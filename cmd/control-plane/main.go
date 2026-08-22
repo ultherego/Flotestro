@@ -160,6 +160,14 @@ func run() error {
 		}
 	}
 
+	// Panel dostepny wylacznie pod localhost nie obsluzy zadnej floty:
+	// certyfikat bramy nie bedzie pasowal do adresu, pod ktorym agent laczy
+	// sie z panelem. Milczenie w tym miejscu kosztuje instalacje, w ktorej
+	// wszystko wyglada na uruchomione, a zaden host sie nie rejestruje.
+	if *advertised == "127.0.0.1" {
+		log.Warn("panel przedstawia sie agentom jako 127.0.0.1; " +
+			"ustaw FLOTESTRO_ADVERTISE na adres widoczny dla hostow floty")
+	}
 	dnsNames, ips := splitAdvertised(*advertised)
 	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(dnsNames, ips)
 	if err != nil {
