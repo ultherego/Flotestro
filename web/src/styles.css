@@ -160,3 +160,11 @@ pre {
 .formularz h2 { margin: 0; }
 .formularz label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tekst-slaby); }
 .formularz textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+
+/* Komunikat wymagajacy decyzji uzytkownika, np. ponownego uwierzytelnienia. */
+.ostrzezenie {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  border: 1px solid var(--uwaga); border-radius: 8px;
+  padding: 12px 16px; margin-bottom: 16px;
+  background: var(--tlo-panel); font-size: 13px;
+}

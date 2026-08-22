@@ -79,6 +79,12 @@ func run() error {
 	directoryWrite := flag.Bool("directory-write",
 		config.Env("FLOTESTRO_DIRECTORY_WRITE", "") == "true",
 		"wlacza zmiany w katalogu tozsamosci; domyslnie panel tylko czyta katalog")
+	stepUpMaxAge := flag.Duration("stepup-max-age",
+		config.EnvDuration("FLOTESTRO_STEPUP_MAX_AGE", 5*time.Minute),
+		"dopuszczalny wiek uwierzytelnienia przy operacjach o najwiekszym wplywie")
+	stepUpACR := flag.String("stepup-acr",
+		config.Env("FLOTESTRO_STEPUP_ACR", ""),
+		"wymagany poziom uwierzytelnienia (acr) przy operacjach o najwiekszym wplywie")
 	webRoot := flag.String("web-root",
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "katalog ze zbudowanym panelem")
 	publicURL := flag.String("public-url",
@@ -251,6 +257,8 @@ func run() error {
 					PublicURL:              *publicURL,
 					WebRoot:                *webRoot,
 					DirectoryWrite:         *directoryWrite,
+					StepUpMaxAge:           *stepUpMaxAge,
+					StepUpACR:              *stepUpACR,
 				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,

@@ -95,6 +95,8 @@ func (h *harness) createPrincipal(subject string, bindings []map[string]string) 
 		"subject":     subject,
 		"roles":       bindings,
 		"issue_token": true,
+		// Nadanie dostepu wymaga powodu; w tescie powodem jest sam test.
+		"reason": "przygotowanie tozsamosci na potrzeby testu integracyjnego",
 	}, &response, http.StatusCreated)
 	if response.Token == "" {
 		h.t.Fatalf("nie wystawiono tokenu dla %s", subject)

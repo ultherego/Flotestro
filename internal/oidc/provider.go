@@ -12,8 +12,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,9 +98,20 @@ type AuthFlow struct {
 	AuthURL      string
 }
 
+// StepUp opisuje zadanie ponownego uwierzytelnienia. Operacje o najwiekszym
+// wplywie wymagaja swiezego logowania, a nie samego posiadania sesji.
+type StepUp struct {
+	// Force wymusza ponowne uwierzytelnienie nawet przy waznej sesji
+	// u dostawcy (prompt=login, max_age=0).
+	Force bool
+	// ACRValues zada konkretnego poziomu uwierzytelnienia. Puste oznacza, ze
+	// instalacja nie zdefiniowala poziomu i panel poprzestaje na swiezosci.
+	ACRValues string
+}
+
 // BeginAuth buduje adres logowania wraz z PKCE. Weryfikator zostaje po stronie
 // serwera; do przegladarki trafia wylacznie jego skrot w challenge.
-func (p *Provider) BeginAuth() (*AuthFlow, error) {
+func (p *Provider) BeginAuth(stepUp StepUp) (*AuthFlow, error) {
 	state, err := randomString(32)
 	if err != nil {
 		return nil, err
@@ -113,11 +126,27 @@ func (p *Provider) BeginAuth() (*AuthFlow, error) {
 		State:        state,
 		Nonce:        nonce,
 		CodeVerifier: verifier,
-		AuthURL: p.oauth.AuthCodeURL(state,
-			coreoidc.Nonce(nonce),
-			oauth2.S256ChallengeOption(verifier),
-		),
+		AuthURL:      p.oauth.AuthCodeURL(state, authOptions(nonce, verifier, stepUp)...),
 	}, nil
+}
+
+// authOptions sklada parametry zadania autoryzacji. Przy step-up dokladamy
+// prompt=login i max_age=0: bez nich dostawca odeslalby istniejaca sesje
+// i panel uznalby stare uwierzytelnienie za swieze.
+func authOptions(nonce, verifier string, stepUp StepUp) []oauth2.AuthCodeOption {
+	options := []oauth2.AuthCodeOption{
+		coreoidc.Nonce(nonce),
+		oauth2.S256ChallengeOption(verifier),
+	}
+	if stepUp.Force {
+		options = append(options,
+			oauth2.SetAuthURLParam("prompt", "login"),
+			oauth2.SetAuthURLParam("max_age", "0"))
+	}
+	if stepUp.ACRValues != "" {
+		options = append(options, oauth2.SetAuthURLParam("acr_values", stepUp.ACRValues))
+	}
+	return options
 }
 
 // TokenSet to komplet tokenow zwrocony przez dostawce.
@@ -135,6 +164,16 @@ type Claims struct {
 	Email             string
 	Name              string
 	Groups            []string
+
+	// AuthTime jest chwila, w ktorej dostawca faktycznie uwierzytelnil
+	// uzytkownika. Zerowa wartosc oznacza, ze dostawca jej nie podal, i nie
+	// moze byc czytana jako "przed chwila".
+	AuthTime time.Time
+	// ACR i AMR opisuja sposob uwierzytelnienia. Panel ich nie interpretuje
+	// po swojemu: MFA nalezy do dostawcy tozsamosci, a panel jedynie sprawdza,
+	// czy dostal zadeklarowany poziom.
+	ACR string
+	AMR []string
 }
 
 // Exchange wymienia kod autoryzacyjny na tokeny i weryfikuje token tozsamosci.
@@ -217,6 +256,9 @@ func (p *Provider) verify(ctx context.Context, rawIDToken, expectedNonce string)
 		Email:             stringClaim(raw, "email"),
 		Name:              stringClaim(raw, "name"),
 		Groups:            stringsClaim(raw, p.config.GroupsClaim),
+		ACR:               stringClaim(raw, "acr"),
+		AMR:               stringsClaim(raw, "amr"),
+		AuthTime:          timeClaim(raw, "auth_time"),
 	}
 	if claims.Subject == "" {
 		return nil, fmt.Errorf("token nie zawiera identyfikatora podmiotu")
@@ -241,6 +283,25 @@ func (p *Provider) LogoutURL(idToken, redirectAfter string) string {
 		url += "&post_logout_redirect_uri=" + redirectAfter
 	}
 	return url
+}
+
+// timeClaim czyta znacznik czasu wyrazony w sekundach epoki. Brak wartosci
+// daje czas zerowy, ktory znaczy "nieustalony": panel nie moze zalozyc, ze
+// uwierzytelnienie nastapilo przed chwila, skoro dostawca tego nie powiedzial.
+func timeClaim(claims map[string]any, name string) time.Time {
+	switch value := claims[name].(type) {
+	case float64:
+		return time.Unix(int64(value), 0).UTC()
+	case json.Number:
+		if seconds, err := value.Int64(); err == nil {
+			return time.Unix(seconds, 0).UTC()
+		}
+	case string:
+		if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return time.Unix(seconds, 0).UTC()
+		}
+	}
+	return time.Time{}
 }
 
 func stringClaim(claims map[string]any, name string) string {

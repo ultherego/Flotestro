@@ -10,6 +10,7 @@ import { Zadania } from "./pages/Zadania";
 import { Kampanie } from "./pages/Kampanie";
 import { Kampania } from "./pages/Kampania";
 import { Katalog } from "./pages/Katalog";
+import { Dostep } from "./pages/Dostep";
 import { Audyt } from "./pages/Audyt";
 
 export function App() {
@@ -30,6 +31,10 @@ export function App() {
   }
   if (error) return <div className="pusto" style={{ padding: 40 }}>Blad: {String(error)}</div>;
 
+  // Rola przypisana gdziekolwiek wystarcza do wejscia na ekran dostepu;
+  // o tym, co wolno zmienic, i tak decyduje serwer przy kazdym zadaniu.
+  const zarzadzaDostepem = (data?.roles ?? []).includes("platform_admin");
+
   return (
     <div className="uklad">
       <nav className="nawigacja">
@@ -39,6 +44,9 @@ export function App() {
         <Link do="/zadania">Zadania</Link>
         <Link do="/kampanie">Kampanie</Link>
         {zdolnosci.directory && <Link do="/katalog">Katalog</Link>}
+        {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
+            zmienic; pozostalym pozycja prowadzilaby do samej odmowy. */}
+        {zarzadzaDostepem && <Link do="/dostep">Dostep</Link>}
         <Link do="/audyt">Audyt</Link>
         <div className="stopka">
           <div>{data?.display_name || data?.subject}</div>
@@ -56,6 +64,7 @@ export function App() {
           <Route path="/kampanie" element={<Kampanie />} />
           <Route path="/kampanie/:id" element={<Kampania />} />
           {zdolnosci.directory && <Route path="/katalog" element={<Katalog />} />}
+          {zarzadzaDostepem && <Route path="/dostep" element={<Dostep />} />}
           <Route path="/audyt" element={<Audyt />} />
           <Route path="*" element={<div className="pusto">Nie ma takiej strony.</div>} />
         </Routes>

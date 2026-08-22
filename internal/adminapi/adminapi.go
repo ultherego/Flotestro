@@ -48,6 +48,8 @@ type Server struct {
 	sessionLimits          authz.SessionLimits
 	publicURL              string
 	webRoot                string
+	// stepUp opisuje warunki operacji o najwiekszym wplywie.
+	stepUp stepUpPolicy
 }
 
 // Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
@@ -62,6 +64,12 @@ type Options struct {
 	WebRoot string
 	// DirectoryWrite wlacza zmiany w katalogu tozsamosci.
 	DirectoryWrite bool
+	// StepUpMaxAge jest dopuszczalnym wiekiem uwierzytelnienia dla operacji
+	// o najwiekszym wplywie. Zero wylacza wymaganie swiezosci.
+	StepUpMaxAge time.Duration
+	// StepUpACR jest wymaganym poziomem uwierzytelnienia, jesli instalacja
+	// go zdefiniowala u dostawcy tozsamosci.
+	StepUpACR string
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
@@ -79,7 +87,8 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
-		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite}
+		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite,
+		stepUp: stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR}}
 }
 
 // Routes buduje router API.

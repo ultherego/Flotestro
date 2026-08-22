@@ -30,6 +30,16 @@ type SessionTokens struct {
 	AccessExpiresAt time.Time
 }
 
+// Authentication opisuje, kiedy i jak dostawca uwierzytelnil uzytkownika.
+// Panel nie interpretuje tych wartosci po swojemu: MFA nalezy do dostawcy,
+// a panel sprawdza wylacznie zgodnosc z wymaganym poziomem i swiezosc.
+type Authentication struct {
+	// At jest chwila uwierzytelnienia. Czas zerowy oznacza stan nieustalony.
+	At  time.Time
+	ACR string
+	AMR []string
+}
+
 // SessionLimits opisuje czasy zycia sesji.
 type SessionLimits struct {
 	// Idle konczy sesje nieuzywana. Absolute konczy ja niezaleznie od aktywnosci.
@@ -44,12 +54,14 @@ type Session struct {
 	Groups       []string
 	RefreshToken string
 	IDToken      string
+	// Auth opisuje uwierzytelnienie, ktore zalozylo te sesje.
+	Auth Authentication
 }
 
 // CreateSession zaklada sesje i zwraca wartosc ciasteczka. Wartosc jest
 // widoczna wylacznie tutaj; w bazie zostaje sam skrot.
 func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string,
-	groups []string, tokens SessionTokens, limits SessionLimits,
+	groups []string, tokens SessionTokens, auth Authentication, limits SessionLimits,
 	userAgent, remoteAddr string) (sessionID, cookieValue string, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -70,15 +82,20 @@ func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string
 
 	sessionID = uuid.NewString()
 	now := time.Now()
+	amr := auth.AMR
+	if amr == nil {
+		amr = []string{}
+	}
 	const query = `
 		insert into web_sessions (id, token_hash, principal_id, groups, refresh_token, id_token,
 		                          access_expires_at, absolute_expires_at, idle_expires_at,
-		                          user_agent, remote_addr)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+		                          user_agent, remote_addr, authenticated_at, acr, amr)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 	if _, err := tx.Exec(ctx, query, sessionID, hash[:], principalID, groups,
 		nullable(tokens.RefreshToken), nullable(tokens.IDToken),
 		nullableTime(tokens.AccessExpiresAt), now.Add(limits.Absolute), now.Add(limits.Idle),
-		nullable(userAgent), nullable(remoteAddr)); err != nil {
+		nullable(userAgent), nullable(remoteAddr),
+		nullableTime(auth.At), nullable(auth.ACR), amr); err != nil {
 		return "", "", fmt.Errorf("zapis sesji: %w", err)
 	}
 	return sessionID, cookieValue, nil
@@ -95,6 +112,7 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	const query = `
 		select w.id, w.token_hash, w.principal_id, w.groups,
 		       coalesce(w.refresh_token, ''), coalesce(w.id_token, ''),
+		       w.authenticated_at, coalesce(w.acr, ''), w.amr,
 		       p.subject, p.display_name, p.kind, coalesce(p.issuer, '')
 		from web_sessions w
 		join principals p on p.id = w.principal_id
@@ -111,8 +129,10 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		principal  Principal
 		issuer     string
 	)
+	var authenticatedAt *time.Time
 	err := s.pool.QueryRow(ctx, query, hash[:]).Scan(&session.ID, &storedHash,
 		&session.PrincipalID, &session.Groups, &session.RefreshToken, &session.IDToken,
+		&authenticatedAt, &session.Auth.ACR, &session.Auth.AMR,
 		&principal.Subject, &principal.DisplayName, &principal.Kind, &issuer)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrSessionInvalid
@@ -122,6 +142,9 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	}
 	if subtle.ConstantTimeCompare(storedHash, hash[:]) != 1 {
 		return nil, nil, ErrSessionInvalid
+	}
+	if authenticatedAt != nil {
+		session.Auth.At = *authenticatedAt
 	}
 	principal.ID = session.PrincipalID
 

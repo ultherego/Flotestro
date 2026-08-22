@@ -214,3 +214,22 @@ export type LocalAccount = {
   unavailable_reason?: string;
   observed_at: string;
 };
+
+export type Principal = {
+  id: string;
+  subject: string;
+  display_name?: string;
+  kind: string;
+  bindings: { role: string; scope: { site: string; environment: string } }[];
+};
+
+export type GroupMapping = {
+  id: string;
+  issuer: string;
+  group_name: string;
+  role: string;
+  site: string;
+  environment: string;
+  created_by: string;
+  created_at: string;
+};

@@ -52,7 +52,7 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 					return
 				}
 				principal = *authenticated
-				ctx = context.WithValue(ctx, sessionContextKey{}, session)
+				ctx = ContextWithSession(ctx, session)
 			}
 		}
 
@@ -66,6 +66,12 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, principalKey, principal)))
 	})
+}
+
+// ContextWithSession dokleja sesje do kontekstu. Poza middleware sluzy
+// testom, ktore sprawdzaja zachowanie zalezne od sposobu uwierzytelnienia.
+func ContextWithSession(ctx context.Context, session *Session) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, session)
 }
 
 // SessionFromContext zwraca sesje przegladarki, jesli zadanie z niej korzysta.

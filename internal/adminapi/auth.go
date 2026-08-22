@@ -10,6 +10,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/oidc"
 )
 
 // handleLogin rozpoczyna logowanie u dostawcy tozsamosci.
@@ -20,7 +21,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flow, err := s.oidc.BeginAuth()
+	// Step-up zmusza dostawce do ponownego uwierzytelnienia. Bez tego
+	// dostawca odeslalby istniejaca sesje i panel uznalby stare
+	// uwierzytelnienie za swieze.
+	stepUp := oidc.StepUp{}
+	if r.URL.Query().Get("step_up") != "" {
+		stepUp = oidc.StepUp{Force: true, ACRValues: s.stepUp.ACR}
+	}
+
+	flow, err := s.oidc.BeginAuth(stepUp)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -107,6 +116,10 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 			RefreshToken:    tokens.RefreshToken,
 			IDToken:         tokens.IDToken,
 			AccessExpiresAt: tokens.ExpiresAt,
+		}, authz.Authentication{
+			At:  claims.AuthTime,
+			ACR: claims.ACR,
+			AMR: claims.AMR,
 		}, s.sessionLimits, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		s.fail(w, err)

@@ -44,6 +44,21 @@ func EnvInt(key string, fallback int) int {
 	return parsed
 }
 
+// EnvDuration odczytuje zmienna srodowiskowa wyrazona czasem, na przyklad
+// "5m". Wartosc nieczytelna nie moze cicho wylaczyc zabezpieczenia, wiec
+// zostaje wartosc domyslna.
+func EnvDuration(key string, fallback time.Duration) time.Duration {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
 // Validate sprawdza minimalny zestaw wymaganych ustawien.
 func (c ControlPlane) Validate() error {
 	if c.DatabaseURL == "" {

@@ -75,6 +75,9 @@ type createPrincipalRequest struct {
 	// wylacznie w tej odpowiedzi.
 	IssueToken    bool `json:"issue_token"`
 	TokenTTLHours int  `json:"token_ttl_hours"`
+	// Reason opisuje, po co nadawany jest dostep. Operacja przestawia reguly
+	// dostepu do calej floty, wiec powod jest czescia sladu audytowego.
+	Reason string `json:"reason"`
 }
 
 // handleCreatePrincipal tworzy tozsamosc wraz z przypisaniami rol.
@@ -98,6 +101,14 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 			problem(w, http.StatusBadRequest, "unknown_role", "nieznana rola "+binding.Role)
 			return
 		}
+	}
+
+	// Nadanie uprawnien jest operacja o najwiekszym wplywie: przestawia to,
+	// kto moze cokolwiek zrobic na flocie.
+	dowod, ok := s.requireStepUp(w, r, actor, request.Reason,
+		"principal.create", "principal", request.Subject)
+	if !ok {
+		return
 	}
 
 	tx, err := s.authz.Pool().Begin(r.Context())
@@ -148,9 +159,10 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "principal.create", TargetType: "principal", TargetID: principalID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"subject": request.Subject, "roles": granted, "token_issued": request.IssueToken,
-		},
+		Detail: withStepUp(map[string]any{
+			"subject": request.Subject, "roles": granted,
+			"token_issued": request.IssueToken,
+		}, dowod),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -168,6 +180,7 @@ type createGroupMappingRequest struct {
 	Role        string `json:"role"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
+	Reason      string `json:"reason"`
 }
 
 // handleListGroupMappings zwraca mapowania grup zewnetrznych na role.
@@ -207,6 +220,14 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Mapowanie grupy na role decyduje, kogo dostawca tozsamosci wpuszcza
+	// i z jakimi uprawnieniami; to zmiana samej reguly dostepu.
+	dowod, ok := s.requireStepUp(w, r, actor, request.Reason,
+		"group_mapping.create", "group_mapping", request.GroupName)
+	if !ok {
+		return
+	}
+
 	tx, err := s.authz.Pool().Begin(r.Context())
 	if err != nil {
 		s.fail(w, err)
@@ -225,10 +246,10 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "group_mapping.create", TargetType: "group_mapping", TargetID: mapping.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
+		Detail: withStepUp(map[string]any{
 			"issuer": mapping.Issuer, "group": mapping.GroupName, "role": string(mapping.Role),
 			"site": mapping.Site, "environment": mapping.Environment,
-		},
+		}, dowod),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -247,6 +268,13 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		return
 	}
 	mappingID := r.PathValue("id")
+	// Powod przy usuwaniu przekazuje sie parametrem: zadanie DELETE nie ma
+	// ciala, a warunek jest ten sam co przy tworzeniu mapowania.
+	dowod, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
+		"group_mapping.delete", "group_mapping", mappingID)
+	if !ok {
+		return
+	}
 	removed, err := s.authz.DeleteGroupMapping(r.Context(), mappingID)
 	if err != nil {
 		s.fail(w, err)
@@ -260,6 +288,7 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "group_mapping.delete", TargetType: "group_mapping", TargetID: mappingID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{}, dowod),
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
