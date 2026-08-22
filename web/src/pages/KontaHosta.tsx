@@ -27,7 +27,7 @@ export function KontaHosta({ host }: { host: Host }) {
   });
 
   if (zapytanie.error instanceof ApiError && zapytanie.error.forbidden) {
-    return <Pusto>Brak uprawnienia do odczytu kont tego hosta.</Pusto>;
+    return <Pusto>You do not have permission to read this host's accounts.</Pusto>;
   }
   if (zapytanie.error) return <Blad error={zapytanie.error} />;
 
@@ -36,8 +36,8 @@ export function KontaHosta({ host }: { host: Host }) {
   return (
     <>
       <p className="podtytul">
-        Konta widziane na hoscie przy ostatnim raporcie agenta.{" "}
-        {konta.length > 0 && <>Obserwacja: <Czas wartosc={konta[0].observed_at} />.</>}
+        Accounts seen on the host at the agent's last report.{" "}
+        {konta.length > 0 && <>Observed: <Czas wartosc={konta[0].observed_at} />.</>}
       </p>
 
       <label className="przelacznik">
@@ -46,21 +46,21 @@ export function KontaHosta({ host }: { host: Host }) {
           checked={pokazSystemowe}
           onChange={(zdarzenie) => setPokazSystemowe(zdarzenie.target.checked)}
         />
-        Pokaz konta systemowe
+        Show system accounts
       </label>
 
       {konta.length === 0 ? (
         <Pusto>
           {pokazSystemowe
-            ? "Host nie zgłosil kont systemowych."
-            : "Host nie zgłosil jeszcze kont uzytkownikow."}
+            ? "The host reported no system accounts."
+            : "The host has not reported user accounts yet."}
         </Pusto>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Konto</th><th>UID</th><th>Zrodlo</th><th>Dostep</th>
-              <th>Klucze SSH</th><th>Grupy</th><th>Operacje</th>
+              <th>Account</th><th>UID</th><th>Source</th><th>Access</th>
+              <th>SSH keys</th><th>Groups</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -93,7 +93,7 @@ function Wiersz({ host, konto }: { host: Host; konto: LocalAccount }) {
         <td><Dostep konto={konto} /></td>
         <td>
           {konto.ssh_keys.length === 0 ? (
-            <span className="zrodlo">brak</span>
+            <span className="zrodlo">none</span>
           ) : (
             konto.ssh_keys.map((klucz) => (
               <div key={klucz.fingerprint} title={klucz.fingerprint}>
@@ -108,19 +108,19 @@ function Wiersz({ host, konto }: { host: Host; konto: LocalAccount }) {
           {zKatalogu ? (
             // Zmiana konta z katalogu nalezy do katalogu. Lokalna zmiana
             // rozjechalaby stan miedzy hostami przy najblizszej synchronizacji.
-            <span className="zrodlo">zarzadzane przez katalog</span>
+            <span className="zrodlo">managed by directory</span>
           ) : (
             <div className="operacje">
               {konto.locked === true ? (
                 <button onClick={() => zlec.mutate({ akcja: "localuser.unlock", nazwa: konto.name })}>
-                  Odblokuj
+                  Unlock
                 </button>
               ) : (
                 <button onClick={() => zlec.mutate({ akcja: "localuser.lock", nazwa: konto.name })}>
-                  Zablokuj
+                  Lock
                 </button>
               )}
-              <button onClick={() => setKlucze(klucze === null ? "" : null)}>Klucze SSH</button>
+              <button onClick={() => setKlucze(klucze === null ? "" : null)}>SSH keys</button>
             </div>
           )}
         </td>
@@ -137,7 +137,7 @@ function Wiersz({ host, konto }: { host: Host; konto: LocalAccount }) {
               <textarea
                 rows={4}
                 value={klucze}
-                placeholder="ssh-ed25519 AAAA… jan@stacja"
+                placeholder="ssh-ed25519 AAAA… jane@laptop"
                 onChange={(zdarzenie) => setKlucze(zdarzenie.target.value)}
               />
               <div className="operacje">
@@ -150,9 +150,9 @@ function Wiersz({ host, konto }: { host: Host; konto: LocalAccount }) {
                     })
                   }
                 >
-                  Zapisz klucze
+                  Save keys
                 </button>
-                <button onClick={() => setKlucze(null)}>Anuluj</button>
+                <button onClick={() => setKlucze(null)}>Cancel</button>
               </div>
             </div>
           </td>
@@ -174,19 +174,19 @@ function Wiersz({ host, konto }: { host: Host; konto: LocalAccount }) {
  */
 function Dostep({ konto }: { konto: LocalAccount }) {
   if (konto.locked === null) {
-    return <span className="znacznik nieznany">nieustalone</span>;
+    return <span className="znacznik nieznany">unknown</span>;
   }
-  if (konto.locked) return <span className="znacznik blad">zablokowane</span>;
+  if (konto.locked) return <span className="znacznik blad">locked</span>;
   if (konto.ssh_keys.length > 0) {
-    return <span className="znacznik">klucz SSH</span>;
+    return <span className="znacznik">SSH key</span>;
   }
-  if (konto.password_set === true) return <span className="znacznik">haslo</span>;
+  if (konto.password_set === true) return <span className="znacznik">password</span>;
   if (konto.password_set === false) {
     // Konto bez hasla i bez klucza jest niedostepne dla nikogo. To zwykle
     // slad po polowicznym odebraniu dostepu i warto to widziec.
-    return <span className="znacznik blad">brak dostepu</span>;
+    return <span className="znacznik blad">no access</span>;
   }
-  return <span className="znacznik nieznany">nieustalone</span>;
+  return <span className="znacznik nieznany">unknown</span>;
 }
 
 function NoweKonto({ host }: { host: Host }) {
@@ -200,7 +200,7 @@ function NoweKonto({ host }: { host: Host }) {
   if (!otwarty) {
     return (
       <div style={{ marginTop: 24 }}>
-        <button onClick={() => setOtwarty(true)}>Zaloz konto lokalne</button>
+        <button onClick={() => setOtwarty(true)}>Create local account</button>
         {zlec.komunikat && <p className="zrodlo" style={{ marginTop: 10 }}>{zlec.komunikat}</p>}
       </div>
     );
@@ -208,21 +208,21 @@ function NoweKonto({ host }: { host: Host }) {
 
   return (
     <div className="formularz" style={{ marginTop: 24 }}>
-      <h2>Nowe konto lokalne</h2>
+      <h2>New local account</h2>
       <p className="podtytul">
-        Konto powstaje bez hasla; dostep daje wylacznie klucz SSH. Panel nie
-        przechowuje ani nie przesyla hasel.
+        The account is created without a password; access is by SSH key only.
+        The panel never stores or transmits passwords.
       </p>
-      <label>Nazwa
-        <input value={nazwa} onChange={(z) => setNazwa(z.target.value)} placeholder="kowalski" />
+      <label>Name
+        <input value={nazwa} onChange={(z) => setNazwa(z.target.value)} placeholder="jsmith" />
       </label>
-      <label>Opis
-        <input value={opis} onChange={(z) => setOpis(z.target.value)} placeholder="Jan Kowalski" />
+      <label>Description
+        <input value={opis} onChange={(z) => setOpis(z.target.value)} placeholder="Jane Smith" />
       </label>
-      <label>Grupy dodatkowe
+      <label>Additional groups
         <input value={grupy} onChange={(z) => setGrupy(z.target.value)} placeholder="sudo, adm" />
       </label>
-      <label>Klucze publiczne SSH, po jednym w wierszu
+      <label>SSH public keys, one per line
         <textarea rows={3} value={klucze} onChange={(z) => setKlucze(z.target.value)} />
       </label>
       <div className="operacje">
@@ -239,9 +239,9 @@ function NoweKonto({ host }: { host: Host }) {
             })
           }
         >
-          Zlec zalozenie konta
+          Request account creation
         </button>
-        <button onClick={() => setOtwarty(false)}>Anuluj</button>
+        <button onClick={() => setOtwarty(false)}>Cancel</button>
       </div>
       {zlec.komunikat && <p className="zrodlo">{zlec.komunikat}</p>}
     </div>
@@ -295,9 +295,9 @@ function useZlecenie(host: Host) {
 
 function nazwaZrodla(zrodlo: LocalAccount["source"]) {
   switch (zrodlo) {
-    case "local": return "lokalne";
-    case "directory": return "katalog";
-    case "system": return "systemowe";
-    default: return "nieustalone";
+    case "local": return "local";
+    case "directory": return "directory";
+    case "system": return "system";
+    default: return "unknown";
   }
 }

@@ -16,7 +16,7 @@ func SPAHandler(root string) http.Handler {
 	if root == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			problem(w, http.StatusNotFound, "web_ui_disabled",
-				"panel nie jest zbudowany; ustaw katalog przez --web-root")
+				"the web panel is not built; set its directory with --web-root")
 		})
 	}
 
@@ -26,7 +26,7 @@ func SPAHandler(root string) http.Handler {
 		// filepath.Clean usuwa "..", ale sprawdzamy jawnie: sciezka pochodzi
 		// z sieci i nie moze wyjsc poza katalog panelu.
 		if strings.Contains(clean, "..") {
-			problem(w, http.StatusBadRequest, "invalid_path", "nieprawidlowa sciezka")
+			problem(w, http.StatusBadRequest, "invalid_path", "invalid path")
 			return
 		}
 

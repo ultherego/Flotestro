@@ -25,7 +25,7 @@ export function Zadania() {
   });
   const anuluj = useMutation({
     mutationFn: (zadanie: Job) =>
-      api.post(`/api/v1/jobs/${zadanie.id}/cancel`, { reason: "anulowane z panelu" }),
+      api.post(`/api/v1/jobs/${zadanie.id}/cancel`, { reason: "canceled from the panel" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
@@ -33,12 +33,12 @@ export function Zadania() {
 
   return (
     <>
-      <h1>Zadania</h1>
-      <p className="podtytul">Zatwierdzenie potwierdza hash planu, wiec podmiana tresci jest wykrywalna.</p>
+      <h1>Jobs</h1>
+      <p className="podtytul">Approval confirms the plan hash, so tampering with its content is detectable.</p>
 
       <div className="filtry">
         <select value={stan} onChange={(e) => setStan(e.target.value)}>
-          <option value="">stan: dowolny</option>
+          <option value="">state: any</option>
           {["awaiting_approval", "queued", "dispatched", "running", "succeeded", "failed", "canceled", "expired"].map(
             (wartosc) => <option key={wartosc} value={wartosc}>{wartosc}</option>,
           )}
@@ -46,13 +46,13 @@ export function Zadania() {
       </div>
 
       {!data?.items.length ? (
-        <Pusto>Brak zadan.</Pusto>
+        <Pusto>No jobs.</Pusto>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Operacja</th><th>Stan</th><th>Zlecil</th><th>Zatwierdzil</th>
-              <th>Wynik</th><th>Utworzone</th><th></th>
+              <th>Operation</th><th>State</th><th>Requested by</th><th>Approved by</th>
+              <th>Result</th><th>Created</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -73,9 +73,9 @@ export function Zadania() {
                     {zadanie.state === "awaiting_approval" && (
                       <>
                         <button onClick={() => zatwierdz.mutate(zadanie)} disabled={zatwierdz.isPending}>
-                          Zatwierdz
+                          Approve
                         </button>{" "}
-                        <button className="wtorny" onClick={() => anuluj.mutate(zadanie)}>Anuluj</button>
+                        <button className="wtorny" onClick={() => anuluj.mutate(zadanie)}>Cancel</button>
                       </>
                     )}
                   </td>
@@ -101,7 +101,7 @@ function Proby({ jobId }: { jobId: string }) {
     queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
   });
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak prob wykonania.</Pusto>;
+  if (!data?.items.length) return <Pusto>No execution attempts.</Pusto>;
 
   return (
     <div>
@@ -110,7 +110,7 @@ function Proby({ jobId }: { jobId: string }) {
           <div>
             proba {proba.attempt_number} · <StanZadania stan={proba.status ?? "—"} /> ·
             kod {proba.exit_code ?? "—"}
-            {proba.replayed && <> · <span className="znacznik">odtworzone z dziennika</span></>}
+            {proba.replayed && <> · <span className="znacznik">replayed from journal</span></>}
             {proba.error_code && <> · <span className="znacznik blad">{proba.error_code}</span></>}
           </div>
           {proba.unit_state_before && proba.unit_state_after && (

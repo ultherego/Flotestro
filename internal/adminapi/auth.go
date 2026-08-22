@@ -17,16 +17,24 @@ import (
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.oidc == nil {
 		problem(w, http.StatusNotImplemented, "oidc_disabled",
-			"logowanie przez dostawce tozsamosci nie jest skonfigurowane")
+			"login through an identity provider is not configured")
 		return
 	}
 
-	// Step-up zmusza dostawce do ponownego uwierzytelnienia. Bez tego
-	// dostawca odeslalby istniejaca sesje i panel uznalby stare
-	// uwierzytelnienie za swieze.
+	// Ponowne uwierzytelnienie ma dwa powody i oba wymagaja tego samego od
+	// dostawcy: zeby zapytal o poswiadczenia zamiast odeslac istniejaca sesje.
+	//
+	// step_up dotyczy operacji o najwiekszym wplywie i zada tez poziomu
+	// uwierzytelnienia. force zmienia konto: bez niego uzytkownik z aktywna
+	// sesja SSO innego uzytkownika jest logowany po cichu nie tym kontem,
+	// co chcial, i nie ma z tego wyjscia w panelu.
+	query := r.URL.Query()
 	stepUp := oidc.StepUp{}
-	if r.URL.Query().Get("step_up") != "" {
+	switch {
+	case query.Get("step_up") != "":
 		stepUp = oidc.StepUp{Force: true, ACRValues: s.stepUp.ACR}
+	case query.Get("force") != "":
+		stepUp = oidc.StepUp{Force: true}
 	}
 
 	flow, err := s.oidc.BeginAuth(stepUp)
@@ -36,7 +44,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cel przekierowania musi byc lokalny, inaczej logowanie stalo by sie
 	// otwartym przekierowaniem na dowolna strone.
-	redirectAfter := localPath(r.URL.Query().Get("redirect"))
+	redirectAfter := localPath(query.Get("redirect"))
 
 	if err := s.authz.SaveAuthFlow(r.Context(), flow.State, flow.CodeVerifier,
 		flow.Nonce, redirectAfter, 10*time.Minute); err != nil {
@@ -49,7 +57,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleAuthCallback wymienia kod na tokeny i zaklada sesje serwerowa.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if s.oidc == nil {
-		problem(w, http.StatusNotImplemented, "oidc_disabled", "logowanie nie jest skonfigurowane")
+		problem(w, http.StatusNotImplemented, "oidc_disabled", "login is not configured")
 		return
 	}
 	query := r.URL.Query()
@@ -62,13 +70,13 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 				"reason": providerError, "description": query.Get("error_description"),
 			},
 		})
-		problem(w, http.StatusUnauthorized, "login_failed", "dostawca tozsamosci odrzucil logowanie")
+		problem(w, http.StatusUnauthorized, "login_failed", "the identity provider rejected the login")
 		return
 	}
 
 	code, state := query.Get("code"), query.Get("state")
 	if code == "" || state == "" {
-		problem(w, http.StatusBadRequest, "invalid_callback", "brak kodu lub stanu logowania")
+		problem(w, http.StatusBadRequest, "invalid_callback", "missing login code or state")
 		return
 	}
 
@@ -82,7 +90,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 			Detail: map[string]any{"reason": "unknown_state"},
 		})
 		problem(w, http.StatusBadRequest, "invalid_state",
-			"stan logowania jest nieznany lub wygasl")
+			"the login state is unknown or expired")
 		return
 	}
 
@@ -93,7 +101,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 			Action: "auth.login", Outcome: audit.OutcomeFailure,
 			Detail: map[string]any{"reason": "token_exchange_failed", "error": err.Error()},
 		})
-		problem(w, http.StatusUnauthorized, "login_failed", "wymiana kodu nie powiodla sie")
+		problem(w, http.StatusUnauthorized, "login_failed", "the code exchange failed")
 		return
 	}
 

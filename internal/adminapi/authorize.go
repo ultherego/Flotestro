@@ -27,7 +27,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, permission au
 		})
 		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
 		problem(w, http.StatusUnauthorized, "unauthenticated",
-			"wymagany token; naglowek Authorization: Bearer <token>")
+			"a token is required; header Authorization: Bearer <token>")
 		return principal, false
 	}
 
@@ -42,7 +42,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, permission au
 			},
 		})
 		problem(w, http.StatusForbidden, "permission_denied",
-			"brak uprawnienia "+string(permission)+" w zakresie "+scope.String())
+			"missing permission "+string(permission)+" in scope "+scope.String())
 		return principal, false
 	}
 	return principal, true
@@ -68,7 +68,7 @@ func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 		})
 		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
 		problem(w, http.StatusUnauthorized, "unauthenticated",
-			"wymagany token; naglowek Authorization: Bearer <token>")
+			"a token is required; header Authorization: Bearer <token>")
 		return principal, false
 	}
 
@@ -83,7 +83,7 @@ func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 			},
 		})
 		problem(w, http.StatusForbidden, "permission_denied",
-			"brak uprawnienia "+string(permission)+" w zadnym zakresie")
+			"missing permission "+string(permission)+" in any scope")
 		return principal, false
 	}
 	return principal, true
@@ -94,7 +94,7 @@ func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 func (s *Server) hostScope(w http.ResponseWriter, r *http.Request, hostID string) (*hosts.Host, authz.Scope, bool) {
 	host, err := s.hosts.Get(r.Context(), hostID)
 	if errors.Is(err, hosts.ErrNotFound) {
-		problem(w, http.StatusNotFound, "host_not_found", "host nie istnieje")
+		problem(w, http.StatusNotFound, "host_not_found", "no such host")
 		return nil, authz.Scope{}, false
 	}
 	if err != nil {

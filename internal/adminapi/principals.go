@@ -15,7 +15,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
-		problem(w, http.StatusUnauthorized, "unauthenticated", "brak waznego tokenu")
+		problem(w, http.StatusUnauthorized, "unauthenticated", "no valid token")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -90,16 +90,16 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 
 	var request createPrincipalRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 	if request.Subject == "" {
-		problem(w, http.StatusBadRequest, "invalid_subject", "brak identyfikatora tozsamosci")
+		problem(w, http.StatusBadRequest, "invalid_subject", "missing identity subject")
 		return
 	}
 	for _, binding := range request.Roles {
 		if !authz.KnownRole(authz.Role(binding.Role)) {
-			problem(w, http.StatusBadRequest, "unknown_role", "nieznana rola "+binding.Role)
+			problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+binding.Role)
 			return
 		}
 	}
@@ -210,14 +210,14 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 
 	var request createGroupMappingRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 	if request.Issuer == "" && s.oidc != nil {
 		request.Issuer = s.oidc.Issuer()
 	}
 	if !authz.KnownRole(authz.Role(request.Role)) {
-		problem(w, http.StatusBadRequest, "unknown_role", "nieznana rola "+request.Role)
+		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+request.Role)
 		return
 	}
 
@@ -282,7 +282,7 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !removed {
-		problem(w, http.StatusNotFound, "mapping_not_found", "mapowanie nie istnieje")
+		problem(w, http.StatusNotFound, "mapping_not_found", "no such mapping")
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{

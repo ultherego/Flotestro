@@ -19,7 +19,7 @@ func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.trust == nil {
-		problem(w, http.StatusNotImplemented, "pki_unavailable", "panel nie zarzadza CA floty")
+		problem(w, http.StatusNotImplemented, "pki_unavailable", "this panel does not manage the fleet CA")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 	}
 	var request pkiRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 	dowod, ok := s.requireStepUp(w, r, actor, request.Reason, "pki.ca.prepare", "pki", "")
@@ -110,7 +110,7 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 	}
 	var request pkiRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 	dowod, ok := s.requireStepUp(w, r, actor, request.Reason, "pki.ca.activate", "pki", "")
@@ -120,7 +120,7 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 
 	pending, przygotowaneO := s.trust.Pending()
 	if pending == nil {
-		problem(w, http.StatusConflict, "no_pending_ca", "nie ma CA przygotowanego do przejecia")
+		problem(w, http.StatusConflict, "no_pending_ca", "no CA is prepared for handover")
 		return
 	}
 	brakujace, err := s.hosts.HostsWithoutCertificateSince(r.Context(), przygotowaneO)
@@ -136,7 +136,7 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 			Detail: map[string]any{"reason": "hosts_missing_ca", "hosts_missing": brakujace},
 		})
 		problem(w, http.StatusConflict, "hosts_missing_ca", fmt.Sprintf(
-			"%d hostow nie ma jeszcze nowego CA; poczekaj na odnowienie ich certyfikatow",
+			"%d hosts do not have the new CA yet; wait for their certificates to renew",
 			brakujace))
 		return
 	}
@@ -169,7 +169,7 @@ func (s *Server) pkiActor(w http.ResponseWriter, r *http.Request) (authz.Princip
 		return actor, false
 	}
 	if s.trust == nil {
-		problem(w, http.StatusNotImplemented, "pki_unavailable", "panel nie zarzadza CA floty")
+		problem(w, http.StatusNotImplemented, "pki_unavailable", "this panel does not manage the fleet CA")
 		return actor, false
 	}
 	return actor, true

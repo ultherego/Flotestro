@@ -5,7 +5,7 @@ import { optional, relativeTime, absoluteTime } from "../lib/format";
 /** Znacznik stanu polaczenia. Stan nieznany ma wlasny wyglad. */
 export function StanPolaczenia({ stan }: { stan: string }) {
   const klasa =
-    stan === "online" ? "ok" : stan === "offline" ? "blad" : stan === "stale" ? "uwaga" : "nieznany";
+    stan === "online" ? "ok" : stan === "offline" ? "blad" : stan === "stale" ? "uwaga" : "unknown";
   return <span className={`znacznik ${klasa}`}>{stan}</span>;
 }
 
@@ -30,7 +30,7 @@ export function LiczbaOpcjonalna({
   ostrzegajOd?: number;
 }) {
   if (wartosc === null || wartosc === undefined) {
-    return <span className="znacznik nieznany">nieustalone</span>;
+    return <span className="znacznik nieznany">unknown</span>;
   }
   if (wartosc >= ostrzegajOd) {
     return <span className="znacznik uwaga">{wartosc}</span>;
@@ -40,14 +40,14 @@ export function LiczbaOpcjonalna({
 
 export function FlagaOpcjonalna({ wartosc }: { wartosc: boolean | null | undefined }) {
   if (wartosc === null || wartosc === undefined) {
-    return <span className="znacznik nieznany">nieustalone</span>;
+    return <span className="znacznik nieznany">unknown</span>;
   }
   return wartosc ? <span className="znacznik uwaga">tak</span> : <span>nie</span>;
 }
 
 /** Czas z zrodlem obserwacji: kazda wartosc ma czas, kiedy byla prawdziwa. */
 export function Czas({ wartosc }: { wartosc?: string | null }) {
-  if (!wartosc) return <span className="znacznik nieznany">nigdy</span>;
+  if (!wartosc) return <span className="znacznik nieznany">never</span>;
   return <span title={absoluteTime(wartosc)}>{relativeTime(wartosc)}</span>;
 }
 
@@ -62,7 +62,7 @@ export function Pusto({ children }: { children: ReactNode }) {
  */
 export function Blad({ error }: { error: unknown }) {
   if (error instanceof ApiError && error.forbidden) {
-    return <Pusto>Brak uprawnienia do tego widoku.</Pusto>;
+    return <Pusto>You do not have permission to view this.</Pusto>;
   }
   const message = error instanceof Error ? error.message : String(error);
   return <div className="blad-strony">Blad: {message}</div>;

@@ -22,21 +22,21 @@ export function Dostep() {
 
   return (
     <>
-      <h1>Dostep</h1>
+      <h1>Access</h1>
       <p className="podtytul">
-        Mapowanie grup dostawcy tozsamosci na role oraz tozsamosci lokalne.
-        Grupa z tokenu sama w sobie niczego nie nadaje - rola wynika z mapowania.
+        Mapping of identity provider groups to roles, plus local identities.
+        A group in the token grants nothing by itself - the role comes from the mapping.
       </p>
 
       <div className="zakladki">
         <button className={zakladka === "mapowania" ? "aktywna" : ""} onClick={() => setZakladka("mapowania")}>
-          Mapowania grup
+          Group mappings
         </button>
         <button className={zakladka === "tozsamosci" ? "aktywna" : ""} onClick={() => setZakladka("tozsamosci")}>
-          Tozsamosci
+          Identities
         </button>
         <button className={zakladka === "ca" ? "aktywna" : ""} onClick={() => setZakladka("ca")}>
-          CA floty
+          Fleet CA
         </button>
       </div>
 
@@ -84,7 +84,7 @@ function Mapowania() {
   });
 
   if (lista.error instanceof ApiError && lista.error.forbidden) {
-    return <Pusto>Brak uprawnienia do zarzadzania dostepem.</Pusto>;
+    return <Pusto>You do not have permission to manage access.</Pusto>;
   }
   if (lista.error) return <Blad error={lista.error} />;
 
@@ -95,7 +95,7 @@ function Mapowania() {
       {lista.data?.items.length ? (
         <table>
           <thead>
-            <tr><th>Grupa</th><th>Rola</th><th>Zakres</th><th>Dodal</th><th>Kiedy</th><th /></tr>
+            <tr><th>Group</th><th>Role</th><th>Scope</th><th>Added by</th><th>When</th><th /></tr>
           </thead>
           <tbody>
             {lista.data.items.map((mapowanie) => (
@@ -111,12 +111,12 @@ function Mapowania() {
                   <button
                     onClick={() => {
                       const reason = window.prompt(
-                        `Powod usuniecia mapowania grupy ${mapowanie.group_name} (min. 8 znakow):`,
+                        `Reason for removing the group mapping ${mapowanie.group_name} (min. 8 characters):`,
                       );
                       if (reason) usun.mutate({ id: mapowanie.id, reason });
                     }}
                   >
-                    Usun
+                    Remove
                   </button>
                 </td>
               </tr>
@@ -124,40 +124,40 @@ function Mapowania() {
           </tbody>
         </table>
       ) : (
-        <Pusto>Brak mapowan. Bez nich nikt nie dostanie roli przez dostawce tozsamosci.</Pusto>
+        <Pusto>No mappings. Without them nobody gets a role from the identity provider.</Pusto>
       )}
 
       {formularz ? (
         <div className="formularz" style={{ marginTop: 24 }}>
-          <h2>Nowe mapowanie</h2>
-          <label>Grupa u dostawcy tozsamosci
+          <h2>New mapping</h2>
+          <label>Identity provider group
             <input value={grupa} onChange={(z) => setGrupa(z.target.value)} placeholder="flotestro-operators" />
           </label>
-          <label>Rola
+          <label>Role
             <select value={rola} onChange={(z) => setRola(z.target.value)}>
               {ROLE.map((nazwa) => <option key={nazwa} value={nazwa}>{nazwa}</option>)}
             </select>
           </label>
-          <label>Lokalizacja (puste = wszystkie)
+          <label>Site (empty = all)
             <input value={site} onChange={(z) => setSite(z.target.value)} placeholder="lab" />
           </label>
-          <label>Srodowisko (puste = wszystkie)
+          <label>Environment (empty = all)
             <input value={srodowisko} onChange={(z) => setSrodowisko(z.target.value)} placeholder="test" />
           </label>
-          <label>Powod zmiany
-            <input value={powod} onChange={(z) => setPowod(z.target.value)} placeholder="np. nowy zespol dyzurny" />
+          <label>Reason for the change
+            <input value={powod} onChange={(z) => setPowod(z.target.value)} placeholder="e.g. new on-call team" />
           </label>
           <div className="operacje">
             <button disabled={!grupa.trim() || powod.trim().length < 8 || dodaj.isPending}
                     onClick={() => dodaj.mutate()}>
               Dodaj mapowanie
             </button>
-            <button onClick={() => setFormularz(false)}>Anuluj</button>
+            <button onClick={() => setFormularz(false)}>Cancel</button>
           </div>
         </div>
       ) : (
         <div style={{ marginTop: 24 }}>
-          <button onClick={() => setFormularz(true)}>Dodaj mapowanie</button>
+          <button onClick={() => setFormularz(true)}>Add mapping</button>
         </div>
       )}
     </>
@@ -171,14 +171,14 @@ function Tozsamosci() {
     retry: false,
   });
   if (error instanceof ApiError && error.forbidden) {
-    return <Pusto>Brak uprawnienia do zarzadzania dostepem.</Pusto>;
+    return <Pusto>You do not have permission to manage access.</Pusto>;
   }
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak tozsamosci.</Pusto>;
+  if (!data?.items.length) return <Pusto>No identities.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Podmiot</th><th>Nazwa</th><th>Rodzaj</th><th>Role i zakresy</th></tr></thead>
+      <thead><tr><th>Subject</th><th>Name</th><th>Kind</th><th>Roles and scopes</th></tr></thead>
       <tbody>
         {data.items.map((tozsamosc) => (
           <tr key={tozsamosc.id}>
@@ -215,7 +215,7 @@ function Ostrzezenie({ blad, zamknij }: { blad: ApiError | null; zamknij: () => 
     return (
       <div className="ostrzezenie">
         <div>
-          <strong>Wymagane ponowne uwierzytelnienie.</strong> {blad.message}
+          <strong>Re-authentication required.</strong> {blad.message}
         </div>
         <div className="operacje">
           <button
@@ -224,9 +224,9 @@ function Ostrzezenie({ blad, zamknij }: { blad: ApiError | null; zamknij: () => 
               window.location.href = `/auth/login?step_up=1&redirect=${cel}`;
             }}
           >
-            Zaloguj ponownie
+            Sign in again
           </button>
-          <button onClick={zamknij}>Zamknij</button>
+          <button onClick={zamknij}>Close</button>
         </div>
       </div>
     );
@@ -234,7 +234,7 @@ function Ostrzezenie({ blad, zamknij }: { blad: ApiError | null; zamknij: () => 
   return (
     <div className="ostrzezenie">
       <div>{blad.message}</div>
-      <div className="operacje"><button onClick={zamknij}>Zamknij</button></div>
+      <div className="operacje"><button onClick={zamknij}>Close</button></div>
     </div>
   );
 }

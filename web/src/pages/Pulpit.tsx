@@ -46,34 +46,34 @@ export function Pulpit() {
 
   return (
     <>
-      <h1>Pulpit floty</h1>
-      <p className="podtytul">Tylko to, co wymaga decyzji.</p>
+      <h1>Fleet dashboard</h1>
+      <p className="podtytul">Only what needs a decision.</p>
 
       <div className="kafelki">
-        <Kafelek etykieta="Hosty" wartosc={s?.hosts} />
+        <Kafelek etykieta="Hosts" wartosc={s?.hosts} />
         <Kafelek etykieta="Online" wartosc={s?.online} />
         <Kafelek etykieta="Offline" wartosc={s?.offline} alarm={(s?.offline ?? 0) > 0} />
-        <Kafelek etykieta="Aktywne sesje" wartosc={s?.active_sessions} />
-        <Kafelek etykieta="Wymaga restartu" wartosc={s?.reboot_required} uwaga={(s?.reboot_required ?? 0) > 0} />
-        <Kafelek etykieta="Z jednostkami w bledzie" wartosc={s?.with_failed_units} uwaga={(s?.with_failed_units ?? 0) > 0} />
-        <Kafelek etykieta="Aktualizacje bezpieczenstwa" wartosc={s?.hosts_with_security_updates} uwaga={(s?.hosts_with_security_updates ?? 0) > 0} />
-        <Kafelek etykieta="Kwarantanna" wartosc={s?.quarantined_hosts} alarm={(s?.quarantined_hosts ?? 0) > 0} />
+        <Kafelek etykieta="Active sessions" wartosc={s?.active_sessions} />
+        <Kafelek etykieta="Reboot required" wartosc={s?.reboot_required} uwaga={(s?.reboot_required ?? 0) > 0} />
+        <Kafelek etykieta="With failed units" wartosc={s?.with_failed_units} uwaga={(s?.with_failed_units ?? 0) > 0} />
+        <Kafelek etykieta="Security updates" wartosc={s?.hosts_with_security_updates} uwaga={(s?.hosts_with_security_updates ?? 0) > 0} />
+        <Kafelek etykieta="Quarantined" wartosc={s?.quarantined_hosts} alarm={(s?.quarantined_hosts ?? 0) > 0} />
       </div>
 
-      <h2>Hosty wymagajace uwagi</h2>
+      <h2>Hosts needing attention</h2>
       {wymagajaUwagi.length === 0 ? (
-        <Pusto>Zaden host nie wymaga uwagi.</Pusto>
+        <Pusto>No host needs attention.</Pusto>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Host</th><th>Stan</th><th>Powod</th><th>Ostatnio widziany</th>
+              <th>Host</th><th>State</th><th>Reason</th><th>Last seen</th>
             </tr>
           </thead>
           <tbody>
             {wymagajaUwagi.map((host) => (
               <tr key={host.id}>
-                <td><Link to={`/hosty/${host.id}`}>{host.hostname}</Link></td>
+                <td><Link to={`/hosts/${host.id}`}>{host.hostname}</Link></td>
                 <td><span className="znacznik">{host.connection_state}</span></td>
                 <td>{powodyUwagi(host).join(", ")}</td>
                 <td><Czas wartosc={host.last_seen_at} /></td>
@@ -83,18 +83,18 @@ export function Pulpit() {
         </table>
       )}
 
-      <h2>Kampanie w toku</h2>
+      <h2>Campaigns in progress</h2>
       {aktywneKampanie.length === 0 ? (
-        <Pusto>Brak kampanii wymagajacych uwagi.</Pusto>
+        <Pusto>No campaigns need attention.</Pusto>
       ) : (
         <table>
           <thead>
-            <tr><th>Nazwa</th><th>Stan</th><th>Operacja</th><th>Powod wstrzymania</th></tr>
+            <tr><th>Name</th><th>State</th><th>Operation</th><th>Pause reason</th></tr>
           </thead>
           <tbody>
             {aktywneKampanie.map((kampania) => (
               <tr key={kampania.id}>
-                <td><Link to={`/kampanie/${kampania.id}`}>{kampania.name}</Link></td>
+                <td><Link to={`/campaigns/${kampania.id}`}>{kampania.name}</Link></td>
                 <td><StanZadania stan={kampania.state} /></td>
                 <td>{kampania.action_type}</td>
                 <td>{kampania.pause_reason || ""}</td>
@@ -104,12 +104,12 @@ export function Pulpit() {
         </table>
       )}
 
-      <h2>Ostatnie odmowy dostepu</h2>
+      <h2>Recent access denials</h2>
       {odmowy.length === 0 ? (
-        <Pusto>Brak odmow w ostatnich zdarzeniach.</Pusto>
+        <Pusto>No denials in recent events.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Czas</th><th>Kto</th><th>Operacja</th><th>Powod</th></tr></thead>
+          <thead><tr><th>Time</th><th>Actor</th><th>Operation</th><th>Reason</th></tr></thead>
           <tbody>
             {odmowy.slice(0, 10).map((zdarzenie) => (
               <tr key={zdarzenie.id}>
@@ -128,7 +128,7 @@ export function Pulpit() {
 
 function powodyUwagi(host: Host): string[] {
   const powody: string[] = [];
-  if (host.connection_state !== "online") powody.push("brak lacznosci");
+  if (host.connection_state !== "online") powody.push("no connection");
   if (host.reboot_required) powody.push("wymaga restartu");
   if ((host.failed_units ?? 0) > 0) powody.push(`${host.failed_units} jednostek w bledzie`);
   if (host.package_database_broken) powody.push("uszkodzona baza pakietow");

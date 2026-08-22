@@ -14,7 +14,7 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	if s.directory == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"configured": false,
-			"detail":     "connector katalogu nie jest skonfigurowany",
+			"detail":     "no directory connector is configured",
 		})
 		return
 	}
@@ -61,7 +61,7 @@ func directoryHandlerFor[T any](s *Server, name string, permission authz.Permiss
 		}
 		if s.directory == nil {
 			problem(w, http.StatusNotImplemented, "directory_disabled",
-				"connector katalogu nie jest skonfigurowany")
+				"no directory connector is configured")
 			return
 		}
 		items, err := load(s, r)

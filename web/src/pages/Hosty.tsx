@@ -31,19 +31,19 @@ export function Hosty() {
 
   return (
     <>
-      <h1>Hosty</h1>
-      <p className="podtytul">Filtry sa wykonywane po stronie serwera.</p>
+      <h1>Hosts</h1>
+      <p className="podtytul">Filters are applied server-side.</p>
 
       <div className="filtry">
-        <input placeholder="lokalizacja" value={site} onChange={(e) => setSite(e.target.value)} />
-        <input placeholder="srodowisko" value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+        <input placeholder="site" value={site} onChange={(e) => setSite(e.target.value)} />
+        <input placeholder="environment" value={environment} onChange={(e) => setEnvironment(e.target.value)} />
         <select value={osFamily} onChange={(e) => setOsFamily(e.target.value)}>
-          <option value="">system: dowolny</option>
+          <option value="">OS: any</option>
           <option value="debian">debian</option>
           <option value="rhel">rhel</option>
         </select>
         <select value={connectionState} onChange={(e) => setConnectionState(e.target.value)}>
-          <option value="">stan: dowolny</option>
+          <option value="">state: any</option>
           <option value="online">online</option>
           <option value="offline">offline</option>
           <option value="stale">stale</option>
@@ -52,27 +52,27 @@ export function Hosty() {
       </div>
 
       {isLoading ? (
-        <Pusto>Wczytywanie…</Pusto>
+        <Pusto>Loading…</Pusto>
       ) : !data?.items.length ? (
-        <Pusto>Zaden host nie pasuje do filtrow.</Pusto>
+        <Pusto>No host matches the filters.</Pusto>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Host</th><th>Stan</th><th>System</th><th>Lokalizacja</th>
-              <th>Srodowisko</th><th>Domena</th><th>Aktualizacje</th>
-              <th>Jednostki w bledzie</th><th>Restart</th><th>Ostatnio widziany</th>
+              <th>Host</th><th>State</th><th>System</th><th>Site</th>
+              <th>Environment</th><th>Domain</th><th>Updates</th>
+              <th>Failed units</th><th>Reboot</th><th>Last seen</th>
             </tr>
           </thead>
           <tbody>
             {data.items.map((host) => (
               <tr key={host.id}>
-                <td><Link to={`/hosty/${host.id}`}>{host.hostname}</Link></td>
+                <td><Link to={`/hosts/${host.id}`}>{host.hostname}</Link></td>
                 <td><StanPolaczenia stan={host.connection_state} /></td>
                 <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
                 <td>{host.site}</td>
                 <td>{host.environment}</td>
-                <td>{host.identity.enrolled ? host.identity.domain : <span className="znacznik">poza domena</span>}</td>
+                <td>{host.identity.enrolled ? host.identity.domain : <span className="znacznik">not in domain</span>}</td>
                 <td><LiczbaOpcjonalna wartosc={host.pending_updates} ostrzegajOd={1} /></td>
                 <td><LiczbaOpcjonalna wartosc={host.failed_units} ostrzegajOd={1} /></td>
                 <td><FlagaOpcjonalna wartosc={host.reboot_required} /></td>

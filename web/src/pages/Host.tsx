@@ -25,17 +25,17 @@ export function Host() {
   });
 
   if (host.error) return <Blad error={host.error} />;
-  if (!host.data) return <Pusto>Wczytywanie…</Pusto>;
+  if (!host.data) return <Pusto>Loading…</Pusto>;
   const dane = host.data;
 
   const zakladki: { klucz: Zakladka; nazwa: string; dostepna: boolean; powod?: string }[] = [
-    { klucz: "przeglad", nazwa: "Przeglad", dostepna: true },
-    { klucz: "pakiety", nazwa: "Pakiety", dostepna: dane.capabilities.apt || dane.capabilities.dnf, powod: "host nie ma obslugiwanego menedzera pakietow" },
-    { klucz: "uslugi", nazwa: "Uslugi", dostepna: dane.capabilities.systemd, powod: "host nie uzywa systemd" },
-    { klucz: "konta", nazwa: "Konta", dostepna: zdolnosci.local_users, powod: "modul kont lokalnych jest wylaczony w tej instalacji" },
-    { klucz: "tozsamosc", nazwa: "Tozsamosc", dostepna: true },
-    { klucz: "zadania", nazwa: "Zadania", dostepna: true },
-    { klucz: "audyt", nazwa: "Audyt", dostepna: true },
+    { klucz: "przeglad", nazwa: "Overview", dostepna: true },
+    { klucz: "pakiety", nazwa: "Packages", dostepna: dane.capabilities.apt || dane.capabilities.dnf, powod: "host has no supported package manager" },
+    { klucz: "uslugi", nazwa: "Services", dostepna: dane.capabilities.systemd, powod: "host does not use systemd" },
+    { klucz: "konta", nazwa: "Accounts", dostepna: zdolnosci.local_users, powod: "the local accounts module is disabled in this installation" },
+    { klucz: "tozsamosc", nazwa: "Identity", dostepna: true },
+    { klucz: "zadania", nazwa: "Jobs", dostepna: true },
+    { klucz: "audyt", nazwa: "Audit", dostepna: true },
   ];
 
   return (
@@ -83,28 +83,28 @@ function Przeglad({ host }: { host: HostType }) {
     <>
       <Pary>
         <Para etykieta="System">{host.os_distribution} {host.os_version} ({host.os_family})</Para>
-        <Para etykieta="Architektura">{host.architecture || "—"}</Para>
-        <Para etykieta="Identyfikator maszyny">{host.machine_id}</Para>
+        <Para etykieta="Architecture">{host.architecture || "—"}</Para>
+        <Para etykieta="Machine ID">{host.machine_id}</Para>
         <Para etykieta="Boot ID">{host.boot_id || "—"}</Para>
-        <Para etykieta="Stan cyklu zycia">{host.lifecycle_state}</Para>
-        <Para etykieta="Wymaga restartu"><FlagaOpcjonalna wartosc={host.reboot_required} /></Para>
-        <Para etykieta="Jednostki w bledzie"><LiczbaOpcjonalna wartosc={host.failed_units} /></Para>
-        <Para etykieta="Baza pakietow">
-          {host.package_database_broken ? <span className="znacznik blad">wymaga naprawy</span> : "w porzadku"}
+        <Para etykieta="Lifecycle state">{host.lifecycle_state}</Para>
+        <Para etykieta="Reboot required"><FlagaOpcjonalna wartosc={host.reboot_required} /></Para>
+        <Para etykieta="Failed units"><LiczbaOpcjonalna wartosc={host.failed_units} /></Para>
+        <Para etykieta="Package database">
+          {host.package_database_broken ? <span className="znacznik blad">needs repair</span> : "w porzadku"}
         </Para>
-        <Para etykieta="Zarejestrowany"><Czas wartosc={host.enrolled_at} /></Para>
+        <Para etykieta="Enrolled"><Czas wartosc={host.enrolled_at} /></Para>
       </Pary>
 
       {sprzet && (
         <>
-          <h2>Sprzet</h2>
+          <h2>Hardware</h2>
           <Pary>
-            <Para etykieta="Rdzenie">{sprzet.cpu_cores}</Para>
-            <Para etykieta="Pamiec">{bytes(sprzet.memory_bytes)}</Para>
-            <Para etykieta="System plikow /">
+            <Para etykieta="CPU cores">{sprzet.cpu_cores}</Para>
+            <Para etykieta="Memory">{bytes(sprzet.memory_bytes)}</Para>
+            <Para etykieta="Root filesystem">
               {bytes(sprzet.root_fs_free_bytes)} wolne z {bytes(sprzet.root_fs_bytes)}
             </Para>
-            <Para etykieta="Wirtualizacja">{sprzet.virtualization || "—"}</Para>
+            <Para etykieta="Virtualization">{sprzet.virtualization || "—"}</Para>
           </Pary>
         </>
       )}
@@ -130,10 +130,10 @@ function Pakiety({ host }: { host: HostType }) {
   return (
     <>
       <Pary>
-        <Para etykieta="Menedzer">{pakiety?.manager || "—"}</Para>
-        <Para etykieta="Zainstalowane">{pakiety?.installed ?? <span className="znacznik nieznany">nieustalone</span>}</Para>
-        <Para etykieta="Do aktualizacji"><LiczbaOpcjonalna wartosc={host.pending_updates} /></Para>
-        <Para etykieta="Aktualizacje bezpieczenstwa"><LiczbaOpcjonalna wartosc={host.pending_security_updates} /></Para>
+        <Para etykieta="Manager">{pakiety?.manager || "—"}</Para>
+        <Para etykieta="Installed">{pakiety?.installed ?? <span className="znacznik nieznany">unknown</span>}</Para>
+        <Para etykieta="Upgradable"><LiczbaOpcjonalna wartosc={host.pending_updates} /></Para>
+        <Para etykieta="Security updates"><LiczbaOpcjonalna wartosc={host.pending_security_updates} /></Para>
       </Pary>
       {pakiety?.unavailable_reason && (
         <p className="zrodlo" style={{ marginTop: 12 }}>
@@ -145,7 +145,7 @@ function Pakiety({ host }: { host: HostType }) {
         opis="Policz dostepne aktualizacje bez zmiany stanu hosta."
         akcja="packages.plan"
         payload={{ package_plan: { refresh_metadata: true } }}
-        etykieta="Zaplanuj aktualizacje"
+        etykieta="Plan updates"
       />
     </>
   );
@@ -162,14 +162,14 @@ function Uslugi({ host }: { host: HostType }) {
 
   return (
     <>
-      <h2>Jednostki w bledzie</h2>
+      <h2>Failed units</h2>
       {!znane ? (
-        <Pusto>Stanu jednostek nie udalo sie ustalic.</Pusto>
+        <Pusto>Unit states could not be determined.</Pusto>
       ) : wBledzie.length === 0 ? (
-        <Pusto>Zadna jednostka nie jest w stanie failed.</Pusto>
+        <Pusto>No unit is in a failed state.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Jednostka</th></tr></thead>
+          <thead><tr><th>Unit</th></tr></thead>
           <tbody>{wBledzie.map((jednostka) => <tr key={jednostka}><td>{jednostka}</td></tr>)}</tbody>
         </table>
       )}
@@ -188,23 +188,23 @@ function Tozsamosc({ host }: { host: HostType }) {
   return (
     <>
       <Pary>
-        <Para etykieta="W domenie">
+        <Para etykieta="In domain">
           {host.identity.enrolled ? <span className="znacznik ok">tak</span> : <span className="znacznik">nie</span>}
         </Para>
-        <Para etykieta="Domena">{host.identity.domain || "—"}</Para>
+        <Para etykieta="Domain">{host.identity.domain || "—"}</Para>
         <Para etykieta="Realm">{host.identity.realm || "—"}</Para>
-        <Para etykieta="Serwery">{(tozsamosc.servers ?? []).join(", ") || "—"}</Para>
-        <Para etykieta="SSSD dziala">{tozsamosc.sssd_running ? "tak" : "nie"}</Para>
+        <Para etykieta="Servers">{(tozsamosc.servers ?? []).join(", ") || "—"}</Para>
+        <Para etykieta="SSSD running">{tozsamosc.sssd_running ? "tak" : "nie"}</Para>
         <Para etykieta="SSSD online"><FlagaOpcjonalna wartosc={host.identity.sssd_online} /></Para>
-        <Para etykieta="Wiek cache">
+        <Para etykieta="Cache age">
           {tozsamosc.cache_age_seconds !== undefined
             ? `${tozsamosc.cache_age_seconds} s`
-            : <span className="znacznik nieznany">nieustalone</span>}
+            : <span className="znacznik nieznany">unknown</span>}
         </Para>
-        <Para etykieta="Principal hosta">{tozsamosc.host_principal || <span className="znacznik nieznany">nieustalone</span>}</Para>
-        <Para etykieta="KVNO keytab">{tozsamosc.keytab_kvno ?? <span className="znacznik nieznany">nieustalone</span>}</Para>
-        <Para etykieta="Zegar zsynchronizowany">{tozsamosc.time_synchronized ? "tak" : "nie"}</Para>
-        <Para etykieta="Sprawdzone"><Czas wartosc={host.identity.checked_at} /></Para>
+        <Para etykieta="Host principal">{tozsamosc.host_principal || <span className="znacznik nieznany">unknown</span>}</Para>
+        <Para etykieta="KVNO keytab">{tozsamosc.keytab_kvno ?? <span className="znacznik nieznany">unknown</span>}</Para>
+        <Para etykieta="Clock synchronized">{tozsamosc.time_synchronized ? "tak" : "nie"}</Para>
+        <Para etykieta="Checked"><Czas wartosc={host.identity.checked_at} /></Para>
       </Pary>
       {tozsamosc.unavailable_reason && (
         <p className="zrodlo" style={{ marginTop: 12 }}>Braki: {tozsamosc.unavailable_reason}</p>
@@ -219,11 +219,11 @@ function ZadaniaHosta({ host }: { host: HostType }) {
     queryFn: () => api.get<Collection<Job>>(`/api/v1/jobs?host_id=${host.id}&limit=50`),
   });
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak zadan dla tego hosta.</Pusto>;
+  if (!data?.items.length) return <Pusto>No jobs for this host.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Operacja</th><th>Stan</th><th>Zlecil</th><th>Zatwierdzil</th><th>Wynik</th><th>Utworzone</th></tr></thead>
+      <thead><tr><th>Operation</th><th>State</th><th>Requested by</th><th>Approved by</th><th>Result</th><th>Created</th></tr></thead>
       <tbody>
         {data.items.map((zadanie) => (
           <tr key={zadanie.id}>
@@ -247,14 +247,14 @@ function AudytHosta({ host }: { host: HostType }) {
     retry: false,
   });
   if (error instanceof ApiError && error.forbidden) {
-    return <Pusto>Brak uprawnienia do odczytu audytu tego hosta.</Pusto>;
+    return <Pusto>You do not have permission to read this host's audit trail.</Pusto>;
   }
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak zdarzen.</Pusto>;
+  if (!data?.items.length) return <Pusto>No events.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Czas</th><th>Kto</th><th>Operacja</th><th>Wynik</th></tr></thead>
+      <thead><tr><th>Time</th><th>Actor</th><th>Operation</th><th>Result</th></tr></thead>
       <tbody>
         {data.items.map((zdarzenie) => (
           <tr key={zdarzenie.id}>
@@ -295,14 +295,14 @@ function ZlecOperacje({
 
   return (
     <div style={{ marginTop: 24 }}>
-      <h2>Zlec operacje</h2>
+      <h2>Request an operation</h2>
       <p className="podtytul">{opis}</p>
       <button onClick={() => mutacja.mutate()} disabled={mutacja.isPending}>
-        {mutacja.isPending ? "Zlecanie…" : etykieta}
+        {mutacja.isPending ? "Requesting…" : etykieta}
       </button>
       {wynik && <p className="zrodlo" style={{ marginTop: 10 }}>{wynik}</p>}
       <p style={{ marginTop: 12 }}>
-        <Link to="/zadania">Zobacz wszystkie zadania</Link>
+        <Link to="/jobs">See all jobs</Link>
       </p>
     </div>
   );

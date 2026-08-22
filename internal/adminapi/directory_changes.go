@@ -22,19 +22,19 @@ type createChangeRequest struct {
 func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Request) {
 	if s.directory == nil || s.changes == nil || !s.directoryWrite {
 		problem(w, http.StatusNotImplemented, "directory_write_disabled",
-			"modul zmian w katalogu jest wylaczony w tej instalacji")
+			"the directory write module is disabled in this installation")
 		return
 	}
 
 	var request createChangeRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 
 	action := identity.ActionType(request.Action)
 	if !action.Known() {
-		problem(w, http.StatusBadRequest, "unknown_action", "nieznany typ zmiany "+request.Action)
+		problem(w, http.StatusBadRequest, "unknown_action", "unknown change type "+request.Action)
 		return
 	}
 	// Zmiana katalogu obejmuje cala flote, wiec wymaga uprawnienia globalnego.
@@ -47,7 +47,7 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 	var payload identity.Payload
 	if len(request.Payload) > 0 {
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_payload", "payload nie jest poprawnym JSON")
+			problem(w, http.StatusBadRequest, "invalid_payload", "the payload is not valid JSON")
 			return
 		}
 	}
@@ -123,7 +123,7 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 			Action: "directory_change.approve", TargetType: "directory_change", TargetID: change.ID,
 			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "payload_hash_mismatch"},
 		})
-		problem(w, http.StatusConflict, "payload_hash_mismatch", "plan zmienil sie od obejrzenia")
+		problem(w, http.StatusConflict, "payload_hash_mismatch", "the plan changed since you reviewed it")
 		return
 	}
 
@@ -136,14 +136,14 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "self_approval"},
 		})
 		problem(w, http.StatusForbidden, "self_approval",
-			"zmiane w katalogu musi zatwierdzic druga osoba")
+			"a directory change must be approved by a second person")
 		return
 	}
 
 	var plan identity.Plan
 	if err := json.Unmarshal(change.Plan, &plan); err == nil && plan.Blocked() {
 		problem(w, http.StatusConflict, "plan_blocked",
-			"plan zawiera konflikty: "+joinStrings(plan.Conflicts))
+			"the plan has conflicts: "+joinStrings(plan.Conflicts))
 		return
 	}
 
@@ -157,7 +157,7 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 	approved, err := s.changes.Approve(r.Context(), tx, change.ID, principal.Subject)
 	if errors.Is(err, identity.ErrConflict) {
 		problem(w, http.StatusConflict, "invalid_state",
-			"zmiana nie oczekuje na zatwierdzenie (stan "+string(change.State)+")")
+			"the change is not awaiting approval (state "+string(change.State)+")")
 		return
 	}
 	if err != nil {
@@ -196,7 +196,7 @@ func (s *Server) handleCancelDirectoryChange(w http.ResponseWriter, r *http.Requ
 	canceled, err := s.changes.Cancel(r.Context(), change.ID, principal.Subject, request.Reason)
 	if errors.Is(err, identity.ErrConflict) {
 		problem(w, http.StatusConflict, "invalid_state",
-			"zmiana nie moze byc anulowana w stanie "+string(change.State))
+			"the change cannot be canceled in state "+string(change.State))
 		return
 	}
 	if err != nil {
@@ -244,7 +244,7 @@ func (s *Server) changeFor(w http.ResponseWriter, r *http.Request,
 	permission authz.Permission) (*identity.Change, authz.Principal, bool) {
 	if s.changes == nil || !s.directoryWrite {
 		problem(w, http.StatusNotImplemented, "directory_write_disabled",
-			"modul zmian w katalogu jest wylaczony w tej instalacji")
+			"the directory write module is disabled in this installation")
 		return nil, authz.Anonymous, false
 	}
 	principal, ok := s.authorize(w, r, permission, authz.GlobalScope, "directory_change", r.PathValue("id"))
@@ -253,7 +253,7 @@ func (s *Server) changeFor(w http.ResponseWriter, r *http.Request,
 	}
 	change, err := s.changes.Get(r.Context(), r.PathValue("id"))
 	if errors.Is(err, identity.ErrNotFound) {
-		problem(w, http.StatusNotFound, "change_not_found", "zmiana nie istnieje")
+		problem(w, http.StatusNotFound, "change_not_found", "no such change")
 		return nil, principal, false
 	}
 	if err != nil {

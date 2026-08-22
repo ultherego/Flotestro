@@ -31,7 +31,7 @@ export function Kampania() {
   });
 
   if (kampania.error) return <Blad error={kampania.error} />;
-  if (!kampania.data) return <Pusto>Wczytywanie…</Pusto>;
+  if (!kampania.data) return <Pusto>Loading…</Pusto>;
   const dane = kampania.data;
 
   return (
@@ -43,35 +43,35 @@ export function Kampania() {
 
       <div style={{ marginBottom: 20 }}>
         {dane.state === "awaiting_approval" && (
-          <button onClick={() => steruj.mutate("approve")}>Zatwierdz</button>
+          <button onClick={() => steruj.mutate("approve")}>Approve</button>
         )}{" "}
         {["canary", "running", "planned"].includes(dane.state) && (
-          <button className="wtorny" onClick={() => steruj.mutate("pause")}>Wstrzymaj</button>
+          <button className="wtorny" onClick={() => steruj.mutate("pause")}>Pause</button>
         )}{" "}
         {dane.state === "paused" && (
-          <button onClick={() => steruj.mutate("resume")}>Wznow</button>
+          <button onClick={() => steruj.mutate("resume")}>Resume</button>
         )}{" "}
         {!["completed", "failed", "canceled"].includes(dane.state) && (
-          <button className="wtorny" onClick={() => steruj.mutate("cancel")}>Anuluj</button>
+          <button className="wtorny" onClick={() => steruj.mutate("cancel")}>Cancel</button>
         )}
       </div>
 
       <Pary>
-        <Para etykieta="Canary / fala">{dane.canary_size} / {dane.wave_size}</Para>
+        <Para etykieta="Canary / wave">{dane.canary_size} / {dane.wave_size}</Para>
         <Para etykieta="Rownolegle hostow">{dane.max_concurrent}</Para>
-        <Para etykieta="Prog bledow">{dane.failure_threshold_percent}% albo {dane.failure_threshold_absolute} szt.</Para>
-        <Para etykieta="Polityka restartu">{dane.reboot_policy}</Para>
-        <Para etykieta="Zatwierdzil">{dane.approved_by || "—"}</Para>
-        <Para etykieta="Wstrzymana przez">{dane.paused_by || "—"}</Para>
-        <Para etykieta="Powod wstrzymania">{dane.pause_reason || "—"}</Para>
-        <Para etykieta="Utworzona"><Czas wartosc={dane.created_at} /></Para>
+        <Para etykieta="Failure threshold">{dane.failure_threshold_percent}% albo {dane.failure_threshold_absolute} szt.</Para>
+        <Para etykieta="Reboot policy">{dane.reboot_policy}</Para>
+        <Para etykieta="Approved by">{dane.approved_by || "—"}</Para>
+        <Para etykieta="Paused by">{dane.paused_by || "—"}</Para>
+        <Para etykieta="Pause reason">{dane.pause_reason || "—"}</Para>
+        <Para etykieta="Created"><Czas wartosc={dane.created_at} /></Para>
       </Pary>
 
       {raport.data && (
         <>
-          <h2>Fale</h2>
+          <h2>Waves</h2>
           <table>
-            <thead><tr><th>Fala</th><th>Canary</th><th>Zamknieta</th><th>Podsumowanie</th></tr></thead>
+            <thead><tr><th>Wave</th><th>Canary</th><th>Closed</th><th>Summary</th></tr></thead>
             <tbody>
               {raport.data.waves.map((fala) => (
                 <tr key={fala.wave}>
@@ -88,10 +88,10 @@ export function Kampania() {
 
       <h2>Cele</h2>
       {!cele.data?.items.length ? (
-        <Pusto>Brak celow.</Pusto>
+        <Pusto>No targets.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Host</th><th>Fala</th><th>Stan</th><th>Kod bledu</th><th>Komunikat</th></tr></thead>
+          <thead><tr><th>Host</th><th>Wave</th><th>State</th><th>Error code</th><th>Message</th></tr></thead>
           <tbody>
             {cele.data.items.map((cel) => (
               <tr key={cel.host_id}>

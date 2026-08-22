@@ -20,14 +20,14 @@ export function Katalog() {
 
   return (
     <>
-      <h1>Katalog tozsamosci</h1>
+      <h1>Identity directory</h1>
       <p className="podtytul">
         {stan.data?.configured === false
-          ? "Connector katalogu nie jest skonfigurowany."
+          ? "No directory connector is configured."
           : stan.data?.reachable
             ? `${stan.data.summary} · connector: ${stan.data.principal}`
             : stan.data?.error
-              ? `Katalog niedostepny: ${stan.data.error}`
+              ? `Directory unavailable: ${stan.data.error}`
               : "Sprawdzanie…"}
       </p>
 
@@ -48,7 +48,7 @@ export function Katalog() {
 }
 
 function BrakUprawnien() {
-  return <Pusto>Brak uprawnienia do odczytu tego zasobu.</Pusto>;
+  return <Pusto>You do not have permission to read this resource.</Pusto>;
 }
 
 function Uzytkownicy() {
@@ -59,11 +59,11 @@ function Uzytkownicy() {
   });
   if (error instanceof ApiError && error.forbidden) return <BrakUprawnien />;
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak kont.</Pusto>;
+  if (!data?.items.length) return <Pusto>No accounts.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Konto</th><th>Imie i nazwisko</th><th>UID</th><th>Grupy</th><th>Klucze SSH</th><th>Stan</th></tr></thead>
+      <thead><tr><th>Account</th><th>Full name</th><th>UID</th><th>Groups</th><th>SSH keys</th><th>State</th></tr></thead>
       <tbody>
         {data.items.map((uzytkownik) => (
           <tr key={uzytkownik.uid}>
@@ -72,7 +72,7 @@ function Uzytkownicy() {
             <td>{uzytkownik.uid_number || "—"}</td>
             <td>{(uzytkownik.groups ?? []).join(", ") || "—"}</td>
             <td>{uzytkownik.ssh_key_fingerprints?.length ?? 0}</td>
-            <td>{uzytkownik.disabled ? <span className="znacznik blad">zablokowane</span> : <span className="znacznik ok">aktywne</span>}</td>
+            <td>{uzytkownik.disabled ? <span className="znacznik blad">locked</span> : <span className="znacznik ok">aktywne</span>}</td>
           </tr>
         ))}
       </tbody>
@@ -88,11 +88,11 @@ function Grupy() {
   });
   if (error instanceof ApiError && error.forbidden) return <BrakUprawnien />;
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak grup.</Pusto>;
+  if (!data?.items.length) return <Pusto>No groups.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Grupa</th><th>GID</th><th>Opis</th><th>Czlonkowie</th></tr></thead>
+      <thead><tr><th>Group</th><th>GID</th><th>Description</th><th>Members</th></tr></thead>
       <tbody>
         {data.items.map((grupa) => (
           <tr key={grupa.name}>
@@ -115,11 +115,11 @@ function RegulyHBAC() {
   });
   if (error instanceof ApiError && error.forbidden) return <BrakUprawnien />;
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak regul.</Pusto>;
+  if (!data?.items.length) return <Pusto>No rules.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Regula</th><th>Wlaczona</th><th>Grupy</th><th>Hosty</th><th>Ryzyko</th></tr></thead>
+      <thead><tr><th>Rule</th><th>Enabled</th><th>Groups</th><th>Hosts</th><th>Risk</th></tr></thead>
       <tbody>
         {data.items.map((regula) => (
           <tr key={regula.name}>
@@ -129,8 +129,8 @@ function RegulyHBAC() {
             <td>{[...(regula.hosts ?? []), ...(regula.host_groups ?? [])].join(", ") || "—"}</td>
             <td>
               {regula.allows_everything
-                ? <span className="znacznik blad">obejmuje cala flote</span>
-                : <span className="znacznik">zawezona</span>}
+                ? <span className="znacznik blad">covers the whole fleet</span>
+                : <span className="znacznik">narrowed</span>}
             </td>
           </tr>
         ))}
@@ -147,11 +147,11 @@ function RegulySudo() {
   });
   if (error instanceof ApiError && error.forbidden) return <BrakUprawnien />;
   if (error) return <Blad error={error} />;
-  if (!data?.items.length) return <Pusto>Brak regul sudo.</Pusto>;
+  if (!data?.items.length) return <Pusto>No sudo rules.</Pusto>;
 
   return (
     <table>
-      <thead><tr><th>Regula</th><th>Wlaczona</th><th>Kogo dotyczy</th><th>Ryzyko</th></tr></thead>
+      <thead><tr><th>Rule</th><th>Enabled</th><th>Applies to</th><th>Risk</th></tr></thead>
       <tbody>
         {data.items.map((regula) => (
           <tr key={regula.name}>
@@ -160,7 +160,7 @@ function RegulySudo() {
             <td>{[...(regula.users ?? []), ...(regula.user_groups ?? [])].join(", ") || "—"}</td>
             <td>
               {regula.critical
-                ? <span className="znacznik blad" title={(regula.critical_reasons ?? []).join("; ")}>krytyczna</span>
+                ? <span className="znacznik blad" title={(regula.critical_reasons ?? []).join("; ")}>critical</span>
                 : "—"}
             </td>
           </tr>

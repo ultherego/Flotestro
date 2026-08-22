@@ -22,7 +22,7 @@ export function App() {
     refetchInterval: false,
   });
 
-  if (isLoading) return <div className="pusto" style={{ padding: 40 }}>Wczytywanie…</div>;
+  if (isLoading) return <div className="pusto" style={{ padding: 40 }}>Loading…</div>;
 
   // Brak sesji kieruje do logowania u dostawcy tozsamosci. Panel nie zbiera
   // hasel: poswiadczenia trafiaja wylacznie do Keycloaka.
@@ -43,34 +43,40 @@ export function App() {
     <div className="uklad">
       <nav className="nawigacja">
         <div className="marka">Flotestro</div>
-        <Link do="/pulpit">Pulpit</Link>
-        <Link do="/hosty">Hosty</Link>
-        <Link do="/zadania">Zadania</Link>
-        {widziKampanie && <Link do="/kampanie">Kampanie</Link>}
-        {zdolnosci.directory && <Link do="/katalog">Katalog</Link>}
+        <Link do="/dashboard">Dashboard</Link>
+        <Link do="/hosts">Hosts</Link>
+        <Link do="/jobs">Jobs</Link>
+        {widziKampanie && <Link do="/campaigns">Campaigns</Link>}
+        {zdolnosci.directory && <Link do="/directory">Directory</Link>}
         {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
             zmienic; pozostalym pozycja prowadzilaby do samej odmowy. */}
-        {zarzadzaDostepem && <Link do="/dostep">Dostep</Link>}
-        {widziAudyt && <Link do="/audyt">Audyt</Link>}
+        {zarzadzaDostepem && <Link do="/access">Access</Link>}
+        {widziAudyt && <Link do="/audit">Audit</Link>}
         <div className="stopka">
           <div>{data?.display_name || data?.subject}</div>
-          <div>{data?.roles.join(", ") || "brak rol"}</div>
-          <a href="#" onClick={wyloguj}>Wyloguj</a>
+          <div>{data?.roles.join(", ") || "no roles"}</div>
+          {/* Dostawca tozsamosci moze miec aktywna sesje innego uzytkownika
+              i logowac nia po cichu. Bez tego odnosnika nie ma z tego wyjscia
+              inaczej niz przez czyszczenie ciasteczek przegladarki. */}
+          <a href={`/auth/login?force=1&redirect=${encodeURIComponent(window.location.pathname)}`}>
+            Zmien konto
+          </a>
+          <a href="#" onClick={wyloguj}>Sign out</a>
         </div>
       </nav>
       <main className="tresc">
         <Routes>
-          <Route path="/" element={<Navigate to="/pulpit" replace />} />
-          <Route path="/pulpit" element={<Pulpit />} />
-          <Route path="/hosty" element={<Hosty />} />
-          <Route path="/hosty/:id" element={<Host />} />
-          <Route path="/zadania" element={<Zadania />} />
-          {widziKampanie && <Route path="/kampanie" element={<Kampanie />} />}
-          {widziKampanie && <Route path="/kampanie/:id" element={<Kampania />} />}
-          {zdolnosci.directory && <Route path="/katalog" element={<Katalog />} />}
-          {zarzadzaDostepem && <Route path="/dostep" element={<Dostep />} />}
-          {widziAudyt && <Route path="/audyt" element={<Audyt />} />}
-          <Route path="*" element={<div className="pusto">Nie ma takiej strony.</div>} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Pulpit />} />
+          <Route path="/hosts" element={<Hosty />} />
+          <Route path="/hosts/:id" element={<Host />} />
+          <Route path="/jobs" element={<Zadania />} />
+          {widziKampanie && <Route path="/campaigns" element={<Kampanie />} />}
+          {widziKampanie && <Route path="/campaigns/:id" element={<Kampania />} />}
+          {zdolnosci.directory && <Route path="/directory" element={<Katalog />} />}
+          {zarzadzaDostepem && <Route path="/access" element={<Dostep />} />}
+          {widziAudyt && <Route path="/audit" element={<Audyt />} />}
+          <Route path="*" element={<div className="pusto">Page not found.</div>} />
         </Routes>
       </main>
     </div>
@@ -79,7 +85,7 @@ export function App() {
 
 function Link({ do: cel, children }: { do: string; children: string }) {
   return (
-    <NavLink to={cel} className={({ isActive }) => (isActive ? "aktywny" : "")}>
+    <NavLink to={cel} className={({ isActive }) => (isActive ? "active" : "")}>
       {children}
     </NavLink>
   );
@@ -98,18 +104,25 @@ function EkranLogowania({ dostawca }: { dostawca: boolean }) {
     <div className="ekran-logowania">
       <div>
         <h1>Flotestro</h1>
-        <p className="podtytul">Panel zarzadzania flota Linux</p>
+        <p className="podtytul">Linux fleet management</p>
         {dostawca ? (
-          <button onClick={() => (window.location.href = "/auth/login?redirect=/pulpit")}>
-            Zaloguj przez dostawce tozsamosci
-          </button>
+          <>
+            <button onClick={() => (window.location.href = "/auth/login?redirect=/dashboard")}>
+              Sign in with identity provider
+            </button>
+            <p className="podtytul" style={{ marginTop: 14 }}>
+              Your identity provider may sign you in with an account you already
+              have an open session for.{" "}
+              <a href="/auth/login?force=1&redirect=/dashboard">Sign in as a different user</a>
+            </p>
+          </>
         ) : (
           // Bez skonfigurowanego dostawcy przycisk logowania prowadzilby do
           // bledu. Panel dziala wtedy na tokenach API i trzeba to powiedziec
           // wprost, zamiast pokazywac martwa akcje.
           <p className="podtytul">
-            W tej instalacji nie skonfigurowano dostawcy tozsamosci. Dostep do
-            panelu odbywa sie tokenem API przekazanym w naglowku Authorization.
+            No identity provider is configured in this installation. Access to
+            the panel uses an API token passed in the Authorization header.
           </p>
         )}
       </div>

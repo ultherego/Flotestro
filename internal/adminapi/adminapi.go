@@ -200,7 +200,7 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.Ping(r.Context()); err != nil {
-		problem(w, http.StatusServiceUnavailable, "database_unavailable", "baza nie odpowiada")
+		problem(w, http.StatusServiceUnavailable, "database_unavailable", "the database is not responding")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -307,7 +307,7 @@ func (s *Server) handleHostInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if revision == nil {
-		problem(w, http.StatusNotFound, "inventory_not_found", "host nie zglosil jeszcze inventory")
+		problem(w, http.StatusNotFound, "inventory_not_found", "the host has not reported inventory yet")
 		return
 	}
 	writeJSON(w, http.StatusOK, revision)
@@ -371,7 +371,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	var req createTokenRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 	if req.Site == "" {
@@ -404,7 +404,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	s.log.Error("blad obslugi zadania API", "err", err)
-	problem(w, http.StatusInternalServerError, "internal_error", "blad wewnetrzny")
+	problem(w, http.StatusInternalServerError, "internal_error", "internal error")
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

@@ -44,7 +44,7 @@ export function CentrumCA({ zglosBlad }: { zglosBlad: (blad: ApiError | null) =>
   });
 
   if (zapytanie.error instanceof ApiError && zapytanie.error.forbidden) {
-    return <Pusto>Brak uprawnienia do przegladu CA floty.</Pusto>;
+    return <Pusto>You do not have permission to view the fleet CA.</Pusto>;
   }
   if (zapytanie.error) return <Blad error={zapytanie.error} />;
 
@@ -55,16 +55,16 @@ export function CentrumCA({ zglosBlad }: { zglosBlad: (blad: ApiError | null) =>
   return (
     <>
       <p className="podtytul">
-        Certyfikaty agentow sa wystawiane przez CA floty. Wymiana odbywa sie
-        w dwoch fazach: nowe CA najpierw trafia do agentow przy odnawianiu
-        certyfikatow, a dopiero potem przejmuje podpisywanie.
+        Agent certificates are issued by the fleet CA. Rotation happens in two
+        phases: the new CA first reaches agents as their certificates are renewed,
+        and only then takes over signing.
       </p>
 
       <table>
         <thead>
           <tr>
-            <th>Stan</th><th>Numer seryjny</th><th>Wazne do</th>
-            <th>Certyfikaty</th><th>Uwagi</th><th /></tr>
+            <th>State</th><th>Serial</th><th>Valid until</th>
+            <th>Certificates</th><th>Notes</th><th /></tr>
         </thead>
         <tbody>
           {lista.map((ca) => (
@@ -76,22 +76,22 @@ export function CentrumCA({ zglosBlad }: { zglosBlad: (blad: ApiError | null) =>
               <td className="zrodlo">
                 {ca.state === "pending" && (
                   ca.ready_to_activate
-                    ? "cala flota zna juz to CA"
-                    : `${ca.hosts_missing} hostow jeszcze go nie zna`
+                    ? "the whole fleet already knows this CA"
+                    : `${ca.hosts_missing} hosts do not know it yet`
                 )}
                 {ca.state === "retired" && ca.hosts_using > 0 &&
-                  "wciaz uzywane przez hosty"}
-                {ca.state === "active" && "podpisuje nowe certyfikaty"}
+                  "still used by hosts"}
+                {ca.state === "active" && "signs new certificates"}
               </td>
               <td>
                 {ca.state === "retired" && ca.hosts_using === 0 && (
                   <button
                     onClick={() => {
-                      const reason = window.prompt("Powod usuniecia CA ze zbioru zaufania (min. 8 znakow):");
+                      const reason = window.prompt("Reason for removing this CA from the trust set (min. 8 characters):");
                       if (reason) usun.mutate({ fingerprint: ca.fingerprint, reason });
                     }}
                   >
-                    Usun ze zbioru
+                    Remove from trust set
                   </button>
                 )}
               </td>
@@ -101,19 +101,19 @@ export function CentrumCA({ zglosBlad }: { zglosBlad: (blad: ApiError | null) =>
       </table>
 
       <div className="formularz" style={{ marginTop: 24 }}>
-        <h2>{oczekujace ? "Faza 2: przekazanie podpisywania" : "Faza 1: przygotowanie nowego CA"}</h2>
+        <h2>{oczekujace ? "Phase 2: hand over signing" : "Phase 1: prepare a new CA"}</h2>
         <p className="podtytul">
           {oczekujace
             ? oczekujace.ready_to_activate
-              ? "Cala flota zna juz nowe CA. Po przekazaniu podpisywania dotychczasowe CA zostaje uznawane, wiec obecne certyfikaty agentow pozostaja wazne."
+              ? "The whole fleet already knows the new CA. After the handover the previous CA stays trusted, so current agent certificates remain valid."
               : `Nowe CA jest juz rozsylane. Przekazanie podpisywania bedzie mozliwe, gdy wszystkie hosty odnowia certyfikaty (pozostalo ${oczekujace.hosts_missing}).`
-            : "Nowe CA zostanie wlaczone do zbioru zaufania i rozeslane do agentow przy odnawianiu ich certyfikatow. Podpisywanie pozostanie przy dotychczasowym CA."}
+            : "The new CA will join the trust set and reach agents as their certificates are renewed. Signing stays with the current CA."}
         </p>
-        <label>Powod zmiany
+        <label>Reason for the change
           <input
             value={powod}
             onChange={(zdarzenie) => setPowod(zdarzenie.target.value)}
-            placeholder="np. planowa wymiana CA przed wygasnieciem"
+            placeholder="e.g. planned CA rotation before expiry"
           />
         </label>
         <div className="operacje">
@@ -122,11 +122,11 @@ export function CentrumCA({ zglosBlad }: { zglosBlad: (blad: ApiError | null) =>
               disabled={!powodGotowy || !oczekujace.ready_to_activate || przekaz.isPending}
               onClick={() => przekaz.mutate()}
             >
-              Przekaz podpisywanie nowemu CA
+              Hand signing over to the new CA
             </button>
           ) : (
             <button disabled={!powodGotowy || przygotuj.isPending} onClick={() => przygotuj.mutate()}>
-              Przygotuj nowe CA
+              Prepare a new CA
             </button>
           )}
         </div>
@@ -138,10 +138,10 @@ export function CentrumCA({ zglosBlad }: { zglosBlad: (blad: ApiError | null) =>
 function StanCA({ stan }: { stan: Authority["state"] }) {
   switch (stan) {
     case "active":
-      return <span className="znacznik ok">podpisuje</span>;
+      return <span className="znacznik ok">signing</span>;
     case "pending":
-      return <span className="znacznik uwaga">przygotowane</span>;
+      return <span className="znacznik uwaga">prepared</span>;
     default:
-      return <span className="znacznik">wycofane</span>;
+      return <span className="znacznik">retired</span>;
   }
 }

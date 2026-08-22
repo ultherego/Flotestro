@@ -16,7 +16,7 @@ export function Audyt() {
   if (error instanceof ApiError && error.forbidden) {
     return (
       <>
-        <h1>Audyt</h1>
+        <h1>Audit</h1>
         <Pusto>
           Brak uprawnienia do odczytu dziennika calej floty. Audyt pojedynczego hosta
           jest dostepny w jego widoku.
@@ -30,8 +30,8 @@ export function Audyt() {
 
   return (
     <>
-      <h1>Audyt</h1>
-      <p className="podtytul">Kazda sciezka sukcesu i bledu tworzy zdarzenie; odmowy takze.</p>
+      <h1>Audit</h1>
+      <p className="podtytul">Every success and failure creates an event; so does every denial.</p>
 
       <div className="filtry">
         <label>
@@ -41,10 +41,10 @@ export function Audyt() {
       </div>
 
       {!zdarzenia.length ? (
-        <Pusto>Brak zdarzen.</Pusto>
+        <Pusto>No events.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Czas</th><th>Kto</th><th>Typ</th><th>Operacja</th><th>Cel</th><th>Wynik</th><th>Szczegoly</th></tr></thead>
+          <thead><tr><th>Time</th><th>Actor</th><th>Typ</th><th>Operation</th><th>Target</th><th>Result</th><th>Details</th></tr></thead>
           <tbody>
             {zdarzenia.map((zdarzenie) => (
               <tr key={zdarzenie.id}>

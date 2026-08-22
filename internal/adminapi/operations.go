@@ -45,14 +45,14 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 
 	var request createOperationRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 
 	action := opspec.ActionType(request.Action)
 	if !action.Known() {
 		problem(w, http.StatusBadRequest, "unknown_action",
-			"nieznany typ operacji; dozwolone: "+joinActions())
+			"unknown operation type; allowed: "+joinActions())
 		return
 	}
 
@@ -66,7 +66,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	var payload opspec.Payload
 	if len(request.Payload) > 0 {
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_payload", "payload nie jest poprawnym JSON")
+			problem(w, http.StatusBadRequest, "invalid_payload", "the payload is not valid JSON")
 			return
 		}
 	}
@@ -85,7 +85,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			Detail:  map[string]any{"reason": "package_database_broken", "action_type": string(action)},
 		})
 		problem(w, http.StatusConflict, "package_database_broken",
-			"baza pakietow hosta wymaga naprawy; operacje pakietowe sa wstrzymane")
+			"the host's package database needs repair; package operations are on hold")
 		return
 	}
 
@@ -95,7 +95,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			Action: "job.create", TargetType: "host", TargetID: hostID,
 			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "quarantined"},
 		})
-		problem(w, http.StatusConflict, "host_quarantined", "host jest w kwarantannie")
+		problem(w, http.StatusConflict, "host_quarantined", "the host is quarantined")
 		return
 	}
 
@@ -103,7 +103,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// operacji, ktorej ten host nigdy nie wykona.
 	if capability := action.RequiredCapability(); !hostHasCapability(host, capability) {
 		problem(w, http.StatusConflict, "capability_missing",
-			"host nie ma zdolnosci "+capability)
+			"the host lacks capability "+capability)
 		return
 	}
 
@@ -188,14 +188,14 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 	var request transitionRequest
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 			return
 		}
 	}
 
 	current, err := s.jobs.Get(r.Context(), jobID)
 	if errors.Is(err, jobs.ErrNotFound) {
-		problem(w, http.StatusNotFound, "job_not_found", "zadanie nie istnieje")
+		problem(w, http.StatusNotFound, "job_not_found", "no such job")
 		return
 	}
 	if err != nil {
@@ -228,7 +228,7 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			},
 		})
 		problem(w, http.StatusForbidden, "self_approval",
-			"w srodowisku "+scope.Environment+" zmiane musi zatwierdzic druga osoba")
+			" in environment "+scope.Environment+" changes require approval by a second person")
 		return
 	}
 
@@ -240,7 +240,7 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			Detail:  map[string]any{"reason": "payload_hash_mismatch", "expected": current.PayloadHash},
 		})
 		problem(w, http.StatusConflict, "payload_hash_mismatch",
-			"plan zmienil sie od czasu obejrzenia")
+			"the plan changed since you reviewed it")
 		return
 	}
 
@@ -271,7 +271,7 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			Detail:  map[string]any{"reason": "invalid_state", "state": string(current.State)},
 		})
 		problem(w, http.StatusConflict, "invalid_state",
-			"operacja niedozwolona w stanie "+string(current.State))
+			"operation not allowed in state "+string(current.State))
 		return
 	}
 	if err != nil {
@@ -334,7 +334,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
 	job, err := s.jobs.Get(r.Context(), jobID)
 	if errors.Is(err, jobs.ErrNotFound) {
-		problem(w, http.StatusNotFound, "job_not_found", "zadanie nie istnieje")
+		problem(w, http.StatusNotFound, "job_not_found", "no such job")
 		return
 	}
 	if err != nil {
@@ -351,7 +351,7 @@ func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
 	job, err := s.jobs.Get(r.Context(), jobID)
 	if errors.Is(err, jobs.ErrNotFound) {
-		problem(w, http.StatusNotFound, "job_not_found", "zadanie nie istnieje")
+		problem(w, http.StatusNotFound, "job_not_found", "no such job")
 		return
 	}
 	if err != nil {
@@ -376,7 +376,7 @@ func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 	if principal := authz.FromContext(r.Context()); !principal.Authenticated() {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
-		problem(w, http.StatusUnauthorized, "unauthenticated", "brak waznego tokenu")
+		problem(w, http.StatusUnauthorized, "unauthenticated", "no valid token")
 		return
 	}
 	type actionInfo struct {

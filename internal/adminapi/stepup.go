@@ -45,7 +45,7 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	if len([]rune(reason)) < minimalStepUpReason {
 		return nil, &stepUpDenial{
 			Code:    "reason_required",
-			Message: "operacja wymaga podania powodu (pole reason, min. 8 znakow)",
+			Message: "this operation requires a reason (field reason, min. 8 characters)",
 			Detail:  map[string]any{},
 		}
 	}
@@ -66,14 +66,14 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 			// czytany jako "przed chwila".
 			return nil, &stepUpDenial{
 				Code:    "reauthentication_required",
-				Message: "dostawca tozsamosci nie podal czasu uwierzytelnienia; zaloguj sie ponownie",
+				Message: "the identity provider did not report the authentication time; sign in again",
 				Detail:  map[string]any{"required_max_age_seconds": int(p.MaxAge.Seconds())},
 			}
 		}
 		if age := time.Since(session.Auth.At); age > p.MaxAge {
 			return nil, &stepUpDenial{
 				Code:    "reauthentication_required",
-				Message: "operacja wymaga swiezego uwierzytelnienia; zaloguj sie ponownie",
+				Message: "this operation requires fresh authentication; sign in again",
 				Detail: map[string]any{
 					"required_max_age_seconds":   int(p.MaxAge.Seconds()),
 					"authentication_age_seconds": int(age.Seconds()),
@@ -84,7 +84,7 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	if p.ACR != "" && session.Auth.ACR != p.ACR {
 		return nil, &stepUpDenial{
 			Code:    "reauthentication_required",
-			Message: "operacja wymaga uwierzytelnienia na poziomie " + p.ACR,
+			Message: "this operation requires authentication at level " + p.ACR,
 			Detail:  map[string]any{"required_acr": p.ACR, "session_acr": session.Auth.ACR},
 		}
 	}

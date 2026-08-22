@@ -42,21 +42,21 @@ type createCampaignRequest struct {
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	var request createCampaignRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
 
 	action := opspec.ActionType(request.Action)
 	if !action.Known() || !action.Mutating() {
 		problem(w, http.StatusBadRequest, "unknown_action",
-			"kampania wymaga operacji zmieniajacej stan hosta")
+			"a campaign requires an operation that changes host state")
 		return
 	}
 
 	var payload opspec.Payload
 	if len(request.Payload) > 0 {
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_payload", "payload nie jest poprawnym JSON")
+			problem(w, http.StatusBadRequest, "invalid_payload", "the payload is not valid JSON")
 			return
 		}
 	}
@@ -77,7 +77,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(candidates) == 0 {
-		problem(w, http.StatusBadRequest, "no_targets", "selektor nie wskazal zadnego hosta")
+		problem(w, http.StatusBadRequest, "no_targets", "the selector matched no hosts")
 		return
 	}
 
@@ -285,7 +285,7 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "self_approval"},
 		})
 		problem(w, http.StatusForbidden, "self_approval",
-			"kampanie produkcyjna musi zatwierdzic druga osoba")
+			"a production campaign must be approved by a second person")
 		return
 	}
 
@@ -299,7 +299,7 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 	approved, err := s.campaigns.Approve(r.Context(), tx, campaign.ID, principal.Subject)
 	if errors.Is(err, campaigns.ErrConflict) {
 		problem(w, http.StatusConflict, "invalid_state",
-			"kampania nie oczekuje na zatwierdzenie (stan "+string(campaign.State)+")")
+			"the campaign is not awaiting approval (state "+string(campaign.State)+")")
 		return
 	}
 	if err != nil {
@@ -362,7 +362,7 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 	}
 	if errors.Is(err, campaigns.ErrConflict) {
 		problem(w, http.StatusConflict, "invalid_state",
-			"operacja niedozwolona w stanie "+string(campaign.State))
+			"operation not allowed in state "+string(campaign.State))
 		return
 	}
 	if err != nil {
@@ -385,7 +385,7 @@ func (s *Server) campaignFor(w http.ResponseWriter, r *http.Request,
 	campaignID := r.PathValue("id")
 	campaign, err := s.campaigns.Get(r.Context(), campaignID)
 	if errors.Is(err, campaigns.ErrNotFound) {
-		problem(w, http.StatusNotFound, "campaign_not_found", "kampania nie istnieje")
+		problem(w, http.StatusNotFound, "campaign_not_found", "no such campaign")
 		return nil, false
 	}
 	if err != nil {

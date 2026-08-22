@@ -14,7 +14,7 @@ import (
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.metrics == nil {
 		problem(w, http.StatusNotImplemented, "metrics_disabled",
-			"metryki nie sa wlaczone w tej instalacji")
+			"metrics are not enabled in this installation")
 		return
 	}
 	if _, ok := s.authorize(w, r, authz.PermMetricsRead, authz.GlobalScope, "metrics", ""); !ok {
