@@ -60,6 +60,11 @@ const (
 	PermLocalUserLock    Permission = "localuser.lock"
 	PermLocalUserUnlock  Permission = "localuser.unlock"
 	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
+
+	// Metryki opisuja flote: liczbe hostow, stany zadan i waznosc CA.
+	// To material rozpoznawczy, wiec ma wlasne uprawnienie, a nie jest
+	// dostepny kazdemu, kto zna adres panelu.
+	PermMetricsRead Permission = "metrics.read"
 )
 
 // Role grupuje uprawnienia. Podzial odpowiada rolom z dokumentu: platform
@@ -85,6 +90,8 @@ var rolePermissions = map[Role][]Permission{
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
+		// Auditor patrzy na stan systemu, wiec metryki naleza do jego pracy.
+		PermMetricsRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -125,7 +132,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermEnrollmentToken, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
-		PermLocalUserUnlock, PermLocalSSHKeyWrite,
+		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 	},
 }
 

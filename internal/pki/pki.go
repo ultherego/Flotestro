@@ -36,6 +36,15 @@ type CA struct {
 	PEM         []byte
 }
 
+// NotAfter zwraca koniec waznosci certyfikatu CA. Wygasajace CA unieruchamia
+// cala flote naraz, wiec ten czas musi byc widoczny w metrykach.
+func (ca *CA) NotAfter() time.Time {
+	if ca == nil || ca.Certificate == nil {
+		return time.Time{}
+	}
+	return ca.Certificate.NotAfter
+}
+
 // EnsureCA wczytuje CA z katalogu stanu lub tworzy nowe przy pierwszym starcie.
 func EnsureCA(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {

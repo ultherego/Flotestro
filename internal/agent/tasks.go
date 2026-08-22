@@ -27,6 +27,11 @@ const (
 	RejectHelperFailed   = "helper_unavailable"
 	RejectCapability     = "capability_missing"
 	RejectInvalidRequest = "invalid_request"
+	// RejectUnsupported oznacza agenta, ktory z zalozenia nie wykonuje zadan.
+	RejectUnsupported = "unsupported"
+	// RejectInternalError oznacza blad po stronie agenta. Zadanie konczy sie
+	// wynikiem negatywnym zamiast zabierac ze soba caly proces.
+	RejectInternalError = "agent_internal_error"
 )
 
 // TaskExecutor wykonuje zadania dostarczone przez control plane.

@@ -21,6 +21,7 @@ import (
 	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
 )
 
@@ -50,6 +51,8 @@ type Server struct {
 	webRoot                string
 	// stepUp opisuje warunki operacji o najwiekszym wplywie.
 	stepUp stepUpPolicy
+	// metrics wystawia stan panelu do monitoringu.
+	metrics *metrics.Collector
 }
 
 // Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
@@ -70,6 +73,8 @@ type Options struct {
 	// StepUpACR jest wymaganym poziomem uwierzytelnienia, jesli instalacja
 	// go zdefiniowala u dostawcy tozsamosci.
 	StepUpACR string
+	// Metrics wystawia stan panelu; pusty wylacza endpoint.
+	Metrics *metrics.Collector
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
@@ -88,7 +93,8 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
 		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite,
-		stepUp: stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR}}
+		stepUp:  stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR},
+		metrics: options.Metrics}
 }
 
 // Routes buduje router API.
@@ -96,6 +102,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	// Logowanie operatorow przez dostawce tozsamosci.
 	mux.HandleFunc("GET /auth/login", s.handleLogin)

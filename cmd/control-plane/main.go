@@ -36,6 +36,7 @@ import (
 	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/scheduler"
@@ -259,6 +260,7 @@ func run() error {
 					DirectoryWrite:         *directoryWrite,
 					StepUpMaxAge:           *stepUpMaxAge,
 					StepUpACR:              *stepUpACR,
+					Metrics:                metrics.NewCollector(pool, registry, ca, cfg.GatewayID),
 				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,

@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -208,7 +210,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient, o
 					case <-sessionCtx.Done():
 						return
 					}
-					result := opts.Executor.Execute(sessionCtx, task)
+					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
 					opts.Log.Info("zadanie zakonczone",
 						"task_id", task.GetTaskId(), "status", result.GetStatus(),
 						"error_code", result.GetErrorCode(), "replayed", result.GetReplayed())
@@ -307,4 +309,54 @@ func withJitter(base time.Duration) time.Duration {
 		return minBackoff
 	}
 	return base/2 + time.Duration(rand.Int64N(int64(base)))
+}
+
+// executeTask uruchamia zadanie za bariera odpornosci.
+//
+// Panika w obsludze jednego zadania nie moze zabic agenta: host stracilby
+// wtedy zarzadzanie przez blad w jednej operacji, a control plane zobaczylby
+// zerwana sesje zamiast informacji, co poszlo nie tak. Zadanie konczy sie
+// wynikiem negatywnym, a agent dziala dalej.
+func executeTask(ctx context.Context, executor *TaskExecutor, task *agentv1.TaskEnvelope,
+	log *slog.Logger) (result *agentv1.TaskResult) {
+	if executor == nil {
+		// Agent bez wykonawcy zadan nie jest zepsuty - taka jest na przyklad
+		// rola symulatora. Odrzucenie jest odpowiedzia, a nie awaria.
+		return &agentv1.TaskResult{
+			TaskId:    task.GetTaskId(),
+			Status:    agentv1.TaskResult_STATUS_REJECTED,
+			ExitCode:  -1,
+			ErrorCode: RejectUnsupported,
+			Message:   "agent nie wykonuje zadan",
+		}
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Error("panika przy wykonaniu zadania",
+				"task_id", task.GetTaskId(), "powod", fmt.Sprint(recovered),
+				"stos", string(debug.Stack()))
+			result = &agentv1.TaskResult{
+				TaskId:    task.GetTaskId(),
+				Status:    agentv1.TaskResult_STATUS_FAILED,
+				ExitCode:  -1,
+				ErrorCode: RejectInternalError,
+				Message:   "wewnetrzny blad agenta przy wykonaniu zadania",
+			}
+		}
+	}()
+
+	result = executor.Execute(ctx, task)
+	if result == nil {
+		// Milczenie agenta jest dla control plane nieodrozninalne od zerwanego
+		// polaczenia, wiec brak wyniku jest tu bledem, a nie pustka.
+		result = &agentv1.TaskResult{
+			TaskId:    task.GetTaskId(),
+			Status:    agentv1.TaskResult_STATUS_FAILED,
+			ExitCode:  -1,
+			ErrorCode: RejectInternalError,
+			Message:   "wykonawca nie zwrocil wyniku",
+		}
+	}
+	return result
 }
