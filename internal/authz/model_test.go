@@ -112,3 +112,51 @@ func TestPustyZakresPrzypisaniaNiePasuje(t *testing.T) {
 		t.Fatal("puste przypisanie objelo konkretny zakres")
 	}
 }
+
+// TestScopeSQLMaTaSamaSemantykeCoMatches pilnuje zgodnosci zawezania list
+// z autoryzacja. Rozjazd tych dwoch regul dal panel, w ktorym administrator
+// z zakresem globalnym widzial pusta flote, a operator ograniczony do jednego
+// srodowiska widzial swoje hosty poprawnie: gwiazdka trafiala do zapytania
+// jako zwykla wartosc i nie pasowala do niczego.
+func TestScopeSQLMaTaSamaSemantykeCoMatches(t *testing.T) {
+	globalny := []Scope{{Site: Wildcard, Environment: Wildcard}}
+	if warunek, args := ScopeSQL(globalny, "site", "environment", 0); warunek != "" || args != nil {
+		t.Errorf("zakres globalny nie moze zawezac: %q %v", warunek, args)
+	}
+
+	waski := []Scope{{Site: "lab", Environment: "test"}}
+	warunek, args := ScopeSQL(waski, "site", "environment", 0)
+	if warunek != "((site = $1 and environment = $2))" {
+		t.Errorf("warunek waskiego zakresu = %q", warunek)
+	}
+	if len(args) != 2 || args[0] != "lab" || args[1] != "test" {
+		t.Errorf("argumenty = %v", args)
+	}
+
+	// Gwiazdka w jednym wymiarze znosi warunek tylko w nim.
+	czesciowy := []Scope{{Site: Wildcard, Environment: "prod"}}
+	warunek, args = ScopeSQL(czesciowy, "site", "environment", 0)
+	if warunek != "((environment = $1))" || len(args) != 1 || args[0] != "prod" {
+		t.Errorf("zakres czesciowy: %q %v", warunek, args)
+	}
+
+	// Numeracja parametrow uwzglednia te juz uzyte w zapytaniu.
+	warunek, _ = ScopeSQL(waski, "h.site", "h.environment", 3)
+	if warunek != "((h.site = $4 and h.environment = $5))" {
+		t.Errorf("przesuniecie parametrow: %q", warunek)
+	}
+
+	// Wartosc pusta nie pasuje do niczego - tak samo jak w Matches.
+	if (Scope{Site: "", Environment: "test"}).Matches(Scope{Site: "lab", Environment: "test"}) {
+		t.Fatal("pusty wymiar nie moze pasowac")
+	}
+	warunek, _ = ScopeSQL([]Scope{{Site: "", Environment: "test"}}, "site", "environment", 0)
+	if warunek != "((false and environment = $1))" {
+		t.Errorf("pusty wymiar w SQL = %q", warunek)
+	}
+
+	// Brak zakresow nie moze oznaczac dostepu do wszystkiego.
+	if warunek, _ := ScopeSQL(nil, "site", "environment", 0); warunek != "false" {
+		t.Errorf("brak zakresow = %q, oczekiwano warunku falszywego", warunek)
+	}
+}

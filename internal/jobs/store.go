@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"github.com/ultherego/flotestro/internal/authz"
 	"time"
 
 	"github.com/google/uuid"
@@ -492,20 +492,13 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	// Zadanie nalezy do hosta, wiec widocznosc dziedziczy po nim: operator
 	// jednego srodowiska nie moze ogladac zadan z calej floty.
 	if len(filter.Scopes) > 0 {
-		warunki := make([]string, 0, len(filter.Scopes))
+		przelozone := make([]authz.Scope, 0, len(filter.Scopes))
 		for _, scope := range filter.Scopes {
-			if scope.Site == "" && scope.Environment == "" {
-				warunki = nil
-				break
-			}
-			args = append(args, nullable(scope.Site), nullable(scope.Environment))
-			warunki = append(warunki, fmt.Sprintf(
-				"(($%d::text is null or h.site = $%d) and ($%d::text is null or h.environment = $%d))",
-				len(args)-1, len(args)-1, len(args), len(args)))
+			przelozone = append(przelozone, authz.Scope{Site: scope.Site, Environment: scope.Environment})
 		}
-		if len(warunki) > 0 {
-			clause += " and exists (select 1 from hosts h where h.id = jobs.host_id and (" +
-				strings.Join(warunki, " or ") + "))"
+		if warunek, dodatkowe := authz.ScopeSQL(przelozone, "h.site", "h.environment", len(args)); warunek != "" {
+			clause += " and exists (select 1 from hosts h where h.id = jobs.host_id and " + warunek + ")"
+			args = append(args, dodatkowe...)
 		}
 	}
 	if filter.HostID != "" {

@@ -186,9 +186,11 @@ function Tozsamosci() {
             <td>{tozsamosc.display_name || "—"}</td>
             <td className="zrodlo">{tozsamosc.kind}</td>
             <td>
-              {tozsamosc.bindings.length === 0
-                ? <span className="zrodlo">brak przypisan</span>
-                : tozsamosc.bindings.map((wiazanie, indeks) => (
+              {/* Pole moze nie przyjsc wcale. Interfejs nie moze sie przez to
+                  wywrocic: jeden brakujacy klucz zabieral caly ekran. */}
+              {(tozsamosc.bindings ?? []).length === 0
+                ? <span className="zrodlo">no direct assignments; roles may come from group mappings</span>
+                : (tozsamosc.bindings ?? []).map((wiazanie, indeks) => (
                     <div key={indeks}>
                       {wiazanie.role}
                       <span className="zrodlo">

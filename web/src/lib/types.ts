@@ -222,7 +222,8 @@ export type Principal = {
   subject: string;
   display_name?: string;
   kind: string;
-  bindings: { role: string; scope: { site: string; environment: string } }[];
+  /** Moze nie przyjsc: tozsamosc bez wlasnych przypisan ma role z mapowan grup. */
+  bindings?: { role: string; scope: { site: string; environment: string } }[];
 };
 
 export type GroupMapping = {

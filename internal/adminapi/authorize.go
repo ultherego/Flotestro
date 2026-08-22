@@ -2,9 +2,7 @@ package adminapi
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
@@ -116,33 +114,13 @@ func (s *Server) jobScope(r *http.Request, hostID string) authz.Scope {
 	return authz.Scope{Site: host.Site, Environment: host.Environment}
 }
 
-// scopeFilter buduje warunek SQL zawezajacy hosty do podanych zakresow.
-//
-// Zakres pusty oznacza uprawnienie globalne i znosi zawezenie. Pusta lista
-// zakresow nie zaweza niczego: wolajacy bez uprawnienia zostaje zatrzymany
-// wczesniej, w authorizeCollection.
+// scopeFilter buduje klauzule WHERE zawezajaca hosty do zakresow tozsamosci.
+// Sama regula zawezania mieszka w pakiecie authz, razem z autoryzacja: dwie
+// osobne implementacje tej samej semantyki juz raz sie rozjechaly.
 func scopeFilter(scopes []authz.Scope) (string, []any) {
-	if len(scopes) == 0 {
+	warunek, args := authz.ScopeSQL(scopes, "site", "environment", 0)
+	if warunek == "" {
 		return "", nil
 	}
-	var warunki []string
-	var args []any
-	for _, scope := range scopes {
-		if scope.Site == "" && scope.Environment == "" {
-			return "", nil
-		}
-		args = append(args, nullableScope(scope.Site), nullableScope(scope.Environment))
-		i := len(args)
-		warunki = append(warunki, fmt.Sprintf(
-			"(($%d::text is null or site = $%d) and ($%d::text is null or environment = $%d))",
-			i-1, i-1, i, i))
-	}
-	return " where " + strings.Join(warunki, " or "), args
-}
-
-func nullableScope(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
+	return " where " + warunek, args
 }

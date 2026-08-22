@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"github.com/ultherego/flotestro/internal/authz"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -280,33 +280,18 @@ func (s *Store) List(ctx context.Context, state string, limit int, scopes []Scop
 	return s.query(ctx, clause+" order by created_at desc limit "+itoa(limit), args...)
 }
 
-// scopeCondition buduje warunek widocznosci po celach kampanii. Zakres pusty
-// oznacza uprawnienie globalne i znosi zawezenie.
+// scopeCondition buduje warunek widocznosci po celach kampanii.
 func scopeCondition(scopes []Scope, offset int) (string, []any) {
-	if len(scopes) == 0 {
+	przelozone := make([]authz.Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		przelozone = append(przelozone, authz.Scope{Site: scope.Site, Environment: scope.Environment})
+	}
+	warunek, args := authz.ScopeSQL(przelozone, "h.site", "h.environment", offset)
+	if warunek == "" {
 		return "", nil
 	}
-	var warunki []string
-	var args []any
-	for _, scope := range scopes {
-		if scope.Site == "" && scope.Environment == "" {
-			return "", nil
-		}
-		args = append(args, nullableText(scope.Site), nullableText(scope.Environment))
-		i := offset + len(args)
-		warunki = append(warunki, fmt.Sprintf(
-			"(($%d::text is null or h.site = $%d) and ($%d::text is null or h.environment = $%d))",
-			i-1, i-1, i, i))
-	}
 	return " and exists (select 1 from campaign_targets t join hosts h on h.id = t.host_id" +
-		" where t.campaign_id = campaigns.id and (" + strings.Join(warunki, " or ") + "))", args
-}
-
-func nullableText(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
+		" where t.campaign_id = campaigns.id and " + warunek + ")", args
 }
 
 const campaignColumns = `

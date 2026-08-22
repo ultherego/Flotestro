@@ -213,6 +213,13 @@ func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Lista pusta to nie to samo co brak listy. Puste przypisania w JSON
+		// jako null wywracaly interfejs, ktory czytal ich liczbe; poza tym
+		// tozsamosc bez wlasnych przypisan wciaz moze miec role z mapowania
+		// grup, wiec "brak" jest tu informacja, a nie brakiem danych.
+		if bindings == nil {
+			bindings = []Binding{}
+		}
 		principals[i].Bindings = bindings
 	}
 	return principals, nil

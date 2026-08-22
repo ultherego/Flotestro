@@ -298,3 +298,52 @@ func (p Principal) Roles() []string {
 	sort.Strings(roles)
 	return roles
 }
+
+// ScopeSQL buduje warunek SQL zawezajacy wiersze do podanych zakresow.
+//
+// Semantyka jest ta sama co w Matches i to jest cel istnienia tej funkcji:
+// zawezanie list rozjechalo sie kiedys z autoryzacja, bo powstalo osobno.
+// Gwiazdka oznacza dowolny zakres i znosi warunek. Wartosc pusta nie pasuje
+// do niczego - brak wiedzy o zakresie nie moze rozszerzac widocznosci.
+//
+// Pusta lista zakresow daje warunek falszywy: tozsamosc bez zadnego zakresu
+// nie widzi nic. Zwrocenie warunku pustego oznaczaloby dostep do wszystkiego,
+// czyli blad w najgorsza mozliwa strone.
+//
+// offset jest liczba parametrow juz uzytych w zapytaniu; funkcja numeruje
+// wlasne od nastepnego.
+func ScopeSQL(scopes []Scope, siteColumn, envColumn string, offset int) (string, []any) {
+	if len(scopes) == 0 {
+		return "false", nil
+	}
+
+	var warunki []string
+	var args []any
+	for _, scope := range scopes {
+		if scope.Site == Wildcard && scope.Environment == Wildcard {
+			// Zakres globalny obejmuje wszystko, wiec dalsze warunki nie maja
+			// juz znaczenia.
+			return "", nil
+		}
+		czesci := make([]string, 0, 2)
+		for _, wymiar := range []struct {
+			kolumna string
+			wartosc string
+		}{{siteColumn, scope.Site}, {envColumn, scope.Environment}} {
+			switch wymiar.wartosc {
+			case Wildcard:
+				// Dowolna wartosc w tym wymiarze.
+			case "":
+				czesci = append(czesci, "false")
+			default:
+				args = append(args, wymiar.wartosc)
+				czesci = append(czesci, fmt.Sprintf("%s = $%d", wymiar.kolumna, offset+len(args)))
+			}
+		}
+		if len(czesci) == 0 {
+			return "", nil
+		}
+		warunki = append(warunki, "("+strings.Join(czesci, " and ")+")")
+	}
+	return "(" + strings.Join(warunki, " or ") + ")", args
+}
