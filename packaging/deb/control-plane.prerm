@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+case "$1" in
+remove|deconfigure)
+    systemctl stop flotestro-control-plane.service || true
+    systemctl disable flotestro-control-plane.service || true
+    ;;
+esac

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Konfiguracja control plane po instalacji pakietu.
+set -e
+
+case "$1" in
+configure)
+    if ! getent passwd flotestro >/dev/null; then
+        adduser --system --group --no-create-home \
+            --home /var/lib/flotestro --shell /usr/sbin/nologin flotestro >/dev/null
+    fi
+
+    # Katalog stanu trzyma klucz CA floty - najwrazliwszy material w systemie.
+    install -d -m 0700 -o flotestro -g flotestro /var/lib/flotestro
+    install -d -m 0755 /etc/flotestro
+    if [ -f /etc/flotestro/control-plane.env ]; then
+        chown root:flotestro /etc/flotestro/control-plane.env
+        chmod 0640 /etc/flotestro/control-plane.env
+    fi
+
+    systemctl daemon-reload || true
+
+    # Panel bez bazy nie ma gdzie trzymac stanu floty. Uruchamianie go w petli
+    # restartow zasmiecaloby dziennik; instalacja konczy sie wtedy wskazowka.
+    if grep -qs '^FLOTESTRO_DATABASE_URL=.*zmien-to' /etc/flotestro/control-plane.env; then
+        systemctl enable flotestro-control-plane.service || true
+        echo "flotestro-control-plane: ustaw FLOTESTRO_DATABASE_URL w" >&2
+        echo "  /etc/flotestro/control-plane.env i uruchom" >&2
+        echo "  systemctl start flotestro-control-plane.service" >&2
+    else
+        systemctl enable --now flotestro-control-plane.service || true
+    fi
+    ;;
+esac

@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+case "$1" in
+purge)
+    # Purge kasuje klucz CA floty. Bez niego zaden agent nie zostanie
+    # rozpoznany i cala flota wymaga ponownego enrollmentu, dlatego przy
+    # zwyklym usunieciu katalog stanu zostaje nietkniety.
+    rm -rf /var/lib/flotestro
+    rm -f /etc/flotestro/control-plane.env
+    rmdir /etc/flotestro 2>/dev/null || true
+    if getent passwd flotestro >/dev/null; then
+        deluser --system flotestro >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+systemctl daemon-reload || true
