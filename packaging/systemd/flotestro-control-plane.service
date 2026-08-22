@@ -1,0 +1,36 @@
+[Unit]
+Description=Flotestro control plane
+Documentation=https://github.com/ultherego/flotestro
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=flotestro
+Group=flotestro
+EnvironmentFile=/etc/flotestro/control-plane.env
+ExecStart=/usr/local/bin/flotestro-control-plane
+Restart=always
+RestartSec=5s
+
+# Klucz CA jest najwrazliwszym materialem w systemie, wiec proces dostaje
+# wylacznie wlasny katalog stanu.
+StateDirectory=flotestro
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/flotestro
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

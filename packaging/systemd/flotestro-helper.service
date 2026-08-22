@@ -1,0 +1,33 @@
+[Unit]
+Description=Helper Flotestro (operacje wymagajace roota)
+Documentation=https://github.com/ultherego/flotestro
+Requires=flotestro-helper.socket
+After=flotestro-helper.socket
+
+[Service]
+Type=simple
+# Helper dziala jako root, ale jest uruchamiany wylacznie przez aktywacje
+# gniazdem i konczy prace po okresie bezczynnosci. W spoczynku floty nie
+# dziala zaden proces uprzywilejowany.
+ExecStart=/usr/local/bin/flotestro-agent-helper
+Environment=FLOTESTRO_AGENT_USER=flotestro-agent
+Environment=FLOTESTRO_HELPER_IDLE_SECONDS=300
+
+# Helper nie nasluchuje na sieci - jedynym wejsciem jest gniazdo unixowe - ale
+# transakcje pakietowe musza pobierac pakiety z repozytorium, wiec ruch
+# wychodzacy jest konieczny. Control plane celowo nie posredniczy w pobieraniu.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# Narzedzia pakietowe potrzebuja zapisywalnego HOME; katalog stanu jest
+# tworzony i sprzatany przez systemd.
+StateDirectory=flotestro-helper
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,42 @@
+[Unit]
+Description=Flotestro agent
+Documentation=https://github.com/ultherego/flotestro
+After=network-online.target flotestro-helper.socket
+Wants=network-online.target flotestro-helper.socket
+
+[Service]
+Type=simple
+User=flotestro-agent
+Group=flotestro-agent
+EnvironmentFile=/etc/flotestro/agent.env
+ExecStart=/usr/local/bin/flotestro-agent
+Restart=always
+RestartSec=5s
+
+# Budzet zasobow agenta jest wymuszony przez systemd, a nie tylko deklarowany.
+MemoryHigh=48M
+MemoryMax=96M
+CPUWeight=20
+IOWeight=20
+
+# Agent nie potrzebuje roota ani zapisu poza wlasnym katalogiem stanu.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+StateDirectory=flotestro-agent
+StateDirectoryMode=0700
+# Agent laczy sie z gniazdem helpera, a to wymaga prawa zapisu do samego
+# gniazda; ProtectSystem=strict montuje reszte systemu tylko do odczytu.
+ReadWritePaths=/var/lib/flotestro-agent /run/flotestro
+
+[Install]
+WantedBy=multi-user.target

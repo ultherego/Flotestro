@@ -1,0 +1,325 @@
+// Command control-plane uruchamia API, gateway agentow i endpoint enrollmentu.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
+	"github.com/ultherego/flotestro/internal/adminapi"
+	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/campaigns"
+	"github.com/ultherego/flotestro/internal/config"
+	"github.com/ultherego/flotestro/internal/database"
+	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/gateway"
+	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/inventory"
+	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/scheduler"
+)
+
+const staleCheckInterval = 30 * time.Second
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("control plane zakonczony bledem", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg := config.ControlPlane{}
+	flag.StringVar(&cfg.DatabaseURL, "database-url",
+		config.Env("FLOTESTRO_DATABASE_URL", ""), "DSN PostgreSQL")
+	flag.StringVar(&cfg.StateDir, "state-dir",
+		config.Env("FLOTESTRO_STATE_DIR", "/var/lib/flotestro"), "katalog stanu (CA)")
+	flag.StringVar(&cfg.GatewayAddr, "gateway-addr",
+		config.Env("FLOTESTRO_GATEWAY_ADDR", ":8443"), "adres gatewaya agentow (mTLS)")
+	flag.StringVar(&cfg.EnrollmentAddr, "enrollment-addr",
+		config.Env("FLOTESTRO_ENROLLMENT_ADDR", ":8444"), "adres endpointu enrollmentu (TLS)")
+	flag.StringVar(&cfg.AdminAddr, "admin-addr",
+		config.Env("FLOTESTRO_ADMIN_ADDR", "127.0.0.1:8080"), "adres REST API")
+	advertised := flag.String("advertise",
+		config.Env("FLOTESTRO_ADVERTISE", "127.0.0.1"),
+		"adresy i nazwy, pod ktorymi agenci widza control plane (po przecinku)")
+	flag.IntVar(&cfg.HeartbeatSeconds, "heartbeat-seconds",
+		config.EnvInt("FLOTESTRO_HEARTBEAT_SECONDS", 60), "bazowy odstep heartbeatu")
+	flag.IntVar(&cfg.HeartbeatJitter, "heartbeat-jitter",
+		config.EnvInt("FLOTESTRO_HEARTBEAT_JITTER", 30), "losowy rozrzut heartbeatu")
+	productionList := flag.String("production-environments",
+		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
+		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
+	flag.Parse()
+
+	productionEnvironments := splitList(*productionList)
+
+	cfg.GatewayID = config.Env("FLOTESTRO_GATEWAY_ID", defaultGatewayID())
+	cfg.StaleAfter = time.Duration(cfg.HeartbeatSeconds+cfg.HeartbeatJitter) * 3 * time.Second
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(log)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if err := database.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	log.Info("schemat bazy aktualny")
+
+	ca, err := pki.EnsureCA(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	log.Info("CA gotowe", "subject", ca.Certificate.Subject.CommonName,
+		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339))
+
+	dnsNames, ips := splitAdvertised(*advertised)
+	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(dnsNames, ips)
+	if err != nil {
+		return err
+	}
+	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
+	if err != nil {
+		return err
+	}
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(ca.Certificate)
+
+	hostStore := hosts.NewStore(pool)
+	inventoryStore := inventory.NewStore(pool)
+	jobStore := jobs.NewStore(pool)
+	campaignStore := campaigns.NewStore(pool)
+	tokenStore := enrollment.NewTokenStore(pool)
+	authzStore := authz.NewStore(pool)
+	recorder := audit.NewRecorder(pool, log)
+	registry := gateway.NewRegistry()
+
+	// Gateway agentow: mTLS obowiazkowe, tozsamosc wylacznie z certyfikatu.
+	if err := bootstrapAdmin(ctx, authzStore, cfg.StateDir, log); err != nil {
+		return err
+	}
+
+	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
+		registry, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+	gatewayMux := http.NewServeMux()
+	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
+	gatewayServer := &http.Server{
+		Addr:    cfg.GatewayAddr,
+		Handler: gateway.WithClientCertificate(gatewayMux),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{serverCert},
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			ClientCAs:    caPool,
+			MinVersion:   tls.VersionTLS13,
+			NextProtos:   []string{"h2"},
+		},
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+
+	// Enrollment: TLS bez certyfikatu klienta, bo host nie ma jeszcze tozsamosci.
+	enrollmentService := gateway.NewEnrollmentService(ca, hostStore, tokenStore, recorder, log)
+	enrollmentMux := http.NewServeMux()
+	enrollmentMux.Handle(agentv1connect.NewEnrollmentServiceHandler(enrollmentService))
+	enrollmentServer := &http.Server{
+		Addr:    cfg.EnrollmentAddr,
+		Handler: enrollmentMux,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{serverCert},
+			MinVersion:   tls.VersionTLS12,
+			NextProtos:   []string{"h2", "http/1.1"},
+		},
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+
+	adminServer := &http.Server{
+		Addr: cfg.AdminAddr,
+		Handler: h2c.NewHandler(
+			adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
+				tokenStore, authzStore, recorder, registry, log, productionEnvironments).Routes(),
+			&http2.Server{}),
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+
+	errCh := make(chan error, 3)
+	go serveTLS(gatewayServer, "gateway agentow", log, errCh)
+	go serveTLS(enrollmentServer, "enrollment", log, errCh)
+	go func() {
+		log.Info("REST API nasluchuje", "addr", adminServer.Addr)
+		if err := adminServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("REST API: %w", err)
+		}
+	}()
+
+	go markStaleHosts(ctx, pool, cfg.StaleAfter, log)
+
+	// Scheduler dostarcza zatwierdzone zadania hostom polaczonym z tym gatewayem
+	// i pilnuje lease oraz TTL.
+	go scheduler.New(jobStore, registry, recorder, log, scheduler.Options{
+		GatewayID:     cfg.GatewayID,
+		LeaseDuration: 5 * time.Minute,
+	}).Run(ctx)
+
+	// Orkiestrator prowadzi kampanie przez canary i fale, tworzac zadania,
+	// ktore dostarcza scheduler.
+	go campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
+		log, 5*time.Second).Run(ctx)
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		log.Info("zamykanie control plane")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = gatewayServer.Shutdown(shutdownCtx)
+	_ = enrollmentServer.Shutdown(shutdownCtx)
+	_ = adminServer.Shutdown(shutdownCtx)
+	return nil
+}
+
+func serveTLS(server *http.Server, name string, log *slog.Logger, errCh chan<- error) {
+	log.Info(name+" nasluchuje", "addr", server.Addr)
+	if err := server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		errCh <- fmt.Errorf("%s: %w", name, err)
+	}
+}
+
+// markStaleHosts oznacza hosty, ktore przestaly sie odzywac. Sesja moze zniknac
+// bez zamkniecia streamu, wiec stan online nie moze opierac sie tylko na nim.
+func markStaleHosts(ctx context.Context, pool *pgxpool.Pool, staleAfter time.Duration, log *slog.Logger) {
+	ticker := time.NewTicker(staleCheckInterval)
+	defer ticker.Stop()
+	const query = `
+		update hosts set connection_state = 'stale', updated_at = now()
+		where connection_state = 'online'
+		  and (last_seen_at is null or last_seen_at < now() - $1::interval)`
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			interval := fmt.Sprintf("%d seconds", int(staleAfter.Seconds()))
+			if _, err := pool.Exec(ctx, query, interval); err != nil && ctx.Err() == nil {
+				log.Error("nie oznaczono hostow jako stale", "err", err)
+			}
+		}
+	}
+}
+
+// bootstrapAdmin tworzy pierwsza tozsamosc, gdy system jest pusty. Bez tego
+// nie da sie wykonac zadnej operacji, bo kazdy endpoint wymaga uprawnien.
+// Token jest pokazany raz, w logu, i nie da sie go odczytac pozniej.
+func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, log *slog.Logger) error {
+	count, err := store.CountPrincipals(ctx)
+	if err != nil {
+		return fmt.Errorf("sprawdzenie tozsamosci: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	tx, err := store.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	principalID, err := store.EnsurePrincipal(ctx, tx, "bootstrap-admin", "Bootstrap administrator", "user")
+	if err != nil {
+		return err
+	}
+	if err := store.GrantRole(ctx, tx, principalID, authz.RolePlatformAdmin,
+		authz.GlobalScope, "system"); err != nil {
+		return err
+	}
+	token, err := store.IssueToken(ctx, tx, principalID, "token bootstrapowy", 0, "system")
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// Token trafia takze do pliku w katalogu stanu, zeby dalo sie go odczytac
+	// po rotacji dziennika. Plik nalezy usunac po utworzeniu wlasciwych
+	// tozsamosci - dopoki istnieje, jest sekretem lezacym na dysku.
+	tokenPath := filepath.Join(stateDir, "bootstrap-token")
+	if err := os.WriteFile(tokenPath, []byte(token.Value+"\n"), 0o600); err != nil {
+		log.Error("nie zapisano tokenu bootstrapowego", "path", tokenPath, "err", err)
+	}
+
+	log.Warn("utworzono tozsamosc bootstrapowa; usun plik tokenu po utworzeniu wlasciwych kont",
+		"subject", "bootstrap-admin", "token_file", tokenPath)
+	return nil
+}
+
+func splitList(value string) []string {
+	var items []string
+	for _, part := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
+}
+
+func splitAdvertised(value string) ([]string, []net.IP) {
+	var (
+		dnsNames []string
+		ips      = []net.IP{net.ParseIP("127.0.0.1")}
+	)
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if ip := net.ParseIP(part); ip != nil {
+			ips = append(ips, ip)
+			continue
+		}
+		dnsNames = append(dnsNames, part)
+	}
+	dnsNames = append(dnsNames, "localhost")
+	return dnsNames, ips
+}
+
+func defaultGatewayID() string {
+	name, err := os.Hostname()
+	if err != nil || name == "" {
+		return "gateway-1"
+	}
+	return name
+}

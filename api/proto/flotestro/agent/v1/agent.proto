@@ -1,0 +1,367 @@
+syntax = "proto3";
+
+package flotestro.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1;agentv1";
+
+// EnrollmentService jest wystawiany na osobnym listenerze, ktory nie wymaga
+// certyfikatu klienta. Jest to jedyny punkt, w ktorym agent bez tozsamosci
+// moze rozmawiac z control plane.
+service EnrollmentService {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+// AgentService wymaga mTLS. Tozsamosc hosta pochodzi wylacznie z certyfikatu
+// klienta, nigdy z tresci wiadomosci.
+service AgentService {
+  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+}
+
+message EnrollRequest {
+  string enrollment_token = 1;
+  // Stabilny identyfikator maszyny, zwykle /etc/machine-id.
+  string machine_id = 2;
+  string hostname = 3;
+  // CSR w formacie PEM. Klucz prywatny nigdy nie opuszcza hosta.
+  bytes csr_pem = 4;
+  AgentBuild build = 5;
+}
+
+message EnrollResponse {
+  string host_id = 1;
+  bytes certificate_pem = 2;
+  bytes ca_bundle_pem = 3;
+  google.protobuf.Timestamp not_after = 4;
+}
+
+message AgentBuild {
+  string agent_version = 1;
+  string os_family = 2;
+  string os_version = 3;
+  string architecture = 4;
+}
+
+message AgentMessage {
+  oneof payload {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    InventoryReport inventory = 3;
+    TaskResult task_result = 4;
+    TaskProgress task_progress = 5;
+  }
+}
+
+message ServerMessage {
+  oneof payload {
+    SessionConfig session_config = 1;
+    InventoryRequest inventory_request = 2;
+    TaskEnvelope task = 3;
+    CancelTask cancel_task = 4;
+  }
+}
+
+// Hello jest pierwsza wiadomoscia w streamie. Gateway odrzuca stream, w ktorym
+// pierwsza wiadomosc jest inna.
+message Hello {
+  string agent_version = 1;
+  // Zmiana boot_id oznacza restart hosta i konczy faze reboot kampanii.
+  string boot_id = 2;
+  Capabilities capabilities = 3;
+  // Ostatnia rewizja inventory znana agentowi; pozwala serwerowi zazadac full.
+  string inventory_revision = 4;
+}
+
+message SessionConfig {
+  int32 heartbeat_seconds = 1;
+  int32 heartbeat_jitter_seconds = 2;
+  string min_agent_version = 3;
+  bool full_inventory_requested = 4;
+}
+
+message InventoryRequest {
+  bool full = 1;
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp sent_at = 1;
+  HealthSignals health = 2;
+}
+
+// HealthSignals celowo zawiera tylko sygnaly decyzyjne. Pelne metryki hosta
+// naleza do node_exportera, nie do heartbeatu.
+//
+// Pola optional oznaczaja stan nieustalony. Agent, ktory nie zdolal odczytac
+// wartosci, nie wysyla jej wcale. Brak wartosci nigdy nie moze byc mylony
+// z zerem ani z falszem: nieudany odczyt nie jest faktem o hoscie.
+message HealthSignals {
+  optional uint32 failed_units = 1;
+  optional bool reboot_required = 2;
+  uint32 load1_milli = 3;
+  uint32 root_fs_used_percent = 4;
+  uint64 uptime_seconds = 5;
+  optional uint32 pending_updates = 6;
+  optional uint32 pending_security_updates = 7;
+}
+
+message Capabilities {
+  bool systemd = 1;
+  bool apt = 2;
+  bool dnf = 3;
+  bool docker = 4;
+  bool journald = 5;
+}
+
+message InventoryReport {
+  // Rewizja liczona przez agenta z tresci raportu; identyczna tresc daje
+  // identyczna rewizje, wiec serwer moze pominac zapis bez zmian.
+  string revision = 1;
+  bool full = 2;
+  string schema_version = 3;
+  OsInfo os = 4;
+  HardwareInfo hardware = 5;
+  PackageSummary packages = 6;
+  // Pelny raport w JSON trafia do JSONB. Pola normalizowane sa wyzej.
+  bytes raw_json = 7;
+}
+
+message OsInfo {
+  string family = 1;
+  string distribution = 2;
+  string version = 3;
+  string kernel = 4;
+  string architecture = 5;
+  string pretty_name = 6;
+}
+
+message HardwareInfo {
+  uint32 cpu_cores = 1;
+  uint64 memory_bytes = 2;
+  uint64 root_fs_bytes = 3;
+  uint64 root_fs_free_bytes = 4;
+  string virtualization = 5;
+}
+
+// PackageSummary rozroznia "zero aktualizacji" od "nie udalo sie ustalic".
+// Adapter, ktory zawiodl, zostawia licznik pusty i opisuje powod w
+// unavailable_reason, zamiast raportowac zero.
+message PackageSummary {
+  optional uint32 installed = 1;
+  optional uint32 upgradable = 2;
+  optional uint32 security_upgradable = 3;
+  string manager = 4;
+  string unavailable_reason = 5;
+}
+
+
+// Koperta zadania. Kontrakt podstawowy celowo nie zawiera pola shell_command:
+// zdalne wykonanie dowolnego ciagu shellowego nie jest operacja, tylko luka.
+message TaskEnvelope {
+  string task_id = 1;
+  // Klucz rozpoznawania ponownego dostarczenia. Handler musi zwrocic poprzedni
+  // wynik zamiast wykonywac mutacje drugi raz.
+  string idempotency_key = 2;
+  string campaign_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // Bezwzgledny TTL. Zadanie po terminie nie jest wykonywane nawet wtedy, gdy
+  // dotarlo do agenta po powrocie sieci.
+  google.protobuf.Timestamp expires_at = 5;
+  // Integralnosc planu zatwierdzonego przez czlowieka.
+  bytes payload_hash = 6;
+  Preconditions preconditions = 7;
+  Limits limits = 8;
+  ActorContext actor_context = 9;
+
+  oneof action {
+    UnitAction unit_action = 20;
+    ReadJournal read_journal = 21;
+    PackagePlan package_plan = 22;
+    PackageUpgrade package_upgrade = 23;
+    SystemReboot system_reboot = 24;
+    ReadUnitStatus read_unit_status = 25;
+  }
+}
+
+// Preconditions sa sprawdzane lokalnie tuz przed wykonaniem. Stan bazowy mogl
+// zmienic sie miedzy zatwierdzeniem planu a dostarczeniem zadania.
+message Preconditions {
+  string os_family = 1;
+  repeated string required_capabilities = 2;
+  // Pusty boot_id oznacza brak wymagania. Niezgodnosc znaczy, ze host zdazyl
+  // sie zrestartowac od czasu planowania.
+  string expected_boot_id = 3;
+}
+
+message Limits {
+  uint32 timeout_seconds = 1;
+  uint32 max_output_bytes = 2;
+}
+
+// ActorContext pozwala agentowi zapisac lokalnie, kto zlecil zmiane.
+message ActorContext {
+  string actor_id = 1;
+  string request_id = 2;
+  repeated string approvals = 3;
+}
+
+message UnitAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_START = 1;
+    OPERATION_STOP = 2;
+    OPERATION_RESTART = 3;
+    OPERATION_RELOAD = 4;
+  }
+  string unit = 1;
+  Operation operation = 2;
+}
+
+message ReadJournal {
+  string unit = 1;
+  uint32 lines = 2;
+  // Priorytet wg syslog: 0 emerg ... 7 debug. Puste oznacza brak filtra.
+  optional uint32 max_priority = 3;
+  string since = 4;
+}
+
+// SystemReboot restartuje hosta. Restart jest osobna faza kampanii, a nie
+// efektem ubocznym aktualizacji.
+message SystemReboot {
+  // Opoznienie daje agentowi czas na odeslanie wyniku, zanim host zniknie.
+  uint32 delay_seconds = 1;
+  string reason = 2;
+}
+
+// ReadUnitStatus odczytuje stan jednostek. Operacja niemutujaca, uzywana przez
+// health checki kampanii i widok hosta.
+message ReadUnitStatus {
+  repeated string units = 1;
+}
+
+message CancelTask {
+  string task_id = 1;
+  string reason = 2;
+}
+
+// TaskProgress niesie czesciowy output dlugotrwalego zadania.
+message TaskProgress {
+  string task_id = 1;
+  bytes chunk = 2;
+  bool stderr = 3;
+}
+
+message TaskResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SUCCEEDED = 1;
+    STATUS_FAILED = 2;
+    STATUS_TIMED_OUT = 3;
+    // Odrzucone lokalnie: niespelnione preconditions, zajety lock, zla wersja.
+    STATUS_REJECTED = 4;
+    // Dotarlo po TTL i nie zostalo wykonane.
+    STATUS_EXPIRED = 5;
+    STATUS_CANCELED = 6;
+  }
+
+  string task_id = 1;
+  string idempotency_key = 2;
+  Status status = 3;
+  int32 exit_code = 4;
+  bytes stdout = 5;
+  bytes stderr = 6;
+  bool output_truncated = 7;
+  // Stabilny kod maszynowy, niezalezny od jezyka i wersji narzedzia.
+  string error_code = 8;
+  string message = 9;
+  google.protobuf.Timestamp started_at = 10;
+  google.protobuf.Timestamp finished_at = 11;
+  // Stan jednostki przed i po zmianie pozwala odroznic "restart wykonany"
+  // od "restart wykonany i jednostka nadal nie dziala".
+  UnitState unit_state_before = 12;
+  UnitState unit_state_after = 13;
+  // Prawda, gdy wynik pochodzi z lokalnego dziennika idempotencji.
+  bool replayed = 14;
+
+  // Wynik wlasciwy dla typu operacji. Kazda operacja ma typowany rezultat,
+  // a nie tylko tekst do przeczytania przez czlowieka.
+  oneof detail {
+    PackagePlanResult package_plan = 20;
+    PackageApplyResult package_apply = 21;
+    UnitStatusResult unit_status = 22;
+  }
+}
+
+// UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
+// Dzieki temu "running" nie ukrywa jednostki w petli auto-restartu.
+message UnitState {
+  string name = 1;
+  string load_state = 2;
+  string active_state = 3;
+  string sub_state = 4;
+  string unit_file_state = 5;
+  string result = 6;
+  uint32 main_pid = 7;
+  uint32 n_restarts = 8;
+}
+
+
+// PackagePlan liczy, co zostaloby zaktualizowane. Nie zmienia stanu systemu
+// poza opcjonalnym odswiezeniem metadanych repozytorium.
+message PackagePlan {
+  // Odswiezenie metadanych wymaga roota i blokady, wiec jest jawnym wyborem,
+  // a nie efektem ubocznym kazdego planu.
+  bool refresh_metadata = 1;
+  // Pusta lista oznacza wszystkie dostepne aktualizacje.
+  repeated string only_packages = 2;
+  bool security_only = 3;
+}
+
+// PackageUpgrade wykonuje transakcje menedzera pakietow.
+message PackageUpgrade {
+  // Hash planu policzony przez agenta przy planowaniu. Niezgodnosc oznacza,
+  // ze metadane repozytorium zmienily sie miedzy planem a wykonaniem.
+  bytes plan_hash = 1;
+  // Pusta lista oznacza wszystkie pakiety z planu.
+  repeated string packages = 2;
+  bool security_only = 3;
+}
+
+// PackageChange opisuje jedna zmiane wersji.
+message PackageChange {
+  string name = 1;
+  string current_version = 2;
+  string candidate_version = 3;
+  string origin = 4;
+  bool security = 5;
+}
+
+message PackagePlanResult {
+  string manager = 1;
+  repeated PackageChange changes = 2;
+  uint64 download_bytes = 3;
+  uint64 disk_available_bytes = 4;
+  // Hash tresci planu; wykonanie porownuje go ze swoim, zeby nie zastosowac
+  // innego zestawu pakietow niz zatwierdzony.
+  bytes plan_hash = 5;
+  bool reboot_predicted = 6;
+  // Prawda, gdy metadane zostaly odswiezone w ramach tego planu.
+  bool metadata_refreshed = 7;
+}
+
+message PackageApplyResult {
+  string manager = 1;
+  // Wersje przed i po transakcji sa zapisywane zawsze, takze przy bledzie.
+  repeated PackageChange applied = 2;
+  bool reboot_required = 3;
+  // Jednostki wymagajace restartu po aktualizacji bibliotek.
+  repeated string services_needing_restart = 4;
+  // Prawda, gdy po awarii dpkg zostal w stanie wymagajacym naprawy.
+  // Kolejne kampanie na tym hoscie musza zostac wstrzymane.
+  bool package_database_broken = 5;
+}
+
+
+message UnitStatusResult {
+  repeated UnitState units = 1;
+}

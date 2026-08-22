@@ -3,6 +3,12 @@
 /dist/
 *.test
 *.out
+# Binaria zbudowane w katalogu glownym przez "go build" bez -o.
+/flotestro-*
+/agent
+/agent-helper
+/agent-simulator
+/control-plane
 
 # Node / Web UI
 node_modules/

@@ -1,0 +1,15 @@
+[Unit]
+Description=Gniazdo helpera Flotestro
+Documentation=https://github.com/ultherego/flotestro
+
+[Socket]
+ListenStream=/run/flotestro/helper.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=flotestro-agent
+# Tylko agent moze sie polaczyc. Helper dodatkowo weryfikuje tozsamosc
+# rozmowcy przez SO_PEERCRED, wiec prawa gniazda nie sa jedyna kontrola.
+Accept=no
+
+[Install]
+WantedBy=sockets.target

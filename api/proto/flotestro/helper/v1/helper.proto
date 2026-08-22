@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package flotestro.helper.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1;helperv1";
+
+// Protokol miedzy nieuprzywilejowanym agentem a helperem roota.
+// Helper nasluchuje wylacznie na gniezdzie unixowym i nigdy nie rozmawia
+// z centrala. Kontrakt jest celowo maly: to jedyna droga do uprawnien roota.
+
+// PROTOCOL_VERSION zmienia sie przy kazdej niezgodnej zmianie kontraktu.
+// Helper odrzuca wersje, ktorej nie zna, zamiast zgadywac znaczenie pol.
+message HelperRequest {
+  uint32 protocol_version = 1;
+  string task_id = 2;
+  // Helper odrzuca zadanie po terminie, niezaleznie od tego, co twierdzi agent.
+  google.protobuf.Timestamp expires_at = 3;
+  uint32 timeout_seconds = 4;
+  uint32 max_output_bytes = 5;
+
+  oneof action {
+    UnitActionRequest unit_action = 20;
+    PackageActionRequest package_action = 21;
+    RebootRequest reboot = 22;
+  }
+}
+
+// RebootRequest zleca kontrolowany restart hosta.
+message RebootRequest {
+  uint32 delay_seconds = 1;
+  string reason = 2;
+}
+
+// PackageActionRequest obejmuje operacje pakietowe wymagajace roota.
+// Planowanie w trybie symulacji nie wymaga roota i nie idzie przez helper.
+message PackageActionRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // Odswiezenie metadanych repozytorium.
+    OPERATION_REFRESH = 1;
+    // Wykonanie transakcji aktualizacji.
+    OPERATION_UPGRADE = 2;
+  }
+  Operation operation = 1;
+  // Pusta lista przy OPERATION_UPGRADE oznacza wszystkie aktualizacje.
+  repeated string packages = 2;
+  bool security_only = 3;
+}
+
+message UnitActionRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_START = 1;
+    OPERATION_STOP = 2;
+    OPERATION_RESTART = 3;
+    OPERATION_RELOAD = 4;
+  }
+  string unit = 1;
+  Operation operation = 2;
+}
+
+message HelperResponse {
+  bool accepted = 1;
+  // Stabilny kod maszynowy: unknown_action, unsupported_version, expired,
+  // protected_unit, invalid_unit, locked, exec_failed, timeout.
+  string error_code = 2;
+  string message = 3;
+  int32 exit_code = 4;
+  bytes stdout = 5;
+  bytes stderr = 6;
+  bool output_truncated = 7;
+  UnitState state_before = 8;
+  UnitState state_after = 9;
+  PackageActionResult package_result = 10;
+}
+
+message PackageActionResult {
+  string manager = 1;
+  repeated PackageVersionChange applied = 2;
+  bool reboot_required = 3;
+  repeated string services_needing_restart = 4;
+  // Prawda, gdy baza pakietow wymaga naprawy po nieudanej transakcji.
+  bool package_database_broken = 5;
+}
+
+message PackageVersionChange {
+  string name = 1;
+  string version_before = 2;
+  string version_after = 3;
+}
+
+message UnitState {
+  string name = 1;
+  string load_state = 2;
+  string active_state = 3;
+  string sub_state = 4;
+  string unit_file_state = 5;
+  string result = 6;
+  uint32 main_pid = 7;
+  uint32 n_restarts = 8;
+}

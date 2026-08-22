@@ -1,0 +1,437 @@
+package adminapi
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/opspec"
+)
+
+// createOperationRequest opisuje zlecenie operacji na hoscie.
+type createOperationRequest struct {
+	Action          string          `json:"action"`
+	Payload         json.RawMessage `json:"payload"`
+	RequiresApprova *bool           `json:"requires_approval,omitempty"`
+	TimeoutSeconds  int             `json:"timeout_seconds,omitempty"`
+	MaxOutputBytes  int             `json:"max_output_bytes,omitempty"`
+	TTLSeconds      int             `json:"ttl_seconds,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	// PinBootID wiaze zadanie z obecnym uruchomieniem hosta. Po restarcie
+	// zadanie zostanie odrzucone zamiast wykonac sie na innym stanie.
+	PinBootID bool `json:"pin_boot_id,omitempty"`
+}
+
+// handleCreateOperation tworzy plan operacji. Mutacja domyslnie wymaga
+// zatwierdzenia; samo zlecenie niczego jeszcze nie zmienia na hoscie.
+func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	host, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermJobCreate, scope, "host", hostID)
+	if !ok {
+		return
+	}
+	actor := principal.Subject
+
+	var request createOperationRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		return
+	}
+
+	action := opspec.ActionType(request.Action)
+	if !action.Known() {
+		problem(w, http.StatusBadRequest, "unknown_action",
+			"nieznany typ operacji; dozwolone: "+joinActions())
+		return
+	}
+
+	// Poza prawem zlecania czegokolwiek potrzebne jest uprawnienie tej
+	// konkretnej operacji: restart uslugi to inny poziom zaufania niz odczyt
+	// dziennika.
+	if _, ok := s.authorize(w, r, authz.Permission(action.Permission()), scope, "host", hostID); !ok {
+		return
+	}
+
+	var payload opspec.Payload
+	if len(request.Payload) > 0 {
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_payload", "payload nie jest poprawnym JSON")
+			return
+		}
+	}
+	if err := opspec.Validate(action, payload); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		return
+	}
+
+	// Host z uszkodzona baza pakietow nie moze dostawac kolejnych operacji
+	// pakietowych, dopoki ktos tego nie wyjasni.
+	if host.PackageDatabaseBroken && strings.HasPrefix(string(action), "packages.") {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: "job.create", TargetType: "host", TargetID: hostID,
+			Outcome: audit.OutcomeDenied,
+			Detail:  map[string]any{"reason": "package_database_broken", "action_type": string(action)},
+		})
+		problem(w, http.StatusConflict, "package_database_broken",
+			"baza pakietow hosta wymaga naprawy; operacje pakietowe sa wstrzymane")
+		return
+	}
+
+	if host.LifecycleState == "quarantined" {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: "job.create", TargetType: "host", TargetID: hostID,
+			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "quarantined"},
+		})
+		problem(w, http.StatusConflict, "host_quarantined", "host jest w kwarantannie")
+		return
+	}
+
+	// Zdolnosc hosta sprawdzamy juz przy planowaniu, zeby nie kolejkowac
+	// operacji, ktorej ten host nigdy nie wykona.
+	if capability := action.RequiredCapability(); !hostHasCapability(host, capability) {
+		problem(w, http.StatusConflict, "capability_missing",
+			"host nie ma zdolnosci "+capability)
+		return
+	}
+
+	requiresApproval := action.Mutating()
+	if request.RequiresApprova != nil {
+		requiresApproval = *request.RequiresApprova
+	}
+
+	preconditions := jobs.Preconditions{
+		OSFamily:             host.OSFamily,
+		RequiredCapabilities: []string{action.RequiredCapability()},
+	}
+	if request.PinBootID {
+		preconditions.ExpectedBootID = host.BootID
+	}
+
+	tx, err := s.jobs.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	job, err := s.jobs.Create(r.Context(), tx, jobs.Spec{
+		HostID:          hostID,
+		Action:          action,
+		Payload:         payload,
+		IdempotencyKey:  request.IdempotencyKey,
+		RequiresApprova: requiresApproval,
+		TimeoutSeconds:  request.TimeoutSeconds,
+		MaxOutputBytes:  request.MaxOutputBytes,
+		TTL:             time.Duration(request.TTLSeconds) * time.Second,
+		CreatedBy:       actor,
+		RequestID:       requestIDOf(r),
+		Preconditions:   preconditions,
+	})
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_operation", err.Error())
+		return
+	}
+
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor,
+		Action: "job.create", TargetType: "job", TargetID: job.ID,
+		RequestID: job.RequestID, Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"host_id": hostID, "action_type": job.ActionType,
+			"payload_hash": job.PayloadHash, "requires_approval": job.RequiresApprova,
+			"state": string(job.State),
+		},
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, job)
+}
+
+func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
+	s.transitionJob(w, r, "approve")
+}
+
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	s.transitionJob(w, r, "cancel")
+}
+
+type transitionRequest struct {
+	Reason string `json:"reason,omitempty"`
+	// PayloadHash pozwala zatwierdzajacemu potwierdzic, ze zatwierdza dokladnie
+	// ten plan, ktory widzial. Niezgodnosc oznacza podmiane miedzy obejrzeniem
+	// a zatwierdzeniem.
+	PayloadHash string `json:"payload_hash,omitempty"`
+}
+
+func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation string) {
+	jobID := r.PathValue("id")
+
+	var request transitionRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+			return
+		}
+	}
+
+	current, err := s.jobs.Get(r.Context(), jobID)
+	if errors.Is(err, jobs.ErrNotFound) {
+		problem(w, http.StatusNotFound, "job_not_found", "zadanie nie istnieje")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	scope := s.jobScope(r, current.HostID)
+	permission := authz.PermJobApprove
+	if operation != "approve" {
+		permission = authz.PermJobCancel
+	}
+	principal, ok := s.authorize(w, r, permission, scope, "job", jobID)
+	if !ok {
+		return
+	}
+	actor := principal.Subject
+
+	// Zasada drugiej osoby: w srodowisku produkcyjnym zlecajacy nie moze
+	// zatwierdzic wlasnej zmiany. Rozdzial rol nie wystarcza, bo jedna osoba
+	// moze miec obie role.
+	if operation == "approve" && s.requiresSecondPerson(scope.Environment) && current.CreatedBy == actor {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: "job.approve", TargetType: "job", TargetID: jobID,
+			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": "self_approval", "environment": scope.Environment,
+				"created_by": current.CreatedBy,
+			},
+		})
+		problem(w, http.StatusForbidden, "self_approval",
+			"w srodowisku "+scope.Environment+" zmiane musi zatwierdzic druga osoba")
+		return
+	}
+
+	if operation == "approve" && request.PayloadHash != "" && request.PayloadHash != current.PayloadHash {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: "job.approve", TargetType: "job", TargetID: jobID,
+			Outcome: audit.OutcomeDenied,
+			Detail:  map[string]any{"reason": "payload_hash_mismatch", "expected": current.PayloadHash},
+		})
+		problem(w, http.StatusConflict, "payload_hash_mismatch",
+			"plan zmienil sie od czasu obejrzenia")
+		return
+	}
+
+	tx, err := s.jobs.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	var (
+		job    *jobs.Job
+		action string
+	)
+	switch operation {
+	case "approve":
+		action = "job.approve"
+		job, err = s.jobs.Approve(r.Context(), tx, jobID, actor)
+	default:
+		action = "job.cancel"
+		job, err = s.jobs.Cancel(r.Context(), tx, jobID, actor, request.Reason)
+	}
+	if errors.Is(err, jobs.ErrConflict) {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: action, TargetType: "job", TargetID: jobID,
+			Outcome: audit.OutcomeDenied,
+			Detail:  map[string]any{"reason": "invalid_state", "state": string(current.State)},
+		})
+		problem(w, http.StatusConflict, "invalid_state",
+			"operacja niedozwolona w stanie "+string(current.State))
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor,
+		Action: action, TargetType: "job", TargetID: jobID,
+		RequestID: job.RequestID, Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"host_id": job.HostID, "action_type": job.ActionType,
+			"payload_hash": job.PayloadHash, "state": string(job.State),
+			"reason": request.Reason,
+		},
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+// requiresSecondPerson mowi, czy srodowisko wymaga zatwierdzenia przez inna
+// osobe niz zlecajaca.
+func (s *Server) requiresSecondPerson(environment string) bool {
+	return s.productionEnvironments[environment]
+}
+
+func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	principal := authz.FromContext(r.Context())
+	if !principal.Authenticated() {
+		s.authorize(w, r, authz.PermJobRead, authz.GlobalScope, "job", "")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	items, err := s.jobs.List(r.Context(), jobs.ListFilter{
+		HostID: r.URL.Query().Get("host_id"),
+		State:  r.URL.Query().Get("state"),
+		Limit:  limit,
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// Lista jest zawezana do zakresow, w ktorych tozsamosc ma prawo odczytu.
+	visible := make([]jobs.Job, 0, len(items))
+	for _, job := range items {
+		if principal.Can(authz.PermJobRead, s.jobScope(r, job.HostID)) {
+			visible = append(visible, job)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "count": len(visible)})
+}
+
+func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	job, err := s.jobs.Get(r.Context(), jobID)
+	if errors.Is(err, jobs.ErrNotFound) {
+		problem(w, http.StatusNotFound, "job_not_found", "zadanie nie istnieje")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if _, ok := s.authorize(w, r, authz.PermJobRead, s.jobScope(r, job.HostID), "job", jobID); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	job, err := s.jobs.Get(r.Context(), jobID)
+	if errors.Is(err, jobs.ErrNotFound) {
+		problem(w, http.StatusNotFound, "job_not_found", "zadanie nie istnieje")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if _, ok := s.authorize(w, r, authz.PermJobRead, s.jobScope(r, job.HostID), "job", jobID); !ok {
+		return
+	}
+	attempts, err := s.jobs.Attempts(r.Context(), jobID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if attempts == nil {
+		attempts = []jobs.Attempt{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": attempts, "count": len(attempts)})
+}
+
+// handleListActions opisuje katalog operacji obslugiwanych przez control plane.
+func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
+	if principal := authz.FromContext(r.Context()); !principal.Authenticated() {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
+		problem(w, http.StatusUnauthorized, "unauthenticated", "brak waznego tokenu")
+		return
+	}
+	type actionInfo struct {
+		Action             string `json:"action"`
+		Mutating           bool   `json:"mutating"`
+		RequiredCapability string `json:"required_capability"`
+		Permission         string `json:"permission"`
+		DefaultTimeout     int    `json:"default_timeout_seconds"`
+	}
+	items := make([]actionInfo, 0)
+	for _, action := range opspec.AllActions() {
+		items = append(items, actionInfo{
+			Action:             string(action),
+			Mutating:           action.Mutating(),
+			RequiredCapability: action.RequiredCapability(),
+			Permission:         action.Permission(),
+			DefaultTimeout:     action.DefaultTimeout(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})
+}
+
+func hostHasCapability(host *hosts.Host, capability string) bool {
+	switch capability {
+	case "":
+		return true
+	case "systemd":
+		return host.Capabilities.Systemd
+	case "apt":
+		return host.Capabilities.APT
+	case "dnf":
+		return host.Capabilities.DNF
+	case "docker":
+		return host.Capabilities.Docker
+	case "journald":
+		return host.Capabilities.Journald
+	case "packages":
+		return host.Capabilities.APT || host.Capabilities.DNF
+	default:
+		return false
+	}
+}
+
+func joinActions() string {
+	result := ""
+	for i, action := range opspec.AllActions() {
+		if i > 0 {
+			result += ", "
+		}
+		result += string(action)
+	}
+	return result
+}
+
+func requestIDOf(r *http.Request) string {
+	return r.Header.Get("X-Request-Id")
+}

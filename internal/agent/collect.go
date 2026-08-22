@@ -1,0 +1,166 @@
+package agent
+
+import (
+	"context"
+	"os"
+	"strings"
+	"time"
+)
+
+// Collect zbiera pelny inventory. Ta funkcja moze uruchamiac procesy potomne,
+// dlatego wolamy ja w cyklu inventory, nigdy w heartbeacie.
+func Collect(ctx context.Context) (Facts, error) {
+	machineID, err := MachineID()
+	if err != nil {
+		return Facts{}, err
+	}
+	hostname, _ := os.Hostname()
+	caps := DetectCapabilities()
+
+	facts := Facts{
+		Hostname:     hostname,
+		MachineID:    machineID,
+		BootID:       BootID(),
+		OS:           ReadOSInfo(),
+		Hardware:     ReadHardware(),
+		Capabilities: caps,
+		Interfaces:   networkInterfaces(),
+		CollectedAt:  time.Now().UTC(),
+	}
+
+	if caps.Systemd {
+		facts.FailedUnits, facts.FailedUnitsKnown = failedUnits(ctx)
+	}
+	switch {
+	case caps.APT:
+		facts.Packages = aptSummary(ctx)
+	case caps.DNF:
+		facts.Packages = dnfSummary(ctx)
+	}
+	facts.RebootRequired = rebootRequired(ctx, caps)
+	return facts, nil
+}
+
+// failedUnits zwraca nazwy jednostek w stanie failed oraz informacje, czy w
+// ogole udalo sie je ustalic. Nieudane zapytanie nie moze wygladac jak zero
+// jednostek w bledzie.
+func failedUnits(ctx context.Context) ([]string, bool) {
+	result := runCommand(ctx, 15*time.Second,
+		"/usr/bin/systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager")
+	if !result.Ran || result.ExitCode != 0 {
+		return nil, false
+	}
+	var units []string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && strings.Contains(fields[0], ".") {
+			units = append(units, fields[0])
+		}
+	}
+	return units, true
+}
+
+// aptSummary liczy pakiety do aktualizacji przez symulacje, ktora nie zmienia
+// stanu systemu i nie potrzebuje blokady dpkg.
+func aptSummary(ctx context.Context) Packages {
+	summary := Packages{Manager: "apt"}
+
+	if result := runCommand(ctx, 30*time.Second,
+		"/usr/bin/dpkg-query", "-f", "${binary:Package}\n", "-W"); result.Ran && result.ExitCode == 0 {
+		installed := uint32(len(strings.Fields(result.Stdout)))
+		summary.Installed = &installed
+	}
+
+	result := runCommand(ctx, 120*time.Second,
+		"/usr/bin/apt-get", "--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
+	if !result.Ran || result.ExitCode != 0 {
+		summary.UnavailableReason = result.Reason()
+		return summary
+	}
+
+	var upgradable, security uint32
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if !strings.HasPrefix(line, "Inst ") {
+			continue
+		}
+		upgradable++
+		// Origin jest w nawiasie na koncu linii; repozytorium bezpieczenstwa
+		// Debiana i Ubuntu zawiera w nazwie "-security".
+		if strings.Contains(line, "-security") || strings.Contains(line, "Debian-Security") {
+			security++
+		}
+	}
+	summary.Upgradable = &upgradable
+	summary.SecurityUpgradable = &security
+	return summary
+}
+
+// dnfSummary liczy aktualizacje bez odswiezania metadanych.
+// check-update zwraca 0 przy braku aktualizacji i 100, gdy jakies sa.
+// Kazdy inny kod jest bledem wykonania, a nie liczba zero.
+func dnfSummary(ctx context.Context) Packages {
+	summary := Packages{Manager: "dnf"}
+
+	if result := runCommand(ctx, 30*time.Second,
+		"/usr/bin/rpm", "-qa", "--qf", "%{NAME}\n"); result.Ran && result.ExitCode == 0 {
+		installed := uint32(len(strings.Fields(result.Stdout)))
+		summary.Installed = &installed
+	}
+
+	result := runCommand(ctx, 180*time.Second,
+		"/usr/bin/dnf", "--quiet", "--cacheonly", "check-update")
+	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 100) {
+		summary.UnavailableReason = result.Reason()
+		return summary
+	}
+
+	var upgradable uint32
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		fields := strings.Fields(line)
+		// Linia aktualizacji to: nazwa.arch  wersja  repozytorium.
+		if len(fields) == 3 && strings.Contains(fields[0], ".") && !strings.HasPrefix(line, " ") {
+			upgradable++
+		}
+	}
+	summary.Upgradable = &upgradable
+	// Fedora nie publikuje spojnych metadanych security dla wszystkich repo,
+	// wiec licznik bezpieczenstwa zostaje nieustalony zamiast falszywego zera.
+	return summary
+}
+
+// rebootRequired sprawdza wskaznik restartu wlasciwy dla dystrybucji.
+// Zwraca nil, gdy stanu nie da sie ustalic.
+func rebootRequired(ctx context.Context, caps Capabilities) *bool {
+	if exists("/var/run/reboot-required") || exists("/run/reboot-required") {
+		return boolPtr(true)
+	}
+	if caps.APT {
+		// Na Debianie brak pliku jest jednoznaczna odpowiedzia.
+		return boolPtr(false)
+	}
+	if caps.DNF {
+		return interpretNeedsRestarting(
+			runCommand(ctx, 60*time.Second, "/usr/bin/dnf", "needs-restarting", "-r"))
+	}
+	return nil
+}
+
+// interpretNeedsRestarting tlumaczy wynik "dnf needs-restarting -r" na odpowiedz
+// o restarcie. Narzedzie zwraca 0 przy braku potrzeby i 1, gdy restart jest
+// wymagany - ale tym samym kodem konczy sie blad wykonania, na przyklad brak
+// zapisywalnego HOME. Kodowi 1 ufamy wiec tylko wtedy, gdy narzedzie cokolwiek
+// wypisalo na stdout; w bledzie milczy tam i pisze na stderr.
+func interpretNeedsRestarting(result commandResult) *bool {
+	switch {
+	case !result.Ran:
+		return nil
+	case result.ExitCode == 0:
+		return boolPtr(false)
+	case result.ExitCode == 1 && strings.TrimSpace(result.Stdout) != "":
+		return boolPtr(true)
+	default:
+		return nil
+	}
+}
+
+func boolPtr(value bool) *bool { return &value }
