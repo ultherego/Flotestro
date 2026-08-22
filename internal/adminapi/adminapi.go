@@ -18,6 +18,7 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/oidc"
@@ -36,6 +37,7 @@ type Server struct {
 	registry  *gateway.Registry
 	oidc      *oidc.Provider
 	directory *freeipa.Client
+	changes   *identity.Store
 	log       *slog.Logger
 
 	// productionEnvironments wymagaja drugiej osoby przy zatwierdzaniu.
@@ -57,8 +59,8 @@ type Options struct {
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
 	jobStore *jobs.Store, campaignStore *campaigns.Store, tokens *enrollment.TokenStore,
 	authzStore *authz.Store, recorder *audit.Recorder, registry *gateway.Registry,
-	provider *oidc.Provider, directory *freeipa.Client, log *slog.Logger,
-	options Options) *Server {
+	provider *oidc.Provider, directory *freeipa.Client, changes *identity.Store,
+	log *slog.Logger, options Options) *Server {
 	production := map[string]bool{}
 	for _, environment := range options.ProductionEnvironments {
 		production[environment] = true
@@ -66,7 +68,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		campaigns: campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
-		registry: registry, oidc: provider, directory: directory, log: log,
+		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL}
 }
@@ -138,6 +140,13 @@ func (s *Server) Routes() http.Handler {
 		func(s *Server, r *http.Request) ([]freeipa.SudoRule, error) {
 			return s.directory.SudoRules(r.Context())
 		}))
+
+	// Zmiany w katalogu: plan, zatwierdzenie i wykonanie faza po fazie.
+	mux.HandleFunc("GET /api/v1/identity/changes", s.handleListDirectoryChanges)
+	mux.HandleFunc("POST /api/v1/identity/changes", s.handleCreateDirectoryChange)
+	mux.HandleFunc("GET /api/v1/identity/changes/{id}", s.handleGetDirectoryChange)
+	mux.HandleFunc("POST /api/v1/identity/changes/{id}/approve", s.handleApproveDirectoryChange)
+	mux.HandleFunc("POST /api/v1/identity/changes/{id}/cancel", s.handleCancelDirectoryChange)
 
 	mux.HandleFunc("GET /api/v1/group-mappings", s.handleListGroupMappings)
 	mux.HandleFunc("POST /api/v1/group-mappings", s.handleCreateGroupMapping)

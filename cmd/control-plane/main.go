@@ -33,6 +33,7 @@ import (
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/oidc"
@@ -192,6 +193,14 @@ func run() error {
 		log.Info("connector katalogu nie jest skonfigurowany")
 	}
 
+	changeStore := identity.NewStore(pool)
+	if directory != nil {
+		// Wykonawca zmian katalogu dziala obok schedulera zadan hostowych:
+		// zmiana w katalogu nie jest operacja na hoscie.
+		go identity.NewExecutor(changeStore, directory, authzStore, recorder,
+			log, 3*time.Second).Run(ctx)
+	}
+
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
 		registry, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	gatewayMux := http.NewServeMux()
@@ -228,7 +237,8 @@ func run() error {
 		Addr: cfg.AdminAddr,
 		Handler: h2c.NewHandler(
 			adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
-				tokenStore, authzStore, recorder, registry, identityProvider, directory, log,
+				tokenStore, authzStore, recorder, registry, identityProvider, directory,
+				changeStore, log,
 				adminapi.Options{
 					ProductionEnvironments: productionEnvironments,
 					SessionIdle:            8 * time.Hour,

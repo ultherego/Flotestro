@@ -102,7 +102,9 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		  and w.revoked_at is null
 		  and w.absolute_expires_at > now()
 		  and w.idle_expires_at > now()
-		  and p.disabled_at is null`
+		  and p.disabled_at is null
+		  -- Znacznik odmowy unicestwia takze trwajaca sesje.
+		  and p.denied_at is null`
 	var (
 		session    Session
 		storedHash []byte

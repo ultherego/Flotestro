@@ -99,15 +99,19 @@ func TestAllowedMethodJestZamknietaLista(t *testing.T) {
 	// sposob wywolania dowolnej komendy katalogu.
 	for _, method := range []string{"user_find", "group_find", "hbacrule_find", "ping"} {
 		if !allowedMethod(method) {
-			t.Errorf("polecenie %s powinno byc dozwolone", method)
+			t.Errorf("polecenie odczytu %s powinno byc dozwolone", method)
 		}
 	}
+	// Polecenia nieobslugiwane obejmuja usuwanie obiektow, zmiane konfiguracji
+	// samego katalogu i zarzadzanie uprawnieniami. Ich brak jest swiadomy:
+	// panel nie moze skasowac konta ani nadac sobie wiekszych praw.
 	for _, method := range []string{
-		"user_del", "user_mod", "group_add", "config_mod",
-		"permission_add", "", "user_find; drop",
+		"user_del", "group_del", "host_del", "config_mod",
+		"permission_add", "privilege_add", "role_add_member",
+		"hbacrule_add", "sudorule_add", "", "user_find; drop",
 	} {
 		if allowedMethod(method) {
-			t.Errorf("polecenie %s nie powinno byc dozwolone na etapie odczytu", method)
+			t.Errorf("polecenie %s nie powinno byc dostepne przez adapter", method)
 		}
 	}
 }

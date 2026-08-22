@@ -130,7 +130,10 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 		where t.token_hash = $1
 		  and t.revoked_at is null
 		  and (t.expires_at is null or t.expires_at > now())
-		  and p.disabled_at is null`
+		  and p.disabled_at is null
+		  -- Lokalny znacznik odmowy dziala natychmiast, niezaleznie od tego,
+		  -- czy blokada zdazyla sie rozpropagowac do katalogu.
+		  and p.denied_at is null`
 	var (
 		tokenID    string
 		storedHash []byte

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -281,6 +282,16 @@ var allowedMethods = map[string]bool{
 	"hbacrule_find": true,
 	"sudorule_find": true,
 	"ping":          true,
+
+	// Operacje zapisu. Kazda jest wykonywana wylacznie przez control plane
+	// po zatwierdzeniu planu; adapter nie udostepnia polecen usuwajacych
+	// konta ani zmieniajacych konfiguracje samego katalogu.
+	"user_add":            true,
+	"user_mod":            true,
+	"user_disable":        true,
+	"user_enable":         true,
+	"group_add_member":    true,
+	"group_remove_member": true,
 }
 
 func allowedMethod(method string) bool { return allowedMethods[method] }
@@ -316,4 +327,35 @@ func cached[T any](ctx context.Context, c *Client, key string, load func() (T, e
 	c.cache[key] = cacheEntry{value: value, expiresAt: time.Now().Add(c.config.CacheTTL)}
 	c.mu.Unlock()
 	return value, nil
+}
+
+// Wzorce nazw obiektow katalogu. Nazwa nigdy nie trafia do polecenia powloki,
+// ale walidacja jest druga linia obrony i odrzuca ksztalty, ktore nie moga byc
+// nazwa konta ani grupy.
+var (
+	userNamePattern  = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
+	groupNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$`)
+)
+
+// validateSSHPublicKey odrzuca material, ktory nie jest kluczem publicznym.
+// Klucz prywatny nigdy nie moze trafic do katalogu ani do logow.
+func validateSSHPublicKey(key string) error {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return fmt.Errorf("pusty klucz SSH")
+	}
+	if strings.Contains(trimmed, "PRIVATE KEY") {
+		return fmt.Errorf("podano klucz prywatny; do katalogu trafia wylacznie klucz publiczny")
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 {
+		return fmt.Errorf("klucz SSH nie ma postaci <typ> <material>")
+	}
+	switch fields[0] {
+	case "ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
+		"ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com":
+		return nil
+	default:
+		return fmt.Errorf("nieobslugiwany typ klucza SSH %q", fields[0])
+	}
 }
