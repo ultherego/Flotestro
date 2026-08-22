@@ -142,3 +142,21 @@ pre {
 .ekran-logowania {
   display: grid; place-items: center; min-height: 100vh; text-align: center;
 }
+
+/* Formularze i operacje na kontach lokalnych. */
+.przelacznik {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--tekst-slaby); font-size: 13px; margin-bottom: 12px;
+}
+.przelacznik input { width: auto; }
+.operacje { display: flex; gap: 8px; flex-wrap: wrap; }
+.operacje button { background: transparent; border-color: var(--obramowanie); color: var(--tekst); }
+.operacje button:hover:not(:disabled) { background: var(--tlo-hover); }
+.formularz {
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid var(--obramowanie); border-radius: 8px;
+  padding: 16px; background: var(--tlo-panel); max-width: 640px;
+}
+.formularz h2 { margin: 0; }
+.formularz label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tekst-slaby); }
+.formularz textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }

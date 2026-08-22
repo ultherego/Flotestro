@@ -273,6 +273,20 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
+		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
+		envelope.Action = &agentv1.TaskEnvelope_LocalUserAction{
+			LocalUserAction: &agentv1.LocalUserAction{
+				Operation:  localUserOperations[action],
+				Name:       payload.LocalUser.Name,
+				Gecos:      payload.LocalUser.Gecos,
+				Shell:      payload.LocalUser.Shell,
+				Groups:     payload.LocalUser.Groups,
+				SshKeys:    payload.LocalUser.SSHKeys,
+				CreateHome: payload.LocalUser.CreateHome,
+			},
+		}
+
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{
 			ReadUnitStatus: &agentv1.ReadUnitStatus{Units: payload.UnitStatus.Units},
@@ -313,6 +327,15 @@ var unitOperations = map[opspec.ActionType]agentv1.UnitAction_Operation{
 	opspec.ActionUnitStop:    agentv1.UnitAction_OPERATION_STOP,
 	opspec.ActionUnitRestart: agentv1.UnitAction_OPERATION_RESTART,
 	opspec.ActionUnitReload:  agentv1.UnitAction_OPERATION_RELOAD,
+}
+
+// localUserOperations tlumaczy typ operacji na wartosc kontraktu. Mapa jest
+// jawna, wiec dodanie akcji bez odwzorowania nie przechodzi przez testy.
+var localUserOperations = map[opspec.ActionType]agentv1.LocalUserAction_Operation{
+	opspec.ActionLocalUserCreate: agentv1.LocalUserAction_OPERATION_CREATE,
+	opspec.ActionLocalUserLock:   agentv1.LocalUserAction_OPERATION_LOCK,
+	opspec.ActionLocalUserUnlock: agentv1.LocalUserAction_OPERATION_UNLOCK,
+	opspec.ActionLocalSSHKeysSet: agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS,
 }
 
 func approvalsOf(job jobs.Job) []string {

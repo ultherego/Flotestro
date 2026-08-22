@@ -33,6 +33,9 @@ type Server struct {
 	packageMutex sync.Mutex
 	// Dolaczenie do domeny zmienia SSSD, Kerberosa i PAM naraz.
 	enrollMutex sync.Mutex
+	// Zmiany kont lokalnych sa serializowane: useradd i usermod pisza do
+	// tych samych plikow.
+	accountMutex sync.Mutex
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
@@ -121,6 +124,10 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *h
 		return s.probeIdentity(ctx, request, action.IdentityProbe)
 	case *helperv1.HelperRequest_DomainEnroll:
 		return s.enrollDomain(ctx, request, action.DomainEnroll)
+	case *helperv1.HelperRequest_LocalAccounts:
+		return s.readLocalAccounts(ctx, request, action.LocalAccounts)
+	case *helperv1.HelperRequest_LocalUserAction:
+		return s.applyLocalUserAction(ctx, request, action.LocalUserAction)
 	default:
 		return reject(ErrorUnknownAction, "brak obslugiwanej akcji")
 	}

@@ -193,3 +193,24 @@ export type InventoryRevision = {
   observed_at: string;
   payload: Record<string, any>;
 };
+
+/**
+ * Konto widziane na hoscie. Wartosc null oznacza stan nieustalony i musi byc
+ * pokazana jako nieznana, a nie jako "nie" - inaczej panel twierdzilby, ze
+ * konto ma otwarty dostep, choc tego nie sprawdzil.
+ */
+export type LocalAccount = {
+  name: string;
+  uid: number;
+  gid: number;
+  home?: string;
+  shell?: string;
+  gecos?: string;
+  source: "local" | "directory" | "system" | "unknown";
+  groups: string[];
+  locked: boolean | null;
+  password_set: boolean | null;
+  ssh_keys: { fingerprint: string; type?: string; comment?: string; source?: string }[];
+  unavailable_reason?: string;
+  observed_at: string;
+};

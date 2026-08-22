@@ -30,6 +30,11 @@ const (
 
 	ActionDomainEnroll    ActionType = "identity.host.enroll"
 	ActionDomainPreflight ActionType = "identity.host.preflight"
+
+	ActionLocalUserCreate ActionType = "localuser.create"
+	ActionLocalUserLock   ActionType = "localuser.lock"
+	ActionLocalUserUnlock ActionType = "localuser.unlock"
+	ActionLocalSSHKeysSet ActionType = "localuser.sshkeys.set"
 )
 
 // ActionVersion jest wersja kontraktu payloadu. Zmiana znaczenia pol wymaga
@@ -92,6 +97,15 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll", timeoutSeconds: 900},
 	// Preflight niczego nie zmienia, wiec nie wymaga zatwierdzenia.
 	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read", timeoutSeconds: 120},
+
+	// Konta lokalne nie zaleza od systemd ani od katalogu: modul dziala takze
+	// tam, gdzie klient zostaje przy zwyklej autoryzacji SSH.
+	// Blokada i odblokowanie maja osobne uprawnienia: w reakcji na incydent
+	// odciecie konta bywa dozwolone tam, gdzie przywrocenie dostepu juz nie.
+	ActionLocalUserCreate: {mutating: true, capability: "", permission: "localuser.create", timeoutSeconds: 120},
+	ActionLocalUserLock:   {mutating: true, capability: "", permission: "localuser.lock", timeoutSeconds: 60},
+	ActionLocalUserUnlock: {mutating: true, capability: "", permission: "localuser.unlock", timeoutSeconds: 60},
+	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write", timeoutSeconds: 60},
 }
 
 // AllActions zwraca posortowana liste obslugiwanych operacji.
@@ -163,6 +177,7 @@ type Payload struct {
 	Reboot         *RebootPayload         `json:"reboot,omitempty"`
 	UnitStatus     *UnitStatusPayload     `json:"unit_status,omitempty"`
 	DomainEnroll   *DomainEnrollPayload   `json:"domain_enroll,omitempty"`
+	LocalUser      *LocalUserPayload      `json:"local_user,omitempty"`
 }
 
 // DomainEnrollPayload opisuje dolaczenie hosta do domeny.
@@ -177,6 +192,22 @@ type DomainEnrollPayload struct {
 	Hostname string `json:"hostname,omitempty"`
 }
 
+// LocalUserPayload opisuje zmiane konta lokalnego.
+//
+// Payload nie zawiera hasla ani hasza. Konto zakladane przez panel jest
+// dostepne wylacznie kluczem SSH, wiec nie istnieje sekret, ktory panel
+// musialby przechowywac lub przenosic.
+type LocalUserPayload struct {
+	Name   string   `json:"name"`
+	Gecos  string   `json:"gecos,omitempty"`
+	Shell  string   `json:"shell,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+	// SSHKeys jest pelna, zamierzona lista kluczy. Pusta lista przy operacji
+	// ustawiania kluczy odbiera dostep i jest swiadoma zmiana, nie brakiem danych.
+	SSHKeys    []string `json:"ssh_keys,omitempty"`
+	CreateHome bool     `json:"create_home,omitempty"`
+}
+
 // Validate sprawdza spojnosc typu operacji z payloadem.
 func Validate(action ActionType, payload Payload) error {
 	if !action.Known() {
@@ -188,6 +219,34 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu package_plan", action)
 		}
 		return validatePackageNames(payload.PackagePlan.OnlyPackages)
+
+	case ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet:
+		if payload.LocalUser == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu local_user", action)
+		}
+		if !localUserNamePattern.MatchString(payload.LocalUser.Name) {
+			return fmt.Errorf("nieprawidlowa nazwa konta %q", payload.LocalUser.Name)
+		}
+		if len(payload.LocalUser.SSHKeys) > 64 {
+			return fmt.Errorf("zbyt wiele kluczy SSH: %d", len(payload.LocalUser.SSHKeys))
+		}
+		for _, key := range payload.LocalUser.SSHKeys {
+			if err := validatePublicKeyShape(key); err != nil {
+				return err
+			}
+		}
+		for _, group := range payload.LocalUser.Groups {
+			if !localUserNamePattern.MatchString(group) {
+				return fmt.Errorf("nieprawidlowa nazwa grupy %q", group)
+			}
+		}
+		if shell := payload.LocalUser.Shell; shell != "" && !strings.HasPrefix(shell, "/") {
+			return fmt.Errorf("powloka musi byc sciezka bezwzgledna, otrzymano %q", shell)
+		}
+		if strings.ContainsAny(payload.LocalUser.Gecos, ":\n") {
+			return fmt.Errorf("pole opisu nie moze zawierac dwukropka ani znaku nowej linii")
+		}
+		return nil
 
 	case ActionDomainEnroll, ActionDomainPreflight:
 		if payload.DomainEnroll == nil {
@@ -249,6 +308,48 @@ func Validate(action ActionType, payload Payload) error {
 // packageNamePattern odpowiada nazwom pakietow Debiana i RPM. Nazwa nigdy nie
 // trafia do powloki, ale walidacja jest druga linia obrony i odrzuca ksztalty,
 // ktore nie moga byc nazwa pakietu.
+// localUserNamePattern odpowiada zakresowi nazw akceptowanemu przez useradd.
+// Walidacja po stronie panelu nie zastepuje walidacji w helperze; obie
+// istnieja, bo koperta moze dotrzec do agenta inna droga niz przez panel.
+var localUserNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}\$?$`)
+
+// validatePublicKeyShape odrzuca material, ktory nie jest kluczem publicznym.
+// Panel nie przyjmuje klucza prywatnego nawet przez pomylke operatora.
+func validatePublicKeyShape(key string) error {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return fmt.Errorf("pusty klucz SSH")
+	}
+	if strings.ContainsAny(trimmed, "\n\r") {
+		return fmt.Errorf("klucz SSH nie moze zawierac znaku nowej linii")
+	}
+	if strings.Contains(trimmed, "PRIVATE KEY") {
+		return fmt.Errorf("przekazano klucz prywatny; panel przyjmuje wylacznie klucze publiczne")
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 {
+		return fmt.Errorf("klucz SSH musi miec postac \"typ material [komentarz]\"")
+	}
+	if !allowedKeyTypes[fields[0]] {
+		return fmt.Errorf("nieobslugiwany typ klucza %q", fields[0])
+	}
+	if len(trimmed) > 16384 {
+		return fmt.Errorf("klucz SSH jest zbyt dlugi")
+	}
+	return nil
+}
+
+// allowedKeyTypes wyklucza typy wycofane, w tym ssh-dss i ssh-rsa z SHA-1.
+var allowedKeyTypes = map[string]bool{
+	"ssh-ed25519":                        true,
+	"ssh-rsa":                            true,
+	"ecdsa-sha2-nistp256":                true,
+	"ecdsa-sha2-nistp384":                true,
+	"ecdsa-sha2-nistp521":                true,
+	"sk-ssh-ed25519@openssh.com":         true,
+	"sk-ecdsa-sha2-nistp256@openssh.com": true,
+}
+
 // domainPattern odrzuca nazwy, ktore nie moga byc domena DNS.
 var domainPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 

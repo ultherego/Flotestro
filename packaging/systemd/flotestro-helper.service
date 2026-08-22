@@ -19,7 +19,10 @@ Environment=FLOTESTRO_HELPER_IDLE_SECONDS=300
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=yes
+# Helper zarzadza plikami authorized_keys w katalogach domowych, wiec /home
+# musi byc dla niego widoczny. ProtectHome nie chronilby tu przed niczym:
+# proces i tak dziala jako root i to on jest granica uprawnien.
+ProtectHome=no
 ProtectKernelModules=yes
 RestrictRealtime=yes
 LockPersonality=yes

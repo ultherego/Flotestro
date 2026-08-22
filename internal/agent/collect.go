@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"os"
+
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"strings"
 	"time"
 )
@@ -15,6 +17,16 @@ var privilegedIdentity func(context.Context, string) (PrivilegedIdentity, error)
 // czesc stanu domeny. Agent uzywa do tego helpera roota.
 func SetPrivilegedIdentityProbe(probe func(context.Context, string) (PrivilegedIdentity, error)) {
 	privilegedIdentity = probe
+}
+
+// privilegedAccounts uzupelnia konta o stan blokady i klucze SSH. Odczyt
+// /etc/shadow i katalogow domowych nalezy do roota.
+var privilegedAccounts func(context.Context, []string) (*helperv1.LocalAccountsResult, error)
+
+// SetPrivilegedAccountProbe wskazuje funkcje odczytujaca uprzywilejowana
+// czesc danych o kontach.
+func SetPrivilegedAccountProbe(probe func(context.Context, []string) (*helperv1.LocalAccountsResult, error)) {
+	privilegedAccounts = probe
 }
 
 // Collect zbiera pelny inventory. Ta funkcja moze uruchamiac procesy potomne,
@@ -51,6 +63,24 @@ func Collect(ctx context.Context) (Facts, error) {
 	// Stan domeny jest czescia inventory, wiec zbierany raz na cykl, a nie
 	// przy kazdym heartbeacie.
 	facts.Identity = ReadIdentityState(ctx)
+
+	// Konta lokalne czytamy z pliku; stan blokady i klucze SSH wymagaja roota
+	// i sa uzupelniane przez helpera.
+	facts.LocalAccounts = ReadLocalAccounts()
+	if privilegedAccounts != nil {
+		names := make([]string, 0, len(facts.LocalAccounts))
+		for _, account := range facts.LocalAccounts {
+			if account.Source == SourceLocal {
+				names = append(names, account.Name)
+			}
+		}
+		if len(names) > 0 {
+			if result, err := privilegedAccounts(ctx, names); err == nil {
+				facts.LocalAccounts = mergePrivilegedAccounts(facts.LocalAccounts, result)
+			}
+		}
+	}
+
 	if facts.Identity.Enrolled && privilegedIdentity != nil {
 		privileged, err := privilegedIdentity(ctx, facts.Identity.Domain)
 		if err != nil {

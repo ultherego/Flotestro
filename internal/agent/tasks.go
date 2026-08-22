@@ -121,6 +121,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.rebootHost(ctx, task, payload.Reboot)
 	case opspec.ActionUnitStatus:
 		return e.readUnitStatus(ctx, task, payload.UnitStatus)
+	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
+		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
+		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
 	case opspec.ActionDomainPreflight:
 		return e.enrollDomain(ctx, task, payload.DomainEnroll, true)
 	case opspec.ActionDomainEnroll:
@@ -373,6 +376,23 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			},
 		}, nil
 
+	case *agentv1.TaskEnvelope_LocalUserAction:
+		request := action.LocalUserAction
+		actionType, known := localUserActions[request.GetOperation()]
+		if !known {
+			return "", opspec.Payload{}, fmt.Errorf("nieznana operacja na koncie: %v", request.GetOperation())
+		}
+		return actionType, opspec.Payload{
+			LocalUser: &opspec.LocalUserPayload{
+				Name:       request.GetName(),
+				Gecos:      request.GetGecos(),
+				Shell:      request.GetShell(),
+				Groups:     request.GetGroups(),
+				SSHKeys:    request.GetSshKeys(),
+				CreateHome: request.GetCreateHome(),
+			},
+		}, nil
+
 	case *agentv1.TaskEnvelope_ReadUnitStatus:
 		return opspec.ActionUnitStatus, opspec.Payload{
 			UnitStatus: &opspec.UnitStatusPayload{Units: action.ReadUnitStatus.GetUnits()},
@@ -443,4 +463,14 @@ func unitStateToAgent(state *helperv1.UnitState) *agentv1.UnitState {
 		MainPid:       state.GetMainPid(),
 		NRestarts:     state.GetNRestarts(),
 	}
+}
+
+// localUserActions tlumaczy operacje kontraktu na typ operacji. Agent nie
+// przyjmuje operacji spoza mapy, wiec rozszerzenie kontraktu przez strone
+// trzecia nie da mu nowych mozliwosci.
+var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
+	agentv1.LocalUserAction_OPERATION_CREATE:       opspec.ActionLocalUserCreate,
+	agentv1.LocalUserAction_OPERATION_LOCK:         opspec.ActionLocalUserLock,
+	agentv1.LocalUserAction_OPERATION_UNLOCK:       opspec.ActionLocalUserUnlock,
+	agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS: opspec.ActionLocalSSHKeysSet,
 }

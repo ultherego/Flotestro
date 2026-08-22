@@ -5,8 +5,10 @@ import { api, ApiError, type Collection } from "../lib/api";
 import type { AuditEvent, Host as HostType, InventoryRevision, Job } from "../lib/types";
 import { Blad, Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Para, Pary, Pusto, StanPolaczenia, StanZadania } from "../components/ui";
 import { bytes } from "../lib/format";
+import { useCapabilities } from "../lib/capabilities";
+import { KontaHosta } from "./KontaHosta";
 
-type Zakladka = "przeglad" | "pakiety" | "uslugi" | "tozsamosc" | "zadania" | "audyt";
+type Zakladka = "przeglad" | "pakiety" | "uslugi" | "konta" | "tozsamosc" | "zadania" | "audyt";
 
 /**
  * Widok hosta. Zakladki nieobslugiwane przez dany host sa wylaczone na
@@ -15,6 +17,7 @@ type Zakladka = "przeglad" | "pakiety" | "uslugi" | "tozsamosc" | "zadania" | "a
 export function Host() {
   const { id = "" } = useParams();
   const [zakladka, setZakladka] = useState<Zakladka>("przeglad");
+  const zdolnosci = useCapabilities();
 
   const host = useQuery({
     queryKey: ["host", id],
@@ -29,6 +32,7 @@ export function Host() {
     { klucz: "przeglad", nazwa: "Przeglad", dostepna: true },
     { klucz: "pakiety", nazwa: "Pakiety", dostepna: dane.capabilities.apt || dane.capabilities.dnf, powod: "host nie ma obslugiwanego menedzera pakietow" },
     { klucz: "uslugi", nazwa: "Uslugi", dostepna: dane.capabilities.systemd, powod: "host nie uzywa systemd" },
+    { klucz: "konta", nazwa: "Konta", dostepna: zdolnosci.local_users, powod: "modul kont lokalnych jest wylaczony w tej instalacji" },
     { klucz: "tozsamosc", nazwa: "Tozsamosc", dostepna: true },
     { klucz: "zadania", nazwa: "Zadania", dostepna: true },
     { klucz: "audyt", nazwa: "Audyt", dostepna: true },
@@ -59,6 +63,7 @@ export function Host() {
       {zakladka === "przeglad" && <Przeglad host={dane} />}
       {zakladka === "pakiety" && <Pakiety host={dane} />}
       {zakladka === "uslugi" && <Uslugi host={dane} />}
+      {zakladka === "konta" && <KontaHosta host={dane} />}
       {zakladka === "tozsamosc" && <Tozsamosc host={dane} />}
       {zakladka === "zadania" && <ZadaniaHosta host={dane} />}
       {zakladka === "audyt" && <AudytHosta host={dane} />}

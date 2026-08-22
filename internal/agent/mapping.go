@@ -62,8 +62,9 @@ func inventoryToProto(f Facts, revision string, rawJSON []byte) *agentv1.Invento
 			Manager:            f.Packages.Manager,
 			UnavailableReason:  f.Packages.UnavailableReason,
 		},
-		Identity: identityToProto(f.Identity),
-		RawJson:  rawJSON,
+		Identity:      identityToProto(f.Identity),
+		LocalAccounts: localAccountsToProto(f.LocalAccounts),
+		RawJson:       rawJSON,
 	}
 }
 

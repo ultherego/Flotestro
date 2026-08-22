@@ -51,6 +51,15 @@ const (
 	PermIdentityGroupWrite  Permission = "identity.group.write"
 	PermIdentityPolicyWrite Permission = "identity.policy.write"
 	PermIdentityHostEnroll  Permission = "identity.host.enroll"
+
+	// Konta lokalne sa osobna sciezka dostepu do hosta, niezalezna od katalogu.
+	// Zalozenie konta i zmiana kluczy SSH to nadanie dostepu do systemu, wiec
+	// maja wlasne uprawnienia; odczyt listy kont miesci sie w inventory.
+	PermLocalUserRead    Permission = "localuser.read"
+	PermLocalUserCreate  Permission = "localuser.create"
+	PermLocalUserLock    Permission = "localuser.lock"
+	PermLocalUserUnlock  Permission = "localuser.unlock"
+	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
 )
 
 // Role grupuje uprawnienia. Podzial odpowiada rolom z dokumentu: platform
@@ -71,11 +80,11 @@ const (
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
-		PermIdentityRead,
+		PermIdentityRead, PermLocalUserRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
-		PermIdentityRead, PermIdentityPolicyRead,
+		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -86,11 +95,14 @@ var rolePermissions = map[Role][]Permission{
 		PermPackagesPlan,
 		// Operator planuje i prowadzi kampanie, ale ich nie zatwierdza.
 		PermCampaignRead, PermCampaignCreate, PermCampaignControl,
+		// Operator widzi konta lokalne, ale ich nie zaklada: nadanie dostepu
+		// do hosta jest decyzja administracyjna, a nie czescia obslugi awarii.
+		PermLocalUserRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
 		PermJobApprove, PermCampaignRead, PermCampaignApprove,
-		PermIdentityRead, PermIdentityPolicyRead,
+		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
 	},
 	// identity_admin zarzadza katalogiem, ale nie prowadzi operacji na hostach.
 	RoleIdentityAdmin: {
@@ -98,6 +110,10 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermUnitStatus,
+		// Konta lokalne sa alternatywa dla katalogu, wiec naleza do tej samej
+		// roli: to ona odpowiada za to, kto ma dostep do hostow.
+		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
+		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 	},
 	RolePlatformAdmin: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -108,6 +124,8 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermEnrollmentToken, PermPrincipalManage,
+		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
+		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 	},
 }
 

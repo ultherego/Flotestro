@@ -30,6 +30,27 @@ type Report struct {
 	IdentityDomain     string
 	IdentityRealm      string
 	IdentitySSSDOnline *bool
+
+	// LocalAccounts jest pelna lista kont widzianych na hoscie. Nil oznacza
+	// brak danych w tym raporcie i nie kasuje poprzedniej obserwacji.
+	LocalAccounts []LocalAccount
+}
+
+// LocalAccount jest obserwacja konta na hoscie.
+type LocalAccount struct {
+	Name              string          `json:"name"`
+	UID               int64           `json:"uid"`
+	GID               int64           `json:"gid"`
+	Home              string          `json:"home,omitempty"`
+	Shell             string          `json:"shell,omitempty"`
+	Gecos             string          `json:"gecos,omitempty"`
+	Source            string          `json:"source"`
+	Groups            []string        `json:"groups"`
+	Locked            *bool           `json:"locked"`
+	PasswordSet       *bool           `json:"password_set"`
+	SSHKeys           json.RawMessage `json:"ssh_keys"`
+	UnavailableReason string          `json:"unavailable_reason,omitempty"`
+	ObservedAt        time.Time       `json:"observed_at"`
 }
 
 // Revision opisuje zapisana rewizje.
@@ -100,10 +121,114 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 		return false, fmt.Errorf("normalizacja inventory hosta: %w", err)
 	}
 
+	if report.LocalAccounts != nil {
+		if err := replaceLocalAccounts(ctx, tx, hostID, report.LocalAccounts); err != nil {
+			return false, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
 	return stored, nil
+}
+
+// replaceLocalAccounts podmienia obserwacje kont hosta. Konta usuniete na
+// hoscie znikaja z panelu, bo lista w raporcie jest pelna, a nie przyrostowa.
+func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, accounts []LocalAccount) error {
+	names := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		names = append(names, account.Name)
+	}
+	const deleteStale = `delete from host_local_accounts where host_id = $1 and name <> all($2)`
+	if _, err := tx.Exec(ctx, deleteStale, hostID, names); err != nil {
+		return fmt.Errorf("czyszczenie kont lokalnych: %w", err)
+	}
+
+	batch := &pgx.Batch{}
+	for _, account := range accounts {
+		queueLocalAccount(batch, hostID, account)
+	}
+	results := tx.SendBatch(ctx, batch)
+	defer results.Close()
+	for range accounts {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("zapis kont lokalnych: %w", err)
+		}
+	}
+	return nil
+}
+
+// queueLocalAccount dokleja zapis obserwacji konta do partii. Zapytanie jest
+// jedno dla raportu pelnego i dla wyniku pojedynczej operacji, wiec obie
+// sciezki zapisuja dokladnie ten sam zestaw pol.
+func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
+	const upsert = `
+		insert into host_local_accounts
+			(host_id, name, uid, gid, home, shell, gecos, source, groups,
+			 locked, password_set, ssh_keys, unavailable_reason, observed_at)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, nullif($13, ''), now())
+		on conflict (host_id, name) do update set
+			uid = excluded.uid, gid = excluded.gid, home = excluded.home,
+			shell = excluded.shell, gecos = excluded.gecos, source = excluded.source,
+			groups = excluded.groups, locked = excluded.locked,
+			password_set = excluded.password_set,
+			ssh_keys = excluded.ssh_keys,
+			unavailable_reason = excluded.unavailable_reason,
+			observed_at = now()`
+	keys := account.SSHKeys
+	if len(keys) == 0 {
+		keys = json.RawMessage("[]")
+	}
+	groups := account.Groups
+	if groups == nil {
+		groups = []string{}
+	}
+	batch.Queue(upsert, hostID, account.Name, account.UID, account.GID,
+		account.Home, account.Shell, account.Gecos, account.Source, groups,
+		account.Locked, account.PasswordSet, keys, account.UnavailableReason)
+}
+
+// UpsertLocalAccount zapisuje obserwacje pojedynczego konta. Sluzy do
+// domkniecia petli po operacji: wynik zadania niesie stan konta odczytany
+// z hosta po zmianie, a pelny raport inventory przyjdzie dopiero pozniej.
+func (s *Store) UpsertLocalAccount(ctx context.Context, hostID string, account LocalAccount) error {
+	batch := &pgx.Batch{}
+	queueLocalAccount(batch, hostID, account)
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+	_, err := results.Exec()
+	return err
+}
+
+// LocalAccounts zwraca ostatnia obserwacje kont hosta.
+func (s *Store) LocalAccounts(ctx context.Context, hostID string) ([]LocalAccount, error) {
+	const query = `
+		select name, uid, gid, coalesce(home, ''), coalesce(shell, ''),
+		       coalesce(gecos, ''), source, groups, locked, password_set, ssh_keys,
+		       coalesce(unavailable_reason, ''), observed_at
+		from host_local_accounts
+		where host_id = $1
+		order by source, name`
+	rows, err := s.pool.Query(ctx, query, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	accounts := []LocalAccount{}
+	for rows.Next() {
+		var account LocalAccount
+		if err := rows.Scan(&account.Name, &account.UID, &account.GID, &account.Home,
+			&account.Shell, &account.Gecos, &account.Source, &account.Groups,
+			&account.Locked, &account.PasswordSet, &account.SSHKeys,
+			&account.UnavailableReason,
+			&account.ObservedAt); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, rows.Err()
 }
 
 // Latest zwraca ostatnia rewizje hosta.

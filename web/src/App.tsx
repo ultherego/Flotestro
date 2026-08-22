@@ -2,6 +2,7 @@ import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "./lib/api";
 import type { Whoami } from "./lib/types";
+import { useCapabilities } from "./lib/capabilities";
 import { Pulpit } from "./pages/Pulpit";
 import { Hosty } from "./pages/Hosty";
 import { Host } from "./pages/Host";
@@ -12,6 +13,7 @@ import { Katalog } from "./pages/Katalog";
 import { Audyt } from "./pages/Audyt";
 
 export function App() {
+  const zdolnosci = useCapabilities();
   const { data, isLoading, error } = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
@@ -24,7 +26,7 @@ export function App() {
   // Brak sesji kieruje do logowania u dostawcy tozsamosci. Panel nie zbiera
   // hasel: poswiadczenia trafiaja wylacznie do Keycloaka.
   if (error instanceof ApiError && error.unauthenticated) {
-    return <EkranLogowania />;
+    return <EkranLogowania dostawca={zdolnosci.identity_provider} />;
   }
   if (error) return <div className="pusto" style={{ padding: 40 }}>Blad: {String(error)}</div>;
 
@@ -36,7 +38,7 @@ export function App() {
         <Link do="/hosty">Hosty</Link>
         <Link do="/zadania">Zadania</Link>
         <Link do="/kampanie">Kampanie</Link>
-        <Link do="/katalog">Katalog</Link>
+        {zdolnosci.directory && <Link do="/katalog">Katalog</Link>}
         <Link do="/audyt">Audyt</Link>
         <div className="stopka">
           <div>{data?.display_name || data?.subject}</div>
@@ -53,7 +55,7 @@ export function App() {
           <Route path="/zadania" element={<Zadania />} />
           <Route path="/kampanie" element={<Kampanie />} />
           <Route path="/kampanie/:id" element={<Kampania />} />
-          <Route path="/katalog" element={<Katalog />} />
+          {zdolnosci.directory && <Route path="/katalog" element={<Katalog />} />}
           <Route path="/audyt" element={<Audyt />} />
           <Route path="*" element={<div className="pusto">Nie ma takiej strony.</div>} />
         </Routes>
@@ -78,15 +80,25 @@ async function wyloguj(event: React.MouseEvent) {
   window.location.href = wynik.logout_url || "/";
 }
 
-function EkranLogowania() {
+function EkranLogowania({ dostawca }: { dostawca: boolean }) {
   return (
     <div className="ekran-logowania">
       <div>
         <h1>Flotestro</h1>
         <p className="podtytul">Panel zarzadzania flota Linux</p>
-        <button onClick={() => (window.location.href = "/auth/login?redirect=/pulpit")}>
-          Zaloguj przez dostawce tozsamosci
-        </button>
+        {dostawca ? (
+          <button onClick={() => (window.location.href = "/auth/login?redirect=/pulpit")}>
+            Zaloguj przez dostawce tozsamosci
+          </button>
+        ) : (
+          // Bez skonfigurowanego dostawcy przycisk logowania prowadzilby do
+          // bledu. Panel dziala wtedy na tokenach API i trzeba to powiedziec
+          // wprost, zamiast pokazywac martwa akcje.
+          <p className="podtytul">
+            W tej instalacji nie skonfigurowano dostawcy tozsamosci. Dostep do
+            panelu odbywa sie tokenem API przekazanym w naglowku Authorization.
+          </p>
+        )}
       </div>
     </div>
   );

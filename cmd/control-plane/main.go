@@ -76,6 +76,9 @@ func run() error {
 		config.Env("FLOTESTRO_OIDC_CLIENT_ID", "flotestro-panel"), "identyfikator klienta OIDC")
 	clientSecret := flag.String("oidc-client-secret",
 		config.Env("FLOTESTRO_OIDC_CLIENT_SECRET", ""), "sekret klienta OIDC")
+	directoryWrite := flag.Bool("directory-write",
+		config.Env("FLOTESTRO_DIRECTORY_WRITE", "") == "true",
+		"wlacza zmiany w katalogu tozsamosci; domyslnie panel tylko czyta katalog")
 	webRoot := flag.String("web-root",
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "katalog ze zbudowanym panelem")
 	publicURL := flag.String("public-url",
@@ -196,7 +199,7 @@ func run() error {
 	}
 
 	changeStore := identity.NewStore(pool)
-	if directory != nil {
+	if directory != nil && *directoryWrite {
 		// Wykonawca zmian katalogu dziala obok schedulera zadan hostowych:
 		// zmiana w katalogu nie jest operacja na hoscie.
 		go identity.NewExecutor(changeStore, directory, authzStore, recorder,
@@ -247,6 +250,7 @@ func run() error {
 					SessionAbsolute:        24 * time.Hour,
 					PublicURL:              *publicURL,
 					WebRoot:                *webRoot,
+					DirectoryWrite:         *directoryWrite,
 				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,

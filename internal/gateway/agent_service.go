@@ -271,6 +271,8 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			IdentityDomain:     identity.GetDomain(),
 			IdentityRealm:      identity.GetRealm(),
 			IdentitySSSDOnline: identity.SssdOnline,
+
+			LocalAccounts: localAccountsFromReport(report),
 		})
 		if err != nil {
 			return err
@@ -329,6 +331,22 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	}, state)
 	if err != nil {
 		return err
+	}
+
+	// Operacja na koncie zmienia stan hosta natychmiast, a pelny raport
+	// inventory przyjdzie dopiero za kilkanascie minut. Agent odczytuje konto
+	// po zmianie, wiec zapisujemy stan faktyczny hosta zamiast czekac;
+	// bez tego panel pokazywalby stan sprzed operacji.
+	if user, ok := result.GetDetail().(*agentv1.TaskResult_LocalUser); ok &&
+		state == jobs.StateSucceeded && user.LocalUser.GetAccount() != nil {
+		accounts := localAccountsFromReport(&agentv1.InventoryReport{
+			Full:          true,
+			LocalAccounts: []*agentv1.LocalAccount{user.LocalUser.GetAccount()},
+		})
+		if err := s.inventory.UpsertLocalAccount(ctx, hostID, accounts[0]); err != nil {
+			s.log.Error("nie zapisano stanu konta po operacji",
+				"host_id", hostID, "konto", user.LocalUser.GetName(), "err", err)
+		}
 	}
 
 	// Uszkodzona baza pakietow blokuje hosta przed kolejnymi kampaniami.
@@ -405,6 +423,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"plan_hash":            hex.EncodeToString(plan.GetPlanHash()),
 			"reboot_predicted":     plan.GetRebootPredicted(),
 			"metadata_refreshed":   plan.GetMetadataRefreshed(),
+		})
+		if err != nil {
+			return nil
+		}
+		return encoded
+
+	case *agentv1.TaskResult_LocalUser:
+		user := detail.LocalUser
+		encoded, err := json.Marshal(map[string]any{
+			"kind":    "local_user",
+			"name":    user.GetName(),
+			"changed": user.GetChanged(),
+			"account": localAccountResultJSON(user.GetAccount()),
 		})
 		if err != nil {
 			return nil
@@ -580,5 +611,85 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 		DNF:      caps.GetDnf(),
 		Docker:   caps.GetDocker(),
 		Journald: caps.GetJournald(),
+	}
+}
+
+// localAccountsFromReport przenosi konta z raportu do modelu inventory.
+//
+// Raport przyrostowy bez sekcji kont zwraca nil, a nie pusta liste: brak
+// danych nie moze skasowac ostatniej znanej listy kont hosta.
+func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalAccount {
+	if !report.GetFull() && len(report.GetLocalAccounts()) == 0 {
+		return nil
+	}
+	accounts := make([]inventory.LocalAccount, 0, len(report.GetLocalAccounts()))
+	for _, account := range report.GetLocalAccounts() {
+		keys, err := json.Marshal(sshKeysJSON(account.GetSshKeys()))
+		if err != nil {
+			keys = json.RawMessage("[]")
+		}
+		accounts = append(accounts, inventory.LocalAccount{
+			Name:              account.GetName(),
+			UID:               int64(account.GetUid()),
+			GID:               int64(account.GetGid()),
+			Home:              account.GetHome(),
+			Shell:             account.GetShell(),
+			Gecos:             account.GetGecos(),
+			Source:            accountSourceName(account.GetSource()),
+			Groups:            account.GetGroups(),
+			Locked:            account.Locked,
+			PasswordSet:       account.PasswordSet,
+			SSHKeys:           keys,
+			UnavailableReason: account.GetUnavailableReason(),
+		})
+	}
+	return accounts
+}
+
+// accountSourceName odwzorowuje zrodlo konta na nazwe uzywana w bazie i API.
+// Wartosc nieokreslona zostaje nieokreslona: "local" byloby zgadywaniem.
+func accountSourceName(source agentv1.LocalAccount_Source) string {
+	switch source {
+	case agentv1.LocalAccount_SOURCE_LOCAL:
+		return "local"
+	case agentv1.LocalAccount_SOURCE_DIRECTORY:
+		return "directory"
+	case agentv1.LocalAccount_SOURCE_SYSTEM:
+		return "system"
+	default:
+		return "unknown"
+	}
+}
+
+func sshKeysJSON(keys []*agentv1.SSHKey) []map[string]any {
+	encoded := make([]map[string]any, 0, len(keys))
+	for _, key := range keys {
+		encoded = append(encoded, map[string]any{
+			"fingerprint": key.GetFingerprint(),
+			"type":        key.GetType(),
+			"comment":     key.GetComment(),
+			"source":      key.GetSource(),
+		})
+	}
+	return encoded
+}
+
+// localAccountResultJSON opisuje stan konta po operacji. Brak konta daje nil,
+// bo konto usuniete lub nieutworzone nie ma stanu do pokazania.
+func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
+	if account == nil {
+		return nil
+	}
+	return map[string]any{
+		"name":         account.GetName(),
+		"uid":          account.GetUid(),
+		"gid":          account.GetGid(),
+		"shell":        account.GetShell(),
+		"gecos":        account.GetGecos(),
+		"source":       accountSourceName(account.GetSource()),
+		"groups":       account.GetGroups(),
+		"locked":       account.Locked,
+		"password_set": account.PasswordSet,
+		"ssh_keys":     sshKeysJSON(account.GetSshKeys()),
 	}
 }

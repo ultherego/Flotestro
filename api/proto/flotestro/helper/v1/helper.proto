@@ -26,7 +26,36 @@ message HelperRequest {
     RebootRequest reboot = 22;
     IdentityProbeRequest identity_probe = 23;
     DomainEnrollRequest domain_enroll = 24;
+    LocalAccountsRequest local_accounts = 25;
+    LocalUserActionRequest local_user_action = 26;
   }
+}
+
+// LocalAccountsRequest odczytuje te dane o kontach, ktore wymagaja roota:
+// stan blokady z /etc/shadow i klucze SSH z katalogow domowych.
+message LocalAccountsRequest {
+  repeated string names = 1;
+}
+
+// LocalUserActionRequest zmienia konto lokalne na hoscie.
+message LocalUserActionRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_CREATE = 1;
+    OPERATION_LOCK = 2;
+    OPERATION_UNLOCK = 3;
+    OPERATION_SET_SSH_KEYS = 4;
+  }
+  Operation operation = 1;
+  string name = 2;
+  string gecos = 3;
+  string shell = 4;
+  repeated string groups = 5;
+  // Klucze publiczne w postaci pelnej. Klucz prywatny nigdy nie trafia
+  // do systemu, a hasla nie sa przesylane w ogole.
+  repeated string ssh_keys = 6;
+  // CreateHome tworzy katalog domowy przy zakladaniu konta.
+  bool create_home = 7;
 }
 
 // DomainEnrollRequest dolacza hosta do domeny. Wymaga roota, bo zmienia
@@ -95,6 +124,25 @@ message HelperResponse {
   PackageActionResult package_result = 10;
   IdentityProbeResult identity_result = 11;
   DomainEnrollResult enroll_result = 12;
+  LocalAccountsResult accounts_result = 13;
+}
+
+message LocalAccountsResult {
+  repeated LocalAccountDetail accounts = 1;
+  string unavailable_reason = 2;
+}
+
+message LocalAccountDetail {
+  string name = 1;
+  optional bool locked = 2;
+  repeated LocalSSHKey ssh_keys = 3;
+  optional bool password_set = 4;
+}
+
+message LocalSSHKey {
+  string fingerprint = 1;
+  string type = 2;
+  string comment = 3;
 }
 
 message DomainEnrollResult {

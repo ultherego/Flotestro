@@ -20,9 +20,9 @@ type createChangeRequest struct {
 // handleCreateDirectoryChange planuje zmiane w katalogu. Samo zlecenie
 // niczego nie zmienia: liczy plan i czeka na zatwierdzenie.
 func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Request) {
-	if s.directory == nil || s.changes == nil {
-		problem(w, http.StatusNotImplemented, "directory_disabled",
-			"connector katalogu nie jest skonfigurowany")
+	if s.directory == nil || s.changes == nil || !s.directoryWrite {
+		problem(w, http.StatusNotImplemented, "directory_write_disabled",
+			"modul zmian w katalogu jest wylaczony w tej instalacji")
 		return
 	}
 
@@ -242,9 +242,9 @@ func (s *Server) handleGetDirectoryChange(w http.ResponseWriter, r *http.Request
 // changeFor wczytuje zmiane i sprawdza uprawnienie.
 func (s *Server) changeFor(w http.ResponseWriter, r *http.Request,
 	permission authz.Permission) (*identity.Change, authz.Principal, bool) {
-	if s.changes == nil {
-		problem(w, http.StatusNotImplemented, "directory_disabled",
-			"connector katalogu nie jest skonfigurowany")
+	if s.changes == nil || !s.directoryWrite {
+		problem(w, http.StatusNotImplemented, "directory_write_disabled",
+			"modul zmian w katalogu jest wylaczony w tej instalacji")
 		return nil, authz.Anonymous, false
 	}
 	principal, ok := s.authorize(w, r, permission, authz.GlobalScope, "directory_change", r.PathValue("id"))

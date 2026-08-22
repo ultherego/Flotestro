@@ -123,6 +123,7 @@ message InventoryReport {
   HardwareInfo hardware = 5;
   PackageSummary packages = 6;
   IdentityState identity = 8;
+  repeated LocalAccount local_accounts = 9;
   // Pelny raport w JSON trafia do JSONB. Pola normalizowane sa wyzej.
   bytes raw_json = 7;
 }
@@ -158,6 +159,55 @@ message IdentityState {
   repeated string config_issues = 13;
   // Powod, dla ktorego stanu nie udalo sie ustalic.
   string unavailable_reason = 14;
+}
+
+// LocalAccount opisuje konto widoczne na hoscie.
+//
+// Zrodlo konta jest istotne: konto lokalne, konto z katalogu i konto
+// systemowe wymagaja innego traktowania, a panel nie moze tworzyc lokalnej
+// kopii konta domenowego, bo przeslonilaby ona tozsamosc z katalogu.
+message LocalAccount {
+  enum Source {
+    SOURCE_UNSPECIFIED = 0;
+    // Konto z /etc/passwd o identyfikatorze z zakresu uzytkownikow.
+    SOURCE_LOCAL = 1;
+    // Konto rozwiazywane przez NSS z katalogu, nieobecne w /etc/passwd.
+    SOURCE_DIRECTORY = 2;
+    // Konto systemowe: uslugi, nie ludzie.
+    SOURCE_SYSTEM = 3;
+  }
+
+  string name = 1;
+  uint32 uid = 2;
+  uint32 gid = 3;
+  string home = 4;
+  string shell = 5;
+  string gecos = 6;
+  Source source = 7;
+  repeated string groups = 8;
+  // Locked oznacza konto zablokowane administracyjnie (prefiks "!" w shadow).
+  // Puste oznacza, ze stanu nie udalo sie ustalic; odczyt wymaga roota.
+  //
+  // Konto bez hasla nie jest zablokowane: konto zalozone przez panel loguje
+  // sie kluczem SSH i ma uwierzytelnianie haslem wylaczone, co jest czym
+  // innym niz odciecie dostepu.
+  optional bool locked = 9;
+  // Klucze publiczne opisane odciskiem; sama tresc klucza nie jest przesylana.
+  repeated SSHKey ssh_keys = 10;
+  // Powod, dla ktorego czesci danych nie udalo sie ustalic.
+  string unavailable_reason = 11;
+  // PasswordSet mowi, czy konto ma haslo nadajace sie do logowania. Konto
+  // bez hasla i bez kluczy jest niedostepne, a konto bez hasla z kluczem
+  // jest dostepne wylacznie kluczem; panel musi te przypadki rozrozniac.
+  optional bool password_set = 12;
+}
+
+message SSHKey {
+  string fingerprint = 1;
+  string type = 2;
+  string comment = 3;
+  // Zrodlo klucza: plik authorized_keys na hoscie albo katalog tozsamosci.
+  string source = 4;
 }
 
 message OsInfo {
@@ -215,6 +265,7 @@ message TaskEnvelope {
     SystemReboot system_reboot = 24;
     ReadUnitStatus read_unit_status = 25;
     DomainEnroll domain_enroll = 26;
+    LocalUserAction local_user_action = 27;
   }
 }
 
@@ -291,6 +342,39 @@ message DomainEnroll {
   string hostname = 6;
 }
 
+// LocalUserAction zarzadza kontem lokalnym na hoscie. Modul jest przeznaczony
+// dla instalacji bez katalogu: tam, gdzie dziala FreeIPA lub inny katalog,
+// konta ludzi pochodza z katalogu i panel ich nie duplikuje.
+//
+// Konta zakladane sa bez hasla. Dostep daje wylacznie klucz SSH, wiec panel
+// nigdy nie przenosi ani nie przechowuje sekretu uwierzytelniajacego.
+message LocalUserAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_CREATE = 1;
+    OPERATION_LOCK = 2;
+    OPERATION_UNLOCK = 3;
+    OPERATION_SET_SSH_KEYS = 4;
+  }
+  Operation operation = 1;
+  string name = 2;
+  string gecos = 3;
+  string shell = 4;
+  repeated string groups = 5;
+  // Pelna, zamierzona lista kluczy publicznych. Operacja jest deklaratywna:
+  // pusta lista odbiera dostep, a nie oznacza "nie zmieniaj".
+  repeated string ssh_keys = 6;
+  bool create_home = 7;
+}
+
+message LocalUserResult {
+  string name = 1;
+  // Changed rozroznia realna zmiane od zgodnosci ze stanem zadanym.
+  bool changed = 2;
+  // Account jest stanem konta po operacji. Puste, gdy konta nie ma.
+  LocalAccount account = 3;
+}
+
 message CancelTask {
   string task_id = 1;
   string reason = 2;
@@ -342,6 +426,7 @@ message TaskResult {
     PackageApplyResult package_apply = 21;
     UnitStatusResult unit_status = 22;
     DomainEnrollResult domain_enroll = 23;
+    LocalUserResult local_user = 24;
   }
 }
 

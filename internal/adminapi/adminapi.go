@@ -38,7 +38,10 @@ type Server struct {
 	oidc      *oidc.Provider
 	directory *freeipa.Client
 	changes   *identity.Store
-	log       *slog.Logger
+	// directoryWrite wlacza modul zmian w katalogu. Domyslnie wylaczony:
+	// klient moze chciec samego widoku, a zmiany robic swoimi narzedziami.
+	directoryWrite bool
+	log            *slog.Logger
 
 	// productionEnvironments wymagaja drugiej osoby przy zatwierdzaniu.
 	productionEnvironments map[string]bool
@@ -57,6 +60,8 @@ type Options struct {
 	PublicURL string
 	// WebRoot wskazuje katalog ze zbudowanym panelem. Pusty wylacza serwowanie.
 	WebRoot string
+	// DirectoryWrite wlacza zmiany w katalogu tozsamosci.
+	DirectoryWrite bool
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
@@ -74,13 +79,14 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
-		webRoot: options.WebRoot}
+		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite}
 }
 
 // Routes buduje router API.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
 
 	// Logowanie operatorow przez dostawce tozsamosci.
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
@@ -90,6 +96,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts", s.handleListHosts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}", s.handleGetHost)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory", s.handleHostInventory)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/local-accounts", s.handleHostLocalAccounts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/audit", s.handleHostAudit)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
 	mux.HandleFunc("GET /api/v1/enrollment-tokens", s.handleListTokens)

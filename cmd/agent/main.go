@@ -94,6 +94,7 @@ func main() {
 	// Uprzywilejowana czesc stanu domeny idzie przez helpera; agent nie ma
 	// dostepu do keytab hosta ani bazy cache SSSD.
 	agent.SetPrivilegedIdentityProbe(executor.ProbePrivilegedIdentity)
+	agent.SetPrivilegedAccountProbe(executor.ProbeLocalAccounts)
 
 	if err := agent.Run(ctx, agent.SessionOptions{
 		GatewayURL:         *gatewayURL,
