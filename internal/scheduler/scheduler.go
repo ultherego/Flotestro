@@ -20,6 +20,13 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
+// EnrollmentCredentials wystawia jednorazowe poswiadczenie dolaczenia hosta
+// do domeny. Poswiadczenie powstaje w chwili wysylki i nie jest przechowywane
+// w bazie razem z zadaniem.
+type EnrollmentCredentials interface {
+	EnsureHostWithOTP(ctx context.Context, fqdn string) (string, error)
+}
+
 // Options konfiguruje petle schedulera.
 type Options struct {
 	GatewayID string
@@ -37,15 +44,16 @@ type Options struct {
 
 // Scheduler laczy kolejke zadan z aktywnymi sesjami agentow.
 type Scheduler struct {
-	store    *jobs.Store
-	registry *gateway.Registry
-	audit    *audit.Recorder
-	log      *slog.Logger
-	options  Options
+	store       *jobs.Store
+	registry    *gateway.Registry
+	audit       *audit.Recorder
+	credentials EnrollmentCredentials
+	log         *slog.Logger
+	options     Options
 }
 
 func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder,
-	log *slog.Logger, options Options) *Scheduler {
+	credentials EnrollmentCredentials, log *slog.Logger, options Options) *Scheduler {
 	if options.Interval <= 0 {
 		options.Interval = 2 * time.Second
 	}
@@ -58,7 +66,8 @@ func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder
 	if options.SendTimeout <= 0 {
 		options.SendTimeout = 5 * time.Second
 	}
-	return &Scheduler{store: store, registry: registry, audit: recorder, log: log, options: options}
+	return &Scheduler{store: store, registry: registry, audit: recorder,
+		credentials: credentials, log: log, options: options}
 }
 
 // Run utrzymuje petle dostarczania do zamkniecia kontekstu.
@@ -113,7 +122,7 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 }
 
 func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
-	envelope, err := buildEnvelope(item)
+	envelope, err := s.buildEnvelopeFor(ctx, item)
 	if err != nil {
 		s.log.Error("nie zbudowano koperty zadania", "job_id", item.Job.ID, "err", err)
 		_ = s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "invalid_envelope")
@@ -151,6 +160,36 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	s.log.Info("zadanie dostarczone",
 		"job_id", item.Job.ID, "host_id", item.Job.HostID,
 		"action", item.Job.ActionType, "attempt", item.Attempt)
+}
+
+// buildEnvelopeFor buduje koperte i uzupelnia ja o poswiadczenia, ktore
+// celowo nie sa przechowywane w bazie.
+func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
+	envelope, err := buildEnvelope(item)
+	if err != nil {
+		return nil, err
+	}
+
+	enroll, ok := envelope.GetAction().(*agentv1.TaskEnvelope_DomainEnroll)
+	if !ok || enroll.DomainEnroll.GetPreflightOnly() {
+		return envelope, nil
+	}
+	if s.credentials == nil {
+		return nil, errUnknownAction("brak zrodla poswiadczen dolaczenia do domeny")
+	}
+
+	hostname := enroll.DomainEnroll.GetHostname()
+	if hostname == "" {
+		return nil, errUnknownAction("dolaczenie wymaga nazwy FQDN hosta")
+	}
+	// Haslo powstaje teraz i jest wazne do pierwszego uzycia; nie trafia
+	// do bazy ani do audytu.
+	password, err := s.credentials.EnsureHostWithOTP(ctx, hostname)
+	if err != nil {
+		return nil, err
+	}
+	enroll.DomainEnroll.OneTimePassword = password
+	return envelope, nil
 }
 
 // buildEnvelope zamienia zadanie z bazy na koperte protokolu agenta.
@@ -222,6 +261,17 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			request.PlanHash = hash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_PackageUpgrade{PackageUpgrade: request}
+
+	case opspec.ActionDomainEnroll, opspec.ActionDomainPreflight:
+		envelope.Action = &agentv1.TaskEnvelope_DomainEnroll{
+			DomainEnroll: &agentv1.DomainEnroll{
+				Domain:        payload.DomainEnroll.Domain,
+				Realm:         payload.DomainEnroll.Realm,
+				Server:        payload.DomainEnroll.Server,
+				Hostname:      payload.DomainEnroll.Hostname,
+				PreflightOnly: action == opspec.ActionDomainPreflight,
+			},
+		}
 
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{

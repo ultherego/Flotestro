@@ -27,6 +27,9 @@ const (
 
 	ActionSystemReboot ActionType = "system.reboot"
 	ActionUnitStatus   ActionType = "unit.status"
+
+	ActionDomainEnroll    ActionType = "identity.host.enroll"
+	ActionDomainPreflight ActionType = "identity.host.preflight"
 )
 
 // ActionVersion jest wersja kontraktu payloadu. Zmiana znaczenia pol wymaga
@@ -84,6 +87,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot", timeoutSeconds: 120},
 	// Odczyt stanu jednostek jest niemutujacy i sluzy health checkom kampanii.
 	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status", timeoutSeconds: 60},
+
+	// Dolaczenie do domeny zmienia uwierzytelnianie calego hosta.
+	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll", timeoutSeconds: 900},
+	// Preflight niczego nie zmienia, wiec nie wymaga zatwierdzenia.
+	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read", timeoutSeconds: 120},
 }
 
 // AllActions zwraca posortowana liste obslugiwanych operacji.
@@ -154,6 +162,19 @@ type Payload struct {
 	PackageUpgrade *PackageUpgradePayload `json:"package_upgrade,omitempty"`
 	Reboot         *RebootPayload         `json:"reboot,omitempty"`
 	UnitStatus     *UnitStatusPayload     `json:"unit_status,omitempty"`
+	DomainEnroll   *DomainEnrollPayload   `json:"domain_enroll,omitempty"`
+}
+
+// DomainEnrollPayload opisuje dolaczenie hosta do domeny.
+//
+// Payload nie zawiera hasla: jednorazowe poswiadczenie jest pobierane
+// z katalogu w chwili wysylki i wstrzykiwane do koperty. Przechowywanie go
+// w bazie oznaczaloby sekret lezacy na dysku przez caly czas zycia zadania.
+type DomainEnrollPayload struct {
+	Domain   string `json:"domain"`
+	Realm    string `json:"realm"`
+	Server   string `json:"server,omitempty"`
+	Hostname string `json:"hostname,omitempty"`
 }
 
 // Validate sprawdza spojnosc typu operacji z payloadem.
@@ -167,6 +188,18 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu package_plan", action)
 		}
 		return validatePackageNames(payload.PackagePlan.OnlyPackages)
+
+	case ActionDomainEnroll, ActionDomainPreflight:
+		if payload.DomainEnroll == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu domain_enroll", action)
+		}
+		if payload.DomainEnroll.Domain == "" || payload.DomainEnroll.Realm == "" {
+			return fmt.Errorf("dolaczenie wymaga domeny i realmu")
+		}
+		if !domainPattern.MatchString(payload.DomainEnroll.Domain) {
+			return fmt.Errorf("nieprawidlowa nazwa domeny %q", payload.DomainEnroll.Domain)
+		}
+		return nil
 
 	case ActionUnitStatus:
 		if payload.UnitStatus == nil || len(payload.UnitStatus.Units) == 0 {
@@ -216,6 +249,9 @@ func Validate(action ActionType, payload Payload) error {
 // packageNamePattern odpowiada nazwom pakietow Debiana i RPM. Nazwa nigdy nie
 // trafia do powloki, ale walidacja jest druga linia obrony i odrzuca ksztalty,
 // ktore nie moga byc nazwa pakietu.
+// domainPattern odrzuca nazwy, ktore nie moga byc domena DNS.
+var domainPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
+
 var packageNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9+._-]*$`)
 
 func validatePackageNames(names []string) error {

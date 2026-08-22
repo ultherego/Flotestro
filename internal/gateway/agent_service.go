@@ -411,6 +411,20 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 		return encoded
 
+	case *agentv1.TaskResult_DomainEnroll:
+		enroll := detail.DomainEnroll
+		encoded, err := json.Marshal(map[string]any{
+			"kind":           "domain_enroll",
+			"enrolled":       enroll.GetEnrolled(),
+			"host_principal": enroll.GetHostPrincipal(),
+			"checks":         preflightChecksJSON(enroll.GetChecks()),
+			"verifications":  preflightChecksJSON(enroll.GetVerifications()),
+		})
+		if err != nil {
+			return nil
+		}
+		return encoded
+
 	case *agentv1.TaskResult_UnitStatus:
 		units := make([]map[string]any, 0)
 		for _, unit := range detail.UnitStatus.GetUnits() {
@@ -449,6 +463,25 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	default:
 		return nil
 	}
+}
+
+// preflightChecksJSON zachowuje trojstanowy wynik sprawdzenia: przeszlo,
+// nie przeszlo albo nie udalo sie ustalic.
+func preflightChecksJSON(checks []*agentv1.PreflightCheck) []map[string]any {
+	items := make([]map[string]any, 0, len(checks))
+	for _, check := range checks {
+		item := map[string]any{
+			"name":     check.GetName(),
+			"detail":   check.GetDetail(),
+			"blocking": check.GetBlocking(),
+			"passed":   nil,
+		}
+		if check.Passed != nil {
+			item["passed"] = check.GetPassed()
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func packageChangesJSON(changes []*agentv1.PackageChange) []map[string]any {

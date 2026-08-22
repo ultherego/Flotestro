@@ -214,6 +214,7 @@ message TaskEnvelope {
     PackageUpgrade package_upgrade = 23;
     SystemReboot system_reboot = 24;
     ReadUnitStatus read_unit_status = 25;
+    DomainEnroll domain_enroll = 26;
   }
 }
 
@@ -273,6 +274,23 @@ message ReadUnitStatus {
   repeated string units = 1;
 }
 
+// DomainEnroll dolacza hosta do domeny katalogu.
+//
+// Jednorazowe haslo jest wstrzykiwane do koperty w chwili wysylki i nie jest
+// przechowywane w bazie: wspolne haslo administratora rozeslane do wszystkich
+// hostow byloby dokladnie tym, przed czym broni sie dokument.
+message DomainEnroll {
+  string domain = 1;
+  string realm = 2;
+  string server = 3;
+  // Krotkotrwale haslo jednorazowe wygenerowane przez katalog dla tego hosta.
+  string one_time_password = 4;
+  // Preflight bez dolaczania: sprawdza warunki i nie zmienia stanu hosta.
+  bool preflight_only = 5;
+  // Nazwa FQDN, pod ktora host ma zostac zarejestrowany.
+  string hostname = 6;
+}
+
 message CancelTask {
   string task_id = 1;
   string reason = 2;
@@ -323,6 +341,7 @@ message TaskResult {
     PackagePlanResult package_plan = 20;
     PackageApplyResult package_apply = 21;
     UnitStatusResult unit_status = 22;
+    DomainEnrollResult domain_enroll = 23;
   }
 }
 
@@ -398,4 +417,24 @@ message PackageApplyResult {
 
 message UnitStatusResult {
   repeated UnitState units = 1;
+}
+
+
+message DomainEnrollResult {
+  // Checks to wyniki preflightu; kazdy ma nazwe, wynik i opis.
+  repeated PreflightCheck checks = 1;
+  bool enrolled = 2;
+  string host_principal = 3;
+  // Verifications potwierdzaja dzialanie NSS, PAM, Kerberos i sudo po
+  // dolaczeniu. Dopiero one pozwalaja uznac enrollment za zakonczony.
+  repeated PreflightCheck verifications = 4;
+}
+
+message PreflightCheck {
+  string name = 1;
+  // Passed jest puste, gdy stanu nie udalo sie ustalic.
+  optional bool passed = 2;
+  string detail = 3;
+  // Blocking oznacza warunek, ktorego niespelnienie wyklucza dolaczenie.
+  bool blocking = 4;
 }

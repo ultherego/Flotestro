@@ -31,6 +31,8 @@ type Server struct {
 	// Osobna blokada dla operacji pakietowych: transakcja moze trwac minuty,
 	// a operacje na jednostkach nie musza na nia czekac.
 	packageMutex sync.Mutex
+	// Dolaczenie do domeny zmienia SSSD, Kerberosa i PAM naraz.
+	enrollMutex sync.Mutex
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
@@ -117,6 +119,8 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *h
 		return s.applyReboot(ctx, request, action.Reboot)
 	case *helperv1.HelperRequest_IdentityProbe:
 		return s.probeIdentity(ctx, request, action.IdentityProbe)
+	case *helperv1.HelperRequest_DomainEnroll:
+		return s.enrollDomain(ctx, request, action.DomainEnroll)
 	default:
 		return reject(ErrorUnknownAction, "brak obslugiwanej akcji")
 	}

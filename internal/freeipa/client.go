@@ -292,6 +292,10 @@ var allowedMethods = map[string]bool{
 	"user_enable":         true,
 	"group_add_member":    true,
 	"group_remove_member": true,
+	// Wpis hosta i jednorazowe haslo dolaczenia. Usuniecie hosta z katalogu
+	// nie jest tu dostepne: odcielo by dostep administratorom.
+	"host_add": true,
+	"host_mod": true,
 }
 
 func allowedMethod(method string) bool { return allowedMethods[method] }
@@ -335,6 +339,7 @@ func cached[T any](ctx context.Context, c *Client, key string, load func() (T, e
 var (
 	userNamePattern  = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
 	groupNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$`)
+	hostNamePattern  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 )
 
 // validateSSHPublicKey odrzuca material, ktory nie jest kluczem publicznym.

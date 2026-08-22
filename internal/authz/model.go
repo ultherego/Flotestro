@@ -97,6 +97,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
+		PermUnitStatus,
 	},
 	RolePlatformAdmin: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,

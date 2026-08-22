@@ -121,6 +121,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.rebootHost(ctx, task, payload.Reboot)
 	case opspec.ActionUnitStatus:
 		return e.readUnitStatus(ctx, task, payload.UnitStatus)
+	case opspec.ActionDomainPreflight:
+		return e.enrollDomain(ctx, task, payload.DomainEnroll, true)
+	case opspec.ActionDomainEnroll:
+		return e.enrollDomain(ctx, task, payload.DomainEnroll, false)
 	default:
 		return e.applyUnitAction(ctx, task, action, payload.Unit)
 	}
@@ -349,6 +353,23 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Reboot: &opspec.RebootPayload{
 				DelaySeconds: request.GetDelaySeconds(),
 				Reason:       request.GetReason(),
+			},
+		}, nil
+
+	case *agentv1.TaskEnvelope_DomainEnroll:
+		request := action.DomainEnroll
+		actionType := opspec.ActionDomainEnroll
+		if request.GetPreflightOnly() {
+			actionType = opspec.ActionDomainPreflight
+		}
+		// Haslo jednorazowe nie wchodzi do payloadu kanonicznego, wiec nie
+		// wplywa na hash planu i nie jest z niego odtwarzalne.
+		return actionType, opspec.Payload{
+			DomainEnroll: &opspec.DomainEnrollPayload{
+				Domain:   request.GetDomain(),
+				Realm:    request.GetRealm(),
+				Server:   request.GetServer(),
+				Hostname: request.GetHostname(),
 			},
 		}, nil
 

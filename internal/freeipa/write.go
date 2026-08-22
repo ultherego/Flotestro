@@ -217,3 +217,44 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// EnsureHostWithOTP zapewnia wpis hosta w katalogu i zwraca jednorazowe
+// haslo dolaczenia.
+//
+// Haslo jest generowane przez katalog, wazne do pierwszego uzycia i wylacznie
+// dla tego jednego hosta. Wspolne haslo administratora rozeslane do calej
+// floty byloby dokladnie tym, przed czym broni sie dokument.
+func (c *Client) EnsureHostWithOTP(ctx context.Context, fqdn string) (string, error) {
+	if !hostNamePattern.MatchString(fqdn) {
+		return "", fmt.Errorf("nieprawidlowa nazwa hosta %q", fqdn)
+	}
+
+	// Host moze juz istniec w katalogu; wtedy odswiezamy samo haslo zamiast
+	// tworzyc wpis od nowa.
+	result, err := c.call(ctx, "host_add", []string{fqdn}, map[string]any{
+		"random": true,
+		"force":  true,
+	})
+	if err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			return "", fmt.Errorf("wpis hosta %s: %w", fqdn, err)
+		}
+		result, err = c.call(ctx, "host_mod", []string{fqdn}, map[string]any{"random": true})
+		if err != nil {
+			return "", fmt.Errorf("odswiezenie hasla hosta %s: %w", fqdn, err)
+		}
+	}
+
+	var decoded struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return "", err
+	}
+	password := first(decoded.Result, "randompassword")
+	if password == "" {
+		return "", fmt.Errorf("katalog nie zwrocil hasla jednorazowego dla %s", fqdn)
+	}
+	c.invalidate()
+	return password, nil
+}

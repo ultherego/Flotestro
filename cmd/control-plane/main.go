@@ -263,7 +263,7 @@ func run() error {
 
 	// Scheduler dostarcza zatwierdzone zadania hostom polaczonym z tym gatewayem
 	// i pilnuje lease oraz TTL.
-	go scheduler.New(jobStore, registry, recorder, log, scheduler.Options{
+	go scheduler.New(jobStore, registry, recorder, directory, log, scheduler.Options{
 		GatewayID:     cfg.GatewayID,
 		LeaseDuration: 5 * time.Minute,
 	}).Run(ctx)

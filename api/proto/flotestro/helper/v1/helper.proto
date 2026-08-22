@@ -25,7 +25,19 @@ message HelperRequest {
     PackageActionRequest package_action = 21;
     RebootRequest reboot = 22;
     IdentityProbeRequest identity_probe = 23;
+    DomainEnrollRequest domain_enroll = 24;
   }
+}
+
+// DomainEnrollRequest dolacza hosta do domeny. Wymaga roota, bo zmienia
+// konfiguracje SSSD, Kerberosa i PAM.
+message DomainEnrollRequest {
+  string domain = 1;
+  string realm = 2;
+  string server = 3;
+  string one_time_password = 4;
+  string hostname = 5;
+  bool preflight_only = 6;
 }
 
 // IdentityProbeRequest odczytuje te elementy stanu domeny, ktore wymagaja
@@ -82,6 +94,21 @@ message HelperResponse {
   UnitState state_after = 9;
   PackageActionResult package_result = 10;
   IdentityProbeResult identity_result = 11;
+  DomainEnrollResult enroll_result = 12;
+}
+
+message DomainEnrollResult {
+  repeated EnrollCheck checks = 1;
+  bool enrolled = 2;
+  string host_principal = 3;
+  repeated EnrollCheck verifications = 4;
+}
+
+message EnrollCheck {
+  string name = 1;
+  optional bool passed = 2;
+  string detail = 3;
+  bool blocking = 4;
 }
 
 message IdentityProbeResult {
