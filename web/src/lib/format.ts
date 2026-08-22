@@ -2,18 +2,28 @@
 // obserwacji, a stan nieustalony nigdy nie jest rysowany jako zero.
 
 export function relativeTime(value?: string | null): string {
-  if (!value) return "nigdy";
+  if (!value) return "never";
   const seconds = Math.floor((Date.now() - new Date(value).getTime()) / 1000);
-  if (seconds < 0) return "za chwile";
-  if (seconds < 60) return `${seconds} s temu`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min temu`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} godz. temu`;
-  return `${Math.floor(seconds / 86400)} dni temu`;
+  if (seconds < 0) return "in a moment";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+/**
+ * Czas bezwzgledny w formacie ISO ze strefa lokalna przegladarki.
+ *
+ * Format zalezny od jezyka przegladarki rozjezdzalby sie miedzy operatorami
+ * ogladajacymi ten sam incydent, a kolejnosc dnia i miesiaca bywa w nim
+ * odwrotna. Slad operacyjny musi czytac sie tak samo u wszystkich.
+ */
 export function absoluteTime(value?: string | null): string {
   if (!value) return "";
-  return new Date(value).toLocaleString("pl-PL");
+  const date = new Date(value);
+  const pad = (liczba: number) => String(liczba).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 /**
@@ -21,8 +31,8 @@ export function absoluteTime(value?: string | null): string {
  * bylo by falszywym sygnalem, ze host jest w porzadku.
  */
 export function optional(value: number | boolean | null | undefined): string {
-  if (value === null || value === undefined) return "nieustalone";
-  if (typeof value === "boolean") return value ? "tak" : "nie";
+  if (value === null || value === undefined) return "unknown";
+  if (typeof value === "boolean") return value ? "yes" : "no";
   return String(value);
 }
 

@@ -6,7 +6,7 @@ import { optional, relativeTime, absoluteTime } from "../lib/format";
 export function StanPolaczenia({ stan }: { stan: string }) {
   const klasa =
     stan === "online" ? "ok" : stan === "offline" ? "blad" : stan === "stale" ? "uwaga" : "unknown";
-  return <span className={`znacznik ${klasa}`}>{stan}</span>;
+  return <span className={`znacznik ${klasa}`}>{nazwaStanu(stan)}</span>;
 }
 
 /** Wynik operacji albo stan zadania. */
@@ -15,7 +15,32 @@ export function StanZadania({ stan }: { stan: string }) {
   const nieudane = ["failed", "timed_out", "expired", "partially_applied"].includes(stan);
   const czeka = ["awaiting_approval", "queued", "planned", "paused"].includes(stan);
   const klasa = udane ? "ok" : nieudane ? "blad" : czeka ? "uwaga" : "";
-  return <span className={`znacznik ${klasa}`}>{stan}</span>;
+  return <span className={`znacznik ${klasa}`}>{nazwaStanu(stan)}</span>;
+}
+
+/**
+ * Stany przychodza z bazy jako identyfikatory kontraktu i tak wygladaly
+ * w interfejsie: "awaiting_approval" albo "partially_applied". Nazwa czytelna
+ * dla operatora nie moze byc jedynym zapisem stanu - identyfikator zostaje
+ * w API i w audycie - ale to operator patrzy na ekran.
+ *
+ * Stan spoza listy pokazujemy tak, jak przyszedl. Zgadywanie tlumaczenia
+ * ukryloby fakt, ze panel zobaczyl cos, czego nie zna.
+ */
+function nazwaStanu(stan: string): string {
+  const nazwy: Record<string, string> = {
+    online: "online", offline: "offline", stale: "stale", unknown: "unknown",
+    queued: "queued", planned: "planned", leased: "assigned",
+    dispatched: "dispatched", running: "running",
+    awaiting_approval: "awaiting approval",
+    succeeded: "succeeded", failed: "failed", timed_out: "timed out",
+    canceled: "canceled", cancelled: "canceled", expired: "expired",
+    rejected: "rejected", replayed: "replayed",
+    active: "active", paused: "paused", completed: "completed",
+    partially_applied: "partially applied",
+    denied: "denied", success: "success", failure: "failure",
+  };
+  return nazwy[stan] ?? stan;
 }
 
 /**

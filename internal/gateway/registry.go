@@ -119,3 +119,15 @@ func (r *Registry) Count() int {
 	defer r.mu.RUnlock()
 	return len(r.sessions)
 }
+
+// SessionIDs zwraca identyfikatory sesji utrzymywanych przez te instancje.
+// Sluzy zamykaniu wpisow po sesjach, ktore juz nie istnieja.
+func (r *Registry) SessionIDs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]string, 0, len(r.sessions))
+	for _, session := range r.sessions {
+		ids = append(ids, session.ID)
+	}
+	return ids
+}

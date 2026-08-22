@@ -249,6 +249,10 @@ func run() error {
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
 		registry, trust, relayStore, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+	// Wpisy sesji po padzie procesu zostaja otwarte i zawyzaja kazdy pomiar
+	// liczacy polaczenia z bazy.
+	go agentService.ReapOrphanSessions(ctx, time.Minute)
+
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
 	gatewayServer := &http.Server{

@@ -810,3 +810,50 @@ func nullableRelay(relayID string) any {
 	}
 	return relayID
 }
+
+// CloseOrphanSessions zamyka wpisy sesji, ktorych ta instancja juz nie
+// utrzymuje.
+//
+// Sesja konczy sie zapisem przy rozlaczeniu, ale przy padzie procesu ten zapis
+// nie ma jak powstac i wpis zostaje otwarty na zawsze. Kazdy pomiar liczacy
+// aktywne sesje z bazy widzialby wtedy fikcyjna flote, a slad audytowy -
+// polaczenia, ktorych nie ma.
+//
+// Wolno zamykac wylacznie sesje wlasnego gatewaya: sesje innej instancji sa
+// zywe, a jej stan zna tylko ona.
+func (s *AgentService) CloseOrphanSessions(ctx context.Context) (int64, error) {
+	const query = `
+		update agent_sessions set ended_at = now(), end_reason = 'orphaned'
+		where gateway_id = $1 and ended_at is null and id <> all($2)`
+	tag, err := s.pool.Exec(ctx, query, s.gatewayID, s.registry.SessionIDs())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ReapOrphanSessions zamyka osierocone wpisy przy starcie i okresowo w trakcie
+// pracy. Pojedynczy strumien moze zginac bez zapisu konca takze wtedy, gdy
+// proces zyje dalej.
+func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Duration) {
+	if zamkniete, err := s.CloseOrphanSessions(ctx); err != nil {
+		s.log.Error("nie zamknieto osieroconych sesji", "err", err)
+	} else if zamkniete > 0 {
+		s.log.Info("zamknieto osierocone sesje po starcie", "wpisow", zamkniete)
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if zamkniete, err := s.CloseOrphanSessions(ctx); err != nil {
+				s.log.Error("nie zamknieto osieroconych sesji", "err", err)
+			} else if zamkniete > 0 {
+				s.log.Warn("zamknieto osierocone sesje", "wpisow", zamkniete)
+			}
+		}
+	}
+}
