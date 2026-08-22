@@ -62,7 +62,27 @@ func inventoryToProto(f Facts, revision string, rawJSON []byte) *agentv1.Invento
 			Manager:            f.Packages.Manager,
 			UnavailableReason:  f.Packages.UnavailableReason,
 		},
-		RawJson: rawJSON,
+		Identity: identityToProto(f.Identity),
+		RawJson:  rawJSON,
+	}
+}
+
+func identityToProto(state IdentityState) *agentv1.IdentityState {
+	return &agentv1.IdentityState{
+		Enrolled:          state.Enrolled,
+		Domain:            state.Domain,
+		Realm:             state.Realm,
+		Servers:           state.Servers,
+		SssdInstalled:     state.SSSDInstalled,
+		SssdRunning:       state.SSSDRunning,
+		SssdOnline:        state.SSSDOnline,
+		CacheAgeSeconds:   state.CacheAgeSeconds,
+		HostPrincipal:     state.HostPrincipal,
+		KeytabKvno:        state.KeytabKVNO,
+		ClockSkewSeconds:  state.ClockSkewSeconds,
+		TimeSynchronized:  state.TimeSynchronized,
+		ConfigIssues:      state.ConfigIssues,
+		UnavailableReason: state.UnavailableReason,
 	}
 }
 

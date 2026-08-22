@@ -23,6 +23,13 @@ type Report struct {
 	OSVersion      string
 	Architecture   string
 	RawJSON        []byte
+
+	// Identity opisuje integracje hosta z domena. Puste wskazniki oznaczaja
+	// stan nieustalony i nie nadpisuja poprzedniej wiedzy.
+	IdentityEnrolled   bool
+	IdentityDomain     string
+	IdentityRealm      string
+	IdentitySSSDOnline *bool
 }
 
 // Revision opisuje zapisana rewizje.
@@ -79,10 +86,17 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 			os_distribution            = coalesce(nullif($4, ''), os_distribution),
 			os_version                 = coalesce(nullif($5, ''), os_version),
 			architecture               = coalesce(nullif($6, ''), architecture),
+			identity_enrolled          = $7,
+			identity_domain            = nullif($8, ''),
+			identity_realm             = nullif($9, ''),
+			identity_sssd_online       = $10,
+			identity_checked_at        = now(),
 			updated_at                 = now()
 		where id = $1`
 	if _, err := tx.Exec(ctx, updateHost, hostID, report.Revision,
-		report.OSFamily, report.OSDistribution, report.OSVersion, report.Architecture); err != nil {
+		report.OSFamily, report.OSDistribution, report.OSVersion, report.Architecture,
+		report.IdentityEnrolled, report.IdentityDomain, report.IdentityRealm,
+		report.IdentitySSSDOnline); err != nil {
 		return false, fmt.Errorf("normalizacja inventory hosta: %w", err)
 	}
 

@@ -91,6 +91,10 @@ func main() {
 	executor := agent.NewTaskExecutor(
 		agent.NewHelperClient(*helperSocket), journal, func() agent.Facts { return agent.Facts{} }, log)
 
+	// Uprzywilejowana czesc stanu domeny idzie przez helpera; agent nie ma
+	// dostepu do keytab hosta ani bazy cache SSSD.
+	agent.SetPrivilegedIdentityProbe(executor.ProbePrivilegedIdentity)
+
 	if err := agent.Run(ctx, agent.SessionOptions{
 		GatewayURL:         *gatewayURL,
 		Identity:           identity,

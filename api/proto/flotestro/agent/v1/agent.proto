@@ -122,8 +122,42 @@ message InventoryReport {
   OsInfo os = 4;
   HardwareInfo hardware = 5;
   PackageSummary packages = 6;
+  IdentityState identity = 8;
   // Pelny raport w JSON trafia do JSONB. Pola normalizowane sa wyzej.
   bytes raw_json = 7;
+}
+
+// IdentityState opisuje stan integracji hosta z domena. Zbierany w cyklu
+// inventory, nigdy przy heartbeacie: pelna lista uzytkownikow nie moze byc
+// pobierana kilka razy na minute z kazdego hosta floty.
+//
+// Pola optional oznaczaja stan nieustalony. Host niepodlaczony do domeny to
+// inna informacja niz host, ktorego stanu nie udalo sie odczytac.
+message IdentityState {
+  bool enrolled = 1;
+  string domain = 2;
+  string realm = 3;
+  // Serwery domeny wykryte lokalnie, bez odpytywania katalogu.
+  repeated string servers = 4;
+
+  bool sssd_installed = 5;
+  bool sssd_running = 6;
+  // Brak wartosci oznacza, ze stanu polaczenia nie udalo sie ustalic.
+  optional bool sssd_online = 7;
+  // Wiek cache SSSD w sekundach; rosnacy wiek przy offline oznacza, ze host
+  // dziala na coraz starszej kopii polityk.
+  optional uint64 cache_age_seconds = 8;
+
+  string host_principal = 9;
+  optional uint32 keytab_kvno = 10;
+  // Rozjazd zegara psuje Kerberos zanim zepsuje cokolwiek innego.
+  optional double clock_skew_seconds = 11;
+  bool time_synchronized = 12;
+
+  // Uwagi z kontroli konfiguracji SSSD.
+  repeated string config_issues = 13;
+  // Powod, dla ktorego stanu nie udalo sie ustalic.
+  string unavailable_reason = 14;
 }
 
 message OsInfo {

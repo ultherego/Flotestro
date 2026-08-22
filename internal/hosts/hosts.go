@@ -75,8 +75,18 @@ type Host struct {
 	PendingSecurityUpdates   *int         `json:"pending_security_updates"`
 	CurrentInventoryRevision string       `json:"current_inventory_revision,omitempty"`
 	PackageDatabaseBroken    bool         `json:"package_database_broken"`
+	Identity                 HostIdentity `json:"identity"`
 	EnrolledAt               time.Time    `json:"enrolled_at"`
 	Capabilities             Capabilities `json:"capabilities"`
+}
+
+// HostIdentity opisuje integracje hosta z domena w widoku API.
+type HostIdentity struct {
+	Enrolled   bool       `json:"enrolled"`
+	Domain     string     `json:"domain,omitempty"`
+	Realm      string     `json:"realm,omitempty"`
+	SSSDOnline *bool      `json:"sssd_online"`
+	CheckedAt  *time.Time `json:"checked_at,omitempty"`
 }
 
 // Store realizuje dostep do tabel hostow.
@@ -258,7 +268,9 @@ type ListFilter struct {
 	Environment     string
 	OSFamily        string
 	ConnectionState string
-	Limit           int
+	// IdentityDomain zaweza do hostow w danej domenie.
+	IdentityDomain string
+	Limit          int
 }
 
 // List zwraca hosty zgodne z filtrem. Filtrowanie odbywa sie w bazie, UI nigdy
@@ -279,6 +291,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 	add("h.environment", filter.Environment)
 	add("h.os_family", filter.OSFamily)
 	add("h.connection_state", filter.ConnectionState)
+	add("h.identity_domain", filter.IdentityDomain)
 
 	where := ""
 	if len(conditions) > 0 {
@@ -302,6 +315,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
 		       h.reboot_required, h.failed_units, h.pending_updates, h.pending_security_updates,
 		       coalesce(h.current_inventory_revision, ''), h.package_database_broken, h.enrolled_at,
+		       h.identity_enrolled, coalesce(h.identity_domain, ''), coalesce(h.identity_realm, ''),
+		       h.identity_sssd_online, h.identity_checked_at,
 		       coalesce(c.systemd, false), coalesce(c.apt, false), coalesce(c.dnf, false),
 		       coalesce(c.docker, false), coalesce(c.journald, false)
 		from hosts h
@@ -322,6 +337,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
 			&h.RebootRequired, &h.FailedUnits, &h.PendingUpdates, &h.PendingSecurityUpdates,
 			&h.CurrentInventoryRevision, &h.PackageDatabaseBroken, &h.EnrolledAt,
+			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
+			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
 			&h.Capabilities.Systemd, &h.Capabilities.APT, &h.Capabilities.DNF,
 			&h.Capabilities.Docker, &h.Capabilities.Journald); err != nil {
 			return nil, err

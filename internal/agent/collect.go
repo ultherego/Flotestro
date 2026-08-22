@@ -7,6 +7,16 @@ import (
 	"time"
 )
 
+// privilegedIdentity jest opcjonalnym zrodlem danych wymagajacych roota.
+// Bez niego inventory nadal powstaje, ale bez keytab i stanu SSSD.
+var privilegedIdentity func(context.Context, string) (PrivilegedIdentity, error)
+
+// SetPrivilegedIdentityProbe wskazuje funkcje odczytujaca uprzywilejowana
+// czesc stanu domeny. Agent uzywa do tego helpera roota.
+func SetPrivilegedIdentityProbe(probe func(context.Context, string) (PrivilegedIdentity, error)) {
+	privilegedIdentity = probe
+}
+
 // Collect zbiera pelny inventory. Ta funkcja moze uruchamiac procesy potomne,
 // dlatego wolamy ja w cyklu inventory, nigdy w heartbeacie.
 func Collect(ctx context.Context) (Facts, error) {
@@ -38,6 +48,19 @@ func Collect(ctx context.Context) (Facts, error) {
 		facts.Packages = dnfSummary(ctx)
 	}
 	facts.RebootRequired = rebootRequired(ctx, caps)
+	// Stan domeny jest czescia inventory, wiec zbierany raz na cykl, a nie
+	// przy kazdym heartbeacie.
+	facts.Identity = ReadIdentityState(ctx)
+	if facts.Identity.Enrolled && privilegedIdentity != nil {
+		privileged, err := privilegedIdentity(ctx, facts.Identity.Domain)
+		if err != nil {
+			// Brak danych uprzywilejowanych nie uniewaznia reszty inventory,
+			// ale musi byc widoczny jako powod, a nie jako cisza.
+			facts.Identity.UnavailableReason = "helper: " + err.Error()
+		} else {
+			facts.Identity = facts.Identity.Merge(privileged)
+		}
+	}
 	return facts, nil
 }
 

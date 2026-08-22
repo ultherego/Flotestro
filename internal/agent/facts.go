@@ -85,10 +85,11 @@ type Facts struct {
 	Capabilities Capabilities `json:"capabilities"`
 	FailedUnits  []string     `json:"failed_units"`
 	// Puste pola oznaczaja, ze stanu nie udalo sie ustalic.
-	FailedUnitsKnown bool      `json:"failed_units_known"`
-	RebootRequired   *bool     `json:"reboot_required,omitempty"`
-	Interfaces       []string  `json:"network_interfaces"`
-	CollectedAt      time.Time `json:"collected_at"`
+	FailedUnitsKnown bool          `json:"failed_units_known"`
+	RebootRequired   *bool         `json:"reboot_required,omitempty"`
+	Identity         IdentityState `json:"identity"`
+	Interfaces       []string      `json:"network_interfaces"`
+	CollectedAt      time.Time     `json:"collected_at"`
 }
 
 // Revision liczy stabilna rewizje z tresci raportu. Identyczny stan hosta daje

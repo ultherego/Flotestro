@@ -256,6 +256,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			return fmt.Errorf("inventory nie jest poprawnym JSON")
 		}
 		os := report.GetOs()
+		identity := report.GetIdentity()
 		stored, err := s.inventory.Save(ctx, hostID, inventory.Report{
 			Revision:       report.GetRevision(),
 			Full:           report.GetFull(),
@@ -265,6 +266,11 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			OSVersion:      os.GetVersion(),
 			Architecture:   os.GetArchitecture(),
 			RawJSON:        raw,
+
+			IdentityEnrolled:   identity.GetEnrolled(),
+			IdentityDomain:     identity.GetDomain(),
+			IdentityRealm:      identity.GetRealm(),
+			IdentitySSSDOnline: identity.SssdOnline,
 		})
 		if err != nil {
 			return err

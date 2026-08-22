@@ -180,3 +180,30 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 		PackageDatabaseBroken:  result.GetPackageDatabaseBroken(),
 	}
 }
+
+// ProbePrivilegedIdentity odczytuje przez helpera te elementy stanu domeny,
+// ktore wymagaja roota: keytab hosta i baze cache SSSD.
+func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain string) (PrivilegedIdentity, error) {
+	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+		TaskId:         "identity-probe",
+		TimeoutSeconds: 60,
+		Action: &helperv1.HelperRequest_IdentityProbe{
+			IdentityProbe: &helperv1.IdentityProbeRequest{Domain: domain},
+		},
+	}, 60*time.Second)
+	if err != nil {
+		return PrivilegedIdentity{}, err
+	}
+	if !response.GetAccepted() {
+		return PrivilegedIdentity{}, errors.New(response.GetErrorCode() + ": " + response.GetMessage())
+	}
+	result := response.GetIdentityResult()
+	return PrivilegedIdentity{
+		HostPrincipal:     result.GetHostPrincipal(),
+		KeytabKVNO:        result.KeytabKvno,
+		CacheAgeSeconds:   result.CacheAgeSeconds,
+		SSSDOnline:        result.SssdOnline,
+		ConfigIssues:      result.GetConfigIssues(),
+		UnavailableReason: result.GetUnavailableReason(),
+	}, nil
+}

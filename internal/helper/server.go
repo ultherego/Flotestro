@@ -115,6 +115,8 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *h
 		return s.applyPackageAction(ctx, request, action.PackageAction)
 	case *helperv1.HelperRequest_Reboot:
 		return s.applyReboot(ctx, request, action.Reboot)
+	case *helperv1.HelperRequest_IdentityProbe:
+		return s.probeIdentity(ctx, request, action.IdentityProbe)
 	default:
 		return reject(ErrorUnknownAction, "brak obslugiwanej akcji")
 	}

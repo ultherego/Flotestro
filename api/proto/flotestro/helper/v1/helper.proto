@@ -24,7 +24,14 @@ message HelperRequest {
     UnitActionRequest unit_action = 20;
     PackageActionRequest package_action = 21;
     RebootRequest reboot = 22;
+    IdentityProbeRequest identity_probe = 23;
   }
+}
+
+// IdentityProbeRequest odczytuje te elementy stanu domeny, ktore wymagaja
+// roota: keytab hosta i baze cache SSSD. Reszte agent czyta sam.
+message IdentityProbeRequest {
+  string domain = 1;
 }
 
 // RebootRequest zleca kontrolowany restart hosta.
@@ -74,6 +81,17 @@ message HelperResponse {
   UnitState state_before = 8;
   UnitState state_after = 9;
   PackageActionResult package_result = 10;
+  IdentityProbeResult identity_result = 11;
+}
+
+message IdentityProbeResult {
+  string host_principal = 1;
+  optional uint32 keytab_kvno = 2;
+  optional uint64 cache_age_seconds = 3;
+  optional bool sssd_online = 4;
+  repeated string config_issues = 5;
+  // Powod, dla ktorego czesci stanu nie udalo sie ustalic.
+  string unavailable_reason = 6;
 }
 
 message PackageActionResult {
