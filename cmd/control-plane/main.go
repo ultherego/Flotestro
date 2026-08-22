@@ -34,6 +34,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/scheduler"
 )
@@ -66,6 +67,17 @@ func run() error {
 		config.EnvInt("FLOTESTRO_HEARTBEAT_SECONDS", 60), "bazowy odstep heartbeatu")
 	flag.IntVar(&cfg.HeartbeatJitter, "heartbeat-jitter",
 		config.EnvInt("FLOTESTRO_HEARTBEAT_JITTER", 30), "losowy rozrzut heartbeatu")
+	issuerURL := flag.String("oidc-issuer",
+		config.Env("FLOTESTRO_OIDC_ISSUER", ""),
+		"adres wystawcy OIDC, np. https://ipa:8081/realms/flotestro")
+	clientID := flag.String("oidc-client-id",
+		config.Env("FLOTESTRO_OIDC_CLIENT_ID", "flotestro-panel"), "identyfikator klienta OIDC")
+	clientSecret := flag.String("oidc-client-secret",
+		config.Env("FLOTESTRO_OIDC_CLIENT_SECRET", ""), "sekret klienta OIDC")
+	publicURL := flag.String("public-url",
+		config.Env("FLOTESTRO_PUBLIC_URL", ""), "adres panelu widoczny dla przegladarki")
+	groupsClaim := flag.String("oidc-groups-claim",
+		config.Env("FLOTESTRO_OIDC_GROUPS_CLAIM", "groups"), "pole tokenu z lista grup")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -130,6 +142,25 @@ func run() error {
 		return err
 	}
 
+	// Dostawca tozsamosci jest opcjonalny: bez niego dzialaja wylacznie tokeny
+	// API, co wystarcza automatyzacji, ale nie spelnia wymogu logowania z MFA.
+	var identityProvider *oidc.Provider
+	if *issuerURL != "" {
+		identityProvider, err = oidc.Discover(ctx, oidc.Config{
+			IssuerURL:    *issuerURL,
+			ClientID:     *clientID,
+			ClientSecret: *clientSecret,
+			RedirectURL:  strings.TrimSuffix(*publicURL, "/") + "/auth/callback",
+			GroupsClaim:  *groupsClaim,
+		})
+		if err != nil {
+			return fmt.Errorf("dostawca tozsamosci: %w", err)
+		}
+		log.Info("dostawca tozsamosci gotowy", "issuer", identityProvider.Issuer())
+	} else {
+		log.Warn("brak dostawcy tozsamosci; logowanie operatorow dziala tylko na tokenach API")
+	}
+
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
 		registry, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	gatewayMux := http.NewServeMux()
@@ -166,7 +197,13 @@ func run() error {
 		Addr: cfg.AdminAddr,
 		Handler: h2c.NewHandler(
 			adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
-				tokenStore, authzStore, recorder, registry, log, productionEnvironments).Routes(),
+				tokenStore, authzStore, recorder, registry, identityProvider, log,
+				adminapi.Options{
+					ProductionEnvironments: productionEnvironments,
+					SessionIdle:            8 * time.Hour,
+					SessionAbsolute:        24 * time.Hour,
+					PublicURL:              *publicURL,
+				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,
 	}

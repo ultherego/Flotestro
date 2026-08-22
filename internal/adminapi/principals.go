@@ -161,3 +161,105 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, response)
 }
+
+type createGroupMappingRequest struct {
+	Issuer      string `json:"issuer"`
+	GroupName   string `json:"group_name"`
+	Role        string `json:"role"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+}
+
+// handleListGroupMappings zwraca mapowania grup zewnetrznych na role.
+func (s *Server) handleListGroupMappings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", ""); !ok {
+		return
+	}
+	mappings, err := s.authz.ListGroupMappings(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if mappings == nil {
+		mappings = []authz.GroupMapping{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": mappings, "count": len(mappings)})
+}
+
+// handleCreateGroupMapping dodaje mapowanie grupy na role w zakresie.
+// Grupa nadaje wylacznie kandydacka role; zakres pozostaje polityka panelu.
+func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", "")
+	if !ok {
+		return
+	}
+
+	var request createGroupMappingRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "cialo zadania nie jest poprawnym JSON")
+		return
+	}
+	if request.Issuer == "" && s.oidc != nil {
+		request.Issuer = s.oidc.Issuer()
+	}
+	if !authz.KnownRole(authz.Role(request.Role)) {
+		problem(w, http.StatusBadRequest, "unknown_role", "nieznana rola "+request.Role)
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	mapping, err := s.authz.CreateGroupMapping(r.Context(), tx, request.Issuer, request.GroupName,
+		authz.Role(request.Role), authz.Scope{Site: request.Site, Environment: request.Environment},
+		actor.Subject)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_mapping", err.Error())
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "group_mapping.create", TargetType: "group_mapping", TargetID: mapping.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"issuer": mapping.Issuer, "group": mapping.GroupName, "role": string(mapping.Role),
+			"site": mapping.Site, "environment": mapping.Environment,
+		},
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, mapping)
+}
+
+// handleDeleteGroupMapping usuwa mapowanie.
+func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", "")
+	if !ok {
+		return
+	}
+	mappingID := r.PathValue("id")
+	removed, err := s.authz.DeleteGroupMapping(r.Context(), mappingID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !removed {
+		problem(w, http.StatusNotFound, "mapping_not_found", "mapowanie nie istnieje")
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "group_mapping.delete", TargetType: "group_mapping", TargetID: mappingID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -39,6 +39,14 @@ const (
 	PermCampaignCreate  Permission = "campaign.create"
 	PermCampaignApprove Permission = "campaign.approve"
 	PermCampaignControl Permission = "campaign.control"
+
+	// Uprawnienia warstwy tozsamosci. Zarzadzanie sudo i HBAC jest oddzielone
+	// od reszty, bo blad w tych regulach otwiera dostep do calej floty.
+	PermIdentityRead        Permission = "identity.read"
+	PermIdentityUserWrite   Permission = "identity.user.write"
+	PermIdentityGroupWrite  Permission = "identity.group.write"
+	PermIdentityPolicyWrite Permission = "identity.policy.write"
+	PermIdentityHostEnroll  Permission = "identity.host.enroll"
 )
 
 // Role grupuje uprawnienia. Podzial odpowiada rolom z dokumentu: platform
@@ -50,6 +58,7 @@ const (
 	RoleAuditor       Role = "auditor"
 	RoleOperator      Role = "operator"
 	RoleApprover      Role = "approver"
+	RoleIdentityAdmin Role = "identity_admin"
 	RolePlatformAdmin Role = "platform_admin"
 )
 
@@ -58,9 +67,11 @@ const (
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
+		PermIdentityRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
+		PermIdentityRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -75,6 +86,13 @@ var rolePermissions = map[Role][]Permission{
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
 		PermJobApprove, PermCampaignRead, PermCampaignApprove,
+		PermIdentityRead,
+	},
+	// identity_admin zarzadza katalogiem, ale nie prowadzi operacji na hostach.
+	RoleIdentityAdmin: {
+		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead,
+		PermIdentityRead, PermIdentityUserWrite, PermIdentityGroupWrite,
+		PermIdentityPolicyWrite, PermIdentityHostEnroll,
 	},
 	RolePlatformAdmin: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -82,6 +100,8 @@ var rolePermissions = map[Role][]Permission{
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
+		PermIdentityRead, PermIdentityUserWrite, PermIdentityGroupWrite,
+		PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermEnrollmentToken, PermPrincipalManage,
 	},
 }

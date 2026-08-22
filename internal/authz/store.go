@@ -228,3 +228,76 @@ func nullable(value string) any {
 	}
 	return value
 }
+
+// GroupMapping wiaze grupe zewnetrzna z rola w zakresie.
+type GroupMapping struct {
+	ID          string    `json:"id"`
+	Issuer      string    `json:"issuer"`
+	GroupName   string    `json:"group_name"`
+	Role        Role      `json:"role"`
+	Site        string    `json:"site"`
+	Environment string    `json:"environment"`
+	CreatedBy   string    `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// CreateGroupMapping dodaje mapowanie grupy na role.
+func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
+	issuer, groupName string, role Role, scope Scope, createdBy string) (*GroupMapping, error) {
+	if !KnownRole(role) {
+		return nil, fmt.Errorf("nieznana rola %q", role)
+	}
+	if issuer == "" || groupName == "" {
+		return nil, fmt.Errorf("mapowanie wymaga wystawcy i nazwy grupy")
+	}
+	mapping := &GroupMapping{
+		ID: uuid.NewString(), Issuer: issuer, GroupName: groupName, Role: role,
+		Site: orWildcard(scope.Site), Environment: orWildcard(scope.Environment),
+		CreatedBy: createdBy,
+	}
+	const query = `
+		insert into group_role_mappings (id, issuer, group_name, role, site, environment, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7)
+		on conflict (issuer, group_name, role, site, environment) do update
+			set created_by = group_role_mappings.created_by
+		returning id, created_at`
+	if err := tx.QueryRow(ctx, query, mapping.ID, issuer, groupName, string(role),
+		mapping.Site, mapping.Environment, createdBy).Scan(&mapping.ID, &mapping.CreatedAt); err != nil {
+		return nil, fmt.Errorf("zapis mapowania grupy: %w", err)
+	}
+	return mapping, nil
+}
+
+// ListGroupMappings zwraca mapowania grup.
+func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
+	const query = `
+		select id, issuer, group_name, role, site, environment, created_by, created_at
+		from group_role_mappings
+		order by issuer, group_name, role`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mappings []GroupMapping
+	for rows.Next() {
+		var mapping GroupMapping
+		if err := rows.Scan(&mapping.ID, &mapping.Issuer, &mapping.GroupName, &mapping.Role,
+			&mapping.Site, &mapping.Environment, &mapping.CreatedBy, &mapping.CreatedAt); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, mapping)
+	}
+	return mappings, rows.Err()
+}
+
+// DeleteGroupMapping usuwa mapowanie. Uzytkownicy tracą wynikajaca z niego
+// role przy nastepnym zadaniu, bez potrzeby ponownego logowania.
+func (s *Store) DeleteGroupMapping(ctx context.Context, mappingID string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `delete from group_role_mappings where id = $1`, mappingID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}

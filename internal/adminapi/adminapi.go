@@ -19,6 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/oidc"
 )
 
 // Server grupuje zaleznosci REST API.
@@ -32,29 +33,49 @@ type Server struct {
 	authz     *authz.Store
 	audit     *audit.Recorder
 	registry  *gateway.Registry
+	oidc      *oidc.Provider
 	log       *slog.Logger
 
 	// productionEnvironments wymagaja drugiej osoby przy zatwierdzaniu.
 	productionEnvironments map[string]bool
+	sessionLimits          authz.SessionLimits
+	publicURL              string
+}
+
+// Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
+type Options struct {
+	ProductionEnvironments []string
+	SessionIdle            time.Duration
+	SessionAbsolute        time.Duration
+	// PublicURL jest adresem panelu widocznym dla przegladarki; uzywany przy
+	// wylogowaniu i przy decyzji o fladze Secure ciasteczek.
+	PublicURL string
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
 	jobStore *jobs.Store, campaignStore *campaigns.Store, tokens *enrollment.TokenStore,
 	authzStore *authz.Store, recorder *audit.Recorder, registry *gateway.Registry,
-	log *slog.Logger, productionEnvironments []string) *Server {
+	provider *oidc.Provider, log *slog.Logger, options Options) *Server {
 	production := map[string]bool{}
-	for _, environment := range productionEnvironments {
+	for _, environment := range options.ProductionEnvironments {
 		production[environment] = true
 	}
+	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		campaigns: campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
-		registry: registry, log: log, productionEnvironments: production}
+		registry: registry, oidc: provider, log: log, productionEnvironments: production,
+		sessionLimits: limits, publicURL: options.PublicURL}
 }
 
 // Routes buduje router API.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+
+	// Logowanie operatorow przez dostawce tozsamosci.
+	mux.HandleFunc("GET /auth/login", s.handleLogin)
+	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
+	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/v1/fleet/summary", s.handleFleetSummary)
 	mux.HandleFunc("GET /api/v1/hosts", s.handleListHosts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}", s.handleGetHost)
@@ -89,10 +110,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals", s.handleCreatePrincipal)
 	mux.HandleFunc("GET /api/v1/whoami", s.handleWhoami)
 	mux.HandleFunc("GET /api/v1/roles", s.handleListRoles)
+	mux.HandleFunc("GET /api/v1/group-mappings", s.handleListGroupMappings)
+	mux.HandleFunc("POST /api/v1/group-mappings", s.handleCreateGroupMapping)
+	mux.HandleFunc("DELETE /api/v1/group-mappings/{id}", s.handleDeleteGroupMapping)
 
 	// Uwierzytelnienie obejmuje caly router. Autoryzacje robia handlery, bo
 	// tylko one znaja zakres celu.
-	return authz.Middleware(s.authz)(mux)
+	authenticator := authz.Authenticator{Tokens: s.authz, Sessions: s.authz}
+	return authenticator.Middleware(mux)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
