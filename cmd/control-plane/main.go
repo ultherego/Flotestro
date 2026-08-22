@@ -29,6 +29,7 @@ import (
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/database"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -78,6 +79,16 @@ func run() error {
 		config.Env("FLOTESTRO_PUBLIC_URL", ""), "adres panelu widoczny dla przegladarki")
 	groupsClaim := flag.String("oidc-groups-claim",
 		config.Env("FLOTESTRO_OIDC_GROUPS_CLAIM", "groups"), "pole tokenu z lista grup")
+	ipaServer := flag.String("ipa-server",
+		config.Env("FLOTESTRO_IPA_SERVER", ""), "adres serwera FreeIPA, np. https://ipa.example.org")
+	ipaPrincipal := flag.String("ipa-principal",
+		config.Env("FLOTESTRO_IPA_PRINCIPAL", ""), "service principal connectora katalogu")
+	ipaKeytab := flag.String("ipa-keytab",
+		config.Env("FLOTESTRO_IPA_KEYTAB", "/etc/flotestro/ipa.keytab"), "keytab connectora")
+	ipaCACert := flag.String("ipa-ca-cert",
+		config.Env("FLOTESTRO_IPA_CA_CERT", "/etc/flotestro/ipa-ca.crt"), "certyfikat CA katalogu")
+	ipaRealm := flag.String("ipa-realm",
+		config.Env("FLOTESTRO_IPA_REALM", ""), "realm Kerberos katalogu")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -161,6 +172,26 @@ func run() error {
 		log.Warn("brak dostawcy tozsamosci; logowanie operatorow dziala tylko na tokenach API")
 	}
 
+	// Connector katalogu jest opcjonalny. Jego brak oznacza panel bez widoku
+	// tozsamosci, a nie panel niedzialajacy.
+	var directory *freeipa.Client
+	if *ipaServer != "" && *ipaPrincipal != "" {
+		directory, err = freeipa.New(freeipa.Config{
+			ServerURL:  *ipaServer,
+			Realm:      *ipaRealm,
+			Principal:  *ipaPrincipal,
+			KeytabPath: *ipaKeytab,
+			CACertPath: *ipaCACert,
+			CacheTTL:   30 * time.Second,
+		})
+		if err != nil {
+			return fmt.Errorf("connector katalogu: %w", err)
+		}
+		log.Info("connector katalogu gotowy", "principal", directory.Principal(), "serwer", *ipaServer)
+	} else {
+		log.Info("connector katalogu nie jest skonfigurowany")
+	}
+
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
 		registry, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	gatewayMux := http.NewServeMux()
@@ -197,7 +228,7 @@ func run() error {
 		Addr: cfg.AdminAddr,
 		Handler: h2c.NewHandler(
 			adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
-				tokenStore, authzStore, recorder, registry, identityProvider, log,
+				tokenStore, authzStore, recorder, registry, identityProvider, directory, log,
 				adminapi.Options{
 					ProductionEnvironments: productionEnvironments,
 					SessionIdle:            8 * time.Hour,

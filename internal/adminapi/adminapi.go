@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
@@ -34,6 +35,7 @@ type Server struct {
 	audit     *audit.Recorder
 	registry  *gateway.Registry
 	oidc      *oidc.Provider
+	directory *freeipa.Client
 	log       *slog.Logger
 
 	// productionEnvironments wymagaja drugiej osoby przy zatwierdzaniu.
@@ -55,7 +57,8 @@ type Options struct {
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
 	jobStore *jobs.Store, campaignStore *campaigns.Store, tokens *enrollment.TokenStore,
 	authzStore *authz.Store, recorder *audit.Recorder, registry *gateway.Registry,
-	provider *oidc.Provider, log *slog.Logger, options Options) *Server {
+	provider *oidc.Provider, directory *freeipa.Client, log *slog.Logger,
+	options Options) *Server {
 	production := map[string]bool{}
 	for _, environment := range options.ProductionEnvironments {
 		production[environment] = true
@@ -63,8 +66,9 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		campaigns: campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
-		registry: registry, oidc: provider, log: log, productionEnvironments: production,
-		sessionLimits: limits, publicURL: options.PublicURL}
+		registry: registry, oidc: provider, directory: directory, log: log,
+		productionEnvironments: production,
+		sessionLimits:          limits, publicURL: options.PublicURL}
 }
 
 // Routes buduje router API.
@@ -110,6 +114,31 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals", s.handleCreatePrincipal)
 	mux.HandleFunc("GET /api/v1/whoami", s.handleWhoami)
 	mux.HandleFunc("GET /api/v1/roles", s.handleListRoles)
+	// Katalog tozsamosci w trybie tylko do odczytu.
+	mux.HandleFunc("GET /api/v1/identity/status", s.handleIdentityStatus)
+	mux.HandleFunc("GET /api/v1/identity/users", directoryHandler(s, "users",
+		func(s *Server, r *http.Request) ([]freeipa.User, error) {
+			return s.directory.Users(r.Context())
+		}))
+	mux.HandleFunc("GET /api/v1/identity/groups", directoryHandler(s, "groups",
+		func(s *Server, r *http.Request) ([]freeipa.Group, error) {
+			return s.directory.Groups(r.Context())
+		}))
+	mux.HandleFunc("GET /api/v1/identity/hosts", directoryHandler(s, "hosts",
+		func(s *Server, r *http.Request) ([]freeipa.Host, error) {
+			return s.directory.Hosts(r.Context())
+		}))
+	// Reguly dostepu i sudo wymagaja osobnego uprawnienia: opisuja, kto moze
+	// wejsc na hosta i podniesc uprawnienia.
+	mux.HandleFunc("GET /api/v1/identity/hbac-rules", policyHandler(s, "hbac",
+		func(s *Server, r *http.Request) ([]freeipa.HBACRule, error) {
+			return s.directory.HBACRules(r.Context())
+		}))
+	mux.HandleFunc("GET /api/v1/identity/sudo-rules", policyHandler(s, "sudo",
+		func(s *Server, r *http.Request) ([]freeipa.SudoRule, error) {
+			return s.directory.SudoRules(r.Context())
+		}))
+
 	mux.HandleFunc("GET /api/v1/group-mappings", s.handleListGroupMappings)
 	mux.HandleFunc("POST /api/v1/group-mappings", s.handleCreateGroupMapping)
 	mux.HandleFunc("DELETE /api/v1/group-mappings/{id}", s.handleDeleteGroupMapping)
