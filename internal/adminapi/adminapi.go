@@ -222,10 +222,14 @@ type FleetSummary struct {
 }
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermHostRead, authz.GlobalScope, "fleet", ""); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "fleet")
+	if !ok {
 		return
 	}
-	const query = `
+	// Podsumowanie liczy tylko te hosty, ktore tozsamosc moze widziec.
+	// Inaczej pulpit operatora jednego srodowiska pokazywalby cala flote.
+	warunek, args := scopeFilter(principal.ScopesFor(authz.PermHostRead))
+	query := `
 		select
 			count(*),
 			count(*) filter (where connection_state = 'online'),
@@ -234,9 +238,10 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 			count(*) filter (where failed_units > 0),
 			count(*) filter (where pending_security_updates > 0),
 			count(*) filter (where lifecycle_state = 'quarantined')
-		from hosts`
+		from hosts `
 	var summary FleetSummary
-	err := s.pool.QueryRow(r.Context(), query).Scan(&summary.Hosts, &summary.Online, &summary.Offline,
+	err := s.pool.QueryRow(r.Context(), query+warunek, args...).Scan(
+		&summary.Hosts, &summary.Online, &summary.Offline,
 		&summary.RebootRequired, &summary.WithFailedUnits, &summary.PendingSecurity, &summary.QuarantinedHosts)
 	if err != nil {
 		s.fail(w, err)
@@ -249,9 +254,8 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	// Lista jest zawezana do zakresu, w ktorym tozsamosc ma prawo odczytu,
 	// zeby operator jednego srodowiska nie widzial calej floty.
-	principal := authz.FromContext(r.Context())
-	if !principal.Authenticated() {
-		s.authorize(w, r, authz.PermHostRead, authz.GlobalScope, "fleet", "")
+	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "fleet")
+	if !ok {
 		return
 	}
 	query := r.URL.Query()

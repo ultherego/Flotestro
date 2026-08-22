@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -250,14 +251,62 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, campaignID string) (*Campa
 }
 
 // List zwraca kampanie, opcjonalnie zawezone stanem.
-func (s *Store) List(ctx context.Context, state string, limit int) ([]Campaign, error) {
+// Scope jest para lokalizacja-srodowisko. Pusta wartosc pola znaczy "dowolne".
+type Scope struct {
+	Site        string
+	Environment string
+}
+
+// List zwraca kampanie zawezone do zakresow, w ktorych wolajacy ma prawo
+// odczytu.
+//
+// Kampania nie ma wlasnego zakresu - ma cele. Widoczna jest wiec ta, ktora
+// dotyka choc jednego hosta z zakresu wolajacego; operator jednego srodowiska
+// widzi kampanie, ktore go dotycza, i nie widzi cudzych.
+func (s *Store) List(ctx context.Context, state string, limit int, scopes []Scope) ([]Campaign, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	clause := "where 1 = 1"
+	args := []any{}
 	if state != "" {
-		return s.query(ctx, "where state = $1 order by created_at desc limit "+itoa(limit), state)
+		args = append(args, state)
+		clause += fmt.Sprintf(" and state = $%d", len(args))
 	}
-	return s.query(ctx, "order by created_at desc limit "+itoa(limit))
+	if warunek, dodatkowe := scopeCondition(scopes, len(args)); warunek != "" {
+		clause += warunek
+		args = append(args, dodatkowe...)
+	}
+	return s.query(ctx, clause+" order by created_at desc limit "+itoa(limit), args...)
+}
+
+// scopeCondition buduje warunek widocznosci po celach kampanii. Zakres pusty
+// oznacza uprawnienie globalne i znosi zawezenie.
+func scopeCondition(scopes []Scope, offset int) (string, []any) {
+	if len(scopes) == 0 {
+		return "", nil
+	}
+	var warunki []string
+	var args []any
+	for _, scope := range scopes {
+		if scope.Site == "" && scope.Environment == "" {
+			return "", nil
+		}
+		args = append(args, nullableText(scope.Site), nullableText(scope.Environment))
+		i := offset + len(args)
+		warunki = append(warunki, fmt.Sprintf(
+			"(($%d::text is null or h.site = $%d) and ($%d::text is null or h.environment = $%d))",
+			i-1, i-1, i, i))
+	}
+	return " and exists (select 1 from campaign_targets t join hosts h on h.id = t.host_id" +
+		" where t.campaign_id = campaigns.id and (" + strings.Join(warunki, " or ") + "))", args
+}
+
+func nullableText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 const campaignColumns = `

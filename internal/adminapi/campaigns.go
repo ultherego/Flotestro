@@ -176,11 +176,13 @@ func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([
 }
 
 func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermCampaignRead, authz.GlobalScope, "campaign", ""); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign")
+	if !ok {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.campaigns.List(r.Context(), r.URL.Query().Get("state"), limit)
+	items, err := s.campaigns.List(r.Context(), r.URL.Query().Get("state"), limit,
+		campaignScopes(principal))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -461,4 +463,15 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// campaignScopes przenosi zakresy tozsamosci do warstwy magazynu. Zakres
+// globalny znosi zawezenie, wiec wystarczy go przekazac tak, jak jest.
+func campaignScopes(principal authz.Principal) []campaigns.Scope {
+	scopes := principal.ScopesFor(authz.PermCampaignRead)
+	result := make([]campaigns.Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		result = append(result, campaigns.Scope{Site: scope.Site, Environment: scope.Environment})
+	}
+	return result
 }

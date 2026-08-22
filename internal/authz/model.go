@@ -238,6 +238,53 @@ func (p Principal) Can(permission Permission, target Scope) bool {
 	return false
 }
 
+// CanAnywhere sprawdza, czy tozsamosc ma uprawnienie w jakimkolwiek zakresie.
+//
+// Sluzy kolekcjom: lista hostow czy kampanii nie ma jednego zakresu, wiec
+// pytanie "czy wolno ci to widziec globalnie" jest dla niej zle postawione.
+// Operator jednego srodowiska ma zobaczyc swoja czesc floty, a nie odmowe.
+func (p Principal) CanAnywhere(permission Permission) bool {
+	for _, binding := range p.Bindings {
+		if binding.Role.Has(permission) {
+			return true
+		}
+	}
+	return false
+}
+
+// Permissions zwraca posortowana liste uprawnien, ktore tozsamosc ma
+// w jakimkolwiek zakresie.
+//
+// Interfejs uzywa jej do ukrycia sekcji, ktorych i tak nie wolno otworzyc.
+// Zrodlem jest serwer, a nie zgadywanie po nazwach rol po stronie przegladarki:
+// polityka moze sie zmienic bez przebudowy panelu.
+func (p Principal) Permissions() []string {
+	unikalne := map[string]bool{}
+	for _, binding := range p.Bindings {
+		for _, permission := range binding.Role.Permissions() {
+			unikalne[string(permission)] = true
+		}
+	}
+	lista := make([]string, 0, len(unikalne))
+	for permission := range unikalne {
+		lista = append(lista, permission)
+	}
+	sort.Strings(lista)
+	return lista
+}
+
+// ScopesFor zwraca zakresy, w ktorych tozsamosc ma dane uprawnienie.
+// Pusty wynik oznacza brak uprawnienia gdziekolwiek.
+func (p Principal) ScopesFor(permission Permission) []Scope {
+	var scopes []Scope
+	for _, binding := range p.Bindings {
+		if binding.Role.Has(permission) {
+			scopes = append(scopes, binding.Scope)
+		}
+	}
+	return scopes
+}
+
 // Roles zwraca nazwy przypisanych rol, do audytu i diagnostyki.
 func (p Principal) Roles() []string {
 	seen := map[Role]bool{}

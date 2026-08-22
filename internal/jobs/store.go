@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -472,12 +473,41 @@ type ListFilter struct {
 	HostID string
 	State  string
 	Limit  int
+	// Scopes zawezaja wynik do zakresow, w ktorych wolajacy ma prawo odczytu.
+	// Pusta lista nie zaweza niczego; zakres pusty w srodku listy oznacza
+	// uprawnienie globalne.
+	Scopes []Scope
+}
+
+// Scope jest para lokalizacja-srodowisko. Pusta wartosc pola znaczy "dowolne".
+type Scope struct {
+	Site        string
+	Environment string
 }
 
 // List zwraca zadania zgodne z filtrem.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	clause := "where 1 = 1"
 	args := []any{}
+	// Zadanie nalezy do hosta, wiec widocznosc dziedziczy po nim: operator
+	// jednego srodowiska nie moze ogladac zadan z calej floty.
+	if len(filter.Scopes) > 0 {
+		warunki := make([]string, 0, len(filter.Scopes))
+		for _, scope := range filter.Scopes {
+			if scope.Site == "" && scope.Environment == "" {
+				warunki = nil
+				break
+			}
+			args = append(args, nullable(scope.Site), nullable(scope.Environment))
+			warunki = append(warunki, fmt.Sprintf(
+				"(($%d::text is null or h.site = $%d) and ($%d::text is null or h.environment = $%d))",
+				len(args)-1, len(args)-1, len(args), len(args)))
+		}
+		if len(warunki) > 0 {
+			clause += " and exists (select 1 from hosts h where h.id = jobs.host_id and (" +
+				strings.Join(warunki, " or ") + "))"
+		}
+	}
 	if filter.HostID != "" {
 		args = append(args, filter.HostID)
 		clause += fmt.Sprintf(" and host_id = $%d", len(args))

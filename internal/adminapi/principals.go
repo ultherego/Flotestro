@@ -24,6 +24,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		"kind":         principal.Kind,
 		"roles":        principal.Roles(),
 		"bindings":     principal.Bindings,
+		"permissions":  principal.Permissions(),
 	})
 }
 

@@ -306,27 +306,26 @@ func (s *Server) requiresSecondPerson(environment string) bool {
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
-	principal := authz.FromContext(r.Context())
-	if !principal.Authenticated() {
-		s.authorize(w, r, authz.PermJobRead, authz.GlobalScope, "job", "")
+	principal, ok := s.authorizeCollection(w, r, authz.PermJobRead, "job")
+	if !ok {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.jobs.List(r.Context(), jobs.ListFilter{
+	// Zawezenie robi baza: sprawdzanie zakresu po pobraniu oznaczalo zapytanie
+	// o hosta dla kazdego zadania z osobna.
+	scopes := principal.ScopesFor(authz.PermJobRead)
+	filtr := jobs.ListFilter{
 		HostID: r.URL.Query().Get("host_id"),
 		State:  r.URL.Query().Get("state"),
 		Limit:  limit,
-	})
+	}
+	for _, scope := range scopes {
+		filtr.Scopes = append(filtr.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
+	}
+	visible, err := s.jobs.List(r.Context(), filtr)
 	if err != nil {
 		s.fail(w, err)
 		return
-	}
-	// Lista jest zawezana do zakresow, w ktorych tozsamosc ma prawo odczytu.
-	visible := make([]jobs.Job, 0, len(items))
-	for _, job := range items {
-		if principal.Can(authz.PermJobRead, s.jobScope(r, job.HostID)) {
-			visible = append(visible, job)
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "count": len(visible)})
 }

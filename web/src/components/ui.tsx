@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ApiError } from "../lib/api";
 import { optional, relativeTime, absoluteTime } from "../lib/format";
 
 /** Znacznik stanu polaczenia. Stan nieznany ma wlasny wyglad. */
@@ -54,7 +55,15 @@ export function Pusto({ children }: { children: ReactNode }) {
   return <div className="pusto">{children}</div>;
 }
 
+/**
+ * Odmowa nie jest awaria panelu, tylko odpowiedzia serwera na uprawnienia
+ * uzytkownika. Czerwony komunikat o bledzie sugerowalby usterke tam, gdzie
+ * system dziala poprawnie.
+ */
 export function Blad({ error }: { error: unknown }) {
+  if (error instanceof ApiError && error.forbidden) {
+    return <Pusto>Brak uprawnienia do tego widoku.</Pusto>;
+  }
   const message = error instanceof Error ? error.message : String(error);
   return <div className="blad-strony">Blad: {message}</div>;
 }

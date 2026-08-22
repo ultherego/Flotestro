@@ -150,6 +150,8 @@ export type Whoami = {
   kind: string;
   roles: string[];
   bindings: { role: string; scope: { site: string; environment: string } }[];
+  /** Uprawnienia w dowolnym zakresie; interfejs ukrywa nimi sekcje bez pokrycia. */
+  permissions: string[];
 };
 
 export type DirectoryUser = {
