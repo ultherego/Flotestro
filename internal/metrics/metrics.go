@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/pki"
 )
 
 // SessionCounter podaje liczbe aktywnych sesji agentow tej instancji.
@@ -35,8 +37,16 @@ type Collector struct {
 	pool     *pgxpool.Pool
 	sessions SessionCounter
 	ca       CertificateSource
-	gateway  string
-	started  time.Time
+	// authorities opisuje caly zbior zaufania, jesli instalacja nim zarzadza.
+	authorities func() []pki.Authority
+	gateway     string
+	started     time.Time
+}
+
+// WithAuthorities dokłada metryki dla kazdego CA w zbiorze zaufania.
+func (c *Collector) WithAuthorities(source func() []pki.Authority) *Collector {
+	c.authorities = source
+	return c
 }
 
 func NewCollector(pool *pgxpool.Pool, sessions SessionCounter, ca CertificateSource,
@@ -91,8 +101,26 @@ func (c *Collector) Gather(ctx context.Context) []byte {
 		if notAfter := c.ca.NotAfter(); !notAfter.IsZero() {
 			metrics = append(metrics, metric{
 				name: "flotestro_ca_certificate_expires_in_seconds", kind: "gauge",
-				help:    "Czas do wygasniecia certyfikatu CA floty.",
+				help:    "Czas do wygasniecia CA podpisujacego certyfikaty agentow.",
 				samples: []sample{{value: time.Until(notAfter).Seconds()}},
+			})
+		}
+	}
+	if c.authorities != nil {
+		// Wycofane CA tez musi byc widoczne: jego wygasniecie odcina hosty,
+		// ktore nie zdazyly przejsc na nowe.
+		var samples []sample
+		for _, ca := range c.authorities() {
+			samples = append(samples, sample{
+				labels: map[string]string{"state": ca.State, "serial": ca.Serial},
+				value:  time.Until(ca.NotAfter).Seconds(),
+			})
+		}
+		if len(samples) > 0 {
+			metrics = append(metrics, metric{
+				name: "flotestro_trust_authority_expires_in_seconds", kind: "gauge",
+				help:    "Czas do wygasniecia kazdego CA w zbiorze zaufania floty.",
+				samples: samples,
 			})
 		}
 	}

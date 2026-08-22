@@ -296,8 +296,9 @@ func run() error {
 					StepUpACR:              *stepUpACR,
 					// Metryka waznosci CA ma pokazywac CA podpisujace,
 					// takze po wymianie, wiec czyta caly zbior zaufania.
-					Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID),
-					Trust:   trust,
+					Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID).
+						WithAuthorities(trust.Authorities),
+					Trust: trust,
 				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,

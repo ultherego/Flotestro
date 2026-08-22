@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { GroupMapping, Principal } from "../lib/types";
 import { Blad, Czas, Pusto } from "../components/ui";
+import { CentrumCA } from "./CentrumCA";
 
 const ROLE = [
   "viewer", "auditor", "operator", "approver", "identity_admin", "platform_admin",
@@ -16,7 +17,8 @@ const ROLE = [
  * z opisem zmiany.
  */
 export function Dostep() {
-  const [zakladka, setZakladka] = useState<"mapowania" | "tozsamosci">("mapowania");
+  const [zakladka, setZakladka] = useState<"mapowania" | "tozsamosci" | "ca">("mapowania");
+  const [ostrzezenie, setOstrzezenie] = useState<ApiError | null>(null);
 
   return (
     <>
@@ -33,9 +35,15 @@ export function Dostep() {
         <button className={zakladka === "tozsamosci" ? "aktywna" : ""} onClick={() => setZakladka("tozsamosci")}>
           Tozsamosci
         </button>
+        <button className={zakladka === "ca" ? "aktywna" : ""} onClick={() => setZakladka("ca")}>
+          CA floty
+        </button>
       </div>
 
-      {zakladka === "mapowania" ? <Mapowania /> : <Tozsamosci />}
+      {zakladka === "ca" && <Ostrzezenie blad={ostrzezenie} zamknij={() => setOstrzezenie(null)} />}
+      {zakladka === "mapowania" && <Mapowania />}
+      {zakladka === "tozsamosci" && <Tozsamosci />}
+      {zakladka === "ca" && <CentrumCA zglosBlad={setOstrzezenie} />}
     </>
   );
 }

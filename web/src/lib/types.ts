@@ -233,3 +233,21 @@ export type GroupMapping = {
   created_by: string;
   created_at: string;
 };
+
+/**
+ * CA floty. Stan "pending" znaczy, ze CA jest juz uznawane i rozsylane, ale
+ * jeszcze nie podpisuje - przekazanie mu podpisywania wymaga, zeby cala flota
+ * zdazyla je poznac.
+ */
+export type Authority = {
+  subject: string;
+  serial: string;
+  fingerprint: string;
+  not_before: string;
+  not_after: string;
+  state: "active" | "pending" | "retired";
+  hosts_using: number;
+  prepared_at?: string;
+  hosts_missing?: number;
+  ready_to_activate?: boolean;
+};
