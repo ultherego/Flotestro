@@ -150,7 +150,7 @@ function Mapowania() {
           <div className="operacje">
             <button disabled={!grupa.trim() || powod.trim().length < 8 || dodaj.isPending}
                     onClick={() => dodaj.mutate()}>
-              Dodaj mapowanie
+              Add mapping
             </button>
             <button onClick={() => setFormularz(false)}>Cancel</button>
           </div>

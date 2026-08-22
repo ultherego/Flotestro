@@ -142,7 +142,7 @@ function Pakiety({ host }: { host: HostType }) {
       )}
       <ZlecOperacje
         host={host}
-        opis="Policz dostepne aktualizacje bez zmiany stanu hosta."
+        opis="Count available updates without changing host state."
         akcja="packages.plan"
         payload={{ package_plan: { refresh_metadata: true } }}
         etykieta="Plan updates"

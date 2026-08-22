@@ -57,6 +57,9 @@ type Apply struct {
 	RebootRequired         bool     `json:"reboot_required"`
 	ServicesNeedingRestart []string `json:"services_needing_restart,omitempty"`
 	DatabaseBroken         bool     `json:"package_database_broken"`
+	// PackagesNeedingAttention wskazuje pakiety, ktore blokuja transakcje.
+	// Bez nich komunikat o naprawie bazy nie mowi, co naprawic.
+	PackagesNeedingAttention []string `json:"packages_needing_attention,omitempty"`
 }
 
 // Options zawezaja zakres planu lub transakcji.

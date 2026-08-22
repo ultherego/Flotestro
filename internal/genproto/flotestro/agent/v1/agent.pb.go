@@ -3734,8 +3734,16 @@ type PackageApplyResult struct {
 	// Prawda, gdy po awarii dpkg zostal w stanie wymagajacym naprawy.
 	// Kolejne kampanie na tym hoscie musza zostac wstrzymane.
 	PackageDatabaseBroken bool `protobuf:"varint,5,opt,name=package_database_broken,json=packageDatabaseBroken,proto3" json:"package_database_broken,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+	//
+	// Sama informacja "baza pakietow wymaga naprawy" nie mowi operatorowi, co
+	// ma zrobic. Typowy przypadek to pakiet z pytaniem konfiguracyjnym bez
+	// odpowiedzi, na przyklad bootloader pytajacy o urzadzenie docelowe: kazda
+	// kolejna transakcja probuje go najpierw dokonfigurowac i pada, nawet gdy
+	// nie ma nic do aktualizacji.
+	PackagesNeedingAttention []string `protobuf:"bytes,6,rep,name=packages_needing_attention,json=packagesNeedingAttention,proto3" json:"packages_needing_attention,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *PackageApplyResult) Reset() {
@@ -3801,6 +3809,13 @@ func (x *PackageApplyResult) GetPackageDatabaseBroken() bool {
 		return x.PackageDatabaseBroken
 	}
 	return false
+}
+
+func (x *PackageApplyResult) GetPackagesNeedingAttention() []string {
+	if x != nil {
+		return x.PackagesNeedingAttention
+	}
+	return nil
 }
 
 type UnitStatusResult struct {
@@ -4316,13 +4331,14 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x14disk_available_bytes\x18\x04 \x01(\x04R\x12diskAvailableBytes\x12\x1b\n" +
 	"\tplan_hash\x18\x05 \x01(\fR\bplanHash\x12)\n" +
 	"\x10reboot_predicted\x18\x06 \x01(\bR\x0frebootPredicted\x12-\n" +
-	"\x12metadata_refreshed\x18\a \x01(\bR\x11metadataRefreshed\"\x86\x02\n" +
+	"\x12metadata_refreshed\x18\a \x01(\bR\x11metadataRefreshed\"\xc4\x02\n" +
 	"\x12PackageApplyResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12;\n" +
 	"\aapplied\x18\x02 \x03(\v2!.flotestro.agent.v1.PackageChangeR\aapplied\x12'\n" +
 	"\x0freboot_required\x18\x03 \x01(\bR\x0erebootRequired\x128\n" +
 	"\x18services_needing_restart\x18\x04 \x03(\tR\x16servicesNeedingRestart\x126\n" +
-	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\"G\n" +
+	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\x12<\n" +
+	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\"G\n" +
 	"\x10UnitStatusResult\x123\n" +
 	"\x05units\x18\x01 \x03(\v2\x1d.flotestro.agent.v1.UnitStateR\x05units\"\xdd\x01\n" +
 	"\x12DomainEnrollResult\x12:\n" +

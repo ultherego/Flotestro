@@ -1381,8 +1381,10 @@ type PackageActionResult struct {
 	ServicesNeedingRestart []string                `protobuf:"bytes,4,rep,name=services_needing_restart,json=servicesNeedingRestart,proto3" json:"services_needing_restart,omitempty"`
 	// Prawda, gdy baza pakietow wymaga naprawy po nieudanej transakcji.
 	PackageDatabaseBroken bool `protobuf:"varint,5,opt,name=package_database_broken,json=packageDatabaseBroken,proto3" json:"package_database_broken,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+	PackagesNeedingAttention []string `protobuf:"bytes,6,rep,name=packages_needing_attention,json=packagesNeedingAttention,proto3" json:"packages_needing_attention,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *PackageActionResult) Reset() {
@@ -1448,6 +1450,13 @@ func (x *PackageActionResult) GetPackageDatabaseBroken() bool {
 		return x.PackageDatabaseBroken
 	}
 	return false
+}
+
+func (x *PackageActionResult) GetPackagesNeedingAttention() []string {
+	if x != nil {
+		return x.PackagesNeedingAttention
+	}
+	return nil
 }
 
 type PackageVersionChange struct {
@@ -1730,13 +1739,14 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x12unavailable_reason\x18\x06 \x01(\tR\x11unavailableReasonB\x0e\n" +
 	"\f_keytab_kvnoB\x14\n" +
 	"\x12_cache_age_secondsB\x0e\n" +
-	"\f_sssd_online\"\x8f\x02\n" +
+	"\f_sssd_online\"\xcd\x02\n" +
 	"\x13PackageActionResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12C\n" +
 	"\aapplied\x18\x02 \x03(\v2).flotestro.helper.v1.PackageVersionChangeR\aapplied\x12'\n" +
 	"\x0freboot_required\x18\x03 \x01(\bR\x0erebootRequired\x128\n" +
 	"\x18services_needing_restart\x18\x04 \x03(\tR\x16servicesNeedingRestart\x126\n" +
-	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\"v\n" +
+	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\x12<\n" +
+	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\"v\n" +
 	"\x14PackageVersionChange\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0eversion_before\x18\x02 \x01(\tR\rversionBefore\x12#\n" +

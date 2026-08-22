@@ -6,6 +6,15 @@ import { Blad, Pusto } from "../components/ui";
 
 type Zakladka = "uzytkownicy" | "grupy" | "hbac" | "sudo";
 
+// Klucz zakladki jest identyfikatorem w kodzie, a nie napisem dla operatora.
+// Wyswietlanie go wprost dawalo w interfejsie angielskim polskie nazwy.
+const nazwaZakladki: Record<Zakladka, string> = {
+  uzytkownicy: "Users",
+  grupy: "Groups",
+  hbac: "HBAC rules",
+  sudo: "sudo rules",
+};
+
 /**
  * Widok katalogu tozsamosci. Reguly HBAC i sudo maja osobne uprawnienie:
  * opisuja, kto moze wejsc na host i podniesc uprawnienia.
@@ -28,13 +37,13 @@ export function Katalog() {
             ? `${stan.data.summary} · connector: ${stan.data.principal}`
             : stan.data?.error
               ? `Directory unavailable: ${stan.data.error}`
-              : "Sprawdzanie…"}
+              : "Checking…"}
       </p>
 
       <div className="zakladki">
         {(["uzytkownicy", "grupy", "hbac", "sudo"] as Zakladka[]).map((klucz) => (
           <button key={klucz} className={zakladka === klucz ? "aktywna" : ""} onClick={() => setZakladka(klucz)}>
-            {klucz}
+            {nazwaZakladki[klucz]}
           </button>
         ))}
       </div>

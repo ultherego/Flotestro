@@ -176,6 +176,8 @@ message PackageActionResult {
   repeated string services_needing_restart = 4;
   // Prawda, gdy baza pakietow wymaga naprawy po nieudanej transakcji.
   bool package_database_broken = 5;
+  // Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+  repeated string packages_needing_attention = 6;
 }
 
 message PackageVersionChange {

@@ -138,15 +138,15 @@ function WynikTypowany({ detail }: { detail: Record<string, any> }) {
         <div className="zrodlo">
           plan {detail.manager}: {detail.changes?.length ?? 0} zmian, pobranie{" "}
           {Math.round((detail.download_bytes ?? 0) / 1048576)} MB
-          {detail.reboot_predicted && ", przewidziany restart"}
+          {detail.reboot_predicted && ", reboot predicted"}
         </div>
       );
     case "package_apply":
       return (
         <div className="zrodlo">
           zastosowano {detail.applied?.length ?? 0} pakietow
-          {detail.reboot_required && ", wymagany restart"}
-          {detail.package_database_broken && ", BAZA PAKIETOW WYMAGA NAPRAWY"}
+          {detail.reboot_required && ", reboot required"}
+          {detail.package_database_broken && ", PACKAGE DATABASE NEEDS REPAIR"}
         </div>
       );
     case "domain_enroll":

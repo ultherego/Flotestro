@@ -18,8 +18,8 @@ export function Audyt() {
       <>
         <h1>Audit</h1>
         <Pusto>
-          Brak uprawnienia do odczytu dziennika calej floty. Audyt pojedynczego hosta
-          jest dostepny w jego widoku.
+          You do not have permission to read the fleet-wide audit trail.
+          A single host's audit trail is available in its own view.
         </Pusto>
       </>
     );
@@ -36,7 +36,7 @@ export function Audyt() {
       <div className="filtry">
         <label>
           <input type="checkbox" checked={tylkoOdmowy} onChange={(e) => setTylkoOdmowy(e.target.checked)} />
-          {" "}tylko odmowy
+          {" "}denials only
         </label>
       </div>
 
@@ -44,7 +44,7 @@ export function Audyt() {
         <Pusto>No events.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Time</th><th>Actor</th><th>Typ</th><th>Operation</th><th>Target</th><th>Result</th><th>Details</th></tr></thead>
+          <thead><tr><th>Time</th><th>Actor</th><th>Kind</th><th>Operation</th><th>Target</th><th>Result</th><th>Details</th></tr></thead>
           <tbody>
             {zdarzenia.map((zdarzenie) => (
               <tr key={zdarzenie.id}>

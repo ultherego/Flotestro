@@ -173,11 +173,12 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 		})
 	}
 	return &agentv1.PackageApplyResult{
-		Manager:                result.GetManager(),
-		Applied:                changes,
-		RebootRequired:         result.GetRebootRequired(),
-		ServicesNeedingRestart: result.GetServicesNeedingRestart(),
-		PackageDatabaseBroken:  result.GetPackageDatabaseBroken(),
+		Manager:                  result.GetManager(),
+		Applied:                  changes,
+		RebootRequired:           result.GetRebootRequired(),
+		ServicesNeedingRestart:   result.GetServicesNeedingRestart(),
+		PackageDatabaseBroken:    result.GetPackageDatabaseBroken(),
+		PackagesNeedingAttention: result.GetPackagesNeedingAttention(),
 	}
 }
 

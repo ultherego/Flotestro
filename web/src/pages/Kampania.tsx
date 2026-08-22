@@ -58,8 +58,8 @@ export function Kampania() {
 
       <Pary>
         <Para etykieta="Canary / wave">{dane.canary_size} / {dane.wave_size}</Para>
-        <Para etykieta="Rownolegle hostow">{dane.max_concurrent}</Para>
-        <Para etykieta="Failure threshold">{dane.failure_threshold_percent}% albo {dane.failure_threshold_absolute} szt.</Para>
+        <Para etykieta="Concurrent hosts">{dane.max_concurrent}</Para>
+        <Para etykieta="Failure threshold">{dane.failure_threshold_percent}% or {dane.failure_threshold_absolute} hosts</Para>
         <Para etykieta="Reboot policy">{dane.reboot_policy}</Para>
         <Para etykieta="Approved by">{dane.approved_by || "—"}</Para>
         <Para etykieta="Paused by">{dane.paused_by || "—"}</Para>

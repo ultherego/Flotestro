@@ -276,11 +276,12 @@ func packageResultToProto(apply packages.Apply) *helperv1.PackageActionResult {
 		})
 	}
 	return &helperv1.PackageActionResult{
-		Manager:                apply.Manager,
-		Applied:                changes,
-		RebootRequired:         apply.RebootRequired,
-		ServicesNeedingRestart: apply.ServicesNeedingRestart,
-		PackageDatabaseBroken:  apply.DatabaseBroken,
+		Manager:                  apply.Manager,
+		Applied:                  changes,
+		RebootRequired:           apply.RebootRequired,
+		ServicesNeedingRestart:   apply.ServicesNeedingRestart,
+		PackageDatabaseBroken:    apply.DatabaseBroken,
+		PackagesNeedingAttention: apply.PackagesNeedingAttention,
 	}
 }
 

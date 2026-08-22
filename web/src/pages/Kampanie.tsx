@@ -152,7 +152,7 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
       {blad && <p className="blad-strony" style={{ marginTop: 12 }}>{blad}</p>}
       <div style={{ marginTop: 16 }}>
         <button onClick={() => utworz.mutate()} disabled={!gotowe || utworz.isPending}>
-          {utworz.isPending ? "Tworzenie…" : `Utworz kampanie na ${liczbaCelow} hostach`}
+          {utworz.isPending ? "Creating…" : `Utworz kampanie na ${liczbaCelow} hostach`}
         </button>{" "}
         <button className="wtorny" onClick={onGotowe}>Cancel</button>
       </div>

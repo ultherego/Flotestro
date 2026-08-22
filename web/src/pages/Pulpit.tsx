@@ -131,7 +131,7 @@ function powodyUwagi(host: Host): string[] {
   if (host.connection_state !== "online") powody.push("no connection");
   if (host.reboot_required) powody.push("wymaga restartu");
   if ((host.failed_units ?? 0) > 0) powody.push(`${host.failed_units} jednostek w bledzie`);
-  if (host.package_database_broken) powody.push("uszkodzona baza pakietow");
+  if (host.package_database_broken) powody.push("package database needs repair");
   if (host.identity.enrolled && host.identity.sssd_online === false) powody.push("SSSD offline");
   return powody;
 }

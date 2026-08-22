@@ -131,8 +131,8 @@ function Wiersz({ host, konto }: { host: Host; konto: LocalAccount }) {
           <td colSpan={7}>
             <div className="formularz">
               <p className="podtytul">
-                Pelna lista kluczy konta {konto.name}, po jednym w wierszu. Zapisanie pustej
-                listy odbiera dostep kluczem SSH.
+                The complete set of keys for {konto.name}, one per line. Saving an empty
+                list revokes SSH key access.
               </p>
               <textarea
                 rows={4}

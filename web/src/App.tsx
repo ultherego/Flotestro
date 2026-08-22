@@ -59,7 +59,7 @@ export function App() {
               i logowac nia po cichu. Bez tego odnosnika nie ma z tego wyjscia
               inaczej niz przez czyszczenie ciasteczek przegladarki. */}
           <a href={`/auth/login?force=1&redirect=${encodeURIComponent(window.location.pathname)}`}>
-            Zmien konto
+            Switch account
           </a>
           <a href="#" onClick={wyloguj}>Sign out</a>
         </div>

@@ -488,12 +488,13 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	case *agentv1.TaskResult_PackageApply:
 		apply := detail.PackageApply
 		encoded, err := json.Marshal(map[string]any{
-			"kind":                     "package_apply",
-			"manager":                  apply.GetManager(),
-			"applied":                  packageChangesJSON(apply.GetApplied()),
-			"reboot_required":          apply.GetRebootRequired(),
-			"services_needing_restart": apply.GetServicesNeedingRestart(),
-			"package_database_broken":  apply.GetPackageDatabaseBroken(),
+			"kind":                       "package_apply",
+			"manager":                    apply.GetManager(),
+			"applied":                    packageChangesJSON(apply.GetApplied()),
+			"reboot_required":            apply.GetRebootRequired(),
+			"services_needing_restart":   apply.GetServicesNeedingRestart(),
+			"package_database_broken":    apply.GetPackageDatabaseBroken(),
+			"packages_needing_attention": apply.GetPackagesNeedingAttention(),
 		})
 		if err != nil {
 			return nil

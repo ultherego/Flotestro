@@ -528,6 +528,14 @@ message PackageApplyResult {
   // Prawda, gdy po awarii dpkg zostal w stanie wymagajacym naprawy.
   // Kolejne kampanie na tym hoscie musza zostac wstrzymane.
   bool package_database_broken = 5;
+  // Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+  //
+  // Sama informacja "baza pakietow wymaga naprawy" nie mowi operatorowi, co
+  // ma zrobic. Typowy przypadek to pakiet z pytaniem konfiguracyjnym bez
+  // odpowiedzi, na przyklad bootloader pytajacy o urzadzenie docelowe: kazda
+  // kolejna transakcja probuje go najpierw dokonfigurowac i pada, nawet gdy
+  // nie ma nic do aktualizacji.
+  repeated string packages_needing_attention = 6;
 }
 
 

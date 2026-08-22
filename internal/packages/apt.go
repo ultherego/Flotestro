@@ -186,11 +186,19 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 	after := a.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
-	apply.DatabaseBroken = a.DatabaseBroken(ctx)
+	apply.PackagesNeedingAttention = a.PackagesNeedingAttention(ctx)
+	apply.DatabaseBroken = len(apply.PackagesNeedingAttention) > 0
 	apply.RebootRequired = fileExists("/var/run/reboot-required") || fileExists("/run/reboot-required")
 	apply.ServicesNeedingRestart = a.servicesNeedingRestart(ctx)
 
 	if !result.Ran || result.ExitCode != 0 {
+		// Nazwa pakietu wchodzi do komunikatu, bo bez niej operator wie tylko
+		// tyle, ze transakcja padla, i musi zalogowac sie na host, zeby ustalic
+		// przyczyne.
+		if len(apply.PackagesNeedingAttention) > 0 {
+			return apply, fmt.Errorf("apt-get upgrade: %s; wymaga uwagi: %s",
+				result.Reason(), strings.Join(apply.PackagesNeedingAttention, ", "))
+		}
 		return apply, fmt.Errorf("apt-get upgrade: %s", result.Reason())
 	}
 	return apply, nil
@@ -215,11 +223,32 @@ func (a *APT) installedVersions(ctx context.Context) map[string]string {
 // DatabaseBroken sprawdza, czy dpkg zostal w stanie wymagajacym naprawy.
 // Po takiej awarii kolejne kampanie na hoscie musza zostac wstrzymane.
 func (a *APT) DatabaseBroken(ctx context.Context) bool {
+	return len(a.PackagesNeedingAttention(ctx)) > 0
+}
+
+// PackagesNeedingAttention wypisuje pakiety, ktorych stan blokuje transakcje.
+//
+// dpkg --audit opisuje problem zdaniami przeznaczonymi dla czlowieka, ale
+// nazwy pakietow podaje w osobnych, wcietych wierszach. Bierzemy je stamtad,
+// zeby operator dostal nazwe zamiast zdania o koniecznosci naprawy.
+func (a *APT) PackagesNeedingAttention(ctx context.Context) []string {
 	result := run(ctx, time.Minute, dpkgPath, "--audit")
-	if !result.Ran {
-		return false
+	if !result.Ran || strings.TrimSpace(result.Stdout) == "" {
+		return nil
 	}
-	return strings.TrimSpace(result.Stdout) != ""
+	var pakiety []string
+	for _, linia := range strings.Split(result.Stdout, "\n") {
+		if !strings.HasPrefix(linia, " ") {
+			continue
+		}
+		pola := strings.Fields(linia)
+		if len(pola) == 0 {
+			continue
+		}
+		// Wiersz opisu zaczyna sie od nazwy pakietu; reszta to jego opis.
+		pakiety = append(pakiety, pola[0])
+	}
+	return pakiety
 }
 
 // servicesNeedingRestart czyta liste zapisana przez needrestart, jesli jest
