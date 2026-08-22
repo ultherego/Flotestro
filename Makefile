@@ -2,8 +2,9 @@ GOBIN     := $(shell go env GOPATH)/bin
 PROTO_DIR := api/proto
 GEN_DIR   := internal/genproto
 LDFLAGS   := -s -w
+VERSION   ?= 0.1.0
 
-.PHONY: help build build-agent generate test test-integration lint tidy clean
+.PHONY: help build build-agent package-deb package-rpm generate test test-integration lint tidy clean
 
 help:
 	@grep -E '^[a-zA-Z-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -14,6 +15,18 @@ build: ## Buduje control plane i agenta dla hosta
 
 build-agent: ## Buduje statycznego agenta dla linux/amd64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent-linux-amd64 ./cmd/agent
+
+package-deb: ## Buduje pakiet .deb agenta (wymaga dpkg-deb)
+	@mkdir -p dist bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent ./cmd/agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent-helper ./cmd/agent-helper
+	packaging/build-deb.sh bin $(VERSION) amd64 dist
+
+package-rpm: ## Buduje pakiet .rpm agenta (wymaga rpmbuild)
+	@mkdir -p dist bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent ./cmd/agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent-helper ./cmd/agent-helper
+	packaging/build-rpm.sh bin $(VERSION) dist
 
 generate: ## Generuje kod z kontraktu protobuf
 	PATH="$(PATH):$(GOBIN)" protoc \

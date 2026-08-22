@@ -1,0 +1,44 @@
+#!/bin/sh
+# Konfiguracja agenta po instalacji pakietu.
+set -e
+
+case "$1" in
+configure)
+    # Konto uslugowe bez powloki i bez katalogu domowego: agent nie jest
+    # tozsamoscia, ktora ktokolwiek loguje sie na hoscie.
+    if ! getent passwd flotestro-agent >/dev/null; then
+        adduser --system --group --no-create-home \
+            --home /var/lib/flotestro-agent --shell /usr/sbin/nologin \
+            flotestro-agent >/dev/null
+    fi
+
+    # Odczyt dziennika bez roota wymaga czlonkostwa w grupie systemd-journal.
+    # Brak grupy nie jest bledem instalacji - odczyt dziennika bedzie wtedy
+    # niedostepny, a agent to zglosi zamiast udawac, ze dziennik jest pusty.
+    if getent group systemd-journal >/dev/null; then
+        usermod --append --groups systemd-journal flotestro-agent
+    fi
+
+    install -d -m 0700 -o flotestro-agent -g flotestro-agent /var/lib/flotestro-agent
+    install -d -m 0755 /etc/flotestro
+    if [ -f /etc/flotestro/agent.env ]; then
+        chown root:flotestro-agent /etc/flotestro/agent.env
+        chmod 0640 /etc/flotestro/agent.env
+    fi
+
+    systemctl daemon-reload || true
+    # Gniazdo helpera musi istniec, zanim agent sprobuje sie z nim polaczyc.
+    systemctl enable --now flotestro-helper.socket || true
+
+    # Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go
+    # w petli restartow zasmiecaloby dziennik hosta; instalacja konczy sie
+    # wtedy wskazowka, a nie cichym bledem.
+    if grep -qs '^FLOTESTRO_GATEWAY_URL=.\+' /etc/flotestro/agent.env; then
+        systemctl enable --now flotestro-agent.service || true
+    else
+        systemctl enable flotestro-agent.service || true
+        echo "flotestro-agent: uzupelnij /etc/flotestro/agent.env i uruchom" >&2
+        echo "  systemctl start flotestro-agent.service" >&2
+    fi
+    ;;
+esac

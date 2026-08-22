@@ -9,7 +9,7 @@ Type=simple
 User=flotestro-agent
 Group=flotestro-agent
 EnvironmentFile=/etc/flotestro/agent.env
-ExecStart=/usr/local/bin/flotestro-agent
+ExecStart=/usr/bin/flotestro-agent
 Restart=always
 RestartSec=5s
 

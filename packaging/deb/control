@@ -1,0 +1,16 @@
+Package: flotestro-agent
+Version: __WERSJA__
+Section: admin
+Priority: optional
+Architecture: __ARCH__
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, adduser
+Recommends: systemd-journal-remote
+Description: Agent floty Flotestro
+ Agent laczy hosta z panelem zarzadzania flota Linux. Utrzymuje sesje mTLS
+ do control plane, raportuje inventory i wykonuje wylacznie operacje typowane
+ - kontrakt nie zna pola z dowolnym poleceniem powloki.
+ .
+ Operacje wymagajace roota realizuje osobny proces pomocniczy uruchamiany
+ przez gniazdo systemd, ktory weryfikuje wolajacego po SO_PEERCRED. Sam agent
+ dziala bez uprawnien roota.

@@ -9,7 +9,7 @@ Type=simple
 User=flotestro
 Group=flotestro
 EnvironmentFile=/etc/flotestro/control-plane.env
-ExecStart=/usr/local/bin/flotestro-control-plane
+ExecStart=/usr/bin/flotestro-control-plane
 Restart=always
 RestartSec=5s
 

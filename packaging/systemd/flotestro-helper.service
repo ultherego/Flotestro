@@ -9,7 +9,7 @@ Type=simple
 # Helper dziala jako root, ale jest uruchamiany wylacznie przez aktywacje
 # gniazdem i konczy prace po okresie bezczynnosci. W spoczynku floty nie
 # dziala zaden proces uprzywilejowany.
-ExecStart=/usr/local/bin/flotestro-agent-helper
+ExecStart=/usr/bin/flotestro-agent-helper
 Environment=FLOTESTRO_AGENT_USER=flotestro-agent
 Environment=FLOTESTRO_HELPER_IDLE_SECONDS=300
 

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+case "$1" in
+remove|deconfigure)
+    systemctl stop flotestro-agent.service || true
+    systemctl stop flotestro-helper.socket flotestro-helper.service || true
+    systemctl disable flotestro-agent.service flotestro-helper.socket || true
+    ;;
+esac

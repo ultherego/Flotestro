@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+case "$1" in
+purge)
+    # Tozsamosc agenta i klucz prywatny zostaja przy zwyklym usunieciu:
+    # ponowna instalacja ma odzyskac te sama tozsamosc bez enrollmentu.
+    # Purge kasuje je swiadomie - host bedzie wtedy nowa maszyna dla panelu.
+    rm -rf /var/lib/flotestro-agent
+    rm -f /etc/flotestro/agent.env
+    rmdir /etc/flotestro 2>/dev/null || true
+    if getent passwd flotestro-agent >/dev/null; then
+        deluser --system flotestro-agent >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+systemctl daemon-reload || true
