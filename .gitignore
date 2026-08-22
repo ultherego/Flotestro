@@ -1,0 +1,14 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+
+# Node / Web UI
+node_modules/
+/web/dist/
+
+# lokalna konfiguracja
+.env
+.env.*
+*.local
