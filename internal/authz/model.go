@@ -65,6 +65,12 @@ const (
 	// To material rozpoznawczy, wiec ma wlasne uprawnienie, a nie jest
 	// dostepny kazdemu, kto zna adres panelu.
 	PermMetricsRead Permission = "metrics.read"
+
+	// CA floty jest korzeniem zaufania dla kazdego hosta. Jego wymiana ma
+	// wlasne uprawnienie, osobne od reszty administracji: blad w tym miejscu
+	// odcina cala flote.
+	PermPKIRead   Permission = "pki.read"
+	PermPKIRotate Permission = "pki.rotate"
 )
 
 // Role grupuje uprawnienia. Podzial odpowiada rolom z dokumentu: platform
@@ -90,8 +96,9 @@ var rolePermissions = map[Role][]Permission{
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
-		// Auditor patrzy na stan systemu, wiec metryki naleza do jego pracy.
-		PermMetricsRead,
+		// Auditor patrzy na stan systemu, wiec metryki i przeglad CA naleza
+		// do jego pracy; wymiana CA juz nie.
+		PermMetricsRead, PermPKIRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -133,6 +140,7 @@ var rolePermissions = map[Role][]Permission{
 		PermEnrollmentToken, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
+		PermPKIRead, PermPKIRotate,
 	},
 }
 

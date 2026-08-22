@@ -190,6 +190,9 @@ type IssuedCert struct {
 	NotBefore   time.Time
 	NotAfter    time.Time
 	CommonName  string
+	// Wystawca pozwala policzyc, ilu hostow dotyczy wycofanie danego CA.
+	IssuerSubject string
+	IssuerSerial  string
 }
 
 // SignAgentCSR podpisuje CSR agenta, osadzajac tozsamosc hosta w URI SAN.
@@ -229,12 +232,14 @@ func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
 	}
 	sum := sha256.Sum256(der)
 	return &IssuedCert{
-		PEM:         pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
-		Serial:      serial.String(),
-		Fingerprint: sum[:],
-		NotBefore:   template.NotBefore,
-		NotAfter:    template.NotAfter,
-		CommonName:  hostID,
+		PEM:           pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		Serial:        serial.String(),
+		Fingerprint:   sum[:],
+		NotBefore:     template.NotBefore,
+		NotAfter:      template.NotAfter,
+		IssuerSubject: ca.Certificate.Subject.CommonName,
+		IssuerSerial:  ca.Certificate.SerialNumber.String(),
+		CommonName:    hostID,
 	}, nil
 }
 

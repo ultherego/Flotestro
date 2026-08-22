@@ -60,7 +60,7 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
 	}
 
-	issued, err := s.ca.SignAgentCSR(req.Msg.GetCsrPem(), hostID)
+	issued, err := s.trust.Active().SignAgentCSR(req.Msg.GetCsrPem(), hostID)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: hostID,
@@ -78,7 +78,8 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
-		issued.Fingerprint, issued.NotBefore, issued.NotAfter); err != nil {
+		issued.Fingerprint, issued.NotBefore, issued.NotAfter,
+		issued.IssuerSubject, issued.IssuerSerial); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("zapis certyfikatu: %w", err))
 	}
 	if err := s.audit.RecordTx(ctx, tx, audit.Event{
@@ -103,7 +104,9 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 
 	return connect.NewResponse(&agentv1.RenewCertificateResponse{
 		CertificatePem: issued.PEM,
-		CaBundlePem:    s.ca.PEM,
-		NotAfter:       timestamppb.New(issued.NotAfter),
+		// Bundle niesie wszystkie uznawane CA, wiec agent poznaje nowe CA
+		// przy zwyklym odnowieniu, bez osobnej dystrybucji.
+		CaBundlePem: s.trust.Bundle(),
+		NotAfter:    timestamppb.New(issued.NotAfter),
 	}), nil
 }

@@ -18,16 +18,16 @@ import (
 // EnrollmentService przyjmuje hosty, ktore nie maja jeszcze tozsamosci.
 // Jest to jedyny endpoint dostepny bez certyfikatu klienta.
 type EnrollmentService struct {
-	ca     *pki.CA
+	trust  *pki.Trust
 	hosts  *hosts.Store
 	tokens *enrollment.TokenStore
 	audit  *audit.Recorder
 	log    *slog.Logger
 }
 
-func NewEnrollmentService(ca *pki.CA, hostStore *hosts.Store, tokens *enrollment.TokenStore,
+func NewEnrollmentService(trust *pki.Trust, hostStore *hosts.Store, tokens *enrollment.TokenStore,
 	recorder *audit.Recorder, log *slog.Logger) *EnrollmentService {
-	return &EnrollmentService{ca: ca, hosts: hostStore, tokens: tokens, audit: recorder, log: log}
+	return &EnrollmentService{trust: trust, hosts: hostStore, tokens: tokens, audit: recorder, log: log}
 }
 
 // Enroll wymienia wazny token i CSR na certyfikat agenta. Cala operacja jest
@@ -78,7 +78,7 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	issued, err := s.ca.SignAgentCSR(msg.GetCsrPem(), hostID)
+	issued, err := s.trust.Active().SignAgentCSR(msg.GetCsrPem(), hostID)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
@@ -90,7 +90,8 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	}
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
-		issued.Fingerprint, issued.NotBefore, issued.NotAfter); err != nil {
+		issued.Fingerprint, issued.NotBefore, issued.NotAfter,
+		issued.IssuerSubject, issued.IssuerSerial); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -121,7 +122,7 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	return connect.NewResponse(&agentv1.EnrollResponse{
 		HostId:         hostID,
 		CertificatePem: issued.PEM,
-		CaBundlePem:    s.ca.PEM,
+		CaBundlePem:    s.trust.Bundle(),
 		NotAfter:       timestamppb.New(issued.NotAfter),
 	}), nil
 }

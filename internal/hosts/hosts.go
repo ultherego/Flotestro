@@ -127,12 +127,14 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, id Identity) (hostID stri
 
 // SaveCertificate zapisuje wystawiony certyfikat agenta.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
-	fingerprint []byte, notBefore, notAfter time.Time) error {
+	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial string) error {
 	const query = `
 		insert into agent_certificates
-			(id, host_id, serial, fingerprint_sha256, subject_common_name, not_before, not_after)
-		values ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := tx.Exec(ctx, query, uuid.NewString(), hostID, serial, fingerprint, commonName, notBefore, notAfter)
+			(id, host_id, serial, fingerprint_sha256, subject_common_name, not_before, not_after,
+			 issuer_subject, issuer_serial)
+		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, ''))`
+	_, err := tx.Exec(ctx, query, uuid.NewString(), hostID, serial, fingerprint, commonName,
+		notBefore, notAfter, issuerSubject, issuerSerial)
 	if err != nil {
 		return fmt.Errorf("zapis certyfikatu: %w", err)
 	}
@@ -349,4 +351,74 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		result = append(result, h)
 	}
 	return result, rows.Err()
+}
+
+// AdoptCertificateIssuer uzupelnia wystawce certyfikatow sprzed wprowadzenia
+// wymiany CA. Wolno to zrobic wylacznie wtedy, gdy istnieje dokladnie jedno
+// CA - przy wiekszej liczbie wystawcy nie da sie ustalic inaczej niz zgadujac,
+// a zgadniety wystawca prowadzilby do odciecia hostow przy wycofaniu CA.
+func (s *Store) AdoptCertificateIssuer(ctx context.Context, subject, serial string) (int64, error) {
+	const query = `
+		update agent_certificates set issuer_subject = $1, issuer_serial = $2
+		where issuer_subject is null`
+	tag, err := s.pool.Exec(ctx, query, subject, serial)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// CertificateIssuers liczy hosty wedlug CA, ktore wystawilo ich obecny,
+// nieodwolany certyfikat. Klucz mapy to "podmiot numer_seryjny" wystawcy.
+//
+// Bez tej wiedzy wycofanie CA byloby zgadywaniem: nie widac, ilu hostom
+// odbiera sie dostep.
+func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) {
+	const query = `
+		select coalesce(issuer_subject, ''), coalesce(issuer_serial, ''), count(*)
+		from agent_certificates
+		where revoked_at is null and not_after > now()
+		group by 1, 2`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	uzycie := map[string]int{}
+	for rows.Next() {
+		var subject, serial string
+		var count int
+		if err := rows.Scan(&subject, &serial, &count); err != nil {
+			return nil, err
+		}
+		uzycie[subject+" "+serial] = count
+	}
+	return uzycie, rows.Err()
+}
+
+// HostsWithoutCertificateSince liczy hosty, ktore od podanej chwili nie
+// dostaly nowego certyfikatu.
+//
+// Sluzy do wymiany CA: agent poznaje nowe CA razem z certyfikatem, wiec host
+// bez swiezego certyfikatu nie ma jeszcze nowego CA u siebie. Przekazanie mu
+// podpisywania odcieloby taki host przy najblizszym restarcie panelu.
+//
+// Liczy sie chwila wydania certyfikatu, a nie poczatek jego waznosci: ten
+// drugi jest celowo cofniety na poczet rozjazdu zegarow i swiezo wydany
+// certyfikat wygladalby przez to na starszy, niz jest.
+func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time) (int, error) {
+	const query = `
+		select count(*)
+		from hosts h
+		where h.lifecycle_state <> 'decommissioned'
+		  and not exists (
+		      select 1 from agent_certificates c
+		      where c.host_id = h.id and c.revoked_at is null and c.created_at >= $1
+		  )`
+	var count int
+	if err := s.pool.QueryRow(ctx, query, since).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }

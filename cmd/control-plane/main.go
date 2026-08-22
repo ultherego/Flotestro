@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -135,14 +134,30 @@ func run() error {
 	}
 	log.Info("schemat bazy aktualny")
 
-	ca, err := pki.EnsureCA(cfg.StateDir)
+	trust, err := pki.EnsureTrust(cfg.StateDir)
 	if err != nil {
 		return err
 	}
+	ca := trust.Active()
 	ca.AgentTTL = *agentCertTTL
 	log.Info("CA gotowe", "subject", ca.Certificate.Subject.CommonName,
 		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339),
-		"agent_cert_ttl", ca.AgentTTL.String())
+		"agent_cert_ttl", ca.AgentTTL.String(),
+		"uznawanych_ca", len(trust.Authorities()))
+
+	// Certyfikaty sprzed wprowadzenia wymiany CA nie maja zapisanego wystawcy.
+	// Uzupelniamy go tylko wtedy, gdy istnieje dokladnie jedno CA: przy
+	// wiekszej liczbie wystawcy nie da sie ustalic inaczej niz zgadujac.
+	if len(trust.Authorities()) == 1 {
+		uzupelnione, err := hosts.NewStore(pool).AdoptCertificateIssuer(ctx,
+			ca.Certificate.Subject.CommonName, ca.Certificate.SerialNumber.String())
+		if err != nil {
+			return fmt.Errorf("uzupelnienie wystawcy certyfikatow: %w", err)
+		}
+		if uzupelnione > 0 {
+			log.Info("uzupelniono wystawce certyfikatow agentow", "wierszy", uzupelnione)
+		}
+	}
 
 	dnsNames, ips := splitAdvertised(*advertised)
 	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(dnsNames, ips)
@@ -154,8 +169,20 @@ func run() error {
 		return err
 	}
 
-	caPool := x509.NewCertPool()
-	caPool.AddCert(ca.Certificate)
+	// Zbior zaufania zmienia sie przy wymianie CA, wiec weryfikacja klienta
+	// czyta go przy kazdym uscisku zamiast trzymac kopie z chwili startu.
+	clientTrust := func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		return &tls.Config{
+			Certificates: []tls.Certificate{serverCert},
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			ClientCAs:    trust.Pool(),
+			MinVersion:   tls.VersionTLS13,
+			// Konfiguracja zwrocona tutaj zastepuje ta z serwera w calosci,
+			// wiec musi sama zadeklarowac HTTP/2. Bez tego negocjacja konczy
+			// sie na HTTP/1.1 i strumien dwukierunkowy nie ma jak dzialac.
+			NextProtos: []string{"h2"},
+		}, nil
+	}
 
 	hostStore := hosts.NewStore(pool)
 	inventoryStore := inventory.NewStore(pool)
@@ -219,7 +246,7 @@ func run() error {
 	}
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
-		registry, ca, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+		registry, trust, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
 	gatewayServer := &http.Server{
@@ -228,15 +255,17 @@ func run() error {
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{serverCert},
 			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    caPool,
-			MinVersion:   tls.VersionTLS13,
-			NextProtos:   []string{"h2"},
+			// Zbior zaufania czytany przy kazdym uscisku: po wymianie CA
+			// nowe certyfikaty agentow musza byc uznane bez restartu panelu.
+			GetConfigForClient: clientTrust,
+			MinVersion:         tls.VersionTLS13,
+			NextProtos:         []string{"h2"},
 		},
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
 	// Enrollment: TLS bez certyfikatu klienta, bo host nie ma jeszcze tozsamosci.
-	enrollmentService := gateway.NewEnrollmentService(ca, hostStore, tokenStore, recorder, log)
+	enrollmentService := gateway.NewEnrollmentService(trust, hostStore, tokenStore, recorder, log)
 	enrollmentMux := http.NewServeMux()
 	enrollmentMux.Handle(agentv1connect.NewEnrollmentServiceHandler(enrollmentService))
 	enrollmentServer := &http.Server{
@@ -265,7 +294,10 @@ func run() error {
 					DirectoryWrite:         *directoryWrite,
 					StepUpMaxAge:           *stepUpMaxAge,
 					StepUpACR:              *stepUpACR,
-					Metrics:                metrics.NewCollector(pool, registry, ca, cfg.GatewayID),
+					// Metryka waznosci CA ma pokazywac CA podpisujace,
+					// takze po wymianie, wiec czyta caly zbior zaufania.
+					Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID),
+					Trust:   trust,
 				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,

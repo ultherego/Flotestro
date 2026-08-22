@@ -63,8 +63,10 @@ type AgentService struct {
 	jobs      *jobs.Store
 	audit     *audit.Recorder
 	registry  *Registry
-	// ca podpisuje odnowienia certyfikatow agentow.
-	ca        *pki.CA
+	// trust podpisuje odnowienia i opisuje, komu panel ufa. Wymiana CA
+	// zmienia ten zbior w trakcie pracy, wiec uslugi nie moga trzymac
+	// pojedynczego CA skopiowanego przy starcie.
+	trust     *pki.Trust
 	log       *slog.Logger
 	gatewayID string
 
@@ -73,11 +75,11 @@ type AgentService struct {
 }
 
 func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
-	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, certificateAuthority *pki.CA,
+	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, trust *pki.Trust,
 	log *slog.Logger, gatewayID string, heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
-		audit: recorder, registry: registry, ca: certificateAuthority,
+		audit: recorder, registry: registry, trust: trust,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 	}

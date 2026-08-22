@@ -23,6 +23,7 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
+	"github.com/ultherego/flotestro/internal/pki"
 )
 
 // Server grupuje zaleznosci REST API.
@@ -53,6 +54,8 @@ type Server struct {
 	stepUp stepUpPolicy
 	// metrics wystawia stan panelu do monitoringu.
 	metrics *metrics.Collector
+	// trust pozwala przejrzec i wymienic CA floty.
+	trust *pki.Trust
 }
 
 // Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
@@ -75,6 +78,8 @@ type Options struct {
 	StepUpACR string
 	// Metrics wystawia stan panelu; pusty wylacza endpoint.
 	Metrics *metrics.Collector
+	// Trust jest zbiorem CA floty; pusty wylacza zarzadzanie PKI.
+	Trust *pki.Trust
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
@@ -94,7 +99,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		sessionLimits:          limits, publicURL: options.PublicURL,
 		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite,
 		stepUp:  stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR},
-		metrics: options.Metrics}
+		metrics: options.Metrics, trust: options.Trust}
 }
 
 // Routes buduje router API.
@@ -103,6 +108,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/v1/pki", s.handlePKIStatus)
+	mux.HandleFunc("POST /api/v1/pki/prepare", s.handlePrepareCA)
+	mux.HandleFunc("POST /api/v1/pki/activate", s.handleActivateCA)
+	mux.HandleFunc("DELETE /api/v1/pki/{fingerprint}", s.handleRetireCA)
 
 	// Logowanie operatorow przez dostawce tozsamosci.
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
