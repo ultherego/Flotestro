@@ -22,6 +22,19 @@ service AgentService {
   // nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
   // wejsciem dla hosta bez tozsamosci.
   rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+  // Ping sprawdza lacznosc z centrala bez zadnego skutku ubocznego.
+  //
+  // Relay potrzebuje sposobu na stwierdzenie, ze lacze wrocilo, zanim wysle
+  // cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
+  // kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message PingRequest {}
+
+message PingResponse {
+  google.protobuf.Timestamp server_time = 1;
+  string gateway_id = 2;
 }
 
 message RenewCertificateRequest {

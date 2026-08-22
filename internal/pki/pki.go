@@ -195,10 +195,29 @@ type IssuedCert struct {
 	IssuerSerial  string
 }
 
+// relayCertTTL jest krotszy niz czas zycia certyfikatu agenta. Relay stoi
+// miedzy flota a centrala i widzi ruch calej lokalizacji, wiec okno
+// wykorzystania jego skradzionego klucza ma byc mniejsze.
+const relayCertTTL = 7 * 24 * time.Hour
+
+// SignRelayCSR podpisuje CSR relaya. Tozsamosc relaya jest osobna od tozsamosci
+// hosta: relay nie jest agentem i nie moze podszyc sie pod host samym
+// certyfikatem, bo panel czyta rodzaj tozsamosci z URI SAN.
+func (ca *CA) SignRelayCSR(csrPEM []byte, relayID string) (*IssuedCert, error) {
+	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL)
+}
+
 // SignAgentCSR podpisuje CSR agenta, osadzajac tozsamosc hosta w URI SAN.
 // Wszystkie pola podmiotu pochodzace z CSR sa ignorowane poza kluczem
 // publicznym: tozsamosc nadaje control plane, nie zglaszajacy sie host.
 func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
+	return ca.signCSR(csrPEM, "host", hostID, ca.agentCertTTL())
+}
+
+// signCSR wystawia certyfikat tozsamosci floty. Rodzaj tozsamosci wchodzi
+// do URI SAN, wiec nie da sie uzyc certyfikatu relaya jako certyfikatu hosta
+// ani odwrotnie.
+func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration) (*IssuedCert, error) {
 	block, _ := pem.Decode(csrPEM)
 	if block == nil {
 		return nil, fmt.Errorf("CSR nie zawiera bloku PEM")
@@ -215,16 +234,25 @@ func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
 	if err != nil {
 		return nil, err
 	}
-	identity := &url.URL{Scheme: identityScheme, Host: "host", Path: "/" + hostID}
+	identity := &url.URL{Scheme: identityScheme, Host: kind, Path: "/" + id}
 	now := time.Now()
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: hostID, OrganizationalUnit: []string{"agent"}},
+		Subject:      pkix.Name{CommonName: id, OrganizationalUnit: []string{kind}},
 		NotBefore:    now.Add(-5 * time.Minute),
-		NotAfter:     now.Add(ca.agentCertTTL()),
+		NotAfter:     now.Add(ttl),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		URIs:         []*url.URL{identity},
+	}
+	if kind == "relay" {
+		// Relay wystepuje w obu rolach: jako serwer wobec agentow swojej
+		// lokalizacji i jako klient wobec centrali. Nazwy sieciowe bierzemy
+		// z CSR, bo to relay wie, pod jakim adresem go widac; tozsamoscia
+		// pozostaje URI SAN nadany przez panel, a nie te nazwy.
+		template.ExtKeyUsage = append(template.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
+		template.DNSNames = csr.DNSNames
+		template.IPAddresses = csr.IPAddresses
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, csr.PublicKey, ca.PrivateKey)
 	if err != nil {
@@ -239,14 +267,24 @@ func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
 		NotAfter:      template.NotAfter,
 		IssuerSubject: ca.Certificate.Subject.CommonName,
 		IssuerSerial:  ca.Certificate.SerialNumber.String(),
-		CommonName:    hostID,
+		CommonName:    id,
 	}, nil
 }
 
 // HostIDFromCert wyciaga tozsamosc hosta z URI SAN certyfikatu klienta.
 func HostIDFromCert(cert *x509.Certificate) (string, error) {
+	return identityFromCert(cert, "host")
+}
+
+// RelayIDFromCert zwraca tozsamosc relaya. Rodzaj tozsamosci jest sprawdzany,
+// wiec certyfikat hosta nie przejdzie jako certyfikat relaya.
+func RelayIDFromCert(cert *x509.Certificate) (string, error) {
+	return identityFromCert(cert, "relay")
+}
+
+func identityFromCert(cert *x509.Certificate, kind string) (string, error) {
 	for _, uri := range cert.URIs {
-		if uri.Scheme == identityScheme && uri.Host == "host" {
+		if uri.Scheme == identityScheme && uri.Host == kind {
 			id := uri.Path
 			if len(id) > 0 && id[0] == '/' {
 				id = id[1:]
@@ -256,7 +294,7 @@ func HostIDFromCert(cert *x509.Certificate) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("certyfikat nie zawiera tozsamosci %s://host/<id>", identityScheme)
+	return "", fmt.Errorf("certyfikat nie zawiera tozsamosci %s://%s/<id>", identityScheme, kind)
 }
 
 // Fingerprint liczy SHA-256 z DER certyfikatu.

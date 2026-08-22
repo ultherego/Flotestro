@@ -43,6 +43,8 @@ const (
 	// AgentServiceRenewCertificateProcedure is the fully-qualified name of the AgentService's
 	// RenewCertificate RPC.
 	AgentServiceRenewCertificateProcedure = "/flotestro.agent.v1.AgentService/RenewCertificate"
+	// AgentServicePingProcedure is the fully-qualified name of the AgentService's Ping RPC.
+	AgentServicePingProcedure = "/flotestro.agent.v1.AgentService/Ping"
 )
 
 // EnrollmentServiceClient is a client for the flotestro.agent.v1.EnrollmentService service.
@@ -124,6 +126,12 @@ type AgentServiceClient interface {
 	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
 	// wejsciem dla hosta bez tozsamosci.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
+	// Ping sprawdza lacznosc z centrala bez zadnego skutku ubocznego.
+	//
+	// Relay potrzebuje sposobu na stwierdzenie, ze lacze wrocilo, zanim wysle
+	// cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
+	// kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
+	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the flotestro.agent.v1.AgentService service. By
@@ -149,6 +157,12 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("RenewCertificate")),
 			connect.WithClientOptions(opts...),
 		),
+		ping: connect.NewClient[v1.PingRequest, v1.PingResponse](
+			httpClient,
+			baseURL+AgentServicePingProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("Ping")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -156,6 +170,7 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 type agentServiceClient struct {
 	connect          *connect.Client[v1.AgentMessage, v1.ServerMessage]
 	renewCertificate *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
+	ping             *connect.Client[v1.PingRequest, v1.PingResponse]
 }
 
 // Connect calls flotestro.agent.v1.AgentService.Connect.
@@ -168,6 +183,11 @@ func (c *agentServiceClient) RenewCertificate(ctx context.Context, req *connect.
 	return c.renewCertificate.CallUnary(ctx, req)
 }
 
+// Ping calls flotestro.agent.v1.AgentService.Ping.
+func (c *agentServiceClient) Ping(ctx context.Context, req *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error) {
+	return c.ping.CallUnary(ctx, req)
+}
+
 // AgentServiceHandler is an implementation of the flotestro.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	Connect(context.Context, *connect.BidiStream[v1.AgentMessage, v1.ServerMessage]) error
@@ -176,6 +196,12 @@ type AgentServiceHandler interface {
 	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
 	// wejsciem dla hosta bez tozsamosci.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
+	// Ping sprawdza lacznosc z centrala bez zadnego skutku ubocznego.
+	//
+	// Relay potrzebuje sposobu na stwierdzenie, ze lacze wrocilo, zanim wysle
+	// cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
+	// kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
+	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -197,12 +223,20 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("RenewCertificate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentServicePingHandler := connect.NewUnaryHandler(
+		AgentServicePingProcedure,
+		svc.Ping,
+		connect.WithSchema(agentServiceMethods.ByName("Ping")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/flotestro.agent.v1.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceConnectProcedure:
 			agentServiceConnectHandler.ServeHTTP(w, r)
 		case AgentServiceRenewCertificateProcedure:
 			agentServiceRenewCertificateHandler.ServeHTTP(w, r)
+		case AgentServicePingProcedure:
+			agentServicePingHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -218,4 +252,8 @@ func (UnimplementedAgentServiceHandler) Connect(context.Context, *connect.BidiSt
 
 func (UnimplementedAgentServiceHandler) RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.RenewCertificate is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.Ping is not implemented"))
 }

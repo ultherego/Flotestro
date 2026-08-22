@@ -27,15 +27,19 @@ var ErrInvalidToken = errors.New("token enrollmentu jest nieprawidlowy")
 // Token opisuje wystawiony token wraz z jawna wartoscia, ktora jest widoczna
 // wylacznie w chwili utworzenia.
 type Token struct {
-	ID          string    `json:"id"`
-	Value       string    `json:"value,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Site        string    `json:"site"`
-	Environment string    `json:"environment"`
-	MaxUses     int       `json:"max_uses"`
-	Uses        int       `json:"uses"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `json:"id"`
+	Value       string `json:"value,omitempty"`
+	Description string `json:"description,omitempty"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	// Kind odroznia token dla agenta od tokenu dla relaya. Relay konczy
+	// polaczenia agentow i swiadczy panelowi, czyj to ruch, wiec jego
+	// rejestracja nie moze byc mozliwa tokenem wystawionym dla hosta.
+	Kind      string    `json:"kind"`
+	MaxUses   int       `json:"max_uses"`
+	Uses      int       `json:"uses"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Scope to zakres, w ktorym token pozwala zarejestrowac hosta.
@@ -43,7 +47,14 @@ type Scope struct {
 	TokenID     string
 	Site        string
 	Environment string
+	Kind        string
 }
+
+// KindAgent i KindRelay sa rodzajami tozsamosci, ktore mozna zarejestrowac.
+const (
+	KindAgent = "agent"
+	KindRelay = "relay"
+)
 
 // TokenStore zarzadza tokenami enrollmentu.
 type TokenStore struct {
@@ -55,8 +66,16 @@ func NewTokenStore(pool *pgxpool.Pool) *TokenStore {
 }
 
 // Create wystawia nowy token. W bazie zapisywany jest wylacznie skrot.
-func (s *TokenStore) Create(ctx context.Context, description, site, environment string,
+func (s *TokenStore) Create(ctx context.Context, description, site, environment, kind string,
 	maxUses int, ttl time.Duration, createdBy string) (*Token, error) {
+	// Nieznany rodzaj tozsamosci nie moze cicho stac sie agentem: token
+	// otwiera droge do floty i jego zakres musi byc jawny.
+	if kind == "" {
+		kind = KindAgent
+	}
+	if kind != KindAgent && kind != KindRelay {
+		return nil, fmt.Errorf("nieznany rodzaj tozsamosci %q", kind)
+	}
 	if maxUses <= 0 {
 		maxUses = 1
 	}
@@ -76,16 +95,17 @@ func (s *TokenStore) Create(ctx context.Context, description, site, environment 
 		Description: description,
 		Site:        site,
 		Environment: environment,
+		Kind:        kind,
 		MaxUses:     maxUses,
 		ExpiresAt:   time.Now().Add(ttl),
 	}
 	const query = `
 		insert into enrollment_tokens
-			(id, token_hash, description, site, environment, max_uses, expires_at, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8)
+			(id, token_hash, description, site, environment, kind, max_uses, expires_at, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		returning created_at`
 	err := s.pool.QueryRow(ctx, query, token.ID, hash[:], nullable(description),
-		site, environment, maxUses, token.ExpiresAt, createdBy).Scan(&token.CreatedAt)
+		site, environment, kind, maxUses, token.ExpiresAt, createdBy).Scan(&token.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("zapis tokenu: %w", err)
 	}
@@ -103,7 +123,7 @@ func (s *TokenStore) Redeem(ctx context.Context, tx pgx.Tx, value string) (Scope
 	hash := hashToken(value)
 
 	const query = `
-		select id, site, environment, max_uses, uses, expires_at, revoked_at
+		select id, site, environment, kind, max_uses, uses, expires_at, revoked_at
 		from enrollment_tokens
 		where token_hash = $1
 		for update`
@@ -115,7 +135,8 @@ func (s *TokenStore) Redeem(ctx context.Context, tx pgx.Tx, value string) (Scope
 		revokedAt *time.Time
 	)
 	err := tx.QueryRow(ctx, query, hash[:]).
-		Scan(&scope.TokenID, &scope.Site, &scope.Environment, &maxUses, &uses, &expiresAt, &revokedAt)
+		Scan(&scope.TokenID, &scope.Site, &scope.Environment, &scope.Kind,
+			&maxUses, &uses, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Scope{}, ErrInvalidToken
 	}

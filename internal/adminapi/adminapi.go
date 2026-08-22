@@ -360,8 +360,12 @@ type createTokenRequest struct {
 	Description string `json:"description"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	MaxUses     int    `json:"max_uses"`
-	TTLMinutes  int    `json:"ttl_minutes"`
+	// Kind rozstrzyga, co wolno zarejestrowac tym tokenem: agenta czy relay.
+	// Puste znaczy agenta, bo taki byl jedyny rodzaj przed wprowadzeniem
+	// relayow i istniejaca automatyzacja nie moze przez to przestac dzialac.
+	Kind       string `json:"kind"`
+	MaxUses    int    `json:"max_uses"`
+	TTLMinutes int    `json:"ttl_minutes"`
 }
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
@@ -385,9 +389,9 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, err := s.tokens.Create(r.Context(), req.Description, req.Site, req.Environment,
-		req.MaxUses, time.Duration(req.TTLMinutes)*time.Minute, principal.Subject)
+		req.Kind, req.MaxUses, time.Duration(req.TTLMinutes)*time.Minute, principal.Subject)
 	if err != nil {
-		s.fail(w, err)
+		problem(w, http.StatusBadRequest, "invalid_kind", err.Error())
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{

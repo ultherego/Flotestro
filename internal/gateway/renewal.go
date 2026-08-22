@@ -110,3 +110,17 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 		NotAfter:    timestamppb.New(issued.NotAfter),
 	}), nil
 }
+
+// Ping potwierdza lacznosc z centrala. Nie zmienia niczego i nie zaglada do
+// bazy: ma odpowiedziec takze wtedy, gdy panel jest pod obciazeniem.
+func (s *AgentService) Ping(ctx context.Context,
+	_ *connect.Request[agentv1.PingRequest],
+) (*connect.Response[agentv1.PingResponse], error) {
+	if _, ok := clientCertificate(ctx); !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
+	}
+	return connect.NewResponse(&agentv1.PingResponse{
+		ServerTime: timestamppb.Now(),
+		GatewayId:  s.gatewayID,
+	}), nil
+}

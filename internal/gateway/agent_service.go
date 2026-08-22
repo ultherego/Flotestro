@@ -22,6 +22,7 @@ import (
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relays"
 )
 
 type contextKey string
@@ -66,7 +67,9 @@ type AgentService struct {
 	// trust podpisuje odnowienia i opisuje, komu panel ufa. Wymiana CA
 	// zmienia ten zbior w trakcie pracy, wiec uslugi nie moga trzymac
 	// pojedynczego CA skopiowanego przy starcie.
-	trust     *pki.Trust
+	trust *pki.Trust
+	// relays rozpoznaje relaye lokalizacji. Puste wylacza posredniczenie.
+	relays    *relays.Store
 	log       *slog.Logger
 	gatewayID string
 
@@ -76,10 +79,11 @@ type AgentService struct {
 
 func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
 	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, trust *pki.Trust,
-	log *slog.Logger, gatewayID string, heartbeatSeconds, heartbeatJitter int) *AgentService {
+	relayStore *relays.Store, log *slog.Logger, gatewayID string,
+	heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
-		audit: recorder, registry: registry, trust: trust,
+		audit: recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 	}
@@ -93,29 +97,29 @@ func (s *AgentService) Connect(ctx context.Context,
 	if !ok {
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
 	}
-	hostID, err := pki.HostIDFromCert(cert)
+
+	// Sesja moze przyjsc bezposrednio od agenta albo przez relay lokalizacji.
+	// W drugim przypadku tozsamosc hosta nie pochodzi z uscisku TLS, tylko
+	// z poswiadczenia relaya, i wlasnie dlatego jest sprawdzana osobno.
+	hostID, relayID, err := s.identifyPeer(ctx, cert, stream.RequestHeader().Get(relayHostHeader))
 	if err != nil {
-		return connect.NewError(connect.CodeUnauthenticated, err)
+		return err
+	}
+	if relayID != "" {
+		s.relays.MarkSeen(ctx, relayID)
 	}
 
-	fingerprint := pki.Fingerprint(cert)
-	status, err := s.hosts.LookupCertificate(ctx, fingerprint)
-	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
-	}
-	switch {
-	case !status.Known:
-		s.denied(ctx, hostID, "unknown_certificate")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat nieznany"))
-	case status.Revoked:
-		s.denied(ctx, hostID, "revoked_certificate")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat odwolany"))
-	case status.HostID != hostID:
-		s.denied(ctx, hostID, "identity_mismatch")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
-	case status.LifecycleState == "quarantined":
-		s.denied(ctx, hostID, "quarantined")
-		return connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
+	// Certyfikat relaya nie opisuje hosta, wiec stan certyfikatu hosta
+	// sprawdzamy wylacznie przy polaczeniu bezposrednim. Tozsamosc hosta
+	// z poswiadczenia relaya zostala juz sprawdzona wyzej.
+	if relayID == "" {
+		status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
+		if err != nil {
+			return connect.NewError(connect.CodeInternal, err)
+		}
+		if problem := s.rejectCertificate(ctx, status, hostID); problem != nil {
+			return problem
+		}
 	}
 
 	// Pierwsza wiadomosc musi byc Hello. Inny start konczy sesje.
@@ -135,7 +139,7 @@ func (s *AgentService) Connect(ctx context.Context,
 
 	session := NewSession(uuid.NewString(), hostID, hello.GetAgentVersion(),
 		hello.GetBootId(), remoteAddr(ctx), 32)
-	if err := s.openSession(ctx, session, fingerprint); err != nil {
+	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	s.registry.Add(session)
@@ -554,13 +558,17 @@ func unitStateJSON(state *agentv1.UnitState) json.RawMessage {
 	return encoded
 }
 
-func (s *AgentService) openSession(ctx context.Context, session *Session, fingerprint []byte) error {
+// openSession zapisuje sesje. relayID jest pusty przy polaczeniu bezposrednim;
+// wypelniony mowi, ktory relay poswiadczyl tozsamosc hosta - bez tego slad
+// audytowy nie odroznia dwoch roznych podstaw zaufania.
+func (s *AgentService) openSession(ctx context.Context, session *Session,
+	fingerprint []byte, relayID string) error {
 	const query = `
 		insert into agent_sessions
-			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id)
-		values ($1, $2, $3, $4, $5, $6, $7)`
+			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id)
+		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`
 	_, err := s.pool.Exec(ctx, query, session.ID, session.HostID, s.gatewayID,
-		fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID)
+		fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID)
 	if err != nil {
 		return err
 	}
@@ -569,6 +577,7 @@ func (s *AgentService) openSession(ctx context.Context, session *Session, finger
 		Action: "agent.session.open", TargetType: "host", TargetID: session.HostID,
 		Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
+			"relay_id":   nullableRelay(relayID),
 			"session_id": session.ID, "gateway_id": s.gatewayID,
 			"agent_version": session.AgentVersion, "boot_id": session.BootID,
 		},
@@ -697,4 +706,107 @@ func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
 		"password_set": account.PasswordSet,
 		"ssh_keys":     sshKeysJSON(account.GetSshKeys()),
 	}
+}
+
+// relayHostHeader niesie tozsamosc hosta poswiadczona przez relay.
+const relayHostHeader = "Flotestro-Relay-Host"
+
+// identifyPeer ustala, czyja jest sesja i kto za nia rreczy.
+//
+// Polaczenie bezposrednie: tozsamosc pochodzi z certyfikatu klienta i jest
+// dowodem posiadania klucza prywatnego hosta.
+//
+// Polaczenie przez relay: certyfikat nalezy do relaya, a tozsamosc hosta jest
+// poswiadczeniem relaya. Panel nie moze jej sprawdzic kryptograficznie, wiec
+// sprawdza to, co moze: czy relay jest znany, nieodwolany i czy host nalezy
+// do jego lokalizacji. To jest wlasnie ta granica zaufania, o ktorej mowi
+// dokument - i dlatego jest zapisana w sesji.
+func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
+	asserted string) (hostID string, relayID string, err error) {
+	if hostID, hostErr := pki.HostIDFromCert(cert); hostErr == nil {
+		if asserted != "" {
+			// Agent nie moze udawac relaya: poswiadczanie cudzej tozsamosci
+			// jest uprawnieniem relaya, a nie naglowkiem do dopisania.
+			return "", "", connect.NewError(connect.CodePermissionDenied,
+				errors.New("certyfikat hosta nie pozwala poswiadczac innych hostow"))
+		}
+		return hostID, "", nil
+	}
+
+	relayIdentity, relayErr := pki.RelayIDFromCert(cert)
+	if relayErr != nil {
+		return "", "", connect.NewError(connect.CodeUnauthenticated, relayErr)
+	}
+	if s.relays == nil {
+		return "", "", connect.NewError(connect.CodePermissionDenied,
+			errors.New("posredniczenie przez relay nie jest wlaczone"))
+	}
+	if asserted == "" {
+		return "", "", connect.NewError(connect.CodeInvalidArgument,
+			errors.New("relay musi wskazac host w naglowku "+relayHostHeader))
+	}
+
+	status, err := s.relays.LookupCertificate(ctx, pki.Fingerprint(cert))
+	if err != nil {
+		return "", "", connect.NewError(connect.CodeInternal, err)
+	}
+	switch {
+	case !status.Known:
+		s.denied(ctx, relayIdentity, "unknown_relay_certificate")
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat relaya nieznany"))
+	case status.Revoked:
+		s.denied(ctx, relayIdentity, "revoked_relay")
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("relay odwolany"))
+	case status.ID != relayIdentity:
+		s.denied(ctx, relayIdentity, "relay_identity_mismatch")
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc relaya nie zgadza sie z certyfikatem"))
+	}
+
+	host, err := s.hosts.Get(ctx, asserted)
+	if err != nil {
+		s.denied(ctx, asserted, "relay_unknown_host")
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("host nieznany"))
+	}
+	// Relay posredniczy wylacznie za swoja lokalizacje. Bez tego jeden
+	// przejety relay obslugiwalby cala flote.
+	if host.Site != status.Site {
+		s.denied(ctx, asserted, "relay_scope_mismatch")
+		return "", "", connect.NewError(connect.CodePermissionDenied,
+			errors.New("host nie nalezy do lokalizacji relaya"))
+	}
+	if host.LifecycleState == "quarantined" {
+		s.denied(ctx, asserted, "quarantined")
+		return "", "", connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
+	}
+	return asserted, status.ID, nil
+}
+
+// rejectCertificate sprawdza stan certyfikatu hosta przy polaczeniu
+// bezposrednim.
+func (s *AgentService) rejectCertificate(ctx context.Context,
+	status hosts.CertificateStatus, hostID string) error {
+	switch {
+	case !status.Known:
+		s.denied(ctx, hostID, "unknown_certificate")
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat nieznany"))
+	case status.Revoked:
+		s.denied(ctx, hostID, "revoked_certificate")
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat odwolany"))
+	case status.HostID != hostID:
+		s.denied(ctx, hostID, "identity_mismatch")
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
+	case status.LifecycleState == "quarantined":
+		s.denied(ctx, hostID, "quarantined")
+		return connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
+	}
+	return nil
+}
+
+// nullableRelay zwraca nil dla polaczenia bezposredniego. Pusty ciag w sladzie
+// audytowym wygladalby jak relay bez nazwy, a nie jak jego brak.
+func nullableRelay(relayID string) any {
+	if relayID == "" {
+		return nil
+	}
+	return relayID
 }

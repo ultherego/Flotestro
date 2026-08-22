@@ -38,6 +38,7 @@ import (
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/scheduler"
 )
 
@@ -189,6 +190,7 @@ func run() error {
 	jobStore := jobs.NewStore(pool)
 	campaignStore := campaigns.NewStore(pool)
 	tokenStore := enrollment.NewTokenStore(pool)
+	relayStore := relays.NewStore(pool)
 	authzStore := authz.NewStore(pool)
 	recorder := audit.NewRecorder(pool, log)
 	registry := gateway.NewRegistry()
@@ -246,7 +248,7 @@ func run() error {
 	}
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
-		registry, trust, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+		registry, trust, relayStore, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
 	gatewayServer := &http.Server{
@@ -265,7 +267,7 @@ func run() error {
 	}
 
 	// Enrollment: TLS bez certyfikatu klienta, bo host nie ma jeszcze tozsamosci.
-	enrollmentService := gateway.NewEnrollmentService(trust, hostStore, tokenStore, recorder, log)
+	enrollmentService := gateway.NewEnrollmentService(trust, hostStore, relayStore, tokenStore, recorder, log)
 	enrollmentMux := http.NewServeMux()
 	enrollmentMux.Handle(agentv1connect.NewEnrollmentServiceHandler(enrollmentService))
 	enrollmentServer := &http.Server{

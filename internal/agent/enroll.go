@@ -10,10 +10,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -57,9 +59,13 @@ type IdentityRequest struct {
 	BootstrapCAPath string
 	MachineID       string
 	Hostname        string
-	OSFamily        string
-	OSVersion       string
-	Architecture    string
+	// Advertised sa nazwami sieciowymi, pod ktorymi widac zglaszajacego sie.
+	// Uzywa ich relay: musi wystapic takze jako serwer wobec agentow swojej
+	// lokalizacji, a agent weryfikuje nazwe w certyfikacie.
+	Advertised   string
+	OSFamily     string
+	OSVersion    string
+	Architecture string
 }
 
 // EnsureIdentity wczytuje istniejaca tozsamosc albo przeprowadza enrollment.
@@ -118,10 +124,22 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	}
 	hostname := request.Hostname
 
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+	wniosek := &x509.CertificateRequest{
 		// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane.
 		Subject: pkix.Name{CommonName: machineID},
-	}, key)
+	}
+	for _, nazwa := range strings.Split(request.Advertised, ",") {
+		nazwa = strings.TrimSpace(nazwa)
+		if nazwa == "" {
+			continue
+		}
+		if adres := net.ParseIP(nazwa); adres != nil {
+			wniosek.IPAddresses = append(wniosek.IPAddresses, adres)
+			continue
+		}
+		wniosek.DNSNames = append(wniosek.DNSNames, nazwa)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, wniosek, key)
 	if err != nil {
 		return nil, err
 	}
