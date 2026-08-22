@@ -96,6 +96,21 @@ func main() {
 	agent.SetPrivilegedIdentityProbe(executor.ProbePrivilegedIdentity)
 	agent.SetPrivilegedAccountProbe(executor.ProbeLocalAccounts)
 
+	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
+	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.
+	odnowienia := make(chan struct{}, 1)
+	go agent.KeepCertificateFresh(ctx, identity, agent.RenewalOptions{
+		StateDir:   *stateDir,
+		GatewayURL: *gatewayURL,
+		Log:        log,
+		OnRenewed: func() {
+			select {
+			case odnowienia <- struct{}{}:
+			default:
+			}
+		},
+	})
+
 	if err := agent.Run(ctx, agent.SessionOptions{
 		GatewayURL:         *gatewayURL,
 		Identity:           identity,
@@ -103,6 +118,7 @@ func main() {
 		Executor:           executor,
 		MaxConcurrentTasks: *maxTasks,
 		Log:                log,
+		Renewed:            odnowienia,
 	}); err != nil {
 		log.Error("agent zakonczony bledem", "err", err)
 		os.Exit(1)

@@ -34,6 +34,18 @@ type CA struct {
 	Certificate *x509.Certificate
 	PrivateKey  *ecdsa.PrivateKey
 	PEM         []byte
+	// AgentTTL nadpisuje czas zycia certyfikatu agenta. Zero oznacza wartosc
+	// domyslna; krotszy termin skraca okno wykorzystania skradzionego klucza,
+	// dluzszy zmniejsza ruch odnowien w duzej flocie.
+	AgentTTL time.Duration
+}
+
+// agentCertTTL zwraca czas zycia certyfikatu agenta.
+func (ca *CA) agentCertTTL() time.Duration {
+	if ca.AgentTTL > 0 {
+		return ca.AgentTTL
+	}
+	return AgentCertTTL
 }
 
 // NotAfter zwraca koniec waznosci certyfikatu CA. Wygasajace CA unieruchamia
@@ -206,7 +218,7 @@ func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: hostID, OrganizationalUnit: []string{"agent"}},
 		NotBefore:    now.Add(-5 * time.Minute),
-		NotAfter:     now.Add(AgentCertTTL),
+		NotAfter:     now.Add(ca.agentCertTTL()),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		URIs:         []*url.URL{identity},

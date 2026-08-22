@@ -80,6 +80,9 @@ func run() error {
 	directoryWrite := flag.Bool("directory-write",
 		config.Env("FLOTESTRO_DIRECTORY_WRITE", "") == "true",
 		"wlacza zmiany w katalogu tozsamosci; domyslnie panel tylko czyta katalog")
+	agentCertTTL := flag.Duration("agent-cert-ttl",
+		config.EnvDuration("FLOTESTRO_AGENT_CERT_TTL", pki.AgentCertTTL),
+		"czas zycia certyfikatu agenta; agent odnawia go po uplywie dwoch trzecich")
 	stepUpMaxAge := flag.Duration("stepup-max-age",
 		config.EnvDuration("FLOTESTRO_STEPUP_MAX_AGE", 5*time.Minute),
 		"dopuszczalny wiek uwierzytelnienia przy operacjach o najwiekszym wplywie")
@@ -136,8 +139,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	ca.AgentTTL = *agentCertTTL
 	log.Info("CA gotowe", "subject", ca.Certificate.Subject.CommonName,
-		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339))
+		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339),
+		"agent_cert_ttl", ca.AgentTTL.String())
 
 	dnsNames, ips := splitAdvertised(*advertised)
 	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(dnsNames, ips)
@@ -214,7 +219,7 @@ func run() error {
 	}
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
-		registry, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+		registry, ca, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
 	gatewayServer := &http.Server{

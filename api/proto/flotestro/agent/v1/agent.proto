@@ -17,6 +17,24 @@ service EnrollmentService {
 // klienta, nigdy z tresci wiadomosci.
 service AgentService {
   rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+  // RenewCertificate wymienia nowy CSR na certyfikat. Tozsamosc pochodzi
+  // z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
+  // nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
+  // wejsciem dla hosta bez tozsamosci.
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+}
+
+message RenewCertificateRequest {
+  // CSR w formacie PEM. Klucz prywatny nigdy nie opuszcza hosta; przy
+  // odnowieniu agent moze wygenerowac nowa pare kluczy.
+  bytes csr_pem = 1;
+  AgentBuild build = 2;
+}
+
+message RenewCertificateResponse {
+  bytes certificate_pem = 1;
+  bytes ca_bundle_pem = 2;
+  google.protobuf.Timestamp not_after = 3;
 }
 
 message EnrollRequest {

@@ -35,6 +35,11 @@ type SessionOptions struct {
 	// Host nie moze zostac zalany praca przez control plane.
 	MaxConcurrentTasks int
 	Log                *slog.Logger
+	// Renewed sygnalizuje odnowienie certyfikatu. Sesja konczy sie wtedy
+	// natychmiast, zeby nastepna poszla juz nowa tozsamoscia; czekanie do
+	// naturalnego zerwania oznaczaloby prace na certyfikacie, ktory wlasnie
+	// zostal zastapiony.
+	Renewed <-chan struct{}
 }
 
 const (
@@ -45,19 +50,21 @@ const (
 // Run utrzymuje polaczenie z gatewayem i wznawia je z backoffem oraz jitterem.
 // Awaria control plane nie moze wywolac lawiny reconnectow z calej floty.
 func Run(ctx context.Context, opts SessionOptions) error {
-	client := agentv1connect.NewAgentServiceClient(
-		newHTTP2Client(opts.Identity),
-		opts.GatewayURL,
-		// Protokol Connect nie obsluguje pelnego dupleksu, wiec stream
-		// dwukierunkowy jedzie po gRPC nad HTTP/2.
-		connect.WithGRPC(),
-	)
-
 	backoff := minBackoff
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// Klient powstaje przy kazdym polaczeniu, bo tozsamosc moze sie
+		// w miedzyczasie zmienic: odnowiony certyfikat musi wejsc do uzycia
+		// bez restartu agenta.
+		client := agentv1connect.NewAgentServiceClient(
+			newHTTP2Client(opts.Identity),
+			opts.GatewayURL,
+			// Protokol Connect nie obsluguje pelnego dupleksu, wiec stream
+			// dwukierunkowy jedzie po gRPC nad HTTP/2.
+			connect.WithGRPC(),
+		)
 		start := time.Now()
 		err := runSession(ctx, client, opts)
 		if ctx.Err() != nil {
@@ -71,6 +78,12 @@ func Run(ctx context.Context, opts SessionOptions) error {
 			backoff = minBackoff
 		}
 		wait := withJitter(backoff)
+		// Sesja przerwana przez odnowienie certyfikatu nie jest bledem, wiec
+		// nie ma powodu odczekiwac przed ponownym polaczeniem.
+		if errors.Is(err, errIdentityRenewed) {
+			wait = 0
+			backoff = minBackoff
+		}
 		opts.Log.Info("ponowne laczenie", "za", wait.Round(time.Second).String())
 		select {
 		case <-ctx.Done():
@@ -83,9 +96,36 @@ func Run(ctx context.Context, opts SessionOptions) error {
 	}
 }
 
-func runSession(ctx context.Context, client agentv1connect.AgentServiceClient, opts SessionOptions) error {
+// errIdentityRenewed konczy sesje po odnowieniu certyfikatu. Nastepne
+// polaczenie idzie juz nowa tozsamoscia.
+var errIdentityRenewed = errors.New("tozsamosc agenta odnowiona")
+
+func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
+	opts SessionOptions) (wynik error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Odnowienie certyfikatu konczy sesje: nastepna ma isc nowa tozsamoscia.
+	// Zerwanie streamu wyglada wtedy jak zwykly blad, wiec powod jest
+	// podmieniany przy wyjsciu - Run nie ma czekac z ponownym polaczeniem.
+	odnowiona := make(chan struct{})
+	if opts.Renewed != nil {
+		go func() {
+			select {
+			case <-opts.Renewed:
+				close(odnowiona)
+				cancel()
+			case <-sessionCtx.Done():
+			}
+		}()
+	}
+	defer func() {
+		select {
+		case <-odnowiona:
+			wynik = errIdentityRenewed
+		default:
+		}
+	}()
 
 	stream := client.Connect(sessionCtx)
 	defer func() { _ = stream.CloseRequest() }()

@@ -40,6 +40,9 @@ const (
 	EnrollmentServiceEnrollProcedure = "/flotestro.agent.v1.EnrollmentService/Enroll"
 	// AgentServiceConnectProcedure is the fully-qualified name of the AgentService's Connect RPC.
 	AgentServiceConnectProcedure = "/flotestro.agent.v1.AgentService/Connect"
+	// AgentServiceRenewCertificateProcedure is the fully-qualified name of the AgentService's
+	// RenewCertificate RPC.
+	AgentServiceRenewCertificateProcedure = "/flotestro.agent.v1.AgentService/RenewCertificate"
 )
 
 // EnrollmentServiceClient is a client for the flotestro.agent.v1.EnrollmentService service.
@@ -116,6 +119,11 @@ func (UnimplementedEnrollmentServiceHandler) Enroll(context.Context, *connect.Re
 // AgentServiceClient is a client for the flotestro.agent.v1.AgentService service.
 type AgentServiceClient interface {
 	Connect(context.Context) *connect.BidiStreamForClient[v1.AgentMessage, v1.ServerMessage]
+	// RenewCertificate wymienia nowy CSR na certyfikat. Tozsamosc pochodzi
+	// z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
+	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
+	// wejsciem dla hosta bez tozsamosci.
+	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the flotestro.agent.v1.AgentService service. By
@@ -135,12 +143,19 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("Connect")),
 			connect.WithClientOptions(opts...),
 		),
+		renewCertificate: connect.NewClient[v1.RenewCertificateRequest, v1.RenewCertificateResponse](
+			httpClient,
+			baseURL+AgentServiceRenewCertificateProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("RenewCertificate")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // agentServiceClient implements AgentServiceClient.
 type agentServiceClient struct {
-	connect *connect.Client[v1.AgentMessage, v1.ServerMessage]
+	connect          *connect.Client[v1.AgentMessage, v1.ServerMessage]
+	renewCertificate *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
 }
 
 // Connect calls flotestro.agent.v1.AgentService.Connect.
@@ -148,9 +163,19 @@ func (c *agentServiceClient) Connect(ctx context.Context) *connect.BidiStreamFor
 	return c.connect.CallBidiStream(ctx)
 }
 
+// RenewCertificate calls flotestro.agent.v1.AgentService.RenewCertificate.
+func (c *agentServiceClient) RenewCertificate(ctx context.Context, req *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error) {
+	return c.renewCertificate.CallUnary(ctx, req)
+}
+
 // AgentServiceHandler is an implementation of the flotestro.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	Connect(context.Context, *connect.BidiStream[v1.AgentMessage, v1.ServerMessage]) error
+	// RenewCertificate wymienia nowy CSR na certyfikat. Tozsamosc pochodzi
+	// z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
+	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
+	// wejsciem dla hosta bez tozsamosci.
+	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -166,10 +191,18 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("Connect")),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentServiceRenewCertificateHandler := connect.NewUnaryHandler(
+		AgentServiceRenewCertificateProcedure,
+		svc.RenewCertificate,
+		connect.WithSchema(agentServiceMethods.ByName("RenewCertificate")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/flotestro.agent.v1.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceConnectProcedure:
 			agentServiceConnectHandler.ServeHTTP(w, r)
+		case AgentServiceRenewCertificateProcedure:
+			agentServiceRenewCertificateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -181,4 +214,8 @@ type UnimplementedAgentServiceHandler struct{}
 
 func (UnimplementedAgentServiceHandler) Connect(context.Context, *connect.BidiStream[v1.AgentMessage, v1.ServerMessage]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.Connect is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.RenewCertificate is not implemented"))
 }

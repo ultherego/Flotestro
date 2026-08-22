@@ -145,19 +145,22 @@ type CertificateStatus struct {
 	LifecycleState string
 	Revoked        bool
 	Known          bool
+	// Serial identyfikuje certyfikat w sladzie audytowym; przy odnowieniu
+	// pozwala powiazac nowy certyfikat z zastapionym.
+	Serial string
 }
 
 // LookupCertificate sprawdza, czy certyfikat jest znany i nieodwolany oraz czy
 // host nie jest w kwarantannie. Gateway odrzuca sesje na podstawie tego wyniku.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (CertificateStatus, error) {
 	const query = `
-		select c.host_id, h.lifecycle_state, c.revoked_at is not null
+		select c.host_id, h.lifecycle_state, c.revoked_at is not null, c.serial
 		from agent_certificates c
 		join hosts h on h.id = c.host_id
 		where c.fingerprint_sha256 = $1`
 	var status CertificateStatus
 	err := s.pool.QueryRow(ctx, query, fingerprint).
-		Scan(&status.HostID, &status.LifecycleState, &status.Revoked)
+		Scan(&status.HostID, &status.LifecycleState, &status.Revoked, &status.Serial)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CertificateStatus{}, nil
 	}

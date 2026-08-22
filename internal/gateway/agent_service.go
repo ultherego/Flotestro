@@ -63,6 +63,8 @@ type AgentService struct {
 	jobs      *jobs.Store
 	audit     *audit.Recorder
 	registry  *Registry
+	// ca podpisuje odnowienia certyfikatow agentow.
+	ca        *pki.CA
 	log       *slog.Logger
 	gatewayID string
 
@@ -71,11 +73,12 @@ type AgentService struct {
 }
 
 func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
-	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, log *slog.Logger,
-	gatewayID string, heartbeatSeconds, heartbeatJitter int) *AgentService {
+	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, certificateAuthority *pki.CA,
+	log *slog.Logger, gatewayID string, heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
-		audit: recorder, registry: registry, log: log, gatewayID: gatewayID,
+		audit: recorder, registry: registry, ca: certificateAuthority,
+		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 	}
 }
