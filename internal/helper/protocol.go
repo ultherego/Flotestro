@@ -33,7 +33,10 @@ const (
 	ErrorLocked             = "locked"
 	ErrorExecFailed         = "exec_failed"
 	ErrorTimeout            = "timeout"
-	ErrorMalformed          = "malformed_request"
+	// ErrorUnsupported oznacza operacje, ktorej ten host nie obsluguje.
+	// Jasna odmowa jest lepsza niz udawanie, ze operacja sie wykonala.
+	ErrorUnsupported = "unsupported"
+	ErrorMalformed   = "malformed_request"
 )
 
 // WriteMessage zapisuje wiadomosc poprzedzona 4-bajtowa dlugoscia.

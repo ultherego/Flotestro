@@ -32,8 +32,11 @@ const (
 
 	PermPackagesPlan    Permission = "packages.plan"
 	PermPackagesUpgrade Permission = "packages.upgrade"
-	PermSystemReboot    Permission = "system.reboot"
-	PermUnitStatus      Permission = "unit.status"
+	// Naprawa dotyka pakietow, ktore moga decydowac o starcie hosta,
+	// wiec jest osobnym uprawnieniem, a nie czescia aktualizacji.
+	PermPackagesRepair Permission = "packages.repair"
+	PermSystemReboot   Permission = "system.reboot"
+	PermUnitStatus     Permission = "unit.status"
 
 	PermCampaignRead    Permission = "campaign.read"
 	PermCampaignCreate  Permission = "campaign.create"
@@ -133,7 +136,8 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
-		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermSystemReboot,
+		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
+		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,

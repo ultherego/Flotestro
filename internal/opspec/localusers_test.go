@@ -66,3 +66,46 @@ func TestOperacjeKontLokalnychMajaOsobneUprawnienia(t *testing.T) {
 		}
 	}
 }
+
+// TestWalidacjaNaprawyPakietow pilnuje granic operacji naprawy. Odpowiedz na
+// pytanie konfiguracyjne trafia do wejscia debconfa, gdzie kazdy wiersz jest
+// osobnym ustawieniem: wartosc ze znakiem nowej linii pozwalalaby dopisac
+// ustawienia, o ktore nikt nie prosil.
+func TestWalidacjaNaprawyPakietow(t *testing.T) {
+	poprawna := Payload{PackageRepair: &PackageRepairPayload{
+		Answers: []DebconfAnswer{{
+			Package: "grub-pc", Question: "grub-pc/install_devices",
+			Type: "multiselect", Value: "/dev/sda",
+		}},
+	}}
+	if err := Validate(ActionPackageRepair, poprawna); err != nil {
+		t.Fatalf("poprawna odpowiedz odrzucona: %v", err)
+	}
+
+	// Naprawa bez odpowiedzi jest dozwolona: samo dokonczenie konfiguracji
+	// wystarcza, gdy poprzednia transakcja zostala przerwana.
+	if err := Validate(ActionPackageRepair, Payload{PackageRepair: &PackageRepairPayload{}}); err != nil {
+		t.Fatalf("naprawa bez odpowiedzi odrzucona: %v", err)
+	}
+
+	przypadki := map[string]DebconfAnswer{
+		"nazwa pytania bez pakietu": {Package: "grub-pc", Question: "install_devices", Type: "string", Value: "x"},
+		"pytanie ze sciezka":        {Package: "grub-pc", Question: "../../etc/passwd", Type: "string", Value: "x"},
+		"typ nieznany":              {Package: "grub-pc", Question: "grub-pc/x", Type: "shell", Value: "x"},
+		"wartosc z nowa linia":      {Package: "grub-pc", Question: "grub-pc/x", Type: "string", Value: "a\nb c d"},
+		"pakiet nieprawidlowy":      {Package: "grub pc", Question: "grub-pc/x", Type: "string", Value: "x"},
+	}
+	for nazwa, answer := range przypadki {
+		payload := Payload{PackageRepair: &PackageRepairPayload{Answers: []DebconfAnswer{answer}}}
+		if err := Validate(ActionPackageRepair, payload); err == nil {
+			t.Errorf("%s: payload powinien zostac odrzucony", nazwa)
+		}
+	}
+
+	if ActionPackageRepair.Permission() == ActionPackageUpgrade.Permission() {
+		t.Error("naprawa musi miec uprawnienie osobne od aktualizacji")
+	}
+	if !ActionPackageRepair.Mutating() {
+		t.Error("naprawa zmienia stan hosta")
+	}
+}

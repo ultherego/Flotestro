@@ -73,6 +73,9 @@ fi
 %systemd_post flotestro-agent.service flotestro-helper.socket
 # Gniazdo helpera musi istniec, zanim agent sprobuje sie z nim polaczyc.
 systemctl enable --now flotestro-helper.socket || :
+# Helper dziala dalej po podmianie binarki, wiec po aktualizacji obslugiwalby
+# zadania starym kodem. Gniazdo uruchomi nowa wersje przy nastepnym zadaniu.
+systemctl stop flotestro-helper.service || :
 
 # Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go w petli
 # restartow zasmiecaloby dziennik hosta; instalacja konczy sie wtedy

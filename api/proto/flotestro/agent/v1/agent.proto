@@ -297,6 +297,7 @@ message TaskEnvelope {
     ReadUnitStatus read_unit_status = 25;
     DomainEnroll domain_enroll = 26;
     LocalUserAction local_user_action = 27;
+    PackagesRepair packages_repair = 28;
   }
 }
 
@@ -406,6 +407,36 @@ message LocalUserResult {
   LocalAccount account = 3;
 }
 
+// PackagesRepair odblokowuje operacje pakietowe na hoscie.
+//
+// Operacja niesie odpowiedzi na pytania konfiguracyjne, ktore zablokowaly
+// pakiet. Odpowiedzi pochodza od operatora, nie od panelu: wybor urzadzenia
+// rozruchowego czy sposobu obslugi plikow konfiguracyjnych to decyzja, ktorej
+// maszyna nie powinna podejmowac za czlowieka.
+//
+// Bez odpowiedzi operacja jedynie ponawia dokonczenie konfiguracji - to
+// wystarcza, gdy poprzednia transakcja zostala przerwana.
+message PackagesRepair {
+  repeated DebconfAnswer answers = 1;
+}
+
+message DebconfAnswer {
+  string package = 1;
+  string question = 2;
+  // Typ pytania w rozumieniu debconfa: select, multiselect, boolean, string.
+  string type = 3;
+  string value = 4;
+}
+
+message PackageRepairResult {
+  string manager = 1;
+  // Pakiety, ktore po naprawie nadal blokuja operacje pakietowe.
+  repeated BlockedPackage still_blocked = 2;
+  // Pytania, na ktore faktycznie ustawiono odpowiedz.
+  repeated string answered = 3;
+  bool repaired = 4;
+}
+
 message CancelTask {
   string task_id = 1;
   string reason = 2;
@@ -458,6 +489,7 @@ message TaskResult {
     UnitStatusResult unit_status = 22;
     DomainEnrollResult domain_enroll = 23;
     LocalUserResult local_user = 24;
+    PackageRepairResult package_repair = 25;
   }
 }
 
@@ -516,6 +548,31 @@ message PackagePlanResult {
   bool reboot_predicted = 6;
   // Prawda, gdy metadane zostaly odswiezone w ramach tego planu.
   bool metadata_refreshed = 7;
+  // Pakiety blokujace transakcje: czekaja na dokonczenie konfiguracji albo
+  // sa uszkodzone. Dopoki taki pakiet istnieje, zadna aktualizacja na tym
+  // hoscie sie nie powiedzie, bo menedzer pakietow najpierw probuje dokonczyc
+  // jego konfiguracje.
+  repeated BlockedPackage blocked = 8;
+}
+
+// BlockedPackage opisuje pakiet blokujacy operacje pakietowe wraz z pytaniami
+// konfiguracyjnymi, na ktore nikt nie odpowiedzial.
+//
+// Bez tych pytan operator wie tylko tyle, ze cos jest nie tak; z nimi widzi,
+// jaka decyzje ma podjac. Odpowiedzi nie zgaduje panel: wybor moze dotyczyc
+// na przyklad urzadzenia, na ktore zapisze sie bootloader.
+message BlockedPackage {
+  string name = 1;
+  string status = 2;
+  repeated DebconfQuestion questions = 3;
+}
+
+message DebconfQuestion {
+  string name = 1;
+  string value = 2;
+  // Answered mowi, czy pytanie ma juz odpowiedz uznana przez system za
+  // udzielona. Puste nie znaczy "nie": stanu moglo sie nie dac ustalic.
+  optional bool answered = 3;
 }
 
 message PackageApplyResult {

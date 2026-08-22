@@ -157,7 +157,26 @@ func planToProto(plan packages.Plan) *agentv1.PackagePlanResult {
 		PlanHash:           plan.Hash(),
 		RebootPredicted:    plan.RebootPredicted,
 		MetadataRefreshed:  plan.MetadataRefreshed,
+		Blocked:            blockedPlanToProto(plan.Blocked),
 	}
+}
+
+// blockedPlanToProto przenosi blokady wraz z pytaniami konfiguracyjnymi.
+// Operator ma je zobaczyc juz na etapie planu, a nie po nieudanej transakcji.
+func blockedPlanToProto(blocked []packages.Blocked) []*agentv1.BlockedPackage {
+	result := make([]*agentv1.BlockedPackage, 0, len(blocked))
+	for _, pakiet := range blocked {
+		pytania := make([]*agentv1.DebconfQuestion, 0, len(pakiet.Questions))
+		for _, pytanie := range pakiet.Questions {
+			pytania = append(pytania, &agentv1.DebconfQuestion{
+				Name: pytanie.Name, Value: pytanie.Value, Answered: pytanie.Answered,
+			})
+		}
+		result = append(result, &agentv1.BlockedPackage{
+			Name: pakiet.Name, Status: pakiet.Status, Questions: pytania,
+		})
+	}
+	return result
 }
 
 func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyResult {

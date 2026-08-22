@@ -10,9 +10,14 @@ import (
 )
 
 const (
-	aptGetPath    = "/usr/bin/apt-get"
-	dpkgPath      = "/usr/bin/dpkg"
-	dpkgQueryPath = "/usr/bin/dpkg-query"
+	aptGetPath     = "/usr/bin/apt-get"
+	dpkgPath       = "/usr/bin/dpkg"
+	dpkgQueryPath  = "/usr/bin/dpkg-query"
+	dpkgStatusPath = "/var/lib/dpkg/status"
+	// Narzedzia debconfa sluza wylacznie odblokowaniu pakietu, ktory czeka
+	// na decyzje operatora.
+	debconfShowPath = "/usr/bin/debconf-show"
+	debconfSetPath  = "/usr/bin/debconf-set-selections"
 )
 
 // aptLockFiles to pliki, ktore APT i dpkg blokuja na czas operacji.
@@ -48,6 +53,10 @@ func (a *APT) LockHeld() (bool, string) {
 // ani roota, wiec planowanie nie koliduje z reczna praca administratora.
 func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: a.Name(), DiskAvailableBytes: diskAvailable("/")}
+	// Pakiet czekajacy na konfiguracje zatrzyma kazda transakcje, wiec plan
+	// mowi o nim od razu. Bez tego operator dowiaduje sie o blokadzie dopiero
+	// po nieudanej aktualizacji.
+	plan.Blocked = a.BlockedPackages(ctx)
 
 	result := run(ctx, 3*time.Minute, aptGetPath,
 		"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
@@ -228,27 +237,62 @@ func (a *APT) DatabaseBroken(ctx context.Context) bool {
 
 // PackagesNeedingAttention wypisuje pakiety, ktorych stan blokuje transakcje.
 //
-// dpkg --audit opisuje problem zdaniami przeznaczonymi dla czlowieka, ale
-// nazwy pakietow podaje w osobnych, wcietych wierszach. Bierzemy je stamtad,
-// zeby operator dostal nazwe zamiast zdania o koniecznosci naprawy.
+// Stan czytamy wprost z bazy dpkg, a nie przez "dpkg --audit": audyt wymaga
+// dostepu do blokady katalogu bazy, ktorego agent bez uprawnien roota nie ma.
+// Plik stanu jest czytelny dla wszystkich, wiec ta sama informacja jest
+// dostepna zarowno agentowi, jak i helperowi - a plan operacji moze ostrzec
+// o blokadzie, zanim ktokolwiek zleci aktualizacje.
 func (a *APT) PackagesNeedingAttention(ctx context.Context) []string {
-	result := run(ctx, time.Minute, dpkgPath, "--audit")
-	if !result.Ran || strings.TrimSpace(result.Stdout) == "" {
+	blocked := a.blockedFromStatus()
+	nazwy := make([]string, 0, len(blocked))
+	for _, pakiet := range blocked {
+		nazwy = append(nazwy, pakiet.Name)
+	}
+	return nazwy
+}
+
+// blockedFromStatus parsuje /var/lib/dpkg/status i zwraca pakiety w stanie
+// innym niz w pelni zainstalowany albo calkiem usuniety.
+func (a *APT) blockedFromStatus() []Blocked {
+	return blockedFromStatusFile(dpkgStatusPath)
+}
+
+// blockedFromStatusFile jest wydzielone, zeby dalo sie sprawdzic parsowanie
+// bez zmieniania bazy pakietow dzialajacego systemu.
+func blockedFromStatusFile(path string) []Blocked {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil
 	}
-	var pakiety []string
-	for _, linia := range strings.Split(result.Stdout, "\n") {
-		if !strings.HasPrefix(linia, " ") {
+	var blocked []Blocked
+	for _, stanza := range strings.Split(string(data), "\n\n") {
+		var nazwa, status string
+		for _, linia := range strings.Split(stanza, "\n") {
+			switch {
+			case strings.HasPrefix(linia, "Package: "):
+				nazwa = strings.TrimSpace(strings.TrimPrefix(linia, "Package: "))
+			case strings.HasPrefix(linia, "Status: "):
+				status = strings.TrimSpace(strings.TrimPrefix(linia, "Status: "))
+			}
+		}
+		if nazwa == "" || status == "" {
 			continue
 		}
-		pola := strings.Fields(linia)
-		if len(pola) == 0 {
+		pola := strings.Fields(status)
+		if len(pola) != 3 {
 			continue
 		}
-		// Wiersz opisu zaczyna sie od nazwy pakietu; reszta to jego opis.
-		pakiety = append(pakiety, pola[0])
+		// Trzecie pole opisuje faktyczny stan pakietu. Zainstalowany i sam
+		// plikami konfiguracyjnymi nie blokuja niczego; kazdy inny stan
+		// znaczy, ze dpkg nie dokonczyl pracy i zrobi to przy nastepnej
+		// transakcji - a wtedy moze na niej paść.
+		switch pola[2] {
+		case "installed", "config-files", "not-installed":
+			continue
+		}
+		blocked = append(blocked, Blocked{Name: nazwa, Status: status})
 	}
-	return pakiety
+	return blocked
 }
 
 // servicesNeedingRestart czyta liste zapisana przez needrestart, jesli jest

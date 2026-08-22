@@ -48,6 +48,10 @@ type Plan struct {
 	DiskAvailableBytes uint64   `json:"disk_available_bytes"`
 	MetadataRefreshed  bool     `json:"metadata_refreshed"`
 	RebootPredicted    bool     `json:"reboot_predicted"`
+	// Blocked opisuje pakiety, ktore uniemozliwia wykonanie planu. Plan sam
+	// w sobie przechodzi, bo niczego nie zmienia, ale transakcja na takim
+	// hoscie padnie - operator ma to wiedziec przed jej zleceniem.
+	Blocked []Blocked `json:"blocked,omitempty"`
 }
 
 // Apply opisuje wynik wykonanej transakcji.
@@ -140,7 +144,32 @@ func SetRuntimeDir(dir string) error {
 // run uruchamia narzedzie ze stala sciezka i tablica argumentow. Nigdy nie
 // uzywamy sh -c, wiec nazwa pakietu nie moze stac sie poleceniem.
 // LC_ALL=C stabilizuje output, ktory musimy parsowac.
+// ErrPackageNotBlocked odrzuca odpowiedz dla pakietu, ktory niczego nie
+// blokuje. Bez tego ograniczenia naprawa bylaby dowolnym ustawianiem
+// konfiguracji dowolnego pakietu na hoscie.
+var ErrPackageNotBlocked = errors.New("pakiet nie blokuje operacji pakietowych")
+
+// ErrInvalidAnswer odrzuca odpowiedz ze znakiem nowej linii: kazdy wiersz
+// wejscia debconfa jest osobnym ustawieniem, wiec taka wartosc pozwalalaby
+// dopisac ustawienia, o ktore nikt nie prosil.
+var ErrInvalidAnswer = errors.New("odpowiedz zawiera znak nowej linii")
+
+func errorf(format string, args ...any) error {
+	return fmt.Errorf(format, args...)
+}
+
+// runWithInput uruchamia polecenie, podajac mu tresc na standardowe wejscie.
+func runWithInput(ctx context.Context, timeout time.Duration, input string,
+	path string, args ...string) commandResult {
+	return runCommand(ctx, timeout, input, path, args...)
+}
+
 func run(ctx context.Context, timeout time.Duration, path string, args ...string) commandResult {
+	return runCommand(ctx, timeout, "", path, args...)
+}
+
+func runCommand(ctx context.Context, timeout time.Duration, input string,
+	path string, args ...string) commandResult {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 		return commandResult{ExitCode: -1, Err: fmt.Errorf("%s: brak narzedzia", path)}
@@ -152,6 +181,9 @@ func run(ctx context.Context, timeout time.Duration, path string, args ...string
 	cmd := exec.CommandContext(cmdCtx, path, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	cmd.Env = []string{
 		"LC_ALL=C",
 		"LANG=C",

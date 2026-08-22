@@ -118,6 +118,8 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *h
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction)
+	case *helperv1.HelperRequest_PackageRepair:
+		return s.repairPackages(ctx, request, action.PackageRepair)
 	case *helperv1.HelperRequest_Reboot:
 		return s.applyReboot(ctx, request, action.Reboot)
 	case *helperv1.HelperRequest_IdentityProbe:
@@ -417,4 +419,82 @@ func ListenerFromSystemd() (net.Listener, bool, error) {
 		return nil, false, fmt.Errorf("gniazdo z systemd: %w", err)
 	}
 	return listener, true, nil
+}
+
+// repairPackages odblokowuje operacje pakietowe na hoscie.
+//
+// Odpowiedzi na pytania konfiguracyjne pochodza od operatora i dotycza
+// wylacznie pakietow, ktore faktycznie blokuja transakcje. Helper nie
+// wymysla odpowiedzi za nikogo: wybor urzadzenia rozruchowego czy sposobu
+// obslugi plikow konfiguracyjnych jest decyzja czlowieka, a maszyna moze
+// nia jedynie wykonac.
+func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperRequest,
+	action *helperv1.PackageRepairRequest) *helperv1.HelperResponse {
+	manager, err := packages.Detect()
+	if err != nil {
+		return reject(ErrorUnsupported, err.Error())
+	}
+	apt, ok := manager.(*packages.APT)
+	if !ok {
+		// Na innych rodzinach systemow blokada wyglada inaczej i naprawa tez
+		// wygladalaby inaczej; udawanie, ze operacja dziala, byloby gorsze
+		// niz jasna odmowa.
+		return reject(ErrorUnsupported,
+			"naprawa pakietow jest obslugiwana wylacznie dla menedzera apt")
+	}
+
+	answers := make([]packages.Answer, 0, len(action.GetAnswers()))
+	for _, answer := range action.GetAnswers() {
+		answers = append(answers, packages.Answer{
+			Package:  answer.GetPackage(),
+			Question: answer.GetQuestion(),
+			Type:     answer.GetType(),
+			Value:    answer.GetValue(),
+		})
+	}
+
+	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	repairCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ustawione, pozostale, err := apt.Repair(repairCtx, answers)
+	response := &helperv1.PackageRepairResponse{
+		Manager:      apt.Name(),
+		Answered:     ustawione,
+		StillBlocked: blockedToProto(pozostale),
+		Repaired:     len(pozostale) == 0,
+	}
+	if err != nil {
+		s.log.Warn("naprawa pakietow nie powiodla sie",
+			"task_id", request.GetTaskId(), "err", err, "pozostalo", len(pozostale))
+		return &helperv1.HelperResponse{
+			Accepted:     false,
+			ErrorCode:    ErrorExecFailed,
+			Message:      err.Error(),
+			RepairResult: response,
+		}
+	}
+
+	s.log.Info("pakiety odblokowane",
+		"task_id", request.GetTaskId(), "odpowiedzi", len(ustawione))
+	return &helperv1.HelperResponse{Accepted: true, RepairResult: response}
+}
+
+func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail {
+	result := make([]*helperv1.BlockedPackageDetail, 0, len(blocked))
+	for _, pakiet := range blocked {
+		pytania := make([]*helperv1.DebconfQuestionDetail, 0, len(pakiet.Questions))
+		for _, pytanie := range pakiet.Questions {
+			pytania = append(pytania, &helperv1.DebconfQuestionDetail{
+				Name: pytanie.Name, Value: pytanie.Value, Answered: pytanie.Answered,
+			})
+		}
+		result = append(result, &helperv1.BlockedPackageDetail{
+			Name: pakiet.Name, Status: pakiet.Status, Questions: pytania,
+		})
+	}
+	return result
 }

@@ -29,6 +29,11 @@ configure)
     systemctl daemon-reload || true
     # Gniazdo helpera musi istniec, zanim agent sprobuje sie z nim polaczyc.
     systemctl enable --now flotestro-helper.socket || true
+    # Helper jest uruchamiany gniazdem i dziala dalej po podmianie binarki,
+    # wiec po aktualizacji obslugiwalby zadania starym kodem az do wygasniecia
+    # bezczynnosci. Zatrzymanie go tutaj sprawia, ze nastepne zadanie trafi
+    # do nowej wersji; gniazdo uruchomi ja ponownie na zadanie.
+    systemctl stop flotestro-helper.service || true
 
     # Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go
     # w petli restartow zasmiecaloby dziennik hosta; instalacja konczy sie

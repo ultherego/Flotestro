@@ -24,6 +24,9 @@ const (
 
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
+	// Naprawa odblokowuje operacje pakietowe na hoscie: ustawia odpowiedzi
+	// operatora na pytania konfiguracyjne i konczy konfiguracje pakietow.
+	ActionPackageRepair ActionType = "packages.repair"
 
 	ActionSystemReboot ActionType = "system.reboot"
 	ActionUnitStatus   ActionType = "unit.status"
@@ -87,6 +90,10 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionPackagePlan: {mutating: false, capability: "packages", permission: "packages.plan", timeoutSeconds: 300},
 	// Transakcja pakietowa jest najbardziej ryzykowna operacja w systemie.
 	ActionPackageUpgrade: {mutating: true, capability: "packages", permission: "packages.upgrade", timeoutSeconds: 1800},
+
+	// Naprawa zmienia stan hosta i moze dotyczyc pakietow o duzym znaczeniu,
+	// z bootloaderem wlacznie, wiec ma wlasne uprawnienie i wlasny timeout.
+	ActionPackageRepair: {mutating: true, capability: "packages", permission: "packages.repair", timeoutSeconds: 1800},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
 	// aktualizacji.
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot", timeoutSeconds: 120},
@@ -178,6 +185,24 @@ type Payload struct {
 	UnitStatus     *UnitStatusPayload     `json:"unit_status,omitempty"`
 	DomainEnroll   *DomainEnrollPayload   `json:"domain_enroll,omitempty"`
 	LocalUser      *LocalUserPayload      `json:"local_user,omitempty"`
+	PackageRepair  *PackageRepairPayload  `json:"package_repair,omitempty"`
+}
+
+// PackageRepairPayload niesie odpowiedzi operatora na pytania konfiguracyjne
+// pakietow, ktore blokuja operacje pakietowe.
+//
+// Payload moze byc pusty: samo dokonczenie konfiguracji wystarcza, gdy
+// poprzednia transakcja zostala przerwana i nic nie czeka na decyzje.
+type PackageRepairPayload struct {
+	Answers []DebconfAnswer `json:"answers,omitempty"`
+}
+
+// DebconfAnswer jest jedna odpowiedzia na pytanie konfiguracyjne pakietu.
+type DebconfAnswer struct {
+	Package  string `json:"package"`
+	Question string `json:"question"`
+	Type     string `json:"type"`
+	Value    string `json:"value"`
 }
 
 // DomainEnrollPayload opisuje dolaczenie hosta do domeny.
@@ -219,6 +244,28 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu package_plan", action)
 		}
 		return validatePackageNames(payload.PackagePlan.OnlyPackages)
+
+	case ActionPackageRepair:
+		if payload.PackageRepair == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu package_repair", action)
+		}
+		for _, answer := range payload.PackageRepair.Answers {
+			if err := validatePackageNames([]string{answer.Package}); err != nil {
+				return err
+			}
+			if !debconfQuestionPattern.MatchString(answer.Question) {
+				return fmt.Errorf("nieprawidlowa nazwa pytania %q", answer.Question)
+			}
+			if !debconfTypePattern.MatchString(answer.Type) {
+				return fmt.Errorf("nieobslugiwany typ pytania %q", answer.Type)
+			}
+			// Znak nowej linii pozwalalby dopisac ustawienia, o ktore nikt
+			// nie prosil: kazdy wiersz wejscia debconfa jest osobnym wpisem.
+			if strings.ContainsAny(answer.Value, "\n\r") {
+				return fmt.Errorf("wartosc odpowiedzi nie moze zawierac znaku nowej linii")
+			}
+		}
+		return nil
 
 	case ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet:
 		if payload.LocalUser == nil {
@@ -349,6 +396,14 @@ var allowedKeyTypes = map[string]bool{
 	"sk-ssh-ed25519@openssh.com":         true,
 	"sk-ecdsa-sha2-nistp256@openssh.com": true,
 }
+
+// debconfQuestionPattern odpowiada nazwom pytan konfiguracyjnych, na przyklad
+// grub-pc/install_devices.
+var debconfQuestionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9._+-]+)+$`)
+
+// debconfTypePattern ogranicza typy do tych, ktore maja sens w odpowiedzi
+// przekazanej z panelu.
+var debconfTypePattern = regexp.MustCompile(`^(select|multiselect|boolean|string|password|note)$`)
 
 // domainPattern odrzuca nazwy, ktore nie moga byc domena DNS.
 var domainPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)

@@ -122,6 +122,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.planPackages(ctx, task, payload.PackagePlan)
 	case opspec.ActionPackageUpgrade:
 		return e.upgradePackages(ctx, task, payload.PackageUpgrade)
+	case opspec.ActionPackageRepair:
+		return e.repairPackages(ctx, task, payload.PackageRepair)
 	case opspec.ActionSystemReboot:
 		return e.rebootHost(ctx, task, payload.Reboot)
 	case opspec.ActionUnitStatus:
@@ -381,6 +383,20 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			},
 		}, nil
 
+	case *agentv1.TaskEnvelope_PackagesRepair:
+		odpowiedzi := make([]opspec.DebconfAnswer, 0, len(action.PackagesRepair.GetAnswers()))
+		for _, answer := range action.PackagesRepair.GetAnswers() {
+			odpowiedzi = append(odpowiedzi, opspec.DebconfAnswer{
+				Package:  answer.GetPackage(),
+				Question: answer.GetQuestion(),
+				Type:     answer.GetType(),
+				Value:    answer.GetValue(),
+			})
+		}
+		return opspec.ActionPackageRepair, opspec.Payload{
+			PackageRepair: &opspec.PackageRepairPayload{Answers: odpowiedzi},
+		}, nil
+
 	case *agentv1.TaskEnvelope_LocalUserAction:
 		request := action.LocalUserAction
 		actionType, known := localUserActions[request.GetOperation()]
@@ -478,4 +494,9 @@ var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
 	agentv1.LocalUserAction_OPERATION_LOCK:         opspec.ActionLocalUserLock,
 	agentv1.LocalUserAction_OPERATION_UNLOCK:       opspec.ActionLocalUserUnlock,
 	agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS: opspec.ActionLocalSSHKeysSet,
+}
+
+// joinNames sklada nazwy w czytelna liste dla komunikatu operatora.
+func joinNames(nazwy []string) string {
+	return strings.Join(nazwy, ", ")
 }

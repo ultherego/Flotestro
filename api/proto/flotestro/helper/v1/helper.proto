@@ -28,6 +28,7 @@ message HelperRequest {
     DomainEnrollRequest domain_enroll = 24;
     LocalAccountsRequest local_accounts = 25;
     LocalUserActionRequest local_user_action = 26;
+    PackageRepairRequest package_repair = 27;
   }
 }
 
@@ -125,6 +126,7 @@ message HelperResponse {
   IdentityProbeResult identity_result = 11;
   DomainEnrollResult enroll_result = 12;
   LocalAccountsResult accounts_result = 13;
+  PackageRepairResponse repair_result = 14;
 }
 
 message LocalAccountsResult {
@@ -178,6 +180,39 @@ message PackageActionResult {
   bool package_database_broken = 5;
   // Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
   repeated string packages_needing_attention = 6;
+}
+
+// PackageRepairRequest odblokowuje operacje pakietowe. Odpowiedzi na pytania
+// konfiguracyjne pochodza od operatora i sa ustawiane przed dokonczeniem
+// konfiguracji pakietow.
+message PackageRepairRequest {
+  repeated DebconfSelection answers = 1;
+}
+
+message DebconfSelection {
+  string package = 1;
+  string question = 2;
+  string type = 3;
+  string value = 4;
+}
+
+message PackageRepairResponse {
+  string manager = 1;
+  repeated BlockedPackageDetail still_blocked = 2;
+  repeated string answered = 3;
+  bool repaired = 4;
+}
+
+message BlockedPackageDetail {
+  string name = 1;
+  string status = 2;
+  repeated DebconfQuestionDetail questions = 3;
+}
+
+message DebconfQuestionDetail {
+  string name = 1;
+  string value = 2;
+  optional bool answered = 3;
 }
 
 message PackageVersionChange {

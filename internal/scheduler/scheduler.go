@@ -287,6 +287,20 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionPackageRepair:
+		odpowiedzi := make([]*agentv1.DebconfAnswer, 0, len(payload.PackageRepair.Answers))
+		for _, answer := range payload.PackageRepair.Answers {
+			odpowiedzi = append(odpowiedzi, &agentv1.DebconfAnswer{
+				Package:  answer.Package,
+				Question: answer.Question,
+				Type:     answer.Type,
+				Value:    answer.Value,
+			})
+		}
+		envelope.Action = &agentv1.TaskEnvelope_PackagesRepair{
+			PackagesRepair: &agentv1.PackagesRepair{Answers: odpowiedzi},
+		}
+
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{
 			ReadUnitStatus: &agentv1.ReadUnitStatus{Units: payload.UnitStatus.Units},

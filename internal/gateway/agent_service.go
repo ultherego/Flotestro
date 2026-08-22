@@ -432,6 +432,21 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"plan_hash":            hex.EncodeToString(plan.GetPlanHash()),
 			"reboot_predicted":     plan.GetRebootPredicted(),
 			"metadata_refreshed":   plan.GetMetadataRefreshed(),
+			"blocked":              blockedJSON(plan.GetBlocked()),
+		})
+		if err != nil {
+			return nil
+		}
+		return encoded
+
+	case *agentv1.TaskResult_PackageRepair:
+		repair := detail.PackageRepair
+		encoded, err := json.Marshal(map[string]any{
+			"kind":          "package_repair",
+			"manager":       repair.GetManager(),
+			"repaired":      repair.GetRepaired(),
+			"answered":      repair.GetAnswered(),
+			"still_blocked": blockedJSON(repair.GetStillBlocked()),
 		})
 		if err != nil {
 			return nil
@@ -857,4 +872,23 @@ func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Dur
 			}
 		}
 	}
+}
+
+// blockedJSON opisuje pakiety blokujace operacje pakietowe wraz z pytaniami
+// konfiguracyjnymi. Panel pokazuje je operatorowi, bo to on podejmuje decyzje.
+func blockedJSON(blocked []*agentv1.BlockedPackage) []map[string]any {
+	result := make([]map[string]any, 0, len(blocked))
+	for _, pakiet := range blocked {
+		pytania := make([]map[string]any, 0, len(pakiet.GetQuestions()))
+		for _, pytanie := range pakiet.GetQuestions() {
+			pytania = append(pytania, map[string]any{
+				"name": pytanie.GetName(), "value": pytanie.GetValue(),
+				"answered": pytanie.Answered,
+			})
+		}
+		result = append(result, map[string]any{
+			"name": pakiet.GetName(), "status": pakiet.GetStatus(), "questions": pytania,
+		})
+	}
+	return result
 }
