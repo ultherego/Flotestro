@@ -76,6 +76,8 @@ func run() error {
 		config.Env("FLOTESTRO_OIDC_CLIENT_ID", "flotestro-panel"), "identyfikator klienta OIDC")
 	clientSecret := flag.String("oidc-client-secret",
 		config.Env("FLOTESTRO_OIDC_CLIENT_SECRET", ""), "sekret klienta OIDC")
+	webRoot := flag.String("web-root",
+		config.Env("FLOTESTRO_WEB_ROOT", ""), "katalog ze zbudowanym panelem")
 	publicURL := flag.String("public-url",
 		config.Env("FLOTESTRO_PUBLIC_URL", ""), "adres panelu widoczny dla przegladarki")
 	groupsClaim := flag.String("oidc-groups-claim",
@@ -244,6 +246,7 @@ func run() error {
 					SessionIdle:            8 * time.Hour,
 					SessionAbsolute:        24 * time.Hour,
 					PublicURL:              *publicURL,
+					WebRoot:                *webRoot,
 				}).Routes(),
 			&http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,

@@ -1,0 +1,144 @@
+/* Panel administracyjny: gestosc informacji wazniejsza od ozdob. */
+:root {
+  --tlo: #0f1115;
+  --tlo-panel: #171a21;
+  --tlo-hover: #1e222b;
+  --obramowanie: #262b36;
+  --tekst: #e6e8ec;
+  --tekst-slaby: #949aa6;
+  --akcent: #4f8cff;
+  --ok: #3fb950;
+  --uwaga: #d29922;
+  --blad: #f85149;
+  --nieznane: #6e7681;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--tlo);
+  color: var(--tekst);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { color: var(--akcent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.uklad { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+
+.nawigacja {
+  background: var(--tlo-panel);
+  border-right: 1px solid var(--obramowanie);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nawigacja .marka { font-weight: 600; font-size: 16px; padding: 8px; margin-bottom: 12px; }
+.nawigacja a {
+  color: var(--tekst-slaby);
+  padding: 8px 10px;
+  border-radius: 6px;
+  display: block;
+}
+.nawigacja a:hover { background: var(--tlo-hover); color: var(--tekst); text-decoration: none; }
+.nawigacja a.aktywny { background: var(--tlo-hover); color: var(--tekst); }
+.nawigacja .stopka { margin-top: auto; font-size: 12px; color: var(--tekst-slaby); padding: 8px; }
+
+.tresc { padding: 24px 28px; overflow-x: auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 24px 0 8px; }
+.podtytul { color: var(--tekst-slaby); margin: 0 0 20px; font-size: 13px; }
+
+.kafelki { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.kafelek {
+  background: var(--tlo-panel);
+  border: 1px solid var(--obramowanie);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.kafelek .etykieta { color: var(--tekst-slaby); font-size: 12px; }
+.kafelek .wartosc { font-size: 26px; font-weight: 600; margin-top: 4px; }
+.kafelek.uwaga .wartosc { color: var(--uwaga); }
+.kafelek.blad .wartosc { color: var(--blad); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left;
+  color: var(--tekst-slaby);
+  font-weight: 500;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--obramowanie);
+  white-space: nowrap;
+}
+td { padding: 8px 10px; border-bottom: 1px solid var(--obramowanie); }
+tbody tr:hover { background: var(--tlo-hover); }
+
+.znacznik {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--obramowanie);
+  color: var(--tekst-slaby);
+  white-space: nowrap;
+}
+.znacznik.ok { color: var(--ok); border-color: #1f4d2a; }
+.znacznik.uwaga { color: var(--uwaga); border-color: #55430f; }
+.znacznik.blad { color: var(--blad); border-color: #5c1f1c; }
+.znacznik.nieznany { color: var(--nieznane); }
+
+.filtry { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+input, select, textarea {
+  background: var(--tlo-panel);
+  border: 1px solid var(--obramowanie);
+  color: var(--tekst);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+}
+button {
+  background: var(--akcent);
+  border: 1px solid transparent;
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+button.wtorny { background: transparent; border-color: var(--obramowanie); color: var(--tekst); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.zakladki { display: flex; gap: 4px; border-bottom: 1px solid var(--obramowanie); margin: 16px 0; }
+.zakladki button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--tekst-slaby);
+  border-radius: 0;
+  padding: 8px 12px;
+}
+.zakladki button.aktywna { color: var(--tekst); border-bottom-color: var(--akcent); }
+.zakladki button:disabled { opacity: 0.35; }
+
+.pary { display: grid; grid-template-columns: 210px 1fr; gap: 6px 16px; font-size: 13px; }
+.pary dt { color: var(--tekst-slaby); }
+.pary dd { margin: 0; }
+
+pre {
+  background: var(--tlo-panel);
+  border: 1px solid var(--obramowanie);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  margin: 0;
+}
+
+.pusto { color: var(--tekst-slaby); padding: 24px 0; }
+.blad-strony { color: var(--blad); }
+.zrodlo { color: var(--tekst-slaby); font-size: 11px; }
+.ekran-logowania {
+  display: grid; place-items: center; min-height: 100vh; text-align: center;
+}

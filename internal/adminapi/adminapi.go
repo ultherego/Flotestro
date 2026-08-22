@@ -44,6 +44,7 @@ type Server struct {
 	productionEnvironments map[string]bool
 	sessionLimits          authz.SessionLimits
 	publicURL              string
+	webRoot                string
 }
 
 // Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
@@ -54,6 +55,8 @@ type Options struct {
 	// PublicURL jest adresem panelu widocznym dla przegladarki; uzywany przy
 	// wylogowaniu i przy decyzji o fladze Secure ciasteczek.
 	PublicURL string
+	// WebRoot wskazuje katalog ze zbudowanym panelem. Pusty wylacza serwowanie.
+	WebRoot string
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
@@ -70,7 +73,8 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		campaigns: campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
-		sessionLimits:          limits, publicURL: options.PublicURL}
+		sessionLimits:          limits, publicURL: options.PublicURL,
+		webRoot: options.WebRoot}
 }
 
 // Routes buduje router API.
@@ -151,6 +155,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/group-mappings", s.handleListGroupMappings)
 	mux.HandleFunc("POST /api/v1/group-mappings", s.handleCreateGroupMapping)
 	mux.HandleFunc("DELETE /api/v1/group-mappings/{id}", s.handleDeleteGroupMapping)
+
+	// Panel jest serwowany pod korzeniem; API ma wlasne prefiksy, wiec nie
+	// koliduje z trasami przegladarki.
+	mux.Handle("/", SPAHandler(s.webRoot))
 
 	// Uwierzytelnienie obejmuje caly router. Autoryzacje robia handlery, bo
 	// tylko one znaja zakres celu.

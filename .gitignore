@@ -18,3 +18,7 @@ node_modules/
 .env
 .env.*
 *.local
+
+# Zaleznosci i wynik budowania panelu
+web/node_modules/
+web/dist/
