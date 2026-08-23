@@ -17,7 +17,16 @@ Environment=FLOTESTRO_HELPER_IDLE_SECONDS=300
 # transakcje pakietowe musza pobierac pakiety z repozytorium, wiec ruch
 # wychodzacy jest konieczny. Control plane celowo nie posredniczy w pobieraniu.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-NoNewPrivileges=yes
+# NoNewPrivileges=yes blokuje przejscia domen SELinuksa przy execve. Skrypty
+# pakietow rpm przechodza do domeny rpm_script_t, wiec na Fedorze i RHEL-u nie
+# daja sie uruchomic - transakcja konczy sie bledem "scriptlet failed" albo
+# cicho nie robi nic, a przyczyny nie widac ani w dzienniku, ani w audycie.
+#
+# Helper i tak dziala jako root, wiec ta dyrektywa niczego mu nie odbierala:
+# nie ma czego eskalowac. Granica jest gniazdo, weryfikacja SO_PEERCRED
+# i zamknieta lista operacji - a nie flagi, ktore udaja, ze proces jest
+# nieuprzywilejowany.
+NoNewPrivileges=no
 PrivateTmp=yes
 # Helper zarzadza plikami authorized_keys w katalogach domowych, wiec /home
 # musi byc dla niego widoczny. ProtectHome nie chronilby tu przed niczym:
