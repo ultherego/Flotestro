@@ -159,7 +159,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
-		opspec.ActionMountRemove, opspec.ActionFilesystemCheck:
+		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
+		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
+		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe:
 		return e.applyStorage(ctx, task, action, payload.Storage)
 	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
 		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
@@ -523,16 +525,28 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionMountRemove
 		case agentv1.StorageAction_OPERATION_FS_CHECK:
 			typ = opspec.ActionFilesystemCheck
+		case agentv1.StorageAction_OPERATION_LVM_EXTEND:
+			typ = opspec.ActionLVMExtend
+		case agentv1.StorageAction_OPERATION_FS_RESIZE:
+			typ = opspec.ActionFilesystemResize
+		case agentv1.StorageAction_OPERATION_FS_CREATE:
+			typ = opspec.ActionFilesystemCreate
+		case agentv1.StorageAction_OPERATION_DISK_WIPE:
+			typ = opspec.ActionDiskWipe
 		}
 		return typ, opspec.Payload{Storage: &opspec.StoragePayload{
-			Source:       przestrzen.GetSource(),
-			Target:       przestrzen.GetTarget(),
-			FSType:       przestrzen.GetFsType(),
-			Options:      przestrzen.GetOptions(),
-			Persist:      przestrzen.GetPersist(),
-			Device:       przestrzen.GetDevice(),
-			ExpectedUUID: przestrzen.GetExpectedUuid(),
-			Repair:       przestrzen.GetRepair(),
+			Source:            przestrzen.GetSource(),
+			Target:            przestrzen.GetTarget(),
+			FSType:            przestrzen.GetFsType(),
+			Options:           przestrzen.GetOptions(),
+			Persist:           przestrzen.GetPersist(),
+			Device:            przestrzen.GetDevice(),
+			ExpectedUUID:      przestrzen.GetExpectedUuid(),
+			Repair:            przestrzen.GetRepair(),
+			ExpectedSerial:    przestrzen.GetExpectedSerial(),
+			ExpectedSizeBytes: przestrzen.GetExpectedSizeBytes(),
+			Size:              przestrzen.GetSize(),
+			Label:             przestrzen.GetLabel(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Firewall:

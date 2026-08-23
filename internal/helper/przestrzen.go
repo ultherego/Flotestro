@@ -39,6 +39,14 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 		return s.odmontuj(actionCtx, action)
 	case helperv1.StorageRequest_OPERATION_FS_CHECK:
 		return s.sprawdzFilesystem(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_LVM_EXTEND:
+		return s.rozszerzWolumen(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_FS_RESIZE:
+		return s.rozszerzFilesystem(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_FS_CREATE:
+		return s.zalozFilesystem(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_DISK_WIPE:
+		return s.wyczyscUrzadzenie(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja na przestrzeni dyskowej")
 }
@@ -143,6 +151,148 @@ func (s *Server) sprawdzFilesystem(ctx context.Context, action *helperv1.Storage
 	}
 	odpowiedz := odpowiedzPrzestrzeni(s.czytajLVM(ctx), komunikat, wyjscie)
 	return odpowiedz
+}
+
+// rozszerzWolumen powieksza wolumen logiczny razem z filesystemem.
+func (s *Server) rozszerzWolumen(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	if !exists(storage.SciezkaLVExtend) {
+		return reject(ErrorUnsupported, "ten host nie ma narzedzi LVM")
+	}
+	argumenty, err := storage.ArgumentyRozszerzeniaLV(action.GetDevice(), action.GetSize(), true)
+	if err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	// Grupa bez wolnego miejsca nie powiekszy zadnego wolumenu. Lepiej
+	// powiedziec to teraz niz zostawic operatorowi blad lvextend.
+	if powod := s.brakMiejscaWGrupie(ctx, action.GetDevice()); powod != "" {
+		return reject(ErrorPreconditionFailed, powod)
+	}
+	wyjscie, err := uruchomNarzedzie(ctx, argumenty)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error()+": "+wyjscie)
+	}
+	return odpowiedzPrzestrzeni(s.czytajLVM(ctx), "wolumen rozszerzony", wyjscie)
+}
+
+// rozszerzFilesystem powieksza filesystem do rozmiaru urzadzenia.
+func (s *Server) rozszerzFilesystem(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	stan := s.obrazPrzestrzeni(ctx)
+	urzadzenie := stan.Urzadzenie(action.GetDevice())
+	if err := (storage.TozsamoscUrzadzenia{
+		Path:      action.GetDevice(),
+		Serial:    action.GetExpectedSerial(),
+		UUID:      action.GetExpectedUuid(),
+		SizeBytes: action.GetExpectedSizeBytes(),
+	}).Zgadza(urzadzenie); err != nil {
+		return reject(ErrorPreconditionFailed, err.Error())
+	}
+	punkt := ""
+	if len(urzadzenie.Mountpoints) > 0 {
+		punkt = urzadzenie.Mountpoints[0]
+	}
+	argumenty, err := storage.ArgumentyRozszerzeniaFS(action.GetDevice(), urzadzenie.FSType, punkt)
+	if err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	wyjscie, err := uruchomNarzedzie(ctx, argumenty)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error()+": "+wyjscie)
+	}
+	return odpowiedzPrzestrzeni(s.czytajLVM(ctx), "filesystem rozszerzony", wyjscie)
+}
+
+// zalozFilesystem formatuje urzadzenie.
+//
+// To jest operacja, po ktorej dane sa nie do odzyskania, wiec host sprawdza
+// wszystko, co panel podal: tozsamosc urzadzenia i to, czy cokolwiek na nim
+// stoi. Zgoda operatora zostala juz zebrana w panelu; tu rozstrzyga fakt.
+func (s *Server) zalozFilesystem(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	stan := s.obrazPrzestrzeni(ctx)
+	if odpowiedz := s.sprawdzCelNiszczacy(stan, action); odpowiedz != nil {
+		return odpowiedz
+	}
+	argumenty, err := storage.ArgumentyFormatowania(action.GetDevice(),
+		action.GetFsType(), action.GetLabel())
+	if err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	wyjscie, err := uruchomNarzedzie(ctx, argumenty)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error()+": "+wyjscie)
+	}
+	return odpowiedzPrzestrzeni(s.czytajLVM(ctx),
+		"filesystem "+action.GetFsType()+" zalozony na "+action.GetDevice(), wyjscie)
+}
+
+// wyczyscUrzadzenie usuwa sygnatury filesystemow.
+func (s *Server) wyczyscUrzadzenie(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	stan := s.obrazPrzestrzeni(ctx)
+	if odpowiedz := s.sprawdzCelNiszczacy(stan, action); odpowiedz != nil {
+		return odpowiedz
+	}
+	argumenty, err := storage.ArgumentyCzyszczenia(action.GetDevice())
+	if err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	wyjscie, err := uruchomNarzedzie(ctx, argumenty)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error()+": "+wyjscie)
+	}
+	// Dane sa nadal fizycznie na plytach: usunelismy sygnatury, a nie
+	// zawartosc. Operator ma to przeczytac, zanim odda dysk komus innemu.
+	return odpowiedzPrzestrzeni(s.czytajLVM(ctx),
+		"sygnatury filesystemow usuniete z "+action.GetDevice()+
+			"; zawartosc nosnika nie zostala nadpisana", wyjscie)
+}
+
+// sprawdzCelNiszczacy pilnuje, ze operacja trafi w to urzadzenie, ktore
+// operator ogladal, i ze nic na nim nie stoi.
+func (s *Server) sprawdzCelNiszczacy(stan storage.Snapshot,
+	action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	if err := (storage.TozsamoscUrzadzenia{
+		Path:      action.GetDevice(),
+		Serial:    action.GetExpectedSerial(),
+		UUID:      action.GetExpectedUuid(),
+		SizeBytes: action.GetExpectedSizeBytes(),
+	}).Zgadza(stan.Urzadzenie(action.GetDevice())); err != nil {
+		return reject(ErrorPreconditionFailed, err.Error())
+	}
+	if punkt := storage.WUzyciu(stan, action.GetDevice()); punkt != "" {
+		return reject(ErrorUnsupported,
+			"urzadzenie jest w uzyciu (zamontowane w "+punkt+"); operacja niszczaca wymaga odmontowania")
+	}
+	return nil
+}
+
+// brakMiejscaWGrupie zwraca powod, gdy grupa wolumenow nie ma juz miejsca.
+func (s *Server) brakMiejscaWGrupie(ctx context.Context, wolumen string) string {
+	lvm := s.czytajLVM(ctx)
+	for _, wpis := range lvm.Volumes {
+		if !storage.PasujeWolumen(wpis, wolumen) {
+			continue
+		}
+		for _, grupa := range lvm.Groups {
+			if grupa.Name == wpis.Group && grupa.FreeBytes == 0 {
+				return "grupa " + grupa.Name + " nie ma wolnego miejsca; " +
+					"wolumen nie da sie rozszerzyc bez dolozenia dysku"
+			}
+		}
+	}
+	return ""
+}
+
+// obrazPrzestrzeni czyta topologie urzadzen po stronie helpera.
+func (s *Server) obrazPrzestrzeni(ctx context.Context) storage.Snapshot {
+	wyjscie, err := wyjscieNarzedzia(ctx, storage.SciezkaLsblk, "-J", "-b", "-o",
+		"NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS,MODEL,SERIAL,WWN,ROTA,RO,PKNAME")
+	if err != nil {
+		return storage.Snapshot{UnavailableReason: "lsblk: " + err.Error()}
+	}
+	urzadzenia, err := storage.ParsujUrzadzenia(wyjscie)
+	if err != nil {
+		return storage.Snapshot{UnavailableReason: err.Error()}
+	}
+	return storage.Snapshot{Devices: urzadzenia}
 }
 
 // czytajLVM zbiera grupy i wolumeny logiczne.

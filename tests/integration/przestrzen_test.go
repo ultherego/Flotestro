@@ -186,3 +186,116 @@ func migawkaPrzestrzeniHosta(t *testing.T, h *harness, hostID string) migawkaPrz
 	}
 	return stan
 }
+
+// TestOperacjaNiszczacaWymagaDwochOsob sprawdza granice, ktora odroznia
+// formatowanie od kazdej innej operacji: pomylka jednej osoby z prawem
+// zatwierdzania kosztuje dane, ktorych nikt nie odtworzy.
+func TestOperacjaNiszczacaWymagaDwochOsob(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	// Cel wybieramy tak, zeby zadanie i tak zostalo odrzucone przez host:
+	// test dotyczy liczenia zgod, a nie kasowania danych.
+	zadanie := h.createOperation(host.ID, map[string]any{
+		"action": "disk.wipe", "reason": powodPrzestrzeni,
+		"target_confirmation": host.Hostname,
+		"payload": map[string]any{"storage": map[string]any{
+			"device": "/dev/sdz", "expected_serial": "URZADZENIE-KTOREGO-NIE-MA"}},
+	})
+	if zadanie.RequiredApprovals != 2 {
+		t.Fatalf("wymaganych zgod = %d", zadanie.RequiredApprovals)
+	}
+
+	po := h.approve(zadanie.ID, zadanie.PayloadHash)
+	if po.State != "awaiting_approval" || po.CollectedApprovals != 1 {
+		t.Fatalf("po pierwszej zgodzie: stan = %s, zgod = %d", po.State, po.CollectedApprovals)
+	}
+	// Ta sama osoba klikajaca drugi raz to nadal jedna osoba.
+	po = h.approve(zadanie.ID, zadanie.PayloadHash)
+	if po.CollectedApprovals != 1 {
+		t.Fatalf("ta sama osoba policzona dwa razy: %d", po.CollectedApprovals)
+	}
+
+	druga := h.withToken(h.createPrincipal("druga-osoba-przestrzen",
+		[]map[string]string{{"role": "platform_admin", "scope": "*"}}))
+	po = druga.approve(zadanie.ID, zadanie.PayloadHash)
+	if po.State != "queued" || po.CollectedApprovals != 2 {
+		t.Fatalf("po drugiej zgodzie: stan = %s, zgod = %d", po.State, po.CollectedApprovals)
+	}
+
+	// Zadanie idzie na host i tam ma zostac odrzucone: urzadzenia nie ma.
+	koncowe := h.awaitTerminal(zadanie.ID, 2*time.Minute)
+	if koncowe.State == "succeeded" {
+		t.Error("host wykonal operacje na urzadzeniu, ktorego nie ma")
+	}
+}
+
+// TestOperacjaNiszczacaSprawdzaTozsamoscUrzadzenia pilnuje, ze formatowanie
+// trafia w ten dysk, ktory operator ogladal. Sciezka /dev/sdX po restarcie
+// wskazuje co innego.
+func TestOperacjaNiszczacaSprawdzaTozsamoscUrzadzenia(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	stan := migawkaPrzestrzeniHosta(t, h, host.ID)
+
+	var pusty urzadzenieView
+	for _, urzadzenie := range stan.Devices {
+		if urzadzenie.Type == "disk" && len(urzadzenie.Mountpoints) == 0 {
+			// Dysk bez zamontowanych potomkow: sprawdzamy po drzewie.
+			zajety := false
+			for _, dziecko := range stan.Devices {
+				if dziecko.Parent == urzadzenie.Path && len(dziecko.Mountpoints) > 0 {
+					zajety = true
+				}
+			}
+			if !zajety {
+				pusty = urzadzenie
+				break
+			}
+		}
+	}
+	if pusty.Path == "" {
+		t.Skip("host nie ma wolnego dysku")
+	}
+
+	// Zla tozsamosc: host ma odmowic, zanim cokolwiek zrobi.
+	zadanie := h.createOperation(host.ID, map[string]any{
+		"action": "disk.wipe", "reason": powodPrzestrzeni,
+		"target_confirmation": host.Hostname,
+		"payload": map[string]any{"storage": map[string]any{
+			"device": pusty.Path, "expected_size_bytes": 1024}},
+	})
+	h.approve(zadanie.ID, zadanie.PayloadHash)
+	druga := h.withToken(h.createPrincipal("druga-osoba-tozsamosc",
+		[]map[string]string{{"role": "platform_admin", "scope": "*"}}))
+	druga.approve(zadanie.ID, zadanie.PayloadHash)
+
+	koncowe := h.awaitTerminal(zadanie.ID, 2*time.Minute)
+	if koncowe.State == "succeeded" {
+		t.Fatalf("host wyczyscil %s mimo niezgodnego rozmiaru", pusty.Path)
+	}
+	proby := h.attempts(zadanie.ID)
+	if !strings.Contains(ostatniKomunikat(proby), "bajtow") {
+		t.Errorf("odmowa nie tlumaczy niezgodnosci: %q", ostatniKomunikat(proby))
+	}
+}
+
+// TestOperacjaNiszczacaWymagaTozsamosci sprawdza, ze zlecenie bez zadnego
+// identyfikatora urzadzenia nie dojezdza do hosta.
+func TestOperacjaNiszczacaWymagaTozsamosci(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "disk.wipe", "reason": powodPrzestrzeni,
+			"target_confirmation": host.Hostname,
+			"payload":             map[string]any{"storage": map[string]any{"device": "/dev/sdb"}}},
+		nil, http.StatusBadRequest)
+
+	// Bez przepisanej nazwy hosta operacja niszczaca nie powstaje w ogole.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "disk.wipe", "reason": powodPrzestrzeni,
+			"payload": map[string]any{"storage": map[string]any{
+				"device": "/dev/sdb", "expected_size_bytes": 2147483648}}},
+		nil, http.StatusBadRequest)
+}

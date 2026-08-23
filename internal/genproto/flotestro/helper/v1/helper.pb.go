@@ -564,6 +564,10 @@ const (
 	StorageRequest_OPERATION_MOUNT_ENSURE StorageRequest_Operation = 2
 	StorageRequest_OPERATION_MOUNT_REMOVE StorageRequest_Operation = 3
 	StorageRequest_OPERATION_FS_CHECK     StorageRequest_Operation = 4
+	StorageRequest_OPERATION_LVM_EXTEND   StorageRequest_Operation = 5
+	StorageRequest_OPERATION_FS_RESIZE    StorageRequest_Operation = 6
+	StorageRequest_OPERATION_FS_CREATE    StorageRequest_Operation = 7
+	StorageRequest_OPERATION_DISK_WIPE    StorageRequest_Operation = 8
 )
 
 // Enum value maps for StorageRequest_Operation.
@@ -574,6 +578,10 @@ var (
 		2: "OPERATION_MOUNT_ENSURE",
 		3: "OPERATION_MOUNT_REMOVE",
 		4: "OPERATION_FS_CHECK",
+		5: "OPERATION_LVM_EXTEND",
+		6: "OPERATION_FS_RESIZE",
+		7: "OPERATION_FS_CREATE",
+		8: "OPERATION_DISK_WIPE",
 	}
 	StorageRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
@@ -581,6 +589,10 @@ var (
 		"OPERATION_MOUNT_ENSURE": 2,
 		"OPERATION_MOUNT_REMOVE": 3,
 		"OPERATION_FS_CHECK":     4,
+		"OPERATION_LVM_EXTEND":   5,
+		"OPERATION_FS_RESIZE":    6,
+		"OPERATION_FS_CREATE":    7,
+		"OPERATION_DISK_WIPE":    8,
 	}
 )
 
@@ -2833,7 +2845,16 @@ type StorageRequest struct {
 	// ExpectedUuid wiaze operacje z konkretnym filesystemem.
 	ExpectedUuid string `protobuf:"bytes,8,opt,name=expected_uuid,json=expectedUuid,proto3" json:"expected_uuid,omitempty"`
 	// Repair wlacza naprawe zamiast samego sprawdzenia.
-	Repair        bool `protobuf:"varint,9,opt,name=repair,proto3" json:"repair,omitempty"`
+	Repair bool `protobuf:"varint,9,opt,name=repair,proto3" json:"repair,omitempty"`
+	// Tozsamosc urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
+	// /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
+	// ogladal - a przy formatowaniu to jest roznica miedzy pustym dyskiem
+	// a cudzymi danymi.
+	ExpectedSerial    string `protobuf:"bytes,10,opt,name=expected_serial,json=expectedSerial,proto3" json:"expected_serial,omitempty"`
+	ExpectedSizeBytes uint64 `protobuf:"varint,11,opt,name=expected_size_bytes,json=expectedSizeBytes,proto3" json:"expected_size_bytes,omitempty"`
+	// Size jest przyrostem wolumenu, np. "+10G" albo "+100%FREE".
+	Size          string `protobuf:"bytes,12,opt,name=size,proto3" json:"size,omitempty"`
+	Label         string `protobuf:"bytes,13,opt,name=label,proto3" json:"label,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2929,6 +2950,34 @@ func (x *StorageRequest) GetRepair() bool {
 		return x.Repair
 	}
 	return false
+}
+
+func (x *StorageRequest) GetExpectedSerial() string {
+	if x != nil {
+		return x.ExpectedSerial
+	}
+	return ""
+}
+
+func (x *StorageRequest) GetExpectedSizeBytes() uint64 {
+	if x != nil {
+		return x.ExpectedSizeBytes
+	}
+	return 0
+}
+
+func (x *StorageRequest) GetSize() string {
+	if x != nil {
+		return x.Size
+	}
+	return ""
+}
+
+func (x *StorageRequest) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
 }
 
 type StorageResult struct {
@@ -4717,7 +4766,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\vrollback_id\x18\x03 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xc0\x03\n" +
+	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xa8\x05\n" +
 	"\x0eStorageRequest\x12K\n" +
 	"\toperation\x18\x01 \x01(\x0e2-.flotestro.helper.v1.StorageRequest.OperationR\toperation\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
@@ -4727,13 +4776,22 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\apersist\x18\x06 \x01(\bR\apersist\x12\x16\n" +
 	"\x06device\x18\a \x01(\tR\x06device\x12#\n" +
 	"\rexpected_uuid\x18\b \x01(\tR\fexpectedUuid\x12\x16\n" +
-	"\x06repair\x18\t \x01(\bR\x06repair\"\x8e\x01\n" +
+	"\x06repair\x18\t \x01(\bR\x06repair\x12'\n" +
+	"\x0fexpected_serial\x18\n" +
+	" \x01(\tR\x0eexpectedSerial\x12.\n" +
+	"\x13expected_size_bytes\x18\v \x01(\x04R\x11expectedSizeBytes\x12\x12\n" +
+	"\x04size\x18\f \x01(\tR\x04size\x12\x14\n" +
+	"\x05label\x18\r \x01(\tR\x05label\"\xf3\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12OPERATION_READ_LVM\x10\x01\x12\x1a\n" +
 	"\x16OPERATION_MOUNT_ENSURE\x10\x02\x12\x1a\n" +
 	"\x16OPERATION_MOUNT_REMOVE\x10\x03\x12\x16\n" +
-	"\x12OPERATION_FS_CHECK\x10\x04\"]\n" +
+	"\x12OPERATION_FS_CHECK\x10\x04\x12\x18\n" +
+	"\x14OPERATION_LVM_EXTEND\x10\x05\x12\x17\n" +
+	"\x13OPERATION_FS_RESIZE\x10\x06\x12\x17\n" +
+	"\x13OPERATION_FS_CREATE\x10\a\x12\x17\n" +
+	"\x13OPERATION_DISK_WIPE\x10\b\"]\n" +
 	"\rStorageResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +

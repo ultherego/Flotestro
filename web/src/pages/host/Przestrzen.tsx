@@ -215,19 +215,71 @@ export function Przestrzen() {
                 {!urzadzenie.uuid && !urzadzenie.serial && "—"}
               </td>
               <td>
-                {urzadzenie.fs_type && (urzadzenie.mountpoints ?? []).length === 0 && (
-                  <button
-                    onClick={() =>
-                      setZamiar({
-                        akcja: "filesystem.check",
-                        etykieta: "Check filesystem",
-                        opis: `${urzadzenie.path} will be checked read-only. The check refuses to run if the filesystem is mounted.`,
-                        payload: { storage: { device: urzadzenie.path } },
-                      })
-                    }
-                  >
-                    Check
-                  </button>
+                {/* Operacje na urzadzeniu maja sens tylko wtedy, gdy nic
+                    na nim nie stoi - i host i tak to sprawdzi jeszcze raz. */}
+                {(urzadzenie.mountpoints ?? []).length === 0 && (
+                  <div className="operacje">
+                    {urzadzenie.fs_type && (
+                      <button
+                        onClick={() =>
+                          setZamiar({
+                            akcja: "filesystem.check",
+                            etykieta: "Check filesystem",
+                            opis: `${urzadzenie.path} will be checked read-only. The check refuses to run if the filesystem is mounted.`,
+                            payload: { storage: { device: urzadzenie.path } },
+                          })
+                        }
+                      >
+                        Check
+                      </button>
+                    )}
+                    {urzadzenie.fs_type && (
+                      <button
+                        onClick={() =>
+                          setZamiar({
+                            akcja: "filesystem.resize",
+                            etykieta: "Grow filesystem",
+                            opis: `The filesystem on ${urzadzenie.path} will grow to fill the device (${bytes(urzadzenie.size_bytes)}).`,
+                            payload: { storage: tozsamosc(urzadzenie) },
+                          })
+                        }
+                      >
+                        Grow
+                      </button>
+                    )}
+                    {/* Formatowanie i czyszczenie niosa tozsamosc urzadzenia
+                        z tego wiersza: host odmowi, jesli trafi w co innego. */}
+                    <button
+                      className="wtorny"
+                      onClick={() =>
+                        setZamiar({
+                          akcja: "filesystem.create",
+                          etykieta: "Format device",
+                          opis: `Everything on ${urzadzenie.path} (${bytes(urzadzenie.size_bytes)}${
+                            urzadzenie.serial ? `, serial ${urzadzenie.serial}` : ""
+                          }) will be destroyed and a new ext4 filesystem created. This needs two approvals.`,
+                          payload: {
+                            storage: { ...tozsamosc(urzadzenie), fs_type: "ext4" },
+                          },
+                        })
+                      }
+                    >
+                      Format
+                    </button>
+                    <button
+                      className="wtorny"
+                      onClick={() =>
+                        setZamiar({
+                          akcja: "disk.wipe",
+                          etykieta: "Wipe signatures",
+                          opis: `Filesystem signatures on ${urzadzenie.path} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.`,
+                          payload: { storage: tozsamosc(urzadzenie) },
+                        })
+                      }
+                    >
+                      Wipe
+                    </button>
+                  </div>
                 )}
               </td>
             </tr>
@@ -257,6 +309,37 @@ export function Przestrzen() {
           </tbody>
         </table>
       )}
+      {snapshot?.volumes?.length ? (
+        <table>
+          <thead><tr><th>Logical volume</th><th>Group</th><th>Size</th><th>Actions</th></tr></thead>
+          <tbody>
+            {snapshot.volumes.map((wolumen) => (
+              <tr key={wolumen.path}>
+                <td>{wolumen.path}</td>
+                <td>{wolumen.group}</td>
+                <td>{bytes(wolumen.size_bytes)}</td>
+                <td>
+                  {/* Rozszerzamy wylacznie w gore i razem z filesystemem:
+                      wolumen wiekszy od filesystemu nie daje ani bajta. */}
+                  <button
+                    onClick={() =>
+                      setZamiar({
+                        akcja: "lvm.extend",
+                        etykieta: "Extend volume",
+                        opis: `${wolumen.path} will grow by 512M together with its filesystem, if the group has room.`,
+                        payload: { storage: { device: wolumen.path, size: "+512M" } },
+                      })
+                    }
+                  >
+                    Extend by 512M
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+
       {snapshot?.raid_unavailable_reason && (
         <p className="zrodlo">{snapshot.raid_unavailable_reason}</p>
       )}
@@ -274,14 +357,35 @@ export function Przestrzen() {
           etykieta={zamiar.etykieta}
           opis={zamiar.opis}
           pracuje={zlec.isPending}
-          onPotwierdz={(powod) =>
-            zlec.mutate({ action: zamiar.akcja, reason: powod, payload: zamiar.payload })
+          onPotwierdz={(powod, potwierdzenie) =>
+            zlec.mutate({
+              action: zamiar.akcja,
+              reason: powod,
+              // Operacja niszczaca wymaga przepisanej nazwy celu. Reszta
+              // operacji jej nie potrzebuje, ale wyslana nie przeszkadza.
+              target_confirmation: potwierdzenie,
+              payload: zamiar.payload,
+            })
           }
           onAnuluj={() => setZamiar(null)}
         />
       )}
     </>
   );
+}
+
+/**
+ * Tozsamosc urzadzenia wysylana razem z operacja. Host porownuje ja ze swoim
+ * stanem i odmawia przy pierwszej niezgodnosci: /dev/sdX po restarcie potrafi
+ * wskazac inny dysk niz ten, ktory operator wlasnie oglada.
+ */
+function tozsamosc(urzadzenie: Urzadzenie): Record<string, unknown> {
+  return {
+    device: urzadzenie.path,
+    expected_serial: urzadzenie.serial ?? "",
+    expected_size_bytes: urzadzenie.size_bytes,
+    expected_uuid: urzadzenie.uuid ?? "",
+  };
 }
 
 /**

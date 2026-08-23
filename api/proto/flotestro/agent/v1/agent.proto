@@ -908,6 +908,10 @@ message StorageAction {
     OPERATION_MOUNT_ENSURE = 2;
     OPERATION_MOUNT_REMOVE = 3;
     OPERATION_FS_CHECK = 4;
+    OPERATION_LVM_EXTEND = 5;
+    OPERATION_FS_RESIZE = 6;
+    OPERATION_FS_CREATE = 7;
+    OPERATION_DISK_WIPE = 8;
   }
   Operation operation = 1;
   string source = 2;
@@ -918,6 +922,13 @@ message StorageAction {
   string device = 7;
   string expected_uuid = 8;
   bool repair = 9;
+  // Tozsamosc urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
+  // /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
+  // ogladal.
+  string expected_serial = 10;
+  uint64 expected_size_bytes = 11;
+  string size = 12;
+  string label = 13;
 }
 
 message StorageResult {

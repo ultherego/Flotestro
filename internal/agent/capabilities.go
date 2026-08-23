@@ -40,6 +40,7 @@ const (
 	WymaganieZapisDNS    = "dns.write"
 	WymaganieZapisZapory = "firewall.write"
 	WymaganieStrefZapory = "firewall.zones"
+	WymaganieLVM         = "storage.lvm"
 )
 
 // Wersja kontraktu adaptera. Podnosi sie, gdy zmienia sie znaczenie operacji
@@ -125,6 +126,9 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			return true
 		}
 		return !znana && c.Available(CapFirewall)
+	case WymaganieLVM:
+		wartosc, _ := c.FeatureStan(CapStorage, "lvm")
+		return wartosc
 	case WymaganieStrefZapory:
 		// Strefy istnieja tylko tam, gdzie dziala firewalld. Host z samym
 		// nftables nie ma czego pokazac ani czego zmienic.

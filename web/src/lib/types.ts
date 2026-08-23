@@ -90,6 +90,10 @@ export type Job = {
   payload: unknown;
   payload_hash: string;
   requires_approval: boolean;
+  // Operacja niszczaca wymaga zgody dwoch osob, wiec sama flaga nie
+  // wystarczy: liczy sie, ile zgod juz jest i ile trzeba.
+  required_approvals: number;
+  collected_approvals: number;
   created_by: string;
   approved_by?: string;
   result_status?: string;

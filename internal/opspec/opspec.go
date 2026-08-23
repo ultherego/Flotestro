@@ -56,10 +56,14 @@ const (
 	ActionFirewallZoneService    ActionType = "firewall.zone.service"
 	ActionFirewallRulesetRestore ActionType = "firewall.ruleset.restore"
 
-	ActionStoragePlan     ActionType = "storage.plan"
-	ActionMountEnsure     ActionType = "mount.ensure"
-	ActionMountRemove     ActionType = "mount.remove"
-	ActionFilesystemCheck ActionType = "filesystem.check"
+	ActionStoragePlan      ActionType = "storage.plan"
+	ActionMountEnsure      ActionType = "mount.ensure"
+	ActionMountRemove      ActionType = "mount.remove"
+	ActionFilesystemCheck  ActionType = "filesystem.check"
+	ActionLVMExtend        ActionType = "lvm.extend"
+	ActionFilesystemResize ActionType = "filesystem.resize"
+	ActionFilesystemCreate ActionType = "filesystem.create"
+	ActionDiskWipe         ActionType = "disk.wipe"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -363,6 +367,20 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Sprawdzenie filesystemu trwa dlugo i wymaga, zeby nikt go nie uzywal.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
 		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage},
+
+	// Rozszerzenie wolumenu i filesystemu jest odwracalne tylko w teorii:
+	// zmniejszenie wymaga zejscia z danymi ponizej granicy, ktorej nikt nie
+	// planowal. Dlatego ryzyko krytyczne, mimo ze nic sie nie kasuje.
+	ActionLVMExtend: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.write",
+		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockStorage},
+	ActionFilesystemResize: {mutating: true, capability: "storage", permission: "storage.filesystem.write",
+		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockStorage},
+	// Formatowanie i czyszczenie niszcza dane nieodwracalnie: wymagaja
+	// swiezego uwierzytelnienia, wpisania nazwy celu i zgody dwoch osob.
+	ActionFilesystemCreate: {mutating: true, capability: "storage", permission: "storage.destructive",
+		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
+	ActionDiskWipe: {mutating: true, capability: "storage", permission: "storage.wipe",
+		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -903,6 +921,13 @@ type StoragePayload struct {
 	// restarcie - i operator ma o tym wiedziec przed, a nie po awarii.
 	Persist bool   `json:"persist,omitempty"`
 	Device  string `json:"device,omitempty"`
+	// ExpectedSerial i ExpectedSizeBytes wiaza operacje z urzadzeniem, ktore
+	// operator ogladal. Sciezka /dev/sdX po restarcie wskazuje co innego.
+	ExpectedSerial    string `json:"expected_serial,omitempty"`
+	ExpectedSizeBytes uint64 `json:"expected_size_bytes,omitempty"`
+	// Size jest przyrostem wolumenu, np. "+10G".
+	Size  string `json:"size,omitempty"`
+	Label string `json:"label,omitempty"`
 	// ExpectedUUID wiaze operacje z konkretnym filesystemem.
 	ExpectedUUID string `json:"expected_uuid,omitempty"`
 	Repair       bool   `json:"repair,omitempty"`
@@ -1343,6 +1368,44 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
 		}
 		return storage.WalidujZrodlo(payload.Storage.Device)
+
+	case ActionLVMExtend:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		_, err := storage.ArgumentyRozszerzeniaLV(payload.Storage.Device, payload.Storage.Size, true)
+		return err
+
+	case ActionFilesystemResize:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		return storage.WalidujZrodlo(payload.Storage.Device)
+
+	case ActionFilesystemCreate:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		// Operacja niszczaca musi wiedziec, w co celuje: sama sciezka nie
+		// wystarczy, bo /dev/sdX po restarcie wskazuje inny dysk.
+		if payload.Storage.ExpectedSerial == "" && payload.Storage.ExpectedSizeBytes == 0 &&
+			payload.Storage.ExpectedUUID == "" {
+			return fmt.Errorf("formatowanie wymaga tozsamosci urzadzenia (serial, UUID albo rozmiar)")
+		}
+		_, err := storage.ArgumentyFormatowania(payload.Storage.Device,
+			payload.Storage.FSType, payload.Storage.Label)
+		return err
+
+	case ActionDiskWipe:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		if payload.Storage.ExpectedSerial == "" && payload.Storage.ExpectedSizeBytes == 0 &&
+			payload.Storage.ExpectedUUID == "" {
+			return fmt.Errorf("czyszczenie wymaga tozsamosci urzadzenia (serial, UUID albo rozmiar)")
+		}
+		_, err := storage.ArgumentyCzyszczenia(payload.Storage.Device)
+		return err
 
 	case ActionFirewallPlan:
 		return nil

@@ -86,7 +86,19 @@ export function Zadania() {
                     )}
                   </td>
                   <td>{zadanie.created_by}</td>
-                  <td>{zadanie.approved_by || "—"}</td>
+                  {/* Przy operacji niszczacej jedna zgoda niczego nie
+                      uruchamia: operator ma widziec, na kogo jeszcze czekamy,
+                      zamiast klikac "Approve" i patrzec, ze nic sie nie dzieje. */}
+                  <td>
+                    {zadanie.required_approvals > 1 ? (
+                      <>
+                        {zadanie.collected_approvals} of {zadanie.required_approvals} approvals
+                        {zadanie.approved_by && <span className="zrodlo"> · {zadanie.approved_by}</span>}
+                      </>
+                    ) : (
+                      zadanie.approved_by || "—"
+                    )}
+                  </td>
                   <td>{zadanie.result_error_code || zadanie.result_status || "—"}</td>
                   <td><Czas wartosc={zadanie.created_at} /></td>
                   <td>

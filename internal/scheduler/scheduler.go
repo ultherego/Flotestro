@@ -323,7 +323,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
-		opspec.ActionMountRemove, opspec.ActionFilesystemCheck:
+		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
+		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
+		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe:
 		operacja := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
 		switch action {
 		case opspec.ActionStoragePlan:
@@ -332,6 +334,14 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operacja = agentv1.StorageAction_OPERATION_MOUNT_REMOVE
 		case opspec.ActionFilesystemCheck:
 			operacja = agentv1.StorageAction_OPERATION_FS_CHECK
+		case opspec.ActionLVMExtend:
+			operacja = agentv1.StorageAction_OPERATION_LVM_EXTEND
+		case opspec.ActionFilesystemResize:
+			operacja = agentv1.StorageAction_OPERATION_FS_RESIZE
+		case opspec.ActionFilesystemCreate:
+			operacja = agentv1.StorageAction_OPERATION_FS_CREATE
+		case opspec.ActionDiskWipe:
+			operacja = agentv1.StorageAction_OPERATION_DISK_WIPE
 		}
 		przestrzen := &agentv1.StorageAction{Operation: operacja}
 		if payload.Storage != nil {
@@ -343,6 +353,10 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			przestrzen.Device = payload.Storage.Device
 			przestrzen.ExpectedUuid = payload.Storage.ExpectedUUID
 			przestrzen.Repair = payload.Storage.Repair
+			przestrzen.ExpectedSerial = payload.Storage.ExpectedSerial
+			przestrzen.ExpectedSizeBytes = payload.Storage.ExpectedSizeBytes
+			przestrzen.Size = payload.Storage.Size
+			przestrzen.Label = payload.Storage.Label
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Storage{Storage: przestrzen}
 

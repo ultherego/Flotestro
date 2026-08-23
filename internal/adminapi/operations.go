@@ -296,7 +296,7 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 	switch operation {
 	case "approve":
 		action = "job.approve"
-		job, err = s.jobs.Approve(r.Context(), tx, jobID, actor)
+		job, err = s.jobs.Approve(r.Context(), tx, jobID, actor, request.Reason)
 	default:
 		action = "job.cancel"
 		job, err = s.jobs.Cancel(r.Context(), tx, jobID, actor, request.Reason)
@@ -325,6 +325,10 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			"host_id": job.HostID, "action_type": job.ActionType,
 			"payload_hash": job.PayloadHash, "state": string(job.State),
 			"reason": request.Reason,
+			// Slad audytowy niesie takze to, ktora to zgoda z wymaganych:
+			// przy operacji niszczacej pierwsza zgoda niczego jeszcze nie
+			// uruchamia i to ma byc widoczne po fakcie.
+			"approvals": job.CollectedApprovals, "required_approvals": job.RequiredApprovals,
 		},
 	}); err != nil {
 		s.fail(w, err)
@@ -391,6 +395,12 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := s.authorize(w, r, authz.PermJobRead, s.jobScope(r, job.HostID), "job", jobID); !ok {
 		return
+	}
+	// Widok pojedynczego zadania niesie takze osoby, ktore je zatwierdzily:
+	// przy operacji wymagajacej dwoch zgod pytanie "na kogo jeszcze czekamy"
+	// jest tym, po ktore operator tu wchodzi.
+	if zgody, err := s.jobs.Zgody(r.Context(), jobID); err == nil {
+		job.Approvals = zgody
 	}
 	writeJSON(w, http.StatusOK, job)
 }

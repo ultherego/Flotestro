@@ -96,6 +96,12 @@ const (
 	PermStorageMountWrite  Permission = "storage.mount.write"
 	PermStorageMountRemove Permission = "storage.mount.remove"
 	PermStorageFsck        Permission = "storage.fsck"
+	// Rozszerzenie i formatowanie to dwie rozne decyzje: pierwsza dodaje
+	// miejsce, druga kasuje wszystko, co na nim bylo.
+	PermStorageLVMWrite        Permission = "storage.lvm.write"
+	PermStorageFilesystemWrite Permission = "storage.filesystem.write"
+	PermStorageDestructive     Permission = "storage.destructive"
+	PermStorageWipe            Permission = "storage.wipe"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -235,6 +241,8 @@ var rolePermissions = map[Role][]Permission{
 		PermFirewallRead, PermFirewallWrite, PermFirewallRuleRemove,
 		PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
 		PermStorageRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
+		PermStorageLVMWrite, PermStorageFilesystemWrite,
+		PermStorageDestructive, PermStorageWipe,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

@@ -55,6 +55,7 @@ const (
 	WymaganieZapisDNS    = "dns.write"
 	WymaganieZapisZapory = "firewall.write"
 	WymaganieStrefZapory = "firewall.zones"
+	WymaganieLVM         = "storage.lvm"
 )
 
 // Available mowi, czy adapter o tej nazwie dziala na hoscie.
@@ -132,6 +133,10 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			return true
 		}
 		return !znana && c.Available(CapFirewall)
+	case WymaganieLVM:
+		// Rozszerzenie wolumenu ma sens tylko tam, gdzie LVM w ogole jest.
+		wartosc, _ := c.FeatureStan(CapStorage, "lvm")
+		return wartosc
 	case WymaganieStrefZapory:
 		wartosc, _ := c.FeatureStan(CapFirewall, "zones")
 		return wartosc

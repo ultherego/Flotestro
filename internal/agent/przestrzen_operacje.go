@@ -63,6 +63,14 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 		operacja = helperv1.StorageRequest_OPERATION_MOUNT_REMOVE
 	case opspec.ActionFilesystemCheck:
 		operacja = helperv1.StorageRequest_OPERATION_FS_CHECK
+	case opspec.ActionLVMExtend:
+		operacja = helperv1.StorageRequest_OPERATION_LVM_EXTEND
+	case opspec.ActionFilesystemResize:
+		operacja = helperv1.StorageRequest_OPERATION_FS_RESIZE
+	case opspec.ActionFilesystemCreate:
+		operacja = helperv1.StorageRequest_OPERATION_FS_CREATE
+	case opspec.ActionDiskWipe:
+		operacja = helperv1.StorageRequest_OPERATION_DISK_WIPE
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
@@ -73,15 +81,19 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_Storage{
 			Storage: &helperv1.StorageRequest{
-				Operation:    operacja,
-				Source:       payload.Source,
-				Target:       payload.Target,
-				FsType:       payload.FSType,
-				Options:      payload.Options,
-				Persist:      payload.Persist,
-				Device:       payload.Device,
-				ExpectedUuid: payload.ExpectedUUID,
-				Repair:       payload.Repair,
+				Operation:         operacja,
+				Source:            payload.Source,
+				Target:            payload.Target,
+				FsType:            payload.FSType,
+				Options:           payload.Options,
+				Persist:           payload.Persist,
+				Device:            payload.Device,
+				ExpectedUuid:      payload.ExpectedUUID,
+				Repair:            payload.Repair,
+				ExpectedSerial:    payload.ExpectedSerial,
+				ExpectedSizeBytes: payload.ExpectedSizeBytes,
+				Size:              payload.Size,
+				Label:             payload.Label,
 			},
 		},
 	}, timeout)

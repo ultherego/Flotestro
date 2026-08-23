@@ -189,17 +189,21 @@ type hostCapability struct {
 }
 
 type jobView struct {
-	ID              string `json:"id"`
-	HostID          string `json:"host_id"`
-	ActionType      string `json:"action_type"`
-	State           string `json:"state"`
-	PayloadHash     string `json:"payload_hash"`
-	RequiresApprova bool   `json:"requires_approval"`
-	CreatedBy       string `json:"created_by"`
-	ApprovedBy      string `json:"approved_by"`
-	ResultStatus    string `json:"result_status"`
-	ResultErrorCode string `json:"result_error_code"`
-	ResultMessage   string `json:"result_message"`
+	// Zgody: operacja niszczaca wymaga dwoch osob, wiec sama flaga
+	// requires_approval nie wystarczy.
+	RequiredApprovals  int    `json:"required_approvals"`
+	CollectedApprovals int    `json:"collected_approvals"`
+	ID                 string `json:"id"`
+	HostID             string `json:"host_id"`
+	ActionType         string `json:"action_type"`
+	State              string `json:"state"`
+	PayloadHash        string `json:"payload_hash"`
+	RequiresApprova    bool   `json:"requires_approval"`
+	CreatedBy          string `json:"created_by"`
+	ApprovedBy         string `json:"approved_by"`
+	ResultStatus       string `json:"result_status"`
+	ResultErrorCode    string `json:"result_error_code"`
+	ResultMessage      string `json:"result_message"`
 }
 
 type attemptView struct {

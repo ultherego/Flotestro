@@ -29,11 +29,15 @@ type Spec struct {
 	Payload         opspec.Payload
 	IdempotencyKey  string
 	RequiresApprova bool
-	TimeoutSeconds  int
-	MaxOutputBytes  int
-	TTL             time.Duration
-	CreatedBy       string
-	RequestID       string
+	// RequiredApprovals mowi, ilu osob potrzeba. Operacja niszczaca dane
+	// wymaga dwoch: pomylka jednej osoby z prawem zatwierdzania kosztuje
+	// dane, ktorych nikt nie odtworzy. Zero oznacza wartosc domyslna.
+	RequiredApprovals int
+	TimeoutSeconds    int
+	MaxOutputBytes    int
+	TTL               time.Duration
+	CreatedBy         string
+	RequestID         string
 	// CampaignID wiaze operacje z rolloutem, ktory ja zlecil. Bez tego
 	// korelacja sladu audytowego urywa sie na operacji, a ekran kampanii nie
 	// wie, ktore operacje sa jego - postep trwajacej aktualizacji nie mial jak
@@ -61,22 +65,28 @@ type Job struct {
 	IdempotencyKey  string          `json:"idempotency_key"`
 	State           State           `json:"state"`
 	RequiresApprova bool            `json:"requires_approval"`
-	Preconditions   json.RawMessage `json:"preconditions"`
-	TimeoutSeconds  int             `json:"timeout_seconds"`
-	MaxOutputBytes  int             `json:"max_output_bytes"`
-	ExpiresAt       time.Time       `json:"expires_at"`
-	CreatedBy       string          `json:"created_by"`
-	RequestID       string          `json:"request_id,omitempty"`
-	ApprovedBy      string          `json:"approved_by,omitempty"`
-	ApprovedAt      *time.Time      `json:"approved_at,omitempty"`
-	CanceledBy      string          `json:"canceled_by,omitempty"`
-	CancelReason    string          `json:"cancel_reason,omitempty"`
-	ResultStatus    string          `json:"result_status,omitempty"`
-	ResultErrorCode string          `json:"result_error_code,omitempty"`
-	ResultMessage   string          `json:"result_message,omitempty"`
-	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	// RequiredApprovals i Approvals opisuja, ile zgod trzeba i ile juz jest.
+	// Bez tego operator klika "approve" i nie wie, dlaczego nic sie nie
+	// stalo.
+	RequiredApprovals  int             `json:"required_approvals"`
+	CollectedApprovals int             `json:"collected_approvals"`
+	Approvals          []Zgoda         `json:"approvals,omitempty"`
+	Preconditions      json.RawMessage `json:"preconditions"`
+	TimeoutSeconds     int             `json:"timeout_seconds"`
+	MaxOutputBytes     int             `json:"max_output_bytes"`
+	ExpiresAt          time.Time       `json:"expires_at"`
+	CreatedBy          string          `json:"created_by"`
+	RequestID          string          `json:"request_id,omitempty"`
+	ApprovedBy         string          `json:"approved_by,omitempty"`
+	ApprovedAt         *time.Time      `json:"approved_at,omitempty"`
+	CanceledBy         string          `json:"canceled_by,omitempty"`
+	CancelReason       string          `json:"cancel_reason,omitempty"`
+	ResultStatus       string          `json:"result_status,omitempty"`
+	ResultErrorCode    string          `json:"result_error_code,omitempty"`
+	ResultMessage      string          `json:"result_message,omitempty"`
+	FinishedAt         *time.Time      `json:"finished_at,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
 }
 
 // Attempt opisuje jedna probe wykonania zadania.
@@ -158,16 +168,16 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		insert into jobs (id, host_id, action_type, action_version, payload, payload_hash,
 		                  idempotency_key, state, requires_approval, preconditions,
 		                  timeout_seconds, max_output_bytes, expires_at, created_by, request_id,
-		                  campaign_id)
+		                  campaign_id, required_approvals)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        nullif($16, '')::uuid)
+		        nullif($16, '')::uuid, $17)
 		on conflict (host_id, idempotency_key) do nothing
 		returning id`
 	jobID := uuid.NewString()
 	err = tx.QueryRow(ctx, query, jobID, spec.HostID, string(spec.Action), opspec.ActionVersion,
 		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApprova,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
-		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID).Scan(&jobID)
+		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, wymaganeZgody(spec)).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Ten sam klucz idempotencji zwraca istniejace zadanie zamiast tworzyc
 		// drugie. Powtorzone zlecenie nie jest bledem.
@@ -179,21 +189,87 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
 
-// Approve zatwierdza zadanie i przenosi je do kolejki.
-func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor string) (*Job, error) {
+// Approve zapisuje zgode i przepuszcza zadanie dalej, gdy zebralo ich dosc.
+//
+// Zgoda jest zapisywana zawsze, takze wtedy, gdy jedna nie wystarcza:
+// operacja niszczaca wymaga dwoch osob i pierwsza z nich ma zobaczyc, ze jej
+// zgoda zostala przyjeta, a nie odbita bez sladu.
+func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
+	const zapisZgody = `
+		insert into job_approvals (job_id, approver, reason)
+		values ($1, $2, $3)
+		on conflict (job_id, approver) do nothing`
+	if _, err := tx.Exec(ctx, zapisZgody, jobID, actor, nullable(reason)); err != nil {
+		return nil, err
+	}
+
+	// Ta sama osoba nie liczy sie dwa razy: klucz glowny tabeli pilnuje tego
+	// w bazie, a nie w kodzie, ktory da sie ominac inna sciezka.
 	const query = `
 		update jobs set state = $2, approved_by = $3, approved_at = now(), updated_at = now()
 		where id = $1 and state = $4
+		  and (select count(*) from job_approvals where job_id = $1) >= required_approvals
 		returning id`
 	var updated string
 	err := tx.QueryRow(ctx, query, jobID, string(StateQueued), actor, string(StateAwaitingApproval)).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrConflict
+		// Zadanie zostaje w oczekiwaniu: albo brakuje zgod, albo ktos zmienil
+		// jego stan w miedzyczasie. Rozstrzyga to stan, ktory zaraz odczytamy.
+		zadanie, err := s.getTx(ctx, tx, "where id = $1", jobID)
+		if err != nil {
+			return nil, err
+		}
+		if zadanie.State != StateAwaitingApproval {
+			return nil, ErrConflict
+		}
+		return zadanie, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	return s.getTx(ctx, tx, "where id = $1", jobID)
+}
+
+// Zgody zwraca osoby, ktore zatwierdzily zadanie.
+func (s *Store) Zgody(ctx context.Context, jobID string) ([]Zgoda, error) {
+	const query = `
+		select approver, coalesce(reason, ''), approved_at
+		from job_approvals where job_id = $1 order by approved_at`
+	rows, err := s.pool.Query(ctx, query, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var zgody []Zgoda
+	for rows.Next() {
+		var zgoda Zgoda
+		if err := rows.Scan(&zgoda.Approver, &zgoda.Reason, &zgoda.ApprovedAt); err != nil {
+			return nil, err
+		}
+		zgody = append(zgody, zgoda)
+	}
+	return zgody, rows.Err()
+}
+
+// Zgoda to jedno zatwierdzenie zadania.
+type Zgoda struct {
+	Approver   string    `json:"approver"`
+	Reason     string    `json:"reason,omitempty"`
+	ApprovedAt time.Time `json:"approved_at"`
+}
+
+// wymaganeZgody ustala, ile osob musi zatwierdzic zadanie.
+//
+// Liczba jest cecha operacji, a nie srodowiska: dysk sformatowany w
+// srodowisku testowym tez jest dyskiem sformatowanym.
+func wymaganeZgody(spec Spec) int {
+	if spec.RequiredApprovals > 0 {
+		return spec.RequiredApprovals
+	}
+	if spec.Action.Risk() == opspec.RiskDestructive {
+		return 2
+	}
+	return 1
 }
 
 // Cancel anuluje zadanie, ktore nie osiagnelo jeszcze stanu koncowego.
@@ -589,7 +665,9 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		       created_by, coalesce(request_id, ''), coalesce(approved_by, ''), approved_at,
 		       coalesce(canceled_by, ''), coalesce(cancel_reason, ''),
 		       coalesce(result_status, ''), coalesce(result_error_code, ''),
-		       coalesce(result_message, ''), finished_at, created_at, updated_at
+		       coalesce(result_message, ''), finished_at, created_at, updated_at,
+		       required_approvals,
+		       (select count(*) from job_approvals a where a.job_id = jobs.id)
 		from jobs ` + clause
 
 	rows, err := q.Query(ctx, query, args...)
@@ -601,14 +679,19 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 	var jobs []Job
 	for rows.Next() {
 		var j Job
+		var zebrane int
 		if err := rows.Scan(&j.ID, &j.HostID, &j.CampaignID, &j.ActionType, &j.ActionVersion,
 			&j.Payload, &j.PayloadHash, &j.IdempotencyKey, &j.State, &j.RequiresApprova,
 			&j.Preconditions, &j.TimeoutSeconds, &j.MaxOutputBytes, &j.ExpiresAt,
 			&j.CreatedBy, &j.RequestID, &j.ApprovedBy, &j.ApprovedAt,
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,
-			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
+			&j.RequiredApprovals, &zebrane); err != nil {
 			return nil, err
 		}
+		// Liczbe zebranych zgod niesie kazdy widok zadania: bez niej operator
+		// klika "approve" i nie wie, dlaczego nic sie nie stalo.
+		j.CollectedApprovals = zebrane
 		jobs = append(jobs, j)
 	}
 	return jobs, rows.Err()
