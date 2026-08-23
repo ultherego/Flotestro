@@ -29,6 +29,8 @@ const (
 	CapStorage = "storage"
 	// Serwer sshd. Konfiguracja idzie do wlasnego pliku w sshd_config.d.
 	CapSSHD = "sshd"
+	// Jadro: ustawienia sysctl i moduly.
+	CapKernel = "kernel"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -180,6 +182,8 @@ func DetectCapabilities() Capabilities {
 	nft := exists("/usr/sbin/nft")
 	lsblk := exists("/usr/bin/lsblk")
 	sshd := exists("/usr/sbin/sshd")
+	sysctl := exists("/usr/sbin/sysctl") || exists("/sbin/sysctl")
+	modprobe := exists("/usr/sbin/modprobe") || exists("/sbin/modprobe")
 	// Panel zapisuje wylacznie do wlasnego pliku, wiec bez katalogu
 	// dolaczanego moglby tylko czytac: sshd_config nalezy do dystrybucji.
 	dropIn := isDir("/etc/ssh/sshd_config.d")
@@ -231,6 +235,13 @@ func DetectCapabilities() Capabilities {
 				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
 			},
 			Reason: powodSieciowy(odczytSieci, zapisSieci),
+		},
+		{
+			Name:      CapKernel,
+			Version:   wersjaAdaptera,
+			Available: sysctl,
+			Features:  map[string]bool{"sysctl": sysctl, "modules": modprobe},
+			Reason:    powod(sysctl, "this host has no sysctl binary"),
 		},
 		{
 			Name:      CapSSHD,

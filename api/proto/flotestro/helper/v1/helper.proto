@@ -47,6 +47,7 @@ message HelperRequest {
     FirewallRequest firewall = 37;
     StorageRequest storage = 38;
     SshRequest ssh = 39;
+    KernelRequest kernel = 40;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -181,6 +182,7 @@ message HelperResponse {
   FirewallResult firewall_result = 25;
   StorageResult storage_result = 26;
   SshResult ssh_result = 27;
+  KernelResult kernel_result = 28;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -486,6 +488,38 @@ message SshResult {
   // w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
   // nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
   repeated string mismatches = 3;
+}
+
+// KernelRequest opisuje operacje na ustawieniach jadra.
+//
+// Panel zmienia ustawienia z okreslonych galezi /proc/sys i zapisuje je do
+// wlasnego pliku: dowolny zapis do /proc/sys obejmuje takze przelaczniki,
+// ktore wylaczaja ochrony jadra albo zatrzymuja host.
+message KernelRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_SYSCTL_ENSURE = 2;
+    OPERATION_MODULE_LOAD = 3;
+    OPERATION_MODULE_BLACKLIST = 4;
+  }
+  Operation operation = 1;
+  map<string, string> settings = 2;
+  // Keys wskazuje dodatkowe klucze do odczytu poza profilem.
+  repeated string keys = 3;
+  string module = 4;
+  // Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
+  bool blacklist = 5;
+}
+
+message KernelResult {
+  bytes snapshot = 1;
+  string message = 2;
+  // PendingReboot wylicza ustawienia zapisane trwale, ktorych jadro nie
+  // przyjelo od reki. Zapis i skutek to dwie rozne rzeczy.
+  repeated string pending_reboot = 3;
+  // AppliedRuntime wylicza ustawienia, ktore obowiazuja juz teraz.
+  repeated string applied_runtime = 4;
 }
 
 message ProcessSignalRequest {

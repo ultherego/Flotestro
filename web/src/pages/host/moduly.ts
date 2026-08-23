@@ -51,6 +51,7 @@ const MODULY: Modul[] = [
   { segment: "firewall", nazwa: "Firewall", powod: wymaga("firewall") },
   { segment: "storage", nazwa: "Storage", powod: wymaga("storage") },
   { segment: "ssh", nazwa: "SSH", powod: wymaga("sshd") },
+  { segment: "kernel", nazwa: "Kernel", powod: wymaga("kernel") },
   {
     segment: "accounts",
     nazwa: "Accounts",

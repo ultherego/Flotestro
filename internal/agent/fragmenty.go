@@ -20,6 +20,7 @@ const (
 	ModulFirewall   = "firewall"
 	ModulStorage    = "storage"
 	ModulSSH        = "ssh"
+	ModulKernel     = "kernel"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
 )
@@ -94,6 +95,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulStorage, "agent/lsblk+mountinfo", powodPrzestrzeni(f), przestrzen(f)},
 
 		{ModulSSH, "agent/sshd", powodSSH(f), konfiguracjaSSH(f)},
+
+		{ModulKernel, "agent/procfs+sysctl", powodJadra(f), jadro(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -226,4 +229,20 @@ func konfiguracjaSSH(f Facts) any {
 		return struct{}{}
 	}
 	return f.SSH
+}
+
+// powodJadra zwraca powod, dla ktorego ustawien jadra nie ustalono.
+func powodJadra(f Facts) string {
+	if f.Kernel == nil {
+		return "this host did not report its kernel settings"
+	}
+	return f.Kernel.UnavailableReason
+}
+
+// jadro zwraca ustawienia jadra albo pusty stan.
+func jadro(f Facts) any {
+	if f.Kernel == nil {
+		return struct{}{}
+	}
+	return f.Kernel
 }

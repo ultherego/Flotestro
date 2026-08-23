@@ -322,6 +322,26 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
+		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
+		operacja := agentv1.KernelAction_OPERATION_READ
+		switch action {
+		case opspec.ActionSysctlEnsure:
+			operacja = agentv1.KernelAction_OPERATION_SYSCTL_ENSURE
+		case opspec.ActionKernelModuleLoad:
+			operacja = agentv1.KernelAction_OPERATION_MODULE_LOAD
+		case opspec.ActionKernelModuleBlacklist:
+			operacja = agentv1.KernelAction_OPERATION_MODULE_BLACKLIST
+		}
+		jadro := &agentv1.KernelAction{Operation: operacja}
+		if payload.Kernel != nil {
+			jadro.Settings = payload.Kernel.Settings
+			jadro.Keys = payload.Kernel.Keys
+			jadro.Module = payload.Kernel.Module
+			jadro.Blacklist = payload.Kernel.Blacklist
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Kernel{Kernel: jadro}
+
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		operacja := agentv1.SshAction_OPERATION_READ

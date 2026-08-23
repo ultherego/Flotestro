@@ -107,6 +107,13 @@ const (
 	PermSSHRead          Permission = "ssh.read"
 	PermSSHConfigWrite   Permission = "ssh.config.write"
 	PermSSHHostKeyRotate Permission = "ssh.hostkey.rotate"
+	// Jadro. Ustawienie sysctl da sie cofnac tak samo, jak zostalo
+	// ustawione; blokada modulu ujawnia skutek dopiero przy starcie hosta,
+	// wiec ma osobne uprawnienie.
+	PermKernelRead            Permission = "kernel.read"
+	PermKernelSysctlWrite     Permission = "kernel.sysctl.write"
+	PermKernelModuleWrite     Permission = "kernel.module.write"
+	PermKernelModuleBlacklist Permission = "kernel.module.blacklist"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -182,7 +189,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -210,7 +217,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -249,6 +256,8 @@ var rolePermissions = map[Role][]Permission{
 		PermStorageLVMWrite, PermStorageFilesystemWrite,
 		PermStorageDestructive, PermStorageWipe,
 		PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
+		PermKernelRead, PermKernelSysctlWrite,
+		PermKernelModuleWrite, PermKernelModuleBlacklist,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

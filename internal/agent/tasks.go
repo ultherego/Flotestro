@@ -158,6 +158,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
+		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
+		return e.applyKernel(ctx, task, action, payload.Kernel)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -516,6 +519,24 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Kernel:
+		jadro := action.Kernel
+		typ := opspec.ActionSysctlPlan
+		switch jadro.GetOperation() {
+		case agentv1.KernelAction_OPERATION_SYSCTL_ENSURE:
+			typ = opspec.ActionSysctlEnsure
+		case agentv1.KernelAction_OPERATION_MODULE_LOAD:
+			typ = opspec.ActionKernelModuleLoad
+		case agentv1.KernelAction_OPERATION_MODULE_BLACKLIST:
+			typ = opspec.ActionKernelModuleBlacklist
+		}
+		return typ, opspec.Payload{Kernel: &opspec.KernelPayload{
+			Settings:  jadro.GetSettings(),
+			Keys:      jadro.GetKeys(),
+			Module:    jadro.GetModule(),
+			Blacklist: jadro.GetBlacklist(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Ssh:

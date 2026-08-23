@@ -17,6 +17,7 @@ import { Resolver } from "./pages/host/Resolver";
 import { Zapora } from "./pages/host/Zapora";
 import { Przestrzen } from "./pages/host/Przestrzen";
 import { SerwerSSH } from "./pages/host/SerwerSSH";
+import { Jadro } from "./pages/host/Jadro";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
 import { KontaHosta } from "./pages/host/Konta";
@@ -101,6 +102,7 @@ export function App() {
             <Route path="firewall" element={<Zapora />} />
             <Route path="storage" element={<Przestrzen />} />
             <Route path="ssh" element={<SerwerSSH />} />
+            <Route path="kernel" element={<Jadro />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />
             <Route path="logs" element={<Logi />} />

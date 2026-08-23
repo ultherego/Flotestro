@@ -12,6 +12,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
+	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
@@ -69,6 +70,11 @@ const (
 	ActionSSHConfigPlan    ActionType = "ssh.config.plan"
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
 	ActionSSHHostKeyRotate ActionType = "ssh.hostkey.rotate"
+
+	ActionSysctlPlan            ActionType = "sysctl.plan"
+	ActionSysctlEnsure          ActionType = "sysctl.ensure"
+	ActionKernelModuleLoad      ActionType = "kernel.module.load"
+	ActionKernelModuleBlacklist ActionType = "kernel.module.blacklist"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -399,6 +405,22 @@ var actionSpecs = map[ActionType]actionSpec{
 	// o odcisk przestanie dzialac.
 	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+
+	// Odczyt ustawien jadra. Profil plus klucze wskazane w zleceniu; caly
+	// /proc/sys ma kilka tysiecy pozycji i jego enumeracja nie odpowiada
+	// na zadne pytanie.
+	ActionSysctlPlan: {mutating: false, capability: "kernel", permission: "kernel.read",
+		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Ustawienie jadra zmienia zachowanie calego hosta, ale da sie je cofnac
+	// tak samo, jak zostalo ustawione.
+	ActionSysctlEnsure: {mutating: true, capability: "kernel", permission: "kernel.sysctl.write",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
+	ActionKernelModuleLoad: {mutating: true, capability: "kernel", permission: "kernel.module.write",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
+	// Blokada modulu dziala dopiero po restarcie, a dla modulow z initramfs
+	// takze po jego odbudowie: skutek ujawnia sie wtedy, gdy host wstaje.
+	ActionKernelModuleBlacklist: {mutating: true, capability: "kernel", permission: "kernel.module.blacklist",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNone},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -923,7 +945,19 @@ type Payload struct {
 	Firewall        *FirewallPayload        `json:"firewall,omitempty"`
 	Storage         *StoragePayload         `json:"storage,omitempty"`
 	SSH             *SSHPayload             `json:"ssh,omitempty"`
+	Kernel          *KernelPayload          `json:"kernel,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// KernelPayload opisuje operacje na ustawieniach jadra.
+type KernelPayload struct {
+	// Settings to klucze sysctl wraz z wartosciami docelowymi.
+	Settings map[string]string `json:"settings,omitempty"`
+	// Keys wskazuje dodatkowe klucze do odczytu poza profilem.
+	Keys   []string `json:"keys,omitempty"`
+	Module string   `json:"module,omitempty"`
+	// Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
+	Blacklist bool `json:"blacklist,omitempty"`
 }
 
 // SSHPayload opisuje zmiane konfiguracji serwera sshd.
@@ -1380,6 +1414,32 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionSysctlPlan:
+		if payload.Kernel != nil {
+			for _, klucz := range payload.Kernel.Keys {
+				if err := kernel.WalidujKlucz(klucz); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+
+	case ActionSysctlEnsure:
+		if payload.Kernel == nil || len(payload.Kernel.Settings) == 0 {
+			return fmt.Errorf("operacja %s wymaga ustawien", action)
+		}
+		if len(payload.Kernel.Settings) > 50 {
+			return fmt.Errorf("jedna operacja obejmuje najwyzej 50 ustawien")
+		}
+		_, err := kernel.SkladajPlikSysctl(payload.Kernel.Settings)
+		return err
+
+	case ActionKernelModuleLoad, ActionKernelModuleBlacklist:
+		if payload.Kernel == nil || payload.Kernel.Module == "" {
+			return fmt.Errorf("operacja %s wymaga nazwy modulu", action)
+		}
+		return kernel.WalidujModul(payload.Kernel.Module)
 
 	case ActionSSHConfigPlan:
 		return nil

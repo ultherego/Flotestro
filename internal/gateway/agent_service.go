@@ -431,6 +431,19 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Ustawienia jadra trafiaja do inwentarza po kazdej zmianie.
+	if jadro := result.GetKernelResult(); jadro != nil && len(jadro.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "kernel",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(jadro.GetSnapshot())),
+			Source:     "agent/procfs+sysctl",
+			Payload:    jadro.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano ustawien jadra", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Konfiguracja sshd trafia do inwentarza po kazdej zmianie: zakladka ma
 	// pokazac stan po operacji, a nie ten sprzed cyklu.
 	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetSnapshot()) > 0 {
@@ -719,6 +732,21 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":       "ssh",
 			"message":    serwer.GetMessage(),
 			"mismatches": serwer.GetMismatches(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Ustawienia zapisane, ale nieprzyjete od reki, sa trescia wyniku:
+	// zapis i skutek to dwie rozne rzeczy.
+	if jadro := result.GetKernelResult(); jadro != nil &&
+		(len(jadro.GetPendingReboot()) > 0 || len(jadro.GetAppliedRuntime()) > 0) {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":            "kernel",
+			"message":         jadro.GetMessage(),
+			"pending_reboot":  jadro.GetPendingReboot(),
+			"applied_runtime": jadro.GetAppliedRuntime(),
 		})
 		if err == nil {
 			return encoded

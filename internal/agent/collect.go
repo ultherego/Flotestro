@@ -10,6 +10,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
+	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 )
@@ -132,6 +133,16 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	// dlatego czytamy calosc raz na cykl inwentarza, a nie przy heartbeacie.
 	przestrzen := ZbierzPrzestrzen(ctx)
 	facts.Storage = &przestrzen
+
+	// Ustawienia jadra czyta helper: czesc kluczy /proc/sys jest czytelna
+	// wylacznie dla roota, a lista modulow i tak potrzebuje jego oczu.
+	if kernelProbe != nil {
+		if snapshot, err := kernelProbe(ctx); err == nil {
+			facts.Kernel = &snapshot
+		} else {
+			facts.Kernel = &kernel.Snapshot{UnavailableReason: "helper: " + err.Error()}
+		}
+	}
 
 	// Konfiguracje sshd czyta helper: "sshd -T" wymaga roota, bo serwer
 	// czyta przy okazji klucze hosta.
