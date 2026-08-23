@@ -215,13 +215,31 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		opts.Executor.facts = currentFacts
 	}
 
-	concurrency := opts.MaxConcurrentTasks
-	if concurrency <= 0 {
-		concurrency = 2
-	}
-	taskSlots := make(chan struct{}, concurrency)
+	// Miejsca sa liczone osobno dla kazdej klasy zasobu: dlugi odczyt
+	// pakietow nie moze zajac calej puli i zatrzymac operacji, ktore trwaja
+	// milisekundy.
+	miejsca := nowyBudzet(opts.MaxConcurrentTasks)
 
 	receiveErr := make(chan error, 1)
+	zglosBlad := func(err error) {
+		select {
+		case receiveErr <- err:
+		default:
+		}
+	}
+
+	// Zbieranie inventory idzie obok petli odbioru: ciezki odczyt nie moze
+	// zatrzymac przyjmowania zadan.
+	inventory := nowyKolektor()
+	go func() {
+		if err := inventory.pracuj(sessionCtx, collect, func(fresh Facts) error {
+			updateFacts(fresh)
+			return sendInventory(fresh)
+		}, opts.Log); err != nil {
+			zglosBlad(err)
+		}
+	}()
+
 	go func() {
 		for {
 			msg, err := stream.Receive()
@@ -231,28 +249,18 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 			switch payload := msg.GetPayload().(type) {
 			case *agentv1.ServerMessage_InventoryRequest:
-				fresh, err := collect(sessionCtx)
-				if err != nil {
-					opts.Log.Error("nie zebrano inventory", "err", err)
-					continue
-				}
-				updateFacts(fresh)
-				if err := sendInventory(fresh); err != nil {
-					receiveErr <- err
-					return
-				}
+				inventory.zazadaj()
 
 			case *agentv1.ServerMessage_Task:
 				// Zadanie wykonuje sie obok petli odbioru: restart jednostki
 				// trwa, a heartbeat i kolejne zadania nie moga na niego czekac.
 				task := payload.Task
 				go func() {
-					select {
-					case taskSlots <- struct{}{}:
-						defer func() { <-taskSlots }()
-					case <-sessionCtx.Done():
+					zwolnij := miejsca.zajmij(sessionCtx, klasaZadania(task))
+					if zwolnij == nil {
 						return
 					}
+					defer zwolnij()
 					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
 					opts.Log.Info("zadanie zakonczone",
 						"task_id", task.GetTaskId(), "status", result.GetStatus(),
@@ -302,15 +310,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			heartbeatTimer.Reset(nextHeartbeat(heartbeatInterval, jitterWindow))
 
 		case <-inventoryTicker.C:
-			fresh, err := collect(sessionCtx)
-			if err != nil {
-				opts.Log.Error("nie zebrano inventory", "err", err)
-				continue
-			}
-			updateFacts(fresh)
-			if err := sendInventory(fresh); err != nil {
-				return err
-			}
+			inventory.zazadaj()
 		}
 	}
 }

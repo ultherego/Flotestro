@@ -14,8 +14,19 @@ Restart=always
 RestartSec=5s
 
 # Budzet zasobow agenta jest wymuszony przez systemd, a nie tylko deklarowany.
-MemoryHigh=48M
-MemoryMax=96M
+#
+# Budzet musi pokryc to, co agent naprawde robi. Narzedzia pakietowe dzialaja
+# jako jego procesy potomne i trafiaja do tej samej grupy: samo rozwiazanie
+# zaleznosci przez apt siega 75 MB (Debian 13, pomiar na flocie testowej).
+# Wczesniejsze 48M nie konczylo sie czytelnym bledem - jadro dlawilo alokacje
+# i spychalo host w swap, wiec planowanie aktualizacji trwalo dziesiatki sekund
+# zamiast sekund, a operacje czekajace za nim wygladaly na zawieszone.
+#
+# Agent sam w sobie miesci sie w kilkudziesieciu megabajtach; reszta budzetu
+# jest dla menedzera pakietow. Jednoczesnie moze dzialac jedna operacja
+# pakietowa, wiec szczyt to agent plus jeden resolver.
+MemoryHigh=192M
+MemoryMax=256M
 CPUWeight=20
 IOWeight=20
 
