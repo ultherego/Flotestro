@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Attempt, Job } from "../lib/types";
 import { Blad, Czas, Pusto, StanZadania } from "../components/ui";
+import { ODSTEP_OPERACJI, useStrumienPostepu } from "../lib/strumien";
 
 /** Lista zadan z zatwierdzaniem. Zatwierdzenie potwierdza hash planu. */
 export function Zadania() {
@@ -16,7 +17,17 @@ export function Zadania() {
   const { data, error } = useQuery({
     queryKey: ["jobs", parametry.toString()],
     queryFn: () => api.get<Collection<Job>>(`/api/v1/jobs?${parametry}`),
+    // Lista operacji nie ma wlasnego strumienia, bo jej zawartosc zmienia sie
+    // takze przez operacje innych operatorow i przez wygasanie zadan.
+    refetchInterval: ODSTEP_OPERACJI,
   });
+
+  // Rozwiniete zadanie ma strumien: probe i wynik pojawiaja sie natychmiast,
+  // a nie przy nastepnym odpytaniu.
+  useStrumienPostepu(rozwiniete ? `/api/v1/jobs/${rozwiniete}/events` : null, [
+    ["jobs"],
+    ["attempts", rozwiniete],
+  ]);
 
   const zatwierdz = useMutation({
     mutationFn: (zadanie: Job) =>

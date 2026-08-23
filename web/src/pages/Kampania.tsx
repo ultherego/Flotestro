@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign as CampaignType, CampaignReport, CampaignTarget } from "../lib/types";
 import { Blad, Czas, Para, Pary, Pusto, StanZadania } from "../components/ui";
+import { useStrumienPostepu } from "../lib/strumien";
 
 export function Kampania() {
   const { id = "" } = useParams();
@@ -20,6 +21,14 @@ export function Kampania() {
     queryKey: ["campaign-report", id],
     queryFn: () => api.get<CampaignReport>(`/api/v1/campaigns/${id}/report`),
   });
+
+  // Kampania jest tym ekranem, na ktorym postep ma znaczenie decyzyjne:
+  // operator patrzy na canary i decyduje, czy puszczac dalsze fale.
+  useStrumienPostepu(id ? `/api/v1/campaigns/${id}/events` : null, [
+    ["campaign", id],
+    ["campaign-targets", id],
+    ["campaign-report", id],
+  ]);
 
   const steruj = useMutation({
     mutationFn: (operacja: string) =>

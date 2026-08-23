@@ -3,12 +3,14 @@ import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Blad, Czas, Pusto, StanZadania } from "../../components/ui";
 import { useHost } from "./wspolne";
+import { ODSTEP_OPERACJI } from "../../lib/strumien";
 
 export function ZadaniaHosta() {
   const host = useHost();
   const { data, error } = useQuery({
     queryKey: ["jobs", host.id],
     queryFn: () => api.get<Collection<Job>>(`/api/v1/jobs?host_id=${host.id}&limit=50`),
+    refetchInterval: ODSTEP_OPERACJI,
   });
   if (error) return <Blad error={error} />;
   if (!data?.items.length) return <Pusto>No jobs for this host.</Pusto>;

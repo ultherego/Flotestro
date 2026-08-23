@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { ODSTEP_ODSWIEZANIA } from "../lib/strumien";
 import { api, type Collection } from "../lib/api";
 import type { Host } from "../lib/types";
 import { Blad, Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Pusto, StanPolaczenia } from "../components/ui";
@@ -25,6 +26,9 @@ export function Hosty() {
   const { data, error, isLoading } = useQuery({
     queryKey: ["hosts", parametry.toString()],
     queryFn: () => api.get<Collection<Host>>(`/api/v1/hosts?${parametry}`),
+    // Stan hostow zmienia sie sam z siebie - przez heartbeaty, nie tylko
+    // przez operacje operatora - wiec lista odswieza sie bez jego udzialu.
+    refetchInterval: ODSTEP_ODSWIEZANIA,
   });
 
   if (error) return <Blad error={error} />;

@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/events"
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -56,7 +57,13 @@ type Server struct {
 	metrics *metrics.Collector
 	// trust pozwala przejrzec i wymienic CA floty.
 	trust *pki.Trust
+	// events rozglasza zmiany stanu operacji do otwartych ekranow.
+	events *events.Bus
 }
+
+// SetEvents podlacza magistrale zdarzen. Bez niej strumienie postepu sa
+// nieczynne, a panel dziala jak dotad - po odswiezeniu strony.
+func (s *Server) SetEvents(bus *events.Bus) { s.events = bus }
 
 // Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
 type Options struct {
@@ -134,6 +141,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)
+	// Strumien postepu jednej operacji. Wynik zostaje trwaly w bazie;
+	// strumien tylko mowi, kiedy warto go odczytac ponownie.
+	mux.HandleFunc("GET /api/v1/jobs/{id}/events", s.handleJobEvents)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/approve", s.handleApproveJob)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.handleCancelJob)
 
@@ -143,6 +153,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/campaigns/{id}", s.handleGetCampaign)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/targets", s.handleCampaignTargets)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/report", s.handleCampaignReport)
+	mux.HandleFunc("GET /api/v1/campaigns/{id}/events", s.handleCampaignEvents)
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/approve", s.handleApproveCampaign)
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/pause", s.handlePauseCampaign)
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)

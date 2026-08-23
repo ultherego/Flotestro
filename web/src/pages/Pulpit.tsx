@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { ODSTEP_ODSWIEZANIA } from "../lib/strumien";
 import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetSummary, Host } from "../lib/types";
 import { Blad, Czas, Pusto, StanZadania } from "../components/ui";
@@ -12,10 +13,12 @@ export function Pulpit() {
   const podsumowanie = useQuery({
     queryKey: ["summary"],
     queryFn: () => api.get<FleetSummary>("/api/v1/fleet/summary"),
+    refetchInterval: ODSTEP_ODSWIEZANIA,
   });
   const hosty = useQuery({
     queryKey: ["hosts"],
     queryFn: () => api.get<Collection<Host>>("/api/v1/hosts?limit=500"),
+    refetchInterval: ODSTEP_ODSWIEZANIA,
   });
   const kampanie = useQuery({
     queryKey: ["campaigns"],

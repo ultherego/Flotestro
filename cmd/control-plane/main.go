@@ -28,6 +28,7 @@ import (
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/database"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/events"
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
@@ -293,28 +294,34 @@ func run() error {
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
+	// Magistrala zdarzen budzi otwarte ekrany, gdy zmienia sie stan operacji.
+	// Bez niej panel dziala jak dotad - postep widac po odswiezeniu strony.
+	eventBus := events.NewBus(pool)
+	go eventBus.Run(ctx, log)
+
+	panelServer := adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
+		tokenStore, authzStore, recorder, registry, identityProvider, directory,
+		changeStore, log,
+		adminapi.Options{
+			ProductionEnvironments: productionEnvironments,
+			SessionIdle:            8 * time.Hour,
+			SessionAbsolute:        24 * time.Hour,
+			PublicURL:              *publicURL,
+			WebRoot:                *webRoot,
+			DirectoryWrite:         *directoryWrite,
+			StepUpMaxAge:           *stepUpMaxAge,
+			StepUpACR:              *stepUpACR,
+			// Metryka waznosci CA ma pokazywac CA podpisujace,
+			// takze po wymianie, wiec czyta caly zbior zaufania.
+			Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID).
+				WithAuthorities(trust.Authorities),
+			Trust: trust,
+		})
+	panelServer.SetEvents(eventBus)
+
 	adminServer := &http.Server{
-		Addr: cfg.AdminAddr,
-		Handler: h2c.NewHandler(
-			adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
-				tokenStore, authzStore, recorder, registry, identityProvider, directory,
-				changeStore, log,
-				adminapi.Options{
-					ProductionEnvironments: productionEnvironments,
-					SessionIdle:            8 * time.Hour,
-					SessionAbsolute:        24 * time.Hour,
-					PublicURL:              *publicURL,
-					WebRoot:                *webRoot,
-					DirectoryWrite:         *directoryWrite,
-					StepUpMaxAge:           *stepUpMaxAge,
-					StepUpACR:              *stepUpACR,
-					// Metryka waznosci CA ma pokazywac CA podpisujace,
-					// takze po wymianie, wiec czyta caly zbior zaufania.
-					Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID).
-						WithAuthorities(trust.Authorities),
-					Trust: trust,
-				}).Routes(),
-			&http2.Server{}),
+		Addr:              cfg.AdminAddr,
+		Handler:           h2c.NewHandler(panelServer.Routes(), &http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 

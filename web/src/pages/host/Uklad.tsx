@@ -7,6 +7,7 @@ import { Blad, Pusto } from "../../components/ui";
 import { useCapabilities } from "../../lib/capabilities";
 import { PasekKontekstu } from "./PasekKontekstu";
 import { moduly, MODUL_DOMYSLNY } from "./moduly";
+import { ODSTEP_ODSWIEZANIA } from "../../lib/strumien";
 
 /**
  * Host workspace. Aktywny modul jest segmentem adresu, a nie stanem
@@ -21,6 +22,9 @@ export function UkladHosta() {
   const host = useQuery({
     queryKey: ["host", id],
     queryFn: () => api.get<Host>(`/api/v1/hosts/${id}`),
+    // Pasek kontekstu niesie stan polaczenia i swiezosc danych, wiec musi
+    // sam sie odswiezac: nieaktualny stan celu jest gorszy niz jego brak.
+    refetchInterval: ODSTEP_ODSWIEZANIA,
   });
 
   const dane = host.data;
