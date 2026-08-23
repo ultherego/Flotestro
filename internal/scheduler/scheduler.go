@@ -242,6 +242,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionPackagePlan:
 		envelope.Action = &agentv1.TaskEnvelope_PackagePlan{
 			PackagePlan: &agentv1.PackagePlan{
+				Mode:            payload.PackagePlan.Mode,
 				RefreshMetadata: payload.PackagePlan.RefreshMetadata,
 				OnlyPackages:    payload.PackagePlan.OnlyPackages,
 				SecurityOnly:    payload.PackagePlan.SecurityOnly,
@@ -303,6 +304,23 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
+
+	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
+		operacja := agentv1.PackageLifecycle_OPERATION_INSTALL
+		switch action {
+		case opspec.ActionPackageRemove:
+			operacja = agentv1.PackageLifecycle_OPERATION_REMOVE
+		case opspec.ActionPackageHoldSet:
+			operacja = agentv1.PackageLifecycle_OPERATION_HOLD
+		}
+		envelope.Action = &agentv1.TaskEnvelope_PackageLifecycle{
+			PackageLifecycle: &agentv1.PackageLifecycle{
+				Operation:        operacja,
+				Packages:         payload.PackageChange.Packages,
+				ExpectedRemovals: payload.PackageChange.ExpectedRemovals,
+				Hold:             payload.PackageChange.Hold,
+			},
+		}
 
 	case opspec.ActionProcessList:
 		envelope.Action = &agentv1.TaskEnvelope_ListProcesses{

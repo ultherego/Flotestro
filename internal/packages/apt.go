@@ -13,6 +13,7 @@ const (
 	aptGetPath     = "/usr/bin/apt-get"
 	dpkgPath       = "/usr/bin/dpkg"
 	dpkgQueryPath  = "/usr/bin/dpkg-query"
+	aptMarkPath    = "/usr/bin/apt-mark"
 	dpkgStatusPath = "/var/lib/dpkg/status"
 	// Narzedzia debconfa sluza wylacznie odblokowaniu pakietu, ktory czeka
 	// na decyzje operatora.
@@ -52,11 +53,18 @@ func (a *APT) LockHeld() (bool, string) {
 // Plan liczy aktualizacje przez symulacje. Symulacja nie potrzebuje blokady
 // ani roota, wiec planowanie nie koliduje z reczna praca administratora.
 func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
-	plan := Plan{Manager: a.Name(), DiskAvailableBytes: diskAvailable("/")}
+	plan := Plan{Manager: a.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
 	// Pakiet czekajacy na konfiguracje zatrzyma kazda transakcje, wiec plan
 	// mowi o nim od razu. Bez tego operator dowiaduje sie o blokadzie dopiero
 	// po nieudanej aktualizacji.
 	plan.Blocked = a.BlockedPackages(ctx)
+
+	switch options.Mode {
+	case ModeRemove:
+		return a.planRemove(ctx, plan, options)
+	case ModeInstall:
+		return a.planInstall(ctx, plan, options)
+	}
 
 	result := run(ctx, 3*time.Minute, aptGetPath,
 		"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
@@ -357,4 +365,180 @@ func diffVersions(before, after map[string]string) []Change {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// planRemove liczy, co zniknie razem z wskazanymi pakietami.
+//
+// Usuniecie jednego pakietu potrafi pociagnac kilkadziesiat zaleznych.
+// Operator ma zobaczyc pelna liste przed zatwierdzeniem, a nie odkryc ja
+// po fakcie, gdy hosta juz nie da sie przywrocic bez rejestru.
+func (a *APT) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
+	if len(options.Packages) == 0 {
+		return plan, fmt.Errorf("plan usuniecia wymaga listy pakietow")
+	}
+	args := append([]string{"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "remove"},
+		options.Packages...)
+	result := run(ctx, 3*time.Minute, aptGetPath, args...)
+	if !result.Ran || result.ExitCode != 0 {
+		return plan, fmt.Errorf("symulacja usuniecia: %s", result.Reason())
+	}
+
+	for _, linia := range strings.Split(result.Stdout, "\n") {
+		nazwa, ok := parseAptRemvLine(linia)
+		if !ok {
+			continue
+		}
+		plan.Removals = append(plan.Removals, nazwa)
+	}
+	plan.Protected = ChronioneWZbiorze(plan.Removals)
+	return plan, nil
+}
+
+// planInstall liczy, co przybedzie razem z wskazanymi pakietami.
+func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan, error) {
+	if len(options.Packages) == 0 {
+		return plan, fmt.Errorf("plan instalacji wymaga listy pakietow")
+	}
+	args := append([]string{"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "install"},
+		options.Packages...)
+	result := run(ctx, 3*time.Minute, aptGetPath, args...)
+	if !result.Ran || result.ExitCode != 0 {
+		return plan, fmt.Errorf("symulacja instalacji: %s", result.Reason())
+	}
+
+	for _, linia := range strings.Split(result.Stdout, "\n") {
+		if change, ok := parseAptInstLine(linia); ok {
+			plan.Changes = append(plan.Changes, change)
+		}
+		// Instalacja tez potrafi usuwac: konflikt pakietow konczy sie
+		// wymiana, a nie dopisaniem.
+		if nazwa, ok := parseAptRemvLine(linia); ok {
+			plan.Removals = append(plan.Removals, nazwa)
+		}
+	}
+	plan.Protected = ChronioneWZbiorze(plan.Removals)
+	plan.DownloadBytes = a.downloadSize(ctx, options)
+	return plan, nil
+}
+
+// parseAptRemvLine czyta linie postaci:
+//
+//	Remv libfoo [1.0-1]
+func parseAptRemvLine(linia string) (string, bool) {
+	pola := strings.Fields(strings.TrimSpace(linia))
+	if len(pola) < 2 || pola[0] != "Remv" {
+		return "", false
+	}
+	return pola[1], true
+}
+
+// Install instaluje wskazane pakiety.
+func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
+	apply := Apply{Manager: a.Name()}
+	if len(options.Packages) == 0 {
+		return apply, fmt.Errorf("instalacja wymaga listy pakietow")
+	}
+	if held, path := a.LockHeld(); held {
+		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
+	}
+	if hidden, dir := modulesHidden(); hidden {
+		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
+	}
+
+	before := a.installedVersions(ctx)
+	args := append([]string{"--yes", "--quiet",
+		"-o", "Dpkg::Options::=--force-confold",
+		"-o", "Dpkg::Options::=--force-confdef",
+		"install"}, options.Packages...)
+	if options.Progress != nil {
+		args = append([]string{"-o", "APT::Status-Fd=3"}, args...)
+	}
+	result := runWithProgress(ctx, 45*time.Minute, options.Progress,
+		options.Progress != nil, aptGetPath, args...)
+
+	after := a.installedVersions(ctx)
+	apply.Applied = diffVersions(before, after)
+	apply.PackagesNeedingAttention = a.PackagesNeedingAttention(ctx)
+	apply.DatabaseBroken = len(apply.PackagesNeedingAttention) > 0
+	apply.RebootRequired = fileExists("/var/run/reboot-required") || fileExists("/run/reboot-required")
+	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		return apply, fmt.Errorf("apt-get install: %s", result.Reason())
+	}
+	return apply, nil
+}
+
+// Remove usuwa wskazane pakiety wraz z ich zaleznosciami.
+//
+// Zbior usuwanych jest liczony ponownie tuz przed operacja i porownywany
+// z tym, co zatwierdzil operator. Roznica oznacza, ze host zmienil sie od
+// czasu planu i usunieciu podleglby inny zestaw - a wtedy odmowa jest
+// wlasciwa reakcja, a nie wykonanie czegos, czego nikt nie widzial.
+func (a *APT) Remove(ctx context.Context, options Options, oczekiwane []string) (Apply, error) {
+	apply := Apply{Manager: a.Name()}
+	if len(options.Packages) == 0 {
+		return apply, fmt.Errorf("usuniecie wymaga listy pakietow")
+	}
+	if held, path := a.LockHeld(); held {
+		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
+	}
+
+	plan, err := a.Plan(ctx, Options{Mode: ModeRemove, Packages: options.Packages})
+	if err != nil {
+		return apply, err
+	}
+	if len(plan.Protected) > 0 {
+		return apply, fmt.Errorf("%w: %s", ErrProtectedPackage, strings.Join(plan.Protected, ", "))
+	}
+	if roznica := porownajZbiory(oczekiwane, plan.Removals); roznica != "" {
+		return apply, fmt.Errorf("%w: %s", ErrPlanChanged, roznica)
+	}
+
+	before := a.installedVersions(ctx)
+	args := append([]string{"--yes", "--quiet", "remove"}, options.Packages...)
+	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, aptGetPath, args...)
+
+	after := a.installedVersions(ctx)
+	apply.Applied = diffVersions(before, after)
+	apply.PackagesNeedingAttention = a.PackagesNeedingAttention(ctx)
+	apply.DatabaseBroken = len(apply.PackagesNeedingAttention) > 0
+	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		return apply, fmt.Errorf("apt-get remove: %s", result.Reason())
+	}
+	return apply, nil
+}
+
+// SetHold wstrzymuje albo zwalnia aktualizacje pakietow.
+func (a *APT) SetHold(ctx context.Context, pakiety []string, hold bool) (Apply, error) {
+	apply := Apply{Manager: a.Name()}
+	if len(pakiety) == 0 {
+		return apply, fmt.Errorf("wstrzymanie wymaga listy pakietow")
+	}
+	operacja := "unhold"
+	if hold {
+		operacja = "hold"
+	}
+	args := append([]string{operacja}, pakiety...)
+	result := run(ctx, time.Minute, aptMarkPath, args...)
+	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		return apply, fmt.Errorf("apt-mark %s: %s", operacja, result.Reason())
+	}
+	return apply, nil
+}
+
+// Holds zwraca pakiety wstrzymane na hoscie.
+func (a *APT) Holds(ctx context.Context) []string {
+	result := run(ctx, 30*time.Second, aptMarkPath, "showhold")
+	if !result.Ran || result.ExitCode != 0 {
+		return nil
+	}
+	var wstrzymane []string
+	for _, linia := range strings.Split(result.Stdout, "\n") {
+		if nazwa := strings.TrimSpace(linia); nazwa != "" {
+			wstrzymane = append(wstrzymane, nazwa)
+		}
+	}
+	return wstrzymane
 }

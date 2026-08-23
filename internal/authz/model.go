@@ -50,6 +50,11 @@ const (
 	// prace i nie da sie go cofnac.
 	PermProcessRead   Permission = "process.read"
 	PermProcessSignal Permission = "process.signal"
+	// Pelny cykl zycia pakietow. Instalacja i usuwanie sa oddzielone od
+	// aktualizacji: to trzy rozne decyzje o tym samym hoscie.
+	PermPackagesInstall Permission = "packages.install"
+	PermPackagesRemove  Permission = "packages.remove"
+	PermPackagesHold    Permission = "packages.hold.write"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -177,6 +182,7 @@ var rolePermissions = map[Role][]Permission{
 		PermComposePlan, PermComposeDeploy,
 		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,
 		PermJournalFollow, PermLogFileRead, PermProcessRead, PermProcessSignal,
+		PermPackagesInstall, PermPackagesRemove, PermPackagesHold,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

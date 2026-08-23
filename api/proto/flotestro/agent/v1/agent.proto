@@ -356,6 +356,7 @@ message TaskEnvelope {
     FollowJournal follow_journal = 34;
     ListProcesses list_processes = 35;
     SignalProcess signal_process = 36;
+    PackageLifecycle package_lifecycle = 37;
   }
 }
 
@@ -611,6 +612,9 @@ message PackagePlan {
   // Pusta lista oznacza wszystkie dostepne aktualizacje.
   repeated string only_packages = 2;
   bool security_only = 3;
+  // Rodzaj planu: upgrade (domyslny), install albo remove. Plan usuniecia
+  // liczy co innego, ale odpowiada na to samo pytanie: co ta operacja zmieni.
+  string mode = 4;
 }
 
 // PackageUpgrade wykonuje transakcje menedzera pakietow.
@@ -648,6 +652,13 @@ message PackagePlanResult {
   // hoscie sie nie powiedzie, bo menedzer pakietow najpierw probuje dokonczyc
   // jego konfiguracje.
   repeated BlockedPackage blocked = 8;
+  string mode = 9;
+  // Pakiety, ktore zniknelyby razem z wskazanymi. Usuniecie jednego pakietu
+  // potrafi pociagnac kilkadziesiat zaleznych.
+  repeated string removals = 10;
+  // Pakiety chronione, ktore znalazly sie w planie. Ich obecnosc oznacza,
+  // ze operacja nie zostanie wykonana.
+  repeated string protected = 11;
 }
 
 // BlockedPackage opisuje pakiet blokujacy operacje pakietowe wraz z pytaniami
@@ -752,6 +763,22 @@ message UnitToggle {
 // i ograniczony z gory: czasem, tempem i liczba linii - inaczej host pracowalby
 // dla nikogo, gdy operator zamknie karte.
 // ListProcesses zamawia snapshot procesow hosta.
+// PackageLifecycle dokłada, usuwa albo wstrzymuje pakiety. Nazwa jest inna
+// niz PackageChange, bo tamta opisuje zmiane wersji w wyniku transakcji,
+// a ta - zlecona operacje.
+message PackageLifecycle {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_INSTALL = 1;
+    OPERATION_REMOVE = 2;
+    OPERATION_HOLD = 3;
+  }
+  Operation operation = 1;
+  repeated string packages = 2;
+  repeated string expected_removals = 3;
+  bool hold = 4;
+}
+
 message ListProcesses {
   // Sortowanie decyduje, ktore procesy trafia do wyniku, gdy jest ich wiecej
   // niz limit.

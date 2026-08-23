@@ -327,3 +327,92 @@ func TestHostZglaszaRejestrAdapterow(t *testing.T) {
 		})
 	}
 }
+
+// TestUsunieciePakietuWymagaZatwierdzonegoZbioru sprawdza granice z rozdzialu
+// 3. Jeden pakiet potrafi pociagnac kilkadziesiat zaleznych, wiec operator
+// zatwierdza zbior, a nie nazwe - i host liczy go ponownie przed operacja.
+func TestUsunieciePakietuWymagaZatwierdzonegoZbioru(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	// Bez zatwierdzonego zbioru operacja nie ma podstawy.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":              "packages.remove",
+			"reason":              "porzadki w laboratorium",
+			"target_confirmation": host.Hostname,
+			"payload":             map[string]any{"package_change": map[string]any{"packages": []string{"sl"}}},
+		}, nil, http.StatusBadRequest)
+
+	// Bez przepisanej nazwy hosta takze nie: usuniecie jest nieodwracalne.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "packages.remove",
+			"reason": "porzadki w laboratorium",
+			"payload": map[string]any{"package_change": map[string]any{
+				"packages": []string{"sl"}, "expected_removals": []string{"sl"},
+			}},
+		}, nil, http.StatusBadRequest)
+}
+
+// TestPakietyChronioneSaOdrzucanePrzyZlecaniu pilnuje, ze operator dowiaduje
+// sie o blokadzie przy zlecaniu, a nie po dostarczeniu zadania. Usuniecie
+// agenta odcieloby host od panelu, a wiec takze od naprawy.
+func TestPakietyChronioneSaOdrzucanePrzyZlecaniu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, pakiet := range []string{"flotestro-agent", "systemd", "openssh-server", "linux-image-6.12"} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action":              "packages.remove",
+				"reason":              "proba usuniecia pakietu chronionego",
+				"target_confirmation": host.Hostname,
+				"payload": map[string]any{"package_change": map[string]any{
+					"packages": []string{pakiet}, "expected_removals": []string{pakiet},
+				}},
+			}, nil, http.StatusBadRequest)
+	}
+}
+
+// TestPlanUsunieciaPokazujeZaleznosci sprawdza, ze plan odpowiada na pytanie
+// "co zniknie", zanim cokolwiek zniknie.
+func TestPlanUsunieciaPokazujeZaleznosci(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	// Plan bez listy pakietow nie ma sensu.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "packages.plan",
+			"payload": map[string]any{"package_plan": map[string]any{"mode": "remove"}},
+		}, nil, http.StatusBadRequest)
+
+	// Nieznany rodzaj planu tez nie.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "packages.plan",
+			"payload": map[string]any{"package_plan": map[string]any{
+				"mode": "wymyslony", "only_packages": []string{"sl"},
+			}},
+		}, nil, http.StatusBadRequest)
+}
+
+// TestWstrzymanieJestOdwracalne sprawdza, ze operacja opisuje stan docelowy,
+// a nie przelacznik: powtorzenie jej nie odwraca zmiany.
+func TestWstrzymanieJestOdwracalne(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, hold := range []bool{true, false} {
+		job, _ := h.runOperation(host.ID, map[string]any{
+			"action": "packages.hold.set",
+			"payload": map[string]any{"package_change": map[string]any{
+				"packages": []string{"nano"}, "hold": hold,
+			}},
+		}, 60*time.Second)
+		if job.State != "succeeded" {
+			t.Fatalf("hold=%v: stan = %s, kod = %s", hold, job.State, job.ResultErrorCode)
+		}
+	}
+}

@@ -50,6 +50,7 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 	}
 
 	plan, err := manager.Plan(planCtx, packages.Options{
+		Mode:         payload.Mode,
 		Packages:     payload.OnlyPackages,
 		SecurityOnly: payload.SecurityOnly,
 	})
@@ -173,6 +174,9 @@ func planToProto(plan packages.Plan) *agentv1.PackagePlanResult {
 		RebootPredicted:    plan.RebootPredicted,
 		MetadataRefreshed:  plan.MetadataRefreshed,
 		Blocked:            blockedPlanToProto(plan.Blocked),
+		Mode:               plan.Mode,
+		Removals:           plan.Removals,
+		Protected:          plan.Protected,
 	}
 }
 
@@ -243,4 +247,71 @@ func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain strin
 		ConfigIssues:      result.GetConfigIssues(),
 		UnavailableReason: result.GetUnavailableReason(),
 	}, nil
+}
+
+// applyPackageLifecycle zleca helperowi instalacje, usuniecie albo
+// wstrzymanie pakietow.
+func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.TaskEnvelope,
+	action opspec.ActionType, payload *opspec.PackageChangePayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"brak payloadu zmiany pakietow")
+	}
+	timeout := timeoutOf(task, action)
+	callCtx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
+	defer cancel()
+
+	operacja := helperv1.PackageActionRequest_OPERATION_INSTALL
+	switch action {
+	case opspec.ActionPackageRemove:
+		operacja = helperv1.PackageActionRequest_OPERATION_REMOVE
+	case opspec.ActionPackageHoldSet:
+		operacja = helperv1.PackageActionRequest_OPERATION_HOLD
+	}
+
+	// Postep dotyczy instalacji i usuwania: obie potrafia trwac minutami.
+	var meldujPostep func(*helperv1.TaskProgress)
+	if e.progress != nil && action != opspec.ActionPackageHoldSet {
+		meldujPostep = func(p *helperv1.TaskProgress) {
+			e.progress(&agentv1.TaskProgress{
+				TaskId:  task.GetTaskId(),
+				Step:    p.GetStep(),
+				Total:   p.GetTotal(),
+				Percent: p.Percent,
+				Message: p.GetMessage(),
+			})
+		}
+	}
+
+	response, err := e.helper.CallWithProgress(callCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action: &helperv1.HelperRequest_PackageAction{
+			PackageAction: &helperv1.PackageActionRequest{
+				Operation:        operacja,
+				Packages:         payload.Packages,
+				ExpectedRemovals: payload.ExpectedRemovals,
+				Hold:             payload.Hold,
+			},
+		},
+	}, timeout, meldujPostep)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+
+	detail := applyToProto(response.GetPackageResult())
+	if !response.GetAccepted() {
+		wynik := rejected(agentv1.TaskResult_STATUS_FAILED,
+			response.GetErrorCode(), response.GetMessage())
+		wynik.TaskId = task.GetTaskId()
+		wynik.Detail = &agentv1.TaskResult_PackageApply{PackageApply: detail}
+		return wynik
+	}
+	return &agentv1.TaskResult{
+		TaskId:   task.GetTaskId(),
+		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
+		ExitCode: 0,
+		Detail:   &agentv1.TaskResult_PackageApply{PackageApply: detail},
+	}
 }

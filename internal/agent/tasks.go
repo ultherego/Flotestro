@@ -152,6 +152,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.readLogFile(ctx, task, payload.LogFile)
 	case opspec.ActionFollowJournal:
 		return e.followJournal(ctx, task, payload.Journal)
+	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
+		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
 	case opspec.ActionProcessList:
 		return e.listProcesses(ctx, task, payload.ProcessList)
 	case opspec.ActionProcessSignal:
@@ -374,6 +376,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		request := action.PackagePlan
 		return opspec.ActionPackagePlan, opspec.Payload{
 			PackagePlan: &opspec.PackagePlanPayload{
+				Mode:            request.GetMode(),
 				RefreshMetadata: request.GetRefreshMetadata(),
 				OnlyPackages:    request.GetOnlyPackages(),
 				SecurityOnly:    request.GetSecurityOnly(),
@@ -473,6 +476,21 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		return typ, opspec.Payload{UnitToggle: &opspec.UnitToggle{
 			Unit:    action.UnitToggle.GetUnit(),
 			Enabled: action.UnitToggle.GetValue(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_PackageLifecycle:
+		zmiana := action.PackageLifecycle
+		typ := opspec.ActionPackageInstall
+		switch zmiana.GetOperation() {
+		case agentv1.PackageLifecycle_OPERATION_REMOVE:
+			typ = opspec.ActionPackageRemove
+		case agentv1.PackageLifecycle_OPERATION_HOLD:
+			typ = opspec.ActionPackageHoldSet
+		}
+		return typ, opspec.Payload{PackageChange: &opspec.PackageChangePayload{
+			Packages:         zmiana.GetPackages(),
+			ExpectedRemovals: zmiana.GetExpectedRemovals(),
+			Hold:             zmiana.GetHold(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_ListProcesses:

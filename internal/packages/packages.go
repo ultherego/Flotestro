@@ -37,6 +37,51 @@ var ErrLocked = errors.New("menedzer pakietow jest zajety")
 // przebuduja initramfs bez sterownikow i host nie wstanie po restarcie.
 var ErrModulesHidden = errors.New("drzewo modulow jadra jest niewidoczne")
 
+// ErrProtectedPackage oznacza probe usuniecia pakietu, bez ktorego host
+// przestaje byc zarzadzalny albo uruchamialny.
+var ErrProtectedPackage = errors.New("pakiet chroniony")
+
+// ErrPlanChanged oznacza, ze zbior usuwanych pakietow zmienil sie od
+// zatwierdzenia planu.
+var ErrPlanChanged = errors.New("plan usuniecia zmienil sie od zatwierdzenia")
+
+// porownajZbiory zwraca opis roznicy albo pustke, gdy zbiory sa rowne.
+// Pusty zbior oczekiwany oznacza brak zatwierdzonego planu i tez jest
+// roznica: operacja nieodwracalna nie moze isc bez podstawy.
+func porownajZbiory(oczekiwane, obecne []string) string {
+	if len(oczekiwane) == 0 {
+		return "brak zatwierdzonego planu usuniecia"
+	}
+	zbior := map[string]bool{}
+	for _, nazwa := range oczekiwane {
+		zbior[nazwa] = true
+	}
+	var dodatkowe []string
+	for _, nazwa := range obecne {
+		if !zbior[nazwa] {
+			dodatkowe = append(dodatkowe, nazwa)
+		}
+		delete(zbior, nazwa)
+	}
+	var brakujace []string
+	for nazwa := range zbior {
+		brakujace = append(brakujace, nazwa)
+	}
+	sort.Strings(dodatkowe)
+	sort.Strings(brakujace)
+
+	switch {
+	case len(dodatkowe) > 0 && len(brakujace) > 0:
+		return "doszly: " + strings.Join(dodatkowe, ", ") +
+			"; odpadly: " + strings.Join(brakujace, ", ")
+	case len(dodatkowe) > 0:
+		return "usunieciu podlegloby takze: " + strings.Join(dodatkowe, ", ")
+	case len(brakujace) > 0:
+		return "nie podlegaja juz usunieciu: " + strings.Join(brakujace, ", ")
+	}
+	return ""
+}
+
 // Change opisuje jedna zmiane wersji pakietu.
 type Change struct {
 	Name             string `json:"name"`
@@ -58,6 +103,15 @@ type Plan struct {
 	// w sobie przechodzi, bo niczego nie zmienia, ale transakcja na takim
 	// hoscie padnie - operator ma to wiedziec przed jej zleceniem.
 	Blocked []Blocked `json:"blocked,omitempty"`
+	// Mode mowi, jakiego rodzaju jest to plan.
+	Mode string `json:"mode,omitempty"`
+	// Removals wylicza pakiety, ktore zniknelyby wraz z wskazanymi. Usuniecie
+	// jednego pakietu potrafi pociagnac kilkadziesiat zaleznych - operator ma
+	// to zobaczyc przed zatwierdzeniem, a nie po.
+	Removals []string `json:"removals,omitempty"`
+	// Protected wylicza pakiety chronione, ktore znalazly sie w planie.
+	// Ich obecnosc oznacza, ze operacja nie zostanie wykonana.
+	Protected []string `json:"protected,omitempty"`
 }
 
 // Apply opisuje wynik wykonanej transakcji.
@@ -97,10 +151,20 @@ func linieKoncowe(stderr, stdout string, ile int) []string {
 // maksymalnieLiniiWyniku ogranicza kontekst bledu w wyniku operacji.
 const maksymalnieLiniiWyniku = 40
 
+// Tryby planowania. Plan aktualizacji i plan usuniecia licza co innego, ale
+// odpowiadaja na to samo pytanie: co ta operacja zmieni na hoscie.
+const (
+	ModeUpgrade = "upgrade"
+	ModeRemove  = "remove"
+	ModeInstall = "install"
+)
+
 // Options zawezaja zakres planu lub transakcji.
 type Options struct {
 	Packages     []string
 	SecurityOnly bool
+	// Mode wybiera rodzaj planu. Pusty oznacza plan aktualizacji.
+	Mode string
 	// Progress odbiera postep dlugiej transakcji. Nil oznacza brak odbiorcy
 	// i wtedy narzedzie dziala jak dotad.
 	Progress ProgressFunc

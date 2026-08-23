@@ -38,6 +38,12 @@ const (
 	// operatora na pytania konfiguracyjne i konczy konfiguracje pakietow.
 	ActionPackageRepair ActionType = "packages.repair"
 
+	// Pelny cykl zycia pakietow. Instalacja dokłada oprogramowanie, usuniecie
+	// je zabiera wraz z zaleznosciami, wstrzymanie zamraza wersje.
+	ActionPackageInstall ActionType = "packages.install"
+	ActionPackageRemove  ActionType = "packages.remove"
+	ActionPackageHoldSet ActionType = "packages.hold.set"
+
 	ActionSystemReboot ActionType = "system.reboot"
 	ActionUnitStatus   ActionType = "unit.status"
 	// Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
@@ -276,6 +282,17 @@ var actionSpecs = map[ActionType]actionSpec{
 	// nie ma, ma to powiedziec przy zlecaniu, a nie po dostarczeniu zadania.
 	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair",
 		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockPackages},
+	// Instalacja dokłada na host oprogramowanie, ktore zaraz zacznie dzialac.
+	ActionPackageInstall: {mutating: true, capability: "packages", permission: "packages.install",
+		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
+	// Usuniecie zabiera pakiet wraz z zaleznymi i nie da sie go cofnac
+	// odtworzeniem stanu: to, co zniknelo, trzeba pobrac na nowo.
+	ActionPackageRemove: {mutating: true, capability: "packages", permission: "packages.remove",
+		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockPackages, requiresPlan: true},
+	// Wstrzymanie zamraza wersje pakietu. Jest odwracalne i lokalne, ale
+	// wstrzymany pakiet nie dostanie takze poprawek bezpieczenstwa.
+	ActionPackageHoldSet: {mutating: true, capability: "packages", permission: "packages.hold.write",
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
 	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
@@ -396,6 +413,44 @@ var wzorzecOkresu = regexp.MustCompile(
 	`^(-?\d+ ?(s|sec|second|seconds|m|min|minute|minutes|h|hour|hours|d|day|days|w|week|weeks)( ago)?` +
 		`|yesterday|today|now` +
 		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?)$`)
+
+// chronionePakiety powtarza liste z modulu pakietow. Duplikat jest swiadomy:
+// pakiet opspec nie ma zaleznosci poza biblioteka standardowa, bo hash planu
+// musi byc liczony ta sama implementacja po obu stronach. Panel odmawia
+// wczesnie, a host - rozstrzygajaco.
+func chronionePakiety(pakiety []string) []string {
+	widziane := map[string]bool{}
+	nazwy := map[string]bool{
+		"flotestro-agent": true, "openssh-server": true, "systemd": true, "sudo": true,
+	}
+	prefiksy := []string{"linux-image", "kernel", "grub", "apt", "dpkg", "dnf", "rpm", "systemd-"}
+
+	var wynik []string
+	for _, pakiet := range pakiety {
+		nazwa := strings.ToLower(strings.TrimSpace(pakiet))
+		if index := strings.IndexByte(nazwa, ':'); index > 0 {
+			nazwa = nazwa[:index]
+		}
+		// Ten sam pakiet bywa i na liscie zleconej, i wsrod zaleznych.
+		// Powtorzenie go w komunikacie sugerowaloby dwa problemy zamiast
+		// jednego.
+		if widziane[nazwa] {
+			continue
+		}
+		widziane[nazwa] = true
+		if nazwy[nazwa] {
+			wynik = append(wynik, pakiet)
+			continue
+		}
+		for _, prefiks := range prefiksy {
+			if strings.HasPrefix(nazwa, prefiks) {
+				wynik = append(wynik, pakiet)
+				break
+			}
+		}
+	}
+	return wynik
+}
 
 // validateLogPath odrzuca sciezki, ktorych host i tak nie przyjmie.
 // Rozstrzygajaca jest allowlista na hoscie; panel odsiewa to, co nie jest
@@ -534,8 +589,21 @@ type JournalPayload struct {
 	FollowSeconds uint32 `json:"follow_seconds,omitempty"`
 }
 
+// PackageChangePayload opisuje instalacje, usuniecie albo wstrzymanie.
+type PackageChangePayload struct {
+	Packages []string `json:"packages"`
+	// ExpectedRemovals jest zbiorem, ktory operator zatwierdzil przy
+	// usuwaniu. Host liczy go ponownie tuz przed operacja: roznica oznacza,
+	// ze usunieciu podleglby inny zestaw, niz obejrzano.
+	ExpectedRemovals []string `json:"expected_removals,omitempty"`
+	// Hold dotyczy wylacznie wstrzymywania: prawda zamraza, falsz zwalnia.
+	Hold bool `json:"hold,omitempty"`
+}
+
 // PackagePlanPayload opisuje planowanie aktualizacji.
 type PackagePlanPayload struct {
+	// Mode wybiera rodzaj planu: upgrade (domyslny), install albo remove.
+	Mode string `json:"mode,omitempty"`
 	// RefreshMetadata wymaga roota i blokady repozytorium, wiec jest jawnym
 	// wyborem, a nie efektem ubocznym kazdego planu.
 	RefreshMetadata bool     `json:"refresh_metadata"`
@@ -600,6 +668,7 @@ type Payload struct {
 	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
 	ProcessList     *ProcessListPayload     `json:"process_list,omitempty"`
 	ProcessSignal   *ProcessSignalPayload   `json:"process_signal,omitempty"`
+	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
 }
 
 // ProcessListPayload opisuje snapshot procesow.
@@ -740,7 +809,46 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.PackagePlan == nil {
 			return fmt.Errorf("operacja %s wymaga payloadu package_plan", action)
 		}
+		switch payload.PackagePlan.Mode {
+		case "", "upgrade":
+		case "install", "remove":
+			if len(payload.PackagePlan.OnlyPackages) == 0 {
+				return fmt.Errorf("plan %s wymaga listy pakietow", payload.PackagePlan.Mode)
+			}
+		default:
+			return fmt.Errorf("nieobslugiwany rodzaj planu %q", payload.PackagePlan.Mode)
+		}
 		return validatePackageNames(payload.PackagePlan.OnlyPackages)
+
+	case ActionPackageInstall, ActionPackageRemove, ActionPackageHoldSet:
+		if payload.PackageChange == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu package_change", action)
+		}
+		if len(payload.PackageChange.Packages) == 0 {
+			return fmt.Errorf("operacja %s wymaga listy pakietow", action)
+		}
+		if err := validatePackageNames(payload.PackageChange.Packages); err != nil {
+			return err
+		}
+		if err := validatePackageNames(payload.PackageChange.ExpectedRemovals); err != nil {
+			return err
+		}
+		// Usuniecie bez zatwierdzonego zbioru nie ma podstawy: operator
+		// zatwierdzilby zmiane, ktorej nie widzial.
+		if action == ActionPackageRemove && len(payload.PackageChange.ExpectedRemovals) == 0 {
+			return fmt.Errorf("usuniecie wymaga zatwierdzonego zbioru pakietow")
+		}
+		// Pakiet chroniony nie jest odrzucany dopiero na hoscie: operator ma
+		// wiedziec przy zlecaniu, ze ta operacja nie ma szans.
+		if action == ActionPackageRemove {
+			razem := append(append([]string{}, payload.PackageChange.Packages...),
+				payload.PackageChange.ExpectedRemovals...)
+			if chronione := chronionePakiety(razem); len(chronione) > 0 {
+				return fmt.Errorf("pakiety chronione nie moga zostac usuniete: %s",
+					strings.Join(chronione, ", "))
+			}
+		}
+		return nil
 
 	case ActionPackageRepair:
 		if payload.PackageRepair == nil {

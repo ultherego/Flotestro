@@ -107,11 +107,22 @@ message PackageActionRequest {
     OPERATION_REFRESH = 1;
     // Wykonanie transakcji aktualizacji.
     OPERATION_UPGRADE = 2;
+    // Dolozenie pakietow na host.
+    OPERATION_INSTALL = 3;
+    // Usuniecie pakietow wraz z zaleznymi.
+    OPERATION_REMOVE = 4;
+    // Wstrzymanie albo zwolnienie aktualizacji pakietow.
+    OPERATION_HOLD = 5;
   }
   Operation operation = 1;
   // Pusta lista przy OPERATION_UPGRADE oznacza wszystkie aktualizacje.
   repeated string packages = 2;
   bool security_only = 3;
+  // Zbior usuwanych zatwierdzony przez operatora. Host liczy go ponownie tuz
+  // przed operacja: roznica oznacza, ze usunieciu podleglby inny zestaw.
+  repeated string expected_removals = 4;
+  // Wartosc docelowa wstrzymania. Operacja opisuje stan, a nie przelacznik.
+  bool hold = 5;
 }
 
 message UnitActionRequest {

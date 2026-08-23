@@ -85,6 +85,12 @@ const (
 	PackageActionRequest_OPERATION_REFRESH PackageActionRequest_Operation = 1
 	// Wykonanie transakcji aktualizacji.
 	PackageActionRequest_OPERATION_UPGRADE PackageActionRequest_Operation = 2
+	// Dolozenie pakietow na host.
+	PackageActionRequest_OPERATION_INSTALL PackageActionRequest_Operation = 3
+	// Usuniecie pakietow wraz z zaleznymi.
+	PackageActionRequest_OPERATION_REMOVE PackageActionRequest_Operation = 4
+	// Wstrzymanie albo zwolnienie aktualizacji pakietow.
+	PackageActionRequest_OPERATION_HOLD PackageActionRequest_Operation = 5
 )
 
 // Enum value maps for PackageActionRequest_Operation.
@@ -93,11 +99,17 @@ var (
 		0: "OPERATION_UNSPECIFIED",
 		1: "OPERATION_REFRESH",
 		2: "OPERATION_UPGRADE",
+		3: "OPERATION_INSTALL",
+		4: "OPERATION_REMOVE",
+		5: "OPERATION_HOLD",
 	}
 	PackageActionRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED": 0,
 		"OPERATION_REFRESH":     1,
 		"OPERATION_UPGRADE":     2,
+		"OPERATION_INSTALL":     3,
+		"OPERATION_REMOVE":      4,
+		"OPERATION_HOLD":        5,
 	}
 )
 
@@ -1010,8 +1022,13 @@ type PackageActionRequest struct {
 	state     protoimpl.MessageState         `protogen:"open.v1"`
 	Operation PackageActionRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.PackageActionRequest_Operation" json:"operation,omitempty"`
 	// Pusta lista przy OPERATION_UPGRADE oznacza wszystkie aktualizacje.
-	Packages      []string `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
-	SecurityOnly  bool     `protobuf:"varint,3,opt,name=security_only,json=securityOnly,proto3" json:"security_only,omitempty"`
+	Packages     []string `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
+	SecurityOnly bool     `protobuf:"varint,3,opt,name=security_only,json=securityOnly,proto3" json:"security_only,omitempty"`
+	// Zbior usuwanych zatwierdzony przez operatora. Host liczy go ponownie tuz
+	// przed operacja: roznica oznacza, ze usunieciu podleglby inny zestaw.
+	ExpectedRemovals []string `protobuf:"bytes,4,rep,name=expected_removals,json=expectedRemovals,proto3" json:"expected_removals,omitempty"`
+	// Wartosc docelowa wstrzymania. Operacja opisuje stan, a nie przelacznik.
+	Hold          bool `protobuf:"varint,5,opt,name=hold,proto3" json:"hold,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1063,6 +1080,20 @@ func (x *PackageActionRequest) GetPackages() []string {
 func (x *PackageActionRequest) GetSecurityOnly() bool {
 	if x != nil {
 		return x.SecurityOnly
+	}
+	return false
+}
+
+func (x *PackageActionRequest) GetExpectedRemovals() []string {
+	if x != nil {
+		return x.ExpectedRemovals
+	}
+	return nil
+}
+
+func (x *PackageActionRequest) GetHold() bool {
+	if x != nil {
+		return x.Hold
 	}
 	return false
 }
@@ -3086,15 +3117,20 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\"L\n" +
 	"\rRebootRequest\x12#\n" +
 	"\rdelay_seconds\x18\x01 \x01(\rR\fdelaySeconds\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x80\x02\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x83\x03\n" +
 	"\x14PackageActionRequest\x12Q\n" +
 	"\toperation\x18\x01 \x01(\x0e23.flotestro.helper.v1.PackageActionRequest.OperationR\toperation\x12\x1a\n" +
 	"\bpackages\x18\x02 \x03(\tR\bpackages\x12#\n" +
-	"\rsecurity_only\x18\x03 \x01(\bR\fsecurityOnly\"T\n" +
+	"\rsecurity_only\x18\x03 \x01(\bR\fsecurityOnly\x12+\n" +
+	"\x11expected_removals\x18\x04 \x03(\tR\x10expectedRemovals\x12\x12\n" +
+	"\x04hold\x18\x05 \x01(\bR\x04hold\"\x95\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11OPERATION_REFRESH\x10\x01\x12\x15\n" +
-	"\x11OPERATION_UPGRADE\x10\x02\"\xcd\x02\n" +
+	"\x11OPERATION_UPGRADE\x10\x02\x12\x15\n" +
+	"\x11OPERATION_INSTALL\x10\x03\x12\x14\n" +
+	"\x10OPERATION_REMOVE\x10\x04\x12\x12\n" +
+	"\x0eOPERATION_HOLD\x10\x05\"\xcd\x02\n" +
 	"\x11UnitActionRequest\x12\x12\n" +
 	"\x04unit\x18\x01 \x01(\tR\x04unit\x12N\n" +
 	"\toperation\x18\x02 \x01(\x0e20.flotestro.helper.v1.UnitActionRequest.OperationR\toperation\"\xd3\x01\n" +

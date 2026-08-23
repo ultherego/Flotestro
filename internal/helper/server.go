@@ -219,6 +219,11 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 	}
 
 	switch action.GetOperation() {
+	case helperv1.PackageActionRequest_OPERATION_INSTALL,
+		helperv1.PackageActionRequest_OPERATION_REMOVE,
+		helperv1.PackageActionRequest_OPERATION_HOLD:
+		return s.cyklZyciaPakietow(operationCtx, manager, action, options)
+
 	case helperv1.PackageActionRequest_OPERATION_REFRESH:
 		if err := manager.Refresh(operationCtx); err != nil {
 			return packageFailure(manager.Name(), err)
@@ -555,4 +560,39 @@ func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail
 		})
 	}
 	return result
+}
+
+// cyklZyciaPakietow wykonuje instalacje, usuniecie albo wstrzymanie.
+//
+// Kazda z tych operacji istnieje tylko dla menedzerow, ktore ja obsluguja.
+// Jasna odmowa jest lepsza niz udawanie, ze operacja sie wykonala - a udawac
+// bylo by latwo, bo wynik "zero zmian" wyglada tak samo jak sukces.
+func (s *Server) cyklZyciaPakietow(ctx context.Context, manager packages.Manager,
+	action *helperv1.PackageActionRequest, options packages.Options) *helperv1.HelperResponse {
+	apt, ok := manager.(*packages.APT)
+	if !ok {
+		return reject(ErrorUnsupported,
+			"pelny cykl zycia pakietow jest obslugiwany wylacznie dla menedzera apt")
+	}
+
+	var apply packages.Apply
+	var err error
+	switch action.GetOperation() {
+	case helperv1.PackageActionRequest_OPERATION_INSTALL:
+		apply, err = apt.Install(ctx, options)
+	case helperv1.PackageActionRequest_OPERATION_REMOVE:
+		apply, err = apt.Remove(ctx, options, action.GetExpectedRemovals())
+	case helperv1.PackageActionRequest_OPERATION_HOLD:
+		apply, err = apt.SetHold(ctx, options.Packages, action.GetHold())
+	}
+	if err != nil {
+		response := packageFailure(manager.Name(), err)
+		response.PackageResult = packageResultToProto(apply)
+		response.PackageResult.Manager = manager.Name()
+		return response
+	}
+	return &helperv1.HelperResponse{
+		Accepted:      true,
+		PackageResult: packageResultToProto(apply),
+	}
 }

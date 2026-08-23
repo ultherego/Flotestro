@@ -654,6 +654,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		plan := detail.PackagePlan
 		encoded, err := json.Marshal(map[string]any{
 			"kind":                 "package_plan",
+			"mode":                 plan.GetMode(),
+			"removals":             plan.GetRemovals(),
+			"protected":            plan.GetProtected(),
 			"manager":              plan.GetManager(),
 			"changes":              packageChangesJSON(plan.GetChanges()),
 			"download_bytes":       plan.GetDownloadBytes(),
