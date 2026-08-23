@@ -30,6 +30,10 @@ message HelperRequest {
     LocalUserActionRequest local_user_action = 26;
     PackageRepairRequest package_repair = 27;
   }
+  // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
+  // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
+  // za wynik operacji.
+  bool want_progress = 28;
 }
 
 // LocalAccountsRequest odczytuje te dane o kontach, ktore wymagaja roota:
@@ -127,6 +131,25 @@ message HelperResponse {
   DomainEnrollResult enroll_result = 12;
   LocalAccountsResult accounts_result = 13;
   PackageRepairResponse repair_result = 14;
+  // Postep operacji w toku. Wiadomosc z postepem nie jest odpowiedzia
+  // koncowa: klient czyta dalej, az dostanie final = true.
+  TaskProgress progress = 15;
+  bool final = 16;
+}
+
+// TaskProgress opisuje postep operacji, ktora trwa na tyle dlugo, ze operator
+// musi widziec, na czym stoi. Postep jest ulotny: nie zastepuje wyniku i nie
+// jest zapisywany - liczy sie to, co widac teraz.
+message TaskProgress {
+  // Krok i liczba krokow, gdy narzedzie je podaje. Zero oznacza nieznane
+  // i nie moze byc pokazane jako zero krokow.
+  uint32 step = 1;
+  uint32 total = 2;
+  // Procent podawany osobno, bo apt zna procent bez krokow, a dnf kroki
+  // bez procentu. Brak pola oznacza postep nieustalony.
+  optional uint32 percent = 3;
+  // Co sie akurat dzieje, np. "Upgrading nfs-utils".
+  string message = 4;
 }
 
 message LocalAccountsResult {
@@ -183,6 +206,8 @@ message PackageActionResult {
   // Co adapter naprawil sam przed ponowieniem transakcji. Cicha naprawa
   // bylaby gorsza od jej braku: host zostal dotkniety inaczej, niz zlecono.
   repeated string self_repair = 7;
+  // Koncowka wyjscia narzedzia przy niepowodzeniu.
+  repeated string output = 8;
 }
 
 // PackageRepairRequest odblokowuje operacje pakietowe. Odpowiedzi na pytania

@@ -492,10 +492,26 @@ message CancelTask {
 }
 
 // TaskProgress niesie czesciowy output dlugotrwalego zadania.
+// TaskProgress niesie postep operacji, ktora trwa na tyle dlugo, ze operator
+// musi widziec, na czym stoi. Postep jest ulotny: nie zastepuje wyniku, nie
+// jest zapisywany i nie wolno wnioskowac z niego o rezultacie.
+//
+// Postep jest opisany polami, a nie surowym wyjsciem narzedzia. Strumien
+// bajtow z apta trafialby na ekran operatora bez zadnej kontroli tresci,
+// a i tak nie dalby sie pokazac jako pasek.
 message TaskProgress {
   string task_id = 1;
   bytes chunk = 2;
   bool stderr = 3;
+  // Krok i liczba krokow, gdy narzedzie je podaje. Zero oznacza nieznane
+  // i nie moze byc pokazane jako zero krokow.
+  uint32 step = 4;
+  uint32 total = 5;
+  // Procent podawany osobno, bo apt zna procent bez krokow, a dnf kroki bez
+  // procentu. Brak pola oznacza postep nieustalony.
+  optional uint32 percent = 6;
+  // Co sie akurat dzieje, np. "Upgrading nfs-utils".
+  string message = 7;
 }
 
 message TaskResult {
@@ -647,6 +663,10 @@ message PackageApplyResult {
   // w pamieci podrecznej. Pytanie konfiguracyjne pakietu jej nie ma
   // i zostaje dla operatora.
   repeated string self_repair = 7;
+  // Koncowka wyjscia narzedzia przy niepowodzeniu. Jedno zdanie mowi, ze cos
+  // padlo; kontekst mowi dlaczego, a logowanie sie na host po kazdej nieudanej
+  // transakcji jest tym, czego panel ma oszczedzic.
+  repeated string output = 8;
 }
 
 

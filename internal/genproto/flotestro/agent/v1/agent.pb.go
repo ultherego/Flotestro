@@ -3439,11 +3439,27 @@ func (x *CancelTask) GetReason() string {
 }
 
 // TaskProgress niesie czesciowy output dlugotrwalego zadania.
+// TaskProgress niesie postep operacji, ktora trwa na tyle dlugo, ze operator
+// musi widziec, na czym stoi. Postep jest ulotny: nie zastepuje wyniku, nie
+// jest zapisywany i nie wolno wnioskowac z niego o rezultacie.
+//
+// Postep jest opisany polami, a nie surowym wyjsciem narzedzia. Strumien
+// bajtow z apta trafialby na ekran operatora bez zadnej kontroli tresci,
+// a i tak nie dalby sie pokazac jako pasek.
 type TaskProgress struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Chunk         []byte                 `protobuf:"bytes,2,opt,name=chunk,proto3" json:"chunk,omitempty"`
-	Stderr        bool                   `protobuf:"varint,3,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Chunk  []byte                 `protobuf:"bytes,2,opt,name=chunk,proto3" json:"chunk,omitempty"`
+	Stderr bool                   `protobuf:"varint,3,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	// Krok i liczba krokow, gdy narzedzie je podaje. Zero oznacza nieznane
+	// i nie moze byc pokazane jako zero krokow.
+	Step  uint32 `protobuf:"varint,4,opt,name=step,proto3" json:"step,omitempty"`
+	Total uint32 `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	// Procent podawany osobno, bo apt zna procent bez krokow, a dnf kroki bez
+	// procentu. Brak pola oznacza postep nieustalony.
+	Percent *uint32 `protobuf:"varint,6,opt,name=percent,proto3,oneof" json:"percent,omitempty"`
+	// Co sie akurat dzieje, np. "Upgrading nfs-utils".
+	Message       string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3497,6 +3513,34 @@ func (x *TaskProgress) GetStderr() bool {
 		return x.Stderr
 	}
 	return false
+}
+
+func (x *TaskProgress) GetStep() uint32 {
+	if x != nil {
+		return x.Step
+	}
+	return 0
+}
+
+func (x *TaskProgress) GetTotal() uint32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *TaskProgress) GetPercent() uint32 {
+	if x != nil && x.Percent != nil {
+		return *x.Percent
+	}
+	return 0
+}
+
+func (x *TaskProgress) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 type TaskResult struct {
@@ -4330,7 +4374,11 @@ type PackageApplyResult struct {
 	// wylacznie to, co ma jedna poprawna odpowiedz - uszkodzony plik
 	// w pamieci podrecznej. Pytanie konfiguracyjne pakietu jej nie ma
 	// i zostaje dla operatora.
-	SelfRepair    []string `protobuf:"bytes,7,rep,name=self_repair,json=selfRepair,proto3" json:"self_repair,omitempty"`
+	SelfRepair []string `protobuf:"bytes,7,rep,name=self_repair,json=selfRepair,proto3" json:"self_repair,omitempty"`
+	// Koncowka wyjscia narzedzia przy niepowodzeniu. Jedno zdanie mowi, ze cos
+	// padlo; kontekst mowi dlaczego, a logowanie sie na host po kazdej nieudanej
+	// transakcji jest tym, czego panel ma oszczedzic.
+	Output        []string `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4410,6 +4458,13 @@ func (x *PackageApplyResult) GetPackagesNeedingAttention() []string {
 func (x *PackageApplyResult) GetSelfRepair() []string {
 	if x != nil {
 		return x.SelfRepair
+	}
+	return nil
+}
+
+func (x *PackageApplyResult) GetOutput() []string {
+	if x != nil {
+		return x.Output
 	}
 	return nil
 }
@@ -4890,11 +4945,17 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"CancelTask\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"U\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xc4\x01\n" +
 	"\fTaskProgress\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05chunk\x18\x02 \x01(\fR\x05chunk\x12\x16\n" +
-	"\x06stderr\x18\x03 \x01(\bR\x06stderr\"\xdb\t\n" +
+	"\x06stderr\x18\x03 \x01(\bR\x06stderr\x12\x12\n" +
+	"\x04step\x18\x04 \x01(\rR\x04step\x12\x14\n" +
+	"\x05total\x18\x05 \x01(\rR\x05total\x12\x1d\n" +
+	"\apercent\x18\x06 \x01(\rH\x00R\apercent\x88\x01\x01\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessageB\n" +
+	"\n" +
+	"\b_percent\"\xdb\t\n" +
 	"\n" +
 	"TaskResult\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12'\n" +
@@ -4974,7 +5035,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1f\n" +
 	"\banswered\x18\x03 \x01(\bH\x00R\banswered\x88\x01\x01B\v\n" +
-	"\t_answered\"\xe5\x02\n" +
+	"\t_answered\"\xfd\x02\n" +
 	"\x12PackageApplyResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12;\n" +
 	"\aapplied\x18\x02 \x03(\v2!.flotestro.agent.v1.PackageChangeR\aapplied\x12'\n" +
@@ -4983,7 +5044,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\x12<\n" +
 	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\x12\x1f\n" +
 	"\vself_repair\x18\a \x03(\tR\n" +
-	"selfRepair\"G\n" +
+	"selfRepair\x12\x16\n" +
+	"\x06output\x18\b \x03(\tR\x06output\"G\n" +
 	"\x10UnitStatusResult\x123\n" +
 	"\x05units\x18\x01 \x03(\v2\x1d.flotestro.agent.v1.UnitStateR\x05units\"\xdd\x01\n" +
 	"\x12DomainEnrollResult\x12:\n" +
@@ -5193,6 +5255,7 @@ func file_flotestro_agent_v1_agent_proto_init() {
 		(*TaskEnvelope_PackagesRepair)(nil),
 	}
 	file_flotestro_agent_v1_agent_proto_msgTypes[29].OneofWrappers = []any{}
+	file_flotestro_agent_v1_agent_proto_msgTypes[39].OneofWrappers = []any{}
 	file_flotestro_agent_v1_agent_proto_msgTypes[40].OneofWrappers = []any{
 		(*TaskResult_PackagePlan)(nil),
 		(*TaskResult_PackageApply)(nil),

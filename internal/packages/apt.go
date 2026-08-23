@@ -198,7 +198,12 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 			"install", "--only-upgrade"}, options.Packages...)
 	}
 
-	result := run(ctx, 45*time.Minute, aptGetPath, args...)
+	// Apt melduje postep wlasnym, maszynowym kanalem na deskryptorze 3.
+	if options.Progress != nil {
+		args = append([]string{"-o", "APT::Status-Fd=3"}, args...)
+	}
+	result := runWithProgress(ctx, 45*time.Minute, options.Progress, options.Progress != nil,
+		aptGetPath, args...)
 
 	// Uszkodzone archiwum w pamieci podrecznej naprawia sie samo, bo ma jedna
 	// poprawna odpowiedz. Pytanie konfiguracyjne pakietu jej nie ma i zostaje
@@ -208,7 +213,8 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		if czyszczenie.Ran && czyszczenie.ExitCode == 0 {
 			apply.SelfRepair = append(apply.SelfRepair,
 				"usunieto uszkodzone archiwa z pamieci podrecznej i ponowiono transakcje")
-			result = run(ctx, 45*time.Minute, aptGetPath, args...)
+			result = runWithProgress(ctx, 45*time.Minute, options.Progress,
+				options.Progress != nil, aptGetPath, args...)
 		}
 	}
 
@@ -223,6 +229,7 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		// Nazwa pakietu wchodzi do komunikatu, bo bez niej operator wie tylko
 		// tyle, ze transakcja padla, i musi zalogowac sie na host, zeby ustalic
 		// przyczyne.
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
 		if len(apply.PackagesNeedingAttention) > 0 {
 			return apply, fmt.Errorf("apt-get upgrade: %s; wymaga uwagi: %s",
 				result.Reason(), strings.Join(apply.PackagesNeedingAttention, ", "))

@@ -294,10 +294,12 @@ func run() error {
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
-	// Magistrala zdarzen budzi otwarte ekrany, gdy zmienia sie stan operacji.
-	// Bez niej panel dziala jak dotad - postep widac po odswiezeniu strony.
+	// Magistrala zdarzen budzi otwarte ekrany, gdy zmienia sie stan operacji
+	// i gdy trwajaca operacja melduje postep. Bez niej panel dziala jak
+	// dotad - postep widac po odswiezeniu strony.
 	eventBus := events.NewBus(pool)
 	go eventBus.Run(ctx, log)
+	agentService.SetEvents(eventBus)
 
 	panelServer := adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
 		tokenStore, authzStore, recorder, registry, identityProvider, directory,

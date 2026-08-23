@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/events"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
@@ -70,7 +72,13 @@ type AgentService struct {
 	// pojedynczego CA skopiowanego przy starcie.
 	trust *pki.Trust
 	// relays rozpoznaje relaye lokalizacji. Puste wylacza posredniczenie.
-	relays    *relays.Store
+	relays *relays.Store
+	// events rozglasza postep operacji do otwartych ekranow panelu.
+	events *events.Bus
+	// proby tlumaczy identyfikator proby na identyfikator operacji. Agent
+	// melduje postep dla proby, a operator patrzy na operacje.
+	probyMu   sync.RWMutex
+	proby     map[string]string
 	log       *slog.Logger
 	gatewayID string
 
@@ -87,8 +95,13 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		audit: recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
+		proby: map[string]string{},
 	}
 }
+
+// SetEvents podlacza magistrale zdarzen. Bez niej agent dziala tak samo,
+// tylko postep dlugiej operacji nie dociera na ekran operatora.
+func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
 
 // Connect obsluguje sesje agenta. Tozsamosc hosta pochodzi wylacznie z
 // certyfikatu klienta; tresc wiadomosci nigdy nie moze jej nadpisac.
@@ -306,11 +319,30 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		return s.recordTaskResult(ctx, hostID, payload.TaskResult)
 
 	case *agentv1.AgentMessage_TaskProgress:
-		// Czesciowy output jest na razie odnotowywany, a nie strumieniowany
-		// dalej; strumien do UI nalezy do modulu logow.
-		s.log.Debug("czesciowy wynik zadania",
-			"host_id", hostID, "task_id", payload.TaskProgress.GetTaskId(),
-			"bajtow", len(payload.TaskProgress.GetChunk()))
+		// Postep idzie prosto na ekran operatora i nie jest zapisywany:
+		// jest ulotny z zalozenia, a trwaly jest wynik. Blad rozgloszenia
+		// nie moze zerwac sesji agenta - stracony podglad jest mniejsza
+		// szkoda niz przerwana operacja.
+		if s.events != nil {
+			progress := payload.TaskProgress
+			// Agent zna identyfikator proby, a operator patrzy na operacje.
+			// Tlumaczenie jest zapamietywane, bo postep melduje sie kilka
+			// razy na sekunde, a przypisanie proby do operacji sie nie zmienia.
+			jobID := s.jobDlaProby(ctx, progress.GetTaskId())
+			if jobID == "" {
+				return nil
+			}
+			if err := s.events.PublishProgress(ctx, events.Event{
+				JobID: jobID,
+				Progress: &events.Progress{
+					Step: progress.GetStep(), Total: progress.GetTotal(),
+					Percent: progress.Percent, Message: progress.GetMessage(),
+				},
+			}); err != nil {
+				s.log.Debug("nie rozgloszono postepu",
+					"host_id", hostID, "task_id", progress.GetTaskId(), "err", err)
+			}
+		}
 		return nil
 
 	case *agentv1.AgentMessage_Hello:
@@ -323,6 +355,38 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	}
 }
 
+// jobDlaProby tlumaczy identyfikator proby na identyfikator operacji.
+// Nieznana proba zwraca pustke: postep bez operacji nie ma komu trafic.
+func (s *AgentService) jobDlaProby(ctx context.Context, attemptID string) string {
+	if attemptID == "" {
+		return ""
+	}
+	s.probyMu.RLock()
+	jobID, znane := s.proby[attemptID]
+	s.probyMu.RUnlock()
+	if znane {
+		return jobID
+	}
+
+	jobID, err := s.jobs.AttemptOwner(ctx, attemptID)
+	if err != nil {
+		return ""
+	}
+	s.probyMu.Lock()
+	// Mapa jest czyszczona przy wyniku proby, ale operacja moze skonczyc sie
+	// bez wyniku - zerwana sesja, wygasly lease. Twardy limit trzyma pamiec
+	// w ryzach niezaleznie od tego, co poszlo nie tak.
+	if len(s.proby) >= maksymalnieZapamietanychProb {
+		s.proby = map[string]string{}
+	}
+	s.proby[attemptID] = jobID
+	s.probyMu.Unlock()
+	return jobID
+}
+
+// maksymalnieZapamietanychProb ogranicza pamiec tlumaczen proba -> operacja.
+const maksymalnieZapamietanychProb = 4096
+
 // recordTaskResult zapisuje wynik zgloszony przez agenta i przenosi zadanie
 // do stanu koncowego. Wynik zawsze trafia do proby; o tym, czy zmienia stan
 // zadania, decyduje maszyna stanow.
@@ -333,6 +397,10 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	if err != nil {
 		return fmt.Errorf("wynik dla nieznanej proby %s: %w", attemptID, err)
 	}
+
+	s.probyMu.Lock()
+	delete(s.proby, attemptID)
+	s.probyMu.Unlock()
 
 	state, statusName := jobStateFor(result.GetStatus())
 	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{
@@ -526,6 +594,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"package_database_broken":    apply.GetPackageDatabaseBroken(),
 			"packages_needing_attention": apply.GetPackagesNeedingAttention(),
 			"self_repair":                apply.GetSelfRepair(),
+			"output":                     apply.GetOutput(),
 		})
 		if err != nil {
 			return nil

@@ -213,6 +213,16 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 	if opts.Executor != nil {
 		opts.Executor.facts = currentFacts
+		// Postep idzie tym samym strumieniem co wyniki. Bledu wysylki nie
+		// eskalujemy: utrata podgladu nie moze przerwac trwajacej operacji.
+		opts.Executor.progress = func(p *agentv1.TaskProgress) {
+			if err := send(&agentv1.AgentMessage{
+				Payload: &agentv1.AgentMessage_TaskProgress{TaskProgress: p},
+			}); err != nil {
+				opts.Log.Debug("nie wyslano postepu zadania",
+					"task_id", p.GetTaskId(), "err", err)
+			}
+		}
 	}
 
 	// Miejsca sa liczone osobno dla kazdej klasy zasobu: dlugi odczyt

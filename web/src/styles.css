@@ -241,3 +241,40 @@ pre {
 .zakladki a.niedostepna { opacity: 0.4; }
 /* Adres na liscie floty czyta sie kolumnowo, wiec idzie czcionka o stalej szerokosci. */
 .adres-listy { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+
+/* Pasek postepu trwajacej operacji. */
+.postep { display: flex; align-items: center; gap: 10px; min-width: 260px; }
+.postep-tor {
+  flex: 1 1 auto;
+  height: 6px;
+  background: var(--tlo-hover);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.postep-wypelnienie {
+  display: block;
+  height: 100%;
+  background: var(--akcent);
+  transition: width 0.3s ease;
+}
+/* Postep nieustalony nie moze wygladac jak zero ani jak komplet. */
+.postep-nieznany {
+  display: block;
+  height: 100%;
+  width: 30%;
+  background: var(--nieznane);
+  animation: postep-wedrowka 1.4s ease-in-out infinite;
+}
+@keyframes postep-wedrowka {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(333%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .postep-nieznany { animation: none; width: 100%; opacity: 0.4; }
+}
+.postep-opis {
+  color: var(--tekst-slaby);
+  font-size: 11px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

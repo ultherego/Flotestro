@@ -141,6 +141,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)
+	// Strumien zdarzen calej widocznej floty. Jedno polaczenie na karte
+	// wystarcza na wszystkie trwajace operacje.
+	mux.HandleFunc("GET /api/v1/events", s.handleFleetEvents)
 	// Strumien postepu jednej operacji. Wynik zostaje trwaly w bazie;
 	// strumien tylko mowi, kiedy warto go odczytac ponownie.
 	mux.HandleFunc("GET /api/v1/jobs/{id}/events", s.handleJobEvents)

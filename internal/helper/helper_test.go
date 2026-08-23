@@ -43,7 +43,7 @@ func TestHelperOdrzucaNieznanaWersjeProtokolu(t *testing.T) {
 	request := unitRequest("nginx.service", func(r *helperv1.HelperRequest) {
 		r.ProtocolVersion = ProtocolVersion + 1
 	})
-	response := testServer().handle(context.Background(), request)
+	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() {
 		t.Fatal("przyjeto zadanie w nieznanej wersji protokolu")
 	}
@@ -58,7 +58,7 @@ func TestHelperOdrzucaZadaniePoTerminie(t *testing.T) {
 	request := unitRequest("nginx.service", func(r *helperv1.HelperRequest) {
 		r.ExpiresAt = timestamppb.New(time.Now().Add(-time.Second))
 	})
-	response := testServer().handle(context.Background(), request)
+	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() {
 		t.Fatal("wykonano zadanie po terminie")
 	}
@@ -71,7 +71,7 @@ func TestHelperChroniKrytyczneJednostki(t *testing.T) {
 	// Walidacja jest powtorzona po stronie roota: helper nie ufa temu, ze
 	// agent sprawdzil polityke ochrony.
 	for _, unit := range []string{"flotestro-agent.service", "sshd.service", "NetworkManager.service"} {
-		response := testServer().handle(context.Background(), unitRequest(unit, nil))
+		response := testServer().handle(context.Background(), unitRequest(unit, nil), nil)
 		if response.GetAccepted() {
 			t.Errorf("dopuszczono operacje na jednostce chronionej %q", unit)
 			continue
@@ -84,7 +84,7 @@ func TestHelperChroniKrytyczneJednostki(t *testing.T) {
 
 func TestHelperOdrzucaNieprawidlowaNazweJednostki(t *testing.T) {
 	for _, unit := range []string{"nginx.service; reboot", "../../x.service", "nginx"} {
-		response := testServer().handle(context.Background(), unitRequest(unit, nil))
+		response := testServer().handle(context.Background(), unitRequest(unit, nil), nil)
 		if response.GetAccepted() {
 			t.Errorf("dopuszczono nazwe %q", unit)
 			continue
@@ -97,7 +97,7 @@ func TestHelperOdrzucaNieprawidlowaNazweJednostki(t *testing.T) {
 
 func TestHelperOdrzucaBrakAkcji(t *testing.T) {
 	request := &helperv1.HelperRequest{ProtocolVersion: ProtocolVersion, TaskId: "task-2"}
-	response := testServer().handle(context.Background(), request)
+	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() || response.GetErrorCode() != ErrorUnknownAction {
 		t.Fatalf("kod = %q, oczekiwano %q", response.GetErrorCode(), ErrorUnknownAction)
 	}
@@ -107,7 +107,7 @@ func TestHelperOdrzucaNieznanaOperacje(t *testing.T) {
 	request := unitRequest("nginx.service", func(r *helperv1.HelperRequest) {
 		r.GetUnitAction().Operation = helperv1.UnitActionRequest_OPERATION_UNSPECIFIED
 	})
-	response := testServer().handle(context.Background(), request)
+	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() || response.GetErrorCode() != ErrorUnknownAction {
 		t.Fatalf("kod = %q, oczekiwano %q", response.GetErrorCode(), ErrorUnknownAction)
 	}

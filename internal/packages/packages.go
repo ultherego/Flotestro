@@ -74,12 +74,36 @@ type Apply struct {
 	// naprawa bylaby gorsza od jej braku: operator musi wiedziec, ze host
 	// zostal dotkniety inaczej, niz zlecil.
 	SelfRepair []string `json:"self_repair,omitempty"`
+	// Output to koncowka wyjscia narzedzia przy niepowodzeniu. Jedno zdanie
+	// z opisem bledu wystarcza, zeby wiedziec, ze cos padlo; zeby wiedziec,
+	// dlaczego, trzeba czasem zobaczyc kontekst - a logowanie sie na host po
+	// kazdej nieudanej transakcji jest dokladnie tym, czego panel ma oszczedzic.
+	Output []string `json:"output,omitempty"`
 }
+
+// linieKoncowe zwraca ostatnie uzyteczne linie wyjscia narzedzia. Przyczyna
+// jest zwykle przy koncu, wiec to poczatek mozna poswiecic.
+func linieKoncowe(stderr, stdout string, ile int) []string {
+	linie := uzyteczneLinie(stderr)
+	if len(linie) == 0 {
+		linie = uzyteczneLinie(stdout)
+	}
+	if len(linie) > ile {
+		linie = linie[len(linie)-ile:]
+	}
+	return linie
+}
+
+// maksymalnieLiniiWyniku ogranicza kontekst bledu w wyniku operacji.
+const maksymalnieLiniiWyniku = 40
 
 // Options zawezaja zakres planu lub transakcji.
 type Options struct {
 	Packages     []string
 	SecurityOnly bool
+	// Progress odbiera postep dlugiej transakcji. Nil oznacza brak odbiorcy
+	// i wtedy narzedzie dziala jak dotad.
+	Progress ProgressFunc
 }
 
 // Manager jest adapterem konkretnego menedzera pakietow.
@@ -189,18 +213,7 @@ func runCommand(ctx context.Context, timeout time.Duration, input string,
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
-	cmd.Env = []string{
-		"LC_ALL=C",
-		"LANG=C",
-		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
-		// Tryb nieinteraktywny jest wymuszony: prompt w transakcji oznaczalby
-		// zawieszenie zadania, a nie sukces.
-		"DEBIAN_FRONTEND=noninteractive",
-		"HOME=" + runtimeDir,
-		"XDG_STATE_HOME=" + filepath.Join(runtimeDir, "state"),
-		"XDG_CACHE_HOME=" + filepath.Join(runtimeDir, "cache"),
-		"XDG_CONFIG_HOME=" + filepath.Join(runtimeDir, "config"),
-	}
+	cmd.Env = srodowisko()
 
 	runErr := cmd.Run()
 	result := commandResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: -1, Err: runErr}
@@ -216,6 +229,26 @@ func runCommand(ctx context.Context, timeout time.Duration, input string,
 		result.Ran = false
 	}
 	return result
+}
+
+// srodowisko jest jednakowe dla wszystkich wywolan narzedzi pakietowych.
+func srodowisko() []string {
+	return []string{
+		"LC_ALL=C",
+		"LANG=C",
+		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+		// Tryb nieinteraktywny jest wymuszony: prompt w transakcji oznaczalby
+		// zawieszenie zadania, a nie sukces.
+		"DEBIAN_FRONTEND=noninteractive",
+		// Dnf tnie wlasne komunikaty do szerokosci terminala, a bez terminala
+		// przyjmuje osiemdziesiat kolumn - przyczyna bledu ginela wtedy
+		// w polowie zdania ("scriptlet failed, exit stat").
+		"COLUMNS=200",
+		"HOME=" + runtimeDir,
+		"XDG_STATE_HOME=" + filepath.Join(runtimeDir, "state"),
+		"XDG_CACHE_HOME=" + filepath.Join(runtimeDir, "cache"),
+		"XDG_CONFIG_HOME=" + filepath.Join(runtimeDir, "config"),
+	}
 }
 
 // lockHeld sprawdza blokade pliku bez uruchamiania procesu. Zwraca falsz, gdy

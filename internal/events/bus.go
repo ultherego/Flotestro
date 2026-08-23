@@ -8,6 +8,7 @@ package events
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -15,14 +16,29 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Kanal powiadomien w bazie.
-const kanal = "flotestro_zadania"
+// Kanaly powiadomien w bazie. Postep jest osobny, bo jest ulotny: nie
+// zapisujemy go i nie wolno wnioskowac z niego o wyniku.
+const (
+	kanal       = "flotestro_zadania"
+	kanalPostep = "flotestro_postep"
+)
 
-// Event opisuje zmiane stanu jednej operacji.
+// Event opisuje zmiane stanu jednej operacji albo jej postep.
 type Event struct {
 	JobID      string `json:"job_id"`
-	State      string `json:"state"`
+	State      string `json:"state,omitempty"`
 	CampaignID string `json:"campaign_id,omitempty"`
+	// Progress jest wypelniony dla zdarzen postepu. Postep nie zmienia stanu
+	// operacji i nie zastepuje jej wyniku.
+	Progress *Progress `json:"progress,omitempty"`
+}
+
+// Progress opisuje postep operacji w toku.
+type Progress struct {
+	Step    uint32  `json:"step,omitempty"`
+	Total   uint32  `json:"total,omitempty"`
+	Percent *uint32 `json:"percent,omitempty"`
+	Message string  `json:"message,omitempty"`
 }
 
 // Bus rozglasza zdarzenia do subskrybentow w tym procesie.
@@ -73,13 +89,19 @@ func (b *Bus) nasluchuj(ctx context.Context) error {
 	}
 	defer conn.Release()
 
-	if _, err := conn.Exec(ctx, "listen "+kanal); err != nil {
-		return err
+	for _, nazwa := range []string{kanal, kanalPostep} {
+		if _, err := conn.Exec(ctx, "listen "+nazwa); err != nil {
+			return err
+		}
 	}
 	for {
 		notification, err := conn.Conn().WaitForNotification(ctx)
 		if err != nil {
 			return err
+		}
+		if notification.Channel == kanalPostep {
+			b.rozglos(parsujPostep(notification.Payload))
+			continue
 		}
 		b.rozglos(parsuj(notification.Payload))
 	}
@@ -99,6 +121,30 @@ func parsuj(payload string) Event {
 		event.CampaignID = strings.TrimSpace(czesci[2])
 	}
 	return event
+}
+
+// parsujPostep czyta powiadomienie o postepie zapisane jako JSON.
+func parsujPostep(payload string) Event {
+	var event Event
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return Event{}
+	}
+	return event
+}
+
+// PublishProgress rozglasza postep operacji. Postep nie jest zapisywany:
+// idzie przez powiadomienie i znika. Ekran, ktory sie wlasnie podlaczyl,
+// zobaczy dopiero nastepny - i to wystarczy, bo wynik i tak jest w bazie.
+func (b *Bus) PublishProgress(ctx context.Context, event Event) error {
+	if event.JobID == "" {
+		return nil
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = b.pool.Exec(ctx, "select pg_notify($1, $2)", kanalPostep, string(payload))
+	return err
 }
 
 func (b *Bus) rozglos(event Event) {

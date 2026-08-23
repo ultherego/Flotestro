@@ -40,6 +40,9 @@ type TaskExecutor struct {
 	journal *IdempotencyJournal
 	facts   func() Facts
 	log     *slog.Logger
+	// progress melduje postep dlugiej operacji do control plane. Nil oznacza
+	// brak sesji - postep bez odbiorcy nie jest zbierany.
+	progress func(*agentv1.TaskProgress)
 }
 
 func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,

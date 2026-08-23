@@ -131,7 +131,8 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	}
 	args = append(args, options.Packages...)
 
-	result := run(ctx, 45*time.Minute, dnfPath, args...)
+	// Dnf numeruje kroki w swoim wyjsciu; postep jest z nich odczytywany.
+	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
 
 	// Uszkodzony plik w pamieci podrecznej ma dokladnie jedna poprawna
 	// odpowiedz: pobrac go jeszcze raz. Czekanie z tym na czlowieka nie
@@ -141,7 +142,7 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		if czyszczenie.Ran && czyszczenie.ExitCode == 0 {
 			apply.SelfRepair = append(apply.SelfRepair,
 				"usunieto uszkodzone pakiety z pamieci podrecznej i ponowiono transakcje")
-			result = run(ctx, 45*time.Minute, dnfPath, args...)
+			result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
 		}
 	}
 
@@ -151,6 +152,7 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply.RebootRequired = d.rebootRequired(ctx)
 
 	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
 		return apply, fmt.Errorf("dnf upgrade: %s", result.Reason())
 	}
 	return apply, nil

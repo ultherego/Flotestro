@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Blad, Czas, Pusto, StanZadania } from "../../components/ui";
+import { Blad, Czas, PasekPostepu, Pusto, StanZadania } from "../../components/ui";
 import { useHost } from "./wspolne";
-import { ODSTEP_OPERACJI } from "../../lib/strumien";
+import { ODSTEP_OPERACJI, usePostep } from "../../lib/strumien";
 
 export function ZadaniaHosta() {
   const host = useHost();
+  const postepy = usePostep("/api/v1/events");
   const { data, error } = useQuery({
     queryKey: ["jobs", host.id],
     queryFn: () => api.get<Collection<Job>>(`/api/v1/jobs?host_id=${host.id}&limit=50`),
@@ -22,7 +23,17 @@ export function ZadaniaHosta() {
         {data.items.map((zadanie) => (
           <tr key={zadanie.id}>
             <td>{zadanie.action_type}</td>
-            <td><StanZadania stan={zadanie.state} /></td>
+            <td>
+              <StanZadania stan={zadanie.state} />
+              {postepy.has(zadanie.id) && (
+                <PasekPostepu
+                  procent={postepy.get(zadanie.id)?.percent}
+                  krok={postepy.get(zadanie.id)?.step}
+                  krokow={postepy.get(zadanie.id)?.total}
+                  opis={postepy.get(zadanie.id)?.message}
+                />
+              )}
+            </td>
             <td>{zadanie.created_by}</td>
             <td>{zadanie.approved_by || "—"}</td>
             <td>{zadanie.result_error_code || zadanie.result_status || "—"}</td>

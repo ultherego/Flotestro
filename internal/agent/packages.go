@@ -98,7 +98,22 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 		}
 	}
 
-	response, err := e.helper.Call(upgradeCtx, &helperv1.HelperRequest{
+	// Transakcja pakietowa trwa minutami. Operator ma widziec, na czym stoi,
+	// a nie czekac na wynik przy pustym ekranie.
+	var meldujPostep func(*helperv1.TaskProgress)
+	if e.progress != nil {
+		meldujPostep = func(p *helperv1.TaskProgress) {
+			e.progress(&agentv1.TaskProgress{
+				TaskId:  task.GetTaskId(),
+				Step:    p.GetStep(),
+				Total:   p.GetTotal(),
+				Percent: p.Percent,
+				Message: p.GetMessage(),
+			})
+		}
+	}
+
+	response, err := e.helper.CallWithProgress(upgradeCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
@@ -109,7 +124,7 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 				SecurityOnly: payload.SecurityOnly,
 			},
 		},
-	}, timeout)
+	}, timeout, meldujPostep)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
@@ -199,6 +214,7 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 		PackageDatabaseBroken:    result.GetPackageDatabaseBroken(),
 		PackagesNeedingAttention: result.GetPackagesNeedingAttention(),
 		SelfRepair:               result.GetSelfRepair(),
+		Output:                   result.GetOutput(),
 	}
 }
 

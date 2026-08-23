@@ -107,3 +107,34 @@ export function Para({ etykieta, children }: { etykieta: string; children: React
 }
 
 export { optional };
+
+/**
+ * Pasek postepu operacji w toku.
+ *
+ * Postep nieustalony nie jest rysowany jako zero - pasek przy zerze wyglada
+ * jak praca, ktora stoi. Bez procentu i bez krokow zostaje sam opis tego,
+ * co sie akurat dzieje.
+ */
+export function PasekPostepu({
+  procent, krok, krokow, opis,
+}: { procent?: number; krok?: number; krokow?: number; opis?: string }) {
+  const zProcentu = typeof procent === "number" ? procent : undefined;
+  const zKrokow = krok && krokow ? Math.round((krok / krokow) * 100) : undefined;
+  const wypelnienie = zProcentu ?? zKrokow;
+
+  return (
+    <div className="postep">
+      <div className="postep-tor">
+        {wypelnienie === undefined ? (
+          <span className="postep-nieznany" />
+        ) : (
+          <span className="postep-wypelnienie" style={{ width: `${Math.min(100, wypelnienie)}%` }} />
+        )}
+      </div>
+      <span className="postep-opis">
+        {krok && krokow ? `${krok}/${krokow}` : wypelnienie !== undefined ? `${wypelnienie}%` : "in progress"}
+        {opis ? ` · ${opis}` : ""}
+      </span>
+    </div>
+  );
+}

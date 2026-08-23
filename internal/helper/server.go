@@ -93,7 +93,27 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	response := s.handle(ctx, &request)
+	// Postep dlugiej operacji leci osobnymi wiadomosciami, zanim przyjdzie
+	// odpowiedz koncowa. Klient, ktory o niego nie prosil, dostaje jedna
+	// wiadomosc jak dotad - starszy agent nie moze wziac postepu za wynik.
+	var wysylkaMu sync.Mutex
+	var postep func(*helperv1.TaskProgress)
+	if request.GetWantProgress() {
+		postep = func(p *helperv1.TaskProgress) {
+			wysylkaMu.Lock()
+			defer wysylkaMu.Unlock()
+			if err := WriteMessage(conn, &helperv1.HelperResponse{Progress: p}); err != nil {
+				// Zerwana wysylka postepu nie moze przerwac operacji: sama
+				// transakcja jest wazniejsza od jej podgladu.
+				s.log.Debug("nie wyslano postepu", "task_id", request.GetTaskId(), "err", err)
+			}
+		}
+	}
+
+	response := s.handle(ctx, &request, postep)
+	response.Final = true
+	wysylkaMu.Lock()
+	defer wysylkaMu.Unlock()
 	if err := WriteMessage(conn, response); err != nil {
 		s.log.Error("nie odeslano odpowiedzi", "task_id", request.GetTaskId(), "err", err)
 	}
@@ -101,7 +121,11 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 
 // handle waliduje zadanie i wykonuje operacje. Kazde odrzucenie ma stabilny
 // kod maszynowy, zeby agent mogl je zaraportowac bez parsowania tekstu.
-func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *helperv1.HelperResponse {
+// handle obsluguje zadanie. Odbiorca postepu jest przekazywany wglab wywolan,
+// a nie trzymany w serwerze: polaczenia sa obslugiwane rownolegle i pole
+// wspoldzielone laczyloby postep jednej operacji z inna.
+func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
+	postep func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	if request.GetProtocolVersion() != ProtocolVersion {
 		return reject(ErrorUnsupportedVersion,
 			fmt.Sprintf("wersja %d, obslugiwana %d", request.GetProtocolVersion(), ProtocolVersion))
@@ -117,7 +141,7 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *h
 	case *helperv1.HelperRequest_UnitAction:
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
-		return s.applyPackageAction(ctx, request, action.PackageAction)
+		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
 	case *helperv1.HelperRequest_PackageRepair:
 		return s.repairPackages(ctx, request, action.PackageRepair)
 	case *helperv1.HelperRequest_Reboot:
@@ -139,7 +163,7 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest) *h
 // Jednoczesnie moze dzialac najwyzej jedna transakcja: rownolegle operacje na
 // tej samej bazie pakietow moga ja uszkodzic.
 func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.HelperRequest,
-	action *helperv1.PackageActionRequest) *helperv1.HelperResponse {
+	action *helperv1.PackageActionRequest, postep func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	manager, err := packages.Detect()
 	if err != nil {
 		return reject(packages.ErrorUnsupported, err.Error())
@@ -167,6 +191,13 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 	options := packages.Options{
 		Packages:     action.GetPackages(),
 		SecurityOnly: action.GetSecurityOnly(),
+	}
+	if postep != nil {
+		options.Progress = func(p packages.Progress) {
+			postep(&helperv1.TaskProgress{
+				Step: p.Step, Total: p.Total, Percent: p.Percent, Message: p.Message,
+			})
+		}
 	}
 
 	switch action.GetOperation() {
@@ -287,6 +318,7 @@ func packageResultToProto(apply packages.Apply) *helperv1.PackageActionResult {
 		PackageDatabaseBroken:    apply.DatabaseBroken,
 		PackagesNeedingAttention: apply.PackagesNeedingAttention,
 		SelfRepair:               apply.SelfRepair,
+		Output:                   apply.Output,
 	}
 }
 

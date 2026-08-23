@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Attempt, Job } from "../lib/types";
-import { Blad, Czas, Pusto, StanZadania } from "../components/ui";
-import { ODSTEP_OPERACJI, useStrumienPostepu } from "../lib/strumien";
+import { Blad, Czas, PasekPostepu, Pusto, StanZadania } from "../components/ui";
+import { ODSTEP_OPERACJI, usePostep } from "../lib/strumien";
 
 /** Lista zadan z zatwierdzaniem. Zatwierdzenie potwierdza hash planu. */
 export function Zadania() {
@@ -22,12 +22,9 @@ export function Zadania() {
     refetchInterval: ODSTEP_OPERACJI,
   });
 
-  // Rozwiniete zadanie ma strumien: probe i wynik pojawiaja sie natychmiast,
-  // a nie przy nastepnym odpytaniu.
-  useStrumienPostepu(rozwiniete ? `/api/v1/jobs/${rozwiniete}/events` : null, [
-    ["jobs"],
-    ["attempts", rozwiniete],
-  ]);
+  // Jeden strumien na karte niesie postep wszystkich trwajacych operacji
+  // i budzi liste, gdy ktoras zmieni stan.
+  const postepy = usePostep("/api/v1/events");
 
   const zatwierdz = useMutation({
     mutationFn: (zadanie: Job) =>
@@ -75,7 +72,19 @@ export function Zadania() {
                       {zadanie.action_type}
                     </a>
                   </td>
-                  <td><StanZadania stan={zadanie.state} /></td>
+                  <td>
+                    <StanZadania stan={zadanie.state} />
+                    {/* Pasek towarzyszy stanowi, a nie zastepuje go: operator
+                        ma widziec i to, ze operacja trwa, i jak daleko zaszla. */}
+                    {postepy.has(zadanie.id) && (
+                      <PasekPostepu
+                        procent={postepy.get(zadanie.id)?.percent}
+                        krok={postepy.get(zadanie.id)?.step}
+                        krokow={postepy.get(zadanie.id)?.total}
+                        opis={postepy.get(zadanie.id)?.message}
+                      />
+                    )}
+                  </td>
                   <td>{zadanie.created_by}</td>
                   <td>{zadanie.approved_by || "—"}</td>
                   <td>{zadanie.result_error_code || zadanie.result_status || "—"}</td>
