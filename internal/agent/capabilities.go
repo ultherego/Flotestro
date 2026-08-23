@@ -11,6 +11,9 @@ const (
 	// Compose jest osobnym adapterem: silnik kontenerow bywa bez niego,
 	// a projekt bez wtyczki compose nie da sie ani zaplanowac, ani wdrozyc.
 	CapCompose = "docker.compose"
+	// Zadania cykliczne. Cron i timery systemd sa dwoma mechanizmami tego
+	// samego, wiec jedna zdolnosc obejmuje oba.
+	CapSchedules = "schedules"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -114,6 +117,9 @@ func DetectCapabilities() Capabilities {
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
 	compose := docker && wtyczkaCompose() != ""
 	journald := exists("/run/systemd/journal/socket")
+	// Wpisy zarzadzane trafiaja do /etc/cron.d, wiec bez tego katalogu modul
+	// nie ma gdzie ich zalozyc - nawet gdy timery systemd dzialaja.
+	harmonogramy := isDir("/etc/cron.d")
 
 	return Capabilities{
 		{
@@ -143,6 +149,13 @@ func DetectCapabilities() Capabilities {
 			// Blokada bazy rpm wyglada inaczej niz pytanie debconfa i naprawa
 			// tez wygladalaby inaczej, wiec adapter jej nie ma.
 			Features: map[string]bool{"repair": false},
+		},
+		{
+			Name:      CapSchedules,
+			Version:   wersjaAdaptera,
+			Available: harmonogramy,
+			Features:  map[string]bool{"cron": harmonogramy, "timers": systemd},
+			Reason:    powod(harmonogramy, "this host has no /etc/cron.d directory"),
 		},
 		{
 			Name:      CapJournald,

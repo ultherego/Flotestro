@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
 // privilegedIdentity jest opcjonalnym zrodlem danych wymagajacych roota.
@@ -93,6 +94,17 @@ func Collect(ctx context.Context) (Facts, error) {
 		} else {
 			// Nieodczytany silnik nie moze wygladac jak host bez kontenerow.
 			facts.Containers = &docker.Summary{UnavailableReason: "helper: " + err.Error()}
+		}
+	}
+
+	// Harmonogramy zmieniaja sie rzadko, wiec ida w cyklu inwentarza, a nie
+	// na zadanie: pelna lista zadan cyklicznych hosta to kilkanascie wpisow,
+	// a nie setki jak przy pakietach czy procesach.
+	if caps.Available(CapSchedules) && scheduleProbe != nil {
+		if snapshot, err := scheduleProbe(ctx); err == nil {
+			facts.Schedules = &snapshot
+		} else {
+			facts.Schedules = &schedules.Snapshot{UnavailableReason: "helper: " + err.Error()}
 		}
 	}
 

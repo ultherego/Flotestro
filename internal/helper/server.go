@@ -145,6 +145,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_Schedule:
+		return s.applySchedule(ctx, request, action.Schedule)
+
 	case *helperv1.HelperRequest_ProcessSignal:
 		return s.signalProcess(ctx, request, action.ProcessSignal)
 

@@ -322,6 +322,30 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
+		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
+		operacja := agentv1.ScheduleAction_OPERATION_ENSURE
+		switch action {
+		case opspec.ActionScheduleDisable:
+			operacja = agentv1.ScheduleAction_OPERATION_DISABLE
+		case opspec.ActionScheduleRemove:
+			operacja = agentv1.ScheduleAction_OPERATION_REMOVE
+		case opspec.ActionScheduleRunNow:
+			operacja = agentv1.ScheduleAction_OPERATION_RUN_NOW
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Schedule{
+			Schedule: &agentv1.ScheduleAction{
+				Operation:  operacja,
+				Id:         payload.Schedule.ID,
+				Expression: payload.Schedule.Expression,
+				Command:    payload.Schedule.Command,
+				User:       payload.Schedule.User,
+				Comment:    payload.Schedule.Comment,
+				Enabled:    payload.Schedule.Enabled,
+				Adopt:      payload.Schedule.Adopt,
+			},
+		}
+
 	case opspec.ActionProcessList:
 		envelope.Action = &agentv1.TaskEnvelope_ListProcesses{
 			ListProcesses: &agentv1.ListProcesses{

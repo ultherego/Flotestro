@@ -35,12 +35,13 @@ type Capabilities []Capability
 // Nazwy adapterow oraz wymagania operacji. Wymaganie jest nazwa logiczna:
 // operacja aktualizacji nie ma wiedziec, czy host uzywa apta czy dnf-a.
 const (
-	CapSystemd  = "systemd"
-	CapAPT      = "packages.apt"
-	CapDNF      = "packages.dnf"
-	CapJournald = "journald"
-	CapDocker   = "docker"
-	CapCompose  = "docker.compose"
+	CapSystemd   = "systemd"
+	CapAPT       = "packages.apt"
+	CapDNF       = "packages.dnf"
+	CapJournald  = "journald"
+	CapDocker    = "docker"
+	CapCompose   = "docker.compose"
+	CapSchedules = "schedules"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"

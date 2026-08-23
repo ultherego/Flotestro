@@ -357,6 +357,7 @@ message TaskEnvelope {
     ListProcesses list_processes = 35;
     SignalProcess signal_process = 36;
     PackageLifecycle package_lifecycle = 37;
+    ScheduleAction schedule = 38;
   }
 }
 
@@ -587,6 +588,7 @@ message TaskResult {
   LogFileResult log_file_result = 29;
   ProcessListResult process_list_result = 30;
   ProcessSignalResult process_signal_result = 31;
+  ScheduleResult schedule_result = 32;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -766,6 +768,31 @@ message UnitToggle {
 // PackageLifecycle dokłada, usuwa albo wstrzymuje pakiety. Nazwa jest inna
 // niz PackageChange, bo tamta opisuje zmiane wersji w wyniku transakcji,
 // a ta - zlecona operacje.
+// ScheduleAction opisuje operacje na zadaniu cyklicznym.
+message ScheduleAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_ENSURE = 1;
+    OPERATION_DISABLE = 2;
+    OPERATION_REMOVE = 3;
+    OPERATION_RUN_NOW = 4;
+    OPERATION_READ = 5;
+  }
+  Operation operation = 1;
+  string id = 2;
+  string expression = 3;
+  repeated string command = 4;
+  string user = 5;
+  string comment = 6;
+  bool enabled = 7;
+  bool adopt = 8;
+}
+
+message ScheduleResult {
+  bytes snapshot = 1;
+  string message = 2;
+}
+
 message PackageLifecycle {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
 // ActionType jest typem operacji. Kazdy typ ma wersje kontraktu i wlasne
@@ -31,6 +33,13 @@ const (
 	// ciagly strumien metryk nalezy do Prometheusa, nie do panelu.
 	ActionProcessList   ActionType = "process.list"
 	ActionProcessSignal ActionType = "process.signal"
+
+	// Zadania cykliczne. Wpis zarzadzany opisuje stan docelowy, a nie
+	// polecenie do wykonania raz.
+	ActionScheduleEnsure  ActionType = "schedule.ensure"
+	ActionScheduleDisable ActionType = "schedule.disable"
+	ActionScheduleRemove  ActionType = "schedule.remove"
+	ActionScheduleRunNow  ActionType = "schedule.run_now"
 
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
@@ -250,6 +259,19 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Zalozenie wpisu cyklicznego oznacza, ze cos bedzie sie uruchamiac bez
+	// udzialu operatora - takze wtedy, gdy nikt nie patrzy.
+	ActionScheduleEnsure: {mutating: true, capability: "schedules", permission: "schedule.write",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
+	// Wylaczenie zostawia tresc na hoscie i jest odwracalne.
+	ActionScheduleDisable: {mutating: true, capability: "schedules", permission: "schedule.disable",
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
+	ActionScheduleRemove: {mutating: true, capability: "schedules", permission: "schedule.remove",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
+	// Uruchomienie teraz wykonuje to samo polecenie poza harmonogramem.
+	ActionScheduleRunNow: {mutating: true, capability: "schedules", permission: "schedule.run",
+		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits},
+
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
 	// Wyslanie sygnalu zatrzymuje czyjas prace: sygnal nie ma stanu przed
@@ -414,10 +436,40 @@ var wzorzecOkresu = regexp.MustCompile(
 		`|yesterday|today|now` +
 		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?)$`)
 
+// identyfikatorHarmonogramu powtarza wzorzec z modulu harmonogramow. Nazwa
+// staje sie nazwa pliku w /etc/cron.d, a cron pomija pliki z kropka i innymi
+// znakami specjalnymi - wpis o zlej nazwie po cichu nigdy by sie nie uruchomil.
+var identyfikatorHarmonogramu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+
+// znakiPowlokiHarmonogramu sa niedozwolone w argumentach polecenia. Cron
+// uruchamia polecenie przez powloke, wiec argument z metaznakiem przestaje
+// byc argumentem, a staje sie druga komenda.
+var znakiPowlokiHarmonogramu = `|&;<>()$` + "`" + `\"'` + "\n\r\t" + `*?[]{}~!#%`
+
+func sprawdzPolecenieHarmonogramu(argumenty []string) error {
+	if !strings.HasPrefix(argumenty[0], "/") {
+		return fmt.Errorf("polecenie musi byc sciezka bezwzgledna, jest %q", argumenty[0])
+	}
+	for _, argument := range argumenty {
+		if argument == "" {
+			return fmt.Errorf("pusty argument polecenia")
+		}
+		if strings.ContainsAny(argument, znakiPowlokiHarmonogramu) {
+			return fmt.Errorf("argument %q zawiera znak powloki", argument)
+		}
+	}
+	return nil
+}
+
 // chronionePakiety powtarza liste z modulu pakietow. Duplikat jest swiadomy:
-// pakiet opspec nie ma zaleznosci poza biblioteka standardowa, bo hash planu
-// musi byc liczony ta sama implementacja po obu stronach. Panel odmawia
-// wczesnie, a host - rozstrzygajaco.
+// opspec jest kontraktem operacji i nie siega po pakiety, ktore uruchamiaja
+// procesy albo czytaja stan hosta - a modul pakietow robi jedno i drugie.
+// Hash planu musi byc liczony ta sama implementacja po obu stronach, wiec
+// lista zyje tu w calosci. Panel odmawia wczesnie, a host - rozstrzygajaco.
+//
+// Z gramatyki crona korzystamy juz wprost z modulu harmonogramow: to czysty
+// parser bez efektow ubocznych, a powtorzenie go tutaj rozjechaloby sie
+// z tym, co host naprawde zrozumie.
 func chronionePakiety(pakiety []string) []string {
 	widziane := map[string]bool{}
 	nazwy := map[string]bool{
@@ -668,7 +720,31 @@ type Payload struct {
 	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
 	ProcessList     *ProcessListPayload     `json:"process_list,omitempty"`
 	ProcessSignal   *ProcessSignalPayload   `json:"process_signal,omitempty"`
+	Schedule        *SchedulePayload        `json:"schedule,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// SchedulePayload opisuje zadanie cykliczne.
+//
+// Wpis opisuje stan docelowy, a nie polecenie do wykonania raz: powtorzenie
+// operacji z tym samym payloadem niczego nie dubluje.
+type SchedulePayload struct {
+	// ID jest stabilnym identyfikatorem wpisu zarzadzanego. Wpis zastany
+	// na hoscie nie ma takiego identyfikatora i nie da sie go tu podac.
+	ID string `json:"id"`
+	// Expression to wyrazenie crona. Sprawdzane po obu stronach: wpis,
+	// ktorego host nie zrozumie, nigdy sie nie uruchomi.
+	Expression string `json:"expression,omitempty"`
+	// Command jest tablica argumentow, nigdy wierszem powloki.
+	Command []string `json:"command,omitempty"`
+	User    string   `json:"user,omitempty"`
+	Comment string   `json:"comment,omitempty"`
+	// Enabled dotyczy wylacznie schedule.disable: prawda wlacza, falsz
+	// wylacza. Wylaczenie nie kasuje tresci wpisu.
+	Enabled bool `json:"enabled,omitempty"`
+	// Adopt pozwala przejac wpis zastany na hoscie. Bez tego panel nie
+	// nadpisuje pracy, ktorej nikt do panelu nie wprowadzal.
+	Adopt bool `json:"adopt,omitempty"`
 }
 
 // ProcessListPayload opisuje snapshot procesow.
@@ -966,6 +1042,30 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu docker_prune", action)
 		}
 		return sprawdzListeSprzatania(payload.DockerPrune)
+
+	case ActionScheduleEnsure, ActionScheduleDisable, ActionScheduleRemove, ActionScheduleRunNow:
+		if payload.Schedule == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu schedule", action)
+		}
+		if !identyfikatorHarmonogramu.MatchString(payload.Schedule.ID) {
+			return fmt.Errorf("nieprawidlowy identyfikator harmonogramu %q", payload.Schedule.ID)
+		}
+		if action != ActionScheduleEnsure {
+			return nil
+		}
+		if strings.TrimSpace(payload.Schedule.Expression) == "" {
+			return fmt.Errorf("harmonogram wymaga wyrazenia")
+		}
+		// Wyrazenie sprawdzamy tu, a nie dopiero na hoscie: wpis, ktorego cron
+		// nie zrozumie, nigdy by sie nie uruchomil, a operator dowiadywalby
+		// sie o tym z bledu wykonania zamiast z odmowy przy zleceniu.
+		if _, err := schedules.ParsujWyrazenie(payload.Schedule.Expression); err != nil {
+			return fmt.Errorf("wyrazenie harmonogramu: %w", err)
+		}
+		if len(payload.Schedule.Command) == 0 {
+			return fmt.Errorf("harmonogram wymaga polecenia")
+		}
+		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
 
 	case ActionProcessList:
 		if payload.ProcessList == nil {

@@ -154,6 +154,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
+		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
+		return e.applySchedule(ctx, task, action, payload.Schedule)
 	case opspec.ActionProcessList:
 		return e.listProcesses(ctx, task, payload.ProcessList)
 	case opspec.ActionProcessSignal:
@@ -491,6 +494,27 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Schedule:
+		harmonogram := action.Schedule
+		typ := opspec.ActionScheduleEnsure
+		switch harmonogram.GetOperation() {
+		case agentv1.ScheduleAction_OPERATION_DISABLE:
+			typ = opspec.ActionScheduleDisable
+		case agentv1.ScheduleAction_OPERATION_REMOVE:
+			typ = opspec.ActionScheduleRemove
+		case agentv1.ScheduleAction_OPERATION_RUN_NOW:
+			typ = opspec.ActionScheduleRunNow
+		}
+		return typ, opspec.Payload{Schedule: &opspec.SchedulePayload{
+			ID:         harmonogram.GetId(),
+			Expression: harmonogram.GetExpression(),
+			Command:    harmonogram.GetCommand(),
+			User:       harmonogram.GetUser(),
+			Comment:    harmonogram.GetComment(),
+			Enabled:    harmonogram.GetEnabled(),
+			Adopt:      harmonogram.GetAdopt(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_ListProcesses:

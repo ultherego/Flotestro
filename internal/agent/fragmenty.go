@@ -17,6 +17,7 @@ const (
 	ModulAccounts   = "accounts"
 	ModulNetwork    = "network"
 	ModulContainers = "containers"
+	ModulSchedules  = "schedules"
 )
 
 // Fragment to stan jednego modulu hosta wraz z jego wlasna rewizja.
@@ -79,6 +80,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		}{f.Interfaces}},
 
 		{ModulContainers, "agent/docker-engine", powodKontenerow(f), podsumowanieKontenerow(f)},
+
+		{ModulSchedules, "agent/cron+systemd", powodHarmonogramow(f), harmonogramy(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -115,4 +118,20 @@ func podsumowanieKontenerow(f Facts) any {
 		return struct{}{}
 	}
 	return f.Containers
+}
+
+// powodHarmonogramow zwraca powod, dla ktorego zadan cyklicznych nie ustalono.
+func powodHarmonogramow(f Facts) string {
+	if f.Schedules == nil {
+		return "this host has no cron directory"
+	}
+	return f.Schedules.UnavailableReason
+}
+
+// harmonogramy zwraca zadania cykliczne albo pusty stan.
+func harmonogramy(f Facts) any {
+	if f.Schedules == nil {
+		return struct{}{}
+	}
+	return f.Schedules
 }

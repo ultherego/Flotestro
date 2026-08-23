@@ -55,6 +55,13 @@ const (
 	PermPackagesInstall Permission = "packages.install"
 	PermPackagesRemove  Permission = "packages.remove"
 	PermPackagesHold    Permission = "packages.hold.write"
+	// Zadania cykliczne uruchamiaja sie bez udzialu operatora, takze wtedy,
+	// gdy nikt nie patrzy - zalozenie wpisu jest osobna decyzja od jego
+	// wylaczenia czy usuniecia.
+	PermScheduleWrite   Permission = "schedule.write"
+	PermScheduleDisable Permission = "schedule.disable"
+	PermScheduleRemove  Permission = "schedule.remove"
+	PermScheduleRun     Permission = "schedule.run"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -183,6 +190,7 @@ var rolePermissions = map[Role][]Permission{
 		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,
 		PermJournalFollow, PermLogFileRead, PermProcessRead, PermProcessSignal,
 		PermPackagesInstall, PermPackagesRemove, PermPackagesHold,
+		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

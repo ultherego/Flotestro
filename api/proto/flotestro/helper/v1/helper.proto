@@ -41,6 +41,7 @@ message HelperRequest {
     ComposeRequest compose = 31;
     LogFileRequest log_file = 32;
     ProcessSignalRequest process_signal = 33;
+    ScheduleRequest schedule = 34;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -169,6 +170,7 @@ message HelperResponse {
   ComposeResult compose_result = 19;
   LogFileResult log_file_result = 20;
   ProcessSignalResult process_signal_result = 21;
+  ScheduleResult schedule_result = 22;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -224,6 +226,37 @@ message DockerActionResult {
 // jest dowolna: helper rozstrzyga ja wlasnym zakresem, nie tresci zadania.
 // ProcessSignalRequest wysyla sygnal do procesu. Czas startu wiaze zadanie
 // z konkretnym procesem, bo jadro uzywa numerow PID ponownie.
+// ScheduleRequest opisuje operacje na zadaniu cyklicznym. Wpis zarzadzany
+// opisuje stan docelowy, a nie polecenie do wykonania raz.
+message ScheduleRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_ENSURE = 1;
+    OPERATION_DISABLE = 2;
+    OPERATION_REMOVE = 3;
+    OPERATION_RUN_NOW = 4;
+    // Odczyt harmonogramow hosta.
+    OPERATION_READ = 5;
+  }
+  Operation operation = 1;
+  string id = 2;
+  string expression = 3;
+  repeated string command = 4;
+  string user = 5;
+  string comment = 6;
+  bool enabled = 7;
+  // Przejecie wpisu zastanego na hoscie. Bez tego panel nie nadpisuje pracy,
+  // ktorej nikt do panelu nie wprowadzal.
+  bool adopt = 8;
+}
+
+message ScheduleResult {
+  // Stan harmonogramow w postaci JSON. Struktura nalezy do modulu
+  // harmonogramow; kontrakt helpera jej nie powtarza.
+  bytes snapshot = 1;
+  string message = 2;
+}
+
 message ProcessSignalRequest {
   int32 pid = 1;
   uint64 expected_start_ticks = 2;

@@ -431,6 +431,20 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Harmonogramy trafiaja do modulu inwentarza: zakladka pyta o stan hosta,
+	// a kazda operacja i tak odsyla pelny obraz po zmianie.
+	if plan := result.GetScheduleResult(); plan != nil && len(plan.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "schedules",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(plan.GetSnapshot())),
+			Source:     "agent/cron+systemd",
+			Payload:    plan.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano harmonogramow", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Snapshot procesow trafia do modulu inwentarza, jak stan kontenerow
 	// i wykaz jednostek: zakladka pyta o stan hosta, a nie o historie zadan.
 	if lista := result.GetProcessListResult(); lista != nil && len(lista.GetSnapshot()) > 0 {
