@@ -19,6 +19,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/modules/docker"
 )
 
 // SchemaVersion opisuje wersje formatu raportu inventory zapisywanego w JSONB.
@@ -81,7 +83,10 @@ type Facts struct {
 	Identity         IdentityState  `json:"identity"`
 	LocalAccounts    []LocalAccount `json:"local_accounts,omitempty"`
 	Interfaces       []string       `json:"network_interfaces"`
-	CollectedAt      time.Time      `json:"collected_at"`
+	// Containers jest podsumowaniem silnika kontenerow. Puste oznacza host
+	// bez silnika albo silnik nieodpytany - rozroznia je unavailable_reason.
+	Containers  *docker.Summary `json:"containers,omitempty"`
+	CollectedAt time.Time       `json:"collected_at"`
 }
 
 // Revision liczy stabilna rewizje z tresci raportu. Identyczny stan hosta daje

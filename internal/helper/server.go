@@ -142,6 +142,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_DockerRead:
+		return s.readDocker(ctx, request, action.DockerRead)
+
 	case *helperv1.HelperRequest_PackageRepair:
 		return s.repairPackages(ctx, request, action.PackageRepair)
 	case *helperv1.HelperRequest_Reboot:

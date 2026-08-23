@@ -37,6 +37,10 @@ const (
 	PermPackagesRepair Permission = "packages.repair"
 	PermSystemReboot   Permission = "system.reboot"
 	PermUnitStatus     Permission = "unit.status"
+	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
+	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
+	// diagnozuje host, a zatrzymywanie ich juz nie.
+	PermDockerRead Permission = "docker.read"
 
 	PermCampaignRead    Permission = "campaign.read"
 	PermCampaignCreate  Permission = "campaign.create"
@@ -94,11 +98,11 @@ const (
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
-		PermIdentityRead, PermLocalUserRead,
+		PermIdentityRead, PermLocalUserRead, PermDockerRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
-		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
+		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead, PermDockerRead,
 		// Auditor patrzy na stan systemu, wiec metryki i przeglad CA naleza
 		// do jego pracy; wymiana CA juz nie.
 		PermMetricsRead, PermPKIRead,
@@ -107,6 +111,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead,
 		PermJobCreate, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
+		PermDockerRead,
 		// Operator planuje aktualizacje, ale ich nie wykonuje: transakcja
 		// pakietowa jest operacja najwyzszego ryzyka i wymaga osobnego prawa.
 		PermPackagesPlan,
@@ -136,6 +141,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
+		PermDockerRead,
 		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

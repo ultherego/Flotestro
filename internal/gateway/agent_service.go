@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
@@ -408,6 +409,22 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	s.probyMu.Lock()
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
+
+	// Pelny stan kontenerow jest zapisywany jako modul inwentarza, a nie tylko
+	// jako wynik operacji. Wynik jest zapisem tego, co sie stalo; zakladka
+	// pyta o stan hosta i ma go dostac bez przegladania historii zadan.
+	if docker := result.GetDockerResult(); docker != nil && len(docker.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:            "containers.full",
+			Revision:          fmt.Sprintf("%x", sha256.Sum256(docker.GetSnapshot())),
+			Source:            "agent/docker-engine",
+			Payload:           docker.GetSnapshot(),
+			UnavailableReason: docker.GetUnavailableReason(),
+			ObservedAt:        time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano stanu kontenerow", "host_id", hostID, "err", err)
+		}
+	}
 
 	state, statusName := jobStateFor(result.GetStatus())
 	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{

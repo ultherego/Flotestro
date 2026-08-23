@@ -41,6 +41,7 @@ const MODULY: Modul[] = [
   { segment: "overview", nazwa: "Overview", powod: () => "" },
   { segment: "packages", nazwa: "Packages", powod: wymaga("packages.apt", "packages.dnf") },
   { segment: "services", nazwa: "Services", powod: wymaga("systemd") },
+  { segment: "containers", nazwa: "Containers", powod: wymaga("docker") },
   {
     segment: "accounts",
     nazwa: "Accounts",

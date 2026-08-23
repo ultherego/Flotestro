@@ -7,6 +7,8 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"strings"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/modules/docker"
 )
 
 // privilegedIdentity jest opcjonalnym zrodlem danych wymagajacych roota.
@@ -78,6 +80,19 @@ func Collect(ctx context.Context) (Facts, error) {
 			if result, err := privilegedAccounts(ctx, names); err == nil {
 				facts.LocalAccounts = mergePrivilegedAccounts(facts.LocalAccounts, result)
 			}
+		}
+	}
+
+	// Silnik kontenerow jest odpytywany raz na cykl inwentarza i tylko
+	// o podsumowanie. Pelne listy pobiera operator, gdy otworzy zakladke -
+	// odpytywanie silnika przy kazdym cyklu obciazaloby host bez powodu.
+	if caps.Available(CapDocker) && dockerProbe != nil {
+		if snapshot, err := dockerProbe(ctx, false); err == nil {
+			podsumowanie := snapshot.Summary
+			facts.Containers = &podsumowanie
+		} else {
+			// Nieodczytany silnik nie moze wygladac jak host bez kontenerow.
+			facts.Containers = &docker.Summary{UnavailableReason: "helper: " + err.Error()}
 		}
 	}
 

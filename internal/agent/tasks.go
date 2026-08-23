@@ -131,6 +131,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.rebootHost(ctx, task, payload.Reboot)
 	case opspec.ActionUnitStatus:
 		return e.readUnitStatus(ctx, task, payload.UnitStatus)
+	case opspec.ActionDockerRead:
+		return e.readDocker(ctx, task)
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -395,6 +397,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 				CreateHome: request.GetCreateHome(),
 			},
 		}, nil
+
+	case *agentv1.TaskEnvelope_DockerRead:
+		return opspec.ActionDockerRead, opspec.Payload{DockerRead: &opspec.DockerReadPayload{}}, nil
 
 	case *agentv1.TaskEnvelope_ReadUnitStatus:
 		return opspec.ActionUnitStatus, opspec.Payload{

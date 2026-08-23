@@ -10,12 +10,13 @@ import (
 // Nazwy modulow inventory. Modul odpowiada zakladce hosta, wiec interfejs
 // pobiera dokladnie to, co pokazuje, a nie caly raport.
 const (
-	ModulSystem   = "system"
-	ModulPackages = "packages"
-	ModulServices = "services"
-	ModulIdentity = "identity"
-	ModulAccounts = "accounts"
-	ModulNetwork  = "network"
+	ModulSystem     = "system"
+	ModulPackages   = "packages"
+	ModulServices   = "services"
+	ModulIdentity   = "identity"
+	ModulAccounts   = "accounts"
+	ModulNetwork    = "network"
+	ModulContainers = "containers"
 )
 
 // Fragment to stan jednego modulu hosta wraz z jego wlasna rewizja.
@@ -76,6 +77,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulNetwork, "agent/net", "", struct {
 			Interfaces []string `json:"interfaces"`
 		}{f.Interfaces}},
+
+		{ModulContainers, "agent/docker-engine", powodKontenerow(f), podsumowanieKontenerow(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -95,4 +98,21 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		})
 	}
 	return fragmenty, nil
+}
+
+// powodKontenerow zwraca powod, dla ktorego stanu silnika nie ustalono.
+func powodKontenerow(f Facts) string {
+	if f.Containers == nil {
+		return "this host does not run a container engine"
+	}
+	return f.Containers.UnavailableReason
+}
+
+// podsumowanieKontenerow zwraca stan silnika albo pusty, gdy silnika nie ma.
+// Brak silnika i silnik nieodpytany rozroznia powod, a nie tresc.
+func podsumowanieKontenerow(f Facts) any {
+	if f.Containers == nil {
+		return struct{}{}
+	}
+	return f.Containers
 }

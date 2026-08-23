@@ -265,3 +265,78 @@ func TestNiezgloszonyModulJestBrakiemZasobu(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/firewall",
 		nil, nil, http.StatusNotFound)
 }
+
+// TestModulKontenerowJestZgloszonyTylkoZSilnikiem sprawdza, ze host bez
+// silnika kontenerow nie udaje hosta, na ktorym po prostu nic nie stoi.
+// Pusty modul i modul niedostepny to dwie rozne odpowiedzi.
+func TestModulKontenerowJestZgloszonyTylkoZSilnikiem(t *testing.T) {
+	h := newHarness(t)
+
+	for _, rodzina := range []string{"debian", "rhel"} {
+		t.Run(rodzina, func(t *testing.T) {
+			host := h.hostByFamily(rodzina)
+			maSilnik := maAdapter(host, "docker")
+
+			var fragment inventoryFragment
+			h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/containers",
+				nil, &fragment, http.StatusOK)
+
+			if fragment.Source != "agent/docker-engine" {
+				t.Errorf("zrodlo = %q", fragment.Source)
+			}
+			if maSilnik && fragment.UnavailableReason != "" {
+				t.Errorf("host z silnikiem podaje powod niedostepnosci: %q", fragment.UnavailableReason)
+			}
+			// Host bez silnika musi powiedziec dlaczego, zamiast milczec.
+			if !maSilnik && fragment.UnavailableReason == "" {
+				t.Error("host bez silnika nie wyjasnia braku kontenerow")
+			}
+		})
+	}
+}
+
+// TestOdczytKontenerowNaZadanie sprawdza sciezke, ktora operator uruchamia,
+// otwierajac zakladke: pelne listy sa pobierane operacja, a nie w kazdym
+// cyklu inwentarza.
+func TestOdczytKontenerowNaZadanie(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	if !maAdapter(host, "docker") {
+		t.Skip("host testowy nie ma silnika kontenerow")
+	}
+
+	job, _ := h.runOperation(host.ID, map[string]any{
+		"action":  "docker.read",
+		"payload": map[string]any{"docker_read": map[string]any{}},
+	}, 90*time.Second)
+	if job.State != "succeeded" {
+		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+	}
+	// Odczyt niczego nie zmienia, wiec nie moze wymagac zatwierdzenia.
+	if job.RequiresApprova {
+		t.Error("odczyt kontenerow wymaga zatwierdzenia, choc niczego nie zmienia")
+	}
+
+	// Wynik nalezy do stanu hosta, a nie do historii zadan: zakladka pyta
+	// o stan i ma go dostac bez przegladania operacji.
+	var pelny inventoryFragment
+	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/containers.full",
+		nil, &pelny, http.StatusOK)
+	if len(pelny.Payload) == 0 {
+		t.Error("pelny stan kontenerow jest pusty")
+	}
+}
+
+// TestHostBezSilnikaOdrzucaOdczytKontenerow pilnuje, ze operacja bez pokrycia
+// w adapterze zostaje odrzucona przy zlecaniu, a nie po dostarczeniu.
+func TestHostBezSilnikaOdrzucaOdczytKontenerow(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("rhel")
+	if maAdapter(host, "docker") {
+		t.Skip("host rhel ma silnik kontenerow")
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "docker.read",
+			"payload": map[string]any{"docker_read": map[string]any{}}},
+		nil, http.StatusConflict)
+}

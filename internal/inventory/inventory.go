@@ -306,6 +306,21 @@ func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fr
 	return nil
 }
 
+// SaveFragment zapisuje jeden modul poza cyklem inwentarza. Uzywaja tego
+// odczyty na zadanie: operator otwiera zakladke, host odsyla stan, a stan
+// nalezy do hosta - nie do historii zadan, w ktorej trzeba go szukac.
+func (s *Store) SaveFragment(ctx context.Context, hostID string, fragment Fragment) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := saveFragments(ctx, tx, hostID, []Fragment{fragment}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // Fragment zwraca stan jednego modulu hosta. Brak wiersza oznacza modul,
 // ktorego host jeszcze nie zglosil.
 func (s *Store) Fragment(ctx context.Context, hostID, module string) (*Fragment, error) {

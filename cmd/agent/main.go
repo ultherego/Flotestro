@@ -95,6 +95,7 @@ func main() {
 	// dostepu do keytab hosta ani bazy cache SSSD.
 	agent.SetPrivilegedIdentityProbe(executor.ProbePrivilegedIdentity)
 	agent.SetPrivilegedAccountProbe(executor.ProbeLocalAccounts)
+	agent.SetDockerProbe(executor.ProbeDocker)
 
 	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
 	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.

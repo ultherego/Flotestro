@@ -301,6 +301,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			PackagesRepair: &agentv1.PackagesRepair{Answers: odpowiedzi},
 		}
 
+	case opspec.ActionDockerRead:
+		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
+
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{
 			ReadUnitStatus: &agentv1.ReadUnitStatus{Units: payload.UnitStatus.Units},

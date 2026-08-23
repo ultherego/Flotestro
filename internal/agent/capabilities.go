@@ -150,12 +150,13 @@ func DetectCapabilities() Capabilities {
 			Name:      CapDocker,
 			Version:   wersjaAdaptera,
 			Available: docker,
-			// Sam demon nie wystarcza: agent widzi jego gniazdo, ale nie ma
-			// jeszcze adaptera kontenerow. Zakladka bez przyciskow i zakladka
-			// wylaczona to dwie rozne informacje dla operatora.
+			// Adapter czyta stan silnika, ale operacji na kontenerach jeszcze
+			// nie wykonuje. Zakladka bez przyciskow i zakladka wylaczona to
+			// dwie rozne informacje dla operatora.
 			ReadOnly: true,
+			Features: map[string]bool{"read": docker, "write": false},
 			Reason: powodGdy(docker,
-				"the agent detects the Docker daemon but has no adapter for containers yet",
+				"containers can be inspected; changing them is not implemented yet",
 				"this host has no Docker socket"),
 		},
 	}

@@ -29,6 +29,10 @@ message HelperRequest {
     LocalAccountsRequest local_accounts = 25;
     LocalUserActionRequest local_user_action = 26;
     PackageRepairRequest package_repair = 27;
+    // Odczyt stanu silnika kontenerow. Agent nie dostaje gniazda Dockera:
+    // czlonkostwo w grupie docker jest rownowazne rootowi, wiec proces
+    // dzialajacy bez uprawnien nie moze go miec.
+    DockerReadRequest docker_read = 29;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -135,6 +139,31 @@ message HelperResponse {
   // koncowa: klient czyta dalej, az dostanie final = true.
   TaskProgress progress = 15;
   bool final = 16;
+  DockerReadResult docker_result = 17;
+}
+
+// DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
+// a nie podany sciezka: przekazanie sciezki do Engine API oznaczaloby, ze
+// przez helpera da sie wywolac dowolna jego operacje.
+message DockerReadRequest {
+  enum Scope {
+    SCOPE_UNSPECIFIED = 0;
+    // Podsumowanie do inventory: lekkie, liczone przy cyklu inwentarza.
+    SCOPE_SUMMARY = 1;
+    // Pelny stan na zadanie operatora, gdy otworzy zakladke.
+    SCOPE_FULL = 2;
+  }
+  Scope scope = 1;
+}
+
+message DockerReadResult {
+  // Stan silnika w postaci JSON. Struktura nalezy do modulu kontenerow
+  // i nie jest powtarzana w kontrakcie helpera - helper jej nie interpretuje,
+  // tylko przenosi.
+  bytes snapshot = 1;
+  // Powod, dla ktorego stanu nie udalo sie ustalic. Pusty silnik i silnik
+  // nieodpytany to dwie rozne informacje.
+  string unavailable_reason = 2;
 }
 
 // TaskProgress opisuje postep operacji, ktora trwa na tyle dlugo, ze operator

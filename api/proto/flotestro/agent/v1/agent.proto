@@ -347,6 +347,7 @@ message TaskEnvelope {
     DomainEnroll domain_enroll = 26;
     LocalUserAction local_user_action = 27;
     PackagesRepair packages_repair = 28;
+    DockerRead docker_read = 29;
   }
 }
 
@@ -556,6 +557,7 @@ message TaskResult {
     LocalUserResult local_user = 24;
     PackageRepairResult package_repair = 25;
   }
+  DockerReadResult docker_result = 26;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -669,6 +671,18 @@ message PackageApplyResult {
   repeated string output = 8;
 }
 
+
+// DockerRead zleca odczyt stanu silnika kontenerow. Zakres wynika z operacji,
+// a nie z parametru: odczyt lekki i odczyt pelny maja rozna cene dla hosta,
+// wiec nie moga byc ta sama operacja.
+message DockerRead {}
+
+// DockerReadResult niesie stan silnika w postaci JSON. Struktura nalezy do
+// modulu kontenerow; kontrakt agenta jej nie powtarza.
+message DockerReadResult {
+  bytes snapshot = 1;
+  string unavailable_reason = 2;
+}
 
 message UnitStatusResult {
   repeated UnitState units = 1;

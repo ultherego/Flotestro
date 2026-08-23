@@ -38,6 +38,10 @@ const (
 	ActionLocalUserLock   ActionType = "localuser.lock"
 	ActionLocalUserUnlock ActionType = "localuser.unlock"
 	ActionLocalSSHKeysSet ActionType = "localuser.sshkeys.set"
+
+	// Odczyt stanu silnika kontenerow. Pelne listy sa pobierane na zadanie
+	// operatora; inventory niesie samo podsumowanie.
+	ActionDockerRead ActionType = "docker.read"
 )
 
 // ActionVersion jest wersja kontraktu payloadu. Zmiana znaczenia pol wymaga
@@ -257,6 +261,12 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
 	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+
+	// Odczyt kontenerow niczego nie zmienia, ale potrafi byc ciezki: pelna
+	// lista obrazow na hoscie budowlanym to megabajty, wiec ma wlasna klase
+	// zasobu i wlasny limit wyniku.
+	ActionDockerRead: {mutating: false, capability: "docker", permission: "docker.read",
+		timeoutSeconds: 120, risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 4 << 20},
 }
 
 // AllActions zwraca posortowana liste obslugiwanych operacji.
@@ -330,7 +340,14 @@ type Payload struct {
 	DomainEnroll   *DomainEnrollPayload   `json:"domain_enroll,omitempty"`
 	LocalUser      *LocalUserPayload      `json:"local_user,omitempty"`
 	PackageRepair  *PackageRepairPayload  `json:"package_repair,omitempty"`
+	DockerRead     *DockerReadPayload     `json:"docker_read,omitempty"`
 }
+
+// DockerReadPayload opisuje odczyt stanu silnika kontenerow. Payload jest
+// pusty z zalozenia: zakres odczytu wynika z operacji, a nie z parametru -
+// inaczej "odczytaj kontenery" i "odczytaj wszystko" bylyby ta sama operacja
+// z rozna cena dla hosta.
+type DockerReadPayload struct{}
 
 // PackageRepairPayload niesie odpowiedzi operatora na pytania konfiguracyjne
 // pakietow, ktore blokuja operacje pakietowe.
@@ -448,6 +465,12 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if !domainPattern.MatchString(payload.DomainEnroll.Domain) {
 			return fmt.Errorf("nieprawidlowa nazwa domeny %q", payload.DomainEnroll.Domain)
+		}
+		return nil
+
+	case ActionDockerRead:
+		if payload.DockerRead == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu docker_read", action)
 		}
 		return nil
 
