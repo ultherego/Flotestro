@@ -214,6 +214,7 @@ func (o *Orchestrator) submitJob(ctx context.Context, campaign Campaign, host *h
 		TTL:             time.Duration(campaign.JobTimeoutSeconds+600) * time.Second,
 		CreatedBy:       "campaign:" + campaign.Name,
 		RequestID:       campaign.RequestID,
+		CampaignID:      campaign.ID,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,
 			RequiredCapabilities: []string{action.RequiredCapability()},

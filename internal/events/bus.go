@@ -19,8 +19,9 @@ import (
 // Kanaly powiadomien w bazie. Postep jest osobny, bo jest ulotny: nie
 // zapisujemy go i nie wolno wnioskowac z niego o wyniku.
 const (
-	kanal       = "flotestro_zadania"
-	kanalPostep = "flotestro_postep"
+	kanal         = "flotestro_zadania"
+	kanalPostep   = "flotestro_postep"
+	kanalKampanie = "flotestro_kampanie"
 )
 
 // Event opisuje zmiane stanu jednej operacji albo jej postep.
@@ -89,7 +90,7 @@ func (b *Bus) nasluchuj(ctx context.Context) error {
 	}
 	defer conn.Release()
 
-	for _, nazwa := range []string{kanal, kanalPostep} {
+	for _, nazwa := range []string{kanal, kanalPostep, kanalKampanie} {
 		if _, err := conn.Exec(ctx, "listen "+nazwa); err != nil {
 			return err
 		}
@@ -99,11 +100,14 @@ func (b *Bus) nasluchuj(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if notification.Channel == kanalPostep {
+		switch notification.Channel {
+		case kanalPostep:
 			b.rozglos(parsujPostep(notification.Payload))
-			continue
+		case kanalKampanie:
+			b.rozglos(parsujCel(notification.Payload))
+		default:
+			b.rozglos(parsuj(notification.Payload))
 		}
-		b.rozglos(parsuj(notification.Payload))
 	}
 }
 
@@ -119,6 +123,21 @@ func parsuj(payload string) Event {
 	}
 	if len(czesci) > 2 {
 		event.CampaignID = strings.TrimSpace(czesci[2])
+	}
+	return event
+}
+
+// parsujCel czyta powiadomienie o zmianie stanu celu kampanii. Cel nie jest
+// operacja: przechodzi przez wlasne stany, ktorych zadne zadanie nie
+// odzwierciedla, wiec jego zdarzenie nie niesie identyfikatora operacji.
+func parsujCel(payload string) Event {
+	czesci := strings.SplitN(payload, " ", 2)
+	event := Event{}
+	if len(czesci) > 0 {
+		event.CampaignID = czesci[0]
+	}
+	if len(czesci) > 1 {
+		event.State = strings.TrimSpace(czesci[1])
 	}
 	return event
 }

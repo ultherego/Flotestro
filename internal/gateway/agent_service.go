@@ -78,7 +78,7 @@ type AgentService struct {
 	// proby tlumaczy identyfikator proby na identyfikator operacji. Agent
 	// melduje postep dla proby, a operator patrzy na operacje.
 	probyMu   sync.RWMutex
-	proby     map[string]string
+	proby     map[string]kontekstZadania
 	log       *slog.Logger
 	gatewayID string
 
@@ -95,7 +95,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		audit: recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
-		proby: map[string]string{},
+		proby: map[string]kontekstZadania{},
 	}
 }
 
@@ -328,12 +328,13 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			// Agent zna identyfikator proby, a operator patrzy na operacje.
 			// Tlumaczenie jest zapamietywane, bo postep melduje sie kilka
 			// razy na sekunde, a przypisanie proby do operacji sie nie zmienia.
-			jobID := s.jobDlaProby(ctx, progress.GetTaskId())
+			jobID, campaignID := s.kontekstProby(ctx, progress.GetTaskId())
 			if jobID == "" {
 				return nil
 			}
 			if err := s.events.PublishProgress(ctx, events.Event{
-				JobID: jobID,
+				JobID:      jobID,
+				CampaignID: campaignID,
 				Progress: &events.Progress{
 					Step: progress.GetStep(), Total: progress.GetTotal(),
 					Percent: progress.Percent, Message: progress.GetMessage(),
@@ -355,33 +356,39 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	}
 }
 
-// jobDlaProby tlumaczy identyfikator proby na identyfikator operacji.
+// kontekstProby tlumaczy identyfikator proby na operacje i jej kampanie.
 // Nieznana proba zwraca pustke: postep bez operacji nie ma komu trafic.
-func (s *AgentService) jobDlaProby(ctx context.Context, attemptID string) string {
+func (s *AgentService) kontekstProby(ctx context.Context, attemptID string) (string, string) {
 	if attemptID == "" {
-		return ""
+		return "", ""
 	}
 	s.probyMu.RLock()
-	jobID, znane := s.proby[attemptID]
+	kontekst, znane := s.proby[attemptID]
 	s.probyMu.RUnlock()
 	if znane {
-		return jobID
+		return kontekst.jobID, kontekst.campaignID
 	}
 
-	jobID, err := s.jobs.AttemptOwner(ctx, attemptID)
+	jobID, campaignID, err := s.jobs.AttemptContext(ctx, attemptID)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	s.probyMu.Lock()
 	// Mapa jest czyszczona przy wyniku proby, ale operacja moze skonczyc sie
 	// bez wyniku - zerwana sesja, wygasly lease. Twardy limit trzyma pamiec
 	// w ryzach niezaleznie od tego, co poszlo nie tak.
 	if len(s.proby) >= maksymalnieZapamietanychProb {
-		s.proby = map[string]string{}
+		s.proby = map[string]kontekstZadania{}
 	}
-	s.proby[attemptID] = jobID
+	s.proby[attemptID] = kontekstZadania{jobID: jobID, campaignID: campaignID}
 	s.probyMu.Unlock()
-	return jobID
+	return jobID, campaignID
+}
+
+// kontekstZadania wiaze probe z operacja i kampania, w ktorej powstala.
+type kontekstZadania struct {
+	jobID      string
+	campaignID string
 }
 
 // maksymalnieZapamietanychProb ogranicza pamiec tlumaczen proba -> operacja.

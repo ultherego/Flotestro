@@ -150,6 +150,11 @@ export type CampaignTarget = {
   state: string;
   error_code?: string;
   message?: string;
+  // Kampania zaklada hostowi kolejno kilka operacji, wiec postep trzeba
+  // wiazac z operacja, a nie z samym hostem.
+  job_id?: string;
+  reboot_job_id?: string;
+  health_job_id?: string;
 };
 
 export type CampaignReport = {

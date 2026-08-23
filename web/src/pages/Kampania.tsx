@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign as CampaignType, CampaignReport, CampaignTarget } from "../lib/types";
-import { Blad, Czas, Para, Pary, Pusto, StanZadania } from "../components/ui";
-import { useStrumienPostepu } from "../lib/strumien";
+import { Blad, Czas, Para, Pary, PasekPostepu, Pusto, StanZadania } from "../components/ui";
+import { ODSTEP_OPERACJI, usePostep, useStrumienPostepu } from "../lib/strumien";
 
 export function Kampania() {
   const { id = "" } = useParams();
@@ -12,14 +12,17 @@ export function Kampania() {
   const kampania = useQuery({
     queryKey: ["campaign", id],
     queryFn: () => api.get<CampaignType>(`/api/v1/campaigns/${id}`),
+    refetchInterval: ODSTEP_OPERACJI,
   });
   const cele = useQuery({
     queryKey: ["campaign-targets", id],
     queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${id}/targets`),
+    refetchInterval: ODSTEP_OPERACJI,
   });
   const raport = useQuery({
     queryKey: ["campaign-report", id],
     queryFn: () => api.get<CampaignReport>(`/api/v1/campaigns/${id}/report`),
+    refetchInterval: ODSTEP_OPERACJI,
   });
 
   // Kampania jest tym ekranem, na ktorym postep ma znaczenie decyzyjne:
@@ -29,6 +32,8 @@ export function Kampania() {
     ["campaign-targets", id],
     ["campaign-report", id],
   ]);
+  // Postep trwajacych operacji kampanii, po hostach.
+  const postepy = usePostep(id ? `/api/v1/campaigns/${id}/events` : null);
 
   const steruj = useMutation({
     mutationFn: (operacja: string) =>
@@ -85,8 +90,8 @@ export function Kampania() {
               {raport.data.waves.map((fala) => (
                 <tr key={fala.wave}>
                   <td>{fala.wave}</td>
-                  <td>{fala.is_canary ? "tak" : "nie"}</td>
-                  <td>{fala.completed ? "tak" : "nie"}</td>
+                  <td>{fala.is_canary ? "yes" : "no"}</td>
+                  <td>{fala.completed ? "yes" : "no"}</td>
                   <td>{Object.entries(fala.totals).map(([stan, ile]) => `${stan}: ${ile}`).join(", ")}</td>
                 </tr>
               ))}
@@ -95,18 +100,32 @@ export function Kampania() {
         </>
       )}
 
-      <h2>Cele</h2>
+      <h2>Targets</h2>
       {!cele.data?.items.length ? (
         <Pusto>No targets.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Host</th><th>Wave</th><th>State</th><th>Error code</th><th>Message</th></tr></thead>
+          <thead><tr><th>Host</th><th>Wave</th><th>State</th><th>Progress</th><th>Error code</th><th>Message</th></tr></thead>
           <tbody>
             {cele.data.items.map((cel) => (
               <tr key={cel.host_id}>
                 <td>{cel.hostname || cel.host_id.slice(0, 8)}</td>
                 <td>{cel.wave}{cel.wave === 0 && " (canary)"}</td>
                 <td><StanZadania stan={cel.state} /></td>
+                {/* Postep dotyczy operacji, ktora akurat trwa na tym hoscie.
+                    Host czekajacy na swoja fale nie ma czego pokazywac. */}
+                <td>
+                  {postepDlaCelu(postepy, cel) ? (
+                    <PasekPostepu
+                      procent={postepDlaCelu(postepy, cel)?.percent}
+                      krok={postepDlaCelu(postepy, cel)?.step}
+                      krokow={postepDlaCelu(postepy, cel)?.total}
+                      opis={postepDlaCelu(postepy, cel)?.message}
+                    />
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>{cel.error_code || "—"}</td>
                 <td>{cel.message || "—"}</td>
               </tr>
@@ -116,4 +135,19 @@ export function Kampania() {
       )}
     </>
   );
+}
+
+/**
+ * Postep celu kampanii szukamy po operacji, ktora do niego nalezy. Kampania
+ * zaklada hostowi kolejno kilka operacji - aktualizacje, restart, health check
+ * - wiec sam identyfikator hosta nie wystarczy.
+ */
+function postepDlaCelu(
+  postepy: Map<string, { step?: number; total?: number; percent?: number; message?: string }>,
+  cel: CampaignTarget,
+) {
+  for (const jobID of [cel.job_id, cel.reboot_job_id, cel.health_job_id]) {
+    if (jobID && postepy.has(jobID)) return postepy.get(jobID);
+  }
+  return undefined;
 }

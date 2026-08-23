@@ -34,7 +34,12 @@ type Spec struct {
 	TTL             time.Duration
 	CreatedBy       string
 	RequestID       string
-	Preconditions   Preconditions
+	// CampaignID wiaze operacje z rolloutem, ktory ja zlecil. Bez tego
+	// korelacja sladu audytowego urywa sie na operacji, a ekran kampanii nie
+	// wie, ktore operacje sa jego - postep trwajacej aktualizacji nie mial jak
+	// do niego trafic.
+	CampaignID    string
+	Preconditions Preconditions
 }
 
 // Preconditions sa sprawdzane przez agenta tuz przed wykonaniem.
@@ -152,15 +157,17 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	const query = `
 		insert into jobs (id, host_id, action_type, action_version, payload, payload_hash,
 		                  idempotency_key, state, requires_approval, preconditions,
-		                  timeout_seconds, max_output_bytes, expires_at, created_by, request_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		                  timeout_seconds, max_output_bytes, expires_at, created_by, request_id,
+		                  campaign_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+		        nullif($16, '')::uuid)
 		on conflict (host_id, idempotency_key) do nothing
 		returning id`
 	jobID := uuid.NewString()
 	err = tx.QueryRow(ctx, query, jobID, spec.HostID, string(spec.Action), opspec.ActionVersion,
 		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApprova,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
-		spec.CreatedBy, nullable(spec.RequestID)).Scan(&jobID)
+		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Ten sam klucz idempotencji zwraca istniejace zadanie zamiast tworzyc
 		// drugie. Powtorzone zlecenie nie jest bledem.
@@ -631,9 +638,24 @@ func nullableJSON(value json.RawMessage) any {
 // AttemptOwner zwraca zadanie, do ktorego nalezy proba. Agent odsyla wynik
 // z identyfikatorem proby, wiec gateway musi odnalezc job.
 func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID string, err error) {
-	err = s.pool.QueryRow(ctx, `select job_id from job_attempts where id = $1`, attemptID).Scan(&jobID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
+	jobID, _, err = s.AttemptContext(ctx, attemptID)
 	return jobID, err
+}
+
+// AttemptContext zwraca operacje proby wraz z jej kampania. Postep zlecony
+// w kampanii musi trafic takze na ekran kampanii, a agent zna wylacznie
+// identyfikator proby.
+func (s *Store) AttemptContext(ctx context.Context, attemptID string) (jobID, campaignID string, err error) {
+	var kampania *string
+	err = s.pool.QueryRow(ctx, `
+		select a.job_id, j.campaign_id::text
+		  from job_attempts a join jobs j on j.id = a.job_id
+		 where a.id = $1`, attemptID).Scan(&jobID, &kampania)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if kampania != nil {
+		campaignID = *kampania
+	}
+	return jobID, campaignID, err
 }
