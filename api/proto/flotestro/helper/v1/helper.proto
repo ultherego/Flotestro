@@ -180,6 +180,9 @@ message PackageActionResult {
   bool package_database_broken = 5;
   // Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
   repeated string packages_needing_attention = 6;
+  // Co adapter naprawil sam przed ponowieniem transakcji. Cicha naprawa
+  // bylaby gorsza od jej braku: host zostal dotkniety inaczej, niz zlecono.
+  repeated string self_repair = 7;
 }
 
 // PackageRepairRequest odblokowuje operacje pakietowe. Odpowiedzi na pytania

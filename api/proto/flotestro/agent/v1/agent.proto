@@ -642,6 +642,11 @@ message PackageApplyResult {
   // kolejna transakcja probuje go najpierw dokonfigurowac i pada, nawet gdy
   // nie ma nic do aktualizacji.
   repeated string packages_needing_attention = 6;
+  // Co adapter naprawil sam przed ponowieniem transakcji. Sam naprawia
+  // wylacznie to, co ma jedna poprawna odpowiedz - uszkodzony plik
+  // w pamieci podrecznej. Pytanie konfiguracyjne pakietu jej nie ma
+  // i zostaje dla operatora.
+  repeated string self_repair = 7;
 }
 
 

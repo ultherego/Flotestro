@@ -4326,8 +4326,13 @@ type PackageApplyResult struct {
 	// kolejna transakcja probuje go najpierw dokonfigurowac i pada, nawet gdy
 	// nie ma nic do aktualizacji.
 	PackagesNeedingAttention []string `protobuf:"bytes,6,rep,name=packages_needing_attention,json=packagesNeedingAttention,proto3" json:"packages_needing_attention,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// Co adapter naprawil sam przed ponowieniem transakcji. Sam naprawia
+	// wylacznie to, co ma jedna poprawna odpowiedz - uszkodzony plik
+	// w pamieci podrecznej. Pytanie konfiguracyjne pakietu jej nie ma
+	// i zostaje dla operatora.
+	SelfRepair    []string `protobuf:"bytes,7,rep,name=self_repair,json=selfRepair,proto3" json:"self_repair,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PackageApplyResult) Reset() {
@@ -4398,6 +4403,13 @@ func (x *PackageApplyResult) GetPackageDatabaseBroken() bool {
 func (x *PackageApplyResult) GetPackagesNeedingAttention() []string {
 	if x != nil {
 		return x.PackagesNeedingAttention
+	}
+	return nil
+}
+
+func (x *PackageApplyResult) GetSelfRepair() []string {
+	if x != nil {
+		return x.SelfRepair
 	}
 	return nil
 }
@@ -4962,14 +4974,16 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1f\n" +
 	"\banswered\x18\x03 \x01(\bH\x00R\banswered\x88\x01\x01B\v\n" +
-	"\t_answered\"\xc4\x02\n" +
+	"\t_answered\"\xe5\x02\n" +
 	"\x12PackageApplyResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12;\n" +
 	"\aapplied\x18\x02 \x03(\v2!.flotestro.agent.v1.PackageChangeR\aapplied\x12'\n" +
 	"\x0freboot_required\x18\x03 \x01(\bR\x0erebootRequired\x128\n" +
 	"\x18services_needing_restart\x18\x04 \x03(\tR\x16servicesNeedingRestart\x126\n" +
 	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\x12<\n" +
-	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\"G\n" +
+	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\x12\x1f\n" +
+	"\vself_repair\x18\a \x03(\tR\n" +
+	"selfRepair\"G\n" +
 	"\x10UnitStatusResult\x123\n" +
 	"\x05units\x18\x01 \x03(\v2\x1d.flotestro.agent.v1.UnitStateR\x05units\"\xdd\x01\n" +
 	"\x12DomainEnrollResult\x12:\n" +

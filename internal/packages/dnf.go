@@ -133,6 +133,18 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 	result := run(ctx, 45*time.Minute, dnfPath, args...)
 
+	// Uszkodzony plik w pamieci podrecznej ma dokladnie jedna poprawna
+	// odpowiedz: pobrac go jeszcze raz. Czekanie z tym na czlowieka nie
+	// dodaje bezpieczenstwa, a kosztuje przerwana kampanie.
+	if (!result.Ran || result.ExitCode != 0) && UszkodzonePobranie(result.Stderr, result.Stdout) {
+		czyszczenie := run(ctx, 5*time.Minute, dnfPath, "--assumeyes", "--quiet", "clean", "packages")
+		if czyszczenie.Ran && czyszczenie.ExitCode == 0 {
+			apply.SelfRepair = append(apply.SelfRepair,
+				"usunieto uszkodzone pakiety z pamieci podrecznej i ponowiono transakcje")
+			result = run(ctx, 45*time.Minute, dnfPath, args...)
+		}
+	}
+
 	after := d.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
 	apply.DatabaseBroken = d.DatabaseBroken(ctx)

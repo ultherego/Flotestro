@@ -200,6 +200,18 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 	result := run(ctx, 45*time.Minute, aptGetPath, args...)
 
+	// Uszkodzone archiwum w pamieci podrecznej naprawia sie samo, bo ma jedna
+	// poprawna odpowiedz. Pytanie konfiguracyjne pakietu jej nie ma i zostaje
+	// dla operatora - to granica miedzy naprawa a decydowaniem za czlowieka.
+	if (!result.Ran || result.ExitCode != 0) && UszkodzonePobranie(result.Stderr, result.Stdout) {
+		czyszczenie := run(ctx, 5*time.Minute, aptGetPath, "--quiet", "clean")
+		if czyszczenie.Ran && czyszczenie.ExitCode == 0 {
+			apply.SelfRepair = append(apply.SelfRepair,
+				"usunieto uszkodzone archiwa z pamieci podrecznej i ponowiono transakcje")
+			result = run(ctx, 45*time.Minute, aptGetPath, args...)
+		}
+	}
+
 	after := a.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
 	apply.PackagesNeedingAttention = a.PackagesNeedingAttention(ctx)

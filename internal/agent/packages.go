@@ -198,6 +198,7 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 		ServicesNeedingRestart:   result.GetServicesNeedingRestart(),
 		PackageDatabaseBroken:    result.GetPackageDatabaseBroken(),
 		PackagesNeedingAttention: result.GetPackagesNeedingAttention(),
+		SelfRepair:               result.GetSelfRepair(),
 	}
 }
 

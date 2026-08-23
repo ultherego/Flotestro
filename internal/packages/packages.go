@@ -70,6 +70,10 @@ type Apply struct {
 	// PackagesNeedingAttention wskazuje pakiety, ktore blokuja transakcje.
 	// Bez nich komunikat o naprawie bazy nie mowi, co naprawic.
 	PackagesNeedingAttention []string `json:"packages_needing_attention,omitempty"`
+	// SelfRepair opisuje, co adapter naprawil sam przed ponowieniem. Cicha
+	// naprawa bylaby gorsza od jej braku: operator musi wiedziec, ze host
+	// zostal dotkniety inaczej, niz zlecil.
+	SelfRepair []string `json:"self_repair,omitempty"`
 }
 
 // Options zawezaja zakres planu lub transakcji.
@@ -120,8 +124,8 @@ func (r commandResult) Reason() string {
 	if r.Err != nil && !r.Ran {
 		return r.Err.Error()
 	}
-	if stderr := strings.TrimSpace(r.Stderr); stderr != "" {
-		return fmt.Sprintf("kod %d: %s", r.ExitCode, firstLine(stderr))
+	if opis := opisBledu(r.Stderr, r.Stdout); opis != "" {
+		return fmt.Sprintf("kod %d: %s", r.ExitCode, opis)
 	}
 	return fmt.Sprintf("kod %d", r.ExitCode)
 }

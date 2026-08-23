@@ -525,6 +525,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"services_needing_restart":   apply.GetServicesNeedingRestart(),
 			"package_database_broken":    apply.GetPackageDatabaseBroken(),
 			"packages_needing_attention": apply.GetPackagesNeedingAttention(),
+			"self_repair":                apply.GetSelfRepair(),
 		})
 		if err != nil {
 			return nil

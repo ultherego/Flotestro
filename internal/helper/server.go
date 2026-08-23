@@ -286,6 +286,7 @@ func packageResultToProto(apply packages.Apply) *helperv1.PackageActionResult {
 		ServicesNeedingRestart:   apply.ServicesNeedingRestart,
 		PackageDatabaseBroken:    apply.DatabaseBroken,
 		PackagesNeedingAttention: apply.PackagesNeedingAttention,
+		SelfRepair:               apply.SelfRepair,
 	}
 }
 

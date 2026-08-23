@@ -1407,8 +1407,11 @@ type PackageActionResult struct {
 	PackageDatabaseBroken bool `protobuf:"varint,5,opt,name=package_database_broken,json=packageDatabaseBroken,proto3" json:"package_database_broken,omitempty"`
 	// Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
 	PackagesNeedingAttention []string `protobuf:"bytes,6,rep,name=packages_needing_attention,json=packagesNeedingAttention,proto3" json:"packages_needing_attention,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// Co adapter naprawil sam przed ponowieniem transakcji. Cicha naprawa
+	// bylaby gorsza od jej braku: host zostal dotkniety inaczej, niz zlecono.
+	SelfRepair    []string `protobuf:"bytes,7,rep,name=self_repair,json=selfRepair,proto3" json:"self_repair,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PackageActionResult) Reset() {
@@ -1479,6 +1482,13 @@ func (x *PackageActionResult) GetPackageDatabaseBroken() bool {
 func (x *PackageActionResult) GetPackagesNeedingAttention() []string {
 	if x != nil {
 		return x.PackagesNeedingAttention
+	}
+	return nil
+}
+
+func (x *PackageActionResult) GetSelfRepair() []string {
+	if x != nil {
+		return x.SelfRepair
 	}
 	return nil
 }
@@ -2068,14 +2078,16 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x12unavailable_reason\x18\x06 \x01(\tR\x11unavailableReasonB\x0e\n" +
 	"\f_keytab_kvnoB\x14\n" +
 	"\x12_cache_age_secondsB\x0e\n" +
-	"\f_sssd_online\"\xcd\x02\n" +
+	"\f_sssd_online\"\xee\x02\n" +
 	"\x13PackageActionResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12C\n" +
 	"\aapplied\x18\x02 \x03(\v2).flotestro.helper.v1.PackageVersionChangeR\aapplied\x12'\n" +
 	"\x0freboot_required\x18\x03 \x01(\bR\x0erebootRequired\x128\n" +
 	"\x18services_needing_restart\x18\x04 \x03(\tR\x16servicesNeedingRestart\x126\n" +
 	"\x17package_database_broken\x18\x05 \x01(\bR\x15packageDatabaseBroken\x12<\n" +
-	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\"W\n" +
+	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\x12\x1f\n" +
+	"\vself_repair\x18\a \x03(\tR\n" +
+	"selfRepair\"W\n" +
 	"\x14PackageRepairRequest\x12?\n" +
 	"\aanswers\x18\x01 \x03(\v2%.flotestro.helper.v1.DebconfSelectionR\aanswers\"r\n" +
 	"\x10DebconfSelection\x12\x18\n" +
