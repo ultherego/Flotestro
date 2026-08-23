@@ -97,7 +97,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectUnknownAction, err.Error())
 	}
-	if capability := action.RequiredCapability(); !hasCapability(facts.Capabilities, capability) {
+	if capability := action.RequiredCapability(); !facts.Capabilities.Spelnia(capability) {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectCapability,
 			fmt.Sprintf("host nie ma zdolnosci %s", capability))
 	}
@@ -292,7 +292,7 @@ func checkPreconditions(preconditions *agentv1.Preconditions, facts Facts) error
 		return fmt.Errorf("oczekiwano systemu %s, host ma %s", want, facts.OS.Family)
 	}
 	for _, capability := range preconditions.GetRequiredCapabilities() {
-		if !hasCapability(facts.Capabilities, capability) {
+		if !facts.Capabilities.Spelnia(capability) {
 			return fmt.Errorf("host nie ma zdolnosci %s", capability)
 		}
 	}
@@ -301,27 +301,6 @@ func checkPreconditions(preconditions *agentv1.Preconditions, facts Facts) error
 		return fmt.Errorf("host zostal zrestartowany od czasu planowania")
 	}
 	return nil
-}
-
-func hasCapability(caps Capabilities, name string) bool {
-	switch name {
-	case "":
-		return true
-	case "systemd":
-		return caps.Systemd
-	case "apt":
-		return caps.APT
-	case "dnf":
-		return caps.DNF
-	case "docker":
-		return caps.Docker
-	case "journald":
-		return caps.Journald
-	case "packages":
-		return caps.APT || caps.DNF
-	default:
-		return false
-	}
 }
 
 // decodeAction tlumaczy koperte na typ operacji i payload w postaci kanonicznej.

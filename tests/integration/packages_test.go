@@ -254,3 +254,73 @@ func TestNieprawidlowaNazwaPakietuJestOdrzucana(t *testing.T) {
 			nil, http.StatusBadRequest)
 	}
 }
+
+// TestNaprawaWymagaAdapteraZTaCecha sprawdza, ze host bez naprawy dowiaduje
+// sie o tym przy zlecaniu, a nie po dostarczeniu zadania. Naprawa odpowiada
+// na pytania debconfa i istnieje wylacznie dla apta; wczesniej operacja byla
+// przyjmowana na kazdym hoscie i odrzucana dopiero przez helpera na Fedorze.
+func TestNaprawaWymagaAdapteraZTaCecha(t *testing.T) {
+	h := newHarness(t)
+
+	rhel := h.hostByFamily("rhel")
+	h.do(http.MethodPost, "/api/v1/hosts/"+rhel.ID+"/operations",
+		map[string]any{"action": "packages.repair",
+			"payload": map[string]any{"package_repair": map[string]any{}}},
+		nil, http.StatusConflict)
+
+	// Ta sama operacja na hoscie z aptem przechodzi: odmowa dotyczy braku
+	// cechy adaptera, a nie samej operacji.
+	debian := h.hostByFamily("debian")
+	h.do(http.MethodPost, "/api/v1/hosts/"+debian.ID+"/operations",
+		map[string]any{"action": "packages.repair",
+			"payload": map[string]any{"package_repair": map[string]any{}}},
+		nil, http.StatusCreated)
+}
+
+// TestHostZglaszaRejestrAdapterow sprawdza, ze host mowi nie tylko, co ma,
+// ale i dlaczego czegos nie ma. Powod jest faktem o hoscie i to host ma go
+// podac - interfejs ma go powtorzyc, a nie zgadywac we wlasnym kodzie.
+func TestHostZglaszaRejestrAdapterow(t *testing.T) {
+	h := newHarness(t)
+
+	for _, przypadek := range []struct {
+		rodzina   string
+		obecny    string
+		nieobecny string
+	}{
+		{"debian", "packages.apt", "packages.dnf"},
+		{"rhel", "packages.dnf", "packages.apt"},
+	} {
+		t.Run(przypadek.rodzina, func(t *testing.T) {
+			host := h.hostByFamily(przypadek.rodzina)
+			if len(host.Capabilities) == 0 {
+				t.Fatal("host nie zglosil zadnego adaptera")
+			}
+			znajdz := func(nazwa string) *hostCapability {
+				for i := range host.Capabilities {
+					if host.Capabilities[i].Name == nazwa {
+						return &host.Capabilities[i]
+					}
+				}
+				return nil
+			}
+
+			obecny := znajdz(przypadek.obecny)
+			if obecny == nil || !obecny.Available {
+				t.Fatalf("adapter %s nie jest zgloszony jako dostepny", przypadek.obecny)
+			}
+			if obecny.Version == 0 {
+				t.Errorf("adapter %s nie podaje wersji kontraktu", przypadek.obecny)
+			}
+
+			nieobecny := znajdz(przypadek.nieobecny)
+			if nieobecny == nil || nieobecny.Available {
+				t.Fatalf("adapter %s nie jest zgloszony jako niedostepny", przypadek.nieobecny)
+			}
+			// Milczaca niedostepnosc zmusza interfejs do zgadywania przyczyny.
+			if nieobecny.Reason == "" {
+				t.Errorf("adapter %s nie podaje powodu niedostepnosci", przypadek.nieobecny)
+			}
+		})
+	}
+}

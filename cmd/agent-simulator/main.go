@@ -200,7 +200,11 @@ func syntheticFacts(hostname, machineID string) agent.Facts {
 		Packages: agent.Packages{
 			Manager: "apt", Installed: &installed, Upgradable: &upgradable,
 		},
-		Capabilities:     agent.Capabilities{Systemd: true, APT: true, Journald: true},
+		Capabilities: agent.Capabilities{
+			{Name: agent.CapSystemd, Version: 1, Available: true},
+			{Name: agent.CapAPT, Version: 1, Available: true, Features: map[string]bool{"repair": true}},
+			{Name: agent.CapJournald, Version: 1, Available: true},
+		},
 		FailedUnitsKnown: true,
 		Interfaces:       []string{"eth0"},
 		CollectedAt:      time.Now().UTC(),

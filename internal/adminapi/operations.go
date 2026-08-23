@@ -399,25 +399,11 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})
 }
 
+// hostHasCapability rozstrzyga wymaganie operacji wobec rejestru adapterow
+// hosta. Rozstrzygniecie nalezy do rejestru, a nie do tego pliku: operacja
+// podaje wymaganie logiczne, host mowi, jakie ma adaptery.
 func hostHasCapability(host *hosts.Host, capability string) bool {
-	switch capability {
-	case "":
-		return true
-	case "systemd":
-		return host.Capabilities.Systemd
-	case "apt":
-		return host.Capabilities.APT
-	case "dnf":
-		return host.Capabilities.DNF
-	case "docker":
-		return host.Capabilities.Docker
-	case "journald":
-		return host.Capabilities.Journald
-	case "packages":
-		return host.Capabilities.APT || host.Capabilities.DNF
-	default:
-		return false
-	}
+	return host.Capabilities.Spelnia(capability)
 }
 
 func joinActions() string {

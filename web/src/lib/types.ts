@@ -1,12 +1,20 @@
 // Typy odpowiadaja kontraktowi REST control plane.
 
-export type Capabilities = {
-  systemd: boolean;
-  apt: boolean;
-  dnf: boolean;
-  docker: boolean;
-  journald: boolean;
+/**
+ * Adapter wykryty na hoscie. Nazwa mowi, co host ma ("packages.apt"), a nie
+ * czego chce operacja ("packages"). Powod pochodzi z hosta: interfejs ma go
+ * powtorzyc, a nie zgadywac przyczyne we wlasnym kodzie.
+ */
+export type Capability = {
+  name: string;
+  version: number;
+  available: boolean;
+  read_only: boolean;
+  reason?: string;
+  features?: Record<string, boolean>;
 };
+
+export type Capabilities = Capability[];
 
 export type HostIdentity = {
   enrolled: boolean;

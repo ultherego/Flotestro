@@ -1,4 +1,4 @@
-import { Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Para, Pary } from "../../components/ui";
+import { Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Para, Pary, Pusto } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { useHost, useInventory } from "./wspolne";
 
@@ -42,6 +42,9 @@ export function Przeglad() {
         </>
       )}
 
+      <h2>Adapters</h2>
+      <Adaptery host={host} />
+
       {inventory.data && (
         <p className="zrodlo" style={{ marginTop: 16 }}>
           Source: inventory, revision {inventory.data.revision.slice(0, 12)}, observed{" "}
@@ -49,5 +52,45 @@ export function Przeglad() {
         </p>
       )}
     </>
+  );
+}
+
+/**
+ * Rejestr adapterow hosta. Operator widzi nie tylko, czego nie ma, ale i
+ * dlaczego - powod pochodzi z hosta, a nie z kodu przegladarki.
+ */
+function Adaptery({ host }: { host: ReturnType<typeof useHost> }) {
+  const adaptery = host.capabilities ?? [];
+  if (adaptery.length === 0) {
+    return <Pusto>This host has not reported its adapters yet.</Pusto>;
+  }
+  return (
+    <table>
+      <thead><tr><th>Adapter</th><th>State</th><th>Features</th><th>Reason</th></tr></thead>
+      <tbody>
+        {adaptery.map((adapter) => (
+          <tr key={adapter.name}>
+            <td>{adapter.name}</td>
+            <td>
+              {!adapter.available ? (
+                <span className="znacznik">unavailable</span>
+              ) : adapter.read_only ? (
+                <span className="znacznik uwaga">read only</span>
+              ) : (
+                <span className="znacznik ok">available</span>
+              )}
+            </td>
+            <td>
+              {Object.entries(adapter.features ?? {}).length === 0
+                ? "—"
+                : Object.entries(adapter.features ?? {})
+                    .map(([nazwa, jest]) => `${nazwa}: ${jest ? "yes" : "no"}`)
+                    .join(", ")}
+            </td>
+            <td className="zrodlo">{adapter.reason || "—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

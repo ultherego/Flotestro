@@ -667,14 +667,45 @@ func (s *AgentService) denied(ctx context.Context, hostID, reason string) {
 	s.log.Warn("odrzucono sesje agenta", "host_id", hostID, "reason", reason)
 }
 
+// capabilitiesFromProto czyta rejestr adapterow. Agent w starszej wersji
+// rejestru nie przysyla wcale, a flota aktualizuje sie stopniowo - rejestr
+// jest wtedy odtwarzany z pol logicznych sprzed jego wprowadzenia. Uznanie
+// takiego hosta za pozbawiony wszystkich adapterow odcieloby go od zarzadzania.
 func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
-	return hosts.Capabilities{
-		Systemd:  caps.GetSystemd(),
-		APT:      caps.GetApt(),
-		DNF:      caps.GetDnf(),
-		Docker:   caps.GetDocker(),
-		Journald: caps.GetJournald(),
+	if zgloszone := caps.GetRegistry(); len(zgloszone) > 0 {
+		registry := make(hosts.Capabilities, 0, len(zgloszone))
+		for _, capability := range zgloszone {
+			registry = append(registry, hosts.Capability{
+				Name:      capability.GetName(),
+				Version:   capability.GetVersion(),
+				Available: capability.GetAvailable(),
+				ReadOnly:  capability.GetReadOnly(),
+				Reason:    capability.GetReason(),
+				Features:  capability.GetFeatures(),
+			})
+		}
+		return registry
 	}
+
+	// Pola logiczne nie niosly powodu ani cech, wiec odtworzony rejestr tez
+	// ich nie ma. Zmyslony powod bylby gorszy niz jego brak.
+	sprzedRejestru := []struct {
+		nazwa    string
+		dostepny bool
+	}{
+		{hosts.CapSystemd, caps.GetSystemd()},
+		{hosts.CapAPT, caps.GetApt()},
+		{hosts.CapDNF, caps.GetDnf()},
+		{hosts.CapDocker, caps.GetDocker()},
+		{hosts.CapJournald, caps.GetJournald()},
+	}
+	registry := make(hosts.Capabilities, 0, len(sprzedRejestru))
+	for _, pozycja := range sprzedRejestru {
+		registry = append(registry, hosts.Capability{
+			Name: pozycja.nazwa, Version: 0, Available: pozycja.dostepny,
+		})
+	}
+	return registry
 }
 
 // localAccountsFromReport przenosi konta z raportu do modelu inventory.

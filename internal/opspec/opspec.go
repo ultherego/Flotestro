@@ -93,7 +93,11 @@ var actionSpecs = map[ActionType]actionSpec{
 
 	// Naprawa zmienia stan hosta i moze dotyczyc pakietow o duzym znaczeniu,
 	// z bootloaderem wlacznie, wiec ma wlasne uprawnienie i wlasny timeout.
-	ActionPackageRepair: {mutating: true, capability: "packages", permission: "packages.repair", timeoutSeconds: 1800},
+	//
+	// Wymaganie jest wezsze niz sama obecnosc menedzera pakietow: naprawa
+	// odpowiada na pytania debconfa i istnieje tylko dla apta. Host, ktory jej
+	// nie ma, ma to powiedziec przy zlecaniu, a nie po dostarczeniu zadania.
+	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair", timeoutSeconds: 1800},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
 	// aktualizacji.
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot", timeoutSeconds: 120},

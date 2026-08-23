@@ -11,13 +11,28 @@ import (
 // Mapowanie miedzy modelem agenta a kontraktem protokolu jest w jednym miejscu,
 // dzieki czemu zmiana kontraktu nie rozlewa sie po logice zbierania faktow.
 
+// capabilitiesToProto wysyla rejestr i - dla starszego serwera - pola logiczne
+// sprzed rejestru. Flota aktualizuje sie stopniowo, wiec obie strony przez
+// jakis czas musza sie rozumiec.
 func capabilitiesToProto(c Capabilities) *agentv1.Capabilities {
+	registry := make([]*agentv1.Capability, 0, len(c))
+	for _, cap := range c {
+		registry = append(registry, &agentv1.Capability{
+			Name:      cap.Name,
+			Version:   cap.Version,
+			Available: cap.Available,
+			ReadOnly:  cap.ReadOnly,
+			Reason:    cap.Reason,
+			Features:  cap.Features,
+		})
+	}
 	return &agentv1.Capabilities{
-		Systemd:  c.Systemd,
-		Apt:      c.APT,
-		Dnf:      c.DNF,
-		Docker:   c.Docker,
-		Journald: c.Journald,
+		Systemd:  c.Available(CapSystemd),
+		Apt:      c.Available(CapAPT),
+		Dnf:      c.Available(CapDNF),
+		Docker:   c.Available(CapDocker),
+		Journald: c.Available(CapJournald),
+		Registry: registry,
 	}
 }
 

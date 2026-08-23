@@ -24,15 +24,6 @@ import (
 // SchemaVersion opisuje wersje formatu raportu inventory zapisywanego w JSONB.
 const SchemaVersion = "1"
 
-// Capabilities to wykryte na hoscie adaptery.
-type Capabilities struct {
-	Systemd  bool `json:"systemd"`
-	APT      bool `json:"apt"`
-	DNF      bool `json:"dnf"`
-	Docker   bool `json:"docker"`
-	Journald bool `json:"journald"`
-}
-
 // OSInfo opisuje system operacyjny hosta.
 type OSInfo struct {
 	Family       string `json:"family"`
@@ -109,17 +100,6 @@ func (f Facts) Revision() (string, []byte, error) {
 		return "", nil, err
 	}
 	return hex.EncodeToString(sum[:16]), full, nil
-}
-
-// DetectCapabilities sprawdza obecnosc adapterow bez uruchamiania procesow.
-func DetectCapabilities() Capabilities {
-	return Capabilities{
-		Systemd:  isDir("/run/systemd/system"),
-		APT:      isExecutable("/usr/bin/apt-get"),
-		DNF:      isExecutable("/usr/bin/dnf") || isExecutable("/usr/bin/dnf5"),
-		Docker:   exists("/var/run/docker.sock") || exists("/run/docker.sock"),
-		Journald: exists("/run/systemd/journal/socket"),
-	}
 }
 
 // MachineID zwraca stabilny identyfikator maszyny.

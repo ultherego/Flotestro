@@ -29,10 +29,11 @@ func TestFlotaJestZarejestrowana(t *testing.T) {
 		if host.ConnectionState != "online" {
 			t.Errorf("stan polaczenia = %s, oczekiwano online", host.ConnectionState)
 		}
-		if !host.Capabilities.Systemd || !host.Capabilities.APT || !host.Capabilities.Journald {
+		if !maAdapter(host, "systemd") || !maAdapter(host, "packages.apt") ||
+			!maAdapter(host, "journald") {
 			t.Errorf("nieoczekiwane zdolnosci hosta Debian: %+v", host.Capabilities)
 		}
-		if host.Capabilities.DNF {
+		if maAdapter(host, "packages.dnf") {
 			t.Error("host Debian nie powinien zglaszac dnf")
 		}
 	})
@@ -45,10 +46,11 @@ func TestFlotaJestZarejestrowana(t *testing.T) {
 		if host.ConnectionState != "online" {
 			t.Errorf("stan polaczenia = %s, oczekiwano online", host.ConnectionState)
 		}
-		if !host.Capabilities.Systemd || !host.Capabilities.DNF || !host.Capabilities.Journald {
+		if !maAdapter(host, "systemd") || !maAdapter(host, "packages.dnf") ||
+			!maAdapter(host, "journald") {
 			t.Errorf("nieoczekiwane zdolnosci hosta Fedora: %+v", host.Capabilities)
 		}
-		if host.Capabilities.APT {
+		if maAdapter(host, "packages.apt") {
 			t.Error("host Fedora nie powinien zglaszac apt")
 		}
 	})
@@ -195,4 +197,14 @@ func TestOdczytDziennikaNieWymagaZatwierdzenia(t *testing.T) {
 	if len(attempts) == 0 || attempts[len(attempts)-1].Stdout == "" {
 		t.Fatal("odczyt dziennika nie zwrocil tresci")
 	}
+}
+
+// maAdapter mowi, czy host zglosil dany adapter jako dostepny.
+func maAdapter(host hostView, nazwa string) bool {
+	for _, adapter := range host.Capabilities {
+		if adapter.Name == nazwa {
+			return adapter.Available
+		}
+	}
+	return false
 }

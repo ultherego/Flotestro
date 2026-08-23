@@ -152,24 +152,29 @@ func (h *harness) do(method, path string, body any, out any, wantStatus int) {
 }
 
 type hostView struct {
-	ID              string `json:"id"`
-	Hostname        string `json:"hostname"`
-	Site            string `json:"site"`
-	Environment     string `json:"environment"`
-	OSFamily        string `json:"os_family"`
-	OSVersion       string `json:"os_version"`
-	ConnectionState string `json:"connection_state"`
-	LifecycleState  string `json:"lifecycle_state"`
-	BootID          string `json:"boot_id"`
-	FailedUnits     *int   `json:"failed_units"`
-	PendingUpdates  *int   `json:"pending_updates"`
-	RebootRequired  *bool  `json:"reboot_required"`
-	Capabilities    struct {
-		Systemd  bool `json:"systemd"`
-		APT      bool `json:"apt"`
-		DNF      bool `json:"dnf"`
-		Journald bool `json:"journald"`
-	} `json:"capabilities"`
+	ID              string           `json:"id"`
+	Hostname        string           `json:"hostname"`
+	Site            string           `json:"site"`
+	Environment     string           `json:"environment"`
+	OSFamily        string           `json:"os_family"`
+	OSVersion       string           `json:"os_version"`
+	ConnectionState string           `json:"connection_state"`
+	LifecycleState  string           `json:"lifecycle_state"`
+	BootID          string           `json:"boot_id"`
+	FailedUnits     *int             `json:"failed_units"`
+	PendingUpdates  *int             `json:"pending_updates"`
+	RebootRequired  *bool            `json:"reboot_required"`
+	Capabilities    []hostCapability `json:"capabilities"`
+}
+
+// hostCapability odwzorowuje rejestr adapterow hosta.
+type hostCapability struct {
+	Name      string          `json:"name"`
+	Version   uint32          `json:"version"`
+	Available bool            `json:"available"`
+	ReadOnly  bool            `json:"read_only"`
+	Reason    string          `json:"reason"`
+	Features  map[string]bool `json:"features"`
 }
 
 type jobView struct {

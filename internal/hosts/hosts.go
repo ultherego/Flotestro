@@ -18,13 +18,105 @@ import (
 // ErrNotFound oznacza brak hosta o podanej tozsamosci.
 var ErrNotFound = errors.New("host nie istnieje")
 
-// Capabilities opisuje wykryte na hoscie adaptery.
-type Capabilities struct {
-	Systemd  bool `json:"systemd"`
-	APT      bool `json:"apt"`
-	DNF      bool `json:"dnf"`
-	Docker   bool `json:"docker"`
-	Journald bool `json:"journald"`
+// Capability opisuje jeden adapter wykryty na hoscie. Nazwa mowi, co host ma
+// ('packages.apt'), a nie czego chce operacja ('packages').
+type Capability struct {
+	Name      string          `json:"name"`
+	Version   uint32          `json:"version"`
+	Available bool            `json:"available"`
+	ReadOnly  bool            `json:"read_only"`
+	Reason    string          `json:"reason,omitempty"`
+	Features  map[string]bool `json:"features,omitempty"`
+}
+
+// Capabilities to rejestr adapterow hosta.
+type Capabilities []Capability
+
+// Nazwy adapterow oraz wymagania operacji. Wymaganie jest nazwa logiczna:
+// operacja aktualizacji nie ma wiedziec, czy host uzywa apta czy dnf-a.
+const (
+	CapSystemd  = "systemd"
+	CapAPT      = "packages.apt"
+	CapDNF      = "packages.dnf"
+	CapJournald = "journald"
+	CapDocker   = "docker"
+
+	WymaganiePakiety         = "packages"
+	WymaganieNaprawaPakietow = "packages.repair"
+)
+
+// Available mowi, czy adapter o tej nazwie dziala na hoscie.
+func (c Capabilities) Available(name string) bool {
+	for _, capability := range c {
+		if capability.Name == name {
+			return capability.Available
+		}
+	}
+	return false
+}
+
+// Feature mowi, czy adapter ma dana czesc.
+func (c Capabilities) Feature(name, feature string) bool {
+	wartosc, _ := c.FeatureStan(name, feature)
+	return wartosc
+}
+
+// FeatureStan oddziela "nie ma tej czesci" od "nie wiadomo, czy ma".
+//
+// Agent sprzed rejestru nie przysyla cech wcale, a jego rejestr jest
+// odtwarzany z pol logicznych. Uznanie milczenia za odmowe odebraloby takiemu
+// hostowi operacje, ktora u niego dziala - nieznana cecha nie jest cecha
+// nieobecna.
+func (c Capabilities) FeatureStan(name, feature string) (wartosc bool, znana bool) {
+	for _, capability := range c {
+		if capability.Name != name {
+			continue
+		}
+		if !capability.Available {
+			// Adapter, ktorego nie ma, na pewno nie ma zadnej czesci.
+			return false, true
+		}
+		value, ok := capability.Features[feature]
+		return value, ok
+	}
+	// Adaptera nie ma w rejestrze - to tez jest odpowiedz, a nie niewiedza.
+	return false, true
+}
+
+// Reason zwraca wyjasnienie zapisane przez hosta. Interfejs ma powtarzac to,
+// co powiedzial host, a nie zgadywac przyczyne w kodzie przegladarki.
+func (c Capabilities) Reason(name string) string {
+	for _, capability := range c {
+		if capability.Name == name {
+			return capability.Reason
+		}
+	}
+	return ""
+}
+
+// Spelnia sprawdza wymaganie operacji wobec rejestru hosta.
+func (c Capabilities) Spelnia(wymaganie string) bool {
+	switch wymaganie {
+	case "":
+		return true
+	case WymaganiePakiety:
+		return c.Available(CapAPT) || c.Available(CapDNF)
+	case WymaganieNaprawaPakietow:
+		for _, adapter := range []string{CapAPT, CapDNF} {
+			wartosc, znana := c.FeatureStan(adapter, "repair")
+			if wartosc {
+				return true
+			}
+			// Adapter obecny, ale milczacy o cechach: decyzje podejmuje host
+			// przy wykonaniu, tak jak przed wprowadzeniem rejestru.
+			if !znana && c.Available(adapter) {
+				return true
+			}
+		}
+		return false
+	default:
+		return c.Available(wymaganie)
+	}
 }
 
 // Health to minimalny zestaw sygnalow z heartbeatu. Wskaznik pusty oznacza
@@ -199,20 +291,29 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 		return fmt.Errorf("aktualizacja hosta: %w", err)
 	}
 
-	detail, err := json.Marshal(caps)
-	if err != nil {
-		return err
+	// Rejestr jest zastepowany w calosci: adapter, ktorego host juz nie zglasza,
+	// zniknal z hosta i nie moze zostac w bazie jako nieaktualna prawda.
+	const usunQuery = `delete from host_capability_registry where host_id = $1`
+	if _, err := tx.Exec(ctx, usunQuery, hostID); err != nil {
+		return fmt.Errorf("czyszczenie rejestru adapterow: %w", err)
 	}
 	const capQuery = `
-		insert into host_capabilities (host_id, systemd, apt, dnf, docker, journald, detail, observed_at)
-		values ($1, $2, $3, $4, $5, $6, $7, now())
-		on conflict (host_id) do update set
-			systemd = excluded.systemd, apt = excluded.apt, dnf = excluded.dnf,
-			docker = excluded.docker, journald = excluded.journald,
-			detail = excluded.detail, observed_at = excluded.observed_at`
-	if _, err := tx.Exec(ctx, capQuery, hostID,
-		caps.Systemd, caps.APT, caps.DNF, caps.Docker, caps.Journald, detail); err != nil {
-		return fmt.Errorf("aktualizacja capabilities: %w", err)
+		insert into host_capability_registry
+			(host_id, name, version, available, read_only, reason, features, observed_at)
+		values ($1, $2, $3, $4, $5, nullif($6, ''), $7, now())`
+	for _, capability := range caps {
+		features, err := json.Marshal(capability.Features)
+		if err != nil {
+			return err
+		}
+		if capability.Features == nil {
+			features = []byte("{}")
+		}
+		if _, err := tx.Exec(ctx, capQuery, hostID, capability.Name,
+			capability.Version, capability.Available, capability.ReadOnly,
+			capability.Reason, features); err != nil {
+			return fmt.Errorf("aktualizacja adaptera %s: %w", capability.Name, err)
+		}
 	}
 	return tx.Commit(ctx)
 }
@@ -330,10 +431,16 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.management_address_observed_at,
 		       h.identity_enrolled, coalesce(h.identity_domain, ''), coalesce(h.identity_realm, ''),
 		       h.identity_sssd_online, h.identity_checked_at,
-		       coalesce(c.systemd, false), coalesce(c.apt, false), coalesce(c.dnf, false),
-		       coalesce(c.docker, false), coalesce(c.journald, false)
+		       coalesce(c.rejestr, '[]'::json)
 		from hosts h
-		left join host_capabilities c on c.host_id = h.id
+		left join lateral (
+		    select json_agg(json_build_object(
+		               'name', r.name, 'version', r.version,
+		               'available', r.available, 'read_only', r.read_only,
+		               'reason', r.reason, 'features', r.features)
+		           order by r.name) as rejestr
+		      from host_capability_registry r where r.host_id = h.id
+		) c on true
 		` + clause
 
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -353,8 +460,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.ManagementAddress, &h.ManagementAddressSource, &h.ManagementAddressObservedAt,
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
-			&h.Capabilities.Systemd, &h.Capabilities.APT, &h.Capabilities.DNF,
-			&h.Capabilities.Docker, &h.Capabilities.Journald); err != nil {
+			&h.Capabilities); err != nil {
 			return nil, err
 		}
 		result = append(result, h)

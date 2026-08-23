@@ -140,12 +140,37 @@ message HealthSignals {
   optional uint32 pending_security_updates = 7;
 }
 
+// Capability opisuje jeden adapter na hoscie. Nazwa mowi, co to za adapter,
+// a nie czego chce operacja: operacja pyta o "packages", host odpowiada
+// "packages.apt".
+message Capability {
+  string name = 1;
+  // Wersja kontraktu adaptera, nie wersja narzedzia. Wersja narzedzia jest
+  // faktem o hoscie i nalezy do inventory.
+  uint32 version = 2;
+  bool available = 3;
+  // Adapter, ktory potrafi czytac, ale nie zmieniac. Wylaczona zakladka
+  // i zakladka bez przyciskow to dwie rozne informacje dla operatora.
+  bool read_only = 4;
+  // Powod niedostepnosci albo ograniczenia. Bez niego interfejs musi zgadywac,
+  // dlaczego czegos nie ma - a zgaduje w kodzie przegladarki, wiec zle.
+  string reason = 5;
+  // Czesci adaptera, ktore moga istniec osobno. Naprawa bazy pakietow dziala
+  // tylko dla apta i host ma to powiedziec, zanim zadanie zostanie wyslane.
+  map<string, bool> features = 6;
+}
+
 message Capabilities {
+  // Pola logiczne sa zaszloscia sprzed rejestru. Agent w starszej wersji nie
+  // przysyla rejestru wcale, a flota aktualizuje sie stopniowo: serwer musi
+  // wtedy odtworzyc rejestr z tych pol, zamiast uznac host za pozbawiony
+  // wszystkich adapterow.
   bool systemd = 1;
   bool apt = 2;
   bool dnf = 3;
   bool docker = 4;
   bool journald = 5;
+  repeated Capability registry = 6;
 }
 
 message InventoryReport {

@@ -50,13 +50,13 @@ func Collect(ctx context.Context) (Facts, error) {
 		CollectedAt:  time.Now().UTC(),
 	}
 
-	if caps.Systemd {
+	if caps.Available(CapSystemd) {
 		facts.FailedUnits, facts.FailedUnitsKnown = failedUnits(ctx)
 	}
 	switch {
-	case caps.APT:
+	case caps.Available(CapAPT):
 		facts.Packages = aptSummary(ctx)
-	case caps.DNF:
+	case caps.Available(CapDNF):
 		facts.Packages = dnfSummary(ctx)
 	}
 	facts.RebootRequired = rebootRequired(ctx, caps)
@@ -187,11 +187,11 @@ func rebootRequired(ctx context.Context, caps Capabilities) *bool {
 	if exists("/var/run/reboot-required") || exists("/run/reboot-required") {
 		return boolPtr(true)
 	}
-	if caps.APT {
+	if caps.Available(CapAPT) {
 		// Na Debianie brak pliku jest jednoznaczna odpowiedzia.
 		return boolPtr(false)
 	}
-	if caps.DNF {
+	if caps.Available(CapDNF) {
 		return interpretNeedsRestarting(
 			runCommand(ctx, 60*time.Second, "/usr/bin/dnf", "needs-restarting", "-r"))
 	}
