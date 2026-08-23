@@ -22,6 +22,7 @@ import (
 
 	dnsmodul "github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/network"
@@ -96,6 +97,8 @@ type Facts struct {
 	// Network jest obrazem interfejsow i tras z jadra. Brak wartosci oznacza
 	// cykl, w ktorym stanu nie zbierano.
 	Network *network.Snapshot `json:"network,omitempty"`
+	// Files jest stanem plikow, ktore panel zapisal na tym hoscie.
+	Files *files.Snapshot `json:"files,omitempty"`
 	// Kernel jest ustawieniami jadra i lista modulow.
 	Kernel *kernel.Snapshot `json:"kernel,omitempty"`
 	// SSH jest konfiguracja serwera sshd.

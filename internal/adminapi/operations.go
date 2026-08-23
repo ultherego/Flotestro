@@ -144,6 +144,24 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Powrot do wczesniejszej wersji pliku niesie sam odcisk: tresc dokladamy
+	// tutaj, zeby plan i to, co trafi na host, byly tym samym. Zlecenie
+	// z pustym plikiem i odciskiem wersji zapisaloby pustke.
+	if action == opspec.ActionFileRollback && payload.File != nil {
+		tresc, err := s.files.Tresc(r.Context(), payload.File.VersionSHA256)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "version_not_found",
+				"no stored version with that checksum")
+			return
+		}
+		payload.File.Content = string(tresc)
+		// Odcisk wersji byl sposobem na wskazanie tresci, a nie czescia
+		// zlecenia: po jej wstawieniu payload opisuje to samo, co zwykly
+		// zapis. Zostawiony w payloadzie nie dojechalby do agenta, bo
+		// koperta zadania go nie niesie - i hash planu przestalby sie zgadzac.
+		payload.File.VersionSHA256 = ""
+	}
+
 	requiresApproval := action.Mutating()
 	if request.RequiresApprova != nil {
 		requiresApproval = *request.RequiresApprova
@@ -196,6 +214,17 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// Tresc zapisujemy juz teraz, zeby historia i powrot do wersji mialy
+	// bajty, ktore operator zatwierdzil. Stan docelowy zapisze dopiero
+	// gateway, po udanej operacji: panel nie moze twierdzic, ze zarzadza
+	// plikiem, ktorego host odrzucil.
+	if payload.File != nil && (action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
+		if _, err := s.files.ZapiszWersje(r.Context(), tx, []byte(payload.File.Content)); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		s.fail(w, err)
 		return

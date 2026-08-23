@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ultherego/flotestro/internal/modules/dns"
+	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/network"
@@ -75,6 +76,12 @@ const (
 	ActionSysctlEnsure          ActionType = "sysctl.ensure"
 	ActionKernelModuleLoad      ActionType = "kernel.module.load"
 	ActionKernelModuleBlacklist ActionType = "kernel.module.blacklist"
+
+	ActionFileRead     ActionType = "file.read"
+	ActionFilePlan     ActionType = "file.plan"
+	ActionFileEnsure   ActionType = "file.ensure"
+	ActionFileRemove   ActionType = "file.remove"
+	ActionFileRollback ActionType = "file.rollback"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -422,6 +429,23 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionKernelModuleBlacklist: {mutating: true, capability: "kernel", permission: "kernel.module.blacklist",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNone},
 
+	// Odczyt pliku konfiguracyjnego siega po tresc, ktora bywa wrazliwa,
+	// nawet gdy sam plik nie jest sekretem: adresy, nazwy kont, topologia.
+	ActionFileRead: {mutating: false, capability: "files.managed", permission: "file.read",
+		timeoutSeconds: 60, risk: RiskHigh, maxOutputBytes: 1 << 20},
+	ActionFilePlan: {mutating: false, capability: "files.managed", permission: "file.plan",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Zapis pliku konfiguracyjnego zmienia zachowanie uslugi po jej
+	// przeladowaniu - takze wtedy, gdy nikt tego nie planowal.
+	ActionFileEnsure: {mutating: true, capability: "files.managed", permission: "file.write",
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+	ActionFileRemove: {mutating: true, capability: "files.managed", permission: "file.remove",
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+	// Powrot do wczesniejszej wersji jest zapisem tresci, ktora kiedys juz
+	// na hoscie byla - ale to nadal zapis.
+	ActionFileRollback: {mutating: true, capability: "files.managed", permission: "file.rollback",
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
 	// Wyslanie sygnalu zatrzymuje czyjas prace: sygnal nie ma stanu przed
@@ -594,6 +618,33 @@ var identyfikatorHarmonogramu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,
 // nazwaInterfejsu dopuszcza nazwy, ktore jadro w ogole przyjmuje. Granica
 // dlugosci to IFNAMSIZ pomniejszone o terminator.
 var nazwaInterfejsu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$`)
+
+// sprawdzSciezkePliku odrzuca sciezki, ktorych panel nie zapisze - zanim
+// zadanie w ogole powstanie.
+//
+// Rozstrzygajaco sprawdza host wlasna allowlista; tu odsiewamy to, co jest
+// bledem zlecenia niezaleznie od hosta.
+func sprawdzSciezkePliku(sciezka string) error {
+	// Sciezki, ktorych panel nie tyka nigdy, odrzucamy juz przy zlecaniu:
+	// host i tak by odmowil, a zadanie w kolejce z takim celem wygladaloby
+	// jak zmiana, ktora zaraz sie wydarzy.
+	if err := filesmodul.Zakazana(sciezka); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(sciezka, "/") {
+		return fmt.Errorf("sciezka %q nie jest bezwzgledna", sciezka)
+	}
+	if strings.Contains(sciezka, "..") {
+		return fmt.Errorf("sciezka %q wychodzi poza wskazany katalog", sciezka)
+	}
+	if strings.ContainsAny(sciezka, "\n\t*?") {
+		return fmt.Errorf("sciezka %q zawiera niedozwolony znak", sciezka)
+	}
+	if len(sciezka) > 4096 {
+		return fmt.Errorf("sciezka jest dluzsza niz 4096 znakow")
+	}
+	return nil
+}
 
 // pierwszyPort zwraca jedyny port operacji strefowej. Operacja dotyczy
 // dokladnie jednego portu, wiec lista dluzsza niz jednoelementowa jest bledem
@@ -946,7 +997,24 @@ type Payload struct {
 	Storage         *StoragePayload         `json:"storage,omitempty"`
 	SSH             *SSHPayload             `json:"ssh,omitempty"`
 	Kernel          *KernelPayload          `json:"kernel,omitempty"`
+	File            *FilePayload            `json:"file,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// FilePayload opisuje operacje na pliku konfiguracyjnym.
+type FilePayload struct {
+	Path string `json:"path"`
+	// Content jest trescia docelowa. Panel wysyla ja w zleceniu, wiec plan
+	// i to, co trafi na host, sa tym samym.
+	Content string `json:"content,omitempty"`
+	Mode    string `json:"mode,omitempty"`
+	Owner   string `json:"owner,omitempty"`
+	Group   string `json:"group,omitempty"`
+	// ExpectedSHA256 wiaze zapis z trescia, ktora operator ogladal.
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+	Validator      string `json:"validator,omitempty"`
+	// VersionSHA256 wskazuje wersje z historii przy powrocie do niej.
+	VersionSHA256 string `json:"version_sha256,omitempty"`
 }
 
 // KernelPayload opisuje operacje na ustawieniach jadra.
@@ -1414,6 +1482,35 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionFilePlan:
+		return nil
+
+	case ActionFileRead, ActionFileRemove:
+		if payload.File == nil || payload.File.Path == "" {
+			return fmt.Errorf("operacja %s wymaga sciezki", action)
+		}
+		return sprawdzSciezkePliku(payload.File.Path)
+
+	case ActionFileEnsure, ActionFileRollback:
+		if payload.File == nil || payload.File.Path == "" {
+			return fmt.Errorf("operacja %s wymaga sciezki", action)
+		}
+		if err := sprawdzSciezkePliku(payload.File.Path); err != nil {
+			return err
+		}
+		if err := filesmodul.WalidujTresc(payload.File.Content); err != nil {
+			return err
+		}
+		if _, err := filesmodul.WalidujTryb(payload.File.Mode); err != nil {
+			return err
+		}
+		if payload.File.Validator != "" {
+			if _, _, err := filesmodul.WybierzWalidator(payload.File.Path, payload.File.Validator); err != nil {
+				return err
+			}
+		}
+		return nil
 
 	case ActionSysctlPlan:
 		if payload.Kernel != nil {

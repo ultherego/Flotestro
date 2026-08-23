@@ -364,6 +364,7 @@ message TaskEnvelope {
     StorageAction storage = 42;
     SshAction ssh = 43;
     KernelAction kernel = 44;
+    FileAction file = 45;
   }
 }
 
@@ -601,6 +602,7 @@ message TaskResult {
   StorageResult storage_result = 36;
   SshResult ssh_result = 37;
   KernelResult kernel_result = 38;
+  FileResult file_result = 39;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -990,6 +992,38 @@ message KernelResult {
   string message = 2;
   repeated string pending_reboot = 3;
   repeated string applied_runtime = 4;
+}
+
+// FileAction opisuje operacje na pliku konfiguracyjnym.
+message FileAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_ENSURE = 2;
+    OPERATION_REMOVE = 3;
+    OPERATION_LIST = 4;
+    // Powrot do wczesniejszej wersji jest na hoscie tym samym zapisem co
+    // ensure, ale operacja pozostaje osobna: hash planu obejmuje jej nazwe,
+    // a slad audytowy ma mowic, ze to byl powrot, a nie nowa tresc.
+    OPERATION_ROLLBACK = 5;
+  }
+  Operation operation = 1;
+  string path = 2;
+  bytes content = 3;
+  string mode = 4;
+  string owner = 5;
+  string group = 6;
+  string expected_sha256 = 7;
+  string validator = 8;
+}
+
+message FileResult {
+  bytes snapshot = 1;
+  string message = 2;
+  bytes content = 3;
+  string sha256 = 4;
+  bool truncated = 5;
+  string validator_output = 6;
 }
 
 message PackageLifecycle {

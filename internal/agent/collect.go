@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
@@ -133,6 +134,16 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	// dlatego czytamy calosc raz na cykl inwentarza, a nie przy heartbeacie.
 	przestrzen := ZbierzPrzestrzen(ctx)
 	facts.Storage = &przestrzen
+
+	// Stan plikow zarzadzanych: host sam wie, ktore pliki panel zapisal,
+	// wiec drift widac bez pytania panelu o liste.
+	if fileProbe != nil {
+		if snapshot, err := fileProbe(ctx); err == nil {
+			facts.Files = &snapshot
+		} else {
+			facts.Files = &files.Snapshot{UnavailableReason: "helper: " + err.Error()}
+		}
+	}
 
 	// Ustawienia jadra czyta helper: czesc kluczy /proc/sys jest czytelna
 	// wylacznie dla roota, a lista modulow i tak potrzebuje jego oczu.

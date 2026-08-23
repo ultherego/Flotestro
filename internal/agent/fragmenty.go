@@ -21,6 +21,7 @@ const (
 	ModulStorage    = "storage"
 	ModulSSH        = "ssh"
 	ModulKernel     = "kernel"
+	ModulFiles      = "files"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
 )
@@ -97,6 +98,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulSSH, "agent/sshd", powodSSH(f), konfiguracjaSSH(f)},
 
 		{ModulKernel, "agent/procfs+sysctl", powodJadra(f), jadro(f)},
+
+		{ModulFiles, "agent/managed-files", powodPlikow(f), plikiZarzadzane(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -245,4 +248,20 @@ func jadro(f Facts) any {
 		return struct{}{}
 	}
 	return f.Kernel
+}
+
+// powodPlikow zwraca powod, dla ktorego stanu plikow nie ustalono.
+func powodPlikow(f Facts) string {
+	if f.Files == nil {
+		return "this host did not report its managed files"
+	}
+	return f.Files.UnavailableReason
+}
+
+// plikiZarzadzane zwraca stan plikow albo pusty obraz.
+func plikiZarzadzane(f Facts) any {
+	if f.Files == nil {
+		return struct{}{}
+	}
+	return f.Files
 }

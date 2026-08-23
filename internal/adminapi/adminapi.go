@@ -16,6 +16,7 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
+	managedfiles "github.com/ultherego/flotestro/internal/files"
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -41,6 +42,8 @@ type Server struct {
 	oidc      *oidc.Provider
 	directory *freeipa.Client
 	changes   *identity.Store
+	// files trzyma stan docelowy plikow konfiguracyjnych i ich historie.
+	files *managedfiles.Store
 	// directoryWrite wlacza modul zmian w katalogu. Domyslnie wylaczony:
 	// klient moze chciec samego widoku, a zmiany robic swoimi narzedziami.
 	directoryWrite bool
@@ -100,6 +103,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	}
 	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
+		files:     managedfiles.NewStore(pool),
 		campaigns: campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
@@ -128,6 +132,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts", s.handleListHosts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}", s.handleGetHost)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory", s.handleHostInventory)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/files", s.handleListManagedFiles)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/files/history", s.handleFileHistory)
+	mux.HandleFunc("GET /api/v1/files/versions/{sha256}", s.handleFileVersion)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory/{module}", s.handleHostInventoryModule)
 	// Historia manifestow projektu. Wycofanie zmiany to wdrozenie
 	// wczesniejszej wersji, wiec nie ma osobnej operacji.

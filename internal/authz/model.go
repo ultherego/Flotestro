@@ -114,6 +114,13 @@ const (
 	PermKernelSysctlWrite     Permission = "kernel.sysctl.write"
 	PermKernelModuleWrite     Permission = "kernel.module.write"
 	PermKernelModuleBlacklist Permission = "kernel.module.blacklist"
+	// Pliki konfiguracyjne. Odczyt tresci jest oddzielony od planu, bo tresc
+	// bywa wrazliwa nawet wtedy, gdy plik nie jest sekretem.
+	PermFileRead     Permission = "file.read"
+	PermFilePlan     Permission = "file.plan"
+	PermFileWrite    Permission = "file.write"
+	PermFileRemove   Permission = "file.remove"
+	PermFileRollback Permission = "file.rollback"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -189,7 +196,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermFilePlan,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -217,7 +224,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermFilePlan,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -258,6 +265,7 @@ var rolePermissions = map[Role][]Permission{
 		PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
 		PermKernelRead, PermKernelSysctlWrite,
 		PermKernelModuleWrite, PermKernelModuleBlacklist,
+		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

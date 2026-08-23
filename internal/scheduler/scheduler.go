@@ -322,6 +322,31 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionFilePlan, opspec.ActionFileRead, opspec.ActionFileEnsure,
+		opspec.ActionFileRemove, opspec.ActionFileRollback:
+		operacja := agentv1.FileAction_OPERATION_LIST
+		switch action {
+		case opspec.ActionFileRead:
+			operacja = agentv1.FileAction_OPERATION_READ
+		case opspec.ActionFileEnsure:
+			operacja = agentv1.FileAction_OPERATION_ENSURE
+		case opspec.ActionFileRollback:
+			operacja = agentv1.FileAction_OPERATION_ROLLBACK
+		case opspec.ActionFileRemove:
+			operacja = agentv1.FileAction_OPERATION_REMOVE
+		}
+		plik := &agentv1.FileAction{Operation: operacja}
+		if payload.File != nil {
+			plik.Path = payload.File.Path
+			plik.Content = []byte(payload.File.Content)
+			plik.Mode = payload.File.Mode
+			plik.Owner = payload.File.Owner
+			plik.Group = payload.File.Group
+			plik.ExpectedSha256 = payload.File.ExpectedSHA256
+			plik.Validator = payload.File.Validator
+		}
+		envelope.Action = &agentv1.TaskEnvelope_File{File: plik}
+
 	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
 		operacja := agentv1.KernelAction_OPERATION_READ

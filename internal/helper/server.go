@@ -145,6 +145,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_File:
+		return s.applyFile(ctx, request, action.File)
+
 	case *helperv1.HelperRequest_Kernel:
 		return s.applyKernel(ctx, request, action.Kernel)
 

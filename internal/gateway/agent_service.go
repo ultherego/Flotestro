@@ -21,10 +21,12 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/events"
+	managedfiles "github.com/ultherego/flotestro/internal/files"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
 )
@@ -76,6 +78,10 @@ type AgentService struct {
 	relays *relays.Store
 	// events rozglasza postep operacji do otwartych ekranow panelu.
 	events *events.Bus
+	// files trzyma stan docelowy plikow konfiguracyjnych. Zapisujemy go
+	// dopiero po udanej operacji: panel nie moze twierdzic, ze zarzadza
+	// plikiem, ktorego host nie przyjal.
+	files *managedfiles.Store
 	// proby tlumaczy identyfikator proby na identyfikator operacji. Agent
 	// melduje postep dla proby, a operator patrzy na operacje.
 	probyMu   sync.RWMutex
@@ -93,6 +99,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 	heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
+		files: managedfiles.NewStore(pool),
 		audit: recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
@@ -431,6 +438,36 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Stan docelowy pliku zapisujemy po udanej operacji, a nie przy jej
+	// zlecaniu: panel nie moze twierdzic, ze zarzadza plikiem, ktorego host
+	// odrzucil.
+	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
+		s.zapiszStanPliku(ctx, hostID, jobID)
+		// Odczytana tresc trafia do magazynu wersji: bez tego nie da sie
+		// wrocic do stanu sprzed pierwszej zmiany z panelu, bo tej tresci
+		// panel nigdy nie zapisywal.
+		if plik := result.GetFileResult(); plik != nil && len(plik.GetContent()) > 0 &&
+			!plik.GetTruncated() {
+			if _, err := s.files.ZapiszWersje(ctx, s.pool, plik.GetContent()); err != nil {
+				s.log.Error("nie zapisano odczytanej wersji pliku", "host_id", hostID, "err", err)
+			}
+		}
+	}
+
+	// Stan plikow zarzadzanych trafia do inwentarza: to on pokazuje drift,
+	// czyli plik zmieniony poza panelem.
+	if plik := result.GetFileResult(); plik != nil && len(plik.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "files",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(plik.GetSnapshot())),
+			Source:     "agent/managed-files",
+			Payload:    plik.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano stanu plikow", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Ustawienia jadra trafiaja do inwentarza po kazdej zmianie.
 	if jadro := result.GetKernelResult(); jadro != nil && len(jadro.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
@@ -747,6 +784,20 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"message":         jadro.GetMessage(),
 			"pending_reboot":  jadro.GetPendingReboot(),
 			"applied_runtime": jadro.GetAppliedRuntime(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Tresc odczytanego pliku nalezy do zadania: to odpowiedz na pytanie
+	// zadane w jednej chwili, a nie stan hosta.
+	if plik := result.GetFileResult(); plik != nil && len(plik.GetContent()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "file",
+			"content":   string(plik.GetContent()),
+			"sha256":    plik.GetSha256(),
+			"truncated": plik.GetTruncated(),
 		})
 		if err == nil {
 			return encoded
@@ -1384,4 +1435,40 @@ func unitStatesJSON(stany []*agentv1.UnitState) []map[string]any {
 		})
 	}
 	return wynik
+}
+
+// zapiszStanPliku zapisuje stan docelowy pliku po udanej operacji.
+func (s *AgentService) zapiszStanPliku(ctx context.Context, hostID, jobID string) {
+	zadanie, err := s.jobs.Get(ctx, jobID)
+	if err != nil {
+		return
+	}
+	switch opspec.ActionType(zadanie.ActionType) {
+	case opspec.ActionFileEnsure, opspec.ActionFileRollback, opspec.ActionFileRemove:
+	default:
+		return
+	}
+
+	var payload opspec.Payload
+	if err := json.Unmarshal(zadanie.Payload, &payload); err != nil || payload.File == nil {
+		return
+	}
+	if opspec.ActionType(zadanie.ActionType) == opspec.ActionFileRemove {
+		if err := s.files.Usun(ctx, s.pool, hostID, payload.File.Path); err != nil {
+			s.log.Error("nie usunieto stanu pliku", "host_id", hostID, "err", err)
+		}
+		return
+	}
+	odcisk, err := s.files.ZapiszWersje(ctx, s.pool, []byte(payload.File.Content))
+	if err != nil {
+		s.log.Error("nie zapisano wersji pliku", "host_id", hostID, "err", err)
+		return
+	}
+	if err := s.files.Ustaw(ctx, s.pool, managedfiles.StanDocelowy{
+		HostID: hostID, Path: payload.File.Path, SHA256: odcisk,
+		Mode: payload.File.Mode, Owner: payload.File.Owner, Group: payload.File.Group,
+		Validator: payload.File.Validator, UpdatedBy: zadanie.CreatedBy,
+	}, jobID); err != nil {
+		s.log.Error("nie zapisano stanu pliku", "host_id", hostID, "err", err)
+	}
 }

@@ -48,6 +48,7 @@ const (
 	CapStorage   = "storage"
 	CapSSHD      = "sshd"
 	CapKernel    = "kernel"
+	CapFiles     = "files.managed"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"

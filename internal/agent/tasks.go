@@ -158,6 +158,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionFilePlan, opspec.ActionFileRead, opspec.ActionFileEnsure,
+		opspec.ActionFileRemove, opspec.ActionFileRollback:
+		return e.applyFile(ctx, task, action, payload.File)
 	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
 		return e.applyKernel(ctx, task, action, payload.Kernel)
@@ -519,6 +522,29 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_File:
+		plik := action.File
+		typ := opspec.ActionFilePlan
+		switch plik.GetOperation() {
+		case agentv1.FileAction_OPERATION_READ:
+			typ = opspec.ActionFileRead
+		case agentv1.FileAction_OPERATION_ENSURE:
+			typ = opspec.ActionFileEnsure
+		case agentv1.FileAction_OPERATION_ROLLBACK:
+			typ = opspec.ActionFileRollback
+		case agentv1.FileAction_OPERATION_REMOVE:
+			typ = opspec.ActionFileRemove
+		}
+		return typ, opspec.Payload{File: &opspec.FilePayload{
+			Path:           plik.GetPath(),
+			Content:        string(plik.GetContent()),
+			Mode:           plik.GetMode(),
+			Owner:          plik.GetOwner(),
+			Group:          plik.GetGroup(),
+			ExpectedSHA256: plik.GetExpectedSha256(),
+			Validator:      plik.GetValidator(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Kernel:

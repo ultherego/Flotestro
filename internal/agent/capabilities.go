@@ -31,6 +31,8 @@ const (
 	CapSSHD = "sshd"
 	// Jadro: ustawienia sysctl i moduly.
 	CapKernel = "kernel"
+	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
+	CapFiles = "files.managed"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -235,6 +237,14 @@ func DetectCapabilities() Capabilities {
 				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
 			},
 			Reason: powodSieciowy(odczytSieci, zapisSieci),
+		},
+		{
+			Name:    CapFiles,
+			Version: wersjaAdaptera,
+			// Modul dziala wszedzie: zakres pochodzi z allowlisty, a jej brak
+			// oznacza liste domyslna, a nie brak modulu.
+			Available: true,
+			Features:  map[string]bool{"allowlist": exists("/etc/flotestro/files.allow")},
 		},
 		{
 			Name:      CapKernel,
