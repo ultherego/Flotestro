@@ -1,11 +1,22 @@
 import { Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Para, Pary, Pusto } from "../../components/ui";
 import { bytes } from "../../lib/format";
-import { useHost, useInventory } from "./wspolne";
+import { SwiezoscModulu, useHost, useModul } from "./wspolne";
+
+type StanSystemu = {
+  os?: Record<string, string>;
+  hardware?: {
+    cpu_cores?: number;
+    memory_bytes?: number;
+    root_fs_bytes?: number;
+    root_fs_free_bytes?: number;
+    virtualization?: string;
+  };
+};
 
 export function Przeglad() {
   const host = useHost();
-  const inventory = useInventory(host.id);
-  const sprzet = inventory.data?.payload?.hardware;
+  const modul = useModul<StanSystemu>(host.id, "system");
+  const sprzet = modul.data?.payload?.hardware;
 
   return (
     <>
@@ -45,12 +56,7 @@ export function Przeglad() {
       <h2>Adapters</h2>
       <Adaptery host={host} />
 
-      {inventory.data && (
-        <p className="zrodlo" style={{ marginTop: 16 }}>
-          Source: inventory, revision {inventory.data.revision.slice(0, 12)}, observed{" "}
-          <Czas wartosc={inventory.data.observed_at} />
-        </p>
-      )}
+      <SwiezoscModulu fragment={modul.data} />
     </>
   );
 }

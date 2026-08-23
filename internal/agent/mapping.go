@@ -51,6 +51,9 @@ func healthToProto(h Health) *agentv1.HealthSignals {
 }
 
 func inventoryToProto(f Facts, revision string, rawJSON []byte) *agentv1.InventoryReport {
+	// Blad rozbicia na moduly nie moze zabrac serwerowi calego raportu:
+	// pelna tresc jest w raw_json i zostaje wyslana tak czy inaczej.
+	fragmenty, _ := f.Fragments()
 	return &agentv1.InventoryReport{
 		Revision:      revision,
 		Full:          true,
@@ -80,6 +83,7 @@ func inventoryToProto(f Facts, revision string, rawJSON []byte) *agentv1.Invento
 		Identity:      identityToProto(f.Identity),
 		LocalAccounts: localAccountsToProto(f.LocalAccounts),
 		RawJson:       rawJSON,
+		Fragments:     fragmentsToProto(fragmenty),
 	}
 }
 
@@ -104,4 +108,19 @@ func identityToProto(state IdentityState) *agentv1.IdentityState {
 
 func timestampNow() *timestamppb.Timestamp {
 	return timestamppb.New(time.Now().UTC())
+}
+
+func fragmentsToProto(fragmenty []Fragment) []*agentv1.InventoryFragment {
+	wynik := make([]*agentv1.InventoryFragment, 0, len(fragmenty))
+	for _, fragment := range fragmenty {
+		wynik = append(wynik, &agentv1.InventoryFragment{
+			Module:            fragment.Module,
+			Revision:          fragment.Revision,
+			Source:            fragment.Source,
+			Payload:           fragment.Payload,
+			UnavailableReason: fragment.UnavailableReason,
+			ObservedAt:        timestamppb.New(fragment.ObservedAt),
+		})
+	}
+	return wynik
 }

@@ -121,6 +121,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts", s.handleListHosts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}", s.handleGetHost)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory", s.handleHostInventory)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory/{module}", s.handleHostInventoryModule)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/local-accounts", s.handleHostLocalAccounts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/audit", s.handleHostAudit)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
@@ -311,6 +312,36 @@ func (s *Server) handleHostInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, revision)
+}
+
+// handleHostInventoryModule zwraca stan jednego modulu hosta.
+//
+// Zakladka pobiera dokladnie to, co pokazuje, wraz z wlasna rewizja i wlasnym
+// znacznikiem obserwacji. Dotad wszystkie zakladki dzielily jedna date, wiec
+// operator patrzacy na pakiety widzial swiezosc czegos innego.
+func (s *Server) handleHostInventoryModule(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	_, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	if _, ok := s.authorize(w, r, authz.PermInventoryRead, scope, "host", hostID); !ok {
+		return
+	}
+	module := r.PathValue("module")
+	fragment, err := s.inventory.Fragment(r.Context(), hostID, module)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if fragment == nil {
+		// Modul niezgloszony przez hosta rozni sie od modulu pustego, wiec
+		// odpowiedzia jest brak zasobu, a nie pusty payload.
+		problem(w, http.StatusNotFound, "inventory_module_not_found",
+			"the host has not reported this inventory module")
+		return
+	}
+	writeJSON(w, http.StatusOK, fragment)
 }
 
 func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {

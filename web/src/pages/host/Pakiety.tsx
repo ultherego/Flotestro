@@ -1,24 +1,31 @@
 import { LiczbaOpcjonalna, Para, Pary } from "../../components/ui";
-import { useHost, useInventory, ZlecOperacje } from "./wspolne";
+import { SwiezoscModulu, useHost, useModul, ZlecOperacje } from "./wspolne";
+
+type StanPakietow = {
+  manager?: string;
+  installed?: number;
+  upgradable?: number;
+  security_upgradable?: number;
+  unavailable_reason?: string;
+};
 
 export function Pakiety() {
   const host = useHost();
-  const inventory = useInventory(host.id);
-  const pakiety = inventory.data?.payload?.packages;
+  const modul = useModul<StanPakietow>(host.id, "packages");
+  const pakiety = modul.data?.payload;
 
   return (
     <>
       <Pary>
         <Para etykieta="Manager">{pakiety?.manager || "—"}</Para>
-        <Para etykieta="Installed">{pakiety?.installed ?? <span className="znacznik nieznany">unknown</span>}</Para>
+        <Para etykieta="Installed">
+          {pakiety?.installed ?? <span className="znacznik nieznany">unknown</span>}
+        </Para>
         <Para etykieta="Upgradable"><LiczbaOpcjonalna wartosc={host.pending_updates} /></Para>
-        <Para etykieta="Security updates"><LiczbaOpcjonalna wartosc={host.pending_security_updates} /></Para>
+        <Para etykieta="Security updates">
+          <LiczbaOpcjonalna wartosc={host.pending_security_updates} />
+        </Para>
       </Pary>
-      {pakiety?.unavailable_reason && (
-        <p className="zrodlo" style={{ marginTop: 12 }}>
-          The state could not be determined: {pakiety.unavailable_reason}
-        </p>
-      )}
       <ZlecOperacje
         host={host}
         opis="Count available updates without changing host state."
@@ -26,6 +33,7 @@ export function Pakiety() {
         payload={{ package_plan: { refresh_metadata: true } }}
         etykieta="Plan updates"
       />
+      <SwiezoscModulu fragment={modul.data} />
     </>
   );
 }

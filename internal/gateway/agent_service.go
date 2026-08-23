@@ -291,6 +291,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			IdentitySSSDOnline: identity.SssdOnline,
 
 			LocalAccounts: localAccountsFromReport(report),
+			Fragments:     fragmentsFromReport(report),
 		})
 		if err != nil {
 			return err
@@ -972,4 +973,25 @@ func stanBazyPakietow(result *agentv1.TaskResult) (uszkodzona bool, znane bool) 
 		return len(detail.PackageRepair.GetStillBlocked()) > 0, true
 	}
 	return false, false
+}
+
+// fragmentsFromReport czyta moduly raportu. Agent sprzed podzialu ich nie
+// przysyla; pusta lista nie kasuje tego, co juz wiadomo o modulach hosta.
+func fragmentsFromReport(report *agentv1.InventoryReport) []inventory.Fragment {
+	zgloszone := report.GetFragments()
+	if len(zgloszone) == 0 {
+		return nil
+	}
+	wynik := make([]inventory.Fragment, 0, len(zgloszone))
+	for _, fragment := range zgloszone {
+		wynik = append(wynik, inventory.Fragment{
+			Module:            fragment.GetModule(),
+			Revision:          fragment.GetRevision(),
+			Source:            fragment.GetSource(),
+			Payload:           fragment.GetPayload(),
+			UnavailableReason: fragment.GetUnavailableReason(),
+			ObservedAt:        fragment.GetObservedAt().AsTime(),
+		})
+	}
+	return wynik
 }

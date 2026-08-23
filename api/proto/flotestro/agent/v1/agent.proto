@@ -186,6 +186,26 @@ message InventoryReport {
   repeated LocalAccount local_accounts = 9;
   // Pelny raport w JSON trafia do JSONB. Pola normalizowane sa wyzej.
   bytes raw_json = 7;
+  // Raport rozbity na moduly. Kazdy modul ma wlasna rewizje i wlasny znacznik
+  // obserwacji, wiec zmiana jednego nie przepisuje calosci, a interfejs wie,
+  // jak swieza jest akurat ta zakladka, ktora operator oglada.
+  repeated InventoryFragment fragments = 10;
+}
+
+// InventoryFragment to stan jednego modulu hosta.
+message InventoryFragment {
+  string module = 1;
+  // Rewizja liczona z tresci fragmentu. Identyczna tresc daje identyczna
+  // rewizje, wiec serwer nie przepisuje wiersza bez zmiany.
+  string revision = 2;
+  // Skad pochodzi odczyt, np. "agent/systemctl". Operator patrzacy na dane
+  // ma wiedziec, czym zostaly zmierzone.
+  string source = 3;
+  bytes payload = 4;
+  // Powod, dla ktorego stanu nie udalo sie ustalic. Pusty modul i modul
+  // nieodczytany to dwie rozne informacje.
+  string unavailable_reason = 5;
+  google.protobuf.Timestamp observed_at = 6;
 }
 
 // IdentityState opisuje stan integracji hosta z domena. Zbierany w cyklu

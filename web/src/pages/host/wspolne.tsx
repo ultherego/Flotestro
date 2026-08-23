@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Host, InventoryRevision, Job } from "../../lib/types";
+import type { Host, InventoryFragment, InventoryRevision, Job } from "../../lib/types";
+import { Czas } from "../../components/ui";
 
 /** Kontekst hosta pochodzi z layoutu, wiec zakladka nie pobiera go ponownie. */
 export function useHost(): Host {
@@ -16,6 +17,34 @@ export function useInventory(hostID: string) {
     queryFn: () => api.get<InventoryRevision>(`/api/v1/hosts/${hostID}/inventory`),
     retry: false,
   });
+}
+
+/**
+ * Zakladka pobiera wlasny modul inventory. Kazdy ma swoja rewizje i swoj
+ * znacznik obserwacji, wiec swiezosc opisuje to, na co operator patrzy,
+ * a nie caly raport hosta.
+ */
+export function useModul<T>(hostID: string, modul: string) {
+  return useQuery({
+    queryKey: ["inventory", hostID, modul],
+    queryFn: () => api.get<InventoryFragment<T>>(`/api/v1/hosts/${hostID}/inventory/${modul}`),
+    retry: false,
+  });
+}
+
+/**
+ * Stopka zakladki: skad dane pochodza i jak sa swieze. Nieodczytany modul
+ * mowi dlaczego - pusty modul i modul nieodczytany to dwie rozne rzeczy.
+ */
+export function SwiezoscModulu({ fragment }: { fragment?: InventoryFragment<unknown> }) {
+  if (!fragment) return null;
+  return (
+    <p className="zrodlo" style={{ marginTop: 16 }}>
+      Source: {fragment.source}, revision {fragment.revision.slice(0, 12)}, observed{" "}
+      <Czas wartosc={fragment.observed_at} />
+      {fragment.unavailable_reason && ` · could not be read: ${fragment.unavailable_reason}`}
+    </p>
+  );
 }
 
 /**

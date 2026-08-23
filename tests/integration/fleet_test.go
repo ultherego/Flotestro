@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -207,4 +208,60 @@ func maAdapter(host hostView, nazwa string) bool {
 		}
 	}
 	return false
+}
+
+// TestInventoryJestPodzieloneNaModuly sprawdza, ze zakladka moze pobrac
+// dokladnie to, co pokazuje, wraz z wlasna rewizja i wlasna swiezoscia.
+// Wczesniej wszystkie zakladki dzielily jedna date obserwacji, wiec operator
+// patrzacy na pakiety widzial swiezosc zupelnie czegos innego.
+func TestInventoryJestPodzieloneNaModuly(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	rewizje := map[string]string{}
+	for _, modul := range []string{"system", "packages", "services", "identity", "accounts", "network"} {
+		t.Run(modul, func(t *testing.T) {
+			var fragment inventoryFragment
+			h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/"+modul,
+				nil, &fragment, http.StatusOK)
+
+			if fragment.Module != modul {
+				t.Errorf("modul = %q, oczekiwano %q", fragment.Module, modul)
+			}
+			if fragment.Revision == "" {
+				t.Error("modul bez wlasnej rewizji")
+			}
+			// Dane bez zrodla nie daja sie ocenic: operator nie wie, czy
+			// patrzy na odczyt z hosta, czy na cache sprzed godziny.
+			if fragment.Source == "" {
+				t.Error("modul nie podaje zrodla odczytu")
+			}
+			if fragment.ObservedAt.IsZero() {
+				t.Error("modul nie podaje znacznika obserwacji")
+			}
+			if len(fragment.Payload) == 0 {
+				t.Error("modul bez tresci")
+			}
+			rewizje[modul] = fragment.Revision
+		})
+	}
+
+	// Rewizje modulow sa niezalezne. Gdyby wszystkie byly rowne, podzial
+	// istnialby tylko w adresie, a nie w danych.
+	widziane := map[string]bool{}
+	for modul, rewizja := range rewizje {
+		if widziane[rewizja] {
+			t.Errorf("modul %s dzieli rewizje z innym modulem", modul)
+		}
+		widziane[rewizja] = true
+	}
+}
+
+// TestNiezgloszonyModulJestBrakiemZasobu pilnuje granicy miedzy modulem
+// pustym a modulem, ktorego host nie zglosil. To dwie rozne odpowiedzi.
+func TestNiezgloszonyModulJestBrakiemZasobu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/firewall",
+		nil, nil, http.StatusNotFound)
 }

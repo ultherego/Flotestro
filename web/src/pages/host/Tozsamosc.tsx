@@ -1,10 +1,20 @@
 import { Czas, FlagaOpcjonalna, Para, Pary } from "../../components/ui";
-import { useHost, useInventory } from "./wspolne";
+import { SwiezoscModulu, useHost, useModul } from "./wspolne";
+
+type StanTozsamosci = {
+  servers?: string[];
+  sssd_running?: boolean;
+  cache_age_seconds?: number;
+  host_principal?: string;
+  keytab_kvno?: number;
+  time_synchronized?: boolean;
+  unavailable_reason?: string;
+};
 
 export function Tozsamosc() {
   const host = useHost();
-  const inventory = useInventory(host.id);
-  const tozsamosc = inventory.data?.payload?.identity ?? {};
+  const modul = useModul<StanTozsamosci>(host.id, "identity");
+  const tozsamosc = modul.data?.payload ?? {};
 
   return (
     <>
@@ -27,9 +37,7 @@ export function Tozsamosc() {
         <Para etykieta="Clock synchronized">{tozsamosc.time_synchronized ? "yes" : "no"}</Para>
         <Para etykieta="Checked"><Czas wartosc={host.identity.checked_at} /></Para>
       </Pary>
-      {tozsamosc.unavailable_reason && (
-        <p className="zrodlo" style={{ marginTop: 12 }}>Missing: {tozsamosc.unavailable_reason}</p>
-      )}
+      <SwiezoscModulu fragment={modul.data} />
     </>
   );
 }

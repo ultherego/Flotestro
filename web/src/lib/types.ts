@@ -16,6 +16,20 @@ export type Capability = {
 
 export type Capabilities = Capability[];
 
+/**
+ * Stan jednego modulu inventory. Rewizja i znacznik obserwacji sa wlasne dla
+ * modulu, wiec zakladka pokazuje swiezosc tego, co wyswietla.
+ */
+export type InventoryFragment<T> = {
+  host_id: string;
+  module: string;
+  revision: string;
+  source: string;
+  payload: T;
+  unavailable_reason?: string;
+  observed_at: string;
+};
+
 export type HostIdentity = {
   enrolled: boolean;
   domain?: string;

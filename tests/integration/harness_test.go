@@ -167,6 +167,17 @@ type hostView struct {
 	Capabilities    []hostCapability `json:"capabilities"`
 }
 
+// inventoryFragment odwzorowuje stan jednego modulu inventory.
+type inventoryFragment struct {
+	HostID            string          `json:"host_id"`
+	Module            string          `json:"module"`
+	Revision          string          `json:"revision"`
+	Source            string          `json:"source"`
+	Payload           json.RawMessage `json:"payload"`
+	UnavailableReason string          `json:"unavailable_reason"`
+	ObservedAt        time.Time       `json:"observed_at"`
+}
+
 // hostCapability odwzorowuje rejestr adapterow hosta.
 type hostCapability struct {
 	Name      string          `json:"name"`

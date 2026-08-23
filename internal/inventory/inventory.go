@@ -34,6 +34,21 @@ type Report struct {
 	// LocalAccounts jest pelna lista kont widzianych na hoscie. Nil oznacza
 	// brak danych w tym raporcie i nie kasuje poprzedniej obserwacji.
 	LocalAccounts []LocalAccount
+
+	// Fragments to raport rozbity na moduly. Pusta lista oznacza agenta
+	// sprzed podzialu i nie kasuje tego, co juz wiadomo o modulach.
+	Fragments []Fragment
+}
+
+// Fragment to stan jednego modulu hosta wraz z wlasna rewizja i swiezoscia.
+type Fragment struct {
+	HostID            string          `json:"host_id"`
+	Module            string          `json:"module"`
+	Revision          string          `json:"revision"`
+	Source            string          `json:"source"`
+	Payload           json.RawMessage `json:"payload"`
+	UnavailableReason string          `json:"unavailable_reason,omitempty"`
+	ObservedAt        time.Time       `json:"observed_at"`
 }
 
 // LocalAccount jest obserwacja konta na hoscie.
@@ -125,6 +140,10 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 		if err := replaceLocalAccounts(ctx, tx, hostID, report.LocalAccounts); err != nil {
 			return false, err
 		}
+	}
+
+	if err := saveFragments(ctx, tx, hostID, report.Fragments); err != nil {
+		return false, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -249,4 +268,88 @@ func (s *Store) Latest(ctx context.Context, hostID string) (*Revision, error) {
 		return nil, err
 	}
 	return &rev, nil
+}
+
+// saveFragments zapisuje moduly, ktore sie zmienily. Modul o tej samej rewizji
+// nie jest przepisywany: dane sa te same, wiec przesuniecie updated_at
+// udawaloby zmiane, ktorej nie bylo. Znacznik obserwacji odswiezamy zawsze -
+// to, ze stan sie nie zmienil, tez zostalo zaobserwowane teraz.
+func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment) error {
+	const query = `
+		insert into host_module_inventory
+			(host_id, module, revision, source, payload, unavailable_reason, observed_at, updated_at)
+		values ($1, $2, $3, $4, $5, nullif($6, ''), $7, now())
+		on conflict (host_id, module) do update set
+			observed_at        = excluded.observed_at,
+			revision           = excluded.revision,
+			source             = excluded.source,
+			payload            = excluded.payload,
+			unavailable_reason = excluded.unavailable_reason,
+			updated_at         = case
+				when host_module_inventory.revision = excluded.revision
+				then host_module_inventory.updated_at
+				else now()
+			end`
+	for _, fragment := range fragments {
+		if fragment.Module == "" || fragment.Revision == "" {
+			continue
+		}
+		observed := fragment.ObservedAt
+		if observed.IsZero() {
+			observed = time.Now().UTC()
+		}
+		if _, err := tx.Exec(ctx, query, hostID, fragment.Module, fragment.Revision,
+			fragment.Source, fragment.Payload, fragment.UnavailableReason, observed); err != nil {
+			return fmt.Errorf("zapis modulu %s: %w", fragment.Module, err)
+		}
+	}
+	return nil
+}
+
+// Fragment zwraca stan jednego modulu hosta. Brak wiersza oznacza modul,
+// ktorego host jeszcze nie zglosil.
+func (s *Store) Fragment(ctx context.Context, hostID, module string) (*Fragment, error) {
+	const query = `
+		select host_id, module, revision, source, payload,
+		       coalesce(unavailable_reason, ''), observed_at
+		  from host_module_inventory
+		 where host_id = $1 and module = $2`
+	var fragment Fragment
+	err := s.pool.QueryRow(ctx, query, hostID, module).Scan(&fragment.HostID,
+		&fragment.Module, &fragment.Revision, &fragment.Source, &fragment.Payload,
+		&fragment.UnavailableReason, &fragment.ObservedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &fragment, nil
+}
+
+// Fragments zwraca wszystkie moduly hosta, po nazwie.
+func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error) {
+	const query = `
+		select host_id, module, revision, source, payload,
+		       coalesce(unavailable_reason, ''), observed_at
+		  from host_module_inventory
+		 where host_id = $1
+		 order by module`
+	rows, err := s.pool.Query(ctx, query, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wynik []Fragment
+	for rows.Next() {
+		var fragment Fragment
+		if err := rows.Scan(&fragment.HostID, &fragment.Module, &fragment.Revision,
+			&fragment.Source, &fragment.Payload, &fragment.UnavailableReason,
+			&fragment.ObservedAt); err != nil {
+			return nil, err
+		}
+		wynik = append(wynik, fragment)
+	}
+	return wynik, rows.Err()
 }
