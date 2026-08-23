@@ -90,7 +90,7 @@ function Przeglad({ host }: { host: HostType }) {
         <Para etykieta="Reboot required"><FlagaOpcjonalna wartosc={host.reboot_required} /></Para>
         <Para etykieta="Failed units"><LiczbaOpcjonalna wartosc={host.failed_units} /></Para>
         <Para etykieta="Package database">
-          {host.package_database_broken ? <span className="znacznik blad">needs repair</span> : "w porzadku"}
+          {host.package_database_broken ? <span className="znacznik blad">needs repair</span> : "healthy"}
         </Para>
         <Para etykieta="Enrolled"><Czas wartosc={host.enrolled_at} /></Para>
       </Pary>

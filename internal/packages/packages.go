@@ -25,11 +25,17 @@ const (
 	ErrorTransaction    = "transaction_failed"
 	ErrorUnsupported    = "unsupported_manager"
 	ErrorDatabaseBroken = "package_database_broken"
+	ErrorModulesHidden  = "kernel_modules_hidden"
 )
 
 // ErrLocked oznacza zajeta blokade menedzera pakietow. Blokady nie obchodzimy:
 // druga transakcja na tej samej bazie pakietow moze ja uszkodzic.
 var ErrLocked = errors.New("menedzer pakietow jest zajety")
+
+// ErrModulesHidden oznacza, ze proces transakcji nie widzi drzewa modulow
+// biezacego jadra. Transakcja w takim srodowisku jest grozna: skrypty pakietow
+// przebuduja initramfs bez sterownikow i host nie wstanie po restarcie.
+var ErrModulesHidden = errors.New("drzewo modulow jadra jest niewidoczne")
 
 // Change opisuje jedna zmiane wersji pakietu.
 type Change struct {
@@ -225,6 +231,50 @@ func lockHeld(path string) (bool, bool) {
 	}
 	_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
 	return false, true
+}
+
+// modulesHidden sprawdza, czy drzewo modulow biezacego jadra jest widoczne dla
+// procesu transakcji. Namespace z ProtectKernelModules=yes podstawia w to
+// miejsce pusty katalog; update-initramfs zbuduje wtedy obraz bez sterownika
+// dysku i host przestanie sie uruchamiac.
+func modulesHidden() (bool, string) {
+	var uts unix.Utsname
+	if err := unix.Uname(&uts); err != nil {
+		return false, ""
+	}
+	release := strings.TrimRight(string(uts.Release[:]), "\x00")
+	return modulesHiddenAt("/proc/modules", "/lib/modules", release)
+}
+
+// modulesHiddenAt jest sprawdzeniem oddzielonym od sciezek systemowych.
+// Jadro monolityczne - bez zaladowanego modulu - nie jest przypadkiem
+// podejrzanym i transakcji nie blokuje. Katalogu, ktorego nie da sie
+// odczytac, tez nie uznajemy za ukryty: niewiedza nie moze zatrzymac
+// aktualizacji calej floty.
+func modulesHiddenAt(procModules, modulesRoot, release string) (bool, string) {
+	if release == "" || !kernelIsModular(procModules) {
+		return false, ""
+	}
+	dir := filepath.Join(modulesRoot, release)
+	entries, err := os.ReadDir(dir)
+	switch {
+	case os.IsNotExist(err):
+		return true, dir
+	case err != nil:
+		return false, ""
+	case len(entries) == 0:
+		return true, dir
+	}
+	return false, ""
+}
+
+// kernelIsModular mowi, czy jadro w ogole uzywa modulow.
+func kernelIsModular(procModules string) bool {
+	data, err := os.ReadFile(procModules)
+	if err != nil {
+		return false
+	}
+	return len(bytes.TrimSpace(data)) > 0
 }
 
 // diskAvailable zwraca wolne miejsce w podanym systemie plikow.

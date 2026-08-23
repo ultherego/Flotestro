@@ -261,6 +261,8 @@ func packageErrorCode(err error) string {
 	switch {
 	case errors.Is(err, packages.ErrLocked):
 		return packages.ErrorLocked
+	case errors.Is(err, packages.ErrModulesHidden):
+		return packages.ErrorModulesHidden
 	case errors.Is(err, context.DeadlineExceeded):
 		return ErrorTimeout
 	default:

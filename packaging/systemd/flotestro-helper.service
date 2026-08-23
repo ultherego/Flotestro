@@ -23,7 +23,12 @@ PrivateTmp=yes
 # musi byc dla niego widoczny. ProtectHome nie chronilby tu przed niczym:
 # proces i tak dziala jako root i to on jest granica uprawnien.
 ProtectHome=no
-ProtectKernelModules=yes
+# ProtectKernelModules=yes podstawia pusty katalog w miejsce /lib/modules.
+# Skrypty pakietow buduja z niego initramfs, wiec transakcja pakietowa
+# wyprodukowalaby obraz bez sterownika dysku i host nie wstalby po restarcie.
+# Ochrona i tak nie stanowilaby granicy: helper dziala jako root i moze
+# ladowac moduly. Granica jest gniazdo i weryfikacja SO_PEERCRED.
+ProtectKernelModules=no
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native

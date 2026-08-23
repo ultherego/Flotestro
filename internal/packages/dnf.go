@@ -117,6 +117,12 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
 	}
 
+	// Dracut buduje initramfs z tego samego drzewa modulow co initramfs-tools,
+	// wiec niewidoczne moduly grozza tu tym samym: hostem, ktory nie wstanie.
+	if hidden, dir := modulesHidden(); hidden {
+		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
+	}
+
 	before := d.installedVersions(ctx)
 
 	args := []string{"--assumeyes", "--quiet", "upgrade"}

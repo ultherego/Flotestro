@@ -174,6 +174,13 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
 	}
 
+	// Transakcja moze pociagnac przebudowe initramfs. Gdy proces nie widzi
+	// modulow jadra, obraz powstanie bez sterownika dysku i host nie wstanie
+	// po restarcie - lepiej nie zaczynac.
+	if hidden, dir := modulesHidden(); hidden {
+		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
+	}
+
 	// Wersje przed transakcja sa zapisywane zawsze, takze gdy transakcja padnie.
 	before := a.installedVersions(ctx)
 
