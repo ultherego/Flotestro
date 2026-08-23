@@ -412,3 +412,70 @@ func TestNieprawidlowyCelKontenerowyJestOdrzucany(t *testing.T) {
 			}, nil, http.StatusBadRequest)
 	}
 }
+
+// TestWdrozenieProjektuWymagaZatwierdzonegoPlanu sprawdza granice z rozdzialu
+// 7: wdrozenie manifestu uruchamia na hoscie obrazy wskazane przez operatora,
+// wiec nie wolno go zlecic bez planu, ktory ten operator obejrzal.
+func TestWdrozenieProjektuWymagaZatwierdzonegoPlanu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	if !maAdapter(host, "docker.compose") {
+		t.Skip("host testowy nie ma wtyczki compose")
+	}
+	const manifest = "services:\n  web:\n    image: nginx:alpine\n"
+
+	// Bez hasha planu wdrozenie nie ma podstawy.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "docker.compose.deploy",
+			"reason": "wdrozenie projektu testowego",
+			"payload": map[string]any{"compose": map[string]any{
+				"project": "testowy", "manifest": manifest,
+			}},
+		}, nil, http.StatusBadRequest)
+
+	// Planowanie niczego nie zmienia, wiec nie wymaga ani powodu, ani
+	// zatwierdzenia.
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "docker.compose.plan",
+		"payload": map[string]any{"compose": map[string]any{
+			"project": "testowy", "manifest": manifest,
+		}},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("plan: stan = %s, kod = %s", job.State, job.ResultErrorCode)
+	}
+	if job.RequiresApprova {
+		t.Error("planowanie projektu wymaga zatwierdzenia, choc niczego nie zmienia")
+	}
+	if len(attempts) == 0 || attempts[len(attempts)-1].Detail == nil {
+		t.Fatal("plan nie zwrocil wyniku")
+	}
+}
+
+// TestNieprawidlowyProjektJestOdrzucany sprawdza walidacje po stronie API.
+// Nazwa projektu trafia do argumentu polecenia i do nazw kontenerow.
+func TestNieprawidlowyProjektJestOdrzucany(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	if !maAdapter(host, "docker.compose") {
+		t.Skip("host testowy nie ma wtyczki compose")
+	}
+	for _, projekt := range []string{"", "Sklep", "sklep;reboot", "../etc"} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action": "docker.compose.plan",
+				"payload": map[string]any{"compose": map[string]any{
+					"project": projekt, "manifest": "services: {}",
+				}},
+			}, nil, http.StatusBadRequest)
+	}
+	// Pusty manifest tez nie jest projektem.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "docker.compose.plan",
+			"payload": map[string]any{"compose": map[string]any{
+				"project": "sklep", "manifest": "   ",
+			}},
+		}, nil, http.StatusBadRequest)
+}

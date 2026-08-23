@@ -529,6 +529,19 @@ func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// Wynik operacji kontenerowej jest osobnym polem, a nie wariantem sumy:
 	// niesie stan przed i po, ktory dotyczy takze operacji zakonczonej bledem.
+	// Wynik projektu Compose jest osobnym polem: niesie plan albo stan
+	// wdrozenia, ktory dotyczy takze operacji zakonczonej bledem.
+	if compose := result.GetComposeResult(); compose != nil && len(compose.GetPayload()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "compose",
+			"payload":            json.RawMessage(compose.GetPayload()),
+			"unavailable_reason": compose.GetUnavailableReason(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if docker := result.GetDockerActionResult(); docker != nil {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":            "docker_action",
@@ -537,6 +550,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"removed":         docker.GetRemoved(),
 			"reclaimed_bytes": docker.ReclaimedBytes,
 			"image_digest":    docker.GetImageDigest(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Wynik projektu Compose jest osobnym polem: niesie plan albo stan
+	// wdrozenia, ktory dotyczy takze operacji zakonczonej bledem.
+	if compose := result.GetComposeResult(); compose != nil && len(compose.GetPayload()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "compose",
+			"payload":            json.RawMessage(compose.GetPayload()),
+			"unavailable_reason": compose.GetUnavailableReason(),
 		})
 		if err == nil {
 			return encoded

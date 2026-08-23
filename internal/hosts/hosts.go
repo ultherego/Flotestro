@@ -40,6 +40,7 @@ const (
 	CapDNF      = "packages.dnf"
 	CapJournald = "journald"
 	CapDocker   = "docker"
+	CapCompose  = "docker.compose"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"

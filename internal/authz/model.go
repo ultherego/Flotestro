@@ -50,6 +50,10 @@ const (
 	PermDockerRemove  Permission = "docker.container.remove"
 	PermDockerPull    Permission = "docker.image.pull"
 	PermDockerPrune   Permission = "docker.prune"
+	// Wdrozenie projektu uruchamia na hoscie obrazy wskazane przez operatora,
+	// wiec jest oddzielone od reszty operacji kontenerowych.
+	PermComposePlan   Permission = "docker.compose.plan"
+	PermComposeDeploy Permission = "docker.compose.deploy"
 
 	PermCampaignRead    Permission = "campaign.read"
 	PermCampaignCreate  Permission = "campaign.create"
@@ -123,6 +127,8 @@ var rolePermissions = map[Role][]Permission{
 		// Operator prowadzi kontenery, ale ich nie kasuje: usuwanie
 		// i sprzatanie sa nieodwracalne i naleza do administratora.
 		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
+		// Operator planuje wdrozenia projektow, ale ich nie wykonuje.
+		PermComposePlan,
 		// Operator planuje aktualizacje, ale ich nie wykonuje: transakcja
 		// pakietowa jest operacja najwyzszego ryzyka i wymaga osobnego prawa.
 		PermPackagesPlan,
@@ -155,6 +161,7 @@ var rolePermissions = map[Role][]Permission{
 		// Administrator ma takze operacje nieodwracalne na kontenerach.
 		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
+		PermComposePlan, PermComposeDeploy,
 		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

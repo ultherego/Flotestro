@@ -136,6 +136,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
 		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
 		return e.applyDocker(ctx, task, task.GetDockerAction())
+	case opspec.ActionComposePlan, opspec.ActionComposeDeploy:
+		return e.applyCompose(ctx, task, task.GetCompose())
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -406,6 +408,17 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_DockerAction:
 		return akcjaDockera(action.DockerAction)
+
+	case *agentv1.TaskEnvelope_Compose:
+		typ := opspec.ActionComposePlan
+		if action.Compose.GetOperation() == agentv1.ComposeAction_OPERATION_DEPLOY {
+			typ = opspec.ActionComposeDeploy
+		}
+		return typ, opspec.Payload{Compose: &opspec.ComposePayload{
+			Project:    action.Compose.GetProject(),
+			Manifest:   action.Compose.GetManifest(),
+			PlanDigest: action.Compose.GetPlanDigest(),
+		}}, nil
 
 	case *agentv1.TaskEnvelope_ReadUnitStatus:
 		return opspec.ActionUnitStatus, opspec.Payload{

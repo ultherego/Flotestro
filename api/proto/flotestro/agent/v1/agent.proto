@@ -349,6 +349,7 @@ message TaskEnvelope {
     PackagesRepair packages_repair = 28;
     DockerRead docker_read = 29;
     DockerAction docker_action = 30;
+    ComposeAction compose = 31;
   }
 }
 
@@ -560,6 +561,7 @@ message TaskResult {
   }
   DockerReadResult docker_result = 26;
   DockerActionResult docker_action_result = 27;
+  ComposeResult compose_result = 28;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -704,6 +706,24 @@ message DockerAction {
   // wiec musi dojechac do agenta - inaczej hash planu przestaje sie zgadzac
   // i operacja zostaje odrzucona jako podmieniona.
   string container_name = 9;
+}
+
+// ComposeAction zleca plan albo wdrozenie projektu Compose.
+message ComposeAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_PLAN = 1;
+    OPERATION_DEPLOY = 2;
+  }
+  Operation operation = 1;
+  string project = 2;
+  string manifest = 3;
+  string plan_digest = 4;
+}
+
+message ComposeResult {
+  bytes payload = 1;
+  string unavailable_reason = 2;
 }
 
 message DockerActionResult {

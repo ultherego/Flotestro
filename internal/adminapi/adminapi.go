@@ -129,6 +129,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts/{id}", s.handleGetHost)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory", s.handleHostInventory)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory/{module}", s.handleHostInventoryModule)
+	// Historia manifestow projektu. Wycofanie zmiany to wdrozenie
+	// wczesniejszej wersji, wiec nie ma osobnej operacji.
+	mux.HandleFunc("GET /api/v1/hosts/{id}/compose/{project}/versions", s.handleComposeVersions)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/local-accounts", s.handleHostLocalAccounts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/audit", s.handleHostAudit)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)

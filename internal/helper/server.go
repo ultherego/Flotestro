@@ -145,6 +145,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_Compose:
+		return s.applyCompose(ctx, request, action.Compose)
+
 	case *helperv1.HelperRequest_DockerAction:
 		return s.applyDocker(ctx, request, action.DockerAction)
 

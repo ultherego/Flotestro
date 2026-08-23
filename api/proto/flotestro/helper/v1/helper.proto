@@ -36,6 +36,9 @@ message HelperRequest {
     // Operacja na silniku kontenerow. Zakres jest wyliczony, a nie podany
     // sciezka: helper nie posredniczy w dowolnym wywolaniu Engine API.
     DockerActionRequest docker_action = 30;
+    // Projekt Compose: plan albo wdrozenie. Manifest przychodzi w tresci,
+    // a nie jako sciezka na hoscie - operator zatwierdzil tresc.
+    ComposeRequest compose = 31;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -144,6 +147,7 @@ message HelperResponse {
   bool final = 16;
   DockerReadResult docker_result = 17;
   DockerActionResult docker_action_result = 18;
+  ComposeResult compose_result = 19;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -193,6 +197,26 @@ message DockerActionResult {
   repeated string removed = 3;
   optional int64 reclaimed_bytes = 4;
   string image_digest = 5;
+}
+
+message ComposeRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_PLAN = 1;
+    OPERATION_DEPLOY = 2;
+  }
+  Operation operation = 1;
+  string project = 2;
+  string manifest = 3;
+  // Hash zatwierdzonego planu. Wdrozenie bez niego nie ma podstawy.
+  string plan_digest = 4;
+}
+
+message ComposeResult {
+  // Plan albo wynik wdrozenia w postaci JSON. Struktura nalezy do modulu
+  // kontenerow; kontrakt helpera jej nie powtarza.
+  bytes payload = 1;
+  string unavailable_reason = 2;
 }
 
 message DockerReadResult {

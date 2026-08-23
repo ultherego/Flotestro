@@ -50,6 +50,11 @@ const (
 	ActionDockerPull    ActionType = "docker.image.pull"
 	// Sprzatanie usuwa wskazane obiekty, a nie wszystko, co pasuje do filtru.
 	ActionDockerPrune ActionType = "docker.prune"
+
+	// Plan projektu Compose liczy roznice miedzy stanem hosta a manifestem.
+	ActionComposePlan ActionType = "docker.compose.plan"
+	// Wdrozenie projektu jest zwiazane z konkretnym planem.
+	ActionComposeDeploy ActionType = "docker.compose.deploy"
 )
 
 // ActionVersion jest wersja kontraktu payloadu. Zmiana znaczenia pol wymaga
@@ -295,6 +300,19 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Sprzatanie usuwa dane bezpowrotnie i domyslnie nie dziala masowo.
 	ActionDockerPrune: {mutating: true, capability: "docker", permission: "docker.prune",
 		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers},
+
+	// Plan niczego nie zmienia, ale uruchamia compose na hoscie i pobiera
+	// metadane obrazow, wiec ma wlasne uprawnienie.
+	ActionComposePlan: {mutating: false, capability: "docker.compose",
+		permission: "docker.compose.plan", timeoutSeconds: 300,
+		risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 1 << 20},
+	// Wdrozenie manifestu uruchamia na hoscie obrazy wskazane przez operatora.
+	// Jest to najdalej idaca operacja tego modulu i nie wolno jej zlecic bez
+	// planu zatwierdzonego przez czlowieka.
+	ActionComposeDeploy: {mutating: true, capability: "docker.compose",
+		permission: "docker.compose.deploy", timeoutSeconds: 1800,
+		risk: RiskCritical, lockClass: LockContainers, requiresPlan: true,
+		maxOutputBytes: 1 << 20},
 }
 
 // AllActions zwraca posortowana liste obslugiwanych operacji.
@@ -310,6 +328,15 @@ func AllActions() []ActionType {
 	}
 	return actions
 }
+
+// nazwaProjektuCompose powtarza wzorzec modulu kontenerow. Nazwa trafia do
+// argumentu polecenia i do nazw kontenerow.
+var nazwaProjektuCompose = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+// maksymalnyManifestCompose ogranicza rozmiar manifestu. Plik wiekszy od tego
+// nie jest juz konfiguracja projektu, tylko czyms, czego operator nie
+// przeczyta przed zatwierdzeniem.
+const maksymalnyManifestCompose = 256 << 10
 
 // identyfikatorKontenera dopuszcza wylacznie szesnastkowy identyfikator
 // silnika. Identyfikator trafia do sciezki zapytania Engine API, wiec nie
@@ -437,6 +464,20 @@ type Payload struct {
 	DockerContainer *DockerContainerPayload `json:"docker_container,omitempty"`
 	DockerImage     *DockerImagePayload     `json:"docker_image,omitempty"`
 	DockerPrune     *DockerPrunePayload     `json:"docker_prune,omitempty"`
+	Compose         *ComposePayload         `json:"compose,omitempty"`
+}
+
+// ComposePayload niesie manifest projektu Compose.
+//
+// Manifest jest czescia payloadu, a nie odwolaniem do pliku na hoscie:
+// operator zatwierdza tresc, ktora obejrzal, a hash payloadu wiaze
+// zatwierdzenie wlasnie z nia.
+type ComposePayload struct {
+	Project  string `json:"project"`
+	Manifest string `json:"manifest"`
+	// PlanDigest wiaze wdrozenie z planem. Pusty jest dopuszczalny wylacznie
+	// przy planowaniu; wdrozenie bez niego nie ma podstawy.
+	PlanDigest string `json:"plan_digest,omitempty"`
 }
 
 // DockerContainerPayload wskazuje kontener operacji.
@@ -626,6 +667,27 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu docker_image", action)
 		}
 		return poprawneOdwolanieObrazu(payload.DockerImage.Reference)
+
+	case ActionComposePlan, ActionComposeDeploy:
+		if payload.Compose == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu compose", action)
+		}
+		if !nazwaProjektuCompose.MatchString(payload.Compose.Project) {
+			return fmt.Errorf("nieprawidlowa nazwa projektu %q", payload.Compose.Project)
+		}
+		if strings.TrimSpace(payload.Compose.Manifest) == "" {
+			return fmt.Errorf("manifest projektu jest pusty")
+		}
+		if len(payload.Compose.Manifest) > maksymalnyManifestCompose {
+			return fmt.Errorf("manifest projektu jest zbyt duzy (%d bajtow)",
+				len(payload.Compose.Manifest))
+		}
+		// Wdrozenie bez planu nie ma podstawy: operator zatwierdzilby zmiane,
+		// ktorej nie widzial.
+		if action == ActionComposeDeploy && payload.Compose.PlanDigest == "" {
+			return fmt.Errorf("wdrozenie projektu wymaga hasha zatwierdzonego planu")
+		}
+		return nil
 
 	case ActionDockerPrune:
 		if payload.DockerPrune == nil {

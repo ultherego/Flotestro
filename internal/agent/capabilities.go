@@ -8,6 +8,9 @@ const (
 	CapDNF      = "packages.dnf"
 	CapJournald = "journald"
 	CapDocker   = "docker"
+	// Compose jest osobnym adapterem: silnik kontenerow bywa bez niego,
+	// a projekt bez wtyczki compose nie da sie ani zaplanowac, ani wdrozyc.
+	CapCompose = "docker.compose"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -109,6 +112,7 @@ func DetectCapabilities() Capabilities {
 	apt := isExecutable("/usr/bin/apt-get")
 	dnf := isExecutable("/usr/bin/dnf") || isExecutable("/usr/bin/dnf5")
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
+	compose := docker && wtyczkaCompose() != ""
 	journald := exists("/run/systemd/journal/socket")
 
 	return Capabilities{
@@ -147,19 +151,42 @@ func DetectCapabilities() Capabilities {
 			Reason:    powod(journald, "this host has no journald socket"),
 		},
 		{
+			Name:      CapCompose,
+			Version:   wersjaAdaptera,
+			Available: compose,
+			Reason: powod(compose,
+				"this host has no Docker Compose plugin"),
+		},
+		{
 			Name:      CapDocker,
 			Version:   wersjaAdaptera,
 			Available: docker,
-			// Adapter czyta stan silnika, ale operacji na kontenerach jeszcze
-			// nie wykonuje. Zakladka bez przyciskow i zakladka wylaczona to
-			// dwie rozne informacje dla operatora.
-			ReadOnly: true,
-			Features: map[string]bool{"read": docker, "write": false},
-			Reason: powodGdy(docker,
-				"containers can be inspected; changing them is not implemented yet",
-				"this host has no Docker socket"),
+			// Adapter czyta stan silnika i wykonuje operacje na kontenerach.
+			// Projekty Compose sa osobna cecha: silnik bywa bez wtyczki.
+			Features: map[string]bool{"read": docker, "write": docker, "compose": compose},
+			Reason:   powod(docker, "this host has no Docker socket"),
 		},
 	}
+}
+
+// sciezkiWtyczkiCompose to miejsca, w ktorych dystrybucje instaluja wtyczke.
+var sciezkiWtyczkiCompose = []string{
+	"/usr/libexec/docker/cli-plugins/docker-compose",
+	"/usr/lib/docker/cli-plugins/docker-compose",
+	"/usr/local/lib/docker/cli-plugins/docker-compose",
+	"/root/.docker/cli-plugins/docker-compose",
+}
+
+// wtyczkaCompose zwraca sciezke wtyczki albo pustke. Sprawdzamy obecnosc
+// pliku, a nie uruchamiamy narzedzia: wykrywanie zdolnosci nie moze
+// uruchamiac procesow.
+func wtyczkaCompose() string {
+	for _, sciezka := range sciezkiWtyczkiCompose {
+		if isExecutable(sciezka) {
+			return sciezka
+		}
+	}
+	return ""
 }
 
 // powod zwraca wyjasnienie tylko dla adaptera niedostepnego.

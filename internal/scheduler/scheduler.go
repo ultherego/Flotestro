@@ -304,6 +304,20 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionComposePlan, opspec.ActionComposeDeploy:
+		operacja := agentv1.ComposeAction_OPERATION_PLAN
+		if action == opspec.ActionComposeDeploy {
+			operacja = agentv1.ComposeAction_OPERATION_DEPLOY
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Compose{
+			Compose: &agentv1.ComposeAction{
+				Operation:  operacja,
+				Project:    payload.Compose.Project,
+				Manifest:   payload.Compose.Manifest,
+				PlanDigest: payload.Compose.PlanDigest,
+			},
+		}
+
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
 		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
 		envelope.Action = &agentv1.TaskEnvelope_DockerAction{
