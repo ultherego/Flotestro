@@ -431,6 +431,20 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Konfiguracja sshd trafia do inwentarza po kazdej zmianie: zakladka ma
+	// pokazac stan po operacji, a nie ten sprzed cyklu.
+	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "ssh",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(serwer.GetSnapshot())),
+			Source:     "agent/sshd",
+			Payload:    serwer.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano konfiguracji sshd", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Obraz przestrzeni dyskowej trafia do inwentarza: kazda operacja odsyla
 	// stan po sobie, wiec zakladka nie czeka na nastepny cykl.
 	if przestrzen := result.GetStorageResult(); przestrzen != nil && len(przestrzen.GetSnapshot()) > 0 {
@@ -692,6 +706,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":    "storage",
 			"message": przestrzen.GetMessage(),
 			"output":  przestrzen.GetOutput(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Ustawienia, ktore nie doszly do skutku, sa trescia wyniku: zmiana
+	// zapisana i przeslonieta wyglada z zewnatrz tak samo jak udana.
+	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetMismatches()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":       "ssh",
+			"message":    serwer.GetMessage(),
+			"mismatches": serwer.GetMismatches(),
 		})
 		if err == nil {
 			return encoded

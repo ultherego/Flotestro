@@ -46,6 +46,7 @@ message HelperRequest {
     DnsRequest dns = 36;
     FirewallRequest firewall = 37;
     StorageRequest storage = 38;
+    SshRequest ssh = 39;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -179,6 +180,7 @@ message HelperResponse {
   DnsResult dns_result = 24;
   FirewallResult firewall_result = 25;
   StorageResult storage_result = 26;
+  SshResult ssh_result = 27;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -446,6 +448,44 @@ message StorageResult {
   string message = 2;
   // Output niesie wyjscie narzedzia sprawdzajacego filesystem.
   string output = 3;
+}
+
+// SshRequest opisuje operacje na serwerze sshd.
+//
+// Konfiguracja idzie do wlasnego pliku w sshd_config.d, a nie do
+// sshd_config: plik glowny nalezy do dystrybucji i administratora hosta.
+message SshRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_APPLY = 2;
+    OPERATION_ROTATE_HOSTKEY = 3;
+  }
+  Operation operation = 1;
+  string port = 2;
+  string permit_root_login = 3;
+  string password_authentication = 4;
+  string pubkey_authentication = 5;
+  string kbd_interactive_authentication = 6;
+  string max_auth_tries = 7;
+  repeated string allow_users = 8;
+  repeated string allow_groups = 9;
+  repeated string deny_users = 10;
+  // AllowLockout pozwala zapisac konfiguracje, po ktorej nie zostanie zadna
+  // dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
+  bool allow_lockout = 11;
+  // KeyType wskazuje klucz hosta do wymiany, np. "ed25519".
+  string key_type = 12;
+}
+
+message SshResult {
+  // Stan sshd w postaci JSON. Struktura nalezy do modulu.
+  bytes snapshot = 1;
+  string message = 2;
+  // Mismatches wylicza ustawienia, ktore nie doszly do skutku mimo zapisu:
+  // w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
+  // nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
+  repeated string mismatches = 3;
 }
 
 message ProcessSignalRequest {

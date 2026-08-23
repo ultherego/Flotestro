@@ -102,6 +102,11 @@ const (
 	PermStorageFilesystemWrite Permission = "storage.filesystem.write"
 	PermStorageDestructive     Permission = "storage.destructive"
 	PermStorageWipe            Permission = "storage.wipe"
+	// Serwer sshd. Zla konfiguracja odcina administracje hosta, a wymiana
+	// klucza zmienia jego tozsamosc widziana przez wszystkich klientow.
+	PermSSHRead          Permission = "ssh.read"
+	PermSSHConfigWrite   Permission = "ssh.config.write"
+	PermSSHHostKeyRotate Permission = "ssh.hostkey.rotate"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -177,7 +182,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -205,7 +210,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -243,6 +248,7 @@ var rolePermissions = map[Role][]Permission{
 		PermStorageRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
 		PermStorageLVMWrite, PermStorageFilesystemWrite,
 		PermStorageDestructive, PermStorageWipe,
+		PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

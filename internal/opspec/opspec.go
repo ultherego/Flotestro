@@ -14,6 +14,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 )
 
@@ -64,6 +65,10 @@ const (
 	ActionFilesystemResize ActionType = "filesystem.resize"
 	ActionFilesystemCreate ActionType = "filesystem.create"
 	ActionDiskWipe         ActionType = "disk.wipe"
+
+	ActionSSHConfigPlan    ActionType = "ssh.config.plan"
+	ActionSSHConfigApply   ActionType = "ssh.config.apply"
+	ActionSSHHostKeyRotate ActionType = "ssh.hostkey.rotate"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -381,6 +386,19 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
 	ActionDiskWipe: {mutating: true, capability: "storage", permission: "storage.wipe",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
+
+	// Odczyt konfiguracji sshd przed zmiana. Plan nie dotyka hosta.
+	ActionSSHConfigPlan: {mutating: false, capability: "sshd", permission: "ssh.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 128 << 10},
+	// Zla konfiguracja sshd odcina administracje hosta i nie ma czym jej
+	// naprawic zdalnie - tak samo jak zla regula zapory.
+	ActionSSHConfigApply: {mutating: true, capability: "sshd", permission: "ssh.config.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+	// Wymiana klucza hosta zmienia jego tozsamosc widziana przez wszystkich
+	// klientow: kazdy zobaczy ostrzezenie known_hosts, a automatyzacja oparta
+	// o odcisk przestanie dzialac.
+	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -904,7 +922,28 @@ type Payload struct {
 	DNS             *DNSPayload             `json:"dns,omitempty"`
 	Firewall        *FirewallPayload        `json:"firewall,omitempty"`
 	Storage         *StoragePayload         `json:"storage,omitempty"`
+	SSH             *SSHPayload             `json:"ssh,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// SSHPayload opisuje zmiane konfiguracji serwera sshd.
+//
+// Puste pole oznacza "nie zmieniaj": panel nie przepisuje calej konfiguracji
+// serwera, tylko te ustawienia, o ktore operator poprosil.
+type SSHPayload struct {
+	Port                   string   `json:"port,omitempty"`
+	PermitRootLogin        string   `json:"permit_root_login,omitempty"`
+	PasswordAuthentication string   `json:"password_authentication,omitempty"`
+	PubkeyAuthentication   string   `json:"pubkey_authentication,omitempty"`
+	KbdInteractive         string   `json:"kbd_interactive_authentication,omitempty"`
+	MaxAuthTries           string   `json:"max_auth_tries,omitempty"`
+	AllowUsers             []string `json:"allow_users,omitempty"`
+	AllowGroups            []string `json:"allow_groups,omitempty"`
+	DenyUsers              []string `json:"deny_users,omitempty"`
+	// AllowLockout pozwala zapisac konfiguracje, po ktorej nie zostanie zadna
+	// dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
+	AllowLockout bool   `json:"allow_lockout,omitempty"`
+	KeyType      string `json:"key_type,omitempty"`
 }
 
 // StoragePayload opisuje operacje na przestrzeni dyskowej.
@@ -1341,6 +1380,35 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionSSHConfigPlan:
+		return nil
+
+	case ActionSSHConfigApply:
+		if payload.SSH == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu ssh", action)
+		}
+		return sshmodul.Waliduj(sshmodul.Ustawienia{
+			Port:                   payload.SSH.Port,
+			PermitRootLogin:        payload.SSH.PermitRootLogin,
+			PasswordAuthentication: payload.SSH.PasswordAuthentication,
+			PubkeyAuthentication:   payload.SSH.PubkeyAuthentication,
+			KbdInteractive:         payload.SSH.KbdInteractive,
+			MaxAuthTries:           payload.SSH.MaxAuthTries,
+			AllowUsers:             payload.SSH.AllowUsers,
+			AllowGroups:            payload.SSH.AllowGroups,
+			DenyUsers:              payload.SSH.DenyUsers,
+		})
+
+	case ActionSSHHostKeyRotate:
+		if payload.SSH == nil || payload.SSH.KeyType == "" {
+			return fmt.Errorf("wymiana klucza wymaga jego typu")
+		}
+		switch payload.SSH.KeyType {
+		case "ed25519", "rsa", "ecdsa":
+			return nil
+		}
+		return fmt.Errorf("panel wymienia klucze ed25519, rsa albo ecdsa, nie %q", payload.SSH.KeyType)
 
 	case ActionStoragePlan:
 		return nil

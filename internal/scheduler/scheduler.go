@@ -322,6 +322,31 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
+		opspec.ActionSSHHostKeyRotate:
+		operacja := agentv1.SshAction_OPERATION_READ
+		switch action {
+		case opspec.ActionSSHConfigApply:
+			operacja = agentv1.SshAction_OPERATION_APPLY
+		case opspec.ActionSSHHostKeyRotate:
+			operacja = agentv1.SshAction_OPERATION_ROTATE_HOSTKEY
+		}
+		serwer := &agentv1.SshAction{Operation: operacja}
+		if payload.SSH != nil {
+			serwer.Port = payload.SSH.Port
+			serwer.PermitRootLogin = payload.SSH.PermitRootLogin
+			serwer.PasswordAuthentication = payload.SSH.PasswordAuthentication
+			serwer.PubkeyAuthentication = payload.SSH.PubkeyAuthentication
+			serwer.KbdInteractiveAuthentication = payload.SSH.KbdInteractive
+			serwer.MaxAuthTries = payload.SSH.MaxAuthTries
+			serwer.AllowUsers = payload.SSH.AllowUsers
+			serwer.AllowGroups = payload.SSH.AllowGroups
+			serwer.DenyUsers = payload.SSH.DenyUsers
+			serwer.AllowLockout = payload.SSH.AllowLockout
+			serwer.KeyType = payload.SSH.KeyType
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Ssh{Ssh: serwer}
+
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
 		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
 		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,

@@ -101,6 +101,7 @@ func main() {
 	agent.SetGatewayURL(*gatewayURL)
 	agent.SetFirewallProbe(executor.ProbeFirewall)
 	agent.SetLVMProbe(executor.ProbeLVM)
+	agent.SetSSHProbe(executor.ProbeSSH)
 
 	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
 	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.

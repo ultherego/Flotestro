@@ -27,6 +27,8 @@ const (
 	// Przestrzen dyskowa. Odczyt wymaga lsblk; LVM i macierze sa osobnymi
 	// cechami, bo host bywa bez nich.
 	CapStorage = "storage"
+	// Serwer sshd. Konfiguracja idzie do wlasnego pliku w sshd_config.d.
+	CapSSHD = "sshd"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -177,6 +179,10 @@ func DetectCapabilities() Capabilities {
 	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
 	nft := exists("/usr/sbin/nft")
 	lsblk := exists("/usr/bin/lsblk")
+	sshd := exists("/usr/sbin/sshd")
+	// Panel zapisuje wylacznie do wlasnego pliku, wiec bez katalogu
+	// dolaczanego moglby tylko czytac: sshd_config nalezy do dystrybucji.
+	dropIn := isDir("/etc/ssh/sshd_config.d")
 	lvm := exists("/usr/sbin/vgs") && exists("/usr/sbin/lvs")
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
@@ -225,6 +231,14 @@ func DetectCapabilities() Capabilities {
 				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
 			},
 			Reason: powodSieciowy(odczytSieci, zapisSieci),
+		},
+		{
+			Name:      CapSSHD,
+			Version:   wersjaAdaptera,
+			Available: sshd,
+			ReadOnly:  !dropIn,
+			Features:  map[string]bool{"dropin": dropIn, "hostkeys": exists("/usr/bin/ssh-keygen")},
+			Reason:    powodSSHD(sshd, dropIn),
 		},
 		{
 			Name:      CapStorage,
@@ -347,6 +361,18 @@ func powodResolvera(resolver bool, adapter string) string {
 	if adapter != network.AdapterNetworkManager {
 		return "resolver changes need NetworkManager; without it a write to resolv.conf " +
 			"would be overwritten by whoever owns the file"
+	}
+	return ""
+}
+
+// powodSSHD tlumaczy, czego brakuje modulowi sshd.
+func powodSSHD(sshd, dropIn bool) string {
+	if !sshd {
+		return "this host has no sshd"
+	}
+	if !dropIn {
+		return "this sshd has no sshd_config.d include; the panel would have to rewrite " +
+			"the distribution's sshd_config, so it only reads here"
 	}
 	return ""
 }

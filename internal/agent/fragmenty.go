@@ -19,6 +19,7 @@ const (
 	ModulDNS        = "dns"
 	ModulFirewall   = "firewall"
 	ModulStorage    = "storage"
+	ModulSSH        = "ssh"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
 )
@@ -91,6 +92,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulFirewall, "agent/nftables", powodZapory(f), zapora(f)},
 
 		{ModulStorage, "agent/lsblk+mountinfo", powodPrzestrzeni(f), przestrzen(f)},
+
+		{ModulSSH, "agent/sshd", powodSSH(f), konfiguracjaSSH(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -207,4 +210,20 @@ func przestrzen(f Facts) any {
 		return struct{}{}
 	}
 	return f.Storage
+}
+
+// powodSSH zwraca powod, dla ktorego konfiguracji sshd nie ustalono.
+func powodSSH(f Facts) string {
+	if f.SSH == nil {
+		return "this host has no sshd"
+	}
+	return f.SSH.UnavailableReason
+}
+
+// konfiguracjaSSH zwraca konfiguracje serwera albo pusty stan.
+func konfiguracjaSSH(f Facts) any {
+	if f.SSH == nil {
+		return struct{}{}
+	}
+	return f.SSH
 }

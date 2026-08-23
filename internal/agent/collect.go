@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 )
 
 // privilegedIdentity jest opcjonalnym zrodlem danych wymagajacych roota.
@@ -131,6 +132,16 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	// dlatego czytamy calosc raz na cykl inwentarza, a nie przy heartbeacie.
 	przestrzen := ZbierzPrzestrzen(ctx)
 	facts.Storage = &przestrzen
+
+	// Konfiguracje sshd czyta helper: "sshd -T" wymaga roota, bo serwer
+	// czyta przy okazji klucze hosta.
+	if caps.Available(CapSSHD) && sshProbe != nil {
+		if snapshot, err := sshProbe(ctx); err == nil {
+			facts.SSH = &snapshot
+		} else {
+			facts.SSH = &sshmodul.Snapshot{UnavailableReason: "helper: " + err.Error()}
+		}
+	}
 
 	// Zapore czyta helper: tablice nftables sa widoczne wylacznie dla roota.
 	// Odczyt jest tani, ale liczniki rosna same, wiec nie robimy z niego

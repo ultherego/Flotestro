@@ -158,6 +158,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
+		opspec.ActionSSHHostKeyRotate:
+		return e.applySSH(ctx, task, action, payload.SSH)
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
 		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
 		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
@@ -513,6 +516,29 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Ssh:
+		serwer := action.Ssh
+		typ := opspec.ActionSSHConfigPlan
+		switch serwer.GetOperation() {
+		case agentv1.SshAction_OPERATION_APPLY:
+			typ = opspec.ActionSSHConfigApply
+		case agentv1.SshAction_OPERATION_ROTATE_HOSTKEY:
+			typ = opspec.ActionSSHHostKeyRotate
+		}
+		return typ, opspec.Payload{SSH: &opspec.SSHPayload{
+			Port:                   serwer.GetPort(),
+			PermitRootLogin:        serwer.GetPermitRootLogin(),
+			PasswordAuthentication: serwer.GetPasswordAuthentication(),
+			PubkeyAuthentication:   serwer.GetPubkeyAuthentication(),
+			KbdInteractive:         serwer.GetKbdInteractiveAuthentication(),
+			MaxAuthTries:           serwer.GetMaxAuthTries(),
+			AllowUsers:             serwer.GetAllowUsers(),
+			AllowGroups:            serwer.GetAllowGroups(),
+			DenyUsers:              serwer.GetDenyUsers(),
+			AllowLockout:           serwer.GetAllowLockout(),
+			KeyType:                serwer.GetKeyType(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Storage:

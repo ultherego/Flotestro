@@ -362,6 +362,7 @@ message TaskEnvelope {
     DnsAction dns = 40;
     FirewallAction firewall = 41;
     StorageAction storage = 42;
+    SshAction ssh = 43;
   }
 }
 
@@ -597,6 +598,7 @@ message TaskResult {
   DnsResult dns_result = 34;
   FirewallResult firewall_result = 35;
   StorageResult storage_result = 36;
+  SshResult ssh_result = 37;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -935,6 +937,34 @@ message StorageResult {
   bytes snapshot = 1;
   string message = 2;
   string output = 3;
+}
+
+// SshAction opisuje operacje na serwerze sshd.
+message SshAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_APPLY = 2;
+    OPERATION_ROTATE_HOSTKEY = 3;
+  }
+  Operation operation = 1;
+  string port = 2;
+  string permit_root_login = 3;
+  string password_authentication = 4;
+  string pubkey_authentication = 5;
+  string kbd_interactive_authentication = 6;
+  string max_auth_tries = 7;
+  repeated string allow_users = 8;
+  repeated string allow_groups = 9;
+  repeated string deny_users = 10;
+  bool allow_lockout = 11;
+  string key_type = 12;
+}
+
+message SshResult {
+  bytes snapshot = 1;
+  string message = 2;
+  repeated string mismatches = 3;
 }
 
 message PackageLifecycle {

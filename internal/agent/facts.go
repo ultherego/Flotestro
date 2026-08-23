@@ -25,6 +25,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 )
 
@@ -94,6 +95,8 @@ type Facts struct {
 	// Network jest obrazem interfejsow i tras z jadra. Brak wartosci oznacza
 	// cykl, w ktorym stanu nie zbierano.
 	Network *network.Snapshot `json:"network,omitempty"`
+	// SSH jest konfiguracja serwera sshd.
+	SSH *sshmodul.Snapshot `json:"ssh,omitempty"`
 	// Storage jest obrazem przestrzeni dyskowej hosta.
 	Storage *storage.Snapshot `json:"storage,omitempty"`
 	// Firewall jest stanem zapory hosta.
