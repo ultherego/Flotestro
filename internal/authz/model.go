@@ -43,6 +43,9 @@ const (
 	PermUnitMaskWrite   Permission = "unit.mask.write"
 	// Odczyt pliku logu siega poza dziennik systemowy.
 	PermLogFileRead Permission = "logfile.read"
+	// Podglad na zywo trzyma proces na hoscie przez caly czas trwania, wiec
+	// jest oddzielony od jednorazowego odczytu dziennika.
+	PermJournalFollow Permission = "journal.follow"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -168,7 +171,8 @@ var rolePermissions = map[Role][]Permission{
 		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
 		PermComposePlan, PermComposeDeploy,
-		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite, PermLogFileRead,
+		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,
+		PermJournalFollow, PermLogFileRead,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

@@ -23,6 +23,9 @@ const (
 	ActionReadJournal ActionType = "journal.read"
 	// Odczyt pliku logu jest ograniczony allowlista administratora hosta.
 	ActionReadLogFile ActionType = "logfile.read"
+	// Podglad dziennika na zywo. Strumien jest krotkotrwaly i ograniczony
+	// z gory: czasem, tempem i liczba linii.
+	ActionFollowJournal ActionType = "journal.follow"
 
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
@@ -236,6 +239,10 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Podglad na zywo trzyma na hoscie proces przez caly czas trwania, wiec
+	// jest wyzej niz jednorazowy odczyt i ma wlasne uprawnienie.
+	ActionFollowJournal: {mutating: false, capability: "journald", permission: "journal.follow",
+		timeoutSeconds: 300, risk: RiskMedium, maxOutputBytes: 1 << 20},
 	// Odczyt pliku siega poza dziennik systemowy, wiec ma wyzsze ryzyko
 	// i wlasne uprawnienie: allowlista bywa szeroka, a log aplikacji miewa
 	// w sobie dane, ktorych dziennik nie ma.
@@ -348,6 +355,36 @@ func AllActions() []ActionType {
 	}
 	return actions
 }
+
+// maksymalnyPodgladSekund ogranicza jeden podglad na zywo. Strumien bez
+// gornej granicy trzymalby proces na hoscie takze wtedy, gdy operator dawno
+// zamknal karte przegladarki.
+const maksymalnyPodgladSekund = 900
+
+// validateJournalPayload sprawdza filtry wspolne dla odczytu i podgladu.
+func validateJournalPayload(payload *JournalPayload) error {
+	if priority := payload.MaxPriority; priority != nil && *priority > 7 {
+		return fmt.Errorf("priorytet syslog musi byc z zakresu 0-7")
+	}
+	if payload.Unit != "" {
+		if err := validateUnitName(payload.Unit); err != nil {
+			return err
+		}
+	}
+	// Wartosc "since" trafia do argumentu journalctl. Nie idzie przez powloke,
+	// ale wezsza walidacja i tak jest tansza niz ufanie.
+	if payload.Since != "" && !wzorzecOkresu.MatchString(payload.Since) {
+		return fmt.Errorf("nieprawidlowy zakres czasu %q", payload.Since)
+	}
+	return nil
+}
+
+// wzorzecOkresu dopuszcza formaty przyjmowane przez journalctl: znacznik
+// czasu, wyrazenie wzgledne i slowa kluczowe.
+var wzorzecOkresu = regexp.MustCompile(
+	`^(-?\d+ ?(s|sec|second|seconds|m|min|minute|minutes|h|hour|hours|d|day|days|w|week|weeks)( ago)?` +
+		`|yesterday|today|now` +
+		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?)$`)
 
 // validateLogPath odrzuca sciezki, ktorych host i tak nie przyjmie.
 // Rozstrzygajaca jest allowlista na hoscie; panel odsiewa to, co nie jest
@@ -480,6 +517,10 @@ type JournalPayload struct {
 	// MaxPriority wg syslog: 0 emerg ... 7 debug. Pusty oznacza brak filtra.
 	MaxPriority *uint32 `json:"max_priority,omitempty"`
 	Since       string  `json:"since,omitempty"`
+	// FollowSeconds ogranicza podglad na zywo. Zero oznacza limit domyslny;
+	// strumien bez gornej granicy trzymalby proces na hoscie w nieskonczonosc,
+	// takze wtedy, gdy nikt juz nie patrzy.
+	FollowSeconds uint32 `json:"follow_seconds,omitempty"`
 }
 
 // PackagePlanPayload opisuje planowanie aktualizacji.
@@ -830,6 +871,16 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return validatePackageNames(payload.PackageUpgrade.Packages)
 
+	case ActionFollowJournal:
+		if payload.Journal == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu journal", action)
+		}
+		if payload.Journal.FollowSeconds > maksymalnyPodgladSekund {
+			return fmt.Errorf("podglad na zywo nie moze trwac dluzej niz %d s",
+				maksymalnyPodgladSekund)
+		}
+		return validateJournalPayload(payload.Journal)
+
 	case ActionReadJournal:
 		if payload.Journal == nil {
 			return fmt.Errorf("operacja %s wymaga payloadu journal", action)
@@ -837,9 +888,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Journal.Lines == 0 || payload.Journal.Lines > 10000 {
 			return fmt.Errorf("liczba linii musi byc z zakresu 1-10000")
 		}
-		if priority := payload.Journal.MaxPriority; priority != nil && *priority > 7 {
-			return fmt.Errorf("priorytet syslog musi byc z zakresu 0-7")
-		}
+		return validateJournalPayload(payload.Journal)
 	default:
 		if payload.Unit == nil {
 			return fmt.Errorf("operacja %s wymaga payloadu unit", action)

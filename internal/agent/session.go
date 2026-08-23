@@ -215,6 +215,15 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		opts.Executor.facts = currentFacts
 		// Postep idzie tym samym strumieniem co wyniki. Bledu wysylki nie
 		// eskalujemy: utrata podgladu nie moze przerwac trwajacej operacji.
+		// Podglad dziennika idzie tym samym strumieniem co wyniki.
+		opts.Executor.logLines = func(linie *agentv1.TaskLogLines) {
+			if err := send(&agentv1.AgentMessage{
+				Payload: &agentv1.AgentMessage_TaskLogLines{TaskLogLines: linie},
+			}); err != nil {
+				opts.Log.Debug("nie wyslano podgladu dziennika",
+					"task_id", linie.GetTaskId(), "err", err)
+			}
+		}
 		opts.Executor.progress = func(p *agentv1.TaskProgress) {
 			if err := send(&agentv1.AgentMessage{
 				Payload: &agentv1.AgentMessage_TaskProgress{TaskProgress: p},
@@ -284,11 +293,18 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				}()
 
 			case *agentv1.ServerMessage_CancelTask:
-				// Nie kazda operacja systemowa da sie bezpiecznie przerwac,
-				// wiec anulowanie jest odnotowane, a nie wymuszane.
+				// Nie kazda operacja systemowa da sie bezpiecznie przerwac -
+				// transakcji pakietowej nie wolno urwac w polowie - wiec
+				// anulowanie dziala tam, gdzie zostalo zgloszone jako
+				// bezpieczne, a poza tym zostaje odnotowane.
+				przerwane := false
+				if opts.Executor != nil && opts.Executor.cancels != nil {
+					przerwane = opts.Executor.cancels.Anuluj(payload.CancelTask.GetTaskId())
+				}
 				opts.Log.Info("zadano anulowania zadania",
 					"task_id", payload.CancelTask.GetTaskId(),
-					"reason", payload.CancelTask.GetReason())
+					"reason", payload.CancelTask.GetReason(),
+					"przerwane", przerwane)
 			}
 		}
 	}()

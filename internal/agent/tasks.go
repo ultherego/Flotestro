@@ -43,11 +43,19 @@ type TaskExecutor struct {
 	// progress melduje postep dlugiej operacji do control plane. Nil oznacza
 	// brak sesji - postep bez odbiorcy nie jest zbierany.
 	progress func(*agentv1.TaskProgress)
+	// logLines przekazuje podglad dziennika. Nil oznacza brak sesji, a wtedy
+	// podglad nie jest w ogole uruchamiany: host nie ma pracowac dla nikogo.
+	logLines func(*agentv1.TaskLogLines)
+	// cancels pozwala przerwac zadania, ktore da sie bezpiecznie przerwac.
+	cancels *anulowania
 }
 
 func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	facts func() Facts, log *slog.Logger) *TaskExecutor {
-	return &TaskExecutor{helper: helperClient, journal: journal, facts: facts, log: log}
+	return &TaskExecutor{
+		helper: helperClient, journal: journal, facts: facts, log: log,
+		cancels: nowaTablicaAnulowan(),
+	}
 }
 
 // Execute realizuje zadanie i zawsze zwraca wynik - takze wtedy, gdy zadanie
@@ -142,6 +150,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.applyUnitToggle(ctx, task, action, task.GetUnitToggle())
 	case opspec.ActionReadLogFile:
 		return e.readLogFile(ctx, task, payload.LogFile)
+	case opspec.ActionFollowJournal:
+		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -459,6 +469,15 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		return typ, opspec.Payload{UnitToggle: &opspec.UnitToggle{
 			Unit:    action.UnitToggle.GetUnit(),
 			Enabled: action.UnitToggle.GetValue(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_FollowJournal:
+		follow := action.FollowJournal
+		return opspec.ActionFollowJournal, opspec.Payload{Journal: &opspec.JournalPayload{
+			Unit:          follow.GetUnit(),
+			Lines:         follow.GetBacklogLines(),
+			MaxPriority:   follow.MaxPriority,
+			FollowSeconds: follow.GetFollowSeconds(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_ReadLogFile:

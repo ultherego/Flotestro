@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -332,6 +334,16 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		s.fail(w, err)
 		return
 	}
+
+	// Anulowanie zapisane w bazie nie zatrzymuje pracy na hoscie. Operacja
+	// juz dostarczona trwa dalej - podglad dziennika trzymalby proces przez
+	// caly swoj limit czasu, mimo ze nikt juz nie patrzy. Prosba o przerwanie
+	// idzie wiec takze do agenta; agent przerwie to, co da sie przerwac
+	// bezpiecznie, a reszte odnotuje.
+	if operation == "cancel" {
+		s.poprosOPrzerwanie(r.Context(), job)
+	}
+
 	writeJSON(w, http.StatusOK, job)
 }
 
@@ -471,4 +483,26 @@ func blockedByBrokenDatabase(action opspec.ActionType) bool {
 		return false
 	}
 	return strings.HasPrefix(string(action), "packages.")
+}
+
+// poprosOPrzerwanie wysyla agentowi prosbe o przerwanie trwajacej proby.
+//
+// Brak sesji nie jest bledem: host moze byc offline, a zadanie i tak jest juz
+// anulowane w bazie i nie zostanie dostarczone ponownie.
+func (s *Server) poprosOPrzerwanie(ctx context.Context, job *jobs.Job) {
+	attemptID, err := s.jobs.LastAttempt(ctx, job.ID)
+	if err != nil || attemptID == "" {
+		return
+	}
+	if _, err := s.registry.Dispatch(job.HostID, &agentv1.ServerMessage{
+		Payload: &agentv1.ServerMessage_CancelTask{
+			CancelTask: &agentv1.CancelTask{
+				TaskId: attemptID,
+				Reason: "operacja anulowana z panelu",
+			},
+		},
+	}, 5*time.Second); err != nil {
+		s.log.Debug("nie wyslano prosby o przerwanie",
+			"job_id", job.ID, "host_id", job.HostID, "err", err)
+	}
 }

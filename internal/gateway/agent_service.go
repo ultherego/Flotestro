@@ -319,6 +319,27 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	case *agentv1.AgentMessage_TaskResult:
 		return s.recordTaskResult(ctx, hostID, payload.TaskResult)
 
+	case *agentv1.AgentMessage_TaskLogLines:
+		// Podglad dziennika idzie prosto na ekran operatora i nie jest
+		// zapisywany. Blad rozgloszenia nie moze zerwac sesji agenta.
+		if s.events != nil {
+			linie := payload.TaskLogLines
+			jobID, campaignID := s.kontekstProby(ctx, linie.GetTaskId())
+			if jobID == "" {
+				return nil
+			}
+			if err := s.events.PublishLog(ctx, events.Event{
+				JobID: jobID, CampaignID: campaignID,
+				Log: &events.LogLines{
+					Lines: linie.GetLines(), Dropped: linie.GetDropped(),
+				},
+			}); err != nil {
+				s.log.Debug("nie rozgloszono podgladu dziennika",
+					"host_id", hostID, "task_id", linie.GetTaskId(), "err", err)
+			}
+		}
+		return nil
+
 	case *agentv1.AgentMessage_TaskProgress:
 		// Postep idzie prosto na ekran operatora i nie jest zapisywany:
 		// jest ulotny z zalozenia, a trwaly jest wynik. Blad rozgloszenia

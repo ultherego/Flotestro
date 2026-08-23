@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -311,4 +312,69 @@ func TestZamaskowanieWymagaUzasadnienia(t *testing.T) {
 			"action":  "unit.enable.set",
 			"payload": map[string]any{"unit_toggle": map[string]any{"unit": "cron.service", "enabled": true}},
 		}, nil, http.StatusCreated)
+}
+
+// TestPodgladDziennikaKonczySieSam sprawdza granice z rozdzialu 6: strumien
+// jest krotkotrwaly i ograniczony z gory. Podglad bez gornej granicy trzymalby
+// proces na hoscie takze wtedy, gdy operator dawno zamknal karte.
+func TestPodgladDziennikaKonczySieSam(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	job, _ := h.runOperation(host.ID, map[string]any{
+		"action": "journal.follow",
+		"payload": map[string]any{"journal": map[string]any{
+			"lines": 3, "follow_seconds": 5,
+		}},
+	}, 90*time.Second)
+
+	if job.State != "succeeded" {
+		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+	}
+	// Koniec podgladu jest sukcesem: strumien mial sie skonczyc.
+	if !strings.Contains(job.ResultMessage, "podglad zakonczony") {
+		t.Errorf("wynik nie podsumowuje podgladu: %q", job.ResultMessage)
+	}
+}
+
+// TestPodgladNieMozeTrwacBezKonca pilnuje gornej granicy czasu.
+func TestPodgladNieMozeTrwacBezKonca(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "journal.follow",
+			"payload": map[string]any{"journal": map[string]any{
+				"lines": 3, "follow_seconds": 100000,
+			}},
+		}, nil, http.StatusBadRequest)
+}
+
+// TestZakresCzasuDziennikaJestSprawdzany sprawdza walidacje filtru "since".
+// Wartosc trafia do argumentu journalctl - nie do powloki, ale wezsza
+// walidacja i tak jest tansza niz ufanie.
+func TestZakresCzasuDziennikaJestSprawdzany(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, zakres := range []string{"wczoraj", "-1h; reboot", "$(date)"} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action": "journal.read",
+				"payload": map[string]any{"journal": map[string]any{
+					"lines": 5, "since": zakres,
+				}},
+			}, nil, http.StatusBadRequest)
+	}
+	// Formaty, ktore journalctl rozumie, musza przejsc.
+	for _, zakres := range []string{"-1h", "yesterday", "2026-08-01"} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action": "journal.read",
+				"payload": map[string]any{"journal": map[string]any{
+					"lines": 5, "since": zakres,
+				}},
+			}, nil, http.StatusCreated)
+	}
 }

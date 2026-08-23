@@ -81,6 +81,7 @@ message AgentMessage {
     InventoryReport inventory = 3;
     TaskResult task_result = 4;
     TaskProgress task_progress = 5;
+    TaskLogLines task_log_lines = 6;
   }
 }
 
@@ -352,6 +353,7 @@ message TaskEnvelope {
     ComposeAction compose = 31;
     UnitToggle unit_toggle = 32;
     ReadLogFile read_log_file = 33;
+    FollowJournal follow_journal = 34;
   }
 }
 
@@ -508,6 +510,17 @@ message CancelTask {
 // Postep jest opisany polami, a nie surowym wyjsciem narzedzia. Strumien
 // bajtow z apta trafialby na ekran operatora bez zadnej kontroli tresci,
 // a i tak nie dalby sie pokazac jako pasek.
+// TaskLogLines niesie kawalek podgladu dziennika. Linie sa ulotne: nie sa
+// zapisywane i nie zastepuja wyniku operacji.
+message TaskLogLines {
+  string task_id = 1;
+  repeated string lines = 2;
+  // Dropped mowi, ile linii pominieto, gdy host produkowal je szybciej niz
+  // pozwala limit tempa. Ciche pominiecie kazaloby operatorowi wierzyc, ze
+  // widzi wszystko.
+  uint32 dropped = 3;
+}
+
 message TaskProgress {
   string task_id = 1;
   bytes chunk = 2;
@@ -731,6 +744,17 @@ message UnitToggle {
 }
 
 // ReadLogFile czyta plik logu z allowlisty hosta.
+// FollowJournal zamawia podglad dziennika na zywo. Strumien jest krotkotrwaly
+// i ograniczony z gory: czasem, tempem i liczba linii - inaczej host pracowalby
+// dla nikogo, gdy operator zamknie karte.
+message FollowJournal {
+  string unit = 1;
+  optional uint32 max_priority = 2;
+  // Ile ostatnich linii pokazac na poczatku, zanim zacznie sie podglad.
+  uint32 backlog_lines = 3;
+  uint32 follow_seconds = 4;
+}
+
 message ReadLogFile {
   string path = 1;
   uint32 lines = 2;

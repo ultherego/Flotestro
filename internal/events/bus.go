@@ -22,6 +22,7 @@ const (
 	kanal         = "flotestro_zadania"
 	kanalPostep   = "flotestro_postep"
 	kanalKampanie = "flotestro_kampanie"
+	kanalLogow    = "flotestro_logi"
 )
 
 // Event opisuje zmiane stanu jednej operacji albo jej postep.
@@ -32,6 +33,17 @@ type Event struct {
 	// Progress jest wypelniony dla zdarzen postepu. Postep nie zmienia stanu
 	// operacji i nie zastepuje jej wyniku.
 	Progress *Progress `json:"progress,omitempty"`
+	// Log jest wypelniony dla podgladu dziennika. Linie sa ulotne: nie sa
+	// zapisywane i nie da sie ich odczytac po fakcie.
+	Log *LogLines `json:"log,omitempty"`
+}
+
+// LogLines to kawalek podgladu dziennika.
+type LogLines struct {
+	Lines []string `json:"lines"`
+	// Dropped mowi, ile linii pominieto przez limit tempa. Ciche pominiecie
+	// kazaloby operatorowi wierzyc, ze widzi wszystko.
+	Dropped uint32 `json:"dropped,omitempty"`
 }
 
 // Progress opisuje postep operacji w toku.
@@ -90,7 +102,7 @@ func (b *Bus) nasluchuj(ctx context.Context) error {
 	}
 	defer conn.Release()
 
-	for _, nazwa := range []string{kanal, kanalPostep, kanalKampanie} {
+	for _, nazwa := range []string{kanal, kanalPostep, kanalKampanie, kanalLogow} {
 		if _, err := conn.Exec(ctx, "listen "+nazwa); err != nil {
 			return err
 		}
@@ -105,6 +117,8 @@ func (b *Bus) nasluchuj(ctx context.Context) error {
 			b.rozglos(parsujPostep(notification.Payload))
 		case kanalKampanie:
 			b.rozglos(parsujCel(notification.Payload))
+		case kanalLogow:
+			b.rozglos(parsujPostep(notification.Payload))
 		default:
 			b.rozglos(parsuj(notification.Payload))
 		}
@@ -149,6 +163,20 @@ func parsujPostep(payload string) Event {
 		return Event{}
 	}
 	return event
+}
+
+// PublishLog rozglasza kawalek podgladu dziennika. Linie ida osobnym kanalem
+// niz postep: postep opisuje operacje, a podglad jest jej trescia.
+func (b *Bus) PublishLog(ctx context.Context, event Event) error {
+	if event.JobID == "" {
+		return nil
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = b.pool.Exec(ctx, "select pg_notify($1, $2)", kanalLogow, string(payload))
+	return err
 }
 
 // PublishProgress rozglasza postep operacji. Postep nie jest zapisywany:

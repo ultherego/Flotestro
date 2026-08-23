@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Pusto } from "../../components/ui";
 import { useHost } from "./wspolne";
+import { usePodgladDziennika } from "../../lib/strumien";
 
 type WynikDziennika = { lines?: string[]; truncated?: boolean };
 type WynikPliku = {
@@ -27,6 +28,8 @@ export function Logi() {
   const host = useHost();
   const queryClient = useQueryClient();
   const [zrodlo, setZrodlo] = useState<"journal" | "file">("journal");
+  const [podglad, setPodglad] = useState<string | null>(null);
+  const [wstrzymane, setWstrzymane] = useState(false);
   const [jednostka, setJednostka] = useState("");
   const [priorytet, setPriorytet] = useState("");
   const [od, setOd] = useState("");
@@ -35,6 +38,35 @@ export function Logi() {
   const [linie, setLinie] = useState<string[] | null>(null);
   const [stopka, setStopka] = useState("");
   const [blad, setBlad] = useState("");
+
+  const strumien = usePodgladDziennika(podglad, wstrzymane);
+
+  // Podglad idzie tym samym strumieniem co postep operacji, wiec jedno
+  // polaczenie na karte wystarcza.
+  const sledz = useMutation({
+    mutationFn: async () => {
+      const zadanie = await api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
+        action: "journal.follow",
+        payload: {
+          journal: {
+            unit: jednostka || undefined,
+            lines: 50,
+            max_priority: priorytet ? Number(priorytet) : undefined,
+            follow_seconds: 300,
+          },
+        },
+      });
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      return zadanie;
+    },
+    onSuccess: (zadanie) => {
+      setBlad("");
+      setLinie(null);
+      setWstrzymane(false);
+      setPodglad(`/api/v1/jobs/${zadanie.id}/events`);
+    },
+    onError: (error) => setBlad(error instanceof Error ? error.message : String(error)),
+  });
 
   const czytaj = useMutation({
     mutationFn: async () => {
@@ -148,6 +180,25 @@ export function Logi() {
           <button onClick={() => czytaj.mutate()} disabled={czytaj.isPending || host.connection_state !== "online"}>
             {czytaj.isPending ? "Reading…" : "Read"}
           </button>
+          {/* Podglad na zywo dotyczy wylacznie dziennika: plik nie ma
+              zdarzen, ktore da sie sledzic bez odpytywania hosta w kolko. */}
+          {zrodlo === "journal" && !podglad && (
+            <button
+              className="wtorny"
+              onClick={() => sledz.mutate()}
+              disabled={sledz.isPending || host.connection_state !== "online"}
+            >
+              {sledz.isPending ? "Starting…" : "Follow"}
+            </button>
+          )}
+          {podglad && (
+            <>
+              <button className="wtorny" onClick={() => setWstrzymane((stan) => !stan)}>
+                {wstrzymane ? "Resume" : "Pause"}
+              </button>
+              <button className="wtorny" onClick={() => setPodglad(null)}>Stop</button>
+            </>
+          )}
         </div>
         {/* Odczyt pliku jest ograniczony zakresem, ktory nalezy do hosta,
             a nie do panelu. */}
@@ -160,7 +211,27 @@ export function Logi() {
 
       {blad && <p className="blad-strony" style={{ marginTop: 12 }}>{blad}</p>}
 
-      {linie !== null && (
+      {podglad && (
+        <>
+          <h2>Live</h2>
+          {/* Limit jest widoczny: operator ma wiedziec, ze podglad skonczy
+              sie sam i ze czesc linii moze zostac pominieta. */}
+          <p className="podtytul">
+            Streaming for up to 5 minutes, capped at 32 KiB/s.
+            {wstrzymane && " Paused — the host keeps sending, the screen does not."}
+            {strumien.pominiete > 0 && ` ${strumien.pominiete} lines dropped by the rate limit.`}
+          </p>
+          {strumien.linie.length === 0 ? (
+            <Pusto>Waiting for the first lines…</Pusto>
+          ) : (
+            <pre style={{ marginTop: 8, maxHeight: 520, overflowY: "auto" }}>
+              {strumien.linie.join("\n")}
+            </pre>
+          )}
+        </>
+      )}
+
+      {linie !== null && !podglad && (
         <>
           <h2>Output</h2>
           {linie.length === 0 ? (

@@ -199,6 +199,7 @@ type jobView struct {
 	ApprovedBy      string `json:"approved_by"`
 	ResultStatus    string `json:"result_status"`
 	ResultErrorCode string `json:"result_error_code"`
+	ResultMessage   string `json:"result_message"`
 }
 
 type attemptView struct {

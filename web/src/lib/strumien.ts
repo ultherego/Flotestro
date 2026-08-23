@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 /** Postep operacji w toku. Wartosci nieustalone sa pominiete, nie wyzerowane. */
@@ -104,3 +104,54 @@ export function usePostep(sciezka: string | null): Map<string, Postep> {
 
   return postepy;
 }
+
+/** Kawalek podgladu dziennika prosto ze strumienia. */
+export type LiniaLogu = { lines: string[]; dropped?: number };
+
+/**
+ * Podglad dziennika na zywo.
+ *
+ * Linie sa ulotne: nie ma ich w API i nie da sie ich odczytac po fakcie.
+ * Pauza zatrzymuje wylacznie dopisywanie na ekranie - host nadal wysyla,
+ * a strumien konczy sie sam po swoim limicie czasu.
+ */
+export function usePodgladDziennika(sciezka: string | null, wstrzymane: boolean) {
+  const [linie, setLinie] = useState<string[]>([]);
+  const [pominiete, setPominiete] = useState(0);
+  const wstrzymaneRef = useRef(wstrzymane);
+  wstrzymaneRef.current = wstrzymane;
+
+  useEffect(() => {
+    if (!sciezka) return;
+    setLinie([]);
+    setPominiete(0);
+    const zrodlo = new EventSource(sciezka, { withCredentials: true });
+
+    zrodlo.addEventListener("log", (zdarzenie) => {
+      if (wstrzymaneRef.current) return;
+      try {
+        const dane = JSON.parse((zdarzenie as MessageEvent).data);
+        const kawalek: LiniaLogu = dane.log;
+        if (!kawalek) return;
+        setLinie((poprzednie) => {
+          const razem = [...poprzednie, ...(kawalek.lines ?? [])];
+          // Bufor przegladarki tez ma granice: podglad trwajacy kwadrans
+          // zjadlby pamiec karty.
+          return razem.length > MAKS_LINII_PODGLADU
+            ? razem.slice(razem.length - MAKS_LINII_PODGLADU)
+            : razem;
+        });
+        if (kawalek.dropped) setPominiete((suma) => suma + kawalek.dropped!);
+      } catch {
+        // Nieczytelny kawalek pomijamy: podglad nie moze wywrocic ekranu.
+      }
+    });
+
+    return () => zrodlo.close();
+  }, [sciezka]);
+
+  return { linie, pominiete };
+}
+
+/** Ile linii podgladu trzyma przegladarka. */
+export const MAKS_LINII_PODGLADU = 5000;

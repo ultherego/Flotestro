@@ -149,7 +149,10 @@ func (s *Server) strumien(w http.ResponseWriter, r *http.Request,
 			// dane po zmianie stanu, a pasek rysuje z postepu - polaczenie
 			// ich w jedno kazaloby odpytywac API kilka razy na sekunde.
 			nazwa := "job"
-			if zdarzenie.Progress != nil {
+			switch {
+			case zdarzenie.Log != nil:
+				nazwa = "log"
+			case zdarzenie.Progress != nil:
 				nazwa = "progress"
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", nazwa, dane)

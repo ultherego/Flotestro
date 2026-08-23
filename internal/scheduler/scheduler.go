@@ -304,6 +304,16 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionFollowJournal:
+		envelope.Action = &agentv1.TaskEnvelope_FollowJournal{
+			FollowJournal: &agentv1.FollowJournal{
+				Unit:          payload.Journal.Unit,
+				MaxPriority:   payload.Journal.MaxPriority,
+				BacklogLines:  payload.Journal.Lines,
+				FollowSeconds: payload.Journal.FollowSeconds,
+			},
+		}
+
 	case opspec.ActionReadLogFile:
 		envelope.Action = &agentv1.TaskEnvelope_ReadLogFile{
 			ReadLogFile: &agentv1.ReadLogFile{

@@ -642,6 +642,22 @@ func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID strin
 	return jobID, err
 }
 
+// LastAttempt zwraca identyfikator ostatniej proby operacji. Pusty oznacza
+// operacje, ktora nie zostala jeszcze dostarczona - nie ma wtedy czego
+// przerywac na hoscie.
+func (s *Store) LastAttempt(ctx context.Context, jobID string) (string, error) {
+	var attemptID string
+	err := s.pool.QueryRow(ctx, `
+		select id from job_attempts
+		 where job_id = $1
+		 order by attempt_number desc
+		 limit 1`, jobID).Scan(&attemptID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return attemptID, err
+}
+
 // AttemptContext zwraca operacje proby wraz z jej kampania. Postep zlecony
 // w kampanii musi trafic takze na ekran kampanii, a agent zna wylacznie
 // identyfikator proby.
