@@ -81,13 +81,20 @@ func TestValidateUnitBlokujeMontowaniaIWymiane(t *testing.T) {
 }
 
 func TestOperationKnown(t *testing.T) {
-	for _, op := range []Operation{OperationStart, OperationStop, OperationRestart, OperationReload} {
+	for _, op := range []Operation{
+		OperationStart, OperationStop, OperationRestart, OperationReload,
+		OperationEnable, OperationDisable, OperationMask, OperationUnmask,
+		OperationResetFail,
+	} {
 		if !op.Known() {
 			t.Errorf("%s powinna byc znana", op)
 		}
 	}
-	// Nie istnieje operacja "dowolne polecenie systemctl".
-	for _, op := range []Operation{"", "daemon-reexec", "mask", "isolate", "kill"} {
+	// Lista operacji jest zamknieta: nie istnieje operacja "dowolne polecenie
+	// systemctl". Isolate zmienia cel calego systemu, kill wysyla dowolny
+	// sygnal, daemon-reexec restartuje pid 1 - zadna z nich nie jest operacja
+	// na jednostce.
+	for _, op := range []Operation{"", "daemon-reexec", "isolate", "kill", "set-property"} {
 		if Operation(op).Known() {
 			t.Errorf("nieobslugiwana operacja %q zostala przyjeta", op)
 		}

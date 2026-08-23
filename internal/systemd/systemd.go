@@ -30,7 +30,9 @@ const (
 // Known sprawdza, czy operacja jest obslugiwana.
 func (o Operation) Known() bool {
 	switch o {
-	case OperationStart, OperationStop, OperationRestart, OperationReload:
+	case OperationStart, OperationStop, OperationRestart, OperationReload,
+		OperationEnable, OperationDisable, OperationMask, OperationUnmask,
+		OperationResetFail:
 		return true
 	default:
 		return false
@@ -270,4 +272,90 @@ func parseUint32(value string) uint32 {
 		return 0
 	}
 	return uint32(parsed)
+}
+
+// OperationEnable i OperationMask sa osobne od start/stop, bo zmieniaja to,
+// co host zrobi po restarcie, a nie jego stan teraz. Jednostka wlaczona
+// i dzialajaca to dwie rozne rzeczy; kazda z nich ma wlasne uprawnienie.
+const (
+	OperationEnable    Operation = "enable"
+	OperationDisable   Operation = "disable"
+	OperationMask      Operation = "mask"
+	OperationUnmask    Operation = "unmask"
+	OperationResetFail Operation = "reset-failed"
+)
+
+// maksymalnieJednostek ogranicza pelna liste. Host z tysiacem jednostek nie
+// jest bledem, ale przeniesienie ich wszystkich do panelu nie pomoze nikomu
+// bardziej niz pierwsze kilkaset.
+const maksymalnieJednostek = 500
+
+// Unit opisuje jednostke na liscie.
+type Unit struct {
+	Name        string `json:"name"`
+	LoadState   string `json:"load_state"`
+	ActiveState string `json:"active_state"`
+	SubState    string `json:"sub_state"`
+	Description string `json:"description,omitempty"`
+	// UnitFileState mowi, co host zrobi po restarcie: enabled, disabled,
+	// masked albo static. Pusty oznacza jednostke bez pliku.
+	UnitFileState string `json:"unit_file_state,omitempty"`
+}
+
+// List zwraca jednostki zaladowane na hoscie.
+//
+// Lista jest pobierana na zadanie operatora, a nie w cyklu inwentarza:
+// zmienia sie czesto, jest dluga i interesuje wylacznie tego, kto akurat
+// patrzy na zakladke.
+func List(ctx context.Context) ([]Unit, bool, error) {
+	stdout, _, err := run(ctx, 30*time.Second,
+		"list-units", "--all", "--no-pager", "--no-legend", "--plain", "--type=service,socket,timer,target,path,mount")
+	if err != nil {
+		return nil, false, err
+	}
+	// Stan plikow jednostek jest osobnym zapytaniem: list-units go nie podaje,
+	// a bez niego nie widac, co host zrobi po restarcie.
+	pliki := stanPlikowJednostek(ctx)
+
+	var jednostki []Unit
+	for _, linia := range strings.Split(stdout, "\n") {
+		pola := strings.Fields(linia)
+		if len(pola) < 4 || !strings.Contains(pola[0], ".") {
+			continue
+		}
+		jednostka := Unit{
+			Name:          pola[0],
+			LoadState:     pola[1],
+			ActiveState:   pola[2],
+			SubState:      pola[3],
+			UnitFileState: pliki[pola[0]],
+		}
+		if len(pola) > 4 {
+			jednostka.Description = strings.Join(pola[4:], " ")
+		}
+		jednostki = append(jednostki, jednostka)
+		if len(jednostki) >= maksymalnieJednostek {
+			// Urwana lista jest zaznaczona, zeby nie wygladala na pelna.
+			return jednostki, true, nil
+		}
+	}
+	return jednostki, false, nil
+}
+
+// stanPlikowJednostek czyta, co host zrobi po restarcie. Nieudany odczyt
+// zwraca pusta mape: brak wiedzy o pliku jednostki nie uniewaznia jej stanu
+// biezacego.
+func stanPlikowJednostek(ctx context.Context) map[string]string {
+	stdout, _, err := run(ctx, 30*time.Second, "list-unit-files", "--no-pager", "--no-legend", "--plain")
+	if err != nil {
+		return map[string]string{}
+	}
+	stany := map[string]string{}
+	for _, linia := range strings.Split(stdout, "\n") {
+		pola := strings.Fields(linia)
+		if len(pola) >= 2 {
+			stany[pola[0]] = pola[1]
+		}
+	}
+	return stany
 }

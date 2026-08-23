@@ -138,6 +138,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.applyDocker(ctx, task, task.GetDockerAction())
 	case opspec.ActionComposePlan, opspec.ActionComposeDeploy:
 		return e.applyCompose(ctx, task, task.GetCompose())
+	case opspec.ActionUnitEnableSet, opspec.ActionUnitMaskSet:
+		return e.applyUnitToggle(ctx, task, action, task.GetUnitToggle())
+	case opspec.ActionReadLogFile:
+		return e.readLogFile(ctx, task, payload.LogFile)
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -157,6 +161,13 @@ func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnv
 	timeout := timeoutOf(task, opspec.ActionUnitStatus)
 	statusCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Pelny wykaz jednostek jest osobna sciezka: nie pytamy systemd o kazda
+	// z nich z osobna, bo host miewa ich kilkaset i kazde zapytanie to
+	// osobny proces.
+	if payload.All {
+		return e.listUnits(statusCtx, task)
+	}
 
 	states := make([]*agentv1.UnitState, 0, len(payload.Units))
 	unhealthy := make([]string, 0)
@@ -247,7 +258,7 @@ func (e *TaskExecutor) applyUnitAction(ctx context.Context, task *agentv1.TaskEn
 		Action: &helperv1.HelperRequest_UnitAction{
 			UnitAction: &helperv1.UnitActionRequest{
 				Unit:      payload.Unit,
-				Operation: helperOperations[action],
+				Operation: operacjaHelpera(action, task),
 			},
 		},
 	}, timeout)
@@ -284,6 +295,26 @@ func (e *TaskExecutor) applyUnitAction(ctx context.Context, task *agentv1.TaskEn
 		result.Message = firstLine(string(response.GetStderr()))
 	}
 	return result
+}
+
+// operacjaHelpera tlumaczy typ operacji na polecenie helpera. Wlaczenie
+// i maskowanie zaleza dodatkowo od wartosci docelowej: jedna operacja opisuje
+// obie strony przelacznika, bo obie sa ta sama decyzja o tej samej wlasciwosci.
+func operacjaHelpera(action opspec.ActionType, task *agentv1.TaskEnvelope) helperv1.UnitActionRequest_Operation {
+	toggle := task.GetUnitToggle()
+	switch action {
+	case opspec.ActionUnitEnableSet:
+		if toggle.GetValue() {
+			return helperv1.UnitActionRequest_OPERATION_ENABLE
+		}
+		return helperv1.UnitActionRequest_OPERATION_DISABLE
+	case opspec.ActionUnitMaskSet:
+		if toggle.GetValue() {
+			return helperv1.UnitActionRequest_OPERATION_MASK
+		}
+		return helperv1.UnitActionRequest_OPERATION_UNMASK
+	}
+	return helperOperations[action]
 }
 
 var helperOperations = map[opspec.ActionType]helperv1.UnitActionRequest_Operation{
@@ -420,9 +451,28 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			PlanDigest: action.Compose.GetPlanDigest(),
 		}}, nil
 
+	case *agentv1.TaskEnvelope_UnitToggle:
+		typ := opspec.ActionUnitEnableSet
+		if action.UnitToggle.GetProperty() == agentv1.UnitToggle_PROPERTY_MASKED {
+			typ = opspec.ActionUnitMaskSet
+		}
+		return typ, opspec.Payload{UnitToggle: &opspec.UnitToggle{
+			Unit:    action.UnitToggle.GetUnit(),
+			Enabled: action.UnitToggle.GetValue(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_ReadLogFile:
+		return opspec.ActionReadLogFile, opspec.Payload{LogFile: &opspec.LogFilePayload{
+			Path:  action.ReadLogFile.GetPath(),
+			Lines: action.ReadLogFile.GetLines(),
+		}}, nil
+
 	case *agentv1.TaskEnvelope_ReadUnitStatus:
 		return opspec.ActionUnitStatus, opspec.Payload{
-			UnitStatus: &opspec.UnitStatusPayload{Units: action.ReadUnitStatus.GetUnits()},
+			UnitStatus: &opspec.UnitStatusPayload{
+				Units: action.ReadUnitStatus.GetUnits(),
+				All:   action.ReadUnitStatus.GetAll(),
+			},
 		}, nil
 
 	case *agentv1.TaskEnvelope_ReadJournal:
@@ -539,4 +589,44 @@ func akcjaDockera(action *agentv1.DockerAction) (opspec.ActionType, opspec.Paylo
 		}, nil
 	}
 	return "", opspec.Payload{}, fmt.Errorf("nieznana operacja na kontenerach")
+}
+
+// listUnits zwraca pelny wykaz jednostek hosta.
+func (e *TaskExecutor) listUnits(ctx context.Context, task *agentv1.TaskEnvelope) *agentv1.TaskResult {
+	jednostki, urwane, err := systemd.List(ctx)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
+	}
+	stany := make([]*agentv1.UnitState, 0, len(jednostki))
+	for _, jednostka := range jednostki {
+		stany = append(stany, &agentv1.UnitState{
+			Name:          jednostka.Name,
+			LoadState:     jednostka.LoadState,
+			ActiveState:   jednostka.ActiveState,
+			SubState:      jednostka.SubState,
+			UnitFileState: jednostka.UnitFileState,
+		})
+	}
+	return &agentv1.TaskResult{
+		TaskId:   task.GetTaskId(),
+		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
+		ExitCode: 0,
+		Detail: &agentv1.TaskResult_UnitStatus{
+			UnitStatus: &agentv1.UnitStatusResult{Units: stany, Truncated: urwane},
+		},
+	}
+}
+
+// applyUnitToggle wlacza albo maskuje jednostke.
+//
+// Operacja opisuje stan docelowy, a nie przelacznik: powtorzenie jej nie
+// odwraca zmiany. Sciezka jest ta sama co przy start i stop, wiec stan przed
+// i po oraz kody bledow pozostaja jednakowe dla calego modulu.
+func (e *TaskExecutor) applyUnitToggle(ctx context.Context, task *agentv1.TaskEnvelope,
+	action opspec.ActionType, toggle *agentv1.UnitToggle) *agentv1.TaskResult {
+	if toggle == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"brak opisu zmiany jednostki")
+	}
+	return e.applyUnitAction(ctx, task, action, &opspec.UnitPayload{Unit: toggle.GetUnit()})
 }

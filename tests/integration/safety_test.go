@@ -218,3 +218,97 @@ func TestOdmowaTezJestAudytowana(t *testing.T) {
 		t.Fatal("odrzucone zatwierdzenie nie zostawilo zdarzenia audytowego")
 	}
 }
+
+// TestOdczytPlikuTylkoZAllowlisty sprawdza granice z rozdzialu 6. Panel,
+// ktory potrafi przeczytac dowolny plik roota, potrafi przeczytac klucze
+// prywatne i /etc/shadow - zakres jest wlasnoscia hosta, a nie zadania.
+func TestOdczytPlikuTylkoZAllowlisty(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, sciezka := range []string{"/etc/shadow", "/root/.ssh/id_rsa", "/etc/flotestro/agent.env"} {
+		job, attempts := h.runOperation(host.ID, map[string]any{
+			"action":  "logfile.read",
+			"payload": map[string]any{"logfile": map[string]any{"path": sciezka, "lines": 5}},
+		}, 60*time.Second)
+
+		if job.State == "succeeded" {
+			t.Errorf("odczytano plik spoza allowlisty: %s", sciezka)
+		}
+		if len(attempts) > 0 && attempts[len(attempts)-1].Message == "" {
+			t.Errorf("odmowa dla %s nie niesie powodu", sciezka)
+		}
+	}
+}
+
+// TestNieprawidlowaSciezkaLoguJestOdrzucana sprawdza walidacje po stronie API.
+// Wyjscie w gore katalogu pozwalaloby dopasowac sie do wzorca allowlisty
+// i mimo to czytac plik spoza niej.
+func TestNieprawidlowaSciezkaLoguJestOdrzucana(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, sciezka := range []string{"", "var/log/syslog", "/var/log/../../etc/shadow"} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action":  "logfile.read",
+				"payload": map[string]any{"logfile": map[string]any{"path": sciezka, "lines": 5}},
+			}, nil, http.StatusBadRequest)
+	}
+}
+
+// TestPelnyWykazJednostekJestZamawianyJawnie pilnuje, ze pusta lista nazw nie
+// znaczy "wszystkie". Odczyt kilku jednostek i wykaz calego hosta to inny
+// koszt, wiec musi byc inna prosba.
+func TestPelnyWykazJednostekJestZamawianyJawnie(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	// Pusta lista bez jawnego zamowienia jest pomylka w wywolaniu.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "unit.status",
+			"payload": map[string]any{"unit_status": map[string]any{"units": []string{}}},
+		}, nil, http.StatusBadRequest)
+
+	// Zamowienie pelnego wykazu razem z lista nazw jest sprzeczne.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "unit.status",
+			"payload": map[string]any{"unit_status": map[string]any{
+				"all": true, "units": []string{"cron.service"},
+			}},
+		}, nil, http.StatusBadRequest)
+
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action":  "unit.status",
+		"payload": map[string]any{"unit_status": map[string]any{"all": true}},
+	}, 90*time.Second)
+	if job.State != "succeeded" {
+		t.Fatalf("wykaz: stan = %s, kod = %s", job.State, job.ResultErrorCode)
+	}
+	if len(attempts) == 0 || attempts[len(attempts)-1].Detail == nil {
+		t.Fatal("wykaz nie zwrocil jednostek")
+	}
+}
+
+// TestZamaskowanieWymagaUzasadnienia sprawdza, ze operacja krytyczna nie idzie
+// jednym klikniecem. Zamaskowanie odbiera jednostce mozliwosc uruchomienia
+// takze recznie i przetrwa restart hosta.
+func TestZamaskowanieWymagaUzasadnienia(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "unit.mask.set",
+			"payload": map[string]any{"unit_toggle": map[string]any{"unit": "cron.service", "enabled": true}},
+		}, nil, http.StatusBadRequest)
+
+	// Wlaczenie jednostki jest odwracalne i idzie bez uzasadnienia.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "unit.enable.set",
+			"payload": map[string]any{"unit_toggle": map[string]any{"unit": "cron.service", "enabled": true}},
+		}, nil, http.StatusCreated)
+}

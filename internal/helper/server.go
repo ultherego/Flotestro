@@ -145,6 +145,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_LogFile:
+		return s.readLogFile(ctx, request, action.LogFile)
+
 	case *helperv1.HelperRequest_Compose:
 		return s.applyCompose(ctx, request, action.Compose)
 
@@ -400,6 +403,11 @@ var unitOperations = map[helperv1.UnitActionRequest_Operation]systemd.Operation{
 	helperv1.UnitActionRequest_OPERATION_STOP:    systemd.OperationStop,
 	helperv1.UnitActionRequest_OPERATION_RESTART: systemd.OperationRestart,
 	helperv1.UnitActionRequest_OPERATION_RELOAD:  systemd.OperationReload,
+	// Wlaczenie i maskowanie zmieniaja to, co host zrobi po restarcie.
+	helperv1.UnitActionRequest_OPERATION_ENABLE:  systemd.OperationEnable,
+	helperv1.UnitActionRequest_OPERATION_DISABLE: systemd.OperationDisable,
+	helperv1.UnitActionRequest_OPERATION_MASK:    systemd.OperationMask,
+	helperv1.UnitActionRequest_OPERATION_UNMASK:  systemd.OperationUnmask,
 }
 
 func reject(code, message string) *helperv1.HelperResponse {

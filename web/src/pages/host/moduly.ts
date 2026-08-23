@@ -43,6 +43,7 @@ const MODULY: Modul[] = [
   { segment: "services", nazwa: "Services", powod: wymaga("systemd") },
   { segment: "containers", nazwa: "Containers", powod: wymaga("docker") },
   { segment: "compose", nazwa: "Compose", powod: wymaga("docker.compose") },
+  { segment: "logs", nazwa: "Logs", powod: wymaga("journald") },
   {
     segment: "accounts",
     nazwa: "Accounts",

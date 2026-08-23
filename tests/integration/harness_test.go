@@ -202,10 +202,13 @@ type jobView struct {
 }
 
 type attemptView struct {
-	Number          int    `json:"attempt_number"`
-	Status          string `json:"status"`
-	ExitCode        *int   `json:"exit_code"`
-	ErrorCode       string `json:"error_code"`
+	Number    int    `json:"attempt_number"`
+	Status    string `json:"status"`
+	ExitCode  *int   `json:"exit_code"`
+	ErrorCode string `json:"error_code"`
+	// Message niesie powod odmowy. Odmowa bez powodu zmusza operatora do
+	// zgadywania, czy pliku nie ma, czy jest poza dozwolonym zakresem.
+	Message         string `json:"message"`
 	Stdout          string `json:"stdout"`
 	Stderr          string `json:"stderr"`
 	Replayed        bool   `json:"replayed"`

@@ -304,6 +304,27 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionReadLogFile:
+		envelope.Action = &agentv1.TaskEnvelope_ReadLogFile{
+			ReadLogFile: &agentv1.ReadLogFile{
+				Path:  payload.LogFile.Path,
+				Lines: payload.LogFile.Lines,
+			},
+		}
+
+	case opspec.ActionUnitEnableSet, opspec.ActionUnitMaskSet:
+		wlasciwosc := agentv1.UnitToggle_PROPERTY_ENABLED
+		if action == opspec.ActionUnitMaskSet {
+			wlasciwosc = agentv1.UnitToggle_PROPERTY_MASKED
+		}
+		envelope.Action = &agentv1.TaskEnvelope_UnitToggle{
+			UnitToggle: &agentv1.UnitToggle{
+				Unit:     payload.UnitToggle.Unit,
+				Property: wlasciwosc,
+				Value:    payload.UnitToggle.Enabled,
+			},
+		}
+
 	case opspec.ActionComposePlan, opspec.ActionComposeDeploy:
 		operacja := agentv1.ComposeAction_OPERATION_PLAN
 		if action == opspec.ActionComposeDeploy {
@@ -326,7 +347,10 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{
-			ReadUnitStatus: &agentv1.ReadUnitStatus{Units: payload.UnitStatus.Units},
+			ReadUnitStatus: &agentv1.ReadUnitStatus{
+				Units: payload.UnitStatus.Units,
+				All:   payload.UnitStatus.All,
+			},
 		}
 
 	case opspec.ActionSystemReboot:

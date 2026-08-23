@@ -350,6 +350,8 @@ message TaskEnvelope {
     DockerRead docker_read = 29;
     DockerAction docker_action = 30;
     ComposeAction compose = 31;
+    UnitToggle unit_toggle = 32;
+    ReadLogFile read_log_file = 33;
   }
 }
 
@@ -405,8 +407,12 @@ message SystemReboot {
 
 // ReadUnitStatus odczytuje stan jednostek. Operacja niemutujaca, uzywana przez
 // health checki kampanii i widok hosta.
+// ReadUnitStatus czyta stan jednostek. Pusta lista przy all = true oznacza
+// pelny wykaz hosta; to inny koszt niz odczyt kilku znanych z nazwy, wiec
+// musi byc zamowiony jawnie.
 message ReadUnitStatus {
   repeated string units = 1;
+  bool all = 2;
 }
 
 // DomainEnroll dolacza hosta do domeny katalogu.
@@ -562,6 +568,7 @@ message TaskResult {
   DockerReadResult docker_result = 26;
   DockerActionResult docker_action_result = 27;
   ComposeResult compose_result = 28;
+  LogFileResult log_file_result = 29;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -709,6 +716,34 @@ message DockerAction {
 }
 
 // ComposeAction zleca plan albo wdrozenie projektu Compose.
+// UnitToggle zmienia to, co host zrobi po restarcie: wlaczenie jednostki albo
+// jej zamaskowanie. Pole jest wartoscia docelowa, a nie przelacznikiem -
+// powtorzenie operacji nie odwraca zmiany.
+message UnitToggle {
+  enum Property {
+    PROPERTY_UNSPECIFIED = 0;
+    PROPERTY_ENABLED = 1;
+    PROPERTY_MASKED = 2;
+  }
+  string unit = 1;
+  Property property = 2;
+  bool value = 3;
+}
+
+// ReadLogFile czyta plik logu z allowlisty hosta.
+message ReadLogFile {
+  string path = 1;
+  uint32 lines = 2;
+}
+
+message LogFileResult {
+  string path = 1;
+  repeated string lines = 2;
+  bool truncated = 3;
+  int64 size_bytes = 4;
+  string allowlist = 5;
+}
+
 message ComposeAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -741,6 +776,9 @@ message DockerReadResult {
 
 message UnitStatusResult {
   repeated UnitState units = 1;
+  // Truncated oznacza wykaz urwany limitem. Urwana lista bez tego znacznika
+  // wygladalaby na pelna.
+  bool truncated = 2;
 }
 
 

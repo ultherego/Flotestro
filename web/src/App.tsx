@@ -11,6 +11,7 @@ import { Pakiety } from "./pages/host/Pakiety";
 import { Uslugi } from "./pages/host/Uslugi";
 import { Kontenery } from "./pages/host/Kontenery";
 import { Compose } from "./pages/host/Compose";
+import { Logi } from "./pages/host/Logi";
 import { KontaHosta } from "./pages/host/Konta";
 import { Tozsamosc } from "./pages/host/Tozsamosc";
 import { ZadaniaHosta } from "./pages/host/Zadania";
@@ -88,6 +89,7 @@ export function App() {
             <Route path="services" element={<Uslugi />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />
+            <Route path="logs" element={<Logi />} />
             <Route path="accounts" element={<KontaHosta />} />
             <Route path="identity" element={<Tozsamosc />} />
             <Route path="jobs" element={<ZadaniaHosta />} />

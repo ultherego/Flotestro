@@ -37,6 +37,12 @@ const (
 	PermPackagesRepair Permission = "packages.repair"
 	PermSystemReboot   Permission = "system.reboot"
 	PermUnitStatus     Permission = "unit.status"
+	// Wlaczenie jednostki zmienia zachowanie hosta po kazdym restarcie,
+	// a zamaskowanie odbiera mozliwosc jej uruchomienia takze recznie.
+	PermUnitEnableWrite Permission = "unit.enable.write"
+	PermUnitMaskWrite   Permission = "unit.mask.write"
+	// Odczyt pliku logu siega poza dziennik systemowy.
+	PermLogFileRead Permission = "logfile.read"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -162,7 +168,8 @@ var rolePermissions = map[Role][]Permission{
 		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
 		PermComposePlan, PermComposeDeploy,
-		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
+		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite, PermLogFileRead,
+		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,

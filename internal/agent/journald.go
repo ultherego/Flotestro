@@ -5,7 +5,9 @@ import (
 	"strconv"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"time"
 )
 
 const journalctlPath = "/usr/bin/journalctl"
@@ -67,4 +69,51 @@ func clampBytes(data []byte, limit int) ([]byte, bool) {
 	// Przycinamy od poczatku: przy odczycie dziennika najswiezsze wpisy sa
 	// na koncu i to one sa potrzebne.
 	return data[len(data)-limit:], true
+}
+
+// readLogFile czyta plik logu przez helpera. Agent nie ma dostepu do plikow
+// roota i nie moze go miec - allowlista jest wlasnoscia hosta, a jej
+// rozstrzyganie nalezy do procesu, ktory ma czym czytac.
+func (e *TaskExecutor) readLogFile(ctx context.Context, task *agentv1.TaskEnvelope,
+	payload *opspec.LogFilePayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"brak payloadu odczytu pliku")
+	}
+	timeout := timeoutOf(task, opspec.ActionReadLogFile)
+	callCtx, cancel := context.WithTimeout(ctx, timeout+15*time.Second)
+	defer cancel()
+
+	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action: &helperv1.HelperRequest_LogFile{
+			LogFile: &helperv1.LogFileRequest{
+				Path:  payload.Path,
+				Lines: payload.Lines,
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+	if !response.GetAccepted() {
+		wynik := rejected(agentv1.TaskResult_STATUS_REJECTED,
+			response.GetErrorCode(), response.GetMessage())
+		wynik.TaskId = task.GetTaskId()
+		return wynik
+	}
+	wynik := response.GetLogFileResult()
+	return &agentv1.TaskResult{
+		TaskId: task.GetTaskId(),
+		Status: agentv1.TaskResult_STATUS_SUCCEEDED,
+		LogFileResult: &agentv1.LogFileResult{
+			Path:      wynik.GetPath(),
+			Lines:     wynik.GetLines(),
+			Truncated: wynik.GetTruncated(),
+			SizeBytes: wynik.GetSizeBytes(),
+			Allowlist: wynik.GetAllowlist(),
+		},
+	}
 }

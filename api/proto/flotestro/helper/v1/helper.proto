@@ -39,6 +39,7 @@ message HelperRequest {
     // Projekt Compose: plan albo wdrozenie. Manifest przychodzi w tresci,
     // a nie jako sciezka na hoscie - operator zatwierdzil tresc.
     ComposeRequest compose = 31;
+    LogFileRequest log_file = 32;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -119,6 +120,12 @@ message UnitActionRequest {
     OPERATION_STOP = 2;
     OPERATION_RESTART = 3;
     OPERATION_RELOAD = 4;
+    // Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
+    // a nie jego stan teraz.
+    OPERATION_ENABLE = 5;
+    OPERATION_DISABLE = 6;
+    OPERATION_MASK = 7;
+    OPERATION_UNMASK = 8;
   }
   string unit = 1;
   Operation operation = 2;
@@ -148,6 +155,7 @@ message HelperResponse {
   DockerReadResult docker_result = 17;
   DockerActionResult docker_action_result = 18;
   ComposeResult compose_result = 19;
+  LogFileResult log_file_result = 20;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -197,6 +205,23 @@ message DockerActionResult {
   repeated string removed = 3;
   optional int64 reclaimed_bytes = 4;
   string image_digest = 5;
+}
+
+// LogFileRequest czyta plik z allowlisty administratora hosta. Sciezka nie
+// jest dowolna: helper rozstrzyga ja wlasnym zakresem, nie tresci zadania.
+message LogFileRequest {
+  string path = 1;
+  uint32 lines = 2;
+}
+
+message LogFileResult {
+  string path = 1;
+  repeated string lines = 2;
+  bool truncated = 3;
+  int64 size_bytes = 4;
+  // Czym odczyt jest ograniczony. Operator ma wiedziec, dlaczego czegos
+  // nie widzi.
+  string allowlist = 5;
 }
 
 message ComposeRequest {

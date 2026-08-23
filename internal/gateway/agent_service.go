@@ -410,6 +410,25 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Pelny wykaz jednostek trafia do modulu inwentarza z tego samego powodu
+	// co stan kontenerow: zakladka pyta o stan hosta, a nie o historie zadan.
+	if status := result.GetUnitStatus(); status != nil && len(status.GetUnits()) > 0 {
+		if encoded, err := json.Marshal(map[string]any{
+			"units":     unitStatesJSON(status.GetUnits()),
+			"truncated": status.GetTruncated(),
+		}); err == nil {
+			if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+				Module:     "services.full",
+				Revision:   fmt.Sprintf("%x", sha256.Sum256(encoded)),
+				Source:     "agent/systemctl",
+				Payload:    encoded,
+				ObservedAt: time.Now().UTC(),
+			}); err != nil {
+				s.log.Error("nie zapisano wykazu jednostek", "host_id", hostID, "err", err)
+			}
+		}
+	}
+
 	// Pelny stan kontenerow jest zapisywany jako modul inwentarza, a nie tylko
 	// jako wynik operacji. Wynik jest zapisem tego, co sie stalo; zakladka
 	// pyta o stan hosta i ma go dostac bez przegladania historii zadan.
@@ -536,6 +555,20 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":               "compose",
 			"payload":            json.RawMessage(compose.GetPayload()),
 			"unavailable_reason": compose.GetUnavailableReason(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	if log := result.GetLogFileResult(); log != nil {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":       "log_file",
+			"path":       log.GetPath(),
+			"lines":      log.GetLines(),
+			"truncated":  log.GetTruncated(),
+			"size_bytes": log.GetSizeBytes(),
+			"allowlist":  log.GetAllowlist(),
 		})
 		if err == nil {
 			return encoded
@@ -1136,6 +1169,24 @@ func fragmentsFromReport(report *agentv1.InventoryReport) []inventory.Fragment {
 			Payload:           fragment.GetPayload(),
 			UnavailableReason: fragment.GetUnavailableReason(),
 			ObservedAt:        fragment.GetObservedAt().AsTime(),
+		})
+	}
+	return wynik
+}
+
+// unitStatesJSON zamienia stany jednostek na postac czytana przez interfejs.
+func unitStatesJSON(stany []*agentv1.UnitState) []map[string]any {
+	wynik := make([]map[string]any, 0, len(stany))
+	for _, stan := range stany {
+		wynik = append(wynik, map[string]any{
+			"name":            stan.GetName(),
+			"load_state":      stan.GetLoadState(),
+			"active_state":    stan.GetActiveState(),
+			"sub_state":       stan.GetSubState(),
+			"unit_file_state": stan.GetUnitFileState(),
+			"result":          stan.GetResult(),
+			"main_pid":        stan.GetMainPid(),
+			"n_restarts":      stan.GetNRestarts(),
 		})
 	}
 	return wynik

@@ -21,6 +21,8 @@ const (
 	ActionUnitRestart ActionType = "unit.restart"
 	ActionUnitReload  ActionType = "unit.reload"
 	ActionReadJournal ActionType = "journal.read"
+	// Odczyt pliku logu jest ograniczony allowlista administratora hosta.
+	ActionReadLogFile ActionType = "logfile.read"
 
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
@@ -30,6 +32,11 @@ const (
 
 	ActionSystemReboot ActionType = "system.reboot"
 	ActionUnitStatus   ActionType = "unit.status"
+	// Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
+	// a nie jego stan teraz. Jednostka wlaczona i dzialajaca to dwie rozne
+	// rzeczy, wiec i operacje sa dwie.
+	ActionUnitEnableSet ActionType = "unit.enable.set"
+	ActionUnitMaskSet   ActionType = "unit.mask.set"
 
 	ActionDomainEnroll    ActionType = "identity.host.enroll"
 	ActionDomainPreflight ActionType = "identity.host.preflight"
@@ -229,6 +236,11 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Odczyt pliku siega poza dziennik systemowy, wiec ma wyzsze ryzyko
+	// i wlasne uprawnienie: allowlista bywa szeroka, a log aplikacji miewa
+	// w sobie dane, ktorych dziennik nie ma.
+	ActionReadLogFile: {mutating: false, capability: "", permission: "logfile.read",
+		timeoutSeconds: 60, risk: RiskMedium, maxOutputBytes: 1 << 20},
 
 	// Planowanie nie zmienia stanu systemu, ale odswiezenie metadanych juz tak,
 	// wiec plan tez ma wlasne uprawnienie.
@@ -252,7 +264,15 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskCritical},
 	// Odczyt stanu jednostek jest niemutujacy i sluzy health checkom kampanii.
 	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status",
-		timeoutSeconds: 60, risk: RiskLow},
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
+	// Wlaczenie jednostki zmienia zachowanie hosta po kazdym nastepnym
+	// restarcie, wiec jest wyzej niz jej uruchomienie teraz.
+	ActionUnitEnableSet: {mutating: true, capability: "systemd", permission: "unit.enable.write",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
+	// Zamaskowanie odbiera jednostce mozliwosc uruchomienia takze recznie
+	// i przetrwa restart hosta - to najdalej idaca zmiana w tym module.
+	ActionUnitMaskSet: {mutating: true, capability: "systemd", permission: "unit.mask.write",
+		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockUnits},
 
 	// Dolaczenie do domeny zmienia uwierzytelnianie calego hosta.
 	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll",
@@ -327,6 +347,50 @@ func AllActions() []ActionType {
 		}
 	}
 	return actions
+}
+
+// validateLogPath odrzuca sciezki, ktorych host i tak nie przyjmie.
+// Rozstrzygajaca jest allowlista na hoscie; panel odsiewa to, co nie jest
+// nawet sciezka bezwzgledna, zeby nie kolejkowac zadania bez szans.
+func validateLogPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("sciezka pliku logu jest pusta")
+	}
+	if len(path) > 4096 {
+		return fmt.Errorf("sciezka pliku logu jest zbyt dluga")
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("sciezka pliku logu musi byc bezwzgledna")
+	}
+	// Wyjscie w gore katalogu pozwalaloby dopasowac sie do wzorca allowlisty
+	// i mimo to czytac plik spoza niej.
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("sciezka pliku logu nie moze zawierac \"..\"")
+	}
+	if strings.ContainsAny(path, "\x00\n") {
+		return fmt.Errorf("sciezka pliku logu zawiera niedozwolony znak")
+	}
+	return nil
+}
+
+// wzorzecJednostki powtarza wzorzec z modulu systemd. Duplikat jest
+// swiadomy: pakiet opspec nie ma zaleznosci poza biblioteka standardowa, bo
+// hash planu musi byc liczony ta sama implementacja po obu stronach. Panel
+// odmawia wczesnie, a host - rozstrzygajaco.
+var wzorzecJednostki = regexp.MustCompile(
+	`^[A-Za-z0-9:_.\\@-]+\.(service|socket|timer|target|path|mount|automount|swap|slice|scope)$`)
+
+func validateUnitName(unit string) error {
+	if unit == "" {
+		return fmt.Errorf("nazwa jednostki jest pusta")
+	}
+	if len(unit) > 256 {
+		return fmt.Errorf("nazwa jednostki jest zbyt dluga")
+	}
+	if !wzorzecJednostki.MatchString(unit) {
+		return fmt.Errorf("nieprawidlowa nazwa jednostki %q", unit)
+	}
+	return nil
 }
 
 // nazwaProjektuCompose powtarza wzorzec modulu kontenerow. Nazwa trafia do
@@ -445,8 +509,23 @@ type RebootPayload struct {
 }
 
 // UnitStatusPayload opisuje odczyt stanu jednostek.
+//
+// Pusta lista oznacza pelny wykaz jednostek hosta. To osobne zapytanie i inny
+// koszt niz odczyt kilku znanych z nazwy, wiec musi byc jawnie zamowione,
+// a nie wynikac z pomylki w wywolaniu.
 type UnitStatusPayload struct {
 	Units []string `json:"units"`
+	// All zamawia pelny wykaz. Bez tego pusta lista jednostek jest bledem.
+	All bool `json:"all,omitempty"`
+}
+
+// UnitToggle wlacza albo wylacza wlasciwosc jednostki.
+type UnitToggle struct {
+	Unit string `json:"unit"`
+	// Enabled dla unit.enable.set, Masked dla unit.mask.set. Pole jest
+	// wartoscia docelowa, a nie przelacznikiem: operacja opisuje stan, ktory
+	// ma zostac osiagniety, wiec powtorzenie jej nie odwraca zmiany.
+	Enabled bool `json:"enabled"`
 }
 
 // Payload jest suma typow payloadow. Dokladnie jedno pole jest wypelnione.
@@ -465,6 +544,15 @@ type Payload struct {
 	DockerImage     *DockerImagePayload     `json:"docker_image,omitempty"`
 	DockerPrune     *DockerPrunePayload     `json:"docker_prune,omitempty"`
 	Compose         *ComposePayload         `json:"compose,omitempty"`
+	UnitToggle      *UnitToggle             `json:"unit_toggle,omitempty"`
+	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
+}
+
+// LogFilePayload opisuje odczyt pliku logu.
+type LogFilePayload struct {
+	Path string `json:"path"`
+	// Lines ogranicza rozmiar wyniku; odczyt bez limitu nie jest dozwolony.
+	Lines uint32 `json:"lines"`
 }
 
 // ComposePayload niesie manifest projektu Compose.
@@ -695,8 +783,31 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return sprawdzListeSprzatania(payload.DockerPrune)
 
+	case ActionReadLogFile:
+		if payload.LogFile == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu logfile", action)
+		}
+		return validateLogPath(payload.LogFile.Path)
+
+	case ActionUnitEnableSet, ActionUnitMaskSet:
+		if payload.UnitToggle == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu unit_toggle", action)
+		}
+		return validateUnitName(payload.UnitToggle.Unit)
+
 	case ActionUnitStatus:
-		if payload.UnitStatus == nil || len(payload.UnitStatus.Units) == 0 {
+		if payload.UnitStatus == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu unit_status", action)
+		}
+		// Pelny wykaz jest zamawiany jawnie; pusta lista bez tego zamowienia
+		// jest pomylka w wywolaniu, a nie prosba o wszystko.
+		if payload.UnitStatus.All {
+			if len(payload.UnitStatus.Units) > 0 {
+				return fmt.Errorf("pelny wykaz jednostek nie przyjmuje listy nazw")
+			}
+			return nil
+		}
+		if len(payload.UnitStatus.Units) == 0 {
 			return fmt.Errorf("operacja %s wymaga listy jednostek", action)
 		}
 		if len(payload.UnitStatus.Units) > 50 {
