@@ -25,6 +25,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	"github.com/ultherego/flotestro/internal/modules/storage"
 )
 
 // SchemaVersion opisuje wersje formatu raportu inventory zapisywanego w JSONB.
@@ -93,6 +94,8 @@ type Facts struct {
 	// Network jest obrazem interfejsow i tras z jadra. Brak wartosci oznacza
 	// cykl, w ktorym stanu nie zbierano.
 	Network *network.Snapshot `json:"network,omitempty"`
+	// Storage jest obrazem przestrzeni dyskowej hosta.
+	Storage *storage.Snapshot `json:"storage,omitempty"`
 	// Firewall jest stanem zapory hosta.
 	Firewall *firewall.Snapshot `json:"firewall,omitempty"`
 	// DNS jest stanem resolvera hosta.

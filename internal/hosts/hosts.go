@@ -45,6 +45,7 @@ const (
 	CapNetwork   = "network"
 	CapDNS       = "dns"
 	CapFirewall  = "firewall"
+	CapStorage   = "storage"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"

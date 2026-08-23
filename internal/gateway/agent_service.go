@@ -431,6 +431,20 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Obraz przestrzeni dyskowej trafia do inwentarza: kazda operacja odsyla
+	// stan po sobie, wiec zakladka nie czeka na nastepny cykl.
+	if przestrzen := result.GetStorageResult(); przestrzen != nil && len(przestrzen.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "storage",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(przestrzen.GetSnapshot())),
+			Source:     "agent/lsblk+mountinfo",
+			Payload:    przestrzen.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano obrazu przestrzeni", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Stan zapory trafia do inwentarza: zakladka pyta o zestaw regul, a kazda
 	// zmiana i tak odsyla pelny obraz po sobie.
 	if zapora := result.GetFirewallResult(); zapora != nil && len(zapora.GetSnapshot()) > 0 {
@@ -665,6 +679,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"rollback_id":       zapora.GetRollbackId(),
 			"rollback_deadline": zapora.GetRollbackDeadline(),
 			"confirmed":         zapora.GetConfirmed(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Wynik sprawdzenia filesystemu nalezy do zadania: to odpowiedz na jedno
+	// pytanie zadane w jednej chwili.
+	if przestrzen := result.GetStorageResult(); przestrzen != nil && przestrzen.GetOutput() != "" {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":    "storage",
+			"message": przestrzen.GetMessage(),
+			"output":  przestrzen.GetOutput(),
 		})
 		if err == nil {
 			return encoded

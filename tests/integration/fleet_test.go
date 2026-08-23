@@ -262,10 +262,10 @@ func TestInventoryJestPodzieloneNaModuly(t *testing.T) {
 func TestNiezgloszonyModulJestBrakiemZasobu(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	// Modul, ktorego host jeszcze nie zglasza. Gdy powstanie, ten test ma
-	// wskazac nastepny nieistniejacy - granica dotyczy odpowiedzi, a nie
-	// konkretnej nazwy.
-	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/storage",
+	// Nazwa celowo nie odpowiada zadnemu modulowi i nigdy nie bedzie:
+	// granica dotyczy odpowiedzi na modul niezgloszony, a nie konkretnego
+	// modulu, ktory za tydzien powstanie i wywroci ten test.
+	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/modul-ktorego-nie-ma",
 		nil, nil, http.StatusNotFound)
 }
 

@@ -361,6 +361,7 @@ message TaskEnvelope {
     NetworkAction network = 39;
     DnsAction dns = 40;
     FirewallAction firewall = 41;
+    StorageAction storage = 42;
   }
 }
 
@@ -595,6 +596,7 @@ message TaskResult {
   NetworkResult network_result = 33;
   DnsResult dns_result = 34;
   FirewallResult firewall_result = 35;
+  StorageResult storage_result = 36;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -896,6 +898,32 @@ message FirewallResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
+}
+
+// StorageAction opisuje operacje na przestrzeni dyskowej hosta.
+message StorageAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_MOUNT_ENSURE = 2;
+    OPERATION_MOUNT_REMOVE = 3;
+    OPERATION_FS_CHECK = 4;
+  }
+  Operation operation = 1;
+  string source = 2;
+  string target = 3;
+  string fs_type = 4;
+  string options = 5;
+  bool persist = 6;
+  string device = 7;
+  string expected_uuid = 8;
+  bool repair = 9;
+}
+
+message StorageResult {
+  bytes snapshot = 1;
+  string message = 2;
+  string output = 3;
 }
 
 message PackageLifecycle {

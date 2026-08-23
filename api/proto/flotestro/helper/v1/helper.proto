@@ -45,6 +45,7 @@ message HelperRequest {
     NetworkRequest network = 35;
     DnsRequest dns = 36;
     FirewallRequest firewall = 37;
+    StorageRequest storage = 38;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -177,6 +178,7 @@ message HelperResponse {
   NetworkResult network_result = 23;
   DnsResult dns_result = 24;
   FirewallResult firewall_result = 25;
+  StorageResult storage_result = 26;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -393,6 +395,44 @@ message FirewallResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
+}
+
+// StorageRequest opisuje operacje na przestrzeni dyskowej hosta.
+//
+// Urzadzenie wskazujemy sciezka wraz z oczekiwanym identyfikatorem: nazwa
+// /dev/sdX zalezy od kolejnosci wykrywania i po restarcie potrafi wskazac
+// inny dysk. Przy operacji niszczacej to jest roznica miedzy wlasciwym
+// dyskiem a cudzymi danymi.
+message StorageRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // Odczyt grup i wolumenow LVM. Narzedzia LVM wymagaja roota.
+    OPERATION_READ_LVM = 1;
+    OPERATION_MOUNT_ENSURE = 2;
+    OPERATION_MOUNT_REMOVE = 3;
+    OPERATION_FS_CHECK = 4;
+  }
+  Operation operation = 1;
+  string source = 2;
+  string target = 3;
+  string fs_type = 4;
+  string options = 5;
+  // Persist zapisuje wpis w /etc/fstab. Bez niego montowanie zniknie po
+  // restarcie, a operator ma o tym wiedziec, a nie odkryc to po awarii.
+  bool persist = 6;
+  string device = 7;
+  // ExpectedUuid wiaze operacje z konkretnym filesystemem.
+  string expected_uuid = 8;
+  // Repair wlacza naprawe zamiast samego sprawdzenia.
+  bool repair = 9;
+}
+
+message StorageResult {
+  // Stan przestrzeni w postaci JSON. Struktura nalezy do modulu.
+  bytes snapshot = 1;
+  string message = 2;
+  // Output niesie wyjscie narzedzia sprawdzajacego filesystem.
+  string output = 3;
 }
 
 message ProcessSignalRequest {

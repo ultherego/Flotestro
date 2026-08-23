@@ -100,6 +100,7 @@ func main() {
 	// Modul sieci sprawdza po zmianie, czy host nadal dosiega panelu.
 	agent.SetGatewayURL(*gatewayURL)
 	agent.SetFirewallProbe(executor.ProbeFirewall)
+	agent.SetLVMProbe(executor.ProbeLVM)
 
 	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
 	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.

@@ -158,6 +158,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
+		opspec.ActionMountRemove, opspec.ActionFilesystemCheck:
+		return e.applyStorage(ctx, task, action, payload.Storage)
 	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
 		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
 		opspec.ActionFirewallZoneService, opspec.ActionFirewallRulesetRestore:
@@ -508,6 +511,28 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Storage:
+		przestrzen := action.Storage
+		typ := opspec.ActionMountEnsure
+		switch przestrzen.GetOperation() {
+		case agentv1.StorageAction_OPERATION_READ:
+			typ = opspec.ActionStoragePlan
+		case agentv1.StorageAction_OPERATION_MOUNT_REMOVE:
+			typ = opspec.ActionMountRemove
+		case agentv1.StorageAction_OPERATION_FS_CHECK:
+			typ = opspec.ActionFilesystemCheck
+		}
+		return typ, opspec.Payload{Storage: &opspec.StoragePayload{
+			Source:       przestrzen.GetSource(),
+			Target:       przestrzen.GetTarget(),
+			FSType:       przestrzen.GetFsType(),
+			Options:      przestrzen.GetOptions(),
+			Persist:      przestrzen.GetPersist(),
+			Device:       przestrzen.GetDevice(),
+			ExpectedUUID: przestrzen.GetExpectedUuid(),
+			Repair:       przestrzen.GetRepair(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Firewall:

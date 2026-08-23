@@ -89,6 +89,13 @@ const (
 	PermFirewallZoneWrite    Permission = "firewall.zone.write"
 	PermFirewallServiceWrite Permission = "firewall.service.write"
 	PermFirewallRestore      Permission = "firewall.restore"
+	// Przestrzen dyskowa. Odczyt topologii jest diagnostyka; montowanie
+	// decyduje o tym, czy host wstanie po restarcie tak, jak stoi teraz,
+	// a sprawdzenie filesystemu wymaga, zeby nikt go nie uzywal.
+	PermStorageRead        Permission = "storage.read"
+	PermStorageMountWrite  Permission = "storage.mount.write"
+	PermStorageMountRemove Permission = "storage.mount.remove"
+	PermStorageFsck        Permission = "storage.fsck"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -164,7 +171,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermFirewallRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -192,7 +199,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead, PermFirewallRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -227,6 +234,7 @@ var rolePermissions = map[Role][]Permission{
 		PermDNSRead, PermDNSHostWrite,
 		PermFirewallRead, PermFirewallWrite, PermFirewallRuleRemove,
 		PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
+		PermStorageRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

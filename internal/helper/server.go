@@ -145,6 +145,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_Storage:
+		return s.applyStorage(ctx, request, action.Storage)
+
 	case *helperv1.HelperRequest_Firewall:
 		return s.applyFirewall(ctx, request, action.Firewall)
 

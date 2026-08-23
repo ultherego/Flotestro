@@ -15,6 +15,7 @@ import { Harmonogramy } from "./pages/host/Harmonogramy";
 import { Siec } from "./pages/host/Siec";
 import { Resolver } from "./pages/host/Resolver";
 import { Zapora } from "./pages/host/Zapora";
+import { Przestrzen } from "./pages/host/Przestrzen";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
 import { KontaHosta } from "./pages/host/Konta";
@@ -97,6 +98,7 @@ export function App() {
             <Route path="network" element={<Siec />} />
             <Route path="dns" element={<Resolver />} />
             <Route path="firewall" element={<Zapora />} />
+            <Route path="storage" element={<Przestrzen />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />
             <Route path="logs" element={<Logi />} />

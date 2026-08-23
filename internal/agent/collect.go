@@ -127,6 +127,11 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	resolver := ZbierzDNS(ctx)
 	facts.DNS = &resolver
 
+	// Topologia dyskow zmienia sie rzadko, ale zajetosc miejsca juz nie -
+	// dlatego czytamy calosc raz na cykl inwentarza, a nie przy heartbeacie.
+	przestrzen := ZbierzPrzestrzen(ctx)
+	facts.Storage = &przestrzen
+
 	// Zapore czyta helper: tablice nftables sa widoczne wylacznie dla roota.
 	// Odczyt jest tani, ale liczniki rosna same, wiec nie robimy z niego
 	// zrodla metryk - od tego jest monitoring.

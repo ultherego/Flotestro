@@ -322,6 +322,30 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
+		opspec.ActionMountRemove, opspec.ActionFilesystemCheck:
+		operacja := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
+		switch action {
+		case opspec.ActionStoragePlan:
+			operacja = agentv1.StorageAction_OPERATION_READ
+		case opspec.ActionMountRemove:
+			operacja = agentv1.StorageAction_OPERATION_MOUNT_REMOVE
+		case opspec.ActionFilesystemCheck:
+			operacja = agentv1.StorageAction_OPERATION_FS_CHECK
+		}
+		przestrzen := &agentv1.StorageAction{Operation: operacja}
+		if payload.Storage != nil {
+			przestrzen.Source = payload.Storage.Source
+			przestrzen.Target = payload.Storage.Target
+			przestrzen.FsType = payload.Storage.FSType
+			przestrzen.Options = payload.Storage.Options
+			przestrzen.Persist = payload.Storage.Persist
+			przestrzen.Device = payload.Storage.Device
+			przestrzen.ExpectedUuid = payload.Storage.ExpectedUUID
+			przestrzen.Repair = payload.Storage.Repair
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Storage{Storage: przestrzen}
+
 	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
 		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
 		opspec.ActionFirewallZoneService, opspec.ActionFirewallRulesetRestore:

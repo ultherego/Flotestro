@@ -24,6 +24,9 @@ const (
 	CapDNS = "dns"
 	// Zapora. Adapter mowi, kto na tym hoscie trzyma reguly.
 	CapFirewall = "firewall"
+	// Przestrzen dyskowa. Odczyt wymaga lsblk; LVM i macierze sa osobnymi
+	// cechami, bo host bywa bez nich.
+	CapStorage = "storage"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -169,6 +172,9 @@ func DetectCapabilities() Capabilities {
 	resolver := exists("/etc/resolv.conf")
 	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
 	nft := exists("/usr/sbin/nft")
+	lsblk := exists("/usr/bin/lsblk")
+	lvm := exists("/usr/sbin/vgs") && exists("/usr/sbin/lvs")
+	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
 
 	return Capabilities{
@@ -215,6 +221,17 @@ func DetectCapabilities() Capabilities {
 				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
 			},
 			Reason: powodSieciowy(odczytSieci, zapisSieci),
+		},
+		{
+			Name:      CapStorage,
+			Version:   wersjaAdaptera,
+			Available: lsblk,
+			Features: map[string]bool{
+				"lvm":  lvm,
+				"fsck": fsck,
+				"raid": exists("/proc/mdstat"),
+			},
+			Reason: powod(lsblk, "this host has no lsblk binary"),
 		},
 		{
 			Name:      CapFirewall,

@@ -14,6 +14,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	"github.com/ultherego/flotestro/internal/modules/storage"
 )
 
 // ActionType jest typem operacji. Kazdy typ ma wersje kontraktu i wlasne
@@ -54,6 +55,11 @@ const (
 	ActionFirewallZonePort       ActionType = "firewall.zone.port"
 	ActionFirewallZoneService    ActionType = "firewall.zone.service"
 	ActionFirewallRulesetRestore ActionType = "firewall.ruleset.restore"
+
+	ActionStoragePlan     ActionType = "storage.plan"
+	ActionMountEnsure     ActionType = "mount.ensure"
+	ActionMountRemove     ActionType = "mount.remove"
+	ActionFilesystemCheck ActionType = "filesystem.check"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -143,6 +149,9 @@ const (
 	// Siec jest jednym zasobem hosta: dwie rownolegle zmiany konfiguracji
 	// zostawilyby stan, ktorego zaden z planow wycofania nie opisuje.
 	LockNetwork = "network"
+	// Przestrzen dyskowa jest jednym zasobem: dwie rownolegle operacje na
+	// tym samym filesystemie moga go uszkodzic.
+	LockStorage = "storage"
 )
 
 // Spec jest pelnym kontraktem jednej operacji.
@@ -340,6 +349,20 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 	ActionFirewallRulesetRestore: {mutating: true, capability: "firewall.write", permission: "firewall.restore",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+
+	// Odczyt topologii na zadanie. Inwentarz i tak ja niesie, ale przed
+	// zmiana operator chce stanu z tej chwili, a nie sprzed cyklu.
+	ActionStoragePlan: {mutating: false, capability: "storage", permission: "storage.read",
+		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
+	// Montowanie jest odwracalne, ale wpis w fstab decyduje o tym, czy host
+	// wstanie po restarcie tak, jak stoi teraz.
+	ActionMountEnsure: {mutating: true, capability: "storage", permission: "storage.mount.write",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage},
+	ActionMountRemove: {mutating: true, capability: "storage", permission: "storage.mount.remove",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage},
+	// Sprawdzenie filesystemu trwa dlugo i wymaga, zeby nikt go nie uzywal.
+	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
+		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -862,7 +885,27 @@ type Payload struct {
 	Network         *NetworkPayload         `json:"network,omitempty"`
 	DNS             *DNSPayload             `json:"dns,omitempty"`
 	Firewall        *FirewallPayload        `json:"firewall,omitempty"`
+	Storage         *StoragePayload         `json:"storage,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// StoragePayload opisuje operacje na przestrzeni dyskowej.
+//
+// Zrodlo wskazujemy identyfikatorem trwalym albo sciezka w /dev: nazwa
+// /dev/sdX zalezy od kolejnosci wykrywania i po restarcie potrafi wskazac
+// inny dysk.
+type StoragePayload struct {
+	Source  string `json:"source,omitempty"`
+	Target  string `json:"target,omitempty"`
+	FSType  string `json:"fs_type,omitempty"`
+	Options string `json:"options,omitempty"`
+	// Persist zapisuje wpis w fstab. Bez niego montowanie zniknie po
+	// restarcie - i operator ma o tym wiedziec przed, a nie po awarii.
+	Persist bool   `json:"persist,omitempty"`
+	Device  string `json:"device,omitempty"`
+	// ExpectedUUID wiaze operacje z konkretnym filesystemem.
+	ExpectedUUID string `json:"expected_uuid,omitempty"`
+	Repair       bool   `json:"repair,omitempty"`
 }
 
 // FirewallPayload opisuje operacje na zaporze hosta.
@@ -1273,6 +1316,33 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionStoragePlan:
+		return nil
+
+	case ActionMountEnsure:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		if err := storage.WalidujZrodlo(payload.Storage.Source); err != nil {
+			return err
+		}
+		if err := storage.WalidujCel(payload.Storage.Target); err != nil {
+			return err
+		}
+		return storage.WalidujOpcje(payload.Storage.Options, payload.Storage.FSType)
+
+	case ActionMountRemove:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		return storage.WalidujCel(payload.Storage.Target)
+
+	case ActionFilesystemCheck:
+		if payload.Storage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+		}
+		return storage.WalidujZrodlo(payload.Storage.Device)
 
 	case ActionFirewallPlan:
 		return nil

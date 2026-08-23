@@ -18,6 +18,7 @@ const (
 	ModulNetwork    = "network"
 	ModulDNS        = "dns"
 	ModulFirewall   = "firewall"
+	ModulStorage    = "storage"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
 )
@@ -88,6 +89,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulDNS, "agent/resolvectl+resolv.conf", powodStanuResolvera(f), resolver(f)},
 
 		{ModulFirewall, "agent/nftables", powodZapory(f), zapora(f)},
+
+		{ModulStorage, "agent/lsblk+mountinfo", powodPrzestrzeni(f), przestrzen(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -188,4 +191,20 @@ func zapora(f Facts) any {
 		return struct{}{}
 	}
 	return f.Firewall
+}
+
+// powodPrzestrzeni zwraca powod, dla ktorego topologii nie ustalono.
+func powodPrzestrzeni(f Facts) string {
+	if f.Storage == nil {
+		return "this host did not report its storage layout"
+	}
+	return f.Storage.UnavailableReason
+}
+
+// przestrzen zwraca obraz przestrzeni dyskowej albo pusty stan.
+func przestrzen(f Facts) any {
+	if f.Storage == nil {
+		return struct{}{}
+	}
+	return f.Storage
 }
