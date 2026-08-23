@@ -82,3 +82,82 @@ func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelop
 		},
 	}
 }
+
+// applyDocker wykonuje operacje na kontenerach przez helpera.
+func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelope,
+	action *agentv1.DockerAction) *agentv1.TaskResult {
+	timeout := time.Duration(task.GetLimits().GetTimeoutSeconds()) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	response, err := e.helper.Call(actionCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action: &helperv1.HelperRequest_DockerAction{
+			DockerAction: &helperv1.DockerActionRequest{
+				Operation:      operacjaDoHelpera(action.GetOperation()),
+				ContainerId:    action.GetContainerId(),
+				TimeoutSeconds: action.GetTimeoutSeconds(),
+				RemoveVolumes:  action.GetRemoveVolumes(),
+				ImageReference: action.GetImageReference(),
+				ImageIds:       action.GetImageIds(),
+				VolumeNames:    action.GetVolumeNames(),
+				NetworkIds:     action.GetNetworkIds(),
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+
+	// Stan przed i po trafia do wyniku takze przy bledzie: administrator musi
+	// wiedziec, czy zmiana zdazyla wejsc w zycie, zanim operacja padla.
+	szczegoly := wynikDockeraDoProto(response.GetDockerActionResult())
+	if !response.GetAccepted() {
+		wynik := rejected(agentv1.TaskResult_STATUS_FAILED,
+			response.GetErrorCode(), response.GetMessage())
+		wynik.TaskId = task.GetTaskId()
+		wynik.DockerActionResult = szczegoly
+		return wynik
+	}
+	return &agentv1.TaskResult{
+		TaskId:             task.GetTaskId(),
+		Status:             agentv1.TaskResult_STATUS_SUCCEEDED,
+		DockerActionResult: szczegoly,
+	}
+}
+
+func operacjaDoHelpera(operacja agentv1.DockerAction_Operation) helperv1.DockerActionRequest_Operation {
+	switch operacja {
+	case agentv1.DockerAction_OPERATION_START:
+		return helperv1.DockerActionRequest_OPERATION_START
+	case agentv1.DockerAction_OPERATION_STOP:
+		return helperv1.DockerActionRequest_OPERATION_STOP
+	case agentv1.DockerAction_OPERATION_RESTART:
+		return helperv1.DockerActionRequest_OPERATION_RESTART
+	case agentv1.DockerAction_OPERATION_REMOVE:
+		return helperv1.DockerActionRequest_OPERATION_REMOVE
+	case agentv1.DockerAction_OPERATION_PULL_IMAGE:
+		return helperv1.DockerActionRequest_OPERATION_PULL_IMAGE
+	case agentv1.DockerAction_OPERATION_PRUNE:
+		return helperv1.DockerActionRequest_OPERATION_PRUNE
+	}
+	return helperv1.DockerActionRequest_OPERATION_UNSPECIFIED
+}
+
+func wynikDockeraDoProto(wynik *helperv1.DockerActionResult) *agentv1.DockerActionResult {
+	if wynik == nil {
+		return nil
+	}
+	return &agentv1.DockerActionResult{
+		Before:         wynik.GetBefore(),
+		After:          wynik.GetAfter(),
+		Removed:        wynik.GetRemoved(),
+		ReclaimedBytes: wynik.ReclaimedBytes,
+		ImageDigest:    wynik.GetImageDigest(),
+	}
+}

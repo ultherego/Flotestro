@@ -117,3 +117,19 @@ func TestStepUpTozsamosciAutomatycznej(t *testing.T) {
 		t.Error("tozsamosc automatyczna przeszla bez powodu")
 	}
 }
+
+// Brak powodu jest brakiem w zadaniu, nie w sesji. Odeslanie klienta do
+// ponownego logowania kazaloby mu naprawiac nie to, co jest zepsute.
+func TestBrakPowoduJestBledemZadania(t *testing.T) {
+	polityka := stepUpPolicy{}
+	_, odmowa := polityka.evaluate("krotko", nil)
+	if odmowa == nil {
+		t.Fatal("zbyt krotki powod zostal przyjety")
+	}
+	if odmowa.Code != "reason_required" {
+		t.Errorf("kod = %q", odmowa.Code)
+	}
+	if !odmowa.BladZadania {
+		t.Error("brak powodu zostal oznaczony jako brak uwierzytelnienia")
+	}
+}

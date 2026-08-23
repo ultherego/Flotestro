@@ -36,6 +36,9 @@ type Server struct {
 	// Zmiany kont lokalnych sa serializowane: useradd i usermod pisza do
 	// tych samych plikow.
 	accountMutex sync.Mutex
+	// Rownolegly restart i usuniecie tego samego kontenera daja
+	// nieprzewidywalny wynik.
+	containerMutex sync.Mutex
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
@@ -142,6 +145,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
 		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+	case *helperv1.HelperRequest_DockerAction:
+		return s.applyDocker(ctx, request, action.DockerAction)
+
 	case *helperv1.HelperRequest_DockerRead:
 		return s.readDocker(ctx, request, action.DockerRead)
 

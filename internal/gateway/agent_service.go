@@ -527,6 +527,22 @@ func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 // resultDetailJSON zapisuje wynik wlasciwy dla typu operacji. Plan aktualizacji
 // i raport transakcji maja rozny ksztalt, wiec trafiaja do JSONB.
 func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
+	// Wynik operacji kontenerowej jest osobnym polem, a nie wariantem sumy:
+	// niesie stan przed i po, ktory dotyczy takze operacji zakonczonej bledem.
+	if docker := result.GetDockerActionResult(); docker != nil {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":            "docker_action",
+			"before":          surowyJSON(docker.GetBefore()),
+			"after":           surowyJSON(docker.GetAfter()),
+			"removed":         docker.GetRemoved(),
+			"reclaimed_bytes": docker.ReclaimedBytes,
+			"image_digest":    docker.GetImageDigest(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	switch detail := result.GetDetail().(type) {
 	case *agentv1.TaskResult_PackagePlan:
 		plan := detail.PackagePlan
@@ -628,6 +644,15 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	default:
 		return nil
 	}
+}
+
+// surowyJSON przenosi zakodowany stan bez ponownego kodowania. Pusty zostaje
+// pusty: kontener usuniety nie ma stanu po operacji.
+func surowyJSON(dane []byte) json.RawMessage {
+	if len(dane) == 0 {
+		return nil
+	}
+	return json.RawMessage(dane)
 }
 
 // preflightChecksJSON zachowuje trojstanowy wynik sprawdzenia: przeszlo,

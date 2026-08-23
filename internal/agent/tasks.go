@@ -133,6 +133,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.readUnitStatus(ctx, task, payload.UnitStatus)
 	case opspec.ActionDockerRead:
 		return e.readDocker(ctx, task)
+	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
+		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
+		return e.applyDocker(ctx, task, task.GetDockerAction())
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -401,6 +404,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 	case *agentv1.TaskEnvelope_DockerRead:
 		return opspec.ActionDockerRead, opspec.Payload{DockerRead: &opspec.DockerReadPayload{}}, nil
 
+	case *agentv1.TaskEnvelope_DockerAction:
+		return akcjaDockera(action.DockerAction)
+
 	case *agentv1.TaskEnvelope_ReadUnitStatus:
 		return opspec.ActionUnitStatus, opspec.Payload{
 			UnitStatus: &opspec.UnitStatusPayload{Units: action.ReadUnitStatus.GetUnits()},
@@ -486,4 +492,38 @@ var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
 // joinNames sklada nazwy w czytelna liste dla komunikatu operatora.
 func joinNames(nazwy []string) string {
 	return strings.Join(nazwy, ", ")
+}
+
+// akcjaDockera tlumaczy koperte operacji kontenerowej na typ i payload.
+// Kazda operacja ma wlasny typ, bo kazda ma inne ryzyko i inne uprawnienie.
+func akcjaDockera(action *agentv1.DockerAction) (opspec.ActionType, opspec.Payload, error) {
+	kontener := &opspec.DockerContainerPayload{
+		ContainerID:    action.GetContainerId(),
+		Name:           action.GetContainerName(),
+		TimeoutSeconds: action.GetTimeoutSeconds(),
+		RemoveVolumes:  action.GetRemoveVolumes(),
+	}
+	switch action.GetOperation() {
+	case agentv1.DockerAction_OPERATION_START:
+		return opspec.ActionDockerStart, opspec.Payload{DockerContainer: kontener}, nil
+	case agentv1.DockerAction_OPERATION_STOP:
+		return opspec.ActionDockerStop, opspec.Payload{DockerContainer: kontener}, nil
+	case agentv1.DockerAction_OPERATION_RESTART:
+		return opspec.ActionDockerRestart, opspec.Payload{DockerContainer: kontener}, nil
+	case agentv1.DockerAction_OPERATION_REMOVE:
+		return opspec.ActionDockerRemove, opspec.Payload{DockerContainer: kontener}, nil
+	case agentv1.DockerAction_OPERATION_PULL_IMAGE:
+		return opspec.ActionDockerPull, opspec.Payload{
+			DockerImage: &opspec.DockerImagePayload{Reference: action.GetImageReference()},
+		}, nil
+	case agentv1.DockerAction_OPERATION_PRUNE:
+		return opspec.ActionDockerPrune, opspec.Payload{
+			DockerPrune: &opspec.DockerPrunePayload{
+				ImageIDs:   action.GetImageIds(),
+				VolumeName: action.GetVolumeNames(),
+				NetworkIDs: action.GetNetworkIds(),
+			},
+		}, nil
+	}
+	return "", opspec.Payload{}, fmt.Errorf("nieznana operacja na kontenerach")
 }

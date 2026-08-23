@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Czas, Para, Pary, Pusto } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { SwiezoscModulu, useHost, useModul } from "./wspolne";
+import { PotwierdzenieCelu } from "./PotwierdzenieCelu";
 
 type Podsumowanie = {
   engine_version?: string;
@@ -46,9 +48,16 @@ type StanPelny = {
  * pobierane wtedy, gdy operator o nie poprosi: odpytywanie silnika o setki
  * obrazow przy kazdym cyklu obciazaloby host bez powodu.
  */
+/** Operacja nieodwracalna czekajaca na potwierdzenie operatora. */
+type DoPotwierdzenia =
+  | { rodzaj: "usun-kontener"; id: string; nazwa: string }
+  | { rodzaj: "usun-obraz"; id: string; nazwa: string };
+
 export function Kontenery() {
   const host = useHost();
   const queryClient = useQueryClient();
+  const [doPotwierdzenia, setDoPotwierdzenia] = useState<DoPotwierdzenia | null>(null);
+  const [komunikat, setKomunikat] = useState("");
   const podsumowanie = useModul<Podsumowanie>(host.id, "containers");
   const pelny = useModul<StanPelny>(host.id, "containers.full");
 
@@ -60,6 +69,60 @@ export function Kontenery() {
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs", host.id] }),
   });
+
+  // Operacje odwracalne ida wprost; nieodwracalne przechodza przez okno
+  // potwierdzenia, ktore dokleda powod i nazwe hosta.
+  const zlec = useMutation({
+    mutationFn: (tresc: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, tresc),
+    onSuccess: (zadanie) => {
+      setKomunikat(
+        zadanie.requires_approval
+          ? `Job ${zadanie.id.slice(0, 8)} is waiting for approval.`
+          : `Job ${zadanie.id.slice(0, 8)} has been queued.`,
+      );
+      setDoPotwierdzenia(null);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+  });
+
+  function operacjaKontenera(akcja: string, kontener: Kontener) {
+    zlec.mutate({
+      action: akcja,
+      payload: {
+        docker_container: {
+          container_id: kontener.id,
+          name: kontener.name,
+          timeout_seconds: 10,
+        },
+      },
+    });
+  }
+
+  function potwierdz(powod: string, potwierdzenie: string) {
+    if (!doPotwierdzenia) return;
+    if (doPotwierdzenia.rodzaj === "usun-kontener") {
+      zlec.mutate({
+        action: "docker.container.remove",
+        reason: powod,
+        target_confirmation: potwierdzenie,
+        payload: {
+          docker_container: {
+            container_id: doPotwierdzenia.id,
+            name: doPotwierdzenia.nazwa,
+          },
+        },
+      });
+      return;
+    }
+    zlec.mutate({
+      action: "docker.prune",
+      reason: powod,
+      target_confirmation: potwierdzenie,
+      payload: { docker_prune: { image_ids: [doPotwierdzenia.id] } },
+    });
+  }
 
   const stan = podsumowanie.data?.payload;
   const listy = pelny.data?.payload;
@@ -128,7 +191,7 @@ export function Kontenery() {
           <thead>
             <tr>
               <th>Name</th><th>State</th><th>Image</th><th>Health</th>
-              <th>Restarts</th><th>Ports</th><th>Compose</th>
+              <th>Restarts</th><th>Ports</th><th>Compose</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -162,6 +225,27 @@ export function Kontenery() {
                     .join(", ") || "—"}
                 </td>
                 <td>{kontener.compose ? `${kontener.compose.project}/${kontener.compose.service}` : "—"}</td>
+                <td>
+                  <div className="operacje">
+                    {kontener.state === "running" ? (
+                      <>
+                        <button onClick={() => operacjaKontenera("docker.container.restart", kontener)}>Restart</button>
+                        <button onClick={() => operacjaKontenera("docker.container.stop", kontener)}>Stop</button>
+                      </>
+                    ) : (
+                      <button onClick={() => operacjaKontenera("docker.container.start", kontener)}>Start</button>
+                    )}
+                    {/* Usuniecie jest nieodwracalne, wiec nie idzie wprost
+                        z klikniecia - otwiera potwierdzenie celu. */}
+                    <button
+                      onClick={() =>
+                        setDoPotwierdzenia({ rodzaj: "usun-kontener", id: kontener.id, nazwa: kontener.name })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -172,19 +256,56 @@ export function Kontenery() {
         <>
           <h2>Images</h2>
           <table>
-            <thead><tr><th>Tags</th><th>Size</th><th>In use</th></tr></thead>
+            <thead><tr><th>Tags</th><th>Size</th><th>In use</th><th>Actions</th></tr></thead>
             <tbody>
               {listy.images.map((obraz) => (
                 <tr key={obraz.id}>
                   <td>{obraz.tags?.join(", ") || <span className="znacznik nieznany">untagged</span>}</td>
                   <td>{bytes(obraz.size_bytes)}</td>
                   <td>{obraz.in_use ? "yes" : "no"}</td>
+                  <td>
+                    {/* Obraz w uzyciu nie moze zostac usuniety przez pomylke:
+                        przycisku przy nim po prostu nie ma. */}
+                    {obraz.in_use ? (
+                      "—"
+                    ) : (
+                      <button
+                        className="wtorny"
+                        onClick={() =>
+                          setDoPotwierdzenia({
+                            rodzaj: "usun-obraz",
+                            id: obraz.id,
+                            nazwa: obraz.tags?.[0] || obraz.id.slice(7, 19),
+                          })
+                        }
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </>
       )}
+
+      {doPotwierdzenia && (
+        <PotwierdzenieCelu
+          host={host}
+          etykieta={doPotwierdzenia.rodzaj === "usun-kontener" ? "Remove container" : "Remove image"}
+          opis={
+            doPotwierdzenia.rodzaj === "usun-kontener"
+              ? `Container ${doPotwierdzenia.nazwa} will be removed. Data outside volumes is lost.`
+              : `Image ${doPotwierdzenia.nazwa} will be removed from this host.`
+          }
+          pracuje={zlec.isPending}
+          onPotwierdz={potwierdz}
+          onAnuluj={() => setDoPotwierdzenia(null)}
+        />
+      )}
+
+      {komunikat && <p className="zrodlo" style={{ marginTop: 12 }}>{komunikat}</p>}
 
       {pelny.data && (
         <p className="zrodlo" style={{ marginTop: 16 }}>

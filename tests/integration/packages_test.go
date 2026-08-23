@@ -225,7 +225,7 @@ func TestUszkodzonaBazaPakietowBlokujeOperacje(t *testing.T) {
 	// zamykalo hosta w petli bez wyjscia: jedyna operacja, ktora potrafi
 	// zdjac te flage, byla przez nia blokowana.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
-		map[string]any{"action": "packages.repair",
+		map[string]any{"action": "packages.repair", "reason": "odblokowanie bazy pakietow",
 			"payload": map[string]any{"package_repair": map[string]any{}}},
 		nil, http.StatusCreated)
 
@@ -262,9 +262,12 @@ func TestNieprawidlowaNazwaPakietuJestOdrzucana(t *testing.T) {
 func TestNaprawaWymagaAdapteraZTaCecha(t *testing.T) {
 	h := newHarness(t)
 
+	// Naprawa jest operacja krytyczna, wiec wymaga uzasadnienia w audycie.
+	const powod = "odblokowanie bazy pakietow"
+
 	rhel := h.hostByFamily("rhel")
 	h.do(http.MethodPost, "/api/v1/hosts/"+rhel.ID+"/operations",
-		map[string]any{"action": "packages.repair",
+		map[string]any{"action": "packages.repair", "reason": powod,
 			"payload": map[string]any{"package_repair": map[string]any{}}},
 		nil, http.StatusConflict)
 
@@ -272,7 +275,7 @@ func TestNaprawaWymagaAdapteraZTaCecha(t *testing.T) {
 	// cechy adaptera, a nie samej operacji.
 	debian := h.hostByFamily("debian")
 	h.do(http.MethodPost, "/api/v1/hosts/"+debian.ID+"/operations",
-		map[string]any{"action": "packages.repair",
+		map[string]any{"action": "packages.repair", "reason": powod,
 			"payload": map[string]any{"package_repair": map[string]any{}}},
 		nil, http.StatusCreated)
 }

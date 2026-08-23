@@ -348,6 +348,7 @@ message TaskEnvelope {
     LocalUserAction local_user_action = 27;
     PackagesRepair packages_repair = 28;
     DockerRead docker_read = 29;
+    DockerAction docker_action = 30;
   }
 }
 
@@ -558,6 +559,7 @@ message TaskResult {
     PackageRepairResult package_repair = 25;
   }
   DockerReadResult docker_result = 26;
+  DockerActionResult docker_action_result = 27;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -679,6 +681,39 @@ message DockerRead {}
 
 // DockerReadResult niesie stan silnika w postaci JSON. Struktura nalezy do
 // modulu kontenerow; kontrakt agenta jej nie powtarza.
+// DockerAction zleca jedna operacje na silniku kontenerow.
+message DockerAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_START = 1;
+    OPERATION_STOP = 2;
+    OPERATION_RESTART = 3;
+    OPERATION_REMOVE = 4;
+    OPERATION_PULL_IMAGE = 5;
+    OPERATION_PRUNE = 6;
+  }
+  Operation operation = 1;
+  string container_id = 2;
+  uint32 timeout_seconds = 3;
+  bool remove_volumes = 4;
+  string image_reference = 5;
+  repeated string image_ids = 6;
+  repeated string volume_names = 7;
+  repeated string network_ids = 8;
+  // Nazwa kontenera sluzy potwierdzeniu i audytowi. Jest czescia payloadu,
+  // wiec musi dojechac do agenta - inaczej hash planu przestaje sie zgadzac
+  // i operacja zostaje odrzucona jako podmieniona.
+  string container_name = 9;
+}
+
+message DockerActionResult {
+  bytes before = 1;
+  bytes after = 2;
+  repeated string removed = 3;
+  optional int64 reclaimed_bytes = 4;
+  string image_digest = 5;
+}
+
 message DockerReadResult {
   bytes snapshot = 1;
   string unavailable_reason = 2;

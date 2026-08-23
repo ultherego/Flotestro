@@ -20,10 +20,15 @@ type createOperationRequest struct {
 	Action          string          `json:"action"`
 	Payload         json.RawMessage `json:"payload"`
 	RequiresApprova *bool           `json:"requires_approval,omitempty"`
-	TimeoutSeconds  int             `json:"timeout_seconds,omitempty"`
-	MaxOutputBytes  int             `json:"max_output_bytes,omitempty"`
-	TTLSeconds      int             `json:"ttl_seconds,omitempty"`
-	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	// TargetConfirmation jest nazwa hosta wpisana przez operatora. Wymagana
+	// przy operacjach nieodwracalnych.
+	TargetConfirmation string `json:"target_confirmation,omitempty"`
+	// Reason uzasadnia operacje o najwyzszym ryzyku i trafia do audytu.
+	Reason         string `json:"reason,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	MaxOutputBytes int    `json:"max_output_bytes,omitempty"`
+	TTLSeconds     int    `json:"ttl_seconds,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	// PinBootID wiaze zadanie z obecnym uruchomieniem hosta. Po restarcie
 	// zadanie zostanie odrzucone zamiast wykonac sie na innym stanie.
 	PinBootID bool `json:"pin_boot_id,omitempty"`
@@ -107,6 +112,36 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Operacja o najwyzszym ryzyku wymaga swiezego uwierzytelnienia: taka,
+	// ktora moze odciac dostep do hosta albo skasowac dane, nie moze isc
+	// z sesji sprzed godziny.
+	var dowodStepUp map[string]any
+	if action.RequiresFreshAuth() {
+		dowod, ok := s.requireStepUp(w, r, principal, request.Reason,
+			string(action), "host", hostID)
+		if !ok {
+			return
+		}
+		dowodStepUp = dowod
+	}
+
+	// Operacja niszczaca wymaga wpisania nazwy celu. Klikniecie nie jest
+	// wystarczajaca decyzja przy zmianie, ktorej nie da sie cofnac - a lista
+	// hostow bywa dluga i podobna.
+	if action.RequiresTargetConfirmation() && request.TargetConfirmation != host.Hostname {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: "job.create", TargetType: "host", TargetID: hostID,
+			Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": "target_confirmation_mismatch", "action": string(action),
+			},
+		})
+		problem(w, http.StatusBadRequest, "target_confirmation_required",
+			"this operation is irreversible; repeat the hostname in target_confirmation")
+		return
+	}
+
 	requiresApproval := action.Mutating()
 	if request.RequiresApprova != nil {
 		requiresApproval = *request.RequiresApprova
@@ -152,7 +187,8 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{
 			"host_id": hostID, "action_type": job.ActionType,
 			"payload_hash": job.PayloadHash, "requires_approval": job.RequiresApprova,
-			"state": string(job.State),
+			"step_up": dowodStepUp,
+			"state":   string(job.State),
 		},
 	}); err != nil {
 		s.fail(w, err)

@@ -42,6 +42,14 @@ const (
 	// Odczyt stanu silnika kontenerow. Pelne listy sa pobierane na zadanie
 	// operatora; inventory niesie samo podsumowanie.
 	ActionDockerRead ActionType = "docker.read"
+
+	ActionDockerStart   ActionType = "docker.container.start"
+	ActionDockerStop    ActionType = "docker.container.stop"
+	ActionDockerRestart ActionType = "docker.container.restart"
+	ActionDockerRemove  ActionType = "docker.container.remove"
+	ActionDockerPull    ActionType = "docker.image.pull"
+	// Sprzatanie usuwa wskazane obiekty, a nie wszystko, co pasuje do filtru.
+	ActionDockerPrune ActionType = "docker.prune"
 )
 
 // ActionVersion jest wersja kontraktu payloadu. Zmiana znaczenia pol wymaga
@@ -267,6 +275,26 @@ var actionSpecs = map[ActionType]actionSpec{
 	// zasobu i wlasny limit wyniku.
 	ActionDockerRead: {mutating: false, capability: "docker", permission: "docker.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 4 << 20},
+
+	// Uruchomienie kontenera przywraca usluge; zatrzymanie ja przerywa,
+	// wiec stop i restart sa wyzej niz start.
+	ActionDockerStart: {mutating: true, capability: "docker", permission: "docker.container.start",
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockContainers},
+	ActionDockerStop: {mutating: true, capability: "docker", permission: "docker.container.stop",
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockContainers},
+	ActionDockerRestart: {mutating: true, capability: "docker", permission: "docker.container.restart",
+		timeoutSeconds: 180, risk: RiskHigh, lockClass: LockContainers},
+	// Usuniecie kontenera jest nieodwracalne: dane spoza wolumenow gina razem
+	// z nim, wiec operator wpisuje nazwe celu, zanim operacja ruszy.
+	ActionDockerRemove: {mutating: true, capability: "docker", permission: "docker.container.remove",
+		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockContainers},
+	// Pobranie obrazu zmienia to, co wstanie przy nastepnym uruchomieniu,
+	// ale samo w sobie nie rusza dzialajacych kontenerow.
+	ActionDockerPull: {mutating: true, capability: "docker", permission: "docker.image.pull",
+		timeoutSeconds: 1800, risk: RiskMedium, lockClass: LockContainers},
+	// Sprzatanie usuwa dane bezpowrotnie i domyslnie nie dziala masowo.
+	ActionDockerPrune: {mutating: true, capability: "docker", permission: "docker.prune",
+		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers},
 }
 
 // AllActions zwraca posortowana liste obslugiwanych operacji.
@@ -281,6 +309,71 @@ func AllActions() []ActionType {
 		}
 	}
 	return actions
+}
+
+// identyfikatorKontenera dopuszcza wylacznie szesnastkowy identyfikator
+// silnika. Identyfikator trafia do sciezki zapytania Engine API, wiec nie
+// moze niesc niczego, co ta sciezke zmienia.
+var identyfikatorKontenera = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+
+func poprawnyIdentyfikatorKontenera(id string) bool {
+	return identyfikatorKontenera.MatchString(id)
+}
+
+// odwolanieObrazu dopuszcza nazwe repozytorium z opcjonalnym rejestrem,
+// tagiem albo digestem. Odwolanie idzie do silnika jako parametr zapytania,
+// a nie do powloki, ale wezsza walidacja i tak jest tansza niz ufanie.
+var odwolanieObrazu = regexp.MustCompile(
+	`^[a-z0-9]+([._\-/][a-z0-9]+)*(:[0-9]{2,5})?(/[a-z0-9]+([._\-/][a-z0-9]+)*)*` +
+		`(:[\w][\w.\-]{0,127})?(@sha256:[a-f0-9]{64})?$`)
+
+func poprawneOdwolanieObrazu(reference string) error {
+	if reference == "" {
+		return fmt.Errorf("odwolanie do obrazu jest puste")
+	}
+	if len(reference) > 512 {
+		return fmt.Errorf("odwolanie do obrazu jest zbyt dlugie")
+	}
+	if !odwolanieObrazu.MatchString(reference) {
+		return fmt.Errorf("nieprawidlowe odwolanie do obrazu %q", reference)
+	}
+	return nil
+}
+
+// identyfikatorObrazu dopuszcza identyfikator silnika z prefiksem algorytmu.
+var identyfikatorObrazu = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// nazwaWolumenu dopuszcza nazwy, ktore tworzy Docker i Compose.
+var nazwaWolumenu = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+
+// maksymalnieObiektowSprzatania ogranicza jedna operacje sprzatania. Lista
+// dluzsza od tego nie jest juz decyzja operatora, tylko filtrem w przebraniu.
+const maksymalnieObiektowSprzatania = 200
+
+func sprawdzListeSprzatania(payload *DockerPrunePayload) error {
+	razem := len(payload.ImageIDs) + len(payload.VolumeName) + len(payload.NetworkIDs)
+	if razem == 0 {
+		return fmt.Errorf("operacja sprzatania nie wskazuje zadnego obiektu")
+	}
+	if razem > maksymalnieObiektowSprzatania {
+		return fmt.Errorf("lista obiektow do usuniecia jest zbyt dluga (%d)", razem)
+	}
+	for _, id := range payload.ImageIDs {
+		if !identyfikatorObrazu.MatchString(id) {
+			return fmt.Errorf("nieprawidlowy identyfikator obrazu %q", id)
+		}
+	}
+	for _, nazwa := range payload.VolumeName {
+		if !nazwaWolumenu.MatchString(nazwa) {
+			return fmt.Errorf("nieprawidlowa nazwa wolumenu %q", nazwa)
+		}
+	}
+	for _, id := range payload.NetworkIDs {
+		if !identyfikatorKontenera.MatchString(id) {
+			return fmt.Errorf("nieprawidlowy identyfikator sieci %q", id)
+		}
+	}
+	return nil
 }
 
 // UnitPayload opisuje operacje na jednostce systemd.
@@ -331,16 +424,54 @@ type UnitStatusPayload struct {
 
 // Payload jest suma typow payloadow. Dokladnie jedno pole jest wypelnione.
 type Payload struct {
-	Unit           *UnitPayload           `json:"unit,omitempty"`
-	Journal        *JournalPayload        `json:"journal,omitempty"`
-	PackagePlan    *PackagePlanPayload    `json:"package_plan,omitempty"`
-	PackageUpgrade *PackageUpgradePayload `json:"package_upgrade,omitempty"`
-	Reboot         *RebootPayload         `json:"reboot,omitempty"`
-	UnitStatus     *UnitStatusPayload     `json:"unit_status,omitempty"`
-	DomainEnroll   *DomainEnrollPayload   `json:"domain_enroll,omitempty"`
-	LocalUser      *LocalUserPayload      `json:"local_user,omitempty"`
-	PackageRepair  *PackageRepairPayload  `json:"package_repair,omitempty"`
-	DockerRead     *DockerReadPayload     `json:"docker_read,omitempty"`
+	Unit            *UnitPayload            `json:"unit,omitempty"`
+	Journal         *JournalPayload         `json:"journal,omitempty"`
+	PackagePlan     *PackagePlanPayload     `json:"package_plan,omitempty"`
+	PackageUpgrade  *PackageUpgradePayload  `json:"package_upgrade,omitempty"`
+	Reboot          *RebootPayload          `json:"reboot,omitempty"`
+	UnitStatus      *UnitStatusPayload      `json:"unit_status,omitempty"`
+	DomainEnroll    *DomainEnrollPayload    `json:"domain_enroll,omitempty"`
+	LocalUser       *LocalUserPayload       `json:"local_user,omitempty"`
+	PackageRepair   *PackageRepairPayload   `json:"package_repair,omitempty"`
+	DockerRead      *DockerReadPayload      `json:"docker_read,omitempty"`
+	DockerContainer *DockerContainerPayload `json:"docker_container,omitempty"`
+	DockerImage     *DockerImagePayload     `json:"docker_image,omitempty"`
+	DockerPrune     *DockerPrunePayload     `json:"docker_prune,omitempty"`
+}
+
+// DockerContainerPayload wskazuje kontener operacji.
+//
+// Celem jest identyfikator, a nie nazwa. Nazwa kontenera jest etykieta:
+// moze zostac przypisana innemu kontenerowi miedzy planem a wykonaniem,
+// a operator zatwierdzil konkretny obiekt.
+type DockerContainerPayload struct {
+	ContainerID string `json:"container_id"`
+	// Name sluzy wylacznie potwierdzeniu i audytowi: operator ma w oknie
+	// nazwe, a w sladzie zostaje to, co widzial.
+	Name string `json:"name,omitempty"`
+	// TimeoutSeconds daje kontenerowi czas na zamkniecie przed zabiciem.
+	TimeoutSeconds uint32 `json:"timeout_seconds,omitempty"`
+	// RemoveVolumes dotyczy wylacznie usuwania i domyslnie jest wylaczone:
+	// wolumen przezywa kontener wlasnie po to, zeby dane przezyly.
+	RemoveVolumes bool `json:"remove_volumes,omitempty"`
+}
+
+// DockerImagePayload opisuje obraz do pobrania.
+type DockerImagePayload struct {
+	// Reference jest pelnym odwolaniem do obrazu, np. "nginx:1.27".
+	Reference string `json:"reference"`
+}
+
+// DockerPrunePayload wylicza obiekty do usuniecia.
+//
+// Sprzatanie po filtrze usuwa to, co pasuje w chwili wykonania - a wiec takze
+// obiekt utworzony po tym, jak operator obejrzal podglad. Dlatego operacja
+// przyjmuje wprost liste obiektow: usuwa dokladnie to, co zostalo pokazane,
+// albo nic.
+type DockerPrunePayload struct {
+	ImageIDs   []string `json:"image_ids,omitempty"`
+	VolumeName []string `json:"volume_names,omitempty"`
+	NetworkIDs []string `json:"network_ids,omitempty"`
 }
 
 // DockerReadPayload opisuje odczyt stanu silnika kontenerow. Payload jest
@@ -473,6 +604,34 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu docker_read", action)
 		}
 		return nil
+
+	case ActionDockerStart, ActionDockerStop, ActionDockerRestart, ActionDockerRemove:
+		if payload.DockerContainer == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu docker_container", action)
+		}
+		if !poprawnyIdentyfikatorKontenera(payload.DockerContainer.ContainerID) {
+			return fmt.Errorf("nieprawidlowy identyfikator kontenera %q",
+				payload.DockerContainer.ContainerID)
+		}
+		if payload.DockerContainer.TimeoutSeconds > 3600 {
+			return fmt.Errorf("czas na zamkniecie kontenera jest zbyt dlugi")
+		}
+		if payload.DockerContainer.RemoveVolumes && action != ActionDockerRemove {
+			return fmt.Errorf("operacja %s nie usuwa wolumenow", action)
+		}
+		return nil
+
+	case ActionDockerPull:
+		if payload.DockerImage == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu docker_image", action)
+		}
+		return poprawneOdwolanieObrazu(payload.DockerImage.Reference)
+
+	case ActionDockerPrune:
+		if payload.DockerPrune == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu docker_prune", action)
+		}
+		return sprawdzListeSprzatania(payload.DockerPrune)
 
 	case ActionUnitStatus:
 		if payload.UnitStatus == nil || len(payload.UnitStatus.Units) == 0 {

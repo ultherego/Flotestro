@@ -33,6 +33,9 @@ message HelperRequest {
     // czlonkostwo w grupie docker jest rownowazne rootowi, wiec proces
     // dzialajacy bez uprawnien nie moze go miec.
     DockerReadRequest docker_read = 29;
+    // Operacja na silniku kontenerow. Zakres jest wyliczony, a nie podany
+    // sciezka: helper nie posredniczy w dowolnym wywolaniu Engine API.
+    DockerActionRequest docker_action = 30;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -140,6 +143,7 @@ message HelperResponse {
   TaskProgress progress = 15;
   bool final = 16;
   DockerReadResult docker_result = 17;
+  DockerActionResult docker_action_result = 18;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -154,6 +158,41 @@ message DockerReadRequest {
     SCOPE_FULL = 2;
   }
   Scope scope = 1;
+}
+
+// DockerActionRequest opisuje jedna operacje na silniku.
+message DockerActionRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_START = 1;
+    OPERATION_STOP = 2;
+    OPERATION_RESTART = 3;
+    OPERATION_REMOVE = 4;
+    OPERATION_PULL_IMAGE = 5;
+    OPERATION_PRUNE = 6;
+  }
+  Operation operation = 1;
+  // Identyfikator kontenera; wylacznie szesnastkowy, sprawdzony przed
+  // wyslaniem i sprawdzony ponownie tutaj.
+  string container_id = 2;
+  uint32 timeout_seconds = 3;
+  bool remove_volumes = 4;
+  string image_reference = 5;
+  // Obiekty do usuniecia przy sprzataniu. Lista jest jawna: sprzatanie po
+  // filtrze usunęłoby takze to, czego operator nie widzial.
+  repeated string image_ids = 6;
+  repeated string volume_names = 7;
+  repeated string network_ids = 8;
+}
+
+message DockerActionResult {
+  // Stan kontenera przed i po, w postaci JSON. Zapisywany takze przy bledzie:
+  // bez tego nie wiadomo, co zdazylo sie zmienic.
+  bytes before = 1;
+  bytes after = 2;
+  repeated string removed = 3;
+  optional int64 reclaimed_bytes = 4;
+  string image_digest = 5;
 }
 
 message DockerReadResult {

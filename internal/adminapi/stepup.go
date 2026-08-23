@@ -35,6 +35,10 @@ type stepUpDenial struct {
 	Code    string
 	Message string
 	Detail  map[string]any
+	// BladZadania oznacza odmowe, ktorej ponowne uwierzytelnienie nie
+	// naprawi. Brak powodu jest brakiem w zadaniu, a nie w sesji - odesłanie
+	// klienta do logowania kazaloby mu naprawiac nie to, co jest zepsute.
+	BladZadania bool
 }
 
 // evaluate rozstrzyga, czy operacja o najwiekszym wplywie moze sie odbyc.
@@ -44,9 +48,10 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	reason = strings.TrimSpace(reason)
 	if len([]rune(reason)) < minimalStepUpReason {
 		return nil, &stepUpDenial{
-			Code:    "reason_required",
-			Message: "this operation requires a reason (field reason, min. 8 characters)",
-			Detail:  map[string]any{},
+			Code:        "reason_required",
+			Message:     "this operation requires a reason (field reason, min. 8 characters)",
+			Detail:      map[string]any{},
+			BladZadania: true,
 		}
 	}
 
@@ -118,6 +123,10 @@ func (s *Server) requireStepUp(w http.ResponseWriter, r *http.Request,
 			Action: action, TargetType: targetType, TargetID: targetID,
 			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied, Detail: denial.Detail,
 		})
+		if denial.BladZadania {
+			problem(w, http.StatusBadRequest, denial.Code, denial.Message)
+			return nil, false
+		}
 		// 401 zamiast 403: brakuje swiezego uwierzytelnienia, a nie uprawnien.
 		problem(w, http.StatusUnauthorized, denial.Code, denial.Message)
 		return nil, false

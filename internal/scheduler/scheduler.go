@@ -304,6 +304,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
+		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
+		envelope.Action = &agentv1.TaskEnvelope_DockerAction{
+			DockerAction: kopertaDockera(action, payload),
+		}
+
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{
 			ReadUnitStatus: &agentv1.ReadUnitStatus{Units: payload.UnitStatus.Units},
@@ -375,4 +381,39 @@ func Jitter(base time.Duration) time.Duration {
 		return 0
 	}
 	return time.Duration(rand.Int64N(int64(base)))
+}
+
+// kopertaDockera sklada koperte operacji kontenerowej. Kazdy typ operacji ma
+// wlasny payload, wiec tlumaczenie jest jawne, a nie po nazwie pola.
+func kopertaDockera(action opspec.ActionType, payload opspec.Payload) *agentv1.DockerAction {
+	koperta := &agentv1.DockerAction{}
+	if kontener := payload.DockerContainer; kontener != nil {
+		koperta.ContainerId = kontener.ContainerID
+		koperta.ContainerName = kontener.Name
+		koperta.TimeoutSeconds = kontener.TimeoutSeconds
+		koperta.RemoveVolumes = kontener.RemoveVolumes
+	}
+	if obraz := payload.DockerImage; obraz != nil {
+		koperta.ImageReference = obraz.Reference
+	}
+	if sprzatanie := payload.DockerPrune; sprzatanie != nil {
+		koperta.ImageIds = sprzatanie.ImageIDs
+		koperta.VolumeNames = sprzatanie.VolumeName
+		koperta.NetworkIds = sprzatanie.NetworkIDs
+	}
+	switch action {
+	case opspec.ActionDockerStart:
+		koperta.Operation = agentv1.DockerAction_OPERATION_START
+	case opspec.ActionDockerStop:
+		koperta.Operation = agentv1.DockerAction_OPERATION_STOP
+	case opspec.ActionDockerRestart:
+		koperta.Operation = agentv1.DockerAction_OPERATION_RESTART
+	case opspec.ActionDockerRemove:
+		koperta.Operation = agentv1.DockerAction_OPERATION_REMOVE
+	case opspec.ActionDockerPull:
+		koperta.Operation = agentv1.DockerAction_OPERATION_PULL_IMAGE
+	case opspec.ActionDockerPrune:
+		koperta.Operation = agentv1.DockerAction_OPERATION_PRUNE
+	}
+	return koperta
 }

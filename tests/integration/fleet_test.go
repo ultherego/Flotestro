@@ -340,3 +340,75 @@ func TestHostBezSilnikaOdrzucaOdczytKontenerow(t *testing.T) {
 			"payload": map[string]any{"docker_read": map[string]any{}}},
 		nil, http.StatusConflict)
 }
+
+// TestOperacjaNiszczacaWymagaPotwierdzeniaCelu sprawdza brame z rozdzialu 6.1:
+// zmiany, ktorej nie da sie cofnac, nie wolno zleci klikniecem. Operator musi
+// podac powod i przepisac nazwe hosta.
+func TestOperacjaNiszczacaWymagaPotwierdzeniaCelu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	if !maAdapter(host, "docker") {
+		t.Skip("host testowy nie ma silnika kontenerow")
+	}
+	const kontener = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	// Bez powodu operacja nie moze powstac: powod zostaje w audycie.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "docker.container.remove",
+			"payload": map[string]any{"docker_container": map[string]any{"container_id": kontener}},
+		}, nil, http.StatusBadRequest)
+
+	// Z powodem, ale bez przepisanej nazwy hosta - nadal odmowa.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "docker.container.remove",
+			"reason":  "porzadki w laboratorium",
+			"payload": map[string]any{"docker_container": map[string]any{"container_id": kontener}},
+		}, nil, http.StatusBadRequest)
+
+	// Nazwa innego hosta nie jest potwierdzeniem tego hosta.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":              "docker.container.remove",
+			"reason":              "porzadki w laboratorium",
+			"target_confirmation": "zupelnie-inny-host",
+			"payload":             map[string]any{"docker_container": map[string]any{"container_id": kontener}},
+		}, nil, http.StatusBadRequest)
+}
+
+// TestOperacjaOdwracalnaNieWymagaPrzepisywaniaNazwy pilnuje, ze brama nie
+// rozlala sie na wszystko. Restart kontenera jest odwracalny i ma isc jednym
+// klikniecem, jak kazda inna operacja.
+func TestOperacjaOdwracalnaNieWymagaPrzepisywaniaNazwy(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	if !maAdapter(host, "docker") {
+		t.Skip("host testowy nie ma silnika kontenerow")
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "docker.container.start",
+			"payload": map[string]any{"docker_container": map[string]any{
+				"container_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			}},
+		}, nil, http.StatusCreated)
+}
+
+// TestNieprawidlowyCelKontenerowyJestOdrzucany sprawdza walidacje po stronie
+// API. Identyfikator trafia do sciezki zapytania Engine API, wiec nie moze
+// niesc niczego, co ta sciezke zmienia.
+func TestNieprawidlowyCelKontenerowyJestOdrzucany(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	if !maAdapter(host, "docker") {
+		t.Skip("host testowy nie ma silnika kontenerow")
+	}
+	for _, id := range []string{"moj-kontener", "../images/json", "abc", ""} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action":  "docker.container.stop",
+				"payload": map[string]any{"docker_container": map[string]any{"container_id": id}},
+			}, nil, http.StatusBadRequest)
+	}
+}

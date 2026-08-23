@@ -41,6 +41,15 @@ const (
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
 	PermDockerRead Permission = "docker.read"
+	// Operacje na kontenerach maja osobne uprawnienia: uruchomienie uslugi
+	// i jej usuniecie to dwie rozne decyzje, takze co do tego, kto moze je
+	// podjac.
+	PermDockerStart   Permission = "docker.container.start"
+	PermDockerStop    Permission = "docker.container.stop"
+	PermDockerRestart Permission = "docker.container.restart"
+	PermDockerRemove  Permission = "docker.container.remove"
+	PermDockerPull    Permission = "docker.image.pull"
+	PermDockerPrune   Permission = "docker.prune"
 
 	PermCampaignRead    Permission = "campaign.read"
 	PermCampaignCreate  Permission = "campaign.create"
@@ -111,7 +120,9 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead,
 		PermJobCreate, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
-		PermDockerRead,
+		// Operator prowadzi kontenery, ale ich nie kasuje: usuwanie
+		// i sprzatanie sa nieodwracalne i naleza do administratora.
+		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
 		// Operator planuje aktualizacje, ale ich nie wykonuje: transakcja
 		// pakietowa jest operacja najwyzszego ryzyka i wymaga osobnego prawa.
 		PermPackagesPlan,
@@ -141,7 +152,9 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
-		PermDockerRead,
+		// Administrator ma takze operacje nieodwracalne na kontenerach.
+		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart,
+		PermDockerPull, PermDockerRemove, PermDockerPrune,
 		PermUnitStatus, PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

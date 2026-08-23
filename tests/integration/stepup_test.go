@@ -25,7 +25,9 @@ func TestZmianaRegulDostepuWymagaPowodu(t *testing.T) {
 			}
 			h.do(http.MethodPost, "/api/v1/group-mappings", map[string]any{
 				"group_name": grupa, "role": "viewer", "reason": powod,
-			}, &problem, http.StatusUnauthorized)
+				// Brak powodu jest brakiem w zadaniu, a nie w sesji: ponowne
+				// uwierzytelnienie by go nie naprawilo.
+			}, &problem, http.StatusBadRequest)
 			if problem.Code != "reason_required" {
 				t.Errorf("kod = %q, oczekiwano reason_required", problem.Code)
 			}
@@ -49,7 +51,7 @@ func TestZmianaRegulDostepuWymagaPowodu(t *testing.T) {
 	var problem struct {
 		Code string `json:"code"`
 	}
-	h.do(http.MethodDelete, "/api/v1/group-mappings/"+mapping.ID, nil, &problem, http.StatusUnauthorized)
+	h.do(http.MethodDelete, "/api/v1/group-mappings/"+mapping.ID, nil, &problem, http.StatusBadRequest)
 	if problem.Code != "reason_required" {
 		t.Errorf("usuniecie bez powodu: kod = %q", problem.Code)
 	}
