@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
@@ -36,6 +37,12 @@ const (
 
 	// Zadania cykliczne. Wpis zarzadzany opisuje stan docelowy, a nie
 	// polecenie do wykonania raz.
+	ActionNetworkPlan         ActionType = "network.plan"
+	ActionNetworkProfileApply ActionType = "network.profile.apply"
+	ActionNetworkRouteEnsure  ActionType = "network.route.ensure"
+	ActionNetworkMTUSet       ActionType = "network.mtu.set"
+	ActionNetworkRollback     ActionType = "network.rollback"
+
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
 	ActionScheduleRemove  ActionType = "schedule.remove"
@@ -121,6 +128,9 @@ const (
 	LockContainers = "containers"
 	LockIdentity   = "identity"
 	LockAccounts   = "accounts"
+	// Siec jest jednym zasobem hosta: dwie rownolegle zmiany konfiguracji
+	// zostawilyby stan, ktorego zaden z planow wycofania nie opisuje.
+	LockNetwork = "network"
 )
 
 // Spec jest pelnym kontraktem jednej operacji.
@@ -271,6 +281,26 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Uruchomienie teraz wykonuje to samo polecenie poza harmonogramem.
 	ActionScheduleRunNow: {mutating: true, capability: "schedules", permission: "schedule.run",
 		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits},
+
+	// Odczyt profili NetworkManagera przed zmiana. Plan nie dotyka hosta.
+	ActionNetworkPlan: {mutating: false, capability: "network", permission: "network.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Zmiana profilu adresowego jest zmiana galezi, na ktorej siedzi panel:
+	// zle ustawiony adres odcina host i zaden nastepny rozkaz juz nie dojdzie.
+	ActionNetworkProfileApply: {mutating: true, capability: "network.write", permission: "network.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+	// Trasy sa osobnym uprawnieniem: zmiana trasy domyslnej przekierowuje
+	// caly ruch hosta, nie tylko jego adres.
+	ActionNetworkRouteEnsure: {mutating: true, capability: "network.write", permission: "network.route.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+	// MTU ma wlasne uprawnienie, bo jest zmiana o innej wadze niz przepisanie
+	// adresu: zle MTU psuje duze pakiety, zly adres odcina host.
+	ActionNetworkMTUSet: {mutating: true, capability: "network.write", permission: "network.mtu.write",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
+	// Wycofanie na zadanie wraca do stanu sprzed zmiany, wiec samo w sobie
+	// jest zmiana sieci - i tak samo ryzykowna jak ta, ktora cofa.
+	ActionNetworkRollback: {mutating: true, capability: "network.write", permission: "network.rollback",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -440,6 +470,65 @@ var wzorzecOkresu = regexp.MustCompile(
 // staje sie nazwa pliku w /etc/cron.d, a cron pomija pliki z kropka i innymi
 // znakami specjalnymi - wpis o zlej nazwie po cichu nigdy by sie nie uruchomil.
 var identyfikatorHarmonogramu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+
+// nazwaInterfejsu dopuszcza nazwy, ktore jadro w ogole przyjmuje. Granica
+// dlugosci to IFNAMSIZ pomniejszone o terminator.
+var nazwaInterfejsu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$`)
+
+// sprawdzZmianeSieci odrzuca konfiguracje, ktorej host nie przyjmie albo
+// ktora odcielaby go od panelu. Panel odmawia wczesnie, host rozstrzygajaco.
+func sprawdzZmianeSieci(action ActionType, zmiana *NetworkPayload) error {
+	switch action {
+	case ActionNetworkMTUSet:
+		if zmiana.MTU == "" {
+			return fmt.Errorf("zmiana MTU wymaga wartosci")
+		}
+		return network.WalidujMTU(zmiana.MTU)
+
+	case ActionNetworkRouteEnsure:
+		// Pusta lista jest tu poprawnym stanem docelowym: znaczy "profil bez
+		// wlasnych tras". Zeby nie byla nim przez pomylke, zlecenie musi
+		// podac ja jawnie jako liste, a nie pominac pole.
+		if zmiana.Routes == nil {
+			return fmt.Errorf("operacja tras wymaga listy tras; pusta lista kasuje trasy profilu")
+		}
+		for _, trasa := range zmiana.Routes {
+			if err := network.WalidujTrase(trasa); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case ActionNetworkProfileApply:
+		switch zmiana.Method {
+		case "auto", "manual":
+		default:
+			return fmt.Errorf("nieobslugiwana metoda %q; panel ustawia auto albo manual", zmiana.Method)
+		}
+		// Metoda manual bez adresu zostawilaby interfejs bez adresu, a wiec
+		// odcielaby host. To nie jest konfiguracja, tylko pomylka.
+		if zmiana.Method == "manual" && len(zmiana.Addresses) == 0 {
+			return fmt.Errorf("metoda manual wymaga co najmniej jednego adresu")
+		}
+		for _, adres := range zmiana.Addresses {
+			if err := network.WalidujAdres(adres); err != nil {
+				return err
+			}
+		}
+		if zmiana.Gateway != "" {
+			if err := network.WalidujAdresIP(zmiana.Gateway); err != nil {
+				return fmt.Errorf("brama: %w", err)
+			}
+		}
+		for _, serwer := range zmiana.DNS {
+			if err := network.WalidujAdresIP(serwer); err != nil {
+				return fmt.Errorf("serwer DNS: %w", err)
+			}
+		}
+		return nil
+	}
+	return nil
+}
 
 // znakiPowlokiHarmonogramu sa niedozwolone w argumentach polecenia. Cron
 // uruchamia polecenie przez powloke, wiec argument z metaznakiem przestaje
@@ -721,7 +810,32 @@ type Payload struct {
 	ProcessList     *ProcessListPayload     `json:"process_list,omitempty"`
 	ProcessSignal   *ProcessSignalPayload   `json:"process_signal,omitempty"`
 	Schedule        *SchedulePayload        `json:"schedule,omitempty"`
+	Network         *NetworkPayload         `json:"network,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// NetworkPayload opisuje zmiane konfiguracji sieci.
+//
+// Payload opisuje stan docelowy interfejsu, a nie polecenia do wykonania.
+// Panel wskazuje interfejs, bo to jego widzi operator; profil NetworkManagera
+// host znajduje sam.
+type NetworkPayload struct {
+	Interface string `json:"interface"`
+	// MTU jest tekstem, bo "auto" jest tu rownoprawna wartoscia: zero
+	// znaczyloby lacze o zerowym MTU.
+	MTU string `json:"mtu,omitempty"`
+	// Routes to pelna lista tras profilu, a nie dopisek: operator widzial
+	// w planie konkretny zestaw i to on ma zostac na hoscie.
+	Routes    []string `json:"routes,omitempty"`
+	Method    string   `json:"method,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
+	Gateway   string   `json:"gateway,omitempty"`
+	DNS       []string `json:"dns,omitempty"`
+	// RollbackSeconds to okno, w ktorym agent ma potwierdzic lacznosc.
+	// Zero oznacza wartosc domyslna hosta, a nie brak wycofania.
+	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
+	// RollbackID wskazuje plan wycofania przy operacji network.rollback.
+	RollbackID string `json:"rollback_id,omitempty"`
 }
 
 // SchedulePayload opisuje zadanie cykliczne.
@@ -1066,6 +1180,24 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionNetworkPlan:
+		return nil
+
+	case ActionNetworkRollback:
+		if payload.Network == nil || payload.Network.RollbackID == "" {
+			return fmt.Errorf("wycofanie wymaga identyfikatora planu")
+		}
+		return nil
+
+	case ActionNetworkMTUSet, ActionNetworkRouteEnsure, ActionNetworkProfileApply:
+		if payload.Network == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu network", action)
+		}
+		if !nazwaInterfejsu.MatchString(payload.Network.Interface) {
+			return fmt.Errorf("nieprawidlowa nazwa interfejsu %q", payload.Network.Interface)
+		}
+		return sprawdzZmianeSieci(action, payload.Network)
 
 	case ActionProcessList:
 		if payload.ProcessList == nil {

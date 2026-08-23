@@ -322,6 +322,34 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
+		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
+		opspec.ActionNetworkRollback:
+		operacja := agentv1.NetworkAction_OPERATION_APPLY_PROFILE
+		switch action {
+		case opspec.ActionNetworkPlan:
+			operacja = agentv1.NetworkAction_OPERATION_READ
+		case opspec.ActionNetworkMTUSet:
+			operacja = agentv1.NetworkAction_OPERATION_SET_MTU
+		case opspec.ActionNetworkRouteEnsure:
+			operacja = agentv1.NetworkAction_OPERATION_ENSURE_ROUTES
+		case opspec.ActionNetworkRollback:
+			operacja = agentv1.NetworkAction_OPERATION_ROLLBACK
+		}
+		siec := &agentv1.NetworkAction{Operation: operacja}
+		if payload.Network != nil {
+			siec.Interface = payload.Network.Interface
+			siec.Mtu = payload.Network.MTU
+			siec.Routes = payload.Network.Routes
+			siec.Method = payload.Network.Method
+			siec.Addresses = payload.Network.Addresses
+			siec.Gateway = payload.Network.Gateway
+			siec.Dns = payload.Network.DNS
+			siec.RollbackSeconds = payload.Network.RollbackSeconds
+			siec.RollbackId = payload.Network.RollbackID
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Network{Network: siec}
+
 	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
 		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
 		operacja := agentv1.ScheduleAction_OPERATION_ENSURE

@@ -38,6 +38,8 @@ func run() error {
 		agentUser = flag.String("agent-user",
 			config.Env("FLOTESTRO_AGENT_USER", "flotestro-agent"),
 			"uzytkownik, ktoremu wolno wydawac polecenia")
+		rollback = flag.String("rollback", "",
+			"wykonaj zapisany plan wycofania zmiany sieci i zakoncz")
 		idleTimeout = flag.Duration("idle-timeout",
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
 			"czas bezczynnosci, po ktorym helper konczy prace")
@@ -46,6 +48,21 @@ func run() error {
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
+
+	// Tryb wycofania jest wolany przez przejsciowa jednostke systemd, gdy
+	// nikt nie potwierdzil lacznosci po zmianie sieci. Dziala bez gniazda,
+	// bez agenta i bez panelu - to ostatnia rzecz, ktora dziala, gdy zmiana
+	// odetnie host od swiata.
+	if *rollback != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		log.Warn("wycofanie zmiany sieci", "plan", *rollback)
+		if err := helper.WycofajZPlanu(ctx, *rollback); err != nil {
+			return err
+		}
+		log.Info("zmiana sieci wycofana", "plan", *rollback)
+		return nil
+	}
 
 	allowedUID, err := lookupUID(*agentUser)
 	if err != nil {

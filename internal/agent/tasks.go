@@ -32,6 +32,10 @@ const (
 	// RejectInternalError oznacza blad po stronie agenta. Zadanie konczy sie
 	// wynikiem negatywnym zamiast zabierac ze soba caly proces.
 	RejectInternalError = "agent_internal_error"
+	// RejectNetworkUnreachable oznacza zmiane sieci, po ktorej host stracil
+	// droge do panelu. Zmiana nie zostaje potwierdzona, wiec host wroci sam
+	// do konfiguracji sprzed niej.
+	RejectNetworkUnreachable = "network_unreachable"
 )
 
 // TaskExecutor wykonuje zadania dostarczone przez control plane.
@@ -154,6 +158,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
+		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
+		opspec.ActionNetworkRollback:
+		return e.applyNetwork(ctx, task, action, payload.Network)
 	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
 		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
 		return e.applySchedule(ctx, task, action, payload.Schedule)
@@ -494,6 +502,31 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Network:
+		siec := action.Network
+		typ := opspec.ActionNetworkProfileApply
+		switch siec.GetOperation() {
+		case agentv1.NetworkAction_OPERATION_READ:
+			typ = opspec.ActionNetworkPlan
+		case agentv1.NetworkAction_OPERATION_SET_MTU:
+			typ = opspec.ActionNetworkMTUSet
+		case agentv1.NetworkAction_OPERATION_ENSURE_ROUTES:
+			typ = opspec.ActionNetworkRouteEnsure
+		case agentv1.NetworkAction_OPERATION_ROLLBACK:
+			typ = opspec.ActionNetworkRollback
+		}
+		return typ, opspec.Payload{Network: &opspec.NetworkPayload{
+			Interface:       siec.GetInterface(),
+			MTU:             siec.GetMtu(),
+			Routes:          siec.GetRoutes(),
+			Method:          siec.GetMethod(),
+			Addresses:       siec.GetAddresses(),
+			Gateway:         siec.GetGateway(),
+			DNS:             siec.GetDns(),
+			RollbackSeconds: siec.GetRollbackSeconds(),
+			RollbackID:      siec.GetRollbackId(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Schedule:

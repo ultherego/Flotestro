@@ -26,6 +26,9 @@ const (
 const (
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"
+	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
+	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
+	WymaganieZapisSieci = "network.write"
 )
 
 // Wersja kontraktu adaptera. Podnosi sie, gdy zmienia sie znaczenie operacji
@@ -105,6 +108,17 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			}
 		}
 		return false
+	case WymaganieZapisSieci:
+		// Zapis sieci wymaga mechanizmu, ktory utrwali zmiane i pozwoli ja
+		// wycofac. Host bez niego ma sie o tym dowiedziec przy zlecaniu,
+		// a nie po dostarczeniu zadania.
+		wartosc, znana := c.FeatureStan(CapNetwork, "write")
+		if wartosc {
+			return true
+		}
+		// Adapter obecny, ale milczacy o cechach: decyzje podejmuje host
+		// przy wykonaniu, tak jak przed wprowadzeniem rejestru.
+		return !znana && c.Available(CapNetwork)
 	default:
 		return c.Available(wymaganie)
 	}

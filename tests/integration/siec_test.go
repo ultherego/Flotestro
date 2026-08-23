@@ -5,7 +5,9 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 type adresView struct {
@@ -147,4 +149,117 @@ func hasPrefixMask(adres string) bool {
 		}
 	}
 	return false
+}
+
+// TestZlaKonfiguracjaSieciNieDojezdzaDoHosta sprawdza, ze wartosc, ktorej
+// host nie przyjmie albo ktora odcielaby go od panelu, jest odrzucona przy
+// zlecaniu. Zmiana sieci to nie jest miejsce na uczenie sie z bledu wykonania.
+func TestZlaKonfiguracjaSieciNieDojezdzaDoHosta(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("rhel")
+	const powod = "test integracyjny modulu sieci"
+
+	przypadki := []struct {
+		akcja    string
+		zmiana   map[string]any
+		dlaczego string
+	}{
+		{"network.mtu.set", map[string]any{"interface": "enp0s8", "mtu": "900"},
+			"MTU ponizej progu IPv6"},
+		{"network.mtu.set", map[string]any{"interface": "enp0s8", "mtu": "duzo"},
+			"MTU, ktore nie jest liczba"},
+		{"network.mtu.set", map[string]any{"interface": "../etc", "mtu": "1500"},
+			"nazwa interfejsu ze sciezka"},
+		{"network.route.ensure", map[string]any{"interface": "enp0s8",
+			"routes": []string{"192.168.9.0 192.168.56.1"}}, "cel trasy bez maski"},
+		{"network.profile.apply", map[string]any{"interface": "enp0s8", "method": "manual"},
+			"metoda manual bez adresu"},
+		{"network.profile.apply", map[string]any{"interface": "enp0s8", "method": "manual",
+			"addresses": []string{"192.168.56.40"}}, "adres bez maski"},
+		{"network.profile.apply", map[string]any{"interface": "enp0s8", "method": "wlasna"},
+			"nieznana metoda"},
+	}
+	for _, przypadek := range przypadki {
+		t.Run(przypadek.dlaczego, func(t *testing.T) {
+			h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+				map[string]any{"action": przypadek.akcja, "reason": powod,
+					"payload": map[string]any{"network": przypadek.zmiana}},
+				nil, http.StatusBadRequest)
+		})
+	}
+}
+
+// TestHostBezMechanizmuZapisuOdmawiaPrzyZlecaniu sprawdza granice, ktora
+// rejestr zdolnosci ma pilnowac: host, ktory nie utrzyma zmiany po restarcie,
+// nie ma jej w ogole dostac.
+func TestHostBezMechanizmuZapisuOdmawiaPrzyZlecaniu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	stan := migawkaSieciHosta(t, h, host.ID)
+	if stan.WriteAdapter != "" {
+		t.Skipf("host ma adapter zapisu %s", stan.WriteAdapter)
+	}
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "network.mtu.set", "reason": "test integracyjny modulu sieci",
+			"payload": map[string]any{"network": map[string]any{
+				"interface": "eth1", "mtu": "1400"}}},
+		nil, http.StatusConflict)
+
+	// Odczyt stanu sieci dziala na tym samym hoscie: modul tylko do odczytu
+	// to nie modul niedostepny.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "network.plan",
+			"payload": map[string]any{"network": map[string]any{"interface": "eth1"}}},
+		nil, http.StatusCreated)
+}
+
+// TestZmianaSieciJestPotwierdzanaLacznoscia przechodzi pelna droge zmiany:
+// host uzbraja wycofanie, zmienia MTU, sprawdza droge do panelu i dopiero
+// wtedy rozbraja zegar. Po tescie MTU wraca do wartosci domyslnej.
+func TestZmianaSieciJestPotwierdzanaLacznoscia(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("rhel")
+	stan := migawkaSieciHosta(t, h, host.ID)
+	if stan.WriteAdapter == "" {
+		t.Skip("host nie ma mechanizmu zapisu konfiguracji sieci")
+	}
+	interfejs := stan.ManagementInterface
+	if interfejs == "" {
+		t.Skip("host nie wskazal interfejsu zarzadzania")
+	}
+
+	t.Cleanup(func() {
+		h.runOperation(host.ID, map[string]any{
+			"action": "network.mtu.set", "reason": "test integracyjny modulu sieci",
+			"payload": map[string]any{"network": map[string]any{
+				"interface": interfejs, "mtu": "auto", "rollback_seconds": 60}},
+		}, 3*time.Minute)
+	})
+
+	zadanie, proby := h.runOperation(host.ID, map[string]any{
+		"action": "network.mtu.set", "reason": "test integracyjny modulu sieci",
+		"payload": map[string]any{"network": map[string]any{
+			"interface": interfejs, "mtu": "1400", "rollback_seconds": 60}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("zmiana MTU: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+	// Komunikat ma powiedziec, ze zegar ratunkowy byl uzbrojony i zostal
+	// rozbrojony po sprawdzeniu drogi do panelu. Cicha zmiana sieci nie
+	// odroznialaby sie od zmiany, ktora zadnego zegara nie miala.
+	if !strings.Contains(ostatniKomunikat(proby), "wycofanie rozbrojone") {
+		t.Errorf("zmiana bez potwierdzenia lacznosci: %s", ostatniKomunikat(proby))
+	}
+
+	po := migawkaSieciHosta(t, h, host.ID)
+	for _, wpis := range po.Interfaces {
+		if wpis.Name == interfejs && wpis.MTU != 1400 {
+			// Inwentarz moze byc o cykl starszy niz zmiana, wiec brak nowej
+			// wartosci nie jest tu bledem - ale zla wartosc juz tak.
+			if wpis.MTU != 1500 {
+				t.Errorf("MTU interfejsu %s = %d", interfejs, wpis.MTU)
+			}
+		}
+	}
 }

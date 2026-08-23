@@ -97,6 +97,8 @@ func main() {
 	agent.SetPrivilegedAccountProbe(executor.ProbeLocalAccounts)
 	agent.SetDockerProbe(executor.ProbeDocker)
 	agent.SetScheduleProbe(executor.ProbeSchedules)
+	// Modul sieci sprawdza po zmianie, czy host nadal dosiega panelu.
+	agent.SetGatewayURL(*gatewayURL)
 
 	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
 	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.

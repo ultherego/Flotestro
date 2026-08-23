@@ -358,6 +358,7 @@ message TaskEnvelope {
     SignalProcess signal_process = 36;
     PackageLifecycle package_lifecycle = 37;
     ScheduleAction schedule = 38;
+    NetworkAction network = 39;
   }
 }
 
@@ -589,6 +590,7 @@ message TaskResult {
   ProcessListResult process_list_result = 30;
   ProcessSignalResult process_signal_result = 31;
   ScheduleResult schedule_result = 32;
+  NetworkResult network_result = 33;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -791,6 +793,40 @@ message ScheduleAction {
 message ScheduleResult {
   bytes snapshot = 1;
   string message = 2;
+}
+
+// NetworkAction opisuje zmiane konfiguracji sieci hosta. Kazda zmiana jest
+// uzbrajana lokalnym wycofaniem po stronie hosta.
+message NetworkAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_SET_MTU = 2;
+    OPERATION_ENSURE_ROUTES = 3;
+    OPERATION_APPLY_PROFILE = 4;
+    OPERATION_CONFIRM = 5;
+    OPERATION_ROLLBACK = 6;
+  }
+  Operation operation = 1;
+  string interface = 2;
+  string mtu = 3;
+  repeated string routes = 4;
+  string method = 5;
+  repeated string addresses = 6;
+  string gateway = 7;
+  repeated string dns = 8;
+  uint32 rollback_seconds = 9;
+  string rollback_id = 10;
+}
+
+message NetworkResult {
+  bytes profiles = 1;
+  string message = 2;
+  string rollback_id = 3;
+  string rollback_deadline = 4;
+  // Confirmed mowi, czy agent zdazyl potwierdzic lacznosc przed terminem.
+  // Falsz przy zmianie, ktora sie udala, oznacza host wycofany przez zegar.
+  bool confirmed = 5;
 }
 
 message PackageLifecycle {

@@ -62,6 +62,19 @@ const (
 	PermScheduleDisable Permission = "schedule.disable"
 	PermScheduleRemove  Permission = "schedule.remove"
 	PermScheduleRun     Permission = "schedule.run"
+	// Siec. Odczyt profili jest przygotowaniem do zmiany, wiec jest tani;
+	// zmiana adresu albo trasy potrafi odciac host od panelu i wtedy zaden
+	// nastepny rozkaz juz nie dojdzie. Trasy maja wlasne uprawnienie, bo
+	// zmiana trasy domyslnej przekierowuje caly ruch hosta, nie tylko
+	// jego adres.
+	PermNetworkRead       Permission = "network.read"
+	PermNetworkWrite      Permission = "network.write"
+	PermNetworkRouteWrite Permission = "network.route.write"
+	// MTU i wycofanie sa oddzielone od przepisania adresu: zle MTU psuje duze
+	// pakiety, zly adres odcina host, a wycofanie wraca do stanu, ktorego
+	// operator moze juz nie pamietac.
+	PermNetworkMTUWrite Permission = "network.mtu.write"
+	PermNetworkRollback Permission = "network.rollback"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -137,6 +150,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
+		PermNetworkRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -162,6 +176,9 @@ var rolePermissions = map[Role][]Permission{
 		// Operator widzi konta lokalne, ale ich nie zaklada: nadanie dostepu
 		// do hosta jest decyzja administracyjna, a nie czescia obslugi awarii.
 		PermLocalUserRead,
+		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
+		// odcina host i nie da sie jej naprawic zdalnie.
+		PermNetworkRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -191,6 +208,8 @@ var rolePermissions = map[Role][]Permission{
 		PermJournalFollow, PermLogFileRead, PermProcessRead, PermProcessSignal,
 		PermPackagesInstall, PermPackagesRemove, PermPackagesHold,
 		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
+		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
+		PermNetworkMTUWrite, PermNetworkRollback,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

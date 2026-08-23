@@ -42,6 +42,7 @@ message HelperRequest {
     LogFileRequest log_file = 32;
     ProcessSignalRequest process_signal = 33;
     ScheduleRequest schedule = 34;
+    NetworkRequest network = 35;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -171,6 +172,7 @@ message HelperResponse {
   LogFileResult log_file_result = 20;
   ProcessSignalResult process_signal_result = 21;
   ScheduleResult schedule_result = 22;
+  NetworkResult network_result = 23;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -255,6 +257,55 @@ message ScheduleResult {
   // harmonogramow; kontrakt helpera jej nie powtarza.
   bytes snapshot = 1;
   string message = 2;
+}
+
+// NetworkRequest opisuje zmiane konfiguracji sieci hosta.
+//
+// Kazda zmiana jest uzbrajana wycofaniem: helper zapisuje stan sprzed zmiany
+// i uruchamia lokalny zegar, ktory ten stan przywroci. Zegar rozbraja dopiero
+// potwierdzenie od agenta, ze host nadal rozmawia z panelem.
+message NetworkRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // Odczyt profili NetworkManagera wraz z ich ustawieniami.
+    OPERATION_READ = 1;
+    OPERATION_SET_MTU = 2;
+    OPERATION_ENSURE_ROUTES = 3;
+    OPERATION_APPLY_PROFILE = 4;
+    // Rozbrojenie wycofania po udanym potwierdzeniu lacznosci.
+    OPERATION_CONFIRM = 5;
+    // Natychmiastowe wycofanie zmiany na zadanie operatora.
+    OPERATION_ROLLBACK = 6;
+  }
+  Operation operation = 1;
+  // Interfejs, ktorego zmiana dotyczy. Profil NetworkManagera helper znajduje
+  // sam: panel opisuje interfejs, bo to jego widzi operator.
+  string interface = 2;
+  string mtu = 3;
+  repeated string routes = 4;
+  string method = 5;
+  repeated string addresses = 6;
+  string gateway = 7;
+  repeated string dns = 8;
+  // Sekundy do wycofania. Zero oznacza wartosc domyslna helpera, a nie brak
+  // wycofania: zmiana sieci bez zegara ratunkowego nie jest tu mozliwa.
+  uint32 rollback_seconds = 9;
+  // Identyfikator planu wycofania przy potwierdzeniu albo wycofaniu.
+  string rollback_id = 10;
+  string reason = 11;
+}
+
+message NetworkResult {
+  // Stan profili w postaci JSON. Struktura nalezy do modulu sieci.
+  bytes profiles = 1;
+  string message = 2;
+  // Identyfikator uzbrojonego wycofania. Puste oznacza operacje, ktora
+  // niczego nie uzbroila.
+  string rollback_id = 3;
+  // Chwila, o ktorej wycofanie sie wykona, jesli nikt go nie rozbroi.
+  string rollback_deadline = 4;
+  // Confirmed mowi, czy wycofanie zostalo rozbrojone.
+  bool confirmed = 5;
 }
 
 message ProcessSignalRequest {
