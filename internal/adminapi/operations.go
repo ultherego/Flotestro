@@ -77,7 +77,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 
 	// Host z uszkodzona baza pakietow nie moze dostawac kolejnych operacji
 	// pakietowych, dopoki ktos tego nie wyjasni.
-	if host.PackageDatabaseBroken && strings.HasPrefix(string(action), "packages.") {
+	if host.PackageDatabaseBroken && blockedByBrokenDatabase(action) {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
 			Action: "job.create", TargetType: "host", TargetID: hostID,
@@ -85,7 +85,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			Detail:  map[string]any{"reason": "package_database_broken", "action_type": string(action)},
 		})
 		problem(w, http.StatusConflict, "package_database_broken",
-			"the host's package database needs repair; package operations are on hold")
+			"the host's package database needs repair; run packages.repair first")
 		return
 	}
 
@@ -433,4 +433,20 @@ func joinActions() string {
 
 func requestIDOf(r *http.Request) string {
 	return r.Header.Get("X-Request-Id")
+}
+
+// blockedByBrokenDatabase mowi, ktore operacje pakietowe nie maja sensu na
+// hoscie z uszkodzona baza pakietow.
+//
+// Naprawa i plan sa z tego wylaczone, i to nie jest wyjatek dla wygody:
+// naprawa jest jedynym sposobem wyjscia z tego stanu, wiec zablokowanie jej
+// zamykaloby hosta w petli bez wyjscia z poziomu panelu. Plan niczego nie
+// zmienia i wlasnie na zablokowanym hoscie jest najbardziej potrzebny, bo
+// pokazuje, co blokuje.
+func blockedByBrokenDatabase(action opspec.ActionType) bool {
+	switch action {
+	case opspec.ActionPackageRepair, opspec.ActionPackagePlan:
+		return false
+	}
+	return strings.HasPrefix(string(action), "packages.")
 }

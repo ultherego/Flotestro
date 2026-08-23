@@ -214,9 +214,26 @@ func TestUszkodzonaBazaPakietowBlokujeOperacje(t *testing.T) {
 			`update hosts set package_database_broken = false where id = $1`, host.ID)
 	})
 
+	// Transakcja na uszkodzonej bazie nie ma szans sie powiesc i nie moze
+	// zostac zlecona.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "packages.upgrade",
+			"payload": map[string]any{"package_upgrade": map[string]any{}}},
+		nil, http.StatusConflict)
+
+	// Naprawa musi byc dozwolona wlasnie w tym stanie. Zablokowanie jej
+	// zamykalo hosta w petli bez wyjscia: jedyna operacja, ktora potrafi
+	// zdjac te flage, byla przez nia blokowana.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "packages.repair",
+			"payload": map[string]any{"package_repair": map[string]any{}}},
+		nil, http.StatusCreated)
+
+	// Plan niczego nie zmienia i na zablokowanym hoscie jest najbardziej
+	// potrzebny: pokazuje, co blokuje.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "packages.plan", "payload": planPayload(false)},
-		nil, http.StatusConflict)
+		nil, http.StatusCreated)
 
 	// Operacje niepakietowe nadal dzialaja: blokada dotyczy tylko pakietow.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",

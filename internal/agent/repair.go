@@ -62,10 +62,17 @@ func (e *TaskExecutor) repairPackages(ctx context.Context, task *agentv1.TaskEnv
 		}
 	}
 
+	komunikat := "operacje pakietowe odblokowane"
+	if len(detail.GetAnswered()) == 0 {
+		// Naprawa hosta, ktory niczego nie potrzebowal, jest powodzeniem.
+		// Kampania obejmujaca cala flote trafi na takie hosty i nie moze
+		// z tego powodu raportowac bledow.
+		komunikat = "nic nie wymagalo naprawy"
+	}
 	return &agentv1.TaskResult{
 		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode: 0,
-		Message:  "operacje pakietowe odblokowane",
+		Message:  komunikat,
 		Detail:   &agentv1.TaskResult_PackageRepair{PackageRepair: detail},
 	}
 }

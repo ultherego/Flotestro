@@ -144,11 +144,6 @@ func SetRuntimeDir(dir string) error {
 // run uruchamia narzedzie ze stala sciezka i tablica argumentow. Nigdy nie
 // uzywamy sh -c, wiec nazwa pakietu nie moze stac sie poleceniem.
 // LC_ALL=C stabilizuje output, ktory musimy parsowac.
-// ErrPackageNotBlocked odrzuca odpowiedz dla pakietu, ktory niczego nie
-// blokuje. Bez tego ograniczenia naprawa bylaby dowolnym ustawianiem
-// konfiguracji dowolnego pakietu na hoscie.
-var ErrPackageNotBlocked = errors.New("pakiet nie blokuje operacji pakietowych")
-
 // ErrInvalidAnswer odrzuca odpowiedz ze znakiem nowej linii: kazdy wiersz
 // wejscia debconfa jest osobnym ustawieniem, wiec taka wartosc pozwalalaby
 // dopisac ustawienia, o ktore nikt nie prosil.

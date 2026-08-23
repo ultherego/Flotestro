@@ -358,14 +358,19 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}
 	}
 
-	// Uszkodzona baza pakietow blokuje hosta przed kolejnymi kampaniami.
-	if apply, ok := result.GetDetail().(*agentv1.TaskResult_PackageApply); ok {
-		if err := s.hosts.SetPackageDatabaseBroken(ctx, hostID,
-			apply.PackageApply.GetPackageDatabaseBroken()); err != nil {
+	// Stan bazy pakietow aktualizuje kazdy wynik, ktory go zna: transakcja,
+	// plan i naprawa.
+	//
+	// Wczesniej robila to wylacznie transakcja, a poniewaz uszkodzona baza
+	// blokuje transakcje, host nie mial jak wrocic do stanu sprawnego z poziomu
+	// panelu - nawet po udanej naprawie. Plan jest tu rownie wiarygodny:
+	// czyta stan pakietow i niczego nie zmienia.
+	if uszkodzona, znane := stanBazyPakietow(result); znane {
+		if err := s.hosts.SetPackageDatabaseBroken(ctx, hostID, uszkodzona); err != nil {
 			s.log.Error("nie zapisano stanu bazy pakietow", "host_id", hostID, "err", err)
 		}
-		if apply.PackageApply.GetPackageDatabaseBroken() {
-			s.log.Error("baza pakietow hosta wymaga naprawy; kampanie wstrzymane",
+		if uszkodzona {
+			s.log.Error("baza pakietow hosta wymaga naprawy; operacje pakietowe wstrzymane",
 				"host_id", hostID)
 		}
 	}
@@ -891,4 +896,21 @@ func blockedJSON(blocked []*agentv1.BlockedPackage) []map[string]any {
 		})
 	}
 	return result
+}
+
+// stanBazyPakietow odczytuje stan bazy pakietow z wyniku zadania.
+//
+// Drugi zwracany parametr mowi, czy wynik w ogole cokolwiek o tym stanie wie.
+// Zadanie niepakietowe nie moze zdejmowac ani nakladac tej flagi: brak wiedzy
+// to nie to samo co stwierdzenie, ze baza jest sprawna.
+func stanBazyPakietow(result *agentv1.TaskResult) (uszkodzona bool, znane bool) {
+	switch detail := result.GetDetail().(type) {
+	case *agentv1.TaskResult_PackageApply:
+		return detail.PackageApply.GetPackageDatabaseBroken(), true
+	case *agentv1.TaskResult_PackagePlan:
+		return len(detail.PackagePlan.GetBlocked()) > 0, true
+	case *agentv1.TaskResult_PackageRepair:
+		return len(detail.PackageRepair.GetStillBlocked()) > 0, true
+	}
+	return false, false
 }

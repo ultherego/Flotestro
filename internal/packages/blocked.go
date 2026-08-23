@@ -88,8 +88,12 @@ func (a *APT) Repair(ctx context.Context, answers []Answer) ([]string, []Blocked
 	var ustawione []string
 	var linie []string
 	for _, answer := range answers {
+		// Odpowiedz dla pakietu, ktory nic nie blokuje, jest pomijana, a nie
+		// odrzucana: host mogl zostac naprawiony w miedzyczasie, a kampania
+		// powtarzajaca te sama naprawe nie moze przez to konczyc sie bledem.
+		// Granica pozostaje ta sama - ustawiamy wylacznie to, co odblokowuje.
 		if !blokujace[answer.Package] {
-			return nil, nil, ErrPackageNotBlocked
+			continue
 		}
 		if strings.ContainsAny(answer.Question+answer.Type+answer.Value, "\n\r") {
 			return nil, nil, ErrInvalidAnswer
