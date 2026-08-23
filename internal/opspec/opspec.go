@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
@@ -42,6 +43,9 @@ const (
 	ActionNetworkRouteEnsure  ActionType = "network.route.ensure"
 	ActionNetworkMTUSet       ActionType = "network.mtu.set"
 	ActionNetworkRollback     ActionType = "network.rollback"
+
+	ActionDNSResolveTest ActionType = "dns.resolve.test"
+	ActionDNSHostApply   ActionType = "dns.host.apply"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -301,6 +305,15 @@ var actionSpecs = map[ActionType]actionSpec{
 	// jest zmiana sieci - i tak samo ryzykowna jak ta, ktora cofa.
 	ActionNetworkRollback: {mutating: true, capability: "network.write", permission: "network.rollback",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
+
+	// Test rozwiazywania nazw pyta z hosta, bo odpowiedz panelu nie mowi nic
+	// o tym, co zobaczy host. Zapytanie niczego nie zmienia.
+	ActionDNSResolveTest: {mutating: false, capability: "dns", permission: "dns.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
+	// Zly resolver odcina host od katalogu i od Kerberosa, a wiec od
+	// logowania - skutek jest szerszy niz sama nazwa, ktorej nie rozwiaze.
+	ActionDNSHostApply: {mutating: true, capability: "dns.write", permission: "dns.host.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -811,7 +824,23 @@ type Payload struct {
 	ProcessSignal   *ProcessSignalPayload   `json:"process_signal,omitempty"`
 	Schedule        *SchedulePayload        `json:"schedule,omitempty"`
 	Network         *NetworkPayload         `json:"network,omitempty"`
+	DNS             *DNSPayload             `json:"dns,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// DNSPayload opisuje operacje na resolverze hosta.
+type DNSPayload struct {
+	// Interface wskazuje profil polaczenia, przez ktory idzie zmiana.
+	// Resolver hosta nalezy do interfejsu, a nie do pliku: plik jest tylko
+	// tym, co usluga z tego wyliczyla.
+	Interface     string   `json:"interface,omitempty"`
+	Servers       []string `json:"servers,omitempty"`
+	SearchDomains []string `json:"search_domains,omitempty"`
+	// IgnoreAutoDNS odrzuca serwery z DHCP. Bez tego serwery panelu i serwery
+	// dostawcy trafiaja do jednej listy, a operator nie wie, ktory odpowiedzial.
+	IgnoreAutoDNS   bool     `json:"ignore_auto_dns,omitempty"`
+	RollbackSeconds uint32   `json:"rollback_seconds,omitempty"`
+	Names           []string `json:"names,omitempty"`
 }
 
 // NetworkPayload opisuje zmiane konfiguracji sieci.
@@ -1180,6 +1209,44 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionDNSResolveTest:
+		if payload.DNS == nil || len(payload.DNS.Names) == 0 {
+			return fmt.Errorf("test wymaga co najmniej jednej nazwy")
+		}
+		if len(payload.DNS.Names) > 20 {
+			return fmt.Errorf("test obejmuje najwyzej 20 nazw naraz")
+		}
+		for _, nazwa := range payload.DNS.Names {
+			if !dns.PoprawnaNazwaDoTestu(nazwa) {
+				return fmt.Errorf("nieprawidlowa nazwa %q", nazwa)
+			}
+		}
+		return nil
+
+	case ActionDNSHostApply:
+		if payload.DNS == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu dns", action)
+		}
+		if !nazwaInterfejsu.MatchString(payload.DNS.Interface) {
+			return fmt.Errorf("nieprawidlowa nazwa interfejsu %q", payload.DNS.Interface)
+		}
+		// Resolver bez serwera nie rozwiaze niczego, a host bez rozwiazywania
+		// nazw traci katalog, Kerberosa i logowanie.
+		if len(payload.DNS.Servers) == 0 {
+			return fmt.Errorf("zmiana resolvera wymaga co najmniej jednego serwera")
+		}
+		for _, serwer := range payload.DNS.Servers {
+			if err := network.WalidujAdresIP(serwer); err != nil {
+				return fmt.Errorf("serwer DNS: %w", err)
+			}
+		}
+		for _, domena := range payload.DNS.SearchDomains {
+			if !dns.PoprawnaNazwaDoTestu(domena) {
+				return fmt.Errorf("nieprawidlowa domena wyszukiwania %q", domena)
+			}
+		}
+		return nil
 
 	case ActionNetworkPlan:
 		return nil

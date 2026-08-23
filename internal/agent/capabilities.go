@@ -19,6 +19,9 @@ const (
 	// Siec. Odczyt dziala wszedzie, gdzie jest iproute2; zapis wymaga
 	// mechanizmu, ktory potrafi wycofac zmiane.
 	CapNetwork = "network"
+	// Resolver hosta. Odczyt dziala wszedzie, gdzie jest resolv.conf; zapis
+	// wymaga mechanizmu, ktory zmiane utrwali.
+	CapDNS = "dns"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -29,6 +32,7 @@ const (
 	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
 	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
 	WymaganieZapisSieci = "network.write"
+	WymaganieZapisDNS   = "dns.write"
 )
 
 // Wersja kontraktu adaptera. Podnosi sie, gdy zmienia sie znaczenie operacji
@@ -108,6 +112,12 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			}
 		}
 		return false
+	case WymaganieZapisDNS:
+		wartosc, znana := c.FeatureStan(CapDNS, "write")
+		if wartosc {
+			return true
+		}
+		return !znana && c.Available(CapDNS)
 	case WymaganieZapisSieci:
 		// Zapis sieci wymaga mechanizmu, ktory utrwali zmiane i pozwoli ja
 		// wycofac. Host bez niego ma sie o tym dowiedziec przy zlecaniu,
@@ -141,6 +151,8 @@ func DetectCapabilities() Capabilities {
 	harmonogramy := isDir("/etc/cron.d")
 	odczytSieci := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
 	zapisSieci := network.WykryjAdapter(network.Istnieje)
+	resolver := exists("/etc/resolv.conf")
+	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
 
 	return Capabilities{
 		{
@@ -186,6 +198,17 @@ func DetectCapabilities() Capabilities {
 				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
 			},
 			Reason: powodSieciowy(odczytSieci, zapisSieci),
+		},
+		{
+			Name:      CapDNS,
+			Version:   wersjaAdaptera,
+			Available: resolver,
+			ReadOnly:  zapisSieci != network.AdapterNetworkManager,
+			Features: map[string]bool{
+				"resolved": resolved,
+				"write":    zapisSieci == network.AdapterNetworkManager,
+			},
+			Reason: powodResolvera(resolver, zapisSieci),
 		},
 		{
 			Name:      CapSchedules,
@@ -263,4 +286,16 @@ func powodSieciowy(odczyt bool, adapter string) string {
 		return "this host has no iproute2 (ip) binary"
 	}
 	return network.PowodBrakuZapisu(adapter)
+}
+
+// powodResolvera tlumaczy, czego brakuje modulowi DNS.
+func powodResolvera(resolver bool, adapter string) string {
+	if !resolver {
+		return "this host has no /etc/resolv.conf"
+	}
+	if adapter != network.AdapterNetworkManager {
+		return "resolver changes need NetworkManager; without it a write to resolv.conf " +
+			"would be overwritten by whoever owns the file"
+	}
+	return ""
 }

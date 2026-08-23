@@ -121,6 +121,11 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	siec := ZbierzSiec(ctx, adresZarzadzania)
 	facts.Network = &siec
 
+	// Resolver czytamy razem z siecia: to jedna decyzja hosta o tym, dokad
+	// ida jego pytania i ktora droga.
+	resolver := ZbierzDNS(ctx)
+	facts.DNS = &resolver
+
 	if facts.Identity.Enrolled && privilegedIdentity != nil {
 		privileged, err := privilegedIdentity(ctx, facts.Identity.Domain)
 		if err != nil {

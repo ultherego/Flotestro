@@ -359,6 +359,7 @@ message TaskEnvelope {
     PackageLifecycle package_lifecycle = 37;
     ScheduleAction schedule = 38;
     NetworkAction network = 39;
+    DnsAction dns = 40;
   }
 }
 
@@ -591,6 +592,7 @@ message TaskResult {
   ProcessSignalResult process_signal_result = 31;
   ScheduleResult schedule_result = 32;
   NetworkResult network_result = 33;
+  DnsResult dns_result = 34;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -827,6 +829,34 @@ message NetworkResult {
   // Confirmed mowi, czy agent zdazyl potwierdzic lacznosc przed terminem.
   // Falsz przy zmianie, ktora sie udala, oznacza host wycofany przez zegar.
   bool confirmed = 5;
+}
+
+// DnsAction opisuje operacje na resolverze hosta.
+message DnsAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // Test rozwiazywania nazw z hosta. Odpowiedz panelu nie mowi nic o tym,
+    // co zobaczy host, wiec pytanie zadaje host.
+    OPERATION_RESOLVE_TEST = 1;
+    OPERATION_APPLY = 2;
+  }
+  Operation operation = 1;
+  string interface = 2;
+  repeated string servers = 3;
+  repeated string search_domains = 4;
+  bool ignore_auto_dns = 5;
+  uint32 rollback_seconds = 6;
+  repeated string names = 7;
+}
+
+message DnsResult {
+  // Wyniki zapytan w postaci JSON. Struktura nalezy do modulu DNS.
+  bytes queries = 1;
+  bytes profiles = 2;
+  string message = 3;
+  string rollback_id = 4;
+  string rollback_deadline = 5;
+  bool confirmed = 6;
 }
 
 message PackageLifecycle {

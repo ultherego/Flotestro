@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	dnsmodul "github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
@@ -91,6 +92,8 @@ type Facts struct {
 	// Network jest obrazem interfejsow i tras z jadra. Brak wartosci oznacza
 	// cykl, w ktorym stanu nie zbierano.
 	Network *network.Snapshot `json:"network,omitempty"`
+	// DNS jest stanem resolvera hosta.
+	DNS *dnsmodul.Snapshot `json:"dns,omitempty"`
 	// Schedules to zadania cykliczne hosta. Brak wartosci oznacza host bez
 	// crona albo odczyt, ktory sie nie powiodl - rozroznia je pole
 	// unavailable_reason w srodku migawki.

@@ -158,6 +158,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionDNSResolveTest, opspec.ActionDNSHostApply:
+		return e.applyDNS(ctx, task, action, payload.DNS)
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
 		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
 		opspec.ActionNetworkRollback:
@@ -502,6 +504,21 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Dns:
+		resolver := action.Dns
+		typ := opspec.ActionDNSHostApply
+		if resolver.GetOperation() == agentv1.DnsAction_OPERATION_RESOLVE_TEST {
+			typ = opspec.ActionDNSResolveTest
+		}
+		return typ, opspec.Payload{DNS: &opspec.DNSPayload{
+			Interface:       resolver.GetInterface(),
+			Servers:         resolver.GetServers(),
+			SearchDomains:   resolver.GetSearchDomains(),
+			IgnoreAutoDNS:   resolver.GetIgnoreAutoDns(),
+			RollbackSeconds: resolver.GetRollbackSeconds(),
+			Names:           resolver.GetNames(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Network:

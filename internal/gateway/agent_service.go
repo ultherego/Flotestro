@@ -610,6 +610,40 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// Wynik testu rozwiazywania nazw nalezy do zadania, a nie do inwentarza:
+	// to odpowiedz na jedno pytanie zadane w jednej chwili, a nie stan hosta.
+	if resolver := result.GetDnsResult(); resolver != nil &&
+		(len(resolver.GetQueries()) > 0 || resolver.GetRollbackId() != "") {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":              "dns",
+			"queries":           surowyJSON(resolver.GetQueries()),
+			"profiles":          surowyJSON(resolver.GetProfiles()),
+			"rollback_id":       resolver.GetRollbackId(),
+			"rollback_deadline": resolver.GetRollbackDeadline(),
+			"confirmed":         resolver.GetConfirmed(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Zmiana sieci niesie identyfikator wycofania i to, czy zdazylo je
+	// rozbroic potwierdzenie lacznosci. Bez tego operator nie wie, czy host
+	// za chwile wroci do poprzedniej konfiguracji.
+	if siec := result.GetNetworkResult(); siec != nil &&
+		(len(siec.GetProfiles()) > 0 || siec.GetRollbackId() != "") {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":              "network",
+			"profiles":          surowyJSON(siec.GetProfiles()),
+			"rollback_id":       siec.GetRollbackId(),
+			"rollback_deadline": siec.GetRollbackDeadline(),
+			"confirmed":         siec.GetConfirmed(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if sygnal := result.GetProcessSignalResult(); sygnal != nil {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "process_signal",
@@ -644,19 +678,6 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"removed":         docker.GetRemoved(),
 			"reclaimed_bytes": docker.ReclaimedBytes,
 			"image_digest":    docker.GetImageDigest(),
-		})
-		if err == nil {
-			return encoded
-		}
-	}
-
-	// Wynik projektu Compose jest osobnym polem: niesie plan albo stan
-	// wdrozenia, ktory dotyczy takze operacji zakonczonej bledem.
-	if compose := result.GetComposeResult(); compose != nil && len(compose.GetPayload()) > 0 {
-		encoded, err := json.Marshal(map[string]any{
-			"kind":               "compose",
-			"payload":            json.RawMessage(compose.GetPayload()),
-			"unavailable_reason": compose.GetUnavailableReason(),
 		})
 		if err == nil {
 			return encoded

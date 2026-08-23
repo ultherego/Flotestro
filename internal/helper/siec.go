@@ -319,11 +319,16 @@ func srodowiskoNarzedzi() []string {
 	return []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
 }
 
-func odpowiedzSieci(profile []network.Profil, komunikat string,
-	plan *network.PlanWycofania) *helperv1.HelperResponse {
-	zakodowane, err := json.Marshal(struct {
+// zakodujProfile zamienia profile w tresc odpowiedzi.
+func zakodujProfile(profile []network.Profil) ([]byte, error) {
+	return json.Marshal(struct {
 		Profile []network.Profil `json:"profiles"`
 	}{profile})
+}
+
+func odpowiedzSieci(profile []network.Profil, komunikat string,
+	plan *network.PlanWycofania) *helperv1.HelperResponse {
+	zakodowane, err := zakodujProfile(profile)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}

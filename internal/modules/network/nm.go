@@ -158,6 +158,38 @@ func ArgumentyTras(polaczenie string, trasy []string) ([][]string, error) {
 	}, nil
 }
 
+// ArgumentyDNS sklada zmiane samego resolvera.
+//
+// Zmieniamy wylacznie pola DNS profilu: adres, brama i trasy zostaja takie,
+// jakie byly. Operator prosil o resolver, wiec dostaje resolver - a nie
+// przepisany caly profil, ktorego reszty nie ogladal.
+func ArgumentyDNS(polaczenie string, serwery, domeny []string, pomijajAuto bool) ([][]string, error) {
+	if polaczenie == "" {
+		return nil, fmt.Errorf("zmiana resolvera bez nazwy polaczenia")
+	}
+	// Resolver bez serwera nie rozwiaze niczego, a host bez rozwiazywania
+	// nazw traci katalog, Kerberosa i logowanie.
+	if len(serwery) == 0 {
+		return nil, fmt.Errorf("zmiana resolvera wymaga co najmniej jednego serwera")
+	}
+	for _, serwer := range serwery {
+		if err := WalidujAdresIP(serwer); err != nil {
+			return nil, fmt.Errorf("serwer DNS: %w", err)
+		}
+	}
+	pomijaj := "no"
+	if pomijajAuto {
+		pomijaj = "yes"
+	}
+	return [][]string{
+		{SciezkaNmcli, "connection", "modify", polaczenie,
+			"ipv4.dns", strings.Join(serwery, ","),
+			"ipv4.dns-search", strings.Join(domeny, ","),
+			"ipv4.ignore-auto-dns", pomijaj},
+		{SciezkaNmcli, "connection", "up", polaczenie},
+	}, nil
+}
+
 // ArgumentyProfilu sklada zapis calego profilu adresowego.
 func ArgumentyProfilu(profil Profil) ([][]string, error) {
 	if profil.Polaczenie == "" {

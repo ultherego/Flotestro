@@ -43,6 +43,7 @@ message HelperRequest {
     ProcessSignalRequest process_signal = 33;
     ScheduleRequest schedule = 34;
     NetworkRequest network = 35;
+    DnsRequest dns = 36;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -173,6 +174,7 @@ message HelperResponse {
   ProcessSignalResult process_signal_result = 21;
   ScheduleResult schedule_result = 22;
   NetworkResult network_result = 23;
+  DnsResult dns_result = 24;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -305,6 +307,35 @@ message NetworkResult {
   // Chwila, o ktorej wycofanie sie wykona, jesli nikt go nie rozbroi.
   string rollback_deadline = 4;
   // Confirmed mowi, czy wycofanie zostalo rozbrojone.
+  bool confirmed = 5;
+}
+
+// DnsRequest zmienia resolver hosta.
+//
+// Zmiana idzie przez profil polaczenia, a nie przez zapis do resolv.conf:
+// plik nalezacy do resolved albo NetworkManagera zostanie i tak nadpisany
+// przy nastepnym zdarzeniu sieci, wiec zapis w nim znikalby sam.
+message DnsRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_APPLY = 1;
+  }
+  Operation operation = 1;
+  string interface = 2;
+  repeated string servers = 3;
+  repeated string search_domains = 4;
+  // IgnoreAutoDns odrzuca serwery podane przez DHCP. Bez tego serwery panelu
+  // i serwery dostawcy trafiaja do jednej listy, a operator nie wie, ktory
+  // odpowiedzial.
+  bool ignore_auto_dns = 5;
+  uint32 rollback_seconds = 6;
+}
+
+message DnsResult {
+  bytes profiles = 1;
+  string message = 2;
+  string rollback_id = 3;
+  string rollback_deadline = 4;
   bool confirmed = 5;
 }
 

@@ -47,6 +47,7 @@ const MODULY: Modul[] = [
   { segment: "logs", nazwa: "Logs", powod: wymaga("journald") },
   { segment: "schedules", nazwa: "Schedules", powod: wymaga("schedules") },
   { segment: "network", nazwa: "Network", powod: wymaga("network") },
+  { segment: "dns", nazwa: "DNS", powod: wymaga("dns") },
   {
     segment: "accounts",
     nazwa: "Accounts",

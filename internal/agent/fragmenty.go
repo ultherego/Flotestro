@@ -16,6 +16,7 @@ const (
 	ModulIdentity   = "identity"
 	ModulAccounts   = "accounts"
 	ModulNetwork    = "network"
+	ModulDNS        = "dns"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
 )
@@ -82,6 +83,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		// Modul sieci zastapil sama liste nazw interfejsow: nazwa bez adresu,
 		// stanu i tras nie odpowiadala na zadne pytanie operatora.
 		{ModulNetwork, "agent/iproute2", powodSieci(f), siec(f)},
+
+		{ModulDNS, "agent/resolvectl+resolv.conf", powodStanuResolvera(f), resolver(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -150,4 +153,20 @@ func siec(f Facts) any {
 		return struct{}{}
 	}
 	return f.Network
+}
+
+// powodStanuResolvera zwraca powod, dla ktorego stanu resolvera nie ustalono.
+func powodStanuResolvera(f Facts) string {
+	if f.DNS == nil {
+		return "this host did not report its resolver state"
+	}
+	return f.DNS.UnavailableReason
+}
+
+// resolver zwraca stan resolvera albo pusty obraz.
+func resolver(f Facts) any {
+	if f.DNS == nil {
+		return struct{}{}
+	}
+	return f.DNS
 }

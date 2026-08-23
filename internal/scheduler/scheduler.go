@@ -322,6 +322,22 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionDNSResolveTest, opspec.ActionDNSHostApply:
+		operacja := agentv1.DnsAction_OPERATION_APPLY
+		if action == opspec.ActionDNSResolveTest {
+			operacja = agentv1.DnsAction_OPERATION_RESOLVE_TEST
+		}
+		resolver := &agentv1.DnsAction{Operation: operacja}
+		if payload.DNS != nil {
+			resolver.Interface = payload.DNS.Interface
+			resolver.Servers = payload.DNS.Servers
+			resolver.SearchDomains = payload.DNS.SearchDomains
+			resolver.IgnoreAutoDns = payload.DNS.IgnoreAutoDNS
+			resolver.RollbackSeconds = payload.DNS.RollbackSeconds
+			resolver.Names = payload.DNS.Names
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Dns{Dns: resolver}
+
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
 		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
 		opspec.ActionNetworkRollback:

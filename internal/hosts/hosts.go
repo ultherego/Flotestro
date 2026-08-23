@@ -43,12 +43,14 @@ const (
 	CapCompose   = "docker.compose"
 	CapSchedules = "schedules"
 	CapNetwork   = "network"
+	CapDNS       = "dns"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"
 	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
 	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
 	WymaganieZapisSieci = "network.write"
+	WymaganieZapisDNS   = "dns.write"
 )
 
 // Available mowi, czy adapter o tej nazwie dziala na hoscie.
@@ -120,6 +122,12 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			}
 		}
 		return false
+	case WymaganieZapisDNS:
+		wartosc, znana := c.FeatureStan(CapDNS, "write")
+		if wartosc {
+			return true
+		}
+		return !znana && c.Available(CapDNS)
 	case WymaganieZapisSieci:
 		// Zapis sieci wymaga mechanizmu, ktory utrwali zmiane i pozwoli ja
 		// wycofac. Host bez niego ma sie o tym dowiedziec przy zlecaniu,

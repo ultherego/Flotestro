@@ -75,6 +75,10 @@ const (
 	// operator moze juz nie pamietac.
 	PermNetworkMTUWrite Permission = "network.mtu.write"
 	PermNetworkRollback Permission = "network.rollback"
+	// DNS hosta jest oddzielony od rekordow w katalogu: wpis w strefie widza
+	// wszyscy klienci domeny, a resolver hosta - tylko ten host.
+	PermDNSRead      Permission = "dns.read"
+	PermDNSHostWrite Permission = "dns.host.write"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -150,7 +154,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead,
+		PermNetworkRead, PermDNSRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -178,7 +182,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead,
+		PermNetworkRead, PermDNSRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -210,6 +214,7 @@ var rolePermissions = map[Role][]Permission{
 		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,
+		PermDNSRead, PermDNSHostWrite,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
