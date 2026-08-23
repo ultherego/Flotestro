@@ -378,3 +378,87 @@ func TestZakresCzasuDziennikaJestSprawdzany(t *testing.T) {
 			}, nil, http.StatusCreated)
 	}
 }
+
+// TestSygnalWymagaCzasuStartu sprawdza granice z rozdzialu 5. Sam PID nie
+// identyfikuje procesu: jadro uzywa numerow ponownie, wiec sygnal wyslany
+// chwile po obejrzeniu listy moglby trafic w cos zupelnie innego.
+func TestSygnalWymagaCzasuStartu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action": "process.signal",
+			"payload": map[string]any{"process_signal": map[string]any{
+				"pid": 99999, "signal": "TERM",
+			}},
+		}, nil, http.StatusBadRequest)
+}
+
+// TestSygnalyPozaListaSaOdrzucane pilnuje, ze lista jest zamknieta: nie
+// istnieje operacja "wyslij dowolny sygnal".
+func TestSygnalyPozaListaSaOdrzucane(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, sygnal := range []string{"STOP", "SEGV", "USR1", "9", ""} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action": "process.signal",
+				"payload": map[string]any{"process_signal": map[string]any{
+					"pid": 99999, "expected_start_ticks": 1, "signal": sygnal,
+				}},
+			}, nil, http.StatusBadRequest)
+	}
+}
+
+// TestProcesInicjujacyJestChroniony sprawdza, ze zatrzymanie systemu nie jest
+// operacja dostepna z listy procesow.
+func TestProcesInicjujacyJestChroniony(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, pid := range []int{1, 0, -1} {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{
+				"action": "process.signal",
+				"payload": map[string]any{"process_signal": map[string]any{
+					"pid": pid, "expected_start_ticks": 1, "signal": "TERM",
+				}},
+			}, nil, http.StatusBadRequest)
+	}
+}
+
+// TestSnapshotProcesowMaGorneGranice sprawdza koszt na hoscie: snapshot
+// powstaje na zadanie i nie moze urosnac do dowolnego rozmiaru.
+func TestSnapshotProcesowMaGorneGranice(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "process.list",
+			"payload": map[string]any{"process_list": map[string]any{"limit": 100000}},
+		}, nil, http.StatusBadRequest)
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{
+			"action":  "process.list",
+			"payload": map[string]any{"process_list": map[string]any{"sort_by": "wymyslone"}},
+		}, nil, http.StatusBadRequest)
+
+	job, _ := h.runOperation(host.ID, map[string]any{
+		"action":  "process.list",
+		"payload": map[string]any{"process_list": map[string]any{"sort_by": "rss", "limit": 10}},
+	}, 60*time.Second)
+	if job.State != "succeeded" {
+		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+	}
+
+	var fragment inventoryFragment
+	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/processes",
+		nil, &fragment, http.StatusOK)
+	if len(fragment.Payload) == 0 {
+		t.Error("snapshot procesow jest pusty")
+	}
+}

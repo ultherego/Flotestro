@@ -354,6 +354,8 @@ message TaskEnvelope {
     UnitToggle unit_toggle = 32;
     ReadLogFile read_log_file = 33;
     FollowJournal follow_journal = 34;
+    ListProcesses list_processes = 35;
+    SignalProcess signal_process = 36;
   }
 }
 
@@ -582,6 +584,8 @@ message TaskResult {
   DockerActionResult docker_action_result = 27;
   ComposeResult compose_result = 28;
   LogFileResult log_file_result = 29;
+  ProcessListResult process_list_result = 30;
+  ProcessSignalResult process_signal_result = 31;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -747,6 +751,35 @@ message UnitToggle {
 // FollowJournal zamawia podglad dziennika na zywo. Strumien jest krotkotrwaly
 // i ograniczony z gory: czasem, tempem i liczba linii - inaczej host pracowalby
 // dla nikogo, gdy operator zamknie karte.
+// ListProcesses zamawia snapshot procesow hosta.
+message ListProcesses {
+  // Sortowanie decyduje, ktore procesy trafia do wyniku, gdy jest ich wiecej
+  // niz limit.
+  string sort_by = 1;
+  uint32 limit = 2;
+}
+
+// SignalProcess wysyla sygnal do procesu zwiazanego z czasem startu. Sam PID
+// nie identyfikuje procesu: jadro uzywa numerow ponownie.
+message SignalProcess {
+  int32 pid = 1;
+  uint64 expected_start_ticks = 2;
+  string signal = 3;
+  string command = 4;
+}
+
+message ProcessListResult {
+  bytes snapshot = 1;
+}
+
+message ProcessSignalResult {
+  int32 pid = 1;
+  string signal = 2;
+  // Command zapisany w chwili wyslania: audyt ma pokazac, co zostalo ubite,
+  // a nie sam numer, ktory zaraz przestanie cokolwiek znaczyc.
+  string command = 3;
+}
+
 message FollowJournal {
   string unit = 1;
   optional uint32 max_priority = 2;

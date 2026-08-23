@@ -40,6 +40,7 @@ message HelperRequest {
     // a nie jako sciezka na hoscie - operator zatwierdzil tresc.
     ComposeRequest compose = 31;
     LogFileRequest log_file = 32;
+    ProcessSignalRequest process_signal = 33;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -156,6 +157,7 @@ message HelperResponse {
   DockerActionResult docker_action_result = 18;
   ComposeResult compose_result = 19;
   LogFileResult log_file_result = 20;
+  ProcessSignalResult process_signal_result = 21;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -209,6 +211,19 @@ message DockerActionResult {
 
 // LogFileRequest czyta plik z allowlisty administratora hosta. Sciezka nie
 // jest dowolna: helper rozstrzyga ja wlasnym zakresem, nie tresci zadania.
+// ProcessSignalRequest wysyla sygnal do procesu. Czas startu wiaze zadanie
+// z konkretnym procesem, bo jadro uzywa numerow PID ponownie.
+message ProcessSignalRequest {
+  int32 pid = 1;
+  uint64 expected_start_ticks = 2;
+  string signal = 3;
+}
+
+message ProcessSignalResult {
+  int32 pid = 1;
+  string signal = 2;
+}
+
 message LogFileRequest {
   string path = 1;
   uint32 lines = 2;

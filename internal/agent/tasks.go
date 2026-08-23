@@ -152,6 +152,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.readLogFile(ctx, task, payload.LogFile)
 	case opspec.ActionFollowJournal:
 		return e.followJournal(ctx, task, payload.Journal)
+	case opspec.ActionProcessList:
+		return e.listProcesses(ctx, task, payload.ProcessList)
+	case opspec.ActionProcessSignal:
+		return e.signalProcess(ctx, task, payload.ProcessSignal)
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -469,6 +473,20 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		return typ, opspec.Payload{UnitToggle: &opspec.UnitToggle{
 			Unit:    action.UnitToggle.GetUnit(),
 			Enabled: action.UnitToggle.GetValue(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_ListProcesses:
+		return opspec.ActionProcessList, opspec.Payload{ProcessList: &opspec.ProcessListPayload{
+			SortBy: action.ListProcesses.GetSortBy(),
+			Limit:  action.ListProcesses.GetLimit(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_SignalProcess:
+		return opspec.ActionProcessSignal, opspec.Payload{ProcessSignal: &opspec.ProcessSignalPayload{
+			PID:           action.SignalProcess.GetPid(),
+			ExpectedStart: action.SignalProcess.GetExpectedStartTicks(),
+			Signal:        action.SignalProcess.GetSignal(),
+			Command:       action.SignalProcess.GetCommand(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_FollowJournal:

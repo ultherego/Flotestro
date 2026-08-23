@@ -10,6 +10,7 @@ import { Przeglad } from "./pages/host/Przeglad";
 import { Pakiety } from "./pages/host/Pakiety";
 import { Uslugi } from "./pages/host/Uslugi";
 import { Kontenery } from "./pages/host/Kontenery";
+import { Procesy } from "./pages/host/Procesy";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
 import { KontaHosta } from "./pages/host/Konta";
@@ -87,6 +88,7 @@ export function App() {
             <Route path="overview" element={<Przeglad />} />
             <Route path="packages" element={<Pakiety />} />
             <Route path="services" element={<Uslugi />} />
+            <Route path="processes" element={<Procesy />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />
             <Route path="logs" element={<Logi />} />

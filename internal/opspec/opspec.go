@@ -27,6 +27,11 @@ const (
 	// z gory: czasem, tempem i liczba linii.
 	ActionFollowJournal ActionType = "journal.follow"
 
+	// Diagnostyka procesow. Snapshot powstaje na zadanie i ma gorna granice;
+	// ciagly strumien metryk nalezy do Prometheusa, nie do panelu.
+	ActionProcessList   ActionType = "process.list"
+	ActionProcessSignal ActionType = "process.signal"
+
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
 	// Naprawa odblokowuje operacje pakietowe na hoscie: ustawia odpowiedzi
@@ -239,6 +244,12 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
+	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
+	// Wyslanie sygnalu zatrzymuje czyjas prace: sygnal nie ma stanu przed
+	// i po, ktory dalo by sie cofnac.
+	ActionProcessSignal: {mutating: true, capability: "", permission: "process.signal",
+		timeoutSeconds: 30, risk: RiskHigh},
 	// Podglad na zywo trzyma na hoscie proces przez caly czas trwania, wiec
 	// jest wyzej niz jednorazowy odczyt i ma wlasne uprawnienie.
 	ActionFollowJournal: {mutating: false, capability: "journald", permission: "journal.follow",
@@ -587,6 +598,30 @@ type Payload struct {
 	Compose         *ComposePayload         `json:"compose,omitempty"`
 	UnitToggle      *UnitToggle             `json:"unit_toggle,omitempty"`
 	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
+	ProcessList     *ProcessListPayload     `json:"process_list,omitempty"`
+	ProcessSignal   *ProcessSignalPayload   `json:"process_signal,omitempty"`
+}
+
+// ProcessListPayload opisuje snapshot procesow.
+type ProcessListPayload struct {
+	// SortBy decyduje, ktore procesy trafia do wyniku, gdy jest ich wiecej
+	// niz limit: rss, cpu, pid albo started.
+	SortBy string `json:"sort_by,omitempty"`
+	Limit  uint32 `json:"limit,omitempty"`
+}
+
+// ProcessSignalPayload opisuje sygnal do procesu.
+//
+// Sam PID nie identyfikuje procesu: jadro uzywa numerow ponownie, wiec sygnal
+// wyslany chwile po obejrzeniu listy moglby trafic w cos innego. Czas startu
+// wiaze zadanie z konkretnym procesem.
+type ProcessSignalPayload struct {
+	PID           int32  `json:"pid"`
+	ExpectedStart uint64 `json:"expected_start_ticks"`
+	Signal        string `json:"signal"`
+	// Command sluzy potwierdzeniu i audytowi: operator ma w oknie polecenie,
+	// a w sladzie zostaje to, co widzial.
+	Command string `json:"command,omitempty"`
 }
 
 // LogFilePayload opisuje odczyt pliku logu.
@@ -823,6 +858,40 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu docker_prune", action)
 		}
 		return sprawdzListeSprzatania(payload.DockerPrune)
+
+	case ActionProcessList:
+		if payload.ProcessList == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu process_list", action)
+		}
+		switch payload.ProcessList.SortBy {
+		case "", "rss", "cpu", "pid", "started":
+		default:
+			return fmt.Errorf("nieobslugiwane sortowanie %q", payload.ProcessList.SortBy)
+		}
+		if payload.ProcessList.Limit > 500 {
+			return fmt.Errorf("limit procesow nie moze przekraczac 500")
+		}
+		return nil
+
+	case ActionProcessSignal:
+		if payload.ProcessSignal == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu process_signal", action)
+		}
+		if payload.ProcessSignal.PID <= 1 {
+			// PID 1 jest systemem inicjujacym; zero i wartosci ujemne
+			// oznaczaja w jadrze grupy procesow, a nie jeden proces.
+			return fmt.Errorf("nieprawidlowy PID %d", payload.ProcessSignal.PID)
+		}
+		switch payload.ProcessSignal.Signal {
+		case "TERM", "KILL", "HUP":
+		default:
+			return fmt.Errorf("nieobslugiwany sygnal %q", payload.ProcessSignal.Signal)
+		}
+		// Bez czasu startu sygnal moze trafic w proces, ktory przejal PID.
+		if payload.ProcessSignal.ExpectedStart == 0 {
+			return fmt.Errorf("sygnal wymaga czasu startu procesu")
+		}
+		return nil
 
 	case ActionReadLogFile:
 		if payload.LogFile == nil {

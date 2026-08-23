@@ -46,6 +46,10 @@ const (
 	// Podglad na zywo trzyma proces na hoscie przez caly czas trwania, wiec
 	// jest oddzielony od jednorazowego odczytu dziennika.
 	PermJournalFollow Permission = "journal.follow"
+	// Odczyt procesow jest diagnostyka; wyslanie sygnalu zatrzymuje czyjas
+	// prace i nie da sie go cofnac.
+	PermProcessRead   Permission = "process.read"
+	PermProcessSignal Permission = "process.signal"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -120,7 +124,7 @@ const (
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
-		PermIdentityRead, PermLocalUserRead, PermDockerRead,
+		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -172,7 +176,7 @@ var rolePermissions = map[Role][]Permission{
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
 		PermComposePlan, PermComposeDeploy,
 		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,
-		PermJournalFollow, PermLogFileRead,
+		PermJournalFollow, PermLogFileRead, PermProcessRead, PermProcessSignal,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

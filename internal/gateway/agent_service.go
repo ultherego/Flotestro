@@ -431,6 +431,20 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Snapshot procesow trafia do modulu inwentarza, jak stan kontenerow
+	// i wykaz jednostek: zakladka pyta o stan hosta, a nie o historie zadan.
+	if lista := result.GetProcessListResult(); lista != nil && len(lista.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "processes",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(lista.GetSnapshot())),
+			Source:     "agent/procfs",
+			Payload:    lista.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano snapshotu procesow", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Pelny wykaz jednostek trafia do modulu inwentarza z tego samego powodu
 	// co stan kontenerow: zakladka pyta o stan hosta, a nie o historie zadan.
 	if status := result.GetUnitStatus(); status != nil && len(status.GetUnits()) > 0 {
@@ -576,6 +590,18 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":               "compose",
 			"payload":            json.RawMessage(compose.GetPayload()),
 			"unavailable_reason": compose.GetUnavailableReason(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	if sygnal := result.GetProcessSignalResult(); sygnal != nil {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":    "process_signal",
+			"pid":     sygnal.GetPid(),
+			"signal":  sygnal.GetSignal(),
+			"command": sygnal.GetCommand(),
 		})
 		if err == nil {
 			return encoded

@@ -304,6 +304,24 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionProcessList:
+		envelope.Action = &agentv1.TaskEnvelope_ListProcesses{
+			ListProcesses: &agentv1.ListProcesses{
+				SortBy: payload.ProcessList.SortBy,
+				Limit:  payload.ProcessList.Limit,
+			},
+		}
+
+	case opspec.ActionProcessSignal:
+		envelope.Action = &agentv1.TaskEnvelope_SignalProcess{
+			SignalProcess: &agentv1.SignalProcess{
+				Pid:                payload.ProcessSignal.PID,
+				ExpectedStartTicks: payload.ProcessSignal.ExpectedStart,
+				Signal:             payload.ProcessSignal.Signal,
+				Command:            payload.ProcessSignal.Command,
+			},
+		}
+
 	case opspec.ActionFollowJournal:
 		envelope.Action = &agentv1.TaskEnvelope_FollowJournal{
 			FollowJournal: &agentv1.FollowJournal{
