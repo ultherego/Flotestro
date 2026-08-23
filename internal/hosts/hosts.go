@@ -69,15 +69,21 @@ type Host struct {
 	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
 	BootID          string     `json:"boot_id,omitempty"`
 	// Puste pola oznaczaja stan nieustalony, nie zero.
-	RebootRequired           *bool        `json:"reboot_required"`
-	FailedUnits              *int         `json:"failed_units"`
-	PendingUpdates           *int         `json:"pending_updates"`
-	PendingSecurityUpdates   *int         `json:"pending_security_updates"`
-	CurrentInventoryRevision string       `json:"current_inventory_revision,omitempty"`
-	PackageDatabaseBroken    bool         `json:"package_database_broken"`
-	Identity                 HostIdentity `json:"identity"`
-	EnrolledAt               time.Time    `json:"enrolled_at"`
-	Capabilities             Capabilities `json:"capabilities"`
+	RebootRequired           *bool  `json:"reboot_required"`
+	FailedUnits              *int   `json:"failed_units"`
+	PendingUpdates           *int   `json:"pending_updates"`
+	PendingSecurityUpdates   *int   `json:"pending_security_updates"`
+	CurrentInventoryRevision string `json:"current_inventory_revision,omitempty"`
+	PackageDatabaseBroken    bool   `json:"package_database_broken"`
+	// Adres zarzadzania i jego pochodzenie. Puste pola oznaczaja adres
+	// nieustalony; interfejs ma wtedy powiedziec "unknown", a nie pokazac
+	// dowolny adres hosta jako rzekomy adres zarzadzania.
+	ManagementAddress           string       `json:"management_address,omitempty"`
+	ManagementAddressSource     string       `json:"management_address_source,omitempty"`
+	ManagementAddressObservedAt *time.Time   `json:"management_address_observed_at,omitempty"`
+	Identity                    HostIdentity `json:"identity"`
+	EnrolledAt                  time.Time    `json:"enrolled_at"`
+	Capabilities                Capabilities `json:"capabilities"`
 }
 
 // HostIdentity opisuje integracje hosta z domena w widoku API.
@@ -320,6 +326,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
 		       h.reboot_required, h.failed_units, h.pending_updates, h.pending_security_updates,
 		       coalesce(h.current_inventory_revision, ''), h.package_database_broken, h.enrolled_at,
+		       coalesce(h.management_address, ''), coalesce(h.management_address_source, ''),
+		       h.management_address_observed_at,
 		       h.identity_enrolled, coalesce(h.identity_domain, ''), coalesce(h.identity_realm, ''),
 		       h.identity_sssd_online, h.identity_checked_at,
 		       coalesce(c.systemd, false), coalesce(c.apt, false), coalesce(c.dnf, false),
@@ -342,6 +350,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
 			&h.RebootRequired, &h.FailedUnits, &h.PendingUpdates, &h.PendingSecurityUpdates,
 			&h.CurrentInventoryRevision, &h.PackageDatabaseBroken, &h.EnrolledAt,
+			&h.ManagementAddress, &h.ManagementAddressSource, &h.ManagementAddressObservedAt,
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
 			&h.Capabilities.Systemd, &h.Capabilities.APT, &h.Capabilities.DNF,
@@ -351,6 +360,34 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		result = append(result, h)
 	}
 	return result, rows.Err()
+}
+
+// Zrodla adresu zarzadzania. Kolejnosc nie jest przypadkowa: adres ustawiony
+// recznie przez operatora opisuje intencje, a nie obserwacje, wiec nie moze
+// zostac nadpisany przez kolejne polaczenie.
+const (
+	AddressFromSession = "session"
+	AddressFromAgent   = "agent"
+	AddressFromManual  = "manual"
+)
+
+// SetManagementAddress zapisuje adres zarzadzania wraz z jego pochodzeniem.
+// Pusty adres nie jest zapisywany: brak obserwacji nie jest faktem o hoscie
+// i nie moze skasowac adresu, ktory znamy z poprzedniego polaczenia.
+func (s *Store) SetManagementAddress(ctx context.Context, hostID, address, source string) error {
+	if address == "" || source == "" {
+		return nil
+	}
+	const query = `
+		update hosts
+		   set management_address             = $2,
+		       management_address_source       = $3,
+		       management_address_observed_at  = now(),
+		       updated_at                      = now()
+		 where id = $1
+		   and coalesce(management_address_source, '') <> 'manual'`
+	_, err := s.pool.Exec(ctx, query, hostID, address, source)
+	return err
 }
 
 // AdoptCertificateIssuer uzupelnia wystawce certyfikatow sprzed wprowadzenia

@@ -59,7 +59,7 @@ export function Hosty() {
         <table>
           <thead>
             <tr>
-              <th>Host</th><th>State</th><th>System</th><th>Site</th>
+              <th>Host</th><th>State</th><th>Management address</th><th>System</th><th>Site</th>
               <th>Environment</th><th>Domain</th><th>Updates</th>
               <th>Failed units</th><th>Reboot</th><th>Last seen</th>
             </tr>
@@ -67,8 +67,15 @@ export function Hosty() {
           <tbody>
             {data.items.map((host) => (
               <tr key={host.id}>
-                <td><Link to={`/hosts/${host.id}`}>{host.hostname}</Link></td>
+                <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
                 <td><StanPolaczenia stan={host.connection_state} /></td>
+                {/* Adres zarzadzania, a nie pierwszy adres hosta z brzegu.
+                    Nieustalony jest pokazany jako nieustalony. */}
+                <td>
+                  {host.management_address
+                    ? <span className="adres-listy" title={`source: ${host.management_address_source}`}>{host.management_address}</span>
+                    : <span className="znacznik nieznany">unknown</span>}
+                </td>
                 <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
                 <td>{host.site}</td>
                 <td>{host.environment}</td>

@@ -39,6 +39,11 @@ export type Host = {
   pending_security_updates: number | null;
   current_inventory_revision?: string;
   package_database_broken: boolean;
+  // Adres zarzadzania i jego pochodzenie. Brak wartosci oznacza adres
+  // nieustalony i musi byc pokazany jako nieustalony.
+  management_address?: string;
+  management_address_source?: "session" | "agent" | "manual";
+  management_address_observed_at?: string;
   enrolled_at: string;
   capabilities: Capabilities;
   identity: HostIdentity;

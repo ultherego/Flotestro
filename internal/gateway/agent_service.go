@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -142,6 +143,14 @@ func (s *AgentService) Connect(ctx context.Context,
 	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
+	// Adres zarzadzania jest odswiezany przy kazdym polaczeniu: host moze
+	// zmienic adres, przeniesc sie za relay albo wrocic sprzed niego.
+	if address, source := managementAddress(session.RemoteAddr, hello.GetLocalAddress(), relayID); address != "" {
+		if err := s.hosts.SetManagementAddress(ctx, hostID, address, source); err != nil {
+			s.log.Error("nie zapisano adresu zarzadzania", "host_id", hostID, "err", err)
+		}
+	}
+
 	s.registry.Add(session)
 	s.log.Info("sesja agenta otwarta",
 		"host_id", hostID, "session_id", session.ID, "agent_version", session.AgentVersion,
@@ -577,6 +586,25 @@ func unitStateJSON(state *agentv1.UnitState) json.RawMessage {
 		return nil
 	}
 	return encoded
+}
+
+// managementAddress wybiera adres zarzadzania hosta i mowi, skad pochodzi.
+//
+// Przy polaczeniu bezposrednim panel widzi adres hosta na wlasnym koncu
+// polaczenia i to jest fakt najmocniejszy, jaki ma. Za relayem widzi adres
+// relaya - podanie go jako adresu hosta byloby falszem, wiec jedynym zrodlem
+// pozostaje to, co host deklaruje o sobie. Gdy nie ma ani jednego, adres
+// zostaje nieustalony; poprzednio znanego nie kasujemy.
+func managementAddress(remoteAddr, declared, relayID string) (address, source string) {
+	if relayID == "" {
+		if host, _, err := net.SplitHostPort(remoteAddr); err == nil && host != "" {
+			return host, hosts.AddressFromSession
+		}
+	}
+	if declared != "" {
+		return declared, hosts.AddressFromAgent
+	}
+	return "", ""
 }
 
 // openSession zapisuje sesje. relayID jest pusty przy polaczeniu bezposrednim;

@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -150,6 +152,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			BootId:            facts.BootID,
 			Capabilities:      capabilitiesToProto(facts.Capabilities),
 			InventoryRevision: revision,
+			LocalAddress:      adresDoPanelu(opts.GatewayURL),
 		}},
 	}); err != nil {
 		return err
@@ -310,6 +313,34 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 		}
 	}
+}
+
+// adresDoPanelu zwraca adres lokalny, ktorym host dosiegnie control plane.
+// Gniazdo UDP nie wysyla zadnego pakietu - samo przypisanie adresu wybiera
+// tablica routingu. To odpowiedz na pytanie "ktorym adresem ten host rozmawia
+// z panelem", a nie pierwszy adres z listy interfejsow, ktory nie znaczy nic.
+//
+// Nieustalony adres zostaje pusty. Panel woli nie znac adresu, niz pokazac
+// operatorowi adres, pod ktorym hosta nie ma.
+func adresDoPanelu(gatewayURL string) string {
+	parsed, err := url.Parse(gatewayURL)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "443"
+	}
+	conn, err := net.Dial("udp", net.JoinHostPort(parsed.Hostname(), port))
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	host, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	if err != nil {
+		return ""
+	}
+	return host
 }
 
 func newHTTP2Client(identity *Identity) *http.Client {

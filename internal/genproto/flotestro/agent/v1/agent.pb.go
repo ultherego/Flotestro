@@ -920,8 +920,12 @@ type Hello struct {
 	Capabilities *Capabilities `protobuf:"bytes,3,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	// Ostatnia rewizja inventory znana agentowi; pozwala serwerowi zazadac full.
 	InventoryRevision string `protobuf:"bytes,4,opt,name=inventory_revision,json=inventoryRevision,proto3" json:"inventory_revision,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Adres, z ktorego agent zestawil to polaczenie. Panel widzi na swoim koncu
+	// adres relaya, gdy host laczy sie przez relay lokalizacji - wtedy jest to
+	// jedyne zrodlo adresu samego hosta. Puste oznacza adres nieustalony.
+	LocalAddress  string `protobuf:"bytes,5,opt,name=local_address,json=localAddress,proto3" json:"local_address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -978,6 +982,13 @@ func (x *Hello) GetCapabilities() *Capabilities {
 func (x *Hello) GetInventoryRevision() string {
 	if x != nil {
 		return x.InventoryRevision
+	}
+	return ""
+}
+
+func (x *Hello) GetLocalAddress() string {
+	if x != nil {
+		return x.LocalAddress
 	}
 	return ""
 }
@@ -4418,12 +4429,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x04task\x18\x03 \x01(\v2 .flotestro.agent.v1.TaskEnvelopeH\x00R\x04task\x12A\n" +
 	"\vcancel_task\x18\x04 \x01(\v2\x1e.flotestro.agent.v1.CancelTaskH\x00R\n" +
 	"cancelTaskB\t\n" +
-	"\apayload\"\xba\x01\n" +
+	"\apayload\"\xdf\x01\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x17\n" +
 	"\aboot_id\x18\x02 \x01(\tR\x06bootId\x12D\n" +
 	"\fcapabilities\x18\x03 \x01(\v2 .flotestro.agent.v1.CapabilitiesR\fcapabilities\x12-\n" +
-	"\x12inventory_revision\x18\x04 \x01(\tR\x11inventoryRevision\"\xdc\x01\n" +
+	"\x12inventory_revision\x18\x04 \x01(\tR\x11inventoryRevision\x12#\n" +
+	"\rlocal_address\x18\x05 \x01(\tR\flocalAddress\"\xdc\x01\n" +
 	"\rSessionConfig\x12+\n" +
 	"\x11heartbeat_seconds\x18\x01 \x01(\x05R\x10heartbeatSeconds\x128\n" +
 	"\x18heartbeat_jitter_seconds\x18\x02 \x01(\x05R\x16heartbeatJitterSeconds\x12*\n" +

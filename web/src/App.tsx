@@ -5,7 +5,14 @@ import type { Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { Pulpit } from "./pages/Pulpit";
 import { Hosty } from "./pages/Hosty";
-import { Host } from "./pages/Host";
+import { UkladHosta } from "./pages/host/Uklad";
+import { Przeglad } from "./pages/host/Przeglad";
+import { Pakiety } from "./pages/host/Pakiety";
+import { Uslugi } from "./pages/host/Uslugi";
+import { KontaHosta } from "./pages/host/Konta";
+import { Tozsamosc } from "./pages/host/Tozsamosc";
+import { ZadaniaHosta } from "./pages/host/Zadania";
+import { AudytHosta } from "./pages/host/Audyt";
 import { Zadania } from "./pages/Zadania";
 import { Kampanie } from "./pages/Kampanie";
 import { Kampania } from "./pages/Kampania";
@@ -69,7 +76,19 @@ export function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Pulpit />} />
           <Route path="/hosts" element={<Hosty />} />
-          <Route path="/hosts/:id" element={<Host />} />
+          {/* Modul hosta jest segmentem adresu, wiec odswiezenie, historia
+              przegladarki i odnosnik bezposredni prowadza tam, gdzie operator
+              faktycznie byl. */}
+          <Route path="/hosts/:id" element={<UkladHosta />}>
+            <Route index element={<Navigate to="overview" replace />} />
+            <Route path="overview" element={<Przeglad />} />
+            <Route path="packages" element={<Pakiety />} />
+            <Route path="services" element={<Uslugi />} />
+            <Route path="accounts" element={<KontaHosta />} />
+            <Route path="identity" element={<Tozsamosc />} />
+            <Route path="jobs" element={<ZadaniaHosta />} />
+            <Route path="audit" element={<AudytHosta />} />
+          </Route>
           <Route path="/jobs" element={<Zadania />} />
           {widziKampanie && <Route path="/campaigns" element={<Kampanie />} />}
           {widziKampanie && <Route path="/campaigns/:id" element={<Kampania />} />}

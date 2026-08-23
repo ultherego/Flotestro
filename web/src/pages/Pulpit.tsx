@@ -73,7 +73,7 @@ export function Pulpit() {
           <tbody>
             {wymagajaUwagi.map((host) => (
               <tr key={host.id}>
-                <td><Link to={`/hosts/${host.id}`}>{host.hostname}</Link></td>
+                <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
                 <td><span className="znacznik">{host.connection_state}</span></td>
                 <td>{powodyUwagi(host).join(", ")}</td>
                 <td><Czas wartosc={host.last_seen_at} /></td>

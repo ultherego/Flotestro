@@ -171,3 +171,73 @@ pre {
 
 /* Odnosniki w stopce nawigacji ida jeden pod drugim. */
 .nawigacja .stopka a { display: block; margin-top: 6px; color: var(--akcent); }
+
+/* Staly pasek kontekstu hosta. Cel operacji ma byc widoczny bez przewijania
+   na kazdej zakladce, dlatego pasek przykleja sie do gory tresci. */
+.pasek-hosta {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: -24px -28px 0;
+  padding: 12px 28px;
+  background: var(--tlo-panel);
+  border-bottom: 1px solid var(--obramowanie);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 20px;
+}
+.pasek-hosta-tozsamosc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pasek-hosta-tozsamosc .nazwa { font-size: 16px; font-weight: 600; }
+.pasek-hosta-tozsamosc .adres {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+  color: var(--tekst-slaby);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* Adres bez pochodzenia nie mowi, czy panel go widzial, czy host go zglosil. */
+.pasek-hosta-tozsamosc .zrodlo-adresu {
+  font-family: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--nieznane);
+}
+.pasek-hosta-fakty {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--tekst-slaby);
+  font-size: 12px;
+}
+.przelacznik-hosta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--tekst-slaby);
+  font-size: 12px;
+}
+.przelacznik-hosta select { font-size: 13px; padding: 4px 8px; }
+
+/* Zakladki hosta sa odnosnikami, bo kazda ma wlasny adres. */
+.zakladki a {
+  color: var(--tekst-slaby);
+  padding: 8px 12px;
+  border-bottom: 2px solid transparent;
+}
+.zakladki a:hover { color: var(--tekst); text-decoration: none; }
+.zakladki a.aktywna { color: var(--tekst); border-bottom-color: var(--akcent); }
+/* Modul bez pokrycia na hoscie zostaje widoczny wraz z powodem: zniknieta
+   zakladka wygladalaby jak brak funkcji w produkcie. */
+.zakladki a.niedostepna { opacity: 0.4; }
+/* Adres na liscie floty czyta sie kolumnowo, wiec idzie czcionka o stalej szerokosci. */
+.adres-listy { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }

@@ -102,6 +102,10 @@ message Hello {
   Capabilities capabilities = 3;
   // Ostatnia rewizja inventory znana agentowi; pozwala serwerowi zazadac full.
   string inventory_revision = 4;
+  // Adres, z ktorego agent zestawil to polaczenie. Panel widzi na swoim koncu
+  // adres relaya, gdy host laczy sie przez relay lokalizacji - wtedy jest to
+  // jedyne zrodlo adresu samego hosta. Puste oznacza adres nieustalony.
+  string local_address = 5;
 }
 
 message SessionConfig {
