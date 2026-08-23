@@ -158,6 +158,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.followJournal(ctx, task, payload.Journal)
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		return e.applyPackageLifecycle(ctx, task, action, payload.PackageChange)
+	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
+		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
+		opspec.ActionFirewallZoneService, opspec.ActionFirewallRulesetRestore:
+		return e.applyFirewall(ctx, task, action, payload.Firewall)
 	case opspec.ActionDNSResolveTest, opspec.ActionDNSHostApply:
 		return e.applyDNS(ctx, task, action, payload.DNS)
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
@@ -504,6 +508,39 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Firewall:
+		zapora := action.Firewall
+		typ := opspec.ActionFirewallRuleEnsure
+		switch zapora.GetOperation() {
+		case agentv1.FirewallAction_OPERATION_READ:
+			typ = opspec.ActionFirewallPlan
+		case agentv1.FirewallAction_OPERATION_RULE_REMOVE:
+			typ = opspec.ActionFirewallRuleRemove
+		case agentv1.FirewallAction_OPERATION_ZONE_PORT:
+			typ = opspec.ActionFirewallZonePort
+		case agentv1.FirewallAction_OPERATION_ZONE_SERVICE:
+			typ = opspec.ActionFirewallZoneService
+		case agentv1.FirewallAction_OPERATION_RESTORE:
+			typ = opspec.ActionFirewallRulesetRestore
+		}
+		return typ, opspec.Payload{Firewall: &opspec.FirewallPayload{
+			RuleID:          zapora.GetRuleId(),
+			Chain:           zapora.GetChain(),
+			Action:          zapora.GetAction(),
+			Protocol:        zapora.GetProtocol(),
+			Ports:           zapora.GetPorts(),
+			Sources:         zapora.GetSources(),
+			Interface:       zapora.GetInterface(),
+			Comment:         zapora.GetComment(),
+			Zone:            zapora.GetZone(),
+			Service:         zapora.GetService(),
+			Enable:          zapora.GetEnable(),
+			BreakGlass:      zapora.GetBreakGlass(),
+			RollbackSeconds: zapora.GetRollbackSeconds(),
+			RollbackID:      zapora.GetRollbackId(),
+			ExpectedHash:    zapora.GetExpectedHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Dns:

@@ -37,6 +37,10 @@ const (
 	// Jasna odmowa jest lepsza niz udawanie, ze operacja sie wykonala.
 	ErrorUnsupported = "unsupported"
 	ErrorMalformed   = "malformed_request"
+	// ErrorPreconditionFailed oznacza zlecenie zlozone wobec innego stanu
+	// hosta niz ten, ktory host ma teraz. To nie jest wada zlecenia ani
+	// awaria wykonania: to zmiana, ktora w miedzyczasie zaszla.
+	ErrorPreconditionFailed = "precondition_failed"
 )
 
 // WriteMessage zapisuje wiadomosc poprzedzona 4-bajtowa dlugoscia.

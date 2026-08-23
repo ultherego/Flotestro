@@ -44,13 +44,16 @@ const (
 	CapSchedules = "schedules"
 	CapNetwork   = "network"
 	CapDNS       = "dns"
+	CapFirewall  = "firewall"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"
 	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
 	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
-	WymaganieZapisSieci = "network.write"
-	WymaganieZapisDNS   = "dns.write"
+	WymaganieZapisSieci  = "network.write"
+	WymaganieZapisDNS    = "dns.write"
+	WymaganieZapisZapory = "firewall.write"
+	WymaganieStrefZapory = "firewall.zones"
 )
 
 // Available mowi, czy adapter o tej nazwie dziala na hoscie.
@@ -122,6 +125,15 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			}
 		}
 		return false
+	case WymaganieZapisZapory:
+		wartosc, znana := c.FeatureStan(CapFirewall, "write")
+		if wartosc {
+			return true
+		}
+		return !znana && c.Available(CapFirewall)
+	case WymaganieStrefZapory:
+		wartosc, _ := c.FeatureStan(CapFirewall, "zones")
+		return wartosc
 	case WymaganieZapisDNS:
 		wartosc, znana := c.FeatureStan(CapDNS, "write")
 		if wartosc {

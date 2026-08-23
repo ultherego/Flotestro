@@ -40,6 +40,8 @@ func run() error {
 			"uzytkownik, ktoremu wolno wydawac polecenia")
 		rollback = flag.String("rollback", "",
 			"wykonaj zapisany plan wycofania zmiany sieci i zakoncz")
+		rollbackFirewall = flag.String("rollback-firewall", "",
+			"wykonaj zapisany plan wycofania zmiany zapory i zakoncz")
 		idleTimeout = flag.Duration("idle-timeout",
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
 			"czas bezczynnosci, po ktorym helper konczy prace")
@@ -53,6 +55,17 @@ func run() error {
 	// nikt nie potwierdzil lacznosci po zmianie sieci. Dziala bez gniazda,
 	// bez agenta i bez panelu - to ostatnia rzecz, ktora dziala, gdy zmiana
 	// odetnie host od swiata.
+	if *rollbackFirewall != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		log.Warn("wycofanie zmiany zapory", "plan", *rollbackFirewall)
+		if err := helper.WycofajZapore(ctx, *rollbackFirewall); err != nil {
+			return err
+		}
+		log.Info("zmiana zapory wycofana", "plan", *rollbackFirewall)
+		return nil
+	}
+
 	if *rollback != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()

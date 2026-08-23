@@ -79,6 +79,16 @@ const (
 	// wszyscy klienci domeny, a resolver hosta - tylko ten host.
 	PermDNSRead      Permission = "dns.read"
 	PermDNSHostWrite Permission = "dns.host.write"
+	// Zapora. Odczyt zestawu regul jest przygotowaniem do zmiany; zla regula
+	// odcina panel od hosta i nie ma czym cofnac zmiany. Usuniecie reguly,
+	// zmiana strefy i przywrocenie stanu maja wlasne uprawnienia, bo to trzy
+	// rozne decyzje o tym samym hoscie.
+	PermFirewallRead         Permission = "firewall.read"
+	PermFirewallWrite        Permission = "firewall.write"
+	PermFirewallRuleRemove   Permission = "firewall.rule.remove"
+	PermFirewallZoneWrite    Permission = "firewall.zone.write"
+	PermFirewallServiceWrite Permission = "firewall.service.write"
+	PermFirewallRestore      Permission = "firewall.restore"
 	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
@@ -154,7 +164,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead, PermDNSRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -182,7 +192,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead,
+		PermNetworkRead, PermDNSRead, PermFirewallRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -215,6 +225,8 @@ var rolePermissions = map[Role][]Permission{
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,
 		PermDNSRead, PermDNSHostWrite,
+		PermFirewallRead, PermFirewallWrite, PermFirewallRuleRemove,
+		PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,

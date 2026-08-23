@@ -431,6 +431,20 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	delete(s.proby, attemptID)
 	s.probyMu.Unlock()
 
+	// Stan zapory trafia do inwentarza: zakladka pyta o zestaw regul, a kazda
+	// zmiana i tak odsyla pelny obraz po sobie.
+	if zapora := result.GetFirewallResult(); zapora != nil && len(zapora.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "firewall",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(zapora.GetSnapshot())),
+			Source:     "agent/nftables",
+			Payload:    zapora.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano stanu zapory", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Harmonogramy trafiaja do modulu inwentarza: zakladka pyta o stan hosta,
 	// a kazda operacja i tak odsyla pelny obraz po zmianie.
 	if plan := result.GetScheduleResult(); plan != nil && len(plan.GetSnapshot()) > 0 {
@@ -638,6 +652,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"rollback_id":       siec.GetRollbackId(),
 			"rollback_deadline": siec.GetRollbackDeadline(),
 			"confirmed":         siec.GetConfirmed(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Zmiana zapory niesie identyfikator wycofania i odcisk zestawu regul.
+	if zapora := result.GetFirewallResult(); zapora != nil && zapora.GetRollbackId() != "" {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":              "firewall",
+			"rollback_id":       zapora.GetRollbackId(),
+			"rollback_deadline": zapora.GetRollbackDeadline(),
+			"confirmed":         zapora.GetConfirmed(),
 		})
 		if err == nil {
 			return encoded

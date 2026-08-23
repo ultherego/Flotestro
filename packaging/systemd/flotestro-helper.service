@@ -16,7 +16,11 @@ Environment=FLOTESTRO_HELPER_IDLE_SECONDS=300
 # Helper nie nasluchuje na sieci - jedynym wejsciem jest gniazdo unixowe - ale
 # transakcje pakietowe musza pobierac pakiety z repozytorium, wiec ruch
 # wychodzacy jest konieczny. Control plane celowo nie posredniczy w pobieraniu.
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# AF_NETLINK jest tu konieczne: przez netlink rozmawiaja z jadrem nft i ip,
+# a wiec caly modul zapory i odczyt stanu sieci. Bez tej rodziny nft konczy
+# sie kodem 3 i komunikatem, ktory nie mowi o gniazdach ani slowa - a modul
+# zapory wyglada wtedy na host bez regul.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # NoNewPrivileges=yes blokuje przejscia domen SELinuksa przy execve. Skrypty
 # pakietow rpm przechodza do domeny rpm_script_t, wiec na Fedorze i RHEL-u nie
 # daja sie uruchomic - transakcja konczy sie bledem "scriptlet failed" albo

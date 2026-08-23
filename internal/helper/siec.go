@@ -193,6 +193,17 @@ func (s *Server) wycofajTeraz(ctx context.Context, id string) *helperv1.HelperRe
 // Jednostka wola ten sam binarny helper w trybie wycofania - polecenie nie
 // pochodzi z planu, wiec plan nie moze wyrazic niczego innego.
 func (s *Server) uzbrojWycofanie(ctx context.Context, plan network.PlanWycofania, okno time.Duration) error {
+	return s.uzbrojZegar(ctx, network.NazwaJednostkiWycofania(plan.ID), okno, "-rollback", plan.ID)
+}
+
+// uzbrojZegar uruchamia przejsciowa jednostke, ktora po zadanym czasie wola
+// helpera w trybie wycofania.
+//
+// Jednostka wola ten sam binarny plik, ktory zmiane zaczal, i przekazuje mu
+// wylacznie identyfikator planu: tresc wycofania pochodzi z pliku planu,
+// a plan opisuje stan, nie polecenia.
+func (s *Server) uzbrojZegar(ctx context.Context, jednostka string, okno time.Duration,
+	flaga, id string) error {
 	systemdRun, err := exec.LookPath("systemd-run")
 	if err != nil {
 		return fmt.Errorf("host bez systemd-run nie potrafi uzbroic wycofania")
@@ -203,11 +214,11 @@ func (s *Server) uzbrojWycofanie(ctx context.Context, plan network.PlanWycofania
 	}
 	cmd := exec.CommandContext(ctx, systemdRun,
 		"--collect", "--quiet",
-		"--unit="+network.NazwaJednostkiWycofania(plan.ID),
-		"--description=Flotestro: wycofanie zmiany sieci",
+		"--unit="+jednostka,
+		"--description=Flotestro: wycofanie zmiany",
 		"--on-active="+strconv.Itoa(int(okno.Seconds())),
 		"--timer-property=AccuracySec=1s",
-		"--", binarny, "-rollback", plan.ID)
+		"--", binarny, flaga, id)
 	cmd.Env = srodowiskoNarzedzi()
 	if wyjscie, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(wyjscie)))
@@ -215,15 +226,25 @@ func (s *Server) uzbrojWycofanie(ctx context.Context, plan network.PlanWycofania
 	return nil
 }
 
-// rozbrojWycofanie zatrzymuje zegar wycofania.
+// rozbrojWycofanie zatrzymuje zegar wycofania zmiany sieci.
 func (s *Server) rozbrojWycofanie(ctx context.Context, id string) error {
-	jednostka := network.NazwaJednostkiWycofania(id)
+	return s.rozbrojZegar(ctx, network.NazwaJednostkiWycofania(id))
+}
+
+// rozbrojZegar zatrzymuje przejsciowa jednostke wycofania.
+func (s *Server) rozbrojZegar(ctx context.Context, jednostka string) error {
 	for _, nazwa := range []string{jednostka + ".timer", jednostka + ".service"} {
 		cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", "stop", nazwa)
 		cmd.Env = srodowiskoNarzedzi()
 		_ = cmd.Run()
 	}
 	return nil
+}
+
+// poprawnyIdentyfikatorPlanu dopuszcza wylacznie znaki, ktore nie moga
+// wyprowadzic sciezki poza katalog planow.
+func poprawnyIdentyfikatorPlanu(id string) bool {
+	return network.PoprawnyIdentyfikatorPlanu(id)
 }
 
 // czytajProfile zbiera profile NetworkManagera wraz z ustawieniami.

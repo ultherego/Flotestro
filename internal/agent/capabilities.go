@@ -22,6 +22,8 @@ const (
 	// Resolver hosta. Odczyt dziala wszedzie, gdzie jest resolv.conf; zapis
 	// wymaga mechanizmu, ktory zmiane utrwali.
 	CapDNS = "dns"
+	// Zapora. Adapter mowi, kto na tym hoscie trzyma reguly.
+	CapFirewall = "firewall"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -31,8 +33,10 @@ const (
 	WymaganieNaprawaPakietow = "packages.repair"
 	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
 	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
-	WymaganieZapisSieci = "network.write"
-	WymaganieZapisDNS   = "dns.write"
+	WymaganieZapisSieci  = "network.write"
+	WymaganieZapisDNS    = "dns.write"
+	WymaganieZapisZapory = "firewall.write"
+	WymaganieStrefZapory = "firewall.zones"
 )
 
 // Wersja kontraktu adaptera. Podnosi sie, gdy zmienia sie znaczenie operacji
@@ -112,6 +116,17 @@ func (c Capabilities) Spelnia(wymaganie string) bool {
 			}
 		}
 		return false
+	case WymaganieZapisZapory:
+		wartosc, znana := c.FeatureStan(CapFirewall, "write")
+		if wartosc {
+			return true
+		}
+		return !znana && c.Available(CapFirewall)
+	case WymaganieStrefZapory:
+		// Strefy istnieja tylko tam, gdzie dziala firewalld. Host z samym
+		// nftables nie ma czego pokazac ani czego zmienic.
+		wartosc, _ := c.FeatureStan(CapFirewall, "zones")
+		return wartosc
 	case WymaganieZapisDNS:
 		wartosc, znana := c.FeatureStan(CapDNS, "write")
 		if wartosc {
@@ -153,6 +168,8 @@ func DetectCapabilities() Capabilities {
 	zapisSieci := network.WykryjAdapter(network.Istnieje)
 	resolver := exists("/etc/resolv.conf")
 	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
+	nft := exists("/usr/sbin/nft")
+	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
 
 	return Capabilities{
 		{
@@ -198,6 +215,19 @@ func DetectCapabilities() Capabilities {
 				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
 			},
 			Reason: powodSieciowy(odczytSieci, zapisSieci),
+		},
+		{
+			Name:      CapFirewall,
+			Version:   wersjaAdaptera,
+			Available: nft || firewalld,
+			ReadOnly:  !nft && !firewalld,
+			Features: map[string]bool{
+				"nftables":  nft,
+				"firewalld": firewalld,
+				"write":     nft,
+				"zones":     firewalld,
+			},
+			Reason: powod(nft || firewalld, "this host has neither nftables nor firewalld"),
 		},
 		{
 			Name:      CapDNS,

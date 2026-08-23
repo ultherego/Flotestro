@@ -360,6 +360,7 @@ message TaskEnvelope {
     ScheduleAction schedule = 38;
     NetworkAction network = 39;
     DnsAction dns = 40;
+    FirewallAction firewall = 41;
   }
 }
 
@@ -593,6 +594,7 @@ message TaskResult {
   ScheduleResult schedule_result = 32;
   NetworkResult network_result = 33;
   DnsResult dns_result = 34;
+  FirewallResult firewall_result = 35;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -857,6 +859,43 @@ message DnsResult {
   string rollback_id = 4;
   string rollback_deadline = 5;
   bool confirmed = 6;
+}
+
+// FirewallAction opisuje operacje na zaporze hosta.
+message FirewallAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_RULE_ENSURE = 2;
+    OPERATION_RULE_REMOVE = 3;
+    OPERATION_ZONE_PORT = 4;
+    OPERATION_ZONE_SERVICE = 5;
+    OPERATION_RESTORE = 6;
+  }
+  Operation operation = 1;
+  string rule_id = 2;
+  string chain = 3;
+  string action = 4;
+  string protocol = 5;
+  repeated string ports = 6;
+  repeated string sources = 7;
+  string interface = 8;
+  string comment = 9;
+  string zone = 10;
+  string service = 11;
+  bool enable = 12;
+  bool break_glass = 13;
+  uint32 rollback_seconds = 14;
+  string rollback_id = 15;
+  string expected_hash = 16;
+}
+
+message FirewallResult {
+  bytes snapshot = 1;
+  string message = 2;
+  string rollback_id = 3;
+  string rollback_deadline = 4;
+  bool confirmed = 5;
 }
 
 message PackageLifecycle {

@@ -17,6 +17,7 @@ const (
 	ModulAccounts   = "accounts"
 	ModulNetwork    = "network"
 	ModulDNS        = "dns"
+	ModulFirewall   = "firewall"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
 )
@@ -85,6 +86,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulNetwork, "agent/iproute2", powodSieci(f), siec(f)},
 
 		{ModulDNS, "agent/resolvectl+resolv.conf", powodStanuResolvera(f), resolver(f)},
+
+		{ModulFirewall, "agent/nftables", powodZapory(f), zapora(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -169,4 +172,20 @@ func resolver(f Facts) any {
 		return struct{}{}
 	}
 	return f.DNS
+}
+
+// powodZapory zwraca powod, dla ktorego stanu zapory nie ustalono.
+func powodZapory(f Facts) string {
+	if f.Firewall == nil {
+		return "this host did not report its firewall state"
+	}
+	return f.Firewall.UnavailableReason
+}
+
+// zapora zwraca stan zapory albo pusty obraz.
+func zapora(f Facts) any {
+	if f.Firewall == nil {
+		return struct{}{}
+	}
+	return f.Firewall
 }

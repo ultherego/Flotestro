@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ultherego/flotestro/internal/modules/dns"
+	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
@@ -46,6 +47,13 @@ const (
 
 	ActionDNSResolveTest ActionType = "dns.resolve.test"
 	ActionDNSHostApply   ActionType = "dns.host.apply"
+
+	ActionFirewallPlan           ActionType = "firewall.plan"
+	ActionFirewallRuleEnsure     ActionType = "firewall.rule.ensure"
+	ActionFirewallRuleRemove     ActionType = "firewall.rule.remove"
+	ActionFirewallZonePort       ActionType = "firewall.zone.port"
+	ActionFirewallZoneService    ActionType = "firewall.zone.service"
+	ActionFirewallRulesetRestore ActionType = "firewall.ruleset.restore"
 
 	ActionScheduleEnsure  ActionType = "schedule.ensure"
 	ActionScheduleDisable ActionType = "schedule.disable"
@@ -315,6 +323,24 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionDNSHostApply: {mutating: true, capability: "dns.write", permission: "dns.host.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 
+	// Odczyt zestawu regul przed zmiana. Plan nie dotyka hosta.
+	ActionFirewallPlan: {mutating: false, capability: "firewall", permission: "firewall.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 512 << 10},
+	// Zla regula odcina panel od hosta i nie ma czym cofnac zmiany, wiec
+	// kazda zmiana zapory jest operacja najwyzszego ryzyka.
+	ActionFirewallRuleEnsure: {mutating: true, capability: "firewall.write", permission: "firewall.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+	ActionFirewallRuleRemove: {mutating: true, capability: "firewall.write", permission: "firewall.rule.remove",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+	// Strefy firewalld opisuja dostep inaczej niz reguly: pytanie brzmi
+	// "co jest otwarte", a nie "ktora regula pasuje pierwsza".
+	ActionFirewallZonePort: {mutating: true, capability: "firewall.zones", permission: "firewall.zone.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+	ActionFirewallZoneService: {mutating: true, capability: "firewall.zones", permission: "firewall.service.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+	ActionFirewallRulesetRestore: {mutating: true, capability: "firewall.write", permission: "firewall.restore",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
 	// Wyslanie sygnalu zatrzymuje czyjas prace: sygnal nie ma stanu przed
@@ -487,6 +513,16 @@ var identyfikatorHarmonogramu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,
 // nazwaInterfejsu dopuszcza nazwy, ktore jadro w ogole przyjmuje. Granica
 // dlugosci to IFNAMSIZ pomniejszone o terminator.
 var nazwaInterfejsu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$`)
+
+// pierwszyPort zwraca jedyny port operacji strefowej. Operacja dotyczy
+// dokladnie jednego portu, wiec lista dluzsza niz jednoelementowa jest bledem
+// - i walidator strefy go zglosi.
+func pierwszyPort(porty []string) string {
+	if len(porty) != 1 {
+		return ""
+	}
+	return porty[0]
+}
 
 // sprawdzZmianeSieci odrzuca konfiguracje, ktorej host nie przyjmie albo
 // ktora odcielaby go od panelu. Panel odmawia wczesnie, host rozstrzygajaco.
@@ -825,7 +861,35 @@ type Payload struct {
 	Schedule        *SchedulePayload        `json:"schedule,omitempty"`
 	Network         *NetworkPayload         `json:"network,omitempty"`
 	DNS             *DNSPayload             `json:"dns,omitempty"`
+	Firewall        *FirewallPayload        `json:"firewall,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+}
+
+// FirewallPayload opisuje operacje na zaporze hosta.
+//
+// Panel nie przyjmuje surowego zapisu nft: tekst reguly jest jezykiem, a
+// przyjmowanie jezyka znaczyloby, ze host wykona wszystko, co da sie w nim
+// zapisac. Kreator sklada regule z pol, ktore panel rozumie.
+type FirewallPayload struct {
+	RuleID    string   `json:"rule_id,omitempty"`
+	Chain     string   `json:"chain,omitempty"`
+	Action    string   `json:"action,omitempty"`
+	Protocol  string   `json:"protocol,omitempty"`
+	Ports     []string `json:"ports,omitempty"`
+	Sources   []string `json:"sources,omitempty"`
+	Interface string   `json:"interface,omitempty"`
+	Comment   string   `json:"comment,omitempty"`
+	// Zone i Service dotycza hostow z firewalld.
+	Zone    string `json:"zone,omitempty"`
+	Service string `json:"service,omitempty"`
+	Enable  bool   `json:"enable,omitempty"`
+	// BreakGlass przelamuje ochrone kanalu zarzadzania. Wymaga jawnej decyzji
+	// operatora, bo skutkiem bywa host, do ktorego trzeba pojechac.
+	BreakGlass      bool   `json:"break_glass,omitempty"`
+	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
+	RollbackID      string `json:"rollback_id,omitempty"`
+	// ExpectedHash wiaze zmiane z zestawem regul, ktory operator ogladal.
+	ExpectedHash string `json:"expected_hash,omitempty"`
 }
 
 // DNSPayload opisuje operacje na resolverze hosta.
@@ -1209,6 +1273,48 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("harmonogram wymaga polecenia")
 		}
 		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+
+	case ActionFirewallPlan:
+		return nil
+
+	case ActionFirewallRulesetRestore:
+		if payload.Firewall == nil || payload.Firewall.RollbackID == "" {
+			return fmt.Errorf("przywrocenie wymaga identyfikatora planu")
+		}
+		return nil
+
+	case ActionFirewallRuleEnsure:
+		if payload.Firewall == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu firewall", action)
+		}
+		return firewall.RuleSpec{
+			ID: payload.Firewall.RuleID, Chain: payload.Firewall.Chain,
+			Action: payload.Firewall.Action, Protocol: payload.Firewall.Protocol,
+			Ports: payload.Firewall.Ports, Sources: payload.Firewall.Sources,
+			Interface: payload.Firewall.Interface, Comment: payload.Firewall.Comment,
+		}.Waliduj()
+
+	case ActionFirewallRuleRemove:
+		if payload.Firewall == nil || payload.Firewall.RuleID == "" {
+			return fmt.Errorf("usuniecie wymaga nazwy reguly")
+		}
+		return nil
+
+	case ActionFirewallZonePort:
+		if payload.Firewall == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu firewall", action)
+		}
+		_, err := firewall.ArgumentyOtwarciaPortu(payload.Firewall.Zone,
+			pierwszyPort(payload.Firewall.Ports), payload.Firewall.Protocol, payload.Firewall.Enable)
+		return err
+
+	case ActionFirewallZoneService:
+		if payload.Firewall == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu firewall", action)
+		}
+		_, err := firewall.ArgumentyUslugi(payload.Firewall.Zone,
+			payload.Firewall.Service, payload.Firewall.Enable)
+		return err
 
 	case ActionDNSResolveTest:
 		if payload.DNS == nil || len(payload.DNS.Names) == 0 {

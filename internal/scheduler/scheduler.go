@@ -322,6 +322,42 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
+		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
+		opspec.ActionFirewallZoneService, opspec.ActionFirewallRulesetRestore:
+		operacja := agentv1.FirewallAction_OPERATION_RULE_ENSURE
+		switch action {
+		case opspec.ActionFirewallPlan:
+			operacja = agentv1.FirewallAction_OPERATION_READ
+		case opspec.ActionFirewallRuleRemove:
+			operacja = agentv1.FirewallAction_OPERATION_RULE_REMOVE
+		case opspec.ActionFirewallZonePort:
+			operacja = agentv1.FirewallAction_OPERATION_ZONE_PORT
+		case opspec.ActionFirewallZoneService:
+			operacja = agentv1.FirewallAction_OPERATION_ZONE_SERVICE
+		case opspec.ActionFirewallRulesetRestore:
+			operacja = agentv1.FirewallAction_OPERATION_RESTORE
+		}
+		zapora := &agentv1.FirewallAction{Operation: operacja}
+		if payload.Firewall != nil {
+			zapora.RuleId = payload.Firewall.RuleID
+			zapora.Chain = payload.Firewall.Chain
+			zapora.Action = payload.Firewall.Action
+			zapora.Protocol = payload.Firewall.Protocol
+			zapora.Ports = payload.Firewall.Ports
+			zapora.Sources = payload.Firewall.Sources
+			zapora.Interface = payload.Firewall.Interface
+			zapora.Comment = payload.Firewall.Comment
+			zapora.Zone = payload.Firewall.Zone
+			zapora.Service = payload.Firewall.Service
+			zapora.Enable = payload.Firewall.Enable
+			zapora.BreakGlass = payload.Firewall.BreakGlass
+			zapora.RollbackSeconds = payload.Firewall.RollbackSeconds
+			zapora.RollbackId = payload.Firewall.RollbackID
+			zapora.ExpectedHash = payload.Firewall.ExpectedHash
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Firewall{Firewall: zapora}
+
 	case opspec.ActionDNSResolveTest, opspec.ActionDNSHostApply:
 		operacja := agentv1.DnsAction_OPERATION_APPLY
 		if action == opspec.ActionDNSResolveTest {

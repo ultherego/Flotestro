@@ -44,6 +44,7 @@ message HelperRequest {
     ScheduleRequest schedule = 34;
     NetworkRequest network = 35;
     DnsRequest dns = 36;
+    FirewallRequest firewall = 37;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -175,6 +176,7 @@ message HelperResponse {
   ScheduleResult schedule_result = 22;
   NetworkResult network_result = 23;
   DnsResult dns_result = 24;
+  FirewallResult firewall_result = 25;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -333,6 +335,60 @@ message DnsRequest {
 
 message DnsResult {
   bytes profiles = 1;
+  string message = 2;
+  string rollback_id = 3;
+  string rollback_deadline = 4;
+  bool confirmed = 5;
+}
+
+// FirewallRequest opisuje operacje na zaporze hosta.
+//
+// Panel zmienia wylacznie wlasna tablice nftables albo strefe firewalld:
+// cudze lancuchy sa przepisywane bez jego udzialu, wiec regula w nich znika
+// bez sladu.
+message FirewallRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_RULE_ENSURE = 2;
+    OPERATION_RULE_REMOVE = 3;
+    OPERATION_ZONE_PORT = 4;
+    OPERATION_ZONE_SERVICE = 5;
+    // Przywrocenie stanu regul panelu sprzed zmiany.
+    OPERATION_RESTORE = 6;
+    OPERATION_CONFIRM = 7;
+  }
+  Operation operation = 1;
+  // Regula w postaci pol, ktore panel rozumie. Surowego zapisu nft nie
+  // przyjmujemy: host wykonalby wszystko, co da sie w nim zapisac.
+  string rule_id = 2;
+  string chain = 3;
+  string action = 4;
+  string protocol = 5;
+  repeated string ports = 6;
+  repeated string sources = 7;
+  string interface = 8;
+  string comment = 9;
+  // Strefa i usluga dotycza hostow z firewalld.
+  string zone = 10;
+  string service = 11;
+  bool enable = 12;
+  // Adres i port kanalu zarzadzania. Regula, ktora je obejmuje, odcielaby
+  // panel od hosta - a wtedy nie ma czym cofnac zmiany.
+  string management_address = 13;
+  uint32 management_port = 14;
+  // BreakGlass przelamuje ochrone kanalu zarzadzania. Wymaga jawnej decyzji
+  // operatora, bo skutkiem bywa host, do ktorego trzeba pojechac.
+  bool break_glass = 15;
+  uint32 rollback_seconds = 16;
+  string rollback_id = 17;
+  // Odcisk zestawu regul, wobec ktorego zlecono zmiane.
+  string expected_hash = 18;
+}
+
+message FirewallResult {
+  // Stan zapory w postaci JSON. Struktura nalezy do modulu zapory.
+  bytes snapshot = 1;
   string message = 2;
   string rollback_id = 3;
   string rollback_deadline = 4;

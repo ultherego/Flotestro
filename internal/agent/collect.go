@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
@@ -125,6 +126,17 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	// ida jego pytania i ktora droga.
 	resolver := ZbierzDNS(ctx)
 	facts.DNS = &resolver
+
+	// Zapore czyta helper: tablice nftables sa widoczne wylacznie dla roota.
+	// Odczyt jest tani, ale liczniki rosna same, wiec nie robimy z niego
+	// zrodla metryk - od tego jest monitoring.
+	if caps.Available(CapFirewall) && firewallProbe != nil {
+		if snapshot, err := firewallProbe(ctx); err == nil {
+			facts.Firewall = &snapshot
+		} else {
+			facts.Firewall = &firewall.Snapshot{UnavailableReason: "helper: " + err.Error()}
+		}
+	}
 
 	if facts.Identity.Enrolled && privilegedIdentity != nil {
 		privileged, err := privilegedIdentity(ctx, facts.Identity.Domain)
