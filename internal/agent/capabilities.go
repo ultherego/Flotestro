@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/ultherego/flotestro/internal/modules/network"
+
 // Nazwy adapterow. Nazwa mowi, co host ma, a nie czego chce operacja:
 // operacja pyta o "packages", host odpowiada "packages.apt".
 const (
@@ -14,6 +16,9 @@ const (
 	// Zadania cykliczne. Cron i timery systemd sa dwoma mechanizmami tego
 	// samego, wiec jedna zdolnosc obejmuje oba.
 	CapSchedules = "schedules"
+	// Siec. Odczyt dziala wszedzie, gdzie jest iproute2; zapis wymaga
+	// mechanizmu, ktory potrafi wycofac zmiane.
+	CapNetwork = "network"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -120,6 +125,8 @@ func DetectCapabilities() Capabilities {
 	// Wpisy zarzadzane trafiaja do /etc/cron.d, wiec bez tego katalogu modul
 	// nie ma gdzie ich zalozyc - nawet gdy timery systemd dzialaja.
 	harmonogramy := isDir("/etc/cron.d")
+	odczytSieci := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
+	zapisSieci := network.WykryjAdapter(network.Istnieje)
 
 	return Capabilities{
 		{
@@ -149,6 +156,22 @@ func DetectCapabilities() Capabilities {
 			// Blokada bazy rpm wyglada inaczej niz pytanie debconfa i naprawa
 			// tez wygladalaby inaczej, wiec adapter jej nie ma.
 			Features: map[string]bool{"repair": false},
+		},
+		{
+			Name:      CapNetwork,
+			Version:   wersjaAdaptera,
+			Available: odczytSieci,
+			// Host bez mechanizmu zapisu nie jest hostem bez sieci: modul
+			// dziala, tylko w trybie odczytu - i mowi, dlaczego.
+			ReadOnly: zapisSieci == "",
+			Features: map[string]bool{
+				"routes":                      odczytSieci,
+				"write":                       zapisSieci != "",
+				network.AdapterNetworkManager: zapisSieci == network.AdapterNetworkManager,
+				network.AdapterNmstate:        zapisSieci == network.AdapterNmstate,
+				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
+			},
+			Reason: powodSieciowy(odczytSieci, zapisSieci),
 		},
 		{
 			Name:      CapSchedules,
@@ -217,4 +240,13 @@ func powodGdy(dostepny bool, gdyJest, gdyBrak string) string {
 		return gdyJest
 	}
 	return gdyBrak
+}
+
+// powodSieciowy tlumaczy, czego modulowi sieci brakuje na tym hoscie.
+// Brak zapisu i brak calego modulu to dwie rozne odpowiedzi.
+func powodSieciowy(odczyt bool, adapter string) string {
+	if !odczyt {
+		return "this host has no iproute2 (ip) binary"
+	}
+	return network.PowodBrakuZapisu(adapter)
 }

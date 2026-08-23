@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
@@ -87,6 +88,9 @@ type Facts struct {
 	// Containers jest podsumowaniem silnika kontenerow. Puste oznacza host
 	// bez silnika albo silnik nieodpytany - rozroznia je unavailable_reason.
 	Containers *docker.Summary `json:"containers,omitempty"`
+	// Network jest obrazem interfejsow i tras z jadra. Brak wartosci oznacza
+	// cykl, w ktorym stanu nie zbierano.
+	Network *network.Snapshot `json:"network,omitempty"`
 	// Schedules to zadania cykliczne hosta. Brak wartosci oznacza host bez
 	// crona albo odczyt, ktory sie nie powiodl - rozroznia je pole
 	// unavailable_reason w srodku migawki.

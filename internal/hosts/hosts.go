@@ -42,6 +42,7 @@ const (
 	CapDocker    = "docker"
 	CapCompose   = "docker.compose"
 	CapSchedules = "schedules"
+	CapNetwork   = "network"
 
 	WymaganiePakiety         = "packages"
 	WymaganieNaprawaPakietow = "packages.repair"

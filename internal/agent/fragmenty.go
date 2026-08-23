@@ -75,13 +75,13 @@ func (f Facts) Fragments() ([]Fragment, error) {
 			Accounts []LocalAccount `json:"accounts"`
 		}{f.LocalAccounts}},
 
-		{ModulNetwork, "agent/net", "", struct {
-			Interfaces []string `json:"interfaces"`
-		}{f.Interfaces}},
-
 		{ModulContainers, "agent/docker-engine", powodKontenerow(f), podsumowanieKontenerow(f)},
 
 		{ModulSchedules, "agent/cron+systemd", powodHarmonogramow(f), harmonogramy(f)},
+
+		// Modul sieci zastapil sama liste nazw interfejsow: nazwa bez adresu,
+		// stanu i tras nie odpowiadala na zadne pytanie operatora.
+		{ModulNetwork, "agent/iproute2", powodSieci(f), siec(f)},
 	}
 
 	fragmenty := make([]Fragment, 0, len(opisy))
@@ -134,4 +134,20 @@ func harmonogramy(f Facts) any {
 		return struct{}{}
 	}
 	return f.Schedules
+}
+
+// powodSieci zwraca powod, dla ktorego stanu sieci nie ustalono.
+func powodSieci(f Facts) string {
+	if f.Network == nil {
+		return "this host did not report its network state"
+	}
+	return f.Network.UnavailableReason
+}
+
+// siec zwraca stan sieci albo pusty obraz.
+func siec(f Facts) any {
+	if f.Network == nil {
+		return struct{}{}
+	}
+	return f.Network
 }

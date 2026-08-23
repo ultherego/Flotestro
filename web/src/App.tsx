@@ -12,6 +12,7 @@ import { Uslugi } from "./pages/host/Uslugi";
 import { Kontenery } from "./pages/host/Kontenery";
 import { Procesy } from "./pages/host/Procesy";
 import { Harmonogramy } from "./pages/host/Harmonogramy";
+import { Siec } from "./pages/host/Siec";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
 import { KontaHosta } from "./pages/host/Konta";
@@ -91,6 +92,7 @@ export function App() {
             <Route path="services" element={<Uslugi />} />
             <Route path="processes" element={<Procesy />} />
             <Route path="schedules" element={<Harmonogramy />} />
+            <Route path="network" element={<Siec />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />
             <Route path="logs" element={<Logi />} />

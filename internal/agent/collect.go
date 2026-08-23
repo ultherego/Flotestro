@@ -35,6 +35,14 @@ func SetPrivilegedAccountProbe(probe func(context.Context, []string) (*helperv1.
 // Collect zbiera pelny inventory. Ta funkcja moze uruchamiac procesy potomne,
 // dlatego wolamy ja w cyklu inventory, nigdy w heartbeacie.
 func Collect(ctx context.Context) (Facts, error) {
+	return CollectFrom(ctx, "")
+}
+
+// CollectFrom zbiera inventory, znajac adres, ktorym host rozmawia z panelem.
+// Bez tego adresu modul sieci nie potrafi wskazac interfejsu zarzadzania,
+// a zgadywanie go z pierwszej pozycji listy konczy sie zmiana konfiguracji
+// interfejsu, przez ktory wlasnie przyszlo polecenie.
+func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	machineID, err := MachineID()
 	if err != nil {
 		return Facts{}, err
@@ -107,6 +115,11 @@ func Collect(ctx context.Context) (Facts, error) {
 			facts.Schedules = &schedules.Snapshot{UnavailableReason: "helper: " + err.Error()}
 		}
 	}
+
+	// Siec czytamy z jadra w kazdym cyklu: odczyt jest tani, a stan potrafi
+	// zmienic sie bez udzialu panelu (DHCP, kabel, kontener).
+	siec := ZbierzSiec(ctx, adresZarzadzania)
+	facts.Network = &siec
 
 	if facts.Identity.Enrolled && privilegedIdentity != nil {
 		privileged, err := privilegedIdentity(ctx, facts.Identity.Domain)

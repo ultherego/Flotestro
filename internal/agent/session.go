@@ -132,9 +132,16 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	stream := client.Connect(sessionCtx)
 	defer func() { _ = stream.CloseRequest() }()
 
+	// Adres, ktorym host dosiega panelu, jest ustalany raz na sesje i podany
+	// modulowi sieci: to on rozstrzyga, ktory interfejs jest kanalem
+	// zarzadzania, a wiec ktorej zmiany nie wolno zrobic bez ostrzezenia.
+	adresLokalny := adresDoPanelu(opts.GatewayURL)
+
 	collect := opts.CollectFacts
 	if collect == nil {
-		collect = Collect
+		collect = func(ctx context.Context) (Facts, error) {
+			return CollectFrom(ctx, adresLokalny)
+		}
 	}
 
 	facts, err := collect(sessionCtx)
@@ -152,7 +159,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			BootId:            facts.BootID,
 			Capabilities:      capabilitiesToProto(facts.Capabilities),
 			InventoryRevision: revision,
-			LocalAddress:      adresDoPanelu(opts.GatewayURL),
+			LocalAddress:      adresLokalny,
 		}},
 	}); err != nil {
 		return err
