@@ -44,6 +44,120 @@ const (
 // podniesienia wersji, a nie cichej reinterpretacji.
 const ActionVersion = 1
 
+// RiskLevel opisuje, czym grozi operacja. Poziom nie jest etykieta w
+// interfejsie: decyduje o swiezosci uwierzytelnienia, o potwierdzeniu celu
+// i o domyslnej polityce kampanii.
+type RiskLevel string
+
+const (
+	// RiskLow to odczyt i planowanie: niczego nie zmienia.
+	RiskLow RiskLevel = "low"
+	// RiskMedium zmienia stan odwracalnie i lokalnie.
+	RiskMedium RiskLevel = "medium"
+	// RiskHigh przerywa usluge albo zmienia zawartosc systemu.
+	RiskHigh RiskLevel = "high"
+	// RiskCritical moze odciac dostep do hosta albo zmienic jego tozsamosc.
+	// Wymaga swiezego uwierzytelnienia operatora.
+	RiskCritical RiskLevel = "critical"
+	// RiskDestructive niszczy dane nieodwracalnie. Wymaga wpisania nazwy celu
+	// i domyslnie nie dziala masowo.
+	RiskDestructive RiskLevel = "destructive"
+)
+
+// LockClass nazywa zasob hosta, ktorego operacja uzywa na wylacznosc.
+// Jednoczesnie moze dzialac jedna mutacja w danej klasie: dwie transakcje
+// pakietowe na tej samej bazie moga ja uszkodzic.
+const (
+	LockNone       = ""
+	LockPackages   = "packages"
+	LockUnits      = "units"
+	LockContainers = "containers"
+	LockIdentity   = "identity"
+	LockAccounts   = "accounts"
+)
+
+// Spec jest pelnym kontraktem jednej operacji.
+type Spec struct {
+	Action         ActionType `json:"action"`
+	Version        uint32     `json:"version"`
+	Capability     string     `json:"capability,omitempty"`
+	Permission     string     `json:"permission"`
+	Mutating       bool       `json:"mutating"`
+	Risk           RiskLevel  `json:"risk"`
+	DefaultTimeout int        `json:"default_timeout_seconds"`
+	MaxOutputBytes uint64     `json:"max_output_bytes"`
+	LockClass      string     `json:"lock_class,omitempty"`
+	// RequiresPlan oznacza operacje, ktorej nie wolno zlecic bez planu
+	// zatwierdzonego przez czlowieka. Hash planu wiaze zatwierdzenie
+	// z konkretnym diffem.
+	RequiresPlan bool `json:"requires_plan"`
+}
+
+// Describe zwraca pelny kontrakt operacji.
+func (a ActionType) Describe() Spec {
+	spec := actionSpecs[a]
+	return Spec{
+		Action:         a,
+		Version:        ActionVersion,
+		Capability:     spec.capability,
+		Permission:     spec.permission,
+		Mutating:       spec.mutating,
+		Risk:           spec.risk,
+		DefaultTimeout: spec.timeoutSeconds,
+		MaxOutputBytes: spec.maxOutputBytes,
+		LockClass:      spec.lockClass,
+		RequiresPlan:   spec.requiresPlan,
+	}
+}
+
+// Risk zwraca poziom ryzyka operacji.
+func (a ActionType) Risk() RiskLevel {
+	if spec, ok := actionSpecs[a]; ok {
+		return spec.risk
+	}
+	// Nieznana operacja nie jest operacja bezpieczna. Domyslny poziom nie
+	// moze byc najnizszy tylko dlatego, ze czegos nie opisano.
+	return RiskCritical
+}
+
+// LockClass zwraca klase zasobu hosta uzywanego na wylacznosc.
+func (a ActionType) LockClass() string {
+	return actionSpecs[a].lockClass
+}
+
+// MaxOutputBytes ogranicza rozmiar wyniku operacji.
+func (a ActionType) MaxOutputBytes() uint64 {
+	if spec, ok := actionSpecs[a]; ok && spec.maxOutputBytes > 0 {
+		return spec.maxOutputBytes
+	}
+	return domyslnyLimitWyniku
+}
+
+// RequiresPlan mowi, czy operacji nie wolno zlecic bez zatwierdzonego planu.
+func (a ActionType) RequiresPlan() bool {
+	return actionSpecs[a].requiresPlan
+}
+
+// RequiresFreshAuth mowi, czy operator musi potwierdzic tozsamosc tuz przed
+// zleceniem. Operacja, ktora moze odciac dostep do hosta, nie moze isc
+// z sesji sprzed godziny.
+func (a ActionType) RequiresFreshAuth() bool {
+	switch a.Risk() {
+	case RiskCritical, RiskDestructive:
+		return true
+	}
+	return false
+}
+
+// RequiresTargetConfirmation mowi, czy operator musi wpisac nazwe celu.
+// Klikniecie nie jest wystarczajaca decyzja przy operacji nieodwracalnej.
+func (a ActionType) RequiresTargetConfirmation() bool {
+	return a.Risk() == RiskDestructive
+}
+
+// domyslnyLimitWyniku obowiazuje operacje, ktore nie podaja wlasnego.
+const domyslnyLimitWyniku = 64 << 10
+
 // Known sprawdza, czy typ operacji jest obslugiwany.
 func (a ActionType) Known() bool {
 	_, ok := actionSpecs[a]
@@ -76,20 +190,36 @@ type actionSpec struct {
 	capability     string
 	permission     string
 	timeoutSeconds int
+	risk           RiskLevel
+	lockClass      string
+	maxOutputBytes uint64
+	requiresPlan   bool
 }
 
+// Poziomy ryzyka i klasy blokad ida za rozdzialami 6.1 i 8 specyfikacji.
+// Ryzyko nie jest etykieta: krytyczne wymaga swiezego uwierzytelnienia,
+// niszczace dodatkowo wpisania nazwy celu. Klasa blokady mowi, ktore operacje
+// nie moga dzialac naraz na tym samym hoscie.
 var actionSpecs = map[ActionType]actionSpec{
-	ActionUnitStart:   {mutating: true, capability: "systemd", permission: "unit.start", timeoutSeconds: 120},
-	ActionUnitStop:    {mutating: true, capability: "systemd", permission: "unit.stop", timeoutSeconds: 120},
-	ActionUnitRestart: {mutating: true, capability: "systemd", permission: "unit.restart", timeoutSeconds: 120},
-	ActionUnitReload:  {mutating: true, capability: "systemd", permission: "unit.reload", timeoutSeconds: 60},
-	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read", timeoutSeconds: 60},
+	ActionUnitStart: {mutating: true, capability: "systemd", permission: "unit.start",
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
+	// Zatrzymanie uslugi przerywa jej dzialanie, wiec jest wyzej niz start.
+	ActionUnitStop: {mutating: true, capability: "systemd", permission: "unit.stop",
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits},
+	ActionUnitRestart: {mutating: true, capability: "systemd", permission: "unit.restart",
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits},
+	ActionUnitReload: {mutating: true, capability: "systemd", permission: "unit.reload",
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
+	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
 
 	// Planowanie nie zmienia stanu systemu, ale odswiezenie metadanych juz tak,
 	// wiec plan tez ma wlasne uprawnienie.
-	ActionPackagePlan: {mutating: false, capability: "packages", permission: "packages.plan", timeoutSeconds: 300},
+	ActionPackagePlan: {mutating: false, capability: "packages", permission: "packages.plan",
+		timeoutSeconds: 300, risk: RiskLow, lockClass: LockPackages},
 	// Transakcja pakietowa jest najbardziej ryzykowna operacja w systemie.
-	ActionPackageUpgrade: {mutating: true, capability: "packages", permission: "packages.upgrade", timeoutSeconds: 1800},
+	ActionPackageUpgrade: {mutating: true, capability: "packages", permission: "packages.upgrade",
+		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
 
 	// Naprawa zmienia stan hosta i moze dotyczyc pakietow o duzym znaczeniu,
 	// z bootloaderem wlacznie, wiec ma wlasne uprawnienie i wlasny timeout.
@@ -97,26 +227,36 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Wymaganie jest wezsze niz sama obecnosc menedzera pakietow: naprawa
 	// odpowiada na pytania debconfa i istnieje tylko dla apta. Host, ktory jej
 	// nie ma, ma to powiedziec przy zlecaniu, a nie po dostarczeniu zadania.
-	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair", timeoutSeconds: 1800},
+	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair",
+		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockPackages},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
-	// aktualizacji.
-	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot", timeoutSeconds: 120},
+	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
+	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
+		timeoutSeconds: 120, risk: RiskCritical},
 	// Odczyt stanu jednostek jest niemutujacy i sluzy health checkom kampanii.
-	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status", timeoutSeconds: 60},
+	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status",
+		timeoutSeconds: 60, risk: RiskLow},
 
 	// Dolaczenie do domeny zmienia uwierzytelnianie calego hosta.
-	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll", timeoutSeconds: 900},
+	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll",
+		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity},
 	// Preflight niczego nie zmienia, wiec nie wymaga zatwierdzenia.
-	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read", timeoutSeconds: 120},
+	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read",
+		timeoutSeconds: 120, risk: RiskLow, lockClass: LockIdentity},
 
 	// Konta lokalne nie zaleza od systemd ani od katalogu: modul dziala takze
 	// tam, gdzie klient zostaje przy zwyklej autoryzacji SSH.
 	// Blokada i odblokowanie maja osobne uprawnienia: w reakcji na incydent
 	// odciecie konta bywa dozwolone tam, gdzie przywrocenie dostepu juz nie.
-	ActionLocalUserCreate: {mutating: true, capability: "", permission: "localuser.create", timeoutSeconds: 120},
-	ActionLocalUserLock:   {mutating: true, capability: "", permission: "localuser.lock", timeoutSeconds: 60},
-	ActionLocalUserUnlock: {mutating: true, capability: "", permission: "localuser.unlock", timeoutSeconds: 60},
-	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write", timeoutSeconds: 60},
+	ActionLocalUserCreate: {mutating: true, capability: "", permission: "localuser.create",
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockAccounts},
+	ActionLocalUserLock: {mutating: true, capability: "", permission: "localuser.lock",
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockAccounts},
+	// Przywrocenie dostepu jest zawsze powazniejsze niz jego odebranie.
+	ActionLocalUserUnlock: {mutating: true, capability: "", permission: "localuser.unlock",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
 }
 
 // AllActions zwraca posortowana liste obslugiwanych operacji.
