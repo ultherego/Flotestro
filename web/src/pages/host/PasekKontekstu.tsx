@@ -21,6 +21,7 @@ export function PasekKontekstu({
         <StanPolaczenia stan={host.connection_state} />
         <span className="nazwa">{host.hostname}</span>
         <AdresZarzadzania host={host} />
+        <OknoSerwisowe host={host} />
       </div>
       <div className="pasek-hosta-fakty">
         <span>{host.site} / {host.environment}</span>
@@ -30,6 +31,25 @@ export function PasekKontekstu({
       </div>
       <PrzelacznikHosta host={host} segment={segment} instalacja={instalacja} />
     </div>
+  );
+}
+
+/**
+ * Znacznik okna serwisowego. Jest w pasku, a nie w zakladce zasilania, bo
+ * dotyczy kazdej operacji na tym hoscie: kto zaczyna cokolwiek robic, ma
+ * wiedziec, ze ktos inny juz przy tej maszynie pracuje.
+ */
+function OknoSerwisowe({ host }: { host: Host }) {
+  if (!host.maintenance) return null;
+  const doKiedy = new Date(host.maintenance.until);
+  if (Number.isNaN(doKiedy.getTime()) || doKiedy.getTime() <= Date.now()) return null;
+  const opis = [host.maintenance.reason, host.maintenance.set_by && `set by ${host.maintenance.set_by}`]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <span className="znacznik uwaga" title={opis || "maintenance window"}>
+      maintenance until {doKiedy.toISOString().slice(0, 16).replace("T", " ")} UTC
+    </span>
   );
 }
 

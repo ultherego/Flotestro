@@ -481,6 +481,35 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}
 	}
 
+	// Stan startu trafia do inwentarza: to ostatni obraz hosta, ktory panel
+	// dostanie, zanim maszyna zejdzie.
+	if zasilanie := result.GetPowerResult(); zasilanie != nil && len(zasilanie.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "power",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(zasilanie.GetSnapshot())),
+			Source:     "agent/procfs+logind",
+			Payload:    zasilanie.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano stanu zasilania", "host_id", hostID, "err", err)
+		}
+	}
+
+	// Stan czasu trafia do inwentarza po kazdej operacji. Zegar zmienia sie
+	// sam miedzy cyklami, wiec swiezy odczyt zaraz po zmianie jest tu
+	// jedynym, ktory mowi cos o skutku tej zmiany.
+	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "time",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(zegar.GetSnapshot())),
+			Source:     "agent/timedatectl+chronyc",
+			Payload:    zegar.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano stanu czasu", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Konfiguracja sshd trafia do inwentarza po kazdej zmianie: zakladka ma
 	// pokazac stan po operacji, a nie ten sprzed cyklu.
 	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetSnapshot()) > 0 {
@@ -784,6 +813,35 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"message":         jadro.GetMessage(),
 			"pending_reboot":  jadro.GetPendingReboot(),
 			"applied_runtime": jadro.GetAppliedRuntime(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Blokady wylaczenia naleza do zadania: to one mowia, dlaczego host
+	// zostal na nogach albo co operator postanowil pominac.
+	if zasilanie := result.GetPowerResult(); zasilanie != nil &&
+		(len(zasilanie.GetInhibitors()) > 0 || zasilanie.GetScheduledAt() != "") {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":         "power",
+			"message":      zasilanie.GetMessage(),
+			"inhibitors":   surowyJSON(zasilanie.GetInhibitors()),
+			"scheduled_at": zasilanie.GetScheduledAt(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Pomiary zrodel czasu naleza do zadania, a nie do stanu hosta: to
+	// odpowiedz na pytanie zadane w jednej chwili, wobec serwerow, ktorych
+	// host jeszcze moze nie uzywac.
+	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetProbes()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":    "time",
+			"message": zegar.GetMessage(),
+			"probes":  surowyJSON(zegar.GetProbes()),
 		})
 		if err == nil {
 			return encoded

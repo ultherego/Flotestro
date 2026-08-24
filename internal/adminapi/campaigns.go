@@ -52,6 +52,15 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"a campaign requires an operation that changes host state")
 		return
 	}
+	// Operacja, ktora wymaga wpisania nazwy celu, nie dziala masowo. Nazwa
+	// celu jest tam jedyna bramka miedzy klinieciem a nieodwracalna zmiana,
+	// a kampania z definicji nie ma jednego celu do wpisania: skasowanie
+	// dysku albo wylaczenie zasilania na calej fali nie ma drogi powrotu.
+	if action.RequiresTargetConfirmation() {
+		problem(w, http.StatusBadRequest, "not_a_campaign_action",
+			"this operation is irreversible and needs its target named; run it host by host")
+		return
+	}
 
 	var payload opspec.Payload
 	if len(request.Payload) > 0 {
@@ -80,6 +89,26 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "no_targets", "the selector matched no hosts")
 		return
 	}
+
+	// Host w oknie serwisowym nie wchodzi do migawki kampanii. Wpisany do niej
+	// i pominiety w fali wygladalby na awarie; pominiety juz tutaj jest
+	// decyzja, ktora operator widzi przed startem.
+	teraz := time.Now().UTC()
+	wSerwisie := 0
+	poza := make([]hosts.Host, 0, len(candidates))
+	for _, host := range candidates {
+		if host.Maintenance.Trwa(teraz) {
+			wSerwisie++
+			continue
+		}
+		poza = append(poza, host)
+	}
+	if len(poza) == 0 {
+		problem(w, http.StatusBadRequest, "all_in_maintenance",
+			"every host the selector matched is in a maintenance window")
+		return
+	}
+	candidates = poza
 
 	// Uprawnienie sprawdzamy dla kazdego hosta z migawki. Kampania obejmujaca
 	// jeden host poza zakresem nie moze przejsc dlatego, ze reszta jest w nim.
@@ -137,8 +166,9 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
 			"name": campaign.Name, "action_type": campaign.ActionType,
-			"targets": len(targets), "canary_size": campaign.CanarySize,
-			"wave_size": campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
+			"targets": len(targets), "skipped_in_maintenance": wSerwisie,
+			"canary_size": campaign.CanarySize,
+			"wave_size":   campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
 		},
 	}); err != nil {
 		s.fail(w, err)

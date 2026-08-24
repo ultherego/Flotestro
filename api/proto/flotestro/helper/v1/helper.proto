@@ -49,6 +49,8 @@ message HelperRequest {
     SshRequest ssh = 39;
     KernelRequest kernel = 40;
     FileRequest file = 41;
+    TimeRequest time = 42;
+    ShutdownRequest shutdown = 43;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -104,6 +106,22 @@ message IdentityProbeRequest {
 message RebootRequest {
   uint32 delay_seconds = 1;
   string reason = 2;
+}
+
+// ShutdownRequest wylacza hosta. Opoznienie daje agentowi czas na odeslanie
+// wyniku, zanim host zniknie z sieci.
+message ShutdownRequest {
+  uint32 delay_seconds = 1;
+  string reason = 2;
+  string mode = 3;
+  bool ignore_inhibitors = 4;
+}
+
+message PowerResult {
+  bytes snapshot = 1;
+  string message = 2;
+  bytes inhibitors = 3;
+  string scheduled_at = 4;
 }
 
 // PackageActionRequest obejmuje operacje pakietowe wymagajace roota.
@@ -185,6 +203,8 @@ message HelperResponse {
   SshResult ssh_result = 27;
   KernelResult kernel_result = 28;
   FileResult file_result = 29;
+  TimeResult time_result = 30;
+  PowerResult power_result = 31;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -490,6 +510,32 @@ message SshResult {
   // w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
   // nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
   repeated string mismatches = 3;
+}
+
+// TimeRequest zmienia zrodla czasu albo strefe hosta.
+//
+// Odczytu tu nie ma: stan czasu czyta agent, bo timedatectl i chronyc
+// odpowiadaja kazdemu, a kazde przejscie przez roota trzeba uzasadnic.
+message TimeRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_CONFIG_APPLY = 1;
+    OPERATION_TIMEZONE_SET = 2;
+  }
+  Operation operation = 1;
+  repeated string servers = 2;
+  string timezone = 3;
+  // AllowStep jest zgoda operatora na przestawienie zegara skokiem. Bez niej
+  // host odrzuca zmiane, ktora cofnelaby czas o wiecej niz prog.
+  bool allow_step = 4;
+  // EnableDropin jest zgoda na dopisanie katalogu zrodel do glownego pliku.
+  bool enable_dropin = 5;
+}
+
+message TimeResult {
+  bytes snapshot = 1;
+  string message = 2;
+  bytes probes = 3;
 }
 
 // KernelRequest opisuje operacje na ustawieniach jadra.

@@ -365,6 +365,8 @@ message TaskEnvelope {
     SshAction ssh = 43;
     KernelAction kernel = 44;
     FileAction file = 45;
+    TimeAction time = 46;
+    SystemShutdown system_shutdown = 47;
   }
 }
 
@@ -416,6 +418,27 @@ message SystemReboot {
   // Opoznienie daje agentowi czas na odeslanie wyniku, zanim host zniknie.
   uint32 delay_seconds = 1;
   string reason = 2;
+}
+
+// SystemShutdown wylacza hosta. Inaczej niz restart, konczy sie stanem,
+// z ktorego panel nie potrafi hosta wyprowadzic: wlaczenie wymaga dostepu
+// poza pasmem.
+message SystemShutdown {
+  uint32 delay_seconds = 1;
+  string reason = 2;
+  // Mode rozroznia wylaczenie zasilania od zatrzymania systemu.
+  string mode = 3;
+  // IgnoreInhibitors przechodzi nad blokadami logind. Bez tego host
+  // z blokada odsyla ja jako powod odmowy, a nie wylacza sie po cichu.
+  bool ignore_inhibitors = 4;
+}
+
+message PowerResult {
+  bytes snapshot = 1;
+  string message = 2;
+  // Inhibitors niesie blokady, ktore wstrzymaly operacje.
+  bytes inhibitors = 3;
+  string scheduled_at = 4;
 }
 
 // ReadUnitStatus odczytuje stan jednostek. Operacja niemutujaca, uzywana przez
@@ -603,6 +626,8 @@ message TaskResult {
   SshResult ssh_result = 37;
   KernelResult kernel_result = 38;
   FileResult file_result = 39;
+  TimeResult time_result = 40;
+  PowerResult power_result = 41;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -969,6 +994,37 @@ message SshResult {
   bytes snapshot = 1;
   string message = 2;
   repeated string mismatches = 3;
+}
+
+// TimeAction opisuje operacje na czasie hosta.
+//
+// Test jest osobna operacja, a nie czescia zmiany: serwer czasu trzeba
+// sprawdzic, zanim odbierze sie hostowi zrodlo, ktore dziala.
+message TimeAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_SYNC_TEST = 1;
+    OPERATION_CONFIG_APPLY = 2;
+    OPERATION_TIMEZONE_SET = 3;
+  }
+  Operation operation = 1;
+  repeated string servers = 2;
+  repeated string probe = 3;
+  string timezone = 4;
+  // AllowStep jest zgoda operatora na przestawienie zegara skokiem.
+  bool allow_step = 5;
+  // EnableDropin jest zgoda na dopisanie do glownego pliku demona jednego
+  // wiersza, ktory wlacza katalog zrodel panelu. Bez niej host bez takiego
+  // katalogu zostaje tylko do odczytu.
+  bool enable_dropin = 6;
+}
+
+message TimeResult {
+  bytes snapshot = 1;
+  string message = 2;
+  // Probes niesie pomiary zadane przez panel. Serwer, ktory nie odpowiedzial,
+  // ma tu powod, a nie przesuniecie rowne zeru.
+  bytes probes = 3;
 }
 
 // KernelAction opisuje operacje na ustawieniach jadra.

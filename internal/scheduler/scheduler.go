@@ -347,6 +347,34 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_File{File: plik}
 
+	case opspec.ActionSystemShutdown:
+		wylaczenie := &agentv1.SystemShutdown{}
+		if payload.Power != nil {
+			wylaczenie.DelaySeconds = payload.Power.DelaySeconds
+			wylaczenie.Reason = payload.Power.Reason
+			wylaczenie.Mode = payload.Power.Mode
+			wylaczenie.IgnoreInhibitors = payload.Power.IgnoreInhibitors
+		}
+		envelope.Action = &agentv1.TaskEnvelope_SystemShutdown{SystemShutdown: wylaczenie}
+
+	case opspec.ActionTimeSyncTest, opspec.ActionTimeConfigApply, opspec.ActionTimezoneSet:
+		operacja := agentv1.TimeAction_OPERATION_SYNC_TEST
+		switch action {
+		case opspec.ActionTimeConfigApply:
+			operacja = agentv1.TimeAction_OPERATION_CONFIG_APPLY
+		case opspec.ActionTimezoneSet:
+			operacja = agentv1.TimeAction_OPERATION_TIMEZONE_SET
+		}
+		zegar := &agentv1.TimeAction{Operation: operacja}
+		if payload.Time != nil {
+			zegar.Servers = payload.Time.Servers
+			zegar.Probe = payload.Time.Probe
+			zegar.Timezone = payload.Time.Timezone
+			zegar.AllowStep = payload.Time.AllowStep
+			zegar.EnableDropin = payload.Time.EnableDropIn
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Time{Time: zegar}
+
 	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
 		operacja := agentv1.KernelAction_OPERATION_READ

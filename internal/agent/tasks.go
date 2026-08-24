@@ -164,6 +164,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
 		return e.applyKernel(ctx, task, action, payload.Kernel)
+	case opspec.ActionTimeSyncTest, opspec.ActionTimeConfigApply, opspec.ActionTimezoneSet:
+		return e.applyTime(ctx, task, action, payload.Time)
+	case opspec.ActionSystemShutdown:
+		return e.shutdownHost(ctx, task, payload.Power)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -545,6 +549,32 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Group:          plik.GetGroup(),
 			ExpectedSHA256: plik.GetExpectedSha256(),
 			Validator:      plik.GetValidator(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_SystemShutdown:
+		wylaczenie := action.SystemShutdown
+		return opspec.ActionSystemShutdown, opspec.Payload{Power: &opspec.PowerPayload{
+			Mode:             wylaczenie.GetMode(),
+			DelaySeconds:     wylaczenie.GetDelaySeconds(),
+			Reason:           wylaczenie.GetReason(),
+			IgnoreInhibitors: wylaczenie.GetIgnoreInhibitors(),
+		}}, nil
+
+	case *agentv1.TaskEnvelope_Time:
+		zegar := action.Time
+		typ := opspec.ActionTimeSyncTest
+		switch zegar.GetOperation() {
+		case agentv1.TimeAction_OPERATION_CONFIG_APPLY:
+			typ = opspec.ActionTimeConfigApply
+		case agentv1.TimeAction_OPERATION_TIMEZONE_SET:
+			typ = opspec.ActionTimezoneSet
+		}
+		return typ, opspec.Payload{Time: &opspec.TimePayload{
+			Servers:      zegar.GetServers(),
+			Probe:        zegar.GetProbe(),
+			Timezone:     zegar.GetTimezone(),
+			AllowStep:    zegar.GetAllowStep(),
+			EnableDropIn: zegar.GetEnableDropin(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Kernel:

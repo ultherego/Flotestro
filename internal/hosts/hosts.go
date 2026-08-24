@@ -216,12 +216,32 @@ type Host struct {
 	// Adres zarzadzania i jego pochodzenie. Puste pola oznaczaja adres
 	// nieustalony; interfejs ma wtedy powiedziec "unknown", a nie pokazac
 	// dowolny adres hosta jako rzekomy adres zarzadzania.
-	ManagementAddress           string       `json:"management_address,omitempty"`
-	ManagementAddressSource     string       `json:"management_address_source,omitempty"`
-	ManagementAddressObservedAt *time.Time   `json:"management_address_observed_at,omitempty"`
-	Identity                    HostIdentity `json:"identity"`
-	EnrolledAt                  time.Time    `json:"enrolled_at"`
-	Capabilities                Capabilities `json:"capabilities"`
+	ManagementAddress           string     `json:"management_address,omitempty"`
+	ManagementAddressSource     string     `json:"management_address_source,omitempty"`
+	ManagementAddressObservedAt *time.Time `json:"management_address_observed_at,omitempty"`
+	// Maintenance jest oknem serwisowym. Puste pole oznacza host poza oknem,
+	// a nie okno o zerowej dlugosci.
+	Maintenance  *MaintenanceWindow `json:"maintenance,omitempty"`
+	Identity     HostIdentity       `json:"identity"`
+	EnrolledAt   time.Time          `json:"enrolled_at"`
+	Capabilities Capabilities       `json:"capabilities"`
+}
+
+// MaintenanceWindow opisuje okno serwisowe hosta.
+//
+// Host w oknie dziala i przyjmuje operacje zlecone recznie; kampanie go
+// omijaja, a alerty z niego nie budza dyzurnego. Okno zawsze ma termin:
+// "do odwolania" konczy sie hostem, o ktorym wszyscy zapomnieli.
+type MaintenanceWindow struct {
+	Until  time.Time `json:"until"`
+	Reason string    `json:"reason,omitempty"`
+	SetBy  string    `json:"set_by,omitempty"`
+	SetAt  time.Time `json:"set_at"`
+}
+
+// Trwa mowi, czy okno obowiazuje w danej chwili.
+func (m *MaintenanceWindow) Trwa(teraz time.Time) bool {
+	return m != nil && teraz.Before(m.Until)
 }
 
 // HostIdentity opisuje integracje hosta z domena w widoku API.
@@ -477,6 +497,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.management_address_observed_at,
 		       h.identity_enrolled, coalesce(h.identity_domain, ''), coalesce(h.identity_realm, ''),
 		       h.identity_sssd_online, h.identity_checked_at,
+		       h.maintenance_until, coalesce(h.maintenance_reason, ''),
+		       coalesce(h.maintenance_by, ''), h.maintenance_at,
 		       coalesce(c.rejestr, '[]'::json)
 		from hosts h
 		left join lateral (
@@ -498,6 +520,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 	var result []Host
 	for rows.Next() {
 		var h Host
+		var oknoDo, oknoOd *time.Time
+		var oknoPowod, oknoKto string
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner,
 			&h.LifecycleState, &h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
@@ -506,8 +530,18 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.ManagementAddress, &h.ManagementAddressSource, &h.ManagementAddressObservedAt,
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
+			&oknoDo, &oknoPowod, &oknoKto, &oknoOd,
 			&h.Capabilities); err != nil {
 			return nil, err
+		}
+		// Okno zamkniete albo wygasle nie jest oknem: pokazujemy je tylko
+		// wtedy, gdy jeszcze trwa.
+		if oknoDo != nil {
+			okno := MaintenanceWindow{Until: *oknoDo, Reason: oknoPowod, SetBy: oknoKto}
+			if oknoOd != nil {
+				okno.SetAt = *oknoOd
+			}
+			h.Maintenance = &okno
 		}
 		result = append(result, h)
 	}
@@ -610,4 +644,26 @@ func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Tim
 		return 0, err
 	}
 	return count, nil
+}
+
+// UstawOknoSerwisowe otwiera albo zamyka okno serwisowe hosta.
+//
+// Zamkniecie okna czysci takze powod i autora: pozostawiony powod opisywalby
+// okno, ktorego juz nie ma, i przy nastepnym otwarciu wygladalby na aktualny.
+func (s *Store) UstawOknoSerwisowe(ctx context.Context, hostID string,
+	doKiedy *time.Time, powod, kto string) (*Host, error) {
+	tag, err := s.pool.Exec(ctx, `
+		update hosts
+		   set maintenance_until  = $2::timestamptz,
+		       maintenance_reason = case when $2::timestamptz is null then null else $3::text end,
+		       maintenance_by     = case when $2::timestamptz is null then null else $4::text end,
+		       maintenance_at     = case when $2::timestamptz is null then null else now() end
+		 where id = $1`, hostID, doKiedy, powod, kto)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
 }

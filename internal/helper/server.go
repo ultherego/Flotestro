@@ -150,6 +150,10 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 
 	case *helperv1.HelperRequest_Kernel:
 		return s.applyKernel(ctx, request, action.Kernel)
+	case *helperv1.HelperRequest_Time:
+		return s.applyTime(ctx, request, action.Time)
+	case *helperv1.HelperRequest_Shutdown:
+		return s.applyShutdown(ctx, request, action.Shutdown)
 
 	case *helperv1.HelperRequest_Ssh:
 		return s.applySSH(ctx, request, action.Ssh)

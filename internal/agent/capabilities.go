@@ -1,6 +1,9 @@
 package agent
 
-import "github.com/ultherego/flotestro/internal/modules/network"
+import (
+	"github.com/ultherego/flotestro/internal/modules/network"
+	czas "github.com/ultherego/flotestro/internal/modules/time"
+)
 
 // Nazwy adapterow. Nazwa mowi, co host ma, a nie czego chce operacja:
 // operacja pyta o "packages", host odpowiada "packages.apt".
@@ -31,6 +34,9 @@ const (
 	CapSSHD = "sshd"
 	// Jadro: ustawienia sysctl i moduly.
 	CapKernel = "kernel"
+	// Czas hosta. Odczyt dziala wszedzie, gdzie jest timedatectl; zapis
+	// wymaga demona, ktoremu panel ma gdzie dopisac serwery.
+	CapTime = "time"
 	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
 	CapFiles = "files.managed"
 )
@@ -192,6 +198,13 @@ func DetectCapabilities() Capabilities {
 	lvm := exists("/usr/sbin/vgs") && exists("/usr/sbin/lvs")
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
+	timedatectl := exists(czas.SciezkaTimedatectl)
+	chrony := exists(czas.SciezkaChronyc)
+	// Timesyncd bywa zainstalowany i zamaskowany, gdy host ma chronyego.
+	// Obecnosc jednostki mowi tylko tyle, ze jest czym pisac - ktory demon
+	// naprawde trzyma zegar, rozstrzyga dopiero odczyt stanu.
+	timesyncd := exists("/usr/lib/systemd/systemd-timesyncd") ||
+		exists("/lib/systemd/systemd-timesyncd")
 
 	return Capabilities{
 		{
@@ -245,6 +258,21 @@ func DetectCapabilities() Capabilities {
 			// oznacza liste domyslna, a nie brak modulu.
 			Available: true,
 			Features:  map[string]bool{"allowlist": exists("/etc/flotestro/files.allow")},
+		},
+		{
+			Name:      CapTime,
+			Version:   wersjaAdaptera,
+			Available: timedatectl,
+			// Host, na ktorym nie ma czego skonfigurowac, nadal pokazuje
+			// czas i przesuniecie - modul jest wtedy do odczytu.
+			ReadOnly: !chrony && !timesyncd,
+			Features: map[string]bool{
+				"chrony":    chrony,
+				"timesyncd": timesyncd,
+				"write":     chrony || timesyncd,
+				"timezone":  timedatectl,
+			},
+			Reason: powod(timedatectl, "this host has no timedatectl"),
 		},
 		{
 			Name:      CapKernel,

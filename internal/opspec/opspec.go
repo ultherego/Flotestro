@@ -1,6 +1,8 @@
 // Package opspec definiuje operacje typowane wspolne dla control plane,
-// agenta i helpera. Pakiet nie ma zaleznosci poza biblioteka standardowa,
-// dzieki czemu hash planu jest liczony jedna implementacja po obu stronach.
+// agenta i helpera. Poza biblioteka standardowa siega wylacznie po pakiety
+// modulow, i tylko po ich walidacje: dzieki temu zlecenie odrzucone na hoscie
+// jest odrzucane juz przy zlecaniu, tym samym kodem i z tym samym powodem.
+// Hash planu liczy jedna implementacja po obu stronach.
 package opspec
 
 import (
@@ -15,9 +17,11 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/network"
+	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
+	czas "github.com/ultherego/flotestro/internal/modules/time"
 )
 
 // ActionType jest typem operacji. Kazdy typ ma wersje kontraktu i wlasne
@@ -72,6 +76,13 @@ const (
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
 	ActionSSHHostKeyRotate ActionType = "ssh.hostkey.rotate"
 
+	// Czas i synchronizacja. Test nie zmienia hosta, ale wychodzi z niego
+	// zapytaniem do serwera czasu - i to on odpowiada na pytanie, czy nowe
+	// zrodlo w ogole dziala, zanim panel odbierze hostowi dzialajace.
+	ActionTimeSyncTest    ActionType = "time.sync.test"
+	ActionTimeConfigApply ActionType = "time.config.apply"
+	ActionTimezoneSet     ActionType = "time.timezone.set"
+
 	ActionSysctlPlan            ActionType = "sysctl.plan"
 	ActionSysctlEnsure          ActionType = "sysctl.ensure"
 	ActionKernelModuleLoad      ActionType = "kernel.module.load"
@@ -101,7 +112,11 @@ const (
 	ActionPackageHoldSet ActionType = "packages.hold.set"
 
 	ActionSystemReboot ActionType = "system.reboot"
-	ActionUnitStatus   ActionType = "unit.status"
+	// Wylaczenie hosta jest operacja, z ktorej panel nie potrafi go wyprowadzic:
+	// wlaczenie wymaga dostepu poza pasmem. Dlatego jest osobna operacja
+	// z wlasnym uprawnieniem, a nie trybem restartu.
+	ActionSystemShutdown ActionType = "system.shutdown"
+	ActionUnitStatus     ActionType = "unit.status"
 	// Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
 	// a nie jego stan teraz. Jednostka wlaczona i dzialajaca to dwie rozne
 	// rzeczy, wiec i operacje sa dwie.
@@ -252,6 +267,12 @@ func (a ActionType) RequiresFreshAuth() bool {
 // RequiresTargetConfirmation mowi, czy operator musi wpisac nazwe celu.
 // Klikniecie nie jest wystarczajaca decyzja przy operacji nieodwracalnej.
 func (a ActionType) RequiresTargetConfirmation() bool {
+	// Wylaczenie nie niszczy danych, ale jest nieodwracalne zdalnie: nikt nie
+	// wlaczy tego hosta przez panel. Lista hostow bywa dluga i podobna, wiec
+	// nazwa celu jest tu ta sama decyzja co przy operacji niszczacej.
+	if a == ActionSystemShutdown {
+		return true
+	}
 	return a.Risk() == RiskDestructive
 }
 
@@ -413,6 +434,21 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
 
+	// Test synchronizacji nie zmienia hosta, ale wysyla z niego pakiety do
+	// wskazanych serwerow: to jedyny sposob, zeby powiedziec cos o serwerze,
+	// ktorego host jeszcze nie uzywa.
+	ActionTimeSyncTest: {mutating: false, capability: "time", permission: "time.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 128 << 10},
+	// Zmiana zrodel czasu potrafi przestawic zegar skokiem, a wtedy bazy
+	// danych, tokeny i certyfikaty widza czas, ktory sie cofnal. Blokada
+	// jednostek jest tu potrzebna, bo zmiana konczy sie restartem demona.
+	ActionTimeConfigApply: {mutating: true, capability: "time", permission: "time.write",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockUnits},
+	// Strefa zmienia to, co host pokazuje ludziom i pisze do dziennika;
+	// nie zmienia chwili, w ktorej host zyje.
+	ActionTimezoneSet: {mutating: true, capability: "time", permission: "time.timezone.write",
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockNone},
+
 	// Odczyt ustawien jadra. Profil plus klucze wskazane w zleceniu; caly
 	// /proc/sys ma kilka tysiecy pozycji i jego enumeracja nie odpowiada
 	// na zadne pytanie.
@@ -493,6 +529,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
 		timeoutSeconds: 120, risk: RiskCritical},
+	// Wylaczenie hosta konczy sie stanem, ktorego panel nie cofnie: nikt nie
+	// wlaczy tej maszyny zdalnie. Blokada jednostek jest tu potrzebna, zeby
+	// zadna inna operacja nie zaczela sie w chwili, gdy host schodzi.
+	ActionSystemShutdown: {mutating: true, capability: "systemd", permission: "system.shutdown",
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits},
 	// Odczyt stanu jednostek jest niemutujacy i sluzy health checkom kampanii.
 	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -999,6 +1040,40 @@ type Payload struct {
 	Kernel          *KernelPayload          `json:"kernel,omitempty"`
 	File            *FilePayload            `json:"file,omitempty"`
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
+	Time            *TimePayload            `json:"time,omitempty"`
+	Power           *PowerPayload           `json:"power,omitempty"`
+}
+
+// PowerPayload opisuje wylaczenie hosta.
+type PowerPayload struct {
+	// Mode rozroznia wylaczenie zasilania od zatrzymania systemu.
+	Mode string `json:"mode,omitempty"`
+	// DelaySeconds daje czas na odeslanie wyniku, zanim host zniknie.
+	DelaySeconds uint32 `json:"delay_seconds,omitempty"`
+	// Reason jest wymagany: nikt nie wlaczy tego hosta zdalnie, wiec slad
+	// audytowy jest jedyna rzecza, ktora po operacji zostaje.
+	Reason string `json:"reason"`
+	// IgnoreInhibitors przechodzi nad blokadami logind. Domyslnie host
+	// z blokada odsyla ja jako powod odmowy.
+	IgnoreInhibitors bool `json:"ignore_inhibitors,omitempty"`
+}
+
+// TimePayload opisuje operacje na czasie hosta.
+type TimePayload struct {
+	// Servers to docelowe serwery czasu. Pusta lista przy zmianie
+	// konfiguracji jest bledem, a nie prosba o wyczyszczenie zrodel: host
+	// bez zrodla czasu rozjedzie sie po cichu.
+	Servers []string `json:"servers,omitempty"`
+	// Probe wskazuje serwery do sprawdzenia bez zmiany konfiguracji.
+	Probe    []string `json:"probe,omitempty"`
+	Timezone string   `json:"timezone,omitempty"`
+	// AllowStep jest zgoda na przestawienie zegara skokiem. Bez niej host
+	// odrzuca zmiane, ktora przesunelaby czas o wiecej niz prog.
+	AllowStep bool `json:"allow_step,omitempty"`
+	// EnableDropIn jest zgoda na dopisanie katalogu zrodel panelu do glownego
+	// pliku demona. Bez niej host, ktory zadnego nie wlacza, zostaje tylko do
+	// odczytu - panel nie dopisuje sie do cudzej konfiguracji po cichu.
+	EnableDropIn bool `json:"enable_dropin,omitempty"`
 }
 
 // FilePayload opisuje operacje na pliku konfiguracyjnym.
@@ -1511,6 +1586,46 @@ func Validate(action ActionType, payload Payload) error {
 			}
 		}
 		return nil
+
+	case ActionSystemShutdown:
+		if payload.Power == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu power", action)
+		}
+		switch payload.Power.Mode {
+		case "", power.TrybWylaczyc, power.TrybZatrzymac:
+		default:
+			return fmt.Errorf("nieobslugiwany tryb wylaczenia %q", payload.Power.Mode)
+		}
+		if err := power.WalidujOpoznienie(payload.Power.DelaySeconds); err != nil {
+			return err
+		}
+		return power.WalidujPowodWylaczenia(payload.Power.Reason)
+
+	case ActionTimeSyncTest:
+		if payload.Time == nil {
+			return nil
+		}
+		if len(payload.Time.Probe) > czas.LimitSerwerow {
+			return fmt.Errorf("test obejmuje najwyzej %d serwerow", czas.LimitSerwerow)
+		}
+		for _, serwer := range payload.Time.Probe {
+			if err := czas.WalidujSerwer(serwer); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case ActionTimeConfigApply:
+		if payload.Time == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu time", action)
+		}
+		return czas.WalidujSerwery(payload.Time.Servers)
+
+	case ActionTimezoneSet:
+		if payload.Time == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu time", action)
+		}
+		return czas.WalidujStrefe(payload.Time.Timezone)
 
 	case ActionSysctlPlan:
 		if payload.Kernel != nil {

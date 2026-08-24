@@ -107,6 +107,21 @@ const (
 	PermSSHRead          Permission = "ssh.read"
 	PermSSHConfigWrite   Permission = "ssh.config.write"
 	PermSSHHostKeyRotate Permission = "ssh.hostkey.rotate"
+	// Okno serwisowe nalezy do prowadzenia ruchu, a nie do zmiany hosta:
+	// deklaruje je ten, kto pilnuje kampanii i dyzuru.
+	PermHostMaintenanceWrite Permission = "host.maintenance.write"
+	// Wylaczenie hosta ma wlasne uprawnienie, osobne od restartu: po
+	// restarcie host wraca sam, po wylaczeniu ktos musi do niego pojsc.
+	PermSystemShutdown Permission = "system.shutdown"
+	// Czas. Odczyt i test zrodel sa czescia diagnozy - przesuniety zegar
+	// wyglada z zewnatrz jak zepsuty Kerberos albo zepsuty mTLS. Zmiana
+	// zrodel potrafi przestawic zegar skokiem, wiec ma wlasne uprawnienie.
+	PermTimeRead  Permission = "time.read"
+	PermTimeWrite Permission = "time.write"
+	// Strefa ma wlasne uprawnienie, bo jest inna decyzja niz zrodla czasu:
+	// zmienia to, co host pokazuje ludziom i pisze do dziennika, ale nie
+	// rusza chwili, w ktorej host zyje.
+	PermTimezoneWrite Permission = "time.timezone.write"
 	// Jadro. Ustawienie sysctl da sie cofnac tak samo, jak zostalo
 	// ustawione; blokada modulu ujawnia skutek dopiero przy starcie hosta,
 	// wiec ma osobne uprawnienie.
@@ -196,7 +211,8 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermFilePlan,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
+		PermTimeRead, PermFilePlan,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -219,12 +235,18 @@ var rolePermissions = map[Role][]Permission{
 		PermPackagesPlan,
 		// Operator planuje i prowadzi kampanie, ale ich nie zatwierdza.
 		PermCampaignRead, PermCampaignCreate, PermCampaignControl,
+		// Okno serwisowe jest narzedziem prowadzenia ruchu: to operator wie,
+		// ze ten host jest wlasnie w naprawie.
+		PermHostMaintenanceWrite,
 		// Operator widzi konta lokalne, ale ich nie zaklada: nadanie dostepu
 		// do hosta jest decyzja administracyjna, a nie czescia obslugi awarii.
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermFilePlan,
+		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
+		// Przesuniety zegar wyglada jak awaria katalogu albo certyfikatow,
+		// wiec test zrodel czasu nalezy do pierwszej diagnozy.
+		PermTimeRead, PermFilePlan,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -265,9 +287,10 @@ var rolePermissions = map[Role][]Permission{
 		PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
 		PermKernelRead, PermKernelSysctlWrite,
 		PermKernelModuleWrite, PermKernelModuleBlacklist,
+		PermTimeRead, PermTimeWrite, PermTimezoneWrite,
 		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
-		PermSystemReboot,
+		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,

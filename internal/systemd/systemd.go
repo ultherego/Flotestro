@@ -219,15 +219,33 @@ func ErrorCodeForExit(exitCode int) string {
 // kampania potrzebuje kilkunastu sekund na odeslanie wyniku przed zniknieciem
 // hosta z sieci.
 func ScheduleReboot(ctx context.Context, delay time.Duration, reason string) (stdout, stderr string, exitCode int, err error) {
+	return SchedulePower(ctx, delay, reason, "reboot")
+}
+
+// SchedulePower planuje restart albo wylaczenie hosta.
+//
+// Jednostka nosi nazwe panelu, wiec operator widzi na hoscie, ze to zlecenie
+// stad, a nie czyjes "shutdown -h" z konsoli.
+//
+// Blokady logind sa sprawdzane wyzej, w helperze: to on wie, czy operator
+// zgodzil sie je pominac, i to on ma o nich powiedziec w wyniku.
+func SchedulePower(ctx context.Context, delay time.Duration, reason, operacja string) (stdout, stderr string, exitCode int, err error) {
 	if delay < time.Second {
 		delay = time.Second
 	}
+	// Celujemy w jednostke docelowa, a nie w "systemctl poweroff": to drugie
+	// idzie przez logind, a logind pyta polkit o zgode. Proces w jednostce
+	// systemd nie ma sesji, wiec polkit nie ma kogo zapytac i odpowiada
+	// "Access denied" - jednostka gasnie kilkanascie sekund po tym, jak panel
+	// odeslal juz sukces. Uruchomienie jednostki docelowej idzie wprost do
+	// menedzera, ktory rootowi ufa, i wykonuje to samo zamkniecie systemu.
+	// Blokady logind sprawdza helper, zanim cokolwiek zaplanujemy.
 	args := []string{
 		"--collect",
 		"--on-active=" + strconv.Itoa(int(delay.Seconds())) + "s",
-		"--unit=flotestro-reboot",
+		"--unit=flotestro-" + operacja,
 		"--description=" + reason,
-		systemctlPath, "reboot",
+		systemctlPath, "start", "--job-mode=replace-irreversibly", operacja + ".target",
 	}
 	out, errOut, err := runTool(ctx, 30*time.Second, systemdRunPath, args...)
 	code := 0

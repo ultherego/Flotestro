@@ -21,6 +21,8 @@ const (
 	ModulStorage    = "storage"
 	ModulSSH        = "ssh"
 	ModulKernel     = "kernel"
+	ModulTime       = "time"
+	ModulPower      = "power"
 	ModulFiles      = "files"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
@@ -98,6 +100,10 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulSSH, "agent/sshd", powodSSH(f), konfiguracjaSSH(f)},
 
 		{ModulKernel, "agent/procfs+sysctl", powodJadra(f), jadro(f)},
+
+		{ModulTime, "agent/timedatectl+chronyc", powodCzasu(f), czasHosta(f)},
+
+		{ModulPower, "agent/procfs+logind", powodZasilania(f), zasilanie(f)},
 
 		{ModulFiles, "agent/managed-files", powodPlikow(f), plikiZarzadzane(f)},
 	}
@@ -248,6 +254,38 @@ func jadro(f Facts) any {
 		return struct{}{}
 	}
 	return f.Kernel
+}
+
+// powodCzasu zwraca powod, dla ktorego stanu czasu nie ustalono.
+func powodCzasu(f Facts) string {
+	if f.Time == nil {
+		return "this host did not report its clock"
+	}
+	return f.Time.UnavailableReason
+}
+
+// czasHosta zwraca stan czasu albo pusty obraz.
+func czasHosta(f Facts) any {
+	if f.Time == nil {
+		return struct{}{}
+	}
+	return f.Time
+}
+
+// powodZasilania zwraca powod, dla ktorego stanu startu nie ustalono.
+func powodZasilania(f Facts) string {
+	if f.Power == nil {
+		return "this host did not report its boot state"
+	}
+	return f.Power.UnavailableReason
+}
+
+// zasilanie zwraca stan startu albo pusty obraz.
+func zasilanie(f Facts) any {
+	if f.Power == nil {
+		return struct{}{}
+	}
+	return f.Power
 }
 
 // powodPlikow zwraca powod, dla ktorego stanu plikow nie ustalono.

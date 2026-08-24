@@ -26,9 +26,11 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/network"
+	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
+	czas "github.com/ultherego/flotestro/internal/modules/time"
 )
 
 // SchemaVersion opisuje wersje formatu raportu inventory zapisywanego w JSONB.
@@ -101,6 +103,12 @@ type Facts struct {
 	Files *files.Snapshot `json:"files,omitempty"`
 	// Kernel jest ustawieniami jadra i lista modulow.
 	Kernel *kernel.Snapshot `json:"kernel,omitempty"`
+	// Power jest stanem startu hosta: boot_id, czas dzialania i to, co
+	// wstrzymuje wylaczenie.
+	Power *power.Snapshot `json:"power,omitempty"`
+	// Time jest czasem hosta i stanem jego synchronizacji. Przesuniety zegar
+	// psuje Kerberosa i mTLS, wiec jest faktem o hoscie, a nie ciekawostka.
+	Time *czas.Snapshot `json:"time,omitempty"`
 	// SSH jest konfiguracja serwera sshd.
 	SSH *sshmodul.Snapshot `json:"ssh,omitempty"`
 	// Storage jest obrazem przestrzeni dyskowej hosta.

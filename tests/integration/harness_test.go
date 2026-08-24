@@ -152,19 +152,28 @@ func (h *harness) do(method, path string, body any, out any, wantStatus int) {
 }
 
 type hostView struct {
-	ID              string           `json:"id"`
-	Hostname        string           `json:"hostname"`
-	Site            string           `json:"site"`
-	Environment     string           `json:"environment"`
-	OSFamily        string           `json:"os_family"`
-	OSVersion       string           `json:"os_version"`
-	ConnectionState string           `json:"connection_state"`
-	LifecycleState  string           `json:"lifecycle_state"`
-	BootID          string           `json:"boot_id"`
-	FailedUnits     *int             `json:"failed_units"`
-	PendingUpdates  *int             `json:"pending_updates"`
-	RebootRequired  *bool            `json:"reboot_required"`
-	Capabilities    []hostCapability `json:"capabilities"`
+	ID              string `json:"id"`
+	Hostname        string `json:"hostname"`
+	Site            string `json:"site"`
+	Environment     string `json:"environment"`
+	OSFamily        string `json:"os_family"`
+	OSVersion       string `json:"os_version"`
+	ConnectionState string `json:"connection_state"`
+	LifecycleState  string `json:"lifecycle_state"`
+	BootID          string `json:"boot_id"`
+	FailedUnits     *int   `json:"failed_units"`
+	PendingUpdates  *int   `json:"pending_updates"`
+	RebootRequired  *bool  `json:"reboot_required"`
+	// Maintenance jest puste, gdy host nie jest w oknie serwisowym.
+	Maintenance  *oknoSerwisoweView `json:"maintenance"`
+	Capabilities []hostCapability   `json:"capabilities"`
+}
+
+// oknoSerwisoweView odwzorowuje okno serwisowe hosta.
+type oknoSerwisoweView struct {
+	Until  time.Time `json:"until"`
+	Reason string    `json:"reason"`
+	SetBy  string    `json:"set_by"`
 }
 
 // inventoryFragment odwzorowuje stan jednego modulu inventory.

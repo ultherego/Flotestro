@@ -18,6 +18,8 @@ import { Zapora } from "./pages/host/Zapora";
 import { Przestrzen } from "./pages/host/Przestrzen";
 import { SerwerSSH } from "./pages/host/SerwerSSH";
 import { Jadro } from "./pages/host/Jadro";
+import { Zegar } from "./pages/host/Zegar";
+import { Zasilanie } from "./pages/host/Zasilanie";
 import { Pliki } from "./pages/host/Pliki";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
@@ -104,6 +106,8 @@ export function App() {
             <Route path="storage" element={<Przestrzen />} />
             <Route path="ssh" element={<SerwerSSH />} />
             <Route path="kernel" element={<Jadro />} />
+            <Route path="time" element={<Zegar />} />
+            <Route path="power" element={<Zasilanie />} />
             <Route path="files" element={<Pliki />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />

@@ -155,6 +155,16 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 		}
 	}
 
+	// Stan startu i blokad wylaczenia. Restart nie konczy sie na wyslaniu
+	// polecenia, wiec panel potrzebuje boot_id i tego, co restart wstrzymuje.
+	zasilanie := ZbierzZasilanie(ctx, facts.BootID, facts.RebootRequired)
+	facts.Power = &zasilanie
+
+	// Czas czyta agent, a nie helper: timedatectl i chronyc odpowiadaja
+	// kazdemu, a kazde przejscie przez roota trzeba uzasadnic.
+	zegar := ZbierzCzas(ctx)
+	facts.Time = &zegar
+
 	// Konfiguracje sshd czyta helper: "sshd -T" wymaga roota, bo serwer
 	// czyta przy okazji klucze hosta.
 	if caps.Available(CapSSHD) && sshProbe != nil {

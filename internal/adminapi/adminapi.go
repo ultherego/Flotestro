@@ -148,6 +148,9 @@ func (s *Server) Routes() http.Handler {
 	// Operacje typowane: plan, zatwierdzenie, wykonanie, wynik.
 	mux.HandleFunc("GET /api/v1/actions", s.handleListActions)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/operations", s.handleCreateOperation)
+	// Okno serwisowe zmienia to, co panel o hoscie sadzi, a nie stan hosta,
+	// wiec ma wlasny punkt wejscia zamiast miejsca w kolejce zadan.
+	mux.HandleFunc("POST /api/v1/hosts/{id}/maintenance", s.handleSetMaintenance)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)

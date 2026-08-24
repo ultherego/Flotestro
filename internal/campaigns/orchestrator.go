@@ -156,6 +156,14 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		if host.ConnectionState != "online" {
 			continue
 		}
+		// Okno serwisowe znaczy "ktos przy tej maszynie pracuje". Kampania
+		// nie czeka na jego koniec, tylko omija host i mowi o tym wprost:
+		// inaczej fala staloby w miejscu przez host, ktory lezy w serwisie.
+		if host.Maintenance.Trwa(time.Now().UTC()) {
+			o.finishTarget(ctx, campaign, target, TargetSkipped, "maintenance",
+				"host jest w oknie serwisowym do "+host.Maintenance.Until.Format(time.RFC3339))
+			continue
+		}
 
 		jobID, err := o.createJob(ctx, campaign, target, host)
 		if err != nil {

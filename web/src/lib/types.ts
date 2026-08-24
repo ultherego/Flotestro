@@ -54,6 +54,9 @@ export type Host = {
   connection_state: "online" | "offline" | "stale" | "unknown";
   last_seen_at?: string;
   boot_id?: string;
+  // Okno serwisowe: puste pole oznacza host poza oknem, a nie okno o zerowej
+  // dlugosci. Kampanie omijaja host w oknie, a alerty z niego nie budza nikogo.
+  maintenance?: { until: string; reason?: string; set_by?: string; set_at?: string };
   // Puste wartosci oznaczaja stan nieustalony, nie zero.
   reboot_required: boolean | null;
   failed_units: number | null;
