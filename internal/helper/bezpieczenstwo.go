@@ -4,17 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/security"
-	"github.com/ultherego/flotestro/internal/systemd"
 )
 
-// jednostkaAudytu jest jednostka demona audytu. Nazwa jest ta sama na obu
-// rodzinach systemow, wiec nie ma tu czego wykrywac.
-const jednostkaAudytu = "auditd.service"
+// nazwyFaktow tlumaczy wyliczenie z protokolu na nazwy faktow modulu.
+//
+// Tlumaczenie istnieje po to, zeby helper nie przyjmowal dowolnego napisu:
+// zakres jego pracy jest zamknieta lista, a nie tekstem od agenta.
+var nazwyFaktow = map[helperv1.SecurityRequest_Fact]string{
+	helperv1.SecurityRequest_FACT_APPARMOR_PROFILES: security.FaktProfileAppArmor,
+	helperv1.SecurityRequest_FACT_AUDIT_RULES:       security.FaktRegulyAudytu,
+	helperv1.SecurityRequest_FACT_SECURE_BOOT:       security.FaktSecureBoot,
+	helperv1.SecurityRequest_FACT_SOCKET_OWNERS:     security.FaktWlascicieleGniazd,
+}
 
 // applySecurity obsluguje operacje modulu bezpieczenstwa.
 func (s *Server) applySecurity(ctx context.Context, request *helperv1.HelperRequest,
@@ -27,151 +34,43 @@ func (s *Server) applySecurity(ctx context.Context, request *helperv1.HelperRequ
 	defer cancel()
 
 	switch action.GetOperation() {
-	case helperv1.SecurityRequest_OPERATION_READ:
-		return odpowiedzBezpieczenstwa(zbierzBezpieczenstwo(actionCtx), "")
+	case helperv1.SecurityRequest_OPERATION_FACTS:
+		return zbierzFakty(actionCtx, action.GetFacts())
 	case helperv1.SecurityRequest_OPERATION_SELINUX_MODE:
 		return ustawTrybMAC(actionCtx, action.GetMode())
+	case helperv1.SecurityRequest_OPERATION_AUDIT_RELOAD:
+		return przeladujReguly(actionCtx)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja modulu bezpieczenstwa")
 }
 
-// zbierzBezpieczenstwo czyta stan ochronny hosta.
+// zbierzFakty odczytuje wylacznie te fakty, o ktore agent poprosil.
 //
-// Odczyt idzie przez helpera, bo prawie wszystko w nim wymaga roota: profile
-// AppArmora leza w securityfs, reguly audytu czyta tylko auditctl, zmienne EFI
-// sa dostepne wylacznie dla roota, a wlascicieli gniazd nasluchujacych widzi
-// tylko ten, kto widzi cudze procesy.
-func zbierzBezpieczenstwo(ctx context.Context) security.Snapshot {
-	snapshot := security.Snapshot{ObservedAt: time.Now().UTC()}
-	snapshot.MAC = stanMAC()
-	snapshot.Audit = stanAudytu(ctx)
-
-	if tresc, err := os.ReadFile(security.PlikFIPS); err == nil {
-		wlaczony := strings.TrimSpace(string(tresc)) == "1"
-		snapshot.FIPSEnabled = &wlaczony
+// Modul nie idzie przez roota w calosci: wiekszosc obrazu agent czyta sam,
+// a tutaj trafia tylko to, czego bez roota nie widac - profile AppArmora
+// w securityfs, reguly audytu, zmienna EFI i wlasciciele gniazd.
+func zbierzFakty(ctx context.Context, zadane []helperv1.SecurityRequest_Fact) *helperv1.HelperResponse {
+	if len(zadane) == 0 {
+		return reject(ErrorMalformed, "zlecenie nie wskazuje zadnego faktu")
 	}
-	if tresc, err := os.ReadFile(security.PlikLockdown); err == nil {
-		snapshot.Lockdown = security.ParsujLockdown(string(tresc))
-	}
-	snapshot.SecureBoot, snapshot.SecureBootReason = stanSecureBoot()
-	snapshot.Listening, snapshot.ListeningKnown = gniazdaNasluchujace(ctx)
-	return snapshot
-}
-
-// stanMAC ustala, ktory system obowiazkowej kontroli dostepu chroni host.
-func stanMAC() security.Mandatory {
-	// SELinux rozpoznajemy po jego systemie plikow, a nie po pliku
-	// konfiguracyjnym: konfiguracja bywa zostawiona na hoscie, na ktorym
-	// SELinux jest wylaczony w jadrze, i wygladalaby na ochrone.
-	konfiguracja, _ := os.ReadFile(security.KonfiguracjaMAC)
-	trybZKonfiguracji, polityka := security.ParsujKonfiguracjeSELinux(string(konfiguracja))
-
-	if exists(security.KatalogSELinux) {
-		mac := security.Mandatory{
-			System:         security.SystemSELinux,
-			ConfiguredMode: trybZKonfiguracji,
-			Policy:         polityka,
+	nazwy := make([]string, 0, len(zadane))
+	for _, fakt := range zadane {
+		nazwa, znany := nazwyFaktow[fakt]
+		if !znany {
+			return reject(ErrorMalformed, "nieznany fakt "+fakt.String())
 		}
-		if tresc, err := os.ReadFile(security.PlikWymuszania); err == nil {
-			mac.Mode = security.ParsujTrybWymuszania(string(tresc))
-		} else {
-			mac.Reason = "nie odczytano trybu: " + err.Error()
-		}
-		return mac
-	}
-	if trybZKonfiguracji != "" {
-		// Konfiguracja mowi "enforcing", a jadro nie ma SELinuksa w ogole.
-		// To jest dokladnie ten przypadek, ktory wyglada na ochrone.
-		return security.Mandatory{
-			System: security.SystemSELinux, Mode: security.TrybDisabled,
-			ConfiguredMode: trybZKonfiguracji, Policy: polityka,
-			Reason: "SELinux jest wylaczony w jadrze mimo wpisu w konfiguracji",
-		}
+		nazwy = append(nazwy, nazwa)
 	}
 
-	if tresc, err := os.ReadFile(security.PlikAppArmor); err == nil {
-		if strings.TrimSpace(string(tresc)) != "Y" {
-			return security.Mandatory{
-				System: security.SystemAppArmor, Mode: security.TrybDisabled,
-				Reason: "AppArmor jest obecny, ale wylaczony w jadrze",
-			}
-		}
-		mac := security.Mandatory{System: security.SystemAppArmor, Mode: security.TrybEnforcing}
-		profile, err := os.ReadFile(security.ProfileAppArmor)
-		if err != nil {
-			mac.Reason = "nie odczytano profili: " + err.Error()
-			return mac
-		}
-		wymuszane, skargi := security.ParsujProfileAppArmor(string(profile))
-		mac.ProfilesEnforcing = &wymuszane
-		mac.ProfilesComplain = &skargi
-		return mac
-	}
-	return security.Mandatory{Reason: "ten host nie ma ani SELinuksa, ani AppArmora"}
-}
-
-// stanAudytu opisuje demona audytu.
-func stanAudytu(ctx context.Context) security.Audyt {
-	audyt := security.Audyt{Present: exists(security.SciezkaAuditctl)}
-	stan, err := systemd.Show(ctx, jednostkaAudytu)
-	if err == nil && stan.LoadState != "not-found" {
-		aktywny := stan.ActiveState == "active"
-		audyt.Active = &aktywny
-		audyt.Present = true
-	}
-	if !audyt.Present {
-		audyt.Reason = "ten host nie ma demona audytu"
-		return audyt
-	}
-	if audyt.Active == nil || !*audyt.Active {
-		// Reguly czyta jadro przez auditctl; zatrzymany demon nie znaczy
-		// jeszcze, ze regul nie ma, ale ich odczyt bywa wtedy pusty.
-		return audyt
-	}
-	wyjscie, err := wyjscieNarzedzia(ctx, security.SciezkaAuditctl, "-l")
+	dodatki := security.ZbierzUzupelnienie(ctx, wyjscieNarzedzia, nazwy)
+	zakodowane, err := json.Marshal(dodatki)
 	if err != nil {
-		audyt.Reason = "nie odczytano regul: " + err.Error()
-		return audyt
+		return reject(ErrorExecFailed, err.Error())
 	}
-	reguly := security.ParsujReguly(wyjscie)
-	audyt.Rules = &reguly
-	return audyt
-}
-
-// stanSecureBoot czyta zmienna EFI albo mowi, dlaczego jej nie ma.
-func stanSecureBoot() (*bool, string) {
-	if !exists(security.KatalogEFI) {
-		// Pytanie o secure boot na hoscie startujacym w trybie BIOS nie ma
-		// odpowiedzi. "Wylaczony" bylby tu falszem.
-		return nil, "host wstaje w trybie BIOS, wiec secure boot nie ma zastosowania"
+	return &helperv1.HelperResponse{
+		Accepted:       true,
+		SecurityResult: &helperv1.SecurityResult{Facts: zakodowane},
 	}
-	dane, err := os.ReadFile(security.KatalogEFIVars + "/" + security.ZmiennaSecureBoot)
-	if err != nil {
-		return nil, "nie odczytano zmiennej EFI: " + err.Error()
-	}
-	stan := security.ParsujSecureBoot(dane)
-	if stan == nil {
-		return nil, "zmienna EFI ma nieoczekiwany rozmiar"
-	}
-	return stan, ""
-}
-
-// gniazdaNasluchujace wylicza to, czym host wystaje na zewnatrz.
-func gniazdaNasluchujace(ctx context.Context) ([]security.Nasluch, bool) {
-	sciezka := security.SciezkaSS
-	if !exists(sciezka) {
-		sciezka = security.SciezkaSSAlt
-	}
-	if !exists(sciezka) {
-		return nil, false
-	}
-	// -H pomija naglowek, -p dokłada wlasciciela gniazda, -n zostawia porty
-	// liczbami: nazwa uslugi z /etc/services opisuje zwyczaj, a nie fakt.
-	wyjscie, err := wyjscieNarzedzia(ctx, sciezka, "-tulpnH")
-	if err != nil {
-		return nil, false
-	}
-	return security.ParsujNasluch(wyjscie), true
 }
 
 // ustawTrybMAC przelacza SELinuksa miedzy enforcing i permissive.
@@ -179,7 +78,7 @@ func ustawTrybMAC(ctx context.Context, tryb string) *helperv1.HelperResponse {
 	if err := security.WalidujTryb(tryb); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	stan := stanMAC()
+	stan := security.StanMAC()
 	if stan.System != security.SystemSELinux {
 		return reject(ErrorUnsupported, "ten host nie ma SELinuksa")
 	}
@@ -209,12 +108,45 @@ func ustawTrybMAC(ctx context.Context, tryb string) *helperv1.HelperResponse {
 		komunikat += " i po restarcie"
 	}
 
-	po := zbierzBezpieczenstwo(ctx)
 	// Zapis nie znaczy skutek: pytamy jadro, w jakim trybie jest teraz.
-	if po.MAC.Mode != tryb {
-		return odpowiedzBezpieczenstwa(po, "polecenie wykonane, ale jadro zglasza tryb "+po.MAC.Mode)
+	po := security.StanMAC()
+	if po.Mode != tryb {
+		return &helperv1.HelperResponse{
+			Accepted: true,
+			SecurityResult: &helperv1.SecurityResult{
+				Message: "polecenie wykonane, ale jadro zglasza tryb " + po.Mode,
+			},
+		}
 	}
-	return odpowiedzBezpieczenstwa(po, komunikat)
+	return &helperv1.HelperResponse{
+		Accepted:       true,
+		SecurityResult: &helperv1.SecurityResult{Message: komunikat},
+	}
+}
+
+// przeladujReguly wczytuje reguly audytu z plikow do jadra.
+//
+// Idziemy przez augenrules, a nie przez restart jednostki: auditd na czesci
+// dystrybucji ma RefuseManualStop i restart konczy sie odmowa, ktora wyglada
+// jak blad panelu, a jest polityka dystrybucji.
+func przeladujReguly(ctx context.Context) *helperv1.HelperResponse {
+	if !exists(security.SciezkaAugenrules) {
+		return reject(ErrorUnsupported, "ten host nie ma narzedzia augenrules")
+	}
+	wyjscie, err := wyjscieNarzedzia(ctx, security.SciezkaAugenrules, "--load")
+	if err != nil {
+		return reject(ErrorExecFailed, "augenrules: "+err.Error()+" "+wyjscie)
+	}
+
+	// Zapis nie znaczy skutek: pytamy jadro, ile regul zna teraz.
+	komunikat := "reguly przeladowane"
+	if wynik, err := wyjscieNarzedzia(ctx, security.SciezkaAuditctl, "-l"); err == nil {
+		komunikat += "; jadro zna " + strconv.Itoa(security.ParsujReguly(wynik)) + " regul"
+	}
+	return &helperv1.HelperResponse{
+		Accepted:       true,
+		SecurityResult: &helperv1.SecurityResult{Message: komunikat},
+	}
 }
 
 // zapiszTrybWKonfiguracji podmienia wartosc SELINUX= w pliku konfiguracyjnym.
@@ -235,15 +167,4 @@ func zapiszTrybWKonfiguracji(tryb string) error {
 		linie = append(linie, "SELINUX="+tryb)
 	}
 	return zapiszPlikJadra(security.KonfiguracjaMAC, strings.Join(linie, "\n"), 0o644)
-}
-
-func odpowiedzBezpieczenstwa(snapshot security.Snapshot, komunikat string) *helperv1.HelperResponse {
-	zakodowany, err := json.Marshal(snapshot)
-	if err != nil {
-		return reject(ErrorExecFailed, err.Error())
-	}
-	return &helperv1.HelperResponse{
-		Accepted:       true,
-		SecurityResult: &helperv1.SecurityResult{Snapshot: zakodowany, Message: komunikat},
-	}
 }

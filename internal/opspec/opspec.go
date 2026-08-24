@@ -84,6 +84,10 @@ const (
 	// modulu, ktory za dana rzecz odpowiada.
 	ActionSecurityScan   ActionType = "security.scan"
 	ActionSELinuxModeSet ActionType = "selinux.mode.set"
+	// Przeladowanie regul audytu jest osobna operacja, bo regula zapisana
+	// i niezaladowana nie notuje niczego, a jednostka auditd na czesci
+	// dystrybucji odmawia recznego restartu.
+	ActionAuditRulesReload ActionType = "security.audit.reload"
 
 	// Czas i synchronizacja. Test nie zmienia hosta, ale wychodzi z niego
 	// zapytaniem do serwera czasu - i to on odpowiada na pytanie, czy nowe
@@ -452,6 +456,10 @@ var actionSpecs = map[ActionType]actionSpec{
 	// reki. Zmiana jest odwracalna, ale w miedzyczasie nie chroni nic.
 	ActionSELinuxModeSet: {mutating: true, capability: "security.mac", permission: "security.mac.write",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+	// Przeladowanie regul audytu zmienia to, co host notuje. Jest odwracalne
+	// i lokalne, ale nie jest odczytem.
+	ActionAuditRulesReload: {mutating: true, capability: "security.audit", permission: "security.audit.reload",
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
 
 	// Test synchronizacji nie zmienia hosta, ale wysyla z niego pakiety do
 	// wskazanych serwerow: to jedyny sposob, zeby powiedziec cos o serwerze,
@@ -1613,7 +1621,7 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return nil
 
-	case ActionSecurityScan:
+	case ActionSecurityScan, ActionAuditRulesReload:
 		return nil
 
 	case ActionSELinuxModeSet:

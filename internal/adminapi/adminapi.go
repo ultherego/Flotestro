@@ -26,6 +26,7 @@ import (
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/remediation"
 )
 
 // Server grupuje zaleznosci REST API.
@@ -62,7 +63,13 @@ type Server struct {
 	trust *pki.Trust
 	// events rozglasza zmiany stanu operacji do otwartych ekranow.
 	events *events.Bus
+	// remediation trzyma plany naprawy. Bez niego modul bezpieczenstwa
+	// pokazuje ustalenia, ale nie zaklada planow.
+	remediation *remediation.Store
 }
+
+// SetRemediation podlacza magazyn planow naprawy.
+func (s *Server) SetRemediation(store *remediation.Store) { s.remediation = store }
 
 // SetEvents podlacza magistrale zdarzen. Bez niej strumienie postepu sa
 // nieczynne, a panel dziala jak dotad - po odswiezeniu strony.
@@ -157,7 +164,9 @@ func (s *Server) Routes() http.Handler {
 	// Zgodnosc z profilem hardeningu liczy panel z faktow, ktore host i tak
 	// zglasza; naprawa jest planem i osobnymi zadaniami modulow.
 	mux.HandleFunc("GET /api/v1/hosts/{id}/security", s.handleHostSecurity)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/security/remediation", s.handleListRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation", s.handleHostRemediation)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)

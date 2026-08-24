@@ -26,9 +26,17 @@ const (
 	KatalogEFI        = "/sys/firmware/efi"
 	KatalogEFIVars    = "/sys/firmware/efi/efivars"
 	SciezkaSetenforce = "/usr/sbin/setenforce"
+	// Augenrules sklada reguly z katalogu rules.d i laduje je do jadra.
+	// To jest droga, ktora auditd sam przewiduje: jednostka demona na czesci
+	// dystrybucji odmawia recznego restartu.
+	SciezkaAugenrules = "/usr/sbin/augenrules"
 	SciezkaAuditctl   = "/usr/sbin/auditctl"
-	SciezkaSS         = "/usr/bin/ss"
-	SciezkaSSAlt      = "/usr/sbin/ss"
+	// Reguly audytu leza w plikach, ktore czyta tylko root - a plik dopisany
+	// i niezaladowany opisuje audyt, ktorego nie ma.
+	KatalogRegulAudytu = "/etc/audit/rules.d"
+	PlikRegulAudytu    = "/etc/audit/audit.rules"
+	SciezkaSS          = "/usr/bin/ss"
+	SciezkaSSAlt       = "/usr/sbin/ss"
 
 	// ZmiennaSecureBoot jest nazwa zmiennej EFI ze stanem secure boot.
 	// Sufiks jest identyfikatorem globalnej przestrzeni nazw EFI.
@@ -80,14 +88,31 @@ func (m Mandatory) Chroni() bool {
 }
 
 // Audyt opisuje stan demona audytu.
+//
+// Reguly zaladowane i reguly skonfigurowane sa dwoma polami, bo bywaja rozne:
+// plik regul dopisany i niezaladowany opisuje audyt, ktorego nie ma, a sama
+// liczba regul nie mowi, czy jadro je zna.
 type Audyt struct {
 	Present bool  `json:"present"`
 	Active  *bool `json:"active"`
-	// Rules jest liczba regul zaladowanych do jadra. Pusty wskaznik oznacza
-	// odczyt, ktory sie nie powiodl, a nie brak regul.
-	Rules  *int   `json:"rules"`
-	Reason string `json:"reason,omitempty"`
+	// RulesLoaded jest liczba regul, ktore zna jadro; RulesConfigured -
+	// liczba regul w plikach. Pusty wskaznik oznacza odczyt, ktory sie nie
+	// powiodl, a nie brak regul.
+	RulesLoaded     *int   `json:"rules_loaded"`
+	RulesConfigured *int   `json:"rules_configured"`
+	Reason          string `json:"reason,omitempty"`
 }
+
+// Zasieg gniazda. Panel nie orzeka, czy usluga jest widoczna z internetu -
+// tego nie wie ani host, ani panel: adres prywatny bywa dostepny w calej sieci
+// firmy, a publiczny bywa za zapora brzegowa. Nazywamy wiec to, co widac:
+// czy gniazdo stoi na petli zwrotnej, na konkretnym adresie hosta, czy na
+// wszystkich interfejsach naraz.
+const (
+	ZasiegPetla      = "loopback"
+	ZasiegAdresHosta = "host-network"
+	ZasiegWszystkie  = "all-interfaces"
+)
 
 // Nasluch to jedno gniazdo nasluchujace na hoscie.
 type Nasluch struct {
@@ -96,10 +121,14 @@ type Nasluch struct {
 	Port     int    `json:"port"`
 	Process  string `json:"process,omitempty"`
 	PID      uint32 `json:"pid,omitempty"`
-	// Exposed oznacza gniazdo widoczne spoza hosta. Usluga na petli zwrotnej
-	// i ta sama usluga na adresie zewnetrznym to dwie rozne sytuacje.
-	Exposed bool `json:"exposed"`
+	// Reach nazywa zasieg gniazda. Usluga na petli zwrotnej i ta sama usluga
+	// na adresie hosta to dwie rozne sytuacje - ale zadna z nich nie jest
+	// automatycznie "widoczna z internetu".
+	Reach string `json:"reach"`
 }
+
+// PozaPetla mowi, czy gniazdo stoi poza petla zwrotna.
+func (n Nasluch) PozaPetla() bool { return n.Reach != ZasiegPetla && n.Reach != "" }
 
 // Snapshot to obraz stanu ochronnego hosta.
 type Snapshot struct {
@@ -116,20 +145,36 @@ type Snapshot struct {
 	// w ogole dalo sie ja odczytac.
 	Listening      []Nasluch `json:"listening,omitempty"`
 	ListeningKnown bool      `json:"listening_known"`
+	// OwnersKnown mowi, czy przy gniazdach jest wlasciciel. Bez roota lista
+	// gniazd jest pelna, ale bezimienna - i to dwie rozne odpowiedzi.
+	OwnersKnown bool `json:"owners_known"`
+	// Missing wylicza fakty, ktorych nie udalo sie zebrac, wraz z powodem.
+	// Sprawdzenia zamieniaja je na stan nieustalony z kodem powodu, zamiast
+	// zgadywac wartosc.
+	Missing map[string]string `json:"missing,omitempty"`
 
 	ObservedAt        time.Time `json:"observed_at"`
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// Wystawione wylicza gniazda widoczne spoza hosta.
-func (s Snapshot) Wystawione() []Nasluch {
-	var wystawione []Nasluch
+// PozaPetla wylicza gniazda stojace poza petla zwrotna.
+func (s Snapshot) PozaPetla() []Nasluch {
+	var poza []Nasluch
 	for _, gniazdo := range s.Listening {
-		if gniazdo.Exposed {
-			wystawione = append(wystawione, gniazdo)
+		if gniazdo.PozaPetla() {
+			poza = append(poza, gniazdo)
 		}
 	}
-	return wystawione
+	return poza
+}
+
+// WedlugZasiegu liczy gniazda w kazdej klasie zasiegu.
+func (s Snapshot) WedlugZasiegu() map[string]int {
+	liczby := map[string]int{}
+	for _, gniazdo := range s.Listening {
+		liczby[gniazdo.Reach]++
+	}
+	return liczby
 }
 
 // WalidujTryb sprawdza tryb SELinuksa zlecony przez panel.
@@ -205,6 +250,22 @@ func ParsujProfileAppArmor(tresc string) (wymuszane, skargi int) {
 	return wymuszane, skargi
 }
 
+// ParsujRegulyZPliku liczy reguly zapisane w pliku.
+//
+// Komentarze i puste linie nie sa regulami; "-D" kasuje wszystkie i tez nia
+// nie jest, choc wyglada jak wpis.
+func ParsujRegulyZPliku(tresc string) int {
+	reguly := 0
+	for _, linia := range strings.Split(tresc, "\n") {
+		linia = strings.TrimSpace(linia)
+		if linia == "" || strings.HasPrefix(linia, "#") || linia == "-D" {
+			continue
+		}
+		reguly++
+	}
+	return reguly
+}
+
 // ParsujReguly czyta wyjscie "auditctl -l".
 func ParsujReguly(wyjscie string) int {
 	reguly := 0
@@ -265,7 +326,7 @@ func ParsujNasluch(wyjscie string) []Nasluch {
 			Protocol: protokol,
 			Address:  adres,
 			Port:     port,
-			Exposed:  WystawionyAdres(adres),
+			Reach:    Zasieg(adres),
 		}
 		if len(pola) >= 7 {
 			gniazdo.Process, gniazdo.PID = wlascicielGniazda(strings.Join(pola[6:], " "))
@@ -293,20 +354,57 @@ func rozdzielAdres(pole string) (string, int, bool) {
 	return adres, port, true
 }
 
-// WystawionyAdres mowi, czy gniazdo pod tym adresem jest widoczne spoza hosta.
-func WystawionyAdres(adres string) bool {
+// Zasieg klasyfikuje adres, pod ktorym stoi gniazdo.
+//
+// Klasyfikacja konczy sie na tym, co host o sobie wie. "Widoczne z internetu"
+// jest wnioskiem o trasach i zaporach brzegowych, ktorego ani host, ani panel
+// nie moga wyciagnac z samego adresu.
+func Zasieg(adres string) string {
 	switch {
 	case adres == "":
-		return false
+		return ""
 	case adres == "*", adres == "0.0.0.0", adres == "::":
-		return true
+		return ZasiegWszystkie
 	case strings.HasPrefix(adres, "127."), adres == "::1":
-		return false
-	// Adres link-local nie wychodzi poza segment, ale jest widoczny dla
-	// kazdego, kto w nim stoi - wiec liczy sie jako wystawiony.
+		return ZasiegPetla
 	default:
-		return true
+		return ZasiegAdresHosta
 	}
+}
+
+// KluczGniazda identyfikuje gniazdo w odpowiedzi helpera o wlascicieli.
+func KluczGniazda(protokol, adres string, port int) string {
+	return protokol + "|" + adres + "|" + strconv.Itoa(port)
+}
+
+// Nazwy faktow, ktorych nie da sie odczytac bez roota. Helper dostaje ich
+// liste, a nie polecenie do wykonania: zakres jego pracy jest wyliczony.
+const (
+	FaktProfileAppArmor   = "apparmor_profiles"
+	FaktRegulyAudytu      = "audit_rules"
+	FaktSecureBoot        = "secure_boot"
+	FaktWlascicieleGniazd = "socket_owners"
+)
+
+// Wlasciciel to proces trzymajacy gniazdo.
+type Wlasciciel struct {
+	Process string `json:"process,omitempty"`
+	PID     uint32 `json:"pid,omitempty"`
+}
+
+// Uzupelnienie to fakty zebrane przez helpera na wyrazne zadanie.
+//
+// Puste pole oznacza fakt, o ktory nie pytano albo ktorego nie udalo sie
+// odczytac - powod jest wtedy w Errors, pod nazwa faktu.
+type Uzupelnienie struct {
+	ProfilesEnforcing *int                  `json:"profiles_enforcing,omitempty"`
+	ProfilesComplain  *int                  `json:"profiles_complain,omitempty"`
+	RulesLoaded       *int                  `json:"rules_loaded,omitempty"`
+	RulesConfigured   *int                  `json:"rules_configured,omitempty"`
+	SecureBoot        *bool                 `json:"secure_boot,omitempty"`
+	SecureBootReason  string                `json:"secure_boot_reason,omitempty"`
+	SocketOwners      map[string]Wlasciciel `json:"socket_owners,omitempty"`
+	Errors            map[string]string     `json:"errors,omitempty"`
 }
 
 // wlascicielGniazda czyta pole users:(("nazwa",pid=N,fd=M)).

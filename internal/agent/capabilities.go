@@ -42,6 +42,9 @@ const (
 	// jest osobna zdolnoscia, bo host bez SELinuksa nie ma czego przelaczac.
 	CapSecurity    = "security"
 	CapSecurityMAC = "security.mac"
+	// Audyt jest osobna zdolnoscia: host bez auditd nie ma czego przeladowac,
+	// a przeladowanie idzie przez augenrules, nie przez restart jednostki.
+	CapSecurityAudit = "security.audit"
 	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
 	CapFiles = "files.managed"
 )
@@ -205,6 +208,7 @@ func DetectCapabilities() Capabilities {
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
 	timedatectl := exists(czas.SciezkaTimedatectl)
 	selinux := isDir(security.KatalogSELinux) && exists(security.SciezkaSetenforce)
+	audyt := exists(security.SciezkaAuditctl) && exists(security.SciezkaAugenrules)
 	apparmor := exists(security.PlikAppArmor)
 	chrony := exists(czas.SciezkaChronyc)
 	// Timesyncd bywa zainstalowany i zamaskowany, gdy host ma chronyego.
@@ -288,11 +292,18 @@ func DetectCapabilities() Capabilities {
 			// o hoscie, a nie brakiem modulu.
 			Available: true,
 			Features: map[string]bool{
-				"selinux":  selinux,
-				"apparmor": apparmor,
-				"auditd":   exists(security.SciezkaAuditctl),
-				"sockets":  exists(security.SciezkaSS) || exists(security.SciezkaSSAlt),
+				"selinux":    selinux,
+				"apparmor":   apparmor,
+				"auditd":     exists(security.SciezkaAuditctl),
+				"augenrules": exists(security.SciezkaAugenrules),
+				"sockets":    exists(security.SciezkaSS) || exists(security.SciezkaSSAlt),
 			},
+		},
+		{
+			Name:      CapSecurityAudit,
+			Version:   wersjaAdaptera,
+			Available: audyt,
+			Reason:    powod(audyt, "this host has no auditd rule tooling"),
 		},
 		{
 			Name:      CapSecurityMAC,

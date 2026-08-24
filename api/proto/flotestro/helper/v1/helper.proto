@@ -523,15 +523,31 @@ message SshResult {
 message SecurityRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    OPERATION_READ = 1;
+    // Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
+    // ani "uruchom polecenie": dostaje liste nazw faktow, ktore umie zebrac.
+    OPERATION_FACTS = 1;
     OPERATION_SELINUX_MODE = 2;
+    // Przeladowanie regul audytu z plikow do jadra. Osobna operacja, bo
+    // jednostka auditd na czesci dystrybucji odmawia recznego restartu.
+    OPERATION_AUDIT_RELOAD = 3;
+  }
+  // Fact wylicza to, czego nie da sie odczytac bez roota. Reszte obrazu
+  // agent sklada sam, bez przechodzenia przez helpera.
+  enum Fact {
+    FACT_UNSPECIFIED = 0;
+    FACT_APPARMOR_PROFILES = 1;
+    FACT_AUDIT_RULES = 2;
+    FACT_SECURE_BOOT = 3;
+    FACT_SOCKET_OWNERS = 4;
   }
   Operation operation = 1;
   string mode = 2;
+  repeated Fact facts = 3;
 }
 
 message SecurityResult {
-  bytes snapshot = 1;
+  // Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
+  bytes facts = 1;
   string message = 2;
 }
 

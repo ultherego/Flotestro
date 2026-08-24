@@ -43,8 +43,10 @@ type Ustalenie = {
   title: string;
   severity: string;
   rationale: string;
+  applicable: boolean;
   passed: boolean;
   unknown: boolean;
+  reason_code?: string;
   expected: string;
   observed: string;
   evidence?: string;
@@ -57,11 +59,33 @@ type Ustalenie = {
 type Raport = {
   findings: Ustalenie[];
   plan_hash: string;
+  plan_hash_version: number;
   generated_at: string;
   counts: Record<string, number>;
 };
 
-type KrokNaprawy = { check_id: string; action?: string; job_id?: string; state?: string; skipped?: string };
+type KrokPlanu = {
+  position: number;
+  check_id: string;
+  action_type: string;
+  lock_class?: string;
+  requires_reboot: boolean;
+  job_id?: string;
+  state: string;
+  reason?: string;
+};
+
+type PlanNaprawy = {
+  id: string;
+  plan_hash: string;
+  reason: string;
+  created_by: string;
+  stop_on_failure: boolean;
+  state: string;
+  created_at: string;
+  finished_at?: string;
+  steps?: KrokPlanu[];
+};
 
 const nieznane = <span className="znacznik nieznany">unknown</span>;
 
@@ -72,6 +96,9 @@ function flaga(wartosc?: boolean | null) {
 
 /** Waga mowi, co sie stanie, gdy nikt nic nie zrobi - nie jak trudno naprawic. */
 function znacznikWagi(ustalenie: Ustalenie) {
+  // "Nie dotyczy" jest osobna odpowiedzia: host bez SELinuksa nie przegrywa
+  // sprawdzenia, ktore go wymaga, i nie zalicza go po cichu.
+  if (!ustalenie.applicable) return <span className="znacznik nieznany">n/a</span>;
   if (ustalenie.unknown) return <span className="znacznik nieznany">unknown</span>;
   if (ustalenie.passed) return <span className="znacznik ok">passed</span>;
   const klasa = ustalenie.severity === "high" ? "blad" : ustalenie.severity === "info" ? "nieznany" : "uwaga";
@@ -92,7 +119,7 @@ export function Bezpieczenstwo() {
   const modul = useModul<Snapshot>(host.id, "security");
   const [wybrane, setWybrane] = useState<string[]>([]);
   const [komunikat, setKomunikat] = useState("");
-  const [kroki, setKroki] = useState<KrokNaprawy[]>([]);
+  const [komunikatPlanu, setKomunikatPlanu] = useState("");
   const [zamiar, setZamiar] = useState<{ etykieta: string; opis: string } | null>(null);
 
   const raport = useQuery({
@@ -114,24 +141,47 @@ export function Bezpieczenstwo() {
     onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
   });
 
+  // Plany naprawy same sie posuwaja, wiec lista odswieza sie sama - inaczej
+  // operator patrzylby na stan sprzed kilku krokow.
+  const plany = useQuery({
+    queryKey: ["remediation", host.id],
+    queryFn: () => api.get<{ items: PlanNaprawy[] }>(`/api/v1/hosts/${host.id}/security/remediation`),
+    refetchInterval: 5000,
+  });
+  const wToku = (plany.data?.items ?? []).find((plan) => plan.state === "running");
+
   const napraw = useMutation({
     mutationFn: (powod: string) =>
-      api.post<{ steps: KrokNaprawy[] }>(`/api/v1/hosts/${host.id}/security/remediation`, {
-        plan_hash: raport.data?.plan_hash,
-        check_ids: wybrane,
-        reason: powod,
-      }),
+      api.post<{ plan: PlanNaprawy; skipped: Record<string, string> }>(
+        `/api/v1/hosts/${host.id}/security/remediation`,
+        { plan_hash: raport.data?.plan_hash, check_ids: wybrane, reason: powod },
+      ),
     onSuccess: (odpowiedz) => {
-      setKroki(odpowiedz.steps);
+      const pominiete = Object.entries(odpowiedz.skipped ?? {});
+      setKomunikatPlanu(
+        pominiete.length
+          ? `Plan ${odpowiedz.plan.id.slice(0, 8)} started; skipped: ${pominiete
+              .map(([id, powod]) => `${id} (${powod})`)
+              .join("; ")}`
+          : `Plan ${odpowiedz.plan.id.slice(0, 8)} started.`,
+      );
       setWybrane([]);
       setZamiar(null);
       setKomunikat("");
+      queryClient.invalidateQueries({ queryKey: ["remediation", host.id] });
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
     onError: (error) => {
       setZamiar(null);
       setKomunikat(error instanceof Error ? error.message : String(error));
     },
+  });
+
+  const zatrzymaj = useMutation({
+    mutationFn: (planID: string) =>
+      api.post(`/api/v1/hosts/${host.id}/security/remediation/${planID}/stop`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["remediation", host.id] }),
+    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
   });
 
   const snapshot = modul.data?.payload;
@@ -251,7 +301,7 @@ export function Bezpieczenstwo() {
           {raport.data
             ? `${raport.data.counts.failed ?? 0} need action · ${raport.data.counts.passed ?? 0} passed · ${
                 raport.data.counts.unknown ?? 0
-              } unknown`
+              } unknown · ${raport.data.counts.not_applicable ?? 0} n/a`
             : "…"}
         </span>
       </div>
@@ -275,7 +325,13 @@ export function Bezpieczenstwo() {
                       podejmie za operatora. */}
                   <input
                     type="checkbox"
-                    disabled={!ustalenie.remediation?.action || ustalenie.passed || ustalenie.unknown}
+                    disabled={
+                      !ustalenie.remediation?.action ||
+                      !ustalenie.applicable ||
+                      ustalenie.passed ||
+                      ustalenie.unknown ||
+                      Boolean(wToku)
+                    }
                     checked={wybrane.includes(ustalenie.check_id)}
                     onChange={(e) =>
                       setWybrane((lista) =>
@@ -296,6 +352,11 @@ export function Bezpieczenstwo() {
                 <td>{ustalenie.expected}</td>
                 <td>
                   {ustalenie.observed}
+                  {/* Kod powodu mowi, co z tym zrobic: poczekac na odczyt,
+                      naprawic agenta czy nadac uprawnienia. */}
+                  {ustalenie.reason_code && (
+                    <div className="zrodlo">reason: {ustalenie.reason_code}</div>
+                  )}
                   {ustalenie.evidence && <div className="zrodlo">{ustalenie.evidence}</div>}
                   {/* Dowod niesie modul i rewizje, z ktorej wynik powstal. */}
                   {ustalenie.revision && (
@@ -334,12 +395,14 @@ export function Bezpieczenstwo() {
             setZamiar({
               etykieta: "Apply remediation",
               opis:
-                `${wybrane.length} finding(s) on ${host.hostname} will be fixed by ${wybrane.length} separate ` +
-                "jobs, each going through the permissions and approval of the module that owns it. " +
-                "The plan is bound to the state you are looking at: if the host changed meanwhile, the request is refused.",
+                `${wybrane.length} finding(s) on ${host.hostname} will be fixed step by step, each step an ` +
+                "ordinary job of the module that owns it, with its own permissions and approval. The next step " +
+                "starts only once the previous one succeeded, and the plan stops at the first failure. " +
+                "It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.",
             })
           }
-          disabled={!wybrane.length || napraw.isPending}
+          disabled={!wybrane.length || napraw.isPending || Boolean(wToku)}
+          title={wToku ? "a remediation plan is already running on this host" : undefined}
         >
           Fix selected ({wybrane.length})
         </button>
@@ -348,27 +411,69 @@ export function Bezpieczenstwo() {
         </span>
       </div>
 
-      {kroki.length > 0 && (
-        <table>
-          <thead><tr><th>Check</th><th>Operation</th><th>Job</th><th>State</th></tr></thead>
-          <tbody>
-            {kroki.map((krok) => (
-              <tr key={krok.check_id}>
-                <td>{krok.check_id}</td>
-                <td>{krok.action || <span className="zrodlo">{krok.skipped}</span>}</td>
-                <td>{krok.job_id ? krok.job_id.slice(0, 8) : "—"}</td>
-                <td>{krok.state || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {komunikatPlanu && <p className="zrodlo" style={{ marginBottom: 12 }}>{komunikatPlanu}</p>}
+
+      <h2>Remediation plans</h2>
+      <p className="podtytul">
+        Steps run one after another: each is an ordinary job of the module that
+        owns it, and the next one starts only once the previous succeeded. A
+        step that needs a reboot ends the plan — what comes after a reboot has
+        to be judged against the host that came back.
+      </p>
+      {!(plany.data?.items ?? []).length ? (
+        <Pusto>No remediation has been planned on this host.</Pusto>
+      ) : (
+        (plany.data?.items ?? []).map((plan) => (
+          <div key={plan.id} style={{ marginBottom: 16 }}>
+            <div className="filtry">
+              <strong>{plan.id.slice(0, 8)}</strong>
+              <span className={`znacznik ${plan.state === "succeeded" ? "ok" : plan.state === "running" ? "uwaga" : "blad"}`}>
+                {plan.state}
+              </span>
+              <span className="zrodlo">
+                {plan.created_by} · <Czas wartosc={plan.created_at} />
+                {plan.stop_on_failure ? " · stops on failure" : " · continues after failure"}
+              </span>
+              {plan.state === "running" && (
+                <button className="wtorny" onClick={() => zatrzymaj.mutate(plan.id)} disabled={zatrzymaj.isPending}>
+                  Stop
+                </button>
+              )}
+            </div>
+            <table>
+              <thead>
+                <tr><th>#</th><th>Check</th><th>Operation</th><th>Lock</th><th>Job</th><th>State</th></tr>
+              </thead>
+              <tbody>
+                {(plan.steps ?? []).map((krok) => (
+                  <tr key={krok.position}>
+                    <td>{krok.position}</td>
+                    <td>{krok.check_id}</td>
+                    <td>
+                      <code>{krok.action_type}</code>
+                      {krok.requires_reboot && <span className="znacznik uwaga"> reboot</span>}
+                    </td>
+                    {/* Klasa blokady mowi, o ktory zasob hosta krok sie
+                        dobija - dwa kroki tej samej klasy nie ida naraz. */}
+                    <td>{krok.lock_class || <span className="zrodlo">—</span>}</td>
+                    <td>{krok.job_id ? krok.job_id.slice(0, 8) : "—"}</td>
+                    <td>
+                      {krok.state}
+                      {krok.reason && <div className="zrodlo">{krok.reason}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
       )}
 
       <SwiezoscModulu fragment={modul.data} />
       {raport.data?.generated_at && (
         <p className="zrodlo">
           Findings computed <Czas wartosc={raport.data.generated_at} /> · plan{" "}
-          {raport.data.plan_hash.slice(0, 12)}
+          {raport.data.plan_hash.slice(0, 12)} (canonical form v{raport.data.plan_hash_version})
         </p>
       )}
 

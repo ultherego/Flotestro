@@ -168,7 +168,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.applyTime(ctx, task, action, payload.Time)
 	case opspec.ActionSystemShutdown:
 		return e.shutdownHost(ctx, task, payload.Power)
-	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet:
+	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet, opspec.ActionAuditRulesReload:
 		return e.applySecurity(ctx, task, action, payload.Security)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
@@ -556,8 +556,11 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 	case *agentv1.TaskEnvelope_Security:
 		ochrona := action.Security
 		typ := opspec.ActionSecurityScan
-		if ochrona.GetOperation() == agentv1.SecurityAction_OPERATION_SELINUX_MODE {
+		switch ochrona.GetOperation() {
+		case agentv1.SecurityAction_OPERATION_SELINUX_MODE:
 			typ = opspec.ActionSELinuxModeSet
+		case agentv1.SecurityAction_OPERATION_AUDIT_RELOAD:
+			typ = opspec.ActionAuditRulesReload
 		}
 		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
 

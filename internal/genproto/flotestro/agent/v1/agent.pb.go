@@ -716,6 +716,7 @@ const (
 	SecurityAction_OPERATION_UNSPECIFIED  SecurityAction_Operation = 0
 	SecurityAction_OPERATION_SCAN         SecurityAction_Operation = 1
 	SecurityAction_OPERATION_SELINUX_MODE SecurityAction_Operation = 2
+	SecurityAction_OPERATION_AUDIT_RELOAD SecurityAction_Operation = 3
 )
 
 // Enum value maps for SecurityAction_Operation.
@@ -724,11 +725,13 @@ var (
 		0: "OPERATION_UNSPECIFIED",
 		1: "OPERATION_SCAN",
 		2: "OPERATION_SELINUX_MODE",
+		3: "OPERATION_AUDIT_RELOAD",
 	}
 	SecurityAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
 		"OPERATION_SCAN":         1,
 		"OPERATION_SELINUX_MODE": 2,
+		"OPERATION_AUDIT_RELOAD": 3,
 	}
 )
 
@@ -9543,14 +9546,15 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1e\n" +
 	"\n" +
 	"mismatches\x18\x03 \x03(\tR\n" +
-	"mismatches\"\xc8\x01\n" +
+	"mismatches\"\xe4\x01\n" +
 	"\x0eSecurityAction\x12J\n" +
 	"\toperation\x18\x01 \x01(\x0e2,.flotestro.agent.v1.SecurityAction.OperationR\toperation\x12\x12\n" +
-	"\x04mode\x18\x02 \x01(\tR\x04mode\"V\n" +
+	"\x04mode\x18\x02 \x01(\tR\x04mode\"r\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_SCAN\x10\x01\x12\x1a\n" +
-	"\x16OPERATION_SELINUX_MODE\x10\x02\"F\n" +
+	"\x16OPERATION_SELINUX_MODE\x10\x02\x12\x1a\n" +
+	"\x16OPERATION_AUDIT_RELOAD\x10\x03\"F\n" +
 	"\x0eSecurityResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xdd\x02\n" +

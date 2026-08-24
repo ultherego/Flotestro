@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,8 +14,8 @@ import (
 	"github.com/ultherego/flotestro/internal/compliance"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
-	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/remediation"
 )
 
 // handleHostSecurity zwraca ustalenia zgodnosci hosta wraz z planem naprawy.
@@ -55,6 +56,9 @@ type widokSprawdzenia struct {
 	Failed   int    `json:"failed"`
 	Passed   int    `json:"passed"`
 	Unknown  int    `json:"unknown"`
+	// NotApplicable liczy hosty, ktorych sprawdzenie nie dotyczy. Bez tej
+	// kolumny host bez SELinuksa wygladalby na niezgodny albo na zgodnego.
+	NotApplicable int `json:"not_applicable"`
 	// Hosts wylicza hosty, ktore sprawdzenia nie przeszly.
 	Hosts []hostZUstaleniem `json:"hosts,omitempty"`
 	// Fixable mowi, ile z nich ma za soba operacje naprawcza.
@@ -117,6 +121,8 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			switch {
+			case !ustalenie.Applicable:
+				widok.NotApplicable++
 			case ustalenie.Unknown:
 				widok.Unknown++
 			case ustalenie.Passed:
@@ -166,24 +172,20 @@ type naprawaRequest struct {
 	// "wszystko": panel nie ma przycisku napraw wszystko.
 	CheckIDs []string `json:"check_ids"`
 	Reason   string   `json:"reason"`
+	// StopOnFailure domyslnie wlaczone: kolejne kroki zakladaja, ze
+	// poprzednie sie udaly.
+	StopOnFailure *bool `json:"stop_on_failure,omitempty"`
 }
 
-// wynikNaprawy opisuje jeden krok planu po zleceniu.
-type wynikNaprawy struct {
-	CheckID string `json:"check_id"`
-	Action  string `json:"action,omitempty"`
-	JobID   string `json:"job_id,omitempty"`
-	State   string `json:"state,omitempty"`
-	// Skipped mowi, dlaczego kroku nie zlecono.
-	Skipped string `json:"skipped,omitempty"`
-}
-
-// handleHostRemediation zleca naprawe wskazanych ustalen.
+// handleHostRemediation zaklada plan naprawy wskazanych ustalen.
 //
 // Naprawa nie jest osobna operacja na hoscie. Kazdy krok to zwykle zadanie
 // modulu, ktory za dana rzecz odpowiada - z jego uprawnieniem, jego ryzykiem
 // i jego zatwierdzeniem. Uprawnienie do naprawy nie zastepuje uprawnien tych
 // modulow, tylko dokłada sie do nich.
+//
+// Kroki ida po kolei, bo kazdy zaklada stan zostawiony przez poprzedni; plan
+// zatrzymuje sie po bledzie, a to, co zdazylo sie wykonac, zostaje widoczne.
 func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -192,6 +194,11 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := s.authorize(w, r, authz.PermSecurityRemediate, scope, "host", hostID)
 	if !ok {
+		return
+	}
+	if s.remediation == nil {
+		problem(w, http.StatusServiceUnavailable, "remediation_disabled",
+			"remediation plans are not enabled in this installation")
 		return
 	}
 
@@ -224,7 +231,6 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	for _, id := range request.CheckIDs {
 		wybrane[id] = true
 	}
-
 	kroki := make([]compliance.Ustalenie, 0, len(request.CheckIDs))
 	for _, ustalenie := range raport.Findings {
 		if wybrane[ustalenie.CheckID] {
@@ -237,20 +243,18 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Uprawnienia sprawdzamy dla calego planu przed zleceniem czegokolwiek:
+	ulozony, err := remediation.Ulozenie(kroki)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_plan", err.Error())
+		return
+	}
+
+	// Uprawnienia sprawdzamy dla calego planu przed zalozeniem czegokolwiek:
 	// polowa naprawy jest gorsza niz zadna, bo zostawia host w stanie,
 	// ktorego nikt nie planowal.
-	najwyzszeRyzyko := opspec.RiskLow
-	for _, krok := range kroki {
-		if krok.Remediation == nil || krok.Remediation.Action == "" {
-			continue
-		}
-		akcja := opspec.ActionType(krok.Remediation.Action)
-		if !akcja.Known() {
-			problem(w, http.StatusBadRequest, "unknown_action",
-				"finding "+krok.CheckID+" maps to an operation this panel does not know")
-			return
-		}
+	wymagaSwiezosci := false
+	for _, krok := range ulozony.Kroki {
+		akcja := opspec.ActionType(krok.ActionType)
 		if _, ok := s.authorize(w, r, authz.Permission(akcja.Permission()), scope, "host", hostID); !ok {
 			return
 		}
@@ -259,15 +263,20 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 				"finding "+krok.CheckID+" maps to an irreversible operation; run it host by host")
 			return
 		}
+		if capability := akcja.RequiredCapability(); !hostHasCapability(host, capability) {
+			problem(w, http.StatusConflict, "capability_missing",
+				"finding "+krok.CheckID+" needs capability "+capability)
+			return
+		}
 		if akcja.RequiresFreshAuth() {
-			najwyzszeRyzyko = opspec.RiskCritical
+			wymagaSwiezosci = true
 		}
 	}
 
-	// Naprawa siegajaca po operacje najwyzszego ryzyka wymaga swiezego
+	// Plan siegajacy po operacje najwyzszego ryzyka wymaga swiezego
 	// uwierzytelnienia tak samo jak ta operacja zlecona wprost.
 	var dowodStepUp map[string]any
-	if najwyzszeRyzyko == opspec.RiskCritical {
+	if wymagaSwiezosci {
 		dowod, ok := s.requireStepUp(w, r, principal, request.Reason,
 			"security.remediation.apply", "host", hostID)
 		if !ok {
@@ -276,92 +285,163 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		dowodStepUp = dowod
 	}
 
-	wyniki := make([]wynikNaprawy, 0, len(kroki))
-	for _, krok := range kroki {
-		wynik := wynikNaprawy{CheckID: krok.CheckID}
-		switch {
-		case !krok.Wymaga():
-			wynik.Skipped = "ustalenie nie wymaga dzialania"
-		case krok.Remediation == nil || krok.Remediation.Action == "":
-			wynik.Skipped = "to ustalenie nie ma operacji naprawczej"
-			if krok.Remediation != nil {
-				wynik.Skipped = krok.Remediation.Note
-			}
-		default:
-			job, err := s.zlecNaprawe(r, host, krok, raport.PlanHash, principal.Subject, request.Reason, dowodStepUp)
-			if err != nil {
-				problem(w, http.StatusBadRequest, "invalid_operation", err.Error())
-				return
-			}
-			wynik.Action = krok.Remediation.Action
-			wynik.JobID = job.ID
-			wynik.State = string(job.State)
-		}
-		wyniki = append(wyniki, wynik)
+	zatrzymajPoBledzie := true
+	if request.StopOnFailure != nil {
+		zatrzymajPoBledzie = *request.StopOnFailure
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"host_id": hostID, "plan_hash": raport.PlanHash, "steps": wyniki,
-	})
-}
-
-// zlecNaprawe tworzy zadanie jednego kroku planu.
-func (s *Server) zlecNaprawe(r *http.Request, host *hosts.Host, krok compliance.Ustalenie,
-	planHash, actor, powod string, dowodStepUp map[string]any) (*jobs.Job, error) {
-	akcja := opspec.ActionType(krok.Remediation.Action)
-	var payload opspec.Payload
-	if len(krok.Remediation.Payload) > 0 {
-		if err := json.Unmarshal(krok.Remediation.Payload, &payload); err != nil {
-			return nil, err
-		}
-	}
-	if err := opspec.Validate(akcja, payload); err != nil {
-		return nil, err
-	}
-	if capability := akcja.RequiredCapability(); !hostHasCapability(host, capability) {
-		return nil, errors.New("host nie ma zdolnosci " + capability)
-	}
-
-	tx, err := s.jobs.Pool().Begin(r.Context())
+	tx, err := s.remediation.Pool().Begin(r.Context())
 	if err != nil {
-		return nil, err
+		s.fail(w, err)
+		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	job, err := s.jobs.Create(r.Context(), tx, jobs.Spec{
-		HostID:  host.ID,
-		Action:  akcja,
-		Payload: payload,
-		// Klucz idempotencji wiaze zadanie z planem: powtorzone zlecenie tego
-		// samego planu nie tworzy drugiego zadania na ten sam krok.
-		IdempotencyKey:  "remediation:" + host.ID + ":" + krok.CheckID + ":" + planHash[:16],
-		RequiresApprova: akcja.Mutating(),
-		CreatedBy:       actor,
-		RequestID:       requestIDOf(r),
-		Preconditions: jobs.Preconditions{
-			OSFamily:             host.OSFamily,
-			RequiredCapabilities: []string{akcja.RequiredCapability()},
-		},
-	})
+	plan, err := s.remediation.Zaloz(r.Context(), tx, remediation.Spec{
+		HostID:          hostID,
+		PlanHash:        raport.PlanHash,
+		PlanHashVersion: raport.PlanHashVersion,
+		Reason:          request.Reason,
+		CreatedBy:       principal.Subject,
+		StopOnFailure:   zatrzymajPoBledzie,
+		BootIDBefore:    host.BootID,
+	}, ulozony.Kroki)
+	if errors.Is(err, remediation.ErrPlanWToku) {
+		problem(w, http.StatusConflict, "plan_in_progress",
+			"a remediation plan is already running on this host")
+		return
+	}
 	if err != nil {
-		return nil, err
+		s.fail(w, err)
+		return
 	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
-		ActorType: audit.ActorUser, ActorID: actor,
-		Action: "security.remediate", TargetType: "job", TargetID: job.ID,
-		RequestID: job.RequestID, Outcome: audit.OutcomeSuccess,
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "security.remediate", TargetType: "host", TargetID: hostID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
-			"host_id": host.ID, "check_id": krok.CheckID,
-			"check_version": krok.CheckVersion, "action_type": job.ActionType,
-			"plan_hash": planHash, "reason": powod, "step_up": dowodStepUp,
+			"plan_id": plan.ID, "plan_hash": raport.PlanHash,
+			"plan_hash_version": raport.PlanHashVersion,
+			"steps":             nazwyKrokow(ulozony.Kroki), "skipped": ulozony.Pominiete,
+			"stop_on_failure": zatrzymajPoBledzie, "reason": request.Reason,
+			"step_up": dowodStepUp,
 		},
 	}); err != nil {
-		return nil, err
+		s.fail(w, err)
+		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		return nil, err
+		s.fail(w, err)
+		return
 	}
-	return job, nil
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"plan": plan, "skipped": ulozony.Pominiete,
+	})
+}
+
+// handleListRemediation zwraca ostatnie plany naprawy hosta.
+func (s *Server) handleListRemediation(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	_, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	if _, ok := s.authorize(w, r, authz.PermSecurityRead, scope, "host", hostID); !ok {
+		return
+	}
+	if s.remediation == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "count": 0})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	plany, err := s.remediation.Hosta(r.Context(), hostID, limit)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if plany == nil {
+		plany = []remediation.Plan{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": plany, "count": len(plany)})
+}
+
+// handleStopRemediation zatrzymuje plan w toku.
+//
+// Krok juz dostarczony hostowi konczy sie po swojemu - panel nie udaje, ze
+// odwolal cos, co host wlasnie wykonuje - ale jego zadanie jest anulowane,
+// a kroki jeszcze nierozpoczete nie ruszaja.
+func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	_, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermSecurityRemediate, scope, "host", hostID)
+	if !ok {
+		return
+	}
+	if s.remediation == nil {
+		problem(w, http.StatusServiceUnavailable, "remediation_disabled",
+			"remediation plans are not enabled in this installation")
+		return
+	}
+
+	plan, err := s.remediation.Plan(r.Context(), r.PathValue("plan"))
+	if errors.Is(err, remediation.ErrNotFound) || (plan != nil && plan.HostID != hostID) {
+		problem(w, http.StatusNotFound, "plan_not_found", "no such remediation plan on this host")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if plan.State != remediation.StanWToku {
+		problem(w, http.StatusConflict, "plan_finished", "this plan is already finished")
+		return
+	}
+
+	if biezacy := plan.Biezacy(); biezacy != nil && biezacy.JobID != "" {
+		tx, err := s.jobs.Pool().Begin(r.Context())
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		defer func() { _ = tx.Rollback(r.Context()) }()
+		if _, err := s.jobs.Cancel(r.Context(), tx, biezacy.JobID, principal.Subject,
+			"plan naprawy zatrzymany"); err == nil {
+			_ = tx.Commit(r.Context())
+		}
+	}
+	if err := s.remediation.PomijPozostale(r.Context(), plan.ID, "plan zatrzymany przez operatora"); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.remediation.ZamknijPlan(r.Context(), plan.ID, remediation.StanZatrzymany); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "security.remediate.stop", TargetType: "host", TargetID: hostID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"plan_id": plan.ID},
+	})
+
+	zaktualizowany, err := s.remediation.Plan(r.Context(), plan.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, zaktualizowany)
+}
+
+func nazwyKrokow(kroki []remediation.Krok) []string {
+	nazwy := make([]string, 0, len(kroki))
+	for _, krok := range kroki {
+		nazwy = append(nazwy, krok.CheckID+":"+krok.ActionType)
+	}
+	return nazwy
 }
 
 // ocenZgodnosc liczy ustalenia dla hosta z fragmentow inwentarza.

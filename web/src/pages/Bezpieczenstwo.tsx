@@ -14,6 +14,7 @@ type Sprawdzenie = {
   failed: number;
   passed: number;
   unknown: number;
+  not_applicable: number;
   fixable: number;
   hosts?: HostZUstaleniem[];
 };
@@ -56,7 +57,7 @@ export function Bezpieczenstwo() {
       <table>
         <thead>
           <tr>
-            <th>Check</th><th>Need action</th><th>Passed</th><th>Unknown</th><th>Expected</th><th>Fixable</th>
+            <th>Check</th><th>Need action</th><th>Passed</th><th>Unknown</th><th>N/A</th><th>Expected</th><th>Fixable</th>
           </tr>
         </thead>
         <tbody>
@@ -83,6 +84,9 @@ export function Bezpieczenstwo() {
                 {/* Nieustalone nie jest zaliczone: host, ktory nie zglosil
                     faktu, nie jest hostem zgodnym. */}
                 <td>{sprawdzenie.unknown ? <span className="znacznik nieznany">{sprawdzenie.unknown}</span> : 0}</td>
+                {/* Sprawdzenie, ktore hosta nie dotyczy, nie wchodzi ani do
+                    zgodnosci, ani do niezgodnosci. */}
+                <td>{sprawdzenie.not_applicable}</td>
                 <td>{sprawdzenie.expected}</td>
                 <td>
                   {sprawdzenie.fixable}
@@ -99,7 +103,7 @@ export function Bezpieczenstwo() {
                     <td colSpan={2}>
                       <Link to={`/hosts/${host.host_id}/security`}>{host.hostname}</Link>
                     </td>
-                    <td colSpan={3}>{host.observed}</td>
+                    <td colSpan={4}>{host.observed}</td>
                     <td>{host.action ? <code>{host.action}</code> : <span className="zrodlo">—</span>}</td>
                   </tr>
                 ))}

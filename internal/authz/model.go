@@ -115,6 +115,8 @@ const (
 	PermSecurityScan      Permission = "security.scan"
 	PermSecurityRemediate Permission = "security.remediate"
 	PermSecurityMACWrite  Permission = "security.mac.write"
+	// Przeladowanie regul audytu zmienia to, co host notuje.
+	PermSecurityAuditReload Permission = "security.audit.reload"
 	// Okno serwisowe nalezy do prowadzenia ruchu, a nie do zmiany hosta:
 	// deklaruje je ten, kto pilnuje kampanii i dyzuru.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
@@ -299,7 +301,8 @@ var rolePermissions = map[Role][]Permission{
 		PermKernelRead, PermKernelSysctlWrite,
 		PermKernelModuleWrite, PermKernelModuleBlacklist,
 		PermTimeRead, PermTimeWrite, PermTimezoneWrite,
-		PermSecurityRead, PermSecurityScan, PermSecurityRemediate, PermSecurityMACWrite,
+		PermSecurityRead, PermSecurityScan, PermSecurityRemediate,
+		PermSecurityMACWrite, PermSecurityAuditReload,
 		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,

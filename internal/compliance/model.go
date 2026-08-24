@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,40 @@ const (
 	WagaLow    = "low"
 	WagaInfo   = "info"
 )
+
+// Kody powodu dla ustalen bez wyniku.
+//
+// Stan nieustalony bez kodu jest bezuzyteczny: operator nie wie, czy ma
+// poczekac na nastepny odczyt, naprawic agenta, czy dac komus uprawnienia.
+const (
+	// PowodBrakFaktu: host nie zglosil modulu, z ktorego sprawdzenie liczy.
+	PowodBrakFaktu = "fact_missing"
+	// PowodNieobslugiwane: host nie ma komponentu, ktorego sprawdzenie dotyczy.
+	// Uzywany przy stanie "nie dotyczy", a nie przy nieustalonym.
+	PowodNieobslugiwane = "unsupported_system"
+	// PowodBladOdczytu: fakt istnieje, ale odczyt sie nie powiodl.
+	PowodBladOdczytu = "read_failed"
+	// PowodBrakUprawnienia: odczytu odmowiono z braku uprawnien.
+	PowodBrakUprawnienia = "permission_denied"
+	// PowodNieaktualny: odczyt jest za stary, zeby cokolwiek z niego orzekac.
+	PowodNieaktualny = "inventory_stale"
+)
+
+// MaksymalnyWiekOdczytu wyznacza, jak stary moze byc fakt, zeby dalo sie na
+// nim oprzec ocene.
+//
+// Cykl inwentarza jest krotszy o rzad wielkosci, wiec przekroczenie tego progu
+// oznacza hosta, ktory nie odzywa sie od dawna - a nie hosta zgodnego.
+const MaksymalnyWiekOdczytu = 6 * time.Hour
+
+// WersjaKanonizacji wersjonuje postac, z ktorej liczy sie odcisk planu.
+//
+// Zmiana postaci zmienia wszystkie odciski, wiec numer jest czescia napisu:
+// plan zatwierdzony przy poprzedniej wersji nie moze zostac wykonany po
+// zmianie zasad liczenia, bo nie wiadomo, co wtedy zatwierdzono.
+const WersjaKanonizacji = 1
+
+const naglowekKanonizacji = "flotestro/compliance-plan/v"
 
 // Fragment to stan jednego modulu hosta wraz z jego rewizja.
 type Fragment struct {
@@ -74,6 +109,9 @@ type Naprawa struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 	// Note mowi, czego operacja nie zalatwia albo dlaczego naprawy nie ma.
 	Note string `json:"note,omitempty"`
+	// RequiresReboot oznacza krok, po ktorym host musi wstac na nowo.
+	// Plan moze miec najwyzej jeden taki krok i konczy sie nim.
+	RequiresReboot bool `json:"requires_reboot,omitempty"`
 }
 
 // Ustalenie to wynik jednego sprawdzenia na jednym hoscie.
@@ -84,10 +122,16 @@ type Ustalenie struct {
 	Severity     string `json:"severity"`
 	// Rationale mowi, co sie stanie, gdy nikt nic nie zrobi.
 	Rationale string `json:"rationale"`
-	// Passed i Unknown to trzy stany, nie dwa: sprawdzenie moze przejsc,
-	// nie przejsc albo nie miec z czego sie policzyc.
+	// Applicable mowi, czy sprawdzenie ma na tym hoscie zastosowanie. Host
+	// z AppArmorem nie przegrywa sprawdzenia wymagajacego SELinuksa - ono go
+	// po prostu nie dotyczy, i to jest osobna odpowiedz od "nie przeszedl".
+	Applicable bool `json:"applicable"`
+	// Passed i Unknown maja sens wylacznie dla sprawdzen, ktore dotycza.
 	Passed  bool `json:"passed"`
 	Unknown bool `json:"unknown"`
+	// ReasonCode nazywa powod braku wyniku. Stan nieustalony bez kodu zmusza
+	// operatora do zgadywania, czy czekac, naprawiac agenta, czy nadac prawa.
+	ReasonCode string `json:"reason_code,omitempty"`
 	// Expected i Observed sa zapisane tak, zeby dalo sie je pokazac obok
 	// siebie bez tlumaczenia.
 	Expected string `json:"expected"`
@@ -103,12 +147,16 @@ type Ustalenie struct {
 }
 
 // Wymaga mowi, czy ustalenie czeka na dzialanie.
-func (u Ustalenie) Wymaga() bool { return !u.Passed && !u.Unknown }
+func (u Ustalenie) Wymaga() bool { return u.Applicable && !u.Passed && !u.Unknown }
 
 // Wynik jest odpowiedzia sprawdzenia.
 type Wynik struct {
-	Passed      bool
-	Unknown     bool
+	Passed bool
+	// NotApplicable zwraca sprawdzenie, ktore na tym hoscie nie ma sensu.
+	NotApplicable bool
+	Unknown       bool
+	// ReasonCode jest wymagany przy Unknown i przy NotApplicable.
+	ReasonCode  string
 	Observed    string
 	Evidence    string
 	Remediation *Naprawa
@@ -135,8 +183,10 @@ type Raport struct {
 	// PlanHash wiaze plan naprawy z ustaleniami, z ktorych powstal. Zmiana
 	// stanu hosta zmienia hash, wiec zatwierdzony plan nie moze zostac
 	// wykonany wobec innego stanu, niz operator ogladal.
-	PlanHash    string    `json:"plan_hash"`
-	GeneratedAt time.Time `json:"generated_at"`
+	PlanHash string `json:"plan_hash"`
+	// PlanHashVersion mowi, ktora postac kanoniczna liczyla odcisk.
+	PlanHashVersion int       `json:"plan_hash_version"`
+	GeneratedAt     time.Time `json:"generated_at"`
 	// Counts streszcza raport bez liczenia po stronie interfejsu.
 	Counts map[string]int `json:"counts"`
 }
@@ -145,7 +195,7 @@ type Raport struct {
 func Ocen(hostID string, wejscie Wejscie, teraz time.Time) Raport {
 	ustalenia := make([]Ustalenie, 0, len(Checks))
 	for _, check := range Checks {
-		ustalenia = append(ustalenia, uruchom(check, wejscie))
+		ustalenia = append(ustalenia, uruchom(check, wejscie, teraz))
 	}
 	sort.SliceStable(ustalenia, func(i, j int) bool {
 		if kolejnoscWagi(ustalenia[i]) != kolejnoscWagi(ustalenia[j]) {
@@ -154,44 +204,74 @@ func Ocen(hostID string, wejscie Wejscie, teraz time.Time) Raport {
 		return ustalenia[i].CheckID < ustalenia[j].CheckID
 	})
 	return Raport{
-		HostID:      hostID,
-		Findings:    ustalenia,
-		PlanHash:    HashPlanu(ustalenia),
-		GeneratedAt: teraz,
-		Counts:      podsumowanie(ustalenia),
+		HostID:          hostID,
+		Findings:        ustalenia,
+		PlanHash:        HashPlanu(hostID, ustalenia),
+		PlanHashVersion: WersjaKanonizacji,
+		GeneratedAt:     teraz,
+		Counts:          podsumowanie(ustalenia),
 	}
 }
 
 // uruchom wykonuje jedno sprawdzenie i opisuje wynik.
-func uruchom(check Check, wejscie Wejscie) Ustalenie {
+func uruchom(check Check, wejscie Wejscie, teraz time.Time) Ustalenie {
 	ustalenie := Ustalenie{
 		CheckID: check.ID, CheckVersion: check.Version, Title: check.Title,
 		Severity: check.Severity, Rationale: check.Rationale,
-		Expected: check.Expected, Module: check.Module,
+		Expected: check.Expected, Module: check.Module, Applicable: true,
 	}
-	if fragment, ok := wejscie.Fragment(check.Module); ok {
+	if check.Module != "" {
+		fragment, ok := wejscie.Fragment(check.Module)
+		if !ok {
+			ustalenie.Unknown = true
+			ustalenie.ReasonCode = PowodBrakFaktu
+			ustalenie.Observed = "host nie zglosil modulu " + check.Module
+			return ustalenie
+		}
 		ustalenie.Revision = fragment.Revision
 		ustalenie.ObservedAt = fragment.ObservedAt
 		// Modul, ktorego host nie odczytal, nie jest modulem pustym.
 		if fragment.UnavailableReason != "" {
 			ustalenie.Unknown = true
+			ustalenie.ReasonCode = PowodBladOdczytu
 			ustalenie.Observed = "nie odczytano: " + fragment.UnavailableReason
 			return ustalenie
 		}
-	} else if check.Module != "" {
-		ustalenie.Unknown = true
-		ustalenie.Observed = "host nie zglosil modulu " + check.Module
-		return ustalenie
+		// Odczyt sprzed doby opisuje hosta sprzed doby. Ocena na nim oparta
+		// mowilaby o stanie, ktorego juz moze nie byc.
+		if !fragment.ObservedAt.IsZero() && teraz.Sub(fragment.ObservedAt) > MaksymalnyWiekOdczytu {
+			ustalenie.Unknown = true
+			ustalenie.ReasonCode = PowodNieaktualny
+			ustalenie.Observed = "ostatni odczyt: " + fragment.ObservedAt.Format(time.RFC3339)
+			return ustalenie
+		}
 	}
 
 	wynik := check.Ocen(wejscie)
-	ustalenie.Passed = wynik.Passed
-	ustalenie.Unknown = wynik.Unknown
 	ustalenie.Observed = wynik.Observed
 	ustalenie.Evidence = wynik.Evidence
+	ustalenie.ReasonCode = wynik.ReasonCode
+
+	switch {
+	case wynik.NotApplicable:
+		// Sprawdzenie, ktore hosta nie dotyczy, nie jest ani przejsciem, ani
+		// porazka: nie wchodzi do zadnej z tych liczb.
+		ustalenie.Applicable = false
+		if ustalenie.ReasonCode == "" {
+			ustalenie.ReasonCode = PowodNieobslugiwane
+		}
+	case wynik.Unknown:
+		ustalenie.Unknown = true
+		if ustalenie.ReasonCode == "" {
+			ustalenie.ReasonCode = PowodBrakFaktu
+		}
+	case wynik.Passed:
+		ustalenie.Passed = true
+	}
+
 	// Naprawe niesie wylacznie ustalenie, ktore czeka na dzialanie: plan
 	// naprawy stanu poprawnego byl by zaproszeniem do zmiany bez powodu.
-	if !wynik.Passed && !wynik.Unknown {
+	if ustalenie.Wymaga() {
 		ustalenie.Remediation = wynik.Remediation
 	}
 	return ustalenie
@@ -199,31 +279,45 @@ func uruchom(check Check, wejscie Wejscie) Ustalenie {
 
 // HashPlanu liczy odcisk ustalen, ktore czekaja na dzialanie.
 //
-// Do odcisku wchodzi sprawdzenie, jego wersja i tresc naprawy - czyli
-// dokladnie to, co operator zatwierdza. Stan, ktory sie zmienil, daje inny
-// odcisk i plan trzeba obejrzec na nowo.
-func HashPlanu(ustalenia []Ustalenie) string {
-	czesci := make([]string, 0, len(ustalenia))
+// Postac kanoniczna niesie wersje kanonizacji, hosta, a dla kazdego kroku:
+// sprawdzenie, jego wersje, rewizje odczytu, z ktorego wynik powstal, oraz
+// operacje naprawcza z payloadem. Zmiana czegokolwiek z tej listy zmienia
+// odcisk - i plan trzeba obejrzec na nowo.
+func HashPlanu(hostID string, ustalenia []Ustalenie) string {
+	kroki := make([]string, 0, len(ustalenia))
 	for _, ustalenie := range ustalenia {
 		if !ustalenie.Wymaga() {
 			continue
 		}
-		czesc := ustalenie.CheckID + "\n" + itoa(ustalenie.CheckVersion) + "\n" + ustalenie.Observed
-		if ustalenie.Remediation != nil {
-			czesc += "\n" + ustalenie.Remediation.Action + "\n" + string(ustalenie.Remediation.Payload)
+		pola := []string{
+			ustalenie.CheckID,
+			strconv.Itoa(ustalenie.CheckVersion),
+			ustalenie.Module,
+			ustalenie.Revision,
+			ustalenie.Observed,
 		}
-		czesci = append(czesci, czesc)
+		if ustalenie.Remediation != nil {
+			pola = append(pola, ustalenie.Remediation.Action, string(ustalenie.Remediation.Payload))
+		} else {
+			pola = append(pola, "", "")
+		}
+		kroki = append(kroki, strings.Join(pola, "\x1f"))
 	}
-	sort.Strings(czesci)
-	suma := sha256.Sum256([]byte(strings.Join(czesci, "\n--\n")))
+	sort.Strings(kroki)
+
+	kanoniczna := naglowekKanonizacji + strconv.Itoa(WersjaKanonizacji) + "\n" + hostID + "\n" +
+		strings.Join(kroki, "\n")
+	suma := sha256.Sum256([]byte(kanoniczna))
 	return hex.EncodeToString(suma[:])
 }
 
 // podsumowanie liczy ustalenia wedlug stanu i wagi.
 func podsumowanie(ustalenia []Ustalenie) map[string]int {
-	liczby := map[string]int{"passed": 0, "failed": 0, "unknown": 0}
+	liczby := map[string]int{"passed": 0, "failed": 0, "unknown": 0, "not_applicable": 0}
 	for _, ustalenie := range ustalenia {
 		switch {
+		case !ustalenie.Applicable:
+			liczby["not_applicable"]++
 		case ustalenie.Unknown:
 			liczby["unknown"]++
 		case ustalenie.Passed:
@@ -237,6 +331,9 @@ func podsumowanie(ustalenia []Ustalenie) map[string]int {
 }
 
 func kolejnoscWagi(ustalenie Ustalenie) int {
+	if !ustalenie.Applicable {
+		return 8
+	}
 	if ustalenie.Passed {
 		return 9
 	}
@@ -249,16 +346,4 @@ func kolejnoscWagi(ustalenie Ustalenie) int {
 		return 2
 	}
 	return 3
-}
-
-func itoa(wartosc int) string {
-	if wartosc == 0 {
-		return "0"
-	}
-	cyfry := ""
-	for wartosc > 0 {
-		cyfry = string(rune('0'+wartosc%10)) + cyfry
-		wartosc /= 10
-	}
-	return cyfry
 }

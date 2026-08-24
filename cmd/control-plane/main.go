@@ -40,6 +40,7 @@ import (
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
+	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/scheduler"
 )
 
@@ -321,6 +322,10 @@ func run() error {
 		})
 	panelServer.SetEvents(eventBus)
 
+	// Plany naprawy: panel je zaklada, runner prowadzi krok po kroku.
+	remediationStore := remediation.NewStore(pool)
+	panelServer.SetRemediation(remediationStore)
+
 	adminServer := &http.Server{
 		Addr:              cfg.AdminAddr,
 		Handler:           h2c.NewHandler(panelServer.Routes(), &http2.Server{}),
@@ -349,6 +354,11 @@ func run() error {
 	// Orkiestrator prowadzi kampanie przez canary i fale, tworzac zadania,
 	// ktore dostarcza scheduler.
 	go campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
+		log, 5*time.Second).Run(ctx)
+
+	// Runner prowadzi plany naprawy krok po kroku: kazdy krok jest zwyklym
+	// zadaniem modulu, a nastepny rusza dopiero, gdy poprzedni sie udal.
+	go remediation.NewRunner(remediationStore, jobStore, hostStore, recorder,
 		log, 5*time.Second).Run(ctx)
 
 	select {

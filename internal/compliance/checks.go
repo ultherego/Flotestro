@@ -52,6 +52,13 @@ var Checks = []Check{
 		Ocen:      ocenAudyt,
 	},
 	{
+		ID: "audit.rules-loaded", Version: 1, Severity: WagaMedium, Module: modulSecurity,
+		Title:     "Reguly audytu sa zaladowane",
+		Expected:  "jadro zna wszystkie reguly zapisane w plikach",
+		Rationale: "Regula zapisana i niezaladowana nie notuje niczego, a wyglada jak wlaczony audyt.",
+		Ocen:      ocenRegulAudytu,
+	},
+	{
 		ID: "boot.secure-boot", Version: 1, Severity: WagaInfo, Module: modulSecurity,
 		Title:     "Secure boot",
 		Expected:  "secure boot wlaczony",
@@ -120,7 +127,7 @@ var Checks = []Check{
 func ocenMAC(wejscie Wejscie) Wynik {
 	stan, ok := stanOchrony(wejscie)
 	if !ok {
-		return nieznane("nie odczytano stanu ochronnego")
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
 	}
 	if stan.MAC.System == "" {
 		return Wynik{
@@ -129,6 +136,14 @@ func ocenMAC(wejscie Wejscie) Wynik {
 			Remediation: &Naprawa{Note: "wlaczenie MAC na dzialajacym hoscie wymaga instalacji polityki " +
 				"i przeetykietowania systemu plikow; panel tego nie robi jedna operacja"},
 		}
+	}
+	// AppArmor bez odczytanych profili nie jest AppArmorem bez ochrony:
+	// bez tego faktu nie da sie orzec niczego.
+	if stan.MAC.System == security.SystemAppArmor && stan.MAC.ProfilesEnforcing == nil {
+		if powod, brakuje := stan.Missing[security.FaktProfileAppArmor]; brakuje {
+			return nieznane(kodBraku(powod), powod)
+		}
+		return nieznane(PowodBrakFaktu, "host nie zglosil liczby profili AppArmora")
 	}
 	if stan.MAC.Chroni() {
 		return Wynik{Passed: true, Observed: opisMAC(stan.MAC)}
@@ -160,14 +175,15 @@ func ocenMAC(wejscie Wejscie) Wynik {
 func ocenTrwaloscMAC(wejscie Wejscie) Wynik {
 	stan, ok := stanOchrony(wejscie)
 	if !ok {
-		return nieznane("nie odczytano stanu ochronnego")
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
 	}
 	if stan.MAC.System != security.SystemSELinux {
-		// AppArmor nie ma osobnego trybu w konfiguracji: jest albo go nie ma.
-		return Wynik{Passed: true, Observed: "host nie uzywa SELinuksa, wiec nie ma tu dwoch trybow"}
+		// Host z AppArmorem nie przegrywa sprawdzenia wymagajacego SELinuksa
+		// i nie zalicza go po cichu: ono go nie dotyczy.
+		return nieDotyczy("ten host nie uzywa SELinuksa; AppArmor nie ma osobnego trybu w konfiguracji")
 	}
 	if stan.MAC.ConfiguredMode == "" {
-		return nieznane("host nie zglosil trybu z konfiguracji")
+		return nieznane(PowodBrakFaktu, "host nie zglosil trybu z konfiguracji")
 	}
 	if stan.MAC.ConfiguredMode == stan.MAC.Mode {
 		return Wynik{Passed: true, Observed: "teraz i po restarcie: " + stan.MAC.Mode}
@@ -194,7 +210,7 @@ func ocenTrwaloscMAC(wejscie Wejscie) Wynik {
 func ocenAudyt(wejscie Wejscie) Wynik {
 	stan, ok := stanOchrony(wejscie)
 	if !ok {
-		return nieznane("nie odczytano stanu ochronnego")
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
 	}
 	if !stan.Audit.Present {
 		return Wynik{
@@ -204,12 +220,12 @@ func ocenAudyt(wejscie Wejscie) Wynik {
 		}
 	}
 	if stan.Audit.Active == nil {
-		return nieznane("nie ustalono stanu demona audytu")
+		return nieznane(PowodBrakFaktu, "nie ustalono stanu demona audytu")
 	}
 	if *stan.Audit.Active {
 		opis := "auditd dziala"
-		if stan.Audit.Rules != nil {
-			opis += ", regul: " + strconv.Itoa(*stan.Audit.Rules)
+		if stan.Audit.RulesLoaded != nil {
+			opis += ", regul w jadrze: " + strconv.Itoa(*stan.Audit.RulesLoaded)
 		}
 		return Wynik{Passed: true, Observed: opis}
 	}
@@ -226,12 +242,15 @@ func ocenAudyt(wejscie Wejscie) Wynik {
 func ocenSecureBoot(wejscie Wejscie) Wynik {
 	stan, ok := stanOchrony(wejscie)
 	if !ok {
-		return nieznane("nie odczytano stanu ochronnego")
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
 	}
 	if stan.SecureBoot == nil {
-		// Pytanie bez odpowiedzi zostaje pytaniem: host w trybie BIOS nie ma
-		// secure boota wylaczonego, tylko nie ma go w ogole.
-		return nieznane(pierwszyNiepusty(stan.SecureBootReason, "stanu secure boot nie ustalono"))
+		if powod, brakuje := stan.Missing[security.FaktSecureBoot]; brakuje {
+			return nieznane(kodBraku(powod), powod)
+		}
+		// Host wstajacy w trybie BIOS nie ma secure boota wylaczonego -
+		// nie ma go w ogole, wiec sprawdzenie go nie dotyczy.
+		return nieDotyczy(pierwszyNiepusty(stan.SecureBootReason, "ten host nie wstaje przez EFI"))
 	}
 	if *stan.SecureBoot {
 		return Wynik{Passed: true, Observed: "wlaczony"}
@@ -245,41 +264,88 @@ func ocenSecureBoot(wejscie Wejscie) Wynik {
 func ocenWystawienie(wejscie Wejscie) Wynik {
 	stan, ok := stanOchrony(wejscie)
 	if !ok {
-		return nieznane("nie odczytano stanu ochronnego")
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
 	}
 	if !stan.ListeningKnown {
-		return nieznane("nie odczytano listy gniazd nasluchujacych")
+		return nieznane(PowodBrakFaktu, "nie odczytano listy gniazd nasluchujacych")
 	}
-	wystawione := stan.Wystawione()
-	if len(wystawione) == 0 {
-		return Wynik{Passed: true, Observed: "host nie nasluchuje poza petla zwrotna"}
+	poza := stan.PozaPetla()
+	if len(poza) == 0 {
+		return Wynik{Passed: true, Observed: "host nasluchuje wylacznie na petli zwrotnej"}
 	}
-	opisy := make([]string, 0, len(wystawione))
-	for _, gniazdo := range wystawione {
-		opis := gniazdo.Protocol + "/" + strconv.Itoa(gniazdo.Port)
+
+	liczby := stan.WedlugZasiegu()
+	opisy := make([]string, 0, len(poza))
+	for _, gniazdo := range poza {
+		opis := gniazdo.Protocol + "/" + strconv.Itoa(gniazdo.Port) + " " + gniazdo.Reach
 		if gniazdo.Process != "" {
 			opis += " (" + gniazdo.Process + ")"
 		}
 		opisy = append(opisy, opis)
 	}
-	// To ustalenie zawsze wymaga czlowieka: panel nie wie, ktora usluga ma
-	// prawo byc wystawiona, a zamkniecie zlej odcina dostep do hosta.
+	dowod := strings.Join(opisy, ", ")
+	// Bez wlascicieli gniazd lista jest pelna, ale bezimienna - i operator ma
+	// o tym wiedziec, zanim zacznie szukac, co to za usluga.
+	if !stan.OwnersKnown {
+		dowod += "; wlasciciele gniazd nieznani"
+	}
+
+	// Panel nie orzeka, ze usluga jest widoczna z internetu: tego nie widac
+	// z adresu. Mowi, na czym gniazdo stoi, a decyzje zostawia czlowiekowi.
 	return Wynik{
-		Observed: fmt.Sprintf("%d gniazd poza petla zwrotna", len(wystawione)),
-		Evidence: strings.Join(opisy, ", "),
+		Observed: fmt.Sprintf("%d na wszystkich interfejsach, %d na adresie hosta",
+			liczby[security.ZasiegWszystkie], liczby[security.ZasiegAdresHosta]),
+		Evidence: dowod,
 		Remediation: &Naprawa{Note: "kazde gniazdo zamyka sie inaczej: regula zapory, konfiguracja uslugi " +
 			"albo jej wylaczenie; panel nie zgaduje, ktora z tych rzeczy jest tu wlasciwa"},
+	}
+}
+
+// ocenRegulAudytu porownuje reguly zapisane w plikach z tymi, ktore zna jadro.
+func ocenRegulAudytu(wejscie Wejscie) Wynik {
+	stan, ok := stanOchrony(wejscie)
+	if !ok {
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+	}
+	if !stan.Audit.Present {
+		return nieDotyczy("ten host nie ma demona audytu")
+	}
+	if stan.Audit.RulesConfigured == nil || stan.Audit.RulesLoaded == nil {
+		if powod, brakuje := stan.Missing[security.FaktRegulyAudytu]; brakuje {
+			return nieznane(kodBraku(powod), powod)
+		}
+		return nieznane(PowodBrakFaktu, "host nie zglosil regul audytu")
+	}
+	if *stan.Audit.RulesConfigured == 0 {
+		return nieDotyczy("ten host nie ma zapisanych regul audytu")
+	}
+	opis := strconv.Itoa(*stan.Audit.RulesLoaded) + " z " +
+		strconv.Itoa(*stan.Audit.RulesConfigured) + " regul zaladowanych do jadra"
+	if *stan.Audit.RulesLoaded >= *stan.Audit.RulesConfigured {
+		return Wynik{Passed: true, Observed: opis}
+	}
+	// Plik regul dopisany i niezaladowany opisuje audyt, ktorego nie ma.
+	return Wynik{
+		Observed: opis,
+		Remediation: &Naprawa{
+			Action: "security.audit.reload",
+			Note: "reguly wczytuje augenrules; restart jednostki nie jest tu droga, " +
+				"bo auditd na czesci dystrybucji odmawia recznego restartu",
+		},
 	}
 }
 
 func ocenRootLogin(wejscie Wejscie) Wynik {
 	stan, ok := stanSSH(wejscie)
 	if !ok {
-		return nieznane("nie odczytano konfiguracji sshd")
+		return nieznane(PowodBladOdczytu, "nie odczytano konfiguracji sshd")
+	}
+	if stan.Unit == "" && len(stan.Ports) == 0 {
+		return nieDotyczy("ten host nie ma serwera sshd")
 	}
 	wartosc := strings.ToLower(stan.PermitRootLogin)
 	if wartosc == "" {
-		return nieznane("sshd nie zglosil ustawienia PermitRootLogin")
+		return nieznane(PowodBrakFaktu, "sshd nie zglosil ustawienia PermitRootLogin")
 	}
 	if wartosc == "no" {
 		return Wynik{Passed: true, Observed: wartosc}
@@ -298,11 +364,14 @@ func ocenRootLogin(wejscie Wejscie) Wynik {
 func ocenHasla(wejscie Wejscie) Wynik {
 	stan, ok := stanSSH(wejscie)
 	if !ok {
-		return nieznane("nie odczytano konfiguracji sshd")
+		return nieznane(PowodBladOdczytu, "nie odczytano konfiguracji sshd")
+	}
+	if stan.Unit == "" && len(stan.Ports) == 0 {
+		return nieDotyczy("ten host nie ma serwera sshd")
 	}
 	wartosc := strings.ToLower(stan.PasswordAuthentication)
 	if wartosc == "" {
-		return nieznane("sshd nie zglosil ustawienia PasswordAuthentication")
+		return nieznane(PowodBrakFaktu, "sshd nie zglosil ustawienia PasswordAuthentication")
 	}
 	if wartosc == "no" {
 		return Wynik{Passed: true, Observed: wartosc}
@@ -323,18 +392,18 @@ func ocenUstawienia(klucz, oczekiwana string) func(Wejscie) Wynik {
 	return func(wejscie Wejscie) Wynik {
 		fragment, ok := wejscie.Fragment(modulKernel)
 		if !ok {
-			return nieznane("nie odczytano ustawien jadra")
+			return nieznane(PowodBrakFaktu, "nie odczytano ustawien jadra")
 		}
 		var stan kernel.Snapshot
 		if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-			return nieznane("nie odczytano ustawien jadra: " + err.Error())
+			return nieznane(PowodBladOdczytu, "nie odczytano ustawien jadra: "+err.Error())
 		}
 		for _, ustawienie := range stan.Settings {
 			if ustawienie.Key != klucz {
 				continue
 			}
 			if ustawienie.Current == "" {
-				return nieznane("host nie zglosil wartosci " + klucz)
+				return nieznane(PowodBrakFaktu, "host nie zglosil wartosci "+klucz)
 			}
 			if ustawienie.Current == oczekiwana {
 				return Wynik{Passed: true, Observed: klucz + " = " + ustawienie.Current}
@@ -348,21 +417,21 @@ func ocenUstawienia(klucz, oczekiwana string) func(Wejscie) Wynik {
 				},
 			}
 		}
-		return nieznane("host nie zglosil klucza " + klucz)
+		return nieznane(PowodBrakFaktu, "host nie zglosil klucza "+klucz)
 	}
 }
 
 func ocenCzas(wejscie Wejscie) Wynik {
 	fragment, ok := wejscie.Fragment(modulTime)
 	if !ok {
-		return nieznane("nie odczytano stanu czasu")
+		return nieznane(PowodBrakFaktu, "nie odczytano stanu czasu")
 	}
 	var stan czas.Snapshot
 	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-		return nieznane("nie odczytano stanu czasu: " + err.Error())
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu czasu: "+err.Error())
 	}
 	if stan.Synchronized == nil {
-		return nieznane("host nie zglosil stanu synchronizacji")
+		return nieznane(PowodBrakFaktu, "host nie zglosil stanu synchronizacji")
 	}
 	if *stan.Synchronized {
 		opis := "zsynchronizowany"
@@ -383,7 +452,7 @@ func ocenPoprawek(wejscie Wejscie) Wynik {
 	// To sprawdzenie nie liczy sie z fragmentu: liczbe poprawek panel zna
 	// z inwentarza pakietow, ktory normalizuje sam.
 	if wejscie.Host.PendingSecurityUpdates == nil {
-		return nieznane("host nie zglosil liczby poprawek bezpieczenstwa")
+		return nieznane(PowodBrakFaktu, "host nie zglosil liczby poprawek bezpieczenstwa")
 	}
 	liczba := *wejscie.Host.PendingSecurityUpdates
 	if liczba == 0 {
@@ -402,14 +471,14 @@ func ocenPoprawek(wejscie Wejscie) Wynik {
 func ocenRestartu(wejscie Wejscie) Wynik {
 	fragment, ok := wejscie.Fragment(modulPower)
 	if !ok {
-		return nieznane("nie odczytano stanu startu")
+		return nieznane(PowodBrakFaktu, "nie odczytano stanu startu")
 	}
 	var stan power.Snapshot
 	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-		return nieznane("nie odczytano stanu startu: " + err.Error())
+		return nieznane(PowodBladOdczytu, "nie odczytano stanu startu: "+err.Error())
 	}
 	if stan.RebootRequired == nil {
-		return nieznane("host nie zglosil, czy wymaga restartu")
+		return nieznane(PowodBrakFaktu, "host nie zglosil, czy wymaga restartu")
 	}
 	if !*stan.RebootRequired {
 		return Wynik{Passed: true, Observed: "restart niewymagany"}
@@ -418,9 +487,10 @@ func ocenRestartu(wejscie Wejscie) Wynik {
 		Observed: "host czeka na restart",
 		Evidence: strings.Join(stan.RebootReasons, ", "),
 		Remediation: &Naprawa{
-			Action:  "system.reboot",
-			Payload: json.RawMessage(`{"reboot":{"delay_seconds":15,"reason":"restart po poprawkach"}}`),
-			Note:    "restart jest osobna faza; w kampanii idzie falami z health checkiem",
+			Action:         "system.reboot",
+			Payload:        json.RawMessage(`{"reboot":{"delay_seconds":15,"reason":"restart po poprawkach"}}`),
+			Note:           "restart konczy plan: to, co po nim, i tak trzeba ocenic na nowo",
+			RequiresReboot: true,
 		},
 	}
 }
@@ -466,8 +536,30 @@ func opisMAC(mac security.Mandatory) string {
 	return "brak"
 }
 
-func nieznane(powod string) Wynik {
-	return Wynik{Unknown: true, Observed: powod}
+// nieznane zwraca stan nieustalony wraz z kodem powodu. Kod jest obowiazkowy:
+// bez niego operator nie wie, czy czekac na odczyt, naprawic agenta, czy nadac
+// uprawnienia.
+func nieznane(kod, powod string) Wynik {
+	return Wynik{Unknown: true, ReasonCode: kod, Observed: powod}
+}
+
+// nieDotyczy zwraca stan "nie dotyczy": host nie ma komponentu, o ktory pyta
+// sprawdzenie. To nie jest ani przejscie, ani porazka.
+func nieDotyczy(powod string) Wynik {
+	return Wynik{NotApplicable: true, ReasonCode: PowodNieobslugiwane, Observed: powod}
+}
+
+// kodBraku tlumaczy powod braku faktu na kod. Odmowa dostepu i nieudany odczyt
+// prowadza do dwoch roznych dzialan operatora.
+func kodBraku(powod string) string {
+	nizszy := strings.ToLower(powod)
+	switch {
+	case strings.Contains(nizszy, "uprawnien"), strings.Contains(nizszy, "permission denied"),
+		strings.Contains(nizszy, "tylko root"), strings.Contains(nizszy, "securityfs"):
+		return PowodBrakUprawnienia
+	default:
+		return PowodBladOdczytu
+	}
 }
 
 func pierwszyNiepusty(wartosci ...string) string {

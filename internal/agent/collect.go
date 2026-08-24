@@ -156,13 +156,13 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 		}
 	}
 
-	// Stan ochronny czyta helper: profile AppArmora leza w securityfs, reguly
-	// audytu czyta auditctl, a wlascicieli gniazd widzi tylko root.
+	// Stan ochronny sklada agent: wiekszosc faktow jest czytelna bez roota,
+	// a te, ktore nie sa, zamawia u helpera po nazwie.
 	if securityProbe != nil {
 		if snapshot, err := securityProbe(ctx); err == nil {
 			facts.Security = &snapshot
 		} else {
-			facts.Security = &security.Snapshot{UnavailableReason: "helper: " + err.Error()}
+			facts.Security = &security.Snapshot{UnavailableReason: err.Error()}
 		}
 	}
 

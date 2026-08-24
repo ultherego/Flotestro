@@ -1007,6 +1007,7 @@ message SecurityAction {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_SCAN = 1;
     OPERATION_SELINUX_MODE = 2;
+    OPERATION_AUDIT_RELOAD = 3;
   }
   Operation operation = 1;
   string mode = 2;

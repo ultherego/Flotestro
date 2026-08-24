@@ -678,22 +678,29 @@ func (SshRequest_Operation) EnumDescriptor() ([]byte, []int) {
 type SecurityRequest_Operation int32
 
 const (
-	SecurityRequest_OPERATION_UNSPECIFIED  SecurityRequest_Operation = 0
-	SecurityRequest_OPERATION_READ         SecurityRequest_Operation = 1
+	SecurityRequest_OPERATION_UNSPECIFIED SecurityRequest_Operation = 0
+	// Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
+	// ani "uruchom polecenie": dostaje liste nazw faktow, ktore umie zebrac.
+	SecurityRequest_OPERATION_FACTS        SecurityRequest_Operation = 1
 	SecurityRequest_OPERATION_SELINUX_MODE SecurityRequest_Operation = 2
+	// Przeladowanie regul audytu z plikow do jadra. Osobna operacja, bo
+	// jednostka auditd na czesci dystrybucji odmawia recznego restartu.
+	SecurityRequest_OPERATION_AUDIT_RELOAD SecurityRequest_Operation = 3
 )
 
 // Enum value maps for SecurityRequest_Operation.
 var (
 	SecurityRequest_Operation_name = map[int32]string{
 		0: "OPERATION_UNSPECIFIED",
-		1: "OPERATION_READ",
+		1: "OPERATION_FACTS",
 		2: "OPERATION_SELINUX_MODE",
+		3: "OPERATION_AUDIT_RELOAD",
 	}
 	SecurityRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
-		"OPERATION_READ":         1,
+		"OPERATION_FACTS":        1,
 		"OPERATION_SELINUX_MODE": 2,
+		"OPERATION_AUDIT_RELOAD": 3,
 	}
 )
 
@@ -722,6 +729,63 @@ func (x SecurityRequest_Operation) Number() protoreflect.EnumNumber {
 // Deprecated: Use SecurityRequest_Operation.Descriptor instead.
 func (SecurityRequest_Operation) EnumDescriptor() ([]byte, []int) {
 	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{26, 0}
+}
+
+// Fact wylicza to, czego nie da sie odczytac bez roota. Reszte obrazu
+// agent sklada sam, bez przechodzenia przez helpera.
+type SecurityRequest_Fact int32
+
+const (
+	SecurityRequest_FACT_UNSPECIFIED       SecurityRequest_Fact = 0
+	SecurityRequest_FACT_APPARMOR_PROFILES SecurityRequest_Fact = 1
+	SecurityRequest_FACT_AUDIT_RULES       SecurityRequest_Fact = 2
+	SecurityRequest_FACT_SECURE_BOOT       SecurityRequest_Fact = 3
+	SecurityRequest_FACT_SOCKET_OWNERS     SecurityRequest_Fact = 4
+)
+
+// Enum value maps for SecurityRequest_Fact.
+var (
+	SecurityRequest_Fact_name = map[int32]string{
+		0: "FACT_UNSPECIFIED",
+		1: "FACT_APPARMOR_PROFILES",
+		2: "FACT_AUDIT_RULES",
+		3: "FACT_SECURE_BOOT",
+		4: "FACT_SOCKET_OWNERS",
+	}
+	SecurityRequest_Fact_value = map[string]int32{
+		"FACT_UNSPECIFIED":       0,
+		"FACT_APPARMOR_PROFILES": 1,
+		"FACT_AUDIT_RULES":       2,
+		"FACT_SECURE_BOOT":       3,
+		"FACT_SOCKET_OWNERS":     4,
+	}
+)
+
+func (x SecurityRequest_Fact) Enum() *SecurityRequest_Fact {
+	p := new(SecurityRequest_Fact)
+	*p = x
+	return p
+}
+
+func (x SecurityRequest_Fact) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SecurityRequest_Fact) Descriptor() protoreflect.EnumDescriptor {
+	return file_flotestro_helper_v1_helper_proto_enumTypes[12].Descriptor()
+}
+
+func (SecurityRequest_Fact) Type() protoreflect.EnumType {
+	return &file_flotestro_helper_v1_helper_proto_enumTypes[12]
+}
+
+func (x SecurityRequest_Fact) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SecurityRequest_Fact.Descriptor instead.
+func (SecurityRequest_Fact) EnumDescriptor() ([]byte, []int) {
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{26, 1}
 }
 
 type TimeRequest_Operation int32
@@ -757,11 +821,11 @@ func (x TimeRequest_Operation) String() string {
 }
 
 func (TimeRequest_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_helper_v1_helper_proto_enumTypes[12].Descriptor()
+	return file_flotestro_helper_v1_helper_proto_enumTypes[13].Descriptor()
 }
 
 func (TimeRequest_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_helper_v1_helper_proto_enumTypes[12]
+	return &file_flotestro_helper_v1_helper_proto_enumTypes[13]
 }
 
 func (x TimeRequest_Operation) Number() protoreflect.EnumNumber {
@@ -812,11 +876,11 @@ func (x KernelRequest_Operation) String() string {
 }
 
 func (KernelRequest_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_helper_v1_helper_proto_enumTypes[13].Descriptor()
+	return file_flotestro_helper_v1_helper_proto_enumTypes[14].Descriptor()
 }
 
 func (KernelRequest_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_helper_v1_helper_proto_enumTypes[13]
+	return &file_flotestro_helper_v1_helper_proto_enumTypes[14]
 }
 
 func (x KernelRequest_Operation) Number() protoreflect.EnumNumber {
@@ -868,11 +932,11 @@ func (x FileRequest_Operation) String() string {
 }
 
 func (FileRequest_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_helper_v1_helper_proto_enumTypes[14].Descriptor()
+	return file_flotestro_helper_v1_helper_proto_enumTypes[15].Descriptor()
 }
 
 func (FileRequest_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_helper_v1_helper_proto_enumTypes[14]
+	return &file_flotestro_helper_v1_helper_proto_enumTypes[15]
 }
 
 func (x FileRequest_Operation) Number() protoreflect.EnumNumber {
@@ -917,11 +981,11 @@ func (x ComposeRequest_Operation) String() string {
 }
 
 func (ComposeRequest_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_helper_v1_helper_proto_enumTypes[15].Descriptor()
+	return file_flotestro_helper_v1_helper_proto_enumTypes[16].Descriptor()
 }
 
 func (ComposeRequest_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_helper_v1_helper_proto_enumTypes[15]
+	return &file_flotestro_helper_v1_helper_proto_enumTypes[16]
 }
 
 func (x ComposeRequest_Operation) Number() protoreflect.EnumNumber {
@@ -3798,6 +3862,7 @@ type SecurityRequest struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`
 	Operation     SecurityRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.SecurityRequest_Operation" json:"operation,omitempty"`
 	Mode          string                    `protobuf:"bytes,2,opt,name=mode,proto3" json:"mode,omitempty"`
+	Facts         []SecurityRequest_Fact    `protobuf:"varint,3,rep,packed,name=facts,proto3,enum=flotestro.helper.v1.SecurityRequest_Fact" json:"facts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3846,10 +3911,18 @@ func (x *SecurityRequest) GetMode() string {
 	return ""
 }
 
+func (x *SecurityRequest) GetFacts() []SecurityRequest_Fact {
+	if x != nil {
+		return x.Facts
+	}
+	return nil
+}
+
 type SecurityResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Snapshot      []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
+	Facts         []byte `protobuf:"bytes,1,opt,name=facts,proto3" json:"facts,omitempty"`
+	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3884,9 +3957,9 @@ func (*SecurityResult) Descriptor() ([]byte, []int) {
 	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{27}
 }
 
-func (x *SecurityResult) GetSnapshot() []byte {
+func (x *SecurityResult) GetFacts() []byte {
 	if x != nil {
-		return x.Snapshot
+		return x.Facts
 	}
 	return nil
 }
@@ -6196,16 +6269,24 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1e\n" +
 	"\n" +
 	"mismatches\x18\x03 \x03(\tR\n" +
-	"mismatches\"\xcb\x01\n" +
+	"mismatches\"\xa7\x03\n" +
 	"\x0fSecurityRequest\x12L\n" +
 	"\toperation\x18\x01 \x01(\x0e2..flotestro.helper.v1.SecurityRequest.OperationR\toperation\x12\x12\n" +
-	"\x04mode\x18\x02 \x01(\tR\x04mode\"V\n" +
+	"\x04mode\x18\x02 \x01(\tR\x04mode\x12?\n" +
+	"\x05facts\x18\x03 \x03(\x0e2).flotestro.helper.v1.SecurityRequest.FactR\x05facts\"s\n" +
 	"\tOperation\x12\x19\n" +
-	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
-	"\x0eOPERATION_READ\x10\x01\x12\x1a\n" +
-	"\x16OPERATION_SELINUX_MODE\x10\x02\"F\n" +
-	"\x0eSecurityResult\x12\x1a\n" +
-	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
+	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fOPERATION_FACTS\x10\x01\x12\x1a\n" +
+	"\x16OPERATION_SELINUX_MODE\x10\x02\x12\x1a\n" +
+	"\x16OPERATION_AUDIT_RELOAD\x10\x03\"|\n" +
+	"\x04Fact\x12\x14\n" +
+	"\x10FACT_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16FACT_APPARMOR_PROFILES\x10\x01\x12\x14\n" +
+	"\x10FACT_AUDIT_RULES\x10\x02\x12\x14\n" +
+	"\x10FACT_SECURE_BOOT\x10\x03\x12\x16\n" +
+	"\x12FACT_SOCKET_OWNERS\x10\x04\"@\n" +
+	"\x0eSecurityResult\x12\x14\n" +
+	"\x05facts\x18\x01 \x01(\fR\x05facts\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xb1\x02\n" +
 	"\vTimeRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.TimeRequest.OperationR\toperation\x12\x18\n" +
@@ -6402,7 +6483,7 @@ func file_flotestro_helper_v1_helper_proto_rawDescGZIP() []byte {
 	return file_flotestro_helper_v1_helper_proto_rawDescData
 }
 
-var file_flotestro_helper_v1_helper_proto_enumTypes = make([]protoimpl.EnumInfo, 16)
+var file_flotestro_helper_v1_helper_proto_enumTypes = make([]protoimpl.EnumInfo, 17)
 var file_flotestro_helper_v1_helper_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
 var file_flotestro_helper_v1_helper_proto_goTypes = []any{
 	(LocalUserActionRequest_Operation)(0), // 0: flotestro.helper.v1.LocalUserActionRequest.Operation
@@ -6417,122 +6498,123 @@ var file_flotestro_helper_v1_helper_proto_goTypes = []any{
 	(StorageRequest_Operation)(0),         // 9: flotestro.helper.v1.StorageRequest.Operation
 	(SshRequest_Operation)(0),             // 10: flotestro.helper.v1.SshRequest.Operation
 	(SecurityRequest_Operation)(0),        // 11: flotestro.helper.v1.SecurityRequest.Operation
-	(TimeRequest_Operation)(0),            // 12: flotestro.helper.v1.TimeRequest.Operation
-	(KernelRequest_Operation)(0),          // 13: flotestro.helper.v1.KernelRequest.Operation
-	(FileRequest_Operation)(0),            // 14: flotestro.helper.v1.FileRequest.Operation
-	(ComposeRequest_Operation)(0),         // 15: flotestro.helper.v1.ComposeRequest.Operation
-	(*HelperRequest)(nil),                 // 16: flotestro.helper.v1.HelperRequest
-	(*LocalAccountsRequest)(nil),          // 17: flotestro.helper.v1.LocalAccountsRequest
-	(*LocalUserActionRequest)(nil),        // 18: flotestro.helper.v1.LocalUserActionRequest
-	(*DomainEnrollRequest)(nil),           // 19: flotestro.helper.v1.DomainEnrollRequest
-	(*IdentityProbeRequest)(nil),          // 20: flotestro.helper.v1.IdentityProbeRequest
-	(*RebootRequest)(nil),                 // 21: flotestro.helper.v1.RebootRequest
-	(*ShutdownRequest)(nil),               // 22: flotestro.helper.v1.ShutdownRequest
-	(*PowerResult)(nil),                   // 23: flotestro.helper.v1.PowerResult
-	(*PackageActionRequest)(nil),          // 24: flotestro.helper.v1.PackageActionRequest
-	(*UnitActionRequest)(nil),             // 25: flotestro.helper.v1.UnitActionRequest
-	(*HelperResponse)(nil),                // 26: flotestro.helper.v1.HelperResponse
-	(*DockerReadRequest)(nil),             // 27: flotestro.helper.v1.DockerReadRequest
-	(*DockerActionRequest)(nil),           // 28: flotestro.helper.v1.DockerActionRequest
-	(*DockerActionResult)(nil),            // 29: flotestro.helper.v1.DockerActionResult
-	(*ScheduleRequest)(nil),               // 30: flotestro.helper.v1.ScheduleRequest
-	(*ScheduleResult)(nil),                // 31: flotestro.helper.v1.ScheduleResult
-	(*NetworkRequest)(nil),                // 32: flotestro.helper.v1.NetworkRequest
-	(*NetworkResult)(nil),                 // 33: flotestro.helper.v1.NetworkResult
-	(*DnsRequest)(nil),                    // 34: flotestro.helper.v1.DnsRequest
-	(*DnsResult)(nil),                     // 35: flotestro.helper.v1.DnsResult
-	(*FirewallRequest)(nil),               // 36: flotestro.helper.v1.FirewallRequest
-	(*FirewallResult)(nil),                // 37: flotestro.helper.v1.FirewallResult
-	(*StorageRequest)(nil),                // 38: flotestro.helper.v1.StorageRequest
-	(*StorageResult)(nil),                 // 39: flotestro.helper.v1.StorageResult
-	(*SshRequest)(nil),                    // 40: flotestro.helper.v1.SshRequest
-	(*SshResult)(nil),                     // 41: flotestro.helper.v1.SshResult
-	(*SecurityRequest)(nil),               // 42: flotestro.helper.v1.SecurityRequest
-	(*SecurityResult)(nil),                // 43: flotestro.helper.v1.SecurityResult
-	(*TimeRequest)(nil),                   // 44: flotestro.helper.v1.TimeRequest
-	(*TimeResult)(nil),                    // 45: flotestro.helper.v1.TimeResult
-	(*KernelRequest)(nil),                 // 46: flotestro.helper.v1.KernelRequest
-	(*KernelResult)(nil),                  // 47: flotestro.helper.v1.KernelResult
-	(*FileRequest)(nil),                   // 48: flotestro.helper.v1.FileRequest
-	(*FileResult)(nil),                    // 49: flotestro.helper.v1.FileResult
-	(*ProcessSignalRequest)(nil),          // 50: flotestro.helper.v1.ProcessSignalRequest
-	(*ProcessSignalResult)(nil),           // 51: flotestro.helper.v1.ProcessSignalResult
-	(*LogFileRequest)(nil),                // 52: flotestro.helper.v1.LogFileRequest
-	(*LogFileResult)(nil),                 // 53: flotestro.helper.v1.LogFileResult
-	(*ComposeRequest)(nil),                // 54: flotestro.helper.v1.ComposeRequest
-	(*ComposeResult)(nil),                 // 55: flotestro.helper.v1.ComposeResult
-	(*DockerReadResult)(nil),              // 56: flotestro.helper.v1.DockerReadResult
-	(*TaskProgress)(nil),                  // 57: flotestro.helper.v1.TaskProgress
-	(*LocalAccountsResult)(nil),           // 58: flotestro.helper.v1.LocalAccountsResult
-	(*LocalAccountDetail)(nil),            // 59: flotestro.helper.v1.LocalAccountDetail
-	(*LocalSSHKey)(nil),                   // 60: flotestro.helper.v1.LocalSSHKey
-	(*DomainEnrollResult)(nil),            // 61: flotestro.helper.v1.DomainEnrollResult
-	(*EnrollCheck)(nil),                   // 62: flotestro.helper.v1.EnrollCheck
-	(*IdentityProbeResult)(nil),           // 63: flotestro.helper.v1.IdentityProbeResult
-	(*PackageActionResult)(nil),           // 64: flotestro.helper.v1.PackageActionResult
-	(*PackageRepairRequest)(nil),          // 65: flotestro.helper.v1.PackageRepairRequest
-	(*DebconfSelection)(nil),              // 66: flotestro.helper.v1.DebconfSelection
-	(*PackageRepairResponse)(nil),         // 67: flotestro.helper.v1.PackageRepairResponse
-	(*BlockedPackageDetail)(nil),          // 68: flotestro.helper.v1.BlockedPackageDetail
-	(*DebconfQuestionDetail)(nil),         // 69: flotestro.helper.v1.DebconfQuestionDetail
-	(*PackageVersionChange)(nil),          // 70: flotestro.helper.v1.PackageVersionChange
-	(*UnitState)(nil),                     // 71: flotestro.helper.v1.UnitState
-	nil,                                   // 72: flotestro.helper.v1.KernelRequest.SettingsEntry
-	(*timestamppb.Timestamp)(nil),         // 73: google.protobuf.Timestamp
+	(SecurityRequest_Fact)(0),             // 12: flotestro.helper.v1.SecurityRequest.Fact
+	(TimeRequest_Operation)(0),            // 13: flotestro.helper.v1.TimeRequest.Operation
+	(KernelRequest_Operation)(0),          // 14: flotestro.helper.v1.KernelRequest.Operation
+	(FileRequest_Operation)(0),            // 15: flotestro.helper.v1.FileRequest.Operation
+	(ComposeRequest_Operation)(0),         // 16: flotestro.helper.v1.ComposeRequest.Operation
+	(*HelperRequest)(nil),                 // 17: flotestro.helper.v1.HelperRequest
+	(*LocalAccountsRequest)(nil),          // 18: flotestro.helper.v1.LocalAccountsRequest
+	(*LocalUserActionRequest)(nil),        // 19: flotestro.helper.v1.LocalUserActionRequest
+	(*DomainEnrollRequest)(nil),           // 20: flotestro.helper.v1.DomainEnrollRequest
+	(*IdentityProbeRequest)(nil),          // 21: flotestro.helper.v1.IdentityProbeRequest
+	(*RebootRequest)(nil),                 // 22: flotestro.helper.v1.RebootRequest
+	(*ShutdownRequest)(nil),               // 23: flotestro.helper.v1.ShutdownRequest
+	(*PowerResult)(nil),                   // 24: flotestro.helper.v1.PowerResult
+	(*PackageActionRequest)(nil),          // 25: flotestro.helper.v1.PackageActionRequest
+	(*UnitActionRequest)(nil),             // 26: flotestro.helper.v1.UnitActionRequest
+	(*HelperResponse)(nil),                // 27: flotestro.helper.v1.HelperResponse
+	(*DockerReadRequest)(nil),             // 28: flotestro.helper.v1.DockerReadRequest
+	(*DockerActionRequest)(nil),           // 29: flotestro.helper.v1.DockerActionRequest
+	(*DockerActionResult)(nil),            // 30: flotestro.helper.v1.DockerActionResult
+	(*ScheduleRequest)(nil),               // 31: flotestro.helper.v1.ScheduleRequest
+	(*ScheduleResult)(nil),                // 32: flotestro.helper.v1.ScheduleResult
+	(*NetworkRequest)(nil),                // 33: flotestro.helper.v1.NetworkRequest
+	(*NetworkResult)(nil),                 // 34: flotestro.helper.v1.NetworkResult
+	(*DnsRequest)(nil),                    // 35: flotestro.helper.v1.DnsRequest
+	(*DnsResult)(nil),                     // 36: flotestro.helper.v1.DnsResult
+	(*FirewallRequest)(nil),               // 37: flotestro.helper.v1.FirewallRequest
+	(*FirewallResult)(nil),                // 38: flotestro.helper.v1.FirewallResult
+	(*StorageRequest)(nil),                // 39: flotestro.helper.v1.StorageRequest
+	(*StorageResult)(nil),                 // 40: flotestro.helper.v1.StorageResult
+	(*SshRequest)(nil),                    // 41: flotestro.helper.v1.SshRequest
+	(*SshResult)(nil),                     // 42: flotestro.helper.v1.SshResult
+	(*SecurityRequest)(nil),               // 43: flotestro.helper.v1.SecurityRequest
+	(*SecurityResult)(nil),                // 44: flotestro.helper.v1.SecurityResult
+	(*TimeRequest)(nil),                   // 45: flotestro.helper.v1.TimeRequest
+	(*TimeResult)(nil),                    // 46: flotestro.helper.v1.TimeResult
+	(*KernelRequest)(nil),                 // 47: flotestro.helper.v1.KernelRequest
+	(*KernelResult)(nil),                  // 48: flotestro.helper.v1.KernelResult
+	(*FileRequest)(nil),                   // 49: flotestro.helper.v1.FileRequest
+	(*FileResult)(nil),                    // 50: flotestro.helper.v1.FileResult
+	(*ProcessSignalRequest)(nil),          // 51: flotestro.helper.v1.ProcessSignalRequest
+	(*ProcessSignalResult)(nil),           // 52: flotestro.helper.v1.ProcessSignalResult
+	(*LogFileRequest)(nil),                // 53: flotestro.helper.v1.LogFileRequest
+	(*LogFileResult)(nil),                 // 54: flotestro.helper.v1.LogFileResult
+	(*ComposeRequest)(nil),                // 55: flotestro.helper.v1.ComposeRequest
+	(*ComposeResult)(nil),                 // 56: flotestro.helper.v1.ComposeResult
+	(*DockerReadResult)(nil),              // 57: flotestro.helper.v1.DockerReadResult
+	(*TaskProgress)(nil),                  // 58: flotestro.helper.v1.TaskProgress
+	(*LocalAccountsResult)(nil),           // 59: flotestro.helper.v1.LocalAccountsResult
+	(*LocalAccountDetail)(nil),            // 60: flotestro.helper.v1.LocalAccountDetail
+	(*LocalSSHKey)(nil),                   // 61: flotestro.helper.v1.LocalSSHKey
+	(*DomainEnrollResult)(nil),            // 62: flotestro.helper.v1.DomainEnrollResult
+	(*EnrollCheck)(nil),                   // 63: flotestro.helper.v1.EnrollCheck
+	(*IdentityProbeResult)(nil),           // 64: flotestro.helper.v1.IdentityProbeResult
+	(*PackageActionResult)(nil),           // 65: flotestro.helper.v1.PackageActionResult
+	(*PackageRepairRequest)(nil),          // 66: flotestro.helper.v1.PackageRepairRequest
+	(*DebconfSelection)(nil),              // 67: flotestro.helper.v1.DebconfSelection
+	(*PackageRepairResponse)(nil),         // 68: flotestro.helper.v1.PackageRepairResponse
+	(*BlockedPackageDetail)(nil),          // 69: flotestro.helper.v1.BlockedPackageDetail
+	(*DebconfQuestionDetail)(nil),         // 70: flotestro.helper.v1.DebconfQuestionDetail
+	(*PackageVersionChange)(nil),          // 71: flotestro.helper.v1.PackageVersionChange
+	(*UnitState)(nil),                     // 72: flotestro.helper.v1.UnitState
+	nil,                                   // 73: flotestro.helper.v1.KernelRequest.SettingsEntry
+	(*timestamppb.Timestamp)(nil),         // 74: google.protobuf.Timestamp
 }
 var file_flotestro_helper_v1_helper_proto_depIdxs = []int32{
-	73, // 0: flotestro.helper.v1.HelperRequest.expires_at:type_name -> google.protobuf.Timestamp
-	25, // 1: flotestro.helper.v1.HelperRequest.unit_action:type_name -> flotestro.helper.v1.UnitActionRequest
-	24, // 2: flotestro.helper.v1.HelperRequest.package_action:type_name -> flotestro.helper.v1.PackageActionRequest
-	21, // 3: flotestro.helper.v1.HelperRequest.reboot:type_name -> flotestro.helper.v1.RebootRequest
-	20, // 4: flotestro.helper.v1.HelperRequest.identity_probe:type_name -> flotestro.helper.v1.IdentityProbeRequest
-	19, // 5: flotestro.helper.v1.HelperRequest.domain_enroll:type_name -> flotestro.helper.v1.DomainEnrollRequest
-	17, // 6: flotestro.helper.v1.HelperRequest.local_accounts:type_name -> flotestro.helper.v1.LocalAccountsRequest
-	18, // 7: flotestro.helper.v1.HelperRequest.local_user_action:type_name -> flotestro.helper.v1.LocalUserActionRequest
-	65, // 8: flotestro.helper.v1.HelperRequest.package_repair:type_name -> flotestro.helper.v1.PackageRepairRequest
-	27, // 9: flotestro.helper.v1.HelperRequest.docker_read:type_name -> flotestro.helper.v1.DockerReadRequest
-	28, // 10: flotestro.helper.v1.HelperRequest.docker_action:type_name -> flotestro.helper.v1.DockerActionRequest
-	54, // 11: flotestro.helper.v1.HelperRequest.compose:type_name -> flotestro.helper.v1.ComposeRequest
-	52, // 12: flotestro.helper.v1.HelperRequest.log_file:type_name -> flotestro.helper.v1.LogFileRequest
-	50, // 13: flotestro.helper.v1.HelperRequest.process_signal:type_name -> flotestro.helper.v1.ProcessSignalRequest
-	30, // 14: flotestro.helper.v1.HelperRequest.schedule:type_name -> flotestro.helper.v1.ScheduleRequest
-	32, // 15: flotestro.helper.v1.HelperRequest.network:type_name -> flotestro.helper.v1.NetworkRequest
-	34, // 16: flotestro.helper.v1.HelperRequest.dns:type_name -> flotestro.helper.v1.DnsRequest
-	36, // 17: flotestro.helper.v1.HelperRequest.firewall:type_name -> flotestro.helper.v1.FirewallRequest
-	38, // 18: flotestro.helper.v1.HelperRequest.storage:type_name -> flotestro.helper.v1.StorageRequest
-	40, // 19: flotestro.helper.v1.HelperRequest.ssh:type_name -> flotestro.helper.v1.SshRequest
-	46, // 20: flotestro.helper.v1.HelperRequest.kernel:type_name -> flotestro.helper.v1.KernelRequest
-	48, // 21: flotestro.helper.v1.HelperRequest.file:type_name -> flotestro.helper.v1.FileRequest
-	44, // 22: flotestro.helper.v1.HelperRequest.time:type_name -> flotestro.helper.v1.TimeRequest
-	22, // 23: flotestro.helper.v1.HelperRequest.shutdown:type_name -> flotestro.helper.v1.ShutdownRequest
-	42, // 24: flotestro.helper.v1.HelperRequest.security:type_name -> flotestro.helper.v1.SecurityRequest
+	74, // 0: flotestro.helper.v1.HelperRequest.expires_at:type_name -> google.protobuf.Timestamp
+	26, // 1: flotestro.helper.v1.HelperRequest.unit_action:type_name -> flotestro.helper.v1.UnitActionRequest
+	25, // 2: flotestro.helper.v1.HelperRequest.package_action:type_name -> flotestro.helper.v1.PackageActionRequest
+	22, // 3: flotestro.helper.v1.HelperRequest.reboot:type_name -> flotestro.helper.v1.RebootRequest
+	21, // 4: flotestro.helper.v1.HelperRequest.identity_probe:type_name -> flotestro.helper.v1.IdentityProbeRequest
+	20, // 5: flotestro.helper.v1.HelperRequest.domain_enroll:type_name -> flotestro.helper.v1.DomainEnrollRequest
+	18, // 6: flotestro.helper.v1.HelperRequest.local_accounts:type_name -> flotestro.helper.v1.LocalAccountsRequest
+	19, // 7: flotestro.helper.v1.HelperRequest.local_user_action:type_name -> flotestro.helper.v1.LocalUserActionRequest
+	66, // 8: flotestro.helper.v1.HelperRequest.package_repair:type_name -> flotestro.helper.v1.PackageRepairRequest
+	28, // 9: flotestro.helper.v1.HelperRequest.docker_read:type_name -> flotestro.helper.v1.DockerReadRequest
+	29, // 10: flotestro.helper.v1.HelperRequest.docker_action:type_name -> flotestro.helper.v1.DockerActionRequest
+	55, // 11: flotestro.helper.v1.HelperRequest.compose:type_name -> flotestro.helper.v1.ComposeRequest
+	53, // 12: flotestro.helper.v1.HelperRequest.log_file:type_name -> flotestro.helper.v1.LogFileRequest
+	51, // 13: flotestro.helper.v1.HelperRequest.process_signal:type_name -> flotestro.helper.v1.ProcessSignalRequest
+	31, // 14: flotestro.helper.v1.HelperRequest.schedule:type_name -> flotestro.helper.v1.ScheduleRequest
+	33, // 15: flotestro.helper.v1.HelperRequest.network:type_name -> flotestro.helper.v1.NetworkRequest
+	35, // 16: flotestro.helper.v1.HelperRequest.dns:type_name -> flotestro.helper.v1.DnsRequest
+	37, // 17: flotestro.helper.v1.HelperRequest.firewall:type_name -> flotestro.helper.v1.FirewallRequest
+	39, // 18: flotestro.helper.v1.HelperRequest.storage:type_name -> flotestro.helper.v1.StorageRequest
+	41, // 19: flotestro.helper.v1.HelperRequest.ssh:type_name -> flotestro.helper.v1.SshRequest
+	47, // 20: flotestro.helper.v1.HelperRequest.kernel:type_name -> flotestro.helper.v1.KernelRequest
+	49, // 21: flotestro.helper.v1.HelperRequest.file:type_name -> flotestro.helper.v1.FileRequest
+	45, // 22: flotestro.helper.v1.HelperRequest.time:type_name -> flotestro.helper.v1.TimeRequest
+	23, // 23: flotestro.helper.v1.HelperRequest.shutdown:type_name -> flotestro.helper.v1.ShutdownRequest
+	43, // 24: flotestro.helper.v1.HelperRequest.security:type_name -> flotestro.helper.v1.SecurityRequest
 	0,  // 25: flotestro.helper.v1.LocalUserActionRequest.operation:type_name -> flotestro.helper.v1.LocalUserActionRequest.Operation
 	1,  // 26: flotestro.helper.v1.PackageActionRequest.operation:type_name -> flotestro.helper.v1.PackageActionRequest.Operation
 	2,  // 27: flotestro.helper.v1.UnitActionRequest.operation:type_name -> flotestro.helper.v1.UnitActionRequest.Operation
-	71, // 28: flotestro.helper.v1.HelperResponse.state_before:type_name -> flotestro.helper.v1.UnitState
-	71, // 29: flotestro.helper.v1.HelperResponse.state_after:type_name -> flotestro.helper.v1.UnitState
-	64, // 30: flotestro.helper.v1.HelperResponse.package_result:type_name -> flotestro.helper.v1.PackageActionResult
-	63, // 31: flotestro.helper.v1.HelperResponse.identity_result:type_name -> flotestro.helper.v1.IdentityProbeResult
-	61, // 32: flotestro.helper.v1.HelperResponse.enroll_result:type_name -> flotestro.helper.v1.DomainEnrollResult
-	58, // 33: flotestro.helper.v1.HelperResponse.accounts_result:type_name -> flotestro.helper.v1.LocalAccountsResult
-	67, // 34: flotestro.helper.v1.HelperResponse.repair_result:type_name -> flotestro.helper.v1.PackageRepairResponse
-	57, // 35: flotestro.helper.v1.HelperResponse.progress:type_name -> flotestro.helper.v1.TaskProgress
-	56, // 36: flotestro.helper.v1.HelperResponse.docker_result:type_name -> flotestro.helper.v1.DockerReadResult
-	29, // 37: flotestro.helper.v1.HelperResponse.docker_action_result:type_name -> flotestro.helper.v1.DockerActionResult
-	55, // 38: flotestro.helper.v1.HelperResponse.compose_result:type_name -> flotestro.helper.v1.ComposeResult
-	53, // 39: flotestro.helper.v1.HelperResponse.log_file_result:type_name -> flotestro.helper.v1.LogFileResult
-	51, // 40: flotestro.helper.v1.HelperResponse.process_signal_result:type_name -> flotestro.helper.v1.ProcessSignalResult
-	31, // 41: flotestro.helper.v1.HelperResponse.schedule_result:type_name -> flotestro.helper.v1.ScheduleResult
-	33, // 42: flotestro.helper.v1.HelperResponse.network_result:type_name -> flotestro.helper.v1.NetworkResult
-	35, // 43: flotestro.helper.v1.HelperResponse.dns_result:type_name -> flotestro.helper.v1.DnsResult
-	37, // 44: flotestro.helper.v1.HelperResponse.firewall_result:type_name -> flotestro.helper.v1.FirewallResult
-	39, // 45: flotestro.helper.v1.HelperResponse.storage_result:type_name -> flotestro.helper.v1.StorageResult
-	41, // 46: flotestro.helper.v1.HelperResponse.ssh_result:type_name -> flotestro.helper.v1.SshResult
-	47, // 47: flotestro.helper.v1.HelperResponse.kernel_result:type_name -> flotestro.helper.v1.KernelResult
-	49, // 48: flotestro.helper.v1.HelperResponse.file_result:type_name -> flotestro.helper.v1.FileResult
-	45, // 49: flotestro.helper.v1.HelperResponse.time_result:type_name -> flotestro.helper.v1.TimeResult
-	23, // 50: flotestro.helper.v1.HelperResponse.power_result:type_name -> flotestro.helper.v1.PowerResult
-	43, // 51: flotestro.helper.v1.HelperResponse.security_result:type_name -> flotestro.helper.v1.SecurityResult
+	72, // 28: flotestro.helper.v1.HelperResponse.state_before:type_name -> flotestro.helper.v1.UnitState
+	72, // 29: flotestro.helper.v1.HelperResponse.state_after:type_name -> flotestro.helper.v1.UnitState
+	65, // 30: flotestro.helper.v1.HelperResponse.package_result:type_name -> flotestro.helper.v1.PackageActionResult
+	64, // 31: flotestro.helper.v1.HelperResponse.identity_result:type_name -> flotestro.helper.v1.IdentityProbeResult
+	62, // 32: flotestro.helper.v1.HelperResponse.enroll_result:type_name -> flotestro.helper.v1.DomainEnrollResult
+	59, // 33: flotestro.helper.v1.HelperResponse.accounts_result:type_name -> flotestro.helper.v1.LocalAccountsResult
+	68, // 34: flotestro.helper.v1.HelperResponse.repair_result:type_name -> flotestro.helper.v1.PackageRepairResponse
+	58, // 35: flotestro.helper.v1.HelperResponse.progress:type_name -> flotestro.helper.v1.TaskProgress
+	57, // 36: flotestro.helper.v1.HelperResponse.docker_result:type_name -> flotestro.helper.v1.DockerReadResult
+	30, // 37: flotestro.helper.v1.HelperResponse.docker_action_result:type_name -> flotestro.helper.v1.DockerActionResult
+	56, // 38: flotestro.helper.v1.HelperResponse.compose_result:type_name -> flotestro.helper.v1.ComposeResult
+	54, // 39: flotestro.helper.v1.HelperResponse.log_file_result:type_name -> flotestro.helper.v1.LogFileResult
+	52, // 40: flotestro.helper.v1.HelperResponse.process_signal_result:type_name -> flotestro.helper.v1.ProcessSignalResult
+	32, // 41: flotestro.helper.v1.HelperResponse.schedule_result:type_name -> flotestro.helper.v1.ScheduleResult
+	34, // 42: flotestro.helper.v1.HelperResponse.network_result:type_name -> flotestro.helper.v1.NetworkResult
+	36, // 43: flotestro.helper.v1.HelperResponse.dns_result:type_name -> flotestro.helper.v1.DnsResult
+	38, // 44: flotestro.helper.v1.HelperResponse.firewall_result:type_name -> flotestro.helper.v1.FirewallResult
+	40, // 45: flotestro.helper.v1.HelperResponse.storage_result:type_name -> flotestro.helper.v1.StorageResult
+	42, // 46: flotestro.helper.v1.HelperResponse.ssh_result:type_name -> flotestro.helper.v1.SshResult
+	48, // 47: flotestro.helper.v1.HelperResponse.kernel_result:type_name -> flotestro.helper.v1.KernelResult
+	50, // 48: flotestro.helper.v1.HelperResponse.file_result:type_name -> flotestro.helper.v1.FileResult
+	46, // 49: flotestro.helper.v1.HelperResponse.time_result:type_name -> flotestro.helper.v1.TimeResult
+	24, // 50: flotestro.helper.v1.HelperResponse.power_result:type_name -> flotestro.helper.v1.PowerResult
+	44, // 51: flotestro.helper.v1.HelperResponse.security_result:type_name -> flotestro.helper.v1.SecurityResult
 	3,  // 52: flotestro.helper.v1.DockerReadRequest.scope:type_name -> flotestro.helper.v1.DockerReadRequest.Scope
 	4,  // 53: flotestro.helper.v1.DockerActionRequest.operation:type_name -> flotestro.helper.v1.DockerActionRequest.Operation
 	5,  // 54: flotestro.helper.v1.ScheduleRequest.operation:type_name -> flotestro.helper.v1.ScheduleRequest.Operation
@@ -6542,24 +6624,25 @@ var file_flotestro_helper_v1_helper_proto_depIdxs = []int32{
 	9,  // 58: flotestro.helper.v1.StorageRequest.operation:type_name -> flotestro.helper.v1.StorageRequest.Operation
 	10, // 59: flotestro.helper.v1.SshRequest.operation:type_name -> flotestro.helper.v1.SshRequest.Operation
 	11, // 60: flotestro.helper.v1.SecurityRequest.operation:type_name -> flotestro.helper.v1.SecurityRequest.Operation
-	12, // 61: flotestro.helper.v1.TimeRequest.operation:type_name -> flotestro.helper.v1.TimeRequest.Operation
-	13, // 62: flotestro.helper.v1.KernelRequest.operation:type_name -> flotestro.helper.v1.KernelRequest.Operation
-	72, // 63: flotestro.helper.v1.KernelRequest.settings:type_name -> flotestro.helper.v1.KernelRequest.SettingsEntry
-	14, // 64: flotestro.helper.v1.FileRequest.operation:type_name -> flotestro.helper.v1.FileRequest.Operation
-	15, // 65: flotestro.helper.v1.ComposeRequest.operation:type_name -> flotestro.helper.v1.ComposeRequest.Operation
-	59, // 66: flotestro.helper.v1.LocalAccountsResult.accounts:type_name -> flotestro.helper.v1.LocalAccountDetail
-	60, // 67: flotestro.helper.v1.LocalAccountDetail.ssh_keys:type_name -> flotestro.helper.v1.LocalSSHKey
-	62, // 68: flotestro.helper.v1.DomainEnrollResult.checks:type_name -> flotestro.helper.v1.EnrollCheck
-	62, // 69: flotestro.helper.v1.DomainEnrollResult.verifications:type_name -> flotestro.helper.v1.EnrollCheck
-	70, // 70: flotestro.helper.v1.PackageActionResult.applied:type_name -> flotestro.helper.v1.PackageVersionChange
-	66, // 71: flotestro.helper.v1.PackageRepairRequest.answers:type_name -> flotestro.helper.v1.DebconfSelection
-	68, // 72: flotestro.helper.v1.PackageRepairResponse.still_blocked:type_name -> flotestro.helper.v1.BlockedPackageDetail
-	69, // 73: flotestro.helper.v1.BlockedPackageDetail.questions:type_name -> flotestro.helper.v1.DebconfQuestionDetail
-	74, // [74:74] is the sub-list for method output_type
-	74, // [74:74] is the sub-list for method input_type
-	74, // [74:74] is the sub-list for extension type_name
-	74, // [74:74] is the sub-list for extension extendee
-	0,  // [0:74] is the sub-list for field type_name
+	12, // 61: flotestro.helper.v1.SecurityRequest.facts:type_name -> flotestro.helper.v1.SecurityRequest.Fact
+	13, // 62: flotestro.helper.v1.TimeRequest.operation:type_name -> flotestro.helper.v1.TimeRequest.Operation
+	14, // 63: flotestro.helper.v1.KernelRequest.operation:type_name -> flotestro.helper.v1.KernelRequest.Operation
+	73, // 64: flotestro.helper.v1.KernelRequest.settings:type_name -> flotestro.helper.v1.KernelRequest.SettingsEntry
+	15, // 65: flotestro.helper.v1.FileRequest.operation:type_name -> flotestro.helper.v1.FileRequest.Operation
+	16, // 66: flotestro.helper.v1.ComposeRequest.operation:type_name -> flotestro.helper.v1.ComposeRequest.Operation
+	60, // 67: flotestro.helper.v1.LocalAccountsResult.accounts:type_name -> flotestro.helper.v1.LocalAccountDetail
+	61, // 68: flotestro.helper.v1.LocalAccountDetail.ssh_keys:type_name -> flotestro.helper.v1.LocalSSHKey
+	63, // 69: flotestro.helper.v1.DomainEnrollResult.checks:type_name -> flotestro.helper.v1.EnrollCheck
+	63, // 70: flotestro.helper.v1.DomainEnrollResult.verifications:type_name -> flotestro.helper.v1.EnrollCheck
+	71, // 71: flotestro.helper.v1.PackageActionResult.applied:type_name -> flotestro.helper.v1.PackageVersionChange
+	67, // 72: flotestro.helper.v1.PackageRepairRequest.answers:type_name -> flotestro.helper.v1.DebconfSelection
+	69, // 73: flotestro.helper.v1.PackageRepairResponse.still_blocked:type_name -> flotestro.helper.v1.BlockedPackageDetail
+	70, // 74: flotestro.helper.v1.BlockedPackageDetail.questions:type_name -> flotestro.helper.v1.DebconfQuestionDetail
+	75, // [75:75] is the sub-list for method output_type
+	75, // [75:75] is the sub-list for method input_type
+	75, // [75:75] is the sub-list for extension type_name
+	75, // [75:75] is the sub-list for extension extendee
+	0,  // [0:75] is the sub-list for field type_name
 }
 
 func init() { file_flotestro_helper_v1_helper_proto_init() }
@@ -6604,7 +6687,7 @@ func file_flotestro_helper_v1_helper_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_flotestro_helper_v1_helper_proto_rawDesc), len(file_flotestro_helper_v1_helper_proto_rawDesc)),
-			NumEnums:      16,
+			NumEnums:      17,
 			NumMessages:   57,
 			NumExtensions: 0,
 			NumServices:   0,
