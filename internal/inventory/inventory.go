@@ -368,3 +368,36 @@ func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error
 	}
 	return wynik, rows.Err()
 }
+
+// FragmentyHostow zwraca moduly wielu hostow jednym zapytaniem.
+//
+// Widok floty liczy zgodnosc dla kazdego hosta osobno, ale pytanie bazy raz na
+// host zamienialo by jeden ekran w setki zapytan.
+func (s *Store) FragmentyHostow(ctx context.Context, hostIDs []string) (map[string][]Fragment, error) {
+	wynik := map[string][]Fragment{}
+	if len(hostIDs) == 0 {
+		return wynik, nil
+	}
+	const query = `
+		select host_id, module, revision, source, payload,
+		       coalesce(unavailable_reason, ''), observed_at
+		  from host_module_inventory
+		 where host_id = any($1)
+		 order by host_id, module`
+	rows, err := s.pool.Query(ctx, query, hostIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var fragment Fragment
+		if err := rows.Scan(&fragment.HostID, &fragment.Module, &fragment.Revision,
+			&fragment.Source, &fragment.Payload, &fragment.UnavailableReason,
+			&fragment.ObservedAt); err != nil {
+			return nil, err
+		}
+		wynik[fragment.HostID] = append(wynik[fragment.HostID], fragment)
+	}
+	return wynik, rows.Err()
+}

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	"github.com/ultherego/flotestro/internal/modules/security"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	czas "github.com/ultherego/flotestro/internal/modules/time"
@@ -75,6 +77,13 @@ const (
 	ActionSSHConfigPlan    ActionType = "ssh.config.plan"
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
 	ActionSSHHostKeyRotate ActionType = "ssh.hostkey.rotate"
+
+	// Bezpieczenstwo. Skan zbiera fakty z hosta; ocena zgodnosci powstaje
+	// w panelu, bo to tam sa wersjonowane sprawdzenia. Naprawa nie jest
+	// osobna operacja na hoscie - kazda mapuje sie na typowana operacje
+	// modulu, ktory za dana rzecz odpowiada.
+	ActionSecurityScan   ActionType = "security.scan"
+	ActionSELinuxModeSet ActionType = "selinux.mode.set"
 
 	// Czas i synchronizacja. Test nie zmienia hosta, ale wychodzi z niego
 	// zapytaniem do serwera czasu - i to on odpowiada na pytanie, czy nowe
@@ -433,6 +442,16 @@ var actionSpecs = map[ActionType]actionSpec{
 	// o odcisk przestanie dzialac.
 	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+
+	// Skan nie zmienia hosta, ale zbiera material rozpoznawczy: liste tego,
+	// czym host wystaje na zewnatrz, wraz z wlascicielami gniazd. Dlatego
+	// wyzej niz zwykly odczyt i z wlasnym uprawnieniem.
+	ActionSecurityScan: {mutating: false, capability: "security", permission: "security.scan",
+		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 512 << 10},
+	// Przelaczenie w permissive zdejmuje ochrone z calego hosta i robi to od
+	// reki. Zmiana jest odwracalna, ale w miedzyczasie nie chroni nic.
+	ActionSELinuxModeSet: {mutating: true, capability: "security.mac", permission: "security.mac.write",
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
 
 	// Test synchronizacji nie zmienia hosta, ale wysyla z niego pakiety do
 	// wskazanych serwerow: to jedyny sposob, zeby powiedziec cos o serwerze,
@@ -1042,6 +1061,13 @@ type Payload struct {
 	PackageChange   *PackageChangePayload   `json:"package_change,omitempty"`
 	Time            *TimePayload            `json:"time,omitempty"`
 	Power           *PowerPayload           `json:"power,omitempty"`
+	Security        *SecurityPayload        `json:"security,omitempty"`
+}
+
+// SecurityPayload opisuje operacje modulu bezpieczenstwa.
+type SecurityPayload struct {
+	// Mode jest trybem obowiazkowej kontroli dostepu.
+	Mode string `json:"mode,omitempty"`
 }
 
 // PowerPayload opisuje wylaczenie hosta.
@@ -1587,6 +1613,15 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return nil
 
+	case ActionSecurityScan:
+		return nil
+
+	case ActionSELinuxModeSet:
+		if payload.Security == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu security", action)
+		}
+		return security.WalidujTryb(payload.Security.Mode)
+
 	case ActionSystemShutdown:
 		if payload.Power == nil {
 			return fmt.Errorf("operacja %s wymaga payloadu power", action)
@@ -2025,6 +2060,29 @@ func validatePackageNames(names []string) error {
 	return nil
 }
 
+// bezPustych usuwa podpayloady, ktore nie niosa zadnej tresci.
+//
+// Payload z pustym podpayloadem opisuje dokladnie te sama operacje co payload
+// bez niego, ale serializuje sie inaczej - a hash liczony po obu stronach
+// musi wyjsc taki sam. Panel wysyla przy odczycie payload pusty, koperta nie
+// ma czego niesc, a agent odtwarza z niej strukture zerowa: bez tego kroku
+// zadanie konczylo sie odmowa "tresc nie odpowiada planowi", choc tresc byla
+// ta sama.
+func (p Payload) bezPustych() Payload {
+	wartosc := reflect.ValueOf(&p).Elem()
+	for i := 0; i < wartosc.NumField(); i++ {
+		pole := wartosc.Field(i)
+		if pole.Kind() != reflect.Pointer || pole.IsNil() {
+			continue
+		}
+		zerowy := reflect.New(pole.Type().Elem())
+		if reflect.DeepEqual(pole.Interface(), zerowy.Interface()) {
+			pole.Set(reflect.Zero(pole.Type()))
+		}
+	}
+	return p
+}
+
 // PayloadHash liczy hash planu w postaci kanonicznej. Agent liczy go tak samo
 // i porownuje z kopertą, wiec podmiana payloadu po zatwierdzeniu jest wykrywalna.
 //
@@ -2032,7 +2090,7 @@ func validatePackageNames(names []string) error {
 // z encoding/json, ktory serializuje pola struktury w kolejnosci deklaracji,
 // wiec wynik jest deterministyczny.
 func PayloadHash(action ActionType, version int, payload Payload) ([]byte, error) {
-	encoded, err := json.Marshal(payload)
+	encoded, err := json.Marshal(payload.bezPustych())
 	if err != nil {
 		return nil, err
 	}

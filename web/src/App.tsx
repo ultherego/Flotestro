@@ -20,6 +20,8 @@ import { SerwerSSH } from "./pages/host/SerwerSSH";
 import { Jadro } from "./pages/host/Jadro";
 import { Zegar } from "./pages/host/Zegar";
 import { Zasilanie } from "./pages/host/Zasilanie";
+import { Bezpieczenstwo } from "./pages/host/Bezpieczenstwo";
+import { Bezpieczenstwo as BezpieczenstwoFloty } from "./pages/Bezpieczenstwo";
 import { Pliki } from "./pages/host/Pliki";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
@@ -59,6 +61,7 @@ export function App() {
   const zarzadzaDostepem = uprawnienia.has("principal.manage");
   const widziAudyt = uprawnienia.has("audit.read");
   const widziKampanie = uprawnienia.has("campaign.read");
+  const widziBezpieczenstwo = uprawnienia.has("security.read");
 
   return (
     <div className="uklad">
@@ -68,6 +71,7 @@ export function App() {
         <Link do="/hosts">Hosts</Link>
         <Link do="/jobs">Jobs</Link>
         {widziKampanie && <Link do="/campaigns">Campaigns</Link>}
+        {widziBezpieczenstwo && <Link do="/security">Security</Link>}
         {zdolnosci.directory && <Link do="/directory">Directory</Link>}
         {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
             zmienic; pozostalym pozycja prowadzilaby do samej odmowy. */}
@@ -90,6 +94,7 @@ export function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Pulpit />} />
           <Route path="/hosts" element={<Hosty />} />
+          <Route path="/security" element={<BezpieczenstwoFloty />} />
           {/* Modul hosta jest segmentem adresu, wiec odswiezenie, historia
               przegladarki i odnosnik bezposredni prowadza tam, gdzie operator
               faktycznie byl. */}
@@ -108,6 +113,7 @@ export function App() {
             <Route path="kernel" element={<Jadro />} />
             <Route path="time" element={<Zegar />} />
             <Route path="power" element={<Zasilanie />} />
+            <Route path="security" element={<Bezpieczenstwo />} />
             <Route path="files" element={<Pliki />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />

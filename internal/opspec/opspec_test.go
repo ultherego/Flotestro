@@ -112,3 +112,32 @@ func TestOperacjeMutujaceSaOdrozniane(t *testing.T) {
 		seen[permission] = true
 	}
 }
+
+// Payload z pustym podpayloadem opisuje te sama operacje co payload bez niego.
+// Panel wysyla przy odczycie pusty payload, koperta nie ma czego niesc, a agent
+// odtwarza z niej strukture zerowa - i bez wspolnej postaci kanonicznej hash
+// wychodzil rozny po obu stronach.
+func TestHashNieZalezyOdPustegoPodpayloadu(t *testing.T) {
+	pusty, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zerowy, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{Security: &SecurityPayload{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(pusty, zerowy) {
+		t.Error("pusty podpayload zmienil hash planu")
+	}
+
+	// Podpayload z trescia nadal zmienia hash - inaczej podmiana zlecenia
+	// przestalaby byc wykrywalna.
+	zTrescia, err := PayloadHash(ActionSecurityScan, ActionVersion,
+		Payload{Security: &SecurityPayload{Mode: "permissive"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(pusty, zTrescia) {
+		t.Error("tresc podpayloadu nie zmienila hashu planu")
+	}
+}

@@ -168,6 +168,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.applyTime(ctx, task, action, payload.Time)
 	case opspec.ActionSystemShutdown:
 		return e.shutdownHost(ctx, task, payload.Power)
+	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet:
+		return e.applySecurity(ctx, task, action, payload.Security)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -550,6 +552,14 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			ExpectedSHA256: plik.GetExpectedSha256(),
 			Validator:      plik.GetValidator(),
 		}}, nil
+
+	case *agentv1.TaskEnvelope_Security:
+		ochrona := action.Security
+		typ := opspec.ActionSecurityScan
+		if ochrona.GetOperation() == agentv1.SecurityAction_OPERATION_SELINUX_MODE {
+			typ = opspec.ActionSELinuxModeSet
+		}
+		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
 
 	case *agentv1.TaskEnvelope_SystemShutdown:
 		wylaczenie := action.SystemShutdown

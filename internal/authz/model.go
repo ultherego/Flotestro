@@ -107,6 +107,14 @@ const (
 	PermSSHRead          Permission = "ssh.read"
 	PermSSHConfigWrite   Permission = "ssh.config.write"
 	PermSSHHostKeyRotate Permission = "ssh.hostkey.rotate"
+	// Bezpieczenstwo. Skan zbiera material rozpoznawczy o hoscie, wiec ma
+	// wlasne uprawnienie osobne od odczytu ustalen. Naprawa nie ma wlasnej
+	// operacji na hoscie: wykonuje ja modul, ktory za dana rzecz odpowiada,
+	// wiec uprawnienie do naprawy nie zastepuje uprawnien tych modulow.
+	PermSecurityRead      Permission = "security.read"
+	PermSecurityScan      Permission = "security.scan"
+	PermSecurityRemediate Permission = "security.remediate"
+	PermSecurityMACWrite  Permission = "security.mac.write"
 	// Okno serwisowe nalezy do prowadzenia ruchu, a nie do zmiany hosta:
 	// deklaruje je ten, kto pilnuje kampanii i dyzuru.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
@@ -212,7 +220,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
-		PermTimeRead, PermFilePlan,
+		PermTimeRead, PermSecurityRead, PermFilePlan,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -220,6 +228,9 @@ var rolePermissions = map[Role][]Permission{
 		// Auditor patrzy na stan systemu, wiec metryki i przeglad CA naleza
 		// do jego pracy; wymiana CA juz nie.
 		PermMetricsRead, PermPKIRead,
+		// Audytor patrzy na stan ochronny hosta i na wyniki sprawdzen -
+		// to material jego pracy; naprawiac go nie musi.
+		PermSecurityRead, PermSecurityScan,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -246,7 +257,7 @@ var rolePermissions = map[Role][]Permission{
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		// Przesuniety zegar wyglada jak awaria katalogu albo certyfikatow,
 		// wiec test zrodel czasu nalezy do pierwszej diagnozy.
-		PermTimeRead, PermFilePlan,
+		PermTimeRead, PermSecurityRead, PermSecurityScan, PermFilePlan,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -288,6 +299,7 @@ var rolePermissions = map[Role][]Permission{
 		PermKernelRead, PermKernelSysctlWrite,
 		PermKernelModuleWrite, PermKernelModuleBlacklist,
 		PermTimeRead, PermTimeWrite, PermTimezoneWrite,
+		PermSecurityRead, PermSecurityScan, PermSecurityRemediate, PermSecurityMACWrite,
 		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
 		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,

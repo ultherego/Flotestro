@@ -481,6 +481,21 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}
 	}
 
+	// Stan ochronny trafia do inwentarza po kazdej operacji: skan istnieje
+	// wlasnie po to, zeby odswiezyc go na zadanie, a przelaczenie MAC ma byc
+	// widoczne w ustaleniach od razu, a nie po nastepnym cyklu.
+	if ochrona := result.GetSecurityResult(); ochrona != nil && len(ochrona.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "security",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(ochrona.GetSnapshot())),
+			Source:     "agent/selinux+audit+ss",
+			Payload:    ochrona.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano stanu ochronnego", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Stan startu trafia do inwentarza: to ostatni obraz hosta, ktory panel
 	// dostanie, zanim maszyna zejdzie.
 	if zasilanie := result.GetPowerResult(); zasilanie != nil && len(zasilanie.GetSnapshot()) > 0 {

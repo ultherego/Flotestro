@@ -51,6 +51,7 @@ message HelperRequest {
     FileRequest file = 41;
     TimeRequest time = 42;
     ShutdownRequest shutdown = 43;
+    SecurityRequest security = 44;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -205,6 +206,7 @@ message HelperResponse {
   FileResult file_result = 29;
   TimeResult time_result = 30;
   PowerResult power_result = 31;
+  SecurityResult security_result = 32;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -510,6 +512,27 @@ message SshResult {
   // w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
   // nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
   repeated string mismatches = 3;
+}
+
+// SecurityRequest czyta stan ochronny hosta albo przelacza SELinuksa.
+//
+// Odczyt idzie przez helpera, bo prawie wszystko w nim wymaga roota: profile
+// AppArmora leza w securityfs, reguly audytu czyta auditctl, zmienne EFI sa
+// dostepne tylko dla roota, a wlascicieli gniazd widzi tylko ten, kto widzi
+// cudze procesy.
+message SecurityRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_READ = 1;
+    OPERATION_SELINUX_MODE = 2;
+  }
+  Operation operation = 1;
+  string mode = 2;
+}
+
+message SecurityResult {
+  bytes snapshot = 1;
+  string message = 2;
 }
 
 // TimeRequest zmienia zrodla czasu albo strefe hosta.

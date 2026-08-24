@@ -151,6 +151,13 @@ func (s *Server) Routes() http.Handler {
 	// Okno serwisowe zmienia to, co panel o hoscie sadzi, a nie stan hosta,
 	// wiec ma wlasny punkt wejscia zamiast miejsca w kolejce zadan.
 	mux.HandleFunc("POST /api/v1/hosts/{id}/maintenance", s.handleSetMaintenance)
+	// Widok floty: jedno zle ustawienie na stu hostach jest jednym problemem,
+	// a nie stoma - i widac to dopiero wtedy, gdy ustalenia stoja obok siebie.
+	mux.HandleFunc("GET /api/v1/security", s.handleFleetSecurity)
+	// Zgodnosc z profilem hardeningu liczy panel z faktow, ktore host i tak
+	// zglasza; naprawa jest planem i osobnymi zadaniami modulow.
+	mux.HandleFunc("GET /api/v1/hosts/{id}/security", s.handleHostSecurity)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation", s.handleHostRemediation)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)

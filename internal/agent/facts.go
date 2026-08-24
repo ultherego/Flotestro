@@ -28,6 +28,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	"github.com/ultherego/flotestro/internal/modules/security"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	czas "github.com/ultherego/flotestro/internal/modules/time"
@@ -103,6 +104,9 @@ type Facts struct {
 	Files *files.Snapshot `json:"files,omitempty"`
 	// Kernel jest ustawieniami jadra i lista modulow.
 	Kernel *kernel.Snapshot `json:"kernel,omitempty"`
+	// Security jest stanem ochronnym hosta: MAC, audyt, tryb rozruchu
+	// i to, czym host wystaje na zewnatrz.
+	Security *security.Snapshot `json:"security,omitempty"`
 	// Power jest stanem startu hosta: boot_id, czas dzialania i to, co
 	// wstrzymuje wylaczenie.
 	Power *power.Snapshot `json:"power,omitempty"`

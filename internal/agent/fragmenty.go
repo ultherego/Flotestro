@@ -23,6 +23,7 @@ const (
 	ModulKernel     = "kernel"
 	ModulTime       = "time"
 	ModulPower      = "power"
+	ModulSecurity   = "security"
 	ModulFiles      = "files"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
@@ -104,6 +105,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulTime, "agent/timedatectl+chronyc", powodCzasu(f), czasHosta(f)},
 
 		{ModulPower, "agent/procfs+logind", powodZasilania(f), zasilanie(f)},
+
+		{ModulSecurity, "agent/selinux+audit+ss", powodOchrony(f), ochrona(f)},
 
 		{ModulFiles, "agent/managed-files", powodPlikow(f), plikiZarzadzane(f)},
 	}
@@ -270,6 +273,22 @@ func czasHosta(f Facts) any {
 		return struct{}{}
 	}
 	return f.Time
+}
+
+// powodOchrony zwraca powod, dla ktorego stanu ochronnego nie ustalono.
+func powodOchrony(f Facts) string {
+	if f.Security == nil {
+		return "this host did not report its security state"
+	}
+	return f.Security.UnavailableReason
+}
+
+// ochrona zwraca stan ochronny albo pusty obraz.
+func ochrona(f Facts) any {
+	if f.Security == nil {
+		return struct{}{}
+	}
+	return f.Security
 }
 
 // powodZasilania zwraca powod, dla ktorego stanu startu nie ustalono.

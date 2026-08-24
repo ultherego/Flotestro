@@ -2,6 +2,7 @@ package agent
 
 import (
 	"github.com/ultherego/flotestro/internal/modules/network"
+	"github.com/ultherego/flotestro/internal/modules/security"
 	czas "github.com/ultherego/flotestro/internal/modules/time"
 )
 
@@ -37,6 +38,10 @@ const (
 	// Czas hosta. Odczyt dziala wszedzie, gdzie jest timedatectl; zapis
 	// wymaga demona, ktoremu panel ma gdzie dopisac serwery.
 	CapTime = "time"
+	// Stan ochronny hosta. Odczyt dziala wszedzie; przelaczenie trybu MAC
+	// jest osobna zdolnoscia, bo host bez SELinuksa nie ma czego przelaczac.
+	CapSecurity    = "security"
+	CapSecurityMAC = "security.mac"
 	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
 	CapFiles = "files.managed"
 )
@@ -199,6 +204,8 @@ func DetectCapabilities() Capabilities {
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
 	timedatectl := exists(czas.SciezkaTimedatectl)
+	selinux := isDir(security.KatalogSELinux) && exists(security.SciezkaSetenforce)
+	apparmor := exists(security.PlikAppArmor)
 	chrony := exists(czas.SciezkaChronyc)
 	// Timesyncd bywa zainstalowany i zamaskowany, gdy host ma chronyego.
 	// Obecnosc jednostki mowi tylko tyle, ze jest czym pisac - ktory demon
@@ -273,6 +280,25 @@ func DetectCapabilities() Capabilities {
 				"timezone":  timedatectl,
 			},
 			Reason: powod(timedatectl, "this host has no timedatectl"),
+		},
+		{
+			Name:    CapSecurity,
+			Version: wersjaAdaptera,
+			// Modul dziala wszedzie: brak SELinuksa czy audytu jest faktem
+			// o hoscie, a nie brakiem modulu.
+			Available: true,
+			Features: map[string]bool{
+				"selinux":  selinux,
+				"apparmor": apparmor,
+				"auditd":   exists(security.SciezkaAuditctl),
+				"sockets":  exists(security.SciezkaSS) || exists(security.SciezkaSSAlt),
+			},
+		},
+		{
+			Name:      CapSecurityMAC,
+			Version:   wersjaAdaptera,
+			Available: selinux,
+			Reason:    powod(selinux, "this host has no SELinux to switch"),
 		},
 		{
 			Name:      CapKernel,

@@ -13,6 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	"github.com/ultherego/flotestro/internal/modules/security"
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 )
 
@@ -152,6 +153,16 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 			facts.Kernel = &snapshot
 		} else {
 			facts.Kernel = &kernel.Snapshot{UnavailableReason: "helper: " + err.Error()}
+		}
+	}
+
+	// Stan ochronny czyta helper: profile AppArmora leza w securityfs, reguly
+	// audytu czyta auditctl, a wlascicieli gniazd widzi tylko root.
+	if securityProbe != nil {
+		if snapshot, err := securityProbe(ctx); err == nil {
+			facts.Security = &snapshot
+		} else {
+			facts.Security = &security.Snapshot{UnavailableReason: "helper: " + err.Error()}
 		}
 	}
 

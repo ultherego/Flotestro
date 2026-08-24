@@ -347,6 +347,17 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_File{File: plik}
 
+	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet:
+		operacja := agentv1.SecurityAction_OPERATION_SCAN
+		if action == opspec.ActionSELinuxModeSet {
+			operacja = agentv1.SecurityAction_OPERATION_SELINUX_MODE
+		}
+		ochrona := &agentv1.SecurityAction{Operation: operacja}
+		if payload.Security != nil {
+			ochrona.Mode = payload.Security.Mode
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Security{Security: ochrona}
+
 	case opspec.ActionSystemShutdown:
 		wylaczenie := &agentv1.SystemShutdown{}
 		if payload.Power != nil {

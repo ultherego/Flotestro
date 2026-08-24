@@ -367,6 +367,7 @@ message TaskEnvelope {
     FileAction file = 45;
     TimeAction time = 46;
     SystemShutdown system_shutdown = 47;
+    SecurityAction security = 48;
   }
 }
 
@@ -628,6 +629,7 @@ message TaskResult {
   FileResult file_result = 39;
   TimeResult time_result = 40;
   PowerResult power_result = 41;
+  SecurityResult security_result = 42;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -994,6 +996,25 @@ message SshResult {
   bytes snapshot = 1;
   string message = 2;
   repeated string mismatches = 3;
+}
+
+// SecurityAction opisuje operacje modulu bezpieczenstwa.
+//
+// Skan zbiera fakty, a nie oceny: zgodnosc z profilem liczy panel, bo tam sa
+// wersjonowane sprawdzenia i tam widac cala flote.
+message SecurityAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_SCAN = 1;
+    OPERATION_SELINUX_MODE = 2;
+  }
+  Operation operation = 1;
+  string mode = 2;
+}
+
+message SecurityResult {
+  bytes snapshot = 1;
+  string message = 2;
 }
 
 // TimeAction opisuje operacje na czasie hosta.
