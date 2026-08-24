@@ -52,7 +52,17 @@ type TaskExecutor struct {
 	logLines func(*agentv1.TaskLogLines)
 	// cancels pozwala przerwac zadania, ktore da sie bezpiecznie przerwac.
 	cancels *anulowania
+	// sekrety pobiera wartosc sekretu na czas jednej operacji. Nil oznacza
+	// brak sesji z panelem - a bez niej nie ma po co pytac o sekret.
+	sekrety PobranieSekretu
 }
+
+// PobranieSekretu siega po wartosc sekretu wskazanego w zadaniu.
+//
+// Wartosc nie przychodzi w kopercie: koperta niesie odnosnik, a host pobiera
+// tresc dopiero wtedy, gdy zaczyna operacje. Funkcja jest wstrzykiwana przez
+// sesje, bo to ona ma polaczenie z panelem.
+type PobranieSekretu func(ctx context.Context, taskID, nazwa string, wersja int) ([]byte, error)
 
 func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	facts func() Facts, log *slog.Logger) *TaskExecutor {
@@ -543,7 +553,12 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		case agentv1.FileAction_OPERATION_REMOVE:
 			typ = opspec.ActionFileRemove
 		}
+		odnosnik := (*opspec.SecretRef)(nil)
+		if ref := plik.GetContentSecret(); ref != nil && ref.GetName() != "" {
+			odnosnik = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
+		}
 		return typ, opspec.Payload{File: &opspec.FilePayload{
+			ContentSecret:  odnosnik,
 			Path:           plik.GetPath(),
 			Content:        string(plik.GetContent()),
 			Mode:           plik.GetMode(),

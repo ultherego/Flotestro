@@ -28,6 +28,28 @@ service AgentService {
   // cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
   // kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
   rpc Ping(PingRequest) returns (PingResponse);
+  // FetchSecret wydaje wartosc sekretu na czas wykonania jednego zadania.
+  //
+  // Wartosc nie jedzie w kopercie zadania: koperta niesie sam odnosnik, a host
+  // siega po tresc dopiero wtedy, gdy zaczyna operacje. Dzieki temu wartosci
+  // nie ma ani w zadaniu, ani w audycie, ani w inwentarzu - jest wylacznie
+  // w magazynie i przez chwile w pamieci hosta.
+  rpc FetchSecret(FetchSecretRequest) returns (FetchSecretResponse);
+}
+
+message FetchSecretRequest {
+  // TaskId wiaze pobranie z konkretnym zadaniem: dzierzawa jest wystawiona
+  // dla niego i dla tego hosta.
+  string task_id = 1;
+  string secret_name = 2;
+  uint32 secret_version = 3;
+}
+
+message FetchSecretResponse {
+  bytes value = 1;
+  uint32 version = 2;
+  // Sha256 pozwala hostowi sprawdzic, ze dostal to, co panel wydal.
+  string sha256 = 3;
 }
 
 message PingRequest {}
@@ -1072,6 +1094,13 @@ message KernelResult {
   repeated string applied_runtime = 4;
 }
 
+// SecretRef wskazuje sekret w magazynie panelu. Koperta zadania niesie
+// wylacznie odnosnik - nigdy wartosc.
+message SecretRef {
+  string name = 1;
+  uint32 version = 2;
+}
+
 // FileAction opisuje operacje na pliku konfiguracyjnym.
 message FileAction {
   enum Operation {
@@ -1093,6 +1122,10 @@ message FileAction {
   string group = 6;
   string expected_sha256 = 7;
   string validator = 8;
+  // ContentSecret wskazuje sekret, ktorego wartosc ma trafic do pliku.
+  // Wyklucza sie z polem content: albo tresc jest jawna, albo pochodzi
+  // z magazynu.
+  SecretRef content_secret = 9;
 }
 
 message FileResult {

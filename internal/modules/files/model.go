@@ -27,6 +27,9 @@ type Plik struct {
 	ModifiedAt *time.Time `json:"modified_at,omitempty"`
 	// Managed oznacza plik, ktory panel zna i ma dla niego stan docelowy.
 	Managed bool `json:"managed"`
+	// FromSecret oznacza plik, ktorego tresc pochodzi z magazynu sekretow.
+	// Dla takiego pliku host nie zglasza odcisku tresci.
+	FromSecret bool `json:"from_secret,omitempty"`
 	// DesiredSHA256 jest odciskiem stanu docelowego. Rozny od SHA256 oznacza
 	// drift: ktos zmienil plik poza panelem.
 	DesiredSHA256 string `json:"desired_sha256,omitempty"`

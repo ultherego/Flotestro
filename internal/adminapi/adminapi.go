@@ -27,6 +27,7 @@ import (
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/remediation"
+	"github.com/ultherego/flotestro/internal/secrets"
 )
 
 // Server grupuje zaleznosci REST API.
@@ -66,7 +67,13 @@ type Server struct {
 	// remediation trzyma plany naprawy. Bez niego modul bezpieczenstwa
 	// pokazuje ustalenia, ale nie zaklada planow.
 	remediation *remediation.Store
+	// secrets trzyma wartosci, ktore nie moga przejsc przez zadania. Pusty
+	// oznacza instalacje bez magazynu.
+	secrets *secrets.Store
 }
+
+// SetSecrets podlacza magazyn sekretow.
+func (s *Server) SetSecrets(store *secrets.Store) { s.secrets = store }
 
 // SetRemediation podlacza magazyn planow naprawy.
 func (s *Server) SetRemediation(store *remediation.Store) { s.remediation = store }
@@ -167,6 +174,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts/{id}/security/remediation", s.handleListRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation", s.handleHostRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
+	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
+	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	mux.HandleFunc("GET /api/v1/secrets", s.handleListSecrets)
+	mux.HandleFunc("POST /api/v1/secrets", s.handleCreateSecret)
+	mux.HandleFunc("GET /api/v1/secrets/{name}", s.handleGetSecret)
+	mux.HandleFunc("POST /api/v1/secrets/{name}/rotate", s.handleRotateSecret)
+	mux.HandleFunc("POST /api/v1/secrets/{name}/retire", s.handleRetireSecret)
+	mux.HandleFunc("DELETE /api/v1/secrets/{name}/versions/{version}", s.handleDestroySecretVersion)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)

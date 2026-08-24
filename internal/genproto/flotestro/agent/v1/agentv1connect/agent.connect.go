@@ -45,6 +45,9 @@ const (
 	AgentServiceRenewCertificateProcedure = "/flotestro.agent.v1.AgentService/RenewCertificate"
 	// AgentServicePingProcedure is the fully-qualified name of the AgentService's Ping RPC.
 	AgentServicePingProcedure = "/flotestro.agent.v1.AgentService/Ping"
+	// AgentServiceFetchSecretProcedure is the fully-qualified name of the AgentService's FetchSecret
+	// RPC.
+	AgentServiceFetchSecretProcedure = "/flotestro.agent.v1.AgentService/FetchSecret"
 )
 
 // EnrollmentServiceClient is a client for the flotestro.agent.v1.EnrollmentService service.
@@ -132,6 +135,13 @@ type AgentServiceClient interface {
 	// cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
 	// kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
 	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
+	// FetchSecret wydaje wartosc sekretu na czas wykonania jednego zadania.
+	//
+	// Wartosc nie jedzie w kopercie zadania: koperta niesie sam odnosnik, a host
+	// siega po tresc dopiero wtedy, gdy zaczyna operacje. Dzieki temu wartosci
+	// nie ma ani w zadaniu, ani w audycie, ani w inwentarzu - jest wylacznie
+	// w magazynie i przez chwile w pamieci hosta.
+	FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the flotestro.agent.v1.AgentService service. By
@@ -163,6 +173,12 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("Ping")),
 			connect.WithClientOptions(opts...),
 		),
+		fetchSecret: connect.NewClient[v1.FetchSecretRequest, v1.FetchSecretResponse](
+			httpClient,
+			baseURL+AgentServiceFetchSecretProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("FetchSecret")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -171,6 +187,7 @@ type agentServiceClient struct {
 	connect          *connect.Client[v1.AgentMessage, v1.ServerMessage]
 	renewCertificate *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
 	ping             *connect.Client[v1.PingRequest, v1.PingResponse]
+	fetchSecret      *connect.Client[v1.FetchSecretRequest, v1.FetchSecretResponse]
 }
 
 // Connect calls flotestro.agent.v1.AgentService.Connect.
@@ -188,6 +205,11 @@ func (c *agentServiceClient) Ping(ctx context.Context, req *connect.Request[v1.P
 	return c.ping.CallUnary(ctx, req)
 }
 
+// FetchSecret calls flotestro.agent.v1.AgentService.FetchSecret.
+func (c *agentServiceClient) FetchSecret(ctx context.Context, req *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error) {
+	return c.fetchSecret.CallUnary(ctx, req)
+}
+
 // AgentServiceHandler is an implementation of the flotestro.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	Connect(context.Context, *connect.BidiStream[v1.AgentMessage, v1.ServerMessage]) error
@@ -202,6 +224,13 @@ type AgentServiceHandler interface {
 	// cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
 	// kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
 	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
+	// FetchSecret wydaje wartosc sekretu na czas wykonania jednego zadania.
+	//
+	// Wartosc nie jedzie w kopercie zadania: koperta niesie sam odnosnik, a host
+	// siega po tresc dopiero wtedy, gdy zaczyna operacje. Dzieki temu wartosci
+	// nie ma ani w zadaniu, ani w audycie, ani w inwentarzu - jest wylacznie
+	// w magazynie i przez chwile w pamieci hosta.
+	FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -229,6 +258,12 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("Ping")),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentServiceFetchSecretHandler := connect.NewUnaryHandler(
+		AgentServiceFetchSecretProcedure,
+		svc.FetchSecret,
+		connect.WithSchema(agentServiceMethods.ByName("FetchSecret")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/flotestro.agent.v1.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceConnectProcedure:
@@ -237,6 +272,8 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 			agentServiceRenewCertificateHandler.ServeHTTP(w, r)
 		case AgentServicePingProcedure:
 			agentServicePingHandler.ServeHTTP(w, r)
+		case AgentServiceFetchSecretProcedure:
+			agentServiceFetchSecretHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -256,4 +293,8 @@ func (UnimplementedAgentServiceHandler) RenewCertificate(context.Context, *conne
 
 func (UnimplementedAgentServiceHandler) Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.Ping is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.FetchSecret is not implemented"))
 }

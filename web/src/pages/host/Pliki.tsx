@@ -8,7 +8,11 @@ import { PotwierdzenieCelu } from "./PotwierdzenieCelu";
 
 type PlikZarzadzany = {
   path: string;
-  desired_sha256: string;
+  // Pusty odcisk stanu docelowego oznacza plik z sekretu: panel nie trzyma
+  // wtedy ani tresci, ani jej odcisku.
+  desired_sha256?: string;
+  desired_secret?: string;
+  desired_secret_version?: number;
   mode?: string;
   owner?: string;
   group?: string;
@@ -18,13 +22,16 @@ type PlikZarzadzany = {
   observed_sha256?: string;
   exists: boolean;
   drift: boolean;
+  drift_unknown_reason?: string;
   observed_mode?: string;
   observed_owner?: string;
   unavailable_reason?: string;
 };
 
 type Wersja = {
-  sha256: string;
+  sha256?: string;
+  secret_name?: string;
+  secret_version?: number;
   size_bytes: number;
   job_id?: string;
   applied_by: string;
@@ -122,6 +129,12 @@ export function Pliki() {
                     <span className="znacznik nieznany">missing on host</span>
                   ) : plik.drift ? (
                     <span className="znacznik nieznany">changed outside the panel</span>
+                  ) : plik.drift_unknown_reason ? (
+                    // Panel nie trzyma odcisku tresci z sekretu, wiec nie
+                    // udaje, ze plik sie zgadza - mowi, czego nie sprawdza.
+                    <span className="znacznik nieznany" title={plik.drift_unknown_reason}>
+                      content not compared
+                    </span>
                   ) : (
                     "matches"
                   )}
@@ -238,25 +251,33 @@ function Historia({
         <thead><tr><th>Version</th><th>Size</th><th>Applied</th><th>By</th><th>Actions</th></tr></thead>
         <tbody>
           {(historia.data?.items ?? []).map((wersja) => (
-            <tr key={`${wersja.sha256}-${wersja.applied_at}`}>
+            <tr key={`${wersja.sha256 || wersja.secret_name}-${wersja.applied_at}`}>
               <td className="zrodlo">
-                {wersja.sha256.slice(0, 12)}
-                {wersja.sha256 === plik.desired_sha256 && <span className="znacznik"> current</span>}
+                {/* Wpis z sekretu nie ma tresci w panelu: pokazujemy, ktora
+                    wersje sekretu wdrozono, bo tylko to panel wie. */}
+                {wersja.sha256
+                  ? wersja.sha256.slice(0, 12)
+                  : `${wersja.secret_name}@v${wersja.secret_version}`}
+                {wersja.sha256 && wersja.sha256 === plik.desired_sha256 && (
+                  <span className="znacznik"> current</span>
+                )}
               </td>
-              <td>{wersja.size_bytes} B</td>
+              <td>{wersja.sha256 ? `${wersja.size_bytes} B` : "—"}</td>
               <td><Czas wartosc={wersja.applied_at} /></td>
               <td>{wersja.applied_by}</td>
               <td>
                 <div className="operacje">
-                  <button onClick={() => setPorownanie(wersja.sha256)}>Compare</button>
+                  <button onClick={() => setPorownanie(wersja.sha256 ?? "")} disabled={!wersja.sha256}>
+                    Compare
+                  </button>
                   <button
                     className="wtorny"
-                    disabled={wersja.sha256 === plik.desired_sha256 && !plik.drift}
+                    disabled={!wersja.sha256 || (wersja.sha256 === plik.desired_sha256 && !plik.drift)}
                     onClick={() =>
                       onZamiar({
                         akcja: "file.rollback",
                         etykieta: "Roll back file",
-                        opis: `${plik.path} on ${hostname} goes back to version ${wersja.sha256.slice(0, 12)} from ${new Date(wersja.applied_at).toLocaleString()}.`,
+                        opis: `${plik.path} on ${hostname} goes back to version ${(wersja.sha256 ?? "").slice(0, 12)} from ${new Date(wersja.applied_at).toLocaleString()}.`,
                         payload: {
                           file: {
                             path: plik.path,
@@ -355,6 +376,11 @@ function NowyPlik({ onZamiar }: { onZamiar: (zamiar: Zamiar) => void }) {
   const [tresc, setTresc] = useState("");
   const [tryb, setTryb] = useState("644");
   const [odcisk, setOdcisk] = useState("");
+  const [sekret, setSekret] = useState("");
+
+  // Tresc jawna i tresc z magazynu wykluczaja sie: inaczej nie wiadomo, co
+  // naprawde wyladuje w pliku.
+  const zSekretu = sekret.trim() !== "";
 
   return (
     <div className="formularz" style={{ marginBottom: 16 }}>
@@ -364,27 +390,54 @@ function NowyPlik({ onZamiar }: { onZamiar: (zamiar: Zamiar) => void }) {
         reviewed — read it first. Without that, a change someone made after you
         looked would vanish under this write.
       </p>
+      <label>
+        From a secret (leave empty to write the content below)
+        <input
+          value={sekret}
+          onChange={(e) => setSekret(e.target.value)}
+          placeholder="repo.token"
+        />
+      </label>
+      {zSekretu && (
+        <p className="podtytul" style={{ margin: 0 }}>
+          The value never travels in the job: the host fetches it from the store
+          when it starts the operation. The panel keeps no copy and no checksum
+          of it, so it will not be able to tell you later whether somebody
+          changed this file on the host — only which secret version was deployed.
+        </p>
+      )}
       <div className="filtry">
         <input value={sciezka} onChange={(e) => setSciezka(e.target.value)} placeholder="/etc/example.conf" style={{ minWidth: 280 }} />
         <input value={tryb} onChange={(e) => setTryb(e.target.value)} placeholder="Mode" style={{ width: 100 }} />
         <input value={odcisk} onChange={(e) => setOdcisk(e.target.value)} placeholder="Expected sha256 (existing file)" style={{ minWidth: 260 }} />
       </div>
-      <label>
-        Content
-        <textarea rows={10} value={tresc} onChange={(e) => setTresc(e.target.value)} />
-      </label>
+      {!zSekretu && (
+        <label>
+          Content
+          <textarea rows={10} value={tresc} onChange={(e) => setTresc(e.target.value)} />
+        </label>
+      )}
       <button
         onClick={() =>
           onZamiar({
             akcja: "file.ensure",
             etykieta: "Write file",
-            opis: `${sciezka} will be written with ${tresc.split("\n").length} lines, mode ${tryb}. The host validates the content first where it knows how.`,
+            opis: zSekretu
+              ? `${sciezka} will be written with the value of secret ${sekret}, mode ${tryb}. The value is fetched by the host at execution time and is stored nowhere else.`
+              : `${sciezka} will be written with ${tresc.split("\n").length} lines, mode ${tryb}. The host validates the content first where it knows how.`,
             payload: {
-              file: { path: sciezka, content: tresc, mode: tryb, expected_sha256: odcisk },
+              file: zSekretu
+                ? {
+                    path: sciezka,
+                    content_secret: { name: sekret.trim() },
+                    mode: tryb,
+                    expected_sha256: odcisk,
+                  }
+                : { path: sciezka, content: tresc, mode: tryb, expected_sha256: odcisk },
             },
           })
         }
-        disabled={!sciezka || !tresc}
+        disabled={!sciezka || (!tresc && !zSekretu)}
       >
         Write
       </button>

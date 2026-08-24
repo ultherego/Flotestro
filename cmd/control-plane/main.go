@@ -42,6 +42,7 @@ import (
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/scheduler"
+	"github.com/ultherego/flotestro/internal/secrets"
 )
 
 const staleCheckInterval = 30 * time.Second
@@ -91,6 +92,12 @@ func run() error {
 	stepUpACR := flag.String("stepup-acr",
 		config.Env("FLOTESTRO_STEPUP_ACR", ""),
 		"wymagany poziom uwierzytelnienia (acr) przy operacjach o najwiekszym wplywie")
+	// Klucz magazynu lezy w katalogu stanu, obok klucza CA: to jedyne miejsce,
+	// do ktorego usluga ma prawo zapisu, i jedyne, ktorego prawa sa na tyle
+	// waskie, zeby trzymac tam material kryptograficzny.
+	secretsKeyFile := flag.String("secrets-key-file",
+		config.Env("FLOTESTRO_SECRETS_KEY_FILE", ""),
+		"plik z kluczem magazynu sekretow; bez jego kopii sekretow nie da sie odzyskac")
 	webRoot := flag.String("web-root",
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "katalog ze zbudowanym panelem")
 	publicURL := flag.String("public-url",
@@ -326,6 +333,25 @@ func run() error {
 	remediationStore := remediation.NewStore(pool)
 	panelServer.SetRemediation(remediationStore)
 
+	// Magazyn sekretow. Klucz lezy w pliku poza baza: kopia bazy bez niego
+	// nie wystarcza, zeby odczytac cokolwiek.
+	sciezkaKlucza := *secretsKeyFile
+	if sciezkaKlucza == "" {
+		sciezkaKlucza = filepath.Join(cfg.StateDir, "secrets.key")
+	}
+	szyfr, utworzony, err := secrets.OtworzSzyfr(sciezkaKlucza)
+	if err != nil {
+		return fmt.Errorf("magazyn sekretow: %w", err)
+	}
+	if utworzony {
+		log.Warn("wygenerowano klucz magazynu sekretow; bez kopii tego pliku "+
+			"sekretow nie da sie odzyskac", "sciezka", sciezkaKlucza)
+	}
+	secretStore := secrets.NewStore(pool, szyfr)
+	panelServer.SetSecrets(secretStore)
+	agentService.SetSecrets(secretStore)
+	agentService.SetSecretLeases(secretStore)
+
 	adminServer := &http.Server{
 		Addr:              cfg.AdminAddr,
 		Handler:           h2c.NewHandler(panelServer.Routes(), &http2.Server{}),
@@ -346,10 +372,14 @@ func run() error {
 
 	// Scheduler dostarcza zatwierdzone zadania hostom polaczonym z tym gatewayem
 	// i pilnuje lease oraz TTL.
-	go scheduler.New(jobStore, registry, recorder, directory, log, scheduler.Options{
+	dyspozytor := scheduler.New(jobStore, registry, recorder, directory, log, scheduler.Options{
 		GatewayID:     cfg.GatewayID,
 		LeaseDuration: 5 * time.Minute,
-	}).Run(ctx)
+	})
+	// Dzierzawy sekretow powstaja w chwili dostarczenia zadania: krotkie okno
+	// zaczyna sie wtedy, gdy host zaczyna prace.
+	dyspozytor.SetSecrets(secretStore)
+	go dyspozytor.Run(ctx)
 
 	// Orkiestrator prowadzi kampanie przez canary i fale, tworzac zadania,
 	// ktore dostarcza scheduler.

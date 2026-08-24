@@ -22,6 +22,7 @@ import { Zegar } from "./pages/host/Zegar";
 import { Zasilanie } from "./pages/host/Zasilanie";
 import { Bezpieczenstwo } from "./pages/host/Bezpieczenstwo";
 import { Bezpieczenstwo as BezpieczenstwoFloty } from "./pages/Bezpieczenstwo";
+import { Sekrety } from "./pages/Sekrety";
 import { Pliki } from "./pages/host/Pliki";
 import { Compose } from "./pages/host/Compose";
 import { Logi } from "./pages/host/Logi";
@@ -62,6 +63,7 @@ export function App() {
   const widziAudyt = uprawnienia.has("audit.read");
   const widziKampanie = uprawnienia.has("campaign.read");
   const widziBezpieczenstwo = uprawnienia.has("security.read");
+  const widziSekrety = uprawnienia.has("secret.read");
 
   return (
     <div className="uklad">
@@ -72,6 +74,7 @@ export function App() {
         <Link do="/jobs">Jobs</Link>
         {widziKampanie && <Link do="/campaigns">Campaigns</Link>}
         {widziBezpieczenstwo && <Link do="/security">Security</Link>}
+        {widziSekrety && <Link do="/secrets">Secrets</Link>}
         {zdolnosci.directory && <Link do="/directory">Directory</Link>}
         {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
             zmienic; pozostalym pozycja prowadzilaby do samej odmowy. */}
@@ -95,6 +98,7 @@ export function App() {
           <Route path="/dashboard" element={<Pulpit />} />
           <Route path="/hosts" element={<Hosty />} />
           <Route path="/security" element={<BezpieczenstwoFloty />} />
+          <Route path="/secrets" element={<Sekrety />} />
           {/* Modul hosta jest segmentem adresu, wiec odswiezenie, historia
               przegladarki i odnosnik bezposredni prowadza tam, gdzie operator
               faktycznie byl. */}

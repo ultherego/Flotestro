@@ -120,6 +120,33 @@ func (r *Relay) RenewCertificate(ctx context.Context,
 	return connect.NewResponse(response.Msg), nil
 }
 
+// FetchSecret przekazuje pobranie sekretu do centrali.
+//
+// Relay nie przechowuje ani nie oglada wartosci: przekazuje wywolanie razem
+// z tozsamoscia hosta, a decyzje o wydaniu podejmuje centrala na podstawie
+// dzierzawy. Bufor tu nie ma sensu - host czeka na odpowiedz, a dzierzawa
+// jest krotka.
+func (r *Relay) FetchSecret(ctx context.Context,
+	req *connect.Request[agentv1.FetchSecretRequest],
+) (*connect.Response[agentv1.FetchSecretResponse], error) {
+	cert, ok := clientCertificate(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
+	}
+	hostID, err := pki.HostIDFromCert(cert)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+
+	forwarded := connect.NewRequest(req.Msg)
+	forwarded.Header().Set(hostHeader, hostID)
+	response, err := r.client.FetchSecret(ctx, forwarded)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(response.Msg), nil
+}
+
 // Ping przekazuje badanie lacznosci do centrali. Relay nie odpowiada sam:
 // pytanie dotyczy drogi do centrali, a nie tego, czy relay dziala.
 func (r *Relay) Ping(ctx context.Context,

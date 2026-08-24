@@ -20,12 +20,15 @@ var odciskHex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // porowna sie odciskow.
 type plikWidok struct {
 	managedfiles.StanDocelowy
-	ObservedSHA256    string `json:"observed_sha256,omitempty"`
-	Exists            bool   `json:"exists"`
-	Drift             bool   `json:"drift"`
-	Mode              string `json:"observed_mode,omitempty"`
-	Owner             string `json:"observed_owner,omitempty"`
-	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	ObservedSHA256 string `json:"observed_sha256,omitempty"`
+	Exists         bool   `json:"exists"`
+	Drift          bool   `json:"drift"`
+	// DriftUnknownReason mowi, dlaczego panel nie porownuje tresci. Cisza
+	// w tym miejscu wygladalaby jak zgodnosc.
+	DriftUnknownReason string `json:"drift_unknown_reason,omitempty"`
+	Mode               string `json:"observed_mode,omitempty"`
+	Owner              string `json:"observed_owner,omitempty"`
+	UnavailableReason  string `json:"unavailable_reason,omitempty"`
 }
 
 // handleListManagedFiles zwraca pliki zarzadzane na hoscie.
@@ -69,7 +72,15 @@ func (s *Server) handleListManagedFiles(w http.ResponseWriter, r *http.Request) 
 			widok.UnavailableReason = plik.UnavailableReason
 			// Drift oznacza wylacznie rozjazd stwierdzony: plik, ktorego
 			// host nie odczytal, nie jest ani zgodny, ani rozjechany.
-			widok.Drift = plik.Exists && plik.SHA256 != "" && plik.SHA256 != stan.SHA256
+			//
+			// Pliku z sekretu panel nie porownuje wcale: nie ma jego odcisku
+			// i mieć go nie moze. Zamiast falszywej zgodnosci mowi wprost,
+			// ze tresci nie sprawdza.
+			widok.Drift = stan.SecretName == "" && plik.Exists &&
+				plik.SHA256 != "" && plik.SHA256 != stan.SHA256
+			if stan.SecretName != "" && plik.Exists {
+				widok.DriftUnknownReason = "tresc pochodzi z magazynu sekretow; panel nie trzyma jej odcisku"
+			}
 		}
 		widoki = append(widoki, widok)
 	}

@@ -1110,6 +1110,40 @@ type TimePayload struct {
 	EnableDropIn bool `json:"enable_dropin,omitempty"`
 }
 
+// SecretRef wskazuje sekret w magazynie panelu.
+//
+// Payload zadania niesie wylacznie odnosnik. Wartosc nie przechodzi przez
+// zadanie, przez audyt ani przez inwentarz: host siega po nia dopiero przy
+// wykonaniu, na krotka dzierzawe wystawiona dla tego jednego zadania. Dzieki
+// temu hash planu tez opisuje odnosnik, a nie tresc - i da sie go pokazac.
+type SecretRef struct {
+	Name string `json:"name"`
+	// Version rowna zeru oznacza wersje biezaca w chwili dostarczenia zadania.
+	Version int `json:"version,omitempty"`
+}
+
+// nazwaSekretu powtarza regule magazynu, zeby zlecenie z nazwa, ktorej magazyn
+// i tak nie przyjmie, odpadalo juz przy zlecaniu. Magazyn pozostaje instancja
+// rozstrzygajaca - sprawdza nazwe ponownie przy wystawianiu dzierzawy.
+var nazwaSekretu = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
+
+// Waliduj sprawdza odnosnik do sekretu.
+func (r *SecretRef) Waliduj() error {
+	if r == nil || r.Name == "" {
+		return fmt.Errorf("odnosnik do sekretu bez nazwy")
+	}
+	if !nazwaSekretu.MatchString(r.Name) {
+		return fmt.Errorf("nieprawidlowa nazwa sekretu %q", r.Name)
+	}
+	if r.Version < 0 {
+		return fmt.Errorf("wersja sekretu nie moze byc ujemna")
+	}
+	return nil
+}
+
+// Pusty mowi, czy odnosnik na nic nie wskazuje.
+func (r *SecretRef) Pusty() bool { return r == nil || r.Name == "" }
+
 // FilePayload opisuje operacje na pliku konfiguracyjnym.
 type FilePayload struct {
 	Path string `json:"path"`
@@ -1124,6 +1158,22 @@ type FilePayload struct {
 	Validator      string `json:"validator,omitempty"`
 	// VersionSHA256 wskazuje wersje z historii przy powrocie do niej.
 	VersionSHA256 string `json:"version_sha256,omitempty"`
+	// ContentSecret wskazuje sekret, ktorego wartosc ma trafic do pliku.
+	// Wyklucza sie z polem Content: albo tresc jest jawna i widoczna w planie,
+	// albo pochodzi z magazynu i nie ma jej nigdzie poza nim.
+	ContentSecret *SecretRef `json:"content_secret,omitempty"`
+}
+
+// Sekrety wylicza odnosniki, po ktore host bedzie musial siegnac.
+//
+// Scheduler wystawia dzierzawe dokladnie na to, co payload wskazuje - ani
+// mniej, ani wiecej.
+func (p Payload) Sekrety() []SecretRef {
+	var odnosniki []SecretRef
+	if p.File != nil && !p.File.ContentSecret.Pusty() {
+		odnosniki = append(odnosniki, *p.File.ContentSecret)
+	}
+	return odnosniki
 }
 
 // KernelPayload opisuje operacje na ustawieniach jadra.
@@ -1613,6 +1663,16 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if _, err := filesmodul.WalidujTryb(payload.File.Mode); err != nil {
 			return err
+		}
+		// Tresc jawna i tresc z magazynu wykluczaja sie: inaczej nie wiadomo,
+		// co naprawde wyladuje w pliku, a plan pokazywalby co innego.
+		if !payload.File.ContentSecret.Pusty() {
+			if payload.File.Content != "" {
+				return fmt.Errorf("plik ma miec tresc albo sekret, nie oba naraz")
+			}
+			if err := payload.File.ContentSecret.Waliduj(); err != nil {
+				return err
+			}
 		}
 		if payload.File.Validator != "" {
 			if _, _, err := filesmodul.WybierzWalidator(payload.File.Path, payload.File.Validator); err != nil {

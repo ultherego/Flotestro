@@ -23,24 +23,34 @@ var ErrNieZnaleziono = errors.New("plik nie jest zarzadzany przez panel")
 
 // StanDocelowy opisuje plik, ktorym zarzadza panel.
 type StanDocelowy struct {
-	HostID    string    `json:"host_id"`
-	Path      string    `json:"path"`
-	SHA256    string    `json:"desired_sha256"`
-	Mode      string    `json:"mode,omitempty"`
-	Owner     string    `json:"owner,omitempty"`
-	Group     string    `json:"group,omitempty"`
-	Validator string    `json:"validator,omitempty"`
-	UpdatedBy string    `json:"updated_by"`
-	UpdatedAt time.Time `json:"updated_at"`
+	HostID string `json:"host_id"`
+	Path   string `json:"path"`
+	// SHA256 jest pusty dla pliku, ktorego tresc pochodzi z magazynu sekretow:
+	// panel nie trzyma wtedy ani tresci, ani jej odcisku.
+	SHA256 string `json:"desired_sha256,omitempty"`
+	// SecretName i SecretVersion opisuja stan docelowy pliku z sekretem.
+	SecretName    string    `json:"desired_secret,omitempty"`
+	SecretVersion int       `json:"desired_secret_version,omitempty"`
+	Mode          string    `json:"mode,omitempty"`
+	Owner         string    `json:"owner,omitempty"`
+	Group         string    `json:"group,omitempty"`
+	Validator     string    `json:"validator,omitempty"`
+	UpdatedBy     string    `json:"updated_by"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Wersja to jedna tresc pliku w historii.
 type Wersja struct {
-	SHA256    string    `json:"sha256"`
-	SizeBytes int64     `json:"size_bytes"`
-	JobID     *string   `json:"job_id,omitempty"`
-	AppliedBy string    `json:"applied_by"`
-	AppliedAt time.Time `json:"applied_at"`
+	// SHA256 jest pusty dla wpisu, ktorego tresc pochodzila z magazynu
+	// sekretow: panel nie przechowuje wtedy ani tresci, ani jej odcisku.
+	SHA256 string `json:"sha256,omitempty"`
+	// SecretName i SecretVersion opisuja wpis z sekretem.
+	SecretName    string    `json:"secret_name,omitempty"`
+	SecretVersion int       `json:"secret_version,omitempty"`
+	SizeBytes     int64     `json:"size_bytes"`
+	JobID         *string   `json:"job_id,omitempty"`
+	AppliedBy     string    `json:"applied_by"`
+	AppliedAt     time.Time `json:"applied_at"`
 }
 
 // wykonawca pozwala wolac te same zapytania w transakcji i poza nia.
@@ -87,24 +97,30 @@ func (s *Store) Tresc(ctx context.Context, odcisk string) ([]byte, error) {
 // Ustaw zapisuje stan docelowy pliku i dopisuje wpis do historii.
 func (s *Store) Ustaw(ctx context.Context, q wykonawca, stan StanDocelowy, jobID string) error {
 	const zapisStanu = `
-		insert into managed_files (host_id, path, desired_sha256, mode, owner_name,
+		insert into managed_files (host_id, path, desired_sha256, desired_secret,
+		                           desired_secret_version, mode, owner_name,
 		                           group_name, validator, updated_by, updated_at)
-		values ($1, $2, $3, nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), $8, now())
+		values ($1, $2, nullif($3, ''), nullif($4, ''), nullif($5, 0),
+		        nullif($6, ''), nullif($7, ''), nullif($8, ''), nullif($9, ''), $10, now())
 		on conflict (host_id, path) do update set
 			desired_sha256 = excluded.desired_sha256,
+			desired_secret = excluded.desired_secret,
+			desired_secret_version = excluded.desired_secret_version,
 			mode = excluded.mode, owner_name = excluded.owner_name,
 			group_name = excluded.group_name, validator = excluded.validator,
 			updated_by = excluded.updated_by, updated_at = now()`
 	if _, err := q.Exec(ctx, zapisStanu, stan.HostID, stan.Path, stan.SHA256,
-		stan.Mode, stan.Owner, stan.Group, stan.Validator, stan.UpdatedBy); err != nil {
+		stan.SecretName, stan.SecretVersion, stan.Mode, stan.Owner, stan.Group,
+		stan.Validator, stan.UpdatedBy); err != nil {
 		return err
 	}
 
 	const zapisHistorii = `
-		insert into managed_file_history (host_id, path, sha256, job_id, applied_by)
-		values ($1, $2, $3, nullif($4, '')::uuid, $5)`
+		insert into managed_file_history (host_id, path, sha256, secret_name,
+		                                  secret_version, job_id, applied_by)
+		values ($1, $2, nullif($3, ''), nullif($4, ''), nullif($5, 0), nullif($6, '')::uuid, $7)`
 	if _, err := q.Exec(ctx, zapisHistorii, stan.HostID, stan.Path, stan.SHA256,
-		jobID, stan.UpdatedBy); err != nil {
+		stan.SecretName, stan.SecretVersion, jobID, stan.UpdatedBy); err != nil {
 		return err
 	}
 	return nil
@@ -121,7 +137,8 @@ func (s *Store) Usun(ctx context.Context, q wykonawca, hostID, sciezka string) e
 // Lista zwraca pliki zarzadzane na hoscie.
 func (s *Store) Lista(ctx context.Context, hostID string) ([]StanDocelowy, error) {
 	const query = `
-		select host_id, path, desired_sha256, coalesce(mode, ''), coalesce(owner_name, ''),
+		select host_id, path, coalesce(desired_sha256, ''), coalesce(desired_secret, ''),
+		       coalesce(desired_secret_version, 0), coalesce(mode, ''), coalesce(owner_name, ''),
 		       coalesce(group_name, ''), coalesce(validator, ''), updated_by, updated_at
 		from managed_files where host_id = $1 order by path`
 	rows, err := s.pool.Query(ctx, query, hostID)
@@ -132,8 +149,9 @@ func (s *Store) Lista(ctx context.Context, hostID string) ([]StanDocelowy, error
 	var wynik []StanDocelowy
 	for rows.Next() {
 		var stan StanDocelowy
-		if err := rows.Scan(&stan.HostID, &stan.Path, &stan.SHA256, &stan.Mode,
-			&stan.Owner, &stan.Group, &stan.Validator, &stan.UpdatedBy, &stan.UpdatedAt); err != nil {
+		if err := rows.Scan(&stan.HostID, &stan.Path, &stan.SHA256, &stan.SecretName,
+			&stan.SecretVersion, &stan.Mode, &stan.Owner, &stan.Group,
+			&stan.Validator, &stan.UpdatedBy, &stan.UpdatedAt); err != nil {
 			return nil, err
 		}
 		wynik = append(wynik, stan)
@@ -146,10 +164,14 @@ func (s *Store) Historia(ctx context.Context, hostID, sciezka string, limit int)
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	// Wpis z sekretem nie ma tresci w magazynie wersji, wiec zlaczenie musi
+	// byc zewnetrzne: inaczej historia pliku z sekretem bylaby pusta.
 	const query = `
-		select h.sha256, v.size_bytes, h.job_id::text, h.applied_by, h.applied_at
+		select coalesce(h.sha256, ''), coalesce(v.size_bytes, 0),
+		       coalesce(h.secret_name, ''), coalesce(h.secret_version, 0),
+		       h.job_id::text, h.applied_by, h.applied_at
 		from managed_file_history h
-		join file_versions v on v.sha256 = h.sha256
+		left join file_versions v on v.sha256 = h.sha256
 		where h.host_id = $1 and h.path = $2
 		order by h.applied_at desc
 		limit $3`
@@ -161,7 +183,8 @@ func (s *Store) Historia(ctx context.Context, hostID, sciezka string, limit int)
 	var wynik []Wersja
 	for rows.Next() {
 		var wersja Wersja
-		if err := rows.Scan(&wersja.SHA256, &wersja.SizeBytes, &wersja.JobID,
+		if err := rows.Scan(&wersja.SHA256, &wersja.SizeBytes, &wersja.SecretName,
+			&wersja.SecretVersion, &wersja.JobID,
 			&wersja.AppliedBy, &wersja.AppliedAt); err != nil {
 			return nil, err
 		}

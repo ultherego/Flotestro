@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -230,6 +231,24 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				opts.Log.Debug("nie wyslano podgladu dziennika",
 					"task_id", linie.GetTaskId(), "err", err)
 			}
+		}
+		// Sekret pobiera sie osobnym wywolaniem, w chwili wykonania operacji.
+		// Wartosc zyje wtedy w pamieci hosta i nigdzie jej nie zapisujemy -
+		// ani w dzienniku agenta, ani w wyniku zadania.
+		opts.Executor.sekrety = func(ctx context.Context, taskID, nazwa string, wersja int) ([]byte, error) {
+			odpowiedz, err := client.FetchSecret(ctx, connect.NewRequest(&agentv1.FetchSecretRequest{
+				TaskId: taskID, SecretName: nazwa, SecretVersion: uint32(wersja),
+			}))
+			if err != nil {
+				return nil, err
+			}
+			wartosc := odpowiedz.Msg.GetValue()
+			// Panel podaje odcisk tego, co wydal: sprawdzamy, ze dostalismy
+			// dokladnie to, a nie tresc uszkodzona po drodze.
+			if odcisk := odpowiedz.Msg.GetSha256(); odcisk != "" && odcisk != odciskWartosci(wartosc) {
+				return nil, errors.New("odcisk pobranego sekretu nie zgadza sie z podanym przez panel")
+			}
+			return wartosc, nil
 		}
 		opts.Executor.progress = func(p *agentv1.TaskProgress) {
 			if err := send(&agentv1.AgentMessage{
@@ -463,4 +482,13 @@ func executeTask(ctx context.Context, executor *TaskExecutor, task *agentv1.Task
 		}
 	}
 	return result
+}
+
+// odciskWartosci liczy sume kontrolna pobranej wartosci sekretu.
+//
+// Sluzy wylacznie do sprawdzenia, ze host dostal to, co panel wydal. Odcisku
+// nigdzie nie zapisujemy: dla krotkiej wartosci sam odcisk bywa wskazowka.
+func odciskWartosci(wartosc []byte) string {
+	suma := sha256.Sum256(wartosc)
+	return hex.EncodeToString(suma[:])
 }

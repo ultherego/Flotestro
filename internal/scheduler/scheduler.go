@@ -18,6 +18,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/secrets"
 )
 
 // EnrollmentCredentials wystawia jednorazowe poswiadczenie dolaczenia hosta
@@ -42,15 +43,30 @@ type Options struct {
 	SendTimeout time.Duration
 }
 
+// SecretLeases wystawia krotkie dzierzawy na sekrety wskazane w zadaniu.
+//
+// Interfejs zamiast konkretnego magazynu: scheduler ma wystawic prawo do
+// pobrania, a nie wiedziec, jak sekrety sa przechowywane.
+type SecretLeases interface {
+	Wystaw(ctx context.Context, nazwa string, wersja int,
+		jobID, hostID string, okno time.Duration) (*secrets.Dzierzawa, error)
+}
+
 // Scheduler laczy kolejke zadan z aktywnymi sesjami agentow.
 type Scheduler struct {
 	store       *jobs.Store
 	registry    *gateway.Registry
 	audit       *audit.Recorder
 	credentials EnrollmentCredentials
+	secrets     SecretLeases
 	log         *slog.Logger
 	options     Options
 }
+
+// SetSecrets podlacza magazyn sekretow. Bez niego zadanie wskazujace sekret
+// nie zostanie dostarczone: host dostalby odnosnik, po ktory nie ma jak
+// siegnac, i operacja padlaby dopiero na hoscie.
+func (s *Scheduler) SetSecrets(leases SecretLeases) { s.secrets = leases }
 
 func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder,
 	credentials EnrollmentCredentials, log *slog.Logger, options Options) *Scheduler {
@@ -170,6 +186,13 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 		return nil, err
 	}
 
+	// Sekrety wskazane w zadaniu dostaja dzierzawy dokladnie w chwili
+	// dostarczenia: krotkie okno zaczyna sie wtedy, gdy host zaczyna prace,
+	// a nie wtedy, gdy operator klikal.
+	if err := s.wystawDzierzawy(ctx, item); err != nil {
+		return nil, err
+	}
+
 	enroll, ok := envelope.GetAction().(*agentv1.TaskEnvelope_DomainEnroll)
 	if !ok || enroll.DomainEnroll.GetPreflightOnly() {
 		return envelope, nil
@@ -190,6 +213,43 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 	}
 	enroll.DomainEnroll.OneTimePassword = password
 	return envelope, nil
+}
+
+// wystawDzierzawy zaklada prawo do pobrania sekretow tego zadania.
+//
+// Wersje ustala magazyn w tej chwili: zadanie zlecone wobec wersji biezacej
+// dostanie te, ktora jest biezaca przy dostarczeniu - i tylko ona bedzie
+// wydana, takze gdy w trakcie powstanie nastepna.
+func (s *Scheduler) wystawDzierzawy(ctx context.Context, item jobs.LeasedJob) error {
+	var payload opspec.Payload
+	if err := json.Unmarshal(item.Job.Payload, &payload); err != nil {
+		return err
+	}
+	odnosniki := payload.Sekrety()
+	if len(odnosniki) == 0 {
+		return nil
+	}
+	if s.secrets == nil {
+		return errUnknownAction("ten panel nie ma magazynu sekretow")
+	}
+	for _, odnosnik := range odnosniki {
+		dzierzawa, err := s.secrets.Wystaw(ctx, odnosnik.Name, odnosnik.Version,
+			item.Job.ID, item.Job.HostID, 0)
+		if err != nil {
+			return err
+		}
+		// Audyt notuje fakt wydania prawa, nazwe i wersje - nigdy wartosc.
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorSystem, ActorID: s.options.GatewayID,
+			Action: "secret.lease", TargetType: "secret", TargetID: odnosnik.Name,
+			RequestID: item.Job.RequestID, Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"job_id": item.Job.ID, "host_id": item.Job.HostID,
+				"version": dzierzawa.Version, "expires_at": dzierzawa.ExpiresAt,
+			},
+		})
+	}
+	return nil
 }
 
 // buildEnvelope zamienia zadanie z bazy na koperte protokolu agenta.
@@ -339,6 +399,14 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		if payload.File != nil {
 			plik.Path = payload.File.Path
 			plik.Content = []byte(payload.File.Content)
+			// Koperta niesie odnosnik, nie wartosc: host siegnie po tresc
+			// osobnym wywolaniem, gdy zacznie operacje.
+			if !payload.File.ContentSecret.Pusty() {
+				plik.ContentSecret = &agentv1.SecretRef{
+					Name:    payload.File.ContentSecret.Name,
+					Version: uint32(payload.File.ContentSecret.Version),
+				}
+			}
 			plik.Mode = payload.File.Mode
 			plik.Owner = payload.File.Owner
 			plik.Group = payload.File.Group

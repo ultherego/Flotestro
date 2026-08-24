@@ -4284,8 +4284,12 @@ type FileRequest struct {
 	// ze stanem hosta zatrzymuje zapis zamiast nadpisac cudza zmiane.
 	ExpectedSha256 string `protobuf:"bytes,7,opt,name=expected_sha256,json=expectedSha256,proto3" json:"expected_sha256,omitempty"`
 	Validator      string `protobuf:"bytes,8,opt,name=validator,proto3" json:"validator,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// FromSecret oznacza tresc pochodzaca z magazynu sekretow. Helper zapisuje
+	// to w swoim rejestrze i przestaje zglaszac odcisk takiego pliku: dla
+	// krotkiej wartosci sam odcisk jest wskazowka.
+	FromSecret    bool `protobuf:"varint,9,opt,name=from_secret,json=fromSecret,proto3" json:"from_secret,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileRequest) Reset() {
@@ -4372,6 +4376,13 @@ func (x *FileRequest) GetValidator() string {
 		return x.Validator
 	}
 	return ""
+}
+
+func (x *FileRequest) GetFromSecret() bool {
+	if x != nil {
+		return x.FromSecret
+	}
+	return false
 }
 
 type FileResult struct {
@@ -6323,7 +6334,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
 	"\x0epending_reboot\x18\x03 \x03(\tR\rpendingReboot\x12'\n" +
-	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"\x88\x03\n" +
+	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"\xa9\x03\n" +
 	"\vFileRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.FileRequest.OperationR\toperation\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
@@ -6332,7 +6343,9 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x05owner\x18\x05 \x01(\tR\x05owner\x12\x14\n" +
 	"\x05group\x18\x06 \x01(\tR\x05group\x12'\n" +
 	"\x0fexpected_sha256\x18\a \x01(\tR\x0eexpectedSha256\x12\x1c\n" +
-	"\tvalidator\x18\b \x01(\tR\tvalidator\"z\n" +
+	"\tvalidator\x18\b \x01(\tR\tvalidator\x12\x1f\n" +
+	"\vfrom_secret\x18\t \x01(\bR\n" +
+	"fromSecret\"z\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x14\n" +

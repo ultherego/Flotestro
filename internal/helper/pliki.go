@@ -145,7 +145,7 @@ func (s *Server) zapiszPlik(ctx context.Context, allowlista files.Allowlist,
 	if err := files.ZapiszAtomowo(sciezka, action.GetContent(), tryb, uid, gid); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	s.zapamietajPlik(sciezka)
+	s.zapamietajPlik(sciezka, action.GetFromSecret())
 
 	komunikat := "plik zapisany"
 	if !maWalidator {
@@ -207,11 +207,20 @@ func (s *Server) sprawdzTresc(ctx context.Context, walidator files.Walidator,
 // stanPlikow opisuje pliki, ktore panel zapisal na tym hoscie.
 func (s *Server) stanPlikow() files.Snapshot {
 	snapshot := files.Snapshot{ObservedAt: time.Now().UTC()}
-	for _, sciezka := range s.rejestrPlikow() {
-		opis := files.OpiszPlik(sciezka)
+	for _, wpis := range s.rejestrPlikow() {
+		opis := files.OpiszPlik(wpis.Path)
 		opis.Managed = true
-		if opis.Exists && opis.UnavailableReason == "" {
-			if odcisk, err := odciskPliku(sciezka); err == nil {
+		opis.FromSecret = wpis.FromSecret
+		switch {
+		case !opis.Exists || opis.UnavailableReason != "":
+		case wpis.FromSecret:
+			// Odcisku tresci z magazynu nie zglaszamy nigdzie: dla krotkiej
+			// wartosci sam odcisk jest wskazowka, a magazyn ma nie zostawiac
+			// wskazowek poza soba. Panel wie, ktora wersje sekretu wdrozono,
+			// i tyle ma wiedziec.
+			opis.UnavailableReason = "tresc pochodzi z magazynu sekretow; odcisk nie jest zglaszany"
+		default:
+			if odcisk, err := odciskPliku(wpis.Path); err == nil {
 				opis.SHA256 = odcisk
 			} else {
 				opis.UnavailableReason = err.Error()
@@ -222,43 +231,63 @@ func (s *Server) stanPlikow() files.Snapshot {
 	return snapshot
 }
 
-func (s *Server) rejestrPlikow() []string {
+// wpisRejestru opisuje jeden plik zapisany przez panel.
+type wpisRejestru struct {
+	Path string `json:"path"`
+	// FromSecret oznacza plik, ktorego tresc przyszla z magazynu sekretow.
+	FromSecret bool `json:"from_secret,omitempty"`
+}
+
+func (s *Server) rejestrPlikow() []wpisRejestru {
 	dane, err := os.ReadFile(PlikRejestruPlikow)
 	if err != nil {
 		return nil
 	}
+	var wpisy []wpisRejestru
+	if err := json.Unmarshal(dane, &wpisy); err == nil {
+		return wpisy
+	}
+	// Rejestr sprzed wprowadzenia sekretow byl sama lista sciezek. Starszy
+	// format czytamy dalej: helper po aktualizacji nie moze zapomniec, ktore
+	// pliki panel zapisal.
 	var sciezki []string
 	if err := json.Unmarshal(dane, &sciezki); err != nil {
 		return nil
 	}
-	return sciezki
+	wpisy = make([]wpisRejestru, 0, len(sciezki))
+	for _, sciezka := range sciezki {
+		wpisy = append(wpisy, wpisRejestru{Path: sciezka})
+	}
+	return wpisy
 }
 
-func (s *Server) zapamietajPlik(sciezka string) {
-	sciezki := s.rejestrPlikow()
-	for _, wpis := range sciezki {
-		if wpis == sciezka {
+func (s *Server) zapamietajPlik(sciezka string, zSekretu bool) {
+	wpisy := s.rejestrPlikow()
+	for i := range wpisy {
+		if wpisy[i].Path == sciezka {
+			wpisy[i].FromSecret = zSekretu
+			s.zapiszRejestrPlikow(wpisy)
 			return
 		}
 	}
-	sciezki = append(sciezki, sciezka)
-	sort.Strings(sciezki)
-	s.zapiszRejestrPlikow(sciezki)
+	wpisy = append(wpisy, wpisRejestru{Path: sciezka, FromSecret: zSekretu})
+	sort.Slice(wpisy, func(i, j int) bool { return wpisy[i].Path < wpisy[j].Path })
+	s.zapiszRejestrPlikow(wpisy)
 }
 
 func (s *Server) zapomnijPlik(sciezka string) {
-	sciezki := s.rejestrPlikow()
-	pozostale := make([]string, 0, len(sciezki))
-	for _, wpis := range sciezki {
-		if wpis != sciezka {
+	wpisy := s.rejestrPlikow()
+	pozostale := make([]wpisRejestru, 0, len(wpisy))
+	for _, wpis := range wpisy {
+		if wpis.Path != sciezka {
 			pozostale = append(pozostale, wpis)
 		}
 	}
 	s.zapiszRejestrPlikow(pozostale)
 }
 
-func (s *Server) zapiszRejestrPlikow(sciezki []string) {
-	dane, err := json.Marshal(sciezki)
+func (s *Server) zapiszRejestrPlikow(wpisy []wpisRejestru) {
+	dane, err := json.Marshal(wpisy)
 	if err != nil {
 		return
 	}

@@ -632,6 +632,10 @@ message FileRequest {
   // ze stanem hosta zatrzymuje zapis zamiast nadpisac cudza zmiane.
   string expected_sha256 = 7;
   string validator = 8;
+  // FromSecret oznacza tresc pochodzaca z magazynu sekretow. Helper zapisuje
+  // to w swoim rejestrze i przestaje zglaszac odcisk takiego pliku: dla
+  // krotkiej wartosci sam odcisk jest wskazowka.
+  bool from_secret = 9;
 }
 
 message FileResult {

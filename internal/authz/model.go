@@ -195,6 +195,13 @@ const (
 	// dostepny kazdemu, kto zna adres panelu.
 	PermMetricsRead Permission = "metrics.read"
 
+	// Magazyn sekretow. Odczyt dotyczy metadanych - wartosci nie da sie
+	// odczytac przez API w ogole. Zniszczenie wersji jest nieodwracalne,
+	// wiec ma wlasne uprawnienie, osobne od zakladania i obracania.
+	PermSecretRead    Permission = "secret.read"
+	PermSecretWrite   Permission = "secret.write"
+	PermSecretDestroy Permission = "secret.destroy"
+
 	// CA floty jest korzeniem zaufania dla kazdego hosta. Jego wymiana ma
 	// wlasne uprawnienie, osobne od reszty administracji: blad w tym miejscu
 	// odcina cala flote.
@@ -233,6 +240,9 @@ var rolePermissions = map[Role][]Permission{
 		// Audytor patrzy na stan ochronny hosta i na wyniki sprawdzen -
 		// to material jego pracy; naprawiac go nie musi.
 		PermSecurityRead, PermSecurityScan,
+		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
+		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
+		PermSecretRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -313,6 +323,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,
+		PermSecretRead, PermSecretWrite, PermSecretDestroy,
 	},
 }
 

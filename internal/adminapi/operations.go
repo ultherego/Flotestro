@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/secrets"
 )
 
 // createOperationRequest opisuje zlecenie operacji na hoscie.
@@ -162,6 +163,37 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		payload.File.VersionSHA256 = ""
 	}
 
+	// Sekret wskazany w zleceniu musi istniec i dac sie wydac. Bez tego
+	// zadanie czekaloby na zatwierdzenie, poszlo do hosta i dopiero tam
+	// odpadlo - a operator dowiedzialby sie o literowce po kilku minutach.
+	for _, odnosnik := range payload.Sekrety() {
+		if s.secrets == nil {
+			problem(w, http.StatusServiceUnavailable, "secrets_disabled",
+				"this installation has no secret store")
+			return
+		}
+		sekret, err := s.secrets.Sekret(r.Context(), odnosnik.Name)
+		if errors.Is(err, secrets.ErrNotFound) {
+			problem(w, http.StatusBadRequest, "secret_not_found",
+				"no secret named "+odnosnik.Name)
+			return
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if !sekret.Wydawalny() {
+			problem(w, http.StatusConflict, "secret_unavailable",
+				"secret "+odnosnik.Name+" has no version that can be issued")
+			return
+		}
+		if odnosnik.Version > sekret.CurrentVersion {
+			problem(w, http.StatusBadRequest, "secret_version_not_found",
+				"secret "+odnosnik.Name+" has no such version")
+			return
+		}
+	}
+
 	requiresApproval := action.Mutating()
 	if request.RequiresApprova != nil {
 		requiresApproval = *request.RequiresApprova
@@ -218,7 +250,10 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// bajty, ktore operator zatwierdzil. Stan docelowy zapisze dopiero
 	// gateway, po udanej operacji: panel nie moze twierdzic, ze zarzadza
 	// plikiem, ktorego host odrzucil.
-	if payload.File != nil && (action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
+	// Plik z sekretu nie zostawia w panelu ani tresci, ani jej odcisku:
+	// wartosc istnieje wylacznie w magazynie i przez chwile na hoscie.
+	if payload.File != nil && payload.File.ContentSecret.Pusty() &&
+		(action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
 		if _, err := s.files.ZapiszWersje(r.Context(), tx, []byte(payload.File.Content)); err != nil {
 			s.fail(w, err)
 			return

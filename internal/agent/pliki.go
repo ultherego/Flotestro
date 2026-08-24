@@ -61,6 +61,25 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		operacja = helperv1.FileRequest_OPERATION_REMOVE
 	}
 
+	// Tresc z magazynu pobieramy dopiero teraz, tuz przed zapisem. Wartosc
+	// zyje przez chwile w pamieci agenta i helpera - nie ma jej w kopercie
+	// zadania, w dzienniku ani w wyniku.
+	tresc := []byte(payload.Content)
+	if !payload.ContentSecret.Pusty() {
+		if e.sekrety == nil {
+			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
+				"agent nie ma polaczenia, przez ktore mozna pobrac sekret")
+		}
+		wartosc, err := e.sekrety(callCtx, task.GetTaskId(),
+			payload.ContentSecret.Name, payload.ContentSecret.Version)
+		if err != nil {
+			// Powod odmowy jest tresci wyniku; wartosci w nim nie ma.
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
+				"nie pobrano sekretu "+payload.ContentSecret.Name+": "+err.Error())
+		}
+		tresc = wartosc
+	}
+
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
@@ -69,12 +88,13 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 			File: &helperv1.FileRequest{
 				Operation:      operacja,
 				Path:           payload.Path,
-				Content:        []byte(payload.Content),
+				Content:        tresc,
 				Mode:           payload.Mode,
 				Owner:          payload.Owner,
 				Group:          payload.Group,
 				ExpectedSha256: payload.ExpectedSHA256,
 				Validator:      payload.Validator,
+				FromSecret:     !payload.ContentSecret.Pusty(),
 			},
 		},
 	}, timeout)

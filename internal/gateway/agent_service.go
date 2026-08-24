@@ -82,6 +82,11 @@ type AgentService struct {
 	// dopiero po udanej operacji: panel nie moze twierdzic, ze zarzadza
 	// plikiem, ktorego host nie przyjal.
 	files *managedfiles.Store
+	// secrets wydaje wartosci sekretow na dzierzawe. Pusty oznacza panel bez
+	// magazynu: operacje wskazujace sekret nie beda wtedy dostarczane.
+	secrets SekretyWydawane
+	// leases pozwala sprawdzic, ktora wersje sekretu panel naprawde wydal.
+	leases SekretyDzierzawione
 	// proby tlumaczy identyfikator proby na identyfikator operacji. Agent
 	// melduje postep dla proby, a operator patrzy na operacje.
 	probyMu   sync.RWMutex
@@ -441,6 +446,15 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	// Stan docelowy pliku zapisujemy po udanej operacji, a nie przy jej
 	// zlecaniu: panel nie moze twierdzic, ze zarzadza plikiem, ktorego host
 	// odrzucil.
+	// Zadanie, ktore sie skonczylo, nie ma po co trzymac otwartego prawa do
+	// sekretu. Dzierzawa i tak wygasnie sama, ale okno ma byc tak krotkie,
+	// jak sie da - a nie tak dlugie, jak pozwala zegar.
+	if s.leases != nil {
+		if err := s.leases.Uniewaznij(ctx, jobID); err != nil {
+			s.log.Debug("nie zamknieto dzierzaw sekretow", "job_id", jobID, "err", err)
+		}
+	}
+
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
 		s.zapiszStanPliku(ctx, hostID, jobID)
 		// Odczytana tresc trafia do magazynu wersji: bez tego nie da sie
@@ -1510,6 +1524,27 @@ func unitStatesJSON(stany []*agentv1.UnitState) []map[string]any {
 	return wynik
 }
 
+// wersjaZDzierzawy odczytuje wersje sekretu, ktora panel naprawde wydal.
+//
+// Zlecenie moze wskazywac "wersje biezaca"; ta ustala sie dopiero przy
+// dostarczeniu zadania, wiec stan docelowy zapisujemy z dzierzawy, a nie
+// z payloadu.
+func wersjaZDzierzawy(ctx context.Context, s *AgentService, jobID, nazwa string) int {
+	if s.leases == nil {
+		return 0
+	}
+	dzierzawy, err := s.leases.Dzierzawy(ctx, jobID)
+	if err != nil {
+		return 0
+	}
+	for _, dzierzawa := range dzierzawy {
+		if dzierzawa.SecretName == nazwa {
+			return dzierzawa.Version
+		}
+	}
+	return 0
+}
+
 // zapiszStanPliku zapisuje stan docelowy pliku po udanej operacji.
 func (s *AgentService) zapiszStanPliku(ctx context.Context, hostID, jobID string) {
 	zadanie, err := s.jobs.Get(ctx, jobID)
@@ -1532,16 +1567,29 @@ func (s *AgentService) zapiszStanPliku(ctx context.Context, hostID, jobID string
 		}
 		return
 	}
-	odcisk, err := s.files.ZapiszWersje(ctx, s.pool, []byte(payload.File.Content))
-	if err != nil {
-		s.log.Error("nie zapisano wersji pliku", "host_id", hostID, "err", err)
-		return
-	}
-	if err := s.files.Ustaw(ctx, s.pool, managedfiles.StanDocelowy{
-		HostID: hostID, Path: payload.File.Path, SHA256: odcisk,
+	stan := managedfiles.StanDocelowy{
+		HostID: hostID, Path: payload.File.Path,
 		Mode: payload.File.Mode, Owner: payload.File.Owner, Group: payload.File.Group,
 		Validator: payload.File.Validator, UpdatedBy: zadanie.CreatedBy,
-	}, jobID); err != nil {
+	}
+	// Plik z sekretu nie zostawia w panelu ani tresci, ani jej odcisku:
+	// stanem docelowym jest nazwa sekretu i wersja. Kosztem jest to, ze panel
+	// nie wykryje podmiany tresci na hoscie - i tak ma byc powiedziane.
+	if !payload.File.ContentSecret.Pusty() {
+		stan.SecretName = payload.File.ContentSecret.Name
+		stan.SecretVersion = payload.File.ContentSecret.Version
+		if stan.SecretVersion == 0 {
+			stan.SecretVersion = wersjaZDzierzawy(ctx, s, jobID, stan.SecretName)
+		}
+	} else {
+		odcisk, err := s.files.ZapiszWersje(ctx, s.pool, []byte(payload.File.Content))
+		if err != nil {
+			s.log.Error("nie zapisano wersji pliku", "host_id", hostID, "err", err)
+			return
+		}
+		stan.SHA256 = odcisk
+	}
+	if err := s.files.Ustaw(ctx, s.pool, stan, jobID); err != nil {
 		s.log.Error("nie zapisano stanu pliku", "host_id", hostID, "err", err)
 	}
 }
