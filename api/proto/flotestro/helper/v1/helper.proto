@@ -54,6 +54,7 @@ message HelperRequest {
     SecurityRequest security = 44;
     CertificateRequest certificate = 45;
     RepositoryRequest repository = 46;
+    BackupRequest backup = 47;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -211,6 +212,7 @@ message HelperResponse {
   SecurityResult security_result = 32;
   CertificateResult certificate_result = 33;
   RepositoryResult repository_result = 34;
+  BackupResult backup_result = 35;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -553,6 +555,51 @@ message SecurityResult {
   // Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
   bytes facts = 1;
   string message = 2;
+}
+
+// BackupRequest steruje narzedziem backupu na hoscie.
+//
+// Poswiadczenia przychodza tu jako wartosci - agent pobral je z magazynu tuz
+// przed operacja - i ida do narzedzia srodowiskiem, a nie argumentem. Wiersz
+// polecen procesu jest w /proc czytelny dla kazdego uzytkownika hosta.
+message BackupRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_PLAN = 1;
+    OPERATION_RUN = 2;
+    OPERATION_VERIFY = 3;
+    OPERATION_RESTORE = 4;
+  }
+  Operation operation = 1;
+  string id = 2;
+  string tool = 3;
+  string repository = 4;
+  repeated string paths = 5;
+  repeated string excludes = 6;
+  repeated string tags = 7;
+  int32 keep_last = 8;
+  int32 keep_daily = 9;
+  int32 keep_weekly = 10;
+  int32 keep_monthly = 11;
+  bool prune = 12;
+  string runbook = 13;
+  // Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+  bool initialize = 21;
+  // Password i env niosa wartosci z magazynu; zyja w pamieci helpera na czas
+  // operacji i nie trafiaja do wyniku ani do dziennika.
+  bytes password = 14;
+  map<string, bytes> env = 15;
+  bool read_data = 16;
+  string snapshot_id = 17;
+  string target = 18;
+  repeated string include = 19;
+  string overwrite = 20;
+}
+
+message BackupResult {
+  bytes state = 1;
+  bytes outcome = 2;
+  string message = 3;
 }
 
 // RepositoryRequest zapisuje albo usuwa zrodlo pakietow.

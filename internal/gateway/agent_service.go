@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	backupstore "github.com/ultherego/flotestro/internal/backup"
 	certyfikaty "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
@@ -27,6 +28,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	modulbackup "github.com/ultherego/flotestro/internal/modules/backup"
 	modulcerts "github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -88,6 +90,10 @@ type AgentService struct {
 	// dopiero po udanej operacji, i to na podstawie odcisku, ktory odeslal
 	// host - a nie tego, ktory panel wyslal.
 	certificates *certyfikaty.Store
+	// backups trzyma historie przebiegow kopii. Panel nie wie, kiedy kopia
+	// sie udala, jesli tego nie zapisze: host nie pamieta tego miedzy
+	// operacjami, a repozytorium odpowiada dopiero po podaniu hasla.
+	backups *backupstore.Store
 	// secrets wydaje wartosci sekretow na dzierzawe. Pusty oznacza panel bez
 	// magazynu: operacje wskazujace sekret nie beda wtedy dostarczane.
 	secrets SekretyWydawane
@@ -112,6 +118,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		files:        managedfiles.NewStore(pool),
 		certificates: certyfikaty.NewStore(pool),
+		backups:      backupstore.NewStore(pool),
 		audit:        recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
@@ -488,6 +495,14 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}); err != nil {
 			s.log.Error("nie zapisano stanu plikow", "host_id", hostID, "err", err)
 		}
+	}
+
+	// Przebieg kopii zapisujemy takze wtedy, gdy sie nie udal: "backup nie
+	// zadzialal" jest wazniejsza wiadomoscia niz "backup zadzialal", a bez
+	// wpisu w historii nie byloby jej gdzie zobaczyc.
+	if kopia := result.GetBackupResult(); kopia != nil {
+		s.zapiszPrzebiegKopii(ctx, hostID, jobID, kopia,
+			result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED)
 	}
 
 	// Zrodla pakietow trafiaja do inwentarza po kazdej zmianie. Fragment
@@ -904,6 +919,22 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":    "time",
 			"message": zegar.GetMessage(),
 			"probes":  surowyJSON(zegar.GetProbes()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Stan repozytorium i wynik kopii naleza do zadania: to odpowiedz na
+	// pytanie zadane w jednej chwili, a nie stan hosta. Lista kopii jest tez
+	// jedynym miejscem, z ktorego operator moze wybrac te do odtworzenia.
+	if kopia := result.GetBackupResult(); kopia != nil &&
+		(len(kopia.GetState()) > 0 || len(kopia.GetOutcome()) > 0) {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":    "backup",
+			"message": kopia.GetMessage(),
+			"state":   surowyJSON(kopia.GetState()),
+			"outcome": surowyJSON(kopia.GetOutcome()),
 		})
 		if err == nil {
 			return encoded
@@ -1752,4 +1783,97 @@ func (s *AgentService) scalRepozytoria(ctx context.Context, hostID string, zrodl
 		UnavailableReason: powod,
 		ObservedAt:        time.Now().UTC(),
 	})
+}
+
+// rodzajeKopii tlumaczy typ operacji na rodzaj wpisu w historii.
+var rodzajeKopii = map[opspec.ActionType]string{
+	opspec.ActionBackupPlan:    modulbackup.OperacjaPlan,
+	opspec.ActionBackupRun:     modulbackup.OperacjaBackup,
+	opspec.ActionBackupVerify:  modulbackup.OperacjaSprawdz,
+	opspec.ActionBackupRestore: modulbackup.OperacjaOdtworzen,
+}
+
+// zapiszPrzebiegKopii dopisuje wynik operacji backupu do historii.
+//
+// Zapisujemy metadane, a nie dane: identyfikator kopii, liczniki i to, kiedy
+// ostatnia kopia w repozytorium powstala. Samych danych panel nie widzi
+// i widziec nie ma.
+func (s *AgentService) zapiszPrzebiegKopii(ctx context.Context, hostID, jobID string,
+	wynik *agentv1.BackupResult, udane bool) {
+	zadanie, err := s.jobs.Get(ctx, jobID)
+	if err != nil {
+		return
+	}
+	rodzaj, znany := rodzajeKopii[opspec.ActionType(zadanie.ActionType)]
+	if !znany {
+		return
+	}
+	var payload opspec.Payload
+	if err := json.Unmarshal(zadanie.Payload, &payload); err != nil || payload.Backup == nil {
+		return
+	}
+
+	przebieg := backupstore.Przebieg{
+		HostID: hostID, Definition: payload.Backup.ID, Kind: rodzaj,
+		JobID: jobID, Outcome: "failed", Message: wynik.GetMessage(),
+		StartedBy: zadanie.CreatedBy,
+	}
+	if udane {
+		przebieg.Outcome = "succeeded"
+	}
+
+	if stan, ok := stanKopii(wynik.GetState()); ok {
+		liczba := len(stan.Snapshots)
+		przebieg.Snapshots = &liczba
+		przebieg.LastSuccessAt = stan.LastSuccessAt
+		if stan.TotalSizeBytes != nil {
+			rozmiar := int64(*stan.TotalSizeBytes)
+			przebieg.RepositorySize = &rozmiar
+		}
+	}
+	if efekt, ok := wynikKopii(wynik.GetOutcome()); ok {
+		przebieg.SnapshotID = efekt.SnapshotID
+		przebieg.BytesAdded = liczbaZBajtow(efekt.BytesAdded)
+		przebieg.TotalBytes = liczbaZBajtow(efekt.TotalBytesProcessed)
+		przebieg.FilesNew = liczbaZBajtow(efekt.FilesNew)
+		przebieg.DurationSeconds = efekt.DurationSeconds
+		if przebieg.Message == "" {
+			przebieg.Message = efekt.Message
+		}
+	}
+	if err := s.backups.ZapiszPrzebieg(ctx, s.pool, przebieg); err != nil {
+		s.log.Error("nie zapisano przebiegu kopii", "host_id", hostID, "err", err)
+	}
+}
+
+func stanKopii(dane []byte) (modulbackup.Stan, bool) {
+	var stan modulbackup.Stan
+	if len(dane) == 0 {
+		return stan, false
+	}
+	if err := json.Unmarshal(dane, &stan); err != nil {
+		return stan, false
+	}
+	return stan, true
+}
+
+func wynikKopii(dane []byte) (modulbackup.Wynik, bool) {
+	var wynik modulbackup.Wynik
+	if len(dane) == 0 {
+		return wynik, false
+	}
+	if err := json.Unmarshal(dane, &wynik); err != nil {
+		return wynik, false
+	}
+	return wynik, true
+}
+
+// liczbaZBajtow zamienia licznik narzedzia na wartosc zapisywalna w bazie.
+// Brak wartosci zostaje brakiem, a nie zerem.
+func liczbaZBajtow(wartosc *uint64) *int64 {
+	if wartosc == nil {
+		return nil
+	}
+	liczba := int64(*wartosc)
+	return &liczba
 }

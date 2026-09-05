@@ -27,6 +27,7 @@ const (
 	ModulPower      = "power"
 	ModulSecurity   = "security"
 	ModulCerts      = "certificates"
+	ModulBackups    = "backups"
 	ModulFiles      = "files"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
@@ -116,6 +117,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulPower, "agent/procfs+logind", powodZasilania(f), zasilanie(f)},
 
 		{ModulSecurity, "agent/selinux+audit+ss", powodOchrony(f), ochrona(f)},
+
+		{ModulBackups, "agent/backup-tools", powodBackupu(f), backupHosta(f)},
 
 		{ModulCerts, "agent/certificates+certmonger", powodCertyfikatow(f), certyfikaty(f)},
 
@@ -348,4 +351,20 @@ func certyfikaty(f Facts) any {
 		return struct{}{}
 	}
 	return f.Certificates
+}
+
+// powodBackupu zwraca powod, dla ktorego stanu narzedzi backupu nie ma.
+func powodBackupu(f Facts) string {
+	if f.Backup == nil {
+		return "the agent did not read backup tools on this host"
+	}
+	return ""
+}
+
+// backupHosta zwraca stan narzedzi backupu.
+func backupHosta(f Facts) any {
+	if f.Backup == nil {
+		return struct{}{}
+	}
+	return f.Backup
 }

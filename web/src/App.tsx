@@ -24,6 +24,8 @@ import { Bezpieczenstwo } from "./pages/host/Bezpieczenstwo";
 import { Bezpieczenstwo as BezpieczenstwoFloty } from "./pages/Bezpieczenstwo";
 import { Sekrety } from "./pages/Sekrety";
 import { CertyfikatyFloty } from "./pages/Certyfikaty";
+import { KopieFloty } from "./pages/Kopie";
+import { Kopie } from "./pages/host/Kopie";
 import { Certyfikaty } from "./pages/host/Certyfikaty";
 import { Pliki } from "./pages/host/Pliki";
 import { Compose } from "./pages/host/Compose";
@@ -67,6 +69,7 @@ export function App() {
   const widziBezpieczenstwo = uprawnienia.has("security.read");
   const widziSekrety = uprawnienia.has("secret.read");
   const widziCertyfikaty = uprawnienia.has("certificate.read");
+  const widziKopie = uprawnienia.has("backup.read");
 
   return (
     <div className="uklad">
@@ -78,6 +81,7 @@ export function App() {
         {widziKampanie && <Link do="/campaigns">Campaigns</Link>}
         {widziBezpieczenstwo && <Link do="/security">Security</Link>}
         {widziCertyfikaty && <Link do="/certificates">Certificates</Link>}
+        {widziKopie && <Link do="/backups">Backups</Link>}
         {widziSekrety && <Link do="/secrets">Secrets</Link>}
         {zdolnosci.directory && <Link do="/directory">Directory</Link>}
         {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
@@ -103,6 +107,7 @@ export function App() {
           <Route path="/hosts" element={<Hosty />} />
           <Route path="/security" element={<BezpieczenstwoFloty />} />
           <Route path="/certificates" element={<CertyfikatyFloty />} />
+          <Route path="/backups" element={<KopieFloty />} />
           <Route path="/secrets" element={<Sekrety />} />
           {/* Modul hosta jest segmentem adresu, wiec odswiezenie, historia
               przegladarki i odnosnik bezposredni prowadza tam, gdzie operator
@@ -124,6 +129,7 @@ export function App() {
             <Route path="power" element={<Zasilanie />} />
             <Route path="security" element={<Bezpieczenstwo />} />
             <Route path="certificates" element={<Certyfikaty />} />
+            <Route path="backups" element={<Kopie />} />
             <Route path="files" element={<Pliki />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />

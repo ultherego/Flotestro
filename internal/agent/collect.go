@@ -174,6 +174,11 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 		}
 	}
 
+	// Narzedzia backupu czyta agent bez roota: obecnosc binarki i jej wersja
+	// sa jawne. Stanu repozytorium tu nie ma - ten wymaga poswiadczen.
+	stanBackupu := ZbierzBackup(ctx)
+	facts.Backup = &stanBackupu
+
 	// Certyfikaty czyta agent, a helper dokłada to, czego bez roota nie widac.
 	// Zakres jest wyliczony: rejestr celow panelu i zlecenia certmongera,
 	// a nie przeszukanie systemu plikow.

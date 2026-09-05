@@ -465,6 +465,55 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
 
+	case opspec.ActionBackupPlan, opspec.ActionBackupRun,
+		opspec.ActionBackupVerify, opspec.ActionBackupRestore:
+		operacja := agentv1.BackupAction_OPERATION_PLAN
+		switch action {
+		case opspec.ActionBackupRun:
+			operacja = agentv1.BackupAction_OPERATION_RUN
+		case opspec.ActionBackupVerify:
+			operacja = agentv1.BackupAction_OPERATION_VERIFY
+		case opspec.ActionBackupRestore:
+			operacja = agentv1.BackupAction_OPERATION_RESTORE
+		}
+		kopia := &agentv1.BackupAction{Operation: operacja}
+		if payload.Backup != nil {
+			kopia.Id = payload.Backup.ID
+			kopia.Tool = payload.Backup.Tool
+			kopia.Repository = payload.Backup.Repository
+			kopia.Paths = payload.Backup.Paths
+			kopia.Excludes = payload.Backup.Excludes
+			kopia.Tags = payload.Backup.Tags
+			kopia.KeepLast = int32(payload.Backup.KeepLast)
+			kopia.KeepDaily = int32(payload.Backup.KeepDaily)
+			kopia.KeepWeekly = int32(payload.Backup.KeepWeekly)
+			kopia.KeepMonthly = int32(payload.Backup.KeepMonthly)
+			kopia.Prune = payload.Backup.Prune
+			kopia.Runbook = payload.Backup.Runbook
+			kopia.Initialize = payload.Backup.Initialize
+			kopia.ReadData = payload.Backup.ReadData
+			kopia.SnapshotId = payload.Backup.SnapshotID
+			kopia.Target = payload.Backup.Target
+			kopia.Include = payload.Backup.Include
+			kopia.Overwrite = payload.Backup.Overwrite
+			// Koperta niesie odnosniki do poswiadczen, nigdy ich wartosci.
+			if !payload.Backup.PasswordSecret.Pusty() {
+				kopia.PasswordSecret = &agentv1.SecretRef{
+					Name:    payload.Backup.PasswordSecret.Name,
+					Version: uint32(payload.Backup.PasswordSecret.Version),
+				}
+			}
+			if len(payload.Backup.EnvSecrets) > 0 {
+				kopia.EnvSecrets = map[string]*agentv1.SecretRef{}
+				for nazwa, odnosnik := range payload.Backup.EnvSecrets {
+					kopia.EnvSecrets[nazwa] = &agentv1.SecretRef{
+						Name: odnosnik.Name, Version: uint32(odnosnik.Version),
+					}
+				}
+			}
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Backup{Backup: kopia}
+
 	case opspec.ActionRepositorySet:
 		zrodlo := &agentv1.RepositoryAction{}
 		if payload.Repository != nil {

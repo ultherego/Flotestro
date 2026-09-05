@@ -13,6 +13,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	kopiestore "github.com/ultherego/flotestro/internal/backup"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	certyfikatystore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/enrollment"
@@ -50,6 +51,9 @@ type Server struct {
 	// certyfikaty trzymaja zakres obserwacji i historie wdrozen. Panel musi
 	// je znac, bo host sam nie powie, ktory plik jest certyfikatem uslugi.
 	certyfikaty *certyfikatystore.Store
+	// kopie trzymaja definicje backupu i historie przebiegow. Danych
+	// backupowych panel nie widzi: plyna z hosta wprost do repozytorium.
+	kopie *kopiestore.Store
 	// directoryWrite wlacza modul zmian w katalogu. Domyslnie wylaczony:
 	// klient moze chciec samego widoku, a zmiany robic swoimi narzedziami.
 	directoryWrite bool
@@ -123,6 +127,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		files:       managedfiles.NewStore(pool),
 		certyfikaty: certyfikatystore.NewStore(pool),
+		kopie:       kopiestore.NewStore(pool),
 		campaigns:   campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
@@ -181,6 +186,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
 	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
 	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	mux.HandleFunc("GET /api/v1/backups", s.handleFleetBackups)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/backups", s.handleHostBackups)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/backups", s.handleSetBackupDefinition)
+	mux.HandleFunc("DELETE /api/v1/hosts/{id}/backups", s.handleDeleteBackupDefinition)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/backups/runs", s.handleBackupRuns)
+
 	mux.HandleFunc("GET /api/v1/certificates", s.handleFleetCertificates)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/certificates", s.handleHostCertificates)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/certificates/deployments", s.handleCertificateDeployments)

@@ -762,6 +762,61 @@ func (SecurityAction_Operation) EnumDescriptor() ([]byte, []int) {
 	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{69, 0}
 }
 
+type BackupAction_Operation int32
+
+const (
+	BackupAction_OPERATION_UNSPECIFIED BackupAction_Operation = 0
+	BackupAction_OPERATION_PLAN        BackupAction_Operation = 1
+	BackupAction_OPERATION_RUN         BackupAction_Operation = 2
+	BackupAction_OPERATION_VERIFY      BackupAction_Operation = 3
+	BackupAction_OPERATION_RESTORE     BackupAction_Operation = 4
+)
+
+// Enum value maps for BackupAction_Operation.
+var (
+	BackupAction_Operation_name = map[int32]string{
+		0: "OPERATION_UNSPECIFIED",
+		1: "OPERATION_PLAN",
+		2: "OPERATION_RUN",
+		3: "OPERATION_VERIFY",
+		4: "OPERATION_RESTORE",
+	}
+	BackupAction_Operation_value = map[string]int32{
+		"OPERATION_UNSPECIFIED": 0,
+		"OPERATION_PLAN":        1,
+		"OPERATION_RUN":         2,
+		"OPERATION_VERIFY":      3,
+		"OPERATION_RESTORE":     4,
+	}
+)
+
+func (x BackupAction_Operation) Enum() *BackupAction_Operation {
+	p := new(BackupAction_Operation)
+	*p = x
+	return p
+}
+
+func (x BackupAction_Operation) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BackupAction_Operation) Descriptor() protoreflect.EnumDescriptor {
+	return file_flotestro_agent_v1_agent_proto_enumTypes[13].Descriptor()
+}
+
+func (BackupAction_Operation) Type() protoreflect.EnumType {
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[13]
+}
+
+func (x BackupAction_Operation) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BackupAction_Operation.Descriptor instead.
+func (BackupAction_Operation) EnumDescriptor() ([]byte, []int) {
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{71, 0}
+}
+
 type CertificateAction_Operation int32
 
 const (
@@ -798,11 +853,11 @@ func (x CertificateAction_Operation) String() string {
 }
 
 func (CertificateAction_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_agent_v1_agent_proto_enumTypes[13].Descriptor()
+	return file_flotestro_agent_v1_agent_proto_enumTypes[14].Descriptor()
 }
 
 func (CertificateAction_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_agent_v1_agent_proto_enumTypes[13]
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[14]
 }
 
 func (x CertificateAction_Operation) Number() protoreflect.EnumNumber {
@@ -811,7 +866,7 @@ func (x CertificateAction_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CertificateAction_Operation.Descriptor instead.
 func (CertificateAction_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{74, 0}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{76, 0}
 }
 
 type TimeAction_Operation int32
@@ -850,11 +905,11 @@ func (x TimeAction_Operation) String() string {
 }
 
 func (TimeAction_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_agent_v1_agent_proto_enumTypes[14].Descriptor()
+	return file_flotestro_agent_v1_agent_proto_enumTypes[15].Descriptor()
 }
 
 func (TimeAction_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_agent_v1_agent_proto_enumTypes[14]
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[15]
 }
 
 func (x TimeAction_Operation) Number() protoreflect.EnumNumber {
@@ -863,7 +918,7 @@ func (x TimeAction_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TimeAction_Operation.Descriptor instead.
 func (TimeAction_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{76, 0}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{78, 0}
 }
 
 type KernelAction_Operation int32
@@ -905,11 +960,11 @@ func (x KernelAction_Operation) String() string {
 }
 
 func (KernelAction_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_agent_v1_agent_proto_enumTypes[15].Descriptor()
+	return file_flotestro_agent_v1_agent_proto_enumTypes[16].Descriptor()
 }
 
 func (KernelAction_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_agent_v1_agent_proto_enumTypes[15]
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[16]
 }
 
 func (x KernelAction_Operation) Number() protoreflect.EnumNumber {
@@ -918,7 +973,7 @@ func (x KernelAction_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use KernelAction_Operation.Descriptor instead.
 func (KernelAction_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{78, 0}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{80, 0}
 }
 
 type FileAction_Operation int32
@@ -966,11 +1021,11 @@ func (x FileAction_Operation) String() string {
 }
 
 func (FileAction_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_agent_v1_agent_proto_enumTypes[16].Descriptor()
+	return file_flotestro_agent_v1_agent_proto_enumTypes[17].Descriptor()
 }
 
 func (FileAction_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_agent_v1_agent_proto_enumTypes[16]
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[17]
 }
 
 func (x FileAction_Operation) Number() protoreflect.EnumNumber {
@@ -979,7 +1034,7 @@ func (x FileAction_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FileAction_Operation.Descriptor instead.
 func (FileAction_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{81, 0}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{83, 0}
 }
 
 type PackageLifecycle_Operation int32
@@ -1018,11 +1073,11 @@ func (x PackageLifecycle_Operation) String() string {
 }
 
 func (PackageLifecycle_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_agent_v1_agent_proto_enumTypes[17].Descriptor()
+	return file_flotestro_agent_v1_agent_proto_enumTypes[18].Descriptor()
 }
 
 func (PackageLifecycle_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_agent_v1_agent_proto_enumTypes[17]
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[18]
 }
 
 func (x PackageLifecycle_Operation) Number() protoreflect.EnumNumber {
@@ -1031,7 +1086,7 @@ func (x PackageLifecycle_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PackageLifecycle_Operation.Descriptor instead.
 func (PackageLifecycle_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{83, 0}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{85, 0}
 }
 
 type ComposeAction_Operation int32
@@ -1067,11 +1122,11 @@ func (x ComposeAction_Operation) String() string {
 }
 
 func (ComposeAction_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_flotestro_agent_v1_agent_proto_enumTypes[18].Descriptor()
+	return file_flotestro_agent_v1_agent_proto_enumTypes[19].Descriptor()
 }
 
 func (ComposeAction_Operation) Type() protoreflect.EnumType {
-	return &file_flotestro_agent_v1_agent_proto_enumTypes[18]
+	return &file_flotestro_agent_v1_agent_proto_enumTypes[19]
 }
 
 func (x ComposeAction_Operation) Number() protoreflect.EnumNumber {
@@ -1080,7 +1135,7 @@ func (x ComposeAction_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ComposeAction_Operation.Descriptor instead.
 func (ComposeAction_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{91, 0}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{93, 0}
 }
 
 type FetchSecretRequest struct {
@@ -3291,6 +3346,7 @@ type TaskEnvelope struct {
 	//	*TaskEnvelope_Security
 	//	*TaskEnvelope_Certificate
 	//	*TaskEnvelope_Repository
+	//	*TaskEnvelope_Backup
 	Action        isTaskEnvelope_Action `protobuf_oneof:"action"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3675,6 +3731,15 @@ func (x *TaskEnvelope) GetRepository() *RepositoryAction {
 	return nil
 }
 
+func (x *TaskEnvelope) GetBackup() *BackupAction {
+	if x != nil {
+		if x, ok := x.Action.(*TaskEnvelope_Backup); ok {
+			return x.Backup
+		}
+	}
+	return nil
+}
+
 type isTaskEnvelope_Action interface {
 	isTaskEnvelope_Action()
 }
@@ -3803,6 +3868,10 @@ type TaskEnvelope_Repository struct {
 	Repository *RepositoryAction `protobuf:"bytes,50,opt,name=repository,proto3,oneof"`
 }
 
+type TaskEnvelope_Backup struct {
+	Backup *BackupAction `protobuf:"bytes,51,opt,name=backup,proto3,oneof"`
+}
+
 func (*TaskEnvelope_UnitAction) isTaskEnvelope_Action() {}
 
 func (*TaskEnvelope_ReadJournal) isTaskEnvelope_Action() {}
@@ -3864,6 +3933,8 @@ func (*TaskEnvelope_Security) isTaskEnvelope_Action() {}
 func (*TaskEnvelope_Certificate) isTaskEnvelope_Action() {}
 
 func (*TaskEnvelope_Repository) isTaskEnvelope_Action() {}
+
+func (*TaskEnvelope_Backup) isTaskEnvelope_Action() {}
 
 // Preconditions sa sprawdzane lokalnie tuz przed wykonaniem. Stan bazowy mogl
 // zmienic sie miedzy zatwierdzeniem planu a dostarczeniem zadania.
@@ -5137,6 +5208,7 @@ type TaskResult struct {
 	SecurityResult      *SecurityResult      `protobuf:"bytes,42,opt,name=security_result,json=securityResult,proto3" json:"security_result,omitempty"`
 	CertificateResult   *CertificateResult   `protobuf:"bytes,43,opt,name=certificate_result,json=certificateResult,proto3" json:"certificate_result,omitempty"`
 	RepositoryResult    *RepositoryResult    `protobuf:"bytes,44,opt,name=repository_result,json=repositoryResult,proto3" json:"repository_result,omitempty"`
+	BackupResult        *BackupResult        `protobuf:"bytes,45,opt,name=backup_result,json=backupResult,proto3" json:"backup_result,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -5459,6 +5531,13 @@ func (x *TaskResult) GetCertificateResult() *CertificateResult {
 func (x *TaskResult) GetRepositoryResult() *RepositoryResult {
 	if x != nil {
 		return x.RepositoryResult
+	}
+	return nil
+}
+
+func (x *TaskResult) GetBackupResult() *BackupResult {
+	if x != nil {
+		return x.BackupResult
 	}
 	return nil
 }
@@ -7700,6 +7779,281 @@ func (x *SecurityResult) GetMessage() string {
 	return ""
 }
 
+// BackupAction opisuje operacje backupu.
+//
+// Dane backupowe nie plyna przez panel: host rozmawia z repozytorium wprost.
+// W kopercie sa metadane definicji i odnosniki do poswiadczen - nigdy same
+// poswiadczenia.
+type BackupAction struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Operation   BackupAction_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.agent.v1.BackupAction_Operation" json:"operation,omitempty"`
+	Id          string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Tool        string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
+	Repository  string                 `protobuf:"bytes,4,opt,name=repository,proto3" json:"repository,omitempty"`
+	Paths       []string               `protobuf:"bytes,5,rep,name=paths,proto3" json:"paths,omitempty"`
+	Excludes    []string               `protobuf:"bytes,6,rep,name=excludes,proto3" json:"excludes,omitempty"`
+	Tags        []string               `protobuf:"bytes,7,rep,name=tags,proto3" json:"tags,omitempty"`
+	KeepLast    int32                  `protobuf:"varint,8,opt,name=keep_last,json=keepLast,proto3" json:"keep_last,omitempty"`
+	KeepDaily   int32                  `protobuf:"varint,9,opt,name=keep_daily,json=keepDaily,proto3" json:"keep_daily,omitempty"`
+	KeepWeekly  int32                  `protobuf:"varint,10,opt,name=keep_weekly,json=keepWeekly,proto3" json:"keep_weekly,omitempty"`
+	KeepMonthly int32                  `protobuf:"varint,11,opt,name=keep_monthly,json=keepMonthly,proto3" json:"keep_monthly,omitempty"`
+	Prune       bool                   `protobuf:"varint,12,opt,name=prune,proto3" json:"prune,omitempty"`
+	// Runbook wskazuje skrypt lezacy juz na hoscie. Tresci panel nie przesyla.
+	Runbook string `protobuf:"bytes,13,opt,name=runbook,proto3" json:"runbook,omitempty"`
+	// Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+	Initialize     bool       `protobuf:"varint,21,opt,name=initialize,proto3" json:"initialize,omitempty"`
+	PasswordSecret *SecretRef `protobuf:"bytes,14,opt,name=password_secret,json=passwordSecret,proto3" json:"password_secret,omitempty"`
+	// EnvSecrets przypisuje zmiennym srodowiska sekrety z magazynu.
+	EnvSecrets map[string]*SecretRef `protobuf:"bytes,15,rep,name=env_secrets,json=envSecrets,proto3" json:"env_secrets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ReadData   bool                  `protobuf:"varint,16,opt,name=read_data,json=readData,proto3" json:"read_data,omitempty"`
+	// Odtworzenie: cel i plan nadpisania sa obowiazkowe.
+	SnapshotId    string   `protobuf:"bytes,17,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
+	Target        string   `protobuf:"bytes,18,opt,name=target,proto3" json:"target,omitempty"`
+	Include       []string `protobuf:"bytes,19,rep,name=include,proto3" json:"include,omitempty"`
+	Overwrite     string   `protobuf:"bytes,20,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupAction) Reset() {
+	*x = BackupAction{}
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupAction) ProtoMessage() {}
+
+func (x *BackupAction) ProtoReflect() protoreflect.Message {
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupAction.ProtoReflect.Descriptor instead.
+func (*BackupAction) Descriptor() ([]byte, []int) {
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *BackupAction) GetOperation() BackupAction_Operation {
+	if x != nil {
+		return x.Operation
+	}
+	return BackupAction_OPERATION_UNSPECIFIED
+}
+
+func (x *BackupAction) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *BackupAction) GetTool() string {
+	if x != nil {
+		return x.Tool
+	}
+	return ""
+}
+
+func (x *BackupAction) GetRepository() string {
+	if x != nil {
+		return x.Repository
+	}
+	return ""
+}
+
+func (x *BackupAction) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+func (x *BackupAction) GetExcludes() []string {
+	if x != nil {
+		return x.Excludes
+	}
+	return nil
+}
+
+func (x *BackupAction) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *BackupAction) GetKeepLast() int32 {
+	if x != nil {
+		return x.KeepLast
+	}
+	return 0
+}
+
+func (x *BackupAction) GetKeepDaily() int32 {
+	if x != nil {
+		return x.KeepDaily
+	}
+	return 0
+}
+
+func (x *BackupAction) GetKeepWeekly() int32 {
+	if x != nil {
+		return x.KeepWeekly
+	}
+	return 0
+}
+
+func (x *BackupAction) GetKeepMonthly() int32 {
+	if x != nil {
+		return x.KeepMonthly
+	}
+	return 0
+}
+
+func (x *BackupAction) GetPrune() bool {
+	if x != nil {
+		return x.Prune
+	}
+	return false
+}
+
+func (x *BackupAction) GetRunbook() string {
+	if x != nil {
+		return x.Runbook
+	}
+	return ""
+}
+
+func (x *BackupAction) GetInitialize() bool {
+	if x != nil {
+		return x.Initialize
+	}
+	return false
+}
+
+func (x *BackupAction) GetPasswordSecret() *SecretRef {
+	if x != nil {
+		return x.PasswordSecret
+	}
+	return nil
+}
+
+func (x *BackupAction) GetEnvSecrets() map[string]*SecretRef {
+	if x != nil {
+		return x.EnvSecrets
+	}
+	return nil
+}
+
+func (x *BackupAction) GetReadData() bool {
+	if x != nil {
+		return x.ReadData
+	}
+	return false
+}
+
+func (x *BackupAction) GetSnapshotId() string {
+	if x != nil {
+		return x.SnapshotId
+	}
+	return ""
+}
+
+func (x *BackupAction) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *BackupAction) GetInclude() []string {
+	if x != nil {
+		return x.Include
+	}
+	return nil
+}
+
+func (x *BackupAction) GetOverwrite() string {
+	if x != nil {
+		return x.Overwrite
+	}
+	return ""
+}
+
+type BackupResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// State niesie stan repozytorium po operacji planu.
+	State []byte `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	// Outcome niesie wynik operacji zmieniajacej.
+	Outcome       []byte `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupResult) Reset() {
+	*x = BackupResult{}
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupResult) ProtoMessage() {}
+
+func (x *BackupResult) ProtoReflect() protoreflect.Message {
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupResult.ProtoReflect.Descriptor instead.
+func (*BackupResult) Descriptor() ([]byte, []int) {
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *BackupResult) GetState() []byte {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *BackupResult) GetOutcome() []byte {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *BackupResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 // RepositoryAction opisuje zrodlo pakietow.
 //
 // Klucz zrodla jedzie w kopercie, bo jest materialem publicznym i plan ma
@@ -7729,7 +8083,7 @@ type RepositoryAction struct {
 
 func (x *RepositoryAction) Reset() {
 	*x = RepositoryAction{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[71]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7741,7 +8095,7 @@ func (x *RepositoryAction) String() string {
 func (*RepositoryAction) ProtoMessage() {}
 
 func (x *RepositoryAction) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[71]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7754,7 +8108,7 @@ func (x *RepositoryAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepositoryAction.ProtoReflect.Descriptor instead.
 func (*RepositoryAction) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{71}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *RepositoryAction) GetId() string {
@@ -7864,7 +8218,7 @@ type RepositoryResult struct {
 
 func (x *RepositoryResult) Reset() {
 	*x = RepositoryResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[72]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7876,7 +8230,7 @@ func (x *RepositoryResult) String() string {
 func (*RepositoryResult) ProtoMessage() {}
 
 func (x *RepositoryResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[72]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7889,7 +8243,7 @@ func (x *RepositoryResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepositoryResult.ProtoReflect.Descriptor instead.
 func (*RepositoryResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{72}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *RepositoryResult) GetSnapshot() []byte {
@@ -7935,7 +8289,7 @@ type CertificateTarget struct {
 
 func (x *CertificateTarget) Reset() {
 	*x = CertificateTarget{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[73]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7947,7 +8301,7 @@ func (x *CertificateTarget) String() string {
 func (*CertificateTarget) ProtoMessage() {}
 
 func (x *CertificateTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[73]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7960,7 +8314,7 @@ func (x *CertificateTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateTarget.ProtoReflect.Descriptor instead.
 func (*CertificateTarget) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{73}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *CertificateTarget) GetPath() string {
@@ -8015,7 +8369,7 @@ type CertificateAction struct {
 
 func (x *CertificateAction) Reset() {
 	*x = CertificateAction{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[74]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8027,7 +8381,7 @@ func (x *CertificateAction) String() string {
 func (*CertificateAction) ProtoMessage() {}
 
 func (x *CertificateAction) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[74]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8040,7 +8394,7 @@ func (x *CertificateAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateAction.ProtoReflect.Descriptor instead.
 func (*CertificateAction) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{74}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *CertificateAction) GetOperation() CertificateAction_Operation {
@@ -8154,7 +8508,7 @@ type CertificateResult struct {
 
 func (x *CertificateResult) Reset() {
 	*x = CertificateResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[75]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8166,7 +8520,7 @@ func (x *CertificateResult) String() string {
 func (*CertificateResult) ProtoMessage() {}
 
 func (x *CertificateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[75]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8179,7 +8533,7 @@ func (x *CertificateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateResult.ProtoReflect.Descriptor instead.
 func (*CertificateResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{75}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *CertificateResult) GetSnapshot() []byte {
@@ -8246,7 +8600,7 @@ type TimeAction struct {
 
 func (x *TimeAction) Reset() {
 	*x = TimeAction{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[76]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8258,7 +8612,7 @@ func (x *TimeAction) String() string {
 func (*TimeAction) ProtoMessage() {}
 
 func (x *TimeAction) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[76]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8271,7 +8625,7 @@ func (x *TimeAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimeAction.ProtoReflect.Descriptor instead.
 func (*TimeAction) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{76}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *TimeAction) GetOperation() TimeAction_Operation {
@@ -8329,7 +8683,7 @@ type TimeResult struct {
 
 func (x *TimeResult) Reset() {
 	*x = TimeResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[77]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8341,7 +8695,7 @@ func (x *TimeResult) String() string {
 func (*TimeResult) ProtoMessage() {}
 
 func (x *TimeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[77]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8354,7 +8708,7 @@ func (x *TimeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimeResult.ProtoReflect.Descriptor instead.
 func (*TimeResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{77}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *TimeResult) GetSnapshot() []byte {
@@ -8392,7 +8746,7 @@ type KernelAction struct {
 
 func (x *KernelAction) Reset() {
 	*x = KernelAction{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[78]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8404,7 +8758,7 @@ func (x *KernelAction) String() string {
 func (*KernelAction) ProtoMessage() {}
 
 func (x *KernelAction) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[78]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8417,7 +8771,7 @@ func (x *KernelAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KernelAction.ProtoReflect.Descriptor instead.
 func (*KernelAction) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{78}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *KernelAction) GetOperation() KernelAction_Operation {
@@ -8467,7 +8821,7 @@ type KernelResult struct {
 
 func (x *KernelResult) Reset() {
 	*x = KernelResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[79]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8479,7 +8833,7 @@ func (x *KernelResult) String() string {
 func (*KernelResult) ProtoMessage() {}
 
 func (x *KernelResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[79]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8492,7 +8846,7 @@ func (x *KernelResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KernelResult.ProtoReflect.Descriptor instead.
 func (*KernelResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{79}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *KernelResult) GetSnapshot() []byte {
@@ -8535,7 +8889,7 @@ type SecretRef struct {
 
 func (x *SecretRef) Reset() {
 	*x = SecretRef{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[80]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8547,7 +8901,7 @@ func (x *SecretRef) String() string {
 func (*SecretRef) ProtoMessage() {}
 
 func (x *SecretRef) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[80]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8560,7 +8914,7 @@ func (x *SecretRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretRef.ProtoReflect.Descriptor instead.
 func (*SecretRef) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{80}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *SecretRef) GetName() string {
@@ -8598,7 +8952,7 @@ type FileAction struct {
 
 func (x *FileAction) Reset() {
 	*x = FileAction{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[81]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8610,7 +8964,7 @@ func (x *FileAction) String() string {
 func (*FileAction) ProtoMessage() {}
 
 func (x *FileAction) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[81]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8623,7 +8977,7 @@ func (x *FileAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileAction.ProtoReflect.Descriptor instead.
 func (*FileAction) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{81}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *FileAction) GetOperation() FileAction_Operation {
@@ -8703,7 +9057,7 @@ type FileResult struct {
 
 func (x *FileResult) Reset() {
 	*x = FileResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[82]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8715,7 +9069,7 @@ func (x *FileResult) String() string {
 func (*FileResult) ProtoMessage() {}
 
 func (x *FileResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[82]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8728,7 +9082,7 @@ func (x *FileResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileResult.ProtoReflect.Descriptor instead.
 func (*FileResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{82}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *FileResult) GetSnapshot() []byte {
@@ -8785,7 +9139,7 @@ type PackageLifecycle struct {
 
 func (x *PackageLifecycle) Reset() {
 	*x = PackageLifecycle{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[83]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8797,7 +9151,7 @@ func (x *PackageLifecycle) String() string {
 func (*PackageLifecycle) ProtoMessage() {}
 
 func (x *PackageLifecycle) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[83]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8810,7 +9164,7 @@ func (x *PackageLifecycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageLifecycle.ProtoReflect.Descriptor instead.
 func (*PackageLifecycle) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{83}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *PackageLifecycle) GetOperation() PackageLifecycle_Operation {
@@ -8853,7 +9207,7 @@ type ListProcesses struct {
 
 func (x *ListProcesses) Reset() {
 	*x = ListProcesses{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[84]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8865,7 +9219,7 @@ func (x *ListProcesses) String() string {
 func (*ListProcesses) ProtoMessage() {}
 
 func (x *ListProcesses) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[84]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8878,7 +9232,7 @@ func (x *ListProcesses) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProcesses.ProtoReflect.Descriptor instead.
 func (*ListProcesses) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{84}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *ListProcesses) GetSortBy() string {
@@ -8909,7 +9263,7 @@ type SignalProcess struct {
 
 func (x *SignalProcess) Reset() {
 	*x = SignalProcess{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[85]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8921,7 +9275,7 @@ func (x *SignalProcess) String() string {
 func (*SignalProcess) ProtoMessage() {}
 
 func (x *SignalProcess) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[85]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8934,7 +9288,7 @@ func (x *SignalProcess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignalProcess.ProtoReflect.Descriptor instead.
 func (*SignalProcess) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{85}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *SignalProcess) GetPid() int32 {
@@ -8974,7 +9328,7 @@ type ProcessListResult struct {
 
 func (x *ProcessListResult) Reset() {
 	*x = ProcessListResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[86]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8986,7 +9340,7 @@ func (x *ProcessListResult) String() string {
 func (*ProcessListResult) ProtoMessage() {}
 
 func (x *ProcessListResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[86]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8999,7 +9353,7 @@ func (x *ProcessListResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessListResult.ProtoReflect.Descriptor instead.
 func (*ProcessListResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{86}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *ProcessListResult) GetSnapshot() []byte {
@@ -9022,7 +9376,7 @@ type ProcessSignalResult struct {
 
 func (x *ProcessSignalResult) Reset() {
 	*x = ProcessSignalResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[87]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9034,7 +9388,7 @@ func (x *ProcessSignalResult) String() string {
 func (*ProcessSignalResult) ProtoMessage() {}
 
 func (x *ProcessSignalResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[87]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9047,7 +9401,7 @@ func (x *ProcessSignalResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessSignalResult.ProtoReflect.Descriptor instead.
 func (*ProcessSignalResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{87}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *ProcessSignalResult) GetPid() int32 {
@@ -9084,7 +9438,7 @@ type FollowJournal struct {
 
 func (x *FollowJournal) Reset() {
 	*x = FollowJournal{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[88]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9096,7 +9450,7 @@ func (x *FollowJournal) String() string {
 func (*FollowJournal) ProtoMessage() {}
 
 func (x *FollowJournal) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[88]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9109,7 +9463,7 @@ func (x *FollowJournal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FollowJournal.ProtoReflect.Descriptor instead.
 func (*FollowJournal) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{88}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *FollowJournal) GetUnit() string {
@@ -9150,7 +9504,7 @@ type ReadLogFile struct {
 
 func (x *ReadLogFile) Reset() {
 	*x = ReadLogFile{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[89]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9162,7 +9516,7 @@ func (x *ReadLogFile) String() string {
 func (*ReadLogFile) ProtoMessage() {}
 
 func (x *ReadLogFile) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[89]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9175,7 +9529,7 @@ func (x *ReadLogFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadLogFile.ProtoReflect.Descriptor instead.
 func (*ReadLogFile) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{89}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ReadLogFile) GetPath() string {
@@ -9205,7 +9559,7 @@ type LogFileResult struct {
 
 func (x *LogFileResult) Reset() {
 	*x = LogFileResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[90]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9217,7 +9571,7 @@ func (x *LogFileResult) String() string {
 func (*LogFileResult) ProtoMessage() {}
 
 func (x *LogFileResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[90]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9230,7 +9584,7 @@ func (x *LogFileResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogFileResult.ProtoReflect.Descriptor instead.
 func (*LogFileResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{90}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *LogFileResult) GetPath() string {
@@ -9280,7 +9634,7 @@ type ComposeAction struct {
 
 func (x *ComposeAction) Reset() {
 	*x = ComposeAction{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[91]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9292,7 +9646,7 @@ func (x *ComposeAction) String() string {
 func (*ComposeAction) ProtoMessage() {}
 
 func (x *ComposeAction) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[91]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9305,7 +9659,7 @@ func (x *ComposeAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComposeAction.ProtoReflect.Descriptor instead.
 func (*ComposeAction) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{91}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ComposeAction) GetOperation() ComposeAction_Operation {
@@ -9346,7 +9700,7 @@ type ComposeResult struct {
 
 func (x *ComposeResult) Reset() {
 	*x = ComposeResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[92]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9358,7 +9712,7 @@ func (x *ComposeResult) String() string {
 func (*ComposeResult) ProtoMessage() {}
 
 func (x *ComposeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[92]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9371,7 +9725,7 @@ func (x *ComposeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComposeResult.ProtoReflect.Descriptor instead.
 func (*ComposeResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{92}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *ComposeResult) GetPayload() []byte {
@@ -9401,7 +9755,7 @@ type DockerActionResult struct {
 
 func (x *DockerActionResult) Reset() {
 	*x = DockerActionResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[93]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9413,7 +9767,7 @@ func (x *DockerActionResult) String() string {
 func (*DockerActionResult) ProtoMessage() {}
 
 func (x *DockerActionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[93]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9426,7 +9780,7 @@ func (x *DockerActionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerActionResult.ProtoReflect.Descriptor instead.
 func (*DockerActionResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{93}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *DockerActionResult) GetBefore() []byte {
@@ -9474,7 +9828,7 @@ type DockerReadResult struct {
 
 func (x *DockerReadResult) Reset() {
 	*x = DockerReadResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[94]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9486,7 +9840,7 @@ func (x *DockerReadResult) String() string {
 func (*DockerReadResult) ProtoMessage() {}
 
 func (x *DockerReadResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[94]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9499,7 +9853,7 @@ func (x *DockerReadResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerReadResult.ProtoReflect.Descriptor instead.
 func (*DockerReadResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{94}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *DockerReadResult) GetSnapshot() []byte {
@@ -9528,7 +9882,7 @@ type UnitStatusResult struct {
 
 func (x *UnitStatusResult) Reset() {
 	*x = UnitStatusResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[95]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9540,7 +9894,7 @@ func (x *UnitStatusResult) String() string {
 func (*UnitStatusResult) ProtoMessage() {}
 
 func (x *UnitStatusResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[95]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9553,7 +9907,7 @@ func (x *UnitStatusResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnitStatusResult.ProtoReflect.Descriptor instead.
 func (*UnitStatusResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{95}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *UnitStatusResult) GetUnits() []*UnitState {
@@ -9585,7 +9939,7 @@ type DomainEnrollResult struct {
 
 func (x *DomainEnrollResult) Reset() {
 	*x = DomainEnrollResult{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[96]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9597,7 +9951,7 @@ func (x *DomainEnrollResult) String() string {
 func (*DomainEnrollResult) ProtoMessage() {}
 
 func (x *DomainEnrollResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[96]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9610,7 +9964,7 @@ func (x *DomainEnrollResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainEnrollResult.ProtoReflect.Descriptor instead.
 func (*DomainEnrollResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{96}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *DomainEnrollResult) GetChecks() []*PreflightCheck {
@@ -9655,7 +10009,7 @@ type PreflightCheck struct {
 
 func (x *PreflightCheck) Reset() {
 	*x = PreflightCheck{}
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[97]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9667,7 +10021,7 @@ func (x *PreflightCheck) String() string {
 func (*PreflightCheck) ProtoMessage() {}
 
 func (x *PreflightCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[97]
+	mi := &file_flotestro_agent_v1_agent_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9680,7 +10034,7 @@ func (x *PreflightCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreflightCheck.ProtoReflect.Descriptor instead.
 func (*PreflightCheck) Descriptor() ([]byte, []int) {
-	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{97}
+	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *PreflightCheck) GetName() string {
@@ -9913,7 +10267,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"_installedB\r\n" +
 	"\v_upgradableB\x16\n" +
-	"\x14_security_upgradable\"\xbc\x14\n" +
+	"\x14_security_upgradable\"\xf8\x14\n" +
 	"\fTaskEnvelope\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12\x1f\n" +
@@ -9962,7 +10316,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\vcertificate\x181 \x01(\v2%.flotestro.agent.v1.CertificateActionH\x00R\vcertificate\x12F\n" +
 	"\n" +
 	"repository\x182 \x01(\v2$.flotestro.agent.v1.RepositoryActionH\x00R\n" +
-	"repositoryB\b\n" +
+	"repository\x12:\n" +
+	"\x06backup\x183 \x01(\v2 .flotestro.agent.v1.BackupActionH\x00R\x06backupB\b\n" +
 	"\x06action\"\x8b\x01\n" +
 	"\rPreconditions\x12\x1b\n" +
 	"\tos_family\x18\x01 \x01(\tR\bosFamily\x123\n" +
@@ -10065,7 +10420,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\apercent\x18\x06 \x01(\rH\x00R\apercent\x88\x01\x01\x12\x18\n" +
 	"\amessage\x18\a \x01(\tR\amessageB\n" +
 	"\n" +
-	"\b_percent\"\xf6\x14\n" +
+	"\b_percent\"\xbd\x15\n" +
 	"\n" +
 	"TaskResult\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12'\n" +
@@ -10116,7 +10471,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\fpower_result\x18) \x01(\v2\x1f.flotestro.agent.v1.PowerResultR\vpowerResult\x12K\n" +
 	"\x0fsecurity_result\x18* \x01(\v2\".flotestro.agent.v1.SecurityResultR\x0esecurityResult\x12T\n" +
 	"\x12certificate_result\x18+ \x01(\v2%.flotestro.agent.v1.CertificateResultR\x11certificateResult\x12Q\n" +
-	"\x11repository_result\x18, \x01(\v2$.flotestro.agent.v1.RepositoryResultR\x10repositoryResult\"\x9d\x01\n" +
+	"\x11repository_result\x18, \x01(\v2$.flotestro.agent.v1.RepositoryResultR\x10repositoryResult\x12E\n" +
+	"\rbackup_result\x18- \x01(\v2 .flotestro.agent.v1.BackupResultR\fbackupResult\"\x9d\x01\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10STATUS_SUCCEEDED\x10\x01\x12\x11\n" +
@@ -10384,7 +10740,51 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x16OPERATION_AUDIT_RELOAD\x10\x03\"F\n" +
 	"\x0eSecurityResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x98\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xb5\a\n" +
+	"\fBackupAction\x12H\n" +
+	"\toperation\x18\x01 \x01(\x0e2*.flotestro.agent.v1.BackupAction.OperationR\toperation\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
+	"\x04tool\x18\x03 \x01(\tR\x04tool\x12\x1e\n" +
+	"\n" +
+	"repository\x18\x04 \x01(\tR\n" +
+	"repository\x12\x14\n" +
+	"\x05paths\x18\x05 \x03(\tR\x05paths\x12\x1a\n" +
+	"\bexcludes\x18\x06 \x03(\tR\bexcludes\x12\x12\n" +
+	"\x04tags\x18\a \x03(\tR\x04tags\x12\x1b\n" +
+	"\tkeep_last\x18\b \x01(\x05R\bkeepLast\x12\x1d\n" +
+	"\n" +
+	"keep_daily\x18\t \x01(\x05R\tkeepDaily\x12\x1f\n" +
+	"\vkeep_weekly\x18\n" +
+	" \x01(\x05R\n" +
+	"keepWeekly\x12!\n" +
+	"\fkeep_monthly\x18\v \x01(\x05R\vkeepMonthly\x12\x14\n" +
+	"\x05prune\x18\f \x01(\bR\x05prune\x12\x18\n" +
+	"\arunbook\x18\r \x01(\tR\arunbook\x12\x1e\n" +
+	"\n" +
+	"initialize\x18\x15 \x01(\bR\n" +
+	"initialize\x12F\n" +
+	"\x0fpassword_secret\x18\x0e \x01(\v2\x1d.flotestro.agent.v1.SecretRefR\x0epasswordSecret\x12Q\n" +
+	"\venv_secrets\x18\x0f \x03(\v20.flotestro.agent.v1.BackupAction.EnvSecretsEntryR\n" +
+	"envSecrets\x12\x1b\n" +
+	"\tread_data\x18\x10 \x01(\bR\breadData\x12\x1f\n" +
+	"\vsnapshot_id\x18\x11 \x01(\tR\n" +
+	"snapshotId\x12\x16\n" +
+	"\x06target\x18\x12 \x01(\tR\x06target\x12\x18\n" +
+	"\ainclude\x18\x13 \x03(\tR\ainclude\x12\x1c\n" +
+	"\toverwrite\x18\x14 \x01(\tR\toverwrite\x1a\\\n" +
+	"\x0fEnvSecretsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.flotestro.agent.v1.SecretRefR\x05value:\x028\x01\"z\n" +
+	"\tOperation\x12\x19\n" +
+	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x01\x12\x11\n" +
+	"\rOPERATION_RUN\x10\x02\x12\x14\n" +
+	"\x10OPERATION_VERIFY\x10\x03\x12\x15\n" +
+	"\x11OPERATION_RESTORE\x10\x04\"X\n" +
+	"\fBackupResult\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\fR\x05state\x12\x18\n" +
+	"\aoutcome\x18\x02 \x01(\fR\aoutcome\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\x98\x03\n" +
 	"\x10RepositoryAction\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -10607,8 +11007,8 @@ func file_flotestro_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_flotestro_agent_v1_agent_proto_rawDescData
 }
 
-var file_flotestro_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 19)
-var file_flotestro_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 100)
+var file_flotestro_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 20)
+var file_flotestro_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 103)
 var file_flotestro_agent_v1_agent_proto_goTypes = []any{
 	(LocalAccount_Source)(0),         // 0: flotestro.agent.v1.LocalAccount.Source
 	(UnitAction_Operation)(0),        // 1: flotestro.agent.v1.UnitAction.Operation
@@ -10623,257 +11023,267 @@ var file_flotestro_agent_v1_agent_proto_goTypes = []any{
 	(StorageAction_Operation)(0),     // 10: flotestro.agent.v1.StorageAction.Operation
 	(SshAction_Operation)(0),         // 11: flotestro.agent.v1.SshAction.Operation
 	(SecurityAction_Operation)(0),    // 12: flotestro.agent.v1.SecurityAction.Operation
-	(CertificateAction_Operation)(0), // 13: flotestro.agent.v1.CertificateAction.Operation
-	(TimeAction_Operation)(0),        // 14: flotestro.agent.v1.TimeAction.Operation
-	(KernelAction_Operation)(0),      // 15: flotestro.agent.v1.KernelAction.Operation
-	(FileAction_Operation)(0),        // 16: flotestro.agent.v1.FileAction.Operation
-	(PackageLifecycle_Operation)(0),  // 17: flotestro.agent.v1.PackageLifecycle.Operation
-	(ComposeAction_Operation)(0),     // 18: flotestro.agent.v1.ComposeAction.Operation
-	(*FetchSecretRequest)(nil),       // 19: flotestro.agent.v1.FetchSecretRequest
-	(*FetchSecretResponse)(nil),      // 20: flotestro.agent.v1.FetchSecretResponse
-	(*PingRequest)(nil),              // 21: flotestro.agent.v1.PingRequest
-	(*PingResponse)(nil),             // 22: flotestro.agent.v1.PingResponse
-	(*RenewCertificateRequest)(nil),  // 23: flotestro.agent.v1.RenewCertificateRequest
-	(*RenewCertificateResponse)(nil), // 24: flotestro.agent.v1.RenewCertificateResponse
-	(*EnrollRequest)(nil),            // 25: flotestro.agent.v1.EnrollRequest
-	(*EnrollResponse)(nil),           // 26: flotestro.agent.v1.EnrollResponse
-	(*AgentBuild)(nil),               // 27: flotestro.agent.v1.AgentBuild
-	(*AgentMessage)(nil),             // 28: flotestro.agent.v1.AgentMessage
-	(*ServerMessage)(nil),            // 29: flotestro.agent.v1.ServerMessage
-	(*Hello)(nil),                    // 30: flotestro.agent.v1.Hello
-	(*SessionConfig)(nil),            // 31: flotestro.agent.v1.SessionConfig
-	(*InventoryRequest)(nil),         // 32: flotestro.agent.v1.InventoryRequest
-	(*Heartbeat)(nil),                // 33: flotestro.agent.v1.Heartbeat
-	(*HealthSignals)(nil),            // 34: flotestro.agent.v1.HealthSignals
-	(*Capability)(nil),               // 35: flotestro.agent.v1.Capability
-	(*Capabilities)(nil),             // 36: flotestro.agent.v1.Capabilities
-	(*InventoryReport)(nil),          // 37: flotestro.agent.v1.InventoryReport
-	(*InventoryFragment)(nil),        // 38: flotestro.agent.v1.InventoryFragment
-	(*IdentityState)(nil),            // 39: flotestro.agent.v1.IdentityState
-	(*LocalAccount)(nil),             // 40: flotestro.agent.v1.LocalAccount
-	(*SSHKey)(nil),                   // 41: flotestro.agent.v1.SSHKey
-	(*OsInfo)(nil),                   // 42: flotestro.agent.v1.OsInfo
-	(*HardwareInfo)(nil),             // 43: flotestro.agent.v1.HardwareInfo
-	(*PackageSummary)(nil),           // 44: flotestro.agent.v1.PackageSummary
-	(*TaskEnvelope)(nil),             // 45: flotestro.agent.v1.TaskEnvelope
-	(*Preconditions)(nil),            // 46: flotestro.agent.v1.Preconditions
-	(*Limits)(nil),                   // 47: flotestro.agent.v1.Limits
-	(*ActorContext)(nil),             // 48: flotestro.agent.v1.ActorContext
-	(*UnitAction)(nil),               // 49: flotestro.agent.v1.UnitAction
-	(*ReadJournal)(nil),              // 50: flotestro.agent.v1.ReadJournal
-	(*SystemReboot)(nil),             // 51: flotestro.agent.v1.SystemReboot
-	(*SystemShutdown)(nil),           // 52: flotestro.agent.v1.SystemShutdown
-	(*PowerResult)(nil),              // 53: flotestro.agent.v1.PowerResult
-	(*ReadUnitStatus)(nil),           // 54: flotestro.agent.v1.ReadUnitStatus
-	(*DomainEnroll)(nil),             // 55: flotestro.agent.v1.DomainEnroll
-	(*LocalUserAction)(nil),          // 56: flotestro.agent.v1.LocalUserAction
-	(*LocalUserResult)(nil),          // 57: flotestro.agent.v1.LocalUserResult
-	(*PackagesRepair)(nil),           // 58: flotestro.agent.v1.PackagesRepair
-	(*DebconfAnswer)(nil),            // 59: flotestro.agent.v1.DebconfAnswer
-	(*PackageRepairResult)(nil),      // 60: flotestro.agent.v1.PackageRepairResult
-	(*CancelTask)(nil),               // 61: flotestro.agent.v1.CancelTask
-	(*TaskLogLines)(nil),             // 62: flotestro.agent.v1.TaskLogLines
-	(*TaskProgress)(nil),             // 63: flotestro.agent.v1.TaskProgress
-	(*TaskResult)(nil),               // 64: flotestro.agent.v1.TaskResult
-	(*UnitState)(nil),                // 65: flotestro.agent.v1.UnitState
-	(*PackagePlan)(nil),              // 66: flotestro.agent.v1.PackagePlan
-	(*PackageUpgrade)(nil),           // 67: flotestro.agent.v1.PackageUpgrade
-	(*PackageChange)(nil),            // 68: flotestro.agent.v1.PackageChange
-	(*PackagePlanResult)(nil),        // 69: flotestro.agent.v1.PackagePlanResult
-	(*BlockedPackage)(nil),           // 70: flotestro.agent.v1.BlockedPackage
-	(*DebconfQuestion)(nil),          // 71: flotestro.agent.v1.DebconfQuestion
-	(*PackageApplyResult)(nil),       // 72: flotestro.agent.v1.PackageApplyResult
-	(*DockerRead)(nil),               // 73: flotestro.agent.v1.DockerRead
-	(*DockerAction)(nil),             // 74: flotestro.agent.v1.DockerAction
-	(*UnitToggle)(nil),               // 75: flotestro.agent.v1.UnitToggle
-	(*ScheduleAction)(nil),           // 76: flotestro.agent.v1.ScheduleAction
-	(*ScheduleResult)(nil),           // 77: flotestro.agent.v1.ScheduleResult
-	(*NetworkAction)(nil),            // 78: flotestro.agent.v1.NetworkAction
-	(*NetworkResult)(nil),            // 79: flotestro.agent.v1.NetworkResult
-	(*DnsAction)(nil),                // 80: flotestro.agent.v1.DnsAction
-	(*DnsResult)(nil),                // 81: flotestro.agent.v1.DnsResult
-	(*FirewallAction)(nil),           // 82: flotestro.agent.v1.FirewallAction
-	(*FirewallResult)(nil),           // 83: flotestro.agent.v1.FirewallResult
-	(*StorageAction)(nil),            // 84: flotestro.agent.v1.StorageAction
-	(*StorageResult)(nil),            // 85: flotestro.agent.v1.StorageResult
-	(*SshAction)(nil),                // 86: flotestro.agent.v1.SshAction
-	(*SshResult)(nil),                // 87: flotestro.agent.v1.SshResult
-	(*SecurityAction)(nil),           // 88: flotestro.agent.v1.SecurityAction
-	(*SecurityResult)(nil),           // 89: flotestro.agent.v1.SecurityResult
-	(*RepositoryAction)(nil),         // 90: flotestro.agent.v1.RepositoryAction
-	(*RepositoryResult)(nil),         // 91: flotestro.agent.v1.RepositoryResult
-	(*CertificateTarget)(nil),        // 92: flotestro.agent.v1.CertificateTarget
-	(*CertificateAction)(nil),        // 93: flotestro.agent.v1.CertificateAction
-	(*CertificateResult)(nil),        // 94: flotestro.agent.v1.CertificateResult
-	(*TimeAction)(nil),               // 95: flotestro.agent.v1.TimeAction
-	(*TimeResult)(nil),               // 96: flotestro.agent.v1.TimeResult
-	(*KernelAction)(nil),             // 97: flotestro.agent.v1.KernelAction
-	(*KernelResult)(nil),             // 98: flotestro.agent.v1.KernelResult
-	(*SecretRef)(nil),                // 99: flotestro.agent.v1.SecretRef
-	(*FileAction)(nil),               // 100: flotestro.agent.v1.FileAction
-	(*FileResult)(nil),               // 101: flotestro.agent.v1.FileResult
-	(*PackageLifecycle)(nil),         // 102: flotestro.agent.v1.PackageLifecycle
-	(*ListProcesses)(nil),            // 103: flotestro.agent.v1.ListProcesses
-	(*SignalProcess)(nil),            // 104: flotestro.agent.v1.SignalProcess
-	(*ProcessListResult)(nil),        // 105: flotestro.agent.v1.ProcessListResult
-	(*ProcessSignalResult)(nil),      // 106: flotestro.agent.v1.ProcessSignalResult
-	(*FollowJournal)(nil),            // 107: flotestro.agent.v1.FollowJournal
-	(*ReadLogFile)(nil),              // 108: flotestro.agent.v1.ReadLogFile
-	(*LogFileResult)(nil),            // 109: flotestro.agent.v1.LogFileResult
-	(*ComposeAction)(nil),            // 110: flotestro.agent.v1.ComposeAction
-	(*ComposeResult)(nil),            // 111: flotestro.agent.v1.ComposeResult
-	(*DockerActionResult)(nil),       // 112: flotestro.agent.v1.DockerActionResult
-	(*DockerReadResult)(nil),         // 113: flotestro.agent.v1.DockerReadResult
-	(*UnitStatusResult)(nil),         // 114: flotestro.agent.v1.UnitStatusResult
-	(*DomainEnrollResult)(nil),       // 115: flotestro.agent.v1.DomainEnrollResult
-	(*PreflightCheck)(nil),           // 116: flotestro.agent.v1.PreflightCheck
-	nil,                              // 117: flotestro.agent.v1.Capability.FeaturesEntry
-	nil,                              // 118: flotestro.agent.v1.KernelAction.SettingsEntry
-	(*timestamppb.Timestamp)(nil),    // 119: google.protobuf.Timestamp
+	(BackupAction_Operation)(0),      // 13: flotestro.agent.v1.BackupAction.Operation
+	(CertificateAction_Operation)(0), // 14: flotestro.agent.v1.CertificateAction.Operation
+	(TimeAction_Operation)(0),        // 15: flotestro.agent.v1.TimeAction.Operation
+	(KernelAction_Operation)(0),      // 16: flotestro.agent.v1.KernelAction.Operation
+	(FileAction_Operation)(0),        // 17: flotestro.agent.v1.FileAction.Operation
+	(PackageLifecycle_Operation)(0),  // 18: flotestro.agent.v1.PackageLifecycle.Operation
+	(ComposeAction_Operation)(0),     // 19: flotestro.agent.v1.ComposeAction.Operation
+	(*FetchSecretRequest)(nil),       // 20: flotestro.agent.v1.FetchSecretRequest
+	(*FetchSecretResponse)(nil),      // 21: flotestro.agent.v1.FetchSecretResponse
+	(*PingRequest)(nil),              // 22: flotestro.agent.v1.PingRequest
+	(*PingResponse)(nil),             // 23: flotestro.agent.v1.PingResponse
+	(*RenewCertificateRequest)(nil),  // 24: flotestro.agent.v1.RenewCertificateRequest
+	(*RenewCertificateResponse)(nil), // 25: flotestro.agent.v1.RenewCertificateResponse
+	(*EnrollRequest)(nil),            // 26: flotestro.agent.v1.EnrollRequest
+	(*EnrollResponse)(nil),           // 27: flotestro.agent.v1.EnrollResponse
+	(*AgentBuild)(nil),               // 28: flotestro.agent.v1.AgentBuild
+	(*AgentMessage)(nil),             // 29: flotestro.agent.v1.AgentMessage
+	(*ServerMessage)(nil),            // 30: flotestro.agent.v1.ServerMessage
+	(*Hello)(nil),                    // 31: flotestro.agent.v1.Hello
+	(*SessionConfig)(nil),            // 32: flotestro.agent.v1.SessionConfig
+	(*InventoryRequest)(nil),         // 33: flotestro.agent.v1.InventoryRequest
+	(*Heartbeat)(nil),                // 34: flotestro.agent.v1.Heartbeat
+	(*HealthSignals)(nil),            // 35: flotestro.agent.v1.HealthSignals
+	(*Capability)(nil),               // 36: flotestro.agent.v1.Capability
+	(*Capabilities)(nil),             // 37: flotestro.agent.v1.Capabilities
+	(*InventoryReport)(nil),          // 38: flotestro.agent.v1.InventoryReport
+	(*InventoryFragment)(nil),        // 39: flotestro.agent.v1.InventoryFragment
+	(*IdentityState)(nil),            // 40: flotestro.agent.v1.IdentityState
+	(*LocalAccount)(nil),             // 41: flotestro.agent.v1.LocalAccount
+	(*SSHKey)(nil),                   // 42: flotestro.agent.v1.SSHKey
+	(*OsInfo)(nil),                   // 43: flotestro.agent.v1.OsInfo
+	(*HardwareInfo)(nil),             // 44: flotestro.agent.v1.HardwareInfo
+	(*PackageSummary)(nil),           // 45: flotestro.agent.v1.PackageSummary
+	(*TaskEnvelope)(nil),             // 46: flotestro.agent.v1.TaskEnvelope
+	(*Preconditions)(nil),            // 47: flotestro.agent.v1.Preconditions
+	(*Limits)(nil),                   // 48: flotestro.agent.v1.Limits
+	(*ActorContext)(nil),             // 49: flotestro.agent.v1.ActorContext
+	(*UnitAction)(nil),               // 50: flotestro.agent.v1.UnitAction
+	(*ReadJournal)(nil),              // 51: flotestro.agent.v1.ReadJournal
+	(*SystemReboot)(nil),             // 52: flotestro.agent.v1.SystemReboot
+	(*SystemShutdown)(nil),           // 53: flotestro.agent.v1.SystemShutdown
+	(*PowerResult)(nil),              // 54: flotestro.agent.v1.PowerResult
+	(*ReadUnitStatus)(nil),           // 55: flotestro.agent.v1.ReadUnitStatus
+	(*DomainEnroll)(nil),             // 56: flotestro.agent.v1.DomainEnroll
+	(*LocalUserAction)(nil),          // 57: flotestro.agent.v1.LocalUserAction
+	(*LocalUserResult)(nil),          // 58: flotestro.agent.v1.LocalUserResult
+	(*PackagesRepair)(nil),           // 59: flotestro.agent.v1.PackagesRepair
+	(*DebconfAnswer)(nil),            // 60: flotestro.agent.v1.DebconfAnswer
+	(*PackageRepairResult)(nil),      // 61: flotestro.agent.v1.PackageRepairResult
+	(*CancelTask)(nil),               // 62: flotestro.agent.v1.CancelTask
+	(*TaskLogLines)(nil),             // 63: flotestro.agent.v1.TaskLogLines
+	(*TaskProgress)(nil),             // 64: flotestro.agent.v1.TaskProgress
+	(*TaskResult)(nil),               // 65: flotestro.agent.v1.TaskResult
+	(*UnitState)(nil),                // 66: flotestro.agent.v1.UnitState
+	(*PackagePlan)(nil),              // 67: flotestro.agent.v1.PackagePlan
+	(*PackageUpgrade)(nil),           // 68: flotestro.agent.v1.PackageUpgrade
+	(*PackageChange)(nil),            // 69: flotestro.agent.v1.PackageChange
+	(*PackagePlanResult)(nil),        // 70: flotestro.agent.v1.PackagePlanResult
+	(*BlockedPackage)(nil),           // 71: flotestro.agent.v1.BlockedPackage
+	(*DebconfQuestion)(nil),          // 72: flotestro.agent.v1.DebconfQuestion
+	(*PackageApplyResult)(nil),       // 73: flotestro.agent.v1.PackageApplyResult
+	(*DockerRead)(nil),               // 74: flotestro.agent.v1.DockerRead
+	(*DockerAction)(nil),             // 75: flotestro.agent.v1.DockerAction
+	(*UnitToggle)(nil),               // 76: flotestro.agent.v1.UnitToggle
+	(*ScheduleAction)(nil),           // 77: flotestro.agent.v1.ScheduleAction
+	(*ScheduleResult)(nil),           // 78: flotestro.agent.v1.ScheduleResult
+	(*NetworkAction)(nil),            // 79: flotestro.agent.v1.NetworkAction
+	(*NetworkResult)(nil),            // 80: flotestro.agent.v1.NetworkResult
+	(*DnsAction)(nil),                // 81: flotestro.agent.v1.DnsAction
+	(*DnsResult)(nil),                // 82: flotestro.agent.v1.DnsResult
+	(*FirewallAction)(nil),           // 83: flotestro.agent.v1.FirewallAction
+	(*FirewallResult)(nil),           // 84: flotestro.agent.v1.FirewallResult
+	(*StorageAction)(nil),            // 85: flotestro.agent.v1.StorageAction
+	(*StorageResult)(nil),            // 86: flotestro.agent.v1.StorageResult
+	(*SshAction)(nil),                // 87: flotestro.agent.v1.SshAction
+	(*SshResult)(nil),                // 88: flotestro.agent.v1.SshResult
+	(*SecurityAction)(nil),           // 89: flotestro.agent.v1.SecurityAction
+	(*SecurityResult)(nil),           // 90: flotestro.agent.v1.SecurityResult
+	(*BackupAction)(nil),             // 91: flotestro.agent.v1.BackupAction
+	(*BackupResult)(nil),             // 92: flotestro.agent.v1.BackupResult
+	(*RepositoryAction)(nil),         // 93: flotestro.agent.v1.RepositoryAction
+	(*RepositoryResult)(nil),         // 94: flotestro.agent.v1.RepositoryResult
+	(*CertificateTarget)(nil),        // 95: flotestro.agent.v1.CertificateTarget
+	(*CertificateAction)(nil),        // 96: flotestro.agent.v1.CertificateAction
+	(*CertificateResult)(nil),        // 97: flotestro.agent.v1.CertificateResult
+	(*TimeAction)(nil),               // 98: flotestro.agent.v1.TimeAction
+	(*TimeResult)(nil),               // 99: flotestro.agent.v1.TimeResult
+	(*KernelAction)(nil),             // 100: flotestro.agent.v1.KernelAction
+	(*KernelResult)(nil),             // 101: flotestro.agent.v1.KernelResult
+	(*SecretRef)(nil),                // 102: flotestro.agent.v1.SecretRef
+	(*FileAction)(nil),               // 103: flotestro.agent.v1.FileAction
+	(*FileResult)(nil),               // 104: flotestro.agent.v1.FileResult
+	(*PackageLifecycle)(nil),         // 105: flotestro.agent.v1.PackageLifecycle
+	(*ListProcesses)(nil),            // 106: flotestro.agent.v1.ListProcesses
+	(*SignalProcess)(nil),            // 107: flotestro.agent.v1.SignalProcess
+	(*ProcessListResult)(nil),        // 108: flotestro.agent.v1.ProcessListResult
+	(*ProcessSignalResult)(nil),      // 109: flotestro.agent.v1.ProcessSignalResult
+	(*FollowJournal)(nil),            // 110: flotestro.agent.v1.FollowJournal
+	(*ReadLogFile)(nil),              // 111: flotestro.agent.v1.ReadLogFile
+	(*LogFileResult)(nil),            // 112: flotestro.agent.v1.LogFileResult
+	(*ComposeAction)(nil),            // 113: flotestro.agent.v1.ComposeAction
+	(*ComposeResult)(nil),            // 114: flotestro.agent.v1.ComposeResult
+	(*DockerActionResult)(nil),       // 115: flotestro.agent.v1.DockerActionResult
+	(*DockerReadResult)(nil),         // 116: flotestro.agent.v1.DockerReadResult
+	(*UnitStatusResult)(nil),         // 117: flotestro.agent.v1.UnitStatusResult
+	(*DomainEnrollResult)(nil),       // 118: flotestro.agent.v1.DomainEnrollResult
+	(*PreflightCheck)(nil),           // 119: flotestro.agent.v1.PreflightCheck
+	nil,                              // 120: flotestro.agent.v1.Capability.FeaturesEntry
+	nil,                              // 121: flotestro.agent.v1.BackupAction.EnvSecretsEntry
+	nil,                              // 122: flotestro.agent.v1.KernelAction.SettingsEntry
+	(*timestamppb.Timestamp)(nil),    // 123: google.protobuf.Timestamp
 }
 var file_flotestro_agent_v1_agent_proto_depIdxs = []int32{
-	119, // 0: flotestro.agent.v1.PingResponse.server_time:type_name -> google.protobuf.Timestamp
-	27,  // 1: flotestro.agent.v1.RenewCertificateRequest.build:type_name -> flotestro.agent.v1.AgentBuild
-	119, // 2: flotestro.agent.v1.RenewCertificateResponse.not_after:type_name -> google.protobuf.Timestamp
-	27,  // 3: flotestro.agent.v1.EnrollRequest.build:type_name -> flotestro.agent.v1.AgentBuild
-	119, // 4: flotestro.agent.v1.EnrollResponse.not_after:type_name -> google.protobuf.Timestamp
-	30,  // 5: flotestro.agent.v1.AgentMessage.hello:type_name -> flotestro.agent.v1.Hello
-	33,  // 6: flotestro.agent.v1.AgentMessage.heartbeat:type_name -> flotestro.agent.v1.Heartbeat
-	37,  // 7: flotestro.agent.v1.AgentMessage.inventory:type_name -> flotestro.agent.v1.InventoryReport
-	64,  // 8: flotestro.agent.v1.AgentMessage.task_result:type_name -> flotestro.agent.v1.TaskResult
-	63,  // 9: flotestro.agent.v1.AgentMessage.task_progress:type_name -> flotestro.agent.v1.TaskProgress
-	62,  // 10: flotestro.agent.v1.AgentMessage.task_log_lines:type_name -> flotestro.agent.v1.TaskLogLines
-	31,  // 11: flotestro.agent.v1.ServerMessage.session_config:type_name -> flotestro.agent.v1.SessionConfig
-	32,  // 12: flotestro.agent.v1.ServerMessage.inventory_request:type_name -> flotestro.agent.v1.InventoryRequest
-	45,  // 13: flotestro.agent.v1.ServerMessage.task:type_name -> flotestro.agent.v1.TaskEnvelope
-	61,  // 14: flotestro.agent.v1.ServerMessage.cancel_task:type_name -> flotestro.agent.v1.CancelTask
-	36,  // 15: flotestro.agent.v1.Hello.capabilities:type_name -> flotestro.agent.v1.Capabilities
-	119, // 16: flotestro.agent.v1.Heartbeat.sent_at:type_name -> google.protobuf.Timestamp
-	34,  // 17: flotestro.agent.v1.Heartbeat.health:type_name -> flotestro.agent.v1.HealthSignals
-	117, // 18: flotestro.agent.v1.Capability.features:type_name -> flotestro.agent.v1.Capability.FeaturesEntry
-	35,  // 19: flotestro.agent.v1.Capabilities.registry:type_name -> flotestro.agent.v1.Capability
-	42,  // 20: flotestro.agent.v1.InventoryReport.os:type_name -> flotestro.agent.v1.OsInfo
-	43,  // 21: flotestro.agent.v1.InventoryReport.hardware:type_name -> flotestro.agent.v1.HardwareInfo
-	44,  // 22: flotestro.agent.v1.InventoryReport.packages:type_name -> flotestro.agent.v1.PackageSummary
-	39,  // 23: flotestro.agent.v1.InventoryReport.identity:type_name -> flotestro.agent.v1.IdentityState
-	40,  // 24: flotestro.agent.v1.InventoryReport.local_accounts:type_name -> flotestro.agent.v1.LocalAccount
-	38,  // 25: flotestro.agent.v1.InventoryReport.fragments:type_name -> flotestro.agent.v1.InventoryFragment
-	119, // 26: flotestro.agent.v1.InventoryFragment.observed_at:type_name -> google.protobuf.Timestamp
+	123, // 0: flotestro.agent.v1.PingResponse.server_time:type_name -> google.protobuf.Timestamp
+	28,  // 1: flotestro.agent.v1.RenewCertificateRequest.build:type_name -> flotestro.agent.v1.AgentBuild
+	123, // 2: flotestro.agent.v1.RenewCertificateResponse.not_after:type_name -> google.protobuf.Timestamp
+	28,  // 3: flotestro.agent.v1.EnrollRequest.build:type_name -> flotestro.agent.v1.AgentBuild
+	123, // 4: flotestro.agent.v1.EnrollResponse.not_after:type_name -> google.protobuf.Timestamp
+	31,  // 5: flotestro.agent.v1.AgentMessage.hello:type_name -> flotestro.agent.v1.Hello
+	34,  // 6: flotestro.agent.v1.AgentMessage.heartbeat:type_name -> flotestro.agent.v1.Heartbeat
+	38,  // 7: flotestro.agent.v1.AgentMessage.inventory:type_name -> flotestro.agent.v1.InventoryReport
+	65,  // 8: flotestro.agent.v1.AgentMessage.task_result:type_name -> flotestro.agent.v1.TaskResult
+	64,  // 9: flotestro.agent.v1.AgentMessage.task_progress:type_name -> flotestro.agent.v1.TaskProgress
+	63,  // 10: flotestro.agent.v1.AgentMessage.task_log_lines:type_name -> flotestro.agent.v1.TaskLogLines
+	32,  // 11: flotestro.agent.v1.ServerMessage.session_config:type_name -> flotestro.agent.v1.SessionConfig
+	33,  // 12: flotestro.agent.v1.ServerMessage.inventory_request:type_name -> flotestro.agent.v1.InventoryRequest
+	46,  // 13: flotestro.agent.v1.ServerMessage.task:type_name -> flotestro.agent.v1.TaskEnvelope
+	62,  // 14: flotestro.agent.v1.ServerMessage.cancel_task:type_name -> flotestro.agent.v1.CancelTask
+	37,  // 15: flotestro.agent.v1.Hello.capabilities:type_name -> flotestro.agent.v1.Capabilities
+	123, // 16: flotestro.agent.v1.Heartbeat.sent_at:type_name -> google.protobuf.Timestamp
+	35,  // 17: flotestro.agent.v1.Heartbeat.health:type_name -> flotestro.agent.v1.HealthSignals
+	120, // 18: flotestro.agent.v1.Capability.features:type_name -> flotestro.agent.v1.Capability.FeaturesEntry
+	36,  // 19: flotestro.agent.v1.Capabilities.registry:type_name -> flotestro.agent.v1.Capability
+	43,  // 20: flotestro.agent.v1.InventoryReport.os:type_name -> flotestro.agent.v1.OsInfo
+	44,  // 21: flotestro.agent.v1.InventoryReport.hardware:type_name -> flotestro.agent.v1.HardwareInfo
+	45,  // 22: flotestro.agent.v1.InventoryReport.packages:type_name -> flotestro.agent.v1.PackageSummary
+	40,  // 23: flotestro.agent.v1.InventoryReport.identity:type_name -> flotestro.agent.v1.IdentityState
+	41,  // 24: flotestro.agent.v1.InventoryReport.local_accounts:type_name -> flotestro.agent.v1.LocalAccount
+	39,  // 25: flotestro.agent.v1.InventoryReport.fragments:type_name -> flotestro.agent.v1.InventoryFragment
+	123, // 26: flotestro.agent.v1.InventoryFragment.observed_at:type_name -> google.protobuf.Timestamp
 	0,   // 27: flotestro.agent.v1.LocalAccount.source:type_name -> flotestro.agent.v1.LocalAccount.Source
-	41,  // 28: flotestro.agent.v1.LocalAccount.ssh_keys:type_name -> flotestro.agent.v1.SSHKey
-	119, // 29: flotestro.agent.v1.TaskEnvelope.created_at:type_name -> google.protobuf.Timestamp
-	119, // 30: flotestro.agent.v1.TaskEnvelope.expires_at:type_name -> google.protobuf.Timestamp
-	46,  // 31: flotestro.agent.v1.TaskEnvelope.preconditions:type_name -> flotestro.agent.v1.Preconditions
-	47,  // 32: flotestro.agent.v1.TaskEnvelope.limits:type_name -> flotestro.agent.v1.Limits
-	48,  // 33: flotestro.agent.v1.TaskEnvelope.actor_context:type_name -> flotestro.agent.v1.ActorContext
-	49,  // 34: flotestro.agent.v1.TaskEnvelope.unit_action:type_name -> flotestro.agent.v1.UnitAction
-	50,  // 35: flotestro.agent.v1.TaskEnvelope.read_journal:type_name -> flotestro.agent.v1.ReadJournal
-	66,  // 36: flotestro.agent.v1.TaskEnvelope.package_plan:type_name -> flotestro.agent.v1.PackagePlan
-	67,  // 37: flotestro.agent.v1.TaskEnvelope.package_upgrade:type_name -> flotestro.agent.v1.PackageUpgrade
-	51,  // 38: flotestro.agent.v1.TaskEnvelope.system_reboot:type_name -> flotestro.agent.v1.SystemReboot
-	54,  // 39: flotestro.agent.v1.TaskEnvelope.read_unit_status:type_name -> flotestro.agent.v1.ReadUnitStatus
-	55,  // 40: flotestro.agent.v1.TaskEnvelope.domain_enroll:type_name -> flotestro.agent.v1.DomainEnroll
-	56,  // 41: flotestro.agent.v1.TaskEnvelope.local_user_action:type_name -> flotestro.agent.v1.LocalUserAction
-	58,  // 42: flotestro.agent.v1.TaskEnvelope.packages_repair:type_name -> flotestro.agent.v1.PackagesRepair
-	73,  // 43: flotestro.agent.v1.TaskEnvelope.docker_read:type_name -> flotestro.agent.v1.DockerRead
-	74,  // 44: flotestro.agent.v1.TaskEnvelope.docker_action:type_name -> flotestro.agent.v1.DockerAction
-	110, // 45: flotestro.agent.v1.TaskEnvelope.compose:type_name -> flotestro.agent.v1.ComposeAction
-	75,  // 46: flotestro.agent.v1.TaskEnvelope.unit_toggle:type_name -> flotestro.agent.v1.UnitToggle
-	108, // 47: flotestro.agent.v1.TaskEnvelope.read_log_file:type_name -> flotestro.agent.v1.ReadLogFile
-	107, // 48: flotestro.agent.v1.TaskEnvelope.follow_journal:type_name -> flotestro.agent.v1.FollowJournal
-	103, // 49: flotestro.agent.v1.TaskEnvelope.list_processes:type_name -> flotestro.agent.v1.ListProcesses
-	104, // 50: flotestro.agent.v1.TaskEnvelope.signal_process:type_name -> flotestro.agent.v1.SignalProcess
-	102, // 51: flotestro.agent.v1.TaskEnvelope.package_lifecycle:type_name -> flotestro.agent.v1.PackageLifecycle
-	76,  // 52: flotestro.agent.v1.TaskEnvelope.schedule:type_name -> flotestro.agent.v1.ScheduleAction
-	78,  // 53: flotestro.agent.v1.TaskEnvelope.network:type_name -> flotestro.agent.v1.NetworkAction
-	80,  // 54: flotestro.agent.v1.TaskEnvelope.dns:type_name -> flotestro.agent.v1.DnsAction
-	82,  // 55: flotestro.agent.v1.TaskEnvelope.firewall:type_name -> flotestro.agent.v1.FirewallAction
-	84,  // 56: flotestro.agent.v1.TaskEnvelope.storage:type_name -> flotestro.agent.v1.StorageAction
-	86,  // 57: flotestro.agent.v1.TaskEnvelope.ssh:type_name -> flotestro.agent.v1.SshAction
-	97,  // 58: flotestro.agent.v1.TaskEnvelope.kernel:type_name -> flotestro.agent.v1.KernelAction
-	100, // 59: flotestro.agent.v1.TaskEnvelope.file:type_name -> flotestro.agent.v1.FileAction
-	95,  // 60: flotestro.agent.v1.TaskEnvelope.time:type_name -> flotestro.agent.v1.TimeAction
-	52,  // 61: flotestro.agent.v1.TaskEnvelope.system_shutdown:type_name -> flotestro.agent.v1.SystemShutdown
-	88,  // 62: flotestro.agent.v1.TaskEnvelope.security:type_name -> flotestro.agent.v1.SecurityAction
-	93,  // 63: flotestro.agent.v1.TaskEnvelope.certificate:type_name -> flotestro.agent.v1.CertificateAction
-	90,  // 64: flotestro.agent.v1.TaskEnvelope.repository:type_name -> flotestro.agent.v1.RepositoryAction
-	1,   // 65: flotestro.agent.v1.UnitAction.operation:type_name -> flotestro.agent.v1.UnitAction.Operation
-	2,   // 66: flotestro.agent.v1.LocalUserAction.operation:type_name -> flotestro.agent.v1.LocalUserAction.Operation
-	40,  // 67: flotestro.agent.v1.LocalUserResult.account:type_name -> flotestro.agent.v1.LocalAccount
-	59,  // 68: flotestro.agent.v1.PackagesRepair.answers:type_name -> flotestro.agent.v1.DebconfAnswer
-	70,  // 69: flotestro.agent.v1.PackageRepairResult.still_blocked:type_name -> flotestro.agent.v1.BlockedPackage
-	3,   // 70: flotestro.agent.v1.TaskResult.status:type_name -> flotestro.agent.v1.TaskResult.Status
-	119, // 71: flotestro.agent.v1.TaskResult.started_at:type_name -> google.protobuf.Timestamp
-	119, // 72: flotestro.agent.v1.TaskResult.finished_at:type_name -> google.protobuf.Timestamp
-	65,  // 73: flotestro.agent.v1.TaskResult.unit_state_before:type_name -> flotestro.agent.v1.UnitState
-	65,  // 74: flotestro.agent.v1.TaskResult.unit_state_after:type_name -> flotestro.agent.v1.UnitState
-	69,  // 75: flotestro.agent.v1.TaskResult.package_plan:type_name -> flotestro.agent.v1.PackagePlanResult
-	72,  // 76: flotestro.agent.v1.TaskResult.package_apply:type_name -> flotestro.agent.v1.PackageApplyResult
-	114, // 77: flotestro.agent.v1.TaskResult.unit_status:type_name -> flotestro.agent.v1.UnitStatusResult
-	115, // 78: flotestro.agent.v1.TaskResult.domain_enroll:type_name -> flotestro.agent.v1.DomainEnrollResult
-	57,  // 79: flotestro.agent.v1.TaskResult.local_user:type_name -> flotestro.agent.v1.LocalUserResult
-	60,  // 80: flotestro.agent.v1.TaskResult.package_repair:type_name -> flotestro.agent.v1.PackageRepairResult
-	113, // 81: flotestro.agent.v1.TaskResult.docker_result:type_name -> flotestro.agent.v1.DockerReadResult
-	112, // 82: flotestro.agent.v1.TaskResult.docker_action_result:type_name -> flotestro.agent.v1.DockerActionResult
-	111, // 83: flotestro.agent.v1.TaskResult.compose_result:type_name -> flotestro.agent.v1.ComposeResult
-	109, // 84: flotestro.agent.v1.TaskResult.log_file_result:type_name -> flotestro.agent.v1.LogFileResult
-	105, // 85: flotestro.agent.v1.TaskResult.process_list_result:type_name -> flotestro.agent.v1.ProcessListResult
-	106, // 86: flotestro.agent.v1.TaskResult.process_signal_result:type_name -> flotestro.agent.v1.ProcessSignalResult
-	77,  // 87: flotestro.agent.v1.TaskResult.schedule_result:type_name -> flotestro.agent.v1.ScheduleResult
-	79,  // 88: flotestro.agent.v1.TaskResult.network_result:type_name -> flotestro.agent.v1.NetworkResult
-	81,  // 89: flotestro.agent.v1.TaskResult.dns_result:type_name -> flotestro.agent.v1.DnsResult
-	83,  // 90: flotestro.agent.v1.TaskResult.firewall_result:type_name -> flotestro.agent.v1.FirewallResult
-	85,  // 91: flotestro.agent.v1.TaskResult.storage_result:type_name -> flotestro.agent.v1.StorageResult
-	87,  // 92: flotestro.agent.v1.TaskResult.ssh_result:type_name -> flotestro.agent.v1.SshResult
-	98,  // 93: flotestro.agent.v1.TaskResult.kernel_result:type_name -> flotestro.agent.v1.KernelResult
-	101, // 94: flotestro.agent.v1.TaskResult.file_result:type_name -> flotestro.agent.v1.FileResult
-	96,  // 95: flotestro.agent.v1.TaskResult.time_result:type_name -> flotestro.agent.v1.TimeResult
-	53,  // 96: flotestro.agent.v1.TaskResult.power_result:type_name -> flotestro.agent.v1.PowerResult
-	89,  // 97: flotestro.agent.v1.TaskResult.security_result:type_name -> flotestro.agent.v1.SecurityResult
-	94,  // 98: flotestro.agent.v1.TaskResult.certificate_result:type_name -> flotestro.agent.v1.CertificateResult
-	91,  // 99: flotestro.agent.v1.TaskResult.repository_result:type_name -> flotestro.agent.v1.RepositoryResult
-	68,  // 100: flotestro.agent.v1.PackagePlanResult.changes:type_name -> flotestro.agent.v1.PackageChange
-	70,  // 101: flotestro.agent.v1.PackagePlanResult.blocked:type_name -> flotestro.agent.v1.BlockedPackage
-	71,  // 102: flotestro.agent.v1.BlockedPackage.questions:type_name -> flotestro.agent.v1.DebconfQuestion
-	68,  // 103: flotestro.agent.v1.PackageApplyResult.applied:type_name -> flotestro.agent.v1.PackageChange
-	4,   // 104: flotestro.agent.v1.DockerAction.operation:type_name -> flotestro.agent.v1.DockerAction.Operation
-	5,   // 105: flotestro.agent.v1.UnitToggle.property:type_name -> flotestro.agent.v1.UnitToggle.Property
-	6,   // 106: flotestro.agent.v1.ScheduleAction.operation:type_name -> flotestro.agent.v1.ScheduleAction.Operation
-	7,   // 107: flotestro.agent.v1.NetworkAction.operation:type_name -> flotestro.agent.v1.NetworkAction.Operation
-	8,   // 108: flotestro.agent.v1.DnsAction.operation:type_name -> flotestro.agent.v1.DnsAction.Operation
-	9,   // 109: flotestro.agent.v1.FirewallAction.operation:type_name -> flotestro.agent.v1.FirewallAction.Operation
-	10,  // 110: flotestro.agent.v1.StorageAction.operation:type_name -> flotestro.agent.v1.StorageAction.Operation
-	11,  // 111: flotestro.agent.v1.SshAction.operation:type_name -> flotestro.agent.v1.SshAction.Operation
-	12,  // 112: flotestro.agent.v1.SecurityAction.operation:type_name -> flotestro.agent.v1.SecurityAction.Operation
-	99,  // 113: flotestro.agent.v1.RepositoryAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
-	13,  // 114: flotestro.agent.v1.CertificateAction.operation:type_name -> flotestro.agent.v1.CertificateAction.Operation
-	92,  // 115: flotestro.agent.v1.CertificateAction.targets:type_name -> flotestro.agent.v1.CertificateTarget
-	99,  // 116: flotestro.agent.v1.CertificateAction.key_secret:type_name -> flotestro.agent.v1.SecretRef
-	14,  // 117: flotestro.agent.v1.TimeAction.operation:type_name -> flotestro.agent.v1.TimeAction.Operation
-	15,  // 118: flotestro.agent.v1.KernelAction.operation:type_name -> flotestro.agent.v1.KernelAction.Operation
-	118, // 119: flotestro.agent.v1.KernelAction.settings:type_name -> flotestro.agent.v1.KernelAction.SettingsEntry
-	16,  // 120: flotestro.agent.v1.FileAction.operation:type_name -> flotestro.agent.v1.FileAction.Operation
-	99,  // 121: flotestro.agent.v1.FileAction.content_secret:type_name -> flotestro.agent.v1.SecretRef
-	17,  // 122: flotestro.agent.v1.PackageLifecycle.operation:type_name -> flotestro.agent.v1.PackageLifecycle.Operation
-	18,  // 123: flotestro.agent.v1.ComposeAction.operation:type_name -> flotestro.agent.v1.ComposeAction.Operation
-	65,  // 124: flotestro.agent.v1.UnitStatusResult.units:type_name -> flotestro.agent.v1.UnitState
-	116, // 125: flotestro.agent.v1.DomainEnrollResult.checks:type_name -> flotestro.agent.v1.PreflightCheck
-	116, // 126: flotestro.agent.v1.DomainEnrollResult.verifications:type_name -> flotestro.agent.v1.PreflightCheck
-	25,  // 127: flotestro.agent.v1.EnrollmentService.Enroll:input_type -> flotestro.agent.v1.EnrollRequest
-	28,  // 128: flotestro.agent.v1.AgentService.Connect:input_type -> flotestro.agent.v1.AgentMessage
-	23,  // 129: flotestro.agent.v1.AgentService.RenewCertificate:input_type -> flotestro.agent.v1.RenewCertificateRequest
-	21,  // 130: flotestro.agent.v1.AgentService.Ping:input_type -> flotestro.agent.v1.PingRequest
-	19,  // 131: flotestro.agent.v1.AgentService.FetchSecret:input_type -> flotestro.agent.v1.FetchSecretRequest
-	26,  // 132: flotestro.agent.v1.EnrollmentService.Enroll:output_type -> flotestro.agent.v1.EnrollResponse
-	29,  // 133: flotestro.agent.v1.AgentService.Connect:output_type -> flotestro.agent.v1.ServerMessage
-	24,  // 134: flotestro.agent.v1.AgentService.RenewCertificate:output_type -> flotestro.agent.v1.RenewCertificateResponse
-	22,  // 135: flotestro.agent.v1.AgentService.Ping:output_type -> flotestro.agent.v1.PingResponse
-	20,  // 136: flotestro.agent.v1.AgentService.FetchSecret:output_type -> flotestro.agent.v1.FetchSecretResponse
-	132, // [132:137] is the sub-list for method output_type
-	127, // [127:132] is the sub-list for method input_type
-	127, // [127:127] is the sub-list for extension type_name
-	127, // [127:127] is the sub-list for extension extendee
-	0,   // [0:127] is the sub-list for field type_name
+	42,  // 28: flotestro.agent.v1.LocalAccount.ssh_keys:type_name -> flotestro.agent.v1.SSHKey
+	123, // 29: flotestro.agent.v1.TaskEnvelope.created_at:type_name -> google.protobuf.Timestamp
+	123, // 30: flotestro.agent.v1.TaskEnvelope.expires_at:type_name -> google.protobuf.Timestamp
+	47,  // 31: flotestro.agent.v1.TaskEnvelope.preconditions:type_name -> flotestro.agent.v1.Preconditions
+	48,  // 32: flotestro.agent.v1.TaskEnvelope.limits:type_name -> flotestro.agent.v1.Limits
+	49,  // 33: flotestro.agent.v1.TaskEnvelope.actor_context:type_name -> flotestro.agent.v1.ActorContext
+	50,  // 34: flotestro.agent.v1.TaskEnvelope.unit_action:type_name -> flotestro.agent.v1.UnitAction
+	51,  // 35: flotestro.agent.v1.TaskEnvelope.read_journal:type_name -> flotestro.agent.v1.ReadJournal
+	67,  // 36: flotestro.agent.v1.TaskEnvelope.package_plan:type_name -> flotestro.agent.v1.PackagePlan
+	68,  // 37: flotestro.agent.v1.TaskEnvelope.package_upgrade:type_name -> flotestro.agent.v1.PackageUpgrade
+	52,  // 38: flotestro.agent.v1.TaskEnvelope.system_reboot:type_name -> flotestro.agent.v1.SystemReboot
+	55,  // 39: flotestro.agent.v1.TaskEnvelope.read_unit_status:type_name -> flotestro.agent.v1.ReadUnitStatus
+	56,  // 40: flotestro.agent.v1.TaskEnvelope.domain_enroll:type_name -> flotestro.agent.v1.DomainEnroll
+	57,  // 41: flotestro.agent.v1.TaskEnvelope.local_user_action:type_name -> flotestro.agent.v1.LocalUserAction
+	59,  // 42: flotestro.agent.v1.TaskEnvelope.packages_repair:type_name -> flotestro.agent.v1.PackagesRepair
+	74,  // 43: flotestro.agent.v1.TaskEnvelope.docker_read:type_name -> flotestro.agent.v1.DockerRead
+	75,  // 44: flotestro.agent.v1.TaskEnvelope.docker_action:type_name -> flotestro.agent.v1.DockerAction
+	113, // 45: flotestro.agent.v1.TaskEnvelope.compose:type_name -> flotestro.agent.v1.ComposeAction
+	76,  // 46: flotestro.agent.v1.TaskEnvelope.unit_toggle:type_name -> flotestro.agent.v1.UnitToggle
+	111, // 47: flotestro.agent.v1.TaskEnvelope.read_log_file:type_name -> flotestro.agent.v1.ReadLogFile
+	110, // 48: flotestro.agent.v1.TaskEnvelope.follow_journal:type_name -> flotestro.agent.v1.FollowJournal
+	106, // 49: flotestro.agent.v1.TaskEnvelope.list_processes:type_name -> flotestro.agent.v1.ListProcesses
+	107, // 50: flotestro.agent.v1.TaskEnvelope.signal_process:type_name -> flotestro.agent.v1.SignalProcess
+	105, // 51: flotestro.agent.v1.TaskEnvelope.package_lifecycle:type_name -> flotestro.agent.v1.PackageLifecycle
+	77,  // 52: flotestro.agent.v1.TaskEnvelope.schedule:type_name -> flotestro.agent.v1.ScheduleAction
+	79,  // 53: flotestro.agent.v1.TaskEnvelope.network:type_name -> flotestro.agent.v1.NetworkAction
+	81,  // 54: flotestro.agent.v1.TaskEnvelope.dns:type_name -> flotestro.agent.v1.DnsAction
+	83,  // 55: flotestro.agent.v1.TaskEnvelope.firewall:type_name -> flotestro.agent.v1.FirewallAction
+	85,  // 56: flotestro.agent.v1.TaskEnvelope.storage:type_name -> flotestro.agent.v1.StorageAction
+	87,  // 57: flotestro.agent.v1.TaskEnvelope.ssh:type_name -> flotestro.agent.v1.SshAction
+	100, // 58: flotestro.agent.v1.TaskEnvelope.kernel:type_name -> flotestro.agent.v1.KernelAction
+	103, // 59: flotestro.agent.v1.TaskEnvelope.file:type_name -> flotestro.agent.v1.FileAction
+	98,  // 60: flotestro.agent.v1.TaskEnvelope.time:type_name -> flotestro.agent.v1.TimeAction
+	53,  // 61: flotestro.agent.v1.TaskEnvelope.system_shutdown:type_name -> flotestro.agent.v1.SystemShutdown
+	89,  // 62: flotestro.agent.v1.TaskEnvelope.security:type_name -> flotestro.agent.v1.SecurityAction
+	96,  // 63: flotestro.agent.v1.TaskEnvelope.certificate:type_name -> flotestro.agent.v1.CertificateAction
+	93,  // 64: flotestro.agent.v1.TaskEnvelope.repository:type_name -> flotestro.agent.v1.RepositoryAction
+	91,  // 65: flotestro.agent.v1.TaskEnvelope.backup:type_name -> flotestro.agent.v1.BackupAction
+	1,   // 66: flotestro.agent.v1.UnitAction.operation:type_name -> flotestro.agent.v1.UnitAction.Operation
+	2,   // 67: flotestro.agent.v1.LocalUserAction.operation:type_name -> flotestro.agent.v1.LocalUserAction.Operation
+	41,  // 68: flotestro.agent.v1.LocalUserResult.account:type_name -> flotestro.agent.v1.LocalAccount
+	60,  // 69: flotestro.agent.v1.PackagesRepair.answers:type_name -> flotestro.agent.v1.DebconfAnswer
+	71,  // 70: flotestro.agent.v1.PackageRepairResult.still_blocked:type_name -> flotestro.agent.v1.BlockedPackage
+	3,   // 71: flotestro.agent.v1.TaskResult.status:type_name -> flotestro.agent.v1.TaskResult.Status
+	123, // 72: flotestro.agent.v1.TaskResult.started_at:type_name -> google.protobuf.Timestamp
+	123, // 73: flotestro.agent.v1.TaskResult.finished_at:type_name -> google.protobuf.Timestamp
+	66,  // 74: flotestro.agent.v1.TaskResult.unit_state_before:type_name -> flotestro.agent.v1.UnitState
+	66,  // 75: flotestro.agent.v1.TaskResult.unit_state_after:type_name -> flotestro.agent.v1.UnitState
+	70,  // 76: flotestro.agent.v1.TaskResult.package_plan:type_name -> flotestro.agent.v1.PackagePlanResult
+	73,  // 77: flotestro.agent.v1.TaskResult.package_apply:type_name -> flotestro.agent.v1.PackageApplyResult
+	117, // 78: flotestro.agent.v1.TaskResult.unit_status:type_name -> flotestro.agent.v1.UnitStatusResult
+	118, // 79: flotestro.agent.v1.TaskResult.domain_enroll:type_name -> flotestro.agent.v1.DomainEnrollResult
+	58,  // 80: flotestro.agent.v1.TaskResult.local_user:type_name -> flotestro.agent.v1.LocalUserResult
+	61,  // 81: flotestro.agent.v1.TaskResult.package_repair:type_name -> flotestro.agent.v1.PackageRepairResult
+	116, // 82: flotestro.agent.v1.TaskResult.docker_result:type_name -> flotestro.agent.v1.DockerReadResult
+	115, // 83: flotestro.agent.v1.TaskResult.docker_action_result:type_name -> flotestro.agent.v1.DockerActionResult
+	114, // 84: flotestro.agent.v1.TaskResult.compose_result:type_name -> flotestro.agent.v1.ComposeResult
+	112, // 85: flotestro.agent.v1.TaskResult.log_file_result:type_name -> flotestro.agent.v1.LogFileResult
+	108, // 86: flotestro.agent.v1.TaskResult.process_list_result:type_name -> flotestro.agent.v1.ProcessListResult
+	109, // 87: flotestro.agent.v1.TaskResult.process_signal_result:type_name -> flotestro.agent.v1.ProcessSignalResult
+	78,  // 88: flotestro.agent.v1.TaskResult.schedule_result:type_name -> flotestro.agent.v1.ScheduleResult
+	80,  // 89: flotestro.agent.v1.TaskResult.network_result:type_name -> flotestro.agent.v1.NetworkResult
+	82,  // 90: flotestro.agent.v1.TaskResult.dns_result:type_name -> flotestro.agent.v1.DnsResult
+	84,  // 91: flotestro.agent.v1.TaskResult.firewall_result:type_name -> flotestro.agent.v1.FirewallResult
+	86,  // 92: flotestro.agent.v1.TaskResult.storage_result:type_name -> flotestro.agent.v1.StorageResult
+	88,  // 93: flotestro.agent.v1.TaskResult.ssh_result:type_name -> flotestro.agent.v1.SshResult
+	101, // 94: flotestro.agent.v1.TaskResult.kernel_result:type_name -> flotestro.agent.v1.KernelResult
+	104, // 95: flotestro.agent.v1.TaskResult.file_result:type_name -> flotestro.agent.v1.FileResult
+	99,  // 96: flotestro.agent.v1.TaskResult.time_result:type_name -> flotestro.agent.v1.TimeResult
+	54,  // 97: flotestro.agent.v1.TaskResult.power_result:type_name -> flotestro.agent.v1.PowerResult
+	90,  // 98: flotestro.agent.v1.TaskResult.security_result:type_name -> flotestro.agent.v1.SecurityResult
+	97,  // 99: flotestro.agent.v1.TaskResult.certificate_result:type_name -> flotestro.agent.v1.CertificateResult
+	94,  // 100: flotestro.agent.v1.TaskResult.repository_result:type_name -> flotestro.agent.v1.RepositoryResult
+	92,  // 101: flotestro.agent.v1.TaskResult.backup_result:type_name -> flotestro.agent.v1.BackupResult
+	69,  // 102: flotestro.agent.v1.PackagePlanResult.changes:type_name -> flotestro.agent.v1.PackageChange
+	71,  // 103: flotestro.agent.v1.PackagePlanResult.blocked:type_name -> flotestro.agent.v1.BlockedPackage
+	72,  // 104: flotestro.agent.v1.BlockedPackage.questions:type_name -> flotestro.agent.v1.DebconfQuestion
+	69,  // 105: flotestro.agent.v1.PackageApplyResult.applied:type_name -> flotestro.agent.v1.PackageChange
+	4,   // 106: flotestro.agent.v1.DockerAction.operation:type_name -> flotestro.agent.v1.DockerAction.Operation
+	5,   // 107: flotestro.agent.v1.UnitToggle.property:type_name -> flotestro.agent.v1.UnitToggle.Property
+	6,   // 108: flotestro.agent.v1.ScheduleAction.operation:type_name -> flotestro.agent.v1.ScheduleAction.Operation
+	7,   // 109: flotestro.agent.v1.NetworkAction.operation:type_name -> flotestro.agent.v1.NetworkAction.Operation
+	8,   // 110: flotestro.agent.v1.DnsAction.operation:type_name -> flotestro.agent.v1.DnsAction.Operation
+	9,   // 111: flotestro.agent.v1.FirewallAction.operation:type_name -> flotestro.agent.v1.FirewallAction.Operation
+	10,  // 112: flotestro.agent.v1.StorageAction.operation:type_name -> flotestro.agent.v1.StorageAction.Operation
+	11,  // 113: flotestro.agent.v1.SshAction.operation:type_name -> flotestro.agent.v1.SshAction.Operation
+	12,  // 114: flotestro.agent.v1.SecurityAction.operation:type_name -> flotestro.agent.v1.SecurityAction.Operation
+	13,  // 115: flotestro.agent.v1.BackupAction.operation:type_name -> flotestro.agent.v1.BackupAction.Operation
+	102, // 116: flotestro.agent.v1.BackupAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
+	121, // 117: flotestro.agent.v1.BackupAction.env_secrets:type_name -> flotestro.agent.v1.BackupAction.EnvSecretsEntry
+	102, // 118: flotestro.agent.v1.RepositoryAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
+	14,  // 119: flotestro.agent.v1.CertificateAction.operation:type_name -> flotestro.agent.v1.CertificateAction.Operation
+	95,  // 120: flotestro.agent.v1.CertificateAction.targets:type_name -> flotestro.agent.v1.CertificateTarget
+	102, // 121: flotestro.agent.v1.CertificateAction.key_secret:type_name -> flotestro.agent.v1.SecretRef
+	15,  // 122: flotestro.agent.v1.TimeAction.operation:type_name -> flotestro.agent.v1.TimeAction.Operation
+	16,  // 123: flotestro.agent.v1.KernelAction.operation:type_name -> flotestro.agent.v1.KernelAction.Operation
+	122, // 124: flotestro.agent.v1.KernelAction.settings:type_name -> flotestro.agent.v1.KernelAction.SettingsEntry
+	17,  // 125: flotestro.agent.v1.FileAction.operation:type_name -> flotestro.agent.v1.FileAction.Operation
+	102, // 126: flotestro.agent.v1.FileAction.content_secret:type_name -> flotestro.agent.v1.SecretRef
+	18,  // 127: flotestro.agent.v1.PackageLifecycle.operation:type_name -> flotestro.agent.v1.PackageLifecycle.Operation
+	19,  // 128: flotestro.agent.v1.ComposeAction.operation:type_name -> flotestro.agent.v1.ComposeAction.Operation
+	66,  // 129: flotestro.agent.v1.UnitStatusResult.units:type_name -> flotestro.agent.v1.UnitState
+	119, // 130: flotestro.agent.v1.DomainEnrollResult.checks:type_name -> flotestro.agent.v1.PreflightCheck
+	119, // 131: flotestro.agent.v1.DomainEnrollResult.verifications:type_name -> flotestro.agent.v1.PreflightCheck
+	102, // 132: flotestro.agent.v1.BackupAction.EnvSecretsEntry.value:type_name -> flotestro.agent.v1.SecretRef
+	26,  // 133: flotestro.agent.v1.EnrollmentService.Enroll:input_type -> flotestro.agent.v1.EnrollRequest
+	29,  // 134: flotestro.agent.v1.AgentService.Connect:input_type -> flotestro.agent.v1.AgentMessage
+	24,  // 135: flotestro.agent.v1.AgentService.RenewCertificate:input_type -> flotestro.agent.v1.RenewCertificateRequest
+	22,  // 136: flotestro.agent.v1.AgentService.Ping:input_type -> flotestro.agent.v1.PingRequest
+	20,  // 137: flotestro.agent.v1.AgentService.FetchSecret:input_type -> flotestro.agent.v1.FetchSecretRequest
+	27,  // 138: flotestro.agent.v1.EnrollmentService.Enroll:output_type -> flotestro.agent.v1.EnrollResponse
+	30,  // 139: flotestro.agent.v1.AgentService.Connect:output_type -> flotestro.agent.v1.ServerMessage
+	25,  // 140: flotestro.agent.v1.AgentService.RenewCertificate:output_type -> flotestro.agent.v1.RenewCertificateResponse
+	23,  // 141: flotestro.agent.v1.AgentService.Ping:output_type -> flotestro.agent.v1.PingResponse
+	21,  // 142: flotestro.agent.v1.AgentService.FetchSecret:output_type -> flotestro.agent.v1.FetchSecretResponse
+	138, // [138:143] is the sub-list for method output_type
+	133, // [133:138] is the sub-list for method input_type
+	133, // [133:133] is the sub-list for extension type_name
+	133, // [133:133] is the sub-list for extension extendee
+	0,   // [0:133] is the sub-list for field type_name
 }
 
 func init() { file_flotestro_agent_v1_agent_proto_init() }
@@ -10931,6 +11341,7 @@ func file_flotestro_agent_v1_agent_proto_init() {
 		(*TaskEnvelope_Security)(nil),
 		(*TaskEnvelope_Certificate)(nil),
 		(*TaskEnvelope_Repository)(nil),
+		(*TaskEnvelope_Backup)(nil),
 	}
 	file_flotestro_agent_v1_agent_proto_msgTypes[31].OneofWrappers = []any{}
 	file_flotestro_agent_v1_agent_proto_msgTypes[44].OneofWrappers = []any{}
@@ -10943,16 +11354,16 @@ func file_flotestro_agent_v1_agent_proto_init() {
 		(*TaskResult_PackageRepair)(nil),
 	}
 	file_flotestro_agent_v1_agent_proto_msgTypes[52].OneofWrappers = []any{}
-	file_flotestro_agent_v1_agent_proto_msgTypes[88].OneofWrappers = []any{}
-	file_flotestro_agent_v1_agent_proto_msgTypes[93].OneofWrappers = []any{}
-	file_flotestro_agent_v1_agent_proto_msgTypes[97].OneofWrappers = []any{}
+	file_flotestro_agent_v1_agent_proto_msgTypes[90].OneofWrappers = []any{}
+	file_flotestro_agent_v1_agent_proto_msgTypes[95].OneofWrappers = []any{}
+	file_flotestro_agent_v1_agent_proto_msgTypes[99].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_flotestro_agent_v1_agent_proto_rawDesc), len(file_flotestro_agent_v1_agent_proto_rawDesc)),
-			NumEnums:      19,
-			NumMessages:   100,
+			NumEnums:      20,
+			NumMessages:   103,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

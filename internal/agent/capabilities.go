@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/security"
@@ -53,6 +54,9 @@ const (
 	CapCertificatesRenew = "certificates.renew"
 	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
 	CapFiles = "files.managed"
+	// Backup. Modul steruje narzedziem, ktore host juz ma: bez narzedzia
+	// i bez runbookow nie ma czym zrobic kopii.
+	CapBackup = "backup"
 )
 
 // Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
@@ -217,6 +221,9 @@ func DetectCapabilities() Capabilities {
 	audyt := exists(security.SciezkaAuditctl) && exists(security.SciezkaAugenrules)
 	apparmor := exists(security.PlikAppArmor)
 	certmonger := exists(certificates.SciezkaGetcert) || exists(certificates.SciezkaGetcertAlt)
+	restic := exists("/usr/bin/restic") || exists("/usr/local/bin/restic")
+	borg := exists("/usr/bin/borg") || exists("/usr/local/bin/borg")
+	runbooki, _ := backup.WykazRunbookow()
 	chrony := exists(czas.SciezkaChronyc)
 	// Timesyncd bywa zainstalowany i zamaskowany, gdy host ma chronyego.
 	// Obecnosc jednostki mowi tylko tyle, ze jest czym pisac - ktory demon
@@ -316,6 +323,16 @@ func DetectCapabilities() Capabilities {
 				"certmonger": certmonger,
 				"deploy":     true,
 			},
+		},
+		{
+			Name:      CapBackup,
+			Version:   wersjaAdaptera,
+			Available: restic || borg || len(runbooki) > 0,
+			Features: map[string]bool{
+				"restic": restic, "borg": borg, "runbook": len(runbooki) > 0,
+			},
+			Reason: powod(restic || borg || len(runbooki) > 0,
+				"this host has no backup tool the panel can drive"),
 		},
 		{
 			Name:      CapCertificatesRenew,

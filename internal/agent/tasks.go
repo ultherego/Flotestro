@@ -185,6 +185,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.applyCertificate(ctx, task, action, payload.Certificate)
 	case opspec.ActionRepositorySet:
 		return e.applyRepository(ctx, task, action, payload.Repository)
+	case opspec.ActionBackupPlan, opspec.ActionBackupRun,
+		opspec.ActionBackupVerify, opspec.ActionBackupRestore:
+		return e.applyBackup(ctx, task, action, payload.Backup)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -583,6 +586,42 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionAuditRulesReload
 		}
 		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
+
+	case *agentv1.TaskEnvelope_Backup:
+		kopia := action.Backup
+		typ := opspec.ActionBackupPlan
+		switch kopia.GetOperation() {
+		case agentv1.BackupAction_OPERATION_RUN:
+			typ = opspec.ActionBackupRun
+		case agentv1.BackupAction_OPERATION_VERIFY:
+			typ = opspec.ActionBackupVerify
+		case agentv1.BackupAction_OPERATION_RESTORE:
+			typ = opspec.ActionBackupRestore
+		}
+		zawartosc := &opspec.BackupPayload{
+			ID: kopia.GetId(), Tool: kopia.GetTool(), Repository: kopia.GetRepository(),
+			Paths: kopia.GetPaths(), Excludes: kopia.GetExcludes(), Tags: kopia.GetTags(),
+			KeepLast: int(kopia.GetKeepLast()), KeepDaily: int(kopia.GetKeepDaily()),
+			KeepWeekly: int(kopia.GetKeepWeekly()), KeepMonthly: int(kopia.GetKeepMonthly()),
+			Prune: kopia.GetPrune(), Runbook: kopia.GetRunbook(),
+			Initialize: kopia.GetInitialize(), ReadData: kopia.GetReadData(), SnapshotID: kopia.GetSnapshotId(),
+			Target: kopia.GetTarget(), Include: kopia.GetInclude(),
+			Overwrite: kopia.GetOverwrite(),
+		}
+		if ref := kopia.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
+			zawartosc.PasswordSecret = &opspec.SecretRef{
+				Name: ref.GetName(), Version: int(ref.GetVersion()),
+			}
+		}
+		if len(kopia.GetEnvSecrets()) > 0 {
+			zawartosc.EnvSecrets = map[string]opspec.SecretRef{}
+			for nazwa, ref := range kopia.GetEnvSecrets() {
+				zawartosc.EnvSecrets[nazwa] = opspec.SecretRef{
+					Name: ref.GetName(), Version: int(ref.GetVersion()),
+				}
+			}
+		}
+		return typ, opspec.Payload{Backup: zawartosc}, nil
 
 	case *agentv1.TaskEnvelope_Repository:
 		zrodlo := action.Repository

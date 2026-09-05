@@ -121,6 +121,15 @@ const (
 	PermSecurityMACWrite  Permission = "security.mac.write"
 	// Przeladowanie regul audytu zmienia to, co host notuje.
 	PermSecurityAuditReload Permission = "security.audit.reload"
+	// Backup. Odczyt stanu repozytorium jest czescia dyzuru - backup, o ktorym
+	// nikt nie wie, ze nie dziala, jest gorszy niz jego brak. Odtworzenie ma
+	// wlasne uprawnienie i najwyzsze ryzyko: rozpakowuje stary stan na
+	// dzialajacym systemie.
+	PermBackupRead    Permission = "backup.read"
+	PermBackupRun     Permission = "backup.run"
+	PermBackupVerify  Permission = "backup.verify"
+	PermBackupRestore Permission = "backup.restore"
+
 	// Okno serwisowe nalezy do prowadzenia ruchu, a nie do zmiany hosta:
 	// deklaruje je ten, kto pilnuje kampanii i dyzuru.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
@@ -244,6 +253,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
+		PermBackupRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -257,6 +267,9 @@ var rolePermissions = map[Role][]Permission{
 		// Terminy certyfikatow sa materialem audytu tak samo jak stan
 		// ochronny: wygasajacy certyfikat jest ustaleniem, a nie awaria.
 		PermCertificateRead,
+		// Backup, ktorego nikt nie sprawdzil, jest ustaleniem audytu,
+		// a nie awaria dyzuru.
+		PermBackupRead,
 		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
 		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
 		PermSecretRead,
@@ -290,6 +303,9 @@ var rolePermissions = map[Role][]Permission{
 		// Operator oglada certyfikaty i wskazuje panelowi, ktorych plikow
 		// pilnowac; wdrozenie nowego jest juz decyzja administratora.
 		PermCertificateRead, PermCertificateWatch,
+		// Operator robi i sprawdza kopie; odtworzenie jest osobna decyzja,
+		// bo rozpakowuje stary stan na dzialajacym systemie.
+		PermBackupRead, PermBackupRun, PermBackupVerify,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -347,6 +363,7 @@ var rolePermissions = map[Role][]Permission{
 		PermSecretRead, PermSecretWrite, PermSecretDestroy,
 		PermCertificateRead, PermCertificateWatch,
 		PermCertificateDeploy, PermCertificateRenew,
+		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
 	},
 }
 

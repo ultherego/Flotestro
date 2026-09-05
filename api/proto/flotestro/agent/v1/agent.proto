@@ -392,6 +392,7 @@ message TaskEnvelope {
     SecurityAction security = 48;
     CertificateAction certificate = 49;
     RepositoryAction repository = 50;
+    BackupAction backup = 51;
   }
 }
 
@@ -656,6 +657,7 @@ message TaskResult {
   SecurityResult security_result = 42;
   CertificateResult certificate_result = 43;
   RepositoryResult repository_result = 44;
+  BackupResult backup_result = 45;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -1042,6 +1044,54 @@ message SecurityAction {
 message SecurityResult {
   bytes snapshot = 1;
   string message = 2;
+}
+
+// BackupAction opisuje operacje backupu.
+//
+// Dane backupowe nie plyna przez panel: host rozmawia z repozytorium wprost.
+// W kopercie sa metadane definicji i odnosniki do poswiadczen - nigdy same
+// poswiadczenia.
+message BackupAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_PLAN = 1;
+    OPERATION_RUN = 2;
+    OPERATION_VERIFY = 3;
+    OPERATION_RESTORE = 4;
+  }
+  Operation operation = 1;
+  string id = 2;
+  string tool = 3;
+  string repository = 4;
+  repeated string paths = 5;
+  repeated string excludes = 6;
+  repeated string tags = 7;
+  int32 keep_last = 8;
+  int32 keep_daily = 9;
+  int32 keep_weekly = 10;
+  int32 keep_monthly = 11;
+  bool prune = 12;
+  // Runbook wskazuje skrypt lezacy juz na hoscie. Tresci panel nie przesyla.
+  string runbook = 13;
+  // Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+  bool initialize = 21;
+  SecretRef password_secret = 14;
+  // EnvSecrets przypisuje zmiennym srodowiska sekrety z magazynu.
+  map<string, SecretRef> env_secrets = 15;
+  bool read_data = 16;
+  // Odtworzenie: cel i plan nadpisania sa obowiazkowe.
+  string snapshot_id = 17;
+  string target = 18;
+  repeated string include = 19;
+  string overwrite = 20;
+}
+
+message BackupResult {
+  // State niesie stan repozytorium po operacji planu.
+  bytes state = 1;
+  // Outcome niesie wynik operacji zmieniajacej.
+  bytes outcome = 2;
+  string message = 3;
 }
 
 // RepositoryAction opisuje zrodlo pakietow.

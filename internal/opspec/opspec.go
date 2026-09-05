@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 
+	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
 	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
@@ -140,6 +142,15 @@ const (
 	// ktore chodza jako root. Stad ryzyko krytyczne i wlasne uprawnienie.
 	ActionRepositorySet ActionType = "packages.repository.set"
 
+	// Backup. Dane nie plyna przez panel: host rozmawia z repozytorium wprost,
+	// a panel widzi metadane - kiedy kopia sie udala, ile zajmuje i co
+	// obejmuje. Odtworzenie jest osobna operacja o najwyzszym ryzyku, bo
+	// rozpakowuje stary stan na dzialajacy system.
+	ActionBackupPlan    ActionType = "backup.plan"
+	ActionBackupRun     ActionType = "backup.run"
+	ActionBackupVerify  ActionType = "backup.verify"
+	ActionBackupRestore ActionType = "backup.restore"
+
 	ActionSystemReboot ActionType = "system.reboot"
 	// Wylaczenie hosta jest operacja, z ktorej panel nie potrafi go wyprowadzic:
 	// wlaczenie wymaga dostepu poza pasmem. Dlatego jest osobna operacja
@@ -218,6 +229,10 @@ const (
 	// Przestrzen dyskowa jest jednym zasobem: dwie rownolegle operacje na
 	// tym samym filesystemie moga go uszkodzic.
 	LockStorage = "storage"
+	// Repozytorium backupu jest jednym zasobem: narzedzia trzymaja na nim
+	// wlasna blokade, a druga operacja i tak czekalaby pod nia - tyle ze bez
+	// wiedzy panelu i do konca limitu czasu.
+	LockBackup = "backup"
 )
 
 // Spec jest pelnym kontraktem jednej operacji.
@@ -585,6 +600,26 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
 	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
+	// Plan czyta repozytorium backupu: liste kopii i ich rozmiar. Nie zmienia
+	// ani hosta, ani repozytorium, ale wymaga poswiadczen - repozytorium
+	// backupu jest zaszyfrowane i nie odpowiada nikomu bez hasla.
+	ActionBackupPlan: {mutating: false, capability: "backup", permission: "backup.read",
+		timeoutSeconds: 600, risk: RiskLow, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+	// Kopia czyta caly wskazany zakres hosta i wysyla go do repozytorium.
+	// Nie zmienia hosta, ale kosztuje jego dysk, procesor i lacze - i trwa.
+	ActionBackupRun: {mutating: true, capability: "backup", permission: "backup.run",
+		timeoutSeconds: 7200, risk: RiskHigh, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+	// Weryfikacja czyta repozytorium i nie zmienia hosta; z odczytem danych
+	// kosztuje tyle, co odtworzenie czesci kopii.
+	ActionBackupVerify: {mutating: true, capability: "backup", permission: "backup.verify",
+		timeoutSeconds: 3600, risk: RiskMedium, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+	// Odtworzenie rozpakowuje stary stan na dzialajacym systemie. Wymaga
+	// wskazania celu i planu nadpisania, a panel nie pozwala celowac w katalogi
+	// systemowe: to, co z odtworzonego katalogu wroci na miejsce, jest osobna
+	// decyzja i osobna operacja.
+	ActionBackupRestore: {mutating: true, capability: "backup", permission: "backup.restore",
+		timeoutSeconds: 7200, risk: RiskCritical, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+
 	// Zrodlo pakietow jest decyzja o zaufaniu, a nie o wersji: od tej chwili
 	// host bierze oprogramowanie takze stamtad. Blokada pakietowa jest tu
 	// konieczna, bo zapis konczy sie odswiezeniem metadanych.
@@ -1109,12 +1144,54 @@ type Payload struct {
 	Security        *SecurityPayload        `json:"security,omitempty"`
 	Certificate     *CertificatePayload     `json:"certificate,omitempty"`
 	Repository      *RepositoryPayload      `json:"repository,omitempty"`
+	Backup          *BackupPayload          `json:"backup,omitempty"`
 }
 
 // SecurityPayload opisuje operacje modulu bezpieczenstwa.
 type SecurityPayload struct {
 	// Mode jest trybem obowiazkowej kontroli dostepu.
 	Mode string `json:"mode,omitempty"`
+}
+
+// BackupPayload opisuje operacje backupu.
+//
+// Poswiadczenia sa odnosnikami do magazynu: haslo repozytorium i zmienne
+// srodowiskowe narzedzia. Wartosci nie ma ani w zleceniu, ani w audycie, ani
+// w inwentarzu - host siega po nie przy wykonaniu i podaje narzedziu
+// srodowiskiem, a nie argumentem widocznym w /proc.
+type BackupPayload struct {
+	ID   string `json:"id"`
+	Tool string `json:"tool"`
+	// Repository jest odnosnikiem do celu backupu; dane plyna tam wprost
+	// z hosta i nigdy przez panel.
+	Repository  string   `json:"repository,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	Excludes    []string `json:"excludes,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	KeepLast    int      `json:"keep_last,omitempty"`
+	KeepDaily   int      `json:"keep_daily,omitempty"`
+	KeepWeekly  int      `json:"keep_weekly,omitempty"`
+	KeepMonthly int      `json:"keep_monthly,omitempty"`
+	Prune       bool     `json:"prune,omitempty"`
+	// Runbook wskazuje skrypt, ktory administrator hosta wczesniej tam polozyl.
+	// Panel nie przesyla jego tresci i nie moze go zalozyc.
+	Runbook string `json:"runbook,omitempty"`
+	// Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+	Initialize bool `json:"initialize,omitempty"`
+
+	PasswordSecret *SecretRef `json:"password_secret,omitempty"`
+	// EnvSecrets przypisuje zmiennym srodowiska sekrety z magazynu: tak ida
+	// poswiadczenia do chmurowego backendu backupu.
+	EnvSecrets map[string]SecretRef `json:"env_secrets,omitempty"`
+	// ReadData wlacza weryfikacje z odczytem danych, a nie samej struktury.
+	ReadData bool `json:"read_data,omitempty"`
+
+	// Odtworzenie. Cel i plan nadpisania sa obowiazkowe: operacja bez nich
+	// ma skutek, ktorego nikt nie zna.
+	SnapshotID string   `json:"snapshot_id,omitempty"`
+	Target     string   `json:"target,omitempty"`
+	Include    []string `json:"include,omitempty"`
+	Overwrite  string   `json:"overwrite,omitempty"`
 }
 
 // RepositoryPayload opisuje zrodlo pakietow.
@@ -1290,6 +1367,22 @@ func (p Payload) Sekrety() []SecretRef {
 	}
 	if p.Repository != nil && !p.Repository.PasswordSecret.Pusty() {
 		odnosniki = append(odnosniki, *p.Repository.PasswordSecret)
+	}
+	if p.Backup != nil {
+		if !p.Backup.PasswordSecret.Pusty() {
+			odnosniki = append(odnosniki, *p.Backup.PasswordSecret)
+		}
+		// Kolejnosc jest ustalona, zeby dwa takie same zlecenia wystawialy
+		// dzierzawy w tej samej kolejnosci.
+		nazwy := make([]string, 0, len(p.Backup.EnvSecrets))
+		for nazwa := range p.Backup.EnvSecrets {
+			nazwy = append(nazwy, nazwa)
+		}
+		sort.Strings(nazwy)
+		for _, nazwa := range nazwy {
+			odnosnik := p.Backup.EnvSecrets[nazwa]
+			odnosniki = append(odnosniki, odnosnik)
+		}
 	}
 	return odnosniki
 }
@@ -1800,6 +1893,49 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionSecurityScan, ActionAuditRulesReload:
+		return nil
+
+	case ActionBackupPlan, ActionBackupRun, ActionBackupVerify, ActionBackupRestore:
+		if payload.Backup == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu backup", action)
+		}
+		kopia := payload.Backup
+		definicja := backupmodul.Definicja{
+			ID: kopia.ID, Tool: kopia.Tool, Repository: kopia.Repository,
+			Paths: kopia.Paths, Excludes: kopia.Excludes, Tags: kopia.Tags,
+			KeepLast: kopia.KeepLast, KeepDaily: kopia.KeepDaily,
+			KeepWeekly: kopia.KeepWeekly, KeepMonthly: kopia.KeepMonthly,
+			Prune: kopia.Prune, Runbook: kopia.Runbook, Initialize: kopia.Initialize,
+		}
+		if err := definicja.Waliduj(); err != nil {
+			return err
+		}
+		if !kopia.PasswordSecret.Pusty() {
+			if err := kopia.PasswordSecret.Waliduj(); err != nil {
+				return err
+			}
+		}
+		nazwyZmiennych := make([]string, 0, len(kopia.EnvSecrets))
+		for nazwa, odnosnik := range kopia.EnvSecrets {
+			nazwyZmiennych = append(nazwyZmiennych, nazwa)
+			kopiaOdnosnika := odnosnik
+			if err := kopiaOdnosnika.Waliduj(); err != nil {
+				return err
+			}
+		}
+		if err := backupmodul.WalidujSrodowisko(nazwyZmiennych); err != nil {
+			return err
+		}
+		if action == ActionBackupRun && len(kopia.Paths) == 0 &&
+			kopia.Tool != backupmodul.NarzedzieRunbook {
+			return fmt.Errorf("kopia wymaga wskazania, co backupowac")
+		}
+		if action == ActionBackupRestore {
+			return backupmodul.WalidujOdtworzenie(backupmodul.Odtworzenie{
+				SnapshotID: kopia.SnapshotID, Target: kopia.Target,
+				Include: kopia.Include, Overwrite: kopia.Overwrite,
+			})
+		}
 		return nil
 
 	case ActionRepositorySet:

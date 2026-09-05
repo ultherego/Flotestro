@@ -113,6 +113,10 @@ type Facts struct {
 	// Security jest stanem ochronnym hosta: MAC, audyt, tryb rozruchu
 	// i to, czym host wystaje na zewnatrz.
 	Security *security.Snapshot `json:"security,omitempty"`
+	// Backup jest tym, co da sie powiedziec o kopiach bez poswiadczen:
+	// czym host moze je zrobic. Stan repozytorium wymaga hasla, wiec jest
+	// operacja, a nie inwentarzem.
+	Backup *StanBackupu `json:"backup,omitempty"`
 	// Certificates jest obrazem certyfikatow, o ktore panel prosil, oraz
 	// tych, ktorych host pilnuje sam. Modul nie przeszukuje dysku, wiec pusta
 	// lista oznacza brak wskazanych plikow, a nie host bez certyfikatow.
