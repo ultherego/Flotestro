@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -116,7 +117,17 @@ func (z *Zrodlo) Pobierz(ctx context.Context, wydania []string,
 		}
 	}
 
-	ustalenia, err := Parsuj(io.LimitReader(odpowiedz.Body, MaksymalnyRozmiar), wydania)
+	// Czytamy o bajt wiecej niz wolno: gdyby odpowiedz byla wieksza, obciety
+	// strumien konczylby sie w srodku danych. Parser zglosilby wtedy blad,
+	// ale nie kazdy blad da sie odroznic od bledu skladni - a zrzut przyciety
+	// w polowie ma wygladac na to, czym jest.
+	licznik := &licznikBajtow{zrodlo: io.LimitReader(odpowiedz.Body, MaksymalnyRozmiar+1)}
+	ustalenia, err := Parsuj(licznik, wydania)
+	if licznik.przeczytane > MaksymalnyRozmiar {
+		return snapshot, nil, fmt.Errorf(
+			"zrzut trackera przekracza %d bajtow - to nie jest zrzut, ktorego oczekujemy",
+			MaksymalnyRozmiar)
+	}
 	if err != nil {
 		return snapshot, nil, err
 	}
@@ -124,6 +135,18 @@ func (z *Zrodlo) Pobierz(ctx context.Context, wydania []string,
 	snapshot.AdvisoryCount = len(ustalenia)
 	snapshot.FetchedAt = time.Now().UTC()
 	return snapshot, ustalenia, nil
+}
+
+// licznikBajtow liczy, ile naprawde przeczytano ze strumienia.
+type licznikBajtow struct {
+	zrodlo      io.Reader
+	przeczytane int64
+}
+
+func (l *licznikBajtow) Read(bufor []byte) (int, error) {
+	ile, err := l.zrodlo.Read(bufor)
+	l.przeczytane += int64(ile)
+	return ile, err
 }
 
 // Parsuj czyta zrzut strumieniowo i zwraca ustalenia dla wskazanych wydan.
@@ -137,8 +160,12 @@ func Parsuj(zrodlo io.Reader, wydania []string) ([]vuln.Advisory, error) {
 	}
 
 	dekoder := json.NewDecoder(zrodlo)
-	if _, err := dekoder.Token(); err != nil {
+	otwarcie, err := dekoder.Token()
+	if err != nil {
 		return nil, fmt.Errorf("zrzut trackera: %w", err)
+	}
+	if otwarcie != json.Delim('{') {
+		return nil, fmt.Errorf("zrzut trackera zaczyna sie od %v, a nie od obiektu", otwarcie)
 	}
 
 	var ustalenia []vuln.Advisory
@@ -164,6 +191,22 @@ func Parsuj(zrodlo io.Reader, wydania []string) ([]vuln.Advisory, error) {
 			}
 		}
 	}
+
+	// Zamkniecie obiektu i koniec strumienia sprawdzamy jawnie. Strumien
+	// urwany w polowie konczy sie po prostu brakiem kolejnego klucza - petla
+	// wychodzi cicho, a panel dostaje polowe zrzutu jako komplet i uznaje
+	// brakujace ustalenia za nieistniejace.
+	zamkniecie, err := dekoder.Token()
+	if err != nil {
+		return nil, fmt.Errorf("zrzut trackera urwany przed zamknieciem: %w", err)
+	}
+	if zamkniecie != json.Delim('}') {
+		return nil, fmt.Errorf("zrzut trackera konczy sie %v, a nie zamknieciem obiektu", zamkniecie)
+	}
+	if _, err := dekoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("zrzut trackera ma dane po zamknieciu obiektu")
+	}
+
 	sort.Slice(ustalenia, func(i, j int) bool {
 		if ustalenia[i].SourcePackage != ustalenia[j].SourcePackage {
 			return ustalenia[i].SourcePackage < ustalenia[j].SourcePackage

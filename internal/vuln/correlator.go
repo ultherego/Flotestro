@@ -23,8 +23,14 @@ type Wejscie struct {
 	Distribution string
 	Release      string
 	Packages     []packages.InstalledPackage
-	// InventoryDigest wiaze ocene z konkretnym obrazem listy pakietow.
+	// InventoryDigest wiaze ocene z konkretnym obrazem listy pakietow,
+	// a AdvisoryDigest - z konkretnym zestawem ustalen producenta.
 	InventoryDigest string
+	AdvisoryDigest  string
+	// AdvisoriesReason mowi, dlaczego nie ma ustalen producenta albo dlaczego
+	// sa stare. Dotyczy dystrybucji, dla ktorych rozstrzygaja metadane
+	// repozytoriow samego hosta.
+	AdvisoriesReason string
 	// ListaNieaktualna oznacza, ze host zglasza inny odcisk listy niz ten,
 	// ktory panel ma u siebie.
 	ListaNieaktualna bool
@@ -59,9 +65,11 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 		HostID: wejscie.HostID, Hostname: wejscie.Hostname,
 		Distribution: wejscie.Distribution, Release: wejscie.Release,
 		Provider: snapshot.Provider, SnapshotDigest: snapshot.Digest,
-		InventoryDigest: wejscie.InventoryDigest,
-		PackagesTotal:   len(wejscie.Packages),
-		EvaluatedAt:     &teraz,
+		InventoryDigest:  wejscie.InventoryDigest,
+		AdvisoryDigest:   wejscie.AdvisoryDigest,
+		AdvisoriesReason: wejscie.AdvisoriesReason,
+		PackagesTotal:    len(wejscie.Packages),
+		EvaluatedAt:      &teraz,
 	}
 
 	// Kolejnosc powodow ma znaczenie: mowimy o najpowazniejszej przeszkodzie,
@@ -69,6 +77,12 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 	switch {
 	case wejscie.BrakListy:
 		stan.CoverageReason = RodzajBrakListy
+		return Ocena{Stan: stan}
+	case wejscie.AdvisoriesReason != "" && wejscie.AdvisoriesReason != RodzajUstaleniaNieswieze:
+		// Host, ktorego metadanych repozytoriow panel nie odczytal, nie jest
+		// hostem bez ustalen producenta: jest hostem, o ktorym nikt nie
+		// sprawdzil, czy jakies ma.
+		stan.CoverageReason = wejscie.AdvisoriesReason
 		return Ocena{Stan: stan}
 	case snapshot.Digest == "":
 		stan.CoverageReason = RodzajBrakFeedu
@@ -84,6 +98,9 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 	}
 	if wejscie.ListaNieaktualna && stan.CoverageReason == "" {
 		stan.CoverageReason = RodzajListaNieaktualna
+	}
+	if wejscie.AdvisoriesReason != "" && stan.CoverageReason == "" {
+		stan.CoverageReason = wejscie.AdvisoriesReason
 	}
 
 	var wynik []Assessment
@@ -117,16 +134,29 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 		}
 	}
 
+	// Liczniki unikatow: jedno advisory niesie kilka CVE i kilka pakietow,
+	// wiec "1354 znalezisk" nie mowi, ile to naprawde roznych spraw.
+	pakiety := map[string]bool{}
+	sprawy := map[string]bool{}
+	cve := map[string]bool{}
 	for _, ustalenie := range wynik {
 		switch ustalenie.State {
 		case StateAffected:
 			stan.Affected++
+			pakiety[ustalenie.BinaryPackage+"\x1f"+ustalenie.Architecture+"\x1f"+
+				ustalenie.InstalledVersion] = true
+			if ustalenie.AdvisoryID != "" {
+				sprawy[ustalenie.AdvisoryID] = true
+			}
+			for _, numer := range ustalenie.CVEIDs {
+				cve[numer] = true
+			}
 			// Podatnosc z poprawka jest do zainstalowania dzis; podatnosc bez
 			// poprawki jest do oceny ryzyka. Sklejone w jedna liczbe daja
 			// sciane, ktorej nikt nie przeczyta - a w niej gina te, ktore
 			// naprawde da sie zamknac.
-			if ustalenie.FixedVersion != "" {
-				stan.AffectedFixable++
+			if ustalenie.VendorFix == VendorFixKnown {
+				stan.AffectedWithVendorFix++
 			} else {
 				stan.AffectedNoFix++
 			}
@@ -134,22 +164,35 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 			stan.Unknown++
 		}
 	}
+	stan.AffectedPackages = len(pakiety)
+	stan.UniqueAdvisories = len(sprawy)
+	stan.UniqueCVEs = len(cve)
 	return Ocena{Findings: wynik, Stan: stan}
 }
 
 // ocenPakiet rozstrzyga jeden pakiet wobec jednego ustalenia producenta.
 func ocenPakiet(wejscie Wejscie, snapshot Snapshot, pakiet packages.InstalledPackage,
 	ustalenie Advisory, teraz time.Time) Assessment {
+	wersjaPorownania, podstawa := WersjaPorownania(pakiet, wejscie.Distribution)
 	ocena := Assessment{
 		HostID: wejscie.HostID, InventoryDigest: wejscie.InventoryDigest,
-		Provider: ustalenie.Provider, SnapshotDigest: snapshot.Digest,
+		AdvisoryDigest: wejscie.AdvisoryDigest,
+		Provider:       ustalenie.Provider, SnapshotDigest: snapshot.Digest,
 		AdvisoryID: ustalenie.AdvisoryID, CVEIDs: ustalenie.CVEIDs,
 		Distribution: wejscie.Distribution, Release: wejscie.Release,
 		SourcePackage: ustalenie.SourcePackage, BinaryPackage: pakiet.Name,
-		Architecture: pakiet.Architecture, InstalledVersion: WersjaPakietu(pakiet, wejscie.Distribution),
+		Architecture:      pakiet.Architecture,
+		InstalledVersion:  WersjaPakietu(pakiet, wejscie.Distribution),
+		ComparisonVersion: wersjaPorownania, ComparisonBasis: podstawa,
 		FixedVersion: ustalenie.FixedVersion, VendorSeverity: ustalenie.VendorSeverity,
 		ComparatorVersion: WersjaKomparatora, EvaluatedAt: teraz,
-		Remediation: RemediationUnknown,
+		PackageOrigin:       KlasaPochodzenia(pakiet, wejscie.Distribution),
+		VendorFix:           VendorFixUnknown,
+		RepositoryCandidate: CandidateUnknown,
+		// Czy transakcje da sie wykonac, wie wylacznie plan pakietowy hosta:
+		// on widzi wstrzymania, wykluczenia i konflikty. Dopoki go nie ma,
+		// panel nie ma prawa niczego obiecywac.
+		Transaction: TransactionUnknown,
 	}
 
 	switch ustalenie.Status {
@@ -165,31 +208,31 @@ func ocenPakiet(wejscie Wejscie, snapshot Snapshot, pakiet packages.InstalledPac
 		// Podatnosc bez poprawki: pakiet jest podatny i nie ma czym tego
 		// naprawic. To wazniejsza wiadomosc niz podatnosc z poprawka.
 		ocena.State = StateAffected
-		ocena.Remediation = RemediationUnavailable
+		ocena.VendorFix = VendorFixUnavailable
+		ocena.RepositoryCandidate = CandidateAbsent
 		return ocena
 	}
 
 	if ustalenie.FixedVersion == "" {
 		ocena.State = StateAffected
-		ocena.Remediation = RemediationUnavailable
+		ocena.VendorFix = VendorFixUnavailable
+		ocena.RepositoryCandidate = CandidateAbsent
 		return ocena
 	}
-	wynik, ok := Porownaj(wejscie.Distribution, ocena.InstalledVersion, ustalenie.FixedVersion)
+	wynik, ok := Porownaj(wejscie.Distribution, wersjaPorownania, ustalenie.FixedVersion)
 	if !ok {
 		ocena.State = StateUnknown
 		ocena.ReasonCode = RodzajWersjaNieczytelna
 		return ocena
 	}
+	ocena.VendorFix = VendorFixKnown
 	if wynik < 0 {
 		ocena.State = StateAffected
-		// Czy poprawke da sie zainstalowac teraz, rozstrzyga plan pakietowy
-		// hosta: advisory mowi tylko, ze taka wersja istnieje. Wyjatkiem jest
-		// ustalenie odczytane z metadanych samego hosta - wtedy poprawka lezy
-		// w repozytorium, z ktorego host bierze pakiety, i to jest odpowiedz,
-		// a nie domysl.
-		ocena.Remediation = RemediationUnknown
+		// Ustalenie odczytane z metadanych samego hosta znaczy, ze poprawka
+		// jest widoczna w repozytorium, z ktorego host bierze pakiety. To
+		// nadal nie znaczy, ze transakcja przejdzie - o tym mowi plan.
 		if ustalenie.FromHostRepositories {
-			ocena.Remediation = RemediationAvailable
+			ocena.RepositoryCandidate = CandidateVisible
 		}
 		return ocena
 	}
@@ -208,30 +251,47 @@ func ustalenieNieznane(wejscie Wejscie, snapshot Snapshot, pakiet packages.Insta
 		Architecture:     pakiet.Architecture,
 		InstalledVersion: WersjaPakietu(pakiet, wejscie.Distribution),
 		State:            StateUnknown, ReasonCode: powod,
-		Remediation: RemediationUnknown, ComparatorVersion: WersjaKomparatora,
-		EvaluatedAt: teraz,
+		VendorFix: VendorFixUnknown, RepositoryCandidate: CandidateUnknown,
+		Transaction: TransactionUnknown, ComparatorVersion: WersjaKomparatora,
+		PackageOrigin:  KlasaPochodzenia(pakiet, wejscie.Distribution),
+		AdvisoryDigest: wejscie.AdvisoryDigest, EvaluatedAt: teraz,
 	}
 }
 
-// PowodPominiecia mowi, dlaczego pakiet nie podlega ocenie producenta.
+// KlasaPochodzenia mowi, czyj jest pakiet.
 //
-// Pakiet przebudowany lokalnie albo pobrany z obcego repozytorium ma wersje,
-// ktorej producent dystrybucji nie zna. Udawanie, ze ustalenia dotycza takiego
-// pakietu, dawaloby falszywe alarmy albo - gorzej - falszywe "bezpieczny".
+// Producent dystrybucji ma prawo wypowiadac sie wylacznie o swoich pakietach.
+// Pakiet z obcego repozytorium albo zbudowany lokalnie ma wersje, ktorej jego
+// ustalenia nie opisuja - liczenie takiego pakietu jako objetego dawaloby
+// pokrycie "sto procent" tam, gdzie panel nie wie nic.
+func KlasaPochodzenia(pakiet packages.InstalledPackage, dystrybucja string) string {
+	if rodzinaRPM(dystrybucja) {
+		// RPM niesie producenta w metadanych pakietu.
+		switch {
+		case pakiet.Vendor == "":
+			return PochodzenieNieznane
+		case producentDystrybucji(pakiet.Vendor, dystrybucja):
+			return PochodzenieDystrybucja
+		default:
+			return PochodzenieObce
+		}
+	}
+	// APT nie zapisuje producenta przy pakiecie: pochodzenie bierze sie
+	// z repozytorium, z ktorego wersja przyszla, i zbiera je agent.
+	switch pakiet.OriginClass {
+	case PochodzenieDystrybucja, PochodzenieObce, PochodzenieLokalne:
+		return pakiet.OriginClass
+	}
+	return PochodzenieNieznane
+}
+
+// PowodPominiecia mowi, dlaczego pakiet nie podlega ocenie producenta.
 func PowodPominiecia(pakiet packages.InstalledPackage, dystrybucja string) string {
 	if zrodloPakietu(pakiet) == "" {
 		return RodzajBrakZrodla
 	}
-	switch dystrybucja {
-	case "fedora", "rhel", "centos", "almalinux", "rocky":
-		// RPM niesie producenta w metadanych: pakiet spoza dystrybucji
-		// rozpoznajemy po nim, a nie po nazwie.
-		if pakiet.Vendor == "" {
-			return RodzajPochodzenieNieznane
-		}
-		if !producentDystrybucji(pakiet.Vendor, dystrybucja) {
-			return RodzajPochodzenieNieznane
-		}
+	if KlasaPochodzenia(pakiet, dystrybucja) != PochodzenieDystrybucja {
+		return RodzajPochodzenieNieznane
 	}
 	return ""
 }
@@ -273,13 +333,40 @@ func zrodloPakietu(pakiet packages.InstalledPackage) string {
 	return pakiet.Name
 }
 
-// WersjaPakietu sklada wersje pakietu w postaci uzywanej przez dystrybucje.
+// WersjaPakietu sklada wersje pakietu binarnego - te, ktora widzi operator.
 func WersjaPakietu(pakiet packages.InstalledPackage, dystrybucja string) string {
 	if rodzinaRPM(dystrybucja) {
 		return pakiet.EVR()
 	}
 	return pakiet.WersjaDeb()
 }
+
+// WersjaPorownania zwraca wersje, ktora nalezy porownac z ustaleniem, oraz to,
+// skad ona pochodzi.
+//
+// Debian i Ubuntu prowadza bezpieczenstwo po pakiecie zrodlowym i podaja
+// wersje zrodlowa - a wersja binarna bywa inna: przebudowa binarna dokleja
+// sufiks ("+b9"), wiec binarna jest wyzsza od zrodlowej przy tym samym kodzie.
+// Porownanie binarnej z ustaleniem zrodlowym potrafi wiec uznac pakiet za
+// naprawiony, choc poprawki w nim nie ma.
+//
+// Gdy wersji zrodlowej nie znamy, porownujemy binarna i mowimy o tym wprost:
+// to jest przyblizenie, a nie ta sama odpowiedz.
+func WersjaPorownania(pakiet packages.InstalledPackage, dystrybucja string) (string, string) {
+	if rodzinaRPM(dystrybucja) {
+		return pakiet.EVR(), PodstawaBinarna
+	}
+	if pakiet.SourceVersion != "" {
+		return pakiet.SourceVersion, PodstawaZrodlowa
+	}
+	return pakiet.WersjaDeb(), PodstawaBinarna
+}
+
+// Podstawy porownania wersji.
+const (
+	PodstawaZrodlowa = "source"
+	PodstawaBinarna  = "binary"
+)
 
 // Porownaj porownuje wersje regulami wlasciwymi dla dystrybucji.
 func Porownaj(dystrybucja, zainstalowana, naprawiona string) (int, bool) {

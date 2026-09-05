@@ -13,10 +13,15 @@ type Ustalenie = {
   binary_package?: string;
   architecture?: string;
   installed_version?: string;
+  comparison_version?: string;
+  comparison_basis?: string;
   fixed_version?: string;
   state: string;
   reason_code?: string;
-  remediation: string;
+  vendor_fix: string;
+  repository_candidate: string;
+  transaction: string;
+  package_origin?: string;
   vendor_severity?: string;
   comparator_version?: string;
   evaluated_at: string;
@@ -28,19 +33,31 @@ type StanOceny = {
   provider?: string;
   snapshot_digest?: string;
   inventory_digest?: string;
+  advisory_digest?: string;
   packages_total: number;
   packages_covered: number;
   affected: number;
-  affected_fixable: number;
+  affected_with_vendor_fix: number;
   affected_no_fix: number;
   unknown: number;
+  affected_packages: number;
+  unique_advisories: number;
+  unique_cves: number;
   coverage_reason?: string;
+  advisories_reason?: string;
   evaluated_at?: string;
 };
 
 type StanListy = {
   digest?: string;
   package_count: number;
+  collected_at?: string;
+  unavailable_reason?: string;
+};
+
+type StanUstalen = {
+  digest?: string;
+  advisory_count: number;
   collected_at?: string;
   unavailable_reason?: string;
 };
@@ -59,9 +76,11 @@ type Raport = {
   state: StanOceny;
   findings: Ustalenie[];
   package_state: StanListy;
+  advisory_state: StanUstalen;
   snapshot?: Snapshot;
   snapshot_stale: boolean;
   coverage_percent: number;
+  fully_assessed: boolean;
 };
 
 /** Powody, dla ktorych ocena jest niepelna - w jezyku operatora, nie kodow. */
@@ -76,6 +95,9 @@ const powody: Record<string, string> = {
   distribution_eol: "this release is past end of life",
   package_list_missing: "the panel has not collected the package list yet",
   package_list_stale: "the package list is older than what the host reports",
+  host_advisories_missing: "the panel has not read this host's repository metadata yet",
+  host_advisories_unreadable: "this host's repository metadata could not be read",
+  host_advisories_stale: "the vendor advisories are older than the refresh policy",
 };
 
 function opisPowodu(kod?: string) {
@@ -144,11 +166,14 @@ export function Podatnosci() {
       </p>
 
       <div className="filtry">
-        <span className="znacznik blad">{stan?.affected_fixable ?? 0} fixable</span>
+        <span className="znacznik blad">{stan?.affected_with_vendor_fix ?? 0} with a vendor fix</span>
         <span className="znacznik uwaga">{stan?.affected_no_fix ?? 0} no fix from vendor</span>
         <span className="znacznik nieznany">{stan?.unknown ?? 0} not established</span>
-        <span className={`znacznik ${(dane?.coverage_percent ?? 0) >= 99 ? "ok" : "uwaga"}`}>
-          {Math.round(dane?.coverage_percent ?? 0)}% of packages covered
+        {/* Pokrycie zaokraglone do calosci zamienialo 99,7% w "100%" - czyli
+            "wszystko sprawdzone" tam, gdzie kilkadziesiat pakietow zostalo
+            poza ocena. Kompletna ocena ma tu wlasna, jawna odpowiedz. */}
+        <span className={`znacznik ${dane?.fully_assessed ? "ok" : "uwaga"}`}>
+          {(dane?.coverage_percent ?? 0).toFixed(1)}% of packages covered
         </span>
         <button className="wtorny" disabled={odswiez.isPending || host.connection_state !== "online"}
                 onClick={() => odswiez.mutate()}>
@@ -156,6 +181,12 @@ export function Podatnosci() {
         </button>
       </div>
       {komunikat && <p className="zrodlo" style={{ marginBottom: 12 }}>{komunikat}</p>}
+      <p className="zrodlo">
+        {stan?.unique_cves ?? 0} distinct CVEs · {stan?.unique_advisories ?? 0} vendor
+        advisories · {stan?.affected_packages ?? 0} installed packages to move.
+        One advisory carries several CVEs and touches several packages, so these
+        never add up — and each answers a different question.
+      </p>
 
       {stan?.coverage_reason && (
         <p className="ostrzezenie">
@@ -196,7 +227,8 @@ export function Podatnosci() {
           <thead>
             <tr>
               <th>Severity</th><th>Advisory</th><th>Package</th>
-              <th>Installed</th><th>Fixed in</th><th>Remediation</th>
+              <th>Installed</th><th>Compared</th><th>Fixed in</th>
+              <th>Vendor fix</th><th>In repositories</th>
             </tr>
           </thead>
           <tbody>
@@ -216,16 +248,36 @@ export function Podatnosci() {
                   )}
                 </td>
                 <td className="zrodlo">{pozycja.installed_version}</td>
+                {/* Debian rozstrzyga po pakiecie zrodlowym, a wersja binarna
+                    bywa z innej numeracji. Pokazujemy obie, zeby bylo widac,
+                    co naprawde porownano. */}
+                <td className="zrodlo">
+                  {pozycja.comparison_version || "—"}
+                  {pozycja.comparison_basis && (
+                    <div className="zrodlo">{pozycja.comparison_basis}</div>
+                  )}
+                </td>
                 <td className="zrodlo">
                   {pozycja.fixed_version || <span className="znacznik uwaga">no fix</span>}
                 </td>
                 <td>
                   {pozycja.state === "unknown" ? (
                     <span className="znacznik nieznany">{opisPowodu(pozycja.reason_code)}</span>
-                  ) : pozycja.remediation === "available" ? (
-                    <span className="znacznik ok">in this host's repositories</span>
-                  ) : pozycja.remediation === "unavailable" ? (
-                    <span className="znacznik uwaga">vendor has no fix</span>
+                  ) : pozycja.vendor_fix === "known" ? (
+                    <span className="znacznik ok">published</span>
+                  ) : pozycja.vendor_fix === "unavailable" ? (
+                    <span className="znacznik uwaga">none</span>
+                  ) : (
+                    <span className="znacznik nieznany">not known</span>
+                  )}
+                </td>
+                <td>
+                  {/* Trzecia os - czy transakcja przejdzie - nalezy do planu
+                      pakietowego, wiec panel jej tu nie obiecuje. */}
+                  {pozycja.repository_candidate === "visible" ? (
+                    <span className="znacznik ok">visible here</span>
+                  ) : pozycja.repository_candidate === "absent" ? (
+                    <span className="znacznik uwaga">not offered</span>
                   ) : (
                     <span className="znacznik">plan an update to find out</span>
                   )}
@@ -268,6 +320,22 @@ export function Podatnosci() {
               read <Czas wartosc={dane?.package_state.collected_at} />
               {dane?.package_state.unavailable_reason && (
                 <div className="zrodlo">{dane.package_state.unavailable_reason}</div>
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td>Vendor advisories</td>
+            <td>
+              {dane?.advisory_state.collected_at ? (
+                <>
+                  {dane.advisory_state.advisory_count} advisories,
+                  read <Czas wartosc={dane.advisory_state.collected_at} />
+                </>
+              ) : (
+                <span className="znacznik nieznany">not read yet</span>
+              )}
+              {dane?.advisory_state.unavailable_reason && (
+                <div className="zrodlo">{opisPowodu(dane.advisory_state.unavailable_reason)}</div>
               )}
             </td>
           </tr>

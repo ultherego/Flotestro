@@ -214,16 +214,21 @@ func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
 				ustalenie.Distribution, ustalenie.Release, ustalenie.SourcePackage,
 				ustalenie.BinaryPackage, ustalenie.Architecture, ustalenie.InstalledVersion,
 				ustalenie.FixedVersion, string(ustalenie.State), ustalenie.ReasonCode,
-				string(ustalenie.Remediation), ustalenie.VendorSeverity,
-				ustalenie.SnapshotDigest, ustalenie.InventoryDigest,
+				string(ustalenie.VendorFix), string(ustalenie.RepositoryCandidate),
+				string(ustalenie.Transaction), ustalenie.ComparisonVersion,
+				ustalenie.ComparisonBasis, ustalenie.PackageOrigin,
+				ustalenie.VendorSeverity, ustalenie.SnapshotDigest,
+				ustalenie.InventoryDigest, ustalenie.AdvisoryDigest,
 				ustalenie.ComparatorVersion, ustalenie.EvaluatedAt,
 			})
 		}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"vuln_findings"}, []string{
 			"host_id", "provider", "advisory_id", "cve_ids", "distribution", "release",
 			"source_package", "binary_package", "architecture", "installed_version",
-			"fixed_version", "state", "reason_code", "remediation", "vendor_severity",
-			"snapshot_digest", "inventory_digest", "comparator_version", "evaluated_at",
+			"fixed_version", "state", "reason_code", "vendor_fix", "repository_candidate",
+			"transaction_state", "comparison_version", "comparison_basis", "package_origin",
+			"vendor_severity", "snapshot_digest", "inventory_digest", "advisory_digest",
+			"comparator_version", "evaluated_at",
 		}, pgx.CopyFromRows(wiersze)); err != nil {
 			return fmt.Errorf("zapis ustalen hosta: %w", err)
 		}
@@ -231,23 +236,35 @@ func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
 
 	const zapisStanu = `
 		insert into vuln_host_state (host_id, distribution, release, provider,
-		                             snapshot_digest, inventory_digest, packages_total,
-		                             packages_covered, affected, affected_fixable,
-		                             affected_no_fix, unknown, coverage_reason, evaluated_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		                             snapshot_digest, inventory_digest, advisory_digest,
+		                             packages_total, packages_covered, affected,
+		                             affected_with_vendor_fix, affected_no_fix, unknown,
+		                             affected_packages, unique_advisories, unique_cves,
+		                             coverage_reason, advisories_reason, evaluated_at)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+		        $17, $18, $19)
 		on conflict (host_id) do update set
 			distribution = excluded.distribution, release = excluded.release,
 			provider = excluded.provider, snapshot_digest = excluded.snapshot_digest,
 			inventory_digest = excluded.inventory_digest,
+			advisory_digest = excluded.advisory_digest,
 			packages_total = excluded.packages_total,
 			packages_covered = excluded.packages_covered,
-			affected = excluded.affected, affected_fixable = excluded.affected_fixable,
+			affected = excluded.affected,
+			affected_with_vendor_fix = excluded.affected_with_vendor_fix,
 			affected_no_fix = excluded.affected_no_fix, unknown = excluded.unknown,
-			coverage_reason = excluded.coverage_reason, evaluated_at = excluded.evaluated_at`
+			affected_packages = excluded.affected_packages,
+			unique_advisories = excluded.unique_advisories,
+			unique_cves = excluded.unique_cves,
+			coverage_reason = excluded.coverage_reason,
+			advisories_reason = excluded.advisories_reason,
+			evaluated_at = excluded.evaluated_at`
 	if _, err := tx.Exec(ctx, zapisStanu, hostID, stan.Distribution, stan.Release,
-		stan.Provider, stan.SnapshotDigest, stan.InventoryDigest, stan.PackagesTotal,
-		stan.PackagesCovered, stan.Affected, stan.AffectedFixable, stan.AffectedNoFix,
-		stan.Unknown, stan.CoverageReason, stan.EvaluatedAt); err != nil {
+		stan.Provider, stan.SnapshotDigest, stan.InventoryDigest, stan.AdvisoryDigest,
+		stan.PackagesTotal, stan.PackagesCovered, stan.Affected, stan.AffectedWithVendorFix,
+		stan.AffectedNoFix, stan.Unknown, stan.AffectedPackages, stan.UniqueAdvisories,
+		stan.UniqueCVEs, stan.CoverageReason, stan.AdvisoriesReason,
+		stan.EvaluatedAt); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -258,8 +275,10 @@ func (s *Store) Ustalenia(ctx context.Context, hostID string, tylkoPodatne bool)
 	const query = `
 		select provider, advisory_id, cve_ids, distribution, release, source_package,
 		       binary_package, architecture, installed_version, fixed_version, state,
-		       reason_code, remediation, vendor_severity, snapshot_digest, inventory_digest,
-		       comparator_version, evaluated_at
+		       reason_code, vendor_fix, repository_candidate, transaction_state,
+		       comparison_version, comparison_basis, package_origin, vendor_severity,
+		       snapshot_digest, inventory_digest, advisory_digest, comparator_version,
+		       evaluated_at
 		from vuln_findings
 		where host_id = $1 and ($2 = false or state = 'affected')
 		order by case vendor_severity
@@ -275,18 +294,22 @@ func (s *Store) Ustalenia(ctx context.Context, hostID string, tylkoPodatne bool)
 	var wynik []Assessment
 	for rows.Next() {
 		var ustalenie Assessment
-		var stan, naprawa string
+		var stan, poprawka, kandydat, transakcja string
 		if err := rows.Scan(&ustalenie.Provider, &ustalenie.AdvisoryID, &ustalenie.CVEIDs,
 			&ustalenie.Distribution, &ustalenie.Release, &ustalenie.SourcePackage,
 			&ustalenie.BinaryPackage, &ustalenie.Architecture, &ustalenie.InstalledVersion,
-			&ustalenie.FixedVersion, &stan, &ustalenie.ReasonCode, &naprawa,
-			&ustalenie.VendorSeverity, &ustalenie.SnapshotDigest, &ustalenie.InventoryDigest,
+			&ustalenie.FixedVersion, &stan, &ustalenie.ReasonCode, &poprawka, &kandydat,
+			&transakcja, &ustalenie.ComparisonVersion, &ustalenie.ComparisonBasis,
+			&ustalenie.PackageOrigin, &ustalenie.VendorSeverity, &ustalenie.SnapshotDigest,
+			&ustalenie.InventoryDigest, &ustalenie.AdvisoryDigest,
 			&ustalenie.ComparatorVersion, &ustalenie.EvaluatedAt); err != nil {
 			return nil, err
 		}
 		ustalenie.HostID = hostID
 		ustalenie.State = AssessmentState(stan)
-		ustalenie.Remediation = RemediationState(naprawa)
+		ustalenie.VendorFix = VendorFixState(poprawka)
+		ustalenie.RepositoryCandidate = RepositoryCandidateState(kandydat)
+		ustalenie.Transaction = TransactionState(transakcja)
 		wynik = append(wynik, ustalenie)
 	}
 	return wynik, rows.Err()
@@ -301,19 +324,45 @@ type StanHosta struct {
 	Provider        string `json:"provider,omitempty"`
 	SnapshotDigest  string `json:"snapshot_digest,omitempty"`
 	InventoryDigest string `json:"inventory_digest,omitempty"`
+	// AdvisoryDigest wiaze ocene z zestawem ustalen producenta. To osobne
+	// zrodlo niz lista pakietow i zmienia sie niezaleznie od niej.
+	AdvisoryDigest  string `json:"advisory_digest,omitempty"`
 	PackagesTotal   int    `json:"packages_total"`
 	PackagesCovered int    `json:"packages_covered"`
 	Affected        int    `json:"affected"`
-	// AffectedFixable i AffectedNoFix rozdzielaja to, co da sie zalatac, od
-	// tego, czego producent nie naprawil. To sa dwie rozne decyzje operatora,
-	// a sklejone w jedna liczbe daja sciane, ktorej nikt nie przeczyta.
-	AffectedFixable int `json:"affected_fixable"`
-	AffectedNoFix   int `json:"affected_no_fix"`
-	Unknown         int `json:"unknown"`
+	// AffectedWithVendorFix i AffectedNoFix rozdzielaja to, na co producent
+	// wydal poprawke, od tego, czego nie naprawil. To sa dwie rozne decyzje
+	// operatora, a sklejone w jedna liczbe daja sciane, ktorej nikt nie
+	// przeczyta. Uwaga: "producent wydal poprawke" to jeszcze nie znaczy, ze
+	// host ja widzi - o tym mowi osobna os przy kazdym znalezisku.
+	AffectedWithVendorFix int `json:"affected_with_vendor_fix"`
+	AffectedNoFix         int `json:"affected_no_fix"`
+	Unknown               int `json:"unknown"`
+	// Trzy liczniki tego samego zbioru, bo to trzy rozne pytania: ile
+	// pakietow trzeba ruszyc, ile spraw producenta zamknac i ilu CVE to
+	// dotyczy. Jedno advisory niesie kilka CVE i kilka pakietow, wiec te
+	// liczby nigdy sie nie zgadzaja - i o to chodzi.
+	AffectedPackages int `json:"affected_packages"`
+	UniqueAdvisories int `json:"unique_advisories"`
+	UniqueCVEs       int `json:"unique_cves"`
 	// CoverageReason mowi, dlaczego ocena jest niepelna. Pusty oznacza pelne
 	// pokrycie; kazdy inny stan musi byc widoczny obok liczby znalezisk.
-	CoverageReason string     `json:"coverage_reason,omitempty"`
-	EvaluatedAt    *time.Time `json:"evaluated_at,omitempty"`
+	CoverageReason string `json:"coverage_reason,omitempty"`
+	// AdvisoriesReason mowi, dlaczego nie ma ustalen producenta. Blad odczytu
+	// metadanych nie moze wygladac jak host bez ustalen.
+	AdvisoriesReason string     `json:"advisories_reason,omitempty"`
+	EvaluatedAt      *time.Time `json:"evaluated_at,omitempty"`
+}
+
+// PelnaOcena mowi, czy ocena tego hosta jest kompletna.
+//
+// Kompletna znaczy trzy rzeczy naraz: nie bylo przeszkody w pokryciu, feed
+// objal wszystkie pakiety hosta i zaden z nich nie zostal nieustalony. Sam
+// pusty powod nie wystarczy - host z jednym pakietem spoza dystrybucji ma
+// ocene niepelna, choc nic jej nie zablokowalo.
+func (s StanHosta) PelnaOcena() bool {
+	return s.EvaluatedAt != nil && s.CoverageReason == "" &&
+		s.PackagesTotal > 0 && s.PackagesCovered == s.PackagesTotal && s.Unknown == 0
 }
 
 // Pokrycie liczy udzial pakietow objetych feedem.
@@ -324,6 +373,31 @@ func (s StanHosta) Pokrycie() float64 {
 	return float64(s.PackagesCovered) / float64(s.PackagesTotal)
 }
 
+// Unikaty liczy rozne sprawy w zbiorze hostow.
+//
+// Rozne, a nie zsumowane: to samo CVE na dwudziestu hostach jest jedna sprawa
+// producenta i dwudziestoma hostami do ruszenia. Suma licznikow hostow miesza
+// jedno z drugim i daje liczbe, ktora nie odpowiada na zadne pytanie.
+type Unikatowe struct {
+	CVE        int `json:"unique_cves"`
+	Advisories int `json:"unique_advisories"`
+}
+
+// Unikaty zwraca liczbe roznych CVE i roznych ustalen wsrod znalezisk.
+func (s *Store) Unikaty(ctx context.Context, hostIDs []string) (Unikatowe, error) {
+	var wynik Unikatowe
+	if len(hostIDs) == 0 {
+		return wynik, nil
+	}
+	const query = `
+		select coalesce(count(distinct cve), 0), count(distinct advisory_id)
+		from vuln_findings
+		left join lateral unnest(cve_ids) as cve on true
+		where host_id = any($1) and state = 'affected'`
+	err := s.pool.QueryRow(ctx, query, hostIDs).Scan(&wynik.CVE, &wynik.Advisories)
+	return wynik, err
+}
+
 // StanyHostow zwraca stan oceny wielu hostow.
 func (s *Store) StanyHostow(ctx context.Context, hostIDs []string) (map[string]StanHosta, error) {
 	wynik := map[string]StanHosta{}
@@ -332,8 +406,10 @@ func (s *Store) StanyHostow(ctx context.Context, hostIDs []string) (map[string]S
 	}
 	const query = `
 		select host_id::text, distribution, release, provider, snapshot_digest,
-		       inventory_digest, packages_total, packages_covered, affected,
-		       affected_fixable, affected_no_fix, unknown, coverage_reason, evaluated_at
+		       inventory_digest, advisory_digest, packages_total, packages_covered,
+		       affected, affected_with_vendor_fix, affected_no_fix, unknown,
+		       affected_packages, unique_advisories, unique_cves, coverage_reason,
+		       advisories_reason, evaluated_at
 		from vuln_host_state where host_id = any($1)`
 	rows, err := s.pool.Query(ctx, query, hostIDs)
 	if err != nil {
@@ -343,9 +419,11 @@ func (s *Store) StanyHostow(ctx context.Context, hostIDs []string) (map[string]S
 	for rows.Next() {
 		var stan StanHosta
 		if err := rows.Scan(&stan.HostID, &stan.Distribution, &stan.Release, &stan.Provider,
-			&stan.SnapshotDigest, &stan.InventoryDigest, &stan.PackagesTotal,
-			&stan.PackagesCovered, &stan.Affected, &stan.AffectedFixable, &stan.AffectedNoFix,
-			&stan.Unknown, &stan.CoverageReason, &stan.EvaluatedAt); err != nil {
+			&stan.SnapshotDigest, &stan.InventoryDigest, &stan.AdvisoryDigest,
+			&stan.PackagesTotal, &stan.PackagesCovered, &stan.Affected,
+			&stan.AffectedWithVendorFix, &stan.AffectedNoFix, &stan.Unknown,
+			&stan.AffectedPackages, &stan.UniqueAdvisories, &stan.UniqueCVEs,
+			&stan.CoverageReason, &stan.AdvisoriesReason, &stan.EvaluatedAt); err != nil {
 			return nil, err
 		}
 		wynik[stan.HostID] = stan

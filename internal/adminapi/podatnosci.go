@@ -27,14 +27,21 @@ type raportPodatnosci struct {
 	HostID   string            `json:"host_id"`
 	State    vuln.StanHosta    `json:"state"`
 	Findings []vuln.Assessment `json:"findings"`
-	// PackageState opisuje liste pakietow, na ktorej oparto ocene.
-	PackageState vuln.StanListy `json:"package_state"`
+	// PackageState opisuje liste pakietow, na ktorej oparto ocene,
+	// a AdvisoryState - zestaw ustalen producenta znany hostowi. To dwa
+	// osobne zrodla i dwa osobne cykle odswiezania.
+	PackageState  vuln.StanListy   `json:"package_state"`
+	AdvisoryState vuln.StanUstalen `json:"advisory_state"`
 	// Snapshot opisuje dane, ktore rozstrzygnely.
 	Snapshot *vuln.Snapshot `json:"snapshot,omitempty"`
 	// SnapshotStale mowi, ze dane sa starsze, niz dopuszcza polityka.
 	SnapshotStale bool `json:"snapshot_stale"`
 	// CoveragePercent jest udzialem pakietow objetych feedem.
 	CoveragePercent float64 `json:"coverage_percent"`
+	// FullyAssessed mowi, czy ocena jest kompletna: bez przeszkody
+	// w pokryciu, z feedem obejmujacym wszystkie pakiety i bez ani jednego
+	// pakietu nieustalonego. Pusty powod sam w sobie tego nie znaczy.
+	FullyAssessed bool `json:"fully_assessed"`
 }
 
 // handleHostVulnerabilities zwraca ustalenia i pokrycie oceny hosta.
@@ -69,14 +76,21 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	stanUstalen, err := s.pakietyHostow.StanUstalenHosta(r.Context(), hostID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
 	raport := raportPodatnosci{
 		HostID: hostID, State: stany[hostID], PackageState: stanListy,
-		Findings: ustalenia,
+		AdvisoryState: stanUstalen, Findings: ustalenia,
 	}
 	if raport.Findings == nil {
 		raport.Findings = []vuln.Assessment{}
 	}
 	raport.CoveragePercent = raport.State.Pokrycie() * 100
+	raport.FullyAssessed = raport.State.PelnaOcena()
 	if raport.State.Provider != "" {
 		if snapshot, err := s.podatnosci.AktywnySnapshot(r.Context(), raport.State.Provider); err == nil {
 			raport.Snapshot = &snapshot
@@ -108,6 +122,10 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 type hostPodatnosci struct {
 	vuln.StanHosta
 	CoveragePercent float64 `json:"coverage_percent"`
+	// FullyAssessed mowi, czy ocena tego hosta jest kompletna. Bez tego pola
+	// ekran musialby zgadywac z samego pustego powodu - a host z jednym
+	// pakietem spoza dystrybucji ma pusty powod i niepelna ocene.
+	FullyAssessed bool `json:"fully_assessed"`
 }
 
 // handleFleetVulnerabilities zwraca ocene calej widocznej floty.
@@ -154,7 +172,16 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	teraz := time.Now().UTC()
 	pozycje := make([]hostPodatnosci, 0, len(identyfikatory))
 	var podatnych, doZalatania, bezPoprawki, nieustalonych, ocenionych, bezOceny int
+	var pakietow, hostowPodatnych int
 	powody := map[string]int{}
+	// Unikaty licza sie na poziomie floty, a nie sumowaniem po hostach: to samo
+	// CVE na dwudziestu hostach jest jedna sprawa producenta i dwudziestoma
+	// hostami do ruszenia. Sumowanie licznikow hostow zamienia jedno w drugie.
+	sprawy, err := s.podatnosci.Unikaty(r.Context(), identyfikatory)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	for _, hostID := range identyfikatory {
 		stan, oceniony := stany[hostID]
 		stan.HostID = hostID
@@ -163,18 +190,25 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 			// Host jeszcze nieoceniony nie jest hostem bez podatnosci.
 			bezOceny++
 			stan.CoverageReason = vuln.RodzajBrakListy
-		} else if stan.CoverageReason == "" {
+		} else if stan.PelnaOcena() {
+			// Kompletna ocena to nie tylko brak przeszkody: feed musi objac
+			// wszystkie pakiety hosta i zaden nie moze zostac nieustalony.
 			ocenionych++
 		}
 		if stan.CoverageReason != "" {
 			powody[stan.CoverageReason]++
 		}
 		podatnych += stan.Affected
-		doZalatania += stan.AffectedFixable
+		doZalatania += stan.AffectedWithVendorFix
 		bezPoprawki += stan.AffectedNoFix
 		nieustalonych += stan.Unknown
+		pakietow += stan.AffectedPackages
+		if stan.Affected > 0 {
+			hostowPodatnych++
+		}
 		pozycje = append(pozycje, hostPodatnosci{
 			StanHosta: stan, CoveragePercent: stan.Pokrycie() * 100,
+			FullyAssessed: stan.PelnaOcena(),
 		})
 	}
 
@@ -201,8 +235,14 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": pozycje, "affected": podatnych, "affected_fixable": doZalatania,
-		"affected_no_fix": bezPoprawki, "unknown": nieustalonych,
+		"items": pozycje, "affected": podatnych,
+		"affected_with_vendor_fix": doZalatania,
+		"affected_no_fix":          bezPoprawki, "unknown": nieustalonych,
+		// Cztery liczby, bo to cztery rozne pytania: ile CVE, ile spraw
+		// producenta, ile instancji pakietow do ruszenia i ilu hostow to
+		// dotyczy. Jedna liczba "znalezisk" nie odpowiada na zadne z nich.
+		"unique_cves": sprawy.CVE, "unique_advisories": sprawy.Advisories,
+		"affected_package_instances": pakietow, "hosts_affected": hostowPodatnych,
 		"hosts_total": len(identyfikatory), "hosts_assessed": ocenionych,
 		"hosts_without_assessment": bezOceny,
 		"coverage_reasons":         powody,

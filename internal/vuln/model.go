@@ -15,16 +15,48 @@ const (
 	StateUnknown     AssessmentState = "unknown"
 )
 
-// Stan naprawy odpowiada na inne pytanie niz stan podatnosci: nie "czy jest
-// dziura", tylko "czy da sie ja teraz zalatac na tym hoscie". Advisory moze
-// mowic "naprawione od wersji X", a repozytoria hosta tej wersji nie miec.
-type RemediationState string
+// Naprawa ma trzy osie, bo sa to trzy rozne pytania i trzy rozne zrodla
+// odpowiedzi. Sklejone w jedno slowo obiecywaly wiecej, niz panel sprawdzil:
+// "dostepna" znaczylo tylko tyle, ze producent gdzies wydal nowsza wersje.
+//
+// VendorFix mowi, czy producent w ogole wydal poprawke. Odpowiada advisory.
+// RepositoryCandidate mowi, czy ta wersja jest widoczna w repozytoriach hosta.
+// Odpowiadaja metadane repozytoriow - i tylko dla nich, dla ktorych je mamy.
+// Transaction mowi, czy da sie ja teraz zainstalowac. Odpowiada wylacznie plan
+// pakietowy hosta: dopiero on widzi wstrzymania, wykluczenia, konflikty
+// modulow i rozwiazanie zaleznosci.
+type VendorFixState string
 
 const (
-	RemediationAvailable   RemediationState = "available"
-	RemediationUnavailable RemediationState = "unavailable"
-	RemediationBlocked     RemediationState = "blocked"
-	RemediationUnknown     RemediationState = "unknown"
+	VendorFixKnown       VendorFixState = "known"
+	VendorFixUnavailable VendorFixState = "unavailable"
+	VendorFixUnknown     VendorFixState = "unknown"
+)
+
+type RepositoryCandidateState string
+
+const (
+	CandidateVisible RepositoryCandidateState = "visible"
+	CandidateAbsent  RepositoryCandidateState = "absent"
+	CandidateUnknown RepositoryCandidateState = "unknown"
+)
+
+type TransactionState string
+
+const (
+	TransactionInstallable TransactionState = "installable"
+	TransactionBlocked     TransactionState = "blocked"
+	TransactionUnknown     TransactionState = "unknown"
+)
+
+// Klasy pochodzenia pakietu. Producent dystrybucji ma prawo mowic wylacznie
+// o swoich pakietach: przebudowany lokalnie albo wziety z obcego repozytorium
+// ma wersje, ktorej jego ustalenia nie opisuja.
+const (
+	PochodzenieDystrybucja = "vendor_distribution"
+	PochodzenieObce        = "third_party_repository"
+	PochodzenieLokalne     = "local_package"
+	PochodzenieNieznane    = "origin_unknown"
 )
 
 // Kody powodu dla stanu nieustalonego. Kazdy "unknown" musi miec powod:
@@ -56,15 +88,28 @@ const (
 	// RodzajListaNieaktualna oznacza liste starsza niz stan zgloszony przez
 	// hosta w inwentarzu.
 	RodzajListaNieaktualna = "package_list_stale"
+	// RodzajBrakUstalen oznacza hosta, ktorego metadanych repozytoriow panel
+	// jeszcze nie odczytal. Dla rodziny RPM to one sa zrodlem rozstrzygajacym,
+	// wiec ich brak jest brakiem oceny, a nie hostem czystym.
+	RodzajBrakUstalen = "host_advisories_missing"
+	// RodzajUstaleniaNieczytelne oznacza metadane, ktorych nie dalo sie
+	// rozpoznac. Blad odczytu nie moze wygladac jak host bez ustalen.
+	RodzajUstaleniaNieczytelne = "host_advisories_unreadable"
+	// RodzajUstaleniaNieswieze oznacza ustalenia starsze, niz dopuszcza
+	// polityka odswiezania.
+	RodzajUstaleniaNieswieze = "host_advisories_stale"
 )
 
 // Assessment jest jednym ustaleniem: co panel wie o jednym pakiecie na jednym
 // hoscie wobec jednego ustalenia trackera.
 type Assessment struct {
 	HostID string `json:"host_id"`
-	// InventoryDigest wiaze ustalenie z konkretnym obrazem listy pakietow.
-	// Ocena bez tego wiazania nie da sie powtorzyc ani uniewaznic.
+	// InventoryDigest wiaze ustalenie z konkretnym obrazem listy pakietow,
+	// a AdvisoryDigest - z konkretnym zestawem ustalen producenta. Dwa
+	// odciski, bo to dwa niezalezne zrodla: zestaw ustalen zmienia sie takze
+	// wtedy, gdy na hoscie nie zmienil sie ani jeden pakiet.
 	InventoryDigest string `json:"inventory_digest,omitempty"`
+	AdvisoryDigest  string `json:"advisory_digest,omitempty"`
 
 	// Provider i SnapshotDigest mowia, ktore dane rozstrzygnely. Bez nich
 	// nie da sie odtworzyc, dlaczego panel powiedzial to, co powiedzial.
@@ -79,15 +124,30 @@ type Assessment struct {
 	BinaryPackage string `json:"binary_package,omitempty"`
 	Architecture  string `json:"architecture,omitempty"`
 
+	// InstalledVersion jest wersja pakietu binarnego - ta, ktora widzi
+	// operator na hoscie.
 	InstalledVersion string `json:"installed_version,omitempty"`
-	FixedVersion     string `json:"fixed_version,omitempty"`
+	// ComparisonVersion jest wersja, ktora naprawde porownano z ustaleniem,
+	// a ComparisonBasis mowi, skad ona pochodzi. Debian prowadzi
+	// bezpieczenstwo po pakiecie zrodlowym, a wersja binarna bywa inna niz
+	// zrodlowa (przebudowa binarna dokleja sufiks) - porownanie binarnej
+	// z zrodlowa potrafi zakwalifikowac podatnosc odwrotnie, niz trzeba.
+	ComparisonVersion string `json:"comparison_version,omitempty"`
+	ComparisonBasis   string `json:"comparison_basis,omitempty"`
+	FixedVersion      string `json:"fixed_version,omitempty"`
 
 	State      AssessmentState `json:"state"`
 	ReasonCode string          `json:"reason_code,omitempty"`
-	// Remediation mowi, czy poprawke da sie zainstalowac teraz. Rozstrzyga
-	// o tym plan pakietowy hosta, a nie advisory.
-	Remediation    RemediationState `json:"remediation"`
-	VendorSeverity string           `json:"vendor_severity,omitempty"`
+	// Trzy osie naprawy: co wydal producent, co widac w repozytoriach hosta
+	// i co da sie naprawde zainstalowac. Ostatnia rozstrzyga tylko plan
+	// pakietowy, wiec dopoki go nie ma, zostaje nieustalona.
+	VendorFix           VendorFixState           `json:"vendor_fix"`
+	RepositoryCandidate RepositoryCandidateState `json:"repository_candidate"`
+	Transaction         TransactionState         `json:"transaction"`
+	VendorSeverity      string                   `json:"vendor_severity,omitempty"`
+	// PackageOrigin mowi, czyj jest ten pakiet. Bez tego pakiet z obcego
+	// repozytorium liczylby sie jako objety ustaleniami producenta.
+	PackageOrigin string `json:"package_origin,omitempty"`
 
 	// ComparatorVersion opisuje regule porownania wersji, ktora uzyto.
 	ComparatorVersion string    `json:"comparator_version,omitempty"`

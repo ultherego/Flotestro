@@ -27,8 +27,13 @@ func pakietDeb(nazwa, wersja, zrodlo string) packages.InstalledPackage {
 	if zrodlo == "" {
 		zrodlo = nazwa
 	}
+	// APT nie zapisuje producenta przy pakiecie, wiec pochodzenie zbiera agent
+	// z metadanych repozytoriow. Pakiet bez niego jest nieustalony - i tak ma
+	// byc, ale tu opisujemy pakiet dystrybucji.
 	return packages.InstalledPackage{
 		Name: nazwa, Version: wersja, Architecture: "amd64", SourceName: zrodlo,
+		SourceVersion: wersja, Origin: "deb.debian.org",
+		OriginClass: packages.PochodzenieDystrybucja,
 	}
 }
 
@@ -135,15 +140,20 @@ func TestOcenaRozstrzygaWersjaProducenta(t *testing.T) {
 
 func TestStatusyProducentaMajaOsobneZnaczenia(t *testing.T) {
 	przypadki := map[string]struct {
-		status  string
-		stan    AssessmentState
-		powod   string
-		naprawa RemediationState
+		status   string
+		stan     AssessmentState
+		powod    string
+		poprawka VendorFixState
+		kandydat RepositoryCandidateState
 	}{
-		"nie dotyczy":          {StatusNieDotyczy, StateNotAffected, "", RemediationUnknown},
-		"badane":               {StatusBadane, StateUnknown, RodzajProducentBada, RemediationUnknown},
-		"otwarte bez poprawki": {StatusOtwarte, StateAffected, "", RemediationUnavailable},
-		"odroczone":            {StatusOdroczone, StateAffected, "", RemediationUnavailable},
+		"nie dotyczy": {StatusNieDotyczy, StateNotAffected, "",
+			VendorFixUnknown, CandidateUnknown},
+		"badane": {StatusBadane, StateUnknown, RodzajProducentBada,
+			VendorFixUnknown, CandidateUnknown},
+		"otwarte bez poprawki": {StatusOtwarte, StateAffected, "",
+			VendorFixUnavailable, CandidateAbsent},
+		"odroczone": {StatusOdroczone, StateAffected, "",
+			VendorFixUnavailable, CandidateAbsent},
 	}
 	for nazwa, przypadek := range przypadki {
 		ustalenia := map[string][]Advisory{
@@ -173,8 +183,17 @@ func TestStatusyProducentaMajaOsobneZnaczenia(t *testing.T) {
 		if ustalenie.State == StateUnknown && ustalenie.ReasonCode == "" {
 			t.Errorf("%s: stan nieustalony bez kodu powodu", nazwa)
 		}
-		if ustalenie.Remediation != przypadek.naprawa {
-			t.Errorf("%s: naprawa = %q", nazwa, ustalenie.Remediation)
+		if ustalenie.VendorFix != przypadek.poprawka {
+			t.Errorf("%s: poprawka producenta = %q", nazwa, ustalenie.VendorFix)
+		}
+		if ustalenie.RepositoryCandidate != przypadek.kandydat {
+			t.Errorf("%s: kandydat w repozytoriach = %q", nazwa, ustalenie.RepositoryCandidate)
+		}
+		// Czy transakcje da sie wykonac, wie wylacznie plan pakietowy hosta.
+		// Panel nie ma prawa tego obiecywac z samego advisory.
+		if ustalenie.Transaction != TransactionUnknown {
+			t.Errorf("%s: transakcja = %q, a planu nikt nie liczyl",
+				nazwa, ustalenie.Transaction)
 		}
 	}
 }
@@ -271,9 +290,202 @@ func TestUstalenieDlaInnejArchitekturyNieDotyczyPakietu(t *testing.T) {
 	if len(ocena.Findings) != 1 {
 		t.Fatalf("odczytano %d ustalen: %+v", len(ocena.Findings), ocena.Findings)
 	}
-	// Ustalenie z metadanych hosta znaczy, ze poprawka lezy w repozytorium,
-	// z ktorego host bierze pakiety - i to jest odpowiedz, a nie domysl.
-	if ocena.Findings[0].Remediation != RemediationAvailable {
-		t.Fatalf("naprawa = %q", ocena.Findings[0].Remediation)
+	// Ustalenie z metadanych hosta znaczy, ze producent wydal poprawke i ze
+	// lezy ona w repozytorium, z ktorego host bierze pakiety. Czy transakcja
+	// przejdzie, to trzecie pytanie - i odpowiada na nie plan pakietowy.
+	znalezisko := ocena.Findings[0]
+	if znalezisko.VendorFix != VendorFixKnown {
+		t.Errorf("poprawka producenta = %q", znalezisko.VendorFix)
+	}
+	if znalezisko.RepositoryCandidate != CandidateVisible {
+		t.Errorf("kandydat w repozytoriach = %q", znalezisko.RepositoryCandidate)
+	}
+	if znalezisko.Transaction != TransactionUnknown {
+		t.Errorf("transakcja = %q, a planu nikt nie liczyl", znalezisko.Transaction)
+	}
+}
+
+// TestDebianPorownujeWersjeZrodlowa pilnuje reguly, ktora dla Debiana
+// rozstrzyga o poprawnosci calej oceny.
+//
+// Tracker mowi o pakiecie zrodlowym i podaje jego wersje. Wersja binarna bywa
+// z zupelnie innej numeracji: metapakiet "gcc" ze zrodla "gcc-defaults" ma
+// wersje kompilatora, na ktory wskazuje, a nie wersje swojego zrodla.
+// Porownanie binarnej z ustaleniem zrodlowym uznaje wtedy pakiet za naprawiony,
+// choc poprawki w nim nie ma - i to jest przeoczenie, nie falszywy alarm.
+func TestDebianPorownujeWersjeZrodlowa(t *testing.T) {
+	metapakiet := packages.InstalledPackage{
+		Name: "gcc", Epoch: "4", Version: "12.2.0", Release: "3", Architecture: "amd64",
+		SourceName: "gcc-defaults", SourceVersion: "1.220",
+		Origin: "deb.debian.org", OriginClass: packages.PochodzenieDystrybucja,
+	}
+	ustalenia := map[string][]Advisory{
+		"gcc-defaults": {{
+			Provider: "debian", AdvisoryID: "CVE-2026-3000", CVEIDs: []string{"CVE-2026-3000"},
+			Distribution: "debian", Release: "trixie", SourcePackage: "gcc-defaults",
+			FixedVersion: "1.221", Status: StatusNaprawione, VendorSeverity: "high",
+		}},
+	}
+	wejscie := wejscieDebiana(metapakiet)
+
+	ocena := Ocen(wejscie, snapshotDebiana("trixie"), ustalenia, 6*time.Hour, teraz)
+	if ocena.Stan.Affected != 1 {
+		t.Fatalf("wersja binarna przeslonila ustalenie zrodlowe: %+v", ocena.Stan)
+	}
+	znalezisko := ocena.Findings[0]
+	if znalezisko.ComparisonVersion != "1.220" || znalezisko.ComparisonBasis != PodstawaZrodlowa {
+		t.Errorf("porownano %q na podstawie %q",
+			znalezisko.ComparisonVersion, znalezisko.ComparisonBasis)
+	}
+	// Operator widzi na hoscie wersje binarna i ona tez musi byc zapisana.
+	if znalezisko.InstalledVersion != "4:12.2.0-3" {
+		t.Errorf("wersja zainstalowana = %q", znalezisko.InstalledVersion)
+	}
+
+	// Bez wersji zrodlowej porownujemy binarna i mowimy o tym wprost: to jest
+	// przyblizenie, a nie ta sama odpowiedz.
+	bezZrodla := metapakiet
+	bezZrodla.SourceVersion = ""
+	przyblizona := Ocen(wejscieDebiana(bezZrodla), snapshotDebiana("trixie"),
+		ustalenia, 6*time.Hour, teraz)
+	if len(przyblizona.Findings) != 0 {
+		t.Fatalf("porownanie binarne mialo dac inna odpowiedz: %+v", przyblizona.Findings)
+	}
+}
+
+// TestPakietAPTZObcegoRepozytoriumJestNieznany pilnuje, zeby pokrycie liczylo
+// tylko pakiety, o ktorych producent dystrybucji ma prawo cokolwiek mowic.
+func TestPakietAPTZObcegoRepozytoriumJestNieznany(t *testing.T) {
+	przypadki := map[string]struct {
+		klasa string
+		powod string
+	}{
+		"obce repozytorium":    {packages.PochodzenieObce, RodzajPochodzenieNieznane},
+		"pakiet lokalny":       {packages.PochodzenieLokalne, RodzajPochodzenieNieznane},
+		"pochodzenie nieznane": {packages.PochodzenieNieznane, RodzajPochodzenieNieznane},
+	}
+	for nazwa, przypadek := range przypadki {
+		pakiet := pakietDeb("nginx", "1.27.0-1", "nginx")
+		pakiet.OriginClass = przypadek.klasa
+		pakiet.Origin = "nginx.org"
+		ocena := Ocen(wejscieDebiana(pakiet), snapshotDebiana("trixie"), nil, 6*time.Hour, teraz)
+		if ocena.Stan.PackagesCovered != 0 {
+			t.Errorf("%s: pokrycie = %d", nazwa, ocena.Stan.PackagesCovered)
+		}
+		if len(ocena.Findings) != 1 || ocena.Findings[0].ReasonCode != przypadek.powod {
+			t.Fatalf("%s: ustalenia = %+v", nazwa, ocena.Findings)
+		}
+		if ocena.Findings[0].PackageOrigin != przypadek.klasa {
+			t.Errorf("%s: pochodzenie = %q", nazwa, ocena.Findings[0].PackageOrigin)
+		}
+		// Host z pakietem nieustalonym nie ma oceny pelnej, choc nic jej nie
+		// zablokowalo.
+		if ocena.Stan.PelnaOcena() {
+			t.Errorf("%s: ocena z pakietem nieustalonym uznana za pelna", nazwa)
+		}
+	}
+}
+
+// TestPelnaOcenaWymagaPelnegoPokrycia pilnuje, zeby "wszystko sprawdzone"
+// znaczylo wszystko, a nie "nic nie przeszkodzilo".
+func TestPelnaOcenaWymagaPelnegoPokrycia(t *testing.T) {
+	pelna := Ocen(wejscieDebiana(pakietDeb("openssl", "3.0.11-1", "openssl")),
+		snapshotDebiana("trixie"), nil, 6*time.Hour, teraz)
+	if !pelna.Stan.PelnaOcena() {
+		t.Fatalf("ocena bez przeszkod nie uznana za pelna: %+v", pelna.Stan)
+	}
+
+	// Host, ktorego jeszcze nie oceniono, nie ma oceny pelnej.
+	if (StanHosta{}).PelnaOcena() {
+		t.Error("host bez oceny uznany za w pelni oceniony")
+	}
+	// Host bez ani jednego pakietu tez nie: to nie jest host czysty.
+	pusta := StanHosta{EvaluatedAt: &teraz}
+	if pusta.PelnaOcena() {
+		t.Error("host bez pakietow uznany za w pelni oceniony")
+	}
+}
+
+// TestUstaleniaHostaMajaWlasnyPowodBraku pilnuje, zeby nieodczytane metadane
+// repozytoriow nie wygladaly jak host bez ustalen producenta.
+func TestUstaleniaHostaMajaWlasnyPowodBraku(t *testing.T) {
+	pakiet := packages.InstalledPackage{
+		Name: "openssl", Epoch: "1", Version: "3.2.6", Release: "4.fc42",
+		Architecture: "x86_64", SourceName: "openssl", Vendor: "Fedora Project",
+	}
+	for _, powod := range []string{RodzajBrakUstalen, RodzajUstaleniaNieczytelne} {
+		wejscie := Wejscie{
+			HostID: "host-5", Distribution: "fedora", Release: "42",
+			Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-5",
+			AdvisoriesReason: powod,
+		}
+		snapshot := Snapshot{Provider: "fedora", Digest: "", Releases: []string{"42"}}
+		ocena := Ocen(wejscie, snapshot, nil, 6*time.Hour, teraz)
+		if ocena.Stan.CoverageReason != powod {
+			t.Errorf("powod pokrycia = %q, oczekiwano %q", ocena.Stan.CoverageReason, powod)
+		}
+		if ocena.Stan.AdvisoriesReason != powod {
+			t.Errorf("powod ustalen = %q", ocena.Stan.AdvisoriesReason)
+		}
+	}
+
+	// Ustalenia stare nie zatrzymuja oceny - tak samo jak nieswiezy feed.
+	wejscie := Wejscie{
+		HostID: "host-5", Distribution: "fedora", Release: "42",
+		Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-5",
+		AdvisoriesReason: RodzajUstaleniaNieswieze, AdvisoryDigest: "u1",
+	}
+	ustalenia := map[string][]Advisory{
+		"openssl": {{
+			Provider: "fedora", AdvisoryID: "FEDORA-2026-abc", Distribution: "fedora",
+			Release: "42", SourcePackage: "openssl", FixedVersion: "1:3.2.7-1.fc42",
+			Status: StatusNaprawione, FromHostRepositories: true,
+		}},
+	}
+	snapshot := Snapshot{Provider: "fedora", Digest: "u1", Releases: []string{"42"},
+		FetchedAt: teraz.Add(-time.Hour)}
+	ocena := Ocen(wejscie, snapshot, ustalenia, 6*time.Hour, teraz)
+	if ocena.Stan.Affected != 1 {
+		t.Fatalf("stare ustalenia zatrzymaly ocene: %+v", ocena.Stan)
+	}
+	if ocena.Stan.CoverageReason != RodzajUstaleniaNieswieze {
+		t.Errorf("powod pokrycia = %q", ocena.Stan.CoverageReason)
+	}
+	if ocena.Findings[0].AdvisoryDigest != "u1" {
+		t.Error("ustalenie nie mowi, ktory zestaw ustalen je rozstrzygnal")
+	}
+}
+
+// TestLicznikiUnikatowSaOsobne pilnuje, zeby jedna liczba nie udawala
+// odpowiedzi na cztery rozne pytania.
+func TestLicznikiUnikatowSaOsobne(t *testing.T) {
+	openssl := pakietDeb("openssl", "3.0.11-1", "openssl")
+	libssl := pakietDeb("libssl3", "3.0.11-1", "openssl")
+	ustalenia := map[string][]Advisory{
+		"openssl": {
+			{Provider: "debian", AdvisoryID: "DSA-5000", CVEIDs: []string{"CVE-2026-1", "CVE-2026-2"},
+				Distribution: "debian", Release: "trixie", SourcePackage: "openssl",
+				FixedVersion: "3.0.12-1", Status: StatusNaprawione},
+			{Provider: "debian", AdvisoryID: "DSA-5001", CVEIDs: []string{"CVE-2026-2"},
+				Distribution: "debian", Release: "trixie", SourcePackage: "openssl",
+				FixedVersion: "3.0.13-1", Status: StatusNaprawione},
+		},
+	}
+	ocena := Ocen(wejscieDebiana(openssl, libssl), snapshotDebiana("trixie"),
+		ustalenia, 6*time.Hour, teraz)
+
+	// Dwa pakiety binarne razy dwa ustalenia daja cztery znaleziska - ale to
+	// sa dwie sprawy producenta, dwa CVE i dwie instancje pakietow.
+	if ocena.Stan.Affected != 4 {
+		t.Fatalf("znalezisk = %d", ocena.Stan.Affected)
+	}
+	if ocena.Stan.AffectedPackages != 2 {
+		t.Errorf("instancji pakietow = %d", ocena.Stan.AffectedPackages)
+	}
+	if ocena.Stan.UniqueAdvisories != 2 {
+		t.Errorf("spraw producenta = %d", ocena.Stan.UniqueAdvisories)
+	}
+	if ocena.Stan.UniqueCVEs != 2 {
+		t.Errorf("roznych CVE = %d", ocena.Stan.UniqueCVEs)
 	}
 }

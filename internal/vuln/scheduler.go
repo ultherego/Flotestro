@@ -37,11 +37,22 @@ type Ustawienia struct {
 	// nieswieze. Nie zatrzymuje to oceny - dane sprzed doby sa lepsze niz ich
 	// brak - ale musi byc widoczne obok wyniku.
 	MaxSnapshotAge time.Duration
+	// MaxAdvisoryAge jest wiekiem, po ktorym panel prosi hosta o ponowny
+	// odczyt metadanych jego repozytoriow.
+	//
+	// Osobny od wieku snapshotu, bo to osobne zrodlo i osobny cykl: producent
+	// wydaje poprawki takze wtedy, gdy na hoscie nie zmienil sie ani jeden
+	// pakiet. Panel wiazacy odswiezenie ustalen ze zmiana listy pakietow
+	// odswiezalby je czasem nigdy.
+	MaxAdvisoryAge time.Duration
 }
 
 // Domyslne zwraca ustawienia domyslne.
 func Domyslne() Ustawienia {
-	return Ustawienia{Interval: 30 * time.Minute, MaxSnapshotAge: 6 * time.Hour}
+	return Ustawienia{
+		Interval: 30 * time.Minute, MaxSnapshotAge: 6 * time.Hour,
+		MaxAdvisoryAge: 30 * time.Minute,
+	}
 }
 
 // Harmonogram synchronizuje feedy i przelicza ocene floty.
@@ -65,6 +76,9 @@ func NowyHarmonogram(store *Store, pakiety *MagazynPakietow, hostStore *hosts.St
 	}
 	if ustawienia.MaxSnapshotAge <= 0 {
 		ustawienia.MaxSnapshotAge = Domyslne().MaxSnapshotAge
+	}
+	if ustawienia.MaxAdvisoryAge <= 0 {
+		ustawienia.MaxAdvisoryAge = Domyslne().MaxAdvisoryAge
 	}
 	return &Harmonogram{
 		store: store, pakiety: pakiety, hosts: hostStore, inventory: inventoryStore,
@@ -116,11 +130,16 @@ type OpisHosta struct {
 // UstaleniaZHosta mowi, czy ustalenia dla tej dystrybucji czyta sie
 // z metadanych repozytoriow hosta, a nie z centralnego feedu.
 //
-// Rodzina RPM publikuje je w updateinfo razem z pakietami, wiec host ma je
-// z tego samego zrodla, z ktorego bierze poprawki. Debian i Ubuntu maja
-// osobne trackery, ktore panel pobiera centralnie.
+// Na razie wylacznie Fedora. Jej updateinfo niesie pelne ustalenia
+// bezpieczenstwa razem z pakietami, wiec host czyta je z tego samego zrodla,
+// z ktorego bierze poprawki.
+//
+// RHEL, AlmaLinux i Rocky maja updateinfo ubozsze albo niepelne, a ich
+// rozstrzygajacym zrodlem sa CSAF/VEX producenta - i dopoki panel ich nie
+// czyta, host tych dystrybucji zostaje z powodem "brak feedu". To jest
+// uczciwsza odpowiedz niz ocena z metadanych, ktore nie opisuja wszystkiego.
 func UstaleniaZHosta(dystrybucja string) bool {
-	return rodzinaRPM(dystrybucja)
+	return strings.ToLower(dystrybucja) == "fedora"
 }
 
 // Dostawca zwraca nazwe trackera wlasciwego dla dystrybucji hosta.
@@ -139,32 +158,53 @@ func Dostawca(dystrybucja string) string {
 }
 
 // opisyHostow zbiera to, czego ocena potrzebuje o kazdym hoscie.
+//
+// Cala flote, strona po stronie. Lista dla UI ma limit i przy zbyt duzej
+// wartosci cicho spada do stu pozycji - przeglad, ktory na tym polegal,
+// ocenial sto hostow i milczal o reszcie. Host nieoceniony wyglada na ekranie
+// tak samo jak host bez podatnosci, wiec cisza jest tu najgorsza odpowiedzia.
 func (h *Harmonogram) opisyHostow(ctx context.Context) ([]OpisHosta, error) {
-	lista, err := h.hosts.List(ctx, hosts.ListFilter{Limit: 1000})
-	if err != nil {
-		return nil, err
-	}
-	identyfikatory := make([]string, 0, len(lista))
-	for _, host := range lista {
-		identyfikatory = append(identyfikatory, host.ID)
-	}
-	fragmenty, err := h.inventory.FragmentyHostow(ctx, identyfikatory)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		opisy    []OpisHosta
+		poNazwie string
+		poID     string
+	)
+	for {
+		strona, err := h.hosts.Przeglad(ctx, poNazwie, poID, hosts.RozmiarStrony)
+		if err != nil {
+			return nil, err
+		}
+		if len(strona) == 0 {
+			return opisy, nil
+		}
 
-	opisy := make([]OpisHosta, 0, len(lista))
-	for _, host := range lista {
-		opis := OpisHosta{ID: host.ID, Hostname: host.Hostname}
-		opis.Distribution, opis.Release = dystrybucjaHosta(host, fragmenty[host.ID])
-		opis.InventoryDigest, opis.InventoryReason = odciskZInwentarza(fragmenty[host.ID])
-		opisy = append(opisy, opis)
+		identyfikatory := make([]string, 0, len(strona))
+		for _, host := range strona {
+			identyfikatory = append(identyfikatory, host.ID)
+		}
+		// Fragmenty inwentarza bierzemy dla strony, a nie dla calej floty:
+		// niosa pelne payloady modulow i w calosci nie zmieszcza sie w pamieci.
+		fragmenty, err := h.inventory.FragmentyHostow(ctx, identyfikatory)
+		if err != nil {
+			return nil, err
+		}
+		for _, host := range strona {
+			opis := OpisHosta{ID: host.ID, Hostname: host.Hostname}
+			opis.Distribution, opis.Release = dystrybucjaHosta(host, fragmenty[host.ID])
+			opis.InventoryDigest, opis.InventoryReason = odciskZInwentarza(fragmenty[host.ID])
+			opisy = append(opisy, opis)
+		}
+
+		ostatni := strona[len(strona)-1]
+		poNazwie, poID = ostatni.Hostname, ostatni.ID
+		if len(strona) < hosts.RozmiarStrony {
+			return opisy, nil
+		}
 	}
-	return opisy, nil
 }
 
 // dystrybucjaHosta ustala dystrybucje i wydanie w jezyku producenta.
-func dystrybucjaHosta(host hosts.Host, fragmenty []inventory.Fragment) (string, string) {
+func dystrybucjaHosta(host hosts.Skrot, fragmenty []inventory.Fragment) (string, string) {
 	dystrybucja := strings.ToLower(host.OSDistribution)
 	wydanie := host.OSVersion
 
@@ -327,25 +367,45 @@ func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 				opis.InventoryDigest != stanListy.Digest,
 		}
 
-		// Dla rodzin RPM zrodlem rozstrzygajacym sa metadane repozytoriow
-		// samego hosta: to one mowia, ktora wersja zamyka ustalenie i czy
-		// lezy w repozytorium, z ktorego ten host bierze pakiety.
+		// Dla Fedory zrodlem rozstrzygajacym sa metadane repozytoriow samego
+		// hosta: to one mowia, ktora wersja zamyka ustalenie i czy lezy
+		// w repozytorium, z ktorego ten host bierze pakiety.
 		zestaw := map[string][]Advisory(nil)
+		odswiezUstalenia := false
 		if UstaleniaZHosta(opis.Distribution) {
+			stanUstalen, err := h.pakiety.StanUstalenHosta(ctx, opis.ID)
+			if err != nil {
+				h.log.Error("nie odczytano stanu ustalen hosta", "host_id", opis.ID, "err", err)
+				continue
+			}
 			zHosta, zebrane, err := h.pakiety.UstaleniaHosta(ctx, opis.ID)
 			if err != nil {
 				h.log.Error("nie odczytano ustalen hosta", "host_id", opis.ID, "err", err)
 			}
 			zestaw = zHosta
-			// Snapshot jest tu wlasnoscia hosta: jego odciskiem jest stan
-			// listy, a wiekiem - chwila odczytu metadanych.
+			wejscie.AdvisoryDigest = stanUstalen.Digest
+			wejscie.AdvisoriesReason = stanUstalen.UnavailableReason
+			switch {
+			case wejscie.AdvisoriesReason != "":
+				// Powod juz jest - odczyt sie nie udal albo go nie bylo.
+				odswiezUstalenia = true
+			case stanUstalen.CollectedAt == nil:
+				wejscie.AdvisoriesReason = RodzajBrakUstalen
+				odswiezUstalenia = true
+			case teraz.Sub(*stanUstalen.CollectedAt) > h.ustawienia.MaxAdvisoryAge:
+				// Producent wydaje poprawki takze wtedy, gdy na hoscie nie
+				// zmienil sie ani jeden pakiet. Ustalenia maja wiec wlasny
+				// cykl odswiezania, niezalezny od odcisku listy pakietow.
+				wejscie.AdvisoriesReason = RodzajUstaleniaNieswieze
+				odswiezUstalenia = true
+			}
+
+			// Snapshot jest tu wlasnoscia hosta: jego odciskiem jest odcisk
+			// zestawu ustalen, a wiekiem - chwila odczytu metadanych.
 			snapshot = Snapshot{
-				Provider: dostawca, Digest: stanListy.Digest,
+				Provider: dostawca, Digest: stanUstalen.Digest,
 				Releases: []string{opis.Release}, AdvisoryCount: len(zHosta),
 				FetchedAt: zebrane, Active: true,
-			}
-			if len(zHosta) == 0 && zebrane.IsZero() {
-				snapshot.Digest = ""
 			}
 		} else {
 			klucz := dostawca + "\x1f" + opis.Release
@@ -367,18 +427,21 @@ func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 		}
 
 		// Lista, ktorej panel nie ma albo ktora opisuje inny stan niz host,
-		// jest powodem do zapytania hosta - a nie do milczenia.
-		if wejscie.BrakListy || wejscie.ListaNieaktualna {
-			h.poprosOListe(ctx, opis, stanListy)
+		// jest powodem do zapytania hosta - a nie do milczenia. Tak samo
+		// ustalenia, ktore sie zestarzaly: ten sam odczyt przynosi jedno
+		// i drugie.
+		if wejscie.BrakListy || wejscie.ListaNieaktualna || odswiezUstalenia {
+			h.poprosOOdczyt(ctx, opis, teraz)
 		}
 	}
 }
 
-// poprosOListe zamawia u hosta pelna liste pakietow.
+// poprosOOdczyt zamawia u hosta pelna liste pakietow razem z ustaleniami
+// producenta z metadanych jego repozytoriow.
 //
 // Zamawiamy ja sami, bo bez niej ocena tego hosta jest pusta - a pusta ocena
 // wyglada jak host bez podatnosci.
-func (h *Harmonogram) poprosOListe(ctx context.Context, opis OpisHosta, stan StanListy) {
+func (h *Harmonogram) poprosOOdczyt(ctx context.Context, opis OpisHosta, teraz time.Time) {
 	if h.jobs == nil || opis.InventoryReason != "" {
 		return
 	}
@@ -388,9 +451,13 @@ func (h *Harmonogram) poprosOListe(ctx context.Context, opis OpisHosta, stan Sta
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Klucz wiaze zlecenie z konkretnym odciskiem listy: dopoki host zglasza
-	// ten sam stan, nie zamawiamy jej drugi raz.
-	klucz := "vuln:packages:" + opis.ID + ":" + opis.InventoryDigest
+	// Klucz niesie kubelek czasu, a nie sam odcisk listy. Klucz oparty na
+	// odcisku byl staly dopoki host sie nie zmienil - a zadanie, ktore raz sie
+	// nie powiodlo, nigdy juz nie wracalo: kolejne cykle trafialy w ten sam
+	// klucz i dostawaly to samo nieudane zlecenie. Kubelek zamyka to okno po
+	// jednym interwale, a w jego obrebie nadal chroni przed powtorzeniem.
+	kubelek := teraz.Truncate(h.ustawienia.Interval).UTC().Format(time.RFC3339)
+	klucz := "vuln:packages:" + opis.ID + ":" + kubelek
 	_, err = h.jobs.Create(ctx, tx, jobs.Spec{
 		HostID:          opis.ID,
 		Action:          opspec.ActionPackageList,
@@ -407,6 +474,6 @@ func (h *Harmonogram) poprosOListe(ctx context.Context, opis OpisHosta, stan Sta
 	if err := tx.Commit(ctx); err != nil {
 		return
 	}
-	h.log.Info("zamowiono liste pakietow", "host_id", opis.ID,
-		"odcisk_hosta", opis.InventoryDigest, "odcisk_panelu", stan.Digest)
+	h.log.Info("zamowiono odczyt pakietow", "host_id", opis.ID,
+		"odcisk_hosta", opis.InventoryDigest, "kubelek", kubelek)
 }

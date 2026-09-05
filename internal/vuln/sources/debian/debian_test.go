@@ -147,3 +147,36 @@ func TestOpisPrzycinamyPoZnakachANieBajtach(t *testing.T) {
 		t.Fatal("urwany znak zostal w opisie")
 	}
 }
+
+// TestZrzutUrwanyNieJestKompletem pilnuje wlasciwosci, bez ktorej polowa
+// zrzutu wygladalaby jak caly feed.
+//
+// Strumien urwany w polowie konczy sie brakiem kolejnego klucza - petla
+// wychodzi wtedy cicho, a panel uznaje brakujace ustalenia za nieistniejace.
+// Ustalenie, ktorego nie ma, znaczy "pakiet niepodatny", wiec taki import
+// zamienia awarie sieci w falszywe "host czysty".
+func TestZrzutUrwanyNieJestKompletem(t *testing.T) {
+	przypadki := map[string]string{
+		"urwany w srodku wpisu": `{"openssl": {"CVE-2026-1": {"releases": {"trixie": {"stat`,
+		"bez zamkniecia": `{"openssl": {"CVE-2026-1": {"releases": ` +
+			`{"trixie": {"status": "open"}}}}`,
+		"dane po zamknieciu": `{"openssl": {}} {"drugi": {}}`,
+		"nie obiekt":         `["openssl"]`,
+	}
+	for nazwa, tresc := range przypadki {
+		if _, err := Parsuj(strings.NewReader(tresc), []string{"trixie"}); err == nil {
+			t.Errorf("%s: parser przyjal niepelny zrzut", nazwa)
+		}
+	}
+
+	// Zrzut kompletny przechodzi - inaczej sprawdzenie byloby bezuzyteczne.
+	pelny := `{"openssl": {"CVE-2026-1": {"releases": {"trixie": ` +
+		`{"status": "resolved", "fixed_version": "3.0.12-1"}}}}}`
+	ustalenia, err := Parsuj(strings.NewReader(pelny), []string{"trixie"})
+	if err != nil {
+		t.Fatalf("kompletny zrzut odrzucony: %v", err)
+	}
+	if len(ustalenia) != 1 || ustalenia[0].FixedVersion != "3.0.12-1" {
+		t.Fatalf("ustalenia = %+v", ustalenia)
+	}
+}

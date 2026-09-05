@@ -12,11 +12,16 @@ type Pozycja = {
   packages_total: number;
   packages_covered: number;
   affected: number;
-  affected_fixable: number;
+  affected_with_vendor_fix: number;
   affected_no_fix: number;
   unknown: number;
+  affected_packages: number;
+  unique_advisories: number;
+  unique_cves: number;
   coverage_reason?: string;
+  advisories_reason?: string;
   coverage_percent: number;
+  fully_assessed: boolean;
   evaluated_at?: string;
 };
 
@@ -33,9 +38,13 @@ type Zrodlo = {
 type Widok = {
   items: Pozycja[];
   affected: number;
-  affected_fixable: number;
+  affected_with_vendor_fix: number;
   affected_no_fix: number;
   unknown: number;
+  unique_cves: number;
+  unique_advisories: number;
+  affected_package_instances: number;
+  hosts_affected: number;
   hosts_total: number;
   hosts_assessed: number;
   hosts_without_assessment: number;
@@ -51,6 +60,10 @@ const powody: Record<string, string> = {
   package_list_missing: "no package list yet",
   package_list_stale: "package list out of date",
   distribution_eol: "release past end of life",
+  package_origin_unknown: "packages from outside the distribution",
+  host_advisories_missing: "repository metadata not read yet",
+  host_advisories_unreadable: "repository metadata could not be read",
+  host_advisories_stale: "vendor advisories past the refresh policy",
 };
 
 /**
@@ -81,13 +94,22 @@ export function PodatnosciFloty() {
       </p>
 
       <div className="filtry">
-        <span className="znacznik blad">{data.affected_fixable} fixable</span>
+        <span className="znacznik blad">{data.affected_with_vendor_fix} with a vendor fix</span>
         <span className="znacznik uwaga">{data.affected_no_fix} no vendor fix</span>
         <span className="znacznik nieznany">{data.unknown} not established</span>
-        <span className={`znacznik ${data.hosts_without_assessment ? "uwaga" : "ok"}`}>
+        <span className={`znacznik ${data.hosts_assessed < data.hosts_total ? "uwaga" : "ok"}`}>
           {data.hosts_assessed}/{data.hosts_total} hosts fully assessed
         </span>
       </div>
+      {/* Cztery liczby, bo to cztery rozne pytania. To samo CVE na dwudziestu
+          hostach jest jedna sprawa producenta i dwudziestoma maszynami do
+          ruszenia - jedna liczba "znalezisk" nie mowi ani jednego, ani
+          drugiego. */}
+      <p className="zrodlo">
+        {data.unique_cves} distinct CVEs · {data.unique_advisories} vendor advisories ·{" "}
+        {data.affected_package_instances} installed packages to move ·{" "}
+        {data.hosts_affected} hosts affected.
+      </p>
 
       {Object.keys(data.coverage_reasons ?? {}).length > 0 && (
         <p className="ostrzezenie">
@@ -141,7 +163,7 @@ export function PodatnosciFloty() {
         <table>
           <thead>
             <tr>
-              <th>Host</th><th>Distribution</th><th>Fixable</th><th>No fix</th>
+              <th>Host</th><th>Distribution</th><th>Vendor fix</th><th>No fix</th>
               <th>Not established</th><th>Coverage</th><th>Assessed</th>
             </tr>
           </thead>
@@ -155,8 +177,8 @@ export function PodatnosciFloty() {
                 </td>
                 <td className="zrodlo">{pozycja.distribution} {pozycja.release}</td>
                 <td>
-                  {pozycja.affected_fixable > 0
-                    ? <span className="znacznik blad">{pozycja.affected_fixable}</span>
+                  {pozycja.affected_with_vendor_fix > 0
+                    ? <span className="znacznik blad">{pozycja.affected_with_vendor_fix}</span>
                     : <span className="znacznik ok">0</span>}
                 </td>
                 <td>{pozycja.affected_no_fix}</td>
@@ -167,8 +189,11 @@ export function PodatnosciFloty() {
                       {powody[pozycja.coverage_reason] ?? pozycja.coverage_reason}
                     </span>
                   ) : (
-                    <span className={`znacznik ${pozycja.coverage_percent >= 99 ? "ok" : "uwaga"}`}>
-                      {Math.round(pozycja.coverage_percent)}% of {pozycja.packages_total}
+                    // Zaokraglenie do calosci zamienialo 99,7% w "100%":
+                    // "wszystko sprawdzone" tam, gdzie kilkadziesiat pakietow
+                    // zostalo poza ocena.
+                    <span className={`znacznik ${pozycja.fully_assessed ? "ok" : "uwaga"}`}>
+                      {pozycja.coverage_percent.toFixed(1)}% of {pozycja.packages_total}
                     </span>
                   )}
                 </td>

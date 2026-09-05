@@ -485,6 +485,58 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 	return s.query(ctx, where, args...)
 }
 
+// Skrot jest tym, co o hoscie wystarcza przegladom calej floty.
+//
+// Przeglad nie jest lista dla UI: nie ma limitu z filtra ani rejestru
+// mozliwosci, bo ma objac wszystkie hosty, a nie pierwsza strone.
+type Skrot struct {
+	ID             string
+	Hostname       string
+	OSDistribution string
+	OSVersion      string
+}
+
+// RozmiarStrony jest wielkoscia jednej strony przegladu.
+const RozmiarStrony = 500
+
+// Przeglad zwraca kolejna strone floty w porzadku klucza (hostname, id).
+//
+// Stronicowanie po kluczu, a nie po offsecie: flota zmienia sie w trakcie
+// przegladu, a offset przy takiej zmianie gubi hosty w srodku. Przeglad, ktory
+// cicho pomija hosty, daje ocene "brak podatnosci" tam, gdzie nikt nie patrzyl.
+//
+// Pierwsza strone bierze sie z pustym kluczem.
+func (s *Store) Przeglad(ctx context.Context, poNazwie, poID string, limit int) ([]Skrot, error) {
+	if limit <= 0 {
+		limit = RozmiarStrony
+	}
+	query := `
+		select h.id, h.hostname, coalesce(h.os_distribution, ''), coalesce(h.os_version, '')
+		from hosts h
+		where ($1 = '' or (h.hostname, h.id) > ($1, $2::uuid))
+		order by h.hostname, h.id
+		limit $3`
+	if poID == "" {
+		poID = "00000000-0000-0000-0000-000000000000"
+	}
+	rows, err := s.pool.Query(ctx, query, poNazwie, poID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wynik []Skrot
+	for rows.Next() {
+		var skrot Skrot
+		if err := rows.Scan(&skrot.ID, &skrot.Hostname, &skrot.OSDistribution,
+			&skrot.OSVersion); err != nil {
+			return nil, err
+		}
+		wynik = append(wynik, skrot)
+	}
+	return wynik, rows.Err()
+}
+
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''),

@@ -12,10 +12,13 @@ package vuln
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/packages"
@@ -34,9 +37,23 @@ type StanListy struct {
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// wykonawca pozwala wolac te same zapytania w transakcji i poza nia.
-type wykonawca interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+// StanUstalen opisuje to, co panel wie o ustaleniach producenta znanych
+// hostowi z metadanych jego repozytoriow.
+//
+// Osobny od stanu listy pakietow, bo to osobne zrodlo i osobny cykl: producent
+// wydaje poprawki takze wtedy, gdy na hoscie nie zmienil sie ani jeden pakiet.
+// Bez tego panel odswiezalby ustalenia dopiero przy zmianie listy - czyli
+// czasem nigdy.
+type StanUstalen struct {
+	HostID string `json:"host_id"`
+	// Digest jest odciskiem zestawu ustalen, ktory panel ma u siebie.
+	Digest        string     `json:"digest,omitempty"`
+	AdvisoryCount int        `json:"advisory_count"`
+	CollectedAt   *time.Time `json:"collected_at,omitempty"`
+	JobID         string     `json:"job_id,omitempty"`
+	// UnavailableReason mowi, dlaczego ustalen nie ma. Blad odczytu metadanych
+	// nie moze wygladac jak host bez ustalen.
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
 // MagazynPakietow trzyma liste pakietow hostow.
@@ -48,13 +65,19 @@ func NowyMagazynPakietow(pool *pgxpool.Pool) *MagazynPakietow {
 	return &MagazynPakietow{pool: pool}
 }
 
-// Zastap podmienia cala liste pakietow hosta w jednej transakcji.
+// ZastapObraz podmienia caly obraz hosta w jednej transakcji.
+//
+// Jednej, bo lista pakietow i ustalenia producenta pochodza z tego samego
+// odczytu i opisuja te sama chwile. Zapisane osobno potrafily sie rozjechac:
+// nowa lista z poprzednimi ustaleniami daje ocene, ktorej nigdy nie bylo na
+// zadnym hoscie.
 //
 // Podmiana, a nie scalanie: lista czesciowa jest gorsza niz jej brak, bo
 // wyglada jak komplet. Albo panel ma obraz z jednej chwili, albo nie ma go
 // wcale.
-func (m *MagazynPakietow) Zastap(ctx context.Context, hostID string,
-	pakiety []packages.InstalledPackage, stan StanListy) error {
+func (m *MagazynPakietow) ZastapObraz(ctx context.Context, hostID string,
+	pakiety []packages.InstalledPackage, stan StanListy,
+	ustalenia []UstalenieHosta, stanUstalen StanUstalen) error {
 	tx, err := m.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -71,12 +94,13 @@ func (m *MagazynPakietow) Zastap(ctx context.Context, hostID string,
 				hostID, pakiet.Name, pakiet.Architecture, pakiet.Epoch, pakiet.Version,
 				pakiet.Release, pakiet.SourceName, pakiet.SourceVersion, pakiet.SourceRPM,
 				pakiet.Vendor, pakiet.RepositoryID, pakiet.ModuleStream,
+				pakiet.Origin, pakiet.OriginClass,
 			})
 		}
 		_, err := tx.CopyFrom(ctx, pgx.Identifier{"host_packages"}, []string{
 			"host_id", "name", "architecture", "epoch", "version", "release",
 			"source_name", "source_version", "source_rpm", "vendor",
-			"repository_id", "module_stream",
+			"repository_id", "module_stream", "origin", "origin_class",
 		}, pgx.CopyFromRows(wiersze))
 		if err != nil {
 			return err
@@ -95,7 +119,63 @@ func (m *MagazynPakietow) Zastap(ctx context.Context, hostID string,
 		stan.CollectedAt, stan.JobID, stan.UnavailableReason); err != nil {
 		return err
 	}
+
+	if _, err := tx.Exec(ctx, `delete from host_advisories where host_id = $1`, hostID); err != nil {
+		return err
+	}
+	if len(ustalenia) > 0 {
+		wiersze := make([][]any, 0, len(ustalenia))
+		for _, ustalenie := range ustalenia {
+			wiersze = append(wiersze, []any{
+				hostID, ustalenie.AdvisoryID, ustalenie.PackageName, ustalenie.Architecture,
+				ustalenie.FixedEVR, ustalenie.CVEIDs, ustalenie.Severity, ustalenie.Title,
+				ustalenie.IssuedAt, ustalenie.CollectedAt,
+			})
+		}
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"host_advisories"}, []string{
+			"host_id", "advisory_id", "package_name", "architecture", "fixed_evr",
+			"cve_ids", "severity", "title", "issued_at", "collected_at",
+		}, pgx.CopyFromRows(wiersze)); err != nil {
+			return err
+		}
+	}
+
+	const zapisUstalen = `
+		insert into host_advisory_state (host_id, digest, advisory_count, collected_at,
+		                                 job_id, unavailable_reason)
+		values ($1, $2, $3, $4, nullif($5, '')::uuid, $6)
+		on conflict (host_id) do update set
+			digest = excluded.digest, advisory_count = excluded.advisory_count,
+			collected_at = excluded.collected_at, job_id = excluded.job_id,
+			unavailable_reason = excluded.unavailable_reason`
+	if _, err := tx.Exec(ctx, zapisUstalen, hostID, stanUstalen.Digest,
+		stanUstalen.AdvisoryCount, stanUstalen.CollectedAt, stanUstalen.JobID,
+		stanUstalen.UnavailableReason); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
+}
+
+// OdciskUstalen liczy odcisk zestawu ustalen znanych hostowi.
+//
+// Odcisk, a nie sama liczba: zestaw zmienia sie takze wtedy, gdy liczba
+// zostaje ta sama - producent podnosi wersje naprawiona w tym samym advisory.
+func OdciskUstalen(ustalenia []UstalenieHosta) string {
+	wiersze := make([]string, 0, len(ustalenia))
+	for _, ustalenie := range ustalenia {
+		wiersze = append(wiersze, strings.Join([]string{
+			ustalenie.AdvisoryID, ustalenie.PackageName, ustalenie.Architecture,
+			ustalenie.FixedEVR, ustalenie.Severity,
+		}, "\x1f"))
+	}
+	sort.Strings(wiersze)
+	suma := sha256.New()
+	suma.Write([]byte("flotestro/vuln/host-advisories/v1\n"))
+	for _, wiersz := range wiersze {
+		suma.Write([]byte(wiersz))
+		suma.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(suma.Sum(nil))
 }
 
 // Stan zwraca to, co panel wie o liscie pakietow hosta.
@@ -141,11 +221,30 @@ func (m *MagazynPakietow) Stany(ctx context.Context, hostIDs []string) (map[stri
 	return wynik, rows.Err()
 }
 
+// StanUstalenHosta zwraca to, co panel wie o ustaleniach producenta znanych
+// hostowi.
+func (m *MagazynPakietow) StanUstalenHosta(ctx context.Context, hostID string) (StanUstalen, error) {
+	const query = `
+		select host_id::text, digest, advisory_count, collected_at,
+		       coalesce(job_id::text, ''), unavailable_reason
+		from host_advisory_state where host_id = $1`
+	var stan StanUstalen
+	err := m.pool.QueryRow(ctx, query, hostID).Scan(&stan.HostID, &stan.Digest,
+		&stan.AdvisoryCount, &stan.CollectedAt, &stan.JobID, &stan.UnavailableReason)
+	if err == pgx.ErrNoRows {
+		// Brak wiersza to nie host bez ustalen: to host, ktorego jeszcze nie
+		// zapytano o metadane jego repozytoriow.
+		return StanUstalen{HostID: hostID, UnavailableReason: RodzajBrakUstalen}, nil
+	}
+	return stan, err
+}
+
 // Pakiety zwraca liste pakietow hosta.
 func (m *MagazynPakietow) Pakiety(ctx context.Context, hostID string) ([]packages.InstalledPackage, error) {
 	const query = `
 		select name, architecture, epoch, version, release, source_name,
-		       source_version, source_rpm, vendor, repository_id, module_stream
+		       source_version, source_rpm, vendor, repository_id, module_stream,
+		       origin, origin_class
 		from host_packages where host_id = $1 order by name, architecture`
 	rows, err := m.pool.Query(ctx, query, hostID)
 	if err != nil {
@@ -158,7 +257,7 @@ func (m *MagazynPakietow) Pakiety(ctx context.Context, hostID string) ([]package
 		if err := rows.Scan(&pakiet.Name, &pakiet.Architecture, &pakiet.Epoch,
 			&pakiet.Version, &pakiet.Release, &pakiet.SourceName, &pakiet.SourceVersion,
 			&pakiet.SourceRPM, &pakiet.Vendor, &pakiet.RepositoryID,
-			&pakiet.ModuleStream); err != nil {
+			&pakiet.ModuleStream, &pakiet.Origin, &pakiet.OriginClass); err != nil {
 			return nil, err
 		}
 		pakiety = append(pakiety, pakiet)
@@ -177,40 +276,6 @@ type UstalenieHosta struct {
 	Title        string     `json:"title,omitempty"`
 	IssuedAt     *time.Time `json:"issued_at,omitempty"`
 	CollectedAt  time.Time  `json:"collected_at"`
-}
-
-// ZastapUstalenia podmienia ustalenia producenta znane hostowi.
-//
-// Podmiana, a nie scalanie: lista pochodzi z jednego odczytu metadanych i albo
-// opisuje stan z tej chwili, albo nie opisuje niczego.
-func (m *MagazynPakietow) ZastapUstalenia(ctx context.Context, hostID string,
-	ustalenia []UstalenieHosta) error {
-	tx, err := m.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `delete from host_advisories where host_id = $1`, hostID); err != nil {
-		return err
-	}
-	if len(ustalenia) > 0 {
-		wiersze := make([][]any, 0, len(ustalenia))
-		for _, ustalenie := range ustalenia {
-			wiersze = append(wiersze, []any{
-				hostID, ustalenie.AdvisoryID, ustalenie.PackageName, ustalenie.Architecture,
-				ustalenie.FixedEVR, ustalenie.CVEIDs, ustalenie.Severity, ustalenie.Title,
-				ustalenie.IssuedAt, ustalenie.CollectedAt,
-			})
-		}
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"host_advisories"}, []string{
-			"host_id", "advisory_id", "package_name", "architecture", "fixed_evr",
-			"cve_ids", "severity", "title", "issued_at", "collected_at",
-		}, pgx.CopyFromRows(wiersze)); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
 }
 
 // UstaleniaHosta zwraca ustalenia producenta znane hostowi, zebrane po nazwie

@@ -38,7 +38,22 @@ type InstalledPackage struct {
 	// nie zapamietal - a nie, ze pakiet jest spoza repozytoriow.
 	RepositoryID string `json:"repository_id,omitempty"`
 	ModuleStream string `json:"module_stream,omitempty"`
+	// Origin jest adresem repozytorium, z ktorego pochodzi zainstalowana
+	// wersja, a OriginClass - jego klasyfikacja. APT nie zapisuje producenta
+	// przy pakiecie, wiec bez tego pakiet z obcego repozytorium wygladalby
+	// jak pakiet dystrybucji i liczylby sie jako objety jej ustaleniami.
+	Origin      string `json:"origin,omitempty"`
+	OriginClass string `json:"origin_class,omitempty"`
 }
+
+// Klasy pochodzenia pakietu. Te same wartosci czyta korelator: pakiet spoza
+// dystrybucji nie podlega ustaleniom jej producenta.
+const (
+	PochodzenieDystrybucja = "vendor_distribution"
+	PochodzenieObce        = "third_party_repository"
+	PochodzenieLokalne     = "local_package"
+	PochodzenieNieznane    = "origin_unknown"
+)
 
 // EVR sklada wersje w postaci, ktorej uzywa porownanie RPM.
 func (p InstalledPackage) EVR() string {
@@ -89,7 +104,11 @@ type ListaZainstalowanych struct {
 //
 // Kanonizacja jest jawna i wersjonowana: bez tego ta sama lista dawalaby rozne
 // odciski po zmianie kolejnosci pol, a panel co cykl pobieralby ja od nowa.
-const wersjaKanonizacjiListy = 1
+//
+// Wersja 2 dolozyla pochodzenie pakietu: zmiana repozytorium, z ktorego pakiet
+// przyszedl, zmienia to, co panel ma prawo o nim powiedziec - nawet gdy wersja
+// zostaje ta sama.
+const wersjaKanonizacjiListy = 2
 
 // Odcisk liczy odcisk listy pakietow.
 func Odcisk(pakiety []InstalledPackage) string {
@@ -111,6 +130,7 @@ func Odcisk(pakiety []InstalledPackage) string {
 		suma.Write([]byte(strings.Join([]string{
 			pakiet.Name, pakiet.Epoch, pakiet.Version, pakiet.Release,
 			pakiet.Architecture, pakiet.SourceName, pakiet.SourceVersion,
+			pakiet.OriginClass,
 		}, "\x1f")))
 		suma.Write([]byte{'\n'})
 	}
@@ -180,7 +200,178 @@ func zainstalowaneAPT(ctx context.Context) ([]InstalledPackage, string) {
 	if len(pakiety) == 0 {
 		return nil, "dpkg-query zwrocil pusta liste"
 	}
+	// Pochodzenie czytamy jednym wywolaniem dla wszystkich pakietow: osobne
+	// pytanie o kazdy z czterystu bylo by czterysta procesami.
+	UzupelnijPochodzenieAPT(ctx, pakiety)
 	return pakiety, ""
+}
+
+// UzupelnijPochodzenieAPT dopisuje pakietom repozytorium, z ktorego przyszla
+// zainstalowana wersja.
+//
+// APT nie zapisuje tego w bazie dpkg: wie to tylko z list pakietow, a "policy"
+// jest jedynym miejscem, ktore laczy zainstalowana wersje z jej zrodlem.
+// Pakiet, ktorego wersje daje wylacznie plik stanu dpkg, przyszedl spoza
+// repozytoriow - recznie albo z budowy lokalnej.
+func UzupelnijPochodzenieAPT(ctx context.Context, pakiety []InstalledPackage) {
+	if len(pakiety) == 0 {
+		return
+	}
+	nazwy := make([]string, 0, len(pakiety))
+	for _, pakiet := range pakiety {
+		nazwy = append(nazwy, pakiet.Name)
+	}
+	wynik := run(ctx, 3*time.Minute, "/usr/bin/apt-cache", append([]string{"policy"}, nazwy...)...)
+	if !wynik.Ran || wynik.ExitCode != 0 {
+		// Brak wiedzy o pochodzeniu zostaje brakiem wiedzy: korelator uzna
+		// takie pakiety za nieustalone, a nie za pakiety dystrybucji.
+		return
+	}
+	pochodzenie := ParsujPolicyAPT(wynik.Stdout)
+	for i := range pakiety {
+		if wpis, znany := pochodzenie[pakiety[i].Name]; znany {
+			pakiety[i].Origin = wpis.Origin
+			pakiety[i].OriginClass = wpis.Class
+		} else {
+			pakiety[i].OriginClass = PochodzenieNieznane
+		}
+	}
+}
+
+// WpisPochodzenia opisuje zrodlo zainstalowanej wersji pakietu.
+type WpisPochodzenia struct {
+	Origin string
+	Class  string
+}
+
+// ParsujPolicyAPT czyta wyjscie "apt-cache policy" dla wielu pakietow.
+//
+// Blok pakietu ma wersje zainstalowana i tabele zrodel z priorytetami. Wersja
+// zainstalowana jest oznaczona trzema gwiazdkami; wiersze pod nia mowia, skad
+// przyszla.
+//
+// Wersja znana wylacznie z pliku stanu dpkg nie oznacza jeszcze pakietu
+// zbudowanego lokalnie. Tak wyglada takze wersja wycofana z repozytorium -
+// stare jadro, ktore lezy na dysku po aktualizacji. Dlatego gdy sama wersja
+// nie ma zrodla, pytamy o pakiet: jesli inne jego wersje pochodza z repozytoriow
+// dystrybucji, to jest pakiet dystrybucji z wersja, ktorej juz nie wydaje.
+// Wlasnie takie pakiety sa najwazniejsze dla oceny podatnosci - wypchniecie
+// ich poza pokrycie ukrywaloby niezalatane jadra.
+func ParsujPolicyAPT(wyjscie string) map[string]WpisPochodzenia {
+	wynik := map[string]WpisPochodzenia{}
+	nazwa := ""
+	zainstalowana := ""
+	wInstalowanej := false
+	var zWersji, zPakietu WpisPochodzenia
+
+	zamknij := func() {
+		if nazwa == "" || zainstalowana == "" || zainstalowana == "(none)" {
+			return
+		}
+		switch {
+		case zWersji.Class != "" && zWersji.Class != PochodzenieLokalne:
+			wynik[nazwa] = zWersji
+		case zPakietu.Class != "":
+			// Wersja wycofana: pakiet nadal nalezy do repozytorium, z ktorego
+			// przyszedl, choc tej jego wersji juz tam nie ma.
+			wynik[nazwa] = zPakietu
+		case zWersji.Class != "":
+			wynik[nazwa] = zWersji
+		default:
+			wynik[nazwa] = WpisPochodzenia{Class: PochodzenieNieznane}
+		}
+	}
+
+	for _, linia := range strings.Split(wyjscie, "\n") {
+		przycieta := strings.TrimSpace(linia)
+		if przycieta == "" {
+			continue
+		}
+		// Naglowek bloku: "nazwa:" przy lewej krawedzi.
+		if !strings.HasPrefix(linia, " ") && strings.HasSuffix(przycieta, ":") {
+			zamknij()
+			nazwa = strings.TrimSuffix(przycieta, ":")
+			if dwukropek := strings.Index(nazwa, ":"); dwukropek > 0 {
+				// Pakiet wieloarchitekturowy ma sufiks architektury.
+				nazwa = nazwa[:dwukropek]
+			}
+			zainstalowana, wInstalowanej = "", false
+			zWersji, zPakietu = WpisPochodzenia{}, WpisPochodzenia{}
+			continue
+		}
+		if nazwa == "" {
+			continue
+		}
+		if strings.HasPrefix(przycieta, "Installed:") {
+			zainstalowana = strings.TrimSpace(strings.TrimPrefix(przycieta, "Installed:"))
+			continue
+		}
+		pola := strings.Fields(przycieta)
+		if strings.HasPrefix(przycieta, "***") {
+			wInstalowanej = len(pola) >= 2 && pola[1] == zainstalowana
+			continue
+		}
+		switch {
+		case len(pola) >= 2 && sameCyfry(pola[0]):
+			// Wiersz zrodla: priorytet, adres, suite, komponent.
+			wpis := KlasaZrodlaAPT(przycieta)
+			if wInstalowanej && zWersji.Class == "" {
+				zWersji = wpis
+			}
+			if wpis.Class == PochodzenieDystrybucja ||
+				(wpis.Class == PochodzenieObce && zPakietu.Class == "") {
+				zPakietu = wpis
+			}
+		case len(pola) >= 2 && sameCyfry(pola[len(pola)-1]):
+			// Wiersz kolejnej wersji: od tego miejsca zrodla dotycza jej,
+			// a nie wersji zainstalowanej.
+			wInstalowanej = false
+		}
+	}
+	zamknij()
+	return wynik
+}
+
+// sameCyfry mowi, czy napis sklada sie wylacznie z cyfr.
+func sameCyfry(napis string) bool {
+	if napis == "" {
+		return false
+	}
+	for _, znak := range napis {
+		if znak < '0' || znak > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// adresyDystrybucji rozpoznaje repozytoria producenta.
+//
+// Lista jest krotka i jawna: wszystko poza nia jest obcym repozytorium, a nie
+// pakietem dystrybucji. Blad w te strone daje "nie wiadomo", a nie falszywe
+// "objete ustaleniami".
+var adresyDystrybucji = []string{
+	"debian.org", "debian.net", "ubuntu.com", "canonical.com", "raspbian.org",
+}
+
+// KlasaZrodlaAPT klasyfikuje wiersz zrodla z "apt-cache policy".
+func KlasaZrodlaAPT(wiersz string) WpisPochodzenia {
+	pola := strings.Fields(wiersz)
+	if len(pola) < 2 {
+		return WpisPochodzenia{Class: PochodzenieNieznane}
+	}
+	adres := pola[1]
+	if strings.Contains(adres, "/var/lib/dpkg/status") {
+		// Wersja znana wylacznie z pliku stanu: pakiet przyszedl spoza
+		// repozytoriow - recznie albo z budowy lokalnej.
+		return WpisPochodzenia{Origin: adres, Class: PochodzenieLokalne}
+	}
+	for _, producent := range adresyDystrybucji {
+		if strings.Contains(adres, producent) {
+			return WpisPochodzenia{Origin: adres, Class: PochodzenieDystrybucja}
+		}
+	}
+	return WpisPochodzenia{Origin: adres, Class: PochodzenieObce}
 }
 
 // zainstalowaneRPM czyta baze RPM w pelnej postaci NEVRA.

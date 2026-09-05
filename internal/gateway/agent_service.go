@@ -1935,16 +1935,25 @@ func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID st
 		pakiety = nil
 		stan.PackageCount = 0
 	}
-	if err := s.pakiety.Zastap(ctx, hostID, pakiety, stan); err != nil {
-		s.log.Error("nie zapisano listy pakietow", "host_id", hostID, "err", err)
-		return
-	}
 
 	// Ustalenia producenta znane hostowi zapisujemy razem z lista: pochodza
-	// z tego samego odczytu i opisuja ten sam moment.
-	ustalenia := ustaleniaZWyniku(wynik, teraz)
-	if err := s.pakiety.ZastapUstalenia(ctx, hostID, ustalenia); err != nil {
-		s.log.Error("nie zapisano ustalen producenta", "host_id", hostID, "err", err)
+	// z tego samego odczytu i opisuja ten sam moment. Blad ich odczytu nie
+	// moze wygladac jak host bez ustalen - dlatego niesie wlasny powod.
+	ustalenia, powod := ustaleniaZWyniku(wynik, teraz)
+	stanUstalen := vuln.StanUstalen{
+		HostID: hostID, JobID: jobID, CollectedAt: &teraz,
+		AdvisoryCount: len(ustalenia), UnavailableReason: powod,
+	}
+	if powod == "" {
+		stanUstalen.Digest = vuln.OdciskUstalen(ustalenia)
+	} else {
+		ustalenia = nil
+		stanUstalen.AdvisoryCount = 0
+	}
+
+	if err := s.pakiety.ZastapObraz(ctx, hostID, pakiety, stan, ustalenia, stanUstalen); err != nil {
+		s.log.Error("nie zapisano obrazu pakietow", "host_id", hostID, "err", err)
+		return
 	}
 	s.log.Info("zapisano liste pakietow", "host_id", hostID,
 		"pakietow", len(pakiety), "ustalen", len(ustalenia), "odcisk", stan.Digest)
@@ -1954,13 +1963,20 @@ func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID st
 //
 // Jedno ustalenie dotyczy zwykle kilku pakietow; panel przechowuje je po
 // pakiecie, bo tak przebiega korelacja.
-func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult, teraz time.Time) []vuln.UstalenieHosta {
+func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult,
+	teraz time.Time) ([]vuln.UstalenieHosta, string) {
+	if powod := wynik.GetAdvisoriesUnavailableReason(); powod != "" {
+		return nil, powod
+	}
 	if len(wynik.GetAdvisories()) == 0 {
-		return nil
+		return nil, ""
 	}
 	var zebrane []modulpakiety.Advisory
 	if err := json.Unmarshal(wynik.GetAdvisories(), &zebrane); err != nil {
-		return nil
+		// Metadanych nie dalo sie rozpoznac. Pusta lista znaczylaby tu "host
+		// nie ma zadnych ustalen producenta" - czyli cos, czego nikt nie
+		// sprawdzil.
+		return nil, vuln.RodzajUstaleniaNieczytelne
 	}
 	var ustalenia []vuln.UstalenieHosta
 	for _, ustalenie := range zebrane {
@@ -1980,5 +1996,5 @@ func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult, teraz time.Time) [
 			})
 		}
 	}
-	return ustalenia
+	return ustalenia, ""
 }
