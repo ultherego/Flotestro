@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -263,9 +264,27 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 		return plan, fmt.Errorf("dnf install: %s", result.Reason())
 	}
 	wyjscie := result.Stdout + "\n" + result.Stderr
-	for _, wpis := range ParsujPlanInstalacjiDNF(wyjscie) {
-		plan.Changes = append(plan.Changes, wpis)
+	// Pakiet, ktorego nie ma w zadnym zrodle, konczy sie kodem bledu
+	// i komunikatem - i to jest odpowiedz, a nie plan pusty.
+	if BrakPakietuDNF(wyjscie) {
+		return plan, fmt.Errorf("dnf nie zna pakietu z tego zlecenia")
 	}
+	if powod := NierozwiazywalneDNF(wyjscie); powod != "" {
+		return plan, fmt.Errorf("dnf nie potrafi ulozyc tej transakcji: %s", powod)
+	}
+	// Transakcje przerwana przed wykonaniem dnf konczy kodem niezerowym;
+	// kod zero oznacza tu, ze nie bylo czego instalowac albo ze narzedzie
+	// odpowiedzialo inaczej, niz zakladamy.
+	zmiany := ParsujPlanInstalacjiDNF(wyjscie)
+	if len(zmiany) == 0 {
+		if result.ExitCode == 0 && CalaTransakcjaGotowa(wyjscie) {
+			// Wszystko juz jest zainstalowane: plan pusty jest tu prawdziwy.
+			return plan, nil
+		}
+		return plan, fmt.Errorf("nie rozpoznano planu instalacji z odpowiedzi dnf (kod %d)",
+			result.ExitCode)
+	}
+	plan.Changes = append(plan.Changes, zmiany...)
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
 	return plan, nil
 }
@@ -280,6 +299,14 @@ var naglowkiUsuniecia = []string{
 	"removing dependencies:",
 }
 
+// Podsumowanie transakcji. Dnf5 pisze "Removing: 3 packages", dnf4 -
+// "Remove  3 Packages"; ta liczba jest jedynym zabezpieczeniem przed
+// niepelnym odczytem tabeli, wiec czytamy oba zapisy.
+var (
+	podsumowaniaUsuniecia  = []string{"removing:", "remove "}
+	podsumowaniaInstalacji = []string{"installing:", "install "}
+)
+
 var naglowkiInstalacji = []string{
 	"installing:",
 	"installing dependencies:",
@@ -293,13 +320,13 @@ var naglowkiInstalacji = []string{
 // Rozbieznosc miedzy nimi jest bledem, a nie szczegolem: to znaczy, ze format
 // wyjscia sie zmienil, a lista pokazana czlowiekowi bylaby niepelna.
 func ParsujPlanUsunieciaDNF(wyjscie string) ([]string, int, error) {
-	nazwy, zapowiedziane := sekcjeTransakcjiDNF(wyjscie, naglowkiUsuniecia, "removing:")
+	nazwy, zapowiedziane := sekcjeTransakcjiDNF(wyjscie, naglowkiUsuniecia, podsumowaniaUsuniecia)
 	return nazwy, zapowiedziane, nil
 }
 
 // ParsujPlanInstalacjiDNF czyta z tabeli transakcji to, co dojdzie.
 func ParsujPlanInstalacjiDNF(wyjscie string) []Change {
-	nazwy, _ := sekcjeTransakcjiDNF(wyjscie, naglowkiInstalacji, "installing:")
+	nazwy, _ := sekcjeTransakcjiDNF(wyjscie, naglowkiInstalacji, podsumowaniaInstalacji)
 	zmiany := make([]Change, 0, len(nazwy))
 	for _, nazwa := range nazwy {
 		zmiany = append(zmiany, Change{Name: nazwa})
@@ -312,7 +339,7 @@ func ParsujPlanInstalacjiDNF(wyjscie string) []Change {
 // Tabela ma naglowki sekcji przy lewej krawedzi i wpisy z wcieciem; kolumny to
 // nazwa, architektura, wersja, repozytorium i rozmiar. Podsumowanie na koncu
 // podaje liczby - i to one sluza do sprawdzenia, czy odczyt jest pelny.
-func sekcjeTransakcjiDNF(wyjscie string, naglowki []string, podsumowanie string) ([]string, int) {
+func sekcjeTransakcjiDNF(wyjscie string, naglowki, podsumowania []string) ([]string, int) {
 	var nazwy []string
 	widziane := map[string]bool{}
 	wSekcji := false
@@ -330,9 +357,10 @@ func sekcjeTransakcjiDNF(wyjscie string, naglowki []string, podsumowanie string)
 			continue
 		}
 		if wPodsumowaniu {
-			if strings.HasPrefix(male, podsumowanie) {
-				pola := strings.Fields(male)
-				for _, pole := range pola {
+			// Dnf5 pisze "Removing: 3 packages", dnf4 - "Remove  3 Packages".
+			// Czytamy oba, bo to ta liczba pilnuje, czy odczyt jest pelny.
+			if pasujeDoPodsumowania(male, podsumowania) {
+				for _, pole := range strings.Fields(male) {
 					if liczba, err := strconv.Atoi(pole); err == nil {
 						zapowiedziane = liczba
 						break
@@ -367,6 +395,16 @@ func sekcjeTransakcjiDNF(wyjscie string, naglowki []string, podsumowanie string)
 	return nazwy, zapowiedziane
 }
 
+// pasujeDoPodsumowania rozpoznaje wiersz podsumowania w obu pokoleniach dnf.
+func pasujeDoPodsumowania(linia string, podsumowania []string) bool {
+	for _, prefiks := range podsumowania {
+		if strings.HasPrefix(linia, prefiks) {
+			return true
+		}
+	}
+	return false
+}
+
 func zawiera(lista []string, wartosc string) bool {
 	for _, wpis := range lista {
 		if wpis == wartosc {
@@ -376,12 +414,23 @@ func zawiera(lista []string, wartosc string) bool {
 	return false
 }
 
-// BrakPakietuDNF rozpoznaje odpowiedz "nie ma czego usuwac".
+// BrakPakietuDNF rozpoznaje odpowiedz "nie ma takiego pakietu".
 func BrakPakietuDNF(wyjscie string) bool {
 	male := strings.ToLower(wyjscie)
 	return strings.Contains(male, "no packages to remove") ||
 		strings.Contains(male, "no match for argument") ||
-		strings.Contains(male, "nothing to do")
+		strings.Contains(male, "unable to find a match")
+}
+
+// CalaTransakcjaGotowa rozpoznaje odpowiedz "nie ma czego robic".
+//
+// To jedyny przypadek, w ktorym pusty plan instalacji jest prawdziwy: wszystko
+// z zlecenia jest juz zainstalowane w wersji, ktorej dnf nie zmienia.
+func CalaTransakcjaGotowa(wyjscie string) bool {
+	male := strings.ToLower(wyjscie)
+	return strings.Contains(male, "nothing to do") ||
+		strings.Contains(male, "package is already installed") ||
+		strings.Contains(male, "already installed")
 }
 
 // Install doklada pakiety wraz z ich zaleznosciami.
@@ -479,7 +528,9 @@ func (d *DNF) SetHold(ctx context.Context, pakiety []string, hold bool) (Apply, 
 
 // Holds zwraca pakiety wstrzymane na hoscie.
 func (d *DNF) Holds(ctx context.Context) []string {
-	result := run(ctx, time.Minute, dnfPath, dnfVersionlock, "list")
+	// --quiet zdejmuje z wyjscia wiersze o metadanych; bez tego pierwsza
+	// linia bywala pokazywana jako nazwa wstrzymanego pakietu.
+	result := run(ctx, time.Minute, dnfPath, "--quiet", dnfVersionlock, "list")
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
 	}
@@ -516,29 +567,33 @@ func ParsujVersionlock(wyjscie string) []string {
 			dodaj(nazwa)
 			continue
 		}
-		if strings.HasPrefix(przycieta, "evr") || strings.Contains(przycieta, "=") &&
-			!strings.Contains(przycieta, "-") {
-			continue
+		// Wpis dnf4 jest wzorcem NEVRA: nazwa-epoka:wersja-wydanie.arch albo
+		// nazwa-epoka:wersja-*. Cokolwiek innego - wiersz o metadanych,
+		// nagłowek, komunikat - nie jest blokada i nie moze udawac nazwy
+		// pakietu na liscie wstrzymanych.
+		if nazwa := nazwaZWzorcaNEVRA(przycieta); nazwa != "" {
+			dodaj(nazwa)
 		}
-		// Format dnf4: nazwa-epoka:wersja-wydanie.arch. Nazwa konczy sie tam,
-		// gdzie zaczyna sie czlon zaczynajacy sie cyfra.
-		dodaj(nazwaZWzorcaRPM(przycieta))
 	}
 	return nazwy
 }
 
-// nazwaZWzorcaRPM wyciaga nazwe pakietu ze wzorca wersji.
-func nazwaZWzorcaRPM(wzorzec string) string {
-	czesci := strings.Split(wzorzec, "-")
-	for i, czesc := range czesci {
-		if czesc == "" {
-			continue
-		}
-		if czesc[0] >= '0' && czesc[0] <= '9' {
-			return strings.Join(czesci[:i], "-")
-		}
+// wzorzecNEVRA rozpoznaje wpis blokady w formacie dnf4.
+//
+// Wzorzec jest scisly celowo: wiersz, ktory nie jest blokada, ma zostac
+// pominiety, a nie trafic na liste wstrzymanych pakietow. Lista z wpisem
+// "Last metadata expiration check" mowilaby operatorowi, ze wstrzymano
+// pakiet, ktory nie istnieje.
+var wzorzecNEVRA = regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9._+-]*?)-([0-9]+:)?[0-9][^\s-]*-[^\s-]+$`)
+
+// nazwaZWzorcaNEVRA wyciaga nazwe pakietu ze wzorca blokady albo zwraca
+// pustke, gdy wiersz blokada nie jest.
+func nazwaZWzorcaNEVRA(wzorzec string) string {
+	dopasowanie := wzorzecNEVRA.FindStringSubmatch(strings.TrimSpace(wzorzec))
+	if dopasowanie == nil {
+		return ""
 	}
-	return wzorzec
+	return dopasowanie[1]
 }
 
 // NierozwiazywalneDNF rozpoznaje transakcje, ktorej dnf nie potrafi ulozyc,

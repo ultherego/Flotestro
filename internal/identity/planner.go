@@ -307,10 +307,7 @@ func (p *Planner) planRekord(ctx context.Context, spec *DNSRecordPayload, dopisa
 		czasownik = "Usuniecie"
 		krok = "usuniecie rekordu"
 	}
-	pelna := spec.Name + "." + strings.TrimSuffix(spec.Zone, ".")
-	if spec.Name == "@" {
-		pelna = strings.TrimSuffix(spec.Zone, ".")
-	}
+	pelna := freeipa.PelnaNazwa(spec.Zone, spec.Name)
 	plan := Plan{
 		Summary: fmt.Sprintf("%s rekordu %s %s %s", czasownik, spec.Type, pelna, spec.Value),
 		Steps:   []string{krok + " " + spec.Type + " " + pelna + " -> " + spec.Value},
@@ -318,14 +315,20 @@ func (p *Planner) planRekord(ctx context.Context, spec *DNSRecordPayload, dopisa
 
 	strefaOdwrotna, nazwaOdwrotna := "", ""
 	if spec.Reverse {
-		strefaOdwrotna, nazwaOdwrotna = spec.ReverseZone, ""
 		wyliczona, nazwa, err := freeipa.StrefaOdwrotna(spec.Value)
 		if err != nil {
 			return plan, err
 		}
-		nazwaOdwrotna = nazwa
-		if strefaOdwrotna == "" {
-			strefaOdwrotna = wyliczona
+		strefaOdwrotna, nazwaOdwrotna = wyliczona, nazwa
+		if spec.ReverseZone != "" {
+			// Strefa wskazana wprost bywa wezsza niz /24: nazwa wzgledna
+			// liczy sie wtedy wzgledem niej, a nie wzgledem podzialu, ktory
+			// panel zalozyl sam.
+			strefaOdwrotna = strings.TrimSuffix(spec.ReverseZone, ".")
+			nazwaOdwrotna, err = freeipa.NazwaWStrefie(spec.Value, strefaOdwrotna)
+			if err != nil {
+				return plan, err
+			}
 		}
 		plan.Steps = append(plan.Steps, krok+" odwrotnego PTR "+nazwaOdwrotna+"."+strefaOdwrotna+
 			" -> "+pelna)

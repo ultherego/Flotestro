@@ -1,6 +1,9 @@
 package freeipa
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRecordSpecWalidujeTypIWartosc(t *testing.T) {
 	dobre := []RecordSpec{
@@ -89,5 +92,46 @@ func TestPoleceniaDNSSaNaLiscieDozwolonych(t *testing.T) {
 		if allowedMethod(metoda) {
 			t.Errorf("polecenie %s nie powinno byc dozwolone", metoda)
 		}
+	}
+}
+
+func TestPelnaNazwaObslugujeKorzenStrefy(t *testing.T) {
+	// Cel PTR "@.flotestro.test." nie wskazuje niczego, a wyglada jak
+	// poprawny rekord - dlatego korzen strefy ma wspolna funkcje.
+	if PelnaNazwa("flotestro.test", "@") != "flotestro.test" {
+		t.Fatalf("korzen strefy = %q", PelnaNazwa("flotestro.test", "@"))
+	}
+	if PelnaNazwa("flotestro.test.", "") != "flotestro.test" {
+		t.Fatalf("pusta nazwa = %q", PelnaNazwa("flotestro.test.", ""))
+	}
+	if PelnaNazwa("flotestro.test", "web") != "web.flotestro.test" {
+		t.Fatalf("nazwa = %q", PelnaNazwa("flotestro.test", "web"))
+	}
+}
+
+func TestNazwaWStrefieLiczyNazweWzgledemWskazanejStrefy(t *testing.T) {
+	// Podzial /24: nazwa jest jednym czlonem.
+	nazwa, err := NazwaWStrefie("192.168.56.10", "56.168.192.in-addr.arpa")
+	if err != nil || nazwa != "10" {
+		t.Fatalf("nazwa=%q err=%v", nazwa, err)
+	}
+	// Podzial szerszy niz /24: nazwa jest dluzsza. Policzenie jej dla /24
+	// dawalo rekord dla zupelnie innego adresu.
+	nazwa, err = NazwaWStrefie("192.168.56.10", "168.192.in-addr.arpa")
+	if err != nil || nazwa != "10.56" {
+		t.Fatalf("nazwa=%q err=%v", nazwa, err)
+	}
+	// Strefa, ktora tego adresu nie obejmuje, jest bledem, a nie rekordem
+	// zapisanym gdzie indziej.
+	if _, err := NazwaWStrefie("192.168.56.10", "57.168.192.in-addr.arpa"); err == nil {
+		t.Fatal("strefa spoza adresu zostala przyjeta")
+	}
+	// IPv6 wzgledem strefy /48.
+	nazwa, err = NazwaWStrefie("2001:db8:1::1", "1.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa")
+	if err != nil {
+		t.Fatalf("IPv6: %v", err)
+	}
+	if !strings.HasSuffix(nazwa, ".0.0.0.0") || strings.Contains(nazwa, "ip6.arpa") {
+		t.Fatalf("IPv6: nazwa=%q", nazwa)
 	}
 }

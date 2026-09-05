@@ -63,7 +63,7 @@ func TestParsujPlanUsunieciaDNFCzytaWszystkieSekcje(t *testing.T) {
 }
 
 func TestParsujPlanUsunieciaDNFCzytaTakzeStarszyFormat(t *testing.T) {
-	usuwane, _, err := ParsujPlanUsunieciaDNF(wyjscieUsunieciaDNF4)
+	usuwane, zapowiedziane, err := ParsujPlanUsunieciaDNF(wyjscieUsunieciaDNF4)
 	if err != nil {
 		t.Fatalf("ParsujPlanUsunieciaDNF: %v", err)
 	}
@@ -80,6 +80,12 @@ func TestParsujPlanUsunieciaDNFCzytaTakzeStarszyFormat(t *testing.T) {
 	}
 	if !znaleziony {
 		t.Errorf("pakiet zalezny nie trafil na liste: %v", usuwane)
+	}
+	// Liczba z podsumowania jest jedynym zabezpieczeniem przed niepelnym
+	// odczytem, wiec musi byc odczytana takze w starszym formacie - tam
+	// wiersz brzmi "Remove  3 Packages", bez dwukropka.
+	if zapowiedziane != 3 {
+		t.Fatalf("dnf4 zapowiedzial %d pakietow", zapowiedziane)
 	}
 }
 
@@ -119,21 +125,39 @@ func TestParsujVersionlockCzytaObaFormaty(t *testing.T) {
 	if nazwy := ParsujVersionlock(dnf5); len(nazwy) != 1 || nazwy[0] != "restic" {
 		t.Fatalf("dnf5: odczytano %v", nazwy)
 	}
-	dnf4 := "Last metadata expiration check: 0:00:12 ago.\n" +
+
+	// Wiersz o metadanych nie jest blokada. Pokazany jako nazwa pakietu
+	// mowilby operatorowi, ze wstrzymano cos, czego nie ma.
+	dnf4 := "Last metadata expiration check: 0:00:12 ago on Sat 05 Sep 2026.\n" +
 		"restic-0:0.18.1-1.fc42.*\nkernel-0:6.11.4-201.fc41.*\n"
 	nazwy := ParsujVersionlock(dnf4)
-	if len(nazwy) != 3 {
-		// Pierwsza linia dnf4 nie jest blokada, ale nie da sie jej odroznic
-		// bez zgadywania - i lepiej pokazac o jedna pozycje za duzo niz
-		// zgubic blokade, ktora naprawde obowiazuje.
-		t.Logf("odczytano %v", nazwy)
+	if len(nazwy) != 2 {
+		t.Fatalf("dnf4: odczytano %v, oczekiwano dokladnie dwoch blokad", nazwy)
 	}
-	znaleziony := map[string]bool{}
-	for _, nazwa := range nazwy {
-		znaleziony[nazwa] = true
+	if nazwy[0] != "restic" || nazwy[1] != "kernel" {
+		t.Fatalf("dnf4: odczytano %v", nazwy)
 	}
-	if !znaleziony["restic"] || !znaleziony["kernel"] {
-		t.Fatalf("dnf4: nie odczytano blokad: %v", nazwy)
+
+	// Nazwa z myslnikiem i pakiet bez epoki tez sa poprawnymi wpisami.
+	zlozone := ParsujVersionlock("python3-dnf-plugin-versionlock-0:4.5.0-1.fc42.*\n" +
+		"tree-2.2.1-1.fc42.*\n")
+	if len(zlozone) != 2 || zlozone[0] != "python3-dnf-plugin-versionlock" || zlozone[1] != "tree" {
+		t.Fatalf("odczytano %v", zlozone)
+	}
+}
+
+func TestPlanInstalacjiNieMilczyOOdmowie(t *testing.T) {
+	// Pakiet, ktorego nie ma w zadnym zrodle, nie moze skonczyc sie planem
+	// pustym: pusty plan czyta sie jako "nic nie trzeba dokladac".
+	if !BrakPakietuDNF("Unable to find a match: nie-ma-takiego-pakietu") {
+		t.Fatal("brak pakietu nie zostal rozpoznany")
+	}
+	// Za to "nothing to do" przy instalacji znaczy, ze wszystko juz jest.
+	if !CalaTransakcjaGotowa("Package tree-2.2.1-1.fc42.x86_64 is already installed.\nNothing to do.") {
+		t.Fatal("gotowa transakcja nie zostala rozpoznana")
+	}
+	if CalaTransakcjaGotowa(wyjscieUsunieciaDNF5) {
+		t.Fatal("zwykla tabela transakcji uznana za gotowa")
 	}
 }
 

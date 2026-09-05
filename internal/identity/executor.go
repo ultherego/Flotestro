@@ -329,13 +329,18 @@ func (e *Executor) zapiszRekord(ctx context.Context, spec *DNSRecordPayload, dop
 		return phases
 	}
 
+	// Strefa wskazana wprost nie moze zostawic nazwy policzonej dla /24:
+	// wtedy PTR powstalby dla innego adresu niz ten w zleceniu.
 	strefa, nazwa, err := freeipa.StrefaOdwrotna(spec.Value)
 	if spec.ReverseZone != "" {
 		strefa = strings.TrimSuffix(spec.ReverseZone, ".")
+		nazwa, err = freeipa.NazwaWStrefie(spec.Value, strefa)
 	}
 	phase = startPhase("rekord odwrotny PTR " + nazwa + "." + strefa)
 	if err == nil {
-		cel := strings.TrimSuffix(spec.Name+"."+strings.TrimSuffix(spec.Zone, "."), ".") + "."
+		// Cel PTR jest pelna nazwa rekordu w przod - takze wtedy, gdy
+		// rekord stoi w korzeniu strefy i zapisuje sie jako "@".
+		cel := freeipa.PelnaNazwa(spec.Zone, spec.Name) + "."
 		odwrotny := freeipa.RecordSpec{
 			Zone: strefa, Name: nazwa, Type: freeipa.RekordPTR, Value: cel, TTL: spec.TTL,
 		}

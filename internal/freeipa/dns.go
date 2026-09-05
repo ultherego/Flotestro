@@ -234,6 +234,50 @@ func (c *Client) RemoveRecord(ctx context.Context, spec RecordSpec) error {
 	return err
 }
 
+// PelnaNazwa sklada pelna nazwe rekordu ze strefy i nazwy wzglednej.
+//
+// Wpis w korzeniu strefy zapisuje sie jako "@" i nie moze dac nazwy
+// zaczynajacej sie od tego znaku: cel PTR "@.example.test." nie wskazuje
+// niczego, a wyglada jak poprawny rekord.
+func PelnaNazwa(zone, name string) string {
+	strefa := strings.TrimSuffix(zone, ".")
+	if name == "" || name == "@" {
+		return strefa
+	}
+	return strings.TrimSuffix(name, ".") + "." + strefa
+}
+
+// NazwaWStrefie liczy nazwe wzgledna rekordu PTR w podanej strefie odwrotnej.
+//
+// Strefa odwrotna nie musi obejmowac calego /24 ani /64: instalacja moze miec
+// podzial waskiej, wskazany wprost w zleceniu. Wtedy nazwa wzgledna jest
+// dluzsza niz jeden czlon - a policzenie jej dla /24 dawalo rekord dla zupelnie
+// innego adresu. Dlatego liczymy pelna nazwe arpa i odejmujemy od niej strefe,
+// zamiast zakladac szerokosc podzialu.
+func NazwaWStrefie(adres, strefa string) (string, error) {
+	pelna, err := PelnaNazwaOdwrotna(adres)
+	if err != nil {
+		return "", err
+	}
+	oczyszczona := strings.TrimSuffix(strings.TrimSpace(strefa), ".")
+	if oczyszczona == "" {
+		return "", fmt.Errorf("nie wskazano strefy odwrotnej")
+	}
+	if !strings.HasSuffix(pelna, "."+oczyszczona) {
+		return "", fmt.Errorf("adres %s nie nalezy do strefy %s", adres, oczyszczona)
+	}
+	return strings.TrimSuffix(pelna, "."+oczyszczona), nil
+}
+
+// PelnaNazwaOdwrotna liczy pelna nazwe arpa dla adresu.
+func PelnaNazwaOdwrotna(adres string) (string, error) {
+	strefa, nazwa, err := StrefaOdwrotna(adres)
+	if err != nil {
+		return "", err
+	}
+	return nazwa + "." + strefa, nil
+}
+
 // StrefaOdwrotna liczy strefe i nazwe rekordu PTR dla adresu.
 //
 // Rekord odwrotny jest osobnym, widocznym elementem planu: to on decyduje,

@@ -156,6 +156,10 @@ func Validate(action ActionType, payload Payload) error {
 				if _, _, err := freeipa.StrefaOdwrotna(payload.DNS.Value); err != nil {
 					return err
 				}
+			} else if _, err := freeipa.NazwaWStrefie(payload.DNS.Value, payload.DNS.ReverseZone); err != nil {
+				// Strefa, ktora nie obejmuje tego adresu, dalaby rekord PTR
+				// dla zupelnie innego hosta.
+				return err
 			}
 		}
 	default:
