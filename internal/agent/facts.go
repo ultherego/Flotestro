@@ -65,7 +65,14 @@ type Packages struct {
 	Installed          *uint32 `json:"installed,omitempty"`
 	Upgradable         *uint32 `json:"upgradable,omitempty"`
 	SecurityUpgradable *uint32 `json:"security_upgradable,omitempty"`
-	UnavailableReason  string  `json:"unavailable_reason,omitempty"`
+	// InstalledDigest i InstalledCount opisuja pelna liste pakietow, ktorej
+	// inwentarz nie niesie: panel porownuje odcisk ze swoja kopia i wie,
+	// kiedy jego lista przestala opisywac host. Bez tego brak wiersza
+	// w bazie panelu wygladalby jak host bez podatnosci.
+	InstalledDigest   string  `json:"installed_digest,omitempty"`
+	InstalledCount    *uint32 `json:"installed_count,omitempty"`
+	InstalledReason   string  `json:"installed_unavailable_reason,omitempty"`
+	UnavailableReason string  `json:"unavailable_reason,omitempty"`
 }
 
 // Health to sygnaly wysylane w heartbeacie. Wskazniki puste oznaczaja stan

@@ -52,6 +52,9 @@ const (
 	PermProcessSignal Permission = "process.signal"
 	// Pelny cykl zycia pakietow. Instalacja i usuwanie sa oddzielone od
 	// aktualizacji: to trzy rozne decyzje o tym samym hoscie.
+	// Pelna lista pakietow jest odczytem inwentarza, ale osobnym: to z niej
+	// bierze sie ocena podatnosci, wiec ma wlasne uprawnienie i wlasny slad.
+	PermPackagesRead    Permission = "packages.read"
 	PermPackagesInstall Permission = "packages.install"
 	PermPackagesRemove  Permission = "packages.remove"
 	PermPackagesHold    Permission = "packages.hold.write"
@@ -266,7 +269,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
-		PermBackupRead, PermMonitoringRead,
+		PermBackupRead, PermMonitoringRead, PermPackagesRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -286,6 +289,9 @@ var rolePermissions = map[Role][]Permission{
 		// Alerty i wyciszenia sa materialem audytu: wyciszenie zalozone
 		// na kwartal jest ustaleniem, a nie szczegolem dyzuru.
 		PermMonitoringRead,
+		// Lista pakietow jest podstawa oceny podatnosci, wiec audytor musi
+		// moc ja zobaczyc.
+		PermPackagesRead,
 		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
 		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
 		PermSecretRead,
@@ -301,7 +307,7 @@ var rolePermissions = map[Role][]Permission{
 		PermComposePlan,
 		// Operator planuje aktualizacje, ale ich nie wykonuje: transakcja
 		// pakietowa jest operacja najwyzszego ryzyka i wymaga osobnego prawa.
-		PermPackagesPlan,
+		PermPackagesPlan, PermPackagesRead,
 		// Operator planuje i prowadzi kampanie, ale ich nie zatwierdza.
 		PermCampaignRead, PermCampaignCreate, PermCampaignControl,
 		// Okno serwisowe jest narzedziem prowadzenia ruchu: to operator wie,
@@ -370,7 +376,7 @@ var rolePermissions = map[Role][]Permission{
 		PermSecurityRead, PermSecurityScan, PermSecurityRemediate,
 		PermSecurityMACWrite, PermSecurityAuditReload,
 		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
-		PermPackagesPlan, PermPackagesUpgrade, PermPackagesRepair,
+		PermPackagesPlan, PermPackagesRead, PermPackagesUpgrade, PermPackagesRepair,
 		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,

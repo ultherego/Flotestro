@@ -394,6 +394,7 @@ message TaskEnvelope {
     RepositoryAction repository = 50;
     BackupAction backup = 51;
     MonitoringProbe monitoring_probe = 52;
+    ListPackages list_packages = 53;
   }
 }
 
@@ -660,6 +661,7 @@ message TaskResult {
   RepositoryResult repository_result = 44;
   BackupResult backup_result = 45;
   MonitoringResult monitoring_result = 46;
+  InstalledPackagesResult installed_packages_result = 47;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -1046,6 +1048,25 @@ message SecurityAction {
 message SecurityResult {
   bytes snapshot = 1;
   string message = 2;
+}
+
+// ListPackages zamawia pelna liste zainstalowanych pakietow.
+//
+// Lista jest duza i zmienia sie rzadko, wiec nie jedzie w kazdym cyklu
+// inwentarza: inwentarz niesie sam odcisk, a panel prosi o tresc dopiero
+// wtedy, gdy jego kopia przestaje ten odcisk opisywac.
+message ListPackages {
+}
+
+message InstalledPackagesResult {
+  // Packages niesie liste w postaci JSON: nazwa, epoka, wersja, wydanie,
+  // architektura i pakiet zrodlowy - komplet potrzebny do korelacji
+  // z trackerem bezpieczenstwa dystrybucji.
+  bytes packages = 1;
+  string digest = 2;
+  uint32 count = 3;
+  string manager = 4;
+  string unavailable_reason = 5;
 }
 
 // MonitoringProbe opisuje sonde wykonywana z hosta.

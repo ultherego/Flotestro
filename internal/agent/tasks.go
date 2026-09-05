@@ -190,6 +190,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.applyBackup(ctx, task, action, payload.Backup)
 	case opspec.ActionMonitoringProbe:
 		return e.applyProbe(ctx, task, action, payload.Monitoring)
+	case opspec.ActionPackageList:
+		return e.listPackages(ctx, task, action)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -588,6 +590,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionAuditRulesReload
 		}
 		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
+
+	case *agentv1.TaskEnvelope_ListPackages:
+		return opspec.ActionPackageList, opspec.Payload{}, nil
 
 	case *agentv1.TaskEnvelope_MonitoringProbe:
 		sonda := action.MonitoringProbe

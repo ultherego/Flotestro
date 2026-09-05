@@ -31,8 +31,10 @@ import (
 	modulbackup "github.com/ultherego/flotestro/internal/modules/backup"
 	modulcerts "github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/opspec"
+	modulpakiety "github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
+	"github.com/ultherego/flotestro/internal/vuln"
 )
 
 type contextKey string
@@ -94,6 +96,10 @@ type AgentService struct {
 	// sie udala, jesli tego nie zapisze: host nie pamieta tego miedzy
 	// operacjami, a repozytorium odpowiada dopiero po podaniu hasla.
 	backups *backupstore.Store
+	// pakiety trzymaja pelna liste pakietow hostow. Bez niej nie da sie
+	// powiedziec nic o podatnosciach - a brak listy musi byc widoczny jako
+	// brak wiedzy, nie jako host bez znalezisk.
+	pakiety *vuln.MagazynPakietow
 	// secrets wydaje wartosci sekretow na dzierzawe. Pusty oznacza panel bez
 	// magazynu: operacje wskazujace sekret nie beda wtedy dostarczane.
 	secrets SekretyWydawane
@@ -119,6 +125,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		files:        managedfiles.NewStore(pool),
 		certificates: certyfikaty.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
+		pakiety:      vuln.NowyMagazynPakietow(pool),
 		audit:        recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
@@ -495,6 +502,14 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}); err != nil {
 			s.log.Error("nie zapisano stanu plikow", "host_id", hostID, "err", err)
 		}
+	}
+
+	// Pelna lista pakietow trafia do wlasnej tabeli: to z niej liczy sie
+	// ocena podatnosci, wiec potrzebne sa wiersze do zlaczen, a nie blob
+	// w inwentarzu.
+	if lista := result.GetInstalledPackagesResult(); lista != nil &&
+		result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
+		s.zapiszListePakietow(ctx, hostID, jobID, lista)
 	}
 
 	// Przebieg kopii zapisujemy takze wtedy, gdy sie nie udal: "backup nie
@@ -1889,4 +1904,41 @@ func liczbaZBajtow(wartosc *uint64) *int64 {
 	}
 	liczba := int64(*wartosc)
 	return &liczba
+}
+
+// zapiszListePakietow zapisuje pelna liste pakietow hosta.
+//
+// Lista czesciowa jest gorsza niz jej brak, bo wyglada jak komplet, wiec
+// zapisujemy ja w jednej transakcji razem z odciskiem. Nieodczytana lista
+// zostawia sam powod - i to on trafia potem do oceny podatnosci jako stan
+// nieustalony, a nie jako host bez znalezisk.
+func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID string,
+	wynik *agentv1.InstalledPackagesResult) {
+	stan := vuln.StanListy{
+		HostID: hostID, Digest: wynik.GetDigest(),
+		PackageCount: int(wynik.GetCount()), JobID: jobID,
+		UnavailableReason: wynik.GetUnavailableReason(),
+	}
+	teraz := time.Now().UTC()
+	stan.CollectedAt = &teraz
+
+	var pakiety []modulpakiety.InstalledPackage
+	if len(wynik.GetPackages()) > 0 {
+		if err := json.Unmarshal(wynik.GetPackages(), &pakiety); err != nil {
+			s.log.Error("nie rozpoznano listy pakietow", "host_id", hostID, "err", err)
+			return
+		}
+	}
+	if stan.UnavailableReason != "" {
+		// Hosta, ktorego listy nie udalo sie odczytac, nie zostawiamy ze
+		// stara lista udajaca aktualna: kasujemy wiersze i zapisujemy powod.
+		pakiety = nil
+		stan.PackageCount = 0
+	}
+	if err := s.pakiety.Zastap(ctx, hostID, pakiety, stan); err != nil {
+		s.log.Error("nie zapisano listy pakietow", "host_id", hostID, "err", err)
+		return
+	}
+	s.log.Info("zapisano liste pakietow", "host_id", hostID,
+		"pakietow", len(pakiety), "odcisk", stan.Digest)
 }

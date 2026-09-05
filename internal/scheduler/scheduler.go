@@ -465,6 +465,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
 
+	case opspec.ActionPackageList:
+		envelope.Action = &agentv1.TaskEnvelope_ListPackages{ListPackages: &agentv1.ListPackages{}}
+
 	case opspec.ActionMonitoringProbe:
 		sonda := &agentv1.MonitoringProbe{}
 		if payload.Monitoring != nil {

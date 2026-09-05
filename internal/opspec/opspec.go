@@ -127,6 +127,12 @@ const (
 	ActionScheduleRemove  ActionType = "schedule.remove"
 	ActionScheduleRunNow  ActionType = "schedule.run_now"
 
+	// Pelna lista pakietow jest pobierana na zadanie, a nie w kazdym cyklu
+	// inwentarza: to kilkaset kilobajtow na host, a zmienia sie rzadko.
+	// Inwentarz niesie sam odcisk listy, wiec panel wie, kiedy jego kopia
+	// przestala opisywac host.
+	ActionPackageList ActionType = "packages.list"
+
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
 	// Naprawa odblokowuje operacje pakietowe na hoscie: ustawia odpowiedzi
@@ -580,6 +586,12 @@ var actionSpecs = map[ActionType]actionSpec{
 
 	// Planowanie nie zmienia stanu systemu, ale odswiezenie metadanych juz tak,
 	// wiec plan tez ma wlasne uprawnienie.
+	// Odczyt listy nie zmienia hosta i nie wymaga roota: baza dpkg i baza RPM
+	// sa czytelne dla wszystkich. Limit wyniku jest wysoki, bo lista tysiaca
+	// pakietow to jej naturalny rozmiar.
+	ActionPackageList: {mutating: false, capability: "packages", permission: "packages.read",
+		timeoutSeconds: 300, risk: RiskLow, maxOutputBytes: 8 << 20},
+
 	ActionPackagePlan: {mutating: false, capability: "packages", permission: "packages.plan",
 		timeoutSeconds: 300, risk: RiskLow, lockClass: LockPackages},
 	// Transakcja pakietowa jest najbardziej ryzykowna operacja w systemie.
@@ -1916,6 +1928,9 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
+		return nil
+
+	case ActionPackageList:
 		return nil
 
 	case ActionSecurityScan, ActionAuditRulesReload:

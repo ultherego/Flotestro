@@ -76,6 +76,19 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	case caps.Available(CapDNF):
 		facts.Packages = dnfSummary(ctx)
 	}
+	// Odcisk pelnej listy pakietow: sama lista jest za duza, zeby jechac
+	// w kazdym cyklu, ale panel musi wiedziec, kiedy jego kopia przestaje
+	// opisywac host.
+	if facts.Packages.Manager != "" {
+		odcisk, ile, powod := odciskPakietow(ctx, facts.Packages.Manager)
+		facts.Packages.InstalledDigest = odcisk
+		facts.Packages.InstalledReason = powod
+		if powod == "" {
+			liczba := uint32(ile)
+			facts.Packages.InstalledCount = &liczba
+		}
+	}
+
 	// Zrodla pakietow czytamy razem z podsumowaniem: to jedna zakladka i jedna
 	// odpowiedz na pytanie, skad host bierze oprogramowanie. Odczyt idzie bez
 	// roota, bo pliki zrodel sa jawne.
