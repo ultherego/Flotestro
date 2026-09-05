@@ -6,12 +6,36 @@ import { LiczbaOpcjonalna, Para, Pary, Pusto } from "../../components/ui";
 import { SwiezoscModulu, useHost, useModul, ZlecOperacje } from "./wspolne";
 import { PotwierdzenieCelu } from "./PotwierdzenieCelu";
 
+type Repozytorium = {
+  id: string;
+  name?: string;
+  url?: string;
+  suites?: string[];
+  components?: string[];
+  enabled: boolean;
+  priority?: number;
+  gpg_key_fingerprint?: string;
+  signed: boolean;
+  username?: string;
+  secret_name?: string;
+  managed: boolean;
+  path?: string;
+  unavailable_reason?: string;
+};
+
+type ObrazRepozytoriow = {
+  repositories?: Repozytorium[];
+  repositories_known?: boolean;
+  repositories_unavailable_reason?: string;
+};
+
 type StanPakietow = {
   manager?: string;
   installed?: number;
   upgradable?: number;
   security_upgradable?: number;
   unavailable_reason?: string;
+  repositories?: ObrazRepozytoriow;
 };
 
 type PlanUsuniecia = {
@@ -38,6 +62,7 @@ export function Pakiety() {
   const [nazwy, setNazwy] = useState("");
   const [plan, setPlan] = useState<PlanUsuniecia | null>(null);
   const [doUsuniecia, setDoUsuniecia] = useState<string[] | null>(null);
+  const [zamiarZrodla, setZamiarZrodla] = useState<ZamiarZrodla | null>(null);
   const [komunikat, setKomunikat] = useState("");
 
   const zlec = useMutation({
@@ -109,6 +134,12 @@ export function Pakiety() {
         akcja="packages.plan"
         payload={{ package_plan: { refresh_metadata: true } }}
         etykieta="Plan updates"
+      />
+
+      <Repozytoria
+        obraz={pakiety?.repositories}
+        menedzer={pakiety?.manager}
+        onZamiar={setZamiarZrodla}
       />
 
       <h2>Install, remove or hold</h2>
@@ -203,6 +234,23 @@ export function Pakiety() {
         </>
       )}
 
+      {zamiarZrodla && (
+        <PotwierdzenieCelu
+          host={host}
+          etykieta={zamiarZrodla.etykieta}
+          opis={zamiarZrodla.opis}
+          pracuje={zlec.isPending}
+          onPotwierdz={(powod) =>
+            zlec.mutate({
+              action: "packages.repository.set",
+              reason: powod,
+              payload: { repository: zamiarZrodla.payload },
+            })
+          }
+          onAnuluj={() => setZamiarZrodla(null)}
+        />
+      )}
+
       {doUsuniecia && (
         <PotwierdzenieCelu
           host={host}
@@ -223,5 +271,231 @@ export function Pakiety() {
         />
       )}
     </>
+  );
+}
+
+type ZamiarZrodla = { etykieta: string; opis: string; payload: Record<string, unknown> };
+
+/**
+ * Zrodla pakietow.
+ *
+ * Dopisanie zrodla nie instaluje niczego dzisiaj, ale rozstrzyga, czyje
+ * pakiety host przyjmie jutro - razem z ich skryptami, ktore chodza jako root.
+ * Dlatego zrodlo bez sprawdzania podpisow wymaga jawnej zgody, a haslo do
+ * zrodla prywatnego wskazuje sie nazwa sekretu, nie wartoscia.
+ */
+function Repozytoria({
+  obraz, menedzer, onZamiar,
+}: {
+  obraz?: ObrazRepozytoriow;
+  menedzer?: string;
+  onZamiar: (zamiar: ZamiarZrodla) => void;
+}) {
+  const [formularz, setFormularz] = useState(false);
+  const zrodla = obraz?.repositories ?? [];
+
+  return (
+    <>
+      <h2>Repositories</h2>
+      <p className="podtytul">
+        Where this host takes software from. Adding a source installs nothing
+        today; it decides whose packages the host will accept tomorrow, with
+        their scripts running as root.
+      </p>
+      {obraz && obraz.repositories_known === false && (
+        <p className="ostrzezenie">
+          <span>
+            The list of sources could not be read
+            {obraz.repositories_unavailable_reason
+              ? `: ${obraz.repositories_unavailable_reason}`
+              : "."}
+          </span>
+        </p>
+      )}
+
+      <div className="filtry">
+        <button className="wtorny" onClick={() => setFormularz((otwarty) => !otwarty)}>
+          {formularz ? "Cancel" : "Add or change a source"}
+        </button>
+      </div>
+      {formularz && <FormularzZrodla menedzer={menedzer} onZamiar={onZamiar} />}
+
+      {!zrodla.length ? (
+        <Pusto>This host reports no package source.</Pusto>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th><th>Address</th><th>State</th><th>Signatures</th>
+              <th>Managed by</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {zrodla.map((zrodlo) => (
+              <tr key={`${zrodlo.path}-${zrodlo.id}`}>
+                <td>
+                  {zrodlo.id}
+                  {zrodlo.path && <div className="zrodlo">{zrodlo.path}</div>}
+                </td>
+                <td className="zrodlo">
+                  {zrodlo.unavailable_reason ? (
+                    <span className="znacznik nieznany">{zrodlo.unavailable_reason}</span>
+                  ) : (
+                    <>
+                      {zrodlo.url}
+                      {zrodlo.suites?.length ? (
+                        <div>{zrodlo.suites.join(" ")} {zrodlo.components?.join(" ")}</div>
+                      ) : null}
+                    </>
+                  )}
+                </td>
+                <td>
+                  {zrodlo.enabled
+                    ? <span className="znacznik ok">enabled</span>
+                    : <span className="znacznik">disabled</span>}
+                </td>
+                <td>
+                  {/* Zrodlo bez sprawdzania podpisow jest zdalna powloka
+                      roota, a nie ustawieniem - i tak ma wygladac. */}
+                  {zrodlo.signed
+                    ? <span className="znacznik ok">checked</span>
+                    : <span className="znacznik blad">not checked</span>}
+                </td>
+                <td>
+                  {zrodlo.managed ? (
+                    <>
+                      <span className="znacznik ok">panel</span>
+                      {zrodlo.secret_name && (
+                        <div className="zrodlo">password from {zrodlo.secret_name}</div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="znacznik">distribution</span>
+                  )}
+                </td>
+                <td>
+                  <div className="operacje">
+                    <button
+                      className="wtorny"
+                      disabled={!zrodlo.managed}
+                      onClick={() =>
+                        onZamiar({
+                          etykieta: zrodlo.enabled ? "Disable source" : "Enable source",
+                          opis: `${zrodlo.id} will be ${zrodlo.enabled ? "disabled" : "enabled"}. The files stay on the host.`,
+                          payload: {
+                            id: zrodlo.id, url: zrodlo.url, name: zrodlo.name,
+                            suites: zrodlo.suites, components: zrodlo.components,
+                            enabled: !zrodlo.enabled, allow_unsigned: !zrodlo.signed,
+                          },
+                        })
+                      }
+                    >
+                      {zrodlo.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      className="wtorny"
+                      disabled={!zrodlo.managed}
+                      onClick={() =>
+                        onZamiar({
+                          etykieta: "Remove source",
+                          opis: `${zrodlo.id} will be removed from this host, together with its key and its password file.`,
+                          payload: { id: zrodlo.id, remove: true },
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+/** Formularz zrodla. Klucz wkleja sie w ramce ASCII; haslo wskazuje nazwa sekretu. */
+function FormularzZrodla({
+  menedzer, onZamiar,
+}: {
+  menedzer?: string;
+  onZamiar: (zamiar: ZamiarZrodla) => void;
+}) {
+  const [id, setId] = useState("");
+  const [url, setUrl] = useState("");
+  const [suites, setSuites] = useState("");
+  const [components, setComponents] = useState("");
+  const [klucz, setKlucz] = useState("");
+  const [bezPodpisow, setBezPodpisow] = useState(false);
+  const [uzytkownik, setUzytkownik] = useState("");
+  const [sekret, setSekret] = useState("");
+  const apt = menedzer === "apt";
+
+  const gotowe = id !== "" && url !== "" && (bezPodpisow || klucz.includes("BEGIN PGP")) &&
+    (!apt || suites.trim() !== "");
+
+  return (
+    <div className="formularz" style={{ marginBottom: 16 }}>
+      <h2>Package source</h2>
+      <p className="podtytul" style={{ margin: 0 }}>
+        The key travels in the job — it is public, and the plan should show what
+        the host will trust. The password does not: name a secret and the host
+        fetches its value once, while it writes the file.
+      </p>
+      <div className="filtry">
+        <input value={id} onChange={(e) => setId(e.target.value)}
+               placeholder="internal" style={{ minWidth: 160 }} />
+        <input value={url} onChange={(e) => setUrl(e.target.value)}
+               placeholder="https://packages.example.com/debian" style={{ minWidth: 320 }} />
+      </div>
+      {apt && (
+        <div className="filtry">
+          <input value={suites} onChange={(e) => setSuites(e.target.value)}
+                 placeholder="Suites (stable)" style={{ minWidth: 200 }} />
+          <input value={components} onChange={(e) => setComponents(e.target.value)}
+                 placeholder="Components (main)" style={{ minWidth: 200 }} />
+        </div>
+      )}
+      <div className="filtry">
+        <input value={uzytkownik} onChange={(e) => setUzytkownik(e.target.value)}
+               placeholder="Username (private source)" style={{ minWidth: 200 }} />
+        <input value={sekret} onChange={(e) => setSekret(e.target.value)}
+               placeholder="Password secret (name only)" style={{ minWidth: 220 }} />
+      </div>
+      <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <input type="checkbox" checked={bezPodpisow}
+               onChange={(e) => setBezPodpisow(e.target.checked)} />
+        Do not check signatures (the host will install anything from this address)
+      </label>
+      {!bezPodpisow && (
+        <label>
+          Signing key (ASCII-armored public key)
+          <textarea rows={8} value={klucz} onChange={(e) => setKlucz(e.target.value)}
+                    placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----" />
+        </label>
+      )}
+      <button
+        disabled={!gotowe}
+        onClick={() =>
+          onZamiar({
+            etykieta: "Write source",
+            opis: `${id} (${url}) becomes a package source on this host${bezPodpisow ? ", with signature checking off — the host will install whatever comes from that address" : ""}${sekret ? `, authenticating as ${uzytkownik} with the value of secret ${sekret}` : ""}. The host fetches its metadata before the change counts as done, and rolls back if it cannot.`,
+            payload: {
+              id, url, enabled: true, allow_unsigned: bezPodpisow,
+              ...(apt ? {
+                suites: suites.split(/[\s,]+/).filter(Boolean),
+                components: components.split(/[\s,]+/).filter(Boolean),
+              } : {}),
+              ...(bezPodpisow ? {} : { gpg_key: klucz }),
+              ...(sekret ? { username: uzytkownik, password_secret: { name: sekret } } : {}),
+            },
+          })
+        }
+      >
+        Write source
+      </button>
+    </div>
   );
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/packages"
 )
 
 // Nazwy modulow inventory. Modul odpowiada zakladce hosta, wiec interfejs
@@ -72,7 +74,13 @@ func (f Facts) Fragments() ([]Fragment, error) {
 			BootID   string   `json:"boot_id"`
 		}{f.OS, f.Hardware, f.Hostname, f.BootID}},
 
-		{ModulPackages, menedzer, f.Packages.UnavailableReason, f.Packages},
+		// Zakladka pakietow pyta o dwie rzeczy naraz: co jest zainstalowane
+		// i skad to przyszlo. Zrodla ida wiec w tym samym fragmencie, a nie
+		// w osobnym module.
+		{ModulPackages, menedzer, f.Packages.UnavailableReason, struct {
+			Packages
+			Repozytoria *packages.ObrazRepozytoriow `json:"repositories,omitempty"`
+		}{f.Packages, f.Repositories}},
 
 		{ModulServices, "agent/systemctl", powodUslug, struct {
 			FailedUnits []string `json:"failed_units"`

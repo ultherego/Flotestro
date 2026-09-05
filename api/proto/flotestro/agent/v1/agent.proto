@@ -391,6 +391,7 @@ message TaskEnvelope {
     SystemShutdown system_shutdown = 47;
     SecurityAction security = 48;
     CertificateAction certificate = 49;
+    RepositoryAction repository = 50;
   }
 }
 
@@ -654,6 +655,7 @@ message TaskResult {
   PowerResult power_result = 41;
   SecurityResult security_result = 42;
   CertificateResult certificate_result = 43;
+  RepositoryResult repository_result = 44;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -1040,6 +1042,41 @@ message SecurityAction {
 message SecurityResult {
   bytes snapshot = 1;
   string message = 2;
+}
+
+// RepositoryAction opisuje zrodlo pakietow.
+//
+// Klucz zrodla jedzie w kopercie, bo jest materialem publicznym i plan ma
+// pokazywac, czemu host zaufa. Hasla w kopercie nie ma: jest odnosnik do
+// magazynu, po ktory host siega dopiero przy zapisie.
+message RepositoryAction {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  repeated string suites = 4;
+  repeated string components = 5;
+  repeated string architectures = 6;
+  bool enabled = 7;
+  int32 priority = 8;
+  // GPGKey jest kluczem publicznym zrodla w ramce ASCII.
+  string gpg_key = 9;
+  // AllowUnsigned jest zgoda na zrodlo, ktorego podpisow host nie sprawdza.
+  bool allow_unsigned = 10;
+  string username = 11;
+  SecretRef password_secret = 12;
+  // Remove usuwa zrodlo razem z jego kluczem i haslem.
+  bool remove = 13;
+}
+
+message RepositoryResult {
+  // Snapshot niesie zrodla widziane na hoscie po zmianie.
+  bytes snapshot = 1;
+  string message = 2;
+  // GpgKeyFingerprint jest odciskiem klucza, ktory naprawde wyladowal na
+  // hoscie. Tylko czlowiek moze porownac go z odciskiem dostawcy.
+  string gpg_key_fingerprint = 3;
+  // RolledBack mowi, ze host wrocil do poprzedniego opisu zrodla.
+  bool rolled_back = 4;
 }
 
 // CertificateTarget wskazuje plik certyfikatu wraz z tym, co panel o nim wie.

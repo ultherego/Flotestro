@@ -183,6 +183,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionCertificateScan, opspec.ActionCertificateDeploy,
 		opspec.ActionCertificateRenew:
 		return e.applyCertificate(ctx, task, action, payload.Certificate)
+	case opspec.ActionRepositorySet:
+		return e.applyRepository(ctx, task, action, payload.Repository)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -581,6 +583,28 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionAuditRulesReload
 		}
 		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
+
+	case *agentv1.TaskEnvelope_Repository:
+		zrodlo := action.Repository
+		odnosnik := (*opspec.SecretRef)(nil)
+		if ref := zrodlo.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
+			odnosnik = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
+		}
+		return opspec.ActionRepositorySet, opspec.Payload{Repository: &opspec.RepositoryPayload{
+			ID:             zrodlo.GetId(),
+			Name:           zrodlo.GetName(),
+			URL:            zrodlo.GetUrl(),
+			Suites:         zrodlo.GetSuites(),
+			Components:     zrodlo.GetComponents(),
+			Architectures:  zrodlo.GetArchitectures(),
+			Enabled:        zrodlo.GetEnabled(),
+			Priority:       int(zrodlo.GetPriority()),
+			GPGKey:         zrodlo.GetGpgKey(),
+			AllowUnsigned:  zrodlo.GetAllowUnsigned(),
+			Username:       zrodlo.GetUsername(),
+			PasswordSecret: odnosnik,
+			Remove:         zrodlo.GetRemove(),
+		}}, nil
 
 	case *agentv1.TaskEnvelope_Certificate:
 		certyfikat := action.Certificate

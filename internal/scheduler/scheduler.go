@@ -465,6 +465,31 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
 
+	case opspec.ActionRepositorySet:
+		zrodlo := &agentv1.RepositoryAction{}
+		if payload.Repository != nil {
+			zrodlo.Id = payload.Repository.ID
+			zrodlo.Name = payload.Repository.Name
+			zrodlo.Url = payload.Repository.URL
+			zrodlo.Suites = payload.Repository.Suites
+			zrodlo.Components = payload.Repository.Components
+			zrodlo.Architectures = payload.Repository.Architectures
+			zrodlo.Enabled = payload.Repository.Enabled
+			zrodlo.Priority = int32(payload.Repository.Priority)
+			zrodlo.GpgKey = payload.Repository.GPGKey
+			zrodlo.AllowUnsigned = payload.Repository.AllowUnsigned
+			zrodlo.Username = payload.Repository.Username
+			zrodlo.Remove = payload.Repository.Remove
+			// Koperta niesie odnosnik do hasla, nie haslo.
+			if !payload.Repository.PasswordSecret.Pusty() {
+				zrodlo.PasswordSecret = &agentv1.SecretRef{
+					Name:    payload.Repository.PasswordSecret.Name,
+					Version: uint32(payload.Repository.PasswordSecret.Version),
+				}
+			}
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Repository{Repository: zrodlo}
+
 	case opspec.ActionSystemShutdown:
 		wylaczenie := &agentv1.SystemShutdown{}
 		if payload.Power != nil {

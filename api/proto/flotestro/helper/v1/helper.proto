@@ -53,6 +53,7 @@ message HelperRequest {
     ShutdownRequest shutdown = 43;
     SecurityRequest security = 44;
     CertificateRequest certificate = 45;
+    RepositoryRequest repository = 46;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -209,6 +210,7 @@ message HelperResponse {
   PowerResult power_result = 31;
   SecurityResult security_result = 32;
   CertificateResult certificate_result = 33;
+  RepositoryResult repository_result = 34;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -551,6 +553,39 @@ message SecurityResult {
   // Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
   bytes facts = 1;
   string message = 2;
+}
+
+// RepositoryRequest zapisuje albo usuwa zrodlo pakietow.
+//
+// Odczytu tu nie ma: pliki zrodel sa jawne i czyta je agent. Do helpera
+// trafia zapis - bo katalog zrodel nalezy do roota - i haslo, ktore agent
+// pobral z magazynu tuz przed operacja.
+message RepositoryRequest {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  repeated string suites = 4;
+  repeated string components = 5;
+  repeated string architectures = 6;
+  bool enabled = 7;
+  int32 priority = 8;
+  string gpg_key = 9;
+  bool allow_unsigned = 10;
+  string username = 11;
+  // Password przychodzi z magazynu przez agenta, zyje w pamieci helpera na
+  // czas operacji i trafia wylacznie do pliku z prawami roota.
+  bytes password = 12;
+  // SecretName zapisujemy w pliku zrodla jako komentarz: panel ma widziec,
+  // z ktorego sekretu pochodzi haslo. Nazwa, nie wartosc.
+  string secret_name = 13;
+  bool remove = 14;
+}
+
+message RepositoryResult {
+  bytes snapshot = 1;
+  string message = 2;
+  string gpg_key_fingerprint = 3;
+  bool rolled_back = 4;
 }
 
 // CertificateTarget wskazuje plik certyfikatu i klucz, ktory do niego nalezy.

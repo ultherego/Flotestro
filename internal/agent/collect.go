@@ -76,6 +76,13 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 	case caps.Available(CapDNF):
 		facts.Packages = dnfSummary(ctx)
 	}
+	// Zrodla pakietow czytamy razem z podsumowaniem: to jedna zakladka i jedna
+	// odpowiedz na pytanie, skad host bierze oprogramowanie. Odczyt idzie bez
+	// roota, bo pliki zrodel sa jawne.
+	if facts.Packages.Manager != "" {
+		obraz := ZbierzRepozytoria(facts.Packages.Manager)
+		facts.Repositories = &obraz
+	}
 	facts.RebootRequired = rebootRequired(ctx, caps)
 	// Stan domeny jest czescia inventory, wiec zbierany raz na cykl, a nie
 	// przy kazdym heartbeacie.

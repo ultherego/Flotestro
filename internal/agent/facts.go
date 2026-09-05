@@ -33,6 +33,7 @@ import (
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	czas "github.com/ultherego/flotestro/internal/modules/time"
+	"github.com/ultherego/flotestro/internal/packages"
 )
 
 // SchemaVersion opisuje wersje formatu raportu inventory zapisywanego w JSONB.
@@ -81,14 +82,18 @@ type Health struct {
 
 // Facts to pelny raport inventory hosta.
 type Facts struct {
-	Hostname     string       `json:"hostname"`
-	MachineID    string       `json:"machine_id"`
-	BootID       string       `json:"boot_id"`
-	OS           OSInfo       `json:"os"`
-	Hardware     Hardware     `json:"hardware"`
-	Packages     Packages     `json:"packages"`
-	Capabilities Capabilities `json:"capabilities"`
-	FailedUnits  []string     `json:"failed_units"`
+	Hostname  string   `json:"hostname"`
+	MachineID string   `json:"machine_id"`
+	BootID    string   `json:"boot_id"`
+	OS        OSInfo   `json:"os"`
+	Hardware  Hardware `json:"hardware"`
+	Packages  Packages `json:"packages"`
+	// Repositories jest lista zrodel pakietow. Pusta lista i lista
+	// nieodczytana to dwie rozne odpowiedzi, wiec obraz niesie swoj wlasny
+	// znacznik i powod.
+	Repositories *packages.ObrazRepozytoriow `json:"repositories,omitempty"`
+	Capabilities Capabilities                `json:"capabilities"`
+	FailedUnits  []string                    `json:"failed_units"`
 	// Puste pola oznaczaja, ze stanu nie udalo sie ustalic.
 	FailedUnitsKnown bool           `json:"failed_units_known"`
 	RebootRequired   *bool          `json:"reboot_required,omitempty"`

@@ -55,6 +55,10 @@ const (
 	PermPackagesInstall Permission = "packages.install"
 	PermPackagesRemove  Permission = "packages.remove"
 	PermPackagesHold    Permission = "packages.hold.write"
+	// Zrodlo pakietow jest decyzja o zaufaniu, a nie o wersji: od jego
+	// dopisania host bierze oprogramowanie takze stamtad, razem ze skryptami
+	// pakietow, ktore chodza jako root. Stad uprawnienie osobne od instalacji.
+	PermPackagesRepository Permission = "packages.repository.write"
 	// Zadania cykliczne uruchamiaja sie bez udzialu operatora, takze wtedy,
 	// gdy nikt nie patrzy - zalozenie wpisu jest osobna decyzja od jego
 	// wylaczenia czy usuniecia.
@@ -314,6 +318,7 @@ var rolePermissions = map[Role][]Permission{
 		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,
 		PermJournalFollow, PermLogFileRead, PermProcessRead, PermProcessSignal,
 		PermPackagesInstall, PermPackagesRemove, PermPackagesHold,
+		PermPackagesRepository,
 		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,

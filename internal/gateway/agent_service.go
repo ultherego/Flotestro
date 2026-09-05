@@ -490,6 +490,15 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}
 	}
 
+	// Zrodla pakietow trafiaja do inwentarza po kazdej zmianie. Fragment
+	// pakietow niesie takze liczniki, wiec podmieniamy w nim same zrodla -
+	// nadpisanie calosci skasowaloby to, czego ta operacja nie dotyczyla.
+	if zrodla := result.GetRepositoryResult(); zrodla != nil && len(zrodla.GetSnapshot()) > 0 {
+		if err := s.scalRepozytoria(ctx, hostID, zrodla.GetSnapshot()); err != nil {
+			s.log.Error("nie zapisano zrodel pakietow", "host_id", hostID, "err", err)
+		}
+	}
+
 	// Obraz certyfikatow trafia do inwentarza po skanie i po wdrozeniu:
 	// zakladka ma pokazywac plik, ktory naprawde lezy na hoscie, a nie ten,
 	// ktory panel wyslal.
@@ -895,6 +904,21 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":    "time",
 			"message": zegar.GetMessage(),
 			"probes":  surowyJSON(zegar.GetProbes()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Odcisk klucza zrodla nalezy do zadania: to jedyna chwila, w ktorej
+	// czlowiek moze porownac go z odciskiem podanym przez dostawce.
+	if zrodla := result.GetRepositoryResult(); zrodla != nil &&
+		(zrodla.GetGpgKeyFingerprint() != "" || zrodla.GetRolledBack()) {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":                "repository",
+			"message":             zrodla.GetMessage(),
+			"gpg_key_fingerprint": zrodla.GetGpgKeyFingerprint(),
+			"rolled_back":         zrodla.GetRolledBack(),
 		})
 		if err == nil {
 			return encoded
@@ -1691,4 +1715,41 @@ func (s *AgentService) zapiszWdrozenieCertyfikatu(ctx context.Context, hostID, j
 	if err := s.certificates.ZapiszWdrozenie(ctx, s.pool, wdrozenie); err != nil {
 		s.log.Error("nie zapisano wdrozenia certyfikatu", "host_id", hostID, "err", err)
 	}
+}
+
+// scalRepozytoria wstawia nowa liste zrodel do fragmentu pakietow.
+//
+// Fragment niesie takze liczniki pakietow, ktorych ta operacja nie dotyczyla:
+// nadpisanie go w calosci zamienialoby zmiane zrodla w utrate wiedzy o tym,
+// ile pakietow czeka na aktualizacje.
+func (s *AgentService) scalRepozytoria(ctx context.Context, hostID string, zrodla []byte) error {
+	fragment, err := s.inventory.Fragment(ctx, hostID, "packages")
+	if err != nil {
+		return err
+	}
+	tresc := map[string]json.RawMessage{}
+	zrodlo := "agent/packages"
+	powod := ""
+	if fragment != nil {
+		if len(fragment.Payload) > 0 {
+			if err := json.Unmarshal(fragment.Payload, &tresc); err != nil {
+				return err
+			}
+		}
+		zrodlo, powod = fragment.Source, fragment.UnavailableReason
+	}
+	tresc["repositories"] = zrodla
+
+	payload, err := json.Marshal(tresc)
+	if err != nil {
+		return err
+	}
+	return s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+		Module:            "packages",
+		Revision:          fmt.Sprintf("%x", sha256.Sum256(payload)),
+		Source:            zrodlo,
+		Payload:           payload,
+		UnavailableReason: powod,
+		ObservedAt:        time.Now().UTC(),
+	})
 }

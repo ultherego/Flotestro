@@ -25,6 +25,7 @@ import (
 	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	czas "github.com/ultherego/flotestro/internal/modules/time"
+	pakietymodul "github.com/ultherego/flotestro/internal/packages"
 )
 
 // ActionType jest typem operacji. Kazdy typ ma wersje kontraktu i wlasne
@@ -134,6 +135,10 @@ const (
 	ActionPackageInstall ActionType = "packages.install"
 	ActionPackageRemove  ActionType = "packages.remove"
 	ActionPackageHoldSet ActionType = "packages.hold.set"
+	// Zrodla pakietow. Dopisanie zrodla nie instaluje niczego dzisiaj, ale
+	// rozstrzyga, czyje pakiety host przyjmie jutro - razem z ich skryptami,
+	// ktore chodza jako root. Stad ryzyko krytyczne i wlasne uprawnienie.
+	ActionRepositorySet ActionType = "packages.repository.set"
 
 	ActionSystemReboot ActionType = "system.reboot"
 	// Wylaczenie hosta jest operacja, z ktorej panel nie potrafi go wyprowadzic:
@@ -580,6 +585,12 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
 	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
+	// Zrodlo pakietow jest decyzja o zaufaniu, a nie o wersji: od tej chwili
+	// host bierze oprogramowanie takze stamtad. Blokada pakietowa jest tu
+	// konieczna, bo zapis konczy sie odswiezeniem metadanych.
+	ActionRepositorySet: {mutating: true, capability: "packages", permission: "packages.repository.write",
+		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockPackages},
+
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
 		timeoutSeconds: 120, risk: RiskCritical},
 	// Wylaczenie hosta konczy sie stanem, ktorego panel nie cofnie: nikt nie
@@ -1097,12 +1108,43 @@ type Payload struct {
 	Power           *PowerPayload           `json:"power,omitempty"`
 	Security        *SecurityPayload        `json:"security,omitempty"`
 	Certificate     *CertificatePayload     `json:"certificate,omitempty"`
+	Repository      *RepositoryPayload      `json:"repository,omitempty"`
 }
 
 // SecurityPayload opisuje operacje modulu bezpieczenstwa.
 type SecurityPayload struct {
 	// Mode jest trybem obowiazkowej kontroli dostepu.
 	Mode string `json:"mode,omitempty"`
+}
+
+// RepositoryPayload opisuje zrodlo pakietow.
+//
+// Klucz zrodla jedzie w zleceniu, bo jest materialem publicznym i plan ma
+// pokazywac, czemu host zaufa. Haslo nie jedzie: jest odnosnikiem do magazynu,
+// po ktory host siega dopiero przy zapisie.
+type RepositoryPayload struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name,omitempty"`
+	URL           string   `json:"url,omitempty"`
+	Suites        []string `json:"suites,omitempty"`
+	Components    []string `json:"components,omitempty"`
+	Architectures []string `json:"architectures,omitempty"`
+	Enabled       bool     `json:"enabled,omitempty"`
+	Priority      int      `json:"priority,omitempty"`
+	// GPGKey jest kluczem publicznym zrodla w ramce ASCII. Host liczy jego
+	// odcisk i odsyla go w wyniku: tylko czlowiek moze porownac odcisk
+	// z tym, ktory podal dostawca.
+	GPGKey string `json:"gpg_key,omitempty"`
+	// AllowUnsigned jest zgoda na zrodlo, ktorego podpisow host nie sprawdza.
+	// Bez niej zrodlo bez klucza nie przejdzie: repozytorium bez podpisu to
+	// zdalna powloka roota, a nie ustawienie domyslne.
+	AllowUnsigned bool   `json:"allow_unsigned,omitempty"`
+	Username      string `json:"username,omitempty"`
+	// PasswordSecret wskazuje haslo w magazynie. Wartosci nie ma ani
+	// w zleceniu, ani w audycie, ani w inwentarzu.
+	PasswordSecret *SecretRef `json:"password_secret,omitempty"`
+	// Remove usuwa zrodlo razem z jego kluczem i haslem.
+	Remove bool `json:"remove,omitempty"`
 }
 
 // CertificateTarget wskazuje plik certyfikatu wraz z tym, co panel o nim wie.
@@ -1245,6 +1287,9 @@ func (p Payload) Sekrety() []SecretRef {
 	}
 	if p.Certificate != nil && !p.Certificate.KeySecret.Pusty() {
 		odnosniki = append(odnosniki, *p.Certificate.KeySecret)
+	}
+	if p.Repository != nil && !p.Repository.PasswordSecret.Pusty() {
+		odnosniki = append(odnosniki, *p.Repository.PasswordSecret)
 	}
 	return odnosniki
 }
@@ -1755,6 +1800,53 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionSecurityScan, ActionAuditRulesReload:
+		return nil
+
+	case ActionRepositorySet:
+		if payload.Repository == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu repository", action)
+		}
+		repo := payload.Repository
+		zrodlo := pakietymodul.Repozytorium{
+			ID: repo.ID, Name: repo.Name, URL: repo.URL,
+			Suites: repo.Suites, Components: repo.Components,
+			Architectures: repo.Architectures, Enabled: repo.Enabled,
+			Priority: repo.Priority, Signed: !repo.AllowUnsigned,
+			Username: repo.Username,
+		}
+		if repo.Remove {
+			zrodlo.URL = ""
+		}
+		zSekretem := !repo.PasswordSecret.Pusty()
+		if zSekretem {
+			if err := repo.PasswordSecret.Waliduj(); err != nil {
+				return err
+			}
+		}
+		// Menedzera panel zna z inwentarza hosta, ale zlecenie musi byc
+		// sprawdzalne bez niego: pola wspolne sprawdzamy zawsze, a te zalezne
+		// od rodziny systemu - dla menedzera, ktory pasuje do opisu zrodla.
+		menedzer := "dnf"
+		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
+			menedzer = "apt"
+		}
+		if err := pakietymodul.WalidujRepozytorium(zrodlo, menedzer, zSekretem); err != nil {
+			return err
+		}
+		if repo.Remove {
+			return nil
+		}
+		// Zrodlo, ktoremu ufamy, musi miec czym sie wykazac. Klucz sprawdzamy
+		// tu tym samym kodem, ktorym sprawdzi go host - zeby material bez
+		// klucza odpadl przy zlecaniu, a nie po zatwierdzeniu.
+		if !repo.AllowUnsigned {
+			if repo.GPGKey == "" {
+				return fmt.Errorf("zrodlo ze sprawdzaniem podpisow wymaga klucza publicznego")
+			}
+			if _, err := pakietymodul.OdciskKlucza(repo.GPGKey); err != nil {
+				return err
+			}
+		}
 		return nil
 
 	case ActionCertificateScan:
