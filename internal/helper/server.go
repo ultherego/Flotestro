@@ -156,6 +156,8 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.applyShutdown(ctx, request, action.Shutdown)
 	case *helperv1.HelperRequest_Security:
 		return s.applySecurity(ctx, request, action.Security)
+	case *helperv1.HelperRequest_Certificate:
+		return s.applyCertificate(ctx, request, action.Certificate)
 
 	case *helperv1.HelperRequest_Ssh:
 		return s.applySSH(ctx, request, action.Ssh)

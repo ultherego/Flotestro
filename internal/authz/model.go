@@ -202,6 +202,16 @@ const (
 	PermSecretWrite   Permission = "secret.write"
 	PermSecretDestroy Permission = "secret.destroy"
 
+	// Certyfikaty na hostach. Odczyt terminow i nazw jest czescia dyzuru -
+	// wygasly certyfikat wyglada jak awaria uslugi. Wdrozenie i odnowienie
+	// podmieniaja tozsamosc, ktora usluga pokazuje swiatu, wiec maja wlasne
+	// uprawnienia. Wskazanie panelowi pliku do obserwacji nie zmienia hosta
+	// i jest osobna, lzejsza decyzja.
+	PermCertificateRead   Permission = "certificate.read"
+	PermCertificateWatch  Permission = "certificate.watch"
+	PermCertificateDeploy Permission = "certificate.deploy"
+	PermCertificateRenew  Permission = "certificate.renew"
+
 	// CA floty jest korzeniem zaufania dla kazdego hosta. Jego wymiana ma
 	// wlasne uprawnienie, osobne od reszty administracji: blad w tym miejscu
 	// odcina cala flote.
@@ -229,7 +239,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
-		PermTimeRead, PermSecurityRead, PermFilePlan,
+		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -240,6 +250,9 @@ var rolePermissions = map[Role][]Permission{
 		// Audytor patrzy na stan ochronny hosta i na wyniki sprawdzen -
 		// to material jego pracy; naprawiac go nie musi.
 		PermSecurityRead, PermSecurityScan,
+		// Terminy certyfikatow sa materialem audytu tak samo jak stan
+		// ochronny: wygasajacy certyfikat jest ustaleniem, a nie awaria.
+		PermCertificateRead,
 		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
 		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
 		PermSecretRead,
@@ -270,6 +283,9 @@ var rolePermissions = map[Role][]Permission{
 		// Przesuniety zegar wyglada jak awaria katalogu albo certyfikatow,
 		// wiec test zrodel czasu nalezy do pierwszej diagnozy.
 		PermTimeRead, PermSecurityRead, PermSecurityScan, PermFilePlan,
+		// Operator oglada certyfikaty i wskazuje panelowi, ktorych plikow
+		// pilnowac; wdrozenie nowego jest juz decyzja administratora.
+		PermCertificateRead, PermCertificateWatch,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -324,6 +340,8 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,
 		PermSecretRead, PermSecretWrite, PermSecretDestroy,
+		PermCertificateRead, PermCertificateWatch,
+		PermCertificateDeploy, PermCertificateRenew,
 	},
 }
 

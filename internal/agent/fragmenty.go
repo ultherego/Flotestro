@@ -24,6 +24,7 @@ const (
 	ModulTime       = "time"
 	ModulPower      = "power"
 	ModulSecurity   = "security"
+	ModulCerts      = "certificates"
 	ModulFiles      = "files"
 	ModulContainers = "containers"
 	ModulSchedules  = "schedules"
@@ -107,6 +108,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModulPower, "agent/procfs+logind", powodZasilania(f), zasilanie(f)},
 
 		{ModulSecurity, "agent/selinux+audit+ss", powodOchrony(f), ochrona(f)},
+
+		{ModulCerts, "agent/certificates+certmonger", powodCertyfikatow(f), certyfikaty(f)},
 
 		{ModulFiles, "agent/managed-files", powodPlikow(f), plikiZarzadzane(f)},
 	}
@@ -321,4 +324,20 @@ func plikiZarzadzane(f Facts) any {
 		return struct{}{}
 	}
 	return f.Files
+}
+
+// powodCertyfikatow zwraca powod, dla ktorego obrazu certyfikatow nie ma.
+func powodCertyfikatow(f Facts) string {
+	if f.Certificates == nil {
+		return "the agent did not read certificates on this host"
+	}
+	return f.Certificates.UnavailableReason
+}
+
+// certyfikaty zwraca obraz certyfikatow hosta.
+func certyfikaty(f Facts) any {
+	if f.Certificates == nil {
+		return struct{}{}
+	}
+	return f.Certificates
 }

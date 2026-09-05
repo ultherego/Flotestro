@@ -429,6 +429,42 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Security{Security: ochrona}
 
+	case opspec.ActionCertificateScan, opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew:
+		operacja := agentv1.CertificateAction_OPERATION_SCAN
+		switch action {
+		case opspec.ActionCertificateDeploy:
+			operacja = agentv1.CertificateAction_OPERATION_DEPLOY
+		case opspec.ActionCertificateRenew:
+			operacja = agentv1.CertificateAction_OPERATION_RENEW
+		}
+		certyfikat := &agentv1.CertificateAction{Operation: operacja}
+		if payload.Certificate != nil {
+			for _, cel := range payload.Certificate.Targets {
+				certyfikat.Targets = append(certyfikat.Targets, &agentv1.CertificateTarget{
+					Path: cel.Path, KeyPath: cel.KeyPath, Service: cel.Service,
+				})
+			}
+			certyfikat.Path = payload.Certificate.Path
+			certyfikat.KeyPath = payload.Certificate.KeyPath
+			certyfikat.Certificate = payload.Certificate.Certificate
+			// Koperta niesie odnosnik do klucza, nie klucz: host siegnie po
+			// wartosc osobnym wywolaniem, gdy zacznie operacje.
+			if !payload.Certificate.KeySecret.Pusty() {
+				certyfikat.KeySecret = &agentv1.SecretRef{
+					Name:    payload.Certificate.KeySecret.Name,
+					Version: uint32(payload.Certificate.KeySecret.Version),
+				}
+			}
+			certyfikat.Owner = payload.Certificate.Owner
+			certyfikat.Group = payload.Certificate.Group
+			certyfikat.Mode = payload.Certificate.Mode
+			certyfikat.KeyMode = payload.Certificate.KeyMode
+			certyfikat.ReloadUnit = payload.Certificate.ReloadUnit
+			certyfikat.ProbeTarget = payload.Certificate.ProbeTarget
+			certyfikat.Request = payload.Certificate.Request
+		}
+		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
+
 	case opspec.ActionSystemShutdown:
 		wylaczenie := &agentv1.SystemShutdown{}
 		if payload.Power != nil {

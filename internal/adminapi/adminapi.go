@@ -14,6 +14,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
+	certyfikatystore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
@@ -46,6 +47,9 @@ type Server struct {
 	changes   *identity.Store
 	// files trzyma stan docelowy plikow konfiguracyjnych i ich historie.
 	files *managedfiles.Store
+	// certyfikaty trzymaja zakres obserwacji i historie wdrozen. Panel musi
+	// je znac, bo host sam nie powie, ktory plik jest certyfikatem uslugi.
+	certyfikaty *certyfikatystore.Store
 	// directoryWrite wlacza modul zmian w katalogu. Domyslnie wylaczony:
 	// klient moze chciec samego widoku, a zmiany robic swoimi narzedziami.
 	directoryWrite bool
@@ -117,8 +121,9 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	}
 	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
-		files:     managedfiles.NewStore(pool),
-		campaigns: campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
+		files:       managedfiles.NewStore(pool),
+		certyfikaty: certyfikatystore.NewStore(pool),
+		campaigns:   campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
@@ -176,6 +181,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
 	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
 	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	mux.HandleFunc("GET /api/v1/certificates", s.handleFleetCertificates)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/certificates", s.handleHostCertificates)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/certificates/deployments", s.handleCertificateDeployments)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/certificates/targets", s.handleWatchCertificate)
+	mux.HandleFunc("DELETE /api/v1/hosts/{id}/certificates/targets", s.handleUnwatchCertificate)
+
 	mux.HandleFunc("GET /api/v1/secrets", s.handleListSecrets)
 	mux.HandleFunc("POST /api/v1/secrets", s.handleCreateSecret)
 	mux.HandleFunc("GET /api/v1/secrets/{name}", s.handleGetSecret)

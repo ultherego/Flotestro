@@ -180,6 +180,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.shutdownHost(ctx, task, payload.Power)
 	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet, opspec.ActionAuditRulesReload:
 		return e.applySecurity(ctx, task, action, payload.Security)
+	case opspec.ActionCertificateScan, opspec.ActionCertificateDeploy,
+		opspec.ActionCertificateRenew:
+		return e.applyCertificate(ctx, task, action, payload.Certificate)
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
 		return e.applySSH(ctx, task, action, payload.SSH)
@@ -578,6 +581,39 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionAuditRulesReload
 		}
 		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
+
+	case *agentv1.TaskEnvelope_Certificate:
+		certyfikat := action.Certificate
+		typ := opspec.ActionCertificateScan
+		switch certyfikat.GetOperation() {
+		case agentv1.CertificateAction_OPERATION_DEPLOY:
+			typ = opspec.ActionCertificateDeploy
+		case agentv1.CertificateAction_OPERATION_RENEW:
+			typ = opspec.ActionCertificateRenew
+		}
+		odnosnik := (*opspec.SecretRef)(nil)
+		if ref := certyfikat.GetKeySecret(); ref != nil && ref.GetName() != "" {
+			odnosnik = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
+		}
+		zawartosc := &opspec.CertificatePayload{
+			Path:        certyfikat.GetPath(),
+			KeyPath:     certyfikat.GetKeyPath(),
+			Certificate: certyfikat.GetCertificate(),
+			KeySecret:   odnosnik,
+			Owner:       certyfikat.GetOwner(),
+			Group:       certyfikat.GetGroup(),
+			Mode:        certyfikat.GetMode(),
+			KeyMode:     certyfikat.GetKeyMode(),
+			ReloadUnit:  certyfikat.GetReloadUnit(),
+			ProbeTarget: certyfikat.GetProbeTarget(),
+			Request:     certyfikat.GetRequest(),
+		}
+		for _, cel := range certyfikat.GetTargets() {
+			zawartosc.Targets = append(zawartosc.Targets, opspec.CertificateTarget{
+				Path: cel.GetPath(), KeyPath: cel.GetKeyPath(), Service: cel.GetService(),
+			})
+		}
+		return typ, opspec.Payload{Certificate: zawartosc}, nil
 
 	case *agentv1.TaskEnvelope_SystemShutdown:
 		wylaczenie := action.SystemShutdown

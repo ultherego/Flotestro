@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/security"
 	czas "github.com/ultherego/flotestro/internal/modules/time"
@@ -45,6 +46,11 @@ const (
 	// Audyt jest osobna zdolnoscia: host bez auditd nie ma czego przeladowac,
 	// a przeladowanie idzie przez augenrules, nie przez restart jednostki.
 	CapSecurityAudit = "security.audit"
+	// Certyfikaty na hostach. Modul dziala wszedzie, bo oglada wskazane pliki
+	// i wdraza nowe. Odnowienie jest osobna zdolnoscia: robi je demon hosta,
+	// a host bez certmongera nie ma czym odnawiac.
+	CapCertificates      = "certificates"
+	CapCertificatesRenew = "certificates.renew"
 	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
 	CapFiles = "files.managed"
 )
@@ -210,6 +216,7 @@ func DetectCapabilities() Capabilities {
 	selinux := isDir(security.KatalogSELinux) && exists(security.SciezkaSetenforce)
 	audyt := exists(security.SciezkaAuditctl) && exists(security.SciezkaAugenrules)
 	apparmor := exists(security.PlikAppArmor)
+	certmonger := exists(certificates.SciezkaGetcert) || exists(certificates.SciezkaGetcertAlt)
 	chrony := exists(czas.SciezkaChronyc)
 	// Timesyncd bywa zainstalowany i zamaskowany, gdy host ma chronyego.
 	// Obecnosc jednostki mowi tylko tyle, ze jest czym pisac - ktory demon
@@ -298,6 +305,23 @@ func DetectCapabilities() Capabilities {
 				"augenrules": exists(security.SciezkaAugenrules),
 				"sockets":    exists(security.SciezkaSS) || exists(security.SciezkaSSAlt),
 			},
+		},
+		{
+			Name:    CapCertificates,
+			Version: wersjaAdaptera,
+			// Modul dziala wszedzie: brak certyfikatow jest faktem o hoscie,
+			// a nie brakiem modulu.
+			Available: true,
+			Features: map[string]bool{
+				"certmonger": certmonger,
+				"deploy":     true,
+			},
+		},
+		{
+			Name:      CapCertificatesRenew,
+			Version:   wersjaAdaptera,
+			Available: certmonger,
+			Reason:    powod(certmonger, "this host does not run certmonger"),
 		},
 		{
 			Name:      CapSecurityAudit,

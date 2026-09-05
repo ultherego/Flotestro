@@ -52,6 +52,7 @@ message HelperRequest {
     TimeRequest time = 42;
     ShutdownRequest shutdown = 43;
     SecurityRequest security = 44;
+    CertificateRequest certificate = 45;
   }
   // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
   // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
@@ -207,6 +208,7 @@ message HelperResponse {
   TimeResult time_result = 30;
   PowerResult power_result = 31;
   SecurityResult security_result = 32;
+  CertificateResult certificate_result = 33;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -549,6 +551,70 @@ message SecurityResult {
   // Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
   bytes facts = 1;
   string message = 2;
+}
+
+// CertificateTarget wskazuje plik certyfikatu i klucz, ktory do niego nalezy.
+message CertificateTarget {
+  string path = 1;
+  string key_path = 2;
+  string service = 3;
+}
+
+// CertificateRequest czyta fakty o certyfikatach albo wdraza nowy.
+//
+// Odczytu w calosci tu nie ma: tresc certyfikatu czyta agent, bo plik jest
+// jawny. Do helpera trafia to, czego bez roota nie widac - prawa kluczy,
+// zlecenia certmongera i pliki zamkniete dla wszystkich poza usluga.
+message CertificateRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
+    // ani "uruchom polecenie": dostaje liste nazw faktow i liste celow.
+    OPERATION_FACTS = 1;
+    OPERATION_DEPLOY = 2;
+    OPERATION_RENEW = 3;
+  }
+  // Fact wylicza to, czego nie da sie odczytac bez roota.
+  enum Fact {
+    FACT_UNSPECIFIED = 0;
+    FACT_KEY_METADATA = 1;
+    FACT_RENEWAL_TRACKING = 2;
+    FACT_CERTIFICATE_FILES = 3;
+  }
+  Operation operation = 1;
+  repeated Fact facts = 2;
+  repeated CertificateTarget targets = 3;
+  string path = 4;
+  string key_path = 5;
+  // Certificate jest trescia jawna certyfikatu wraz z lancuchem.
+  bytes certificate = 6;
+  // Key jest trescia klucza prywatnego. Przychodzi z magazynu przez agenta
+  // tuz przed operacja, zyje w pamieci helpera na czas jej trwania i nie
+  // trafia do zadnego pliku poza tym, ktory ma powstac.
+  bytes key = 7;
+  string owner = 8;
+  string group = 9;
+  string mode = 10;
+  string key_mode = 11;
+  string reload_unit = 12;
+  string probe_target = 13;
+  string request = 14;
+  // Authoritative mowi, ze lista celow jest pelna lista panelu dla tego hosta.
+  // Helper zapamietuje ja u siebie, zeby inwentarz opisywal te same pliki
+  // takze wtedy, gdy panel akurat nie pyta - tak samo jak przy plikach
+  // zarzadzanych. Bez tego zakladka pokazywalaby stan sprzed ostatniej zmiany
+  // konfiguracji panelu.
+  bool authoritative = 15;
+}
+
+message CertificateResult {
+  // Facts niesie wylacznie to, o co pytano.
+  bytes facts = 1;
+  string message = 2;
+  string fingerprint_sha256 = 3;
+  string not_after = 4;
+  bytes probe = 5;
+  bool rolled_back = 6;
 }
 
 // TimeRequest zmienia zrodla czasu albo strefe hosta.

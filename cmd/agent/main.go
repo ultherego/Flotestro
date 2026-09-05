@@ -105,6 +105,7 @@ func main() {
 	agent.SetKernelProbe(executor.ProbeKernel)
 	agent.SetFileProbe(executor.ProbeFiles)
 	agent.SetSecurityProbe(executor.ProbeSecurity)
+	agent.SetCertificateProbe(executor.ProbeCertificates)
 
 	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
 	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.

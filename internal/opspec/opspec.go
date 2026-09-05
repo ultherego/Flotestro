@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
 	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
@@ -88,6 +89,16 @@ const (
 	// i niezaladowana nie notuje niczego, a jednostka auditd na czesci
 	// dystrybucji odmawia recznego restartu.
 	ActionAuditRulesReload ActionType = "security.audit.reload"
+
+	// Certyfikaty. Skan oglada wylacznie wskazane pliki: panel, ktory chodzi
+	// po calym systemie plikow, znajduje magazyn zaufania zamiast certyfikatow
+	// uslug. Klucz prywatny nie jedzie w zleceniu - payload niesie odnosnik
+	// do magazynu, a host siega po wartosc dopiero przy wykonaniu.
+	ActionCertificateScan   ActionType = "certificate.scan"
+	ActionCertificateDeploy ActionType = "certificate.deploy"
+	// Odnowienie jest osobna operacja, bo robi je host wlasnym demonem:
+	// panel prosi certmongera o nowy certyfikat, a nie podaje mu tresci.
+	ActionCertificateRenew ActionType = "certificate.renew"
 
 	// Czas i synchronizacja. Test nie zmienia hosta, ale wychodzi z niego
 	// zapytaniem do serwera czasu - i to on odpowiada na pytanie, czy nowe
@@ -460,6 +471,21 @@ var actionSpecs = map[ActionType]actionSpec{
 	// i lokalne, ale nie jest odczytem.
 	ActionAuditRulesReload: {mutating: true, capability: "security.audit", permission: "security.audit.reload",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
+
+	// Skan oglada wskazane pliki i nie zmienia hosta. Wynik niesie terminy
+	// i nazwy, ktore certyfikat i tak pokazuje kazdemu, kto sie z usluga
+	// polaczy - a klucza prywatnego nie dotyka.
+	ActionCertificateScan: {mutating: false, capability: "certificates", permission: "certificate.read",
+		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
+	// Wdrozenie podmienia tozsamosc, ktora usluga pokazuje swiatu, i konczy
+	// sie przeladowaniem tej uslugi. Zly material zatrzymuje usluge, a zle
+	// prawa klucza oddaja ja kazdemu na hoscie - stad ryzyko krytyczne.
+	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+	// Odnowienie konczy sie tak samo jak wdrozenie: nowym plikiem i uslugą,
+	// ktora go czyta. Robi je demon hosta, ale skutek jest ten sam.
+	ActionCertificateRenew: {mutating: true, capability: "certificates.renew", permission: "certificate.renew",
+		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockUnits},
 
 	// Test synchronizacji nie zmienia hosta, ale wysyla z niego pakiety do
 	// wskazanych serwerow: to jedyny sposob, zeby powiedziec cos o serwerze,
@@ -1070,12 +1096,56 @@ type Payload struct {
 	Time            *TimePayload            `json:"time,omitempty"`
 	Power           *PowerPayload           `json:"power,omitempty"`
 	Security        *SecurityPayload        `json:"security,omitempty"`
+	Certificate     *CertificatePayload     `json:"certificate,omitempty"`
 }
 
 // SecurityPayload opisuje operacje modulu bezpieczenstwa.
 type SecurityPayload struct {
 	// Mode jest trybem obowiazkowej kontroli dostepu.
 	Mode string `json:"mode,omitempty"`
+}
+
+// CertificateTarget wskazuje plik certyfikatu wraz z tym, co panel o nim wie.
+//
+// Sciezka klucza i nazwa uslugi pochodza z konfiguracji panelu, a nie
+// z domyslu hosta: powiazanie "ten plik czyta ta usluga" wpisuje czlowiek,
+// bo tylko on je zna.
+type CertificateTarget struct {
+	Path    string `json:"path"`
+	KeyPath string `json:"key_path,omitempty"`
+	Service string `json:"service,omitempty"`
+}
+
+// CertificatePayload opisuje operacje modulu certyfikatow.
+type CertificatePayload struct {
+	// Targets wyznacza zakres skanu. Pusta lista oznacza skan tego, co host
+	// wie o sobie sam - czyli zlecen certmongera - a nie skan calego dysku.
+	Targets []CertificateTarget `json:"targets,omitempty"`
+
+	// Path i KeyPath sa celem wdrozenia.
+	Path    string `json:"path,omitempty"`
+	KeyPath string `json:"key_path,omitempty"`
+	// Certificate jest trescia jawna: certyfikat wraz z lancuchem. Idzie
+	// w zleceniu, bo jest publiczny i plan ma pokazywac to, co trafi na host.
+	Certificate string `json:"certificate,omitempty"`
+	// KeySecret wskazuje klucz prywatny w magazynie. Wartosci nie ma ani
+	// w zleceniu, ani w audycie, ani w inwentarzu - host pobiera ja tuz
+	// przed podmiana, na jednorazowa dzierzawe.
+	KeySecret *SecretRef `json:"key_secret,omitempty"`
+	Owner     string     `json:"owner,omitempty"`
+	Group     string     `json:"group,omitempty"`
+	Mode      string     `json:"mode,omitempty"`
+	KeyMode   string     `json:"key_mode,omitempty"`
+	// ReloadUnit jest usluga, ktora ma przeczytac nowy plik. Bez niej
+	// wdrozenie konczy sie plikiem na dysku i stara tozsamoscia w pamieci
+	// procesu - a to wyglada jak zmiana, ktorej nie widac.
+	ReloadUnit string `json:"reload_unit,omitempty"`
+	// ProbeTarget jest adresem, pod ktorym host sprawdzi wynik wdrozenia.
+	// Sonda porownuje odcisk, a nie zaufanie: pyta, czy usluga podaje ten
+	// certyfikat, ktory wlasnie zapisano.
+	ProbeTarget string `json:"probe_target,omitempty"`
+	// Request wskazuje zlecenie certmongera przy odnowieniu.
+	Request string `json:"request,omitempty"`
 }
 
 // PowerPayload opisuje wylaczenie hosta.
@@ -1172,6 +1242,9 @@ func (p Payload) Sekrety() []SecretRef {
 	var odnosniki []SecretRef
 	if p.File != nil && !p.File.ContentSecret.Pusty() {
 		odnosniki = append(odnosniki, *p.File.ContentSecret)
+	}
+	if p.Certificate != nil && !p.Certificate.KeySecret.Pusty() {
+		odnosniki = append(odnosniki, *p.Certificate.KeySecret)
 	}
 	return odnosniki
 }
@@ -1683,6 +1756,91 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionSecurityScan, ActionAuditRulesReload:
 		return nil
+
+	case ActionCertificateScan:
+		if payload.Certificate == nil {
+			return nil
+		}
+		if len(payload.Certificate.Targets) > certificates.MaksymalnaLiczbaCertyfikatow {
+			return fmt.Errorf("skan obejmuje najwyzej %d plikow",
+				certificates.MaksymalnaLiczbaCertyfikatow)
+		}
+		for _, cel := range payload.Certificate.Targets {
+			if err := certificates.WalidujSciezke(cel.Path); err != nil {
+				return err
+			}
+			if cel.KeyPath != "" {
+				if err := certificates.WalidujSciezke(cel.KeyPath); err != nil {
+					return err
+				}
+			}
+			if err := certificates.WalidujJednostke(cel.Service); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case ActionCertificateDeploy:
+		if payload.Certificate == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+		}
+		cert := payload.Certificate
+		if err := certificates.WalidujSciezke(cert.Path); err != nil {
+			return err
+		}
+		if cert.Certificate == "" {
+			return fmt.Errorf("wdrozenie wymaga tresci certyfikatu")
+		}
+		// Material sprawdzamy tu tym samym kodem, ktorym sprawdzi go host:
+		// zlecenie z popsutym lancuchem odpada przy zlecaniu, a nie po
+		// zatwierdzeniu i dostarczeniu na host.
+		certy, err := certificates.ParsujPEM([]byte(cert.Certificate))
+		if err != nil {
+			return err
+		}
+		if err := certificates.SprawdzLancuch(certy); err != nil {
+			return err
+		}
+		if !cert.KeySecret.Pusty() {
+			if cert.KeyPath == "" {
+				return fmt.Errorf("klucz z magazynu wymaga sciezki, pod ktora ma trafic")
+			}
+			if err := cert.KeySecret.Waliduj(); err != nil {
+				return err
+			}
+		}
+		if cert.KeyPath != "" {
+			if err := certificates.WalidujSciezke(cert.KeyPath); err != nil {
+				return err
+			}
+		}
+		if err := certificates.WalidujJednostke(cert.ReloadUnit); err != nil {
+			return err
+		}
+		return certificates.WalidujCel(cert.ProbeTarget)
+
+	case ActionCertificateRenew:
+		if payload.Certificate == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+		}
+		// Zlecenie wskazujemy identyfikatorem albo sciezka pliku. Sciezka jest
+		// tu potrzebna nie dla wygody: identyfikator zlecenia certmongera jest
+		// inny na kazdym hoscie, wiec kampania odnawiajaca ten sam certyfikat
+		// na calej flocie nie ma czym go wskazac.
+		if payload.Certificate.Request == "" {
+			if payload.Certificate.Path == "" {
+				return fmt.Errorf("odnowienie wymaga identyfikatora zlecenia albo sciezki certyfikatu")
+			}
+			if err := certificates.WalidujSciezke(payload.Certificate.Path); err != nil {
+				return err
+			}
+		} else if err := certificates.WalidujZlecenie(payload.Certificate.Request); err != nil {
+			return err
+		}
+		if err := certificates.WalidujJednostke(payload.Certificate.ReloadUnit); err != nil {
+			return err
+		}
+		return certificates.WalidujCel(payload.Certificate.ProbeTarget)
 
 	case ActionSELinuxModeSet:
 		if payload.Security == nil {

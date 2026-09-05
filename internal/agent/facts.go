@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/modules/certificates"
 	dnsmodul "github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/files"
@@ -107,6 +108,10 @@ type Facts struct {
 	// Security jest stanem ochronnym hosta: MAC, audyt, tryb rozruchu
 	// i to, czym host wystaje na zewnatrz.
 	Security *security.Snapshot `json:"security,omitempty"`
+	// Certificates jest obrazem certyfikatow, o ktore panel prosil, oraz
+	// tych, ktorych host pilnuje sam. Modul nie przeszukuje dysku, wiec pusta
+	// lista oznacza brak wskazanych plikow, a nie host bez certyfikatow.
+	Certificates *certificates.Snapshot `json:"certificates,omitempty"`
 	// Power jest stanem startu hosta: boot_id, czas dzialania i to, co
 	// wstrzymuje wylaczenie.
 	Power *power.Snapshot `json:"power,omitempty"`

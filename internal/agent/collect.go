@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
@@ -163,6 +164,17 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 			facts.Security = &snapshot
 		} else {
 			facts.Security = &security.Snapshot{UnavailableReason: err.Error()}
+		}
+	}
+
+	// Certyfikaty czyta agent, a helper dokłada to, czego bez roota nie widac.
+	// Zakres jest wyliczony: rejestr celow panelu i zlecenia certmongera,
+	// a nie przeszukanie systemu plikow.
+	if certificateProbe != nil {
+		if snapshot, err := certificateProbe(ctx); err == nil {
+			facts.Certificates = &snapshot
+		} else {
+			facts.Certificates = &certificates.Snapshot{UnavailableReason: err.Error()}
 		}
 	}
 

@@ -390,6 +390,7 @@ message TaskEnvelope {
     TimeAction time = 46;
     SystemShutdown system_shutdown = 47;
     SecurityAction security = 48;
+    CertificateAction certificate = 49;
   }
 }
 
@@ -652,6 +653,7 @@ message TaskResult {
   TimeResult time_result = 40;
   PowerResult power_result = 41;
   SecurityResult security_result = 42;
+  CertificateResult certificate_result = 43;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -1038,6 +1040,63 @@ message SecurityAction {
 message SecurityResult {
   bytes snapshot = 1;
   string message = 2;
+}
+
+// CertificateTarget wskazuje plik certyfikatu wraz z tym, co panel o nim wie.
+//
+// Powiazanie "ten plik czyta ta usluga" nie jest domyslem hosta: wpisuje je
+// czlowiek w panelu, bo tylko on je zna.
+message CertificateTarget {
+  string path = 1;
+  string key_path = 2;
+  string service = 3;
+}
+
+// CertificateAction opisuje operacje modulu certyfikatow.
+//
+// Skan oglada wylacznie wskazane pliki oraz to, czego host pilnuje sam:
+// przeszukanie calego systemu plikow znajduje magazyn zaufania zamiast
+// certyfikatow uslug. Klucz prywatny nie jedzie w kopercie - jest w niej
+// odnosnik do magazynu, po ktory host siega dopiero przy wykonaniu.
+message CertificateAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_SCAN = 1;
+    OPERATION_DEPLOY = 2;
+    OPERATION_RENEW = 3;
+  }
+  Operation operation = 1;
+  repeated CertificateTarget targets = 2;
+  string path = 3;
+  string key_path = 4;
+  // Certificate jest trescia jawna: certyfikat wraz z lancuchem.
+  string certificate = 5;
+  SecretRef key_secret = 6;
+  string owner = 7;
+  string group = 8;
+  string mode = 9;
+  string key_mode = 10;
+  // ReloadUnit jest usluga, ktora ma przeczytac nowy plik.
+  string reload_unit = 11;
+  // ProbeTarget jest adresem, pod ktorym host sprawdzi wynik wdrozenia.
+  string probe_target = 12;
+  // Request wskazuje zlecenie certmongera przy odnowieniu.
+  string request = 13;
+}
+
+message CertificateResult {
+  bytes snapshot = 1;
+  string message = 2;
+  // Fingerprint jest odciskiem certyfikatu, ktory naprawde wyladowal na
+  // hoscie - a nie tego, ktory panel wyslal.
+  string fingerprint_sha256 = 3;
+  string not_after = 4;
+  // Probe niesie odpowiedz uslugi po przeladowaniu.
+  bytes probe = 5;
+  // RolledBack mowi, ze host wrocil do poprzedniego pliku. Wdrozenie, ktore
+  // sie cofnelo, nie moze wygladac jak wdrozenie, ktore sie nie udalo
+  // w polowie.
+  bool rolled_back = 6;
 }
 
 // TimeAction opisuje operacje na czasie hosta.

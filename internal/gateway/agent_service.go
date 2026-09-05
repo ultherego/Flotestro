@@ -20,12 +20,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	certyfikaty "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	modulcerts "github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
@@ -82,6 +84,10 @@ type AgentService struct {
 	// dopiero po udanej operacji: panel nie moze twierdzic, ze zarzadza
 	// plikiem, ktorego host nie przyjal.
 	files *managedfiles.Store
+	// certificates trzyma historie wdrozonych certyfikatow. Zapisujemy ja
+	// dopiero po udanej operacji, i to na podstawie odcisku, ktory odeslal
+	// host - a nie tego, ktory panel wyslal.
+	certificates *certyfikaty.Store
 	// secrets wydaje wartosci sekretow na dzierzawe. Pusty oznacza panel bez
 	// magazynu: operacje wskazujace sekret nie beda wtedy dostarczane.
 	secrets SekretyWydawane
@@ -104,8 +110,9 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 	heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
-		files: managedfiles.NewStore(pool),
-		audit: recorder, registry: registry, trust: trust, relays: relayStore,
+		files:        managedfiles.NewStore(pool),
+		certificates: certyfikaty.NewStore(pool),
+		audit:        recorder, registry: registry, trust: trust, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 		proby: map[string]kontekstZadania{},
@@ -457,6 +464,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
 		s.zapiszStanPliku(ctx, hostID, jobID)
+		s.zapiszWdrozenieCertyfikatu(ctx, hostID, jobID, result.GetCertificateResult())
 		// Odczytana tresc trafia do magazynu wersji: bez tego nie da sie
 		// wrocic do stanu sprzed pierwszej zmiany z panelu, bo tej tresci
 		// panel nigdy nie zapisywal.
@@ -479,6 +487,22 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
 			s.log.Error("nie zapisano stanu plikow", "host_id", hostID, "err", err)
+		}
+	}
+
+	// Obraz certyfikatow trafia do inwentarza po skanie i po wdrozeniu:
+	// zakladka ma pokazywac plik, ktory naprawde lezy na hoscie, a nie ten,
+	// ktory panel wyslal.
+	if certyfikat := result.GetCertificateResult(); certyfikat != nil &&
+		len(certyfikat.GetSnapshot()) > 0 {
+		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
+			Module:     "certificates",
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(certyfikat.GetSnapshot())),
+			Source:     "agent/certificates+certmonger",
+			Payload:    certyfikat.GetSnapshot(),
+			ObservedAt: time.Now().UTC(),
+		}); err != nil {
+			s.log.Error("nie zapisano obrazu certyfikatow", "host_id", hostID, "err", err)
 		}
 	}
 
@@ -871,6 +895,25 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":    "time",
 			"message": zegar.GetMessage(),
 			"probes":  surowyJSON(zegar.GetProbes()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Odpowiedz uslugi po wdrozeniu nalezy do zadania, a nie do stanu hosta:
+	// to pomiar z jednej chwili, tuz po podmianie. Razem z nim idzie odcisk
+	// tego, co naprawde wyladowalo, i informacja, czy host sie wycofal.
+	if certyfikat := result.GetCertificateResult(); certyfikat != nil &&
+		(len(certyfikat.GetProbe()) > 0 || certyfikat.GetFingerprintSha256() != "" ||
+			certyfikat.GetRolledBack()) {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "certificate",
+			"message":            certyfikat.GetMessage(),
+			"fingerprint_sha256": certyfikat.GetFingerprintSha256(),
+			"not_after":          certyfikat.GetNotAfter(),
+			"probe":              surowyJSON(certyfikat.GetProbe()),
+			"rolled_back":        certyfikat.GetRolledBack(),
 		})
 		if err == nil {
 			return encoded
@@ -1591,5 +1634,61 @@ func (s *AgentService) zapiszStanPliku(ctx context.Context, hostID, jobID string
 	}
 	if err := s.files.Ustaw(ctx, s.pool, stan, jobID); err != nil {
 		s.log.Error("nie zapisano stanu pliku", "host_id", hostID, "err", err)
+	}
+}
+
+// zapiszWdrozenieCertyfikatu dopisuje wdrozenie do historii po udanej operacji.
+//
+// Odcisk bierzemy z wyniku hosta, a nie z payloadu: panel ma zapisac to, co
+// naprawde wyladowalo na dysku. Klucz jest w historii sama nazwa sekretu
+// i wersja - wartosci nie ma tu ani nigdzie indziej poza magazynem.
+func (s *AgentService) zapiszWdrozenieCertyfikatu(ctx context.Context, hostID, jobID string,
+	wynik *agentv1.CertificateResult) {
+	if wynik == nil || wynik.GetFingerprintSha256() == "" {
+		return
+	}
+	zadanie, err := s.jobs.Get(ctx, jobID)
+	if err != nil {
+		return
+	}
+	switch opspec.ActionType(zadanie.ActionType) {
+	case opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew:
+	default:
+		return
+	}
+
+	var payload opspec.Payload
+	if err := json.Unmarshal(zadanie.Payload, &payload); err != nil || payload.Certificate == nil {
+		return
+	}
+	wdrozenie := certyfikaty.Wdrozenie{
+		HostID:            hostID,
+		Path:              payload.Certificate.Path,
+		FingerprintSHA256: wynik.GetFingerprintSha256(),
+		JobID:             jobID,
+		DeployedBy:        zadanie.CreatedBy,
+	}
+	if termin, err := time.Parse(time.RFC3339, wynik.GetNotAfter()); err == nil {
+		wdrozenie.NotAfter = &termin
+	}
+	// Tresc zapisujemy tylko przy wdrozeniu z panelu: odnowienie robi demon
+	// hosta i panel nie zna certyfikatu, ktory z niego wyszedl. Zostaje wtedy
+	// sam odcisk i termin - czyli to, co host odeslal.
+	if payload.Certificate.Certificate != "" {
+		wdrozenie.Certificate = payload.Certificate.Certificate
+		if certy, err := modulcerts.ParsujPEM([]byte(payload.Certificate.Certificate)); err == nil {
+			wdrozenie.Subject = certy[0].Subject.String()
+			wdrozenie.Issuer = certy[0].Issuer.String()
+		}
+	}
+	if !payload.Certificate.KeySecret.Pusty() {
+		wdrozenie.KeySecret = payload.Certificate.KeySecret.Name
+		wdrozenie.KeyVersion = payload.Certificate.KeySecret.Version
+		if wdrozenie.KeyVersion == 0 {
+			wdrozenie.KeyVersion = wersjaZDzierzawy(ctx, s, jobID, wdrozenie.KeySecret)
+		}
+	}
+	if err := s.certificates.ZapiszWdrozenie(ctx, s.pool, wdrozenie); err != nil {
+		s.log.Error("nie zapisano wdrozenia certyfikatu", "host_id", hostID, "err", err)
 	}
 }
