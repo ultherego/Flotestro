@@ -81,6 +81,24 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 		if snapshot, err := s.podatnosci.AktywnySnapshot(r.Context(), raport.State.Provider); err == nil {
 			raport.Snapshot = &snapshot
 			raport.SnapshotStale = snapshot.Nieswiezy(s.wiekFeedu, time.Now().UTC())
+		} else if raport.State.SnapshotDigest != "" {
+			// Rodzina RPM czyta ustalenia z metadanych wlasnych repozytoriow,
+			// wiec nie ma centralnego snapshotu. Panel i tak musi powiedziec,
+			// co rozstrzygnelo ocene - inaczej wynik jest bez zrodla.
+			ustalenia, zebrane, err := s.pakietyHostow.UstaleniaHosta(r.Context(), hostID)
+			if err == nil {
+				ile := 0
+				for _, dla := range ustalenia {
+					ile += len(dla)
+				}
+				snapshot := vuln.Snapshot{
+					Provider: raport.State.Provider + " (metadane repozytoriow hosta)",
+					Digest:   raport.State.SnapshotDigest, AdvisoryCount: ile,
+					Releases: []string{raport.State.Release}, FetchedAt: zebrane, Active: true,
+				}
+				raport.Snapshot = &snapshot
+				raport.SnapshotStale = snapshot.Nieswiezy(s.wiekFeedu, time.Now().UTC())
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, raport)

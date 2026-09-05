@@ -1939,6 +1939,46 @@ func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID st
 		s.log.Error("nie zapisano listy pakietow", "host_id", hostID, "err", err)
 		return
 	}
+
+	// Ustalenia producenta znane hostowi zapisujemy razem z lista: pochodza
+	// z tego samego odczytu i opisuja ten sam moment.
+	ustalenia := ustaleniaZWyniku(wynik, teraz)
+	if err := s.pakiety.ZastapUstalenia(ctx, hostID, ustalenia); err != nil {
+		s.log.Error("nie zapisano ustalen producenta", "host_id", hostID, "err", err)
+	}
 	s.log.Info("zapisano liste pakietow", "host_id", hostID,
-		"pakietow", len(pakiety), "odcisk", stan.Digest)
+		"pakietow", len(pakiety), "ustalen", len(ustalenia), "odcisk", stan.Digest)
+}
+
+// ustaleniaZWyniku rozpakowuje ustalenia producenta z wyniku odczytu.
+//
+// Jedno ustalenie dotyczy zwykle kilku pakietow; panel przechowuje je po
+// pakiecie, bo tak przebiega korelacja.
+func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult, teraz time.Time) []vuln.UstalenieHosta {
+	if len(wynik.GetAdvisories()) == 0 {
+		return nil
+	}
+	var zebrane []modulpakiety.Advisory
+	if err := json.Unmarshal(wynik.GetAdvisories(), &zebrane); err != nil {
+		return nil
+	}
+	var ustalenia []vuln.UstalenieHosta
+	for _, ustalenie := range zebrane {
+		// Ustalenie bez CVE jest normalne: producent nie zawsze je przypisuje.
+		// Kolumna nie przyjmuje jednak wartosci pustej, a brak listy i lista
+		// pusta znacza tu to samo.
+		cve := ustalenie.CVEIDs
+		if cve == nil {
+			cve = []string{}
+		}
+		for _, pakiet := range ustalenie.Packages {
+			ustalenia = append(ustalenia, vuln.UstalenieHosta{
+				AdvisoryID: ustalenie.ID, PackageName: pakiet.Name,
+				Architecture: pakiet.Architecture, FixedEVR: pakiet.EVR,
+				CVEIDs: cve, Severity: ustalenie.Severity,
+				Title: ustalenie.Title, IssuedAt: ustalenie.IssuedAt, CollectedAt: teraz,
+			})
+		}
+	}
+	return ustalenia
 }

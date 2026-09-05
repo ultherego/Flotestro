@@ -113,6 +113,16 @@ type OpisHosta struct {
 	InventoryReason string
 }
 
+// UstaleniaZHosta mowi, czy ustalenia dla tej dystrybucji czyta sie
+// z metadanych repozytoriow hosta, a nie z centralnego feedu.
+//
+// Rodzina RPM publikuje je w updateinfo razem z pakietami, wiec host ma je
+// z tego samego zrodla, z ktorego bierze poprawki. Debian i Ubuntu maja
+// osobne trackery, ktore panel pobiera centralnie.
+func UstaleniaZHosta(dystrybucja string) bool {
+	return rodzinaRPM(dystrybucja)
+}
+
 // Dostawca zwraca nazwe trackera wlasciwego dla dystrybucji hosta.
 func Dostawca(dystrybucja string) string {
 	switch strings.ToLower(dystrybucja) {
@@ -317,17 +327,40 @@ func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 				opis.InventoryDigest != stanListy.Digest,
 		}
 
-		klucz := dostawca + "\x1f" + opis.Release
-		if _, mamy := ustalenia[klucz]; !mamy && snapshot.ID != "" &&
-			ObejmujeWydanie(snapshot, opis.Release) {
-			pobrane, err := h.store.UstaleniaDlaWydania(ctx, snapshot.ID, opis.Distribution, opis.Release)
+		// Dla rodzin RPM zrodlem rozstrzygajacym sa metadane repozytoriow
+		// samego hosta: to one mowia, ktora wersja zamyka ustalenie i czy
+		// lezy w repozytorium, z ktorego ten host bierze pakiety.
+		zestaw := map[string][]Advisory(nil)
+		if UstaleniaZHosta(opis.Distribution) {
+			zHosta, zebrane, err := h.pakiety.UstaleniaHosta(ctx, opis.ID)
 			if err != nil {
-				h.log.Error("nie odczytano ustalen feedu", "dostawca", dostawca, "err", err)
+				h.log.Error("nie odczytano ustalen hosta", "host_id", opis.ID, "err", err)
 			}
-			ustalenia[klucz] = pobrane
+			zestaw = zHosta
+			// Snapshot jest tu wlasnoscia hosta: jego odciskiem jest stan
+			// listy, a wiekiem - chwila odczytu metadanych.
+			snapshot = Snapshot{
+				Provider: dostawca, Digest: stanListy.Digest,
+				Releases: []string{opis.Release}, AdvisoryCount: len(zHosta),
+				FetchedAt: zebrane, Active: true,
+			}
+			if len(zHosta) == 0 && zebrane.IsZero() {
+				snapshot.Digest = ""
+			}
+		} else {
+			klucz := dostawca + "\x1f" + opis.Release
+			if _, mamy := ustalenia[klucz]; !mamy && snapshot.ID != "" &&
+				ObejmujeWydanie(snapshot, opis.Release) {
+				pobrane, err := h.store.UstaleniaDlaWydania(ctx, snapshot.ID, opis.Distribution, opis.Release)
+				if err != nil {
+					h.log.Error("nie odczytano ustalen feedu", "dostawca", dostawca, "err", err)
+				}
+				ustalenia[klucz] = pobrane
+			}
+			zestaw = ustalenia[klucz]
 		}
 
-		ocena := Ocen(wejscie, snapshot, ustalenia[klucz], h.ustawienia.MaxSnapshotAge, teraz)
+		ocena := Ocen(wejscie, snapshot, zestaw, h.ustawienia.MaxSnapshotAge, teraz)
 		if err := h.store.ZapiszUstalenia(ctx, opis.ID, ocena.Findings, ocena.Stan); err != nil {
 			h.log.Error("nie zapisano oceny podatnosci", "host_id", opis.ID, "err", err)
 			continue

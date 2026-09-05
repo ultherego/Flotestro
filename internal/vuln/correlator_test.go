@@ -241,3 +241,39 @@ func TestOcenaRPMUwzgledniaEpoke(t *testing.T) {
 		t.Fatalf("wersja zainstalowana = %q", ocena.Findings[0].InstalledVersion)
 	}
 }
+
+func TestUstalenieDlaInnejArchitekturyNieDotyczyPakietu(t *testing.T) {
+	// Producent wydaje osobne pakiety dla kazdej architektury; ustalenie dla
+	// i686 nie naprawia pakietu x86_64 - a przypisane do niego dawaloby dwa
+	// ustalenia o tym samym pakiecie.
+	pakiet := packages.InstalledPackage{
+		Name: "openssh", Version: "9.9p1", Release: "13.fc42", Architecture: "x86_64",
+		SourceName: "openssh", Vendor: "Fedora Project",
+	}
+	ustalenia := map[string][]Advisory{
+		"openssh": {
+			{Provider: "fedora", AdvisoryID: "FEDORA-2026-a", SourcePackage: "openssh",
+				BinaryPackage: "openssh", Architecture: "i686", FixedVersion: "9.9p1-14.fc42",
+				Status: StatusNaprawione, FromHostRepositories: true},
+			{Provider: "fedora", AdvisoryID: "FEDORA-2026-a", SourcePackage: "openssh",
+				BinaryPackage: "openssh", Architecture: "x86_64", FixedVersion: "9.9p1-14.fc42",
+				Status: StatusNaprawione, FromHostRepositories: true},
+		},
+	}
+	wejscie := Wejscie{
+		HostID: "host-4", Distribution: "fedora", Release: "42",
+		Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-4",
+	}
+	snapshot := Snapshot{Provider: "fedora", Digest: "f1", Releases: []string{"42"},
+		FetchedAt: teraz.Add(-time.Hour)}
+
+	ocena := Ocen(wejscie, snapshot, ustalenia, 6*time.Hour, teraz)
+	if len(ocena.Findings) != 1 {
+		t.Fatalf("odczytano %d ustalen: %+v", len(ocena.Findings), ocena.Findings)
+	}
+	// Ustalenie z metadanych hosta znaczy, ze poprawka lezy w repozytorium,
+	// z ktorego host bierze pakiety - i to jest odpowiedz, a nie domysl.
+	if ocena.Findings[0].Remediation != RemediationAvailable {
+		t.Fatalf("naprawa = %q", ocena.Findings[0].Remediation)
+	}
+}

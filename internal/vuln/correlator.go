@@ -97,9 +97,14 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 		}
 		stan.PackagesCovered++
 
-		zrodlo := zrodloPakietu(pakiet)
-		for _, ustalenie := range ustalenia[zrodlo] {
+		for _, ustalenie := range ustalenia[KluczKorelacji(pakiet, wejscie.Distribution)] {
 			if ustalenie.BinaryPackage != "" && ustalenie.BinaryPackage != pakiet.Name {
+				continue
+			}
+			// Poprawka dla innej architektury nie naprawia tego pakietu:
+			// producent wydaje je osobno i osobno je numeruje.
+			if ustalenie.Architecture != "" && pakiet.Architecture != "" &&
+				ustalenie.Architecture != pakiet.Architecture {
 				continue
 			}
 			ocena := ocenPakiet(wejscie, snapshot, pakiet, ustalenie, teraz)
@@ -178,8 +183,14 @@ func ocenPakiet(wejscie Wejscie, snapshot Snapshot, pakiet packages.InstalledPac
 	if wynik < 0 {
 		ocena.State = StateAffected
 		// Czy poprawke da sie zainstalowac teraz, rozstrzyga plan pakietowy
-		// hosta: advisory mowi tylko, ze taka wersja istnieje.
+		// hosta: advisory mowi tylko, ze taka wersja istnieje. Wyjatkiem jest
+		// ustalenie odczytane z metadanych samego hosta - wtedy poprawka lezy
+		// w repozytorium, z ktorego host bierze pakiety, i to jest odpowiedz,
+		// a nie domysl.
 		ocena.Remediation = RemediationUnknown
+		if ustalenie.FromHostRepositories {
+			ocena.Remediation = RemediationAvailable
+		}
 		return ocena
 	}
 	ocena.State = StateNotAffected
@@ -239,6 +250,19 @@ func producentDystrybucji(vendor, dystrybucja string) bool {
 		return strings.Contains(maly, "rocky")
 	}
 	return false
+}
+
+// KluczKorelacji zwraca klucz, po ktorym szuka sie ustalen dla pakietu.
+//
+// Debian i Ubuntu prowadza bezpieczenstwo po pakiecie zrodlowym: jedno
+// ustalenie dotyczy wszystkich binarnych z tego samego zrodla. Fedora mowi
+// w updateinfo o pakietach binarnych, bo tam ustalenie jest lista konkretnych
+// wersji do zainstalowania.
+func KluczKorelacji(pakiet packages.InstalledPackage, dystrybucja string) string {
+	if rodzinaRPM(dystrybucja) {
+		return pakiet.Name
+	}
+	return zrodloPakietu(pakiet)
 }
 
 // zrodloPakietu zwraca nazwe pakietu zrodlowego.

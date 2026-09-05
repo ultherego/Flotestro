@@ -202,8 +202,15 @@ func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
 	if len(ustalenia) > 0 {
 		wiersze := make([][]any, 0, len(ustalenia))
 		for _, ustalenie := range ustalenia {
+			// Ustalenie bez CVE jest normalne: producent nie zawsze je
+			// przypisuje, a kolumna nie przyjmuje wartosci pustej. Brak listy
+			// i lista pusta znacza tu to samo.
+			cve := ustalenie.CVEIDs
+			if cve == nil {
+				cve = []string{}
+			}
 			wiersze = append(wiersze, []any{
-				hostID, ustalenie.Provider, ustalenie.AdvisoryID, ustalenie.CVEIDs,
+				hostID, ustalenie.Provider, ustalenie.AdvisoryID, cve,
 				ustalenie.Distribution, ustalenie.Release, ustalenie.SourcePackage,
 				ustalenie.BinaryPackage, ustalenie.Architecture, ustalenie.InstalledVersion,
 				ustalenie.FixedVersion, string(ustalenie.State), ustalenie.ReasonCode,

@@ -7878,8 +7878,14 @@ type InstalledPackagesResult struct {
 	Count             uint32 `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
 	Manager           string `protobuf:"bytes,4,opt,name=manager,proto3" json:"manager,omitempty"`
 	UnavailableReason string `protobuf:"bytes,5,opt,name=unavailable_reason,json=unavailableReason,proto3" json:"unavailable_reason,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Advisories niesie ustalenia producenta znane hostowi z metadanych
+	// repozytoriow - dla dnf sa one zrodlem rozstrzygajacym, bo mowia
+	// o wersjach z tych samych repozytoriow, z ktorych host bierze pakiety.
+	// To sa fakty, a nie ocena: czy dotycza tego hosta, rozstrzyga panel.
+	Advisories                  []byte `protobuf:"bytes,6,opt,name=advisories,proto3" json:"advisories,omitempty"`
+	AdvisoriesUnavailableReason string `protobuf:"bytes,7,opt,name=advisories_unavailable_reason,json=advisoriesUnavailableReason,proto3" json:"advisories_unavailable_reason,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *InstalledPackagesResult) Reset() {
@@ -7943,6 +7949,20 @@ func (x *InstalledPackagesResult) GetManager() string {
 func (x *InstalledPackagesResult) GetUnavailableReason() string {
 	if x != nil {
 		return x.UnavailableReason
+	}
+	return ""
+}
+
+func (x *InstalledPackagesResult) GetAdvisories() []byte {
+	if x != nil {
+		return x.Advisories
+	}
+	return nil
+}
+
+func (x *InstalledPackagesResult) GetAdvisoriesUnavailableReason() string {
+	if x != nil {
+		return x.AdvisoriesUnavailableReason
 	}
 	return ""
 }
@@ -11046,13 +11066,17 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0eSecurityResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x0e\n" +
-	"\fListPackages\"\xac\x01\n" +
+	"\fListPackages\"\x90\x02\n" +
 	"\x17InstalledPackagesResult\x12\x1a\n" +
 	"\bpackages\x18\x01 \x01(\fR\bpackages\x12\x16\n" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x14\n" +
 	"\x05count\x18\x03 \x01(\rR\x05count\x12\x18\n" +
 	"\amanager\x18\x04 \x01(\tR\amanager\x12-\n" +
-	"\x12unavailable_reason\x18\x05 \x01(\tR\x11unavailableReason\"\xac\x01\n" +
+	"\x12unavailable_reason\x18\x05 \x01(\tR\x11unavailableReason\x12\x1e\n" +
+	"\n" +
+	"advisories\x18\x06 \x01(\fR\n" +
+	"advisories\x12B\n" +
+	"\x1dadvisories_unavailable_reason\x18\a \x01(\tR\x1badvisoriesUnavailableReason\"\xac\x01\n" +
 	"\x0fMonitoringProbe\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12#\n" +

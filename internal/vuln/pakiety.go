@@ -165,3 +165,89 @@ func (m *MagazynPakietow) Pakiety(ctx context.Context, hostID string) ([]package
 	}
 	return pakiety, rows.Err()
 }
+
+// UstalenieHosta jest ustaleniem producenta znanym hostowi z jego repozytoriow.
+type UstalenieHosta struct {
+	AdvisoryID   string     `json:"advisory_id"`
+	PackageName  string     `json:"package_name"`
+	Architecture string     `json:"architecture,omitempty"`
+	FixedEVR     string     `json:"fixed_evr,omitempty"`
+	CVEIDs       []string   `json:"cve_ids,omitempty"`
+	Severity     string     `json:"severity,omitempty"`
+	Title        string     `json:"title,omitempty"`
+	IssuedAt     *time.Time `json:"issued_at,omitempty"`
+	CollectedAt  time.Time  `json:"collected_at"`
+}
+
+// ZastapUstalenia podmienia ustalenia producenta znane hostowi.
+//
+// Podmiana, a nie scalanie: lista pochodzi z jednego odczytu metadanych i albo
+// opisuje stan z tej chwili, albo nie opisuje niczego.
+func (m *MagazynPakietow) ZastapUstalenia(ctx context.Context, hostID string,
+	ustalenia []UstalenieHosta) error {
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `delete from host_advisories where host_id = $1`, hostID); err != nil {
+		return err
+	}
+	if len(ustalenia) > 0 {
+		wiersze := make([][]any, 0, len(ustalenia))
+		for _, ustalenie := range ustalenia {
+			wiersze = append(wiersze, []any{
+				hostID, ustalenie.AdvisoryID, ustalenie.PackageName, ustalenie.Architecture,
+				ustalenie.FixedEVR, ustalenie.CVEIDs, ustalenie.Severity, ustalenie.Title,
+				ustalenie.IssuedAt, ustalenie.CollectedAt,
+			})
+		}
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"host_advisories"}, []string{
+			"host_id", "advisory_id", "package_name", "architecture", "fixed_evr",
+			"cve_ids", "severity", "title", "issued_at", "collected_at",
+		}, pgx.CopyFromRows(wiersze)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// UstaleniaHosta zwraca ustalenia producenta znane hostowi, zebrane po nazwie
+// pakietu binarnego - bo tak mowi o nich updateinfo.
+func (m *MagazynPakietow) UstaleniaHosta(ctx context.Context, hostID string) (map[string][]Advisory, time.Time, error) {
+	const query = `
+		select advisory_id, package_name, architecture, fixed_evr, cve_ids,
+		       severity, title, collected_at
+		from host_advisories where host_id = $1`
+	rows, err := m.pool.Query(ctx, query, hostID)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+
+	wynik := map[string][]Advisory{}
+	var najnowsze time.Time
+	for rows.Next() {
+		var ustalenie UstalenieHosta
+		if err := rows.Scan(&ustalenie.AdvisoryID, &ustalenie.PackageName,
+			&ustalenie.Architecture, &ustalenie.FixedEVR, &ustalenie.CVEIDs,
+			&ustalenie.Severity, &ustalenie.Title, &ustalenie.CollectedAt); err != nil {
+			return nil, time.Time{}, err
+		}
+		if ustalenie.CollectedAt.After(najnowsze) {
+			najnowsze = ustalenie.CollectedAt
+		}
+		wynik[ustalenie.PackageName] = append(wynik[ustalenie.PackageName], Advisory{
+			AdvisoryID: ustalenie.AdvisoryID, CVEIDs: ustalenie.CVEIDs,
+			SourcePackage: ustalenie.PackageName, BinaryPackage: ustalenie.PackageName,
+			Architecture: ustalenie.Architecture,
+			FixedVersion: ustalenie.FixedEVR, Status: StatusNaprawione,
+			VendorSeverity: ustalenie.Severity, Title: ustalenie.Title,
+			// Ustalenie z metadanych hosta znaczy, ze poprawka lezy
+			// w repozytorium, z ktorego host bierze pakiety.
+			FromHostRepositories: true,
+		})
+	}
+	return wynik, najnowsze, rows.Err()
+}

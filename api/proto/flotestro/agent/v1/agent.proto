@@ -1067,6 +1067,12 @@ message InstalledPackagesResult {
   uint32 count = 3;
   string manager = 4;
   string unavailable_reason = 5;
+  // Advisories niesie ustalenia producenta znane hostowi z metadanych
+  // repozytoriow - dla dnf sa one zrodlem rozstrzygajacym, bo mowia
+  // o wersjach z tych samych repozytoriow, z ktorych host bierze pakiety.
+  // To sa fakty, a nie ocena: czy dotycza tego hosta, rozstrzyga panel.
+  bytes advisories = 6;
+  string advisories_unavailable_reason = 7;
 }
 
 // MonitoringProbe opisuje sonde wykonywana z hosta.

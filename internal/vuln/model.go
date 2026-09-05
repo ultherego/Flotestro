@@ -119,6 +119,10 @@ type Advisory struct {
 	// BinaryPackage zawezaja ustalenie do jednego pakietu binarnego; puste
 	// oznacza cale zrodlo.
 	BinaryPackage string `json:"binary_package,omitempty"`
+	// Architecture zawezaja ustalenie do jednej architektury. Producent
+	// wydaje osobne pakiety dla kazdej, a poprawka dla i686 nie naprawia
+	// pakietu x86_64 - i nie moze byc do niego przypisana.
+	Architecture string `json:"architecture,omitempty"`
 	// FixedVersion pusta oznacza ustalenie bez poprawki: pakiet jest podatny
 	// i nie ma czym tego naprawic.
 	FixedVersion string `json:"fixed_version,omitempty"`
@@ -128,6 +132,10 @@ type Advisory struct {
 	Title          string     `json:"title,omitempty"`
 	URL            string     `json:"url,omitempty"`
 	PublishedAt    *time.Time `json:"published_at,omitempty"`
+	// FromHostRepositories oznacza ustalenie odczytane z metadanych
+	// repozytoriow samego hosta. Wtedy poprawka jest osiagalna z definicji:
+	// host widzi ja w repozytorium, z ktorego bierze pakiety.
+	FromHostRepositories bool `json:"from_host_repositories,omitempty"`
 }
 
 // Statusy ustalen u producenta.

@@ -21,8 +21,18 @@ func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvel
 	odczytCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	lista := packages.Zainstalowane(odczytCtx, menedzerHosta(odczytCtx))
+	menedzer := menedzerHosta(odczytCtx)
+	lista := packages.Zainstalowane(odczytCtx, menedzer)
 	zakodowana, err := json.Marshal(lista.Packages)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
+	}
+
+	// Ustalenia producenta czytamy przy tej samej okazji: dla dnf leza
+	// w metadanych repozytoriow, ktore host i tak ma. To sa fakty o pakietach,
+	// tak samo jak sama lista - ocena powstaje w panelu.
+	ustalenia, powodUstalen := packages.Ustalenia(odczytCtx, menedzer, lista.Packages)
+	zakodowaneUstalenia, err := json.Marshal(ustalenia)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
 	}
@@ -30,7 +40,8 @@ func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvel
 	// Nieodczytana lista nie moze wygladac jak host bez pakietow: to jest
 	// odpowiedz "nie wiadomo", a na jej podstawie nie wolno powiedziec
 	// niczego o podatnosciach.
-	komunikat := "odczytano " + itoa(lista.Count) + " pakietow"
+	komunikat := "odczytano " + itoa(lista.Count) + " pakietow, " +
+		itoa(len(ustalenia)) + " ustalen producenta"
 	if lista.UnavailableReason != "" {
 		komunikat = "listy pakietow nie odczytano: " + lista.UnavailableReason
 	}
@@ -39,11 +50,13 @@ func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvel
 		Status:  agentv1.TaskResult_STATUS_SUCCEEDED,
 		Message: komunikat,
 		InstalledPackagesResult: &agentv1.InstalledPackagesResult{
-			Packages:          zakodowana,
-			Digest:            lista.Digest,
-			Count:             uint32(lista.Count),
-			Manager:           lista.Manager,
-			UnavailableReason: lista.UnavailableReason,
+			Packages:                    zakodowana,
+			Digest:                      lista.Digest,
+			Count:                       uint32(lista.Count),
+			Manager:                     lista.Manager,
+			UnavailableReason:           lista.UnavailableReason,
+			Advisories:                  zakodowaneUstalenia,
+			AdvisoriesUnavailableReason: powodUstalen,
 		},
 	}
 }
