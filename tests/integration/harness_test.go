@@ -252,11 +252,15 @@ type packageDetail struct {
 		CurrentVersion   string `json:"current_version"`
 		CandidateVersion string `json:"candidate_version"`
 	} `json:"applied"`
-	PlanHash              string `json:"plan_hash"`
-	RebootPredicted       bool   `json:"reboot_predicted"`
-	MetadataRefreshed     bool   `json:"metadata_refreshed"`
-	RebootRequired        bool   `json:"reboot_required"`
-	PackageDatabaseBroken bool   `json:"package_database_broken"`
+	// Removals i Protected sa trescia planu usuniecia: co zniknie razem
+	// z pakietem i czego panel nie usunie mimo prosby.
+	Removals              []string `json:"removals"`
+	Protected             []string `json:"protected"`
+	PlanHash              string   `json:"plan_hash"`
+	RebootPredicted       bool     `json:"reboot_predicted"`
+	MetadataRefreshed     bool     `json:"metadata_refreshed"`
+	RebootRequired        bool     `json:"reboot_required"`
+	PackageDatabaseBroken bool     `json:"package_database_broken"`
 }
 
 func (h *harness) hosts() []hostView {

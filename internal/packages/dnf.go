@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -42,6 +43,16 @@ func (d *DNF) LockHeld() (bool, string) {
 // aktualizacje, i 0, gdy ich nie ma; kazdy inny kod jest bledem.
 func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: d.Name(), DiskAvailableBytes: diskAvailable("/")}
+
+	// Plan usuniecia i plan instalacji odpowiadaja na inne pytanie niz plan
+	// aktualizacji: nie "co sie zmieni samo", tylko "co zniknie albo dojdzie
+	// razem z tym, o co prosze".
+	switch options.Mode {
+	case ModeRemove:
+		return d.planRemove(ctx, plan, options)
+	case ModeInstall:
+		return d.planInstall(ctx, plan, options)
+	}
 
 	result := run(ctx, 5*time.Minute, dnfPath, "--quiet", "--cacheonly", "check-update")
 	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 100) {
@@ -184,4 +195,393 @@ func (d *DNF) rebootRequired(ctx context.Context) bool {
 func (d *DNF) DatabaseBroken(ctx context.Context) bool {
 	result := run(ctx, 2*time.Minute, rpmPath, "--verifydb")
 	return result.Ran && result.ExitCode != 0
+}
+
+// Pelny cykl zycia pakietow dla dnf.
+//
+// Instalacja, usuniecie i wstrzymanie sa tu osobnymi decyzjami tak samo jak
+// w apt, ale narzedzie odpowiada inaczej: dnf nie ma symulacji, ktora
+// wypisalaby sam zbior zmian, wiec plan czytamy z jego wlasnej tabeli
+// transakcji przerwanej przed wykonaniem. To jest odpowiedz dnf, a nie nasza
+// rekonstrukcja jego zaleznosci - i tylko taka odpowiedz wolno pokazac
+// czlowiekowi, ktory zaraz cos usunie.
+
+// dnfVersionlock jest nazwa polecenia wtyczki blokujacej wersje.
+const dnfVersionlock = "versionlock"
+
+// planRemove liczy, co zniknie razem ze wskazanymi pakietami.
+func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
+	if len(options.Packages) == 0 {
+		return plan, fmt.Errorf("plan usuniecia wymaga listy pakietow")
+	}
+	// --assumeno konczy sie kodem 1 i komunikatem o przerwaniu: to jest
+	// sposob, w jaki dnf pokazuje transakcje, ktorej nie wykonuje.
+	args := append([]string{"--assumeno", "remove"}, options.Packages...)
+	result := run(ctx, 10*time.Minute, dnfPath, args...)
+	if !result.Ran {
+		return plan, fmt.Errorf("dnf remove: %s", result.Reason())
+	}
+	wyjscie := result.Stdout + "\n" + result.Stderr
+	if BrakPakietuDNF(wyjscie) {
+		// Pakiet, ktorego nie ma, nie jest bledem planu: nie ma czego usuwac.
+		return plan, nil
+	}
+	// Transakcja, ktorej dnf nie potrafi ulozyc, nie jest planem pustym.
+	// Pusty plan czytaloby sie jako "nic nie zniknie" - a to jest odpowiedz
+	// na inne pytanie niz "tego sie nie da usunac".
+	if powod := NierozwiazywalneDNF(wyjscie); powod != "" {
+		return plan, fmt.Errorf("dnf nie potrafi ulozyc tej transakcji: %s", powod)
+	}
+	usuwane, zapowiedziane, err := ParsujPlanUsunieciaDNF(wyjscie)
+	if err != nil {
+		return plan, err
+	}
+	if zapowiedziane > 0 && len(usuwane) != zapowiedziane {
+		// Cisza w tym miejscu bylaby najgorsza z mozliwych odpowiedzi:
+		// operator zobaczylby krotsza liste, niz to, co naprawde zniknie.
+		return plan, fmt.Errorf("nie rozpoznano planu usuniecia: dnf zapowiada %d pakietow, "+
+			"a odczytano %d", zapowiedziane, len(usuwane))
+	}
+	if len(usuwane) == 0 {
+		// Wyjscie, z ktorego nic nie odczytalismy, tez nie jest planem pustym:
+		// znaczy, ze format sie zmienil i nie wiemy, co by zniknelo.
+		return plan, fmt.Errorf("nie rozpoznano planu usuniecia z odpowiedzi dnf")
+	}
+	plan.Removals = usuwane
+	plan.Protected = ChronioneWZbiorze(plan.Removals)
+	return plan, nil
+}
+
+// planInstall liczy, co dojdzie razem ze wskazanymi pakietami.
+func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan, error) {
+	if len(options.Packages) == 0 {
+		return plan, fmt.Errorf("plan instalacji wymaga listy pakietow")
+	}
+	args := append([]string{"--assumeno", "install"}, options.Packages...)
+	result := run(ctx, 10*time.Minute, dnfPath, args...)
+	if !result.Ran {
+		return plan, fmt.Errorf("dnf install: %s", result.Reason())
+	}
+	wyjscie := result.Stdout + "\n" + result.Stderr
+	for _, wpis := range ParsujPlanInstalacjiDNF(wyjscie) {
+		plan.Changes = append(plan.Changes, wpis)
+	}
+	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
+	return plan, nil
+}
+
+// naglowkiUsuniecia wylicza sekcje tabeli transakcji, ktore znacza usuniecie.
+// Kazda z nich znaczy co innego dla czlowieka - pakiet wskazany, pakiet
+// zalezny i pakiet, ktory zostaje bez uzytkownika - ale wszystkie znikaja.
+var naglowkiUsuniecia = []string{
+	"removing:",
+	"removing dependent packages:",
+	"removing unused dependencies:",
+	"removing dependencies:",
+}
+
+var naglowkiInstalacji = []string{
+	"installing:",
+	"installing dependencies:",
+	"installing weak dependencies:",
+	"upgrading:",
+}
+
+// ParsujPlanUsunieciaDNF czyta tabele transakcji przerwanej przed wykonaniem.
+//
+// Zwraca nazwy pakietow oraz liczbe, ktora dnf sam zapowiedzial w podsumowaniu.
+// Rozbieznosc miedzy nimi jest bledem, a nie szczegolem: to znaczy, ze format
+// wyjscia sie zmienil, a lista pokazana czlowiekowi bylaby niepelna.
+func ParsujPlanUsunieciaDNF(wyjscie string) ([]string, int, error) {
+	nazwy, zapowiedziane := sekcjeTransakcjiDNF(wyjscie, naglowkiUsuniecia, "removing:")
+	return nazwy, zapowiedziane, nil
+}
+
+// ParsujPlanInstalacjiDNF czyta z tabeli transakcji to, co dojdzie.
+func ParsujPlanInstalacjiDNF(wyjscie string) []Change {
+	nazwy, _ := sekcjeTransakcjiDNF(wyjscie, naglowkiInstalacji, "installing:")
+	zmiany := make([]Change, 0, len(nazwy))
+	for _, nazwa := range nazwy {
+		zmiany = append(zmiany, Change{Name: nazwa})
+	}
+	return zmiany
+}
+
+// sekcjeTransakcjiDNF czyta nazwy pakietow z tabeli transakcji.
+//
+// Tabela ma naglowki sekcji przy lewej krawedzi i wpisy z wcieciem; kolumny to
+// nazwa, architektura, wersja, repozytorium i rozmiar. Podsumowanie na koncu
+// podaje liczby - i to one sluza do sprawdzenia, czy odczyt jest pelny.
+func sekcjeTransakcjiDNF(wyjscie string, naglowki []string, podsumowanie string) ([]string, int) {
+	var nazwy []string
+	widziane := map[string]bool{}
+	wSekcji := false
+	wPodsumowaniu := false
+	zapowiedziane := 0
+
+	for _, linia := range strings.Split(wyjscie, "\n") {
+		przycieta := strings.TrimSpace(linia)
+		male := strings.ToLower(przycieta)
+		if przycieta == "" {
+			continue
+		}
+		if strings.HasPrefix(male, "transaction summary") {
+			wSekcji, wPodsumowaniu = false, true
+			continue
+		}
+		if wPodsumowaniu {
+			if strings.HasPrefix(male, podsumowanie) {
+				pola := strings.Fields(male)
+				for _, pole := range pola {
+					if liczba, err := strconv.Atoi(pole); err == nil {
+						zapowiedziane = liczba
+						break
+					}
+				}
+			}
+			continue
+		}
+		if zawiera(naglowki, male) {
+			wSekcji = true
+			continue
+		}
+		// Naglowek innej sekcji konczy poprzednia.
+		if strings.HasSuffix(male, ":") && !strings.HasPrefix(linia, " ") {
+			wSekcji = false
+			continue
+		}
+		if !wSekcji || !strings.HasPrefix(linia, " ") {
+			continue
+		}
+		pola := strings.Fields(przycieta)
+		if len(pola) < 2 {
+			continue
+		}
+		nazwa := pola[0]
+		if widziane[nazwa] {
+			continue
+		}
+		widziane[nazwa] = true
+		nazwy = append(nazwy, nazwa)
+	}
+	return nazwy, zapowiedziane
+}
+
+func zawiera(lista []string, wartosc string) bool {
+	for _, wpis := range lista {
+		if wpis == wartosc {
+			return true
+		}
+	}
+	return false
+}
+
+// BrakPakietuDNF rozpoznaje odpowiedz "nie ma czego usuwac".
+func BrakPakietuDNF(wyjscie string) bool {
+	male := strings.ToLower(wyjscie)
+	return strings.Contains(male, "no packages to remove") ||
+		strings.Contains(male, "no match for argument") ||
+		strings.Contains(male, "nothing to do")
+}
+
+// Install doklada pakiety wraz z ich zaleznosciami.
+func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
+	apply := Apply{Manager: d.Name()}
+	if len(options.Packages) == 0 {
+		return apply, fmt.Errorf("instalacja wymaga listy pakietow")
+	}
+	if held, path := d.LockHeld(); held {
+		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
+	}
+	if hidden, dir := modulesHidden(); hidden {
+		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
+	}
+
+	before := d.installedVersions(ctx)
+	args := append([]string{"--assumeyes", "--quiet", "install"}, options.Packages...)
+	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
+
+	after := d.installedVersions(ctx)
+	apply.Applied = diffVersions(before, after)
+	apply.DatabaseBroken = d.DatabaseBroken(ctx)
+	apply.RebootRequired = d.rebootRequired(ctx)
+	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		return apply, fmt.Errorf("dnf install: %s", result.Reason())
+	}
+	return apply, nil
+}
+
+// Remove usuwa wskazane pakiety wraz z tym, co zniknie razem z nimi.
+//
+// Zbior jest liczony ponownie tuz przed operacja i porownywany z tym, co
+// zatwierdzil operator: roznica oznacza, ze host zmienil sie od czasu planu.
+func (d *DNF) Remove(ctx context.Context, options Options, oczekiwane []string) (Apply, error) {
+	apply := Apply{Manager: d.Name()}
+	if len(options.Packages) == 0 {
+		return apply, fmt.Errorf("usuniecie wymaga listy pakietow")
+	}
+	if held, path := d.LockHeld(); held {
+		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
+	}
+
+	plan, err := d.planRemove(ctx, Plan{Manager: d.Name()}, options)
+	if err != nil {
+		return apply, err
+	}
+	if len(plan.Protected) > 0 {
+		return apply, fmt.Errorf("%w: %s", ErrProtectedPackage, strings.Join(plan.Protected, ", "))
+	}
+	if roznica := porownajZbiory(oczekiwane, plan.Removals); roznica != "" {
+		return apply, fmt.Errorf("%w: %s", ErrPlanChanged, roznica)
+	}
+
+	before := d.installedVersions(ctx)
+	args := append([]string{"--assumeyes", "--quiet", "remove"}, options.Packages...)
+	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
+
+	after := d.installedVersions(ctx)
+	apply.Applied = diffVersions(before, after)
+	apply.DatabaseBroken = d.DatabaseBroken(ctx)
+	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		return apply, fmt.Errorf("dnf remove: %s", result.Reason())
+	}
+	return apply, nil
+}
+
+// SetHold wstrzymuje albo zwalnia aktualizacje pakietow.
+//
+// Dnf robi to wtyczka versionlock. Host bez niej nie umie wstrzymac pakietu -
+// i to jest odpowiedz, a nie cicha zgoda: pakiet uznany za wstrzymany, a
+// aktualizowany przy nastepnej kampanii, jest gorszy niz jawna odmowa.
+func (d *DNF) SetHold(ctx context.Context, pakiety []string, hold bool) (Apply, error) {
+	apply := Apply{Manager: d.Name()}
+	if len(pakiety) == 0 {
+		return apply, fmt.Errorf("wstrzymanie wymaga listy pakietow")
+	}
+	if !d.MaVersionlock(ctx) {
+		return apply, fmt.Errorf("%s: ten host nie ma wtyczki versionlock, wiec dnf nie "+
+			"potrafi wstrzymac pakietu", ErrorUnsupported)
+	}
+	operacja := "delete"
+	if hold {
+		operacja = "add"
+	}
+	args := append([]string{dnfVersionlock, operacja}, pakiety...)
+	result := run(ctx, 5*time.Minute, dnfPath, args...)
+	if !result.Ran || result.ExitCode != 0 {
+		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		return apply, fmt.Errorf("dnf versionlock %s: %s", operacja, result.Reason())
+	}
+	return apply, nil
+}
+
+// Holds zwraca pakiety wstrzymane na hoscie.
+func (d *DNF) Holds(ctx context.Context) []string {
+	result := run(ctx, time.Minute, dnfPath, dnfVersionlock, "list")
+	if !result.Ran || result.ExitCode != 0 {
+		return nil
+	}
+	return ParsujVersionlock(result.Stdout)
+}
+
+// MaVersionlock mowi, czy host umie wstrzymywac pakiety.
+func (d *DNF) MaVersionlock(ctx context.Context) bool {
+	result := run(ctx, 30*time.Second, dnfPath, dnfVersionlock, "list")
+	return result.Ran && result.ExitCode == 0
+}
+
+// ParsujVersionlock czyta liste blokad w obu formatach, ktore dnf wypisuje.
+//
+// Dnf5 pisze "Package name: <nazwa>", dnf4 - sam wzorzec "nazwa-0:wersja.*".
+// Czytamy oba, bo panel ma dzialac na obu pokoleniach narzedzia.
+func ParsujVersionlock(wyjscie string) []string {
+	var nazwy []string
+	widziane := map[string]bool{}
+	dodaj := func(nazwa string) {
+		nazwa = strings.TrimSpace(nazwa)
+		if nazwa == "" || widziane[nazwa] {
+			return
+		}
+		widziane[nazwa] = true
+		nazwy = append(nazwy, nazwa)
+	}
+	for _, linia := range strings.Split(wyjscie, "\n") {
+		przycieta := strings.TrimSpace(linia)
+		if przycieta == "" || strings.HasPrefix(przycieta, "#") {
+			continue
+		}
+		if nazwa, ok := strings.CutPrefix(przycieta, "Package name:"); ok {
+			dodaj(nazwa)
+			continue
+		}
+		if strings.HasPrefix(przycieta, "evr") || strings.Contains(przycieta, "=") &&
+			!strings.Contains(przycieta, "-") {
+			continue
+		}
+		// Format dnf4: nazwa-epoka:wersja-wydanie.arch. Nazwa konczy sie tam,
+		// gdzie zaczyna sie czlon zaczynajacy sie cyfra.
+		dodaj(nazwaZWzorcaRPM(przycieta))
+	}
+	return nazwy
+}
+
+// nazwaZWzorcaRPM wyciaga nazwe pakietu ze wzorca wersji.
+func nazwaZWzorcaRPM(wzorzec string) string {
+	czesci := strings.Split(wzorzec, "-")
+	for i, czesc := range czesci {
+		if czesc == "" {
+			continue
+		}
+		if czesc[0] >= '0' && czesc[0] <= '9' {
+			return strings.Join(czesci[:i], "-")
+		}
+	}
+	return wzorzec
+}
+
+// NierozwiazywalneDNF rozpoznaje transakcje, ktorej dnf nie potrafi ulozyc,
+// i zwraca powod podany przez narzedzie.
+//
+// Najczestszy przypadek to pakiet, bez ktorego nie da sie zostawic systemu
+// spojnym - dnf odmawia wtedy calej transakcji. Odmowa z powodem jest tu
+// jedyna poprawna odpowiedzia: pusta lista znaczylaby "nic nie zniknie".
+func NierozwiazywalneDNF(wyjscie string) string {
+	male := strings.ToLower(wyjscie)
+	markery := []string{
+		"failed to resolve the transaction",
+		"depsolve error",
+		"error: depsolving problem",
+		"protected packages",
+		"the operation would result in removing",
+	}
+	znaleziony := false
+	for _, marker := range markery {
+		if strings.Contains(male, marker) {
+			znaleziony = true
+			break
+		}
+	}
+	if !znaleziony {
+		return ""
+	}
+	// Powod bierzemy z linii "Problem:" albo z konca wyjscia: to tam dnf
+	// tlumaczy, czego nie da sie pogodzic.
+	var powody []string
+	for _, linia := range strings.Split(wyjscie, "\n") {
+		przycieta := strings.TrimSpace(linia)
+		male := strings.ToLower(przycieta)
+		if strings.HasPrefix(male, "problem") || strings.Contains(male, "protected") ||
+			strings.HasPrefix(male, "- ") {
+			powody = append(powody, przycieta)
+		}
+	}
+	if len(powody) == 0 {
+		return "dnf odrzucil transakcje bez podania powodu"
+	}
+	if len(powody) > 3 {
+		powody = powody[:3]
+	}
+	return strings.Join(powody, " / ")
 }

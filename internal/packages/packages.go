@@ -188,6 +188,16 @@ type Manager interface {
 	DatabaseBroken(ctx context.Context) bool
 }
 
+// CyklZycia opisuje adapter, ktory umie caly cykl zycia pakietow, a nie samo
+// aktualizowanie. Interfejs, a nie konkretny typ: helper ma pytac "czy ten
+// menedzer to potrafi", a nie "czy to jest apt".
+type CyklZycia interface {
+	Install(ctx context.Context, options Options) (Apply, error)
+	Remove(ctx context.Context, options Options, oczekiwane []string) (Apply, error)
+	SetHold(ctx context.Context, pakiety []string, hold bool) (Apply, error)
+	Holds(ctx context.Context) []string
+}
+
 // Detect zwraca adapter wlasciwy dla hosta.
 func Detect() (Manager, error) {
 	for _, manager := range []Manager{&APT{}, &DNF{}} {

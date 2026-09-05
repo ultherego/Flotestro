@@ -605,21 +605,21 @@ func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail
 // bylo by latwo, bo wynik "zero zmian" wyglada tak samo jak sukces.
 func (s *Server) cyklZyciaPakietow(ctx context.Context, manager packages.Manager,
 	action *helperv1.PackageActionRequest, options packages.Options) *helperv1.HelperResponse {
-	apt, ok := manager.(*packages.APT)
+	cykl, ok := manager.(packages.CyklZycia)
 	if !ok {
 		return reject(ErrorUnsupported,
-			"pelny cykl zycia pakietow jest obslugiwany wylacznie dla menedzera apt")
+			"menedzer "+manager.Name()+" nie obsluguje pelnego cyklu zycia pakietow")
 	}
 
 	var apply packages.Apply
 	var err error
 	switch action.GetOperation() {
 	case helperv1.PackageActionRequest_OPERATION_INSTALL:
-		apply, err = apt.Install(ctx, options)
+		apply, err = cykl.Install(ctx, options)
 	case helperv1.PackageActionRequest_OPERATION_REMOVE:
-		apply, err = apt.Remove(ctx, options, action.GetExpectedRemovals())
+		apply, err = cykl.Remove(ctx, options, action.GetExpectedRemovals())
 	case helperv1.PackageActionRequest_OPERATION_HOLD:
-		apply, err = apt.SetHold(ctx, options.Packages, action.GetHold())
+		apply, err = cykl.SetHold(ctx, options.Packages, action.GetHold())
 	}
 	if err != nil {
 		response := packageFailure(manager.Name(), err)
