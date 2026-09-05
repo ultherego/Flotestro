@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { DirectoryGroup, DirectoryUser, HBACRule, SudoRule } from "../lib/types";
 import { Blad, Pusto } from "../components/ui";
 
-type Zakladka = "uzytkownicy" | "grupy" | "hbac" | "sudo";
+type Zakladka = "uzytkownicy" | "grupy" | "hbac" | "sudo" | "dns";
 
 // Klucz zakladki jest identyfikatorem w kodzie, a nie napisem dla operatora.
 // Wyswietlanie go wprost dawalo w interfejsie angielskim polskie nazwy.
@@ -13,6 +13,7 @@ const nazwaZakladki: Record<Zakladka, string> = {
   grupy: "Groups",
   hbac: "HBAC rules",
   sudo: "sudo rules",
+  dns: "DNS",
 };
 
 /**
@@ -41,7 +42,7 @@ export function Katalog() {
       </p>
 
       <div className="zakladki">
-        {(["uzytkownicy", "grupy", "hbac", "sudo"] as Zakladka[]).map((klucz) => (
+        {(["uzytkownicy", "grupy", "hbac", "sudo", "dns"] as Zakladka[]).map((klucz) => (
           <button key={klucz} className={zakladka === klucz ? "aktywna" : ""} onClick={() => setZakladka(klucz)}>
             {nazwaZakladki[klucz]}
           </button>
@@ -52,6 +53,7 @@ export function Katalog() {
       {zakladka === "grupy" && <Grupy />}
       {zakladka === "hbac" && <RegulyHBAC />}
       {zakladka === "sudo" && <RegulySudo />}
+      {zakladka === "dns" && <DNSKatalogowy />}
     </>
   );
 }
@@ -176,5 +178,149 @@ function RegulySudo() {
         ))}
       </tbody>
     </table>
+  );
+}
+
+type Strefa = { name: string; reverse: boolean };
+
+type RekordDNS = { zone: string; name: string; type: string; values: string[]; ttl?: number };
+
+type ZmianaKatalogu = { id: string; state: string; plan?: { summary?: string; steps?: string[]; conflicts?: string[] } };
+
+/**
+ * DNS katalogowy.
+ *
+ * To jest inny zakres niz resolver hosta: tam panel mowi jednemu hostowi,
+ * kogo ma pytac, a tutaj - co katalog odpowie calej sieci. Dlatego rekord
+ * idzie ta sama droga co zmiana konta: plan, zatwierdzenie, wykonanie faza
+ * po fazie - a nie jako zadanie dla agenta.
+ */
+function DNSKatalogowy() {
+  const queryClient = useQueryClient();
+  const [strefa, setStrefa] = useState("");
+  const [nazwa, setNazwa] = useState("");
+  const [typ, setTyp] = useState("A");
+  const [wartosc, setWartosc] = useState("");
+  const [ttl, setTtl] = useState("");
+  const [odwrotny, setOdwrotny] = useState(true);
+  const [komunikat, setKomunikat] = useState("");
+
+  const strefy = useQuery({
+    queryKey: ["dns-zones"],
+    queryFn: () => api.get<Collection<Strefa>>("/api/v1/identity/dns/zones"),
+    retry: false,
+  });
+  const wybrana = strefa || strefy.data?.items?.[0]?.name || "";
+
+  const rekordy = useQuery({
+    queryKey: ["dns-records", wybrana],
+    queryFn: () =>
+      api.get<Collection<RekordDNS>>(`/api/v1/identity/dns/records?zone=${encodeURIComponent(wybrana)}`),
+    enabled: wybrana !== "",
+    retry: false,
+  });
+
+  const zlec = useMutation({
+    mutationFn: (tresc: Record<string, unknown>) =>
+      api.post<ZmianaKatalogu>("/api/v1/identity/changes", tresc),
+    onSuccess: (zmiana) => {
+      const konflikty = zmiana.plan?.conflicts ?? [];
+      setKomunikat(
+        konflikty.length
+          ? `Change ${zmiana.id.slice(0, 8)} planned with conflicts: ${konflikty.join("; ")}`
+          : `Change ${zmiana.id.slice(0, 8)} is ${zmiana.state.replace("_", " ")}.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["dns-records", wybrana] });
+      queryClient.invalidateQueries({ queryKey: ["directory-changes"] });
+    },
+    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+  });
+
+  if (strefy.error instanceof ApiError && strefy.error.forbidden) return <BrakUprawnien />;
+  if (strefy.error) return <Blad error={strefy.error} />;
+
+  const rekord = (dopisanie: boolean) => ({
+    action: dopisanie ? "dns.record.ensure" : "dns.record.remove",
+    payload: {
+      dns: {
+        zone: wybrana, name: nazwa, type: typ, value: wartosc,
+        ttl: Number(ttl) || 0,
+        reverse: odwrotny && (typ === "A" || typ === "AAAA"),
+      },
+    },
+  });
+
+  return (
+    <>
+      <p className="podtytul">
+        Zones and records live in the directory, not in anyone's /etc/hosts. A
+        record here answers for the whole network, so it goes the same way as a
+        directory account: plan first, then approval, then execution — and the
+        reverse record is a separate, visible step of that plan.
+      </p>
+
+      <div className="filtry">
+        <select value={wybrana} onChange={(e) => setStrefa(e.target.value)}>
+          {(strefy.data?.items ?? []).map((pozycja) => (
+            <option key={pozycja.name} value={pozycja.name}>
+              {pozycja.name}{pozycja.reverse ? " (reverse)" : ""}
+            </option>
+          ))}
+        </select>
+        <span className="zrodlo">{(rekordy.data?.items ?? []).length} records</span>
+      </div>
+
+      <div className="formularz" style={{ marginBottom: 16 }}>
+        <div className="filtry">
+          <input value={nazwa} onChange={(e) => setNazwa(e.target.value)}
+                 placeholder="name (web, @, _ldap._tcp)" style={{ minWidth: 200 }} />
+          <select value={typ} onChange={(e) => setTyp(e.target.value)}>
+            {["A", "AAAA", "CNAME", "TXT", "SRV", "PTR"].map((pozycja) => (
+              <option key={pozycja} value={pozycja}>{pozycja}</option>
+            ))}
+          </select>
+          <input value={wartosc} onChange={(e) => setWartosc(e.target.value)}
+                 placeholder="value (10.0.0.5)" style={{ minWidth: 240 }} />
+          <input value={ttl} onChange={(e) => setTtl(e.target.value)}
+                 placeholder="TTL" style={{ width: 90 }} />
+        </div>
+        {(typ === "A" || typ === "AAAA") && (
+          <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={odwrotny} onChange={(e) => setOdwrotny(e.target.checked)} />
+            Also write the reverse (PTR) record — forgetting it is the usual mistake
+          </label>
+        )}
+        <div className="operacje">
+          <button disabled={!wybrana || !nazwa || !wartosc} onClick={() => zlec.mutate(rekord(true))}>
+            Plan record
+          </button>
+          <button className="wtorny" disabled={!wybrana || !nazwa || !wartosc}
+                  onClick={() => zlec.mutate(rekord(false))}>
+            Plan removal
+          </button>
+        </div>
+        {komunikat && <p className="zrodlo" style={{ margin: 0 }}>{komunikat}</p>}
+      </div>
+
+      {rekordy.error ? (
+        <Blad error={rekordy.error} />
+      ) : !(rekordy.data?.items ?? []).length ? (
+        <Pusto>This zone has no records the panel can read.</Pusto>
+      ) : (
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th></tr></thead>
+          <tbody>
+            {(rekordy.data?.items ?? []).map((pozycja, indeks) => (
+              <tr key={`${pozycja.name}-${pozycja.type}-${indeks}`}>
+                <td>{pozycja.name}</td>
+                <td>{pozycja.type}</td>
+                <td className="zrodlo">{pozycja.values.join(", ")}</td>
+                <td>{pozycja.ttl || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }

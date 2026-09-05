@@ -83,6 +83,11 @@ const (
 	// wszyscy klienci domeny, a resolver hosta - tylko ten host.
 	PermDNSRead      Permission = "dns.read"
 	PermDNSHostWrite Permission = "dns.host.write"
+	// DNS katalogowy jest osobnym zakresem niz resolver hosta: tam panel mowi
+	// jednemu hostowi, kogo ma pytac, a tutaj - co katalog odpowie calej
+	// sieci. Zly rekord psuje nie jeden host, tylko wszystkich, ktorzy o niego
+	// zapytaja, wiec uprawnienie jest osobne i globalne.
+	PermDNSDirectoryWrite Permission = "dns.directory.write"
 	// Zapora. Odczyt zestawu regul jest przygotowaniem do zmiany; zla regula
 	// odcina panel od hosta i nie ma czym cofnac zmiany. Usuniecie reguly,
 	// zmiana strefy i przywrocenie stanu maja wlasne uprawnienia, bo to trzy
@@ -330,6 +335,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
+		PermDNSDirectoryWrite,
 		PermUnitStatus,
 		// Konta lokalne sa alternatywa dla katalogu, wiec naleza do tej samej
 		// roli: to ona odpowiada za to, kto ma dostep do hostow.
@@ -369,6 +375,7 @@ var rolePermissions = map[Role][]Permission{
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
+		PermDNSDirectoryWrite,
 		PermEnrollmentToken, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,

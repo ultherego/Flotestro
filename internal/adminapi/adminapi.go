@@ -4,6 +4,7 @@ package adminapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -264,6 +265,22 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/identity/sudo-rules", policyHandler(s, "sudo",
 		func(s *Server, r *http.Request) ([]freeipa.SudoRule, error) {
 			return s.directory.SudoRules(r.Context())
+		}))
+
+	// DNS katalogowy: strefy i rekordy. Odczyt idzie tym samym uprawnieniem
+	// co reszta katalogu; zapis jest zmiana centralna z wlasnym uprawnieniem
+	// i wlasnym planem.
+	mux.HandleFunc("GET /api/v1/identity/dns/zones", directoryHandler(s, "dns-zones",
+		func(s *Server, r *http.Request) ([]freeipa.Strefa, error) {
+			return s.directory.Zones(r.Context())
+		}))
+	mux.HandleFunc("GET /api/v1/identity/dns/records", directoryHandler(s, "dns-records",
+		func(s *Server, r *http.Request) ([]freeipa.Rekord, error) {
+			strefa := r.URL.Query().Get("zone")
+			if strefa == "" {
+				return nil, fmt.Errorf("wymagany parametr zone")
+			}
+			return s.directory.Records(r.Context(), strefa)
 		}))
 
 	// Zmiany w katalogu: plan, zatwierdzenie i wykonanie faza po fazie.

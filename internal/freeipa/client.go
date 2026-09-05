@@ -296,6 +296,16 @@ var allowedMethods = map[string]bool{
 	// nie jest tu dostepne: odcielo by dostep administratorom.
 	"host_add": true,
 	"host_mod": true,
+
+	// DNS katalogowy. Odczyt stref i rekordow oraz dopisanie i usuniecie
+	// pojedynczej wartosci. Polecen zmieniajacych sama strefe - jej serwery
+	// nazw, SOA czy DNSSEC - adapter nie udostepnia: to konfiguracja
+	// katalogu, a nie zawartosc, ktora prowadzi panel floty.
+	"dnszone_find":   true,
+	"dnsrecord_find": true,
+	"dnsrecord_show": true,
+	"dnsrecord_add":  true,
+	"dnsrecord_del":  true,
 }
 
 func allowedMethod(method string) bool { return allowedMethods[method] }

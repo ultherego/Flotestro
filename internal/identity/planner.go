@@ -32,6 +32,10 @@ func (p *Planner) Build(ctx context.Context, action ActionType, payload Payload)
 		return p.planGroupMembers(ctx, payload.Group)
 	case ActionSSHKeys:
 		return p.planSSHKeys(ctx, payload.SSHKeys)
+	case ActionDNSRecordEnsure:
+		return p.planRekord(ctx, payload.DNS, true)
+	case ActionDNSRecordRemove:
+		return p.planRekord(ctx, payload.DNS, false)
 	default:
 		return Plan{}, fmt.Errorf("nieznany typ zmiany %q", action)
 	}
@@ -290,4 +294,90 @@ func matchesSubject(ruleUsers, ruleGroups []string, uid string, groups []string)
 		}
 	}
 	return false
+}
+
+// planRekord opisuje, co stanie sie z rekordem w katalogu.
+//
+// Rekord odwrotny jest osobnym krokiem planu, a nie szczegolem zapisu: to on
+// decyduje, co odpowie zapytanie o adres, i najczesciej to o nim sie zapomina.
+func (p *Planner) planRekord(ctx context.Context, spec *DNSRecordPayload, dopisanie bool) (Plan, error) {
+	czasownik := "Dopisanie"
+	krok := "dopisanie rekordu"
+	if !dopisanie {
+		czasownik = "Usuniecie"
+		krok = "usuniecie rekordu"
+	}
+	pelna := spec.Name + "." + strings.TrimSuffix(spec.Zone, ".")
+	if spec.Name == "@" {
+		pelna = strings.TrimSuffix(spec.Zone, ".")
+	}
+	plan := Plan{
+		Summary: fmt.Sprintf("%s rekordu %s %s %s", czasownik, spec.Type, pelna, spec.Value),
+		Steps:   []string{krok + " " + spec.Type + " " + pelna + " -> " + spec.Value},
+	}
+
+	strefaOdwrotna, nazwaOdwrotna := "", ""
+	if spec.Reverse {
+		strefaOdwrotna, nazwaOdwrotna = spec.ReverseZone, ""
+		wyliczona, nazwa, err := freeipa.StrefaOdwrotna(spec.Value)
+		if err != nil {
+			return plan, err
+		}
+		nazwaOdwrotna = nazwa
+		if strefaOdwrotna == "" {
+			strefaOdwrotna = wyliczona
+		}
+		plan.Steps = append(plan.Steps, krok+" odwrotnego PTR "+nazwaOdwrotna+"."+strefaOdwrotna+
+			" -> "+pelna)
+	}
+
+	strefy, err := p.directory.Zones(ctx)
+	if err != nil {
+		return plan, err
+	}
+	znane := map[string]bool{}
+	for _, strefa := range strefy {
+		znane[strefa.Name] = true
+	}
+	if !znane[strings.TrimSuffix(spec.Zone, ".")] {
+		// Strefy panel nie zaklada: to decyzja o podziale przestrzeni nazw,
+		// a nie o jednym wpisie.
+		plan.Conflicts = append(plan.Conflicts,
+			fmt.Sprintf("katalog nie ma strefy %s", spec.Zone))
+	}
+	if spec.Reverse && !znane[strings.TrimSuffix(strefaOdwrotna, ".")] {
+		plan.Conflicts = append(plan.Conflicts,
+			fmt.Sprintf("katalog nie ma strefy odwrotnej %s", strefaOdwrotna))
+	}
+
+	// Stan biezacy rekordu: czy taki wpis juz jest i z jaka wartoscia.
+	rekordy, err := p.directory.Records(ctx, strings.TrimSuffix(spec.Zone, "."))
+	if err != nil {
+		// Brak dostepu do strefy nie uniewaznia planu, ale operator ma
+		// wiedziec, ze panel nie porownal go ze stanem katalogu.
+		plan.Conflicts = append(plan.Conflicts,
+			"nie odczytano rekordow strefy: "+err.Error())
+		return plan, nil
+	}
+	for _, rekord := range rekordy {
+		if rekord.Name != spec.Name || rekord.Type != spec.Type {
+			continue
+		}
+		if slices.Contains(rekord.Values, spec.Value) {
+			if dopisanie {
+				plan.Conflicts = append(plan.Conflicts,
+					fmt.Sprintf("rekord %s %s ma juz wartosc %s", spec.Type, pelna, spec.Value))
+			}
+			continue
+		}
+		// Rekord z inna wartoscia nie jest bledem: nazwa moze wskazywac
+		// kilka adresow. Ale operator ma to zobaczyc przed zapisem.
+		plan.Steps = append(plan.Steps, fmt.Sprintf("uwaga: %s %s wskazuje juz %s",
+			spec.Type, pelna, strings.Join(rekord.Values, ", ")))
+		if !dopisanie && !slices.Contains(rekord.Values, spec.Value) {
+			plan.Conflicts = append(plan.Conflicts,
+				fmt.Sprintf("rekord %s %s nie ma wartosci %s", spec.Type, pelna, spec.Value))
+		}
+	}
+	return plan, nil
 }

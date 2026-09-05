@@ -107,8 +107,12 @@ func run() error {
 		config.Env("FLOTESTRO_PUBLIC_URL", ""), "adres panelu widoczny dla przegladarki")
 	groupsClaim := flag.String("oidc-groups-claim",
 		config.Env("FLOTESTRO_OIDC_GROUPS_CLAIM", "groups"), "pole tokenu z lista grup")
+	// Nazwa zmiennej musi zgadzac sie z plikiem konfiguracyjnym, ktory
+	// instalacja dostaje w pakiecie: rozjazd oznaczal, ze wypelniony
+	// FLOTESTRO_IPA_URL nie wlaczal niczego, a panel milczal o powodzie.
 	ipaServer := flag.String("ipa-server",
-		config.Env("FLOTESTRO_IPA_SERVER", ""), "adres serwera FreeIPA, np. https://ipa.example.org")
+		config.Env("FLOTESTRO_IPA_URL", config.Env("FLOTESTRO_IPA_SERVER", "")),
+		"adres serwera FreeIPA, np. https://ipa.example.org")
 	ipaPrincipal := flag.String("ipa-principal",
 		config.Env("FLOTESTRO_IPA_PRINCIPAL", ""), "service principal connectora katalogu")
 	ipaKeytab := flag.String("ipa-keytab",

@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
 // ActionType jest typem zmiany w katalogu.
@@ -19,6 +21,11 @@ const (
 	ActionUserEnable   ActionType = "identity.user.enable"
 	ActionGroupMembers ActionType = "identity.group.members"
 	ActionSSHKeys      ActionType = "identity.sshkeys.set"
+	// DNS katalogowy jest zmiana centralna, tak samo jak konto: dotyczy
+	// calej sieci, a nie jednego hosta, i idzie jedna transakcja przez
+	// connector katalogu - a nie przez agenta.
+	ActionDNSRecordEnsure ActionType = "dns.record.ensure"
+	ActionDNSRecordRemove ActionType = "dns.record.remove"
 )
 
 // State jest stanem zmiany.
@@ -52,6 +59,25 @@ type Payload struct {
 	Group     *GroupPayload     `json:"group,omitempty"`
 	SSHKeys   *SSHKeysPayload   `json:"ssh_keys,omitempty"`
 	Reference *ReferencePayload `json:"reference,omitempty"`
+	DNS       *DNSRecordPayload `json:"dns,omitempty"`
+}
+
+// DNSRecordPayload opisuje rekord w strefie katalogu.
+type DNSRecordPayload struct {
+	Zone string `json:"zone"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Value jest trescia rekordu: adres, nazwa albo tekst - zaleznie od typu.
+	Value string `json:"value"`
+	TTL   int    `json:"ttl,omitempty"`
+	// Reverse jest zgoda na dopisanie rekordu odwrotnego. Rekord PTR jest
+	// osobnym, widocznym elementem planu: to on decyduje, co odpowie
+	// zapytanie o adres, a zapomnienie o nim jest najczestszym bledem przy
+	// dopisywaniu hostow.
+	Reverse bool `json:"reverse,omitempty"`
+	// ReverseZone pozwala wskazac strefe odwrotna wprost. Puste oznacza
+	// strefe wyliczona z adresu - a ta zaklada podzial na /24.
+	ReverseZone string `json:"reverse_zone,omitempty"`
 }
 
 // UserPayload opisuje konto do utworzenia.
@@ -109,6 +135,29 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.SSHKeys == nil || payload.SSHKeys.UID == "" {
 			return fmt.Errorf("operacja %s wymaga wskazania konta", action)
 		}
+	case ActionDNSRecordEnsure, ActionDNSRecordRemove:
+		if payload.DNS == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu dns", action)
+		}
+		// Sprawdzamy tym samym kodem, ktory zaraz wykona zapis: rekord
+		// odrzucony przez katalog ma odpasc przy zlecaniu, a nie po
+		// zatwierdzeniu.
+		if err := (freeipa.RecordSpec{
+			Zone: payload.DNS.Zone, Name: payload.DNS.Name, Type: payload.DNS.Type,
+			Value: payload.DNS.Value, TTL: payload.DNS.TTL,
+		}).Validate(); err != nil {
+			return err
+		}
+		if payload.DNS.Reverse {
+			if payload.DNS.Type != freeipa.RekordA && payload.DNS.Type != freeipa.RekordAAAA {
+				return fmt.Errorf("rekord odwrotny ma sens wylacznie dla adresu")
+			}
+			if payload.DNS.ReverseZone == "" {
+				if _, _, err := freeipa.StrefaOdwrotna(payload.DNS.Value); err != nil {
+					return err
+				}
+			}
+		}
 	default:
 		return fmt.Errorf("nieznany typ zmiany %q", action)
 	}
@@ -122,6 +171,8 @@ func (a ActionType) Permission() string {
 		return "identity.user.write"
 	case ActionGroupMembers:
 		return "identity.group.write"
+	case ActionDNSRecordEnsure, ActionDNSRecordRemove:
+		return "dns.directory.write"
 	default:
 		return "identity.policy.write"
 	}
@@ -130,7 +181,8 @@ func (a ActionType) Permission() string {
 // Known sprawdza, czy typ zmiany jest obslugiwany.
 func (a ActionType) Known() bool {
 	switch a {
-	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys:
+	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
+		ActionDNSRecordEnsure, ActionDNSRecordRemove:
 		return true
 	default:
 		return false

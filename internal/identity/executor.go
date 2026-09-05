@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -92,6 +93,10 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 		phases = e.changeGroupMembers(ctx, payload.Group)
 	case ActionSSHKeys:
 		phases = e.setSSHKeys(ctx, payload.SSHKeys)
+	case ActionDNSRecordEnsure:
+		phases = e.zapiszRekord(ctx, payload.DNS, true)
+	case ActionDNSRecordRemove:
+		phases = e.zapiszRekord(ctx, payload.DNS, false)
 	default:
 		e.finish(ctx, change, StateFailed, nil, "nieznany typ zmiany")
 		return
@@ -296,4 +301,50 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// zapiszRekord dopisuje albo usuwa rekord i - gdy trzeba - jego odpowiednik
+// odwrotny. Kazdy jest osobna faza, bo katalog wykonuje je osobno i moga sie
+// rozejsc: rekord w przod bez rekordu wstecz jest czestym, cichym bledem.
+func (e *Executor) zapiszRekord(ctx context.Context, spec *DNSRecordPayload, dopisanie bool) []Phase {
+	var phases []Phase
+	if spec == nil {
+		return phases
+	}
+	opis := spec.Type + " " + spec.Name + "." + strings.TrimSuffix(spec.Zone, ".")
+
+	glowny := freeipa.RecordSpec{
+		Zone: strings.TrimSuffix(spec.Zone, "."), Name: spec.Name,
+		Type: spec.Type, Value: spec.Value, TTL: spec.TTL,
+	}
+	phase := startPhase("rekord " + opis)
+	var err error
+	if dopisanie {
+		_, err = e.directory.EnsureRecord(ctx, glowny)
+	} else {
+		err = e.directory.RemoveRecord(ctx, glowny)
+	}
+	phases = append(phases, finishPhase(phase, err, spec.Value))
+	if err != nil || !spec.Reverse {
+		return phases
+	}
+
+	strefa, nazwa, err := freeipa.StrefaOdwrotna(spec.Value)
+	if spec.ReverseZone != "" {
+		strefa = strings.TrimSuffix(spec.ReverseZone, ".")
+	}
+	phase = startPhase("rekord odwrotny PTR " + nazwa + "." + strefa)
+	if err == nil {
+		cel := strings.TrimSuffix(spec.Name+"."+strings.TrimSuffix(spec.Zone, "."), ".") + "."
+		odwrotny := freeipa.RecordSpec{
+			Zone: strefa, Name: nazwa, Type: freeipa.RekordPTR, Value: cel, TTL: spec.TTL,
+		}
+		if dopisanie {
+			_, err = e.directory.EnsureRecord(ctx, odwrotny)
+		} else {
+			err = e.directory.RemoveRecord(ctx, odwrotny)
+		}
+	}
+	phases = append(phases, finishPhase(phase, err, ""))
+	return phases
 }
