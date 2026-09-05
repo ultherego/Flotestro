@@ -130,6 +130,14 @@ const (
 	PermBackupVerify  Permission = "backup.verify"
 	PermBackupRestore Permission = "backup.restore"
 
+	// Monitoring. Panel nie ma wlasnych metryk ani wlasnych regul alertowych:
+	// czyta cudze. Wyciszenie alertu ma jednak swoje uprawnienie, bo wylacza
+	// czujnik - a sonda wychodzi z hosta polaczeniem, wiec nie jest zwyklym
+	// odczytem inwentarza.
+	PermMonitoringRead    Permission = "monitoring.read"
+	PermMonitoringProbe   Permission = "monitoring.probe"
+	PermMonitoringSilence Permission = "monitoring.silence.write"
+
 	// Okno serwisowe nalezy do prowadzenia ruchu, a nie do zmiany hosta:
 	// deklaruje je ten, kto pilnuje kampanii i dyzuru.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
@@ -253,7 +261,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
-		PermBackupRead,
+		PermBackupRead, PermMonitoringRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -270,6 +278,9 @@ var rolePermissions = map[Role][]Permission{
 		// Backup, ktorego nikt nie sprawdzil, jest ustaleniem audytu,
 		// a nie awaria dyzuru.
 		PermBackupRead,
+		// Alerty i wyciszenia sa materialem audytu: wyciszenie zalozone
+		// na kwartal jest ustaleniem, a nie szczegolem dyzuru.
+		PermMonitoringRead,
 		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
 		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
 		PermSecretRead,
@@ -306,6 +317,8 @@ var rolePermissions = map[Role][]Permission{
 		// Operator robi i sprawdza kopie; odtworzenie jest osobna decyzja,
 		// bo rozpakowuje stary stan na dzialajacym systemie.
 		PermBackupRead, PermBackupRun, PermBackupVerify,
+		// Dyzur czyta alerty, sonduje z hosta i wycisza na czas naprawy.
+		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -364,6 +377,7 @@ var rolePermissions = map[Role][]Permission{
 		PermCertificateRead, PermCertificateWatch,
 		PermCertificateDeploy, PermCertificateRenew,
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
+		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
 	},
 }
 

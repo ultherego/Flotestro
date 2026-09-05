@@ -20,6 +20,7 @@ import (
 	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
+	monitoringmodul "github.com/ultherego/flotestro/internal/modules/monitoring"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
@@ -146,6 +147,12 @@ const (
 	// a panel widzi metadane - kiedy kopia sie udala, ile zajmuje i co
 	// obejmuje. Odtworzenie jest osobna operacja o najwyzszym ryzyku, bo
 	// rozpakowuje stary stan na dzialajacy system.
+	// Sonda odpowiada na pytanie, ktorego monitoring centralny nie umie
+	// zadac: co widzi ten host. Wyciszenie alertu nie jest operacja na
+	// hoscie i nie idzie ta droga - zmienia to, co o hoscie sadzi system
+	// alertowy, a nie sam host.
+	ActionMonitoringProbe ActionType = "monitoring.probe.run"
+
 	ActionBackupPlan    ActionType = "backup.plan"
 	ActionBackupRun     ActionType = "backup.run"
 	ActionBackupVerify  ActionType = "backup.verify"
@@ -600,6 +607,12 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages},
 	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
 	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
+	// Sonda nie zmienia hosta, ale wychodzi z niego polaczeniem do wskazanej
+	// uslugi - i to jest jej cala wartosc: mowi, co widzi ten host, a nie
+	// co widzi monitoring z innego miejsca sieci.
+	ActionMonitoringProbe: {mutating: false, capability: "monitoring", permission: "monitoring.probe",
+		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 64 << 10},
+
 	// Plan czyta repozytorium backupu: liste kopii i ich rozmiar. Nie zmienia
 	// ani hosta, ani repozytorium, ale wymaga poswiadczen - repozytorium
 	// backupu jest zaszyfrowane i nie odpowiada nikomu bez hasla.
@@ -1145,12 +1158,25 @@ type Payload struct {
 	Certificate     *CertificatePayload     `json:"certificate,omitempty"`
 	Repository      *RepositoryPayload      `json:"repository,omitempty"`
 	Backup          *BackupPayload          `json:"backup,omitempty"`
+	Monitoring      *MonitoringPayload      `json:"monitoring,omitempty"`
 }
 
 // SecurityPayload opisuje operacje modulu bezpieczenstwa.
 type SecurityPayload struct {
 	// Mode jest trybem obowiazkowej kontroli dostepu.
 	Mode string `json:"mode,omitempty"`
+}
+
+// MonitoringPayload opisuje sonde wykonywana z hosta.
+type MonitoringPayload struct {
+	Kind string `json:"kind"`
+	// Target jest adresem: URL dla sondy HTTP, host:port dla TCP.
+	Target string `json:"target"`
+	// ExpectStatus i ExpectBody opisuja, co uznajemy za dobra odpowiedz.
+	// Puste oznacza "cokolwiek z zakresu 2xx i 3xx".
+	ExpectStatus   int    `json:"expect_status,omitempty"`
+	ExpectBody     string `json:"expect_body,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 
 // BackupPayload opisuje operacje backupu.
@@ -1894,6 +1920,17 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionSecurityScan, ActionAuditRulesReload:
 		return nil
+
+	case ActionMonitoringProbe:
+		if payload.Monitoring == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu monitoring", action)
+		}
+		return monitoringmodul.Zlecenie{
+			Kind: payload.Monitoring.Kind, Target: payload.Monitoring.Target,
+			ExpectStatus:   payload.Monitoring.ExpectStatus,
+			ExpectBody:     payload.Monitoring.ExpectBody,
+			TimeoutSeconds: payload.Monitoring.TimeoutSeconds,
+		}.Waliduj()
 
 	case ActionBackupPlan, ActionBackupRun, ActionBackupVerify, ActionBackupRestore:
 		if payload.Backup == nil {

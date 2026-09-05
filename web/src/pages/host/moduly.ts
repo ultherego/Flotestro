@@ -57,6 +57,7 @@ const MODULY: Modul[] = [
   { segment: "security", nazwa: "Security", powod: wymaga("security") },
   { segment: "certificates", nazwa: "Certificates", powod: wymaga("certificates") },
   { segment: "backups", nazwa: "Backups", powod: wymaga("backup") },
+  { segment: "monitoring", nazwa: "Monitoring", powod: wymaga("monitoring") },
   { segment: "files", nazwa: "Files", powod: wymaga("files.managed") },
   {
     segment: "accounts",

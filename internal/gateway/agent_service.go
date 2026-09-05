@@ -925,6 +925,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// Wynik sondy nalezy do zadania: to odpowiedz uslugi z jednej chwili,
+	// widziana z tego jednego hosta.
+	if sonda := result.GetMonitoringResult(); sonda != nil && len(sonda.GetProbe()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":    "monitoring",
+			"message": sonda.GetMessage(),
+			"probe":   surowyJSON(sonda.GetProbe()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Stan repozytorium i wynik kopii naleza do zadania: to odpowiedz na
 	// pytanie zadane w jednej chwili, a nie stan hosta. Lista kopii jest tez
 	// jedynym miejscem, z ktorego operator moze wybrac te do odtworzenia.

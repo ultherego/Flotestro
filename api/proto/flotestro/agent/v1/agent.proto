@@ -393,6 +393,7 @@ message TaskEnvelope {
     CertificateAction certificate = 49;
     RepositoryAction repository = 50;
     BackupAction backup = 51;
+    MonitoringProbe monitoring_probe = 52;
   }
 }
 
@@ -658,6 +659,7 @@ message TaskResult {
   CertificateResult certificate_result = 43;
   RepositoryResult repository_result = 44;
   BackupResult backup_result = 45;
+  MonitoringResult monitoring_result = 46;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
@@ -1043,6 +1045,24 @@ message SecurityAction {
 
 message SecurityResult {
   bytes snapshot = 1;
+  string message = 2;
+}
+
+// MonitoringProbe opisuje sonde wykonywana z hosta.
+//
+// Sonda odpowiada na pytanie, ktorego monitoring centralny nie umie zadac:
+// co widzi ten host. Nie zmienia niczego i nie potrzebuje roota.
+message MonitoringProbe {
+  // Kind: http albo tcp.
+  string kind = 1;
+  string target = 2;
+  int32 expect_status = 3;
+  string expect_body = 4;
+  int32 timeout_seconds = 5;
+}
+
+message MonitoringResult {
+  bytes probe = 1;
   string message = 2;
 }
 

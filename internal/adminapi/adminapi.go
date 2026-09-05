@@ -51,6 +51,9 @@ type Server struct {
 	// certyfikaty trzymaja zakres obserwacji i historie wdrozen. Panel musi
 	// je znac, bo host sam nie powie, ktory plik jest certyfikatem uslugi.
 	certyfikaty *certyfikatystore.Store
+	// monitoring laczy panel z metrykami i alertami. Pusty oznacza instalacje
+	// bez monitoringu - i to jest stan poprawny, a nie awaria.
+	monitoring Monitoring
 	// kopie trzymaja definicje backupu i historie przebiegow. Danych
 	// backupowych panel nie widzi: plyna z hosta wprost do repozytorium.
 	kopie *kopiestore.Store
@@ -186,6 +189,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
 	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
 	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	mux.HandleFunc("GET /api/v1/monitoring", s.handleFleetMonitoring)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/monitoring", s.handleHostMonitoring)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/monitoring/silences", s.handleCreateSilence)
+	mux.HandleFunc("DELETE /api/v1/hosts/{id}/monitoring/silences/{silence}", s.handleExpireSilence)
+
 	mux.HandleFunc("GET /api/v1/backups", s.handleFleetBackups)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/backups", s.handleHostBackups)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/backups", s.handleSetBackupDefinition)

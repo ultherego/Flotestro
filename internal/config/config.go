@@ -23,6 +23,26 @@ type ControlPlane struct {
 	GatewayID        string
 }
 
+// Monitoring opisuje polaczenia z systemami metryk i alertow.
+//
+// Kazde jest opcjonalne: instalacja bez monitoringu dziala tak samo, a panel
+// mowi wprost, ze zrodel nie wskazano - zamiast rysowac puste wykresy.
+type Monitoring struct {
+	PrometheusURL   string
+	AlertmanagerURL string
+	Timeout         time.Duration
+	// HostLabel i HostValue tlumacza host panelu na etykiete u zrodel.
+	HostLabel        string
+	HostValue        string
+	SiteLabel        string
+	EnvironmentLabel string
+	// DashboardURL i LogsURL sa szablonami odnosnikow: panel prowadzi do
+	// cudzych ekranow, zamiast je odtwarzac.
+	DashboardURL string
+	LogsURL      string
+	Window       time.Duration
+}
+
 // Env odczytuje zmienna srodowiskowa z wartoscia domyslna.
 func Env(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {

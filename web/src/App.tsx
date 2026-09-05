@@ -25,6 +25,8 @@ import { Bezpieczenstwo as BezpieczenstwoFloty } from "./pages/Bezpieczenstwo";
 import { Sekrety } from "./pages/Sekrety";
 import { CertyfikatyFloty } from "./pages/Certyfikaty";
 import { KopieFloty } from "./pages/Kopie";
+import { MonitoringFloty } from "./pages/Monitoring";
+import { Monitoring } from "./pages/host/Monitoring";
 import { Kopie } from "./pages/host/Kopie";
 import { Certyfikaty } from "./pages/host/Certyfikaty";
 import { Pliki } from "./pages/host/Pliki";
@@ -70,6 +72,7 @@ export function App() {
   const widziSekrety = uprawnienia.has("secret.read");
   const widziCertyfikaty = uprawnienia.has("certificate.read");
   const widziKopie = uprawnienia.has("backup.read");
+  const widziMonitoring = uprawnienia.has("monitoring.read");
 
   return (
     <div className="uklad">
@@ -82,6 +85,7 @@ export function App() {
         {widziBezpieczenstwo && <Link do="/security">Security</Link>}
         {widziCertyfikaty && <Link do="/certificates">Certificates</Link>}
         {widziKopie && <Link do="/backups">Backups</Link>}
+        {widziMonitoring && <Link do="/monitoring">Monitoring</Link>}
         {widziSekrety && <Link do="/secrets">Secrets</Link>}
         {zdolnosci.directory && <Link do="/directory">Directory</Link>}
         {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
@@ -108,6 +112,7 @@ export function App() {
           <Route path="/security" element={<BezpieczenstwoFloty />} />
           <Route path="/certificates" element={<CertyfikatyFloty />} />
           <Route path="/backups" element={<KopieFloty />} />
+          <Route path="/monitoring" element={<MonitoringFloty />} />
           <Route path="/secrets" element={<Sekrety />} />
           {/* Modul hosta jest segmentem adresu, wiec odswiezenie, historia
               przegladarki i odnosnik bezposredni prowadza tam, gdzie operator
@@ -130,6 +135,7 @@ export function App() {
             <Route path="security" element={<Bezpieczenstwo />} />
             <Route path="certificates" element={<Certyfikaty />} />
             <Route path="backups" element={<Kopie />} />
+            <Route path="monitoring" element={<Monitoring />} />
             <Route path="files" element={<Pliki />} />
             <Route path="containers" element={<Kontenery />} />
             <Route path="compose" element={<Compose />} />

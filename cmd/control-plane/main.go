@@ -34,6 +34,9 @@ import (
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/identity"
+	"github.com/ultherego/flotestro/internal/integrations"
+	alertyIntegracji "github.com/ultherego/flotestro/internal/integrations/alerts"
+	metrykiIntegracji "github.com/ultherego/flotestro/internal/integrations/metrics"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
@@ -114,6 +117,35 @@ func run() error {
 		config.Env("FLOTESTRO_IPA_CA_CERT", "/etc/flotestro/ipa-ca.crt"), "certyfikat CA katalogu")
 	ipaRealm := flag.String("ipa-realm",
 		config.Env("FLOTESTRO_IPA_REALM", ""), "realm Kerberos katalogu")
+	monitoring := config.Monitoring{}
+	flag.StringVar(&monitoring.PrometheusURL, "prometheus-url",
+		config.Env("FLOTESTRO_PROMETHEUS_URL", ""),
+		"adres zrodla metryk (Prometheus API); pusty wylacza wykresy")
+	flag.StringVar(&monitoring.AlertmanagerURL, "alertmanager-url",
+		config.Env("FLOTESTRO_ALERTMANAGER_URL", ""),
+		"adres zrodla alertow (Alertmanager API); pusty wylacza alerty i wyciszenia")
+	flag.DurationVar(&monitoring.Timeout, "monitoring-timeout",
+		config.EnvDuration("FLOTESTRO_MONITORING_TIMEOUT", integrations.DomyslnyLimitCzasu),
+		"limit czasu pojedynczego pytania do monitoringu")
+	flag.StringVar(&monitoring.HostLabel, "monitoring-host-label",
+		config.Env("FLOTESTRO_MONITORING_HOST_LABEL", "instance"),
+		"etykieta, po ktorej monitoring rozpoznaje host")
+	flag.StringVar(&monitoring.HostValue, "monitoring-host-value",
+		config.Env("FLOTESTRO_MONITORING_HOST_VALUE", "{hostname}:9100"),
+		"szablon wartosci etykiety hosta, np. {hostname}:9100")
+	flag.StringVar(&monitoring.SiteLabel, "monitoring-site-label",
+		config.Env("FLOTESTRO_MONITORING_SITE_LABEL", "site"), "etykieta lokalizacji")
+	flag.StringVar(&monitoring.EnvironmentLabel, "monitoring-environment-label",
+		config.Env("FLOTESTRO_MONITORING_ENVIRONMENT_LABEL", "environment"), "etykieta srodowiska")
+	flag.StringVar(&monitoring.DashboardURL, "monitoring-dashboard-url",
+		config.Env("FLOTESTRO_MONITORING_DASHBOARD_URL", ""),
+		"szablon odnosnika do dashboardu hosta")
+	flag.StringVar(&monitoring.LogsURL, "monitoring-logs-url",
+		config.Env("FLOTESTRO_MONITORING_LOGS_URL", ""),
+		"szablon odnosnika do logow hosta")
+	flag.DurationVar(&monitoring.Window, "monitoring-window",
+		config.EnvDuration("FLOTESTRO_MONITORING_WINDOW", 3*time.Hour),
+		"domyslny zakres czasu wykresow")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -328,6 +360,28 @@ func run() error {
 			Trust: trust,
 		})
 	panelServer.SetEvents(eventBus)
+
+	// Monitoring: panel czyta cudze metryki i cudze alerty. Puste adresy
+	// oznaczaja instalacje bez monitoringu - wtedy zakladka mowi wprost, ze
+	// zrodel nie wskazano, zamiast rysowac puste wykresy.
+	panelServer.SetMonitoring(adminapi.Monitoring{
+		Metryki: metrykiIntegracji.NowyPrometheus(monitoring.PrometheusURL, monitoring.Timeout, nil),
+		Alerty:  alertyIntegracji.NowyAlertmanager(monitoring.AlertmanagerURL, monitoring.Timeout),
+		Mapowanie: integrations.Mapowanie{
+			HostLabel:        monitoring.HostLabel,
+			HostValue:        monitoring.HostValue,
+			SiteLabel:        monitoring.SiteLabel,
+			EnvironmentLabel: monitoring.EnvironmentLabel,
+			DashboardURL:     monitoring.DashboardURL,
+			LogsURL:          monitoring.LogsURL,
+			Okno:             monitoring.Window,
+		},
+	})
+	if monitoring.PrometheusURL != "" || monitoring.AlertmanagerURL != "" {
+		log.Info("integracje monitoringowe podlaczone",
+			"metryki", monitoring.PrometheusURL, "alerty", monitoring.AlertmanagerURL,
+			"etykieta_hosta", monitoring.HostLabel)
+	}
 
 	// Plany naprawy: panel je zaklada, runner prowadzi krok po kroku.
 	remediationStore := remediation.NewStore(pool)

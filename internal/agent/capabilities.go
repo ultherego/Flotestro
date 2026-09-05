@@ -54,6 +54,9 @@ const (
 	CapCertificatesRenew = "certificates.renew"
 	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
 	CapFiles = "files.managed"
+	// Sonda z hosta. Dziala wszedzie: to zwykle polaczenie, bez roota
+	// i bez dodatkowego narzedzia.
+	CapMonitoring = "monitoring"
 	// Backup. Modul steruje narzedziem, ktore host juz ma: bez narzedzia
 	// i bez runbookow nie ma czym zrobic kopii.
 	CapBackup = "backup"
@@ -323,6 +326,16 @@ func DetectCapabilities() Capabilities {
 				"certmonger": certmonger,
 				"deploy":     true,
 			},
+		},
+		{
+			Name:    CapMonitoring,
+			Version: wersjaAdaptera,
+			// Sonda nie wymaga niczego poza siecia, wiec modul dziala
+			// wszedzie. Metryki i alerty czyta panel z systemow centralnych,
+			// a nie agent - host nie dostaje z tego powodu ani jednego
+			// dodatkowego collectora.
+			Available: true,
+			Features:  map[string]bool{"probe.http": true, "probe.tcp": true},
 		},
 		{
 			Name:      CapBackup,

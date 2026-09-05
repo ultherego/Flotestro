@@ -465,6 +465,17 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
 
+	case opspec.ActionMonitoringProbe:
+		sonda := &agentv1.MonitoringProbe{}
+		if payload.Monitoring != nil {
+			sonda.Kind = payload.Monitoring.Kind
+			sonda.Target = payload.Monitoring.Target
+			sonda.ExpectStatus = int32(payload.Monitoring.ExpectStatus)
+			sonda.ExpectBody = payload.Monitoring.ExpectBody
+			sonda.TimeoutSeconds = int32(payload.Monitoring.TimeoutSeconds)
+		}
+		envelope.Action = &agentv1.TaskEnvelope_MonitoringProbe{MonitoringProbe: sonda}
+
 	case opspec.ActionBackupPlan, opspec.ActionBackupRun,
 		opspec.ActionBackupVerify, opspec.ActionBackupRestore:
 		operacja := agentv1.BackupAction_OPERATION_PLAN
