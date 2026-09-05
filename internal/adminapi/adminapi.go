@@ -31,6 +31,7 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/secrets"
+	"github.com/ultherego/flotestro/internal/vuln"
 )
 
 // Server grupuje zaleznosci REST API.
@@ -55,6 +56,12 @@ type Server struct {
 	// monitoring laczy panel z metrykami i alertami. Pusty oznacza instalacje
 	// bez monitoringu - i to jest stan poprawny, a nie awaria.
 	monitoring Monitoring
+	// podatnosci trzymaja ustalenia korelatora, a pakietyHostow - liste,
+	// na ktorej te ustalenia sie oparly. Pusty korelator oznacza instalacje
+	// bez oceny podatnosci.
+	podatnosci    *vuln.Store
+	pakietyHostow *vuln.MagazynPakietow
+	wiekFeedu     time.Duration
 	// kopie trzymaja definicje backupu i historie przebiegow. Danych
 	// backupowych panel nie widzi: plyna z hosta wprost do repozytorium.
 	kopie *kopiestore.Store
@@ -190,6 +197,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
 	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
 	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	mux.HandleFunc("GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
+	mux.HandleFunc("GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)
+
 	mux.HandleFunc("GET /api/v1/monitoring", s.handleFleetMonitoring)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/monitoring", s.handleHostMonitoring)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/monitoring/silences", s.handleCreateSilence)

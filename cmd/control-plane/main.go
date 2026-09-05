@@ -46,6 +46,8 @@ import (
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/scheduler"
 	"github.com/ultherego/flotestro/internal/secrets"
+	"github.com/ultherego/flotestro/internal/vuln"
+	debianzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/debian"
 )
 
 const staleCheckInterval = 30 * time.Second
@@ -150,6 +152,19 @@ func run() error {
 	flag.DurationVar(&monitoring.Window, "monitoring-window",
 		config.EnvDuration("FLOTESTRO_MONITORING_WINDOW", 3*time.Hour),
 		"domyslny zakres czasu wykresow")
+	podatnosci := config.Podatnosci{}
+	flag.BoolVar(&podatnosci.Enabled, "vulnerability-correlator",
+		config.Env("FLOTESTRO_VULN_ENABLED", "true") == "true",
+		"wlacza korelator podatnosci oparty na trackerach dystrybucji")
+	flag.DurationVar(&podatnosci.SyncInterval, "vulnerability-sync-interval",
+		config.EnvDuration("FLOTESTRO_VULN_SYNC_INTERVAL", 30*time.Minute),
+		"jak czesto panel pyta trackery o zmiany")
+	flag.DurationVar(&podatnosci.MaxSnapshotAge, "vulnerability-max-snapshot-age",
+		config.EnvDuration("FLOTESTRO_VULN_MAX_SNAPSHOT_AGE", 6*time.Hour),
+		"wiek, powyzej ktorego dane feedu sa opisywane jako nieswieze")
+	flag.StringVar(&podatnosci.DebianURL, "vulnerability-debian-url",
+		config.Env("FLOTESTRO_VULN_DEBIAN_URL", debianzrodlo.AdresDomyslny),
+		"zrzut trackera bezpieczenstwa Debiana; pusty wylacza to zrodlo")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -391,6 +406,12 @@ func run() error {
 	remediationStore := remediation.NewStore(pool)
 	panelServer.SetRemediation(remediationStore)
 
+	// Korelator podatnosci trzyma snapshoty feedow, ustalenia producentow
+	// i liste pakietow hostow.
+	vulnStore := vuln.NewStore(pool)
+	packageStore := vuln.NowyMagazynPakietow(pool)
+	panelServer.SetPodatnosci(vulnStore, packageStore, podatnosci.MaxSnapshotAge)
+
 	// Magazyn sekretow. Klucz lezy w pliku poza baza: kopia bazy bez niego
 	// nie wystarcza, zeby odczytac cokolwiek.
 	sciezkaKlucza := *secretsKeyFile
@@ -448,6 +469,32 @@ func run() error {
 	// zadaniem modulu, a nastepny rusza dopiero, gdy poprzedni sie udal.
 	go remediation.NewRunner(remediationStore, jobStore, hostStore, recorder,
 		log, 5*time.Second).Run(ctx)
+
+	// Korelator podatnosci: trackery producentow dystrybucji rozstrzygaja,
+	// czy zainstalowana wersja jest podatna. Panel niczego nie zgaduje - host
+	// bez feedu albo bez listy pakietow dostaje stan nieustalony z powodem,
+	// a nie zero znalezisk.
+	if podatnosci.Enabled {
+		var zrodla []vuln.Zrodlo
+		if podatnosci.DebianURL != "" {
+			zrodla = append(zrodla, debianzrodlo.Nowe(podatnosci.DebianURL, 10*time.Minute))
+		}
+		if len(zrodla) == 0 {
+			log.Warn("korelator podatnosci wlaczony, ale nie ma zadnego zrodla")
+		} else {
+			nazwy := make([]string, 0, len(zrodla))
+			for _, zrodlo := range zrodla {
+				nazwy = append(nazwy, zrodlo.Nazwa())
+			}
+			log.Info("korelator podatnosci uruchomiony", "zrodla", nazwy,
+				"odstep", podatnosci.SyncInterval, "maksymalny_wiek", podatnosci.MaxSnapshotAge)
+			go vuln.NowyHarmonogram(vulnStore, packageStore, hostStore, inventoryStore,
+				jobStore, zrodla, vuln.Ustawienia{
+					Interval:       podatnosci.SyncInterval,
+					MaxSnapshotAge: podatnosci.MaxSnapshotAge,
+				}, log).Run(ctx)
+		}
+	}
 
 	select {
 	case err := <-errCh:

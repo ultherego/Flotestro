@@ -47,6 +47,10 @@ type OSInfo struct {
 	Kernel       string `json:"kernel"`
 	Architecture string `json:"architecture"`
 	PrettyName   string `json:"pretty_name"`
+	// Codename jest nazwa wydania (bookworm, trixie, noble). Trackery
+	// bezpieczenstwa Debiana i Ubuntu mowia wlasnie nia, a nie numerem -
+	// bez niej nie da sie powiedziec, ktore ustalenia dotycza tego hosta.
+	Codename string `json:"codename,omitempty"`
 }
 
 // Hardware opisuje zasoby hosta.
@@ -196,6 +200,7 @@ func ReadOSInfo() OSInfo {
 	info.Distribution = release["ID"]
 	info.Version = firstNonEmpty(release["VERSION_ID"], release["VERSION"])
 	info.PrettyName = release["PRETTY_NAME"]
+	info.Codename = firstNonEmpty(release["VERSION_CODENAME"], release["UBUNTU_CODENAME"])
 	info.Family = osFamily(release)
 
 	if kernel, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {

@@ -138,6 +138,11 @@ const (
 	PermBackupVerify  Permission = "backup.verify"
 	PermBackupRestore Permission = "backup.restore"
 
+	// Podatnosci. Ocena powstaje w panelu z ustalen producenta dystrybucji;
+	// odczyt jest osobnym uprawnieniem, bo lista podatnosci floty jest
+	// materialem rozpoznawczym o niej samej.
+	PermVulnerabilityRead Permission = "vulnerability.read"
+
 	// Monitoring. Panel nie ma wlasnych metryk ani wlasnych regul alertowych:
 	// czyta cudze. Wyciszenie alertu ma jednak swoje uprawnienie, bo wylacza
 	// czujnik - a sonda wychodzi z hosta polaczeniem, wiec nie jest zwyklym
@@ -269,7 +274,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
-		PermBackupRead, PermMonitoringRead, PermPackagesRead,
+		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -290,8 +295,8 @@ var rolePermissions = map[Role][]Permission{
 		// na kwartal jest ustaleniem, a nie szczegolem dyzuru.
 		PermMonitoringRead,
 		// Lista pakietow jest podstawa oceny podatnosci, wiec audytor musi
-		// moc ja zobaczyc.
-		PermPackagesRead,
+		// moc ja zobaczyc - razem z sama ocena.
+		PermPackagesRead, PermVulnerabilityRead,
 		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
 		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
 		PermSecretRead,
@@ -322,6 +327,7 @@ var rolePermissions = map[Role][]Permission{
 		// Przesuniety zegar wyglada jak awaria katalogu albo certyfikatow,
 		// wiec test zrodel czasu nalezy do pierwszej diagnozy.
 		PermTimeRead, PermSecurityRead, PermSecurityScan, PermFilePlan,
+		PermVulnerabilityRead,
 		// Operator oglada certyfikaty i wskazuje panelowi, ktorych plikow
 		// pilnowac; wdrozenie nowego jest juz decyzja administratora.
 		PermCertificateRead, PermCertificateWatch,
@@ -391,6 +397,7 @@ var rolePermissions = map[Role][]Permission{
 		PermCertificateDeploy, PermCertificateRenew,
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
+		PermVulnerabilityRead,
 	},
 }
 

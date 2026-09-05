@@ -43,6 +43,21 @@ type Monitoring struct {
 	Window       time.Duration
 }
 
+// Podatnosci opisuje korelator CVE.
+//
+// Rozstrzyga tracker producenta dystrybucji; feedy upstreamowe moga pozniej
+// dolozyc opis i CVSS, ale nie moga zmienic odpowiedzi "podatny / niepodatny".
+type Podatnosci struct {
+	Enabled bool
+	// SyncInterval mowi, jak czesto panel pyta trackery o zmiany.
+	SyncInterval time.Duration
+	// MaxSnapshotAge jest wiekiem, powyzej ktorego dane sa nieswieze. Nie
+	// zatrzymuje to oceny, ale musi byc widoczne obok wyniku.
+	MaxSnapshotAge time.Duration
+	// DebianURL wskazuje zrzut trackera Debiana; pusty wylacza to zrodlo.
+	DebianURL string
+}
+
 // Env odczytuje zmienna srodowiskowa z wartoscia domyslna.
 func Env(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
