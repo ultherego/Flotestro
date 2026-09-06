@@ -336,6 +336,67 @@ func (s *Store) PrzejmijMaszyne(ctx context.Context, tx pgx.Tx, hostID string, i
 	return nil
 }
 
+// Stany cyklu zycia hosta.
+//
+// Tylko host aktywny dostaje zadania, sesje, sekrety i odnowienia. Pozostale
+// stany sa roznymi rodzajami "nie" i kazdy z nich znaczy co innego dla
+// operatora: kwarantanna jest odwracalna, wycofywanie trwa, wycofany jest
+// koncem zaufania.
+const (
+	StanAktywny     = "active"
+	StanKwarantanna = "quarantined"
+	StanWycofywanie = "retiring"
+	StanWycofany    = "retired"
+)
+
+// Aktywny mowi, czy w tym stanie panel wolno hostowi cokolwiek zlecac.
+func Aktywny(stan string) bool { return stan == StanAktywny }
+
+// ErrNiedozwolonePrzejscie oznacza zmiane stanu, ktorej nie wolno wykonac.
+var ErrNiedozwolonePrzejscie = errors.New("niedozwolone przejscie cyklu zycia")
+
+// ZmienStanZycia przestawia host miedzy stanami cyklu zycia.
+//
+// Przejscie jest warunkowe i wykonuje sie w jednym zapytaniu: dwa zadania
+// wydane naraz nie moga skonczyc sie hostem, ktory jest jednoczesnie wycofany
+// i przywrocony. Dozwolone stany wyjsciowe sa czescia decyzji wolajacego.
+func (s *Store) ZmienStanZycia(ctx context.Context, tx pgx.Tx, hostID string,
+	zStanow []string, nowy, powod, aktor string) error {
+	const query = `
+		update hosts set
+			lifecycle_state      = $2,
+			lifecycle_reason     = $3,
+			lifecycle_changed_at = now(),
+			lifecycle_changed_by = $4,
+			retired_at           = case when $2 = 'retired' then now() else retired_at end,
+			updated_at           = now()
+		where id = $1::uuid and lifecycle_state = any($5)`
+	znacznik, err := tx.Exec(ctx, query, hostID, nowy, powod, aktor, zStanow)
+	if err != nil {
+		return fmt.Errorf("zmiana stanu cyklu zycia: %w", err)
+	}
+	if znacznik.RowsAffected() == 0 {
+		return ErrNiedozwolonePrzejscie
+	}
+	return nil
+}
+
+// OdwolajCertyfikaty uniewaznia wszystkie wazne certyfikaty hosta.
+//
+// Uzywane, gdy klucz hosta mogl wyciec albo gdy host odchodzi z floty:
+// certyfikat pozostaje kryptograficznie poprawny, wiec bez tego zapisu
+// przejeta maszyna nadal przedstawialaby sie panelowi skutecznie.
+func (s *Store) OdwolajCertyfikaty(ctx context.Context, tx pgx.Tx, hostID, powod string) (int, error) {
+	const query = `
+		update agent_certificates set revoked_at = now(), revocation_reason = $2
+		where host_id = $1::uuid and revoked_at is null`
+	znacznik, err := tx.Exec(ctx, query, hostID, powod)
+	if err != nil {
+		return 0, fmt.Errorf("odwolanie certyfikatow: %w", err)
+	}
+	return int(znacznik.RowsAffected()), nil
+}
+
 // SaveCertificate zapisuje wystawiony certyfikat agenta.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
 	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial string) error {

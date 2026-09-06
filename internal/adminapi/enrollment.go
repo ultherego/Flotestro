@@ -9,6 +9,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
 // zamowienieRequest jest trescia zamowienia enrollmentu.
@@ -157,6 +158,15 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	}
 	principal, ok := s.authorize(w, r, authz.PermHostIdentityReplace, scope, "host", hostID)
 	if !ok {
+		return
+	}
+
+	// Host wycofany nie wraca do floty tokenem. Zamowienie, ktorego i tak nie
+	// da sie uzyc, byloby obietnica bez pokrycia - powrot zaczyna sie od
+	// cofniecia decyzji o wycofaniu.
+	if host.LifecycleState == hosts.StanWycofany {
+		problem(w, http.StatusConflict, "host_retired",
+			"a retired host cannot be brought back with a recovery token")
 		return
 	}
 

@@ -291,6 +291,19 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 		if scope.ExpectedHostID == "" {
 			return errors.New("recovery_without_host")
 		}
+		// Host wycofany nie wraca do floty odtworzeniem tozsamosci. Utrata
+		// zaufania jest decyzja operatora i cofa sie ja w panelu, a nie
+		// tokenem na hoscie.
+		host, err := s.hosts.Get(ctx, scope.ExpectedHostID)
+		if err != nil {
+			return err
+		}
+		if host == nil {
+			return errors.New("recovery_host_missing")
+		}
+		if host.LifecycleState == hosts.StanWycofany {
+			return errors.New("host_retired")
+		}
 		// Maszyna nieznana panelowi jest tu w porzadku: po przeinstalowaniu
 		// host ma nowe machine_id, a tozsamosc odtwarzamy po wskazanym
 		// host_id. Znana maszyna musi byc tym samym hostem.

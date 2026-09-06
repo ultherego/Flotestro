@@ -7,13 +7,21 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -360,4 +368,123 @@ func truncate(data []byte, limit int) string {
 
 func unitPayload(unit string) map[string]any {
 	return map[string]any{"unit": map[string]any{"unit": unit}}
+}
+
+// poczekajNaPolaczenie czeka, az host wroci do floty.
+//
+// Agent laczy sie z wlasnym backoffem, wiec po zamknieciu sesji przez panel
+// jest chwila, w ktorej host jest offline i nie jest to awaria.
+func (h *harness) poczekajNaPolaczenie(hostID string, limit time.Duration) {
+	h.t.Helper()
+	koniec := time.Now().Add(limit)
+	for {
+		for _, host := range h.hosts() {
+			if host.ID == hostID && host.ConnectionState == "online" {
+				return
+			}
+		}
+		if time.Now().After(koniec) {
+			h.t.Fatalf("host %s nie wrocil do floty w %s", hostID, limit)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// domyslnyEnrollment wskazuje publiczny endpoint enrollmentu floty testowej.
+const domyslnyEnrollment = "https://192.168.56.10:8444"
+
+// zarejestrujSyntetycznyHost wprowadza do floty maszyne, ktorej nie ma.
+//
+// Testy cyklu zycia musza czegos naprawde wycofac, a hosta floty testowej nie
+// wolno: wycofanie jest nieodwracalne i zabralo by pozostalym testom maszyne.
+func (h *harness) zarejestrujSyntetycznyHost(t *testing.T) hostView {
+	t.Helper()
+	var zamowienie struct {
+		Token string `json:"token"`
+	}
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "host syntetyczny testu", "site": "lab", "environment": "test",
+	}, &zamowienie, http.StatusCreated)
+
+	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maszyna := uniqueSubject("maszyna-testowa")
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: maszyna}}, klucz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+
+	tresc, err := json.Marshal(map[string]any{
+		"enrollmentToken": zamowienie.Token,
+		"machineId":       maszyna,
+		"hostname":        maszyna,
+		"csrPem":          csrPEM,
+		"clientRequestId": uuid.NewString(),
+		"build":           map[string]any{"agentVersion": "test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adres := envOr("FLOTESTRO_TEST_ENROLLMENT", domyslnyEnrollment) +
+		"/flotestro.agent.v1.EnrollmentService/Enroll"
+	// Zaufanie do panelu bierzemy z tego samego bundla, ktorego uzywaja
+	// agenci: test, ktory wylacza weryfikacje, nie sprawdza tej drogi.
+	pula, err := x509.SystemCertPool()
+	if err != nil || pula == nil {
+		pula = x509.NewCertPool()
+	}
+	if bundle, err := os.ReadFile(envOr("FLOTESTRO_TEST_CA", "/var/lib/flotestro/ca.pem")); err == nil {
+		pula.AppendCertsFromPEM(bundle)
+	}
+	klient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs: pula, MinVersion: tls.VersionTLS12,
+		}},
+	}
+	zadanie, err := http.NewRequest(http.MethodPost, adres, bytes.NewReader(tresc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zadanie.Header.Set("Content-Type", "application/json")
+	odpowiedz, err := klient.Do(zadanie)
+	if err != nil {
+		t.Fatalf("enrollment syntetycznego hosta: %v", err)
+	}
+	defer odpowiedz.Body.Close()
+	if odpowiedz.StatusCode != http.StatusOK {
+		tresc2, _ := io.ReadAll(io.LimitReader(odpowiedz.Body, 1<<12))
+		t.Fatalf("enrollment odrzucony: %s %s", odpowiedz.Status, tresc2)
+	}
+	var wynik struct {
+		HostID string `json:"hostId"`
+	}
+	if err := json.NewDecoder(odpowiedz.Body).Decode(&wynik); err != nil {
+		t.Fatal(err)
+	}
+
+	// Maszyna syntetyczna znika razem z testem. Wycofany host zostaje we
+	// flocie na zawsze - i po kilku przebiegach ekran floty pokazywalby
+	// wylacznie smieci po testach. Kasujemy wprost w bazie, bo w produkcie
+	// takiej operacji nie ma i nie powinno byc.
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := h.database(ctx).Exec(ctx,
+			`delete from hosts where id = $1::uuid`, wynik.HostID); err != nil {
+			t.Logf("nie posprzatano syntetycznego hosta %s: %v", wynik.HostID, err)
+		}
+	})
+
+	for _, host := range h.hosts() {
+		if host.ID == wynik.HostID {
+			return host
+		}
+	}
+	t.Fatalf("host %s nie pojawil sie na liscie floty", wynik.HostID)
+	return hostView{}
 }

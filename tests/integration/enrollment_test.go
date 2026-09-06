@@ -156,3 +156,96 @@ func TestZamowienieMaGraniceCzasu(t *testing.T) {
 		"ttl_minutes": 60 * 48,
 	}, nil, http.StatusBadRequest)
 }
+
+// TestKwarantannaOdcinaHostaINieBlokujeGo pilnuje, ze odciecie dziala od razu
+// i da sie je zdjac.
+//
+// Test przechodzi na hoscie floty testowej i przywraca go na koniec: pozostawiony
+// w kwarantannie host wywrocilby wszystkie pozostale testy.
+func TestKwarantannaOdcinaHostaINieBlokujeGo(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("rhel")
+
+	var wynik struct {
+		LifecycleState string `json:"lifecycle_state"`
+		SessionClosed  bool   `json:"session_closed"`
+		JobsCanceled   int    `json:"jobs_canceled"`
+	}
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
+			map[string]any{"reason": "koniec testu"}, nil, http.StatusOK)
+		// Agent wraca dopiero po swoim backoffie. Bez czekania kolejne testy
+		// zastaja host offline i przewracaja sie z powodu, ktory nie ma nic
+		// wspolnego z tym, co sprawdzaja.
+		h.poczekajNaPolaczenie(host.ID, time.Minute)
+	})
+
+	// Powod jest wymagany: host odciety bez powodu jest hostem, o ktorym za
+	// tydzien nikt nie bedzie wiedzial, czemu nie pracuje.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
+		map[string]any{}, nil, http.StatusBadRequest)
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
+		map[string]any{"reason": "test kwarantanny"}, &wynik, http.StatusOK)
+	if wynik.LifecycleState != "quarantined" {
+		t.Fatalf("stan = %q", wynik.LifecycleState)
+	}
+	if !wynik.SessionClosed {
+		t.Error("sesja hosta nie zostala zamknieta - kwarantanna sprawdzana " +
+			"dopiero przy nastepnym polaczeniu nie odcina przejetej maszyny")
+	}
+
+	// Host w kwarantannie nie przyjmuje nowych operacji.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "journal.read",
+			"payload": map[string]any{"journal": map[string]any{"lines": 5}}},
+		nil, http.StatusConflict)
+}
+
+// TestWycofanieWymagaPrzepisaniaNazwy pilnuje, ze utraty zaufania nie da sie
+// kliknac przez pomylke.
+func TestWycofanieWymagaPrzepisaniaNazwy(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
+		map[string]any{"reason": "proba bez potwierdzenia"}, nil, http.StatusBadRequest)
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
+		map[string]any{"reason": "proba z cudza nazwa", "typed_confirmation": "inny-host"},
+		nil, http.StatusBadRequest)
+
+	// Hosta floty testowej nie wycofujemy naprawde: sprawdzamy sama bramke.
+	// Pelne wycofanie ma wlasny test na maszynie syntetycznej.
+}
+
+// TestWycofanyHostNieWracaTokenem pilnuje, ze utrata zaufania jest decyzja
+// panelu, a nie stanem, ktory da sie cofnac tokenem na hoscie.
+func TestWycofanyHostNieWracaTokenem(t *testing.T) {
+	h := newHarness(t)
+	// Maszyny syntetycznej nie ma we flocie, wiec mozemy ja naprawde wycofac.
+	host := h.zarejestrujSyntetycznyHost(t)
+
+	var wynik struct {
+		LifecycleState      string `json:"lifecycle_state"`
+		CertificatesRevoked int    `json:"certificates_revoked"`
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
+		map[string]any{"reason": "maszyna oddana", "typed_confirmation": host.Hostname},
+		&wynik, http.StatusOK)
+	if wynik.LifecycleState != "retired" {
+		t.Fatalf("stan = %q", wynik.LifecycleState)
+	}
+	// Wycofanie zawsze odwoluje certyfikaty: host nie moze wrocic sam
+	// z waznym certyfikatem w reku.
+	if wynik.CertificatesRevoked == 0 {
+		t.Error("wycofanie nie odwolalo zadnego certyfikatu")
+	}
+
+	// Zamowienie odtworzenia dla wycofanego hosta jest obietnica bez pokrycia.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
+		map[string]any{"description": "powrot"}, nil, http.StatusConflict)
+
+	// Kwarantanny wycofanego hosta tez nie ma po co zdejmowac.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
+		map[string]any{"reason": "proba powrotu"}, nil, http.StatusConflict)
+}

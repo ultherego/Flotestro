@@ -184,6 +184,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/enrollment-requests/{id}", s.handleGetEnrollmentRequest)
 	mux.HandleFunc("POST /api/v1/enrollment-requests/{id}/revoke", s.handleRevokeEnrollmentRequest)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/identity-recovery", s.handleIdentityRecovery)
+	// Cykl zycia hosta: odciecie, przywrocenie i wycofanie z floty.
+	mux.HandleFunc("POST /api/v1/hosts/{id}/quarantine", s.handleQuarantineHost)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/quarantine/release", s.handleReleaseHost)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/decommission", s.handleDecommissionHost)
 
 	// Operacje typowane: plan, zatwierdzenie, wykonanie, wynik.
 	mux.HandleFunc("GET /api/v1/actions", s.handleListActions)

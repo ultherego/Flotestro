@@ -291,6 +291,25 @@ func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason stri
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
 
+// AnulujNiewyslane konczy zadania hosta, ktore jeszcze nie ruszyly.
+//
+// Wysylane i biezace zostaja: agent moze byc w polowie nieprzerywalnej
+// operacji, a panel nie ma jak jej cofnac. Anulowanie ich w bazie zrobiloby
+// tylko tyle, ze wynik przyszedlby do zadania, ktore juz nie istnieje.
+func (s *Store) AnulujNiewyslane(ctx context.Context, tx pgx.Tx, hostID, aktor,
+	powod string) (int, error) {
+	const query = `
+		update jobs set state = $2, canceled_by = $3, canceled_at = now(),
+		                cancel_reason = $4, finished_at = now(), updated_at = now()
+		where host_id = $1::uuid
+		  and state in ('planned', 'awaiting_approval', 'queued', 'leased')`
+	znacznik, err := tx.Exec(ctx, query, hostID, string(StateCanceled), aktor, nullable(powod))
+	if err != nil {
+		return 0, err
+	}
+	return int(znacznik.RowsAffected()), nil
+}
+
 // LeasedJob laczy zadanie z proba, ktora je wykonuje.
 type LeasedJob struct {
 	Job       Job

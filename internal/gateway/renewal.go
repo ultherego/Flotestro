@@ -10,6 +10,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
@@ -55,9 +56,12 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
-	case status.LifecycleState == "quarantined":
-		s.denied(ctx, hostID, "quarantined")
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
+	case !hosts.Aktywny(status.LifecycleState):
+		// Odnowienie certyfikatu hostowi w kwarantannie albo wycofanemu
+		// przedluzaloby dokladnie to zaufanie, ktore zostalo cofniete.
+		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("host jest w stanie %s", status.LifecycleState))
 	}
 
 	issued, err := s.trust.Active().SignAgentCSR(req.Msg.GetCsrPem(), hostID)

@@ -278,6 +278,16 @@ func (s *AgentService) Connect(ctx context.Context,
 		case <-ctx.Done():
 			return nil
 
+		case <-session.Zamknieta():
+			// Panel zakonczyl sesje: kwarantanna albo wycofanie hosta.
+			// Sprawdzenie przy nastepnym polaczeniu nie odcieloby maszyny,
+			// ktora wlasnie teraz wykonuje czyjes polecenia.
+			s.log.Info("sesja agenta zamknieta przez panel",
+				"host_id", hostID, "session_id", session.ID,
+				"powod", session.PowodZamkniecia())
+			return connect.NewError(connect.CodePermissionDenied,
+				errors.New(session.PowodZamkniecia()))
+
 		case err := <-senderErr:
 			s.log.Info("wysylka do agenta zakonczona", "host_id", hostID, "err", err)
 			return nil
@@ -1502,9 +1512,10 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		return "", "", connect.NewError(connect.CodePermissionDenied,
 			errors.New("host nie nalezy do lokalizacji relaya"))
 	}
-	if host.LifecycleState == "quarantined" {
-		s.denied(ctx, asserted, "quarantined")
-		return "", "", connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
+	if !hosts.Aktywny(host.LifecycleState) {
+		s.denied(ctx, asserted, "lifecycle_"+host.LifecycleState)
+		return "", "", connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("host jest w stanie %s", host.LifecycleState))
 	}
 	return asserted, status.ID, nil
 }
@@ -1523,9 +1534,12 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
-	case status.LifecycleState == "quarantined":
-		s.denied(ctx, hostID, "quarantined")
-		return connect.NewError(connect.CodePermissionDenied, errors.New("host jest w kwarantannie"))
+	case !hosts.Aktywny(status.LifecycleState):
+		// Kwarantanna, wycofywanie i wycofanie roznia sie dla operatora,
+		// ale dla polaczenia znacza to samo: ten host nie ma prawa pracowac.
+		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
+		return connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("host jest w stanie %s", status.LifecycleState))
 	}
 	return nil
 }

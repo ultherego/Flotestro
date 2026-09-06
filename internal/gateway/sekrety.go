@@ -8,6 +8,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/secrets"
 )
@@ -61,6 +62,19 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	nazwa := req.Msg.GetSecretName()
 	if nazwa == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("brak nazwy sekretu"))
+	}
+	// Host, ktory nie jest aktywny, nie dostaje sekretow - takze wtedy, gdy
+	// dzierzawa zostala wystawiona przed kwarantanna. Sekret wydany maszynie,
+	// ktorej wlasnie przestalismy ufac, jest dokladnie tym, czego kwarantanna
+	// ma nie dopuscic.
+	host, err := s.hosts.Get(ctx, hostID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if host == nil || !hosts.Aktywny(host.LifecycleState) {
+		s.odmowaSekretu(ctx, hostID, nazwa, "lifecycle")
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			errors.New("host nie jest aktywny"))
 	}
 	// Agent zna identyfikator proby; dzierzawa jest wystawiona na operacje.
 	jobID, _ := s.kontekstProby(ctx, req.Msg.GetTaskId())

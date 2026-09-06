@@ -30,7 +30,13 @@ const (
 	// To osobne prawo od zapraszania nowych maszyn: wymiana tozsamosci jest
 	// przejeciem hosta, ktory juz jest we flocie.
 	PermHostIdentityReplace Permission = "host.identity.replace"
-	PermPrincipalManage     Permission = "principal.manage"
+	// Cykl zycia hosta. Kwarantanna, jej zdjecie i wycofanie sa trzema
+	// roznymi decyzjami i maja trzy rozne prawa: odciecie w incydencie musi
+	// byc szybkie, przywrocenie i wycofanie - rozwazne.
+	PermHostQuarantine        Permission = "host.quarantine"
+	PermHostQuarantineRelease Permission = "host.quarantine.release"
+	PermHostDecommission      Permission = "host.decommission"
+	PermPrincipalManage       Permission = "principal.manage"
 
 	PermUnitStart   Permission = "unit.start"
 	PermUnitStop    Permission = "unit.stop"
@@ -397,7 +403,8 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermDNSDirectoryWrite,
 		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke,
-		PermHostIdentityReplace, PermPrincipalManage,
+		PermHostIdentityReplace, PermHostQuarantine, PermHostQuarantineRelease,
+		PermHostDecommission, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,

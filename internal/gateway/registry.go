@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -26,6 +27,12 @@ type Session struct {
 	// outbound jest jedyna droga wysylki do agenta. Stream nie jest bezpieczny
 	// dla rownoleglych Send, wiec pisze do niego wylacznie jedna goroutine.
 	outbound chan *agentv1.ServerMessage
+	// zamkniecie konczy sesje z inicjatywy panelu. Kwarantanna sprawdzana
+	// dopiero przy nastepnym polaczeniu nie odcina hosta, ktory wlasnie jest
+	// przejety - a to jest ta chwila, w ktorej odciecie ma znaczenie.
+	zamkniecie chan struct{}
+	raz        sync.Once
+	powod      atomic.Pointer[string]
 }
 
 // NewSession tworzy sesje z buforem wiadomosci wychodzacych.
@@ -36,8 +43,30 @@ func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int)
 	return &Session{
 		ID: id, HostID: hostID, AgentVersion: agentVersion, BootID: bootID,
 		RemoteAddr: remoteAddr, StartedAt: time.Now(),
-		outbound: make(chan *agentv1.ServerMessage, buffer),
+		outbound:   make(chan *agentv1.ServerMessage, buffer),
+		zamkniecie: make(chan struct{}),
 	}
+}
+
+// Zakoncz zamyka sesje z inicjatywy panelu.
+//
+// Idempotentne: kwarantanna wydana dwa razy nie moze wywrocic gatewaya.
+func (s *Session) Zakoncz(powod string) {
+	s.raz.Do(func() {
+		s.powod.Store(&powod)
+		close(s.zamkniecie)
+	})
+}
+
+// Zamknieta jest kanalem, ktory zamyka sie razem z sesja.
+func (s *Session) Zamknieta() <-chan struct{} { return s.zamkniecie }
+
+// PowodZamkniecia mowi, dlaczego panel zakonczyl sesje.
+func (s *Session) PowodZamkniecia() string {
+	if powod := s.powod.Load(); powod != nil {
+		return *powod
+	}
+	return ""
 }
 
 // Outbound zwraca kanal wiadomosci do wyslania do agenta.
@@ -54,6 +83,22 @@ func (s *Session) Send(message *agentv1.ServerMessage, timeout time.Duration) er
 	case <-timer.C:
 		return ErrSendTimeout
 	}
+}
+
+// ZakonczSesje konczy sesje hosta, jesli jakas trwa.
+//
+// Zwraca, czy bylo co konczyc: host offline w chwili kwarantanny nie jest
+// bledem, tylko hostem, ktory i tak nie wroci - warunek przy polaczeniu go
+// nie wpusci.
+func (r *Registry) ZakonczSesje(hostID, powod string) bool {
+	r.mu.RLock()
+	session, ok := r.sessions[hostID]
+	r.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	session.Zakoncz(powod)
+	return true
 }
 
 // Registry jest krotkotrwalym rejestrem aktywnych sesji. Jest to jedyny stan
