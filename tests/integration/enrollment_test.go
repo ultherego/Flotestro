@@ -3,9 +3,14 @@
 package integration
 
 import (
+	"io"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
 // zamowienieView odwzorowuje zamowienie enrollmentu.
@@ -16,18 +21,18 @@ type krokView struct {
 }
 
 type zamowienieView struct {
-	ID                string    `json:"id"`
-	Token             string    `json:"token"`
-	Site              string    `json:"site"`
-	Environment       string    `json:"environment"`
-	Kind              string    `json:"kind"`
-	Purpose           string    `json:"purpose"`
-	ExpectedMachineID string    `json:"expected_machine_id"`
-	ExpectedHostID    string    `json:"expected_host_id"`
-	MaxUses           int       `json:"max_uses"`
-	Uses              int       `json:"uses"`
-	Status            string    `json:"status"`
-	EnrolledHostID    string    `json:"enrolled_host_id"`
+	ID                string     `json:"id"`
+	Token             string     `json:"token"`
+	Site              string     `json:"site"`
+	Environment       string     `json:"environment"`
+	Kind              string     `json:"kind"`
+	Purpose           string     `json:"purpose"`
+	ExpectedMachineID string     `json:"expected_machine_id"`
+	ExpectedHostID    string     `json:"expected_host_id"`
+	MaxUses           int        `json:"max_uses"`
+	Uses              int        `json:"uses"`
+	Status            string     `json:"status"`
+	EnrolledHostID    string     `json:"enrolled_host_id"`
 	ExpiresAt         time.Time  `json:"expires_at"`
 	Steps             []krokView `json:"steps"`
 }
@@ -307,4 +312,112 @@ func TestPostepInstalacjiOpisujeKroki(t *testing.T) {
 	if po.Status != "enrolled" {
 		t.Fatalf("status po rejestracji = %q", po.Status)
 	}
+}
+
+// TestWymianaAgentaKonczySiePowrotemHosta pilnuje wlasciwosci, dla ktorej ta
+// operacja w ogole istnieje osobno: sukcesem jest host, ktory wrocil
+// z oczekiwana wersja, a nie kod wyjscia menedzera pakietow.
+//
+// Agent wymienia sam siebie, wiec proces liczacy zadanie ginie w polowie.
+// Gdyby panel czekal na jego wynik, kazda wymiana konczylaby sie limitem
+// czasu - takze wtedy, gdy host wrocil sprawny.
+func TestWymianaAgentaKonczySiePowrotemHosta(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	var przed struct {
+		AgentVersion string `json:"agent_version"`
+	}
+	h.get("/api/v1/hosts/"+host.ID, &przed)
+	// Cel bierzemy z repozytorium floty testowej: musi tam byc, bo inaczej
+	// menedzer pakietow nie ma czego zainstalowac. Domyslnie jest to wersja
+	// najnowsza - test, ktory cofalby hosta na stare wydanie, zostawialby
+	// flote na kodzie sprzed zmiany i nie dalby sie powtorzyc.
+	cel := os.Getenv("FLOTESTRO_TEST_AGENT_VERSION")
+	if cel == "" {
+		cel = h.najnowszaWersjaAgenta()
+	}
+	if przed.AgentVersion == cel {
+		t.Skipf("host jest juz w wersji %s", cel)
+	}
+
+	job := h.createOperation(host.ID, map[string]any{
+		"action":  "agent.upgrade",
+		"payload": map[string]any{"agent_upgrade": map[string]any{"target_version": cel}},
+	})
+	if job.ID == "" {
+		t.Fatal("nie powstalo zadanie wymiany agenta")
+	}
+	// Wymiana agenta jest operacja wysokiego ryzyka: odcina host od
+	// zarzadzania na czas restartu, wiec wymaga zatwierdzenia.
+	if !job.RequiresApprova {
+		t.Fatal("wymiana agenta nie wymaga zatwierdzenia")
+	}
+	job = h.approve(job.ID, job.PayloadHash)
+
+	// Wymiana trwa: pakiet, restart uslugi i powrot sesji. Panel rozstrzyga
+	// dopiero po Hello z nowa wersja.
+	koniec := time.Now().Add(4 * time.Minute)
+	var stan jobView
+	for time.Now().Before(koniec) {
+		h.get("/api/v1/jobs/"+job.ID, &stan)
+		if stan.State == "succeeded" || stan.State == "failed" {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	if stan.State != "succeeded" {
+		t.Fatalf("zadanie wymiany agenta w stanie %q (%s)", stan.State, stan.ResultMessage)
+	}
+
+	var po struct {
+		AgentVersion string `json:"agent_version"`
+	}
+	h.get("/api/v1/hosts/"+host.ID, &po)
+	if po.AgentVersion != cel {
+		t.Fatalf("host zglasza wersje %q, oczekiwano %q", po.AgentVersion, cel)
+	}
+	h.poczekajNaPolaczenie(host.ID, time.Minute)
+}
+
+// najnowszaWersjaAgenta czyta z repozytorium floty testowej najwyzsza wersje
+// pakietu agenta.
+//
+// Wersji nie zgadujemy ze stalej w tescie: repozytorium laboratorium rosnie
+// przy kazdym wydaniu, a wersja wpisana na sztywno cofalaby hosta tym dalej,
+// im dluzej zyje projekt. Brak odpowiedzi konczy test pominieciem z powodem -
+// wymiana agenta na wersje, ktorej nie ma w repozytorium, nie jest testem.
+func (h *harness) najnowszaWersjaAgenta() string {
+	h.t.Helper()
+	adres := envOr("FLOTESTRO_TEST_REPO", defaultRepo)
+	response, err := h.client.Get(adres + "/deb/dists/stable/main/binary-amd64/Packages")
+	if err != nil {
+		h.t.Skipf("repozytorium floty testowej niedostepne (%s): %v", adres, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		h.t.Skipf("repozytorium floty testowej odpowiedzialo %s", response.Status)
+	}
+	tresc, err := io.ReadAll(response.Body)
+	if err != nil {
+		h.t.Skipf("indeks repozytorium nieczytelny: %v", err)
+	}
+
+	var pakiet string
+	var najnowsza string
+	for _, linia := range strings.Split(string(tresc), "\n") {
+		switch {
+		case strings.HasPrefix(linia, "Package: "):
+			pakiet = strings.TrimSpace(strings.TrimPrefix(linia, "Package: "))
+		case strings.HasPrefix(linia, "Version: ") && pakiet == "flotestro-agent":
+			wersja := strings.TrimSpace(strings.TrimPrefix(linia, "Version: "))
+			if najnowsza == "" || version.PorownajDeb(wersja, najnowsza) > 0 {
+				najnowsza = wersja
+			}
+		}
+	}
+	if najnowsza == "" {
+		h.t.Skip("repozytorium floty testowej nie ma pakietu agenta")
+	}
+	return najnowsza
 }

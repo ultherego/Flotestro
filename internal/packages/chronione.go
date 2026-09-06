@@ -12,8 +12,12 @@ import (
 // dotyczaja rzeczy, ktorych dystrybucja za istotne nie uznaje, a ktore
 // w zarzadzanej flocie sa nie mniej wazne: agent, ktory wykona naprawe,
 // i dostep, przez ktory mozna wejsc, gdy panel zawiedzie.
+// PakietAgenta jest nazwa pakietu, ktory niesie tego agenta. Zwykla
+// aktualizacja pakietow celowo go pomija.
+const PakietAgenta = "flotestro-agent"
+
 var chronioneNazwy = []string{
-	"flotestro-agent",
+	PakietAgenta,
 	"openssh-server",
 	"systemd",
 	"sudo",

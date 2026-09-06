@@ -63,6 +63,7 @@ export function Pakiety() {
   const [plan, setPlan] = useState<PlanUsuniecia | null>(null);
   const [doUsuniecia, setDoUsuniecia] = useState<string[] | null>(null);
   const [zamiarZrodla, setZamiarZrodla] = useState<ZamiarZrodla | null>(null);
+  const [wersjaAgenta, setWersjaAgenta] = useState("");
   const [komunikat, setKomunikat] = useState("");
 
   const zlec = useMutation({
@@ -141,6 +142,38 @@ export function Pakiety() {
         menedzer={pakiety?.manager}
         onZamiar={setZamiarZrodla}
       />
+
+      <h2>Agent</h2>
+      <p className="podtytul">
+        The agent is left alone by ordinary package upgrades: replacing it in
+        the middle of a transaction it is running would cut the host off from
+        management with nobody to report the result. Replacing it is its own
+        operation, and it counts as done only when the host comes back
+        reporting the version that was asked for.
+      </p>
+      <div className="formularz" style={{ marginBottom: 16 }}>
+        <label>
+          Target agent version (currently {host.agent_version || "unknown"})
+          <input
+            value={wersjaAgenta}
+            onChange={(e) => setWersjaAgenta(e.target.value)}
+            placeholder="0.2.0"
+          />
+        </label>
+        <div className="operacje">
+          <button
+            disabled={!wersjaAgenta || wersjaAgenta === host.agent_version}
+            onClick={() =>
+              zlec.mutate({
+                action: "agent.upgrade",
+                payload: { agent_upgrade: { target_version: wersjaAgenta } },
+              })
+            }
+          >
+            Replace agent
+          </button>
+        </div>
+      </div>
 
       <h2>Install, remove or hold</h2>
       <div className="formularz">

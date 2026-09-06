@@ -141,6 +141,13 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	if options.SecurityOnly {
 		args = append(args, "--security")
 	}
+	// Zwykla aktualizacja nie rusza agenta. Wymiana agenta w srodku
+	// transakcji, ktora on sam wykonuje, konczy sie hostem odcietym od
+	// zarzadzania w polowie pracy - i wynikiem, ktorego nikt nie odbierze.
+	// Do tego jest osobna operacja, ktora omija te ochrone swiadomie.
+	if len(options.Packages) == 0 {
+		args = append(args, "--exclude="+PakietAgenta)
+	}
 	args = append(args, options.Packages...)
 
 	// Dnf numeruje kroki w swoim wyjsciu; postep jest z nich odczytywany.
@@ -449,6 +456,13 @@ func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 	before := d.installedVersions(ctx)
 	args := append([]string{"--assumeyes", "--quiet", "install"}, options.Packages...)
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
+	// dnf nie cofa wersji poleceniem "install" i nie ma na to przelacznika:
+	// do wersji starszej niz zainstalowana sluzy osobne polecenie. Probujemy
+	// go tylko wtedy, gdy operacja jawnie na to pozwala.
+	if options.AllowDowngrade && (!result.Ran || result.ExitCode != 0) {
+		powrot := append([]string{"--assumeyes", "--quiet", "downgrade"}, options.Packages...)
+		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, powrot...)
+	}
 
 	after := d.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)

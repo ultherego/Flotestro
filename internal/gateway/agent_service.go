@@ -195,6 +195,9 @@ func (s *AgentService) Connect(ctx context.Context,
 	if err := s.hosts.ApplyHello(ctx, hostID, hello.GetAgentVersion(), hello.GetBootId(), caps); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
+	// Wymiane agenta rozstrzyga jego powrot, a nie kod wyjscia menedzera
+	// pakietow: proces, ktory wykonywal zadanie, zostal w polowie zastapiony.
+	s.rozstrzygnijAktualizacjeAgenta(ctx, hostID, hello.GetAgentVersion())
 
 	session := NewSession(uuid.NewString(), hostID, hello.GetAgentVersion(),
 		hello.GetBootId(), remoteAddr(ctx), 32)

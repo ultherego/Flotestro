@@ -73,9 +73,9 @@ type raportPodatnosciView struct {
 		Releases      []string `json:"releases"`
 	} `json:"snapshot"`
 	// CVEDetails jest wzbogaceniem: ocena CVSS i opis z bazy upstreamowej.
-	CVEDetails map[string]szczegolyCVEView `json:"cve_details"`
-	CoveragePercent float64 `json:"coverage_percent"`
-	FullyAssessed   bool    `json:"fully_assessed"`
+	CVEDetails      map[string]szczegolyCVEView `json:"cve_details"`
+	CoveragePercent float64                     `json:"coverage_percent"`
+	FullyAssessed   bool                        `json:"fully_assessed"`
 }
 
 type flotaPodatnosciView struct {

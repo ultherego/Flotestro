@@ -199,6 +199,16 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		"-o", "APT::Get::Assume-Yes=true",
 		"upgrade",
 	}
+	// Zwykla aktualizacja nie rusza agenta: wymiana go w srodku transakcji,
+	// ktora on sam wykonuje, konczy sie hostem odcietym w polowie pracy
+	// i wynikiem, ktorego nikt nie odbierze. APT nie zna wykluczen, wiec
+	// pakiet jest wstrzymany na czas transakcji i zwalniany po niej.
+	// Do wymiany agenta jest osobna operacja, ktora omija to swiadomie.
+	if len(options.Packages) == 0 {
+		if zwolnij, err := a.wstrzymajAgenta(ctx); err == nil {
+			defer zwolnij()
+		}
+	}
 	if len(options.Packages) > 0 {
 		args = append([]string{"--yes", "--quiet",
 			"-o", "Dpkg::Options::=--force-confold",
@@ -433,6 +443,33 @@ func parseAptRemvLine(linia string) (string, bool) {
 }
 
 // Install instaluje wskazane pakiety.
+// wstrzymajAgenta wstrzymuje pakiet agenta na czas jednej transakcji.
+//
+// Zwraca funkcje zwalniajaca. Gdy pakiet byl wstrzymany wczesniej przez
+// administratora, nie zwalniamy go: decyzja operatora hosta jest wazniejsza
+// niz wygoda jednej transakcji.
+func (a *APT) wstrzymajAgenta(ctx context.Context) (func(), error) {
+	stan := run(ctx, 30*time.Second, aptMarkPath, "showhold")
+	if !stan.Ran {
+		return nil, fmt.Errorf("apt-mark showhold: %s", stan.Reason())
+	}
+	if strings.Contains(stan.Stdout, PakietAgenta) {
+		return func() {}, nil
+	}
+	if wynik := run(ctx, 30*time.Second, aptMarkPath, "hold", PakietAgenta); !wynik.Ran ||
+		wynik.ExitCode != 0 {
+		return nil, fmt.Errorf("apt-mark hold: %s", wynik.Reason())
+	}
+	return func() {
+		// Kontekst transakcji moze byc juz anulowany, a zwolnienie musi sie
+		// wykonac mimo to: pakiet zostawiony na wstrzymaniu blokowalby
+		// pozniejsza wymiane agenta.
+		zwalnianie, anuluj := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer anuluj()
+		run(zwalnianie, 30*time.Second, aptMarkPath, "unhold", PakietAgenta)
+	}, nil
+}
+
 func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 	if len(options.Packages) == 0 {
@@ -446,10 +483,18 @@ func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
 	}
 
 	before := a.installedVersions(ctx)
-	args := append([]string{"--yes", "--quiet",
+	args := []string{"--yes", "--quiet",
 		"-o", "Dpkg::Options::=--force-confold",
-		"-o", "Dpkg::Options::=--force-confdef",
-		"install"}, options.Packages...)
+		"-o", "Dpkg::Options::=--force-confdef"}
+	if options.AllowDowngrade {
+		args = append(args, "--allow-downgrades")
+	}
+	// Wstrzymanie pakietu chroni go przed zwykla aktualizacja, a nie przed
+	// operacja, ktora wskazuje wersje wprost.
+	if options.AllowDowngrade {
+		args = append(args, "--allow-change-held-packages")
+	}
+	args = append(append(args, "install"), options.Packages...)
 	if options.Progress != nil {
 		args = append([]string{"-o", "APT::Status-Fd=3"}, args...)
 	}

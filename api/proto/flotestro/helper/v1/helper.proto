@@ -153,6 +153,11 @@ message PackageActionRequest {
   repeated string expected_removals = 4;
   // Wartosc docelowa wstrzymania. Operacja opisuje stan, a nie przelacznik.
   bool hold = 5;
+  // Zgoda na instalacje wersji starszej niz zainstalowana. Menedzery
+  // pakietow odmawiaja tego domyslnie i slusznie: cofniecie wersji bywa
+  // nieodwracalne dla formatu danych. Wlacza to wylacznie operacja, ktora
+  // wskazuje wersje wprost - jak wymiana agenta na wersje powrotu.
+  bool allow_downgrade = 6;
 }
 
 message UnitActionRequest {

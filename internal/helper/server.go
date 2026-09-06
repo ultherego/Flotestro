@@ -615,6 +615,13 @@ func (s *Server) cyklZyciaPakietow(ctx context.Context, manager packages.Manager
 	var err error
 	switch action.GetOperation() {
 	case helperv1.PackageActionRequest_OPERATION_INSTALL:
+		options.AllowDowngrade = action.GetAllowDowngrade()
+		// Wymiana samego agenta nie moze isc w grupie kontrolnej helpera:
+		// skrypty tego pakietu zatrzymuja helpera, a razem z nim menedzera
+		// pakietow w polowie transakcji.
+		if spec, samowymiana := wymianaAgenta(options.Packages); samowymiana {
+			return s.zlecWymianeAgenta(ctx, manager, spec)
+		}
 		apply, err = cykl.Install(ctx, options)
 	case helperv1.PackageActionRequest_OPERATION_REMOVE:
 		apply, err = cykl.Remove(ctx, options, action.GetExpectedRemovals())

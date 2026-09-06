@@ -46,6 +46,10 @@ const (
 
 	PermPackagesPlan    Permission = "packages.plan"
 	PermPackagesUpgrade Permission = "packages.upgrade"
+	// PermAgentUpgrade jest osobnym prawem od aktualizacji pakietow: wymiana
+	// agenta odcina host od zarzadzania na czas restartu i rozlicza sie
+	// inaczej - dopiero powrot hosta jest sukcesem.
+	PermAgentUpgrade Permission = "agent.upgrade"
 	// Naprawa dotyka pakietow, ktore moga decydowac o starcie hosta,
 	// wiec jest osobnym uprawnieniem, a nie czescia aktualizacji.
 	PermPackagesRepair Permission = "packages.repair"
@@ -397,6 +401,7 @@ var rolePermissions = map[Role][]Permission{
 		PermSecurityMACWrite, PermSecurityAuditReload,
 		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
 		PermPackagesPlan, PermPackagesRead, PermPackagesUpgrade, PermPackagesRepair,
+		PermAgentUpgrade,
 		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,

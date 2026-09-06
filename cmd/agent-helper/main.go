@@ -42,6 +42,8 @@ func run() error {
 			"wykonaj zapisany plan wycofania zmiany sieci i zakoncz")
 		rollbackFirewall = flag.String("rollback-firewall", "",
 			"wykonaj zapisany plan wycofania zmiany zapory i zakoncz")
+		wymianaAgenta = flag.String("wymiana-agenta", "",
+			"zainstaluj wskazana wersje pakietu agenta i zakoncz")
 		idleTimeout = flag.Duration("idle-timeout",
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
 			"czas bezczynnosci, po ktorym helper konczy prace")
@@ -50,6 +52,17 @@ func run() error {
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
+
+	// Tryb wymiany agenta jest wolany przez przejsciowa jednostke systemd.
+	// Instalacja pakietu agenta zatrzymuje helpera i restartuje agenta, wiec
+	// nie moze biec w procesie, ktory ja zlecil: ten proces nie dozylby
+	// konca wlasnej transakcji.
+	if *wymianaAgenta != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		log.Info("wymiana agenta", "pakiet", *wymianaAgenta)
+		return helper.WykonajWymianeAgenta(ctx, *wymianaAgenta, log)
+	}
 
 	// Tryb wycofania jest wolany przez przejsciowa jednostke systemd, gdy
 	// nikt nie potwierdzil lacznosci po zmianie sieci. Dziala bez gniazda,

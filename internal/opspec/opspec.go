@@ -148,6 +148,12 @@ const (
 	// rozstrzyga, czyje pakiety host przyjmie jutro - razem z ich skryptami,
 	// ktore chodza jako root. Stad ryzyko krytyczne i wlasne uprawnienie.
 	ActionRepositorySet ActionType = "packages.repository.set"
+	// ActionAgentUpgrade wymienia samego agenta. Zwykla aktualizacja
+	// pakietow celowo omija flotestro-agent - inaczej host odcinalby sie
+	// od zarzadzania w srodku transakcji, ktora sam wykonuje. Ta operacja
+	// robi to swiadomie i jest rozliczana inaczej: sukcesem jest powrot
+	// hosta z oczekiwana wersja, a nie kod wyjscia menedzera pakietow.
+	ActionAgentUpgrade ActionType = "agent.upgrade"
 
 	// Backup. Dane nie plyna przez panel: host rozmawia z repozytorium wprost,
 	// a panel widzi metadane - kiedy kopia sie udala, ile zajmuje i co
@@ -597,6 +603,8 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Transakcja pakietowa jest najbardziej ryzykowna operacja w systemie.
 	ActionPackageUpgrade: {mutating: true, capability: "packages", permission: "packages.upgrade",
 		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
+	ActionAgentUpgrade: {mutating: true, capability: "packages", permission: "agent.upgrade",
+		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages},
 
 	// Naprawa zmienia stan hosta i moze dotyczyc pakietow o duzym znaczeniu,
 	// z bootloaderem wlacznie, wiec ma wlasne uprawnienie i wlasny timeout.
@@ -1107,6 +1115,56 @@ type PackageUpgradePayload struct {
 	SecurityOnly bool     `json:"security_only,omitempty"`
 }
 
+// AgentUpgradePayload opisuje wymiane agenta na wskazana wersje.
+type AgentUpgradePayload struct {
+	// TargetVersion jest wersja, ktora ma sie zglosic po restarcie. To ona
+	// rozstrzyga o powodzeniu: kod wyjscia menedzera pakietow mowi tylko,
+	// ze transakcja przeszla, a nie ze host wrocil.
+	TargetVersion string `json:"target_version"`
+	// PackageSHA256 jest suma pakietu z wydania. Menedzer sprawdza podpis
+	// repozytorium, a to jest drugie, niezalezne sprawdzenie - i jedyne,
+	// ktore panel moze wykonac po swojej stronie.
+	PackageSHA256 string `json:"package_sha256,omitempty"`
+	// RollbackVersion mowi, do czego wrocic, gdy host nie wroci z nowa
+	// wersja. Puste oznacza brak przygotowanego powrotu.
+	RollbackVersion string `json:"rollback_version,omitempty"`
+}
+
+// poprawnaWersjaAgenta pilnuje, ze wersja jest wersja pakietu, a nie
+// dowolnym tekstem trafiajacym do wiersza polecen menedzera.
+func poprawnaWersjaAgenta(wersja string) bool {
+	if wersja == "" || len(wersja) > 64 {
+		return false
+	}
+	for _, znak := range wersja {
+		switch {
+		case znak >= '0' && znak <= '9':
+		case znak >= 'a' && znak <= 'z':
+		case znak >= 'A' && znak <= 'Z':
+		case znak == '.' || znak == '-' || znak == '+' || znak == '~' || znak == ':' || znak == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// poprawnaSuma sprawdza zapis SHA-256.
+func poprawnaSuma(suma string) bool {
+	if len(suma) != 64 {
+		return false
+	}
+	for _, znak := range suma {
+		switch {
+		case znak >= '0' && znak <= '9':
+		case znak >= 'a' && znak <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // RebootPayload opisuje kontrolowany restart hosta.
 type RebootPayload struct {
 	// DelaySeconds daje czas na zamkniecie sesji i odeslanie wyniku, zanim
@@ -1167,6 +1225,7 @@ type Payload struct {
 	Time            *TimePayload            `json:"time,omitempty"`
 	Power           *PowerPayload           `json:"power,omitempty"`
 	Security        *SecurityPayload        `json:"security,omitempty"`
+	AgentUpgrade    *AgentUpgradePayload    `json:"agent_upgrade,omitempty"`
 	Certificate     *CertificatePayload     `json:"certificate,omitempty"`
 	Repository      *RepositoryPayload      `json:"repository,omitempty"`
 	Backup          *BackupPayload          `json:"backup,omitempty"`
@@ -2466,6 +2525,23 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu package_upgrade", action)
 		}
 		return validatePackageNames(payload.PackageUpgrade.Packages)
+
+	case ActionAgentUpgrade:
+		if payload.AgentUpgrade == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu agent_upgrade", action)
+		}
+		if !poprawnaWersjaAgenta(payload.AgentUpgrade.TargetVersion) {
+			return fmt.Errorf("wersja docelowa %q nie jest wersja pakietu",
+				payload.AgentUpgrade.TargetVersion)
+		}
+		if wersja := payload.AgentUpgrade.RollbackVersion; wersja != "" &&
+			!poprawnaWersjaAgenta(wersja) {
+			return fmt.Errorf("wersja powrotu %q nie jest wersja pakietu", wersja)
+		}
+		if suma := payload.AgentUpgrade.PackageSHA256; suma != "" && !poprawnaSuma(suma) {
+			return fmt.Errorf("suma pakietu nie jest szesnastkowym SHA-256")
+		}
+		return nil
 
 	case ActionFollowJournal:
 		if payload.Journal == nil {

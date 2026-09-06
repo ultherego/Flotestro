@@ -323,6 +323,15 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_PackageUpgrade{PackageUpgrade: request}
 
+	case opspec.ActionAgentUpgrade:
+		envelope.Action = &agentv1.TaskEnvelope_AgentUpgrade{
+			AgentUpgrade: &agentv1.AgentUpgrade{
+				TargetVersion:   payload.AgentUpgrade.TargetVersion,
+				PackageSha256:   payload.AgentUpgrade.PackageSHA256,
+				RollbackVersion: payload.AgentUpgrade.RollbackVersion,
+			},
+		}
+
 	case opspec.ActionDomainEnroll, opspec.ActionDomainPreflight:
 		envelope.Action = &agentv1.TaskEnvelope_DomainEnroll{
 			DomainEnroll: &agentv1.DomainEnroll{

@@ -27,7 +27,11 @@ import (
 )
 
 // Version jest wersja agenta raportowana do control plane.
-const Version = "0.1.0"
+//
+// Zmienna, a nie stala: wydanie wpisuje tu numer pakietu przy budowaniu
+// (-ldflags -X). Bez tego panel widzialby jedna wersje przez cale zycie
+// floty i nie mialby jak sprawdzic, czy aktualizacja naprawde doszla.
+var Version = "0.1.0"
 
 // Identity to material kryptograficzny hosta przechowywany lokalnie.
 type Identity struct {

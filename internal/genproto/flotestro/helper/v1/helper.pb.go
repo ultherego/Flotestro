@@ -2179,9 +2179,14 @@ type PackageActionRequest struct {
 	// przed operacja: roznica oznacza, ze usunieciu podleglby inny zestaw.
 	ExpectedRemovals []string `protobuf:"bytes,4,rep,name=expected_removals,json=expectedRemovals,proto3" json:"expected_removals,omitempty"`
 	// Wartosc docelowa wstrzymania. Operacja opisuje stan, a nie przelacznik.
-	Hold          bool `protobuf:"varint,5,opt,name=hold,proto3" json:"hold,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Hold bool `protobuf:"varint,5,opt,name=hold,proto3" json:"hold,omitempty"`
+	// Zgoda na instalacje wersji starszej niz zainstalowana. Menedzery
+	// pakietow odmawiaja tego domyslnie i slusznie: cofniecie wersji bywa
+	// nieodwracalne dla formatu danych. Wlacza to wylacznie operacja, ktora
+	// wskazuje wersje wprost - jak wymiana agenta na wersje powrotu.
+	AllowDowngrade bool `protobuf:"varint,6,opt,name=allow_downgrade,json=allowDowngrade,proto3" json:"allow_downgrade,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PackageActionRequest) Reset() {
@@ -2245,6 +2250,13 @@ func (x *PackageActionRequest) GetExpectedRemovals() []string {
 func (x *PackageActionRequest) GetHold() bool {
 	if x != nil {
 		return x.Hold
+	}
+	return false
+}
+
+func (x *PackageActionRequest) GetAllowDowngrade() bool {
+	if x != nil {
+		return x.AllowDowngrade
 	}
 	return false
 }
@@ -7071,13 +7083,14 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\n" +
 	"inhibitors\x18\x03 \x01(\fR\n" +
 	"inhibitors\x12!\n" +
-	"\fscheduled_at\x18\x04 \x01(\tR\vscheduledAt\"\x83\x03\n" +
+	"\fscheduled_at\x18\x04 \x01(\tR\vscheduledAt\"\xac\x03\n" +
 	"\x14PackageActionRequest\x12Q\n" +
 	"\toperation\x18\x01 \x01(\x0e23.flotestro.helper.v1.PackageActionRequest.OperationR\toperation\x12\x1a\n" +
 	"\bpackages\x18\x02 \x03(\tR\bpackages\x12#\n" +
 	"\rsecurity_only\x18\x03 \x01(\bR\fsecurityOnly\x12+\n" +
 	"\x11expected_removals\x18\x04 \x03(\tR\x10expectedRemovals\x12\x12\n" +
-	"\x04hold\x18\x05 \x01(\bR\x04hold\"\x95\x01\n" +
+	"\x04hold\x18\x05 \x01(\bR\x04hold\x12'\n" +
+	"\x0fallow_downgrade\x18\x06 \x01(\bR\x0eallowDowngrade\"\x95\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11OPERATION_REFRESH\x10\x01\x12\x15\n" +

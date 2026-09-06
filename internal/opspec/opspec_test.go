@@ -141,3 +141,41 @@ func TestHashNieZalezyOdPustegoPodpayloadu(t *testing.T) {
 		t.Error("tresc podpayloadu nie zmienila hashu planu")
 	}
 }
+
+// TestWymianaAgentaMaWlasneReguly pilnuje, ze operacja, ktora wymienia sam
+// mechanizm zarzadzania, nie przyjmuje czegokolwiek.
+func TestWymianaAgentaMaWlasneReguly(t *testing.T) {
+	if err := Validate(ActionAgentUpgrade, Payload{}); err == nil {
+		t.Error("wymiana agenta bez payloadu przeszla")
+	}
+	if err := Validate(ActionAgentUpgrade, Payload{
+		AgentUpgrade: &AgentUpgradePayload{TargetVersion: "0.2.0"},
+	}); err != nil {
+		t.Errorf("poprawna wersja odrzucona: %v", err)
+	}
+	// Wersja trafia do wiersza polecen menedzera pakietow, wiec nie moze byc
+	// dowolnym tekstem.
+	for _, zla := range []string{"", "0.2.0; rm -rf /", "$(id)", "wersja z odstepem"} {
+		if err := Validate(ActionAgentUpgrade, Payload{
+			AgentUpgrade: &AgentUpgradePayload{TargetVersion: zla},
+		}); err == nil {
+			t.Errorf("wersja %q przeszla", zla)
+		}
+	}
+	if err := Validate(ActionAgentUpgrade, Payload{
+		AgentUpgrade: &AgentUpgradePayload{TargetVersion: "0.2.0", PackageSHA256: "nie-suma"},
+	}); err == nil {
+		t.Error("suma, ktora nie jest SHA-256, przeszla")
+	}
+
+	// Wymiana agenta ma wlasne prawo: kto moze aktualizowac pakiety, nie
+	// dostaje przez to prawa do wymiany samego mechanizmu zarzadzania.
+	if ActionAgentUpgrade.Permission() == ActionPackageUpgrade.Permission() {
+		t.Error("wymiana agenta dzieli uprawnienie ze zwykla aktualizacja")
+	}
+	// Klasa blokady jest ta sama co pakietow: dwie transakcje pakietowe naraz
+	// to uszkodzona baza pakietow.
+	if ActionAgentUpgrade.LockClass() != ActionPackageUpgrade.LockClass() {
+		t.Error("wymiana agenta nie blokuje sie z transakcjami pakietowymi")
+	}
+}

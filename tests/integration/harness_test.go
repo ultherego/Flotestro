@@ -28,6 +28,9 @@ import (
 const (
 	defaultAPI      = "http://192.168.56.10:8080"
 	defaultDatabase = "postgres://flotestro:flotestro@192.168.56.20:5432/flotestro?sslmode=disable"
+	// Repozytorium pakietow floty testowej. Stoi obok panelu, bo w labie
+	// panel jest tez maszyna wydania.
+	defaultRepo = "http://192.168.56.10:8090"
 )
 
 // harness zbiera dostep do API i bazy floty testowej.

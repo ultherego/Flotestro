@@ -46,8 +46,11 @@ configure)
     systemctl enable flotestro-agent.service || true
     if [ -e /var/lib/flotestro-agent/identity/current/agent.pem ] ||
        [ -e /var/lib/flotestro-agent/agent.pem ]; then
-        # Host ma juz tozsamosc: aktualizacja pakietu ma go tylko wznowic.
+        # Host ma juz tozsamosc: aktualizacja pakietu ma go wznowic - i to
+        # naprawde wznowic. "start" na dzialajacej usludze nic nie robi, wiec
+        # po aktualizacji dalej pracowalby stary proces ze starej binarki.
         systemctl start flotestro-agent.service || true
+        systemctl try-restart flotestro-agent.service || true
     else
         # Enrollment jest decyzja operatora i wymaga tokenu, wiec pakiet go
         # nie zgaduje. Usluga ma warunek startu na tozsamosc, wiec do czasu

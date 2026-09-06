@@ -310,6 +310,48 @@ func (s *Store) AnulujNiewyslane(ctx context.Context, tx pgx.Tx, hostID, aktor,
 	return int(znacznik.RowsAffected()), nil
 }
 
+// OtwarteZadaniaAkcji zwraca niedokonczone zadania danej akcji dla hosta
+// razem z ich ostatnia proba i payloadem.
+//
+// Uzywane przez operacje, ktore konczy dopiero powrot hosta: agent wymienia
+// sam siebie i nie ma jak odeslac wyniku, bo proces, ktory go liczyl, wlasnie
+// zostal zastapiony.
+func (s *Store) OtwarteZadaniaAkcji(ctx context.Context, hostID,
+	akcja string) ([]OtwarteZadanie, error) {
+	const query = `
+		select j.id::text, coalesce(a.id::text, ''), j.payload
+		from jobs j
+		left join lateral (
+			select id from job_attempts where job_id = j.id
+			order by attempt_number desc limit 1
+		) a on true
+		where j.host_id = $1::uuid and j.action_type = $2
+		  and j.state in ('queued', 'leased', 'dispatched', 'running')
+		order by j.created_at`
+	rows, err := s.pool.Query(ctx, query, hostID, akcja)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var zadania []OtwarteZadanie
+	for rows.Next() {
+		var zadanie OtwarteZadanie
+		if err := rows.Scan(&zadanie.JobID, &zadanie.AttemptID, &zadanie.Payload); err != nil {
+			return nil, err
+		}
+		zadania = append(zadania, zadanie)
+	}
+	return zadania, rows.Err()
+}
+
+// OtwarteZadanie jest zadaniem czekajacym na rozstrzygniecie.
+type OtwarteZadanie struct {
+	JobID     string
+	AttemptID string
+	Payload   json.RawMessage
+}
+
 // LeasedJob laczy zadanie z proba, ktora je wykonuje.
 type LeasedJob struct {
 	Job       Job

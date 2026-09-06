@@ -401,7 +401,21 @@ message TaskEnvelope {
     BackupAction backup = 51;
     MonitoringProbe monitoring_probe = 52;
     ListPackages list_packages = 53;
+    AgentUpgrade agent_upgrade = 54;
   }
+}
+
+// AgentUpgrade wymienia samego agenta. Wynik tej operacji nie wraca ta sama
+// droga co inne: proces, ktory ja wykonuje, zostaje w polowie zastapiony,
+// wiec rozstrzyga ja powrot hosta z oczekiwana wersja.
+message AgentUpgrade {
+  string target_version = 1;
+  // Suma pakietu z wydania. Menedzer sprawdza podpis repozytorium, a to jest
+  // drugie, niezalezne sprawdzenie.
+  string package_sha256 = 2;
+  // Wersja, do ktorej wrocic, gdy host nie wroci z nowa. Pusta oznacza brak
+  // przygotowanego powrotu.
+  string rollback_version = 3;
 }
 
 // Preconditions sa sprawdzane lokalnie tuz przed wykonaniem. Stan bazowy mogl

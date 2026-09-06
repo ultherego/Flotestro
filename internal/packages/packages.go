@@ -168,6 +168,10 @@ type Options struct {
 	// Progress odbiera postep dlugiej transakcji. Nil oznacza brak odbiorcy
 	// i wtedy narzedzie dziala jak dotad.
 	Progress ProgressFunc
+	// AllowDowngrade zgadza sie na wersje starsza niz zainstalowana.
+	// Domyslnie wylaczone: menedzery pakietow odmawiaja tego z dobrego
+	// powodu, bo cofniecie wersji bywa nieodwracalne dla formatu danych.
+	AllowDowngrade bool
 }
 
 // Manager jest adapterem konkretnego menedzera pakietow.

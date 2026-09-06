@@ -18,6 +18,15 @@ import (
 	"github.com/ultherego/flotestro/internal/systemd"
 )
 
+// StatusPoWymianie oznacza wynik, ktorego nie ma po co odsylac: agent wlasnie
+// zostal zastapiony i o powodzeniu rozstrzygnie jego powrot.
+//
+// Zwykle milczenie agenta jest bledem - control plane nie odrozni go od
+// zerwanego polaczenia. Tu jest odwrotnie: kazdy wynik odeslany w tej chwili
+// bylby nieprawda, bo proces, ktory go liczy, za sekunde przestanie istniec,
+// a to, czy wymiana sie udala, widac dopiero po nowym Hello.
+const StatusPoWymianie = "agent_upgrade_in_flight"
+
 // Stabilne kody odrzucenia. Sa czescia kontraktu i nie zaleza od jezyka.
 const (
 	RejectExpired        = "expired"
@@ -165,6 +174,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.planPackages(ctx, task, payload.PackagePlan)
 	case opspec.ActionPackageUpgrade:
 		return e.upgradePackages(ctx, task, payload.PackageUpgrade)
+	case opspec.ActionAgentUpgrade:
+		return e.upgradeAgent(ctx, task, payload.AgentUpgrade)
 	case opspec.ActionPackageRepair:
 		return e.repairPackages(ctx, task, payload.PackageRepair)
 	case opspec.ActionSystemReboot:
@@ -470,6 +481,16 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			payload.PlanHash = hex.EncodeToString(request.GetPlanHash())
 		}
 		return opspec.ActionPackageUpgrade, opspec.Payload{PackageUpgrade: &payload}, nil
+
+	case *agentv1.TaskEnvelope_AgentUpgrade:
+		request := action.AgentUpgrade
+		return opspec.ActionAgentUpgrade, opspec.Payload{
+			AgentUpgrade: &opspec.AgentUpgradePayload{
+				TargetVersion:   request.GetTargetVersion(),
+				PackageSHA256:   request.GetPackageSha256(),
+				RollbackVersion: request.GetRollbackVersion(),
+			},
+		}, nil
 
 	case *agentv1.TaskEnvelope_SystemReboot:
 		request := action.SystemReboot

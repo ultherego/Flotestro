@@ -319,6 +319,15 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					}
 					defer zwolnij()
 					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
+					// Wymiana agenta nie ma wyniku do odeslania: proces,
+					// ktory ja wykonal, wlasnie jest zastepowany, a o tym,
+					// czy sie udala, rozstrzyga powrot hosta z nowa wersja.
+					// Kazda inna odpowiedz bylaby zgadywaniem.
+					if result.GetErrorCode() == StatusPoWymianie {
+						opts.Log.Info("wymiana agenta w toku",
+							"task_id", task.GetTaskId(), "opis", result.GetMessage())
+						return
+					}
 					opts.Log.Info("zadanie zakonczone",
 						"task_id", task.GetTaskId(), "status", result.GetStatus(),
 						"error_code", result.GetErrorCode(), "replayed", result.GetReplayed())
