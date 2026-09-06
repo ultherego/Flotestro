@@ -64,7 +64,7 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 			fmt.Errorf("host jest w stanie %s", status.LifecycleState))
 	}
 
-	issued, err := s.trust.Active().SignAgentCSR(req.Msg.GetCsrPem(), hostID)
+	issued, err := s.wystawca.PodpiszHosta(ctx, req.Msg.GetCsrPem(), hostID)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: hostID,
@@ -73,6 +73,13 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Bundle zaufania idzie razem z certyfikatem: po rotacji CA host musi
+	// dostac nowy zbior, zanim stary issuer przestanie obowiazywac.
+	zaufanie, err := s.wystawca.Zaufanie(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	tx, err := s.hosts.Pool().Begin(ctx)
@@ -110,7 +117,7 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 		CertificatePem: issued.PEM,
 		// Bundle niesie wszystkie uznawane CA, wiec agent poznaje nowe CA
 		// przy zwyklym odnowieniu, bez osobnej dystrybucji.
-		CaBundlePem: s.trust.Bundle(),
+		CaBundlePem: zaufanie,
 		NotAfter:    timestamppb.New(issued.NotAfter),
 	}), nil
 }

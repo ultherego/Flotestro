@@ -45,6 +45,22 @@ nazwaRPM() {
     esac
 }
 
+# stempel sklada flagi konsolidatora wpisujace pochodzenie w binarke.
+#
+# Sam numer wersji nie wystarcza, gdy pakiet zachowuje sie inaczej niz
+# powinien: pierwsze pytanie brzmi wtedy "z ktorego commita to jest" i musi
+# dac sie odpowiedziec na hoscie, bez dostepu do maszyny wydania.
+stempel() {
+    local pakiet=github.com/ultherego/flotestro/internal/buildinfo
+    local commit data
+    # safe.directory: katalog ze zrodlami czesto nalezy do innego uzytkownika
+    # niz proces budujacy, a git odmawia wtedy odczytu.
+    commit="$(git -C "$repo" -c "safe.directory=$repo" rev-parse HEAD 2>/dev/null || true)"
+    data="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf -- "-X %s.Wersja=%s -X %s.Commit=%s -X %s.Data=%s" \
+        "$pakiet" "$WERSJA" "$pakiet" "$commit" "$pakiet" "$data"
+}
+
 zbudujBinarki() {
     local arch="$1" stage="$WYNIK/stage-$arch"
     echo "==> binarki $arch"
@@ -60,7 +76,7 @@ zbudujBinarki() {
         # z zaszytej stalej.
         CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
             "$GO" -C "$repo" build -trimpath \
-            -ldflags "-s -w -X github.com/ultherego/flotestro/internal/agent.Version=$WERSJA" \
+            -ldflags "-s -w $(stempel)" \
             -o "$stage/flotestro-$skladnik" "./cmd/$skladnik"
     done
     # Panel webowy jest niezalezny od architektury; wchodzi do pakietu

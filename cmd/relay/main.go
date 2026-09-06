@@ -28,13 +28,15 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/ultherego/flotestro/internal/agent"
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/relay"
 	"github.com/ultherego/flotestro/internal/relayconfig"
 )
 
-// wersja jest stemplowana przy budowaniu wydania, tak samo jak w agencie.
-var wersja = agent.Version
+// wersja relaya jest wersja calego wydania: relay i agent ida z jednego
+// zrodla i nie moga rozjechac sie numerem.
+var wersja = buildinfo.Wersja
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -56,7 +58,7 @@ func uruchom(args []string, log *slog.Logger) error {
 	case "config":
 		return polecenieConfig(args[1:])
 	case "version":
-		fmt.Printf("flotestro-relay %s\n", wersja)
+		fmt.Println(buildinfo.Opis("flotestro-relay"))
 		return nil
 	default:
 		return fmt.Errorf("nieznane polecenie %q", args[0])

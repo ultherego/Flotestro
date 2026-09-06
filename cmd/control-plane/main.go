@@ -38,6 +38,7 @@ import (
 	alertyIntegracji "github.com/ultherego/flotestro/internal/integrations/alerts"
 	metrykiIntegracji "github.com/ultherego/flotestro/internal/integrations/metrics"
 	"github.com/ultherego/flotestro/internal/inventory"
+	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
@@ -336,8 +337,13 @@ func run() error {
 			log, 3*time.Second).Run(ctx)
 	}
 
+	// Wystawca stoi miedzy uslugami a urzedem certyfikacji. Dzis klucz CA
+	// lezy w pliku panelu; przeniesienie go do HSM ma zmienic wylacznie te
+	// jedna linie, a nie protokol agenta.
+	wystawca := issuer.ZZaufania(trust)
+
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
-		registry, trust, relayStore, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+		registry, wystawca, relayStore, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
 	// Wpisy sesji po padzie procesu zostaja otwarte i zawyzaja kazdy pomiar
 	// liczacy polaczenia z bazy.
 	go agentService.ReapOrphanSessions(ctx, time.Minute)
@@ -353,9 +359,9 @@ func run() error {
 	// Enrollment jest jedna usluga dla obu drog: bezposredniej i przez relay.
 	// Druga instancja znaczylaby dwa zbiory tych samych regul, ktore z czasem
 	// rozjezdzaja sie po cichu.
-	enrollmentService := gateway.NewEnrollmentService(trust, hostStore, relayStore,
+	enrollmentService := gateway.NewEnrollmentService(wystawca, hostStore, relayStore,
 		tokenStore, recorder, log)
-	relayService := gateway.NewRelayService(relayStore, trust, recorder, registry,
+	relayService := gateway.NewRelayService(relayStore, wystawca, recorder, registry,
 		enrollmentService, log)
 
 	gatewayMux := http.NewServeMux()

@@ -13,24 +13,28 @@ import (
 	"github.com/ultherego/flotestro/internal/enrollment"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
-	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/relays"
 )
 
 // EnrollmentService przyjmuje hosty, ktore nie maja jeszcze tozsamosci.
 // Jest to jedyny endpoint dostepny bez certyfikatu klienta.
 type EnrollmentService struct {
-	trust  *pki.Trust
-	relays *relays.Store
-	hosts  *hosts.Store
-	tokens *enrollment.Store
-	audit  *audit.Recorder
-	log    *slog.Logger
+	// wystawca podpisuje certyfikaty tozsamosci. Interfejs, a nie urzad:
+	// przeniesienie klucza CA do HSM ma zmienic implementacje, a nie te
+	// usluge i nie protokol agenta.
+	wystawca issuer.Wystawca
+	relays   *relays.Store
+	hosts    *hosts.Store
+	tokens   *enrollment.Store
+	audit    *audit.Recorder
+	log      *slog.Logger
 }
 
-func NewEnrollmentService(trust *pki.Trust, hostStore *hosts.Store, relayStore *relays.Store,
-	tokens *enrollment.Store, recorder *audit.Recorder, log *slog.Logger) *EnrollmentService {
-	return &EnrollmentService{trust: trust, hosts: hostStore, relays: relayStore,
+func NewEnrollmentService(wystawca issuer.Wystawca, hostStore *hosts.Store,
+	relayStore *relays.Store, tokens *enrollment.Store, recorder *audit.Recorder,
+	log *slog.Logger) *EnrollmentService {
+	return &EnrollmentService{wystawca: wystawca, hosts: hostStore, relays: relayStore,
 		tokens: tokens, audit: recorder, log: log}
 }
 
@@ -184,7 +188,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		}
 	}
 
-	issued, err := s.trust.Active().SignAgentCSR(msg.GetCsrPem(), hostID)
+	issued, err := s.wystawca.PodpiszHosta(ctx, msg.GetCsrPem(), hostID)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
@@ -193,6 +197,12 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	// Bundle zaufania idzie w tej samej odpowiedzi co certyfikat: host bez
+	// niego nie wie, komu ufac, i nie zestawi sesji.
+	zaufanie, err := s.wystawca.Zaufanie(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
@@ -204,7 +214,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	// Proba zapisuje sie w tej samej transakcji co host i certyfikat: zapis
 	// po commicie moglby nie dojsc, a wtedy idempotencja bylaby pozorna.
 	if err := s.tokens.ZapiszProbe(ctx, tx, scope.TokenID, proba, enrollment.Powtorzenie{
-		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: s.trust.Bundle(),
+		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: zaufanie,
 		CertificateSerial: issued.Serial,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -238,7 +248,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	return connect.NewResponse(&agentv1.EnrollResponse{
 		HostId:         hostID,
 		CertificatePem: issued.PEM,
-		CaBundlePem:    s.trust.Bundle(),
+		CaBundlePem:    zaufanie,
 		NotAfter:       timestamppb.New(issued.NotAfter),
 	}), nil
 }
@@ -262,7 +272,7 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	issued, err := s.trust.Active().SignRelayCSR(msg.GetCsrPem(), relayID)
+	issued, err := s.wystawca.PodpiszRelay(ctx, msg.GetCsrPem(), relayID, nil)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: name,
@@ -271,6 +281,10 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	zaufanie, err := s.wystawca.Zaufanie(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
 		issued.Fingerprint, issued.NotAfter); err != nil {
@@ -301,7 +315,7 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	return connect.NewResponse(&agentv1.EnrollResponse{
 		HostId:         relayID,
 		CertificatePem: issued.PEM,
-		CaBundlePem:    s.trust.Bundle(),
+		CaBundlePem:    zaufanie,
 		NotAfter:       timestamppb.New(issued.NotAfter),
 	}), nil
 }
@@ -359,7 +373,7 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 //
 // Zrodlem jest wystawiony certyfikat, a nie zadanie: to on rozstrzyga, co
 // relay naprawde poswiadcza wobec agentow swojej lokalizacji.
-func nazwySieciowe(issued *pki.IssuedCert) []string {
+func nazwySieciowe(issued *issuer.Certyfikat) []string {
 	nazwy := append([]string{}, issued.DNSNames...)
 	return append(nazwy, issued.IPAddresses...)
 }

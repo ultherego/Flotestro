@@ -2,13 +2,8 @@ package agent
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -143,19 +138,19 @@ func leafNotBefore(identity *Identity) time.Time {
 // atomowo. Stary material zostaje na dysku do chwili, w ktorej nowy jest
 // kompletny: przerwanie w polowie nie moze zostawic hosta bez tozsamosci.
 func renewCertificate(ctx context.Context, identity *Identity, options RenewalOptions) error {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	magazyn := identitystore.Nowy(options.StateDir)
+	// Klucz tworzy magazyn: przy profilu sprzetowym nowa generacja powstaje
+	// w ukladzie i nigdy go nie opuszcza, a odnawianie tego nie zauwaza.
+	key, err := magazyn.NowyKlucz()
 	if err != nil {
 		return err
 	}
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane
-		// na podstawie certyfikatu, ktorym agent sie uwierzytelnia.
-		Subject: pkix.Name{CommonName: identity.HostID},
-	}, key)
+	// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane
+	// na podstawie certyfikatu, ktorym agent sie uwierzytelnia.
+	csrPEM, err := identitystore.Wniosek(key, identity.HostID, nil, nil)
 	if err != nil {
 		return err
 	}
-	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
 	// Odnowienie idzie przez mTLS obecnym certyfikatem: to on jest dowodem
 	// tozsamosci. Token enrollmentu nie bierze w tym udzialu.
@@ -178,11 +173,6 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		return fmt.Errorf("odnowienie odrzucone: %w", err)
 	}
 
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return err
-	}
-
 	// Bundle zaufania zmienia sie tylko przy rotacji CA. Gdy panel go nie
 	// przyslal, do generacji idzie ten, ktory obowiazuje: generacja musi byc
 	// kompletem, a nie kluczem i certyfikatem bez wskazania zaufania.
@@ -194,9 +184,8 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		return fmt.Errorf("odnowienie bez bundla zaufania")
 	}
 
-	magazyn := identitystore.Nowy(options.StateDir)
 	odnowiona, err := magazyn.Zatwierdz(identitystore.Generacja{
-		KluczPEM:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		Klucz:         key,
 		CertyfikatPEM: response.Msg.GetCertificatePem(),
 		ZaufaniePEM:   bundle,
 	})

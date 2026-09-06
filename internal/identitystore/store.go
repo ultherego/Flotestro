@@ -12,6 +12,7 @@
 package identitystore
 
 import (
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -57,9 +58,26 @@ var (
 
 // Generacja jest kompletem materialu kryptograficznego hosta.
 type Generacja struct {
+	// Klucz jest zrodlem materialu prywatnego. Interfejs, bo klucz nie
+	// zawsze da sie wyeksportowac - profil sprzetowy zostawia go w ukladzie
+	// i oddaje wylacznie podpisywanie.
+	Klucz Klucz
+	// KluczPEM jest droga dla klucza, ktory jest zwyklym plikiem. Puste, gdy
+	// podano Klucz; podane, gdy wolajacy ma juz gotowy material.
 	KluczPEM      []byte
 	CertyfikatPEM []byte
 	ZaufaniePEM   []byte
+}
+
+// klucz zwraca klucz generacji niezaleznie od drogi, ktora zostal podany.
+func (g Generacja) klucz() (Klucz, error) {
+	if g.Klucz != nil {
+		return g.Klucz, nil
+	}
+	if len(g.KluczPEM) == 0 {
+		return nil, fmt.Errorf("%w: generacja bez klucza", ErrParaKluczy)
+	}
+	return KluczZPEM(g.KluczPEM)
 }
 
 // Tozsamosc jest wczytana generacja gotowa do uzycia w polaczeniu.
@@ -78,13 +96,28 @@ type Tozsamosc struct {
 
 // Magazyn zarzadza katalogiem tozsamosci hosta.
 type Magazyn struct {
-	root string
+	root   string
+	zrodlo ZrodloKlucza
 }
 
 // Nowy tworzy magazyn w katalogu stanu agenta.
 func Nowy(katalogStanu string) *Magazyn {
-	return &Magazyn{root: filepath.Join(katalogStanu, KatalogTozsamosci)}
+	return NowyZeZrodlem(katalogStanu, Programowe())
 }
+
+// NowyZeZrodlem tworzy magazyn z wskazanym zrodlem kluczy.
+//
+// Profil sprzetowy podmienia wylacznie zrodlo: reszta magazynu, enrollment
+// i odnawianie nie wiedza, gdzie lezy klucz, i nie maja wiedziec.
+func NowyZeZrodlem(katalogStanu string, zrodlo ZrodloKlucza) *Magazyn {
+	if zrodlo == nil {
+		zrodlo = Programowe()
+	}
+	return &Magazyn{root: filepath.Join(katalogStanu, KatalogTozsamosci), zrodlo: zrodlo}
+}
+
+// NowyKlucz tworzy klucz zgodny ze zrodlem tego magazynu.
+func (m *Magazyn) NowyKlucz() (Klucz, error) { return m.zrodlo.Nowy() }
 
 // Katalog zwraca katalog tozsamosci.
 func (m *Magazyn) Katalog() string { return m.root }
@@ -95,13 +128,23 @@ func (m *Magazyn) Katalog() string { return m.root }
 // bundla zaufania, na koncu tozsamosc w certyfikacie. Kazde z nich osobno
 // oznacza cos innego dla operatora.
 func Sprawdz(g Generacja) error {
-	para, err := tls.X509KeyPair(g.CertyfikatPEM, g.KluczPEM)
+	klucz, err := g.klucz()
+	if err != nil {
+		return err
+	}
+	blok, _ := pem.Decode(g.CertyfikatPEM)
+	if blok == nil {
+		return fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrParaKluczy)
+	}
+	lisc, err := x509.ParseCertificate(blok.Bytes)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrParaKluczy, err)
 	}
-	lisc, err := x509.ParseCertificate(para.Certificate[0])
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParaKluczy, err)
+	// Para jest sprawdzana przez klucz publiczny, a nie przez zlozenie
+	// certyfikatu z materialem prywatnym: klucza sprzetowego nie da sie
+	// zlozyc, a i tak wiadomo, czy pasuje.
+	if !pasujaKlucze(lisc.PublicKey, klucz.Publiczny()) {
+		return fmt.Errorf("%w: certyfikat nie pasuje do klucza", ErrParaKluczy)
 	}
 	korzenie := x509.NewCertPool()
 	if !korzenie.AppendCertsFromPEM(g.ZaufaniePEM) {
@@ -151,9 +194,14 @@ func (m *Magazyn) Zatwierdz(g Generacja) (*Tozsamosc, error) {
 		return nil, err
 	}
 
-	// Klucz jest czytelny wylacznie dla wlasciciela; certyfikat i bundle nie
-	// sa tajne i moga byc czytane przez narzedzia diagnostyczne.
-	if err := zapiszZSync(filepath.Join(tymczasowy, NazwaKlucza), g.KluczPEM, 0o600); err != nil {
+	// Klucz zapisuje sie sam: tylko on wie, co znaczy jego utrwalenie.
+	// Certyfikat i bundle nie sa tajne i moga byc czytane przez narzedzia
+	// diagnostyczne.
+	klucz, err := g.klucz()
+	if err != nil {
+		return nil, err
+	}
+	if err := klucz.Zapisz(tymczasowy); err != nil {
 		return nil, err
 	}
 	if err := zapiszZSync(filepath.Join(tymczasowy, NazwaCertyfikatu), g.CertyfikatPEM, 0o644); err != nil {
@@ -219,7 +267,7 @@ func (m *Magazyn) Biezaca() (*Tozsamosc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
 	}
-	return wczytaj(katalog)
+	return wczytaj(katalog, m.zrodlo)
 }
 
 // Poprzednia wczytuje generacje sprzed biezacej.
@@ -240,7 +288,7 @@ func (m *Magazyn) Poprzednia() (*Tozsamosc, error) {
 		if nazwy[i] == aktualna {
 			continue
 		}
-		return wczytaj(filepath.Join(m.root, KatalogGeneracji, nazwy[i]))
+		return wczytaj(filepath.Join(m.root, KatalogGeneracji, nazwy[i]), m.zrodlo)
 	}
 	return nil, ErrBrakTozsamosci
 }
@@ -329,8 +377,14 @@ func (m *Magazyn) generacje() ([]string, error) {
 }
 
 // wczytaj czyta komplet z katalogu generacji.
-func wczytaj(katalog string) (*Tozsamosc, error) {
-	kluczPEM, err := os.ReadFile(filepath.Join(katalog, NazwaKlucza))
+//
+// Klucz wczytuje zrodlo, a nie ta funkcja: dla klucza sprzetowego w katalogu
+// lezy uchwyt, a nie material, i tylko zrodlo wie, co z nim zrobic.
+func wczytaj(katalog string, zrodlo ZrodloKlucza) (*Tozsamosc, error) {
+	if zrodlo == nil {
+		zrodlo = Programowe()
+	}
+	klucz, err := zrodlo.Wczytaj(katalog)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
 	}
@@ -343,10 +397,11 @@ func wczytaj(katalog string) (*Tozsamosc, error) {
 		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
 	}
 
-	para, err := tls.X509KeyPair(certPEM, kluczPEM)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrParaKluczy, err)
+	blok, _ := pem.Decode(certPEM)
+	if blok == nil {
+		return nil, fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrParaKluczy)
 	}
+	para := tls.Certificate{Certificate: [][]byte{blok.Bytes}, PrivateKey: klucz.Signer()}
 	lisc, err := x509.ParseCertificate(para.Certificate[0])
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrParaKluczy, err)
@@ -447,4 +502,13 @@ func (m *Magazyn) Migruj(kluczPath, certPath, zaufaniePath string) (bool, error)
 		return false, err
 	}
 	return true, nil
+}
+
+// pasujaKlucze mowi, czy certyfikat opisuje ten klucz.
+func pasujaKlucze(zCertyfikatu, publiczny crypto.PublicKey) bool {
+	porownywalny, ok := publiczny.(interface{ Equal(crypto.PublicKey) bool })
+	if !ok {
+		return false
+	}
+	return porownywalny.Equal(zCertyfikatu)
 }

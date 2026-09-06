@@ -2,13 +2,9 @@ package relay
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -214,20 +210,16 @@ func poczatek(tozsamosc Tozsamosc) time.Time {
 
 // odnow wymienia nowa pare kluczy na certyfikat i zapisuje ja atomowo.
 func odnow(ctx context.Context, obecna Tozsamosc, opcje OpcjeOdnowienia) (Tozsamosc, error) {
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	magazyn := identitystore.Nowy(opcje.StateDir)
+	klucz, err := magazyn.NowyKlucz()
 	if err != nil {
 		return Tozsamosc{}, err
 	}
 	dns, adresy := rozdzielNazwy(opcje.Nazwy)
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject:     pkix.Name{CommonName: obecna.RelayID},
-		DNSNames:    dns,
-		IPAddresses: adresy,
-	}, klucz)
+	csrPEM, err := identitystore.Wniosek(klucz, obecna.RelayID, dns, adresy)
 	if err != nil {
 		return Tozsamosc{}, err
 	}
-	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
 	// Odnowienie idzie przez mTLS obecnym certyfikatem: to on jest dowodem
 	// tozsamosci relaya. Token enrollmentu nie bierze w tym udzialu.
@@ -252,10 +244,6 @@ func odnow(ctx context.Context, obecna Tozsamosc, opcje OpcjeOdnowienia) (Tozsam
 		return Tozsamosc{}, fmt.Errorf("odnowienie odrzucone: %w", err)
 	}
 
-	kluczDER, err := x509.MarshalECPrivateKey(klucz)
-	if err != nil {
-		return Tozsamosc{}, err
-	}
 	// Bundle zaufania zmienia sie tylko przy rotacji CA floty. Gdy centrala
 	// go nie przyslala, do generacji idzie ten, ktory obowiazuje: generacja
 	// musi byc kompletem, a nie kluczem bez wskazania zaufania.
@@ -267,9 +255,8 @@ func odnow(ctx context.Context, obecna Tozsamosc, opcje OpcjeOdnowienia) (Tozsam
 		return Tozsamosc{}, fmt.Errorf("odnowienie bez bundla zaufania")
 	}
 
-	magazyn := identitystore.Nowy(opcje.StateDir)
 	zapisana, err := magazyn.Zatwierdz(identitystore.Generacja{
-		KluczPEM:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kluczDER}),
+		Klucz:         klucz,
 		CertyfikatPEM: odpowiedz.Msg.GetCertificatePem(),
 		ZaufaniePEM:   bundle,
 	})

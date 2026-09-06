@@ -27,6 +27,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
+	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/jobs"
 	modulbackup "github.com/ultherego/flotestro/internal/modules/backup"
 	modulcerts "github.com/ultherego/flotestro/internal/modules/certificates"
@@ -76,10 +77,10 @@ type AgentService struct {
 	jobs      *jobs.Store
 	audit     *audit.Recorder
 	registry  *Registry
-	// trust podpisuje odnowienia i opisuje, komu panel ufa. Wymiana CA
-	// zmienia ten zbior w trakcie pracy, wiec uslugi nie moga trzymac
-	// pojedynczego CA skopiowanego przy starcie.
-	trust *pki.Trust
+	// wystawca podpisuje odnowienia i opisuje, komu panel ufa. Interfejs,
+	// a nie urzad: wymiana CA zmienia zbior zaufania w trakcie pracy, a
+	// przeniesienie klucza do HSM ma nie dotknac tej uslugi.
+	wystawca issuer.Wystawca
 	// relays rozpoznaje relaye lokalizacji. Puste wylacza posredniczenie.
 	relays *relays.Store
 	// events rozglasza postep operacji do otwartych ekranow panelu.
@@ -120,7 +121,7 @@ type AgentService struct {
 }
 
 func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
-	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, trust *pki.Trust,
+	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, wystawca issuer.Wystawca,
 	relayStore *relays.Store, log *slog.Logger, gatewayID string,
 	heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
@@ -129,7 +130,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		certificates: certyfikaty.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
 		pakiety:      vuln.NowyMagazynPakietow(pool),
-		audit:        recorder, registry: registry, trust: trust, relays: relayStore,
+		audit:        recorder, registry: registry, wystawca: wystawca, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 		proby: map[string]kontekstZadania{},

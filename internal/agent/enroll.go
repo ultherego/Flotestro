@@ -2,13 +2,8 @@ package agent
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/identitystore"
@@ -31,7 +27,7 @@ import (
 // Zmienna, a nie stala: wydanie wpisuje tu numer pakietu przy budowaniu
 // (-ldflags -X). Bez tego panel widzialby jedna wersje przez cale zycie
 // floty i nie mialby jak sprawdzic, czy aktualizacja naprawde doszla.
-var Version = "0.1.0"
+var Version = buildinfo.Wersja
 
 // Identity to material kryptograficzny hosta przechowywany lokalnie.
 type Identity struct {
@@ -145,7 +141,10 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 		return nil, fmt.Errorf("bundle CA nie zawiera certyfikatu")
 	}
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Klucz tworzy magazyn, a nie ta funkcja: to on wie, czy klucz jest
+	// plikiem, czy zostaje w ukladzie sprzetowym. Enrollment ma dzialac tak
+	// samo w obu profilach.
+	key, err := magazyn.NowyKlucz()
 	if err != nil {
 		return nil, err
 	}
@@ -155,26 +154,24 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	}
 	hostname := request.Hostname
 
-	wniosek := &x509.CertificateRequest{
-		// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane.
-		Subject: pkix.Name{CommonName: machineID},
-	}
+	var dns []string
+	var adresy []net.IP
 	for _, nazwa := range strings.Split(request.Advertised, ",") {
 		nazwa = strings.TrimSpace(nazwa)
 		if nazwa == "" {
 			continue
 		}
 		if adres := net.ParseIP(nazwa); adres != nil {
-			wniosek.IPAddresses = append(wniosek.IPAddresses, adres)
+			adresy = append(adresy, adres)
 			continue
 		}
-		wniosek.DNSNames = append(wniosek.DNSNames, nazwa)
+		dns = append(dns, nazwa)
 	}
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, wniosek, key)
+	// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane.
+	csrPEM, err := identitystore.Wniosek(key, machineID, dns, adresy)
 	if err != nil {
 		return nil, err
 	}
-	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
 	client := agentv1connect.NewEnrollmentServiceClient(&http.Client{
 		Timeout:   30 * time.Second,
@@ -206,12 +203,6 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 		return nil, fmt.Errorf("enrollment odrzucony: %w", err)
 	}
 
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-
 	// Zapis idzie jedna generacja: klucz, certyfikat i bundle albo trafiaja
 	// na dysk razem, albo nie trafia wcale.
 	bundle := resp.Msg.GetCaBundlePem()
@@ -219,7 +210,7 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 		bundle = caPEM
 	}
 	tozsamosc, err := magazyn.Zatwierdz(identitystore.Generacja{
-		KluczPEM: keyPEM, CertyfikatPEM: resp.Msg.GetCertificatePem(), ZaufaniePEM: bundle,
+		Klucz: key, CertyfikatPEM: resp.Msg.GetCertificatePem(), ZaufaniePEM: bundle,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("zapis tozsamosci: %w", err)

@@ -100,6 +100,12 @@ func UruchomWymianeAgenta(ctx context.Context, spec string) error {
 	}
 	cmd := exec.CommandContext(ctx, systemdRun,
 		"--collect", "--quiet",
+		// Bez --no-block systemd-run czeka na koniec jednostki typu oneshot,
+		// czyli na cala transakcje - a sam stoi wtedy w grupie kontrolnej
+		// helpera, ktora ta transakcja za chwile zatrzyma. Zlecenie ma
+		// wrocic po uruchomieniu jednostki, a nie po jej zakonczeniu:
+		// o wyniku rozstrzyga powrot agenta.
+		"--no-block",
 		"--unit="+JednostkaWymianyAgenta,
 		"--description=Flotestro: wymiana agenta",
 		"--property=Type=oneshot",

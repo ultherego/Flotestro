@@ -12,7 +12,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
+
+	"github.com/ultherego/flotestro/internal/buildinfo"
 )
 
 func main() {
@@ -38,8 +39,9 @@ func uruchomZWejsciem(argumenty []string, wejscie io.Reader, wyjscie, bledy io.W
 	case "enroll":
 		return poleceniaEnrollmentu(argumenty[1:], wejscie, wyjscie, bledy)
 	case "version":
-		fmt.Fprintf(wyjscie, "flotestro-agentctl %s (%s/%s, %s)\n",
-			wersja, runtime.GOOS, runtime.GOARCH, runtime.Version())
+		// Sam numer wersji nie wystarcza, gdy pakiet zachowuje sie inaczej
+		// niz powinien: pierwsze pytanie brzmi "z ktorego commita to jest".
+		fmt.Fprintln(wyjscie, buildinfo.Opis("flotestro-agentctl"))
 		return 0
 	case "help", "-h", "--help":
 		pomoc(wyjscie)

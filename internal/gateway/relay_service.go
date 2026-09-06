@@ -11,6 +11,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
 )
@@ -23,7 +24,7 @@ import (
 // Wspolne RPC oznaczaloby jeden zbior warunkow dla dwoch roznych uprawnien.
 type RelayService struct {
 	relays   *relays.Store
-	trust    *pki.Trust
+	wystawca issuer.Wystawca
 	audit    *audit.Recorder
 	registry *Registry
 	// enrollment obsluguje zgloszenia hostow z izolowanych lokalizacji.
@@ -34,11 +35,11 @@ type RelayService struct {
 	log        *slog.Logger
 }
 
-func NewRelayService(relayStore *relays.Store, trust *pki.Trust,
+func NewRelayService(relayStore *relays.Store, wystawca issuer.Wystawca,
 	recorder *audit.Recorder, registry *Registry,
 	enrollmentService *EnrollmentService, log *slog.Logger) *RelayService {
 	return &RelayService{
-		relays: relayStore, trust: trust, audit: recorder,
+		relays: relayStore, wystawca: wystawca, audit: recorder,
 		registry: registry, enrollment: enrollmentService, log: log,
 	}
 }
@@ -150,7 +151,7 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 			"relay_id", relayID, "nazwy", roznica, "wystawione", nazwy)
 	}
 
-	issued, err := s.trust.Active().SignRelayCSRZNazwami(req.Msg.GetCsrPem(), relayID, nazwy)
+	issued, err := s.wystawca.PodpiszRelay(ctx, req.Msg.GetCsrPem(), relayID, nazwy)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: relayID,
@@ -159,6 +160,11 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	zaufanie, err := s.wystawca.Zaufanie(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	tx, err := s.relays.Pool().Begin(ctx)
@@ -197,7 +203,7 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 		"relay_id", relayID, "nazwa", status.Name, "wygasa", issued.NotAfter)
 	return connect.NewResponse(&agentv1.RenewRelayCertificateResponse{
 		CertificatePem:    issued.PEM,
-		ClientCaBundlePem: s.trust.Bundle(),
+		ClientCaBundlePem: zaufanie,
 		NotAfter:          timestamppb.New(issued.NotAfter),
 	}), nil
 }
