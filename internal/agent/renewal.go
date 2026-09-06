@@ -21,6 +21,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
 // renewalThreshold mowi, kiedy zaczac odnawianie: gdy zostala mniej niz jedna
@@ -181,25 +182,31 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 	if err != nil {
 		return err
 	}
-	p := paths(options.StateDir)
-	if err := writeAtomic(p.Key, pem.EncodeToMemory(
-		&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
-		return err
+
+	// Bundle zaufania zmienia sie tylko przy rotacji CA. Gdy panel go nie
+	// przyslal, do generacji idzie ten, ktory obowiazuje: generacja musi byc
+	// kompletem, a nie kluczem i certyfikatem bez wskazania zaufania.
+	bundle := response.Msg.GetCaBundlePem()
+	if len(bundle) == 0 {
+		bundle = identity.ZaufaniePEM
 	}
-	if err := writeAtomic(p.Cert, response.Msg.GetCertificatePem(), 0o644); err != nil {
-		return err
-	}
-	if bundle := response.Msg.GetCaBundlePem(); len(bundle) > 0 {
-		if err := writeAtomic(p.CA, bundle, 0o644); err != nil {
-			return err
-		}
+	if len(bundle) == 0 {
+		return fmt.Errorf("odnowienie bez bundla zaufania")
 	}
 
-	odnowiona, err := loadIdentity(p)
+	magazyn := identitystore.Nowy(options.StateDir)
+	odnowiona, err := magazyn.Zatwierdz(identitystore.Generacja{
+		KluczPEM:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		CertyfikatPEM: response.Msg.GetCertificatePem(),
+		ZaufaniePEM:   bundle,
+	})
 	if err != nil {
-		return fmt.Errorf("nowy certyfikat nie daje sie wczytac: %w", err)
+		// Odrzucona generacja nie rusza tego, czym host pracuje: lepiej
+		// zostac na starym certyfikacie i sprobowac za pol godziny niz
+		// zostac z polowa pary.
+		return fmt.Errorf("nowa tozsamosc odrzucona: %w", err)
 	}
-	*identity = *odnowiona
+	*identity = *zTozsamosci(odnowiona)
 	return nil
 }
 

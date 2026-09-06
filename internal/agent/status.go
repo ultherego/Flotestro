@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
 // NazwaPlikuStanu jest plikiem, w ktorym agent zapisuje, co sie z nim dzieje.
@@ -139,7 +141,25 @@ type StanTozsamosci struct {
 }
 
 // OdczytajTozsamosc czyta tozsamosc z katalogu stanu bez zadnego polaczenia.
+//
+// Najpierw magazyn generacji, potem stary uklad plikow: narzedzie na hoscie
+// ma odpowiadac tak samo przed migracja i po niej.
 func OdczytajTozsamosc(stateDir string) StanTozsamosci {
+	magazyn := identitystore.Nowy(stateDir)
+	if tozsamosc, err := magazyn.Biezaca(); err == nil {
+		return StanTozsamosci{
+			Sciezki: IdentityPaths{
+				Key:  filepath.Join(tozsamosc.Katalog, identitystore.NazwaKlucza),
+				Cert: filepath.Join(tozsamosc.Katalog, identitystore.NazwaCertyfikatu),
+				CA:   filepath.Join(tozsamosc.Katalog, identitystore.NazwaZaufania),
+			},
+			Obecna:   true,
+			HostID:   tozsamosc.HostID,
+			NotAfter: tozsamosc.NotAfter,
+			Wygasl:   time.Now().After(tozsamosc.NotAfter),
+		}
+	}
+
 	sciezki := paths(stateDir)
 	stan := StanTozsamosci{Sciezki: sciezki}
 

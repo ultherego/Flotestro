@@ -22,6 +22,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
 // Version jest wersja agenta raportowana do control plane.
@@ -33,6 +34,18 @@ type Identity struct {
 	Certificate tls.Certificate
 	CAPool      *x509.CertPool
 	NotAfter    time.Time
+	// ZaufaniePEM jest bundlem, ktory rozstrzyga o zaufaniu tej tozsamosci.
+	// Trzymamy go w pamieci, bo odnowienie zapisuje cala generacje naraz -
+	// takze wtedy, gdy panel nie przyslal nowego bundla.
+	ZaufaniePEM []byte
+}
+
+// zTozsamosci tlumaczy generacje z magazynu na tozsamosc agenta.
+func zTozsamosci(t *identitystore.Tozsamosc) *Identity {
+	return &Identity{
+		HostID: t.HostID, Certificate: t.Certificate, CAPool: t.CAPool,
+		NotAfter: t.NotAfter, ZaufaniePEM: t.ZaufaniePEM,
+	}
 }
 
 // IdentityPaths wskazuje pliki tozsamosci w katalogu stanu agenta.
@@ -101,8 +114,21 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	}
 	p := paths(stateDir)
 
-	if identity, err := loadIdentity(p); err == nil {
-		return identity, nil
+	// Magazyn generacji jest zrodlem tozsamosci. Slady przerwanych zapisow
+	// sprzatamy przy starcie: katalog tymczasowy po awarii nie jest stanem.
+	magazyn := identitystore.Nowy(stateDir)
+	if err := magazyn.Sprzataj(); err != nil {
+		return nil, fmt.Errorf("porzadkowanie tozsamosci: %w", err)
+	}
+	if tozsamosc, err := magazyn.Biezaca(); err == nil && time.Now().Before(tozsamosc.NotAfter) {
+		return zTozsamosci(tozsamosc), nil
+	}
+	// Host postawiony przed wprowadzeniem magazynu ma komplet luzem
+	// w katalogu stanu. Przenosimy go raz, bez kasowania oryginalow.
+	if przeniesiona, err := magazyn.Migruj(p.Key, p.Cert, p.CA); przeniesiona && err == nil {
+		if tozsamosc, err := magazyn.Biezaca(); err == nil && time.Now().Before(tozsamosc.NotAfter) {
+			return zTozsamosci(tozsamosc), nil
+		}
 	}
 
 	caPEM, err := readCABundle(p.CA, bootstrapCAPath)
@@ -171,16 +197,20 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 		return nil, err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	if err := os.WriteFile(p.Key, keyPEM, 0o600); err != nil {
-		return nil, err
+
+	// Zapis idzie jedna generacja: klucz, certyfikat i bundle albo trafiaja
+	// na dysk razem, albo nie trafia wcale.
+	bundle := resp.Msg.GetCaBundlePem()
+	if len(bundle) == 0 {
+		bundle = caPEM
 	}
-	if err := os.WriteFile(p.Cert, resp.Msg.GetCertificatePem(), 0o644); err != nil {
-		return nil, err
+	tozsamosc, err := magazyn.Zatwierdz(identitystore.Generacja{
+		KluczPEM: keyPEM, CertyfikatPEM: resp.Msg.GetCertificatePem(), ZaufaniePEM: bundle,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("zapis tozsamosci: %w", err)
 	}
-	if err := os.WriteFile(p.CA, resp.Msg.GetCaBundlePem(), 0o644); err != nil {
-		return nil, err
-	}
-	return loadIdentity(p)
+	return zTozsamosci(tozsamosc), nil
 }
 
 func readCABundle(statePath, bootstrapPath string) ([]byte, error) {
