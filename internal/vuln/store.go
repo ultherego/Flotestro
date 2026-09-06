@@ -53,6 +53,9 @@ func (s *Store) ZapiszSnapshot(ctx context.Context, snapshot Snapshot,
 		if err := aktywuj(ctx, tx, snapshot.Provider, identyfikator); err != nil {
 			return "", err
 		}
+		if err := sprzatnijSnapshoty(ctx, tx, snapshot.Provider); err != nil {
+			return "", err
+		}
 		return identyfikator, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -70,20 +73,23 @@ func (s *Store) ZapiszSnapshot(ctx context.Context, snapshot Snapshot,
 	}
 
 	if len(ustalenia) > 0 {
-		wiersze := make([][]any, 0, len(ustalenia))
-		for _, ustalenie := range ustalenia {
-			wiersze = append(wiersze, []any{
+		// Wiersze podajemy po jednym, a nie z gotowej tablicy: feed Red Hata
+		// ma blisko miliona ustalen na wydanie i przepisanie ich najpierw do
+		// pamieci kosztowaloby panel wiecej niz sam zapis.
+		zrodlo := pgx.CopyFromSlice(len(ustalenia), func(i int) ([]any, error) {
+			ustalenie := ustalenia[i]
+			return []any{
 				identyfikator, ustalenie.Provider, ustalenie.AdvisoryID, ustalenie.CVEIDs,
 				ustalenie.Distribution, ustalenie.Release, ustalenie.SourcePackage,
 				ustalenie.BinaryPackage, ustalenie.FixedVersion, ustalenie.Status,
 				ustalenie.VendorSeverity, ustalenie.Title, ustalenie.URL, ustalenie.PublishedAt,
-			})
-		}
+			}, nil
+		})
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"vuln_advisories"}, []string{
 			"snapshot_id", "provider", "advisory_id", "cve_ids", "distribution", "release",
 			"source_package", "binary_package", "fixed_version", "status", "vendor_severity",
 			"title", "url", "published_at",
-		}, pgx.CopyFromRows(wiersze)); err != nil {
+		}, zrodlo); err != nil {
 			return "", fmt.Errorf("zapis ustalen: %w", err)
 		}
 	}
@@ -91,7 +97,30 @@ func (s *Store) ZapiszSnapshot(ctx context.Context, snapshot Snapshot,
 	if err := aktywuj(ctx, tx, snapshot.Provider, identyfikator); err != nil {
 		return "", err
 	}
+	if err := sprzatnijSnapshoty(ctx, tx, snapshot.Provider); err != nil {
+		return "", err
+	}
 	return identyfikator, tx.Commit(ctx)
+}
+
+// SnapshotowNieaktywnych mowi, ile poprzednich pobran zostaje obok aktywnego.
+//
+// Zostaja, bo ocena wskazuje odcisk danych, ktore ja rozstrzygnely, i bez
+// nich nie da sie powiedziec, czemu panel powiedzial to, co powiedzial.
+// Nie zostaja wszystkie, bo jedno pobranie feedu producenta to od
+// kilkudziesieciu tysiecy do miliona ustalen na dobe.
+const SnapshotowNieaktywnych = 2
+
+// sprzatnijSnapshoty kasuje pobrania starsze niz kilka ostatnich.
+func sprzatnijSnapshoty(ctx context.Context, tx pgx.Tx, dostawca string) error {
+	const kasuj = `
+		delete from vuln_snapshots
+		where provider = $1 and not active and id not in (
+		    select id from vuln_snapshots
+		    where provider = $1 and not active
+		    order by fetched_at desc limit $2)`
+	_, err := tx.Exec(ctx, kasuj, dostawca, SnapshotowNieaktywnych)
+	return err
 }
 
 // aktywuj przelacza aktywny snapshot dostawcy jednym ruchem.

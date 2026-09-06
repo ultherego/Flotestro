@@ -48,6 +48,7 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/vuln"
 	debianzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/debian"
+	redhatzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/redhat"
 	ubuntuzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/ubuntu"
 )
 
@@ -169,6 +170,12 @@ func run() error {
 	flag.StringVar(&podatnosci.UbuntuURL, "vulnerability-ubuntu-url",
 		config.Env("FLOTESTRO_VULN_UBUNTU_URL", ubuntuzrodlo.AdresDomyslny),
 		"katalog z danymi OVAL Canonical; pusty wylacza to zrodlo")
+	flag.StringVar(&podatnosci.RedHatURL, "vulnerability-redhat-url",
+		config.Env("FLOTESTRO_VULN_REDHAT_URL", redhatzrodlo.AdresDomyslny),
+		"katalog z danymi CSAF/VEX Red Hata; pusty wylacza to zrodlo")
+	flag.StringVar(&podatnosci.RedHatCache, "vulnerability-redhat-cache",
+		config.Env("FLOTESTRO_VULN_REDHAT_CACHE", redhatzrodlo.KatalogDomyslny),
+		"katalog na odczytane ustalenia Red Hata")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -485,6 +492,10 @@ func run() error {
 		}
 		if podatnosci.UbuntuURL != "" {
 			zrodla = append(zrodla, ubuntuzrodlo.Nowe(podatnosci.UbuntuURL, 10*time.Minute))
+		}
+		if podatnosci.RedHatURL != "" {
+			zrodla = append(zrodla, redhatzrodlo.Nowe(podatnosci.RedHatURL,
+				podatnosci.RedHatCache, 30*time.Minute))
 		}
 		if len(zrodla) == 0 {
 			log.Warn("korelator podatnosci wlaczony, ale nie ma zadnego zrodla")

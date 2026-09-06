@@ -59,6 +59,13 @@ type Podatnosci struct {
 	// UbuntuURL wskazuje katalog z danymi OVAL Canonical; pusty wylacza to
 	// zrodlo.
 	UbuntuURL string
+	// RedHatURL wskazuje katalog z danymi CSAF/VEX Red Hata; pusty wylacza
+	// to zrodlo.
+	RedHatURL string
+	// RedHatCache jest katalogiem, w ktorym panel trzyma odczytane
+	// ustalenia Red Hata miedzy cyklami. Pelne dane to trzysta megabajtow
+	// archiwum, wiec bez pamieci kazdy cykl pobieralby je od nowa.
+	RedHatCache string
 }
 
 // Env odczytuje zmienna srodowiskowa z wartoscia domyslna.

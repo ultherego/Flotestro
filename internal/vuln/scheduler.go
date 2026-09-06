@@ -143,6 +143,12 @@ func UstaleniaZHosta(dystrybucja string) bool {
 }
 
 // Dostawca zwraca nazwe trackera wlasciwego dla dystrybucji hosta.
+//
+// CentOS Stream, AlmaLinux i Rocky nie dostaja trackera Red Hata, choc
+// pakiety maja te same nazwy: ich wersje sa wlasne (przebudowa dokleja swoj
+// sufiks, Stream idzie przed RHEL-em), wiec ustalenie Red Hata mowiloby o
+// czym innym. Do czasu, az panel przeczyta ich wlasne zrodla, ich hosty maja
+// dostawac powod "brak feedu" - to jest uczciwsza odpowiedz niz cudza ocena.
 func Dostawca(dystrybucja string) string {
 	switch strings.ToLower(dystrybucja) {
 	case "debian":
@@ -151,7 +157,7 @@ func Dostawca(dystrybucja string) string {
 		return "ubuntu"
 	case "fedora":
 		return "fedora"
-	case "rhel", "centos", "almalinux", "rocky":
+	case "rhel":
 		return "redhat"
 	}
 	return ""
@@ -233,7 +239,22 @@ func dystrybucjaHosta(host hosts.Skrot, fragmenty []inventory.Fragment) (string,
 			wydanie = tresc.OS.Version
 		}
 	}
-	return dystrybucja, wydanie
+	return dystrybucja, WydanieTrackera(dystrybucja, wydanie)
+}
+
+// WydanieTrackera sprowadza wydanie hosta do postaci, ktora zna tracker.
+//
+// Red Hat mowi o wydaniu glownym: host zglasza 9.4, a ustalenia dotycza
+// dziewiatki. Bez tego kazdy host RHEL-a wychodzilby jako "wydanie spoza
+// feedu". Debian, Ubuntu i Fedora nazywaja wydania tak samo jak ich hosty.
+func WydanieTrackera(dystrybucja, wydanie string) string {
+	if Dostawca(dystrybucja) != "redhat" {
+		return wydanie
+	}
+	if glowne, _, ok := strings.Cut(wydanie, "."); ok {
+		return glowne
+	}
+	return wydanie
 }
 
 // odciskZInwentarza czyta odcisk listy pakietow zgloszony przez hosta.
