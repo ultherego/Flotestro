@@ -71,6 +71,21 @@ type Snapshot = {
   error?: string;
 };
 
+/** Wzbogacenie: ocena CVSS i opis z bazy upstreamowej.
+ *
+ *  Stoi obok znaleziska, a nie w nim. O tym, czy pakiet jest podatny i co to
+ *  zamyka, mowi wylacznie producent dystrybucji - to jest tylko odpowiedz na
+ *  pytanie "jak grozna jest sama podatnosc". Brak wpisu jest normalny. */
+type SzczegolyCVE = {
+  cve: string;
+  source: string;
+  cvss_score?: number;
+  cvss_severity?: string;
+  cvss_vector?: string;
+  cvss_version?: string;
+  summary?: string;
+};
+
 type Raport = {
   host_id: string;
   state: StanOceny;
@@ -81,7 +96,28 @@ type Raport = {
   snapshot_stale: boolean;
   coverage_percent: number;
   fully_assessed: boolean;
+  cve_details?: Record<string, SzczegolyCVE>;
 };
+
+/** Najwyzsza ocena CVSS sposrod CVE jednego znaleziska.
+ *
+ *  Jedno ustalenie niesie czasem kilka CVE i to najgrozniejsze z nich decyduje
+ *  o tym, jak pilna jest sprawa. */
+function najwyzszaOcena(
+  pozycja: Ustalenie,
+  szczegoly?: Record<string, SzczegolyCVE>,
+): SzczegolyCVE | undefined {
+  if (!szczegoly) return undefined;
+  let najlepsza: SzczegolyCVE | undefined;
+  for (const numer of pozycja.cve_ids ?? []) {
+    const wpis = szczegoly[numer];
+    if (wpis?.cvss_score === undefined) continue;
+    if (najlepsza?.cvss_score === undefined || wpis.cvss_score > najlepsza.cvss_score) {
+      najlepsza = wpis;
+    }
+  }
+  return najlepsza;
+}
 
 /** Powody, dla ktorych ocena jest niepelna - w jezyku operatora, nie kodow. */
 const powody: Record<string, string> = {
@@ -226,7 +262,7 @@ export function Podatnosci() {
         <table>
           <thead>
             <tr>
-              <th>Severity</th><th>Advisory</th><th>Package</th>
+              <th>Severity</th><th>CVSS</th><th>Advisory</th><th>Package</th>
               <th>Installed</th><th>Compared</th><th>Fixed in</th>
               <th>Vendor fix</th><th>In repositories</th>
             </tr>
@@ -235,6 +271,13 @@ export function Podatnosci() {
             {widoczne.slice(0, 300).map((pozycja, indeks) => (
               <tr key={`${pozycja.advisory_id}-${pozycja.binary_package}-${pozycja.installed_version}-${indeks}`}>
                 <td><ZnacznikWagi waga={pozycja.vendor_severity} /></td>
+                {/* Ocena upstreamowa stoi obok wagi producenta, a nie zamiast
+                    niej: producent zna swoja dystrybucje, a CVSS mowi o samej
+                    podatnosci. Gdy wzbogacenia nie ma, kolumna jest pusta
+                    i nic to nie zmienia w ocenie. */}
+                <td className="zrodlo" title={najwyzszaOcena(pozycja, dane?.cve_details)?.cvss_vector}>
+                  {najwyzszaOcena(pozycja, dane?.cve_details)?.cvss_score?.toFixed(1) ?? "—"}
+                </td>
                 <td>
                   {pozycja.advisory_id}
                   {pozycja.cve_ids?.length ? (

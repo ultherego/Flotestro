@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"time"
@@ -42,6 +43,39 @@ type raportPodatnosci struct {
 	// w pokryciu, z feedem obejmujacym wszystkie pakiety i bez ani jednego
 	// pakietu nieustalonego. Pusty powod sam w sobie tego nie znaczy.
 	FullyAssessed bool `json:"fully_assessed"`
+	// CVEDetails sa wzbogaceniem: ocena CVSS i opis podatnosci z bazy
+	// upstreamowej. Stoja obok znalezisk, a nie w nich, bo niczego w nich
+	// nie zmieniaja - o tym, czy pakiet jest podatny, mowi wylacznie
+	// producent dystrybucji. Brak wpisu jest normalny.
+	CVEDetails map[string]vuln.SzczegolyCVE `json:"cve_details,omitempty"`
+}
+
+// szczegolyCVE dobiera wzbogacenie do znalezisk.
+//
+// Bezglosnie: brak opisow nie moze przeszkodzic w pokazaniu oceny, bo ocena
+// z nich nie korzysta. Gdy zrodla wzbogacajacego nie ma albo odczyt sie nie
+// uda, zakladka pokazuje to samo co zawsze, tylko bez wagi upstreamowej.
+func (s *Server) szczegolyCVE(ctx context.Context, ustalenia []vuln.Assessment) map[string]vuln.SzczegolyCVE {
+	widziane := map[string]bool{}
+	numery := make([]string, 0, len(ustalenia))
+	for _, ustalenie := range ustalenia {
+		for _, numer := range ustalenie.CVEIDs {
+			if numer == "" || widziane[numer] {
+				continue
+			}
+			widziane[numer] = true
+			numery = append(numery, numer)
+		}
+	}
+	if len(numery) == 0 {
+		return nil
+	}
+	szczegoly, err := s.podatnosci.Szczegoly(ctx, numery)
+	if err != nil {
+		s.log.Error("nie odczytano opisow podatnosci", "err", err)
+		return nil
+	}
+	return szczegoly
 }
 
 // handleHostVulnerabilities zwraca ustalenia i pokrycie oceny hosta.
@@ -91,6 +125,7 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 	}
 	raport.CoveragePercent = raport.State.Pokrycie() * 100
 	raport.FullyAssessed = raport.State.PelnaOcena()
+	raport.CVEDetails = s.szczegolyCVE(r.Context(), raport.Findings)
 	if raport.State.Provider != "" {
 		if snapshot, err := s.podatnosci.AktywnySnapshot(r.Context(), raport.State.Provider); err == nil {
 			raport.Snapshot = &snapshot

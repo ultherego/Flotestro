@@ -84,6 +84,9 @@ type AgentService struct {
 	relays *relays.Store
 	// events rozglasza postep operacji do otwartych ekranow panelu.
 	events *events.Bus
+	// odswiezOcene prosi korelator o przeliczenie hosta poza kolejnoscia.
+	// Puste, gdy korelator jest wylaczony.
+	odswiezOcene func(hostID string)
 	// files trzyma stan docelowy plikow konfiguracyjnych. Zapisujemy go
 	// dopiero po udanej operacji: panel nie moze twierdzic, ze zarzadza
 	// plikiem, ktorego host nie przyjal.
@@ -131,6 +134,14 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 		proby: map[string]kontekstZadania{},
 	}
+}
+
+// SetOdswiezenieOceny podlacza prosbe o przeliczenie oceny podatnosci.
+//
+// Opcjonalne: bez korelatora gateway dziala tak samo, tylko nikt nie czeka
+// na te dane.
+func (s *AgentService) SetOdswiezenieOceny(odswiez func(hostID string)) {
+	s.odswiezOcene = odswiez
 }
 
 // SetEvents podlacza magistrale zdarzen. Bez niej agent dziala tak samo,
@@ -1957,6 +1968,13 @@ func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID st
 	}
 	s.log.Info("zapisano liste pakietow", "host_id", hostID,
 		"pakietow", len(pakiety), "ustalen", len(ustalenia), "odcisk", stan.Digest)
+
+	// Ocena ma nadazac za tym, co ja rozstrzyga. Host, ktory wlasnie
+	// odpowiedzial na prosbe o odczyt, nie moze do nastepnego cyklu widniec
+	// jako host bez listy albo z ustaleniami sprzed polowy doby.
+	if s.odswiezOcene != nil {
+		s.odswiezOcene(hostID)
+	}
 }
 
 // ustaleniaZWyniku rozpakowuje ustalenia producenta z wyniku odczytu.

@@ -66,6 +66,16 @@ type Podatnosci struct {
 	// ustalenia Red Hata miedzy cyklami. Pelne dane to trzysta megabajtow
 	// archiwum, wiec bez pamieci kazdy cykl pobieralby je od nowa.
 	RedHatCache string
+	// NVDURL wskazuje API bazy NVD; pusty wylacza wzbogacanie. To zrodlo
+	// niczego nie rozstrzyga - doklada tylko ocene CVSS i opis podatnosci.
+	NVDURL string
+	// NVDKey jest kluczem API do NVD. Bez klucza wolno wykonac piec zadan
+	// na trzydziesci sekund, wiec pierwszy odczyt trwa okolo dwudziestu
+	// minut; z kluczem kilka minut.
+	NVDKey string
+	// NVDInterval mowi, jak czesto panel pyta NVD o zmiany. Rzadziej niz
+	// o podatnosci: te dane nie zmieniaja ani jednej odpowiedzi o hostach.
+	NVDInterval time.Duration
 }
 
 // Env odczytuje zmienna srodowiskowa z wartoscia domyslna.

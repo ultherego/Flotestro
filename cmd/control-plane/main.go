@@ -48,6 +48,7 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/vuln"
 	debianzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/debian"
+	nvdzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/nvd"
 	redhatzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/redhat"
 	ubuntuzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/ubuntu"
 )
@@ -176,6 +177,15 @@ func run() error {
 	flag.StringVar(&podatnosci.RedHatCache, "vulnerability-redhat-cache",
 		config.Env("FLOTESTRO_VULN_REDHAT_CACHE", redhatzrodlo.KatalogDomyslny),
 		"katalog na odczytane ustalenia Red Hata")
+	flag.StringVar(&podatnosci.NVDURL, "vulnerability-nvd-url",
+		config.Env("FLOTESTRO_VULN_NVD_URL", nvdzrodlo.AdresDomyslny),
+		"API bazy NVD do wzbogacania opisow; puste wylacza")
+	flag.StringVar(&podatnosci.NVDKey, "vulnerability-nvd-key",
+		config.Env("FLOTESTRO_VULN_NVD_KEY", ""),
+		"klucz API do NVD; bez niego pierwszy odczyt trwa okolo dwudziestu minut")
+	flag.DurationVar(&podatnosci.NVDInterval, "vulnerability-nvd-interval",
+		config.EnvDuration("FLOTESTRO_VULN_NVD_INTERVAL", 6*time.Hour),
+		"jak czesto panel pyta NVD o zmiany opisow")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -506,11 +516,27 @@ func run() error {
 			}
 			log.Info("korelator podatnosci uruchomiony", "zrodla", nazwy,
 				"odstep", podatnosci.SyncInterval, "maksymalny_wiek", podatnosci.MaxSnapshotAge)
-			go vuln.NowyHarmonogram(vulnStore, packageStore, hostStore, inventoryStore,
-				jobStore, zrodla, vuln.Ustawienia{
+			harmonogram := vuln.NowyHarmonogram(vulnStore, packageStore, hostStore,
+				inventoryStore, jobStore, zrodla, vuln.Ustawienia{
 					Interval:       podatnosci.SyncInterval,
 					MaxSnapshotAge: podatnosci.MaxSnapshotAge,
-				}, log).Run(ctx)
+				}, log)
+			// Host, ktory wlasnie przyslal liste pakietow albo ustalenia
+			// swoich repozytoriow, dostaje przeliczenie od razu. Inaczej
+			// przez pol godziny widnialby jako host, o ktorym panel nic nie
+			// wie - choc wlasnie mu odpowiedzial.
+			agentService.SetOdswiezenieOceny(harmonogram.Odswiez)
+			go harmonogram.Run(ctx)
+		}
+		// Wzbogacanie idzie osobnym, rzadszym cyklem i osobna droga: opisy
+		// z NVD nie zmieniaja ani jednej odpowiedzi o hostach, wiec ich brak
+		// nie moze wstrzymac oceny.
+		if podatnosci.NVDURL != "" {
+			log.Info("wzbogacanie opisow podatnosci uruchomione", "zrodlo", nvdzrodlo.Dostawca,
+				"odstep", podatnosci.NVDInterval, "klucz_api", podatnosci.NVDKey != "")
+			go vuln.NowyWzbogacacz(vulnStore,
+				nvdzrodlo.Nowy(podatnosci.NVDURL, podatnosci.NVDKey, 5*time.Minute),
+				podatnosci.NVDInterval, log).Run(ctx)
 		}
 	}
 

@@ -37,6 +37,11 @@ type Ustawienia struct {
 	// nieswieze. Nie zatrzymuje to oceny - dane sprzed doby sa lepsze niz ich
 	// brak - ale musi byc widoczne obok wyniku.
 	MaxSnapshotAge time.Duration
+	// Debounce mowi, jak dlugo zbieramy prosby o przeliczenie hosta, zanim
+	// je wykonamy. Host melduje liste pakietow i ustalenia osobno, a kilka
+	// hostow potrafi odpowiedziec naraz - jedno przeliczenie dla calej
+	// grupy kosztuje tyle, co jedno dla pierwszego z nich.
+	Debounce time.Duration
 	// MaxAdvisoryAge jest wiekiem, po ktorym panel prosi hosta o ponowny
 	// odczyt metadanych jego repozytoriow.
 	//
@@ -51,7 +56,7 @@ type Ustawienia struct {
 func Domyslne() Ustawienia {
 	return Ustawienia{
 		Interval: 30 * time.Minute, MaxSnapshotAge: 6 * time.Hour,
-		MaxAdvisoryAge: 30 * time.Minute,
+		MaxAdvisoryAge: 30 * time.Minute, Debounce: 15 * time.Second,
 	}
 }
 
@@ -65,6 +70,10 @@ type Harmonogram struct {
 	zrodla     []Zrodlo
 	ustawienia Ustawienia
 	log        *slog.Logger
+	// odswiezenia niosa hosty, ktore wlasnie przyslaly nowe dane. Ocena ma
+	// nadazac za tym, co ja rozstrzyga: host, ktory odpowiedzial na prosbe
+	// o odczyt, nie moze przez pol godziny widniec jako host bez odczytu.
+	odswiezenia chan string
 }
 
 // NowyHarmonogram tworzy harmonogram korelatora.
@@ -80,9 +89,30 @@ func NowyHarmonogram(store *Store, pakiety *MagazynPakietow, hostStore *hosts.St
 	if ustawienia.MaxAdvisoryAge <= 0 {
 		ustawienia.MaxAdvisoryAge = Domyslne().MaxAdvisoryAge
 	}
+	if ustawienia.Debounce <= 0 {
+		ustawienia.Debounce = Domyslne().Debounce
+	}
 	return &Harmonogram{
 		store: store, pakiety: pakiety, hosts: hostStore, inventory: inventoryStore,
 		jobs: jobStore, zrodla: zrodla, ustawienia: ustawienia, log: log,
+		odswiezenia: make(chan string, 1024),
+	}
+}
+
+// Odswiez prosi o przeliczenie oceny hosta poza kolejnoscia.
+//
+// Wolane przez gateway, gdy host przysle liste pakietow albo ustalenia swoich
+// repozytoriow. Prosba jest tylko prosba: gdy kolejka jest pelna, host
+// poczeka na zwykly cykl - to jest gorsze o kilkanascie minut, a nie
+// o odpowiedz.
+func (h *Harmonogram) Odswiez(hostID string) {
+	if hostID == "" {
+		return
+	}
+	select {
+	case h.odswiezenia <- hostID:
+	default:
+		h.log.Debug("kolejka odswiezen oceny pelna", "host_id", hostID)
 	}
 }
 
@@ -93,14 +123,82 @@ func (h *Harmonogram) Run(ctx context.Context) {
 	h.Cykl(ctx)
 	ticker := time.NewTicker(h.ustawienia.Interval)
 	defer ticker.Stop()
+
+	// Prosby o przeliczenie zbieramy przez chwile i wykonujemy razem. Host
+	// odpowiada na liste pakietow i na ustalenia osobno, a odczyt ustalen
+	// feedu dla jednego wydania to nawet milion wierszy - nie ma powodu
+	// robic tego dwa razy pod rzad.
+	czekajace := map[string]bool{}
+	var zwloka *time.Timer
+	var sygnal <-chan time.Time
+	defer func() {
+		if zwloka != nil {
+			zwloka.Stop()
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			h.Cykl(ctx)
+		case hostID := <-h.odswiezenia:
+			czekajace[hostID] = true
+			if zwloka == nil {
+				zwloka = time.NewTimer(h.ustawienia.Debounce)
+				sygnal = zwloka.C
+			}
+		case <-sygnal:
+			identyfikatory := make([]string, 0, len(czekajace))
+			for hostID := range czekajace {
+				identyfikatory = append(identyfikatory, hostID)
+			}
+			czekajace = map[string]bool{}
+			zwloka, sygnal = nil, nil
+			h.PrzeliczHosty(ctx, identyfikatory)
 		}
 	}
+}
+
+// PrzeliczHosty przelicza ocene wskazanych hostow.
+func (h *Harmonogram) PrzeliczHosty(ctx context.Context, identyfikatory []string) {
+	if len(identyfikatory) == 0 {
+		return
+	}
+	opisy, err := h.opisyWskazanych(ctx, identyfikatory)
+	if err != nil {
+		h.log.Error("nie odczytano hostow do przeliczenia oceny", "err", err)
+		return
+	}
+	h.Przelicz(ctx, opisy)
+}
+
+// opisyWskazanych zbiera to, czego ocena potrzebuje o wskazanych hostach.
+func (h *Harmonogram) opisyWskazanych(ctx context.Context,
+	identyfikatory []string) ([]OpisHosta, error) {
+	fragmenty, err := h.inventory.FragmentyHostow(ctx, identyfikatory)
+	if err != nil {
+		return nil, err
+	}
+	opisy := make([]OpisHosta, 0, len(identyfikatory))
+	for _, hostID := range identyfikatory {
+		host, err := h.hosts.Get(ctx, hostID)
+		if err != nil || host == nil {
+			// Host skasowany miedzy prosba a przeliczeniem nie jest bledem
+			// przegladu: po prostu go nie ma.
+			continue
+		}
+		skrot := hosts.Skrot{
+			ID: host.ID, Hostname: host.Hostname,
+			OSDistribution: host.OSDistribution, OSVersion: host.OSVersion,
+		}
+		opis := OpisHosta{ID: host.ID, Hostname: host.Hostname}
+		opis.Distribution, opis.Release = dystrybucjaHosta(skrot, fragmenty[host.ID])
+		opis.InventoryDigest, opis.InventoryReason = odciskZInwentarza(fragmenty[host.ID])
+		opisy = append(opisy, opis)
+	}
+	return opisy, nil
 }
 
 // Cykl wykonuje jedno przejscie: synchronizacje feedow i ocene hostow.

@@ -72,6 +72,8 @@ type raportPodatnosciView struct {
 		AdvisoryCount int      `json:"advisory_count"`
 		Releases      []string `json:"releases"`
 	} `json:"snapshot"`
+	// CVEDetails jest wzbogaceniem: ocena CVSS i opis z bazy upstreamowej.
+	CVEDetails map[string]szczegolyCVEView `json:"cve_details"`
 	CoveragePercent float64 `json:"coverage_percent"`
 	FullyAssessed   bool    `json:"fully_assessed"`
 }
@@ -97,6 +99,17 @@ type flotaPodatnosciView struct {
 }
 
 var wzorzecCVE = regexp.MustCompile(`^CVE-\d{4}-\d{4,}$`)
+
+// szczegolyCVEView odwzorowuje wzbogacenie jednego numeru CVE.
+type szczegolyCVEView struct {
+	CVE          string   `json:"cve"`
+	Source       string   `json:"source"`
+	CVSSScore    *float64 `json:"cvss_score"`
+	CVSSSeverity string   `json:"cvss_severity"`
+	CVSSVector   string   `json:"cvss_vector"`
+	CVSSVersion  string   `json:"cvss_version"`
+	Summary      string   `json:"summary"`
+}
 
 // podatnosciHosta czyta ocene hosta.
 func podatnosciHosta(h *harness, hostID string) raportPodatnosciView {
@@ -429,6 +442,54 @@ func TestFlotaLiczyUnikatyOsobno(t *testing.T) {
 			t.Errorf("host %s: pelna ocena = %v przy %d/%d pakietow",
 				pozycja.HostID[:8], pozycja.FullyAssessed,
 				pozycja.PackagesCovered, pozycja.PackagesTotal)
+		}
+	}
+}
+
+// TestWzbogacenieDokladaOceneAleNieRozstrzyga pilnuje, ze dane upstreamowe
+// docieraja do zakladki hosta i ze nic w ocenie nie zmieniaja.
+//
+// Waga producenta i ocena CVSS to dwie rozne odpowiedzi: producent zna swoja
+// dystrybucje, a CVSS mowi o samej podatnosci. Panel ma pokazac obie i nie
+// pozwolic drugiej podmienic pierwszej.
+func TestWzbogacenieDokladaOceneAleNieRozstrzyga(t *testing.T) {
+	h := newHarness(t)
+	_, raport := hostDystrybucji(h, "debian")
+	if len(raport.CVEDetails) == 0 {
+		t.Fatal("zakladka hosta bez ani jednego opisu podatnosci - wzbogacanie nie dojechalo")
+	}
+
+	zOcena := 0
+	for numer, wpis := range raport.CVEDetails {
+		if !wzorzecCVE.MatchString(numer) {
+			t.Errorf("opis pod kluczem %q, ktory nie jest numerem CVE", numer)
+		}
+		if wpis.Source == "" {
+			t.Errorf("%s: opis bez wskazania zrodla", numer)
+		}
+		if wpis.CVSSScore == nil {
+			continue
+		}
+		zOcena++
+		if *wpis.CVSSScore < 0 || *wpis.CVSSScore > 10 {
+			t.Errorf("%s: ocena CVSS = %v", numer, *wpis.CVSSScore)
+		}
+		if wpis.CVSSVector == "" || wpis.CVSSVersion == "" {
+			t.Errorf("%s: ocena bez wektora albo wersji: %+v", numer, wpis)
+		}
+	}
+	if zOcena == 0 {
+		t.Fatal("ani jeden opis nie niesie oceny CVSS")
+	}
+
+	// Ustalenia zostaja takie, jakie wydal producent: wzbogacenie stoi obok
+	// nich, a nie w nich.
+	for _, ustalenie := range raport.Findings {
+		if ustalenie.State != "affected" {
+			continue
+		}
+		if ustalenie.Provider == "nvd" {
+			t.Fatalf("znalezisko rozstrzygniete przez zrodlo wzbogacajace: %+v", ustalenie)
 		}
 	}
 }
