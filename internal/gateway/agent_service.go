@@ -201,6 +201,7 @@ func (s *AgentService) Connect(ctx context.Context,
 
 	session := NewSession(uuid.NewString(), hostID, hello.GetAgentVersion(),
 		hello.GetBootId(), remoteAddr(ctx), 32)
+	session.RelayID = relayID
 	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}

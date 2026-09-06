@@ -37,6 +37,51 @@ service AgentService {
   rpc FetchSecret(FetchSecretRequest) returns (FetchSecretResponse);
 }
 
+// RelayService obsluguje relaye lokalizacji. Jest osobna usluga, bo relay
+// jest osobna granica zaufania: jego certyfikat ma inny rodzaj tozsamosci
+// i inny czas zycia, a operacje hosta nie sa dla niego dostepne.
+//
+// Odnowienie certyfikatu agenta nie moze obsluzyc relaya: tamto RPC oczekuje
+// tozsamosci hosta w URI SAN i slusznie odrzuca wszystko inne.
+service RelayService {
+  // RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
+  // pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
+  rpc RenewCertificate(RenewRelayCertificateRequest) returns (RenewRelayCertificateResponse);
+  // Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
+  rpc Ping(RelayPingRequest) returns (RelayPingResponse);
+}
+
+message RenewRelayCertificateRequest {
+  // ClientRequestId czyni ponowienie idempotentnym: zerwane polaczenie po
+  // wystawieniu certyfikatu nie moze zostawic relaya bez tozsamosci ani
+  // wygenerowac drugiej.
+  string client_request_id = 1;
+  bytes csr_pem = 2;
+  AgentBuild build = 3;
+  // AdvertisedNames sa zyczeniem, a nie deklaracja. Centrala wystawia
+  // wylacznie te nazwy, ktore relay ma zapisane w rejestrze: zmiana nazw
+  // jest decyzja operatora, nie odnowieniem certyfikatu.
+  repeated string advertised_names = 4;
+}
+
+message RenewRelayCertificateResponse {
+  bytes certificate_pem = 1;
+  // ClientCaBundlePem sluzy relayowi do weryfikacji certyfikatow agentow
+  // jego lokalizacji. Rotacja CA floty dochodzi do relaya ta droga, zanim
+  // nowy issuer zacznie wystawiac certyfikaty hostom.
+  bytes client_ca_bundle_pem = 2;
+  google.protobuf.Timestamp not_after = 3;
+}
+
+message RelayPingRequest {}
+
+message RelayPingResponse {
+  google.protobuf.Timestamp server_time = 1;
+  // Sesje mowi, ilu agentow centrala widzi jako polaczonych przez ten relay.
+  // Rozjazd z liczba lokalna jest pierwszym objawem sesji, ktora zawisla.
+  uint32 sessions = 2;
+}
+
 message FetchSecretRequest {
   // TaskId wiaze pobranie z konkretnym zadaniem: dzierzawa jest wystawiona
   // dla niego i dla tego hosta.

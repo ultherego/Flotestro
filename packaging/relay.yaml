@@ -1,0 +1,42 @@
+# Konfiguracja relaya Flotestro.
+#
+# Relay jest opcjonalnym komponentem lokalizacji i osobna granica zaufania:
+# konczy polaczenie agenta i sam swiadczy centrali, czyj to ruch. Dlatego ma
+# wlasny plik, wlasne konto uslugowe i wlasny katalog stanu.
+#
+# Czego tu nie ma i nie moze byc:
+#   - tokenu enrollmentu - to sekret jednorazowy, a ten plik przezywa
+#     aktualizacje pakietu i trafia do kopii zapasowych,
+#   - tozsamosci relaya - bierze sie ona z certyfikatu, a nie z tekstu.
+schema_version: 1
+
+relay:
+  # Nazwa relaya. Jest kluczem naturalnym w rejestrze centrali: ponowna
+  # instalacja tej samej nazwy odswieza wpis, a nie tworzy drugi.
+  name: ""
+
+  # Wartosc oczekiwana. Zakres nadaje token enrollmentu i to on rozstrzyga;
+  # rozjazd oznacza, ze plik opisuje inna lokalizacje niz certyfikat.
+  site: ""
+
+  # Relay dziala bez uprawnien roota, wiec port jest powyzej 1024.
+  listen: "0.0.0.0:8453"
+
+  # Nazwy, pod ktorymi agenci lokalizacji widza relay. Wchodza do certyfikatu
+  # serwerowego; zmiana nazw wymaga decyzji operatora w panelu, bo odnowienie
+  # wystawia wylacznie to, co centrala ma zapisane w rejestrze.
+  advertised_names: []
+
+  state_dir: "/var/lib/flotestro-relay"
+
+  # Limit bufora wynikow na czas awarii lacza do centrali. Zero znaczy
+  # "nie buforuj": wyniki z czasu awarii przepadaja wtedy swiadomie.
+  buffer_max_bytes: 268435456
+
+upstream:
+  enrollment_url: ""
+  # Bramy centrali w kolejnosci priorytetu.
+  gateway_urls: []
+  # Bundle CA floty do pierwszego polaczenia. Po enrollmencie relay uzywa
+  # kopii zapisanej w katalogu stanu.
+  bootstrap_ca_file: "/var/lib/flotestro-relay/ca.pem"

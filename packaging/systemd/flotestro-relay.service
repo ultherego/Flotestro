@@ -1,0 +1,46 @@
+[Unit]
+Description=Flotestro site relay
+Documentation=https://github.com/ultherego/flotestro
+After=network-online.target
+Wants=network-online.target
+
+# Relay bez konfiguracji i bez tozsamosci nie ma dokad sie polaczyc ani czym
+# przedstawic agentom. Petla restartow zasmiecalaby dziennik maszyny, ktora
+# po prostu czeka na rejestracje.
+ConditionPathExists=/etc/flotestro/relay.yaml
+ConditionPathExists=/var/lib/flotestro-relay/identity/current/agent.pem
+
+[Service]
+Type=simple
+User=flotestro-relay
+Group=flotestro-relay
+ExecStart=/usr/bin/flotestro-relay run --config /etc/flotestro/relay.yaml
+Restart=on-failure
+RestartSec=5s
+
+# Relay konczy TLS calej lokalizacji i nie wykonuje operacji na hoscie:
+# nie ma tu helpera i nie ma po co dawac wiecej uprawnien.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+StateDirectory=flotestro-relay
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/flotestro-relay
+
+# Bufor wynikow ma limit w konfiguracji, ale limit procesu jest twardszy:
+# awaria lacza nie moze zamienic sie w awarie maszyny lokalizacji.
+LimitNOFILE=131072
+MemoryHigh=512M
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

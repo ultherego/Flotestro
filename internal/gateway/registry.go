@@ -23,6 +23,10 @@ type Session struct {
 	BootID       string
 	RemoteAddr   string
 	StartedAt    time.Time
+	// RelayID jest pusty przy polaczeniu bezposrednim. Panel musi umiec
+	// powiedziec, ktory relay poswiadczyl tozsamosc hosta: to dwie rozne
+	// podstawy zaufania, a nie szczegol trasy.
+	RelayID string
 
 	// outbound jest jedyna droga wysylki do agenta. Stream nie jest bezpieczny
 	// dla rownoleglych Send, wiec pisze do niego wylacznie jedna goroutine.
@@ -157,6 +161,25 @@ func (r *Registry) ConnectedHosts() []string {
 		hosts = append(hosts, hostID)
 	}
 	return hosts
+}
+
+// SesjeRelaya liczy sesje poswiadczone przez wskazany relay.
+//
+// Relay porownuje te liczbe ze swoja: rozjazd oznacza sesje, ktora zawisla po
+// jednej stronie, a tego nie widac z zadnej strony osobno.
+func (r *Registry) SesjeRelaya(relayID string) int {
+	if relayID == "" {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var ile int
+	for _, session := range r.sessions {
+		if session.RelayID == relayID {
+			ile++
+		}
+	}
+	return ile
 }
 
 func (r *Registry) Count() int {

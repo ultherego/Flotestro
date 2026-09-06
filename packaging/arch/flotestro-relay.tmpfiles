@@ -1,0 +1,3 @@
+# Katalog stanu nalezy do relaya i jest zamkniety dla reszty systemu: leza
+# w nim klucz prywatny i tozsamosc relaya.
+d /var/lib/flotestro-relay 0700 flotestro-relay flotestro-relay -

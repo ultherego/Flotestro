@@ -50,7 +50,7 @@ zbudujBinarki() {
     echo "==> binarki $arch"
     rm -rf "$stage"
     mkdir -p "$stage"
-    for skladnik in agent agent-helper agentctl control-plane; do
+    for skladnik in agent agent-helper agentctl relay control-plane; do
         # CGO wylaczone: pakiet ma dzialac na kazdej maszynie danej
         # architektury, a nie tylko na tej, ktora ma te same biblioteki.
         # -trimpath usuwa sciezki maszyny budujacej, zeby ta sama binarka
@@ -81,7 +81,7 @@ zbudujPakiety() {
     [ -d "$stage" ] || { echo "brak binarek w $stage" >&2; exit 1; }
     if command -v dpkg-deb >/dev/null; then
         echo "==> pakiety .deb $arch"
-        for skladnik in agent control-plane; do
+        for skladnik in agent relay control-plane; do
             "$here/build-deb.sh" "$skladnik" "$stage" "$WERSJA" "$arch" "$WYNIK" >/dev/null
         done
         zbudowano=true
@@ -89,8 +89,11 @@ zbudujPakiety() {
     if command -v makepkg >/dev/null; then
         # makepkg pakuje gotowe pliki, wiec architektura jest kwestia nazwy
         # pakietu, a nie maszyny budujacej.
-        echo "==> pakiet pacman $(nazwaARCH "$arch")"
-        "$here/build-arch.sh" "$stage" "$WERSJA" "$(nazwaARCH "$arch")" "$WYNIK" >/dev/null
+        echo "==> pakiety pacman $(nazwaARCH "$arch")"
+        for skladnik in agent relay; do
+            "$here/build-arch.sh" "$skladnik" "$stage" "$WERSJA" \
+                "$(nazwaARCH "$arch")" "$WYNIK" >/dev/null
+        done
         zbudowano=true
     fi
     if command -v rpmbuild >/dev/null; then
@@ -100,7 +103,7 @@ zbudujPakiety() {
         # o tym wprost, zamiast wydawac wydanie niepelne po cichu.
         if [ "$(nazwaRPM "$arch")" = "$(uname -m)" ]; then
             echo "==> pakiety .rpm $(nazwaRPM "$arch")"
-            for skladnik in agent control-plane; do
+            for skladnik in agent relay control-plane; do
                 "$here/build-rpm.sh" "$skladnik" "$stage" "$WERSJA" "$(nazwaRPM "$arch")" "$WYNIK" >/dev/null
             done
             zbudowano=true

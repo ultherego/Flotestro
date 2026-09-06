@@ -1,0 +1,3 @@
+# Konto uslugowe relaya. Osobne od konta agenta: na maszynie relaya moze stac
+# takze zwykly agent, a jego tozsamosc nie moze byc czytelna dla relaya.
+u flotestro-relay - "Flotestro relay" /var/lib/flotestro-relay /usr/bin/nologin

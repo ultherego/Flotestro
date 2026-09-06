@@ -193,6 +193,10 @@ type IssuedCert struct {
 	// Wystawca pozwala policzyc, ilu hostow dotyczy wycofanie danego CA.
 	IssuerSubject string
 	IssuerSerial  string
+	// Nazwy sieciowe wystawione w certyfikacie. Puste dla hostow: tylko
+	// relay wystepuje wobec kogokolwiek jako serwer.
+	DNSNames    []string
+	IPAddresses []string
 }
 
 // relayCertTTL jest krotszy niz czas zycia certyfikatu agenta. Relay stoi
@@ -204,20 +208,31 @@ const relayCertTTL = 7 * 24 * time.Hour
 // hosta: relay nie jest agentem i nie moze podszyc sie pod host samym
 // certyfikatem, bo panel czyta rodzaj tozsamosci z URI SAN.
 func (ca *CA) SignRelayCSR(csrPEM []byte, relayID string) (*IssuedCert, error) {
-	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL)
+	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, nil)
+}
+
+// SignRelayCSRZNazwami wystawia certyfikat relaya z nazwami wskazanymi przez
+// panel zamiast tych z CSR.
+//
+// Odnowienie idzie ta droga: nazwy sieciowe sa granica zaufania wobec agentow
+// lokalizacji, wiec przy odnowieniu pochodza z rejestru, a nie z zadania.
+// Relay, ktory chce wystepowac pod nowa nazwa, potrzebuje decyzji operatora.
+func (ca *CA) SignRelayCSRZNazwami(csrPEM []byte, relayID string, nazwy []string) (*IssuedCert, error) {
+	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, nazwy)
 }
 
 // SignAgentCSR podpisuje CSR agenta, osadzajac tozsamosc hosta w URI SAN.
 // Wszystkie pola podmiotu pochodzace z CSR sa ignorowane poza kluczem
 // publicznym: tozsamosc nadaje control plane, nie zglaszajacy sie host.
 func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
-	return ca.signCSR(csrPEM, "host", hostID, ca.agentCertTTL())
+	return ca.signCSR(csrPEM, "host", hostID, ca.agentCertTTL(), nil)
 }
 
 // signCSR wystawia certyfikat tozsamosci floty. Rodzaj tozsamosci wchodzi
 // do URI SAN, wiec nie da sie uzyc certyfikatu relaya jako certyfikatu hosta
 // ani odwrotnie.
-func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration) (*IssuedCert, error) {
+func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
+	nazwy []string) (*IssuedCert, error) {
 	block, _ := pem.Decode(csrPEM)
 	if block == nil {
 		return nil, fmt.Errorf("CSR nie zawiera bloku PEM")
@@ -253,12 +268,22 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration) (*Issue
 		template.ExtKeyUsage = append(template.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 		template.DNSNames = csr.DNSNames
 		template.IPAddresses = csr.IPAddresses
+		if nazwy != nil {
+			// Nazwy narzucone przez panel zastepuja te z CSR w calosci.
+			// Dopisanie ich obok zostawialoby relayowi mozliwosc dolozenia
+			// sobie nazwy, ktorej operator nigdy nie zatwierdzil.
+			template.DNSNames, template.IPAddresses = rozdzielNazwy(nazwy)
+		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, csr.PublicKey, ca.PrivateKey)
 	if err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(der)
+	adresy := make([]string, 0, len(template.IPAddresses))
+	for _, adres := range template.IPAddresses {
+		adresy = append(adresy, adres.String())
+	}
 	return &IssuedCert{
 		PEM:           pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		Serial:        serial.String(),
@@ -268,7 +293,27 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration) (*Issue
 		IssuerSubject: ca.Certificate.Subject.CommonName,
 		IssuerSerial:  ca.Certificate.SerialNumber.String(),
 		CommonName:    id,
+		DNSNames:      template.DNSNames,
+		IPAddresses:   adresy,
 	}, nil
+}
+
+// rozdzielNazwy dzieli nazwy sieciowe na adresy IP i nazwy DNS.
+//
+// Nazwa, ktora jest adresem IP, musi trafic do SAN jako adres: przegladarki
+// i biblioteki TLS nie dopasowuja adresu do wpisu DNS, wiec taki certyfikat
+// wygladalby poprawnie, a agent i tak by go odrzucil.
+func rozdzielNazwy(nazwy []string) ([]string, []net.IP) {
+	var dns []string
+	var adresy []net.IP
+	for _, nazwa := range nazwy {
+		if adres := net.ParseIP(nazwa); adres != nil {
+			adresy = append(adresy, adres)
+			continue
+		}
+		dns = append(dns, nazwa)
+	}
+	return dns, adresy
 }
 
 // HostIDFromCert wyciaga tozsamosc hosta z URI SAN certyfikatu klienta.

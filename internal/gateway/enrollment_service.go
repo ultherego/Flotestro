@@ -244,6 +244,11 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		issued.Fingerprint, issued.NotAfter); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// Nazwy sieciowe z pierwszego CSR staja sie zapisem w rejestrze. Odtad
+	// to panel mowi, jakie nazwy relay poswiadcza; odnowienie ich nie zmienia.
+	if err := s.relays.ZapiszNazwy(ctx, tx, relayID, nazwySieciowe(issued)); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 
 	if err := s.audit.RecordTx(ctx, tx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: name,
@@ -316,4 +321,13 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 		return errors.New("unknown_purpose")
 	}
 	return nil
+}
+
+// nazwySieciowe zbiera nazwy, ktore panel wystawil w certyfikacie relaya.
+//
+// Zrodlem jest wystawiony certyfikat, a nie zadanie: to on rozstrzyga, co
+// relay naprawde poswiadcza wobec agentow swojej lokalizacji.
+func nazwySieciowe(issued *pki.IssuedCert) []string {
+	nazwy := append([]string{}, issued.DNSNames...)
+	return append(nazwy, issued.IPAddresses...)
 }

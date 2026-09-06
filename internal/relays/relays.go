@@ -67,6 +67,35 @@ func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial strin
 	return err
 }
 
+// ZapiszNazwy zapisuje nazwy sieciowe, pod ktorymi relay jest widoczny.
+//
+// Nazwy zostaja w rejestrze, bo to one wchodza do certyfikatu serwerowego
+// przy kazdym odnowieniu. Gdyby pochodzily z zadania, relay przy odnowieniu
+// moglby wziac nazwe cudzej uslugi i stac sie dla agentow czyms innym.
+func (s *Store) ZapiszNazwy(ctx context.Context, tx pgx.Tx, id string, nazwy []string) error {
+	if nazwy == nil {
+		nazwy = []string{}
+	}
+	_, err := tx.Exec(ctx, "update relays set advertised_names = $2 where id = $1", id, nazwy)
+	return err
+}
+
+// Nazwy zwraca zapisane nazwy sieciowe relaya.
+func (s *Store) Nazwy(ctx context.Context, id string) ([]string, error) {
+	var nazwy []string
+	err := s.pool.QueryRow(ctx, "select advertised_names from relays where id = $1", id).Scan(&nazwy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return nazwy, err
+}
+
+// OdnotujOdnowienie zapisuje chwile wymiany certyfikatu relaya.
+func (s *Store) OdnotujOdnowienie(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, "update relays set renewed_at = now() where id = $1", id)
+	return err
+}
+
 // Status opisuje relay przedstawiajacy certyfikat.
 type Status struct {
 	ID          string

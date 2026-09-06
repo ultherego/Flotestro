@@ -25,6 +25,8 @@ const (
 	EnrollmentServiceName = "flotestro.agent.v1.EnrollmentService"
 	// AgentServiceName is the fully-qualified name of the AgentService service.
 	AgentServiceName = "flotestro.agent.v1.AgentService"
+	// RelayServiceName is the fully-qualified name of the RelayService service.
+	RelayServiceName = "flotestro.agent.v1.RelayService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -48,6 +50,11 @@ const (
 	// AgentServiceFetchSecretProcedure is the fully-qualified name of the AgentService's FetchSecret
 	// RPC.
 	AgentServiceFetchSecretProcedure = "/flotestro.agent.v1.AgentService/FetchSecret"
+	// RelayServiceRenewCertificateProcedure is the fully-qualified name of the RelayService's
+	// RenewCertificate RPC.
+	RelayServiceRenewCertificateProcedure = "/flotestro.agent.v1.RelayService/RenewCertificate"
+	// RelayServicePingProcedure is the fully-qualified name of the RelayService's Ping RPC.
+	RelayServicePingProcedure = "/flotestro.agent.v1.RelayService/Ping"
 )
 
 // EnrollmentServiceClient is a client for the flotestro.agent.v1.EnrollmentService service.
@@ -297,4 +304,106 @@ func (UnimplementedAgentServiceHandler) Ping(context.Context, *connect.Request[v
 
 func (UnimplementedAgentServiceHandler) FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.FetchSecret is not implemented"))
+}
+
+// RelayServiceClient is a client for the flotestro.agent.v1.RelayService service.
+type RelayServiceClient interface {
+	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
+	// pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
+	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
+	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
+	Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error)
+}
+
+// NewRelayServiceClient constructs a client for the flotestro.agent.v1.RelayService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewRelayServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RelayServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	relayServiceMethods := v1.File_flotestro_agent_v1_agent_proto.Services().ByName("RelayService").Methods()
+	return &relayServiceClient{
+		renewCertificate: connect.NewClient[v1.RenewRelayCertificateRequest, v1.RenewRelayCertificateResponse](
+			httpClient,
+			baseURL+RelayServiceRenewCertificateProcedure,
+			connect.WithSchema(relayServiceMethods.ByName("RenewCertificate")),
+			connect.WithClientOptions(opts...),
+		),
+		ping: connect.NewClient[v1.RelayPingRequest, v1.RelayPingResponse](
+			httpClient,
+			baseURL+RelayServicePingProcedure,
+			connect.WithSchema(relayServiceMethods.ByName("Ping")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// relayServiceClient implements RelayServiceClient.
+type relayServiceClient struct {
+	renewCertificate *connect.Client[v1.RenewRelayCertificateRequest, v1.RenewRelayCertificateResponse]
+	ping             *connect.Client[v1.RelayPingRequest, v1.RelayPingResponse]
+}
+
+// RenewCertificate calls flotestro.agent.v1.RelayService.RenewCertificate.
+func (c *relayServiceClient) RenewCertificate(ctx context.Context, req *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error) {
+	return c.renewCertificate.CallUnary(ctx, req)
+}
+
+// Ping calls flotestro.agent.v1.RelayService.Ping.
+func (c *relayServiceClient) Ping(ctx context.Context, req *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error) {
+	return c.ping.CallUnary(ctx, req)
+}
+
+// RelayServiceHandler is an implementation of the flotestro.agent.v1.RelayService service.
+type RelayServiceHandler interface {
+	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
+	// pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
+	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
+	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
+	Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error)
+}
+
+// NewRelayServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewRelayServiceHandler(svc RelayServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	relayServiceMethods := v1.File_flotestro_agent_v1_agent_proto.Services().ByName("RelayService").Methods()
+	relayServiceRenewCertificateHandler := connect.NewUnaryHandler(
+		RelayServiceRenewCertificateProcedure,
+		svc.RenewCertificate,
+		connect.WithSchema(relayServiceMethods.ByName("RenewCertificate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	relayServicePingHandler := connect.NewUnaryHandler(
+		RelayServicePingProcedure,
+		svc.Ping,
+		connect.WithSchema(relayServiceMethods.ByName("Ping")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/flotestro.agent.v1.RelayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case RelayServiceRenewCertificateProcedure:
+			relayServiceRenewCertificateHandler.ServeHTTP(w, r)
+		case RelayServicePingProcedure:
+			relayServicePingHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedRelayServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedRelayServiceHandler struct{}
+
+func (UnimplementedRelayServiceHandler) RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.RelayService.RenewCertificate is not implemented"))
+}
+
+func (UnimplementedRelayServiceHandler) Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.RelayService.Ping is not implemented"))
 }

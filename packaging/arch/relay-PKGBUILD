@@ -1,0 +1,32 @@
+# Pakiet relaya dla Archa i pochodnych (CachyOS, EndeavourOS).
+#
+# PKGBUILD nie kompiluje kodu: bierze binarke, ktora juz przeszla testy,
+# dokladnie tak samo jak pakiety .deb i .rpm.
+pkgname=flotestro-relay
+pkgver=__WERSJA__
+pkgrel=1
+pkgdesc='Relay lokalizacji Flotestro'
+arch=('x86_64' 'aarch64')
+url='https://github.com/ultherego/flotestro'
+license=('LicenseRef-Flotestro')
+depends=('systemd' 'ca-certificates')
+# Konfiguracja lokalizacji przezywa aktualizacje pakietu; nowa wersja ladzie
+# obok jako .pacnew.
+backup=('etc/flotestro/relay.yaml')
+install=flotestro-relay.install
+source=(
+  "flotestro-relay"
+  'flotestro-relay.service'
+  'flotestro-relay.sysusers'
+  'flotestro-relay.tmpfiles'
+  'relay.yaml'
+)
+sha256sums=(__SUMY__)
+
+package() {
+  install -Dm755 flotestro-relay          "$pkgdir/usr/bin/flotestro-relay"
+  install -Dm644 flotestro-relay.service  "$pkgdir/usr/lib/systemd/system/flotestro-relay.service"
+  install -Dm644 flotestro-relay.sysusers "$pkgdir/usr/lib/sysusers.d/flotestro-relay.conf"
+  install -Dm644 flotestro-relay.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/flotestro-relay.conf"
+  install -Dm640 relay.yaml               "$pkgdir/etc/flotestro/relay.yaml"
+}

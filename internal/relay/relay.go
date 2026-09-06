@@ -42,7 +42,7 @@ type Options struct {
 // Relay posredniczy miedzy agentami lokalizacji a centrala.
 type Relay struct {
 	options Options
-	client  agentv1connect.AgentServiceClient
+	klient  atomic.Pointer[klientCentrali]
 	buffer  *Buffer
 	log     *slog.Logger
 
@@ -60,11 +60,31 @@ func New(options Options) *Relay {
 	if log == nil {
 		log = slog.Default()
 	}
-	client := agentv1connect.NewAgentServiceClient(
+	relay := &Relay{
+		options: options, log: log,
+		buffer: NewBuffer(options.BufferBytes),
+		sesje:  map[string]context.CancelFunc{},
+	}
+	relay.klient.Store(&klientCentrali{
+		client: klientDoCentrali(options.UpstreamURL, options.Identity, options.TrustPool),
+	})
+	return relay
+}
+
+// klientCentrali opakowuje klienta, zeby dalo sie go podmienic w calosci.
+// atomic.Pointer wymaga konkretnego typu, a klient jest interfejsem.
+type klientCentrali struct {
+	client agentv1connect.AgentServiceClient
+}
+
+// klientDoCentrali sklada klienta uslugi agentow w centrali.
+func klientDoCentrali(adres string, tozsamosc tls.Certificate,
+	zaufanie *x509.CertPool) agentv1connect.AgentServiceClient {
+	return agentv1connect.NewAgentServiceClient(
 		&http.Client{Transport: &http2.Transport{
 			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{options.Identity},
-				RootCAs:      options.TrustPool,
+				Certificates: []tls.Certificate{tozsamosc},
+				RootCAs:      zaufanie,
 				MinVersion:   tls.VersionTLS13,
 			},
 			// Zerwane lacze WAN nie objawia sie bledem wysylki: dane mieszcza
@@ -74,14 +94,27 @@ func New(options Options) *Relay {
 			ReadIdleTimeout: 15 * time.Second,
 			PingTimeout:     10 * time.Second,
 		}},
-		options.UpstreamURL,
+		adres,
 		connect.WithGRPC(),
 	)
-	return &Relay{
-		options: options, client: client, log: log,
-		buffer: NewBuffer(options.BufferBytes),
-		sesje:  map[string]context.CancelFunc{},
-	}
+}
+
+// OdswiezTozsamosc podmienia certyfikat, ktorym relay przedstawia sie
+// centrali.
+//
+// Po odnowieniu stary certyfikat jest jeszcze wazny, ale przestaje byc tym,
+// po ktorym panel rozpoznaje relay. Nowe polaczenia do centrali musza isc
+// nowym; trwajace strumienie zyja do naturalnego konca, wiec agenci nie
+// traca sesji przez samo odnowienie.
+func (r *Relay) OdswiezTozsamosc(tozsamosc tls.Certificate, zaufanie *x509.CertPool) {
+	r.klient.Store(&klientCentrali{
+		client: klientDoCentrali(r.options.UpstreamURL, tozsamosc, zaufanie),
+	})
+}
+
+// centrala zwraca biezacego klienta uslugi agentow.
+func (r *Relay) centrala() agentv1connect.AgentServiceClient {
+	return r.klient.Load().client
 }
 
 // Handler obsluguje polaczenia agentow. Relay wystawia ten sam kontrakt co
@@ -111,7 +144,7 @@ func (r *Relay) RenewCertificate(ctx context.Context,
 
 	forwarded := connect.NewRequest(req.Msg)
 	forwarded.Header().Set(hostHeader, hostID)
-	response, err := r.client.RenewCertificate(ctx, forwarded)
+	response, err := r.centrala().RenewCertificate(ctx, forwarded)
 	if err != nil {
 		// Odnowienie musi dojsc do centrali; bufor tu nie pomoze, bo agent
 		// czeka na odpowiedz. Powtorzy probe zgodnie z wlasnym harmonogramem.
@@ -140,7 +173,7 @@ func (r *Relay) FetchSecret(ctx context.Context,
 
 	forwarded := connect.NewRequest(req.Msg)
 	forwarded.Header().Set(hostHeader, hostID)
-	response, err := r.client.FetchSecret(ctx, forwarded)
+	response, err := r.centrala().FetchSecret(ctx, forwarded)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +185,7 @@ func (r *Relay) FetchSecret(ctx context.Context,
 func (r *Relay) Ping(ctx context.Context,
 	req *connect.Request[agentv1.PingRequest],
 ) (*connect.Response[agentv1.PingResponse], error) {
-	response, err := r.client.Ping(ctx, connect.NewRequest(req.Msg))
+	response, err := r.centrala().Ping(ctx, connect.NewRequest(req.Msg))
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +213,7 @@ func (r *Relay) Connect(ctx context.Context,
 	r.trackSession(hostID, zakoncz)
 	defer r.trackSession(hostID, nil)
 
-	upstream := r.client.Connect(sessionCtx)
+	upstream := r.centrala().Connect(sessionCtx)
 	upstream.RequestHeader().Set(hostHeader, hostID)
 	defer func() {
 		_ = upstream.CloseRequest()
@@ -351,7 +384,7 @@ func (r *Relay) WatchUpstream(ctx context.Context, interval time.Duration) {
 				continue
 			}
 			probeCtx, anuluj := context.WithTimeout(ctx, 10*time.Second)
-			_, err := r.client.Ping(probeCtx, connect.NewRequest(&agentv1.PingRequest{}))
+			_, err := r.centrala().Ping(probeCtx, connect.NewRequest(&agentv1.PingRequest{}))
 			anuluj()
 			if err != nil {
 				continue

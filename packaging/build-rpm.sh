@@ -3,13 +3,14 @@
 # z rodziny Fedory/RHEL.
 #
 #   build-rpm.sh agent         <stage> <wersja> <arch> <out>
+#   build-rpm.sh relay         <stage> <wersja> <arch> <out>
 #   build-rpm.sh control-plane <stage> <wersja> <arch> <out>
 #
 # Architektura jest jawna, a nie brana z maszyny budujacej: pakiet dla arm64
 # powstaje na tej samej maszynie co dla x86_64, bo binarka jest juz gotowa.
 set -eu
 
-SKLADNIK="${1:?podaj skladnik: agent albo control-plane}"
+SKLADNIK="${1:?podaj skladnik: agent, relay albo control-plane}"
 STAGE="${2:?podaj katalog z binarkami}"
 VERSION="${3:-0.1.0}"
 ARCH="${4:-x86_64}"
@@ -22,6 +23,7 @@ trap 'rm -rf "$topdir"' EXIT
 case "$SKLADNIK" in
 agent)         cp "$here/agent.env" "$STAGE/agent.env"
                cp "$here/agent.yaml" "$STAGE/agent.yaml" ;;
+relay)         cp "$here/relay.yaml" "$STAGE/relay.yaml" ;;
 control-plane) cp "$here/control-plane.env" "$STAGE/control-plane.env" ;;
 *) echo "nieznany skladnik: $SKLADNIK" >&2; exit 1 ;;
 esac

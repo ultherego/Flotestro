@@ -2,13 +2,14 @@
 # Buduje pakiet .deb z gotowych binarek.
 #
 #   build-deb.sh agent         <stage> <wersja> <arch> <out>
+#   build-deb.sh relay         <stage> <wersja> <arch> <out>
 #   build-deb.sh control-plane <stage> <wersja> <arch> <out>
 #
 # Skrypt nie kompiluje kodu: pakiet ma powstac dokladnie z tych artefaktow,
 # ktore przeszly testy. Wymaga dpkg-deb, czyli hosta z rodziny Debiana.
 set -eu
 
-SKLADNIK="${1:?podaj skladnik: agent albo control-plane}"
+SKLADNIK="${1:?podaj skladnik: agent, relay albo control-plane}"
 STAGE="${2:?podaj katalog z binarkami}"
 VERSION="${3:-0.1.0}"
 ARCH="${4:-amd64}"
@@ -43,6 +44,14 @@ agent)
     install -m 0640 "$here/agent.env" "$root/etc/flotestro/agent.env"
     install -d -m 0700 "$root/var/lib/flotestro-agent"
     nazwa="flotestro-agent"
+    ;;
+relay)
+    install -m 0755 "$STAGE/flotestro-relay" "$root/usr/bin/flotestro-relay"
+    install -m 0644 "$here/systemd/flotestro-relay.service" \
+        "$root/lib/systemd/system/flotestro-relay.service"
+    install -m 0640 "$here/relay.yaml" "$root/etc/flotestro/relay.yaml"
+    install -d -m 0700 "$root/var/lib/flotestro-relay"
+    nazwa="flotestro-relay"
     ;;
 control-plane)
     install -m 0755 "$STAGE/flotestro-control-plane" "$root/usr/bin/flotestro-control-plane"

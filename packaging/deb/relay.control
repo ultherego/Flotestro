@@ -1,0 +1,15 @@
+Package: flotestro-relay
+Version: __WERSJA__
+Section: admin
+Priority: optional
+Architecture: __ARCH__
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, adduser
+Description: Relay lokalizacji Flotestro
+ Relay posredniczy miedzy agentami jednej lokalizacji a centrala: utrzymuje
+ jedno polaczenie w gore zamiast setek, buforuje wyniki na czas awarii lacza
+ i nie przekazuje zadan, ktorym uplynal czas zycia.
+ .
+ Relay jest osobna granica zaufania. Ma wlasny certyfikat innego rodzaju niz
+ certyfikat hosta, wlasne konto uslugowe i wlasny katalog stanu; nie podpisuje
+ zadnego certyfikatu i nie wykonuje operacji na hostach.

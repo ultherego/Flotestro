@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+case "$1" in
+remove|deconfigure)
+    systemctl stop flotestro-relay.service || true
+    systemctl disable flotestro-relay.service || true
+    ;;
+esac

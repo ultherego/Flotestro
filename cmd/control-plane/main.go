@@ -342,8 +342,15 @@ func run() error {
 	// liczacy polaczenia z bazy.
 	go agentService.ReapOrphanSessions(ctx, time.Minute)
 
+	// Relay ma wlasna usluge na tym samym listenerze: jego certyfikat jest
+	// certyfikatem floty, tylko innego rodzaju, wiec przechodzi ten sam
+	// uscisk mTLS. Osobne RPC pilnuje, ze operacje hosta nadal sa poza
+	// jego zasiegiem.
+	relayService := gateway.NewRelayService(relayStore, trust, recorder, registry, log)
+
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
+	gatewayMux.Handle(agentv1connect.NewRelayServiceHandler(relayService))
 	gatewayServer := &http.Server{
 		Addr:    cfg.GatewayAddr,
 		Handler: gateway.WithClientCertificate(gatewayMux),
