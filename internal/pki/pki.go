@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -325,6 +326,25 @@ func HostIDFromCert(cert *x509.Certificate) (string, error) {
 // wiec certyfikat hosta nie przejdzie jako certyfikat relaya.
 func RelayIDFromCert(cert *x509.Certificate) (string, error) {
 	return identityFromCert(cert, "relay")
+}
+
+// TozsamoscZCertyfikatu zwraca rodzaj i identyfikator z URI SAN.
+//
+// Rodzaj jest zwracany, a nie sprawdzany: sa miejsca, ktore przyjmuja obie
+// tozsamosci floty - magazyn generacji jest ten sam dla agenta i dla relaya,
+// bo zapisuje klucz i certyfikat, a nie role.
+func TozsamoscZCertyfikatu(cert *x509.Certificate) (rodzaj, id string, err error) {
+	for _, uri := range cert.URIs {
+		if uri.Scheme != identityScheme {
+			continue
+		}
+		wartosc := strings.TrimPrefix(uri.Path, "/")
+		if wartosc == "" {
+			continue
+		}
+		return uri.Host, wartosc, nil
+	}
+	return "", "", fmt.Errorf("certyfikat nie zawiera tozsamosci %s://<rodzaj>/<id>", identityScheme)
 }
 
 func identityFromCert(cert *x509.Certificate, kind string) (string, error) {

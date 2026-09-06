@@ -85,10 +85,12 @@ type Zamowienie struct {
 	// maszyny i konkretnego hosta.
 	ExpectedMachineID string `json:"expected_machine_id,omitempty"`
 	ExpectedHostID    string `json:"expected_host_id,omitempty"`
-	MaxUses           int    `json:"max_uses"`
-	Uses              int    `json:"uses"`
-	Status            string `json:"status"`
-	EnrolledHostID    string `json:"enrolled_host_id,omitempty"`
+	// RelayID ogranicza trase zgloszenia do jednego relaya.
+	RelayID        string `json:"relay_id,omitempty"`
+	MaxUses        int    `json:"max_uses"`
+	Uses           int    `json:"uses"`
+	Status         string `json:"status"`
+	EnrolledHostID string `json:"enrolled_host_id,omitempty"`
 
 	ExpiresAt time.Time  `json:"expires_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
@@ -108,6 +110,10 @@ type Scope struct {
 	Purpose           string
 	ExpectedMachineID string
 	ExpectedHostID    string
+	// RelayID ogranicza trase zgloszenia. Puste znaczy "dowolna": token
+	// zwiazany z relayem nie zadziala poza jego lokalizacja, a token bez
+	// zwiazku dziala tak jak dotad.
+	RelayID string
 }
 
 // Powtorzenie jest zapisem proby, ktora juz sie udala.
@@ -153,9 +159,13 @@ type TworzenieWejscie struct {
 	Purpose           string
 	ExpectedMachineID string
 	ExpectedHostID    string
-	MaxUses           int
-	TTL               time.Duration
-	CreatedBy         string
+	// RelayID zamyka zamowienie w jednej lokalizacji. Token wyniesiony poza
+	// nia nie zarejestruje niczego: centrala sprawdza, ktory relay podpisal
+	// zgloszenie swoim kanalem mTLS.
+	RelayID   string
+	MaxUses   int
+	TTL       time.Duration
+	CreatedBy string
 }
 
 // Create wystawia nowe zamowienie. W bazie zapisywany jest wylacznie skrot.
@@ -208,19 +218,20 @@ func (s *Store) Create(ctx context.Context, wejscie TworzenieWejscie) (*Zamowien
 		Site: wejscie.Site, Environment: wejscie.Environment,
 		Kind: kind, Purpose: purpose,
 		ExpectedMachineID: wejscie.ExpectedMachineID, ExpectedHostID: wejscie.ExpectedHostID,
+		RelayID: wejscie.RelayID,
 		MaxUses: maxUses, Status: StatusOczekuje,
 		ExpiresAt: time.Now().Add(ttl), CreatedBy: wejscie.CreatedBy,
 	}
 	const query = `
 		insert into enrollment_requests
 			(id, token_hash, description, site, environment, kind, purpose,
-			 expected_machine_id, expected_host_id, max_uses, expires_at, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10, $11, $12)
+			 expected_machine_id, expected_host_id, relay_id, max_uses, expires_at, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, nullif($10, '')::uuid, $11, $12, $13)
 		returning created_at, updated_at`
 	err := s.pool.QueryRow(ctx, query, zamowienie.ID, hash[:], nullable(wejscie.Description),
 		wejscie.Site, wejscie.Environment, kind, purpose,
 		nullable(wejscie.ExpectedMachineID), nullable(wejscie.ExpectedHostID),
-		maxUses, zamowienie.ExpiresAt, wejscie.CreatedBy).
+		wejscie.RelayID, maxUses, zamowienie.ExpiresAt, wejscie.CreatedBy).
 		Scan(&zamowienie.CreatedAt, &zamowienie.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("zapis zamowienia: %w", err)
@@ -273,6 +284,7 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, wejscie ProbaWejscie) (Wy
 	const query = `
 		select id, site, environment, kind, purpose,
 		       coalesce(expected_machine_id, ''), coalesce(expected_host_id::text, ''),
+		       coalesce(relay_id::text, ''),
 		       max_uses, uses, expires_at, revoked_at
 		from enrollment_requests
 		where token_hash = $1
@@ -286,7 +298,7 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, wejscie ProbaWejscie) (Wy
 	)
 	err := tx.QueryRow(ctx, query, hash[:]).
 		Scan(&scope.TokenID, &scope.Site, &scope.Environment, &scope.Kind, &scope.Purpose,
-			&scope.ExpectedMachineID, &scope.ExpectedHostID,
+			&scope.ExpectedMachineID, &scope.ExpectedHostID, &scope.RelayID,
 			&maxUses, &uses, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Wynik{}, ErrInvalidToken
@@ -472,6 +484,7 @@ func (s *Store) List(ctx context.Context) ([]Zamowienie, error) {
 const kolumnyZamowienia = `
 	select id, coalesce(description, ''), site, environment, kind, purpose,
 	       coalesce(expected_machine_id, ''), coalesce(expected_host_id::text, ''),
+	       coalesce(relay_id::text, ''),
 	       max_uses, uses, status, coalesce(enrolled_host_id::text, ''),
 	       expires_at, revoked_at, created_by, created_at, updated_at
 	from enrollment_requests`
@@ -484,7 +497,7 @@ type skaner interface {
 func skanujZamowienie(wiersz skaner) (*Zamowienie, error) {
 	var z Zamowienie
 	if err := wiersz.Scan(&z.ID, &z.Description, &z.Site, &z.Environment, &z.Kind, &z.Purpose,
-		&z.ExpectedMachineID, &z.ExpectedHostID, &z.MaxUses, &z.Uses, &z.Status,
+		&z.ExpectedMachineID, &z.ExpectedHostID, &z.RelayID, &z.MaxUses, &z.Uses, &z.Status,
 		&z.EnrolledHostID, &z.ExpiresAt, &z.RevokedAt, &z.CreatedBy,
 		&z.CreatedAt, &z.UpdatedAt); err != nil {
 		return nil, err

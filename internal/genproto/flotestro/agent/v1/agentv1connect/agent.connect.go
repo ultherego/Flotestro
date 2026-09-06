@@ -55,6 +55,9 @@ const (
 	RelayServiceRenewCertificateProcedure = "/flotestro.agent.v1.RelayService/RenewCertificate"
 	// RelayServicePingProcedure is the fully-qualified name of the RelayService's Ping RPC.
 	RelayServicePingProcedure = "/flotestro.agent.v1.RelayService/Ping"
+	// RelayServiceProxyEnrollProcedure is the fully-qualified name of the RelayService's ProxyEnroll
+	// RPC.
+	RelayServiceProxyEnrollProcedure = "/flotestro.agent.v1.RelayService/ProxyEnroll"
 )
 
 // EnrollmentServiceClient is a client for the flotestro.agent.v1.EnrollmentService service.
@@ -313,6 +316,14 @@ type RelayServiceClient interface {
 	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
 	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
 	Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error)
+	// ProxyEnroll przekazuje zgloszenie hosta z izolowanej lokalizacji.
+	//
+	// Relay nie podpisuje niczego sam: CA floty zostaje w centrali. Relay jest
+	// terminatorem TLS, wiec widzi token - i wlasnie dlatego zgloszenie idzie
+	// jego kanalem mTLS, a nie publicznym endpointem enrollmentu. Centrala wie
+	// wtedy, ktora lokalizacja poswiadcza to zgloszenie, i moze odmowic
+	// tokenowi wyniesionemu gdzie indziej.
+	ProxyEnroll(context.Context, *connect.Request[v1.ProxyEnrollRequest]) (*connect.Response[v1.EnrollResponse], error)
 }
 
 // NewRelayServiceClient constructs a client for the flotestro.agent.v1.RelayService service. By
@@ -338,6 +349,12 @@ func NewRelayServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(relayServiceMethods.ByName("Ping")),
 			connect.WithClientOptions(opts...),
 		),
+		proxyEnroll: connect.NewClient[v1.ProxyEnrollRequest, v1.EnrollResponse](
+			httpClient,
+			baseURL+RelayServiceProxyEnrollProcedure,
+			connect.WithSchema(relayServiceMethods.ByName("ProxyEnroll")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -345,6 +362,7 @@ func NewRelayServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 type relayServiceClient struct {
 	renewCertificate *connect.Client[v1.RenewRelayCertificateRequest, v1.RenewRelayCertificateResponse]
 	ping             *connect.Client[v1.RelayPingRequest, v1.RelayPingResponse]
+	proxyEnroll      *connect.Client[v1.ProxyEnrollRequest, v1.EnrollResponse]
 }
 
 // RenewCertificate calls flotestro.agent.v1.RelayService.RenewCertificate.
@@ -357,6 +375,11 @@ func (c *relayServiceClient) Ping(ctx context.Context, req *connect.Request[v1.R
 	return c.ping.CallUnary(ctx, req)
 }
 
+// ProxyEnroll calls flotestro.agent.v1.RelayService.ProxyEnroll.
+func (c *relayServiceClient) ProxyEnroll(ctx context.Context, req *connect.Request[v1.ProxyEnrollRequest]) (*connect.Response[v1.EnrollResponse], error) {
+	return c.proxyEnroll.CallUnary(ctx, req)
+}
+
 // RelayServiceHandler is an implementation of the flotestro.agent.v1.RelayService service.
 type RelayServiceHandler interface {
 	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
@@ -364,6 +387,14 @@ type RelayServiceHandler interface {
 	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
 	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
 	Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error)
+	// ProxyEnroll przekazuje zgloszenie hosta z izolowanej lokalizacji.
+	//
+	// Relay nie podpisuje niczego sam: CA floty zostaje w centrali. Relay jest
+	// terminatorem TLS, wiec widzi token - i wlasnie dlatego zgloszenie idzie
+	// jego kanalem mTLS, a nie publicznym endpointem enrollmentu. Centrala wie
+	// wtedy, ktora lokalizacja poswiadcza to zgloszenie, i moze odmowic
+	// tokenowi wyniesionemu gdzie indziej.
+	ProxyEnroll(context.Context, *connect.Request[v1.ProxyEnrollRequest]) (*connect.Response[v1.EnrollResponse], error)
 }
 
 // NewRelayServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -385,12 +416,20 @@ func NewRelayServiceHandler(svc RelayServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(relayServiceMethods.ByName("Ping")),
 		connect.WithHandlerOptions(opts...),
 	)
+	relayServiceProxyEnrollHandler := connect.NewUnaryHandler(
+		RelayServiceProxyEnrollProcedure,
+		svc.ProxyEnroll,
+		connect.WithSchema(relayServiceMethods.ByName("ProxyEnroll")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/flotestro.agent.v1.RelayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RelayServiceRenewCertificateProcedure:
 			relayServiceRenewCertificateHandler.ServeHTTP(w, r)
 		case RelayServicePingProcedure:
 			relayServicePingHandler.ServeHTTP(w, r)
+		case RelayServiceProxyEnrollProcedure:
+			relayServiceProxyEnrollHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -406,4 +445,8 @@ func (UnimplementedRelayServiceHandler) RenewCertificate(context.Context, *conne
 
 func (UnimplementedRelayServiceHandler) Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.RelayService.Ping is not implemented"))
+}
+
+func (UnimplementedRelayServiceHandler) ProxyEnroll(context.Context, *connect.Request[v1.ProxyEnrollRequest]) (*connect.Response[v1.EnrollResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.RelayService.ProxyEnroll is not implemented"))
 }

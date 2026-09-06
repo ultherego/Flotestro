@@ -34,12 +34,29 @@ func NewEnrollmentService(trust *pki.Trust, hostStore *hosts.Store, relayStore *
 		tokens: tokens, audit: recorder, log: log}
 }
 
-// Enroll wymienia wazny token i CSR na certyfikat agenta. Cala operacja jest
-// jedna transakcja: token, host, certyfikat i zdarzenie audytowe albo powstaja
-// razem, albo wcale.
+// poswiadczenieRelaya opisuje relay, ktory przekazal zgloszenie hosta.
+//
+// Puste znaczy zgloszenie bezposrednie. Rozroznienie jest istotne: token
+// zwiazany z lokalizacja nie moze zadzialac poza nia, a token bez zwiazku
+// dziala tak samo obiema drogami.
+type poswiadczenieRelaya struct {
+	ID    string
+	Site  string
+	Nazwa string
+}
+
+// Enroll wymienia wazny token i CSR na certyfikat agenta.
 func (s *EnrollmentService) Enroll(ctx context.Context,
 	req *connect.Request[agentv1.EnrollRequest]) (*connect.Response[agentv1.EnrollResponse], error) {
-	msg := req.Msg
+	return s.enrollZaRelayem(ctx, req.Msg, poswiadczenieRelaya{})
+}
+
+// enrollZaRelayem obsluguje zgloszenie hosta. Cala operacja jest jedna
+// transakcja: token, host, certyfikat i zdarzenie audytowe albo powstaja
+// razem, albo wcale.
+func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
+	msg *agentv1.EnrollRequest, przezRelay poswiadczenieRelaya,
+) (*connect.Response[agentv1.EnrollResponse], error) {
 	if msg.GetMachineId() == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("brak machine_id"))
 	}
@@ -75,6 +92,21 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	scope := wynik.Scope
+
+	// Trasa zgloszenia jest czescia zakresu, a nie szczegolem sieci. Token
+	// zwiazany z relayem wyniesiony do innej lokalizacji nie moze niczego
+	// zarejestrowac; token bez zwiazku dziala tak samo obiema drogami.
+	if err := sprawdzTrase(scope, przezRelay); err != nil {
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
+			Action: "host.enroll", Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": err.Error(), "token_id": scope.TokenID,
+				"relay_id": nullableRelay(przezRelay.ID), "hostname": msg.GetHostname(),
+			},
+		})
+		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
+	}
 
 	// Powtorzenie proby, ktorej odpowiedz zginela w sieci: agent dostaje ten
 	// sam certyfikat, ktory juz zostal dla niego wydany. Nic sie nie zuzywa
@@ -330,4 +362,29 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 func nazwySieciowe(issued *pki.IssuedCert) []string {
 	nazwy := append([]string{}, issued.DNSNames...)
 	return append(nazwy, issued.IPAddresses...)
+}
+
+// sprawdzTrase pilnuje, ze zgloszenie przyszlo droga, ktora zamowienie
+// dopuszcza.
+//
+// Relay jest terminatorem TLS, wiec widzi token swojej lokalizacji. To jest
+// cena za rejestracje w izolowanym site i dlatego zakres tokenu ma byc waski:
+// zamowienie zwiazane z relayem dziala wylacznie przez niego, a zamowienie
+// lokalizacji nie przechodzi przez relay innej lokalizacji.
+func sprawdzTrase(scope enrollment.Scope, przezRelay poswiadczenieRelaya) error {
+	if przezRelay.ID == "" {
+		// Zgloszenie bezposrednie. Zamowienie zwiazane z relayem nie moze
+		// pojsc ta droga: inaczej zwiazek nie znaczylby nic.
+		if scope.RelayID != "" {
+			return errors.New("zamowienie wymaga rejestracji przez relay")
+		}
+		return nil
+	}
+	if scope.RelayID != "" && scope.RelayID != przezRelay.ID {
+		return errors.New("zamowienie nalezy do innego relaya")
+	}
+	if scope.Site != "" && przezRelay.Site != "" && scope.Site != przezRelay.Site {
+		return errors.New("zamowienie nalezy do innej lokalizacji")
+	}
+	return nil
 }

@@ -212,11 +212,17 @@ func polecenieRun(args []string, log *slog.Logger) error {
 	posrednik := relay.New(relay.Options{
 		UpstreamURL:  brama,
 		UpstreamURLs: cfg.Upstream.GatewayURLs,
-		Identity:     tozsamosc.Certificate,
-		TrustPool:    tozsamosc.CAPool,
-		BufferBytes:  int(cfg.Bufor()),
-		Log:          log,
+		// Adres enrollmentu wlacza posredniczenie w rejestracji. W izolowanej
+		// lokalizacji host nie widzi centrali i relay jest jedyna droga.
+		EnrollmentURL: cfg.Upstream.EnrollmentURL,
+		Identity:      tozsamosc.Certificate,
+		TrustPool:     tozsamosc.CAPool,
+		BufferBytes:   int(cfg.Bufor()),
+		Log:           log,
 	})
+	// Host przed rejestracja nie ma certyfikatu, wiec uscisk nie moze go
+	// zadac. Kazde RPC poza rejestracja sprawdza go z osobna.
+	zywa.PosredniczyWRejestracji(cfg.Upstream.EnrollmentURL != "")
 
 	// Agenci lacza sie do relaya tym samym protokolem co do centrali, wiec
 	// wymagany jest certyfikat klienta wystawiony przez CA floty. Certyfikat
@@ -228,7 +234,6 @@ func polecenieRun(args []string, log *slog.Logger) error {
 		TLSConfig: &tls.Config{
 			GetCertificate:     zywa.Certyfikat,
 			GetConfigForClient: zywa.KonfiguracjaKlienta,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
 			ClientCAs:          tozsamosc.CAPool,
 			MinVersion:         tls.VersionTLS13,
 			NextProtos:         []string{"h2"},

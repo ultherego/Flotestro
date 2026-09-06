@@ -57,6 +57,9 @@ type Tozsamosc struct {
 // regularnie i samo z siebie nie jest zdarzeniem operacyjnym.
 type Zywa struct {
 	biezaca atomic.Pointer[Tozsamosc]
+	// rejestracja mowi, czy listener ma wpuszczac polaczenia bez certyfikatu
+	// klienta. Wlaczana tylko wtedy, gdy relay posredniczy w rejestracji.
+	rejestracja atomic.Bool
 }
 
 // NowaZywa tworzy uchwyt na biezaca tozsamosc relaya.
@@ -81,16 +84,28 @@ func (z *Zywa) Certyfikat(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 // KonfiguracjaKlienta zwraca ustawienia uscisku dla agentow lokalizacji.
 // Zbior zaufania jest czytany przy kazdym uscisku: po rotacji CA floty relay
 // ma uznac nowe certyfikaty agentow bez restartu.
+//
+// Wymog certyfikatu klienta zalezy od tego, czy relay posredniczy takze
+// w rejestracji. Host przed enrollmentem nie ma czym sie przedstawic, wiec
+// uscisk nie moze go zadac; certyfikat sprawdza wtedy kazde RPC z osobna
+// i bez niego odmawia wszystkiego poza sama rejestracja.
 func (z *Zywa) KonfiguracjaKlienta(*tls.ClientHelloInfo) (*tls.Config, error) {
 	tozsamosc := z.biezaca.Load()
+	wymog := tls.RequireAndVerifyClientCert
+	if z.rejestracja.Load() {
+		wymog = tls.VerifyClientCertIfGiven
+	}
 	return &tls.Config{
 		GetCertificate: z.Certyfikat,
-		ClientAuth:     tls.RequireAndVerifyClientCert,
+		ClientAuth:     wymog,
 		ClientCAs:      tozsamosc.CAPool,
 		MinVersion:     tls.VersionTLS13,
 		NextProtos:     []string{"h2"},
 	}, nil
 }
+
+// PosredniczyWRejestracji mowi, ze relay przyjmuje takze hosty bez tozsamosci.
+func (z *Zywa) PosredniczyWRejestracji(wlaczone bool) { z.rejestracja.Store(wlaczone) }
 
 // OpcjeOdnowienia opisuje odnawianie certyfikatu relaya.
 type OpcjeOdnowienia struct {

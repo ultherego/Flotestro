@@ -49,6 +49,20 @@ service RelayService {
   rpc RenewCertificate(RenewRelayCertificateRequest) returns (RenewRelayCertificateResponse);
   // Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
   rpc Ping(RelayPingRequest) returns (RelayPingResponse);
+  // ProxyEnroll przekazuje zgloszenie hosta z izolowanej lokalizacji.
+  //
+  // Relay nie podpisuje niczego sam: CA floty zostaje w centrali. Relay jest
+  // terminatorem TLS, wiec widzi token - i wlasnie dlatego zgloszenie idzie
+  // jego kanalem mTLS, a nie publicznym endpointem enrollmentu. Centrala wie
+  // wtedy, ktora lokalizacja poswiadcza to zgloszenie, i moze odmowic
+  // tokenowi wyniesionemu gdzie indziej.
+  rpc ProxyEnroll(ProxyEnrollRequest) returns (EnrollResponse);
+}
+
+message ProxyEnrollRequest {
+  // Zgloszenie hosta w postaci, w jakiej przyszlo do relaya. Relay go nie
+  // zmienia: gdyby mogl, tozsamosc hosta zalezalaby od posrednika.
+  EnrollRequest enrollment = 1;
 }
 
 message RenewRelayCertificateRequest {

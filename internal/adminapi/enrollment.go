@@ -24,8 +24,12 @@ type zamowienieRequest struct {
 	// dzialajacej maszyny.
 	Purpose           string `json:"purpose"`
 	ExpectedMachineID string `json:"expected_machine_id"`
-	MaxUses           int    `json:"max_uses"`
-	TTLMinutes        int    `json:"ttl_minutes"`
+	// RelayID zamyka zamowienie w jednej lokalizacji: token zadziala
+	// wylacznie przez ten relay. Puste znaczy bez ograniczenia trasy - i tak
+	// zostaje dla instalacji bez relayow.
+	RelayID    string `json:"relay_id"`
+	MaxUses    int    `json:"max_uses"`
+	TTLMinutes int    `json:"ttl_minutes"`
 }
 
 // handleCreateEnrollmentRequest wystawia zamowienie i pokazuje token raz.
@@ -62,6 +66,7 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		Detail: map[string]any{
 			"site": zamowienie.Site, "environment": zamowienie.Environment,
 			"kind": zamowienie.Kind, "purpose": zamowienie.Purpose,
+			"relay_id": zamowienie.RelayID,
 			"max_uses": zamowienie.MaxUses, "expires_at": zamowienie.ExpiresAt,
 		},
 	})
@@ -85,6 +90,7 @@ func (s *Server) tworzZamowienie(r *http.Request, req zamowienieRequest, aktor,
 		Description: req.Description, Site: req.Site, Environment: req.Environment,
 		Kind: req.Kind, Purpose: req.Purpose,
 		ExpectedMachineID: req.ExpectedMachineID, ExpectedHostID: hostID,
+		RelayID: req.RelayID,
 		MaxUses: req.MaxUses, TTL: ttl, CreatedBy: aktor,
 	})
 }

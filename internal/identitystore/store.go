@@ -114,7 +114,10 @@ func Sprawdz(g Generacja) error {
 	}); err != nil {
 		return fmt.Errorf("%w: %v", ErrLancuch, err)
 	}
-	if _, err := pki.HostIDFromCert(lisc); err != nil {
+	// Magazyn trzyma tozsamosc agenta i tozsamosc relaya: zapisuje klucz
+	// z certyfikatem, a nie role. Rodzaj rozstrzyga to, co sie tym
+	// certyfikatem robi, i sprawdzaja go uslugi po drugiej stronie.
+	if _, _, err := pki.TozsamoscZCertyfikatu(lisc); err != nil {
 		return fmt.Errorf("%w: %v", ErrTozsamoscCert, err)
 	}
 	return nil
@@ -352,7 +355,7 @@ func wczytaj(katalog string) (*Tozsamosc, error) {
 	if !pula.AppendCertsFromPEM(zaufaniePEM) {
 		return nil, ErrZaufanie
 	}
-	hostID, err := pki.HostIDFromCert(lisc)
+	_, hostID, err := pki.TozsamoscZCertyfikatu(lisc)
 	if err != nil {
 		// Starsze certyfikaty floty moga nie miec URI SAN. Nazwa wlasna jest
 		// wtedy jedynym, co host o sobie wie - i lepsza niz odmowa startu.

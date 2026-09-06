@@ -268,8 +268,17 @@ func pulaZaufaniaTestu() *x509.CertPool {
 // wyslijDoEnrollmentu wola publiczny endpoint enrollmentu floty testowej.
 func (h *harness) wyslijDoEnrollmentu(t *testing.T, tresc []byte) ([]byte, int, []byte) {
 	t.Helper()
-	adres := envOr("FLOTESTRO_TEST_ENROLLMENT", domyslnyEnrollment) +
-		"/flotestro.agent.v1.EnrollmentService/Enroll"
+	return h.wyslijDoEnrollmentuNa(t, envOr("FLOTESTRO_TEST_ENROLLMENT", domyslnyEnrollment), tresc)
+}
+
+// wyslijDoEnrollmentuNa wola enrollment pod wskazanym adresem.
+//
+// Adres jest osobnym argumentem, bo host w izolowanej lokalizacji nie zna
+// adresu centrali i rejestruje sie przez relay - a to jest ta sama usluga
+// wystawiona w innym miejscu.
+func (h *harness) wyslijDoEnrollmentuNa(t *testing.T, baza string, tresc []byte) ([]byte, int, []byte) {
+	t.Helper()
+	adres := baza + "/flotestro.agent.v1.EnrollmentService/Enroll"
 	klient := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
@@ -288,4 +297,90 @@ func (h *harness) wyslijDoEnrollmentu(t *testing.T, tresc []byte) ([]byte, int, 
 	defer odpowiedz.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(odpowiedz.Body, 1<<16))
 	return body, odpowiedz.StatusCode, body
+}
+
+// TestRejestracjaPrzezRelayWIzolowanejLokalizacji pilnuje drogi, ktora jest
+// jedyna droga hosta nie widzacego centrali: token idzie do relaya, a relay
+// poswiadcza centrali, z ktorej lokalizacji przyszlo zgloszenie.
+//
+// Relay niczego nie podpisuje: certyfikat wystawia CA floty w centrali.
+func TestRejestracjaPrzezRelayWIzolowanejLokalizacji(t *testing.T) {
+	h := newHarness(t)
+	relayID, adres := h.relayLaboratorium(t)
+
+	var zamowienie struct {
+		Token string `json:"token"`
+	}
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "host za relayem", "site": "lab", "environment": "test",
+		"relay_id": relayID,
+	}, &zamowienie, http.StatusCreated)
+
+	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maszyna := uniqueSubject("host-za-relayem")
+	zgloszenie, err := json.Marshal(map[string]any{
+		"enrollmentToken": zamowienie.Token,
+		"machineId":       maszyna,
+		"hostname":        maszyna,
+		"csrPem":          csrRelaya(t, klucz, maszyna, nil),
+		"clientRequestId": uuid.NewString(),
+		"build":           map[string]any{"agentVersion": "test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Token zwiazany z relayem nie moze zadzialac poza jego lokalizacja.
+	// Inaczej zwiazek nie znaczylby nic: wystarczyloby wyniesc token.
+	_, status, tresc := h.wyslijDoEnrollmentu(t, zgloszenie)
+	if status == http.StatusOK {
+		t.Fatal("token zwiazany z relayem zarejestrowal host bezposrednio")
+	}
+
+	odpowiedz, status, tresc := h.wyslijDoEnrollmentuNa(t, adres, zgloszenie)
+	if status != http.StatusOK {
+		t.Fatalf("rejestracja przez relay odrzucona: %d %s", status, tresc)
+	}
+	var wynik struct {
+		HostID         string `json:"hostId"`
+		CertificatePem []byte `json:"certificatePem"`
+	}
+	if err := json.Unmarshal(odpowiedz, &wynik); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := h.database(ctx).Exec(ctx,
+			`delete from hosts where id = $1::uuid`, wynik.HostID); err != nil {
+			t.Logf("nie posprzatano hosta %s: %v", wynik.HostID, err)
+		}
+	})
+
+	_, lisc := paraTLS(t, klucz, wynik.CertificatePem)
+	// Certyfikat pochodzi z centrali i jest certyfikatem hosta, a nie relaya:
+	// relay przekazuje zgloszenie, ale nie nadaje tozsamosci.
+	if len(lisc.URIs) != 1 || lisc.URIs[0].Host != "host" {
+		t.Fatalf("URI SAN wystawionego certyfikatu = %v", lisc.URIs)
+	}
+	if lisc.URIs[0].Path != "/"+wynik.HostID {
+		t.Fatalf("certyfikat opisuje %q, panel zwrocil %q", lisc.URIs[0].Path, wynik.HostID)
+	}
+}
+
+// relayLaboratorium znajduje relay floty testowej i jego adres.
+func (h *harness) relayLaboratorium(t *testing.T) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	var relayID string
+	var nazwy []string
+	err := h.database(ctx).QueryRow(ctx, `
+		select id::text, advertised_names from relays
+		where revoked_at is null order by enrolled_at desc limit 1`).Scan(&relayID, &nazwy)
+	if err != nil || len(nazwy) == 0 {
+		t.Skipf("flota testowa nie ma relaya: %v", err)
+	}
+	return relayID, "https://" + nazwy[0] + ":8453"
 }

@@ -26,15 +26,66 @@ type RelayService struct {
 	trust    *pki.Trust
 	audit    *audit.Recorder
 	registry *Registry
-	log      *slog.Logger
+	// enrollment obsluguje zgloszenia hostow z izolowanych lokalizacji.
+	// Relay nie podpisuje niczego sam, wiec zgloszenie idzie do tej samej
+	// uslugi, ktora obsluguje polaczenia bezposrednie - z jedna roznica:
+	// wiadomo, ktory relay je poswiadcza.
+	enrollment *EnrollmentService
+	log        *slog.Logger
 }
 
 func NewRelayService(relayStore *relays.Store, trust *pki.Trust,
-	recorder *audit.Recorder, registry *Registry, log *slog.Logger) *RelayService {
+	recorder *audit.Recorder, registry *Registry,
+	enrollmentService *EnrollmentService, log *slog.Logger) *RelayService {
 	return &RelayService{
 		relays: relayStore, trust: trust, audit: recorder,
-		registry: registry, log: log,
+		registry: registry, enrollment: enrollmentService, log: log,
 	}
+}
+
+// ProxyEnroll przyjmuje zgloszenie hosta przekazane przez relay.
+//
+// Host w izolowanej lokalizacji nie widzi centrali i rejestruje sie przez
+// relay. Relay jest terminatorem TLS, wiec widzi token; dlatego zgloszenie
+// idzie jego kanalem mTLS, a nie publicznym endpointem. Centrala sprawdza
+// wtedy dwie rzeczy, ktorych publiczny endpoint sprawdzic nie moze: czy
+// zamowienie nalezy do lokalizacji tego relaya i czy nie jest zwiazane
+// z innym relayem.
+func (s *RelayService) ProxyEnroll(ctx context.Context,
+	req *connect.Request[agentv1.ProxyEnrollRequest],
+) (*connect.Response[agentv1.EnrollResponse], error) {
+	if s.enrollment == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented,
+			errors.New("ta instalacja nie przyjmuje zgloszen przez relay"))
+	}
+	cert, ok := clientCertificate(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated,
+			errors.New("brak certyfikatu klienta"))
+	}
+	relayID, err := pki.RelayIDFromCert(cert)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+	status, err := s.relays.LookupCertificate(ctx, pki.Fingerprint(cert))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if !status.Known || status.Revoked || status.ID != relayID {
+		s.odmowa(ctx, relayID, "relay_not_active")
+		return nil, connect.NewError(connect.CodeUnauthenticated,
+			fmt.Errorf("relay %s nie jest aktywny", relayID))
+	}
+	zgloszenie := req.Msg.GetEnrollment()
+	if zgloszenie == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("brak zgloszenia hosta"))
+	}
+	s.relays.MarkSeen(ctx, relayID)
+
+	return s.enrollment.enrollZaRelayem(ctx, zgloszenie, poswiadczenieRelaya{
+		ID: relayID, Site: status.Site, Nazwa: status.Name,
+	})
 }
 
 // RenewCertificate wymienia CSR relaya na nowy certyfikat.

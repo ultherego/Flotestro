@@ -33,6 +33,10 @@ type Options struct {
 	// utrzymuje jedno polaczenie w gore, ale awaria bramy nie moze odciac
 	// calej lokalizacji do czasu, az ktos zajrzy do konfiguracji.
 	UpstreamURLs []string
+	// EnrollmentURL wlacza posredniczenie w rejestracji hostow. Puste
+	// znaczy, ze relay jej nie obsluguje: lokalizacja, ktora widzi centrale,
+	// nie potrzebuje posrednika przy jednorazowej czynnosci.
+	EnrollmentURL string
 	// Identity jest tozsamoscia relaya wobec centrali.
 	Identity tls.Certificate
 	// TrustPool weryfikuje zarowno centrale, jak i certyfikaty agentow:
@@ -162,6 +166,12 @@ func (r *Relay) centrala() agentv1connect.AgentServiceClient {
 func (r *Relay) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(agentv1connect.NewAgentServiceHandler(r))
+	// Rejestracja hosta idzie tym samym portem: host w izolowanej lokalizacji
+	// zna wylacznie adres relaya. Bez certyfikatu klienta przechodzi tylko ta
+	// jedna usluga - pozostale czytaja tozsamosc z uscisku i bez niej odmawiaja.
+	if r.options.EnrollmentURL != "" {
+		mux.Handle(r.EnrollmentHandler())
+	}
 	return mux
 }
 
@@ -225,6 +235,14 @@ func (r *Relay) FetchSecret(ctx context.Context,
 func (r *Relay) Ping(ctx context.Context,
 	req *connect.Request[agentv1.PingRequest],
 ) (*connect.Response[agentv1.PingResponse], error) {
+	// Certyfikat klienta jest wymagany takze tutaj. Listener relaya wpuszcza
+	// polaczenia bez certyfikatu, bo host przed rejestracja nie ma czym sie
+	// przedstawic - ale badanie lacznosci nie jest czescia rejestracji i nie
+	// moze byc darmowym sposobem sprawdzania, czy centrala zyje.
+	if _, ok := clientCertificate(ctx); !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated,
+			errors.New("brak certyfikatu klienta"))
+	}
 	response, err := r.centrala().Ping(ctx, connect.NewRequest(req.Msg))
 	if err != nil {
 		return nil, err

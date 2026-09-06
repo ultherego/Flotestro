@@ -350,7 +350,13 @@ func run() error {
 	// certyfikatem floty, tylko innego rodzaju, wiec przechodzi ten sam
 	// uscisk mTLS. Osobne RPC pilnuje, ze operacje hosta nadal sa poza
 	// jego zasiegiem.
-	relayService := gateway.NewRelayService(relayStore, trust, recorder, registry, log)
+	// Enrollment jest jedna usluga dla obu drog: bezposredniej i przez relay.
+	// Druga instancja znaczylaby dwa zbiory tych samych regul, ktore z czasem
+	// rozjezdzaja sie po cichu.
+	enrollmentService := gateway.NewEnrollmentService(trust, hostStore, relayStore,
+		tokenStore, recorder, log)
+	relayService := gateway.NewRelayService(relayStore, trust, recorder, registry,
+		enrollmentService, log)
 
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
@@ -371,7 +377,6 @@ func run() error {
 	}
 
 	// Enrollment: TLS bez certyfikatu klienta, bo host nie ma jeszcze tozsamosci.
-	enrollmentService := gateway.NewEnrollmentService(trust, hostStore, relayStore, tokenStore, recorder, log)
 	enrollmentMux := http.NewServeMux()
 	enrollmentMux.Handle(agentv1connect.NewEnrollmentServiceHandler(enrollmentService))
 	enrollmentServer := &http.Server{
