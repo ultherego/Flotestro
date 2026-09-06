@@ -330,10 +330,22 @@ func tenSamZakres(a, b []string) bool {
 }
 
 // Przelicz ocenia hosty aktywnym snapshotem ich dystrybucji.
+//
+// Przelicza tylko te, ktorych wejscie sie zmienilo. Ocena zalezy od trzech
+// odciskow - snapshotu feedu, listy pakietow i zestawu ustalen hosta - oraz od
+// tego, co przeszkadza w pelnym pokryciu. Gdy zadne z nich sie nie ruszylo,
+// wynik bylby co do bajta ten sam, a koszt to odczyt kilkuset pakietow
+// i przepisanie kilku tysiecy wierszy na host.
+//
+// Zostaje siatka bezpieczenstwa: ocena starsza niz dopuszczalny wiek feedu
+// liczy sie od nowa bez wzgledu na odciski. Blad w rachunku "co sie zmienilo"
+// ma kosztowac opoznienie, a nie ocene zamrozona na zawsze.
 func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 	snapshoty := map[string]Snapshot{}
 	ustalenia := map[string]map[string][]Advisory{}
 	teraz := time.Now().UTC()
+	poprzednie := h.poprzednieStany(ctx, opisy)
+	pominietych := 0
 
 	for _, opis := range opisy {
 		dostawca := Dostawca(opis.Distribution)
@@ -350,17 +362,12 @@ func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 			h.log.Error("nie odczytano stanu listy pakietow", "host_id", opis.ID, "err", err)
 			continue
 		}
-		pakiety, err := h.pakiety.Pakiety(ctx, opis.ID)
-		if err != nil {
-			h.log.Error("nie odczytano listy pakietow", "host_id", opis.ID, "err", err)
-			continue
-		}
 
 		wejscie := Wejscie{
 			HostID: opis.ID, Hostname: opis.Hostname,
 			Distribution: opis.Distribution, Release: opis.Release,
-			Packages: pakiety, InventoryDigest: stanListy.Digest,
-			BrakListy: len(pakiety) == 0,
+			InventoryDigest: stanListy.Digest,
+			BrakListy:       stanListy.Digest == "" || stanListy.PackageCount == 0,
 			// Host zglasza inny odcisk niz ten, ktory panel ma u siebie:
 			// ocena opisuje wtedy stan sprzed zmiany.
 			ListaNieaktualna: opis.InventoryDigest != "" && stanListy.Digest != "" &&
@@ -420,20 +427,88 @@ func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 			zestaw = ustalenia[klucz]
 		}
 
+		// Zamowienie odczytu jest niezalezne od przeliczania: host bez listy
+		// ma ja dostac tak samo wtedy, gdy jego ocena od cyklu sie nie
+		// zmienila. Inaczej host raz pominiety nigdy by o nia nie poprosil.
+		if wejscie.BrakListy || wejscie.ListaNieaktualna || odswiezUstalenia {
+			h.poprosOOdczyt(ctx, opis, teraz)
+		}
+
+		if !h.doPrzeliczenia(poprzednie[opis.ID], wejscie, snapshot, teraz) {
+			pominietych++
+			continue
+		}
+		pakiety, err := h.pakiety.Pakiety(ctx, opis.ID)
+		if err != nil {
+			h.log.Error("nie odczytano listy pakietow", "host_id", opis.ID, "err", err)
+			continue
+		}
+		wejscie.Packages = pakiety
+
 		ocena := Ocen(wejscie, snapshot, zestaw, h.ustawienia.MaxSnapshotAge, teraz)
 		if err := h.store.ZapiszUstalenia(ctx, opis.ID, ocena.Findings, ocena.Stan); err != nil {
 			h.log.Error("nie zapisano oceny podatnosci", "host_id", opis.ID, "err", err)
 			continue
 		}
+	}
+	if pominietych > 0 {
+		// Pominiecia mowimy glosno: cichy przeglad, ktory nic nie policzyl,
+		// wyglada tak samo jak przeglad, ktory nic nie znalazl.
+		h.log.Info("ocena podatnosci przeliczona", "hostow", len(opisy),
+			"pominietych_bez_zmian", pominietych)
+	}
+}
 
-		// Lista, ktorej panel nie ma albo ktora opisuje inny stan niz host,
-		// jest powodem do zapytania hosta - a nie do milczenia. Tak samo
-		// ustalenia, ktore sie zestarzaly: ten sam odczyt przynosi jedno
-		// i drugie.
-		if wejscie.BrakListy || wejscie.ListaNieaktualna || odswiezUstalenia {
-			h.poprosOOdczyt(ctx, opis, teraz)
+// poprzednieStany czyta zapisane oceny hostow, strona po stronie.
+func (h *Harmonogram) poprzednieStany(ctx context.Context, opisy []OpisHosta) map[string]StanHosta {
+	wynik := map[string]StanHosta{}
+	for poczatek := 0; poczatek < len(opisy); poczatek += hosts.RozmiarStrony {
+		koniec := min(poczatek+hosts.RozmiarStrony, len(opisy))
+		identyfikatory := make([]string, 0, koniec-poczatek)
+		for _, opis := range opisy[poczatek:koniec] {
+			identyfikatory = append(identyfikatory, opis.ID)
+		}
+		stany, err := h.store.StanyHostow(ctx, identyfikatory)
+		if err != nil {
+			// Bez poprzednich stanow przeliczamy wszystko. Kosztuje wiecej,
+			// ale nie zostawia oceny zamrozonej na nieznanym wejsciu.
+			h.log.Error("nie odczytano poprzednich ocen", "err", err)
+			return map[string]StanHosta{}
+		}
+		for identyfikator, stan := range stany {
+			wynik[identyfikator] = stan
 		}
 	}
+	return wynik
+}
+
+// doPrzeliczenia mowi, czy ocene hosta trzeba policzyc od nowa.
+//
+// Wejsciem oceny sa trzy odciski i powod niepelnego pokrycia. Gdy zaden z nich
+// sie nie zmienil, nowa ocena bylaby kopia poprzedniej - a jej policzenie
+// kosztuje odczyt calej listy pakietow i przepisanie wszystkich znalezisk.
+func (h *Harmonogram) doPrzeliczenia(poprzedni StanHosta, wejscie Wejscie,
+	snapshot Snapshot, teraz time.Time) bool {
+	if poprzedni.EvaluatedAt == nil {
+		return true
+	}
+	// Siatka bezpieczenstwa: ocena, ktorej nikt nie ruszal dluzej niz wiek
+	// dopuszczalny dla feedu, liczy sie od nowa bez wzgledu na odciski.
+	if teraz.Sub(*poprzedni.EvaluatedAt) > h.ustawienia.MaxSnapshotAge {
+		return true
+	}
+	if poprzedni.Distribution != wejscie.Distribution ||
+		poprzedni.Release != wejscie.Release ||
+		poprzedni.Provider != snapshot.Provider ||
+		poprzedni.SnapshotDigest != snapshot.Digest ||
+		poprzedni.InventoryDigest != wejscie.InventoryDigest ||
+		poprzedni.AdvisoryDigest != wejscie.AdvisoryDigest {
+		return true
+	}
+	// Powod pokrycia zalezy takze od czasu: feed swiezy o poranku bywa
+	// nieswiezy wieczorem, a to zmienia wynik bez zmiany ani jednego odcisku.
+	powod, _ := PowodPokrycia(wejscie, snapshot, h.ustawienia.MaxSnapshotAge, teraz)
+	return powod != poprzedni.CoverageReason
 }
 
 // poprosOOdczyt zamawia u hosta pelna liste pakietow razem z ustaleniami

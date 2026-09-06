@@ -72,35 +72,10 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 		EvaluatedAt:      &teraz,
 	}
 
-	// Kolejnosc powodow ma znaczenie: mowimy o najpowazniejszej przeszkodzie,
-	// a nie o pierwszej napotkanej.
-	switch {
-	case wejscie.BrakListy:
-		stan.CoverageReason = RodzajBrakListy
+	powod, blokuje := PowodPokrycia(wejscie, snapshot, maksymalnyWiekFeedu, teraz)
+	stan.CoverageReason = powod
+	if blokuje {
 		return Ocena{Stan: stan}
-	case wejscie.AdvisoriesReason != "" && wejscie.AdvisoriesReason != RodzajUstaleniaNieswieze:
-		// Host, ktorego metadanych repozytoriow panel nie odczytal, nie jest
-		// hostem bez ustalen producenta: jest hostem, o ktorym nikt nie
-		// sprawdzil, czy jakies ma.
-		stan.CoverageReason = wejscie.AdvisoriesReason
-		return Ocena{Stan: stan}
-	case snapshot.Digest == "":
-		stan.CoverageReason = RodzajBrakFeedu
-		return Ocena{Stan: stan}
-	case !ObejmujeWydanie(snapshot, wejscie.Release):
-		stan.CoverageReason = RodzajWydanieNieobslugiwane
-		return Ocena{Stan: stan}
-	}
-	if snapshot.Nieswiezy(maksymalnyWiekFeedu, teraz) {
-		// Nieswiezy feed nie zatrzymuje oceny: dane sprzed doby sa lepsze niz
-		// ich brak. Ale operator ma wiedziec, ze patrzy na wczorajszy obraz.
-		stan.CoverageReason = RodzajFeedNieswiezy
-	}
-	if wejscie.ListaNieaktualna && stan.CoverageReason == "" {
-		stan.CoverageReason = RodzajListaNieaktualna
-	}
-	if wejscie.AdvisoriesReason != "" && stan.CoverageReason == "" {
-		stan.CoverageReason = wejscie.AdvisoriesReason
 	}
 
 	var wynik []Assessment
@@ -168,6 +143,44 @@ func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
 	stan.UniqueAdvisories = len(sprawy)
 	stan.UniqueCVEs = len(cve)
 	return Ocena{Findings: wynik, Stan: stan}
+}
+
+// PowodPokrycia mowi, co przeszkadza w pelnej ocenie hosta i czy przeszkoda
+// zatrzymuje ocene.
+//
+// Jedna funkcja, bo ten sam rachunek robia dwa miejsca: ocena i decyzja, czy
+// hosta w ogole trzeba przeliczac. Rozjazd miedzy nimi zamrozilby ocene
+// w stanie, ktory przestal byc prawdziwy.
+//
+// Kolejnosc powodow ma znaczenie: mowimy o najpowazniejszej przeszkodzie,
+// a nie o pierwszej napotkanej.
+func PowodPokrycia(wejscie Wejscie, snapshot Snapshot,
+	maksymalnyWiekFeedu time.Duration, teraz time.Time) (string, bool) {
+	switch {
+	case wejscie.BrakListy:
+		return RodzajBrakListy, true
+	case wejscie.AdvisoriesReason != "" && wejscie.AdvisoriesReason != RodzajUstaleniaNieswieze:
+		// Host, ktorego metadanych repozytoriow panel nie odczytal, nie jest
+		// hostem bez ustalen producenta: jest hostem, o ktorym nikt nie
+		// sprawdzil, czy jakies ma.
+		return wejscie.AdvisoriesReason, true
+	case snapshot.Digest == "":
+		return RodzajBrakFeedu, true
+	case !ObejmujeWydanie(snapshot, wejscie.Release):
+		return RodzajWydanieNieobslugiwane, true
+	}
+	// Nieswiezy feed nie zatrzymuje oceny: dane sprzed doby sa lepsze niz ich
+	// brak. Ale operator ma wiedziec, ze patrzy na wczorajszy obraz.
+	if snapshot.Nieswiezy(maksymalnyWiekFeedu, teraz) {
+		return RodzajFeedNieswiezy, false
+	}
+	if wejscie.ListaNieaktualna {
+		return RodzajListaNieaktualna, false
+	}
+	if wejscie.AdvisoriesReason != "" {
+		return wejscie.AdvisoriesReason, false
+	}
+	return "", false
 }
 
 // ocenPakiet rozstrzyga jeden pakiet wobec jednego ustalenia producenta.
