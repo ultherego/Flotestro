@@ -56,6 +56,9 @@ type Podatnosci struct {
 	MaxSnapshotAge time.Duration
 	// DebianURL wskazuje zrzut trackera Debiana; pusty wylacza to zrodlo.
 	DebianURL string
+	// UbuntuURL wskazuje katalog z danymi OVAL Canonical; pusty wylacza to
+	// zrodlo.
+	UbuntuURL string
 }
 
 // Env odczytuje zmienna srodowiskowa z wartoscia domyslna.

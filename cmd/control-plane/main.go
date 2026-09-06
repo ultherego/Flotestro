@@ -48,6 +48,7 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/vuln"
 	debianzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/debian"
+	ubuntuzrodlo "github.com/ultherego/flotestro/internal/vuln/sources/ubuntu"
 )
 
 const staleCheckInterval = 30 * time.Second
@@ -165,6 +166,9 @@ func run() error {
 	flag.StringVar(&podatnosci.DebianURL, "vulnerability-debian-url",
 		config.Env("FLOTESTRO_VULN_DEBIAN_URL", debianzrodlo.AdresDomyslny),
 		"zrzut trackera bezpieczenstwa Debiana; pusty wylacza to zrodlo")
+	flag.StringVar(&podatnosci.UbuntuURL, "vulnerability-ubuntu-url",
+		config.Env("FLOTESTRO_VULN_UBUNTU_URL", ubuntuzrodlo.AdresDomyslny),
+		"katalog z danymi OVAL Canonical; pusty wylacza to zrodlo")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"srodowiska, w ktorych zmiane musi zatwierdzic druga osoba")
@@ -478,6 +482,9 @@ func run() error {
 		var zrodla []vuln.Zrodlo
 		if podatnosci.DebianURL != "" {
 			zrodla = append(zrodla, debianzrodlo.Nowe(podatnosci.DebianURL, 10*time.Minute))
+		}
+		if podatnosci.UbuntuURL != "" {
+			zrodla = append(zrodla, ubuntuzrodlo.Nowe(podatnosci.UbuntuURL, 10*time.Minute))
 		}
 		if len(zrodla) == 0 {
 			log.Warn("korelator podatnosci wlaczony, ale nie ma zadnego zrodla")
