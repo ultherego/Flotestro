@@ -2,14 +2,18 @@
 # Buduje pakiet .rpm z gotowych binarek. Wymaga rpmbuild, czyli hosta
 # z rodziny Fedory/RHEL.
 #
-#   build-rpm.sh agent         <stage> <wersja> <out>
-#   build-rpm.sh control-plane <stage> <wersja> <out>
+#   build-rpm.sh agent         <stage> <wersja> <arch> <out>
+#   build-rpm.sh control-plane <stage> <wersja> <arch> <out>
+#
+# Architektura jest jawna, a nie brana z maszyny budujacej: pakiet dla arm64
+# powstaje na tej samej maszynie co dla x86_64, bo binarka jest juz gotowa.
 set -eu
 
 SKLADNIK="${1:?podaj skladnik: agent albo control-plane}"
 STAGE="${2:?podaj katalog z binarkami}"
 VERSION="${3:-0.1.0}"
-OUT="${4:-.}"
+ARCH="${4:-x86_64}"
+OUT="${5:-.}"
 
 here="$(cd "$(dirname "$0")" && pwd)"
 topdir="$(mktemp -d)"
@@ -23,6 +27,7 @@ control-plane) cp "$here/control-plane.env" "$STAGE/control-plane.env" ;;
 esac
 
 rpmbuild -bb "$here/rpm/flotestro-$SKLADNIK.spec" \
+    --target "$ARCH" \
     --define "_topdir $topdir" \
     --define "_flotestro_version $VERSION" \
     --define "_flotestro_stage $STAGE" \
