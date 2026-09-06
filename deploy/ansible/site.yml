@@ -1,0 +1,12 @@
+---
+# Wdrozenie agenta na flote.
+#
+#   ansible-playbook -i inwentarz.ini site.yml \
+#       -e flotestro_automation_api_token="$TOKEN"
+#
+# Token administracyjny podaje sie z zewnatrz i nigdy nie zapisuje w repo.
+- name: Flotestro agent
+  hosts: flotestro_agents
+  become: true
+  roles:
+    - flotestro_agent

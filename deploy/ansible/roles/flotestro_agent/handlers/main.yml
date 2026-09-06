@@ -1,0 +1,8 @@
+---
+# Restart tylko wtedy, gdy host ma juz tozsamosc. Usluga i tak nie wstanie
+# bez niej, a nieudany restart w handlerze wyglada jak awaria wdrozenia.
+- name: Restart flotestro agent
+  ansible.builtin.systemd_service:
+    name: flotestro-agent.service
+    state: restarted
+  when: flotestro_identity.stat.exists | default(false)

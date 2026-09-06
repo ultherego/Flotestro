@@ -1,0 +1,33 @@
+---
+# Ustawienia roli. Nic tu nie jest sekretem: token enrollmentu powstaje
+# dopiero w trakcie i tylko dla tego hosta, ktory wlasnie jest instalowany.
+flotestro_agent_package: flotestro-agent
+
+# Panel: API administracyjne (tworzy zamowienia) oraz adresy, ktore trafiaja
+# do konfiguracji hosta.
+flotestro_api_url: ""
+flotestro_agent_enrollment_url: ""
+flotestro_agent_gateway_urls: []
+
+# Repozytorium pakietow i klucz, ktorym jest podpisane. Bez klucza instalacja
+# nie ma jak sprawdzic, co instaluje.
+flotestro_repo_url: ""
+flotestro_repo_key_url: "{{ flotestro_repo_url }}/flotestro-repo.asc"
+flotestro_repo_channel: stable
+
+# Bundle CA floty do pierwszego polaczenia. Musi przyjsc kanalem, ktoremu
+# host ufa - stad osobna zmienna, a nie pobieranie z byle adresu.
+flotestro_ca_url: "{{ flotestro_repo_url }}/flotestro-ca.pem"
+
+flotestro_agent_config_path: /etc/flotestro/agent.yaml
+flotestro_agent_state_dir: /var/lib/flotestro-agent
+flotestro_agent_site: default
+flotestro_agent_environment: unassigned
+flotestro_agent_inventory_interval: 15m
+flotestro_agent_max_concurrent_tasks: 2
+flotestro_agent_mode: full
+
+# Token administracyjny do zamowienia enrollmentu. Podawany z zewnatrz
+# (vault, zmienna srodowiskowa CI) i nigdy nie zapisywany na hoscie.
+flotestro_automation_api_token: ""
+flotestro_enrollment_ttl_minutes: 15

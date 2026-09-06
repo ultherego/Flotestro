@@ -1,0 +1,26 @@
+# Plik generowany przez Ansible. Zmiany reczne przepadna przy nastepnym
+# przebiegu - konfiguracja hosta nalezy do automatyzacji, a nie do maszyny.
+#
+# Nie ma tu tokenu ani tozsamosci: token jest sekretem jednorazowym, a
+# tozsamosc bierze sie z certyfikatu wydanego przez panel.
+schema_version: 1
+
+connection:
+  enrollment_url: "{{ flotestro_agent_enrollment_url }}"
+  gateway_urls:
+{% for adres in flotestro_agent_gateway_urls %}
+    - "{{ adres }}"
+{% endfor %}
+  bootstrap_ca_file: "{{ flotestro_agent_state_dir }}/ca.pem"
+  connect_timeout: "15s"
+  reconnect_min: "2s"
+  reconnect_max: "2m"
+
+agent:
+  state_dir: "{{ flotestro_agent_state_dir }}"
+  inventory_interval: "{{ flotestro_agent_inventory_interval }}"
+  max_concurrent_tasks: {{ flotestro_agent_max_concurrent_tasks }}
+  mode: "{{ flotestro_agent_mode }}"
+
+helper:
+  socket: "/run/flotestro/helper.sock"
