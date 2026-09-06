@@ -289,6 +289,53 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, id Identity) (hostID stri
 	return hostID, created, nil
 }
 
+// IDPoMachineID zwraca hosta o tym identyfikatorze maszyny.
+//
+// Puste znaczy "panel takiej maszyny nie zna" - i to jest odpowiedz, a nie
+// blad: enrollment nowego hosta wlasnie na niej sie opiera.
+func (s *Store) IDPoMachineID(ctx context.Context, tx pgx.Tx, machineID string) (string, error) {
+	if machineID == "" {
+		return "", nil
+	}
+	var hostID string
+	err := tx.QueryRow(ctx, `select id::text from hosts where machine_id = $1`, machineID).Scan(&hostID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("odczyt hosta po machine_id: %w", err)
+	}
+	return hostID, nil
+}
+
+// PrzejmijMaszyne wiaze istniejacego hosta z nowa maszyna.
+//
+// Uzywane przy odtwarzaniu tozsamosci: przeinstalowany host ma nowe
+// machine_id, ale jest tym samym hostem w panelu - z ta sama historia, tymi
+// samymi zadaniami i tym samym miejscem we flocie. Zalozenie mu drugiego
+// wiersza zostawialoby w panelu martwego bliznika.
+func (s *Store) PrzejmijMaszyne(ctx context.Context, tx pgx.Tx, hostID string, id Identity) error {
+	const query = `
+		update hosts set
+			machine_id    = $2,
+			hostname      = coalesce(nullif($3, ''), hostname),
+			os_family     = coalesce(nullif($4, ''), os_family),
+			os_version    = coalesce(nullif($5, ''), os_version),
+			architecture  = coalesce(nullif($6, ''), architecture),
+			agent_version = coalesce(nullif($7, ''), agent_version),
+			updated_at    = now()
+		where id = $1::uuid`
+	znacznik, err := tx.Exec(ctx, query, hostID, id.MachineID, id.Hostname,
+		id.OSFamily, id.OSVersion, id.Architecture, id.AgentVersion)
+	if err != nil {
+		return fmt.Errorf("przejecie maszyny przez hosta: %w", err)
+	}
+	if znacznik.RowsAffected() == 0 {
+		return fmt.Errorf("host %s nie istnieje", hostID)
+	}
+	return nil
+}
+
 // SaveCertificate zapisuje wystawiony certyfikat agenta.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
 	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial string) error {

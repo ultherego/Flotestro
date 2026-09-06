@@ -1470,10 +1470,16 @@ type EnrollRequest struct {
 	MachineId string `protobuf:"bytes,2,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Hostname  string `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	// CSR w formacie PEM. Klucz prywatny nigdy nie opuszcza hosta.
-	CsrPem        []byte      `protobuf:"bytes,4,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
-	Build         *AgentBuild `protobuf:"bytes,5,opt,name=build,proto3" json:"build,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CsrPem []byte      `protobuf:"bytes,4,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	Build  *AgentBuild `protobuf:"bytes,5,opt,name=build,proto3" json:"build,omitempty"`
+	// Identyfikator jednej proby enrollmentu, staly przy ponowieniach.
+	//
+	// Odpowiedz moze zginac po tym, jak panel zapisal hosta i wystawil
+	// certyfikat. Agent ponawia wtedy ta sama probe i po tym identyfikatorze
+	// dostaje ten sam certyfikat zamiast odmowy "token zuzyty".
+	ClientRequestId string `protobuf:"bytes,6,opt,name=client_request_id,json=clientRequestId,proto3" json:"client_request_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *EnrollRequest) Reset() {
@@ -1539,6 +1545,13 @@ func (x *EnrollRequest) GetBuild() *AgentBuild {
 		return x.Build
 	}
 	return nil
+}
+
+func (x *EnrollRequest) GetClientRequestId() string {
+	if x != nil {
+		return x.ClientRequestId
+	}
+	return ""
 }
 
 type EnrollResponse struct {
@@ -10412,14 +10425,15 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x18RenewCertificateResponse\x12'\n" +
 	"\x0fcertificate_pem\x18\x01 \x01(\fR\x0ecertificatePem\x12\"\n" +
 	"\rca_bundle_pem\x18\x02 \x01(\fR\vcaBundlePem\x127\n" +
-	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"\xc4\x01\n" +
+	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"\xf0\x01\n" +
 	"\rEnrollRequest\x12)\n" +
 	"\x10enrollment_token\x18\x01 \x01(\tR\x0fenrollmentToken\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x02 \x01(\tR\tmachineId\x12\x1a\n" +
 	"\bhostname\x18\x03 \x01(\tR\bhostname\x12\x17\n" +
 	"\acsr_pem\x18\x04 \x01(\fR\x06csrPem\x124\n" +
-	"\x05build\x18\x05 \x01(\v2\x1e.flotestro.agent.v1.AgentBuildR\x05build\"\xaf\x01\n" +
+	"\x05build\x18\x05 \x01(\v2\x1e.flotestro.agent.v1.AgentBuildR\x05build\x12*\n" +
+	"\x11client_request_id\x18\x06 \x01(\tR\x0fclientRequestId\"\xaf\x01\n" +
 	"\x0eEnrollResponse\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12'\n" +
 	"\x0fcertificate_pem\x18\x02 \x01(\fR\x0ecertificatePem\x12\"\n" +

@@ -23,7 +23,7 @@ func TestBrakTokenuBlokujeDostep(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/v1/hosts", "/api/v1/jobs", "/api/v1/audit",
-		"/api/v1/actions", "/api/v1/enrollment-tokens",
+		"/api/v1/actions", "/api/v1/enrollment-requests",
 	} {
 		anonymous.do(http.MethodGet, path, nil, nil, http.StatusUnauthorized)
 	}
@@ -151,7 +151,7 @@ func TestViewerNiczegoNieZmienia(t *testing.T) {
 			"payload": map[string]any{"journal": map[string]any{"lines": 5}}},
 		nil, http.StatusForbidden)
 	viewer.do(http.MethodGet, "/api/v1/audit", nil, nil, http.StatusForbidden)
-	viewer.do(http.MethodPost, "/api/v1/enrollment-tokens",
+	viewer.do(http.MethodPost, "/api/v1/enrollment-requests",
 		map[string]any{"description": "proba"}, nil, http.StatusForbidden)
 	viewer.do(http.MethodGet, "/api/v1/principals", nil, nil, http.StatusForbidden)
 }

@@ -1,0 +1,158 @@
+//go:build integration
+
+package integration
+
+import (
+	"net/http"
+	"testing"
+	"time"
+)
+
+// zamowienieView odwzorowuje zamowienie enrollmentu.
+type zamowienieView struct {
+	ID                string    `json:"id"`
+	Token             string    `json:"token"`
+	Site              string    `json:"site"`
+	Environment       string    `json:"environment"`
+	Kind              string    `json:"kind"`
+	Purpose           string    `json:"purpose"`
+	ExpectedMachineID string    `json:"expected_machine_id"`
+	ExpectedHostID    string    `json:"expected_host_id"`
+	MaxUses           int       `json:"max_uses"`
+	Uses              int       `json:"uses"`
+	Status            string    `json:"status"`
+	EnrolledHostID    string    `json:"enrolled_host_id"`
+	ExpiresAt         time.Time `json:"expires_at"`
+}
+
+// TestZamowienieEnrollmentuPokazujeTokenRaz pilnuje, ze jawny token istnieje
+// wylacznie w odpowiedzi na utworzenie zamowienia.
+//
+// Token jest sekretem jednorazowym. Gdyby dalo sie go odczytac z listy albo
+// z pojedynczego zamowienia, kazdy z prawem odczytu instalacji mialby klucz
+// do wprowadzenia wlasnej maszyny do floty.
+func TestZamowienieEnrollmentuPokazujeTokenRaz(t *testing.T) {
+	h := newHarness(t)
+	var utworzone zamowienieView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "test zamowienia", "site": "lab", "environment": "test",
+		"ttl_minutes": 15,
+	}, &utworzone, http.StatusCreated)
+
+	if utworzone.Token == "" {
+		t.Fatal("zamowienie bez tokenu - agent nie ma czym sie przedstawic")
+	}
+	if utworzone.Purpose != "new" || utworzone.Kind != "agent" {
+		t.Fatalf("cel = %q, rodzaj = %q", utworzone.Purpose, utworzone.Kind)
+	}
+	if utworzone.Status != "pending" {
+		t.Fatalf("status = %q", utworzone.Status)
+	}
+
+	var odczytane zamowienieView
+	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &odczytane)
+	if odczytane.Token != "" {
+		t.Fatal("odczyt zamowienia oddaje token")
+	}
+	if odczytane.ID != utworzone.ID {
+		t.Fatalf("id = %q, chcemy %q", odczytane.ID, utworzone.ID)
+	}
+
+	var lista struct {
+		Items []zamowienieView `json:"items"`
+	}
+	h.get("/api/v1/enrollment-requests", &lista)
+	znalezione := false
+	for _, pozycja := range lista.Items {
+		if pozycja.ID == utworzone.ID {
+			znalezione = true
+		}
+		if pozycja.Token != "" {
+			t.Fatalf("lista zamowien oddaje token dla %s", pozycja.ID)
+		}
+	}
+	if !znalezione {
+		t.Fatal("utworzone zamowienie nie pojawilo sie na liscie")
+	}
+}
+
+// TestCofnieteZamowienieNieDzialaOdRazu pilnuje, ze cofniecie zamyka token
+// natychmiast, takze gdy czesc puli zostala juz wykorzystana.
+func TestCofnieteZamowienieNieDzialaOdRazu(t *testing.T) {
+	h := newHarness(t)
+	var utworzone zamowienieView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "do cofniecia", "site": "lab", "environment": "test", "max_uses": 5,
+	}, &utworzone, http.StatusCreated)
+
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+utworzone.ID+"/revoke",
+		nil, nil, http.StatusNoContent)
+
+	var po zamowienieView
+	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &po)
+	if po.Status != "revoked" {
+		t.Fatalf("status po cofnieciu = %q", po.Status)
+	}
+	// Cofniecie jest idempotentne: druga proba nie moze skonczyc sie bledem
+	// serwera, bo operator nie ma jak sprawdzic, czy pierwsza doszla.
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+utworzone.ID+"/revoke",
+		nil, nil, http.StatusNoContent)
+	h.do(http.MethodPost,
+		"/api/v1/enrollment-requests/00000000-0000-4000-8000-000000000000/revoke",
+		nil, nil, http.StatusNotFound)
+}
+
+// TestZamowienieOdtworzeniaTozsamosciWiazeSieZHostem pilnuje, ze wymiana
+// tozsamosci jest zwiazana z konkretnym hostem, a nie z dowolna maszyna.
+func TestZamowienieOdtworzeniaTozsamosciWiazeSieZHostem(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	var zamowienie zamowienieView
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
+		map[string]any{"description": "po przeinstalowaniu"}, &zamowienie, http.StatusCreated)
+
+	if zamowienie.Purpose != "replace_identity" {
+		t.Fatalf("cel = %q", zamowienie.Purpose)
+	}
+	if zamowienie.ExpectedHostID != host.ID {
+		t.Fatalf("zamowienie wskazuje hosta %q, chcemy %q", zamowienie.ExpectedHostID, host.ID)
+	}
+	// Odtworzenie dotyczy jednego hosta, wiec i jednego uzycia: token
+	// wielokrotny bylby kluczem do tej samej maszyny na zapas.
+	if zamowienie.MaxUses != 1 {
+		t.Fatalf("liczba uzyc = %d", zamowienie.MaxUses)
+	}
+	if zamowienie.Token == "" {
+		t.Fatal("zamowienie bez tokenu")
+	}
+	// Zakres bierze sie z hosta: odtworzenie tozsamosci nie jest okazja do
+	// przeniesienia hosta do innego srodowiska.
+	if zamowienie.Site != host.Site || zamowienie.Environment != host.Environment {
+		t.Fatalf("zakres = %s/%s, host = %s/%s", zamowienie.Site, zamowienie.Environment,
+			host.Site, host.Environment)
+	}
+
+	// Tego celu nie da sie zamowic zwyklym wejsciem: wymiana tozsamosci ma
+	// wlasne prawo i wlasna droge.
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"purpose": "replace_identity", "site": "lab", "environment": "test",
+	}, nil, http.StatusBadRequest)
+}
+
+// TestZamowienieMaGraniceCzasu pilnuje, ze token nie moze lezec tygodniami.
+func TestZamowienieMaGraniceCzasu(t *testing.T) {
+	h := newHarness(t)
+	var utworzone zamowienieView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "domyslny czas", "site": "lab", "environment": "test",
+	}, &utworzone, http.StatusCreated)
+	if zostalo := time.Until(utworzone.ExpiresAt); zostalo > time.Hour {
+		t.Fatalf("domyslny czas zycia = %s", zostalo)
+	}
+	// Powyzej doby token jest sekretem czekajacym na wyciek.
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "za dlugi", "site": "lab", "environment": "test",
+		"ttl_minutes": 60 * 48,
+	}, nil, http.StatusBadRequest)
+}

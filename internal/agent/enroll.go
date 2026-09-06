@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
@@ -176,11 +177,20 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: caPool, MinVersion: tls.VersionTLS12}},
 	}, enrollmentURL)
 
+	// Identyfikator proby przezywa restart agenta: gdy odpowiedz zginie
+	// w sieci, ponowienie ma isc pod tym samym numerem i dostac ten sam
+	// certyfikat zamiast odmowy "token zuzyty".
+	numerProby, err := numerProbyEnrollmentu(stateDir)
+	if err != nil {
+		return nil, err
+	}
+
 	resp, err := client.Enroll(ctx, connect.NewRequest(&agentv1.EnrollRequest{
 		EnrollmentToken: token,
 		MachineId:       machineID,
 		Hostname:        hostname,
 		CsrPem:          csrPEM,
+		ClientRequestId: numerProby,
 		Build: &agentv1.AgentBuild{
 			AgentVersion: Version,
 			OsFamily:     request.OSFamily,
@@ -210,7 +220,33 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	if err != nil {
 		return nil, fmt.Errorf("zapis tozsamosci: %w", err)
 	}
+	// Proba sie zamknela: nastepny enrollment jest nowa sprawa i idzie pod
+	// nowym numerem.
+	_ = os.Remove(filepath.Join(stateDir, plikProbyEnrollmentu))
 	return zTozsamosci(tozsamosc), nil
+}
+
+// plikProbyEnrollmentu trzyma numer biezacej proby enrollmentu.
+const plikProbyEnrollmentu = "enroll-request-id"
+
+// numerProbyEnrollmentu zwraca staly numer proby, tworzac go przy pierwszym
+// uzyciu.
+//
+// Numer musi przezyc restart agenta w trakcie enrollmentu: to on odroznia
+// "ponow te sama probe" od "zacznij nowa". Nowy numer po kazdym restarcie
+// zuzywalby token przy kazdej probie.
+func numerProbyEnrollmentu(stateDir string) (string, error) {
+	sciezka := filepath.Join(stateDir, plikProbyEnrollmentu)
+	if zapisany, err := os.ReadFile(sciezka); err == nil {
+		if numer, err := uuid.Parse(strings.TrimSpace(string(zapisany))); err == nil {
+			return numer.String(), nil
+		}
+	}
+	numer := uuid.NewString()
+	if err := os.WriteFile(sciezka, []byte(numer+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("numer proby enrollmentu: %w", err)
+	}
+	return numer, nil
 }
 
 func readCABundle(statePath, bootstrapPath string) ([]byte, error) {

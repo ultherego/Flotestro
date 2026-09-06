@@ -33,12 +33,12 @@ func TestGwiazdkaWCeluNieRozszerzaUprawnien(t *testing.T) {
 		Role:  RolePlatformAdmin,
 		Scope: Scope{Site: "warszawa", Environment: "staging"},
 	})
-	if operator.Can(PermEnrollmentToken, GlobalScope) {
+	if operator.Can(PermHostEnrollCreate, GlobalScope) {
 		t.Fatal("waskie przypisanie objelo operacje globalna")
 	}
 
 	global := principalWith(Binding{Role: RolePlatformAdmin, Scope: GlobalScope})
-	if !global.Can(PermEnrollmentToken, GlobalScope) {
+	if !global.Can(PermHostEnrollCreate, GlobalScope) {
 		t.Fatal("przypisanie z gwiazdka nie objelo operacji globalnej")
 	}
 }
@@ -61,7 +61,7 @@ func TestRolaOdczytuNieZmieniaStanu(t *testing.T) {
 	mutating := []Permission{
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload,
-		PermEnrollmentToken, PermPrincipalManage,
+		PermHostEnrollCreate, PermPrincipalManage,
 	}
 	for _, role := range []Role{RoleViewer, RoleAuditor} {
 		for _, permission := range mutating {

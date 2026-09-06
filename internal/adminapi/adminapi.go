@@ -41,7 +41,7 @@ type Server struct {
 	inventory *inventory.Store
 	jobs      *jobs.Store
 	campaigns *campaigns.Store
-	tokens    *enrollment.TokenStore
+	tokens    *enrollment.Store
 	authz     *authz.Store
 	audit     *audit.Recorder
 	registry  *gateway.Registry
@@ -126,7 +126,7 @@ type Options struct {
 }
 
 func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
-	jobStore *jobs.Store, campaignStore *campaigns.Store, tokens *enrollment.TokenStore,
+	jobStore *jobs.Store, campaignStore *campaigns.Store, tokens *enrollment.Store,
 	authzStore *authz.Store, recorder *audit.Recorder, registry *gateway.Registry,
 	provider *oidc.Provider, directory *freeipa.Client, changes *identity.Store,
 	log *slog.Logger, options Options) *Server {
@@ -177,8 +177,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts/{id}/local-accounts", s.handleHostLocalAccounts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/audit", s.handleHostAudit)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
-	mux.HandleFunc("GET /api/v1/enrollment-tokens", s.handleListTokens)
-	mux.HandleFunc("POST /api/v1/enrollment-tokens", s.handleCreateToken)
+	// Zamowienie enrollmentu jest trwalym rekordem oczekujacej instalacji;
+	// token jest tylko sekretem, ktory autoryzuje jedna probe.
+	mux.HandleFunc("GET /api/v1/enrollment-requests", s.handleListEnrollmentRequests)
+	mux.HandleFunc("POST /api/v1/enrollment-requests", s.handleCreateEnrollmentRequest)
+	mux.HandleFunc("GET /api/v1/enrollment-requests/{id}", s.handleGetEnrollmentRequest)
+	mux.HandleFunc("POST /api/v1/enrollment-requests/{id}/revoke", s.handleRevokeEnrollmentRequest)
+	mux.HandleFunc("POST /api/v1/hosts/{id}/identity-recovery", s.handleIdentityRecovery)
 
 	// Operacje typowane: plan, zatwierdzenie, wykonanie, wynik.
 	mux.HandleFunc("GET /api/v1/actions", s.handleListActions)
@@ -488,68 +493,6 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": records, "count": len(records)})
-}
-
-func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermEnrollmentToken, authz.GlobalScope, "enrollment_token", ""); !ok {
-		return
-	}
-	tokens, err := s.tokens.List(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": tokens, "count": len(tokens)})
-}
-
-type createTokenRequest struct {
-	Description string `json:"description"`
-	Site        string `json:"site"`
-	Environment string `json:"environment"`
-	// Kind rozstrzyga, co wolno zarejestrowac tym tokenem: agenta czy relay.
-	// Puste znaczy agenta, bo taki byl jedyny rodzaj przed wprowadzeniem
-	// relayow i istniejaca automatyzacja nie moze przez to przestac dzialac.
-	Kind       string `json:"kind"`
-	MaxUses    int    `json:"max_uses"`
-	TTLMinutes int    `json:"ttl_minutes"`
-}
-
-func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authorize(w, r, authz.PermEnrollmentToken, authz.GlobalScope, "enrollment_token", "")
-	if !ok {
-		return
-	}
-	var req createTokenRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
-		return
-	}
-	if req.Site == "" {
-		req.Site = "default"
-	}
-	if req.Environment == "" {
-		req.Environment = "unassigned"
-	}
-	if req.TTLMinutes <= 0 {
-		req.TTLMinutes = 60
-	}
-
-	token, err := s.tokens.Create(r.Context(), req.Description, req.Site, req.Environment,
-		req.Kind, req.MaxUses, time.Duration(req.TTLMinutes)*time.Minute, principal.Subject)
-	if err != nil {
-		problem(w, http.StatusBadRequest, "invalid_kind", err.Error())
-		return
-	}
-	s.audit.Record(r.Context(), audit.Event{
-		ActorType: audit.ActorUser, ActorID: principal.Subject,
-		Action: "enrollment_token.create", TargetType: "enrollment_token", TargetID: token.ID,
-		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"site": token.Site, "environment": token.Environment, "max_uses": token.MaxUses,
-		},
-	})
-	// Wartosc tokenu jest widoczna wylacznie w tej odpowiedzi.
-	writeJSON(w, http.StatusCreated, token)
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {

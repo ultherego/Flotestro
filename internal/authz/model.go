@@ -14,15 +14,23 @@ import (
 type Permission string
 
 const (
-	PermHostRead        Permission = "host.read"
-	PermInventoryRead   Permission = "inventory.read"
-	PermAuditRead       Permission = "audit.read"
-	PermJobRead         Permission = "job.read"
-	PermJobCreate       Permission = "job.create"
-	PermJobApprove      Permission = "job.approve"
-	PermJobCancel       Permission = "job.cancel"
-	PermEnrollmentToken Permission = "enrollment_token.create"
-	PermPrincipalManage Permission = "principal.manage"
+	PermHostRead      Permission = "host.read"
+	PermInventoryRead Permission = "inventory.read"
+	PermAuditRead     Permission = "audit.read"
+	PermJobRead       Permission = "job.read"
+	PermJobCreate     Permission = "job.create"
+	PermJobApprove    Permission = "job.approve"
+	PermJobCancel     Permission = "job.cancel"
+	// Zamowienia enrollmentu: kto moze zaprosic maszyne do floty, kto widzi
+	// oczekujace instalacje i kto moze je cofnac.
+	PermHostEnrollCreate Permission = "host.enroll.create"
+	PermHostEnrollRead   Permission = "host.enroll.read"
+	PermHostEnrollRevoke Permission = "host.enroll.revoke"
+	// PermHostIdentityReplace pozwala odtworzyc tozsamosc istniejacego hosta.
+	// To osobne prawo od zapraszania nowych maszyn: wymiana tozsamosci jest
+	// przejeciem hosta, ktory juz jest we flocie.
+	PermHostIdentityReplace Permission = "host.identity.replace"
+	PermPrincipalManage     Permission = "principal.manage"
 
 	PermUnitStart   Permission = "unit.start"
 	PermUnitStop    Permission = "unit.stop"
@@ -388,7 +396,8 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermDNSDirectoryWrite,
-		PermEnrollmentToken, PermPrincipalManage,
+		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke,
+		PermHostIdentityReplace, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,

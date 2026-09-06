@@ -23,13 +23,13 @@ type EnrollmentService struct {
 	trust  *pki.Trust
 	relays *relays.Store
 	hosts  *hosts.Store
-	tokens *enrollment.TokenStore
+	tokens *enrollment.Store
 	audit  *audit.Recorder
 	log    *slog.Logger
 }
 
 func NewEnrollmentService(trust *pki.Trust, hostStore *hosts.Store, relayStore *relays.Store,
-	tokens *enrollment.TokenStore, recorder *audit.Recorder, log *slog.Logger) *EnrollmentService {
+	tokens *enrollment.Store, recorder *audit.Recorder, log *slog.Logger) *EnrollmentService {
 	return &EnrollmentService{trust: trust, hosts: hostStore, relays: relayStore,
 		tokens: tokens, audit: recorder, log: log}
 }
@@ -53,10 +53,18 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	scope, err := s.tokens.Redeem(ctx, tx, msg.GetEnrollmentToken())
+	proba := enrollment.ProbaWejscie{
+		Token:           msg.GetEnrollmentToken(),
+		MachineID:       msg.GetMachineId(),
+		ClientRequestID: msg.GetClientRequestId(),
+		CSR:             msg.GetCsrPem(),
+	}
+	wynik, err := s.tokens.Redeem(ctx, tx, proba)
 	if err != nil {
 		if errors.Is(err, enrollment.ErrInvalidToken) {
-			// Odmowa jest zdarzeniem audytowym tak samo jak sukces.
+			// Odmowa jest zdarzeniem audytowym tak samo jak sukces. Powod
+			// zostaje w audycie serwera; agent dostaje zawsze te sama
+			// odpowiedz, zeby nie dalo sie po niej zgadywac tokenow.
 			s.audit.Record(ctx, audit.Event{
 				ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
 				Action: "host.enroll", Outcome: audit.OutcomeDenied,
@@ -66,6 +74,32 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	scope := wynik.Scope
+
+	// Powtorzenie proby, ktorej odpowiedz zginela w sieci: agent dostaje ten
+	// sam certyfikat, ktory juz zostal dla niego wydany. Nic sie nie zuzywa
+	// i nic nie powstaje po raz drugi.
+	if powtorzone := wynik.Powtorzenie; powtorzone != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
+			Action: "host.enroll", TargetType: "host", TargetID: powtorzone.HostID,
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"replay": true, "token_id": scope.TokenID,
+				"cert_serial": powtorzone.CertificateSerial,
+			},
+		})
+		s.log.Info("powtorzona proba enrollmentu", "host_id", powtorzone.HostID,
+			"machine_id", msg.GetMachineId())
+		return connect.NewResponse(&agentv1.EnrollResponse{
+			HostId:         powtorzone.HostID,
+			CertificatePem: powtorzone.CertificatePEM,
+			CaBundlePem:    powtorzone.CABundlePEM,
+		}), nil
+	}
 
 	// Token rozstrzyga, co powstaje. Rejestracja relaya tokenem wystawionym
 	// dla agenta bylaby cicha zmiana granicy zaufania: relay konczy sesje
@@ -74,8 +108,23 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 		return s.enrollRelay(ctx, tx, msg, scope)
 	}
 
+	// Cel zamowienia rozstrzyga, co wolno zrobic z maszyna, ktora panel juz
+	// zna. Bez tego kazdy token bylby kluczem do przejecia tozsamosci
+	// dzialajacego hosta.
+	if err := s.sprawdzCel(ctx, tx, msg, scope); err != nil {
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
+			Action: "host.enroll", Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": err.Error(), "purpose": scope.Purpose,
+				"hostname": msg.GetHostname(), "token_id": scope.TokenID,
+			},
+		})
+		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
+	}
+
 	build := msg.GetBuild()
-	hostID, created, err := s.hosts.Upsert(ctx, tx, hosts.Identity{
+	tozsamosc := hosts.Identity{
 		MachineID:    msg.GetMachineId(),
 		Hostname:     msg.GetHostname(),
 		Site:         scope.Site,
@@ -84,9 +133,23 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 		OSVersion:    build.GetOsVersion(),
 		Architecture: build.GetArchitecture(),
 		AgentVersion: build.GetAgentVersion(),
-	})
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	var (
+		hostID  string
+		created bool
+	)
+	if scope.Purpose == enrollment.CelWymiana {
+		// Odtworzenie tozsamosci nie zaklada nowego hosta: przeinstalowana
+		// maszyna wraca do tego samego wiersza, z ta sama historia.
+		hostID = scope.ExpectedHostID
+		if err := s.hosts.PrzejmijMaszyne(ctx, tx, hostID, tozsamosc); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+	} else {
+		hostID, created, err = s.hosts.Upsert(ctx, tx, tozsamosc)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
 	}
 
 	issued, err := s.trust.Active().SignAgentCSR(msg.GetCsrPem(), hostID)
@@ -106,12 +169,22 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	// Proba zapisuje sie w tej samej transakcji co host i certyfikat: zapis
+	// po commicie moglby nie dojsc, a wtedy idempotencja bylaby pozorna.
+	if err := s.tokens.ZapiszProbe(ctx, tx, scope.TokenID, proba, enrollment.Powtorzenie{
+		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: s.trust.Bundle(),
+		CertificateSerial: issued.Serial,
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
 	if err := s.audit.RecordTx(ctx, tx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
 		Action: "host.enroll", TargetType: "host", TargetID: hostID,
 		Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
 			"created":       created,
+			"purpose":       scope.Purpose,
 			"hostname":      msg.GetHostname(),
 			"site":          scope.Site,
 			"environment":   scope.Environment,
@@ -194,4 +267,40 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		CaBundlePem:    s.trust.Bundle(),
 		NotAfter:       timestamppb.New(issued.NotAfter),
 	}), nil
+}
+
+// sprawdzCel pilnuje, ze zamowienie pasuje do tego, co naprawde sie dzieje.
+//
+// Rozroznienie jest calym sensem tej funkcji. "Nowy host" oznacza maszyne,
+// ktorej panel nie zna: token o tym celu nie moze przejac tozsamosci
+// dzialajacej maszyny, nawet gdy ktos poda jej machine_id. "Wymiana
+// tozsamosci" oznacza konkretnego hosta wskazanego przy zamawianiu - i tylko
+// jego.
+func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
+	msg *agentv1.EnrollRequest, scope enrollment.Scope) error {
+	istniejacy, err := s.hosts.IDPoMachineID(ctx, tx, msg.GetMachineId())
+	if err != nil {
+		return err
+	}
+	switch scope.Purpose {
+	case enrollment.CelNowy:
+		if istniejacy != "" {
+			return errors.New("machine_id_known")
+		}
+	case enrollment.CelWymiana:
+		if scope.ExpectedHostID == "" {
+			return errors.New("recovery_without_host")
+		}
+		// Maszyna nieznana panelowi jest tu w porzadku: po przeinstalowaniu
+		// host ma nowe machine_id, a tozsamosc odtwarzamy po wskazanym
+		// host_id. Znana maszyna musi byc tym samym hostem.
+		if istniejacy != "" && istniejacy != scope.ExpectedHostID {
+			return errors.New("machine_id_other_host")
+		}
+	case enrollment.CelRelay:
+		return errors.New("relay_purpose_for_host")
+	default:
+		return errors.New("unknown_purpose")
+	}
+	return nil
 }

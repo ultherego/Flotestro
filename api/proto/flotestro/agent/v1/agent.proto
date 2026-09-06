@@ -80,6 +80,12 @@ message EnrollRequest {
   // CSR w formacie PEM. Klucz prywatny nigdy nie opuszcza hosta.
   bytes csr_pem = 4;
   AgentBuild build = 5;
+  // Identyfikator jednej proby enrollmentu, staly przy ponowieniach.
+  //
+  // Odpowiedz moze zginac po tym, jak panel zapisal hosta i wystawil
+  // certyfikat. Agent ponawia wtedy ta sama probe i po tym identyfikatorze
+  // dostaje ten sam certyfikat zamiast odmowy "token zuzyty".
+  string client_request_id = 6;
 }
 
 message EnrollResponse {
