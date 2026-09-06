@@ -1,0 +1,3 @@
+# Katalog stanu nalezy do agenta i jest zamkniety dla reszty systemu: leza
+# w nim klucz prywatny i tozsamosc hosta.
+d /var/lib/flotestro-agent 0700 flotestro-agent flotestro-agent -

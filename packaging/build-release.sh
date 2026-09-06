@@ -33,6 +33,10 @@ mkdir -p "$WYNIK"
 # Nazwy architektur roznia sie miedzy Go, Debianem i RPM-em. Tlumaczymy je
 # w jednym miejscu, bo pomylka konczy sie pakietem, ktory instaluje sie na
 # niewlasciwej maszynie.
+# Arch nazywa architektury tak samo jak RPM, ale osobna funkcja mowi wprost,
+# ze to zbieg okolicznosci, a nie wspolny slownik.
+nazwaARCH() { nazwaRPM "$1"; }
+
 nazwaRPM() {
     case "$1" in
     amd64) echo x86_64 ;;
@@ -51,8 +55,12 @@ zbudujBinarki() {
         # architektury, a nie tylko na tej, ktora ma te same biblioteki.
         # -trimpath usuwa sciezki maszyny budujacej, zeby ta sama binarka
         # powstawala niezaleznie od tego, gdzie lezy katalog roboczy.
+        # Wersja jest wpisywana w binarke: panel porownuje ja z wersja
+        # docelowa po aktualizacji, wiec musi pochodzic z wydania, a nie
+        # z zaszytej stalej.
         CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
-            "$GO" -C "$repo" build -trimpath -ldflags '-s -w' \
+            "$GO" -C "$repo" build -trimpath \
+            -ldflags "-s -w -X github.com/ultherego/flotestro/internal/agent.Version=$WERSJA" \
             -o "$stage/flotestro-$skladnik" "./cmd/$skladnik"
     done
     # Panel webowy jest niezalezny od architektury; wchodzi do pakietu
@@ -76,6 +84,13 @@ zbudujPakiety() {
         for skladnik in agent control-plane; do
             "$here/build-deb.sh" "$skladnik" "$stage" "$WERSJA" "$arch" "$WYNIK" >/dev/null
         done
+        zbudowano=true
+    fi
+    if command -v makepkg >/dev/null; then
+        # makepkg pakuje gotowe pliki, wiec architektura jest kwestia nazwy
+        # pakietu, a nie maszyny budujacej.
+        echo "==> pakiet pacman $(nazwaARCH "$arch")"
+        "$here/build-arch.sh" "$stage" "$WERSJA" "$(nazwaARCH "$arch")" "$WYNIK" >/dev/null
         zbudowano=true
     fi
     if command -v rpmbuild >/dev/null; then

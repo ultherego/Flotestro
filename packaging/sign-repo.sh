@@ -77,6 +77,26 @@ if ls "$WYDANIE"/*.rpm >/dev/null 2>&1; then
         -o "$rpm_dir/repodata/repomd.xml.asc" "$rpm_dir/repodata/repomd.xml"
 fi
 
+# --- pacman ------------------------------------------------------------
+if ls "$WYDANIE"/*.pkg.tar.* >/dev/null 2>&1; then
+    echo "==> repozytorium pacman ($KANAL)"
+    arch_dir="$REPO/arch/$KANAL"
+    mkdir -p "$arch_dir"
+    cp "$WYDANIE"/*.pkg.tar.* "$arch_dir/"
+    command -v repo-add >/dev/null || { echo "brak repo-add" >&2; exit 1; }
+    # repo-add --sign podpisuje baze pakietow, a --key wskazuje czym.
+    # Same pakiety podpisujemy osobno: pacman sprawdza jedno i drugie.
+    for pakiet in "$arch_dir"/*.pkg.tar.*; do
+        case "$pakiet" in *.sig) continue ;; esac
+        gpg --batch --yes --local-user "$KLUCZ" --detach-sign --no-armor "$pakiet"
+    done
+    # Baza pakietow jest tym, co pacman czyta jako pierwsze. Blad repo-add
+    # zostawilby repozytorium z samymi plikami i bez indeksu - klient
+    # zobaczylby puste repozytorium, a nie blad.
+    ( cd "$arch_dir" && repo-add --sign --key "$KLUCZ" flotestro.db.tar.gz ./*.pkg.tar.zst >/dev/null )
+    [ -e "$arch_dir/flotestro.db" ] || { echo "repo-add nie zbudowal bazy pakietow" >&2; exit 1; }
+fi
+
 # Klucz publiczny lezy obok repozytorium: host musi go dodac, zanim
 # cokolwiek zainstaluje, i musi miec skad go wziac.
 gpg --batch --yes --armor --export "$KLUCZ" > "$REPO/flotestro-repo.asc"

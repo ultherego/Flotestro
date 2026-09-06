@@ -18,7 +18,10 @@ ConditionPathExists=|/var/lib/flotestro-agent/agent.pem
 Type=simple
 User=flotestro-agent
 Group=flotestro-agent
-EnvironmentFile=/etc/flotestro/agent.env
+# Plik srodowiska jest opcjonalny i taki ma zostac: ustawienia hosta opisuje
+# agent.yaml, a to jest tylko miejsce na override i na jednorazowy token.
+# Jego brak nie moze zatrzymac uslugi - pakiet Archa go nie niesie.
+EnvironmentFile=-/etc/flotestro/agent.env
 ExecStart=/usr/bin/flotestro-agent
 Restart=always
 RestartSec=5s

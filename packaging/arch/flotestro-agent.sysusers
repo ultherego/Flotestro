@@ -1,0 +1,3 @@
+# Konto uslugowe agenta. Bez powloki i bez katalogu domowego: agent nie jest
+# tozsamoscia, ktora ktokolwiek loguje sie na hoscie.
+u flotestro-agent - "Flotestro agent" /var/lib/flotestro-agent /usr/bin/nologin
