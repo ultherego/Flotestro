@@ -34,6 +34,7 @@ install -m 0755 %{_flotestro_stage}/flotestro-agentctl     %{buildroot}%{_bindir
 
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -m 0644 %{_flotestro_units}/flotestro-agent.service  %{buildroot}%{_unitdir}/
+install -m 0644 %{_flotestro_units}/flotestro-enroll.service %{buildroot}%{_unitdir}/
 install -m 0644 %{_flotestro_units}/flotestro-helper.service %{buildroot}%{_unitdir}/
 install -m 0644 %{_flotestro_units}/flotestro-helper.socket  %{buildroot}%{_unitdir}/
 
@@ -48,6 +49,7 @@ install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-agent
 %{_bindir}/flotestro-agent-helper
 %{_bindir}/flotestro-agentctl
 %{_unitdir}/flotestro-agent.service
+%{_unitdir}/flotestro-enroll.service
 %{_unitdir}/flotestro-helper.service
 %{_unitdir}/flotestro-helper.socket
 %dir %{_sysconfdir}/flotestro
@@ -84,12 +86,13 @@ systemctl stop flotestro-helper.service || :
 # Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go w petli
 # restartow zasmiecaloby dziennik hosta; instalacja konczy sie wtedy
 # wskazowka, a nie cichym bledem.
-if grep -qs '^\s*-\s*https' %{_sysconfdir}/flotestro/agent.yaml ||
-   grep -qs '^FLOTESTRO_GATEWAY_URL=.\+' %{_sysconfdir}/flotestro/agent.env; then
-    systemctl enable --now flotestro-agent.service || :
+systemctl enable flotestro-agent.service || :
+if [ -e %{_sharedstatedir}/flotestro-agent/identity/current/agent.pem ] ||
+   [ -e %{_sharedstatedir}/flotestro-agent/agent.pem ]; then
+    systemctl start flotestro-agent.service || :
 else
-    systemctl enable flotestro-agent.service || :
-    echo "flotestro-agent: uzupelnij %{_sysconfdir}/flotestro/agent.yaml i uruchom" >&2
+    echo "flotestro-agent: uzupelnij %{_sysconfdir}/flotestro/agent.yaml i zarejestruj host" >&2
+    echo "  sudo -u flotestro-agent flotestro-agentctl enroll" >&2
     echo "  systemctl start flotestro-agent.service" >&2
 fi
 

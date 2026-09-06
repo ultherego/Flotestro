@@ -4,6 +4,16 @@ Documentation=https://github.com/ultherego/flotestro
 After=network-online.target flotestro-helper.socket
 Wants=network-online.target flotestro-helper.socket
 
+# Demon startuje dopiero wtedy, gdy jest czym sie przedstawic. Host bez
+# konfiguracji albo przed enrollmentem nie ma sie gdzie polaczyc, a petla
+# restartow zasmieca dziennik i wyglada jak awaria - zamiast jak host, ktory
+# czeka na rejestracje.
+ConditionPathExists=/etc/flotestro/agent.yaml
+# Tozsamosc w magazynie generacji albo, dla hostow sprzed jego wprowadzenia,
+# w starym ukladzie plikow. Wystarczy jedna z nich.
+ConditionPathExists=|/var/lib/flotestro-agent/identity/current/agent.pem
+ConditionPathExists=|/var/lib/flotestro-agent/agent.pem
+
 [Service]
 Type=simple
 User=flotestro-agent

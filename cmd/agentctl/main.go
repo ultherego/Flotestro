@@ -20,6 +20,10 @@ func main() {
 }
 
 func uruchom(argumenty []string, wyjscie, bledy io.Writer) int {
+	return uruchomZWejsciem(argumenty, os.Stdin, wyjscie, bledy)
+}
+
+func uruchomZWejsciem(argumenty []string, wejscie io.Reader, wyjscie, bledy io.Writer) int {
 	if len(argumenty) == 0 {
 		pomoc(bledy)
 		return 2
@@ -31,6 +35,8 @@ func uruchom(argumenty []string, wyjscie, bledy io.Writer) int {
 		return poleceniaStanu(argumenty[1:], wyjscie, bledy)
 	case "diagnose":
 		return poleceniaDiagnozy(argumenty[1:], wyjscie, bledy)
+	case "enroll":
+		return poleceniaEnrollmentu(argumenty[1:], wejscie, wyjscie, bledy)
 	case "version":
 		fmt.Fprintf(wyjscie, "flotestro-agentctl %s (%s/%s, %s)\n",
 			wersja, runtime.GOOS, runtime.GOARCH, runtime.Version())
@@ -48,6 +54,7 @@ func uruchom(argumenty []string, wyjscie, bledy io.Writer) int {
 func pomoc(gdzie io.Writer) {
 	fmt.Fprint(gdzie, `flotestro-agentctl - narzedzie hosta
 
+  enroll          [--token-file PLIK]  rejestruje host we flocie i zapisuje tozsamosc
   config validate [--config PLIK]   sprawdza plik konfiguracji i prawa do niego
   config show     [--config PLIK]   pokazuje ustawienia po uzupelnieniu domyslnych
   status          [--config PLIK]   tozsamosc, certyfikat, sesja i helper

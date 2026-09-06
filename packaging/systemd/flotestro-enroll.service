@@ -1,0 +1,34 @@
+[Unit]
+Description=Rejestracja hosta we flocie Flotestro
+Documentation=https://github.com/ultherego/flotestro
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/flotestro/agent.yaml
+# Rejestracja dotyczy hosta, ktory tozsamosci jeszcze nie ma. Host juz
+# zarejestrowany nie ma tu czego szukac - jednostka po prostu nie startuje.
+ConditionPathExists=!/var/lib/flotestro-agent/identity/current/agent.pem
+
+[Service]
+Type=oneshot
+User=flotestro-agent
+Group=flotestro-agent
+# Token przychodzi jako credential systemd, a nie w srodowisku ani
+# w argumentach: argument widzi kazdy uzytkownik hosta w liscie procesow,
+# a zmienna srodowiskowa zostaje w pliku uslugi na stale.
+LoadCredential=enrollment-token:/run/flotestro-bootstrap/enrollment-token
+ExecStart=/usr/bin/flotestro-agentctl enroll --config /etc/flotestro/agent.yaml --token-file %d/enrollment-token
+
+StateDirectory=flotestro-agent
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/flotestro-agent
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native

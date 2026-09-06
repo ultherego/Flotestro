@@ -125,3 +125,37 @@ func TestStatusMowiOBrakuTozsamosci(t *testing.T) {
 		t.Fatalf("wyjscie = %q", wyjscie.String())
 	}
 }
+
+func TestEnrollOdmawiaGdyTozsamoscJestWazna(t *testing.T) {
+	// Rejestracja hosta, ktory juz jest we flocie, byla by cicha wymiana
+	// tozsamosci. To jest osobna decyzja i idzie przez zamowienie w panelu.
+	katalog := t.TempDir()
+	sciezka := filepath.Join(katalog, "agent.yaml")
+	tresc := strings.Replace(dobraKonfiguracja, `  state_dir: "/var/lib/flotestro-agent"`,
+		`  state_dir: "`+katalog+`"`, 1)
+	if err := os.WriteFile(sciezka, []byte(tresc), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Bez tozsamosci polecenie ma pytac o token, a nie odmawiac - wiec
+	// podajemy pusty, zeby sprawdzic sama sciezke bledu.
+	var wyjscie, bledy bytes.Buffer
+	kod := uruchomZWejsciem([]string{"enroll", "--config", sciezka},
+		strings.NewReader(""), &wyjscie, &bledy)
+	if kod != 1 {
+		t.Fatalf("kod = %d, wyjscie: %s %s", kod, wyjscie.String(), bledy.String())
+	}
+	if !strings.Contains(bledy.String(), "token enrollmentu jest pusty") {
+		t.Fatalf("bledy = %q", bledy.String())
+	}
+}
+
+func TestEnrollNiePrzyjmujeTokenuWArgumencie(t *testing.T) {
+	// Argument wiersza polecenia widzi kazdy uzytkownik hosta w liscie
+	// procesow, wiec takiej flagi nie ma i nie moze byc.
+	var wyjscie, bledy bytes.Buffer
+	kod := uruchomZWejsciem([]string{"enroll", "--token", "flt_cokolwiek"},
+		strings.NewReader(""), &wyjscie, &bledy)
+	if kod != 2 {
+		t.Fatalf("kod = %d - flaga z tokenem zostala przyjeta", kod)
+	}
+}
