@@ -106,6 +106,26 @@ func podatnosciHosta(h *harness, hostID string) raportPodatnosciView {
 	return raport
 }
 
+// hostDystrybucji szuka hosta po dystrybucji, a nie po rodzinie.
+//
+// Ubuntu jest w rodzinie debianowej, ale ma wlasny tracker, wlasne kieszenie
+// i wlasne wersje: test, ktory bierze "pierwszy host rodziny debian", pytalby
+// raz Debiana, a raz Ubuntu - i milczalby o tym, ktorego naprawde sprawdzil.
+func hostDystrybucji(h *harness, dystrybucja string) (hostView, raportPodatnosciView) {
+	h.t.Helper()
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		raport := podatnosciHosta(h, host.ID)
+		if raport.State.Distribution == dystrybucja {
+			return host, raport
+		}
+	}
+	h.t.Fatalf("flota testowa nie ma hosta dystrybucji %s", dystrybucja)
+	return hostView{}, raportPodatnosciView{}
+}
+
 // TestOcenaPodatnosciOpisujePokrycie pilnuje wlasciwosci, dla ktorej ten modul
 // w ogole ma sens: zero znalezisk nie moze znaczyc "host czysty", gdy naprawde
 // znaczy "nie bylo czym ocenic".
@@ -115,9 +135,8 @@ func podatnosciHosta(h *harness, hostID string) raportPodatnosciView {
 // wygodne dla testu i bezuzyteczne jako sprawdzenie.
 func TestOcenaPodatnosciOpisujePokrycie(t *testing.T) {
 	h := newHarness(t)
-	for _, rodzina := range []string{"debian", "rhel"} {
-		host := h.hostByFamily(rodzina)
-		raport := podatnosciHosta(h, host.ID)
+	for _, rodzina := range []string{"debian", "ubuntu", "fedora"} {
+		_, raport := hostDystrybucji(h, rodzina)
 		stan := raport.State
 
 		if stan.CoverageReason != "" {
@@ -164,11 +183,10 @@ func TestUstalenieWiazeSieZDanymiIWersjami(t *testing.T) {
 	h := newHarness(t)
 	// Kazda rodzina ma swoja podstawe porownania: Debian prowadzi
 	// bezpieczenstwo po pakiecie zrodlowym, Fedora po binarnym.
-	podstawy := map[string]string{"debian": "source", "rhel": "binary"}
+	podstawy := map[string]string{"debian": "source", "ubuntu": "source", "fedora": "binary"}
 
-	for _, rodzina := range []string{"debian", "rhel"} {
-		host := h.hostByFamily(rodzina)
-		raport := podatnosciHosta(h, host.ID)
+	for _, rodzina := range []string{"debian", "ubuntu", "fedora"} {
+		_, raport := hostDystrybucji(h, rodzina)
 		if len(raport.Findings) == 0 {
 			t.Fatalf("%s: zaden pakiet nie dal sie ocenic - to nie jest wynik", rodzina)
 		}
@@ -239,8 +257,7 @@ func TestUstalenieWiazeSieZDanymiIWersjami(t *testing.T) {
 // dojechal pusty albo korelacja nie zlapala pakietu zrodlowego.
 func TestDebianOcenaMaKonkretneCVE(t *testing.T) {
 	h := newHarness(t)
-	host := h.hostByFamily("debian")
-	raport := podatnosciHosta(h, host.ID)
+	_, raport := hostDystrybucji(h, "debian")
 
 	zCVE, bezPoprawki := 0, 0
 	pakiety := map[string]bool{}
@@ -285,8 +302,7 @@ func TestDebianOcenaMaKonkretneCVE(t *testing.T) {
 // ma wlasny, osobny cykl odczytu ustalen producenta - i mowi, kiedy je czytal.
 func TestFedoraCzytaUstaleniaZMetadanychHosta(t *testing.T) {
 	h := newHarness(t)
-	host := h.hostByFamily("rhel")
-	raport := podatnosciHosta(h, host.ID)
+	_, raport := hostDystrybucji(h, "fedora")
 
 	if raport.AdvisoryState.CollectedAt == nil {
 		t.Fatalf("panel nie zapisal, kiedy czytal ustalenia producenta: %+v",
@@ -307,6 +323,65 @@ func TestFedoraCzytaUstaleniaZMetadanychHosta(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+// TestUbuntuOcenaNiesiePoprawkiProducenta pilnuje, ze dane OVAL Canonical
+// docieraja do oceny jako ustalenia, a nie sama struktura.
+//
+// Wydanie noble ma i podatnosci z poprawka, i takie, ktorych producent nie
+// naprawil. Brak jednych albo drugich znaczylby, ze czegos nie czytamy:
+// samych otwartych - ze gubimy stany z wersja, samych naprawionych - ze
+// gubimy testy bez stanu.
+func TestUbuntuOcenaNiesiePoprawkiProducenta(t *testing.T) {
+	h := newHarness(t)
+	_, raport := hostDystrybucji(h, "ubuntu")
+
+	zPoprawka, bezPoprawki := 0, 0
+	pakiety := map[string]bool{}
+	zCVE := 0
+	for _, ustalenie := range raport.Findings {
+		if ustalenie.State != "affected" {
+			continue
+		}
+		pakiety[ustalenie.SourcePackage] = true
+		for _, numer := range ustalenie.CVEIDs {
+			if wzorzecCVE.MatchString(numer) {
+				zCVE++
+			}
+		}
+		if ustalenie.FixedVersion != "" {
+			zPoprawka++
+		} else {
+			bezPoprawki++
+		}
+		// Ubuntu prowadzi bezpieczenstwo po pakiecie zrodlowym, tak samo jak
+		// Debian: porownanie wersji binarnej z ustaleniem zrodlowym potrafi
+		// zakwalifikowac podatnosc odwrotnie, niz trzeba.
+		if ustalenie.ComparisonBasis != "source" {
+			t.Fatalf("Ubuntu porownuje na podstawie %q: %+v",
+				ustalenie.ComparisonBasis, ustalenie)
+		}
+		if ustalenie.Provider != "ubuntu" {
+			t.Fatalf("ustalenie Ubuntu od dostawcy %q", ustalenie.Provider)
+		}
+	}
+	if zCVE == 0 {
+		t.Fatalf("ocena Ubuntu bez ani jednego numeru CVE (%d znalezisk)",
+			len(raport.Findings))
+	}
+	if zPoprawka == 0 {
+		t.Error("ocena Ubuntu bez ani jednej poprawki producenta - " +
+			"stany z wersja naprawiona nie dojechaly")
+	}
+	if bezPoprawki == 0 {
+		t.Error("ocena Ubuntu bez ani jednej podatnosci bez poprawki - " +
+			"testy bez stanu nie dojechaly")
+	}
+	// Jeden pakiet zrodlowy daje kilka binarnych: korelacja po samej nazwie
+	// binarnej gubilaby wiekszosc ustalen Canonical.
+	if len(pakiety) < 2 {
+		t.Errorf("ocena dotyczy %d pakietow zrodlowych", len(pakiety))
 	}
 }
 
