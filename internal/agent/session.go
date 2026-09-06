@@ -20,13 +20,17 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
+	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 )
 
 // SessionOptions konfiguruje polaczenie agenta z control plane.
 type SessionOptions struct {
-	GatewayURL        string
+	// GatewayURLs sa bramami w kolejnosci priorytetu. Agent utrzymuje jedna
+	// aktywna sesje, ale zna cala liste: przelaczenie na brame zapasowa nie
+	// moze byc reczna czynnoscia operatora w chwili awarii centrali.
+	GatewayURLs       []string
 	Identity          *Identity
 	InventoryInterval time.Duration
 	Executor          *TaskExecutor
@@ -47,6 +51,10 @@ type SessionOptions struct {
 	// diagnostyczne na hoscie widzi tylko pliki tozsamosci i nie umie
 	// odpowiedziec, czy agent naprawde rozmawia z panelem.
 	Stan *PisarzStanu
+
+	// gatewayURL jest brama wybrana na te jedna sesje. Nie pochodzi
+	// z konfiguracji, tylko z menedzera bram, wiec nie jest polem publicznym.
+	gatewayURL string
 }
 
 const (
@@ -57,51 +65,85 @@ const (
 // Run utrzymuje polaczenie z gatewayem i wznawia je z backoffem oraz jitterem.
 // Awaria control plane nie moze wywolac lawiny reconnectow z calej floty.
 func Run(ctx context.Context, opts SessionOptions) error {
-	backoff := minBackoff
+	menedzer := endpoints.Nowy(opts.GatewayURLs, minBackoff, maxBackoff)
+	if len(menedzer.Bramy()) == 0 {
+		return errors.New("agent nie ma zadnej bramy do polaczenia")
+	}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		brama, err := menedzer.Wybierz(time.Now())
+		if err != nil {
+			// Odwolana tozsamosc nie jest awaria lacza. Agent przestaje sie
+			// dobijac i zostawia powod tam, gdzie zajrzy operator hosta:
+			// dalsze proby niczego nie naprawia, a enrollment jest decyzja
+			// czlowieka, nie skutkiem ubocznym reconnectu.
+			opts.Log.Error("polaczenie zatrzymane", "err", err)
+			opts.Stan.Rozlaczony(err.Error(), time.Now())
+			return err
+		}
+		if brama == nil {
+			// Kazda brama ma jeszcze okno ponowienia. Czekamy do najblizszej,
+			// zamiast krecic sie w petli.
+			czekanie := menedzer.DoNastepnej(time.Now())
+			opts.Log.Info("wszystkie bramy w oknie ponowienia",
+				"za", czekanie.Round(time.Second).String())
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(czekanie):
+			}
+			continue
+		}
+
 		// Klient powstaje przy kazdym polaczeniu, bo tozsamosc moze sie
 		// w miedzyczasie zmienic: odnowiony certyfikat musi wejsc do uzycia
 		// bez restartu agenta.
 		client := agentv1connect.NewAgentServiceClient(
 			newHTTP2Client(opts.Identity),
-			opts.GatewayURL,
+			brama.URL,
 			// Protokol Connect nie obsluguje pelnego dupleksu, wiec stream
 			// dwukierunkowy jedzie po gRPC nad HTTP/2.
 			connect.WithGRPC(),
 		)
 		start := time.Now()
-		err := runSession(ctx, client, opts)
+		sesja := opts
+		sesja.gatewayURL = brama.URL
+		err = runSession(ctx, client, sesja)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if err != nil {
-			opts.Log.Warn("sesja zakonczona", "err", err)
+			opts.Log.Warn("sesja zakonczona", "brama", brama.URL, "err", err)
 			opts.Stan.Rozlaczony(err.Error(), time.Now())
 		} else {
 			opts.Stan.Rozlaczony("", time.Now())
 		}
-		// Sesja, ktora dzialala dluzej niz minute, nie jest objawem petli bledu.
-		if time.Since(start) > time.Minute {
-			backoff = minBackoff
+
+		switch {
+		case errors.Is(err, errIdentityRenewed):
+			// Przerwanie po odnowieniu certyfikatu nie jest bledem bramy:
+			// nastepne polaczenie idzie nowa tozsamoscia i to samo miejsce.
+			menedzer.Sukces(brama.URL, time.Now())
+			continue
+		case time.Since(start) > time.Minute:
+			// Sesja, ktora pracowala dluzej niz minute, nie jest objawem
+			// petli bledu - nawet jesli skonczyla sie zerwaniem.
+			menedzer.Sukces(brama.URL, time.Now())
+			if err == nil {
+				continue
+			}
 		}
-		wait := withJitter(backoff)
-		// Sesja przerwana przez odnowienie certyfikatu nie jest bledem, wiec
-		// nie ma powodu odczekiwac przed ponownym polaczeniem.
-		if errors.Is(err, errIdentityRenewed) {
-			wait = 0
-			backoff = minBackoff
-		}
-		opts.Log.Info("ponowne laczenie", "za", wait.Round(time.Second).String())
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(wait):
-		}
-		if backoff < maxBackoff {
-			backoff *= 2
+
+		klasa := endpoints.Rozpoznaj(err)
+		menedzer.Blad(brama.URL, klasa, time.Now())
+		if klasa == endpoints.KlasaKonfiguracji {
+			// Zla konfiguracja nie naprawi sie ponowieniem, wiec mowimy
+			// o niej wprost i tam, gdzie widac ja bez panelu.
+			opts.Log.Error("brama odrzucila polaczenie z powodu konfiguracji",
+				"brama", brama.URL, "err", err,
+				"podpowiedz", "sprawdz bootstrap_ca_file i nazwe w gateway_urls")
 		}
 	}
 }
@@ -143,7 +185,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// Adres, ktorym host dosiega panelu, jest ustalany raz na sesje i podany
 	// modulowi sieci: to on rozstrzyga, ktory interfejs jest kanalem
 	// zarzadzania, a wiec ktorej zmiany nie wolno zrobic bez ostrzezenia.
-	adresLokalny := adresDoPanelu(opts.GatewayURL)
+	adresLokalny := adresDoPanelu(opts.gatewayURL)
 
 	collect := opts.CollectFacts
 	if collect == nil {
@@ -189,7 +231,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 
 	opts.Log.Info("sesja nawiazana",
 		"host_id", opts.Identity.HostID, "heartbeat", heartbeatInterval.String())
-	opts.Stan.Polaczony(opts.GatewayURL, time.Now())
+	opts.Stan.Polaczony(opts.gatewayURL, time.Now())
 
 	// Send nie jest bezpieczny dla rownoleglych wywolan.
 	var sendMu sync.Mutex

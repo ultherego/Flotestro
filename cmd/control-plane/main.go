@@ -341,6 +341,10 @@ func run() error {
 	// Wpisy sesji po padzie procesu zostaja otwarte i zawyzaja kazdy pomiar
 	// liczacy polaczenia z bazy.
 	go agentService.ReapOrphanSessions(ctx, time.Minute)
+	// Host przelaczajacy sie miedzy bramami zostawia na poprzedniej sesje,
+	// ktora nadal wyglada na zywa. Bez tego nasluchu obie bramy uwazalyby sie
+	// za wlasciwe i to samo zadanie pojechaloby dwa razy.
+	go gateway.NasluchujEpok(ctx, pool, registry, cfg.GatewayID, log)
 
 	// Relay ma wlasna usluge na tym samym listenerze: jego certyfikat jest
 	// certyfikatem floty, tylko innego rodzaju, wiec przechodzi ten sam

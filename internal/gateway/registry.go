@@ -27,6 +27,10 @@ type Session struct {
 	// powiedziec, ktory relay poswiadczyl tozsamosc hosta: to dwie rozne
 	// podstawy zaufania, a nie szczegol trasy.
 	RelayID string
+	// Epoka rosnie w obrebie hosta i rozstrzyga, ktora sesja jest wlasciwa.
+	// Dwie bramy nie widza siebie nawzajem; widza wspolna baze, wiec to
+	// z niej pochodzi numer i to on wskazuje zwyciezce.
+	Epoka int64
 
 	// outbound jest jedyna droga wysylki do agenta. Stream nie jest bezpieczny
 	// dla rownoleglych Send, wiec pisze do niego wylacznie jedna goroutine.

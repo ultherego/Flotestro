@@ -159,7 +159,7 @@ func simulate(ctx context.Context, index int, prefix, stateDir, enrollmentURL, g
 	defer counters.connected.Add(-1)
 
 	err = agent.Run(ctx, agent.SessionOptions{
-		GatewayURL:   gatewayURL,
+		GatewayURLs:  []string{gatewayURL},
 		Identity:     identity,
 		CollectFacts: func(context.Context) (agent.Facts, error) { return facts, nil },
 		// Symulowany agent nie wykonuje zadan mutujacych; celem jest pomiar

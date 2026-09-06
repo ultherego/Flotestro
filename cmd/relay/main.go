@@ -208,15 +208,14 @@ func polecenieRun(args []string, log *slog.Logger) error {
 		"nazwa", cfg.Relay.Name, "cert_not_after", tozsamosc.NotAfter.Format(time.RFC3339))
 
 	zywa := relay.NowaZywa(tozsamosc)
-	// Pierwsza brama z listy. Kolejne wchodza wraz z failoverem: dopoki go
-	// nie ma, relay nie udaje, ze korzysta z calej listy.
 	brama := cfg.Upstream.GatewayURLs[0]
 	posrednik := relay.New(relay.Options{
-		UpstreamURL: brama,
-		Identity:    tozsamosc.Certificate,
-		TrustPool:   tozsamosc.CAPool,
-		BufferBytes: int(cfg.Bufor()),
-		Log:         log,
+		UpstreamURL:  brama,
+		UpstreamURLs: cfg.Upstream.GatewayURLs,
+		Identity:     tozsamosc.Certificate,
+		TrustPool:    tozsamosc.CAPool,
+		BufferBytes:  int(cfg.Bufor()),
+		Log:          log,
 	})
 
 	// Agenci lacza sie do relaya tym samym protokolem co do centrali, wiec
@@ -259,7 +258,8 @@ func polecenieRun(args []string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	log.Info("relay nasluchuje", "adres", cfg.Relay.Listen, "centrala", brama,
+	log.Info("relay nasluchuje", "adres", cfg.Relay.Listen,
+		"centrala", posrednik.Brama(), "bram", len(cfg.Upstream.GatewayURLs),
 		"bufor_bajtow", cfg.Bufor())
 
 	errCh := make(chan error, 1)

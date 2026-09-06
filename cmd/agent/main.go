@@ -25,7 +25,8 @@ func main() {
 		enrollmentURL = flag.String("enrollment-url",
 			config.Env("FLOTESTRO_ENROLLMENT_URL", ""), "adres endpointu enrollmentu")
 		gatewayURL = flag.String("gateway-url",
-			config.Env("FLOTESTRO_GATEWAY_URL", ""), "adres gatewaya agentow")
+			config.Env("FLOTESTRO_GATEWAY_URL", ""),
+			"adres gatewaya agentow; nadpisuje cala liste z pliku")
 		token = flag.String("enrollment-token",
 			config.Env("FLOTESTRO_ENROLLMENT_TOKEN", ""), "token enrollmentu (tylko pierwszy start)")
 		caFile = flag.String("ca-file",
@@ -57,6 +58,10 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
+	// Bramy w kolejnosci priorytetu. Pusta lista znaczy "tylko to, co podano
+	// flaga albo zmienna" - i wtedy wypelnia sie nizej pojedynczym adresem.
+	var bramy []string
+
 	cfg, zPliku, err := wczytajKonfiguracje(*configPath)
 	if err != nil {
 		log.Error("konfiguracja agenta", "plik", *configPath, "err", err)
@@ -65,8 +70,8 @@ func main() {
 	if zPliku {
 		zastosuj(cfg, jawne, ustawienia{
 			stateDir: stateDir, enrollmentURL: enrollmentURL, gatewayURL: gatewayURL,
-			caFile: caFile, helperSocket: helperSocket, inventoryMinutes: inventoryMinutes,
-			maxTasks: maxTasks, tryb: tryb,
+			bramy: &bramy, caFile: caFile, helperSocket: helperSocket,
+			inventoryMinutes: inventoryMinutes, maxTasks: maxTasks, tryb: tryb,
 		})
 		log.Info("konfiguracja wczytana", "plik", *configPath,
 			"bram", len(cfg.Connection.GatewayURLs), "tryb", *tryb)
@@ -102,7 +107,10 @@ func main() {
 		return
 	}
 
-	if *enrollmentURL == "" || *gatewayURL == "" {
+	if len(bramy) == 0 && *gatewayURL != "" {
+		bramy = []string{*gatewayURL}
+	}
+	if *enrollmentURL == "" || len(bramy) == 0 {
 		log.Error("wymagane sa --enrollment-url i --gateway-url")
 		os.Exit(1)
 	}
@@ -139,7 +147,9 @@ func main() {
 	agent.SetDockerProbe(executor.ProbeDocker)
 	agent.SetScheduleProbe(executor.ProbeSchedules)
 	// Modul sieci sprawdza po zmianie, czy host nadal dosiega panelu.
-	agent.SetGatewayURL(*gatewayURL)
+	// Wystarczy jedna brama: chodzi o to, czy host w ogole ma droge do
+	// centrali, a nie o to, ktora z nich obsluguje biezaca sesje.
+	agent.SetGatewayURL(bramy[0])
 	agent.SetFirewallProbe(executor.ProbeFirewall)
 	agent.SetLVMProbe(executor.ProbeLVM)
 	agent.SetSSHProbe(executor.ProbeSSH)
@@ -152,8 +162,11 @@ func main() {
 	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.
 	odnowienia := make(chan struct{}, 1)
 	go agent.KeepCertificateFresh(ctx, identity, agent.RenewalOptions{
-		StateDir:   *stateDir,
-		GatewayURL: *gatewayURL,
+		StateDir: *stateDir,
+		// Odnowienie idzie do bramy pierwszego wyboru. Nie jest pilne co do
+		// minuty: do wygasniecia zostaje wtedy jeszcze jedna trzecia zycia
+		// certyfikatu, wiec awaria tej jednej bramy nie odcina hosta.
+		GatewayURL: bramy[0],
 		Log:        log,
 		OnRenewed: func() {
 			select {
@@ -164,7 +177,7 @@ func main() {
 	})
 
 	if err := agent.Run(ctx, agent.SessionOptions{
-		GatewayURL:         *gatewayURL,
+		GatewayURLs:        bramy,
 		Identity:           identity,
 		InventoryInterval:  time.Duration(*inventoryMinutes) * time.Minute,
 		Executor:           executor,
@@ -198,6 +211,7 @@ type ustawienia struct {
 	stateDir         *string
 	enrollmentURL    *string
 	gatewayURL       *string
+	bramy            *[]string
 	caFile           *string
 	helperSocket     *string
 	inventoryMinutes *int
@@ -243,11 +257,15 @@ func zastosuj(cfg agentconfig.Config, jawne map[string]bool, cel ustawienia) {
 	}
 	ustaw("state-dir", "FLOTESTRO_AGENT_STATE_DIR", cfg.Agent.StateDir, cel.stateDir)
 	ustaw("enrollment-url", "FLOTESTRO_ENROLLMENT_URL", cfg.Connection.EnrollmentURL, cel.enrollmentURL)
-	// Lista bram jest priorytetowa; przelaczanie miedzy nimi przyjdzie razem
-	// z obsluga HA. Do tego czasu agent uzywa pierwszej i nie udaje, ze zna
-	// pozostale.
+	// Lista bram jest priorytetowa i idzie do agenta w calosci: przelaczenie
+	// na brame zapasowa nie moze byc reczna czynnoscia operatora w chwili
+	// awarii centrali. Jawna flaga albo zmienna srodowiskowa zastepuje cala
+	// liste - kto podaje jeden adres, ten chce dokladnie jego.
 	if len(cfg.Connection.GatewayURLs) > 0 {
 		ustaw("gateway-url", "FLOTESTRO_GATEWAY_URL", cfg.Connection.GatewayURLs[0], cel.gatewayURL)
+		if !jawne["gateway-url"] && os.Getenv("FLOTESTRO_GATEWAY_URL") == "" {
+			*cel.bramy = append([]string{}, cfg.Connection.GatewayURLs...)
+		}
 	}
 	ustaw("ca-file", "FLOTESTRO_CA_FILE", cfg.Connection.BootstrapCA, cel.caFile)
 	ustaw("helper-socket", "FLOTESTRO_HELPER_SOCKET", cfg.Helper.Socket, cel.helperSocket)

@@ -17,6 +17,10 @@ depends=('systemd' 'ca-certificates')
 # Konfiguracja hosta przezywa aktualizacje pakietu; nowa wersja ladzie obok
 # jako .pacnew i musi byc widoczna w diagnostyce.
 backup=('etc/flotestro/agent.yaml')
+# Pakiet niesie gotowe binarki, wiec nie ma z czego zlozyc pakietu debug:
+# makepkg zrobilby pusty, a jego nazwa jest tak podobna, ze latwo wydac go
+# zamiast wlasciwego.
+options=('!debug')
 install=flotestro-agent.install
 source=(
   "flotestro-agent"

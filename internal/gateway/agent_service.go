@@ -1274,14 +1274,42 @@ func managementAddress(remoteAddr, declared, relayID string) (address, source st
 // audytowy nie odroznia dwoch roznych podstaw zaufania.
 func (s *AgentService) openSession(ctx context.Context, session *Session,
 	fingerprint []byte, relayID string) error {
+	// Numer epoki i wpis sesji powstaja w jednej transakcji. Dwie bramy
+	// otwierajace sesje temu samemu hostowi w tej samej chwili musza dostac
+	// rozne numery, bo to numer rozstrzyga, ktora z nich jest ta wlasciwa.
 	const query = `
 		insert into agent_sessions
-			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id)
-		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`
-	_, err := s.pool.Exec(ctx, query, session.ID, session.HostID, s.gatewayID,
-		fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID)
-	if err != nil {
+			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id, epoch)
+		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid,
+			(select coalesce(max(epoch), 0) + 1 from agent_sessions where host_id = $2))
+		returning epoch`
+	if err := s.pool.QueryRow(ctx, query, session.ID, session.HostID, s.gatewayID,
+		fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID).
+		Scan(&session.Epoka); err != nil {
 		return err
+	}
+
+	// Starsze sesje tego hosta sa zamykane w bazie od razu: wpis otwarty na
+	// bramie, ktora juz nie obsluguje hosta, zawyza kazdy pomiar liczacy
+	// polaczenia i kaze schedulerowi wysylac zadania w prozne miejsce.
+	if _, err := s.pool.Exec(ctx, `
+		update agent_sessions set ended_at = now(), end_reason = 'superseded'
+		where host_id = $1 and epoch < $2 and ended_at is null`,
+		session.HostID, session.Epoka); err != nil {
+		s.log.Error("nie zamknieto starszych sesji hosta",
+			"host_id", session.HostID, "err", err)
+	}
+	// Lokalna starsza sesja moze byc wciaz w rejestrze tej bramy: rejestr
+	// trzyma jedna sesje na hosta, wiec dopiero Add ja zastapi, a stream
+	// trwalby dalej i odbieral wiadomosci.
+	if poprzednia, trwa := s.registry.Get(session.HostID); trwa && poprzednia.Epoka < session.Epoka {
+		poprzednia.Zakoncz("superseded")
+	}
+	// Pozostale bramy dowiaduja sie przez baze - to jedyny punkt, ktory
+	// widzi je wszystkie.
+	if err := ogloszEpoke(ctx, s.pool, session.HostID, session.Epoka, s.gatewayID); err != nil {
+		s.log.Error("nie ogloszono epoki sesji",
+			"host_id", session.HostID, "epoka", session.Epoka, "err", err)
 	}
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: session.HostID,
@@ -1290,6 +1318,7 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		Detail: map[string]any{
 			"relay_id":   nullableRelay(relayID),
 			"session_id": session.ID, "gateway_id": s.gatewayID,
+			"epoch":         session.Epoka,
 			"agent_version": session.AgentVersion, "boot_id": session.BootID,
 		},
 	})

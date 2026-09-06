@@ -13,6 +13,10 @@ depends=('systemd' 'ca-certificates')
 # Konfiguracja lokalizacji przezywa aktualizacje pakietu; nowa wersja ladzie
 # obok jako .pacnew.
 backup=('etc/flotestro/relay.yaml')
+# Pakiet niesie gotowe binarki, wiec nie ma z czego zlozyc pakietu debug:
+# makepkg zrobilby pusty, a jego nazwa jest tak podobna, ze latwo wydac go
+# zamiast wlasciwego.
+options=('!debug')
 install=flotestro-relay.install
 source=(
   "flotestro-relay"

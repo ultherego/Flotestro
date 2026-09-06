@@ -14,6 +14,7 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
+	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -28,6 +29,10 @@ const hostHeader = "Flotestro-Relay-Host"
 type Options struct {
 	// UpstreamURL jest adresem bramy agentow w centrali.
 	UpstreamURL string
+	// UpstreamURLs sa pozostalymi bramami w kolejnosci priorytetu. Relay
+	// utrzymuje jedno polaczenie w gore, ale awaria bramy nie moze odciac
+	// calej lokalizacji do czasu, az ktos zajrzy do konfiguracji.
+	UpstreamURLs []string
 	// Identity jest tozsamoscia relaya wobec centrali.
 	Identity tls.Certificate
 	// TrustPool weryfikuje zarowno centrale, jak i certyfikaty agentow:
@@ -43,6 +48,11 @@ type Options struct {
 type Relay struct {
 	options Options
 	klient  atomic.Pointer[klientCentrali]
+	// bramy prowadzi wybor bramy centrali wraz z backoffem i klasa bledu.
+	bramy *endpoints.Menedzer
+	// biezaca jest adresem bramy, z ktora relay rozmawia teraz. Zmienia sie
+	// przy przelaczeniu, wiec nie da sie go trzymac w options.
+	biezaca atomic.Pointer[string]
 	buffer  *Buffer
 	log     *slog.Logger
 
@@ -51,8 +61,9 @@ type Relay struct {
 	// w trybie buforowania jest konczona, zeby agent polaczyl sie na nowo
 	// i wrocil do przekazywania na zywo; inaczej zostalaby w tym trybie
 	// do konca swojego zycia, mimo ze centrala znowu odpowiada.
-	sesje    map[string]context.CancelFunc
-	upstream atomic.Bool
+	sesje     map[string]context.CancelFunc
+	upstream  atomic.Bool
+	tozsamosc atomic.Pointer[materialRelaya]
 }
 
 func New(options Options) *Relay {
@@ -60,15 +71,31 @@ func New(options Options) *Relay {
 	if log == nil {
 		log = slog.Default()
 	}
+	adresy := options.UpstreamURLs
+	if len(adresy) == 0 {
+		adresy = []string{options.UpstreamURL}
+	}
 	relay := &Relay{
 		options: options, log: log,
+		bramy:  endpoints.Nowy(adresy, endpoints.MinBackoff, endpoints.MaxBackoff),
 		buffer: NewBuffer(options.BufferBytes),
 		sesje:  map[string]context.CancelFunc{},
 	}
+	pierwsza := adresy[0]
+	relay.biezaca.Store(&pierwsza)
+	relay.tozsamosc.Store(&materialRelaya{
+		cert: options.Identity, zaufanie: options.TrustPool,
+	})
 	relay.klient.Store(&klientCentrali{
-		client: klientDoCentrali(options.UpstreamURL, options.Identity, options.TrustPool),
+		client: klientDoCentrali(pierwsza, options.Identity, options.TrustPool),
 	})
 	return relay
+}
+
+// materialRelaya trzyma biezacy certyfikat relaya wobec centrali.
+type materialRelaya struct {
+	cert     tls.Certificate
+	zaufanie *x509.CertPool
 }
 
 // klientCentrali opakowuje klienta, zeby dalo sie go podmienic w calosci.
@@ -107,10 +134,23 @@ func klientDoCentrali(adres string, tozsamosc tls.Certificate,
 // nowym; trwajace strumienie zyja do naturalnego konca, wiec agenci nie
 // traca sesji przez samo odnowienie.
 func (r *Relay) OdswiezTozsamosc(tozsamosc tls.Certificate, zaufanie *x509.CertPool) {
+	r.tozsamosc.Store(&materialRelaya{cert: tozsamosc, zaufanie: zaufanie})
 	r.klient.Store(&klientCentrali{
-		client: klientDoCentrali(r.options.UpstreamURL, tozsamosc, zaufanie),
+		client: klientDoCentrali(*r.biezaca.Load(), tozsamosc, zaufanie),
 	})
 }
+
+// przelaczBrame kieruje relay do innej bramy centrali.
+func (r *Relay) przelaczBrame(adres string) {
+	material := r.tozsamosc.Load()
+	r.biezaca.Store(&adres)
+	r.klient.Store(&klientCentrali{
+		client: klientDoCentrali(adres, material.cert, material.zaufanie),
+	})
+}
+
+// Brama zwraca adres centrali, z ktora relay rozmawia teraz.
+func (r *Relay) Brama() string { return *r.biezaca.Load() }
 
 // centrala zwraca biezacego klienta uslugi agentow.
 func (r *Relay) centrala() agentv1connect.AgentServiceClient {
@@ -383,13 +423,26 @@ func (r *Relay) WatchUpstream(ctx context.Context, interval time.Duration) {
 			if r.upstream.Load() {
 				continue
 			}
+			// Wybor bramy nalezy do menedzera: to on pilnuje kolejnosci
+			// priorytetow i okien ponowien. Relay probuje tej, ktora jest
+			// gotowa, a nie po kolei kazdej przy kazdym tyknieciu.
+			brama, blad := r.bramy.Wybierz(time.Now())
+			if blad != nil || brama == nil {
+				continue
+			}
+			if brama.URL != r.Brama() {
+				r.przelaczBrame(brama.URL)
+			}
 			probeCtx, anuluj := context.WithTimeout(ctx, 10*time.Second)
 			_, err := r.centrala().Ping(probeCtx, connect.NewRequest(&agentv1.PingRequest{}))
 			anuluj()
 			if err != nil {
+				r.bramy.Blad(brama.URL, endpoints.Rozpoznaj(err), time.Now())
 				continue
 			}
+			r.bramy.Sukces(brama.URL, time.Now())
 			r.upstream.Store(true)
+			r.log.Info("lacznosc z centrala potwierdzona", "brama", brama.URL)
 			// Sesje pracujace w trybie buforowania konczymy: agent polaczy sie
 			// ponownie w ciagu sekund i wtedy odeslemy jego bufor w tej samej
 			// sesji, ktora zaczyna sie od Hello.

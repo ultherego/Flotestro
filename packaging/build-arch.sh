@@ -65,7 +65,10 @@ sed -e "s/__WERSJA__/$WERSJA/" -e "s/__SUMY__/${sumy% }/" \
 ( cd "$build" && CARCH="$ARCH" makepkg --nodeps --noconfirm --ignorearch >makepkg.log 2>&1 ) ||
     { cat "$build/makepkg.log" >&2; exit 1; }
 
-pakiet="$(find "$build" -maxdepth 1 -name "flotestro-$SKLADNIK-*.pkg.tar.*" | head -1)"
+# Pakiet debug ma nazwe tak podobna, ze wchodzi w ten sam wzorzec. Wydanie
+# z pusta binarka wygladaloby poprawnie az do instalacji.
+pakiet="$(find "$build" -maxdepth 1 -name "flotestro-$SKLADNIK-*.pkg.tar.*" \
+    ! -name "flotestro-$SKLADNIK-debug-*" | head -1)"
 [ -n "$pakiet" ] || { echo "makepkg nie wyprodukowal pakietu" >&2; exit 1; }
 cp "$pakiet" "$OUT/"
 echo "$OUT/$(basename "$pakiet")"
