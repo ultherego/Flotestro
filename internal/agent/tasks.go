@@ -36,6 +36,10 @@ const (
 	// droge do panelu. Zmiana nie zostaje potwierdzona, wiec host wroci sam
 	// do konfiguracji sprzed niej.
 	RejectNetworkUnreachable = "network_unreachable"
+	// RejectReadOnly oznacza hosta wlaczonego w trybie obserwacji. To nie
+	// jest awaria ani brak zdolnosci: wlasciciel hosta tak go skonfigurowal
+	// i panel ma to zobaczyc jako decyzje, a nie jako usterke.
+	RejectReadOnly = "agent_read_only"
 )
 
 // TaskExecutor wykonuje zadania dostarczone przez control plane.
@@ -55,6 +59,9 @@ type TaskExecutor struct {
 	// sekrety pobiera wartosc sekretu na czas jednej operacji. Nil oznacza
 	// brak sesji z panelem - a bez niej nie ma po co pytac o sekret.
 	sekrety PobranieSekretu
+	// tylkoOdczyt oznacza hosta w trybie obserwacji: agent raportuje fakty
+	// i wykonuje odczyty, ale nie zmienia niczego na hoscie.
+	tylkoOdczyt bool
 }
 
 // PobranieSekretu siega po wartosc sekretu wskazanego w zadaniu.
@@ -70,6 +77,11 @@ func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 		helper: helperClient, journal: journal, facts: facts, log: log,
 		cancels: nowaTablicaAnulowan(),
 	}
+}
+
+// UstawTrybOdczytu wlacza tryb obserwacji: agent nie wykona zadnej mutacji.
+func (e *TaskExecutor) UstawTrybOdczytu(tylkoOdczyt bool) {
+	e.tylkoOdczyt = tylkoOdczyt
 }
 
 // Execute realizuje zadanie i zawsze zwraca wynik - takze wtedy, gdy zadanie
@@ -121,6 +133,12 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	action, payload, err := decodeAction(task)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectUnknownAction, err.Error())
+	}
+	// Tryb obserwacji odrzuca mutacje przed sprawdzeniem czegokolwiek
+	// innego: host, ktory ma tylko patrzec, nie ma prawa nawet sprobowac.
+	if e.tylkoOdczyt && action.Mutating() {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectReadOnly,
+			"agent pracuje w trybie read_only i nie wykonuje zmian")
 	}
 	if capability := action.RequiredCapability(); !facts.Capabilities.Spelnia(capability) {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectCapability,

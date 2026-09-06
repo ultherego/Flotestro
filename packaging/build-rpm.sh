@@ -16,7 +16,8 @@ topdir="$(mktemp -d)"
 trap 'rm -rf "$topdir"' EXIT
 
 case "$SKLADNIK" in
-agent)         cp "$here/agent.env" "$STAGE/agent.env" ;;
+agent)         cp "$here/agent.env" "$STAGE/agent.env"
+               cp "$here/agent.yaml" "$STAGE/agent.yaml" ;;
 control-plane) cp "$here/control-plane.env" "$STAGE/control-plane.env" ;;
 *) echo "nieznany skladnik: $SKLADNIK" >&2; exit 1 ;;
 esac

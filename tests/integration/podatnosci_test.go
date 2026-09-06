@@ -342,13 +342,19 @@ func TestFedoraCzytaUstaleniaZMetadanychHosta(t *testing.T) {
 // TestUbuntuOcenaNiesiePoprawkiProducenta pilnuje, ze dane OVAL Canonical
 // docieraja do oceny jako ustalenia, a nie sama struktura.
 //
-// Wydanie noble ma i podatnosci z poprawka, i takie, ktorych producent nie
-// naprawil. Brak jednych albo drugich znaczylby, ze czegos nie czytamy:
-// samych otwartych - ze gubimy stany z wersja, samych naprawionych - ze
-// gubimy testy bez stanu.
+// Czego test nie sprawdza: liczby podatnosci z poprawka. Host w labie sam
+// instaluje aktualizacje bezpieczenstwa, wiec ta liczba spada do zera przy
+// kazdym pelnym zalataniu - i wtedy zerowy licznik jest poprawna odpowiedzia,
+// a nie objawem gubienia danych. Ze stany z wersja naprawiona sa czytane,
+// pilnuje test jednostkowy parsera.
 func TestUbuntuOcenaNiesiePoprawkiProducenta(t *testing.T) {
 	h := newHarness(t)
 	_, raport := hostDystrybucji(h, "ubuntu")
+
+	if raport.Snapshot == nil || raport.Snapshot.Provider != "ubuntu" ||
+		raport.Snapshot.AdvisoryCount == 0 {
+		t.Fatalf("ocena Ubuntu bez wskazania danych producenta: %+v", raport.Snapshot)
+	}
 
 	zPoprawka, bezPoprawki := 0, 0
 	pakiety := map[string]bool{}
@@ -365,8 +371,16 @@ func TestUbuntuOcenaNiesiePoprawkiProducenta(t *testing.T) {
 		}
 		if ustalenie.FixedVersion != "" {
 			zPoprawka++
+			if ustalenie.VendorFix != "known" {
+				t.Fatalf("poprawka %q opisana jako %q: %+v",
+					ustalenie.FixedVersion, ustalenie.VendorFix, ustalenie)
+			}
 		} else {
 			bezPoprawki++
+			if ustalenie.VendorFix != "unavailable" {
+				t.Fatalf("podatnosc bez poprawki opisana jako %q: %+v",
+					ustalenie.VendorFix, ustalenie)
+			}
 		}
 		// Ubuntu prowadzi bezpieczenstwo po pakiecie zrodlowym, tak samo jak
 		// Debian: porownanie wersji binarnej z ustaleniem zrodlowym potrafi
@@ -383,13 +397,15 @@ func TestUbuntuOcenaNiesiePoprawkiProducenta(t *testing.T) {
 		t.Fatalf("ocena Ubuntu bez ani jednego numeru CVE (%d znalezisk)",
 			len(raport.Findings))
 	}
-	if zPoprawka == 0 {
-		t.Error("ocena Ubuntu bez ani jednej poprawki producenta - " +
-			"stany z wersja naprawiona nie dojechaly")
-	}
 	if bezPoprawki == 0 {
 		t.Error("ocena Ubuntu bez ani jednej podatnosci bez poprawki - " +
 			"testy bez stanu nie dojechaly")
+	}
+	// Podatnosc z poprawka i bez niej to dwie rozne odpowiedzi i nie moga
+	// sie zamieniac miejscami. Ile ktorych jest, zalezy od tego, czy host
+	// jest zalatany - ale zgodnosc obu osi musi byc zawsze.
+	if zPoprawka+bezPoprawki == 0 {
+		t.Fatal("ocena Ubuntu bez ani jednego znaleziska")
 	}
 	// Jeden pakiet zrodlowy daje kilka binarnych: korelacja po samej nazwie
 	// binarnej gubilaby wiekszosc ustalen Canonical.

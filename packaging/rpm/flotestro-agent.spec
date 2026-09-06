@@ -30,6 +30,7 @@ rm -rf %{buildroot}
 install -d -m 0755 %{buildroot}%{_bindir}
 install -m 0755 %{_flotestro_stage}/flotestro-agent        %{buildroot}%{_bindir}/flotestro-agent
 install -m 0755 %{_flotestro_stage}/flotestro-agent-helper %{buildroot}%{_bindir}/flotestro-agent-helper
+install -m 0755 %{_flotestro_stage}/flotestro-agentctl     %{buildroot}%{_bindir}/flotestro-agentctl
 
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -m 0644 %{_flotestro_units}/flotestro-agent.service  %{buildroot}%{_unitdir}/
@@ -37,19 +38,22 @@ install -m 0644 %{_flotestro_units}/flotestro-helper.service %{buildroot}%{_unit
 install -m 0644 %{_flotestro_units}/flotestro-helper.socket  %{buildroot}%{_unitdir}/
 
 install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
-install -m 0640 %{_flotestro_stage}/agent.env %{buildroot}%{_sysconfdir}/flotestro/agent.env
+install -m 0640 %{_flotestro_stage}/agent.yaml %{buildroot}%{_sysconfdir}/flotestro/agent.yaml
+install -m 0640 %{_flotestro_stage}/agent.env  %{buildroot}%{_sysconfdir}/flotestro/agent.env
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-agent
 
 %files
 %{_bindir}/flotestro-agent
 %{_bindir}/flotestro-agent-helper
+%{_bindir}/flotestro-agentctl
 %{_unitdir}/flotestro-agent.service
 %{_unitdir}/flotestro-helper.service
 %{_unitdir}/flotestro-helper.socket
 %dir %{_sysconfdir}/flotestro
 # Konfiguracja nie moze zostac nadpisana przy aktualizacji: zawiera adres
 # panelu i token enrollmentu tego hosta.
+%config(noreplace) %attr(0640, root, flotestro-agent) %{_sysconfdir}/flotestro/agent.yaml
 %config(noreplace) %attr(0640, root, flotestro-agent) %{_sysconfdir}/flotestro/agent.env
 %dir %attr(0700, flotestro-agent, flotestro-agent) %{_sharedstatedir}/flotestro-agent
 
@@ -80,11 +84,12 @@ systemctl stop flotestro-helper.service || :
 # Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go w petli
 # restartow zasmiecaloby dziennik hosta; instalacja konczy sie wtedy
 # wskazowka, a nie cichym bledem.
-if grep -qs '^FLOTESTRO_GATEWAY_URL=.\+' %{_sysconfdir}/flotestro/agent.env; then
+if grep -qs '^\s*-\s*https' %{_sysconfdir}/flotestro/agent.yaml ||
+   grep -qs '^FLOTESTRO_GATEWAY_URL=.\+' %{_sysconfdir}/flotestro/agent.env; then
     systemctl enable --now flotestro-agent.service || :
 else
     systemctl enable flotestro-agent.service || :
-    echo "flotestro-agent: uzupelnij %{_sysconfdir}/flotestro/agent.env i uruchom" >&2
+    echo "flotestro-agent: uzupelnij %{_sysconfdir}/flotestro/agent.yaml i uruchom" >&2
     echo "  systemctl start flotestro-agent.service" >&2
 fi
 

@@ -32,9 +32,13 @@ case "$SKLADNIK" in
 agent)
     install -m 0755 "$STAGE/flotestro-agent"        "$root/usr/bin/flotestro-agent"
     install -m 0755 "$STAGE/flotestro-agent-helper" "$root/usr/bin/flotestro-agent-helper"
+    install -m 0755 "$STAGE/flotestro-agentctl"     "$root/usr/bin/flotestro-agentctl"
     for unit in flotestro-agent.service flotestro-helper.service flotestro-helper.socket; do
         install -m 0644 "$here/systemd/$unit" "$root/lib/systemd/system/$unit"
     done
+    install -m 0640 "$here/agent.yaml" "$root/etc/flotestro/agent.yaml"
+    # agent.env zostaje dla hostow postawionych przed wprowadzeniem YAML-a
+    # i jako miejsce na jednorazowy token enrollmentu.
     install -m 0640 "$here/agent.env" "$root/etc/flotestro/agent.env"
     install -d -m 0700 "$root/var/lib/flotestro-agent"
     nazwa="flotestro-agent"

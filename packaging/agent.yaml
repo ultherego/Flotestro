@@ -1,0 +1,40 @@
+# Konfiguracja agenta Flotestro.
+#
+# Plik jest kanonicznym zrodlem ustawien hosta i jest oznaczony jako
+# konfiguracyjny, wiec aktualizacja pakietu go nie nadpisuje.
+#
+# Czego tu nie ma i nie moze byc:
+#   - tokenu enrollmentu - to sekret jednorazowy, a ten plik przezywa
+#     aktualizacje pakietu i trafia do kopii zapasowych,
+#   - tozsamosci hosta - bierze sie ona z certyfikatu, a nie z tekstu,
+#     ktory kazdy moze przepisac,
+#   - site, environment i wlasciciela - o nich rozstrzyga panel na podstawie
+#     profilu enrollmentu, a nie plik na hoscie.
+schema_version: 1
+
+connection:
+  # Adres uslugi enrollmentu. Uzywany raz, do wydania certyfikatu hosta.
+  enrollment_url: ""
+
+  # Bramy agentow (mTLS) w kolejnosci priorytetu. Agent uzywa pierwszej;
+  # przelaczanie miedzy nimi przychodzi razem z obsluga HA.
+  gateway_urls: []
+
+  # Bundle CA floty do pierwszego polaczenia. Po enrollmencie agent uzywa
+  # kopii zapisanej w katalogu stanu.
+  bootstrap_ca_file: "/var/lib/flotestro-agent/ca.pem"
+
+  connect_timeout: "15s"
+  reconnect_min: "2s"
+  reconnect_max: "2m"
+
+agent:
+  state_dir: "/var/lib/flotestro-agent"
+  inventory_interval: "15m"
+  max_concurrent_tasks: 2
+  # full - host zarzadzany; read_only - host wylacznie obserwowany:
+  # agent raportuje fakty i nie wykona zadnej zmiany.
+  mode: "full"
+
+helper:
+  socket: "/run/flotestro/helper.sock"

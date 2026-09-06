@@ -43,6 +43,10 @@ type SessionOptions struct {
 	// naturalnego zerwania oznaczaloby prace na certyfikacie, ktory wlasnie
 	// zostal zastapiony.
 	Renewed <-chan struct{}
+	// Stan zapisuje na dysk to, co sie z agentem dzieje. Bez tego narzedzie
+	// diagnostyczne na hoscie widzi tylko pliki tozsamosci i nie umie
+	// odpowiedziec, czy agent naprawde rozmawia z panelem.
+	Stan *PisarzStanu
 }
 
 const (
@@ -75,6 +79,9 @@ func Run(ctx context.Context, opts SessionOptions) error {
 		}
 		if err != nil {
 			opts.Log.Warn("sesja zakonczona", "err", err)
+			opts.Stan.Rozlaczony(err.Error(), time.Now())
+		} else {
+			opts.Stan.Rozlaczony("", time.Now())
 		}
 		// Sesja, ktora dzialala dluzej niz minute, nie jest objawem petli bledu.
 		if time.Since(start) > time.Minute {
@@ -182,6 +189,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 
 	opts.Log.Info("sesja nawiazana",
 		"host_id", opts.Identity.HostID, "heartbeat", heartbeatInterval.String())
+	opts.Stan.Polaczony(opts.GatewayURL, time.Now())
 
 	// Send nie jest bezpieczny dla rownoleglych wywolan.
 	var sendMu sync.Mutex
@@ -196,9 +204,13 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		if err != nil {
 			return err
 		}
-		return send(&agentv1.AgentMessage{
+		if err := send(&agentv1.AgentMessage{
 			Payload: &agentv1.AgentMessage_Inventory{Inventory: inventoryToProto(f, rev, raw)},
-		})
+		}); err != nil {
+			return err
+		}
+		opts.Stan.Inwentarz(rev, time.Now())
+		return nil
 	}
 
 	if err := sendInventory(facts); err != nil {
