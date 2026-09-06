@@ -413,6 +413,13 @@ func (h *Harmonogram) Synchronizuj(ctx context.Context, opisy []OpisHosta) {
 
 		snapshot, ustalenia, err := zrodlo.Pobierz(ctx, lista, etag)
 		if errors.Is(err, ErrBezZmian) || (err != nil && strings.Contains(err.Error(), "nie zmienil sie")) {
+			// "Bez zmian" jest potwierdzeniem, a nie brakiem odpowiedzi:
+			// dane sa nadal te, ktore obowiazuja. Bez tego zapisu feed
+			// zmieniajacy sie raz na dobe wygladalby na porzucony.
+			if err := h.store.PotwierdzSnapshot(ctx, zrodlo.Nazwa()); err != nil {
+				h.log.Error("nie odnotowano potwierdzenia feedu",
+					"dostawca", zrodlo.Nazwa(), "err", err)
+			}
 			h.log.Debug("feed bez zmian", "dostawca", zrodlo.Nazwa())
 			continue
 		}

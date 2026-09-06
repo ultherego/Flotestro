@@ -229,6 +229,11 @@ type Snapshot struct {
 	Releases      []string  `json:"releases,omitempty"`
 	AdvisoryCount int       `json:"advisory_count"`
 	FetchedAt     time.Time `json:"fetched_at"`
+	// CheckedAt mowi, kiedy panel ostatni raz potwierdzil, ze te dane sa
+	// nadal aktualne. Feed zmieniajacy sie raz na dobe nie jest nieswiezy
+	// dlatego, ze sie nie zmienil - jest nieswiezy dopiero wtedy, gdy panel
+	// nie umie tego potwierdzic.
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
 	// SourceModifiedAt jest data, ktora podal serwer feedu.
 	SourceModifiedAt *time.Time `json:"source_modified_at,omitempty"`
 	// ETag pozwala nie pobierac danych, ktore sie nie zmienily.
@@ -241,9 +246,17 @@ type Snapshot struct {
 }
 
 // Nieswiezy mowi, czy snapshot jest starszy, niz dopuszcza polityka.
+//
+// Liczy sie ostatnie potwierdzenie, a nie ostatnia zmiana: dane sprzed doby,
+// o ktore panel pytal kwadrans temu, opisuja stan aktualny. Nieswiezy jest
+// dopiero feed, z ktorym panel stracil kontakt.
 func (s Snapshot) Nieswiezy(maksymalnyWiek time.Duration, teraz time.Time) bool {
-	if s.FetchedAt.IsZero() {
+	odniesienie := s.FetchedAt
+	if s.CheckedAt != nil && s.CheckedAt.After(odniesienie) {
+		odniesienie = *s.CheckedAt
+	}
+	if odniesienie.IsZero() {
 		return true
 	}
-	return teraz.Sub(s.FetchedAt) > maksymalnyWiek
+	return teraz.Sub(odniesienie) > maksymalnyWiek
 }

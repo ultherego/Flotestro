@@ -45,7 +45,8 @@ func (s *Store) ZapiszSnapshot(ctx context.Context, snapshot Snapshot,
 	err = tx.QueryRow(ctx, istniejacy, snapshot.Provider, snapshot.Digest).Scan(&identyfikator)
 	if err == nil {
 		const odswiez = `
-			update vuln_snapshots set fetched_at = now(), etag = $2, error = ''
+			update vuln_snapshots set fetched_at = now(), checked_at = now(),
+			                          etag = $2, error = ''
 			where id = $1::uuid`
 		if _, err := tx.Exec(ctx, odswiez, identyfikator, snapshot.ETag); err != nil {
 			return "", err
@@ -64,8 +65,8 @@ func (s *Store) ZapiszSnapshot(ctx context.Context, snapshot Snapshot,
 
 	const wstaw = `
 		insert into vuln_snapshots (provider, digest, releases, advisory_count,
-		                            source_modified_at, etag, active)
-		values ($1, $2, $3, $4, $5, $6, false)
+		                            source_modified_at, etag, active, checked_at)
+		values ($1, $2, $3, $4, $5, $6, false, now())
 		returning id::text`
 	if err := tx.QueryRow(ctx, wstaw, snapshot.Provider, snapshot.Digest, snapshot.Releases,
 		len(ustalenia), snapshot.SourceModifiedAt, snapshot.ETag).Scan(&identyfikator); err != nil {
@@ -134,6 +135,19 @@ func aktywuj(ctx context.Context, tx pgx.Tx, dostawca, identyfikator string) err
 	return err
 }
 
+// PotwierdzSnapshot odnotowuje, ze dane sa nadal aktualne.
+//
+// Feed, ktory sie nie zmienil, nie jest feedem nieswiezym: panel wlasnie
+// o niego zapytal i dostal odpowiedz "bez zmian". Bez tego zapisu zrodlo
+// zmieniajace sie raz na dobe wygladaloby na porzucone po kilku godzinach.
+func (s *Store) PotwierdzSnapshot(ctx context.Context, dostawca string) error {
+	const query = `
+		update vuln_snapshots set checked_at = now(), error = ''
+		where provider = $1 and active`
+	_, err := s.pool.Exec(ctx, query, dostawca)
+	return err
+}
+
 // ZapiszBladPobrania odnotowuje nieudane pobranie, nie ruszajac aktywnego
 // snapshotu.
 func (s *Store) ZapiszBladPobrania(ctx context.Context, dostawca, powod string) error {
@@ -147,12 +161,13 @@ func (s *Store) ZapiszBladPobrania(ctx context.Context, dostawca, powod string) 
 func (s *Store) AktywnySnapshot(ctx context.Context, dostawca string) (Snapshot, error) {
 	const query = `
 		select id::text, provider, digest, releases, advisory_count, fetched_at,
-		       source_modified_at, etag, active, error
+		       checked_at, source_modified_at, etag, active, error
 		from vuln_snapshots where provider = $1 and active`
 	var snapshot Snapshot
 	err := s.pool.QueryRow(ctx, query, dostawca).Scan(&snapshot.ID, &snapshot.Provider,
 		&snapshot.Digest, &snapshot.Releases, &snapshot.AdvisoryCount, &snapshot.FetchedAt,
-		&snapshot.SourceModifiedAt, &snapshot.ETag, &snapshot.Active, &snapshot.Error)
+		&snapshot.CheckedAt, &snapshot.SourceModifiedAt, &snapshot.ETag,
+		&snapshot.Active, &snapshot.Error)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Snapshot{Provider: dostawca}, ErrBrakSnapshotu
 	}
@@ -163,7 +178,7 @@ func (s *Store) AktywnySnapshot(ctx context.Context, dostawca string) (Snapshot,
 func (s *Store) Snapshoty(ctx context.Context) ([]Snapshot, error) {
 	const query = `
 		select id::text, provider, digest, releases, advisory_count, fetched_at,
-		       source_modified_at, etag, active, error
+		       checked_at, source_modified_at, etag, active, error
 		from vuln_snapshots where active order by provider`
 	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
@@ -175,8 +190,8 @@ func (s *Store) Snapshoty(ctx context.Context) ([]Snapshot, error) {
 		var snapshot Snapshot
 		if err := rows.Scan(&snapshot.ID, &snapshot.Provider, &snapshot.Digest,
 			&snapshot.Releases, &snapshot.AdvisoryCount, &snapshot.FetchedAt,
-			&snapshot.SourceModifiedAt, &snapshot.ETag, &snapshot.Active,
-			&snapshot.Error); err != nil {
+			&snapshot.CheckedAt, &snapshot.SourceModifiedAt, &snapshot.ETag,
+			&snapshot.Active, &snapshot.Error); err != nil {
 			return nil, err
 		}
 		snapshoty = append(snapshoty, snapshot)
