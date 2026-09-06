@@ -9,6 +9,12 @@ import (
 )
 
 // zamowienieView odwzorowuje zamowienie enrollmentu.
+// krokView odwzorowuje jeden krok instalacji.
+type krokView struct {
+	Key   string `json:"key"`
+	State string `json:"state"`
+}
+
 type zamowienieView struct {
 	ID                string    `json:"id"`
 	Token             string    `json:"token"`
@@ -22,7 +28,8 @@ type zamowienieView struct {
 	Uses              int       `json:"uses"`
 	Status            string    `json:"status"`
 	EnrolledHostID    string    `json:"enrolled_host_id"`
-	ExpiresAt         time.Time `json:"expires_at"`
+	ExpiresAt         time.Time  `json:"expires_at"`
+	Steps             []krokView `json:"steps"`
 }
 
 // TestZamowienieEnrollmentuPokazujeTokenRaz pilnuje, ze jawny token istnieje
@@ -248,4 +255,56 @@ func TestWycofanyHostNieWracaTokenem(t *testing.T) {
 	// Kwarantanny wycofanego hosta tez nie ma po co zdejmowac.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": "proba powrotu"}, nil, http.StatusConflict)
+}
+
+// TestPostepInstalacjiOpisujeKroki pilnuje, ze ekran instalacji dostaje
+// prawde o tym, co host juz zrobil.
+//
+// Kroki sa osobne, bo kazdy zawodzi z innego powodu: token moze wygasnac,
+// certyfikat moze zostac odrzucony przy bledzie CSR, sesja moze nie dojsc
+// przez zapore, a inwentarz moze nie przyjsc, gdy agent nie ma zdolnosci.
+func TestPostepInstalacjiOpisujeKroki(t *testing.T) {
+	h := newHarness(t)
+	var utworzone zamowienieView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "test krokow", "site": "lab", "environment": "test",
+	}, &utworzone, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+utworzone.ID+"/revoke",
+			nil, nil, 0)
+	})
+
+	var przed zamowienieView
+	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &przed)
+	if len(przed.Steps) != 4 {
+		t.Fatalf("krokow = %d: %+v", len(przed.Steps), przed.Steps)
+	}
+	for _, krok := range przed.Steps {
+		if krok.State != "waiting" {
+			t.Fatalf("krok %s przed instalacja = %q", krok.Key, krok.State)
+		}
+	}
+
+	// Maszyna syntetyczna rejestruje sie i na tym poprzestaje: nie laczy sie
+	// sesja i nie przysyla inwentarza, wiec dwa pierwsze kroki maja byc
+	// zrobione, a dwa kolejne dalej czekac.
+	host := h.zarejestrujSyntetycznyHostZamowieniem(t, utworzone.Token)
+	var po zamowienieView
+	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &po)
+	stany := map[string]string{}
+	for _, krok := range po.Steps {
+		stany[krok.Key] = krok.State
+	}
+	if stany["token"] != "done" || stany["certificate"] != "done" {
+		t.Fatalf("kroki po rejestracji = %v", stany)
+	}
+	if stany["connected"] != "waiting" || stany["inventory"] != "waiting" {
+		t.Errorf("host bez sesji pokazany jako polaczony: %v", stany)
+	}
+	if po.EnrolledHostID != host.ID {
+		t.Fatalf("zamowienie wskazuje hosta %q, chcemy %q", po.EnrolledHostID, host.ID)
+	}
+	if po.Status != "enrolled" {
+		t.Fatalf("status po rejestracji = %q", po.Status)
+	}
 }

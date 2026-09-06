@@ -89,6 +89,74 @@ func (s *Server) tworzZamowienie(r *http.Request, req zamowienieRequest, aktor,
 	})
 }
 
+// krokInstalacji jest jednym etapem widocznym na ekranie instalacji.
+//
+// Etapy sa osobne, bo kazdy z nich zawodzi z innego powodu i inaczej sie go
+// naprawia: token moze wygasnac, certyfikat moze zostac odrzucony przy bledzie
+// CSR, sesja moze nie dojsc przez zaporę, a inwentarz moze nie przyjsc, gdy
+// agent nie ma jeszcze zdolnosci.
+type krokInstalacji struct {
+	Key   string `json:"key"`
+	State string `json:"state"`
+}
+
+// Etapy instalacji hosta.
+const (
+	KrokToken      = "token"
+	KrokCertyfikat = "certificate"
+	KrokPolaczenie = "connected"
+	KrokInwentarz  = "inventory"
+	StanCzeka      = "waiting"
+	StanZrobione   = "done"
+	StanNieudany   = "failed"
+)
+
+// zamowienieZKrokami dokleda do zamowienia postep instalacji.
+type zamowienieZKrokami struct {
+	*enrollment.Zamowienie
+	Steps []krokInstalacji `json:"steps"`
+}
+
+// krokiInstalacji liczy postep instalacji z tego, co panel naprawde widzi.
+//
+// Nic tu nie jest deklaracja agenta: token zuzyty wynika z licznika uzyc,
+// certyfikat z zapisanego hosta, sesja ze stanu polaczenia, a inwentarz
+// z fragmentow, ktore juz doszly.
+func (s *Server) krokiInstalacji(r *http.Request,
+	zamowienie *enrollment.Zamowienie) []krokInstalacji {
+	nieudane := zamowienie.Status == enrollment.StatusWygasl ||
+		zamowienie.Status == enrollment.StatusUniewazniony ||
+		zamowienie.Status == enrollment.StatusNieudany
+
+	stanKroku := func(zrobiony bool) string {
+		switch {
+		case zrobiony:
+			return StanZrobione
+		case nieudane:
+			// Zamowienie zamkniete bez tego kroku juz go nie wykona.
+			return StanNieudany
+		default:
+			return StanCzeka
+		}
+	}
+
+	kroki := []krokInstalacji{
+		{Key: KrokToken, State: stanKroku(zamowienie.Uses > 0)},
+		{Key: KrokCertyfikat, State: stanKroku(zamowienie.EnrolledHostID != "")},
+	}
+	polaczony, zInwentarzem := false, false
+	if zamowienie.EnrolledHostID != "" {
+		if host, err := s.hosts.Get(r.Context(), zamowienie.EnrolledHostID); err == nil && host != nil {
+			polaczony = host.ConnectionState == "online"
+			zInwentarzem = host.CurrentInventoryRevision != ""
+		}
+	}
+	kroki = append(kroki,
+		krokInstalacji{Key: KrokPolaczenie, State: stanKroku(polaczony)},
+		krokInstalacji{Key: KrokInwentarz, State: stanKroku(zInwentarzem)})
+	return kroki
+}
+
 // handleListEnrollmentRequests pokazuje oczekujace i zamkniete instalacje.
 func (s *Server) handleListEnrollmentRequests(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermHostEnrollRead, authz.GlobalScope,
@@ -118,7 +186,9 @@ func (s *Server) handleGetEnrollmentRequest(w http.ResponseWriter, r *http.Reque
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, zamowienie)
+	writeJSON(w, http.StatusOK, zamowienieZKrokami{
+		Zamowienie: zamowienie, Steps: s.krokiInstalacji(r, zamowienie),
+	})
 }
 
 // handleRevokeEnrollmentRequest natychmiast blokuje pozostale uzycia.

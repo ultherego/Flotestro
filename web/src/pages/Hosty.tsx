@@ -11,6 +11,12 @@ import { Blad, Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Pusto, StanPolaczenia } 
  * pobiera calej floty do pamieci przegladarki, zeby ja przefiltrowac.
  */
 export function Hosty() {
+  const uprawnienia = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<{ permissions: string[] }>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const mozeDodac = (uprawnienia.data?.permissions ?? []).includes("host.enroll.create");
   const [site, setSite] = useState("");
   const [environment, setEnvironment] = useState("");
   const [osFamily, setOsFamily] = useState("");
@@ -35,7 +41,13 @@ export function Hosty() {
 
   return (
     <>
-      <h1>Hosts</h1>
+      <div className="naglowek-z-akcja">
+        <h1>Hosts</h1>
+        {/* Odnosnik widzi ten, kto moze zamowic instalacje; pozostalym
+            prowadzilby wylacznie do odmowy. O tym, co wolno, i tak
+            rozstrzyga serwer. */}
+        {mozeDodac && <Link to="/hosts/new" className="przycisk">Add host</Link>}
+      </div>
       <p className="podtytul">Filters are applied server-side.</p>
 
       <div className="filtry">

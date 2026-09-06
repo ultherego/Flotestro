@@ -405,6 +405,12 @@ func (h *harness) zarejestrujSyntetycznyHost(t *testing.T) hostView {
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
 		"description": "host syntetyczny testu", "site": "lab", "environment": "test",
 	}, &zamowienie, http.StatusCreated)
+	return h.zarejestrujSyntetycznyHostZamowieniem(t, zamowienie.Token)
+}
+
+// zarejestrujSyntetycznyHostZamowieniem uzywa tokenu, ktory juz istnieje.
+func (h *harness) zarejestrujSyntetycznyHostZamowieniem(t *testing.T, token string) hostView {
+	t.Helper()
 
 	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -419,7 +425,7 @@ func (h *harness) zarejestrujSyntetycznyHost(t *testing.T) hostView {
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
 	tresc, err := json.Marshal(map[string]any{
-		"enrollmentToken": zamowienie.Token,
+		"enrollmentToken": token,
 		"machineId":       maszyna,
 		"hostname":        maszyna,
 		"csrPem":          csrPEM,

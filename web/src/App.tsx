@@ -5,6 +5,7 @@ import type { Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { Pulpit } from "./pages/Pulpit";
 import { Hosty } from "./pages/Hosty";
+import { DodajHost } from "./pages/DodajHost";
 import { UkladHosta } from "./pages/host/Uklad";
 import { Przeglad } from "./pages/host/Przeglad";
 import { Pakiety } from "./pages/host/Pakiety";
@@ -113,6 +114,8 @@ export function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Pulpit />} />
           <Route path="/hosts" element={<Hosty />} />
+          {/* Sciezka jest przed trasa hosta, bo "new" nie jest identyfikatorem. */}
+          <Route path="/hosts/new" element={<DodajHost />} />
           <Route path="/security" element={<BezpieczenstwoFloty />} />
           <Route path="/certificates" element={<CertyfikatyFloty />} />
           <Route path="/backups" element={<KopieFloty />} />

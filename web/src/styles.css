@@ -161,6 +161,26 @@ pre {
 .formularz label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tekst-slaby); }
 .formularz textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
 
+/* Ekran instalacji hosta: dwie kolumny pol i lista krokow z poleceniami.
+   Polecenia stoja w bloku monospace, zeby dalo sie je przepisac bez pomylki
+   - i zeby bylo widac, ze token nie jest ich czescia. */
+.naglowek-z-akcja { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.naglowek-z-akcja h1 { margin: 0; }
+a.przycisk {
+  border: 1px solid var(--obramowanie); border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; color: var(--tekst); text-decoration: none;
+}
+a.przycisk:hover { background: var(--tlo-hover); }
+.siatka-dwie { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.kroki { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.kroki pre {
+  margin: 6px 0 0; padding: 8px 10px; overflow-x: auto;
+  border: 1px solid var(--obramowanie); border-radius: 6px;
+  background: var(--tlo); font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.operacje button.drugorzedny { color: var(--tekst-slaby); }
+
 /* Komunikat wymagajacy decyzji uzytkownika, np. ponownego uwierzytelnienia. */
 .ostrzezenie {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
