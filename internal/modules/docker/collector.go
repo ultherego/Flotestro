@@ -70,8 +70,78 @@ func Collect(ctx context.Context, client *Client) Snapshot {
 		snapshot.Volumes = wolumeny
 	}
 
+	powiazUzycie(&snapshot)
 	snapshot.Summary = podsumuj(snapshot, snapshot.Summary)
 	return snapshot
+}
+
+// powiazUzycie wypelnia uzycie sieci i wolumenow z listy kontenerow.
+//
+// Silnik nie odpowiada na to pytanie: w liscie sieci zwraca pusta mape
+// kontenerow, a rozmiar i licznik odwolan wolumenu podaje dopiero przy
+// osobnym rachunku miejsca. Bez tego wyliczenia kazda siec i kazdy wolumen
+// wygladalyby na porzucone - a to one trafiaja pod sprzatanie.
+//
+// Liczy sie takze kontener zatrzymany: wolumen zatrzymanego kontenera nie
+// jest wolumenem niczyim.
+func powiazUzycie(snapshot *Snapshot) {
+	poNazwie := map[string]int{}
+	poID := map[string]int{}
+	for i := range snapshot.Networks {
+		poNazwie[snapshot.Networks[i].Name] = i
+		poID[snapshot.Networks[i].ID] = i
+	}
+	wolumeny := map[string]int{}
+	for i := range snapshot.Volumes {
+		wolumeny[snapshot.Volumes[i].Name] = i
+	}
+
+	for _, kontener := range snapshot.Containers {
+		for _, podlaczenie := range kontener.Networks {
+			indeks, ok := poNazwie[podlaczenie.Name]
+			if !ok {
+				indeks, ok = poID[podlaczenie.ID]
+			}
+			if !ok {
+				// Siec zniknela miedzy jednym zapytaniem a drugim. Kontener
+				// mowi o niej prawde, ale nie ma jej do czego dopisac.
+				continue
+			}
+			siec := &snapshot.Networks[indeks]
+			siec.Containers = append(siec.Containers, NetworkMember{
+				ID: kontener.ID, Name: kontener.Name, State: kontener.State,
+				IPv4: podlaczenie.IPv4,
+			})
+			siec.InUse = true
+		}
+		for _, montowanie := range kontener.Mounts {
+			if montowanie.Type != "volume" || montowanie.Name == "" {
+				continue
+			}
+			indeks, ok := wolumeny[montowanie.Name]
+			if !ok {
+				continue
+			}
+			wolumen := &snapshot.Volumes[indeks]
+			wolumen.UsedBy = append(wolumen.UsedBy, VolumeMount{
+				ContainerID: kontener.ID, ContainerName: kontener.Name,
+				State: kontener.State, Destination: montowanie.Destination,
+				ReadOnly: montowanie.ReadOnly,
+			})
+			wolumen.InUse = true
+		}
+	}
+
+	for i := range snapshot.Networks {
+		sort.Slice(snapshot.Networks[i].Containers, func(a, b int) bool {
+			return snapshot.Networks[i].Containers[a].Name < snapshot.Networks[i].Containers[b].Name
+		})
+	}
+	for i := range snapshot.Volumes {
+		sort.Slice(snapshot.Volumes[i].UsedBy, func(a, b int) bool {
+			return snapshot.Volumes[i].UsedBy[a].ContainerName < snapshot.Volumes[i].UsedBy[b].ContainerName
+		})
+	}
 }
 
 // podsumuj liczy sygnaly decyzyjne. Podsumowanie nie jest metryka: mowi, czy
@@ -82,6 +152,18 @@ func podsumuj(snapshot Snapshot, podstawa Summary) Summary {
 	podsumowanie.Images = len(snapshot.Images)
 	podsumowanie.Networks = len(snapshot.Networks)
 	podsumowanie.Volumes = len(snapshot.Volumes)
+	for _, siec := range snapshot.Networks {
+		// Siec wbudowana nie jest kandydatem do sprzatania, wiec nie ma jej
+		// w liczniku - inaczej kazdy host mialby trzy sieci "do usuniecia".
+		if !siec.InUse && !siec.Predefined {
+			podsumowanie.NetworksUnused++
+		}
+	}
+	for _, wolumen := range snapshot.Volumes {
+		if !wolumen.InUse {
+			podsumowanie.VolumesUnused++
+		}
+	}
 
 	projekty := map[string]*Project{}
 	for _, kontener := range snapshot.Containers {

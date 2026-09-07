@@ -41,6 +41,12 @@ const (
 	// hosta niz ten, ktory host ma teraz. To nie jest wada zlecenia ani
 	// awaria wykonania: to zmiana, ktora w miedzyczasie zaszla.
 	ErrorPreconditionFailed = "precondition_failed"
+	// Odmowy sprzatania silnika kontenerow. Rozne powody, bo rozne sa
+	// wnioski: obiektu w uzyciu nie usuwa sie do czasu zatrzymania uslugi,
+	// a sieci wbudowanej nie usuwa sie nigdy.
+	ErrorDockerInUse         = "docker_object_in_use"
+	ErrorDockerPredefined    = "docker_network_predefined"
+	ErrorDockerObjectMissing = "docker_object_missing"
 )
 
 // WriteMessage zapisuje wiadomosc poprzedzona 4-bajtowa dlugoscia.

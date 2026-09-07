@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -154,6 +155,14 @@ func (c *Client) Containers(ctx context.Context, all bool) ([]Container, error) 
 			Destination string `json:"Destination"`
 			RW          bool   `json:"RW"`
 		} `json:"Mounts"`
+		NetworkSettings struct {
+			Networks map[string]struct {
+				NetworkID         string   `json:"NetworkID"`
+				IPAddress         string   `json:"IPAddress"`
+				GlobalIPv6Address string   `json:"GlobalIPv6Address"`
+				Aliases           []string `json:"Aliases"`
+			} `json:"Networks"`
+		} `json:"NetworkSettings"`
 	}
 	if err := c.get(ctx, "/containers/json", query, &surowe); err != nil {
 		return nil, err
@@ -184,6 +193,18 @@ func (c *Client) Containers(ctx context.Context, all bool) ([]Container, error) 
 				Destination: mount.Destination, ReadOnly: !mount.RW,
 			})
 		}
+		// Przynaleznosc do sieci czytamy stad, a nie z listy sieci: silnik
+		// w liscie sieci zwraca pusta mape kontenerow, wiec kazda siec
+		// wygladalaby na nieuzywana.
+		for nazwa, siec := range wpis.NetworkSettings.Networks {
+			kontener.Networks = append(kontener.Networks, ContainerNetwork{
+				Name: nazwa, ID: siec.NetworkID, IPv4: siec.IPAddress,
+				IPv6: siec.GlobalIPv6Address, Aliases: siec.Aliases,
+			})
+		}
+		sort.Slice(kontener.Networks, func(i, j int) bool {
+			return kontener.Networks[i].Name < kontener.Networks[j].Name
+		})
 		kontenery = append(kontenery, kontener)
 	}
 	return kontenery, nil
@@ -238,18 +259,28 @@ func (c *Client) Images(ctx context.Context) ([]Image, error) {
 }
 
 // Networks zwraca sieci Dockera.
+//
+// Uzycie sieci nie pochodzi stad: silnik w liscie sieci zwraca pusta mape
+// kontenerow, wiec kazda siec wygladalaby na nieuzywana. Wylicza je kolektor
+// z listy kontenerow.
 func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 	var surowe []struct {
-		ID     string `json:"Id"`
-		Name   string `json:"Name"`
-		Driver string `json:"Driver"`
-		Scope  string `json:"Scope"`
-		IPAM   struct {
+		ID         string    `json:"Id"`
+		Name       string    `json:"Name"`
+		Driver     string    `json:"Driver"`
+		Scope      string    `json:"Scope"`
+		Created    time.Time `json:"Created"`
+		EnableIPv6 bool      `json:"EnableIPv6"`
+		Internal   bool      `json:"Internal"`
+		Attachable bool      `json:"Attachable"`
+		Ingress    bool      `json:"Ingress"`
+		IPAM       struct {
 			Config []struct {
-				Subnet string `json:"Subnet"`
+				Subnet  string `json:"Subnet"`
+				Gateway string `json:"Gateway"`
 			} `json:"Config"`
 		} `json:"IPAM"`
-		Containers map[string]any `json:"Containers"`
+		Labels map[string]string `json:"Labels"`
 	}
 	if err := c.get(ctx, "/networks", nil, &surowe); err != nil {
 		return nil, err
@@ -258,25 +289,52 @@ func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 	for _, wpis := range surowe {
 		siec := Network{
 			ID: wpis.ID, Name: wpis.Name, Driver: wpis.Driver, Scope: wpis.Scope,
-			InUse: len(wpis.Containers) > 0,
+			CreatedAt: wpis.Created.UTC(), IPv6: wpis.EnableIPv6,
+			Internal: wpis.Internal, Attachable: wpis.Attachable, Ingress: wpis.Ingress,
+			Labels:     etykietyBezSekretow(wpis.Labels),
+			Predefined: siecWbudowana(wpis.Name),
+			Compose:    wpis.Labels["com.docker.compose.project"],
 		}
 		for _, config := range wpis.IPAM.Config {
 			if config.Subnet != "" {
 				siec.Subnets = append(siec.Subnets, config.Subnet)
 			}
+			if config.Gateway != "" {
+				siec.Gateways = append(siec.Gateways, config.Gateway)
+			}
 		}
 		sieci = append(sieci, siec)
 	}
+	sort.Slice(sieci, func(i, j int) bool { return sieci[i].Name < sieci[j].Name })
 	return sieci, nil
 }
 
+// siecWbudowana mowi, czy siec nalezy do silnika. Silnik nie pozwala jej
+// usunac, wiec panel nie moze tego proponowac ani probowac.
+func siecWbudowana(nazwa string) bool {
+	switch nazwa {
+	case "bridge", "host", "none":
+		return true
+	}
+	return false
+}
+
 // Volumes zwraca wolumeny Dockera.
+//
+// Uzycie i rozmiar nie pochodza z tego zapytania: silnik podaje UsageData
+// tylko przy osobnym, drogim rachunku miejsca. Uzycie wylicza kolektor
+// z montowan kontenerow, a rozmiar zostaje nieznany z podanym powodem -
+// zero sugerowaloby wolumen pusty i gotowy do skasowania.
 func (c *Client) Volumes(ctx context.Context) ([]Volume, error) {
 	var odpowiedz struct {
 		Volumes []struct {
-			Name       string `json:"Name"`
-			Driver     string `json:"Driver"`
-			Mountpoint string `json:"Mountpoint"`
+			Name       string            `json:"Name"`
+			Driver     string            `json:"Driver"`
+			Mountpoint string            `json:"Mountpoint"`
+			Scope      string            `json:"Scope"`
+			CreatedAt  time.Time         `json:"CreatedAt"`
+			Labels     map[string]string `json:"Labels"`
+			Options    map[string]string `json:"Options"`
 			UsageData  *struct {
 				Size     int64 `json:"Size"`
 				RefCount int64 `json:"RefCount"`
@@ -288,18 +346,24 @@ func (c *Client) Volumes(ctx context.Context) ([]Volume, error) {
 	}
 	wolumeny := make([]Volume, 0, len(odpowiedz.Volumes))
 	for _, wpis := range odpowiedz.Volumes {
-		wolumen := Volume{Name: wpis.Name, Driver: wpis.Driver, Mountpoint: wpis.Mountpoint}
-		if wpis.UsageData != nil {
-			// Rozmiar -1 oznacza, ze silnik go nie liczyl. Zapisanie go jako
-			// zera sugerowaloby pusty wolumen gotowy do skasowania.
-			if wpis.UsageData.Size >= 0 {
-				rozmiar := wpis.UsageData.Size
-				wolumen.SizeBytes = &rozmiar
-			}
-			wolumen.InUse = wpis.UsageData.RefCount > 0
+		wolumen := Volume{
+			Name: wpis.Name, Driver: wpis.Driver, Mountpoint: wpis.Mountpoint,
+			Scope: wpis.Scope, CreatedAt: wpis.CreatedAt.UTC(),
+			Labels:  etykietyBezSekretow(wpis.Labels),
+			Options: wpis.Options,
+			Compose: wpis.Labels["com.docker.compose.project"],
+			// Rozmiar liczy sie przejsciem po calym wolumenie, wiec silnik
+			// nie podaje go w tym zapytaniu.
+			SizeReason: "silnik nie podaje rozmiaru bez rachunku miejsca",
+		}
+		if wpis.UsageData != nil && wpis.UsageData.Size >= 0 {
+			rozmiar := wpis.UsageData.Size
+			wolumen.SizeBytes = &rozmiar
+			wolumen.SizeReason = ""
 		}
 		wolumeny = append(wolumeny, wolumen)
 	}
+	sort.Slice(wolumeny, func(i, j int) bool { return wolumeny[i].Name < wolumeny[j].Name })
 	return wolumeny, nil
 }
 

@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"time"
 
@@ -113,6 +114,12 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 		digest, err = client.PullImage(actionCtx, action.GetImageReference())
 		wynik.ImageDigest = digest
 	case helperv1.DockerActionRequest_OPERATION_PRUNE:
+		// Nazwy i identyfikatory trafiaja do sciezki zapytania Engine API,
+		// a helper dziala jako root: panel juz je sprawdzil, ale helper nie
+		// moze ufac tresci wiadomosci.
+		if powod := sprawdzListeSprzatania(action); powod != "" {
+			return reject(ErrorMalformed, powod)
+		}
 		wynik, err = docker.Prune(actionCtx, client,
 			action.GetImageIds(), action.GetVolumeNames(), action.GetNetworkIds())
 	default:
@@ -133,11 +140,47 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 		ImageDigest:    wynik.ImageDigest,
 	}
 	if err != nil {
-		response := reject(ErrorExecFailed, err.Error())
+		response := reject(kodBleduDockera(err), err.Error())
 		response.DockerActionResult = odpowiedz
 		return response
 	}
 	return &helperv1.HelperResponse{Accepted: true, DockerActionResult: odpowiedz}
+}
+
+// sprawdzListeSprzatania powtarza walidacje panelu dla obiektow sprzatania.
+// Zwraca pusty tekst, gdy lista jest w porzadku.
+func sprawdzListeSprzatania(action *helperv1.DockerActionRequest) string {
+	for _, id := range action.GetImageIds() {
+		if !identyfikatorObrazu.MatchString(id) {
+			return "nieprawidlowy identyfikator obrazu"
+		}
+	}
+	for _, nazwa := range action.GetVolumeNames() {
+		if !nazwaWolumenu.MatchString(nazwa) {
+			return "nieprawidlowa nazwa wolumenu"
+		}
+	}
+	for _, id := range action.GetNetworkIds() {
+		if !identyfikatorKontenera.MatchString(id) {
+			return "nieprawidlowy identyfikator sieci"
+		}
+	}
+	return ""
+}
+
+// kodBleduDockera rozdziela odmowe od awarii. Operator, ktory prosil
+// o usuniecie wolumenu w uzyciu, ma zobaczyc, ze host odmowil - a nie, ze
+// wykonanie sie nie powiodlo.
+func kodBleduDockera(err error) string {
+	switch {
+	case errors.Is(err, docker.ErrWUzyciu):
+		return ErrorDockerInUse
+	case errors.Is(err, docker.ErrSiecWbudowana):
+		return ErrorDockerPredefined
+	case errors.Is(err, docker.ErrNieIstnieje):
+		return ErrorDockerObjectMissing
+	}
+	return ErrorExecFailed
 }
 
 // wymagaKontenera mowi, czy operacja dotyczy konkretnego kontenera.
@@ -152,9 +195,13 @@ func wymagaKontenera(operation helperv1.DockerActionRequest_Operation) bool {
 	return false
 }
 
-// identyfikatorKontenera powtarza walidacje panelu. Helper nie ufa tresci
-// wiadomosci, bo dziala jako root.
-var identyfikatorKontenera = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+// Wzorce powtarzaja walidacje panelu. Helper nie ufa tresci wiadomosci, bo
+// dziala jako root, a te wartosci trafiaja do sciezki zapytania Engine API.
+var (
+	identyfikatorKontenera = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+	identyfikatorObrazu    = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+	nazwaWolumenu          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+)
 
 // zakoduj zamienia stan kontenera na JSON. Brak kontenera zostaje pusty:
 // kontener usuniety nie ma stanu po operacji i nie wolno go zmyslac.

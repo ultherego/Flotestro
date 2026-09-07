@@ -2,10 +2,12 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Result opisuje wynik operacji na silniku kontenerow.
@@ -138,6 +140,20 @@ func Prune(ctx context.Context, client *Client, images, volumes, networks []stri
 	var odzyskane int64
 	var znaneRozmiary bool
 
+	// Stan hosta czytamy przed usunieciem - i po to, zeby moc odmowic.
+	// Silnik odmowilby sam, ale komunikatem o konflikcie HTTP; operator ma
+	// dostac nazwy kontenerow, ktore z tego obiektu korzystaja.
+	stan := Snapshot{}
+	if len(volumes) > 0 || len(networks) > 0 {
+		var err error
+		if stan, err = stanDoSprzatania(ctx, client); err != nil {
+			return wynik, err
+		}
+		if err := sprawdzSprzatanie(stan, volumes, networks); err != nil {
+			return wynik, err
+		}
+	}
+
 	// Rozmiary sa liczone przed usunieciem: po fakcie nie ma juz czego mierzyc.
 	rozmiary := map[string]int64{}
 	if obrazy, err := client.Images(ctx); err == nil {
@@ -146,11 +162,9 @@ func Prune(ctx context.Context, client *Client, images, volumes, networks []stri
 		}
 	}
 	wolumeny := map[string]int64{}
-	if lista, err := client.Volumes(ctx); err == nil {
-		for _, wolumen := range lista {
-			if wolumen.SizeBytes != nil {
-				wolumeny[wolumen.Name] = *wolumen.SizeBytes
-			}
+	for _, wolumen := range stan.Volumes {
+		if wolumen.SizeBytes != nil {
+			wolumeny[wolumen.Name] = *wolumen.SizeBytes
 		}
 	}
 
@@ -187,6 +201,109 @@ func Prune(ctx context.Context, client *Client, images, volumes, networks []stri
 		wynik.ReclaimedBytes = &odzyskane
 	}
 	return wynik, nil
+}
+
+// Bledy odmowy sprzatania. Sa czescia kontraktu: helper tlumaczy je na kody,
+// ktore panel pokazuje operatorowi.
+var (
+	// ErrWUzyciu oznacza obiekt, z ktorego korzysta kontener. Usuniecie
+	// wolumenu w uzyciu to utrata danych dzialajacej uslugi.
+	ErrWUzyciu = errors.New("obiekt jest w uzyciu")
+	// ErrSiecWbudowana oznacza siec nalezaca do silnika. Silnik nie pozwala
+	// jej usunac i nie ma powodu probowac.
+	ErrSiecWbudowana = errors.New("siec wbudowana silnika")
+	// ErrNieIstnieje oznacza obiekt, ktorego na hoscie nie ma. Cisza byla by
+	// gorsza: operator uznalby, ze cos usunal.
+	ErrNieIstnieje = errors.New("obiekt nie istnieje na tym hoscie")
+)
+
+// stanDoSprzatania czyta to, co rozstrzyga o dopuszczalnosci sprzatania:
+// listy sieci i wolumenow razem z uzyciem wyliczonym z kontenerow.
+func stanDoSprzatania(ctx context.Context, client *Client) (Snapshot, error) {
+	stan := Snapshot{}
+	kontenery, err := client.Containers(ctx, true)
+	if err != nil {
+		return stan, fmt.Errorf("lista kontenerow: %w", err)
+	}
+	stan.Containers = kontenery
+	if sieci, err := client.Networks(ctx); err == nil {
+		stan.Networks = sieci
+	} else {
+		return stan, fmt.Errorf("lista sieci: %w", err)
+	}
+	if lista, err := client.Volumes(ctx); err == nil {
+		stan.Volumes = lista
+	} else {
+		return stan, fmt.Errorf("lista wolumenow: %w", err)
+	}
+	powiazUzycie(&stan)
+	return stan, nil
+}
+
+// sprawdzSprzatanie odmawia, zanim cokolwiek zniknie.
+//
+// Sprzatanie jest jedna operacja: gdyby pierwszy wolumen zniknal, a drugi
+// okazal sie zajety, operator zostalby ze stanem w polowie. Dlatego cala
+// lista jest sprawdzana z gory.
+func sprawdzSprzatanie(stan Snapshot, volumes, networks []string) error {
+	for _, nazwa := range volumes {
+		wolumen := wolumenPoNazwie(stan.Volumes, nazwa)
+		if wolumen == nil {
+			return fmt.Errorf("wolumen %s: %w", nazwa, ErrNieIstnieje)
+		}
+		if wolumen.InUse {
+			return fmt.Errorf("wolumen %s montuje %s: %w",
+				nazwa, nazwyKontenerowWolumenu(*wolumen), ErrWUzyciu)
+		}
+	}
+	for _, id := range networks {
+		siec := siecPoID(stan.Networks, id)
+		if siec == nil {
+			return fmt.Errorf("siec %s: %w", skrotID(id), ErrNieIstnieje)
+		}
+		if siec.Predefined {
+			return fmt.Errorf("siec %s: %w", siec.Name, ErrSiecWbudowana)
+		}
+		if siec.InUse {
+			return fmt.Errorf("do sieci %s podlaczone sa %s: %w",
+				siec.Name, nazwyKontenerowSieci(*siec), ErrWUzyciu)
+		}
+	}
+	return nil
+}
+
+func wolumenPoNazwie(lista []Volume, nazwa string) *Volume {
+	for i := range lista {
+		if lista[i].Name == nazwa {
+			return &lista[i]
+		}
+	}
+	return nil
+}
+
+func siecPoID(lista []Network, id string) *Network {
+	for i := range lista {
+		if lista[i].ID == id {
+			return &lista[i]
+		}
+	}
+	return nil
+}
+
+func nazwyKontenerowWolumenu(wolumen Volume) string {
+	nazwy := make([]string, 0, len(wolumen.UsedBy))
+	for _, uzycie := range wolumen.UsedBy {
+		nazwy = append(nazwy, uzycie.ContainerName)
+	}
+	return strings.Join(nazwy, ", ")
+}
+
+func nazwyKontenerowSieci(siec Network) string {
+	nazwy := make([]string, 0, len(siec.Containers))
+	for _, kontener := range siec.Containers {
+		nazwy = append(nazwy, kontener.Name)
+	}
+	return strings.Join(nazwy, ", ")
 }
 
 // skrotID skraca identyfikator do dlugosci czytelnej w wyniku operacji.
