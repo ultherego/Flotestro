@@ -143,6 +143,9 @@ export type Campaign = {
   failure_threshold_absolute: number;
   reboot_policy: string;
   requires_approval: boolean;
+  // Odcisk tego, co zatwierdzajacy widzi: operacja, payload, lista hostow
+  // i polityka rozwijania. Zgoda musi go podac.
+  approval_fingerprint: string;
   created_by: string;
   approved_by?: string;
   paused_by?: string;

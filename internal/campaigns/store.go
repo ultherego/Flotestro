@@ -66,20 +66,30 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	state := StateQueuedOrApproval(spec.RequiresApproval)
 	campaignID := uuid.NewString()
 
+	// Odcisk powstaje z tego samego opisu, ktory trafia do bazy. Zatwierdzenie
+	// bedzie musialo go podac, wiec zgoda dotyczy tej listy hostow i tej
+	// polityki, a nie samego identyfikatora kampanii.
+	odcisk, err := Odcisk(spec, hosts)
+	if err != nil {
+		return nil, err
+	}
+
 	const insert = `
 		insert into campaigns (id, name, action_type, payload, selector, state,
 		                       canary_size, wave_size, max_concurrent,
 		                       failure_threshold_percent, failure_threshold_absolute,
 		                       maintenance_start, maintenance_end, reboot_policy,
 		                       health_check_units, job_timeout_seconds,
-		                       requires_approval, created_by, request_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`
+		                       requires_approval, created_by, request_id,
+		                       approval_fingerprint)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`
 	if _, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
 		string(state), spec.CanarySize, spec.WaveSize, spec.MaxConcurrent,
 		spec.FailureThresholdPercent, spec.FailureThresholdAbsolute,
 		spec.MaintenanceStart, spec.MaintenanceEnd, string(spec.RebootPolicy),
 		healthChecks, spec.JobTimeoutSeconds,
-		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID)); err != nil {
+		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID),
+		odcisk); err != nil {
 		return nil, fmt.Errorf("utworzenie kampanii: %w", err)
 	}
 
@@ -299,7 +309,7 @@ const campaignColumns = `
 	       canary_size, wave_size, max_concurrent,
 	       failure_threshold_percent, failure_threshold_absolute,
 	       maintenance_start, maintenance_end, reboot_policy, health_check_units,
-	       job_timeout_seconds, requires_approval,
+	       job_timeout_seconds, requires_approval, approval_fingerprint,
 	       coalesce(approved_by, ''), approved_at, coalesce(paused_by, ''),
 	       coalesce(pause_reason, ''), coalesce(canceled_by, ''),
 	       created_by, coalesce(request_id, ''), started_at, finished_at, created_at, updated_at
@@ -322,7 +332,7 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.CanarySize, &c.WaveSize, &c.MaxConcurrent,
 			&c.FailureThresholdPercent, &c.FailureThresholdAbsolute,
 			&c.MaintenanceStart, &c.MaintenanceEnd, &c.RebootPolicy, &c.HealthCheckUnits,
-			&c.JobTimeoutSeconds, &c.RequiresApproval,
+			&c.JobTimeoutSeconds, &c.RequiresApproval, &c.ApprovalFingerprint,
 			&c.ApprovedBy, &c.ApprovedAt, &c.PausedBy, &c.PauseReason, &c.CanceledBy,
 			&c.CreatedBy, &c.RequestID, &c.StartedAt, &c.FinishedAt,
 			&c.CreatedAt, &c.UpdatedAt); err != nil {

@@ -49,6 +49,10 @@ const (
 	// jest awaria ani brak zdolnosci: wlasciciel hosta tak go skonfigurowal
 	// i panel ma to zobaczyc jako decyzje, a nie jako usterke.
 	RejectReadOnly = "agent_read_only"
+	// RejectResourceBusy oznacza zadanie, ktore czekalo na zasob hosta i go
+	// nie doczekalo. To nie jest awaria: host pracuje, tylko nad czyms innym,
+	// czego ta operacja nie moze robic rownolegle.
+	RejectResourceBusy = "resource_busy"
 )
 
 // TaskExecutor wykonuje zadania dostarczone przez control plane.

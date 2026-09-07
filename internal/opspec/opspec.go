@@ -268,6 +268,32 @@ const (
 	LockBackup = "backup"
 )
 
+// CampaignMode mowi, czy i jak operacja moze dzialac na wielu hostach naraz.
+//
+// Kazda operacja deklaruje go jawnie, a domyslna wartoscia jest brak. Dodanie
+// nowej operacji do rejestru nie otwiera jej wiec dla calej floty: brak
+// metadanych znaczy odmowe, a nie "ten sam payload wszedzie".
+type CampaignMode string
+
+const (
+	// CampaignNone oznacza operacje niedozwolona masowo. Nie jest to brak
+	// funkcji, tylko swiadoma odmowa: usuniecie pakietu, wyczyszczenie dysku
+	// albo wylaczenie hosta ma jeden cel, ktorego operator wpisuje z reki.
+	CampaignNone CampaignMode = "none"
+	// CampaignSamePayload oznacza operacje, ktorej intencja jest przenosna:
+	// ten sam payload znaczy to samo na kazdym hoscie, a preflight i
+	// weryfikacja i tak dzieja sie osobno.
+	CampaignSamePayload CampaignMode = "same_payload"
+	// CampaignPerHostPlan oznacza wspolny stan docelowy, z ktorego kazdy host
+	// wylicza wlasny plan. Dwa hosty wybrane tym samym zamowieniem prawie
+	// nigdy nie maja tego samego diffu, wiec zatwierdzenie musi dotyczyc
+	// zestawu planow, a nie jednego payloadu.
+	CampaignPerHostPlan CampaignMode = "per_host_plan"
+	// CampaignSpecialized oznacza operacje z wlasna maszyna stanow: restart
+	// rozlicza sie powrotem hosta, enrollment ma wlasne etapy.
+	CampaignSpecialized CampaignMode = "specialized"
+)
+
 // Spec jest pelnym kontraktem jednej operacji.
 type Spec struct {
 	Action         ActionType `json:"action"`
@@ -279,6 +305,9 @@ type Spec struct {
 	DefaultTimeout int        `json:"default_timeout_seconds"`
 	MaxOutputBytes uint64     `json:"max_output_bytes"`
 	LockClass      string     `json:"lock_class,omitempty"`
+	// CampaignMode mowi, czy operacja moze dzialac masowo i na jakich
+	// zasadach. Brak deklaracji znaczy odmowe.
+	CampaignMode CampaignMode `json:"campaign_mode"`
 	// RequiresPlan oznacza operacje, ktorej nie wolno zlecic bez planu
 	// zatwierdzonego przez czlowieka. Hash planu wiaze zatwierdzenie
 	// z konkretnym diffem.
@@ -298,6 +327,7 @@ func (a ActionType) Describe() Spec {
 		DefaultTimeout: spec.timeoutSeconds,
 		MaxOutputBytes: spec.maxOutputBytes,
 		LockClass:      spec.lockClass,
+		CampaignMode:   a.CampaignMode(),
 		RequiresPlan:   spec.requiresPlan,
 	}
 }
@@ -315,6 +345,15 @@ func (a ActionType) Risk() RiskLevel {
 // LockClass zwraca klase zasobu hosta uzywanego na wylacznosc.
 func (a ActionType) LockClass() string {
 	return actionSpecs[a].lockClass
+}
+
+// CampaignMode zwraca tryb pracy masowej. Nieznana operacja i operacja bez
+// deklaracji dostaja odmowe: brak metadanych nie moze znaczyc zgody.
+func (a ActionType) CampaignMode() CampaignMode {
+	if tryb, ok := trybyMasowe[a]; ok {
+		return tryb
+	}
+	return CampaignNone
 }
 
 // MaxOutputBytes ogranicza rozmiar wyniku operacji.

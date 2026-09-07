@@ -51,6 +51,21 @@ export function Kampanie() {
   );
 }
 
+/** Operacja w rejestrze: to serwer mowi, co wolno robic masowo. */
+type Operacja = {
+  action: string;
+  mutating: boolean;
+  campaign_mode: string;
+  campaign_ready: boolean;
+};
+
+/**
+ * Operacje, dla ktorych kreator umie zbudowac payload. Rejestr moze
+ * dopuszczac wiecej, niz ten formularz potrafi opisac - i wtedy operacja jest
+ * widoczna, ale nieaktywna. Ukrycie jej wygladaloby jak brak funkcji.
+ */
+const OPERACJE_KREATORA = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
+
 /**
  * Kreator kampanii. Ostatni krok pokazuje dokladnie, ile hostow zostanie
  * objetych zmiana, zanim cokolwiek powstanie.
@@ -70,6 +85,15 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
   const [politykaRestartu, setPolitykaRestartu] = useState("never");
   const [blad, setBlad] = useState("");
 
+  // Lista operacji masowych pochodzi z serwera, a nie z tego pliku. To rejestr
+  // operacji decyduje, co wolno robic cala flota, i to on wie, ze nowa
+  // operacja nie otwiera sie masowo sama z siebie.
+  const operacje = useQuery({
+    queryKey: ["actions"],
+    queryFn: () => api.get<{ items: Operacja[] }>("/api/v1/actions"),
+  });
+  const masowe = (operacje.data?.items ?? []).filter((pozycja) => pozycja.campaign_ready);
+
   // Podglad celow: operator widzi liste hostow przed utworzeniem kampanii.
   const parametry = new URLSearchParams({ limit: "500" });
   if (site) parametry.set("site", site);
@@ -84,7 +108,7 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
       api.post<Campaign>("/api/v1/campaigns", {
         name: nazwa,
         action: akcja,
-        payload: akcja === "unit.restart" ? { unit: { unit: jednostka } } : { package_upgrade: {} },
+        payload: { unit: { unit: jednostka } },
         selector: { site: site || undefined, environment: environment || undefined },
         canary_size: canary,
         wave_size: fala,
@@ -101,7 +125,7 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
   });
 
   const liczbaCelow = podglad.data?.count ?? 0;
-  const gotowe = nazwa && (akcja !== "unit.restart" || jednostka) && liczbaCelow > 0;
+  const gotowe = nazwa && jednostka && liczbaCelow > 0;
 
   return (
     <div className="kafelek" style={{ marginTop: 16, maxWidth: 760 }}>
@@ -109,13 +133,26 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
       <div className="filtry">
         <input placeholder="campaign name" value={nazwa} onChange={(e) => setNazwa(e.target.value)} style={{ minWidth: 240 }} />
         <select value={akcja} onChange={(e) => setAkcja(e.target.value)}>
-          <option value="unit.restart">unit.restart</option>
-          <option value="packages.upgrade">packages.upgrade</option>
+          {masowe.map((pozycja) => (
+            <option
+              key={pozycja.action}
+              value={pozycja.action}
+              disabled={!OPERACJE_KREATORA.includes(pozycja.action)}
+            >
+              {pozycja.action}
+              {OPERACJE_KREATORA.includes(pozycja.action) ? "" : " — no bulk form yet"}
+            </option>
+          ))}
         </select>
-        {akcja === "unit.restart" && (
-          <input placeholder="unit, e.g. cron.service" value={jednostka} onChange={(e) => setJednostka(e.target.value)} />
-        )}
+        <input placeholder="unit, e.g. cron.service" value={jednostka} onChange={(e) => setJednostka(e.target.value)} />
       </div>
+      {/* Operacja, ktora liczy inny plan na kazdym hoscie, nie moze udawac
+          jednego payloadu. Kreator jej nie pokazuje, a nie ukrywa powodu. */}
+      <p className="podtytul">
+        Operations that compute a different plan on every host — package upgrades, files, network,
+        firewall, storage — are not here. A campaign would approve one payload while every host
+        needs its own; run them from the host workspace until per-host plans land.
+      </p>
       <div className="filtry">
         <input placeholder="site" value={site} onChange={(e) => setSite(e.target.value)} />
         <input placeholder="environment" value={environment} onChange={(e) => setEnvironment(e.target.value)} />

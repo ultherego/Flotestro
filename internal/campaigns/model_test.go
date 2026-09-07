@@ -1,6 +1,7 @@
 package campaigns
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -129,4 +130,64 @@ func TestWalidacjaSpecu(t *testing.T) {
 			t.Fatal("okno konczace sie przed startem przeszlo walidacje")
 		}
 	})
+}
+
+// TestOdciskZmieniaSieZKazdaDecyzja pilnuje, po co odcisk istnieje: zgoda ma
+// dotyczyc dokladnie tego, co zatwierdzajacy zobaczyl. Kazda zmiana, ktora
+// przesuwa ryzyko, musi go uniewaznic.
+func TestOdciskZmieniaSieZKazdaDecyzja(t *testing.T) {
+	podstawa := Spec{
+		Name: "restart", ActionType: "unit.restart",
+		Payload:       json.RawMessage(`{"unit":{"unit":"cron.service"}}`),
+		CanarySize:    1,
+		WaveSize:      5,
+		MaxConcurrent: 2, FailureThresholdPercent: 20, RebootPolicy: RebootNever,
+	}
+	hosty := []TargetHost{{ID: "host-b"}, {ID: "host-a"}}
+
+	odcisk, err := Odcisk(podstawa, hosty)
+	if err != nil {
+		t.Fatalf("odcisk: %v", err)
+	}
+	if odcisk == "" {
+		t.Fatal("pusty odcisk")
+	}
+
+	// Kolejnosc hostow w migawce nie jest decyzja.
+	inaczej, err := Odcisk(podstawa, []TargetHost{{ID: "host-a"}, {ID: "host-b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inaczej != odcisk {
+		t.Error("kolejnosc hostow zmienila odcisk")
+	}
+
+	zmiany := map[string]func(*Spec, *[]TargetHost){
+		"inny host": func(_ *Spec, hosty *[]TargetHost) {
+			*hosty = append(*hosty, TargetHost{ID: "host-c"})
+		},
+		"inny payload": func(s *Spec, _ *[]TargetHost) {
+			s.Payload = json.RawMessage(`{"unit":{"unit":"ssh.service"}}`)
+		},
+		"inna operacja":     func(s *Spec, _ *[]TargetHost) { s.ActionType = "unit.stop" },
+		"wiecej rownolegle": func(s *Spec, _ *[]TargetHost) { s.MaxConcurrent = 50 },
+		"wieksza fala":      func(s *Spec, _ *[]TargetHost) { s.WaveSize = 500 },
+		"brak canary":       func(s *Spec, _ *[]TargetHost) { s.CanarySize = 0 },
+		"wyzszy prog":       func(s *Spec, _ *[]TargetHost) { s.FailureThresholdPercent = 100 },
+		"restart hostow":    func(s *Spec, _ *[]TargetHost) { s.RebootPolicy = RebootAlways },
+	}
+	for nazwa, zmien := range zmiany {
+		t.Run(nazwa, func(t *testing.T) {
+			zmieniona := podstawa
+			cele := append([]TargetHost(nil), hosty...)
+			zmien(&zmieniona, &cele)
+			inny, err := Odcisk(zmieniona, cele)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inny == odcisk {
+				t.Error("zmiana nie uniewaznila odcisku zatwierdzenia")
+			}
+		})
+	}
 }

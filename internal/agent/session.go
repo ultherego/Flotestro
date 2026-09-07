@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -318,6 +319,9 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// pakietow nie moze zajac calej puli i zatrzymac operacji, ktore trwaja
 	// milisekundy.
 	miejsca := nowyBudzet(opts.MaxConcurrentTasks)
+	// Blokady zasobow sa druga warstwa obok budzetu: budzet mowi, ile zadan
+	// host uniesie, a zamki - ktore z nich nie moga isc obok siebie.
+	zasoby := noweZamki()
 
 	receiveErr := make(chan error, 1)
 	zglosBlad := func(err error) {
@@ -383,11 +387,41 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				// trwa, a heartbeat i kolejne zadania nie moga na niego czekac.
 				task := payload.Task
 				go func() {
+					// Najpierw zasoby, potem miejsce w budzecie: zadanie
+					// czekajace na zajety zasob nie ma powodu trzymac miejsca,
+					// ktore przydaloby sie operacji bez kolizji.
+					roszczenia := roszczeniaZadania(task)
+					oddajZasoby, powod := zajmijZasoby(sessionCtx, zasoby, task, roszczenia)
+					if powod != "" {
+						// Odmowa z nazwa blokujacego zadania jest odpowiedzia;
+						// cisza do konca limitu czasu operacji nia nie jest.
+						odmowa := rejected(agentv1.TaskResult_STATUS_REJECTED,
+							RejectResourceBusy, powod)
+						odmowa.TaskId = task.GetTaskId()
+						opts.Log.Info("zadanie odrzucone przez blokade zasobu",
+							"task_id", task.GetTaskId(), "powod", powod)
+						if err := send(&agentv1.AgentMessage{
+							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: odmowa},
+						}); err != nil {
+							opts.Log.Error("nie odeslano odmowy zadania",
+								"task_id", task.GetTaskId(), "err", err)
+						}
+						return
+					}
+					if oddajZasoby == nil {
+						return
+					}
+					defer oddajZasoby()
+
 					zwolnij := miejsca.zajmij(sessionCtx, klasaZadania(task))
 					if zwolnij == nil {
 						return
 					}
 					defer zwolnij()
+					if len(roszczenia) > 0 {
+						opts.Log.Info("zasoby zajete", "task_id", task.GetTaskId(),
+							"roszczenia", strings.Join(roszczenia, ","))
+					}
 					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
 					// Wymiana agenta nie ma wyniku do odeslania: proces,
 					// ktory ja wykonal, wlasnie jest zastepowany, a o tym,

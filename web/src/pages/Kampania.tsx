@@ -37,7 +37,13 @@ export function Kampania() {
 
   const steruj = useMutation({
     mutationFn: (operacja: string) =>
-      api.post(`/api/v1/campaigns/${id}/${operacja}`, { reason: "z panelu" }),
+      api.post(`/api/v1/campaigns/${id}/${operacja}`, {
+        reason: "z panelu",
+        // Zatwierdzenie niesie odcisk kampanii, ktora wlasnie widac. Gdy
+        // kampania zmienila sie od jej wczytania, serwer odmawia zamiast
+        // przenosic zgode na cos innego.
+        approval_fingerprint: kampania.data?.approval_fingerprint,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaign", id] });
       queryClient.invalidateQueries({ queryKey: ["campaign-targets", id] });
@@ -76,6 +82,9 @@ export function Kampania() {
         <Para etykieta="Failure threshold">{dane.failure_threshold_percent}% or {dane.failure_threshold_absolute} hosts</Para>
         <Para etykieta="Reboot policy">{dane.reboot_policy}</Para>
         <Para etykieta="Approved by">{dane.approved_by || "—"}</Para>
+        <Para etykieta="Approval fingerprint">
+          <span title={dane.approval_fingerprint}>{dane.approval_fingerprint.slice(0, 16) || "—"}</span>
+        </Para>
         <Para etykieta="Paused by">{dane.paused_by || "—"}</Para>
         <Para etykieta="Pause reason">{dane.pause_reason || "—"}</Para>
         <Para etykieta="Created"><Czas wartosc={dane.created_at} /></Para>

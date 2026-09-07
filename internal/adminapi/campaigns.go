@@ -35,6 +35,23 @@ type createCampaignRequest struct {
 	HealthCheckUnits         []string   `json:"health_check_units,omitempty"`
 	JobTimeoutSeconds        *int       `json:"job_timeout_seconds,omitempty"`
 	RequiresApproval         *bool      `json:"requires_approval,omitempty"`
+	// Reason uzasadnia kampanie o najwyzszym ryzyku i trafia do audytu.
+	Reason string `json:"reason,omitempty"`
+}
+
+// powodOdmowyTrybu tlumaczy odmowe na zdanie, z ktorego operator wie, co
+// zrobic dalej. Odmowa bez powodu wyglada jak brak funkcji w produkcie.
+func powodOdmowyTrybu(action opspec.ActionType) string {
+	switch action.CampaignMode() {
+	case opspec.CampaignPerHostPlan:
+		return "this operation computes a different plan on every host, " +
+			"and a campaign cannot yet approve a set of per-host plans; run it host by host"
+	case opspec.CampaignSpecialized:
+		return "this operation needs its own multi-step sequence, " +
+			"which the campaign engine does not run yet; run it host by host"
+	default:
+		return "this operation is not available for campaigns; run it host by host"
+	}
 }
 
 // handleCreateCampaign planuje kampanie. Selektor jest natychmiast zamieniany
@@ -59,6 +76,14 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	if action.RequiresTargetConfirmation() {
 		problem(w, http.StatusBadRequest, "not_a_campaign_action",
 			"this operation is irreversible and needs its target named; run it host by host")
+		return
+	}
+	// Tryb masowy jest deklaracja operacji, a nie wnioskiem z jej ryzyka.
+	// Brak deklaracji znaczy odmowe: dopisanie nowej operacji do rejestru nie
+	// moze samo z siebie otwierac jej dla calej floty.
+	if !opspec.TrybWykonywalny(action) {
+		problem(w, http.StatusBadRequest, "campaign_mode_unsupported",
+			powodOdmowyTrybu(action))
 		return
 	}
 
@@ -123,12 +148,25 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Kampania nie moze byc droga naokolo bramki pojedynczego hosta. Ta sama
+	// operacja zlecona z reki wymaga swiezego uwierzytelnienia, wiec zlecona
+	// na cala flote wymaga go tym bardziej.
+	var dowodStepUp map[string]any
+	if action.RequiresFreshAuth() {
+		dowod, ok := s.requireStepUp(w, r, principal, request.Reason,
+			"campaign.create", "campaign", "")
+		if !ok {
+			return
+		}
+		dowodStepUp = dowod
+	}
+
 	spec := campaigns.Spec{
 		Name:                     request.Name,
 		ActionType:               string(action),
 		Payload:                  request.Payload,
 		Selector:                 selector,
-		CanarySize:               valueOr(request.CanarySize, 1),
+		CanarySize:               canaryOr(request.CanarySize, 1),
 		WaveSize:                 valueOr(request.WaveSize, 10),
 		MaxConcurrent:            valueOr(request.MaxConcurrent, 5),
 		FailureThresholdPercent:  valueOr(request.FailureThresholdPercent, 20),
@@ -164,12 +202,14 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "campaign.create", TargetType: "campaign", TargetID: campaign.ID,
 		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
+		Detail: withStepUp(map[string]any{
 			"name": campaign.Name, "action_type": campaign.ActionType,
-			"targets": len(targets), "skipped_in_maintenance": wSerwisie,
+			"campaign_mode": string(action.CampaignMode()),
+			"targets":       len(targets), "skipped_in_maintenance": wSerwisie,
 			"canary_size": campaign.CanarySize,
 			"wave_size":   campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
-		},
+			"approval_fingerprint": campaign.ApprovalFingerprint,
+		}, dowodStepUp),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -305,6 +345,31 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := authz.FromContext(r.Context())
+
+	// Zgoda dotyczy tego, co zatwierdzajacy zobaczyl: tej operacji, tego
+	// payloadu, tej listy hostow i tej polityki rozwijania. Odcisk jest
+	// jedynym dowodem, ze patrzyl na to samo - bez niego zgoda odnosilaby sie
+	// do samego identyfikatora kampanii.
+	var request struct {
+		ApprovalFingerprint string `json:"approval_fingerprint"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request)
+	}
+	if request.ApprovalFingerprint != campaign.ApprovalFingerprint {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: principal.Subject,
+			Action: "campaign.approve", TargetType: "campaign", TargetID: campaign.ID,
+			Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": "fingerprint_mismatch", "expected": campaign.ApprovalFingerprint,
+				"provided": request.ApprovalFingerprint,
+			},
+		})
+		problem(w, http.StatusConflict, "fingerprint_mismatch",
+			"the campaign changed since it was reviewed; re-read it and approve the current plan")
+		return
+	}
 
 	// Zasada drugiej osoby obowiazuje takze kampanie, i to tym bardziej:
 	// jedno zatwierdzenie uruchamia zmiane na wielu hostach.
@@ -479,6 +544,17 @@ func (s *Server) campaignNeedsSecondPerson(r *http.Request, campaign *campaigns.
 		}
 	}
 	return false
+}
+
+// canaryOr rozni sie od valueOr jedna rzecza: zero jest tu decyzja, a nie
+// brakiem wartosci. Kampania bez canary jest sensowna - i tak wlasnie
+// wyglada domyslny profil operacji odwracalnych. Ciche podstawienie jedynki
+// zmienialoby polityke, o ktora operator prosil.
+func canaryOr(value *int, fallback int) int {
+	if value == nil || *value < 0 {
+		return fallback
+	}
+	return *value
 }
 
 func valueOr(value *int, fallback int) int {

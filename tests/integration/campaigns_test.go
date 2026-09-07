@@ -4,6 +4,7 @@ package integration
 
 import (
 	"net/http"
+	"sort"
 	"testing"
 	"time"
 )
@@ -15,10 +16,13 @@ type campaignView struct {
 	CanarySize       int    `json:"canary_size"`
 	WaveSize         int    `json:"wave_size"`
 	RequiresApproval bool   `json:"requires_approval"`
-	CreatedBy        string `json:"created_by"`
-	ApprovedBy       string `json:"approved_by"`
-	PausedBy         string `json:"paused_by"`
-	PauseReason      string `json:"pause_reason"`
+	// Odcisk tego, co zatwierdzajacy widzi. Zgoda bez niego dotyczylaby
+	// samego identyfikatora kampanii.
+	ApprovalFingerprint string `json:"approval_fingerprint"`
+	CreatedBy           string `json:"created_by"`
+	ApprovedBy          string `json:"approved_by"`
+	PausedBy            string `json:"paused_by"`
+	PauseReason         string `json:"pause_reason"`
 }
 
 type campaignTargetView struct {
@@ -27,6 +31,7 @@ type campaignTargetView struct {
 	Wave      int    `json:"wave"`
 	State     string `json:"state"`
 	ErrorCode string `json:"error_code"`
+	JobID     string `json:"job_id"`
 }
 
 type campaignReportView struct {
@@ -51,6 +56,16 @@ func (h *harness) createCampaign(body map[string]any) campaignView {
 			map[string]any{"reason": "koniec testu"}, nil, 0)
 	})
 	return campaign
+}
+
+// approveCampaign zatwierdza kampanie jej wlasnym odciskiem.
+func (h *harness) approveCampaign(campaign campaignView) campaignView {
+	h.t.Helper()
+	var zatwierdzona campaignView
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint},
+		&zatwierdzona, http.StatusOK)
+	return zatwierdzona
 }
 
 func (h *harness) campaign(id string) campaignView {
@@ -156,7 +171,7 @@ func TestKampaniaCzekaNaZatwierdzenie(t *testing.T) {
 func TestCanaryPoprzedzaKolejneFale(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("canary przed fala", "cron.service", nil))
-	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", nil, nil, http.StatusOK)
+	h.approveCampaign(campaign)
 
 	// W chwili, gdy canary pracuje, kolejne fale musza czekac.
 	deadline := time.Now().Add(60 * time.Second)
@@ -192,7 +207,7 @@ func TestProgBledowWstrzymujeKampanie(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("kampania z bledem", "nieistniejaca-jednostka.service",
 		map[string]any{"failure_threshold_absolute": 1}))
-	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", nil, nil, http.StatusOK)
+	h.approveCampaign(campaign)
 
 	paused := h.awaitCampaign(campaign.ID, map[string]bool{"paused": true}, 90*time.Second)
 	if paused.PauseReason == "" {
@@ -231,7 +246,7 @@ func TestRaportKampaniiOpisujeFale(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("raport", "nieistniejaca-jednostka.service",
 		map[string]any{"failure_threshold_absolute": 1}))
-	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", nil, nil, http.StatusOK)
+	h.approveCampaign(campaign)
 	h.awaitCampaign(campaign.ID, map[string]bool{"paused": true}, 90*time.Second)
 
 	var report campaignReportView
@@ -255,7 +270,7 @@ func TestRaportKampaniiOpisujeFale(t *testing.T) {
 func TestWstrzymanaKampaniaDaSieWznowicIAnulowac(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("sterowanie", "cron.service", nil))
-	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", nil, nil, http.StatusOK)
+	h.approveCampaign(campaign)
 
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/pause",
 		map[string]any{"reason": "test"}, nil, http.StatusOK)
@@ -305,11 +320,14 @@ func TestOperatorNieZatwierdzaKampanii(t *testing.T) {
 			map[string]any{"reason": "koniec testu"}, nil, 0)
 	})
 
+	zgoda := map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint}
 	// Operator prowadzi kampanie, ale jej nie zatwierdza.
-	operator.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", nil, nil, http.StatusForbidden)
+	operator.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		zgoda, nil, http.StatusForbidden)
 	// Approver zatwierdza, ale nie tworzy.
 	approver.do(http.MethodPost, "/api/v1/campaigns", body, nil, http.StatusForbidden)
-	approver.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", nil, nil, http.StatusOK)
+	approver.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		zgoda, nil, http.StatusOK)
 }
 
 // TestKampaniaPozaZakresemJestOdrzucana sprawdza, ze uprawnienie jest badane
@@ -325,4 +343,217 @@ func TestKampaniaPozaZakresemJestOdrzucana(t *testing.T) {
 		labCampaign("poza zakresem", "cron.service", map[string]any{
 			"selector": map[string]any{"host_ids": []string{host.ID}},
 		}), nil, http.StatusForbidden)
+}
+
+// TestKampaniaOdmawiaOperacjiBezTrybuMasowego pilnuje bramki, ktora oddziela
+// operacje jednohostowe od flotowych. Odmowa ma przyjsc przy zlecaniu i miec
+// wlasny kod: kampania, ktora zatwierdza jeden payload dla operacji liczacej
+// inny plan na kazdym hoscie, zatwierdzalaby zmiane, ktorej nikt nie widzial.
+func TestKampaniaOdmawiaOperacjiBezTrybuMasowego(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	przypadki := map[string]map[string]any{
+		// Aktualizacja pakietow liczy inny zestaw na kazdym hoscie.
+		"packages.upgrade": {"package_upgrade": map[string]any{}},
+		// Zapis pliku jest deklaracja stanu, ktory na kazdym hoscie ma inna
+		// zawartosc wyjsciowa.
+		"file.ensure": {"file": map[string]any{
+			"path": "/etc/flotestro-test.conf", "content": "x", "mode": "0644",
+		}},
+	}
+	for akcja, payload := range przypadki {
+		t.Run(akcja, func(t *testing.T) {
+			var odpowiedz struct {
+				Code   string `json:"code"`
+				Detail string `json:"detail"`
+			}
+			h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
+				"name": "tryb masowy " + akcja, "action": akcja, "payload": payload,
+				"selector": map[string]any{"host_ids": []string{host.ID}},
+			}, &odpowiedz, http.StatusBadRequest)
+			if odpowiedz.Code != "campaign_mode_unsupported" {
+				t.Fatalf("kod odmowy = %q (%s)", odpowiedz.Code, odpowiedz.Detail)
+			}
+			if odpowiedz.Detail == "" {
+				t.Error("odmowa bez powodu wyglada jak brak funkcji")
+			}
+		})
+	}
+}
+
+// TestZatwierdzenieDotyczyTegoCoWidac pilnuje inwariantu zgody: zatwierdzenie
+// bez odcisku albo z cudzym odciskiem nie jest zgoda na te kampanie.
+func TestZatwierdzenieDotyczyTegoCoWidac(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	campaign := h.createCampaign(labCampaign("odcisk zgody", "cron.service",
+		map[string]any{"selector": map[string]any{"host_ids": []string{host.ID}}}))
+
+	if campaign.ApprovalFingerprint == "" {
+		t.Fatal("kampania bez odcisku zatwierdzenia")
+	}
+	// Bez odcisku i z cudzym odciskiem: jedno i drugie jest zgoda na cos
+	// innego niz ta kampania.
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		map[string]any{}, nil, http.StatusConflict)
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		map[string]any{"approval_fingerprint": "0000000000000000"}, nil, http.StatusConflict)
+
+	zatwierdzona := h.approveCampaign(campaign)
+	if zatwierdzona.ApprovedBy == "" {
+		t.Fatal("kampania zatwierdzona bez zapisania osoby")
+	}
+}
+
+// TestKampaniaPracujeNaWieluHostachNaraz jest dowodem, ze multitasking
+// naprawde dziala. Limit rownoleglosci wiekszy od jednego ma znaczyc, ze dwa
+// hosty pracuja obok siebie, a nie ze kolejka idzie szybciej.
+func TestKampaniaPracujeNaWieluHostachNaraz(t *testing.T) {
+	h := newHarness(t)
+	// Jedna rodzina systemow: kampania ma pokazac rownoleglosc, a nie
+	// roznice w nazwach jednostek miedzy dystrybucjami.
+	hosty := h.hosts()
+	online := make([]string, 0, len(hosty))
+	for _, host := range hosty {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+
+	// Bez canary i z jedna fala: caly zestaw ma ruszyc naraz.
+	campaign := h.createCampaign(labCampaign("rownoleglosc", "cron.service", map[string]any{
+		"selector":       map[string]any{"host_ids": online},
+		"canary_size":    0,
+		"wave_size":      len(online),
+		"max_concurrent": len(online),
+	}))
+	h.approveCampaign(campaign)
+
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+
+	// Rownoleglosc rozstrzygamy z czasow prob, a nie z odpytywania: dwie
+	// operacje trwajace ulamek sekundy moglyby zmiescic sie miedzy jednym
+	// zapytaniem a drugim, a i tak dzialalyby obok siebie.
+	okna := make([]okno, 0, len(online))
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.JobID == "" {
+			continue
+		}
+		for _, proba := range h.probyZadania(target.JobID) {
+			if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+				continue
+			}
+			okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+		}
+	}
+	if len(okna) < 2 {
+		t.Fatalf("kampania zostawila %d prob z czasami", len(okna))
+	}
+	if !zachodzaNaSiebie(okna) {
+		t.Errorf("zadne dwie proby nie dzialaly obok siebie: %+v", okna)
+	}
+}
+
+type okno struct{ od, do time.Time }
+
+// zachodzaNaSiebie mowi, czy ktorekolwiek dwa okna maja wspolna chwile.
+func zachodzaNaSiebie(okna []okno) bool {
+	for i := range okna {
+		for j := i + 1; j < len(okna); j++ {
+			if okna[i].od.Before(okna[j].do) && okna[j].od.Before(okna[i].do) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// probyZadania zwraca proby wraz z czasami wyslania i zakonczenia.
+func (h *harness) probyZadania(jobID string) []probaZCzasem {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []probaZCzasem `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	return odpowiedz.Items
+}
+
+type probaZCzasem struct {
+	Status       string     `json:"status"`
+	DispatchedAt *time.Time `json:"dispatched_at"`
+	FinishedAt   *time.Time `json:"finished_at"`
+}
+
+// TestKolidujaceOperacjeNaHoscieSaSerializowane pilnuje blokad zasobow hosta.
+//
+// Trzy restarty tej samej jednostki zlecone naraz musza wykonac sie po kolei.
+// Dowod jest w stanie jednostki: kazdy restart widzi przed soba proces, ktory
+// zostawil poprzedni. Gdyby dwa restarty weszly obok siebie, ten lancuch by
+// sie zerwal - a limit zadan hosta sam z siebie tego nie zapewnia, bo klasa
+// ogolna ma wiecej niz jedno miejsce.
+func TestKolidujaceOperacjeNaHoscieSaSerializowane(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	const ile = 3
+	zadania := make([]string, 0, ile)
+	for i := 0; i < ile; i++ {
+		job := h.createOperation(host.ID, map[string]any{
+			"action": "unit.restart", "reason": "test serializacji blokad zasobu",
+			"payload": unitPayload("cron.service"),
+		})
+		if job.RequiresApprova {
+			job = h.approve(job.ID, job.PayloadHash)
+		}
+		zadania = append(zadania, job.ID)
+	}
+
+	type wykonanie struct {
+		koniec     time.Time
+		pidPrzed   uint32
+		pidPo      uint32
+		stanPrzed  string
+		identyfika string
+	}
+	wykonania := make([]wykonanie, 0, ile)
+	for _, jobID := range zadania {
+		zadanie := h.awaitTerminal(jobID, 3*time.Minute)
+		if zadanie.State != "succeeded" {
+			t.Fatalf("restart %s: stan = %s, kod = %s",
+				jobID, zadanie.State, zadanie.ResultErrorCode)
+		}
+		proby := h.attempts(jobID)
+		ostatnia := proby[len(proby)-1]
+		if ostatnia.UnitStateBefore == nil || ostatnia.UnitStateAfter == nil {
+			t.Fatalf("restart %s bez stanu jednostki", jobID)
+		}
+		czasy := h.probyZadania(jobID)
+		koniec := czasy[len(czasy)-1].FinishedAt
+		if koniec == nil {
+			t.Fatalf("restart %s bez czasu zakonczenia", jobID)
+		}
+		wykonania = append(wykonania, wykonanie{
+			koniec: *koniec, pidPrzed: ostatnia.UnitStateBefore.MainPID,
+			pidPo: ostatnia.UnitStateAfter.MainPID, stanPrzed: ostatnia.UnitStateBefore.ActiveState,
+			identyfika: jobID,
+		})
+	}
+
+	sort.Slice(wykonania, func(i, j int) bool {
+		return wykonania[i].koniec.Before(wykonania[j].koniec)
+	})
+	for i := 1; i < len(wykonania); i++ {
+		if wykonania[i].pidPrzed != wykonania[i-1].pidPo {
+			t.Errorf("restart %s zaczal od procesu %d, a poprzedni zostawil %d - operacje weszly na siebie",
+				wykonania[i].identyfika, wykonania[i].pidPrzed, wykonania[i-1].pidPo)
+		}
+	}
 }

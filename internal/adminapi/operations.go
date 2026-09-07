@@ -507,6 +507,14 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		RequiredCapability string `json:"required_capability"`
 		Permission         string `json:"permission"`
 		DefaultTimeout     int    `json:"default_timeout_seconds"`
+		Risk               string `json:"risk"`
+		LockClass          string `json:"lock_class,omitempty"`
+		// CampaignMode mowi, czym operacja jest wobec floty, a CampaignReady -
+		// co panel dzisiaj naprawde umie przeprowadzic. To dwie rozne
+		// informacje: kreator ma pokazywac tylko drugie, a odmowe tlumaczyc
+		// pierwsza.
+		CampaignMode  string `json:"campaign_mode"`
+		CampaignReady bool   `json:"campaign_ready"`
 	}
 	items := make([]actionInfo, 0)
 	for _, action := range opspec.AllActions() {
@@ -516,6 +524,10 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			RequiredCapability: action.RequiredCapability(),
 			Permission:         action.Permission(),
 			DefaultTimeout:     action.DefaultTimeout(),
+			Risk:               string(action.Risk()),
+			LockClass:          action.LockClass(),
+			CampaignMode:       string(action.CampaignMode()),
+			CampaignReady:      opspec.TrybWykonywalny(action),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})

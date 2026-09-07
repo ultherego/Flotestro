@@ -4,8 +4,11 @@
 package campaigns
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -143,6 +146,67 @@ func (s Spec) Validate() error {
 	return nil
 }
 
+// Odcisk liczy odcisk zatwierdzenia kampanii.
+//
+// Zgoda ma dotyczyc dokladnie tego, co operator zobaczyl: tej samej operacji,
+// tego samego payloadu, tej samej listy hostow i tej samej polityki
+// rozwijania. Gdyby odcisk obejmowal sam identyfikator kampanii, zatwierdzenie
+// przenosiloby sie na kazda zmiane, ktora ktos wprowadzilby po drodze.
+//
+// Hosty sa sortowane, bo kolejnosc migawki nie jest decyzja. Wszystko inne
+// wchodzi w takiej postaci, w jakiej zostalo zapisane.
+func Odcisk(spec Spec, targets []TargetHost) (string, error) {
+	hosty := make([]string, 0, len(targets))
+	for _, target := range targets {
+		hosty = append(hosty, target.ID)
+	}
+	sort.Strings(hosty)
+
+	payload := spec.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage("{}")
+	}
+	tresc := struct {
+		Wersja     int             `json:"campaign_version"`
+		Akcja      string          `json:"action"`
+		Payload    json.RawMessage `json:"payload"`
+		Hosty      []string        `json:"targets"`
+		Rozwijanie struct {
+			Canary      int          `json:"canary_size"`
+			Fala        int          `json:"wave_size"`
+			Rownolegle  int          `json:"max_concurrent"`
+			ProgProcent int          `json:"failure_threshold_percent"`
+			ProgLiczba  int          `json:"failure_threshold_absolute"`
+			Restart     RebootPolicy `json:"reboot_policy"`
+			Jednostki   []string     `json:"health_check_units"`
+			LimitCzasu  int          `json:"job_timeout_seconds"`
+			OknoOd      *time.Time   `json:"maintenance_start,omitempty"`
+			OknoDo      *time.Time   `json:"maintenance_end,omitempty"`
+		} `json:"rollout"`
+	}{Wersja: WersjaKampanii, Akcja: spec.ActionType, Payload: payload, Hosty: hosty}
+	tresc.Rozwijanie.Canary = spec.CanarySize
+	tresc.Rozwijanie.Fala = spec.WaveSize
+	tresc.Rozwijanie.Rownolegle = spec.MaxConcurrent
+	tresc.Rozwijanie.ProgProcent = spec.FailureThresholdPercent
+	tresc.Rozwijanie.ProgLiczba = spec.FailureThresholdAbsolute
+	tresc.Rozwijanie.Restart = spec.RebootPolicy
+	tresc.Rozwijanie.Jednostki = spec.HealthCheckUnits
+	tresc.Rozwijanie.LimitCzasu = spec.JobTimeoutSeconds
+	tresc.Rozwijanie.OknoOd = spec.MaintenanceStart
+	tresc.Rozwijanie.OknoDo = spec.MaintenanceEnd
+
+	encoded, err := json.Marshal(tresc)
+	if err != nil {
+		return "", err
+	}
+	suma := sha256.Sum256(encoded)
+	return hex.EncodeToString(suma[:]), nil
+}
+
+// WersjaKampanii jest wersja semantyki kampanii. Zmiana wersji uniewaznia
+// zatwierdzenia: zgoda dotyczyla innych regul.
+const WersjaKampanii = 2
+
 // Campaign jest widokiem kampanii zwracanym przez API.
 type Campaign struct {
 	ID                       string          `json:"id"`
@@ -162,17 +226,20 @@ type Campaign struct {
 	HealthCheckUnits         []string        `json:"health_check_units"`
 	JobTimeoutSeconds        int             `json:"job_timeout_seconds"`
 	RequiresApproval         bool            `json:"requires_approval"`
-	ApprovedBy               string          `json:"approved_by,omitempty"`
-	ApprovedAt               *time.Time      `json:"approved_at,omitempty"`
-	PausedBy                 string          `json:"paused_by,omitempty"`
-	PauseReason              string          `json:"pause_reason,omitempty"`
-	CanceledBy               string          `json:"canceled_by,omitempty"`
-	CreatedBy                string          `json:"created_by"`
-	RequestID                string          `json:"request_id,omitempty"`
-	StartedAt                *time.Time      `json:"started_at,omitempty"`
-	FinishedAt               *time.Time      `json:"finished_at,omitempty"`
-	CreatedAt                time.Time       `json:"created_at"`
-	UpdatedAt                time.Time       `json:"updated_at"`
+	// ApprovalFingerprint jest odciskiem tego, co zatwierdzajacy widzi.
+	// Zgoda podana wobec innego odcisku dotyczy innej kampanii.
+	ApprovalFingerprint string     `json:"approval_fingerprint"`
+	ApprovedBy          string     `json:"approved_by,omitempty"`
+	ApprovedAt          *time.Time `json:"approved_at,omitempty"`
+	PausedBy            string     `json:"paused_by,omitempty"`
+	PauseReason         string     `json:"pause_reason,omitempty"`
+	CanceledBy          string     `json:"canceled_by,omitempty"`
+	CreatedBy           string     `json:"created_by"`
+	RequestID           string     `json:"request_id,omitempty"`
+	StartedAt           *time.Time `json:"started_at,omitempty"`
+	FinishedAt          *time.Time `json:"finished_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // Target jest hostem w kampanii.
