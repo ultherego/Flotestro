@@ -247,6 +247,15 @@ func TestStrefyFirewalldSaOsobnymModelem(t *testing.T) {
 
 func migawkaZaporyHosta(t *testing.T, h *harness, hostID string) migawkaZapory {
 	t.Helper()
+	// Zmiana reguly jest rozliczana odciskiem zestawu, wiec migawka musi
+	// pochodzic z tej chwili, a nie z ostatniego cyklu inwentarza. Poprzedni
+	// przebieg testu zostawia host w innym stanie niz zapisany obraz i plan
+	// odbija sie od precondition_failed.
+	h.runOperation(hostID, map[string]any{
+		"action": "inventory.refresh", "reason": powodZapory,
+		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"firewall"}}},
+	}, 2*time.Minute)
+
 	var fragment inventoryFragment
 	h.do(http.MethodGet, "/api/v1/hosts/"+hostID+"/inventory/firewall", nil, &fragment, http.StatusOK)
 	var stan migawkaZapory

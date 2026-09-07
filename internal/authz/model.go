@@ -207,6 +207,10 @@ const (
 	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
 	// diagnozuje host, a zatrzymywanie ich juz nie.
 	PermDockerRead Permission = "docker.read"
+	// PermDockerEvents pozwala przeczytac dziennik zdarzen silnika. Osobne
+	// od odczytu stanu: stan mowi, jak jest, a dziennik - co sie tu dzialo,
+	// razem z tym, czego stan juz nie pamieta.
+	PermDockerEvents Permission = "docker.events"
 	// Operacje na kontenerach maja osobne uprawnienia: uruchomienie uslugi
 	// i jej usuniecie to dwie rozne decyzje, takze co do tego, kto moze je
 	// podjac.
@@ -294,14 +298,14 @@ const (
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
-		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermProcessRead,
+		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermDockerEvents, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
 		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
-		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead, PermDockerRead,
+		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead, PermDockerRead, PermDockerEvents,
 		// Auditor patrzy na stan systemu, wiec metryki i przeglad CA naleza
 		// do jego pracy; wymiana CA juz nie.
 		PermMetricsRead, PermPKIRead,
@@ -333,7 +337,8 @@ var rolePermissions = map[Role][]Permission{
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		// Operator prowadzi kontenery, ale ich nie kasuje: usuwanie
 		// i sprzatanie sa nieodwracalne i naleza do administratora.
-		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
+		PermDockerRead, PermDockerEvents,
+		PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
 		// Operator planuje wdrozenia projektow, ale ich nie wykonuje.
 		PermComposePlan,
 		// Operator planuje aktualizacje, ale ich nie wykonuje: transakcja
@@ -385,7 +390,8 @@ var rolePermissions = map[Role][]Permission{
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		// Administrator ma takze operacje nieodwracalne na kontenerach.
-		PermDockerRead, PermDockerStart, PermDockerStop, PermDockerRestart,
+		PermDockerRead, PermDockerEvents,
+		PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
 		PermComposePlan, PermComposeDeploy,
 		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,

@@ -462,6 +462,7 @@ message TaskEnvelope {
     ListPackages list_packages = 53;
     AgentUpgrade agent_upgrade = 54;
     RefreshInventory refresh_inventory = 55;
+    ReadDockerEvents read_docker_events = 56;
   }
 }
 
@@ -733,6 +734,7 @@ message TaskResult {
     PackageRepairResult package_repair = 25;
   }
   DockerReadResult docker_result = 26;
+  DockerEventsResult docker_events_result = 49;
   DockerActionResult docker_action_result = 27;
   ComposeResult compose_result = 28;
   LogFileResult log_file_result = 29;
@@ -900,6 +902,24 @@ message DockerRead {}
 
 // DockerReadResult niesie stan silnika w postaci JSON. Struktura nalezy do
 // modulu kontenerow; kontrakt agenta jej nie powtarza.
+// ReadDockerEvents zleca odczyt dziennika zdarzen silnika kontenerow.
+//
+// Odczyt jest zamkniety w oknie czasu i w limitach. Zadanie, ktore czyta
+// zdarzenia "do odwolania", zostaloby na hoscie na zawsze - a operator i tak
+// pyta o to, co stalo sie wokol jednej awarii.
+message ReadDockerEvents {
+  // SinceSeconds mowi, jak daleko wstecz siegnac.
+  uint32 since_seconds = 1;
+  // FollowSeconds przedluza odczyt poza chwile obecna. Zero znaczy sam
+  // dziennik przeszly - zadanie konczy sie od razu.
+  uint32 follow_seconds = 2;
+  // Types ogranicza rodzaje zdarzen: container, image, network, volume.
+  // Pusta lista znaczy wszystkie cztery.
+  repeated string types = 3;
+  // MaxEvents ogranicza liczbe zwroconych zdarzen.
+  uint32 max_events = 4;
+}
+
 // DockerAction zleca jedna operacje na silniku kontenerow.
 message DockerAction {
   enum Operation {
@@ -1527,6 +1547,17 @@ message DockerActionResult {
 message DockerReadResult {
   bytes snapshot = 1;
   string unavailable_reason = 2;
+}
+
+// DockerEventsResult niesie zdarzenia z zamknietego okna czasu.
+message DockerEventsResult {
+  // Zdarzenia w postaci JSON. Struktura nalezy do modulu kontenerow.
+  bytes events = 1;
+  // Truncated oznacza odczyt urwany limitem liczby albo rozmiaru. Urwana
+  // lista bez tego znacznika wygladalaby na kompletna.
+  bool truncated = 2;
+  string truncated_reason = 3;
+  string unavailable_reason = 4;
 }
 
 message UnitStatusResult {

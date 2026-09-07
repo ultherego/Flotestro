@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -114,6 +115,60 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 	// Odpowiedzi silnika bywaja duze: lista obrazow na hoscie budowlanym
 	// potrafi miec megabajty. Limit chroni pamiec agenta i helpera.
 	return json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(out)
+}
+
+// errLimitRozmiaru oznacza strumien urwany limitem, a nie awarie odczytu.
+var errLimitRozmiaru = errors.New("osiagnieto limit rozmiaru odczytu")
+
+// strumien czyta odpowiedz linia po linii i oddaje kazda do wywolania.
+//
+// Sluzy jedynemu zapytaniu, ktore odpowiada strumieniem zamiast jedna
+// wartoscia: dziennikowi zdarzen. Limit bajtow jest twardy - host, na ktorym
+// cos wstaje w petli, potrafi wyprodukowac zdarzenia szybciej, niz panel
+// zdazy je przeczytac. Zwrocenie false przez wywolanie konczy odczyt.
+func (c *Client) strumien(ctx context.Context, path string, query url.Values,
+	dalej func(linia []byte) bool, limitBajtow int64) error {
+	target := "http://docker/" + apiVersion + path
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrUnavailable, skrocBlad(err))
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		return fmt.Errorf("silnik odpowiedzial %d: %s",
+			response.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	czytnik := bufio.NewScanner(io.LimitReader(response.Body, limitBajtow))
+	// Pojedyncze zdarzenie bywa dlugie: silnik dokleda do niego wszystkie
+	// etykiety obiektu.
+	czytnik.Buffer(make([]byte, 0, 8<<10), 256<<10)
+	var przeczytane int64
+	for czytnik.Scan() {
+		linia := czytnik.Bytes()
+		przeczytane += int64(len(linia)) + 1
+		if len(linia) == 0 {
+			continue
+		}
+		if !dalej(linia) {
+			return nil
+		}
+	}
+	if err := czytnik.Err(); err != nil {
+		return err
+	}
+	if przeczytane >= limitBajtow {
+		return errLimitRozmiaru
+	}
+	return nil
 }
 
 // skrocBlad usuwa z komunikatu powtarzalny prefiks transportu HTTP, ktory nic

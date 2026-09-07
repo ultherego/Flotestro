@@ -83,6 +83,53 @@ func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelop
 	}
 }
 
+// readDockerEvents czyta dziennik zdarzen silnika w zamknietym oknie.
+//
+// Zadanie konczy sie samo, bo okno jest domkniete z obu stron. Odczyt bez
+// konca zostalby na hoscie na zawsze - takze wtedy, gdy panel dawno przestal
+// go sluchac.
+func (e *TaskExecutor) readDockerEvents(ctx context.Context,
+	task *agentv1.TaskEnvelope) *agentv1.TaskResult {
+	zamowienie := task.GetReadDockerEvents()
+	// Limit helpera obejmuje okno sledzenia z zapasem na sam odczyt.
+	timeout := time.Duration(zamowienie.GetFollowSeconds())*time.Second + 90*time.Second
+
+	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action: &helperv1.HelperRequest_DockerEvents{
+			DockerEvents: &helperv1.DockerEventsRequest{
+				SinceSeconds:  zamowienie.GetSinceSeconds(),
+				FollowSeconds: zamowienie.GetFollowSeconds(),
+				Types:         zamowienie.GetTypes(),
+				MaxEvents:     zamowienie.GetMaxEvents(),
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+	wynik := response.GetDockerEventsResult()
+	if wynik == nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed,
+			"helper nie odeslal dziennika zdarzen")
+	}
+
+	// Niedostepny silnik nie jest bledem operacji: odczyt sie udal, a jego
+	// trescia jest informacja, ze silnik nie odpowiada.
+	return &agentv1.TaskResult{
+		TaskId: task.GetTaskId(),
+		Status: agentv1.TaskResult_STATUS_SUCCEEDED,
+		DockerEventsResult: &agentv1.DockerEventsResult{
+			Events:            wynik.GetEvents(),
+			Truncated:         wynik.GetTruncated(),
+			TruncatedReason:   wynik.GetTruncatedReason(),
+			UnavailableReason: wynik.GetUnavailableReason(),
+		},
+	}
+}
+
 // applyDocker wykonuje operacje na kontenerach przez helpera.
 func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelope,
 	action *agentv1.DockerAction) *agentv1.TaskResult {

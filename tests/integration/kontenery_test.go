@@ -292,3 +292,172 @@ func policzNieuzywaneSieci(sieci []siecView) int {
 	}
 	return licznik
 }
+
+type zdarzenieView struct {
+	Time       time.Time         `json:"time"`
+	Type       string            `json:"type"`
+	Action     string            `json:"action"`
+	ActorID    string            `json:"actor_id"`
+	ActorName  string            `json:"actor_name"`
+	Attributes map[string]string `json:"attributes"`
+}
+
+type wynikZdarzen struct {
+	Kind   string `json:"kind"`
+	Events struct {
+		Events    []zdarzenieView `json:"events"`
+		Since     time.Time       `json:"since"`
+		Until     time.Time       `json:"until"`
+		Types     []string        `json:"types"`
+		Truncated bool            `json:"truncated"`
+	} `json:"events"`
+	UnavailableReason string `json:"unavailable_reason"`
+}
+
+// TestOdczytZdarzenKonczySieSam pilnuje wlasciwosci, bez ktorej ta operacja
+// nie moglaby istniec: odczyt jest zamkniety w oknie i konczy sie sam, takze
+// gdy nikt na niego nie czeka. Zadanie czytajace zdarzenia "do odwolania"
+// zostaloby na hoscie na zawsze.
+func TestOdczytZdarzenKonczySieSam(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	start := time.Now()
+	zadanie, proby := h.runOperation(host.ID, map[string]any{
+		"action": "docker.events", "reason": powodKontenerow,
+		"payload": map[string]any{"docker_events": map[string]any{
+			"since_seconds": 3600, "follow_seconds": 5, "max_events": 50,
+		}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("odczyt zdarzen: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+	// Sledzenie 5 sekund ma sie skonczyc w kilkanascie sekund, a nie po
+	// limicie czasu zadania.
+	if trwalo := time.Since(start); trwalo > time.Minute {
+		t.Errorf("odczyt z oknem sledzenia 5 s trwal %s", trwalo)
+	}
+
+	wynik := wynikZdarzenZadania(t, h, zadanie.ID)
+	if wynik.UnavailableReason != "" {
+		t.Skipf("silnik kontenerow niedostepny: %s", wynik.UnavailableReason)
+	}
+	if wynik.Kind != "docker_events" {
+		t.Fatalf("rodzaj wyniku = %q", wynik.Kind)
+	}
+	// Okno musi wrocic w wyniku: bez niego pusta lista nie mowi nic, bo
+	// cisza w oknie i brak odczytu wygladaja tak samo.
+	if wynik.Events.Since.IsZero() || wynik.Events.Until.IsZero() {
+		t.Fatalf("wynik bez okna: %+v", wynik.Events)
+	}
+	if !wynik.Events.Until.After(wynik.Events.Since) {
+		t.Errorf("okno konczy sie przed poczatkiem: %s - %s",
+			wynik.Events.Since, wynik.Events.Until)
+	}
+	if len(wynik.Events.Types) != 4 {
+		t.Errorf("brak filtra mial dac cztery rodzaje, jest %v", wynik.Events.Types)
+	}
+	for _, zdarzenie := range wynik.Events.Events {
+		if zdarzenie.Type == "" || zdarzenie.Action == "" {
+			t.Errorf("zdarzenie bez rodzaju albo dzialania: %+v", zdarzenie)
+		}
+		if zdarzenie.Time.Before(wynik.Events.Since.Add(-time.Minute)) {
+			t.Errorf("zdarzenie %s spoza okna (%s)", zdarzenie.Time, wynik.Events.Since)
+		}
+	}
+}
+
+// TestOdczytZdarzenWidziOperacjeNaHoscie sprawdza, ze dziennik odpowiada na
+// pytanie, na ktore stan hosta nie odpowiada: co sie tu wydarzylo. Restart
+// kontenera zostawia w stanie ten sam kontener co przedtem, a w dzienniku -
+// slad.
+func TestOdczytZdarzenWidziOperacjeNaHoscie(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	stan := stanSilnikaHosta(t, h, host.ID)
+	var cel *kontenerView
+	for i := range stan.Containers {
+		if stan.Containers[i].State == "running" {
+			cel = &stan.Containers[i]
+			break
+		}
+	}
+	if cel == nil {
+		t.Skip("host nie ma dzialajacego kontenera")
+	}
+
+	zadanie, proby := h.runOperation(host.ID, map[string]any{
+		"action": "docker.container.restart", "reason": powodKontenerow,
+		"payload": map[string]any{"docker_container": map[string]any{
+			"container_id": cel.ID, "name": cel.Name, "timeout_seconds": 10,
+		}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("restart kontenera: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+
+	zdarzenia, proby := h.runOperation(host.ID, map[string]any{
+		"action": "docker.events", "reason": powodKontenerow,
+		"payload": map[string]any{"docker_events": map[string]any{
+			"since_seconds": 300, "types": []string{"container"}, "max_events": 200,
+		}},
+	}, 3*time.Minute)
+	if zdarzenia.State != "succeeded" {
+		t.Fatalf("odczyt zdarzen: stan = %s, %s", zdarzenia.State, ostatniKomunikat(proby))
+	}
+
+	wynik := wynikZdarzenZadania(t, h, zdarzenia.ID)
+	if wynik.UnavailableReason != "" {
+		t.Skipf("silnik kontenerow niedostepny: %s", wynik.UnavailableReason)
+	}
+	znalezione := false
+	for _, zdarzenie := range wynik.Events.Events {
+		if zdarzenie.Type != "container" {
+			t.Errorf("filtr container przepuscil %q", zdarzenie.Type)
+		}
+		if zdarzenie.ActorName == cel.Name && zdarzenie.Action == "restart" {
+			znalezione = true
+		}
+	}
+	if !znalezione {
+		t.Errorf("dziennik nie zna restartu kontenera %s", cel.Name)
+	}
+}
+
+// TestZlecenieZdarzenSpozaOknaJestOdrzucane pilnuje, ze granice sa czescia
+// kontraktu operacji: operator dowiaduje sie o nich przy zlecaniu, a nie
+// przez ciche przyciecie na hoscie.
+func TestZlecenieZdarzenSpozaOknaJestOdrzucane(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for nazwa, zamowienie := range map[string]map[string]any{
+		"okno wstecz":     {"since_seconds": 7 * 24 * 3600},
+		"sledzenie":       {"follow_seconds": 3600},
+		"limit zdarzen":   {"max_events": 100000},
+		"nieznany rodzaj": {"types": []string{"daemon"}},
+	} {
+		t.Run(nazwa, func(t *testing.T) {
+			h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+				map[string]any{
+					"action": "docker.events", "reason": powodKontenerow,
+					"payload": map[string]any{"docker_events": zamowienie},
+				}, nil, http.StatusBadRequest)
+		})
+	}
+}
+
+func wynikZdarzenZadania(t *testing.T, h *harness, jobID string) wynikZdarzen {
+	t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail wynikZdarzen `json:"detail"`
+		} `json:"items"`
+	}
+	h.do(http.MethodGet, "/api/v1/jobs/"+jobID+"/attempts", nil, &odpowiedz, http.StatusOK)
+	if len(odpowiedz.Items) == 0 {
+		t.Fatal("zadanie bez prob")
+	}
+	return odpowiedz.Items[len(odpowiedz.Items)-1].Detail
+}

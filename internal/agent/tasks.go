@@ -188,6 +188,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.readUnitStatus(ctx, task, payload.UnitStatus)
 	case opspec.ActionDockerRead:
 		return e.readDocker(ctx, task)
+	case opspec.ActionDockerEvents:
+		return e.readDockerEvents(ctx, task)
 	case opspec.ActionInventoryRefresh:
 		return e.odswiezInwentarza(ctx, task)
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
@@ -557,6 +559,17 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_DockerRead:
 		return opspec.ActionDockerRead, opspec.Payload{DockerRead: &opspec.DockerReadPayload{}}, nil
+
+	case *agentv1.TaskEnvelope_ReadDockerEvents:
+		zdarzenia := action.ReadDockerEvents
+		return opspec.ActionDockerEvents, opspec.Payload{
+			DockerEvents: &opspec.DockerEventsPayload{
+				SinceSeconds:  int(zdarzenia.GetSinceSeconds()),
+				FollowSeconds: int(zdarzenia.GetFollowSeconds()),
+				Types:         zdarzenia.GetTypes(),
+				MaxEvents:     int(zdarzenia.GetMaxEvents()),
+			},
+		}, nil
 
 	case *agentv1.TaskEnvelope_RefreshInventory:
 		return opspec.ActionInventoryRefresh, opspec.Payload{

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Czas, Para, Pary, Pusto } from "../../components/ui";
@@ -82,7 +82,31 @@ type DoPotwierdzenia =
   | { rodzaj: "usun-siec"; id: string; nazwa: string }
   | { rodzaj: "usun-wolumen"; id: string; nazwa: string };
 
-type Widok = "kontenery" | "obrazy" | "sieci" | "wolumeny";
+type Widok = "kontenery" | "obrazy" | "sieci" | "wolumeny" | "zdarzenia";
+
+type Zdarzenie = {
+  time: string;
+  type: string;
+  action: string;
+  actor_id?: string;
+  actor_name?: string;
+  attributes?: Record<string, string>;
+};
+
+type WynikZdarzen = {
+  kind?: string;
+  events?: {
+    events?: Zdarzenie[];
+    since?: string;
+    until?: string;
+    types?: string[];
+    truncated?: boolean;
+    truncated_reason?: string;
+  };
+  truncated?: boolean;
+  truncated_reason?: string;
+  unavailable_reason?: string;
+};
 
 /**
  * Kontenery hosta.
@@ -253,6 +277,9 @@ export function Kontenery() {
         <button className={widok === "wolumeny" ? "aktywna" : ""} onClick={() => setWidok("wolumeny")}>
           Volumes{listy?.volumes?.length ? ` (${listy.volumes.length})` : ""}
         </button>
+        <button className={widok === "zdarzenia" ? "aktywna" : ""} onClick={() => setWidok("zdarzenia")}>
+          Events
+        </button>
       </div>
 
       {widok === "kontenery" && (
@@ -295,6 +322,8 @@ export function Kontenery() {
         />
       )}
 
+      {widok === "zdarzenia" && <Zdarzenia />}
+
       {doPotwierdzenia && (
         <PotwierdzenieCelu
           host={host}
@@ -312,6 +341,166 @@ export function Kontenery() {
         <p className="zrodlo" style={{ marginTop: 16 }}>
           Full state read from the host <Czas wartosc={pelny.data.observed_at} />
           {listy?.summary?.unavailable_reason && ` · ${listy.summary.unavailable_reason}`}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * Dziennik zdarzen silnika.
+ *
+ * Odczyt jest zamowieniem z zamknietym oknem, a nie podgladem na zywo:
+ * zadanie, ktore czyta zdarzenia do odwolania, zostaloby na hoscie na
+ * zawsze. Dlatego okno, sledzenie i limit sa polami formularza - operator
+ * pyta o konkretny przedzial wokol jednej awarii.
+ *
+ * Zdarzenia sa odpowiedzia z jednej chwili, wiec zostaja w wyniku zadania
+ * i nie trafiaja do inwentarza: stan hosta mowi, jak jest teraz, a dziennik -
+ * co sie stalo po drodze, w tym z kontenerem, ktorego juz nie ma.
+ */
+function Zdarzenia() {
+  const host = useHost();
+  const [zadanie, setZadanie] = useState("");
+  const [komunikat, setKomunikat] = useState("");
+  const [okno, setOkno] = useState(3600);
+  const [sledzenie, setSledzenie] = useState(0);
+  const [rodzaje, setRodzaje] = useState<string[]>([]);
+
+  const zlec = useMutation({
+    mutationFn: () =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
+        action: "docker.events",
+        payload: {
+          docker_events: {
+            since_seconds: okno,
+            follow_seconds: sledzenie,
+            types: rodzaje,
+            max_events: 200,
+          },
+        },
+      }),
+    onSuccess: (nowe) => {
+      setKomunikat("");
+      setZadanie(nowe.id);
+    },
+    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+  });
+
+  // Odczyt trwa tyle, ile okno sledzenia, wiec wynik pojawia sie z opoznieniem.
+  // Pytamy o proby, dopoki zadanie nie ma statusu koncowego.
+  const wynik = useQuery({
+    queryKey: ["job-attempts", zadanie],
+    queryFn: () =>
+      api.get<{ items: { status?: string; message?: string; detail?: WynikZdarzen }[] }>(
+        `/api/v1/jobs/${zadanie}/attempts`,
+      ),
+    enabled: zadanie !== "",
+    refetchInterval: (zapytanie) => {
+      const proby = (zapytanie.state.data as { items?: { status?: string }[] } | undefined)?.items;
+      return proby?.[proby.length - 1]?.status ? false : 2000;
+    },
+  });
+
+  const proby = wynik.data?.items ?? [];
+  const ostatnia = proby[proby.length - 1];
+  const odczyt = ostatnia?.detail;
+  const lista = odczyt?.events?.events ?? [];
+  const trwa = zlec.isPending || (zadanie !== "" && !ostatnia?.status);
+
+  function przelacz(rodzaj: string) {
+    setRodzaje((biezace) =>
+      biezace.includes(rodzaj) ? biezace.filter((nazwa) => nazwa !== rodzaj) : [...biezace, rodzaj],
+    );
+  }
+
+  return (
+    <>
+      <div className="formularz" style={{ marginBottom: 12 }}>
+        <label>
+          Look back
+          <select value={okno} onChange={(e) => setOkno(Number(e.target.value))}>
+            <option value={900}>15 minutes</option>
+            <option value={3600}>1 hour</option>
+            <option value={21600}>6 hours</option>
+            <option value={86400}>24 hours</option>
+          </select>
+        </label>
+        {/* Sledzenie ma twarda granice: zadanie bez konca zostaloby na
+            hoscie na zawsze, takze gdy nikt juz na nie nie patrzy. */}
+        <label>
+          Then watch for
+          <select value={sledzenie} onChange={(e) => setSledzenie(Number(e.target.value))}>
+            <option value={0}>nothing, past only</option>
+            <option value={15}>15 seconds</option>
+            <option value={30}>30 seconds</option>
+            <option value={60}>60 seconds</option>
+          </select>
+        </label>
+        <span className="operacje">
+          {["container", "image", "network", "volume"].map((rodzaj) => (
+            <button
+              key={rodzaj}
+              type="button"
+              className={rodzaje.includes(rodzaj) ? "" : "wtorny"}
+              onClick={() => przelacz(rodzaj)}
+            >
+              {rodzaj}
+            </button>
+          ))}
+        </span>
+        <button onClick={() => zlec.mutate()} disabled={trwa || host.connection_state !== "online"}>
+          {trwa ? "Reading…" : "Read events"}
+        </button>
+      </div>
+      <p className="podtytul">
+        The host reads a closed window and the task ends by itself. No filter selected means all four
+        kinds.
+      </p>
+
+      {komunikat && <p className="zrodlo">{komunikat}</p>}
+      {odczyt?.unavailable_reason && (
+        <Pusto>The container engine did not answer: {odczyt.unavailable_reason}</Pusto>
+      )}
+
+      {zadanie === "" ? (
+        <Pusto>Events are read on request. Pick a window and read them.</Pusto>
+      ) : lista.length === 0 && ostatnia?.status ? (
+        <Pusto>
+          Nothing happened in that window
+          {odczyt?.events?.since && odczyt.events.until
+            ? ` (${new Date(odczyt.events.since).toLocaleTimeString()} – ${new Date(odczyt.events.until).toLocaleTimeString()})`
+            : ""}
+          .
+        </Pusto>
+      ) : (
+        <table>
+          <thead><tr><th>Time</th><th>Kind</th><th>Action</th><th>Object</th><th>Details</th></tr></thead>
+          <tbody>
+            {lista.map((zdarzenie, indeks) => (
+              <tr key={`${zdarzenie.time}-${indeks}`}>
+                <td><Czas wartosc={zdarzenie.time} /></td>
+                <td>{zdarzenie.type}</td>
+                <td>{zdarzenie.action}</td>
+                <td>{zdarzenie.actor_name || zdarzenie.actor_id?.slice(0, 12) || "—"}</td>
+                <td>
+                  {Object.entries(zdarzenie.attributes ?? {})
+                    .filter(([klucz]) => klucz !== "name")
+                    .map(([klucz, wartosc]) => `${klucz}=${wartosc}`)
+                    .join(" ") || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* Urwana lista bez tego zdania wygladalaby na kompletna, a operator
+          wyciagalby wnioski z dziennika, ktorego nie widzial w calosci. */}
+      {(odczyt?.truncated || odczyt?.events?.truncated) && (
+        <p className="zrodlo">
+          Truncated: {odczyt.truncated_reason || odczyt.events?.truncated_reason}. Narrow the window
+          or the kinds.
         </p>
       )}
     </>

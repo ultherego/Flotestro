@@ -59,6 +59,52 @@ func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest
 	}
 }
 
+// readDockerEvents czyta dziennik zdarzen silnika w zamknietym oknie.
+//
+// Zadanie konczy sie samo: okno i limity sa domykane w module, a nie brane
+// na slowo z wiadomosci. Odczyt "do odwolania" zostalby na hoscie na zawsze,
+// takze wtedy, gdy panel dawno przestal go sluchac.
+func (s *Server) readDockerEvents(ctx context.Context,
+	action *helperv1.DockerEventsRequest) *helperv1.HelperResponse {
+	client, err := docker.New()
+	if err != nil {
+		return &helperv1.HelperResponse{
+			Accepted: true,
+			DockerEventsResult: &helperv1.DockerEventsResult{
+				UnavailableReason: err.Error(),
+			},
+		}
+	}
+
+	snapshot, err := docker.Events(ctx, client, docker.EventsOptions{
+		Since:  time.Duration(action.GetSinceSeconds()) * time.Second,
+		Follow: time.Duration(action.GetFollowSeconds()) * time.Second,
+		Types:  action.GetTypes(),
+		Max:    int(action.GetMaxEvents()),
+	})
+	if err != nil {
+		return &helperv1.HelperResponse{
+			Accepted: true,
+			DockerEventsResult: &helperv1.DockerEventsResult{
+				UnavailableReason: err.Error(),
+			},
+		}
+	}
+
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		DockerEventsResult: &helperv1.DockerEventsResult{
+			Events:          encoded,
+			Truncated:       snapshot.Truncated,
+			TruncatedReason: snapshot.Reason,
+		},
+	}
+}
+
 // applyDocker wykonuje operacje na silniku kontenerow.
 //
 // Identyfikator kontenera jest sprawdzany ponownie, choc panel juz go

@@ -33,6 +33,9 @@ message HelperRequest {
     // czlonkostwo w grupie docker jest rownowazne rootowi, wiec proces
     // dzialajacy bez uprawnien nie moze go miec.
     DockerReadRequest docker_read = 29;
+    // Dziennik zdarzen silnika: osobne zapytanie, bo ma wlasne okno czasu
+    // i wlasne limity. Odczyt bez konca zostalby na hoscie na zawsze.
+    DockerEventsRequest docker_events = 48;
     // Operacja na silniku kontenerow. Zakres jest wyliczony, a nie podany
     // sciezka: helper nie posredniczy w dowolnym wywolaniu Engine API.
     DockerActionRequest docker_action = 30;
@@ -218,6 +221,7 @@ message HelperResponse {
   CertificateResult certificate_result = 33;
   RepositoryResult repository_result = 34;
   BackupResult backup_result = 35;
+  DockerEventsResult docker_events_result = 36;
 }
 
 // DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
@@ -847,6 +851,23 @@ message ComposeResult {
   // kontenerow; kontrakt helpera jej nie powtarza.
   bytes payload = 1;
   string unavailable_reason = 2;
+}
+
+// DockerEventsRequest opisuje zamkniete okno odczytu dziennika zdarzen.
+// Helper nie przyjmuje filtra w postaci gotowego zapytania do Engine API:
+// rodzaje zdarzen sa nazwane, a okno i limity - wyliczone.
+message DockerEventsRequest {
+  uint32 since_seconds = 1;
+  uint32 follow_seconds = 2;
+  repeated string types = 3;
+  uint32 max_events = 4;
+}
+
+message DockerEventsResult {
+  bytes events = 1;
+  bool truncated = 2;
+  string truncated_reason = 3;
+  string unavailable_reason = 4;
 }
 
 message DockerReadResult {

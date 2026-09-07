@@ -848,6 +848,28 @@ func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 // resultDetailJSON zapisuje wynik wlasciwy dla typu operacji. Plan aktualizacji
 // i raport transakcji maja rozny ksztalt, wiec trafiaja do JSONB.
 func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
+	// Dziennik zdarzen jest odpowiedzia na pytanie z jednej chwili, a nie
+	// stanem hosta: zostaje w wyniku zadania i nie trafia do inwentarza.
+	if zdarzenia := result.GetDockerEventsResult(); zdarzenia != nil &&
+		(len(zdarzenia.GetEvents()) > 0 || zdarzenia.GetUnavailableReason() != "") {
+		// Silnik niedostepny nie niesie zadnego dziennika, a wynik i tak ma
+		// powstac: to on mowi operatorowi, dlaczego niczego nie widzi.
+		odczyt := json.RawMessage(zdarzenia.GetEvents())
+		if len(odczyt) == 0 {
+			odczyt = json.RawMessage("{}")
+		}
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "docker_events",
+			"events":             odczyt,
+			"truncated":          zdarzenia.GetTruncated(),
+			"truncated_reason":   zdarzenia.GetTruncatedReason(),
+			"unavailable_reason": zdarzenia.GetUnavailableReason(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Odswiezenie inwentarza niesie dowod: rewizje obrazu, ktory z niego
 	// powstal. Bez niej wynik mowilby tylko, ze zadanie sie nie wywrocilo.
 	if odswiezenie := result.GetInventoryRefreshResult(); odswiezenie != nil &&

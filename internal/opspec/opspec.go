@@ -17,6 +17,7 @@ import (
 	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
+	"github.com/ultherego/flotestro/internal/modules/docker"
 	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
@@ -210,6 +211,10 @@ const (
 	ActionDockerPull    ActionType = "docker.image.pull"
 	// Sprzatanie usuwa wskazane obiekty, a nie wszystko, co pasuje do filtru.
 	ActionDockerPrune ActionType = "docker.prune"
+	// ActionDockerEvents czyta dziennik zdarzen silnika. Osobna operacja,
+	// bo odpowiada na inne pytanie niz odczyt stanu: nie "jak jest", tylko
+	// "co sie tu stalo".
+	ActionDockerEvents ActionType = "docker.events"
 
 	// Plan projektu Compose liczy roznice miedzy stanem hosta a manifestem.
 	ActionComposePlan ActionType = "docker.compose.plan"
@@ -739,6 +744,12 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Sprzatanie usuwa dane bezpowrotnie i domyslnie nie dziala masowo.
 	ActionDockerPrune: {mutating: true, capability: "docker", permission: "docker.prune",
 		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers},
+	// Dziennik zdarzen niczego nie zmienia i nie bierze blokady kontenerow:
+	// odczyt trwajacy okno sledzenia nie moze wstrzymywac restartu, o ktory
+	// operator wlasnie prosi - a to wlasnie ten restart chce w nim zobaczyc.
+	// Limit czasu obejmuje najdluzsze dopuszczalne okno z zapasem.
+	ActionDockerEvents: {mutating: false, capability: "docker", permission: "docker.events",
+		timeoutSeconds: 180, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
 	// Plan niczego nie zmienia, ale uruchamia compose na hoscie i pobiera
 	// metadane obrazow, wiec ma wlasne uprawnienie.
@@ -1054,6 +1065,36 @@ var nazwaWolumenu = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
 // dluzsza od tego nie jest juz decyzja operatora, tylko filtrem w przebraniu.
 const maksymalnieObiektowSprzatania = 200
 
+// sprawdzOdczytZdarzen pilnuje granic okna. Zlecenie spoza nich jest bledem
+// zlecenia, a nie czyms, co host ma po cichu przyciac: operator, ktory prosil
+// o dobe sledzenia, ma sie dowiedziec, ze taka operacja nie istnieje.
+func sprawdzOdczytZdarzen(payload *DockerEventsPayload) error {
+	if payload == nil {
+		// Brak payloadu jest poprawny: domyslne okno jest najczestsza droga.
+		return nil
+	}
+	if payload.SinceSeconds < 0 || payload.SinceSeconds > maksymalneOknoZdarzen {
+		return fmt.Errorf("okno odczytu zdarzen poza zakresem (%d s)", payload.SinceSeconds)
+	}
+	if payload.FollowSeconds < 0 || payload.FollowSeconds > maksymalneSledzenieZdarzen {
+		return fmt.Errorf("sledzenie zdarzen poza zakresem (%d s)", payload.FollowSeconds)
+	}
+	if payload.MaxEvents < 0 || payload.MaxEvents > maksymalnieZdarzen {
+		return fmt.Errorf("limit liczby zdarzen poza zakresem (%d)", payload.MaxEvents)
+	}
+	widziane := map[string]bool{}
+	for _, rodzaj := range payload.Types {
+		if !docker.RodzajZdarzenia(rodzaj) {
+			return fmt.Errorf("nieznany rodzaj zdarzen %q", rodzaj)
+		}
+		if widziane[rodzaj] {
+			return fmt.Errorf("rodzaj zdarzen %q powtorzony", rodzaj)
+		}
+		widziane[rodzaj] = true
+	}
+	return nil
+}
+
 func sprawdzListeSprzatania(payload *DockerPrunePayload) error {
 	razem := len(payload.ImageIDs) + len(payload.VolumeName) + len(payload.NetworkIDs)
 	if razem == 0 {
@@ -1223,6 +1264,7 @@ type Payload struct {
 	DockerContainer *DockerContainerPayload `json:"docker_container,omitempty"`
 	DockerImage     *DockerImagePayload     `json:"docker_image,omitempty"`
 	DockerPrune     *DockerPrunePayload     `json:"docker_prune,omitempty"`
+	DockerEvents    *DockerEventsPayload    `json:"docker_events,omitempty"`
 	Compose         *ComposePayload         `json:"compose,omitempty"`
 	UnitToggle      *UnitToggle             `json:"unit_toggle,omitempty"`
 	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
@@ -1755,6 +1797,31 @@ type DockerPrunePayload struct {
 	NetworkIDs []string `json:"network_ids,omitempty"`
 }
 
+// Granice odczytu dziennika zdarzen. Panel odmawia zlecenia spoza nich,
+// zanim zadanie ruszy w swiat; host domyka je po raz drugi, bo to on placi
+// za odczyt.
+const (
+	maksymalneOknoZdarzen      = 24 * 60 * 60
+	maksymalneSledzenieZdarzen = 60
+	maksymalnieZdarzen         = 1000
+)
+
+// DockerEventsPayload opisuje zamkniete okno odczytu dziennika zdarzen.
+//
+// Kazde pole ma granice, bo zadanie bez granic zostaje na hoscie na zawsze.
+// Zero znaczy wartosc domyslna modulu, a nie brak limitu.
+type DockerEventsPayload struct {
+	// SinceSeconds mowi, jak daleko wstecz siegnac.
+	SinceSeconds int `json:"since_seconds,omitempty"`
+	// FollowSeconds przedluza odczyt poza chwile obecna. Zero znaczy sam
+	// dziennik przeszly - zadanie konczy sie od razu.
+	FollowSeconds int `json:"follow_seconds,omitempty"`
+	// Types ogranicza rodzaje zdarzen. Pusta lista znaczy wszystkie znane.
+	Types []string `json:"types,omitempty"`
+	// MaxEvents ogranicza liczbe zdarzen w wyniku.
+	MaxEvents int `json:"max_events,omitempty"`
+}
+
 // DockerReadPayload opisuje odczyt stanu silnika kontenerow. Payload jest
 // pusty z zalozenia: zakres odczytu wynika z operacji, a nie z parametru -
 // inaczej "odczytaj kontenery" i "odczytaj wszystko" bylyby ta sama operacja
@@ -1997,6 +2064,9 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("operacja %s wymaga payloadu docker_prune", action)
 		}
 		return sprawdzListeSprzatania(payload.DockerPrune)
+
+	case ActionDockerEvents:
+		return sprawdzOdczytZdarzen(payload.DockerEvents)
 
 	case ActionScheduleEnsure, ActionScheduleDisable, ActionScheduleRemove, ActionScheduleRunNow:
 		if payload.Schedule == nil {

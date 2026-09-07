@@ -196,6 +196,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 	case *helperv1.HelperRequest_DockerRead:
 		return s.readDocker(ctx, request, action.DockerRead)
 
+	case *helperv1.HelperRequest_DockerEvents:
+		return s.readDockerEvents(ctx, action.DockerEvents)
+
 	case *helperv1.HelperRequest_PackageRepair:
 		return s.repairPackages(ctx, request, action.PackageRepair)
 	case *helperv1.HelperRequest_Reboot:

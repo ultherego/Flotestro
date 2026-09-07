@@ -374,6 +374,19 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionDockerEvents:
+		// Okno jest opcjonalne: brak payloadu znaczy domyslne okno modulu.
+		// Wartosci ida do koperty w calosci, bo hash planu liczy sie z nich -
+		// pominiete pole daloby na hoscie inny plan niz w panelu.
+		zdarzenia := &agentv1.ReadDockerEvents{}
+		if payload.DockerEvents != nil {
+			zdarzenia.SinceSeconds = uint32(payload.DockerEvents.SinceSeconds)
+			zdarzenia.FollowSeconds = uint32(payload.DockerEvents.FollowSeconds)
+			zdarzenia.Types = payload.DockerEvents.Types
+			zdarzenia.MaxEvents = uint32(payload.DockerEvents.MaxEvents)
+		}
+		envelope.Action = &agentv1.TaskEnvelope_ReadDockerEvents{ReadDockerEvents: zdarzenia}
+
 	case opspec.ActionInventoryRefresh:
 		// Zakres jest opcjonalny: brak payloadu znaczy caly inwentarz.
 		var moduly []string
