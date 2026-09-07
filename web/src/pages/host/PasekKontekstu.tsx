@@ -1,7 +1,8 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
-import type { Host } from "../../lib/types";
+import type { Host, Job } from "../../lib/types";
 import { Czas, StanPolaczenia } from "../../components/ui";
 import { modul as znajdzModul, MODUL_DOMYSLNY } from "./moduly";
 import type { Capabilities as ZdolnosciInstalacji } from "../../lib/capabilities";
@@ -28,10 +29,97 @@ export function PasekKontekstu({
         <span>{host.os_distribution || host.os_family || "unknown OS"} {host.os_version}</span>
         <span>{host.architecture || "unknown arch"} · agent {host.agent_version || "unknown"}</span>
         <span>seen <Czas wartosc={host.last_seen_at} /></span>
+        <OdswiezInwentarz host={host} segment={segment} />
       </div>
       <PrzelacznikHosta host={host} segment={segment} instalacja={instalacja} />
     </div>
   );
+}
+
+/**
+ * Odswiezenie inwentarza na zadanie.
+ *
+ * Panel pokazuje obraz sprzed ostatniego cyklu, wiec operator, ktory wlasnie
+ * zmienil cos na hoscie recznie albo szykuje kampanie, musi umiec zapytac
+ * "jak jest teraz". Przycisk jest w pasku, a nie w zakladce, bo dotyczy
+ * calego hosta; zakres wynika z otwartej zakladki - odswiezamy to, na co
+ * operator patrzy, a nie caly host przy kazdym kliknieciu.
+ */
+function OdswiezInwentarz({ host, segment }: { host: Host; segment: string }) {
+  const queryClient = useQueryClient();
+  const [zadanie, setZadanie] = useState("");
+  const [komunikat, setKomunikat] = useState("");
+  // Zakres bierzemy z rejestru zakladek: to on wie, z ktorego modulu
+  // inwentarza zyje otwarty widok. Zakladka bez modulu (Jobs, Overview)
+  // odswieza caly host - zawezenie do czegos, czego nie ma, nie odswiezyloby
+  // niczego.
+  const zakres = znajdzModul(segment)?.inwentarz;
+
+  // Zadanie konczy sie dopiero po zapisaniu nowej rewizji, wiec przycisk
+  // sledzi je do konca. Inaczej "odswiezono" znaczyloby tylko "zlecono",
+  // a operator patrzylby na stary obraz w przekonaniu, ze jest nowy.
+  const stan = useQuery({
+    queryKey: ["job", zadanie],
+    queryFn: () => api.get<Job>(`/api/v1/jobs/${zadanie}`),
+    enabled: zadanie !== "",
+    refetchInterval: (zapytanie) =>
+      zakonczone((zapytanie.state.data as Job | undefined)?.state) ? false : 2000,
+  });
+
+  useEffect(() => {
+    const wynik = stan.data;
+    if (!wynik || !zakonczone(wynik.state)) return;
+    setZadanie("");
+    if (wynik.state !== "succeeded") {
+      setKomunikat(wynik.result_error_code || wynik.result_message || wynik.state);
+      return;
+    }
+    setKomunikat(wynik.result_message || "inventory refreshed");
+    // Nowy obraz jest w panelu, wiec widoki tego hosta maja go pokazac.
+    // Nie ma jednego klucza inwentarza: kazda zakladka czyta swoj, wiec
+    // uniewazniamy wszystko, co dotyczy tej maszyny.
+    queryClient.invalidateQueries({
+      predicate: (zapytanie) => zapytanie.queryKey.includes(host.id),
+    });
+  }, [stan.data, host.id, queryClient]);
+
+  const zlec = useMutation({
+    mutationFn: () =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
+        action: "inventory.refresh",
+        payload: { inventory: zakres ? { modules: [zakres] } : {} },
+      }),
+    onSuccess: (nowe) => {
+      setKomunikat("");
+      setZadanie(nowe.id);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+  });
+
+  const trwa = zlec.isPending || zadanie !== "";
+  const opis = zakres
+    ? `ask the host to re-read its ${zakres} module now`
+    : "ask the host to re-read its whole inventory now";
+  return (
+    <span className="odswiezenie-inwentarza">
+      <button
+        type="button"
+        className="link"
+        disabled={trwa || host.connection_state !== "online"}
+        title={host.connection_state === "online" ? opis : "the host is not connected"}
+        onClick={() => zlec.mutate()}
+      >
+        {trwa ? "refreshing…" : "refresh"}
+      </button>
+      {komunikat && <span className="komunikat">{komunikat}</span>}
+    </span>
+  );
+}
+
+/** Stany koncowe zadania. Poza nimi warto pytac dalej. */
+function zakonczone(stan: string | undefined): boolean {
+  return ["succeeded", "failed", "timed_out", "canceled", "expired"].includes(stan ?? "");
 }
 
 /**

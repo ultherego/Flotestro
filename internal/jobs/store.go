@@ -781,9 +781,15 @@ func nullableJSON(value json.RawMessage) any {
 
 // AttemptOwner zwraca zadanie, do ktorego nalezy proba. Agent odsyla wynik
 // z identyfikatorem proby, wiec gateway musi odnalezc job.
-func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID string, err error) {
-	jobID, _, err = s.AttemptContext(ctx, attemptID)
-	return jobID, err
+func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID, action string, err error) {
+	err = s.pool.QueryRow(ctx, `
+		select a.job_id, j.action_type
+		  from job_attempts a join jobs j on j.id = a.job_id
+		 where a.id = $1`, attemptID).Scan(&jobID, &action)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	return jobID, action, err
 }
 
 // LastAttempt zwraca identyfikator ostatniej proby operacji. Pusty oznacza

@@ -190,6 +190,15 @@ const (
 	ActionLocalUserUnlock ActionType = "localuser.unlock"
 	ActionLocalSSHKeysSet ActionType = "localuser.sshkeys.set"
 
+	// ActionInventoryRefresh zamawia ponowny odczyt inwentarza.
+	//
+	// Panel widzi obraz sprzed ostatniego cyklu, a decyzja przed kampania
+	// albo po recznej zmianie na hoscie musi opierac sie na stanie z tej
+	// chwili. Operacja niczego nie zmienia i dlatego jest tania - ale nie
+	// jest darmowa: odczyt uruchamia na hoscie podprocesy, wiec ma wlasne
+	// uprawnienie i wlasny limit czasu.
+	ActionInventoryRefresh ActionType = "inventory.refresh"
+
 	// Odczyt stanu silnika kontenerow. Pelne listy sa pobierane na zadanie
 	// operatora; inventory niesie samo podsumowanie.
 	ActionDockerRead ActionType = "docker.read"
@@ -702,6 +711,12 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Odczyt kontenerow niczego nie zmienia, ale potrafi byc ciezki: pelna
 	// lista obrazow na hoscie budowlanym to megabajty, wiec ma wlasna klase
 	// zasobu i wlasny limit wyniku.
+	// Odswiezenie inwentarza nie zmienia hosta i nie bierze zadnej blokady:
+	// odczyt moze isc rownolegle z operacja, ktora wlasnie trwa - najwyzej
+	// zobaczy stan w polowie zmiany, a to jest prawda o tej chwili.
+	ActionInventoryRefresh: {mutating: false, permission: "inventory.refresh",
+		timeoutSeconds: 300, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
+
 	ActionDockerRead: {mutating: false, capability: "docker", permission: "docker.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 4 << 20},
 
@@ -1230,6 +1245,39 @@ type Payload struct {
 	Repository      *RepositoryPayload      `json:"repository,omitempty"`
 	Backup          *BackupPayload          `json:"backup,omitempty"`
 	Monitoring      *MonitoringPayload      `json:"monitoring,omitempty"`
+	Inventory       *InventoryPayload       `json:"inventory,omitempty"`
+}
+
+// maksymalnieModulowOdswiezenia ogranicza dlugosc zakresu. Zadanie z lista
+// dluzsza niz zbior modulow nie jest zadaniem czesciowym, tylko blednym.
+const maksymalnieModulowOdswiezenia = 32
+
+// ModuleInwentarza wylicza moduly, ktore panel umie odswiezyc na zadanie.
+//
+// Lista jest tu, a nie w agencie, bo to kontrakt operacji: panel odmawia
+// zlecenia z nieznana nazwa, zanim zadanie ruszy w swiat.
+var ModuleInwentarza = []string{
+	"system", "packages", "services", "identity", "accounts", "network",
+	"dns", "firewall", "storage", "ssh", "kernel", "time", "power",
+	"security", "certificates", "backups", "files", "containers", "schedules",
+}
+
+// ModulInwentarza mowi, czy nazwa opisuje modul inwentarza.
+func ModulInwentarza(nazwa string) bool {
+	for _, modul := range ModuleInwentarza {
+		if modul == nazwa {
+			return true
+		}
+	}
+	return false
+}
+
+// InventoryPayload opisuje zakres odswiezenia inwentarza.
+type InventoryPayload struct {
+	// Modules ogranicza odczyt. Puste znaczy caly inwentarz - i to jest
+	// domyslna droga, bo operator zwykle pyta "jak jest teraz", a nie
+	// "jak jest teraz z jedna zakladka".
+	Modules []string `json:"modules,omitempty"`
 }
 
 // SecurityPayload opisuje operacje modulu bezpieczenstwa.
@@ -1868,6 +1916,30 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if !domainPattern.MatchString(payload.DomainEnroll.Domain) {
 			return fmt.Errorf("nieprawidlowa nazwa domeny %q", payload.DomainEnroll.Domain)
+		}
+		return nil
+
+	case ActionInventoryRefresh:
+		// Payload jest opcjonalny: brak zakresu znaczy caly inwentarz.
+		if payload.Inventory == nil {
+			return nil
+		}
+		if len(payload.Inventory.Modules) > maksymalnieModulowOdswiezenia {
+			return fmt.Errorf("odswiezenie obejmuje najwyzej %d modulow",
+				maksymalnieModulowOdswiezenia)
+		}
+		widziane := map[string]bool{}
+		for _, modul := range payload.Inventory.Modules {
+			// Nieznana nazwa modulu nie moze przejsc jako "nic do zrobienia":
+			// literowka konczylaby sie odswiezeniem, ktore nic nie odswieza,
+			// a wyglada na udane.
+			if !ModulInwentarza(modul) {
+				return fmt.Errorf("nieznany modul inwentarza %q", modul)
+			}
+			if widziane[modul] {
+				return fmt.Errorf("modul %q podany dwa razy", modul)
+			}
+			widziane[modul] = true
 		}
 		return nil
 

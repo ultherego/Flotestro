@@ -23,13 +23,13 @@ func TestZamowienieZebraniaNieBlokuje(t *testing.T) {
 	k := nowyKolektor()
 	// Tylko pierwsze zebranie ma trwac: drugie jest tym zlozonym z zamowien
 	// zlozonych w trakcie i konczy sie od razu.
-	go k.pracuj(ctx, func(context.Context) (Facts, error) {
+	go k.pracuj(ctx, func(context.Context, []string) (Facts, error) {
 		pierwsze.Do(func() {
 			close(trwa)
 			<-zwolnij
 		})
 		return Facts{}, nil
-	}, func(Facts) error { return nil }, cichy())
+	}, func(Facts) (Odswiezenie, error) { return Odswiezenie{}, nil }, cichy())
 
 	k.zazadaj()
 	<-trwa // zebranie sie zaczelo i trwa
@@ -56,13 +56,13 @@ func TestZamowieniaSieSkladaja(t *testing.T) {
 	gotowe := make(chan struct{}, 8)
 
 	k := nowyKolektor()
-	go k.pracuj(ctx, func(context.Context) (Facts, error) {
+	go k.pracuj(ctx, func(context.Context, []string) (Facts, error) {
 		if zebrania.Add(1) == 1 {
 			close(trwa)
 			<-zwolnij
 		}
 		return Facts{}, nil
-	}, func(Facts) error { gotowe <- struct{}{}; return nil }, cichy())
+	}, func(Facts) (Odswiezenie, error) { gotowe <- struct{}{}; return Odswiezenie{}, nil }, cichy())
 
 	k.zazadaj()
 	<-trwa
@@ -90,12 +90,12 @@ func TestNieudaneZebranieNieKonczyPracy(t *testing.T) {
 	var proby atomic.Int32
 	gotowe := make(chan struct{}, 2)
 	k := nowyKolektor()
-	go k.pracuj(ctx, func(context.Context) (Facts, error) {
+	go k.pracuj(ctx, func(context.Context, []string) (Facts, error) {
 		if proby.Add(1) == 1 {
 			return Facts{}, context.DeadlineExceeded
 		}
 		return Facts{}, nil
-	}, func(Facts) error { gotowe <- struct{}{}; return nil }, cichy())
+	}, func(Facts) (Odswiezenie, error) { gotowe <- struct{}{}; return Odswiezenie{}, nil }, cichy())
 
 	k.zazadaj()
 	time.Sleep(50 * time.Millisecond)

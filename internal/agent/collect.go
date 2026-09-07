@@ -7,15 +7,6 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"strings"
 	"time"
-
-	"github.com/ultherego/flotestro/internal/modules/certificates"
-	"github.com/ultherego/flotestro/internal/modules/docker"
-	"github.com/ultherego/flotestro/internal/modules/files"
-	"github.com/ultherego/flotestro/internal/modules/firewall"
-	"github.com/ultherego/flotestro/internal/modules/kernel"
-	"github.com/ultherego/flotestro/internal/modules/schedules"
-	"github.com/ultherego/flotestro/internal/modules/security"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
 )
 
 // privilegedIdentity jest opcjonalnym zrodlem danych wymagajacych roota.
@@ -49,6 +40,21 @@ func Collect(ctx context.Context) (Facts, error) {
 // a zgadywanie go z pierwszej pozycji listy konczy sie zmiana konfiguracji
 // interfejsu, przez ktory wlasnie przyszlo polecenie.
 func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
+	return ZbierzModuly(ctx, adresZarzadzania, Facts{}, nil)
+}
+
+// ZbierzModuly zbiera inventory ograniczone do wskazanych modulow.
+//
+// Pusta lista znaczy caly inventory. Lista niepusta znaczy odswiezenie
+// czesciowe: zbierane sa wylacznie wskazane moduly, a reszta jest przepisana
+// z poprzedniego obrazu. Inaczej inventory po odswiezeniu jednego modulu
+// bylby obrazem hosta bez calej reszty - a to nie jest to samo, co host,
+// ktory tej reszty nie ma.
+//
+// Fakty podstawowe - tozsamosc maszyny, system, sprzet, zdolnosci - sa
+// zbierane zawsze. Sa tanie i to one rozstrzygaja, ktore moduly maja sens.
+func ZbierzModuly(ctx context.Context, adresZarzadzania string,
+	poprzednie Facts, moduly []string) (Facts, error) {
 	machineID, err := MachineID()
 	if err != nil {
 		return Facts{}, err
@@ -66,185 +72,37 @@ func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
 		Interfaces:   networkInterfaces(),
 		CollectedAt:  time.Now().UTC(),
 	}
-
-	if caps.Available(CapSystemd) {
-		facts.FailedUnits, facts.FailedUnitsKnown = failedUnits(ctx)
-	}
-	switch {
-	case caps.Available(CapAPT):
-		facts.Packages = aptSummary(ctx)
-	case caps.Available(CapDNF):
-		facts.Packages = dnfSummary(ctx)
-	}
-	// Odcisk pelnej listy pakietow: sama lista jest za duza, zeby jechac
-	// w kazdym cyklu, ale panel musi wiedziec, kiedy jego kopia przestaje
-	// opisywac host.
-	if facts.Packages.Manager != "" {
-		odcisk, ile, powod := odciskPakietow(ctx, facts.Packages.Manager)
-		facts.Packages.InstalledDigest = odcisk
-		facts.Packages.InstalledReason = powod
-		if powod == "" {
-			liczba := uint32(ile)
-			facts.Packages.InstalledCount = &liczba
-		}
-	}
-
-	// Zrodla pakietow czytamy razem z podsumowaniem: to jedna zakladka i jedna
-	// odpowiedz na pytanie, skad host bierze oprogramowanie. Odczyt idzie bez
-	// roota, bo pliki zrodel sa jawne.
-	if facts.Packages.Manager != "" {
-		obraz := ZbierzRepozytoria(facts.Packages.Manager)
-		facts.Repositories = &obraz
-	}
 	facts.RebootRequired = rebootRequired(ctx, caps)
-	// Stan domeny jest czescia inventory, wiec zbierany raz na cykl, a nie
-	// przy kazdym heartbeacie.
-	facts.Identity = ReadIdentityState(ctx)
 
-	// Konta lokalne czytamy z pliku; stan blokady i klucze SSH wymagaja roota
-	// i sa uzupelniane przez helpera.
-	facts.LocalAccounts = ReadLocalAccounts()
-	if privilegedAccounts != nil {
-		names := make([]string, 0, len(facts.LocalAccounts))
-		for _, account := range facts.LocalAccounts {
-			if account.Source == SourceLocal {
-				names = append(names, account.Name)
-			}
+	wybrane := zbiorModulow(moduly)
+	for _, nazwa := range KolejnoscModulow {
+		zbieracz := zbieraczeModulow[nazwa]
+		if len(wybrane) > 0 && !wybrane[nazwa] {
+			// Modul spoza zakresu odswiezenia zostaje taki, jaki byl.
+			// Przepisanie jest swiadome: brak danych oznaczalby, ze host
+			// ich nie ma, a on ich w tym cyklu nie byl pytany.
+			zbieracz.przepisz(&facts, poprzednie)
+			continue
 		}
-		if len(names) > 0 {
-			if result, err := privilegedAccounts(ctx, names); err == nil {
-				facts.LocalAccounts = mergePrivilegedAccounts(facts.LocalAccounts, result)
-			}
-		}
-	}
-
-	// Silnik kontenerow jest odpytywany raz na cykl inwentarza i tylko
-	// o podsumowanie. Pelne listy pobiera operator, gdy otworzy zakladke -
-	// odpytywanie silnika przy kazdym cyklu obciazaloby host bez powodu.
-	if caps.Available(CapDocker) && dockerProbe != nil {
-		if snapshot, err := dockerProbe(ctx, false); err == nil {
-			podsumowanie := snapshot.Summary
-			facts.Containers = &podsumowanie
-		} else {
-			// Nieodczytany silnik nie moze wygladac jak host bez kontenerow.
-			facts.Containers = &docker.Summary{UnavailableReason: "helper: " + err.Error()}
-		}
-	}
-
-	// Harmonogramy zmieniaja sie rzadko, wiec ida w cyklu inwentarza, a nie
-	// na zadanie: pelna lista zadan cyklicznych hosta to kilkanascie wpisow,
-	// a nie setki jak przy pakietach czy procesach.
-	if caps.Available(CapSchedules) && scheduleProbe != nil {
-		if snapshot, err := scheduleProbe(ctx); err == nil {
-			facts.Schedules = &snapshot
-		} else {
-			facts.Schedules = &schedules.Snapshot{UnavailableReason: "helper: " + err.Error()}
-		}
-	}
-
-	// Siec czytamy z jadra w kazdym cyklu: odczyt jest tani, a stan potrafi
-	// zmienic sie bez udzialu panelu (DHCP, kabel, kontener).
-	siec := ZbierzSiec(ctx, adresZarzadzania)
-	facts.Network = &siec
-
-	// Resolver czytamy razem z siecia: to jedna decyzja hosta o tym, dokad
-	// ida jego pytania i ktora droga.
-	resolver := ZbierzDNS(ctx)
-	facts.DNS = &resolver
-
-	// Topologia dyskow zmienia sie rzadko, ale zajetosc miejsca juz nie -
-	// dlatego czytamy calosc raz na cykl inwentarza, a nie przy heartbeacie.
-	przestrzen := ZbierzPrzestrzen(ctx)
-	facts.Storage = &przestrzen
-
-	// Stan plikow zarzadzanych: host sam wie, ktore pliki panel zapisal,
-	// wiec drift widac bez pytania panelu o liste.
-	if fileProbe != nil {
-		if snapshot, err := fileProbe(ctx); err == nil {
-			facts.Files = &snapshot
-		} else {
-			facts.Files = &files.Snapshot{UnavailableReason: "helper: " + err.Error()}
-		}
-	}
-
-	// Ustawienia jadra czyta helper: czesc kluczy /proc/sys jest czytelna
-	// wylacznie dla roota, a lista modulow i tak potrzebuje jego oczu.
-	if kernelProbe != nil {
-		if snapshot, err := kernelProbe(ctx); err == nil {
-			facts.Kernel = &snapshot
-		} else {
-			facts.Kernel = &kernel.Snapshot{UnavailableReason: "helper: " + err.Error()}
-		}
-	}
-
-	// Stan ochronny sklada agent: wiekszosc faktow jest czytelna bez roota,
-	// a te, ktore nie sa, zamawia u helpera po nazwie.
-	if securityProbe != nil {
-		if snapshot, err := securityProbe(ctx); err == nil {
-			facts.Security = &snapshot
-		} else {
-			facts.Security = &security.Snapshot{UnavailableReason: err.Error()}
-		}
-	}
-
-	// Narzedzia backupu czyta agent bez roota: obecnosc binarki i jej wersja
-	// sa jawne. Stanu repozytorium tu nie ma - ten wymaga poswiadczen.
-	stanBackupu := ZbierzBackup(ctx)
-	facts.Backup = &stanBackupu
-
-	// Certyfikaty czyta agent, a helper dokłada to, czego bez roota nie widac.
-	// Zakres jest wyliczony: rejestr celow panelu i zlecenia certmongera,
-	// a nie przeszukanie systemu plikow.
-	if certificateProbe != nil {
-		if snapshot, err := certificateProbe(ctx); err == nil {
-			facts.Certificates = &snapshot
-		} else {
-			facts.Certificates = &certificates.Snapshot{UnavailableReason: err.Error()}
-		}
-	}
-
-	// Stan startu i blokad wylaczenia. Restart nie konczy sie na wyslaniu
-	// polecenia, wiec panel potrzebuje boot_id i tego, co restart wstrzymuje.
-	zasilanie := ZbierzZasilanie(ctx, facts.BootID, facts.RebootRequired)
-	facts.Power = &zasilanie
-
-	// Czas czyta agent, a nie helper: timedatectl i chronyc odpowiadaja
-	// kazdemu, a kazde przejscie przez roota trzeba uzasadnic.
-	zegar := ZbierzCzas(ctx)
-	facts.Time = &zegar
-
-	// Konfiguracje sshd czyta helper: "sshd -T" wymaga roota, bo serwer
-	// czyta przy okazji klucze hosta.
-	if caps.Available(CapSSHD) && sshProbe != nil {
-		if snapshot, err := sshProbe(ctx); err == nil {
-			facts.SSH = &snapshot
-		} else {
-			facts.SSH = &sshmodul.Snapshot{UnavailableReason: "helper: " + err.Error()}
-		}
-	}
-
-	// Zapore czyta helper: tablice nftables sa widoczne wylacznie dla roota.
-	// Odczyt jest tani, ale liczniki rosna same, wiec nie robimy z niego
-	// zrodla metryk - od tego jest monitoring.
-	if caps.Available(CapFirewall) && firewallProbe != nil {
-		if snapshot, err := firewallProbe(ctx); err == nil {
-			facts.Firewall = &snapshot
-		} else {
-			facts.Firewall = &firewall.Snapshot{UnavailableReason: "helper: " + err.Error()}
-		}
-	}
-
-	if facts.Identity.Enrolled && privilegedIdentity != nil {
-		privileged, err := privilegedIdentity(ctx, facts.Identity.Domain)
-		if err != nil {
-			// Brak danych uprzywilejowanych nie uniewaznia reszty inventory,
-			// ale musi byc widoczny jako powod, a nie jako cisza.
-			facts.Identity.UnavailableReason = "helper: " + err.Error()
-		} else {
-			facts.Identity = facts.Identity.Merge(privileged)
-		}
+		zbieracz.zbierz(ctx, &facts, adresZarzadzania)
 	}
 	return facts, nil
+}
+
+// zbiorModulow zamienia liste nazw na zbior. Puste wejscie daje pusty zbior,
+// ktory znaczy "wszystko".
+func zbiorModulow(moduly []string) map[string]bool {
+	if len(moduly) == 0 {
+		return nil
+	}
+	zbior := make(map[string]bool, len(moduly))
+	for _, nazwa := range moduly {
+		nazwa = strings.ToLower(strings.TrimSpace(nazwa))
+		if nazwa != "" {
+			zbior[nazwa] = true
+		}
+	}
+	return zbior
 }
 
 // failedUnits zwraca nazwy jednostek w stanie failed oraz informacje, czy w

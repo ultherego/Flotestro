@@ -238,6 +238,32 @@ a.przycisk:hover { background: var(--tlo-hover); }
   color: var(--tekst-slaby);
   font-size: 12px;
 }
+/*
+ * Odswiezenie inwentarza stoi wsrod faktow o hoscie, bo dotyczy ich wszystkich:
+ * to one sa obrazem sprzed ostatniego cyklu, ktory operator wlasnie chce
+ * zastapic stanem z tej chwili.
+ */
+.odswiezenie-inwentarza {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.odswiezenie-inwentarza button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--akcent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.odswiezenie-inwentarza button:disabled {
+  color: var(--nieznane);
+  cursor: default;
+  text-decoration: none;
+}
+.odswiezenie-inwentarza .komunikat { color: var(--tekst-slaby); }
+
 .przelacznik-hosta {
   display: inline-flex;
   align-items: center;

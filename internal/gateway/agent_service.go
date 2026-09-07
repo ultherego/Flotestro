@@ -481,7 +481,7 @@ const maksymalnieZapamietanychProb = 4096
 func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	result *agentv1.TaskResult) error {
 	attemptID := result.GetTaskId()
-	jobID, err := s.jobs.AttemptOwner(ctx, attemptID)
+	jobID, akcja, err := s.jobs.AttemptOwner(ctx, attemptID)
 	if err != nil {
 		return fmt.Errorf("wynik dla nieznanej proby %s: %w", attemptID, err)
 	}
@@ -734,14 +734,28 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	}
 
 	state, statusName := jobStateFor(result.GetStatus())
+
+	// Odswiezenie inwentarza rozliczamy pojawieniem sie rewizji, a nie
+	// zgloszeniem agenta. Agent wysyla obraz tym samym strumieniem tuz przed
+	// wynikiem, wiec zanim tu dojdziemy, rewizja jest juz zapisana. Gdy jej
+	// nie ma, obraz nie dojechal - a zadanie, ktore mowi "odswiezono" nad
+	// stanem sprzed kwadransa, jest gorsze niz zadanie nieudane.
+	kodBledu, opisBledu := result.GetErrorCode(), result.GetMessage()
+	if state == jobs.StateSucceeded && akcja == string(opspec.ActionInventoryRefresh) {
+		if kod, opis := s.sprawdzOdswiezenie(ctx, hostID, result); kod != "" {
+			state, statusName = jobs.StateFailed, "failed"
+			kodBledu, opisBledu = kod, opis
+		}
+	}
+
 	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{
 		Status:          statusName,
 		ExitCode:        result.GetExitCode(),
 		Stdout:          result.GetStdout(),
 		Stderr:          result.GetStderr(),
 		OutputTruncated: result.GetOutputTruncated(),
-		ErrorCode:       result.GetErrorCode(),
-		Message:         result.GetMessage(),
+		ErrorCode:       kodBledu,
+		Message:         opisBledu,
 		Replayed:        result.GetReplayed(),
 		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
 		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
@@ -834,6 +848,21 @@ func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 // resultDetailJSON zapisuje wynik wlasciwy dla typu operacji. Plan aktualizacji
 // i raport transakcji maja rozny ksztalt, wiec trafiaja do JSONB.
 func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
+	// Odswiezenie inwentarza niesie dowod: rewizje obrazu, ktory z niego
+	// powstal. Bez niej wynik mowilby tylko, ze zadanie sie nie wywrocilo.
+	if odswiezenie := result.GetInventoryRefreshResult(); odswiezenie != nil &&
+		odswiezenie.GetRevision() != "" {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":     "inventory_refresh",
+			"revision": odswiezenie.GetRevision(),
+			"changed":  odswiezenie.GetChanged(),
+			"modules":  odswiezenie.GetModules(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Wynik operacji kontenerowej jest osobnym polem, a nie wariantem sumy:
 	// niesie stan przed i po, ktory dotyczy takze operacji zakonczonej bledem.
 	// Wynik projektu Compose jest osobnym polem: niesie plan albo stan
@@ -2063,4 +2092,33 @@ func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult,
 		}
 	}
 	return ustalenia, ""
+}
+
+// sprawdzOdswiezenie potwierdza, ze rewizja zgloszona przez agenta jest ta,
+// ktora panel naprawde ma. Wolane tylko dla operacji odswiezenia inwentarza.
+//
+// Zwraca pusty kod, gdy wszystko sie zgadza. Rozjazd jest bledem zadania,
+// a nie awaria hosta: host zebral obraz, tylko panel go nie dostal.
+func (s *AgentService) sprawdzOdswiezenie(ctx context.Context, hostID string,
+	result *agentv1.TaskResult) (kod, opis string) {
+	odswiezenie := result.GetInventoryRefreshResult()
+	if odswiezenie.GetRevision() == "" {
+		// Sukces bez rewizji jest milczeniem: nie wiadomo, czy obraz powstal.
+		return "inventory_revision_missing", "agent nie podal rewizji odswiezonego inwentarza"
+	}
+	rewizja, err := s.inventory.Latest(ctx, hostID)
+	if err != nil {
+		s.log.Error("nie odczytano rewizji inwentarza", "host_id", hostID, "err", err)
+		return "", ""
+	}
+	if rewizja == nil || rewizja.Revision != odswiezenie.GetRevision() {
+		zapisana := "brak"
+		if rewizja != nil {
+			zapisana = rewizja.Revision
+		}
+		return "inventory_revision_missing",
+			fmt.Sprintf("agent zglosil rewizje %s, panel ma %s",
+				odswiezenie.GetRevision(), zapisana)
+	}
+	return "", ""
 }

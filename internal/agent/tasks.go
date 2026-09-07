@@ -71,6 +71,10 @@ type TaskExecutor struct {
 	// tylkoOdczyt oznacza hosta w trybie obserwacji: agent raportuje fakty
 	// i wykonuje odczyty, ale nie zmienia niczego na hoscie.
 	tylkoOdczyt bool
+	// odswiezInwentarz zamawia zebranie inwentarza i czeka na rewizje, ktora
+	// z niego powstala. Nil oznacza brak sesji - a bez niej nie ma dokad
+	// wyslac nowego obrazu, wiec i nie ma czego odswiezac.
+	odswiezInwentarz func(ctx context.Context, moduly []string) Odswiezenie
 }
 
 // PobranieSekretu siega po wartosc sekretu wskazanego w zadaniu.
@@ -184,6 +188,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.readUnitStatus(ctx, task, payload.UnitStatus)
 	case opspec.ActionDockerRead:
 		return e.readDocker(ctx, task)
+	case opspec.ActionInventoryRefresh:
+		return e.odswiezInwentarza(ctx, task)
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
 		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
 		return e.applyDocker(ctx, task, task.GetDockerAction())
@@ -551,6 +557,11 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_DockerRead:
 		return opspec.ActionDockerRead, opspec.Payload{DockerRead: &opspec.DockerReadPayload{}}, nil
+
+	case *agentv1.TaskEnvelope_RefreshInventory:
+		return opspec.ActionInventoryRefresh, opspec.Payload{
+			Inventory: &opspec.InventoryPayload{Modules: action.RefreshInventory.GetModules()},
+		}, nil
 
 	case *agentv1.TaskEnvelope_DockerAction:
 		return akcjaDockera(action.DockerAction)

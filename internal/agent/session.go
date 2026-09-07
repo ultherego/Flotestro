@@ -331,13 +331,41 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// zatrzymac przyjmowania zadan.
 	inventory := nowyKolektor()
 	go func() {
-		if err := inventory.pracuj(sessionCtx, collect, func(fresh Facts) error {
+		zbierz := func(ctx context.Context, moduly []string) (Facts, error) {
+			if len(moduly) == 0 {
+				return collect(ctx)
+			}
+			// Odswiezenie czesciowe wchodzi w poprzedni obraz: modul spoza
+			// zakresu ma zostac taki, jaki byl, a nie zniknac.
+			return ZbierzModuly(ctx, adresLokalny, currentFacts(), moduly)
+		}
+		przyjmij := func(fresh Facts) (Odswiezenie, error) {
+			poprzednia := ""
+			if rev, _, err := currentFacts().Revision(); err == nil {
+				poprzednia = rev
+			}
 			updateFacts(fresh)
-			return sendInventory(fresh)
-		}, opts.Log); err != nil {
+			if err := sendInventory(fresh); err != nil {
+				return Odswiezenie{}, err
+			}
+			nowa, _, err := fresh.Revision()
+			if err != nil {
+				return Odswiezenie{}, err
+			}
+			return Odswiezenie{Rewizja: nowa, Zmieniona: nowa != poprzednia}, nil
+		}
+		if err := inventory.pracuj(sessionCtx, zbierz, przyjmij, opts.Log); err != nil {
 			zglosBlad(err)
 		}
 	}()
+
+	// Odswiezenie na zadanie jest operacja typowana, wiec wykonawca musi
+	// umiec o nie poprosic - i doczekac sie rewizji, ktora z niego powstala.
+	if opts.Executor != nil {
+		opts.Executor.odswiezInwentarz = func(ctx context.Context, moduly []string) Odswiezenie {
+			return inventory.odswiez(ctx, moduly)
+		}
+	}
 
 	go func() {
 		for {

@@ -461,7 +461,20 @@ message TaskEnvelope {
     MonitoringProbe monitoring_probe = 52;
     ListPackages list_packages = 53;
     AgentUpgrade agent_upgrade = 54;
+    RefreshInventory refresh_inventory = 55;
   }
+}
+
+// RefreshInventory zamawia ponowny odczyt inwentarza.
+//
+// Operacja nie zmienia hosta - i wlasnie dlatego istnieje osobno. Panel widzi
+// obraz sprzed ostatniego cyklu, a decyzje przed kampania albo po recznej
+// zmianie na hoscie musza opierac sie na stanie z tej chwili, a nie sprzed
+// kwadransa.
+message RefreshInventory {
+  // Modules ogranicza odczyt do wskazanych modulow. Puste znaczy caly
+  // inwentarz. Nazwy sa te same, ktorymi inwentarz dzieli sie na fragmenty.
+  repeated string modules = 1;
 }
 
 // AgentUpgrade wymienia samego agenta. Wynik tej operacji nie wraca ta sama
@@ -741,6 +754,21 @@ message TaskResult {
   BackupResult backup_result = 45;
   MonitoringResult monitoring_result = 46;
   InstalledPackagesResult installed_packages_result = 47;
+  InventoryRefreshResult inventory_refresh_result = 48;
+}
+
+// InventoryRefreshResult niesie dowod odswiezenia.
+//
+// Samo przyjecie zadania niczego nie dowodzi: odczyt moglby sie nie udac albo
+// nie dojsc. Dowodem jest rewizja obrazu, ktory z tego odczytu powstal.
+message InventoryRefreshResult {
+  string revision = 1;
+  // Changed mowi, czy obraz rozni sie od poprzedniego. Brak zmiany nie jest
+  // bledem: host, ktory sie nie zmienil, jest prawdziwa odpowiedzia.
+  bool changed = 2;
+  // Modules wylicza to, co naprawde zostalo odczytane. Puste znaczy caly
+  // inwentarz.
+  repeated string modules = 3;
 }
 
 // UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.

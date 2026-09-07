@@ -16,11 +16,16 @@ type Permission string
 const (
 	PermHostRead      Permission = "host.read"
 	PermInventoryRead Permission = "inventory.read"
-	PermAuditRead     Permission = "audit.read"
-	PermJobRead       Permission = "job.read"
-	PermJobCreate     Permission = "job.create"
-	PermJobApprove    Permission = "job.approve"
-	PermJobCancel     Permission = "job.cancel"
+	// PermInventoryRefresh pozwala zamowic ponowny odczyt inwentarza.
+	// Osobne od odczytu: patrzenie na zapisany obraz jest darmowe, a kazanie
+	// hostowi zebrac go od nowa juz nie - to podprocesy na maszynie, ktora
+	// pracuje.
+	PermInventoryRefresh Permission = "inventory.refresh"
+	PermAuditRead        Permission = "audit.read"
+	PermJobRead          Permission = "job.read"
+	PermJobCreate        Permission = "job.create"
+	PermJobApprove       Permission = "job.approve"
+	PermJobCancel        Permission = "job.cancel"
 	// Zamowienia enrollmentu: kto moze zaprosic maszyne do floty, kto widzi
 	// oczekujace instalacje i kto moze je cofnac.
 	PermHostEnrollCreate Permission = "host.enroll.create"
@@ -321,6 +326,9 @@ var rolePermissions = map[Role][]Permission{
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
+		// Odswiezenie inwentarza jest pierwszym ruchem przy kazdej awarii:
+		// zanim ktos zacznie zmieniac host, chce wiedziec, jak jest teraz.
+		PermInventoryRefresh,
 		PermJobCreate, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		// Operator prowadzi kontenery, ale ich nie kasuje: usuwanie
@@ -373,7 +381,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 	},
 	RolePlatformAdmin: {
-		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
+		PermHostRead, PermInventoryRead, PermInventoryRefresh, PermJobRead, PermAuditRead,
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		// Administrator ma takze operacje nieodwracalne na kontenerach.

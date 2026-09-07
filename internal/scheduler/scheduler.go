@@ -374,6 +374,16 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerRead:
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
+	case opspec.ActionInventoryRefresh:
+		// Zakres jest opcjonalny: brak payloadu znaczy caly inwentarz.
+		var moduly []string
+		if payload.Inventory != nil {
+			moduly = payload.Inventory.Modules
+		}
+		envelope.Action = &agentv1.TaskEnvelope_RefreshInventory{
+			RefreshInventory: &agentv1.RefreshInventory{Modules: moduly},
+		}
+
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
 		operacja := agentv1.PackageLifecycle_OPERATION_INSTALL
 		switch action {
