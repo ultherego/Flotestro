@@ -93,7 +93,12 @@ if ls "$WYDANIE"/*.pkg.tar.* >/dev/null 2>&1; then
     # Baza pakietow jest tym, co pacman czyta jako pierwsze. Blad repo-add
     # zostawilby repozytorium z samymi plikami i bez indeksu - klient
     # zobaczylby puste repozytorium, a nie blad.
-    ( cd "$arch_dir" && repo-add --sign --key "$KLUCZ" flotestro.db.tar.gz ./*.pkg.tar.zst >/dev/null )
+    # Kolejnosc ma znaczenie: repo-add zapisuje w bazie ten pakiet, ktory
+    # dostal jako ostatni, a nie ten o najwyzszej wersji. Glob powloki sortuje
+    # alfabetycznie, wiec 0.9.0 wygrywalo z 0.13.0 i repozytorium ogloszalo
+    # stara wersje jako biezaca. Sortowanie wersjami stawia najnowsza na koncu.
+    mapfile -t pakiety < <(printf '%s\n' "$arch_dir"/*.pkg.tar.zst | sort -V)
+    ( cd "$arch_dir" && repo-add --sign --key "$KLUCZ" flotestro.db.tar.gz "${pakiety[@]}" >/dev/null )
     [ -e "$arch_dir/flotestro.db" ] || { echo "repo-add nie zbudowal bazy pakietow" >&2; exit 1; }
 fi
 
