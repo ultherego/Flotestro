@@ -24,6 +24,7 @@ import (
 	"github.com/ultherego/flotestro/internal/adminapi"
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/database"
@@ -279,6 +280,7 @@ func run() error {
 	inventoryStore := inventory.NewStore(pool)
 	jobStore := jobs.NewStore(pool)
 	campaignStore := campaigns.NewStore(pool)
+	budgetStore := budgets.NewStore(pool, log)
 	tokenStore := enrollment.NewTokenStore(pool)
 	relayStore := relays.NewStore(pool)
 	authzStore := authz.NewStore(pool)
@@ -445,6 +447,10 @@ func run() error {
 			"etykieta_hosta", monitoring.HostLabel)
 	}
 
+	// Budzety sa widoczne w panelu: host stojacy na pojemnosci ma pokazac,
+	// na ktory budzet czeka, a nie stac bez powodu.
+	panelServer.SetBudgets(budgetStore)
+
 	// Plany naprawy: panel je zaklada, runner prowadzi krok po kroku.
 	remediationStore := remediation.NewStore(pool)
 	panelServer.SetRemediation(remediationStore)
@@ -503,10 +509,14 @@ func run() error {
 	dyspozytor.SetSecrets(secretStore)
 	go dyspozytor.Run(ctx)
 
+	// Budzety odpowiadaja na inne pytanie niz limit kampanii: nie ile hostow
+	// ma ruszyc w tej zmianie, tylko ile zmian uniesie flota i lokalizacja.
+	go budgetStore.Run(ctx)
+
 	// Orkiestrator prowadzi kampanie przez canary i fale, tworzac zadania,
 	// ktore dostarcza scheduler.
 	go campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
-		log, 5*time.Second).Run(ctx)
+		budgetStore, log, 5*time.Second).Run(ctx)
 
 	// Runner prowadzi plany naprawy krok po kroku: kazdy krok jest zwyklym
 	// zadaniem modulu, a nastepny rusza dopiero, gdy poprzedni sie udal.

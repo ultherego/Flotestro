@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -17,21 +18,27 @@ import (
 // restartu z weryfikacja. Nie wykonuje niczego sam - tworzy zadania, ktore
 // dostarcza scheduler.
 type Orchestrator struct {
-	store    *Store
-	jobs     *jobs.Store
-	hosts    *hosts.Store
-	audit    *audit.Recorder
+	store *Store
+	jobs  *jobs.Store
+	hosts *hosts.Store
+	audit *audit.Recorder
+	// budzety pilnuja pojemnosci floty i lokalizacji. Limit rownoleglosci
+	// kampanii odpowiada na inne pytanie: ile hostow ma ruszyc naraz w tej
+	// zmianie. Dziesiec kampanii po piec hostow to nadal piecdziesiat
+	// jednoczesnych mutacji, o ktorych nikt nie zdecydowal.
+	budzety  *budgets.Store
 	log      *slog.Logger
 	interval time.Duration
 }
 
 func NewOrchestrator(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
-	recorder *audit.Recorder, log *slog.Logger, interval time.Duration) *Orchestrator {
+	recorder *audit.Recorder, budzety *budgets.Store, log *slog.Logger,
+	interval time.Duration) *Orchestrator {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
 	return &Orchestrator{store: store, jobs: jobStore, hosts: hostStore,
-		audit: recorder, log: log, interval: interval}
+		audit: recorder, budzety: budzety, log: log, interval: interval}
 }
 
 // Run prowadzi kampanie do zamkniecia kontekstu.
@@ -73,6 +80,11 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	if campaign.State == StatePlanning {
 		return o.planuj(ctx, campaign, targets)
 	}
+
+	// Dzierzawy tokenow odnawiamy przed domknieciem: host, ktory wlasnie
+	// konczy, i tak je zaraz odda, a host w polowie transakcji nie moze ich
+	// stracic z powodu uplywu czasu.
+	o.odnowPojemnosc(ctx, targets)
 
 	// Najpierw domykamy to, co juz biegnie: bez tego progi liczylyby sie na
 	// nieaktualnym stanie.
@@ -139,14 +151,17 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 	targets []Target, wave int) error {
 	running := 0
 	for _, target := range targets {
-		if target.Wave == wave && !target.State.Finished() && target.State != TargetPending {
+		// Host czekajacy na budzet nie zajmuje slotu rownoleglosci: nic
+		// jeszcze nie robi, a policzony jako pracujacy blokowalby fale, ktora
+		// ma wolna pojemnosc gdzie indziej.
+		if target.Wave == wave && !target.State.Finished() && !target.State.Czeka() {
 			running++
 		}
 	}
 
 	for i := range targets {
 		target := &targets[i]
-		if target.Wave != wave || target.State != TargetPending {
+		if target.Wave != wave || !target.State.Czeka() {
 			continue
 		}
 		if running >= campaign.MaxConcurrent {
@@ -172,8 +187,22 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			continue
 		}
 
+		// Pojemnosci pytamy dopiero tutaj: host jest podlaczony, poza oknem
+		// serwisowym i naprawde gotowy ruszyc. Token wziety wczesniej
+		// zmniejszalby pojemnosc floty dla kogos, kto moglby z niej
+		// skorzystac.
+		wolne, err := o.zajmijPojemnosc(ctx, campaign, target, host)
+		if err != nil {
+			return err
+		}
+		if !wolne {
+			continue
+		}
+
 		jobID, err := o.createJob(ctx, campaign, target, host)
 		if err != nil {
+			// Zadanie nie powstalo, wiec tokeny nie maja czego pilnowac.
+			o.zwolnijPojemnosc(ctx, target)
 			o.finishTarget(ctx, campaign, target, TargetFailed, "job_create_failed", err.Error())
 			continue
 		}

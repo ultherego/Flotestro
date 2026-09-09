@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	kopiestore "github.com/ultherego/flotestro/internal/backup"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	certyfikatystore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/enrollment"
@@ -41,6 +42,9 @@ type Server struct {
 	inventory *inventory.Store
 	jobs      *jobs.Store
 	campaigns *campaigns.Store
+	// budzety pokazuja pojemnosc floty i lokalizacji. Pusty oznacza
+	// instalacje, w ktorej pojemnosci nikt nie egzekwuje.
+	budzety   *budgets.Store
 	tokens    *enrollment.Store
 	authz     *authz.Store
 	audit     *audit.Recorder
@@ -100,6 +104,9 @@ func (s *Server) SetRemediation(store *remediation.Store) { s.remediation = stor
 // SetEvents podlacza magistrale zdarzen. Bez niej strumienie postepu sa
 // nieczynne, a panel dziala jak dotad - po odswiezeniu strony.
 func (s *Server) SetEvents(bus *events.Bus) { s.events = bus }
+
+// SetBudgets podlacza budzety pojemnosci.
+func (s *Server) SetBudgets(store *budgets.Store) { s.budzety = store }
 
 // Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
 type Options struct {
@@ -206,6 +213,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
 	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
 	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	mux.HandleFunc("GET /api/v1/budgets", s.handleListBudgets)
+	mux.HandleFunc("PUT /api/v1/budgets/{key...}", s.handleSetBudget)
 	mux.HandleFunc("GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)
 

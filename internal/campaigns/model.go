@@ -52,15 +52,28 @@ type TargetState string
 const (
 	TargetPending TargetState = "pending"
 	// TargetPlanning oznacza hosta, ktory liczy wlasny plan zmiany.
-	TargetPlanning  TargetState = "planning"
-	TargetRunning   TargetState = "running"
-	TargetRebooting TargetState = "rebooting"
-	TargetVerifying TargetState = "verifying"
-	TargetSucceeded TargetState = "succeeded"
-	TargetFailed    TargetState = "failed"
-	TargetSkipped   TargetState = "skipped"
-	TargetCanceled  TargetState = "canceled"
+	TargetPlanning TargetState = "planning"
+	// TargetAwaitingBudget oznacza hosta gotowego do zmiany, ktory czeka na
+	// pojemnosc floty albo lokalizacji. Nie zajmuje slotu wykonania i nie
+	// jest bledem - ale musi byc widoczny, bo inaczej kampania stoi bez
+	// podanego powodu.
+	TargetAwaitingBudget TargetState = "awaiting_budget"
+	TargetRunning        TargetState = "running"
+	TargetRebooting      TargetState = "rebooting"
+	TargetVerifying      TargetState = "verifying"
+	TargetSucceeded      TargetState = "succeeded"
+	TargetFailed         TargetState = "failed"
+	TargetSkipped        TargetState = "skipped"
+	TargetCanceled       TargetState = "canceled"
 )
+
+// Czeka mowi, czy host jest gotowy do uruchomienia, ale jeszcze nie ruszyl.
+//
+// Oczekiwanie na budzet jest tym samym miejscem w kolejce co pending: host nie
+// zajmuje slotu, a przy kazdym obiegu prosi o pojemnosc jeszcze raz.
+func (t TargetState) Czeka() bool {
+	return t == TargetPending || t == TargetAwaitingBudget
+}
 
 // Finished mowi, czy host zakonczyl udzial w kampanii.
 func (t TargetState) Finished() bool {

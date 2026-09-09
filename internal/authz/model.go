@@ -230,6 +230,13 @@ const (
 	PermCampaignApprove Permission = "campaign.approve"
 	PermCampaignControl Permission = "campaign.control"
 
+	// Budzety mowia, ile zmian naraz uniesie flota i lokalizacja. Odczyt jest
+	// czescia wgladu w kampanie: bez niego host stojacy na budzecie wyglada
+	// jak host zapomniany. Zmiana pojemnosci jest osobnym uprawnieniem, bo
+	// podniesiona po cichu odbiera znaczenie kazdemu limitowi ponizej.
+	PermBudgetRead  Permission = "budget.read"
+	PermBudgetWrite Permission = "budget.write"
+
 	// Uprawnienia warstwy tozsamosci. Zarzadzanie sudo i HBAC jest oddzielone
 	// od reszty, bo blad w tych regulach otwiera dostep do calej floty.
 	PermIdentityRead Permission = "identity.read"
@@ -418,6 +425,7 @@ var rolePermissions = map[Role][]Permission{
 		PermAgentUpgrade,
 		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
+		PermBudgetRead, PermBudgetWrite,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermDNSDirectoryWrite,

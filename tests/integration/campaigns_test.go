@@ -629,3 +629,179 @@ func TestKampaniaPakietowLiczyPlanNaKazdymHoscie(t *testing.T) {
 		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
 	}
 }
+
+type budzetView struct {
+	Klucz     string `json:"key"`
+	Pojemnosc int    `json:"capacity"`
+	Zajete    int    `json:"used"`
+	Chetnych  int    `json:"claimants"`
+}
+
+// ustawBudzet zmienia pojemnosc budzetu na czas testu i przywraca ja potem.
+func (h *harness) ustawBudzet(klucz string, pojemnosc, poTescie int) {
+	h.t.Helper()
+	h.do(http.MethodPut, "/api/v1/budgets/"+klucz,
+		map[string]any{"capacity": pojemnosc, "note": "test integracyjny budzetow"},
+		nil, http.StatusOK)
+	h.t.Cleanup(func() {
+		// Budzet zmieniony na czas testu musi wrocic: zostawiony na jedynce
+		// spowolnilby kazdy nastepny przebieg i wygladalo by to na usterke.
+		h.do(http.MethodPut, "/api/v1/budgets/"+klucz,
+			map[string]any{"capacity": poTescie, "note": "po tescie"}, nil, 0)
+	})
+}
+
+// TestBudzetLokalizacjiZatrzymujeNadmiarowaZmiane pilnuje inwariantu I-05:
+// limit rownoleglosci kampanii nie jest jedynym limitem systemu.
+//
+// Kampania prosi o trzy hosty naraz i ma na to zgode - a mimo to lokalizacja
+// dopuszcza jedna zmiane tej rodziny. Dowod jest w czasach prob: zadne dwie
+// nie moga zachodzic na siebie. Dowodem drugim jest widocznosc: host, ktory
+// czeka, musi to powiedziec, a nie stac w kolejce bez powodu.
+//
+// Kontrola negatywna stoi obok: TestKampaniaPracujeNaWieluHostachNaraz robi to
+// samo na tej samej flocie przy domyslnej pojemnosci i wymaga, zeby okna sie
+// zachodzily. Bez tej pary "brak zachodzenia" moglby znaczyc po prostu wolna
+// flote, a nie dzialajacy budzet.
+func TestBudzetLokalizacjiZatrzymujeNadmiarowaZmiane(t *testing.T) {
+	h := newHarness(t)
+	// Jedna rodzina systemow i jedna lokalizacja: dowod dotyczy budzetu,
+	// a nie roznic w nazwach jednostek miedzy dystrybucjami.
+	online := make([]hostView, 0, 3)
+	lokalizacja := ""
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" || host.OSFamily != "debian" {
+			continue
+		}
+		if lokalizacja == "" {
+			lokalizacja = host.Site
+		}
+		if host.Site == lokalizacja {
+			online = append(online, host)
+		}
+	}
+	if len(online) < 2 || lokalizacja == "" {
+		t.Skip("flota testowa ma mniej niz dwa podlaczone hosty rodziny debian w jednej lokalizacji")
+	}
+
+	// Jednostki sa najtansza mutacja, jaka mamy: dowod dotyczy budzetu,
+	// a nie tego, co konkretnie robi operacja.
+	klucz := "site:" + lokalizacja + ":units"
+	const domyslnaPojemnosc = 10
+	h.ustawBudzet(klucz, 1, domyslnaPojemnosc)
+
+	cele := make([]string, 0, len(online))
+	for _, host := range online {
+		cele = append(cele, host.ID)
+	}
+	campaign := h.createCampaign(map[string]any{
+		"name": "restart z budzetem", "action": "unit.restart",
+		"reason":                     "test budzetu lokalizacji",
+		"payload":                    unitPayload("cron.service"),
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State == "awaiting_approval" {
+		campaign = h.approveCampaign(campaign)
+	}
+
+	// Po drodze przynajmniej jeden host musi zglosic, ze czeka na pojemnosc.
+	// Sprawdzamy to w trakcie, bo stan jest przejsciowy.
+	czekal := false
+	deadline := time.Now().Add(4 * time.Minute)
+	for time.Now().Before(deadline) {
+		for _, target := range h.campaignTargets(campaign.ID) {
+			if target.State == "awaiting_budget" {
+				czekal = true
+				if target.ErrorCode != "budget_capacity" && target.ErrorCode != "budget_fair_share" {
+					t.Errorf("host czeka na budzet bez podanego powodu: %+v", target)
+				}
+			}
+		}
+		stan := h.campaign(campaign.ID)
+		if stan.State == "completed" || stan.State == "failed" || stan.State == "paused" {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	if !czekal {
+		t.Error("zaden host nie zglosil oczekiwania na pojemnosc - budzet nikogo nie zatrzymal")
+	}
+
+	okna := make([]okno, 0, len(cele))
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.JobID == "" {
+			continue
+		}
+		for _, proba := range h.probyZadania(target.JobID) {
+			if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+				continue
+			}
+			okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+		}
+	}
+	if len(okna) < 2 {
+		t.Fatalf("kampania zostawila %d prob z czasami", len(okna))
+	}
+	// Sedno inwariantu: kampania miala zgode na trzy naraz, a lokalizacja
+	// dopuszczala jedna. Zachodzace okna znaczylyby, ze budzet nie wiazal.
+	if zachodzaNaSiebie(okna) {
+		t.Errorf("dwie zmiany weszly obok siebie mimo budzetu 1: %+v", okna)
+	}
+}
+
+// TestBudzetPokazujeZajetoscIOdmawiaZerowejPojemnosci pilnuje ekranu, bez
+// ktorego kampania stojaca na budzecie wyglada jak kampania zapomniana.
+func TestBudzetPokazujeZajetoscIOdmawiaZerowejPojemnosci(t *testing.T) {
+	h := newHarness(t)
+	var widok struct {
+		Items []budzetView `json:"items"`
+	}
+	h.get("/api/v1/budgets", &widok)
+	if len(widok.Items) == 0 {
+		t.Fatal("panel nie ma ani jednego budzetu - pojemnosci nikt nie pilnuje")
+	}
+	znalezione := map[string]budzetView{}
+	for _, budzet := range widok.Items {
+		if budzet.Pojemnosc < 1 {
+			t.Errorf("budzet %s o pojemnosci %d", budzet.Klucz, budzet.Pojemnosc)
+		}
+		znalezione[budzet.Klucz] = budzet
+	}
+	// Odczyt i mutacja maja osobne pojemnosci: sto odczytow stanu to nie to
+	// samo obciazenie co sto transakcji pakietowych.
+	for _, klucz := range []string{"global:mutations", "global:reads"} {
+		if _, mamy := znalezione[klucz]; !mamy {
+			t.Errorf("brak budzetu %s: %+v", klucz, widok.Items)
+		}
+	}
+
+	// Pojemnosc zerowa nie jest polityka, tylko cichym zatrzymaniem wszystkiego.
+	h.do(http.MethodPut, "/api/v1/budgets/global:mutations",
+		map[string]any{"capacity": 0}, nil, http.StatusBadRequest)
+}
+
+// TestZmianaBudzetuWymagaUprawnienia pilnuje, ze pojemnosci nie podnosi sie
+// po cichu: budzet podniesiony bez sladu odbiera znaczenie kazdemu limitowi
+// ponizej.
+func TestZmianaBudzetuWymagaUprawnienia(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	operatorToken := h.createPrincipal(uniqueSubject("bez-budzetow"),
+		[]map[string]string{{"role": "approver", "site": host.Site, "environment": host.Environment}})
+	bezPrawa := h.withToken(operatorToken)
+
+	bezPrawa.do(http.MethodPut, "/api/v1/budgets/global:mutations",
+		map[string]any{"capacity": 500}, nil, http.StatusForbidden)
+}

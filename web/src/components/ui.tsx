@@ -13,7 +13,8 @@ export function StanPolaczenia({ stan }: { stan: string }) {
 export function StanZadania({ stan }: { stan: string }) {
   const udane = ["succeeded", "completed", "active"].includes(stan);
   const nieudane = ["failed", "timed_out", "expired", "partially_applied"].includes(stan);
-  const czeka = ["awaiting_approval", "queued", "planned", "planning", "paused"].includes(stan);
+  const czeka = ["awaiting_approval", "queued", "planned", "planning", "paused",
+    "awaiting_budget"].includes(stan);
   const klasa = udane ? "ok" : nieudane ? "blad" : czeka ? "uwaga" : "";
   return <span className={`znacznik ${klasa}`}>{nazwaStanu(stan)}</span>;
 }
@@ -35,6 +36,8 @@ function nazwaStanu(stan: string): string {
     awaiting_approval: "awaiting approval",
     // Kampania liczy plan na kazdym hoscie; niczego jeszcze nie zmienia.
     planning: "planning per host",
+    // Host jest gotowy, ale flota albo lokalizacja nie ma teraz pojemnosci.
+    awaiting_budget: "waiting for capacity",
     succeeded: "succeeded", failed: "failed", timed_out: "timed out",
     canceled: "canceled", cancelled: "canceled", expired: "expired",
     rejected: "rejected", replayed: "replayed",

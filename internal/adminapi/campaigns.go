@@ -538,6 +538,16 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 
+	// Kampania zatrzymana jednym zapisem nie zamyka hostow po kolei, wiec
+	// nie ma gdzie oddac tokenow. Oddajemy je tutaj: pojemnosc trzymana przez
+	// kampanie, ktora juz nic nie robi, zatrzymuje nastepna.
+	if operation == "cancel" && s.budzety != nil {
+		if err := s.budzety.ZwolnijRoszczacego(r.Context(), "campaign:"+campaign.ID); err != nil {
+			s.log.Error("nie zwolniono pojemnosci anulowanej kampanii",
+				"campaign_id", campaign.ID, "err", err)
+		}
+	}
+
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "campaign." + operation, TargetType: "campaign", TargetID: campaign.ID,

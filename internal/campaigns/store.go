@@ -211,7 +211,8 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	// Hosty, ktore jeszcze nie ruszyly, nie zostana ruszone.
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets set state = 'canceled', finished_at = now()
-		where campaign_id = $1 and state = 'pending'`, campaignID); err != nil {
+		where campaign_id = $1 and state in ('pending', 'awaiting_budget')`,
+		campaignID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -452,7 +453,9 @@ func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetS
 			state       = $2,
 			error_code  = $3,
 			message     = $4,
-			started_at  = coalesce(started_at, case when $2 <> 'pending' then now() end),
+			started_at  = coalesce(started_at,
+			                       case when $2 not in ('pending', 'awaiting_budget')
+			                            then now() end),
 			finished_at = case when $2 in ('succeeded', 'failed', 'skipped', 'canceled')
 			                   then now() else finished_at end
 		where id = $1`

@@ -215,6 +215,9 @@ func (o *Orchestrator) finishTarget(ctx context.Context, campaign Campaign, targ
 		return
 	}
 	target.State = state
+	// Tokeny wracaja do puli razem z koncem hosta. Zwolnienie jest osobne od
+	// wygasniecia dzierzawy: pojemnosc ma wrocic teraz, a nie za dwie minuty.
+	o.zwolnijPojemnosc(ctx, target)
 
 	outcome := audit.OutcomeSuccess
 	if state == TargetFailed {
@@ -266,6 +269,15 @@ func (o *Orchestrator) complete(ctx context.Context, campaign Campaign,
 	}
 	if err := o.store.SetState(ctx, campaign.ID, state, ""); err != nil {
 		return err
+	}
+	// Hosty oddaly swoje tokeny, konczac sie po kolei. Zostaja zapisy
+	// oczekiwania - i one tez musza zniknac, bo licza sie do udzialu
+	// nastepnych kampanii.
+	if o.budzety != nil {
+		if err := o.budzety.ZwolnijRoszczacego(ctx, "campaign:"+campaign.ID); err != nil {
+			o.log.Error("nie zwolniono pojemnosci zakonczonej kampanii",
+				"campaign_id", campaign.ID, "err", err)
+		}
 	}
 
 	counts, err := o.store.Counts(ctx, campaign.ID)
