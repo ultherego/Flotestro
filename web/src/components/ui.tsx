@@ -13,9 +13,12 @@ export function StanPolaczenia({ stan }: { stan: string }) {
 export function StanZadania({ stan }: { stan: string }) {
   const udane = ["succeeded", "completed", "active"].includes(stan);
   const nieudane = ["failed", "timed_out", "expired", "partially_applied"].includes(stan);
+  // Niezdolnosc i pominiecie nie sa awaria: host nic nie zepsul, po prostu
+  // nie bral udzialu. Czerwien nazywalaby to bledem, ktorego nie bylo.
+  const pominiete = ["ineligible", "skipped", "no_change"].includes(stan);
   const czeka = ["awaiting_approval", "queued", "planned", "planning", "paused",
     "awaiting_budget"].includes(stan);
-  const klasa = udane ? "ok" : nieudane ? "blad" : czeka ? "uwaga" : "";
+  const klasa = udane ? "ok" : nieudane ? "blad" : pominiete ? "nieznany" : czeka ? "uwaga" : "";
   return <span className={`znacznik ${klasa}`}>{nazwaStanu(stan)}</span>;
 }
 
@@ -38,6 +41,9 @@ function nazwaStanu(stan: string): string {
     planning: "planning per host",
     // Host jest gotowy, ale flota albo lokalizacja nie ma teraz pojemnosci.
     awaiting_budget: "waiting for capacity",
+    // Host nie wykona tej operacji: nie ma adaptera albo nie spelnia warunku.
+    // To nie jest awaria wykonania i nie liczy sie do progu bledow.
+    ineligible: "cannot run this",
     succeeded: "succeeded", failed: "failed", timed_out: "timed out",
     canceled: "canceled", cancelled: "canceled", expired: "expired",
     rejected: "rejected", replayed: "replayed",

@@ -38,6 +38,12 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 type TargetHost struct {
 	ID     string
 	BootID string
+	// Stan i powod opisuja host zamkniety juz w chwili tworzenia kampanii:
+	// niezdolny do tej operacji albo w oknie serwisowym. Pusty stan znaczy
+	// host gotowy do pracy.
+	Stan  TargetState
+	Powod string
+	Opis  string
 }
 
 // Create tworzy kampanie wraz z niemutowalna migawka celow. Podzial na fale
@@ -100,15 +106,34 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		return nil, fmt.Errorf("utworzenie kampanii: %w", err)
 	}
 
-	for index, host := range hosts {
-		wave, position := AssignWave(index, spec.CanarySize, spec.WaveSize)
+	// Fale liczymy tylko z hostow gotowych. Host zamkniety od razu nie moze
+	// zajac miejsca w canary: canary zlozone z hostow, ktore nic nie zrobia,
+	// nie jest proba na malej grupie.
+	gotowych := 0
+	for _, host := range hosts {
+		stan := host.Stan
+		if stan == "" {
+			stan = TargetPending
+		}
+		wave, position := 0, 0
+		if stan == TargetPending {
+			wave, position = AssignWave(gotowych, spec.CanarySize, spec.WaveSize)
+			gotowych++
+		}
 		const insertTarget = `
-			insert into campaign_targets (id, campaign_id, host_id, wave, position, boot_id_before)
-			values ($1, $2, $3, $4, $5, $6)`
+			insert into campaign_targets (id, campaign_id, host_id, wave, position,
+			                              boot_id_before, state, error_code, message,
+			                              finished_at)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+			        case when $7 = 'pending' then null else now() end)`
 		if _, err := tx.Exec(ctx, insertTarget, uuid.NewString(), campaignID,
-			host.ID, wave, position, nullable(host.BootID)); err != nil {
+			host.ID, wave, position, nullable(host.BootID), string(stan),
+			nullable(host.Powod), nullable(host.Opis)); err != nil {
 			return nil, fmt.Errorf("zapis celu kampanii: %w", err)
 		}
+	}
+	if gotowych == 0 {
+		return nil, ErrNoTargets
 	}
 
 	return s.getTx(ctx, tx, campaignID)
@@ -302,6 +327,37 @@ func (s *Store) ZamknijPlanowanie(ctx context.Context, campaignID, planSetHash,
 		return ErrConflict
 	}
 	return nil
+}
+
+// AktywneCele mowi, ktore hosty sa juz celami trwajacych kampanii.
+//
+// Kolizja nie zatrzymuje nowego zamowienia: blokady zasobow na hoscie i tak
+// ustawia operacje w kolejce. Ale operator ma to wiedziec przed startem -
+// kampania, ktora czeka na cudza transakcje pakietowa, wyglada jak kampania,
+// ktora stoi bez powodu.
+func (s *Store) AktywneCele(ctx context.Context) (map[string]string, error) {
+	const query = `
+		select t.host_id, t.campaign_id
+		  from campaign_targets t
+		  join campaigns c on c.id = t.campaign_id
+		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running')
+		   and t.state in ('pending', 'planning', 'awaiting_budget', 'running',
+		                   'rebooting', 'verifying')`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	kolizje := map[string]string{}
+	for rows.Next() {
+		var host, campaign string
+		if err := rows.Scan(&host, &campaign); err != nil {
+			return nil, err
+		}
+		kolizje[host] = campaign
+	}
+	return kolizje, rows.Err()
 }
 
 // Get zwraca kampanie.

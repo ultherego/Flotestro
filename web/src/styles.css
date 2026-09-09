@@ -324,3 +324,68 @@ a.przycisk:hover { background: var(--tlo-hover); }
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * Bulk Workspace. ScopeBar trzyma nazwe, operacje i liczbe celow przez caly
+ * kreator: liczba hostow schowana dwa kroki wczesniej znaczy tyle co jej brak.
+ */
+.pasek-zakresu {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 -28px 16px;
+  padding: 12px 28px;
+  background: var(--tlo-panel);
+  border-bottom: 1px solid var(--obramowanie);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 24px;
+}
+.pasek-zakresu .tozsamosc { display: flex; align-items: baseline; gap: 10px; }
+.pasek-zakresu .tozsamosc .nazwa { font-size: 16px; font-weight: 600; }
+.pasek-zakresu .tozsamosc .akcja {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  color: var(--tekst-slaby);
+}
+.pasek-zakresu .fakty {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--tekst-slaby);
+  font-size: 12px;
+  align-items: center;
+}
+
+/* Kroki kreatora. Krok zamkniety mowi, czego brakuje - wygaszenie bez powodu
+   wyglada jak usterka interfejsu, a nie jak bramka przejscia. */
+.kroki-bulk {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 20px;
+  padding: 0;
+}
+.kroki-bulk .krok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 1px solid var(--obramowanie);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--tekst);
+  cursor: pointer;
+  text-align: left;
+}
+.kroki-bulk .krok.aktywny { border-color: var(--akcent); color: var(--akcent); }
+.kroki-bulk .krok:disabled { cursor: not-allowed; color: var(--tekst-slaby); }
+.kroki-bulk .krok .numer {
+  font-variant-numeric: tabular-nums;
+  color: var(--tekst-slaby);
+  font-size: 12px;
+}
+.kroki-bulk .krok .powod { font-size: 11px; color: var(--nieznane); }

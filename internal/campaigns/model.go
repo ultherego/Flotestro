@@ -58,13 +58,18 @@ const (
 	// jest bledem - ale musi byc widoczny, bo inaczej kampania stoi bez
 	// podanego powodu.
 	TargetAwaitingBudget TargetState = "awaiting_budget"
-	TargetRunning        TargetState = "running"
-	TargetRebooting      TargetState = "rebooting"
-	TargetVerifying      TargetState = "verifying"
-	TargetSucceeded      TargetState = "succeeded"
-	TargetFailed         TargetState = "failed"
-	TargetSkipped        TargetState = "skipped"
-	TargetCanceled       TargetState = "canceled"
+	// TargetIneligible oznacza hosta, ktory nie moze wykonac tej operacji:
+	// nie ma wymaganego adaptera albo nie spelnia warunku wstepnego. To nie
+	// jest awaria wykonania i nie liczy sie do progu bledow - ale host zostaje
+	// w migawce, bo zniknieciem po cichu nikt nie moze zarzadzac.
+	TargetIneligible TargetState = "ineligible"
+	TargetRunning    TargetState = "running"
+	TargetRebooting  TargetState = "rebooting"
+	TargetVerifying  TargetState = "verifying"
+	TargetSucceeded  TargetState = "succeeded"
+	TargetFailed     TargetState = "failed"
+	TargetSkipped    TargetState = "skipped"
+	TargetCanceled   TargetState = "canceled"
 )
 
 // Czeka mowi, czy host jest gotowy do uruchomienia, ale jeszcze nie ruszyl.
@@ -78,7 +83,7 @@ func (t TargetState) Czeka() bool {
 // Finished mowi, czy host zakonczyl udzial w kampanii.
 func (t TargetState) Finished() bool {
 	switch t {
-	case TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled:
+	case TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled, TargetIneligible:
 		return true
 	default:
 		return false
@@ -176,9 +181,16 @@ func (s Spec) Validate() error {
 // Hosty sa sortowane, bo kolejnosc migawki nie jest decyzja. Wszystko inne
 // wchodzi w takiej postaci, w jakiej zostalo zapisane.
 func Odcisk(spec Spec, targets []TargetHost) (string, error) {
+	// Odcisk niesie takze stan wyjsciowy hosta. Zgoda dotyczy tego, co
+	// naprawde ruszy: kampania, w ktorej host byl niezdolny, a po ponownym
+	// policzeniu jest gotowy, jest inna kampania niz ta zatwierdzona.
 	hosty := make([]string, 0, len(targets))
 	for _, target := range targets {
-		hosty = append(hosty, target.ID)
+		wpis := target.ID
+		if target.Stan != "" {
+			wpis += ":" + string(target.Stan)
+		}
+		hosty = append(hosty, wpis)
 	}
 	sort.Strings(hosty)
 

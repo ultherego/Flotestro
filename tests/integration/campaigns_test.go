@@ -805,3 +805,137 @@ func TestZmianaBudzetuWymagaUprawnienia(t *testing.T) {
 	bezPrawa.do(http.MethodPut, "/api/v1/budgets/global:mutations",
 		map[string]any{"capacity": 500}, nil, http.StatusForbidden)
 }
+
+type podgladView struct {
+	Count        int      `json:"count"`
+	Limit        int      `json:"limit"`
+	Eligible     int      `json:"eligible"`
+	Sample       []string `json:"sample"`
+	CampaignMode string   `json:"campaign_mode"`
+	RequiresPlan bool     `json:"requires_plan"`
+	Excluded     []struct {
+		Reason string   `json:"reason"`
+		Count  int      `json:"count"`
+		Sample []string `json:"sample"`
+	} `json:"excluded"`
+	Notes []struct {
+		Reason string   `json:"reason"`
+		Count  int      `json:"count"`
+		Sample []string `json:"sample"`
+	} `json:"notes"`
+}
+
+// TestPodgladOdrozniaGotowegoOdNiezdolnego pilnuje kryterium A-02: operator ma
+// przed startem wiedziec, ktore hosty ruszaja i dlaczego pozostale nie.
+//
+// Flota testowa ma host Archa, ktory nie ma ani apta, ani dnf-a. Aktualizacja
+// pakietow jest na nim niewykonalna i panel ma to powiedziec przed
+// utworzeniem kampanii, a nie bledem przy wykonaniu. Ten sam host jest
+// jednoczesnie gotowy do restartu jednostki - kwalifikacja zalezy od operacji,
+// a nie od hosta.
+func TestPodgladOdrozniaGotowegoOdNiezdolnego(t *testing.T) {
+	h := newHarness(t)
+
+	var restart podgladView
+	h.get("/api/v1/campaigns/preview?action=unit.restart", &restart)
+	if restart.Count == 0 {
+		t.Fatal("podglad nie widzi ani jednego hosta")
+	}
+	if restart.Eligible == 0 {
+		t.Fatalf("zaden host nie jest gotowy do restartu jednostki: %+v", restart)
+	}
+	if restart.CampaignMode != "same_payload" {
+		t.Errorf("restart jednostki w trybie %q", restart.CampaignMode)
+	}
+	if restart.RequiresPlan {
+		t.Error("restart jednostki nie liczy planu na hoscie")
+	}
+
+	var aktualizacja podgladView
+	h.get("/api/v1/campaigns/preview?action=packages.upgrade", &aktualizacja)
+	if !aktualizacja.RequiresPlan || aktualizacja.CampaignMode != "per_host_plan" {
+		t.Errorf("aktualizacja pakietow opisana jako %q, plan=%v",
+			aktualizacja.CampaignMode, aktualizacja.RequiresPlan)
+	}
+	// Ta sama flota, inna operacja: host bez adaptera pakietow ma byc
+	// wykluczony z powodem, a nie policzony jako gotowy.
+	if aktualizacja.Eligible >= restart.Eligible {
+		t.Errorf("aktualizacja ma %d gotowych hostow przy %d gotowych do restartu - "+
+			"host bez apta i dnf-a nie zostal rozpoznany",
+			aktualizacja.Eligible, restart.Eligible)
+	}
+	brakAdaptera := 0
+	for _, grupa := range aktualizacja.Excluded {
+		if grupa.Reason == "capability_missing" {
+			brakAdaptera = grupa.Count
+			if len(grupa.Sample) == 0 {
+				t.Error("wykluczenie bez ani jednej nazwy hosta")
+			}
+		}
+	}
+	if brakAdaptera == 0 {
+		t.Errorf("podglad nie wyklucza ani jednego hosta bez adaptera: %+v", aktualizacja.Excluded)
+	}
+	if aktualizacja.Eligible+brakAdaptera > aktualizacja.Count {
+		t.Errorf("gotowych %d i wykluczonych %d przy %d dopasowanych",
+			aktualizacja.Eligible, brakAdaptera, aktualizacja.Count)
+	}
+}
+
+// TestKampaniaZostawiaNiezdolnyHostWMigawce pilnuje doktryny: host, ktory nie
+// wykona operacji, nie znika po cichu.
+//
+// Wykluczenie po cichu jest gorsze niz odmowa: operator zatwierdza kampanie na
+// czterech hostach, a dowiaduje sie o trzech dopiero z raportu - albo nie
+// dowiaduje sie wcale.
+func TestKampaniaZostawiaNiezdolnyHostWMigawce(t *testing.T) {
+	h := newHarness(t)
+	cele := make([]string, 0, 4)
+	niezdolne := 0
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		cele = append(cele, host.ID)
+		if host.OSFamily == "arch" {
+			niezdolne++
+		}
+	}
+	if niezdolne == 0 {
+		t.Skip("flota testowa nie ma hosta bez adaptera pakietow")
+	}
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "aktualizacja calej floty", "action": "packages.upgrade",
+		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+
+	stany := map[string]int{}
+	powody := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		stany[target.State]++
+		if target.State == "ineligible" {
+			powody[target.Hostname] = target.ErrorCode
+		}
+	}
+	if stany["ineligible"] != niezdolne {
+		t.Errorf("migawka ma %d hostow niezdolnych przy %d bez adaptera: %+v",
+			stany["ineligible"], niezdolne, stany)
+	}
+	for hostname, kod := range powody {
+		if kod != "capability_missing" {
+			t.Errorf("host %s niezdolny bez podanego powodu: %q", hostname, kod)
+		}
+	}
+	// Host niezdolny nie jest awaria: kampania ma isc dalej na pozostalych.
+	if stany["pending"]+stany["planning"] == 0 {
+		t.Errorf("kampania nie zostawila ani jednego hosta do pracy: %+v", stany)
+	}
+}

@@ -40,6 +40,7 @@ import { Tozsamosc } from "./pages/host/Tozsamosc";
 import { ZadaniaHosta } from "./pages/host/Zadania";
 import { AudytHosta } from "./pages/host/Audyt";
 import { Zadania } from "./pages/Zadania";
+import { Bulk } from "./pages/Bulk";
 import { Kampanie } from "./pages/Kampanie";
 import { Kampania } from "./pages/Kampania";
 import { Katalog } from "./pages/Katalog";
@@ -85,6 +86,9 @@ export function App() {
         <Link do="/dashboard">Dashboard</Link>
         <Link do="/hosts">Hosts</Link>
         <Link do="/jobs">Jobs</Link>
+        {/* Kampania jest glownym mechanizmem zmiany, a nie skrotem na liscie
+            hostow: ma wlasne miejsce w nawigacji, obok pracy na jednym hoscie. */}
+        {widziKampanie && <Link do="/bulk">Bulk</Link>}
         {widziKampanie && <Link do="/campaigns">Campaigns</Link>}
         {widziBezpieczenstwo && <Link do="/security">Security</Link>}
         {widziCertyfikaty && <Link do="/certificates">Certificates</Link>}
@@ -155,6 +159,7 @@ export function App() {
             <Route path="audit" element={<AudytHosta />} />
           </Route>
           <Route path="/jobs" element={<Zadania />} />
+          {widziKampanie && <Route path="/bulk" element={<Bulk />} />}
           {widziKampanie && <Route path="/campaigns" element={<Kampanie />} />}
           {widziKampanie && <Route path="/campaigns/:id" element={<Kampania />} />}
           {zdolnosci.directory && <Route path="/directory" element={<Katalog />} />}

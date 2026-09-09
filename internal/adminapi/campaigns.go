@@ -120,25 +120,17 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Host w oknie serwisowym nie wchodzi do migawki kampanii. Wpisany do niej
-	// i pominiety w fali wygladalby na awarie; pominiety juz tutaj jest
-	// decyzja, ktora operator widzi przed startem.
-	teraz := time.Now().UTC()
-	wSerwisie := 0
-	poza := make([]hosts.Host, 0, len(candidates))
-	for _, host := range candidates {
-		if host.Maintenance.Trwa(teraz) {
-			wSerwisie++
-			continue
-		}
-		poza = append(poza, host)
-	}
-	if len(poza) == 0 {
-		problem(w, http.StatusBadRequest, "all_in_maintenance",
-			"every host the selector matched is in a maintenance window")
+	// Kwalifikacja rozstrzyga, ktore hosty naprawde ruszaja. Host w oknie
+	// serwisowym i host bez wymaganego adaptera zostaja w migawce, ale
+	// zamkniete od razu i z powodem: znikniecie po cichu ukrywaloby decyzje,
+	// a wpisanie ich jako gotowych nazwaloby brak zdolnosci awaria.
+	ocena := oceniKandydatow(candidates, action, s.aktywneKolizje(r.Context()),
+		time.Now().UTC())
+	if len(ocena.Gotowe) == 0 {
+		problem(w, http.StatusBadRequest, "no_eligible_targets",
+			"no matched host can run this operation: "+opisWykluczen(ocena.Wykluczenia()))
 		return
 	}
-	candidates = poza
 
 	// Uprawnienie sprawdzamy dla kazdego hosta z migawki. Kampania obejmujaca
 	// jeden host poza zakresem nie moze przejsc dlatego, ze reszta jest w nim.
@@ -186,10 +178,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RequestID:                requestIDOf(r),
 	}
 
-	targets := make([]campaigns.TargetHost, 0, len(candidates))
-	for _, host := range candidates {
-		targets = append(targets, campaigns.TargetHost{ID: host.ID, BootID: host.BootID})
-	}
+	targets := ocena.Cele()
 
 	tx, err := s.campaigns.Pool().Begin(r.Context())
 	if err != nil {
@@ -210,7 +199,8 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		Detail: withStepUp(map[string]any{
 			"name": campaign.Name, "action_type": campaign.ActionType,
 			"campaign_mode": string(action.CampaignMode()),
-			"targets":       len(targets), "skipped_in_maintenance": wSerwisie,
+			"targets":       len(targets), "eligible": len(ocena.Gotowe),
+			"excluded": ocena.Wykluczenia(), "notes": ocena.Uwagi,
 			"canary_size": campaign.CanarySize,
 			"wave_size":   campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
 			"approval_fingerprint": campaign.ApprovalFingerprint,
@@ -224,6 +214,24 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, campaign)
+}
+
+// opisWykluczen sklada powody odmowy w jedno zdanie.
+//
+// Odmowa "zaden host nie moze tego wykonac" bez powodow jest cisza: operator
+// widzi selektor, ktory cos dopasowal, i odmowe bez zwiazku z tym, co widzi.
+func opisWykluczen(grupy []grupaHostow) string {
+	opis := ""
+	for i, grupa := range grupy {
+		if i > 0 {
+			opis += ", "
+		}
+		opis += fmt.Sprintf("%s: %d", grupa.Powod, grupa.Liczba)
+	}
+	if opis == "" {
+		return "brak powodow do podania"
+	}
+	return opis
 }
 
 // resolveTargets zamienia selektor na liste hostow.
@@ -300,19 +308,62 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	probka, err := s.hosts.Strona(r.Context(), filter, "", "", rozmiarProbkiPodgladu)
+	odpowiedz := map[string]any{
+		"count": ile,
+		"limit": maksymalnaMigawkaKampanii,
+	}
+
+	// Bez operacji podglad odpowiada tylko na pytanie "ilu hostow to dotyczy".
+	// Kwalifikacja zalezy od operacji: hosty bez adaptera pakietow sa gotowe
+	// do restartu uslugi i niezdolne do aktualizacji.
+	akcja := opspec.ActionType(r.URL.Query().Get("action"))
+	if akcja == "" {
+		probka, err := s.hosts.Strona(r.Context(), filter, "", "", rozmiarProbkiPodgladu)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		odpowiedz["sample"] = nazwyHostow(probka)
+		writeJSON(w, http.StatusOK, odpowiedz)
+		return
+	}
+	if !akcja.Known() {
+		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(akcja))
+		return
+	}
+
+	// Kwalifikacje liczymy na tej samej migawce, ktora weszlaby do kampanii.
+	// Podglad liczony inaczej niz tworzenie bylby gorszy niz jego brak:
+	// operator zatwierdzalby jedna kampanie, a dostawal druga.
+	kandydaci, err := s.resolveTargets(r, campaigns.Selector{
+		Site: filter.Site, Environment: filter.Environment, OSFamily: filter.OSFamily,
+	})
+	if errors.Is(err, ErrZbytSzerokiSelektor) {
+		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	nazwy := make([]string, 0, len(probka))
-	for _, host := range probka {
+	ocena := oceniKandydatow(kandydaci, akcja, s.aktywneKolizje(r.Context()),
+		time.Now().UTC())
+
+	odpowiedz["sample"] = nazwyHostow(ocena.Gotowe[:min(len(ocena.Gotowe), rozmiarProbkiPodgladu)])
+	odpowiedz["eligible"] = len(ocena.Gotowe)
+	odpowiedz["excluded"] = ocena.Wykluczenia()
+	odpowiedz["notes"] = ocena.Uwagi
+	odpowiedz["campaign_mode"] = string(akcja.CampaignMode())
+	odpowiedz["requires_plan"] = opspec.AkcjaPlanowania(akcja) != ""
+	writeJSON(w, http.StatusOK, odpowiedz)
+}
+
+func nazwyHostow(lista []hosts.Host) []string {
+	nazwy := make([]string, 0, len(lista))
+	for _, host := range lista {
 		nazwy = append(nazwy, host.Hostname)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"count": ile, "sample": nazwy,
-		"limit": maksymalnaMigawkaKampanii,
-	})
+	return nazwy
 }
 
 // rozmiarProbkiPodgladu ogranicza probke pokazywana przy podgladzie.
