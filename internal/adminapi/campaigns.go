@@ -3,6 +3,7 @@ package adminapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -106,6 +107,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		HostIDs:     request.Selector.HostIDs,
 	}
 	candidates, err := s.resolveTargets(r, selector)
+	if errors.Is(err, ErrZbytSzerokiSelektor) {
+		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -166,10 +171,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		ActionType:               string(action),
 		Payload:                  request.Payload,
 		Selector:                 selector,
-		CanarySize:               canaryOr(request.CanarySize, 1),
+		CanarySize:               wartoscLubDomyslna(request.CanarySize, 1),
 		WaveSize:                 valueOr(request.WaveSize, 10),
 		MaxConcurrent:            valueOr(request.MaxConcurrent, 5),
-		FailureThresholdPercent:  valueOr(request.FailureThresholdPercent, 20),
+		FailureThresholdPercent:  wartoscLubDomyslna(request.FailureThresholdPercent, 20),
 		FailureThresholdAbsolute: valueOr(request.FailureThresholdAbsolute, 0),
 		MaintenanceStart:         request.MaintenanceStart,
 		MaintenanceEnd:           request.MaintenanceEnd,
@@ -237,13 +242,81 @@ func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([
 		}
 		return result, nil
 	}
-	return s.hosts.List(r.Context(), hosts.ListFilter{
+	// Selektor jest czytany strona po stronie, bez ukrytego limitu: kampania
+	// obejmujaca tysiac hostow ma znaczyc tysiac hostow, a nie pierwsze
+	// piecset posortowane alfabetycznie. Gorna granica jest jawna i konczy
+	// sie bledem, a nie cichym obcieciem listy.
+	filter := hosts.ListFilter{
 		Site:        selector.Site,
 		Environment: selector.Environment,
 		OSFamily:    selector.OSFamily,
-		Limit:       500,
+	}
+	wynik := make([]hosts.Host, 0, hosts.RozmiarStrony)
+	poNazwie, poID := "", ""
+	for {
+		strona, err := s.hosts.Strona(r.Context(), filter, poNazwie, poID, hosts.RozmiarStrony)
+		if err != nil {
+			return nil, err
+		}
+		wynik = append(wynik, strona...)
+		if len(strona) < hosts.RozmiarStrony {
+			return wynik, nil
+		}
+		if len(wynik) > maksymalnaMigawkaKampanii {
+			return nil, fmt.Errorf("%w: selektor obejmuje wiecej niz %d hostow",
+				ErrZbytSzerokiSelektor, maksymalnaMigawkaKampanii)
+		}
+		ostatni := strona[len(strona)-1]
+		poNazwie, poID = ostatni.Hostname, ostatni.ID
+	}
+}
+
+// maksymalnaMigawkaKampanii jest granica jednej kampanii. Nie chroni bazy,
+// tylko czlowieka: migawka wieksza niz to jest zwykle blednym selektorem,
+// a nie zamiarem.
+const maksymalnaMigawkaKampanii = 10000
+
+// ErrZbytSzerokiSelektor oznacza selektor obejmujacy wiecej hostow, niz
+// jedna kampania ma prowadzic.
+var ErrZbytSzerokiSelektor = errors.New("selektor obejmuje zbyt wiele hostow")
+
+// handleCampaignPreview odpowiada na pytanie "ilu hostow to dotyczy".
+//
+// Liczba pochodzi z bazy, a nie z dlugosci pierwszej strony listy hostow:
+// operator zatwierdza zmiane na tylu maszynach, ile mu pokazano, wiec podglad
+// nie moze urywac sie na ukrytym limicie. Probka jest tylko probka i jest tak
+// nazwana.
+func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign"); !ok {
+		return
+	}
+	filter := hosts.ListFilter{
+		Site:        r.URL.Query().Get("site"),
+		Environment: r.URL.Query().Get("environment"),
+		OSFamily:    r.URL.Query().Get("os_family"),
+	}
+	ile, err := s.hosts.Policz(r.Context(), filter)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	probka, err := s.hosts.Strona(r.Context(), filter, "", "", rozmiarProbkiPodgladu)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	nazwy := make([]string, 0, len(probka))
+	for _, host := range probka {
+		nazwy = append(nazwy, host.Hostname)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count": ile, "sample": nazwy,
+		"limit": maksymalnaMigawkaKampanii,
 	})
 }
+
+// rozmiarProbkiPodgladu ogranicza probke pokazywana przy podgladzie.
+const rozmiarProbkiPodgladu = 12
 
 func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign")
@@ -546,11 +619,12 @@ func (s *Server) campaignNeedsSecondPerson(r *http.Request, campaign *campaigns.
 	return false
 }
 
-// canaryOr rozni sie od valueOr jedna rzecza: zero jest tu decyzja, a nie
-// brakiem wartosci. Kampania bez canary jest sensowna - i tak wlasnie
-// wyglada domyslny profil operacji odwracalnych. Ciche podstawienie jedynki
-// zmienialoby polityke, o ktora operator prosil.
-func canaryOr(value *int, fallback int) int {
+// wartoscLubDomyslna rozni sie od valueOr jedna rzecza: zero jest tu decyzja,
+// a nie brakiem wartosci. Kampania bez canary jest sensowna, tak jak kampania
+// bez progu procentowego - i tak wlasnie wygladaja domyslne profile
+// z dokumentu. Ciche podstawienie wartosci zmienialoby polityke, o ktora
+// operator prosil, a odcisk zatwierdzenia obejmowalby juz co innego.
+func wartoscLubDomyslna(value *int, fallback int) int {
 	if value == nil || *value < 0 {
 		return fallback
 	}

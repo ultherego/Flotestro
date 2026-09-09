@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
-import type { Campaign, Host } from "../lib/types";
+import type { Campaign } from "../lib/types";
 import { Blad, Czas, Pusto, StanZadania } from "../components/ui";
 
 export function Kampanie() {
@@ -64,7 +64,12 @@ type Operacja = {
  * dopuszczac wiecej, niz ten formularz potrafi opisac - i wtedy operacja jest
  * widoczna, ale nieaktywna. Ukrycie jej wygladaloby jak brak funkcji.
  */
-const OPERACJE_KREATORA = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
+const OPERACJE_KREATORA = [
+  "unit.start", "unit.stop", "unit.restart", "unit.reload", "packages.upgrade",
+];
+
+/** Operacje, ktore biora nazwe jednostki systemd. */
+const OPERACJE_JEDNOSTKI = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
 
 /**
  * Kreator kampanii. Ostatni krok pokazuje dokladnie, ile hostow zostanie
@@ -83,6 +88,7 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
   const [progProcent, setProgProcent] = useState(20);
   const [progLiczba, setProgLiczba] = useState(0);
   const [politykaRestartu, setPolitykaRestartu] = useState("never");
+  const [tylkoBezpieczenstwo, setTylkoBezpieczenstwo] = useState(true);
   const [blad, setBlad] = useState("");
 
   // Lista operacji masowych pochodzi z serwera, a nie z tego pliku. To rejestr
@@ -94,13 +100,17 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
   });
   const masowe = (operacje.data?.items ?? []).filter((pozycja) => pozycja.campaign_ready);
 
-  // Podglad celow: operator widzi liste hostow przed utworzeniem kampanii.
-  const parametry = new URLSearchParams({ limit: "500" });
+  // Podglad celow: liczbe liczy serwer, a nie dlugosc pierwszej strony listy
+  // hostow. Operator zatwierdza zmiane na tylu maszynach, ile mu pokazano.
+  const parametry = new URLSearchParams();
   if (site) parametry.set("site", site);
   if (environment) parametry.set("environment", environment);
   const podglad = useQuery({
-    queryKey: ["hosts", "preview", parametry.toString()],
-    queryFn: () => api.get<Collection<Host>>(`/api/v1/hosts?${parametry}`),
+    queryKey: ["campaign-preview", parametry.toString()],
+    queryFn: () =>
+      api.get<{ count: number; sample: string[]; limit: number }>(
+        `/api/v1/campaigns/preview?${parametry}`,
+      ),
   });
 
   const utworz = useMutation({
@@ -108,7 +118,9 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
       api.post<Campaign>("/api/v1/campaigns", {
         name: nazwa,
         action: akcja,
-        payload: { unit: { unit: jednostka } },
+        payload: OPERACJE_JEDNOSTKI.includes(akcja)
+          ? { unit: { unit: jednostka } }
+          : { package_upgrade: { security_only: tylkoBezpieczenstwo } },
         selector: { site: site || undefined, environment: environment || undefined },
         canary_size: canary,
         wave_size: fala,
@@ -125,7 +137,9 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
   });
 
   const liczbaCelow = podglad.data?.count ?? 0;
-  const gotowe = nazwa && jednostka && liczbaCelow > 0;
+  const probka = podglad.data?.sample ?? [];
+  const wymagaJednostki = OPERACJE_JEDNOSTKI.includes(akcja);
+  const gotowe = nazwa && (!wymagaJednostki || jednostka) && liczbaCelow > 0;
 
   return (
     <div className="kafelek" style={{ marginTop: 16, maxWidth: 760 }}>
@@ -144,14 +158,26 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
             </option>
           ))}
         </select>
-        <input placeholder="unit, e.g. cron.service" value={jednostka} onChange={(e) => setJednostka(e.target.value)} />
+        {wymagaJednostki ? (
+          <input placeholder="unit, e.g. cron.service" value={jednostka} onChange={(e) => setJednostka(e.target.value)} />
+        ) : (
+          <label>
+            <input
+              type="checkbox"
+              checked={tylkoBezpieczenstwo}
+              onChange={(e) => setTylkoBezpieczenstwo(e.target.checked)}
+            />{" "}
+            security updates only
+          </label>
+        )}
       </div>
-      {/* Operacja, ktora liczy inny plan na kazdym hoscie, nie moze udawac
-          jednego payloadu. Kreator jej nie pokazuje, a nie ukrywa powodu. */}
+      {/* Operacja, ktora liczy inny plan na kazdym hoscie, przechodzi przez
+          faze planowania - a nie udaje jednego payloadu. Operacje, dla ktorych
+          panel nie ma jeszcze plannera, nie sa ukryte: sa odmowione z powodem. */}
       <p className="podtytul">
-        Operations that compute a different plan on every host — package upgrades, files, network,
-        firewall, storage — are not here. A campaign would approve one payload while every host
-        needs its own; run them from the host workspace until per-host plans land.
+        {wymagaJednostki
+          ? "The same payload means the same thing on every host; each host still runs its own preflight."
+          : "Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change."}
       </p>
       <div className="filtry">
         <input placeholder="site" value={site} onChange={(e) => setSite(e.target.value)} />
@@ -180,8 +206,8 @@ function Kreator({ onGotowe }: { onGotowe: () => void }) {
             when the campaign is created; hosts added later will not join it.
           </p>
           <div className="zrodlo">
-            {(podglad.data?.items ?? []).slice(0, 12).map((host) => host.hostname).join(", ")}
-            {liczbaCelow > 12 && ` i ${liczbaCelow - 12} wiecej`}
+            {probka.join(", ")}
+            {liczbaCelow > probka.length && ` i ${liczbaCelow - probka.length} wiecej`}
           </div>
         </>
       )}

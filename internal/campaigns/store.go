@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ultherego/flotestro/internal/authz"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 var (
@@ -64,6 +66,11 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	}
 
 	state := StateQueuedOrApproval(spec.RequiresApproval)
+	// Zmiana liczona per host zaczyna od planowania: zgoda ma dotyczyc
+	// diffow, a te dopiero powstana.
+	if opspec.AkcjaPlanowania(opspec.ActionType(spec.ActionType)) != "" {
+		state = StatePlanning
+	}
 	campaignID := uuid.NewString()
 
 	// Odcisk powstaje z tego samego opisu, ktory trafia do bazy. Zatwierdzenie
@@ -229,7 +236,71 @@ func (s *Store) SetState(ctx context.Context, campaignID string, state State, re
 
 // Active zwraca kampanie wymagajace obslugi przez orkiestrator.
 func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
-	return s.query(ctx, "where state in ('planned', 'canary', 'running') order by created_at")
+	// Planowanie jest stanem aktywnym: kampania nic jeszcze nie zmienia, ale
+	// orchestrator ma co robic - kazdy host liczy wlasny plan.
+	return s.query(ctx,
+		"where state in ('planning', 'planned', 'canary', 'running') order by created_at")
+}
+
+// ZapiszPlan zapisuje plan wyliczony na jednym hoscie.
+//
+// Plan powstaje raz i nie jest przeliczany po zatwierdzeniu: zgoda dotyczy
+// tego diffu, a nie tego, co host wylicza teraz.
+func (s *Store) ZapiszPlan(ctx context.Context, campaignID, hostID, hash string,
+	plan json.RawMessage) error {
+	if len(plan) == 0 {
+		plan = json.RawMessage("{}")
+	}
+	const query = `
+		insert into campaign_plans (campaign_id, host_id, plan_hash, plan)
+		values ($1, $2, $3, $4)
+		on conflict (campaign_id, host_id) do update
+		   set plan_hash = excluded.plan_hash, plan = excluded.plan,
+		       computed_at = now()`
+	_, err := s.pool.Exec(ctx, query, campaignID, hostID, hash, plan)
+	return err
+}
+
+// Plany zwraca odciski planow kampanii w podziale na hosty.
+func (s *Store) Plany(ctx context.Context, campaignID string) (map[string]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`select host_id, plan_hash from campaign_plans where campaign_id = $1`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	plany := map[string]string{}
+	for rows.Next() {
+		var host, hash string
+		if err := rows.Scan(&host, &hash); err != nil {
+			return nil, err
+		}
+		plany[host] = hash
+	}
+	return plany, rows.Err()
+}
+
+// ZamknijPlanowanie zapisuje odcisk zestawu planow razem z odciskiem
+// zatwierdzenia i przenosi kampanie do stanu, w ktorym czeka na decyzje.
+//
+// Odcisk zatwierdzenia zmienia sie tu po raz ostatni: od tej chwili zgoda
+// dotyczy konkretnego zestawu planow, a nie samego zamowienia.
+func (s *Store) ZamknijPlanowanie(ctx context.Context, campaignID, planSetHash,
+	odcisk string, dalej State) error {
+	const query = `
+		update campaigns
+		   set plan_set_hash = $2, approval_fingerprint = $3, state = $4, updated_at = now()
+		 where id = $1 and state = $5`
+	tag, err := s.pool.Exec(ctx, query, campaignID, planSetHash, odcisk,
+		string(dalej), string(StatePlanning))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrConflict
+	}
+	return nil
 }
 
 // Get zwraca kampanie.
@@ -309,7 +380,7 @@ const campaignColumns = `
 	       canary_size, wave_size, max_concurrent,
 	       failure_threshold_percent, failure_threshold_absolute,
 	       maintenance_start, maintenance_end, reboot_policy, health_check_units,
-	       job_timeout_seconds, requires_approval, approval_fingerprint,
+	       job_timeout_seconds, requires_approval, approval_fingerprint, plan_set_hash,
 	       coalesce(approved_by, ''), approved_at, coalesce(paused_by, ''),
 	       coalesce(pause_reason, ''), coalesce(canceled_by, ''),
 	       created_by, coalesce(request_id, ''), started_at, finished_at, created_at, updated_at
@@ -332,7 +403,7 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.CanarySize, &c.WaveSize, &c.MaxConcurrent,
 			&c.FailureThresholdPercent, &c.FailureThresholdAbsolute,
 			&c.MaintenanceStart, &c.MaintenanceEnd, &c.RebootPolicy, &c.HealthCheckUnits,
-			&c.JobTimeoutSeconds, &c.RequiresApproval, &c.ApprovalFingerprint,
+			&c.JobTimeoutSeconds, &c.RequiresApproval, &c.ApprovalFingerprint, &c.PlanSetHash,
 			&c.ApprovedBy, &c.ApprovedAt, &c.PausedBy, &c.PauseReason, &c.CanceledBy,
 			&c.CreatedBy, &c.RequestID, &c.StartedAt, &c.FinishedAt,
 			&c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -347,7 +418,8 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 func (s *Store) Targets(ctx context.Context, campaignID string) ([]Target, error) {
 	const query = `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,
-		       t.state, t.job_id, t.reboot_job_id, t.health_job_id, coalesce(t.boot_id_before, ''),
+		       t.state, t.job_id, t.plan_job_id, t.reboot_job_id, t.health_job_id,
+		       coalesce(t.boot_id_before, ''),
 		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at
 		from campaign_targets t
 		left join hosts h on h.id = t.host_id
@@ -363,7 +435,7 @@ func (s *Store) Targets(ctx context.Context, campaignID string) ([]Target, error
 	for rows.Next() {
 		var t Target
 		if err := rows.Scan(&t.ID, &t.CampaignID, &t.HostID, &t.Hostname, &t.Wave, &t.Position,
-			&t.State, &t.JobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
+			&t.State, &t.JobID, &t.PlanJobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
 			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt); err != nil {
 			return nil, err
 		}
@@ -398,6 +470,8 @@ func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) e
 		query = `update campaign_targets set reboot_job_id = $2 where id = $1`
 	case "health_job_id":
 		query = `update campaign_targets set health_job_id = $2 where id = $1`
+	case "plan_job_id":
+		query = `update campaign_targets set plan_job_id = $2 where id = $1`
 	default:
 		return fmt.Errorf("nieznana kolumna zadania %q", column)
 	}

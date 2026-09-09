@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 func kopertaJednostki(id, unit string) *agentv1.TaskEnvelope {
@@ -183,5 +185,35 @@ func TestPlikiSaOsobnymiZasobami(t *testing.T) {
 	}
 	if len(drugi) != 1 || drugi[0] != "file:/etc/b.conf" {
 		t.Fatalf("roszczenia drugiego pliku = %v", drugi)
+	}
+}
+
+// TestPayloadNaprawyMaTenSamHashCoWPanelu pilnuje wlasciwosci, ktora laczy
+// panel z agentem: koperta musi odtworzyc dokladnie ten payload, z ktorego
+// panel policzyl hash planu. Pusta lista zapisuje sie w JSON inaczej niz jej
+// brak, wiec naprawa bez odpowiedzi konczyla sie odmowa payload_hash_mismatch.
+func TestPayloadNaprawyMaTenSamHashCoWPanelu(t *testing.T) {
+	wPanelu := opspec.Payload{PackageRepair: &opspec.PackageRepairPayload{}}
+	oczekiwany, err := opspec.PayloadHash(opspec.ActionPackageRepair, opspec.ActionVersion, wPanelu)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	koperta := &agentv1.TaskEnvelope{
+		TaskId: "naprawa",
+		Action: &agentv1.TaskEnvelope_PackagesRepair{
+			PackagesRepair: &agentv1.PackagesRepair{},
+		},
+	}
+	action, payload, err := decodeAction(koperta)
+	if err != nil {
+		t.Fatalf("dekodowanie koperty: %v", err)
+	}
+	uAgenta, err := opspec.PayloadHash(action, opspec.ActionVersion, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(oczekiwany, uAgenta) {
+		t.Fatalf("hash planu rozjezdza sie: panel %x, agent %x", oczekiwany, uAgenta)
 	}
 }

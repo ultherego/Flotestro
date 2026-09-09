@@ -131,6 +131,17 @@ func run() error {
 		"agent_user", *agentUser, "uid", allowedUID,
 		"socket_activated", activated, "protocol_version", helper.ProtocolVersion)
 
+	// Transakcja pakietowa wstrzymuje na swoj czas pakiet agenta, zeby nie
+	// wymienic go w polowie wlasnej pracy. Gdy zginela razem z procesem,
+	// wstrzymanie zostawalo na zawsze i blokowalo kazda pozniejsza wymiane
+	// agenta. Sprzatamy je przy starcie - ale tylko wtedy, gdy to my je
+	// zalozylismy.
+	if zwolniono, err := packages.ZwolnijPorzuconeWstrzymanie(ctx); err != nil {
+		log.Warn("nie zwolniono porzuconego wstrzymania pakietu agenta", "err", err)
+	} else if zwolniono {
+		log.Info("zwolniono porzucone wstrzymanie pakietu agenta")
+	}
+
 	// Helper konczy prace po okresie bezczynnosci. W stanie spoczynku floty
 	// nie dziala zaden proces roota.
 	if *idleTimeout > 0 {

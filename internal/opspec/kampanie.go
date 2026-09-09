@@ -85,6 +85,22 @@ var trybyMasowe = map[ActionType]CampaignMode{
 	ActionFirewallRulesetRestore: CampaignSpecialized,
 }
 
+// AkcjaPlanowania mowi, ktora operacja liczy plan dla operacji zmieniajacej.
+//
+// Plan jest odczytem i ma wlasny typ operacji: to on chodzi po hoscie, liczy
+// diff i zwraca jego odcisk. Kampania w trybie per_host_plan uruchamia go
+// najpierw na kazdym hoscie, a dopiero zestaw tych planow idzie do
+// zatwierdzenia.
+//
+// Pusta wartosc znaczy, ze panel nie umie zaplanowac tej zmiany masowo.
+func AkcjaPlanowania(action ActionType) ActionType {
+	switch action {
+	case ActionPackageUpgrade:
+		return ActionPackagePlan
+	}
+	return ""
+}
+
 // TrybyWykonywalne wylicza tryby, ktore silnik kampanii naprawde umie
 // przeprowadzic.
 //
@@ -96,6 +112,10 @@ func TrybWykonywalny(action ActionType) bool {
 	switch action.CampaignMode() {
 	case CampaignSamePayload:
 		return true
+	case CampaignPerHostPlan:
+		// Plan per host musi miec czym powstac. Bez operacji planujacej
+		// kampania zatwierdzalaby zmiane, ktorej diffu nikt nie policzyl.
+		return AkcjaPlanowania(action) != ""
 	case CampaignSpecialized:
 		// Restart ma w silniku wlasna faze: nowy boot ID i sprawdzenie
 		// jednostek po powrocie. Pozostale specjalizacje jeszcze jej nie maja.

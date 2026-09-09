@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,10 @@ import (
 type State string
 
 const (
+	// StatePlanning jest faza, w ktorej kazdy host liczy wlasny plan.
+	// Kampania niczego jeszcze nie zmienia: plan jest odczytem, a jego
+	// zestaw - tym, co operator za chwile zatwierdzi.
+	StatePlanning         State = "planning"
 	StatePlanned          State = "planned"
 	StateAwaitingApproval State = "awaiting_approval"
 	StateCanary           State = "canary"
@@ -45,7 +50,9 @@ func (s State) Terminal() bool {
 type TargetState string
 
 const (
-	TargetPending   TargetState = "pending"
+	TargetPending TargetState = "pending"
+	// TargetPlanning oznacza hosta, ktory liczy wlasny plan zmiany.
+	TargetPlanning  TargetState = "planning"
 	TargetRunning   TargetState = "running"
 	TargetRebooting TargetState = "rebooting"
 	TargetVerifying TargetState = "verifying"
@@ -203,6 +210,27 @@ func Odcisk(spec Spec, targets []TargetHost) (string, error) {
 	return hex.EncodeToString(suma[:]), nil
 }
 
+// OdciskZPlanami przelicza odcisk zatwierdzenia razem z zestawem planow.
+//
+// Po fazie planowania zgoda dotyczy juz nie samego zamowienia, tylko tego,
+// co kazdy host naprawde zrobi. Plan przeliczony na innym stanie hosta daje
+// inny odcisk zestawu, wiec uniewaznia zgode.
+func OdciskZPlanami(campaign Campaign, planSetHash string) (string, error) {
+	if campaign.ApprovalFingerprint == "" {
+		return "", fmt.Errorf("kampania %s nie ma odcisku zamowienia", campaign.ID)
+	}
+	// Odcisk zamowienia powstal przy tworzeniu kampanii i obejmuje operacje,
+	// payload, liste hostow i polityke rozwijania. Zestaw planow dokleja sie
+	// do niego, wiec zgoda dotyczy jednego i drugiego.
+	return odciskTekstu([]string{campaign.ApprovalFingerprint, planSetHash}), nil
+}
+
+// odciskTekstu liczy odcisk z uporzadkowanej listy tekstow.
+func odciskTekstu(czesci []string) string {
+	suma := sha256.Sum256([]byte(strings.Join(czesci, "\n")))
+	return hex.EncodeToString(suma[:])
+}
+
 // WersjaKampanii jest wersja semantyki kampanii. Zmiana wersji uniewaznia
 // zatwierdzenia: zgoda dotyczyla innych regul.
 const WersjaKampanii = 2
@@ -228,37 +256,42 @@ type Campaign struct {
 	RequiresApproval         bool            `json:"requires_approval"`
 	// ApprovalFingerprint jest odciskiem tego, co zatwierdzajacy widzi.
 	// Zgoda podana wobec innego odcisku dotyczy innej kampanii.
-	ApprovalFingerprint string     `json:"approval_fingerprint"`
-	ApprovedBy          string     `json:"approved_by,omitempty"`
-	ApprovedAt          *time.Time `json:"approved_at,omitempty"`
-	PausedBy            string     `json:"paused_by,omitempty"`
-	PauseReason         string     `json:"pause_reason,omitempty"`
-	CanceledBy          string     `json:"canceled_by,omitempty"`
-	CreatedBy           string     `json:"created_by"`
-	RequestID           string     `json:"request_id,omitempty"`
-	StartedAt           *time.Time `json:"started_at,omitempty"`
-	FinishedAt          *time.Time `json:"finished_at,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ApprovalFingerprint string `json:"approval_fingerprint"`
+	// PlanSetHash jest odciskiem zestawu planow per host. Pusty oznacza
+	// kampanie, ktora planow nie potrzebuje.
+	PlanSetHash string     `json:"plan_set_hash,omitempty"`
+	ApprovedBy  string     `json:"approved_by,omitempty"`
+	ApprovedAt  *time.Time `json:"approved_at,omitempty"`
+	PausedBy    string     `json:"paused_by,omitempty"`
+	PauseReason string     `json:"pause_reason,omitempty"`
+	CanceledBy  string     `json:"canceled_by,omitempty"`
+	CreatedBy   string     `json:"created_by"`
+	RequestID   string     `json:"request_id,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // Target jest hostem w kampanii.
 type Target struct {
-	ID           string      `json:"id"`
-	CampaignID   string      `json:"campaign_id"`
-	HostID       string      `json:"host_id"`
-	Hostname     string      `json:"hostname,omitempty"`
-	Wave         int         `json:"wave"`
-	Position     int         `json:"position"`
-	State        TargetState `json:"state"`
-	JobID        *string     `json:"job_id,omitempty"`
-	RebootJobID  *string     `json:"reboot_job_id,omitempty"`
-	HealthJobID  *string     `json:"health_job_id,omitempty"`
-	BootIDBefore string      `json:"boot_id_before,omitempty"`
-	ErrorCode    string      `json:"error_code,omitempty"`
-	Message      string      `json:"message,omitempty"`
-	StartedAt    *time.Time  `json:"started_at,omitempty"`
-	FinishedAt   *time.Time  `json:"finished_at,omitempty"`
+	ID         string      `json:"id"`
+	CampaignID string      `json:"campaign_id"`
+	HostID     string      `json:"host_id"`
+	Hostname   string      `json:"hostname,omitempty"`
+	Wave       int         `json:"wave"`
+	Position   int         `json:"position"`
+	State      TargetState `json:"state"`
+	JobID      *string     `json:"job_id,omitempty"`
+	// PlanJobID jest zadaniem, ktore policzylo plan tego hosta.
+	PlanJobID    *string    `json:"plan_job_id,omitempty"`
+	RebootJobID  *string    `json:"reboot_job_id,omitempty"`
+	HealthJobID  *string    `json:"health_job_id,omitempty"`
+	BootIDBefore string     `json:"boot_id_before,omitempty"`
+	ErrorCode    string     `json:"error_code,omitempty"`
+	Message      string     `json:"message,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
 // Report podsumowuje przebieg kampanii.

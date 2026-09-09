@@ -3,6 +3,7 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -65,6 +66,12 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	targets, err := o.store.Targets(ctx, campaign.ID)
 	if err != nil {
 		return err
+	}
+
+	// Faza planowania jest osobna droga: nic sie jeszcze nie zmienia, wiec
+	// nie ma fal, progow ani limitu rownoleglosci kampanii.
+	if campaign.State == StatePlanning {
+		return o.planuj(ctx, campaign, targets)
 	}
 
 	// Najpierw domykamy to, co juz biegnie: bez tego progi liczylyby sie na
@@ -198,7 +205,24 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 			return "", err
 		}
 	}
-	return o.submitJob(ctx, campaign, host, opspec.ActionType(campaign.ActionType), payload,
+	action := opspec.ActionType(campaign.ActionType)
+
+	// Zmiana liczona per host jedzie z odciskiem planu tego hosta. Host
+	// porownuje go ze stanem, ktory ma teraz, i odmawia, gdy plan sie
+	// zdezaktualizowal - zgoda dotyczyla tamtego diffu, nie tego.
+	if opspec.AkcjaPlanowania(action) != "" {
+		plany, err := o.store.Plany(ctx, campaign.ID)
+		if err != nil {
+			return "", err
+		}
+		hash := plany[target.HostID]
+		if hash == "" {
+			return "", fmt.Errorf("host %s nie ma policzonego planu", target.HostID)
+		}
+		payload = zPlanem(action, payload, hash)
+	}
+
+	return o.submitJob(ctx, campaign, host, action, payload,
 		"campaign:"+campaign.ID+":main:"+target.HostID)
 }
 

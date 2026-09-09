@@ -43,8 +43,10 @@ func TestOperacjaZPlanemNieJestSamymPayloadem(t *testing.T) {
 		if action.CampaignMode() == CampaignSamePayload {
 			t.Errorf("%s wymaga planu, a jest zadeklarowana jako same_payload", action)
 		}
-		if TrybWykonywalny(action) {
-			t.Errorf("%s wymaga planu, a kampania ja dopuszcza", action)
+		// Kampania moze prowadzic taka operacje tylko wtedy, gdy ma czym
+		// policzyc plan na kazdym hoscie osobno.
+		if TrybWykonywalny(action) && AkcjaPlanowania(action) == "" {
+			t.Errorf("%s wymaga planu, a kampania nie ma czym go policzyc", action)
 		}
 	}
 }
@@ -71,12 +73,21 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	if !TrybWykonywalny(ActionSystemReboot) {
 		t.Error("restart hosta nie jest wykonywalny masowo, choc ma wlasna faze")
 	}
-	// Aktualizacja pakietow liczy inny plan na kazdym hoscie: dopoki panel
-	// nie zatwierdza zestawu planow, kampania jej nie prowadzi.
-	if TrybWykonywalny(ActionPackageUpgrade) {
-		t.Error("aktualizacja pakietow dopuszczona bez planow per host")
-	}
+	// Aktualizacja pakietow liczy inny plan na kazdym hoscie, wiec kampania
+	// prowadzi ja przez faze planowania - i tylko dlatego jest dopuszczona.
 	if ActionPackageUpgrade.CampaignMode() != CampaignPerHostPlan {
 		t.Errorf("aktualizacja pakietow ma tryb %q", ActionPackageUpgrade.CampaignMode())
+	}
+	if AkcjaPlanowania(ActionPackageUpgrade) != ActionPackagePlan {
+		t.Errorf("aktualizacja pakietow planuje sie operacja %q",
+			AkcjaPlanowania(ActionPackageUpgrade))
+	}
+	if !TrybWykonywalny(ActionPackageUpgrade) {
+		t.Error("aktualizacja pakietow nie jest prowadzona mimo fazy planowania")
+	}
+	// Zmiana pliku takze liczy plan na kazdym hoscie, ale panel nie ma
+	// jeszcze czym go policzyc masowo - i dlatego odmawia.
+	if TrybWykonywalny(ActionFileEnsure) {
+		t.Error("zapis pliku dopuszczony bez planow per host")
 	}
 }

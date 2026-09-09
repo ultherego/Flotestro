@@ -247,6 +247,9 @@ func (s *Server) Routes() http.Handler {
 	// Kampanie: plan, zatwierdzenie, prowadzenie i raport.
 	mux.HandleFunc("GET /api/v1/campaigns", s.handleListCampaigns)
 	mux.HandleFunc("POST /api/v1/campaigns", s.handleCreateCampaign)
+	// Podglad selektora: liczba celow pochodzi z bazy, a nie z dlugosci
+	// pierwszej strony listy hostow.
+	mux.HandleFunc("GET /api/v1/campaigns/preview", s.handleCampaignPreview)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}", s.handleGetCampaign)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/targets", s.handleCampaignTargets)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/report", s.handleCampaignReport)

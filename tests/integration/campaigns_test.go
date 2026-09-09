@@ -19,6 +19,7 @@ type campaignView struct {
 	// Odcisk tego, co zatwierdzajacy widzi. Zgoda bez niego dotyczylaby
 	// samego identyfikatora kampanii.
 	ApprovalFingerprint string `json:"approval_fingerprint"`
+	PlanSetHash         string `json:"plan_set_hash"`
 	CreatedBy           string `json:"created_by"`
 	ApprovedBy          string `json:"approved_by"`
 	PausedBy            string `json:"paused_by"`
@@ -32,6 +33,7 @@ type campaignTargetView struct {
 	State     string `json:"state"`
 	ErrorCode string `json:"error_code"`
 	JobID     string `json:"job_id"`
+	PlanJobID string `json:"plan_job_id"`
 }
 
 type campaignReportView struct {
@@ -354,10 +356,8 @@ func TestKampaniaOdmawiaOperacjiBezTrybuMasowego(t *testing.T) {
 	host := h.hostByFamily("debian")
 
 	przypadki := map[string]map[string]any{
-		// Aktualizacja pakietow liczy inny zestaw na kazdym hoscie.
-		"packages.upgrade": {"package_upgrade": map[string]any{}},
-		// Zapis pliku jest deklaracja stanu, ktory na kazdym hoscie ma inna
-		// zawartosc wyjsciowa.
+		// Zapis pliku liczy inny diff na kazdym hoscie, a panel nie ma jeszcze
+		// czym go policzyc masowo - wiec odmawia zamiast udawac.
 		"file.ensure": {"file": map[string]any{
 			"path": "/etc/flotestro-test.conf", "content": "x", "mode": "0644",
 		}},
@@ -555,5 +555,77 @@ func TestKolidujaceOperacjeNaHoscieSaSerializowane(t *testing.T) {
 			t.Errorf("restart %s zaczal od procesu %d, a poprzedni zostawil %d - operacje weszly na siebie",
 				wykonania[i].identyfika, wykonania[i].pidPrzed, wykonania[i-1].pidPo)
 		}
+	}
+}
+
+// TestKampaniaPakietowLiczyPlanNaKazdymHoscie pilnuje najwazniejszej zmiany
+// Campaigns v2: zgoda nie dotyczy jednego payloadu, tylko zestawu planow.
+//
+// Dwa hosty wybrane tym samym zamowieniem prawie nigdy nie maja tego samego
+// diffu, wiec kampania najpierw pyta kazdy host, co u niego wyjdzie, a dopiero
+// potem prosi o zgode. Odcisk zatwierdzenia zmienia sie po planowaniu -
+// dowodem jest to, ze zgoda podana odciskiem sprzed planowania jest odrzucona.
+func TestKampaniaPakietowLiczyPlanNaKazdymHoscie(t *testing.T) {
+	h := newHarness(t)
+	hosty := h.hosts()
+	cele := make([]string, 0, 2)
+	for _, host := range hosty {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "aktualizacja z planami", "action": "packages.upgrade",
+		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State != "planning" {
+		t.Fatalf("kampania pakietowa zaczela od stanu %s", campaign.State)
+	}
+	odciskZamowienia := campaign.ApprovalFingerprint
+
+	// Faza planowania konczy sie sama: kazdy host liczy swoj plan.
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	if poPlanowaniu.PlanSetHash == "" {
+		t.Fatal("kampania po planowaniu bez odcisku zestawu planow")
+	}
+	if poPlanowaniu.ApprovalFingerprint == odciskZamowienia {
+		t.Error("zestaw planow nie zmienil odcisku zatwierdzenia")
+	}
+
+	// Zgoda podana odciskiem sprzed planowania dotyczy czegos innego.
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		map[string]any{"approval_fingerprint": odciskZamowienia}, nil, http.StatusConflict)
+
+	// Kazdy cel ma zadanie planujace i wrocil do kolejki.
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.PlanJobID == "" {
+			t.Errorf("cel %s bez zadania planujacego", target.Hostname)
+		}
+		if target.State != "pending" {
+			t.Errorf("cel %s po planowaniu jest w stanie %s", target.Hostname, target.State)
+		}
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
 	}
 }

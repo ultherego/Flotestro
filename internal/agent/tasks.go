@@ -531,7 +531,10 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}, nil
 
 	case *agentv1.TaskEnvelope_PackagesRepair:
-		odpowiedzi := make([]opspec.DebconfAnswer, 0, len(action.PackagesRepair.GetAnswers()))
+		// Lista pusta i brak listy musza dac ten sam payload: hash planu liczy
+		// sie z JSON-a, a pusta tablica zapisuje sie inaczej niz jej brak.
+		// Naprawa bez odpowiedzi konczyla sie przez to payload_hash_mismatch.
+		var odpowiedzi []opspec.DebconfAnswer
 		for _, answer := range action.PackagesRepair.GetAnswers() {
 			odpowiedzi = append(odpowiedzi, opspec.DebconfAnswer{
 				Package:  answer.GetPackage(),

@@ -593,6 +593,83 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 	return s.query(ctx, where, args...)
 }
 
+// Strona zwraca kolejna strone hostow zgodnych z filtrem.
+//
+// Kampania nie moze miec ukrytego limitu: selektor obejmujacy tysiac hostow
+// ma znaczyc tysiac hostow, a nie pierwsze piecset posortowane alfabetycznie.
+// Stronicowanie idzie po kluczu (hostname, id), a nie po offsecie - flota
+// zmienia sie w trakcie przegladania, a offset gubi wtedy hosty w srodku.
+//
+// Pierwsza strone bierze sie z pustym kluczem.
+func (s *Store) Strona(ctx context.Context, filter ListFilter,
+	poNazwie, poID string, limit int) ([]Host, error) {
+	var (
+		conditions []string
+		args       []any
+	)
+	add := func(column, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	add("h.site", filter.Site)
+	add("h.environment", filter.Environment)
+	add("h.os_family", filter.OSFamily)
+	add("h.connection_state", filter.ConnectionState)
+	add("h.identity_domain", filter.IdentityDomain)
+
+	if poID == "" {
+		poID = "00000000-0000-0000-0000-000000000000"
+	}
+	args = append(args, poNazwie, poID)
+	conditions = append(conditions, fmt.Sprintf("($%d = '' or (h.hostname, h.id) > ($%d, $%d::uuid))",
+		len(args)-1, len(args)-1, len(args)))
+
+	if limit <= 0 {
+		limit = RozmiarStrony
+	}
+	args = append(args, limit)
+	klauzula := "where " + strings.Join(conditions, " and ") +
+		fmt.Sprintf(" order by h.hostname, h.id limit $%d", len(args))
+
+	return s.query(ctx, klauzula, args...)
+}
+
+// Policz zwraca liczbe hostow zgodnych z filtrem.
+//
+// Podglad kampanii musi podac prawdziwa liczbe celow, a nie dlugosc pierwszej
+// strony: operator zatwierdza zmiane na tylu hostach, ile mu pokazano.
+func (s *Store) Policz(ctx context.Context, filter ListFilter) (int, error) {
+	var (
+		conditions []string
+		args       []any
+	)
+	add := func(column, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	add("site", filter.Site)
+	add("environment", filter.Environment)
+	add("os_family", filter.OSFamily)
+	add("connection_state", filter.ConnectionState)
+	add("identity_domain", filter.IdentityDomain)
+
+	query := "select count(*) from hosts"
+	if len(conditions) > 0 {
+		query += " where " + strings.Join(conditions, " and ")
+	}
+	var ile int
+	if err := s.pool.QueryRow(ctx, query, args...).Scan(&ile); err != nil {
+		return 0, err
+	}
+	return ile, nil
+}
+
 // Skrot jest tym, co o hoscie wystarcza przegladom calej floty.
 //
 // Przeglad nie jest lista dla UI: nie ma limitu z filtra ani rejestru

@@ -132,11 +132,47 @@ func hostDystrybucji(h *harness, dystrybucja string) (hostView, raportPodatnosci
 		}
 		raport := podatnosciHosta(h, host.ID)
 		if raport.State.Distribution == dystrybucja {
-			return host, raport
+			return host, zeSwiezaLista(h, host.ID, raport)
 		}
 	}
 	h.t.Fatalf("flota testowa nie ma hosta dystrybucji %s", dystrybucja)
 	return hostView{}, raportPodatnosciView{}
+}
+
+// zeSwiezaLista domyka ocene, ktora opisuje stan sprzed ostatniej zmiany.
+//
+// Ocena jest liczona z listy pakietow zapisanej w panelu, a nie z hosta.
+// Kazda transakcja pakietowa - takze ta zlecona przez inny test - zostawia te
+// liste starsza niz odcisk zgloszony przez hosta, i panel mowi o tym wprost
+// (package_list_stale). Panel sam zamawia odczyt, ale robi to w swoim cyklu,
+// pol godziny dluzszym niz caly przebieg testow: tutaj zamawiamy go od razu
+// i czekamy na przeliczenie, zamiast pytac o ocene sprzed zmiany.
+func zeSwiezaLista(h *harness, hostID string, raport raportPodatnosciView) raportPodatnosciView {
+	h.t.Helper()
+	if raport.State.CoverageReason != "package_list_stale" {
+		return raport
+	}
+	zadanie, proby := h.runOperation(hostID, map[string]any{
+		"action": "packages.list", "reason": "test integracyjny oceny podatnosci",
+	}, 5*time.Minute)
+	if zadanie.State != "succeeded" {
+		h.t.Fatalf("odczyt listy pakietow: stan = %s, %s",
+			zadanie.State, ostatniKomunikat(proby))
+	}
+	// Korelator zbiera prosby o przeliczenie przez kilkanascie sekund, zeby
+	// nie liczyc dwa razy tego samego hosta. Czekamy na wynik, a nie na sam
+	// koniec zadania: zapisana ocena jest o cykl pozniej niz odpowiedz hosta.
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		swiezy := podatnosciHosta(h, hostID)
+		if swiezy.State.CoverageReason != "package_list_stale" {
+			return swiezy
+		}
+		if time.Now().After(deadline) {
+			return swiezy
+		}
+		time.Sleep(3 * time.Second)
+	}
 }
 
 // TestOcenaPodatnosciOpisujePokrycie pilnuje wlasciwosci, dla ktorej ten modul

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -192,6 +193,35 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	// Wersje przed transakcja sa zapisywane zawsze, takze gdy transakcja padnie.
 	before := a.installedVersions(ctx)
 
+	// APT nie zna trybu "tylko bezpieczenstwo": apt-get upgrade podnosi
+	// wszystko, co da sie podniesc. Zawezenie jest wiec wyliczane z planu
+	// i przekazywane jako lista nazw - inaczej operator zatwierdzalby trzy
+	// pakiety bezpieczenstwa, a host podnosilby czterdziesci.
+	if options.SecurityOnly && len(options.Packages) == 0 {
+		plan, err := a.Plan(ctx, options)
+		if err != nil {
+			return apply, err
+		}
+		if len(plan.Changes) == 0 {
+			// Brak aktualizacji bezpieczenstwa nie jest bledem i nie moze
+			// zamieniac sie w pelna aktualizacje hosta.
+			return apply, nil
+		}
+		for _, change := range plan.Changes {
+			// Pakiet agenta ma wlasna operacje wymiany: podniesiony w tej
+			// transakcji zatrzymalby helpera, ktory ja prowadzi. Pozostale
+			// pakiety chronione podnosza sie normalnie - ochrona dotyczy
+			// ich usuwania, a nie aktualizacji bezpieczenstwa.
+			if change.Name == PakietAgenta {
+				continue
+			}
+			options.Packages = append(options.Packages, change.Name)
+		}
+		if len(options.Packages) == 0 {
+			return apply, nil
+		}
+	}
+
 	args := []string{
 		"--yes", "--quiet",
 		"-o", "Dpkg::Options::=--force-confold",
@@ -204,10 +234,8 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	// i wynikiem, ktorego nikt nie odbierze. APT nie zna wykluczen, wiec
 	// pakiet jest wstrzymany na czas transakcji i zwalniany po niej.
 	// Do wymiany agenta jest osobna operacja, ktora omija to swiadomie.
-	if len(options.Packages) == 0 {
-		if zwolnij, err := a.wstrzymajAgenta(ctx); err == nil {
-			defer zwolnij()
-		}
+	if zwolnij, err := a.wstrzymajAgenta(ctx); err == nil {
+		defer zwolnij()
 	}
 	if len(options.Packages) > 0 {
 		args = append([]string{"--yes", "--quiet",
@@ -460,6 +488,13 @@ func (a *APT) wstrzymajAgenta(ctx context.Context) (func(), error) {
 		wynik.ExitCode != 0 {
 		return nil, fmt.Errorf("apt-mark hold: %s", wynik.Reason())
 	}
+	// Slad wlasnego wstrzymania. Transakcja moze zginac razem z procesem -
+	// wtedy odroczone zwolnienie sie nie wykona, a pakiet zostaje wstrzymany
+	// na zawsze i blokuje kazda pozniejsza wymiane agenta. Po tym pliku
+	// poznajemy wstrzymanie wlasne i tylko takie zwalniamy: decyzja
+	// administratora hosta zostaje nietknieta.
+	_ = os.WriteFile(sladWstrzymania(), []byte(PakietAgenta+"\n"), 0o600)
+
 	return func() {
 		// Kontekst transakcji moze byc juz anulowany, a zwolnienie musi sie
 		// wykonac mimo to: pakiet zostawiony na wstrzymaniu blokowalby
@@ -467,7 +502,45 @@ func (a *APT) wstrzymajAgenta(ctx context.Context) (func(), error) {
 		zwalnianie, anuluj := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer anuluj()
 		run(zwalnianie, 30*time.Second, aptMarkPath, "unhold", PakietAgenta)
+		_ = os.Remove(sladWstrzymania())
 	}, nil
+}
+
+// sladWstrzymania wskazuje plik znacznika wlasnego wstrzymania pakietu agenta.
+func sladWstrzymania() string {
+	return filepath.Join(runtimeDir, "state", "wstrzymany-agent")
+}
+
+// ZwolnijPorzuconeWstrzymanie zdejmuje wstrzymanie pakietu agenta zostawione
+// przez transakcje, ktora nie doszla do konca.
+//
+// Wywolywane przy starcie helpera. Bez tego host, na ktorym transakcja zginela
+// razem z procesem, zostawal z pakietem agenta wstrzymanym na zawsze - i zadna
+// pozniejsza wymiana agenta nie mogla przejsc.
+func ZwolnijPorzuconeWstrzymanie(ctx context.Context) (bool, error) {
+	slad := sladWstrzymania()
+	if _, err := os.Stat(slad); err != nil {
+		return false, nil
+	}
+	defer func() { _ = os.Remove(slad) }()
+
+	// Host bez apt nie ma czego zwalniac. Slad zostal usuniety wyzej, wiec
+	// proba nie wroci przy kazdym starcie helpera.
+	if _, err := os.Stat(aptMarkPath); err != nil {
+		return false, nil
+	}
+	stan := run(ctx, 30*time.Second, aptMarkPath, "showhold")
+	if !stan.Ran {
+		return false, fmt.Errorf("apt-mark showhold: %s", stan.Reason())
+	}
+	if !strings.Contains(stan.Stdout, PakietAgenta) {
+		return false, nil
+	}
+	if wynik := run(ctx, 30*time.Second, aptMarkPath, "unhold", PakietAgenta); !wynik.Ran ||
+		wynik.ExitCode != 0 {
+		return false, fmt.Errorf("apt-mark unhold: %s", wynik.Reason())
+	}
+	return true, nil
 }
 
 func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {

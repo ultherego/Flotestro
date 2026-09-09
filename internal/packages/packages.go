@@ -318,6 +318,14 @@ func srodowisko() []string {
 		// Tryb nieinteraktywny jest wymuszony: prompt w transakcji oznaczalby
 		// zawieszenie zadania, a nie sukces.
 		"DEBIAN_FRONTEND=noninteractive",
+		// needrestart na Debianie i Ubuntu sam restartuje uslugi, ktorych
+		// biblioteki sie zmienily. W transakcji prowadzonej przez helpera
+		// trafia to takze na niego samego: helper znika w polowie wlasnej
+		// pracy, a zadanie konczy sie "odpowiedz helpera: EOF". Restart jest
+		// decyzja panelu - polityka restartu kampanii albo osobna operacja -
+		// wiec narzedzie ma go tylko odnotowac.
+		"NEEDRESTART_MODE=l",
+		"NEEDRESTART_SUSPEND=flotestro",
 		// Dnf tnie wlasne komunikaty do szerokosci terminala, a bez terminala
 		// przyjmuje osiemdziesiat kolumn - przyczyna bledu ginela wtedy
 		// w polowie zdania ("scriptlet failed, exit stat").
