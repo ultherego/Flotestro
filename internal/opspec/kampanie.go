@@ -95,9 +95,23 @@ var trybyMasowe = map[ActionType]CampaignMode{
 // Pusta wartosc znaczy, ze panel nie umie zaplanowac tej zmiany masowo.
 func AkcjaPlanowania(action ActionType) ActionType {
 	switch action {
+	// Transakcja pakietowa: plan liczy diff i zwraca wlasny odcisk, ktory
+	// wraca do hosta razem ze zmiana.
 	case ActionPackageUpgrade:
 		return ActionPackagePlan
+
+	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
+	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
+	// ktory tego planu nigdy nie widzial.
+	case ActionComposeDeploy:
+		return ActionComposePlan
 	}
+	// Pozostale rodziny odmawiaja i warto wiedziec, dlaczego. Ich operacje
+	// "*.plan" - file.plan, network.plan, firewall.plan, storage.plan -
+	// czytaja stan hosta, a nie licza diffu wobec stanu docelowego. Nazwanie
+	// ich planerem dalo by kampanii fazy planowania, ktora niczego nie
+	// planuje, i zgode odnoszaca sie do odczytu zamiast do zmiany. Planer
+	// per host dla tych rodzin jest osobna praca, a nie mapowaniem nazw.
 	return ""
 }
 
@@ -122,4 +136,34 @@ func TrybWykonywalny(action ActionType) bool {
 		return action == ActionSystemReboot
 	}
 	return false
+}
+
+// OdciskZPlanowania jest znacznikiem w miejsce odcisku, ktorego jeszcze nie ma.
+//
+// Nie jedzie na zaden host: sluzy wylacznie walidacji zamowienia kampanii,
+// a orkiestrator zastepuje go odciskiem planu policzonego na tym hoscie.
+const OdciskZPlanowania = "pending-per-host-plan"
+
+// ValidateZamowienieKampanii sprawdza payload zamowienia kampanii.
+//
+// Rozni sie od Validate jedna rzecza: operacja liczona per host nie moze miec
+// odcisku planu w chwili zamowienia, bo plan powstanie dopiero na hostach.
+// Reszta wymagan zostaje bez zmian, a sam odcisk jest egzekwowany dwa razy:
+// orkiestrator wklada do zadania odcisk planu tego hosta, a host odmawia, gdy
+// odcisk nie pasuje do stanu, ktory ma teraz.
+func ValidateZamowienieKampanii(action ActionType, payload Payload) error {
+	if AkcjaPlanowania(action) != "" {
+		payload = zPlaceholderemPlanu(payload)
+	}
+	return Validate(action, payload)
+}
+
+// zPlaceholderemPlanu wstawia znacznik tam, gdzie walidacja wymaga odcisku.
+func zPlaceholderemPlanu(payload Payload) Payload {
+	if payload.Compose != nil && payload.Compose.PlanDigest == "" {
+		kopia := *payload.Compose
+		kopia.PlanDigest = OdciskZPlanowania
+		payload.Compose = &kopia
+	}
+	return payload
 }

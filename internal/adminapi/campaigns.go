@@ -95,7 +95,9 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := opspec.Validate(action, payload); err != nil {
+	// Zamowienie kampanii jest walidowane inaczej niz operacja na jednym
+	// hoscie: odcisku planu jeszcze nie ma, bo plan powstanie na hostach.
+	if err := opspec.ValidateZamowienieKampanii(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
 		return
 	}

@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"testing"
@@ -938,4 +939,146 @@ func TestKampaniaZostawiaNiezdolnyHostWMigawce(t *testing.T) {
 	if stany["pending"]+stany["planning"] == 0 {
 		t.Errorf("kampania nie zostawila ani jednego hosta do pracy: %+v", stany)
 	}
+}
+
+// TestKampaniaComposeNiesieDigestPlanuNaHosta pilnuje, ze faza planowania nie
+// jest wlasnoscia pakietow: druga rodzina liczy plan na hoscie i dostaje go
+// z powrotem razem ze zmiana.
+//
+// Digest planu Compose powstaje z manifestu i z digestow obrazow, ktore ten
+// host naprawde widzi. Wdrozenie niesie go z powrotem, a host odmawia, gdy
+// przestal pasowac - zgoda dotyczyla tamtego planu, nie tego.
+func TestKampaniaComposeNiesieDigestPlanuNaHosta(t *testing.T) {
+	h := newHarness(t)
+	const projekt = "flotestro-kampania"
+	manifest := "services:\n  web:\n    image: nginx:alpine\n"
+
+	// Docker jest w tej flocie na jednym hoscie. To wystarczy, zeby pokazac
+	// faze planowania, a pozostale hosty pokazuja przy okazji, ze niezdolnosc
+	// nie jest awaria.
+	cele := make([]string, 0, 4)
+	zDockerem := 0
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		cele = append(cele, host.ID)
+		// O zdolnosci mowi rejestr adapterow hosta, a nie zgadywanie po
+		// dystrybucji: silnik kontenerow moze byc wszedzie albo nigdzie.
+		for _, zdolnosc := range host.Capabilities {
+			if zdolnosc.Name == "docker.compose" && zdolnosc.Available {
+				zDockerem++
+			}
+		}
+	}
+	if zDockerem == 0 {
+		t.Skip("flota testowa nie ma hosta z silnikiem kontenerow")
+	}
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "wdrozenie projektu", "action": "docker.compose.deploy",
+		"reason":  "test integracyjny planow Compose",
+		"payload": map[string]any{"compose": map[string]any{"project": projekt, "manifest": manifest}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State != "planning" {
+		t.Fatalf("kampania Compose zaczela od stanu %s", campaign.State)
+	}
+	odciskZamowienia := campaign.ApprovalFingerprint
+
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	if poPlanowaniu.PlanSetHash == "" {
+		t.Fatal("kampania Compose po planowaniu bez odcisku zestawu planow")
+	}
+	if poPlanowaniu.ApprovalFingerprint == odciskZamowienia {
+		t.Error("zestaw planow nie zmienil odcisku zatwierdzenia")
+	}
+
+	// Host bez silnika kontenerow jest niezdolny, a nie zepsuty: nie liczy sie
+	// do progu bledow i nie zatrzymuje kampanii.
+	planowalo, niezdolnych := 0, 0
+	for _, target := range h.campaignTargets(campaign.ID) {
+		switch target.State {
+		case "ineligible":
+			niezdolnych++
+		case "pending":
+			planowalo++
+			if target.PlanJobID == "" {
+				t.Errorf("cel %s bez zadania planujacego", target.Hostname)
+			}
+		}
+	}
+	if planowalo != zDockerem {
+		t.Errorf("plan policzylo %d hostow, silnik ma %d", planowalo, zDockerem)
+	}
+	if niezdolnych != len(cele)-zDockerem {
+		t.Errorf("niezdolnych %d przy %d hostach bez silnika",
+			niezdolnych, len(cele)-zDockerem)
+	}
+
+	// Sprzatanie idzie po kontenerach, bo panel nie ma operacji "zdejmij
+	// projekt": wdrozenie jest deklaracja stanu, a nie poleceniem, ktore da
+	// sie cofnac jednym rozkazem.
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			for _, kontener := range kontenneryProjektu(h, hostID, projekt) {
+				h.runOperation(hostID, map[string]any{
+					"action": "docker.container.remove",
+					"reason": "sprzatanie po tescie Compose",
+					"payload": map[string]any{
+						"docker_container": map[string]any{"container_id": kontener, "force": true},
+					},
+				}, 2*time.Minute)
+			}
+		}
+	})
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+}
+
+// kontenneryProjektu zwraca identyfikatory kontenerow jednego projektu Compose.
+func kontenneryProjektu(h *harness, hostID, projekt string) []string {
+	h.t.Helper()
+	var fragment inventoryFragment
+	h.do(http.MethodGet, "/api/v1/hosts/"+hostID+"/inventory/containers",
+		nil, &fragment, http.StatusOK)
+	if len(fragment.Payload) == 0 {
+		return nil
+	}
+	var stan struct {
+		Containers []struct {
+			ID      string            `json:"id"`
+			Labels  map[string]string `json:"labels"`
+			Compose *struct {
+				Project string `json:"project"`
+			} `json:"compose"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
+		return nil
+	}
+	identyfikatory := []string{}
+	for _, kontener := range stan.Containers {
+		if (kontener.Compose != nil && kontener.Compose.Project == projekt) ||
+			kontener.Labels["com.docker.compose.project"] == projekt {
+			identyfikatory = append(identyfikatory, kontener.ID)
+		}
+	}
+	return identyfikatory
 }

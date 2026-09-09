@@ -85,9 +85,36 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	if !TrybWykonywalny(ActionPackageUpgrade) {
 		t.Error("aktualizacja pakietow nie jest prowadzona mimo fazy planowania")
 	}
-	// Zmiana pliku takze liczy plan na kazdym hoscie, ale panel nie ma
-	// jeszcze czym go policzyc masowo - i dlatego odmawia.
-	if TrybWykonywalny(ActionFileEnsure) {
-		t.Error("zapis pliku dopuszczony bez planow per host")
+// Wdrozenie Compose liczy plan na kazdym hoscie tak samo jak pakiety: digest
+	// powstaje z manifestu i z digestow obrazow, ktore ten host naprawde
+	// widzi, i wraca do niego razem ze zmiana.
+	for zmiana, planer := range map[ActionType]ActionType{
+		ActionComposeDeploy: ActionComposePlan,
+	} {
+		if AkcjaPlanowania(zmiana) != planer {
+			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
+				zmiana, AkcjaPlanowania(zmiana), planer)
+		}
+		if !TrybWykonywalny(zmiana) {
+			t.Errorf("%s odmowiona mimo istniejacego planera", zmiana)
+		}
+	}
+
+	// Rodzina, ktorej panel nie umie jeszcze zaplanowac masowo, jest nadal
+	// odmawiana. Odmowa jest tu odpowiedzia, a nie brakiem funkcji: kampania
+	// bez planu per host zatwierdzalaby zmiane, ktorej diffu nikt nie policzyl.
+	// Rodziny, ktorych operacja "*.plan" czyta stan hosta zamiast liczyc diff
+	// wobec stanu docelowego, nadal odmawiaja. Zapis pliku jest tu najlepszym
+	// przykladem: file.plan zwraca liste plikow zarzadzanych, a nie roznice
+	// miedzy trescia zastana a zadana.
+	for _, zmiana := range []ActionType{
+		ActionFileEnsure, ActionNetworkProfileApply, ActionDNSHostApply,
+	} {
+		if AkcjaPlanowania(zmiana) != "" {
+			t.Errorf("%s ma planera, wiec ta czesc testu przestala cokolwiek pilnowac", zmiana)
+		}
+		if TrybWykonywalny(zmiana) {
+			t.Errorf("%s dopuszczona bez planow per host", zmiana)
+		}
 	}
 }

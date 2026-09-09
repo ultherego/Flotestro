@@ -44,7 +44,8 @@ func (o *Orchestrator) planuj(ctx context.Context, campaign Campaign, targets []
 		}
 		switch target.State {
 		case TargetPending:
-			if err := o.zlecPlan(ctx, campaign, target, akcja, payload); err != nil {
+			if err := o.zlecPlan(ctx, campaign, target, akcja,
+				opspec.ActionType(campaign.ActionType), payload); err != nil {
 				return err
 			}
 		case TargetPlanning:
@@ -66,7 +67,7 @@ func (o *Orchestrator) planuj(ctx context.Context, campaign Campaign, targets []
 
 // zlecPlan uruchamia na hoscie operacje planujaca.
 func (o *Orchestrator) zlecPlan(ctx context.Context, campaign Campaign, target *Target,
-	akcja opspec.ActionType, payload opspec.Payload) error {
+	akcja, zmiana opspec.ActionType, payload opspec.Payload) error {
 	host, err := o.hosts.Get(ctx, target.HostID)
 	if err != nil {
 		o.finishTarget(ctx, campaign, target, TargetSkipped, "host_unavailable", err.Error())
@@ -77,7 +78,7 @@ func (o *Orchestrator) zlecPlan(ctx context.Context, campaign Campaign, target *
 		return nil
 	}
 
-	jobID, err := o.submitJob(ctx, campaign, host, akcja, planPayload(akcja, payload),
+	jobID, err := o.submitJob(ctx, campaign, host, akcja, planPayload(akcja, zmiana, payload),
 		"campaign:"+campaign.ID+":plan:"+target.HostID)
 	if err != nil {
 		o.finishTarget(ctx, campaign, target, TargetFailed, "plan_create_failed", err.Error())
@@ -138,26 +139,78 @@ func (o *Orchestrator) odbierzPlan(ctx context.Context, campaign Campaign,
 }
 
 // odciskPlanu wyciaga odcisk planu z wyniku zadania planujacego.
+//
+// Odcisk moze pochodzic z dwoch miejsc i to nie jest to samo. Odcisk policzony
+// przez hosta wiaze takze wykonanie: transakcja pakietowa i wdrozenie Compose
+// niosa go z powrotem, a host odmawia, gdy przestal pasowac do stanu, ktory ma
+// teraz. Odcisk policzony w panelu wiaze wylacznie zgode: mowi, ze operator
+// zatwierdzil dokladnie ten diff, ktory host zglosil.
+//
+// Wolimy odcisk hosta wszedzie, gdzie istnieje. Cichy zamiennik po stronie
+// panelu obiecywalby wiecej, niz naprawde pilnuje.
 func (o *Orchestrator) odciskPlanu(ctx context.Context, jobID string) (string, json.RawMessage, error) {
 	proby, err := o.jobs.Attempts(ctx, jobID)
 	if err != nil {
 		return "", nil, err
 	}
 	for i := len(proby) - 1; i >= 0; i-- {
-		if len(proby[i].Detail) == 0 {
+		detal := proby[i].Detail
+		if len(detal) == 0 {
 			continue
 		}
-		var szczegol struct {
-			PlanHash string `json:"plan_hash"`
+		if odcisk := odciskZHosta(detal); odcisk != "" {
+			return odcisk, detal, nil
 		}
-		if err := json.Unmarshal(proby[i].Detail, &szczegol); err != nil {
-			continue
-		}
-		if szczegol.PlanHash != "" {
-			return szczegol.PlanHash, proby[i].Detail, nil
+		// Plan bez wlasnego odcisku nadal jest planem: to opis diffu, ktory
+		// host wlasnie policzyl. Liczymy odcisk z jego tresci, zeby zgoda
+		// dotyczyla tego opisu, a nie samego faktu, ze plan powstal.
+		if odcisk := OdciskTresci(detal); odcisk != "" {
+			return odcisk, detal, nil
 		}
 	}
 	return "", nil, nil
+}
+
+// odciskZHosta czyta odcisk policzony na hoscie.
+//
+// Kazda rodzina nazywa go inaczej, bo kazda liczy go z czego innego: plan
+// pakietowy z listy zmian, plan Compose z manifestu i digestow obrazow.
+func odciskZHosta(detal json.RawMessage) string {
+	var szczegol struct {
+		PlanHash string `json:"plan_hash"`
+		Kind     string `json:"kind"`
+		Payload  struct {
+			Digest string `json:"digest"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(detal, &szczegol); err != nil {
+		return ""
+	}
+	if szczegol.PlanHash != "" {
+		return szczegol.PlanHash
+	}
+	if szczegol.Kind == "compose" {
+		return szczegol.Payload.Digest
+	}
+	return ""
+}
+
+// OdciskTresci liczy odcisk planu z jego opisu.
+func OdciskTresci(detal json.RawMessage) string {
+	if len(detal) == 0 {
+		return ""
+	}
+	// Kanonizujemy przez ponowne zakodowanie: kolejnosc kluczy w JSON-ie od
+	// hosta nie jest decyzja i nie moze zmieniac odcisku.
+	var wartosc any
+	if err := json.Unmarshal(detal, &wartosc); err != nil {
+		return ""
+	}
+	kanoniczny, err := json.Marshal(wartosc)
+	if err != nil {
+		return ""
+	}
+	return odciskTekstu([]string{string(kanoniczny)})
 }
 
 // zamknijPlanowanie liczy odcisk zestawu planow i przenosi kampanie do
@@ -193,18 +246,36 @@ func (o *Orchestrator) zamknijPlanowanie(ctx context.Context, campaign Campaign,
 
 // planPayload przycina payload zmiany do tego, co potrzebne planowi.
 //
-// Plan pyta o ten sam zakres, ale innym typem operacji: aktualizacja niesie
-// odcisk zatwierdzonego planu, a plan go dopiero liczy.
-func planPayload(akcja opspec.ActionType, payload opspec.Payload) opspec.Payload {
+// Plan pyta o ten sam stan docelowy, ale innym typem operacji. Dla wiekszosci
+// rodzin payload jest ten sam - plan pliku czy manifestu Compose potrzebuje
+// dokladnie tego, co zmiana - i tylko transakcja pakietowa ma osobny ksztalt:
+// aktualizacja niesie odcisk zatwierdzonego planu, a plan go dopiero liczy.
+func planPayload(akcja opspec.ActionType, zmiana opspec.ActionType,
+	payload opspec.Payload) opspec.Payload {
 	if akcja != opspec.ActionPackagePlan {
 		return payload
 	}
-	plan := &opspec.PackagePlanPayload{Mode: "upgrade"}
-	if payload.PackageUpgrade != nil {
+	plan := &opspec.PackagePlanPayload{Mode: trybPlanu(zmiana)}
+	switch {
+	case payload.PackageUpgrade != nil:
 		plan.OnlyPackages = payload.PackageUpgrade.Packages
 		plan.SecurityOnly = payload.PackageUpgrade.SecurityOnly
+	case payload.PackageChange != nil:
+		plan.OnlyPackages = payload.PackageChange.Packages
 	}
 	return opspec.Payload{PackagePlan: plan}
+}
+
+// trybPlanu mowi, o co pytamy planer pakietow.
+func trybPlanu(zmiana opspec.ActionType) string {
+	switch zmiana {
+	case opspec.ActionPackageInstall:
+		return "install"
+	case opspec.ActionPackageRemove:
+		return "remove"
+	default:
+		return "upgrade"
+	}
 }
 
 // zPlanem dokleda do payloadu zmiany odcisk planu policzonego na tym hoscie.
@@ -212,13 +283,24 @@ func planPayload(akcja opspec.ActionType, payload opspec.Payload) opspec.Payload
 // Bez tego kampania wyslalaby zmiane bez planu, a host nie mialby czego
 // porownac ze stanem, ktory ma teraz.
 func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string) opspec.Payload {
-	if action == opspec.ActionPackageUpgrade {
+	switch action {
+	case opspec.ActionPackageUpgrade:
 		aktualizacja := &opspec.PackageUpgradePayload{PlanHash: hash}
 		if payload.PackageUpgrade != nil {
 			aktualizacja.Packages = payload.PackageUpgrade.Packages
 			aktualizacja.SecurityOnly = payload.PackageUpgrade.SecurityOnly
 		}
 		payload.PackageUpgrade = aktualizacja
+
+	case opspec.ActionComposeDeploy:
+		// Digest planu Compose powstaje z manifestu i z digestow obrazow.
+		// Wdrozenie bez niego nie ma podstawy, a wdrozenie z cudzym trafiloby
+		// na host, ktory tego planu nigdy nie widzial.
+		if payload.Compose != nil {
+			manifest := *payload.Compose
+			manifest.PlanDigest = hash
+			payload.Compose = &manifest
+		}
 	}
 	return payload
 }
