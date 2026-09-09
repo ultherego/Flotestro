@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -328,6 +329,53 @@ func (s *Store) ZamknijPlanowanie(ctx context.Context, campaignID, planSetHash,
 	}
 	return nil
 }
+
+// Zdarzenie jest jednym wpisem przebiegu kampanii.
+type Zdarzenie struct {
+	ID         int64           `json:"id"`
+	Aggregate  string          `json:"aggregate_type"`
+	Type       string          `json:"event_type"`
+	Payload    json.RawMessage `json:"payload"`
+	OccurredAt time.Time       `json:"occurred_at"`
+}
+
+// Przebieg zwraca trwaly slad kampanii: co i kiedy sie w niej stalo.
+//
+// Stan koncowy widac w tabelach, ale przebieg jest tym, czego operator
+// potrzebuje w trakcie: kiedy ruszylo canary, ktory host padl jako pierwszy
+// i o ktorej kampania sie zatrzymala. Powiadomienia tego nie utrzymaja -
+// zdarzenie wyslane w chwili restartu panelu nie istnieje juz nigdzie.
+func (s *Store) Przebieg(ctx context.Context, campaignID string, limit int) ([]Zdarzenie, error) {
+	if limit <= 0 || limit > maksymalnyPrzebieg {
+		limit = maksymalnyPrzebieg
+	}
+	const query = `
+		select id, aggregate_type, event_type, payload, occurred_at
+		  from outbox_events
+		 where aggregate_id = $1 and aggregate_type in ('campaign', 'campaign_target')
+		 order by id
+		 limit $2`
+	rows, err := s.pool.Query(ctx, query, campaignID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	przebieg := []Zdarzenie{}
+	for rows.Next() {
+		var wpis Zdarzenie
+		if err := rows.Scan(&wpis.ID, &wpis.Aggregate, &wpis.Type,
+			&wpis.Payload, &wpis.OccurredAt); err != nil {
+			return nil, err
+		}
+		przebieg = append(przebieg, wpis)
+	}
+	return przebieg, rows.Err()
+}
+
+// maksymalnyPrzebieg ogranicza jeden odczyt przebiegu. Kampania na tysiacu
+// hostow ma kilka tysiecy zdarzen i nie ma powodu wysylac ich wszystkich naraz.
+const maksymalnyPrzebieg = 2000
 
 // AktywneCele mowi, ktore hosty sa juz celami trwajacych kampanii.
 //

@@ -1082,3 +1082,85 @@ func kontenneryProjektu(h *harness, hostID, projekt string) []string {
 	}
 	return identyfikatory
 }
+
+type wpisPrzebieguView struct {
+	ID         int64           `json:"id"`
+	Aggregate  string          `json:"aggregate_type"`
+	Type       string          `json:"event_type"`
+	Payload    json.RawMessage `json:"payload"`
+	OccurredAt time.Time       `json:"occurred_at"`
+}
+
+// TestPrzebiegKampaniiPrzezywaRestartPanelu pilnuje inwariantu I-14: przebieg
+// kampanii da sie odtworzyc z trwalych zapisow, a nie tylko z powiadomien.
+//
+// Powiadomienie wyslane w chwili, gdy panel byl restartowany, nie istnieje juz
+// nigdzie. Stan koncowy zostaje w tabelach, ale przebieg - to, co i kiedy sie
+// stalo - znikal razem z nim. Kampania bez przebiegu jest raportem po fakcie,
+// a nie kontrola nad rolloutem.
+func TestPrzebiegKampaniiPrzezywaRestartPanelu(t *testing.T) {
+	h := newHarness(t)
+	online := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+
+	campaign := h.createCampaign(labCampaign("przebieg", "cron.service", map[string]any{
+		"selector":       map[string]any{"host_ids": online},
+		"canary_size":    1,
+		"wave_size":      len(online),
+		"max_concurrent": len(online),
+	}))
+	h.approveCampaign(campaign)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+
+	var przebieg struct {
+		Items []wpisPrzebieguView `json:"items"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/timeline", &przebieg)
+	if len(przebieg.Items) == 0 {
+		t.Fatal("kampania bez ani jednego zdarzenia w przebiegu")
+	}
+
+	// Przebieg ma nazwac fazy kampanii i losy hostow. Sam stan koncowy widac
+	// w tabelach; tutaj chodzi o to, jak do niego doszlo.
+	rodzaje := map[string]int{}
+	for _, wpis := range przebieg.Items {
+		rodzaje[wpis.Type]++
+		if wpis.OccurredAt.IsZero() {
+			t.Errorf("zdarzenie %s bez czasu", wpis.Type)
+		}
+		if len(wpis.Payload) == 0 {
+			t.Errorf("zdarzenie %s bez tresci", wpis.Type)
+		}
+	}
+	for _, wymagane := range []string{
+		"campaign.canary", "campaign.running", "campaign.completed",
+		"target.running", "target.succeeded",
+	} {
+		if rodzaje[wymagane] == 0 {
+			t.Errorf("przebieg bez zdarzenia %s: %+v", wymagane, rodzaje)
+		}
+	}
+	if rodzaje["target.succeeded"] != len(online) {
+		t.Errorf("zdarzen target.succeeded %d przy %d hostach",
+			rodzaje["target.succeeded"], len(online))
+	}
+
+	// Kolejnosc jest czescia odpowiedzi: canary poprzedza pozostale fale.
+	for i := 1; i < len(przebieg.Items); i++ {
+		if przebieg.Items[i].ID <= przebieg.Items[i-1].ID {
+			t.Fatalf("przebieg nie jest uporzadkowany: %d po %d",
+				przebieg.Items[i].ID, przebieg.Items[i-1].ID)
+		}
+	}
+}

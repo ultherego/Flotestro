@@ -413,6 +413,29 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": targets, "count": len(targets)})
 }
 
+// handleCampaignTimeline zwraca trwaly przebieg kampanii.
+//
+// Raport mowi, jak sie skonczylo. Przebieg mowi, jak szlo - i to on jest
+// potrzebny w trakcie: kiedy ruszylo canary, ktory host padl jako pierwszy
+// i o ktorej kampania sie zatrzymala. Powiadomienia tego nie utrzymaja, bo
+// zdarzenie wyslane w chwili restartu panelu nie istnieje juz nigdzie.
+func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) {
+	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
+	if !ok {
+		return
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		limit = 0
+	}
+	przebieg, err := s.campaigns.Przebieg(r.Context(), campaign.ID, limit)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": przebieg, "count": len(przebieg)})
+}
+
 // handleCampaignReport buduje raport koncowy: wersje stanu, podzial na fale
 // i liste hostow, ktore wymagaja uwagi.
 func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {

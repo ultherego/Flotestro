@@ -153,6 +153,29 @@ export type Campaign = {
   created_at: string;
 };
 
+/**
+ * Jeden wpis trwalego przebiegu kampanii.
+ *
+ * Tresc zalezy od rodzaju zdarzenia, wiec jest workiem pol, a nie sztywnym
+ * ksztaltem: zdarzenie celu niesie host i fale, zdarzenie kampanii - powod
+ * wstrzymania. Udawanie jednego ksztaltu zmuszaloby do wypelniania pol,
+ * ktorych dane zdarzenie nie ma.
+ */
+export type WpisPrzebiegu = {
+  id: number;
+  aggregate_type: string;
+  event_type: string;
+  occurred_at: string;
+  payload?: {
+    host_id?: string;
+    wave?: number;
+    error_code?: string;
+    message?: string;
+    pause_reason?: string;
+    job_id?: string;
+  };
+};
+
 export type CampaignTarget = {
   host_id: string;
   hostname?: string;

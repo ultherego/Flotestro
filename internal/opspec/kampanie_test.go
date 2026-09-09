@@ -85,7 +85,7 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	if !TrybWykonywalny(ActionPackageUpgrade) {
 		t.Error("aktualizacja pakietow nie jest prowadzona mimo fazy planowania")
 	}
-// Wdrozenie Compose liczy plan na kazdym hoscie tak samo jak pakiety: digest
+	// Wdrozenie Compose liczy plan na kazdym hoscie tak samo jak pakiety: digest
 	// powstaje z manifestu i z digestow obrazow, ktore ten host naprawde
 	// widzi, i wraca do niego razem ze zmiana.
 	for zmiana, planer := range map[ActionType]ActionType{

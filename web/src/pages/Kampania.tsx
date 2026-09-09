@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
-import type { Campaign as CampaignType, CampaignReport, CampaignTarget } from "../lib/types";
+import type {
+  Campaign as CampaignType, CampaignReport, CampaignTarget, WpisPrzebiegu,
+} from "../lib/types";
 import { Blad, Czas, Para, Pary, PasekPostepu, Pusto, StanZadania } from "../components/ui";
 import { ODSTEP_OPERACJI, usePostep, useStrumienPostepu } from "../lib/strumien";
 
@@ -22,6 +24,14 @@ export function Kampania() {
   const raport = useQuery({
     queryKey: ["campaign-report", id],
     queryFn: () => api.get<CampaignReport>(`/api/v1/campaigns/${id}/report`),
+    refetchInterval: ODSTEP_OPERACJI,
+  });
+  // Przebieg pochodzi z trwalego sladu, a nie z powiadomien: zdarzenie wyslane
+  // w chwili restartu panelu nie istnieje juz nigdzie, a operator wracajacy do
+  // kampanii ma zobaczyc, jak szla, a nie tylko czym sie skonczyla.
+  const przebieg = useQuery({
+    queryKey: ["campaign-timeline", id],
+    queryFn: () => api.get<Collection<WpisPrzebiegu>>(`/api/v1/campaigns/${id}/timeline`),
     refetchInterval: ODSTEP_OPERACJI,
   });
 
@@ -109,6 +119,25 @@ export function Kampania() {
         </>
       )}
 
+      <h2>Timeline</h2>
+      {!przebieg.data?.items.length ? (
+        <Pusto>No recorded events yet.</Pusto>
+      ) : (
+        <table>
+          <thead><tr><th>When</th><th>Event</th><th>Host</th><th>Detail</th></tr></thead>
+          <tbody>
+            {przebieg.data.items.map((wpis) => (
+              <tr key={wpis.id}>
+                <td><Czas wartosc={wpis.occurred_at} /></td>
+                <td>{wpis.event_type}</td>
+                <td>{nazwaHostaZdarzenia(wpis, cele.data?.items ?? [])}</td>
+                <td>{opisZdarzenia(wpis)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
       <h2>Targets</h2>
       {!cele.data?.items.length ? (
         <Pusto>No targets.</Pusto>
@@ -144,6 +173,32 @@ export function Kampania() {
       )}
     </>
   );
+}
+
+/** nazwaHostaZdarzenia tlumaczy identyfikator hosta na nazwe z listy celow. */
+function nazwaHostaZdarzenia(wpis: WpisPrzebiegu, cele: CampaignTarget[]): string {
+  const hostID = wpis.payload?.host_id;
+  if (!hostID) return "—";
+  const cel = cele.find((pozycja) => pozycja.host_id === hostID);
+  return cel?.hostname || hostID.slice(0, 8);
+}
+
+/**
+ * opisZdarzenia pokazuje to, co odroznia jedno zdarzenie od drugiego.
+ *
+ * Kod bledu i powod wstrzymania sa tu wazniejsze niz sam typ zdarzenia:
+ * "host failed" bez powodu nie mowi nic poza tym, ze cos poszlo zle.
+ */
+function opisZdarzenia(wpis: WpisPrzebiegu): string {
+  const czesci = [
+    wpis.payload?.error_code,
+    wpis.payload?.message,
+    wpis.payload?.pause_reason,
+  ].filter((czesc) => czesc);
+  if (typeof wpis.payload?.wave === "number" && wpis.aggregate_type === "campaign_target") {
+    czesci.unshift(`wave ${wpis.payload.wave}`);
+  }
+  return czesci.join(" · ") || "—";
 }
 
 /**
