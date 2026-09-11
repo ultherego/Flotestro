@@ -1528,6 +1528,12 @@ func TestKampaniaMontowaniaRozwiazujeUUIDNaKazdymHoscie(t *testing.T) {
 		if host.ConnectionState != "online" || host.OSFamily != "debian" {
 			continue
 		}
+		// Fragment przestrzeni pochodzi z cyklu inwentarza; poprzedni test
+		// mogl wlasnie odmontowac dysk, ktorego migawka jeszcze nie widzi.
+		h.runOperation(host.ID, map[string]any{
+			"action": "inventory.refresh", "reason": "test kampanii montowania",
+			"payload": map[string]any{"inventory": map[string]any{"modules": []string{"storage"}}},
+		}, 2*time.Minute)
 		stan := migawkaPrzestrzeniHosta(t, h, host.ID)
 		for _, urzadzenie := range stan.Devices {
 			if urzadzenie.FSType == "ext4" && urzadzenie.UUID != "" &&
@@ -2498,6 +2504,12 @@ func TestKampaniaSprawdzeniaFilesystemuLiczyPlanNaKazdymHoscie(t *testing.T) {
 		if host.ConnectionState != "online" {
 			continue
 		}
+		// Fragment przestrzeni pochodzi z cyklu inwentarza; poprzedni test
+		// mogl wlasnie odmontowac dysk, ktorego migawka jeszcze nie widzi.
+		h.runOperation(host.ID, map[string]any{
+			"action": "inventory.refresh", "reason": "test kampanii sprawdzenia filesystemu",
+			"payload": map[string]any{"inventory": map[string]any{"modules": []string{"storage"}}},
+		}, 2*time.Minute)
 		stan := migawkaPrzestrzeniHosta(t, h, host.ID)
 		for _, urzadzenie := range stan.Devices {
 			if urzadzenie.FSType == "ext4" && urzadzenie.UUID != "" && len(urzadzenie.Mountpoints) == 0 {
