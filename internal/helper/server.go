@@ -39,23 +39,39 @@ type Server struct {
 	// Rownolegly restart i usuniecie tego samego kontenera daja
 	// nieprzewidywalny wynik.
 	containerMutex sync.Mutex
+
+	// Bezczynnosc liczy sie od zamkniecia ostatniego polaczenia, a nie od
+	// startu procesu. Zegar liczony od startu przecinal transakcje pakietowa
+	// albo odczyt zdarzen w polowie - dokladnie w piatej minucie pracy.
+	IdleTimeout time.Duration
+	aktywne     sync.WaitGroup
+	ruch        chan struct{}
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
-	return &Server{allowedUID: allowedUID, log: log}
+	return &Server{allowedUID: allowedUID, log: log, ruch: make(chan struct{}, 1)}
 }
 
-// Serve przyjmuje polaczenia do zamkniecia kontekstu.
+// Serve przyjmuje polaczenia do zamkniecia kontekstu albo do uplywu
+// bezczynnosci, gdy IdleTimeout jest ustawiony.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
 	}()
+	if s.IdleTimeout > 0 {
+		go s.pilnujBezczynnosci(ctx, cancel)
+	}
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
+				// Polaczenia w toku koncza swoja prace: zamkniecie gniazda
+				// nie jest przerwaniem zadania.
+				s.aktywne.Wait()
 				return nil
 			}
 			var netErr net.Error
@@ -64,7 +80,64 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			}
 			return fmt.Errorf("accept: %w", err)
 		}
-		go s.handleConnection(ctx, conn)
+		s.aktywne.Add(1)
+		go func() {
+			defer s.aktywne.Done()
+			defer s.zaznaczRuch()
+			s.handleConnection(context.WithoutCancel(ctx), conn)
+		}()
+	}
+}
+
+// pilnujBezczynnosci konczy prace, gdy przez IdleTimeout nie zamknelo sie
+// zadne polaczenie i zadne nie jest w toku.
+func (s *Server) pilnujBezczynnosci(ctx context.Context, cancel context.CancelFunc) {
+	timer := time.NewTimer(s.IdleTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.ruch:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(s.IdleTimeout)
+		case <-timer.C:
+			if wToku := s.polaczeniaWToku(); wToku {
+				// Zadanie trwa dluzej niz okno bezczynnosci; liczymy od nowa.
+				timer.Reset(s.IdleTimeout)
+				continue
+			}
+			s.log.Info("koniec pracy po okresie bezczynnosci", "timeout", s.IdleTimeout.String())
+			cancel()
+			return
+		}
+	}
+}
+
+// polaczeniaWToku mowi, czy jakies polaczenie jest wlasnie obslugiwane.
+func (s *Server) polaczeniaWToku() bool {
+	gotowe := make(chan struct{})
+	go func() {
+		s.aktywne.Wait()
+		close(gotowe)
+	}()
+	select {
+	case <-gotowe:
+		return false
+	case <-time.After(10 * time.Millisecond):
+		return true
+	}
+}
+
+func (s *Server) zaznaczRuch() {
+	select {
+	case s.ruch <- struct{}{}:
+	default:
 	}
 }
 

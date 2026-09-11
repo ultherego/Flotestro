@@ -143,29 +143,12 @@ func run() error {
 	}
 
 	// Helper konczy prace po okresie bezczynnosci. W stanie spoczynku floty
-	// nie dziala zaden proces roota.
-	if *idleTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(ctx)
-		defer cancel()
-		go watchIdle(ctx, cancel, listener, *idleTimeout, log)
-	}
-
-	return helper.NewServer(allowedUID, log).Serve(ctx, listener)
-}
-
-// watchIdle zamyka helper, gdy przez zadany czas nikt sie nie polaczyl.
-func watchIdle(ctx context.Context, cancel context.CancelFunc, listener net.Listener,
-	timeout time.Duration, log *slog.Logger) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-		log.Info("koniec pracy po okresie bezczynnosci", "timeout", timeout.String())
-		cancel()
-		_ = listener.Close()
-	}
+	// nie dziala zaden proces roota. Bezczynnosc liczy serwer od ostatniego
+	// polaczenia i nigdy w trakcie zadania: zegar liczony tu od startu
+	// przecinal transakcje, ktora akurat trwala w piatej minucie.
+	server := helper.NewServer(allowedUID, log)
+	server.IdleTimeout = *idleTimeout
+	return server.Serve(ctx, listener)
 }
 
 func lookupUID(name string) (uint32, error) {
