@@ -222,11 +222,13 @@ func krokiZmiany(action *helperv1.NetworkRequest, polaczenie string,
 			Adresy:     action.GetAddresses(),
 			Brama:      action.GetGateway(),
 			DNS:        action.GetDns(),
-			// Trasy i MTU zostaja takie, jakie byly: profil adresowy jest
-			// osobna operacja i nie moze po cichu skasowac ustawien,
-			// o ktorych operator nie byl pytany.
-			Trasy: obecny.Trasy,
-			MTU:   obecny.MTU,
+			// Trasy, MTU i reszta resolvera zostaja takie, jakie byly: profil
+			// adresowy jest osobna operacja i nie moze po cichu skasowac
+			// ustawien, o ktorych operator nie byl pytany.
+			DNSSearch:     obecny.DNSSearch,
+			IgnoreAutoDNS: obecny.IgnoreAutoDNS,
+			Trasy:         obecny.Trasy,
+			MTU:           obecny.MTU,
 		}
 		return network.ArgumentyProfilu(docelowy)
 	}

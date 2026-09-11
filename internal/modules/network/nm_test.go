@@ -158,3 +158,23 @@ func TestIdentyfikatorPlanuNieWychodziZKatalogu(t *testing.T) {
 		t.Errorf("sciezka = %q, err = %v", sciezka, err)
 	}
 }
+
+func TestProfilCzytaIZapisujeResztaResolvera(t *testing.T) {
+	profil := ParsujProfil("connection.id:enp0s8\nipv4.dns:192.168.56.50\n" +
+		"ipv4.dns-search:flotestro.test,lab.test\nipv4.ignore-auto-dns:yes")
+	if len(profil.DNSSearch) != 2 || !profil.IgnoreAutoDNS {
+		t.Fatalf("profil bez reszty resolvera: %+v", profil)
+	}
+	profil.Metoda = "auto"
+	kroki, err := ArgumentyProfilu(profil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zapis := strings.Join(kroki[0], " ")
+	// Wycofanie odtwarza profil tym samym kodem: domeny wyszukiwania
+	// i odrzucanie serwerow z DHCP musza wracac razem z serwerami.
+	if !strings.Contains(zapis, "ipv4.dns-search flotestro.test,lab.test") ||
+		!strings.Contains(zapis, "ipv4.ignore-auto-dns yes") {
+		t.Errorf("zapis profilu gubi reszte resolvera: %s", zapis)
+	}
+}

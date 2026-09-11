@@ -333,6 +333,14 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.Network = &siec
 		}
 
+	case opspec.ActionDNSHostApply:
+		// Resolver wiaze sie odciskiem planu tak samo jak reszta sieci.
+		if payload.DNS != nil {
+			resolver := *payload.DNS
+			resolver.PlanHash = hash
+			payload.DNS = &resolver
+		}
+
 	case opspec.ActionMountEnsure:
 		// Montowanie wiaze sie zrodlem rozwiazanym do UUID na tym hoscie:
 		// mount po UUID znajdzie ten sam filesystem albo zaden, a nigdy

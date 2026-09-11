@@ -245,7 +245,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
 		opspec.ActionFirewallZoneService, opspec.ActionFirewallRulesetRestore:
 		return e.applyFirewall(ctx, task, action, payload.Firewall)
-	case opspec.ActionDNSResolveTest, opspec.ActionDNSHostApply:
+	case opspec.ActionDNSResolveTest, opspec.ActionDNSPlan, opspec.ActionDNSHostApply:
 		return e.applyDNS(ctx, task, action, payload.DNS)
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
 		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
@@ -914,8 +914,11 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 	case *agentv1.TaskEnvelope_Dns:
 		resolver := action.Dns
 		typ := opspec.ActionDNSHostApply
-		if resolver.GetOperation() == agentv1.DnsAction_OPERATION_RESOLVE_TEST {
+		switch resolver.GetOperation() {
+		case agentv1.DnsAction_OPERATION_RESOLVE_TEST:
 			typ = opspec.ActionDNSResolveTest
+		case agentv1.DnsAction_OPERATION_PLAN:
+			typ = opspec.ActionDNSPlan
 		}
 		return typ, opspec.Payload{DNS: &opspec.DNSPayload{
 			Interface:       resolver.GetInterface(),
@@ -924,6 +927,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			IgnoreAutoDNS:   resolver.GetIgnoreAutoDns(),
 			RollbackSeconds: resolver.GetRollbackSeconds(),
 			Names:           resolver.GetNames(),
+			PlanHash:        resolver.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Network:

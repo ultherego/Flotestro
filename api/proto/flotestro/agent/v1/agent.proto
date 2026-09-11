@@ -1041,6 +1041,8 @@ message DnsAction {
     // co zobaczy host, wiec pytanie zadaje host.
     OPERATION_RESOLVE_TEST = 1;
     OPERATION_APPLY = 2;
+    // Plan zmiany resolvera liczony na hoscie bez dotykania konfiguracji.
+    OPERATION_PLAN = 3;
   }
   Operation operation = 1;
   string interface = 2;
@@ -1049,6 +1051,8 @@ message DnsAction {
   bool ignore_auto_dns = 5;
   uint32 rollback_seconds = 6;
   repeated string names = 7;
+  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  string plan_hash = 8;
 }
 
 message DnsResult {
@@ -1059,6 +1063,8 @@ message DnsResult {
   string rollback_id = 4;
   string rollback_deadline = 5;
   bool confirmed = 6;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 7;
 }
 
 // FirewallAction opisuje operacje na zaporze hosta.

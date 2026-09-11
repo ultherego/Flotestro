@@ -107,7 +107,9 @@ const (
 	PermNetworkRollback Permission = "network.rollback"
 	// DNS hosta jest oddzielony od rekordow w katalogu: wpis w strefie widza
 	// wszyscy klienci domeny, a resolver hosta - tylko ten host.
-	PermDNSRead      Permission = "dns.read"
+	PermDNSRead Permission = "dns.read"
+	// Plan resolvera jest odczytem: liczy roznice, niczego nie zmienia.
+	PermDNSPlan      Permission = "dns.plan"
 	PermDNSHostWrite Permission = "dns.host.write"
 	// DNS katalogowy jest osobnym zakresem niz resolver hosta: tam panel mowi
 	// jednemu hostowi, kogo ma pytac, a tutaj - co katalog odpowie calej
@@ -306,7 +308,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermDockerEvents, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
+		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		PermTimeRead, PermSecurityRead, PermFilePlan, PermCertificateRead,
 		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
 	},
@@ -361,7 +363,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead,
 		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
 		// odcina host i nie da sie jej naprawic zdalnie.
-		PermNetworkRead, PermDNSRead, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
+		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead,
 		// Przesuniety zegar wyglada jak awaria katalogu albo certyfikatow,
 		// wiec test zrodel czasu nalezy do pierwszej diagnozy.
 		PermTimeRead, PermSecurityRead, PermSecurityScan, PermFilePlan,
@@ -408,7 +410,7 @@ var rolePermissions = map[Role][]Permission{
 		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,
-		PermDNSRead, PermDNSHostWrite,
+		PermDNSRead, PermDNSPlan, PermDNSHostWrite,
 		PermFirewallRead, PermFirewallWrite, PermFirewallRuleRemove,
 		PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
 		PermStorageRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,

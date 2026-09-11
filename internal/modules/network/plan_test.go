@@ -75,3 +75,26 @@ func TestOdmowaPlanuMaOdcisk(t *testing.T) {
 		t.Error("odmowa nie zmienila odcisku")
 	}
 }
+
+func TestPlanResolveraZmieniaTylkoResolver(t *testing.T) {
+	obecny := profilTestowy()
+	obecny.DNS = []string{"192.168.56.50"}
+	plan := ZaplanujDNS("eth1", obecny, []string{"192.168.56.50"}, []string{"flotestro.test"}, true)
+	if plan.Action != PlanZmienia || plan.Operation != PlanDNS {
+		t.Fatalf("plan resolvera: %+v", plan)
+	}
+	if len(plan.Changes) != 2 {
+		t.Errorf("zmiany resolvera: %v", plan.Changes)
+	}
+	if plan.Desired.MTU != obecny.MTU || len(plan.Desired.Trasy) != len(obecny.Trasy) ||
+		plan.Desired.Metoda != obecny.Metoda {
+		t.Errorf("plan resolvera ruszyl reszte profilu: %+v", plan.Desired)
+	}
+	bez := ZaplanujDNS("eth1", obecny, []string{"192.168.56.50"}, nil, false)
+	if bez.Action != PlanBezZmian {
+		t.Errorf("resolver w stanie docelowym policzony jako zmiana: %+v", bez)
+	}
+	if pusty := ZaplanujDNS("eth1", obecny, nil, nil, false); pusty.Refusal == "" {
+		t.Error("resolver bez serwera przeszedl bez odmowy")
+	}
+}

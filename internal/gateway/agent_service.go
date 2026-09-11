@@ -902,6 +902,24 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	// Wynik testu rozwiazywania nazw nalezy do zadania, a nie do inwentarza:
 	// to odpowiedz na jedno pytanie zadane w jednej chwili, a nie stan hosta.
+	// Plan resolvera jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
+	// ktora sie jeszcze nie wydarzyla, wobec profilu, ktory host ma teraz.
+	if resolver := result.GetDnsResult(); resolver != nil && len(resolver.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(resolver.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "dns_plan",
+			"plan":      json.RawMessage(resolver.GetPlan()),
+			"plan_hash": plan.PlanHash,
+			"profiles":  surowyJSON(resolver.GetProfiles()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if resolver := result.GetDnsResult(); resolver != nil &&
 		(len(resolver.GetQueries()) > 0 || resolver.GetRollbackId() != "") {
 		encoded, err := json.Marshal(map[string]any{

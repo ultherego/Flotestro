@@ -46,6 +46,7 @@ const (
 	PlanMTU    = "mtu"
 	PlanTrasy  = "routes"
 	PlanProfil = "profile"
+	PlanDNS    = "dns"
 
 	PlanZmienia  = "update"
 	PlanBezZmian = "no_change"
@@ -85,11 +86,28 @@ func ZaplanujProfil(interfejs string, obecny Profil, metoda string, adresy []str
 		Polaczenie: obecny.Polaczenie, Interfejs: obecny.Interfejs,
 		Metoda: metoda, Adresy: append([]string(nil), adresy...),
 		Brama: brama, DNS: append([]string(nil), dns...),
+		DNSSearch: obecny.DNSSearch, IgnoreAutoDNS: obecny.IgnoreAutoDNS,
 		Trasy: obecny.Trasy, MTU: obecny.MTU,
 	}
 	if _, err := ArgumentyProfilu(docelowy); err != nil {
 		return plan.zOdmowa(err.Error())
 	}
+	return plan.zDocelowym(docelowy)
+}
+
+// ZaplanujDNS liczy roznice dla samego resolvera: serwerow, domen
+// wyszukiwania i tego, czy serwery z DHCP sa odrzucane. Reszta profilu
+// zostaje taka, jaka host ma.
+func ZaplanujDNS(interfejs string, obecny Profil, serwery, domeny []string,
+	pomijajAuto bool) Plan {
+	plan := nowyPlan(interfejs, obecny, PlanDNS)
+	if _, err := ArgumentyDNS(obecny.Polaczenie, serwery, domeny, pomijajAuto); err != nil {
+		return plan.zOdmowa(err.Error())
+	}
+	docelowy := obecny
+	docelowy.DNS = append([]string(nil), serwery...)
+	docelowy.DNSSearch = append([]string(nil), domeny...)
+	docelowy.IgnoreAutoDNS = pomijajAuto
 	return plan.zDocelowym(docelowy)
 }
 
@@ -147,6 +165,17 @@ func roznice(obecny, docelowy Profil) []string {
 	}
 	if !tenSamZbior(obecny.DNS, docelowy.DNS) {
 		zmiany = append(zmiany, "DNS z "+lista(obecny.DNS)+" na "+lista(docelowy.DNS))
+	}
+	if !tenSamZbior(obecny.DNSSearch, docelowy.DNSSearch) {
+		zmiany = append(zmiany, "domeny wyszukiwania z "+lista(obecny.DNSSearch)+
+			" na "+lista(docelowy.DNSSearch))
+	}
+	if obecny.IgnoreAutoDNS != docelowy.IgnoreAutoDNS {
+		if docelowy.IgnoreAutoDNS {
+			zmiany = append(zmiany, "serwery z DHCP beda odrzucane")
+		} else {
+			zmiany = append(zmiany, "serwery z DHCP beda przyjmowane")
+		}
 	}
 	if !tenSamZbior(obecny.Trasy, docelowy.Trasy) {
 		zmiany = append(zmiany, "trasy z "+lista(obecny.Trasy)+" na "+lista(docelowy.Trasy))

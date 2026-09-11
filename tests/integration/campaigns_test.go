@@ -366,8 +366,8 @@ func TestKampaniaOdmawiaOperacjiBezTrybuMasowego(t *testing.T) {
 		"filesystem.resize": {"storage": map[string]any{
 			"device": "/dev/sdb",
 		}},
-		"dns.host.apply": {"dns": map[string]any{
-			"servers": []string{"192.168.56.50"},
+		"lvm.extend": {"storage": map[string]any{
+			"device": "/dev/vg0/dane", "size": "+1G",
 		}},
 	}
 	for akcja, payload := range przypadki {
@@ -1775,7 +1775,7 @@ func TestKampaniaSieciLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 	}
 	odciski := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planSieci(h, target.PlanJobID)
+		plan := planZRodzaju(h, target.PlanJobID, "network_plan")
 		if plan.Action != "update" || len(plan.Changes) != 1 ||
 			!strings.Contains(plan.Changes[0], "MTU") {
 			t.Errorf("host %s planuje %q %v zamiast zmiany MTU", target.Hostname, plan.Action, plan.Changes)
@@ -1831,32 +1831,6 @@ func TestKampaniaSieciLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
-}
-
-// planSieci czyta z wyniku zadania planujacego plan sieci.
-func planSieci(h *harness, jobID string) (plan struct {
-	Action   string   `json:"action"`
-	Changes  []string `json:"changes"`
-	Refusal  string   `json:"refusal"`
-	PlanHash string   `json:"plan_hash"`
-}) {
-	h.t.Helper()
-	var odpowiedz struct {
-		Items []struct {
-			Detail struct {
-				Kind string          `json:"kind"`
-				Plan json.RawMessage `json:"plan"`
-			} `json:"detail"`
-		} `json:"items"`
-	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "network_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
-			return plan
-		}
-	}
-	return plan
 }
 
 // TestKampaniaStrefyFirewalldLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze wpis
@@ -2007,6 +1981,156 @@ func planStrefy(h *harness, jobID string) (plan struct {
 	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
 	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
 		if odpowiedz.Items[i].Detail.Kind == "firewall_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// TestKampaniaResolveraLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze zmiana
+// resolvera w kampanii dostaje plan policzony na hoscie wobec profilu,
+// ktory host ma, i wraca z jego odciskiem - a interfejs bez profilu jest
+// odmowa przed zgoda.
+func TestKampaniaResolveraLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+	h := newHarness(t)
+	const serwer = "192.168.56.50"
+
+	interfejsy := map[string]string{}
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		stan := migawkaSieciHosta(t, h, host.ID)
+		if stan.WriteAdapter == "" || stan.ManagementInterface == "" {
+			continue
+		}
+		interfejsy[host.ID] = stan.ManagementInterface
+		cele = append(cele, host.ID)
+	}
+	if len(cele) == 0 {
+		t.Skip("flota nie ma hosta z mechanizmem zapisu konfiguracji sieci")
+	}
+	interfejs := interfejsy[cele[0]]
+	wybrane := cele[:0]
+	for _, hostID := range cele {
+		if interfejsy[hostID] == interfejs {
+			wybrane = append(wybrane, hostID)
+		}
+	}
+	cele = wybrane
+
+	// Sprzatanie zostawia serwer bez domen wyszukiwania: resolver bez
+	// serwera jest odmowa, wiec pustego profilu nie da sie tu przywrocic.
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "dns.host.apply", "reason": "sprzatanie po tescie kampanii resolvera",
+				"payload": map[string]any{"dns": map[string]any{
+					"interface": interfejs, "servers": []string{serwer}, "rollback_seconds": 60}},
+			}, 3*time.Minute)
+		}
+	})
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "resolver na flocie", "action": "dns.host.apply",
+		"reason": "test integracyjny planow resolvera",
+		"payload": map[string]any{"dns": map[string]any{
+			"interface": interfejs, "servers": []string{serwer},
+			"search_domains": []string{"flotestro.test"}, "rollback_seconds": 60}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	odciski := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planZRodzaju(h, target.PlanJobID, "dns_plan")
+		if plan.Action != "update" || plan.PlanHash == "" {
+			t.Errorf("host %s planuje %+v zamiast zmiany resolvera", target.Hostname, plan)
+		}
+		var oDomenach bool
+		for _, zmiana := range plan.Changes {
+			oDomenach = oDomenach || strings.Contains(zmiana, "domeny wyszukiwania")
+		}
+		if !oDomenach {
+			t.Errorf("host %s nie widzi zmiany domen wyszukiwania: %v", target.Hostname, plan.Changes)
+		}
+		odciski[target.Hostname] = plan.PlanHash
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		var zadanie struct {
+			Payload struct {
+				DNS struct {
+					PlanHash string `json:"plan_hash"`
+				} `json:"dns"`
+			} `json:"payload"`
+		}
+		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
+		if zadanie.Payload.DNS.PlanHash != odciski[target.Hostname] {
+			t.Errorf("host %s dostal odcisk %q, plan mial %q",
+				target.Hostname, zadanie.Payload.DNS.PlanHash, odciski[target.Hostname])
+		}
+	}
+
+	bezProfilu := h.createCampaign(map[string]any{
+		"name": "resolver na interfejsie, ktorego nie ma", "action": "dns.host.apply",
+		"reason": "test odmowy planu resolvera",
+		"payload": map[string]any{"dns": map[string]any{
+			"interface": "flotestro9", "servers": []string{serwer}, "rollback_seconds": 60}},
+		"selector":    map[string]any{"host_ids": cele},
+		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
+		"reboot_policy": "never",
+	})
+	stanOdmowy := h.awaitCampaign(bezProfilu.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if stanOdmowy.State == "awaiting_approval" {
+		t.Fatal("kampania na interfejsie bez profilu doszla do zgody")
+	}
+	for _, target := range h.campaignTargets(bezProfilu.ID) {
+		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
+			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+		}
+	}
+}
+
+// planZRodzaju czyta z wyniku zadania planujacego plan o danym rodzaju.
+func planZRodzaju(h *harness, jobID, rodzaj string) (plan struct {
+	Action   string   `json:"action"`
+	Changes  []string `json:"changes"`
+	Refusal  string   `json:"refusal"`
+	PlanHash string   `json:"plan_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == rodzaj {
 			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
 			return plan
 		}

@@ -455,6 +455,8 @@ type DnsRequest_Operation int32
 const (
 	DnsRequest_OPERATION_UNSPECIFIED DnsRequest_Operation = 0
 	DnsRequest_OPERATION_APPLY       DnsRequest_Operation = 1
+	// Plan zmiany resolvera bez dotykania hosta.
+	DnsRequest_OPERATION_PLAN DnsRequest_Operation = 2
 )
 
 // Enum value maps for DnsRequest_Operation.
@@ -462,10 +464,12 @@ var (
 	DnsRequest_Operation_name = map[int32]string{
 		0: "OPERATION_UNSPECIFIED",
 		1: "OPERATION_APPLY",
+		2: "OPERATION_PLAN",
 	}
 	DnsRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED": 0,
 		"OPERATION_APPLY":       1,
+		"OPERATION_PLAN":        2,
 	}
 )
 
@@ -3324,8 +3328,11 @@ type DnsRequest struct {
 	// odpowiedzial.
 	IgnoreAutoDns   bool   `protobuf:"varint,5,opt,name=ignore_auto_dns,json=ignoreAutoDns,proto3" json:"ignore_auto_dns,omitempty"`
 	RollbackSeconds uint32 `protobuf:"varint,6,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Odcisk planu, na ktory operator sie zgodzil; helper liczy plan jeszcze
+	// raz wobec profilu, ktory ma teraz.
+	PlanHash      string `protobuf:"bytes,7,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DnsRequest) Reset() {
@@ -3400,6 +3407,13 @@ func (x *DnsRequest) GetRollbackSeconds() uint32 {
 	return 0
 }
 
+func (x *DnsRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type DnsResult struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Profiles         []byte                 `protobuf:"bytes,1,opt,name=profiles,proto3" json:"profiles,omitempty"`
@@ -3407,8 +3421,10 @@ type DnsResult struct {
 	RollbackId       string                 `protobuf:"bytes,3,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
 	RollbackDeadline string                 `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	Confirmed        bool                   `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DnsResult) Reset() {
@@ -3474,6 +3490,13 @@ func (x *DnsResult) GetConfirmed() bool {
 		return x.Confirmed
 	}
 	return false
+}
+
+func (x *DnsResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // FirewallRequest opisuje operacje na zaporze hosta.
@@ -7476,7 +7499,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
 	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
-	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xc4\x02\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xf5\x02\n" +
 	"\n" +
 	"DnsRequest\x12G\n" +
 	"\toperation\x18\x01 \x01(\x0e2).flotestro.helper.v1.DnsRequest.OperationR\toperation\x12\x1c\n" +
@@ -7484,17 +7507,20 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\aservers\x18\x03 \x03(\tR\aservers\x12%\n" +
 	"\x0esearch_domains\x18\x04 \x03(\tR\rsearchDomains\x12&\n" +
 	"\x0fignore_auto_dns\x18\x05 \x01(\bR\rignoreAutoDns\x12)\n" +
-	"\x10rollback_seconds\x18\x06 \x01(\rR\x0frollbackSeconds\";\n" +
+	"\x10rollback_seconds\x18\x06 \x01(\rR\x0frollbackSeconds\x12\x1b\n" +
+	"\tplan_hash\x18\a \x01(\tR\bplanHash\"O\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fOPERATION_APPLY\x10\x01\"\xad\x01\n" +
+	"\x0fOPERATION_APPLY\x10\x01\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x02\"\xc1\x01\n" +
 	"\tDnsResult\x12\x1a\n" +
 	"\bprofiles\x18\x01 \x01(\fR\bprofiles\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vrollback_id\x18\x03 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xc4\x06\n" +
+	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xc4\x06\n" +
 	"\x0fFirewallRequest\x12L\n" +
 	"\toperation\x18\x01 \x01(\x0e2..flotestro.helper.v1.FirewallRequest.OperationR\toperation\x12\x17\n" +
 	"\arule_id\x18\x02 \x01(\tR\x06ruleId\x12\x14\n" +

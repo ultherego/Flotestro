@@ -33,7 +33,12 @@ type Profil struct {
 	Adresy     []string `json:"addresses,omitempty"`
 	Brama      string   `json:"gateway,omitempty"`
 	DNS        []string `json:"dns,omitempty"`
-	Trasy      []string `json:"routes,omitempty"`
+	// DNSSearch i IgnoreAutoDNS naleza do resolvera tak samo jak serwery:
+	// wycofanie, ktore przywraca same serwery, zostawia host z cudzymi
+	// domenami wyszukiwania i z odrzuconymi serwerami z DHCP.
+	DNSSearch     []string `json:"dns_search,omitempty"`
+	IgnoreAutoDNS bool     `json:"ignore_auto_dns,omitempty"`
+	Trasy         []string `json:"routes,omitempty"`
 	// MTU jest tekstem, bo "auto" jest tu rownoprawna wartoscia.
 	MTU string `json:"mtu,omitempty"`
 }
@@ -41,8 +46,8 @@ type Profil struct {
 // PolaProfilu wylicza ustawienia, o ktore panel pyta NetworkManagera.
 var PolaProfilu = []string{
 	"connection.id", "connection.interface-name", "ipv4.method",
-	"ipv4.addresses", "ipv4.gateway", "ipv4.dns", "ipv4.routes",
-	"802-3-ethernet.mtu",
+	"ipv4.addresses", "ipv4.gateway", "ipv4.dns", "ipv4.dns-search",
+	"ipv4.ignore-auto-dns", "ipv4.routes", "802-3-ethernet.mtu",
 }
 
 // ParsujPolaczenia czyta wyjscie "nmcli -t -f NAME,UUID,DEVICE,TYPE,STATE con show".
@@ -104,6 +109,10 @@ func ParsujProfil(wyjscie string) Profil {
 			profil.Brama = wartosc
 		case "ipv4.dns":
 			profil.DNS = listaWartosci(wartosc)
+		case "ipv4.dns-search":
+			profil.DNSSearch = listaWartosci(wartosc)
+		case "ipv4.ignore-auto-dns":
+			profil.IgnoreAutoDNS = wartosc == "yes"
 		case "ipv4.routes":
 			profil.Trasy = listaWartosci(wartosc)
 		case "802-3-ethernet.mtu":
@@ -226,11 +235,17 @@ func ArgumentyProfilu(profil Profil) ([][]string, error) {
 		}
 	}
 
+	pomijaj := "no"
+	if profil.IgnoreAutoDNS {
+		pomijaj = "yes"
+	}
 	modyfikacja := []string{SciezkaNmcli, "connection", "modify", profil.Polaczenie,
 		"ipv4.method", profil.Metoda,
 		"ipv4.addresses", strings.Join(profil.Adresy, ","),
 		"ipv4.gateway", profil.Brama,
 		"ipv4.dns", strings.Join(profil.DNS, ","),
+		"ipv4.dns-search", strings.Join(profil.DNSSearch, ","),
+		"ipv4.ignore-auto-dns", pomijaj,
 		"ipv4.routes", strings.Join(profil.Trasy, ",")}
 	if profil.MTU != "" {
 		modyfikacja = append(modyfikacja, "802-3-ethernet.mtu", profil.MTU)

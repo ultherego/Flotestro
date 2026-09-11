@@ -491,6 +491,8 @@ const (
 	// co zobaczy host, wiec pytanie zadaje host.
 	DnsAction_OPERATION_RESOLVE_TEST DnsAction_Operation = 1
 	DnsAction_OPERATION_APPLY        DnsAction_Operation = 2
+	// Plan zmiany resolvera liczony na hoscie bez dotykania konfiguracji.
+	DnsAction_OPERATION_PLAN DnsAction_Operation = 3
 )
 
 // Enum value maps for DnsAction_Operation.
@@ -499,11 +501,13 @@ var (
 		0: "OPERATION_UNSPECIFIED",
 		1: "OPERATION_RESOLVE_TEST",
 		2: "OPERATION_APPLY",
+		3: "OPERATION_PLAN",
 	}
 	DnsAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
 		"OPERATION_RESOLVE_TEST": 1,
 		"OPERATION_APPLY":        2,
+		"OPERATION_PLAN":         3,
 	}
 )
 
@@ -7565,8 +7569,10 @@ type DnsAction struct {
 	IgnoreAutoDns   bool                   `protobuf:"varint,5,opt,name=ignore_auto_dns,json=ignoreAutoDns,proto3" json:"ignore_auto_dns,omitempty"`
 	RollbackSeconds uint32                 `protobuf:"varint,6,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
 	Names           []string               `protobuf:"bytes,7,rep,name=names,proto3" json:"names,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,8,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DnsAction) Reset() {
@@ -7648,6 +7654,13 @@ func (x *DnsAction) GetNames() []string {
 	return nil
 }
 
+func (x *DnsAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type DnsResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Wyniki zapytan w postaci JSON. Struktura nalezy do modulu DNS.
@@ -7657,8 +7670,10 @@ type DnsResult struct {
 	RollbackId       string `protobuf:"bytes,4,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
 	RollbackDeadline string `protobuf:"bytes,5,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	Confirmed        bool   `protobuf:"varint,6,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DnsResult) Reset() {
@@ -7731,6 +7746,13 @@ func (x *DnsResult) GetConfirmed() bool {
 		return x.Confirmed
 	}
 	return false
+}
+
+func (x *DnsResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // FirewallAction opisuje operacje na zaporze hosta.
@@ -11737,7 +11759,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
 	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
-	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xf3\x02\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xa4\x03\n" +
 	"\tDnsAction\x12E\n" +
 	"\toperation\x18\x01 \x01(\x0e2'.flotestro.agent.v1.DnsAction.OperationR\toperation\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x18\n" +
@@ -11745,11 +11767,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0esearch_domains\x18\x04 \x03(\tR\rsearchDomains\x12&\n" +
 	"\x0fignore_auto_dns\x18\x05 \x01(\bR\rignoreAutoDns\x12)\n" +
 	"\x10rollback_seconds\x18\x06 \x01(\rR\x0frollbackSeconds\x12\x14\n" +
-	"\x05names\x18\a \x03(\tR\x05names\"W\n" +
+	"\x05names\x18\a \x03(\tR\x05names\x12\x1b\n" +
+	"\tplan_hash\x18\b \x01(\tR\bplanHash\"k\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16OPERATION_RESOLVE_TEST\x10\x01\x12\x13\n" +
-	"\x0fOPERATION_APPLY\x10\x02\"\xc7\x01\n" +
+	"\x0fOPERATION_APPLY\x10\x02\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x03\"\xdb\x01\n" +
 	"\tDnsResult\x12\x18\n" +
 	"\aqueries\x18\x01 \x01(\fR\aqueries\x12\x1a\n" +
 	"\bprofiles\x18\x02 \x01(\fR\bprofiles\x12\x18\n" +
@@ -11757,7 +11781,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\vrollback_id\x18\x04 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x05 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x06 \x01(\bR\tconfirmed\"\xd2\x05\n" +
+	"\tconfirmed\x18\x06 \x01(\bR\tconfirmed\x12\x12\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\"\xd2\x05\n" +
 	"\x0eFirewallAction\x12J\n" +
 	"\toperation\x18\x01 \x01(\x0e2,.flotestro.agent.v1.FirewallAction.OperationR\toperation\x12\x17\n" +
 	"\arule_id\x18\x02 \x01(\tR\x06ruleId\x12\x14\n" +

@@ -207,6 +207,7 @@ function WynikTypowany({ detail }: { detail: Record<string, any> }) {
     case "firewall_plan":
     case "mount_plan":
     case "network_plan":
+    case "dns_plan":
       return (
         <div className="zrodlo">
           <StreszczeniePlanu plan={(detail.plan ?? {}) as Record<string, any>} />

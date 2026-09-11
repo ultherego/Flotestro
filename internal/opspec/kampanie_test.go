@@ -102,6 +102,7 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 		ActionNetworkMTUSet:       ActionNetworkPlan,
 		ActionNetworkRouteEnsure:  ActionNetworkPlan,
 		ActionNetworkProfileApply: ActionNetworkPlan,
+		ActionDNSHostApply:        ActionDNSPlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
@@ -120,7 +121,7 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// brak funkcji. Plik przeszedl juz te droge: dostal prawdziwy planer,
 	// wiec przestal tu byc przykladem.
 	for _, zmiana := range []ActionType{
-		ActionDNSHostApply, ActionLVMExtend,
+		ActionFilesystemResize, ActionLVMExtend,
 	} {
 		if AkcjaPlanowania(zmiana) != "" {
 			t.Errorf("%s ma planera, wiec ta czesc testu przestala cokolwiek pilnowac", zmiana)

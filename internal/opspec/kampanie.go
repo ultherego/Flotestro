@@ -125,9 +125,11 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	// Siec: plan liczy roznice miedzy profilem NetworkManagera, ktory host
 	// ma, a zadanym - i zwraca odcisk tej roznicy. Zmiana wraca z odciskiem,
 	// a host liczy plan jeszcze raz: profil zmieniony po planowaniu
-	// zatrzymuje zmiane. DNS hosta idzie osobna operacja i czeka na planer.
+	// zatrzymuje zmiane. Resolver idzie ta sama droga wlasna operacja dns.plan.
 	case ActionNetworkProfileApply, ActionNetworkRouteEnsure, ActionNetworkMTUSet:
 		return ActionNetworkPlan
+	case ActionDNSHostApply:
+		return ActionDNSPlan
 
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,

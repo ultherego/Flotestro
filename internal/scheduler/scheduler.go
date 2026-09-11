@@ -752,10 +752,13 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Firewall{Firewall: zapora}
 
-	case opspec.ActionDNSResolveTest, opspec.ActionDNSHostApply:
+	case opspec.ActionDNSResolveTest, opspec.ActionDNSPlan, opspec.ActionDNSHostApply:
 		operacja := agentv1.DnsAction_OPERATION_APPLY
-		if action == opspec.ActionDNSResolveTest {
+		switch action {
+		case opspec.ActionDNSResolveTest:
 			operacja = agentv1.DnsAction_OPERATION_RESOLVE_TEST
+		case opspec.ActionDNSPlan:
+			operacja = agentv1.DnsAction_OPERATION_PLAN
 		}
 		resolver := &agentv1.DnsAction{Operation: operacja}
 		if payload.DNS != nil {
@@ -765,6 +768,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			resolver.IgnoreAutoDns = payload.DNS.IgnoreAutoDNS
 			resolver.RollbackSeconds = payload.DNS.RollbackSeconds
 			resolver.Names = payload.DNS.Names
+			resolver.PlanHash = payload.DNS.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Dns{Dns: resolver}
 

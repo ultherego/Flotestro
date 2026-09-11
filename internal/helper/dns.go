@@ -2,6 +2,8 @@ package helper
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -19,7 +21,8 @@ import (
 // bledu siega dalej niz jedna nierozwiazana nazwa.
 func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DnsRequest) *helperv1.HelperResponse {
-	if action.GetOperation() != helperv1.DnsRequest_OPERATION_APPLY {
+	planowanie := action.GetOperation() == helperv1.DnsRequest_OPERATION_PLAN
+	if !planowanie && action.GetOperation() != helperv1.DnsRequest_OPERATION_APPLY {
 		return reject(ErrorUnknownAction, "nieznana operacja na resolverze")
 	}
 	if !s.unitMutex.TryLock() {
@@ -35,13 +38,36 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	defer cancel()
 
 	if !network.Istnieje(network.SciezkaNmcli) {
-		return reject(ErrorUnsupported,
-			"ten host nie ma NetworkManagera; resolver jest tu tylko do odczytu")
+		powod := "ten host nie ma NetworkManagera; resolver jest tu tylko do odczytu"
+		if planowanie {
+			// Brak mechanizmu zapisu jest odpowiedzia planu, nie bledem
+			// odczytu: kampania ma zobaczyc ten host jako odmowe.
+			return odpowiedzPlanuResolvera(nil,
+				network.OdmowaPlanu(action.GetInterface(), network.PlanDNS, powod))
+		}
+		return reject(ErrorUnsupported, powod)
 	}
 
 	polaczenie, profil, err := s.profilInterfejsu(actionCtx, action.GetInterface())
 	if err != nil {
+		if planowanie {
+			return odpowiedzPlanuResolvera(s.czytajProfile(actionCtx),
+				network.OdmowaPlanu(action.GetInterface(), network.PlanDNS, err.Error()))
+		}
 		return reject(ErrorUnsupported, err.Error())
+	}
+
+	if planowanie {
+		return odpowiedzPlanuResolvera(s.czytajProfile(actionCtx), planResolvera(action, profil))
+	}
+	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal. Inny odcisk znaczy, ze profil zmienil sie od
+	// planowania - i to jest odmowa, nie ostrzezenie.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		if teraz := planResolvera(action, profil); teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"profil "+polaczenie+" zmienil sie od planowania; zmiana wymaga nowego planu")
+		}
 	}
 
 	kroki, err := network.ArgumentyDNS(polaczenie, action.GetServers(),
@@ -94,6 +120,37 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 				plan.Termin.Format(time.RFC3339) + ", jesli agent nie potwierdzi lacznosci",
 			RollbackId:       plan.ID,
 			RollbackDeadline: plan.Termin.Format(time.RFC3339),
+		},
+	}
+}
+
+// planResolvera liczy plan zmiany resolvera wobec profilu zastanego.
+func planResolvera(action *helperv1.DnsRequest, profil network.Profil) network.Plan {
+	return network.ZaplanujDNS(action.GetInterface(), profil, action.GetServers(),
+		action.GetSearchDomains(), action.GetIgnoreAutoDns())
+}
+
+func odpowiedzPlanuResolvera(profile []network.Profil, plan network.Plan) *helperv1.HelperResponse {
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	zakodowane, err := zakodujProfile(profile)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == network.PlanBezZmian:
+		komunikat = "resolver profilu " + plan.Connection + " jest juz w stanie docelowym"
+	default:
+		komunikat = "resolver profilu " + plan.Connection + ": " + strings.Join(plan.Changes, "; ")
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		DnsResult: &helperv1.DnsResult{
+			Profiles: zakodowane, Message: komunikat, Plan: zakodowany,
 		},
 	}
 }

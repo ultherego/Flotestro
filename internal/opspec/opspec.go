@@ -62,6 +62,7 @@ const (
 	ActionNetworkRollback     ActionType = "network.rollback"
 
 	ActionDNSResolveTest ActionType = "dns.resolve.test"
+	ActionDNSPlan        ActionType = "dns.plan"
 	ActionDNSHostApply   ActionType = "dns.host.apply"
 
 	ActionFirewallPlan           ActionType = "firewall.plan"
@@ -485,6 +486,10 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Test rozwiazywania nazw pyta z hosta, bo odpowiedz panelu nie mowi nic
 	// o tym, co zobaczy host. Zapytanie niczego nie zmienia.
 	ActionDNSResolveTest: {mutating: false, capability: "dns", permission: "dns.read",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
+	// Plan resolvera: roznica miedzy profilem zastanym a zadanym. Nie dotyka
+	// hosta, wiec nie ma wycofania ani klasy blokady.
+	ActionDNSPlan: {mutating: false, capability: "dns", permission: "dns.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
 	// Zly resolver odcina host od katalogu i od Kerberosa, a wiec od
 	// logowania - skutek jest szerszy niz sama nazwa, ktorej nie rozwiaze.
@@ -1710,6 +1715,9 @@ type DNSPayload struct {
 	IgnoreAutoDNS   bool     `json:"ignore_auto_dns,omitempty"`
 	RollbackSeconds uint32   `json:"rollback_seconds,omitempty"`
 	Names           []string `json:"names,omitempty"`
+	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
+	// plan jeszcze raz przed zmiana.
+	PlanHash string `json:"plan_hash,omitempty"`
 }
 
 // NetworkPayload opisuje zmiane konfiguracji sieci.
@@ -2593,6 +2601,11 @@ func Validate(action ActionType, payload Payload) error {
 				return fmt.Errorf("nieprawidlowa nazwa %q", nazwa)
 			}
 		}
+		return nil
+
+	case ActionDNSPlan:
+		// Plan przyjmuje to samo, co zmiana, i sam nazywa, czego host nie
+		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
 		return nil
 
 	case ActionDNSHostApply:

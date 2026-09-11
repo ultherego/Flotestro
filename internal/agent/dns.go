@@ -107,6 +107,11 @@ func (e *TaskExecutor) applyDNS(ctx context.Context, task *agentv1.TaskEnvelope,
 		}
 	}
 
+	operacja := helperv1.DnsRequest_OPERATION_APPLY
+	if action == opspec.ActionDNSPlan {
+		// Plan liczy roznice wobec profilu, ktory host ma, bez dotykania go.
+		operacja = helperv1.DnsRequest_OPERATION_PLAN
+	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -115,12 +120,13 @@ func (e *TaskExecutor) applyDNS(ctx context.Context, task *agentv1.TaskEnvelope,
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_Dns{
 			Dns: &helperv1.DnsRequest{
-				Operation:       helperv1.DnsRequest_OPERATION_APPLY,
+				Operation:       operacja,
 				Interface:       payload.Interface,
 				Servers:         payload.Servers,
 				SearchDomains:   payload.SearchDomains,
 				IgnoreAutoDns:   payload.IgnoreAutoDNS,
 				RollbackSeconds: payload.RollbackSeconds,
+				PlanHash:        payload.PlanHash,
 			},
 		},
 	}, timeout)
@@ -134,6 +140,7 @@ func (e *TaskExecutor) applyDNS(ctx context.Context, task *agentv1.TaskEnvelope,
 		Message:          wynik.GetMessage(),
 		RollbackId:       wynik.GetRollbackId(),
 		RollbackDeadline: wynik.GetRollbackDeadline(),
+		Plan:             wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

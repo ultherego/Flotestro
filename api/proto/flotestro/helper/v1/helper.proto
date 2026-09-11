@@ -377,6 +377,8 @@ message DnsRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_APPLY = 1;
+    // Plan zmiany resolvera bez dotykania hosta.
+    OPERATION_PLAN = 2;
   }
   Operation operation = 1;
   string interface = 2;
@@ -387,6 +389,9 @@ message DnsRequest {
   // odpowiedzial.
   bool ignore_auto_dns = 5;
   uint32 rollback_seconds = 6;
+  // Odcisk planu, na ktory operator sie zgodzil; helper liczy plan jeszcze
+  // raz wobec profilu, ktory ma teraz.
+  string plan_hash = 7;
 }
 
 message DnsResult {
@@ -395,6 +400,8 @@ message DnsResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 6;
 }
 
 // FirewallRequest opisuje operacje na zaporze hosta.
