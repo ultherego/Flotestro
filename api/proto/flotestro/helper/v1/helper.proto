@@ -402,6 +402,9 @@ message FirewallRequest {
     // Przywrocenie stanu regul panelu sprzed zmiany.
     OPERATION_RESTORE = 6;
     OPERATION_CONFIRM = 7;
+    // Policzenie roznicy miedzy regula zastana a zadana. Nie zmienia
+    // niczego: odpowiada, co by sie stalo i wobec ktorego zestawu regul.
+    OPERATION_PLAN = 8;
   }
   Operation operation = 1;
   // Regula w postaci pol, ktore panel rozumie. Surowego zapisu nft nie
@@ -438,6 +441,8 @@ message FirewallResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
+  // Plan jest opisem roznicy miedzy regula zastana a zadana, w JSON.
+  bytes plan = 6;
 }
 
 // StorageRequest opisuje operacje na przestrzeni dyskowej hosta.

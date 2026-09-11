@@ -502,6 +502,9 @@ const (
 	// Przywrocenie stanu regul panelu sprzed zmiany.
 	FirewallRequest_OPERATION_RESTORE FirewallRequest_Operation = 6
 	FirewallRequest_OPERATION_CONFIRM FirewallRequest_Operation = 7
+	// Policzenie roznicy miedzy regula zastana a zadana. Nie zmienia
+	// niczego: odpowiada, co by sie stalo i wobec ktorego zestawu regul.
+	FirewallRequest_OPERATION_PLAN FirewallRequest_Operation = 8
 )
 
 // Enum value maps for FirewallRequest_Operation.
@@ -515,6 +518,7 @@ var (
 		5: "OPERATION_ZONE_SERVICE",
 		6: "OPERATION_RESTORE",
 		7: "OPERATION_CONFIRM",
+		8: "OPERATION_PLAN",
 	}
 	FirewallRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
@@ -525,6 +529,7 @@ var (
 		"OPERATION_ZONE_SERVICE": 5,
 		"OPERATION_RESTORE":      6,
 		"OPERATION_CONFIRM":      7,
+		"OPERATION_PLAN":         8,
 	}
 )
 
@@ -3640,8 +3645,10 @@ type FirewallResult struct {
 	RollbackId       string `protobuf:"bytes,3,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
 	RollbackDeadline string `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	Confirmed        bool   `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Plan jest opisem roznicy miedzy regula zastana a zadana, w JSON.
+	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FirewallResult) Reset() {
@@ -3707,6 +3714,13 @@ func (x *FirewallResult) GetConfirmed() bool {
 		return x.Confirmed
 	}
 	return false
+}
+
+func (x *FirewallResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // StorageRequest opisuje operacje na przestrzeni dyskowej hosta.
@@ -7436,7 +7450,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\vrollback_id\x18\x03 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xb0\x06\n" +
+	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xc4\x06\n" +
 	"\x0fFirewallRequest\x12L\n" +
 	"\toperation\x18\x01 \x01(\x0e2..flotestro.helper.v1.FirewallRequest.OperationR\toperation\x12\x17\n" +
 	"\arule_id\x18\x02 \x01(\tR\x06ruleId\x12\x14\n" +
@@ -7458,7 +7472,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x10rollback_seconds\x18\x10 \x01(\rR\x0frollbackSeconds\x12\x1f\n" +
 	"\vrollback_id\x18\x11 \x01(\tR\n" +
 	"rollbackId\x12#\n" +
-	"\rexpected_hash\x18\x12 \x01(\tR\fexpectedHash\"\xd3\x01\n" +
+	"\rexpected_hash\x18\x12 \x01(\tR\fexpectedHash\"\xe7\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x19\n" +
@@ -7467,14 +7481,16 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x13OPERATION_ZONE_PORT\x10\x04\x12\x1a\n" +
 	"\x16OPERATION_ZONE_SERVICE\x10\x05\x12\x15\n" +
 	"\x11OPERATION_RESTORE\x10\x06\x12\x15\n" +
-	"\x11OPERATION_CONFIRM\x10\a\"\xb2\x01\n" +
+	"\x11OPERATION_CONFIRM\x10\a\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\b\"\xc6\x01\n" +
 	"\x0eFirewallResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vrollback_id\x18\x03 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xa8\x05\n" +
+	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xa8\x05\n" +
 	"\x0eStorageRequest\x12K\n" +
 	"\toperation\x18\x01 \x01(\x0e2-.flotestro.helper.v1.StorageRequest.OperationR\toperation\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +

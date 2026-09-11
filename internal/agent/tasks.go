@@ -876,7 +876,10 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		zapora := action.Firewall
 		typ := opspec.ActionFirewallRuleEnsure
 		switch zapora.GetOperation() {
-		case agentv1.FirewallAction_OPERATION_READ:
+		case agentv1.FirewallAction_OPERATION_READ, agentv1.FirewallAction_OPERATION_PLAN:
+			// Odczyt i plan sa ta sama operacja panelu; rozroznia je obecnosc
+			// reguly. Typ musi byc jeden, bo hash payloadu liczy sie po obu
+			// stronach z tego samego typu.
 			typ = opspec.ActionFirewallPlan
 		case agentv1.FirewallAction_OPERATION_RULE_REMOVE:
 			typ = opspec.ActionFirewallRuleRemove

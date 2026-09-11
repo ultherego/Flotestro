@@ -51,8 +51,85 @@ func (s *Server) applyFirewall(ctx context.Context, request *helperv1.HelperRequ
 	case helperv1.FirewallRequest_OPERATION_RULE_ENSURE,
 		helperv1.FirewallRequest_OPERATION_RULE_REMOVE:
 		return s.zmienReguly(actionCtx, action)
+	case helperv1.FirewallRequest_OPERATION_PLAN:
+		return s.zaplanujRegule(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja na zaporze")
+}
+
+// zaplanujRegule liczy roznice miedzy regula zastana a zadana.
+//
+// Niczego nie zmienia. Sprawdzenia sa te same co przy zmianie - regula
+// niepoprawna albo odcinajaca kanal zarzadzania ma odpasc tutaj, na etapie
+// planu, a nie na polowie floty w trakcie wykonania. Odmowa jest wtedy
+// trescia planu, nie awaria: operator widzi ja przed zgoda.
+//
+// Plan niesie odcisk calego zestawu regul, jaki host ma teraz. Zmiana wraca
+// z tym odciskiem i host odmawia, gdy zestaw sie w miedzyczasie zmienil.
+func (s *Server) zaplanujRegule(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
+	stan := s.czytajZapore(ctx)
+	if stan.UnavailableReason != "" {
+		return reject(ErrorUnsupported, stan.UnavailableReason)
+	}
+	rejestr, err := firewall.WczytajRejestr(firewall.KatalogRejestru)
+	if err != nil {
+		return reject(ErrorExecFailed, "odczyt rejestru regul: "+err.Error())
+	}
+
+	// Plan bez lancucha i dzialania jest planem usuniecia: zalozenie reguly
+	// zawsze je niesie, usuniecie nigdy. Wynik nazywa to wprost.
+	usuwanie := action.GetChain() == "" && action.GetAction() == ""
+
+	var plan firewall.Plan
+	if usuwanie {
+		plan = firewall.ZaplanujUsuniecie(rejestr, action.GetRuleId(), stan.Hash, stan.Adapter)
+	} else {
+		regula := firewall.RuleSpec{
+			ID: action.GetRuleId(), Chain: action.GetChain(), Action: action.GetAction(),
+			Protocol: action.GetProtocol(), Ports: action.GetPorts(),
+			Sources: action.GetSources(), Interface: action.GetInterface(),
+			Comment: action.GetComment(),
+		}
+		if err := regula.Waliduj(); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+		plan = firewall.ZaplanujRegule(rejestr, regula, stan.Hash, stan.Adapter)
+		if !action.GetBreakGlass() {
+			if err := firewall.ChroniKanalZarzadzania(regula,
+				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
+				plan.Refusal = err.Error()
+			}
+		}
+	}
+
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	odpowiedz := odpowiedzZapory(stan, opisPlanuZapory(plan), nil)
+	if odpowiedz.GetFirewallResult() != nil {
+		odpowiedz.FirewallResult.Plan = zakodowany
+	}
+	return odpowiedz
+}
+
+// opisPlanuZapory streszcza plan jednym zdaniem dla dziennika operacji.
+func opisPlanuZapory(plan firewall.Plan) string {
+	if plan.Refusal != "" {
+		return "zmiana nie wejdzie na ten host: " + plan.Refusal
+	}
+	switch plan.Action {
+	case firewall.PlanBezZmian:
+		return "regula jest juz w stanie docelowym"
+	case firewall.PlanTworzy:
+		return "regula powstanie"
+	case firewall.PlanJuzUsuniety:
+		return "reguly nie ma, wiec nie ma czego usuwac"
+	case firewall.PlanUsuwa:
+		return "regula zostanie usunieta"
+	default:
+		return "zmieni sie: " + strings.Join(plan.Changes, ", ")
+	}
 }
 
 // zmienReguly zaklada albo usuwa regule panelu i przebudowuje tablice.

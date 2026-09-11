@@ -1065,6 +1065,8 @@ message FirewallAction {
     OPERATION_ZONE_PORT = 4;
     OPERATION_ZONE_SERVICE = 5;
     OPERATION_RESTORE = 6;
+    // Policzenie roznicy miedzy regula zastana a zadana, bez zmiany.
+    OPERATION_PLAN = 7;
   }
   Operation operation = 1;
   string rule_id = 2;
@@ -1090,6 +1092,8 @@ message FirewallResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
+  // Plan jest opisem roznicy miedzy regula zastana a zadana, w JSON.
+  bytes plan = 6;
 }
 
 // StorageAction opisuje operacje na przestrzeni dyskowej hosta.

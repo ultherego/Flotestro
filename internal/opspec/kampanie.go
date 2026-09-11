@@ -106,6 +106,14 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionFileEnsure, ActionFileRemove, ActionFileRollback:
 		return ActionFilePlan
 
+	// Zapora: plan liczy roznice wobec rejestru regul panelu i zwraca odcisk
+	// calego zestawu, jaki host ma teraz. Zmiana wraca z tym odciskiem, wiec
+	// zestaw zmieniony po planowaniu zatrzymuje ja zamiast wejsc w cudze
+	// sasiedztwo regul. Strefy firewalld to inny model i czekaja na wlasny
+	// planer.
+	case ActionFirewallRuleEnsure, ActionFirewallRuleRemove:
+		return ActionFirewallPlan
+
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
 	// ktory tego planu nigdy nie widzial.
@@ -113,8 +121,8 @@ func AkcjaPlanowania(action ActionType) ActionType {
 		return ActionComposePlan
 	}
 	// Pozostale rodziny odmawiaja i warto wiedziec, dlaczego. Ich operacje
-	// "*.plan" - network.plan, firewall.plan, storage.plan - czytaja stan
-	// hosta, a nie licza diffu wobec stanu docelowego. Nazwanie ich planerem
+	// "*.plan" - network.plan, storage.plan - czytaja stan hosta, a nie licza
+	// diffu wobec stanu docelowego. Nazwanie ich planerem
 	// dalo by kampanii faze planowania, ktora niczego nie planuje, i zgode
 	// odnoszaca sie do odczytu zamiast do zmiany. Planer per host dla tych
 	// rodzin jest osobna praca, a nie mapowaniem nazw - tak jak byla nia

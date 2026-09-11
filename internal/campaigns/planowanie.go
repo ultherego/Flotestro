@@ -127,6 +127,14 @@ func (o *Orchestrator) odbierzPlan(ctx context.Context, campaign Campaign,
 			"host nie podal odcisku planu")
 		return true, nil
 	}
+	if powod := odmowaPlanu(plan); powod != "" {
+		// Plan, ktory mowi "ta zmiana nie wejdzie na ten host", jest
+		// odpowiedzia, a nie awaria odczytu. Host konczy udzial tutaj,
+		// zanim ktokolwiek zatwierdzi cokolwiek - a nie w polowie floty,
+		// gdy zmiana odbija sie od hosta w trakcie wykonania.
+		o.finishTarget(ctx, campaign, target, TargetIneligible, "plan_refused", powod)
+		return true, nil
+	}
 	if err := o.store.ZapiszPlan(ctx, campaign.ID, target.HostID, hash, plan); err != nil {
 		return false, err
 	}
@@ -304,6 +312,16 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.File = &plik
 		}
 
+	case opspec.ActionFirewallRuleEnsure, opspec.ActionFirewallRuleRemove:
+		// Zapora wiaze sie odciskiem calego zestawu regul, ktory host mial
+		// przy planowaniu: zmiana ma wejsc w to sasiedztwo, ktore operator
+		// ogladal, a nie w inne.
+		if odcisk := odciskZestawuRegul(plan); odcisk != "" && payload.Firewall != nil {
+			regula := *payload.Firewall
+			regula.ExpectedHash = odcisk
+			payload.Firewall = &regula
+		}
+
 	case opspec.ActionComposeDeploy:
 		// Digest planu Compose powstaje z manifestu i z digestow obrazow.
 		// Wdrozenie bez niego nie ma podstawy, a wdrozenie z cudzym trafiloby
@@ -339,6 +357,49 @@ func odciskZastanejTresci(plan json.RawMessage) string {
 		return ""
 	}
 	return szczegol.Plan.SHA256
+}
+
+// odmowaPlanu czyta z planu powod, dla ktorego zmiana nie wejdzie na host.
+//
+// Kazdy planer moze go podac: regula odcinajaca kanal zarzadzania, walidator
+// odrzucajacy tresc pliku. Pusty wynik znaczy plan wykonalny.
+func odmowaPlanu(plan json.RawMessage) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	var szczegol struct {
+		Plan struct {
+			Refusal         string `json:"refusal"`
+			ValidatorFailed bool   `json:"validator_failed"`
+			ValidatorOutput string `json:"validator_output"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(plan, &szczegol); err != nil {
+		return ""
+	}
+	if szczegol.Plan.Refusal != "" {
+		return szczegol.Plan.Refusal
+	}
+	if szczegol.Plan.ValidatorFailed {
+		return "walidator odrzucil tresc docelowa: " + szczegol.Plan.ValidatorOutput
+	}
+	return ""
+}
+
+// odciskZestawuRegul wyjmuje z planu zapory odcisk zestawu regul hosta.
+func odciskZestawuRegul(plan json.RawMessage) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	var szczegol struct {
+		Plan struct {
+			RulesetHash string `json:"ruleset_hash"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(plan, &szczegol); err != nil {
+		return ""
+	}
+	return szczegol.Plan.RulesetHash
 }
 
 // OdciskZestawuPlanow liczy odcisk calego zestawu planow.

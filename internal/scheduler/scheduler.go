@@ -710,7 +710,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		operacja := agentv1.FirewallAction_OPERATION_RULE_ENSURE
 		switch action {
 		case opspec.ActionFirewallPlan:
+			// Plan bez reguly jest odczytem zestawu (zakladka hosta); plan
+			// z regula liczy roznice dla niej - faza planowania kampanii.
 			operacja = agentv1.FirewallAction_OPERATION_READ
+			if payload.Firewall != nil && strings.TrimSpace(payload.Firewall.RuleID) != "" {
+				operacja = agentv1.FirewallAction_OPERATION_PLAN
+			}
 		case opspec.ActionFirewallRuleRemove:
 			operacja = agentv1.FirewallAction_OPERATION_RULE_REMOVE
 		case opspec.ActionFirewallZonePort:

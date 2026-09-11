@@ -1371,3 +1371,147 @@ func dzialaniePlanu(h *harness, jobID string) string {
 	}
 	return ""
 }
+
+// TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda pilnuje dwoch rzeczy naraz.
+//
+// Pierwsza: regula zapory zamowiona na dwoch hostach to dwie rozne zmiany -
+// jeden host ja tworzy, drugi zmienia - i kazda wraca na host z odciskiem
+// zestawu regul, ktory ten host mial przy planowaniu.
+//
+// Druga: regula, ktora odcielaby kanal zarzadzania, ma odpasc na etapie
+// planu, zanim ktokolwiek cokolwiek zatwierdzi. Odmowa przy wykonaniu na
+// polowie floty bylaby odpowiedzia spozniona.
+func TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+	h := newHarness(t)
+	const nazwa = "test-kampanii-zapory"
+	cele := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+	if !migawkaZaporyHosta(t, h, cele[0]).Writable {
+		t.Skip("host nie pozwala zmieniac zapory")
+	}
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "firewall.rule.remove", "reason": "sprzatanie po tescie kampanii zapory",
+				"payload": map[string]any{"firewall": map[string]any{
+					"rule_id": nazwa, "rollback_seconds": 60}},
+			}, 2*time.Minute)
+		}
+	})
+
+	// Pierwszy host dostaje regule na inny port; drugi zostaje bez niej.
+	stan := migawkaZaporyHosta(t, h, cele[0])
+	zadanie, proby := h.runOperation(cele[0], map[string]any{
+		"action": "firewall.rule.ensure", "reason": "przygotowanie testu kampanii zapory",
+		"payload": map[string]any{"firewall": map[string]any{
+			"rule_id": nazwa, "chain": "wejscie", "action": "drop",
+			"protocol": "tcp", "ports": []string{"2525"},
+			"sources": []string{"10.10.0.0/16"}, "rollback_seconds": 60,
+			"expected_hash": stan.Hash}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("przygotowanie reguly: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+
+	regula := map[string]any{
+		"rule_id": nazwa, "chain": "wejscie", "action": "drop",
+		"protocol": "tcp", "ports": []string{"25"},
+		"sources": []string{"10.10.0.0/16"}, "rollback_seconds": 60,
+	}
+	campaign := h.createCampaign(map[string]any{
+		"name": "regula na calej flocie", "action": "firewall.rule.ensure",
+		"reason":                     "test integracyjny planow zapory",
+		"payload":                    map[string]any{"firewall": regula},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State != "planning" {
+		t.Fatalf("kampania zapory zaczela od stanu %s", campaign.State)
+	}
+
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	dzialania := map[string]int{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		dzialania[dzialaniePlanuZapory(h, target.PlanJobID)]++
+	}
+	if dzialania["create"] == 0 || dzialania["update"] == 0 {
+		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	for _, hostID := range cele {
+		po := regulaPanelu(t, h, hostID, nazwa)
+		if !strings.Contains(po.Text, "tcp dport 25") {
+			t.Errorf("host %s po kampanii ma regule %q", hostID[:8], po.Text)
+		}
+	}
+
+	// Regula odcinajaca panel: plan ma ja odrzucic na kazdym hoscie, a kampania
+	// ma sie zatrzymac bez zgody, bo nie zostal zaden host do pracy.
+	odcinajaca := h.createCampaign(map[string]any{
+		"name": "regula odcinajaca", "action": "firewall.rule.ensure",
+		"reason": "test odmowy planu zapory",
+		"payload": map[string]any{"firewall": map[string]any{
+			"rule_id": "test-odciecia-kampania", "chain": "wejscie", "action": "drop",
+			"protocol": "tcp", "ports": []string{"8000-9000"}, "rollback_seconds": 60}},
+		"selector":       map[string]any{"host_ids": cele},
+		"canary_size":    0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
+		"reboot_policy":             "never",
+	})
+	stanOdmowy := h.awaitCampaign(odcinajaca.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if stanOdmowy.State == "awaiting_approval" {
+		t.Fatal("kampania z regula odcinajaca panel doszla do zgody")
+	}
+	for _, target := range h.campaignTargets(odcinajaca.ID) {
+		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
+			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+		}
+	}
+}
+
+// dzialaniePlanuZapory czyta z wyniku zadania planujacego, co plan ma zrobic.
+func dzialaniePlanuZapory(h *harness, jobID string) string {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string `json:"kind"`
+				Plan struct {
+					Action string `json:"action"`
+				} `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "firewall_plan" {
+			return odpowiedz.Items[i].Detail.Plan.Action
+		}
+	}
+	return ""
+}

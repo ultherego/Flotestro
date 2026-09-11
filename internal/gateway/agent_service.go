@@ -934,6 +934,23 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// Plan reguly jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
+	// ktora sie jeszcze nie wydarzyla, wobec zestawu regul, jaki host ma teraz.
+	if zapora := result.GetFirewallResult(); zapora != nil && len(zapora.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(zapora.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "firewall_plan",
+			"plan":      json.RawMessage(zapora.GetPlan()),
+			"plan_hash": plan.PlanHash,
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Zmiana zapory niesie identyfikator wycofania i odcisk zestawu regul.
 	if zapora := result.GetFirewallResult(); zapora != nil && zapora.GetRollbackId() != "" {
 		encoded, err := json.Marshal(map[string]any{

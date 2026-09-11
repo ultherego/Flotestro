@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -59,7 +60,13 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 	operacja := helperv1.FirewallRequest_OPERATION_RULE_ENSURE
 	switch action {
 	case opspec.ActionFirewallPlan:
+		// Plan bez reguly jest odczytem zestawu: tak dziala zakladka hosta.
+		// Plan z regula liczy roznice dla tej jednej reguly - to jest faza
+		// planowania kampanii.
 		operacja = helperv1.FirewallRequest_OPERATION_READ
+		if strings.TrimSpace(payload.RuleID) != "" {
+			operacja = helperv1.FirewallRequest_OPERATION_PLAN
+		}
 	case opspec.ActionFirewallRuleRemove:
 		operacja = helperv1.FirewallRequest_OPERATION_RULE_REMOVE
 	case opspec.ActionFirewallZonePort:
@@ -111,6 +118,7 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 		Message:          wynik.GetMessage(),
 		RollbackId:       wynik.GetRollbackId(),
 		RollbackDeadline: wynik.GetRollbackDeadline(),
+		Plan:             wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
