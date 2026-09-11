@@ -92,13 +92,6 @@ export function Pliki() {
         <button onClick={() => setNowy((otwarty) => !otwarty)}>
           {nowy ? "Cancel" : "Manage a file"}
         </button>
-        <button
-          className="wtorny"
-          onClick={() => zlec.mutate({ action: "file.plan", payload: { file: { path: "/" } } })}
-          disabled={host.connection_state !== "online"}
-        >
-          Refresh from host
-        </button>
       </div>
       {komunikat && <p className="zrodlo" style={{ marginBottom: 12 }}>{komunikat}</p>}
 

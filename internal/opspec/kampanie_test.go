@@ -90,6 +90,9 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// widzi, i wraca do niego razem ze zmiana.
 	for zmiana, planer := range map[ActionType]ActionType{
 		ActionComposeDeploy: ActionComposePlan,
+		ActionFileEnsure:    ActionFilePlan,
+		ActionFileRemove:    ActionFilePlan,
+		ActionFileRollback:  ActionFilePlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
@@ -104,11 +107,11 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// odmawiana. Odmowa jest tu odpowiedzia, a nie brakiem funkcji: kampania
 	// bez planu per host zatwierdzalaby zmiane, ktorej diffu nikt nie policzyl.
 	// Rodziny, ktorych operacja "*.plan" czyta stan hosta zamiast liczyc diff
-	// wobec stanu docelowego, nadal odmawiaja. Zapis pliku jest tu najlepszym
-	// przykladem: file.plan zwraca liste plikow zarzadzanych, a nie roznice
-	// miedzy trescia zastana a zadana.
+	// wobec stanu docelowego, nadal odmawiaja - i to jest odpowiedz, a nie
+	// brak funkcji. Plik przeszedl juz te droge: dostal prawdziwy planer,
+	// wiec przestal tu byc przykladem.
 	for _, zmiana := range []ActionType{
-		ActionFileEnsure, ActionNetworkProfileApply, ActionDNSHostApply,
+		ActionNetworkProfileApply, ActionDNSHostApply,
 	} {
 		if AkcjaPlanowania(zmiana) != "" {
 			t.Errorf("%s ma planera, wiec ta czesc testu przestala cokolwiek pilnowac", zmiana)

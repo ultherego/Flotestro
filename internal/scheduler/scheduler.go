@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -426,6 +427,13 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operacja = agentv1.FileAction_OPERATION_ROLLBACK
 		case opspec.ActionFileRemove:
 			operacja = agentv1.FileAction_OPERATION_REMOVE
+		case opspec.ActionFilePlan:
+			// Plan bez sciezki jest odczytem stanu wszystkich plikow panelu -
+			// tak dziala zakladka hosta. Plan ze sciezka liczy roznice dla tego
+			// jednego pliku i to jest faza planowania kampanii.
+			if payload.File != nil && strings.TrimSpace(payload.File.Path) != "" {
+				operacja = agentv1.FileAction_OPERATION_PLAN
+			}
 		}
 		plik := &agentv1.FileAction{Operation: operacja}
 		if payload.File != nil {

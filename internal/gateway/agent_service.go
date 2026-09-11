@@ -1080,6 +1080,24 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// Plan pliku jest wynikiem zadania, a nie stanem hosta: opisuje zmiane,
+	// ktora sie jeszcze nie wydarzyla. Odcisk planu wyjmujemy na wierzch, bo
+	// to po nim kampania wiaze zgode z tym konkretnym diffem.
+	if plik := result.GetFileResult(); plik != nil && len(plik.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(plik.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "file_plan",
+			"plan":      json.RawMessage(plik.GetPlan()),
+			"plan_hash": plan.PlanHash,
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Tresc odczytanego pliku nalezy do zadania: to odpowiedz na pytanie
 	// zadane w jednej chwili, a nie stan hosta.
 	if plik := result.GetFileResult(); plik != nil && len(plik.GetContent()) > 0 {

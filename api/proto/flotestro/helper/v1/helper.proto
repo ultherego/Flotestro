@@ -778,6 +778,9 @@ message FileRequest {
     OPERATION_REMOVE = 3;
     // Odczyt stanu plikow, ktore panel juz zapisal.
     OPERATION_LIST = 4;
+    // Policzenie roznicy miedzy stanem zastanym a zadanym. Nie zmienia
+    // niczego: odpowiada na pytanie, co by sie stalo i od czego zalezy.
+    OPERATION_PLAN = 5;
   }
   Operation operation = 1;
   string path = 2;
@@ -805,6 +808,10 @@ message FileResult {
   // ValidatorOutput niesie wynik sprawdzenia tresci. Puste oznacza plik,
   // dla ktorego panel nie zna sprawdzenia - i to tez jest odpowiedz.
   string validator_output = 6;
+  // Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
+  // Osobne pole, bo plan dotyczy zmiany, ktora sie jeszcze nie wydarzyla,
+  // a pozostale pola opisuja to, co host ma teraz.
+  bytes plan = 7;
 }
 
 message ProcessSignalRequest {

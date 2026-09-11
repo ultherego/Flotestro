@@ -308,6 +308,24 @@ func (s *Store) Plany(ctx context.Context, campaignID string) (map[string]string
 	return plany, rows.Err()
 }
 
+// PlanHosta zwraca plan policzony na jednym hoscie razem z jego trescia.
+//
+// Sam odcisk wystarcza do zwiazania zgody, ale nie do wykonania: zapis pliku
+// musi wrocic na host z odciskiem tresci, ktora operator ogladal, a ten lezy
+// w tresci planu, nie w jego odcisku.
+func (s *Store) PlanHosta(ctx context.Context, campaignID, hostID string) (string, json.RawMessage, error) {
+	var hash string
+	var plan json.RawMessage
+	const query = `
+		select plan_hash, plan from campaign_plans
+		 where campaign_id = $1 and host_id = $2`
+	err := s.pool.QueryRow(ctx, query, campaignID, hostID).Scan(&hash, &plan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, nil
+	}
+	return hash, plan, err
+}
+
 // ZamknijPlanowanie zapisuje odcisk zestawu planow razem z odciskiem
 // zatwierdzenia i przenosi kampanie do stanu, w ktorym czeka na decyzje.
 //

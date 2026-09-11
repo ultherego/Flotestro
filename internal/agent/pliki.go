@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -59,6 +60,13 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		operacja = helperv1.FileRequest_OPERATION_ENSURE
 	case opspec.ActionFileRemove:
 		operacja = helperv1.FileRequest_OPERATION_REMOVE
+	case opspec.ActionFilePlan:
+		// Plan bez sciezki jest odczytem stanu wszystkich plikow panelu:
+		// tak dziala zakladka hosta i tak ma dzialac dalej. Plan ze sciezka
+		// liczy roznice dla tego jednego pliku.
+		if strings.TrimSpace(payload.Path) != "" {
+			operacja = helperv1.FileRequest_OPERATION_PLAN
+		}
 	}
 
 	// Tresc z magazynu pobieramy dopiero teraz, tuz przed zapisem. Wartosc
@@ -110,6 +118,7 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		Sha256:          wynik.GetSha256(),
 		Truncated:       wynik.GetTruncated(),
 		ValidatorOutput: wynik.GetValidatorOutput(),
+		Plan:            wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

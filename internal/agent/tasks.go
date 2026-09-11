@@ -634,6 +634,11 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionFileRollback
 		case agentv1.FileAction_OPERATION_REMOVE:
 			typ = opspec.ActionFileRemove
+		case agentv1.FileAction_OPERATION_PLAN:
+			// Plan i odczyt listy sa ta sama operacja panelu: rozroznia je
+			// obecnosc sciezki, a nie nazwa. Hash payloadu musi wyjsc taki
+			// sam po obu stronach, wiec typ jest tu jeden.
+			typ = opspec.ActionFilePlan
 		}
 		odnosnik := (*opspec.SecretRef)(nil)
 		if ref := plik.GetContentSecret(); ref != nil && ref.GetName() != "" {

@@ -1063,6 +1063,9 @@ const (
 	FileRequest_OPERATION_REMOVE      FileRequest_Operation = 3
 	// Odczyt stanu plikow, ktore panel juz zapisal.
 	FileRequest_OPERATION_LIST FileRequest_Operation = 4
+	// Policzenie roznicy miedzy stanem zastanym a zadanym. Nie zmienia
+	// niczego: odpowiada na pytanie, co by sie stalo i od czego zalezy.
+	FileRequest_OPERATION_PLAN FileRequest_Operation = 5
 )
 
 // Enum value maps for FileRequest_Operation.
@@ -1073,6 +1076,7 @@ var (
 		2: "OPERATION_ENSURE",
 		3: "OPERATION_REMOVE",
 		4: "OPERATION_LIST",
+		5: "OPERATION_PLAN",
 	}
 	FileRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED": 0,
@@ -1080,6 +1084,7 @@ var (
 		"OPERATION_ENSURE":      2,
 		"OPERATION_REMOVE":      3,
 		"OPERATION_LIST":        4,
+		"OPERATION_PLAN":        5,
 	}
 )
 
@@ -5481,8 +5486,12 @@ type FileResult struct {
 	// ValidatorOutput niesie wynik sprawdzenia tresci. Puste oznacza plik,
 	// dla ktorego panel nie zna sprawdzenia - i to tez jest odpowiedz.
 	ValidatorOutput string `protobuf:"bytes,6,opt,name=validator_output,json=validatorOutput,proto3" json:"validator_output,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
+	// Osobne pole, bo plan dotyczy zmiany, ktora sie jeszcze nie wydarzyla,
+	// a pozostale pola opisuja to, co host ma teraz.
+	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileResult) Reset() {
@@ -5555,6 +5564,13 @@ func (x *FileResult) GetValidatorOutput() string {
 		return x.ValidatorOutput
 	}
 	return ""
+}
+
+func (x *FileResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 type ProcessSignalRequest struct {
@@ -7677,7 +7693,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
 	"\x0epending_reboot\x18\x03 \x03(\tR\rpendingReboot\x12'\n" +
-	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"\xa9\x03\n" +
+	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"\xbe\x03\n" +
 	"\vFileRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.FileRequest.OperationR\toperation\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
@@ -7688,13 +7704,14 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x0fexpected_sha256\x18\a \x01(\tR\x0eexpectedSha256\x12\x1c\n" +
 	"\tvalidator\x18\b \x01(\tR\tvalidator\x12\x1f\n" +
 	"\vfrom_secret\x18\t \x01(\bR\n" +
-	"fromSecret\"z\n" +
+	"fromSecret\"\x8e\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x14\n" +
 	"\x10OPERATION_ENSURE\x10\x02\x12\x14\n" +
 	"\x10OPERATION_REMOVE\x10\x03\x12\x12\n" +
-	"\x0eOPERATION_LIST\x10\x04\"\xbd\x01\n" +
+	"\x0eOPERATION_LIST\x10\x04\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x05\"\xd1\x01\n" +
 	"\n" +
 	"FileResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
@@ -7702,7 +7719,8 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\acontent\x18\x03 \x01(\fR\acontent\x12\x16\n" +
 	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1c\n" +
 	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x12)\n" +
-	"\x10validator_output\x18\x06 \x01(\tR\x0fvalidatorOutput\"r\n" +
+	"\x10validator_output\x18\x06 \x01(\tR\x0fvalidatorOutput\x12\x12\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\"r\n" +
 	"\x14ProcessSignalRequest\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x120\n" +
 	"\x14expected_start_ticks\x18\x02 \x01(\x04R\x12expectedStartTicks\x12\x16\n" +

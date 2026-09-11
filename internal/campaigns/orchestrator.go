@@ -240,15 +240,14 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 	// porownuje go ze stanem, ktory ma teraz, i odmawia, gdy plan sie
 	// zdezaktualizowal - zgoda dotyczyla tamtego diffu, nie tego.
 	if opspec.AkcjaPlanowania(action) != "" {
-		plany, err := o.store.Plany(ctx, campaign.ID)
+		hash, plan, err := o.store.PlanHosta(ctx, campaign.ID, target.HostID)
 		if err != nil {
 			return "", err
 		}
-		hash := plany[target.HostID]
 		if hash == "" {
 			return "", fmt.Errorf("host %s nie ma policzonego planu", target.HostID)
 		}
-		payload = zPlanem(action, payload, hash)
+		payload = zPlanem(action, payload, hash, plan)
 	}
 
 	return o.submitJob(ctx, campaign, host, action, payload,

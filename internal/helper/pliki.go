@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -44,6 +45,8 @@ func (s *Server) applyFile(ctx context.Context, request *helperv1.HelperRequest,
 		return s.zapiszPlik(actionCtx, allowlista, action)
 	case helperv1.FileRequest_OPERATION_REMOVE:
 		return s.usunPlik(allowlista, action)
+	case helperv1.FileRequest_OPERATION_PLAN:
+		return s.zaplanujPlik(actionCtx, allowlista, action)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja na pliku")
 }
@@ -154,6 +157,106 @@ func (s *Server) zapiszPlik(ctx context.Context, allowlista files.Allowlist,
 		komunikat += "; panel nie zna walidatora dla tego pliku, wiec tresc nie zostala sprawdzona"
 	}
 	return odpowiedzPlikow(s.stanPlikow(), komunikat, nil, files.Odcisk(action.GetContent()))
+}
+
+// zaplanujPlik liczy roznice miedzy plikiem zastanym a stanem docelowym.
+//
+// Niczego nie zmienia i nie moze zmienic: to odpowiedz na pytanie, co by sie
+// stalo. Host jest jedynym miejscem, w ktorym da sie ja policzyc - panel nie
+// wie, co naprawde lezy na tej maszynie, a dwie maszyny z tym samym stanem
+// docelowym maja dwa rozne diffy.
+//
+// Sprawdzenia wejscia sa te same co przy zapisie. Plan, ktory przeszedl, a
+// zapis, ktory odpada na walidacji trybu, byl by planem nieprawdziwym.
+func (s *Server) zaplanujPlik(ctx context.Context, allowlista files.Allowlist,
+	action *helperv1.FileRequest) *helperv1.HelperResponse {
+	sciezka := action.GetPath()
+	if odpowiedz := sprawdzZakres(allowlista, sciezka); odpowiedz != nil {
+		return odpowiedz
+	}
+	// Plan bez tresci i bez trybu jest planem usuniecia. Rodzaj zmiany nie
+	// jedzie w kopercie osobnym polem, bo planerem dla zapisu, powrotu
+	// i usuniecia jest ta sama operacja - rozroznia je payload, ktory panel
+	// przekazuje bez zmian. Zgadywania tu nie ma: zapis zawsze niesie tresc
+	// albo odnosnik do sekretu, usuniecie nigdy.
+	//
+	// Wynik nazywa to wprost polem action planu, wiec operator, ktory zapytal
+	// o co innego, widzi, co panel naprawde policzyl.
+	usuwanie := len(action.GetContent()) == 0 && action.GetMode() == "" &&
+		!action.GetFromSecret()
+
+	if !usuwanie {
+		if err := files.WalidujTresc(string(action.GetContent())); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+		if _, err := files.WalidujTryb(action.GetMode()); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+		if _, _, err := files.Wlasciciel(action.GetOwner(), action.GetGroup()); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+	}
+
+	obecny := files.OpiszPlik(sciezka)
+	if obecny.Exists && obecny.UnavailableReason == "" {
+		// Odcisk tresci zastanej jest sednem planu: to on wiaze pozniejszy
+		// zapis z plikiem, ktory operator naprawde ogladal.
+		odcisk, err := odciskPliku(sciezka)
+		if err != nil {
+			obecny.UnavailableReason = err.Error()
+		} else {
+			obecny.SHA256 = odcisk
+		}
+	}
+
+	plan := files.Zaplanuj(obecny, action.GetContent(), action.GetMode(),
+		action.GetOwner(), action.GetGroup(), action.GetFromSecret(), usuwanie)
+
+	// Walidator sprawdza tresc docelowa, a nie zastana: pytanie brzmi, czy to,
+	// co chcemy zapisac, ma sens dla tej uslugi.
+	if !usuwanie {
+		walidator, maWalidator, err := files.WybierzWalidator(sciezka, action.GetValidator())
+		if err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+		if maWalidator {
+			wyjscie, err := s.sprawdzTresc(ctx, walidator, sciezka, action.GetContent())
+			plan.ValidatorOutput = wyjscie
+			if err != nil {
+				// Tresc, ktorej walidator nie przyjmuje, jest wynikiem planu,
+				// a nie awaria: operator ma to zobaczyc przed zatwierdzeniem,
+				// zamiast dowiadywac sie przy zapisie na polowie floty.
+				plan.ValidatorFailed = true
+				plan.ValidatorOutput = err.Error() + " " + wyjscie
+			}
+		}
+	}
+
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	odpowiedz := odpowiedzPlikow(s.stanPlikow(), opisPlanu(plan), nil, plan.SHA256)
+	if odpowiedz.GetFileResult() != nil {
+		odpowiedz.FileResult.Plan = zakodowany
+	}
+	return odpowiedz
+}
+
+// opisPlanu streszcza plan jednym zdaniem dla dziennika operacji.
+func opisPlanu(plan files.Plan) string {
+	switch plan.Action {
+	case files.PlanBezZmian:
+		return "plik jest juz w stanie docelowym"
+	case files.PlanTworzy:
+		return "plik powstanie"
+	case files.PlanJuzUsuniety:
+		return "pliku nie ma, wiec nie ma czego usuwac"
+	case files.PlanUsuwa:
+		return "plik zostanie usuniety"
+	default:
+		return "zmieni sie: " + strings.Join(plan.Changes, ", ")
+	}
 }
 
 // usunPlik kasuje plik z zakresu.

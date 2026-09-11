@@ -357,11 +357,16 @@ func TestKampaniaOdmawiaOperacjiBezTrybuMasowego(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
+	// Rodziny, ktorych operacja "*.plan" czyta stan hosta zamiast liczyc diff
+	// wobec stanu docelowego. Zapis pliku byl tu kiedys przykladem i przestal
+	// nim byc, gdy dostal prawdziwy planer - o to w tej bramce chodzi:
+	// przepustka jest deklaracja i mechanizm, a nie nazwa operacji.
 	przypadki := map[string]map[string]any{
-		// Zapis pliku liczy inny diff na kazdym hoscie, a panel nie ma jeszcze
-		// czym go policzyc masowo - wiec odmawia zamiast udawac.
-		"file.ensure": {"file": map[string]any{
-			"path": "/etc/flotestro-test.conf", "content": "x", "mode": "0644",
+		"network.profile.apply": {"network": map[string]any{
+			"interface": "eth0", "method": "dhcp",
+		}},
+		"dns.host.apply": {"dns": map[string]any{
+			"servers": []string{"192.168.56.50"},
 		}},
 	}
 	for akcja, payload := range przypadki {
@@ -1230,4 +1235,139 @@ func wyciagnij(tekst, nazwa string) string {
 		}
 	}
 	return strings.Join(wiersze, "\n")
+}
+
+// TestKampaniaPlikowLiczyDiffNaKazdymHoscie pilnuje tego, co odroznia plik od
+// operacji o przenosnej intencji.
+//
+// Ten sam stan docelowy znaczy na dwoch hostach co innego: jeden ma plik
+// o innej tresci, drugi nie ma go wcale. Kampania musi zapytac kazdy host
+// z osobna, zgoda ma dotyczyc zestawu tych odpowiedzi, a zapis ma wrocic na
+// host z odciskiem tresci, ktora operator ogladal - inaczej zmiana zrobiona
+// miedzy planem a zapisem znikneloby bez sladu.
+func TestKampaniaPlikowLiczyDiffNaKazdymHoscie(t *testing.T) {
+	h := newHarness(t)
+	const sciezka = "/etc/flotestro-kampania-plikow.conf"
+	cele := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "file.remove", "reason": "sprzatanie po tescie planow plikowych",
+				"payload": map[string]any{"file": map[string]any{"path": sciezka}},
+			}, 2*time.Minute)
+		}
+	})
+
+	// Pierwszy host dostaje plik z inna trescia; drugi zostaje bez niego. Od
+	// tej chwili ten sam stan docelowy to dwie rozne zmiany.
+	zadanie, proby := h.runOperation(cele[0], map[string]any{
+		"action": "file.ensure", "reason": "przygotowanie testu planow plikowych",
+		"payload": map[string]any{"file": map[string]any{
+			"path": sciezka, "content": "stara tresc\n", "mode": "0644"}},
+	}, 2*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("przygotowanie pliku: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "wspolny plik konfiguracyjny", "action": "file.ensure",
+		"reason": "test integracyjny planow plikowych",
+		"payload": map[string]any{"file": map[string]any{
+			"path": sciezka, "content": "nowa tresc\n", "mode": "0644"}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State != "planning" {
+		t.Fatalf("kampania plikowa zaczela od stanu %s", campaign.State)
+	}
+	odciskZamowienia := campaign.ApprovalFingerprint
+
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	if poPlanowaniu.PlanSetHash == "" {
+		t.Fatal("kampania plikowa po planowaniu bez odcisku zestawu planow")
+	}
+	if poPlanowaniu.ApprovalFingerprint == odciskZamowienia {
+		t.Error("zestaw planow nie zmienil odcisku zatwierdzenia")
+	}
+
+	// Sedno: dwa hosty, dwa rozne plany. Jeden tworzy plik, drugi go zmienia.
+	dzialania := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.PlanJobID == "" {
+			t.Fatalf("cel %s bez zadania planujacego", target.Hostname)
+		}
+		dzialania[target.Hostname] = dzialaniePlanu(h, target.PlanJobID)
+	}
+	rodzaje := map[string]int{}
+	for _, dzialanie := range dzialania {
+		rodzaje[dzialanie]++
+	}
+	if rodzaje["create"] == 0 || rodzaje["update"] == 0 {
+		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+
+	// Oba hosty doszly do tego samego stanu docelowego, choc szly do niego
+	// z dwoch roznych miejsc. Plan liczony teraz nie ma juz nic do zrobienia.
+	for _, hostID := range cele {
+		zadanie, proby := h.runOperation(hostID, map[string]any{
+			"action": "file.plan", "reason": "sprawdzenie stanu po kampanii",
+			"payload": map[string]any{"file": map[string]any{
+				"path": sciezka, "content": "nowa tresc\n", "mode": "0644"}},
+		}, 2*time.Minute)
+		if zadanie.State != "succeeded" {
+			t.Fatalf("plan koncowy: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+		}
+		if dzialanie := dzialaniePlanu(h, zadanie.ID); dzialanie != "no_change" {
+			t.Errorf("po kampanii host %s ma jeszcze do zrobienia: %s", hostID[:8], dzialanie)
+		}
+		_ = proby
+	}
+}
+
+// dzialaniePlanu czyta z wyniku zadania planujacego to, co plan ma zrobic.
+func dzialaniePlanu(h *harness, jobID string) string {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string `json:"kind"`
+				Plan struct {
+					Action string `json:"action"`
+				} `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "file_plan" {
+			return odpowiedz.Items[i].Detail.Plan.Action
+		}
+	}
+	return ""
 }

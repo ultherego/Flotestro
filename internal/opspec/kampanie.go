@@ -100,6 +100,12 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionPackageUpgrade:
 		return ActionPackagePlan
 
+	// Plik: plan liczy roznice miedzy trescia zastana a zadana i zwraca odcisk
+	// tresci, ktora host mial w tej chwili. Zapis wraca z tym odciskiem, wiec
+	// plik zmieniony po planowaniu zatrzymuje zmiane zamiast nadpisac cudza.
+	case ActionFileEnsure, ActionFileRemove, ActionFileRollback:
+		return ActionFilePlan
+
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
 	// ktory tego planu nigdy nie widzial.
@@ -107,11 +113,12 @@ func AkcjaPlanowania(action ActionType) ActionType {
 		return ActionComposePlan
 	}
 	// Pozostale rodziny odmawiaja i warto wiedziec, dlaczego. Ich operacje
-	// "*.plan" - file.plan, network.plan, firewall.plan, storage.plan -
-	// czytaja stan hosta, a nie licza diffu wobec stanu docelowego. Nazwanie
-	// ich planerem dalo by kampanii fazy planowania, ktora niczego nie
-	// planuje, i zgode odnoszaca sie do odczytu zamiast do zmiany. Planer
-	// per host dla tych rodzin jest osobna praca, a nie mapowaniem nazw.
+	// "*.plan" - network.plan, firewall.plan, storage.plan - czytaja stan
+	// hosta, a nie licza diffu wobec stanu docelowego. Nazwanie ich planerem
+	// dalo by kampanii faze planowania, ktora niczego nie planuje, i zgode
+	// odnoszaca sie do odczytu zamiast do zmiany. Planer per host dla tych
+	// rodzin jest osobna praca, a nie mapowaniem nazw - tak jak byla nia
+	// dla plikow.
 	return ""
 }
 

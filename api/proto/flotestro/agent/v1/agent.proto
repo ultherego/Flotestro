@@ -1433,6 +1433,10 @@ message FileAction {
     // ensure, ale operacja pozostaje osobna: hash planu obejmuje jej nazwe,
     // a slad audytowy ma mowic, ze to byl powrot, a nie nowa tresc.
     OPERATION_ROLLBACK = 5;
+    // Policzenie roznicy miedzy stanem zastanym a zadanym. Dwa hosty z tym
+    // samym stanem docelowym maja dwa rozne diffy, wiec kampania musi zapytac
+    // kazdy z osobna, zanim operator cokolwiek zatwierdzi.
+    OPERATION_PLAN = 6;
   }
   Operation operation = 1;
   string path = 2;
@@ -1455,6 +1459,8 @@ message FileResult {
   string sha256 = 4;
   bool truncated = 5;
   string validator_output = 6;
+  // Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
+  bytes plan = 7;
 }
 
 message PackageLifecycle {

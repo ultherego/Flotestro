@@ -988,6 +988,10 @@ const (
 	// ensure, ale operacja pozostaje osobna: hash planu obejmuje jej nazwe,
 	// a slad audytowy ma mowic, ze to byl powrot, a nie nowa tresc.
 	FileAction_OPERATION_ROLLBACK FileAction_Operation = 5
+	// Policzenie roznicy miedzy stanem zastanym a zadanym. Dwa hosty z tym
+	// samym stanem docelowym maja dwa rozne diffy, wiec kampania musi zapytac
+	// kazdy z osobna, zanim operator cokolwiek zatwierdzi.
+	FileAction_OPERATION_PLAN FileAction_Operation = 6
 )
 
 // Enum value maps for FileAction_Operation.
@@ -999,6 +1003,7 @@ var (
 		3: "OPERATION_REMOVE",
 		4: "OPERATION_LIST",
 		5: "OPERATION_ROLLBACK",
+		6: "OPERATION_PLAN",
 	}
 	FileAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED": 0,
@@ -1007,6 +1012,7 @@ var (
 		"OPERATION_REMOVE":      3,
 		"OPERATION_LIST":        4,
 		"OPERATION_ROLLBACK":    5,
+		"OPERATION_PLAN":        6,
 	}
 )
 
@@ -9988,8 +9994,10 @@ type FileResult struct {
 	Sha256          string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
 	Truncated       bool                   `protobuf:"varint,5,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	ValidatorOutput string                 `protobuf:"bytes,6,opt,name=validator_output,json=validatorOutput,proto3" json:"validator_output,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
+	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileResult) Reset() {
@@ -10062,6 +10070,13 @@ func (x *FileResult) GetValidatorOutput() string {
 		return x.ValidatorOutput
 	}
 	return ""
+}
+
+func (x *FileResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 type PackageLifecycle struct {
@@ -11957,7 +11972,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"9\n" +
 	"\tSecretRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\rR\aversion\"\xe4\x03\n" +
+	"\aversion\x18\x02 \x01(\rR\aversion\"\xf8\x03\n" +
 	"\n" +
 	"FileAction\x12F\n" +
 	"\toperation\x18\x01 \x01(\x0e2(.flotestro.agent.v1.FileAction.OperationR\toperation\x12\x12\n" +
@@ -11968,14 +11983,15 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x05group\x18\x06 \x01(\tR\x05group\x12'\n" +
 	"\x0fexpected_sha256\x18\a \x01(\tR\x0eexpectedSha256\x12\x1c\n" +
 	"\tvalidator\x18\b \x01(\tR\tvalidator\x12D\n" +
-	"\x0econtent_secret\x18\t \x01(\v2\x1d.flotestro.agent.v1.SecretRefR\rcontentSecret\"\x92\x01\n" +
+	"\x0econtent_secret\x18\t \x01(\v2\x1d.flotestro.agent.v1.SecretRefR\rcontentSecret\"\xa6\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x14\n" +
 	"\x10OPERATION_ENSURE\x10\x02\x12\x14\n" +
 	"\x10OPERATION_REMOVE\x10\x03\x12\x12\n" +
 	"\x0eOPERATION_LIST\x10\x04\x12\x16\n" +
-	"\x12OPERATION_ROLLBACK\x10\x05\"\xbd\x01\n" +
+	"\x12OPERATION_ROLLBACK\x10\x05\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x06\"\xd1\x01\n" +
 	"\n" +
 	"FileResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
@@ -11983,7 +11999,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\acontent\x18\x03 \x01(\fR\acontent\x12\x16\n" +
 	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1c\n" +
 	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x12)\n" +
-	"\x10validator_output\x18\x06 \x01(\tR\x0fvalidatorOutput\"\xa6\x02\n" +
+	"\x10validator_output\x18\x06 \x01(\tR\x0fvalidatorOutput\x12\x12\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\"\xa6\x02\n" +
 	"\x10PackageLifecycle\x12L\n" +
 	"\toperation\x18\x01 \x01(\x0e2..flotestro.agent.v1.PackageLifecycle.OperationR\toperation\x12\x1a\n" +
 	"\bpackages\x18\x02 \x03(\tR\bpackages\x12+\n" +

@@ -282,7 +282,8 @@ func trybPlanu(zmiana opspec.ActionType) string {
 //
 // Bez tego kampania wyslalaby zmiane bez planu, a host nie mialby czego
 // porownac ze stanem, ktory ma teraz.
-func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string) opspec.Payload {
+func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
+	plan json.RawMessage) opspec.Payload {
 	switch action {
 	case opspec.ActionPackageUpgrade:
 		aktualizacja := &opspec.PackageUpgradePayload{PlanHash: hash}
@@ -291,6 +292,17 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string) opsp
 			aktualizacja.SecurityOnly = payload.PackageUpgrade.SecurityOnly
 		}
 		payload.PackageUpgrade = aktualizacja
+
+	case opspec.ActionFileEnsure, opspec.ActionFileRemove, opspec.ActionFileRollback:
+		// Plik wiaze sie z planem inaczej niz pakiety: host nie porownuje
+		// odcisku planu, tylko odcisk tresci, ktora zastal. To jest ten sam
+		// mechanizm, ktory chroni pojedynczy zapis przed nadpisaniem cudzej
+		// zmiany - a tutaj daje kazdemu hostowi jego wlasny warunek wstepny.
+		if odcisk := odciskZastanejTresci(plan); odcisk != "" && payload.File != nil {
+			plik := *payload.File
+			plik.ExpectedSHA256 = odcisk
+			payload.File = &plik
+		}
 
 	case opspec.ActionComposeDeploy:
 		// Digest planu Compose powstaje z manifestu i z digestow obrazow.
@@ -303,6 +315,30 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string) opsp
 		}
 	}
 	return payload
+}
+
+// odciskZastanejTresci wyjmuje z planu odcisk pliku, ktory host mial w chwili
+// planowania.
+//
+// Pusty wynik jest tu poprawna odpowiedzia: pliku moze nie byc, a wtedy zapis
+// nie ma czego oczekiwac i host sam sprawdzi, ze nadal go nie ma.
+func odciskZastanejTresci(plan json.RawMessage) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	var szczegol struct {
+		Plan struct {
+			SHA256 string `json:"sha256"`
+			Exists bool   `json:"exists"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(plan, &szczegol); err != nil {
+		return ""
+	}
+	if !szczegol.Plan.Exists {
+		return ""
+	}
+	return szczegol.Plan.SHA256
 }
 
 // OdciskZestawuPlanow liczy odcisk calego zestawu planow.
