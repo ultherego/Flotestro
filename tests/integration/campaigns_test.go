@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1163,4 +1164,70 @@ func TestPrzebiegKampaniiPrzezywaRestartPanelu(t *testing.T) {
 				przebieg.Items[i].ID, przebieg.Items[i-1].ID)
 		}
 	}
+}
+
+// TestMetrykiPokazujaMaszynerieKampanii pilnuje obserwowalnosci tej czesci
+// systemu, ktora bez niej jest niewidzialna.
+//
+// Kampania stojaca na budzecie i kampania, ktora idzie, wygladaja z zewnatrz
+// tak samo: obie sa "w toku". Tylko jedna z nich wymaga reakcji, a rozroznia
+// je kod powodu przy hostach i zajetosc budzetu.
+func TestMetrykiPokazujaMaszynerieKampanii(t *testing.T) {
+	h := newHarness(t)
+	tekst := h.tekst("/metrics")
+
+	// Budzety sa opisane zawsze - takze wtedy, gdy nic ich nie zajmuje.
+	// Pojemnosc podana dopiero wtedy, gdy jest problem, nie pozwolilaby
+	// zobaczyc, jak blisko granicy pracuje flota.
+	for _, fragment := range []string{
+		"flotestro_budget_tokens",
+		`flotestro_budget_tokens{budget="global:mutations",status="capacity"}`,
+		`flotestro_budget_tokens{budget="global:mutations",status="used"}`,
+	} {
+		if !strings.Contains(tekst, fragment) {
+			t.Errorf("metryki bez %q", fragment)
+		}
+	}
+
+	online := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+
+	campaign := h.createCampaign(labCampaign("metryki", "cron.service", map[string]any{
+		"selector":       map[string]any{"host_ids": online},
+		"canary_size":    0,
+		"wave_size":      len(online),
+		"max_concurrent": len(online),
+	}))
+	// Kampania czekajaca na zatwierdzenie jest kampania w toku: ktos musi
+	// podjac decyzje, a metryka ma to pokazac.
+	tekst = h.tekst("/metrics")
+	if !strings.Contains(tekst, `flotestro_campaigns_active{action="unit.restart"`) {
+		t.Errorf("metryki nie widza kampanii w toku:\n%s", wyciagnij(tekst, "flotestro_campaigns_active"))
+	}
+	if !strings.Contains(tekst, "flotestro_campaign_targets{") {
+		t.Errorf("metryki nie widza hostow kampanii:\n%s",
+			wyciagnij(tekst, "flotestro_campaign_targets"))
+	}
+
+	h.approveCampaign(campaign)
+	h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+}
+
+// wyciagnij zwraca wiersze metryki o danej nazwie - do komunikatu bledu.
+func wyciagnij(tekst, nazwa string) string {
+	wiersze := []string{}
+	for _, wiersz := range strings.Split(tekst, "\n") {
+		if strings.Contains(wiersz, nazwa) {
+			wiersze = append(wiersze, wiersz)
+		}
+	}
+	return strings.Join(wiersze, "\n")
 }

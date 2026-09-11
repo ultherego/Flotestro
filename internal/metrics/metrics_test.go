@@ -93,3 +93,49 @@ func TestStanNieustalonyJestPomijany(t *testing.T) {
 		t.Errorf("liczba sesji nie zostala wystawiona:\n%s", tekst)
 	}
 }
+
+// TestDwieEtykietyMajaStalaKolejnosc pilnuje szeregow, w ktorych stan sam
+// z siebie nie wystarcza.
+//
+// Host kampanii wstrzymany brakiem pojemnosci i host bez wymaganego adaptera
+// sa oba "nie ruszyl". Kod powodu jest tym, co je odroznia, wiec jedzie
+// w metryce razem ze stanem - a kolejnosc szeregow musi byc powtarzalna,
+// bo inaczej kolejne odczyty roznia sie bez powodu.
+func TestDwieEtykietyMajaStalaKolejnosc(t *testing.T) {
+	wynik := string(render([]metric{{
+		name: "flotestro_campaign_targets", kind: "gauge", help: "Hosty kampanii.",
+		samples: []sample{
+			{labels: map[string]string{"state": "awaiting_budget", "reason_code": "budget_capacity"}, value: 3},
+			{labels: map[string]string{"state": "pending", "reason_code": "none"}, value: 7},
+		},
+	}}))
+
+	// Etykiety w jednym szeregu ida alfabetycznie, wiec kod powodu przed stanem.
+	oczekiwane := "" +
+		`flotestro_campaign_targets{reason_code="budget_capacity",state="awaiting_budget"} 3` + "\n" +
+		`flotestro_campaign_targets{reason_code="none",state="pending"} 7` + "\n"
+	if !strings.HasSuffix(wynik, oczekiwane) {
+		t.Errorf("szeregi w zlej postaci lub kolejnosci:\n%s", wynik)
+	}
+}
+
+// TestPojemnoscIZajetoscSaOsobnymiSzeregami pilnuje, ze budzet mowi
+// jednoczesnie ile ma i ile zajete. Sama zajetosc nie odpowiada na pytanie,
+// czy budzet jest przy granicy - a to jest jedyne pytanie, ktore operator
+// zadaje, gdy kampania stoi.
+func TestPojemnoscIZajetoscSaOsobnymiSzeregami(t *testing.T) {
+	wynik := string(render([]metric{{
+		name: "flotestro_budget_tokens", kind: "gauge", help: "Tokeny budzetow.",
+		samples: []sample{
+			{labels: map[string]string{"budget": "site:warsaw:packages", "status": "capacity"}, value: 5},
+			{labels: map[string]string{"budget": "site:warsaw:packages", "status": "used"}, value: 5},
+			{labels: map[string]string{"budget": "site:warsaw:packages", "status": "waiting"}, value: 2},
+		},
+	}}))
+
+	for _, fragment := range []string{`status="capacity"} 5`, `status="used"} 5`, `status="waiting"} 2`} {
+		if !strings.Contains(wynik, fragment) {
+			t.Errorf("brak szeregu %q:\n%s", fragment, wynik)
+		}
+	}
+}

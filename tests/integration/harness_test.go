@@ -120,6 +120,33 @@ func (h *harness) get(path string, out any) {
 	h.do(http.MethodGet, path, nil, out, http.StatusOK)
 }
 
+// tekst pobiera odpowiedz, ktora nie jest JSON-em.
+//
+// Ekspozycja metryk jest tekstem w formacie Prometheusa i ma nim zostac:
+// przepuszczenie jej przez JSON tylko po to, zeby test mial wygodniej,
+// sprawdzaloby cos innego niz to, co czyta Prometheus.
+func (h *harness) tekst(path string) string {
+	h.t.Helper()
+	request, err := http.NewRequest(http.MethodGet, h.api+path, nil)
+	if err != nil {
+		h.t.Fatalf("budowa zadania: %v", err)
+	}
+	if h.token != "" {
+		request.Header.Set("Authorization", "Bearer "+h.token)
+	}
+	response, err := h.client.Do(request)
+	if err != nil {
+		h.t.Fatalf("GET %s: %v", path, err)
+	}
+	defer response.Body.Close()
+
+	raw, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		h.t.Fatalf("GET %s: kod %d; tresc: %s", path, response.StatusCode, truncate(raw, 300))
+	}
+	return string(raw)
+}
+
 // do wykonuje zadanie i sprawdza kod odpowiedzi.
 func (h *harness) do(method, path string, body any, out any, wantStatus int) {
 	h.t.Helper()

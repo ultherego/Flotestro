@@ -231,7 +231,176 @@ func (c *Collector) databaseMetrics(ctx context.Context) []metric {
 		})
 	}
 
+	return append(result, c.metrykiKampanii(queryCtx)...)
+}
+
+// metrykiKampanii pokazuja maszynerie zmiany flotowej: kampanie w toku, losy
+// ich hostow i pojemnosc, ktora ich pilnuje.
+//
+// Bez nich kampania stojaca na budzecie albo na cudzej blokadzie wyglada
+// z zewnatrz tak samo jak kampania, ktora idzie - a to sa dwie rozne sytuacje
+// i tylko jedna z nich wymaga reakcji.
+//
+// Etykiety sa domkniete: stan, operacja, kod powodu i klucz budzetu. Nazwa
+// hosta nie jest tu etykieta - flota rosnie, a liczba szeregow czasowych ma
+// nie rosnac razem z nia.
+func (c *Collector) metrykiKampanii(ctx context.Context) []metric {
+	var result []metric
+
+	if samples, err := c.paryEtykiet(ctx, `
+		select state, action_type, count(*) from campaigns
+		 where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'paused')
+		 group by 1, 2`, "state", "action"); err == nil {
+		result = append(result, metric{
+			name: "flotestro_campaigns_active", kind: "gauge",
+			help:    "Kampanie w toku wedlug stanu i operacji.",
+			samples: samples,
+		})
+	}
+
+	// Kod powodu jest tu rownie wazny jak stan: host wstrzymany brakiem
+	// pojemnosci i host bez wymaganego adaptera sa oba "nie ruszyl", a znacza
+	// co innego i wymagaja czego innego.
+	if samples, err := c.paryEtykiet(ctx, `
+		select t.state, coalesce(nullif(t.error_code, ''), 'none'), count(*)
+		  from campaign_targets t
+		  join campaigns c on c.id = t.campaign_id
+		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'paused')
+		 group by 1, 2`, "state", "reason_code"); err == nil {
+		result = append(result, metric{
+			name: "flotestro_campaign_targets", kind: "gauge",
+			help:    "Hosty kampanii w toku wedlug stanu i kodu powodu.",
+			samples: samples,
+		})
+	}
+
+	// Pojemnosc i zajetosc jednym szeregiem, rozroznione etykieta: bez
+	// pojemnosci sama zajetosc nie mowi, czy budzet jest przy granicy.
+	if samples, err := c.probkiBudzetow(ctx); err == nil && len(samples) > 0 {
+		result = append(result, metric{
+			name: "flotestro_budget_tokens", kind: "gauge",
+			help:    "Tokeny budzetow: pojemnosc, zajetosc i liczba chetnych.",
+			samples: samples,
+		})
+	}
+
+	// Najdluzsze biezace oczekiwanie na pojemnosc. Histogramu tu nie ma:
+	// kolektor renderuje szeregi wprost z zapytan, a zmyslony histogram
+	// z kubelkami liczonymi po fakcie klamalby o rozkladzie.
+	if samples, err := c.oczekiwanieNaBudzet(ctx); err == nil && len(samples) > 0 {
+		result = append(result, metric{
+			name: "flotestro_budget_wait_seconds_max", kind: "gauge",
+			help:    "Najdluzsze biezace oczekiwanie na pojemnosc budzetu.",
+			samples: samples,
+		})
+	}
 	return result
+}
+
+// paryEtykiet czyta zapytanie o trzech kolumnach: dwie etykiety i liczba.
+func (c *Collector) paryEtykiet(ctx context.Context, query, pierwsza, druga string) ([]sample, error) {
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	samples := []sample{}
+	for rows.Next() {
+		var a, b string
+		var ile float64
+		if err := rows.Scan(&a, &b, &ile); err != nil {
+			return nil, err
+		}
+		samples = append(samples, sample{
+			labels: map[string]string{pierwsza: a, druga: b}, value: ile,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		if samples[i].labels[pierwsza] != samples[j].labels[pierwsza] {
+			return samples[i].labels[pierwsza] < samples[j].labels[pierwsza]
+		}
+		return samples[i].labels[druga] < samples[j].labels[druga]
+	})
+	return samples, nil
+}
+
+func (c *Collector) probkiBudzetow(ctx context.Context) ([]sample, error) {
+	const query = `
+		select l.key, l.capacity,
+		       coalesce((select sum(weight) from budget_leases d
+		                  where d.key = l.key and d.lease_until > now()), 0),
+		       (select count(*) from budget_waiters w
+		         where w.key = l.key and w.seen_at > now() - interval '30 seconds')
+		  from budget_limits l
+		 order by l.key`
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	samples := []sample{}
+	for rows.Next() {
+		var klucz string
+		var pojemnosc, zajete, chetnych float64
+		if err := rows.Scan(&klucz, &pojemnosc, &zajete, &chetnych); err != nil {
+			return nil, err
+		}
+		for status, wartosc := range map[string]float64{
+			"capacity": pojemnosc, "used": zajete, "waiting": chetnych,
+		} {
+			samples = append(samples, sample{
+				labels: map[string]string{"budget": klucz, "status": status},
+				value:  wartosc,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		if samples[i].labels["budget"] != samples[j].labels["budget"] {
+			return samples[i].labels["budget"] < samples[j].labels["budget"]
+		}
+		return samples[i].labels["status"] < samples[j].labels["status"]
+	})
+	return samples, nil
+}
+
+func (c *Collector) oczekiwanieNaBudzet(ctx context.Context) ([]sample, error) {
+	const query = `
+		select key, class, max(extract(epoch from now() - since))
+		  from budget_waiters
+		 where seen_at > now() - interval '30 seconds'
+		 group by 1, 2`
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	samples := []sample{}
+	for rows.Next() {
+		var klucz, klasa string
+		var sekundy float64
+		if err := rows.Scan(&klucz, &klasa, &sekundy); err != nil {
+			return nil, err
+		}
+		samples = append(samples, sample{
+			labels: map[string]string{"budget": klucz, "class": klasa}, value: sekundy,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		return samples[i].labels["budget"] < samples[j].labels["budget"]
+	})
+	return samples, nil
 }
 
 func (c *Collector) groupCount(ctx context.Context, query string) (map[string]float64, error) {
