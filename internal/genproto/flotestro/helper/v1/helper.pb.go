@@ -393,6 +393,10 @@ const (
 	NetworkRequest_OPERATION_CONFIRM NetworkRequest_Operation = 5
 	// Natychmiastowe wycofanie zmiany na zadanie operatora.
 	NetworkRequest_OPERATION_ROLLBACK NetworkRequest_Operation = 6
+	// Plan zmiany bez dotykania hosta: roznica miedzy profilem zastanym
+	// a zadanym. Rodzaj zmiany helper poznaje po polach: method wskazuje
+	// profil adresowy, routes trasy, mtu samo MTU.
+	NetworkRequest_OPERATION_PLAN NetworkRequest_Operation = 7
 )
 
 // Enum value maps for NetworkRequest_Operation.
@@ -405,6 +409,7 @@ var (
 		4: "OPERATION_APPLY_PROFILE",
 		5: "OPERATION_CONFIRM",
 		6: "OPERATION_ROLLBACK",
+		7: "OPERATION_PLAN",
 	}
 	NetworkRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":   0,
@@ -414,6 +419,7 @@ var (
 		"OPERATION_APPLY_PROFILE": 4,
 		"OPERATION_CONFIRM":       5,
 		"OPERATION_ROLLBACK":      6,
+		"OPERATION_PLAN":          7,
 	}
 )
 
@@ -3087,8 +3093,12 @@ type NetworkRequest struct {
 	// wycofania: zmiana sieci bez zegara ratunkowego nie jest tu mozliwa.
 	RollbackSeconds uint32 `protobuf:"varint,9,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
 	// Identyfikator planu wycofania przy potwierdzeniu albo wycofaniu.
-	RollbackId    string `protobuf:"bytes,10,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
-	Reason        string `protobuf:"bytes,11,opt,name=reason,proto3" json:"reason,omitempty"`
+	RollbackId string `protobuf:"bytes,10,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
+	Reason     string `protobuf:"bytes,11,opt,name=reason,proto3" json:"reason,omitempty"`
+	// Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
+	// raz wobec profilu, ktory ma teraz: inny odcisk znaczy, ze host zmienil
+	// sie od planowania i zmiana wchodzilaby w inny stan niz ogladany.
+	PlanHash      string `protobuf:"bytes,12,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3200,6 +3210,13 @@ func (x *NetworkRequest) GetReason() string {
 	return ""
 }
 
+func (x *NetworkRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type NetworkResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Stan profili w postaci JSON. Struktura nalezy do modulu sieci.
@@ -3211,7 +3228,10 @@ type NetworkResult struct {
 	// Chwila, o ktorej wycofanie sie wykona, jesli nikt go nie rozbroi.
 	RollbackDeadline string `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	// Confirmed mowi, czy wycofanie zostalo rozbrojone.
-	Confirmed     bool `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
+	Confirmed bool `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN. Struktura nalezy do
+	// modulu sieci.
+	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3279,6 +3299,13 @@ func (x *NetworkResult) GetConfirmed() bool {
 		return x.Confirmed
 	}
 	return false
+}
+
+func (x *NetworkResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // DnsRequest zmienia resolver hosta.
@@ -7417,7 +7444,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x0eOPERATION_READ\x10\x05\"F\n" +
 	"\x0eScheduleResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xa8\x04\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xd9\x04\n" +
 	"\x0eNetworkRequest\x12K\n" +
 	"\toperation\x18\x01 \x01(\x0e2-.flotestro.helper.v1.NetworkRequest.OperationR\toperation\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x10\n" +
@@ -7431,7 +7458,8 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\vrollback_id\x18\n" +
 	" \x01(\tR\n" +
 	"rollbackId\x12\x16\n" +
-	"\x06reason\x18\v \x01(\tR\x06reason\"\xba\x01\n" +
+	"\x06reason\x18\v \x01(\tR\x06reason\x12\x1b\n" +
+	"\tplan_hash\x18\f \x01(\tR\bplanHash\"\xce\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x15\n" +
@@ -7439,14 +7467,16 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x17OPERATION_ENSURE_ROUTES\x10\x03\x12\x1b\n" +
 	"\x17OPERATION_APPLY_PROFILE\x10\x04\x12\x15\n" +
 	"\x11OPERATION_CONFIRM\x10\x05\x12\x16\n" +
-	"\x12OPERATION_ROLLBACK\x10\x06\"\xb1\x01\n" +
+	"\x12OPERATION_ROLLBACK\x10\x06\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\a\"\xc5\x01\n" +
 	"\rNetworkResult\x12\x1a\n" +
 	"\bprofiles\x18\x01 \x01(\fR\bprofiles\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vrollback_id\x18\x03 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xc4\x02\n" +
+	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xc4\x02\n" +
 	"\n" +
 	"DnsRequest\x12G\n" +
 	"\toperation\x18\x01 \x01(\x0e2).flotestro.helper.v1.DnsRequest.OperationR\toperation\x12\x1c\n" +

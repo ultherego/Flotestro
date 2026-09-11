@@ -64,7 +64,7 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 		// Plan z regula liczy roznice dla tej jednej reguly - to jest faza
 		// planowania kampanii.
 		operacja = helperv1.FirewallRequest_OPERATION_READ
-		if strings.TrimSpace(payload.RuleID) != "" {
+		if strings.TrimSpace(payload.RuleID) != "" || strings.TrimSpace(payload.Zone) != "" {
 			operacja = helperv1.FirewallRequest_OPERATION_PLAN
 		}
 	case opspec.ActionFirewallRuleRemove:

@@ -94,6 +94,14 @@ func ZaplanujUsuniecie(rejestr Rejestr, id, rulesetHash, adapter string) Plan {
 	return plan
 }
 
+// Odmow wpisuje powod odmowy poznany po policzeniu roznic - na przyklad
+// ochrone kanalu zarzadzania - i liczy odcisk na nowo: plan z odmowa jest
+// inna odpowiedzia niz plan bez niej.
+func (p *Plan) Odmow(powod string) {
+	p.Refusal = powod
+	p.PlanHash = odciskPlanu(*p)
+}
+
 // Znajdz zwraca regule panelu o danym identyfikatorze.
 func (r Rejestr) Znajdz(id string) (RuleSpec, bool) {
 	for _, regula := range r.Rules {

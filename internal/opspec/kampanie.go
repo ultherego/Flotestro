@@ -109,9 +109,11 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	// Zapora: plan liczy roznice wobec rejestru regul panelu i zwraca odcisk
 	// calego zestawu, jaki host ma teraz. Zmiana wraca z tym odciskiem, wiec
 	// zestaw zmieniony po planowaniu zatrzymuje ja zamiast wejsc w cudze
-	// sasiedztwo regul. Strefy firewalld to inny model i czekaja na wlasny
-	// planer.
-	case ActionFirewallRuleEnsure, ActionFirewallRuleRemove:
+	// sasiedztwo regul. Strefa firewalld jest zbiorem wpisow, wiec jej plan
+	// mowi, czy wpis w nim jest - i wiaze sie tym samym odciskiem zestawu,
+	// bo firewalld przepisuje nftables przy kazdej zmianie strefy.
+	case ActionFirewallRuleEnsure, ActionFirewallRuleRemove,
+		ActionFirewallZonePort, ActionFirewallZoneService:
 		return ActionFirewallPlan
 
 	// Montowanie: plan rozwiazuje zrodlo do UUID filesystemu, ktory ten host
@@ -120,6 +122,13 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionMountEnsure, ActionMountRemove:
 		return ActionStoragePlan
 
+	// Siec: plan liczy roznice miedzy profilem NetworkManagera, ktory host
+	// ma, a zadanym - i zwraca odcisk tej roznicy. Zmiana wraca z odciskiem,
+	// a host liczy plan jeszcze raz: profil zmieniony po planowaniu
+	// zatrzymuje zmiane. DNS hosta idzie osobna operacja i czeka na planer.
+	case ActionNetworkProfileApply, ActionNetworkRouteEnsure, ActionNetworkMTUSet:
+		return ActionNetworkPlan
+
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
 	// ktory tego planu nigdy nie widzial.
@@ -127,7 +136,7 @@ func AkcjaPlanowania(action ActionType) ActionType {
 		return ActionComposePlan
 	}
 	// Pozostale rodziny odmawiaja i warto wiedziec, dlaczego. Ich operacje
-	// "*.plan" - network.plan, a dla LVM i filesystemow storage.plan - czytaja
+	// "*.plan" - dla LVM i filesystemow storage.plan - czytaja
 	// stan hosta, a nie licza diffu wobec stanu docelowego. Nazwanie ich planerem
 	// dalo by kampanii faze planowania, ktora niczego nie planuje, i zgode
 	// odnoszaca sie do odczytu zamiast do zmiany. Planer per host dla tych

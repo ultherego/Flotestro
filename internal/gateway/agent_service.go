@@ -917,6 +917,24 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// Plan sieci jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
+	// ktora sie jeszcze nie wydarzyla, wobec profilu, ktory host ma teraz.
+	if siec := result.GetNetworkResult(); siec != nil && len(siec.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(siec.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "network_plan",
+			"plan":      json.RawMessage(siec.GetPlan()),
+			"plan_hash": plan.PlanHash,
+			"profiles":  surowyJSON(siec.GetProfiles()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Zmiana sieci niesie identyfikator wycofania i to, czy zdazylo je
 	// rozbroic potwierdzenie lacznosci. Bez tego operator nie wie, czy host
 	// za chwile wroci do poprzedniej konfiguracji.

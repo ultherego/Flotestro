@@ -719,7 +719,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			// Plan bez reguly jest odczytem zestawu (zakladka hosta); plan
 			// z regula liczy roznice dla niej - faza planowania kampanii.
 			operacja = agentv1.FirewallAction_OPERATION_READ
-			if payload.Firewall != nil && strings.TrimSpace(payload.Firewall.RuleID) != "" {
+			if payload.Firewall != nil && (strings.TrimSpace(payload.Firewall.RuleID) != "" ||
+				strings.TrimSpace(payload.Firewall.Zone) != "") {
 				operacja = agentv1.FirewallAction_OPERATION_PLAN
 			}
 		case opspec.ActionFirewallRuleRemove:
@@ -773,7 +774,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		operacja := agentv1.NetworkAction_OPERATION_APPLY_PROFILE
 		switch action {
 		case opspec.ActionNetworkPlan:
+			// Plan bez opisu zmiany jest odczytem profili; z opisem zmiany
+			// liczy roznice wobec niej na hoscie.
 			operacja = agentv1.NetworkAction_OPERATION_READ
+			if payload.Network != nil && payload.Network.OpisujeZmiane() {
+				operacja = agentv1.NetworkAction_OPERATION_PLAN
+			}
 		case opspec.ActionNetworkMTUSet:
 			operacja = agentv1.NetworkAction_OPERATION_SET_MTU
 		case opspec.ActionNetworkRouteEnsure:
@@ -792,6 +798,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			siec.Dns = payload.Network.DNS
 			siec.RollbackSeconds = payload.Network.RollbackSeconds
 			siec.RollbackId = payload.Network.RollbackID
+			siec.PlanHash = payload.Network.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Network{Network: siec}
 

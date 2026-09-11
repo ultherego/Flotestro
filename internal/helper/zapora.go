@@ -71,6 +71,11 @@ func (s *Server) zaplanujRegule(ctx context.Context, action *helperv1.FirewallRe
 	if stan.UnavailableReason != "" {
 		return reject(ErrorUnsupported, stan.UnavailableReason)
 	}
+	// Plan ze strefa dotyczy firewalld: strefa jest zbiorem wpisow, a nie
+	// regula panelu, i liczy sie inaczej.
+	if action.GetZone() != "" {
+		return s.zaplanujStrefe(stan, action)
+	}
 	rejestr, err := firewall.WczytajRejestr(firewall.KatalogRejestru)
 	if err != nil {
 		return reject(ErrorExecFailed, "odczyt rejestru regul: "+err.Error())
@@ -97,7 +102,7 @@ func (s *Server) zaplanujRegule(ctx context.Context, action *helperv1.FirewallRe
 		if !action.GetBreakGlass() {
 			if err := firewall.ChroniKanalZarzadzania(regula,
 				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
-				plan.Refusal = err.Error()
+				plan.Odmow(err.Error())
 			}
 		}
 	}
@@ -107,6 +112,51 @@ func (s *Server) zaplanujRegule(ctx context.Context, action *helperv1.FirewallRe
 		return reject(ErrorExecFailed, err.Error())
 	}
 	odpowiedz := odpowiedzZapory(stan, opisPlanuZapory(plan), nil)
+	if odpowiedz.GetFirewallResult() != nil {
+		odpowiedz.FirewallResult.Plan = zakodowany
+	}
+	return odpowiedz
+}
+
+// zaplanujStrefe liczy roznice dla wpisu w strefie firewalld. Sprawdzenia
+// sa te same co przy zmianie, lacznie z ochrona kanalu zarzadzania:
+// odmowa jest trescia planu, nie awaria.
+func (s *Server) zaplanujStrefe(stan firewall.Snapshot, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
+	var plan firewall.ZonePlan
+	switch {
+	case !exists(firewall.SciezkaFirewallCmd):
+		plan = firewall.ZonePlan{Zone: action.GetZone(), RulesetHash: stan.Hash, Adapter: stan.Adapter}
+		plan.Odmow("ten host nie ma firewalld")
+	case action.GetService() != "":
+		plan = firewall.ZaplanujUsluge(stan.Zones, action.GetZone(), action.GetService(),
+			action.GetEnable(), stan.Hash, stan.Adapter)
+	case len(action.GetPorts()) != 1:
+		plan = firewall.ZonePlan{Zone: action.GetZone(), Kind: firewall.WpisPortu,
+			RulesetHash: stan.Hash, Adapter: stan.Adapter}
+		plan.Odmow("operacja dotyczy dokladnie jednego portu")
+	default:
+		plan = firewall.ZaplanujPort(stan.Zones, action.GetZone(), action.GetPorts()[0],
+			action.GetProtocol(), action.GetEnable(), stan.Hash, stan.Adapter)
+		if plan.Refusal == "" && !action.GetEnable() && !action.GetBreakGlass() &&
+			action.GetPorts()[0] == strconv.Itoa(int(action.GetManagementPort())) {
+			plan.Odmow("port " + action.GetPorts()[0] + " jest kanalem zarzadzania; " +
+				"swiadome zamkniecie wymaga jawnej zgody operatora")
+		}
+	}
+
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == firewall.PlanBezZmian:
+		komunikat = "strefa " + plan.Zone + " jest juz w stanie docelowym"
+	default:
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	odpowiedz := odpowiedzZapory(stan, komunikat, nil)
 	if odpowiedz.GetFirewallResult() != nil {
 		odpowiedz.FirewallResult.Plan = zakodowany
 	}
@@ -209,6 +259,15 @@ func (s *Server) zmienReguly(ctx context.Context, action *helperv1.FirewallReque
 func (s *Server) zmienStrefe(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	if !exists(firewall.SciezkaFirewallCmd) {
 		return reject(ErrorUnsupported, "ten host nie ma firewalld")
+	}
+	// Zmiana zlecona wobec innego zestawu regul nie jest ta sama zmiana,
+	// ktora operator ogladal w planie: firewalld przepisuje nftables przy
+	// kazdej zmianie strefy, wiec odcisk zestawu wykrywa cudza zmiane.
+	if oczekiwany := action.GetExpectedHash(); oczekiwany != "" {
+		if stan := s.czytajZapore(ctx); oczekiwany != stan.Hash {
+			return reject(ErrorPreconditionFailed, fmt.Sprintf(
+				"zestaw regul zmienil sie od czasu planu (%s zamiast %s)", stan.Hash, oczekiwany))
+		}
 	}
 
 	var kroki [][]string

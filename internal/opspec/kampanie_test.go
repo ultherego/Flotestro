@@ -89,14 +89,19 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// powstaje z manifestu i z digestow obrazow, ktore ten host naprawde
 	// widzi, i wraca do niego razem ze zmiana.
 	for zmiana, planer := range map[ActionType]ActionType{
-		ActionComposeDeploy:      ActionComposePlan,
-		ActionFileEnsure:         ActionFilePlan,
-		ActionFileRemove:         ActionFilePlan,
-		ActionFileRollback:       ActionFilePlan,
-		ActionFirewallRuleEnsure: ActionFirewallPlan,
-		ActionFirewallRuleRemove: ActionFirewallPlan,
-		ActionMountEnsure:        ActionStoragePlan,
-		ActionMountRemove:        ActionStoragePlan,
+		ActionComposeDeploy:       ActionComposePlan,
+		ActionFileEnsure:          ActionFilePlan,
+		ActionFileRemove:          ActionFilePlan,
+		ActionFileRollback:        ActionFilePlan,
+		ActionFirewallRuleEnsure:  ActionFirewallPlan,
+		ActionFirewallRuleRemove:  ActionFirewallPlan,
+		ActionFirewallZonePort:    ActionFirewallPlan,
+		ActionFirewallZoneService: ActionFirewallPlan,
+		ActionMountEnsure:         ActionStoragePlan,
+		ActionMountRemove:         ActionStoragePlan,
+		ActionNetworkMTUSet:       ActionNetworkPlan,
+		ActionNetworkRouteEnsure:  ActionNetworkPlan,
+		ActionNetworkProfileApply: ActionNetworkPlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
@@ -115,7 +120,7 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// brak funkcji. Plik przeszedl juz te droge: dostal prawdziwy planer,
 	// wiec przestal tu byc przykladem.
 	for _, zmiana := range []ActionType{
-		ActionNetworkProfileApply, ActionDNSHostApply,
+		ActionDNSHostApply, ActionLVMExtend,
 	} {
 		if AkcjaPlanowania(zmiana) != "" {
 			t.Errorf("%s ma planera, wiec ta czesc testu przestala cokolwiek pilnowac", zmiana)

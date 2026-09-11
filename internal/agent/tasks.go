@@ -930,7 +930,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		siec := action.Network
 		typ := opspec.ActionNetworkProfileApply
 		switch siec.GetOperation() {
-		case agentv1.NetworkAction_OPERATION_READ:
+		case agentv1.NetworkAction_OPERATION_READ, agentv1.NetworkAction_OPERATION_PLAN:
 			typ = opspec.ActionNetworkPlan
 		case agentv1.NetworkAction_OPERATION_SET_MTU:
 			typ = opspec.ActionNetworkMTUSet
@@ -947,6 +947,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Addresses:       siec.GetAddresses(),
 			Gateway:         siec.GetGateway(),
 			DNS:             siec.GetDns(),
+			PlanHash:        siec.GetPlanHash(),
 			RollbackSeconds: siec.GetRollbackSeconds(),
 			RollbackID:      siec.GetRollbackId(),
 		}}, nil

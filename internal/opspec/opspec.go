@@ -1734,6 +1734,17 @@ type NetworkPayload struct {
 	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
 	// RollbackID wskazuje plan wycofania przy operacji network.rollback.
 	RollbackID string `json:"rollback_id,omitempty"`
+	// PlanHash wiaze zmiane z planem policzonym na tym hoscie. Host liczy
+	// plan jeszcze raz przed zmiana: inny odcisk znaczy, ze profil zmienil
+	// sie od planowania i zmiana wchodzilaby w inny stan niz ogladany.
+	PlanHash string `json:"plan_hash,omitempty"`
+}
+
+// OpisujeZmiane mowi, czy payload niesie zmiane do zaplanowania: MTU, liste
+// tras albo profil adresowy. Payload z samym interfejsem jest pytaniem
+// o stan, a nie o roznice.
+func (p NetworkPayload) OpisujeZmiane() bool {
+	return p.Interface != "" && (p.MTU != "" || p.Routes != nil || p.Method != "")
 }
 
 // SchedulePayload opisuje zadanie cykliczne.

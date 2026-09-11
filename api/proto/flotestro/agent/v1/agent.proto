@@ -1004,6 +1004,8 @@ message NetworkAction {
     OPERATION_APPLY_PROFILE = 4;
     OPERATION_CONFIRM = 5;
     OPERATION_ROLLBACK = 6;
+    // Plan zmiany liczony na hoscie bez dotykania konfiguracji.
+    OPERATION_PLAN = 7;
   }
   Operation operation = 1;
   string interface = 2;
@@ -1015,6 +1017,8 @@ message NetworkAction {
   repeated string dns = 8;
   uint32 rollback_seconds = 9;
   string rollback_id = 10;
+  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  string plan_hash = 11;
 }
 
 message NetworkResult {
@@ -1025,6 +1029,8 @@ message NetworkResult {
   // Confirmed mowi, czy agent zdazyl potwierdzic lacznosc przed terminem.
   // Falsz przy zmianie, ktora sie udala, oznacza host wycofany przez zegar.
   bool confirmed = 5;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 6;
 }
 
 // DnsAction opisuje operacje na resolverze hosta.

@@ -325,6 +325,10 @@ message NetworkRequest {
     OPERATION_CONFIRM = 5;
     // Natychmiastowe wycofanie zmiany na zadanie operatora.
     OPERATION_ROLLBACK = 6;
+    // Plan zmiany bez dotykania hosta: roznica miedzy profilem zastanym
+    // a zadanym. Rodzaj zmiany helper poznaje po polach: method wskazuje
+    // profil adresowy, routes trasy, mtu samo MTU.
+    OPERATION_PLAN = 7;
   }
   Operation operation = 1;
   // Interfejs, ktorego zmiana dotyczy. Profil NetworkManagera helper znajduje
@@ -342,6 +346,10 @@ message NetworkRequest {
   // Identyfikator planu wycofania przy potwierdzeniu albo wycofaniu.
   string rollback_id = 10;
   string reason = 11;
+  // Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
+  // raz wobec profilu, ktory ma teraz: inny odcisk znaczy, ze host zmienil
+  // sie od planowania i zmiana wchodzilaby w inny stan niz ogladany.
+  string plan_hash = 12;
 }
 
 message NetworkResult {
@@ -355,6 +363,9 @@ message NetworkResult {
   string rollback_deadline = 4;
   // Confirmed mowi, czy wycofanie zostalo rozbrojone.
   bool confirmed = 5;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN. Struktura nalezy do
+  // modulu sieci.
+  bytes plan = 6;
 }
 
 // DnsRequest zmienia resolver hosta.

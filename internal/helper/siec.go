@@ -45,6 +45,13 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 	defer cancel()
 
 	if !network.Istnieje(network.SciezkaNmcli) {
+		if action.GetOperation() == helperv1.NetworkRequest_OPERATION_PLAN {
+			// Brak NetworkManagera jest odpowiedzia planu, nie bledem
+			// odczytu: kampania ma zobaczyc ten host jako odmowe.
+			return odpowiedzPlanuSieci(nil, network.OdmowaPlanu(action.GetInterface(),
+				rodzajZmianySieci(action),
+				"ten host nie ma NetworkManagera; konfiguracja sieci jest tu tylko do odczytu"))
+		}
 		return reject(ErrorUnsupported,
 			"ten host nie ma NetworkManagera; konfiguracja sieci jest tu tylko do odczytu")
 	}
@@ -52,6 +59,9 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 	switch action.GetOperation() {
 	case helperv1.NetworkRequest_OPERATION_READ:
 		return odpowiedzSieci(s.czytajProfile(actionCtx), "", nil)
+
+	case helperv1.NetworkRequest_OPERATION_PLAN:
+		return s.zaplanujSiec(actionCtx, action)
 
 	case helperv1.NetworkRequest_OPERATION_CONFIRM:
 		return s.potwierdzZmiane(actionCtx, action.GetRollbackId())
@@ -67,11 +77,88 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 	return reject(ErrorUnknownAction, "nieznana operacja na sieci")
 }
 
+// zaplanujSiec liczy roznice miedzy profilem zastanym a zadanym, nie
+// dotykajac hosta. Rodzaj zmiany poznaje po polach zlecenia.
+func (s *Server) zaplanujSiec(ctx context.Context, action *helperv1.NetworkRequest) *helperv1.HelperResponse {
+	profile := s.czytajProfile(ctx)
+	_, profil, err := s.profilInterfejsu(ctx, action.GetInterface())
+	if err != nil {
+		return odpowiedzPlanuSieci(profile, network.OdmowaPlanu(action.GetInterface(),
+			rodzajZmianySieci(action), err.Error()))
+	}
+	return odpowiedzPlanuSieci(profile, planSieci(action, profil))
+}
+
+// planSieci liczy plan dla zmiany opisanej zleceniem wobec profilu zastanego.
+func planSieci(action *helperv1.NetworkRequest, profil network.Profil) network.Plan {
+	switch rodzajZmianySieci(action) {
+	case network.PlanProfil:
+		return network.ZaplanujProfil(action.GetInterface(), profil, action.GetMethod(),
+			action.GetAddresses(), action.GetGateway(), action.GetDns())
+	case network.PlanTrasy:
+		return network.ZaplanujTrasy(action.GetInterface(), profil, action.GetRoutes())
+	default:
+		return network.ZaplanujMTU(action.GetInterface(), profil, action.GetMtu())
+	}
+}
+
+// rodzajZmianySieci mowi, ktora zmiane opisuje zlecenie. Operacje
+// mutujace nazywaja ja wprost; plan poznaje ja po polach, bo jedna
+// operacja planujaca obsluguje trzy rodzaje zmian.
+func rodzajZmianySieci(action *helperv1.NetworkRequest) string {
+	switch action.GetOperation() {
+	case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
+		return network.PlanProfil
+	case helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES:
+		return network.PlanTrasy
+	case helperv1.NetworkRequest_OPERATION_SET_MTU:
+		return network.PlanMTU
+	}
+	switch {
+	case action.GetMethod() != "":
+		return network.PlanProfil
+	case action.Routes != nil:
+		return network.PlanTrasy
+	default:
+		return network.PlanMTU
+	}
+}
+
+func odpowiedzPlanuSieci(profile []network.Profil, plan network.Plan) *helperv1.HelperResponse {
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == network.PlanBezZmian:
+		komunikat = "profil " + plan.Connection + " jest juz w stanie docelowym"
+	default:
+		komunikat = "profil " + plan.Connection + ": " + strings.Join(plan.Changes, "; ")
+	}
+	odpowiedz := odpowiedzSieci(profile, komunikat, nil)
+	if odpowiedz.GetNetworkResult() != nil {
+		odpowiedz.NetworkResult.Plan = zakodowany
+	}
+	return odpowiedz
+}
+
 // zmienSiec sklada zmiane, uzbraja wycofanie i dopiero potem dotyka hosta.
 func (s *Server) zmienSiec(ctx context.Context, action *helperv1.NetworkRequest) *helperv1.HelperResponse {
 	polaczenie, profil, err := s.profilInterfejsu(ctx, action.GetInterface())
 	if err != nil {
 		return reject(ErrorUnsupported, err.Error())
+	}
+
+	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal. Plan liczony teraz z innym odciskiem znaczy, ze
+	// profil zmienil sie od planowania - i to jest odmowa, nie ostrzezenie.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		if teraz := planSieci(action, profil); teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"profil "+polaczenie+" zmienil sie od planowania; zmiana wymaga nowego planu")
+		}
 	}
 
 	kroki, err := krokiZmiany(action, polaczenie, profil)

@@ -358,12 +358,13 @@ func TestKampaniaOdmawiaOperacjiBezTrybuMasowego(t *testing.T) {
 	host := h.hostByFamily("debian")
 
 	// Rodziny, ktorych operacja "*.plan" czyta stan hosta zamiast liczyc diff
-	// wobec stanu docelowego. Zapis pliku byl tu kiedys przykladem i przestal
-	// nim byc, gdy dostal prawdziwy planer - o to w tej bramce chodzi:
-	// przepustka jest deklaracja i mechanizm, a nie nazwa operacji.
+	// wobec stanu docelowego. Zapis pliku i profil sieci byly tu kiedys
+	// przykladami i przestaly nimi byc, gdy dostaly prawdziwe planery - o to
+	// w tej bramce chodzi: przepustka jest deklaracja i mechanizm, a nie
+	// nazwa operacji.
 	przypadki := map[string]map[string]any{
-		"network.profile.apply": {"network": map[string]any{
-			"interface": "eth0", "method": "dhcp",
+		"filesystem.resize": {"storage": map[string]any{
+			"device": "/dev/sdb",
 		}},
 		"dns.host.apply": {"dns": map[string]any{
 			"servers": []string{"192.168.56.50"},
@@ -1689,6 +1690,323 @@ func planMontowania(h *harness, jobID string) (plan struct {
 	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
 	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
 		if odpowiedz.Items[i].Detail.Kind == "mount_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// TestKampaniaSieciLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze zmiana sieci
+// w kampanii dostaje plan policzony na hoscie: roznice wobec profilu, ktory
+// host ma, odcisk tej roznicy w zmianie i odmowe przed zgoda tam, gdzie
+// zmiana nie ma na czym wejsc.
+func TestKampaniaSieciLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+	h := newHarness(t)
+
+	// Hosty z mechanizmem zapisu i wskazanym interfejsem zarzadzania.
+	interfejsy := map[string]string{}
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		stan := migawkaSieciHosta(t, h, host.ID)
+		if stan.WriteAdapter == "" || stan.ManagementInterface == "" {
+			continue
+		}
+		interfejsy[host.ID] = stan.ManagementInterface
+		cele = append(cele, host.ID)
+	}
+	if len(cele) == 0 {
+		t.Skip("flota nie ma hosta z mechanizmem zapisu konfiguracji sieci")
+	}
+	// Zamowienie wskazuje jeden interfejs, a hosty nazywaja go roznie.
+	// Kampania idzie na te, ktore maja go pod ta sama nazwa.
+	liczebnosc := map[string]int{}
+	for _, nazwa := range interfejsy {
+		liczebnosc[nazwa]++
+	}
+	interfejs := ""
+	for nazwa, ile := range liczebnosc {
+		if ile > liczebnosc[interfejs] || (ile == liczebnosc[interfejs] && nazwa < interfejs) {
+			interfejs = nazwa
+		}
+	}
+	wybrane := cele[:0]
+	for _, hostID := range cele {
+		if interfejsy[hostID] == interfejs {
+			wybrane = append(wybrane, hostID)
+		}
+	}
+	cele = wybrane
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "network.mtu.set", "reason": "sprzatanie po tescie kampanii sieci",
+				"payload": map[string]any{"network": map[string]any{
+					"interface": interfejs, "mtu": "auto", "rollback_seconds": 60}},
+			}, 3*time.Minute)
+		}
+	})
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "MTU na flocie", "action": "network.mtu.set",
+		"reason": "test integracyjny planow sieci",
+		"payload": map[string]any{"network": map[string]any{
+			"interface": interfejs, "mtu": "1400", "rollback_seconds": 60}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State != "planning" {
+		t.Fatalf("kampania sieci zaczela od stanu %s", campaign.State)
+	}
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	odciski := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planSieci(h, target.PlanJobID)
+		if plan.Action != "update" || len(plan.Changes) != 1 ||
+			!strings.Contains(plan.Changes[0], "MTU") {
+			t.Errorf("host %s planuje %q %v zamiast zmiany MTU", target.Hostname, plan.Action, plan.Changes)
+		}
+		if plan.PlanHash == "" {
+			t.Errorf("host %s nie podal odcisku planu", target.Hostname)
+		}
+		odciski[target.Hostname] = plan.PlanHash
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	// Zmiana, ktora weszla na host, niesie odcisk planu tego hosta: host
+	// liczyl plan jeszcze raz przed zmiana i mial z czym porownac.
+	for _, target := range h.campaignTargets(campaign.ID) {
+		var zadanie struct {
+			Payload struct {
+				Network struct {
+					PlanHash string `json:"plan_hash"`
+				} `json:"network"`
+			} `json:"payload"`
+		}
+		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
+		if zadanie.Payload.Network.PlanHash != odciski[target.Hostname] {
+			t.Errorf("host %s dostal odcisk %q, plan mial %q",
+				target.Hostname, zadanie.Payload.Network.PlanHash, odciski[target.Hostname])
+		}
+	}
+
+	// Interfejs bez profilu: plan ma odmowic na kazdym hoscie, a kampania
+	// zatrzymac sie bez zgody, bo nie zostal zaden host do pracy.
+	bezProfilu := h.createCampaign(map[string]any{
+		"name": "MTU na interfejsie, ktorego nie ma", "action": "network.mtu.set",
+		"reason": "test odmowy planu sieci",
+		"payload": map[string]any{"network": map[string]any{
+			"interface": "flotestro9", "mtu": "1400", "rollback_seconds": 60}},
+		"selector":    map[string]any{"host_ids": cele},
+		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
+		"reboot_policy": "never",
+	})
+	stanOdmowy := h.awaitCampaign(bezProfilu.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if stanOdmowy.State == "awaiting_approval" {
+		t.Fatal("kampania na interfejsie bez profilu doszla do zgody")
+	}
+	for _, target := range h.campaignTargets(bezProfilu.ID) {
+		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
+			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+		}
+	}
+}
+
+// planSieci czyta z wyniku zadania planujacego plan sieci.
+func planSieci(h *harness, jobID string) (plan struct {
+	Action   string   `json:"action"`
+	Changes  []string `json:"changes"`
+	Refusal  string   `json:"refusal"`
+	PlanHash string   `json:"plan_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "network_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// TestKampaniaStrefyFirewalldLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze wpis
+// w strefie firewalld w kampanii dostaje plan policzony na hoscie: czy port
+// juz jest otwarty, w ktorej strefie i wobec jakiego zestawu regul - a strefa,
+// ktorej host nie ma, jest odmowa przed zgoda.
+func TestKampaniaStrefyFirewalldLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+	h := newHarness(t)
+	const port = "9445"
+
+	strefy := map[string]string{}
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		stan := migawkaZaporyHosta(t, h, host.ID)
+		if stan.Adapter != "firewalld" {
+			continue
+		}
+		for _, strefa := range stan.Zones {
+			if strefa.Active {
+				strefy[host.ID] = strefa.Name
+				cele = append(cele, host.ID)
+				break
+			}
+		}
+	}
+	if len(cele) == 0 {
+		t.Skip("flota nie ma hosta z firewalld i aktywna strefa")
+	}
+	strefa := strefy[cele[0]]
+	wybrane := cele[:0]
+	for _, hostID := range cele {
+		if strefy[hostID] == strefa {
+			wybrane = append(wybrane, hostID)
+		}
+	}
+	cele = wybrane
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "firewall.zone.port", "reason": "sprzatanie po tescie kampanii stref",
+				"payload": map[string]any{"firewall": map[string]any{
+					"zone": strefa, "ports": []string{port}, "protocol": "tcp", "enable": false}},
+			}, 2*time.Minute)
+		}
+	})
+
+	otwarcie := map[string]any{"firewall": map[string]any{
+		"zone": strefa, "ports": []string{port}, "protocol": "tcp", "enable": true}}
+	campaign := h.createCampaign(map[string]any{
+		"name": "port w strefie na flocie", "action": "firewall.zone.port",
+		"reason":                     "test integracyjny planow stref",
+		"payload":                    otwarcie,
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planStrefy(h, target.PlanJobID)
+		if plan.Action != "create" || plan.Present || plan.Entry != port+"/tcp" || plan.RulesetHash == "" {
+			t.Errorf("host %s planuje %+v zamiast otwarcia portu", target.Hostname, plan)
+		}
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+
+	// Ten sam wpis raz jeszcze: plan ma powiedziec, ze port juz jest otwarty.
+	powtorka := h.createCampaign(map[string]any{
+		"name": "port w strefie raz jeszcze", "action": "firewall.zone.port",
+		"reason": "test planu bez zmian", "payload": otwarcie,
+		"selector":    map[string]any{"host_ids": cele},
+		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
+		"reboot_policy": "never",
+	})
+	poPowtorce := h.awaitCampaign(powtorka.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPowtorce.State != "awaiting_approval" {
+		t.Fatalf("powtorka: planowanie skonczylo sie stanem %s (%s)",
+			poPowtorce.State, poPowtorce.PauseReason)
+	}
+	for _, target := range h.campaignTargets(powtorka.ID) {
+		if plan := planStrefy(h, target.PlanJobID); plan.Action != "no_change" || !plan.Present {
+			t.Errorf("host %s po otwarciu planuje %+v", target.Hostname, plan)
+		}
+	}
+	h.do(http.MethodPost, "/api/v1/campaigns/"+powtorka.ID+"/cancel",
+		map[string]any{"reason": "test planu bez zmian"}, nil, 0)
+
+	// Strefa, ktorej host nie ma: odmowa w planie na kazdym hoscie.
+	bezStrefy := h.createCampaign(map[string]any{
+		"name": "port w strefie, ktorej nie ma", "action": "firewall.zone.port",
+		"reason": "test odmowy planu strefy",
+		"payload": map[string]any{"firewall": map[string]any{
+			"zone": "flotestro-nie-ma", "ports": []string{port}, "protocol": "tcp", "enable": true}},
+		"selector":    map[string]any{"host_ids": cele},
+		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
+		"reboot_policy": "never",
+	})
+	stanOdmowy := h.awaitCampaign(bezStrefy.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if stanOdmowy.State == "awaiting_approval" {
+		t.Fatal("kampania na strefie, ktorej nie ma, doszla do zgody")
+	}
+	for _, target := range h.campaignTargets(bezStrefy.ID) {
+		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
+			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+		}
+	}
+}
+
+// planStrefy czyta z wyniku zadania planujacego plan strefy firewalld.
+func planStrefy(h *harness, jobID string) (plan struct {
+	Action      string `json:"action"`
+	Entry       string `json:"entry"`
+	Present     bool   `json:"present"`
+	Refusal     string `json:"refusal"`
+	RulesetHash string `json:"ruleset_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "firewall_plan" {
 			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
 			return plan
 		}

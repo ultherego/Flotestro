@@ -428,6 +428,8 @@ const (
 	NetworkAction_OPERATION_APPLY_PROFILE NetworkAction_Operation = 4
 	NetworkAction_OPERATION_CONFIRM       NetworkAction_Operation = 5
 	NetworkAction_OPERATION_ROLLBACK      NetworkAction_Operation = 6
+	// Plan zmiany liczony na hoscie bez dotykania konfiguracji.
+	NetworkAction_OPERATION_PLAN NetworkAction_Operation = 7
 )
 
 // Enum value maps for NetworkAction_Operation.
@@ -440,6 +442,7 @@ var (
 		4: "OPERATION_APPLY_PROFILE",
 		5: "OPERATION_CONFIRM",
 		6: "OPERATION_ROLLBACK",
+		7: "OPERATION_PLAN",
 	}
 	NetworkAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":   0,
@@ -449,6 +452,7 @@ var (
 		"OPERATION_APPLY_PROFILE": 4,
 		"OPERATION_CONFIRM":       5,
 		"OPERATION_ROLLBACK":      6,
+		"OPERATION_PLAN":          7,
 	}
 )
 
@@ -7351,8 +7355,10 @@ type NetworkAction struct {
 	Dns             []string                `protobuf:"bytes,8,rep,name=dns,proto3" json:"dns,omitempty"`
 	RollbackSeconds uint32                  `protobuf:"varint,9,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
 	RollbackId      string                  `protobuf:"bytes,10,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,11,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NetworkAction) Reset() {
@@ -7455,6 +7461,13 @@ func (x *NetworkAction) GetRollbackId() string {
 	return ""
 }
 
+func (x *NetworkAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type NetworkResult struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Profiles         []byte                 `protobuf:"bytes,1,opt,name=profiles,proto3" json:"profiles,omitempty"`
@@ -7463,7 +7476,9 @@ type NetworkResult struct {
 	RollbackDeadline string                 `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	// Confirmed mowi, czy agent zdazyl potwierdzic lacznosc przed terminem.
 	// Falsz przy zmianie, ktora sie udala, oznacza host wycofany przez zegar.
-	Confirmed     bool `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
+	Confirmed bool `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7531,6 +7546,13 @@ func (x *NetworkResult) GetConfirmed() bool {
 		return x.Confirmed
 	}
 	return false
+}
+
+func (x *NetworkResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // DnsAction opisuje operacje na resolverze hosta.
@@ -11684,7 +11706,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0eOPERATION_READ\x10\x05\"F\n" +
 	"\x0eScheduleResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x8d\x04\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xbe\x04\n" +
 	"\rNetworkAction\x12I\n" +
 	"\toperation\x18\x01 \x01(\x0e2+.flotestro.agent.v1.NetworkAction.OperationR\toperation\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x10\n" +
@@ -11697,7 +11719,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x10rollback_seconds\x18\t \x01(\rR\x0frollbackSeconds\x12\x1f\n" +
 	"\vrollback_id\x18\n" +
 	" \x01(\tR\n" +
-	"rollbackId\"\xba\x01\n" +
+	"rollbackId\x12\x1b\n" +
+	"\tplan_hash\x18\v \x01(\tR\bplanHash\"\xce\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x15\n" +
@@ -11705,14 +11728,16 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x17OPERATION_ENSURE_ROUTES\x10\x03\x12\x1b\n" +
 	"\x17OPERATION_APPLY_PROFILE\x10\x04\x12\x15\n" +
 	"\x11OPERATION_CONFIRM\x10\x05\x12\x16\n" +
-	"\x12OPERATION_ROLLBACK\x10\x06\"\xb1\x01\n" +
+	"\x12OPERATION_ROLLBACK\x10\x06\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\a\"\xc5\x01\n" +
 	"\rNetworkResult\x12\x1a\n" +
 	"\bprofiles\x18\x01 \x01(\fR\bprofiles\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vrollback_id\x18\x03 \x01(\tR\n" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
-	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\"\xf3\x02\n" +
+	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xf3\x02\n" +
 	"\tDnsAction\x12E\n" +
 	"\toperation\x18\x01 \x01(\x0e2'.flotestro.agent.v1.DnsAction.OperationR\toperation\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x18\n" +

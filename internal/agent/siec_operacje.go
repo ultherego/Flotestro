@@ -41,7 +41,12 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 	operacja := helperv1.NetworkRequest_OPERATION_APPLY_PROFILE
 	switch action {
 	case opspec.ActionNetworkPlan:
+		// Plan bez opisu zmiany jest odczytem profili; z opisem zmiany liczy
+		// roznice wobec niej, bez dotykania hosta.
 		operacja = helperv1.NetworkRequest_OPERATION_READ
+		if payload.OpisujeZmiane() {
+			operacja = helperv1.NetworkRequest_OPERATION_PLAN
+		}
 	case opspec.ActionNetworkMTUSet:
 		operacja = helperv1.NetworkRequest_OPERATION_SET_MTU
 	case opspec.ActionNetworkRouteEnsure:
@@ -66,6 +71,7 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 				Dns:             payload.DNS,
 				RollbackSeconds: payload.RollbackSeconds,
 				RollbackId:      payload.RollbackID,
+				PlanHash:        payload.PlanHash,
 			},
 		},
 	}, timeout)
@@ -80,6 +86,7 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 		RollbackId:       wynik.GetRollbackId(),
 		RollbackDeadline: wynik.GetRollbackDeadline(),
 		Confirmed:        wynik.GetConfirmed(),
+		Plan:             wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

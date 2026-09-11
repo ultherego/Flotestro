@@ -312,7 +312,8 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.File = &plik
 		}
 
-	case opspec.ActionFirewallRuleEnsure, opspec.ActionFirewallRuleRemove:
+	case opspec.ActionFirewallRuleEnsure, opspec.ActionFirewallRuleRemove,
+		opspec.ActionFirewallZonePort, opspec.ActionFirewallZoneService:
 		// Zapora wiaze sie odciskiem calego zestawu regul, ktory host mial
 		// przy planowaniu: zmiana ma wejsc w to sasiedztwo, ktore operator
 		// ogladal, a nie w inne.
@@ -320,6 +321,16 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			regula := *payload.Firewall
 			regula.ExpectedHash = odcisk
 			payload.Firewall = &regula
+		}
+
+	case opspec.ActionNetworkProfileApply, opspec.ActionNetworkRouteEnsure,
+		opspec.ActionNetworkMTUSet:
+		// Siec wiaze sie odciskiem planu: host liczy plan jeszcze raz przed
+		// zmiana i profil zmieniony od planowania zatrzymuje ja.
+		if payload.Network != nil {
+			siec := *payload.Network
+			siec.PlanHash = hash
+			payload.Network = &siec
 		}
 
 	case opspec.ActionMountEnsure:
