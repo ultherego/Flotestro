@@ -617,21 +617,24 @@ const (
 	StorageAction_OPERATION_DISK_WIPE    StorageAction_Operation = 8
 	// Policzenie roznicy miedzy montowaniem zastanym a zadanym, bez zmiany.
 	StorageAction_OPERATION_MOUNT_PLAN StorageAction_Operation = 9
+	// Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu.
+	StorageAction_OPERATION_DEVICE_PLAN StorageAction_Operation = 10
 )
 
 // Enum value maps for StorageAction_Operation.
 var (
 	StorageAction_Operation_name = map[int32]string{
-		0: "OPERATION_UNSPECIFIED",
-		1: "OPERATION_READ",
-		2: "OPERATION_MOUNT_ENSURE",
-		3: "OPERATION_MOUNT_REMOVE",
-		4: "OPERATION_FS_CHECK",
-		5: "OPERATION_LVM_EXTEND",
-		6: "OPERATION_FS_RESIZE",
-		7: "OPERATION_FS_CREATE",
-		8: "OPERATION_DISK_WIPE",
-		9: "OPERATION_MOUNT_PLAN",
+		0:  "OPERATION_UNSPECIFIED",
+		1:  "OPERATION_READ",
+		2:  "OPERATION_MOUNT_ENSURE",
+		3:  "OPERATION_MOUNT_REMOVE",
+		4:  "OPERATION_FS_CHECK",
+		5:  "OPERATION_LVM_EXTEND",
+		6:  "OPERATION_FS_RESIZE",
+		7:  "OPERATION_FS_CREATE",
+		8:  "OPERATION_DISK_WIPE",
+		9:  "OPERATION_MOUNT_PLAN",
+		10: "OPERATION_DEVICE_PLAN",
 	}
 	StorageAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
@@ -644,6 +647,7 @@ var (
 		"OPERATION_FS_CREATE":    7,
 		"OPERATION_DISK_WIPE":    8,
 		"OPERATION_MOUNT_PLAN":   9,
+		"OPERATION_DEVICE_PLAN":  10,
 	}
 )
 
@@ -681,6 +685,8 @@ const (
 	SshAction_OPERATION_READ           SshAction_Operation = 1
 	SshAction_OPERATION_APPLY          SshAction_Operation = 2
 	SshAction_OPERATION_ROTATE_HOSTKEY SshAction_Operation = 3
+	// Plan zmiany liczony na hoscie bez dotykania konfiguracji.
+	SshAction_OPERATION_PLAN SshAction_Operation = 4
 )
 
 // Enum value maps for SshAction_Operation.
@@ -690,12 +696,14 @@ var (
 		1: "OPERATION_READ",
 		2: "OPERATION_APPLY",
 		3: "OPERATION_ROTATE_HOSTKEY",
+		4: "OPERATION_PLAN",
 	}
 	SshAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":    0,
 		"OPERATION_READ":           1,
 		"OPERATION_APPLY":          2,
 		"OPERATION_ROTATE_HOSTKEY": 3,
+		"OPERATION_PLAN":           4,
 	}
 )
 
@@ -892,6 +900,8 @@ const (
 	TimeAction_OPERATION_SYNC_TEST    TimeAction_Operation = 1
 	TimeAction_OPERATION_CONFIG_APPLY TimeAction_Operation = 2
 	TimeAction_OPERATION_TIMEZONE_SET TimeAction_Operation = 3
+	// Plan zmiany zrodel czasu liczony na hoscie bez dotykania konfiguracji.
+	TimeAction_OPERATION_PLAN TimeAction_Operation = 4
 )
 
 // Enum value maps for TimeAction_Operation.
@@ -901,12 +911,14 @@ var (
 		1: "OPERATION_SYNC_TEST",
 		2: "OPERATION_CONFIG_APPLY",
 		3: "OPERATION_TIMEZONE_SET",
+		4: "OPERATION_PLAN",
 	}
 	TimeAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
 		"OPERATION_SYNC_TEST":    1,
 		"OPERATION_CONFIG_APPLY": 2,
 		"OPERATION_TIMEZONE_SET": 3,
+		"OPERATION_PLAN":         4,
 	}
 )
 
@@ -945,6 +957,8 @@ const (
 	KernelAction_OPERATION_SYSCTL_ENSURE    KernelAction_Operation = 2
 	KernelAction_OPERATION_MODULE_LOAD      KernelAction_Operation = 3
 	KernelAction_OPERATION_MODULE_BLACKLIST KernelAction_Operation = 4
+	// Plan blokady modulu liczony na hoscie bez dotykania konfiguracji.
+	KernelAction_OPERATION_MODULE_PLAN KernelAction_Operation = 5
 )
 
 // Enum value maps for KernelAction_Operation.
@@ -955,6 +969,7 @@ var (
 		2: "OPERATION_SYSCTL_ENSURE",
 		3: "OPERATION_MODULE_LOAD",
 		4: "OPERATION_MODULE_BLACKLIST",
+		5: "OPERATION_MODULE_PLAN",
 	}
 	KernelAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":      0,
@@ -962,6 +977,7 @@ var (
 		"OPERATION_SYSCTL_ENSURE":    2,
 		"OPERATION_MODULE_LOAD":      3,
 		"OPERATION_MODULE_BLACKLIST": 4,
+		"OPERATION_MODULE_PLAN":      5,
 	}
 )
 
@@ -8024,8 +8040,12 @@ type StorageAction struct {
 	ExpectedSizeBytes uint64 `protobuf:"varint,11,opt,name=expected_size_bytes,json=expectedSizeBytes,proto3" json:"expected_size_bytes,omitempty"`
 	Size              string `protobuf:"bytes,12,opt,name=size,proto3" json:"size,omitempty"`
 	Label             string `protobuf:"bytes,13,opt,name=label,proto3" json:"label,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Plan nazywa rodzaj planowanej operacji na urzadzeniu.
+	Plan string `protobuf:"bytes,14,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,15,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StorageAction) Reset() {
@@ -8149,6 +8169,20 @@ func (x *StorageAction) GetLabel() string {
 	return ""
 }
 
+func (x *StorageAction) GetPlan() string {
+	if x != nil {
+		return x.Plan
+	}
+	return ""
+}
+
+func (x *StorageAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type StorageResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
@@ -8233,8 +8267,10 @@ type SshAction struct {
 	DenyUsers                    []string               `protobuf:"bytes,10,rep,name=deny_users,json=denyUsers,proto3" json:"deny_users,omitempty"`
 	AllowLockout                 bool                   `protobuf:"varint,11,opt,name=allow_lockout,json=allowLockout,proto3" json:"allow_lockout,omitempty"`
 	KeyType                      string                 `protobuf:"bytes,12,opt,name=key_type,json=keyType,proto3" json:"key_type,omitempty"`
-	unknownFields                protoimpl.UnknownFields
-	sizeCache                    protoimpl.SizeCache
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,13,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SshAction) Reset() {
@@ -8351,11 +8387,20 @@ func (x *SshAction) GetKeyType() string {
 	return ""
 }
 
+func (x *SshAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type SshResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Snapshot      []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Mismatches    []string               `protobuf:"bytes,3,rep,name=mismatches,proto3" json:"mismatches,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Snapshot   []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Message    string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Mismatches []string               `protobuf:"bytes,3,rep,name=mismatches,proto3" json:"mismatches,omitempty"`
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8407,6 +8452,13 @@ func (x *SshResult) GetMessage() string {
 func (x *SshResult) GetMismatches() []string {
 	if x != nil {
 		return x.Mismatches
+	}
+	return nil
+}
+
+func (x *SshResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
 	}
 	return nil
 }
@@ -9606,7 +9658,9 @@ type TimeAction struct {
 	// EnableDropin jest zgoda na dopisanie do glownego pliku demona jednego
 	// wiersza, ktory wlacza katalog zrodel panelu. Bez niej host bez takiego
 	// katalogu zostaje tylko do odczytu.
-	EnableDropin  bool `protobuf:"varint,6,opt,name=enable_dropin,json=enableDropin,proto3" json:"enable_dropin,omitempty"`
+	EnableDropin bool `protobuf:"varint,6,opt,name=enable_dropin,json=enableDropin,proto3" json:"enable_dropin,omitempty"`
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,7,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9683,13 +9737,22 @@ func (x *TimeAction) GetEnableDropin() bool {
 	return false
 }
 
+func (x *TimeAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type TimeResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	// Probes niesie pomiary zadane przez panel. Serwer, ktory nie odpowiedzial,
 	// ma tu powod, a nie przesuniecie rowne zeru.
-	Probes        []byte `protobuf:"bytes,3,opt,name=probes,proto3" json:"probes,omitempty"`
+	Probes []byte `protobuf:"bytes,3,opt,name=probes,proto3" json:"probes,omitempty"`
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9745,14 +9808,23 @@ func (x *TimeResult) GetProbes() []byte {
 	return nil
 }
 
+func (x *TimeResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
 // KernelAction opisuje operacje na ustawieniach jadra.
 type KernelAction struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Operation     KernelAction_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.agent.v1.KernelAction_Operation" json:"operation,omitempty"`
-	Settings      map[string]string      `protobuf:"bytes,2,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Keys          []string               `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
-	Module        string                 `protobuf:"bytes,4,opt,name=module,proto3" json:"module,omitempty"`
-	Blacklist     bool                   `protobuf:"varint,5,opt,name=blacklist,proto3" json:"blacklist,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Operation KernelAction_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.agent.v1.KernelAction_Operation" json:"operation,omitempty"`
+	Settings  map[string]string      `protobuf:"bytes,2,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Keys      []string               `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
+	Module    string                 `protobuf:"bytes,4,opt,name=module,proto3" json:"module,omitempty"`
+	Blacklist bool                   `protobuf:"varint,5,opt,name=blacklist,proto3" json:"blacklist,omitempty"`
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,6,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9822,14 +9894,23 @@ func (x *KernelAction) GetBlacklist() bool {
 	return false
 }
 
+func (x *KernelAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type KernelResult struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot       []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message        string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	PendingReboot  []string               `protobuf:"bytes,3,rep,name=pending_reboot,json=pendingReboot,proto3" json:"pending_reboot,omitempty"`
 	AppliedRuntime []string               `protobuf:"bytes,4,rep,name=applied_runtime,json=appliedRuntime,proto3" json:"applied_runtime,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+	Plan          []byte `protobuf:"bytes,5,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *KernelResult) Reset() {
@@ -9886,6 +9967,13 @@ func (x *KernelResult) GetPendingReboot() []string {
 func (x *KernelResult) GetAppliedRuntime() []string {
 	if x != nil {
 		return x.AppliedRuntime
+	}
+	return nil
+}
+
+func (x *KernelResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
 	}
 	return nil
 }
@@ -10155,8 +10243,11 @@ type PackageLifecycle struct {
 	Packages         []string                   `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
 	ExpectedRemovals []string                   `protobuf:"bytes,3,rep,name=expected_removals,json=expectedRemovals,proto3" json:"expected_removals,omitempty"`
 	Hold             bool                       `protobuf:"varint,4,opt,name=hold,proto3" json:"hold,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Odcisk planu instalacji zatwierdzonego przez operatora; host liczy plan
+	// jeszcze raz i odmawia, gdy metadane repozytorium sie zmienily.
+	PlanHash      string `protobuf:"bytes,5,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PackageLifecycle) Reset() {
@@ -10215,6 +10306,13 @@ func (x *PackageLifecycle) GetHold() bool {
 		return x.Hold
 	}
 	return false
+}
+
+func (x *PackageLifecycle) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
 }
 
 type ListProcesses struct {
@@ -11819,7 +11917,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
 	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
-	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xbb\x05\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\x87\x06\n" +
 	"\rStorageAction\x12I\n" +
 	"\toperation\x18\x01 \x01(\x0e2+.flotestro.agent.v1.StorageAction.OperationR\toperation\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
@@ -11834,7 +11932,9 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	" \x01(\tR\x0eexpectedSerial\x12.\n" +
 	"\x13expected_size_bytes\x18\v \x01(\x04R\x11expectedSizeBytes\x12\x12\n" +
 	"\x04size\x18\f \x01(\tR\x04size\x12\x14\n" +
-	"\x05label\x18\r \x01(\tR\x05label\"\x89\x02\n" +
+	"\x05label\x18\r \x01(\tR\x05label\x12\x12\n" +
+	"\x04plan\x18\x0e \x01(\tR\x04plan\x12\x1b\n" +
+	"\tplan_hash\x18\x0f \x01(\tR\bplanHash\"\xa4\x02\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x1a\n" +
@@ -11845,12 +11945,14 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x13OPERATION_FS_RESIZE\x10\x06\x12\x17\n" +
 	"\x13OPERATION_FS_CREATE\x10\a\x12\x17\n" +
 	"\x13OPERATION_DISK_WIPE\x10\b\x12\x18\n" +
-	"\x14OPERATION_MOUNT_PLAN\x10\t\"q\n" +
+	"\x14OPERATION_MOUNT_PLAN\x10\t\x12\x19\n" +
+	"\x15OPERATION_DEVICE_PLAN\x10\n" +
+	"\"q\n" +
 	"\rStorageResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06output\x18\x03 \x01(\tR\x06output\x12\x12\n" +
-	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xfe\x04\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xb0\x05\n" +
 	"\tSshAction\x12E\n" +
 	"\toperation\x18\x01 \x01(\x0e2'.flotestro.agent.v1.SshAction.OperationR\toperation\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\tR\x04port\x12*\n" +
@@ -11866,18 +11968,21 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"deny_users\x18\n" +
 	" \x03(\tR\tdenyUsers\x12#\n" +
 	"\rallow_lockout\x18\v \x01(\bR\fallowLockout\x12\x19\n" +
-	"\bkey_type\x18\f \x01(\tR\akeyType\"m\n" +
+	"\bkey_type\x18\f \x01(\tR\akeyType\x12\x1b\n" +
+	"\tplan_hash\x18\r \x01(\tR\bplanHash\"\x81\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x13\n" +
 	"\x0fOPERATION_APPLY\x10\x02\x12\x1c\n" +
-	"\x18OPERATION_ROTATE_HOSTKEY\x10\x03\"a\n" +
+	"\x18OPERATION_ROTATE_HOSTKEY\x10\x03\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x04\"u\n" +
 	"\tSshResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1e\n" +
 	"\n" +
 	"mismatches\x18\x03 \x03(\tR\n" +
-	"mismatches\"\xe4\x01\n" +
+	"mismatches\x12\x12\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xe4\x01\n" +
 	"\x0eSecurityAction\x12J\n" +
 	"\toperation\x18\x01 \x01(\x0e2,.flotestro.agent.v1.SecurityAction.OperationR\toperation\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\tR\x04mode\"r\n" +
@@ -12010,7 +12115,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\tnot_after\x18\x04 \x01(\tR\bnotAfter\x12\x14\n" +
 	"\x05probe\x18\x05 \x01(\fR\x05probe\x12\x1f\n" +
 	"\vrolled_back\x18\x06 \x01(\bR\n" +
-	"rolledBack\"\xdd\x02\n" +
+	"rolledBack\"\x8f\x03\n" +
 	"\n" +
 	"TimeAction\x12F\n" +
 	"\toperation\x18\x01 \x01(\x0e2(.flotestro.agent.v1.TimeAction.OperationR\toperation\x12\x18\n" +
@@ -12019,37 +12124,43 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\btimezone\x18\x04 \x01(\tR\btimezone\x12\x1d\n" +
 	"\n" +
 	"allow_step\x18\x05 \x01(\bR\tallowStep\x12#\n" +
-	"\renable_dropin\x18\x06 \x01(\bR\fenableDropin\"w\n" +
+	"\renable_dropin\x18\x06 \x01(\bR\fenableDropin\x12\x1b\n" +
+	"\tplan_hash\x18\a \x01(\tR\bplanHash\"\x8b\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13OPERATION_SYNC_TEST\x10\x01\x12\x1a\n" +
 	"\x16OPERATION_CONFIG_APPLY\x10\x02\x12\x1a\n" +
-	"\x16OPERATION_TIMEZONE_SET\x10\x03\"Z\n" +
+	"\x16OPERATION_TIMEZONE_SET\x10\x03\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x04\"n\n" +
 	"\n" +
 	"TimeResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
-	"\x06probes\x18\x03 \x01(\fR\x06probes\"\xc0\x03\n" +
+	"\x06probes\x18\x03 \x01(\fR\x06probes\x12\x12\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xf8\x03\n" +
 	"\fKernelAction\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.agent.v1.KernelAction.OperationR\toperation\x12J\n" +
 	"\bsettings\x18\x02 \x03(\v2..flotestro.agent.v1.KernelAction.SettingsEntryR\bsettings\x12\x12\n" +
 	"\x04keys\x18\x03 \x03(\tR\x04keys\x12\x16\n" +
 	"\x06module\x18\x04 \x01(\tR\x06module\x12\x1c\n" +
-	"\tblacklist\x18\x05 \x01(\bR\tblacklist\x1a;\n" +
+	"\tblacklist\x18\x05 \x01(\bR\tblacklist\x12\x1b\n" +
+	"\tplan_hash\x18\x06 \x01(\tR\bplanHash\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x1b\n" +
 	"\x17OPERATION_SYSCTL_ENSURE\x10\x02\x12\x19\n" +
 	"\x15OPERATION_MODULE_LOAD\x10\x03\x12\x1e\n" +
-	"\x1aOPERATION_MODULE_BLACKLIST\x10\x04\"\x94\x01\n" +
+	"\x1aOPERATION_MODULE_BLACKLIST\x10\x04\x12\x19\n" +
+	"\x15OPERATION_MODULE_PLAN\x10\x05\"\xa8\x01\n" +
 	"\fKernelResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
 	"\x0epending_reboot\x18\x03 \x03(\tR\rpendingReboot\x12'\n" +
-	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"9\n" +
+	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\x12\x12\n" +
+	"\x04plan\x18\x05 \x01(\fR\x04plan\"9\n" +
 	"\tSecretRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\rR\aversion\"\xf8\x03\n" +
@@ -12080,12 +12191,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1c\n" +
 	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x12)\n" +
 	"\x10validator_output\x18\x06 \x01(\tR\x0fvalidatorOutput\x12\x12\n" +
-	"\x04plan\x18\a \x01(\fR\x04plan\"\xa6\x02\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\"\xc3\x02\n" +
 	"\x10PackageLifecycle\x12L\n" +
 	"\toperation\x18\x01 \x01(\x0e2..flotestro.agent.v1.PackageLifecycle.OperationR\toperation\x12\x1a\n" +
 	"\bpackages\x18\x02 \x03(\tR\bpackages\x12+\n" +
 	"\x11expected_removals\x18\x03 \x03(\tR\x10expectedRemovals\x12\x12\n" +
-	"\x04hold\x18\x04 \x01(\bR\x04hold\"g\n" +
+	"\x04hold\x18\x04 \x01(\bR\x04hold\x12\x1b\n" +
+	"\tplan_hash\x18\x05 \x01(\tR\bplanHash\"g\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11OPERATION_INSTALL\x10\x01\x12\x14\n" +

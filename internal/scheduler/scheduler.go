@@ -412,6 +412,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				Packages:         payload.PackageChange.Packages,
 				ExpectedRemovals: payload.PackageChange.ExpectedRemovals,
 				Hold:             payload.PackageChange.Hold,
+				PlanHash:         payload.PackageChange.PlanHash,
 			},
 		}
 
@@ -603,9 +604,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_SystemShutdown{SystemShutdown: wylaczenie}
 
-	case opspec.ActionTimeSyncTest, opspec.ActionTimeConfigApply, opspec.ActionTimezoneSet:
+	case opspec.ActionTimeSyncTest, opspec.ActionTimePlan, opspec.ActionTimeConfigApply,
+		opspec.ActionTimezoneSet:
 		operacja := agentv1.TimeAction_OPERATION_SYNC_TEST
 		switch action {
+		case opspec.ActionTimePlan:
+			operacja = agentv1.TimeAction_OPERATION_PLAN
 		case opspec.ActionTimeConfigApply:
 			operacja = agentv1.TimeAction_OPERATION_CONFIG_APPLY
 		case opspec.ActionTimezoneSet:
@@ -618,13 +622,16 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			zegar.Timezone = payload.Time.Timezone
 			zegar.AllowStep = payload.Time.AllowStep
 			zegar.EnableDropin = payload.Time.EnableDropIn
+			zegar.PlanHash = payload.Time.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Time{Time: zegar}
 
-	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
+	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure, opspec.ActionKernelModulePlan,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
 		operacja := agentv1.KernelAction_OPERATION_READ
 		switch action {
+		case opspec.ActionKernelModulePlan:
+			operacja = agentv1.KernelAction_OPERATION_MODULE_PLAN
 		case opspec.ActionSysctlEnsure:
 			operacja = agentv1.KernelAction_OPERATION_SYSCTL_ENSURE
 		case opspec.ActionKernelModuleLoad:
@@ -638,6 +645,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			jadro.Keys = payload.Kernel.Keys
 			jadro.Module = payload.Kernel.Module
 			jadro.Blacklist = payload.Kernel.Blacklist
+			jadro.PlanHash = payload.Kernel.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Kernel{Kernel: jadro}
 
@@ -645,6 +653,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		opspec.ActionSSHHostKeyRotate:
 		operacja := agentv1.SshAction_OPERATION_READ
 		switch action {
+		case opspec.ActionSSHConfigPlan:
+			// Plan bez ustawien jest odczytem stanu (zakladka hosta); plan
+			// z ustawieniami liczy roznice wobec nich - faza planowania.
+			if payload.SSH != nil && payload.SSH.OpisujeZmiane() {
+				operacja = agentv1.SshAction_OPERATION_PLAN
+			}
 		case opspec.ActionSSHConfigApply:
 			operacja = agentv1.SshAction_OPERATION_APPLY
 		case opspec.ActionSSHHostKeyRotate:
@@ -663,6 +677,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			serwer.DenyUsers = payload.SSH.DenyUsers
 			serwer.AllowLockout = payload.SSH.AllowLockout
 			serwer.KeyType = payload.SSH.KeyType
+			serwer.PlanHash = payload.SSH.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Ssh{Ssh: serwer}
 
@@ -679,6 +694,11 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operacja = agentv1.StorageAction_OPERATION_READ
 			if payload.Storage != nil && strings.TrimSpace(payload.Storage.Target) != "" {
 				operacja = agentv1.StorageAction_OPERATION_MOUNT_PLAN
+			}
+			// Plan nazwany po rodzaju dotyczy urzadzenia: sprawdzenia albo
+			// rozszerzenia filesystemu lub wolumenu.
+			if payload.Storage != nil && payload.Storage.Plan != "" {
+				operacja = agentv1.StorageAction_OPERATION_DEVICE_PLAN
 			}
 		case opspec.ActionMountRemove:
 			operacja = agentv1.StorageAction_OPERATION_MOUNT_REMOVE
@@ -707,6 +727,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			przestrzen.ExpectedSizeBytes = payload.Storage.ExpectedSizeBytes
 			przestrzen.Size = payload.Storage.Size
 			przestrzen.Label = payload.Storage.Label
+			przestrzen.Plan = payload.Storage.Plan
+			przestrzen.PlanHash = payload.Storage.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Storage{Storage: przestrzen}
 

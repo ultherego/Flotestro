@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -35,6 +36,8 @@ func (s *Server) applyTime(ctx context.Context, request *helperv1.HelperRequest,
 	defer cancel()
 
 	switch action.GetOperation() {
+	case helperv1.TimeRequest_OPERATION_PLAN:
+		return s.zaplanujSerweryCzasu(actionCtx, action)
 	case helperv1.TimeRequest_OPERATION_CONFIG_APPLY:
 		return s.zapiszSerweryCzasu(actionCtx, action)
 	case helperv1.TimeRequest_OPERATION_TIMEZONE_SET:
@@ -54,6 +57,15 @@ func (s *Server) zapiszSerweryCzasu(ctx context.Context, action *helperv1.TimeRe
 	}
 
 	snapshot := czas.Zbierz(ctx, wyjscieNarzedzia)
+	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal: inny plik panelu albo inny demon od planowania jest
+	// odmowa, nie ostrzezeniem.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		if teraz := czas.Zaplanuj(snapshot, serwery, action.GetEnableDropin()); teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"zrodla czasu zmienily sie od planowania; zmiana wymaga nowego planu")
+		}
+	}
 	switch snapshot.Service {
 	case czas.DemonChrony:
 		return s.zapiszChrony(ctx, serwery, snapshot, action.GetEnableDropin())
@@ -62,6 +74,30 @@ func (s *Server) zapiszSerweryCzasu(ctx context.Context, action *helperv1.TimeRe
 	}
 	return reject(ErrorUnsupported,
 		"ten host nie ma demona czasu, ktoremu panel moglby wskazac serwery")
+}
+
+// zaplanujSerweryCzasu liczy roznice dla zmiany zrodel czasu bez dotykania
+// hosta. Brak demona i brak katalogu bez zgody sa odmowa w planie.
+func (s *Server) zaplanujSerweryCzasu(ctx context.Context, action *helperv1.TimeRequest) *helperv1.HelperResponse {
+	snapshot := czas.Zbierz(ctx, wyjscieNarzedzia)
+	plan := czas.Zaplanuj(snapshot, action.GetServers(), action.GetEnableDropin())
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == czas.PlanBezZmian:
+		komunikat = "zrodla czasu sa juz w stanie docelowym"
+	default:
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	odpowiedz := odpowiedzCzasu(snapshot, komunikat)
+	if odpowiedz.GetTimeResult() != nil {
+		odpowiedz.TimeResult.Plan = zakodowany
+	}
+	return odpowiedz
 }
 
 // zapiszChrony dopisuje serwery do katalogu, ktory chrony sam wlacza.

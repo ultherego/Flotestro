@@ -586,21 +586,25 @@ const (
 	// Policzenie roznicy miedzy montowaniem zastanym a zadanym. Nie zmienia
 	// niczego i rozwiazuje zrodlo do UUID filesystemu, ktory ten host ma.
 	StorageRequest_OPERATION_MOUNT_PLAN StorageRequest_Operation = 9
+	// Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu, bez
+	// dotykania hosta. Rodzaj nazywa pole plan.
+	StorageRequest_OPERATION_DEVICE_PLAN StorageRequest_Operation = 10
 )
 
 // Enum value maps for StorageRequest_Operation.
 var (
 	StorageRequest_Operation_name = map[int32]string{
-		0: "OPERATION_UNSPECIFIED",
-		1: "OPERATION_READ_LVM",
-		2: "OPERATION_MOUNT_ENSURE",
-		3: "OPERATION_MOUNT_REMOVE",
-		4: "OPERATION_FS_CHECK",
-		5: "OPERATION_LVM_EXTEND",
-		6: "OPERATION_FS_RESIZE",
-		7: "OPERATION_FS_CREATE",
-		8: "OPERATION_DISK_WIPE",
-		9: "OPERATION_MOUNT_PLAN",
+		0:  "OPERATION_UNSPECIFIED",
+		1:  "OPERATION_READ_LVM",
+		2:  "OPERATION_MOUNT_ENSURE",
+		3:  "OPERATION_MOUNT_REMOVE",
+		4:  "OPERATION_FS_CHECK",
+		5:  "OPERATION_LVM_EXTEND",
+		6:  "OPERATION_FS_RESIZE",
+		7:  "OPERATION_FS_CREATE",
+		8:  "OPERATION_DISK_WIPE",
+		9:  "OPERATION_MOUNT_PLAN",
+		10: "OPERATION_DEVICE_PLAN",
 	}
 	StorageRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
@@ -613,6 +617,7 @@ var (
 		"OPERATION_FS_CREATE":    7,
 		"OPERATION_DISK_WIPE":    8,
 		"OPERATION_MOUNT_PLAN":   9,
+		"OPERATION_DEVICE_PLAN":  10,
 	}
 )
 
@@ -650,6 +655,9 @@ const (
 	SshRequest_OPERATION_READ           SshRequest_Operation = 1
 	SshRequest_OPERATION_APPLY          SshRequest_Operation = 2
 	SshRequest_OPERATION_ROTATE_HOSTKEY SshRequest_Operation = 3
+	// Plan zmiany bez dotykania hosta: roznica miedzy tym, co serwer
+	// stosuje, a zamowieniem.
+	SshRequest_OPERATION_PLAN SshRequest_Operation = 4
 )
 
 // Enum value maps for SshRequest_Operation.
@@ -659,12 +667,14 @@ var (
 		1: "OPERATION_READ",
 		2: "OPERATION_APPLY",
 		3: "OPERATION_ROTATE_HOSTKEY",
+		4: "OPERATION_PLAN",
 	}
 	SshRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":    0,
 		"OPERATION_READ":           1,
 		"OPERATION_APPLY":          2,
 		"OPERATION_ROTATE_HOSTKEY": 3,
+		"OPERATION_PLAN":           4,
 	}
 )
 
@@ -976,6 +986,8 @@ const (
 	TimeRequest_OPERATION_UNSPECIFIED  TimeRequest_Operation = 0
 	TimeRequest_OPERATION_CONFIG_APPLY TimeRequest_Operation = 1
 	TimeRequest_OPERATION_TIMEZONE_SET TimeRequest_Operation = 2
+	// Plan zmiany zrodel czasu bez dotykania hosta.
+	TimeRequest_OPERATION_PLAN TimeRequest_Operation = 3
 )
 
 // Enum value maps for TimeRequest_Operation.
@@ -984,11 +996,13 @@ var (
 		0: "OPERATION_UNSPECIFIED",
 		1: "OPERATION_CONFIG_APPLY",
 		2: "OPERATION_TIMEZONE_SET",
+		3: "OPERATION_PLAN",
 	}
 	TimeRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
 		"OPERATION_CONFIG_APPLY": 1,
 		"OPERATION_TIMEZONE_SET": 2,
+		"OPERATION_PLAN":         3,
 	}
 )
 
@@ -1027,6 +1041,8 @@ const (
 	KernelRequest_OPERATION_SYSCTL_ENSURE    KernelRequest_Operation = 2
 	KernelRequest_OPERATION_MODULE_LOAD      KernelRequest_Operation = 3
 	KernelRequest_OPERATION_MODULE_BLACKLIST KernelRequest_Operation = 4
+	// Plan blokady modulu bez dotykania hosta.
+	KernelRequest_OPERATION_MODULE_PLAN KernelRequest_Operation = 5
 )
 
 // Enum value maps for KernelRequest_Operation.
@@ -1037,6 +1053,7 @@ var (
 		2: "OPERATION_SYSCTL_ENSURE",
 		3: "OPERATION_MODULE_LOAD",
 		4: "OPERATION_MODULE_BLACKLIST",
+		5: "OPERATION_MODULE_PLAN",
 	}
 	KernelRequest_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":      0,
@@ -1044,6 +1061,7 @@ var (
 		"OPERATION_SYSCTL_ENSURE":    2,
 		"OPERATION_MODULE_LOAD":      3,
 		"OPERATION_MODULE_BLACKLIST": 4,
+		"OPERATION_MODULE_PLAN":      5,
 	}
 )
 
@@ -3806,8 +3824,13 @@ type StorageRequest struct {
 	ExpectedSerial    string `protobuf:"bytes,10,opt,name=expected_serial,json=expectedSerial,proto3" json:"expected_serial,omitempty"`
 	ExpectedSizeBytes uint64 `protobuf:"varint,11,opt,name=expected_size_bytes,json=expectedSizeBytes,proto3" json:"expected_size_bytes,omitempty"`
 	// Size jest przyrostem wolumenu, np. "+10G" albo "+100%FREE".
-	Size          string `protobuf:"bytes,12,opt,name=size,proto3" json:"size,omitempty"`
-	Label         string `protobuf:"bytes,13,opt,name=label,proto3" json:"label,omitempty"`
+	Size  string `protobuf:"bytes,12,opt,name=size,proto3" json:"size,omitempty"`
+	Label string `protobuf:"bytes,13,opt,name=label,proto3" json:"label,omitempty"`
+	// Plan nazywa rodzaj planowanej operacji na urzadzeniu: check, resize
+	// albo lvm_extend.
+	Plan string `protobuf:"bytes,14,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,15,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3933,6 +3956,20 @@ func (x *StorageRequest) GetLabel() string {
 	return ""
 }
 
+func (x *StorageRequest) GetPlan() string {
+	if x != nil {
+		return x.Plan
+	}
+	return ""
+}
+
+func (x *StorageRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type StorageResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Stan przestrzeni w postaci JSON. Struktura nalezy do modulu.
@@ -4024,7 +4061,10 @@ type SshRequest struct {
 	// dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
 	AllowLockout bool `protobuf:"varint,11,opt,name=allow_lockout,json=allowLockout,proto3" json:"allow_lockout,omitempty"`
 	// KeyType wskazuje klucz hosta do wymiany, np. "ed25519".
-	KeyType       string `protobuf:"bytes,12,opt,name=key_type,json=keyType,proto3" json:"key_type,omitempty"`
+	KeyType string `protobuf:"bytes,12,opt,name=key_type,json=keyType,proto3" json:"key_type,omitempty"`
+	// Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
+	// raz wobec stanu, ktory ma teraz.
+	PlanHash      string `protobuf:"bytes,13,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4143,6 +4183,13 @@ func (x *SshRequest) GetKeyType() string {
 	return ""
 }
 
+func (x *SshRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type SshResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Stan sshd w postaci JSON. Struktura nalezy do modulu.
@@ -4151,7 +4198,9 @@ type SshResult struct {
 	// Mismatches wylicza ustawienia, ktore nie doszly do skutku mimo zapisu:
 	// w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
 	// nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
-	Mismatches    []string `protobuf:"bytes,3,rep,name=mismatches,proto3" json:"mismatches,omitempty"`
+	Mismatches []string `protobuf:"bytes,3,rep,name=mismatches,proto3" json:"mismatches,omitempty"`
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4203,6 +4252,13 @@ func (x *SshResult) GetMessage() string {
 func (x *SshResult) GetMismatches() []string {
 	if x != nil {
 		return x.Mismatches
+	}
+	return nil
+}
+
+func (x *SshResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
 	}
 	return nil
 }
@@ -5152,7 +5208,9 @@ type TimeRequest struct {
 	// host odrzuca zmiane, ktora cofnelaby czas o wiecej niz prog.
 	AllowStep bool `protobuf:"varint,4,opt,name=allow_step,json=allowStep,proto3" json:"allow_step,omitempty"`
 	// EnableDropin jest zgoda na dopisanie katalogu zrodel do glownego pliku.
-	EnableDropin  bool `protobuf:"varint,5,opt,name=enable_dropin,json=enableDropin,proto3" json:"enable_dropin,omitempty"`
+	EnableDropin bool `protobuf:"varint,5,opt,name=enable_dropin,json=enableDropin,proto3" json:"enable_dropin,omitempty"`
+	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,6,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5222,11 +5280,20 @@ func (x *TimeRequest) GetEnableDropin() bool {
 	return false
 }
 
+func (x *TimeRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type TimeResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Snapshot      []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Probes        []byte                 `protobuf:"bytes,3,opt,name=probes,proto3" json:"probes,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Probes   []byte                 `protobuf:"bytes,3,opt,name=probes,proto3" json:"probes,omitempty"`
+	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5282,6 +5349,13 @@ func (x *TimeResult) GetProbes() []byte {
 	return nil
 }
 
+func (x *TimeResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
 // KernelRequest opisuje operacje na ustawieniach jadra.
 //
 // Panel zmienia ustawienia z okreslonych galezi /proc/sys i zapisuje je do
@@ -5295,7 +5369,9 @@ type KernelRequest struct {
 	Keys   []string `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
 	Module string   `protobuf:"bytes,4,opt,name=module,proto3" json:"module,omitempty"`
 	// Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
-	Blacklist     bool `protobuf:"varint,5,opt,name=blacklist,proto3" json:"blacklist,omitempty"`
+	Blacklist bool `protobuf:"varint,5,opt,name=blacklist,proto3" json:"blacklist,omitempty"`
+	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,6,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5365,6 +5441,13 @@ func (x *KernelRequest) GetBlacklist() bool {
 	return false
 }
 
+func (x *KernelRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type KernelResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
@@ -5374,8 +5457,10 @@ type KernelResult struct {
 	PendingReboot []string `protobuf:"bytes,3,rep,name=pending_reboot,json=pendingReboot,proto3" json:"pending_reboot,omitempty"`
 	// AppliedRuntime wylicza ustawienia, ktore obowiazuja juz teraz.
 	AppliedRuntime []string `protobuf:"bytes,4,rep,name=applied_runtime,json=appliedRuntime,proto3" json:"applied_runtime,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+	Plan          []byte `protobuf:"bytes,5,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *KernelResult) Reset() {
@@ -5432,6 +5517,13 @@ func (x *KernelResult) GetPendingReboot() []string {
 func (x *KernelResult) GetAppliedRuntime() []string {
 	if x != nil {
 		return x.AppliedRuntime
+	}
+	return nil
+}
+
+func (x *KernelResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
 	}
 	return nil
 }
@@ -7560,7 +7652,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
 	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
-	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xc2\x05\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\x8e\x06\n" +
 	"\x0eStorageRequest\x12K\n" +
 	"\toperation\x18\x01 \x01(\x0e2-.flotestro.helper.v1.StorageRequest.OperationR\toperation\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
@@ -7575,7 +7667,9 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	" \x01(\tR\x0eexpectedSerial\x12.\n" +
 	"\x13expected_size_bytes\x18\v \x01(\x04R\x11expectedSizeBytes\x12\x12\n" +
 	"\x04size\x18\f \x01(\tR\x04size\x12\x14\n" +
-	"\x05label\x18\r \x01(\tR\x05label\"\x8d\x02\n" +
+	"\x05label\x18\r \x01(\tR\x05label\x12\x12\n" +
+	"\x04plan\x18\x0e \x01(\tR\x04plan\x12\x1b\n" +
+	"\tplan_hash\x18\x0f \x01(\tR\bplanHash\"\xa8\x02\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12OPERATION_READ_LVM\x10\x01\x12\x1a\n" +
@@ -7586,12 +7680,14 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x13OPERATION_FS_RESIZE\x10\x06\x12\x17\n" +
 	"\x13OPERATION_FS_CREATE\x10\a\x12\x17\n" +
 	"\x13OPERATION_DISK_WIPE\x10\b\x12\x18\n" +
-	"\x14OPERATION_MOUNT_PLAN\x10\t\"q\n" +
+	"\x14OPERATION_MOUNT_PLAN\x10\t\x12\x19\n" +
+	"\x15OPERATION_DEVICE_PLAN\x10\n" +
+	"\"q\n" +
 	"\rStorageResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06output\x18\x03 \x01(\tR\x06output\x12\x12\n" +
-	"\x04plan\x18\x04 \x01(\fR\x04plan\"\x81\x05\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xb3\x05\n" +
 	"\n" +
 	"SshRequest\x12G\n" +
 	"\toperation\x18\x01 \x01(\x0e2).flotestro.helper.v1.SshRequest.OperationR\toperation\x12\x12\n" +
@@ -7608,18 +7704,21 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"deny_users\x18\n" +
 	" \x03(\tR\tdenyUsers\x12#\n" +
 	"\rallow_lockout\x18\v \x01(\bR\fallowLockout\x12\x19\n" +
-	"\bkey_type\x18\f \x01(\tR\akeyType\"m\n" +
+	"\bkey_type\x18\f \x01(\tR\akeyType\x12\x1b\n" +
+	"\tplan_hash\x18\r \x01(\tR\bplanHash\"\x81\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x13\n" +
 	"\x0fOPERATION_APPLY\x10\x02\x12\x1c\n" +
-	"\x18OPERATION_ROTATE_HOSTKEY\x10\x03\"a\n" +
+	"\x18OPERATION_ROTATE_HOSTKEY\x10\x03\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x04\"u\n" +
 	"\tSshResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1e\n" +
 	"\n" +
 	"mismatches\x18\x03 \x03(\tR\n" +
-	"mismatches\"\xa7\x03\n" +
+	"mismatches\x12\x12\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xa7\x03\n" +
 	"\x0fSecurityRequest\x12L\n" +
 	"\toperation\x18\x01 \x01(\x0e2..flotestro.helper.v1.SecurityRequest.OperationR\toperation\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\tR\x04mode\x12?\n" +
@@ -7745,43 +7844,49 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\tnot_after\x18\x04 \x01(\tR\bnotAfter\x12\x14\n" +
 	"\x05probe\x18\x05 \x01(\fR\x05probe\x12\x1f\n" +
 	"\vrolled_back\x18\x06 \x01(\bR\n" +
-	"rolledBack\"\xb1\x02\n" +
+	"rolledBack\"\xe2\x02\n" +
 	"\vTimeRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.TimeRequest.OperationR\toperation\x12\x18\n" +
 	"\aservers\x18\x02 \x03(\tR\aservers\x12\x1a\n" +
 	"\btimezone\x18\x03 \x01(\tR\btimezone\x12\x1d\n" +
 	"\n" +
 	"allow_step\x18\x04 \x01(\bR\tallowStep\x12#\n" +
-	"\renable_dropin\x18\x05 \x01(\bR\fenableDropin\"^\n" +
+	"\renable_dropin\x18\x05 \x01(\bR\fenableDropin\x12\x1b\n" +
+	"\tplan_hash\x18\x06 \x01(\tR\bplanHash\"r\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16OPERATION_CONFIG_APPLY\x10\x01\x12\x1a\n" +
-	"\x16OPERATION_TIMEZONE_SET\x10\x02\"Z\n" +
+	"\x16OPERATION_TIMEZONE_SET\x10\x02\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x03\"n\n" +
 	"\n" +
 	"TimeResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
-	"\x06probes\x18\x03 \x01(\fR\x06probes\"\xc5\x03\n" +
+	"\x06probes\x18\x03 \x01(\fR\x06probes\x12\x12\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xfd\x03\n" +
 	"\rKernelRequest\x12J\n" +
 	"\toperation\x18\x01 \x01(\x0e2,.flotestro.helper.v1.KernelRequest.OperationR\toperation\x12L\n" +
 	"\bsettings\x18\x02 \x03(\v20.flotestro.helper.v1.KernelRequest.SettingsEntryR\bsettings\x12\x12\n" +
 	"\x04keys\x18\x03 \x03(\tR\x04keys\x12\x16\n" +
 	"\x06module\x18\x04 \x01(\tR\x06module\x12\x1c\n" +
-	"\tblacklist\x18\x05 \x01(\bR\tblacklist\x1a;\n" +
+	"\tblacklist\x18\x05 \x01(\bR\tblacklist\x12\x1b\n" +
+	"\tplan_hash\x18\x06 \x01(\tR\bplanHash\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x1b\n" +
 	"\x17OPERATION_SYSCTL_ENSURE\x10\x02\x12\x19\n" +
 	"\x15OPERATION_MODULE_LOAD\x10\x03\x12\x1e\n" +
-	"\x1aOPERATION_MODULE_BLACKLIST\x10\x04\"\x94\x01\n" +
+	"\x1aOPERATION_MODULE_BLACKLIST\x10\x04\x12\x19\n" +
+	"\x15OPERATION_MODULE_PLAN\x10\x05\"\xa8\x01\n" +
 	"\fKernelResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
 	"\x0epending_reboot\x18\x03 \x03(\tR\rpendingReboot\x12'\n" +
-	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\"\xbe\x03\n" +
+	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\x12\x12\n" +
+	"\x04plan\x18\x05 \x01(\fR\x04plan\"\xbe\x03\n" +
 	"\vFileRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.FileRequest.OperationR\toperation\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +

@@ -212,10 +212,11 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionFilePlan, opspec.ActionFileRead, opspec.ActionFileEnsure,
 		opspec.ActionFileRemove, opspec.ActionFileRollback:
 		return e.applyFile(ctx, task, action, payload.File)
-	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure,
+	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure, opspec.ActionKernelModulePlan,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
 		return e.applyKernel(ctx, task, action, payload.Kernel)
-	case opspec.ActionTimeSyncTest, opspec.ActionTimeConfigApply, opspec.ActionTimezoneSet:
+	case opspec.ActionTimeSyncTest, opspec.ActionTimePlan, opspec.ActionTimeConfigApply,
+		opspec.ActionTimezoneSet:
 		return e.applyTime(ctx, task, action, payload.Time)
 	case opspec.ActionSystemShutdown:
 		return e.shutdownHost(ctx, task, payload.Power)
@@ -620,6 +621,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Packages:         zmiana.GetPackages(),
 			ExpectedRemovals: zmiana.GetExpectedRemovals(),
 			Hold:             zmiana.GetHold(),
+			PlanHash:         zmiana.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_File:
@@ -788,6 +790,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionTimeConfigApply
 		case agentv1.TimeAction_OPERATION_TIMEZONE_SET:
 			typ = opspec.ActionTimezoneSet
+		case agentv1.TimeAction_OPERATION_PLAN:
+			typ = opspec.ActionTimePlan
 		}
 		return typ, opspec.Payload{Time: &opspec.TimePayload{
 			Servers:      zegar.GetServers(),
@@ -795,6 +799,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Timezone:     zegar.GetTimezone(),
 			AllowStep:    zegar.GetAllowStep(),
 			EnableDropIn: zegar.GetEnableDropin(),
+			PlanHash:     zegar.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Kernel:
@@ -807,12 +812,15 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionKernelModuleLoad
 		case agentv1.KernelAction_OPERATION_MODULE_BLACKLIST:
 			typ = opspec.ActionKernelModuleBlacklist
+		case agentv1.KernelAction_OPERATION_MODULE_PLAN:
+			typ = opspec.ActionKernelModulePlan
 		}
 		return typ, opspec.Payload{Kernel: &opspec.KernelPayload{
 			Settings:  jadro.GetSettings(),
 			Keys:      jadro.GetKeys(),
 			Module:    jadro.GetModule(),
 			Blacklist: jadro.GetBlacklist(),
+			PlanHash:  jadro.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Ssh:
@@ -836,13 +844,15 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			DenyUsers:              serwer.GetDenyUsers(),
 			AllowLockout:           serwer.GetAllowLockout(),
 			KeyType:                serwer.GetKeyType(),
+			PlanHash:               serwer.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Storage:
 		przestrzen := action.Storage
 		typ := opspec.ActionMountEnsure
 		switch przestrzen.GetOperation() {
-		case agentv1.StorageAction_OPERATION_READ, agentv1.StorageAction_OPERATION_MOUNT_PLAN:
+		case agentv1.StorageAction_OPERATION_READ, agentv1.StorageAction_OPERATION_MOUNT_PLAN,
+			agentv1.StorageAction_OPERATION_DEVICE_PLAN:
 			// Odczyt i plan sa ta sama operacja panelu; rozroznia je obecnosc
 			// celu. Typ jest jeden, bo hash payloadu liczy sie z typu po obu
 			// stronach.
@@ -873,6 +883,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			ExpectedSizeBytes: przestrzen.GetExpectedSizeBytes(),
 			Size:              przestrzen.GetSize(),
 			Label:             przestrzen.GetLabel(),
+			Plan:              przestrzen.GetPlan(),
+			PlanHash:          przestrzen.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Firewall:

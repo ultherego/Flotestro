@@ -56,6 +56,8 @@ func (e *TaskExecutor) applyKernel(ctx context.Context, task *agentv1.TaskEnvelo
 		operacja = helperv1.KernelRequest_OPERATION_MODULE_LOAD
 	case opspec.ActionKernelModuleBlacklist:
 		operacja = helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST
+	case opspec.ActionKernelModulePlan:
+		operacja = helperv1.KernelRequest_OPERATION_MODULE_PLAN
 	}
 	zadanie := &helperv1.KernelRequest{Operation: operacja}
 	if payload != nil {
@@ -63,6 +65,7 @@ func (e *TaskExecutor) applyKernel(ctx context.Context, task *agentv1.TaskEnvelo
 		zadanie.Keys = payload.Keys
 		zadanie.Module = payload.Module
 		zadanie.Blacklist = payload.Blacklist
+		zadanie.PlanHash = payload.PlanHash
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -81,6 +84,7 @@ func (e *TaskExecutor) applyKernel(ctx context.Context, task *agentv1.TaskEnvelo
 		Message:        wynik.GetMessage(),
 		PendingReboot:  wynik.GetPendingReboot(),
 		AppliedRuntime: wynik.GetAppliedRuntime(),
+		Plan:           wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

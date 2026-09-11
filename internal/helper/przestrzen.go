@@ -50,6 +50,8 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 		return s.wyczyscUrzadzenie(actionCtx, action)
 	case helperv1.StorageRequest_OPERATION_MOUNT_PLAN:
 		return s.zaplanujMontowanie(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_DEVICE_PLAN:
+		return s.zaplanujUrzadzenie(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja na przestrzeni dyskowej")
 }
@@ -225,6 +227,9 @@ func (s *Server) sprawdzFilesystem(ctx context.Context, action *helperv1.Storage
 	if err := storage.WalidujZrodlo(urzadzenie); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
+	if odpowiedz := s.sprawdzOdciskPlanuUrzadzenia(ctx, action); odpowiedz != nil {
+		return odpowiedz
+	}
 	// fsck na zamontowanym filesystemie potrafi go uszkodzic. To nie jest
 	// ostrzezenie, tylko powod odmowy.
 	if punkt := s.punktMontowania(ctx, urzadzenie); punkt != "" {
@@ -259,6 +264,9 @@ func (s *Server) rozszerzWolumen(ctx context.Context, action *helperv1.StorageRe
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
+	if odpowiedz := s.sprawdzOdciskPlanuUrzadzenia(ctx, action); odpowiedz != nil {
+		return odpowiedz
+	}
 	// Grupa bez wolnego miejsca nie powiekszy zadnego wolumenu. Lepiej
 	// powiedziec to teraz niz zostawic operatorowi blad lvextend.
 	if powod := s.brakMiejscaWGrupie(ctx, action.GetDevice()); powod != "" {
@@ -273,6 +281,9 @@ func (s *Server) rozszerzWolumen(ctx context.Context, action *helperv1.StorageRe
 
 // rozszerzFilesystem powieksza filesystem do rozmiaru urzadzenia.
 func (s *Server) rozszerzFilesystem(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	if odpowiedz := s.sprawdzOdciskPlanuUrzadzenia(ctx, action); odpowiedz != nil {
+		return odpowiedz
+	}
 	stan := s.obrazPrzestrzeni(ctx)
 	urzadzenie := stan.Urzadzenie(action.GetDevice())
 	if err := (storage.TozsamoscUrzadzenia{
@@ -390,6 +401,76 @@ func (s *Server) obrazPrzestrzeni(ctx context.Context) storage.Snapshot {
 		return storage.Snapshot{UnavailableReason: err.Error()}
 	}
 	return storage.Snapshot{Devices: urzadzenia}
+}
+
+// zaplanujUrzadzenie liczy plan sprawdzenia albo rozszerzenia bez dotykania
+// hosta. Urzadzenie, ktorego nie ma, filesystem zamontowany przed fsck
+// i grupa bez miejsca sa odmowa w planie, nie awaria wykonania.
+func (s *Server) zaplanujUrzadzenie(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	stan := s.stanUrzadzen(ctx)
+	plan := planUrzadzenia(stan, action)
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	if plan.Refusal == "" {
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	odpowiedz := odpowiedzPrzestrzeni(stan, komunikat, "")
+	if odpowiedz.GetStorageResult() != nil {
+		odpowiedz.StorageResult.Plan = zakodowany
+	}
+	return odpowiedz
+}
+
+// planUrzadzenia liczy plan wedlug rodzaju nazwanego w zleceniu; operacje
+// mutujace nazywaja go wprost.
+func planUrzadzenia(stan storage.Snapshot, action *helperv1.StorageRequest) storage.DevicePlan {
+	rodzaj := action.GetPlan()
+	switch action.GetOperation() {
+	case helperv1.StorageRequest_OPERATION_FS_CHECK:
+		rodzaj = storage.PlanSprawdzenie
+	case helperv1.StorageRequest_OPERATION_FS_RESIZE:
+		rodzaj = storage.PlanRozszerzenieFS
+	case helperv1.StorageRequest_OPERATION_LVM_EXTEND:
+		rodzaj = storage.PlanRozszerzenieLV
+	}
+	switch rodzaj {
+	case storage.PlanRozszerzenieFS:
+		return storage.ZaplanujRozszerzenieFS(stan, action.GetDevice())
+	case storage.PlanRozszerzenieLV:
+		return storage.ZaplanujRozszerzenieLV(stan, action.GetDevice(), action.GetSize())
+	case storage.PlanSprawdzenie:
+		return storage.ZaplanujSprawdzenie(stan, action.GetDevice(), action.GetRepair())
+	}
+	plan := storage.DevicePlan{Operation: rodzaj, Device: action.GetDevice()}
+	plan.Odmow("nieznany rodzaj planu " + rodzaj)
+	return plan
+}
+
+// sprawdzOdciskPlanuUrzadzenia porownuje plan liczony teraz z tym, na
+// ktory operator sie zgodzil. Inny odcisk znaczy, ze urzadzenie albo grupa
+// zmienily sie od planowania - i to jest odmowa, nie ostrzezenie.
+func (s *Server) sprawdzOdciskPlanuUrzadzenia(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	oczekiwany := action.GetPlanHash()
+	if oczekiwany == "" {
+		return nil
+	}
+	if teraz := planUrzadzenia(s.stanUrzadzen(ctx), action); teraz.PlanHash != oczekiwany {
+		return reject(ErrorPreconditionFailed,
+			"urzadzenie "+action.GetDevice()+" zmienilo sie od planowania; zmiana wymaga nowego planu")
+	}
+	return nil
+}
+
+// stanUrzadzen sklada topologie urzadzen razem z LVM.
+func (s *Server) stanUrzadzen(ctx context.Context) storage.Snapshot {
+	stan := s.obrazPrzestrzeni(ctx)
+	lvm := s.czytajLVM(ctx)
+	stan.Groups, stan.Volumes = lvm.Groups, lvm.Volumes
+	stan.LVMUnavailableReason = lvm.LVMUnavailableReason
+	return stan
 }
 
 // czytajLVM zbiera grupy i wolumeny logiczne.

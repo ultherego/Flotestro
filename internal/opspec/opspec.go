@@ -110,12 +110,14 @@ const (
 	// zapytaniem do serwera czasu - i to on odpowiada na pytanie, czy nowe
 	// zrodlo w ogole dziala, zanim panel odbierze hostowi dzialajace.
 	ActionTimeSyncTest    ActionType = "time.sync.test"
+	ActionTimePlan        ActionType = "time.plan"
 	ActionTimeConfigApply ActionType = "time.config.apply"
 	ActionTimezoneSet     ActionType = "time.timezone.set"
 
 	ActionSysctlPlan            ActionType = "sysctl.plan"
 	ActionSysctlEnsure          ActionType = "sysctl.ensure"
 	ActionKernelModuleLoad      ActionType = "kernel.module.load"
+	ActionKernelModulePlan      ActionType = "kernel.module.plan"
 	ActionKernelModuleBlacklist ActionType = "kernel.module.blacklist"
 
 	ActionFileRead     ActionType = "file.read"
@@ -589,6 +591,10 @@ var actionSpecs = map[ActionType]actionSpec{
 	// ktorego host jeszcze nie uzywa.
 	ActionTimeSyncTest: {mutating: false, capability: "time", permission: "time.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 128 << 10},
+	// Plan zrodel czasu: roznica miedzy plikiem panelu a zamowieniem, wraz
+	// z tym, czy demon zostanie zrestartowany. Nie dotyka hosta.
+	ActionTimePlan: {mutating: false, capability: "time", permission: "time.plan",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
 	// Zmiana zrodel czasu potrafi przestawic zegar skokiem, a wtedy bazy
 	// danych, tokeny i certyfikaty widza czas, ktory sie cofnal. Blokada
 	// jednostek jest tu potrzebna, bo zmiana konczy sie restartem demona.
@@ -610,6 +616,10 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
 	ActionKernelModuleLoad: {mutating: true, capability: "kernel", permission: "kernel.module.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
+	// Plan blokady modulu: roznica miedzy blokada zastana a zadana. Nie
+	// dotyka hosta.
+	ActionKernelModulePlan: {mutating: false, capability: "kernel", permission: "kernel.module.plan",
+		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
 	// Blokada modulu dziala dopiero po restarcie, a dla modulow z initramfs
 	// takze po jego odbudowie: skutek ujawnia sie wtedy, gdy host wstaje.
 	ActionKernelModuleBlacklist: {mutating: true, capability: "kernel", permission: "kernel.module.blacklist",
@@ -1193,6 +1203,10 @@ type PackageChangePayload struct {
 	ExpectedRemovals []string `json:"expected_removals,omitempty"`
 	// Hold dotyczy wylacznie wstrzymywania: prawda zamraza, falsz zwalnia.
 	Hold bool `json:"hold,omitempty"`
+	// PlanHash wiaze instalacje z planem policzonym na tym hoscie: host
+	// liczy plan jeszcze raz i odmawia, gdy metadane repozytorium sie
+	// zmienily od zatwierdzenia.
+	PlanHash string `json:"plan_hash,omitempty"`
 }
 
 // PackagePlanPayload opisuje planowanie aktualizacji.
@@ -1528,6 +1542,9 @@ type TimePayload struct {
 	// pliku demona. Bez niej host, ktory zadnego nie wlacza, zostaje tylko do
 	// odczytu - panel nie dopisuje sie do cudzej konfiguracji po cichu.
 	EnableDropIn bool `json:"enable_dropin,omitempty"`
+	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
+	// plan jeszcze raz przed zapisem.
+	PlanHash string `json:"plan_hash,omitempty"`
 }
 
 // SecretRef wskazuje sekret w magazynie panelu.
@@ -1627,6 +1644,9 @@ type KernelPayload struct {
 	Module string   `json:"module,omitempty"`
 	// Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
 	Blacklist bool `json:"blacklist,omitempty"`
+	// PlanHash wiaze blokade z planem policzonym na tym hoscie; host liczy
+	// plan jeszcze raz przed zapisem.
+	PlanHash string `json:"plan_hash,omitempty"`
 }
 
 // SSHPayload opisuje zmiane konfiguracji serwera sshd.
@@ -1647,6 +1667,17 @@ type SSHPayload struct {
 	// dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
 	AllowLockout bool   `json:"allow_lockout,omitempty"`
 	KeyType      string `json:"key_type,omitempty"`
+	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
+	// plan jeszcze raz przed zapisem.
+	PlanHash string `json:"plan_hash,omitempty"`
+}
+
+// OpisujeZmiane mowi, czy payload niesie ustawienia do zaplanowania. Payload
+// bez ustawien jest pytaniem o stan serwera, a nie o roznice.
+func (p SSHPayload) OpisujeZmiane() bool {
+	return p.Port != "" || p.PermitRootLogin != "" || p.PasswordAuthentication != "" ||
+		p.PubkeyAuthentication != "" || p.KbdInteractive != "" || p.MaxAuthTries != "" ||
+		len(p.AllowUsers) > 0 || len(p.AllowGroups) > 0 || len(p.DenyUsers) > 0
 }
 
 // StoragePayload opisuje operacje na przestrzeni dyskowej.
@@ -1673,6 +1704,13 @@ type StoragePayload struct {
 	// ExpectedUUID wiaze operacje z konkretnym filesystemem.
 	ExpectedUUID string `json:"expected_uuid,omitempty"`
 	Repair       bool   `json:"repair,omitempty"`
+	// Plan nazywa rodzaj operacji planowanej przez storage.plan na
+	// urzadzeniu: check, resize albo lvm_extend. Montowanie poznaje sie po
+	// celu, wiec nie potrzebuje nazwy.
+	Plan string `json:"plan,omitempty"`
+	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
+	// plan jeszcze raz przed operacja.
+	PlanHash string `json:"plan_hash,omitempty"`
 }
 
 // FirewallPayload opisuje operacje na zaporze hosta.
@@ -2415,6 +2453,11 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return nil
 
+	case ActionTimePlan:
+		// Plan przyjmuje to samo, co zmiana, i sam nazywa, czego host nie
+		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
+		return nil
+
 	case ActionTimeConfigApply:
 		if payload.Time == nil {
 			return fmt.Errorf("operacja %s wymaga payloadu time", action)
@@ -2446,6 +2489,11 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		_, err := kernel.SkladajPlikSysctl(payload.Kernel.Settings)
 		return err
+
+	case ActionKernelModulePlan:
+		// Plan przyjmuje to samo, co zmiana, i sam nazywa, czego host nie
+		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
+		return nil
 
 	case ActionKernelModuleLoad, ActionKernelModuleBlacklist:
 		if payload.Kernel == nil || payload.Kernel.Module == "" {

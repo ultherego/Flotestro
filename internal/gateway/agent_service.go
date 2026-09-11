@@ -1004,11 +1004,18 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// ktora sie jeszcze nie wydarzyla, i zrodlo rozwiazane do UUID tego hosta.
 	if przestrzen := result.GetStorageResult(); przestrzen != nil && len(przestrzen.GetPlan()) > 0 {
 		var plan struct {
-			PlanHash string `json:"plan_hash"`
+			PlanHash  string `json:"plan_hash"`
+			Operation string `json:"operation"`
 		}
 		_ = json.Unmarshal(przestrzen.GetPlan(), &plan)
+		// Plan montowania i plan urzadzenia (fsck, rozszerzenie) sa dwoma
+		// ksztaltami; rodzaj wyniku ma to nazwac.
+		rodzaj := "mount_plan"
+		if plan.Operation != "" {
+			rodzaj = "device_plan"
+		}
 		encoded, err := json.Marshal(map[string]any{
-			"kind":      "mount_plan",
+			"kind":      rodzaj,
 			"plan":      json.RawMessage(przestrzen.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
@@ -1032,11 +1039,45 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	// Ustawienia, ktore nie doszly do skutku, sa trescia wyniku: zmiana
 	// zapisana i przeslonieta wyglada z zewnatrz tak samo jak udana.
+	// Plan sshd jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
+	// ktora sie jeszcze nie wydarzyla, wobec konfiguracji, ktora serwer
+	// stosuje teraz.
+	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(serwer.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "ssh_plan",
+			"plan":      json.RawMessage(serwer.GetPlan()),
+			"plan_hash": plan.PlanHash,
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetMismatches()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":       "ssh",
 			"message":    serwer.GetMessage(),
 			"mismatches": serwer.GetMismatches(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Plan blokady modulu jest wynikiem zadania, nie stanem hosta.
+	if jadro := result.GetKernelResult(); jadro != nil && len(jadro.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(jadro.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "kernel_module_plan",
+			"plan":      json.RawMessage(jadro.GetPlan()),
+			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
 			return encoded
@@ -1076,6 +1117,22 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// Pomiary zrodel czasu naleza do zadania, a nie do stanu hosta: to
 	// odpowiedz na pytanie zadane w jednej chwili, wobec serwerow, ktorych
 	// host jeszcze moze nie uzywac.
+	// Plan zrodel czasu jest wynikiem zadania, nie stanem hosta.
+	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(zegar.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "time_plan",
+			"plan":      json.RawMessage(zegar.GetPlan()),
+			"plan_hash": plan.PlanHash,
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetProbes()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "time",

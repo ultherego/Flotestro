@@ -269,6 +269,24 @@ func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.
 		operacja = helperv1.PackageActionRequest_OPERATION_HOLD
 	}
 
+	// Instalacja zatwierdzona na podstawie planu ma zainstalowac to, co
+	// operator ogladal. Metadane repozytorium zmienione od planowania daja
+	// inny plan - i to jest odmowa, nie ostrzezenie.
+	if action == opspec.ActionPackageInstall && payload.PlanHash != "" {
+		manager, err := packages.Detect()
+		if err != nil {
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorUnsupported, err.Error())
+		}
+		current, err := manager.Plan(callCtx, packages.Options{Mode: "install", Packages: payload.Packages})
+		if err != nil {
+			return rejected(agentv1.TaskResult_STATUS_FAILED, packageErrorCode(err), err.Error())
+		}
+		if hex.EncodeToString(current.Hash()) != strings.ToLower(payload.PlanHash) {
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorPlanMismatch,
+				"metadane repozytorium zmienily sie od zatwierdzenia planu")
+		}
+	}
+
 	// Postep dotyczy instalacji i usuwania: obie potrafia trwac minutami.
 	var meldujPostep func(*helperv1.TaskProgress)
 	if e.progress != nil && action != opspec.ActionPackageHoldSet {

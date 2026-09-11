@@ -38,7 +38,8 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 	// agent: kazde przejscie przez roota trzeba uzasadnic. Plan z celem jest
 	// czym innym: liczy roznice dla jednego montowania i rozwiazuje zrodlo
 	// do UUID - to robi helper, bo to on potem montuje.
-	if action == opspec.ActionStoragePlan && (payload == nil || strings.TrimSpace(payload.Target) == "") {
+	if action == opspec.ActionStoragePlan && (payload == nil ||
+		(strings.TrimSpace(payload.Target) == "" && payload.Plan == "")) {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		snapshot := ZbierzPrzestrzen(callCtx)
@@ -64,6 +65,9 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 	switch action {
 	case opspec.ActionStoragePlan:
 		operacja = helperv1.StorageRequest_OPERATION_MOUNT_PLAN
+		if payload.Plan != "" {
+			operacja = helperv1.StorageRequest_OPERATION_DEVICE_PLAN
+		}
 	case opspec.ActionMountRemove:
 		operacja = helperv1.StorageRequest_OPERATION_MOUNT_REMOVE
 	case opspec.ActionFilesystemCheck:
@@ -98,6 +102,8 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 				ExpectedSerial:    payload.ExpectedSerial,
 				ExpectedSizeBytes: payload.ExpectedSizeBytes,
 				Size:              payload.Size,
+				Plan:              payload.Plan,
+				PlanHash:          payload.PlanHash,
 				Label:             payload.Label,
 			},
 		},

@@ -30,6 +30,8 @@ func (s *Server) applyKernel(ctx context.Context, request *helperv1.HelperReques
 		return s.zaladujModul(actionCtx, action)
 	case helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST:
 		return s.zablokujModul(actionCtx, action)
+	case helperv1.KernelRequest_OPERATION_MODULE_PLAN:
+		return s.zaplanujBlokade(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja na jadrze")
 }
@@ -123,6 +125,16 @@ func (s *Server) zablokujModul(ctx context.Context, action *helperv1.KernelReque
 	if err := kernel.WalidujModul(action.GetModule()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
+	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal: inny plik blokad albo inny stan modulu od planowania
+	// jest odmowa, nie ostrzezeniem.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		teraz := kernel.ZaplanujBlokade(s.czytajJadro(ctx, nil), action.GetModule(), action.GetBlacklist())
+		if teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"blokady modulow zmienily sie od planowania; zmiana wymaga nowego planu")
+		}
+	}
 
 	obecne := []string{}
 	if tresc, err := os.ReadFile(kernel.PlikBlacklisty); err == nil {
@@ -157,6 +169,30 @@ func (s *Server) zablokujModul(ctx context.Context, action *helperv1.KernelReque
 		}
 	}
 	return odpowiedzJadra(s.czytajJadro(ctx, nil), komunikat, nil, nil)
+}
+
+// zaplanujBlokade liczy roznice dla blokady modulu bez dotykania hosta.
+// Modul chroniony i zla nazwa sa odmowa w planie, nie bledem zlecenia.
+func (s *Server) zaplanujBlokade(ctx context.Context, action *helperv1.KernelRequest) *helperv1.HelperResponse {
+	stan := s.czytajJadro(ctx, nil)
+	plan := kernel.ZaplanujBlokade(stan, action.GetModule(), action.GetBlacklist())
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == kernel.PlanBezZmian:
+		komunikat = "blokada modulu " + plan.Module + " jest juz w stanie docelowym"
+	default:
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	odpowiedz := odpowiedzJadra(stan, komunikat, nil, nil)
+	if odpowiedz.GetKernelResult() != nil {
+		odpowiedz.KernelResult.Plan = zakodowany
+	}
+	return odpowiedz
 }
 
 // czytajJadro sklada obraz ustawien jadra.

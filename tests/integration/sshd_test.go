@@ -22,6 +22,7 @@ type migawkaSSH struct {
 	PermitRootLogin        string           `json:"permit_root_login"`
 	PasswordAuthentication string           `json:"password_authentication"`
 	PubkeyAuthentication   string           `json:"pubkey_authentication"`
+	GSSAPIAuthentication   string           `json:"gssapi_authentication"`
 	MaxAuthTries           int              `json:"max_auth_tries"`
 	HostKeys               []kluczHostaView `json:"host_keys"`
 	ManagedPath            string           `json:"managed_path"`

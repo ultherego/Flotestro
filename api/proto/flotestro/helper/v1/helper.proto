@@ -484,6 +484,9 @@ message StorageRequest {
     // Policzenie roznicy miedzy montowaniem zastanym a zadanym. Nie zmienia
     // niczego i rozwiazuje zrodlo do UUID filesystemu, ktory ten host ma.
     OPERATION_MOUNT_PLAN = 9;
+    // Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu, bez
+    // dotykania hosta. Rodzaj nazywa pole plan.
+    OPERATION_DEVICE_PLAN = 10;
   }
   Operation operation = 1;
   string source = 2;
@@ -507,6 +510,11 @@ message StorageRequest {
   // Size jest przyrostem wolumenu, np. "+10G" albo "+100%FREE".
   string size = 12;
   string label = 13;
+  // Plan nazywa rodzaj planowanej operacji na urzadzeniu: check, resize
+  // albo lvm_extend.
+  string plan = 14;
+  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  string plan_hash = 15;
 }
 
 message StorageResult {
@@ -529,6 +537,9 @@ message SshRequest {
     OPERATION_READ = 1;
     OPERATION_APPLY = 2;
     OPERATION_ROTATE_HOSTKEY = 3;
+    // Plan zmiany bez dotykania hosta: roznica miedzy tym, co serwer
+    // stosuje, a zamowieniem.
+    OPERATION_PLAN = 4;
   }
   Operation operation = 1;
   string port = 2;
@@ -545,6 +556,9 @@ message SshRequest {
   bool allow_lockout = 11;
   // KeyType wskazuje klucz hosta do wymiany, np. "ed25519".
   string key_type = 12;
+  // Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
+  // raz wobec stanu, ktory ma teraz.
+  string plan_hash = 13;
 }
 
 message SshResult {
@@ -555,6 +569,8 @@ message SshResult {
   // w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
   // nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
   repeated string mismatches = 3;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 4;
 }
 
 // SecurityRequest czyta stan ochronny hosta albo przelacza SELinuksa.
@@ -745,6 +761,8 @@ message TimeRequest {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_CONFIG_APPLY = 1;
     OPERATION_TIMEZONE_SET = 2;
+    // Plan zmiany zrodel czasu bez dotykania hosta.
+    OPERATION_PLAN = 3;
   }
   Operation operation = 1;
   repeated string servers = 2;
@@ -754,12 +772,16 @@ message TimeRequest {
   bool allow_step = 4;
   // EnableDropin jest zgoda na dopisanie katalogu zrodel do glownego pliku.
   bool enable_dropin = 5;
+  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  string plan_hash = 6;
 }
 
 message TimeResult {
   bytes snapshot = 1;
   string message = 2;
   bytes probes = 3;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 4;
 }
 
 // KernelRequest opisuje operacje na ustawieniach jadra.
@@ -774,6 +796,8 @@ message KernelRequest {
     OPERATION_SYSCTL_ENSURE = 2;
     OPERATION_MODULE_LOAD = 3;
     OPERATION_MODULE_BLACKLIST = 4;
+    // Plan blokady modulu bez dotykania hosta.
+    OPERATION_MODULE_PLAN = 5;
   }
   Operation operation = 1;
   map<string, string> settings = 2;
@@ -782,6 +806,8 @@ message KernelRequest {
   string module = 4;
   // Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
   bool blacklist = 5;
+  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  string plan_hash = 6;
 }
 
 message KernelResult {
@@ -792,6 +818,8 @@ message KernelResult {
   repeated string pending_reboot = 3;
   // AppliedRuntime wylicza ustawienia, ktore obowiazuja juz teraz.
   repeated string applied_runtime = 4;
+  // Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+  bytes plan = 5;
 }
 
 // FileRequest opisuje operacje na pliku konfiguracyjnym.

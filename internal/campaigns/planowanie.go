@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -260,6 +261,14 @@ func (o *Orchestrator) zamknijPlanowanie(ctx context.Context, campaign Campaign,
 // aktualizacja niesie odcisk zatwierdzonego planu, a plan go dopiero liczy.
 func planPayload(akcja opspec.ActionType, zmiana opspec.ActionType,
 	payload opspec.Payload) opspec.Payload {
+	// Plan urzadzenia dostaje nazwe rodzaju: sama sciezka /dev/... nie mowi,
+	// czy operator sprawdza, czy rozszerza.
+	if rodzaj := rodzajPlanuUrzadzenia(zmiana); rodzaj != "" && payload.Storage != nil {
+		przestrzen := *payload.Storage
+		przestrzen.Plan = rodzaj
+		payload.Storage = &przestrzen
+		return payload
+	}
 	if akcja != opspec.ActionPackagePlan {
 		return payload
 	}
@@ -272,6 +281,19 @@ func planPayload(akcja opspec.ActionType, zmiana opspec.ActionType,
 		plan.OnlyPackages = payload.PackageChange.Packages
 	}
 	return opspec.Payload{PackagePlan: plan}
+}
+
+// rodzajPlanuUrzadzenia mowi, o ktory plan urzadzenia pytamy.
+func rodzajPlanuUrzadzenia(zmiana opspec.ActionType) string {
+	switch zmiana {
+	case opspec.ActionFilesystemCheck:
+		return storage.PlanSprawdzenie
+	case opspec.ActionFilesystemResize:
+		return storage.PlanRozszerzenieFS
+	case opspec.ActionLVMExtend:
+		return storage.PlanRozszerzenieLV
+	}
+	return ""
 }
 
 // trybPlanu mowi, o co pytamy planer pakietow.
@@ -293,6 +315,13 @@ func trybPlanu(zmiana opspec.ActionType) string {
 func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 	plan json.RawMessage) opspec.Payload {
 	switch action {
+	case opspec.ActionPackageInstall:
+		instalacja := &opspec.PackageChangePayload{PlanHash: hash}
+		if payload.PackageChange != nil {
+			instalacja.Packages = payload.PackageChange.Packages
+		}
+		payload.PackageChange = instalacja
+
 	case opspec.ActionPackageUpgrade:
 		aktualizacja := &opspec.PackageUpgradePayload{PlanHash: hash}
 		if payload.PackageUpgrade != nil {
@@ -333,12 +362,49 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.Network = &siec
 		}
 
+	case opspec.ActionTimeConfigApply:
+		// Zrodla czasu wiaza sie odciskiem planu: plik panelu albo demon
+		// zmieniony od planowania zatrzymuje zmiane.
+		if payload.Time != nil {
+			zegar := *payload.Time
+			zegar.PlanHash = hash
+			payload.Time = &zegar
+		}
+
+	case opspec.ActionKernelModuleBlacklist:
+		// Blokada modulu wiaze sie odciskiem planu: plik blokad albo stan
+		// modulu zmieniony od planowania zatrzymuje zmiane.
+		if payload.Kernel != nil {
+			jadro := *payload.Kernel
+			jadro.PlanHash = hash
+			payload.Kernel = &jadro
+		}
+
+	case opspec.ActionSSHConfigApply:
+		// sshd wiaze sie odciskiem planu: host liczy plan jeszcze raz przed
+		// zapisem, a serwer albo plik panelu zmieniony od planowania
+		// zatrzymuje zmiane.
+		if payload.SSH != nil {
+			serwer := *payload.SSH
+			serwer.PlanHash = hash
+			payload.SSH = &serwer
+		}
+
 	case opspec.ActionDNSHostApply:
 		// Resolver wiaze sie odciskiem planu tak samo jak reszta sieci.
 		if payload.DNS != nil {
 			resolver := *payload.DNS
 			resolver.PlanHash = hash
 			payload.DNS = &resolver
+		}
+
+	case opspec.ActionFilesystemCheck, opspec.ActionFilesystemResize, opspec.ActionLVMExtend:
+		// Urzadzenie wiaze sie odciskiem planu: dysk, grupa albo montowanie
+		// zmienione od planowania zatrzymuja operacje.
+		if payload.Storage != nil {
+			przestrzen := *payload.Storage
+			przestrzen.PlanHash = hash
+			payload.Storage = &przestrzen
 		}
 
 	case opspec.ActionMountEnsure:

@@ -97,7 +97,7 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	switch action {
 	// Transakcja pakietowa: plan liczy diff i zwraca wlasny odcisk, ktory
 	// wraca do hosta razem ze zmiana.
-	case ActionPackageUpgrade:
+	case ActionPackageUpgrade, ActionPackageInstall:
 		return ActionPackagePlan
 
 	// Plik: plan liczy roznice miedzy trescia zastana a zadana i zwraca odcisk
@@ -122,6 +122,13 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionMountEnsure, ActionMountRemove:
 		return ActionStoragePlan
 
+	// Sprawdzenie i rozszerzenia: plan mowi, czy host widzi urzadzenie, czy
+	// filesystem jest zamontowany, ile miejsca ma grupa. Rodzaj planu
+	// nazywa payload planera (StoragePayload.Plan), bo sama sciezka nie mowi,
+	// co operator zamierza.
+	case ActionFilesystemCheck, ActionFilesystemResize, ActionLVMExtend:
+		return ActionStoragePlan
+
 	// Siec: plan liczy roznice miedzy profilem NetworkManagera, ktory host
 	// ma, a zadanym - i zwraca odcisk tej roznicy. Zmiana wraca z odciskiem,
 	// a host liczy plan jeszcze raz: profil zmieniony po planowaniu
@@ -131,19 +138,34 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionDNSHostApply:
 		return ActionDNSPlan
 
+	// sshd: plan liczy roznice miedzy tym, co serwer stosuje, a zamowieniem,
+	// razem z plikiem panelu, ktory zapis nadpisuje w calosci. Odciecie
+	// wszystkich metod logowania jest odmowa w planie, nie w wykonaniu.
+	case ActionSSHConfigApply:
+		return ActionSSHConfigPlan
+
+	// Blokada modulu: plan mowi, czy wpis juz jest, czy modul dziala i kto go
+	// trzyma - bo wtedy wpis zadziala dopiero po restarcie. Modul chroniony
+	// jest odmowa w planie.
+	case ActionKernelModuleBlacklist:
+		return ActionKernelModulePlan
+
+	// Zrodla czasu: plan mowi, ktory demon host ma, czy przeladuje zrodla,
+	// czy zrestartuje sie, i czy panel dopisze swoj katalog do cudzego
+	// pliku. Host bez demona i bez zgody na katalog jest odmowa w planie.
+	case ActionTimeConfigApply:
+		return ActionTimePlan
+
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
 	// ktory tego planu nigdy nie widzial.
 	case ActionComposeDeploy:
 		return ActionComposePlan
 	}
-	// Pozostale rodziny odmawiaja i warto wiedziec, dlaczego. Ich operacje
-	// "*.plan" - dla LVM i filesystemow storage.plan - czytaja
-	// stan hosta, a nie licza diffu wobec stanu docelowego. Nazwanie ich planerem
-	// dalo by kampanii faze planowania, ktora niczego nie planuje, i zgode
-	// odnoszaca sie do odczytu zamiast do zmiany. Planer per host dla tych
-	// rodzin jest osobna praca, a nie mapowaniem nazw - tak jak byla nia
-	// dla plikow.
+	// Rodzina bez planera odmawia i nazywa powod: kampania bez planu per
+	// host zatwierdzalaby zmiane, ktorej diffu nikt nie policzyl. Planer
+	// jest osobna praca (proto, helper, wydanie agenta), a nie mapowaniem
+	// nazw - tak bylo z kazda rodzina powyzej.
 	return ""
 }
 

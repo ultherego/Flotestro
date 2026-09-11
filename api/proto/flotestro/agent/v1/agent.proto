@@ -1122,6 +1122,8 @@ message StorageAction {
     OPERATION_DISK_WIPE = 8;
     // Policzenie roznicy miedzy montowaniem zastanym a zadanym, bez zmiany.
     OPERATION_MOUNT_PLAN = 9;
+    // Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu.
+    OPERATION_DEVICE_PLAN = 10;
   }
   Operation operation = 1;
   string source = 2;
@@ -1139,6 +1141,10 @@ message StorageAction {
   uint64 expected_size_bytes = 11;
   string size = 12;
   string label = 13;
+  // Plan nazywa rodzaj planowanej operacji na urzadzeniu.
+  string plan = 14;
+  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  string plan_hash = 15;
 }
 
 message StorageResult {
@@ -1156,6 +1162,8 @@ message SshAction {
     OPERATION_READ = 1;
     OPERATION_APPLY = 2;
     OPERATION_ROTATE_HOSTKEY = 3;
+    // Plan zmiany liczony na hoscie bez dotykania konfiguracji.
+    OPERATION_PLAN = 4;
   }
   Operation operation = 1;
   string port = 2;
@@ -1169,12 +1177,16 @@ message SshAction {
   repeated string deny_users = 10;
   bool allow_lockout = 11;
   string key_type = 12;
+  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  string plan_hash = 13;
 }
 
 message SshResult {
   bytes snapshot = 1;
   string message = 2;
   repeated string mismatches = 3;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 4;
 }
 
 // SecurityAction opisuje operacje modulu bezpieczenstwa.
@@ -1390,6 +1402,8 @@ message TimeAction {
     OPERATION_SYNC_TEST = 1;
     OPERATION_CONFIG_APPLY = 2;
     OPERATION_TIMEZONE_SET = 3;
+    // Plan zmiany zrodel czasu liczony na hoscie bez dotykania konfiguracji.
+    OPERATION_PLAN = 4;
   }
   Operation operation = 1;
   repeated string servers = 2;
@@ -1401,6 +1415,8 @@ message TimeAction {
   // wiersza, ktory wlacza katalog zrodel panelu. Bez niej host bez takiego
   // katalogu zostaje tylko do odczytu.
   bool enable_dropin = 6;
+  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  string plan_hash = 7;
 }
 
 message TimeResult {
@@ -1409,6 +1425,8 @@ message TimeResult {
   // Probes niesie pomiary zadane przez panel. Serwer, ktory nie odpowiedzial,
   // ma tu powod, a nie przesuniecie rowne zeru.
   bytes probes = 3;
+  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  bytes plan = 4;
 }
 
 // KernelAction opisuje operacje na ustawieniach jadra.
@@ -1419,12 +1437,16 @@ message KernelAction {
     OPERATION_SYSCTL_ENSURE = 2;
     OPERATION_MODULE_LOAD = 3;
     OPERATION_MODULE_BLACKLIST = 4;
+    // Plan blokady modulu liczony na hoscie bez dotykania konfiguracji.
+    OPERATION_MODULE_PLAN = 5;
   }
   Operation operation = 1;
   map<string, string> settings = 2;
   repeated string keys = 3;
   string module = 4;
   bool blacklist = 5;
+  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  string plan_hash = 6;
 }
 
 message KernelResult {
@@ -1432,6 +1454,8 @@ message KernelResult {
   string message = 2;
   repeated string pending_reboot = 3;
   repeated string applied_runtime = 4;
+  // Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+  bytes plan = 5;
 }
 
 // SecretRef wskazuje sekret w magazynie panelu. Koperta zadania niesie
@@ -1494,6 +1518,9 @@ message PackageLifecycle {
   repeated string packages = 2;
   repeated string expected_removals = 3;
   bool hold = 4;
+  // Odcisk planu instalacji zatwierdzonego przez operatora; host liczy plan
+  // jeszcze raz i odmawia, gdy metadane repozytorium sie zmienily.
+  string plan_hash = 5;
 }
 
 message ListProcesses {

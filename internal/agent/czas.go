@@ -61,8 +61,13 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 	}
 
 	operacja := helperv1.TimeRequest_OPERATION_CONFIG_APPLY
-	if action == opspec.ActionTimezoneSet {
+	switch action {
+	case opspec.ActionTimezoneSet:
 		operacja = helperv1.TimeRequest_OPERATION_TIMEZONE_SET
+	case opspec.ActionTimePlan:
+		// Plan liczy roznice wobec pliku panelu bez dotykania hosta;
+		// osiagalnosc serwerow sprawdza dopiero zmiana.
+		operacja = helperv1.TimeRequest_OPERATION_PLAN
 	}
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
@@ -75,6 +80,7 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 				Timezone:     payload.Timezone,
 				AllowStep:    payload.AllowStep,
 				EnableDropin: payload.EnableDropIn,
+				PlanHash:     payload.PlanHash,
 			},
 		},
 	}, timeout)
@@ -87,6 +93,7 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 		Snapshot: wynik.GetSnapshot(),
 		Message:  wynik.GetMessage(),
 		Probes:   zakodujPomiary(pomiary),
+		Plan:     wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

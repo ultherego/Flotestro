@@ -89,20 +89,27 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// powstaje z manifestu i z digestow obrazow, ktore ten host naprawde
 	// widzi, i wraca do niego razem ze zmiana.
 	for zmiana, planer := range map[ActionType]ActionType{
-		ActionComposeDeploy:       ActionComposePlan,
-		ActionFileEnsure:          ActionFilePlan,
-		ActionFileRemove:          ActionFilePlan,
-		ActionFileRollback:        ActionFilePlan,
-		ActionFirewallRuleEnsure:  ActionFirewallPlan,
-		ActionFirewallRuleRemove:  ActionFirewallPlan,
-		ActionFirewallZonePort:    ActionFirewallPlan,
-		ActionFirewallZoneService: ActionFirewallPlan,
-		ActionMountEnsure:         ActionStoragePlan,
-		ActionMountRemove:         ActionStoragePlan,
-		ActionNetworkMTUSet:       ActionNetworkPlan,
-		ActionNetworkRouteEnsure:  ActionNetworkPlan,
-		ActionNetworkProfileApply: ActionNetworkPlan,
-		ActionDNSHostApply:        ActionDNSPlan,
+		ActionComposeDeploy:         ActionComposePlan,
+		ActionFileEnsure:            ActionFilePlan,
+		ActionFileRemove:            ActionFilePlan,
+		ActionFileRollback:          ActionFilePlan,
+		ActionFirewallRuleEnsure:    ActionFirewallPlan,
+		ActionFirewallRuleRemove:    ActionFirewallPlan,
+		ActionFirewallZonePort:      ActionFirewallPlan,
+		ActionFirewallZoneService:   ActionFirewallPlan,
+		ActionMountEnsure:           ActionStoragePlan,
+		ActionMountRemove:           ActionStoragePlan,
+		ActionNetworkMTUSet:         ActionNetworkPlan,
+		ActionNetworkRouteEnsure:    ActionNetworkPlan,
+		ActionNetworkProfileApply:   ActionNetworkPlan,
+		ActionDNSHostApply:          ActionDNSPlan,
+		ActionSSHConfigApply:        ActionSSHConfigPlan,
+		ActionKernelModuleBlacklist: ActionKernelModulePlan,
+		ActionTimeConfigApply:       ActionTimePlan,
+		ActionFilesystemCheck:       ActionStoragePlan,
+		ActionFilesystemResize:      ActionStoragePlan,
+		ActionLVMExtend:             ActionStoragePlan,
+		ActionPackageInstall:        ActionPackagePlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
@@ -113,21 +120,25 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 		}
 	}
 
-	// Rodzina, ktorej panel nie umie jeszcze zaplanowac masowo, jest nadal
-	// odmawiana. Odmowa jest tu odpowiedzia, a nie brakiem funkcji: kampania
-	// bez planu per host zatwierdzalaby zmiane, ktorej diffu nikt nie policzyl.
-	// Rodziny, ktorych operacja "*.plan" czyta stan hosta zamiast liczyc diff
-	// wobec stanu docelowego, nadal odmawiaja - i to jest odpowiedz, a nie
-	// brak funkcji. Plik przeszedl juz te droge: dostal prawdziwy planer,
-	// wiec przestal tu byc przykladem.
-	for _, zmiana := range []ActionType{
-		ActionFilesystemResize, ActionLVMExtend,
-	} {
-		if AkcjaPlanowania(zmiana) != "" {
-			t.Errorf("%s ma planera, wiec ta czesc testu przestala cokolwiek pilnowac", zmiana)
+	// Kazda rodzina zadeklarowana jako plan per host ma planera: brak
+	// planera oznaczalby kampanie, ktora deklaruje planowanie i nie umie
+	// go zrobic. Nowa rodzina bez planera ma tu odpasc, a nie w produkcji.
+	for _, action := range AllActions() {
+		if action.CampaignMode() != CampaignPerHostPlan {
+			continue
 		}
+		if AkcjaPlanowania(action) == "" {
+			t.Errorf("%s deklaruje plan per host, a nie ma planera", action)
+		}
+		if !TrybWykonywalny(action) {
+			t.Errorf("%s odmowiona mimo planera", action)
+		}
+	}
+	// Bramka nadal istnieje: operacja wyspecjalizowana bez wlasnej fazy
+	// w silniku jest odmawiana z powodem, a nie udawana.
+	for _, zmiana := range []ActionType{ActionDomainEnroll, ActionPackageRepair} {
 		if TrybWykonywalny(zmiana) {
-			t.Errorf("%s dopuszczona bez planow per host", zmiana)
+			t.Errorf("%s dopuszczona bez wlasnej fazy w silniku", zmiana)
 		}
 	}
 }

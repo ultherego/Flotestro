@@ -51,6 +51,12 @@ func (e *TaskExecutor) applySSH(ctx context.Context, task *agentv1.TaskEnvelope,
 
 	operacja := helperv1.SshRequest_OPERATION_READ
 	switch action {
+	case opspec.ActionSSHConfigPlan:
+		// Plan bez ustawien jest odczytem stanu; z ustawieniami liczy
+		// roznice wobec nich, bez dotykania serwera.
+		if payload != nil && payload.OpisujeZmiane() {
+			operacja = helperv1.SshRequest_OPERATION_PLAN
+		}
 	case opspec.ActionSSHConfigApply:
 		operacja = helperv1.SshRequest_OPERATION_APPLY
 	case opspec.ActionSSHHostKeyRotate:
@@ -69,6 +75,7 @@ func (e *TaskExecutor) applySSH(ctx context.Context, task *agentv1.TaskEnvelope,
 		zadanie.DenyUsers = payload.DenyUsers
 		zadanie.AllowLockout = payload.AllowLockout
 		zadanie.KeyType = payload.KeyType
+		zadanie.PlanHash = payload.PlanHash
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -86,6 +93,7 @@ func (e *TaskExecutor) applySSH(ctx context.Context, task *agentv1.TaskEnvelope,
 		Snapshot:   wynik.GetSnapshot(),
 		Message:    wynik.GetMessage(),
 		Mismatches: wynik.GetMismatches(),
+		Plan:       wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

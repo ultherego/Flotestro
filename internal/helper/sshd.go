@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -33,12 +34,23 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 	defer cancel()
 
 	if !exists(sciezkaSshd) {
+		if action.GetOperation() == helperv1.SshRequest_OPERATION_PLAN {
+			// Brak serwera jest odpowiedzia planu, nie bledem odczytu:
+			// kampania ma zobaczyc ten host jako odmowe.
+			return odpowiedzPlanuSSH(sshmodul.Snapshot{}, sshmodul.Zaplanuj(
+				sshmodul.Snapshot{UnavailableReason: "ten host nie ma serwera sshd"},
+				ustawieniaZZadania(action), action.GetAllowLockout()))
+		}
 		return reject(ErrorUnsupported, "ten host nie ma serwera sshd")
 	}
 
 	switch action.GetOperation() {
 	case helperv1.SshRequest_OPERATION_READ:
 		return odpowiedzSSH(s.czytajSSH(actionCtx), "", nil)
+	case helperv1.SshRequest_OPERATION_PLAN:
+		stan := s.czytajSSH(actionCtx)
+		return odpowiedzPlanuSSH(stan, sshmodul.Zaplanuj(stan,
+			ustawieniaZZadania(action), action.GetAllowLockout()))
 	case helperv1.SshRequest_OPERATION_APPLY:
 		return s.zapiszKonfiguracjeSSH(actionCtx, action)
 	case helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY:
@@ -55,6 +67,16 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 func (s *Server) zapiszKonfiguracjeSSH(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
 	ustawienia := ustawieniaZZadania(action)
 	stan := s.czytajSSH(ctx)
+
+	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal. Inny odcisk znaczy, ze serwer albo plik panelu
+	// zmienil sie od planowania - i to jest odmowa, nie ostrzezenie.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		if teraz := sshmodul.Zaplanuj(stan, ustawienia, action.GetAllowLockout()); teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"konfiguracja sshd zmienila sie od planowania; zmiana wymaga nowego planu")
+		}
+	}
 
 	// Serwer, do ktorego nie da sie zalogowac zadna metoda, nie jest
 	// zabezpieczony - jest niedostepny.
@@ -264,4 +286,25 @@ func odpowiedzSSH(snapshot sshmodul.Snapshot, komunikat string, rozbiezne []stri
 			Snapshot: zakodowane, Message: komunikat, Mismatches: rozbiezne,
 		},
 	}
+}
+
+// odpowiedzPlanuSSH dokleda plan do stanu serwera.
+func odpowiedzPlanuSSH(stan sshmodul.Snapshot, plan sshmodul.Plan) *helperv1.HelperResponse {
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == sshmodul.PlanBezZmian:
+		komunikat = "konfiguracja sshd jest juz w stanie docelowym"
+	default:
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	odpowiedz := odpowiedzSSH(stan, komunikat, nil)
+	if odpowiedz.GetSshResult() != nil {
+		odpowiedz.SshResult.Plan = zakodowany
+	}
+	return odpowiedz
 }
