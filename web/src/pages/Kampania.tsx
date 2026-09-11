@@ -5,6 +5,7 @@ import type {
   Campaign as CampaignType, CampaignReport, CampaignTarget, WpisPrzebiegu,
 } from "../lib/types";
 import { Blad, Czas, Para, Pary, PasekPostepu, Pusto, StanZadania } from "../components/ui";
+import { PlanZadania } from "../components/plan";
 import { ODSTEP_OPERACJI, usePostep, useStrumienPostepu } from "../lib/strumien";
 
 export function Kampania() {
@@ -143,12 +144,15 @@ export function Kampania() {
         <Pusto>No targets.</Pusto>
       ) : (
         <table>
-          <thead><tr><th>Host</th><th>Wave</th><th>State</th><th>Progress</th><th>Error code</th><th>Message</th></tr></thead>
+          <thead><tr><th>Host</th><th>Wave</th><th>Plan</th><th>State</th><th>Progress</th><th>Error code</th><th>Message</th></tr></thead>
           <tbody>
             {cele.data.items.map((cel) => (
               <tr key={cel.host_id}>
                 <td>{cel.hostname || cel.host_id.slice(0, 8)}</td>
                 <td>{cel.wave}{cel.wave === 0 && " (canary)"}</td>
+                {/* Zgoda dotyczy roznic policzonych na hoscie, nie zamiaru.
+                    Host bez operacji planujacej nie ma planu do pokazania. */}
+                <td>{cel.plan_job_id ? <PlanZadania jobId={cel.plan_job_id} /> : "—"}</td>
                 <td><StanZadania stan={cel.state} /></td>
                 {/* Postep dotyczy operacji, ktora akurat trwa na tym hoscie.
                     Host czekajacy na swoja fale nie ma czego pokazywac. */}

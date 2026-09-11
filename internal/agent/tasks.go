@@ -842,7 +842,10 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		przestrzen := action.Storage
 		typ := opspec.ActionMountEnsure
 		switch przestrzen.GetOperation() {
-		case agentv1.StorageAction_OPERATION_READ:
+		case agentv1.StorageAction_OPERATION_READ, agentv1.StorageAction_OPERATION_MOUNT_PLAN:
+			// Odczyt i plan sa ta sama operacja panelu; rozroznia je obecnosc
+			// celu. Typ jest jeden, bo hash payloadu liczy sie z typu po obu
+			// stronach.
 			typ = opspec.ActionStoragePlan
 		case agentv1.StorageAction_OPERATION_MOUNT_REMOVE:
 			typ = opspec.ActionMountRemove

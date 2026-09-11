@@ -114,6 +114,12 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionFirewallRuleEnsure, ActionFirewallRuleRemove:
 		return ActionFirewallPlan
 
+	// Montowanie: plan rozwiazuje zrodlo do UUID filesystemu, ktory ten host
+	// ma, i to UUID jedzie w zmianie. Sciezka /dev/sdX po restarcie wskazuje
+	// co innego; UUID wskazuje ten sam filesystem albo zaden.
+	case ActionMountEnsure, ActionMountRemove:
+		return ActionStoragePlan
+
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
 	// ktory tego planu nigdy nie widzial.
@@ -121,8 +127,8 @@ func AkcjaPlanowania(action ActionType) ActionType {
 		return ActionComposePlan
 	}
 	// Pozostale rodziny odmawiaja i warto wiedziec, dlaczego. Ich operacje
-	// "*.plan" - network.plan, storage.plan - czytaja stan hosta, a nie licza
-	// diffu wobec stanu docelowego. Nazwanie ich planerem
+	// "*.plan" - network.plan, a dla LVM i filesystemow storage.plan - czytaja
+	// stan hosta, a nie licza diffu wobec stanu docelowego. Nazwanie ich planerem
 	// dalo by kampanii faze planowania, ktora niczego nie planuje, i zgode
 	// odnoszaca sie do odczytu zamiast do zmiany. Planer per host dla tych
 	// rodzin jest osobna praca, a nie mapowaniem nazw - tak jak byla nia

@@ -322,6 +322,16 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.Firewall = &regula
 		}
 
+	case opspec.ActionMountEnsure:
+		// Montowanie wiaze sie zrodlem rozwiazanym do UUID na tym hoscie:
+		// mount po UUID znajdzie ten sam filesystem albo zaden, a nigdy
+		// cudzy dysk, ktory po restarcie dostal te sama sciezke.
+		if zrodlo := zrodloRozwiazane(plan); zrodlo != "" && payload.Storage != nil {
+			montowanie := *payload.Storage
+			montowanie.Source = zrodlo
+			payload.Storage = &montowanie
+		}
+
 	case opspec.ActionComposeDeploy:
 		// Digest planu Compose powstaje z manifestu i z digestow obrazow.
 		// Wdrozenie bez niego nie ma podstawy, a wdrozenie z cudzym trafiloby
@@ -384,6 +394,22 @@ func odmowaPlanu(plan json.RawMessage) string {
 		return "walidator odrzucil tresc docelowa: " + szczegol.Plan.ValidatorOutput
 	}
 	return ""
+}
+
+// zrodloRozwiazane wyjmuje z planu montowania zrodlo po UUID.
+func zrodloRozwiazane(plan json.RawMessage) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	var szczegol struct {
+		Plan struct {
+			ResolvedSource string `json:"resolved_source"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(plan, &szczegol); err != nil {
+		return ""
+	}
+	return szczegol.Plan.ResolvedSource
 }
 
 // odciskZestawuRegul wyjmuje z planu zapory odcisk zestawu regul hosta.

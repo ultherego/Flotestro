@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -47,8 +48,97 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 		return s.zalozFilesystem(actionCtx, action)
 	case helperv1.StorageRequest_OPERATION_DISK_WIPE:
 		return s.wyczyscUrzadzenie(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_MOUNT_PLAN:
+		return s.zaplanujMontowanie(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "nieznana operacja na przestrzeni dyskowej")
+}
+
+// zaplanujMontowanie liczy roznice miedzy montowaniem zastanym a zadanym.
+//
+// Niczego nie zmienia. Sprawdzenia wejscia sa te same co przy montowaniu,
+// a do tego plan rozwiazuje zrodlo do UUID filesystemu, ktory ten host ma:
+// to UUID jedzie potem w zmianie, wiec dysk, ktory po restarcie dostal inna
+// sciezke, nie zostanie zamontowany w cudze miejsce.
+func (s *Server) zaplanujMontowanie(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	if err := storage.WalidujCel(action.GetTarget()); err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	// Plan bez zrodla jest planem odmontowania: montowanie zawsze ma zrodlo,
+	// odmontowanie nigdy. Wynik nazywa to wprost polem action.
+	odmontowanie := action.GetSource() == ""
+	if !odmontowanie {
+		if err := storage.WalidujZrodlo(action.GetSource()); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+		if err := storage.WalidujOpcje(action.GetOptions(), action.GetFsType()); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+	}
+
+	stan := s.obrazPrzestrzeni(ctx)
+	if stan.UnavailableReason != "" {
+		return reject(ErrorUnsupported, stan.UnavailableReason)
+	}
+	mountinfo, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return reject(ErrorExecFailed, "mountinfo: "+err.Error())
+	}
+	fstab, _ := os.ReadFile(storage.SciezkaFstab)
+	stan.Mounts = storage.PolaczMontowania(
+		storage.ParsujMountinfo(string(mountinfo)), storage.ParsujFstab(string(fstab)))
+
+	var plan storage.MountPlan
+	if odmontowanie {
+		plan = storage.ZaplanujOdmontowanie(stan, action.GetTarget())
+		if plan.Action == storage.PlanUsuwa {
+			// Odmontowanie zajetego filesystemu sie nie powiedzie; lepiej
+			// powiedziec to w planie niz na polowie floty przy wykonaniu.
+			if uzytkownicy := s.procesyNaFilesystemie(ctx, action.GetTarget()); uzytkownicy != "" {
+				plan.Odmow("filesystem jest w uzyciu przez: " + uzytkownicy)
+			}
+		}
+	} else {
+		plan = storage.ZaplanujMontowanie(stan, action.GetSource(), action.GetTarget(),
+			action.GetFsType(), action.GetOptions(), action.GetPersist())
+	}
+	// Plan liczony w prywatnej przestrzeni montowan opisywalby zmiane, ktora
+	// na host nigdy nie wejdzie. Odmowa ma stanac w planie, nie w wykonaniu.
+	if plan.Refusal == "" && plan.Action != storage.PlanBezZmian &&
+		plan.Action != storage.PlanJuzUsuniety {
+		if err := wspolnaPrzestrzenMontowan(); err != nil {
+			plan.Odmow(err.Error())
+		}
+	}
+
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	odpowiedz := odpowiedzPrzestrzeni(stan, opisPlanuMontowania(plan), "")
+	if odpowiedz.GetStorageResult() != nil {
+		odpowiedz.StorageResult.Plan = zakodowany
+	}
+	return odpowiedz
+}
+
+// opisPlanuMontowania streszcza plan jednym zdaniem dla dziennika operacji.
+func opisPlanuMontowania(plan storage.MountPlan) string {
+	if plan.Refusal != "" {
+		return "zmiana nie wejdzie na ten host: " + plan.Refusal
+	}
+	switch plan.Action {
+	case storage.PlanBezZmian:
+		return "montowanie jest juz w stanie docelowym"
+	case storage.PlanTworzy:
+		return "montowanie powstanie ze zrodla " + plan.ResolvedSource
+	case storage.PlanJuzUsuniety:
+		return "montowania nie ma, wiec nie ma czego usuwac"
+	case storage.PlanUsuwa:
+		return "montowanie zostanie usuniete"
+	default:
+		return "zmieni sie: " + strings.Join(plan.Changes, ", ")
+	}
 }
 
 // zamontuj zaklada wpis w fstab i montuje filesystem.
@@ -65,6 +155,10 @@ func (s *Server) zamontuj(ctx context.Context, action *helperv1.StorageRequest) 
 	}
 	if err := storage.WalidujOpcje(action.GetOptions(), action.GetFsType()); err != nil {
 		return reject(ErrorMalformed, err.Error())
+	}
+
+	if err := wspolnaPrzestrzenMontowan(); err != nil {
+		return reject(ErrorUnsupported, err.Error())
 	}
 
 	// Filesystem, ktorego host nie widzi, nie da sie zamontowac - i lepiej
@@ -105,6 +199,9 @@ func (s *Server) zamontuj(ctx context.Context, action *helperv1.StorageRequest) 
 func (s *Server) odmontuj(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
 	if err := storage.WalidujCel(action.GetTarget()); err != nil {
 		return reject(ErrorMalformed, err.Error())
+	}
+	if err := wspolnaPrzestrzenMontowan(); err != nil {
+		return reject(ErrorUnsupported, err.Error())
 	}
 	// Odmontowanie zajetego filesystemu nie powiedzie sie, a komunikat
 	// samego umount nie mowi, kto go trzyma.
@@ -376,6 +473,30 @@ func (s *Server) procesyNaFilesystemie(ctx context.Context, cel string) string {
 		pidy = append(pidy[:10], "...")
 	}
 	return "PID " + strings.Join(pidy, ", ")
+}
+
+// wspolnaPrzestrzenMontowan sprawdza, czy helper dzieli przestrzen montowan
+// z hostem.
+//
+// Usluga uruchomiona z PrivateTmp, ProtectSystem albo inna dyrektywa
+// tworzaca przestrzen montowan dostaje wlasna kopie drzewa, z ktorej nic
+// nie wraca na host. mount konczy sie wtedy sukcesem, helper melduje
+// "zamontowany", a host filesystemu nie ma. To jest najgorszy z wynikow:
+// cichy. Lepiej odmowic i nazwac powod.
+func wspolnaPrzestrzenMontowan() error {
+	hosta, err := os.Readlink("/proc/1/ns/mnt")
+	if err != nil {
+		return fmt.Errorf("przestrzen montowan hosta: %w", err)
+	}
+	helpera, err := os.Readlink("/proc/self/ns/mnt")
+	if err != nil {
+		return fmt.Errorf("przestrzen montowan helpera: %w", err)
+	}
+	if hosta != helpera {
+		return fmt.Errorf("helper dziala w prywatnej przestrzeni montowan " +
+			"(PrivateTmp albo podobna dyrektywa uslugi); montowanie nie byloby widoczne dla hosta")
+	}
+	return nil
 }
 
 func zapewnijKatalog(cel string) error {

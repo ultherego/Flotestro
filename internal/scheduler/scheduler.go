@@ -673,7 +673,13 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		operacja := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
 		switch action {
 		case opspec.ActionStoragePlan:
+			// Plan bez celu jest odczytem topologii (zakladka hosta); plan
+			// z celem liczy roznice dla jednego montowania - faza planowania
+			// kampanii.
 			operacja = agentv1.StorageAction_OPERATION_READ
+			if payload.Storage != nil && strings.TrimSpace(payload.Storage.Target) != "" {
+				operacja = agentv1.StorageAction_OPERATION_MOUNT_PLAN
+			}
 		case opspec.ActionMountRemove:
 			operacja = agentv1.StorageAction_OPERATION_MOUNT_REMOVE
 		case opspec.ActionFilesystemCheck:

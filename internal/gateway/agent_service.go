@@ -964,6 +964,23 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// Plan montowania jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
+	// ktora sie jeszcze nie wydarzyla, i zrodlo rozwiazane do UUID tego hosta.
+	if przestrzen := result.GetStorageResult(); przestrzen != nil && len(przestrzen.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(przestrzen.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "mount_plan",
+			"plan":      json.RawMessage(przestrzen.GetPlan()),
+			"plan_hash": plan.PlanHash,
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// Wynik sprawdzenia filesystemu nalezy do zadania: to odpowiedz na jedno
 	// pytanie zadane w jednej chwili.
 	if przestrzen := result.GetStorageResult(); przestrzen != nil && przestrzen.GetOutput() != "" {

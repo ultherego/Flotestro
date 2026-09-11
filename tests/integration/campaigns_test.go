@@ -983,8 +983,8 @@ func TestKampaniaComposeNiesieDigestPlanuNaHosta(t *testing.T) {
 
 	campaign := h.createCampaign(map[string]any{
 		"name": "wdrozenie projektu", "action": "docker.compose.deploy",
-		"reason":  "test integracyjny planow Compose",
-		"payload": map[string]any{"compose": map[string]any{"project": projekt, "manifest": manifest}},
+		"reason":                     "test integracyjny planow Compose",
+		"payload":                    map[string]any{"compose": map[string]any{"project": projekt, "manifest": manifest}},
 		"selector":                   map[string]any{"host_ids": cele},
 		"canary_size":                0,
 		"wave_size":                  len(cele),
@@ -1477,10 +1477,10 @@ func TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 		"payload": map[string]any{"firewall": map[string]any{
 			"rule_id": "test-odciecia-kampania", "chain": "wejscie", "action": "drop",
 			"protocol": "tcp", "ports": []string{"8000-9000"}, "rollback_seconds": 60}},
-		"selector":       map[string]any{"host_ids": cele},
-		"canary_size":    0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"selector":    map[string]any{"host_ids": cele},
+		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
-		"reboot_policy":             "never",
+		"reboot_policy": "never",
 	})
 	stanOdmowy := h.awaitCampaign(odcinajaca.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
@@ -1514,4 +1514,184 @@ func dzialaniePlanuZapory(h *harness, jobID string) string {
 		}
 	}
 	return ""
+}
+
+// TestKampaniaMontowaniaRozwiazujeUUIDNaKazdymHoscie sprawdza, ze zamowienie
+// "zamontuj /dev/sdb" nie jedzie na hosty jako sciezka: kazdy host rozwiazuje
+// ja do UUID filesystemu, ktory naprawde ma, i ten UUID wraca w zmianie.
+// Dwa hosty z ta sama sciezka maja dwa rozne filesystemy - i dwa rozne UUID.
+func TestKampaniaMontowaniaRozwiazujeUUIDNaKazdymHoscie(t *testing.T) {
+	h := newHarness(t)
+	const cel = "/mnt/flotestro-kampania"
+
+	// Hosty rodziny debian z wolnym filesystemem pod ta sama sciezka.
+	zrodla := map[string]string{}
+	var hosty []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" || host.OSFamily != "debian" {
+			continue
+		}
+		stan := migawkaPrzestrzeniHosta(t, h, host.ID)
+		for _, urzadzenie := range stan.Devices {
+			if urzadzenie.FSType == "ext4" && urzadzenie.UUID != "" &&
+				len(urzadzenie.Mountpoints) == 0 && !wFstab(stan, urzadzenie) {
+				zrodla[host.ID] = urzadzenie.Path
+				hosty = append(hosty, host.ID)
+				break
+			}
+		}
+	}
+	if len(hosty) < 2 {
+		t.Skip("flota ma mniej niz dwa hosty debian z wolnym filesystemem ext4")
+	}
+	hosty = hosty[:2]
+	if zrodla[hosty[0]] != zrodla[hosty[1]] {
+		t.Skipf("wolne filesystemy maja rozne sciezki: %s i %s",
+			zrodla[hosty[0]], zrodla[hosty[1]])
+	}
+	sciezka := zrodla[hosty[0]]
+
+	t.Cleanup(func() {
+		for _, hostID := range hosty {
+			h.runOperation(hostID, map[string]any{
+				"action": "mount.remove", "reason": "sprzatanie po tescie kampanii montowania",
+				"payload": map[string]any{"storage": map[string]any{"target": cel}},
+			}, 2*time.Minute)
+		}
+	})
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "dysk danych na flocie", "action": "mount.ensure",
+		"reason": "test integracyjny planow montowania",
+		"payload": map[string]any{"storage": map[string]any{
+			"source": sciezka, "target": cel, "fs_type": "ext4",
+			"options": "defaults,noatime", "persist": true}},
+		"selector":                   map[string]any{"host_ids": hosty},
+		"canary_size":                0,
+		"wave_size":                  len(hosty),
+		"max_concurrent":             len(hosty),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	if campaign.State != "planning" {
+		t.Fatalf("kampania montowania zaczela od stanu %s", campaign.State)
+	}
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+
+	rozwiazane := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planMontowania(h, target.PlanJobID)
+		if plan.Action != "create" {
+			t.Errorf("host %s planuje %q zamiast create", target.Hostname, plan.Action)
+		}
+		if !strings.HasPrefix(plan.ResolvedSource, "UUID=") {
+			t.Errorf("host %s nie rozwiazal zrodla do UUID: %q", target.Hostname, plan.ResolvedSource)
+		}
+		rozwiazane[target.Hostname] = plan.ResolvedSource
+	}
+	if len(rozwiazane) != 2 {
+		t.Fatalf("plany dla %d hostow zamiast 2", len(rozwiazane))
+	}
+	var uuidy []string
+	for _, uuid := range rozwiazane {
+		uuidy = append(uuidy, uuid)
+	}
+	if uuidy[0] == uuidy[1] {
+		t.Fatalf("dwa hosty rozwiazaly %s do tego samego UUID %s", sciezka, uuidy[0])
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+
+	// Zmiana, ktora weszla na host, ma niesc UUID tego hosta, a nie sciezke
+	// z zamowienia - i host ma po niej montowanie zapisane w fstab.
+	for _, target := range h.campaignTargets(campaign.ID) {
+		var zadanie struct {
+			Payload struct {
+				Storage struct {
+					Source string `json:"source"`
+				} `json:"storage"`
+			} `json:"payload"`
+		}
+		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
+		if zadanie.Payload.Storage.Source != rozwiazane[target.Hostname] {
+			t.Errorf("host %s dostal zrodlo %q, plan mial %q",
+				target.Hostname, zadanie.Payload.Storage.Source, rozwiazane[target.Hostname])
+		}
+		if !montowanieHosta(t, h, target.HostID, cel) {
+			t.Errorf("host %s po kampanii nie ma %s zamontowanego i w fstab", target.Hostname, cel)
+		}
+	}
+}
+
+// montowanieHosta czeka, az inwentarz hosta pokaze cel zamontowany i w fstab.
+// Fragment przestrzeni pochodzi z cyklu inwentarza, wiec po zmianie trzeba
+// go odswiezyc, a zapis fragmentu jest asynchroniczny wzgledem zadania.
+func montowanieHosta(t *testing.T, h *harness, hostID, cel string) bool {
+	t.Helper()
+	h.runOperation(hostID, map[string]any{
+		"action": "inventory.refresh", "reason": "test kampanii montowania",
+		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"storage"}}},
+	}, 2*time.Minute)
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		for _, montowanie := range migawkaPrzestrzeniHosta(t, h, hostID).Mounts {
+			if montowanie.Target == cel && montowanie.Mounted && montowanie.InFstab {
+				return true
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// wFstab mowi, czy urzadzenie ma wpis w fstab pod jakimkolwiek celem.
+func wFstab(stan migawkaPrzestrzeni, urzadzenie urzadzenieView) bool {
+	for _, montowanie := range stan.Mounts {
+		if !montowanie.InFstab {
+			continue
+		}
+		if montowanie.Source == urzadzenie.Path ||
+			montowanie.Source == "UUID="+urzadzenie.UUID {
+			return true
+		}
+	}
+	return false
+}
+
+// planMontowania czyta z wyniku zadania planujacego plan montowania.
+func planMontowania(h *harness, jobID string) (plan struct {
+	Action         string `json:"action"`
+	ResolvedSource string `json:"resolved_source"`
+	Refusal        string `json:"refusal"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "mount_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
 }

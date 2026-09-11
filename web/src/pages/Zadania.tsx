@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
+import { StreszczeniePlanu } from "../components/plan";
 import type { Attempt, Job } from "../lib/types";
 import { Blad, Czas, PasekPostepu, Pusto, StanZadania } from "../components/ui";
 import { ODSTEP_OPERACJI, usePostep } from "../lib/strumien";
@@ -200,6 +201,14 @@ function WynikTypowany({ detail }: { detail: Record<string, any> }) {
               {jednostka.name}: {jednostka.active_state}/{jednostka.sub_state}
             </div>
           ))}
+        </div>
+      );
+    case "file_plan":
+    case "firewall_plan":
+    case "mount_plan":
+      return (
+        <div className="zrodlo">
+          <StreszczeniePlanu plan={(detail.plan ?? {}) as Record<string, any>} />
         </div>
       );
     default:

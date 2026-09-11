@@ -31,7 +31,14 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # i zamknieta lista operacji - a nie flagi, ktore udaja, ze proces jest
 # nieuprzywilejowany.
 NoNewPrivileges=no
-PrivateTmp=yes
+# PrivateTmp=yes (jak kazda dyrektywa tworzaca przestrzen montowan) odcina
+# propagacje montowan z uslugi do hosta: mount wykonany przez helper wchodzi
+# do jego prywatnej przestrzeni, helper melduje sukces, a host nie ma
+# filesystemu - i po restarcie czyta wpis z fstab, ktorego nikt nie sprawdzil.
+# Helper montuje i odmontowuje w imieniu hosta, wiec musi dzielic z nim
+# przestrzen montowan. Prywatny /tmp niczego tu nie chronil: proces i tak
+# dziala jako root.
+PrivateTmp=no
 # Helper zarzadza plikami authorized_keys w katalogach domowych, wiec /home
 # musi byc dla niego widoczny. ProtectHome nie chronilby tu przed niczym:
 # proces i tak dziala jako root i to on jest granica uprawnien.

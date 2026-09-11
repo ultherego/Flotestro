@@ -607,6 +607,8 @@ const (
 	StorageAction_OPERATION_FS_RESIZE    StorageAction_Operation = 6
 	StorageAction_OPERATION_FS_CREATE    StorageAction_Operation = 7
 	StorageAction_OPERATION_DISK_WIPE    StorageAction_Operation = 8
+	// Policzenie roznicy miedzy montowaniem zastanym a zadanym, bez zmiany.
+	StorageAction_OPERATION_MOUNT_PLAN StorageAction_Operation = 9
 )
 
 // Enum value maps for StorageAction_Operation.
@@ -621,6 +623,7 @@ var (
 		6: "OPERATION_FS_RESIZE",
 		7: "OPERATION_FS_CREATE",
 		8: "OPERATION_DISK_WIPE",
+		9: "OPERATION_MOUNT_PLAN",
 	}
 	StorageAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED":  0,
@@ -632,6 +635,7 @@ var (
 		"OPERATION_FS_RESIZE":    6,
 		"OPERATION_FS_CREATE":    7,
 		"OPERATION_DISK_WIPE":    8,
+		"OPERATION_MOUNT_PLAN":   9,
 	}
 )
 
@@ -8102,10 +8106,12 @@ func (x *StorageAction) GetLabel() string {
 }
 
 type StorageResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Snapshot      []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Output        string                 `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Output   string                 `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
+	// Plan jest opisem roznicy miedzy montowaniem zastanym a zadanym, w JSON.
+	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8159,6 +8165,13 @@ func (x *StorageResult) GetOutput() string {
 		return x.Output
 	}
 	return ""
+}
+
+func (x *StorageResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // SshAction opisuje operacje na serwerze sshd.
@@ -11756,7 +11769,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"rollbackId\x12+\n" +
 	"\x11rollback_deadline\x18\x04 \x01(\tR\x10rollbackDeadline\x12\x1c\n" +
 	"\tconfirmed\x18\x05 \x01(\bR\tconfirmed\x12\x12\n" +
-	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xa1\x05\n" +
+	"\x04plan\x18\x06 \x01(\fR\x04plan\"\xbb\x05\n" +
 	"\rStorageAction\x12I\n" +
 	"\toperation\x18\x01 \x01(\x0e2+.flotestro.agent.v1.StorageAction.OperationR\toperation\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
@@ -11771,7 +11784,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	" \x01(\tR\x0eexpectedSerial\x12.\n" +
 	"\x13expected_size_bytes\x18\v \x01(\x04R\x11expectedSizeBytes\x12\x12\n" +
 	"\x04size\x18\f \x01(\tR\x04size\x12\x14\n" +
-	"\x05label\x18\r \x01(\tR\x05label\"\xef\x01\n" +
+	"\x05label\x18\r \x01(\tR\x05label\"\x89\x02\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x1a\n" +
@@ -11781,11 +11794,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x14OPERATION_LVM_EXTEND\x10\x05\x12\x17\n" +
 	"\x13OPERATION_FS_RESIZE\x10\x06\x12\x17\n" +
 	"\x13OPERATION_FS_CREATE\x10\a\x12\x17\n" +
-	"\x13OPERATION_DISK_WIPE\x10\b\"]\n" +
+	"\x13OPERATION_DISK_WIPE\x10\b\x12\x18\n" +
+	"\x14OPERATION_MOUNT_PLAN\x10\t\"q\n" +
 	"\rStorageResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
-	"\x06output\x18\x03 \x01(\tR\x06output\"\xfe\x04\n" +
+	"\x06output\x18\x03 \x01(\tR\x06output\x12\x12\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\"\xfe\x04\n" +
 	"\tSshAction\x12E\n" +
 	"\toperation\x18\x01 \x01(\x0e2'.flotestro.agent.v1.SshAction.OperationR\toperation\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\tR\x04port\x12*\n" +

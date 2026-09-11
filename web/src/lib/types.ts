@@ -188,6 +188,8 @@ export type CampaignTarget = {
   job_id?: string;
   reboot_job_id?: string;
   health_job_id?: string;
+  // Operacja planujaca: jej wynik jest planem, na ktory operator sie zgadza.
+  plan_job_id?: string;
 };
 
 export type CampaignReport = {

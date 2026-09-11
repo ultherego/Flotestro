@@ -89,10 +89,14 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// powstaje z manifestu i z digestow obrazow, ktore ten host naprawde
 	// widzi, i wraca do niego razem ze zmiana.
 	for zmiana, planer := range map[ActionType]ActionType{
-		ActionComposeDeploy: ActionComposePlan,
-		ActionFileEnsure:    ActionFilePlan,
-		ActionFileRemove:    ActionFilePlan,
-		ActionFileRollback:  ActionFilePlan,
+		ActionComposeDeploy:      ActionComposePlan,
+		ActionFileEnsure:         ActionFilePlan,
+		ActionFileRemove:         ActionFilePlan,
+		ActionFileRollback:       ActionFilePlan,
+		ActionFirewallRuleEnsure: ActionFirewallPlan,
+		ActionFirewallRuleRemove: ActionFirewallPlan,
+		ActionMountEnsure:        ActionStoragePlan,
+		ActionMountRemove:        ActionStoragePlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",

@@ -1108,6 +1108,8 @@ message StorageAction {
     OPERATION_FS_RESIZE = 6;
     OPERATION_FS_CREATE = 7;
     OPERATION_DISK_WIPE = 8;
+    // Policzenie roznicy miedzy montowaniem zastanym a zadanym, bez zmiany.
+    OPERATION_MOUNT_PLAN = 9;
   }
   Operation operation = 1;
   string source = 2;
@@ -1131,6 +1133,8 @@ message StorageResult {
   bytes snapshot = 1;
   string message = 2;
   string output = 3;
+  // Plan jest opisem roznicy miedzy montowaniem zastanym a zadanym, w JSON.
+  bytes plan = 4;
 }
 
 // SshAction opisuje operacje na serwerze sshd.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -34,8 +35,10 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 	timeout := timeoutOf(task, action)
 
 	// Odczyt topologii nie wymaga roota poza czescia LVM, wiec sklada go
-	// agent: kazde przejscie przez roota trzeba uzasadnic.
-	if action == opspec.ActionStoragePlan {
+	// agent: kazde przejscie przez roota trzeba uzasadnic. Plan z celem jest
+	// czym innym: liczy roznice dla jednego montowania i rozwiazuje zrodlo
+	// do UUID - to robi helper, bo to on potem montuje.
+	if action == opspec.ActionStoragePlan && (payload == nil || strings.TrimSpace(payload.Target) == "") {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		snapshot := ZbierzPrzestrzen(callCtx)
@@ -59,6 +62,8 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 	}
 	operacja := helperv1.StorageRequest_OPERATION_MOUNT_ENSURE
 	switch action {
+	case opspec.ActionStoragePlan:
+		operacja = helperv1.StorageRequest_OPERATION_MOUNT_PLAN
 	case opspec.ActionMountRemove:
 		operacja = helperv1.StorageRequest_OPERATION_MOUNT_REMOVE
 	case opspec.ActionFilesystemCheck:
@@ -106,6 +111,7 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 		Snapshot: wynik.GetSnapshot(),
 		Message:  wynik.GetMessage(),
 		Output:   wynik.GetOutput(),
+		Plan:     wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
