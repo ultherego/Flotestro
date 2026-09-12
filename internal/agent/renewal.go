@@ -185,9 +185,9 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 	}
 
 	odnowiona, err := magazyn.Commit(identitystore.Generation{
-		Key:         key,
+		Key:            key,
 		CertificatePEM: response.Msg.GetCertificatePem(),
-		TrustPEM:   bundle,
+		TrustPEM:       bundle,
 	})
 	if err != nil {
 		// Odrzucona generacja nie rusza tego, czym host pracuje: lepiej

@@ -1,9 +1,9 @@
-// Package freeipa jest adapterem katalogu FreeIPA. Uzywa udokumentowanego
-// JSON-RPC po HTTPS z uwierzytelnieniem Kerberos.
+// Package freeipa is the adapter for the FreeIPA directory. It uses the
+// documented JSON-RPC over HTTPS with Kerberos authentication.
 //
-// Zapis bezposrednio do LDAP jest swiadomie niemozliwy w tym pakiecie: omijalby
-// walidacje, pluginy i semantyke FreeIPA, przez co panel tworzylby obiekty,
-// ktorych sam katalog uznalby za niespojne.
+// Writing straight to LDAP is deliberately impossible in this package: it
+// would bypass FreeIPA's validation, plugins and semantics, and the panel
+// would create objects the directory itself would consider inconsistent.
 package freeipa
 
 import (
@@ -27,31 +27,32 @@ import (
 	"github.com/jcmturner/gokrb5/v8/spnego"
 )
 
-// Config opisuje polaczenie z katalogiem.
+// Config describes the connection with the directory.
 type Config struct {
-	// ServerURL jest adresem serwera IPA, np. https://ipa.flotestro.test.
+	// ServerURL is the address of the IPA server, e.g. https://ipa.flotestro.test.
 	ServerURL string
 	Realm     string
-	// Principal jest wlasnym service principalem connectora. Nie uzywamy
-	// konta admin ani Directory Managera.
+	// Principal is the connector's own service principal. We use neither the
+	// admin account nor the Directory Manager.
 	Principal string
-	// KeytabPath wskazuje keytab connectora. Keytab nie trafia do bazy.
+	// KeytabPath points at the connector's keytab. The keytab does not reach the database.
 	KeytabPath string
-	// KRB5ConfPath wskazuje konfiguracje Kerberosa.
+	// KRB5ConfPath points at the Kerberos configuration.
 	KRB5ConfPath string
-	// CACertPath jest certyfikatem CA katalogu.
+	// CACertPath is the CA certificate of the directory.
 	CACertPath string
-	// CacheTTL jest krotkim czasem zycia odpowiedzi. Panel nie replikuje
-	// katalogu, wiec cache ma tylko chronic serwer IPA przed nadmiarem zapytan.
+	// CacheTTL is the short lifetime of an answer. The panel does not
+	// replicate the directory, so the cache only protects the IPA server from
+	// an excess of queries.
 	CacheTTL time.Duration
 }
 
-// Enabled mowi, czy connector jest skonfigurowany.
+// Enabled says whether the connector is configured.
 func (c Config) Enabled() bool {
 	return c.ServerURL != "" && c.Principal != "" && c.KeytabPath != ""
 }
 
-// Client rozmawia z katalogiem.
+// Client talks to the directory.
 type Client struct {
 	config     Config
 	http       *http.Client
@@ -71,10 +72,10 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// New tworzy klienta katalogu.
+// New creates a directory client.
 func New(cfg Config) (*Client, error) {
 	if !cfg.Enabled() {
-		return nil, fmt.Errorf("connector katalogu nie jest skonfigurowany")
+		return nil, fmt.Errorf("the directory connector is not configured")
 	}
 	if cfg.CacheTTL <= 0 {
 		cfg.CacheTTL = 30 * time.Second
@@ -100,7 +101,7 @@ func New(cfg Config) (*Client, error) {
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("certyfikat CA katalogu nie zawiera certyfikatu")
+			return nil, fmt.Errorf("the directory CA file contains no certificate")
 		}
 		tlsConfig.RootCAs = pool
 	}
@@ -137,9 +138,10 @@ func (c *Client) login(ctx context.Context) error {
 	krbClient := client.NewWithKeytab(username, realm, c.krbKeytab, c.krbConfig,
 		client.DisablePAFXFAST(true))
 	if err := krbClient.Login(); err != nil {
-		// Fail closed: bez biletu nie przechodzimy na zadna inna metode
-		// uwierzytelnienia, w szczegolnosci na haslo administratora.
-		return fmt.Errorf("logowanie Kerberos jako %s: %w", c.config.Principal, err)
+		// Fail closed: without a ticket we fall back to no other
+		// authentication method, in particular not to an administrator
+		// password.
+		return fmt.Errorf("Kerberos login as %s: %w", c.config.Principal, err)
 	}
 	defer krbClient.Destroy()
 
@@ -152,18 +154,18 @@ func (c *Client) login(ctx context.Context) error {
 	spnegoClient := spnego.NewClient(krbClient, c.http, "")
 	response, err := spnegoClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("sesja katalogu: %w", err)
+		return fmt.Errorf("the directory session: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("sesja katalogu: kod %d", response.StatusCode)
+		return fmt.Errorf("the directory session: code %d", response.StatusCode)
 	}
 	c.logged = true
 	return nil
 }
 
-// rpcRequest jest koperta JSON-RPC katalogu.
+// rpcRequest is the JSON-RPC envelope of the directory.
 type rpcRequest struct {
 	Method string `json:"method"`
 	Params []any  `json:"params"`
@@ -185,17 +187,17 @@ type rpcResponse struct {
 // z listy jawnie wspieranych komend, nigdy z zadania uzytkownika.
 func (c *Client) call(ctx context.Context, method string, args []string, options map[string]any) (json.RawMessage, error) {
 	if !allowedMethod(method) {
-		return nil, fmt.Errorf("polecenie %q nie jest wspierane przez adapter", method)
+		return nil, fmt.Errorf("the command %q is not supported by the adapter", method)
 	}
 	if options == nil {
 		options = map[string]any{}
 	}
-	// Katalog wymaga listy pozycyjnej nawet dla polecen bez argumentow;
-	// pusty wskaznik serializuje sie do null i jest odrzucany.
+	// The directory requires a positional list even for commands without
+	// arguments; an empty pointer serialises to null and is rejected.
 	if args == nil {
 		args = []string{}
 	}
-	// Katalog domyslnie zwraca skrocone rekordy; version stabilizuje kontrakt.
+	// The directory returns shortened records by default; version pins the contract.
 	options["version"] = apiVersion
 
 	payload, err := json.Marshal(rpcRequest{
@@ -210,7 +212,7 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 	if err == nil {
 		return result, nil
 	}
-	// Sesja katalogu wygasa; jedno ponowne logowanie jest normalna sciezka.
+	// The directory session expires; one re-login is the normal path.
 	if !strings.Contains(err.Error(), "401") {
 		return nil, err
 	}
@@ -234,28 +236,28 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	// FreeIPA odrzuca zapytania bez naglowka Referer jako ochrone przed CSRF.
+	// FreeIPA rejects requests without a Referer header as CSRF protection.
 	request.Header.Set("Referer", c.referer)
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("zapytanie do katalogu: %w", err)
+		return nil, fmt.Errorf("the query to the directory: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("katalog odrzucil sesje: 401")
+		return nil, fmt.Errorf("the directory refused the session: 401")
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("katalog: kod %d", response.StatusCode)
+		return nil, fmt.Errorf("the directory: code %d", response.StatusCode)
 	}
 
 	var decoded rpcResponse
 	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("odpowiedz katalogu: %w", err)
+		return nil, fmt.Errorf("the directory response: %w", err)
 	}
 	if decoded.Error != nil {
-		return nil, fmt.Errorf("katalog: %s (%s)", decoded.Error.Message, decoded.Error.Name)
+		return nil, fmt.Errorf("the directory: %s (%s)", decoded.Error.Message, decoded.Error.Name)
 	}
 	return decoded.Result, nil
 }
@@ -266,12 +268,12 @@ func (c *Client) findRaw(ctx context.Context, method string) ([]map[string]any, 
 	return c.find(ctx, method, true)
 }
 
-// apiVersion przypina wersje kontraktu katalogu. Bez tego serwer moze zmienic
-// ksztalt odpowiedzi po aktualizacji.
+// apiVersion pins the version of the directory contract. Without it the
+// server may change the shape of its answers after an upgrade.
 const apiVersion = "2.254"
 
-// allowedMethods to jedyne polecenia, jakie adapter potrafi wykonac.
-// Lista jest zamknieta: nie istnieje sposob wywolania dowolnego polecenia IPA.
+// allowedMethods are the only commands the adapter is able to run. The list
+// is closed: there is no way to call an arbitrary IPA command.
 var allowedMethods = map[string]bool{
 	"user_find":     true,
 	"user_show":     true,
@@ -283,8 +285,8 @@ var allowedMethods = map[string]bool{
 	"sudorule_find": true,
 	"ping":          true,
 
-	// Operacje zapisu. Kazda jest wykonywana wylacznie przez control plane
-	// po zatwierdzeniu planu; adapter nie udostepnia polecen usuwajacych
+	// The write operations. Each is carried out solely by the control plane
+	// after the plan is approved; the adapter exposes no deleting commands
 	// konta ani zmieniajacych konfiguracje samego katalogu.
 	"user_add":            true,
 	"user_mod":            true,
@@ -292,15 +294,16 @@ var allowedMethods = map[string]bool{
 	"user_enable":         true,
 	"group_add_member":    true,
 	"group_remove_member": true,
-	// Wpis hosta i jednorazowe haslo dolaczenia. Usuniecie hosta z katalogu
-	// nie jest tu dostepne: odcielo by dostep administratorom.
+	// The host entry and the one-time enrollment password. Deleting a host
+	// from the directory is not available here: it would cut off the
+	// administrators' access.
 	"host_add": true,
 	"host_mod": true,
 
-	// DNS katalogowy. Odczyt stref i rekordow oraz dopisanie i usuniecie
-	// pojedynczej wartosci. Polecen zmieniajacych sama strefe - jej serwery
-	// nazw, SOA czy DNSSEC - adapter nie udostepnia: to konfiguracja
-	// katalogu, a nie zawartosc, ktora prowadzi panel floty.
+	// Directory DNS. Reading zones and records plus adding and removing a
+	// single value. Commands that change the zone itself - its name servers,
+	// SOA or DNSSEC - the adapter does not expose: that is the directory's
+	// configuration rather than the content the fleet panel runs.
 	"dnszone_find":   true,
 	"dnsrecord_find": true,
 	"dnsrecord_show": true,
@@ -319,7 +322,7 @@ func splitPrincipal(principal, defaultRealm string) (string, string) {
 }
 
 // cached zwraca wynik z krotkiego cache albo pobiera go z katalogu.
-// Panel nie replikuje katalogu; cache chroni serwer IPA przed nadmiarem
+// The panel does not replicate the directory; the cache protects the IPA server from an excess
 // zapytan przy odswiezaniu widoku.
 func cached[T any](ctx context.Context, c *Client, key string, load func() (T, error)) (T, error) {
 	c.mu.Lock()
@@ -343,8 +346,9 @@ func cached[T any](ctx context.Context, c *Client, key string, load func() (T, e
 	return value, nil
 }
 
-// Wzorce nazw obiektow katalogu. Nazwa nigdy nie trafia do polecenia powloki,
-// ale walidacja jest druga linia obrony i odrzuca ksztalty, ktore nie moga byc
+// The patterns of directory object names. A name never reaches a shell
+// command, but validation is a second line of defence and rejects shapes that
+// cannot be
 // nazwa konta ani grupy.
 var (
 	userNamePattern  = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
@@ -352,25 +356,25 @@ var (
 	hostNamePattern  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 )
 
-// validateSSHPublicKey odrzuca material, ktory nie jest kluczem publicznym.
-// Klucz prywatny nigdy nie moze trafic do katalogu ani do logow.
+// validateSSHPublicKey rejects material that is not a public key.
+// A private key must never reach the directory or the logs.
 func validateSSHPublicKey(key string) error {
 	trimmed := strings.TrimSpace(key)
 	if trimmed == "" {
 		return fmt.Errorf("pusty klucz SSH")
 	}
 	if strings.Contains(trimmed, "PRIVATE KEY") {
-		return fmt.Errorf("podano klucz prywatny; do katalogu trafia wylacznie klucz publiczny")
+		return fmt.Errorf("a private key was given; only a public key reaches the directory")
 	}
 	fields := strings.Fields(trimmed)
 	if len(fields) < 2 {
-		return fmt.Errorf("klucz SSH nie ma postaci <typ> <material>")
+		return fmt.Errorf("the SSH key does not have the form <type> <material>")
 	}
 	switch fields[0] {
 	case "ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
 		"ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com":
 		return nil
 	default:
-		return fmt.Errorf("nieobslugiwany typ klucza SSH %q", fields[0])
+		return fmt.Errorf("unsupported SSH key type %q", fields[0])
 	}
 }

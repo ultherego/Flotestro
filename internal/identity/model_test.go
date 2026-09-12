@@ -5,83 +5,84 @@ import (
 	"testing"
 )
 
-func TestCzesciowySukcesMaWlasnyStan(t *testing.T) {
-	// Dokument zabrania przedstawiania czesciowego sukcesu jako powodzenia:
-	// operator musialby sam odkryc, ze czesc zmian zostala zastosowana.
+func TestAPartialSuccessHasItsOwnState(t *testing.T) {
+	// The document forbids presenting a partial success as a success: the
+	// operator would have to discover for themselves that some of the changes
+	// were applied.
 	phases := []Phase{
-		{Name: "utworzenie konta", Status: "succeeded"},
-		{Name: "dodanie do grupy", Status: "failed"},
+		{Name: "creating the account", Status: "succeeded"},
+		{Name: "adding to the group", Status: "failed"},
 	}
 	if got := StateFor(phases); got != StatePartiallyApplied {
-		t.Fatalf("stan = %s, oczekiwano partially_applied", got)
+		t.Fatalf("state = %s, expected partially_applied", got)
 	}
 }
 
-func TestStanKoncowyZalezyOdWynikuFaz(t *testing.T) {
+func TestTheFinalStateFollowsTheResultsOfThePhases(t *testing.T) {
 	cases := map[string]struct {
 		phases []Phase
 		want   State
 	}{
-		"wszystkie udane": {
+		"all succeeded": {
 			[]Phase{{Status: "succeeded"}, {Status: "succeeded"}}, StateSucceeded},
-		"wszystkie nieudane": {
+		"all failed": {
 			[]Phase{{Status: "failed"}, {Status: "failed"}}, StateFailed},
-		"pierwsza faza padla": {
+		"the first phase failed": {
 			[]Phase{{Status: "failed"}}, StateFailed},
-		"brak faz": {
+		"no phases": {
 			nil, StateFailed},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			if got := StateFor(tc.phases); got != tc.want {
-				t.Fatalf("stan = %s, oczekiwano %s", got, tc.want)
+				t.Fatalf("state = %s, expected %s", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestPlanZKonfliktemBlokujeWykonanie(t *testing.T) {
-	blocked := Plan{Conflicts: []string{"konto juz istnieje"}}
+func TestAPlanWithAConflictBlocksExecution(t *testing.T) {
+	blocked := Plan{Conflicts: []string{"the account already exists"}}
 	if !blocked.Blocked() {
-		t.Fatal("plan z konfliktem nie blokuje wykonania")
+		t.Fatal("a plan with a conflict does not block execution")
 	}
-	// Ostrzezenie opisuje skutek, ktory latwo przeoczyc, ale nie zatrzymuje
-	// zmiany; konflikt oznacza, ze wykonanie nie ma sensu.
-	warned := Plan{Warnings: []string{"konto traci 3 reguly sudo"}}
+	// A warning describes a consequence that is easy to miss but does not
+	// stop the change; a conflict means the execution makes no sense.
+	warned := Plan{Warnings: []string{"the account loses 3 sudo rules"}}
 	if warned.Blocked() {
-		t.Fatal("samo ostrzezenie zablokowalo wykonanie")
+		t.Fatal("a warning alone blocked the execution")
 	}
 }
 
-func TestWalidacjaWymagaPayloaduZgodnegoZTypem(t *testing.T) {
+func TestValidationRequiresAPayloadMatchingTheType(t *testing.T) {
 	cases := map[string]struct {
 		action  ActionType
 		payload Payload
 		wantErr bool
 	}{
-		"utworzenie bez payloadu":  {ActionUserCreate, Payload{}, true},
-		"utworzenie bez nazwiska":  {ActionUserCreate, Payload{User: &UserPayload{UID: "jan"}}, true},
-		"utworzenie poprawne":      {ActionUserCreate, Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski"}}, false},
-		"blokada bez konta":        {ActionUserDisable, Payload{}, true},
-		"blokada poprawna":         {ActionUserDisable, Payload{Reference: &ReferencePayload{UID: "jan"}}, false},
-		"pusta zmiana czlonkostwa": {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "grupa"}}, true},
-		"zmiana czlonkostwa":       {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "grupa", Add: []string{"jan"}}}, false},
-		"nieznany typ":             {"identity.user.delete", Payload{}, true},
+		"creation without a payload": {ActionUserCreate, Payload{}, true},
+		"creation without a surname": {ActionUserCreate, Payload{User: &UserPayload{UID: "jan"}}, true},
+		"valid creation":             {ActionUserCreate, Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski"}}, false},
+		"locking without an account": {ActionUserDisable, Payload{}, true},
+		"valid locking":              {ActionUserDisable, Payload{Reference: &ReferencePayload{UID: "jan"}}, false},
+		"empty membership change":    {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "group"}}, true},
+		"membership change":          {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "group", Add: []string{"jan"}}}, false},
+		"unknown type":               {"identity.user.delete", Payload{}, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			err := Validate(tc.action, tc.payload)
 			if tc.wantErr && err == nil {
-				t.Fatal("nieprawidlowa zmiana przeszla walidacje")
+				t.Fatal("an invalid change passed validation")
 			}
 			if !tc.wantErr && err != nil {
-				t.Fatalf("poprawna zmiana odrzucona: %v", err)
+				t.Fatalf("a valid change was rejected: %v", err)
 			}
 		})
 	}
 }
 
-func TestPayloadHashWykrywaPodmiane(t *testing.T) {
+func TestThePayloadHashDetectsASwap(t *testing.T) {
 	original := Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski",
 		Groups: []string{"flotestro-viewers"}}}
 	approved, err := PayloadHash(ActionUserCreate, original)
@@ -89,8 +90,8 @@ func TestPayloadHashWykrywaPodmiane(t *testing.T) {
 		t.Fatalf("hash: %v", err)
 	}
 
-	// Podmiana grupy po zatwierdzeniu jest podniesieniem uprawnien, wiec musi
-	// zmienic hash planu.
+	// Swapping the group after the approval is a privilege escalation, so it
+	// has to change the plan hash.
 	tampered := Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski",
 		Groups: []string{"flotestro-platform-admins"}}}
 	changed, err := PayloadHash(ActionUserCreate, tampered)
@@ -98,36 +99,36 @@ func TestPayloadHashWykrywaPodmiane(t *testing.T) {
 		t.Fatalf("hash: %v", err)
 	}
 	if bytes.Equal(approved, changed) {
-		t.Fatal("podmiana grupy nie zmienila hasha planu")
+		t.Fatal("swapping the group did not change the plan hash")
 	}
 
-	// Ten sam plan musi dac ten sam hash.
+	// The same plan has to give the same hash.
 	again, _ := PayloadHash(ActionUserCreate, original)
 	if !bytes.Equal(approved, again) {
-		t.Fatal("ten sam plan dal rozne hashe")
+		t.Fatal("the same plan gave different hashes")
 	}
 }
 
-func TestUprawnieniaSaRozdzielonePerTypZmiany(t *testing.T) {
+func TestPermissionsAreSeparatedPerTypeOfChange(t *testing.T) {
 	if ActionGroupMembers.Permission() == ActionUserCreate.Permission() {
-		t.Error("zmiana czlonkostwa ma to samo uprawnienie co tworzenie konta")
+		t.Error("a membership change has the same permission as creating an account")
 	}
 	for _, action := range []ActionType{ActionUserCreate, ActionUserDisable, ActionSSHKeys} {
 		if action.Permission() != "identity.user.write" {
-			t.Errorf("%s ma uprawnienie %s", action, action.Permission())
+			t.Errorf("%s has the permission %s", action, action.Permission())
 		}
 	}
 }
 
-func TestStanKoncowyJestRozpoznawany(t *testing.T) {
+func TestTheFinalStateIsRecognised(t *testing.T) {
 	for _, state := range []State{StateSucceeded, StatePartiallyApplied, StateFailed, StateCanceled} {
 		if !state.Terminal() {
-			t.Errorf("%s powinien byc stanem koncowym", state)
+			t.Errorf("%s should be a final state", state)
 		}
 	}
 	for _, state := range []State{StatePlanned, StateAwaitingApproval, StateRunning} {
 		if state.Terminal() {
-			t.Errorf("%s nie jest stanem koncowym", state)
+			t.Errorf("%s is not a final state", state)
 		}
 	}
 }

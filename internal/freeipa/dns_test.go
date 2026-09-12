@@ -5,133 +5,133 @@ import (
 	"testing"
 )
 
-func TestRecordSpecWalidujeTypIWartosc(t *testing.T) {
+func TestRecordSpecValidatesTheTypeAndTheValue(t *testing.T) {
 	dobre := []RecordSpec{
-		{Zone: "flotestro.test", Name: "web", Type: RekordA, Value: "10.0.0.5"},
-		{Zone: "flotestro.test", Name: "web6", Type: RekordAAAA, Value: "2001:db8::5"},
-		{Zone: "flotestro.test", Name: "alias", Type: RekordCNAME, Value: "web.flotestro.test."},
-		{Zone: "flotestro.test", Name: "@", Type: RekordTXT, Value: "v=spf1 -all"},
-		{Zone: "flotestro.test", Name: "_ldap._tcp", Type: RekordSRV, Value: "0 100 389 ipa.flotestro.test."},
+		{Zone: "flotestro.test", Name: "web", Type: RecordA, Value: "10.0.0.5"},
+		{Zone: "flotestro.test", Name: "web6", Type: RecordAAAA, Value: "2001:db8::5"},
+		{Zone: "flotestro.test", Name: "alias", Type: RecordCNAME, Value: "web.flotestro.test."},
+		{Zone: "flotestro.test", Name: "@", Type: RecordTXT, Value: "v=spf1 -all"},
+		{Zone: "flotestro.test", Name: "_ldap._tcp", Type: RecordSRV, Value: "0 100 389 ipa.flotestro.test."},
 	}
 	for _, spec := range dobre {
 		if err := spec.Validate(); err != nil {
-			t.Errorf("poprawny rekord %+v odrzucony: %v", spec, err)
+			t.Errorf("the valid record %+v was rejected: %v", spec, err)
 		}
 	}
 
-	zle := map[string]RecordSpec{
-		// Adres w rekordzie A musi byc adresem IPv4: nazwa w tym miejscu
-		// tworzy rekord, ktory nigdy nie zadziala.
-		"A z nazwa":         {Zone: "flotestro.test", Name: "web", Type: RekordA, Value: "web.example.test"},
-		"A z adresem IPv6":  {Zone: "flotestro.test", Name: "web", Type: RekordA, Value: "2001:db8::5"},
-		"AAAA z IPv4":       {Zone: "flotestro.test", Name: "web", Type: RekordAAAA, Value: "10.0.0.5"},
-		"pusta wartosc":     {Zone: "flotestro.test", Name: "web", Type: RekordA},
-		"nieznany typ":      {Zone: "flotestro.test", Name: "web", Type: "NS", Value: "ipa.flotestro.test."},
-		"zla strefa":        {Zone: "flotestro test", Name: "web", Type: RekordA, Value: "10.0.0.5"},
-		"nazwa ze spacja":   {Zone: "flotestro.test", Name: "we b", Type: RekordA, Value: "10.0.0.5"},
-		"TTL poza zakresem": {Zone: "flotestro.test", Name: "web", Type: RekordA, Value: "10.0.0.5", TTL: -1},
-		"SRV bez pol":       {Zone: "flotestro.test", Name: "_ldap._tcp", Type: RekordSRV, Value: "389 ipa"},
-		"nowa linia":        {Zone: "flotestro.test", Name: "web", Type: RekordTXT, Value: "a\nb"},
+	bad := map[string]RecordSpec{
+		// The address in an A record has to be an IPv4 address: a name in
+		// this place creates a record that will never work.
+		"A with a name":          {Zone: "flotestro.test", Name: "web", Type: RecordA, Value: "web.example.test"},
+		"A with an IPv6 address": {Zone: "flotestro.test", Name: "web", Type: RecordA, Value: "2001:db8::5"},
+		"AAAA with IPv4":         {Zone: "flotestro.test", Name: "web", Type: RecordAAAA, Value: "10.0.0.5"},
+		"an empty value":         {Zone: "flotestro.test", Name: "web", Type: RecordA},
+		"an unknown type":        {Zone: "flotestro.test", Name: "web", Type: "NS", Value: "ipa.flotestro.test."},
+		"a bad zone":             {Zone: "flotestro test", Name: "web", Type: RecordA, Value: "10.0.0.5"},
+		"a name with a space":    {Zone: "flotestro.test", Name: "we b", Type: RecordA, Value: "10.0.0.5"},
+		"a TTL out of range":     {Zone: "flotestro.test", Name: "web", Type: RecordA, Value: "10.0.0.5", TTL: -1},
+		"SRV without fields":     {Zone: "flotestro.test", Name: "_ldap._tcp", Type: RecordSRV, Value: "389 ipa"},
+		"a new line":             {Zone: "flotestro.test", Name: "web", Type: RecordTXT, Value: "a\nb"},
 	}
-	for nazwa, spec := range zle {
+	for name, spec := range bad {
 		if err := spec.Validate(); err == nil {
-			t.Errorf("%s: rekord zostal przyjety", nazwa)
+			t.Errorf("%s: the record was accepted", name)
 		}
 	}
 }
 
-func TestStrefaOdwrotnaLiczyNazweIStrefe(t *testing.T) {
-	strefa, nazwa, err := StrefaOdwrotna("192.168.56.10")
+func TestReverseZoneComputesTheNameAndTheZone(t *testing.T) {
+	zone, name, err := ReverseZone("192.168.56.10")
 	if err != nil {
-		t.Fatalf("StrefaOdwrotna: %v", err)
+		t.Fatalf("ReverseZone: %v", err)
 	}
-	if strefa != "56.168.192.in-addr.arpa" || nazwa != "10" {
-		t.Fatalf("IPv4: strefa=%q nazwa=%q", strefa, nazwa)
+	if zone != "56.168.192.in-addr.arpa" || name != "10" {
+		t.Fatalf("IPv4: zone=%q name=%q", zone, name)
 	}
 
-	strefa, nazwa, err = StrefaOdwrotna("2001:db8::1")
+	zone, name, err = ReverseZone("2001:db8::1")
 	if err != nil {
-		t.Fatalf("StrefaOdwrotna IPv6: %v", err)
+		t.Fatalf("ReverseZone IPv6: %v", err)
 	}
-	// Strefa obejmuje pierwsze 64 bity, nazwa - pozostale.
-	if strefa != "0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa" {
-		t.Fatalf("IPv6: strefa=%q", strefa)
+	// The zone covers the first 64 bits, the name - the rest.
+	if zone != "0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa" {
+		t.Fatalf("IPv6: zone=%q", zone)
 	}
-	if nazwa != "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0" {
-		t.Fatalf("IPv6: nazwa=%q", nazwa)
+	if name != "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0" {
+		t.Fatalf("IPv6: name=%q", name)
 	}
 
-	if _, _, err := StrefaOdwrotna("to nie jest adres"); err == nil {
-		t.Fatal("nazwa zostala przyjeta jako adres")
+	if _, _, err := ReverseZone("this is not an address"); err == nil {
+		t.Fatal("a name was accepted as an address")
 	}
 }
 
-func TestRekordFQDNSkladaNazwe(t *testing.T) {
-	rekord := Rekord{Zone: "flotestro.test", Name: "web"}
-	if rekord.FQDN() != "web.flotestro.test" {
-		t.Fatalf("FQDN = %q", rekord.FQDN())
+func TestRecordFQDNBuildsTheName(t *testing.T) {
+	record := Record{Zone: "flotestro.test", Name: "web"}
+	if record.FQDN() != "web.flotestro.test" {
+		t.Fatalf("FQDN = %q", record.FQDN())
 	}
-	// Wpis w korzeniu strefy zapisuje sie jako "@" i nie moze dac nazwy
-	// zaczynajacej sie kropka.
-	korzen := Rekord{Zone: "flotestro.test", Name: "@"}
-	if korzen.FQDN() != "flotestro.test" {
-		t.Fatalf("FQDN korzenia = %q", korzen.FQDN())
+	// An entry at the root of a zone is written as "@" and must not give a
+	// name starting with a dot.
+	root := Record{Zone: "flotestro.test", Name: "@"}
+	if root.FQDN() != "flotestro.test" {
+		t.Fatalf("the FQDN of the root = %q", root.FQDN())
 	}
 }
 
-func TestPoleceniaDNSSaNaLiscieDozwolonych(t *testing.T) {
-	// Adapter nie ma sposobu wywolania dowolnego polecenia katalogu, wiec
-	// kazda nowa operacja musi byc dopisana swiadomie.
-	for _, metoda := range []string{"dnszone_find", "dnsrecord_find", "dnsrecord_add", "dnsrecord_del"} {
-		if !allowedMethod(metoda) {
-			t.Errorf("polecenie %s nie jest dozwolone", metoda)
+func TestTheDNSCommandsAreOnTheAllowedList(t *testing.T) {
+	// The adapter has no way of calling an arbitrary directory command, so
+	// every new operation has to be added deliberately.
+	for _, method := range []string{"dnszone_find", "dnsrecord_find", "dnsrecord_add", "dnsrecord_del"} {
+		if !allowedMethod(method) {
+			t.Errorf("the command %s is not allowed", method)
 		}
 	}
-	// Polecen zmieniajacych sama strefe nie ma i byc nie powinno.
-	for _, metoda := range []string{"dnszone_add", "dnszone_del", "dnszone_mod", "dnsconfig_mod"} {
-		if allowedMethod(metoda) {
-			t.Errorf("polecenie %s nie powinno byc dozwolone", metoda)
+	// There are no commands that change the zone itself, and there should be none.
+	for _, method := range []string{"dnszone_add", "dnszone_del", "dnszone_mod", "dnsconfig_mod"} {
+		if allowedMethod(method) {
+			t.Errorf("the command %s should not be allowed", method)
 		}
 	}
 }
 
-func TestPelnaNazwaObslugujeKorzenStrefy(t *testing.T) {
-	// Cel PTR "@.flotestro.test." nie wskazuje niczego, a wyglada jak
-	// poprawny rekord - dlatego korzen strefy ma wspolna funkcje.
-	if PelnaNazwa("flotestro.test", "@") != "flotestro.test" {
-		t.Fatalf("korzen strefy = %q", PelnaNazwa("flotestro.test", "@"))
+func TestFullNameHandlesTheRootOfAZone(t *testing.T) {
+	// The PTR target "@.flotestro.test." points at nothing while looking like
+	// a valid record - that is why the root of a zone has a shared function.
+	if FullName("flotestro.test", "@") != "flotestro.test" {
+		t.Fatalf("the root of the zone = %q", FullName("flotestro.test", "@"))
 	}
-	if PelnaNazwa("flotestro.test.", "") != "flotestro.test" {
-		t.Fatalf("pusta nazwa = %q", PelnaNazwa("flotestro.test.", ""))
+	if FullName("flotestro.test.", "") != "flotestro.test" {
+		t.Fatalf("an empty name = %q", FullName("flotestro.test.", ""))
 	}
-	if PelnaNazwa("flotestro.test", "web") != "web.flotestro.test" {
-		t.Fatalf("nazwa = %q", PelnaNazwa("flotestro.test", "web"))
+	if FullName("flotestro.test", "web") != "web.flotestro.test" {
+		t.Fatalf("name = %q", FullName("flotestro.test", "web"))
 	}
 }
 
-func TestNazwaWStrefieLiczyNazweWzgledemWskazanejStrefy(t *testing.T) {
-	// Podzial /24: nazwa jest jednym czlonem.
-	nazwa, err := NazwaWStrefie("192.168.56.10", "56.168.192.in-addr.arpa")
-	if err != nil || nazwa != "10" {
-		t.Fatalf("nazwa=%q err=%v", nazwa, err)
+func TestNameInZoneComputesTheNameAgainstTheNamedZone(t *testing.T) {
+	// A /24 split: the name is one label.
+	name, err := NameInZone("192.168.56.10", "56.168.192.in-addr.arpa")
+	if err != nil || name != "10" {
+		t.Fatalf("name=%q err=%v", name, err)
 	}
-	// Podzial szerszy niz /24: nazwa jest dluzsza. Policzenie jej dla /24
-	// dawalo rekord dla zupelnie innego adresu.
-	nazwa, err = NazwaWStrefie("192.168.56.10", "168.192.in-addr.arpa")
-	if err != nil || nazwa != "10.56" {
-		t.Fatalf("nazwa=%q err=%v", nazwa, err)
+	// A split wider than /24: the name is longer. Computing it for a /24 gave
+	// a record for an entirely different address.
+	name, err = NameInZone("192.168.56.10", "168.192.in-addr.arpa")
+	if err != nil || name != "10.56" {
+		t.Fatalf("name=%q err=%v", name, err)
 	}
-	// Strefa, ktora tego adresu nie obejmuje, jest bledem, a nie rekordem
-	// zapisanym gdzie indziej.
-	if _, err := NazwaWStrefie("192.168.56.10", "57.168.192.in-addr.arpa"); err == nil {
-		t.Fatal("strefa spoza adresu zostala przyjeta")
+	// A zone that does not cover this address is an error rather than a
+	// record written somewhere else.
+	if _, err := NameInZone("192.168.56.10", "57.168.192.in-addr.arpa"); err == nil {
+		t.Fatal("a zone outside the address was accepted")
 	}
-	// IPv6 wzgledem strefy /48.
-	nazwa, err = NazwaWStrefie("2001:db8:1::1", "1.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa")
+	// IPv6 against a /48 zone.
+	name, err = NameInZone("2001:db8:1::1", "1.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa")
 	if err != nil {
 		t.Fatalf("IPv6: %v", err)
 	}
-	if !strings.HasSuffix(nazwa, ".0.0.0.0") || strings.Contains(nazwa, "ip6.arpa") {
-		t.Fatalf("IPv6: nazwa=%q", nazwa)
+	if !strings.HasSuffix(name, ".0.0.0.0") || strings.Contains(name, "ip6.arpa") {
+		t.Fatalf("IPv6: name=%q", name)
 	}
 }

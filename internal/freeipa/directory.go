@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// User jest kontem POSIX w katalogu. Panel nie przechowuje hasel ani kopii
-// katalogu; te dane sa odczytywane na zadanie i krotko cache'owane.
+// User is a POSIX account in the directory. The panel stores neither
+// passwords nor a copy of the directory; this data is read on request and
+// cached briefly.
 type User struct {
 	UID         string   `json:"uid"`
 	FirstName   string   `json:"first_name,omitempty"`
@@ -20,13 +21,13 @@ type User struct {
 	HomeDir     string   `json:"home_directory,omitempty"`
 	Shell       string   `json:"shell,omitempty"`
 	Groups      []string `json:"groups,omitempty"`
-	// Disabled odpowiada nsaccountlock w katalogu.
+	// Disabled corresponds to nsaccountlock in the directory.
 	Disabled bool `json:"disabled"`
-	// SSHKeyFingerprints pokazuje klucze bez ich tresci.
+	// SSHKeyFingerprints shows the keys without their content.
 	SSHKeyFingerprints []string `json:"ssh_key_fingerprints,omitempty"`
 }
 
-// Group jest grupa POSIX.
+// Group is a POSIX group.
 type Group struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
@@ -35,7 +36,7 @@ type Group struct {
 	MemberOf    []string `json:"member_of,omitempty"`
 }
 
-// Host jest wpisem hosta w katalogu.
+// Host is a host entry in the directory.
 type Host struct {
 	FQDN        string   `json:"fqdn"`
 	Description string   `json:"description,omitempty"`
@@ -141,23 +142,23 @@ func (c *Client) Groups(ctx context.Context) ([]Group, error) {
 	})
 }
 
-// Hosts zwraca hosty zarejestrowane w katalogu.
+// Hosts returns the hosts registered in the directory.
 func (c *Client) Hosts(ctx context.Context) ([]Host, error) {
 	return cached(ctx, c, "hosts", func() ([]Host, error) {
-		// Tryb surowy jest tu konieczny: krbLastPwdChange, jedyny wskaznik
-		// dolaczenia dostepny bez zapytania na kazdy host, jest odfiltrowany
-		// z widoku przyjaznego.
+		// Raw mode is necessary here: krbLastPwdChange, the only indicator of
+		// enrollment available without a query per host, is filtered out of
+		// the friendly view.
 		records, err := c.findRaw(ctx, "host_find")
 		if err != nil {
 			return nil, err
 		}
 		hosts := make([]Host, 0, len(records))
 		for _, record := range records {
-			// has_keytab jest atrybutem wyliczanym wylacznie przez host_show,
-			// wiec uzycie go wymagaloby zapytania na kazdy host - dokladnie
-			// tego, czego dokument zabrania. krbLastPwdChange pojawia sie
-			// w chwili ustawienia klucza hosta, wiec rozroznia hosty
-			// dolaczone od samych wpisow w katalogu.
+			// has_keytab is an attribute computed solely by host_show, so
+			// using it would require a query per host - exactly what the
+			// document forbids. krbLastPwdChange appears at the moment the
+			// host key is set, so it tells enrolled hosts from mere entries
+			// in the directory.
 			enrolledAt := first(record, "krblastpwdchange")
 			hosts = append(hosts, Host{
 				FQDN:        first(record, "fqdn"),
@@ -229,43 +230,43 @@ func (c *Client) SudoRules(ctx context.Context) ([]SudoRule, error) {
 	})
 }
 
-// sudoRisk oznacza reguly o podwyzszonym ryzyku. NOPASSWD i ALL sa wymienione
-// w dokumencie jako krytyczne: pierwsze znosi potwierdzenie tozsamosci,
-// drugie daje pelne uprawnienia roota.
+// sudoRisk marks the rules of raised risk. NOPASSWD and ALL are named in the
+// document as critical: the first removes the confirmation of identity, the
+// second grants full root privileges.
 func sudoRisk(record map[string]any, rule SudoRule) (bool, []string) {
 	var reasons []string
 	for _, option := range rule.Options {
 		if option == "!authenticate" || option == "NOPASSWD" || option == "nopasswd" {
-			reasons = append(reasons, "reguła nie wymaga potwierdzenia hasłem")
+			reasons = append(reasons, "the rule requires no password confirmation")
 			break
 		}
 	}
 	if first(record, "cmdcategory") == "all" {
-		reasons = append(reasons, "reguła obejmuje wszystkie polecenia")
+		reasons = append(reasons, "the rule covers every command")
 	}
 	if first(record, "hostcategory") == "all" {
-		reasons = append(reasons, "reguła obejmuje wszystkie hosty")
+		reasons = append(reasons, "the rule covers every host")
 	}
 	if first(record, "usercategory") == "all" {
-		reasons = append(reasons, "reguła obejmuje wszystkich użytkowników")
+		reasons = append(reasons, "the rule covers every user")
 	}
 	if first(record, "runasusercategory") == "all" {
-		reasons = append(reasons, "reguła pozwala działać jako dowolny użytkownik")
+		reasons = append(reasons, "the rule allows acting as any user")
 	}
 	return len(reasons) > 0, reasons
 }
 
-// findRecords wykonuje wyszukiwanie w widoku przyjaznym.
+// findRecords runs a search in the friendly view.
 func (c *Client) findRecords(ctx context.Context, method string) ([]map[string]any, error) {
 	return c.find(ctx, method, false)
 }
 
-// find wykonuje polecenie wyszukiwania i zwraca rekordy katalogu.
+// find runs a search command and returns the directory's records.
 func (c *Client) find(ctx context.Context, method string, raw bool) ([]map[string]any, error) {
 	options := map[string]any{
 		"all": true,
-		// Zero oznacza brak limitu po stronie serwera; katalog testowy jest
-		// maly, a przy duzym trzeba bedzie stronicowac.
+		// Zero means no limit on the server's side; the test directory is
+		// small, and a large one will need paging.
 		"sizelimit": 0,
 	}
 	if raw {
@@ -281,17 +282,18 @@ func (c *Client) find(ctx context.Context, method string, raw bool) ([]map[strin
 		Truncated bool             `json:"truncated"`
 	}
 	if err := json.Unmarshal(result, &decoded); err != nil {
-		return nil, fmt.Errorf("odpowiedz %s: %w", method, err)
+		return nil, fmt.Errorf("the %s response: %w", method, err)
 	}
 	if decoded.Truncated {
-		// Obciety wynik jest gorszy niz blad: wygladalby jak kompletna lista.
-		return nil, fmt.Errorf("katalog obcial wynik %s; wymagane stronicowanie", method)
+		// A truncated result is worse than an error: it would look like a
+		// complete list.
+		return nil, fmt.Errorf("the directory truncated the result of %s; paging is required", method)
 	}
 	return decoded.Result, nil
 }
 
-// hostGroupsFromDNs wyciaga nazwy grup hostow z pelnych DN-ow. W trybie
-// surowym katalog zwraca czlonkostwo jako DN, a nie jako nazwe.
+// hostGroupsFromDNs takes the names of host groups out of full DNs. In raw
+// mode the directory returns membership as DNs rather than as names.
 func hostGroupsFromDNs(dns []string) []string {
 	var groups []string
 	for _, dn := range dns {
@@ -309,7 +311,7 @@ func hostGroupsFromDNs(dns []string) []string {
 	return groups
 }
 
-// FreeIPA zwraca wartosci jako listy, nawet dla pol jednowartosciowych.
+// FreeIPA returns values as lists, even for single-valued fields.
 func first(record map[string]any, key string) string {
 	values := strings_(record, key)
 	if len(values) == 0 {
@@ -318,10 +320,10 @@ func first(record map[string]any, key string) string {
 	return values[0]
 }
 
-// lookup znajduje wartosc niezaleznie od wielkosci liter w nazwie pola.
-// Katalog zwraca raz "krbLastPwdChange", raz "krblastpwdchange", zaleznie od
-// trybu odpowiedzi; przypinanie sie do jednej pisowni konczy sie cichym
-// brakiem danych.
+// lookup finds a value regardless of the case of the field name.
+// The directory returns "krbLastPwdChange" one time and "krblastpwdchange"
+// another, depending on the response mode; pinning to one spelling ends in
+// silently missing data.
 func lookup(record map[string]any, key string) any {
 	if value, ok := record[key]; ok {
 		return value

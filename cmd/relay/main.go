@@ -178,7 +178,7 @@ func zarejestruj(ctx context.Context, cfg relayconfig.Config, token string) (rel
 		Certificate: tozsamosc.Certificate,
 		CAPool:      tozsamosc.CAPool,
 		NotAfter:    tozsamosc.NotAfter,
-		TrustPEM: tozsamosc.TrustPEM,
+		TrustPEM:    tozsamosc.TrustPEM,
 	}, nil
 }
 

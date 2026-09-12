@@ -12,12 +12,12 @@ import (
 )
 
 var (
-	// ErrNotFound oznacza brak zmiany o podanym identyfikatorze.
-	ErrNotFound = errors.New("zmiana nie istnieje")
-	// ErrConflict oznacza operacje niedozwolona w obecnym stanie.
-	ErrConflict = errors.New("operacja niedozwolona w obecnym stanie zmiany")
-	// ErrBlocked oznacza plan, ktory wyklucza wykonanie.
-	ErrBlocked = errors.New("plan zawiera konflikty i nie moze zostac wykonany")
+	// ErrNotFound means there is no change with the given identifier.
+	ErrNotFound = errors.New("the change does not exist")
+	// ErrConflict means an operation not allowed in the current state.
+	ErrConflict = errors.New("the operation is not allowed in the current state of the change")
+	// ErrBlocked means a plan that rules out execution.
+	ErrBlocked = errors.New("the plan holds conflicts and cannot be carried out")
 )
 
 // Store realizuje dostep do tabeli zmian katalogu.
@@ -41,8 +41,8 @@ type Spec struct {
 	RequestID        string
 }
 
-// Create zapisuje zaplanowana zmiane. Zmiana wymagajaca zatwierdzenia nie
-// rusza, dopoki ktos jej nie zatwierdzi.
+// Create records a planned change. A change that requires approval does not
+// start until somebody approves it.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Change, error) {
 	if err := Validate(spec.Action, spec.Payload); err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Change, erro
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	if _, err := tx.Exec(ctx, query, id, string(spec.Action), payloadJSON, hash, planJSON,
 		string(state), spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID)); err != nil {
-		return nil, fmt.Errorf("zapis zmiany katalogu: %w", err)
+		return nil, fmt.Errorf("recording the directory change: %w", err)
 	}
 	return s.getTx(ctx, tx, id)
 }
@@ -97,7 +97,7 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, changeID, actor string) 
 	return s.getTx(ctx, tx, changeID)
 }
 
-// Cancel anuluje zmiane, ktora jeszcze nie ruszyla.
+// Cancel cancels a change that has not started yet.
 func (s *Store) Cancel(ctx context.Context, changeID, actor, reason string) (*Change, error) {
 	const query = `
 		update directory_changes set state = $2, canceled_by = $3, canceled_at = now(),
@@ -115,8 +115,8 @@ func (s *Store) Cancel(ctx context.Context, changeID, actor, reason string) (*Ch
 	return s.Get(ctx, changeID)
 }
 
-// Claim przejmuje zmiane do wykonania. Warunek na stanie sprawia, ze dwie
-// repliki nie wykonaja tej samej zmiany rownolegle.
+// Claim takes a change for execution. The condition on the state means two
+// replicas will not carry out the same change in parallel.
 func (s *Store) Claim(ctx context.Context, changeID string) (bool, error) {
 	const query = `
 		update directory_changes set state = $2, started_at = now(), updated_at = now()
@@ -218,9 +218,9 @@ func scanChanges(rows pgx.Rows) ([]Change, error) {
 	return changes, rows.Err()
 }
 
-// SetLocalDeny ustawia lokalny znacznik odmowy dla konta zewnetrznego.
-// Znacznik dziala natychmiast, zanim blokada w katalogu zdazy sie
-// rozpropagowac do hostow i do dostawcy tozsamosci.
+// SetLocalDeny sets the local denial marker for an external account.
+// The marker takes effect at once, before the lock in the directory reaches
+// the hosts and the identity provider.
 func (s *Store) SetLocalDeny(ctx context.Context, subject, reason string, denied bool) (int64, error) {
 	var query string
 	var args []any

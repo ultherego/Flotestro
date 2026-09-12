@@ -367,10 +367,10 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 		client = uuid.Nil.String()
 	}
 	var (
-		hostID      string
-		certPEM     []byte
-		bundlePEM   []byte
-		serial      string
+		hostID    string
+		certPEM   []byte
+		bundlePEM []byte
+		serial    string
 		storedCSR []byte
 	)
 	err := tx.QueryRow(ctx, query, requestID, client, fingerprint[:]).

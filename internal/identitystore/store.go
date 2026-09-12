@@ -66,9 +66,9 @@ type Generation struct {
 	Key Key
 	// KeyPEM is the way for a key that is an ordinary file. Empty when Key is
 	// given; given when the caller already has the material.
-	KeyPEM          []byte
-	CertificatePEM  []byte
-	TrustPEM        []byte
+	KeyPEM         []byte
+	CertificatePEM []byte
+	TrustPEM       []byte
 }
 
 // key returns the generation's key regardless of the way it was given.

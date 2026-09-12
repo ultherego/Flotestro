@@ -9,8 +9,9 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
-// Planner buduje podglad wplywu zmiany. Plan pokazuje wynikowe czlonkostwo,
-// hosty osiagalne przez HBAC i reguly sudo, zanim cokolwiek sie wydarzy.
+// Planner builds a preview of a change's impact. The plan shows the resulting
+// membership, the hosts reachable through HBAC and the sudo rules before
+// anything happens.
 type Planner struct {
 	directory *freeipa.Client
 }
@@ -19,7 +20,7 @@ func NewPlanner(directory *freeipa.Client) *Planner {
 	return &Planner{directory: directory}
 }
 
-// Build liczy plan dla zmiany.
+// Build computes the plan for a change.
 func (p *Planner) Build(ctx context.Context, action ActionType, payload Payload) (Plan, error) {
 	switch action {
 	case ActionUserCreate:
@@ -33,30 +34,30 @@ func (p *Planner) Build(ctx context.Context, action ActionType, payload Payload)
 	case ActionSSHKeys:
 		return p.planSSHKeys(ctx, payload.SSHKeys)
 	case ActionDNSRecordEnsure:
-		return p.planRekord(ctx, payload.DNS, true)
+		return p.planRecord(ctx, payload.DNS, true)
 	case ActionDNSRecordRemove:
-		return p.planRekord(ctx, payload.DNS, false)
+		return p.planRecord(ctx, payload.DNS, false)
 	default:
-		return Plan{}, fmt.Errorf("nieznany typ zmiany %q", action)
+		return Plan{}, fmt.Errorf("unknown type of change %q", action)
 	}
 }
 
 func (p *Planner) planUserCreate(ctx context.Context, spec *UserPayload) (Plan, error) {
 	plan := Plan{
-		Summary:       fmt.Sprintf("Utworzenie konta %s", spec.UID),
+		Summary:       fmt.Sprintf("Creating the account %s", spec.UID),
 		AffectedUsers: []string{spec.UID},
-		Steps:         []string{"utworzenie konta w katalogu"},
+		Steps:         []string{"creating the account in the directory"},
 	}
 	if len(spec.Groups) > 0 {
-		plan.Steps = append(plan.Steps, "dodanie do grup: "+strings.Join(spec.Groups, ", "))
+		plan.Steps = append(plan.Steps, "adding to the groups: "+strings.Join(spec.Groups, ", "))
 		plan.ResultingGroups = spec.Groups
 	}
 	if len(spec.SSHKeys) > 0 {
-		plan.Steps = append(plan.Steps, fmt.Sprintf("ustawienie %d kluczy SSH", len(spec.SSHKeys)))
+		plan.Steps = append(plan.Steps, fmt.Sprintf("setting %d SSH keys", len(spec.SSHKeys)))
 	}
 
-	// Konflikt nazwy zatrzymuje wykonanie: katalog nie scala kont
-	// automatycznie, a panel nie moze tego robic za niego.
+	// A name conflict stops the execution: the directory does not merge
+	// accounts automatically, and the panel must not do it on its behalf.
 	users, err := p.directory.Users(ctx)
 	if err != nil {
 		return plan, err
@@ -64,7 +65,7 @@ func (p *Planner) planUserCreate(ctx context.Context, spec *UserPayload) (Plan, 
 	for _, user := range users {
 		if user.UID == spec.UID {
 			plan.Conflicts = append(plan.Conflicts,
-				fmt.Sprintf("konto %s juz istnieje (UID %s)", user.UID, user.UIDNumber))
+				fmt.Sprintf("the account %s already exists (UID %s)", user.UID, user.UIDNumber))
 		}
 	}
 
@@ -78,7 +79,7 @@ func (p *Planner) planUserCreate(ctx context.Context, spec *UserPayload) (Plan, 
 	}
 	for _, wanted := range spec.Groups {
 		if !known[wanted] {
-			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("grupa %s nie istnieje", wanted))
+			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("the group %s does not exist", wanted))
 		}
 	}
 
@@ -92,14 +93,14 @@ func (p *Planner) planUserCreate(ctx context.Context, spec *UserPayload) (Plan, 
 	return plan, nil
 }
 
-// planUserAccess pokazuje dostep, ktory zostanie odebrany albo przywrocony.
+// planUserAccess shows the access that will be taken away or restored.
 func (p *Planner) planUserAccess(ctx context.Context, uid string, enabling bool) (Plan, error) {
-	verb := "Zablokowanie"
+	verb := "Locking"
 	if enabling {
-		verb = "Odblokowanie"
+		verb = "Unlocking"
 	}
 	plan := Plan{
-		Summary:       fmt.Sprintf("%s konta %s", verb, uid),
+		Summary:       fmt.Sprintf("%s the account %s", verb, uid),
 		AffectedUsers: []string{uid},
 	}
 
@@ -115,20 +116,20 @@ func (p *Planner) planUserAccess(ctx context.Context, uid string, enabling bool)
 		}
 	}
 	if found == nil {
-		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("konto %s nie istnieje w katalogu", uid))
+		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("the account %s does not exist in the directory", uid))
 		return plan, nil
 	}
 	plan.CurrentGroups = found.Groups
 
 	if enabling {
-		plan.Steps = []string{"odblokowanie konta w katalogu"}
+		plan.Steps = []string{"unlocking the account in the directory"}
 	} else {
-		// Kolejnosc ma znaczenie: lokalny znacznik odmowy dziala natychmiast,
-		// zanim zmiana w katalogu zdazy sie rozpropagowac do hostow.
+		// The order matters: the local denial marker takes effect at once,
+		// before the change in the directory reaches the hosts.
 		plan.Steps = []string{
-			"lokalny znacznik odmowy w panelu",
-			"uniewaznienie sesji panelu",
-			"zablokowanie konta w katalogu",
+			"the local denial marker in the panel",
+			"revoking the panel sessions",
+			"locking the account in the directory",
 		}
 	}
 
@@ -140,24 +141,24 @@ func (p *Planner) planUserAccess(ctx context.Context, uid string, enabling bool)
 	plan.SudoRules = access.sudo
 	if !enabling && len(access.sudo) > 0 {
 		plan.Warnings = append(plan.Warnings,
-			fmt.Sprintf("konto traci %d regul sudo", len(access.sudo)))
+			fmt.Sprintf("the account loses %d sudo rules", len(access.sudo)))
 	}
 	if !enabling && found.Disabled {
-		plan.Warnings = append(plan.Warnings, "konto jest juz zablokowane w katalogu")
+		plan.Warnings = append(plan.Warnings, "the account is already locked in the directory")
 	}
 	return plan, nil
 }
 
 func (p *Planner) planGroupMembers(ctx context.Context, spec *GroupPayload) (Plan, error) {
 	plan := Plan{
-		Summary:       fmt.Sprintf("Zmiana czlonkostwa w grupie %s", spec.Group),
+		Summary:       fmt.Sprintf("Changing the membership of the group %s", spec.Group),
 		AffectedUsers: append(append([]string{}, spec.Add...), spec.Remove...),
 	}
 	if len(spec.Add) > 0 {
-		plan.Steps = append(plan.Steps, "dodanie: "+strings.Join(spec.Add, ", "))
+		plan.Steps = append(plan.Steps, "adding: "+strings.Join(spec.Add, ", "))
 	}
 	if len(spec.Remove) > 0 {
-		plan.Steps = append(plan.Steps, "usuniecie: "+strings.Join(spec.Remove, ", "))
+		plan.Steps = append(plan.Steps, "removing: "+strings.Join(spec.Remove, ", "))
 	}
 
 	groups, err := p.directory.Groups(ctx)
@@ -172,7 +173,7 @@ func (p *Planner) planGroupMembers(ctx context.Context, spec *GroupPayload) (Pla
 		}
 	}
 	if target == nil {
-		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("grupa %s nie istnieje", spec.Group))
+		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("the group %s does not exist", spec.Group))
 		return plan, nil
 	}
 
@@ -197,23 +198,23 @@ func (p *Planner) planGroupMembers(ctx context.Context, spec *GroupPayload) (Pla
 	plan.SudoRules = access.sudo
 	plan.Warnings = append(plan.Warnings, access.warnings...)
 
-	// Dodanie do grupy uprzywilejowanej jest zmiana wysokiego ryzyka.
+	// Adding to a privileged group is a change of high risk.
 	if len(access.sudo) > 0 && len(spec.Add) > 0 {
 		plan.Warnings = append(plan.Warnings,
-			fmt.Sprintf("grupa daje dostep do %d regul sudo", len(access.sudo)))
+			fmt.Sprintf("the group grants access to %d sudo rules", len(access.sudo)))
 	}
 	return plan, nil
 }
 
 func (p *Planner) planSSHKeys(ctx context.Context, spec *SSHKeysPayload) (Plan, error) {
 	plan := Plan{
-		Summary:       fmt.Sprintf("Ustawienie kluczy SSH konta %s", spec.UID),
+		Summary:       fmt.Sprintf("Setting the SSH keys of the account %s", spec.UID),
 		AffectedUsers: []string{spec.UID},
-		Steps:         []string{fmt.Sprintf("ustawienie %d kluczy publicznych", len(spec.Keys))},
+		Steps:         []string{fmt.Sprintf("setting %d public keys", len(spec.Keys))},
 	}
 	if len(spec.Keys) == 0 {
 		plan.Warnings = append(plan.Warnings,
-			"pusta lista usuwa wszystkie klucze konta i moze odciac logowanie po SSH")
+			"an empty list removes every key of the account and can cut off SSH login")
 	}
 
 	user, err := p.directory.ShowUser(ctx, spec.UID)
@@ -223,19 +224,19 @@ func (p *Planner) planSSHKeys(ctx context.Context, spec *SSHKeysPayload) (Plan, 
 	}
 	if len(user.SSHKeyFingerprints) > 0 {
 		plan.Warnings = append(plan.Warnings,
-			fmt.Sprintf("konto ma obecnie %d kluczy; zostana zastapione", len(user.SSHKeyFingerprints)))
+			fmt.Sprintf("the account has %d keys now; they will be replaced", len(user.SSHKeyFingerprints)))
 	}
 	return plan, nil
 }
 
-// access opisuje dostep wynikajacy z czlonkostwa w grupach.
+// access describes the access that follows from group membership.
 type access struct {
 	hosts    []string
 	sudo     []string
 	warnings []string
 }
 
-// accessFor liczy, do jakich hostow i regul sudo prowadzi czlonkostwo.
+// accessFor computes which hosts and sudo rules a membership leads to.
 func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (access, error) {
 	var result access
 	if len(groups) == 0 && uid == "" {
@@ -251,14 +252,14 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 			continue
 		}
 		if rule.AllowsEverything {
-			result.hosts = append(result.hosts, "wszystkie hosty (regula "+rule.Name+")")
+			result.hosts = append(result.hosts, "every host (the rule "+rule.Name+")")
 			result.warnings = append(result.warnings,
-				"dostep wynika z reguly "+rule.Name+" obejmujacej cala flote")
+				"the access follows from the rule "+rule.Name+" covering the whole fleet")
 			continue
 		}
 		result.hosts = append(result.hosts, rule.Hosts...)
 		for _, group := range rule.HostGroups {
-			result.hosts = append(result.hosts, "grupa hostow "+group)
+			result.hosts = append(result.hosts, "the host group "+group)
 		}
 	}
 
@@ -272,8 +273,8 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 		}
 		label := rule.Name
 		if rule.Critical {
-			label += " (krytyczna: " + strings.Join(rule.CriticalReasons, ", ") + ")"
-			result.warnings = append(result.warnings, "regula sudo "+rule.Name+" jest krytyczna")
+			label += " (critical: " + strings.Join(rule.CriticalReasons, ", ") + ")"
+			result.warnings = append(result.warnings, "the sudo rule "+rule.Name+" is critical")
 		}
 		result.sudo = append(result.sudo, label)
 	}
@@ -283,7 +284,7 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 	return result, nil
 }
 
-// matchesSubject mowi, czy regula obejmuje konto albo ktoras z jego grup.
+// matchesSubject says whether the rule covers the account or one of its groups.
 func matchesSubject(ruleUsers, ruleGroups []string, uid string, groups []string) bool {
 	if uid != "" && slices.Contains(ruleUsers, uid) {
 		return true
@@ -296,90 +297,93 @@ func matchesSubject(ruleUsers, ruleGroups []string, uid string, groups []string)
 	return false
 }
 
-// planRekord opisuje, co stanie sie z rekordem w katalogu.
+// planRecord describes what will happen to a record in the directory.
 //
-// Rekord odwrotny jest osobnym krokiem planu, a nie szczegolem zapisu: to on
-// decyduje, co odpowie zapytanie o adres, i najczesciej to o nim sie zapomina.
-func (p *Planner) planRekord(ctx context.Context, spec *DNSRecordPayload, dopisanie bool) (Plan, error) {
-	czasownik := "Dopisanie"
-	krok := "dopisanie rekordu"
-	if !dopisanie {
-		czasownik = "Usuniecie"
-		krok = "usuniecie rekordu"
+// The reverse record is a separate step of the plan rather than a detail of
+// the write: it decides what a query about an address answers, and it is the
+// thing most often forgotten.
+func (p *Planner) planRecord(ctx context.Context, spec *DNSRecordPayload, adding bool) (Plan, error) {
+	verb := "Adding"
+	step := "adding the record"
+	if !adding {
+		verb = "Removing"
+		step = "removing the record"
 	}
-	pelna := freeipa.PelnaNazwa(spec.Zone, spec.Name)
+	full := freeipa.FullName(spec.Zone, spec.Name)
 	plan := Plan{
-		Summary: fmt.Sprintf("%s rekordu %s %s %s", czasownik, spec.Type, pelna, spec.Value),
-		Steps:   []string{krok + " " + spec.Type + " " + pelna + " -> " + spec.Value},
+		Summary: fmt.Sprintf("%s the record %s %s %s", verb, spec.Type, full, spec.Value),
+		Steps:   []string{step + " " + spec.Type + " " + full + " -> " + spec.Value},
 	}
 
-	strefaOdwrotna, nazwaOdwrotna := "", ""
+	reverseZone, reverseName := "", ""
 	if spec.Reverse {
-		wyliczona, nazwa, err := freeipa.StrefaOdwrotna(spec.Value)
+		computed, name, err := freeipa.ReverseZone(spec.Value)
 		if err != nil {
 			return plan, err
 		}
-		strefaOdwrotna, nazwaOdwrotna = wyliczona, nazwa
+		reverseZone, reverseName = computed, name
 		if spec.ReverseZone != "" {
-			// Strefa wskazana wprost bywa wezsza niz /24: nazwa wzgledna
-			// liczy sie wtedy wzgledem niej, a nie wzgledem podzialu, ktory
-			// panel zalozyl sam.
-			strefaOdwrotna = strings.TrimSuffix(spec.ReverseZone, ".")
-			nazwaOdwrotna, err = freeipa.NazwaWStrefie(spec.Value, strefaOdwrotna)
+			// A zone named explicitly is sometimes narrower than /24: the
+			// relative name is then computed against it rather than against
+			// the split the panel assumed by itself.
+			reverseZone = strings.TrimSuffix(spec.ReverseZone, ".")
+			reverseName, err = freeipa.NameInZone(spec.Value, reverseZone)
 			if err != nil {
 				return plan, err
 			}
 		}
-		plan.Steps = append(plan.Steps, krok+" odwrotnego PTR "+nazwaOdwrotna+"."+strefaOdwrotna+
-			" -> "+pelna)
+		plan.Steps = append(plan.Steps, step+" the reverse PTR "+reverseName+"."+reverseZone+
+			" -> "+full)
 	}
 
-	strefy, err := p.directory.Zones(ctx)
+	zones, err := p.directory.Zones(ctx)
 	if err != nil {
 		return plan, err
 	}
-	znane := map[string]bool{}
-	for _, strefa := range strefy {
-		znane[strefa.Name] = true
+	known := map[string]bool{}
+	for _, zone := range zones {
+		known[zone.Name] = true
 	}
-	if !znane[strings.TrimSuffix(spec.Zone, ".")] {
-		// Strefy panel nie zaklada: to decyzja o podziale przestrzeni nazw,
-		// a nie o jednym wpisie.
+	if !known[strings.TrimSuffix(spec.Zone, ".")] {
+		// The panel does not create a zone: that is a decision about the
+		// division of the namespace rather than about one entry.
 		plan.Conflicts = append(plan.Conflicts,
-			fmt.Sprintf("katalog nie ma strefy %s", spec.Zone))
+			fmt.Sprintf("the directory has no zone %s", spec.Zone))
 	}
-	if spec.Reverse && !znane[strings.TrimSuffix(strefaOdwrotna, ".")] {
+	if spec.Reverse && !known[strings.TrimSuffix(reverseZone, ".")] {
 		plan.Conflicts = append(plan.Conflicts,
-			fmt.Sprintf("katalog nie ma strefy odwrotnej %s", strefaOdwrotna))
+			fmt.Sprintf("the directory has no reverse zone %s", reverseZone))
 	}
 
-	// Stan biezacy rekordu: czy taki wpis juz jest i z jaka wartoscia.
-	rekordy, err := p.directory.Records(ctx, strings.TrimSuffix(spec.Zone, "."))
+	// The current state of the record: whether such an entry exists and with what value.
+	records, err := p.directory.Records(ctx, strings.TrimSuffix(spec.Zone, "."))
 	if err != nil {
-		// Brak dostepu do strefy nie uniewaznia planu, ale operator ma
-		// wiedziec, ze panel nie porownal go ze stanem katalogu.
+		// No access to the zone does not invalidate the plan, but the
+		// operator is to know that the panel did not compare it with the
+		// state of the directory.
 		plan.Conflicts = append(plan.Conflicts,
-			"nie odczytano rekordow strefy: "+err.Error())
+			"the records of the zone were not read: "+err.Error())
 		return plan, nil
 	}
-	for _, rekord := range rekordy {
-		if rekord.Name != spec.Name || rekord.Type != spec.Type {
+	for _, record := range records {
+		if record.Name != spec.Name || record.Type != spec.Type {
 			continue
 		}
-		if slices.Contains(rekord.Values, spec.Value) {
-			if dopisanie {
+		if slices.Contains(record.Values, spec.Value) {
+			if adding {
 				plan.Conflicts = append(plan.Conflicts,
-					fmt.Sprintf("rekord %s %s ma juz wartosc %s", spec.Type, pelna, spec.Value))
+					fmt.Sprintf("the record %s %s already has the value %s", spec.Type, full, spec.Value))
 			}
 			continue
 		}
-		// Rekord z inna wartoscia nie jest bledem: nazwa moze wskazywac
-		// kilka adresow. Ale operator ma to zobaczyc przed zapisem.
-		plan.Steps = append(plan.Steps, fmt.Sprintf("uwaga: %s %s wskazuje juz %s",
-			spec.Type, pelna, strings.Join(rekord.Values, ", ")))
-		if !dopisanie && !slices.Contains(rekord.Values, spec.Value) {
+		// A record with a different value is not an error: a name may point
+		// at several addresses. But the operator is to see that before the
+		// write.
+		plan.Steps = append(plan.Steps, fmt.Sprintf("note: %s %s already points at %s",
+			spec.Type, full, strings.Join(record.Values, ", ")))
+		if !adding && !slices.Contains(record.Values, spec.Value) {
 			plan.Conflicts = append(plan.Conflicts,
-				fmt.Sprintf("rekord %s %s nie ma wartosci %s", spec.Type, pelna, spec.Value))
+				fmt.Sprintf("the record %s %s does not have the value %s", spec.Type, full, spec.Value))
 		}
 	}
 	return plan, nil

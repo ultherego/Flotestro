@@ -296,7 +296,7 @@ func hostWithEveryNonConformance(t *testing.T) Input {
 	}
 }
 
-func wskaznikPrawdy() *bool           { prawda := true; return &prawda }
+func wskaznikPrawdy() *bool       { prawda := true; return &prawda }
 func countPointer(value int) *int { return &value }
 
 // A host with AppArmor does not fail a check requiring SELinux. The "not

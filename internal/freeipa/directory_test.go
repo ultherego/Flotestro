@@ -2,116 +2,117 @@ package freeipa
 
 import "testing"
 
-func TestLookupIgnorujeWielkoscLiter(t *testing.T) {
-	// Katalog zwraca raz krbLastPwdChange, raz krblastpwdchange, zaleznie od
-	// trybu odpowiedzi. Przypiecie sie do jednej pisowni konczy sie cichym
-	// brakiem danych, a nie bledem.
+func TestLookupIgnoresLetterCase(t *testing.T) {
+	// The directory returns krbLastPwdChange one time and krblastpwdchange
+	// another, depending on the response mode. Pinning to one spelling ends
+	// in silently missing data rather than in an error.
 	record := map[string]any{"krbLastPwdChange": []any{"20260822144537Z"}}
 	if got := first(record, "krblastpwdchange"); got != "20260822144537Z" {
-		t.Fatalf("odczytano %q, oczekiwano wartosci mimo innej pisowni", got)
+		t.Fatalf("read %q, expected the value despite the different spelling", got)
 	}
-	if got := first(record, "nieistniejace"); got != "" {
-		t.Fatalf("nieistniejace pole zwrocilo %q", got)
+	if got := first(record, "nonexistent"); got != "" {
+		t.Fatalf("a field that does not exist returned %q", got)
 	}
 }
 
-func TestStringsObslugujeKsztaltyOdpowiedzi(t *testing.T) {
-	// FreeIPA zwraca wartosci jako listy, ciagi albo obiekty base64.
+func TestStringsHandlesTheShapesOfAnswers(t *testing.T) {
+	// FreeIPA returns values as lists, strings or base64 objects.
 	cases := map[string]struct {
 		value any
 		want  int
 	}{
-		"lista":  {[]any{"a", "b"}, 2},
-		"ciag":   {"a", 1},
-		"base64": {[]any{map[string]any{"__base64__": "zakodowane"}}, 1},
-		"pusto":  {nil, 0},
-		"liczba": {[]any{42}, 0},
+		"list":   {[]any{"a", "b"}, 2},
+		"string": {"a", 1},
+		"base64": {[]any{map[string]any{"__base64__": "encoded"}}, 1},
+		"empty":  {nil, 0},
+		"number": {[]any{42}, 0},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := strings_(map[string]any{"pole": tc.value}, "pole")
+			got := strings_(map[string]any{"field": tc.value}, "field")
 			if len(got) != tc.want {
-				t.Fatalf("odczytano %d wartosci, oczekiwano %d", len(got), tc.want)
+				t.Fatalf("read %d values, expected %d", len(got), tc.want)
 			}
 		})
 	}
 }
 
-func TestSudoRiskOznaczaReguleBezHasla(t *testing.T) {
-	// NOPASSWD znosi potwierdzenie tozsamosci, a ALL daje pelne uprawnienia
-	// roota. Dokument wymienia oba jako krytyczne.
+func TestSudoRiskMarksARuleWithoutAPassword(t *testing.T) {
+	// NOPASSWD removes the identity confirmation and ALL grants full root
+	// rights. The document names both as critical.
 	critical, reasons := sudoRisk(map[string]any{}, SudoRule{Options: []string{"!authenticate"}})
 	if !critical {
-		t.Fatal("regula bez potwierdzenia hasla nie zostala oznaczona jako krytyczna")
+		t.Fatal("a rule without password confirmation was not marked as critical")
 	}
 	if len(reasons) == 0 {
-		t.Fatal("brak opisu powodu")
+		t.Fatal("no description of the reason")
 	}
 }
 
-func TestSudoRiskOznaczaKategorieWszystko(t *testing.T) {
+func TestSudoRiskMarksTheAllCategory(t *testing.T) {
 	cases := map[string]string{
-		"cmdcategory":       "wszystkie polecenia",
-		"hostcategory":      "wszystkie hosty",
-		"usercategory":      "wszyscy uzytkownicy",
-		"runasusercategory": "dowolny uzytkownik",
+		"cmdcategory":       "all commands",
+		"hostcategory":      "all hosts",
+		"usercategory":      "all users",
+		"runasusercategory": "any user",
 	}
 	for field := range cases {
 		t.Run(field, func(t *testing.T) {
 			critical, reasons := sudoRisk(map[string]any{field: []any{"all"}}, SudoRule{})
 			if !critical || len(reasons) == 0 {
-				t.Fatalf("kategoria all w polu %s nie zostala oznaczona jako ryzykowna", field)
+				t.Fatalf("the all category in the field %s was not marked as risky", field)
 			}
 		})
 	}
 }
 
-func TestSudoRiskNieOznaczaZwyklejReguly(t *testing.T) {
+func TestSudoRiskDoesNotMarkAnOrdinaryRule(t *testing.T) {
 	critical, reasons := sudoRisk(
 		map[string]any{"cmdcategory": []any{}, "hostcategory": []any{}},
 		SudoRule{Users: []string{"jkowalski"}, Commands: []string{"/usr/bin/systemctl"}},
 	)
 	if critical {
-		t.Fatalf("zwykla regula oznaczona jako krytyczna: %v", reasons)
+		t.Fatalf("an ordinary rule was marked as critical: %v", reasons)
 	}
 }
 
 func TestHostGroupsFromDNs(t *testing.T) {
-	// W trybie surowym czlonkostwo przychodzi jako pelne DN-y; interesuja nas
-	// wylacznie grupy hostow, nie role ani inne obiekty.
+	// In raw mode the membership arrives as full DNs; only host groups are of
+	// interest here, not roles or other objects.
 	dns := []string{
 		"cn=ipaservers,cn=hostgroups,cn=accounts,dc=flotestro,dc=test",
 		"cn=produkcja,cn=hostgroups,cn=accounts,dc=flotestro,dc=test",
 		"cn=Flotestro Connector,cn=roles,cn=accounts,dc=flotestro,dc=test",
-		"niepoprawny-dn",
+		"an-invalid-dn",
 	}
 	groups := hostGroupsFromDNs(dns)
 	if len(groups) != 2 {
-		t.Fatalf("wyciagnieto %v, oczekiwano dwoch grup hostow", groups)
+		t.Fatalf("extracted %v, expected two host groups", groups)
 	}
 	if groups[0] != "ipaservers" || groups[1] != "produkcja" {
-		t.Fatalf("nieoczekiwane nazwy grup: %v", groups)
+		t.Fatalf("unexpected group names: %v", groups)
 	}
 }
 
-func TestAllowedMethodJestZamknietaLista(t *testing.T) {
-	// Adapter udostepnia wylacznie jawnie wspierane polecenia. Nie istnieje
-	// sposob wywolania dowolnej komendy katalogu.
+func TestAllowedMethodIsAClosedList(t *testing.T) {
+	// The adapter exposes only explicitly supported commands. There is no way
+	// of calling an arbitrary directory command.
 	for _, method := range []string{"user_find", "group_find", "hbacrule_find", "ping"} {
 		if !allowedMethod(method) {
-			t.Errorf("polecenie odczytu %s powinno byc dozwolone", method)
+			t.Errorf("the read command %s should be allowed", method)
 		}
 	}
-	// Polecenia nieobslugiwane obejmuja usuwanie obiektow, zmiane konfiguracji
-	// samego katalogu i zarzadzanie uprawnieniami. Ich brak jest swiadomy:
-	// panel nie moze skasowac konta ani nadac sobie wiekszych praw.
+	// Unsupported commands cover deleting objects, changing the configuration
+	// of the directory itself and managing permissions. Their absence is
+	// deliberate: the panel cannot delete an account or grant itself wider
+	// rights.
 	for _, method := range []string{
 		"user_del", "group_del", "host_del", "config_mod",
 		"permission_add", "privilege_add", "role_add_member",
 		"hbacrule_add", "sudorule_add", "", "user_find; drop",
 	} {
 		if allowedMethod(method) {
-			t.Errorf("polecenie %s nie powinno byc dostepne przez adapter", method)
+			t.Errorf("the command %s should not be available through the adapter", method)
 		}
 	}
 }
@@ -119,10 +120,10 @@ func TestAllowedMethodJestZamknietaLista(t *testing.T) {
 func TestSplitPrincipal(t *testing.T) {
 	name, realm := splitPrincipal("flotestro/panel.flotestro.test@FLOTESTRO.TEST", "INNY")
 	if name != "flotestro/panel.flotestro.test" || realm != "FLOTESTRO.TEST" {
-		t.Fatalf("rozdzielono na %q i %q", name, realm)
+		t.Fatalf("split into %q and %q", name, realm)
 	}
 	name, realm = splitPrincipal("flotestro/panel.flotestro.test", "FLOTESTRO.TEST")
 	if name != "flotestro/panel.flotestro.test" || realm != "FLOTESTRO.TEST" {
-		t.Fatalf("brak realmu w principalu dal %q i %q", name, realm)
+		t.Fatalf("a principal without a realm gave %q and %q", name, realm)
 	}
 }

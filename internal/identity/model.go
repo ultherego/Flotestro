@@ -1,6 +1,7 @@
-// Package identity realizuje zmiany w katalogu tozsamosci: plan, zatwierdzenie
-// i wykonanie zlozone z faz. Utworzenie uzytkownika jest jedna transakcja
-// biznesowa panelu, ale kilkoma operacjami katalogu.
+// Package identity carries out changes in the identity directory: the plan,
+// the approval and an execution made of phases. Creating a user is one
+// business transaction of the panel but several operations of the
+// directory.
 package identity
 
 import (
@@ -12,7 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
-// ActionType jest typem zmiany w katalogu.
+// ActionType is the type of a change in the directory.
 type ActionType string
 
 const (
@@ -21,14 +22,14 @@ const (
 	ActionUserEnable   ActionType = "identity.user.enable"
 	ActionGroupMembers ActionType = "identity.group.members"
 	ActionSSHKeys      ActionType = "identity.sshkeys.set"
-	// DNS katalogowy jest zmiana centralna, tak samo jak konto: dotyczy
-	// calej sieci, a nie jednego hosta, i idzie jedna transakcja przez
-	// connector katalogu - a nie przez agenta.
+	// Directory DNS is a central change, just like an account: it concerns
+	// the whole network rather than one host and goes in one transaction
+	// through the directory connector - not through an agent.
 	ActionDNSRecordEnsure ActionType = "dns.record.ensure"
 	ActionDNSRecordRemove ActionType = "dns.record.remove"
 )
 
-// State jest stanem zmiany.
+// State is the state of a change.
 type State string
 
 const (
@@ -36,14 +37,14 @@ const (
 	StateAwaitingApproval State = "awaiting_approval"
 	StateRunning          State = "running"
 	StateSucceeded        State = "succeeded"
-	// StatePartiallyApplied oznacza zmiane, ktorej czesc faz sie powiodla.
-	// Dokument zabrania przedstawiania takiego wyniku jako powodzenia.
+	// StatePartiallyApplied marks a change some of whose phases succeeded.
+	// The document forbids presenting such a result as a success.
 	StatePartiallyApplied State = "partially_applied"
 	StateFailed           State = "failed"
 	StateCanceled         State = "canceled"
 )
 
-// Terminal mowi, czy stan jest koncowy.
+// Terminal says whether the state is final.
 func (s State) Terminal() bool {
 	switch s {
 	case StateSucceeded, StatePartiallyApplied, StateFailed, StateCanceled:
@@ -53,7 +54,7 @@ func (s State) Terminal() bool {
 	}
 }
 
-// Payload jest suma typow zmian. Dokladnie jedno pole jest wypelnione.
+// Payload is the sum of the change types. Exactly one field is filled in.
 type Payload struct {
 	User      *UserPayload      `json:"user,omitempty"`
 	Group     *GroupPayload     `json:"group,omitempty"`
@@ -62,25 +63,25 @@ type Payload struct {
 	DNS       *DNSRecordPayload `json:"dns,omitempty"`
 }
 
-// DNSRecordPayload opisuje rekord w strefie katalogu.
+// DNSRecordPayload describes a record in a directory zone.
 type DNSRecordPayload struct {
 	Zone string `json:"zone"`
 	Name string `json:"name"`
 	Type string `json:"type"`
-	// Value jest trescia rekordu: adres, nazwa albo tekst - zaleznie od typu.
+	// Value is the content of the record: an address, a name or text - depending on the type.
 	Value string `json:"value"`
 	TTL   int    `json:"ttl,omitempty"`
-	// Reverse jest zgoda na dopisanie rekordu odwrotnego. Rekord PTR jest
-	// osobnym, widocznym elementem planu: to on decyduje, co odpowie
-	// zapytanie o adres, a zapomnienie o nim jest najczestszym bledem przy
-	// dopisywaniu hostow.
+	// Reverse is the consent to add the reverse record. A PTR record is a
+	// separate, visible element of the plan: it decides what a query about an
+	// address answers, and forgetting it is the most common mistake when
+	// adding hosts.
 	Reverse bool `json:"reverse,omitempty"`
-	// ReverseZone pozwala wskazac strefe odwrotna wprost. Puste oznacza
-	// strefe wyliczona z adresu - a ta zaklada podzial na /24.
+	// ReverseZone allows naming the reverse zone explicitly. Empty means the
+	// zone computed from the address - and that assumes a /24 split.
 	ReverseZone string `json:"reverse_zone,omitempty"`
 }
 
-// UserPayload opisuje konto do utworzenia.
+// UserPayload describes the account to create.
 type UserPayload struct {
 	UID       string   `json:"uid"`
 	FirstName string   `json:"first_name,omitempty"`
@@ -91,57 +92,57 @@ type UserPayload struct {
 	SSHKeys   []string `json:"ssh_keys,omitempty"`
 }
 
-// GroupPayload opisuje zmiane czlonkostwa.
+// GroupPayload describes a change of membership.
 type GroupPayload struct {
 	Group  string   `json:"group"`
 	Add    []string `json:"add,omitempty"`
 	Remove []string `json:"remove,omitempty"`
 }
 
-// SSHKeysPayload ustawia komplet kluczy publicznych konta.
+// SSHKeysPayload sets the complete set of an account's public keys.
 type SSHKeysPayload struct {
 	UID  string   `json:"uid"`
 	Keys []string `json:"keys"`
 }
 
-// ReferencePayload wskazuje istniejacy obiekt katalogu.
+// ReferencePayload names an existing object of the directory.
 type ReferencePayload struct {
 	UID    string `json:"uid"`
 	Reason string `json:"reason,omitempty"`
 }
 
-// Validate sprawdza spojnosc typu zmiany z payloadem.
+// Validate checks that the type of change and the payload agree.
 func Validate(action ActionType, payload Payload) error {
 	switch action {
 	case ActionUserCreate:
 		if payload.User == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu user", action)
+			return fmt.Errorf("the operation %s requires a user payload", action)
 		}
 		if payload.User.UID == "" || payload.User.LastName == "" {
-			return fmt.Errorf("konto wymaga nazwy i nazwiska")
+			return fmt.Errorf("an account requires a name and a surname")
 		}
 	case ActionUserDisable, ActionUserEnable:
 		if payload.Reference == nil || payload.Reference.UID == "" {
-			return fmt.Errorf("operacja %s wymaga wskazania konta", action)
+			return fmt.Errorf("the operation %s requires naming an account", action)
 		}
 	case ActionGroupMembers:
 		if payload.Group == nil || payload.Group.Group == "" {
-			return fmt.Errorf("operacja %s wymaga wskazania grupy", action)
+			return fmt.Errorf("the operation %s requires naming a group", action)
 		}
 		if len(payload.Group.Add) == 0 && len(payload.Group.Remove) == 0 {
-			return fmt.Errorf("zmiana czlonkostwa jest pusta")
+			return fmt.Errorf("the membership change is empty")
 		}
 	case ActionSSHKeys:
 		if payload.SSHKeys == nil || payload.SSHKeys.UID == "" {
-			return fmt.Errorf("operacja %s wymaga wskazania konta", action)
+			return fmt.Errorf("the operation %s requires naming an account", action)
 		}
 	case ActionDNSRecordEnsure, ActionDNSRecordRemove:
 		if payload.DNS == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu dns", action)
+			return fmt.Errorf("the operation %s requires a dns payload", action)
 		}
-		// Sprawdzamy tym samym kodem, ktory zaraz wykona zapis: rekord
-		// odrzucony przez katalog ma odpasc przy zlecaniu, a nie po
-		// zatwierdzeniu.
+		// We check with the same code that will carry out the write: a record
+		// the directory refuses is to fall out at ordering time rather than
+		// after the approval.
 		if err := (freeipa.RecordSpec{
 			Zone: payload.DNS.Zone, Name: payload.DNS.Name, Type: payload.DNS.Type,
 			Value: payload.DNS.Value, TTL: payload.DNS.TTL,
@@ -149,26 +150,26 @@ func Validate(action ActionType, payload Payload) error {
 			return err
 		}
 		if payload.DNS.Reverse {
-			if payload.DNS.Type != freeipa.RekordA && payload.DNS.Type != freeipa.RekordAAAA {
-				return fmt.Errorf("rekord odwrotny ma sens wylacznie dla adresu")
+			if payload.DNS.Type != freeipa.RecordA && payload.DNS.Type != freeipa.RecordAAAA {
+				return fmt.Errorf("a reverse record makes sense for an address only")
 			}
 			if payload.DNS.ReverseZone == "" {
-				if _, _, err := freeipa.StrefaOdwrotna(payload.DNS.Value); err != nil {
+				if _, _, err := freeipa.ReverseZone(payload.DNS.Value); err != nil {
 					return err
 				}
-			} else if _, err := freeipa.NazwaWStrefie(payload.DNS.Value, payload.DNS.ReverseZone); err != nil {
-				// Strefa, ktora nie obejmuje tego adresu, dalaby rekord PTR
-				// dla zupelnie innego hosta.
+			} else if _, err := freeipa.NameInZone(payload.DNS.Value, payload.DNS.ReverseZone); err != nil {
+				// A zone that does not cover this address would give a PTR
+				// record for an entirely different host.
 				return err
 			}
 		}
 	default:
-		return fmt.Errorf("nieznany typ zmiany %q", action)
+		return fmt.Errorf("unknown type of change %q", action)
 	}
 	return nil
 }
 
-// Permission zwraca uprawnienie wymagane do zlecenia zmiany.
+// Permission returns the permission required to order a change.
 func (a ActionType) Permission() string {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionSSHKeys:
@@ -182,7 +183,7 @@ func (a ActionType) Permission() string {
 	}
 }
 
-// Known sprawdza, czy typ zmiany jest obslugiwany.
+// Known checks whether the type of change is supported.
 func (a ActionType) Known() bool {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
@@ -193,7 +194,7 @@ func (a ActionType) Known() bool {
 	}
 }
 
-// PayloadHash liczy hash planu w postaci kanonicznej.
+// PayloadHash computes the plan hash in canonical form.
 func PayloadHash(action ActionType, payload Payload) ([]byte, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -203,29 +204,29 @@ func PayloadHash(action ActionType, payload Payload) ([]byte, error) {
 	return sum[:], nil
 }
 
-// Plan opisuje wplyw zmiany, zanim cokolwiek sie wydarzy.
+// Plan describes the impact of a change before anything happens.
 type Plan struct {
 	Summary string `json:"summary"`
-	// Steps to fazy, ktore zostana wykonane.
+	// Steps are the phases that will be carried out.
 	Steps []string `json:"steps"`
-	// AffectedUsers to konta dotkniete zmiana.
+	// AffectedUsers are the accounts the change touches.
 	AffectedUsers []string `json:"affected_users,omitempty"`
-	// CurrentGroups i ResultingGroups pokazuja czlonkostwo przed i po.
+	// CurrentGroups and ResultingGroups show the membership before and after.
 	CurrentGroups   []string `json:"current_groups,omitempty"`
 	ResultingGroups []string `json:"resulting_groups,omitempty"`
-	// ReachableHosts i SudoRules pokazuja dostep wynikajacy z czlonkostwa.
+	// ReachableHosts and SudoRules show the access that follows from the membership.
 	ReachableHosts []string `json:"reachable_hosts,omitempty"`
 	SudoRules      []string `json:"sudo_rules,omitempty"`
-	// Warnings opisuja skutki, ktore latwo przeoczyc.
+	// Warnings describe the consequences that are easy to miss.
 	Warnings []string `json:"warnings,omitempty"`
-	// Conflicts zatrzymuja wykonanie: katalog juz zawiera obiekt o tej nazwie.
+	// Conflicts stop the execution: the directory already holds an object with that name.
 	Conflicts []string `json:"conflicts,omitempty"`
 }
 
-// Blocked mowi, czy plan wyklucza wykonanie.
+// Blocked says whether the plan rules out execution.
 func (p Plan) Blocked() bool { return len(p.Conflicts) > 0 }
 
-// Phase jest wynikiem jednej fazy wykonania.
+// Phase is the result of one phase of the execution.
 type Phase struct {
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
@@ -234,7 +235,7 @@ type Phase struct {
 	FinishedAt time.Time `json:"finished_at"`
 }
 
-// Change jest widokiem zmiany zwracanym przez API.
+// Change is the view of a change returned by the API.
 type Change struct {
 	ID               string          `json:"id"`
 	ActionType       string          `json:"action_type"`
@@ -255,9 +256,9 @@ type Change struct {
 	CreatedAt        time.Time       `json:"created_at"`
 }
 
-// StateFor okresla stan koncowy na podstawie wynikow faz.
-// Czesciowe powodzenie ma wlasny stan: przedstawienie go jako sukcesu
-// ukrywaloby fakt, ze czesc zmian zostala zastosowana, a czesc nie.
+// StateFor decides the final state from the results of the phases.
+// A partial success has its own state: presenting it as a success would hide
+// the fact that some of the changes were applied and some were not.
 func StateFor(phases []Phase) State {
 	var succeeded, failed int
 	for _, phase := range phases {

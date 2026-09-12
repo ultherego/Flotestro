@@ -10,49 +10,49 @@ import (
 	"strings"
 )
 
-// DNS katalogowy jest osobnym zakresem niz resolver hosta: tam panel mowi
-// hostowi, kogo ma pytac, a tutaj - co katalog ma odpowiadac calej sieci.
-// Rekord wskazujacy na zly adres psuje nie jeden host, tylko wszystkich,
-// ktorzy o niego zapytaja.
+// Directory DNS is a different scope from the host's resolver: there the
+// panel tells a host whom to ask, and here - what the directory answers the
+// whole network. A record pointing at a wrong address breaks not one host but
+// everyone who asks about it.
 
-// Typy rekordow, ktore panel potrafi zapisac.
+// The record types the panel can write.
 //
-// Lista jest zamknieta i krotka celowo. Rekordy NS, SOA i DNSSEC zmieniaja
-// sposob dzialania samej strefy, a nie jej zawartosc - i nie sa czyms, co
-// dopisuje sie z panelu zarzadzania flota.
+// The list is closed and short on purpose. NS, SOA and DNSSEC records change
+// how the zone itself works rather than its content - and they are not
+// something one adds from a fleet management panel.
 const (
-	RekordA     = "A"
-	RekordAAAA  = "AAAA"
-	RekordCNAME = "CNAME"
-	RekordTXT   = "TXT"
-	RekordSRV   = "SRV"
-	RekordPTR   = "PTR"
+	RecordA     = "A"
+	RecordAAAA  = "AAAA"
+	RecordCNAME = "CNAME"
+	RecordTXT   = "TXT"
+	RecordSRV   = "SRV"
+	RecordPTR   = "PTR"
 )
 
-// atrybutRekordu tlumaczy typ rekordu na nazwe pola w katalogu.
-var atrybutRekordu = map[string]string{
-	RekordA:     "arecord",
-	RekordAAAA:  "aaaarecord",
-	RekordCNAME: "cnamerecord",
-	RekordTXT:   "txtrecord",
-	RekordSRV:   "srvrecord",
-	RekordPTR:   "ptrrecord",
+// recordAttribute translates a record type into the directory's field name.
+var recordAttribute = map[string]string{
+	RecordA:     "arecord",
+	RecordAAAA:  "aaaarecord",
+	RecordCNAME: "cnamerecord",
+	RecordTXT:   "txtrecord",
+	RecordSRV:   "srvrecord",
+	RecordPTR:   "ptrrecord",
 }
 
 var (
-	nazwaStrefy  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.?$`)
-	nazwaRekordu = regexp.MustCompile(`^(\*|@|[a-zA-Z0-9_]([a-zA-Z0-9_-]*[a-zA-Z0-9_])?)(\.[a-zA-Z0-9_]([a-zA-Z0-9_-]*[a-zA-Z0-9_])?)*$`)
+	zoneNamePattern   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.?$`)
+	recordNamePattern = regexp.MustCompile(`^(\*|@|[a-zA-Z0-9_]([a-zA-Z0-9_-]*[a-zA-Z0-9_])?)(\.[a-zA-Z0-9_]([a-zA-Z0-9_-]*[a-zA-Z0-9_])?)*$`)
 )
 
-// Strefa jest strefa DNS w katalogu.
-type Strefa struct {
+// Zone is a DNS zone in the directory.
+type Zone struct {
 	Name string `json:"name"`
-	// Reverse oznacza strefe odwrotna (in-addr.arpa albo ip6.arpa).
+	// Reverse marks a reverse zone (in-addr.arpa or ip6.arpa).
 	Reverse bool `json:"reverse"`
 }
 
-// Rekord jest jednym wpisem w strefie.
-type Rekord struct {
+// Record is one entry in a zone.
+type Record struct {
 	Zone   string   `json:"zone"`
 	Name   string   `json:"name"`
 	Type   string   `json:"type"`
@@ -60,15 +60,15 @@ type Rekord struct {
 	TTL    int      `json:"ttl,omitempty"`
 }
 
-// FQDN sklada pelna nazwe rekordu.
-func (r Rekord) FQDN() string {
+// FQDN builds the full name of a record.
+func (r Record) FQDN() string {
 	if r.Name == "@" || r.Name == "" {
 		return strings.TrimSuffix(r.Zone, ".")
 	}
 	return strings.TrimSuffix(r.Name, ".") + "." + strings.TrimSuffix(r.Zone, ".")
 }
 
-// RecordSpec opisuje rekord zlecony przez panel.
+// RecordSpec describes a record ordered by the panel.
 type RecordSpec struct {
 	Zone  string
 	Name  string
@@ -77,91 +77,92 @@ type RecordSpec struct {
 	TTL   int
 }
 
-// Validate sprawdza rekord, zanim cokolwiek pojdzie do katalogu.
+// Validate checks a record before anything goes to the directory.
 func (s RecordSpec) Validate() error {
-	if !nazwaStrefy.MatchString(s.Zone) {
-		return fmt.Errorf("nieprawidlowa nazwa strefy %q", s.Zone)
+	if !zoneNamePattern.MatchString(s.Zone) {
+		return fmt.Errorf("invalid zone name %q", s.Zone)
 	}
-	if !nazwaRekordu.MatchString(s.Name) {
-		return fmt.Errorf("nieprawidlowa nazwa rekordu %q", s.Name)
+	if !recordNamePattern.MatchString(s.Name) {
+		return fmt.Errorf("invalid record name %q", s.Name)
 	}
-	if _, znany := atrybutRekordu[s.Type]; !znany {
-		return fmt.Errorf("panel nie zapisuje rekordow typu %q", s.Type)
+	if _, known := recordAttribute[s.Type]; !known {
+		return fmt.Errorf("the panel does not write records of type %q", s.Type)
 	}
 	if s.TTL < 0 || s.TTL > 604800 {
-		return fmt.Errorf("TTL %d jest poza zakresem 0-604800", s.TTL)
+		return fmt.Errorf("the TTL %d is out of the range 0-604800", s.TTL)
 	}
-	wartosc := strings.TrimSpace(s.Value)
-	if wartosc == "" {
-		return fmt.Errorf("rekord wymaga wartosci")
+	value := strings.TrimSpace(s.Value)
+	if value == "" {
+		return fmt.Errorf("a record requires a value")
 	}
-	if strings.ContainsAny(wartosc, "\n\r") {
-		return fmt.Errorf("wartosc rekordu zawiera znak nowej linii")
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("the record value contains a newline")
 	}
 	switch s.Type {
-	case RekordA:
-		adres := net.ParseIP(wartosc)
+	case RecordA:
+		adres := net.ParseIP(value)
 		if adres == nil || adres.To4() == nil {
-			return fmt.Errorf("%q nie jest adresem IPv4", wartosc)
+			return fmt.Errorf("%q is not an IPv4 address", value)
 		}
-	case RekordAAAA:
-		adres := net.ParseIP(wartosc)
+	case RecordAAAA:
+		adres := net.ParseIP(value)
 		if adres == nil || adres.To4() != nil {
-			return fmt.Errorf("%q nie jest adresem IPv6", wartosc)
+			return fmt.Errorf("%q is not an IPv6 address", value)
 		}
-	case RekordCNAME, RekordPTR:
-		if !nazwaStrefy.MatchString(strings.TrimSuffix(wartosc, ".")) {
-			return fmt.Errorf("%q nie jest nazwa domenowa", wartosc)
+	case RecordCNAME, RecordPTR:
+		if !zoneNamePattern.MatchString(strings.TrimSuffix(value, ".")) {
+			return fmt.Errorf("%q is not a domain name", value)
 		}
-	case RekordSRV:
-		// Format: priorytet waga port cel.
-		pola := strings.Fields(wartosc)
-		if len(pola) != 4 {
-			return fmt.Errorf("rekord SRV ma postac \"priorytet waga port cel\"")
+	case RecordSRV:
+		// The format is: priority weight port target.
+		fields := strings.Fields(value)
+		if len(fields) != 4 {
+			return fmt.Errorf("an SRV record has the form \"priority weight port target\"")
 		}
-		for _, pole := range pola[:3] {
-			liczba, err := strconv.Atoi(pole)
-			if err != nil || liczba < 0 || liczba > 65535 {
-				return fmt.Errorf("nieprawidlowa liczba %q w rekordzie SRV", pole)
+		for _, field := range fields[:3] {
+			number, err := strconv.Atoi(field)
+			if err != nil || number < 0 || number > 65535 {
+				return fmt.Errorf("invalid number %q in the SRV record", field)
 			}
 		}
-	case RekordTXT:
-		if len(wartosc) > 255 {
-			return fmt.Errorf("wartosc rekordu TXT jest dluzsza niz 255 znakow")
+	case RecordTXT:
+		if len(value) > 255 {
+			return fmt.Errorf("the value of the TXT record is longer than 255 characters")
 		}
 	}
 	return nil
 }
 
-// Zones zwraca strefy DNS katalogu.
-func (c *Client) Zones(ctx context.Context) ([]Strefa, error) {
-	return cached(ctx, c, "dns-zones", func() ([]Strefa, error) {
+// Zones returns the DNS zones of the directory.
+func (c *Client) Zones(ctx context.Context) ([]Zone, error) {
+	return cached(ctx, c, "dns-zones", func() ([]Zone, error) {
 		records, err := c.findRecords(ctx, "dnszone_find")
 		if err != nil {
 			return nil, err
 		}
-		strefy := make([]Strefa, 0, len(records))
+		zones := make([]Zone, 0, len(records))
 		for _, record := range records {
-			nazwa := strings.TrimSuffix(first(record, "idnsname"), ".")
-			if nazwa == "" {
+			name := strings.TrimSuffix(first(record, "idnsname"), ".")
+			if name == "" {
 				continue
 			}
-			strefy = append(strefy, Strefa{
-				Name:    nazwa,
-				Reverse: strings.HasSuffix(nazwa, ".in-addr.arpa") || strings.HasSuffix(nazwa, ".ip6.arpa"),
+			zones = append(zones, Zone{
+				Name:    name,
+				Reverse: strings.HasSuffix(name, ".in-addr.arpa") || strings.HasSuffix(name, ".ip6.arpa"),
 			})
 		}
-		return strefy, nil
+		return zones, nil
 	})
 }
 
-// Records zwraca rekordy jednej strefy.
+// Records returns the records of one zone.
 //
-// Nie cache'ujemy ich: rekord jest tym, co zmienia sie w odpowiedzi na
-// operacje panelu, a lista sprzed minuty pokazywalaby stan sprzed zmiany.
-func (c *Client) Records(ctx context.Context, zone string) ([]Rekord, error) {
-	if !nazwaStrefy.MatchString(zone) {
-		return nil, fmt.Errorf("nieprawidlowa nazwa strefy %q", zone)
+// We do not cache them: a record is what changes in response to the panel's
+// operations, and a list from a minute ago would show the state from before
+// the change.
+func (c *Client) Records(ctx context.Context, zone string) ([]Record, error) {
+	if !zoneNamePattern.MatchString(zone) {
+		return nil, fmt.Errorf("invalid zone name %q", zone)
 	}
 	result, err := c.call(ctx, "dnsrecord_find", []string{zone}, map[string]any{
 		"all": true, "sizelimit": 0,
@@ -174,135 +175,140 @@ func (c *Client) Records(ctx context.Context, zone string) ([]Rekord, error) {
 		Truncated bool             `json:"truncated"`
 	}
 	if err := json.Unmarshal(result, &decoded); err != nil {
-		return nil, fmt.Errorf("odpowiedz dnsrecord_find: %w", err)
+		return nil, fmt.Errorf("the dnsrecord_find response: %w", err)
 	}
 	if decoded.Truncated {
-		return nil, fmt.Errorf("katalog obcial liste rekordow strefy %s", zone)
+		return nil, fmt.Errorf("the directory truncated the list of records of the zone %s", zone)
 	}
 
-	var rekordy []Rekord
-	for _, record := range decoded.Result {
-		nazwa := first(record, "idnsname")
-		for typ, atrybut := range atrybutRekordu {
-			wartosci := strings_(record, atrybut)
-			if len(wartosci) == 0 {
+	var records []Record
+	for _, entry := range decoded.Result {
+		name := first(entry, "idnsname")
+		for recordType, attribute := range recordAttribute {
+			values := strings_(entry, attribute)
+			if len(values) == 0 {
 				continue
 			}
-			rekord := Rekord{Zone: strings.TrimSuffix(zone, "."), Name: nazwa, Type: typ, Values: wartosci}
-			if ttl := first(record, "dnsttl"); ttl != "" {
-				rekord.TTL, _ = strconv.Atoi(ttl)
+			record := Record{Zone: strings.TrimSuffix(zone, "."), Name: name, Type: recordType, Values: values}
+			if ttl := first(entry, "dnsttl"); ttl != "" {
+				record.TTL, _ = strconv.Atoi(ttl)
 			}
-			rekordy = append(rekordy, rekord)
+			records = append(records, record)
 		}
 	}
-	return rekordy, nil
+	return records, nil
 }
 
-// EnsureRecord dopisuje rekord do strefy.
+// EnsureRecord adds a record to a zone.
 //
-// Katalog dodaje wartosc do rekordu, a nie zastepuje calego wpisu: nazwa
-// z dwoma adresami zostaje nazwa z dwoma adresami. Panel nie usuwa niczego
-// przy zapisie - usuniecie jest osobna operacja o wyzszym ryzyku.
-func (c *Client) EnsureRecord(ctx context.Context, spec RecordSpec) (Rekord, error) {
+// The directory adds the value to the record rather than replacing the whole
+// entry: a name with two addresses stays a name with two addresses. The panel
+// removes nothing while writing - removal is a separate operation of higher
+// risk.
+func (c *Client) EnsureRecord(ctx context.Context, spec RecordSpec) (Record, error) {
 	if err := spec.Validate(); err != nil {
-		return Rekord{}, err
+		return Record{}, err
 	}
 	options := map[string]any{
-		atrybutRekordu[spec.Type]: []string{spec.Value},
+		recordAttribute[spec.Type]: []string{spec.Value},
 	}
 	if spec.TTL > 0 {
 		options["dnsttl"] = spec.TTL
 	}
 	if _, err := c.call(ctx, "dnsrecord_add",
 		[]string{spec.Zone, spec.Name}, options); err != nil {
-		return Rekord{}, err
+		return Record{}, err
 	}
-	return Rekord{
+	return Record{
 		Zone: strings.TrimSuffix(spec.Zone, "."), Name: spec.Name,
 		Type: spec.Type, Values: []string{spec.Value}, TTL: spec.TTL,
 	}, nil
 }
 
-// RemoveRecord usuwa jedna wartosc rekordu.
+// RemoveRecord removes one value of a record.
 func (c *Client) RemoveRecord(ctx context.Context, spec RecordSpec) error {
 	if err := spec.Validate(); err != nil {
 		return err
 	}
 	_, err := c.call(ctx, "dnsrecord_del", []string{spec.Zone, spec.Name}, map[string]any{
-		atrybutRekordu[spec.Type]: []string{spec.Value},
+		recordAttribute[spec.Type]: []string{spec.Value},
 	})
 	return err
 }
 
-// PelnaNazwa sklada pelna nazwe rekordu ze strefy i nazwy wzglednej.
+// FullName builds the full name of a record from the zone and a relative
+// name.
 //
-// Wpis w korzeniu strefy zapisuje sie jako "@" i nie moze dac nazwy
-// zaczynajacej sie od tego znaku: cel PTR "@.example.test." nie wskazuje
-// niczego, a wyglada jak poprawny rekord.
-func PelnaNazwa(zone, name string) string {
-	strefa := strings.TrimSuffix(zone, ".")
+// An entry at the root of a zone is written as "@" and must not give a name
+// starting with that character: the PTR target "@.example.test." points at
+// nothing while looking like a valid record.
+func FullName(zone, name string) string {
+	zoneName := strings.TrimSuffix(zone, ".")
 	if name == "" || name == "@" {
-		return strefa
+		return zoneName
 	}
-	return strings.TrimSuffix(name, ".") + "." + strefa
+	return strings.TrimSuffix(name, ".") + "." + zoneName
 }
 
-// NazwaWStrefie liczy nazwe wzgledna rekordu PTR w podanej strefie odwrotnej.
+// NameInZone computes the relative name of a PTR record within the given
+// reverse zone.
 //
-// Strefa odwrotna nie musi obejmowac calego /24 ani /64: instalacja moze miec
-// podzial waskiej, wskazany wprost w zleceniu. Wtedy nazwa wzgledna jest
-// dluzsza niz jeden czlon - a policzenie jej dla /24 dawalo rekord dla zupelnie
-// innego adresu. Dlatego liczymy pelna nazwe arpa i odejmujemy od niej strefe,
-// zamiast zakladac szerokosc podzialu.
-func NazwaWStrefie(adres, strefa string) (string, error) {
-	pelna, err := PelnaNazwaOdwrotna(adres)
+// A reverse zone does not have to cover a whole /24 or /64: an installation
+// may have a narrower split, named explicitly in the request. The relative
+// name is then longer than one label - and computing it for a /24 gave a
+// record for an entirely different address. That is why we compute the full
+// arpa name and subtract the zone from it instead of assuming the width of
+// the split.
+func NameInZone(address, zone string) (string, error) {
+	full, err := FullReverseName(address)
 	if err != nil {
 		return "", err
 	}
-	oczyszczona := strings.TrimSuffix(strings.TrimSpace(strefa), ".")
-	if oczyszczona == "" {
-		return "", fmt.Errorf("nie wskazano strefy odwrotnej")
+	cleaned := strings.TrimSuffix(strings.TrimSpace(zone), ".")
+	if cleaned == "" {
+		return "", fmt.Errorf("no reverse zone was named")
 	}
-	if !strings.HasSuffix(pelna, "."+oczyszczona) {
-		return "", fmt.Errorf("adres %s nie nalezy do strefy %s", adres, oczyszczona)
+	if !strings.HasSuffix(full, "."+cleaned) {
+		return "", fmt.Errorf("the address %s does not belong to the zone %s", address, cleaned)
 	}
-	return strings.TrimSuffix(pelna, "."+oczyszczona), nil
+	return strings.TrimSuffix(full, "."+cleaned), nil
 }
 
-// PelnaNazwaOdwrotna liczy pelna nazwe arpa dla adresu.
-func PelnaNazwaOdwrotna(adres string) (string, error) {
-	strefa, nazwa, err := StrefaOdwrotna(adres)
+// FullReverseName computes the full arpa name for an address.
+func FullReverseName(address string) (string, error) {
+	zone, name, err := ReverseZone(address)
 	if err != nil {
 		return "", err
 	}
-	return nazwa + "." + strefa, nil
+	return name + "." + zone, nil
 }
 
-// StrefaOdwrotna liczy strefe i nazwe rekordu PTR dla adresu.
+// ReverseZone computes the zone and the name of the PTR record for an
+// address.
 //
-// Rekord odwrotny jest osobnym, widocznym elementem planu: to on decyduje,
-// co odpowie zapytanie o adres - a zapominanie o nim jest najczestszym bledem
-// przy dopisywaniu hostow.
-func StrefaOdwrotna(adres string) (strefa, nazwa string, err error) {
-	ip := net.ParseIP(adres)
+// The reverse record is a separate, visible element of the plan: it decides
+// what a query about an address answers - and forgetting it is the most
+// common mistake when adding hosts.
+func ReverseZone(address string) (zone, name string, err error) {
+	ip := net.ParseIP(address)
 	if ip == nil {
-		return "", "", fmt.Errorf("%q nie jest adresem IP", adres)
+		return "", "", fmt.Errorf("%q is not an IP address", address)
 	}
-	if czworka := ip.To4(); czworka != nil {
-		// Strefa /24 jest tym, co FreeIPA zaklada domyslnie przy tworzeniu
-		// stref odwrotnych; wezsze podzialy wymagaja wskazania strefy wprost.
-		return fmt.Sprintf("%d.%d.%d.in-addr.arpa", czworka[2], czworka[1], czworka[0]),
-			strconv.Itoa(int(czworka[3])), nil
+	if four := ip.To4(); four != nil {
+		// A /24 zone is what FreeIPA assumes by default when creating reverse
+		// zones; narrower splits require naming the zone explicitly.
+		return fmt.Sprintf("%d.%d.%d.in-addr.arpa", four[2], four[1], four[0]),
+			strconv.Itoa(int(four[3])), nil
 	}
-	// IPv6: nazwa to szesnastkowe polbajty w odwrotnej kolejnosci; strefa
-	// obejmuje pierwsze 64 bity adresu.
-	rozwiniety := ip.To16()
-	var polbajty []string
-	for i := len(rozwiniety) - 1; i >= 0; i-- {
-		polbajty = append(polbajty,
-			strconv.FormatUint(uint64(rozwiniety[i]&0x0f), 16),
-			strconv.FormatUint(uint64(rozwiniety[i]>>4), 16))
+	// IPv6: the name is the hexadecimal nibbles in reverse order; the zone
+	// covers the first 64 bits of the address.
+	expanded := ip.To16()
+	var nibbles []string
+	for i := len(expanded) - 1; i >= 0; i-- {
+		nibbles = append(nibbles,
+			strconv.FormatUint(uint64(expanded[i]&0x0f), 16),
+			strconv.FormatUint(uint64(expanded[i]>>4), 16))
 	}
-	return strings.Join(polbajty[16:], ".") + ".ip6.arpa",
-		strings.Join(polbajty[:16], "."), nil
+	return strings.Join(nibbles[16:], ".") + ".ip6.arpa",
+		strings.Join(nibbles[:16], "."), nil
 }

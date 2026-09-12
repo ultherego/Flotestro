@@ -39,9 +39,9 @@ func generation(t *testing.T, ca *pki.CA, hostID string) Generation {
 		t.Fatal(err)
 	}
 	return Generation{
-		KeyPEM:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		KeyPEM:         pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
 		CertificatePEM: wydany.PEM,
-		TrustPEM:   ca.PEM,
+		TrustPEM:       ca.PEM,
 	}
 }
 
@@ -213,9 +213,9 @@ func TestAMismatchedPairIsRejected(t *testing.T) {
 	pierwszaGeneracja := generation(t, ca, testHost)
 	drugaGeneracja := generation(t, ca, testHost)
 	pomieszana := Generation{
-		KeyPEM:      pierwszaGeneracja.KeyPEM,
+		KeyPEM:         pierwszaGeneracja.KeyPEM,
 		CertificatePEM: drugaGeneracja.CertificatePEM,
-		TrustPEM:   ca.PEM,
+		TrustPEM:       ca.PEM,
 	}
 	if _, err := store.Commit(pomieszana); !errors.Is(err, ErrKeyPair) {
 		t.Fatalf("blad = %v, chcemy %v", err, ErrKeyPair)

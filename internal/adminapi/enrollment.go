@@ -114,7 +114,7 @@ const (
 	KrokInwentarz  = "inventory"
 	StanCzeka      = "waiting"
 	StanZrobione   = "done"
-	StateFailed   = "failed"
+	StateFailed    = "failed"
 )
 
 // zamowienieZKrokami dokleda do zamowienia postep instalacji.

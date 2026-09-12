@@ -41,7 +41,7 @@ type Identity struct {
 	Certificate tls.Certificate
 	CAPool      *x509.CertPool
 	NotAfter    time.Time
-	TrustPEM []byte
+	TrustPEM    []byte
 }
 
 // Zywa tozsamosc trzyma biezacy material relaya i pozwala podmienic go
@@ -256,9 +256,9 @@ func odnow(ctx context.Context, obecna Identity, opcje OpcjeOdnowienia) (Identit
 	}
 
 	zapisana, err := magazyn.Commit(identitystore.Generation{
-		Key:         klucz,
+		Key:            klucz,
 		CertificatePEM: odpowiedz.Msg.GetCertificatePem(),
-		TrustPEM:   bundle,
+		TrustPEM:       bundle,
 	})
 	if err != nil {
 		// Odrzucona generacja nie rusza tego, czym relay pracuje: lepiej
@@ -271,7 +271,7 @@ func odnow(ctx context.Context, obecna Identity, opcje OpcjeOdnowienia) (Identit
 		Certificate: zapisana.Certificate,
 		CAPool:      zapisana.CAPool,
 		NotAfter:    zapisana.NotAfter,
-		TrustPEM: zapisana.TrustPEM,
+		TrustPEM:    zapisana.TrustPEM,
 	}, nil
 }
 

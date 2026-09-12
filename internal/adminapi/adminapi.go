@@ -305,11 +305,11 @@ func (s *Server) Routes() http.Handler {
 	// co reszta katalogu; zapis jest zmiana centralna z wlasnym uprawnieniem
 	// i wlasnym planem.
 	mux.HandleFunc("GET /api/v1/identity/dns/zones", directoryHandler(s, "dns-zones",
-		func(s *Server, r *http.Request) ([]freeipa.Strefa, error) {
+		func(s *Server, r *http.Request) ([]freeipa.Zone, error) {
 			return s.directory.Zones(r.Context())
 		}))
 	mux.HandleFunc("GET /api/v1/identity/dns/records", directoryHandler(s, "dns-records",
-		func(s *Server, r *http.Request) ([]freeipa.Rekord, error) {
+		func(s *Server, r *http.Request) ([]freeipa.Record, error) {
 			strefa := r.URL.Query().Get("zone")
 			if strefa == "" {
 				return nil, fmt.Errorf("wymagany parametr zone")
