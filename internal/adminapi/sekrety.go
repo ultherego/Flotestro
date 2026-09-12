@@ -34,7 +34,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 			"this installation has no secret store")
 		return
 	}
-	lista, err := s.secrets.Lista(r.Context())
+	lista, err := s.secrets.List(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -74,7 +74,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	sekret, err := s.secrets.Utworz(r.Context(), request.Name, request.Description,
+	sekret, err := s.secrets.Create(r.Context(), request.Name, request.Description,
 		[]byte(request.Value), principal.Subject)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_secret", err.Error())
@@ -107,7 +107,7 @@ func (s *Server) handleRotateSecret(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	sekret, err := s.secrets.Obroc(r.Context(), r.PathValue("name"), []byte(request.Value), principal.Subject)
+	sekret, err := s.secrets.Rotate(r.Context(), r.PathValue("name"), []byte(request.Value), principal.Subject)
 	switch {
 	case errors.Is(err, secrets.ErrNotFound):
 		problem(w, http.StatusNotFound, "secret_not_found", "no such secret")
@@ -142,7 +142,7 @@ func (s *Server) handleRetireSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nazwa := r.PathValue("name")
-	if err := s.secrets.Wycofaj(r.Context(), nazwa); err != nil {
+	if err := s.secrets.Retire(r.Context(), nazwa); err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusNotFound, "secret_not_found", "no such secret")
 			return
@@ -155,7 +155,7 @@ func (s *Server) handleRetireSecret(w http.ResponseWriter, r *http.Request) {
 		Action: "secret.retire", TargetType: "secret", TargetID: nazwa,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 	})
-	sekret, err := s.secrets.Sekret(r.Context(), nazwa)
+	sekret, err := s.secrets.Secret(r.Context(), nazwa)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -183,7 +183,7 @@ func (s *Server) handleDestroySecretVersion(w http.ResponseWriter, r *http.Reque
 		problem(w, http.StatusBadRequest, "invalid_version", err.Error())
 		return
 	}
-	if err := s.secrets.Zniszcz(r.Context(), nazwa, wersja); err != nil {
+	if err := s.secrets.Destroy(r.Context(), nazwa, wersja); err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusNotFound, "version_not_found", "no such secret version")
 			return
@@ -197,7 +197,7 @@ func (s *Server) handleDestroySecretVersion(w http.ResponseWriter, r *http.Reque
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"version": wersja},
 	})
-	sekret, err := s.secrets.Sekret(r.Context(), nazwa)
+	sekret, err := s.secrets.Secret(r.Context(), nazwa)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -211,7 +211,7 @@ func (s *Server) sekret(w http.ResponseWriter, r *http.Request) (*secrets.Secret
 			"this installation has no secret store")
 		return nil, false
 	}
-	sekret, err := s.secrets.Sekret(r.Context(), r.PathValue("name"))
+	sekret, err := s.secrets.Secret(r.Context(), r.PathValue("name"))
 	if errors.Is(err, secrets.ErrNotFound) {
 		problem(w, http.StatusNotFound, "secret_not_found", "no such secret")
 		return nil, false

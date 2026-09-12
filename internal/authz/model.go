@@ -1,5 +1,6 @@
-// Package authz zawiera model autoryzacji: uprawnienia, role i zakresy.
-// Uprawnienie to zawsze para operacja + zakres, nigdy sama operacja.
+// Package authz holds the authorisation model: permissions, roles and
+// scopes. A permission is always a pair of operation + scope, never an
+// operation alone.
 package authz
 
 import (
@@ -8,36 +9,37 @@ import (
 	"strings"
 )
 
-// Permission jest pojedynczym uprawnieniem. Operacje na hostach maja wlasne
-// uprawnienia pochodzace z opspec, zeby restart uslugi nie byl tym samym
-// poziomem zaufania co odczyt inwentarza.
+// Permission is a single permission. Host operations have their own
+// permissions coming from opspec, so that restarting a service is not the
+// same level of trust as reading the inventory.
 type Permission string
 
 const (
 	PermHostRead      Permission = "host.read"
 	PermInventoryRead Permission = "inventory.read"
-	// PermInventoryRefresh pozwala zamowic ponowny odczyt inwentarza.
-	// Osobne od odczytu: patrzenie na zapisany obraz jest darmowe, a kazanie
-	// hostowi zebrac go od nowa juz nie - to podprocesy na maszynie, ktora
-	// pracuje.
+	// PermInventoryRefresh allows ordering the inventory to be read again.
+	// Separate from reading: looking at the stored picture is free, telling
+	// the host to collect it anew is not - those are subprocesses on a
+	// machine that is doing work.
 	PermInventoryRefresh Permission = "inventory.refresh"
 	PermAuditRead        Permission = "audit.read"
 	PermJobRead          Permission = "job.read"
 	PermJobCreate        Permission = "job.create"
 	PermJobApprove       Permission = "job.approve"
 	PermJobCancel        Permission = "job.cancel"
-	// Zamowienia enrollmentu: kto moze zaprosic maszyne do floty, kto widzi
-	// oczekujace instalacje i kto moze je cofnac.
+	// Enrollment requests: who may invite a machine into the fleet, who sees
+	// the pending installations and who may revoke them.
 	PermHostEnrollCreate Permission = "host.enroll.create"
 	PermHostEnrollRead   Permission = "host.enroll.read"
 	PermHostEnrollRevoke Permission = "host.enroll.revoke"
-	// PermHostIdentityReplace pozwala odtworzyc tozsamosc istniejacego hosta.
-	// To osobne prawo od zapraszania nowych maszyn: wymiana tozsamosci jest
-	// przejeciem hosta, ktory juz jest we flocie.
+	// PermHostIdentityReplace allows restoring the identity of an existing
+	// host. That is a right separate from inviting new machines: replacing an
+	// identity means taking over a host that is already in the fleet.
 	PermHostIdentityReplace Permission = "host.identity.replace"
-	// Cykl zycia hosta. Kwarantanna, jej zdjecie i wycofanie sa trzema
-	// roznymi decyzjami i maja trzy rozne prawa: odciecie w incydencie musi
-	// byc szybkie, przywrocenie i wycofanie - rozwazne.
+	// The host lifecycle. Quarantine, lifting it and decommissioning are
+	// three different decisions and have three different rights: cutting a
+	// host off during an incident has to be fast, restoring and
+	// decommissioning - deliberate.
 	PermHostQuarantine        Permission = "host.quarantine"
 	PermHostQuarantineRelease Permission = "host.quarantine.release"
 	PermHostDecommission      Permission = "host.decommission"
@@ -51,183 +53,194 @@ const (
 
 	PermPackagesPlan    Permission = "packages.plan"
 	PermPackagesUpgrade Permission = "packages.upgrade"
-	// PermAgentUpgrade jest osobnym prawem od aktualizacji pakietow: wymiana
-	// agenta odcina host od zarzadzania na czas restartu i rozlicza sie
-	// inaczej - dopiero powrot hosta jest sukcesem.
+	// PermAgentUpgrade is a right separate from upgrading packages: replacing
+	// the agent cuts the host off from management for the restart and is
+	// settled differently - only the host's return is a success.
 	PermAgentUpgrade Permission = "agent.upgrade"
-	// Naprawa dotyka pakietow, ktore moga decydowac o starcie hosta,
-	// wiec jest osobnym uprawnieniem, a nie czescia aktualizacji.
+	// A repair touches packages that can decide whether the host starts, so
+	// it is a separate permission rather than part of an upgrade.
 	PermPackagesRepair Permission = "packages.repair"
 	PermSystemReboot   Permission = "system.reboot"
 	PermUnitStatus     Permission = "unit.status"
-	// Wlaczenie jednostki zmienia zachowanie hosta po kazdym restarcie,
-	// a zamaskowanie odbiera mozliwosc jej uruchomienia takze recznie.
+	// Enabling a unit changes the host's behaviour after every reboot, and
+	// masking takes away the ability to start it even manually.
 	PermUnitEnableWrite Permission = "unit.enable.write"
 	PermUnitMaskWrite   Permission = "unit.mask.write"
-	// Odczyt pliku logu siega poza dziennik systemowy.
+	// Reading a log file reaches beyond the system journal.
 	PermLogFileRead Permission = "logfile.read"
-	// Podglad na zywo trzyma proces na hoscie przez caly czas trwania, wiec
-	// jest oddzielony od jednorazowego odczytu dziennika.
+	// A live view keeps a process on the host for its whole duration, so it
+	// is separated from a one-off journal read.
 	PermJournalFollow Permission = "journal.follow"
-	// Odczyt procesow jest diagnostyka; wyslanie sygnalu zatrzymuje czyjas
-	// prace i nie da sie go cofnac.
+	// Reading processes is diagnostics; sending a signal stops somebody's
+	// work and cannot be undone.
 	PermProcessRead   Permission = "process.read"
 	PermProcessSignal Permission = "process.signal"
-	// Pelny cykl zycia pakietow. Instalacja i usuwanie sa oddzielone od
-	// aktualizacji: to trzy rozne decyzje o tym samym hoscie.
-	// Pelna lista pakietow jest odczytem inwentarza, ale osobnym: to z niej
-	// bierze sie ocena podatnosci, wiec ma wlasne uprawnienie i wlasny slad.
+	// The full package lifecycle. Installing and removing are separated from
+	// upgrading: those are three different decisions about the same host.
+	// The full package list is an inventory read, but a separate one: the
+	// vulnerability assessment comes from it, so it has its own permission
+	// and its own trail.
 	PermPackagesRead    Permission = "packages.read"
 	PermPackagesInstall Permission = "packages.install"
 	PermPackagesRemove  Permission = "packages.remove"
 	PermPackagesHold    Permission = "packages.hold.write"
-	// Zrodlo pakietow jest decyzja o zaufaniu, a nie o wersji: od jego
-	// dopisania host bierze oprogramowanie takze stamtad, razem ze skryptami
-	// pakietow, ktore chodza jako root. Stad uprawnienie osobne od instalacji.
+	// A package source is a decision about trust rather than about a version:
+	// once it is added the host takes software from there as well, together
+	// with package scripts that run as root. Hence a permission separate from
+	// installing.
 	PermPackagesRepository Permission = "packages.repository.write"
-	// Zadania cykliczne uruchamiaja sie bez udzialu operatora, takze wtedy,
-	// gdy nikt nie patrzy - zalozenie wpisu jest osobna decyzja od jego
-	// wylaczenia czy usuniecia.
+	// Scheduled jobs run without the operator, including when nobody is
+	// watching - creating an entry is a decision separate from disabling or
+	// removing it.
 	PermScheduleWrite   Permission = "schedule.write"
 	PermScheduleDisable Permission = "schedule.disable"
 	PermScheduleRemove  Permission = "schedule.remove"
 	PermScheduleRun     Permission = "schedule.run"
-	// Siec. Odczyt profili jest przygotowaniem do zmiany, wiec jest tani;
-	// zmiana adresu albo trasy potrafi odciac host od panelu i wtedy zaden
-	// nastepny rozkaz juz nie dojdzie. Trasy maja wlasne uprawnienie, bo
-	// zmiana trasy domyslnej przekierowuje caly ruch hosta, nie tylko
-	// jego adres.
+	// The network. Reading the profiles is preparation for a change, so it is
+	// cheap; changing an address or a route can cut the host off from the
+	// panel, and then no further order will arrive. Routes have their own
+	// permission, because changing the default route redirects all of the
+	// host's traffic, not just its address.
 	PermNetworkRead       Permission = "network.read"
 	PermNetworkWrite      Permission = "network.write"
 	PermNetworkRouteWrite Permission = "network.route.write"
-	// MTU i wycofanie sa oddzielone od przepisania adresu: zle MTU psuje duze
-	// pakiety, zly adres odcina host, a wycofanie wraca do stanu, ktorego
-	// operator moze juz nie pamietac.
+	// MTU and rollback are separated from rewriting an address: a wrong MTU
+	// breaks large packets, a wrong address cuts the host off, and a rollback
+	// returns to a state the operator may no longer remember.
 	PermNetworkMTUWrite Permission = "network.mtu.write"
 	PermNetworkRollback Permission = "network.rollback"
-	// DNS hosta jest oddzielony od rekordow w katalogu: wpis w strefie widza
-	// wszyscy klienci domeny, a resolver hosta - tylko ten host.
+	// The host's DNS is separated from the records in the directory: an entry
+	// in a zone is seen by every client of the domain, and the host's
+	// resolver - only by that host.
 	PermDNSRead Permission = "dns.read"
-	// Plan resolvera jest odczytem: liczy roznice, niczego nie zmienia.
+	// The resolver plan is a read: it computes a difference and changes nothing.
 	PermDNSPlan      Permission = "dns.plan"
 	PermDNSHostWrite Permission = "dns.host.write"
-	// DNS katalogowy jest osobnym zakresem niz resolver hosta: tam panel mowi
-	// jednemu hostowi, kogo ma pytac, a tutaj - co katalog odpowie calej
-	// sieci. Zly rekord psuje nie jeden host, tylko wszystkich, ktorzy o niego
-	// zapytaja, wiec uprawnienie jest osobne i globalne.
+	// Directory DNS is a different scope from the host's resolver: there the
+	// panel tells one host whom to ask, and here - what the directory answers
+	// the whole network. A bad record breaks not one host but everyone who
+	// asks about it, so the permission is separate and global.
 	PermDNSDirectoryWrite Permission = "dns.directory.write"
-	// Zapora. Odczyt zestawu regul jest przygotowaniem do zmiany; zla regula
-	// odcina panel od hosta i nie ma czym cofnac zmiany. Usuniecie reguly,
-	// zmiana strefy i przywrocenie stanu maja wlasne uprawnienia, bo to trzy
-	// rozne decyzje o tym samym hoscie.
+	// The firewall. Reading the ruleset is preparation for a change; a bad
+	// rule cuts the panel off from the host and there is nothing left to undo
+	// the change with. Removing a rule, changing a zone and restoring the
+	// state have their own permissions, because those are three different
+	// decisions about the same host.
 	PermFirewallRead         Permission = "firewall.read"
 	PermFirewallWrite        Permission = "firewall.write"
 	PermFirewallRuleRemove   Permission = "firewall.rule.remove"
 	PermFirewallZoneWrite    Permission = "firewall.zone.write"
 	PermFirewallServiceWrite Permission = "firewall.service.write"
 	PermFirewallRestore      Permission = "firewall.restore"
-	// Przestrzen dyskowa. Odczyt topologii jest diagnostyka; montowanie
-	// decyduje o tym, czy host wstanie po restarcie tak, jak stoi teraz,
-	// a sprawdzenie filesystemu wymaga, zeby nikt go nie uzywal.
+	// Storage. Reading the topology is diagnostics; mounting decides whether
+	// the host comes back from a reboot the way it stands now, and checking a
+	// filesystem requires that nobody is using it.
 	PermStorageRead        Permission = "storage.read"
 	PermStorageMountWrite  Permission = "storage.mount.write"
 	PermStorageMountRemove Permission = "storage.mount.remove"
 	PermStorageFsck        Permission = "storage.fsck"
-	// Rozszerzenie i formatowanie to dwie rozne decyzje: pierwsza dodaje
-	// miejsce, druga kasuje wszystko, co na nim bylo.
+	// Extending and formatting are two different decisions: the first adds
+	// space, the second deletes everything that was on it.
 	PermStorageLVMWrite        Permission = "storage.lvm.write"
 	PermStorageFilesystemWrite Permission = "storage.filesystem.write"
 	PermStorageDestructive     Permission = "storage.destructive"
 	PermStorageWipe            Permission = "storage.wipe"
-	// Serwer sshd. Zla konfiguracja odcina administracje hosta, a wymiana
-	// klucza zmienia jego tozsamosc widziana przez wszystkich klientow.
+	// The sshd server. A bad configuration cuts off administration of the
+	// host, and replacing the key changes the identity every client sees.
 	PermSSHRead          Permission = "ssh.read"
 	PermSSHConfigWrite   Permission = "ssh.config.write"
 	PermSSHHostKeyRotate Permission = "ssh.hostkey.rotate"
-	// Bezpieczenstwo. Skan zbiera material rozpoznawczy o hoscie, wiec ma
-	// wlasne uprawnienie osobne od odczytu ustalen. Naprawa nie ma wlasnej
-	// operacji na hoscie: wykonuje ja modul, ktory za dana rzecz odpowiada,
-	// wiec uprawnienie do naprawy nie zastepuje uprawnien tych modulow.
+	// Security. A scan collects reconnaissance material about the host, so it
+	// has its own permission separate from reading the findings. Remediation
+	// has no host operation of its own: it is carried out by the module
+	// responsible for the given thing, so the remediation permission does not
+	// replace those modules' permissions.
 	PermSecurityRead      Permission = "security.read"
 	PermSecurityScan      Permission = "security.scan"
 	PermSecurityRemediate Permission = "security.remediate"
 	PermSecurityMACWrite  Permission = "security.mac.write"
-	// Przeladowanie regul audytu zmienia to, co host notuje.
+	// Reloading the audit rules changes what the host records.
 	PermSecurityAuditReload Permission = "security.audit.reload"
-	// Backup. Odczyt stanu repozytorium jest czescia dyzuru - backup, o ktorym
-	// nikt nie wie, ze nie dziala, jest gorszy niz jego brak. Odtworzenie ma
-	// wlasne uprawnienie i najwyzsze ryzyko: rozpakowuje stary stan na
-	// dzialajacym systemie.
+	// Backup. Reading the state of the repository is part of being on call -
+	// a backup nobody knows is broken is worse than none. A restore has its
+	// own permission and the highest risk: it unpacks old state onto a
+	// running system.
 	PermBackupRead    Permission = "backup.read"
 	PermBackupRun     Permission = "backup.run"
 	PermBackupVerify  Permission = "backup.verify"
 	PermBackupRestore Permission = "backup.restore"
 
-	// Podatnosci. Ocena powstaje w panelu z ustalen producenta dystrybucji;
-	// odczyt jest osobnym uprawnieniem, bo lista podatnosci floty jest
-	// materialem rozpoznawczym o niej samej.
+	// Vulnerabilities. The assessment is formed in the panel out of the
+	// distribution vendor's findings; reading it is a separate permission,
+	// because the fleet's list of vulnerabilities is reconnaissance material
+	// about the fleet itself.
 	PermVulnerabilityRead Permission = "vulnerability.read"
 
-	// Monitoring. Panel nie ma wlasnych metryk ani wlasnych regul alertowych:
-	// czyta cudze. Wyciszenie alertu ma jednak swoje uprawnienie, bo wylacza
-	// czujnik - a sonda wychodzi z hosta polaczeniem, wiec nie jest zwyklym
-	// odczytem inwentarza.
+	// Monitoring. The panel has neither metrics nor alerting rules of its
+	// own: it reads somebody else's. Silencing an alert does have its own
+	// permission, because it switches a sensor off - and a probe leaves the
+	// host with a connection, so it is not an ordinary inventory read.
 	PermMonitoringRead    Permission = "monitoring.read"
 	PermMonitoringProbe   Permission = "monitoring.probe"
 	PermMonitoringSilence Permission = "monitoring.silence.write"
 
-	// Okno serwisowe nalezy do prowadzenia ruchu, a nie do zmiany hosta:
-	// deklaruje je ten, kto pilnuje kampanii i dyzuru.
+	// A maintenance window belongs to running operations rather than to
+	// changing a host: it is declared by whoever watches the campaigns and
+	// the on-call duty.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
-	// Wylaczenie hosta ma wlasne uprawnienie, osobne od restartu: po
-	// restarcie host wraca sam, po wylaczeniu ktos musi do niego pojsc.
+	// Shutting a host down has its own permission, separate from rebooting:
+	// after a reboot the host comes back by itself, after a shutdown somebody
+	// has to go to it.
 	PermSystemShutdown Permission = "system.shutdown"
-	// Czas. Odczyt i test zrodel sa czescia diagnozy - przesuniety zegar
-	// wyglada z zewnatrz jak zepsuty Kerberos albo zepsuty mTLS. Zmiana
-	// zrodel potrafi przestawic zegar skokiem, wiec ma wlasne uprawnienie.
+	// Time. Reading and testing the sources are part of diagnosis - a drifted
+	// clock looks from the outside like broken Kerberos or broken mTLS.
+	// Changing the sources can step the clock, so it has its own
+	// permission.
 	PermTimeRead Permission = "time.read"
-	// Plan zrodel czasu jest odczytem: liczy roznice, niczego nie zmienia.
+	// The time-source plan is a read: it computes a difference and changes nothing.
 	PermTimePlan  Permission = "time.plan"
 	PermTimeWrite Permission = "time.write"
-	// Strefa ma wlasne uprawnienie, bo jest inna decyzja niz zrodla czasu:
-	// zmienia to, co host pokazuje ludziom i pisze do dziennika, ale nie
-	// rusza chwili, w ktorej host zyje.
+	// The timezone has its own permission, because it is a different decision
+	// from the time sources: it changes what the host shows to people and
+	// writes to the journal, but it does not touch the moment the host lives
+	// in.
 	PermTimezoneWrite Permission = "time.timezone.write"
-	// Jadro. Ustawienie sysctl da sie cofnac tak samo, jak zostalo
-	// ustawione; blokada modulu ujawnia skutek dopiero przy starcie hosta,
-	// wiec ma osobne uprawnienie.
+	// The kernel. A sysctl setting can be undone the same way it was set;
+	// blacklisting a module shows its effect only when the host starts, so it
+	// has a separate permission.
 	PermKernelRead Permission = "kernel.read"
-	// Plan blokady modulu jest odczytem: liczy roznice, niczego nie zmienia.
+	// The module blacklist plan is a read: it computes a difference and changes nothing.
 	PermKernelModulePlan      Permission = "kernel.module.plan"
 	PermKernelSysctlWrite     Permission = "kernel.sysctl.write"
 	PermKernelModuleWrite     Permission = "kernel.module.write"
 	PermKernelModuleBlacklist Permission = "kernel.module.blacklist"
-	// Pliki konfiguracyjne. Odczyt tresci jest oddzielony od planu, bo tresc
-	// bywa wrazliwa nawet wtedy, gdy plik nie jest sekretem.
+	// Configuration files. Reading the content is separated from the plan,
+	// because the content is sometimes sensitive even when the file is not a
+	// secret.
 	PermFileRead     Permission = "file.read"
 	PermFilePlan     Permission = "file.plan"
 	PermFileWrite    Permission = "file.write"
 	PermFileRemove   Permission = "file.remove"
 	PermFileRollback Permission = "file.rollback"
-	// PermDockerRead pozwala odczytac stan silnika kontenerow. Odczyt jest
-	// oddzielony od zmian: ogladanie kontenerow nalezy do pracy kazdego, kto
-	// diagnozuje host, a zatrzymywanie ich juz nie.
+	// PermDockerRead allows reading the state of the container engine.
+	// Reading is separated from changes: looking at containers is part of the
+	// work of anyone diagnosing a host, stopping them is not.
 	PermDockerRead Permission = "docker.read"
-	// PermDockerEvents pozwala przeczytac dziennik zdarzen silnika. Osobne
-	// od odczytu stanu: stan mowi, jak jest, a dziennik - co sie tu dzialo,
-	// razem z tym, czego stan juz nie pamieta.
+	// PermDockerEvents allows reading the engine's event journal. Separate
+	// from reading state: state says how things are, and the journal - what
+	// happened here, including what the state no longer remembers.
 	PermDockerEvents Permission = "docker.events"
-	// Operacje na kontenerach maja osobne uprawnienia: uruchomienie uslugi
-	// i jej usuniecie to dwie rozne decyzje, takze co do tego, kto moze je
-	// podjac.
+	// Container operations have separate permissions: starting a service and
+	// removing it are two different decisions, including as to who may take
+	// them.
 	PermDockerStart   Permission = "docker.container.start"
 	PermDockerStop    Permission = "docker.container.stop"
 	PermDockerRestart Permission = "docker.container.restart"
 	PermDockerRemove  Permission = "docker.container.remove"
 	PermDockerPull    Permission = "docker.image.pull"
 	PermDockerPrune   Permission = "docker.prune"
-	// Wdrozenie projektu uruchamia na hoscie obrazy wskazane przez operatora,
-	// wiec jest oddzielone od reszty operacji kontenerowych.
+	// Deploying a project starts the images the operator named on the host,
+	// so it is separated from the rest of the container operations.
 	PermComposePlan   Permission = "docker.compose.plan"
 	PermComposeDeploy Permission = "docker.compose.deploy"
 
@@ -236,75 +249,81 @@ const (
 	PermCampaignApprove Permission = "campaign.approve"
 	PermCampaignControl Permission = "campaign.control"
 
-	// Budzety mowia, ile zmian naraz uniesie flota i lokalizacja. Odczyt jest
-	// czescia wgladu w kampanie: bez niego host stojacy na budzecie wyglada
-	// jak host zapomniany. Zmiana pojemnosci jest osobnym uprawnieniem, bo
-	// podniesiona po cichu odbiera znaczenie kazdemu limitowi ponizej.
+	// Budgets say how many changes at once the fleet and the site can carry.
+	// Reading them is part of the view into campaigns: without it a host
+	// waiting on a budget looks like a forgotten host. Changing the capacity
+	// is a separate permission, because raised silently it takes the meaning
+	// out of every limit below.
 	PermBudgetRead  Permission = "budget.read"
 	PermBudgetWrite Permission = "budget.write"
 
-	// Uprawnienia warstwy tozsamosci. Zarzadzanie sudo i HBAC jest oddzielone
-	// od reszty, bo blad w tych regulach otwiera dostep do calej floty.
+	// Permissions of the identity layer. Managing sudo and HBAC is separated
+	// from the rest, because a mistake in those rules opens access to the
+	// whole fleet.
 	PermIdentityRead Permission = "identity.read"
-	// Reguly HBAC i sudo opisuja, kto moze uzyskac dostep i podniesc
-	// uprawnienia. To material rozpoznawczy, wiec ich odczyt jest osobnym
-	// uprawnieniem, a nie czescia zwyklego wgladu w katalog.
+	// HBAC and sudo rules describe who may get access and raise their
+	// privileges. That is reconnaissance material, so reading them is a
+	// separate permission rather than part of an ordinary view into the
+	// directory.
 	PermIdentityPolicyRead  Permission = "identity.policy.read"
 	PermIdentityUserWrite   Permission = "identity.user.write"
 	PermIdentityGroupWrite  Permission = "identity.group.write"
 	PermIdentityPolicyWrite Permission = "identity.policy.write"
 	PermIdentityHostEnroll  Permission = "identity.host.enroll"
 
-	// Konta lokalne sa osobna sciezka dostepu do hosta, niezalezna od katalogu.
-	// Zalozenie konta i zmiana kluczy SSH to nadanie dostepu do systemu, wiec
-	// maja wlasne uprawnienia; odczyt listy kont miesci sie w inventory.
+	// Local accounts are a separate path of access to the host, independent
+	// of the directory. Creating an account and changing SSH keys means
+	// granting access to the system, so they have their own permissions;
+	// reading the list of accounts fits within the inventory.
 	PermLocalUserRead    Permission = "localuser.read"
 	PermLocalUserCreate  Permission = "localuser.create"
 	PermLocalUserLock    Permission = "localuser.lock"
 	PermLocalUserUnlock  Permission = "localuser.unlock"
 	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
 
-	// Metryki opisuja flote: liczbe hostow, stany zadan i waznosc CA.
-	// To material rozpoznawczy, wiec ma wlasne uprawnienie, a nie jest
-	// dostepny kazdemu, kto zna adres panelu.
+	// The metrics describe the fleet: the number of hosts, the states of
+	// tasks and the validity of the CA. That is reconnaissance material, so
+	// it has its own permission rather than being available to everyone who
+	// knows the panel's address.
 	PermMetricsRead Permission = "metrics.read"
 
-	// Magazyn sekretow. Odczyt dotyczy metadanych - wartosci nie da sie
-	// odczytac przez API w ogole. Zniszczenie wersji jest nieodwracalne,
-	// wiec ma wlasne uprawnienie, osobne od zakladania i obracania.
+	// The secret store. Reading concerns metadata - the value cannot be read
+	// through the API at all. Destroying a version is irreversible, so it has
+	// its own permission, separate from creating and rotating.
 	PermSecretRead    Permission = "secret.read"
 	PermSecretWrite   Permission = "secret.write"
 	PermSecretDestroy Permission = "secret.destroy"
 
-	// Certyfikaty na hostach. Odczyt terminow i nazw jest czescia dyzuru -
-	// wygasly certyfikat wyglada jak awaria uslugi. Wdrozenie i odnowienie
-	// podmieniaja tozsamosc, ktora usluga pokazuje swiatu, wiec maja wlasne
-	// uprawnienia. Wskazanie panelowi pliku do obserwacji nie zmienia hosta
-	// i jest osobna, lzejsza decyzja.
-	// Plan wdrozenia jest odczytem: liczy roznice, niczego nie zmienia.
+	// Certificates on hosts. Reading the dates and names is part of being on
+	// call - an expired certificate looks like a service outage. A deployment
+	// and a renewal replace the identity a service shows to the world, so
+	// they have their own permissions. Pointing the panel at a file to watch
+	// does not change the host and is a separate, lighter decision.
+	// The deployment plan is a read: it computes a difference and changes
+	// nothing.
 	PermCertificatePlan   Permission = "certificate.plan"
 	PermCertificateRead   Permission = "certificate.read"
 	PermCertificateWatch  Permission = "certificate.watch"
 	PermCertificateDeploy Permission = "certificate.deploy"
-	// Zaufanie do urzedu jest szersze niz jeden plik: od tej chwili host
-	// przyjmuje kazdy certyfikat, ktory ten urzad podpisze. Wycofanie ma
-	// osobne uprawnienie, bo zrywa polaczenia, ktorych nikt nie zmienial.
-	// Plan kroku rotacji jest odczytem: czyta magazyn zaufania i liczy
-	// roznice, niczego nie zmieniajac.
+	// Trusting an authority is wider than one file: from that moment the host
+	// accepts every certificate this authority signs. Withdrawing it has a
+	// separate permission, because it breaks connections nobody changed.
+	// The plan of a rotation step is a read: it reads the trust store and
+	// computes a difference, changing nothing.
 	PermCertificateTrustPlan   Permission = "certificate.trust.plan"
 	PermCertificateTrustWrite  Permission = "certificate.trust.write"
 	PermCertificateTrustRemove Permission = "certificate.trust.remove"
 	PermCertificateRenew       Permission = "certificate.renew"
 
-	// CA floty jest korzeniem zaufania dla kazdego hosta. Jego wymiana ma
-	// wlasne uprawnienie, osobne od reszty administracji: blad w tym miejscu
-	// odcina cala flote.
+	// The fleet's CA is the root of trust for every host. Replacing it has
+	// its own permission, separate from the rest of administration: a mistake
+	// here cuts off the whole fleet.
 	PermPKIRead   Permission = "pki.read"
 	PermPKIRotate Permission = "pki.rotate"
 )
 
-// Role grupuje uprawnienia. Podzial odpowiada rolom z dokumentu: platform
-// admin, operator, auditor i approver.
+// Role groups permissions. The split matches the roles from the document:
+// platform admin, operator, auditor and approver.
 type Role string
 
 const (
@@ -316,8 +335,9 @@ const (
 	RolePlatformAdmin Role = "platform_admin"
 )
 
-// rolePermissions opisuje, co wolno kazdej roli. Rozdzielenie operatora
-// od approvera jest celowe: kto zleca zmiane, nie powinien jej zatwierdzac.
+// rolePermissions describes what each role may do. Separating the operator
+// from the approver is deliberate: whoever orders a change should not be the
+// one to approve it.
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
@@ -329,66 +349,73 @@ var rolePermissions = map[Role][]Permission{
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead, PermDockerRead, PermDockerEvents,
-		// Auditor patrzy na stan systemu, wiec metryki i przeglad CA naleza
-		// do jego pracy; wymiana CA juz nie.
+		// An auditor looks at the state of the system, so the metrics and a
+		// review of the CA are part of their work; replacing the CA is not.
 		PermMetricsRead, PermPKIRead,
-		// Audytor patrzy na stan ochronny hosta i na wyniki sprawdzen -
-		// to material jego pracy; naprawiac go nie musi.
+		// An auditor looks at the host's protective state and at the results
+		// of the checks - that is the material of their work; they do not
+		// have to fix it.
 		PermSecurityRead, PermSecurityScan,
-		// Terminy certyfikatow sa materialem audytu tak samo jak stan
-		// ochronny: wygasajacy certyfikat jest ustaleniem, a nie awaria.
+		// Certificate dates are audit material just as the protective state
+		// is: an expiring certificate is a finding, not an outage.
 		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan,
-		// Backup, ktorego nikt nie sprawdzil, jest ustaleniem audytu,
-		// a nie awaria dyzuru.
+		// A backup nobody verified is an audit finding, not an on-call
+		// outage.
 		PermBackupRead,
-		// Alerty i wyciszenia sa materialem audytu: wyciszenie zalozone
-		// na kwartal jest ustaleniem, a nie szczegolem dyzuru.
+		// Alerts and silences are audit material: a silence set for a
+		// quarter is a finding, not an on-call detail.
 		PermMonitoringRead,
-		// Lista pakietow jest podstawa oceny podatnosci, wiec audytor musi
-		// moc ja zobaczyc - razem z sama ocena.
+		// The package list is the basis of the vulnerability assessment, so
+		// an auditor has to be able to see it - together with the assessment
+		// itself.
 		PermPackagesRead, PermVulnerabilityRead,
-		// Metadane sekretow sa czescia obrazu instalacji: co istnieje, kto
-		// zalozyl, kiedy obrocono. Wartosci nie widzi nikt.
+		// Secret metadata is part of the picture of the installation: what
+		// exists, who created it, when it was rotated. Nobody sees the
+		// values.
 		PermSecretRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
-		// Odswiezenie inwentarza jest pierwszym ruchem przy kazdej awarii:
-		// zanim ktos zacznie zmieniac host, chce wiedziec, jak jest teraz.
+		// Refreshing the inventory is the first move in every outage: before
+		// somebody starts changing a host, they want to know how things are
+		// now.
 		PermInventoryRefresh,
 		PermJobCreate, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
-		// Operator prowadzi kontenery, ale ich nie kasuje: usuwanie
-		// i sprzatanie sa nieodwracalne i naleza do administratora.
+		// The operator runs containers but does not delete them: removing and
+		// pruning are irreversible and belong to the administrator.
 		PermDockerRead, PermDockerEvents,
 		PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
-		// Operator planuje wdrozenia projektow, ale ich nie wykonuje.
+		// The operator plans project deployments but does not carry them out.
 		PermComposePlan,
-		// Operator planuje aktualizacje, ale ich nie wykonuje: transakcja
-		// pakietowa jest operacja najwyzszego ryzyka i wymaga osobnego prawa.
+		// The operator plans upgrades but does not carry them out: a package
+		// transaction is an operation of the highest risk and requires a
+		// separate right.
 		PermPackagesPlan, PermPackagesRead,
-		// Operator planuje i prowadzi kampanie, ale ich nie zatwierdza.
+		// The operator plans and runs campaigns but does not approve them.
 		PermCampaignRead, PermCampaignCreate, PermCampaignControl,
-		// Okno serwisowe jest narzedziem prowadzenia ruchu: to operator wie,
-		// ze ten host jest wlasnie w naprawie.
+		// A maintenance window is a tool for running operations: it is the
+		// operator who knows that this host is being repaired right now.
 		PermHostMaintenanceWrite,
-		// Operator widzi konta lokalne, ale ich nie zaklada: nadanie dostepu
-		// do hosta jest decyzja administracyjna, a nie czescia obslugi awarii.
+		// The operator sees local accounts but does not create them: granting
+		// access to a host is an administrative decision rather than part of
+		// handling an outage.
 		PermLocalUserRead,
-		// Operator czyta konfiguracje sieci, ale jej nie zmienia: zla zmiana
-		// odcina host i nie da sie jej naprawic zdalnie.
+		// The operator reads the network configuration but does not change
+		// it: a bad change cuts the host off and cannot be fixed remotely.
 		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
-		// Przesuniety zegar wyglada jak awaria katalogu albo certyfikatow,
-		// wiec test zrodel czasu nalezy do pierwszej diagnozy.
+		// A drifted clock looks like a directory or certificate outage, so
+		// testing the time sources belongs to the first diagnosis.
 		PermTimeRead, PermTimePlan, PermSecurityRead, PermSecurityScan, PermFilePlan,
 		PermVulnerabilityRead,
-		// Operator oglada certyfikaty i wskazuje panelowi, ktorych plikow
-		// pilnowac; wdrozenie nowego jest juz decyzja administratora.
+		// The operator looks at certificates and tells the panel which files
+		// to watch; deploying a new one is already an administrator's
+		// decision.
 		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan, PermCertificateWatch,
-		// Operator robi i sprawdza kopie; odtworzenie jest osobna decyzja,
-		// bo rozpakowuje stary stan na dzialajacym systemie.
+		// The operator makes and verifies copies; a restore is a separate
+		// decision, because it unpacks old state onto a running system.
 		PermBackupRead, PermBackupRun, PermBackupVerify,
-		// Dyzur czyta alerty, sonduje z hosta i wycisza na czas naprawy.
+		// On-call reads alerts, probes from the host and silences during a repair.
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
 	},
 	RoleApprover: {
@@ -396,15 +423,16 @@ var rolePermissions = map[Role][]Permission{
 		PermJobApprove, PermCampaignRead, PermCampaignApprove,
 		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
 	},
-	// identity_admin zarzadza katalogiem, ale nie prowadzi operacji na hostach.
+	// identity_admin manages the directory but does not run operations on hosts.
 	RoleIdentityAdmin: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermDNSDirectoryWrite,
 		PermUnitStatus,
-		// Konta lokalne sa alternatywa dla katalogu, wiec naleza do tej samej
-		// roli: to ona odpowiada za to, kto ma dostep do hostow.
+		// Local accounts are an alternative to the directory, so they belong
+		// to the same role: it is the one responsible for who has access to
+		// the hosts.
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 	},
@@ -412,7 +440,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermInventoryRefresh, PermJobRead, PermAuditRead,
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
-		// Administrator ma takze operacje nieodwracalne na kontenerach.
+		// The administrator also has the irreversible container operations.
 		PermDockerRead, PermDockerEvents,
 		PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
@@ -461,20 +489,20 @@ var rolePermissions = map[Role][]Permission{
 	},
 }
 
-// KnownRole sprawdza, czy rola istnieje.
+// KnownRole checks whether the role exists.
 func KnownRole(role Role) bool {
 	_, ok := rolePermissions[role]
 	return ok
 }
 
-// Permissions zwraca posortowana liste uprawnien roli.
+// Permissions returns the sorted list of the role's permissions.
 func (r Role) Permissions() []Permission {
 	permissions := append([]Permission(nil), rolePermissions[r]...)
 	sort.Slice(permissions, func(i, j int) bool { return permissions[i] < permissions[j] })
 	return permissions
 }
 
-// Has sprawdza, czy rola ma uprawnienie.
+// Has checks whether the role has the permission.
 func (r Role) Has(permission Permission) bool {
 	for _, granted := range rolePermissions[r] {
 		if granted == permission {
@@ -484,7 +512,7 @@ func (r Role) Has(permission Permission) bool {
 	return false
 }
 
-// AllRoles zwraca posortowana liste rol.
+// AllRoles returns the sorted list of roles.
 func AllRoles() []Role {
 	roles := make([]Role, 0, len(rolePermissions))
 	for role := range rolePermissions {
@@ -494,19 +522,19 @@ func AllRoles() []Role {
 	return roles
 }
 
-// Scope ogranicza uprawnienie do czesci floty. Gwiazdka oznacza dowolna wartosc.
+// Scope limits a permission to part of the fleet. An asterisk means any value.
 type Scope struct {
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
 }
 
-// Wildcard jest wartoscia oznaczajaca dowolny zakres.
+// Wildcard is the value meaning any scope.
 const Wildcard = "*"
 
-// Matches sprawdza, czy zakres uprawnienia obejmuje zakres celu.
-// Gwiazdka po stronie uprawnienia pasuje do wszystkiego. Pusty zakres celu nie
-// jest dopasowywany przez waskie uprawnienie: brak wiedzy o celu nie moze
-// rozszerzac uprawnien.
+// Matches checks whether the permission's scope covers the target's scope.
+// An asterisk on the permission's side matches everything. An empty target
+// scope is not matched by a narrow permission: not knowing the target must
+// not widen permissions.
 func (s Scope) Matches(target Scope) bool {
 	return matchesValue(s.Site, target.Site) && matchesValue(s.Environment, target.Environment)
 }
@@ -518,7 +546,7 @@ func matchesValue(granted, target string) bool {
 	return granted != "" && granted == target
 }
 
-// String zwraca czytelny opis zakresu.
+// String returns a readable description of the scope.
 func (s Scope) String() string {
 	return fmt.Sprintf("site=%s env=%s", orWildcard(s.Site), orWildcard(s.Environment))
 }
@@ -530,13 +558,13 @@ func orWildcard(value string) string {
 	return value
 }
 
-// Binding to rola przypisana w zakresie.
+// Binding is a role assigned within a scope.
 type Binding struct {
 	Role  Role  `json:"role"`
 	Scope Scope `json:"scope"`
 }
 
-// Principal jest uwierzytelniona tozsamoscia wraz z jej rolami.
+// Principal is an authenticated identity together with its roles.
 type Principal struct {
 	ID          string    `json:"id"`
 	Subject     string    `json:"subject"`
@@ -545,7 +573,7 @@ type Principal struct {
 	Bindings    []Binding `json:"bindings"`
 }
 
-// Can sprawdza, czy tozsamosc ma uprawnienie w zakresie celu.
+// Can checks whether the identity has the permission within the target's scope.
 func (p Principal) Can(permission Permission, target Scope) bool {
 	for _, binding := range p.Bindings {
 		if binding.Role.Has(permission) && binding.Scope.Matches(target) {
@@ -555,11 +583,13 @@ func (p Principal) Can(permission Permission, target Scope) bool {
 	return false
 }
 
-// CanAnywhere sprawdza, czy tozsamosc ma uprawnienie w jakimkolwiek zakresie.
+// CanAnywhere checks whether the identity has the permission in any scope at
+// all.
 //
-// Sluzy kolekcjom: lista hostow czy kampanii nie ma jednego zakresu, wiec
-// pytanie "czy wolno ci to widziec globalnie" jest dla niej zle postawione.
-// Operator jednego srodowiska ma zobaczyc swoja czesc floty, a nie odmowe.
+// It serves collections: a list of hosts or campaigns has no single scope, so
+// the question "may you see this globally" is wrongly put for it. The
+// operator of one environment is to see their part of the fleet, not a
+// refusal.
 func (p Principal) CanAnywhere(permission Permission) bool {
 	for _, binding := range p.Bindings {
 		if binding.Role.Has(permission) {
@@ -569,29 +599,29 @@ func (p Principal) CanAnywhere(permission Permission) bool {
 	return false
 }
 
-// Permissions zwraca posortowana liste uprawnien, ktore tozsamosc ma
-// w jakimkolwiek zakresie.
+// Permissions returns the sorted list of permissions the identity has in any
+// scope at all.
 //
-// Interfejs uzywa jej do ukrycia sekcji, ktorych i tak nie wolno otworzyc.
-// Zrodlem jest serwer, a nie zgadywanie po nazwach rol po stronie przegladarki:
-// polityka moze sie zmienic bez przebudowy panelu.
+// The interface uses it to hide the sections that must not be opened anyway.
+// The source is the server rather than guesswork over role names in the
+// browser: the policy can change without rebuilding the panel.
 func (p Principal) Permissions() []string {
-	unikalne := map[string]bool{}
+	unique := map[string]bool{}
 	for _, binding := range p.Bindings {
 		for _, permission := range binding.Role.Permissions() {
-			unikalne[string(permission)] = true
+			unique[string(permission)] = true
 		}
 	}
-	lista := make([]string, 0, len(unikalne))
-	for permission := range unikalne {
-		lista = append(lista, permission)
+	list := make([]string, 0, len(unique))
+	for permission := range unique {
+		list = append(list, permission)
 	}
-	sort.Strings(lista)
-	return lista
+	sort.Strings(list)
+	return list
 }
 
-// ScopesFor zwraca zakresy, w ktorych tozsamosc ma dane uprawnienie.
-// Pusty wynik oznacza brak uprawnienia gdziekolwiek.
+// ScopesFor returns the scopes in which the identity has the given
+// permission. An empty result means no permission anywhere.
 func (p Principal) ScopesFor(permission Permission) []Scope {
 	var scopes []Scope
 	for _, binding := range p.Bindings {
@@ -602,7 +632,7 @@ func (p Principal) ScopesFor(permission Permission) []Scope {
 	return scopes
 }
 
-// Roles zwraca nazwy przypisanych rol, do audytu i diagnostyki.
+// Roles returns the names of the assigned roles, for audit and diagnostics.
 func (p Principal) Roles() []string {
 	seen := map[Role]bool{}
 	var roles []string
@@ -616,51 +646,52 @@ func (p Principal) Roles() []string {
 	return roles
 }
 
-// ScopeSQL buduje warunek SQL zawezajacy wiersze do podanych zakresow.
+// ScopeSQL builds an SQL condition narrowing the rows to the given scopes.
 //
-// Semantyka jest ta sama co w Matches i to jest cel istnienia tej funkcji:
-// zawezanie list rozjechalo sie kiedys z autoryzacja, bo powstalo osobno.
-// Gwiazdka oznacza dowolny zakres i znosi warunek. Wartosc pusta nie pasuje
-// do niczego - brak wiedzy o zakresie nie moze rozszerzac widocznosci.
+// The semantics are the same as in Matches, and that is the reason this
+// function exists: narrowing lists once drifted apart from authorisation,
+// because it was written separately. An asterisk means any scope and lifts
+// the condition. An empty value matches nothing - not knowing the scope must
+// not widen visibility.
 //
-// Pusta lista zakresow daje warunek falszywy: tozsamosc bez zadnego zakresu
-// nie widzi nic. Zwrocenie warunku pustego oznaczaloby dostep do wszystkiego,
-// czyli blad w najgorsza mozliwa strone.
+// An empty list of scopes gives a false condition: an identity without any
+// scope sees nothing. Returning an empty condition would mean access to
+// everything, that is, an error in the worst possible direction.
 //
-// offset jest liczba parametrow juz uzytych w zapytaniu; funkcja numeruje
-// wlasne od nastepnego.
+// offset is the number of parameters already used in the query; the function
+// numbers its own from the next one.
 func ScopeSQL(scopes []Scope, siteColumn, envColumn string, offset int) (string, []any) {
 	if len(scopes) == 0 {
 		return "false", nil
 	}
 
-	var warunki []string
+	var conditions []string
 	var args []any
 	for _, scope := range scopes {
 		if scope.Site == Wildcard && scope.Environment == Wildcard {
-			// Zakres globalny obejmuje wszystko, wiec dalsze warunki nie maja
-			// juz znaczenia.
+			// A global scope covers everything, so further conditions no
+			// longer matter.
 			return "", nil
 		}
-		czesci := make([]string, 0, 2)
-		for _, wymiar := range []struct {
-			kolumna string
-			wartosc string
+		parts := make([]string, 0, 2)
+		for _, dimension := range []struct {
+			column string
+			value  string
 		}{{siteColumn, scope.Site}, {envColumn, scope.Environment}} {
-			switch wymiar.wartosc {
+			switch dimension.value {
 			case Wildcard:
-				// Dowolna wartosc w tym wymiarze.
+				// Any value in this dimension.
 			case "":
-				czesci = append(czesci, "false")
+				parts = append(parts, "false")
 			default:
-				args = append(args, wymiar.wartosc)
-				czesci = append(czesci, fmt.Sprintf("%s = $%d", wymiar.kolumna, offset+len(args)))
+				args = append(args, dimension.value)
+				parts = append(parts, fmt.Sprintf("%s = $%d", dimension.column, offset+len(args)))
 			}
 		}
-		if len(czesci) == 0 {
+		if len(parts) == 0 {
 			return "", nil
 		}
-		warunki = append(warunki, "("+strings.Join(czesci, " and ")+")")
+		conditions = append(conditions, "("+strings.Join(parts, " and ")+")")
 	}
-	return "(" + strings.Join(warunki, " or ") + ")", args
+	return "(" + strings.Join(conditions, " or ") + ")", args
 }

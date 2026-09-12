@@ -166,13 +166,13 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// Sekret wskazany w zleceniu musi istniec i dac sie wydac. Bez tego
 	// zadanie czekaloby na zatwierdzenie, poszlo do hosta i dopiero tam
 	// odpadlo - a operator dowiedzialby sie o literowce po kilku minutach.
-	for _, odnosnik := range payload.Sekrety() {
+	for _, odnosnik := range payload.Secrets() {
 		if s.secrets == nil {
 			problem(w, http.StatusServiceUnavailable, "secrets_disabled",
 				"this installation has no secret store")
 			return
 		}
-		sekret, err := s.secrets.Sekret(r.Context(), odnosnik.Name)
+		sekret, err := s.secrets.Secret(r.Context(), odnosnik.Name)
 		if errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusBadRequest, "secret_not_found",
 				"no secret named "+odnosnik.Name)
@@ -182,7 +182,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
-		if !sekret.Wydawalny() {
+		if !sekret.Issuable() {
 			problem(w, http.StatusConflict, "secret_unavailable",
 				"secret "+odnosnik.Name+" has no version that can be issued")
 			return
@@ -252,7 +252,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// plikiem, ktorego host odrzucil.
 	// Plik z sekretu nie zostawia w panelu ani tresci, ani jej odcisku:
 	// wartosc istnieje wylacznie w magazynie i przez chwile na hoscie.
-	if payload.File != nil && payload.File.ContentSecret.Pusty() &&
+	if payload.File != nil && payload.File.ContentSecret.Empty() &&
 		(action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
 		if _, err := s.files.ZapiszWersje(r.Context(), tx, []byte(payload.File.Content)); err != nil {
 			s.fail(w, err)
@@ -463,7 +463,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	// Widok pojedynczego zadania niesie takze osoby, ktore je zatwierdzily:
 	// przy operacji wymagajacej dwoch zgod pytanie "na kogo jeszcze czekamy"
 	// jest tym, po ktore operator tu wchodzi.
-	if zgody, err := s.jobs.Zgody(r.Context(), jobID); err == nil {
+	if zgody, err := s.jobs.Approvals(r.Context(), jobID); err == nil {
 		job.Approvals = zgody
 	}
 	writeJSON(w, http.StatusOK, job)
@@ -522,8 +522,8 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]actionInfo, 0)
 	for _, action := range opspec.AllActions() {
-		wykluczenie := opspec.PowodWykluczeniaZKampanii(action)
-		gotowa := wykluczenie == "" && opspec.TrybWykonywalny(action)
+		wykluczenie := opspec.CampaignExclusionReason(action)
+		gotowa := wykluczenie == "" && opspec.ExecutableMode(action)
 		powod := wykluczenie
 		if powod == "" && !gotowa {
 			powod = powodOdmowyTrybu(action)
@@ -548,7 +548,7 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 // hosta. Rozstrzygniecie nalezy do rejestru, a nie do tego pliku: operacja
 // podaje wymaganie logiczne, host mowi, jakie ma adaptery.
 func hostHasCapability(host *hosts.Host, capability string) bool {
-	return host.Capabilities.Spelnia(capability)
+	return host.Capabilities.Satisfies(capability)
 }
 
 func joinActions() string {

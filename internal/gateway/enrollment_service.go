@@ -178,7 +178,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		// Odtworzenie tozsamosci nie zaklada nowego hosta: przeinstalowana
 		// maszyna wraca do tego samego wiersza, z ta sama historia.
 		hostID = scope.ExpectedHostID
-		if err := s.hosts.PrzejmijMaszyne(ctx, tx, hostID, tozsamosc); err != nil {
+		if err := s.hosts.AdoptMachine(ctx, tx, hostID, tozsamosc); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	} else {
@@ -329,7 +329,7 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 // jego.
 func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 	msg *agentv1.EnrollRequest, scope enrollment.Scope) error {
-	istniejacy, err := s.hosts.IDPoMachineID(ctx, tx, msg.GetMachineId())
+	istniejacy, err := s.hosts.IDByMachineID(ctx, tx, msg.GetMachineId())
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 		if host == nil {
 			return errors.New("recovery_host_missing")
 		}
-		if host.LifecycleState == hosts.StanWycofany {
+		if host.LifecycleState == hosts.StateRetired {
 			return errors.New("host_retired")
 		}
 		// Maszyna nieznana panelowi jest tu w porzadku: po przeinstalowaniu

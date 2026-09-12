@@ -42,7 +42,7 @@ func main() {
 		// Plik YAML jest kanonicznym zrodlem ustawien; flagi i zmienne
 		// srodowiskowe zostaja jako override dla obrazow i testow.
 		configPath = flag.String("config",
-			config.Env("FLOTESTRO_AGENT_CONFIG", agentconfig.SciezkaDomyslna),
+			config.Env("FLOTESTRO_AGENT_CONFIG", agentconfig.DefaultPath),
 			"plik konfiguracji agenta")
 		tryb = flag.String("mode", config.Env("FLOTESTRO_AGENT_MODE", ""),
 			"tryb pracy: full albo read_only")
@@ -135,7 +135,7 @@ func main() {
 		agent.NewHelperClient(*helperSocket), journal, func() agent.Facts { return agent.Facts{} }, log)
 	// Tryb obserwacji jest decyzja wlasciciela hosta, a nie brakiem
 	// zdolnosci: agent raportuje fakty, ale nie wykona zadnej zmiany.
-	if *tryb == agentconfig.TrybOdczytu {
+	if *tryb == agentconfig.ModeReadOnly {
 		executor.UstawTrybOdczytu(true)
 		log.Info("agent pracuje w trybie obserwacji", "tryb", *tryb)
 	}
@@ -235,11 +235,11 @@ func wczytajKonfiguracje(sciezka string) (agentconfig.Config, bool, error) {
 		}
 		return agentconfig.Config{}, false, err
 	}
-	cfg, err := agentconfig.Wczytaj(sciezka)
+	cfg, err := agentconfig.Load(sciezka)
 	if err != nil {
 		return agentconfig.Config{}, false, err
 	}
-	if err := cfg.SprawdzBootstrapCA(); err != nil {
+	if err := cfg.CheckBootstrapCA(); err != nil {
 		return agentconfig.Config{}, false, err
 	}
 	return cfg, true, nil

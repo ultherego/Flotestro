@@ -497,7 +497,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	// sekretu. Dzierzawa i tak wygasnie sama, ale okno ma byc tak krotkie,
 	// jak sie da - a nie tak dlugie, jak pozwala zegar.
 	if s.leases != nil {
-		if err := s.leases.Uniewaznij(ctx, jobID); err != nil {
+		if err := s.leases.Revoke(ctx, jobID); err != nil {
 			s.log.Debug("nie zamknieto dzierzaw sekretow", "job_id", jobID, "err", err)
 		}
 	}
@@ -1790,7 +1790,7 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		return "", "", connect.NewError(connect.CodePermissionDenied,
 			errors.New("host nie nalezy do lokalizacji relaya"))
 	}
-	if !hosts.Aktywny(host.LifecycleState) {
+	if !hosts.Active(host.LifecycleState) {
 		s.denied(ctx, asserted, "lifecycle_"+host.LifecycleState)
 		return "", "", connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("host jest w stanie %s", host.LifecycleState))
@@ -1812,7 +1812,7 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
-	case !hosts.Aktywny(status.LifecycleState):
+	case !hosts.Active(status.LifecycleState):
 		// Kwarantanna, wycofywanie i wycofanie roznia sie dla operatora,
 		// ale dla polaczenia znacza to samo: ten host nie ma prawa pracowac.
 		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
@@ -1962,7 +1962,7 @@ func wersjaZDzierzawy(ctx context.Context, s *AgentService, jobID, nazwa string)
 	if s.leases == nil {
 		return 0
 	}
-	dzierzawy, err := s.leases.Dzierzawy(ctx, jobID)
+	dzierzawy, err := s.leases.Leases(ctx, jobID)
 	if err != nil {
 		return 0
 	}
@@ -2004,7 +2004,7 @@ func (s *AgentService) zapiszStanPliku(ctx context.Context, hostID, jobID string
 	// Plik z sekretu nie zostawia w panelu ani tresci, ani jej odcisku:
 	// stanem docelowym jest nazwa sekretu i wersja. Kosztem jest to, ze panel
 	// nie wykryje podmiany tresci na hoscie - i tak ma byc powiedziane.
-	if !payload.File.ContentSecret.Pusty() {
+	if !payload.File.ContentSecret.Empty() {
 		stan.SecretName = payload.File.ContentSecret.Name
 		stan.SecretVersion = payload.File.ContentSecret.Version
 		if stan.SecretVersion == 0 {
@@ -2067,7 +2067,7 @@ func (s *AgentService) zapiszWdrozenieCertyfikatu(ctx context.Context, hostID, j
 			wdrozenie.Issuer = certy[0].Issuer.String()
 		}
 	}
-	if !payload.Certificate.KeySecret.Pusty() {
+	if !payload.Certificate.KeySecret.Empty() {
 		wdrozenie.KeySecret = payload.Certificate.KeySecret.Name
 		wdrozenie.KeyVersion = payload.Certificate.KeySecret.Version
 		if wdrozenie.KeyVersion == 0 {

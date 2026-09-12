@@ -83,7 +83,7 @@ func oceniKandydatow(kandydaci []hosts.Host, action opspec.ActionType,
 			wynik.zamknij(host, campaigns.TargetIneligible, PowodKwarantanna,
 				"host jest w kwarantannie i nie przyjmuje operacji")
 			continue
-		case host.Maintenance.Trwa(teraz):
+		case host.Maintenance.Active(teraz):
 			wynik.zamknij(host, campaigns.TargetSkipped, PowodSerwis,
 				"host jest w oknie serwisowym do "+host.Maintenance.Until.Format(time.RFC3339))
 			continue
@@ -94,7 +94,7 @@ func oceniKandydatow(kandydaci []hosts.Host, action opspec.ActionType,
 		// preflight na samym hoscie.
 		if wymaganie != "" && len(host.Capabilities) == 0 {
 			dodaj(&nieznane, host)
-		} else if wymaganie != "" && !host.Capabilities.Spelnia(wymaganie) {
+		} else if wymaganie != "" && !host.Capabilities.Satisfies(wymaganie) {
 			wynik.zamknij(host, campaigns.TargetIneligible, PowodBrakZdolnosci,
 				"host nie ma adaptera wymaganego przez te operacje: "+wymaganie)
 			continue

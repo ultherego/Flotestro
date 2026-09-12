@@ -5,99 +5,101 @@ import (
 	"testing"
 )
 
-// Identyfikator kontenera trafia do sciezki zapytania Engine API, wiec nie
-// moze niesc niczego, co ta sciezke zmienia. Nazwa kontenera nie jest
-// dozwolona celowo: jest etykieta i moze zostac przypisana innemu obiektowi
-// miedzy planem a wykonaniem.
-func TestCelKontenerowyMusiBycIdentyfikatorem(t *testing.T) {
-	zle := []string{
-		"", "moj-kontener", "../../images/json", "abc", "ABCDEF012345",
+// A container identifier goes into the path of an Engine API request, so it
+// must not carry anything that changes that path. A container name is
+// deliberately not allowed: it is a label and can be assigned to a different
+// object between the plan and the execution.
+func TestAContainerTargetHasToBeAnIdentifier(t *testing.T) {
+	bad := []string{
+		"", "my-container", "../../images/json", "abc", "ABCDEF012345",
 		"5c5b63d3119a/json", "5c5b63d3119a?all=1",
 	}
-	for _, id := range zle {
+	for _, id := range bad {
 		payload := Payload{DockerContainer: &DockerContainerPayload{ContainerID: id}}
 		if err := Validate(ActionDockerStop, payload); err == nil {
-			t.Errorf("identyfikator %q zostal przyjety", id)
+			t.Errorf("the identifier %q was accepted", id)
 		}
 	}
-	dobre := Payload{DockerContainer: &DockerContainerPayload{
+	good := Payload{DockerContainer: &DockerContainerPayload{
 		ContainerID: "5c5b63d3119a59ac7a7a7f2a18342dbd01f459a88ca81487ba987ddcc5c4bc00",
 	}}
-	if err := Validate(ActionDockerStop, dobre); err != nil {
-		t.Errorf("poprawny identyfikator odrzucony: %v", err)
+	if err := Validate(ActionDockerStop, good); err != nil {
+		t.Errorf("a valid identifier was rejected: %v", err)
 	}
 }
 
-// Wolumen przezywa kontener wlasnie po to, zeby dane przezyly. Usuwanie
-// wolumenow jest dozwolone tylko przy usuwaniu kontenera i tylko jawnie.
-func TestUsuwanieWolumenowTylkoPrzyUsuwaniuKontenera(t *testing.T) {
+// A volume outlives its container precisely so that the data outlives it.
+// Removing volumes is allowed only when removing a container, and only
+// explicitly.
+func TestRemovingVolumesOnlyWhenRemovingAContainer(t *testing.T) {
 	payload := Payload{DockerContainer: &DockerContainerPayload{
 		ContainerID:   "5c5b63d3119a59ac7a7a7f2a18342dbd01f459a88ca81487ba987ddcc5c4bc00",
 		RemoveVolumes: true,
 	}}
 	if err := Validate(ActionDockerStop, payload); err == nil {
-		t.Error("zatrzymanie kontenera przyjelo usuwanie wolumenow")
+		t.Error("stopping a container accepted removing volumes")
 	}
 	if err := Validate(ActionDockerRemove, payload); err != nil {
-		t.Errorf("usuniecie kontenera odrzucilo usuwanie wolumenow: %v", err)
+		t.Errorf("removing a container rejected removing volumes: %v", err)
 	}
 }
 
-// Sprzatanie usuwa dokladnie to, co zostalo pokazane operatorowi. Pusta lista
-// nie jest zleceniem "usun wszystko" - jest brakiem decyzji.
-func TestSprzatanieWymagaJawnejListy(t *testing.T) {
+// Pruning removes exactly what was shown to the operator. An empty list is
+// not an order to "remove everything" - it is the absence of a decision.
+func TestPruningRequiresAnExplicitList(t *testing.T) {
 	if err := Validate(ActionDockerPrune, Payload{DockerPrune: &DockerPrunePayload{}}); err == nil {
-		t.Error("sprzatanie bez wskazanych obiektow zostalo przyjete")
+		t.Error("pruning without named objects was accepted")
 	}
 
-	dobre := Payload{DockerPrune: &DockerPrunePayload{
+	good := Payload{DockerPrune: &DockerPrunePayload{
 		ImageIDs: []string{"sha256:" + strings.Repeat("a", 64)},
 	}}
-	if err := Validate(ActionDockerPrune, dobre); err != nil {
-		t.Errorf("poprawna lista odrzucona: %v", err)
+	if err := Validate(ActionDockerPrune, good); err != nil {
+		t.Errorf("a valid list was rejected: %v", err)
 	}
 
-	zle := Payload{DockerPrune: &DockerPrunePayload{ImageIDs: []string{"nginx:latest"}}}
-	if err := Validate(ActionDockerPrune, zle); err == nil {
-		t.Error("tag obrazu przyjety jako identyfikator")
+	bad := Payload{DockerPrune: &DockerPrunePayload{ImageIDs: []string{"nginx:latest"}}}
+	if err := Validate(ActionDockerPrune, bad); err == nil {
+		t.Error("an image tag was accepted as an identifier")
 	}
 }
 
-// Odwolanie do obrazu jest sprawdzane, choc nie trafia do powloki: wezsza
-// walidacja jest tansza niz ufanie.
-func TestOdwolanieDoObrazuJestSprawdzane(t *testing.T) {
-	dobre := []string{
+// An image reference is checked even though it does not reach a shell:
+// narrower validation is cheaper than trust.
+func TestAnImageReferenceIsChecked(t *testing.T) {
+	good := []string{
 		"nginx", "nginx:alpine", "docker.io/library/nginx:1.27",
-		"rejestr.firma.pl:5000/zespol/aplikacja:2.1",
+		"registry.company.example:5000/team/application:2.1",
 		"nginx@sha256:" + strings.Repeat("a", 64),
 	}
-	for _, odwolanie := range dobre {
-		payload := Payload{DockerImage: &DockerImagePayload{Reference: odwolanie}}
+	for _, reference := range good {
+		payload := Payload{DockerImage: &DockerImagePayload{Reference: reference}}
 		if err := Validate(ActionDockerPull, payload); err != nil {
-			t.Errorf("odrzucono poprawne odwolanie %q: %v", odwolanie, err)
+			t.Errorf("the valid reference %q was rejected: %v", reference, err)
 		}
 	}
-	zle := []string{"", "nginx latest", "nginx;reboot", "NGINX:latest", "-x"}
-	for _, odwolanie := range zle {
-		payload := Payload{DockerImage: &DockerImagePayload{Reference: odwolanie}}
+	bad := []string{"", "nginx latest", "nginx;reboot", "NGINX:latest", "-x"}
+	for _, reference := range bad {
+		payload := Payload{DockerImage: &DockerImagePayload{Reference: reference}}
 		if err := Validate(ActionDockerPull, payload); err == nil {
-			t.Errorf("przyjeto nieprawidlowe odwolanie %q", odwolanie)
+			t.Errorf("the invalid reference %q was accepted", reference)
 		}
 	}
 }
 
-// Poziom ryzyka nie jest etykieta: usuwanie kontenera i sprzatanie sa
-// niszczace, wiec wymagaja swiezego uwierzytelnienia i wpisania nazwy celu.
-func TestOperacjeNiszczaceWymagajaPotwierdzeniaCelu(t *testing.T) {
+// The risk level is not a label: removing a container and pruning are
+// destructive, so they require fresh authentication and typing the target
+// name.
+func TestDestructiveOperationsRequireTargetConfirmation(t *testing.T) {
 	for _, action := range []ActionType{ActionDockerRemove, ActionDockerPrune} {
 		if action.Risk() != RiskDestructive {
-			t.Errorf("%s ma ryzyko %s", action, action.Risk())
+			t.Errorf("%s has the risk %s", action, action.Risk())
 		}
 		if !action.RequiresFreshAuth() || !action.RequiresTargetConfirmation() {
-			t.Errorf("%s nie wymaga potwierdzenia celu", action)
+			t.Errorf("%s does not require target confirmation", action)
 		}
 	}
 	if ActionDockerStart.RequiresTargetConfirmation() {
-		t.Error("uruchomienie kontenera wymaga wpisania nazwy celu")
+		t.Error("starting a container requires typing the target name")
 	}
 }

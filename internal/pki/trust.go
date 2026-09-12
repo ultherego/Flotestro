@@ -14,47 +14,47 @@ import (
 	"time"
 )
 
-// Trust jest zbiorem CA floty: jednym podpisujacym i dowolna liczba
-// wycofywanych, ktore nadal sa uznawane.
+// Trust is the fleet's set of CAs: one that signs and any number of
+// withdrawn ones that are still recognised.
 //
-// Wymiana CA nie moze zerwac floty. Nowe CA musi byc uznawane przez panel
-// zanim zacznie podpisywac, a stare musi byc uznawane jeszcze przez caly
-// okres waznosci wydanych nim certyfikatow agentow. Zbior obowiazuje wiec
-// w obu kierunkach: panel ufa wszystkim wpisom, a agent dostaje je wszystkie
-// w bundlu przy enrollmencie i przy kazdym odnowieniu.
+// Rotating a CA must not break the fleet. A new CA has to be recognised by
+// the panel before it starts signing, and the old one has to stay recognised
+// for the whole validity of the agent certificates issued with it. The set
+// therefore applies in both directions: the panel trusts every entry, and the
+// agent gets them all in the bundle at enrollment and at every renewal.
 type Trust struct {
 	mu sync.RWMutex
-	// active podpisuje nowe certyfikaty.
+	// active signs new certificates.
 	active *CA
-	// pending jest juz uznawane i rozsylane w bundlu, ale jeszcze nic nie
-	// podpisuje. Ten stan jest istota bezpiecznej wymiany: gdyby nowe CA od
-	// razu podpisywalo, panel po restarcie przedstawialby certyfikat serwera,
-	// ktorego nie uznaje zaden agent poza tymi, ktore zdazyly sie odnowic.
+	// pending is already recognised and distributed in the bundle, but signs
+	// nothing yet. This state is the essence of a safe rotation: if the new
+	// CA signed at once, after a restart the panel would present a server
+	// certificate no agent recognises except those that managed to renew.
 	pending *CA
-	// pendingAt jest chwila przygotowania; od niej liczy sie, ktore hosty
-	// zdazyly dostac nowy bundle.
+	// pendingAt is the moment of preparation; it is what decides which hosts
+	// have managed to get the new bundle.
 	pendingAt time.Time
-	// retired sa nadal uznawane, ale juz nic nie podpisuja.
+	// retired ones are still recognised but sign nothing any more.
 	retired []*CA
 	dir     string
 }
 
-// retiredDir trzyma CA wycofane z podpisywania.
+// retiredDir holds the CAs withdrawn from signing.
 const retiredDir = "ca-retired"
 
-// pendingCertFile i pendingKeyFile trzymaja CA przygotowane do przejecia.
+// pendingCertFile and pendingKeyFile hold the CA prepared to take over.
 const (
 	pendingCertFile = "ca-pending.pem"
 	pendingKeyFile  = "ca-pending.key"
-	// pendingAtFile zapisuje chwile przygotowania CA. Nie wystarczy data
-	// poczatku waznosci certyfikatu: jest ona celowo cofnieta o godzine na
-	// poczet rozjazdu zegarow, wiec host odnowiony przed samym przygotowaniem
-	// wygladalby na taki, ktory nowe CA juz zna.
+	// pendingAtFile records the moment the CA was prepared. The start of the
+	// certificate's validity is not enough: it is deliberately backdated by
+	// an hour to allow for clock skew, so a host renewed just before the
+	// preparation would look like one that already knows the new CA.
 	pendingAtFile = "ca-pending.at"
 )
 
-// EnsureTrust wczytuje zbior CA z katalogu stanu, tworzac pierwsze CA przy
-// pierwszym starcie.
+// EnsureTrust reads the set of CAs from the state directory, creating the
+// first CA on the first start.
 func EnsureTrust(dir string) (*Trust, error) {
 	active, err := EnsureCA(dir)
 	if err != nil {
@@ -70,11 +70,11 @@ func EnsureTrust(dir string) (*Trust, error) {
 			return nil, fmt.Errorf("%s: %w", pendingCertFile, err)
 		}
 		trust.pending = pending
-		// Brak albo uszkodzenie znacznika nie moze zatrzymac panelu. Przyjmujemy
-		// wtedy chwile biezaca, czyli zalozenie, ze zaden host jeszcze nowego CA
-		// nie zna: przejecie podpisywania zostanie wstrzymane do czasu odnowienia
-		// certyfikatow. Blad w te strone kosztuje czekanie, blad w druga -
-		// odciecie floty.
+		// A missing or damaged marker must not stop the panel. We then take
+		// the current moment, that is, the assumption that no host knows the
+		// new CA yet: the handover of signing will be held back until the
+		// certificates are renewed. An error in this direction costs waiting,
+		// an error in the other one cuts off the fleet.
 		trust.pendingAt = time.Now().UTC()
 		if stamp, err := os.ReadFile(filepath.Join(dir, pendingAtFile)); err == nil {
 			if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(string(stamp))); err == nil {
@@ -91,7 +91,7 @@ func EnsureTrust(dir string) (*Trust, error) {
 
 	entries, err := os.ReadDir(filepath.Join(dir, retiredDir))
 	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("katalog wycofanych CA: %w", err)
+		return nil, fmt.Errorf("directory of withdrawn CAs: %w", err)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".pem" {
@@ -102,8 +102,8 @@ func EnsureTrust(dir string) (*Trust, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Wycofane CA nie ma przy sobie klucza: nie ma juz nic podpisywac,
-		// a trzymanie klucza bez potrzeby tylko powieksza ryzyko.
+		// A withdrawn CA keeps no key with it: it has nothing left to sign,
+		// and keeping a key without need only increases the risk.
 		cert, err := parseCertificateOnly(certPEM)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
@@ -113,14 +113,14 @@ func EnsureTrust(dir string) (*Trust, error) {
 	return trust, nil
 }
 
-// Active zwraca CA podpisujace nowe certyfikaty.
+// Active returns the CA signing new certificates.
 func (t *Trust) Active() *CA {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.active
 }
 
-// Pool buduje zbior zaufania do weryfikacji certyfikatow agentow.
+// Pool builds the trust pool for verifying agent certificates.
 func (t *Trust) Pool() *x509.CertPool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -135,8 +135,9 @@ func (t *Trust) Pool() *x509.CertPool {
 	return pool
 }
 
-// Bundle zwraca wszystkie uznawane CA w formacie PEM. Agent zapisuje go
-// u siebie, wiec musi zawierac takze CA, ktore dopiero zacznie podpisywac.
+// Bundle returns every recognised CA in PEM format. The agent stores it
+// locally, so it has to contain the CA that is only about to start signing as
+// well.
 func (t *Trust) Bundle() []byte {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -151,31 +152,32 @@ func (t *Trust) Bundle() []byte {
 	return bundle
 }
 
-// Authority opisuje jedno CA na potrzeby przegladu i metryk.
+// Authority describes one CA for the overview and the metrics.
 type Authority struct {
 	Subject     string    `json:"subject"`
 	Serial      string    `json:"serial"`
 	Fingerprint string    `json:"fingerprint"`
 	NotBefore   time.Time `json:"not_before"`
 	NotAfter    time.Time `json:"not_after"`
-	// State: active podpisuje, pending czeka na przejecie, retired jest
-	// jeszcze uznawane. Sam znacznik "active" nie odroznilby dwoch ostatnich.
+	// State: active signs, pending waits to take over, retired is still
+	// recognised. An "active" flag alone would not tell the last two
+	// apart.
 	State string `json:"state"`
-	// PreparedAt jest chwila przygotowania CA. Od niej liczy sie, ktore hosty
-	// zdazyly juz dostac nowy bundle.
+	// PreparedAt is the moment the CA was prepared. It is what decides which
+	// hosts have already got the new bundle.
 	PreparedAt time.Time `json:"prepared_at,omitempty"`
 }
 
-// Authorities wypisuje zbior zaufania, zaczynajac od CA podpisujacego.
+// Authorities lists the trust set, starting with the signing CA.
 func (t *Trust) Authorities() []Authority {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	list := []Authority{describe(t.active, "active")}
 	if t.pending != nil {
-		przygotowane := describe(t.pending, "pending")
-		przygotowane.PreparedAt = t.pendingAt
-		list = append(list, przygotowane)
+		prepared := describe(t.pending, "pending")
+		prepared.PreparedAt = t.pendingAt
+		list = append(list, prepared)
 	}
 	for _, ca := range t.retired {
 		list = append(list, describe(ca, "retired"))
@@ -198,71 +200,73 @@ func describe(ca *CA, state string) Authority {
 	return authority
 }
 
-// Prepare tworzy nowe CA i wlacza je do zbioru zaufania, ale jeszcze nie
-// pozwala mu podpisywac.
+// Prepare creates a new CA and admits it into the trust set, but does not let
+// it sign yet.
 //
-// To pierwsza z dwoch faz wymiany. Od tej chwili panel uznaje nowe CA, a kazdy
-// agent dostaje je w bundlu przy najblizszym odnowieniu certyfikatu. Dopiero
-// gdy cala flota ma juz nowe CA u siebie, wolno mu zaczac podpisywac.
+// This is the first of the two phases of a rotation. From this moment the
+// panel recognises the new CA, and every agent gets it in the bundle at its
+// next certificate renewal. Only once the whole fleet has the new CA locally
+// may it start signing.
 //
-// Jednofazowa wymiana wygladalaby na dzialajaca do pierwszego restartu panelu:
-// certyfikat serwera wystawiony nowym CA nie zostalby uznany przez zadnego
-// agenta, ktory nie zdazyl sie odnowic, i cala flota stracilaby lacznosc.
+// A single-phase rotation would look like it worked until the panel's first
+// restart: a server certificate issued by the new CA would not be recognised
+// by any agent that had not managed to renew, and the whole fleet would lose
+// its connection.
 func (t *Trust) Prepare() (Authority, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.pending != nil {
-		return Authority{}, fmt.Errorf("CA przygotowane do przejecia juz istnieje")
+		return Authority{}, fmt.Errorf("a CA prepared to take over already exists")
 	}
-	nowe, certPEM, keyPEM, err := newCA()
+	created, certPEM, keyPEM, err := newCA()
 	if err != nil {
 		return Authority{}, err
 	}
-	nowe.AgentTTL = t.active.AgentTTL
+	created.AgentTTL = t.active.AgentTTL
 
 	if err := writeFileAtomic(filepath.Join(t.dir, pendingCertFile), certPEM, 0o644); err != nil {
 		return Authority{}, err
 	}
-	// Klucz CA jest najbardziej wrazliwym materialem w systemie.
+	// The CA key is the most sensitive material in the system.
 	if err := writeFileAtomic(filepath.Join(t.dir, pendingKeyFile), keyPEM, 0o600); err != nil {
 		return Authority{}, err
 	}
-	teraz := time.Now().UTC()
+	now := time.Now().UTC()
 	if err := writeFileAtomic(filepath.Join(t.dir, pendingAtFile),
-		[]byte(teraz.Format(time.RFC3339)), 0o644); err != nil {
+		[]byte(now.Format(time.RFC3339)), 0o644); err != nil {
 		return Authority{}, err
 	}
-	t.pending = nowe
-	t.pendingAt = teraz
+	t.pending = created
+	t.pendingAt = now
 
-	przygotowane := describe(nowe, "pending")
-	przygotowane.PreparedAt = teraz
-	return przygotowane, nil
+	prepared := describe(created, "pending")
+	prepared.PreparedAt = now
+	return prepared, nil
 }
 
-// Activate przekazuje podpisywanie przygotowanemu CA, a dotychczasowe
-// przenosi do uznawanych.
+// Activate hands signing over to the prepared CA and moves the previous one
+// to the recognised ones.
 //
-// Wywolujacy sprawdza wczesniej, ze kazdy host ma juz nowe CA u siebie;
-// tutaj pilnujemy tylko spojnosci samego zbioru.
+// The caller checks beforehand that every host already has the new CA
+// locally; here we only guard the consistency of the set itself.
 func (t *Trust) Activate() (Authority, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.pending == nil {
-		return Authority{}, fmt.Errorf("nie ma CA przygotowanego do przejecia")
+		return Authority{}, fmt.Errorf("there is no CA prepared to take over")
 	}
 
-	// Dotychczasowe CA zapisujemy jako wycofane, zanim nowe stanie sie
-	// podpisujacym: przerwanie w tym miejscu zostawia flote z CA, ktore
-	// panel nadal uznaje.
+	// We record the previous CA as withdrawn before the new one becomes the
+	// signing one: an interruption at this point leaves the fleet with a CA
+	// the panel still recognises.
 	if err := os.MkdirAll(filepath.Join(t.dir, retiredDir), 0o700); err != nil {
 		return Authority{}, err
 	}
-	poprzednie := filepath.Join(t.dir, retiredDir,
+	previous := filepath.Join(t.dir, retiredDir,
 		t.active.Certificate.SerialNumber.String()+".pem")
-	if err := os.WriteFile(poprzednie, t.active.PEM, 0o644); err != nil {
+	if err := os.WriteFile(previous, t.active.PEM, 0o644); err != nil {
 		return Authority{}, err
 	}
 
@@ -286,33 +290,33 @@ func (t *Trust) Activate() (Authority, error) {
 	return describe(t.active, "active"), nil
 }
 
-// Pending zwraca CA przygotowane do przejecia wraz z chwila przygotowania.
+// Pending returns the CA prepared to take over together with the moment it was prepared.
 func (t *Trust) Pending() (*CA, time.Time) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.pending, t.pendingAt
 }
 
-// Retire usuwa wycofane CA ze zbioru zaufania.
+// Retire removes a withdrawn CA from the trust set.
 //
-// Operacja jest nieodwracalna dla hostow, ktore nadal maja certyfikat wydany
-// tym CA: przestana byc wpuszczane. Dlatego panel odmawia, dopoki takie hosty
-// istnieja - decyzje o ich odcieciu podejmuje sie osobno, przez odwolanie
-// certyfikatu albo kwarantanne hosta.
+// The operation is irreversible for the hosts that still hold a certificate
+// issued by that CA: they stop being let in. That is why the panel refuses as
+// long as such hosts exist - the decision to cut them off is taken separately,
+// by revoking a certificate or quarantining a host.
 func (t *Trust) Retire(fingerprint string, hostsUsing int) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if hostsUsing > 0 {
-		return fmt.Errorf("z tego CA korzysta jeszcze %d hostow", hostsUsing)
+		return fmt.Errorf("%d hosts still use this CA", hostsUsing)
 	}
 	if fingerprintHex(t.active.Certificate.Raw) == fingerprint {
-		return fmt.Errorf("nie mozna usunac CA, ktore podpisuje nowe certyfikaty")
+		return fmt.Errorf("the CA that signs new certificates cannot be removed")
 	}
 	if t.pending != nil && fingerprintHex(t.pending.Certificate.Raw) == fingerprint {
-		// Porzucenie przygotowanego CA jest dozwolone: nic nim jeszcze nie
-		// podpisano, a agenci, ktorzy je dostali, poprostu przestana je znac
-		// przy nastepnym odnowieniu.
+		// Abandoning a prepared CA is allowed: nothing has been signed with
+		// it yet, and the agents that got it will simply stop knowing it at
+		// their next renewal.
 		_ = os.Remove(filepath.Join(t.dir, pendingCertFile))
 		_ = os.Remove(filepath.Join(t.dir, pendingKeyFile))
 		_ = os.Remove(filepath.Join(t.dir, pendingAtFile))
@@ -332,21 +336,21 @@ func (t *Trust) Retire(fingerprint string, hostsUsing int) error {
 		t.retired = append(t.retired[:index], t.retired[index+1:]...)
 		return nil
 	}
-	return fmt.Errorf("nie znaleziono CA o odcisku %s", fingerprint)
+	return fmt.Errorf("no CA with the fingerprint %s was found", fingerprint)
 }
 
-// NotAfter zwraca termin CA podpisujacego; metryki pilnuja wlasnie jego.
+// NotAfter returns the deadline of the signing CA; the metrics watch exactly that one.
 func (t *Trust) NotAfter() time.Time {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.active.NotAfter()
 }
 
-// parseCertificateOnly wczytuje certyfikat bez klucza prywatnego.
+// parseCertificateOnly reads a certificate without a private key.
 func parseCertificateOnly(certPEM []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return nil, fmt.Errorf("brak bloku PEM")
+		return nil, fmt.Errorf("no PEM block")
 	}
 	return x509.ParseCertificate(block.Bytes)
 }
@@ -356,11 +360,11 @@ func fingerprintHex(der []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// writeFileAtomic podmienia plik przez plik tymczasowy i zmiane nazwy.
-// Przerwanie w polowie zapisu klucza CA zostawiloby panel bez tozsamosci
-// calej floty.
+// writeFileAtomic replaces a file through a temporary file and a rename.
+// An interruption halfway through writing the CA key would leave the panel
+// without the identity of the whole fleet.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	temporary := path + ".nowy"
+	temporary := path + ".new"
 	if err := os.WriteFile(temporary, data, mode); err != nil {
 		return err
 	}

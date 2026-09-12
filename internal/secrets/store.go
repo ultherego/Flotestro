@@ -9,25 +9,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Store trzyma sekrety i dzierzawy.
+// Store holds the secrets and the leases.
 type Store struct {
-	pool  *pgxpool.Pool
-	szyfr *Szyfr
+	pool   *pgxpool.Pool
+	cipher *Cipher
 }
 
-func NewStore(pool *pgxpool.Pool, szyfr *Szyfr) *Store {
-	return &Store{pool: pool, szyfr: szyfr}
+func NewStore(pool *pgxpool.Pool, cipher *Cipher) *Store {
+	return &Store{pool: pool, cipher: cipher}
 }
 
-// Pool udostepnia pule do transakcji laczonych z innymi zapisami.
+// Pool exposes the pool for transactions combined with other writes.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Utworz zaklada sekret wraz z pierwsza wersja.
-func (s *Store) Utworz(ctx context.Context, nazwa, opis string, wartosc []byte, autor string) (*Secret, error) {
-	if err := WalidujNazwe(nazwa); err != nil {
+// Create creates a secret together with its first version.
+func (s *Store) Create(ctx context.Context, name, description string, value []byte, author string) (*Secret, error) {
+	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	if err := WalidujWartosc(wartosc); err != nil {
+	if err := ValidateValue(value); err != nil {
 		return nil, err
 	}
 
@@ -40,31 +40,31 @@ func (s *Store) Utworz(ctx context.Context, nazwa, opis string, wartosc []byte, 
 	var id string
 	if err := tx.QueryRow(ctx, `
 		insert into secrets (name, description, created_by) values ($1, $2, $3)
-		returning id`, nazwa, nullable(opis), autor).Scan(&id); err != nil {
+		returning id`, name, nullable(description), author).Scan(&id); err != nil {
 		return nil, err
 	}
-	if err := s.zapiszWersje(ctx, tx, id, 1, wartosc, autor); err != nil {
+	if err := s.saveVersion(ctx, tx, id, 1, value, author); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return s.Sekret(ctx, nazwa)
+	return s.Secret(ctx, name)
 }
 
-// Obroc dokłada nowa wersje i czyni ja biezaca.
+// Rotate adds a new version and makes it the current one.
 //
-// Poprzednie wersje zostaja: host, ktory dostal dzierzawe na wersje 3, ma ja
-// dostac takze wtedy, gdy w miedzyczasie powstala wersja 4.
-func (s *Store) Obroc(ctx context.Context, nazwa string, wartosc []byte, autor string) (*Secret, error) {
-	if err := WalidujWartosc(wartosc); err != nil {
+// The previous versions stay: a host that got a lease on version 3 is to get
+// it also when version 4 has come into being in the meantime.
+func (s *Store) Rotate(ctx context.Context, name string, value []byte, author string) (*Secret, error) {
+	if err := ValidateValue(value); err != nil {
 		return nil, err
 	}
-	sekret, err := s.Sekret(ctx, nazwa)
+	secret, err := s.Secret(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	if sekret.RetiredAt != nil {
+	if secret.RetiredAt != nil {
 		return nil, ErrRetired
 	}
 
@@ -74,78 +74,79 @@ func (s *Store) Obroc(ctx context.Context, nazwa string, wartosc []byte, autor s
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := s.zapiszWersje(ctx, tx, sekret.ID, sekret.CurrentVersion+1, wartosc, autor); err != nil {
+	if err := s.saveVersion(ctx, tx, secret.ID, secret.CurrentVersion+1, value, author); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return s.Sekret(ctx, nazwa)
+	return s.Secret(ctx, name)
 }
 
-// zapiszWersje zapisuje zaszyfrowana wartosc i przesuwa wersje biezaca.
-func (s *Store) zapiszWersje(ctx context.Context, tx pgx.Tx, secretID string,
-	wersja int, wartosc []byte, autor string) error {
-	nonce, szyfrogram, err := s.szyfr.Zaszyfruj(wartosc)
+// saveVersion records the encrypted value and moves the current version.
+func (s *Store) saveVersion(ctx context.Context, tx pgx.Tx, secretID string,
+	version int, value []byte, author string) error {
+	nonce, ciphertext, err := s.cipher.Encrypt(value)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		insert into secret_versions (secret_id, version, nonce, ciphertext, size_bytes, created_by)
 		values ($1, $2, $3, $4, $5, $6)`,
-		secretID, wersja, nonce, szyfrogram, len(wartosc), autor); err != nil {
+		secretID, version, nonce, ciphertext, len(value), author); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `
-		update secrets set current_version = $2, updated_at = now() where id = $1`, secretID, wersja)
+		update secrets set current_version = $2, updated_at = now() where id = $1`, secretID, version)
 	return err
 }
 
-// Sekret zwraca metadane sekretu wraz z historia wersji - bez tresci.
-func (s *Store) Sekret(ctx context.Context, nazwa string) (*Secret, error) {
-	sekrety, err := s.zapytaj(ctx, "where name = $1", nazwa)
+// Secret returns the metadata of a secret together with its version history -
+// without the content.
+func (s *Store) Secret(ctx context.Context, name string) (*Secret, error) {
+	secrets, err := s.query(ctx, "where name = $1", name)
 	if err != nil {
 		return nil, err
 	}
-	if len(sekrety) == 0 {
+	if len(secrets) == 0 {
 		return nil, ErrNotFound
 	}
-	wersje, err := s.wersje(ctx, sekrety[0].ID)
+	versions, err := s.versions(ctx, secrets[0].ID)
 	if err != nil {
 		return nil, err
 	}
-	sekrety[0].Versions = wersje
-	return &sekrety[0], nil
+	secrets[0].Versions = versions
+	return &secrets[0], nil
 }
 
-// Lista zwraca wszystkie sekrety.
-func (s *Store) Lista(ctx context.Context) ([]Secret, error) {
-	return s.zapytaj(ctx, "order by name")
+// List returns every secret.
+func (s *Store) List(ctx context.Context) ([]Secret, error) {
+	return s.query(ctx, "order by name")
 }
 
-func (s *Store) zapytaj(ctx context.Context, klauzula string, argumenty ...any) ([]Secret, error) {
+func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Secret, error) {
 	rows, err := s.pool.Query(ctx, `
 		select id, name, coalesce(description, ''), current_version,
 		       created_by, created_at, updated_at, retired_at
-		  from secrets `+klauzula, argumenty...)
+		  from secrets `+clause, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var sekrety []Secret
+	var secrets []Secret
 	for rows.Next() {
-		var sekret Secret
-		if err := rows.Scan(&sekret.ID, &sekret.Name, &sekret.Description, &sekret.CurrentVersion,
-			&sekret.CreatedBy, &sekret.CreatedAt, &sekret.UpdatedAt, &sekret.RetiredAt); err != nil {
+		var secret Secret
+		if err := rows.Scan(&secret.ID, &secret.Name, &secret.Description, &secret.CurrentVersion,
+			&secret.CreatedBy, &secret.CreatedAt, &secret.UpdatedAt, &secret.RetiredAt); err != nil {
 			return nil, err
 		}
-		sekrety = append(sekrety, sekret)
+		secrets = append(secrets, secret)
 	}
-	return sekrety, rows.Err()
+	return secrets, rows.Err()
 }
 
-func (s *Store) wersje(ctx context.Context, secretID string) ([]Wersja, error) {
+func (s *Store) versions(ctx context.Context, secretID string) ([]Version, error) {
 	rows, err := s.pool.Query(ctx, `
 		select version, size_bytes, created_by, created_at, destroyed_at
 		  from secret_versions where secret_id = $1 order by version desc`, secretID)
@@ -154,44 +155,45 @@ func (s *Store) wersje(ctx context.Context, secretID string) ([]Wersja, error) {
 	}
 	defer rows.Close()
 
-	var wersje []Wersja
+	var versions []Version
 	for rows.Next() {
-		var wersja Wersja
-		if err := rows.Scan(&wersja.Version, &wersja.SizeBytes, &wersja.CreatedBy,
-			&wersja.CreatedAt, &wersja.Destroyed); err != nil {
+		var version Version
+		if err := rows.Scan(&version.Version, &version.SizeBytes, &version.CreatedBy,
+			&version.CreatedAt, &version.Destroyed); err != nil {
 			return nil, err
 		}
-		wersje = append(wersje, wersja)
+		versions = append(versions, version)
 	}
-	return wersje, rows.Err()
+	return versions, rows.Err()
 }
 
-// Wycofaj zamyka sekret: metadane zostaja, wydawanie sie konczy.
-func (s *Store) Wycofaj(ctx context.Context, nazwa string) error {
+// Retire closes a secret: the metadata stays, the issuing ends.
+func (s *Store) Retire(ctx context.Context, name string) error {
 	tag, err := s.pool.Exec(ctx, `
 		update secrets set retired_at = now(), updated_at = now()
-		 where name = $1 and retired_at is null`, nazwa)
+		 where name = $1 and retired_at is null`, name)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	// Dzierzawy wystawione wczesniej traca waznosc razem z sekretem.
+	// The leases issued earlier lose their validity together with the secret.
 	_, err = s.pool.Exec(ctx, `
 		update secret_leases set revoked_at = now()
 		 where secret_id = (select id from secrets where name = $1)
-		   and redeemed_at is null and revoked_at is null`, nazwa)
+		   and redeemed_at is null and revoked_at is null`, name)
 	return err
 }
 
-// Zniszcz kasuje tresc jednej wersji, zostawiajac slad, ze istniala.
-func (s *Store) Zniszcz(ctx context.Context, nazwa string, wersja int) error {
+// Destroy deletes the content of one version, leaving a trace that it
+// existed.
+func (s *Store) Destroy(ctx context.Context, name string, version int) error {
 	tag, err := s.pool.Exec(ctx, `
 		update secret_versions
 		   set ciphertext = '\x'::bytea, nonce = '\x'::bytea, destroyed_at = now()
 		 where secret_id = (select id from secrets where name = $1)
-		   and version = $2 and destroyed_at is null`, nazwa, wersja)
+		   and version = $2 and destroyed_at is null`, name, version)
 	if err != nil {
 		return err
 	}
@@ -201,56 +203,56 @@ func (s *Store) Zniszcz(ctx context.Context, nazwa string, wersja int) error {
 	return nil
 }
 
-// Wystaw zaklada dzierzawe na czas wykonania jednego zadania.
+// Issue creates a lease for the duration of one task.
 //
-// Wersje ustalamy w chwili wystawienia: zadanie zlecone wobec wersji biezacej
-// ma dostac te wersje, ktora byla biezaca, gdy je dostarczano - a nie te,
-// ktora powstanie w trakcie.
-func (s *Store) Wystaw(ctx context.Context, nazwa string, wersja int,
-	jobID, hostID string, okno time.Duration) (*Dzierzawa, error) {
-	if err := WalidujNazwe(nazwa); err != nil {
+// We fix the version at the moment of issuing: a task ordered against the
+// current version is to get the version that was current when it was
+// delivered - not the one that comes into being while it runs.
+func (s *Store) Issue(ctx context.Context, name string, version int,
+	jobID, hostID string, window time.Duration) (*Lease, error) {
+	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	sekret, err := s.Sekret(ctx, nazwa)
+	secret, err := s.Secret(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	if sekret.RetiredAt != nil {
+	if secret.RetiredAt != nil {
 		return nil, ErrRetired
 	}
-	if wersja == 0 {
-		wersja = sekret.CurrentVersion
+	if version == 0 {
+		version = secret.CurrentVersion
 	}
-	if wersja <= 0 {
+	if version <= 0 {
 		return nil, ErrNotFound
 	}
-	if okno <= 0 {
-		okno = OknoDzierzawy
+	if window <= 0 {
+		window = LeaseWindow
 	}
 
-	dzierzawa := &Dzierzawa{
-		SecretID: sekret.ID, SecretName: sekret.Name, Version: wersja,
+	lease := &Lease{
+		SecretID: secret.ID, SecretName: secret.Name, Version: version,
 		JobID: jobID, HostID: hostID,
 	}
 	err = s.pool.QueryRow(ctx, `
 		insert into secret_leases (secret_id, version, job_id, host_id, expires_at)
 		values ($1, $2, $3, $4, now() + $5::interval)
 		returning id, issued_at, expires_at`,
-		sekret.ID, wersja, jobID, hostID, okno.String()).
-		Scan(&dzierzawa.ID, &dzierzawa.IssuedAt, &dzierzawa.ExpiresAt)
+		secret.ID, version, jobID, hostID, window.String()).
+		Scan(&lease.ID, &lease.IssuedAt, &lease.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
-	return dzierzawa, nil
+	return lease, nil
 }
 
-// Wydaj zwraca wartosc sekretu i zuzywa dzierzawe.
+// Redeem returns the value of the secret and uses up the lease.
 //
-// Dzierzawa jest jednorazowa: to samo zadanie moze pobrac sekret raz. Ponowna
-// proba jest odmowa, a nie druga kopia - powtorzone pobranie oznacza albo
-// ponowienie operacji, ktore dostanie wlasna dzierzawe, albo kogos, kto uzywa
-// cudzej.
-func (s *Store) Wydaj(ctx context.Context, jobID, hostID, nazwa string, wersja int) ([]byte, int, error) {
+// A lease is single-use: the same task may fetch the secret once. A second
+// attempt is a refusal rather than a second copy - a repeated fetch means
+// either a retry of the operation, which gets its own lease, or somebody
+// using a lease that is not theirs.
+func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version int) ([]byte, int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -258,12 +260,12 @@ func (s *Store) Wydaj(ctx context.Context, jobID, hostID, nazwa string, wersja i
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var leaseID, secretID string
-	var wydanaWersja int
-	warunekWersji := ""
-	argumenty := []any{jobID, hostID, nazwa}
-	if wersja > 0 {
-		warunekWersji = " and l.version = $4"
-		argumenty = append(argumenty, wersja)
+	var issuedVersion int
+	versionCondition := ""
+	args := []any{jobID, hostID, name}
+	if version > 0 {
+		versionCondition = " and l.version = $4"
+		args = append(args, version)
 	}
 	err = tx.QueryRow(ctx, `
 		select l.id, l.secret_id, l.version
@@ -271,10 +273,10 @@ func (s *Store) Wydaj(ctx context.Context, jobID, hostID, nazwa string, wersja i
 		  join secrets s on s.id = l.secret_id
 		 where l.job_id = $1 and l.host_id = $2 and s.name = $3
 		   and l.redeemed_at is null and l.revoked_at is null
-		   and l.expires_at > now() and s.retired_at is null`+warunekWersji+`
+		   and l.expires_at > now() and s.retired_at is null`+versionCondition+`
 		 order by l.issued_at desc
 		 limit 1
-		   for update`, argumenty...).Scan(&leaseID, &secretID, &wydanaWersja)
+		   for update`, args...).Scan(&leaseID, &secretID, &issuedVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, 0, ErrNoLease
 	}
@@ -282,22 +284,22 @@ func (s *Store) Wydaj(ctx context.Context, jobID, hostID, nazwa string, wersja i
 		return nil, 0, err
 	}
 
-	var nonce, szyfrogram []byte
-	var zniszczona *time.Time
+	var nonce, ciphertext []byte
+	var destroyed *time.Time
 	if err := tx.QueryRow(ctx, `
 		select nonce, ciphertext, destroyed_at from secret_versions
-		 where secret_id = $1 and version = $2`, secretID, wydanaWersja).
-		Scan(&nonce, &szyfrogram, &zniszczona); err != nil {
+		 where secret_id = $1 and version = $2`, secretID, issuedVersion).
+		Scan(&nonce, &ciphertext, &destroyed); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, 0, ErrNotFound
 		}
 		return nil, 0, err
 	}
-	if zniszczona != nil || len(szyfrogram) == 0 {
+	if destroyed != nil || len(ciphertext) == 0 {
 		return nil, 0, ErrDestroyed
 	}
 
-	wartosc, err := s.szyfr.Odszyfruj(nonce, szyfrogram)
+	value, err := s.cipher.Decrypt(nonce, ciphertext)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -308,22 +310,23 @@ func (s *Store) Wydaj(ctx context.Context, jobID, hostID, nazwa string, wersja i
 	if err := tx.Commit(ctx); err != nil {
 		return nil, 0, err
 	}
-	return wartosc, wydanaWersja, nil
+	return value, issuedVersion, nil
 }
 
-// Uniewaznij zamyka niezuzyte dzierzawy zadania.
+// Revoke closes the unused leases of a task.
 //
-// Zadanie, ktore sie skonczylo albo zostalo anulowane, nie ma po co trzymac
-// otwartego prawa do sekretu.
-func (s *Store) Uniewaznij(ctx context.Context, jobID string) error {
+// A task that has finished or was cancelled has no reason to keep an open
+// right to a secret.
+func (s *Store) Revoke(ctx context.Context, jobID string) error {
 	_, err := s.pool.Exec(ctx, `
 		update secret_leases set revoked_at = now()
 		 where job_id = $1 and redeemed_at is null and revoked_at is null`, jobID)
 	return err
 }
 
-// Dzierzawy zwraca dzierzawy zadania - do pokazania w audycie operacji.
-func (s *Store) Dzierzawy(ctx context.Context, jobID string) ([]Dzierzawa, error) {
+// Leases returns the leases of a task - to be shown in the operation's audit
+// trail.
+func (s *Store) Leases(ctx context.Context, jobID string) ([]Lease, error) {
 	rows, err := s.pool.Query(ctx, `
 		select l.id, l.secret_id, s.name, l.version, l.job_id, l.host_id,
 		       l.issued_at, l.expires_at, l.redeemed_at, l.revoked_at
@@ -334,23 +337,23 @@ func (s *Store) Dzierzawy(ctx context.Context, jobID string) ([]Dzierzawa, error
 	}
 	defer rows.Close()
 
-	var dzierzawy []Dzierzawa
+	var leases []Lease
 	for rows.Next() {
-		var dzierzawa Dzierzawa
-		if err := rows.Scan(&dzierzawa.ID, &dzierzawa.SecretID, &dzierzawa.SecretName,
-			&dzierzawa.Version, &dzierzawa.JobID, &dzierzawa.HostID,
-			&dzierzawa.IssuedAt, &dzierzawa.ExpiresAt,
-			&dzierzawa.RedeemedAt, &dzierzawa.RevokedAt); err != nil {
+		var lease Lease
+		if err := rows.Scan(&lease.ID, &lease.SecretID, &lease.SecretName,
+			&lease.Version, &lease.JobID, &lease.HostID,
+			&lease.IssuedAt, &lease.ExpiresAt,
+			&lease.RedeemedAt, &lease.RevokedAt); err != nil {
 			return nil, err
 		}
-		dzierzawy = append(dzierzawy, dzierzawa)
+		leases = append(leases, lease)
 	}
-	return dzierzawy, rows.Err()
+	return leases, rows.Err()
 }
 
-func nullable(wartosc string) any {
-	if wartosc == "" {
+func nullable(value string) any {
+	if value == "" {
 		return nil
 	}
-	return wartosc
+	return value
 }

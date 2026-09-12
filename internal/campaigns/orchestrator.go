@@ -181,7 +181,7 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		// Okno serwisowe znaczy "ktos przy tej maszynie pracuje". Kampania
 		// nie czeka na jego koniec, tylko omija host i mowi o tym wprost:
 		// inaczej fala staloby w miejscu przez host, ktory lezy w serwisie.
-		if host.Maintenance.Trwa(time.Now().UTC()) {
+		if host.Maintenance.Active(time.Now().UTC()) {
 			o.finishTarget(ctx, campaign, target, TargetSkipped, "maintenance",
 				"host jest w oknie serwisowym do "+host.Maintenance.Until.Format(time.RFC3339))
 			continue
@@ -239,7 +239,7 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 	// Zmiana liczona per host jedzie z odciskiem planu tego hosta. Host
 	// porownuje go ze stanem, ktory ma teraz, i odmawia, gdy plan sie
 	// zdezaktualizowal - zgoda dotyczyla tamtego diffu, nie tego.
-	if opspec.AkcjaPlanowania(action) != "" {
+	if opspec.PlanningAction(action) != "" {
 		hash, plan, err := o.store.PlanHosta(ctx, campaign.ID, target.HostID)
 		if err != nil {
 			return "", err

@@ -44,7 +44,7 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 		// Plan bez opisu zmiany jest odczytem profili; z opisem zmiany liczy
 		// roznice wobec niej, bez dotykania hosta.
 		operacja = helperv1.NetworkRequest_OPERATION_READ
-		if payload.OpisujeZmiane() {
+		if payload.DescribesChange() {
 			operacja = helperv1.NetworkRequest_OPERATION_PLAN
 		}
 	case opspec.ActionNetworkMTUSet:

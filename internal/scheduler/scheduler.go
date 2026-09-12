@@ -49,8 +49,8 @@ type Options struct {
 // Interfejs zamiast konkretnego magazynu: scheduler ma wystawic prawo do
 // pobrania, a nie wiedziec, jak sekrety sa przechowywane.
 type SecretLeases interface {
-	Wystaw(ctx context.Context, nazwa string, wersja int,
-		jobID, hostID string, okno time.Duration) (*secrets.Dzierzawa, error)
+	Issue(ctx context.Context, name string, version int,
+		jobID, hostID string, okno time.Duration) (*secrets.Lease, error)
 }
 
 // Scheduler laczy kolejke zadan z aktywnymi sesjami agentow.
@@ -226,7 +226,7 @@ func (s *Scheduler) wystawDzierzawy(ctx context.Context, item jobs.LeasedJob) er
 	if err := json.Unmarshal(item.Job.Payload, &payload); err != nil {
 		return err
 	}
-	odnosniki := payload.Sekrety()
+	odnosniki := payload.Secrets()
 	if len(odnosniki) == 0 {
 		return nil
 	}
@@ -234,7 +234,7 @@ func (s *Scheduler) wystawDzierzawy(ctx context.Context, item jobs.LeasedJob) er
 		return errUnknownAction("ten panel nie ma magazynu sekretow")
 	}
 	for _, odnosnik := range odnosniki {
-		dzierzawa, err := s.secrets.Wystaw(ctx, odnosnik.Name, odnosnik.Version,
+		dzierzawa, err := s.secrets.Issue(ctx, odnosnik.Name, odnosnik.Version,
 			item.Job.ID, item.Job.HostID, 0)
 		if err != nil {
 			return err
@@ -442,7 +442,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			plik.Content = []byte(payload.File.Content)
 			// Koperta niesie odnosnik, nie wartosc: host siegnie po tresc
 			// osobnym wywolaniem, gdy zacznie operacje.
-			if !payload.File.ContentSecret.Pusty() {
+			if !payload.File.ContentSecret.Empty() {
 				plik.ContentSecret = &agentv1.SecretRef{
 					Name:    payload.File.ContentSecret.Name,
 					Version: uint32(payload.File.ContentSecret.Version),
@@ -501,7 +501,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			certyfikat.Certificate = payload.Certificate.Certificate
 			// Koperta niesie odnosnik do klucza, nie klucz: host siegnie po
 			// wartosc osobnym wywolaniem, gdy zacznie operacje.
-			if !payload.Certificate.KeySecret.Pusty() {
+			if !payload.Certificate.KeySecret.Empty() {
 				certyfikat.KeySecret = &agentv1.SecretRef{
 					Name:    payload.Certificate.KeySecret.Name,
 					Version: uint32(payload.Certificate.KeySecret.Version),
@@ -567,7 +567,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			kopia.Plan = payload.Backup.Plan
 			kopia.PlanHash = payload.Backup.PlanHash
 			// Koperta niesie odnosniki do poswiadczen, nigdy ich wartosci.
-			if !payload.Backup.PasswordSecret.Pusty() {
+			if !payload.Backup.PasswordSecret.Empty() {
 				kopia.PasswordSecret = &agentv1.SecretRef{
 					Name:    payload.Backup.PasswordSecret.Name,
 					Version: uint32(payload.Backup.PasswordSecret.Version),
@@ -600,7 +600,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			zrodlo.Username = payload.Repository.Username
 			zrodlo.Remove = payload.Repository.Remove
 			// Koperta niesie odnosnik do hasla, nie haslo.
-			if !payload.Repository.PasswordSecret.Pusty() {
+			if !payload.Repository.PasswordSecret.Empty() {
 				zrodlo.PasswordSecret = &agentv1.SecretRef{
 					Name:    payload.Repository.PasswordSecret.Name,
 					Version: uint32(payload.Repository.PasswordSecret.Version),
@@ -671,7 +671,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		case opspec.ActionSSHConfigPlan:
 			// Plan bez ustawien jest odczytem stanu (zakladka hosta); plan
 			// z ustawieniami liczy roznice wobec nich - faza planowania.
-			if payload.SSH != nil && payload.SSH.OpisujeZmiane() {
+			if payload.SSH != nil && payload.SSH.DescribesChange() {
 				operacja = agentv1.SshAction_OPERATION_PLAN
 			}
 		case opspec.ActionSSHConfigApply:
@@ -818,7 +818,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			// Plan bez opisu zmiany jest odczytem profili; z opisem zmiany
 			// liczy roznice wobec niej na hoscie.
 			operacja = agentv1.NetworkAction_OPERATION_READ
-			if payload.Network != nil && payload.Network.OpisujeZmiane() {
+			if payload.Network != nil && payload.Network.DescribesChange() {
 				operacja = agentv1.NetworkAction_OPERATION_PLAN
 			}
 		case opspec.ActionNetworkMTUSet:

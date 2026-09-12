@@ -12,317 +12,317 @@ import (
 )
 
 const (
-	// domyslnaDzierzawa jest terminem tokenow. Krotszy niz najdluzsza
-	// operacja, bo dzierzawa jest odnawiana dopoki zadanie zyje. Awaria
-	// orkiestratora ma zwolnic pojemnosc po chwili, a nie po godzinie.
-	domyslnaDzierzawa = 2 * time.Minute
-	// wiekOczekiwania mowi, jak dlugo nieodswiezone oczekiwanie liczy sie do
-	// udzialu. Kampania, ktora przestala pytac, nie moze w nieskonczonosc
-	// zmniejszac udzialu pozostalym.
-	wiekOczekiwania = 30 * time.Second
-	// okresSprzatania wyznacza czestotliwosc usuwania wygaslych wierszy.
-	okresSprzatania = time.Minute
+	// defaultLease is the term of the tokens. Shorter than the longest
+	// operation, because a lease is renewed for as long as the work lives. An
+	// orchestrator failure has to free capacity after a moment, not after an
+	// hour.
+	defaultLease = 2 * time.Minute
+	// waiterAge says how long a waiting entry that is no longer refreshed
+	// counts towards the share. A campaign that stopped asking must not keep
+	// shrinking everyone else's share forever.
+	waiterAge = 30 * time.Second
+	// sweepInterval sets how often expired rows are removed.
+	sweepInterval = time.Minute
 )
 
-// Store jest autorytatywnym stanem przyznan.
+// Store is the authoritative state of the grants.
 //
-// Trzymamy go w bazie, a nie w pamieci procesu, bo orkiestratorow moze byc
-// wiecej niz jeden. Limit egzekwowany w pamieci kazdego z nich nie jest
-// limitem floty, tylko limitem instancji - i przy dwoch instancjach znaczy
-// dwa razy tyle, co obiecywal.
+// It lives in the database, not in process memory, because there can be more
+// than one orchestrator. A limit enforced in the memory of each of them is not
+// a fleet limit but an instance limit - and with two instances it means twice
+// what it promised.
 type Store struct {
-	pool      *pgxpool.Pool
-	log       *slog.Logger
-	dzierzawa time.Duration
+	pool  *pgxpool.Pool
+	log   *slog.Logger
+	lease time.Duration
 }
 
 func NewStore(pool *pgxpool.Pool, log *slog.Logger) *Store {
-	return &Store{pool: pool, log: log, dzierzawa: domyslnaDzierzawa}
+	return &Store{pool: pool, log: log, lease: defaultLease}
 }
 
-// Zajmij przyznaje wszystkie potrzeby albo zadna.
+// Acquire grants every need or none of them.
 //
-// Czesciowe zajecie byloby gorsze niz odmowa: token globalny trzymany podczas
-// czekania na token lokalizacji zmniejsza pojemnosc floty dla wszystkich
-// innych, nie zblizajac tego zadania do startu. Dlatego caly zestaw idzie
-// w jednej transakcji, a wiersze pojemnosci sa blokowane w ustalonej
-// kolejnosci - bez tego dwa orkiestratory potrafilyby sie zakleszczyc.
+// A partial grant would be worse than a refusal: a global token held while
+// waiting for a site token lowers the fleet capacity for everyone else without
+// bringing this work any closer to starting. That is why the whole set goes in
+// one transaction, and the capacity rows are locked in a fixed order - without
+// that two orchestrators could deadlock.
 //
-// Pusta odmowa oznacza sukces. Wlasciciel jest identyfikatorem zadania
-// (u nas: celu kampanii), roszczacy - jednostka sprawiedliwosci, czyli calej
-// kampanii.
-func (s *Store) Zajmij(ctx context.Context, wlasciciel, roszczacy string, klasa Klasa,
-	potrzeby []Potrzeba) (Odmowa, error) {
-	if len(potrzeby) == 0 {
-		return Odmowa{}, nil
+// An empty refusal means success. The owner is the identifier of the work (for
+// us: a campaign target), the claimant is the unit of fairness, that is the
+// whole campaign.
+func (s *Store) Acquire(ctx context.Context, owner, claimant string, class Class,
+	needs []Need) (Refusal, error) {
+	if len(needs) == 0 {
+		return Refusal{}, nil
 	}
-	uporzadkowane := make([]Potrzeba, len(potrzeby))
-	copy(uporzadkowane, potrzeby)
-	sort.Slice(uporzadkowane, func(i, j int) bool {
-		return uporzadkowane[i].Klucz < uporzadkowane[j].Klucz
+	ordered := make([]Need, len(needs))
+	copy(ordered, needs)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].Key < ordered[j].Key
 	})
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return Odmowa{}, err
+		return Refusal{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	pojemnosci, err := s.pojemnosci(ctx, tx, uporzadkowane)
+	capacities, err := s.capacities(ctx, tx, ordered)
 	if err != nil {
-		return Odmowa{}, err
+		return Refusal{}, err
 	}
 
-	przyznane := make([]Potrzeba, 0, len(uporzadkowane))
-	for _, potrzeba := range uporzadkowane {
-		pojemnosc, opisany := pojemnosci[potrzeba.Klucz]
-		if !opisany {
-			// Budzet nieskonfigurowany nie jest budzetem zerowym. Nie
-			// zatrzymuje zadania, ale tez nie udaje, ze czegos pilnuje.
+	granted := make([]Need, 0, len(ordered))
+	for _, need := range ordered {
+		capacity, described := capacities[need.Key]
+		if !described {
+			// An unconfigured budget is not a zero budget. It does not stop
+			// the work, but it does not pretend to guard anything either.
 			continue
 		}
-		odmowa, err := s.sprawdz(ctx, tx, wlasciciel, roszczacy, klasa, potrzeba, pojemnosc)
+		refusal, err := s.check(ctx, tx, owner, claimant, class, need, capacity)
 		if err != nil {
-			return Odmowa{}, err
+			return Refusal{}, err
 		}
-		if !odmowa.Pusta() {
-			if err := s.zapiszOczekiwanie(ctx, tx, potrzeba.Klucz, roszczacy, klasa); err != nil {
-				return Odmowa{}, err
+		if !refusal.Empty() {
+			if err := s.recordWaiter(ctx, tx, need.Key, claimant, class); err != nil {
+				return Refusal{}, err
 			}
-			// Oczekiwanie musi przetrwac odmowe: bez niego nikt nie policzy
-			// udzialu ani nie awansuje czekajacego po czasie.
+			// The waiting entry has to survive the refusal: without it nobody
+			// computes the share or promotes the waiter by age.
 			if err := tx.Commit(ctx); err != nil {
-				return Odmowa{}, err
+				return Refusal{}, err
 			}
-			return odmowa, nil
+			return refusal, nil
 		}
-		przyznane = append(przyznane, potrzeba)
+		granted = append(granted, need)
 	}
 
-	for _, potrzeba := range przyznane {
-		if err := s.zapiszDzierzawe(ctx, tx, potrzeba, wlasciciel, roszczacy); err != nil {
-			return Odmowa{}, err
+	for _, need := range granted {
+		if err := s.recordLease(ctx, tx, need, owner, claimant); err != nil {
+			return Refusal{}, err
 		}
 	}
 	if _, err := tx.Exec(ctx,
 		`delete from budget_waiters where claimant = $1 and key = any($2)`,
-		roszczacy, klucze(przyznane)); err != nil {
-		return Odmowa{}, err
+		claimant, keysOf(granted)); err != nil {
+		return Refusal{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Odmowa{}, err
+		return Refusal{}, err
 	}
-	return Odmowa{}, nil
+	return Refusal{}, nil
 }
 
-// pojemnosci czyta i blokuje wiersze pojemnosci dla calego zestawu potrzeb.
+// capacities reads and locks the capacity rows for the whole set of needs.
 //
-// Klucz scisly wygrywa z wzorcem: instalacja moze opisac jedna lokalizacje
-// inaczej niz wszystkie pozostale.
-func (s *Store) pojemnosci(ctx context.Context, tx pgx.Tx,
-	potrzeby []Potrzeba) (map[string]int, error) {
-	szukane := make([]string, 0, 2*len(potrzeby))
-	for _, potrzeba := range potrzeby {
-		szukane = append(szukane, potrzeba.Klucz)
-		if wzorzec := Wzorzec(potrzeba.Klucz); wzorzec != "" {
-			szukane = append(szukane, wzorzec)
+// An exact key wins over a pattern: an installation may describe one site
+// differently from all the others.
+func (s *Store) capacities(ctx context.Context, tx pgx.Tx,
+	needs []Need) (map[string]int, error) {
+	wanted := make([]string, 0, 2*len(needs))
+	for _, need := range needs {
+		wanted = append(wanted, need.Key)
+		if pattern := Pattern(need.Key); pattern != "" {
+			wanted = append(wanted, pattern)
 		}
 	}
-	// Kolejnosc blokowania jest ustalona kluczem, wiec dwa orkiestratory
-	// biora te same wiersze w tej samej kolejnosci.
+	// The locking order is fixed by the key, so two orchestrators take the
+	// same rows in the same order.
 	rows, err := tx.Query(ctx,
 		`select key, capacity from budget_limits where key = any($1) order by key for update`,
-		szukane)
+		wanted)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	zrodlo := map[string]int{}
+	source := map[string]int{}
 	for rows.Next() {
-		var klucz string
-		var pojemnosc int
-		if err := rows.Scan(&klucz, &pojemnosc); err != nil {
+		var key string
+		var capacity int
+		if err := rows.Scan(&key, &capacity); err != nil {
 			return nil, err
 		}
-		zrodlo[klucz] = pojemnosc
+		source[key] = capacity
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	wynik := map[string]int{}
-	for _, potrzeba := range potrzeby {
-		if pojemnosc, ok := zrodlo[potrzeba.Klucz]; ok {
-			wynik[potrzeba.Klucz] = pojemnosc
+	result := map[string]int{}
+	for _, need := range needs {
+		if capacity, ok := source[need.Key]; ok {
+			result[need.Key] = capacity
 			continue
 		}
-		if pojemnosc, ok := zrodlo[Wzorzec(potrzeba.Klucz)]; ok {
-			wynik[potrzeba.Klucz] = pojemnosc
+		if capacity, ok := source[Pattern(need.Key)]; ok {
+			result[need.Key] = capacity
 		}
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// sprawdz rozstrzyga jeden budzet: najpierw pojemnosc, potem udzial.
-func (s *Store) sprawdz(ctx context.Context, tx pgx.Tx, wlasciciel, roszczacy string,
-	klasa Klasa, potrzeba Potrzeba, pojemnosc int) (Odmowa, error) {
-	// Wlasne, wczesniejsze zajecie tego samego klucza nie moze liczyc sie
-	// dwa razy: ponowienie zadania nie jest nowym obciazeniem.
-	const zajetosc = `
+// check decides one budget: capacity first, then the fair share.
+func (s *Store) check(ctx context.Context, tx pgx.Tx, owner, claimant string,
+	class Class, need Need, capacity int) (Refusal, error) {
+	// Our own earlier hold on the same key must not count twice: retrying a
+	// task is not new load.
+	const usage = `
 		select coalesce(sum(weight), 0),
 		       coalesce(sum(weight) filter (where claimant = $2), 0)
 		  from budget_leases
 		 where key = $1 and lease_until > now() and owner <> $3`
-	var zajete, moje int
-	if err := tx.QueryRow(ctx, zajetosc, potrzeba.Klucz, roszczacy, wlasciciel).
-		Scan(&zajete, &moje); err != nil {
-		return Odmowa{}, err
+	var used, mine int
+	if err := tx.QueryRow(ctx, usage, need.Key, claimant, owner).
+		Scan(&used, &mine); err != nil {
+		return Refusal{}, err
 	}
 
-	czeka, err := s.czasOczekiwania(ctx, tx, potrzeba.Klucz, roszczacy)
+	waiting, err := s.waitingTime(ctx, tx, need.Key, claimant)
 	if err != nil {
-		return Odmowa{}, err
+		return Refusal{}, err
 	}
-	if zajete+potrzeba.Waga > pojemnosc {
-		return Odmowa{Klucz: potrzeba.Klucz, Powod: PowodPojemnosc,
-			Zajete: zajete, Pojemnosc: pojemnosc, Czeka: czeka}, nil
+	if used+need.Weight > capacity {
+		return Refusal{Key: need.Key, Reason: ReasonCapacity,
+			Used: used, Capacity: capacity, Waiting: waiting}, nil
 	}
 
-	// Udzial liczymy dopiero, gdy pojemnosc jest. Wolne tokeny dzielimy
-	// miedzy tych, ktorzy o nie prosza: kampania obejmujaca tysiac hostow
-	// dostaje porcje, a nie wszystko, co akurat zostalo wolne.
-	chetnych, err := s.chetnych(ctx, tx, potrzeba.Klucz)
+	// The share is computed only once there is capacity. Free tokens are
+	// divided between those who ask for them: a campaign covering a thousand
+	// hosts gets a portion, not everything that happens to be free.
+	claimants, err := s.claimants(ctx, tx, need.Key)
 	if err != nil {
-		return Odmowa{}, err
+		return Refusal{}, err
 	}
-	udzial := pojemnosc / max(chetnych, 1)
-	if udzial < 1 {
-		udzial = 1
+	share := capacity / max(claimants, 1)
+	if share < 1 {
+		share = 1
 	}
-	if moje+potrzeba.Waga > udzial && czeka < klasa.WiekAwansu() {
-		return Odmowa{Klucz: potrzeba.Klucz, Powod: PowodUdzial, Zajete: zajete,
-			Pojemnosc: pojemnosc, Udzial: udzial, Trzymane: moje, Czeka: czeka}, nil
+	if mine+need.Weight > share && waiting < class.PromotionAge() {
+		return Refusal{Key: need.Key, Reason: ReasonFairShare, Used: used,
+			Capacity: capacity, Share: share, Held: mine, Waiting: waiting}, nil
 	}
-	return Odmowa{}, nil
+	return Refusal{}, nil
 }
 
-// chetnych liczy roszczacych, ktorzy trzymaja tokeny albo o nie prosza.
-func (s *Store) chetnych(ctx context.Context, tx pgx.Tx, klucz string) (int, error) {
+// claimants counts the claimants that hold tokens or ask for them.
+func (s *Store) claimants(ctx context.Context, tx pgx.Tx, key string) (int, error) {
 	const query = `
 		select count(*) from (
 		    select claimant from budget_leases where key = $1 and lease_until > now()
 		    union
 		    select claimant from budget_waiters
 		     where key = $1 and seen_at > now() - make_interval(secs => $2)
-		) as chetni`
-	var ile int
-	err := tx.QueryRow(ctx, query, klucz, wiekOczekiwania.Seconds()).Scan(&ile)
-	return ile, err
+		) as asking`
+	var count int
+	err := tx.QueryRow(ctx, query, key, waiterAge.Seconds()).Scan(&count)
+	return count, err
 }
 
-// czasOczekiwania mowi, jak dlugo roszczacy czeka na ten budzet.
-func (s *Store) czasOczekiwania(ctx context.Context, tx pgx.Tx,
-	klucz, roszczacy string) (time.Duration, error) {
-	var sekundy *float64
+// waitingTime says how long the claimant has been waiting for this budget.
+func (s *Store) waitingTime(ctx context.Context, tx pgx.Tx,
+	key, claimant string) (time.Duration, error) {
+	var seconds *float64
 	const query = `
 		select extract(epoch from (now() - since))::float8 from budget_waiters
 		 where key = $1 and claimant = $2`
-	if err := tx.QueryRow(ctx, query, klucz, roszczacy).Scan(&sekundy); err != nil {
+	if err := tx.QueryRow(ctx, query, key, claimant).Scan(&seconds); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil
 		}
 		return 0, err
 	}
-	if sekundy == nil {
+	if seconds == nil {
 		return 0, nil
 	}
-	return time.Duration(*sekundy * float64(time.Second)), nil
+	return time.Duration(*seconds * float64(time.Second)), nil
 }
 
-func (s *Store) zapiszOczekiwanie(ctx context.Context, tx pgx.Tx,
-	klucz, roszczacy string, klasa Klasa) error {
-	// since zostaje z pierwszego zgloszenia: to ono jest podstawa awansu.
-	// seen_at mowi, czy ktos jeszcze o ten budzet prosi.
+func (s *Store) recordWaiter(ctx context.Context, tx pgx.Tx,
+	key, claimant string, class Class) error {
+	// since stays from the first request: it is the basis of the promotion.
+	// seen_at says whether anyone still asks for this budget.
 	const query = `
 		insert into budget_waiters (key, claimant, class)
 		values ($1, $2, $3)
 		on conflict (key, claimant) do update set seen_at = now(), class = excluded.class`
-	_, err := tx.Exec(ctx, query, klucz, roszczacy, string(klasa))
+	_, err := tx.Exec(ctx, query, key, claimant, string(class))
 	return err
 }
 
-func (s *Store) zapiszDzierzawe(ctx context.Context, tx pgx.Tx, potrzeba Potrzeba,
-	wlasciciel, roszczacy string) error {
+func (s *Store) recordLease(ctx context.Context, tx pgx.Tx, need Need,
+	owner, claimant string) error {
 	const query = `
 		insert into budget_leases (key, owner, claimant, weight, lease_until)
 		values ($1, $2, $3, $4, now() + make_interval(secs => $5))
 		on conflict (key, owner) do update
 		   set claimant = excluded.claimant, weight = excluded.weight,
 		       lease_until = excluded.lease_until`
-	_, err := tx.Exec(ctx, query, potrzeba.Klucz, wlasciciel, roszczacy,
-		potrzeba.Waga, s.dzierzawa.Seconds())
+	_, err := tx.Exec(ctx, query, need.Key, owner, claimant,
+		need.Weight, s.lease.Seconds())
 	return err
 }
 
-// Odnow przedluza dzierzawy zadan, ktore nadal pracuja.
+// Renew extends the leases of work that is still running.
 //
-// Bez odnowienia dlugie operacje - transakcja pakietowa potrafi trwac
-// kwadrans - zwalnialyby pojemnosc w polowie pracy, a system uruchamialby
-// wiecej, niz naprawde uniesie.
-func (s *Store) Odnow(ctx context.Context, wlasciciele []string) error {
-	if len(wlasciciele) == 0 {
+// Without renewal long operations - a package transaction can take a quarter
+// of an hour - would free capacity halfway through, and the system would start
+// more than it can really carry.
+func (s *Store) Renew(ctx context.Context, owners []string) error {
+	if len(owners) == 0 {
 		return nil
 	}
 	_, err := s.pool.Exec(ctx,
 		`update budget_leases set lease_until = now() + make_interval(secs => $2)
-		  where owner = any($1)`, wlasciciele, s.dzierzawa.Seconds())
+		  where owner = any($1)`, owners, s.lease.Seconds())
 	return err
 }
 
-// Zwolnij oddaje tokeny zadania.
-func (s *Store) Zwolnij(ctx context.Context, wlasciciel string) error {
-	_, err := s.pool.Exec(ctx, `delete from budget_leases where owner = $1`, wlasciciel)
+// Release returns the tokens of one piece of work.
+func (s *Store) Release(ctx context.Context, owner string) error {
+	_, err := s.pool.Exec(ctx, `delete from budget_leases where owner = $1`, owner)
 	return err
 }
 
-// ZwolnijRoszczacego oddaje wszystko, co trzyma jedna kampania.
+// ReleaseClaimant returns everything one campaign holds.
 //
-// Anulowanie nie przechodzi przez zamkniecie kazdego hosta z osobna: kampania
-// jest zatrzymywana jednym zapisem, a jej hosty nie dostaja juz zadnego
-// obiegu, w ktorym mialyby cokolwiek oddac. Bez tego tokeny zostawaly do
-// wygasniecia dzierzawy i nastepna kampania czekala na pojemnosc, ktorej
-// nikt juz nie uzywal.
-func (s *Store) ZwolnijRoszczacego(ctx context.Context, roszczacy string) error {
+// Cancelling does not go through closing every host one by one: the campaign
+// is stopped with a single write, and its hosts get no further round in which
+// they could give anything back. Without this the tokens stayed until the
+// lease expired and the next campaign waited for capacity nobody was using.
+func (s *Store) ReleaseClaimant(ctx context.Context, claimant string) error {
 	if _, err := s.pool.Exec(ctx,
-		`delete from budget_leases where claimant = $1`, roszczacy); err != nil {
+		`delete from budget_leases where claimant = $1`, claimant); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `delete from budget_waiters where claimant = $1`, roszczacy)
+	_, err := s.pool.Exec(ctx, `delete from budget_waiters where claimant = $1`, claimant)
 	return err
 }
 
-// Run sprzata wygasle dzierzawy i porzucone oczekiwania.
+// Run sweeps expired leases and abandoned waiting entries.
 //
-// Wygasla dzierzawa i tak nie liczy sie do zajetosci, wiec sprzatanie nie
-// zmienia decyzji - porzadkuje tabele i pilnuje, zeby oczekiwanie po awarii
-// nie zmniejszalo udzialu w nieskonczonosc.
+// An expired lease does not count towards usage anyway, so the sweep changes
+// no decision - it keeps the tables tidy and makes sure that a waiting entry
+// left after a failure does not shrink the share forever.
 func (s *Store) Run(ctx context.Context) {
-	ticker := time.NewTicker(okresSprzatania)
+	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.sprzataj(ctx); err != nil {
-				s.log.Error("nie posprzatano budzetow", "err", err)
+			if err := s.sweep(ctx); err != nil {
+				s.log.Error("budget sweep failed", "err", err)
 			}
 		}
 	}
 }
 
-func (s *Store) sprzataj(ctx context.Context) error {
+func (s *Store) sweep(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx,
 		`delete from budget_leases where lease_until < now() - make_interval(secs => $1)`,
 		(10 * time.Minute).Seconds()); err != nil {
@@ -334,36 +334,37 @@ func (s *Store) sprzataj(ctx context.Context) error {
 	return err
 }
 
-// UstawPojemnosc zapisuje polityke pojemnosci jednego budzetu.
+// SetCapacity writes the capacity policy of one budget.
 //
-// Klucz moze byc scisly ('site:warsaw:packages') albo wzorcem
-// ('site:*:packages'). Wzorzec zmienia polityke domyslna dla lokalizacji,
-// ktorych nikt nie opisal osobno; klucz scisly wyjmuje jedna z nich spod
-// tej polityki.
-func (s *Store) UstawPojemnosc(ctx context.Context, klucz string, pojemnosc int,
-	nota string) error {
+// The key may be exact ('site:warsaw:packages') or a pattern
+// ('site:*:packages'). A pattern changes the default policy for the sites
+// nobody described separately; an exact key takes one of them out from under
+// that policy.
+func (s *Store) SetCapacity(ctx context.Context, key string, capacity int,
+	note string) error {
 	const query = `
 		insert into budget_limits (key, capacity, note)
 		values ($1, $2, $3)
 		on conflict (key) do update
 		   set capacity = excluded.capacity, note = excluded.note, updated_at = now()`
-	_, err := s.pool.Exec(ctx, query, klucz, pojemnosc, nota)
+	_, err := s.pool.Exec(ctx, query, key, capacity, note)
 	return err
 }
 
-// Stan opisuje jeden budzet na potrzeby ekranu operatora.
-type Stan struct {
-	Klucz     string `json:"key"`
-	Pojemnosc int    `json:"capacity"`
-	Zajete    int    `json:"used"`
-	Chetnych  int    `json:"claimants"`
+// State describes one budget for the operator's screen.
+type State struct {
+	Key       string `json:"key"`
+	Capacity  int    `json:"capacity"`
+	Used      int    `json:"used"`
+	Claimants int    `json:"claimants"`
 }
 
-// Stany zwracaja obraz budzetow, ktore cokolwiek trzymaja albo maja chetnych.
+// States returns the picture of the budgets that hold anything or have anyone
+// asking.
 //
-// Budzet, ktory nikogo nie zatrzymuje, nie musi byc na ekranie. Budzet, ktory
-// zatrzymuje, musi - inaczej kampania stoi bez podanego powodu.
-func (s *Store) Stany(ctx context.Context) ([]Stan, error) {
+// A budget that stops nobody does not have to be on the screen. A budget that
+// stops someone must be - otherwise a campaign stands with no reason given.
+func (s *Store) States(ctx context.Context) ([]State, error) {
 	const query = `
 		select l.key, l.capacity,
 		       coalesce((select sum(weight) from budget_leases d
@@ -374,30 +375,30 @@ func (s *Store) Stany(ctx context.Context) ([]Stan, error) {
 		            union
 		            select claimant from budget_waiters w
 		             where w.key = l.key and w.seen_at > now() - make_interval(secs => $1)
-		       ) as chetni)
+		       ) as asking)
 		  from budget_limits l
 		 order by l.key`
-	rows, err := s.pool.Query(ctx, query, wiekOczekiwania.Seconds())
+	rows, err := s.pool.Query(ctx, query, waiterAge.Seconds())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	stany := []Stan{}
+	states := []State{}
 	for rows.Next() {
-		var stan Stan
-		if err := rows.Scan(&stan.Klucz, &stan.Pojemnosc, &stan.Zajete, &stan.Chetnych); err != nil {
+		var state State
+		if err := rows.Scan(&state.Key, &state.Capacity, &state.Used, &state.Claimants); err != nil {
 			return nil, err
 		}
-		stany = append(stany, stan)
+		states = append(states, state)
 	}
-	return stany, rows.Err()
+	return states, rows.Err()
 }
 
-func klucze(potrzeby []Potrzeba) []string {
-	wynik := make([]string, 0, len(potrzeby))
-	for _, potrzeba := range potrzeby {
-		wynik = append(wynik, potrzeba.Klucz)
+func keysOf(needs []Need) []string {
+	result := make([]string, 0, len(needs))
+	for _, need := range needs {
+		result = append(result, need.Key)
 	}
-	return wynik
+	return result
 }

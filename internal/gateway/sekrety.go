@@ -18,14 +18,14 @@ import (
 // Interfejs zamiast konkretnego magazynu: gateway ma wydac wartosc na podstawie
 // dzierzawy, a nie wiedziec, jak sekrety sa przechowywane.
 type SekretyWydawane interface {
-	Wydaj(ctx context.Context, jobID, hostID, nazwa string, wersja int) ([]byte, int, error)
+	Redeem(ctx context.Context, jobID, hostID, name string, version int) ([]byte, int, error)
 }
 
 // SekretyDzierzawione opisuje dzierzawy wystawione dla zadania.
 type SekretyDzierzawione interface {
-	Dzierzawy(ctx context.Context, jobID string) ([]secrets.Dzierzawa, error)
-	// Uniewaznij zamyka dzierzawy zadania, ktore sie skonczylo.
-	Uniewaznij(ctx context.Context, jobID string) error
+	Leases(ctx context.Context, jobID string) ([]secrets.Lease, error)
+	// Revoke closes the leases of a task that has finished.
+	Revoke(ctx context.Context, jobID string) error
 }
 
 // SetSecrets podlacza magazyn sekretow.
@@ -71,7 +71,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if host == nil || !hosts.Aktywny(host.LifecycleState) {
+	if host == nil || !hosts.Active(host.LifecycleState) {
 		s.odmowaSekretu(ctx, hostID, nazwa, "lifecycle")
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			errors.New("host nie jest aktywny"))
@@ -84,7 +84,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 			errors.New("nieznane zadanie"))
 	}
 
-	wartosc, wersja, err := s.secrets.Wydaj(ctx, jobID, hostID, nazwa, int(req.Msg.GetSecretVersion()))
+	wartosc, wersja, err := s.secrets.Redeem(ctx, jobID, hostID, nazwa, int(req.Msg.GetSecretVersion()))
 	switch {
 	case errors.Is(err, secrets.ErrNoLease):
 		s.odmowaSekretu(ctx, hostID, nazwa, "no_lease")
@@ -109,7 +109,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		},
 	})
 	return connect.NewResponse(&agentv1.FetchSecretResponse{
-		Value: wartosc, Version: uint32(wersja), Sha256: secrets.Odcisk(wartosc),
+		Value: wartosc, Version: uint32(wersja), Sha256: secrets.Fingerprint(wartosc),
 	}), nil
 }
 

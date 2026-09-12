@@ -82,7 +82,7 @@ func (l *lokalny) PodpiszRelay(_ context.Context, csrPEM []byte, relayID string,
 	if len(nazwy) == 0 {
 		wydany, err = l.trust.Active().SignRelayCSR(csrPEM, relayID)
 	} else {
-		wydany, err = l.trust.Active().SignRelayCSRZNazwami(csrPEM, relayID, nazwy)
+		wydany, err = l.trust.Active().SignRelayCSRWithNames(csrPEM, relayID, nazwy)
 	}
 	if err != nil {
 		return nil, err

@@ -24,7 +24,7 @@ import (
 func poleceniaEnrollmentu(argumenty []string, wejscie io.Reader, wyjscie, bledy io.Writer) int {
 	zestaw := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	zestaw.SetOutput(bledy)
-	sciezka := zestaw.String("config", agentconfig.SciezkaDomyslna, "plik konfiguracji agenta")
+	sciezka := zestaw.String("config", agentconfig.DefaultPath, "plik konfiguracji agenta")
 	plikTokenu := zestaw.String("token-file", "", "plik z tokenem enrollmentu")
 	nazwa := zestaw.String("hostname", "", "nazwa hosta zglaszana do panelu")
 	limit := zestaw.Duration("timeout", 2*time.Minute, "limit czasu na enrollment")
@@ -32,12 +32,12 @@ func poleceniaEnrollmentu(argumenty []string, wejscie io.Reader, wyjscie, bledy 
 		return 2
 	}
 
-	cfg, err := agentconfig.Wczytaj(*sciezka)
+	cfg, err := agentconfig.Load(*sciezka)
 	if err != nil {
 		fmt.Fprintf(bledy, "config: %s\n  %v\n", *sciezka, err)
 		return 1
 	}
-	if err := cfg.SprawdzBootstrapCA(); err != nil {
+	if err := cfg.CheckBootstrapCA(); err != nil {
 		fmt.Fprintf(bledy, "bootstrap_ca_file: %v\n", err)
 		return 1
 	}

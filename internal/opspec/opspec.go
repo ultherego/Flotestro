@@ -1,8 +1,9 @@
-// Package opspec definiuje operacje typowane wspolne dla control plane,
-// agenta i helpera. Poza biblioteka standardowa siega wylacznie po pakiety
-// modulow, i tylko po ich walidacje: dzieki temu zlecenie odrzucone na hoscie
-// jest odrzucane juz przy zlecaniu, tym samym kodem i z tym samym powodem.
-// Hash planu liczy jedna implementacja po obu stronach.
+// Package opspec defines the typed operations shared by the control plane,
+// the agent and the helper. Outside the standard library it reaches only for
+// the module packages, and only for their validation: thanks to that an order
+// rejected on the host is rejected already when it is placed, by the same code
+// and with the same reason. The plan hash is computed by one implementation on
+// both sides.
 package opspec
 
 import (
@@ -34,8 +35,8 @@ import (
 	pakietymodul "github.com/ultherego/flotestro/internal/packages"
 )
 
-// ActionType jest typem operacji. Kazdy typ ma wersje kontraktu i wlasne
-// uprawnienie; nie istnieje typ "dowolne polecenie".
+// ActionType is the type of an operation. Every type has a contract version
+// and its own permission; there is no "arbitrary command" type.
 type ActionType string
 
 const (
@@ -44,19 +45,20 @@ const (
 	ActionUnitRestart ActionType = "unit.restart"
 	ActionUnitReload  ActionType = "unit.reload"
 	ActionReadJournal ActionType = "journal.read"
-	// Odczyt pliku logu jest ograniczony allowlista administratora hosta.
+	// Reading a log file is limited by the host administrator's allowlist.
 	ActionReadLogFile ActionType = "logfile.read"
-	// Podglad dziennika na zywo. Strumien jest krotkotrwaly i ograniczony
-	// z gory: czasem, tempem i liczba linii.
+	// A live view of the journal. The stream is short-lived and bounded from
+	// above: by time, by rate and by the number of lines.
 	ActionFollowJournal ActionType = "journal.follow"
 
-	// Diagnostyka procesow. Snapshot powstaje na zadanie i ma gorna granice;
-	// ciagly strumien metryk nalezy do Prometheusa, nie do panelu.
+	// Process diagnostics. A snapshot is taken on request and has an upper
+	// bound; a continuous stream of metrics belongs to Prometheus, not to the
+	// panel.
 	ActionProcessList   ActionType = "process.list"
 	ActionProcessSignal ActionType = "process.signal"
 
-	// Zadania cykliczne. Wpis zarzadzany opisuje stan docelowy, a nie
-	// polecenie do wykonania raz.
+	// Scheduled jobs. A managed entry describes the target state, not a
+	// command to run once.
 	ActionNetworkPlan         ActionType = "network.plan"
 	ActionNetworkProfileApply ActionType = "network.profile.apply"
 	ActionNetworkRouteEnsure  ActionType = "network.route.ensure"
@@ -87,38 +89,41 @@ const (
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
 	ActionSSHHostKeyRotate ActionType = "ssh.hostkey.rotate"
 
-	// Bezpieczenstwo. Skan zbiera fakty z hosta; ocena zgodnosci powstaje
-	// w panelu, bo to tam sa wersjonowane sprawdzenia. Naprawa nie jest
-	// osobna operacja na hoscie - kazda mapuje sie na typowana operacje
-	// modulu, ktory za dana rzecz odpowiada.
+	// Security. A scan collects facts from the host; the compliance verdict
+	// is formed in the panel, because that is where the checks are
+	// versioned. Remediation is not a separate host operation - each one maps
+	// onto a typed operation of the module responsible for that thing.
 	ActionSecurityScan   ActionType = "security.scan"
 	ActionSELinuxModeSet ActionType = "selinux.mode.set"
-	// Przeladowanie regul audytu jest osobna operacja, bo regula zapisana
-	// i niezaladowana nie notuje niczego, a jednostka auditd na czesci
-	// dystrybucji odmawia recznego restartu.
+	// Reloading the audit rules is a separate operation, because a rule that
+	// is written and not loaded records nothing, and the auditd unit on some
+	// distributions refuses a manual restart.
 	ActionAuditRulesReload ActionType = "security.audit.reload"
 
-	// Certyfikaty. Skan oglada wylacznie wskazane pliki: panel, ktory chodzi
-	// po calym systemie plikow, znajduje magazyn zaufania zamiast certyfikatow
-	// uslug. Klucz prywatny nie jedzie w zleceniu - payload niesie odnosnik
-	// do magazynu, a host siega po wartosc dopiero przy wykonaniu.
+	// Certificates. The scan looks only at the files it is pointed at: a
+	// panel that walks the whole filesystem finds the trust store instead of
+	// service certificates. The private key does not travel in the order -
+	// the payload carries a reference to the store, and the host reaches for
+	// the value only at execution time.
 	ActionCertificateScan ActionType = "certificate.scan"
 	ActionCertificatePlan ActionType = "certificate.plan"
-	// Rotacja urzedu jest ciagiem stanow, a nie jedna zmiana: host najpierw
-	// ufa staremu i nowemu urzedowi naraz, potem dostaje nowy certyfikat,
-	// a stary urzad znika na koncu - i tylko tam, gdzie nic go juz nie
-	// podpisuje.
+	// Rotating the authority is a sequence of states, not one change: the
+	// host first trusts the old and the new authority at once, then gets a
+	// new certificate, and the old authority disappears at the end - and only
+	// where nothing is signed by it any more.
 	ActionCertificateTrustPlan   ActionType = "certificate.trust.plan"
 	ActionCertificateTrustEnsure ActionType = "certificate.trust.ensure"
 	ActionCertificateTrustRemove ActionType = "certificate.trust.remove"
 	ActionCertificateDeploy      ActionType = "certificate.deploy"
-	// Odnowienie jest osobna operacja, bo robi je host wlasnym demonem:
-	// panel prosi certmongera o nowy certyfikat, a nie podaje mu tresci.
+	// A renewal is a separate operation, because the host does it with its
+	// own daemon: the panel asks certmonger for a new certificate instead of
+	// handing it the content.
 	ActionCertificateRenew ActionType = "certificate.renew"
 
-	// Czas i synchronizacja. Test nie zmienia hosta, ale wychodzi z niego
-	// zapytaniem do serwera czasu - i to on odpowiada na pytanie, czy nowe
-	// zrodlo w ogole dziala, zanim panel odbierze hostowi dzialajace.
+	// Time and synchronisation. The test changes nothing on the host, but it
+	// leaves it with a query to the time server - and it is the server that
+	// answers whether the new source works at all, before the panel takes a
+	// working one away from the host.
 	ActionTimeSyncTest    ActionType = "time.sync.test"
 	ActionTimePlan        ActionType = "time.plan"
 	ActionTimeConfigApply ActionType = "time.config.apply"
@@ -141,42 +146,46 @@ const (
 	ActionScheduleRemove  ActionType = "schedule.remove"
 	ActionScheduleRunNow  ActionType = "schedule.run_now"
 
-	// Pelna lista pakietow jest pobierana na zadanie, a nie w kazdym cyklu
-	// inwentarza: to kilkaset kilobajtow na host, a zmienia sie rzadko.
-	// Inwentarz niesie sam odcisk listy, wiec panel wie, kiedy jego kopia
-	// przestala opisywac host.
+	// The full package list is fetched on request rather than in every
+	// inventory cycle: it is a few hundred kilobytes per host and changes
+	// rarely. The inventory carries the digest of the list itself, so the
+	// panel knows when its copy stopped describing the host.
 	ActionPackageList ActionType = "packages.list"
 
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
-	// Naprawa odblokowuje operacje pakietowe na hoscie: ustawia odpowiedzi
-	// operatora na pytania konfiguracyjne i konczy konfiguracje pakietow.
+	// A repair unblocks package operations on the host: it sets the
+	// operator's answers to configuration questions and finishes configuring
+	// the packages.
 	ActionPackageRepair ActionType = "packages.repair"
 
-	// Pelny cykl zycia pakietow. Instalacja dokłada oprogramowanie, usuniecie
-	// je zabiera wraz z zaleznosciami, wstrzymanie zamraza wersje.
+	// The full package lifecycle. An install adds software, a removal takes
+	// it away together with its dependencies, a hold freezes the version.
 	ActionPackageInstall ActionType = "packages.install"
 	ActionPackageRemove  ActionType = "packages.remove"
 	ActionPackageHoldSet ActionType = "packages.hold.set"
-	// Zrodla pakietow. Dopisanie zrodla nie instaluje niczego dzisiaj, ale
-	// rozstrzyga, czyje pakiety host przyjmie jutro - razem z ich skryptami,
-	// ktore chodza jako root. Stad ryzyko krytyczne i wlasne uprawnienie.
+	// Package sources. Adding a source installs nothing today, but it decides
+	// whose packages the host will accept tomorrow - together with their
+	// scripts, which run as root. Hence the critical risk and its own
+	// permission.
 	ActionRepositorySet ActionType = "packages.repository.set"
-	// ActionAgentUpgrade wymienia samego agenta. Zwykla aktualizacja
-	// pakietow celowo omija flotestro-agent - inaczej host odcinalby sie
-	// od zarzadzania w srodku transakcji, ktora sam wykonuje. Ta operacja
-	// robi to swiadomie i jest rozliczana inaczej: sukcesem jest powrot
-	// hosta z oczekiwana wersja, a nie kod wyjscia menedzera pakietow.
+	// ActionAgentUpgrade replaces the agent itself. An ordinary package
+	// upgrade deliberately skips flotestro-agent - otherwise the host would
+	// cut itself off from management in the middle of a transaction it is
+	// running. This operation does it knowingly and is settled differently:
+	// success is the host coming back with the expected version, not the exit
+	// code of the package manager.
 	ActionAgentUpgrade ActionType = "agent.upgrade"
 
-	// Backup. Dane nie plyna przez panel: host rozmawia z repozytorium wprost,
-	// a panel widzi metadane - kiedy kopia sie udala, ile zajmuje i co
-	// obejmuje. Odtworzenie jest osobna operacja o najwyzszym ryzyku, bo
-	// rozpakowuje stary stan na dzialajacy system.
-	// Sonda odpowiada na pytanie, ktorego monitoring centralny nie umie
-	// zadac: co widzi ten host. Wyciszenie alertu nie jest operacja na
-	// hoscie i nie idzie ta droga - zmienia to, co o hoscie sadzi system
-	// alertowy, a nie sam host.
+	// Backup. The data does not flow through the panel: the host talks to the
+	// repository directly, and the panel sees metadata - when a copy
+	// succeeded, how much room it takes and what it covers. A restore is a
+	// separate operation of the highest risk, because it unpacks old state
+	// onto a running system.
+	// A probe answers the question central monitoring cannot ask: what does
+	// this host see. Silencing an alert is not an operation on the host and
+	// does not go this way - it changes what the alerting system thinks about
+	// the host, not the host itself.
 	ActionMonitoringProbe ActionType = "monitoring.probe.run"
 
 	ActionBackupPlan    ActionType = "backup.plan"
@@ -185,14 +194,15 @@ const (
 	ActionBackupRestore ActionType = "backup.restore"
 
 	ActionSystemReboot ActionType = "system.reboot"
-	// Wylaczenie hosta jest operacja, z ktorej panel nie potrafi go wyprowadzic:
-	// wlaczenie wymaga dostepu poza pasmem. Dlatego jest osobna operacja
-	// z wlasnym uprawnieniem, a nie trybem restartu.
+	// Shutting a host down is an operation the panel cannot bring it back
+	// from: powering it on needs out-of-band access. That is why it is a
+	// separate operation with its own permission rather than a mode of
+	// reboot.
 	ActionSystemShutdown ActionType = "system.shutdown"
 	ActionUnitStatus     ActionType = "unit.status"
-	// Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
-	// a nie jego stan teraz. Jednostka wlaczona i dzialajaca to dwie rozne
-	// rzeczy, wiec i operacje sa dwie.
+	// Enabling and masking change what the host will do after a reboot, not
+	// its state now. A unit that is enabled and a unit that is running are
+	// two different things, so there are two operations.
 	ActionUnitEnableSet ActionType = "unit.enable.set"
 	ActionUnitMaskSet   ActionType = "unit.mask.set"
 
@@ -204,17 +214,17 @@ const (
 	ActionLocalUserUnlock ActionType = "localuser.unlock"
 	ActionLocalSSHKeysSet ActionType = "localuser.sshkeys.set"
 
-	// ActionInventoryRefresh zamawia ponowny odczyt inwentarza.
+	// ActionInventoryRefresh orders the inventory to be read again.
 	//
-	// Panel widzi obraz sprzed ostatniego cyklu, a decyzja przed kampania
-	// albo po recznej zmianie na hoscie musi opierac sie na stanie z tej
-	// chwili. Operacja niczego nie zmienia i dlatego jest tania - ale nie
-	// jest darmowa: odczyt uruchamia na hoscie podprocesy, wiec ma wlasne
-	// uprawnienie i wlasny limit czasu.
+	// The panel sees the picture from the last cycle, and a decision taken
+	// before a campaign or after a manual change on the host has to rest on
+	// the state of this moment. The operation changes nothing and is
+	// therefore cheap - but not free: the read starts subprocesses on the
+	// host, so it has its own permission and its own time limit.
 	ActionInventoryRefresh ActionType = "inventory.refresh"
 
-	// Odczyt stanu silnika kontenerow. Pelne listy sa pobierane na zadanie
-	// operatora; inventory niesie samo podsumowanie.
+	// Reading the state of the container engine. Full lists are fetched at
+	// the operator's request; the inventory carries only the summary.
 	ActionDockerRead ActionType = "docker.read"
 
 	ActionDockerStart   ActionType = "docker.container.start"
@@ -222,46 +232,48 @@ const (
 	ActionDockerRestart ActionType = "docker.container.restart"
 	ActionDockerRemove  ActionType = "docker.container.remove"
 	ActionDockerPull    ActionType = "docker.image.pull"
-	// Sprzatanie usuwa wskazane obiekty, a nie wszystko, co pasuje do filtru.
+	// Pruning removes the objects it is pointed at, not everything matching a
+	// filter.
 	ActionDockerPrune ActionType = "docker.prune"
-	// ActionDockerEvents czyta dziennik zdarzen silnika. Osobna operacja,
-	// bo odpowiada na inne pytanie niz odczyt stanu: nie "jak jest", tylko
-	// "co sie tu stalo".
+	// ActionDockerEvents reads the engine's event journal. A separate
+	// operation, because it answers a different question from a state read:
+	// not "how are things", but "what happened here".
 	ActionDockerEvents ActionType = "docker.events"
 
-	// Plan projektu Compose liczy roznice miedzy stanem hosta a manifestem.
+	// The plan of a Compose project computes the difference between the
+	// host's state and the manifest.
 	ActionComposePlan ActionType = "docker.compose.plan"
-	// Wdrozenie projektu jest zwiazane z konkretnym planem.
+	// Deploying a project is bound to one specific plan.
 	ActionComposeDeploy ActionType = "docker.compose.deploy"
 )
 
-// ActionVersion jest wersja kontraktu payloadu. Zmiana znaczenia pol wymaga
-// podniesienia wersji, a nie cichej reinterpretacji.
+// ActionVersion is the version of the payload contract. Changing the meaning
+// of a field requires raising the version, not a silent reinterpretation.
 const ActionVersion = 1
 
-// RiskLevel opisuje, czym grozi operacja. Poziom nie jest etykieta w
-// interfejsie: decyduje o swiezosci uwierzytelnienia, o potwierdzeniu celu
-// i o domyslnej polityce kampanii.
+// RiskLevel describes what an operation threatens. The level is not a label
+// in the interface: it decides the freshness of authentication, the target
+// confirmation and the default campaign policy.
 type RiskLevel string
 
 const (
-	// RiskLow to odczyt i planowanie: niczego nie zmienia.
+	// RiskLow is a read or a plan: it changes nothing.
 	RiskLow RiskLevel = "low"
-	// RiskMedium zmienia stan odwracalnie i lokalnie.
+	// RiskMedium changes state reversibly and locally.
 	RiskMedium RiskLevel = "medium"
-	// RiskHigh przerywa usluge albo zmienia zawartosc systemu.
+	// RiskHigh interrupts a service or changes the content of the system.
 	RiskHigh RiskLevel = "high"
-	// RiskCritical moze odciac dostep do hosta albo zmienic jego tozsamosc.
-	// Wymaga swiezego uwierzytelnienia operatora.
+	// RiskCritical can cut off access to the host or change its identity.
+	// It requires fresh operator authentication.
 	RiskCritical RiskLevel = "critical"
-	// RiskDestructive niszczy dane nieodwracalnie. Wymaga wpisania nazwy celu
-	// i domyslnie nie dziala masowo.
+	// RiskDestructive destroys data irreversibly. It requires typing the
+	// target name and by default does not run in bulk.
 	RiskDestructive RiskLevel = "destructive"
 )
 
-// LockClass nazywa zasob hosta, ktorego operacja uzywa na wylacznosc.
-// Jednoczesnie moze dzialac jedna mutacja w danej klasie: dwie transakcje
-// pakietowe na tej samej bazie moga ja uszkodzic.
+// LockClass names the host resource an operation uses exclusively. Only one
+// mutation in a given class can run at a time: two package transactions on
+// the same database can damage it.
 const (
 	LockNone       = ""
 	LockPackages   = "packages"
@@ -269,49 +281,53 @@ const (
 	LockContainers = "containers"
 	LockIdentity   = "identity"
 	LockAccounts   = "accounts"
-	// Siec jest jednym zasobem hosta: dwie rownolegle zmiany konfiguracji
-	// zostawilyby stan, ktorego zaden z planow wycofania nie opisuje.
+	// The network is one host resource: two parallel configuration changes
+	// would leave a state that neither rollback plan describes.
 	LockNetwork = "network"
-	// Przestrzen dyskowa jest jednym zasobem: dwie rownolegle operacje na
-	// tym samym filesystemie moga go uszkodzic.
+	// Storage is one resource: two parallel operations on the same
+	// filesystem can damage it.
 	LockStorage = "storage"
-	// Repozytorium backupu jest jednym zasobem: narzedzia trzymaja na nim
-	// wlasna blokade, a druga operacja i tak czekalaby pod nia - tyle ze bez
-	// wiedzy panelu i do konca limitu czasu.
+	// A backup repository is one resource: the tools hold their own lock on
+	// it, and a second operation would wait under that lock anyway - only
+	// without the panel knowing, and until its time limit runs out.
 	LockBackup = "backup"
-	// Magazyn zaufania jest jeden na host, a narzedzie przeliczajace go
-	// przepisuje cala wiazke: dwie zmiany kotwic naraz daja wiazke, ktorej
-	// nie widzial ani jeden z planow.
+	// The trust store is one per host, and the tool that recomputes it
+	// rewrites the whole bundle: two anchor changes at once give a bundle
+	// neither of the plans saw.
 	LockCertificates = "certificates"
 )
 
-// CampaignMode mowi, czy i jak operacja moze dzialac na wielu hostach naraz.
+// CampaignMode says whether and how an operation may run on many hosts at
+// once.
 //
-// Kazda operacja deklaruje go jawnie, a domyslna wartoscia jest brak. Dodanie
-// nowej operacji do rejestru nie otwiera jej wiec dla calej floty: brak
-// metadanych znaczy odmowe, a nie "ten sam payload wszedzie".
+// Every operation declares it explicitly, and the default value is none.
+// Adding a new operation to the registry therefore does not open it to the
+// whole fleet: missing metadata means a refusal, not "the same payload
+// everywhere".
 type CampaignMode string
 
 const (
-	// CampaignNone oznacza operacje niedozwolona masowo. Nie jest to brak
-	// funkcji, tylko swiadoma odmowa: usuniecie pakietu, wyczyszczenie dysku
-	// albo wylaczenie hosta ma jeden cel, ktorego operator wpisuje z reki.
+	// CampaignNone marks an operation that is not allowed in bulk. This is
+	// not a missing feature but a deliberate refusal: removing a package,
+	// wiping a disk or shutting a host down has one target, which the
+	// operator types by hand.
 	CampaignNone CampaignMode = "none"
-	// CampaignSamePayload oznacza operacje, ktorej intencja jest przenosna:
-	// ten sam payload znaczy to samo na kazdym hoscie, a preflight i
-	// weryfikacja i tak dzieja sie osobno.
+	// CampaignSamePayload marks an operation whose intent carries over: the
+	// same payload means the same thing on every host, and preflight and
+	// verification happen separately anyway.
 	CampaignSamePayload CampaignMode = "same_payload"
-	// CampaignPerHostPlan oznacza wspolny stan docelowy, z ktorego kazdy host
-	// wylicza wlasny plan. Dwa hosty wybrane tym samym zamowieniem prawie
-	// nigdy nie maja tego samego diffu, wiec zatwierdzenie musi dotyczyc
-	// zestawu planow, a nie jednego payloadu.
+	// CampaignPerHostPlan marks a shared target state from which every host
+	// computes its own plan. Two hosts picked by the same request almost
+	// never have the same diff, so the approval has to cover a set of plans
+	// rather than one payload.
 	CampaignPerHostPlan CampaignMode = "per_host_plan"
-	// CampaignSpecialized oznacza operacje z wlasna maszyna stanow: restart
-	// rozlicza sie powrotem hosta, enrollment ma wlasne etapy.
+	// CampaignSpecialized marks an operation with its own state machine: a
+	// reboot is settled by the host coming back, enrollment has its own
+	// stages.
 	CampaignSpecialized CampaignMode = "specialized"
 )
 
-// Spec jest pelnym kontraktem jednej operacji.
+// Spec is the full contract of one operation.
 type Spec struct {
 	Action         ActionType `json:"action"`
 	Version        uint32     `json:"version"`
@@ -322,16 +338,16 @@ type Spec struct {
 	DefaultTimeout int        `json:"default_timeout_seconds"`
 	MaxOutputBytes uint64     `json:"max_output_bytes"`
 	LockClass      string     `json:"lock_class,omitempty"`
-	// CampaignMode mowi, czy operacja moze dzialac masowo i na jakich
-	// zasadach. Brak deklaracji znaczy odmowe.
+	// CampaignMode says whether the operation may run in bulk and on what
+	// terms. A missing declaration means a refusal.
 	CampaignMode CampaignMode `json:"campaign_mode"`
-	// RequiresPlan oznacza operacje, ktorej nie wolno zlecic bez planu
-	// zatwierdzonego przez czlowieka. Hash planu wiaze zatwierdzenie
-	// z konkretnym diffem.
+	// RequiresPlan marks an operation that must not be ordered without a plan
+	// approved by a human. The plan hash binds the approval to one specific
+	// diff.
 	RequiresPlan bool `json:"requires_plan"`
 }
 
-// Describe zwraca pelny kontrakt operacji.
+// Describe returns the full contract of an operation.
 func (a ActionType) Describe() Spec {
 	spec := actionSpecs[a]
 	return Spec{
@@ -349,46 +365,48 @@ func (a ActionType) Describe() Spec {
 	}
 }
 
-// Risk zwraca poziom ryzyka operacji.
+// Risk returns the risk level of an operation.
 func (a ActionType) Risk() RiskLevel {
 	if spec, ok := actionSpecs[a]; ok {
 		return spec.risk
 	}
-	// Nieznana operacja nie jest operacja bezpieczna. Domyslny poziom nie
-	// moze byc najnizszy tylko dlatego, ze czegos nie opisano.
+	// An unknown operation is not a safe operation. The default level cannot
+	// be the lowest one just because something went undescribed.
 	return RiskCritical
 }
 
-// LockClass zwraca klase zasobu hosta uzywanego na wylacznosc.
+// LockClass returns the class of the host resource used exclusively.
 func (a ActionType) LockClass() string {
 	return actionSpecs[a].lockClass
 }
 
-// CampaignMode zwraca tryb pracy masowej. Nieznana operacja i operacja bez
-// deklaracji dostaja odmowe: brak metadanych nie moze znaczyc zgody.
+// CampaignMode returns the bulk-operation mode. An unknown operation and an
+// operation without a declaration both get a refusal: missing metadata must
+// not mean consent.
 func (a ActionType) CampaignMode() CampaignMode {
-	if tryb, ok := trybyMasowe[a]; ok {
-		return tryb
+	if mode, ok := campaignModes[a]; ok {
+		return mode
 	}
 	return CampaignNone
 }
 
-// MaxOutputBytes ogranicza rozmiar wyniku operacji.
+// MaxOutputBytes bounds the size of an operation's result.
 func (a ActionType) MaxOutputBytes() uint64 {
 	if spec, ok := actionSpecs[a]; ok && spec.maxOutputBytes > 0 {
 		return spec.maxOutputBytes
 	}
-	return domyslnyLimitWyniku
+	return defaultOutputLimit
 }
 
-// RequiresPlan mowi, czy operacji nie wolno zlecic bez zatwierdzonego planu.
+// RequiresPlan says whether an operation must not be ordered without an
+// approved plan.
 func (a ActionType) RequiresPlan() bool {
 	return actionSpecs[a].requiresPlan
 }
 
-// RequiresFreshAuth mowi, czy operator musi potwierdzic tozsamosc tuz przed
-// zleceniem. Operacja, ktora moze odciac dostep do hosta, nie moze isc
-// z sesji sprzed godziny.
+// RequiresFreshAuth says whether the operator has to confirm their identity
+// right before ordering. An operation that can cut off access to a host must
+// not travel on an hour-old session.
 func (a ActionType) RequiresFreshAuth() bool {
 	switch a.Risk() {
 	case RiskCritical, RiskDestructive:
@@ -397,44 +415,46 @@ func (a ActionType) RequiresFreshAuth() bool {
 	return false
 }
 
-// RequiresTargetConfirmation mowi, czy operator musi wpisac nazwe celu.
-// Klikniecie nie jest wystarczajaca decyzja przy operacji nieodwracalnej.
+// RequiresTargetConfirmation says whether the operator has to type the target
+// name. A click is not decision enough for an irreversible operation.
 func (a ActionType) RequiresTargetConfirmation() bool {
-	// Wylaczenie nie niszczy danych, ale jest nieodwracalne zdalnie: nikt nie
-	// wlaczy tego hosta przez panel. Lista hostow bywa dluga i podobna, wiec
-	// nazwa celu jest tu ta sama decyzja co przy operacji niszczacej.
+	// A shutdown destroys no data, but it is irreversible remotely: nobody
+	// will power this host back on through the panel. A list of hosts is
+	// often long and full of similar names, so the target name is the same
+	// decision here as for a destructive operation.
 	if a == ActionSystemShutdown {
 		return true
 	}
 	return a.Risk() == RiskDestructive
 }
 
-// domyslnyLimitWyniku obowiazuje operacje, ktore nie podaja wlasnego.
-const domyslnyLimitWyniku = 64 << 10
+// defaultOutputLimit applies to operations that do not state their own.
+const defaultOutputLimit = 64 << 10
 
-// Known sprawdza, czy typ operacji jest obslugiwany.
+// Known checks whether the operation type is supported.
 func (a ActionType) Known() bool {
 	_, ok := actionSpecs[a]
 	return ok
 }
 
-// Mutating mowi, czy operacja zmienia stan hosta.
+// Mutating says whether the operation changes the state of the host.
 func (a ActionType) Mutating() bool {
 	spec, ok := actionSpecs[a]
 	return ok && spec.mutating
 }
 
-// RequiredCapability zwraca zdolnosc hosta, bez ktorej operacja nie ma sensu.
+// RequiredCapability returns the host capability without which the operation
+// makes no sense.
 func (a ActionType) RequiredCapability() string {
 	return actionSpecs[a].capability
 }
 
-// Permission zwraca uprawnienie wymagane do zlecenia operacji.
+// Permission returns the permission required to order the operation.
 func (a ActionType) Permission() string {
 	return actionSpecs[a].permission
 }
 
-// DefaultTimeout zwraca domyslny limit czasu wykonania w sekundach.
+// DefaultTimeout returns the default execution time limit in seconds.
 func (a ActionType) DefaultTimeout() int {
 	return actionSpecs[a].timeoutSeconds
 }
@@ -450,14 +470,14 @@ type actionSpec struct {
 	requiresPlan   bool
 }
 
-// Poziomy ryzyka i klasy blokad ida za rozdzialami 6.1 i 8 specyfikacji.
-// Ryzyko nie jest etykieta: krytyczne wymaga swiezego uwierzytelnienia,
-// niszczace dodatkowo wpisania nazwy celu. Klasa blokady mowi, ktore operacje
-// nie moga dzialac naraz na tym samym hoscie.
+// The risk levels and lock classes follow chapters 6.1 and 8 of the
+// specification. Risk is not a label: critical requires fresh
+// authentication, destructive additionally requires typing the target name.
+// The lock class says which operations must not run at once on the same host.
 var actionSpecs = map[ActionType]actionSpec{
 	ActionUnitStart: {mutating: true, capability: "systemd", permission: "unit.start",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
-	// Zatrzymanie uslugi przerywa jej dzialanie, wiec jest wyzej niz start.
+	// Stopping a service interrupts it, so it ranks higher than starting.
 	ActionUnitStop: {mutating: true, capability: "systemd", permission: "unit.stop",
 		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits},
 	ActionUnitRestart: {mutating: true, capability: "systemd", permission: "unit.restart",
@@ -466,63 +486,69 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Zalozenie wpisu cyklicznego oznacza, ze cos bedzie sie uruchamiac bez
-	// udzialu operatora - takze wtedy, gdy nikt nie patrzy.
+	// Creating a scheduled entry means something will run without the
+	// operator - including when nobody is watching.
 	ActionScheduleEnsure: {mutating: true, capability: "schedules", permission: "schedule.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
-	// Wylaczenie zostawia tresc na hoscie i jest odwracalne.
+	// Disabling leaves the content on the host and is reversible.
 	ActionScheduleDisable: {mutating: true, capability: "schedules", permission: "schedule.disable",
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionScheduleRemove: {mutating: true, capability: "schedules", permission: "schedule.remove",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
-	// Uruchomienie teraz wykonuje to samo polecenie poza harmonogramem.
+	// Running now executes the same command outside the schedule.
 	ActionScheduleRunNow: {mutating: true, capability: "schedules", permission: "schedule.run",
 		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits},
 
-	// Odczyt profili NetworkManagera przed zmiana. Plan nie dotyka hosta.
+	// Reading NetworkManager profiles before a change. The plan does not
+	// touch the host.
 	ActionNetworkPlan: {mutating: false, capability: "network", permission: "network.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Zmiana profilu adresowego jest zmiana galezi, na ktorej siedzi panel:
-	// zle ustawiony adres odcina host i zaden nastepny rozkaz juz nie dojdzie.
+	// Changing the address profile means changing the branch the panel sits
+	// on: a wrongly set address cuts the host off and no further order will
+	// ever arrive.
 	ActionNetworkProfileApply: {mutating: true, capability: "network.write", permission: "network.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
-	// Trasy sa osobnym uprawnieniem: zmiana trasy domyslnej przekierowuje
-	// caly ruch hosta, nie tylko jego adres.
+	// Routes are a separate permission: changing the default route redirects
+	// all of the host's traffic, not just its address.
 	ActionNetworkRouteEnsure: {mutating: true, capability: "network.write", permission: "network.route.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
-	// MTU ma wlasne uprawnienie, bo jest zmiana o innej wadze niz przepisanie
-	// adresu: zle MTU psuje duze pakiety, zly adres odcina host.
+	// MTU has its own permission, because it is a change of a different
+	// weight from rewriting an address: a wrong MTU breaks large packets, a
+	// wrong address cuts the host off.
 	ActionNetworkMTUSet: {mutating: true, capability: "network.write", permission: "network.mtu.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
-	// Wycofanie na zadanie wraca do stanu sprzed zmiany, wiec samo w sobie
-	// jest zmiana sieci - i tak samo ryzykowna jak ta, ktora cofa.
+	// A rollback on request returns to the state from before the change, so
+	// it is itself a network change - and just as risky as the one it undoes.
 	ActionNetworkRollback: {mutating: true, capability: "network.write", permission: "network.rollback",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
 
-	// Test rozwiazywania nazw pyta z hosta, bo odpowiedz panelu nie mowi nic
-	// o tym, co zobaczy host. Zapytanie niczego nie zmienia.
+	// The name resolution test asks from the host, because the panel's answer
+	// says nothing about what the host will see. The query changes nothing.
 	ActionDNSResolveTest: {mutating: false, capability: "dns", permission: "dns.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
-	// Plan resolvera: roznica miedzy profilem zastanym a zadanym. Nie dotyka
-	// hosta, wiec nie ma wycofania ani klasy blokady.
+	// The resolver plan: the difference between the profile found and the one
+	// requested. It does not touch the host, so it has no rollback and no
+	// lock class.
 	ActionDNSPlan: {mutating: false, capability: "dns", permission: "dns.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
-	// Zly resolver odcina host od katalogu i od Kerberosa, a wiec od
-	// logowania - skutek jest szerszy niz sama nazwa, ktorej nie rozwiaze.
+	// A bad resolver cuts the host off from the directory and from Kerberos,
+	// and therefore from logging in - the effect is wider than the one name
+	// that will not resolve.
 	ActionDNSHostApply: {mutating: true, capability: "dns.write", permission: "dns.host.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 
-	// Odczyt zestawu regul przed zmiana. Plan nie dotyka hosta.
+	// Reading the ruleset before a change. The plan does not touch the host.
 	ActionFirewallPlan: {mutating: false, capability: "firewall", permission: "firewall.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 512 << 10},
-	// Zla regula odcina panel od hosta i nie ma czym cofnac zmiany, wiec
-	// kazda zmiana zapory jest operacja najwyzszego ryzyka.
+	// A bad rule cuts the panel off from the host and there is nothing left
+	// to undo the change with, so every firewall change is an operation of
+	// the highest risk.
 	ActionFirewallRuleEnsure: {mutating: true, capability: "firewall.write", permission: "firewall.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 	ActionFirewallRuleRemove: {mutating: true, capability: "firewall.write", permission: "firewall.rule.remove",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
-	// Strefy firewalld opisuja dostep inaczej niz reguly: pytanie brzmi
-	// "co jest otwarte", a nie "ktora regula pasuje pierwsza".
+	// firewalld zones describe access differently from rules: the question is
+	// "what is open", not "which rule matches first".
 	ActionFirewallZonePort: {mutating: true, capability: "firewall.zones", permission: "firewall.zone.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 	ActionFirewallZoneService: {mutating: true, capability: "firewall.zones", permission: "firewall.service.write",
@@ -530,324 +556,346 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionFirewallRulesetRestore: {mutating: true, capability: "firewall.write", permission: "firewall.restore",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
 
-	// Odczyt topologii na zadanie. Inwentarz i tak ja niesie, ale przed
-	// zmiana operator chce stanu z tej chwili, a nie sprzed cyklu.
+	// Reading the topology on request. The inventory carries it anyway, but
+	// before a change the operator wants the state of this moment, not the
+	// one from the last cycle.
 	ActionStoragePlan: {mutating: false, capability: "storage", permission: "storage.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
-	// Montowanie jest odwracalne, ale wpis w fstab decyduje o tym, czy host
-	// wstanie po restarcie tak, jak stoi teraz.
+	// Mounting is reversible, but the fstab entry decides whether the host
+	// comes back from a reboot the way it stands now.
 	ActionMountEnsure: {mutating: true, capability: "storage", permission: "storage.mount.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage},
 	ActionMountRemove: {mutating: true, capability: "storage", permission: "storage.mount.remove",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage},
-	// Sprawdzenie filesystemu trwa dlugo i wymaga, zeby nikt go nie uzywal.
+	// A filesystem check takes long and requires that nobody is using it.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
 		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage},
 
-	// Rozszerzenie wolumenu i filesystemu jest odwracalne tylko w teorii:
-	// zmniejszenie wymaga zejscia z danymi ponizej granicy, ktorej nikt nie
-	// planowal. Dlatego ryzyko krytyczne, mimo ze nic sie nie kasuje.
+	// Extending a volume and a filesystem is reversible only in theory:
+	// shrinking requires getting the data below a boundary nobody planned
+	// for. Hence the critical risk, even though nothing is deleted.
 	ActionLVMExtend: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.write",
 		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockStorage},
 	ActionFilesystemResize: {mutating: true, capability: "storage", permission: "storage.filesystem.write",
 		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockStorage},
-	// Formatowanie i czyszczenie niszcza dane nieodwracalnie: wymagaja
-	// swiezego uwierzytelnienia, wpisania nazwy celu i zgody dwoch osob.
+	// Formatting and wiping destroy data irreversibly: they require fresh
+	// authentication, typing the target name and the consent of two people.
 	ActionFilesystemCreate: {mutating: true, capability: "storage", permission: "storage.destructive",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
 	ActionDiskWipe: {mutating: true, capability: "storage", permission: "storage.wipe",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
 
-	// Odczyt konfiguracji sshd przed zmiana. Plan nie dotyka hosta.
+	// Reading the sshd configuration before a change. The plan does not touch
+	// the host.
 	ActionSSHConfigPlan: {mutating: false, capability: "sshd", permission: "ssh.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 128 << 10},
-	// Zla konfiguracja sshd odcina administracje hosta i nie ma czym jej
-	// naprawic zdalnie - tak samo jak zla regula zapory.
+	// A bad sshd configuration cuts off administration of the host and there
+	// is nothing to fix it with remotely - exactly like a bad firewall rule.
 	ActionSSHConfigApply: {mutating: true, capability: "sshd", permission: "ssh.config.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
-	// Wymiana klucza hosta zmienia jego tozsamosc widziana przez wszystkich
-	// klientow: kazdy zobaczy ostrzezenie known_hosts, a automatyzacja oparta
-	// o odcisk przestanie dzialac.
+	// Replacing the host key changes the identity every client sees: everyone
+	// gets a known_hosts warning, and automation based on the fingerprint
+	// stops working.
 	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
 
-	// Skan nie zmienia hosta, ale zbiera material rozpoznawczy: liste tego,
-	// czym host wystaje na zewnatrz, wraz z wlascicielami gniazd. Dlatego
-	// wyzej niz zwykly odczyt i z wlasnym uprawnieniem.
+	// The scan does not change the host, but it collects reconnaissance
+	// material: a list of what the host exposes to the outside, together with
+	// the owners of the sockets. Hence higher than an ordinary read and with
+	// its own permission.
 	ActionSecurityScan: {mutating: false, capability: "security", permission: "security.scan",
 		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 512 << 10},
-	// Przelaczenie w permissive zdejmuje ochrone z calego hosta i robi to od
-	// reki. Zmiana jest odwracalna, ale w miedzyczasie nie chroni nic.
+	// Switching to permissive takes protection off the whole host and does it
+	// immediately. The change is reversible, but in the meantime it protects
+	// nothing.
 	ActionSELinuxModeSet: {mutating: true, capability: "security.mac", permission: "security.mac.write",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
-	// Przeladowanie regul audytu zmienia to, co host notuje. Jest odwracalne
-	// i lokalne, ale nie jest odczytem.
+	// Reloading the audit rules changes what the host records. It is
+	// reversible and local, but it is not a read.
 	ActionAuditRulesReload: {mutating: true, capability: "security.audit", permission: "security.audit.reload",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
 
-	// Skan oglada wskazane pliki i nie zmienia hosta. Wynik niesie terminy
-	// i nazwy, ktore certyfikat i tak pokazuje kazdemu, kto sie z usluga
-	// polaczy - a klucza prywatnego nie dotyka.
+	// The scan looks at the files it is pointed at and does not change the
+	// host. The result carries dates and names that the certificate shows to
+	// anyone connecting to the service anyway - and it does not touch the
+	// private key.
 	ActionCertificateScan: {mutating: false, capability: "certificates", permission: "certificate.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Wdrozenie podmienia tozsamosc, ktora usluga pokazuje swiatu, i konczy
-	// sie przeladowaniem tej uslugi. Zly material zatrzymuje usluge, a zle
-	// prawa klucza oddaja ja kazdemu na hoscie - stad ryzyko krytyczne.
-	// Plan wdrozenia: roznica miedzy certyfikatem zastanym a zamowionym.
-	// Nie dotyka hosta i nie siega po klucz prywatny.
+	// A deployment replaces the identity a service shows to the world and
+	// ends with reloading that service. Bad material stops the service, and
+	// bad key permissions hand it to everyone on the host - hence the
+	// critical risk.
+	// The deployment plan: the difference between the certificate found and
+	// the one ordered. It does not touch the host and does not reach for the
+	// private key.
 	ActionCertificatePlan: {mutating: false, capability: "certificates", permission: "certificate.plan",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
 	ActionCertificateTrustPlan: {mutating: false, capability: "certificates", permission: "certificate.trust.plan",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
-	// Zaufanie do urzedu jest decyzja szersza niz jeden plik: od tej chwili
-	// host przyjmuje kazdy certyfikat, ktory ten urzad podpisze.
+	// Trusting an authority is a decision wider than one file: from that
+	// moment the host accepts every certificate this authority signs.
 	ActionCertificateTrustEnsure: {mutating: true, capability: "certificates", permission: "certificate.trust.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates},
-	// Wycofanie zaufania zrywa polaczenia, ktorych nikt nie zmienial, jesli
-	// urzad nadal cokolwiek podpisuje. Host sprawdza to u siebie.
+	// Withdrawing trust breaks connections nobody changed, if the authority
+	// still signs anything. The host checks that at its own end.
 	ActionCertificateTrustRemove: {mutating: true, capability: "certificates", permission: "certificate.trust.remove",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates},
 	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
-	// Odnowienie konczy sie tak samo jak wdrozenie: nowym plikiem i uslugą,
-	// ktora go czyta. Robi je demon hosta, ale skutek jest ten sam.
+	// A renewal ends the same way a deployment does: with a new file and a
+	// service that reads it. The host's daemon does it, but the effect is the
+	// same.
 	ActionCertificateRenew: {mutating: true, capability: "certificates.renew", permission: "certificate.renew",
 		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockUnits},
 
-	// Test synchronizacji nie zmienia hosta, ale wysyla z niego pakiety do
-	// wskazanych serwerow: to jedyny sposob, zeby powiedziec cos o serwerze,
-	// ktorego host jeszcze nie uzywa.
+	// The synchronisation test does not change the host, but it sends packets
+	// from it to the named servers: that is the only way to say anything
+	// about a server the host is not using yet.
 	ActionTimeSyncTest: {mutating: false, capability: "time", permission: "time.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 128 << 10},
-	// Plan zrodel czasu: roznica miedzy plikiem panelu a zamowieniem, wraz
-	// z tym, czy demon zostanie zrestartowany. Nie dotyka hosta.
+	// The time-source plan: the difference between the panel's file and the
+	// order, together with whether the daemon will be restarted. It does not
+	// touch the host.
 	ActionTimePlan: {mutating: false, capability: "time", permission: "time.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Zmiana zrodel czasu potrafi przestawic zegar skokiem, a wtedy bazy
-	// danych, tokeny i certyfikaty widza czas, ktory sie cofnal. Blokada
-	// jednostek jest tu potrzebna, bo zmiana konczy sie restartem demona.
+	// Changing the time sources can step the clock, and then databases,
+	// tokens and certificates see time that went backwards. The unit lock is
+	// needed here because the change ends with restarting the daemon.
 	ActionTimeConfigApply: {mutating: true, capability: "time", permission: "time.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockUnits},
-	// Strefa zmienia to, co host pokazuje ludziom i pisze do dziennika;
-	// nie zmienia chwili, w ktorej host zyje.
+	// The timezone changes what the host shows to people and writes to the
+	// journal; it does not change the moment the host lives in.
 	ActionTimezoneSet: {mutating: true, capability: "time", permission: "time.timezone.write",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockNone},
 
-	// Odczyt ustawien jadra. Profil plus klucze wskazane w zleceniu; caly
-	// /proc/sys ma kilka tysiecy pozycji i jego enumeracja nie odpowiada
-	// na zadne pytanie.
+	// Reading kernel settings. The profile plus the keys named in the order;
+	// the whole of /proc/sys has a few thousand entries and enumerating it
+	// answers no question at all.
 	ActionSysctlPlan: {mutating: false, capability: "kernel", permission: "kernel.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Ustawienie jadra zmienia zachowanie calego hosta, ale da sie je cofnac
-	// tak samo, jak zostalo ustawione.
+	// A kernel setting changes the behaviour of the whole host, but it can be
+	// undone the same way it was set.
 	ActionSysctlEnsure: {mutating: true, capability: "kernel", permission: "kernel.sysctl.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
 	ActionKernelModuleLoad: {mutating: true, capability: "kernel", permission: "kernel.module.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
-	// Plan blokady modulu: roznica miedzy blokada zastana a zadana. Nie
-	// dotyka hosta.
+	// The module blacklist plan: the difference between the blacklist found
+	// and the one requested. It does not touch the host.
 	ActionKernelModulePlan: {mutating: false, capability: "kernel", permission: "kernel.module.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Blokada modulu dziala dopiero po restarcie, a dla modulow z initramfs
-	// takze po jego odbudowie: skutek ujawnia sie wtedy, gdy host wstaje.
+	// Blacklisting a module takes effect only after a reboot, and for modules
+	// from the initramfs also after it is rebuilt: the effect shows up when
+	// the host comes back.
 	ActionKernelModuleBlacklist: {mutating: true, capability: "kernel", permission: "kernel.module.blacklist",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNone},
 
-	// Odczyt pliku konfiguracyjnego siega po tresc, ktora bywa wrazliwa,
-	// nawet gdy sam plik nie jest sekretem: adresy, nazwy kont, topologia.
+	// Reading a configuration file reaches for content that is often
+	// sensitive even when the file itself is not a secret: addresses, account
+	// names, topology.
 	ActionFileRead: {mutating: false, capability: "files.managed", permission: "file.read",
 		timeoutSeconds: 60, risk: RiskHigh, maxOutputBytes: 1 << 20},
 	ActionFilePlan: {mutating: false, capability: "files.managed", permission: "file.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Zapis pliku konfiguracyjnego zmienia zachowanie uslugi po jej
-	// przeladowaniu - takze wtedy, gdy nikt tego nie planowal.
+	// Writing a configuration file changes the behaviour of a service once it
+	// is reloaded - including when nobody planned for that.
 	ActionFileEnsure: {mutating: true, capability: "files.managed", permission: "file.write",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
 	ActionFileRemove: {mutating: true, capability: "files.managed", permission: "file.remove",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
-	// Powrot do wczesniejszej wersji jest zapisem tresci, ktora kiedys juz
-	// na hoscie byla - ale to nadal zapis.
+	// Going back to an earlier version is a write of content that was once on
+	// the host - but it is still a write.
 	ActionFileRollback: {mutating: true, capability: "files.managed", permission: "file.rollback",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
-	// Wyslanie sygnalu zatrzymuje czyjas prace: sygnal nie ma stanu przed
-	// i po, ktory dalo by sie cofnac.
+	// Sending a signal stops somebody's work: a signal has no before and
+	// after state that could be undone.
 	ActionProcessSignal: {mutating: true, capability: "", permission: "process.signal",
 		timeoutSeconds: 30, risk: RiskHigh},
-	// Podglad na zywo trzyma na hoscie proces przez caly czas trwania, wiec
-	// jest wyzej niz jednorazowy odczyt i ma wlasne uprawnienie.
+	// A live view keeps a process on the host for the whole time it lasts, so
+	// it ranks higher than a one-off read and has its own permission.
 	ActionFollowJournal: {mutating: false, capability: "journald", permission: "journal.follow",
 		timeoutSeconds: 300, risk: RiskMedium, maxOutputBytes: 1 << 20},
-	// Odczyt pliku siega poza dziennik systemowy, wiec ma wyzsze ryzyko
-	// i wlasne uprawnienie: allowlista bywa szeroka, a log aplikacji miewa
-	// w sobie dane, ktorych dziennik nie ma.
+	// Reading a file reaches beyond the system journal, so it carries a
+	// higher risk and its own permission: the allowlist is sometimes wide,
+	// and an application log sometimes holds data the journal does not.
 	ActionReadLogFile: {mutating: false, capability: "", permission: "logfile.read",
 		timeoutSeconds: 60, risk: RiskMedium, maxOutputBytes: 1 << 20},
 
-	// Planowanie nie zmienia stanu systemu, ale odswiezenie metadanych juz tak,
-	// wiec plan tez ma wlasne uprawnienie.
-	// Odczyt listy nie zmienia hosta i nie wymaga roota: baza dpkg i baza RPM
-	// sa czytelne dla wszystkich. Limit wyniku jest wysoki, bo lista tysiaca
-	// pakietow to jej naturalny rozmiar.
+	// Planning does not change the state of the system, but refreshing the
+	// metadata does, so the plan has its own permission too.
+	// Reading the list does not change the host and does not need root: the
+	// dpkg database and the RPM database are readable by everyone. The output
+	// limit is high, because a list of a thousand packages is its natural
+	// size.
 	ActionPackageList: {mutating: false, capability: "packages", permission: "packages.read",
 		timeoutSeconds: 300, risk: RiskLow, maxOutputBytes: 8 << 20},
 
 	ActionPackagePlan: {mutating: false, capability: "packages", permission: "packages.plan",
 		timeoutSeconds: 300, risk: RiskLow, lockClass: LockPackages},
-	// Transakcja pakietowa jest najbardziej ryzykowna operacja w systemie.
+	// A package transaction is the riskiest operation in the system.
 	ActionPackageUpgrade: {mutating: true, capability: "packages", permission: "packages.upgrade",
 		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
 	ActionAgentUpgrade: {mutating: true, capability: "packages", permission: "agent.upgrade",
 		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages},
 
-	// Naprawa zmienia stan hosta i moze dotyczyc pakietow o duzym znaczeniu,
-	// z bootloaderem wlacznie, wiec ma wlasne uprawnienie i wlasny timeout.
+	// A repair changes the state of the host and can touch packages of great
+	// importance, the bootloader included, so it has its own permission and
+	// its own timeout.
 	//
-	// Wymaganie jest wezsze niz sama obecnosc menedzera pakietow: naprawa
-	// odpowiada na pytania debconfa i istnieje tylko dla apta. Host, ktory jej
-	// nie ma, ma to powiedziec przy zlecaniu, a nie po dostarczeniu zadania.
+	// The requirement is narrower than the mere presence of a package
+	// manager: a repair answers debconf questions and exists only for apt. A
+	// host that does not have it has to say so when the operation is ordered,
+	// not after the task has been delivered.
 	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair",
 		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockPackages},
-	// Instalacja dokłada na host oprogramowanie, ktore zaraz zacznie dzialac.
+	// An install adds software to the host that will start running right
+	// away.
 	ActionPackageInstall: {mutating: true, capability: "packages", permission: "packages.install",
 		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
-	// Usuniecie zabiera pakiet wraz z zaleznymi i nie da sie go cofnac
-	// odtworzeniem stanu: to, co zniknelo, trzeba pobrac na nowo.
+	// A removal takes the package away together with everything that depends
+	// on it, and it cannot be undone by restoring state: what disappeared has
+	// to be downloaded again.
 	ActionPackageRemove: {mutating: true, capability: "packages", permission: "packages.remove",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockPackages, requiresPlan: true},
-	// Wstrzymanie zamraza wersje pakietu. Jest odwracalne i lokalne, ale
-	// wstrzymany pakiet nie dostanie takze poprawek bezpieczenstwa.
+	// A hold freezes the package version. It is reversible and local, but a
+	// held package will not get security fixes either.
 	ActionPackageHoldSet: {mutating: true, capability: "packages", permission: "packages.hold.write",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages},
-	// Restart jest osobna, zatwierdzana faza kampanii, a nie efektem ubocznym
-	// aktualizacji. Odciecie hosta na czas restartu czyni go krytycznym.
-	// Sonda nie zmienia hosta, ale wychodzi z niego polaczeniem do wskazanej
-	// uslugi - i to jest jej cala wartosc: mowi, co widzi ten host, a nie
-	// co widzi monitoring z innego miejsca sieci.
+	// A reboot is a separate, approved campaign phase, not a side effect of
+	// an upgrade. Cutting the host off for the duration of the reboot makes
+	// it critical.
+	// A probe does not change the host, but it leaves it with a connection to
+	// the named service - and that is its whole value: it says what this host
+	// sees, not what monitoring sees from another place in the network.
 	ActionMonitoringProbe: {mutating: false, capability: "monitoring", permission: "monitoring.probe",
 		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 64 << 10},
 
-	// Plan czyta repozytorium backupu: liste kopii i ich rozmiar. Nie zmienia
-	// ani hosta, ani repozytorium, ale wymaga poswiadczen - repozytorium
-	// backupu jest zaszyfrowane i nie odpowiada nikomu bez hasla.
+	// The plan reads the backup repository: the list of copies and their
+	// size. It changes neither the host nor the repository, but it needs
+	// credentials - a backup repository is encrypted and answers nobody
+	// without a password.
 	ActionBackupPlan: {mutating: false, capability: "backup", permission: "backup.read",
 		timeoutSeconds: 600, risk: RiskLow, lockClass: LockBackup, maxOutputBytes: 512 << 10},
-	// Kopia czyta caly wskazany zakres hosta i wysyla go do repozytorium.
-	// Nie zmienia hosta, ale kosztuje jego dysk, procesor i lacze - i trwa.
+	// A copy reads the whole named range of the host and sends it to the
+	// repository. It does not change the host, but it costs its disk, its CPU
+	// and its link - and it takes time.
 	ActionBackupRun: {mutating: true, capability: "backup", permission: "backup.run",
 		timeoutSeconds: 7200, risk: RiskHigh, lockClass: LockBackup, maxOutputBytes: 512 << 10},
-	// Weryfikacja czyta repozytorium i nie zmienia hosta; z odczytem danych
-	// kosztuje tyle, co odtworzenie czesci kopii.
+	// Verification reads the repository and does not change the host; with
+	// the data read it costs as much as restoring part of a copy.
 	ActionBackupVerify: {mutating: true, capability: "backup", permission: "backup.verify",
 		timeoutSeconds: 3600, risk: RiskMedium, lockClass: LockBackup, maxOutputBytes: 512 << 10},
-	// Odtworzenie rozpakowuje stary stan na dzialajacym systemie. Wymaga
-	// wskazania celu i planu nadpisania, a panel nie pozwala celowac w katalogi
-	// systemowe: to, co z odtworzonego katalogu wroci na miejsce, jest osobna
-	// decyzja i osobna operacja.
+	// A restore unpacks old state onto a running system. It requires naming
+	// the target and an overwrite plan, and the panel does not allow aiming
+	// at system directories: what comes back from a restored directory to its
+	// place is a separate decision and a separate operation.
 	ActionBackupRestore: {mutating: true, capability: "backup", permission: "backup.restore",
 		timeoutSeconds: 7200, risk: RiskCritical, lockClass: LockBackup, maxOutputBytes: 512 << 10},
 
-	// Zrodlo pakietow jest decyzja o zaufaniu, a nie o wersji: od tej chwili
-	// host bierze oprogramowanie takze stamtad. Blokada pakietowa jest tu
-	// konieczna, bo zapis konczy sie odswiezeniem metadanych.
+	// A package source is a decision about trust, not about a version: from
+	// that moment the host takes software from there as well. The package
+	// lock is necessary here, because the write ends with refreshing the
+	// metadata.
 	ActionRepositorySet: {mutating: true, capability: "packages", permission: "packages.repository.write",
 		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockPackages},
 
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
 		timeoutSeconds: 120, risk: RiskCritical},
-	// Wylaczenie hosta konczy sie stanem, ktorego panel nie cofnie: nikt nie
-	// wlaczy tej maszyny zdalnie. Blokada jednostek jest tu potrzebna, zeby
-	// zadna inna operacja nie zaczela sie w chwili, gdy host schodzi.
+	// Shutting a host down ends in a state the panel cannot undo: nobody will
+	// power this machine on remotely. The unit lock is needed here so that no
+	// other operation starts at the moment the host is going down.
 	ActionSystemShutdown: {mutating: true, capability: "systemd", permission: "system.shutdown",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits},
-	// Odczyt stanu jednostek jest niemutujacy i sluzy health checkom kampanii.
+	// Reading unit state is non-mutating and serves campaign health checks.
 	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
-	// Wlaczenie jednostki zmienia zachowanie hosta po kazdym nastepnym
-	// restarcie, wiec jest wyzej niz jej uruchomienie teraz.
+	// Enabling a unit changes the behaviour of the host after every following
+	// reboot, so it ranks higher than starting it now.
 	ActionUnitEnableSet: {mutating: true, capability: "systemd", permission: "unit.enable.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
-	// Zamaskowanie odbiera jednostce mozliwosc uruchomienia takze recznie
-	// i przetrwa restart hosta - to najdalej idaca zmiana w tym module.
+	// Masking takes away a unit's ability to start even manually and survives
+	// a reboot of the host - the furthest-reaching change in this module.
 	ActionUnitMaskSet: {mutating: true, capability: "systemd", permission: "unit.mask.write",
 		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockUnits},
 
-	// Dolaczenie do domeny zmienia uwierzytelnianie calego hosta.
+	// Joining a domain changes authentication for the whole host.
 	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll",
 		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity},
-	// Preflight niczego nie zmienia, wiec nie wymaga zatwierdzenia.
+	// Preflight changes nothing, so it needs no approval.
 	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockIdentity},
 
-	// Konta lokalne nie zaleza od systemd ani od katalogu: modul dziala takze
-	// tam, gdzie klient zostaje przy zwyklej autoryzacji SSH.
-	// Blokada i odblokowanie maja osobne uprawnienia: w reakcji na incydent
-	// odciecie konta bywa dozwolone tam, gdzie przywrocenie dostepu juz nie.
+	// Local accounts depend neither on systemd nor on a directory: the module
+	// works also where the customer stays with plain SSH authorisation.
+	// Locking and unlocking have separate permissions: in response to an
+	// incident, cutting an account off is sometimes allowed where restoring
+	// access is not.
 	ActionLocalUserCreate: {mutating: true, capability: "", permission: "localuser.create",
 		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockAccounts},
 	ActionLocalUserLock: {mutating: true, capability: "", permission: "localuser.lock",
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockAccounts},
-	// Przywrocenie dostepu jest zawsze powazniejsze niz jego odebranie.
+	// Restoring access is always more serious than taking it away.
 	ActionLocalUserUnlock: {mutating: true, capability: "", permission: "localuser.unlock",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
 	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
 
-	// Odczyt kontenerow niczego nie zmienia, ale potrafi byc ciezki: pelna
-	// lista obrazow na hoscie budowlanym to megabajty, wiec ma wlasna klase
-	// zasobu i wlasny limit wyniku.
-	// Odswiezenie inwentarza nie zmienia hosta i nie bierze zadnej blokady:
-	// odczyt moze isc rownolegle z operacja, ktora wlasnie trwa - najwyzej
-	// zobaczy stan w polowie zmiany, a to jest prawda o tej chwili.
+	// Reading containers changes nothing, but it can be heavy: the full list
+	// of images on a build host is megabytes, so it has its own resource
+	// class and its own output limit.
+	// Refreshing the inventory does not change the host and takes no lock: a
+	// read may run alongside an operation that is under way - at worst it
+	// will see state halfway through a change, and that is the truth about
+	// this moment.
 	ActionInventoryRefresh: {mutating: false, permission: "inventory.refresh",
 		timeoutSeconds: 300, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
 	ActionDockerRead: {mutating: false, capability: "docker", permission: "docker.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 4 << 20},
 
-	// Uruchomienie kontenera przywraca usluge; zatrzymanie ja przerywa,
-	// wiec stop i restart sa wyzej niz start.
+	// Starting a container restores a service; stopping interrupts one, so
+	// stop and restart rank higher than start.
 	ActionDockerStart: {mutating: true, capability: "docker", permission: "docker.container.start",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockContainers},
 	ActionDockerStop: {mutating: true, capability: "docker", permission: "docker.container.stop",
 		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockContainers},
 	ActionDockerRestart: {mutating: true, capability: "docker", permission: "docker.container.restart",
 		timeoutSeconds: 180, risk: RiskHigh, lockClass: LockContainers},
-	// Usuniecie kontenera jest nieodwracalne: dane spoza wolumenow gina razem
-	// z nim, wiec operator wpisuje nazwe celu, zanim operacja ruszy.
+	// Removing a container is irreversible: data outside volumes dies with
+	// it, so the operator types the target name before the operation starts.
 	ActionDockerRemove: {mutating: true, capability: "docker", permission: "docker.container.remove",
 		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockContainers},
-	// Pobranie obrazu zmienia to, co wstanie przy nastepnym uruchomieniu,
-	// ale samo w sobie nie rusza dzialajacych kontenerow.
+	// Pulling an image changes what will come up at the next start, but by
+	// itself it does not touch running containers.
 	ActionDockerPull: {mutating: true, capability: "docker", permission: "docker.image.pull",
 		timeoutSeconds: 1800, risk: RiskMedium, lockClass: LockContainers},
-	// Sprzatanie usuwa dane bezpowrotnie i domyslnie nie dziala masowo.
+	// Pruning removes data for good and by default does not run in bulk.
 	ActionDockerPrune: {mutating: true, capability: "docker", permission: "docker.prune",
 		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers},
-	// Dziennik zdarzen niczego nie zmienia i nie bierze blokady kontenerow:
-	// odczyt trwajacy okno sledzenia nie moze wstrzymywac restartu, o ktory
-	// operator wlasnie prosi - a to wlasnie ten restart chce w nim zobaczyc.
-	// Limit czasu obejmuje najdluzsze dopuszczalne okno z zapasem.
+	// The event journal changes nothing and takes no container lock: a read
+	// lasting the follow window must not hold back the restart the operator
+	// is asking for - and that restart is exactly what they want to see in
+	// it. The time limit covers the longest allowed window with a margin.
 	ActionDockerEvents: {mutating: false, capability: "docker", permission: "docker.events",
 		timeoutSeconds: 180, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
-	// Plan niczego nie zmienia, ale uruchamia compose na hoscie i pobiera
-	// metadane obrazow, wiec ma wlasne uprawnienie.
+	// The plan changes nothing, but it runs compose on the host and fetches
+	// image metadata, so it has its own permission.
 	ActionComposePlan: {mutating: false, capability: "docker.compose",
 		permission: "docker.compose.plan", timeoutSeconds: 300,
 		risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 1 << 20},
-	// Wdrozenie manifestu uruchamia na hoscie obrazy wskazane przez operatora.
-	// Jest to najdalej idaca operacja tego modulu i nie wolno jej zlecic bez
-	// planu zatwierdzonego przez czlowieka.
+	// Deploying a manifest starts the images the operator named on the host.
+	// It is the furthest-reaching operation of this module and must not be
+	// ordered without a plan approved by a human.
 	ActionComposeDeploy: {mutating: true, capability: "docker.compose",
 		permission: "docker.compose.deploy", timeoutSeconds: 1800,
 		risk: RiskCritical, lockClass: LockContainers, requiresPlan: true,
 		maxOutputBytes: 1 << 20},
 }
 
-// AllActions zwraca posortowana liste obslugiwanych operacji.
+// AllActions returns a sorted list of the supported operations.
 func AllActions() []ActionType {
 	actions := make([]ActionType, 0, len(actionSpecs))
 	for action := range actionSpecs {
@@ -861,130 +909,134 @@ func AllActions() []ActionType {
 	return actions
 }
 
-// maksymalnyPodgladSekund ogranicza jeden podglad na zywo. Strumien bez
-// gornej granicy trzymalby proces na hoscie takze wtedy, gdy operator dawno
-// zamknal karte przegladarki.
-const maksymalnyPodgladSekund = 900
+// maxFollowSeconds bounds a single live view. A stream without an upper bound
+// would keep a process on the host even long after the operator closed the
+// browser tab.
+const maxFollowSeconds = 900
 
-// validateJournalPayload sprawdza filtry wspolne dla odczytu i podgladu.
+// validateJournalPayload checks the filters shared by a read and a live view.
 func validateJournalPayload(payload *JournalPayload) error {
 	if priority := payload.MaxPriority; priority != nil && *priority > 7 {
-		return fmt.Errorf("priorytet syslog musi byc z zakresu 0-7")
+		return fmt.Errorf("the syslog priority has to be in the range 0-7")
 	}
 	if payload.Unit != "" {
 		if err := validateUnitName(payload.Unit); err != nil {
 			return err
 		}
 	}
-	// Wartosc "since" trafia do argumentu journalctl. Nie idzie przez powloke,
-	// ale wezsza walidacja i tak jest tansza niz ufanie.
-	if payload.Since != "" && !wzorzecOkresu.MatchString(payload.Since) {
-		return fmt.Errorf("nieprawidlowy zakres czasu %q", payload.Since)
+	// The "since" value goes into a journalctl argument. It does not pass
+	// through a shell, but narrower validation is still cheaper than trust.
+	if payload.Since != "" && !periodPattern.MatchString(payload.Since) {
+		return fmt.Errorf("invalid time range %q", payload.Since)
 	}
 	return nil
 }
 
-// wzorzecOkresu dopuszcza formaty przyjmowane przez journalctl: znacznik
-// czasu, wyrazenie wzgledne i slowa kluczowe.
-var wzorzecOkresu = regexp.MustCompile(
+// periodPattern allows the formats journalctl accepts: a timestamp, a
+// relative expression and keywords.
+var periodPattern = regexp.MustCompile(
 	`^(-?\d+ ?(s|sec|second|seconds|m|min|minute|minutes|h|hour|hours|d|day|days|w|week|weeks)( ago)?` +
 		`|yesterday|today|now` +
 		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?)$`)
 
-// identyfikatorHarmonogramu powtarza wzorzec z modulu harmonogramow. Nazwa
-// staje sie nazwa pliku w /etc/cron.d, a cron pomija pliki z kropka i innymi
-// znakami specjalnymi - wpis o zlej nazwie po cichu nigdy by sie nie uruchomil.
-var identyfikatorHarmonogramu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+// scheduleIdentifier repeats the pattern from the schedules module. The name
+// becomes the name of a file in /etc/cron.d, and cron skips files with a dot
+// and other special characters - an entry with a bad name would silently
+// never run.
+var scheduleIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
 
-// nazwaInterfejsu dopuszcza nazwy, ktore jadro w ogole przyjmuje. Granica
-// dlugosci to IFNAMSIZ pomniejszone o terminator.
-var nazwaInterfejsu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$`)
+// interfaceName allows the names the kernel accepts at all. The length limit
+// is IFNAMSIZ minus the terminator.
+var interfaceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$`)
 
-// sprawdzSciezkePliku odrzuca sciezki, ktorych panel nie zapisze - zanim
-// zadanie w ogole powstanie.
+// checkFilePath rejects paths the panel will not write - before the task even
+// comes into being.
 //
-// Rozstrzygajaco sprawdza host wlasna allowlista; tu odsiewamy to, co jest
-// bledem zlecenia niezaleznie od hosta.
-func sprawdzSciezkePliku(sciezka string) error {
-	// Sciezki, ktorych panel nie tyka nigdy, odrzucamy juz przy zlecaniu:
-	// host i tak by odmowil, a zadanie w kolejce z takim celem wygladaloby
-	// jak zmiana, ktora zaraz sie wydarzy.
-	if err := filesmodul.Zakazana(sciezka); err != nil {
+// The host decides conclusively with its own allowlist; here we sieve out
+// what is an error in the order regardless of the host.
+func checkFilePath(path string) error {
+	// Paths the panel never touches are rejected already at ordering time:
+	// the host would refuse anyway, and a queued task with such a target
+	// would look like a change about to happen.
+	if err := filesmodul.Zakazana(path); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(sciezka, "/") {
-		return fmt.Errorf("sciezka %q nie jest bezwzgledna", sciezka)
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("the path %q is not absolute", path)
 	}
-	if strings.Contains(sciezka, "..") {
-		return fmt.Errorf("sciezka %q wychodzi poza wskazany katalog", sciezka)
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("the path %q leaves the named directory", path)
 	}
-	if strings.ContainsAny(sciezka, "\n\t*?") {
-		return fmt.Errorf("sciezka %q zawiera niedozwolony znak", sciezka)
+	if strings.ContainsAny(path, "\n\t*?") {
+		return fmt.Errorf("the path %q contains a forbidden character", path)
 	}
-	if len(sciezka) > 4096 {
-		return fmt.Errorf("sciezka jest dluzsza niz 4096 znakow")
+	if len(path) > 4096 {
+		return fmt.Errorf("the path is longer than 4096 characters")
 	}
 	return nil
 }
 
-// pierwszyPort zwraca jedyny port operacji strefowej. Operacja dotyczy
-// dokladnie jednego portu, wiec lista dluzsza niz jednoelementowa jest bledem
-// - i walidator strefy go zglosi.
-func pierwszyPort(porty []string) string {
-	if len(porty) != 1 {
+// firstPort returns the single port of a zone operation. The operation
+// concerns exactly one port, so a list longer than one element is an error -
+// and the zone validator reports it.
+func firstPort(ports []string) string {
+	if len(ports) != 1 {
 		return ""
 	}
-	return porty[0]
+	return ports[0]
 }
 
-// sprawdzZmianeSieci odrzuca konfiguracje, ktorej host nie przyjmie albo
-// ktora odcielaby go od panelu. Panel odmawia wczesnie, host rozstrzygajaco.
-func sprawdzZmianeSieci(action ActionType, zmiana *NetworkPayload) error {
+// checkNetworkChange rejects a configuration the host will not accept or one
+// that would cut it off from the panel. The panel refuses early, the host
+// conclusively.
+func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 	switch action {
 	case ActionNetworkMTUSet:
-		if zmiana.MTU == "" {
-			return fmt.Errorf("zmiana MTU wymaga wartosci")
+		if change.MTU == "" {
+			return fmt.Errorf("an MTU change requires a value")
 		}
-		return network.WalidujMTU(zmiana.MTU)
+		return network.WalidujMTU(change.MTU)
 
 	case ActionNetworkRouteEnsure:
-		// Pusta lista jest tu poprawnym stanem docelowym: znaczy "profil bez
-		// wlasnych tras". Zeby nie byla nim przez pomylke, zlecenie musi
-		// podac ja jawnie jako liste, a nie pominac pole.
-		if zmiana.Routes == nil {
-			return fmt.Errorf("operacja tras wymaga listy tras; pusta lista kasuje trasy profilu")
+		// An empty list is a valid target state here: it means "a profile
+		// without routes of its own". So that it does not become one by
+		// accident, the order has to give it explicitly as a list rather than
+		// omit the field.
+		if change.Routes == nil {
+			return fmt.Errorf("a route operation requires a list of routes; an empty list clears the profile's routes")
 		}
-		for _, trasa := range zmiana.Routes {
-			if err := network.WalidujTrase(trasa); err != nil {
+		for _, route := range change.Routes {
+			if err := network.WalidujTrase(route); err != nil {
 				return err
 			}
 		}
 		return nil
 
 	case ActionNetworkProfileApply:
-		switch zmiana.Method {
+		switch change.Method {
 		case "auto", "manual":
 		default:
-			return fmt.Errorf("nieobslugiwana metoda %q; panel ustawia auto albo manual", zmiana.Method)
+			return fmt.Errorf("unsupported method %q; the panel sets auto or manual", change.Method)
 		}
-		// Metoda manual bez adresu zostawilaby interfejs bez adresu, a wiec
-		// odcielaby host. To nie jest konfiguracja, tylko pomylka.
-		if zmiana.Method == "manual" && len(zmiana.Addresses) == 0 {
-			return fmt.Errorf("metoda manual wymaga co najmniej jednego adresu")
+		// The manual method without an address would leave the interface
+		// without one, and so cut the host off. That is not a configuration,
+		// it is a mistake.
+		if change.Method == "manual" && len(change.Addresses) == 0 {
+			return fmt.Errorf("the manual method requires at least one address")
 		}
-		for _, adres := range zmiana.Addresses {
-			if err := network.WalidujAdres(adres); err != nil {
+		for _, address := range change.Addresses {
+			if err := network.WalidujAdres(address); err != nil {
 				return err
 			}
 		}
-		if zmiana.Gateway != "" {
-			if err := network.WalidujAdresIP(zmiana.Gateway); err != nil {
-				return fmt.Errorf("brama: %w", err)
+		if change.Gateway != "" {
+			if err := network.WalidujAdresIP(change.Gateway); err != nil {
+				return fmt.Errorf("gateway: %w", err)
 			}
 		}
-		for _, serwer := range zmiana.DNS {
-			if err := network.WalidujAdresIP(serwer); err != nil {
-				return fmt.Errorf("serwer DNS: %w", err)
+		for _, server := range change.DNS {
+			if err := network.WalidujAdresIP(server); err != nil {
+				return fmt.Errorf("DNS server: %w", err)
 			}
 		}
 		return nil
@@ -992,298 +1044,304 @@ func sprawdzZmianeSieci(action ActionType, zmiana *NetworkPayload) error {
 	return nil
 }
 
-// znakiPowlokiHarmonogramu sa niedozwolone w argumentach polecenia. Cron
-// uruchamia polecenie przez powloke, wiec argument z metaznakiem przestaje
-// byc argumentem, a staje sie druga komenda.
-var znakiPowlokiHarmonogramu = `|&;<>()$` + "`" + `\"'` + "\n\r\t" + `*?[]{}~!#%`
+// scheduleShellCharacters are forbidden in command arguments. Cron runs the
+// command through a shell, so an argument with a metacharacter stops being an
+// argument and becomes a second command.
+var scheduleShellCharacters = `|&;<>()$` + "`" + `\"'` + "\n\r\t" + `*?[]{}~!#%`
 
-func sprawdzPolecenieHarmonogramu(argumenty []string) error {
-	if !strings.HasPrefix(argumenty[0], "/") {
-		return fmt.Errorf("polecenie musi byc sciezka bezwzgledna, jest %q", argumenty[0])
+func checkScheduleCommand(arguments []string) error {
+	if !strings.HasPrefix(arguments[0], "/") {
+		return fmt.Errorf("the command has to be an absolute path, it is %q", arguments[0])
 	}
-	for _, argument := range argumenty {
+	for _, argument := range arguments {
 		if argument == "" {
-			return fmt.Errorf("pusty argument polecenia")
+			return fmt.Errorf("empty command argument")
 		}
-		if strings.ContainsAny(argument, znakiPowlokiHarmonogramu) {
-			return fmt.Errorf("argument %q zawiera znak powloki", argument)
+		if strings.ContainsAny(argument, scheduleShellCharacters) {
+			return fmt.Errorf("the argument %q contains a shell character", argument)
 		}
 	}
 	return nil
 }
 
-// chronionePakiety powtarza liste z modulu pakietow. Duplikat jest swiadomy:
-// opspec jest kontraktem operacji i nie siega po pakiety, ktore uruchamiaja
-// procesy albo czytaja stan hosta - a modul pakietow robi jedno i drugie.
-// Hash planu musi byc liczony ta sama implementacja po obu stronach, wiec
-// lista zyje tu w calosci. Panel odmawia wczesnie, a host - rozstrzygajaco.
+// protectedPackages repeats the list from the packages module. The duplicate
+// is deliberate: opspec is the contract of the operations and does not reach
+// for packages that start processes or read host state - and the packages
+// module does both. The plan hash has to be computed by the same
+// implementation on both sides, so the list lives here in full. The panel
+// refuses early, and the host - conclusively.
 //
-// Z gramatyki crona korzystamy juz wprost z modulu harmonogramow: to czysty
-// parser bez efektow ubocznych, a powtorzenie go tutaj rozjechaloby sie
-// z tym, co host naprawde zrozumie.
-func chronionePakiety(pakiety []string) []string {
-	widziane := map[string]bool{}
-	nazwy := map[string]bool{
+// The cron grammar we already use directly from the schedules module: it is a
+// pure parser without side effects, and repeating it here would drift from
+// what the host really understands.
+func protectedPackages(packages []string) []string {
+	seen := map[string]bool{}
+	names := map[string]bool{
 		"flotestro-agent": true, "openssh-server": true, "systemd": true, "sudo": true,
 	}
-	prefiksy := []string{"linux-image", "kernel", "grub", "apt", "dpkg", "dnf", "rpm", "systemd-"}
+	prefixes := []string{"linux-image", "kernel", "grub", "apt", "dpkg", "dnf", "rpm", "systemd-"}
 
-	var wynik []string
-	for _, pakiet := range pakiety {
-		nazwa := strings.ToLower(strings.TrimSpace(pakiet))
-		if index := strings.IndexByte(nazwa, ':'); index > 0 {
-			nazwa = nazwa[:index]
+	var result []string
+	for _, pkg := range packages {
+		name := strings.ToLower(strings.TrimSpace(pkg))
+		if index := strings.IndexByte(name, ':'); index > 0 {
+			name = name[:index]
 		}
-		// Ten sam pakiet bywa i na liscie zleconej, i wsrod zaleznych.
-		// Powtorzenie go w komunikacie sugerowaloby dwa problemy zamiast
-		// jednego.
-		if widziane[nazwa] {
+		// The same package appears both on the ordered list and among the
+		// dependants. Repeating it in the message would suggest two problems
+		// instead of one.
+		if seen[name] {
 			continue
 		}
-		widziane[nazwa] = true
-		if nazwy[nazwa] {
-			wynik = append(wynik, pakiet)
+		seen[name] = true
+		if names[name] {
+			result = append(result, pkg)
 			continue
 		}
-		for _, prefiks := range prefiksy {
-			if strings.HasPrefix(nazwa, prefiks) {
-				wynik = append(wynik, pakiet)
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(name, prefix) {
+				result = append(result, pkg)
 				break
 			}
 		}
 	}
-	return wynik
+	return result
 }
 
-// validateLogPath odrzuca sciezki, ktorych host i tak nie przyjmie.
-// Rozstrzygajaca jest allowlista na hoscie; panel odsiewa to, co nie jest
-// nawet sciezka bezwzgledna, zeby nie kolejkowac zadania bez szans.
+// validateLogPath rejects paths the host will not accept anyway. The
+// allowlist on the host decides; the panel sieves out what is not even an
+// absolute path, so that a hopeless task is not queued.
 func validateLogPath(path string) error {
 	if path == "" {
-		return fmt.Errorf("sciezka pliku logu jest pusta")
+		return fmt.Errorf("the log file path is empty")
 	}
 	if len(path) > 4096 {
-		return fmt.Errorf("sciezka pliku logu jest zbyt dluga")
+		return fmt.Errorf("the log file path is too long")
 	}
 	if !strings.HasPrefix(path, "/") {
-		return fmt.Errorf("sciezka pliku logu musi byc bezwzgledna")
+		return fmt.Errorf("the log file path has to be absolute")
 	}
-	// Wyjscie w gore katalogu pozwalaloby dopasowac sie do wzorca allowlisty
-	// i mimo to czytac plik spoza niej.
+	// Walking up a directory would allow matching the allowlist pattern and
+	// still reading a file outside it.
 	if strings.Contains(path, "..") {
-		return fmt.Errorf("sciezka pliku logu nie moze zawierac \"..\"")
+		return fmt.Errorf("the log file path must not contain \"..\"")
 	}
 	if strings.ContainsAny(path, "\x00\n") {
-		return fmt.Errorf("sciezka pliku logu zawiera niedozwolony znak")
+		return fmt.Errorf("the log file path contains a forbidden character")
 	}
 	return nil
 }
 
-// wzorzecJednostki powtarza wzorzec z modulu systemd. Duplikat jest
-// swiadomy: pakiet opspec nie ma zaleznosci poza biblioteka standardowa, bo
-// hash planu musi byc liczony ta sama implementacja po obu stronach. Panel
-// odmawia wczesnie, a host - rozstrzygajaco.
-var wzorzecJednostki = regexp.MustCompile(
+// unitPattern repeats the pattern from the systemd module. The duplicate is
+// deliberate: the opspec package has no dependencies outside the standard
+// library, because the plan hash has to be computed by the same
+// implementation on both sides. The panel refuses early, and the host -
+// conclusively.
+var unitPattern = regexp.MustCompile(
 	`^[A-Za-z0-9:_.\\@-]+\.(service|socket|timer|target|path|mount|automount|swap|slice|scope)$`)
 
 func validateUnitName(unit string) error {
 	if unit == "" {
-		return fmt.Errorf("nazwa jednostki jest pusta")
+		return fmt.Errorf("the unit name is empty")
 	}
 	if len(unit) > 256 {
-		return fmt.Errorf("nazwa jednostki jest zbyt dluga")
+		return fmt.Errorf("the unit name is too long")
 	}
-	if !wzorzecJednostki.MatchString(unit) {
-		return fmt.Errorf("nieprawidlowa nazwa jednostki %q", unit)
+	if !unitPattern.MatchString(unit) {
+		return fmt.Errorf("invalid unit name %q", unit)
 	}
 	return nil
 }
 
-// nazwaProjektuCompose powtarza wzorzec modulu kontenerow. Nazwa trafia do
-// argumentu polecenia i do nazw kontenerow.
-var nazwaProjektuCompose = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+// composeProjectName repeats the pattern of the containers module. The name
+// goes into a command argument and into container names.
+var composeProjectName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
-// maksymalnyManifestCompose ogranicza rozmiar manifestu. Plik wiekszy od tego
-// nie jest juz konfiguracja projektu, tylko czyms, czego operator nie
-// przeczyta przed zatwierdzeniem.
-const maksymalnyManifestCompose = 256 << 10
+// maxComposeManifest bounds the size of a manifest. A file larger than this
+// is no longer a project configuration, but something the operator will not
+// read before approving it.
+const maxComposeManifest = 256 << 10
 
-// identyfikatorKontenera dopuszcza wylacznie szesnastkowy identyfikator
-// silnika. Identyfikator trafia do sciezki zapytania Engine API, wiec nie
-// moze niesc niczego, co ta sciezke zmienia.
-var identyfikatorKontenera = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+// containerIdentifier allows only the engine's hexadecimal identifier. The
+// identifier goes into the path of an Engine API request, so it must not
+// carry anything that changes that path.
+var containerIdentifier = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 
-func poprawnyIdentyfikatorKontenera(id string) bool {
-	return identyfikatorKontenera.MatchString(id)
+func validContainerIdentifier(id string) bool {
+	return containerIdentifier.MatchString(id)
 }
 
-// odwolanieObrazu dopuszcza nazwe repozytorium z opcjonalnym rejestrem,
-// tagiem albo digestem. Odwolanie idzie do silnika jako parametr zapytania,
-// a nie do powloki, ale wezsza walidacja i tak jest tansza niz ufanie.
-var odwolanieObrazu = regexp.MustCompile(
+// imageReference allows a repository name with an optional registry, tag or
+// digest. The reference goes to the engine as a request parameter rather than
+// to a shell, but narrower validation is still cheaper than trust.
+var imageReference = regexp.MustCompile(
 	`^[a-z0-9]+([._\-/][a-z0-9]+)*(:[0-9]{2,5})?(/[a-z0-9]+([._\-/][a-z0-9]+)*)*` +
 		`(:[\w][\w.\-]{0,127})?(@sha256:[a-f0-9]{64})?$`)
 
-func poprawneOdwolanieObrazu(reference string) error {
+func validImageReference(reference string) error {
 	if reference == "" {
-		return fmt.Errorf("odwolanie do obrazu jest puste")
+		return fmt.Errorf("the image reference is empty")
 	}
 	if len(reference) > 512 {
-		return fmt.Errorf("odwolanie do obrazu jest zbyt dlugie")
+		return fmt.Errorf("the image reference is too long")
 	}
-	if !odwolanieObrazu.MatchString(reference) {
-		return fmt.Errorf("nieprawidlowe odwolanie do obrazu %q", reference)
+	if !imageReference.MatchString(reference) {
+		return fmt.Errorf("invalid image reference %q", reference)
 	}
 	return nil
 }
 
-// identyfikatorObrazu dopuszcza identyfikator silnika z prefiksem algorytmu.
-var identyfikatorObrazu = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+// imageIdentifier allows the engine identifier with its algorithm prefix.
+var imageIdentifier = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
-// nazwaWolumenu dopuszcza nazwy, ktore tworzy Docker i Compose.
-var nazwaWolumenu = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+// volumeName allows the names Docker and Compose create.
+var volumeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
 
-// maksymalnieObiektowSprzatania ogranicza jedna operacje sprzatania. Lista
-// dluzsza od tego nie jest juz decyzja operatora, tylko filtrem w przebraniu.
-const maksymalnieObiektowSprzatania = 200
+// maxPruneObjects bounds a single prune operation. A list longer than this is
+// no longer an operator's decision, but a filter in disguise.
+const maxPruneObjects = 200
 
-// sprawdzOdczytZdarzen pilnuje granic okna. Zlecenie spoza nich jest bledem
-// zlecenia, a nie czyms, co host ma po cichu przyciac: operator, ktory prosil
-// o dobe sledzenia, ma sie dowiedziec, ze taka operacja nie istnieje.
-func sprawdzOdczytZdarzen(payload *DockerEventsPayload) error {
+// checkEventsRead guards the window boundaries. An order outside them is an
+// error in the order, not something the host should silently trim: an
+// operator who asked for a day of following has to learn that no such
+// operation exists.
+func checkEventsRead(payload *DockerEventsPayload) error {
 	if payload == nil {
-		// Brak payloadu jest poprawny: domyslne okno jest najczestsza droga.
+		// A missing payload is valid: the default window is the most common
+		// way.
 		return nil
 	}
-	if payload.SinceSeconds < 0 || payload.SinceSeconds > maksymalneOknoZdarzen {
-		return fmt.Errorf("okno odczytu zdarzen poza zakresem (%d s)", payload.SinceSeconds)
+	if payload.SinceSeconds < 0 || payload.SinceSeconds > maxEventWindow {
+		return fmt.Errorf("the event read window is out of range (%d s)", payload.SinceSeconds)
 	}
-	if payload.FollowSeconds < 0 || payload.FollowSeconds > maksymalneSledzenieZdarzen {
-		return fmt.Errorf("sledzenie zdarzen poza zakresem (%d s)", payload.FollowSeconds)
+	if payload.FollowSeconds < 0 || payload.FollowSeconds > maxEventFollow {
+		return fmt.Errorf("event following is out of range (%d s)", payload.FollowSeconds)
 	}
-	if payload.MaxEvents < 0 || payload.MaxEvents > maksymalnieZdarzen {
-		return fmt.Errorf("limit liczby zdarzen poza zakresem (%d)", payload.MaxEvents)
+	if payload.MaxEvents < 0 || payload.MaxEvents > maxEvents {
+		return fmt.Errorf("the event count limit is out of range (%d)", payload.MaxEvents)
 	}
-	widziane := map[string]bool{}
-	for _, rodzaj := range payload.Types {
-		if !docker.RodzajZdarzenia(rodzaj) {
-			return fmt.Errorf("nieznany rodzaj zdarzen %q", rodzaj)
+	seen := map[string]bool{}
+	for _, kind := range payload.Types {
+		if !docker.RodzajZdarzenia(kind) {
+			return fmt.Errorf("unknown event kind %q", kind)
 		}
-		if widziane[rodzaj] {
-			return fmt.Errorf("rodzaj zdarzen %q powtorzony", rodzaj)
+		if seen[kind] {
+			return fmt.Errorf("event kind %q repeated", kind)
 		}
-		widziane[rodzaj] = true
+		seen[kind] = true
 	}
 	return nil
 }
 
-func sprawdzListeSprzatania(payload *DockerPrunePayload) error {
-	razem := len(payload.ImageIDs) + len(payload.VolumeName) + len(payload.NetworkIDs)
-	if razem == 0 {
-		return fmt.Errorf("operacja sprzatania nie wskazuje zadnego obiektu")
+func checkPruneList(payload *DockerPrunePayload) error {
+	total := len(payload.ImageIDs) + len(payload.VolumeName) + len(payload.NetworkIDs)
+	if total == 0 {
+		return fmt.Errorf("the prune operation names no object")
 	}
-	if razem > maksymalnieObiektowSprzatania {
-		return fmt.Errorf("lista obiektow do usuniecia jest zbyt dluga (%d)", razem)
+	if total > maxPruneObjects {
+		return fmt.Errorf("the list of objects to remove is too long (%d)", total)
 	}
 	for _, id := range payload.ImageIDs {
-		if !identyfikatorObrazu.MatchString(id) {
-			return fmt.Errorf("nieprawidlowy identyfikator obrazu %q", id)
+		if !imageIdentifier.MatchString(id) {
+			return fmt.Errorf("invalid image identifier %q", id)
 		}
 	}
-	for _, nazwa := range payload.VolumeName {
-		if !nazwaWolumenu.MatchString(nazwa) {
-			return fmt.Errorf("nieprawidlowa nazwa wolumenu %q", nazwa)
+	for _, name := range payload.VolumeName {
+		if !volumeName.MatchString(name) {
+			return fmt.Errorf("invalid volume name %q", name)
 		}
 	}
 	for _, id := range payload.NetworkIDs {
-		if !identyfikatorKontenera.MatchString(id) {
-			return fmt.Errorf("nieprawidlowy identyfikator sieci %q", id)
+		if !containerIdentifier.MatchString(id) {
+			return fmt.Errorf("invalid network identifier %q", id)
 		}
 	}
 	return nil
 }
 
-// UnitPayload opisuje operacje na jednostce systemd.
+// UnitPayload describes an operation on a systemd unit.
 type UnitPayload struct {
 	Unit string `json:"unit"`
 }
 
-// JournalPayload opisuje odczyt dziennika.
+// JournalPayload describes a journal read.
 type JournalPayload struct {
 	Unit string `json:"unit,omitempty"`
-	// Lines ogranicza rozmiar wyniku; odczyt bez limitu nie jest dozwolony.
+	// Lines bounds the size of the result; a read without a limit is not
+	// allowed.
 	Lines uint32 `json:"lines"`
-	// MaxPriority wg syslog: 0 emerg ... 7 debug. Pusty oznacza brak filtra.
+	// MaxPriority follows syslog: 0 emerg ... 7 debug. Empty means no filter.
 	MaxPriority *uint32 `json:"max_priority,omitempty"`
 	Since       string  `json:"since,omitempty"`
-	// FollowSeconds ogranicza podglad na zywo. Zero oznacza limit domyslny;
-	// strumien bez gornej granicy trzymalby proces na hoscie w nieskonczonosc,
-	// takze wtedy, gdy nikt juz nie patrzy.
+	// FollowSeconds bounds the live view. Zero means the default limit; a
+	// stream without an upper bound would keep a process on the host
+	// forever, including when nobody is watching any more.
 	FollowSeconds uint32 `json:"follow_seconds,omitempty"`
 }
 
-// PackageChangePayload opisuje instalacje, usuniecie albo wstrzymanie.
+// PackageChangePayload describes an install, a removal or a hold.
 type PackageChangePayload struct {
 	Packages []string `json:"packages"`
-	// ExpectedRemovals jest zbiorem, ktory operator zatwierdzil przy
-	// usuwaniu. Host liczy go ponownie tuz przed operacja: roznica oznacza,
-	// ze usunieciu podleglby inny zestaw, niz obejrzano.
+	// ExpectedRemovals is the set the operator approved for a removal. The
+	// host computes it again right before the operation: a difference means a
+	// different set would be removed from the one that was reviewed.
 	ExpectedRemovals []string `json:"expected_removals,omitempty"`
-	// Hold dotyczy wylacznie wstrzymywania: prawda zamraza, falsz zwalnia.
+	// Hold concerns holds only: true freezes, false releases.
 	Hold bool `json:"hold,omitempty"`
-	// PlanHash wiaze instalacje z planem policzonym na tym hoscie: host
-	// liczy plan jeszcze raz i odmawia, gdy metadane repozytorium sie
-	// zmienily od zatwierdzenia.
+	// PlanHash binds the install to the plan computed on this host: the host
+	// computes the plan once more and refuses when the repository metadata
+	// changed since the approval.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// PackagePlanPayload opisuje planowanie aktualizacji.
+// PackagePlanPayload describes planning an upgrade.
 type PackagePlanPayload struct {
-	// Mode wybiera rodzaj planu: upgrade (domyslny), install albo remove.
+	// Mode picks the kind of plan: upgrade (the default), install or remove.
 	Mode string `json:"mode,omitempty"`
-	// RefreshMetadata wymaga roota i blokady repozytorium, wiec jest jawnym
-	// wyborem, a nie efektem ubocznym kazdego planu.
+	// RefreshMetadata requires root and the repository lock, so it is an
+	// explicit choice rather than a side effect of every plan.
 	RefreshMetadata bool     `json:"refresh_metadata"`
 	OnlyPackages    []string `json:"only_packages,omitempty"`
 	SecurityOnly    bool     `json:"security_only,omitempty"`
 }
 
-// PackageUpgradePayload opisuje wykonanie transakcji aktualizacji.
+// PackageUpgradePayload describes carrying out an upgrade transaction.
 type PackageUpgradePayload struct {
-	// PlanHash wiaze wykonanie z konkretnym planem. Pusty oznacza brak
-	// weryfikacji i jest dopuszczalny wylacznie poza kampania.
+	// PlanHash binds the execution to one specific plan. Empty means no
+	// verification and is allowed outside a campaign only.
 	PlanHash     string   `json:"plan_hash,omitempty"`
 	Packages     []string `json:"packages,omitempty"`
 	SecurityOnly bool     `json:"security_only,omitempty"`
 }
 
-// AgentUpgradePayload opisuje wymiane agenta na wskazana wersje.
+// AgentUpgradePayload describes replacing the agent with a named version.
 type AgentUpgradePayload struct {
-	// TargetVersion jest wersja, ktora ma sie zglosic po restarcie. To ona
-	// rozstrzyga o powodzeniu: kod wyjscia menedzera pakietow mowi tylko,
-	// ze transakcja przeszla, a nie ze host wrocil.
+	// TargetVersion is the version that has to report in after the restart.
+	// It is what settles success: the exit code of the package manager says
+	// only that the transaction went through, not that the host came back.
 	TargetVersion string `json:"target_version"`
-	// PackageSHA256 jest suma pakietu z wydania. Menedzer sprawdza podpis
-	// repozytorium, a to jest drugie, niezalezne sprawdzenie - i jedyne,
-	// ktore panel moze wykonac po swojej stronie.
+	// PackageSHA256 is the checksum of the package from the release. The
+	// manager checks the repository signature, and this is a second,
+	// independent check - and the only one the panel can perform on its own
+	// side.
 	PackageSHA256 string `json:"package_sha256,omitempty"`
-	// RollbackVersion mowi, do czego wrocic, gdy host nie wroci z nowa
-	// wersja. Puste oznacza brak przygotowanego powrotu.
+	// RollbackVersion says what to return to when the host does not come back
+	// with the new version. Empty means no prepared return.
 	RollbackVersion string `json:"rollback_version,omitempty"`
 }
 
-// poprawnaWersjaAgenta pilnuje, ze wersja jest wersja pakietu, a nie
-// dowolnym tekstem trafiajacym do wiersza polecen menedzera.
-func poprawnaWersjaAgenta(wersja string) bool {
-	if wersja == "" || len(wersja) > 64 {
+// validAgentVersion guards that the version is a package version rather than
+// arbitrary text landing on the package manager's command line.
+func validAgentVersion(version string) bool {
+	if version == "" || len(version) > 64 {
 		return false
 	}
-	for _, znak := range wersja {
+	for _, char := range version {
 		switch {
-		case znak >= '0' && znak <= '9':
-		case znak >= 'a' && znak <= 'z':
-		case znak >= 'A' && znak <= 'Z':
-		case znak == '.' || znak == '-' || znak == '+' || znak == '~' || znak == ':' || znak == '_':
+		case char >= '0' && char <= '9':
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char == '.' || char == '-' || char == '+' || char == '~' || char == ':' || char == '_':
 		default:
 			return false
 		}
@@ -1291,15 +1349,15 @@ func poprawnaWersjaAgenta(wersja string) bool {
 	return true
 }
 
-// poprawnaSuma sprawdza zapis SHA-256.
-func poprawnaSuma(suma string) bool {
-	if len(suma) != 64 {
+// validChecksum checks the SHA-256 notation.
+func validChecksum(sum string) bool {
+	if len(sum) != 64 {
 		return false
 	}
-	for _, znak := range suma {
+	for _, char := range sum {
 		switch {
-		case znak >= '0' && znak <= '9':
-		case znak >= 'a' && znak <= 'f':
+		case char >= '0' && char <= '9':
+		case char >= 'a' && char <= 'f':
 		default:
 			return false
 		}
@@ -1307,35 +1365,36 @@ func poprawnaSuma(suma string) bool {
 	return true
 }
 
-// RebootPayload opisuje kontrolowany restart hosta.
+// RebootPayload describes a controlled reboot of the host.
 type RebootPayload struct {
-	// DelaySeconds daje czas na zamkniecie sesji i odeslanie wyniku, zanim
-	// host zniknie z sieci.
+	// DelaySeconds gives time to close the session and send the result back
+	// before the host disappears from the network.
 	DelaySeconds uint32 `json:"delay_seconds,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 }
 
-// UnitStatusPayload opisuje odczyt stanu jednostek.
+// UnitStatusPayload describes a read of unit state.
 //
-// Pusta lista oznacza pelny wykaz jednostek hosta. To osobne zapytanie i inny
-// koszt niz odczyt kilku znanych z nazwy, wiec musi byc jawnie zamowione,
-// a nie wynikac z pomylki w wywolaniu.
+// An empty list means the full list of the host's units. That is a separate
+// query and a different cost from reading a few units known by name, so it
+// has to be ordered explicitly rather than result from a mistake in the call.
 type UnitStatusPayload struct {
 	Units []string `json:"units"`
-	// All zamawia pelny wykaz. Bez tego pusta lista jednostek jest bledem.
+	// All orders the full list. Without it an empty list of units is an
+	// error.
 	All bool `json:"all,omitempty"`
 }
 
-// UnitToggle wlacza albo wylacza wlasciwosc jednostki.
+// UnitToggle turns a property of a unit on or off.
 type UnitToggle struct {
 	Unit string `json:"unit"`
-	// Enabled dla unit.enable.set, Masked dla unit.mask.set. Pole jest
-	// wartoscia docelowa, a nie przelacznikiem: operacja opisuje stan, ktory
-	// ma zostac osiagniety, wiec powtorzenie jej nie odwraca zmiany.
+	// Enabled for unit.enable.set, Masked for unit.mask.set. The field is a
+	// target value rather than a toggle: the operation describes the state to
+	// be reached, so repeating it does not undo the change.
 	Enabled bool `json:"enabled"`
 }
 
-// Payload jest suma typow payloadow. Dokladnie jedno pole jest wypelnione.
+// Payload is the sum of the payload types. Exactly one field is filled in.
 type Payload struct {
 	Unit            *UnitPayload            `json:"unit,omitempty"`
 	Journal         *JournalPayload         `json:"journal,omitempty"`
@@ -1376,67 +1435,69 @@ type Payload struct {
 	Inventory       *InventoryPayload       `json:"inventory,omitempty"`
 }
 
-// maksymalnieModulowOdswiezenia ogranicza dlugosc zakresu. Zadanie z lista
-// dluzsza niz zbior modulow nie jest zadaniem czesciowym, tylko blednym.
-const maksymalnieModulowOdswiezenia = 32
+// maxRefreshModules bounds the length of the scope. An order with a list
+// longer than the set of modules is not a partial order, it is a wrong one.
+const maxRefreshModules = 32
 
-// ModuleInwentarza wylicza moduly, ktore panel umie odswiezyc na zadanie.
+// InventoryModules lists the modules the panel can refresh on request.
 //
-// Lista jest tu, a nie w agencie, bo to kontrakt operacji: panel odmawia
-// zlecenia z nieznana nazwa, zanim zadanie ruszy w swiat.
-var ModuleInwentarza = []string{
+// The list is here rather than in the agent, because it is part of the
+// operation contract: the panel refuses an order with an unknown name before
+// the task goes out into the world.
+var InventoryModules = []string{
 	"system", "packages", "services", "identity", "accounts", "network",
 	"dns", "firewall", "storage", "ssh", "kernel", "time", "power",
 	"security", "certificates", "backups", "files", "containers", "schedules",
 }
 
-// ModulInwentarza mowi, czy nazwa opisuje modul inwentarza.
-func ModulInwentarza(nazwa string) bool {
-	for _, modul := range ModuleInwentarza {
-		if modul == nazwa {
+// IsInventoryModule says whether a name describes an inventory module.
+func IsInventoryModule(name string) bool {
+	for _, module := range InventoryModules {
+		if module == name {
 			return true
 		}
 	}
 	return false
 }
 
-// InventoryPayload opisuje zakres odswiezenia inwentarza.
+// InventoryPayload describes the scope of an inventory refresh.
 type InventoryPayload struct {
-	// Modules ogranicza odczyt. Puste znaczy caly inwentarz - i to jest
-	// domyslna droga, bo operator zwykle pyta "jak jest teraz", a nie
-	// "jak jest teraz z jedna zakladka".
+	// Modules narrows the read. Empty means the whole inventory - and that is
+	// the default way, because an operator usually asks "how are things now",
+	// not "how are things now on one tab".
 	Modules []string `json:"modules,omitempty"`
 }
 
-// SecurityPayload opisuje operacje modulu bezpieczenstwa.
+// SecurityPayload describes an operation of the security module.
 type SecurityPayload struct {
-	// Mode jest trybem obowiazkowej kontroli dostepu.
+	// Mode is the mode of mandatory access control.
 	Mode string `json:"mode,omitempty"`
 }
 
-// MonitoringPayload opisuje sonde wykonywana z hosta.
+// MonitoringPayload describes a probe carried out from the host.
 type MonitoringPayload struct {
 	Kind string `json:"kind"`
-	// Target jest adresem: URL dla sondy HTTP, host:port dla TCP.
+	// Target is the address: a URL for an HTTP probe, host:port for TCP.
 	Target string `json:"target"`
-	// ExpectStatus i ExpectBody opisuja, co uznajemy za dobra odpowiedz.
-	// Puste oznacza "cokolwiek z zakresu 2xx i 3xx".
+	// ExpectStatus and ExpectBody describe what we treat as a good answer.
+	// Empty means "anything in the 2xx and 3xx range".
 	ExpectStatus   int    `json:"expect_status,omitempty"`
 	ExpectBody     string `json:"expect_body,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 
-// BackupPayload opisuje operacje backupu.
+// BackupPayload describes a backup operation.
 //
-// Poswiadczenia sa odnosnikami do magazynu: haslo repozytorium i zmienne
-// srodowiskowe narzedzia. Wartosci nie ma ani w zleceniu, ani w audycie, ani
-// w inwentarzu - host siega po nie przy wykonaniu i podaje narzedziu
-// srodowiskiem, a nie argumentem widocznym w /proc.
+// The credentials are references to the store: the repository password and
+// the tool's environment variables. The values are in neither the order, nor
+// the audit trail, nor the inventory - the host reaches for them at execution
+// time and hands them to the tool through the environment rather than as an
+// argument visible in /proc.
 type BackupPayload struct {
 	ID   string `json:"id"`
 	Tool string `json:"tool"`
-	// Repository jest odnosnikiem do celu backupu; dane plyna tam wprost
-	// z hosta i nigdy przez panel.
+	// Repository is a reference to the backup target; the data flows there
+	// straight from the host and never through the panel.
 	Repository  string   `json:"repository,omitempty"`
 	Paths       []string `json:"paths,omitempty"`
 	Excludes    []string `json:"excludes,omitempty"`
@@ -1446,39 +1507,41 @@ type BackupPayload struct {
 	KeepWeekly  int      `json:"keep_weekly,omitempty"`
 	KeepMonthly int      `json:"keep_monthly,omitempty"`
 	Prune       bool     `json:"prune,omitempty"`
-	// Runbook wskazuje skrypt, ktory administrator hosta wczesniej tam polozyl.
-	// Panel nie przesyla jego tresci i nie moze go zalozyc.
+	// Runbook points at a script the host administrator put there earlier.
+	// The panel does not send its content and cannot create it.
 	Runbook string `json:"runbook,omitempty"`
-	// Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+	// Initialize is the consent to create the repository on the first copy.
 	Initialize bool `json:"initialize,omitempty"`
 
 	PasswordSecret *SecretRef `json:"password_secret,omitempty"`
-	// EnvSecrets przypisuje zmiennym srodowiska sekrety z magazynu: tak ida
-	// poswiadczenia do chmurowego backendu backupu.
+	// EnvSecrets assigns secrets from the store to environment variables:
+	// that is how credentials reach a cloud backup backend.
 	EnvSecrets map[string]SecretRef `json:"env_secrets,omitempty"`
-	// ReadData wlacza weryfikacje z odczytem danych, a nie samej struktury.
+	// ReadData turns on verification that reads the data rather than the
+	// structure alone.
 	ReadData bool `json:"read_data,omitempty"`
-	// Plan nazywa rodzaj planowanej operacji: run albo verify. Puste znaczy
-	// odczyt stanu repozytorium - to samo zlecenie sluzy obu rzeczom, wiec
-	// rodzaj planu musi byc nazwany, a nie zgadniety z zakresu.
+	// Plan names the kind of planned operation: run or verify. Empty means a
+	// read of the repository state - the same order serves both things, so
+	// the kind of plan has to be named rather than guessed from the scope.
 	Plan string `json:"plan,omitempty"`
-	// PlanHash wiaze kopie z planem policzonym na tym hoscie: zakres albo
-	// repozytorium zmienione od planowania zatrzymuja operacje.
+	// PlanHash binds the copy to the plan computed on this host: a scope or a
+	// repository changed since planning stops the operation.
 	PlanHash string `json:"plan_hash,omitempty"`
 
-	// Odtworzenie. Cel i plan nadpisania sa obowiazkowe: operacja bez nich
-	// ma skutek, ktorego nikt nie zna.
+	// A restore. The target and the overwrite plan are mandatory: an
+	// operation without them has an effect nobody knows.
 	SnapshotID string   `json:"snapshot_id,omitempty"`
 	Target     string   `json:"target,omitempty"`
 	Include    []string `json:"include,omitempty"`
 	Overwrite  string   `json:"overwrite,omitempty"`
 }
 
-// RepositoryPayload opisuje zrodlo pakietow.
+// RepositoryPayload describes a package source.
 //
-// Klucz zrodla jedzie w zleceniu, bo jest materialem publicznym i plan ma
-// pokazywac, czemu host zaufa. Haslo nie jedzie: jest odnosnikiem do magazynu,
-// po ktory host siega dopiero przy zapisie.
+// The source key travels in the order, because it is public material and the
+// plan is meant to show what the host will trust. The password does not
+// travel: it is a reference to the store, which the host reaches for only at
+// write time.
 type RepositoryPayload struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name,omitempty"`
@@ -1488,225 +1551,236 @@ type RepositoryPayload struct {
 	Architectures []string `json:"architectures,omitempty"`
 	Enabled       bool     `json:"enabled,omitempty"`
 	Priority      int      `json:"priority,omitempty"`
-	// GPGKey jest kluczem publicznym zrodla w ramce ASCII. Host liczy jego
-	// odcisk i odsyla go w wyniku: tylko czlowiek moze porownac odcisk
-	// z tym, ktory podal dostawca.
+	// GPGKey is the public key of the source in an ASCII frame. The host
+	// computes its fingerprint and sends it back in the result: only a human
+	// can compare that fingerprint with the one the supplier gave.
 	GPGKey string `json:"gpg_key,omitempty"`
-	// AllowUnsigned jest zgoda na zrodlo, ktorego podpisow host nie sprawdza.
-	// Bez niej zrodlo bez klucza nie przejdzie: repozytorium bez podpisu to
-	// zdalna powloka roota, a nie ustawienie domyslne.
+	// AllowUnsigned is the consent to a source whose signatures the host does
+	// not check. Without it a source without a key does not pass: an unsigned
+	// repository is a remote root shell, not a default setting.
 	AllowUnsigned bool   `json:"allow_unsigned,omitempty"`
 	Username      string `json:"username,omitempty"`
-	// PasswordSecret wskazuje haslo w magazynie. Wartosci nie ma ani
-	// w zleceniu, ani w audycie, ani w inwentarzu.
+	// PasswordSecret points at the password in the store. The value is in
+	// neither the order, nor the audit trail, nor the inventory.
 	PasswordSecret *SecretRef `json:"password_secret,omitempty"`
-	// Remove usuwa zrodlo razem z jego kluczem i haslem.
+	// Remove deletes the source together with its key and its password.
 	Remove bool `json:"remove,omitempty"`
 }
 
-// CertificateTarget wskazuje plik certyfikatu wraz z tym, co panel o nim wie.
+// CertificateTarget points at a certificate file together with what the panel
+// knows about it.
 //
-// Sciezka klucza i nazwa uslugi pochodza z konfiguracji panelu, a nie
-// z domyslu hosta: powiazanie "ten plik czyta ta usluga" wpisuje czlowiek,
-// bo tylko on je zna.
+// The key path and the service name come from the panel's configuration
+// rather than from a guess by the host: the link "this file is read by this
+// service" is typed in by a human, because only a human knows it.
 type CertificateTarget struct {
 	Path    string `json:"path"`
 	KeyPath string `json:"key_path,omitempty"`
 	Service string `json:"service,omitempty"`
 }
 
-// CertificatePayload opisuje operacje modulu certyfikatow.
+// CertificatePayload describes an operation of the certificates module.
 type CertificatePayload struct {
-	// Targets wyznacza zakres skanu. Pusta lista oznacza skan tego, co host
-	// wie o sobie sam - czyli zlecen certmongera - a nie skan calego dysku.
+	// Targets sets the scope of the scan. An empty list means scanning what
+	// the host knows about itself - that is, certmonger's requests - and not
+	// scanning the whole disk.
 	Targets []CertificateTarget `json:"targets,omitempty"`
 
-	// Path i KeyPath sa celem wdrozenia.
+	// Path and KeyPath are the target of a deployment.
 	Path    string `json:"path,omitempty"`
 	KeyPath string `json:"key_path,omitempty"`
-	// Certificate jest trescia jawna: certyfikat wraz z lancuchem. Idzie
-	// w zleceniu, bo jest publiczny i plan ma pokazywac to, co trafi na host.
+	// Certificate is content in the clear: the certificate together with its
+	// chain. It travels in the order, because it is public and the plan is
+	// meant to show what will reach the host.
 	Certificate string `json:"certificate,omitempty"`
-	// KeySecret wskazuje klucz prywatny w magazynie. Wartosci nie ma ani
-	// w zleceniu, ani w audycie, ani w inwentarzu - host pobiera ja tuz
-	// przed podmiana, na jednorazowa dzierzawe.
+	// KeySecret points at the private key in the store. The value is in
+	// neither the order, nor the audit trail, nor the inventory - the host
+	// fetches it right before the swap, on a single-use lease.
 	KeySecret *SecretRef `json:"key_secret,omitempty"`
 	Owner     string     `json:"owner,omitempty"`
 	Group     string     `json:"group,omitempty"`
 	Mode      string     `json:"mode,omitempty"`
 	KeyMode   string     `json:"key_mode,omitempty"`
-	// ReloadUnit jest usluga, ktora ma przeczytac nowy plik. Bez niej
-	// wdrozenie konczy sie plikiem na dysku i stara tozsamoscia w pamieci
-	// procesu - a to wyglada jak zmiana, ktorej nie widac.
+	// ReloadUnit is the service that has to read the new file. Without it a
+	// deployment ends with a file on disk and the old identity in the
+	// process's memory - and that looks like a change nobody can see.
 	ReloadUnit string `json:"reload_unit,omitempty"`
-	// ProbeTarget jest adresem, pod ktorym host sprawdzi wynik wdrozenia.
-	// Sonda porownuje odcisk, a nie zaufanie: pyta, czy usluga podaje ten
-	// certyfikat, ktory wlasnie zapisano.
+	// ProbeTarget is the address at which the host will check the result of
+	// the deployment. The probe compares the fingerprint rather than trust:
+	// it asks whether the service serves the certificate just written.
 	ProbeTarget string `json:"probe_target,omitempty"`
-	// Request wskazuje zlecenie certmongera przy odnowieniu.
+	// Request points at the certmonger request during a renewal.
 	Request string `json:"request,omitempty"`
-	// AnchorID nazywa kotwice panelu w magazynie zaufania hosta. Plik na
-	// hoscie nazywa sie od niej, wiec po niej panel pozna swoja kotwice.
+	// AnchorID names the panel's anchor in the host's trust store. The file
+	// on the host is named after it, so that is how the panel recognises its
+	// own anchor.
 	AnchorID string `json:"anchor_id,omitempty"`
-	// PlanHash wiaze wdrozenie z planem policzonym na tym hoscie; host liczy
-	// plan jeszcze raz przed podmiana plikow.
+	// PlanHash binds the deployment to the plan computed on this host; the
+	// host computes the plan once more before swapping the files.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// PowerPayload opisuje wylaczenie hosta.
+// PowerPayload describes shutting a host down.
 type PowerPayload struct {
-	// Mode rozroznia wylaczenie zasilania od zatrzymania systemu.
+	// Mode distinguishes cutting the power from halting the system.
 	Mode string `json:"mode,omitempty"`
-	// DelaySeconds daje czas na odeslanie wyniku, zanim host zniknie.
+	// DelaySeconds gives time to send the result back before the host
+	// disappears.
 	DelaySeconds uint32 `json:"delay_seconds,omitempty"`
-	// Reason jest wymagany: nikt nie wlaczy tego hosta zdalnie, wiec slad
-	// audytowy jest jedyna rzecza, ktora po operacji zostaje.
+	// Reason is required: nobody will power this host on remotely, so the
+	// audit trail is the only thing left after the operation.
 	Reason string `json:"reason"`
-	// IgnoreInhibitors przechodzi nad blokadami logind. Domyslnie host
-	// z blokada odsyla ja jako powod odmowy.
+	// IgnoreInhibitors overrides logind's inhibitors. By default a host with
+	// an inhibitor sends it back as the reason for a refusal.
 	IgnoreInhibitors bool `json:"ignore_inhibitors,omitempty"`
 }
 
-// TimePayload opisuje operacje na czasie hosta.
+// TimePayload describes an operation on the host's time.
 type TimePayload struct {
-	// Servers to docelowe serwery czasu. Pusta lista przy zmianie
-	// konfiguracji jest bledem, a nie prosba o wyczyszczenie zrodel: host
-	// bez zrodla czasu rozjedzie sie po cichu.
+	// Servers are the target time servers. An empty list in a configuration
+	// change is an error rather than a request to clear the sources: a host
+	// without a time source drifts silently.
 	Servers []string `json:"servers,omitempty"`
-	// Probe wskazuje serwery do sprawdzenia bez zmiany konfiguracji.
+	// Probe names the servers to check without changing the configuration.
 	Probe    []string `json:"probe,omitempty"`
 	Timezone string   `json:"timezone,omitempty"`
-	// AllowStep jest zgoda na przestawienie zegara skokiem. Bez niej host
-	// odrzuca zmiane, ktora przesunelaby czas o wiecej niz prog.
+	// AllowStep is the consent to step the clock. Without it the host
+	// rejects a change that would move time by more than the threshold.
 	AllowStep bool `json:"allow_step,omitempty"`
-	// EnableDropIn jest zgoda na dopisanie katalogu zrodel panelu do glownego
-	// pliku demona. Bez niej host, ktory zadnego nie wlacza, zostaje tylko do
-	// odczytu - panel nie dopisuje sie do cudzej konfiguracji po cichu.
+	// EnableDropIn is the consent to add the panel's source directory to the
+	// daemon's main file. Without it a host that includes none stays
+	// read-only - the panel does not add itself to somebody else's
+	// configuration silently.
 	EnableDropIn bool `json:"enable_dropin,omitempty"`
-	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
-	// plan jeszcze raz przed zapisem.
+	// PlanHash binds the change to the plan computed on this host; the host
+	// computes the plan once more before writing.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// SecretRef wskazuje sekret w magazynie panelu.
+// SecretRef points at a secret in the panel's store.
 //
-// Payload zadania niesie wylacznie odnosnik. Wartosc nie przechodzi przez
-// zadanie, przez audyt ani przez inwentarz: host siega po nia dopiero przy
-// wykonaniu, na krotka dzierzawe wystawiona dla tego jednego zadania. Dzieki
-// temu hash planu tez opisuje odnosnik, a nie tresc - i da sie go pokazac.
+// The task payload carries only the reference. The value passes through
+// neither the task, nor the audit trail, nor the inventory: the host reaches
+// for it only at execution time, on a short lease issued for that one task.
+// Thanks to that the plan hash also describes the reference rather than the
+// content - and it can be shown.
 type SecretRef struct {
 	Name string `json:"name"`
-	// Version rowna zeru oznacza wersje biezaca w chwili dostarczenia zadania.
+	// Version equal to zero means the version current at the moment the task
+	// is delivered.
 	Version int `json:"version,omitempty"`
 }
 
-// nazwaSekretu powtarza regule magazynu, zeby zlecenie z nazwa, ktorej magazyn
-// i tak nie przyjmie, odpadalo juz przy zlecaniu. Magazyn pozostaje instancja
-// rozstrzygajaca - sprawdza nazwe ponownie przy wystawianiu dzierzawy.
-var nazwaSekretu = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
+// secretName repeats the store's rule, so that an order with a name the store
+// would not accept anyway falls out already at ordering time. The store
+// remains the deciding authority - it checks the name again when it issues
+// the lease.
+var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
 
-// Waliduj sprawdza odnosnik do sekretu.
-func (r *SecretRef) Waliduj() error {
+// Validate checks the reference to a secret.
+func (r *SecretRef) Validate() error {
 	if r == nil || r.Name == "" {
-		return fmt.Errorf("odnosnik do sekretu bez nazwy")
+		return fmt.Errorf("a reference to a secret without a name")
 	}
-	if !nazwaSekretu.MatchString(r.Name) {
-		return fmt.Errorf("nieprawidlowa nazwa sekretu %q", r.Name)
+	if !secretName.MatchString(r.Name) {
+		return fmt.Errorf("invalid secret name %q", r.Name)
 	}
 	if r.Version < 0 {
-		return fmt.Errorf("wersja sekretu nie moze byc ujemna")
+		return fmt.Errorf("the secret version must not be negative")
 	}
 	return nil
 }
 
-// Pusty mowi, czy odnosnik na nic nie wskazuje.
-func (r *SecretRef) Pusty() bool { return r == nil || r.Name == "" }
+// Empty says whether the reference points at nothing.
+func (r *SecretRef) Empty() bool { return r == nil || r.Name == "" }
 
-// String opisuje odnosnik w postaci "nazwa#wersja". Sama nazwa i wersja:
-// wartosci sekretu nie ma w tym module i nie moze pojawic sie w planie ani
-// w dzienniku.
+// String describes the reference as "name#version". The name and the version
+// only: the value of the secret is not in this module and must not appear in
+// a plan or in a log.
 func (r *SecretRef) String() string {
-	if r.Pusty() {
+	if r.Empty() {
 		return ""
 	}
 	if r.Version <= 0 {
-		return r.Name + "#biezaca"
+		return r.Name + "#current"
 	}
 	return r.Name + "#" + strconv.Itoa(r.Version)
 }
 
-// FilePayload opisuje operacje na pliku konfiguracyjnym.
+// FilePayload describes an operation on a configuration file.
 type FilePayload struct {
 	Path string `json:"path"`
-	// Content jest trescia docelowa. Panel wysyla ja w zleceniu, wiec plan
-	// i to, co trafi na host, sa tym samym.
+	// Content is the target content. The panel sends it in the order, so the
+	// plan and what reaches the host are the same thing.
 	Content string `json:"content,omitempty"`
 	Mode    string `json:"mode,omitempty"`
 	Owner   string `json:"owner,omitempty"`
 	Group   string `json:"group,omitempty"`
-	// ExpectedSHA256 wiaze zapis z trescia, ktora operator ogladal.
+	// ExpectedSHA256 binds the write to the content the operator reviewed.
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 	Validator      string `json:"validator,omitempty"`
-	// VersionSHA256 wskazuje wersje z historii przy powrocie do niej.
+	// VersionSHA256 points at the version from the history when going back to
+	// it.
 	VersionSHA256 string `json:"version_sha256,omitempty"`
-	// ContentSecret wskazuje sekret, ktorego wartosc ma trafic do pliku.
-	// Wyklucza sie z polem Content: albo tresc jest jawna i widoczna w planie,
-	// albo pochodzi z magazynu i nie ma jej nigdzie poza nim.
+	// ContentSecret points at the secret whose value is to land in the file.
+	// It excludes the Content field: either the content is in the clear and
+	// visible in the plan, or it comes from the store and exists nowhere
+	// outside it.
 	ContentSecret *SecretRef `json:"content_secret,omitempty"`
 }
 
-// Sekrety wylicza odnosniki, po ktore host bedzie musial siegnac.
+// Secrets lists the references the host will have to reach for.
 //
-// Scheduler wystawia dzierzawe dokladnie na to, co payload wskazuje - ani
-// mniej, ani wiecej.
-func (p Payload) Sekrety() []SecretRef {
-	var odnosniki []SecretRef
-	if p.File != nil && !p.File.ContentSecret.Pusty() {
-		odnosniki = append(odnosniki, *p.File.ContentSecret)
+// The scheduler issues a lease for exactly what the payload points at -
+// neither less nor more.
+func (p Payload) Secrets() []SecretRef {
+	var references []SecretRef
+	if p.File != nil && !p.File.ContentSecret.Empty() {
+		references = append(references, *p.File.ContentSecret)
 	}
-	if p.Certificate != nil && !p.Certificate.KeySecret.Pusty() {
-		odnosniki = append(odnosniki, *p.Certificate.KeySecret)
+	if p.Certificate != nil && !p.Certificate.KeySecret.Empty() {
+		references = append(references, *p.Certificate.KeySecret)
 	}
-	if p.Repository != nil && !p.Repository.PasswordSecret.Pusty() {
-		odnosniki = append(odnosniki, *p.Repository.PasswordSecret)
+	if p.Repository != nil && !p.Repository.PasswordSecret.Empty() {
+		references = append(references, *p.Repository.PasswordSecret)
 	}
 	if p.Backup != nil {
-		if !p.Backup.PasswordSecret.Pusty() {
-			odnosniki = append(odnosniki, *p.Backup.PasswordSecret)
+		if !p.Backup.PasswordSecret.Empty() {
+			references = append(references, *p.Backup.PasswordSecret)
 		}
-		// Kolejnosc jest ustalona, zeby dwa takie same zlecenia wystawialy
-		// dzierzawy w tej samej kolejnosci.
-		nazwy := make([]string, 0, len(p.Backup.EnvSecrets))
-		for nazwa := range p.Backup.EnvSecrets {
-			nazwy = append(nazwy, nazwa)
+		// The order is fixed so that two identical orders issue their leases
+		// in the same order.
+		names := make([]string, 0, len(p.Backup.EnvSecrets))
+		for name := range p.Backup.EnvSecrets {
+			names = append(names, name)
 		}
-		sort.Strings(nazwy)
-		for _, nazwa := range nazwy {
-			odnosnik := p.Backup.EnvSecrets[nazwa]
-			odnosniki = append(odnosniki, odnosnik)
+		sort.Strings(names)
+		for _, name := range names {
+			reference := p.Backup.EnvSecrets[name]
+			references = append(references, reference)
 		}
 	}
-	return odnosniki
+	return references
 }
 
-// KernelPayload opisuje operacje na ustawieniach jadra.
+// KernelPayload describes an operation on kernel settings.
 type KernelPayload struct {
-	// Settings to klucze sysctl wraz z wartosciami docelowymi.
+	// Settings are sysctl keys together with their target values.
 	Settings map[string]string `json:"settings,omitempty"`
-	// Keys wskazuje dodatkowe klucze do odczytu poza profilem.
+	// Keys names additional keys to read beyond the profile.
 	Keys   []string `json:"keys,omitempty"`
 	Module string   `json:"module,omitempty"`
-	// Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
+	// Blacklist says whether the module is to be blocked or unblocked.
 	Blacklist bool `json:"blacklist,omitempty"`
-	// PlanHash wiaze blokade z planem policzonym na tym hoscie; host liczy
-	// plan jeszcze raz przed zapisem.
+	// PlanHash binds the blacklist entry to the plan computed on this host;
+	// the host computes the plan once more before writing.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// SSHPayload opisuje zmiane konfiguracji serwera sshd.
+// SSHPayload describes a change to the sshd server configuration.
 //
-// Puste pole oznacza "nie zmieniaj": panel nie przepisuje calej konfiguracji
-// serwera, tylko te ustawienia, o ktore operator poprosil.
+// An empty field means "do not change": the panel does not rewrite the
+// server's whole configuration, only the settings the operator asked about.
 type SSHPayload struct {
 	Port                   string   `json:"port,omitempty"`
 	PermitRootLogin        string   `json:"permit_root_login,omitempty"`
@@ -1717,61 +1791,66 @@ type SSHPayload struct {
 	AllowUsers             []string `json:"allow_users,omitempty"`
 	AllowGroups            []string `json:"allow_groups,omitempty"`
 	DenyUsers              []string `json:"deny_users,omitempty"`
-	// AllowLockout pozwala zapisac konfiguracje, po ktorej nie zostanie zadna
-	// dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
+	// AllowLockout permits writing a configuration after which no working
+	// authentication method is left. It requires an explicit decision by the
+	// operator.
 	AllowLockout bool   `json:"allow_lockout,omitempty"`
 	KeyType      string `json:"key_type,omitempty"`
-	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
-	// plan jeszcze raz przed zapisem.
+	// PlanHash binds the change to the plan computed on this host; the host
+	// computes the plan once more before writing.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// OpisujeZmiane mowi, czy payload niesie ustawienia do zaplanowania. Payload
-// bez ustawien jest pytaniem o stan serwera, a nie o roznice.
-func (p SSHPayload) OpisujeZmiane() bool {
+// DescribesChange says whether the payload carries settings to plan. A
+// payload without settings is a question about the state of the server, not
+// about a difference.
+func (p SSHPayload) DescribesChange() bool {
 	return p.Port != "" || p.PermitRootLogin != "" || p.PasswordAuthentication != "" ||
 		p.PubkeyAuthentication != "" || p.KbdInteractive != "" || p.MaxAuthTries != "" ||
 		len(p.AllowUsers) > 0 || len(p.AllowGroups) > 0 || len(p.DenyUsers) > 0
 }
 
-// StoragePayload opisuje operacje na przestrzeni dyskowej.
+// StoragePayload describes an operation on storage.
 //
-// Zrodlo wskazujemy identyfikatorem trwalym albo sciezka w /dev: nazwa
-// /dev/sdX zalezy od kolejnosci wykrywania i po restarcie potrafi wskazac
-// inny dysk.
+// The source is named by a persistent identifier or by a path in /dev: the
+// name /dev/sdX depends on the order of discovery and after a reboot can
+// point at a different disk.
 type StoragePayload struct {
 	Source  string `json:"source,omitempty"`
 	Target  string `json:"target,omitempty"`
 	FSType  string `json:"fs_type,omitempty"`
 	Options string `json:"options,omitempty"`
-	// Persist zapisuje wpis w fstab. Bez niego montowanie zniknie po
-	// restarcie - i operator ma o tym wiedziec przed, a nie po awarii.
+	// Persist writes an entry in fstab. Without it the mount disappears after
+	// a reboot - and the operator is to know that before the outage, not
+	// after.
 	Persist bool   `json:"persist,omitempty"`
 	Device  string `json:"device,omitempty"`
-	// ExpectedSerial i ExpectedSizeBytes wiaza operacje z urzadzeniem, ktore
-	// operator ogladal. Sciezka /dev/sdX po restarcie wskazuje co innego.
+	// ExpectedSerial and ExpectedSizeBytes bind the operation to the device
+	// the operator reviewed. A /dev/sdX path points at something else after a
+	// reboot.
 	ExpectedSerial    string `json:"expected_serial,omitempty"`
 	ExpectedSizeBytes uint64 `json:"expected_size_bytes,omitempty"`
-	// Size jest przyrostem wolumenu, np. "+10G".
+	// Size is the increment of the volume, e.g. "+10G".
 	Size  string `json:"size,omitempty"`
 	Label string `json:"label,omitempty"`
-	// ExpectedUUID wiaze operacje z konkretnym filesystemem.
+	// ExpectedUUID binds the operation to one specific filesystem.
 	ExpectedUUID string `json:"expected_uuid,omitempty"`
 	Repair       bool   `json:"repair,omitempty"`
-	// Plan nazywa rodzaj operacji planowanej przez storage.plan na
-	// urzadzeniu: check, resize albo lvm_extend. Montowanie poznaje sie po
-	// celu, wiec nie potrzebuje nazwy.
+	// Plan names the kind of operation storage.plan is planning on the
+	// device: check, resize or lvm_extend. A mount is recognised by its
+	// target, so it needs no name.
 	Plan string `json:"plan,omitempty"`
-	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
-	// plan jeszcze raz przed operacja.
+	// PlanHash binds the change to the plan computed on this host; the host
+	// computes the plan once more before the operation.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// FirewallPayload opisuje operacje na zaporze hosta.
+// FirewallPayload describes an operation on the host's firewall.
 //
-// Panel nie przyjmuje surowego zapisu nft: tekst reguly jest jezykiem, a
-// przyjmowanie jezyka znaczyloby, ze host wykona wszystko, co da sie w nim
-// zapisac. Kreator sklada regule z pol, ktore panel rozumie.
+// The panel does not accept raw nft text: a rule written as text is a
+// language, and accepting a language would mean the host executes everything
+// that can be written in it. The wizard builds the rule out of fields the
+// panel understands.
 type FirewallPayload struct {
 	RuleID    string   `json:"rule_id,omitempty"`
 	Chain     string   `json:"chain,omitempty"`
@@ -1781,213 +1860,222 @@ type FirewallPayload struct {
 	Sources   []string `json:"sources,omitempty"`
 	Interface string   `json:"interface,omitempty"`
 	Comment   string   `json:"comment,omitempty"`
-	// Zone i Service dotycza hostow z firewalld.
+	// Zone and Service concern hosts with firewalld.
 	Zone    string `json:"zone,omitempty"`
 	Service string `json:"service,omitempty"`
 	Enable  bool   `json:"enable,omitempty"`
-	// BreakGlass przelamuje ochrone kanalu zarzadzania. Wymaga jawnej decyzji
-	// operatora, bo skutkiem bywa host, do ktorego trzeba pojechac.
+	// BreakGlass overrides the protection of the management channel. It
+	// requires an explicit decision by the operator, because the result is
+	// sometimes a host somebody has to drive to.
 	BreakGlass      bool   `json:"break_glass,omitempty"`
 	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
 	RollbackID      string `json:"rollback_id,omitempty"`
-	// ExpectedHash wiaze zmiane z zestawem regul, ktory operator ogladal.
+	// ExpectedHash binds the change to the ruleset the operator reviewed.
 	ExpectedHash string `json:"expected_hash,omitempty"`
 }
 
-// DNSPayload opisuje operacje na resolverze hosta.
+// DNSPayload describes an operation on the host's resolver.
 type DNSPayload struct {
-	// Interface wskazuje profil polaczenia, przez ktory idzie zmiana.
-	// Resolver hosta nalezy do interfejsu, a nie do pliku: plik jest tylko
-	// tym, co usluga z tego wyliczyla.
+	// Interface names the connection profile the change goes through. The
+	// host's resolver belongs to the interface rather than to the file: the
+	// file is only what the service computed out of it.
 	Interface     string   `json:"interface,omitempty"`
 	Servers       []string `json:"servers,omitempty"`
 	SearchDomains []string `json:"search_domains,omitempty"`
-	// IgnoreAutoDNS odrzuca serwery z DHCP. Bez tego serwery panelu i serwery
-	// dostawcy trafiaja do jednej listy, a operator nie wie, ktory odpowiedzial.
+	// IgnoreAutoDNS rejects the servers from DHCP. Without it the panel's
+	// servers and the provider's servers land in one list, and the operator
+	// does not know which one answered.
 	IgnoreAutoDNS   bool     `json:"ignore_auto_dns,omitempty"`
 	RollbackSeconds uint32   `json:"rollback_seconds,omitempty"`
 	Names           []string `json:"names,omitempty"`
-	// PlanHash wiaze zmiane z planem policzonym na tym hoscie; host liczy
-	// plan jeszcze raz przed zmiana.
+	// PlanHash binds the change to the plan computed on this host; the host
+	// computes the plan once more before the change.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// NetworkPayload opisuje zmiane konfiguracji sieci.
+// NetworkPayload describes a change to the network configuration.
 //
-// Payload opisuje stan docelowy interfejsu, a nie polecenia do wykonania.
-// Panel wskazuje interfejs, bo to jego widzi operator; profil NetworkManagera
-// host znajduje sam.
+// The payload describes the target state of the interface, not commands to
+// run. The panel names the interface, because that is what the operator sees;
+// the NetworkManager profile the host finds by itself.
 type NetworkPayload struct {
 	Interface string `json:"interface"`
-	// MTU jest tekstem, bo "auto" jest tu rownoprawna wartoscia: zero
-	// znaczyloby lacze o zerowym MTU.
+	// MTU is text, because "auto" is an equally valid value here: zero would
+	// mean a link with an MTU of zero.
 	MTU string `json:"mtu,omitempty"`
-	// Routes to pelna lista tras profilu, a nie dopisek: operator widzial
-	// w planie konkretny zestaw i to on ma zostac na hoscie.
+	// Routes is the profile's complete list of routes, not an addition: the
+	// operator saw one specific set in the plan and that is what is to stay
+	// on the host.
 	Routes    []string `json:"routes,omitempty"`
 	Method    string   `json:"method,omitempty"`
 	Addresses []string `json:"addresses,omitempty"`
 	Gateway   string   `json:"gateway,omitempty"`
 	DNS       []string `json:"dns,omitempty"`
-	// RollbackSeconds to okno, w ktorym agent ma potwierdzic lacznosc.
-	// Zero oznacza wartosc domyslna hosta, a nie brak wycofania.
+	// RollbackSeconds is the window in which the agent has to confirm
+	// connectivity. Zero means the host's default value, not the absence of a
+	// rollback.
 	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
-	// RollbackID wskazuje plan wycofania przy operacji network.rollback.
+	// RollbackID points at the rollback plan in a network.rollback operation.
 	RollbackID string `json:"rollback_id,omitempty"`
-	// PlanHash wiaze zmiane z planem policzonym na tym hoscie. Host liczy
-	// plan jeszcze raz przed zmiana: inny odcisk znaczy, ze profil zmienil
-	// sie od planowania i zmiana wchodzilaby w inny stan niz ogladany.
+	// PlanHash binds the change to the plan computed on this host. The host
+	// computes the plan once more before the change: a different digest means
+	// the profile changed since planning and the change would enter a state
+	// other than the one reviewed.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// OpisujeZmiane mowi, czy payload niesie zmiane do zaplanowania: MTU, liste
-// tras albo profil adresowy. Payload z samym interfejsem jest pytaniem
-// o stan, a nie o roznice.
-func (p NetworkPayload) OpisujeZmiane() bool {
+// DescribesChange says whether the payload carries a change to plan: an MTU,
+// a list of routes or an address profile. A payload with an interface alone
+// is a question about state, not about a difference.
+func (p NetworkPayload) DescribesChange() bool {
 	return p.Interface != "" && (p.MTU != "" || p.Routes != nil || p.Method != "")
 }
 
-// SchedulePayload opisuje zadanie cykliczne.
+// SchedulePayload describes a scheduled job.
 //
-// Wpis opisuje stan docelowy, a nie polecenie do wykonania raz: powtorzenie
-// operacji z tym samym payloadem niczego nie dubluje.
+// The entry describes the target state, not a command to run once: repeating
+// the operation with the same payload duplicates nothing.
 type SchedulePayload struct {
-	// ID jest stabilnym identyfikatorem wpisu zarzadzanego. Wpis zastany
-	// na hoscie nie ma takiego identyfikatora i nie da sie go tu podac.
+	// ID is the stable identifier of a managed entry. An entry found on the
+	// host has no such identifier and cannot be named here.
 	ID string `json:"id"`
-	// Expression to wyrazenie crona. Sprawdzane po obu stronach: wpis,
-	// ktorego host nie zrozumie, nigdy sie nie uruchomi.
+	// Expression is the cron expression. Checked on both sides: an entry the
+	// host will not understand would never run.
 	Expression string `json:"expression,omitempty"`
-	// Command jest tablica argumentow, nigdy wierszem powloki.
+	// Command is an array of arguments, never a shell line.
 	Command []string `json:"command,omitempty"`
 	User    string   `json:"user,omitempty"`
 	Comment string   `json:"comment,omitempty"`
-	// Enabled dotyczy wylacznie schedule.disable: prawda wlacza, falsz
-	// wylacza. Wylaczenie nie kasuje tresci wpisu.
+	// Enabled concerns schedule.disable only: true enables, false disables.
+	// Disabling does not delete the content of the entry.
 	Enabled bool `json:"enabled,omitempty"`
-	// Adopt pozwala przejac wpis zastany na hoscie. Bez tego panel nie
-	// nadpisuje pracy, ktorej nikt do panelu nie wprowadzal.
+	// Adopt allows taking over an entry found on the host. Without it the
+	// panel does not overwrite work nobody entered into the panel.
 	Adopt bool `json:"adopt,omitempty"`
 }
 
-// ProcessListPayload opisuje snapshot procesow.
+// ProcessListPayload describes a snapshot of processes.
 type ProcessListPayload struct {
-	// SortBy decyduje, ktore procesy trafia do wyniku, gdy jest ich wiecej
-	// niz limit: rss, cpu, pid albo started.
+	// SortBy decides which processes land in the result when there are more
+	// of them than the limit: rss, cpu, pid or started.
 	SortBy string `json:"sort_by,omitempty"`
 	Limit  uint32 `json:"limit,omitempty"`
 }
 
-// ProcessSignalPayload opisuje sygnal do procesu.
+// ProcessSignalPayload describes a signal to a process.
 //
-// Sam PID nie identyfikuje procesu: jadro uzywa numerow ponownie, wiec sygnal
-// wyslany chwile po obejrzeniu listy moglby trafic w cos innego. Czas startu
-// wiaze zadanie z konkretnym procesem.
+// A PID alone does not identify a process: the kernel reuses numbers, so a
+// signal sent a moment after the list was reviewed could hit something else.
+// The start time binds the task to one specific process.
 type ProcessSignalPayload struct {
 	PID           int32  `json:"pid"`
 	ExpectedStart uint64 `json:"expected_start_ticks"`
 	Signal        string `json:"signal"`
-	// Command sluzy potwierdzeniu i audytowi: operator ma w oknie polecenie,
-	// a w sladzie zostaje to, co widzial.
+	// Command serves confirmation and the audit trail: the operator has the
+	// command in the dialog, and what they saw stays in the trail.
 	Command string `json:"command,omitempty"`
 }
 
-// LogFilePayload opisuje odczyt pliku logu.
+// LogFilePayload describes reading a log file.
 type LogFilePayload struct {
 	Path string `json:"path"`
-	// Lines ogranicza rozmiar wyniku; odczyt bez limitu nie jest dozwolony.
+	// Lines bounds the size of the result; a read without a limit is not
+	// allowed.
 	Lines uint32 `json:"lines"`
 }
 
-// ComposePayload niesie manifest projektu Compose.
+// ComposePayload carries the manifest of a Compose project.
 //
-// Manifest jest czescia payloadu, a nie odwolaniem do pliku na hoscie:
-// operator zatwierdza tresc, ktora obejrzal, a hash payloadu wiaze
-// zatwierdzenie wlasnie z nia.
+// The manifest is part of the payload rather than a reference to a file on
+// the host: the operator approves the content they reviewed, and the payload
+// hash binds the approval to exactly that.
 type ComposePayload struct {
 	Project  string `json:"project"`
 	Manifest string `json:"manifest"`
-	// PlanDigest wiaze wdrozenie z planem. Pusty jest dopuszczalny wylacznie
-	// przy planowaniu; wdrozenie bez niego nie ma podstawy.
+	// PlanDigest binds the deployment to a plan. An empty one is allowed only
+	// while planning; a deployment without it has no basis.
 	PlanDigest string `json:"plan_digest,omitempty"`
 }
 
-// DockerContainerPayload wskazuje kontener operacji.
+// DockerContainerPayload names the container of an operation.
 //
-// Celem jest identyfikator, a nie nazwa. Nazwa kontenera jest etykieta:
-// moze zostac przypisana innemu kontenerowi miedzy planem a wykonaniem,
-// a operator zatwierdzil konkretny obiekt.
+// The target is an identifier, not a name. A container name is a label: it
+// can be assigned to a different container between the plan and the
+// execution, and the operator approved one specific object.
 type DockerContainerPayload struct {
 	ContainerID string `json:"container_id"`
-	// Name sluzy wylacznie potwierdzeniu i audytowi: operator ma w oknie
-	// nazwe, a w sladzie zostaje to, co widzial.
+	// Name serves confirmation and the audit trail only: the operator has the
+	// name in the dialog, and what they saw stays in the trail.
 	Name string `json:"name,omitempty"`
-	// TimeoutSeconds daje kontenerowi czas na zamkniecie przed zabiciem.
+	// TimeoutSeconds gives the container time to shut down before being
+	// killed.
 	TimeoutSeconds uint32 `json:"timeout_seconds,omitempty"`
-	// RemoveVolumes dotyczy wylacznie usuwania i domyslnie jest wylaczone:
-	// wolumen przezywa kontener wlasnie po to, zeby dane przezyly.
+	// RemoveVolumes concerns removal only and is off by default: a volume
+	// outlives its container precisely so that the data outlives it.
 	RemoveVolumes bool `json:"remove_volumes,omitempty"`
 }
 
-// DockerImagePayload opisuje obraz do pobrania.
+// DockerImagePayload describes the image to pull.
 type DockerImagePayload struct {
-	// Reference jest pelnym odwolaniem do obrazu, np. "nginx:1.27".
+	// Reference is the full image reference, e.g. "nginx:1.27".
 	Reference string `json:"reference"`
 }
 
-// DockerPrunePayload wylicza obiekty do usuniecia.
+// DockerPrunePayload lists the objects to remove.
 //
-// Sprzatanie po filtrze usuwa to, co pasuje w chwili wykonania - a wiec takze
-// obiekt utworzony po tym, jak operator obejrzal podglad. Dlatego operacja
-// przyjmuje wprost liste obiektow: usuwa dokladnie to, co zostalo pokazane,
-// albo nic.
+// Pruning by filter removes what matches at execution time - including an
+// object created after the operator reviewed the preview. That is why the
+// operation takes an explicit list of objects: it removes exactly what was
+// shown, or nothing.
 type DockerPrunePayload struct {
 	ImageIDs   []string `json:"image_ids,omitempty"`
 	VolumeName []string `json:"volume_names,omitempty"`
 	NetworkIDs []string `json:"network_ids,omitempty"`
 }
 
-// Granice odczytu dziennika zdarzen. Panel odmawia zlecenia spoza nich,
-// zanim zadanie ruszy w swiat; host domyka je po raz drugi, bo to on placi
-// za odczyt.
+// The boundaries of an event journal read. The panel refuses an order outside
+// them before the task goes out into the world; the host closes them a second
+// time, because it is the one paying for the read.
 const (
-	maksymalneOknoZdarzen      = 24 * 60 * 60
-	maksymalneSledzenieZdarzen = 60
-	maksymalnieZdarzen         = 1000
+	maxEventWindow = 24 * 60 * 60
+	maxEventFollow = 60
+	maxEvents      = 1000
 )
 
-// DockerEventsPayload opisuje zamkniete okno odczytu dziennika zdarzen.
+// DockerEventsPayload describes a closed window of an event journal read.
 //
-// Kazde pole ma granice, bo zadanie bez granic zostaje na hoscie na zawsze.
-// Zero znaczy wartosc domyslna modulu, a nie brak limitu.
+// Every field has a boundary, because a task without boundaries stays on the
+// host forever. Zero means the module's default value, not the absence of a
+// limit.
 type DockerEventsPayload struct {
-	// SinceSeconds mowi, jak daleko wstecz siegnac.
+	// SinceSeconds says how far back to reach.
 	SinceSeconds int `json:"since_seconds,omitempty"`
-	// FollowSeconds przedluza odczyt poza chwile obecna. Zero znaczy sam
-	// dziennik przeszly - zadanie konczy sie od razu.
+	// FollowSeconds extends the read past the present moment. Zero means the
+	// past journal alone - the task ends right away.
 	FollowSeconds int `json:"follow_seconds,omitempty"`
-	// Types ogranicza rodzaje zdarzen. Pusta lista znaczy wszystkie znane.
+	// Types narrows the kinds of events. An empty list means all known ones.
 	Types []string `json:"types,omitempty"`
-	// MaxEvents ogranicza liczbe zdarzen w wyniku.
+	// MaxEvents bounds the number of events in the result.
 	MaxEvents int `json:"max_events,omitempty"`
 }
 
-// DockerReadPayload opisuje odczyt stanu silnika kontenerow. Payload jest
-// pusty z zalozenia: zakres odczytu wynika z operacji, a nie z parametru -
-// inaczej "odczytaj kontenery" i "odczytaj wszystko" bylyby ta sama operacja
-// z rozna cena dla hosta.
+// DockerReadPayload describes a read of the container engine's state. The
+// payload is empty by design: the scope of the read follows from the
+// operation rather than from a parameter - otherwise "read the containers"
+// and "read everything" would be the same operation at a different price for
+// the host.
 type DockerReadPayload struct{}
 
-// PackageRepairPayload niesie odpowiedzi operatora na pytania konfiguracyjne
-// pakietow, ktore blokuja operacje pakietowe.
+// PackageRepairPayload carries the operator's answers to package
+// configuration questions that block package operations.
 //
-// Payload moze byc pusty: samo dokonczenie konfiguracji wystarcza, gdy
-// poprzednia transakcja zostala przerwana i nic nie czeka na decyzje.
+// The payload may be empty: finishing the configuration is enough when the
+// previous transaction was interrupted and nothing is waiting for a decision.
 type PackageRepairPayload struct {
 	Answers []DebconfAnswer `json:"answers,omitempty"`
 }
 
-// DebconfAnswer jest jedna odpowiedzia na pytanie konfiguracyjne pakietu.
+// DebconfAnswer is one answer to a package configuration question.
 type DebconfAnswer struct {
 	Package  string `json:"package"`
 	Question string `json:"question"`
@@ -1995,11 +2083,12 @@ type DebconfAnswer struct {
 	Value    string `json:"value"`
 }
 
-// DomainEnrollPayload opisuje dolaczenie hosta do domeny.
+// DomainEnrollPayload describes joining the host to a domain.
 //
-// Payload nie zawiera hasla: jednorazowe poswiadczenie jest pobierane
-// z katalogu w chwili wysylki i wstrzykiwane do koperty. Przechowywanie go
-// w bazie oznaczaloby sekret lezacy na dysku przez caly czas zycia zadania.
+// The payload contains no password: the one-time credential is fetched from
+// the directory at send time and injected into the envelope. Storing it in
+// the database would mean a secret lying on disk for the whole life of the
+// task.
 type DomainEnrollPayload struct {
 	Domain   string `json:"domain"`
 	Realm    string `json:"realm"`
@@ -2007,49 +2096,50 @@ type DomainEnrollPayload struct {
 	Hostname string `json:"hostname,omitempty"`
 }
 
-// LocalUserPayload opisuje zmiane konta lokalnego.
+// LocalUserPayload describes a change to a local account.
 //
-// Payload nie zawiera hasla ani hasza. Konto zakladane przez panel jest
-// dostepne wylacznie kluczem SSH, wiec nie istnieje sekret, ktory panel
-// musialby przechowywac lub przenosic.
+// The payload contains neither a password nor a hash. An account created by
+// the panel is reachable by SSH key only, so there is no secret the panel
+// would have to store or carry.
 type LocalUserPayload struct {
 	Name   string   `json:"name"`
 	Gecos  string   `json:"gecos,omitempty"`
 	Shell  string   `json:"shell,omitempty"`
 	Groups []string `json:"groups,omitempty"`
-	// SSHKeys jest pelna, zamierzona lista kluczy. Pusta lista przy operacji
-	// ustawiania kluczy odbiera dostep i jest swiadoma zmiana, nie brakiem danych.
+	// SSHKeys is the complete, intended list of keys. An empty list in a
+	// key-setting operation takes access away and is a deliberate change, not
+	// missing data.
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	CreateHome bool     `json:"create_home,omitempty"`
 }
 
-// Validate sprawdza spojnosc typu operacji z payloadem.
+// Validate checks that the operation type and the payload agree.
 func Validate(action ActionType, payload Payload) error {
 	if !action.Known() {
-		return fmt.Errorf("nieznany typ operacji %q", action)
+		return fmt.Errorf("unknown operation type %q", action)
 	}
 	switch action {
 	case ActionPackagePlan:
 		if payload.PackagePlan == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu package_plan", action)
+			return fmt.Errorf("the operation %s requires a package_plan payload", action)
 		}
 		switch payload.PackagePlan.Mode {
 		case "", "upgrade":
 		case "install", "remove":
 			if len(payload.PackagePlan.OnlyPackages) == 0 {
-				return fmt.Errorf("plan %s wymaga listy pakietow", payload.PackagePlan.Mode)
+				return fmt.Errorf("a %s plan requires a list of packages", payload.PackagePlan.Mode)
 			}
 		default:
-			return fmt.Errorf("nieobslugiwany rodzaj planu %q", payload.PackagePlan.Mode)
+			return fmt.Errorf("unsupported plan kind %q", payload.PackagePlan.Mode)
 		}
 		return validatePackageNames(payload.PackagePlan.OnlyPackages)
 
 	case ActionPackageInstall, ActionPackageRemove, ActionPackageHoldSet:
 		if payload.PackageChange == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu package_change", action)
+			return fmt.Errorf("the operation %s requires a package_change payload", action)
 		}
 		if len(payload.PackageChange.Packages) == 0 {
-			return fmt.Errorf("operacja %s wymaga listy pakietow", action)
+			return fmt.Errorf("the operation %s requires a list of packages", action)
 		}
 		if err := validatePackageNames(payload.PackageChange.Packages); err != nil {
 			return err
@@ -2057,54 +2147,54 @@ func Validate(action ActionType, payload Payload) error {
 		if err := validatePackageNames(payload.PackageChange.ExpectedRemovals); err != nil {
 			return err
 		}
-		// Usuniecie bez zatwierdzonego zbioru nie ma podstawy: operator
-		// zatwierdzilby zmiane, ktorej nie widzial.
+		// A removal without an approved set has no basis: the operator would
+		// be approving a change they did not see.
 		if action == ActionPackageRemove && len(payload.PackageChange.ExpectedRemovals) == 0 {
-			return fmt.Errorf("usuniecie wymaga zatwierdzonego zbioru pakietow")
+			return fmt.Errorf("a removal requires an approved set of packages")
 		}
-		// Pakiet chroniony nie jest odrzucany dopiero na hoscie: operator ma
-		// wiedziec przy zlecaniu, ze ta operacja nie ma szans.
+		// A protected package is not rejected only on the host: the operator
+		// is to know when ordering that this operation has no chance.
 		if action == ActionPackageRemove {
-			razem := append(append([]string{}, payload.PackageChange.Packages...),
+			together := append(append([]string{}, payload.PackageChange.Packages...),
 				payload.PackageChange.ExpectedRemovals...)
-			if chronione := chronionePakiety(razem); len(chronione) > 0 {
-				return fmt.Errorf("pakiety chronione nie moga zostac usuniete: %s",
-					strings.Join(chronione, ", "))
+			if protected := protectedPackages(together); len(protected) > 0 {
+				return fmt.Errorf("protected packages must not be removed: %s",
+					strings.Join(protected, ", "))
 			}
 		}
 		return nil
 
 	case ActionPackageRepair:
 		if payload.PackageRepair == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu package_repair", action)
+			return fmt.Errorf("the operation %s requires a package_repair payload", action)
 		}
 		for _, answer := range payload.PackageRepair.Answers {
 			if err := validatePackageNames([]string{answer.Package}); err != nil {
 				return err
 			}
 			if !debconfQuestionPattern.MatchString(answer.Question) {
-				return fmt.Errorf("nieprawidlowa nazwa pytania %q", answer.Question)
+				return fmt.Errorf("invalid question name %q", answer.Question)
 			}
 			if !debconfTypePattern.MatchString(answer.Type) {
-				return fmt.Errorf("nieobslugiwany typ pytania %q", answer.Type)
+				return fmt.Errorf("unsupported question type %q", answer.Type)
 			}
-			// Znak nowej linii pozwalalby dopisac ustawienia, o ktore nikt
-			// nie prosil: kazdy wiersz wejscia debconfa jest osobnym wpisem.
+			// A newline would allow appending settings nobody asked for:
+			// every line of debconf input is a separate entry.
 			if strings.ContainsAny(answer.Value, "\n\r") {
-				return fmt.Errorf("wartosc odpowiedzi nie moze zawierac znaku nowej linii")
+				return fmt.Errorf("the answer value must not contain a newline")
 			}
 		}
 		return nil
 
 	case ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet:
 		if payload.LocalUser == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu local_user", action)
+			return fmt.Errorf("the operation %s requires a local_user payload", action)
 		}
 		if !localUserNamePattern.MatchString(payload.LocalUser.Name) {
-			return fmt.Errorf("nieprawidlowa nazwa konta %q", payload.LocalUser.Name)
+			return fmt.Errorf("invalid account name %q", payload.LocalUser.Name)
 		}
 		if len(payload.LocalUser.SSHKeys) > 64 {
-			return fmt.Errorf("zbyt wiele kluczy SSH: %d", len(payload.LocalUser.SSHKeys))
+			return fmt.Errorf("too many SSH keys: %d", len(payload.LocalUser.SSHKeys))
 		}
 		for _, key := range payload.LocalUser.SSHKeys {
 			if err := validatePublicKeyShape(key); err != nil {
@@ -2113,149 +2203,149 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		for _, group := range payload.LocalUser.Groups {
 			if !localUserNamePattern.MatchString(group) {
-				return fmt.Errorf("nieprawidlowa nazwa grupy %q", group)
+				return fmt.Errorf("invalid group name %q", group)
 			}
 		}
 		if shell := payload.LocalUser.Shell; shell != "" && !strings.HasPrefix(shell, "/") {
-			return fmt.Errorf("powloka musi byc sciezka bezwzgledna, otrzymano %q", shell)
+			return fmt.Errorf("the shell has to be an absolute path, got %q", shell)
 		}
 		if strings.ContainsAny(payload.LocalUser.Gecos, ":\n") {
-			return fmt.Errorf("pole opisu nie moze zawierac dwukropka ani znaku nowej linii")
+			return fmt.Errorf("the description field must not contain a colon or a newline")
 		}
 		return nil
 
 	case ActionDomainEnroll, ActionDomainPreflight:
 		if payload.DomainEnroll == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu domain_enroll", action)
+			return fmt.Errorf("the operation %s requires a domain_enroll payload", action)
 		}
 		if payload.DomainEnroll.Domain == "" || payload.DomainEnroll.Realm == "" {
-			return fmt.Errorf("dolaczenie wymaga domeny i realmu")
+			return fmt.Errorf("joining requires a domain and a realm")
 		}
 		if !domainPattern.MatchString(payload.DomainEnroll.Domain) {
-			return fmt.Errorf("nieprawidlowa nazwa domeny %q", payload.DomainEnroll.Domain)
+			return fmt.Errorf("invalid domain name %q", payload.DomainEnroll.Domain)
 		}
 		return nil
 
 	case ActionInventoryRefresh:
-		// Payload jest opcjonalny: brak zakresu znaczy caly inwentarz.
+		// The payload is optional: no scope means the whole inventory.
 		if payload.Inventory == nil {
 			return nil
 		}
-		if len(payload.Inventory.Modules) > maksymalnieModulowOdswiezenia {
-			return fmt.Errorf("odswiezenie obejmuje najwyzej %d modulow",
-				maksymalnieModulowOdswiezenia)
+		if len(payload.Inventory.Modules) > maxRefreshModules {
+			return fmt.Errorf("a refresh covers at most %d modules", maxRefreshModules)
 		}
-		widziane := map[string]bool{}
-		for _, modul := range payload.Inventory.Modules {
-			// Nieznana nazwa modulu nie moze przejsc jako "nic do zrobienia":
-			// literowka konczylaby sie odswiezeniem, ktore nic nie odswieza,
-			// a wyglada na udane.
-			if !ModulInwentarza(modul) {
-				return fmt.Errorf("nieznany modul inwentarza %q", modul)
+		seen := map[string]bool{}
+		for _, module := range payload.Inventory.Modules {
+			// An unknown module name must not pass as "nothing to do": a typo
+			// would end in a refresh that refreshes nothing and looks like a
+			// success.
+			if !IsInventoryModule(module) {
+				return fmt.Errorf("unknown inventory module %q", module)
 			}
-			if widziane[modul] {
-				return fmt.Errorf("modul %q podany dwa razy", modul)
+			if seen[module] {
+				return fmt.Errorf("the module %q was given twice", module)
 			}
-			widziane[modul] = true
+			seen[module] = true
 		}
 		return nil
 
 	case ActionDockerRead:
 		if payload.DockerRead == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu docker_read", action)
+			return fmt.Errorf("the operation %s requires a docker_read payload", action)
 		}
 		return nil
 
 	case ActionDockerStart, ActionDockerStop, ActionDockerRestart, ActionDockerRemove:
 		if payload.DockerContainer == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu docker_container", action)
+			return fmt.Errorf("the operation %s requires a docker_container payload", action)
 		}
-		if !poprawnyIdentyfikatorKontenera(payload.DockerContainer.ContainerID) {
-			return fmt.Errorf("nieprawidlowy identyfikator kontenera %q",
+		if !validContainerIdentifier(payload.DockerContainer.ContainerID) {
+			return fmt.Errorf("invalid container identifier %q",
 				payload.DockerContainer.ContainerID)
 		}
 		if payload.DockerContainer.TimeoutSeconds > 3600 {
-			return fmt.Errorf("czas na zamkniecie kontenera jest zbyt dlugi")
+			return fmt.Errorf("the time given to shut the container down is too long")
 		}
 		if payload.DockerContainer.RemoveVolumes && action != ActionDockerRemove {
-			return fmt.Errorf("operacja %s nie usuwa wolumenow", action)
+			return fmt.Errorf("the operation %s does not remove volumes", action)
 		}
 		return nil
 
 	case ActionDockerPull:
 		if payload.DockerImage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu docker_image", action)
+			return fmt.Errorf("the operation %s requires a docker_image payload", action)
 		}
-		return poprawneOdwolanieObrazu(payload.DockerImage.Reference)
+		return validImageReference(payload.DockerImage.Reference)
 
 	case ActionComposePlan, ActionComposeDeploy:
 		if payload.Compose == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu compose", action)
+			return fmt.Errorf("the operation %s requires a compose payload", action)
 		}
-		if !nazwaProjektuCompose.MatchString(payload.Compose.Project) {
-			return fmt.Errorf("nieprawidlowa nazwa projektu %q", payload.Compose.Project)
+		if !composeProjectName.MatchString(payload.Compose.Project) {
+			return fmt.Errorf("invalid project name %q", payload.Compose.Project)
 		}
 		if strings.TrimSpace(payload.Compose.Manifest) == "" {
-			return fmt.Errorf("manifest projektu jest pusty")
+			return fmt.Errorf("the project manifest is empty")
 		}
-		if len(payload.Compose.Manifest) > maksymalnyManifestCompose {
-			return fmt.Errorf("manifest projektu jest zbyt duzy (%d bajtow)",
+		if len(payload.Compose.Manifest) > maxComposeManifest {
+			return fmt.Errorf("the project manifest is too large (%d bytes)",
 				len(payload.Compose.Manifest))
 		}
-		// Wdrozenie bez planu nie ma podstawy: operator zatwierdzilby zmiane,
-		// ktorej nie widzial.
+		// A deployment without a plan has no basis: the operator would be
+		// approving a change they did not see.
 		if action == ActionComposeDeploy && payload.Compose.PlanDigest == "" {
-			return fmt.Errorf("wdrozenie projektu wymaga hasha zatwierdzonego planu")
+			return fmt.Errorf("deploying a project requires the hash of an approved plan")
 		}
 		return nil
 
 	case ActionDockerPrune:
 		if payload.DockerPrune == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu docker_prune", action)
+			return fmt.Errorf("the operation %s requires a docker_prune payload", action)
 		}
-		return sprawdzListeSprzatania(payload.DockerPrune)
+		return checkPruneList(payload.DockerPrune)
 
 	case ActionDockerEvents:
-		return sprawdzOdczytZdarzen(payload.DockerEvents)
+		return checkEventsRead(payload.DockerEvents)
 
 	case ActionScheduleEnsure, ActionScheduleDisable, ActionScheduleRemove, ActionScheduleRunNow:
 		if payload.Schedule == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu schedule", action)
+			return fmt.Errorf("the operation %s requires a schedule payload", action)
 		}
-		if !identyfikatorHarmonogramu.MatchString(payload.Schedule.ID) {
-			return fmt.Errorf("nieprawidlowy identyfikator harmonogramu %q", payload.Schedule.ID)
+		if !scheduleIdentifier.MatchString(payload.Schedule.ID) {
+			return fmt.Errorf("invalid schedule identifier %q", payload.Schedule.ID)
 		}
 		if action != ActionScheduleEnsure {
 			return nil
 		}
 		if strings.TrimSpace(payload.Schedule.Expression) == "" {
-			return fmt.Errorf("harmonogram wymaga wyrazenia")
+			return fmt.Errorf("a schedule requires an expression")
 		}
-		// Wyrazenie sprawdzamy tu, a nie dopiero na hoscie: wpis, ktorego cron
-		// nie zrozumie, nigdy by sie nie uruchomil, a operator dowiadywalby
-		// sie o tym z bledu wykonania zamiast z odmowy przy zleceniu.
+		// We check the expression here rather than only on the host: an entry
+		// cron will not understand would never run, and the operator would
+		// learn about it from an execution error instead of a refusal at
+		// ordering time.
 		if _, err := schedules.ParsujWyrazenie(payload.Schedule.Expression); err != nil {
-			return fmt.Errorf("wyrazenie harmonogramu: %w", err)
+			return fmt.Errorf("schedule expression: %w", err)
 		}
 		if len(payload.Schedule.Command) == 0 {
-			return fmt.Errorf("harmonogram wymaga polecenia")
+			return fmt.Errorf("a schedule requires a command")
 		}
-		return sprawdzPolecenieHarmonogramu(payload.Schedule.Command)
+		return checkScheduleCommand(payload.Schedule.Command)
 
 	case ActionFilePlan:
 		return nil
 
 	case ActionFileRead, ActionFileRemove:
 		if payload.File == nil || payload.File.Path == "" {
-			return fmt.Errorf("operacja %s wymaga sciezki", action)
+			return fmt.Errorf("the operation %s requires a path", action)
 		}
-		return sprawdzSciezkePliku(payload.File.Path)
+		return checkFilePath(payload.File.Path)
 
 	case ActionFileEnsure, ActionFileRollback:
 		if payload.File == nil || payload.File.Path == "" {
-			return fmt.Errorf("operacja %s wymaga sciezki", action)
+			return fmt.Errorf("the operation %s requires a path", action)
 		}
-		if err := sprawdzSciezkePliku(payload.File.Path); err != nil {
+		if err := checkFilePath(payload.File.Path); err != nil {
 			return err
 		}
 		if err := filesmodul.WalidujTresc(payload.File.Content); err != nil {
@@ -2264,13 +2354,14 @@ func Validate(action ActionType, payload Payload) error {
 		if _, err := filesmodul.WalidujTryb(payload.File.Mode); err != nil {
 			return err
 		}
-		// Tresc jawna i tresc z magazynu wykluczaja sie: inaczej nie wiadomo,
-		// co naprawde wyladuje w pliku, a plan pokazywalby co innego.
-		if !payload.File.ContentSecret.Pusty() {
+		// Clear content and content from the store exclude each other:
+		// otherwise it is unknown what really lands in the file, and the plan
+		// would show something else.
+		if !payload.File.ContentSecret.Empty() {
 			if payload.File.Content != "" {
-				return fmt.Errorf("plik ma miec tresc albo sekret, nie oba naraz")
+				return fmt.Errorf("the file is to have content or a secret, not both at once")
 			}
-			if err := payload.File.ContentSecret.Waliduj(); err != nil {
+			if err := payload.File.ContentSecret.Validate(); err != nil {
 				return err
 			}
 		}
@@ -2289,7 +2380,7 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionMonitoringProbe:
 		if payload.Monitoring == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu monitoring", action)
+			return fmt.Errorf("the operation %s requires a monitoring payload", action)
 		}
 		return monitoringmodul.Zlecenie{
 			Kind: payload.Monitoring.Kind, Target: payload.Monitoring.Target,
@@ -2300,53 +2391,54 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionBackupPlan, ActionBackupRun, ActionBackupVerify, ActionBackupRestore:
 		if payload.Backup == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu backup", action)
+			return fmt.Errorf("the operation %s requires a backup payload", action)
 		}
-		kopia := payload.Backup
-		definicja := backupmodul.Definicja{
-			ID: kopia.ID, Tool: kopia.Tool, Repository: kopia.Repository,
-			Paths: kopia.Paths, Excludes: kopia.Excludes, Tags: kopia.Tags,
-			KeepLast: kopia.KeepLast, KeepDaily: kopia.KeepDaily,
-			KeepWeekly: kopia.KeepWeekly, KeepMonthly: kopia.KeepMonthly,
-			Prune: kopia.Prune, Runbook: kopia.Runbook, Initialize: kopia.Initialize,
+		copyPayload := payload.Backup
+		definition := backupmodul.Definicja{
+			ID: copyPayload.ID, Tool: copyPayload.Tool, Repository: copyPayload.Repository,
+			Paths: copyPayload.Paths, Excludes: copyPayload.Excludes, Tags: copyPayload.Tags,
+			KeepLast: copyPayload.KeepLast, KeepDaily: copyPayload.KeepDaily,
+			KeepWeekly: copyPayload.KeepWeekly, KeepMonthly: copyPayload.KeepMonthly,
+			Prune: copyPayload.Prune, Runbook: copyPayload.Runbook,
+			Initialize: copyPayload.Initialize,
 		}
-		if err := definicja.Waliduj(); err != nil {
+		if err := definition.Waliduj(); err != nil {
 			return err
 		}
-		if !kopia.PasswordSecret.Pusty() {
-			if err := kopia.PasswordSecret.Waliduj(); err != nil {
+		if !copyPayload.PasswordSecret.Empty() {
+			if err := copyPayload.PasswordSecret.Validate(); err != nil {
 				return err
 			}
 		}
-		nazwyZmiennych := make([]string, 0, len(kopia.EnvSecrets))
-		for nazwa, odnosnik := range kopia.EnvSecrets {
-			nazwyZmiennych = append(nazwyZmiennych, nazwa)
-			kopiaOdnosnika := odnosnik
-			if err := kopiaOdnosnika.Waliduj(); err != nil {
+		variableNames := make([]string, 0, len(copyPayload.EnvSecrets))
+		for name, reference := range copyPayload.EnvSecrets {
+			variableNames = append(variableNames, name)
+			referenceCopy := reference
+			if err := referenceCopy.Validate(); err != nil {
 				return err
 			}
 		}
-		if err := backupmodul.WalidujSrodowisko(nazwyZmiennych); err != nil {
+		if err := backupmodul.WalidujSrodowisko(variableNames); err != nil {
 			return err
 		}
-		if action == ActionBackupRun && len(kopia.Paths) == 0 &&
-			kopia.Tool != backupmodul.NarzedzieRunbook {
-			return fmt.Errorf("kopia wymaga wskazania, co backupowac")
+		if action == ActionBackupRun && len(copyPayload.Paths) == 0 &&
+			copyPayload.Tool != backupmodul.NarzedzieRunbook {
+			return fmt.Errorf("a copy requires being told what to back up")
 		}
 		if action == ActionBackupRestore {
 			return backupmodul.WalidujOdtworzenie(backupmodul.Odtworzenie{
-				SnapshotID: kopia.SnapshotID, Target: kopia.Target,
-				Include: kopia.Include, Overwrite: kopia.Overwrite,
+				SnapshotID: copyPayload.SnapshotID, Target: copyPayload.Target,
+				Include: copyPayload.Include, Overwrite: copyPayload.Overwrite,
 			})
 		}
 		return nil
 
 	case ActionRepositorySet:
 		if payload.Repository == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu repository", action)
+			return fmt.Errorf("the operation %s requires a repository payload", action)
 		}
 		repo := payload.Repository
-		zrodlo := pakietymodul.Repozytorium{
+		source := pakietymodul.Repozytorium{
 			ID: repo.ID, Name: repo.Name, URL: repo.URL,
 			Suites: repo.Suites, Components: repo.Components,
 			Architectures: repo.Architectures, Enabled: repo.Enabled,
@@ -2354,33 +2446,35 @@ func Validate(action ActionType, payload Payload) error {
 			Username: repo.Username,
 		}
 		if repo.Remove {
-			zrodlo.URL = ""
+			source.URL = ""
 		}
-		zSekretem := !repo.PasswordSecret.Pusty()
-		if zSekretem {
-			if err := repo.PasswordSecret.Waliduj(); err != nil {
+		withSecret := !repo.PasswordSecret.Empty()
+		if withSecret {
+			if err := repo.PasswordSecret.Validate(); err != nil {
 				return err
 			}
 		}
-		// Menedzera panel zna z inwentarza hosta, ale zlecenie musi byc
-		// sprawdzalne bez niego: pola wspolne sprawdzamy zawsze, a te zalezne
-		// od rodziny systemu - dla menedzera, ktory pasuje do opisu zrodla.
-		menedzer := "dnf"
+		// The panel knows the manager from the host's inventory, but the
+		// order has to be checkable without it: the shared fields we check
+		// always, and those that depend on the system family - for the
+		// manager that matches the description of the source.
+		manager := "dnf"
 		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
-			menedzer = "apt"
+			manager = "apt"
 		}
-		if err := pakietymodul.WalidujRepozytorium(zrodlo, menedzer, zSekretem); err != nil {
+		if err := pakietymodul.WalidujRepozytorium(source, manager, withSecret); err != nil {
 			return err
 		}
 		if repo.Remove {
 			return nil
 		}
-		// Zrodlo, ktoremu ufamy, musi miec czym sie wykazac. Klucz sprawdzamy
-		// tu tym samym kodem, ktorym sprawdzi go host - zeby material bez
-		// klucza odpadl przy zlecaniu, a nie po zatwierdzeniu.
+		// A source we trust has to have something to show for itself. We
+		// check the key here with the same code the host will use - so that
+		// material without a key falls out at ordering time rather than after
+		// approval.
 		if !repo.AllowUnsigned {
 			if repo.GPGKey == "" {
-				return fmt.Errorf("zrodlo ze sprawdzaniem podpisow wymaga klucza publicznego")
+				return fmt.Errorf("a source with signature checking requires a public key")
 			}
 			if _, err := pakietymodul.OdciskKlucza(repo.GPGKey); err != nil {
 				return err
@@ -2393,19 +2487,19 @@ func Validate(action ActionType, payload Payload) error {
 			return nil
 		}
 		if len(payload.Certificate.Targets) > certificates.MaksymalnaLiczbaCertyfikatow {
-			return fmt.Errorf("skan obejmuje najwyzej %d plikow",
+			return fmt.Errorf("a scan covers at most %d files",
 				certificates.MaksymalnaLiczbaCertyfikatow)
 		}
-		for _, cel := range payload.Certificate.Targets {
-			if err := certificates.WalidujSciezke(cel.Path); err != nil {
+		for _, target := range payload.Certificate.Targets {
+			if err := certificates.WalidujSciezke(target.Path); err != nil {
 				return err
 			}
-			if cel.KeyPath != "" {
-				if err := certificates.WalidujSciezke(cel.KeyPath); err != nil {
+			if target.KeyPath != "" {
+				if err := certificates.WalidujSciezke(target.KeyPath); err != nil {
 					return err
 				}
 			}
-			if err := certificates.WalidujJednostke(cel.Service); err != nil {
+			if err := certificates.WalidujJednostke(target.Service); err != nil {
 				return err
 			}
 		}
@@ -2416,7 +2510,7 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionCertificateTrustEnsure:
 		if payload.Certificate == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
 		if err := certificates.WalidujKotwice(payload.Certificate.AnchorID); err != nil {
 			return err
@@ -2426,41 +2520,42 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionCertificateTrustRemove:
 		if payload.Certificate == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
 		return certificates.WalidujKotwice(payload.Certificate.AnchorID)
 
 	case ActionCertificatePlan:
-		// Plan przyjmuje to samo, co wdrozenie, i sam nazywa, czego host nie
-		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
+		// The plan accepts the same thing a deployment does and names by
+		// itself what the host will not accept: a refusal is the content of
+		// the plan, not an error in the order.
 		return nil
 
 	case ActionCertificateDeploy:
 		if payload.Certificate == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
 		cert := payload.Certificate
 		if err := certificates.WalidujSciezke(cert.Path); err != nil {
 			return err
 		}
 		if cert.Certificate == "" {
-			return fmt.Errorf("wdrozenie wymaga tresci certyfikatu")
+			return fmt.Errorf("a deployment requires the content of the certificate")
 		}
-		// Material sprawdzamy tu tym samym kodem, ktorym sprawdzi go host:
-		// zlecenie z popsutym lancuchem odpada przy zlecaniu, a nie po
-		// zatwierdzeniu i dostarczeniu na host.
-		certy, err := certificates.ParsujPEM([]byte(cert.Certificate))
+		// We check the material here with the same code the host will use: an
+		// order with a broken chain falls out at ordering time rather than
+		// after approval and delivery to the host.
+		parsed, err := certificates.ParsujPEM([]byte(cert.Certificate))
 		if err != nil {
 			return err
 		}
-		if err := certificates.SprawdzLancuch(certy); err != nil {
+		if err := certificates.SprawdzLancuch(parsed); err != nil {
 			return err
 		}
-		if !cert.KeySecret.Pusty() {
+		if !cert.KeySecret.Empty() {
 			if cert.KeyPath == "" {
-				return fmt.Errorf("klucz z magazynu wymaga sciezki, pod ktora ma trafic")
+				return fmt.Errorf("a key from the store requires the path it is to land at")
 			}
-			if err := cert.KeySecret.Waliduj(); err != nil {
+			if err := cert.KeySecret.Validate(); err != nil {
 				return err
 			}
 		}
@@ -2476,15 +2571,15 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionCertificateRenew:
 		if payload.Certificate == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
-		// Zlecenie wskazujemy identyfikatorem albo sciezka pliku. Sciezka jest
-		// tu potrzebna nie dla wygody: identyfikator zlecenia certmongera jest
-		// inny na kazdym hoscie, wiec kampania odnawiajaca ten sam certyfikat
-		// na calej flocie nie ma czym go wskazac.
+		// The request is named by an identifier or by a file path. The path is
+		// needed here not for convenience: a certmonger request identifier is
+		// different on every host, so a campaign renewing the same
+		// certificate across the fleet has nothing to name it with.
 		if payload.Certificate.Request == "" {
 			if payload.Certificate.Path == "" {
-				return fmt.Errorf("odnowienie wymaga identyfikatora zlecenia albo sciezki certyfikatu")
+				return fmt.Errorf("a renewal requires a request identifier or a certificate path")
 			}
 			if err := certificates.WalidujSciezke(payload.Certificate.Path); err != nil {
 				return err
@@ -2499,18 +2594,18 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionSELinuxModeSet:
 		if payload.Security == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu security", action)
+			return fmt.Errorf("the operation %s requires a security payload", action)
 		}
 		return security.WalidujTryb(payload.Security.Mode)
 
 	case ActionSystemShutdown:
 		if payload.Power == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu power", action)
+			return fmt.Errorf("the operation %s requires a power payload", action)
 		}
 		switch payload.Power.Mode {
 		case "", power.TrybWylaczyc, power.TrybZatrzymac:
 		default:
-			return fmt.Errorf("nieobslugiwany tryb wylaczenia %q", payload.Power.Mode)
+			return fmt.Errorf("unsupported shutdown mode %q", payload.Power.Mode)
 		}
 		if err := power.WalidujOpoznienie(payload.Power.DelaySeconds); err != nil {
 			return err
@@ -2522,36 +2617,37 @@ func Validate(action ActionType, payload Payload) error {
 			return nil
 		}
 		if len(payload.Time.Probe) > czas.LimitSerwerow {
-			return fmt.Errorf("test obejmuje najwyzej %d serwerow", czas.LimitSerwerow)
+			return fmt.Errorf("a test covers at most %d servers", czas.LimitSerwerow)
 		}
-		for _, serwer := range payload.Time.Probe {
-			if err := czas.WalidujSerwer(serwer); err != nil {
+		for _, server := range payload.Time.Probe {
+			if err := czas.WalidujSerwer(server); err != nil {
 				return err
 			}
 		}
 		return nil
 
 	case ActionTimePlan:
-		// Plan przyjmuje to samo, co zmiana, i sam nazywa, czego host nie
-		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
+		// The plan accepts the same thing a change does and names by itself
+		// what the host will not accept: a refusal is the content of the
+		// plan, not an error in the order.
 		return nil
 
 	case ActionTimeConfigApply:
 		if payload.Time == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu time", action)
+			return fmt.Errorf("the operation %s requires a time payload", action)
 		}
 		return czas.WalidujSerwery(payload.Time.Servers)
 
 	case ActionTimezoneSet:
 		if payload.Time == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu time", action)
+			return fmt.Errorf("the operation %s requires a time payload", action)
 		}
 		return czas.WalidujStrefe(payload.Time.Timezone)
 
 	case ActionSysctlPlan:
 		if payload.Kernel != nil {
-			for _, klucz := range payload.Kernel.Keys {
-				if err := kernel.WalidujKlucz(klucz); err != nil {
+			for _, key := range payload.Kernel.Keys {
+				if err := kernel.WalidujKlucz(key); err != nil {
 					return err
 				}
 			}
@@ -2560,22 +2656,23 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionSysctlEnsure:
 		if payload.Kernel == nil || len(payload.Kernel.Settings) == 0 {
-			return fmt.Errorf("operacja %s wymaga ustawien", action)
+			return fmt.Errorf("the operation %s requires settings", action)
 		}
 		if len(payload.Kernel.Settings) > 50 {
-			return fmt.Errorf("jedna operacja obejmuje najwyzej 50 ustawien")
+			return fmt.Errorf("one operation covers at most 50 settings")
 		}
 		_, err := kernel.SkladajPlikSysctl(payload.Kernel.Settings)
 		return err
 
 	case ActionKernelModulePlan:
-		// Plan przyjmuje to samo, co zmiana, i sam nazywa, czego host nie
-		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
+		// The plan accepts the same thing a change does and names by itself
+		// what the host will not accept: a refusal is the content of the
+		// plan, not an error in the order.
 		return nil
 
 	case ActionKernelModuleLoad, ActionKernelModuleBlacklist:
 		if payload.Kernel == nil || payload.Kernel.Module == "" {
-			return fmt.Errorf("operacja %s wymaga nazwy modulu", action)
+			return fmt.Errorf("the operation %s requires a module name", action)
 		}
 		return kernel.WalidujModul(payload.Kernel.Module)
 
@@ -2584,7 +2681,7 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionSSHConfigApply:
 		if payload.SSH == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu ssh", action)
+			return fmt.Errorf("the operation %s requires an ssh payload", action)
 		}
 		return sshmodul.Waliduj(sshmodul.Ustawienia{
 			Port:                   payload.SSH.Port,
@@ -2600,20 +2697,20 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionSSHHostKeyRotate:
 		if payload.SSH == nil || payload.SSH.KeyType == "" {
-			return fmt.Errorf("wymiana klucza wymaga jego typu")
+			return fmt.Errorf("replacing a key requires its type")
 		}
 		switch payload.SSH.KeyType {
 		case "ed25519", "rsa", "ecdsa":
 			return nil
 		}
-		return fmt.Errorf("panel wymienia klucze ed25519, rsa albo ecdsa, nie %q", payload.SSH.KeyType)
+		return fmt.Errorf("the panel replaces ed25519, rsa or ecdsa keys, not %q", payload.SSH.KeyType)
 
 	case ActionStoragePlan:
 		return nil
 
 	case ActionMountEnsure:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
 		if err := storage.WalidujZrodlo(payload.Storage.Source); err != nil {
 			return err
@@ -2625,38 +2722,39 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionMountRemove:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
 		return storage.WalidujCel(payload.Storage.Target)
 
 	case ActionFilesystemCheck:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
 		return storage.WalidujZrodlo(payload.Storage.Device)
 
 	case ActionLVMExtend:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
 		_, err := storage.ArgumentyRozszerzeniaLV(payload.Storage.Device, payload.Storage.Size, true)
 		return err
 
 	case ActionFilesystemResize:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
 		return storage.WalidujZrodlo(payload.Storage.Device)
 
 	case ActionFilesystemCreate:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		// Operacja niszczaca musi wiedziec, w co celuje: sama sciezka nie
-		// wystarczy, bo /dev/sdX po restarcie wskazuje inny dysk.
+		// A destructive operation has to know what it aims at: the path alone
+		// is not enough, because /dev/sdX points at a different disk after a
+		// reboot.
 		if payload.Storage.ExpectedSerial == "" && payload.Storage.ExpectedSizeBytes == 0 &&
 			payload.Storage.ExpectedUUID == "" {
-			return fmt.Errorf("formatowanie wymaga tozsamosci urzadzenia (serial, UUID albo rozmiar)")
+			return fmt.Errorf("formatting requires the identity of the device (serial, UUID or size)")
 		}
 		_, err := storage.ArgumentyFormatowania(payload.Storage.Device,
 			payload.Storage.FSType, payload.Storage.Label)
@@ -2664,11 +2762,11 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionDiskWipe:
 		if payload.Storage == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu storage", action)
+			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
 		if payload.Storage.ExpectedSerial == "" && payload.Storage.ExpectedSizeBytes == 0 &&
 			payload.Storage.ExpectedUUID == "" {
-			return fmt.Errorf("czyszczenie wymaga tozsamosci urzadzenia (serial, UUID albo rozmiar)")
+			return fmt.Errorf("wiping requires the identity of the device (serial, UUID or size)")
 		}
 		_, err := storage.ArgumentyCzyszczenia(payload.Storage.Device)
 		return err
@@ -2678,13 +2776,13 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionFirewallRulesetRestore:
 		if payload.Firewall == nil || payload.Firewall.RollbackID == "" {
-			return fmt.Errorf("przywrocenie wymaga identyfikatora planu")
+			return fmt.Errorf("a restore requires the identifier of a plan")
 		}
 		return nil
 
 	case ActionFirewallRuleEnsure:
 		if payload.Firewall == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu firewall", action)
+			return fmt.Errorf("the operation %s requires a firewall payload", action)
 		}
 		return firewall.RuleSpec{
 			ID: payload.Firewall.RuleID, Chain: payload.Firewall.Chain,
@@ -2695,21 +2793,21 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionFirewallRuleRemove:
 		if payload.Firewall == nil || payload.Firewall.RuleID == "" {
-			return fmt.Errorf("usuniecie wymaga nazwy reguly")
+			return fmt.Errorf("a removal requires the name of the rule")
 		}
 		return nil
 
 	case ActionFirewallZonePort:
 		if payload.Firewall == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu firewall", action)
+			return fmt.Errorf("the operation %s requires a firewall payload", action)
 		}
 		_, err := firewall.ArgumentyOtwarciaPortu(payload.Firewall.Zone,
-			pierwszyPort(payload.Firewall.Ports), payload.Firewall.Protocol, payload.Firewall.Enable)
+			firstPort(payload.Firewall.Ports), payload.Firewall.Protocol, payload.Firewall.Enable)
 		return err
 
 	case ActionFirewallZoneService:
 		if payload.Firewall == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu firewall", action)
+			return fmt.Errorf("the operation %s requires a firewall payload", action)
 		}
 		_, err := firewall.ArgumentyUslugi(payload.Firewall.Zone,
 			payload.Firewall.Service, payload.Firewall.Enable)
@@ -2717,43 +2815,44 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionDNSResolveTest:
 		if payload.DNS == nil || len(payload.DNS.Names) == 0 {
-			return fmt.Errorf("test wymaga co najmniej jednej nazwy")
+			return fmt.Errorf("a test requires at least one name")
 		}
 		if len(payload.DNS.Names) > 20 {
-			return fmt.Errorf("test obejmuje najwyzej 20 nazw naraz")
+			return fmt.Errorf("a test covers at most 20 names at once")
 		}
-		for _, nazwa := range payload.DNS.Names {
-			if !dns.PoprawnaNazwaDoTestu(nazwa) {
-				return fmt.Errorf("nieprawidlowa nazwa %q", nazwa)
+		for _, name := range payload.DNS.Names {
+			if !dns.PoprawnaNazwaDoTestu(name) {
+				return fmt.Errorf("invalid name %q", name)
 			}
 		}
 		return nil
 
 	case ActionDNSPlan:
-		// Plan przyjmuje to samo, co zmiana, i sam nazywa, czego host nie
-		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
+		// The plan accepts the same thing a change does and names by itself
+		// what the host will not accept: a refusal is the content of the
+		// plan, not an error in the order.
 		return nil
 
 	case ActionDNSHostApply:
 		if payload.DNS == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu dns", action)
+			return fmt.Errorf("the operation %s requires a dns payload", action)
 		}
-		if !nazwaInterfejsu.MatchString(payload.DNS.Interface) {
-			return fmt.Errorf("nieprawidlowa nazwa interfejsu %q", payload.DNS.Interface)
+		if !interfaceName.MatchString(payload.DNS.Interface) {
+			return fmt.Errorf("invalid interface name %q", payload.DNS.Interface)
 		}
-		// Resolver bez serwera nie rozwiaze niczego, a host bez rozwiazywania
-		// nazw traci katalog, Kerberosa i logowanie.
+		// A resolver without a server resolves nothing, and a host without
+		// name resolution loses the directory, Kerberos and logging in.
 		if len(payload.DNS.Servers) == 0 {
-			return fmt.Errorf("zmiana resolvera wymaga co najmniej jednego serwera")
+			return fmt.Errorf("a resolver change requires at least one server")
 		}
-		for _, serwer := range payload.DNS.Servers {
-			if err := network.WalidujAdresIP(serwer); err != nil {
-				return fmt.Errorf("serwer DNS: %w", err)
+		for _, server := range payload.DNS.Servers {
+			if err := network.WalidujAdresIP(server); err != nil {
+				return fmt.Errorf("DNS server: %w", err)
 			}
 		}
-		for _, domena := range payload.DNS.SearchDomains {
-			if !dns.PoprawnaNazwaDoTestu(domena) {
-				return fmt.Errorf("nieprawidlowa domena wyszukiwania %q", domena)
+		for _, domain := range payload.DNS.SearchDomains {
+			if !dns.PoprawnaNazwaDoTestu(domain) {
+				return fmt.Errorf("invalid search domain %q", domain)
 			}
 		}
 		return nil
@@ -2763,181 +2862,183 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionNetworkRollback:
 		if payload.Network == nil || payload.Network.RollbackID == "" {
-			return fmt.Errorf("wycofanie wymaga identyfikatora planu")
+			return fmt.Errorf("a rollback requires the identifier of a plan")
 		}
 		return nil
 
 	case ActionNetworkMTUSet, ActionNetworkRouteEnsure, ActionNetworkProfileApply:
 		if payload.Network == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu network", action)
+			return fmt.Errorf("the operation %s requires a network payload", action)
 		}
-		if !nazwaInterfejsu.MatchString(payload.Network.Interface) {
-			return fmt.Errorf("nieprawidlowa nazwa interfejsu %q", payload.Network.Interface)
+		if !interfaceName.MatchString(payload.Network.Interface) {
+			return fmt.Errorf("invalid interface name %q", payload.Network.Interface)
 		}
-		return sprawdzZmianeSieci(action, payload.Network)
+		return checkNetworkChange(action, payload.Network)
 
 	case ActionProcessList:
 		if payload.ProcessList == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu process_list", action)
+			return fmt.Errorf("the operation %s requires a process_list payload", action)
 		}
 		switch payload.ProcessList.SortBy {
 		case "", "rss", "cpu", "pid", "started":
 		default:
-			return fmt.Errorf("nieobslugiwane sortowanie %q", payload.ProcessList.SortBy)
+			return fmt.Errorf("unsupported sorting %q", payload.ProcessList.SortBy)
 		}
 		if payload.ProcessList.Limit > 500 {
-			return fmt.Errorf("limit procesow nie moze przekraczac 500")
+			return fmt.Errorf("the process limit must not exceed 500")
 		}
 		return nil
 
 	case ActionProcessSignal:
 		if payload.ProcessSignal == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu process_signal", action)
+			return fmt.Errorf("the operation %s requires a process_signal payload", action)
 		}
 		if payload.ProcessSignal.PID <= 1 {
-			// PID 1 jest systemem inicjujacym; zero i wartosci ujemne
-			// oznaczaja w jadrze grupy procesow, a nie jeden proces.
-			return fmt.Errorf("nieprawidlowy PID %d", payload.ProcessSignal.PID)
+			// PID 1 is the init system; zero and negative values mean process
+			// groups in the kernel rather than one process.
+			return fmt.Errorf("invalid PID %d", payload.ProcessSignal.PID)
 		}
 		switch payload.ProcessSignal.Signal {
 		case "TERM", "KILL", "HUP":
 		default:
-			return fmt.Errorf("nieobslugiwany sygnal %q", payload.ProcessSignal.Signal)
+			return fmt.Errorf("unsupported signal %q", payload.ProcessSignal.Signal)
 		}
-		// Bez czasu startu sygnal moze trafic w proces, ktory przejal PID.
+		// Without the start time the signal could hit a process that took
+		// over the PID.
 		if payload.ProcessSignal.ExpectedStart == 0 {
-			return fmt.Errorf("sygnal wymaga czasu startu procesu")
+			return fmt.Errorf("a signal requires the start time of the process")
 		}
 		return nil
 
 	case ActionReadLogFile:
 		if payload.LogFile == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu logfile", action)
+			return fmt.Errorf("the operation %s requires a logfile payload", action)
 		}
 		return validateLogPath(payload.LogFile.Path)
 
 	case ActionUnitEnableSet, ActionUnitMaskSet:
 		if payload.UnitToggle == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu unit_toggle", action)
+			return fmt.Errorf("the operation %s requires a unit_toggle payload", action)
 		}
 		return validateUnitName(payload.UnitToggle.Unit)
 
 	case ActionUnitStatus:
 		if payload.UnitStatus == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu unit_status", action)
+			return fmt.Errorf("the operation %s requires a unit_status payload", action)
 		}
-		// Pelny wykaz jest zamawiany jawnie; pusta lista bez tego zamowienia
-		// jest pomylka w wywolaniu, a nie prosba o wszystko.
+		// The full list is ordered explicitly; an empty list without that
+		// order is a mistake in the call, not a request for everything.
 		if payload.UnitStatus.All {
 			if len(payload.UnitStatus.Units) > 0 {
-				return fmt.Errorf("pelny wykaz jednostek nie przyjmuje listy nazw")
+				return fmt.Errorf("the full list of units does not take a list of names")
 			}
 			return nil
 		}
 		if len(payload.UnitStatus.Units) == 0 {
-			return fmt.Errorf("operacja %s wymaga listy jednostek", action)
+			return fmt.Errorf("the operation %s requires a list of units", action)
 		}
 		if len(payload.UnitStatus.Units) > 50 {
-			return fmt.Errorf("lista jednostek jest zbyt dluga")
+			return fmt.Errorf("the list of units is too long")
 		}
 		return nil
 
 	case ActionSystemReboot:
 		if payload.Reboot == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu reboot", action)
+			return fmt.Errorf("the operation %s requires a reboot payload", action)
 		}
 		if payload.Reboot.DelaySeconds > 3600 {
-			return fmt.Errorf("opoznienie restartu nie moze przekraczac godziny")
+			return fmt.Errorf("the reboot delay must not exceed an hour")
 		}
 		return nil
 
 	case ActionPackageUpgrade:
 		if payload.PackageUpgrade == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu package_upgrade", action)
+			return fmt.Errorf("the operation %s requires a package_upgrade payload", action)
 		}
 		return validatePackageNames(payload.PackageUpgrade.Packages)
 
 	case ActionAgentUpgrade:
 		if payload.AgentUpgrade == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu agent_upgrade", action)
+			return fmt.Errorf("the operation %s requires an agent_upgrade payload", action)
 		}
-		if !poprawnaWersjaAgenta(payload.AgentUpgrade.TargetVersion) {
-			return fmt.Errorf("wersja docelowa %q nie jest wersja pakietu",
+		if !validAgentVersion(payload.AgentUpgrade.TargetVersion) {
+			return fmt.Errorf("the target version %q is not a package version",
 				payload.AgentUpgrade.TargetVersion)
 		}
-		if wersja := payload.AgentUpgrade.RollbackVersion; wersja != "" &&
-			!poprawnaWersjaAgenta(wersja) {
-			return fmt.Errorf("wersja powrotu %q nie jest wersja pakietu", wersja)
+		if version := payload.AgentUpgrade.RollbackVersion; version != "" &&
+			!validAgentVersion(version) {
+			return fmt.Errorf("the rollback version %q is not a package version", version)
 		}
-		if suma := payload.AgentUpgrade.PackageSHA256; suma != "" && !poprawnaSuma(suma) {
-			return fmt.Errorf("suma pakietu nie jest szesnastkowym SHA-256")
+		if sum := payload.AgentUpgrade.PackageSHA256; sum != "" && !validChecksum(sum) {
+			return fmt.Errorf("the package checksum is not a hexadecimal SHA-256")
 		}
 		return nil
 
 	case ActionFollowJournal:
 		if payload.Journal == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu journal", action)
+			return fmt.Errorf("the operation %s requires a journal payload", action)
 		}
-		if payload.Journal.FollowSeconds > maksymalnyPodgladSekund {
-			return fmt.Errorf("podglad na zywo nie moze trwac dluzej niz %d s",
-				maksymalnyPodgladSekund)
+		if payload.Journal.FollowSeconds > maxFollowSeconds {
+			return fmt.Errorf("a live view must not last longer than %d s", maxFollowSeconds)
 		}
 		return validateJournalPayload(payload.Journal)
 
 	case ActionReadJournal:
 		if payload.Journal == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu journal", action)
+			return fmt.Errorf("the operation %s requires a journal payload", action)
 		}
 		if payload.Journal.Lines == 0 || payload.Journal.Lines > 10000 {
-			return fmt.Errorf("liczba linii musi byc z zakresu 1-10000")
+			return fmt.Errorf("the number of lines has to be in the range 1-10000")
 		}
 		return validateJournalPayload(payload.Journal)
 	default:
 		if payload.Unit == nil {
-			return fmt.Errorf("operacja %s wymaga payloadu unit", action)
+			return fmt.Errorf("the operation %s requires a unit payload", action)
 		}
 		if strings.TrimSpace(payload.Unit.Unit) == "" {
-			return fmt.Errorf("nazwa jednostki jest pusta")
+			return fmt.Errorf("the unit name is empty")
 		}
 	}
 	return nil
 }
 
-// packageNamePattern odpowiada nazwom pakietow Debiana i RPM. Nazwa nigdy nie
-// trafia do powloki, ale walidacja jest druga linia obrony i odrzuca ksztalty,
-// ktore nie moga byc nazwa pakietu.
-// localUserNamePattern odpowiada zakresowi nazw akceptowanemu przez useradd.
-// Walidacja po stronie panelu nie zastepuje walidacji w helperze; obie
-// istnieja, bo koperta moze dotrzec do agenta inna droga niz przez panel.
+// packageNamePattern matches Debian and RPM package names. A name never
+// reaches a shell, but validation is a second line of defence and rejects
+// shapes that cannot be a package name.
+// localUserNamePattern matches the range of names useradd accepts. Validation
+// on the panel's side does not replace validation in the helper; both exist,
+// because an envelope can reach the agent by a way other than through the
+// panel.
 var localUserNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}\$?$`)
 
-// validatePublicKeyShape odrzuca material, ktory nie jest kluczem publicznym.
-// Panel nie przyjmuje klucza prywatnego nawet przez pomylke operatora.
+// validatePublicKeyShape rejects material that is not a public key. The panel
+// does not accept a private key even by an operator's mistake.
 func validatePublicKeyShape(key string) error {
 	trimmed := strings.TrimSpace(key)
 	if trimmed == "" {
-		return fmt.Errorf("pusty klucz SSH")
+		return fmt.Errorf("empty SSH key")
 	}
 	if strings.ContainsAny(trimmed, "\n\r") {
-		return fmt.Errorf("klucz SSH nie moze zawierac znaku nowej linii")
+		return fmt.Errorf("an SSH key must not contain a newline")
 	}
 	if strings.Contains(trimmed, "PRIVATE KEY") {
-		return fmt.Errorf("przekazano klucz prywatny; panel przyjmuje wylacznie klucze publiczne")
+		return fmt.Errorf("a private key was passed; the panel accepts public keys only")
 	}
 	fields := strings.Fields(trimmed)
 	if len(fields) < 2 {
-		return fmt.Errorf("klucz SSH musi miec postac \"typ material [komentarz]\"")
+		return fmt.Errorf("an SSH key has to have the form \"type material [comment]\"")
 	}
 	if !allowedKeyTypes[fields[0]] {
-		return fmt.Errorf("nieobslugiwany typ klucza %q", fields[0])
+		return fmt.Errorf("unsupported key type %q", fields[0])
 	}
 	if len(trimmed) > 16384 {
-		return fmt.Errorf("klucz SSH jest zbyt dlugi")
+		return fmt.Errorf("the SSH key is too long")
 	}
 	return nil
 }
 
-// allowedKeyTypes wyklucza typy wycofane, w tym ssh-dss i ssh-rsa z SHA-1.
+// allowedKeyTypes excludes withdrawn types, including ssh-dss and ssh-rsa
+// with SHA-1.
 var allowedKeyTypes = map[string]bool{
 	"ssh-ed25519":                        true,
 	"ssh-rsa":                            true,
@@ -2948,62 +3049,63 @@ var allowedKeyTypes = map[string]bool{
 	"sk-ecdsa-sha2-nistp256@openssh.com": true,
 }
 
-// debconfQuestionPattern odpowiada nazwom pytan konfiguracyjnych, na przyklad
-// grub-pc/install_devices.
+// debconfQuestionPattern matches the names of configuration questions, for
+// example grub-pc/install_devices.
 var debconfQuestionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9._+-]+)+$`)
 
-// debconfTypePattern ogranicza typy do tych, ktore maja sens w odpowiedzi
-// przekazanej z panelu.
+// debconfTypePattern limits the types to those that make sense in an answer
+// passed from the panel.
 var debconfTypePattern = regexp.MustCompile(`^(select|multiselect|boolean|string|password|note)$`)
 
-// domainPattern odrzuca nazwy, ktore nie moga byc domena DNS.
+// domainPattern rejects names that cannot be a DNS domain.
 var domainPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 
 var packageNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9+._-]*$`)
 
 func validatePackageNames(names []string) error {
 	if len(names) > 500 {
-		return fmt.Errorf("lista pakietow jest zbyt dluga")
+		return fmt.Errorf("the list of packages is too long")
 	}
 	for _, name := range names {
 		if !packageNamePattern.MatchString(name) {
-			return fmt.Errorf("nieprawidlowa nazwa pakietu %q", name)
+			return fmt.Errorf("invalid package name %q", name)
 		}
 	}
 	return nil
 }
 
-// bezPustych usuwa podpayloady, ktore nie niosa zadnej tresci.
+// withoutEmpty removes sub-payloads that carry no content.
 //
-// Payload z pustym podpayloadem opisuje dokladnie te sama operacje co payload
-// bez niego, ale serializuje sie inaczej - a hash liczony po obu stronach
-// musi wyjsc taki sam. Panel wysyla przy odczycie payload pusty, koperta nie
-// ma czego niesc, a agent odtwarza z niej strukture zerowa: bez tego kroku
-// zadanie konczylo sie odmowa "tresc nie odpowiada planowi", choc tresc byla
-// ta sama.
-func (p Payload) bezPustych() Payload {
-	wartosc := reflect.ValueOf(&p).Elem()
-	for i := 0; i < wartosc.NumField(); i++ {
-		pole := wartosc.Field(i)
-		if pole.Kind() != reflect.Pointer || pole.IsNil() {
+// A payload with an empty sub-payload describes exactly the same operation as
+// a payload without one, but it serialises differently - and a hash computed
+// on both sides has to come out the same. On a read the panel sends an empty
+// payload, the envelope has nothing to carry, and the agent reconstructs a
+// zero structure from it: without this step the task ended with the refusal
+// "the content does not match the plan", although the content was the same.
+func (p Payload) withoutEmpty() Payload {
+	value := reflect.ValueOf(&p).Elem()
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		if field.Kind() != reflect.Pointer || field.IsNil() {
 			continue
 		}
-		zerowy := reflect.New(pole.Type().Elem())
-		if reflect.DeepEqual(pole.Interface(), zerowy.Interface()) {
-			pole.Set(reflect.Zero(pole.Type()))
+		zero := reflect.New(field.Type().Elem())
+		if reflect.DeepEqual(field.Interface(), zero.Interface()) {
+			field.Set(reflect.Zero(field.Type()))
 		}
 	}
 	return p
 }
 
-// PayloadHash liczy hash planu w postaci kanonicznej. Agent liczy go tak samo
-// i porownuje z kopertą, wiec podmiana payloadu po zatwierdzeniu jest wykrywalna.
+// PayloadHash computes the plan hash in canonical form. The agent computes it
+// the same way and compares it with the envelope, so swapping the payload
+// after approval is detectable.
 //
-// Kanoniczna postac to: "<typ>\n<wersja>\n<JSON payloadu>". JSON pochodzi
-// z encoding/json, ktory serializuje pola struktury w kolejnosci deklaracji,
-// wiec wynik jest deterministyczny.
+// The canonical form is: "<type>\n<version>\n<payload JSON>". The JSON comes
+// from encoding/json, which serialises struct fields in declaration order, so
+// the result is deterministic.
 func PayloadHash(action ActionType, version int, payload Payload) ([]byte, error) {
-	encoded, err := json.Marshal(payload.bezPustych())
+	encoded, err := json.Marshal(payload.withoutEmpty())
 	if err != nil {
 		return nil, err
 	}

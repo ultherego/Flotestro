@@ -467,7 +467,7 @@ func run() error {
 	if sciezkaKlucza == "" {
 		sciezkaKlucza = filepath.Join(cfg.StateDir, "secrets.key")
 	}
-	szyfr, utworzony, err := secrets.OtworzSzyfr(sciezkaKlucza)
+	szyfr, utworzony, err := secrets.OpenCipher(sciezkaKlucza)
 	if err != nil {
 		return fmt.Errorf("magazyn sekretow: %w", err)
 	}

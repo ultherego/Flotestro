@@ -157,7 +157,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectReadOnly,
 			"agent pracuje w trybie read_only i nie wykonuje zmian")
 	}
-	if capability := action.RequiredCapability(); !facts.Capabilities.Spelnia(capability) {
+	if capability := action.RequiredCapability(); !facts.Capabilities.Satisfies(capability) {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectCapability,
 			fmt.Sprintf("host nie ma zdolnosci %s", capability))
 	}
@@ -452,7 +452,7 @@ func checkPreconditions(preconditions *agentv1.Preconditions, facts Facts) error
 		return fmt.Errorf("oczekiwano systemu %s, host ma %s", want, facts.OS.Family)
 	}
 	for _, capability := range preconditions.GetRequiredCapabilities() {
-		if !facts.Capabilities.Spelnia(capability) {
+		if !facts.Capabilities.Satisfies(capability) {
 			return fmt.Errorf("host nie ma zdolnosci %s", capability)
 		}
 	}

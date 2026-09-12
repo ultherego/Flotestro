@@ -16,44 +16,44 @@ import (
 )
 
 var (
-	// ErrNotFound oznacza brak joba o podanym identyfikatorze.
-	ErrNotFound = errors.New("zadanie nie istnieje")
-	// ErrConflict oznacza probe przejscia niedozwolonego w danym stanie.
-	ErrConflict = errors.New("operacja niedozwolona w obecnym stanie zadania")
+	// ErrNotFound means there is no job with the given identifier.
+	ErrNotFound = errors.New("the task does not exist")
+	// ErrConflict means an attempt at a transition forbidden in this state.
+	ErrConflict = errors.New("the operation is not allowed in the current state of the task")
 )
 
-// Spec opisuje zadanie do utworzenia.
+// Spec describes the task to create.
 type Spec struct {
 	HostID          string
 	Action          opspec.ActionType
 	Payload         opspec.Payload
 	IdempotencyKey  string
 	RequiresApprova bool
-	// RequiredApprovals mowi, ilu osob potrzeba. Operacja niszczaca dane
-	// wymaga dwoch: pomylka jednej osoby z prawem zatwierdzania kosztuje
-	// dane, ktorych nikt nie odtworzy. Zero oznacza wartosc domyslna.
+	// RequiredApprovals says how many people are needed. An operation that
+	// destroys data requires two: a mistake by one person with the right to
+	// approve costs data nobody will restore. Zero means the default value.
 	RequiredApprovals int
 	TimeoutSeconds    int
 	MaxOutputBytes    int
 	TTL               time.Duration
 	CreatedBy         string
 	RequestID         string
-	// CampaignID wiaze operacje z rolloutem, ktory ja zlecil. Bez tego
-	// korelacja sladu audytowego urywa sie na operacji, a ekran kampanii nie
-	// wie, ktore operacje sa jego - postep trwajacej aktualizacji nie mial jak
-	// do niego trafic.
+	// CampaignID binds the operation to the rollout that ordered it. Without
+	// it the audit trail's correlation breaks off at the operation, and the
+	// campaign screen does not know which operations are its own - the
+	// progress of an upgrade under way had no way of reaching it.
 	CampaignID    string
 	Preconditions Preconditions
 }
 
-// Preconditions sa sprawdzane przez agenta tuz przed wykonaniem.
+// Preconditions are checked by the agent right before execution.
 type Preconditions struct {
 	OSFamily             string   `json:"os_family,omitempty"`
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 	ExpectedBootID       string   `json:"expected_boot_id,omitempty"`
 }
 
-// Job jest widokiem zadania zwracanym przez API.
+// Job is the view of a task returned by the API.
 type Job struct {
 	ID              string          `json:"id"`
 	HostID          string          `json:"host_id"`
@@ -65,12 +65,12 @@ type Job struct {
 	IdempotencyKey  string          `json:"idempotency_key"`
 	State           State           `json:"state"`
 	RequiresApprova bool            `json:"requires_approval"`
-	// RequiredApprovals i Approvals opisuja, ile zgod trzeba i ile juz jest.
-	// Bez tego operator klika "approve" i nie wie, dlaczego nic sie nie
-	// stalo.
+	// RequiredApprovals and Approvals say how many approvals are needed and
+	// how many there already are. Without them the operator clicks "approve"
+	// and does not know why nothing happened.
 	RequiredApprovals  int             `json:"required_approvals"`
 	CollectedApprovals int             `json:"collected_approvals"`
-	Approvals          []Zgoda         `json:"approvals,omitempty"`
+	Approvals          []Approval      `json:"approvals,omitempty"`
 	Preconditions      json.RawMessage `json:"preconditions"`
 	TimeoutSeconds     int             `json:"timeout_seconds"`
 	MaxOutputBytes     int             `json:"max_output_bytes"`
@@ -89,7 +89,7 @@ type Job struct {
 	UpdatedAt          time.Time       `json:"updated_at"`
 }
 
-// Attempt opisuje jedna probe wykonania zadania.
+// Attempt describes one attempt at carrying out a task.
 type Attempt struct {
 	ID              string          `json:"id"`
 	JobID           string          `json:"job_id"`
@@ -112,7 +112,7 @@ type Attempt struct {
 	CreatedAt       time.Time       `json:"created_at"`
 }
 
-// Store realizuje dostep do tabel zadan.
+// Store provides access to the task tables.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -123,9 +123,9 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Create tworzy zadanie wraz z hashem planu. Zadanie wymagajace zatwierdzenia
-// startuje w awaiting_approval i nie trafia do kolejki, dopoki ktos go nie
-// zatwierdzi.
+// Create creates a task together with the plan hash. A task that requires
+// approval starts in awaiting_approval and does not reach the queue until
+// somebody approves it.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) {
 	if err := opspec.Validate(spec.Action, spec.Payload); err != nil {
 		return nil, err
@@ -177,34 +177,36 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	err = tx.QueryRow(ctx, query, jobID, spec.HostID, string(spec.Action), opspec.ActionVersion,
 		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApprova,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
-		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, wymaganeZgody(spec)).Scan(&jobID)
+		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, requiredApprovals(spec)).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Ten sam klucz idempotencji zwraca istniejace zadanie zamiast tworzyc
-		// drugie. Powtorzone zlecenie nie jest bledem.
+		// The same idempotency key returns the existing task instead of
+		// creating a second one. A repeated order is not an error.
 		return s.getTx(ctx, tx, "where host_id = $1 and idempotency_key = $2", spec.HostID, idempotencyKey)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("utworzenie zadania: %w", err)
+		return nil, fmt.Errorf("creating the task: %w", err)
 	}
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
 
-// Approve zapisuje zgode i przepuszcza zadanie dalej, gdy zebralo ich dosc.
+// Approve records an approval and lets the task through once it has
+// collected enough of them.
 //
-// Zgoda jest zapisywana zawsze, takze wtedy, gdy jedna nie wystarcza:
-// operacja niszczaca wymaga dwoch osob i pierwsza z nich ma zobaczyc, ze jej
-// zgoda zostala przyjeta, a nie odbita bez sladu.
+// The approval is always recorded, also when one is not enough: a destructive
+// operation requires two people, and the first of them is to see that their
+// approval was accepted rather than bounced without a trace.
 func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
-	const zapisZgody = `
+	const recordApproval = `
 		insert into job_approvals (job_id, approver, reason)
 		values ($1, $2, $3)
 		on conflict (job_id, approver) do nothing`
-	if _, err := tx.Exec(ctx, zapisZgody, jobID, actor, nullable(reason)); err != nil {
+	if _, err := tx.Exec(ctx, recordApproval, jobID, actor, nullable(reason)); err != nil {
 		return nil, err
 	}
 
-	// Ta sama osoba nie liczy sie dwa razy: klucz glowny tabeli pilnuje tego
-	// w bazie, a nie w kodzie, ktory da sie ominac inna sciezka.
+	// The same person does not count twice: the table's primary key guards
+	// that in the database rather than in code, which can be bypassed by
+	// another path.
 	const query = `
 		update jobs set state = $2, approved_by = $3, approved_at = now(), updated_at = now()
 		where id = $1 and state = $4
@@ -213,16 +215,17 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason str
 	var updated string
 	err := tx.QueryRow(ctx, query, jobID, string(StateQueued), actor, string(StateAwaitingApproval)).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Zadanie zostaje w oczekiwaniu: albo brakuje zgod, albo ktos zmienil
-		// jego stan w miedzyczasie. Rozstrzyga to stan, ktory zaraz odczytamy.
-		zadanie, err := s.getTx(ctx, tx, "where id = $1", jobID)
+		// The task stays waiting: either approvals are missing, or somebody
+		// changed its state in the meantime. The state we are about to read
+		// settles it.
+		task, err := s.getTx(ctx, tx, "where id = $1", jobID)
 		if err != nil {
 			return nil, err
 		}
-		if zadanie.State != StateAwaitingApproval {
+		if task.State != StateAwaitingApproval {
 			return nil, ErrConflict
 		}
-		return zadanie, nil
+		return task, nil
 	}
 	if err != nil {
 		return nil, err
@@ -230,8 +233,8 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason str
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
 
-// Zgody zwraca osoby, ktore zatwierdzily zadanie.
-func (s *Store) Zgody(ctx context.Context, jobID string) ([]Zgoda, error) {
+// Approvals returns the people who approved the task.
+func (s *Store) Approvals(ctx context.Context, jobID string) ([]Approval, error) {
 	const query = `
 		select approver, coalesce(reason, ''), approved_at
 		from job_approvals where job_id = $1 order by approved_at`
@@ -240,29 +243,29 @@ func (s *Store) Zgody(ctx context.Context, jobID string) ([]Zgoda, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var zgody []Zgoda
+	var approvals []Approval
 	for rows.Next() {
-		var zgoda Zgoda
-		if err := rows.Scan(&zgoda.Approver, &zgoda.Reason, &zgoda.ApprovedAt); err != nil {
+		var approval Approval
+		if err := rows.Scan(&approval.Approver, &approval.Reason, &approval.ApprovedAt); err != nil {
 			return nil, err
 		}
-		zgody = append(zgody, zgoda)
+		approvals = append(approvals, approval)
 	}
-	return zgody, rows.Err()
+	return approvals, rows.Err()
 }
 
-// Zgoda to jedno zatwierdzenie zadania.
-type Zgoda struct {
+// Approval is a single approval of a task.
+type Approval struct {
 	Approver   string    `json:"approver"`
 	Reason     string    `json:"reason,omitempty"`
 	ApprovedAt time.Time `json:"approved_at"`
 }
 
-// wymaganeZgody ustala, ile osob musi zatwierdzic zadanie.
+// requiredApprovals decides how many people have to approve the task.
 //
-// Liczba jest cecha operacji, a nie srodowiska: dysk sformatowany w
-// srodowisku testowym tez jest dyskiem sformatowanym.
-func wymaganeZgody(spec Spec) int {
+// The number is a property of the operation rather than of the environment: a
+// disk formatted in a test environment is a formatted disk too.
+func requiredApprovals(spec Spec) int {
 	if spec.RequiredApprovals > 0 {
 		return spec.RequiredApprovals
 	}
@@ -272,7 +275,7 @@ func wymaganeZgody(spec Spec) int {
 	return 1
 }
 
-// Cancel anuluje zadanie, ktore nie osiagnelo jeszcze stanu koncowego.
+// Cancel cancels a task that has not reached a final state yet.
 func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
 	const query = `
 		update jobs set state = $2, canceled_by = $3, canceled_at = now(),
@@ -291,33 +294,34 @@ func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason stri
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
 
-// AnulujNiewyslane konczy zadania hosta, ktore jeszcze nie ruszyly.
+// CancelUndelivered ends the host's tasks that have not started yet.
 //
-// Wysylane i biezace zostaja: agent moze byc w polowie nieprzerywalnej
-// operacji, a panel nie ma jak jej cofnac. Anulowanie ich w bazie zrobiloby
-// tylko tyle, ze wynik przyszedlby do zadania, ktore juz nie istnieje.
-func (s *Store) AnulujNiewyslane(ctx context.Context, tx pgx.Tx, hostID, aktor,
-	powod string) (int, error) {
+// Tasks being delivered and running stay: the agent may be halfway through an
+// uninterruptible operation, and the panel has no way of undoing it.
+// Cancelling them in the database would only mean the result arriving for a
+// task that no longer exists.
+func (s *Store) CancelUndelivered(ctx context.Context, tx pgx.Tx, hostID, actor,
+	reason string) (int, error) {
 	const query = `
 		update jobs set state = $2, canceled_by = $3, canceled_at = now(),
 		                cancel_reason = $4, finished_at = now(), updated_at = now()
 		where host_id = $1::uuid
 		  and state in ('planned', 'awaiting_approval', 'queued', 'leased')`
-	znacznik, err := tx.Exec(ctx, query, hostID, string(StateCanceled), aktor, nullable(powod))
+	tag, err := tx.Exec(ctx, query, hostID, string(StateCanceled), actor, nullable(reason))
 	if err != nil {
 		return 0, err
 	}
-	return int(znacznik.RowsAffected()), nil
+	return int(tag.RowsAffected()), nil
 }
 
-// OtwarteZadaniaAkcji zwraca niedokonczone zadania danej akcji dla hosta
-// razem z ich ostatnia proba i payloadem.
+// OpenTasksOfAction returns the host's unfinished tasks of a given action
+// together with their last attempt and payload.
 //
-// Uzywane przez operacje, ktore konczy dopiero powrot hosta: agent wymienia
-// sam siebie i nie ma jak odeslac wyniku, bo proces, ktory go liczyl, wlasnie
-// zostal zastapiony.
-func (s *Store) OtwarteZadaniaAkcji(ctx context.Context, hostID,
-	akcja string) ([]OtwarteZadanie, error) {
+// Used by operations that only the host's return settles: the agent replaces
+// itself and has no way of sending the result back, because the process that
+// computed it has just been replaced.
+func (s *Store) OpenTasksOfAction(ctx context.Context, hostID,
+	action string) ([]OpenTask, error) {
 	const query = `
 		select j.id::text, coalesce(a.id::text, ''), j.payload
 		from jobs j
@@ -328,40 +332,40 @@ func (s *Store) OtwarteZadaniaAkcji(ctx context.Context, hostID,
 		where j.host_id = $1::uuid and j.action_type = $2
 		  and j.state in ('queued', 'leased', 'dispatched', 'running')
 		order by j.created_at`
-	rows, err := s.pool.Query(ctx, query, hostID, akcja)
+	rows, err := s.pool.Query(ctx, query, hostID, action)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var zadania []OtwarteZadanie
+	var tasks []OpenTask
 	for rows.Next() {
-		var zadanie OtwarteZadanie
-		if err := rows.Scan(&zadanie.JobID, &zadanie.AttemptID, &zadanie.Payload); err != nil {
+		var task OpenTask
+		if err := rows.Scan(&task.JobID, &task.AttemptID, &task.Payload); err != nil {
 			return nil, err
 		}
-		zadania = append(zadania, zadanie)
+		tasks = append(tasks, task)
 	}
-	return zadania, rows.Err()
+	return tasks, rows.Err()
 }
 
-// OtwarteZadanie jest zadaniem czekajacym na rozstrzygniecie.
-type OtwarteZadanie struct {
+// OpenTask is a task waiting to be settled.
+type OpenTask struct {
 	JobID     string
 	AttemptID string
 	Payload   json.RawMessage
 }
 
-// LeasedJob laczy zadanie z proba, ktora je wykonuje.
+// LeasedJob joins a task with the attempt carrying it out.
 type LeasedJob struct {
 	Job       Job
 	AttemptID string
 	Attempt   int
 }
 
-// Lease pobiera zadania gotowe do wykonania dla podanych hostow i nadaje im
-// lease. SKIP LOCKED sprawia, ze rownolegle workery nie blokuja sie nawzajem
-// ani nie pobieraja tego samego zadania.
+// Lease takes the tasks ready to run for the given hosts and gives them a
+// lease. SKIP LOCKED means parallel workers neither block each other nor take
+// the same task.
 func (s *Store) Lease(ctx context.Context, gatewayID string, hostIDs []string,
 	limit int, leaseDuration time.Duration) ([]LeasedJob, error) {
 	if len(hostIDs) == 0 || limit <= 0 {
@@ -383,7 +387,7 @@ func (s *Store) Lease(ctx context.Context, gatewayID string, hostIDs []string,
 		for update skip locked`
 	rows, err := tx.Query(ctx, selectQuery, hostIDs, limit)
 	if err != nil {
-		return nil, fmt.Errorf("pobranie zadan: %w", err)
+		return nil, fmt.Errorf("taking the tasks: %w", err)
 	}
 	var jobIDs []string
 	for rows.Next() {
@@ -437,7 +441,7 @@ func (s *Store) Lease(ctx context.Context, gatewayID string, hostIDs []string,
 	return leased, nil
 }
 
-// MarkDispatched odnotowuje przekazanie zadania do agenta.
+// MarkDispatched records handing the task over to the agent.
 func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -458,7 +462,7 @@ func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID 
 	return tx.Commit(ctx)
 }
 
-// ReleaseLease zwraca zadanie do kolejki, gdy nie udalo sie go dostarczyc.
+// ReleaseLease returns the task to the queue when it could not be delivered.
 func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -481,7 +485,7 @@ func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason strin
 	return tx.Commit(ctx)
 }
 
-// Result opisuje wynik zgloszony przez agenta.
+// Result describes the result reported by the agent.
 type Result struct {
 	Status          string
 	ExitCode        int32
@@ -493,13 +497,14 @@ type Result struct {
 	Replayed        bool
 	UnitStateBefore json.RawMessage
 	UnitStateAfter  json.RawMessage
-	// Detail jest wynikiem wlasciwym dla typu operacji, np. planem aktualizacji.
+	// Detail is the result specific to the operation type, e.g. an upgrade plan.
 	Detail json.RawMessage
 }
 
-// RecordResult zapisuje wynik proby i przenosi zadanie do stanu koncowego.
-// Zwraca informacje, czy wynik zostal przyjety: pozny wynik po utracie lease
-// jest zachowywany diagnostycznie, ale nie nadpisuje nowszej decyzji.
+// RecordResult records the result of an attempt and moves the task to a final
+// state. It returns whether the result was accepted: a late result after a
+// lost lease is kept for diagnostics but does not overwrite a newer
+// decision.
 func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	result Result, jobState State) (accepted bool, err error) {
 	tx, err := s.pool.Begin(ctx)
@@ -531,8 +536,8 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		return false, err
 	}
 
-	// Stan koncowy jest ostateczny: wynik, ktory przyszedl po anulowaniu albo
-	// po innym rozstrzygnieciu, nie cofa decyzji.
+	// A final state is final: a result that arrived after a cancellation or
+	// after another settlement does not undo the decision.
 	if currentState.Terminal() {
 		return false, tx.Commit(ctx)
 	}
@@ -551,12 +556,12 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	return true, tx.Commit(ctx)
 }
 
-// ReclaimExpiredLeases zwraca do kolejki zadania, ktorych lease wygasl.
-// Gateway moze zniknac bez zamkniecia sesji, wiec czas jest jedynym pewnym
-// sygnalem, ze proba sie nie powiodla.
+// ReclaimExpiredLeases returns tasks whose lease expired to the queue. A
+// gateway can disappear without closing its session, so time is the only
+// certain signal that an attempt failed.
 func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 	const query = `
-		with wygasle as (
+		with expired as (
 			select a.id as attempt_id, a.job_id
 			from job_attempts a
 			join jobs j on j.id = a.job_id
@@ -566,14 +571,14 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 			  and j.state in ('leased', 'dispatched', 'running')
 			for update of a skip locked
 		),
-		zamkniete as (
+		closed as (
 			update job_attempts set finished_at = now(), status = 'lease_expired',
 			                        lease_expires_at = null
-			where id in (select attempt_id from wygasle)
+			where id in (select attempt_id from expired)
 			returning job_id
 		)
 		update jobs set state = 'queued', updated_at = now()
-		where id in (select job_id from zamkniete)
+		where id in (select job_id from closed)
 		returning id`
 	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
@@ -587,7 +592,7 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 	return count, rows.Err()
 }
 
-// ExpireOverdue oznacza zadania, ktore przekroczyly TTL, zanim ruszyly.
+// ExpireOverdue marks the tasks that exceeded their TTL before starting.
 func (s *Store) ExpireOverdue(ctx context.Context) (int, error) {
 	const query = `
 		update jobs set state = 'expired', result_status = 'expired',
@@ -607,42 +612,43 @@ func (s *Store) ExpireOverdue(ctx context.Context) (int, error) {
 	return count, rows.Err()
 }
 
-// Get zwraca zadanie.
+// Get returns a task.
 func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 	return s.getPool(ctx, "where id = $1", jobID)
 }
 
-// ListFilter opisuje filtry listy zadan.
+// ListFilter describes the filters of a task list.
 type ListFilter struct {
 	HostID string
 	State  string
 	Limit  int
-	// Scopes zawezaja wynik do zakresow, w ktorych wolajacy ma prawo odczytu.
-	// Pusta lista nie zaweza niczego; zakres pusty w srodku listy oznacza
-	// uprawnienie globalne.
+	// Scopes narrow the result to the scopes in which the caller has the
+	// right to read. An empty list narrows nothing; an empty scope inside the
+	// list means a global permission.
 	Scopes []Scope
 }
 
-// Scope jest para lokalizacja-srodowisko. Pusta wartosc pola znaczy "dowolne".
+// Scope is a site-environment pair. An empty field means "any".
 type Scope struct {
 	Site        string
 	Environment string
 }
 
-// List zwraca zadania zgodne z filtrem.
+// List returns the tasks matching the filter.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	clause := "where 1 = 1"
 	args := []any{}
-	// Zadanie nalezy do hosta, wiec widocznosc dziedziczy po nim: operator
-	// jednego srodowiska nie moze ogladac zadan z calej floty.
+	// A task belongs to a host, so it inherits visibility from it: the
+	// operator of one environment must not see the tasks of the whole
+	// fleet.
 	if len(filter.Scopes) > 0 {
-		przelozone := make([]authz.Scope, 0, len(filter.Scopes))
+		translated := make([]authz.Scope, 0, len(filter.Scopes))
 		for _, scope := range filter.Scopes {
-			przelozone = append(przelozone, authz.Scope{Site: scope.Site, Environment: scope.Environment})
+			translated = append(translated, authz.Scope{Site: scope.Site, Environment: scope.Environment})
 		}
-		if warunek, dodatkowe := authz.ScopeSQL(przelozone, "h.site", "h.environment", len(args)); warunek != "" {
-			clause += " and exists (select 1 from hosts h where h.id = jobs.host_id and " + warunek + ")"
-			args = append(args, dodatkowe...)
+		if condition, extra := authz.ScopeSQL(translated, "h.site", "h.environment", len(args)); condition != "" {
+			clause += " and exists (select 1 from hosts h where h.id = jobs.host_id and " + condition + ")"
+			args = append(args, extra...)
 		}
 	}
 	if filter.HostID != "" {
@@ -663,7 +669,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	return s.queryJobs(ctx, s.pool, clause, args...)
 }
 
-// Attempts zwraca proby wykonania zadania.
+// Attempts returns the attempts at carrying out a task.
 func (s *Store) Attempts(ctx context.Context, jobID string) ([]Attempt, error) {
 	const query = `
 		select id, job_id, attempt_number, coalesce(gateway_id, ''), session_id,
@@ -740,19 +746,20 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 	var jobs []Job
 	for rows.Next() {
 		var j Job
-		var zebrane int
+		var collected int
 		if err := rows.Scan(&j.ID, &j.HostID, &j.CampaignID, &j.ActionType, &j.ActionVersion,
 			&j.Payload, &j.PayloadHash, &j.IdempotencyKey, &j.State, &j.RequiresApprova,
 			&j.Preconditions, &j.TimeoutSeconds, &j.MaxOutputBytes, &j.ExpiresAt,
 			&j.CreatedBy, &j.RequestID, &j.ApprovedBy, &j.ApprovedAt,
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,
 			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
-			&j.RequiredApprovals, &zebrane); err != nil {
+			&j.RequiredApprovals, &collected); err != nil {
 			return nil, err
 		}
-		// Liczbe zebranych zgod niesie kazdy widok zadania: bez niej operator
-		// klika "approve" i nie wie, dlaczego nic sie nie stalo.
-		j.CollectedApprovals = zebrane
+		// Every view of a task carries the number of collected approvals:
+		// without it the operator clicks "approve" and does not know why
+		// nothing happened.
+		j.CollectedApprovals = collected
 		jobs = append(jobs, j)
 	}
 	return jobs, rows.Err()
@@ -779,8 +786,9 @@ func nullableJSON(value json.RawMessage) any {
 	return []byte(value)
 }
 
-// AttemptOwner zwraca zadanie, do ktorego nalezy proba. Agent odsyla wynik
-// z identyfikatorem proby, wiec gateway musi odnalezc job.
+// AttemptOwner returns the task an attempt belongs to. The agent sends the
+// result back with the attempt identifier, so the gateway has to find the
+// job.
 func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID, action string, err error) {
 	err = s.pool.QueryRow(ctx, `
 		select a.job_id, j.action_type
@@ -792,9 +800,9 @@ func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID, acti
 	return jobID, action, err
 }
 
-// LastAttempt zwraca identyfikator ostatniej proby operacji. Pusty oznacza
-// operacje, ktora nie zostala jeszcze dostarczona - nie ma wtedy czego
-// przerywac na hoscie.
+// LastAttempt returns the identifier of the operation's last attempt. An
+// empty one means an operation that has not been delivered yet - there is
+// then nothing to interrupt on the host.
 func (s *Store) LastAttempt(ctx context.Context, jobID string) (string, error) {
 	var attemptID string
 	err := s.pool.QueryRow(ctx, `
@@ -808,20 +816,20 @@ func (s *Store) LastAttempt(ctx context.Context, jobID string) (string, error) {
 	return attemptID, err
 }
 
-// AttemptContext zwraca operacje proby wraz z jej kampania. Postep zlecony
-// w kampanii musi trafic takze na ekran kampanii, a agent zna wylacznie
-// identyfikator proby.
+// AttemptContext returns the attempt's operation together with its campaign.
+// Progress ordered in a campaign has to reach the campaign screen as well,
+// and the agent knows only the attempt identifier.
 func (s *Store) AttemptContext(ctx context.Context, attemptID string) (jobID, campaignID string, err error) {
-	var kampania *string
+	var campaign *string
 	err = s.pool.QueryRow(ctx, `
 		select a.job_id, j.campaign_id::text
 		  from job_attempts a join jobs j on j.id = a.job_id
-		 where a.id = $1`, attemptID).Scan(&jobID, &kampania)
+		 where a.id = $1`, attemptID).Scan(&jobID, &campaign)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", ErrNotFound
 	}
-	if kampania != nil {
-		campaignID = *kampania
+	if campaign != nil {
+		campaignID = *campaign
 	}
 	return jobID, campaignID, err
 }

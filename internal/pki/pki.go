@@ -1,5 +1,5 @@
-// Package pki obsluguje wewnetrzne CA Flotestro: certyfikat serwera oraz
-// podpisywanie CSR agentow. Klucz prywatny agenta nigdy nie trafia do CA.
+// Package pki runs Flotestro's internal CA: the server certificate and the
+// signing of agent CSRs. An agent's private key never reaches the CA.
 package pki
 
 import (
@@ -21,27 +21,28 @@ import (
 )
 
 const (
-	// Certyfikat agenta jest krotkotrwaly; rotacja jest normalnym trybem pracy.
+	// An agent certificate is short-lived; rotation is the normal mode of work.
 	AgentCertTTL  = 30 * 24 * time.Hour
 	serverCertTTL = 365 * 24 * time.Hour
 	caTTL         = 10 * 365 * 24 * time.Hour
 
-	// Schemat URI SAN niosacego tozsamosc hosta.
+	// The scheme of the URI SAN carrying the host's identity.
 	identityScheme = "flotestro"
 )
 
-// CA jest wewnetrznym urzedem certyfikacji control plane.
+// CA is the internal certificate authority of the control plane.
 type CA struct {
 	Certificate *x509.Certificate
 	PrivateKey  *ecdsa.PrivateKey
 	PEM         []byte
-	// AgentTTL nadpisuje czas zycia certyfikatu agenta. Zero oznacza wartosc
-	// domyslna; krotszy termin skraca okno wykorzystania skradzionego klucza,
-	// dluzszy zmniejsza ruch odnowien w duzej flocie.
+	// AgentTTL overrides the lifetime of an agent certificate. Zero means the
+	// default value; a shorter term shortens the window in which a stolen key
+	// can be used, a longer one lowers the renewal traffic in a large
+	// fleet.
 	AgentTTL time.Duration
 }
 
-// agentCertTTL zwraca czas zycia certyfikatu agenta.
+// agentCertTTL returns the lifetime of an agent certificate.
 func (ca *CA) agentCertTTL() time.Duration {
 	if ca.AgentTTL > 0 {
 		return ca.AgentTTL
@@ -49,8 +50,9 @@ func (ca *CA) agentCertTTL() time.Duration {
 	return AgentCertTTL
 }
 
-// NotAfter zwraca koniec waznosci certyfikatu CA. Wygasajace CA unieruchamia
-// cala flote naraz, wiec ten czas musi byc widoczny w metrykach.
+// NotAfter returns the end of validity of the CA certificate. An expiring CA
+// immobilises the whole fleet at once, so this time has to be visible in the
+// metrics.
 func (ca *CA) NotAfter() time.Time {
 	if ca == nil || ca.Certificate == nil {
 		return time.Time{}
@@ -58,10 +60,10 @@ func (ca *CA) NotAfter() time.Time {
 	return ca.Certificate.NotAfter
 }
 
-// EnsureCA wczytuje CA z katalogu stanu lub tworzy nowe przy pierwszym starcie.
+// EnsureCA reads the CA from the state directory or creates one on the first start.
 func EnsureCA(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("katalog stanu: %w", err)
+		return nil, fmt.Errorf("state directory: %w", err)
 	}
 	certPath := filepath.Join(dir, "ca.pem")
 	keyPath := filepath.Join(dir, "ca.key")
@@ -85,7 +87,7 @@ func EnsureCA(dir string) (*CA, error) {
 	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
 		return nil, err
 	}
-	// Klucz CA jest najbardziej wrazliwym materialem w systemie.
+	// The CA key is the most sensitive material in the system.
 	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
 		return nil, err
 	}
@@ -132,7 +134,7 @@ func newCA() (*CA, []byte, []byte, error) {
 func parseCA(certPEM, keyPEM []byte) (*CA, error) {
 	certBlock, _ := pem.Decode(certPEM)
 	if certBlock == nil {
-		return nil, fmt.Errorf("ca.pem nie zawiera bloku PEM")
+		return nil, fmt.Errorf("ca.pem contains no PEM block")
 	}
 	cert, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
@@ -140,7 +142,7 @@ func parseCA(certPEM, keyPEM []byte) (*CA, error) {
 	}
 	keyBlock, _ := pem.Decode(keyPEM)
 	if keyBlock == nil {
-		return nil, fmt.Errorf("ca.key nie zawiera bloku PEM")
+		return nil, fmt.Errorf("ca.key contains no PEM block")
 	}
 	key, err := x509.ParseECPrivateKey(keyBlock.Bytes)
 	if err != nil {
@@ -149,7 +151,7 @@ func parseCA(certPEM, keyPEM []byte) (*CA, error) {
 	return &CA{Certificate: cert, PrivateKey: key, PEM: certPEM}, nil
 }
 
-// IssueServerCert wystawia certyfikat dla listenerow control plane.
+// IssueServerCert issues a certificate for the control plane's listeners.
 func (ca *CA) IssueServerCert(dnsNames []string, ipAddresses []net.IP) (certPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -183,7 +185,7 @@ func (ca *CA) IssueServerCert(dnsNames []string, ipAddresses []net.IP) (certPEM,
 	return certPEM, keyPEM, nil
 }
 
-// IssuedCert opisuje wystawiony certyfikat agenta na potrzeby zapisu w bazie.
+// IssuedCert describes an issued agent certificate for recording in the database.
 type IssuedCert struct {
 	PEM         []byte
 	Serial      string
@@ -191,59 +193,62 @@ type IssuedCert struct {
 	NotBefore   time.Time
 	NotAfter    time.Time
 	CommonName  string
-	// Wystawca pozwala policzyc, ilu hostow dotyczy wycofanie danego CA.
+	// The issuer allows counting how many hosts a withdrawal of a given CA concerns.
 	IssuerSubject string
 	IssuerSerial  string
-	// Nazwy sieciowe wystawione w certyfikacie. Puste dla hostow: tylko
-	// relay wystepuje wobec kogokolwiek jako serwer.
+	// The network names issued in the certificate. Empty for hosts: only a
+	// relay acts as a server towards anyone.
 	DNSNames    []string
 	IPAddresses []string
 }
 
-// relayCertTTL jest krotszy niz czas zycia certyfikatu agenta. Relay stoi
-// miedzy flota a centrala i widzi ruch calej lokalizacji, wiec okno
-// wykorzystania jego skradzionego klucza ma byc mniejsze.
+// relayCertTTL is shorter than the lifetime of an agent certificate. A relay
+// stands between the fleet and the centre and sees the traffic of a whole
+// site, so the window in which its stolen key can be used is to be smaller.
 const relayCertTTL = 7 * 24 * time.Hour
 
-// SignRelayCSR podpisuje CSR relaya. Tozsamosc relaya jest osobna od tozsamosci
-// hosta: relay nie jest agentem i nie moze podszyc sie pod host samym
-// certyfikatem, bo panel czyta rodzaj tozsamosci z URI SAN.
+// SignRelayCSR signs a relay's CSR. A relay's identity is separate from a
+// host's: a relay is not an agent and cannot impersonate a host with the
+// certificate alone, because the panel reads the kind of identity from the
+// URI SAN.
 func (ca *CA) SignRelayCSR(csrPEM []byte, relayID string) (*IssuedCert, error) {
 	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, nil)
 }
 
-// SignRelayCSRZNazwami wystawia certyfikat relaya z nazwami wskazanymi przez
-// panel zamiast tych z CSR.
+// SignRelayCSRWithNames issues a relay certificate with the names given by
+// the panel instead of those from the CSR.
 //
-// Odnowienie idzie ta droga: nazwy sieciowe sa granica zaufania wobec agentow
-// lokalizacji, wiec przy odnowieniu pochodza z rejestru, a nie z zadania.
-// Relay, ktory chce wystepowac pod nowa nazwa, potrzebuje decyzji operatora.
-func (ca *CA) SignRelayCSRZNazwami(csrPEM []byte, relayID string, nazwy []string) (*IssuedCert, error) {
-	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, nazwy)
+// A renewal goes this way: the network names are the boundary of trust
+// towards the site's agents, so on a renewal they come from the registry
+// rather than from the request. A relay that wants to act under a new name
+// needs an operator's decision.
+func (ca *CA) SignRelayCSRWithNames(csrPEM []byte, relayID string, names []string) (*IssuedCert, error) {
+	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, names)
 }
 
-// SignAgentCSR podpisuje CSR agenta, osadzajac tozsamosc hosta w URI SAN.
-// Wszystkie pola podmiotu pochodzace z CSR sa ignorowane poza kluczem
-// publicznym: tozsamosc nadaje control plane, nie zglaszajacy sie host.
+// SignAgentCSR signs an agent's CSR, embedding the host's identity in the URI
+// SAN. Every subject field coming from the CSR is ignored apart from the
+// public key: the identity is granted by the control plane, not by the host
+// that asks for it.
 func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
 	return ca.signCSR(csrPEM, "host", hostID, ca.agentCertTTL(), nil)
 }
 
-// signCSR wystawia certyfikat tozsamosci floty. Rodzaj tozsamosci wchodzi
-// do URI SAN, wiec nie da sie uzyc certyfikatu relaya jako certyfikatu hosta
-// ani odwrotnie.
+// signCSR issues a certificate of a fleet identity. The kind of identity goes
+// into the URI SAN, so a relay certificate cannot be used as a host
+// certificate or the other way round.
 func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
-	nazwy []string) (*IssuedCert, error) {
+	names []string) (*IssuedCert, error) {
 	block, _ := pem.Decode(csrPEM)
 	if block == nil {
-		return nil, fmt.Errorf("CSR nie zawiera bloku PEM")
+		return nil, fmt.Errorf("the CSR contains no PEM block")
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("CSR: %w", err)
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return nil, fmt.Errorf("podpis CSR: %w", err)
+		return nil, fmt.Errorf("CSR signature: %w", err)
 	}
 
 	serial, err := randomSerial()
@@ -262,18 +267,19 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 		URIs:         []*url.URL{identity},
 	}
 	if kind == "relay" {
-		// Relay wystepuje w obu rolach: jako serwer wobec agentow swojej
-		// lokalizacji i jako klient wobec centrali. Nazwy sieciowe bierzemy
-		// z CSR, bo to relay wie, pod jakim adresem go widac; tozsamoscia
-		// pozostaje URI SAN nadany przez panel, a nie te nazwy.
+		// A relay acts in both roles: as a server towards the agents of its
+		// site and as a client towards the centre. We take the network names
+		// from the CSR, because it is the relay that knows the address it is
+		// seen at; the identity remains the URI SAN granted by the panel
+		// rather than those names.
 		template.ExtKeyUsage = append(template.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 		template.DNSNames = csr.DNSNames
 		template.IPAddresses = csr.IPAddresses
-		if nazwy != nil {
-			// Nazwy narzucone przez panel zastepuja te z CSR w calosci.
-			// Dopisanie ich obok zostawialoby relayowi mozliwosc dolozenia
-			// sobie nazwy, ktorej operator nigdy nie zatwierdzil.
-			template.DNSNames, template.IPAddresses = rozdzielNazwy(nazwy)
+		if names != nil {
+			// The names imposed by the panel replace those from the CSR in
+			// full. Adding them alongside would leave the relay able to give
+			// itself a name the operator never approved.
+			template.DNSNames, template.IPAddresses = splitNames(names)
 		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, csr.PublicKey, ca.PrivateKey)
@@ -281,9 +287,9 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 		return nil, err
 	}
 	sum := sha256.Sum256(der)
-	adresy := make([]string, 0, len(template.IPAddresses))
-	for _, adres := range template.IPAddresses {
-		adresy = append(adresy, adres.String())
+	addresses := make([]string, 0, len(template.IPAddresses))
+	for _, address := range template.IPAddresses {
+		addresses = append(addresses, address.String())
 	}
 	return &IssuedCert{
 		PEM:           pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
@@ -295,56 +301,56 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 		IssuerSerial:  ca.Certificate.SerialNumber.String(),
 		CommonName:    id,
 		DNSNames:      template.DNSNames,
-		IPAddresses:   adresy,
+		IPAddresses:   addresses,
 	}, nil
 }
 
-// rozdzielNazwy dzieli nazwy sieciowe na adresy IP i nazwy DNS.
+// splitNames divides network names into IP addresses and DNS names.
 //
-// Nazwa, ktora jest adresem IP, musi trafic do SAN jako adres: przegladarki
-// i biblioteki TLS nie dopasowuja adresu do wpisu DNS, wiec taki certyfikat
-// wygladalby poprawnie, a agent i tak by go odrzucil.
-func rozdzielNazwy(nazwy []string) ([]string, []net.IP) {
+// A name that is an IP address has to land in the SAN as an address: browsers
+// and TLS libraries do not match an address against a DNS entry, so such a
+// certificate would look correct and the agent would reject it anyway.
+func splitNames(names []string) ([]string, []net.IP) {
 	var dns []string
-	var adresy []net.IP
-	for _, nazwa := range nazwy {
-		if adres := net.ParseIP(nazwa); adres != nil {
-			adresy = append(adresy, adres)
+	var addresses []net.IP
+	for _, name := range names {
+		if address := net.ParseIP(name); address != nil {
+			addresses = append(addresses, address)
 			continue
 		}
-		dns = append(dns, nazwa)
+		dns = append(dns, name)
 	}
-	return dns, adresy
+	return dns, addresses
 }
 
-// HostIDFromCert wyciaga tozsamosc hosta z URI SAN certyfikatu klienta.
+// HostIDFromCert extracts the host's identity from the client certificate's URI SAN.
 func HostIDFromCert(cert *x509.Certificate) (string, error) {
 	return identityFromCert(cert, "host")
 }
 
-// RelayIDFromCert zwraca tozsamosc relaya. Rodzaj tozsamosci jest sprawdzany,
-// wiec certyfikat hosta nie przejdzie jako certyfikat relaya.
+// RelayIDFromCert returns a relay's identity. The kind of identity is
+// checked, so a host certificate does not pass as a relay certificate.
 func RelayIDFromCert(cert *x509.Certificate) (string, error) {
 	return identityFromCert(cert, "relay")
 }
 
-// TozsamoscZCertyfikatu zwraca rodzaj i identyfikator z URI SAN.
+// IdentityFromCert returns the kind and the identifier from the URI SAN.
 //
-// Rodzaj jest zwracany, a nie sprawdzany: sa miejsca, ktore przyjmuja obie
-// tozsamosci floty - magazyn generacji jest ten sam dla agenta i dla relaya,
-// bo zapisuje klucz i certyfikat, a nie role.
-func TozsamoscZCertyfikatu(cert *x509.Certificate) (rodzaj, id string, err error) {
+// The kind is returned rather than checked: there are places that accept both
+// fleet identities - the generation store is the same for an agent and for a
+// relay, because it records a key and a certificate rather than a role.
+func IdentityFromCert(cert *x509.Certificate) (kind, id string, err error) {
 	for _, uri := range cert.URIs {
 		if uri.Scheme != identityScheme {
 			continue
 		}
-		wartosc := strings.TrimPrefix(uri.Path, "/")
-		if wartosc == "" {
+		value := strings.TrimPrefix(uri.Path, "/")
+		if value == "" {
 			continue
 		}
-		return uri.Host, wartosc, nil
+		return uri.Host, value, nil
 	}
-	return "", "", fmt.Errorf("certyfikat nie zawiera tozsamosci %s://<rodzaj>/<id>", identityScheme)
+	return "", "", fmt.Errorf("the certificate carries no identity %s://<kind>/<id>", identityScheme)
 }
 
 func identityFromCert(cert *x509.Certificate, kind string) (string, error) {
@@ -359,10 +365,10 @@ func identityFromCert(cert *x509.Certificate, kind string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("certyfikat nie zawiera tozsamosci %s://%s/<id>", identityScheme, kind)
+	return "", fmt.Errorf("the certificate carries no identity %s://%s/<id>", identityScheme, kind)
 }
 
-// Fingerprint liczy SHA-256 z DER certyfikatu.
+// Fingerprint computes the SHA-256 of the certificate's DER.
 func Fingerprint(cert *x509.Certificate) []byte {
 	sum := sha256.Sum256(cert.Raw)
 	return sum[:]

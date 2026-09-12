@@ -16,17 +16,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TokenPrefix odroznia token API od innych sekretow w logach i konfiguracji.
+// TokenPrefix distinguishes an API token from other secrets in logs and configuration.
 const TokenPrefix = "flta_"
 
 var (
-	// ErrUnauthenticated oznacza brak lub nieprawidlowy token.
-	ErrUnauthenticated = errors.New("brak waznego uwierzytelnienia")
-	// ErrNotFound oznacza brak tozsamosci.
-	ErrNotFound = errors.New("tozsamosc nie istnieje")
+	// ErrUnauthenticated means a missing or invalid token.
+	ErrUnauthenticated = errors.New("no valid authentication")
+	// ErrNotFound means the identity does not exist.
+	ErrNotFound = errors.New("the identity does not exist")
 )
 
-// Store realizuje dostep do tozsamosci, tokenow i przypisan rol.
+// Store provides access to identities, tokens and role assignments.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -37,8 +37,8 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Token opisuje wystawiony token API. Wartosc jest widoczna wylacznie
-// w chwili utworzenia.
+// Token describes an issued API token. The value is visible only at the
+// moment it is created.
 type Token struct {
 	ID          string     `json:"id"`
 	PrincipalID string     `json:"principal_id"`
@@ -49,7 +49,7 @@ type Token struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
-// EnsurePrincipal tworzy tozsamosc lub zwraca istniejaca.
+// EnsurePrincipal creates an identity or returns the existing one.
 func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 	subject, displayName, kind string) (string, error) {
 	if kind == "" {
@@ -65,16 +65,16 @@ func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 	var id string
 	err := tx.QueryRow(ctx, query, uuid.NewString(), subject, displayName, kind).Scan(&id)
 	if err != nil {
-		return "", fmt.Errorf("zapis tozsamosci: %w", err)
+		return "", fmt.Errorf("saving the identity: %w", err)
 	}
 	return id, nil
 }
 
-// GrantRole przypisuje role w zakresie. Ponowne przypisanie jest bezpieczne.
+// GrantRole assigns a role within a scope. Assigning it again is safe.
 func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	principalID string, role Role, scope Scope, createdBy string) error {
 	if !KnownRole(role) {
-		return fmt.Errorf("nieznana rola %q", role)
+		return fmt.Errorf("unknown role %q", role)
 	}
 	const query = `
 		insert into role_bindings (id, principal_id, role, site, environment, created_by)
@@ -85,7 +85,7 @@ func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	return err
 }
 
-// IssueToken wystawia token dla tozsamosci. W bazie zapisujemy tylko skrot.
+// IssueToken issues a token for an identity. Only its digest is stored in the database.
 func (s *Store) IssueToken(ctx context.Context, tx pgx.Tx, principalID, description string,
 	ttl time.Duration, createdBy string) (*Token, error) {
 	raw := make([]byte, 32)
@@ -109,13 +109,14 @@ func (s *Store) IssueToken(ctx context.Context, tx pgx.Tx, principalID, descript
 		returning created_at`
 	if err := tx.QueryRow(ctx, query, token.ID, principalID, hash[:],
 		nullable(description), expiresAt, createdBy).Scan(&token.CreatedAt); err != nil {
-		return nil, fmt.Errorf("zapis tokenu: %w", err)
+		return nil, fmt.Errorf("saving the token: %w", err)
 	}
 	return token, nil
 }
 
-// Authenticate zamienia token na tozsamosc wraz z rolami.
-// Porownanie skrotu idzie w stalym czasie, zeby nie ujawniac prefiksu tokenu.
+// Authenticate turns a token into an identity together with its roles.
+// The digest comparison runs in constant time, so as not to reveal the
+// token's prefix.
 func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -131,8 +132,8 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 		  and t.revoked_at is null
 		  and (t.expires_at is null or t.expires_at > now())
 		  and p.disabled_at is null
-		  -- Lokalny znacznik odmowy dziala natychmiast, niezaleznie od tego,
-		  -- czy blokada zdazyla sie rozpropagowac do katalogu.
+		  -- The local denial marker takes effect at once, regardless of
+		  -- whether the lock has reached the directory yet.
 		  and p.denied_at is null`
 	var (
 		tokenID    string
@@ -158,7 +159,7 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 	}
 	principal.Bindings = bindings
 
-	// Zapis uzycia jest pomocniczy; jego blad nie moze zablokowac zadania.
+	// Recording the use is auxiliary; its failure must not block the request.
 	_, _ = s.pool.Exec(ctx, `update api_tokens set last_used_at = now() where id = $1`, tokenID)
 	return &principal, nil
 }
@@ -182,7 +183,7 @@ func (s *Store) bindingsOf(ctx context.Context, principalID string) ([]Binding, 
 	return bindings, rows.Err()
 }
 
-// ListPrincipals zwraca tozsamosci wraz z rolami.
+// ListPrincipals returns the identities together with their roles.
 func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 	const query = `
 		select id, subject, display_name, kind
@@ -213,10 +214,11 @@ func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Lista pusta to nie to samo co brak listy. Puste przypisania w JSON
-		// jako null wywracaly interfejs, ktory czytal ich liczbe; poza tym
-		// tozsamosc bez wlasnych przypisan wciaz moze miec role z mapowania
-		// grup, wiec "brak" jest tu informacja, a nie brakiem danych.
+		// An empty list is not the same as a missing list. Empty assignments
+		// rendered as null in JSON broke the interface that read their count;
+		// besides, an identity without assignments of its own can still have
+		// roles from the group mapping, so "none" is information here rather
+		// than missing data.
 		if bindings == nil {
 			bindings = []Binding{}
 		}
@@ -225,7 +227,7 @@ func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 	return principals, nil
 }
 
-// CountPrincipals mowi, czy system ma juz jakakolwiek tozsamosc.
+// CountPrincipals says whether the system has any identity yet.
 func (s *Store) CountPrincipals(ctx context.Context) (int, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `select count(*) from principals`).Scan(&count)
@@ -239,7 +241,7 @@ func nullable(value string) any {
 	return value
 }
 
-// GroupMapping wiaze grupe zewnetrzna z rola w zakresie.
+// GroupMapping binds an external group to a role within a scope.
 type GroupMapping struct {
 	ID          string    `json:"id"`
 	Issuer      string    `json:"issuer"`
@@ -251,14 +253,14 @@ type GroupMapping struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// CreateGroupMapping dodaje mapowanie grupy na role.
+// CreateGroupMapping adds a mapping from a group to a role.
 func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 	issuer, groupName string, role Role, scope Scope, createdBy string) (*GroupMapping, error) {
 	if !KnownRole(role) {
-		return nil, fmt.Errorf("nieznana rola %q", role)
+		return nil, fmt.Errorf("unknown role %q", role)
 	}
 	if issuer == "" || groupName == "" {
-		return nil, fmt.Errorf("mapowanie wymaga wystawcy i nazwy grupy")
+		return nil, fmt.Errorf("a mapping requires an issuer and a group name")
 	}
 	mapping := &GroupMapping{
 		ID: uuid.NewString(), Issuer: issuer, GroupName: groupName, Role: role,
@@ -273,12 +275,12 @@ func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 		returning id, created_at`
 	if err := tx.QueryRow(ctx, query, mapping.ID, issuer, groupName, string(role),
 		mapping.Site, mapping.Environment, createdBy).Scan(&mapping.ID, &mapping.CreatedAt); err != nil {
-		return nil, fmt.Errorf("zapis mapowania grupy: %w", err)
+		return nil, fmt.Errorf("saving the group mapping: %w", err)
 	}
 	return mapping, nil
 }
 
-// ListGroupMappings zwraca mapowania grup.
+// ListGroupMappings returns the group mappings.
 func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
 	const query = `
 		select id, issuer, group_name, role, site, environment, created_by, created_at
@@ -302,8 +304,8 @@ func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
 	return mappings, rows.Err()
 }
 
-// DeleteGroupMapping usuwa mapowanie. Uzytkownicy tracą wynikajaca z niego
-// role przy nastepnym zadaniu, bez potrzeby ponownego logowania.
+// DeleteGroupMapping removes a mapping. Users lose the role that followed
+// from it on their next request, without having to log in again.
 func (s *Store) DeleteGroupMapping(ctx context.Context, mappingID string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `delete from group_role_mappings where id = $1`, mappingID)
 	if err != nil {

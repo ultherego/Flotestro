@@ -82,14 +82,14 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// Sa operacje, ktorych masowo nie wolno robic wcale - nie dlatego, ze
 	// panel nie umie, tylko dlatego, ze ich skutek wymaga obecnosci
 	// operatora przy kazdym hoscie z osobna.
-	if powod := opspec.PowodWykluczeniaZKampanii(action); powod != "" {
+	if powod := opspec.CampaignExclusionReason(action); powod != "" {
 		problem(w, http.StatusBadRequest, "not_a_campaign_action", powod)
 		return
 	}
 	// Tryb masowy jest deklaracja operacji, a nie wnioskiem z jej ryzyka.
 	// Brak deklaracji znaczy odmowe: dopisanie nowej operacji do rejestru nie
 	// moze samo z siebie otwierac jej dla calej floty.
-	if !opspec.TrybWykonywalny(action) {
+	if !opspec.ExecutableMode(action) {
 		problem(w, http.StatusBadRequest, "campaign_mode_unsupported",
 			powodOdmowyTrybu(action))
 		return
@@ -104,7 +104,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	// Zamowienie kampanii jest walidowane inaczej niz operacja na jednym
 	// hoscie: odcisku planu jeszcze nie ma, bo plan powstanie na hostach.
-	if err := opspec.ValidateZamowienieKampanii(action, payload); err != nil {
+	if err := opspec.ValidateCampaignRequest(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
 		return
 	}
@@ -145,7 +145,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// czesci floty zostawia hosty, ktorych reszta przestaje rozpoznawac.
 	// Taka kampania nie zaczyna sie wcale, dopoki ktorykolwiek cel jest
 	// niepewny - i mowi, ktory.
-	if powod := opspec.PowodPelnegoPokrycia(action); powod != "" {
+	if powod := opspec.FullCoverageReason(action); powod != "" {
 		if niepewne := ocena.Niepewne(); len(niepewne) > 0 {
 			problem(w, http.StatusBadRequest, "incomplete_coverage",
 				powod+"; "+opisWykluczen(niepewne))
@@ -280,15 +280,15 @@ func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([
 		Environment: selector.Environment,
 		OSFamily:    selector.OSFamily,
 	}
-	wynik := make([]hosts.Host, 0, hosts.RozmiarStrony)
+	wynik := make([]hosts.Host, 0, hosts.PageSize)
 	poNazwie, poID := "", ""
 	for {
-		strona, err := s.hosts.Strona(r.Context(), filter, poNazwie, poID, hosts.RozmiarStrony)
+		strona, err := s.hosts.Page(r.Context(), filter, poNazwie, poID, hosts.PageSize)
 		if err != nil {
 			return nil, err
 		}
 		wynik = append(wynik, strona...)
-		if len(strona) < hosts.RozmiarStrony {
+		if len(strona) < hosts.PageSize {
 			return wynik, nil
 		}
 		if len(wynik) > maksymalnaMigawkaKampanii {
@@ -324,7 +324,7 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		Environment: r.URL.Query().Get("environment"),
 		OSFamily:    r.URL.Query().Get("os_family"),
 	}
-	ile, err := s.hosts.Policz(r.Context(), filter)
+	ile, err := s.hosts.Count(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -339,7 +339,7 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	// do restartu uslugi i niezdolne do aktualizacji.
 	akcja := opspec.ActionType(r.URL.Query().Get("action"))
 	if akcja == "" {
-		probka, err := s.hosts.Strona(r.Context(), filter, "", "", rozmiarProbkiPodgladu)
+		probka, err := s.hosts.Page(r.Context(), filter, "", "", rozmiarProbkiPodgladu)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -375,7 +375,7 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	odpowiedz["excluded"] = ocena.Wykluczenia()
 	odpowiedz["notes"] = ocena.Uwagi
 	odpowiedz["campaign_mode"] = string(akcja.CampaignMode())
-	odpowiedz["requires_plan"] = opspec.AkcjaPlanowania(akcja) != ""
+	odpowiedz["requires_plan"] = opspec.PlanningAction(akcja) != ""
 	odpowiedz["distribution"] = rozklad(ocena.Gotowe, akcja)
 	writeJSON(w, http.StatusOK, odpowiedz)
 }
@@ -741,7 +741,7 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 	// nie ma gdzie oddac tokenow. Oddajemy je tutaj: pojemnosc trzymana przez
 	// kampanie, ktora juz nic nie robi, zatrzymuje nastepna.
 	if operation == "cancel" && s.budzety != nil {
-		if err := s.budzety.ZwolnijRoszczacego(r.Context(), "campaign:"+campaign.ID); err != nil {
+		if err := s.budzety.ReleaseClaimant(r.Context(), "campaign:"+campaign.ID); err != nil {
 			s.log.Error("nie zwolniono pojemnosci anulowanej kampanii",
 				"campaign_id", campaign.ID, "err", err)
 		}

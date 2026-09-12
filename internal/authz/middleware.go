@@ -8,25 +8,25 @@ import (
 )
 
 const (
-	// SessionCookie niesie referencje do sesji serwerowej. Jest HttpOnly, wiec
-	// skrypt w przegladarce jej nie odczyta.
+	// SessionCookie carries a reference to the server-side session. It is
+	// HttpOnly, so a script in the browser cannot read it.
 	SessionCookie = "flotestro_session"
-	// CSRFCookie jest czytelny dla skryptu i musi zostac odeslany w naglowku.
-	// Ciasteczko samo w sobie nie autoryzuje niczego.
+	// CSRFCookie is readable by a script and has to be sent back in a header.
+	// The cookie by itself authorises nothing.
 	CSRFCookie = "flotestro_csrf"
-	// CSRFHeader jest naglowkiem z wartoscia CSRFCookie.
+	// CSRFHeader is the header carrying the value of CSRFCookie.
 	CSRFHeader = "X-Flotestro-CSRF"
 )
 
-// SessionAuthenticator zamienia ciasteczko na tozsamosc.
+// SessionAuthenticator turns a cookie into an identity.
 type SessionAuthenticator interface {
 	AuthenticateSession(ctx context.Context, cookieValue string) (*Principal, *Session, error)
 }
 
 type sessionContextKey struct{}
 
-// Authenticator laczy dwie drogi uwierzytelnienia: sesje przegladarki
-// z dostawcy tozsamosci oraz token API dla automatyzacji.
+// Authenticator joins two ways of authenticating: a browser session from the
+// identity provider and an API token for automation.
 type Authenticator struct {
 	Tokens interface {
 		Authenticate(ctx context.Context, token string) (*Principal, error)
@@ -34,19 +34,21 @@ type Authenticator struct {
 	Sessions SessionAuthenticator
 }
 
-// Middleware ustala tozsamosc zadania. Samo uwierzytelnienie niczego nie
-// autoryzuje: decyzje podejmuja handlery, bo tylko one znaja zakres celu.
+// Middleware establishes the identity of the request. Authentication by
+// itself authorises nothing: the handlers make the decisions, because only
+// they know the target's scope.
 func (a Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		principal := Anonymous
 
-		// Sesja przegladarki ma pierwszenstwo; token API sluzy automatyzacji.
+		// The browser session takes precedence; the API token serves automation.
 		if cookie, err := r.Cookie(SessionCookie); err == nil && a.Sessions != nil {
 			if authenticated, session, err := a.Sessions.AuthenticateSession(ctx, cookie.Value); err == nil {
-				// Zadanie zmieniajace stan z ciasteczkiem wymaga potwierdzenia
-				// CSRF: przegladarka dolacza ciasteczko automatycznie, wiec
-				// samo jego posiadanie nie dowodzi intencji uzytkownika.
+				// A state-changing request with a cookie requires CSRF
+				// confirmation: the browser attaches the cookie
+				// automatically, so having it does not prove the user's
+				// intent.
 				if !safeMethod(r.Method) && !csrfValid(r) {
 					writeCSRFError(w)
 					return
@@ -68,13 +70,14 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// ContextWithSession dokleja sesje do kontekstu. Poza middleware sluzy
-// testom, ktore sprawdzaja zachowanie zalezne od sposobu uwierzytelnienia.
+// ContextWithSession attaches the session to the context. Outside the
+// middleware it serves tests that check behaviour depending on the way of
+// authenticating.
 func ContextWithSession(ctx context.Context, session *Session) context.Context {
 	return context.WithValue(ctx, sessionContextKey{}, session)
 }
 
-// SessionFromContext zwraca sesje przegladarki, jesli zadanie z niej korzysta.
+// SessionFromContext returns the browser session if the request uses one.
 func SessionFromContext(ctx context.Context) (*Session, bool) {
 	session, ok := ctx.Value(sessionContextKey{}).(*Session)
 	return session, ok
@@ -89,8 +92,8 @@ func safeMethod(method string) bool {
 	}
 }
 
-// csrfValid sprawdza schemat double submit: wartosc z ciasteczka musi zostac
-// powtorzona w naglowku, czego obca strona nie potrafi zrobic.
+// csrfValid checks the double submit scheme: the value from the cookie has
+// to be repeated in a header, which a foreign site cannot do.
 func csrfValid(r *http.Request) bool {
 	cookie, err := r.Cookie(CSRFCookie)
 	if err != nil || cookie.Value == "" {
@@ -107,7 +110,7 @@ func writeCSRFError(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte(`{"type":"about:blank","title":"Forbidden","status":403,` +
-		`"code":"csrf_required","detail":"brak lub nieprawidlowy naglowek ` + CSRFHeader + `"}`))
+		`"code":"csrf_required","detail":"the ` + CSRFHeader + ` header is missing or invalid"}`))
 }
 
 func bearerToken(r *http.Request) string {

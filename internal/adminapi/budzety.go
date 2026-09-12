@@ -23,7 +23,7 @@ func (s *Server) handleListBudgets(w http.ResponseWriter, r *http.Request) {
 			"budgets are disabled in this installation")
 		return
 	}
-	stany, err := s.budzety.Stany(r.Context())
+	stany, err := s.budzety.States(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -70,7 +70,7 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.budzety.UstawPojemnosc(r.Context(), klucz, request.Capacity, request.Note); err != nil {
+	if err := s.budzety.SetCapacity(r.Context(), klucz, request.Capacity, request.Note); err != nil {
 		s.fail(w, err)
 		return
 	}

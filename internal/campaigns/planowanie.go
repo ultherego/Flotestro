@@ -22,7 +22,7 @@ import (
 // rownoleglosci kampanii: hosty licza rownolegle, a blokady zasobow po stronie
 // agenta i tak nie pozwola planowi wejsc w trwajaca transakcje pakietowa.
 func (o *Orchestrator) planuj(ctx context.Context, campaign Campaign, targets []Target) error {
-	akcja := opspec.AkcjaPlanowania(opspec.ActionType(campaign.ActionType))
+	akcja := opspec.PlanningAction(opspec.ActionType(campaign.ActionType))
 	if akcja == "" {
 		// Kampania nie powinna byla powstac; zatrzymanie jest jedyna uczciwa
 		// odpowiedzia, bo planu nie ma czym policzyc.

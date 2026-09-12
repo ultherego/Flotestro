@@ -56,7 +56,7 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
-	case !hosts.Aktywny(status.LifecycleState):
+	case !hosts.Active(status.LifecycleState):
 		// Odnowienie certyfikatu hostowi w kwarantannie albo wycofanemu
 		// przedluzaloby dokladnie to zaufanie, ktore zostalo cofniete.
 		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)

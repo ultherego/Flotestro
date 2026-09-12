@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPayloadHashJestStabilny(t *testing.T) {
+func TestThePayloadHashIsStable(t *testing.T) {
 	payload := Payload{Unit: &UnitPayload{Unit: "nginx.service"}}
 
 	first, err := PayloadHash(ActionUnitRestart, ActionVersion, payload)
@@ -16,13 +16,14 @@ func TestPayloadHashJestStabilny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	// Serwer i agent licza hash niezaleznie; ten sam plan musi dac ten sam hash.
+	// The server and the agent compute the hash independently; the same plan
+	// has to give the same hash.
 	if !bytes.Equal(first, second) {
-		t.Fatal("ten sam plan dal rozne hashe")
+		t.Fatal("the same plan gave different hashes")
 	}
 }
 
-func TestPayloadHashWykrywaPodmianePlanu(t *testing.T) {
+func TestThePayloadHashDetectsASwappedPlan(t *testing.T) {
 	approved, _ := PayloadHash(ActionUnitRestart, ActionVersion,
 		Payload{Unit: &UnitPayload{Unit: "nginx.service"}})
 
@@ -31,11 +32,11 @@ func TestPayloadHashWykrywaPodmianePlanu(t *testing.T) {
 		version int
 		payload Payload
 	}{
-		"podmieniona jednostka": {ActionUnitRestart, ActionVersion,
+		"swapped unit": {ActionUnitRestart, ActionVersion,
 			Payload{Unit: &UnitPayload{Unit: "sshd.service"}}},
-		"podmieniona operacja": {ActionUnitStop, ActionVersion,
+		"swapped operation": {ActionUnitStop, ActionVersion,
 			Payload{Unit: &UnitPayload{Unit: "nginx.service"}}},
-		"podmieniona wersja kontraktu": {ActionUnitRestart, ActionVersion + 1,
+		"swapped contract version": {ActionUnitRestart, ActionVersion + 1,
 			Payload{Unit: &UnitPayload{Unit: "nginx.service"}}},
 	}
 	for name, tc := range cases {
@@ -45,137 +46,140 @@ func TestPayloadHashWykrywaPodmianePlanu(t *testing.T) {
 				t.Fatalf("hash: %v", err)
 			}
 			if bytes.Equal(approved, tampered) {
-				t.Fatal("podmiana planu nie zmienila hasha")
+				t.Fatal("swapping the plan did not change the hash")
 			}
 		})
 	}
 }
 
-func TestValidateWymagaPayloaduZgodnegoZTypem(t *testing.T) {
+func TestValidateRequiresAPayloadMatchingTheType(t *testing.T) {
 	if err := Validate(ActionUnitRestart, Payload{}); err == nil {
-		t.Error("operacja na jednostce bez payloadu przeszla walidacje")
+		t.Error("a unit operation without a payload passed validation")
 	}
 	if err := Validate(ActionUnitRestart, Payload{Unit: &UnitPayload{Unit: "  "}}); err == nil {
-		t.Error("pusta nazwa jednostki przeszla walidacje")
+		t.Error("an empty unit name passed validation")
 	}
 	if err := Validate(ActionReadJournal, Payload{Unit: &UnitPayload{Unit: "nginx.service"}}); err == nil {
-		t.Error("odczyt dziennika z payloadem jednostki przeszedl walidacje")
+		t.Error("a journal read with a unit payload passed validation")
 	}
 	if err := Validate("unit.chmod", Payload{Unit: &UnitPayload{Unit: "x.service"}}); err == nil {
-		t.Error("nieznany typ operacji przeszedl walidacje")
+		t.Error("an unknown operation type passed validation")
 	}
 	if err := Validate(ActionUnitRestart, Payload{Unit: &UnitPayload{Unit: "nginx.service"}}); err != nil {
-		t.Errorf("poprawna operacja odrzucona: %v", err)
+		t.Errorf("a valid operation was rejected: %v", err)
 	}
 }
 
-func TestValidateOgraniczaOdczytDziennika(t *testing.T) {
-	// Odczyt bez limitu linii pozwolilby sciagnac dowolnie duzy wynik.
+func TestValidateBoundsAJournalRead(t *testing.T) {
+	// A read without a line limit would allow pulling an arbitrarily large
+	// result.
 	if err := Validate(ActionReadJournal, Payload{Journal: &JournalPayload{Lines: 0}}); err == nil {
-		t.Error("odczyt bez limitu linii przeszedl walidacje")
+		t.Error("a read without a line limit passed validation")
 	}
 	if err := Validate(ActionReadJournal, Payload{Journal: &JournalPayload{Lines: 100000}}); err == nil {
-		t.Error("odczyt ponad limit przeszedl walidacje")
+		t.Error("a read above the limit passed validation")
 	}
 	priority := uint32(9)
 	if err := Validate(ActionReadJournal,
 		Payload{Journal: &JournalPayload{Lines: 100, MaxPriority: &priority}}); err == nil {
-		t.Error("nieprawidlowy priorytet syslog przeszedl walidacje")
+		t.Error("an invalid syslog priority passed validation")
 	}
 	if err := Validate(ActionReadJournal, Payload{Journal: &JournalPayload{Lines: 100}}); err != nil {
-		t.Errorf("poprawny odczyt odrzucony: %v", err)
+		t.Errorf("a valid read was rejected: %v", err)
 	}
 }
 
-func TestOperacjeMutujaceSaOdrozniane(t *testing.T) {
+func TestMutatingOperationsAreDistinguished(t *testing.T) {
 	if ActionReadJournal.Mutating() {
-		t.Error("odczyt dziennika nie jest mutacja")
+		t.Error("a journal read is not a mutation")
 	}
 	for _, action := range []ActionType{ActionUnitStart, ActionUnitStop, ActionUnitRestart, ActionUnitReload} {
 		if !action.Mutating() {
-			t.Errorf("%s musi byc traktowana jak mutacja", action)
+			t.Errorf("%s has to be treated as a mutation", action)
 		}
 		if action.RequiredCapability() != "systemd" {
-			t.Errorf("%s wymaga systemd", action)
+			t.Errorf("%s requires systemd", action)
 		}
 	}
-	// Kazda operacja ma wlasne uprawnienie; nie istnieje jedno szerokie admin.
+	// Every operation has its own permission; there is no single broad admin
+	// one.
 	seen := map[string]bool{}
 	for _, action := range AllActions() {
 		permission := action.Permission()
 		if permission == "" {
-			t.Errorf("%s nie ma uprawnienia", action)
+			t.Errorf("%s has no permission", action)
 		}
 		if seen[permission] {
-			t.Errorf("uprawnienie %s jest wspoldzielone przez wiele operacji", permission)
+			t.Errorf("the permission %s is shared by several operations", permission)
 		}
 		seen[permission] = true
 	}
 }
 
-// Payload z pustym podpayloadem opisuje te sama operacje co payload bez niego.
-// Panel wysyla przy odczycie pusty payload, koperta nie ma czego niesc, a agent
-// odtwarza z niej strukture zerowa - i bez wspolnej postaci kanonicznej hash
-// wychodzil rozny po obu stronach.
-func TestHashNieZalezyOdPustegoPodpayloadu(t *testing.T) {
-	pusty, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{})
+// A payload with an empty sub-payload describes the same operation as a
+// payload without one. On a read the panel sends an empty payload, the
+// envelope has nothing to carry, and the agent reconstructs a zero structure
+// from it - and without a shared canonical form the hash came out different
+// on the two sides.
+func TestTheHashDoesNotDependOnAnEmptySubPayload(t *testing.T) {
+	empty, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	zerowy, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{Security: &SecurityPayload{}})
+	zero, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{Security: &SecurityPayload{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(pusty, zerowy) {
-		t.Error("pusty podpayload zmienil hash planu")
+	if !bytes.Equal(empty, zero) {
+		t.Error("an empty sub-payload changed the plan hash")
 	}
 
-	// Podpayload z trescia nadal zmienia hash - inaczej podmiana zlecenia
-	// przestalaby byc wykrywalna.
-	zTrescia, err := PayloadHash(ActionSecurityScan, ActionVersion,
+	// A sub-payload with content still changes the hash - otherwise swapping
+	// an order would stop being detectable.
+	withContent, err := PayloadHash(ActionSecurityScan, ActionVersion,
 		Payload{Security: &SecurityPayload{Mode: "permissive"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Equal(pusty, zTrescia) {
-		t.Error("tresc podpayloadu nie zmienila hashu planu")
+	if bytes.Equal(empty, withContent) {
+		t.Error("the content of a sub-payload did not change the plan hash")
 	}
 }
 
-// TestWymianaAgentaMaWlasneReguly pilnuje, ze operacja, ktora wymienia sam
-// mechanizm zarzadzania, nie przyjmuje czegokolwiek.
-func TestWymianaAgentaMaWlasneReguly(t *testing.T) {
+// TestReplacingTheAgentHasItsOwnRules guards that the operation replacing the
+// management mechanism itself does not accept just anything.
+func TestReplacingTheAgentHasItsOwnRules(t *testing.T) {
 	if err := Validate(ActionAgentUpgrade, Payload{}); err == nil {
-		t.Error("wymiana agenta bez payloadu przeszla")
+		t.Error("replacing the agent without a payload passed")
 	}
 	if err := Validate(ActionAgentUpgrade, Payload{
 		AgentUpgrade: &AgentUpgradePayload{TargetVersion: "0.2.0"},
 	}); err != nil {
-		t.Errorf("poprawna wersja odrzucona: %v", err)
+		t.Errorf("a valid version was rejected: %v", err)
 	}
-	// Wersja trafia do wiersza polecen menedzera pakietow, wiec nie moze byc
-	// dowolnym tekstem.
-	for _, zla := range []string{"", "0.2.0; rm -rf /", "$(id)", "wersja z odstepem"} {
+	// The version reaches the package manager's command line, so it must not
+	// be arbitrary text.
+	for _, bad := range []string{"", "0.2.0; rm -rf /", "$(id)", "version with a space"} {
 		if err := Validate(ActionAgentUpgrade, Payload{
-			AgentUpgrade: &AgentUpgradePayload{TargetVersion: zla},
+			AgentUpgrade: &AgentUpgradePayload{TargetVersion: bad},
 		}); err == nil {
-			t.Errorf("wersja %q przeszla", zla)
+			t.Errorf("the version %q passed", bad)
 		}
 	}
 	if err := Validate(ActionAgentUpgrade, Payload{
-		AgentUpgrade: &AgentUpgradePayload{TargetVersion: "0.2.0", PackageSHA256: "nie-suma"},
+		AgentUpgrade: &AgentUpgradePayload{TargetVersion: "0.2.0", PackageSHA256: "not-a-sum"},
 	}); err == nil {
-		t.Error("suma, ktora nie jest SHA-256, przeszla")
+		t.Error("a checksum that is not a SHA-256 passed")
 	}
 
-	// Wymiana agenta ma wlasne prawo: kto moze aktualizowac pakiety, nie
-	// dostaje przez to prawa do wymiany samego mechanizmu zarzadzania.
+	// Replacing the agent has its own right: whoever may upgrade packages does
+	// not thereby get the right to replace the management mechanism itself.
 	if ActionAgentUpgrade.Permission() == ActionPackageUpgrade.Permission() {
-		t.Error("wymiana agenta dzieli uprawnienie ze zwykla aktualizacja")
+		t.Error("replacing the agent shares its permission with an ordinary upgrade")
 	}
-	// Klasa blokady jest ta sama co pakietow: dwie transakcje pakietowe naraz
-	// to uszkodzona baza pakietow.
+	// The lock class is the same as for packages: two package transactions at
+	// once mean a damaged package database.
 	if ActionAgentUpgrade.LockClass() != ActionPackageUpgrade.LockClass() {
-		t.Error("wymiana agenta nie blokuje sie z transakcjami pakietowymi")
+		t.Error("replacing the agent does not lock against package transactions")
 	}
 }

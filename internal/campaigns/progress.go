@@ -274,7 +274,7 @@ func (o *Orchestrator) complete(ctx context.Context, campaign Campaign,
 	// oczekiwania - i one tez musza zniknac, bo licza sie do udzialu
 	// nastepnych kampanii.
 	if o.budzety != nil {
-		if err := o.budzety.ZwolnijRoszczacego(ctx, "campaign:"+campaign.ID); err != nil {
+		if err := o.budzety.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
 			o.log.Error("nie zwolniono pojemnosci zakonczonej kampanii",
 				"campaign_id", campaign.ID, "err", err)
 		}

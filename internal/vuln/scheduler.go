@@ -189,7 +189,7 @@ func (h *Harmonogram) opisyWskazanych(ctx context.Context,
 			// przegladu: po prostu go nie ma.
 			continue
 		}
-		skrot := hosts.Skrot{
+		skrot := hosts.Summary{
 			ID: host.ID, Hostname: host.Hostname,
 			OSDistribution: host.OSDistribution, OSVersion: host.OSVersion,
 		}
@@ -274,7 +274,7 @@ func (h *Harmonogram) opisyHostow(ctx context.Context) ([]OpisHosta, error) {
 		poID     string
 	)
 	for {
-		strona, err := h.hosts.Przeglad(ctx, poNazwie, poID, hosts.RozmiarStrony)
+		strona, err := h.hosts.Sweep(ctx, poNazwie, poID, hosts.PageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -301,14 +301,14 @@ func (h *Harmonogram) opisyHostow(ctx context.Context) ([]OpisHosta, error) {
 
 		ostatni := strona[len(strona)-1]
 		poNazwie, poID = ostatni.Hostname, ostatni.ID
-		if len(strona) < hosts.RozmiarStrony {
+		if len(strona) < hosts.PageSize {
 			return opisy, nil
 		}
 	}
 }
 
 // dystrybucjaHosta ustala dystrybucje i wydanie w jezyku producenta.
-func dystrybucjaHosta(host hosts.Skrot, fragmenty []inventory.Fragment) (string, string) {
+func dystrybucjaHosta(host hosts.Summary, fragmenty []inventory.Fragment) (string, string) {
 	dystrybucja := strings.ToLower(host.OSDistribution)
 	wydanie := host.OSVersion
 
@@ -588,8 +588,8 @@ func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
 // poprzednieStany czyta zapisane oceny hostow, strona po stronie.
 func (h *Harmonogram) poprzednieStany(ctx context.Context, opisy []OpisHosta) map[string]StanHosta {
 	wynik := map[string]StanHosta{}
-	for poczatek := 0; poczatek < len(opisy); poczatek += hosts.RozmiarStrony {
-		koniec := min(poczatek+hosts.RozmiarStrony, len(opisy))
+	for poczatek := 0; poczatek < len(opisy); poczatek += hosts.PageSize {
+		koniec := min(poczatek+hosts.PageSize, len(opisy))
 		identyfikatory := make([]string, 0, koniec-poczatek)
 		for _, opis := range opisy[poczatek:koniec] {
 			identyfikatory = append(identyfikatory, opis.ID)

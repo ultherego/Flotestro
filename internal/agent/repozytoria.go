@@ -42,7 +42,7 @@ func (e *TaskExecutor) applyRepository(ctx context.Context, task *agentv1.TaskEn
 	// Haslo pobieramy dopiero teraz, tuz przed zapisem. Wartosc zyje przez
 	// chwile w pamieci agenta i helpera - nie ma jej w kopercie zadania,
 	// w dzienniku ani w wyniku. W pliku zrodla zostaje sama nazwa sekretu.
-	if !payload.PasswordSecret.Pusty() && !payload.Remove {
+	if !payload.PasswordSecret.Empty() && !payload.Remove {
 		if e.sekrety == nil {
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 				"agent nie ma polaczenia, przez ktore mozna pobrac sekret")

@@ -20,7 +20,7 @@ import (
 // nigdy nie wrocil.
 func (s *AgentService) rozstrzygnijAktualizacjeAgenta(ctx context.Context,
 	hostID, wersja string) {
-	zadania, err := s.jobs.OtwarteZadaniaAkcji(ctx, hostID, string(opspec.ActionAgentUpgrade))
+	zadania, err := s.jobs.OpenTasksOfAction(ctx, hostID, string(opspec.ActionAgentUpgrade))
 	if err != nil {
 		s.log.Error("nie odczytano zadan wymiany agenta", "host_id", hostID, "err", err)
 		return
@@ -45,7 +45,7 @@ func (s *AgentService) rozstrzygnijAktualizacjeAgenta(ctx context.Context,
 
 // zamknijAktualizacje zapisuje wynik zadania wymiany agenta.
 func (s *AgentService) zamknijAktualizacje(ctx context.Context, hostID string,
-	zadanie jobs.OtwarteZadanie, stan jobs.State, kod, opis string) {
+	zadanie jobs.OpenTask, stan jobs.State, kod, opis string) {
 	status := "succeeded"
 	if stan != jobs.StateSucceeded {
 		status = "failed"

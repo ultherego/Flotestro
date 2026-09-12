@@ -223,7 +223,7 @@ func TestProsbaWTrakcieZebraniaCzekaNaNastepne(t *testing.T) {
 // Rozjazd nie bylby widoczny: zadanie skonczyloby sie sukcesem, nie
 // odswiezajac niczego.
 func TestKazdyModulKontraktuMaZbieracz(t *testing.T) {
-	for _, nazwa := range opspec.ModuleInwentarza {
+	for _, nazwa := range opspec.InventoryModules {
 		if nazwa == ModulSystem {
 			// Fakty podstawowe zbieraja sie zawsze, wiec nie maja wpisu
 			// w mapie zbieraczy.
@@ -234,7 +234,7 @@ func TestKazdyModulKontraktuMaZbieracz(t *testing.T) {
 		}
 	}
 	for nazwa := range zbieraczeModulow {
-		if !opspec.ModulInwentarza(nazwa) {
+		if !opspec.IsInventoryModule(nazwa) {
 			t.Errorf("agent zbiera modul %q, ktorego panel nie przyjmuje", nazwa)
 		}
 	}

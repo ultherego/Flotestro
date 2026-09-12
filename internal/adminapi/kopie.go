@@ -194,7 +194,7 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 				"this installation has no secret store")
 			return
 		}
-		if _, err := s.secrets.Sekret(r.Context(), nazwa); errors.Is(err, secrets.ErrNotFound) {
+		if _, err := s.secrets.Secret(r.Context(), nazwa); errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusBadRequest, "secret_not_found", "no secret named "+nazwa)
 			return
 		} else if err != nil {
@@ -480,7 +480,7 @@ func (s *Server) obciazenieRepozytoriow(ctx context.Context,
 		if !mamy {
 			wpis = &obciazenieRepozytorium{
 				Repository: pozycja.Repository,
-				BudgetKey:  budgets.KluczBackendu(pozycja.Repository),
+				BudgetKey:  budgets.BackendKey(pozycja.Repository),
 			}
 			wedlug[pozycja.Repository] = wpis
 			kolejnosc = append(kolejnosc, pozycja.Repository)
@@ -501,22 +501,22 @@ func (s *Server) obciazenieRepozytoriow(ctx context.Context,
 	// Budzety sa opcjonalne: instalacja bez nich nadal pokazuje backendy,
 	// tylko bez ich pojemnosci.
 	if s.budzety != nil {
-		if stany, err := s.budzety.Stany(ctx); err == nil {
-			wedlugKlucza := map[string]budgets.Stan{}
+		if stany, err := s.budzety.States(ctx); err == nil {
+			wedlugKlucza := map[string]budgets.State{}
 			for _, stan := range stany {
-				wedlugKlucza[stan.Klucz] = stan
+				wedlugKlucza[stan.Key] = stan
 			}
 			for _, wpis := range wedlug {
 				stan, mamy := wedlugKlucza[wpis.BudgetKey]
 				if !mamy {
 					// Polityka domyslna dla wszystkich backendow liczy sie
 					// tak samo jak opisana osobno.
-					stan, mamy = wedlugKlucza[budgets.Wzorzec(wpis.BudgetKey)]
+					stan, mamy = wedlugKlucza[budgets.Pattern(wpis.BudgetKey)]
 				}
 				if !mamy {
 					continue
 				}
-				pojemnosc, zajete, chetnych := stan.Pojemnosc, stan.Zajete, stan.Chetnych
+				pojemnosc, zajete, chetnych := stan.Capacity, stan.Used, stan.Claimants
 				wpis.Capacity, wpis.Used, wpis.Claimants = &pojemnosc, &zajete, &chetnych
 			}
 		}

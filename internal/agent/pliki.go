@@ -73,7 +73,7 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 	// zyje przez chwile w pamieci agenta i helpera - nie ma jej w kopercie
 	// zadania, w dzienniku ani w wyniku.
 	tresc := []byte(payload.Content)
-	if !payload.ContentSecret.Pusty() {
+	if !payload.ContentSecret.Empty() {
 		if e.sekrety == nil {
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 				"agent nie ma polaczenia, przez ktore mozna pobrac sekret")
@@ -102,7 +102,7 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 				Group:          payload.Group,
 				ExpectedSha256: payload.ExpectedSHA256,
 				Validator:      payload.Validator,
-				FromSecret:     !payload.ContentSecret.Pusty(),
+				FromSecret:     !payload.ContentSecret.Empty(),
 			},
 		},
 	}, timeout)

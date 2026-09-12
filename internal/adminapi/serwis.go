@@ -65,7 +65,7 @@ func (s *Server) handleSetMaintenance(w http.ResponseWriter, r *http.Request) {
 		doKiedy = &termin
 	}
 
-	zaktualizowany, err := s.hosts.UstawOknoSerwisowe(r.Context(), hostID, doKiedy, powod, principal.Subject)
+	zaktualizowany, err := s.hosts.SetMaintenanceWindow(r.Context(), hostID, doKiedy, powod, principal.Subject)
 	if err != nil {
 		s.fail(w, err)
 		return

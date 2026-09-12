@@ -8,159 +8,152 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// TestPotrzebyRozrozniajaOdczytIMutacje pilnuje granicy, dla ktorej te budzety
-// w ogole istnieja: sto odczytow stanu to nie to samo obciazenie co sto
-// transakcji pakietowych.
-func TestPotrzebyRozrozniajaOdczytIMutacje(t *testing.T) {
-	odczyt := Potrzeby(opspec.ActionPackageList, "warsaw", "")
-	if len(odczyt) != 1 || odczyt[0].Klucz != KluczGlobalneOdczyty {
-		t.Fatalf("odczyt obciaza budzety %+v", odczyt)
+// TestNeedsSeparateReadsFromMutations guards the boundary these budgets exist
+// for: a hundred state reads are not the same load as a hundred package
+// transactions.
+func TestNeedsSeparateReadsFromMutations(t *testing.T) {
+	read := Needs(opspec.ActionPackageList, "warsaw", "")
+	if len(read) != 1 || read[0].Key != KeyGlobalReads {
+		t.Fatalf("a read loads budgets %+v", read)
 	}
 
-	mutacja := Potrzeby(opspec.ActionPackageUpgrade, "warsaw", "")
-	if len(mutacja) != 2 {
-		t.Fatalf("transakcja pakietowa obciaza budzety %+v", mutacja)
+	mutation := Needs(opspec.ActionPackageUpgrade, "warsaw", "")
+	if len(mutation) != 2 {
+		t.Fatalf("a package transaction loads budgets %+v", mutation)
 	}
-	if mutacja[0].Klucz != KluczGlobalneMutacje {
-		t.Errorf("transakcja poza budzetem mutacji: %+v", mutacja)
+	if mutation[0].Key != KeyGlobalMutations {
+		t.Errorf("transaction outside the mutation budget: %+v", mutation)
 	}
-	if mutacja[1].Klucz != "site:warsaw:packages" {
-		t.Errorf("transakcja poza budzetem lokalizacji: %+v", mutacja)
+	if mutation[1].Key != "site:warsaw:packages" {
+		t.Errorf("transaction outside the site budget: %+v", mutation)
 	}
 }
 
-// TestRestartMaWlasnaRodzineLokalizacji pilnuje operacji, ktora nie ma klasy
-// blokady, bo zabiera caly host - a mimo to jest tym, czego w jednej
-// lokalizacji nie chcemy robic dziesiec razy naraz.
-func TestRestartMaWlasnaRodzineLokalizacji(t *testing.T) {
-	if rodzina := RodzinaLokalizacji(opspec.ActionSystemReboot); rodzina != "reboot" {
-		t.Fatalf("restart w rodzinie %q", rodzina)
+// TestRebootHasItsOwnSiteFamily guards the operation that has no lock class
+// because it takes the whole host - and is still the thing we do not want to
+// do ten times at once in one site.
+func TestRebootHasItsOwnSiteFamily(t *testing.T) {
+	if family := SiteFamily(opspec.ActionSystemReboot); family != "reboot" {
+		t.Fatalf("reboot in family %q", family)
 	}
-	potrzeby := Potrzeby(opspec.ActionSystemReboot, "warsaw", "")
-	if len(potrzeby) != 2 || potrzeby[1].Klucz != "site:warsaw:reboot" {
-		t.Fatalf("restart obciaza budzety %+v", potrzeby)
-	}
-}
-
-// TestHostBezLokalizacjiNieDostajeKluczaZDziura pilnuje, zeby brak lokalizacji
-// nie zamienil sie w klucz "site::packages" - czyli w jeden wspolny budzet
-// dla wszystkich hostow, ktorych nikt nie przypisal.
-func TestHostBezLokalizacjiNieDostajeKluczaZDziura(t *testing.T) {
-	potrzeby := Potrzeby(opspec.ActionPackageUpgrade, "", "")
-	if len(potrzeby) != 1 || potrzeby[0].Klucz != KluczGlobalneMutacje {
-		t.Fatalf("host bez lokalizacji obciaza budzety %+v", potrzeby)
+	needs := Needs(opspec.ActionSystemReboot, "warsaw", "")
+	if len(needs) != 2 || needs[1].Key != "site:warsaw:reboot" {
+		t.Fatalf("reboot loads budgets %+v", needs)
 	}
 }
 
-// TestWzorzecOpisujeKazdaLokalizacje pilnuje polityki domyslnej: lokalizacji
-// jest tyle, ile ich zalozono, i nikt nie opisuje kazdej z osobna.
-func TestWzorzecOpisujeKazdaLokalizacje(t *testing.T) {
-	if wzorzec := Wzorzec("site:warsaw:packages"); wzorzec != "site:*:packages" {
-		t.Errorf("wzorzec = %q", wzorzec)
-	}
-	// Klucz globalny nie ma czesci zmiennej, wiec nie ma tez wzorca.
-	if wzorzec := Wzorzec(KluczGlobalneMutacje); wzorzec != "" {
-		t.Errorf("klucz globalny dostal wzorzec %q", wzorzec)
+// TestHostWithoutSiteGetsNoKeyWithAHole makes sure a missing site does not
+// turn into the key "site::packages" - that is, into one shared budget for
+// every host nobody has assigned yet.
+func TestHostWithoutSiteGetsNoKeyWithAHole(t *testing.T) {
+	needs := Needs(opspec.ActionPackageUpgrade, "", "")
+	if len(needs) != 1 || needs[0].Key != KeyGlobalMutations {
+		t.Fatalf("a host without a site loads budgets %+v", needs)
 	}
 }
 
-// TestAwansZalezyOdKlasy pilnuje, ze priorytet naprawde cos znaczy: operacja
-// pilna przestaje byc ograniczana udzialem szybciej niz kampania w tle.
-func TestAwansZalezyOdKlasy(t *testing.T) {
-	kolejnosc := []Klasa{KlasaIncydent, KlasaInterakcja, KlasaUtrzymanie, KlasaTlo}
-	poprzedni := time.Duration(-1)
-	for _, klasa := range kolejnosc {
-		wiek := klasa.WiekAwansu()
-		if wiek <= poprzedni {
-			t.Errorf("klasa %s czeka %s, a mniej pilna %s", klasa, wiek, poprzedni)
+// TestPatternDescribesEverySite guards the default policy: there are as many
+// sites as someone created, and nobody describes each of them separately.
+func TestPatternDescribesEverySite(t *testing.T) {
+	if pattern := Pattern("site:warsaw:packages"); pattern != "site:*:packages" {
+		t.Errorf("pattern = %q", pattern)
+	}
+	// A global key has no variable part, so it has no pattern either.
+	if pattern := Pattern(KeyGlobalMutations); pattern != "" {
+		t.Errorf("a global key got the pattern %q", pattern)
+	}
+}
+
+// TestPromotionDependsOnClass makes sure the priority really means something:
+// an urgent operation stops being limited by its share sooner than a
+// background campaign.
+func TestPromotionDependsOnClass(t *testing.T) {
+	order := []Class{ClassIncident, ClassInteractive, ClassMaintenance, ClassBackground}
+	previous := time.Duration(-1)
+	for _, class := range order {
+		age := class.PromotionAge()
+		if age <= previous {
+			t.Errorf("class %s waits %s, and a less urgent one %s", class, age, previous)
 		}
-		poprzedni = wiek
+		previous = age
 	}
-	if KlasaIncydent.WiekAwansu() != 0 {
-		t.Error("incydent czeka na awans, zamiast dostac go od razu")
+	if ClassIncident.PromotionAge() != 0 {
+		t.Error("an incident waits for promotion instead of getting it at once")
 	}
 }
 
-// TestOdmowaNazywaPrzeszkode pilnuje doktryny: odmowa bez powodu jest cisza,
-// a cisza jest najgorsza odpowiedzia.
-func TestOdmowaNazywaPrzeszkode(t *testing.T) {
-	if !(Odmowa{}).Pusta() {
-		t.Fatal("pusta odmowa nie jest pusta")
+// TestRefusalNamesTheObstacle guards the doctrine: a refusal without a reason
+// is silence, and silence is the worst answer.
+func TestRefusalNamesTheObstacle(t *testing.T) {
+	if !(Refusal{}).Empty() {
+		t.Fatal("an empty refusal is not empty")
 	}
-	pojemnosc := Odmowa{Klucz: "site:warsaw:packages", Powod: PowodPojemnosc,
-		Zajete: 5, Pojemnosc: 5, Czeka: 12 * time.Second}
-	opis := pojemnosc.Opis()
+	capacity := Refusal{Key: "site:warsaw:packages", Reason: ReasonCapacity,
+		Used: 5, Capacity: 5, Waiting: 12 * time.Second}
+	description := capacity.Describe()
 	for _, fragment := range []string{"site:warsaw:packages", "5", "12s"} {
-		if !zawiera(opis, fragment) {
-			t.Errorf("opis %q nie mowi o %q", opis, fragment)
+		if !strings.Contains(description, fragment) {
+			t.Errorf("description %q does not mention %q", description, fragment)
 		}
 	}
 
-	udzial := Odmowa{Klucz: KluczGlobalneMutacje, Powod: PowodUdzial,
-		Pojemnosc: 50, Udzial: 25, Trzymane: 25}
-	// Odmowa udzialu i odmowa pojemnosci to dwie rozne sytuacje: przy
-	// pierwszej tokeny sa wolne, tylko nie dla tego roszczacego.
-	if udzial.Opis() == pojemnosc.Opis() {
-		t.Error("obie odmowy brzmia tak samo")
+	share := Refusal{Key: KeyGlobalMutations, Reason: ReasonFairShare,
+		Capacity: 50, Share: 25, Held: 25}
+	// A share refusal and a capacity refusal are two different situations: in
+	// the first one there are free tokens, just not for this claimant.
+	if share.Describe() == capacity.Describe() {
+		t.Error("both refusals read the same")
 	}
-	if !zawiera(udzial.Opis(), "25") {
-		t.Errorf("odmowa udzialu nie podaje liczb: %q", udzial.Opis())
+	if !strings.Contains(share.Describe(), "25") {
+		t.Errorf("the share refusal gives no numbers: %q", share.Describe())
 	}
 }
 
-func zawiera(tekst, fragment string) bool {
-	for i := 0; i+len(fragment) <= len(tekst); i++ {
-		if tekst[i:i+len(fragment)] == fragment {
-			return true
-		}
-	}
-	return false
-}
-
-// Repozytorium backupu jest zasobem wspolnym floty: budzet lokalizacji nie
-// wie nic o backendzie, do ktorego pisze pol floty naraz.
-func TestBudzetBackenduDotyczyRepozytorium(t *testing.T) {
-	kopia := Potrzeby(opspec.ActionBackupRun, "warsaw", "/srv/kopie")
+// A backup repository is a resource shared by the whole fleet: a site budget
+// knows nothing about the backend half the fleet writes to at once.
+func TestBackendBudgetFollowsTheRepository(t *testing.T) {
+	backup := Needs(opspec.ActionBackupRun, "warsaw", "/srv/copies")
 	var backend string
-	for _, potrzeba := range kopia {
-		if strings.HasPrefix(potrzeba.Klucz, "backend:") {
-			backend = potrzeba.Klucz
+	for _, need := range backup {
+		if strings.HasPrefix(need.Key, "backend:") {
+			backend = need.Key
 		}
 	}
-	if backend != "backend:/srv/kopie:backup" {
-		t.Fatalf("klucz backendu = %q", backend)
+	if backend != "backend:/srv/copies:backup" {
+		t.Fatalf("backend key = %q", backend)
 	}
-	// Polityka domyslna musi dzialac takze dla repozytorium, ktorego nikt
-	// nie opisal osobno.
-	if Wzorzec(backend) != "backend:*:backup" {
-		t.Errorf("wzorzec backendu = %q", Wzorzec(backend))
-	}
-
-	// Sprawdzenie kopii czyta z tego samego lacza, wiec tez obciaza backend.
-	sprawdzenie := Potrzeby(opspec.ActionBackupVerify, "warsaw", "/srv/kopie")
-	if len(sprawdzenie) != len(kopia) {
-		t.Errorf("sprawdzenie kopii omija budzet backendu: %+v", sprawdzenie)
+	// The default policy has to work for a repository nobody described
+	// separately as well.
+	if Pattern(backend) != "backend:*:backup" {
+		t.Errorf("backend pattern = %q", Pattern(backend))
 	}
 
-	// Adres ze schematem i uzytkownikiem nadal musi dac klucz trzyczesciowy,
-	// a dwa rozne repozytoria - dwa rozne klucze.
-	zdalny := KluczBackendu("sftp:kopie@backup.example:/srv/kopie")
-	if Wzorzec(zdalny) != "backend:*:backup" {
-		t.Errorf("wzorzec zdalnego repozytorium = %q (%s)", Wzorzec(zdalny), zdalny)
+	// Verifying a copy reads over the same link, so it loads the backend too.
+	verify := Needs(opspec.ActionBackupVerify, "warsaw", "/srv/copies")
+	if len(verify) != len(backup) {
+		t.Errorf("verification skips the backend budget: %+v", verify)
 	}
-	dlugi := KluczBackendu("s3:https://example.invalid/" + strings.Repeat("a", 200))
-	inny := KluczBackendu("s3:https://example.invalid/" + strings.Repeat("a", 199) + "b")
-	if dlugi == inny {
-		t.Error("dwa dlugie adresy trafily do jednego budzetu")
+
+	// An address with a scheme and a user still has to give a three-part key,
+	// and two different repositories - two different keys.
+	remote := BackendKey("sftp:copies@backup.example:/srv/copies")
+	if Pattern(remote) != "backend:*:backup" {
+		t.Errorf("remote repository pattern = %q (%s)", Pattern(remote), remote)
 	}
-	if Wzorzec(dlugi) != "backend:*:backup" {
-		t.Errorf("wzorzec dlugiego adresu = %q", Wzorzec(dlugi))
+	long := BackendKey("s3:https://example.invalid/" + strings.Repeat("a", 200))
+	other := BackendKey("s3:https://example.invalid/" + strings.Repeat("a", 199) + "b")
+	if long == other {
+		t.Error("two long addresses landed in one budget")
 	}
-	if KluczBackendu("") != "" {
-		t.Error("pusty adres dostal klucz budzetu")
+	if Pattern(long) != "backend:*:backup" {
+		t.Errorf("long address pattern = %q", Pattern(long))
 	}
-	// Operacja spoza modulu kopii nie obciaza backendu, nawet gdy adres jest.
-	if len(Potrzeby(opspec.ActionUnitRestart, "warsaw", "/srv/kopie")) != 2 {
-		t.Error("restart jednostki obciazyl budzet backendu")
+	if BackendKey("") != "" {
+		t.Error("an empty address got a budget key")
+	}
+	// An operation outside the backup module does not load the backend, even
+	// when an address is present.
+	if len(Needs(opspec.ActionUnitRestart, "warsaw", "/srv/copies")) != 2 {
+		t.Error("a unit restart loaded the backend budget")
 	}
 }

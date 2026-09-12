@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// stubTokens i stubSessions pozwalaja sprawdzic sam lancuch uwierzytelnienia
-// bez bazy danych.
+// stubTokens and stubSessions allow checking the authentication chain itself
+// without a database.
 type stubTokens struct{ principal *Principal }
 
 func (s stubTokens) Authenticate(context.Context, string) (*Principal, error) {
@@ -24,7 +24,7 @@ func (s stubSessions) AuthenticateSession(context.Context, string) (*Principal, 
 	if s.principal == nil {
 		return nil, nil, ErrSessionInvalid
 	}
-	return s.principal, &Session{ID: "sesja-1", PrincipalID: s.principal.ID}, nil
+	return s.principal, &Session{ID: "session-1", PrincipalID: s.principal.ID}, nil
 }
 
 func handlerCapturing(captured *Principal) http.Handler {
@@ -34,9 +34,9 @@ func handlerCapturing(captured *Principal) http.Handler {
 	})
 }
 
-func TestSesjaMaPierwszenstwoPrzedTokenem(t *testing.T) {
-	sessionPrincipal := &Principal{ID: "z-sesji", Subject: "operator"}
-	tokenPrincipal := &Principal{ID: "z-tokenu", Subject: "automat"}
+func TestTheSessionTakesPrecedenceOverTheToken(t *testing.T) {
+	sessionPrincipal := &Principal{ID: "from-session", Subject: "operator"}
+	tokenPrincipal := &Principal{ID: "from-token", Subject: "automation"}
 	authenticator := Authenticator{
 		Tokens:   stubTokens{principal: tokenPrincipal},
 		Sessions: stubSessions{principal: sessionPrincipal},
@@ -44,134 +44,134 @@ func TestSesjaMaPierwszenstwoPrzedTokenem(t *testing.T) {
 
 	var captured Principal
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
-	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_cokolwiek"})
-	request.Header.Set("Authorization", "Bearer flta_cos")
+	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_anything"})
+	request.Header.Set("Authorization", "Bearer flta_something")
 
 	authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(httptest.NewRecorder(), request)
-	if captured.ID != "z-sesji" {
-		t.Fatalf("tozsamosc = %q, oczekiwano z-sesji", captured.ID)
+	if captured.ID != "from-session" {
+		t.Fatalf("identity = %q, expected from-session", captured.ID)
 	}
 }
 
-func TestTokenDzialaBezSesji(t *testing.T) {
+func TestATokenWorksWithoutASession(t *testing.T) {
 	authenticator := Authenticator{
-		Tokens:   stubTokens{principal: &Principal{ID: "z-tokenu", Subject: "automat"}},
+		Tokens:   stubTokens{principal: &Principal{ID: "from-token", Subject: "automation"}},
 		Sessions: stubSessions{},
 	}
 	var captured Principal
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
-	request.Header.Set("Authorization", "Bearer flta_cos")
+	request.Header.Set("Authorization", "Bearer flta_something")
 
 	authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(httptest.NewRecorder(), request)
-	if captured.ID != "z-tokenu" {
-		t.Fatalf("tozsamosc = %q, oczekiwano z-tokenu", captured.ID)
+	if captured.ID != "from-token" {
+		t.Fatalf("identity = %q, expected from-token", captured.ID)
 	}
 }
 
-func TestZmianaStanuZCiasteczkiemWymagaCSRF(t *testing.T) {
-	principal := &Principal{ID: "z-sesji", Subject: "operator"}
+func TestAStateChangeWithACookieRequiresCSRF(t *testing.T) {
+	principal := &Principal{ID: "from-session", Subject: "operator"}
 	authenticator := Authenticator{Sessions: stubSessions{principal: principal}}
 
-	// Przegladarka dolacza ciasteczko automatycznie, wiec samo jego posiadanie
-	// nie dowodzi, ze zadanie pochodzi od uzytkownika panelu.
-	t.Run("bez naglowka", func(t *testing.T) {
+	// The browser attaches the cookie automatically, so having it does not
+	// prove that the request comes from a user of the panel.
+	t.Run("without the header", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/x/approve", nil)
-		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_cokolwiek"})
-		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "wartosc-csrf"})
+		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_anything"})
+		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "csrf-value"})
 
 		recorder := httptest.NewRecorder()
 		var captured Principal
 		authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusForbidden {
-			t.Fatalf("kod = %d, oczekiwano 403", recorder.Code)
+			t.Fatalf("code = %d, expected 403", recorder.Code)
 		}
 	})
 
-	t.Run("naglowek niezgodny z ciasteczkiem", func(t *testing.T) {
+	t.Run("header not matching the cookie", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/x/approve", nil)
-		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_cokolwiek"})
-		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "wartosc-csrf"})
-		request.Header.Set(CSRFHeader, "inna-wartosc")
+		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_anything"})
+		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "csrf-value"})
+		request.Header.Set(CSRFHeader, "another-value")
 
 		recorder := httptest.NewRecorder()
 		var captured Principal
 		authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusForbidden {
-			t.Fatalf("kod = %d, oczekiwano 403", recorder.Code)
+			t.Fatalf("code = %d, expected 403", recorder.Code)
 		}
 	})
 
-	t.Run("zgodny naglowek przechodzi", func(t *testing.T) {
+	t.Run("a matching header passes", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/x/approve", nil)
-		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_cokolwiek"})
-		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "wartosc-csrf"})
-		request.Header.Set(CSRFHeader, "wartosc-csrf")
+		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_anything"})
+		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "csrf-value"})
+		request.Header.Set(CSRFHeader, "csrf-value")
 
 		recorder := httptest.NewRecorder()
 		var captured Principal
 		authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusOK {
-			t.Fatalf("kod = %d, oczekiwano 200", recorder.Code)
+			t.Fatalf("code = %d, expected 200", recorder.Code)
 		}
-		if captured.ID != "z-sesji" {
-			t.Fatalf("tozsamosc = %q", captured.ID)
+		if captured.ID != "from-session" {
+			t.Fatalf("identity = %q", captured.ID)
 		}
 	})
 }
 
-func TestOdczytZCiasteczkiemNieWymagaCSRF(t *testing.T) {
-	// Zadanie tylko do odczytu nie zmienia stanu, wiec wymog CSRF
-	// utrudnialby korzystanie z panelu bez zysku dla bezpieczenstwa.
+func TestAReadWithACookieDoesNotRequireCSRF(t *testing.T) {
+	// A read-only request does not change state, so requiring CSRF would make
+	// the panel harder to use with no gain in security.
 	authenticator := Authenticator{
-		Sessions: stubSessions{principal: &Principal{ID: "z-sesji", Subject: "operator"}},
+		Sessions: stubSessions{principal: &Principal{ID: "from-session", Subject: "operator"}},
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
-	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_cokolwiek"})
+	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_anything"})
 
 	recorder := httptest.NewRecorder()
 	var captured Principal
 	authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK || captured.ID != "z-sesji" {
-		t.Fatalf("kod = %d, tozsamosc = %q", recorder.Code, captured.ID)
+	if recorder.Code != http.StatusOK || captured.ID != "from-session" {
+		t.Fatalf("code = %d, identity = %q", recorder.Code, captured.ID)
 	}
 }
 
-func TestTokenNieWymagaCSRF(t *testing.T) {
-	// Token jest przesylany jawnie przez klienta, wiec nie jest podatny na
-	// mimowolne dolaczenie przez przegladarke.
+func TestATokenDoesNotRequireCSRF(t *testing.T) {
+	// The token is sent explicitly by the client, so it is not open to being
+	// attached unintentionally by a browser.
 	authenticator := Authenticator{
-		Tokens: stubTokens{principal: &Principal{ID: "z-tokenu", Subject: "automat"}},
+		Tokens: stubTokens{principal: &Principal{ID: "from-token", Subject: "automation"}},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/campaigns", nil)
-	request.Header.Set("Authorization", "Bearer flta_cos")
+	request.Header.Set("Authorization", "Bearer flta_something")
 
 	recorder := httptest.NewRecorder()
 	var captured Principal
 	authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK || captured.ID != "z-tokenu" {
-		t.Fatalf("kod = %d, tozsamosc = %q", recorder.Code, captured.ID)
+	if recorder.Code != http.StatusOK || captured.ID != "from-token" {
+		t.Fatalf("code = %d, identity = %q", recorder.Code, captured.ID)
 	}
 }
 
-func TestBrakPoswiadczenDajeTozsamoscAnonimowa(t *testing.T) {
+func TestNoCredentialsGiveAnAnonymousIdentity(t *testing.T) {
 	authenticator := Authenticator{Tokens: stubTokens{}, Sessions: stubSessions{}}
 	var captured Principal
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
 	authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(httptest.NewRecorder(), request)
 
 	if captured.Authenticated() {
-		t.Fatal("zadanie bez poswiadczen dostalo tozsamosc")
+		t.Fatal("a request without credentials got an identity")
 	}
 	if captured.Can(PermHostRead, GlobalScope) {
-		t.Fatal("tozsamosc anonimowa ma uprawnienia")
+		t.Fatal("the anonymous identity has permissions")
 	}
 }
 
-func TestNieprawidlowySchematAutoryzacjiJestIgnorowany(t *testing.T) {
+func TestAnInvalidAuthorizationSchemeIsIgnored(t *testing.T) {
 	authenticator := Authenticator{
-		Tokens: stubTokens{principal: &Principal{ID: "z-tokenu"}},
+		Tokens: stubTokens{principal: &Principal{ID: "from-token"}},
 	}
-	for _, header := range []string{"Basic dXNlcjpwYXNz", "flta_goly_token", "Bearer", ""} {
+	for _, header := range []string{"Basic dXNlcjpwYXNz", "flta_bare_token", "Bearer", ""} {
 		var captured Principal
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/hosts", nil)
 		if header != "" {
@@ -179,12 +179,12 @@ func TestNieprawidlowySchematAutoryzacjiJestIgnorowany(t *testing.T) {
 		}
 		authenticator.Middleware(handlerCapturing(&captured)).ServeHTTP(httptest.NewRecorder(), request)
 		if captured.Authenticated() {
-			t.Errorf("naglowek %q zostal przyjety jako poswiadczenie", header)
+			t.Errorf("the header %q was accepted as a credential", header)
 		}
 	}
 }
 
-func TestMergeBindingsUsuwaDuplikaty(t *testing.T) {
+func TestMergeBindingsRemovesDuplicates(t *testing.T) {
 	manual := []Binding{{Role: RoleOperator, Scope: Scope{Site: "lab", Environment: "test"}}}
 	mapped := []Binding{
 		{Role: RoleOperator, Scope: Scope{Site: "lab", Environment: "test"}},
@@ -192,6 +192,6 @@ func TestMergeBindingsUsuwaDuplikaty(t *testing.T) {
 	}
 	merged := mergeBindings(manual, mapped)
 	if len(merged) != 2 {
-		t.Fatalf("polaczono %d przypisan, oczekiwano 2", len(merged))
+		t.Fatalf("merged %d assignments, expected 2", len(merged))
 	}
 }

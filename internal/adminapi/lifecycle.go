@@ -28,8 +28,8 @@ type zmianaCykluZycia struct {
 func (s *Server) handleQuarantineHost(w http.ResponseWriter, r *http.Request) {
 	s.zmienCyklZycia(w, r, cyklZycia{
 		Permission: authz.PermHostQuarantine,
-		ZStanow:    []string{hosts.StanAktywny, hosts.StanKwarantanna},
-		Nowy:       hosts.StanKwarantanna,
+		ZStanow:    []string{hosts.StateActive, hosts.StateQuarantined},
+		Nowy:       hosts.StateQuarantined,
 		Akcja:      "host.quarantine",
 		// Zadania juz wyslane zostaja: agent moze byc w polowie operacji,
 		// ktorej nie da sie przerwac, a panel nie ma jak jej cofnac.
@@ -42,8 +42,8 @@ func (s *Server) handleQuarantineHost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReleaseHost(w http.ResponseWriter, r *http.Request) {
 	s.zmienCyklZycia(w, r, cyklZycia{
 		Permission: authz.PermHostQuarantineRelease,
-		ZStanow:    []string{hosts.StanKwarantanna},
-		Nowy:       hosts.StanAktywny,
+		ZStanow:    []string{hosts.StateQuarantined},
+		Nowy:       hosts.StateActive,
 		Akcja:      "host.quarantine.release",
 	})
 }
@@ -56,8 +56,8 @@ func (s *Server) handleReleaseHost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) {
 	s.zmienCyklZycia(w, r, cyklZycia{
 		Permission:          authz.PermHostDecommission,
-		ZStanow:             []string{hosts.StanAktywny, hosts.StanKwarantanna, hosts.StanWycofywanie},
-		Nowy:                hosts.StanWycofany,
+		ZStanow:             []string{hosts.StateActive, hosts.StateQuarantined, hosts.StateRetiring},
+		Nowy:                hosts.StateRetired,
 		Akcja:               "host.decommission",
 		WymagaPotwierdzenia: true,
 		// Wycofanie zawsze odwoluje certyfikaty: host, ktory odchodzi
@@ -123,9 +123,9 @@ func (s *Server) zmienCyklZycia(w http.ResponseWriter, r *http.Request, przejsci
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	if err := s.hosts.ZmienStanZycia(r.Context(), tx, hostID, przejscie.ZStanow,
+	if err := s.hosts.ChangeLifecycleState(r.Context(), tx, hostID, przejscie.ZStanow,
 		przejscie.Nowy, req.Reason, principal.Subject); err != nil {
-		if errors.Is(err, hosts.ErrNiedozwolonePrzejscie) {
+		if errors.Is(err, hosts.ErrForbiddenTransition) {
 			problem(w, http.StatusConflict, "lifecycle_conflict",
 				"the host is not in a state that allows this change")
 			return
@@ -136,7 +136,7 @@ func (s *Server) zmienCyklZycia(w http.ResponseWriter, r *http.Request, przejsci
 
 	anulowanych := 0
 	if przejscie.AnulujZadania {
-		anulowanych, err = s.jobs.AnulujNiewyslane(r.Context(), tx, hostID,
+		anulowanych, err = s.jobs.CancelUndelivered(r.Context(), tx, hostID,
 			principal.Subject, przejscie.Akcja)
 		if err != nil {
 			s.fail(w, err)
@@ -145,7 +145,7 @@ func (s *Server) zmienCyklZycia(w http.ResponseWriter, r *http.Request, przejsci
 	}
 	odwolanych := 0
 	if przejscie.ZawszeOdwoluj || req.RevokeCertificates {
-		odwolanych, err = s.hosts.OdwolajCertyfikaty(r.Context(), tx, hostID, req.Reason)
+		odwolanych, err = s.hosts.RevokeCertificates(r.Context(), tx, hostID, req.Reason)
 		if err != nil {
 			s.fail(w, err)
 			return

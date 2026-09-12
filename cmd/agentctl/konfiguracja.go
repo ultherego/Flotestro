@@ -30,7 +30,7 @@ func poleceniaKonfiguracji(argumenty []string, wyjscie, bledy io.Writer) int {
 func sciezkaKonfiguracji(nazwa string, argumenty []string, bledy io.Writer) (string, bool) {
 	zestaw := flag.NewFlagSet(nazwa, flag.ContinueOnError)
 	zestaw.SetOutput(bledy)
-	sciezka := zestaw.String("config", agentconfig.SciezkaDomyslna, "plik konfiguracji agenta")
+	sciezka := zestaw.String("config", agentconfig.DefaultPath, "plik konfiguracji agenta")
 	if err := zestaw.Parse(argumenty); err != nil {
 		return "", false
 	}
@@ -47,13 +47,13 @@ func sprawdzKonfiguracje(argumenty []string, wyjscie, bledy io.Writer, pokaz boo
 		return 2
 	}
 
-	cfg, err := agentconfig.Wczytaj(sciezka)
+	cfg, err := agentconfig.Load(sciezka)
 	if err != nil {
 		fmt.Fprintf(bledy, "config: %s\n  %v\n", sciezka, err)
 		return 1
 	}
 	problemy := 0
-	if err := cfg.SprawdzBootstrapCA(); err != nil {
+	if err := cfg.CheckBootstrapCA(); err != nil {
 		fmt.Fprintf(bledy, "bootstrap_ca_file: %v\n", err)
 		problemy++
 	}

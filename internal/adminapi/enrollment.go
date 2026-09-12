@@ -240,7 +240,7 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	// Host wycofany nie wraca do floty tokenem. Zamowienie, ktorego i tak nie
 	// da sie uzyc, byloby obietnica bez pokrycia - powrot zaczyna sie od
 	// cofniecia decyzji o wycofaniu.
-	if host.LifecycleState == hosts.StanWycofany {
+	if host.LifecycleState == hosts.StateRetired {
 		problem(w, http.StatusConflict, "host_retired",
 			"a retired host cannot be brought back with a recovery token")
 		return

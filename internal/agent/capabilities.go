@@ -62,18 +62,19 @@ const (
 	CapBackup = "backup"
 )
 
-// Wymagania operacji. Nazwa logiczna nie wskazuje adaptera, bo operacja nie ma
-// znac rodziny systemu hosta.
+// The requirements of operations. A logical name does not point at an
+// adapter, because an operation is not to know the host's system family.
 const (
-	WymaganiePakiety         = "packages"
-	WymaganieNaprawaPakietow = "packages.repair"
-	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
-	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
-	WymaganieZapisSieci  = "network.write"
-	WymaganieZapisDNS    = "dns.write"
-	WymaganieZapisZapory = "firewall.write"
-	WymaganieStrefZapory = "firewall.zones"
-	WymaganieLVM         = "storage.lvm"
+	NeedPackages      = "packages"
+	NeedPackageRepair = "packages.repair"
+	// Writing the network configuration. Reading works everywhere iproute2
+	// is, so the module alone does not yet say that anything can be changed
+	// here.
+	NeedNetworkWrite  = "network.write"
+	NeedDNSWrite      = "dns.write"
+	NeedFirewallWrite = "firewall.write"
+	NeedFirewallZones = "firewall.zones"
+	NeedLVM           = "storage.lvm"
 )
 
 // Wersja kontraktu adaptera. Podnosi sie, gdy zmienia sie znaczenie operacji
@@ -105,87 +106,91 @@ func (c Capabilities) Available(name string) bool {
 
 // Feature mowi, czy adapter ma dana czesc.
 func (c Capabilities) Feature(name, feature string) bool {
-	wartosc, _ := c.FeatureStan(name, feature)
+	wartosc, _ := c.FeatureState(name, feature)
 	return wartosc
 }
 
-// FeatureStan oddziela "nie ma tej czesci" od "nie wiadomo, czy ma".
+// FeatureState separates "it does not have this part" from "it is not known
+// whether it has it".
 //
-// Agent sprzed rejestru nie przysyla cech wcale, a jego rejestr jest
-// odtwarzany z pol logicznych. Uznanie milczenia za odmowe odebraloby takiemu
-// hostowi operacje, ktora u niego dziala - nieznana cecha nie jest cecha
-// nieobecna.
-func (c Capabilities) FeatureStan(name, feature string) (wartosc bool, znana bool) {
+// An agent from before the registry sends no features at all, and its
+// registry is reconstructed from logical fields. Treating silence as a
+// refusal would take away from such a host an operation that works on it - an
+// unknown feature is not an absent feature.
+func (c Capabilities) FeatureState(name, feature string) (value bool, known bool) {
 	for _, capability := range c {
 		if capability.Name != name {
 			continue
 		}
 		if !capability.Available {
-			// Adapter, ktorego nie ma, na pewno nie ma zadnej czesci.
+			// An adapter that is not there certainly has no parts.
 			return false, true
 		}
 		value, ok := capability.Features[feature]
 		return value, ok
 	}
-	// Adaptera nie ma w rejestrze - to tez jest odpowiedz, a nie niewiedza.
+	// The adapter is not in the registry - that is an answer too, not ignorance.
 	return false, true
 }
 
-// Spelnia sprawdza wymaganie operacji. Wymagania sa nazwami logicznymi, a nie
-// nazwami adapterow: operacja aktualizacji nie ma wiedziec, czy host uzywa
-// apta czy dnf-a, a naprawa bazy pakietow ma wiedziec, ze dziala tylko dla apta.
-func (c Capabilities) Spelnia(wymaganie string) bool {
-	switch wymaganie {
+// Satisfies checks an operation's requirement. Requirements are logical names
+// rather than adapter names: an upgrade operation is not to know whether the
+// host uses apt or dnf, and repairing the package database is to know that it
+// works for apt only.
+func (c Capabilities) Satisfies(requirement string) bool {
+	switch requirement {
 	case "":
 		return true
-	case WymaganiePakiety:
+	case NeedPackages:
 		return c.Available(CapAPT) || c.Available(CapDNF)
-	case WymaganieNaprawaPakietow:
+	case NeedPackageRepair:
 		for _, adapter := range []string{CapAPT, CapDNF} {
-			wartosc, znana := c.FeatureStan(adapter, "repair")
-			if wartosc {
+			value, known := c.FeatureState(adapter, "repair")
+			if value {
 				return true
 			}
-			// Adapter obecny, ale milczacy o cechach: decyzje podejmuje host
-			// przy wykonaniu, tak jak przed wprowadzeniem rejestru.
-			if !znana && c.Available(adapter) {
+			// The adapter is present but silent about its features: the host
+			// decides at execution time, as it did before the registry was
+			// introduced.
+			if !known && c.Available(adapter) {
 				return true
 			}
 		}
 		return false
-	case WymaganieZapisZapory:
-		wartosc, znana := c.FeatureStan(CapFirewall, "write")
-		if wartosc {
+	case NeedFirewallWrite:
+		value, known := c.FeatureState(CapFirewall, "write")
+		if value {
 			return true
 		}
-		return !znana && c.Available(CapFirewall)
-	case WymaganieLVM:
-		wartosc, _ := c.FeatureStan(CapStorage, "lvm")
-		return wartosc
-	case WymaganieStrefZapory:
-		// Strefy istnieja tylko tam, gdzie dziala firewalld. Host z samym
-		// nftables nie ma czego pokazac ani czego zmienic.
-		wartosc, _ := c.FeatureStan(CapFirewall, "zones")
-		return wartosc
-	case WymaganieZapisDNS:
-		wartosc, znana := c.FeatureStan(CapDNS, "write")
-		if wartosc {
+		return !known && c.Available(CapFirewall)
+	case NeedLVM:
+		value, _ := c.FeatureState(CapStorage, "lvm")
+		return value
+	case NeedFirewallZones:
+		// Zones exist only where firewalld runs. A host with nftables alone
+		// has nothing to show and nothing to change.
+		value, _ := c.FeatureState(CapFirewall, "zones")
+		return value
+	case NeedDNSWrite:
+		value, known := c.FeatureState(CapDNS, "write")
+		if value {
 			return true
 		}
-		return !znana && c.Available(CapDNS)
-	case WymaganieZapisSieci:
-		// Zapis sieci wymaga mechanizmu, ktory utrwali zmiane i pozwoli ja
-		// wycofac. Host bez niego ma sie o tym dowiedziec przy zlecaniu,
-		// a nie po dostarczeniu zadania.
-		wartosc, znana := c.FeatureStan(CapNetwork, "write")
-		if wartosc {
+		return !known && c.Available(CapDNS)
+	case NeedNetworkWrite:
+		// Writing the network requires a mechanism that persists the change
+		// and allows rolling it back. A host without one is to learn about it
+		// when the operation is ordered, not after the task is delivered.
+		value, known := c.FeatureState(CapNetwork, "write")
+		if value {
 			return true
 		}
-		// Adapter obecny, ale milczacy o cechach: decyzje podejmuje host
-		// przy wykonaniu, tak jak przed wprowadzeniem rejestru.
-		return !znana && c.Available(CapNetwork)
+		// The adapter is present but silent about its features: the host
+		// decides at execution time, as it did before the registry was
+		// introduced.
+		return !known && c.Available(CapNetwork)
 	default:
-		return c.Available(wymaganie)
+		return c.Available(requirement)
 	}
 }
 

@@ -19,7 +19,7 @@ func poleceniaStanu(argumenty []string, wyjscie, bledy io.Writer) int {
 	}
 
 	problemy := 0
-	cfg, err := agentconfig.Wczytaj(sciezka)
+	cfg, err := agentconfig.Load(sciezka)
 	if err != nil {
 		fmt.Fprintf(wyjscie, "Config:       BLAD (%s): %v\n", sciezka, err)
 		// Bez konfiguracji nie wiemy nawet, gdzie szukac tozsamosci -
@@ -75,7 +75,7 @@ func poleceniaStanu(argumenty []string, wyjscie, bledy io.Writer) int {
 			stan.LastInventoryAt.UTC().Format(time.RFC3339), skrot(stan.InventoryRevision))
 	}
 
-	if cfg.Agent.Mode == agentconfig.TrybOdczytu {
+	if cfg.Agent.Mode == agentconfig.ModeReadOnly {
 		// W trybie odczytu helper nie ma prawa dzialac: jego brak jest
 		// wtedy odpowiedzia, a nie usterka.
 		fmt.Fprintf(wyjscie, "Helper:       wylaczony (tryb %s)\n", cfg.Agent.Mode)

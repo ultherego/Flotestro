@@ -8,15 +8,15 @@ type contextKey string
 
 const principalKey contextKey = "flotestro.principal"
 
-// GlobalScope jest celem operacji nieprzypisanych do konkretnej czesci floty.
-// Dopasuje sie do niego wylacznie przypisanie z gwiazdka, wiec operator
-// jednego srodowiska nie zarzadza calym systemem.
+// GlobalScope is the target of operations not assigned to any particular
+// part of the fleet. Only an assignment with an asterisk matches it, so the
+// operator of one environment does not manage the whole system.
 var GlobalScope = Scope{Site: Wildcard, Environment: Wildcard}
 
-// Anonymous jest tozsamoscia bez zadnych uprawnien.
+// Anonymous is an identity without any permissions.
 var Anonymous = Principal{Subject: "anonymous", Kind: "user"}
 
-// FromContext zwraca tozsamosc zadania.
+// FromContext returns the identity of the request.
 func FromContext(ctx context.Context) Principal {
 	principal, ok := ctx.Value(principalKey).(Principal)
 	if !ok {
@@ -25,7 +25,7 @@ func FromContext(ctx context.Context) Principal {
 	return principal
 }
 
-// Authenticated mowi, czy zadanie ma jakakolwiek tozsamosc.
+// Authenticated says whether the request has any identity at all.
 func (p Principal) Authenticated() bool {
 	return p.ID != ""
 }

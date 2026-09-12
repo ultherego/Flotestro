@@ -1,5 +1,6 @@
-// Package hosts przechowuje tozsamosc i stan hostow. Pakiet nie zna warstwy
-// HTTP ani protokolu agenta; mapowanie kontraktow nalezy do gatewaya.
+// Package hosts stores the identity and state of hosts. The package knows
+// neither the HTTP layer nor the agent protocol; mapping the contracts belongs
+// to the gateway.
 package hosts
 
 import (
@@ -15,11 +16,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound oznacza brak hosta o podanej tozsamosci.
-var ErrNotFound = errors.New("host nie istnieje")
+// ErrNotFound means there is no host with the given identity.
+var ErrNotFound = errors.New("the host does not exist")
 
-// Capability opisuje jeden adapter wykryty na hoscie. Nazwa mowi, co host ma
-// ('packages.apt'), a nie czego chce operacja ('packages').
+// Capability describes one adapter discovered on a host. The name says what
+// the host has ('packages.apt'), not what an operation wants ('packages').
 type Capability struct {
 	Name      string          `json:"name"`
 	Version   uint32          `json:"version"`
@@ -29,11 +30,12 @@ type Capability struct {
 	Features  map[string]bool `json:"features,omitempty"`
 }
 
-// Capabilities to rejestr adapterow hosta.
+// Capabilities is the registry of a host's adapters.
 type Capabilities []Capability
 
-// Nazwy adapterow oraz wymagania operacji. Wymaganie jest nazwa logiczna:
-// operacja aktualizacji nie ma wiedziec, czy host uzywa apta czy dnf-a.
+// The names of the adapters and the requirements of operations. A
+// requirement is a logical name: an upgrade operation is not to know whether
+// the host uses apt or dnf.
 const (
 	CapSystemd   = "systemd"
 	CapAPT       = "packages.apt"
@@ -50,18 +52,19 @@ const (
 	CapKernel    = "kernel"
 	CapFiles     = "files.managed"
 
-	WymaganiePakiety         = "packages"
-	WymaganieNaprawaPakietow = "packages.repair"
-	// Zapis konfiguracji sieci. Odczyt dziala wszedzie, gdzie jest iproute2,
-	// wiec sam modul nie mowi jeszcze, ze da sie tu cokolwiek zmienic.
-	WymaganieZapisSieci  = "network.write"
-	WymaganieZapisDNS    = "dns.write"
-	WymaganieZapisZapory = "firewall.write"
-	WymaganieStrefZapory = "firewall.zones"
-	WymaganieLVM         = "storage.lvm"
+	NeedPackages      = "packages"
+	NeedPackageRepair = "packages.repair"
+	// Writing the network configuration. Reading works everywhere iproute2
+	// is, so the module alone does not yet say that anything can be changed
+	// here.
+	NeedNetworkWrite  = "network.write"
+	NeedDNSWrite      = "dns.write"
+	NeedFirewallWrite = "firewall.write"
+	NeedFirewallZones = "firewall.zones"
+	NeedLVM           = "storage.lvm"
 )
 
-// Available mowi, czy adapter o tej nazwie dziala na hoscie.
+// Available says whether the adapter with this name works on the host.
 func (c Capabilities) Available(name string) bool {
 	for _, capability := range c {
 		if capability.Name == name {
@@ -71,36 +74,37 @@ func (c Capabilities) Available(name string) bool {
 	return false
 }
 
-// Feature mowi, czy adapter ma dana czesc.
+// Feature says whether the adapter has the given part.
 func (c Capabilities) Feature(name, feature string) bool {
-	wartosc, _ := c.FeatureStan(name, feature)
-	return wartosc
+	value, _ := c.FeatureState(name, feature)
+	return value
 }
 
-// FeatureStan oddziela "nie ma tej czesci" od "nie wiadomo, czy ma".
+// FeatureState separates "it does not have this part" from "it is not known
+// whether it has it".
 //
-// Agent sprzed rejestru nie przysyla cech wcale, a jego rejestr jest
-// odtwarzany z pol logicznych. Uznanie milczenia za odmowe odebraloby takiemu
-// hostowi operacje, ktora u niego dziala - nieznana cecha nie jest cecha
-// nieobecna.
-func (c Capabilities) FeatureStan(name, feature string) (wartosc bool, znana bool) {
+// An agent from before the registry sends no features at all, and its
+// registry is reconstructed from logical fields. Treating silence as a
+// refusal would take away from such a host an operation that works on it - an
+// unknown feature is not an absent feature.
+func (c Capabilities) FeatureState(name, feature string) (value bool, known bool) {
 	for _, capability := range c {
 		if capability.Name != name {
 			continue
 		}
 		if !capability.Available {
-			// Adapter, ktorego nie ma, na pewno nie ma zadnej czesci.
+			// An adapter that is not there certainly has no parts.
 			return false, true
 		}
 		value, ok := capability.Features[feature]
 		return value, ok
 	}
-	// Adaptera nie ma w rejestrze - to tez jest odpowiedz, a nie niewiedza.
+	// The adapter is not in the registry - that is an answer too, not ignorance.
 	return false, true
 }
 
-// Reason zwraca wyjasnienie zapisane przez hosta. Interfejs ma powtarzac to,
-// co powiedzial host, a nie zgadywac przyczyne w kodzie przegladarki.
+// Reason returns the explanation recorded by the host. The interface is to
+// repeat what the host said rather than guess the cause in browser code.
 func (c Capabilities) Reason(name string) string {
 	for _, capability := range c {
 		if capability.Name == name {
@@ -110,63 +114,66 @@ func (c Capabilities) Reason(name string) string {
 	return ""
 }
 
-// Spelnia sprawdza wymaganie operacji wobec rejestru hosta.
-func (c Capabilities) Spelnia(wymaganie string) bool {
-	switch wymaganie {
+// Satisfies checks an operation's requirement against the host's registry.
+func (c Capabilities) Satisfies(requirement string) bool {
+	switch requirement {
 	case "":
 		return true
-	case WymaganiePakiety:
+	case NeedPackages:
 		return c.Available(CapAPT) || c.Available(CapDNF)
-	case WymaganieNaprawaPakietow:
+	case NeedPackageRepair:
 		for _, adapter := range []string{CapAPT, CapDNF} {
-			wartosc, znana := c.FeatureStan(adapter, "repair")
-			if wartosc {
+			value, known := c.FeatureState(adapter, "repair")
+			if value {
 				return true
 			}
-			// Adapter obecny, ale milczacy o cechach: decyzje podejmuje host
-			// przy wykonaniu, tak jak przed wprowadzeniem rejestru.
-			if !znana && c.Available(adapter) {
+			// The adapter is present but silent about its features: the host
+			// decides at execution time, as it did before the registry was
+			// introduced.
+			if !known && c.Available(adapter) {
 				return true
 			}
 		}
 		return false
-	case WymaganieZapisZapory:
-		wartosc, znana := c.FeatureStan(CapFirewall, "write")
-		if wartosc {
+	case NeedFirewallWrite:
+		value, known := c.FeatureState(CapFirewall, "write")
+		if value {
 			return true
 		}
-		return !znana && c.Available(CapFirewall)
-	case WymaganieLVM:
-		// Rozszerzenie wolumenu ma sens tylko tam, gdzie LVM w ogole jest.
-		wartosc, _ := c.FeatureStan(CapStorage, "lvm")
-		return wartosc
-	case WymaganieStrefZapory:
-		wartosc, _ := c.FeatureStan(CapFirewall, "zones")
-		return wartosc
-	case WymaganieZapisDNS:
-		wartosc, znana := c.FeatureStan(CapDNS, "write")
-		if wartosc {
+		return !known && c.Available(CapFirewall)
+	case NeedLVM:
+		// Extending a volume makes sense only where LVM exists at all.
+		value, _ := c.FeatureState(CapStorage, "lvm")
+		return value
+	case NeedFirewallZones:
+		value, _ := c.FeatureState(CapFirewall, "zones")
+		return value
+	case NeedDNSWrite:
+		value, known := c.FeatureState(CapDNS, "write")
+		if value {
 			return true
 		}
-		return !znana && c.Available(CapDNS)
-	case WymaganieZapisSieci:
-		// Zapis sieci wymaga mechanizmu, ktory utrwali zmiane i pozwoli ja
-		// wycofac. Host bez niego ma sie o tym dowiedziec przy zlecaniu,
-		// a nie po dostarczeniu zadania.
-		wartosc, znana := c.FeatureStan(CapNetwork, "write")
-		if wartosc {
+		return !known && c.Available(CapDNS)
+	case NeedNetworkWrite:
+		// Writing the network requires a mechanism that persists the change
+		// and allows rolling it back. A host without one is to learn about it
+		// when the operation is ordered, not after the task is delivered.
+		value, known := c.FeatureState(CapNetwork, "write")
+		if value {
 			return true
 		}
-		// Adapter obecny, ale milczacy o cechach: decyzje podejmuje host
-		// przy wykonaniu, tak jak przed wprowadzeniem rejestru.
-		return !znana && c.Available(CapNetwork)
+		// The adapter is present but silent about its features: the host
+		// decides at execution time, as it did before the registry was
+		// introduced.
+		return !known && c.Available(CapNetwork)
 	default:
-		return c.Available(wymaganie)
+		return c.Available(requirement)
 	}
 }
 
-// Health to minimalny zestaw sygnalow z heartbeatu. Wskaznik pusty oznacza
-// stan nieustalony przez agenta i nie nadpisuje ostatniej znanej wartosci.
+// Health is the minimal set of signals from a heartbeat. An empty pointer
+// means a state the agent did not determine and does not overwrite the last
+// known value.
 type Health struct {
 	FailedUnits            *uint32
 	RebootRequired         *bool
@@ -177,7 +184,7 @@ type Health struct {
 	PendingSecurityUpdates *uint32
 }
 
-// Identity to dane zgloszone przy enrollmencie.
+// Identity is the data reported at enrollment.
 type Identity struct {
 	MachineID    string
 	Hostname     string
@@ -189,7 +196,7 @@ type Identity struct {
 	AgentVersion string
 }
 
-// Host jest widokiem hosta zwracanym przez API.
+// Host is the view of a host returned by the API.
 type Host struct {
 	ID              string     `json:"id"`
 	MachineID       string     `json:"machine_id"`
@@ -206,32 +213,33 @@ type Host struct {
 	ConnectionState string     `json:"connection_state"`
 	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
 	BootID          string     `json:"boot_id,omitempty"`
-	// Puste pola oznaczaja stan nieustalony, nie zero.
+	// Empty fields mean an undetermined state, not zero.
 	RebootRequired           *bool  `json:"reboot_required"`
 	FailedUnits              *int   `json:"failed_units"`
 	PendingUpdates           *int   `json:"pending_updates"`
 	PendingSecurityUpdates   *int   `json:"pending_security_updates"`
 	CurrentInventoryRevision string `json:"current_inventory_revision,omitempty"`
 	PackageDatabaseBroken    bool   `json:"package_database_broken"`
-	// Adres zarzadzania i jego pochodzenie. Puste pola oznaczaja adres
-	// nieustalony; interfejs ma wtedy powiedziec "unknown", a nie pokazac
-	// dowolny adres hosta jako rzekomy adres zarzadzania.
+	// The management address and where it came from. Empty fields mean an
+	// undetermined address; the interface is then to say "unknown" rather
+	// than show any address of the host as a supposed management address.
 	ManagementAddress           string     `json:"management_address,omitempty"`
 	ManagementAddressSource     string     `json:"management_address_source,omitempty"`
 	ManagementAddressObservedAt *time.Time `json:"management_address_observed_at,omitempty"`
-	// Maintenance jest oknem serwisowym. Puste pole oznacza host poza oknem,
-	// a nie okno o zerowej dlugosci.
+	// Maintenance is the maintenance window. An empty field means a host
+	// outside a window, not a window of zero length.
 	Maintenance  *MaintenanceWindow `json:"maintenance,omitempty"`
 	Identity     HostIdentity       `json:"identity"`
 	EnrolledAt   time.Time          `json:"enrolled_at"`
 	Capabilities Capabilities       `json:"capabilities"`
 }
 
-// MaintenanceWindow opisuje okno serwisowe hosta.
+// MaintenanceWindow describes a host's maintenance window.
 //
-// Host w oknie dziala i przyjmuje operacje zlecone recznie; kampanie go
-// omijaja, a alerty z niego nie budza dyzurnego. Okno zawsze ma termin:
-// "do odwolania" konczy sie hostem, o ktorym wszyscy zapomnieli.
+// A host inside a window runs and accepts manually ordered operations;
+// campaigns skip it, and its alerts do not wake the on-call engineer. A
+// window always has an end: "until further notice" ends with a host everybody
+// forgot about.
 type MaintenanceWindow struct {
 	Until  time.Time `json:"until"`
 	Reason string    `json:"reason,omitempty"`
@@ -239,12 +247,12 @@ type MaintenanceWindow struct {
 	SetAt  time.Time `json:"set_at"`
 }
 
-// Trwa mowi, czy okno obowiazuje w danej chwili.
-func (m *MaintenanceWindow) Trwa(teraz time.Time) bool {
-	return m != nil && teraz.Before(m.Until)
+// Active says whether the window is in force at the given moment.
+func (m *MaintenanceWindow) Active(now time.Time) bool {
+	return m != nil && now.Before(m.Until)
 }
 
-// HostIdentity opisuje integracje hosta z domena w widoku API.
+// HostIdentity describes the host's integration with a domain in the API view.
 type HostIdentity struct {
 	Enrolled   bool       `json:"enrolled"`
 	Domain     string     `json:"domain,omitempty"`
@@ -253,7 +261,7 @@ type HostIdentity struct {
 	CheckedAt  *time.Time `json:"checked_at,omitempty"`
 }
 
-// Store realizuje dostep do tabel hostow.
+// Store provides access to the host tables.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -264,9 +272,9 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Upsert tworzy host lub aktualizuje jego dane identyfikacyjne.
-// Kluczem tozsamosci jest machine_id, dzieki czemu ponowny enrollment tej samej
-// maszyny nie tworzy duplikatu.
+// Upsert creates a host or updates its identifying data. The identity key is
+// machine_id, so enrolling the same machine again does not create a
+// duplicate.
 func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, id Identity) (hostID string, created bool, err error) {
 	const query = `
 		insert into hosts (id, machine_id, hostname, site, environment,
@@ -284,16 +292,17 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, id Identity) (hostID stri
 	err = tx.QueryRow(ctx, query, newID, id.MachineID, id.Hostname, id.Site, id.Environment,
 		id.OSFamily, id.OSVersion, id.Architecture, id.AgentVersion).Scan(&hostID, &created)
 	if err != nil {
-		return "", false, fmt.Errorf("upsert hosta: %w", err)
+		return "", false, fmt.Errorf("upserting the host: %w", err)
 	}
 	return hostID, created, nil
 }
 
-// IDPoMachineID zwraca hosta o tym identyfikatorze maszyny.
+// IDByMachineID returns the host with this machine identifier.
 //
-// Puste znaczy "panel takiej maszyny nie zna" - i to jest odpowiedz, a nie
-// blad: enrollment nowego hosta wlasnie na niej sie opiera.
-func (s *Store) IDPoMachineID(ctx context.Context, tx pgx.Tx, machineID string) (string, error) {
+// An empty value means "the panel does not know such a machine" - and that is
+// an answer rather than an error: enrolling a new host rests on exactly
+// that.
+func (s *Store) IDByMachineID(ctx context.Context, tx pgx.Tx, machineID string) (string, error) {
 	if machineID == "" {
 		return "", nil
 	}
@@ -303,18 +312,18 @@ func (s *Store) IDPoMachineID(ctx context.Context, tx pgx.Tx, machineID string) 
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("odczyt hosta po machine_id: %w", err)
+		return "", fmt.Errorf("reading the host by machine_id: %w", err)
 	}
 	return hostID, nil
 }
 
-// PrzejmijMaszyne wiaze istniejacego hosta z nowa maszyna.
+// AdoptMachine binds an existing host to a new machine.
 //
-// Uzywane przy odtwarzaniu tozsamosci: przeinstalowany host ma nowe
-// machine_id, ale jest tym samym hostem w panelu - z ta sama historia, tymi
-// samymi zadaniami i tym samym miejscem we flocie. Zalozenie mu drugiego
-// wiersza zostawialoby w panelu martwego bliznika.
-func (s *Store) PrzejmijMaszyne(ctx context.Context, tx pgx.Tx, hostID string, id Identity) error {
+// Used when restoring an identity: a reinstalled host has a new machine_id
+// but is the same host in the panel - with the same history, the same tasks
+// and the same place in the fleet. Creating a second row for it would leave a
+// dead twin in the panel.
+func (s *Store) AdoptMachine(ctx context.Context, tx pgx.Tx, hostID string, id Identity) error {
 	const query = `
 		update hosts set
 			machine_id    = $2,
@@ -325,43 +334,43 @@ func (s *Store) PrzejmijMaszyne(ctx context.Context, tx pgx.Tx, hostID string, i
 			agent_version = coalesce(nullif($7, ''), agent_version),
 			updated_at    = now()
 		where id = $1::uuid`
-	znacznik, err := tx.Exec(ctx, query, hostID, id.MachineID, id.Hostname,
+	tag, err := tx.Exec(ctx, query, hostID, id.MachineID, id.Hostname,
 		id.OSFamily, id.OSVersion, id.Architecture, id.AgentVersion)
 	if err != nil {
-		return fmt.Errorf("przejecie maszyny przez hosta: %w", err)
+		return fmt.Errorf("adopting the machine into the host: %w", err)
 	}
-	if znacznik.RowsAffected() == 0 {
-		return fmt.Errorf("host %s nie istnieje", hostID)
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("the host %s does not exist", hostID)
 	}
 	return nil
 }
 
-// Stany cyklu zycia hosta.
+// The host lifecycle states.
 //
-// Tylko host aktywny dostaje zadania, sesje, sekrety i odnowienia. Pozostale
-// stany sa roznymi rodzajami "nie" i kazdy z nich znaczy co innego dla
-// operatora: kwarantanna jest odwracalna, wycofywanie trwa, wycofany jest
-// koncem zaufania.
+// Only an active host gets tasks, sessions, secrets and renewals. The other
+// states are different kinds of "no" and each means something else to the
+// operator: quarantine is reversible, retiring is under way, retired is the
+// end of trust.
 const (
-	StanAktywny     = "active"
-	StanKwarantanna = "quarantined"
-	StanWycofywanie = "retiring"
-	StanWycofany    = "retired"
+	StateActive      = "active"
+	StateQuarantined = "quarantined"
+	StateRetiring    = "retiring"
+	StateRetired     = "retired"
 )
 
-// Aktywny mowi, czy w tym stanie panel wolno hostowi cokolwiek zlecac.
-func Aktywny(stan string) bool { return stan == StanAktywny }
+// Active says whether in this state the panel may order the host anything.
+func Active(state string) bool { return state == StateActive }
 
-// ErrNiedozwolonePrzejscie oznacza zmiane stanu, ktorej nie wolno wykonac.
-var ErrNiedozwolonePrzejscie = errors.New("niedozwolone przejscie cyklu zycia")
+// ErrForbiddenTransition means a state change that must not be carried out.
+var ErrForbiddenTransition = errors.New("forbidden lifecycle transition")
 
-// ZmienStanZycia przestawia host miedzy stanami cyklu zycia.
+// ChangeLifecycleState moves a host between lifecycle states.
 //
-// Przejscie jest warunkowe i wykonuje sie w jednym zapytaniu: dwa zadania
-// wydane naraz nie moga skonczyc sie hostem, ktory jest jednoczesnie wycofany
-// i przywrocony. Dozwolone stany wyjsciowe sa czescia decyzji wolajacego.
-func (s *Store) ZmienStanZycia(ctx context.Context, tx pgx.Tx, hostID string,
-	zStanow []string, nowy, powod, aktor string) error {
+// The transition is conditional and runs in a single query: two orders issued
+// at once must not end with a host that is both retired and restored. The
+// allowed source states are part of the caller's decision.
+func (s *Store) ChangeLifecycleState(ctx context.Context, tx pgx.Tx, hostID string,
+	fromStates []string, newState, reason, actor string) error {
 	const query = `
 		update hosts set
 			lifecycle_state      = $2,
@@ -371,33 +380,33 @@ func (s *Store) ZmienStanZycia(ctx context.Context, tx pgx.Tx, hostID string,
 			retired_at           = case when $2 = 'retired' then now() else retired_at end,
 			updated_at           = now()
 		where id = $1::uuid and lifecycle_state = any($5)`
-	znacznik, err := tx.Exec(ctx, query, hostID, nowy, powod, aktor, zStanow)
+	tag, err := tx.Exec(ctx, query, hostID, newState, reason, actor, fromStates)
 	if err != nil {
-		return fmt.Errorf("zmiana stanu cyklu zycia: %w", err)
+		return fmt.Errorf("changing the lifecycle state: %w", err)
 	}
-	if znacznik.RowsAffected() == 0 {
-		return ErrNiedozwolonePrzejscie
+	if tag.RowsAffected() == 0 {
+		return ErrForbiddenTransition
 	}
 	return nil
 }
 
-// OdwolajCertyfikaty uniewaznia wszystkie wazne certyfikaty hosta.
+// RevokeCertificates invalidates every valid certificate of a host.
 //
-// Uzywane, gdy klucz hosta mogl wyciec albo gdy host odchodzi z floty:
-// certyfikat pozostaje kryptograficznie poprawny, wiec bez tego zapisu
-// przejeta maszyna nadal przedstawialaby sie panelowi skutecznie.
-func (s *Store) OdwolajCertyfikaty(ctx context.Context, tx pgx.Tx, hostID, powod string) (int, error) {
+// Used when the host's key may have leaked or when the host leaves the fleet:
+// the certificate stays cryptographically valid, so without this record a
+// captured machine would still introduce itself to the panel successfully.
+func (s *Store) RevokeCertificates(ctx context.Context, tx pgx.Tx, hostID, reason string) (int, error) {
 	const query = `
 		update agent_certificates set revoked_at = now(), revocation_reason = $2
 		where host_id = $1::uuid and revoked_at is null`
-	znacznik, err := tx.Exec(ctx, query, hostID, powod)
+	tag, err := tx.Exec(ctx, query, hostID, reason)
 	if err != nil {
-		return 0, fmt.Errorf("odwolanie certyfikatow: %w", err)
+		return 0, fmt.Errorf("revoking the certificates: %w", err)
 	}
-	return int(znacznik.RowsAffected()), nil
+	return int(tag.RowsAffected()), nil
 }
 
-// SaveCertificate zapisuje wystawiony certyfikat agenta.
+// SaveCertificate records an issued agent certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
 	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial string) error {
 	const query = `
@@ -408,24 +417,25 @@ func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, 
 	_, err := tx.Exec(ctx, query, uuid.NewString(), hostID, serial, fingerprint, commonName,
 		notBefore, notAfter, issuerSubject, issuerSerial)
 	if err != nil {
-		return fmt.Errorf("zapis certyfikatu: %w", err)
+		return fmt.Errorf("saving the certificate: %w", err)
 	}
 	return nil
 }
 
-// CertificateStatus opisuje stan certyfikatu przedstawionego przez agenta.
+// CertificateStatus describes the state of a certificate presented by an agent.
 type CertificateStatus struct {
 	HostID         string
 	LifecycleState string
 	Revoked        bool
 	Known          bool
-	// Serial identyfikuje certyfikat w sladzie audytowym; przy odnowieniu
-	// pozwala powiazac nowy certyfikat z zastapionym.
+	// Serial identifies the certificate in the audit trail; on a renewal it
+	// allows linking the new certificate with the replaced one.
 	Serial string
 }
 
-// LookupCertificate sprawdza, czy certyfikat jest znany i nieodwolany oraz czy
-// host nie jest w kwarantannie. Gateway odrzuca sesje na podstawie tego wyniku.
+// LookupCertificate checks whether the certificate is known and not revoked
+// and whether the host is not in quarantine. The gateway rejects sessions
+// based on this result.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (CertificateStatus, error) {
 	const query = `
 		select c.host_id, h.lifecycle_state, c.revoked_at is not null, c.serial
@@ -445,7 +455,7 @@ func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Cert
 	return status, nil
 }
 
-// ApplyHello zapisuje dane sesji zgloszone w pierwszej wiadomosci streamu.
+// ApplyHello records the session data reported in the first message of the stream.
 func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID string, caps Capabilities) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -462,14 +472,15 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 			updated_at       = now()
 		where id = $1`
 	if _, err := tx.Exec(ctx, hostQuery, hostID, agentVersion, bootID); err != nil {
-		return fmt.Errorf("aktualizacja hosta: %w", err)
+		return fmt.Errorf("updating the host: %w", err)
 	}
 
-	// Rejestr jest zastepowany w calosci: adapter, ktorego host juz nie zglasza,
-	// zniknal z hosta i nie moze zostac w bazie jako nieaktualna prawda.
-	const usunQuery = `delete from host_capability_registry where host_id = $1`
-	if _, err := tx.Exec(ctx, usunQuery, hostID); err != nil {
-		return fmt.Errorf("czyszczenie rejestru adapterow: %w", err)
+	// The registry is replaced in full: an adapter the host no longer reports
+	// has disappeared from the host and must not stay in the database as a
+	// stale truth.
+	const deleteQuery = `delete from host_capability_registry where host_id = $1`
+	if _, err := tx.Exec(ctx, deleteQuery, hostID); err != nil {
+		return fmt.Errorf("clearing the adapter registry: %w", err)
 	}
 	const capQuery = `
 		insert into host_capability_registry
@@ -486,16 +497,16 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 		if _, err := tx.Exec(ctx, capQuery, hostID, capability.Name,
 			capability.Version, capability.Available, capability.ReadOnly,
 			capability.Reason, features); err != nil {
-			return fmt.Errorf("aktualizacja adaptera %s: %w", capability.Name, err)
+			return fmt.Errorf("updating the adapter %s: %w", capability.Name, err)
 		}
 	}
 	return tx.Commit(ctx)
 }
 
-// ApplyHeartbeat zapisuje minimalne sygnaly zdrowia i odswieza last_seen_at.
-// Sygnal nieustalony przez agenta zostawia poprzednia wartosc nietknieta:
-// chwilowa awaria odczytu na hoscie nie moze kasowac tego, co juz wiemy, ani
-// udawac zera.
+// ApplyHeartbeat records the minimal health signals and refreshes
+// last_seen_at. A signal the agent did not determine leaves the previous
+// value untouched: a momentary read failure on the host must neither delete
+// what we already know nor pretend to be zero.
 func (s *Store) ApplyHeartbeat(ctx context.Context, hostID string, health Health) error {
 	const query = `
 		update hosts set
@@ -513,7 +524,7 @@ func (s *Store) ApplyHeartbeat(ctx context.Context, hostID string, health Health
 	return err
 }
 
-// countArg zamienia nieustalony licznik na NULL dla zapytania.
+// countArg turns an undetermined counter into NULL for the query.
 func countArg(value *uint32) any {
 	if value == nil {
 		return nil
@@ -521,22 +532,22 @@ func countArg(value *uint32) any {
 	return int(*value)
 }
 
-// SetPackageDatabaseBroken zapisuje, czy baza pakietow hosta wymaga naprawy.
-// Host w tym stanie nie moze brac udzialu w kolejnych kampaniach.
+// SetPackageDatabaseBroken records whether the host's package database needs
+// repair. A host in this state cannot take part in further campaigns.
 func (s *Store) SetPackageDatabaseBroken(ctx context.Context, hostID string, broken bool) error {
 	const query = `update hosts set package_database_broken = $2, updated_at = now() where id = $1`
 	_, err := s.pool.Exec(ctx, query, hostID, broken)
 	return err
 }
 
-// MarkDisconnected oznacza hosta jako offline po zamknieciu streamu.
+// MarkDisconnected marks a host as offline after the stream closes.
 func (s *Store) MarkDisconnected(ctx context.Context, hostID string) error {
 	const query = `update hosts set connection_state = 'offline', updated_at = now() where id = $1`
 	_, err := s.pool.Exec(ctx, query, hostID)
 	return err
 }
 
-// Get zwraca pojedynczy host.
+// Get returns a single host.
 func (s *Store) Get(ctx context.Context, hostID string) (*Host, error) {
 	rows, err := s.query(ctx, "where h.id = $1", hostID)
 	if err != nil {
@@ -548,19 +559,19 @@ func (s *Store) Get(ctx context.Context, hostID string) (*Host, error) {
 	return &rows[0], nil
 }
 
-// ListFilter opisuje filtry wykonywane po stronie serwera.
+// ListFilter describes the filters applied on the server's side.
 type ListFilter struct {
 	Site            string
 	Environment     string
 	OSFamily        string
 	ConnectionState string
-	// IdentityDomain zaweza do hostow w danej domenie.
+	// IdentityDomain narrows to the hosts in a given domain.
 	IdentityDomain string
 	Limit          int
 }
 
-// List zwraca hosty zgodne z filtrem. Filtrowanie odbywa sie w bazie, UI nigdy
-// nie pobiera calej floty do pamieci przegladarki.
+// List returns the hosts matching the filter. Filtering happens in the
+// database; the UI never pulls the whole fleet into the browser's memory.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 	var (
 		conditions []string
@@ -593,16 +604,17 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 	return s.query(ctx, where, args...)
 }
 
-// Strona zwraca kolejna strone hostow zgodnych z filtrem.
+// Page returns the next page of hosts matching the filter.
 //
-// Kampania nie moze miec ukrytego limitu: selektor obejmujacy tysiac hostow
-// ma znaczyc tysiac hostow, a nie pierwsze piecset posortowane alfabetycznie.
-// Stronicowanie idzie po kluczu (hostname, id), a nie po offsecie - flota
-// zmienia sie w trakcie przegladania, a offset gubi wtedy hosty w srodku.
+// A campaign must not have a hidden limit: a selector covering a thousand
+// hosts has to mean a thousand hosts, not the first five hundred sorted
+// alphabetically. Paging goes by the key (hostname, id) rather than by an
+// offset - the fleet changes while it is being browsed, and an offset then
+// loses hosts in the middle.
 //
-// Pierwsza strone bierze sie z pustym kluczem.
-func (s *Store) Strona(ctx context.Context, filter ListFilter,
-	poNazwie, poID string, limit int) ([]Host, error) {
+// The first page is taken with an empty key.
+func (s *Store) Page(ctx context.Context, filter ListFilter,
+	afterName, afterID string, limit int) ([]Host, error) {
 	var (
 		conditions []string
 		args       []any
@@ -620,28 +632,29 @@ func (s *Store) Strona(ctx context.Context, filter ListFilter,
 	add("h.connection_state", filter.ConnectionState)
 	add("h.identity_domain", filter.IdentityDomain)
 
-	if poID == "" {
-		poID = "00000000-0000-0000-0000-000000000000"
+	if afterID == "" {
+		afterID = "00000000-0000-0000-0000-000000000000"
 	}
-	args = append(args, poNazwie, poID)
+	args = append(args, afterName, afterID)
 	conditions = append(conditions, fmt.Sprintf("($%d = '' or (h.hostname, h.id) > ($%d, $%d::uuid))",
 		len(args)-1, len(args)-1, len(args)))
 
 	if limit <= 0 {
-		limit = RozmiarStrony
+		limit = PageSize
 	}
 	args = append(args, limit)
-	klauzula := "where " + strings.Join(conditions, " and ") +
+	clause := "where " + strings.Join(conditions, " and ") +
 		fmt.Sprintf(" order by h.hostname, h.id limit $%d", len(args))
 
-	return s.query(ctx, klauzula, args...)
+	return s.query(ctx, clause, args...)
 }
 
-// Policz zwraca liczbe hostow zgodnych z filtrem.
+// Count returns the number of hosts matching the filter.
 //
-// Podglad kampanii musi podac prawdziwa liczbe celow, a nie dlugosc pierwszej
-// strony: operator zatwierdza zmiane na tylu hostach, ile mu pokazano.
-func (s *Store) Policz(ctx context.Context, filter ListFilter) (int, error) {
+// A campaign preview has to give the true number of targets rather than the
+// length of the first page: the operator approves a change on as many hosts
+// as they were shown.
+func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
 	var (
 		conditions []string
 		args       []any
@@ -663,37 +676,39 @@ func (s *Store) Policz(ctx context.Context, filter ListFilter) (int, error) {
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
-	var ile int
-	if err := s.pool.QueryRow(ctx, query, args...).Scan(&ile); err != nil {
+	var count int
+	if err := s.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
 		return 0, err
 	}
-	return ile, nil
+	return count, nil
 }
 
-// Skrot jest tym, co o hoscie wystarcza przegladom calej floty.
+// Summary is what a sweep over the whole fleet needs to know about a host.
 //
-// Przeglad nie jest lista dla UI: nie ma limitu z filtra ani rejestru
-// mozliwosci, bo ma objac wszystkie hosty, a nie pierwsza strone.
-type Skrot struct {
+// A sweep is not a list for the UI: it has neither a limit from a filter nor
+// the capability registry, because it is to cover every host rather than the
+// first page.
+type Summary struct {
 	ID             string
 	Hostname       string
 	OSDistribution string
 	OSVersion      string
 }
 
-// RozmiarStrony jest wielkoscia jednej strony przegladu.
-const RozmiarStrony = 500
+// PageSize is the size of one page of a sweep.
+const PageSize = 500
 
-// Przeglad zwraca kolejna strone floty w porzadku klucza (hostname, id).
+// Sweep returns the next page of the fleet in the order of the key
+// (hostname, id).
 //
-// Stronicowanie po kluczu, a nie po offsecie: flota zmienia sie w trakcie
-// przegladu, a offset przy takiej zmianie gubi hosty w srodku. Przeglad, ktory
-// cicho pomija hosty, daje ocene "brak podatnosci" tam, gdzie nikt nie patrzyl.
+// Paging by key rather than by offset: the fleet changes during a sweep, and
+// an offset then loses hosts in the middle. A sweep that silently skips hosts
+// gives the verdict "no vulnerabilities" where nobody looked.
 //
-// Pierwsza strone bierze sie z pustym kluczem.
-func (s *Store) Przeglad(ctx context.Context, poNazwie, poID string, limit int) ([]Skrot, error) {
+// The first page is taken with an empty key.
+func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int) ([]Summary, error) {
 	if limit <= 0 {
-		limit = RozmiarStrony
+		limit = PageSize
 	}
 	query := `
 		select h.id, h.hostname, coalesce(h.os_distribution, ''), coalesce(h.os_version, '')
@@ -701,25 +716,25 @@ func (s *Store) Przeglad(ctx context.Context, poNazwie, poID string, limit int) 
 		where ($1 = '' or (h.hostname, h.id) > ($1, $2::uuid))
 		order by h.hostname, h.id
 		limit $3`
-	if poID == "" {
-		poID = "00000000-0000-0000-0000-000000000000"
+	if afterID == "" {
+		afterID = "00000000-0000-0000-0000-000000000000"
 	}
-	rows, err := s.pool.Query(ctx, query, poNazwie, poID, limit)
+	rows, err := s.pool.Query(ctx, query, afterName, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var wynik []Skrot
+	var result []Summary
 	for rows.Next() {
-		var skrot Skrot
-		if err := rows.Scan(&skrot.ID, &skrot.Hostname, &skrot.OSDistribution,
-			&skrot.OSVersion); err != nil {
+		var summary Summary
+		if err := rows.Scan(&summary.ID, &summary.Hostname, &summary.OSDistribution,
+			&summary.OSVersion); err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, skrot)
+		result = append(result, summary)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
@@ -757,8 +772,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 	var result []Host
 	for rows.Next() {
 		var h Host
-		var oknoDo, oknoOd *time.Time
-		var oknoPowod, oknoKto string
+		var windowUntil, windowFrom *time.Time
+		var windowReason, windowBy string
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner,
 			&h.LifecycleState, &h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
@@ -767,36 +782,37 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.ManagementAddress, &h.ManagementAddressSource, &h.ManagementAddressObservedAt,
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
-			&oknoDo, &oknoPowod, &oknoKto, &oknoOd,
+			&windowUntil, &windowReason, &windowBy, &windowFrom,
 			&h.Capabilities); err != nil {
 			return nil, err
 		}
-		// Okno zamkniete albo wygasle nie jest oknem: pokazujemy je tylko
-		// wtedy, gdy jeszcze trwa.
-		if oknoDo != nil {
-			okno := MaintenanceWindow{Until: *oknoDo, Reason: oknoPowod, SetBy: oknoKto}
-			if oknoOd != nil {
-				okno.SetAt = *oknoOd
+		// A closed or expired window is not a window: we show it only while
+		// it is still in force.
+		if windowUntil != nil {
+			window := MaintenanceWindow{Until: *windowUntil, Reason: windowReason, SetBy: windowBy}
+			if windowFrom != nil {
+				window.SetAt = *windowFrom
 			}
-			h.Maintenance = &okno
+			h.Maintenance = &window
 		}
 		result = append(result, h)
 	}
 	return result, rows.Err()
 }
 
-// Zrodla adresu zarzadzania. Kolejnosc nie jest przypadkowa: adres ustawiony
-// recznie przez operatora opisuje intencje, a nie obserwacje, wiec nie moze
-// zostac nadpisany przez kolejne polaczenie.
+// The sources of the management address. The order is not accidental: an
+// address set manually by an operator describes an intent rather than an
+// observation, so it must not be overwritten by the next connection.
 const (
 	AddressFromSession = "session"
 	AddressFromAgent   = "agent"
 	AddressFromManual  = "manual"
 )
 
-// SetManagementAddress zapisuje adres zarzadzania wraz z jego pochodzeniem.
-// Pusty adres nie jest zapisywany: brak obserwacji nie jest faktem o hoscie
-// i nie moze skasowac adresu, ktory znamy z poprzedniego polaczenia.
+// SetManagementAddress records the management address together with where it
+// came from. An empty address is not recorded: a missing observation is not a
+// fact about the host and must not delete the address we know from the
+// previous connection.
 func (s *Store) SetManagementAddress(ctx context.Context, hostID, address, source string) error {
 	if address == "" || source == "" {
 		return nil
@@ -813,10 +829,11 @@ func (s *Store) SetManagementAddress(ctx context.Context, hostID, address, sourc
 	return err
 }
 
-// AdoptCertificateIssuer uzupelnia wystawce certyfikatow sprzed wprowadzenia
-// wymiany CA. Wolno to zrobic wylacznie wtedy, gdy istnieje dokladnie jedno
-// CA - przy wiekszej liczbie wystawcy nie da sie ustalic inaczej niz zgadujac,
-// a zgadniety wystawca prowadzilby do odciecia hostow przy wycofaniu CA.
+// AdoptCertificateIssuer fills in the issuer of certificates from before CA
+// rotation was introduced. It may be done only when exactly one CA exists -
+// with more of them the issuer cannot be established other than by guessing,
+// and a guessed issuer would lead to hosts being cut off when a CA is
+// withdrawn.
 func (s *Store) AdoptCertificateIssuer(ctx context.Context, subject, serial string) (int64, error) {
 	const query = `
 		update agent_certificates set issuer_subject = $1, issuer_serial = $2
@@ -828,11 +845,11 @@ func (s *Store) AdoptCertificateIssuer(ctx context.Context, subject, serial stri
 	return tag.RowsAffected(), nil
 }
 
-// CertificateIssuers liczy hosty wedlug CA, ktore wystawilo ich obecny,
-// nieodwolany certyfikat. Klucz mapy to "podmiot numer_seryjny" wystawcy.
+// CertificateIssuers counts hosts by the CA that issued their current,
+// unrevoked certificate. The map key is the issuer's "subject serial".
 //
-// Bez tej wiedzy wycofanie CA byloby zgadywaniem: nie widac, ilu hostom
-// odbiera sie dostep.
+// Without that knowledge withdrawing a CA would be guesswork: it is not
+// visible how many hosts lose access.
 func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) {
 	const query = `
 		select coalesce(issuer_subject, ''), coalesce(issuer_serial, ''), count(*)
@@ -845,28 +862,30 @@ func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) 
 	}
 	defer rows.Close()
 
-	uzycie := map[string]int{}
+	usage := map[string]int{}
 	for rows.Next() {
 		var subject, serial string
 		var count int
 		if err := rows.Scan(&subject, &serial, &count); err != nil {
 			return nil, err
 		}
-		uzycie[subject+" "+serial] = count
+		usage[subject+" "+serial] = count
 	}
-	return uzycie, rows.Err()
+	return usage, rows.Err()
 }
 
-// HostsWithoutCertificateSince liczy hosty, ktore od podanej chwili nie
-// dostaly nowego certyfikatu.
+// HostsWithoutCertificateSince counts the hosts that have not received a new
+// certificate since the given moment.
 //
-// Sluzy do wymiany CA: agent poznaje nowe CA razem z certyfikatem, wiec host
-// bez swiezego certyfikatu nie ma jeszcze nowego CA u siebie. Przekazanie mu
-// podpisywania odcieloby taki host przy najblizszym restarcie panelu.
+// It serves CA rotation: the agent learns the new CA together with its
+// certificate, so a host without a fresh certificate does not have the new CA
+// yet. Handing signing over to it would cut such a host off at the panel's
+// next restart.
 //
-// Liczy sie chwila wydania certyfikatu, a nie poczatek jego waznosci: ten
-// drugi jest celowo cofniety na poczet rozjazdu zegarow i swiezo wydany
-// certyfikat wygladalby przez to na starszy, niz jest.
+// What counts is the moment the certificate was issued rather than the start
+// of its validity: the latter is deliberately backdated to allow for clock
+// skew, and a freshly issued certificate would therefore look older than it
+// is.
 func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time) (int, error) {
 	const query = `
 		select count(*)
@@ -883,19 +902,20 @@ func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Tim
 	return count, nil
 }
 
-// UstawOknoSerwisowe otwiera albo zamyka okno serwisowe hosta.
+// SetMaintenanceWindow opens or closes a host's maintenance window.
 //
-// Zamkniecie okna czysci takze powod i autora: pozostawiony powod opisywalby
-// okno, ktorego juz nie ma, i przy nastepnym otwarciu wygladalby na aktualny.
-func (s *Store) UstawOknoSerwisowe(ctx context.Context, hostID string,
-	doKiedy *time.Time, powod, kto string) (*Host, error) {
+// Closing the window also clears the reason and the author: a reason left
+// behind would describe a window that no longer exists and would look current
+// the next time one is opened.
+func (s *Store) SetMaintenanceWindow(ctx context.Context, hostID string,
+	until *time.Time, reason, actor string) (*Host, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update hosts
 		   set maintenance_until  = $2::timestamptz,
 		       maintenance_reason = case when $2::timestamptz is null then null else $3::text end,
 		       maintenance_by     = case when $2::timestamptz is null then null else $4::text end,
 		       maintenance_at     = case when $2::timestamptz is null then null else now() end
-		 where id = $1`, hostID, doKiedy, powod, kto)
+		 where id = $1`, hostID, until, reason, actor)
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const przykladPelny = `
+const fullExample = `
 schema_version: 1
 
 connection:
@@ -31,121 +31,121 @@ helper:
   socket: "/run/flotestro/helper.sock"
 `
 
-func TestPelnyPlikPrzechodzi(t *testing.T) {
-	cfg, err := Czytaj(strings.NewReader(przykladPelny))
+func TestAFullFilePasses(t *testing.T) {
+	cfg, err := Read(strings.NewReader(fullExample))
 	if err != nil {
-		t.Fatalf("konfiguracja odrzucona: %v", err)
+		t.Fatalf("the configuration was rejected: %v", err)
 	}
 	if len(cfg.Connection.GatewayURLs) != 2 {
-		t.Fatalf("bram = %v", cfg.Connection.GatewayURLs)
+		t.Fatalf("gateways = %v", cfg.Connection.GatewayURLs)
 	}
 	if cfg.Connection.ConnectTimeout != 15*time.Second ||
 		cfg.Connection.ReconnectMax != 2*time.Minute {
-		t.Fatalf("czasy = %s / %s", cfg.Connection.ConnectTimeout, cfg.Connection.ReconnectMax)
+		t.Fatalf("durations = %s / %s", cfg.Connection.ConnectTimeout, cfg.Connection.ReconnectMax)
 	}
 	if cfg.Agent.InventoryInterval != 15*time.Minute {
-		t.Fatalf("odstep inwentarza = %s", cfg.Agent.InventoryInterval)
+		t.Fatalf("inventory interval = %s", cfg.Agent.InventoryInterval)
 	}
 }
 
-func TestBrakujacePolaBioraDomyslne(t *testing.T) {
-	minimalny := `
+func TestMissingFieldsTakeTheDefaults(t *testing.T) {
+	minimal := `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 `
-	cfg, err := Czytaj(strings.NewReader(minimalny))
+	cfg, err := Read(strings.NewReader(minimal))
 	if err != nil {
-		t.Fatalf("konfiguracja odrzucona: %v", err)
+		t.Fatalf("the configuration was rejected: %v", err)
 	}
-	domyslne := Domyslne()
-	if cfg.Agent.StateDir != domyslne.Agent.StateDir ||
-		cfg.Agent.MaxConcurrentTasks != domyslne.Agent.MaxConcurrentTasks ||
-		cfg.Agent.Mode != domyslne.Agent.Mode ||
-		cfg.Helper.Socket != domyslne.Helper.Socket ||
-		cfg.Agent.InventoryInterval != domyslne.Agent.InventoryInterval {
-		t.Fatalf("domyslne nie uzupelnione: %+v", cfg)
+	defaults := Defaults()
+	if cfg.Agent.StateDir != defaults.Agent.StateDir ||
+		cfg.Agent.MaxConcurrentTasks != defaults.Agent.MaxConcurrentTasks ||
+		cfg.Agent.Mode != defaults.Agent.Mode ||
+		cfg.Helper.Socket != defaults.Helper.Socket ||
+		cfg.Agent.InventoryInterval != defaults.Agent.InventoryInterval {
+		t.Fatalf("the defaults were not filled in: %+v", cfg)
 	}
 }
 
-// TestPlikOdrzucaBledy przechodzi przez przypadki z dokumentu. Kazdy z nich
-// kiedys konczyl sie cichym startem z innym ustawieniem, niz operator
-// zapisal - a to jest gorsze niz host, ktory nie wstaje.
-func TestPlikOdrzucaBledy(t *testing.T) {
-	przypadki := []struct {
-		nazwa   string
-		plik    string
-		oczekuj error
+// TestTheFileRejectsErrors goes through the cases from the document. Each of
+// them once ended in a silent start with a setting other than the one the
+// operator wrote - and that is worse than a host that does not come up.
+func TestTheFileRejectsErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		file   string
+		expect error
 	}{
-		{"nieznane pole", `
+		{"unknown field", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_url: "https://gw.example.com:8443"
-`, ErrDekodowanie},
-		{"http zamiast https", `
+`, ErrDecode},
+		{"http instead of https", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["http://gw.example.com:8443"]
 `, nil},
-		{"poswiadczenia w adresie", `
+		{"credentials in the address", `
 schema_version: 1
 connection:
-  enrollment_url: "https://uzytkownik:haslo@enroll.example.com"
+  enrollment_url: "https://user:password@enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 `, nil},
-		{"drugi dokument", `
+		{"second document", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 ---
 schema_version: 1
-`, ErrWieleDokumentow},
-		{"limit zadan zero", `
+`, ErrMultipleDocs},
+		{"task limit zero", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 agent:
   max_concurrent_tasks: 0
-`, ErrLimitZadan},
-		{"limit zadan tysiac", `
+`, ErrTaskLimit},
+		{"task limit of a thousand", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 agent:
   max_concurrent_tasks: 1000
-`, ErrLimitZadan},
-		{"duplikat bramy", `
+`, ErrTaskLimit},
+		{"duplicate gateway", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443", "https://gw.example.com:8443"]
-`, ErrDuplikatBramy},
-		{"nieznany schemat", `
+`, ErrGatewayDuplicate},
+		{"unknown schema", `
 schema_version: 2
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
-`, ErrSchemat},
-		{"brak bramy", `
+`, ErrSchema},
+		{"no gateway", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
-`, ErrBrakBramy},
-		{"nieznany tryb", `
+`, ErrGatewayMissing},
+		{"unknown mode", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 agent:
-  mode: "polowicznie"
-`, ErrTryb},
-		{"odstep inwentarza minuta", `
+  mode: "halfway"
+`, ErrMode},
+		{"inventory interval of a minute", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
@@ -153,100 +153,101 @@ connection:
 agent:
   inventory_interval: "1m"
 `, nil},
-		{"ponowienia odwrotnie", `
+		{"reconnect bounds reversed", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
   reconnect_min: "5m"
   reconnect_max: "10s"
-`, ErrKolejnoscPonowien},
-		{"katalog stanu wzgledny", `
+`, ErrReconnectOrder},
+		{"relative state directory", `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 agent:
-  state_dir: "stan"
-`, ErrKatalogStanu},
+  state_dir: "state"
+`, ErrStateDir},
 	}
 
-	for _, przypadek := range przypadki {
-		t.Run(przypadek.nazwa, func(t *testing.T) {
-			_, err := Czytaj(strings.NewReader(przypadek.plik))
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := Read(strings.NewReader(testCase.file))
 			if err == nil {
-				t.Fatal("plik przeszedl, choc nie powinien")
+				t.Fatal("the file passed although it should not have")
 			}
-			if przypadek.oczekuj != nil && !errors.Is(err, przypadek.oczekuj) {
-				t.Fatalf("blad = %v, chcemy %v", err, przypadek.oczekuj)
+			if testCase.expect != nil && !errors.Is(err, testCase.expect) {
+				t.Fatalf("error = %v, want %v", err, testCase.expect)
 			}
 		})
 	}
 
-	// Brak wpisu to co innego niz jawne zero: pierwsze bierze wartosc
-	// domyslna, drugie jest bledem.
-	cfg, err := Czytaj(strings.NewReader(`
+	// A missing entry is something else than an explicit zero: the first
+	// takes the default value, the second is an error.
+	cfg, err := Read(strings.NewReader(`
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
   gateway_urls: ["https://gw.example.com:8443"]
 `))
 	if err != nil {
-		t.Fatalf("plik bez limitu odrzucony: %v", err)
+		t.Fatalf("a file without a limit was rejected: %v", err)
 	}
-	if cfg.Agent.MaxConcurrentTasks != Domyslne().Agent.MaxConcurrentTasks {
-		t.Fatalf("limit zadan po uzupelnieniu = %d", cfg.Agent.MaxConcurrentTasks)
-	}
-}
-
-func TestBootstrapCAMusiBycZwyklymPlikiem(t *testing.T) {
-	katalog := t.TempDir()
-	plik := filepath.Join(katalog, "ca.pem")
-	if err := os.WriteFile(plik, []byte("-----BEGIN CERTIFICATE-----\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg := Domyslne()
-	cfg.Connection.BootstrapCA = plik
-	if err := cfg.SprawdzBootstrapCA(); err != nil {
-		t.Fatalf("zwykly plik odrzucony: %v", err)
-	}
-
-	// Dowiazanie moze wskazywac katalog zapisywalny przez kogos innego,
-	// a podmiana bundla CA to podmiana calego zaufania hosta.
-	dowiazanie := filepath.Join(katalog, "ca-link.pem")
-	if err := os.Symlink(plik, dowiazanie); err != nil {
-		t.Fatal(err)
-	}
-	cfg.Connection.BootstrapCA = dowiazanie
-	if err := cfg.SprawdzBootstrapCA(); !errors.Is(err, ErrBootstrapCA) {
-		t.Fatalf("dowiazanie przeszlo: %v", err)
-	}
-
-	zapisywalny := filepath.Join(katalog, "ca-otwarty.pem")
-	if err := os.WriteFile(zapisywalny, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// Prawa ustawiamy po zapisie: umask procesu i tak przycialby tryb
-	// podany przy tworzeniu, a test ma sprawdzic plik naprawde otwarty.
-	if err := os.Chmod(zapisywalny, 0o666); err != nil {
-		t.Fatal(err)
-	}
-	cfg.Connection.BootstrapCA = zapisywalny
-	if err := cfg.SprawdzBootstrapCA(); !errors.Is(err, ErrBootstrapCA) {
-		t.Fatalf("plik zapisywalny dla wszystkich przeszedl: %v", err)
+	if cfg.Agent.MaxConcurrentTasks != Defaults().Agent.MaxConcurrentTasks {
+		t.Fatalf("task limit after filling in = %d", cfg.Agent.MaxConcurrentTasks)
 	}
 }
 
-func TestWczytajZPliku(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "agent.yaml")
-	if err := os.WriteFile(sciezka, []byte(przykladPelny), 0o640); err != nil {
+func TestTheBootstrapCAHasToBeAnOrdinaryFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(file, []byte("-----BEGIN CERTIFICATE-----\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Wczytaj(sciezka); err != nil {
-		t.Fatalf("plik odrzucony: %v", err)
+	cfg := Defaults()
+	cfg.Connection.BootstrapCA = file
+	if err := cfg.CheckBootstrapCA(); err != nil {
+		t.Fatalf("an ordinary file was rejected: %v", err)
 	}
-	if _, err := Wczytaj(filepath.Join(katalog, "nie-ma.yaml")); !errors.Is(err, ErrOtwarcie) {
-		t.Fatalf("brak pliku = %v", err)
+
+	// A symlink can point into a directory writable by somebody else, and
+	// replacing the CA bundle means replacing the host's whole trust.
+	link := filepath.Join(dir, "ca-link.pem")
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Connection.BootstrapCA = link
+	if err := cfg.CheckBootstrapCA(); !errors.Is(err, ErrBootstrapCA) {
+		t.Fatalf("a symlink passed: %v", err)
+	}
+
+	writable := filepath.Join(dir, "ca-open.pem")
+	if err := os.WriteFile(writable, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// We set the permissions after writing: the process umask would trim the
+	// mode given at creation anyway, and the test is to check a file that is
+	// really open.
+	if err := os.Chmod(writable, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Connection.BootstrapCA = writable
+	if err := cfg.CheckBootstrapCA(); !errors.Is(err, ErrBootstrapCA) {
+		t.Fatalf("a world-writable file passed: %v", err)
+	}
+}
+
+func TestLoadFromAFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(path, []byte(fullExample), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("the file was rejected: %v", err)
+	}
+	if _, err := Load(filepath.Join(dir, "missing.yaml")); !errors.Is(err, ErrOpen) {
+		t.Fatalf("a missing file = %v", err)
 	}
 }

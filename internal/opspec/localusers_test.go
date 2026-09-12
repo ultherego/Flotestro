@@ -2,110 +2,114 @@ package opspec
 
 import "testing"
 
-func TestWalidacjaKontaLokalnego(t *testing.T) {
-	klucz := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 jan@stacja"
+func TestLocalAccountValidation(t *testing.T) {
+	key := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 jan@workstation"
 
-	poprawne := Payload{LocalUser: &LocalUserPayload{
-		Name: "kowalski", Shell: "/bin/bash", Groups: []string{"sudo"}, SSHKeys: []string{klucz},
+	valid := Payload{LocalUser: &LocalUserPayload{
+		Name: "kowalski", Shell: "/bin/bash", Groups: []string{"sudo"}, SSHKeys: []string{key},
 	}}
-	if err := Validate(ActionLocalUserCreate, poprawne); err != nil {
-		t.Fatalf("poprawny payload odrzucony: %v", err)
+	if err := Validate(ActionLocalUserCreate, valid); err != nil {
+		t.Fatalf("a valid payload was rejected: %v", err)
 	}
 
-	// Pusta lista kluczy jest swiadomym odebraniem dostepu, a nie brakiem danych.
-	pusta := Payload{LocalUser: &LocalUserPayload{Name: "kowalski", SSHKeys: []string{}}}
-	if err := Validate(ActionLocalSSHKeysSet, pusta); err != nil {
-		t.Fatalf("odebranie kluczy musi byc dozwolone: %v", err)
+	// An empty list of keys is a deliberate removal of access, not missing
+	// data.
+	empty := Payload{LocalUser: &LocalUserPayload{Name: "kowalski", SSHKeys: []string{}}}
+	if err := Validate(ActionLocalSSHKeysSet, empty); err != nil {
+		t.Fatalf("taking keys away has to be allowed: %v", err)
 	}
 
-	przypadki := map[string]LocalUserPayload{
-		"nazwa z wielka litera": {Name: "Kowalski"},
-		"nazwa ze sciezka":      {Name: "../root"},
-		"nazwa pusta":           {Name: ""},
-		"powloka wzgledna":      {Name: "kowalski", Shell: "bash"},
-		"dwukropek w opisie":    {Name: "kowalski", Gecos: "Jan:Kowalski"},
-		"grupa nieprawidlowa":   {Name: "kowalski", Groups: []string{"su do"}},
-		"klucz prywatny":        {Name: "kowalski", SSHKeys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
-		"klucz z nowa linia":    {Name: "kowalski", SSHKeys: []string{klucz + "\nssh-rsa AAAA"}},
-		"typ klucza nieznany":   {Name: "kowalski", SSHKeys: []string{"ssh-dss AAAAB3Nz jan"}},
-		"klucz bez materialu":   {Name: "kowalski", SSHKeys: []string{"ssh-ed25519"}},
-		"klucz pusty":           {Name: "kowalski", SSHKeys: []string{"   "}},
+	cases := map[string]LocalUserPayload{
+		"name with a capital letter": {Name: "Kowalski"},
+		"name with a path":           {Name: "../root"},
+		"empty name":                 {Name: ""},
+		"relative shell":             {Name: "kowalski", Shell: "bash"},
+		"colon in the description":   {Name: "kowalski", Gecos: "Jan:Kowalski"},
+		"invalid group":              {Name: "kowalski", Groups: []string{"su do"}},
+		"private key":                {Name: "kowalski", SSHKeys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
+		"key with a newline":         {Name: "kowalski", SSHKeys: []string{key + "\nssh-rsa AAAA"}},
+		"unknown key type":           {Name: "kowalski", SSHKeys: []string{"ssh-dss AAAAB3Nz jan"}},
+		"key without material":       {Name: "kowalski", SSHKeys: []string{"ssh-ed25519"}},
+		"empty key":                  {Name: "kowalski", SSHKeys: []string{"   "}},
 	}
-	for nazwa, payload := range przypadki {
+	for name, payload := range cases {
 		if err := Validate(ActionLocalUserCreate, payload.copy()); err == nil {
-			t.Errorf("%s: payload powinien zostac odrzucony", nazwa)
+			t.Errorf("%s: the payload should have been rejected", name)
 		}
 	}
 
 	if err := Validate(ActionLocalUserLock, Payload{}); err == nil {
-		t.Error("operacja bez payloadu musi byc odrzucona")
+		t.Error("an operation without a payload has to be rejected")
 	}
 }
 
-// copy pozwala uzyc tej samej struktury w tabeli przypadkow bez wspoldzielenia.
+// copy allows using the same structure in a table of cases without sharing
+// it.
 func (p LocalUserPayload) copy() Payload {
-	kopia := p
-	return Payload{LocalUser: &kopia}
+	copied := p
+	return Payload{LocalUser: &copied}
 }
 
-func TestOperacjeKontLokalnychMajaOsobneUprawnienia(t *testing.T) {
-	// Blokada i odblokowanie sa rozdzielone celowo: w reakcji na incydent
-	// odciecie konta bywa dozwolone tam, gdzie przywrocenie dostepu nie jest.
+func TestLocalAccountOperationsHaveSeparatePermissions(t *testing.T) {
+	// Locking and unlocking are separated deliberately: in response to an
+	// incident, cutting an account off is sometimes allowed where restoring
+	// access is not.
 	if ActionLocalUserLock.Permission() == ActionLocalUserUnlock.Permission() {
-		t.Error("blokada i odblokowanie musza miec osobne uprawnienia")
+		t.Error("locking and unlocking have to have separate permissions")
 	}
 	for _, action := range []ActionType{
 		ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet,
 	} {
 		if !action.Mutating() {
-			t.Errorf("%s zmienia stan hosta", action)
+			t.Errorf("%s changes the state of the host", action)
 		}
-		// Konta lokalne dzialaja tez tam, gdzie nie ma systemd ani katalogu.
+		// Local accounts work also where there is neither systemd nor a
+		// directory.
 		if action.RequiredCapability() != "" {
-			t.Errorf("%s nie powinna wymagac zdolnosci hosta", action)
+			t.Errorf("%s should not require a host capability", action)
 		}
 	}
 }
 
-// TestWalidacjaNaprawyPakietow pilnuje granic operacji naprawy. Odpowiedz na
-// pytanie konfiguracyjne trafia do wejscia debconfa, gdzie kazdy wiersz jest
-// osobnym ustawieniem: wartosc ze znakiem nowej linii pozwalalaby dopisac
-// ustawienia, o ktore nikt nie prosil.
-func TestWalidacjaNaprawyPakietow(t *testing.T) {
-	poprawna := Payload{PackageRepair: &PackageRepairPayload{
+// TestPackageRepairValidation guards the boundaries of the repair operation.
+// An answer to a configuration question reaches debconf's input, where every
+// line is a separate setting: a value with a newline would allow appending
+// settings nobody asked for.
+func TestPackageRepairValidation(t *testing.T) {
+	valid := Payload{PackageRepair: &PackageRepairPayload{
 		Answers: []DebconfAnswer{{
 			Package: "grub-pc", Question: "grub-pc/install_devices",
 			Type: "multiselect", Value: "/dev/sda",
 		}},
 	}}
-	if err := Validate(ActionPackageRepair, poprawna); err != nil {
-		t.Fatalf("poprawna odpowiedz odrzucona: %v", err)
+	if err := Validate(ActionPackageRepair, valid); err != nil {
+		t.Fatalf("a valid answer was rejected: %v", err)
 	}
 
-	// Naprawa bez odpowiedzi jest dozwolona: samo dokonczenie konfiguracji
-	// wystarcza, gdy poprzednia transakcja zostala przerwana.
+	// A repair without answers is allowed: finishing the configuration is
+	// enough when the previous transaction was interrupted.
 	if err := Validate(ActionPackageRepair, Payload{PackageRepair: &PackageRepairPayload{}}); err != nil {
-		t.Fatalf("naprawa bez odpowiedzi odrzucona: %v", err)
+		t.Fatalf("a repair without answers was rejected: %v", err)
 	}
 
-	przypadki := map[string]DebconfAnswer{
-		"nazwa pytania bez pakietu": {Package: "grub-pc", Question: "install_devices", Type: "string", Value: "x"},
-		"pytanie ze sciezka":        {Package: "grub-pc", Question: "../../etc/passwd", Type: "string", Value: "x"},
-		"typ nieznany":              {Package: "grub-pc", Question: "grub-pc/x", Type: "shell", Value: "x"},
-		"wartosc z nowa linia":      {Package: "grub-pc", Question: "grub-pc/x", Type: "string", Value: "a\nb c d"},
-		"pakiet nieprawidlowy":      {Package: "grub pc", Question: "grub-pc/x", Type: "string", Value: "x"},
+	cases := map[string]DebconfAnswer{
+		"question name without a package": {Package: "grub-pc", Question: "install_devices", Type: "string", Value: "x"},
+		"question with a path":            {Package: "grub-pc", Question: "../../etc/passwd", Type: "string", Value: "x"},
+		"unknown type":                    {Package: "grub-pc", Question: "grub-pc/x", Type: "shell", Value: "x"},
+		"value with a newline":            {Package: "grub-pc", Question: "grub-pc/x", Type: "string", Value: "a\nb c d"},
+		"invalid package":                 {Package: "grub pc", Question: "grub-pc/x", Type: "string", Value: "x"},
 	}
-	for nazwa, answer := range przypadki {
+	for name, answer := range cases {
 		payload := Payload{PackageRepair: &PackageRepairPayload{Answers: []DebconfAnswer{answer}}}
 		if err := Validate(ActionPackageRepair, payload); err == nil {
-			t.Errorf("%s: payload powinien zostac odrzucony", nazwa)
+			t.Errorf("%s: the payload should have been rejected", name)
 		}
 	}
 
 	if ActionPackageRepair.Permission() == ActionPackageUpgrade.Permission() {
-		t.Error("naprawa musi miec uprawnienie osobne od aktualizacji")
+		t.Error("a repair has to have a permission separate from an upgrade")
 	}
 	if !ActionPackageRepair.Mutating() {
-		t.Error("naprawa zmienia stan hosta")
+		t.Error("a repair changes the state of the host")
 	}
 }

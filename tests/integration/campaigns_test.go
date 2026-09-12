@@ -2838,7 +2838,7 @@ func TestKampaniaKopiiLiczyZakresIWymagaSprawdzenia(t *testing.T) {
 		"payload":  map[string]any{"backup": odtworzenie},
 		"selector": map[string]any{"host_ids": cele},
 	}, &odmowa, http.StatusBadRequest)
-	if odmowa.Code != "not_a_campaign_action" || !strings.Contains(odmowa.Detail, "obecnosci operatora") {
+	if odmowa.Code != "not_a_campaign_action" || !strings.Contains(odmowa.Detail, "an operator present at every host") {
 		t.Errorf("odmowa odtworzenia: %s (%s)", odmowa.Code, odmowa.Detail)
 	}
 
@@ -2999,7 +2999,7 @@ func TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego(t *testing.T) {
 		// Odtworzenie kopii jest granica, a nie brakiem funkcji: powod ma
 		// mowic o operatorze przy hoscie, a nie o silniku kampanii.
 		if pozycja.Action == "backup.restore" {
-			if pozycja.Ready || !strings.Contains(pozycja.Refusal, "obecnosci operatora") {
+			if pozycja.Ready || !strings.Contains(pozycja.Refusal, "an operator present at every host") {
 				t.Errorf("odtworzenie: ready=%v, powod=%q", pozycja.Ready, pozycja.Refusal)
 			}
 		}
@@ -3217,7 +3217,7 @@ func TestKampaniaZaufaniaRozdajeUrzadIChroniUzywany(t *testing.T) {
 		"payload":  map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
 		"selector": map[string]any{"host_ids": append(append([]string{}, cele...), hostPoza(t, h, cele))},
 	}, &niepelne, http.StatusBadRequest)
-	if niepelne.Code != "incomplete_coverage" || !strings.Contains(niepelne.Detail, "cala flote") {
+	if niepelne.Code != "incomplete_coverage" || !strings.Contains(niepelne.Detail, "the whole fleet at once") {
 		t.Errorf("kampania z niepewnym celem: %s (%s)", niepelne.Code, niepelne.Detail)
 	}
 

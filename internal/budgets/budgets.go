@@ -1,12 +1,12 @@
-// Package budgets odpowiada na pytanie, czy system ma pojemnosc, zeby
-// uruchomic kolejna operacje.
+// Package budgets answers one question: does the system have the capacity to
+// start one more operation.
 //
-// To nie jest to samo pytanie co blokada zasobu. Blokada mowi, czy dwie
-// operacje sie wykluczaja na jednym hoscie; budzet mowi, czy flota, lokalizacja
-// i kanal to udzwigna. Polaczenie ich w jedna liczbe daje pozorne
-// bezpieczenstwo: limit pieciu hostow w kampanii nie chroni repozytorium przed
-// setka rownoleglych pobran, a mutex pakietow nie mowi nic o obciazeniu
-// lokalizacji.
+// This is not the same question a resource lock answers. A lock says whether
+// two operations exclude each other on one host; a budget says whether the
+// fleet, the site and the channel can carry them. Folding both into a single
+// number gives false safety: a limit of five hosts in a campaign does not
+// protect a repository from a hundred parallel reads, and a package mutex says
+// nothing about the load on a site.
 package budgets
 
 import (
@@ -19,125 +19,125 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Klasa jest priorytetem, z jakim zadanie ubiega sie o pojemnosc.
+// Class is the priority with which work asks for capacity.
 //
-// Kolejnosc ma znaczenie tylko przez czas awansu: operacja pilna przestaje byc
-// ograniczana udzialem po chwili, kampania utrzymaniowa - po minutach. Zadna
-// klasa nie omija samej pojemnosci: incydent tez nie moze uruchomic dwoch
-// zmian sieci w lokalizacji, ktora dopuszcza jedna.
-type Klasa string
+// The order only matters for as long as the promotion takes: an urgent
+// operation stops being limited by its fair share after a moment, a
+// maintenance campaign after minutes. No class skips capacity itself: an
+// incident cannot run two network changes in a site that allows one either.
+type Class string
 
 const (
-	// KlasaIncydent to reakcja na awarie: zablokowanie konta, zatrzymanie
-	// uslugi. Czeka najkrocej.
-	KlasaIncydent Klasa = "incident"
-	// KlasaInterakcja to praca operatora na jednym hoscie.
-	KlasaInterakcja Klasa = "interactive"
-	// KlasaUtrzymanie to kampania zaplanowana i zatwierdzona.
-	KlasaUtrzymanie Klasa = "maintenance"
-	// KlasaTlo to prace wlasne panelu: przeglady, odczyty cykliczne.
-	KlasaTlo Klasa = "background"
+	// ClassIncident is a response to a failure: locking an account, stopping
+	// a service. It waits the shortest.
+	ClassIncident Class = "incident"
+	// ClassInteractive is an operator working on a single host.
+	ClassInteractive Class = "interactive"
+	// ClassMaintenance is a planned and approved campaign.
+	ClassMaintenance Class = "maintenance"
+	// ClassBackground is the panel's own work: sweeps, periodic reads.
+	ClassBackground Class = "background"
 )
 
-// WiekAwansu mowi, jak dlugo klasa czeka, zanim przestaje ja obowiazywac
-// udzial.
+// PromotionAge says how long a class waits before its fair share stops
+// binding.
 //
-// Udzial chroni male, pilne operacje przed zaglodzeniem przez duza kampanie.
-// Sam udzial jednak takze potrafi zaglodzic - kampanie, ktora czeka w
-// nieskonczonosc, bo ktos ciagle zglasza nowe zadania. Awans po czasie zamyka
-// to okno: pojemnosci nadal trzeba dotrzymac, ale udzial przestaje wiazac.
-func (k Klasa) WiekAwansu() time.Duration {
-	switch k {
-	case KlasaIncydent:
+// The fair share protects small, urgent operations from being starved by a
+// large campaign. The share itself can starve too, though - a campaign that
+// waits forever because someone keeps submitting new work. Promotion by age
+// closes that window: capacity still has to be respected, but the share no
+// longer binds.
+func (c Class) PromotionAge() time.Duration {
+	switch c {
+	case ClassIncident:
 		return 0
-	case KlasaInterakcja:
+	case ClassInteractive:
 		return 15 * time.Second
-	case KlasaUtrzymanie:
+	case ClassMaintenance:
 		return 2 * time.Minute
 	default:
 		return 5 * time.Minute
 	}
 }
 
-// Znana mowi, czy klasa jest jedna ze znanych.
-func Znana(k Klasa) bool {
-	switch k {
-	case KlasaIncydent, KlasaInterakcja, KlasaUtrzymanie, KlasaTlo:
+// Known says whether the class is one of the known ones.
+func Known(c Class) bool {
+	switch c {
+	case ClassIncident, ClassInteractive, ClassMaintenance, ClassBackground:
 		return true
 	default:
 		return false
 	}
 }
 
-// Potrzeba jest jednym wymaganiem pojemnosci.
+// Need is a single capacity requirement.
 //
-// Waga jest kosztem: jedno zadanie to zwykle jeden token, ale operacja, ktora
-// sciaga gigabajty, ma kosztowac wiecej niz odczyt stanu.
-type Potrzeba struct {
-	Klucz string
-	Waga  int
+// Weight is the cost: one task is usually one token, but an operation that
+// pulls gigabytes should cost more than reading state.
+type Need struct {
+	Key    string
+	Weight int
 }
 
-// Powody odmowy. Kazda odmowa musi dac sie odroznic: brak pojemnosci calej
-// floty i przekroczony udzial jednej kampanii to dwie rozne sytuacje i dwie
-// rozne odpowiedzi dla operatora.
+// Refusal reasons. Every refusal has to be distinguishable: the whole fleet
+// being out of capacity and one campaign exceeding its share are two different
+// situations and two different answers for the operator.
 const (
-	// PowodPojemnosc oznacza budzet zajety w calosci.
-	PowodPojemnosc = "capacity"
-	// PowodUdzial oznacza pojemnosc wolna, ale nie dla tego roszczacego:
-	// jedna kampania nie bierze wszystkich wolnych tokenow.
-	PowodUdzial = "fair_share"
+	// ReasonCapacity means the budget is fully taken.
+	ReasonCapacity = "capacity"
+	// ReasonFairShare means there is free capacity, but not for this
+	// claimant: one campaign does not take every free token.
+	ReasonFairShare = "fair_share"
 )
 
-// Odmowa opisuje budzet, ktory nie mial miejsca.
+// Refusal describes a budget that had no room.
 //
-// Cisza nie jest odpowiedzia: host czekajacy na tokeny ma pokazac, na ktory
-// budzet czeka, ile jest zajete i jak dlugo trwa oczekiwanie.
-type Odmowa struct {
-	Klucz     string
-	Powod     string
-	Zajete    int
-	Pojemnosc int
-	// Udzial jest porcja przypadajaca na jednego roszczacego, a Trzymane -
-	// tym, co ten roszczacy juz ma. Bez obu liczb odmowa "udzial wyczerpany"
-	// nie mowi, czy zabraklo o jeden token, czy o sto.
-	Udzial   int
-	Trzymane int
-	Czeka    time.Duration
+// Silence is not an answer: a host waiting for tokens has to show which budget
+// it waits for, how much is taken and how long the wait has lasted.
+type Refusal struct {
+	Key      string
+	Reason   string
+	Used     int
+	Capacity int
+	// Share is the portion for a single claimant, and Held is what this
+	// claimant already has. Without both numbers a "share exhausted" refusal
+	// does not say whether one token was missing or a hundred.
+	Share   int
+	Held    int
+	Waiting time.Duration
 }
 
-// Opis nazywa przeszkode zdaniem, ktore da sie pokazac operatorowi.
-func (o Odmowa) Opis() string {
-	if o.Klucz == "" {
+// Describe names the obstacle in a sentence that can be shown to an operator.
+func (r Refusal) Describe() string {
+	if r.Key == "" {
 		return ""
 	}
-	if o.Powod == PowodUdzial {
-		return fmt.Sprintf("budzet %s: udzial %d z %d tokenow, trzymamy %d, czekamy %s",
-			o.Klucz, o.Udzial, o.Pojemnosc, o.Trzymane, o.Czeka.Round(time.Second))
+	if r.Reason == ReasonFairShare {
+		return fmt.Sprintf("budget %s: share %d of %d tokens, holding %d, waiting %s",
+			r.Key, r.Share, r.Capacity, r.Held, r.Waiting.Round(time.Second))
 	}
-	return fmt.Sprintf("budzet %s: zajete %d z %d, czekamy %s",
-		o.Klucz, o.Zajete, o.Pojemnosc, o.Czeka.Round(time.Second))
+	return fmt.Sprintf("budget %s: %d of %d taken, waiting %s",
+		r.Key, r.Used, r.Capacity, r.Waiting.Round(time.Second))
 }
 
-// Pusta mowi, czy odmowy nie bylo.
-func (o Odmowa) Pusta() bool { return o.Klucz == "" }
+// Empty says whether there was no refusal.
+func (r Refusal) Empty() bool { return r.Key == "" }
 
-// Klucze budzetow globalnych. Odczyt i mutacja maja osobne pojemnosci: sto
-// odczytow stanu nie jest tym samym obciazeniem co sto transakcji pakietowych.
+// Keys of the global budgets. Reads and mutations have separate capacities: a
+// hundred state reads are not the same load as a hundred package transactions.
 const (
-	KluczGlobalneMutacje = "global:mutations"
-	KluczGlobalneOdczyty = "global:reads"
+	KeyGlobalMutations = "global:mutations"
+	KeyGlobalReads     = "global:reads"
 )
 
-// RodzinaLokalizacji nazywa rodzine zasobow, ktora operacja obciaza
-// w lokalizacji.
+// SiteFamily names the family of resources an operation loads within a site.
 //
-// Podstawa jest klasa blokady z rejestru operacji: to ona nazywa zasob, ktorego
-// operacja uzywa na wylacznosc. Restart nie ma klasy blokady, bo zabiera caly
-// host - a mimo to jest tym, czego w jednej lokalizacji nie chcemy robic
-// dziesiec razy naraz. Pusta wartosc znaczy operacje bez budzetu lokalizacji,
-// a nie budzet zerowy: nadal obowiazuje budzet globalny.
-func RodzinaLokalizacji(action opspec.ActionType) string {
+// The basis is the lock class from the operation registry: it is the one that
+// names the resource an operation uses exclusively. A reboot has no lock class
+// because it takes the whole host - and it is still the thing we do not want
+// to do ten times at once in one site. An empty value means an operation
+// without a site budget, not a zero budget: the global budget still applies.
+func SiteFamily(action opspec.ActionType) string {
 	switch action {
 	case opspec.ActionSystemReboot, opspec.ActionSystemShutdown:
 		return "reboot"
@@ -145,98 +145,97 @@ func RodzinaLokalizacji(action opspec.ActionType) string {
 	return action.LockClass()
 }
 
-// KluczLokalizacji sklada klucz budzetu lokalizacji.
-func KluczLokalizacji(site, rodzina string) string {
-	if site == "" || rodzina == "" {
+// SiteKey builds the key of a site budget.
+func SiteKey(site, family string) string {
+	if site == "" || family == "" {
 		return ""
 	}
-	return "site:" + site + ":" + rodzina
+	return "site:" + site + ":" + family
 }
 
-// KluczBackendu sklada klucz budzetu repozytorium backupu.
+// BackendKey builds the key of a backup repository budget.
 //
-// Limit lokalizacji nie chroni repozytorium: dziesiec hostow z trzech
-// lokalizacji miesci sie w kazdym budzecie lokalizacji i nadal jest
-// dziesiecioma strumieniami do jednego backendu, ktory ma jedno lacze
-// i jeden dysk.
+// A site limit does not protect a repository: ten hosts from three sites fit
+// into every site budget and are still ten streams into one backend that has
+// one link and one disk.
 //
-// Adres repozytorium bywa dowolnym tekstem - ze schematem, uzytkownikiem
-// i sciezka. Klucz musi zostac trzyczesciowy, zeby polityka domyslna
-// ("backend:*:backup") dzialala, wiec dwukropki ida na podkreslenia, a
-// dlugi adres konczy sie odciskiem: dwa rozne repozytoria nie moga trafic
-// do jednego budzetu przez samo obciecie.
-func KluczBackendu(repozytorium string) string {
-	repozytorium = strings.TrimSpace(repozytorium)
-	if repozytorium == "" {
+// A repository address can be any text - with a scheme, a user and a path. The
+// key has to stay in three parts for the default policy ("backend:*:backup")
+// to work, so colons become underscores, and a long address ends with a
+// fingerprint: two different repositories must not land in one budget just
+// because the name was cut.
+func BackendKey(repository string) string {
+	repository = strings.TrimSpace(repository)
+	if repository == "" {
 		return ""
 	}
-	nazwa := strings.NewReplacer(":", "_", " ", "_").Replace(repozytorium)
-	if len(nazwa) > 100 {
-		suma := sha256.Sum256([]byte(repozytorium))
-		nazwa = nazwa[:100] + "_" + hex.EncodeToString(suma[:])[:16]
+	name := strings.NewReplacer(":", "_", " ", "_").Replace(repository)
+	if len(name) > 100 {
+		sum := sha256.Sum256([]byte(repository))
+		name = name[:100] + "_" + hex.EncodeToString(sum[:])[:16]
 	}
-	return "backend:" + nazwa + ":backup"
+	return "backend:" + name + ":backup"
 }
 
-// Wzorzec zamienia klucz scisly na wzorzec polityki domyslnej.
+// Pattern turns an exact key into the pattern of the default policy.
 //
-// Lokalizacji jest tyle, ile ich zalozono, i nikt nie opisuje kazdej z osobna.
-// Wzorzec pozwala miec polityke dla wszystkich, nie odbierajac mozliwosci
-// opisania jednej inaczej.
-func Wzorzec(klucz string) string {
-	czesci := rozbij(klucz)
-	if len(czesci) != 3 {
+// There are as many sites as someone created, and nobody describes each of
+// them separately. A pattern allows one policy for all of them without taking
+// away the option of describing one differently.
+func Pattern(key string) string {
+	parts := split(key)
+	if len(parts) != 3 {
 		return ""
 	}
-	return czesci[0] + ":*:" + czesci[2]
+	return parts[0] + ":*:" + parts[2]
 }
 
-func rozbij(klucz string) []string {
-	czesci := make([]string, 0, 3)
-	poczatek := 0
-	for i := 0; i < len(klucz); i++ {
-		if klucz[i] == ':' {
-			czesci = append(czesci, klucz[poczatek:i])
-			poczatek = i + 1
+func split(key string) []string {
+	parts := make([]string, 0, 3)
+	start := 0
+	for i := 0; i < len(key); i++ {
+		if key[i] == ':' {
+			parts = append(parts, key[start:i])
+			start = i + 1
 		}
 	}
-	return append(czesci, klucz[poczatek:])
+	return append(parts, key[start:])
 }
 
-// Potrzeby wylicza budzety, ktore operacja obciaza na jednym hoscie.
+// Needs lists the budgets one operation loads on one host.
 //
-// Czego tu nie ma: budzetu bramy, domeny awarii i backendu. Panel nie zna
-// jeszcze topologii, ktora by je definiowala - i lepiej, zeby ich nie bylo
-// widac, niz zeby udawaly limit liczony z niczego. Dolozenie ich to dolozenie
-// pozycji do tej listy.
-func Potrzeby(action opspec.ActionType, site, repozytorium string) []Potrzeba {
-	globalny := KluczGlobalneOdczyty
+// What is not here: a gateway budget and a failure domain budget. The panel
+// does not know the topology that would define them yet - and it is better for
+// them to be absent than to pretend to be a limit computed out of nothing.
+// Adding them means adding entries to this list.
+func Needs(action opspec.ActionType, site, repository string) []Need {
+	global := KeyGlobalReads
 	if action.Mutating() {
-		globalny = KluczGlobalneMutacje
+		global = KeyGlobalMutations
 	}
-	potrzeby := []Potrzeba{{Klucz: globalny, Waga: 1}}
+	needs := []Need{{Key: global, Weight: 1}}
 
-	// Budzet lokalizacji dotyczy zmian. Odczyty obciazaja host i lacze, a te
-	// maja wlasne limity po stronie agenta.
+	// The site budget applies to changes. Reads load the host and its link,
+	// and those have their own limits on the agent side.
 	if action.Mutating() {
-		if klucz := KluczLokalizacji(site, RodzinaLokalizacji(action)); klucz != "" {
-			potrzeby = append(potrzeby, Potrzeba{Klucz: klucz, Waga: 1})
+		if key := SiteKey(site, SiteFamily(action)); key != "" {
+			needs = append(needs, Need{Key: key, Weight: 1})
 		}
 	}
 
-	// Repozytorium backupu jest zasobem wspolnym dla calej floty, wiec ma
-	// wlasny budzet - takze przy odczycie, bo sprawdzenie kopii czyta z tego
-	// samego lacza co jej zapis.
+	// A backup repository is a resource shared by the whole fleet, so it has
+	// its own budget - including for reads, because verifying a copy reads
+	// over the same link that writing it uses.
 	//
-	// Waga jest jedna dla kazdej operacji. Dokument mowi o budzetach
-	// wazonych, ale waga kopii wobec sprawdzenia zalezy od rozmiaru danych
-	// i od backendu - a liczba wzieta bez pomiaru udawalaby limit policzony
-	// z niczego.
+	// The weight is one for every operation. The document speaks of weighted
+	// budgets, but the weight of a copy against a verification depends on the
+	// size of the data and on the backend - and a number taken without a
+	// measurement would pretend to be a limit computed out of nothing.
 	switch action {
 	case opspec.ActionBackupRun, opspec.ActionBackupVerify, opspec.ActionBackupRestore:
-		if klucz := KluczBackendu(repozytorium); klucz != "" {
-			potrzeby = append(potrzeby, Potrzeba{Klucz: klucz, Waga: 1})
+		if key := BackendKey(repository); key != "" {
+			needs = append(needs, Need{Key: key, Weight: 1})
 		}
 	}
-	return potrzeby
+	return needs
 }

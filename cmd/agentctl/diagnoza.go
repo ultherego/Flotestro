@@ -28,7 +28,7 @@ func poleceniaDiagnozy(argumenty []string, wyjscie, bledy io.Writer) int {
 	ctx, anuluj := context.WithTimeout(context.Background(), 60*time.Second)
 	defer anuluj()
 
-	cfg, err := agentconfig.Wczytaj(sciezka)
+	cfg, err := agentconfig.Load(sciezka)
 	if err != nil {
 		fmt.Fprintf(wyjscie, "config      BLAD  %s: %v\n", sciezka, err)
 		return 1
@@ -54,7 +54,7 @@ func poleceniaDiagnozy(argumenty []string, wyjscie, bledy io.Writer) int {
 		problemy += sprawdzAdres(ctx, wyjscie, adres, pula, cfg.Connection.ConnectTimeout)
 	}
 
-	if cfg.Agent.Mode == agentconfig.TrybOdczytu {
+	if cfg.Agent.Mode == agentconfig.ModeReadOnly {
 		fmt.Fprintf(wyjscie, "helper      -     wylaczony (tryb %s)\n", cfg.Agent.Mode)
 	} else if err := gniazdoDziala(cfg.Helper.Socket); err != nil {
 		fmt.Fprintf(wyjscie, "helper      BLAD  %v\n", err)

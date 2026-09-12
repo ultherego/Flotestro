@@ -92,7 +92,7 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 	// Poswiadczenia pobieramy dopiero teraz, tuz przed operacja. Zyja przez
 	// chwile w pamieci agenta i helpera - nie ma ich w kopercie zadania,
 	// w dzienniku ani w wyniku.
-	if !payload.PasswordSecret.Pusty() {
+	if !payload.PasswordSecret.Empty() {
 		wartosc, wynik := e.pobierzSekret(callCtx, task, *payload.PasswordSecret)
 		if wynik != nil {
 			return wynik

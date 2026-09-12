@@ -31,31 +31,31 @@ func (o *Orchestrator) zajmijPojemnosc(ctx context.Context, campaign Campaign,
 	// Roszczacym jest kampania, a nie host: sprawiedliwosc dzieli tokeny
 	// miedzy zmiany, nie miedzy maszyny. Inaczej kampania na tysiacu hostow
 	// mialaby tysiac razy wiekszy udzial niz kampania na jednym.
-	odmowa, err := o.budzety.Zajmij(ctx, target.ID, "campaign:"+campaign.ID,
-		budgets.KlasaUtrzymanie, budgets.Potrzeby(action, host.Site, repozytorium))
+	refusal, err := o.budzety.Acquire(ctx, target.ID, "campaign:"+campaign.ID,
+		budgets.ClassMaintenance, budgets.Needs(action, host.Site, repozytorium))
 	if err != nil {
 		return false, err
 	}
-	if odmowa.Pusta() {
+	if refusal.Empty() {
 		return true, nil
 	}
 
 	// Cisza jest tu najgorsza odpowiedzia: host stojacy bez powodu wyglada
 	// jak host zapomniany. Stan i komunikat nazywaja budzet i jego zajetosc.
-	if target.State != TargetAwaitingBudget || target.ErrorCode != kodBudzetu(odmowa) {
+	if target.State != TargetAwaitingBudget || target.ErrorCode != kodBudzetu(refusal) {
 		if err := o.store.UpdateTarget(ctx, target.ID, TargetAwaitingBudget,
-			kodBudzetu(odmowa), odmowa.Opis()); err != nil {
+			kodBudzetu(refusal), refusal.Describe()); err != nil {
 			return false, err
 		}
 	}
 	target.State = TargetAwaitingBudget
-	target.ErrorCode = kodBudzetu(odmowa)
+	target.ErrorCode = kodBudzetu(refusal)
 	return false, nil
 }
 
 // kodBudzetu nazywa przeszkode kodem, ktory da sie filtrowac.
-func kodBudzetu(odmowa budgets.Odmowa) string {
-	return "budget_" + odmowa.Powod
+func kodBudzetu(refusal budgets.Refusal) string {
+	return "budget_" + refusal.Reason
 }
 
 // zwolnijPojemnosc oddaje tokeny hosta.
@@ -67,7 +67,7 @@ func (o *Orchestrator) zwolnijPojemnosc(ctx context.Context, target *Target) {
 	if o.budzety == nil {
 		return
 	}
-	if err := o.budzety.Zwolnij(ctx, target.ID); err != nil {
+	if err := o.budzety.Release(ctx, target.ID); err != nil {
 		o.log.Error("nie zwolniono pojemnosci celu kampanii",
 			"host_id", target.HostID, "err", err)
 	}
@@ -91,7 +91,7 @@ func (o *Orchestrator) odnowPojemnosc(ctx context.Context, targets []Target) {
 	if len(pracujace) == 0 {
 		return
 	}
-	if err := o.budzety.Odnow(ctx, pracujace); err != nil {
+	if err := o.budzety.Renew(ctx, pracujace); err != nil {
 		o.log.Error("nie odnowiono pojemnosci kampanii", "err", err)
 	}
 }

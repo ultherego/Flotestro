@@ -255,7 +255,7 @@ func (s *Server) handleWatchCertificate(w http.ResponseWriter, r *http.Request) 
 				"this installation has no secret store")
 			return
 		}
-		if _, err := s.secrets.Sekret(r.Context(), zadanie.KeySecret); errors.Is(err, secrets.ErrNotFound) {
+		if _, err := s.secrets.Secret(r.Context(), zadanie.KeySecret); errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusBadRequest, "secret_not_found", "no secret named "+zadanie.KeySecret)
 			return
 		} else if err != nil {

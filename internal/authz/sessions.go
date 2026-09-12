@@ -14,52 +14,53 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// SessionTokenPrefix odroznia referencje do sesji od innych sekretow.
+// SessionTokenPrefix distinguishes a session reference from other secrets.
 const SessionTokenPrefix = "flts_"
 
-// defaultIdleWindow jest oknem bezczynnosci odswiezanym przy kazdym zadaniu.
+// defaultIdleWindow is the idle window refreshed on every request.
 const defaultIdleWindow = 8 * time.Hour
 
-// ErrSessionInvalid oznacza brak, wygasniecie lub uniewaznienie sesji.
-var ErrSessionInvalid = errors.New("sesja jest nieprawidlowa")
+// ErrSessionInvalid means the session is missing, expired or revoked.
+var ErrSessionInvalid = errors.New("the session is invalid")
 
-// SessionTokens to material, ktory pozostaje po stronie serwera.
+// SessionTokens is the material that stays on the server's side.
 type SessionTokens struct {
 	RefreshToken    string
 	IDToken         string
 	AccessExpiresAt time.Time
 }
 
-// Authentication opisuje, kiedy i jak dostawca uwierzytelnil uzytkownika.
-// Panel nie interpretuje tych wartosci po swojemu: MFA nalezy do dostawcy,
-// a panel sprawdza wylacznie zgodnosc z wymaganym poziomem i swiezosc.
+// Authentication describes when and how the provider authenticated the user.
+// The panel does not reinterpret these values on its own: MFA belongs to the
+// provider, and the panel checks only the match with the required level and
+// the freshness.
 type Authentication struct {
-	// At jest chwila uwierzytelnienia. Czas zerowy oznacza stan nieustalony.
+	// At is the moment of authentication. A zero time means an unknown state.
 	At  time.Time
 	ACR string
 	AMR []string
 }
 
-// SessionLimits opisuje czasy zycia sesji.
+// SessionLimits describes the lifetimes of a session.
 type SessionLimits struct {
-	// Idle konczy sesje nieuzywana. Absolute konczy ja niezaleznie od aktywnosci.
+	// Idle ends an unused session. Absolute ends it regardless of activity.
 	Idle     time.Duration
 	Absolute time.Duration
 }
 
-// Session opisuje aktywna sesje przegladarki.
+// Session describes an active browser session.
 type Session struct {
 	ID           string
 	PrincipalID  string
 	Groups       []string
 	RefreshToken string
 	IDToken      string
-	// Auth opisuje uwierzytelnienie, ktore zalozylo te sesje.
+	// Auth describes the authentication that created this session.
 	Auth Authentication
 }
 
-// CreateSession zaklada sesje i zwraca wartosc ciasteczka. Wartosc jest
-// widoczna wylacznie tutaj; w bazie zostaje sam skrot.
+// CreateSession creates a session and returns the cookie value. The value is
+// visible only here; only its digest stays in the database.
 func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string,
 	groups []string, tokens SessionTokens, auth Authentication, limits SessionLimits,
 	userAgent, remoteAddr string) (sessionID, cookieValue string, err error) {
@@ -96,13 +97,14 @@ func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string
 		nullableTime(tokens.AccessExpiresAt), now.Add(limits.Absolute), now.Add(limits.Idle),
 		nullable(userAgent), nullable(remoteAddr),
 		nullableTime(auth.At), nullable(auth.ACR), amr); err != nil {
-		return "", "", fmt.Errorf("zapis sesji: %w", err)
+		return "", "", fmt.Errorf("saving the session: %w", err)
 	}
 	return sessionID, cookieValue, nil
 }
 
-// AuthenticateSession zamienia ciasteczko na tozsamosc wraz z rolami.
-// Role pochodza z przypisan recznych oraz z mapowania grup zapisanych w sesji.
+// AuthenticateSession turns a cookie into an identity together with its
+// roles. The roles come from manual assignments and from the mapping of the
+// groups stored in the session.
 func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*Principal, *Session, error) {
 	if cookieValue == "" {
 		return nil, nil, ErrSessionInvalid
@@ -121,7 +123,7 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		  and w.absolute_expires_at > now()
 		  and w.idle_expires_at > now()
 		  and p.disabled_at is null
-		  -- Znacznik odmowy unicestwia takze trwajaca sesje.
+		  -- A denial marker destroys an ongoing session as well.
 		  and p.denied_at is null`
 	var (
 		session    Session
@@ -152,17 +154,17 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	if err != nil {
 		return nil, nil, err
 	}
-	// Mapowanie grup liczymy przy kazdym zadaniu, wiec zmiana polityki dziala
-	// bez ponownego logowania uzytkownika.
+	// We compute the group mapping on every request, so a change of policy
+	// takes effect without the user logging in again.
 	mapped, err := s.MappedBindings(ctx, issuer, session.Groups)
 	if err != nil {
 		return nil, nil, err
 	}
 	principal.Bindings = mergeBindings(bindings, mapped)
 
-	// Odswiezenie okna bezczynnosci; blad nie moze zablokowac zadania.
-	// make_interval przyjmuje liczbe wprost; konkatenacja tekstu wymagalaby
-	// rzutowania i cicho psula sie na typie argumentu.
+	// Refreshing the idle window; an error must not block the request.
+	// make_interval takes a number directly; concatenating text would require
+	// a cast and would silently break on the argument's type.
 	_, _ = s.pool.Exec(ctx,
 		`update web_sessions set last_seen_at = now(),
 		        idle_expires_at = now() + make_interval(secs => $2)
@@ -170,7 +172,7 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	return &principal, &session, nil
 }
 
-// RevokeSession konczy sesje.
+// RevokeSession ends a session.
 func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) error {
 	_, err := s.pool.Exec(ctx, `
 		update web_sessions set revoked_at = now(), revocation_reason = $2,
@@ -179,8 +181,9 @@ func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) err
 	return err
 }
 
-// RevokeSessionsOf konczy wszystkie sesje tozsamosci. Uzywane przy blokadzie
-// konta: samo wylaczenie w katalogu nie unicestwia trwajacej sesji panelu.
+// RevokeSessionsOf ends every session of an identity. Used when locking an
+// account: disabling it in the directory alone does not destroy an ongoing
+// panel session.
 func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update web_sessions set revoked_at = now(), revocation_reason = $2, refresh_token = null
@@ -191,7 +194,7 @@ func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string
 	return tag.RowsAffected(), nil
 }
 
-// PurgeExpired kasuje wygasle sesje i porzucone przeplywy logowania.
+// PurgeExpired deletes expired sessions and abandoned login flows.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx,
 		`delete from web_sessions where absolute_expires_at < now() - interval '7 days'`); err != nil {
@@ -201,8 +204,9 @@ func (s *Store) PurgeExpired(ctx context.Context) error {
 	return err
 }
 
-// SaveAuthFlow zapisuje stan rozpoczetego logowania. Weryfikator PKCE nie
-// trafia do przegladarki, wiec przechwycenie przekierowania nie wystarcza.
+// SaveAuthFlow records the state of a login that has started. The PKCE
+// verifier does not reach the browser, so intercepting the redirect is not
+// enough.
 func (s *Store) SaveAuthFlow(ctx context.Context, state, verifier, nonce, redirectAfter string,
 	ttl time.Duration) error {
 	if ttl <= 0 {
@@ -215,8 +219,8 @@ func (s *Store) SaveAuthFlow(ctx context.Context, state, verifier, nonce, redire
 	return err
 }
 
-// TakeAuthFlow odczytuje i kasuje stan logowania. Kod autoryzacyjny mozna
-// wymienic tylko raz, wiec stan jest jednorazowy.
+// TakeAuthFlow reads and deletes the login state. An authorisation code can
+// be exchanged only once, so the state is single-use.
 func (s *Store) TakeAuthFlow(ctx context.Context, state string) (verifier, nonce, redirectAfter string, err error) {
 	const query = `
 		delete from auth_flows
@@ -229,7 +233,7 @@ func (s *Store) TakeAuthFlow(ctx context.Context, state string) (verifier, nonce
 	return verifier, nonce, redirectAfter, err
 }
 
-// MappedBindings zamienia grupy zewnetrzne na role w zakresach.
+// MappedBindings turns external groups into roles within scopes.
 func (s *Store) MappedBindings(ctx context.Context, issuer string, groups []string) ([]Binding, error) {
 	if issuer == "" || len(groups) == 0 {
 		return nil, nil
@@ -255,13 +259,13 @@ func (s *Store) MappedBindings(ctx context.Context, issuer string, groups []stri
 	return bindings, rows.Err()
 }
 
-// UpsertExternalPrincipal wiaze konto dostawcy z tozsamoscia Flotestro.
-// Kluczem jest para issuer i subject: nazwa uzytkownika moze sie zmienic,
-// identyfikator podmiotu nie.
+// UpsertExternalPrincipal binds a provider account to a Flotestro identity.
+// The key is the pair issuer and subject: the user name can change, the
+// subject identifier cannot.
 func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 	issuer, subjectID, username, displayName, email string) (string, error) {
 	if issuer == "" || subjectID == "" {
-		return "", fmt.Errorf("brak issuer lub identyfikatora podmiotu")
+		return "", fmt.Errorf("the issuer or the subject identifier is missing")
 	}
 	subject := username
 	if subject == "" {
@@ -294,7 +298,7 @@ func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 	return id, err
 }
 
-// mergeBindings laczy przypisania reczne z wynikajacymi z grup, bez duplikatow.
+// mergeBindings joins manual assignments with those following from groups, without duplicates.
 func mergeBindings(manual, mapped []Binding) []Binding {
 	seen := map[Binding]bool{}
 	result := make([]Binding, 0, len(manual)+len(mapped))

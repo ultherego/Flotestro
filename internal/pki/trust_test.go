@@ -9,117 +9,120 @@ import (
 	"time"
 )
 
-func liczCertyfikaty(t *testing.T, bundle []byte) int {
+func countCertificates(t *testing.T, bundle []byte) int {
 	t.Helper()
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(bundle) {
-		t.Fatal("bundle nie zawiera certyfikatow")
+		t.Fatal("the bundle contains no certificates")
 	}
 	return strings.Count(string(bundle), "BEGIN CERTIFICATE")
 }
 
-// TestWymianaJestDwufazowa pilnuje warunku, ktory chroni flote przed odcieciem.
-// Nowe CA musi byc uznawane i rozsylane, zanim zacznie podpisywac: certyfikat
-// serwera wystawiony CA, ktorego agent nie zna, konczy sie utrata lacznosci
-// z cala flota przy najblizszym restarcie panelu.
-func TestWymianaJestDwufazowa(t *testing.T) {
+// TestTheRotationHasTwoPhases guards the condition that protects the fleet
+// from being cut off. A new CA has to be recognised and distributed before it
+// starts signing: a server certificate issued by a CA the agent does not know
+// ends in the loss of the connection to the whole fleet at the panel's next
+// restart.
+func TestTheRotationHasTwoPhases(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pierwotne := trust.Active().Certificate.SerialNumber.String()
+	original := trust.Active().Certificate.SerialNumber.String()
 
-	if liczCertyfikaty(t, trust.Bundle()) != 1 {
-		t.Fatal("swiezy zbior powinien miec dokladnie jedno CA")
+	if countCertificates(t, trust.Bundle()) != 1 {
+		t.Fatal("a fresh set should have exactly one CA")
 	}
 
-	przygotowane, err := trust.Prepare()
+	prepared, err := trust.Prepare()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if przygotowane.State != "pending" {
-		t.Errorf("stan przygotowanego CA = %q", przygotowane.State)
+	if prepared.State != "pending" {
+		t.Errorf("the state of the prepared CA = %q", prepared.State)
 	}
-	// Przygotowane CA jest juz rozsylane i uznawane, ale nie podpisuje.
-	if trust.Active().Certificate.SerialNumber.String() != pierwotne {
-		t.Error("przygotowanie nie moze zmienic CA podpisujacego")
+	// The prepared CA is already distributed and recognised, but it does not
+	// sign.
+	if trust.Active().Certificate.SerialNumber.String() != original {
+		t.Error("preparing must not change the signing CA")
 	}
-	if liczCertyfikaty(t, trust.Bundle()) != 2 {
-		t.Error("przygotowane CA musi trafic do bundla")
+	if countCertificates(t, trust.Bundle()) != 2 {
+		t.Error("the prepared CA has to reach the bundle")
 	}
 	if _, err := trust.Prepare(); err == nil {
-		t.Error("drugie przygotowanie przy oczekujacym CA powinno zostac odrzucone")
+		t.Error("a second preparation while a CA is pending should be refused")
 	}
 
-	aktywne, err := trust.Activate()
+	active, err := trust.Activate()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aktywne.Serial != przygotowane.Serial {
-		t.Errorf("podpisywanie przejelo CA %s, oczekiwano %s", aktywne.Serial, przygotowane.Serial)
+	if active.Serial != prepared.Serial {
+		t.Errorf("signing was taken over by the CA %s, expected %s", active.Serial, prepared.Serial)
 	}
-	// Poprzednie CA zostaje uznawane: certyfikaty agentow nim wydane sa wazne.
-	if liczCertyfikaty(t, trust.Bundle()) != 2 {
-		t.Error("po przejeciu zbior musi zawierac stare i nowe CA")
+	// The previous CA stays recognised: the agent certificates issued with it
+	// are valid.
+	if countCertificates(t, trust.Bundle()) != 2 {
+		t.Error("after the handover the set has to contain the old and the new CA")
 	}
 	if _, err := trust.Activate(); err == nil {
-		t.Error("przejecie bez przygotowanego CA powinno zostac odrzucone")
+		t.Error("a handover without a prepared CA should be refused")
 	}
 }
 
-func TestZbiorPrzezywaRestart(t *testing.T) {
+func TestTheSetSurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	przygotowane, err := trust.Prepare()
+	prepared, err := trust.Prepare()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Panel restartuje sie w trakcie wymiany; stan musi przetrwac.
-	ponownie, err := EnsureTrust(dir)
+	// The panel restarts during the rotation; the state has to survive.
+	again, err := EnsureTrust(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, przygotowaneO := ponownie.Pending()
+	pending, preparedAt := again.Pending()
 	if pending == nil {
-		t.Fatal("przygotowane CA nie przetrwalo restartu")
+		t.Fatal("the prepared CA did not survive the restart")
 	}
-	if pending.Certificate.SerialNumber.String() != przygotowane.Serial {
-		t.Error("po restarcie oczekuje inne CA niz przygotowane")
+	if pending.Certificate.SerialNumber.String() != prepared.Serial {
+		t.Error("after the restart a different CA is pending than the prepared one")
 	}
-	if przygotowaneO.IsZero() {
-		t.Error("chwila przygotowania nie przetrwala restartu")
+	if preparedAt.IsZero() {
+		t.Error("the moment of preparation did not survive the restart")
 	}
-	if przygotowaneO.After(time.Now()) {
-		t.Error("chwila przygotowania nie moze byc z przyszlosci")
+	if preparedAt.After(time.Now()) {
+		t.Error("the moment of preparation must not be in the future")
 	}
 
-	if _, err := ponownie.Activate(); err != nil {
+	if _, err := again.Activate(); err != nil {
 		t.Fatal(err)
 	}
-	poAktywacji, err := EnsureTrust(dir)
+	afterActivation, err := EnsureTrust(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if poAktywacji.Active().Certificate.SerialNumber.String() != przygotowane.Serial {
-		t.Error("po restarcie podpisuje inne CA niz zatwierdzone")
+	if afterActivation.Active().Certificate.SerialNumber.String() != prepared.Serial {
+		t.Error("after the restart a different CA signs than the approved one")
 	}
-	if pending, _ := poAktywacji.Pending(); pending != nil {
-		t.Error("po przejeciu nie moze zostac CA oczekujace")
+	if pending, _ := afterActivation.Pending(); pending != nil {
+		t.Error("after the handover no CA may stay pending")
 	}
-	if liczCertyfikaty(t, poAktywacji.Bundle()) != 2 {
-		t.Error("wycofane CA musi zostac w zbiorze zaufania")
+	if countCertificates(t, afterActivation.Bundle()) != 2 {
+		t.Error("the withdrawn CA has to stay in the trust set")
 	}
 }
 
-// TestZnacznikPrzygotowaniaJestOdporny sprawdza zachowanie przy braku pliku
-// ze znacznikiem. Panel ma wtedy przyjac wartosc bezpieczna, a nie odmowic
-// startu ani uznac, ze flota zna juz nowe CA.
-func TestZnacznikPrzygotowaniaJestOdporny(t *testing.T) {
+// TestThePreparationMarkerIsResilient checks the behaviour when the marker
+// file is missing. The panel is then to take the safe value rather than
+// refuse to start or assume the fleet already knows the new CA.
+func TestThePreparationMarkerIsResilient(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)
 	if err != nil {
@@ -132,28 +135,28 @@ func TestZnacznikPrzygotowaniaJestOdporny(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	przed := time.Now()
-	odtworzone, err := EnsureTrust(dir)
+	before := time.Now()
+	restored, err := EnsureTrust(dir)
 	if err != nil {
-		t.Fatalf("brak znacznika zatrzymal panel: %v", err)
+		t.Fatalf("a missing marker stopped the panel: %v", err)
 	}
-	_, przygotowaneO := odtworzone.Pending()
-	if przygotowaneO.Before(przed.Add(-time.Minute)) {
-		t.Errorf("przyjeto zbyt wczesna chwile przygotowania: %s", przygotowaneO)
+	_, preparedAt := restored.Pending()
+	if preparedAt.Before(before.Add(-time.Minute)) {
+		t.Errorf("too early a moment of preparation was taken: %s", preparedAt)
 	}
-	// Znacznik ma zostac zapisany, zeby kolejny restart go nie przesuwal.
+	// The marker is to be written so that the next restart does not move it.
 	if _, err := os.Stat(filepath.Join(dir, pendingAtFile)); err != nil {
-		t.Error("znacznik nie zostal odtworzony na dysku")
+		t.Error("the marker was not restored on disk")
 	}
 }
 
-func TestWycofanieChroniHosty(t *testing.T) {
+func TestWithdrawalProtectsTheHosts(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aktywneOdcisk := trust.Authorities()[0].Fingerprint
+	activeFingerprint := trust.Authorities()[0].Fingerprint
 	if _, err := trust.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -161,28 +164,29 @@ func TestWycofanieChroniHosty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var wycofane string
+	var withdrawn string
 	for _, ca := range trust.Authorities() {
 		if ca.State == "retired" {
-			wycofane = ca.Fingerprint
+			withdrawn = ca.Fingerprint
 		}
 	}
-	if wycofane == "" {
-		t.Fatal("brak wycofanego CA po przejeciu")
+	if withdrawn == "" {
+		t.Fatal("no withdrawn CA after the handover")
 	}
 
-	// Dopoki hosty maja certyfikaty z tego CA, usuniecie go odcieloby je.
-	if err := trust.Retire(wycofane, 3); err == nil {
-		t.Error("wycofanie uzywanego CA powinno zostac odrzucone")
+	// As long as hosts hold certificates from this CA, removing it would cut
+	// them off.
+	if err := trust.Retire(withdrawn, 3); err == nil {
+		t.Error("withdrawing a CA that is in use should be refused")
 	}
-	if err := trust.Retire(aktywneOdcisk, 0); err != nil {
-		// aktywneOdcisk jest teraz wycofany, wiec usuniecie jest dozwolone.
-		t.Errorf("nieuzywane CA powinno dac sie usunac: %v", err)
+	if err := trust.Retire(activeFingerprint, 0); err != nil {
+		// activeFingerprint is withdrawn by now, so removing it is allowed.
+		t.Errorf("an unused CA should be removable: %v", err)
 	}
-	if liczCertyfikaty(t, trust.Bundle()) != 1 {
-		t.Error("po usunieciu w zbiorze ma zostac samo CA podpisujace")
+	if countCertificates(t, trust.Bundle()) != 1 {
+		t.Error("after the removal only the signing CA is to stay in the set")
 	}
 	if err := trust.Retire(trust.Authorities()[0].Fingerprint, 0); err == nil {
-		t.Error("nie wolno usunac CA, ktore podpisuje")
+		t.Error("the CA that signs must not be removed")
 	}
 }

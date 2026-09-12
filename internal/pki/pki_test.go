@@ -15,56 +15,57 @@ func TestEnsureCAIsStableAcrossRestarts(t *testing.T) {
 
 	first, err := EnsureCA(dir)
 	if err != nil {
-		t.Fatalf("pierwsze utworzenie CA: %v", err)
+		t.Fatalf("creating the CA for the first time: %v", err)
 	}
 	second, err := EnsureCA(dir)
 	if err != nil {
-		t.Fatalf("ponowne wczytanie CA: %v", err)
+		t.Fatalf("reading the CA again: %v", err)
 	}
 
-	// Restart control plane nie moze uniewaznic certyfikatow calej floty.
+	// A restart of the control plane must not invalidate the whole fleet's certificates.
 	if first.Certificate.SerialNumber.Cmp(second.Certificate.SerialNumber) != 0 {
-		t.Fatal("ponowny start wygenerowal nowe CA zamiast wczytac istniejace")
+		t.Fatal("the second start generated a new CA instead of reading the existing one")
 	}
 	if !second.Certificate.IsCA {
-		t.Fatal("wczytany certyfikat nie jest CA")
+		t.Fatal("the certificate that was read is not a CA")
 	}
 }
 
-func TestSignAgentCSRNadajeTozsamoscSerwera(t *testing.T) {
+func TestSignAgentCSRGrantsTheServersIdentity(t *testing.T) {
 	ca, err := EnsureCA(t.TempDir())
 	if err != nil {
 		t.Fatalf("CA: %v", err)
 	}
 
 	const hostID = "3f2a9c1e-0000-4000-8000-000000000001"
-	// Host podaje w CSR cudza tozsamosc; control plane musi ja zignorowac.
-	csrPEM := makeCSR(t, "zupelnie-inny-host")
+	// The host puts somebody else's identity in the CSR; the control plane
+	// has to ignore it.
+	csrPEM := makeCSR(t, "an-entirely-different-host")
 
 	issued, err := ca.SignAgentCSR(csrPEM, hostID)
 	if err != nil {
-		t.Fatalf("podpisanie CSR: %v", err)
+		t.Fatalf("signing the CSR: %v", err)
 	}
 
 	block, _ := pem.Decode(issued.PEM)
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		t.Fatalf("parsowanie certyfikatu: %v", err)
+		t.Fatalf("parsing the certificate: %v", err)
 	}
 
 	got, err := HostIDFromCert(cert)
 	if err != nil {
-		t.Fatalf("odczyt tozsamosci: %v", err)
+		t.Fatalf("reading the identity: %v", err)
 	}
 	if got != hostID {
-		t.Fatalf("tozsamosc = %q, oczekiwano %q", got, hostID)
+		t.Fatalf("identity = %q, expected %q", got, hostID)
 	}
 	if cert.Subject.CommonName != hostID {
-		t.Fatalf("CN = %q, oczekiwano %q", cert.Subject.CommonName, hostID)
+		t.Fatalf("CN = %q, expected %q", cert.Subject.CommonName, hostID)
 	}
 }
 
-func TestSignAgentCSROdrzucaUszkodzonyPodpis(t *testing.T) {
+func TestSignAgentCSRRejectsABrokenSignature(t *testing.T) {
 	ca, err := EnsureCA(t.TempDir())
 	if err != nil {
 		t.Fatalf("CA: %v", err)
@@ -72,22 +73,22 @@ func TestSignAgentCSROdrzucaUszkodzonyPodpis(t *testing.T) {
 
 	csrPEM := makeCSR(t, "host")
 	block, _ := pem.Decode(csrPEM)
-	// Psujemy ostatni bajt podpisu CSR.
+	// We break the last byte of the CSR's signature.
 	block.Bytes[len(block.Bytes)-1] ^= 0xff
 	broken := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: block.Bytes})
 
 	if _, err := ca.SignAgentCSR(broken, "host-id"); err == nil {
-		t.Fatal("CSR z bledym podpisem zostal podpisany")
+		t.Fatal("a CSR with a bad signature was signed")
 	}
 }
 
-func TestHostIDFromCertOdrzucaCertyfikatBezTozsamosci(t *testing.T) {
+func TestHostIDFromCertRejectsACertificateWithoutAnIdentity(t *testing.T) {
 	ca, err := EnsureCA(t.TempDir())
 	if err != nil {
 		t.Fatalf("CA: %v", err)
 	}
 	if _, err := HostIDFromCert(ca.Certificate); err == nil {
-		t.Fatal("certyfikat bez URI SAN zostal uznany za tozsamosc hosta")
+		t.Fatal("a certificate without a URI SAN was accepted as a host identity")
 	}
 }
 
@@ -95,7 +96,7 @@ func makeCSR(t *testing.T, commonName string) []byte {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("klucz: %v", err)
+		t.Fatalf("key: %v", err)
 	}
 	der, err := x509.CreateCertificateRequest(rand.Reader,
 		&x509.CertificateRequest{Subject: pkix.Name{CommonName: commonName}}, key)

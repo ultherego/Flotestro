@@ -54,7 +54,7 @@ func (e *TaskExecutor) applySSH(ctx context.Context, task *agentv1.TaskEnvelope,
 	case opspec.ActionSSHConfigPlan:
 		// Plan bez ustawien jest odczytem stanu; z ustawieniami liczy
 		// roznice wobec nich, bez dotykania serwera.
-		if payload != nil && payload.OpisujeZmiane() {
+		if payload != nil && payload.DescribesChange() {
 			operacja = helperv1.SshRequest_OPERATION_PLAN
 		}
 	case opspec.ActionSSHConfigApply:
