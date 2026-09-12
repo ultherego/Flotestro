@@ -66,15 +66,15 @@ const (
 // Run utrzymuje polaczenie z gatewayem i wznawia je z backoffem oraz jitterem.
 // Awaria control plane nie moze wywolac lawiny reconnectow z calej floty.
 func Run(ctx context.Context, opts SessionOptions) error {
-	menedzer := endpoints.Nowy(opts.GatewayURLs, minBackoff, maxBackoff)
-	if len(menedzer.Bramy()) == 0 {
+	menedzer := endpoints.New(opts.GatewayURLs, minBackoff, maxBackoff)
+	if len(menedzer.Gateways()) == 0 {
 		return errors.New("agent nie ma zadnej bramy do polaczenia")
 	}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		brama, err := menedzer.Wybierz(time.Now())
+		brama, err := menedzer.Choose(time.Now())
 		if err != nil {
 			// Odwolana tozsamosc nie jest awaria lacza. Agent przestaje sie
 			// dobijac i zostawia powod tam, gdzie zajrzy operator hosta:
@@ -87,7 +87,7 @@ func Run(ctx context.Context, opts SessionOptions) error {
 		if brama == nil {
 			// Kazda brama ma jeszcze okno ponowienia. Czekamy do najblizszej,
 			// zamiast krecic sie w petli.
-			czekanie := menedzer.DoNastepnej(time.Now())
+			czekanie := menedzer.UntilNext(time.Now())
 			opts.Log.Info("wszystkie bramy w oknie ponowienia",
 				"za", czekanie.Round(time.Second).String())
 			select {
@@ -126,20 +126,20 @@ func Run(ctx context.Context, opts SessionOptions) error {
 		case errors.Is(err, errIdentityRenewed):
 			// Przerwanie po odnowieniu certyfikatu nie jest bledem bramy:
 			// nastepne polaczenie idzie nowa tozsamoscia i to samo miejsce.
-			menedzer.Sukces(brama.URL, time.Now())
+			menedzer.Success(brama.URL, time.Now())
 			continue
 		case time.Since(start) > time.Minute:
 			// Sesja, ktora pracowala dluzej niz minute, nie jest objawem
 			// petli bledu - nawet jesli skonczyla sie zerwaniem.
-			menedzer.Sukces(brama.URL, time.Now())
+			menedzer.Success(brama.URL, time.Now())
 			if err == nil {
 				continue
 			}
 		}
 
-		klasa := endpoints.Rozpoznaj(err)
-		menedzer.Blad(brama.URL, klasa, time.Now())
-		if klasa == endpoints.KlasaKonfiguracji {
+		klasa := endpoints.Classify(err)
+		menedzer.Error(brama.URL, klasa, time.Now())
+		if klasa == endpoints.ClassConfiguration {
 			// Zla konfiguracja nie naprawi sie ponowieniem, wiec mowimy
 			// o niej wprost i tam, gdzie widac ja bez panelu.
 			opts.Log.Error("brama odrzucila polaczenie z powodu konfiguracji",

@@ -6,116 +6,119 @@ import (
 	"time"
 )
 
-var teraz = time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+var now = time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 
-func menedzer() *Menedzer {
-	return Nowy([]string{"https://a:8443", "https://b:8443"}, time.Second, time.Minute)
+func manager() *Manager {
+	return New([]string{"https://a:8443", "https://b:8443"}, time.Second, time.Minute)
 }
 
-// TestPierwszaBramaJestPriorytetem pilnuje, ze lista jest kolejnoscia, a nie
-// zbiorem: po powrocie glownej bramy flota ma z niej korzystac, a nie zostac
-// na zapasowej.
-func TestPierwszaBramaJestPriorytetem(t *testing.T) {
-	m := menedzer()
-	brama, err := m.Wybierz(teraz)
-	if err != nil || brama == nil || brama.URL != "https://a:8443" {
-		t.Fatalf("wybrano %v (%v)", brama, err)
+// TestTheFirstGatewayIsThePriority guards that the list is an order rather
+// than a set: once the main gateway is back the fleet is to use it instead of
+// staying on the backup one.
+func TestTheFirstGatewayIsThePriority(t *testing.T) {
+	m := manager()
+	gateway, err := m.Choose(now)
+	if err != nil || gateway == nil || gateway.URL != "https://a:8443" {
+		t.Fatalf("chose %v (%v)", gateway, err)
 	}
 
-	m.Blad("https://a:8443", KlasaSieci, teraz)
-	brama, err = m.Wybierz(teraz)
-	if err != nil || brama == nil || brama.URL != "https://b:8443" {
-		t.Fatalf("po bledzie pierwszej wybrano %v (%v)", brama, err)
+	m.Error("https://a:8443", ClassNetwork, now)
+	gateway, err = m.Choose(now)
+	if err != nil || gateway == nil || gateway.URL != "https://b:8443" {
+		t.Fatalf("after an error of the first one it chose %v (%v)", gateway, err)
 	}
 
-	// Okno pierwszej minelo - wracamy na nia.
-	brama, err = m.Wybierz(teraz.Add(2 * time.Minute))
-	if err != nil || brama == nil || brama.URL != "https://a:8443" {
-		t.Fatalf("po oknie wybrano %v (%v)", brama, err)
-	}
-}
-
-// TestOdwolanaTozsamoscZatrzymujeProby pilnuje wlasciwosci z dokumentu:
-// odwolany certyfikat nie jest awaria lacza i agent ma przestac sie dobijac,
-// a nie przelaczac miedzy bramami w nieskonczonosc.
-func TestOdwolanaTozsamoscZatrzymujeProby(t *testing.T) {
-	m := menedzer()
-	m.Blad("https://a:8443", KlasaTozsamosci, teraz)
-	if _, err := m.Wybierz(teraz.Add(time.Hour)); !errors.Is(err, ErrTozsamoscOdrzucona) {
-		t.Fatalf("po odrzuceniu tozsamosci menedzer zwrocil %v", err)
+	// The window of the first one has passed - we return to it.
+	gateway, err = m.Choose(now.Add(2 * time.Minute))
+	if err != nil || gateway == nil || gateway.URL != "https://a:8443" {
+		t.Fatalf("after the window it chose %v (%v)", gateway, err)
 	}
 }
 
-// TestBladKonfiguracjiCzekaDluzej pilnuje, ze zla konfiguracja nie zamienia
-// sie w petle ponowien: naprawia ja czlowiek, a nie kolejna proba.
-func TestBladKonfiguracjiCzekaDluzej(t *testing.T) {
-	m := Nowy([]string{"https://a:8443"}, time.Second, time.Minute)
-	m.Blad("https://a:8443", KlasaKonfiguracji, teraz)
-	stan := m.Bramy()[0]
-	if stan.NastepnaProba.Sub(teraz) > BackoffKonfiguracji {
-		t.Fatalf("okno %s przekracza granice", stan.NastepnaProba.Sub(teraz))
+// TestARevokedIdentityStopsTheAttempts guards the property from the document:
+// a revoked certificate is not a failure of the link and the agent is to stop
+// knocking rather than switch between gateways endlessly.
+func TestARevokedIdentityStopsTheAttempts(t *testing.T) {
+	m := manager()
+	m.Error("https://a:8443", ClassIdentity, now)
+	if _, err := m.Choose(now.Add(time.Hour)); !errors.Is(err, ErrIdentityRejected) {
+		t.Fatalf("after the identity was rejected the manager returned %v", err)
 	}
-	if _, err := m.Wybierz(teraz.Add(time.Minute)); err != nil {
+}
+
+// TestAConfigurationErrorWaitsLonger guards that a wrong configuration does
+// not turn into a loop of retries: a person fixes it rather than another
+// attempt.
+func TestAConfigurationErrorWaitsLonger(t *testing.T) {
+	m := New([]string{"https://a:8443"}, time.Second, time.Minute)
+	m.Error("https://a:8443", ClassConfiguration, now)
+	state := m.Gateways()[0]
+	if state.NextAttempt.Sub(now) > ConfigurationBackoff {
+		t.Fatalf("the window %s exceeds the limit", state.NextAttempt.Sub(now))
+	}
+	if _, err := m.Choose(now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	// Po minucie brama moze byc jeszcze niegotowa - to jest cel. Sprawdzamy
-	// tylko, ze menedzer nie kaze czekac dluzej niz wynika z klasy bledu.
-	if czekanie := m.DoNastepnej(teraz); czekanie > BackoffKonfiguracji {
-		t.Fatalf("czekanie %s przekracza granice", czekanie)
+	// After a minute the gateway may still not be ready - that is the point.
+	// We only check that the manager does not ask to wait longer than the
+	// class of the error implies.
+	if waiting := m.UntilNext(now); waiting > ConfigurationBackoff {
+		t.Fatalf("the waiting %s exceeds the limit", waiting)
 	}
 }
 
-// TestBackoffNiePrzekreca pilnuje, ze dlugo niedostepna brama nie dostaje
-// ujemnego okna po przekreceniu przesuniecia bitowego.
-func TestBackoffNiePrzekreca(t *testing.T) {
-	m := Nowy([]string{"https://a:8443"}, time.Second, time.Minute)
+// TestTheBackoffDoesNotOverflow guards that a gateway unavailable for a long
+// time does not get a negative window after the bit shift overflows.
+func TestTheBackoffDoesNotOverflow(t *testing.T) {
+	m := New([]string{"https://a:8443"}, time.Second, time.Minute)
 	for i := 0; i < 80; i++ {
-		m.Blad("https://a:8443", KlasaSieci, teraz)
-		stan := m.Bramy()[0]
-		okno := stan.NastepnaProba.Sub(teraz)
-		if okno < 0 || okno > time.Minute {
-			t.Fatalf("po %d bledach okno = %s", i+1, okno)
+		m.Error("https://a:8443", ClassNetwork, now)
+		state := m.Gateways()[0]
+		window := state.NextAttempt.Sub(now)
+		if window < 0 || window > time.Minute {
+			t.Fatalf("after %d errors the window = %s", i+1, window)
 		}
 	}
 }
 
-// TestSukcesKasujeHistorie pilnuje, ze brama, ktora znowu dziala, wraca do
-// pelnej dostepnosci zamiast dzwigac backoff sprzed awarii.
-func TestSukcesKasujeHistorie(t *testing.T) {
-	m := menedzer()
-	m.Blad("https://a:8443", KlasaSieci, teraz)
-	m.Sukces("https://a:8443", teraz)
-	brama, err := m.Wybierz(teraz)
-	if err != nil || brama.URL != "https://a:8443" || brama.Bledy != 0 {
-		t.Fatalf("po sukcesie stan = %+v (%v)", brama, err)
+// TestSuccessClearsTheHistory guards that a gateway that works again returns
+// to full availability instead of carrying the backoff from before the
+// failure.
+func TestSuccessClearsTheHistory(t *testing.T) {
+	m := manager()
+	m.Error("https://a:8443", ClassNetwork, now)
+	m.Success("https://a:8443", now)
+	gateway, err := m.Choose(now)
+	if err != nil || gateway.URL != "https://a:8443" || gateway.Errors != 0 {
+		t.Fatalf("after the success the state = %+v (%v)", gateway, err)
 	}
 }
 
-func TestRozpoznanieKlasBledow(t *testing.T) {
-	przypadki := []struct {
-		tresc string
-		klasa Klasa
+func TestTheClassificationOfErrors(t *testing.T) {
+	cases := []struct {
+		text  string
+		class Class
 	}{
-		{"certyfikat odwolany", KlasaTozsamosci},
-		{"x509: certificate signed by unknown authority", KlasaKonfiguracji},
-		{"x509: certificate is valid for panel, not gateway", KlasaKonfiguracji},
-		{"dial tcp 10.0.0.1:8443: connect: connection refused", KlasaSieci},
-		{"context deadline exceeded", KlasaSieci},
+		{"the certificate was revoked", ClassIdentity},
+		{"x509: certificate signed by unknown authority", ClassConfiguration},
+		{"x509: certificate is valid for panel, not gateway", ClassConfiguration},
+		{"dial tcp 10.0.0.1:8443: connect: connection refused", ClassNetwork},
+		{"context deadline exceeded", ClassNetwork},
 	}
-	for _, przypadek := range przypadki {
-		t.Run(przypadek.tresc, func(t *testing.T) {
-			if got := Rozpoznaj(errors.New(przypadek.tresc)); got != przypadek.klasa {
-				t.Fatalf("Rozpoznaj = %q, oczekiwano %q", got, przypadek.klasa)
+	for _, c := range cases {
+		t.Run(c.text, func(t *testing.T) {
+			if got := Classify(errors.New(c.text)); got != c.class {
+				t.Fatalf("Classify = %q, expected %q", got, c.class)
 			}
 		})
 	}
 }
 
-// TestDuplikatyBramSaPomijane pilnuje, ze ta sama brama wpisana dwa razy nie
-// dostaje podwojnej szansy w kolejce ponowien.
-func TestDuplikatyBramSaPomijane(t *testing.T) {
-	m := Nowy([]string{"https://a:8443", "https://a:8443", ""}, time.Second, time.Minute)
-	if len(m.Bramy()) != 1 {
-		t.Fatalf("bramy = %+v", m.Bramy())
+// TestDuplicateGatewaysAreSkipped guards that the same gateway written twice
+// does not get a double chance in the queue of retries.
+func TestDuplicateGatewaysAreSkipped(t *testing.T) {
+	m := New([]string{"https://a:8443", "https://a:8443", ""}, time.Second, time.Minute)
+	if len(m.Gateways()) != 1 {
+		t.Fatalf("gateways = %+v", m.Gateways())
 	}
 }

@@ -2438,7 +2438,7 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("the operation %s requires a repository payload", action)
 		}
 		repo := payload.Repository
-		source := pakietymodul.Repozytorium{
+		source := pakietymodul.Repository{
 			ID: repo.ID, Name: repo.Name, URL: repo.URL,
 			Suites: repo.Suites, Components: repo.Components,
 			Architectures: repo.Architectures, Enabled: repo.Enabled,
@@ -2462,7 +2462,7 @@ func Validate(action ActionType, payload Payload) error {
 		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
 			manager = "apt"
 		}
-		if err := pakietymodul.WalidujRepozytorium(source, manager, withSecret); err != nil {
+		if err := pakietymodul.ValidateRepository(source, manager, withSecret); err != nil {
 			return err
 		}
 		if repo.Remove {
@@ -2476,7 +2476,7 @@ func Validate(action ActionType, payload Payload) error {
 			if repo.GPGKey == "" {
 				return fmt.Errorf("a source with signature checking requires a public key")
 			}
-			if _, err := pakietymodul.OdciskKlucza(repo.GPGKey); err != nil {
+			if _, err := pakietymodul.KeyFingerprint(repo.GPGKey); err != nil {
 				return err
 			}
 		}

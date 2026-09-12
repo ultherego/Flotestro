@@ -2,8 +2,8 @@ package packages
 
 import "testing"
 
-// wyjscieUpdateinfo jest prawdziwym wyjsciem "dnf updateinfo info" z Fedory 42.
-const wyjscieUpdateinfo = `Name        : FEDORA-2025-191738fa1f
+// updateinfoOutput is the real output of "dnf updateinfo info" from Fedora 42.
+const updateinfoOutput = `Name        : FEDORA-2025-191738fa1f
 Title       : firewalld-2.3.2-1.fc42
 Severity    : None
 Type        : bugfix
@@ -40,55 +40,57 @@ Collection  :
             : openssh-9.9p1-14.fc42.x86_64
 `
 
-func TestParsujUpdateinfoCzytaUstaleniaProducenta(t *testing.T) {
-	ustalenia := ParsujUpdateinfo(wyjscieUpdateinfo)
-	if len(ustalenia) != 2 {
-		t.Fatalf("odczytano %d ustalen: %+v", len(ustalenia), ustalenia)
+func TestParseUpdateinfoReadsTheVendorFindings(t *testing.T) {
+	advisories := ParseUpdateinfo(updateinfoOutput)
+	if len(advisories) != 2 {
+		t.Fatalf("read %d findings: %+v", len(advisories), advisories)
 	}
 
-	poprawka := ustalenia[0]
-	if poprawka.ID != "FEDORA-2025-191738fa1f" || poprawka.Type != "bugfix" {
-		t.Fatalf("pierwsze ustalenie: %+v", poprawka)
+	bugfix := advisories[0]
+	if bugfix.ID != "FEDORA-2025-191738fa1f" || bugfix.Type != "bugfix" {
+		t.Fatalf("the first finding: %+v", bugfix)
 	}
-	// "None" nie jest waga: to brak wagi i tak ma zostac.
-	if poprawka.Severity != "" {
-		t.Errorf("waga poprawki bledu = %q", poprawka.Severity)
+	// "None" is not a severity: it is a missing severity and is to stay one.
+	if bugfix.Severity != "" {
+		t.Errorf("the severity of the bug fix = %q", bugfix.Severity)
 	}
-	if len(poprawka.CVEIDs) != 0 {
-		t.Errorf("poprawka bledu dostala CVE: %v", poprawka.CVEIDs)
+	if len(bugfix.CVEIDs) != 0 {
+		t.Errorf("the bug fix got a CVE: %v", bugfix.CVEIDs)
 	}
 
-	bezpieczenstwo := ustalenia[1]
-	if bezpieczenstwo.Type != TypSecurity || bezpieczenstwo.Severity != "high" {
-		t.Fatalf("ustalenie bezpieczenstwa: %+v", bezpieczenstwo)
+	security := advisories[1]
+	if security.Type != TypeSecurity || security.Severity != "high" {
+		t.Fatalf("the security finding: %+v", security)
 	}
-	// CVE wystepuje i w opisie, i w tytule odnosnika - ma zostac jedno.
-	if len(bezpieczenstwo.CVEIDs) != 1 || bezpieczenstwo.CVEIDs[0] != "CVE-2026-35385" {
-		t.Fatalf("CVE = %v", bezpieczenstwo.CVEIDs)
+	// The CVE appears both in the description and in the title of the
+	// reference - one is to stay.
+	if len(security.CVEIDs) != 1 || security.CVEIDs[0] != "CVE-2026-35385" {
+		t.Fatalf("CVE = %v", security.CVEIDs)
 	}
-	if bezpieczenstwo.IssuedAt == nil || bezpieczenstwo.IssuedAt.Year() != 2026 {
-		t.Errorf("data wydania = %v", bezpieczenstwo.IssuedAt)
+	if security.IssuedAt == nil || security.IssuedAt.Year() != 2026 {
+		t.Errorf("the date of release = %v", security.IssuedAt)
 	}
-	if len(bezpieczenstwo.Packages) != 4 {
-		t.Fatalf("odczytano %d pakietow: %+v", len(bezpieczenstwo.Packages), bezpieczenstwo.Packages)
+	if len(security.Packages) != 4 {
+		t.Fatalf("read %d packages: %+v", len(security.Packages), security.Packages)
 	}
-	// Nazwa pakietu bywa dluzsza niz nazwa ustalenia i zawiera myslniki.
-	znaleziony := false
-	for _, pakiet := range bezpieczenstwo.Packages {
-		if pakiet.Name == "openssh-clients" {
-			znaleziony = true
-			if pakiet.EVR != "9.9p1-14.fc42" || pakiet.Architecture != "x86_64" {
-				t.Errorf("pakiet z myslnikiem odczytany jako %+v", pakiet)
+	// The name of a package is sometimes longer than the name of the finding
+	// and contains dashes.
+	found := false
+	for _, pkg := range security.Packages {
+		if pkg.Name == "openssh-clients" {
+			found = true
+			if pkg.EVR != "9.9p1-14.fc42" || pkg.Architecture != "x86_64" {
+				t.Errorf("a package with a dash was read as %+v", pkg)
 			}
 		}
 	}
-	if !znaleziony {
-		t.Errorf("pakiet openssh-clients nie trafil na liste: %+v", bezpieczenstwo.Packages)
+	if !found {
+		t.Errorf("the package openssh-clients did not land on the list: %+v", security.Packages)
 	}
 }
 
-func TestParsujNEVRACzytaNazweZMyslnikami(t *testing.T) {
-	przypadki := map[string]AdvisoryPackage{
+func TestParseNEVRAReadsANameWithDashes(t *testing.T) {
+	cases := map[string]AdvisoryPackage{
 		"openssh-9.9p1-14.fc42.x86_64":       {Name: "openssh", EVR: "9.9p1-14.fc42", Architecture: "x86_64"},
 		"openssh-clients-9.9p1-14.fc42.i686": {Name: "openssh-clients", EVR: "9.9p1-14.fc42", Architecture: "i686"},
 		"python3-dnf-plugin-versionlock-4.5.0-1.fc42.noarch": {
@@ -96,15 +98,15 @@ func TestParsujNEVRACzytaNazweZMyslnikami(t *testing.T) {
 		},
 		"kernel-6.17.4-200.fc42.src": {Name: "kernel", EVR: "6.17.4-200.fc42", Architecture: "src"},
 	}
-	for wpis, oczekiwany := range przypadki {
-		wynik, ok := ParsujNEVRA(wpis)
-		if !ok || wynik != oczekiwany {
-			t.Errorf("%s -> %+v (ok=%v), oczekiwano %+v", wpis, wynik, ok, oczekiwany)
+	for entry, expected := range cases {
+		result, ok := ParseNEVRA(entry)
+		if !ok || result != expected {
+			t.Errorf("%s -> %+v (ok=%v), expected %+v", entry, result, ok, expected)
 		}
 	}
-	for _, zly := range []string{"", "bezmyslnikow", "nazwa-bezarch"} {
-		if _, ok := ParsujNEVRA(zly); ok {
-			t.Errorf("%q zostal przyjety jako NEVRA", zly)
+	for _, bad := range []string{"", "withoutdashes", "name-withoutarch"} {
+		if _, ok := ParseNEVRA(bad); ok {
+			t.Errorf("%q was accepted as a NEVRA", bad)
 		}
 	}
 }

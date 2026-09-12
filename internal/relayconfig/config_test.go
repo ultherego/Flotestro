@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const poprawny = `
+const validConfig = `
 schema_version: 1
 relay:
   name: "relay-waw-01"
@@ -24,103 +24,104 @@ upstream:
   bootstrap_ca_file: "/etc/flotestro/bootstrap-ca.pem"
 `
 
-func TestPoprawnaKonfiguracjaPrzechodzi(t *testing.T) {
-	cfg, err := Czytaj(strings.NewReader(poprawny))
+func TestAValidConfigurationGoesThrough(t *testing.T) {
+	cfg, err := Read(strings.NewReader(validConfig))
 	if err != nil {
-		t.Fatalf("konfiguracja z dokumentu odrzucona: %v", err)
+		t.Fatalf("the configuration from the document was rejected: %v", err)
 	}
 	if cfg.Relay.Name != "relay-waw-01" || cfg.Relay.Site != "warsaw" {
-		t.Fatalf("odczytano %+v", cfg.Relay)
+		t.Fatalf("read %+v", cfg.Relay)
 	}
 	if len(cfg.Upstream.GatewayURLs) != 2 {
-		t.Fatalf("bramy = %v", cfg.Upstream.GatewayURLs)
+		t.Fatalf("gateways = %v", cfg.Upstream.GatewayURLs)
 	}
-	if cfg.Bufor() != 268435456 {
-		t.Fatalf("bufor = %d", cfg.Bufor())
+	if cfg.Buffer() != 268435456 {
+		t.Fatalf("buffer = %d", cfg.Buffer())
 	}
 }
 
-// TestLiterowkaNieJestDrobiazgiem pilnuje wlasciwosci, dla ktorej ten parser
-// jest rygorystyczny: relay wstajacy mimo nierozpoznanego pola wyglada na
-// skonfigurowanego, a dziala inaczej niz plik mowi.
-func TestLiterowkaNieJestDrobiazgiem(t *testing.T) {
-	_, err := Czytaj(strings.NewReader(strings.Replace(poprawny,
+// TestATypoIsNotADetail guards the property this parser is strict for: a
+// relay that comes up despite an unrecognised field looks configured and works
+// differently than the file says.
+func TestATypoIsNotADetail(t *testing.T) {
+	_, err := Read(strings.NewReader(strings.Replace(validConfig,
 		"gateway_urls:", "gateway_url:", 1)))
-	if !errors.Is(err, ErrDekodowanie) {
-		t.Fatalf("literowka w nazwie pola dala %v", err)
+	if !errors.Is(err, ErrDecode) {
+		t.Fatalf("a typo in the name of a field gave %v", err)
 	}
 }
 
-func TestKonfiguracjaOdrzucaBledy(t *testing.T) {
-	przypadki := []struct {
-		nazwa string
-		zmien func(string) string
-		kod   error
+func TestTheConfigurationRejectsErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(string) string
+		code   error
 	}{
-		{"inna wersja schematu", func(s string) string {
+		{"a different schema version", func(s string) string {
 			return strings.Replace(s, "schema_version: 1", "schema_version: 2", 1)
-		}, ErrSchemat},
-		{"brak nazwy", func(s string) string {
+		}, ErrSchema},
+		{"a missing name", func(s string) string {
 			return strings.Replace(s, `  name: "relay-waw-01"`, `  name: ""`, 1)
-		}, ErrBrakNazwy},
-		{"port uprzywilejowany", func(s string) string {
+		}, ErrNameMissing},
+		{"a privileged port", func(s string) string {
 			return strings.Replace(s, "0.0.0.0:8453", "0.0.0.0:443", 1)
-		}, ErrPortUprzywilej},
-		{"nasluch bez portu", func(s string) string {
+		}, ErrPrivilegedPort},
+		{"a listen address without a port", func(s string) string {
 			return strings.Replace(s, `"0.0.0.0:8453"`, `"0.0.0.0"`, 1)
-		}, ErrNasluch},
-		{"bez nazwy sieciowej", func(s string) string {
+		}, ErrListen},
+		{"without a network name", func(s string) string {
 			return strings.Replace(s, `    - "relay-waw-01.example.com"`, "", 1)
-		}, ErrBrakNazwSieci},
-		{"katalog wzgledny", func(s string) string {
-			return strings.Replace(s, `"/var/lib/flotestro-relay"`, `"stan"`, 1)
-		}, ErrKatalogStanu},
-		{"bufor ponad limit", func(s string) string {
+		}, ErrAdvertisedMissing},
+		{"a relative directory", func(s string) string {
+			return strings.Replace(s, `"/var/lib/flotestro-relay"`, `"state"`, 1)
+		}, ErrStateDir},
+		{"a buffer over the limit", func(s string) string {
 			return strings.Replace(s, "buffer_max_bytes: 268435456",
 				"buffer_max_bytes: 999999999999", 1)
-		}, ErrBufor},
-		{"dwie te same bramy", func(s string) string {
+		}, ErrBuffer},
+		{"the same gateway twice", func(s string) string {
 			return strings.Replace(s,
 				`    - "https://gateway-b.flotestro.example.com:8443"`,
 				`    - "https://gateway-a.flotestro.example.com:8443"`, 1)
-		}, ErrDuplikatBramy},
+		}, ErrGatewayDuplicate},
 	}
-	for _, przypadek := range przypadki {
-		t.Run(przypadek.nazwa, func(t *testing.T) {
-			_, err := Czytaj(strings.NewReader(przypadek.zmien(poprawny)))
-			if !errors.Is(err, przypadek.kod) {
-				t.Fatalf("blad = %v, oczekiwano %v", err, przypadek.kod)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Read(strings.NewReader(c.change(validConfig)))
+			if !errors.Is(err, c.code) {
+				t.Fatalf("error = %v, expected %v", err, c.code)
 			}
 		})
 	}
 }
 
-// TestBrakBuforaJestWyborem pilnuje roznicy miedzy "nie wpisano" a "wpisano
-// zero": relay bez bufora gubi wyniki na czas awarii lacza i to ma byc
-// decyzja operatora, a nie skutek pominiecia wpisu.
-func TestBrakBuforaJestWyborem(t *testing.T) {
-	bez := strings.Replace(poprawny, "  buffer_max_bytes: 268435456\n", "", 1)
-	cfg, err := Czytaj(strings.NewReader(bez))
+// TestNoBufferIsAChoice guards the difference between "nothing was written"
+// and "zero was written": a relay without a buffer loses results while the
+// link is down, and that is to be a decision of the operator rather than the
+// result of a skipped entry.
+func TestNoBufferIsAChoice(t *testing.T) {
+	without := strings.Replace(validConfig, "  buffer_max_bytes: 268435456\n", "", 1)
+	cfg, err := Read(strings.NewReader(without))
 	if err != nil {
-		t.Fatalf("konfiguracja bez bufora odrzucona: %v", err)
+		t.Fatalf("a configuration without a buffer was rejected: %v", err)
 	}
-	if cfg.Bufor() != BuforDomyslny {
-		t.Fatalf("bufor bez wpisu = %d, oczekiwano %d", cfg.Bufor(), BuforDomyslny)
+	if cfg.Buffer() != DefaultBuffer {
+		t.Fatalf("the buffer without an entry = %d, expected %d", cfg.Buffer(), DefaultBuffer)
 	}
 
-	zero := strings.Replace(poprawny, "buffer_max_bytes: 268435456", "buffer_max_bytes: 0", 1)
-	cfg, err = Czytaj(strings.NewReader(zero))
+	zero := strings.Replace(validConfig, "buffer_max_bytes: 268435456", "buffer_max_bytes: 0", 1)
+	cfg, err = Read(strings.NewReader(zero))
 	if err != nil {
-		t.Fatalf("jawne zero odrzucone: %v", err)
+		t.Fatalf("an explicit zero was rejected: %v", err)
 	}
-	if cfg.Bufor() != 0 {
-		t.Fatalf("jawne zero dalo bufor %d", cfg.Bufor())
+	if cfg.Buffer() != 0 {
+		t.Fatalf("an explicit zero gave the buffer %d", cfg.Buffer())
 	}
 }
 
-func TestDrugiDokumentJestBledem(t *testing.T) {
-	_, err := Czytaj(strings.NewReader(poprawny + "\n---\nschema_version: 1\n"))
-	if !errors.Is(err, ErrWieleDokumentow) {
-		t.Fatalf("drugi dokument dal %v", err)
+func TestASecondDocumentIsAnError(t *testing.T) {
+	_, err := Read(strings.NewReader(validConfig + "\n---\nschema_version: 1\n"))
+	if !errors.Is(err, ErrMultipleDocuments) {
+		t.Fatalf("a second document gave %v", err)
 	}
 }

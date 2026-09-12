@@ -205,13 +205,13 @@ func TestSecurityUpdatesComeFromThePanelsInventory(t *testing.T) {
 	}
 }
 
-// Kazda naprawa musi wskazywac operacje, ktora panel zna. Sprawdzenie
-// proponujace nieistniejacy typ operacji zostaloby odrzucone dopiero przy
-// zlecaniu, a wtedy operator widzi blad zamiast planu.
+// Every remediation has to name an operation the panel knows. A check
+// proposing a non-existent operation type would be rejected only at the
+// ordering, and the operator would then see an error instead of a plan.
 func TestRemediationsPointAtOperationsFromTheCatalogue(t *testing.T) {
 	for _, check := range Checks {
 		if check.ID == "" || check.Version == 0 || check.Severity == "" {
-			t.Errorf("sprawdzenie bez tozsamosci: %+v", check)
+			t.Errorf("a check without an identity: %+v", check)
 		}
 		if check.Rationale == "" || check.Expected == "" {
 			t.Errorf("%s without a rationale or a target state", check.ID)

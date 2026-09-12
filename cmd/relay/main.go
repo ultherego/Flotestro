@@ -38,7 +38,7 @@ import (
 
 // the version of the relay is the version of the whole release: the relay and
 // the agent come from one source and must not drift apart in their number.
-var version = buildinfo.Wersja
+var version = buildinfo.Version
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -60,7 +60,7 @@ func run(args []string, log *slog.Logger) error {
 	case "config":
 		return configCommand(args[1:])
 	case "version":
-		fmt.Println(buildinfo.Opis("flotestro-relay"))
+		fmt.Println(buildinfo.Describe("flotestro-relay"))
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
@@ -75,7 +75,7 @@ func run(args []string, log *slog.Logger) error {
 // log after a failed start.
 func configCommand(args []string) error {
 	flags := flag.NewFlagSet("config", flag.ContinueOnError)
-	path := flags.String("config", relayconfig.SciezkaDomyslna, "the configuration file of the relay")
+	path := flags.String("config", relayconfig.DefaultPath, "the configuration file of the relay")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func configCommand(args []string) error {
 	if flags.NArg() > 0 {
 		action = flags.Arg(0)
 	}
-	cfg, err := relayconfig.Wczytaj(*path)
+	cfg, err := relayconfig.Load(*path)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func configCommand(args []string) error {
 		fmt.Printf("listen:          %s\n", cfg.Relay.Listen)
 		fmt.Printf("network names:   %s\n", strings.Join(cfg.Relay.AdvertisedNames, ", "))
 		fmt.Printf("state directory: %s\n", cfg.Relay.StateDir)
-		fmt.Printf("buffer (bytes):  %d\n", cfg.Bufor())
+		fmt.Printf("buffer (bytes):  %d\n", cfg.Buffer())
 		fmt.Printf("enrollment:      %s\n", cfg.Upstream.EnrollmentURL)
 		fmt.Printf("gateways:        %s\n", strings.Join(cfg.Upstream.GatewayURLs, ", "))
 		return nil
@@ -113,12 +113,12 @@ func configCommand(args []string) error {
 // restart. The registration is a decision of the operator and happens once.
 func enrollCommand(args []string, log *slog.Logger) error {
 	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
-	path := flags.String("config", relayconfig.SciezkaDomyslna, "the configuration file of the relay")
+	path := flags.String("config", relayconfig.DefaultPath, "the configuration file of the relay")
 	tokenFile := flags.String("token-file", "", "the file with the enrollment token")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := relayconfig.Wczytaj(*path)
+	cfg, err := relayconfig.Load(*path)
 	if err != nil {
 		return err
 	}
@@ -191,11 +191,11 @@ func register(ctx context.Context, cfg relayconfig.Config, token string) (relay.
 // runCommand starts the relay from the configuration file.
 func runCommand(args []string, log *slog.Logger) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
-	path := flags.String("config", relayconfig.SciezkaDomyslna, "the configuration file of the relay")
+	path := flags.String("config", relayconfig.DefaultPath, "the configuration file of the relay")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := relayconfig.Wczytaj(*path)
+	cfg, err := relayconfig.Load(*path)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func runCommand(args []string, log *slog.Logger) error {
 	log.Info("the identity of the relay is ready", "relay_id", identity.RelayID,
 		"name", cfg.Relay.Name, "cert_not_after", identity.NotAfter.Format(time.RFC3339))
 
-	live := relay.NowaZywa(identity)
+	live := relay.NewLive(identity)
 	gateway := cfg.Upstream.GatewayURLs[0]
 	proxy := relay.New(relay.Options{
 		UpstreamURL:  gateway,
@@ -227,13 +227,13 @@ func runCommand(args []string, log *slog.Logger) error {
 		EnrollmentURL: cfg.Upstream.EnrollmentURL,
 		Identity:      identity.Certificate,
 		TrustPool:     identity.CAPool,
-		BufferBytes:   int(cfg.Bufor()),
+		BufferBytes:   int(cfg.Buffer()),
 		Log:           log,
 	})
 	// A host has no certificate before its registration, so the handshake
 	// must not demand one. Every RPC other than the registration checks it
 	// separately.
-	live.PosredniczyWRejestracji(cfg.Upstream.EnrollmentURL != "")
+	live.MediatesRegistration(cfg.Upstream.EnrollmentURL != "")
 
 	// The agents connect to the relay with the same protocol as to the
 	// centre, so a client certificate issued by the CA of the fleet is
@@ -244,8 +244,8 @@ func runCommand(args []string, log *slog.Logger) error {
 		Addr:    cfg.Relay.Listen,
 		Handler: relay.WithClientCertificate(proxy.Handler()),
 		TLSConfig: &tls.Config{
-			GetCertificate:     live.Certyfikat,
-			GetConfigForClient: live.KonfiguracjaKlienta,
+			GetCertificate:     live.Certificate,
+			GetConfigForClient: live.ClientConfiguration,
 			ClientCAs:          identity.CAPool,
 			MinVersion:         tls.VersionTLS13,
 			NextProtos:         []string{"h2"},
@@ -256,14 +256,14 @@ func runCommand(args []string, log *slog.Logger) error {
 		return err
 	}
 
-	go relay.UtrzymujCertyfikat(ctx, live, relay.OpcjeOdnowienia{
+	go relay.KeepCertificate(ctx, live, relay.RenewalOptions{
 		StateDir:   cfg.Relay.StateDir,
 		GatewayURL: gateway,
-		Nazwy:      cfg.Relay.AdvertisedNames,
-		Wersja:     version,
+		Names:      cfg.Relay.AdvertisedNames,
+		Version:    version,
 		Log:        log,
-		PoOdnowieniu: func(renewed relay.Identity) {
-			proxy.OdswiezTozsamosc(renewed.Certificate, renewed.CAPool)
+		AfterRenewal: func(renewed relay.Identity) {
+			proxy.RefreshIdentity(renewed.Certificate, renewed.CAPool)
 		},
 	})
 
@@ -277,8 +277,8 @@ func runCommand(args []string, log *slog.Logger) error {
 		return err
 	}
 	log.Info("the relay is listening", "address", cfg.Relay.Listen,
-		"centre", proxy.Brama(), "gateways", len(cfg.Upstream.GatewayURLs),
-		"buffer_bytes", cfg.Bufor())
+		"centre", proxy.Gateway(), "gateways", len(cfg.Upstream.GatewayURLs),
+		"buffer_bytes", cfg.Buffer())
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ServeTLS(listener, "", "") }()

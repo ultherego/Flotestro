@@ -1,5 +1,5 @@
-// Package config zbiera konfiguracje control plane i agenta ze zmiennych
-// srodowiskowych oraz flag.
+// Package config gathers the configuration of the control plane and of the
+// agent from environment variables and flags.
 package config
 
 import (
@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// ControlPlane opisuje konfiguracje serwera.
+// ControlPlane describes the configuration of the server.
 type ControlPlane struct {
 	DatabaseURL      string
 	StateDir         string
@@ -23,62 +23,68 @@ type ControlPlane struct {
 	GatewayID        string
 }
 
-// Monitoring opisuje polaczenia z systemami metryk i alertow.
+// Monitoring describes the connections to the metric and alert systems.
 //
-// Kazde jest opcjonalne: instalacja bez monitoringu dziala tak samo, a panel
-// mowi wprost, ze zrodel nie wskazano - zamiast rysowac puste wykresy.
+// Each of them is optional: an installation without monitoring works the same,
+// and the panel says outright that no sources were named - instead of drawing
+// empty charts.
 type Monitoring struct {
 	PrometheusURL   string
 	AlertmanagerURL string
 	Timeout         time.Duration
-	// HostLabel i HostValue tlumacza host panelu na etykiete u zrodel.
+	// HostLabel and HostValue translate a host of the panel into a label at
+	// the sources.
 	HostLabel        string
 	HostValue        string
 	SiteLabel        string
 	EnvironmentLabel string
-	// DashboardURL i LogsURL sa szablonami odnosnikow: panel prowadzi do
-	// cudzych ekranow, zamiast je odtwarzac.
+	// DashboardURL and LogsURL are templates of links: the panel leads to
+	// somebody else's screens instead of recreating them.
 	DashboardURL string
 	LogsURL      string
 	Window       time.Duration
 }
 
-// Podatnosci opisuje korelator CVE.
+// Vulnerabilities describes the CVE correlator.
 //
-// Rozstrzyga tracker producenta dystrybucji; feedy upstreamowe moga pozniej
-// dolozyc opis i CVSS, ale nie moga zmienic odpowiedzi "podatny / niepodatny".
-type Podatnosci struct {
+// The tracker of the distribution vendor settles the matter; upstream feeds
+// may later add a description and a CVSS, but they must not change the answer
+// "vulnerable / not vulnerable".
+type Vulnerabilities struct {
 	Enabled bool
-	// SyncInterval mowi, jak czesto panel pyta trackery o zmiany.
+	// SyncInterval says how often the panel asks the trackers about changes.
 	SyncInterval time.Duration
-	// MaxSnapshotAge jest wiekiem, powyzej ktorego dane sa nieswieze. Nie
-	// zatrzymuje to oceny, ale musi byc widoczne obok wyniku.
+	// MaxSnapshotAge is the age above which the data are stale. It does not
+	// stop the assessment, but it has to be visible next to the result.
 	MaxSnapshotAge time.Duration
-	// DebianURL wskazuje zrzut trackera Debiana; pusty wylacza to zrodlo.
+	// DebianURL names the dump of the Debian tracker; empty disables this
+	// source.
 	DebianURL string
-	// UbuntuURL wskazuje katalog z danymi OVAL Canonical; pusty wylacza to
-	// zrodlo.
+	// UbuntuURL names the directory with the OVAL data of Canonical; empty
+	// disables this source.
 	UbuntuURL string
-	// RedHatURL wskazuje katalog z danymi CSAF/VEX Red Hata; pusty wylacza
-	// to zrodlo.
+	// RedHatURL names the directory with the CSAF/VEX data of Red Hat; empty
+	// disables this source.
 	RedHatURL string
 	// RedHatCache jest katalogiem, w ktorym panel trzyma odczytane
 	// ustalenia Red Hata miedzy cyklami. Pelne dane to trzysta megabajtow
 	// archiwum, wiec bez pamieci kazdy cykl pobieralby je od nowa.
 	RedHatCache string
 	// NVDURL wskazuje API bazy NVD; pusty wylacza wzbogacanie. To zrodlo
-	// niczego nie rozstrzyga - doklada tylko ocene CVSS i opis podatnosci.
+	// settles nothing - it only adds the CVSS score and the description of a
+	// vulnerability.
 	NVDURL string
-	// NVDKey jest kluczem API do NVD. Bez klucza wolno wykonac piec zadan
-	// na trzydziesci sekund, wiec pierwszy odczyt trwa okolo dwudziestu
-	// minut; z kluczem kilka minut.
+	// NVDKey is the API key for NVD. Without a key five requests per thirty
+	// seconds are allowed, so the first read takes around twenty minutes; with
+	// a key a few minutes.
 	NVDKey string
-	// NVDInterval mowi, jak czesto panel pyta NVD o zmiany. Rzadziej niz
-	// o podatnosci: te dane nie zmieniaja ani jednej odpowiedzi o hostach.
+	// NVDInterval says how often the panel asks NVD about changes. Less often
+	// than about vulnerabilities: these data do not change a single answer
+	// about hosts.
 	NVDInterval time.Duration
 }
 
-// Env odczytuje zmienna srodowiskowa z wartoscia domyslna.
+// Env reads an environment variable with a default value.
 func Env(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
 		return value
@@ -86,7 +92,7 @@ func Env(key, fallback string) string {
 	return fallback
 }
 
-// EnvInt odczytuje liczbowa zmienna srodowiskowa.
+// EnvInt reads a numeric environment variable.
 func EnvInt(key string, fallback int) int {
 	value, ok := os.LookupEnv(key)
 	if !ok || value == "" {
@@ -99,9 +105,9 @@ func EnvInt(key string, fallback int) int {
 	return parsed
 }
 
-// EnvDuration odczytuje zmienna srodowiskowa wyrazona czasem, na przyklad
-// "5m". Wartosc nieczytelna nie moze cicho wylaczyc zabezpieczenia, wiec
-// zostaje wartosc domyslna.
+// EnvDuration reads an environment variable expressed as a duration, for
+// example "5m". An unreadable value must not silently switch a safeguard off,
+// so the default value stays.
 func EnvDuration(key string, fallback time.Duration) time.Duration {
 	value, ok := os.LookupEnv(key)
 	if !ok || value == "" {
@@ -114,13 +120,13 @@ func EnvDuration(key string, fallback time.Duration) time.Duration {
 	return parsed
 }
 
-// Validate sprawdza minimalny zestaw wymaganych ustawien.
+// Validate checks the minimal set of required settings.
 func (c ControlPlane) Validate() error {
 	if c.DatabaseURL == "" {
-		return fmt.Errorf("brak FLOTESTRO_DATABASE_URL")
+		return fmt.Errorf("FLOTESTRO_DATABASE_URL is missing")
 	}
 	if c.StateDir == "" {
-		return fmt.Errorf("brak katalogu stanu")
+		return fmt.Errorf("the state directory is missing")
 	}
 	return nil
 }

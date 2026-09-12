@@ -6,22 +6,23 @@ import (
 	"time"
 )
 
-// Blocked opisuje pakiet blokujacy operacje pakietowe.
+// Blocked describes a package that blocks package operations.
 type Blocked struct {
 	Name      string     `json:"name"`
 	Status    string     `json:"status"`
 	Questions []Question `json:"questions,omitempty"`
 }
 
-// Question jest pytaniem konfiguracyjnym pakietu.
+// Question is a configuration question of a package.
 type Question struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
-	// Answered jest nieustalone, gdy nie udalo sie odczytac stanu pytania.
+	// Answered is undetermined when the state of the question could not be
+	// read.
 	Answered *bool `json:"answered,omitempty"`
 }
 
-// Answer jest odpowiedzia operatora na pytanie konfiguracyjne.
+// Answer is the answer of the operator to a configuration question.
 type Answer struct {
 	Package  string
 	Question string
@@ -29,95 +30,99 @@ type Answer struct {
 	Value    string
 }
 
-// BlockedPackages opisuje pakiety, ktore blokuja transakcje, wraz z pytaniami
-// konfiguracyjnymi bez odpowiedzi.
+// BlockedPackages describes the packages that block a transaction, together
+// with the configuration questions without an answer.
 //
-// Sama nazwa pakietu mowi, gdzie szukac; dopiero pytania mowia, jaka decyzje
-// trzeba podjac. Panel ich nie rozstrzyga - przekazuje je operatorowi.
+// The name of a package alone says where to look; only the questions say which
+// decision has to be made. The panel does not settle them - it hands them to
+// the operator.
 func (a *APT) BlockedPackages(ctx context.Context) []Blocked {
 	blocked := a.blockedFromStatus()
 	for index := range blocked {
-		// Pytania konfiguracyjne czyta wylacznie root: baza debconfa nie jest
-		// czytelna dla agenta. Ich brak w planie nie oznacza wiec, ze pytan
-		// nie ma - operator zobaczy je przy naprawie, ktora idzie przez
-		// helpera.
+		// Only root reads the configuration questions: the debconf database is
+		// not readable by the agent. Their absence in the plan therefore does
+		// not mean there are no questions - the operator sees them during the
+		// repair, which goes through the helper.
 		blocked[index].Questions = a.questions(ctx, blocked[index].Name)
 	}
 	return blocked
 }
 
-// questions czyta pytania konfiguracyjne pakietu. Gwiazdka przed nazwa oznacza
-// pytanie z udzielona odpowiedzia; brak narzedzia debconf daje pusta liste,
-// a nie zmyslona informacje o braku pytan.
-func (a *APT) questions(ctx context.Context, pakiet string) []Question {
-	result := run(ctx, 30*time.Second, debconfShowPath, pakiet)
+// questions reads the configuration questions of a package. An asterisk
+// before the name marks a question with an answer given; a missing debconf
+// tool gives an empty list rather than made-up information that there are no
+// questions.
+func (a *APT) questions(ctx context.Context, pkg string) []Question {
+	result := run(ctx, 30*time.Second, debconfShowPath, pkg)
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
 	}
-	var pytania []Question
-	for _, linia := range strings.Split(result.Stdout, "\n") {
-		trimmed := strings.TrimSpace(linia)
+	var questions []Question
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		odpowiedziane := strings.HasPrefix(trimmed, "*")
+		answered := strings.HasPrefix(trimmed, "*")
 		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "*"))
-		nazwa, wartosc, _ := strings.Cut(trimmed, ":")
-		stan := odpowiedziane
-		pytania = append(pytania, Question{
-			Name:     strings.TrimSpace(nazwa),
-			Value:    strings.TrimSpace(wartosc),
-			Answered: &stan,
+		name, value, _ := strings.Cut(trimmed, ":")
+		state := answered
+		questions = append(questions, Question{
+			Name:     strings.TrimSpace(name),
+			Value:    strings.TrimSpace(value),
+			Answered: &state,
 		})
 	}
-	return pytania
+	return questions
 }
 
-// Repair ustawia odpowiedzi operatora i konczy konfiguracje pakietow.
+// Repair sets the answers of the operator and finishes the configuration of
+// the packages.
 //
-// Odpowiedzi dotycza wylacznie pakietow, ktore faktycznie blokuja operacje.
-// Bez tego ograniczenia operacja bylaby dowolnym ustawianiem konfiguracji
-// dowolnego pakietu na hoscie, czyli tym, czego kontrakt operacji typowanych
-// ma nie dopuszczac.
+// The answers cover only the packages that really block the operation. Without
+// that limit the operation would be arbitrary configuration of an arbitrary
+// package on the host - exactly what the contract of typed operations is not
+// to allow.
 func (a *APT) Repair(ctx context.Context, answers []Answer) ([]string, []Blocked, error) {
-	blokujace := map[string]bool{}
-	for _, pakiet := range a.PackagesNeedingAttention(ctx) {
-		blokujace[pakiet] = true
+	blocking := map[string]bool{}
+	for _, pkg := range a.PackagesNeedingAttention(ctx) {
+		blocking[pkg] = true
 	}
 
-	var ustawione []string
-	var linie []string
+	var set_ []string
+	var lines []string
 	for _, answer := range answers {
-		// Odpowiedz dla pakietu, ktory nic nie blokuje, jest pomijana, a nie
-		// odrzucana: host mogl zostac naprawiony w miedzyczasie, a kampania
-		// powtarzajaca te sama naprawe nie moze przez to konczyc sie bledem.
-		// Granica pozostaje ta sama - ustawiamy wylacznie to, co odblokowuje.
-		if !blokujace[answer.Package] {
+		// An answer for a package that blocks nothing is skipped rather than
+		// rejected: the host may have been repaired in the meantime, and a
+		// campaign repeating the same repair must not fail because of that.
+		// The boundary stays the same - we set only what unblocks.
+		if !blocking[answer.Package] {
 			continue
 		}
 		if strings.ContainsAny(answer.Question+answer.Type+answer.Value, "\n\r") {
 			return nil, nil, ErrInvalidAnswer
 		}
-		linie = append(linie, strings.Join(
+		lines = append(lines, strings.Join(
 			[]string{answer.Package, answer.Question, answer.Type, answer.Value}, " "))
-		// Nazwa pytania zawiera juz pakiet, wiec sklejanie ich dawalo
-		// etykiete w rodzaju grub-pc/grub-pc/install_devices.
-		ustawione = append(ustawione, answer.Question)
+		// The name of the question already carries the package, so gluing them
+		// together gave a label of the sort
+		// grub-pc/grub-pc/install_devices.
+		set_ = append(set_, answer.Question)
 	}
 
-	if len(linie) > 0 {
-		result := runWithInput(ctx, time.Minute, strings.Join(linie, "\n")+"\n", debconfSetPath)
+	if len(lines) > 0 {
+		result := runWithInput(ctx, time.Minute, strings.Join(lines, "\n")+"\n", debconfSetPath)
 		if !result.Ran || result.ExitCode != 0 {
 			return nil, nil, errorf("debconf-set-selections: %s", result.Reason())
 		}
 	}
 
-	// Dokonczenie konfiguracji jest tu jedyna zmiana stanu: nie instalujemy
-	// ani nie usuwamy niczego.
+	// Finishing the configuration is the only change of state here: we neither
+	// install nor remove anything.
 	result := run(ctx, 15*time.Minute, dpkgPath, "--configure", "-a")
-	pozostale := a.BlockedPackages(ctx)
+	remaining := a.BlockedPackages(ctx)
 	if !result.Ran || result.ExitCode != 0 {
-		return ustawione, pozostale, errorf("dpkg --configure -a: %s", result.Reason())
+		return set_, remaining, errorf("dpkg --configure -a: %s", result.Reason())
 	}
-	return ustawione, pozostale, nil
+	return set_, remaining, nil
 }

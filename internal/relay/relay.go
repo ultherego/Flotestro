@@ -20,54 +20,55 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
-// hostHeader niesie tozsamosc hosta poswiadczona przez relay. Nazwa musi byc
-// zgodna z gatewayem: to jedyne miejsce, w ktorym panel dowiaduje sie, czyj
-// ruch przechodzi przez relay.
+// hostHeader carries the identity of the host attested by the relay. The name
+// has to match the gateway: it is the only place where the panel learns whose
+// traffic goes through the relay.
 const hostHeader = "Flotestro-Relay-Host"
 
-// Options opisuje relay lokalizacji.
+// Options describe the relay of a site.
 type Options struct {
-	// UpstreamURL jest adresem bramy agentow w centrali.
+	// UpstreamURL is the address of the agent gateway in the centre.
 	UpstreamURL string
-	// UpstreamURLs sa pozostalymi bramami w kolejnosci priorytetu. Relay
-	// utrzymuje jedno polaczenie w gore, ale awaria bramy nie moze odciac
-	// calej lokalizacji do czasu, az ktos zajrzy do konfiguracji.
+	// UpstreamURLs are the remaining gateways in order of priority. The relay
+	// keeps one connection upwards, but a failure of a gateway must not cut a
+	// whole site off until somebody looks into the configuration.
 	UpstreamURLs []string
-	// EnrollmentURL wlacza posredniczenie w rejestracji hostow. Puste
-	// znaczy, ze relay jej nie obsluguje: lokalizacja, ktora widzi centrale,
-	// nie potrzebuje posrednika przy jednorazowej czynnosci.
+	// EnrollmentURL enables mediation in the registration of hosts. Empty
+	// means the relay does not handle it: a site that sees the centre needs no
+	// intermediary for a one-time act.
 	EnrollmentURL string
-	// Identity jest tozsamoscia relaya wobec centrali.
+	// Identity is the identity of the relay towards the centre.
 	Identity tls.Certificate
-	// TrustPool weryfikuje zarowno centrale, jak i certyfikaty agentow:
-	// jedno CA floty obejmuje obie strony.
+	// TrustPool verifies both the centre and the certificates of the agents:
+	// one CA of the fleet covers both sides.
 	TrustPool *x509.CertPool
-	// BufferBytes ogranicza pamiec przeznaczona na wyniki czekajace na
-	// powrot lacza.
+	// BufferBytes limits the memory given to the results waiting for the link
+	// to come back.
 	BufferBytes int
 	Log         *slog.Logger
 }
 
-// Relay posredniczy miedzy agentami lokalizacji a centrala.
+// Relay mediates between the agents of a site and the centre.
 type Relay struct {
 	options Options
-	klient  atomic.Pointer[klientCentrali]
-	// bramy prowadzi wybor bramy centrali wraz z backoffem i klasa bledu.
-	bramy *endpoints.Menedzer
-	// biezaca jest adresem bramy, z ktora relay rozmawia teraz. Zmienia sie
-	// przy przelaczeniu, wiec nie da sie go trzymac w options.
-	biezaca atomic.Pointer[string]
+	client_ atomic.Pointer[centreClient]
+	// gateways drives the choice of the gateway of the centre together with
+	// the backoff and the class of an error.
+	gateways *endpoints.Manager
+	// current is the address of the gateway the relay speaks to now. It
+	// changes on a switch, so it cannot be kept in options.
+	current atomic.Pointer[string]
 	buffer  *Buffer
 	log     *slog.Logger
 
 	mu sync.RWMutex
-	// sesje trzymaja funkcje przerwania. Po powrocie lacza sesja pracujaca
-	// w trybie buforowania jest konczona, zeby agent polaczyl sie na nowo
-	// i wrocil do przekazywania na zywo; inaczej zostalaby w tym trybie
-	// do konca swojego zycia, mimo ze centrala znowu odpowiada.
-	sesje     map[string]context.CancelFunc
-	upstream  atomic.Bool
-	tozsamosc atomic.Pointer[materialRelaya]
+	// sessions hold the cancel functions. Once the link is back, a session
+	// working in the buffering mode is ended so that the agent connects anew
+	// and returns to live forwarding; otherwise it would stay in that mode to
+	// the end of its life even though the centre answers again.
+	sessions map[string]context.CancelFunc
+	upstream atomic.Bool
+	identity atomic.Pointer[relayMaterial]
 }
 
 func New(options Options) *Relay {
@@ -75,117 +76,122 @@ func New(options Options) *Relay {
 	if log == nil {
 		log = slog.Default()
 	}
-	adresy := options.UpstreamURLs
-	if len(adresy) == 0 {
-		adresy = []string{options.UpstreamURL}
+	addresses := options.UpstreamURLs
+	if len(addresses) == 0 {
+		addresses = []string{options.UpstreamURL}
 	}
 	relay := &Relay{
 		options: options, log: log,
-		bramy:  endpoints.Nowy(adresy, endpoints.MinBackoff, endpoints.MaxBackoff),
-		buffer: NewBuffer(options.BufferBytes),
-		sesje:  map[string]context.CancelFunc{},
+		gateways: endpoints.New(addresses, endpoints.MinBackoff, endpoints.MaxBackoff),
+		buffer:   NewBuffer(options.BufferBytes),
+		sessions: map[string]context.CancelFunc{},
 	}
-	pierwsza := adresy[0]
-	relay.biezaca.Store(&pierwsza)
-	relay.tozsamosc.Store(&materialRelaya{
-		cert: options.Identity, zaufanie: options.TrustPool,
+	first := addresses[0]
+	relay.current.Store(&first)
+	relay.identity.Store(&relayMaterial{
+		cert: options.Identity, trust: options.TrustPool,
 	})
-	relay.klient.Store(&klientCentrali{
-		client: klientDoCentrali(pierwsza, options.Identity, options.TrustPool),
+	relay.client_.Store(&centreClient{
+		client: clientToCentre(first, options.Identity, options.TrustPool),
 	})
 	return relay
 }
 
-// materialRelaya trzyma biezacy certyfikat relaya wobec centrali.
-type materialRelaya struct {
-	cert     tls.Certificate
-	zaufanie *x509.CertPool
+// relayMaterial holds the current certificate of the relay towards the
+// centre.
+type relayMaterial struct {
+	cert  tls.Certificate
+	trust *x509.CertPool
 }
 
-// klientCentrali opakowuje klienta, zeby dalo sie go podmienic w calosci.
-// atomic.Pointer wymaga konkretnego typu, a klient jest interfejsem.
-type klientCentrali struct {
+// centreClient wraps the client so that it can be swapped as a whole.
+// atomic.Pointer requires a concrete type, and the client is an interface.
+type centreClient struct {
 	client agentv1connect.AgentServiceClient
 }
 
-// klientDoCentrali sklada klienta uslugi agentow w centrali.
-func klientDoCentrali(adres string, tozsamosc tls.Certificate,
-	zaufanie *x509.CertPool) agentv1connect.AgentServiceClient {
+// clientToCentre assembles the client of the agent service in the centre.
+func clientToCentre(address string, identity tls.Certificate,
+	trust *x509.CertPool) agentv1connect.AgentServiceClient {
 	return agentv1connect.NewAgentServiceClient(
 		&http.Client{Transport: &http2.Transport{
 			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{tozsamosc},
-				RootCAs:      zaufanie,
+				Certificates: []tls.Certificate{identity},
+				RootCAs:      trust,
 				MinVersion:   tls.VersionTLS13,
 			},
-			// Zerwane lacze WAN nie objawia sie bledem wysylki: dane mieszcza
-			// sie w buforze jadra, a TCP retransmituje je kilkanascie minut.
-			// Bez aktywnego badania relay przez ten czas uwazalby, ze wszystko
-			// dziala, i nie zaczalby buforowac.
+			// A broken WAN link does not show up as a send error: the data fit
+			// in the buffer of the kernel and TCP retransmits them for more
+			// than a dozen minutes. Without active probing the relay would
+			// consider everything working for that time and would not start
+			// buffering.
 			ReadIdleTimeout: 15 * time.Second,
 			PingTimeout:     10 * time.Second,
 		}},
-		adres,
+		address,
 		connect.WithGRPC(),
 	)
 }
 
-// OdswiezTozsamosc podmienia certyfikat, ktorym relay przedstawia sie
-// centrali.
+// RefreshIdentity swaps the certificate the relay presents itself to the
+// centre with.
 //
-// Po odnowieniu stary certyfikat jest jeszcze wazny, ale przestaje byc tym,
-// po ktorym panel rozpoznaje relay. Nowe polaczenia do centrali musza isc
-// nowym; trwajace strumienie zyja do naturalnego konca, wiec agenci nie
-// traca sesji przez samo odnowienie.
-func (r *Relay) OdswiezTozsamosc(tozsamosc tls.Certificate, zaufanie *x509.CertPool) {
-	r.tozsamosc.Store(&materialRelaya{cert: tozsamosc, zaufanie: zaufanie})
-	r.klient.Store(&klientCentrali{
-		client: klientDoCentrali(*r.biezaca.Load(), tozsamosc, zaufanie),
+// After a renewal the old certificate is still valid but stops being the one
+// the panel recognises the relay by. New connections to the centre have to go
+// with the new one; running streams live to their natural end, so the agents
+// do not lose their sessions because of the renewal alone.
+func (r *Relay) RefreshIdentity(identity tls.Certificate, trust *x509.CertPool) {
+	r.identity.Store(&relayMaterial{cert: identity, trust: trust})
+	r.client_.Store(&centreClient{
+		client: clientToCentre(*r.current.Load(), identity, trust),
 	})
 }
 
-// przelaczBrame kieruje relay do innej bramy centrali.
-func (r *Relay) przelaczBrame(adres string) {
-	material := r.tozsamosc.Load()
-	r.biezaca.Store(&adres)
-	r.klient.Store(&klientCentrali{
-		client: klientDoCentrali(adres, material.cert, material.zaufanie),
+// switchGateway points the relay at another gateway of the centre.
+func (r *Relay) switchGateway(address string) {
+	material := r.identity.Load()
+	r.current.Store(&address)
+	r.client_.Store(&centreClient{
+		client: clientToCentre(address, material.cert, material.trust),
 	})
 }
 
-// Brama zwraca adres centrali, z ktora relay rozmawia teraz.
-func (r *Relay) Brama() string { return *r.biezaca.Load() }
+// Gateway returns the address of the centre the relay speaks to now.
+func (r *Relay) Gateway() string { return *r.current.Load() }
 
-// centrala zwraca biezacego klienta uslugi agentow.
-func (r *Relay) centrala() agentv1connect.AgentServiceClient {
-	return r.klient.Load().client
+// centre returns the current client of the agent service.
+func (r *Relay) centre() agentv1connect.AgentServiceClient {
+	return r.client_.Load().client
 }
 
-// Handler obsluguje polaczenia agentow. Relay wystawia ten sam kontrakt co
-// centrala, wiec agent nie wie i nie musi wiedziec, ze rozmawia przez relay.
+// Handler serves the connections of the agents. The relay exposes the same
+// contract as the centre, so the agent does not know and does not have to know
+// that it speaks through a relay.
 func (r *Relay) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(agentv1connect.NewAgentServiceHandler(r))
-	// Rejestracja hosta idzie tym samym portem: host w izolowanej lokalizacji
-	// zna wylacznie adres relaya. Bez certyfikatu klienta przechodzi tylko ta
-	// jedna usluga - pozostale czytaja tozsamosc z uscisku i bez niej odmawiaja.
+	// The registration of a host goes over the same port: a host in an
+	// isolated site knows the address of the relay alone. Without a client
+	// certificate only that one service goes through - the rest read the
+	// identity from the handshake and refuse without it.
 	if r.options.EnrollmentURL != "" {
 		mux.Handle(r.EnrollmentHandler())
 	}
 	return mux
 }
 
-// RenewCertificate przekazuje odnowienie certyfikatu do centrali.
+// RenewCertificate forwards the renewal of a certificate to the centre.
 //
-// Relay nie podpisuje niczego sam: CA floty zostaje w centrali, a relay
-// jedynie posredniczy. Certyfikat agenta jest tu weryfikowany w uscisku TLS,
-// wiec tozsamosc wnioskujacego jest znana i doklejana tak samo jak w sesji.
+// The relay signs nothing itself: the CA of the fleet stays in the centre and
+// the relay only mediates. The certificate of the agent is verified here in
+// the TLS handshake, so the identity of the requester is known and attached
+// just as in a session.
 func (r *Relay) RenewCertificate(ctx context.Context,
 	req *connect.Request[agentv1.RenewCertificateRequest],
 ) (*connect.Response[agentv1.RenewCertificateResponse], error) {
 	cert, ok := clientCertificate(ctx)
 	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no client certificate"))
 	}
 	hostID, err := pki.HostIDFromCert(cert)
 	if err != nil {
@@ -194,27 +200,28 @@ func (r *Relay) RenewCertificate(ctx context.Context,
 
 	forwarded := connect.NewRequest(req.Msg)
 	forwarded.Header().Set(hostHeader, hostID)
-	response, err := r.centrala().RenewCertificate(ctx, forwarded)
+	response, err := r.centre().RenewCertificate(ctx, forwarded)
 	if err != nil {
-		// Odnowienie musi dojsc do centrali; bufor tu nie pomoze, bo agent
-		// czeka na odpowiedz. Powtorzy probe zgodnie z wlasnym harmonogramem.
+		// The renewal has to reach the centre; the buffer does not help here,
+		// because the agent waits for an answer. It will try again on its own
+		// schedule.
 		return nil, err
 	}
 	return connect.NewResponse(response.Msg), nil
 }
 
-// FetchSecret przekazuje pobranie sekretu do centrali.
+// FetchSecret forwards the fetch of a secret to the centre.
 //
-// Relay nie przechowuje ani nie oglada wartosci: przekazuje wywolanie razem
-// z tozsamoscia hosta, a decyzje o wydaniu podejmuje centrala na podstawie
-// dzierzawy. Bufor tu nie ma sensu - host czeka na odpowiedz, a dzierzawa
-// jest krotka.
+// The relay neither stores nor looks at the value: it forwards the call
+// together with the identity of the host, and the centre decides on the
+// release on the basis of the lease. A buffer makes no sense here - the host
+// waits for an answer and the lease is short.
 func (r *Relay) FetchSecret(ctx context.Context,
 	req *connect.Request[agentv1.FetchSecretRequest],
 ) (*connect.Response[agentv1.FetchSecretResponse], error) {
 	cert, ok := clientCertificate(ctx)
 	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no client certificate"))
 	}
 	hostID, err := pki.HostIDFromCert(cert)
 	if err != nil {
@@ -223,149 +230,154 @@ func (r *Relay) FetchSecret(ctx context.Context,
 
 	forwarded := connect.NewRequest(req.Msg)
 	forwarded.Header().Set(hostHeader, hostID)
-	response, err := r.centrala().FetchSecret(ctx, forwarded)
+	response, err := r.centre().FetchSecret(ctx, forwarded)
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(response.Msg), nil
 }
 
-// Ping przekazuje badanie lacznosci do centrali. Relay nie odpowiada sam:
-// pytanie dotyczy drogi do centrali, a nie tego, czy relay dziala.
+// Ping forwards a connectivity probe to the centre. The relay does not answer
+// on its own: the question concerns the path to the centre rather than whether
+// the relay works.
 func (r *Relay) Ping(ctx context.Context,
 	req *connect.Request[agentv1.PingRequest],
 ) (*connect.Response[agentv1.PingResponse], error) {
-	// Certyfikat klienta jest wymagany takze tutaj. Listener relaya wpuszcza
-	// polaczenia bez certyfikatu, bo host przed rejestracja nie ma czym sie
-	// przedstawic - ale badanie lacznosci nie jest czescia rejestracji i nie
-	// moze byc darmowym sposobem sprawdzania, czy centrala zyje.
+	// A client certificate is required here as well. The listener of the relay
+	// lets connections without a certificate in, because a host before its
+	// registration has nothing to present itself with - but a connectivity
+	// probe is not part of the registration and must not be a free way of
+	// checking whether the centre is alive.
 	if _, ok := clientCertificate(ctx); !ok {
 		return nil, connect.NewError(connect.CodeUnauthenticated,
-			errors.New("brak certyfikatu klienta"))
+			errors.New("no client certificate"))
 	}
-	response, err := r.centrala().Ping(ctx, connect.NewRequest(req.Msg))
+	response, err := r.centre().Ping(ctx, connect.NewRequest(req.Msg))
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(response.Msg), nil
 }
 
-// Connect przekazuje sesje agenta do centrali.
+// Connect forwards the session of an agent to the centre.
 //
-// Identity hosta pochodzi z certyfikatu agenta zweryfikowanego w uscisku TLS
-// po stronie relaya i jest doklejana do polaczenia w gore. Relay nie przeglada
-// tresci zadan; jego rola konczy sie na przekazaniu i zbuforowaniu.
+// The identity of the host comes from the certificate of the agent verified in
+// the TLS handshake on the side of the relay and is attached to the connection
+// upwards. The relay does not look into the content of the jobs; its role ends
+// at forwarding and buffering.
 func (r *Relay) Connect(ctx context.Context,
 	stream *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage]) error {
 	cert, ok := clientCertificate(ctx)
 	if !ok {
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("no client certificate"))
 	}
 	hostID, err := pki.HostIDFromCert(cert)
 	if err != nil {
 		return connect.NewError(connect.CodeUnauthenticated, err)
 	}
 
-	sessionCtx, zakoncz := context.WithCancel(ctx)
-	defer zakoncz()
-	r.trackSession(hostID, zakoncz)
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r.trackSession(hostID, cancel)
 	defer r.trackSession(hostID, nil)
 
-	upstream := r.centrala().Connect(sessionCtx)
+	upstream := r.centre().Connect(sessionCtx)
 	upstream.RequestHeader().Set(hostHeader, hostID)
 	defer func() {
 		_ = upstream.CloseRequest()
 		_ = upstream.CloseResponse()
 	}()
 
-	// Zerwanie lacza poznajemy po stronie odbioru. Wysylka tego nie pokaze:
-	// dane trafiaja do kolejki HTTP/2 i do bufora jadra, wiec Send konczy sie
-	// powodzeniem jeszcze dlugo po tym, jak centrala przestala odpowiadac.
-	utracone := make(chan struct{})
-	var raz sync.Once
+	// A broken link is recognised on the receiving side. Sending will not show
+	// it: the data go into the HTTP/2 queue and into the buffer of the kernel,
+	// so Send succeeds long after the centre stopped answering.
+	lost := make(chan struct{})
+	var once sync.Once
 	go func() {
 		err := r.pumpDown(ctx, hostID, stream, upstream)
 		r.upstream.Store(false)
-		raz.Do(func() { close(utracone) })
+		once.Do(func() { close(lost) })
 		if err != nil && ctx.Err() == nil {
-			r.log.Warn("polaczenie z centrala zerwane, przechodze na buforowanie",
+			r.log.Warn("the connection to the centre broke, switching to buffering",
 				"host_id", hostID, "err", err)
 		}
 	}()
 
 	r.upstream.Store(true)
 
-	// Odbior od agenta idzie osobna goroutine, zeby petla mogla zareagowac na
-	// przerwanie sesji. Receive blokuje sie na kontekscie zadania i nie widzi
-	// naszego przerwania: bez tego sesja przelaczona na buforowanie zostalaby
-	// w tym trybie na zawsze, mimo ze centrala juz odpowiada.
-	odebrane := make(chan *agentv1.AgentMessage)
-	bledy := make(chan error, 1)
+	// The reception from the agent goes in a goroutine of its own so that the
+	// loop can react to the cancellation of the session. Receive blocks on the
+	// context of the request and does not see our cancellation: without this a
+	// session switched to buffering would stay in that mode for good even
+	// though the centre answers again.
+	received := make(chan *agentv1.AgentMessage)
+	errors_ := make(chan error, 1)
 	go func() {
 		for {
 			message, err := stream.Receive()
 			if err != nil {
-				bledy <- err
+				errors_ <- err
 				return
 			}
 			select {
-			case odebrane <- message:
+			case received <- message:
 			case <-sessionCtx.Done():
 				return
 			}
 		}
 	}()
 
-	// Sesja zaczyna sie od Hello; dopiero po nim wolno odeslac to, co czekalo
-	// w buforze - centrala odrzuca strumien, ktory zaczyna sie inaczej.
-	pierwsza := true
+	// A session starts with Hello; only after it may what waited in the buffer
+	// be sent back - the centre rejects a stream that starts otherwise.
+	first := true
 	for {
 		var message *agentv1.AgentMessage
 		select {
 		case <-sessionCtx.Done():
-			// Sesja wznowi sie sama: agent laczy sie ponownie po sekundach.
+			// The session resumes on its own: the agent connects again within
+			// seconds.
 			return nil
-		case err := <-bledy:
+		case err := <-errors_:
 			return err
-		case message = <-odebrane:
+		case message = <-received:
 		}
 
 		select {
-		case <-utracone:
-			// Centrala jest nieosiagalna: wiadomosc czeka w buforze zamiast
-			// zginac. Utracony wynik wyglada dla panelu jak zadanie, ktore
-			// wciaz trwa, i blokuje hosta na czas TTL.
-			r.zbuforuj(hostID, message)
+		case <-lost:
+			// The centre is unreachable: the message waits in the buffer
+			// instead of being lost. A lost result looks to the panel like a
+			// job that is still running and blocks the host for the TTL.
+			r.bufferMessage(hostID, message)
 		default:
 			if sendErr := upstream.Send(message); sendErr != nil {
 				r.upstream.Store(false)
-				raz.Do(func() { close(utracone) })
-				r.zbuforuj(hostID, message)
+				once.Do(func() { close(lost) })
+				r.bufferMessage(hostID, message)
 				continue
 			}
-			if pierwsza {
-				pierwsza = false
-				r.odeslijBufor(hostID, upstream)
+			if first {
+				first = false
+				r.flushBuffer(hostID, upstream)
 			}
 		}
 	}
 }
 
-// zbuforuj odklada wiadomosc i zglasza przepelnienie. Pelny bufor jest
-// zdarzeniem operacyjnym: od tej chwili lokalizacja gubi wyniki.
-func (r *Relay) zbuforuj(hostID string, message *agentv1.AgentMessage) {
+// buffer_ sets a message aside and reports an overflow. A full buffer is an
+// operational event: from that moment the site loses results.
+func (r *Relay) bufferMessage(hostID string, message *agentv1.AgentMessage) {
 	if err := r.buffer.Add(hostID, message); err != nil {
-		r.log.Error("bufor relaya pelny, wynik odrzucony",
-			"host_id", hostID, "err", err, "stan", r.buffer.Stats())
+		r.log.Error("the buffer of the relay is full, the result was dropped",
+			"host_id", hostID, "err", err, "state", r.buffer.Stats())
 	}
 }
 
-// pumpDown przekazuje zadania z centrali do agenta.
+// pumpDown forwards the jobs from the centre to the agent.
 //
-// Zadanie, ktoremu uplynal TTL, nie jest przekazywane. Dokument mowi wprost:
-// relay buforuje wyniki, ale nie wykonuje zadania po TTL - a przekazanie
-// przeterminowanego zadania jest wlasnie zleceniem pracy, o ktora nikt juz
-// nie prosi.
+// A job whose TTL has run out is not forwarded. The document says it outright:
+// the relay buffers results but does not carry a job out after its TTL - and
+// forwarding an expired job is exactly ordering work nobody is asking for any
+// more.
 func (r *Relay) pumpDown(ctx context.Context, hostID string,
 	to *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage],
 	from *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]) error {
@@ -374,8 +386,8 @@ func (r *Relay) pumpDown(ctx context.Context, hostID string,
 		if err != nil {
 			return err
 		}
-		if task := message.GetTask(); task != nil && wygaslo(task) {
-			r.log.Warn("zadanie pominiete po uplywie TTL",
+		if task := message.GetTask(); task != nil && expired(task) {
+			r.log.Warn("the job was skipped after its TTL ran out",
 				"host_id", hostID, "task_id", task.GetTaskId(),
 				"expires_at", task.GetExpiresAt().AsTime().Format(time.RFC3339))
 			continue
@@ -386,7 +398,7 @@ func (r *Relay) pumpDown(ctx context.Context, hostID string,
 	}
 }
 
-func wygaslo(task *agentv1.TaskEnvelope) bool {
+func expired(task *agentv1.TaskEnvelope) bool {
 	expires := task.GetExpiresAt()
 	if expires == nil {
 		return false
@@ -394,42 +406,43 @@ func wygaslo(task *agentv1.TaskEnvelope) bool {
 	return time.Now().After(expires.AsTime())
 }
 
-func (r *Relay) trackSession(hostID string, zakoncz context.CancelFunc) {
+func (r *Relay) trackSession(hostID string, cancel context.CancelFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if zakoncz != nil {
-		r.sesje[hostID] = zakoncz
+	if cancel != nil {
+		r.sessions[hostID] = cancel
 		return
 	}
-	delete(r.sesje, hostID)
+	delete(r.sessions, hostID)
 }
 
-// resetSessions konczy sesje agentow po powrocie lacza. Agent laczy sie
-// ponownie w ciagu sekund i od razu pracuje na zywo.
+// resetSessions ends the sessions of the agents once the link is back. The
+// agent connects again within seconds and works live at once.
 func (r *Relay) resetSessions() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, zakoncz := range r.sesje {
-		zakoncz()
+	for _, cancel := range r.sessions {
+		cancel()
 	}
-	return len(r.sesje)
+	return len(r.sessions)
 }
 
-// Stats opisuje stan relaya na potrzeby metryk i diagnostyki.
-func (r *Relay) Stats() (sesje int, bufor Stats, upstreamOK bool) {
+// Stats describes the state of the relay for the metrics and the diagnostics.
+func (r *Relay) Stats() (sessions int, buffer_ Stats, upstreamOK bool) {
 	r.mu.RLock()
-	sesje = len(r.sesje)
+	sessions = len(r.sessions)
 	r.mu.RUnlock()
-	return sesje, r.buffer.Stats(), r.upstream.Load()
+	return sessions, r.buffer.Stats(), r.upstream.Load()
 }
 
-// WatchUpstream bada lacznosc z centrala, gdy relay pracuje w trybie
-// buforowania.
+// WatchUpstream probes the connectivity with the centre while the relay works
+// in the buffering mode.
 //
-// Badanie idzie osobnym wywolaniem bez skutkow ubocznych. Wczesniejsza wersja
-// sprawdzala lacze, wysylajac zbuforowane wiadomosci osobnym strumieniem - i
-// gubila je, bo sesja agenta zaczyna sie od Hello, a strumien bez Hello jest
-// przez centrale odrzucany. Bufor ma chronic wyniki, a nie je tracic.
+// The probe goes as a separate call without side effects. An earlier version
+// checked the link by sending the buffered messages over a separate stream -
+// and lost them, because the session of an agent starts with Hello and a
+// stream without Hello is rejected by the centre. The buffer is to protect the
+// results rather than lose them.
 func (r *Relay) WatchUpstream(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -441,42 +454,45 @@ func (r *Relay) WatchUpstream(ctx context.Context, interval time.Duration) {
 			if r.upstream.Load() {
 				continue
 			}
-			// Wybor bramy nalezy do menedzera: to on pilnuje kolejnosci
-			// priorytetow i okien ponowien. Relay probuje tej, ktora jest
-			// gotowa, a nie po kolei kazdej przy kazdym tyknieciu.
-			brama, blad := r.bramy.Wybierz(time.Now())
-			if blad != nil || brama == nil {
+			// The choice of a gateway belongs to the manager: it watches over
+			// the order of the priorities and the windows of the retries. The
+			// relay tries the one that is ready rather than each in turn on
+			// every tick.
+			gateway, err_ := r.gateways.Choose(time.Now())
+			if err_ != nil || gateway == nil {
 				continue
 			}
-			if brama.URL != r.Brama() {
-				r.przelaczBrame(brama.URL)
+			if gateway.URL != r.Gateway() {
+				r.switchGateway(gateway.URL)
 			}
-			probeCtx, anuluj := context.WithTimeout(ctx, 10*time.Second)
-			_, err := r.centrala().Ping(probeCtx, connect.NewRequest(&agentv1.PingRequest{}))
-			anuluj()
+			probeCtx, cancelProbe := context.WithTimeout(ctx, 10*time.Second)
+			_, err := r.centre().Ping(probeCtx, connect.NewRequest(&agentv1.PingRequest{}))
+			cancelProbe()
 			if err != nil {
-				r.bramy.Blad(brama.URL, endpoints.Rozpoznaj(err), time.Now())
+				r.gateways.Error(gateway.URL, endpoints.Classify(err), time.Now())
 				continue
 			}
-			r.bramy.Sukces(brama.URL, time.Now())
+			r.gateways.Success(gateway.URL, time.Now())
 			r.upstream.Store(true)
-			r.log.Info("lacznosc z centrala potwierdzona", "brama", brama.URL)
-			// Sesje pracujace w trybie buforowania konczymy: agent polaczy sie
-			// ponownie w ciagu sekund i wtedy odeslemy jego bufor w tej samej
-			// sesji, ktora zaczyna sie od Hello.
-			if zakonczone := r.resetSessions(); zakonczone > 0 {
-				r.log.Info("lacznosc z centrala wrocila, sesje zostana wznowione",
-					"sesji", zakonczone, "bufor", r.buffer.Stats().Messages)
+			r.log.Info("the connectivity with the centre was confirmed", "gateway", gateway.URL)
+			// The sessions working in the buffering mode are ended: the agent
+			// connects again within seconds and we then send its buffer back
+			// in the same session, which starts with Hello.
+			if ended := r.resetSessions(); ended > 0 {
+				r.log.Info("the connectivity with the centre is back, the sessions will resume",
+					"sessions", ended, "buffer", r.buffer.Stats().Messages)
 			}
 		}
 	}
 }
 
-// certKey przenosi certyfikat agenta z warstwy TLS do obslugi strumienia.
+// certKey carries the certificate of the agent from the TLS layer into the
+// handling of the stream.
 type certKey struct{}
 
-// WithClientCertificate przenosi certyfikat klienta do kontekstu zadania.
-// Kontrakt nie niesie tozsamosci: pochodzi ona wylacznie z uscisku TLS.
+// WithClientCertificate carries the client certificate into the context of
+// the request. The contract carries no identity: it comes from the TLS
+// handshake alone.
 func WithClientCertificate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -492,25 +508,25 @@ func clientCertificate(ctx context.Context) (*x509.Certificate, bool) {
 	return cert, ok
 }
 
-// odeslijBufor odsyla zbuforowane wiadomosci hosta w jego zywej sesji.
-// Wiadomosc znika z bufora dopiero po wyslaniu, wiec zerwanie w polowie
-// oznacza ponowna probe, a nie utrate wyniku.
-func (r *Relay) odeslijBufor(hostID string,
+// flushBuffer sends the buffered messages of a host back in its live session.
+// A message disappears from the buffer only after it has been sent, so a break
+// halfway means another attempt rather than a lost result.
+func (r *Relay) flushBuffer(hostID string,
 	upstream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]) {
-	wyslane := 0
+	sent := 0
 	for {
 		message, ok := r.buffer.TakeFor(hostID)
 		if !ok {
 			break
 		}
 		if err := upstream.Send(message); err != nil {
-			r.log.Warn("nie odeslano bufora", "host_id", hostID, "err", err)
+			r.log.Warn("the buffer was not sent back", "host_id", hostID, "err", err)
 			return
 		}
 		r.buffer.CommitFor(hostID)
-		wyslane++
+		sent++
 	}
-	if wyslane > 0 {
-		r.log.Info("odeslano zbuforowane wiadomosci", "host_id", hostID, "wiadomosci", wyslane)
+	if sent > 0 {
+		r.log.Info("the buffered messages were sent back", "host_id", hostID, "messages", sent)
 	}
 }

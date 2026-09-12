@@ -16,13 +16,14 @@ const (
 	dpkgQueryPath  = "/usr/bin/dpkg-query"
 	aptMarkPath    = "/usr/bin/apt-mark"
 	dpkgStatusPath = "/var/lib/dpkg/status"
-	// Narzedzia debconfa sluza wylacznie odblokowaniu pakietu, ktory czeka
-	// na decyzje operatora.
+	// The debconf tools serve only to unblock a package that waits for a
+	// decision of the operator.
 	debconfShowPath = "/usr/bin/debconf-show"
 	debconfSetPath  = "/usr/bin/debconf-set-selections"
 )
 
-// aptLockFiles to pliki, ktore APT i dpkg blokuja na czas operacji.
+// aptLockFiles are the files APT and dpkg lock for the duration of an
+// operation.
 var aptLockFiles = []string{
 	"/var/lib/dpkg/lock-frontend",
 	"/var/lib/dpkg/lock",
@@ -30,7 +31,7 @@ var aptLockFiles = []string{
 	"/var/lib/apt/lists/lock",
 }
 
-// APT jest adapterem Debiana i Ubuntu.
+// APT is the adapter of Debian and Ubuntu.
 type APT struct{}
 
 func (a *APT) Name() string { return "apt" }
@@ -40,8 +41,8 @@ func (a *APT) Available() bool {
 	return err == nil && !info.IsDir()
 }
 
-// LockHeld sprawdza blokady dpkg i APT. Blokady nie obchodzimy: rownolegla
-// transakcja moze uszkodzic baze pakietow.
+// LockHeld checks the locks of dpkg and APT. We do not work around a lock: a
+// concurrent transaction can damage the package database.
 func (a *APT) LockHeld() (bool, string) {
 	for _, path := range aptLockFiles {
 		if held, checked := lockHeld(path); checked && held {
@@ -51,13 +52,14 @@ func (a *APT) LockHeld() (bool, string) {
 	return false, ""
 }
 
-// Plan liczy aktualizacje przez symulacje. Symulacja nie potrzebuje blokady
-// ani roota, wiec planowanie nie koliduje z reczna praca administratora.
+// Plan computes the upgrade through a simulation. A simulation needs neither
+// the lock nor root, so planning does not collide with the manual work of the
+// administrator.
 func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: a.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
-	// Pakiet czekajacy na konfiguracje zatrzyma kazda transakcje, wiec plan
-	// mowi o nim od razu. Bez tego operator dowiaduje sie o blokadzie dopiero
-	// po nieudanej aktualizacji.
+	// A package waiting for its configuration stops every transaction, so the
+	// plan says so at once. Without that the operator learns about the block
+	// only after a failed upgrade.
 	plan.Blocked = a.BlockedPackages(ctx)
 
 	switch options.Mode {
@@ -70,7 +72,7 @@ func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 	result := run(ctx, 3*time.Minute, aptGetPath,
 		"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
 	if !result.Ran || result.ExitCode != 0 {
-		return plan, fmt.Errorf("symulacja apt: %s", result.Reason())
+		return plan, fmt.Errorf("the apt simulation: %s", result.Reason())
 	}
 
 	for _, line := range strings.Split(result.Stdout, "\n") {
@@ -90,7 +92,8 @@ func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 //
 //	Inst libfoo [1.0-1] (1.0-2 Debian:12/stable [amd64])
 //
-// Format jest stabilny przy LC_ALL=C i nie zalezy od jezyka interfejsu.
+// The format is stable under LC_ALL=C and does not depend on the language of
+// the interface.
 func parseAptInstLine(line string) (Change, bool) {
 	if !strings.HasPrefix(line, "Inst ") {
 		return Change{}, false
@@ -118,7 +121,8 @@ func parseAptInstLine(line string) (Change, bool) {
 			}
 		}
 	}
-	// Repozytoria bezpieczenstwa Debiana i Ubuntu maja rozpoznawalny origin.
+	// The security repositories of Debian and Ubuntu have a recognisable
+	// origin.
 	origin := change.Origin
 	change.Security = strings.Contains(origin, "-security") ||
 		strings.Contains(origin, "Debian-Security") ||
@@ -126,8 +130,9 @@ func parseAptInstLine(line string) (Change, bool) {
 	return change, true
 }
 
-// downloadSize sumuje rozmiary pakietow do pobrania. Wartosc jest szacunkiem
-// planu, a nie obietnica; przy bledzie zwracamy zero zamiast zgadywac.
+// downloadSize sums up the sizes of the packages to fetch. The value is an
+// estimate of the plan rather than a promise; on an error we return zero
+// instead of guessing.
 func (a *APT) downloadSize(ctx context.Context, options Options) uint64 {
 	result := run(ctx, 2*time.Minute, aptGetPath,
 		"--print-uris", "--quiet", "--yes", "-o", "Debug::NoLocking=true", "upgrade")
@@ -137,7 +142,7 @@ func (a *APT) downloadSize(ctx context.Context, options Options) uint64 {
 	var total uint64
 	for _, line := range strings.Split(result.Stdout, "\n") {
 		fields := strings.Fields(line)
-		// Format: 'uri' nazwa_pliku rozmiar SHA256:...
+		// The format: 'uri' file_name size SHA256:...
 		if len(fields) < 3 || !strings.HasPrefix(fields[0], "'") {
 			continue
 		}
@@ -148,8 +153,8 @@ func (a *APT) downloadSize(ctx context.Context, options Options) uint64 {
 	return total
 }
 
-// rebootPredicted zgaduje potrzebe restartu na podstawie aktualizowanych
-// pakietow. Jest to przewidywanie planu, a nie stan hosta.
+// rebootPredicted guesses the need for a restart from the packages being
+// upgraded. It is a prediction of the plan rather than the state of the host.
 func (a *APT) rebootPredicted(changes []Change) bool {
 	for _, change := range changes {
 		name := change.Name
@@ -161,7 +166,8 @@ func (a *APT) rebootPredicted(changes []Change) bool {
 	return false
 }
 
-// Refresh odswieza metadane repozytorium. Wymaga roota i blokady.
+// Refresh refreshes the metadata of the repository. It requires root and the
+// lock.
 func (a *APT) Refresh(ctx context.Context) error {
 	if held, path := a.LockHeld(); held {
 		return fmt.Errorf("%w: %s", ErrLocked, path)
@@ -173,9 +179,10 @@ func (a *APT) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Upgrade wykonuje transakcje. Zachowanie wobec conffiles jest zdefiniowane
-// jawnie: zachowujemy plik administratora i nigdy nie pytamy interaktywnie.
-// Prompt w tym trybie oznaczalby zawieszenie, a nie sukces.
+// Upgrade carries the transaction out. The behaviour towards conffiles is
+// defined explicitly: we keep the file of the administrator and never ask
+// interactively. A prompt in this mode would mean a hang rather than a
+// success.
 func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 
@@ -183,36 +190,37 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
 	}
 
-	// Transakcja moze pociagnac przebudowe initramfs. Gdy proces nie widzi
-	// modulow jadra, obraz powstanie bez sterownika dysku i host nie wstanie
-	// po restarcie - lepiej nie zaczynac.
+	// A transaction can pull a rebuild of the initramfs. When the process does
+	// not see the kernel modules, the image comes out without the disk driver
+	// and the host does not come up after a restart - better not to start.
 	if hidden, dir := modulesHidden(); hidden {
 		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
 	}
 
-	// Wersje przed transakcja sa zapisywane zawsze, takze gdy transakcja padnie.
+	// The versions from before the transaction are always recorded, also when
+	// the transaction fails.
 	before := a.installedVersions(ctx)
 
-	// APT nie zna trybu "tylko bezpieczenstwo": apt-get upgrade podnosi
-	// wszystko, co da sie podniesc. Zawezenie jest wiec wyliczane z planu
-	// i przekazywane jako lista nazw - inaczej operator zatwierdzalby trzy
-	// pakiety bezpieczenstwa, a host podnosilby czterdziesci.
+	// APT has no "security only" mode: apt-get upgrade raises everything that
+	// can be raised. The narrowing is therefore computed from the plan and
+	// passed as a list of names - otherwise the operator would approve three
+	// security packages and the host would raise forty.
 	if options.SecurityOnly && len(options.Packages) == 0 {
 		plan, err := a.Plan(ctx, options)
 		if err != nil {
 			return apply, err
 		}
 		if len(plan.Changes) == 0 {
-			// Brak aktualizacji bezpieczenstwa nie jest bledem i nie moze
-			// zamieniac sie w pelna aktualizacje hosta.
+			// No security updates is not an error and must not turn into a
+			// full upgrade of the host.
 			return apply, nil
 		}
 		for _, change := range plan.Changes {
-			// Pakiet agenta ma wlasna operacje wymiany: podniesiony w tej
-			// transakcji zatrzymalby helpera, ktory ja prowadzi. Pozostale
-			// pakiety chronione podnosza sie normalnie - ochrona dotyczy
-			// ich usuwania, a nie aktualizacji bezpieczenstwa.
-			if change.Name == PakietAgenta {
+			// The agent package has an operation of its own for replacing it:
+			// raised in this transaction it would stop the helper that runs
+			// it. The remaining protected packages are raised normally - the
+			// protection covers removing them rather than security updates.
+			if change.Name == AgentPackage {
 				continue
 			}
 			options.Packages = append(options.Packages, change.Name)
@@ -229,13 +237,14 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		"-o", "APT::Get::Assume-Yes=true",
 		"upgrade",
 	}
-	// Zwykla aktualizacja nie rusza agenta: wymiana go w srodku transakcji,
-	// ktora on sam wykonuje, konczy sie hostem odcietym w polowie pracy
-	// i wynikiem, ktorego nikt nie odbierze. APT nie zna wykluczen, wiec
-	// pakiet jest wstrzymany na czas transakcji i zwalniany po niej.
-	// Do wymiany agenta jest osobna operacja, ktora omija to swiadomie.
-	if zwolnij, err := a.wstrzymajAgenta(ctx); err == nil {
-		defer zwolnij()
+	// An ordinary upgrade does not touch the agent: replacing it in the middle
+	// of a transaction it carries out itself ends with a host cut off halfway
+	// through the work and a result nobody collects. APT has no exclusions, so
+	// the package is held for the duration of the transaction and released
+	// afterwards. Replacing the agent has an operation of its own that skips
+	// this deliberately.
+	if release, err := a.holdAgent(ctx); err == nil {
+		defer release()
 	}
 	if len(options.Packages) > 0 {
 		args = append([]string{"--yes", "--quiet",
@@ -244,21 +253,22 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 			"install", "--only-upgrade"}, options.Packages...)
 	}
 
-	// Apt melduje postep wlasnym, maszynowym kanalem na deskryptorze 3.
+	// Apt reports progress over a machine channel of its own on descriptor 3.
 	if options.Progress != nil {
 		args = append([]string{"-o", "APT::Status-Fd=3"}, args...)
 	}
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, options.Progress != nil,
 		aptGetPath, args...)
 
-	// Uszkodzone archiwum w pamieci podrecznej naprawia sie samo, bo ma jedna
-	// poprawna odpowiedz. Pytanie konfiguracyjne pakietu jej nie ma i zostaje
-	// dla operatora - to granica miedzy naprawa a decydowaniem za czlowieka.
-	if (!result.Ran || result.ExitCode != 0) && UszkodzonePobranie(result.Stderr, result.Stdout) {
-		czyszczenie := run(ctx, 5*time.Minute, aptGetPath, "--quiet", "clean")
-		if czyszczenie.Ran && czyszczenie.ExitCode == 0 {
+	// A damaged archive in the cache repairs itself, because it has one
+	// correct answer. A configuration question of a package has none and is
+	// left to the operator - that is the boundary between repairing and
+	// deciding for a person.
+	if (!result.Ran || result.ExitCode != 0) && BrokenDownload(result.Stderr, result.Stdout) {
+		cleaning := run(ctx, 5*time.Minute, aptGetPath, "--quiet", "clean")
+		if cleaning.Ran && cleaning.ExitCode == 0 {
 			apply.SelfRepair = append(apply.SelfRepair,
-				"usunieto uszkodzone archiwa z pamieci podrecznej i ponowiono transakcje")
+				"the damaged archives were removed from the cache and the transaction was retried")
 			result = runWithProgress(ctx, 45*time.Minute, options.Progress,
 				options.Progress != nil, aptGetPath, args...)
 		}
@@ -272,12 +282,12 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply.ServicesNeedingRestart = a.servicesNeedingRestart(ctx)
 
 	if !result.Ran || result.ExitCode != 0 {
-		// Nazwa pakietu wchodzi do komunikatu, bo bez niej operator wie tylko
-		// tyle, ze transakcja padla, i musi zalogowac sie na host, zeby ustalic
-		// przyczyne.
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		// The name of the package goes into the message, because without it the
+		// operator knows only that the transaction failed and has to log into
+		// the host to establish the cause.
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		if len(apply.PackagesNeedingAttention) > 0 {
-			return apply, fmt.Errorf("apt-get upgrade: %s; wymaga uwagi: %s",
+			return apply, fmt.Errorf("apt-get upgrade: %s; needs attention: %s",
 				result.Reason(), strings.Join(apply.PackagesNeedingAttention, ", "))
 		}
 		return apply, fmt.Errorf("apt-get upgrade: %s", result.Reason())
@@ -285,7 +295,7 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	return apply, nil
 }
 
-// installedVersions zwraca mape pakiet -> wersja.
+// installedVersions returns a map of package -> version.
 func (a *APT) installedVersions(ctx context.Context) map[string]string {
 	result := run(ctx, 2*time.Minute, dpkgQueryPath, "-W", "-f", "${binary:Package} ${Version}\n")
 	if !result.Ran || result.ExitCode != 0 {
@@ -301,36 +311,39 @@ func (a *APT) installedVersions(ctx context.Context) map[string]string {
 	return versions
 }
 
-// DatabaseBroken sprawdza, czy dpkg zostal w stanie wymagajacym naprawy.
-// Po takiej awarii kolejne kampanie na hoscie musza zostac wstrzymane.
+// DatabaseBroken checks whether dpkg was left in a state that needs
+// repairing. After such a failure the following campaigns on the host have to
+// be held back.
 func (a *APT) DatabaseBroken(ctx context.Context) bool {
 	return len(a.PackagesNeedingAttention(ctx)) > 0
 }
 
-// PackagesNeedingAttention wypisuje pakiety, ktorych stan blokuje transakcje.
+// PackagesNeedingAttention lists the packages whose state blocks a
+// transaction.
 //
-// Stan czytamy wprost z bazy dpkg, a nie przez "dpkg --audit": audyt wymaga
-// dostepu do blokady katalogu bazy, ktorego agent bez uprawnien roota nie ma.
-// Plik stanu jest czytelny dla wszystkich, wiec ta sama informacja jest
-// dostepna zarowno agentowi, jak i helperowi - a plan operacji moze ostrzec
-// o blokadzie, zanim ktokolwiek zleci aktualizacje.
+// The state is read straight from the dpkg database rather than through "dpkg
+// --audit": the audit needs access to the lock of the database directory,
+// which the agent without root does not have. The status file is readable by
+// everyone, so the same information is available both to the agent and to the
+// helper - and the plan of an operation can warn about the block before anyone
+// orders an upgrade.
 func (a *APT) PackagesNeedingAttention(ctx context.Context) []string {
 	blocked := a.blockedFromStatus()
-	nazwy := make([]string, 0, len(blocked))
-	for _, pakiet := range blocked {
-		nazwy = append(nazwy, pakiet.Name)
+	names := make([]string, 0, len(blocked))
+	for _, pkg := range blocked {
+		names = append(names, pkg.Name)
 	}
-	return nazwy
+	return names
 }
 
-// blockedFromStatus parsuje /var/lib/dpkg/status i zwraca pakiety w stanie
-// innym niz w pelni zainstalowany albo calkiem usuniety.
+// blockedFromStatus parses /var/lib/dpkg/status and returns the packages in a
+// state other than fully installed or entirely removed.
 func (a *APT) blockedFromStatus() []Blocked {
 	return blockedFromStatusFile(dpkgStatusPath)
 }
 
-// blockedFromStatusFile jest wydzielone, zeby dalo sie sprawdzic parsowanie
-// bez zmieniania bazy pakietow dzialajacego systemu.
+// blockedFromStatusFile is separated out so that the parsing can be checked
+// without changing the package database of a running system.
 func blockedFromStatusFile(path string) []Blocked {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -338,37 +351,37 @@ func blockedFromStatusFile(path string) []Blocked {
 	}
 	var blocked []Blocked
 	for _, stanza := range strings.Split(string(data), "\n\n") {
-		var nazwa, status string
-		for _, linia := range strings.Split(stanza, "\n") {
+		var name, status string
+		for _, line := range strings.Split(stanza, "\n") {
 			switch {
-			case strings.HasPrefix(linia, "Package: "):
-				nazwa = strings.TrimSpace(strings.TrimPrefix(linia, "Package: "))
-			case strings.HasPrefix(linia, "Status: "):
-				status = strings.TrimSpace(strings.TrimPrefix(linia, "Status: "))
+			case strings.HasPrefix(line, "Package: "):
+				name = strings.TrimSpace(strings.TrimPrefix(line, "Package: "))
+			case strings.HasPrefix(line, "Status: "):
+				status = strings.TrimSpace(strings.TrimPrefix(line, "Status: "))
 			}
 		}
-		if nazwa == "" || status == "" {
+		if name == "" || status == "" {
 			continue
 		}
-		pola := strings.Fields(status)
-		if len(pola) != 3 {
+		fields := strings.Fields(status)
+		if len(fields) != 3 {
 			continue
 		}
-		// Trzecie pole opisuje faktyczny stan pakietu. Zainstalowany i sam
-		// plikami konfiguracyjnymi nie blokuja niczego; kazdy inny stan
-		// znaczy, ze dpkg nie dokonczyl pracy i zrobi to przy nastepnej
-		// transakcji - a wtedy moze na niej paść.
-		switch pola[2] {
+		// The third field describes the actual state of the package. Installed
+		// and configuration files alone block nothing; every other state means
+		// dpkg did not finish its work and will do it during the next
+		// transaction - and may fail on it then.
+		switch fields[2] {
 		case "installed", "config-files", "not-installed":
 			continue
 		}
-		blocked = append(blocked, Blocked{Name: nazwa, Status: status})
+		blocked = append(blocked, Blocked{Name: name, Status: status})
 	}
 	return blocked
 }
 
-// servicesNeedingRestart czyta liste zapisana przez needrestart, jesli jest
-// zainstalowany. Brak narzedzia oznacza pusta liste, a nie brak potrzeby.
+// servicesNeedingRestart reads the list written by needrestart, if it is
+// installed. A missing tool means an empty list rather than no need.
 func (a *APT) servicesNeedingRestart(ctx context.Context) []string {
 	const path = "/var/run/reboot-required.pkgs"
 	data, err := os.ReadFile(path)
@@ -384,7 +397,7 @@ func (a *APT) servicesNeedingRestart(ctx context.Context) []string {
 	return packages
 }
 
-// diffVersions porownuje stan przed i po transakcji.
+// diffVersions compares the state before and after the transaction.
 func diffVersions(before, after map[string]string) []Change {
 	var changes []Change
 	for name, newVersion := range after {
@@ -405,56 +418,56 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// planRemove liczy, co zniknie razem z wskazanymi pakietami.
+// planRemove computes what will disappear along with the named packages.
 //
-// Usuniecie jednego pakietu potrafi pociagnac kilkadziesiat zaleznych.
-// Operator ma zobaczyc pelna liste przed zatwierdzeniem, a nie odkryc ja
-// po fakcie, gdy hosta juz nie da sie przywrocic bez rejestru.
+// Removing one package can pull dozens of dependent ones. The operator is to
+// see the full list before the approval rather than discover it after the
+// fact, when the host can no longer be restored without a registry.
 func (a *APT) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
-		return plan, fmt.Errorf("plan usuniecia wymaga listy pakietow")
+		return plan, fmt.Errorf("a removal plan requires a list of packages")
 	}
 	args := append([]string{"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "remove"},
 		options.Packages...)
 	result := run(ctx, 3*time.Minute, aptGetPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
-		return plan, fmt.Errorf("symulacja usuniecia: %s", result.Reason())
+		return plan, fmt.Errorf("the removal simulation: %s", result.Reason())
 	}
 
-	for _, linia := range strings.Split(result.Stdout, "\n") {
-		nazwa, ok := parseAptRemvLine(linia)
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		name, ok := parseAptRemvLine(line)
 		if !ok {
 			continue
 		}
-		plan.Removals = append(plan.Removals, nazwa)
+		plan.Removals = append(plan.Removals, name)
 	}
-	plan.Protected = ChronioneWZbiorze(plan.Removals)
+	plan.Protected = ProtectedInSet(plan.Removals)
 	return plan, nil
 }
 
-// planInstall liczy, co przybedzie razem z wskazanymi pakietami.
+// planInstall computes what will arrive along with the named packages.
 func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
-		return plan, fmt.Errorf("plan instalacji wymaga listy pakietow")
+		return plan, fmt.Errorf("an installation plan requires a list of packages")
 	}
 	args := append([]string{"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "install"},
 		options.Packages...)
 	result := run(ctx, 3*time.Minute, aptGetPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
-		return plan, fmt.Errorf("symulacja instalacji: %s", result.Reason())
+		return plan, fmt.Errorf("the installation simulation: %s", result.Reason())
 	}
 
-	for _, linia := range strings.Split(result.Stdout, "\n") {
-		if change, ok := parseAptInstLine(linia); ok {
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if change, ok := parseAptInstLine(line); ok {
 			plan.Changes = append(plan.Changes, change)
 		}
-		// Instalacja tez potrafi usuwac: konflikt pakietow konczy sie
-		// wymiana, a nie dopisaniem.
-		if nazwa, ok := parseAptRemvLine(linia); ok {
-			plan.Removals = append(plan.Removals, nazwa)
+		// An installation can remove as well: a conflict of packages ends with
+		// a replacement rather than an addition.
+		if name, ok := parseAptRemvLine(line); ok {
+			plan.Removals = append(plan.Removals, name)
 		}
 	}
-	plan.Protected = ChronioneWZbiorze(plan.Removals)
+	plan.Protected = ProtectedInSet(plan.Removals)
 	plan.DownloadBytes = a.downloadSize(ctx, options)
 	return plan, nil
 }
@@ -462,83 +475,82 @@ func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 // parseAptRemvLine czyta linie postaci:
 //
 //	Remv libfoo [1.0-1]
-func parseAptRemvLine(linia string) (string, bool) {
-	pola := strings.Fields(strings.TrimSpace(linia))
-	if len(pola) < 2 || pola[0] != "Remv" {
+func parseAptRemvLine(line string) (string, bool) {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) < 2 || fields[0] != "Remv" {
 		return "", false
 	}
-	return pola[1], true
+	return fields[1], true
 }
 
-// Install instaluje wskazane pakiety.
-// wstrzymajAgenta wstrzymuje pakiet agenta na czas jednej transakcji.
+// holdAgent holds the agent package for the duration of one transaction.
 //
-// Zwraca funkcje zwalniajaca. Gdy pakiet byl wstrzymany wczesniej przez
-// administratora, nie zwalniamy go: decyzja operatora hosta jest wazniejsza
-// niz wygoda jednej transakcji.
-func (a *APT) wstrzymajAgenta(ctx context.Context) (func(), error) {
-	stan := run(ctx, 30*time.Second, aptMarkPath, "showhold")
-	if !stan.Ran {
-		return nil, fmt.Errorf("apt-mark showhold: %s", stan.Reason())
+// It returns the releasing function. When the package was held earlier by the
+// administrator we do not release it: the decision of the operator of the host
+// weighs more than the convenience of one transaction.
+func (a *APT) holdAgent(ctx context.Context) (func(), error) {
+	state := run(ctx, 30*time.Second, aptMarkPath, "showhold")
+	if !state.Ran {
+		return nil, fmt.Errorf("apt-mark showhold: %s", state.Reason())
 	}
-	if strings.Contains(stan.Stdout, PakietAgenta) {
+	if strings.Contains(state.Stdout, AgentPackage) {
 		return func() {}, nil
 	}
-	if wynik := run(ctx, 30*time.Second, aptMarkPath, "hold", PakietAgenta); !wynik.Ran ||
-		wynik.ExitCode != 0 {
-		return nil, fmt.Errorf("apt-mark hold: %s", wynik.Reason())
+	if result := run(ctx, 30*time.Second, aptMarkPath, "hold", AgentPackage); !result.Ran ||
+		result.ExitCode != 0 {
+		return nil, fmt.Errorf("apt-mark hold: %s", result.Reason())
 	}
-	// Slad wlasnego wstrzymania. Transakcja moze zginac razem z procesem -
-	// wtedy odroczone zwolnienie sie nie wykona, a pakiet zostaje wstrzymany
-	// na zawsze i blokuje kazda pozniejsza wymiane agenta. Po tym pliku
-	// poznajemy wstrzymanie wlasne i tylko takie zwalniamy: decyzja
-	// administratora hosta zostaje nietknieta.
-	_ = os.WriteFile(sladWstrzymania(), []byte(PakietAgenta+"\n"), 0o600)
+	// The trace of our own hold. A transaction can die with its process - the
+	// deferred release does not run then and the package stays held for good,
+	// blocking every later replacement of the agent. This file is how we
+	// recognise our own hold, and only such a hold is released: the decision
+	// of the administrator of the host stays untouched.
+	_ = os.WriteFile(holdTrace(), []byte(AgentPackage+"\n"), 0o600)
 
 	return func() {
-		// Kontekst transakcji moze byc juz anulowany, a zwolnienie musi sie
-		// wykonac mimo to: pakiet zostawiony na wstrzymaniu blokowalby
-		// pozniejsza wymiane agenta.
-		zwalnianie, anuluj := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer anuluj()
-		run(zwalnianie, 30*time.Second, aptMarkPath, "unhold", PakietAgenta)
-		_ = os.Remove(sladWstrzymania())
+		// The context of the transaction may already be cancelled and the
+		// release has to run anyway: a package left on hold would block a
+		// later replacement of the agent.
+		releasing, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		run(releasing, 30*time.Second, aptMarkPath, "unhold", AgentPackage)
+		_ = os.Remove(holdTrace())
 	}, nil
 }
 
-// sladWstrzymania wskazuje plik znacznika wlasnego wstrzymania pakietu agenta.
-func sladWstrzymania() string {
+// holdTrace names the marker file of our own hold on the agent package.
+func holdTrace() string {
 	return filepath.Join(runtimeDir, "state", "wstrzymany-agent")
 }
 
-// ZwolnijPorzuconeWstrzymanie zdejmuje wstrzymanie pakietu agenta zostawione
-// przez transakcje, ktora nie doszla do konca.
+// ReleaseAbandonedHold lifts the hold on the agent package left behind by a
+// transaction that did not reach its end.
 //
-// Wywolywane przy starcie helpera. Bez tego host, na ktorym transakcja zginela
-// razem z procesem, zostawal z pakietem agenta wstrzymanym na zawsze - i zadna
-// pozniejsza wymiana agenta nie mogla przejsc.
-func ZwolnijPorzuconeWstrzymanie(ctx context.Context) (bool, error) {
-	slad := sladWstrzymania()
-	if _, err := os.Stat(slad); err != nil {
+// Called at the start of the helper. Without it a host whose transaction died
+// with its process was left with the agent package held for good - and no
+// later replacement of the agent could go through.
+func ReleaseAbandonedHold(ctx context.Context) (bool, error) {
+	trace := holdTrace()
+	if _, err := os.Stat(trace); err != nil {
 		return false, nil
 	}
-	defer func() { _ = os.Remove(slad) }()
+	defer func() { _ = os.Remove(trace) }()
 
-	// Host bez apt nie ma czego zwalniac. Slad zostal usuniety wyzej, wiec
-	// proba nie wroci przy kazdym starcie helpera.
+	// A host without apt has nothing to release. The trace was removed above,
+	// so the attempt does not come back at every start of the helper.
 	if _, err := os.Stat(aptMarkPath); err != nil {
 		return false, nil
 	}
-	stan := run(ctx, 30*time.Second, aptMarkPath, "showhold")
-	if !stan.Ran {
-		return false, fmt.Errorf("apt-mark showhold: %s", stan.Reason())
+	state := run(ctx, 30*time.Second, aptMarkPath, "showhold")
+	if !state.Ran {
+		return false, fmt.Errorf("apt-mark showhold: %s", state.Reason())
 	}
-	if !strings.Contains(stan.Stdout, PakietAgenta) {
+	if !strings.Contains(state.Stdout, AgentPackage) {
 		return false, nil
 	}
-	if wynik := run(ctx, 30*time.Second, aptMarkPath, "unhold", PakietAgenta); !wynik.Ran ||
-		wynik.ExitCode != 0 {
-		return false, fmt.Errorf("apt-mark unhold: %s", wynik.Reason())
+	if result := run(ctx, 30*time.Second, aptMarkPath, "unhold", AgentPackage); !result.Ran ||
+		result.ExitCode != 0 {
+		return false, fmt.Errorf("apt-mark unhold: %s", result.Reason())
 	}
 	return true, nil
 }
@@ -546,7 +558,7 @@ func ZwolnijPorzuconeWstrzymanie(ctx context.Context) (bool, error) {
 func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 	if len(options.Packages) == 0 {
-		return apply, fmt.Errorf("instalacja wymaga listy pakietow")
+		return apply, fmt.Errorf("an installation requires a list of packages")
 	}
 	if held, path := a.LockHeld(); held {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
@@ -562,8 +574,8 @@ func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
 	if options.AllowDowngrade {
 		args = append(args, "--allow-downgrades")
 	}
-	// Wstrzymanie pakietu chroni go przed zwykla aktualizacja, a nie przed
-	// operacja, ktora wskazuje wersje wprost.
+	// A hold on a package protects it from an ordinary upgrade rather than
+	// from an operation that names the version outright.
 	if options.AllowDowngrade {
 		args = append(args, "--allow-change-held-packages")
 	}
@@ -580,22 +592,22 @@ func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
 	apply.DatabaseBroken = len(apply.PackagesNeedingAttention) > 0
 	apply.RebootRequired = fileExists("/var/run/reboot-required") || fileExists("/run/reboot-required")
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		return apply, fmt.Errorf("apt-get install: %s", result.Reason())
 	}
 	return apply, nil
 }
 
-// Remove usuwa wskazane pakiety wraz z ich zaleznosciami.
+// Remove removes the named packages along with their dependencies.
 //
-// Zbior usuwanych jest liczony ponownie tuz przed operacja i porownywany
-// z tym, co zatwierdzil operator. Roznica oznacza, ze host zmienil sie od
-// czasu planu i usunieciu podleglby inny zestaw - a wtedy odmowa jest
-// wlasciwa reakcja, a nie wykonanie czegos, czego nikt nie widzial.
-func (a *APT) Remove(ctx context.Context, options Options, oczekiwane []string) (Apply, error) {
+// The set to remove is computed again right before the operation and compared
+// with what the operator approved. A difference means the host has changed
+// since the plan and a different set would be removed - and a refusal is then
+// the right reaction rather than carrying out something nobody saw.
+func (a *APT) Remove(ctx context.Context, options Options, expected []string) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 	if len(options.Packages) == 0 {
-		return apply, fmt.Errorf("usuniecie wymaga listy pakietow")
+		return apply, fmt.Errorf("a removal requires a list of packages")
 	}
 	if held, path := a.LockHeld(); held {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
@@ -608,8 +620,8 @@ func (a *APT) Remove(ctx context.Context, options Options, oczekiwane []string) 
 	if len(plan.Protected) > 0 {
 		return apply, fmt.Errorf("%w: %s", ErrProtectedPackage, strings.Join(plan.Protected, ", "))
 	}
-	if roznica := porownajZbiory(oczekiwane, plan.Removals); roznica != "" {
-		return apply, fmt.Errorf("%w: %s", ErrPlanChanged, roznica)
+	if difference := compareSets(expected, plan.Removals); difference != "" {
+		return apply, fmt.Errorf("%w: %s", ErrPlanChanged, difference)
 	}
 
 	before := a.installedVersions(ctx)
@@ -621,42 +633,42 @@ func (a *APT) Remove(ctx context.Context, options Options, oczekiwane []string) 
 	apply.PackagesNeedingAttention = a.PackagesNeedingAttention(ctx)
 	apply.DatabaseBroken = len(apply.PackagesNeedingAttention) > 0
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		return apply, fmt.Errorf("apt-get remove: %s", result.Reason())
 	}
 	return apply, nil
 }
 
-// SetHold wstrzymuje albo zwalnia aktualizacje pakietow.
-func (a *APT) SetHold(ctx context.Context, pakiety []string, hold bool) (Apply, error) {
+// SetHold holds or releases the upgrades of packages.
+func (a *APT) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
-	if len(pakiety) == 0 {
-		return apply, fmt.Errorf("wstrzymanie wymaga listy pakietow")
+	if len(pkgs) == 0 {
+		return apply, fmt.Errorf("a hold requires a list of packages")
 	}
-	operacja := "unhold"
+	operation := "unhold"
 	if hold {
-		operacja = "hold"
+		operation = "hold"
 	}
-	args := append([]string{operacja}, pakiety...)
+	args := append([]string{operation}, pkgs...)
 	result := run(ctx, time.Minute, aptMarkPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
-		return apply, fmt.Errorf("apt-mark %s: %s", operacja, result.Reason())
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
+		return apply, fmt.Errorf("apt-mark %s: %s", operation, result.Reason())
 	}
 	return apply, nil
 }
 
-// Holds zwraca pakiety wstrzymane na hoscie.
+// Holds returns the packages held on the host.
 func (a *APT) Holds(ctx context.Context) []string {
 	result := run(ctx, 30*time.Second, aptMarkPath, "showhold")
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
 	}
-	var wstrzymane []string
-	for _, linia := range strings.Split(result.Stdout, "\n") {
-		if nazwa := strings.TrimSpace(linia); nazwa != "" {
-			wstrzymane = append(wstrzymane, nazwa)
+	var held []string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			held = append(held, name)
 		}
 	}
-	return wstrzymane
+	return held
 }

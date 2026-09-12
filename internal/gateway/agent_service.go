@@ -1805,10 +1805,10 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 	switch {
 	case !status.Known:
 		s.denied(ctx, hostID, "unknown_certificate")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat nieznany"))
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate is unknown"))
 	case status.Revoked:
 		s.denied(ctx, hostID, "revoked_certificate")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat odwolany"))
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate was revoked"))
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))

@@ -1,15 +1,16 @@
-// Package endpoints wybiera brame, z ktora agent probuje sie polaczyc.
+// Package endpoints chooses the gateway the agent tries to connect to.
 //
-// Agent utrzymuje jedna aktywna sesje, ale zna uporzadkowana liste bram.
-// Wybor nie jest samym "wez nastepna z listy": rodzaj bledu rozstrzyga, czy
-// w ogole warto probowac dalej. Zerwane TCP znaczy "sprobuj gdzie indziej
-// za chwile"; nieznane CA znaczy "ta brama jest zle skonfigurowana i szybkie
-// przelaczanie w kolko niczego nie naprawi"; odwolany certyfikat znaczy
-// "przestan probowac, bo problem nie jest po stronie sieci".
+// An agent keeps one active session but knows an ordered list of gateways.
+// The choice is not simply "take the next one from the list": the kind of
+// error settles whether it is worth trying further at all. A broken TCP
+// connection means "try somewhere else in a moment"; an unknown CA means "this
+// gateway is misconfigured and switching quickly in circles will not fix
+// anything"; a revoked certificate means "stop trying, because the problem is
+// not on the side of the network".
 //
-// Backoff ma pelny jitter, bo dziesiec tysiecy agentow nie moze wrocic
-// w tej samej sekundzie po awarii centrali - to ta sekunda przewraca ja
-// ponownie.
+// The backoff has full jitter, because ten thousand agents must not come back
+// in the same second after a failure of the centre - it is that second that
+// topples it again.
 package endpoints
 
 import (
@@ -20,213 +21,217 @@ import (
 	"time"
 )
 
-// Klasa opisuje rodzaj niepowodzenia polaczenia.
-type Klasa string
+// Class describes the kind of a failure of a connection.
+type Class string
 
 const (
-	// KlasaSieci to zerwane albo odrzucone polaczenie. Zwykla awaria: warto
-	// sprobowac nastepnej bramy zaraz.
-	KlasaSieci Klasa = "network"
-	// KlasaKonfiguracji to nieznane CA albo nazwa, ktorej certyfikat nie
-	// poswiadcza. Szybkie przelaczanie niczego nie naprawi, bo problem jest
-	// w konfiguracji, a nie w laczu.
-	KlasaKonfiguracji Klasa = "configuration_error"
-	// KlasaTozsamosci to certyfikat nieznany albo odwolany. Agent ma
-	// przestac probowac: kolejne proby nie sa awaria lacza, tylko dobijaniem
-	// sie tozsamoscia, ktora zostala cofnieta.
-	KlasaTozsamosci Klasa = "identity_rejected"
+	// ClassNetwork is a broken or refused connection. An ordinary failure: it
+	// is worth trying the next gateway right away.
+	ClassNetwork Class = "network"
+	// ClassConfiguration is an unknown CA or a name the certificate does not
+	// attest. Switching quickly will fix nothing, because the problem is in
+	// the configuration rather than in the link.
+	ClassConfiguration Class = "configuration_error"
+	// ClassIdentity is a certificate that is unknown or revoked. The agent is
+	// to stop trying: further attempts are not a failure of the link but
+	// knocking with an identity that has been withdrawn.
+	ClassIdentity Class = "identity_rejected"
 )
 
-// ErrTozsamoscOdrzucona konczy prace menedzera: zadna brama nie wpusci
-// certyfikatu, ktory panel odwolal.
-var ErrTozsamoscOdrzucona = errors.New("tozsamosc agenta odrzucona przez centrale")
+// ErrIdentityRejected ends the work of the manager: no gateway will let in a
+// certificate the panel has revoked.
+var ErrIdentityRejected = errors.New("the identity of the agent was rejected by the centre")
 
-// Domyslne granice backoffu.
+// The default limits of the backoff.
 const (
 	MinBackoff = 2 * time.Second
 	MaxBackoff = 5 * time.Minute
-	// BackoffKonfiguracji jest dluzszy: blad konfiguracji naprawia czlowiek,
-	// a nie ponowienie. Krotki backoff zamienilby to w petle w dzienniku.
-	BackoffKonfiguracji = 15 * time.Minute
+	// ConfigurationBackoff is longer: a configuration error is fixed by a
+	// person rather than by a retry. A short backoff would turn it into a loop
+	// in the log.
+	ConfigurationBackoff = 15 * time.Minute
 )
 
-// Stan opisuje jedna brame.
-type Stan struct {
-	URL           string
-	Bledy         int
-	Klasa         Klasa
-	NastepnaProba time.Time
-	OstatniSukces time.Time
+// State describes one gateway.
+type State struct {
+	URL         string
+	Errors      int
+	Class       Class
+	NextAttempt time.Time
+	LastSuccess time.Time
 }
 
-// Menedzer prowadzi wybor bramy.
-type Menedzer struct {
-	bramy      []*Stan
+// Manager drives the choice of a gateway.
+type Manager struct {
+	gateways   []*State
 	minBackoff time.Duration
 	maxBackoff time.Duration
-	// odrzucona zapamietuje, ze centrala odmowila tozsamosci. Stan globalny,
-	// a nie per brama: tozsamosc jest jedna dla calej floty.
-	odrzucona bool
+	// rejected remembers that the centre refused the identity. Global state
+	// rather than per gateway: the identity is one for the whole fleet.
+	rejected bool
 }
 
-// Nowy tworzy menedzera dla podanej listy bram w kolejnosci priorytetu.
-func Nowy(adresy []string, minBackoff, maxBackoff time.Duration) *Menedzer {
+// New creates a manager for the given list of gateways in order of priority.
+func New(addresses []string, minBackoff, maxBackoff time.Duration) *Manager {
 	if minBackoff <= 0 {
 		minBackoff = MinBackoff
 	}
 	if maxBackoff < minBackoff {
 		maxBackoff = MaxBackoff
 	}
-	menedzer := &Menedzer{minBackoff: minBackoff, maxBackoff: maxBackoff}
-	widziane := map[string]bool{}
-	for _, adres := range adresy {
-		if adres == "" || widziane[adres] {
+	manager := &Manager{minBackoff: minBackoff, maxBackoff: maxBackoff}
+	seen := map[string]bool{}
+	for _, address := range addresses {
+		if address == "" || seen[address] {
 			continue
 		}
-		widziane[adres] = true
-		menedzer.bramy = append(menedzer.bramy, &Stan{URL: adres})
+		seen[address] = true
+		manager.gateways = append(manager.gateways, &State{URL: address})
 	}
-	return menedzer
+	return manager
 }
 
-// Bramy zwraca stan wszystkich bram w kolejnosci priorytetu.
-func (m *Menedzer) Bramy() []Stan {
-	kopia := make([]Stan, 0, len(m.bramy))
-	for _, brama := range m.bramy {
-		kopia = append(kopia, *brama)
+// Gateways returns the state of every gateway in order of priority.
+func (m *Manager) Gateways() []State {
+	copied := make([]State, 0, len(m.gateways))
+	for _, gateway := range m.gateways {
+		copied = append(copied, *gateway)
 	}
-	return kopia
+	return copied
 }
 
-// Wybierz zwraca pierwsza brame gotowa do proby.
+// Choose returns the first gateway ready for an attempt.
 //
-// Kolejnosc listy jest priorytetem, a nie sugestia: agent wraca na brame
-// pierwsza, gdy tylko jej okno ponowienia minie. Bez tego cala flota
-// zostawalaby na bramie zapasowej dlugo po tym, jak glowna wrocila.
-func (m *Menedzer) Wybierz(teraz time.Time) (*Stan, error) {
-	if m.odrzucona {
-		return nil, ErrTozsamoscOdrzucona
+// The order of the list is a priority rather than a suggestion: the agent
+// returns to the first gateway as soon as its retry window passes. Without
+// that the whole fleet would stay on the backup gateway long after the main
+// one came back.
+func (m *Manager) Choose(now time.Time) (*State, error) {
+	if m.rejected {
+		return nil, ErrIdentityRejected
 	}
-	for _, brama := range m.bramy {
-		if !teraz.Before(brama.NastepnaProba) {
-			return brama, nil
+	for _, gateway := range m.gateways {
+		if !now.Before(gateway.NextAttempt) {
+			return gateway, nil
 		}
 	}
 	return nil, nil
 }
 
-// DoNastepnej mowi, ile czekac, zanim ktorakolwiek brama bedzie gotowa.
-func (m *Menedzer) DoNastepnej(teraz time.Time) time.Duration {
-	var najblizsza time.Duration
-	for _, brama := range m.bramy {
-		czekanie := brama.NastepnaProba.Sub(teraz)
-		if czekanie <= 0 {
+// UntilNext says how long to wait before any gateway is ready.
+func (m *Manager) UntilNext(now time.Time) time.Duration {
+	var soonest time.Duration
+	for _, gateway := range m.gateways {
+		waiting := gateway.NextAttempt.Sub(now)
+		if waiting <= 0 {
 			return 0
 		}
-		if najblizsza == 0 || czekanie < najblizsza {
-			najblizsza = czekanie
+		if soonest == 0 || waiting < soonest {
+			soonest = waiting
 		}
 	}
-	if najblizsza == 0 {
+	if soonest == 0 {
 		return m.minBackoff
 	}
-	return najblizsza
+	return soonest
 }
 
-// Sukces kasuje historie bledow bramy.
+// Success clears the error history of a gateway.
 //
-// Liczy sie sesja, ktora naprawde pracowala. Polaczenie zerwane po sekundzie
-// nie jest sukcesem, choc technicznie sie nawiazalo - dlatego wolajacy
-// decyduje, kiedy to wywolac.
-func (m *Menedzer) Sukces(url string, teraz time.Time) {
-	for _, brama := range m.bramy {
-		if brama.URL == url {
-			brama.Bledy = 0
-			brama.Klasa = ""
-			brama.OstatniSukces = teraz
-			brama.NastepnaProba = time.Time{}
+// What counts is a session that really worked. A connection broken after a
+// second is not a success even though it was technically established - which
+// is why the caller decides when to call this.
+func (m *Manager) Success(url string, now time.Time) {
+	for _, gateway := range m.gateways {
+		if gateway.URL == url {
+			gateway.Errors = 0
+			gateway.Class = ""
+			gateway.LastSuccess = now
+			gateway.NextAttempt = time.Time{}
 			return
 		}
 	}
 }
 
-// Blad odnotowuje nieudana probe i wyznacza okno nastepnej.
-func (m *Menedzer) Blad(url string, klasa Klasa, teraz time.Time) {
-	if klasa == KlasaTozsamosci {
-		// Odwolany certyfikat nie jest problemem tej bramy. Dalsze proby
-		// nie przywroca dostepu i tylko zasypia dziennik centrali.
-		m.odrzucona = true
+// Error records a failed attempt and sets the window of the next one.
+func (m *Manager) Error(url string, class_ Class, now time.Time) {
+	if class_ == ClassIdentity {
+		// A revoked certificate is not a problem of this gateway. Further
+		// attempts will not restore access and only bury the log of the
+		// centre.
+		m.rejected = true
 	}
-	for _, brama := range m.bramy {
-		if brama.URL != url {
+	for _, gateway := range m.gateways {
+		if gateway.URL != url {
 			continue
 		}
-		brama.Bledy++
-		brama.Klasa = klasa
-		brama.NastepnaProba = teraz.Add(m.okno(brama))
+		gateway.Errors++
+		gateway.Class = class_
+		gateway.NextAttempt = now.Add(m.window(gateway))
 		return
 	}
 }
 
-// okno wylicza czas do nastepnej proby danej bramy.
-func (m *Menedzer) okno(brama *Stan) time.Duration {
-	gora := m.maxBackoff
-	if brama.Klasa == KlasaKonfiguracji {
-		gora = BackoffKonfiguracji
+// window computes the time until the next attempt of a given gateway.
+func (m *Manager) window(gateway *State) time.Duration {
+	upper := m.maxBackoff
+	if gateway.Class == ClassConfiguration {
+		upper = ConfigurationBackoff
 	}
-	// Podwajanie ograniczone wykladnikiem: 1<<n przy kilkudziesieciu bledach
-	// przekreca licznik i daje ujemny czas.
-	wykladnik := brama.Bledy
-	if wykladnik > 10 {
-		wykladnik = 10
+	// The doubling is bounded by the exponent: 1<<n with dozens of errors
+	// overflows the counter and gives a negative duration.
+	exponent := gateway.Errors
+	if exponent > 10 {
+		exponent = 10
 	}
-	okno := m.minBackoff * time.Duration(1<<wykladnik)
-	if okno > gora || okno <= 0 {
-		okno = gora
+	window := m.minBackoff * time.Duration(1<<exponent)
+	if window > upper || window <= 0 {
+		window = upper
 	}
-	return pelnyJitter(okno)
+	return fullJitter(window)
 }
 
-// pelnyJitter zwraca losowy czas z przedzialu [0, gora).
+// fullJitter returns a random duration from the range [0, upper).
 //
-// Pelny jitter, a nie polowa: chodzi o rozproszenie floty, a nie o skrocenie
-// czekania. Polowiczny zostawia szczyt w tym samym miejscu, tylko nizszy.
-func pelnyJitter(gora time.Duration) time.Duration {
-	if gora <= 0 {
+// Full jitter rather than half: the point is spreading the fleet out rather
+// than shortening the wait. A halved one leaves the peak in the same place,
+// only lower.
+func fullJitter(upper time.Duration) time.Duration {
+	if upper <= 0 {
 		return 0
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(gora)))
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(upper)))
 	if err != nil {
-		return gora / 2
+		return upper / 2
 	}
 	return time.Duration(n.Int64())
 }
 
-// Rozpoznaj klasyfikuje blad polaczenia.
+// Classify classifies a connection error.
 //
-// Rozpoznanie idzie po tresci bledu, bo biblioteki TLS nie daja tu typow,
-// ktore przezylyby opakowanie w connect i http2. Nierozpoznany blad jest
-// bledem sieci: to zalozenie, ktore najwyzej kaze sprobowac ponownie,
-// a nie takie, ktore zatrzymuje agenta na zawsze.
-func Rozpoznaj(err error) Klasa {
+// The recognition goes by the text of the error, because the TLS libraries
+// give no types here that would survive being wrapped in connect and http2. An
+// unrecognised error is a network error: that is an assumption which at worst
+// asks for another attempt rather than one that stops the agent for good.
+func Classify(err error) Class {
 	if err == nil {
-		return KlasaSieci
+		return ClassNetwork
 	}
-	tresc := strings.ToLower(err.Error())
+	text := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(tresc, "certyfikat odwolany"),
-		strings.Contains(tresc, "certyfikat nieznany"),
-		strings.Contains(tresc, "identity_rejected"),
-		strings.Contains(tresc, "tls: certificate required"),
-		strings.Contains(tresc, "bad certificate"),
-		strings.Contains(tresc, "certificate revoked"):
-		return KlasaTozsamosci
-	case strings.Contains(tresc, "unknown authority"),
-		strings.Contains(tresc, "certificate signed by unknown"),
-		strings.Contains(tresc, "not valid for any names"),
-		strings.Contains(tresc, "certificate is valid for"),
-		strings.Contains(tresc, "x509: "):
-		return KlasaKonfiguracji
+	case strings.Contains(text, "the certificate was revoked"),
+		strings.Contains(text, "the certificate is unknown"),
+		strings.Contains(text, "identity_rejected"),
+		strings.Contains(text, "tls: certificate required"),
+		strings.Contains(text, "bad certificate"),
+		strings.Contains(text, "certificate revoked"):
+		return ClassIdentity
+	case strings.Contains(text, "unknown authority"),
+		strings.Contains(text, "certificate signed by unknown"),
+		strings.Contains(text, "not valid for any names"),
+		strings.Contains(text, "certificate is valid for"),
+		strings.Contains(text, "x509: "):
+		return ClassConfiguration
 	}
-	return KlasaSieci
+	return ClassNetwork
 }

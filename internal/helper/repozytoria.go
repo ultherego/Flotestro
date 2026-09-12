@@ -36,7 +36,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	}
 	nazwaMenedzera := menedzer.Name()
 
-	repo := packages.Repozytorium{
+	repo := packages.Repository{
 		ID: action.GetId(), Name: action.GetName(), URL: action.GetUrl(),
 		Suites: action.GetSuites(), Components: action.GetComponents(),
 		Architectures: action.GetArchitectures(), Enabled: action.GetEnabled(),
@@ -46,7 +46,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	if action.GetRemove() {
 		repo.URL = ""
 	}
-	if err := packages.WalidujRepozytorium(repo, nazwaMenedzera,
+	if err := packages.ValidateRepository(repo, nazwaMenedzera,
 		len(action.GetPassword()) > 0); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -62,14 +62,14 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	// z odciskiem podanym przez dostawce.
 	odcisk := ""
 	if !action.GetRemove() && repo.Signed {
-		odcisk, err = packages.OdciskKlucza(action.GetGpgKey())
+		odcisk, err = packages.KeyFingerprint(action.GetGpgKey())
 		if err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 		repo.GPGKeyFingerprint = odcisk
 	}
 
-	sciezki := packages.SciezkiZrodla(repo.ID, nazwaMenedzera)
+	sciezki := packages.SourcePaths(repo.ID, nazwaMenedzera)
 	kopie := make([]kopiaPliku, 0, len(sciezki))
 	for _, sciezka := range sciezki {
 		kopia, err := zapamietajPlik(sciezka)
@@ -98,7 +98,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 		return odpowiedzZrodel(s, nazwaMenedzera, "zrodlo "+repo.ID+" usuniete", "", false)
 	}
 
-	pliki, err := packages.PlikiZrodla(repo, nazwaMenedzera, action.GetGpgKey(), action.GetPassword())
+	pliki, err := packages.SourceFiles(repo, nazwaMenedzera, action.GetGpgKey(), action.GetPassword())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -114,8 +114,8 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 			// jest haslo.
 			return reject(ErrorExecFailed, "nie zapisano "+plik.Path+": "+err.Error())
 		}
-		if filepath.Dir(plik.Path) == packages.KatalogZrodelAPT ||
-			filepath.Dir(plik.Path) == packages.KatalogZrodelDNF {
+		if filepath.Dir(plik.Path) == packages.APTSourcesDir ||
+			filepath.Dir(plik.Path) == packages.DNFSourcesDir {
 			sciezkaZrodla = plik.Path
 		}
 	}
@@ -124,7 +124,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	// cokolwiek pobrac. Zrodlo wylaczone pomijamy - nie ma czego pobierac.
 	komunikat := "zrodlo " + repo.ID + " zapisane"
 	if repo.Enabled {
-		if err := packages.OdswiezZrodlo(actionCtx, nazwaMenedzera, repo.ID, sciezkaZrodla); err != nil {
+		if err := packages.RefreshSource(actionCtx, nazwaMenedzera, repo.ID, sciezkaZrodla); err != nil {
 			cofniete := cofnij()
 			powod := "metadanych zrodla nie udalo sie pobrac: " + err.Error()
 			if cofniete {
@@ -150,7 +150,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 
 // odpowiedzZrodel sklada wynik razem z obrazem zrodel po zmianie.
 func odpowiedzZrodel(s *Server, menedzer, komunikat, odcisk string, cofniete bool) *helperv1.HelperResponse {
-	obraz := packages.CzytajRepozytoria(menedzer)
+	obraz := packages.ReadRepositories(menedzer)
 	zakodowany, err := json.Marshal(obraz)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())

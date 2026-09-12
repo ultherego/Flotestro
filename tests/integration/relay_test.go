@@ -88,7 +88,7 @@ func TestOdwolanyRelayNieOdnowiSie(t *testing.T) {
 	if status == http.StatusOK {
 		t.Fatal("odwolany relay odnowil certyfikat")
 	}
-	if !bytes.Contains(tresc, []byte("odwolany")) {
+	if !bytes.Contains(tresc, []byte("revoked")) {
 		t.Fatalf("odmowa bez powodu: %s %s", http.StatusText(status), tresc)
 	}
 }

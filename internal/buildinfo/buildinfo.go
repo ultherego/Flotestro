@@ -1,13 +1,14 @@
-// Package buildinfo mowi, z czego powstala ta binarka.
+// Package buildinfo says what this binary was made of.
 //
-// Wersja sama nie wystarcza, gdy pakiet zachowuje sie inaczej niz powinien:
-// pierwsze pytanie brzmi wtedy "z ktorego commita to jest" i musi dac sie
-// odpowiedziec na hoscie, bez dostepu do maszyny wydania. Dlatego commit
-// i data budowania sa wpisywane w binarke tak samo jak wersja.
+// The version alone is not enough when a package behaves differently than it
+// should: the first question is then "which commit is this from" and it has to
+// be answerable on the host, without access to the release machine. That is
+// why the commit and the build date are written into the binary just like the
+// version.
 //
-// Wersja protokolu jest tu obok nich swiadomie: to ona rozstrzyga, czy stary
-// agent w ogole dogada sie z panelem, a operator patrzacy na host powinien
-// widziec komplet w jednym miejscu.
+// The version of the protocol sits next to them deliberately: it settles
+// whether an old agent can talk to the panel at all, and an operator looking
+// at a host should see the whole set in one place.
 package buildinfo
 
 import (
@@ -16,42 +17,43 @@ import (
 	"strings"
 )
 
-// Wartosci wpisywane przy budowaniu wydania przez -ldflags -X.
+// The values written in when building a release through -ldflags -X.
 //
-// Domyslne mowia wprost, ze nikt ich nie wpisal. "nieznany" jest lepszy niz
-// zmyslona wartosc: pakiet zbudowany recznie ma wygladac inaczej niz wydanie.
+// The defaults say outright that nobody wrote them in. "unknown" is better
+// than a made-up value: a package built by hand is to look different from a
+// release.
 var (
-	Wersja = "0.1.0"
-	Commit = ""
-	Data   = ""
+	Version = "0.1.0"
+	Commit  = ""
+	Date    = ""
 )
 
-// ProtokolAgenta zmienia sie przy kazdej niezgodnej zmianie kontraktu miedzy
-// agentem a centrala.
-const ProtokolAgenta = 1
+// AgentProtocol changes with every incompatible change of the contract
+// between the agent and the centre.
+const AgentProtocol = 1
 
-// Opis sklada jedna linie dla polecenia "version".
-func Opis(nazwa string) string {
-	linia := nazwa + " " + Wersja
-	if commit := KrotkiCommit(); commit != "" {
-		linia += " (" + commit
-		if Data != "" {
-			linia += ", " + Data
+// Describe assembles one line for the "version" command.
+func Describe(name string) string {
+	line := name + " " + Version
+	if commit := ShortCommit(); commit != "" {
+		line += " (" + commit
+		if Date != "" {
+			line += ", " + Date
 		}
-		linia += ")"
+		line += ")"
 	}
-	return linia + " [" + runtime.GOOS + "/" + runtime.GOARCH + ", " + runtime.Version() + "]"
+	return line + " [" + runtime.GOOS + "/" + runtime.GOARCH + ", " + runtime.Version() + "]"
 }
 
-// KrotkiCommit skraca odcisk commita do postaci czytelnej w jednej linii.
+// ShortCommit shortens the commit digest into a form readable in one line.
 //
-// Gdy wydanie nie wpisalo commita, probujemy odczytac go z metadanych
-// budowania: przy zwyklym "go build" jest tam i wystarcza, zeby powiedziec,
-// z czego powstala ta binarka.
-func KrotkiCommit() string {
+// When the release did not write the commit in, we try to read it from the
+// build metadata: with a plain "go build" it is there and is enough to say
+// what this binary was made of.
+func ShortCommit() string {
 	commit := Commit
 	if commit == "" {
-		commit = commitZMetadanych()
+		commit = commitFromMetadata()
 	}
 	if len(commit) > 12 {
 		return commit[:12]
@@ -59,14 +61,14 @@ func KrotkiCommit() string {
 	return commit
 }
 
-func commitZMetadanych() string {
+func commitFromMetadata() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return ""
 	}
-	for _, ustawienie := range info.Settings {
-		if ustawienie.Key == "vcs.revision" {
-			return strings.TrimSpace(ustawienie.Value)
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			return strings.TrimSpace(setting.Value)
 		}
 	}
 	return ""

@@ -369,7 +369,7 @@ func PackageVersion(pkg packages.InstalledPackage, distribution string) string {
 	if isRPMFamily(distribution) {
 		return pkg.EVR()
 	}
-	return pkg.WersjaDeb()
+	return pkg.DebVersion()
 }
 
 // ComparisonVersionFor returns the version that has to be compared against
@@ -390,7 +390,7 @@ func ComparisonVersionFor(pkg packages.InstalledPackage, distribution string) (s
 	if pkg.SourceVersion != "" {
 		return pkg.SourceVersion, BasisSource
 	}
-	return pkg.WersjaDeb(), BasisBinary
+	return pkg.DebVersion(), BasisBinary
 }
 
 // The bases of a version comparison.

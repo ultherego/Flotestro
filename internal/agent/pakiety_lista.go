@@ -22,7 +22,7 @@ func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvel
 	defer cancel()
 
 	menedzer := menedzerHosta(odczytCtx)
-	lista := packages.Zainstalowane(odczytCtx, menedzer)
+	lista := packages.Installed(odczytCtx, menedzer)
 	zakodowana, err := json.Marshal(lista.Packages)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
@@ -31,7 +31,7 @@ func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvel
 	// Ustalenia producenta czytamy przy tej samej okazji: dla dnf leza
 	// w metadanych repozytoriow, ktore host i tak ma. To sa fakty o pakietach,
 	// tak samo jak sama lista - ocena powstaje w panelu.
-	ustalenia, powodUstalen := packages.Ustalenia(odczytCtx, menedzer, lista.Packages)
+	ustalenia, powodUstalen := packages.Advisories(odczytCtx, menedzer, lista.Packages)
 	zakodowaneUstalenia, err := json.Marshal(ustalenia)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
@@ -91,6 +91,6 @@ func odciskPakietow(ctx context.Context, menedzer string) (string, int, string) 
 	}
 	odczytCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	lista := packages.Zainstalowane(odczytCtx, menedzer)
+	lista := packages.Installed(odczytCtx, menedzer)
 	return lista.Digest, lista.Count, lista.UnavailableReason
 }

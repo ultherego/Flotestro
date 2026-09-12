@@ -8,62 +8,63 @@ import (
 	"testing"
 )
 
-// pakietKlucza sklada minimalny pakiet klucza publicznego w wersji 4:
-// wersja, znacznik czasu, algorytm i material klucza. Do policzenia odcisku
-// nie potrzeba wiecej, a wlasny pakiet pozwala sprawdzic rachunek bez
-// wklejania cudzego klucza do testu.
-func pakietKlucza() []byte {
-	tresc := []byte{4, 0x66, 0x00, 0x00, 0x00, 1}
-	tresc = append(tresc, make([]byte, 20)...)
-	return tresc
+// keyPacket assembles a minimal public key packet in version 4: the version,
+// the timestamp, the algorithm and the key material. Nothing more is needed to
+// compute the fingerprint, and a packet of our own allows checking the
+// reckoning without pasting somebody else's key into the test.
+func keyPacket() []byte {
+	content := []byte{4, 0x66, 0x00, 0x00, 0x00, 1}
+	content = append(content, make([]byte, 20)...)
+	return content
 }
 
-func ramka(dane []byte) string {
-	naglowek := []byte{0xc0 | 6, byte(len(dane))}
-	pelne := append(naglowek, dane...)
-	zakodowane := base64.StdEncoding.EncodeToString(pelne)
+func frame(data []byte) string {
+	header := []byte{0xc0 | 6, byte(len(data))}
+	full := append(header, data...)
+	encoded := base64.StdEncoding.EncodeToString(full)
 	return "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n" +
-		zakodowane + "\n=abcd\n-----END PGP PUBLIC KEY BLOCK-----\n"
+		encoded + "\n=abcd\n-----END PGP PUBLIC KEY BLOCK-----\n"
 }
 
-func TestOdciskKluczaLiczySHA1PoPrefiksie(t *testing.T) {
-	pakiet := pakietKlucza()
-	odcisk, err := OdciskKlucza(ramka(pakiet))
+func TestTheKeyFingerprintComputesSHA1OverThePrefix(t *testing.T) {
+	packet := keyPacket()
+	fingerprint, err := KeyFingerprint(frame(packet))
 	if err != nil {
-		t.Fatalf("OdciskKlucza: %v", err)
+		t.Fatalf("KeyFingerprint: %v", err)
 	}
 
-	suma := sha1.New()
-	suma.Write([]byte{0x99, byte(len(pakiet) >> 8), byte(len(pakiet))})
-	suma.Write(pakiet)
-	oczekiwany := strings.ToUpper(hex.EncodeToString(suma.Sum(nil)))
-	if odcisk != oczekiwany {
-		t.Fatalf("odcisk = %s, oczekiwano %s", odcisk, oczekiwany)
+	sum := sha1.New()
+	sum.Write([]byte{0x99, byte(len(packet) >> 8), byte(len(packet))})
+	sum.Write(packet)
+	expected := strings.ToUpper(hex.EncodeToString(sum.Sum(nil)))
+	if fingerprint != expected {
+		t.Fatalf("fingerprint = %s, expected %s", fingerprint, expected)
 	}
-	if len(odcisk) != 40 {
-		t.Fatalf("odcisk klucza v4 ma %d znakow", len(odcisk))
+	if len(fingerprint) != 40 {
+		t.Fatalf("the fingerprint of a v4 key has %d characters", len(fingerprint))
 	}
 }
 
-func TestOdciskKluczaOdrzucaCoNieJestKluczem(t *testing.T) {
-	zle := map[string]string{
-		"pusty":             "",
-		"bez ramki":         "to nie jest klucz",
-		"pusta ramka":       "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n-----END PGP PUBLIC KEY BLOCK-----",
-		"popsuty base64":    "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n!!!!\n-----END PGP PUBLIC KEY BLOCK-----",
-		"certyfikat":        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
-		"pakiet bez klucza": ramka([]byte{}),
+func TestTheKeyFingerprintRejectsWhatIsNotAKey(t *testing.T) {
+	bad := map[string]string{
+		"empty":                  "",
+		"without a frame":        "this is not a key",
+		"an empty frame":         "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n-----END PGP PUBLIC KEY BLOCK-----",
+		"broken base64":          "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n!!!!\n-----END PGP PUBLIC KEY BLOCK-----",
+		"a certificate":          "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+		"a packet without a key": frame([]byte{}),
 	}
-	for nazwa, material := range zle {
-		if _, err := OdciskKlucza(material); err == nil {
-			t.Errorf("%s: material zostal przyjety jako klucz", nazwa)
+	for name, material := range bad {
+		if _, err := KeyFingerprint(material); err == nil {
+			t.Errorf("%s: the material was accepted as a key", name)
 		}
 	}
 
-	// Wersji, ktorej nie znamy, nie zgadujemy: bledny odcisk jest gorszy niz
-	// jego brak, bo czlowiek uznalby go za zgodny z odciskiem dostawcy.
-	nieznanaWersja := append([]byte{9}, make([]byte, 10)...)
-	if _, err := OdciskKlucza(ramka(nieznanaWersja)); err == nil {
-		t.Error("klucz w nieznanej wersji dostal odcisk")
+	// A version we do not know is not guessed at: a wrong fingerprint is worse
+	// than none, because a person would call it a match with the one of the
+	// supplier.
+	unknownVersion := append([]byte{9}, make([]byte, 10)...)
+	if _, err := KeyFingerprint(frame(unknownVersion)); err == nil {
+		t.Error("a key of an unknown version got a fingerprint")
 	}
 }

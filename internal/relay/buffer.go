@@ -1,6 +1,6 @@
-// Package relay implementuje relay lokalizacji: konczy polaczenia agentow,
-// utrzymuje jedno polaczenie do centrali i buforuje wyniki na czas awarii
-// lacza.
+// Package relay implements the relay of a site: it terminates the connections
+// of the agents, keeps one connection to the centre and buffers the results
+// while the link is down.
 package relay
 
 import (
@@ -11,18 +11,19 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ErrBufferFull oznacza wyczerpanie bufora. Relay zglasza to wprost zamiast
-// po cichu gubic wyniki: utracony wynik zadania wyglada dla panelu jak zadanie
-// nadal trwajace.
-var ErrBufferFull = errors.New("bufor relaya jest pelny")
+// ErrBufferFull means the buffer is exhausted. The relay says so outright
+// instead of silently losing results: a lost result of a job looks to the
+// panel like a job that is still running.
+var ErrBufferFull = errors.New("the buffer of the relay is full")
 
-// Buffer przechowuje wiadomosci agentow na czas przerwy w lacznosci
-// z centrala.
+// Buffer keeps the messages of the agents for the duration of a break in the
+// connectivity with the centre.
 //
-// Dokument wymaga bufora ograniczonego: relay w odcietej lokalizacji nie moze
-// rosnac do wyczerpania dysku, bo wtedy zabiera lokalizacje takze to, co
-// dziala lokalnie. Limit jest liczony w bajtach, bo to on odpowiada zajetosci
-// zasobu, a nie liczba wiadomosci.
+// The document requires a bounded buffer: a relay in a cut-off site must not
+// grow until the disk is exhausted, because that takes from the site what
+// works locally as well. The limit is counted in bytes, because it is bytes
+// that correspond to the occupied resource rather than the number of
+// messages.
 type Buffer struct {
 	mu       sync.Mutex
 	items    []*bufferedMessage
@@ -44,9 +45,10 @@ func NewBuffer(maxBytes int) *Buffer {
 	return &Buffer{maxBytes: maxBytes}
 }
 
-// Add odklada wiadomosc agenta. Po przekroczeniu limitu nowe wiadomosci sa
-// odrzucane, a nie kasuja starszych: starszy wynik zwykle dotyczy zadania,
-// ktore juz sie skonczylo, i jest blizej dostarczenia niz nowszy.
+// Add sets a message of an agent aside. Once the limit is exceeded new
+// messages are dropped rather than deleting the older ones: an older result
+// usually concerns a job that has already finished and is closer to delivery
+// than a newer one.
 func (b *Buffer) Add(hostID string, message *agentv1.AgentMessage) error {
 	payload, err := proto.Marshal(message)
 	if err != nil {
@@ -64,9 +66,9 @@ func (b *Buffer) Add(hostID string, message *agentv1.AgentMessage) error {
 	return nil
 }
 
-// Take pobiera najstarsza wiadomosc bez usuwania jej z bufora. Wiadomosc
-// znika dopiero po potwierdzonym wyslaniu: utrata na granicy sieci nie moze
-// oznaczac utraty wyniku.
+// Take takes the oldest message without removing it from the buffer. A
+// message disappears only after a confirmed send: a loss at the edge of the
+// network must not mean a lost result.
 func (b *Buffer) Take() (hostID string, message *agentv1.AgentMessage, ok bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -76,15 +78,15 @@ func (b *Buffer) Take() (hostID string, message *agentv1.AgentMessage, ok bool) 
 	item := b.items[0]
 	decoded := &agentv1.AgentMessage{}
 	if err := proto.Unmarshal(item.payload, decoded); err != nil {
-		// Uszkodzonej wiadomosci nie da sie dostarczyc; usuwamy ja, zeby nie
-		// zablokowala calej kolejki.
+		// A damaged message cannot be delivered; we remove it so that it does
+		// not block the whole queue.
 		b.removeFirstLocked()
 		return "", nil, false
 	}
 	return item.hostID, decoded, true
 }
 
-// Commit usuwa potwierdzona wiadomosc.
+// Commit removes a confirmed message.
 func (b *Buffer) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -99,7 +101,8 @@ func (b *Buffer) removeFirstLocked() {
 	b.items = b.items[1:]
 }
 
-// Stats opisuje zajetosc bufora do metryk i do decyzji operatora.
+// Stats describes the fill of the buffer for the metrics and for the
+// decisions of the operator.
 type Stats struct {
 	Messages int
 	Bytes    int
@@ -113,9 +116,9 @@ func (b *Buffer) Stats() Stats {
 	return Stats{Messages: len(b.items), Bytes: b.bytes, MaxBytes: b.maxBytes, Dropped: b.dropped}
 }
 
-// TakeFor zwraca najstarsza wiadomosc danego hosta bez usuwania jej z bufora.
-// Bufor jest wspolny dla lokalizacji, ale odsyla sie go w sesji konkretnego
-// hosta: centrala wiaze strumien z jedna tozsamoscia.
+// TakeFor returns the oldest message of a given host without removing it from
+// the buffer. The buffer is shared by the site, but it is sent back in the
+// session of a specific host: the centre binds a stream to one identity.
 func (b *Buffer) TakeFor(hostID string) (*agentv1.AgentMessage, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -133,7 +136,7 @@ func (b *Buffer) TakeFor(hostID string) (*agentv1.AgentMessage, bool) {
 	return nil, false
 }
 
-// CommitFor usuwa najstarsza wiadomosc danego hosta.
+// CommitFor removes the oldest message of a given host.
 func (b *Buffer) CommitFor(hostID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

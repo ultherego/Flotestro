@@ -80,7 +80,7 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		// w osobnym module.
 		{ModulPackages, menedzer, f.Packages.UnavailableReason, struct {
 			Packages
-			Repozytoria *packages.ObrazRepozytoriow `json:"repositories,omitempty"`
+			Repozytoria *packages.RepositoryImage `json:"repositories,omitempty"`
 		}{f.Packages, f.Repositories}},
 
 		{ModulServices, "agent/systemctl", powodUslug, struct {

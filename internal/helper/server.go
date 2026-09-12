@@ -681,7 +681,7 @@ func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail
 // bylo by latwo, bo wynik "zero zmian" wyglada tak samo jak sukces.
 func (s *Server) cyklZyciaPakietow(ctx context.Context, manager packages.Manager,
 	action *helperv1.PackageActionRequest, options packages.Options) *helperv1.HelperResponse {
-	cykl, ok := manager.(packages.CyklZycia)
+	cykl, ok := manager.(packages.Lifecycle)
 	if !ok {
 		return reject(ErrorUnsupported,
 			"menedzer "+manager.Name()+" nie obsluguje pelnego cyklu zycia pakietow")

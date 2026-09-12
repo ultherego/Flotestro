@@ -8,125 +8,126 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// heartbeat buduje wiadomosc rozpoznawalna po znaczniku czasu: sluzy on tu
-// wylacznie do sprawdzenia, czyja wiadomosc wrocila w czyjej sesji.
-func heartbeat(znacznik int64) *agentv1.AgentMessage {
+// heartbeat builds a message recognisable by its timestamp: here it serves
+// only to check whose message came back in whose session.
+func heartbeat(mark int64) *agentv1.AgentMessage {
 	return &agentv1.AgentMessage{
 		Payload: &agentv1.AgentMessage_Heartbeat{
-			Heartbeat: &agentv1.Heartbeat{SentAt: timestamppb.New(time.Unix(znacznik, 0))},
+			Heartbeat: &agentv1.Heartbeat{SentAt: timestamppb.New(time.Unix(mark, 0))},
 		},
 	}
 }
 
-// TestBuforMaGranice pilnuje wymogu dokumentu: bufor relaya jest ograniczony.
-// Relay w odcietej lokalizacji nie moze rosnac do wyczerpania dysku, bo wtedy
-// zabiera lokalizacji takze to, co dziala lokalnie.
-func TestBuforMaGranice(t *testing.T) {
-	bufor := NewBuffer(200)
+// TestTheBufferHasALimit guards the requirement of the document: the buffer of
+// a relay is bounded. A relay in a cut-off site must not grow until the disk
+// is exhausted, because that takes from the site what works locally as well.
+func TestTheBufferHasALimit(t *testing.T) {
+	buffer := NewBuffer(200)
 
-	zmiescilo := 0
+	accepted := 0
 	for i := 0; i < 100; i++ {
-		if err := bufor.Add("host-1", heartbeat(1)); err != nil {
+		if err := buffer.Add("host-1", heartbeat(1)); err != nil {
 			break
 		}
-		zmiescilo++
+		accepted++
 	}
-	if zmiescilo == 0 {
-		t.Fatal("bufor nie przyjal ani jednej wiadomosci")
+	if accepted == 0 {
+		t.Fatal("the buffer accepted not a single message")
 	}
 
-	stan := bufor.Stats()
-	if stan.Bytes > stan.MaxBytes {
-		t.Errorf("bufor przekroczyl limit: %d > %d", stan.Bytes, stan.MaxBytes)
+	state := buffer.Stats()
+	if state.Bytes > state.MaxBytes {
+		t.Errorf("the buffer exceeded the limit: %d > %d", state.Bytes, state.MaxBytes)
 	}
-	if err := bufor.Add("host-1", heartbeat(1)); err == nil {
-		t.Error("pelny bufor przyjal kolejna wiadomosc")
+	if err := buffer.Add("host-1", heartbeat(1)); err == nil {
+		t.Error("a full buffer accepted another message")
 	}
-	// Odrzucenie musi byc policzone: cicha utrata wynikow wyglada dla panelu
-	// jak zadania, ktore nadal trwaja.
-	if bufor.Stats().Dropped == 0 {
-		t.Error("odrzucenie nie zostalo odnotowane")
+	// The drop has to be counted: a silent loss of results looks to the panel
+	// like jobs that are still running.
+	if buffer.Stats().Dropped == 0 {
+		t.Error("the drop was not recorded")
 	}
 }
 
-// TestBuforOdsylaWSesjiHosta sprawdza, ze wiadomosci wracaja do wlasciwej
-// sesji. Centrala wiaze strumien z jedna tozsamoscia, wiec wynik jednego hosta
-// nie moze pojsc w sesji drugiego.
-func TestBuforOdsylaWSesjiHosta(t *testing.T) {
-	bufor := NewBuffer(1 << 20)
-	for _, wpis := range []struct {
-		host     string
-		znacznik int64
+// TestTheBufferSendsBackInTheSessionOfTheHost checks that the messages come
+// back to the right session. The centre binds a stream to one identity, so the
+// result of one host must not go in the session of another.
+func TestTheBufferSendsBackInTheSessionOfTheHost(t *testing.T) {
+	buffer := NewBuffer(1 << 20)
+	for _, entry := range []struct {
+		host string
+		mark int64
 	}{{"host-1", 1}, {"host-2", 2}, {"host-1", 3}} {
-		if err := bufor.Add(wpis.host, heartbeat(wpis.znacznik)); err != nil {
+		if err := buffer.Add(entry.host, heartbeat(entry.mark)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	pobrane := 0
+	taken := 0
 	for {
-		message, ok := bufor.TakeFor("host-1")
+		message, ok := buffer.TakeFor("host-1")
 		if !ok {
 			break
 		}
-		if znacznik := message.GetHeartbeat().GetSentAt().AsTime().Unix(); znacznik == 2 {
-			t.Error("w sesji host-1 pojawila sie wiadomosc innego hosta")
+		if mark := message.GetHeartbeat().GetSentAt().AsTime().Unix(); mark == 2 {
+			t.Error("a message of another host appeared in the session of host-1")
 		}
-		bufor.CommitFor("host-1")
-		pobrane++
+		buffer.CommitFor("host-1")
+		taken++
 	}
-	if pobrane != 2 {
-		t.Errorf("odeslano %d wiadomosci host-1, oczekiwano 2", pobrane)
+	if taken != 2 {
+		t.Errorf("%d messages of host-1 were sent back, expected 2", taken)
 	}
-	// Wiadomosc drugiego hosta czeka na jego wlasna sesje.
-	if stan := bufor.Stats(); stan.Messages != 1 {
-		t.Errorf("w buforze zostalo %d wiadomosci, oczekiwano 1", stan.Messages)
+	// The message of the second host waits for its own session.
+	if state := buffer.Stats(); state.Messages != 1 {
+		t.Errorf("%d messages were left in the buffer, expected 1", state.Messages)
 	}
 }
 
-// TestWiadomoscZnikaDopieroPoWyslaniu pilnuje kolejnosci: podgladniecie nie
-// usuwa wiadomosci, bo zerwanie lacza w polowie oznaczaloby utrate wyniku.
-func TestWiadomoscZnikaDopieroPoWyslaniu(t *testing.T) {
-	bufor := NewBuffer(1 << 20)
-	if err := bufor.Add("host-1", heartbeat(1)); err != nil {
+// TestAMessageDisappearsOnlyAfterItIsSent guards the order: a peek does not
+// remove a message, because a broken link halfway would mean a lost result.
+func TestAMessageDisappearsOnlyAfterItIsSent(t *testing.T) {
+	buffer := NewBuffer(1 << 20)
+	if err := buffer.Add("host-1", heartbeat(1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := bufor.TakeFor("host-1"); !ok {
-		t.Fatal("brak wiadomosci w buforze")
+	if _, ok := buffer.TakeFor("host-1"); !ok {
+		t.Fatal("there is no message in the buffer")
 	}
-	if bufor.Stats().Messages != 1 {
-		t.Error("podgladniecie usunelo wiadomosc przed potwierdzeniem wyslania")
+	if buffer.Stats().Messages != 1 {
+		t.Error("the peek removed the message before the send was confirmed")
 	}
-	bufor.CommitFor("host-1")
-	if bufor.Stats().Messages != 0 {
-		t.Error("potwierdzona wiadomosc zostala w buforze")
+	buffer.CommitFor("host-1")
+	if buffer.Stats().Messages != 0 {
+		t.Error("a confirmed message stayed in the buffer")
 	}
 }
 
-// TestZadaniePoTTLNieJestPrzekazywane odpowiada wymogowi z dokumentu: relay
-// buforuje wyniki, ale nie wykonuje zadania po TTL. Przekazanie
-// przeterminowanego zadania jest zleceniem pracy, o ktora nikt juz nie prosi -
-// a host wykonalby ja, bo sam nie wie, ze czekala na polce.
-func TestZadaniePoTTLNieJestPrzekazywane(t *testing.T) {
-	przeterminowane := &agentv1.TaskEnvelope{
-		TaskId:    "zadanie-1",
+// TestAJobAfterItsTTLIsNotForwarded answers the requirement from the document:
+// the relay buffers results but does not carry a job out after its TTL.
+// Forwarding an expired job is ordering work nobody is asking for any more -
+// and the host would carry it out, because it does not know it waited on a
+// shelf.
+func TestAJobAfterItsTTLIsNotForwarded(t *testing.T) {
+	overdue := &agentv1.TaskEnvelope{
+		TaskId:    "job-1",
 		ExpiresAt: timestamppb.New(time.Now().Add(-time.Minute)),
 	}
-	if !wygaslo(przeterminowane) {
-		t.Error("zadanie po terminie nie zostalo rozpoznane")
+	if !expired(overdue) {
+		t.Error("a job past its deadline was not recognised")
 	}
 
-	wazne := &agentv1.TaskEnvelope{
-		TaskId:    "zadanie-2",
+	valid := &agentv1.TaskEnvelope{
+		TaskId:    "job-2",
 		ExpiresAt: timestamppb.New(time.Now().Add(10 * time.Minute)),
 	}
-	if wygaslo(wazne) {
-		t.Error("wazne zadanie zostalo uznane za przeterminowane")
+	if expired(valid) {
+		t.Error("a valid job was treated as expired")
 	}
 
-	// Zadanie bez terminu nie jest przeterminowane: brak terminu to brak
-	// wymagania, a nie termin w przeszlosci.
-	if wygaslo(&agentv1.TaskEnvelope{TaskId: "zadanie-3"}) {
-		t.Error("zadanie bez terminu zostalo pominiete")
+	// A job without a deadline is not expired: a missing deadline is a missing
+	// requirement rather than a deadline in the past.
+	if expired(&agentv1.TaskEnvelope{TaskId: "job-3"}) {
+		t.Error("a job without a deadline was skipped")
 	}
 }

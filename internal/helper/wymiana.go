@@ -32,10 +32,10 @@ func wymianaAgenta(pakiety []string) (string, bool) {
 		return "", false
 	}
 	spec := strings.TrimSpace(pakiety[0])
-	if spec == packages.PakietAgenta {
+	if spec == packages.AgentPackage {
 		return spec, true
 	}
-	reszta, ok := strings.CutPrefix(spec, packages.PakietAgenta)
+	reszta, ok := strings.CutPrefix(spec, packages.AgentPackage)
 	if !ok || len(reszta) < 2 {
 		return "", false
 	}
@@ -63,7 +63,7 @@ func wymianaAgenta(pakiety []string) (string, bool) {
 // rozstrzyga powrot agenta w oczekiwanej wersji, co widzi panel.
 func (s *Server) zlecWymianeAgenta(ctx context.Context, manager packages.Manager,
 	spec string) *helperv1.HelperResponse {
-	if _, ok := manager.(packages.CyklZycia); !ok {
+	if _, ok := manager.(packages.Lifecycle); !ok {
 		return reject(ErrorUnsupported,
 			"menedzer "+manager.Name()+" nie obsluguje instalacji pakietow")
 	}
@@ -136,7 +136,7 @@ func WykonajWymianeAgenta(ctx context.Context, spec string, log *slog.Logger) er
 	if err != nil {
 		return err
 	}
-	cykl, ok := manager.(packages.CyklZycia)
+	cykl, ok := manager.(packages.Lifecycle)
 	if !ok {
 		return fmt.Errorf("menedzer %s nie obsluguje instalacji pakietow", manager.Name())
 	}

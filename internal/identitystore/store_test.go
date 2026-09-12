@@ -17,7 +17,7 @@ import (
 
 const testHost = "3f2a9c1e-0000-4000-8000-000000000001"
 
-// generation wystawia komplet materialu przez to samo CA, ktorego uzywa panel.
+// generation issues the whole material through the same CA the panel uses.
 func generation(t *testing.T, ca *pki.CA, hostID string) Generation {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

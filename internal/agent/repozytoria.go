@@ -16,8 +16,8 @@ import (
 // Bez roota: pliki zrodel sa jawne. Wyjatkiem jest zrodlo z haslem, ktoremu
 // panel sam nadal prawa roota - takie zostaje na liscie z powodem, zamiast
 // z niej zniknac.
-func ZbierzRepozytoria(menedzer string) packages.ObrazRepozytoriow {
-	return packages.CzytajRepozytoria(menedzer)
+func ZbierzRepozytoria(menedzer string) packages.RepositoryImage {
+	return packages.ReadRepositories(menedzer)
 }
 
 // applyRepository wykonuje zapis zrodla pakietow.

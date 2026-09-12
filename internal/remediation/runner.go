@@ -209,7 +209,7 @@ func (r *Runner) hostCameBack(ctx context.Context, plan Plan) (bool, string) {
 		return false, "the host's state was not read: " + err.Error()
 	}
 	if host.ConnectionState != "online" {
-		return false, "host nie cameBack po restarcie w " + ReturnWindow.String()
+		return false, "the host did not come back after the restart within " + ReturnWindow.String()
 	}
 	if plan.BootIDBefore != "" && host.BootID == plan.BootIDBefore {
 		return false, "the host answers, but with the same boot identifier"

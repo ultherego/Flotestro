@@ -43,7 +43,7 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 		// The version number alone is not enough when a package behaves
 		// differently than it should: the first question is "which commit is
 		// this from".
-		fmt.Fprintln(out, buildinfo.Opis("flotestro-agentctl"))
+		fmt.Fprintln(out, buildinfo.Describe("flotestro-agentctl"))
 		return 0
 	case "help", "-h", "--help":
 		usage(out)

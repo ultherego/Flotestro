@@ -27,7 +27,7 @@ import (
 // Zmienna, a nie stala: wydanie wpisuje tu numer pakietu przy budowaniu
 // (-ldflags -X). Bez tego panel widzialby jedna wersje przez cale zycie
 // floty i nie mialby jak sprawdzic, czy aktualizacja naprawde doszla.
-var Version = buildinfo.Wersja
+var Version = buildinfo.Version
 
 // Identity to material kryptograficzny hosta przechowywany lokalnie.
 type Identity struct {

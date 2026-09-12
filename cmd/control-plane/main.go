@@ -160,7 +160,7 @@ func run() error {
 	flag.DurationVar(&monitoring.Window, "monitoring-window",
 		config.EnvDuration("FLOTESTRO_MONITORING_WINDOW", 3*time.Hour),
 		"the default time range of the charts")
-	vulnerabilities := config.Podatnosci{}
+	vulnerabilities := config.Vulnerabilities{}
 	flag.BoolVar(&vulnerabilities.Enabled, "vulnerability-correlator",
 		config.Env("FLOTESTRO_VULN_ENABLED", "true") == "true",
 		"enables the vulnerability correlator based on the trackers of the distributions")

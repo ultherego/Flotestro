@@ -117,9 +117,9 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 func pakietAgenta(menedzer, wersja string) (string, error) {
 	switch menedzer {
 	case "apt":
-		return packages.PakietAgenta + "=" + wersja, nil
+		return packages.AgentPackage + "=" + wersja, nil
 	case "dnf":
-		return packages.PakietAgenta + "-" + wersja, nil
+		return packages.AgentPackage + "-" + wersja, nil
 	}
 	return "", fmt.Errorf("menedzer %s nie umie wskazac wersji pakietu", menedzer)
 }

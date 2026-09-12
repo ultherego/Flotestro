@@ -5,56 +5,57 @@ import (
 	"testing"
 )
 
-// Zbior usuwanych jest liczony ponownie tuz przed operacja. Roznica oznacza,
-// ze host zmienil sie od czasu planu - a wtedy usunieciu podleglby inny
-// zestaw, niz operator zatwierdzil.
-func TestPorownanieZbiorowWykrywaKazdaRoznice(t *testing.T) {
-	if roznica := porownajZbiory([]string{"a", "b"}, []string{"b", "a"}); roznica != "" {
-		t.Errorf("rowne zbiory uznane za rozne: %q", roznica)
+// The set of packages to remove is computed again right before the operation.
+// A difference means the host has changed since the plan - and a different set
+// would then be removed than the one the operator approved.
+func TestTheComparisonOfSetsFindsEveryDifference(t *testing.T) {
+	if difference := compareSets([]string{"a", "b"}, []string{"b", "a"}); difference != "" {
+		t.Errorf("equal sets were called different: %q", difference)
 	}
 
-	roznica := porownajZbiory([]string{"a"}, []string{"a", "b"})
-	if !strings.Contains(roznica, "takze: b") {
-		t.Errorf("nie wykryto dodatkowego pakietu: %q", roznica)
+	difference := compareSets([]string{"a"}, []string{"a", "b"})
+	if !strings.Contains(difference, "also cover: b") {
+		t.Errorf("an extra package was not found: %q", difference)
 	}
 
-	roznica = porownajZbiory([]string{"a", "b"}, []string{"a"})
-	if !strings.Contains(roznica, "nie podlegaja") {
-		t.Errorf("nie wykryto brakujacego pakietu: %q", roznica)
+	difference = compareSets([]string{"a", "b"}, []string{"a"})
+	if !strings.Contains(difference, "no longer subject") {
+		t.Errorf("a missing package was not found: %q", difference)
 	}
 
-	roznica = porownajZbiory([]string{"a", "b"}, []string{"a", "c"})
-	if !strings.Contains(roznica, "doszly: c") || !strings.Contains(roznica, "odpadly: b") {
-		t.Errorf("niepelny opis roznicy: %q", roznica)
+	difference = compareSets([]string{"a", "b"}, []string{"a", "c"})
+	if !strings.Contains(difference, "added: c") || !strings.Contains(difference, "dropped: b") {
+		t.Errorf("an incomplete description of the difference: %q", difference)
 	}
 }
 
-// Operacja nieodwracalna nie moze isc bez podstawy: pusty zbior oczekiwany
-// oznacza brak zatwierdzonego planu, a nie zgode na wszystko.
-func TestBrakPlanuJestRoznica(t *testing.T) {
-	if porownajZbiory(nil, []string{"a"}) == "" {
-		t.Error("brak planu zostal uznany za zgodnosc")
+// An irreversible operation must not go without a basis: an empty expected set
+// means there is no approved plan rather than consent to everything.
+func TestAMissingPlanIsADifference(t *testing.T) {
+	if compareSets(nil, []string{"a"}) == "" {
+		t.Error("a missing plan was treated as a match")
 	}
-	if porownajZbiory(nil, nil) == "" {
-		t.Error("brak planu przy pustym zbiorze zostal uznany za zgodnosc")
+	if compareSets(nil, nil) == "" {
+		t.Error("a missing plan with an empty set was treated as a match")
 	}
 }
 
-// Linia "Remv" jest jedynym zrodlem listy usuwanych. Format jest stabilny
-// przy LC_ALL=C i nie zalezy od jezyka interfejsu.
-func TestParsowanieLiniiUsuniecia(t *testing.T) {
-	nazwa, ok := parseAptRemvLine("Remv libfoo [1.0-1]")
-	if !ok || nazwa != "libfoo" {
-		t.Errorf("nazwa = %q, ok = %v", nazwa, ok)
+// The "Remv" line is the only source of the list of packages to remove. The
+// format is stable under LC_ALL=C and does not depend on the language of the
+// interface.
+func TestParsingARemovalLine(t *testing.T) {
+	name, ok := parseAptRemvLine("Remv libfoo [1.0-1]")
+	if !ok || name != "libfoo" {
+		t.Errorf("name = %q, ok = %v", name, ok)
 	}
-	for _, linia := range []string{
+	for _, line := range []string{
 		"Inst libfoo [1.0-1] (1.0-2 Debian:13 [amd64])",
 		"Conf libfoo (1.0-2)",
 		"",
 		"Remv",
 	} {
-		if _, ok := parseAptRemvLine(linia); ok {
-			t.Errorf("linia %q zostala uznana za usuniecie", linia)
+		if _, ok := parseAptRemvLine(line); ok {
+			t.Errorf("the line %q was treated as a removal", line)
 		}
 	}
 }

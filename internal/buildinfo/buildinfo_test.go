@@ -5,29 +5,29 @@ import (
 	"testing"
 )
 
-func TestOpisNiesieWersjeISrodowisko(t *testing.T) {
-	opis := Opis("flotestro-agentctl")
-	if !strings.HasPrefix(opis, "flotestro-agentctl "+Wersja) {
-		t.Fatalf("opis = %q", opis)
+func TestDescribeCarriesTheVersionAndTheEnvironment(t *testing.T) {
+	description := Describe("flotestro-agentctl")
+	if !strings.HasPrefix(description, "flotestro-agentctl "+Version) {
+		t.Fatalf("description = %q", description)
 	}
-	if !strings.Contains(opis, "go1") {
-		t.Fatalf("opis bez wersji toolchainu: %q", opis)
+	if !strings.Contains(description, "go1") {
+		t.Fatalf("the description carries no toolchain version: %q", description)
 	}
 }
 
-// TestKrotkiCommitNieZmysla pilnuje zasady, ze nieznane nie jest zerem ani
-// wymyslona wartoscia: bez wpisanego commita i bez metadanych zostaje pustka,
-// ktora widac, a nie odcisk, ktory wyglada wiarygodnie.
-func TestKrotkiCommitNieZmysla(t *testing.T) {
-	poprzedni := Commit
-	t.Cleanup(func() { Commit = poprzedni })
+// TestShortCommitMakesNothingUp guards the rule that unknown is neither zero
+// nor a made-up value: without a commit written in and without metadata what
+// is left is a visible emptiness rather than a digest that looks credible.
+func TestShortCommitMakesNothingUp(t *testing.T) {
+	previous := Commit
+	t.Cleanup(func() { Commit = previous })
 
 	Commit = "0123456789abcdef0123456789abcdef01234567"
-	if got := KrotkiCommit(); got != "0123456789ab" {
-		t.Fatalf("KrotkiCommit = %q", got)
+	if got := ShortCommit(); got != "0123456789ab" {
+		t.Fatalf("ShortCommit = %q", got)
 	}
-	Commit = "krotki"
-	if got := KrotkiCommit(); got != "krotki" {
-		t.Fatalf("KrotkiCommit = %q", got)
+	Commit = "short"
+	if got := ShortCommit(); got != "short" {
+		t.Fatalf("ShortCommit = %q", got)
 	}
 }

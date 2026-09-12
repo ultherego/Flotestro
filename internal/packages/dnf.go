@@ -15,13 +15,13 @@ const (
 	rpmPath = "/usr/bin/rpm"
 )
 
-// dnfLockFiles to pliki blokowane na czas transakcji RPM.
+// dnfLockFiles are the files locked for the duration of an RPM transaction.
 var dnfLockFiles = []string{
 	"/var/lib/rpm/.rpm.lock",
 	"/var/cache/dnf/metadata_lock.pid",
 }
 
-// DNF jest adapterem Fedory i systemow z rodziny RHEL.
+// DNF is the adapter of Fedora and of the systems of the RHEL family.
 type DNF struct{}
 
 func (d *DNF) Name() string { return "dnf" }
@@ -40,14 +40,15 @@ func (d *DNF) LockHeld() (bool, string) {
 	return false, ""
 }
 
-// Plan liczy aktualizacje z lokalnego cache. check-update zwraca 100, gdy sa
-// aktualizacje, i 0, gdy ich nie ma; kazdy inny kod jest bledem.
+// Plan computes the upgrade from the local cache. check-update returns 100
+// when there are updates and 0 when there are none; every other code is an
+// error.
 func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: d.Name(), DiskAvailableBytes: diskAvailable("/")}
 
-	// Plan usuniecia i plan instalacji odpowiadaja na inne pytanie niz plan
-	// aktualizacji: nie "co sie zmieni samo", tylko "co zniknie albo dojdzie
-	// razem z tym, o co prosze".
+	// A removal plan and an installation plan answer a question other than an
+	// upgrade plan: not "what will change on its own" but "what will disappear
+	// or arrive along with what I am asking for".
 	switch options.Mode {
 	case ModeRemove:
 		return d.planRemove(ctx, plan, options)
@@ -68,8 +69,8 @@ func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 		plan.Changes = append(plan.Changes, change)
 	}
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
-	// Fedora nie publikuje spojnych metadanych o rozmiarze pobrania w tym
-	// trybie, wiec nie zgadujemy wartosci.
+	// Fedora does not publish consistent metadata about the download size in
+	// this mode, so we do not guess the value.
 	return plan, nil
 }
 
@@ -92,9 +93,9 @@ func parseDNFUpdateLine(line string) (Change, bool) {
 		Name:             name,
 		CandidateVersion: fields[1],
 		Origin:           fields[2],
-		// Fedora nie publikuje spojnych metadanych security dla wszystkich
-		// repozytoriow, wiec nie oznaczamy zmian jako bezpieczenstwa na
-		// podstawie samej nazwy repozytorium.
+		// Fedora does not publish consistent security metadata for every
+		// repository, so we do not mark changes as security on the basis of
+		// the name of the repository alone.
 		Security: false,
 	}, true
 }
@@ -120,8 +121,9 @@ func (d *DNF) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Upgrade wykonuje transakcje. Tryb jest nieinteraktywny, a wersje przed i po
-// zapisujemy zawsze, takze gdy transakcja sie nie powiedzie.
+// Upgrade carries the transaction out. The mode is non-interactive, and the
+// versions before and after are always recorded, also when the transaction
+// fails.
 func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 
@@ -129,8 +131,9 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
 	}
 
-	// Dracut buduje initramfs z tego samego drzewa modulow co initramfs-tools,
-	// wiec niewidoczne moduly grozza tu tym samym: hostem, ktory nie wstanie.
+	// Dracut builds the initramfs from the same module tree as initramfs-tools,
+	// so hidden modules threaten the same thing here: a host that will not come
+	// up.
 	if hidden, dir := modulesHidden(); hidden {
 		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
 	}
@@ -141,26 +144,27 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	if options.SecurityOnly {
 		args = append(args, "--security")
 	}
-	// Zwykla aktualizacja nie rusza agenta. Wymiana agenta w srodku
-	// transakcji, ktora on sam wykonuje, konczy sie hostem odcietym od
-	// zarzadzania w polowie pracy - i wynikiem, ktorego nikt nie odbierze.
-	// Do tego jest osobna operacja, ktora omija te ochrone swiadomie.
+	// An ordinary upgrade does not touch the agent. Replacing the agent in the
+	// middle of a transaction it carries out itself ends with a host cut off
+	// from management halfway through the work - and a result nobody collects.
+	// There is a separate operation for that, which skips this protection
+	// deliberately.
 	if len(options.Packages) == 0 {
-		args = append(args, "--exclude="+PakietAgenta)
+		args = append(args, "--exclude="+AgentPackage)
 	}
 	args = append(args, options.Packages...)
 
-	// Dnf numeruje kroki w swoim wyjsciu; postep jest z nich odczytywany.
+	// Dnf numbers the steps in its output; the progress is read out of them.
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
 
-	// Uszkodzony plik w pamieci podrecznej ma dokladnie jedna poprawna
-	// odpowiedz: pobrac go jeszcze raz. Czekanie z tym na czlowieka nie
-	// dodaje bezpieczenstwa, a kosztuje przerwana kampanie.
-	if (!result.Ran || result.ExitCode != 0) && UszkodzonePobranie(result.Stderr, result.Stdout) {
-		czyszczenie := run(ctx, 5*time.Minute, dnfPath, "--assumeyes", "--quiet", "clean", "packages")
-		if czyszczenie.Ran && czyszczenie.ExitCode == 0 {
+	// A damaged file in the cache has exactly one correct answer: fetch it
+	// again. Waiting for a person with that adds no safety and costs an
+	// interrupted campaign.
+	if (!result.Ran || result.ExitCode != 0) && BrokenDownload(result.Stderr, result.Stdout) {
+		cleaning := run(ctx, 5*time.Minute, dnfPath, "--assumeyes", "--quiet", "clean", "packages")
+		if cleaning.Ran && cleaning.ExitCode == 0 {
 			apply.SelfRepair = append(apply.SelfRepair,
-				"usunieto uszkodzone pakiety z pamieci podrecznej i ponowiono transakcje")
+				"the damaged packages were removed from the cache and the transaction was retried")
 			result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
 		}
 	}
@@ -171,7 +175,7 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply.RebootRequired = d.rebootRequired(ctx)
 
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		return apply, fmt.Errorf("dnf upgrade: %s", result.Reason())
 	}
 	return apply, nil
@@ -192,259 +196,268 @@ func (d *DNF) installedVersions(ctx context.Context) map[string]string {
 	return versions
 }
 
-// rebootRequired pyta dnf o potrzebe restartu. Kodowi 1 ufamy tylko wtedy, gdy
-// narzedzie cokolwiek wypisalo: tym samym kodem konczy sie blad wykonania.
+// rebootRequired asks dnf about the need for a restart. We trust the code 1
+// only when the tool printed something: an execution error ends with the same
+// code.
 func (d *DNF) rebootRequired(ctx context.Context) bool {
 	result := run(ctx, time.Minute, dnfPath, "needs-restarting", "-r")
 	return result.Ran && result.ExitCode == 1 && strings.TrimSpace(result.Stdout) != ""
 }
 
-// DatabaseBroken sprawdza spojnosc bazy RPM.
+// DatabaseBroken checks the consistency of the RPM database.
 func (d *DNF) DatabaseBroken(ctx context.Context) bool {
 	result := run(ctx, 2*time.Minute, rpmPath, "--verifydb")
 	return result.Ran && result.ExitCode != 0
 }
 
-// Pelny cykl zycia pakietow dla dnf.
+// The full life cycle of packages for dnf.
 //
-// Instalacja, usuniecie i wstrzymanie sa tu osobnymi decyzjami tak samo jak
-// w apt, ale narzedzie odpowiada inaczej: dnf nie ma symulacji, ktora
-// wypisalaby sam zbior zmian, wiec plan czytamy z jego wlasnej tabeli
-// transakcji przerwanej przed wykonaniem. To jest odpowiedz dnf, a nie nasza
-// rekonstrukcja jego zaleznosci - i tylko taka odpowiedz wolno pokazac
-// czlowiekowi, ktory zaraz cos usunie.
+// Installing, removing and holding are separate decisions here just as in apt,
+// but the tool answers differently: dnf has no simulation that would print the
+// set of changes alone, so the plan is read from its own table of a
+// transaction interrupted before execution. That is the answer of dnf rather
+// than our reconstruction of its dependencies - and only such an answer may be
+// shown to a person who is about to remove something.
 
-// dnfVersionlock jest nazwa polecenia wtyczki blokujacej wersje.
+// dnfVersionlock is the name of the command of the plugin that locks
+// versions.
 const dnfVersionlock = "versionlock"
 
-// planRemove liczy, co zniknie razem ze wskazanymi pakietami.
+// planRemove computes what will disappear along with the named packages.
 func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
-		return plan, fmt.Errorf("plan usuniecia wymaga listy pakietow")
+		return plan, fmt.Errorf("a removal plan requires a list of packages")
 	}
-	// --assumeno konczy sie kodem 1 i komunikatem o przerwaniu: to jest
-	// sposob, w jaki dnf pokazuje transakcje, ktorej nie wykonuje.
+	// --assumeno ends with the code 1 and a message about the interruption:
+	// that is how dnf shows a transaction it does not carry out.
 	args := append([]string{"--assumeno", "remove"}, options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
 		return plan, fmt.Errorf("dnf remove: %s", result.Reason())
 	}
-	wyjscie := result.Stdout + "\n" + result.Stderr
-	if BrakPakietuDNF(wyjscie) {
-		// Pakiet, ktorego nie ma, nie jest bledem planu: nie ma czego usuwac.
+	output := result.Stdout + "\n" + result.Stderr
+	if DNFPackageMissing(output) {
+		// A package that is not there is not an error of the plan: there is
+		// nothing to remove.
 		return plan, nil
 	}
-	// Transakcja, ktorej dnf nie potrafi ulozyc, nie jest planem pustym.
-	// Pusty plan czytaloby sie jako "nic nie zniknie" - a to jest odpowiedz
-	// na inne pytanie niz "tego sie nie da usunac".
-	if powod := NierozwiazywalneDNF(wyjscie); powod != "" {
-		return plan, fmt.Errorf("dnf nie potrafi ulozyc tej transakcji: %s", powod)
+	// A transaction dnf cannot resolve is not an empty plan. An empty plan
+	// would read as "nothing will disappear" - and that is the answer to a
+	// question other than "this cannot be removed".
+	if reason := DNFUnresolvable(output); reason != "" {
+		return plan, fmt.Errorf("dnf cannot resolve this transaction: %s", reason)
 	}
-	usuwane, zapowiedziane, err := ParsujPlanUsunieciaDNF(wyjscie)
+	removals, announced, err := ParseDNFRemovalPlan(output)
 	if err != nil {
 		return plan, err
 	}
-	if zapowiedziane > 0 && len(usuwane) != zapowiedziane {
-		// Cisza w tym miejscu bylaby najgorsza z mozliwych odpowiedzi:
-		// operator zobaczylby krotsza liste, niz to, co naprawde zniknie.
-		return plan, fmt.Errorf("nie rozpoznano planu usuniecia: dnf zapowiada %d pakietow, "+
-			"a odczytano %d", zapowiedziane, len(usuwane))
+	if announced > 0 && len(removals) != announced {
+		// Silence here would be the worst possible answer: the operator would
+		// see a shorter list than what will really disappear.
+		return plan, fmt.Errorf("the removal plan was not recognised: dnf announces %d packages "+
+			"and %d were read", announced, len(removals))
 	}
-	if len(usuwane) == 0 {
-		// Wyjscie, z ktorego nic nie odczytalismy, tez nie jest planem pustym:
-		// znaczy, ze format sie zmienil i nie wiemy, co by zniknelo.
-		return plan, fmt.Errorf("nie rozpoznano planu usuniecia z odpowiedzi dnf")
+	if len(removals) == 0 {
+		// Output we read nothing out of is not an empty plan either: it means
+		// the format has changed and we do not know what would disappear.
+		return plan, fmt.Errorf("the removal plan was not recognised in the answer of dnf")
 	}
-	plan.Removals = usuwane
-	plan.Protected = ChronioneWZbiorze(plan.Removals)
+	plan.Removals = removals
+	plan.Protected = ProtectedInSet(plan.Removals)
 	return plan, nil
 }
 
-// planInstall liczy, co dojdzie razem ze wskazanymi pakietami.
+// planInstall computes what will arrive along with the named packages.
 func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
-		return plan, fmt.Errorf("plan instalacji wymaga listy pakietow")
+		return plan, fmt.Errorf("an installation plan requires a list of packages")
 	}
 	args := append([]string{"--assumeno", "install"}, options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
 		return plan, fmt.Errorf("dnf install: %s", result.Reason())
 	}
-	wyjscie := result.Stdout + "\n" + result.Stderr
-	// Pakiet, ktorego nie ma w zadnym zrodle, konczy sie kodem bledu
-	// i komunikatem - i to jest odpowiedz, a nie plan pusty.
-	if BrakPakietuDNF(wyjscie) {
-		return plan, fmt.Errorf("dnf nie zna pakietu z tego zlecenia")
+	output := result.Stdout + "\n" + result.Stderr
+	// A package that is in no source ends with an error code and a message -
+	// and that is an answer rather than an empty plan.
+	if DNFPackageMissing(output) {
+		return plan, fmt.Errorf("dnf does not know a package from this order")
 	}
-	if powod := NierozwiazywalneDNF(wyjscie); powod != "" {
-		return plan, fmt.Errorf("dnf nie potrafi ulozyc tej transakcji: %s", powod)
+	if reason := DNFUnresolvable(output); reason != "" {
+		return plan, fmt.Errorf("dnf cannot resolve this transaction: %s", reason)
 	}
-	// Transakcje przerwana przed wykonaniem dnf konczy kodem niezerowym;
-	// kod zero oznacza tu, ze nie bylo czego instalowac albo ze narzedzie
-	// odpowiedzialo inaczej, niz zakladamy.
-	zmiany := ParsujPlanInstalacjiDNF(wyjscie)
-	if len(zmiany) == 0 {
-		if result.ExitCode == 0 && CalaTransakcjaGotowa(wyjscie) {
-			// Wszystko juz jest zainstalowane: plan pusty jest tu prawdziwy.
+	// Dnf ends a transaction interrupted before execution with a non-zero
+	// code; a zero code means here that there was nothing to install or that
+	// the tool answered other than we assume.
+	changes := ParseDNFInstallPlan(output)
+	if len(changes) == 0 {
+		if result.ExitCode == 0 && WholeTransactionReady(output) {
+			// Everything is already installed: an empty plan is true here.
 			return plan, nil
 		}
-		return plan, fmt.Errorf("nie rozpoznano planu instalacji z odpowiedzi dnf (kod %d)",
+		return plan, fmt.Errorf("the installation plan was not recognised in the answer of dnf (code %d)",
 			result.ExitCode)
 	}
-	plan.Changes = append(plan.Changes, zmiany...)
+	plan.Changes = append(plan.Changes, changes...)
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
 	return plan, nil
 }
 
-// naglowkiUsuniecia wylicza sekcje tabeli transakcji, ktore znacza usuniecie.
-// Kazda z nich znaczy co innego dla czlowieka - pakiet wskazany, pakiet
-// zalezny i pakiet, ktory zostaje bez uzytkownika - ale wszystkie znikaja.
-var naglowkiUsuniecia = []string{
+// removalHeadings list the sections of the transaction table that mean a
+// removal. Each of them means something else to a person - a named package, a
+// dependent package and a package left without a user - but all of them
+// disappear.
+var removalHeadings = []string{
 	"removing:",
 	"removing dependent packages:",
 	"removing unused dependencies:",
 	"removing dependencies:",
 }
 
-// Podsumowanie transakcji. Dnf5 pisze "Removing: 3 packages", dnf4 -
-// "Remove  3 Packages"; ta liczba jest jedynym zabezpieczeniem przed
-// niepelnym odczytem tabeli, wiec czytamy oba zapisy.
+// The summary of a transaction. Dnf5 writes "Removing: 3 packages", dnf4 -
+// "Remove  3 Packages"; that number is the only guard against an incomplete
+// read of the table, so we read both spellings.
 var (
-	podsumowaniaUsuniecia  = []string{"removing:", "remove "}
-	podsumowaniaInstalacji = []string{"installing:", "install "}
+	removalSummaries = []string{"removing:", "remove "}
+	installSummaries = []string{"installing:", "install "}
 )
 
-var naglowkiInstalacji = []string{
+var installHeadings = []string{
 	"installing:",
 	"installing dependencies:",
 	"installing weak dependencies:",
 	"upgrading:",
 }
 
-// ParsujPlanUsunieciaDNF czyta tabele transakcji przerwanej przed wykonaniem.
+// ParseDNFRemovalPlan reads the table of a transaction interrupted before
+// execution.
 //
-// Zwraca nazwy pakietow oraz liczbe, ktora dnf sam zapowiedzial w podsumowaniu.
-// Rozbieznosc miedzy nimi jest bledem, a nie szczegolem: to znaczy, ze format
-// wyjscia sie zmienil, a lista pokazana czlowiekowi bylaby niepelna.
-func ParsujPlanUsunieciaDNF(wyjscie string) ([]string, int, error) {
-	nazwy, zapowiedziane := sekcjeTransakcjiDNF(wyjscie, naglowkiUsuniecia, podsumowaniaUsuniecia)
-	return nazwy, zapowiedziane, nil
+// It returns the names of the packages and the number dnf itself announced in
+// the summary. A divergence between them is an error rather than a detail: it
+// means the format of the output has changed and the list shown to a person
+// would be incomplete.
+func ParseDNFRemovalPlan(output string) ([]string, int, error) {
+	names, announced := dnfTransactionSections(output, removalHeadings, removalSummaries)
+	return names, announced, nil
 }
 
-// ParsujPlanInstalacjiDNF czyta z tabeli transakcji to, co dojdzie.
-func ParsujPlanInstalacjiDNF(wyjscie string) []Change {
-	nazwy, _ := sekcjeTransakcjiDNF(wyjscie, naglowkiInstalacji, podsumowaniaInstalacji)
-	zmiany := make([]Change, 0, len(nazwy))
-	for _, nazwa := range nazwy {
-		zmiany = append(zmiany, Change{Name: nazwa})
+// ParseDNFInstallPlan reads from the transaction table what will arrive.
+func ParseDNFInstallPlan(output string) []Change {
+	names, _ := dnfTransactionSections(output, installHeadings, installSummaries)
+	changes := make([]Change, 0, len(names))
+	for _, name := range names {
+		changes = append(changes, Change{Name: name})
 	}
-	return zmiany
+	return changes
 }
 
-// sekcjeTransakcjiDNF czyta nazwy pakietow z tabeli transakcji.
+// dnfTransactionSections reads the names of the packages from the transaction
+// table.
 //
-// Tabela ma naglowki sekcji przy lewej krawedzi i wpisy z wcieciem; kolumny to
-// nazwa, architektura, wersja, repozytorium i rozmiar. Podsumowanie na koncu
-// podaje liczby - i to one sluza do sprawdzenia, czy odczyt jest pelny.
-func sekcjeTransakcjiDNF(wyjscie string, naglowki, podsumowania []string) ([]string, int) {
-	var nazwy []string
-	widziane := map[string]bool{}
-	wSekcji := false
-	wPodsumowaniu := false
-	zapowiedziane := 0
+// The table has section headings at the left edge and indented entries; the
+// columns are the name, the architecture, the version, the repository and the
+// size. The summary at the end gives the numbers - and they serve to check
+// whether the read is complete.
+func dnfTransactionSections(output string, headings, summaries []string) ([]string, int) {
+	var names []string
+	seen := map[string]bool{}
+	inSection := false
+	inSummary := false
+	announced := 0
 
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		przycieta := strings.TrimSpace(linia)
-		male := strings.ToLower(przycieta)
-		if przycieta == "" {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if trimmed == "" {
 			continue
 		}
-		if strings.HasPrefix(male, "transaction summary") {
-			wSekcji, wPodsumowaniu = false, true
+		if strings.HasPrefix(lower, "transaction summary") {
+			inSection, inSummary = false, true
 			continue
 		}
-		if wPodsumowaniu {
-			// Dnf5 pisze "Removing: 3 packages", dnf4 - "Remove  3 Packages".
-			// Czytamy oba, bo to ta liczba pilnuje, czy odczyt jest pelny.
-			if pasujeDoPodsumowania(male, podsumowania) {
-				for _, pole := range strings.Fields(male) {
-					if liczba, err := strconv.Atoi(pole); err == nil {
-						zapowiedziane = liczba
+		if inSummary {
+			// Dnf5 writes "Removing: 3 packages", dnf4 - "Remove  3 Packages".
+			// We read both, because it is that number that guards whether the
+			// read is complete.
+			if matchesSummary(lower, summaries) {
+				for _, field := range strings.Fields(lower) {
+					if number, err := strconv.Atoi(field); err == nil {
+						announced = number
 						break
 					}
 				}
 			}
 			continue
 		}
-		if zawiera(naglowki, male) {
-			wSekcji = true
+		if contains(headings, lower) {
+			inSection = true
 			continue
 		}
-		// Naglowek innej sekcji konczy poprzednia.
-		if strings.HasSuffix(male, ":") && !strings.HasPrefix(linia, " ") {
-			wSekcji = false
+		// The heading of another section ends the previous one.
+		if strings.HasSuffix(lower, ":") && !strings.HasPrefix(line, " ") {
+			inSection = false
 			continue
 		}
-		if !wSekcji || !strings.HasPrefix(linia, " ") {
+		if !inSection || !strings.HasPrefix(line, " ") {
 			continue
 		}
-		pola := strings.Fields(przycieta)
-		if len(pola) < 2 {
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
 			continue
 		}
-		nazwa := pola[0]
-		if widziane[nazwa] {
+		name := fields[0]
+		if seen[name] {
 			continue
 		}
-		widziane[nazwa] = true
-		nazwy = append(nazwy, nazwa)
+		seen[name] = true
+		names = append(names, name)
 	}
-	return nazwy, zapowiedziane
+	return names, announced
 }
 
-// pasujeDoPodsumowania rozpoznaje wiersz podsumowania w obu pokoleniach dnf.
-func pasujeDoPodsumowania(linia string, podsumowania []string) bool {
-	for _, prefiks := range podsumowania {
-		if strings.HasPrefix(linia, prefiks) {
+// matchesSummary recognises a summary line in both generations of dnf.
+func matchesSummary(line string, summaries []string) bool {
+	for _, prefix := range summaries {
+		if strings.HasPrefix(line, prefix) {
 			return true
 		}
 	}
 	return false
 }
 
-func zawiera(lista []string, wartosc string) bool {
-	for _, wpis := range lista {
-		if wpis == wartosc {
+func contains(list []string, value string) bool {
+	for _, entry := range list {
+		if entry == value {
 			return true
 		}
 	}
 	return false
 }
 
-// BrakPakietuDNF rozpoznaje odpowiedz "nie ma takiego pakietu".
-func BrakPakietuDNF(wyjscie string) bool {
-	male := strings.ToLower(wyjscie)
-	return strings.Contains(male, "no packages to remove") ||
-		strings.Contains(male, "no match for argument") ||
-		strings.Contains(male, "unable to find a match")
+// DNFPackageMissing recognises the answer "there is no such package".
+func DNFPackageMissing(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "no packages to remove") ||
+		strings.Contains(lower, "no match for argument") ||
+		strings.Contains(lower, "unable to find a match")
 }
 
-// CalaTransakcjaGotowa rozpoznaje odpowiedz "nie ma czego robic".
+// WholeTransactionReady recognises the answer "there is nothing to do".
 //
-// To jedyny przypadek, w ktorym pusty plan instalacji jest prawdziwy: wszystko
-// z zlecenia jest juz zainstalowane w wersji, ktorej dnf nie zmienia.
-func CalaTransakcjaGotowa(wyjscie string) bool {
-	male := strings.ToLower(wyjscie)
-	return strings.Contains(male, "nothing to do") ||
-		strings.Contains(male, "package is already installed") ||
-		strings.Contains(male, "already installed")
+// It is the only case where an empty installation plan is true: everything
+// from the order is already installed in a version dnf does not change.
+func WholeTransactionReady(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "nothing to do") ||
+		strings.Contains(lower, "package is already installed") ||
+		strings.Contains(lower, "already installed")
 }
 
-// Install doklada pakiety wraz z ich zaleznosciami.
+// Install adds packages along with their dependencies.
 func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	if len(options.Packages) == 0 {
-		return apply, fmt.Errorf("instalacja wymaga listy pakietow")
+		return apply, fmt.Errorf("an installation requires a list of packages")
 	}
 	if held, path := d.LockHeld(); held {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
@@ -456,12 +469,12 @@ func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 	before := d.installedVersions(ctx)
 	args := append([]string{"--assumeyes", "--quiet", "install"}, options.Packages...)
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
-	// dnf nie cofa wersji poleceniem "install" i nie ma na to przelacznika:
-	// do wersji starszej niz zainstalowana sluzy osobne polecenie. Probujemy
-	// go tylko wtedy, gdy operacja jawnie na to pozwala.
+	// dnf does not go back a version with the "install" command and has no
+	// switch for it: a separate command serves a version older than the
+	// installed one. We try it only when the operation explicitly allows it.
 	if options.AllowDowngrade && (!result.Ran || result.ExitCode != 0) {
-		powrot := append([]string{"--assumeyes", "--quiet", "downgrade"}, options.Packages...)
-		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, powrot...)
+		downgrade := append([]string{"--assumeyes", "--quiet", "downgrade"}, options.Packages...)
+		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, downgrade...)
 	}
 
 	after := d.installedVersions(ctx)
@@ -469,20 +482,21 @@ func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 	apply.DatabaseBroken = d.DatabaseBroken(ctx)
 	apply.RebootRequired = d.rebootRequired(ctx)
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		return apply, fmt.Errorf("dnf install: %s", result.Reason())
 	}
 	return apply, nil
 }
 
-// Remove usuwa wskazane pakiety wraz z tym, co zniknie razem z nimi.
+// Remove removes the named packages along with what disappears with them.
 //
-// Zbior jest liczony ponownie tuz przed operacja i porownywany z tym, co
-// zatwierdzil operator: roznica oznacza, ze host zmienil sie od czasu planu.
-func (d *DNF) Remove(ctx context.Context, options Options, oczekiwane []string) (Apply, error) {
+// The set is computed again right before the operation and compared with what
+// the operator approved: a difference means the host has changed since the
+// plan.
+func (d *DNF) Remove(ctx context.Context, options Options, expected []string) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	if len(options.Packages) == 0 {
-		return apply, fmt.Errorf("usuniecie wymaga listy pakietow")
+		return apply, fmt.Errorf("a removal requires a list of packages")
 	}
 	if held, path := d.LockHeld(); held {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
@@ -495,8 +509,8 @@ func (d *DNF) Remove(ctx context.Context, options Options, oczekiwane []string) 
 	if len(plan.Protected) > 0 {
 		return apply, fmt.Errorf("%w: %s", ErrProtectedPackage, strings.Join(plan.Protected, ", "))
 	}
-	if roznica := porownajZbiory(oczekiwane, plan.Removals); roznica != "" {
-		return apply, fmt.Errorf("%w: %s", ErrPlanChanged, roznica)
+	if difference := compareSets(expected, plan.Removals); difference != "" {
+		return apply, fmt.Errorf("%w: %s", ErrPlanChanged, difference)
 	}
 
 	before := d.installedVersions(ctx)
@@ -507,150 +521,153 @@ func (d *DNF) Remove(ctx context.Context, options Options, oczekiwane []string) 
 	apply.Applied = diffVersions(before, after)
 	apply.DatabaseBroken = d.DatabaseBroken(ctx)
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		return apply, fmt.Errorf("dnf remove: %s", result.Reason())
 	}
 	return apply, nil
 }
 
-// SetHold wstrzymuje albo zwalnia aktualizacje pakietow.
+// SetHold holds or releases the upgrades of packages.
 //
-// Dnf robi to wtyczka versionlock. Host bez niej nie umie wstrzymac pakietu -
-// i to jest odpowiedz, a nie cicha zgoda: pakiet uznany za wstrzymany, a
-// aktualizowany przy nastepnej kampanii, jest gorszy niz jawna odmowa.
-func (d *DNF) SetHold(ctx context.Context, pakiety []string, hold bool) (Apply, error) {
+// Dnf does that with the versionlock plugin. A host without it cannot hold a
+// package - and that is an answer rather than a silent consent: a package
+// considered held and upgraded in the next campaign is worse than an outright
+// refusal.
+func (d *DNF) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
-	if len(pakiety) == 0 {
-		return apply, fmt.Errorf("wstrzymanie wymaga listy pakietow")
+	if len(pkgs) == 0 {
+		return apply, fmt.Errorf("a hold requires a list of packages")
 	}
-	if !d.MaVersionlock(ctx) {
-		return apply, fmt.Errorf("%s: ten host nie ma wtyczki versionlock, wiec dnf nie "+
-			"potrafi wstrzymac pakietu", ErrorUnsupported)
+	if !d.HasVersionlock(ctx) {
+		return apply, fmt.Errorf("%s: this host has no versionlock plugin, so dnf cannot "+
+			"hold a package", ErrorUnsupported)
 	}
-	operacja := "delete"
+	operation := "delete"
 	if hold {
-		operacja = "add"
+		operation = "add"
 	}
-	args := append([]string{dnfVersionlock, operacja}, pakiety...)
+	args := append([]string{dnfVersionlock, operation}, pkgs...)
 	result := run(ctx, 5*time.Minute, dnfPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
-		apply.Output = linieKoncowe(result.Stderr, result.Stdout, maksymalnieLiniiWyniku)
-		return apply, fmt.Errorf("dnf versionlock %s: %s", operacja, result.Reason())
+		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
+		return apply, fmt.Errorf("dnf versionlock %s: %s", operation, result.Reason())
 	}
 	return apply, nil
 }
 
-// Holds zwraca pakiety wstrzymane na hoscie.
+// Holds returns the packages held on the host.
 func (d *DNF) Holds(ctx context.Context) []string {
-	// --quiet zdejmuje z wyjscia wiersze o metadanych; bez tego pierwsza
-	// linia bywala pokazywana jako nazwa wstrzymanego pakietu.
+	// --quiet removes the lines about metadata from the output; without it the
+	// first line was sometimes shown as the name of a held package.
 	result := run(ctx, time.Minute, dnfPath, "--quiet", dnfVersionlock, "list")
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
 	}
-	return ParsujVersionlock(result.Stdout)
+	return ParseVersionlock(result.Stdout)
 }
 
-// MaVersionlock mowi, czy host umie wstrzymywac pakiety.
-func (d *DNF) MaVersionlock(ctx context.Context) bool {
+// HasVersionlock says whether the host can hold packages.
+func (d *DNF) HasVersionlock(ctx context.Context) bool {
 	result := run(ctx, 30*time.Second, dnfPath, dnfVersionlock, "list")
 	return result.Ran && result.ExitCode == 0
 }
 
-// ParsujVersionlock czyta liste blokad w obu formatach, ktore dnf wypisuje.
+// ParseVersionlock reads the list of locks in both formats dnf prints.
 //
-// Dnf5 pisze "Package name: <nazwa>", dnf4 - sam wzorzec "nazwa-0:wersja.*".
-// Czytamy oba, bo panel ma dzialac na obu pokoleniach narzedzia.
-func ParsujVersionlock(wyjscie string) []string {
-	var nazwy []string
-	widziane := map[string]bool{}
-	dodaj := func(nazwa string) {
-		nazwa = strings.TrimSpace(nazwa)
-		if nazwa == "" || widziane[nazwa] {
+// Dnf5 writes "Package name: <name>", dnf4 - the pattern "name-0:version.*"
+// alone. We read both, because the panel is to work with both generations of
+// the tool.
+func ParseVersionlock(output string) []string {
+	var names []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
 			return
 		}
-		widziane[nazwa] = true
-		nazwy = append(nazwy, nazwa)
+		seen[name] = true
+		names = append(names, name)
 	}
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		przycieta := strings.TrimSpace(linia)
-		if przycieta == "" || strings.HasPrefix(przycieta, "#") {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if nazwa, ok := strings.CutPrefix(przycieta, "Package name:"); ok {
-			dodaj(nazwa)
+		if name, ok := strings.CutPrefix(trimmed, "Package name:"); ok {
+			add(name)
 			continue
 		}
-		// Wpis dnf4 jest wzorcem NEVRA: nazwa-epoka:wersja-wydanie.arch albo
-		// nazwa-epoka:wersja-*. Cokolwiek innego - wiersz o metadanych,
-		// nagłowek, komunikat - nie jest blokada i nie moze udawac nazwy
-		// pakietu na liscie wstrzymanych.
-		if nazwa := nazwaZWzorcaNEVRA(przycieta); nazwa != "" {
-			dodaj(nazwa)
+		// A dnf4 entry is a NEVRA pattern: name-epoch:version-release.arch or
+		// name-epoch:version-*. Anything else - a line about metadata, a
+		// heading, a message - is not a lock and must not pretend to be the
+		// name of a package on the list of held ones.
+		if name := nameFromNEVRAPattern(trimmed); name != "" {
+			add(name)
 		}
 	}
-	return nazwy
+	return names
 }
 
-// wzorzecNEVRA rozpoznaje wpis blokady w formacie dnf4.
+// nevraPattern recognises a lock entry in the dnf4 format.
 //
-// Wzorzec jest scisly celowo: wiersz, ktory nie jest blokada, ma zostac
-// pominiety, a nie trafic na liste wstrzymanych pakietow. Lista z wpisem
-// "Last metadata expiration check" mowilaby operatorowi, ze wstrzymano
-// pakiet, ktory nie istnieje.
-var wzorzecNEVRA = regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9._+-]*?)-([0-9]+:)?[0-9][^\s-]*-[^\s-]+$`)
+// The pattern is deliberately strict: a line that is not a lock is to be
+// skipped rather than land on the list of held packages. A list with the entry
+// "Last metadata expiration check" would tell the operator that a package that
+// does not exist has been held.
+var nevraPattern = regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9._+-]*?)-([0-9]+:)?[0-9][^\s-]*-[^\s-]+$`)
 
-// nazwaZWzorcaNEVRA wyciaga nazwe pakietu ze wzorca blokady albo zwraca
-// pustke, gdy wiersz blokada nie jest.
-func nazwaZWzorcaNEVRA(wzorzec string) string {
-	dopasowanie := wzorzecNEVRA.FindStringSubmatch(strings.TrimSpace(wzorzec))
-	if dopasowanie == nil {
+// nameFromNEVRAPattern extracts the name of a package out of a lock pattern,
+// or returns nothing when the line is not a lock.
+func nameFromNEVRAPattern(pattern string) string {
+	match := nevraPattern.FindStringSubmatch(strings.TrimSpace(pattern))
+	if match == nil {
 		return ""
 	}
-	return dopasowanie[1]
+	return match[1]
 }
 
-// NierozwiazywalneDNF rozpoznaje transakcje, ktorej dnf nie potrafi ulozyc,
-// i zwraca powod podany przez narzedzie.
+// DNFUnresolvable recognises a transaction dnf cannot resolve and returns the
+// reason the tool gave.
 //
-// Najczestszy przypadek to pakiet, bez ktorego nie da sie zostawic systemu
-// spojnym - dnf odmawia wtedy calej transakcji. Odmowa z powodem jest tu
-// jedyna poprawna odpowiedzia: pusta lista znaczylaby "nic nie zniknie".
-func NierozwiazywalneDNF(wyjscie string) string {
-	male := strings.ToLower(wyjscie)
-	markery := []string{
+// The most common case is a package without which the system cannot be left
+// consistent - dnf then refuses the whole transaction. A refusal with a reason
+// is the only correct answer here: an empty list would mean "nothing will
+// disappear".
+func DNFUnresolvable(output string) string {
+	lower := strings.ToLower(output)
+	markers := []string{
 		"failed to resolve the transaction",
 		"depsolve error",
 		"error: depsolving problem",
 		"protected packages",
 		"the operation would result in removing",
 	}
-	znaleziony := false
-	for _, marker := range markery {
-		if strings.Contains(male, marker) {
-			znaleziony = true
+	found := false
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			found = true
 			break
 		}
 	}
-	if !znaleziony {
+	if !found {
 		return ""
 	}
-	// Powod bierzemy z linii "Problem:" albo z konca wyjscia: to tam dnf
-	// tlumaczy, czego nie da sie pogodzic.
-	var powody []string
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		przycieta := strings.TrimSpace(linia)
-		male := strings.ToLower(przycieta)
-		if strings.HasPrefix(male, "problem") || strings.Contains(male, "protected") ||
-			strings.HasPrefix(male, "- ") {
-			powody = append(powody, przycieta)
+	// The reason is taken from the "Problem:" lines or from the end of the
+	// output: that is where dnf explains what cannot be reconciled.
+	var reasons []string
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "problem") || strings.Contains(lower, "protected") ||
+			strings.HasPrefix(lower, "- ") {
+			reasons = append(reasons, trimmed)
 		}
 	}
-	if len(powody) == 0 {
-		return "dnf odrzucil transakcje bez podania powodu"
+	if len(reasons) == 0 {
+		return "dnf rejected the transaction without giving a reason"
 	}
-	if len(powody) > 3 {
-		powody = powody[:3]
+	if len(reasons) > 3 {
+		reasons = reasons[:3]
 	}
-	return strings.Join(powody, " / ")
+	return strings.Join(reasons, " / ")
 }

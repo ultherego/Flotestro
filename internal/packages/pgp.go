@@ -9,174 +9,177 @@ import (
 	"strings"
 )
 
-// Klucz repozytorium jest materialem publicznym, wiec panel moze go przesylac
-// w zleceniu - inaczej niz haslo, ktore idzie przez magazyn sekretow. Publiczny
-// nie znaczy jednak dowolny: to ten klucz rozstrzyga, czyje pakiety host
-// zainstaluje. Dlatego zanim trafi na dysk, sprawdzamy, ze naprawde jest
-// kluczem OpenPGP, i liczymy jego odcisk - zeby czlowiek mial co porownac
-// z odciskiem podanym przez dostawce.
+// The key of a repository is public material, so the panel may send it in an
+// order - unlike a password, which goes through the secret store. Public does
+// not mean arbitrary, though: it is that key that settles whose packages the
+// host will install. That is why, before it lands on disk, we check that it
+// really is an OpenPGP key and compute its fingerprint - so that a person has
+// something to compare with the fingerprint given by the supplier.
 //
-// Liczymy go sami, bez biblioteki OpenPGP: potrzebny jest jeden pakiet
-// z ramki ASCII i jeden skrot, a nie caly model zaufania.
+// We compute it ourselves, without an OpenPGP library: what is needed is one
+// packet from an ASCII frame and one digest, not a whole trust model.
 
-// OdciskKlucza sprawdza material klucza i zwraca odcisk klucza glownego.
-func OdciskKlucza(material string) (string, error) {
-	dane, err := rozpakujRamke(material)
+// KeyFingerprint checks the key material and returns the fingerprint of the
+// primary key.
+func KeyFingerprint(material string) (string, error) {
+	data, err := unwrapFrame(material)
 	if err != nil {
 		return "", err
 	}
-	pakiet, err := pierwszyKluczPubliczny(dane)
+	packet, err := firstPublicKey(data)
 	if err != nil {
 		return "", err
 	}
-	return odciskPakietuKlucza(pakiet)
+	return keyPacketFingerprint(packet)
 }
 
-// rozpakujRamke zdejmuje ramke ASCII i dekoduje tresc.
+// unwrapFrame removes the ASCII frame and decodes the content.
 //
-// Klucz podany binarnie tez jest kluczem: rozpoznajemy go po tym, ze nie ma
-// naglowka ramki, i przepuszczamy dalej bez dekodowania.
-func rozpakujRamke(material string) ([]byte, error) {
-	przyciety := strings.TrimSpace(material)
-	if przyciety == "" {
-		return nil, fmt.Errorf("material klucza jest pusty")
+// A key given in binary is a key as well: we recognise it by the missing frame
+// header and pass it on without decoding.
+func unwrapFrame(material string) ([]byte, error) {
+	trimmed := strings.TrimSpace(material)
+	if trimmed == "" {
+		return nil, fmt.Errorf("the key material is empty")
 	}
-	if !strings.HasPrefix(przyciety, "-----BEGIN PGP PUBLIC KEY BLOCK-----") {
-		return nil, fmt.Errorf("material nie jest kluczem publicznym OpenPGP w ramce ASCII")
+	if !strings.HasPrefix(trimmed, "-----BEGIN PGP PUBLIC KEY BLOCK-----") {
+		return nil, fmt.Errorf("the material is not an OpenPGP public key in an ASCII frame")
 	}
-	linie := strings.Split(przyciety, "\n")
-	var tresc strings.Builder
-	wTresci := false
-	for _, linia := range linie[1:] {
-		linia = strings.TrimSpace(linia)
+	lines := strings.Split(trimmed, "\n")
+	var content strings.Builder
+	inContent := false
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
 		switch {
-		case strings.HasPrefix(linia, "-----END"):
-			wTresci = false
-		case !wTresci && linia == "":
-			// Pusta linia konczy naglowki ramki i zaczyna tresc.
-			wTresci = true
-		case wTresci:
-			// Suma kontrolna CRC24 zaczyna sie od znaku rownosci i nie
-			// nalezy do tresci.
-			if strings.HasPrefix(linia, "=") {
+		case strings.HasPrefix(line, "-----END"):
+			inContent = false
+		case !inContent && line == "":
+			// An empty line ends the headers of the frame and starts the
+			// content.
+			inContent = true
+		case inContent:
+			// The CRC24 checksum starts with an equals sign and does not
+			// belong to the content.
+			if strings.HasPrefix(line, "=") {
 				continue
 			}
-			tresc.WriteString(linia)
+			content.WriteString(line)
 		}
 	}
-	if tresc.Len() == 0 {
-		return nil, fmt.Errorf("ramka klucza nie zawiera tresci")
+	if content.Len() == 0 {
+		return nil, fmt.Errorf("the frame of the key carries no content")
 	}
-	dane, err := base64.StdEncoding.DecodeString(tresc.String())
+	data, err := base64.StdEncoding.DecodeString(content.String())
 	if err != nil {
-		return nil, fmt.Errorf("tresc klucza nie jest poprawnym base64: %w", err)
+		return nil, fmt.Errorf("the content of the key is not valid base64: %w", err)
 	}
-	return dane, nil
+	return data, nil
 }
 
-// pierwszyKluczPubliczny znajduje pakiet klucza glownego (tag 6).
-func pierwszyKluczPubliczny(dane []byte) ([]byte, error) {
+// firstPublicKey finds the packet of the primary key (tag 6).
+func firstPublicKey(data []byte) ([]byte, error) {
 	i := 0
-	for i < len(dane) {
-		naglowek := dane[i]
-		if naglowek&0x80 == 0 {
-			return nil, fmt.Errorf("material klucza ma nieprawidlowa strukture pakietow")
+	for i < len(data) {
+		header := data[i]
+		if header&0x80 == 0 {
+			return nil, fmt.Errorf("the key material has an invalid packet structure")
 		}
 		var tag int
-		var dlugosc int
-		if naglowek&0x40 != 0 {
-			// Format nowy: tag w szesciu bitach, dlugosc jedno- lub
-			// wielobajtowa.
-			tag = int(naglowek & 0x3f)
+		var length int
+		if header&0x40 != 0 {
+			// The new format: the tag in six bits, the length one or several
+			// bytes.
+			tag = int(header & 0x3f)
 			i++
-			if i >= len(dane) {
-				return nil, fmt.Errorf("pakiet klucza jest urwany")
+			if i >= len(data) {
+				return nil, fmt.Errorf("the packet of the key is cut short")
 			}
-			pierwszy := int(dane[i])
+			first := int(data[i])
 			switch {
-			case pierwszy < 192:
-				dlugosc = pierwszy
+			case first < 192:
+				length = first
 				i++
-			case pierwszy < 224:
-				if i+1 >= len(dane) {
-					return nil, fmt.Errorf("pakiet klucza jest urwany")
+			case first < 224:
+				if i+1 >= len(data) {
+					return nil, fmt.Errorf("the packet of the key is cut short")
 				}
-				dlugosc = (pierwszy-192)<<8 + int(dane[i+1]) + 192
+				length = (first-192)<<8 + int(data[i+1]) + 192
 				i += 2
-			case pierwszy == 255:
-				if i+4 >= len(dane) {
-					return nil, fmt.Errorf("pakiet klucza jest urwany")
+			case first == 255:
+				if i+4 >= len(data) {
+					return nil, fmt.Errorf("the packet of the key is cut short")
 				}
-				dlugosc = int(dane[i+1])<<24 | int(dane[i+2])<<16 |
-					int(dane[i+3])<<8 | int(dane[i+4])
+				length = int(data[i+1])<<24 | int(data[i+2])<<16 |
+					int(data[i+3])<<8 | int(data[i+4])
 				i += 5
 			default:
-				// Dlugosc czesciowa wystepuje w danych strumieniowych,
-				// a nie w kluczu.
-				return nil, fmt.Errorf("material klucza ma nieobslugiwana dlugosc pakietu")
+				// A partial length occurs in streamed data rather than in a
+				// key.
+				return nil, fmt.Errorf("the key material has an unsupported packet length")
 			}
 		} else {
-			tag = int(naglowek&0x3c) >> 2
-			typDlugosci := int(naglowek & 0x03)
+			tag = int(header&0x3c) >> 2
+			lengthType := int(header & 0x03)
 			i++
-			switch typDlugosci {
+			switch lengthType {
 			case 0:
-				if i >= len(dane) {
-					return nil, fmt.Errorf("pakiet klucza jest urwany")
+				if i >= len(data) {
+					return nil, fmt.Errorf("the packet of the key is cut short")
 				}
-				dlugosc = int(dane[i])
+				length = int(data[i])
 				i++
 			case 1:
-				if i+1 >= len(dane) {
-					return nil, fmt.Errorf("pakiet klucza jest urwany")
+				if i+1 >= len(data) {
+					return nil, fmt.Errorf("the packet of the key is cut short")
 				}
-				dlugosc = int(dane[i])<<8 | int(dane[i+1])
+				length = int(data[i])<<8 | int(data[i+1])
 				i += 2
 			case 2:
-				if i+3 >= len(dane) {
-					return nil, fmt.Errorf("pakiet klucza jest urwany")
+				if i+3 >= len(data) {
+					return nil, fmt.Errorf("the packet of the key is cut short")
 				}
-				dlugosc = int(dane[i])<<24 | int(dane[i+1])<<16 |
-					int(dane[i+2])<<8 | int(dane[i+3])
+				length = int(data[i])<<24 | int(data[i+1])<<16 |
+					int(data[i+2])<<8 | int(data[i+3])
 				i += 4
 			default:
-				return nil, fmt.Errorf("material klucza ma nieobslugiwana dlugosc pakietu")
+				return nil, fmt.Errorf("the key material has an unsupported packet length")
 			}
 		}
-		if dlugosc < 0 || i+dlugosc > len(dane) {
-			return nil, fmt.Errorf("pakiet klucza jest urwany")
+		if length < 0 || i+length > len(data) {
+			return nil, fmt.Errorf("the packet of the key is cut short")
 		}
 		if tag == 6 {
-			return dane[i : i+dlugosc], nil
+			return data[i : i+length], nil
 		}
-		i += dlugosc
+		i += length
 	}
-	return nil, fmt.Errorf("material nie zawiera pakietu klucza publicznego")
+	return nil, fmt.Errorf("the material carries no public key packet")
 }
 
-// odciskPakietuKlucza liczy odcisk klucza glownego.
+// keyPacketFingerprint computes the fingerprint of the primary key.
 //
-// Wersja 4 liczy SHA-1 po prefiksie 0x99 i dwubajtowej dlugosci; wersja 6 -
-// SHA-256 po prefiksie 0x9b i czterobajtowej dlugosci. Wersji, ktorej nie
-// znamy, nie zgadujemy: bledny odcisk jest gorszy niz brak odcisku, bo
-// czlowiek porownalby go z odciskiem dostawcy i uznal za zgodny.
-func odciskPakietuKlucza(pakiet []byte) (string, error) {
-	if len(pakiet) == 0 {
-		return "", fmt.Errorf("pakiet klucza jest pusty")
+// Version 4 computes SHA-1 over the prefix 0x99 and a two-byte length; version
+// 6 - SHA-256 over the prefix 0x9b and a four-byte length. A version we do not
+// know is not guessed at: a wrong fingerprint is worse than no fingerprint,
+// because a person would compare it with the one of the supplier and call it a
+// match.
+func keyPacketFingerprint(packet []byte) (string, error) {
+	if len(packet) == 0 {
+		return "", fmt.Errorf("the packet of the key is empty")
 	}
-	switch pakiet[0] {
+	switch packet[0] {
 	case 4:
-		suma := sha1.New()
-		suma.Write([]byte{0x99, byte(len(pakiet) >> 8), byte(len(pakiet))})
-		suma.Write(pakiet)
-		return strings.ToUpper(hex.EncodeToString(suma.Sum(nil))), nil
+		sum := sha1.New()
+		sum.Write([]byte{0x99, byte(len(packet) >> 8), byte(len(packet))})
+		sum.Write(packet)
+		return strings.ToUpper(hex.EncodeToString(sum.Sum(nil))), nil
 	case 6:
-		suma := sha256.New()
-		dlugosc := len(pakiet)
-		suma.Write([]byte{0x9b, byte(dlugosc >> 24), byte(dlugosc >> 16),
-			byte(dlugosc >> 8), byte(dlugosc)})
-		suma.Write(pakiet)
-		return strings.ToUpper(hex.EncodeToString(suma.Sum(nil))), nil
+		sum := sha256.New()
+		length := len(packet)
+		sum.Write([]byte{0x9b, byte(length >> 24), byte(length >> 16),
+			byte(length >> 8), byte(length)})
+		sum.Write(packet)
+		return strings.ToUpper(hex.EncodeToString(sum.Sum(nil))), nil
 	}
-	return "", fmt.Errorf("klucz w wersji %d nie jest obslugiwany", pakiet[0])
+	return "", fmt.Errorf("a key of version %d is not supported", packet[0])
 }

@@ -137,7 +137,7 @@ func Check(g Generation) error {
 	}
 	block, _ := pem.Decode(g.CertificatePEM)
 	if block == nil {
-		return fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrKeyPair)
+		return fmt.Errorf("%w: the certificate carries no PEM block", ErrKeyPair)
 	}
 	leaf, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
@@ -147,7 +147,7 @@ func Check(g Generation) error {
 	// certificate with the private material: a hardware key cannot be
 	// combined, and it is known anyway whether it matches.
 	if !keysMatch(leaf.PublicKey, key.Public()) {
-		return fmt.Errorf("%w: certyfikat nie pasuje do klucza", ErrKeyPair)
+		return fmt.Errorf("%w: the certificate does not match the key", ErrKeyPair)
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(g.TrustPEM) {
@@ -408,7 +408,7 @@ func load(dir string, source KeySource) (*Identity, error) {
 
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return nil, fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrKeyPair)
+		return nil, fmt.Errorf("%w: the certificate carries no PEM block", ErrKeyPair)
 	}
 	pair := tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: key.Signer()}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
@@ -441,7 +441,7 @@ func load(dir string, source KeySource) (*Identity, error) {
 func serialNumber(certPEM []byte) (string, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return "", fmt.Errorf("%w: certyfikat nie jest poprawnym PEM", ErrKeyPair)
+		return "", fmt.Errorf("%w: the certificate is not valid PEM", ErrKeyPair)
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {

@@ -119,12 +119,12 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 	switch {
 	case !status.Known:
 		s.odmowa(ctx, relayID, "unknown_certificate")
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat nieznany"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate is unknown"))
 	case status.Revoked:
 		// Odwolany relay nie moze sie odnowic. Bez tego odwolanie bylo by
 		// przerwa do najblizszego odnowienia, a nie odcieciem.
 		s.odmowa(ctx, relayID, "revoked_certificate")
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat odwolany"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate was revoked"))
 	case status.ID != relayID:
 		s.odmowa(ctx, relayID, "identity_mismatch")
 		return nil, connect.NewError(connect.CodeUnauthenticated,

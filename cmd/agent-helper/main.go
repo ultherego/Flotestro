@@ -140,7 +140,7 @@ func run() error {
 	// the process, the hold stayed for good and blocked every later
 	// replacement of the agent. We clean it up at the start - but only when
 	// it was us who placed it.
-	if released, err := packages.ZwolnijPorzuconeWstrzymanie(ctx); err != nil {
+	if released, err := packages.ReleaseAbandonedHold(ctx); err != nil {
 		log.Warn("the abandoned hold on the agent package was not released", "err", err)
 	} else if released {
 		log.Info("the abandoned hold on the agent package was released")

@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// TestStanPakietowZBazyDpkg pilnuje rozpoznawania pakietow, ktore zablokuja
-// kazda kolejna transakcje. Typowy przypadek z floty: pakiet rozpakowany, ale
-// nieskonfigurowany, bo jego pytanie konfiguracyjne nie ma odpowiedzi. Dopoki
-// tak stoi, aktualizacje na tym hoscie nie przechodza - takze wtedy, gdy nie
-// ma nic do zaktualizowania.
-func TestStanPakietowZBazyDpkg(t *testing.T) {
-	sciezka := filepath.Join(t.TempDir(), "status")
-	zawartosc := `Package: bash
+// TestThePackageStatesFromTheDpkgDatabase guards the recognition of the
+// packages that will block every following transaction. The typical case from
+// a fleet: a package unpacked but not configured, because its configuration
+// question has no answer. As long as it stands like that, the upgrades on this
+// host do not go through - also when there is nothing to upgrade.
+func TestThePackageStatesFromTheDpkgDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "status")
+	content := `Package: bash
 Status: install ok installed
 Version: 5.2
 
@@ -32,38 +32,38 @@ Version: 1.0
 Package: bar
 Status: purge ok not-installed
 
-Package: uszkodzony
-Version: bez statusu
+Package: damaged
+Version: without a status
 `
-	if err := os.WriteFile(sciezka, []byte(zawartosc), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	blocked := blockedFromStatusFile(sciezka)
-	nazwy := map[string]string{}
-	for _, pakiet := range blocked {
-		nazwy[pakiet.Name] = pakiet.Status
+	blocked := blockedFromStatusFile(path)
+	names := map[string]string{}
+	for _, pkg := range blocked {
+		names[pkg.Name] = pkg.Status
 	}
 
 	if len(blocked) != 2 {
-		t.Fatalf("rozpoznano %d pakietow blokujacych: %v", len(blocked), nazwy)
+		t.Fatalf("recognised %d blocking packages: %v", len(blocked), names)
 	}
-	if nazwy["grub-pc"] != "install ok unpacked" {
-		t.Errorf("grub-pc: status %q", nazwy["grub-pc"])
+	if names["grub-pc"] != "install ok unpacked" {
+		t.Errorf("grub-pc: status %q", names["grub-pc"])
 	}
-	if _, jest := nazwy["libfoo"]; !jest {
-		t.Error("pakiet w stanie half-configured musi byc rozpoznany")
+	if _, ok := names["libfoo"]; !ok {
+		t.Error("a package in the half-configured state has to be recognised")
 	}
-	// Pakiet w pelni zainstalowany i pakiet po usunieciu niczego nie blokuja.
-	for _, spokojny := range []string{"bash", "cpp", "bar"} {
-		if _, jest := nazwy[spokojny]; jest {
-			t.Errorf("pakiet %s nie blokuje niczego", spokojny)
+	// A fully installed package and a package after removal block nothing.
+	for _, quiet := range []string{"bash", "cpp", "bar"} {
+		if _, ok := names[quiet]; ok {
+			t.Errorf("the package %s blocks nothing", quiet)
 		}
 	}
 
-	// Brak pliku nie moze udawac, ze wszystko jest w porzadku ani wywracac
-	// odczytu: zwracamy pusta liste i idziemy dalej.
-	if blocked := blockedFromStatusFile(filepath.Join(t.TempDir(), "nie-ma")); blocked != nil {
-		t.Errorf("brak pliku dal %v", blocked)
+	// A missing file must neither pretend that everything is fine nor topple
+	// the read: we return an empty list and go on.
+	if blocked := blockedFromStatusFile(filepath.Join(t.TempDir(), "absent")); blocked != nil {
+		t.Errorf("a missing file gave %v", blocked)
 	}
 }
