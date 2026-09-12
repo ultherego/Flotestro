@@ -280,3 +280,90 @@ func szczegolKopii(t *testing.T, h *harness, jobID string) szczegolKopiiView {
 	}
 	return wynik.Items[len(wynik.Items)-1].Detail
 }
+
+// TestWidokKopiiPokazujeObciazenieBackendu sprawdza to, czego lista kopii nie
+// mowi: ktory backend jest waskim gardlem. Kopie ida z wielu hostow do jednego
+// repozytorium, a to ono decyduje, ile z nich pojdzie naraz.
+func TestWidokKopiiPokazujeObciazenieBackendu(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	nazwa := fmt.Sprintf("obciazenie-%d", time.Now().UnixNano())
+	repozytorium := "/srv/" + nazwa
+	sekret := nowySekret(t, h, "haslo-"+nazwa)
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/backups", map[string]any{
+		"name": nazwa, "tool": "restic", "repository": repozytorium,
+		"paths": []string{"/etc/flotestro"}, "keep_last": 1,
+		"initialize": true, "password_secret": sekret.Name,
+	}, nil, http.StatusOK)
+	t.Cleanup(func() {
+		h.do(http.MethodDelete,
+			"/api/v1/hosts/"+host.ID+"/backups?name="+nazwa, nil, nil, 0)
+	})
+
+	// Budzet backendu jest polityka panelu, a nie stanem hosta: widok ma go
+	// pokazac takze wtedy, gdy do repozytorium nie poszla jeszcze zadna kopia.
+	h.ustawBudzet("backend:"+repozytorium+":backup", 2, 50)
+
+	var widok struct {
+		NeverRestored int `json:"never_restored"`
+		Items         []struct {
+			Definition    string  `json:"definition"`
+			LastRestoreAt *string `json:"last_restore_at"`
+		} `json:"items"`
+		Repositories []struct {
+			Repository     string   `json:"repository"`
+			Hosts          int      `json:"hosts"`
+			BudgetKey      string   `json:"budget_key"`
+			Capacity       *int     `json:"capacity"`
+			Used           *int     `json:"used"`
+			OldestAgeHours *float64 `json:"oldest_age_hours"`
+		} `json:"repositories"`
+	}
+	h.get("/api/v1/backups", &widok)
+
+	var znalezione bool
+	for _, pozycja := range widok.Repositories {
+		if pozycja.Repository != repozytorium {
+			continue
+		}
+		znalezione = true
+		if pozycja.Hosts != 1 {
+			t.Errorf("repozytorium opisane dla %d hostow", pozycja.Hosts)
+		}
+		if pozycja.BudgetKey != "backend:"+repozytorium+":backup" {
+			t.Errorf("klucz budzetu = %q", pozycja.BudgetKey)
+		}
+		// Pojemnosc ustawiona przez operatora ma dojsc do widoku: bez niej
+		// nie widac, co ogranicza rownoleglosc kopii.
+		if pozycja.Capacity == nil || *pozycja.Capacity != 2 {
+			t.Errorf("pojemnosc backendu = %v", pozycja.Capacity)
+		}
+		if pozycja.Used == nil {
+			t.Error("widok nie mowi, ile tokenow backendu jest zajetych")
+		}
+	}
+	if !znalezione {
+		t.Fatalf("widok kopii nie zna repozytorium %s: %+v", repozytorium, widok.Repositories)
+	}
+
+	// Kopia, ktorej nikt nigdy nie odtworzyl, jest nadzieja, a nie kopia.
+	// Definicja zalozona przed chwila nie byla odtwarzana ani razu i widok
+	// ma to powiedziec wprost, a nie milczec.
+	var opisana bool
+	for _, pozycja := range widok.Items {
+		if pozycja.Definition != nazwa {
+			continue
+		}
+		opisana = true
+		if pozycja.LastRestoreAt != nil {
+			t.Errorf("nowa definicja ma date odtworzenia: %v", *pozycja.LastRestoreAt)
+		}
+	}
+	if !opisana {
+		t.Errorf("widok nie zna definicji %s", nazwa)
+	}
+	if widok.NeverRestored == 0 {
+		t.Error("widok nie liczy kopii, ktorych nigdy nie odtwarzano")
+	}
+}

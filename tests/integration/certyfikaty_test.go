@@ -407,3 +407,114 @@ func liscZUrzedu(t *testing.T, nazwa, urzadPEM, kluczUrzeduPEM string) paraZUrze
 		odcisk:     hex.EncodeToString(suma[:]),
 	}
 }
+
+// TestWidokFlotyMaOsWaznosci sprawdza to, czego posortowana lista nie mowi:
+// kiedy bedzie nastepna fala odnowien. Lista odpowiada na pytanie "co pali
+// sie teraz", os - na pytanie "co planowac".
+func TestWidokFlotyMaOsWaznosci(t *testing.T) {
+	h := newHarness(t)
+	var widok struct {
+		Items []struct {
+			DaysToExpiry *int `json:"days_to_expiry"`
+		} `json:"items"`
+		Timeline []struct {
+			Reason string `json:"reason"`
+			Count  int    `json:"count"`
+		} `json:"timeline"`
+	}
+	h.get("/api/v1/certificates", &widok)
+	if len(widok.Items) == 0 {
+		t.Skip("flota nie zglasza zadnego certyfikatu")
+	}
+	if len(widok.Timeline) == 0 {
+		t.Fatal("widok floty nie ma osi waznosci")
+	}
+
+	okna := map[string]int{}
+	suma := 0
+	for _, okno := range widok.Timeline {
+		okna[okno.Reason] = okno.Count
+		suma += okno.Count
+	}
+	for _, nazwa := range []string{"wygasle", "7 dni", "30 dni", "90 dni", "pozniej", "bez terminu"} {
+		if _, mamy := okna[nazwa]; !mamy {
+			t.Errorf("os nie ma okna %q: %+v", widok.Timeline, nazwa)
+		}
+	}
+	// Kazdy certyfikat nalezy dokladnie do jednego okna. Os, ktora nie
+	// sumuje sie do calosci, opisuje inna flote niz ta lista.
+	if suma < len(widok.Items) {
+		t.Errorf("os sumuje sie do %d, certyfikatow jest co najmniej %d", suma, len(widok.Items))
+	}
+	// Certyfikat bez terminu nie moze wpasc do okna "pozniej": brak wiedzy
+	// to nie jest odleglosc w czasie.
+	bezTerminu := 0
+	for _, pozycja := range widok.Items {
+		if pozycja.DaysToExpiry == nil {
+			bezTerminu++
+		}
+	}
+	if bezTerminu > 0 && okna["bez terminu"] == 0 {
+		t.Errorf("certyfikaty bez terminu (%d) nie trafily do wlasnego okna", bezTerminu)
+	}
+}
+
+// TestKluczPrywatnyNieTrafiaDoDziennikaHosta pilnuje wlasciwosci, dla ktorej
+// magazyn sekretow w ogole istnieje - i ktorej nie widac w API: material
+// klucza przechodzi przez agenta i helpera w chwili wdrozenia, wiec jedno
+// nieostrozne logowanie zostawiloby go w dzienniku hosta na zawsze.
+func TestKluczPrywatnyNieTrafiaDoDziennikaHosta(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("rhel")
+	sciezka := fmt.Sprintf("/etc/pki/tls/certs/flotestro-dziennik-%d.crt", time.Now().UnixNano())
+	sciezkaKlucza := strings.Replace(strings.Replace(sciezka, "/certs/", "/private/", 1), ".crt", ".key", 1)
+
+	certPEM, kluczPEM, _ := paraTestowa(t, host.Hostname, 40*24*time.Hour)
+	sekret := nowySekret(t, h, kluczPEM)
+	t.Cleanup(func() {
+		h.do(http.MethodDelete,
+			"/api/v1/hosts/"+host.ID+"/certificates/targets?path="+sciezka, nil, nil, 0)
+		for _, doUsuniecia := range []string{sciezka, sciezkaKlucza} {
+			h.runOperation(host.ID, map[string]any{
+				"action": "file.remove", "reason": powodCertyfikatu,
+				"payload": map[string]any{"file": map[string]any{"path": doUsuniecia}},
+			}, 2*time.Minute)
+		}
+	})
+
+	zadanie, proby := h.runOperation(host.ID, map[string]any{
+		"action": "certificate.deploy", "reason": powodCertyfikatu,
+		"payload": map[string]any{"certificate": map[string]any{
+			"path": sciezka, "key_path": sciezkaKlucza, "certificate": certPEM,
+			"key_secret": map[string]any{"name": sekret.Name},
+		}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("wdrozenie: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+
+	// Szukamy w dzienniku fragmentu klucza w postaci, w jakiej przechodzi
+	// przez panel: jednego wiersza base64 ze srodka materialu.
+	fragment := strings.Split(strings.TrimSpace(kluczPEM), "\n")[1]
+	for _, jednostka := range []string{"flotestro-agent", "flotestro-helper"} {
+		odczyt, proby := h.runOperation(host.ID, map[string]any{
+			"action": "journal.read", "reason": powodCertyfikatu,
+			"payload": map[string]any{"journal": map[string]any{
+				"unit": jednostka + ".service", "lines": 400}},
+		}, 2*time.Minute)
+		if odczyt.State != "succeeded" {
+			t.Fatalf("odczyt dziennika %s: stan = %s, %s", jednostka, odczyt.State,
+				ostatniKomunikat(proby))
+		}
+		for _, proba := range proby {
+			if strings.Contains(proba.Stdout, fragment) {
+				t.Fatalf("dziennik %s niesie material klucza prywatnego", jednostka)
+			}
+			// Sama nazwa sekretu w dzienniku jest w porzadku - to odnosnik,
+			// a nie wartosc. Wartosci nie moze byc w zadnej postaci.
+			if strings.Contains(proba.Stdout, "BEGIN PRIVATE KEY") {
+				t.Fatalf("dziennik %s niesie klucz w postaci PEM", jednostka)
+			}
+		}
+	}
+}

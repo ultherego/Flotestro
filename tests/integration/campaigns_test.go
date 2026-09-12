@@ -3644,3 +3644,98 @@ func TestFlotaPokazujeKomuUfaWTrakcieRotacji(t *testing.T) {
 		t.Error("widok nie policzyl zadnego hosta")
 	}
 }
+
+// TestBudzetBackenduWiazeDwieKampanie pilnuje granicy z dokumentu w jej
+// pelnej postaci: limit backendu ma obowiazywac miedzy kampaniami, a nie
+// tylko wewnatrz jednej. Dwie kampanie do jednego repozytorium nie moga
+// pisac naraz, choc kazda z osobna miesci sie w swoim limicie.
+func TestBudzetBackenduWiazeDwieKampanie(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily != "arch" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty z narzedziem backupu")
+	}
+	cele = cele[:2]
+
+	nazwa := fmt.Sprintf("dwie-%d", time.Now().UnixNano())
+	repozytorium := "/srv/" + nazwa
+	sekret := nowySekret(t, h, "haslo-"+nazwa)
+	zlecenie := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "tool": "restic", "repository": repozytorium,
+			"paths": []string{"/etc/flotestro"}, "keep_last": 1, "initialize": true,
+			"password_secret": map[string]any{"name": sekret.Name},
+		}
+	}
+	h.ustawBudzet("backend:"+repozytorium+":backup", 1, 50)
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "file.remove", "reason": "sprzatanie po tescie dwoch kampanii",
+				"payload": map[string]any{"file": map[string]any{"path": repozytorium + "/config"}},
+			}, 2*time.Minute)
+		}
+	})
+
+	// Dwie osobne kampanie, kazda na jednym hoscie: limit kampanii nie
+	// zatrzyma tu niczego, bo kazda ma po jednym celu.
+	kampanie := make([]campaignView, 0, 2)
+	for i, hostID := range cele {
+		kampania := h.createCampaign(map[string]any{
+			"name": fmt.Sprintf("kopia %d z %s", i+1, nazwa), "action": "backup.run",
+			"reason":                     "test budzetu backendu miedzy kampaniami",
+			"payload":                    map[string]any{"backup": zlecenie(fmt.Sprintf("%s-%d", nazwa, i+1))},
+			"selector":                   map[string]any{"host_ids": []string{hostID}},
+			"canary_size":                0,
+			"wave_size":                  1,
+			"max_concurrent":             1,
+			"failure_threshold_percent":  0,
+			"failure_threshold_absolute": 0,
+			"reboot_policy":              "never",
+		})
+		kampanie = append(kampanie, kampania)
+	}
+	for i := range kampanie {
+		stan := h.awaitCampaign(kampanie[i].ID,
+			map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 5*time.Minute)
+		if stan.State != "awaiting_approval" {
+			t.Fatalf("kampania %d skonczyla planowanie stanem %s (%s)", i+1, stan.State, stan.PauseReason)
+		}
+		h.approveCampaign(stan)
+	}
+
+	okna := make([]okno, 0, 2)
+	for i := range kampanie {
+		koncowa := h.awaitCampaign(kampanie[i].ID,
+			map[string]bool{"completed": true, "failed": true, "paused": true}, 10*time.Minute)
+		if koncowa.State != "completed" {
+			t.Fatalf("kampania %d skonczyla sie stanem %s (%s)", i+1, koncowa.State, koncowa.PauseReason)
+		}
+		for _, target := range h.campaignTargets(kampanie[i].ID) {
+			if target.JobID == "" {
+				continue
+			}
+			for _, proba := range h.probyZadania(target.JobID) {
+				if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+					continue
+				}
+				okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+			}
+		}
+	}
+	if len(okna) < 2 {
+		t.Fatalf("dwie kampanie zostawily %d prob z czasami", len(okna))
+	}
+	// Sedno: budzet backendu jest wspolny dla calej floty, wiec dwie
+	// niezalezne kampanie musialy sie rozsunac w czasie.
+	if zachodzaNaSiebie(okna) {
+		t.Errorf("dwie kampanie pisaly do repozytorium naraz mimo budzetu 1: %+v", okna)
+	}
+}

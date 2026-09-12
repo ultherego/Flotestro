@@ -436,6 +436,9 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 		}
 		return pozycje[i].NotAfter.Before(*pozycje[j].NotAfter)
 	})
+	// Os waznosci liczymy przed obcieciem listy: obciecie dotyczy tego, co
+	// pokazujemy, a nie tego, co flota naprawde ma.
+	wszystkie := pozycje
 	obciete := false
 	if len(pozycje) > LimitCertyfikatowFloty {
 		pozycje = pozycje[:LimitCertyfikatowFloty]
@@ -444,6 +447,7 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": pozycje, "counts": liczby, "truncated": obciete,
+		"timeline":    osWaznosci(wszystkie),
 		"hosts_total": len(widoczne), "hosts_without_certificates": bezObserwacji,
 		"thresholds": map[string]int{
 			"critical_days": int(certyfikaty.ProgPilny.Hours() / 24),
@@ -575,4 +579,51 @@ func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 		"hosts_without_trust_store": powody,
 		"hosts_unknown":             nieznane,
 	})
+}
+
+// osWaznosci grupuje certyfikaty floty po czasie, jaki im zostal.
+//
+// Lista posortowana po terminie odpowiada na pytanie "co pali sie teraz".
+// Nie odpowiada na pytanie "kiedy bedzie nastepna fala" - a to ono decyduje,
+// czy rotacje trzeba planowac na ten tydzien, czy na kwartal.
+func osWaznosci(pozycje []certyfikatFloty) []grupaHostow {
+	progi := []struct {
+		nazwa string
+		dni   int
+	}{
+		{"wygasle", 0}, {"7 dni", 7}, {"30 dni", 30}, {"90 dni", 90}, {"pozniej", -1},
+	}
+	liczby := make([]int, len(progi))
+	nieznane := 0
+
+	for _, pozycja := range pozycje {
+		if pozycja.DaysToExpiry == nil {
+			// Certyfikat bez terminu nie jest certyfikatem waznym dlugo:
+			// to jest brak wiedzy i ma stac osobno.
+			nieznane++
+			continue
+		}
+		dni := *pozycja.DaysToExpiry
+		umieszczony := false
+		for i, prog := range progi {
+			if prog.dni < 0 {
+				continue
+			}
+			if (prog.dni == 0 && dni < 0) || (prog.dni > 0 && dni >= 0 && dni <= prog.dni) {
+				liczby[i]++
+				umieszczony = true
+				break
+			}
+		}
+		if !umieszczony {
+			liczby[len(progi)-1]++
+		}
+	}
+
+	grupy := make([]grupaHostow, 0, len(progi)+1)
+	for i, prog := range progi {
+		grupy = append(grupy, grupaHostow{Powod: prog.nazwa, Liczba: liczby[i]})
+	}
+	grupy = append(grupy, grupaHostow{Powod: "bez terminu", Liczba: nieznane})
+	return grupy
 }

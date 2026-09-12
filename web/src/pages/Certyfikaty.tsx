@@ -23,6 +23,8 @@ type Widok = {
   truncated: boolean;
   hosts_total: number;
   hosts_without_certificates: number;
+  // Os waznosci: ile certyfikatow konczy sie w ktorym oknie czasu.
+  timeline?: { reason: string; count: number }[];
   thresholds: { critical_days: number; warning_days: number };
 };
 
@@ -76,6 +78,8 @@ export function CertyfikatyFloty() {
           {data.hosts_without_certificates} of {data.hosts_total} hosts report none
         </span>
       </div>
+
+      <OsWaznosci os={data.timeline ?? []} />
 
       <Zaufanie />
 
@@ -212,5 +216,28 @@ function Zaufanie() {
         {bezMagazynu.map((grupa) => `; ${grupa.count}: ${grupa.reason}`).join("")}
       </div>
     </section>
+  );
+}
+
+/**
+ * Os waznosci certyfikatow floty.
+ *
+ * Lista posortowana po terminie mowi, co pali sie teraz. Os mowi, kiedy
+ * bedzie nastepna fala - a to ona decyduje, czy rotacje planuje sie na ten
+ * tydzien, czy na kwartal.
+ */
+function OsWaznosci({ os }: { os: { reason: string; count: number }[] }) {
+  if (!os.length) return null;
+  const razem = os.reduce((suma, okno) => suma + okno.count, 0);
+  if (razem === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12 }}>
+      {os.map((okno) => (
+        <div key={okno.reason}>
+          <strong>{okno.count}</strong>
+          <div className="zrodlo">{okno.reason}</div>
+        </div>
+      ))}
+    </div>
   );
 }

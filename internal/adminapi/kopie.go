@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	kopie "github.com/ultherego/flotestro/internal/backup"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/hosts"
 	modul "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -284,7 +286,11 @@ func (s *Server) handleBackupRuns(w http.ResponseWriter, r *http.Request) {
 
 // kopiaFloty opisuje jedna definicje w skali floty.
 type kopiaFloty struct {
-	HostID        string     `json:"host_id"`
+	HostID string `json:"host_id"`
+	// LastRestoreAt jest data ostatniej udanej proby odtworzenia. Brak
+	// wartosci znaczy "nigdy nie odtwarzano", a nie "odtworzenie sie nie
+	// udalo" - to sa dwie rozne odpowiedzi i obie warto widziec.
+	LastRestoreAt *time.Time `json:"last_restore_at,omitempty"`
 	Hostname      string     `json:"hostname"`
 	Definition    string     `json:"definition"`
 	Tool          string     `json:"tool"`
@@ -340,6 +346,14 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// Kopia, ktorej nikt nigdy nie odtworzyl, jest nadzieja, a nie kopia.
+	// Panel nie zmusza do proby odtworzenia, ale ma powiedziec, kiedy byla
+	// ostatnia - i kiedy nie bylo jej nigdy.
+	odtworzenia, err := s.kopie.OstatnieWeFlocie(r.Context(), identyfikatory, modul.OperacjaOdtworzen)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 
 	klucz := func(hostID, definicja string) string { return hostID + "\x1f" + definicja }
 	ostatniPlan := map[string]kopie.Przebieg{}
@@ -354,8 +368,13 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	for _, uruchomienie := range uruchomienia {
 		ostatnieUruchomienie[klucz(uruchomienie.HostID, uruchomienie.Definition)] = uruchomienie
 	}
+	ostatnieOdtworzenie := map[string]kopie.Przebieg{}
+	for _, odtworzenie := range odtworzenia {
+		ostatnieOdtworzenie[klucz(odtworzenie.HostID, odtworzenie.Definition)] = odtworzenie
+	}
 
 	teraz := time.Now().UTC()
+	nigdyNieOdtwarzane := 0
 	pozycje := make([]kopiaFloty, 0, len(definicje))
 	liczby := map[string]int{}
 	niesprawdzone := 0
@@ -389,6 +408,12 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 		if pozycja.Unverified {
 			niesprawdzone++
 		}
+		if odtworzenie, znane := ostatnieOdtworzenie[identyfikator]; znane {
+			czas := odtworzenie.RecordedAt.UTC()
+			pozycja.LastRestoreAt = &czas
+		} else {
+			nigdyNieOdtwarzane++
+		}
 		liczby[pozycja.Status]++
 		pozycje = append(pozycje, pozycja)
 	}
@@ -410,11 +435,106 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": pozycje, "counts": liczby, "unverified": niesprawdzone,
-		"hosts_total": len(identyfikatory),
+		"never_restored": nigdyNieOdtwarzane,
+		"repositories":   s.obciazenieRepozytoriow(r.Context(), pozycje),
+		"hosts_total":    len(identyfikatory),
 		"thresholds": map[string]int{
 			"warning_hours":     int(kopie.ProgOstrzezenia.Hours()),
 			"critical_hours":    int(kopie.ProgPilny.Hours()),
 			"verification_days": int(kopie.ProgWeryfikacji.Hours() / 24),
 		},
 	})
+}
+
+// obciazenieRepozytorium opisuje jeden backend widziany z calej floty.
+type obciazenieRepozytorium struct {
+	Repository string `json:"repository"`
+	Hosts      int    `json:"hosts"`
+	Unverified int    `json:"unverified"`
+	// OldestAgeHours jest wiekiem najstarszej kopii w tym repozytorium.
+	// Repozytorium jest tak dobre, jak jego najgorsza kopia.
+	OldestAgeHours *float64 `json:"oldest_age_hours,omitempty"`
+	// BudgetKey, Capacity i Used opisuja budzet tego backendu. Pojemnosc
+	// nieustawiona jest brakiem polityki, a nie zerem: wtedy nic tu nie
+	// ogranicza rownoleglosci i trzeba to widziec.
+	BudgetKey string `json:"budget_key"`
+	Capacity  *int   `json:"capacity,omitempty"`
+	Used      *int   `json:"used,omitempty"`
+	Claimants *int   `json:"claimants,omitempty"`
+}
+
+// obciazenieRepozytoriow grupuje kopie floty po backendzie i dokleda budzet.
+//
+// Lista kopii mowi, ktory host ma stara kopie. Nie mowi, ktory backend jest
+// waskim gardlem - a to on decyduje, ile kopii moze isc naraz. Bez tego
+// operator widzi wolna kampanie i nie wie, co ja trzyma.
+func (s *Server) obciazenieRepozytoriow(ctx context.Context,
+	pozycje []kopiaFloty) []obciazenieRepozytorium {
+	kolejnosc := []string{}
+	wedlug := map[string]*obciazenieRepozytorium{}
+	for _, pozycja := range pozycje {
+		if pozycja.Repository == "" {
+			continue
+		}
+		wpis, mamy := wedlug[pozycja.Repository]
+		if !mamy {
+			wpis = &obciazenieRepozytorium{
+				Repository: pozycja.Repository,
+				BudgetKey:  budgets.KluczBackendu(pozycja.Repository),
+			}
+			wedlug[pozycja.Repository] = wpis
+			kolejnosc = append(kolejnosc, pozycja.Repository)
+		}
+		wpis.Hosts++
+		if pozycja.Unverified {
+			wpis.Unverified++
+		}
+		if pozycja.AgeHours != nil && (wpis.OldestAgeHours == nil || *pozycja.AgeHours > *wpis.OldestAgeHours) {
+			wiek := *pozycja.AgeHours
+			wpis.OldestAgeHours = &wiek
+		}
+	}
+	if len(kolejnosc) == 0 {
+		return []obciazenieRepozytorium{}
+	}
+
+	// Budzety sa opcjonalne: instalacja bez nich nadal pokazuje backendy,
+	// tylko bez ich pojemnosci.
+	if s.budzety != nil {
+		if stany, err := s.budzety.Stany(ctx); err == nil {
+			wedlugKlucza := map[string]budgets.Stan{}
+			for _, stan := range stany {
+				wedlugKlucza[stan.Klucz] = stan
+			}
+			for _, wpis := range wedlug {
+				stan, mamy := wedlugKlucza[wpis.BudgetKey]
+				if !mamy {
+					// Polityka domyslna dla wszystkich backendow liczy sie
+					// tak samo jak opisana osobno.
+					stan, mamy = wedlugKlucza[budgets.Wzorzec(wpis.BudgetKey)]
+				}
+				if !mamy {
+					continue
+				}
+				pojemnosc, zajete, chetnych := stan.Pojemnosc, stan.Zajete, stan.Chetnych
+				wpis.Capacity, wpis.Used, wpis.Claimants = &pojemnosc, &zajete, &chetnych
+			}
+		}
+	}
+
+	// Najpierw backendy z najstarsza kopia: to one wymagaja uwagi.
+	obciazenia := make([]obciazenieRepozytorium, 0, len(kolejnosc))
+	for _, repozytorium := range kolejnosc {
+		obciazenia = append(obciazenia, *wedlug[repozytorium])
+	}
+	sort.SliceStable(obciazenia, func(i, j int) bool {
+		if (obciazenia[i].OldestAgeHours == nil) != (obciazenia[j].OldestAgeHours == nil) {
+			return obciazenia[j].OldestAgeHours == nil
+		}
+		if obciazenia[i].OldestAgeHours == nil {
+			return obciazenia[i].Repository < obciazenia[j].Repository
+		}
+		return *obciazenia[i].OldestAgeHours > *obciazenia[j].OldestAgeHours
+	})
+	return obciazenia
 }

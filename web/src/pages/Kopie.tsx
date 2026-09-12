@@ -13,14 +13,28 @@ type Pozycja = {
   last_success_at?: string;
   age_hours?: number;
   unverified: boolean;
+  last_restore_at?: string;
 };
 
 type Widok = {
   items: Pozycja[];
   counts: Record<string, number>;
   unverified: number;
+  never_restored?: number;
   hosts_total: number;
   thresholds: { warning_hours: number; critical_hours: number; verification_days: number };
+  repositories?: Repozytorium[];
+};
+
+type Repozytorium = {
+  repository: string;
+  hosts: number;
+  unverified: number;
+  oldest_age_hours?: number;
+  budget_key: string;
+  capacity?: number;
+  used?: number;
+  claimants?: number;
 };
 
 function znacznik(stan: string, wiek?: number) {
@@ -70,8 +84,13 @@ export function KopieFloty() {
         <span className="znacznik uwaga">{liczby.warning ?? 0} ageing</span>
         <span className="znacznik ok">{liczby.ok ?? 0} fresh</span>
         <span className="znacznik uwaga">{data.unverified} unverified</span>
+        {/* Kopia, ktorej nikt nigdy nie odtworzyl, jest nadzieja, a nie
+            kopia. Panel nie zmusza do proby - ma powiedziec, ze jej nie bylo. */}
+        <span className="znacznik nieznany">{data.never_restored ?? 0} never restored</span>
         <span className="zrodlo">{data.hosts_total} hosts visible</span>
       </div>
+
+      <Repozytoria repozytoria={data.repositories ?? []} />
 
       {!data.items.length ? (
         <Pusto>
@@ -107,6 +126,13 @@ export function KopieFloty() {
                   ) : (
                     <span className="znacznik ok">verified</span>
                   )}
+                  <div className="zrodlo">
+                    {pozycja.last_restore_at ? (
+                      <>restored <Czas wartosc={pozycja.last_restore_at} /></>
+                    ) : (
+                      "never restored"
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -114,5 +140,60 @@ export function KopieFloty() {
         </table>
       )}
     </>
+  );
+}
+
+/**
+ * Backendy, do ktorych pisze flota.
+ *
+ * Lista kopii mowi, ktory host ma stara kopie. Nie mowi, ktory backend jest
+ * waskim gardlem - a to on decyduje, ile kopii idzie naraz. Pojemnosc
+ * nieustawiona jest tu brakiem polityki, a nie zerem: wtedy nic nie
+ * ogranicza rownoleglosci i lepiej, zeby to bylo widac.
+ */
+function Repozytoria({ repozytoria }: { repozytoria: Repozytorium[] }) {
+  if (!repozytoria.length) return null;
+  return (
+    <section style={{ marginTop: 16 }}>
+      <h2>Repositories</h2>
+      <table>
+        <thead>
+          <tr><th>Repository</th><th>Hosts</th><th>Oldest backup</th><th>Parallel writes</th></tr>
+        </thead>
+        <tbody>
+          {repozytoria.map((pozycja) => (
+            <tr key={pozycja.repository}>
+              <td>
+                {pozycja.repository}
+                <div className="zrodlo">{pozycja.budget_key}</div>
+              </td>
+              <td>
+                {pozycja.hosts}
+                {pozycja.unverified > 0 && (
+                  <div className="zrodlo">{pozycja.unverified} unverified</div>
+                )}
+              </td>
+              <td>
+                {pozycja.oldest_age_hours === undefined
+                  ? "—"
+                  : `${Math.round(pozycja.oldest_age_hours)} h`}
+              </td>
+              <td>
+                {pozycja.capacity === undefined ? (
+                  <span className="znacznik nieznany">no limit set</span>
+                ) : (
+                  <>
+                    {pozycja.used ?? 0} / {pozycja.capacity}
+                    {(pozycja.claimants ?? 0) > 0 && (
+                      <div className="zrodlo">{pozycja.claimants} campaigns want it</div>
+                    )}
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
