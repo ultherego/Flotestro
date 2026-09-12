@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ultherego/flotestro/internal/jobs"
+	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
@@ -263,6 +264,19 @@ func planPayload(akcja opspec.ActionType, zmiana opspec.ActionType,
 	payload opspec.Payload) opspec.Payload {
 	// Plan urzadzenia dostaje nazwe rodzaju: sama sciezka /dev/... nie mowi,
 	// czy operator sprawdza, czy rozszerza.
+	// Plan kopii tez dostaje nazwe rodzaju: to samo zlecenie sluzy odczytowi
+	// repozytorium i planowaniu kopii.
+	if zmiana == opspec.ActionBackupRun || zmiana == opspec.ActionBackupVerify {
+		if payload.Backup != nil {
+			kopia := *payload.Backup
+			kopia.Plan = backupmodul.PlanKopia
+			if zmiana == opspec.ActionBackupVerify {
+				kopia.Plan = backupmodul.PlanSprawdzenie
+			}
+			payload.Backup = &kopia
+		}
+		return payload
+	}
 	if rodzaj := rodzajPlanuUrzadzenia(zmiana); rodzaj != "" && payload.Storage != nil {
 		przestrzen := *payload.Storage
 		przestrzen.Plan = rodzaj
@@ -360,6 +374,24 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			siec := *payload.Network
 			siec.PlanHash = hash
 			payload.Network = &siec
+		}
+
+	case opspec.ActionBackupRun, opspec.ActionBackupVerify:
+		// Kopia wiaze sie odciskiem planu: zakres albo repozytorium
+		// zmienione od planowania zatrzymuja operacje.
+		if payload.Backup != nil {
+			kopia := *payload.Backup
+			kopia.PlanHash = hash
+			payload.Backup = &kopia
+		}
+
+	case opspec.ActionCertificateDeploy:
+		// Certyfikat wiaze sie odciskiem planu: plik pod ta sciezka zmieniony
+		// od planowania zatrzymuje wdrozenie zamiast nadpisac cudzy material.
+		if payload.Certificate != nil {
+			certyfikat := *payload.Certificate
+			certyfikat.PlanHash = hash
+			payload.Certificate = &certyfikat
 		}
 
 	case opspec.ActionTimeConfigApply:

@@ -110,6 +110,9 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 		ActionFilesystemResize:      ActionStoragePlan,
 		ActionLVMExtend:             ActionStoragePlan,
 		ActionPackageInstall:        ActionPackagePlan,
+		ActionCertificateDeploy:     ActionCertificatePlan,
+		ActionBackupRun:             ActionBackupPlan,
+		ActionBackupVerify:          ActionBackupPlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
@@ -140,5 +143,17 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 		if TrybWykonywalny(zmiana) {
 			t.Errorf("%s dopuszczona bez wlasnej fazy w silniku", zmiana)
 		}
+	}
+}
+
+// TestOdtworzenieNieIdzieMasowo pilnuje granicy, ktora nie jest brakiem
+// funkcji: odtworzenie rozpakowuje stary stan na dzialajacym systemie i ma
+// wymagac obecnosci operatora przy kazdym hoscie.
+func TestOdtworzenieNieIdzieMasowo(t *testing.T) {
+	if PowodWykluczeniaZKampanii(ActionBackupRestore) == "" {
+		t.Error("odtworzenie nie jest wykluczone z kampanii")
+	}
+	if PowodWykluczeniaZKampanii(ActionBackupRun) != "" {
+		t.Error("kopia wykluczona z kampanii razem z odtworzeniem")
 	}
 }

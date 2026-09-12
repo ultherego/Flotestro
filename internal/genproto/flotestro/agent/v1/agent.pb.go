@@ -848,6 +848,8 @@ const (
 	CertificateAction_OPERATION_SCAN        CertificateAction_Operation = 1
 	CertificateAction_OPERATION_DEPLOY      CertificateAction_Operation = 2
 	CertificateAction_OPERATION_RENEW       CertificateAction_Operation = 3
+	// Plan wdrozenia liczony na hoscie, bez siegania po klucz prywatny.
+	CertificateAction_OPERATION_PLAN CertificateAction_Operation = 4
 )
 
 // Enum value maps for CertificateAction_Operation.
@@ -857,12 +859,14 @@ var (
 		1: "OPERATION_SCAN",
 		2: "OPERATION_DEPLOY",
 		3: "OPERATION_RENEW",
+		4: "OPERATION_PLAN",
 	}
 	CertificateAction_Operation_value = map[string]int32{
 		"OPERATION_UNSPECIFIED": 0,
 		"OPERATION_SCAN":        1,
 		"OPERATION_DEPLOY":      2,
 		"OPERATION_RENEW":       3,
+		"OPERATION_PLAN":        4,
 	}
 )
 
@@ -8872,10 +8876,14 @@ type BackupAction struct {
 	EnvSecrets map[string]*SecretRef `protobuf:"bytes,15,rep,name=env_secrets,json=envSecrets,proto3" json:"env_secrets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	ReadData   bool                  `protobuf:"varint,16,opt,name=read_data,json=readData,proto3" json:"read_data,omitempty"`
 	// Odtworzenie: cel i plan nadpisania sa obowiazkowe.
-	SnapshotId    string   `protobuf:"bytes,17,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
-	Target        string   `protobuf:"bytes,18,opt,name=target,proto3" json:"target,omitempty"`
-	Include       []string `protobuf:"bytes,19,rep,name=include,proto3" json:"include,omitempty"`
-	Overwrite     string   `protobuf:"bytes,20,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
+	SnapshotId string   `protobuf:"bytes,17,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
+	Target     string   `protobuf:"bytes,18,opt,name=target,proto3" json:"target,omitempty"`
+	Include    []string `protobuf:"bytes,19,rep,name=include,proto3" json:"include,omitempty"`
+	Overwrite  string   `protobuf:"bytes,20,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
+	// Plan nazywa rodzaj planowanej operacji: run albo verify.
+	Plan string `protobuf:"bytes,23,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,22,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9057,13 +9065,31 @@ func (x *BackupAction) GetOverwrite() string {
 	return ""
 }
 
+func (x *BackupAction) GetPlan() string {
+	if x != nil {
+		return x.Plan
+	}
+	return ""
+}
+
+func (x *BackupAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type BackupResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// State niesie stan repozytorium po operacji planu.
 	State []byte `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
 	// Outcome niesie wynik operacji zmieniajacej.
-	Outcome       []byte `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"`
-	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Outcome []byte `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Message string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	// Plan kopii w postaci JSON przy OPERATION_PLAN z zakresem.
+	Plan []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Verified mowi, ze po kopii host sprawdzil repozytorium.
+	Verified      bool `protobuf:"varint,5,opt,name=verified,proto3" json:"verified,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9117,6 +9143,20 @@ func (x *BackupResult) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *BackupResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
+func (x *BackupResult) GetVerified() bool {
+	if x != nil {
+		return x.Verified
+	}
+	return false
 }
 
 // RepositoryAction opisuje zrodlo pakietow.
@@ -9427,7 +9467,9 @@ type CertificateAction struct {
 	// ProbeTarget jest adresem, pod ktorym host sprawdzi wynik wdrozenia.
 	ProbeTarget string `protobuf:"bytes,12,opt,name=probe_target,json=probeTarget,proto3" json:"probe_target,omitempty"`
 	// Request wskazuje zlecenie certmongera przy odnowieniu.
-	Request       string `protobuf:"bytes,13,opt,name=request,proto3" json:"request,omitempty"`
+	Request string `protobuf:"bytes,13,opt,name=request,proto3" json:"request,omitempty"`
+	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+	PlanHash      string `protobuf:"bytes,14,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9553,6 +9595,13 @@ func (x *CertificateAction) GetRequest() string {
 	return ""
 }
 
+func (x *CertificateAction) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
 type CertificateResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
@@ -9566,7 +9615,9 @@ type CertificateResult struct {
 	// RolledBack mowi, ze host wrocil do poprzedniego pliku. Wdrozenie, ktore
 	// sie cofnelo, nie moze wygladac jak wdrozenie, ktore sie nie udalo
 	// w polowie.
-	RolledBack    bool `protobuf:"varint,6,opt,name=rolled_back,json=rolledBack,proto3" json:"rolled_back,omitempty"`
+	RolledBack bool `protobuf:"varint,6,opt,name=rolled_back,json=rolledBack,proto3" json:"rolled_back,omitempty"`
+	// Plan wdrozenia w postaci JSON przy OPERATION_PLAN.
+	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9641,6 +9692,13 @@ func (x *CertificateResult) GetRolledBack() bool {
 		return x.RolledBack
 	}
 	return false
+}
+
+func (x *CertificateResult) GetPlan() []byte {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
 }
 
 // TimeAction opisuje operacje na czasie hosta.
@@ -12014,7 +12072,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0ftimeout_seconds\x18\x05 \x01(\x05R\x0etimeoutSeconds\"B\n" +
 	"\x10MonitoringResult\x12\x14\n" +
 	"\x05probe\x18\x01 \x01(\fR\x05probe\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xb5\a\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xe6\a\n" +
 	"\fBackupAction\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.agent.v1.BackupAction.OperationR\toperation\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
@@ -12045,7 +12103,9 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"snapshotId\x12\x16\n" +
 	"\x06target\x18\x12 \x01(\tR\x06target\x12\x18\n" +
 	"\ainclude\x18\x13 \x03(\tR\ainclude\x12\x1c\n" +
-	"\toverwrite\x18\x14 \x01(\tR\toverwrite\x1a\\\n" +
+	"\toverwrite\x18\x14 \x01(\tR\toverwrite\x12\x12\n" +
+	"\x04plan\x18\x17 \x01(\tR\x04plan\x12\x1b\n" +
+	"\tplan_hash\x18\x16 \x01(\tR\bplanHash\x1a\\\n" +
 	"\x0fEnvSecretsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
 	"\x05value\x18\x02 \x01(\v2\x1d.flotestro.agent.v1.SecretRefR\x05value:\x028\x01\"z\n" +
@@ -12054,11 +12114,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0eOPERATION_PLAN\x10\x01\x12\x11\n" +
 	"\rOPERATION_RUN\x10\x02\x12\x14\n" +
 	"\x10OPERATION_VERIFY\x10\x03\x12\x15\n" +
-	"\x11OPERATION_RESTORE\x10\x04\"X\n" +
+	"\x11OPERATION_RESTORE\x10\x04\"\x88\x01\n" +
 	"\fBackupResult\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\fR\x05state\x12\x18\n" +
 	"\aoutcome\x18\x02 \x01(\fR\aoutcome\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\x98\x03\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x12\n" +
+	"\x04plan\x18\x04 \x01(\fR\x04plan\x12\x1a\n" +
+	"\bverified\x18\x05 \x01(\bR\bverified\"\x98\x03\n" +
 	"\x10RepositoryAction\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -12085,7 +12147,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x11CertificateTarget\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bkey_path\x18\x02 \x01(\tR\akeyPath\x12\x18\n" +
-	"\aservice\x18\x03 \x01(\tR\aservice\"\xd2\x04\n" +
+	"\aservice\x18\x03 \x01(\tR\aservice\"\x83\x05\n" +
 	"\x11CertificateAction\x12M\n" +
 	"\toperation\x18\x01 \x01(\x0e2/.flotestro.agent.v1.CertificateAction.OperationR\toperation\x12?\n" +
 	"\atargets\x18\x02 \x03(\v2%.flotestro.agent.v1.CertificateTargetR\atargets\x12\x12\n" +
@@ -12102,12 +12164,14 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\vreload_unit\x18\v \x01(\tR\n" +
 	"reloadUnit\x12!\n" +
 	"\fprobe_target\x18\f \x01(\tR\vprobeTarget\x12\x18\n" +
-	"\arequest\x18\r \x01(\tR\arequest\"e\n" +
+	"\arequest\x18\r \x01(\tR\arequest\x12\x1b\n" +
+	"\tplan_hash\x18\x0e \x01(\tR\bplanHash\"y\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_SCAN\x10\x01\x12\x14\n" +
 	"\x10OPERATION_DEPLOY\x10\x02\x12\x13\n" +
-	"\x0fOPERATION_RENEW\x10\x03\"\xcc\x01\n" +
+	"\x0fOPERATION_RENEW\x10\x03\x12\x12\n" +
+	"\x0eOPERATION_PLAN\x10\x04\"\xe0\x01\n" +
 	"\x11CertificateResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12-\n" +
@@ -12115,7 +12179,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\tnot_after\x18\x04 \x01(\tR\bnotAfter\x12\x14\n" +
 	"\x05probe\x18\x05 \x01(\fR\x05probe\x12\x1f\n" +
 	"\vrolled_back\x18\x06 \x01(\bR\n" +
-	"rolledBack\"\x8f\x03\n" +
+	"rolledBack\x12\x12\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\"\x8f\x03\n" +
 	"\n" +
 	"TimeAction\x12F\n" +
 	"\toperation\x18\x01 \x01(\x0e2(.flotestro.agent.v1.TimeAction.OperationR\toperation\x12\x18\n" +

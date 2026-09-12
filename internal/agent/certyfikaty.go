@@ -171,9 +171,22 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		ProbeTarget: payload.ProbeTarget,
 		Request:     payload.Request,
 	}
+	if action == opspec.ActionCertificatePlan {
+		// Plan nie siega po klucz prywatny: opisuje wdrozenie, ktore sie
+		// jeszcze nie wydarzylo, i sam plan trafia do bazy panelu.
+		zadanie.Operation = helperv1.CertificateRequest_OPERATION_PLAN
+		zadanie.Certificate = []byte(payload.Certificate)
+		if !payload.KeySecret.Pusty() {
+			zadanie.KeySecretRef = payload.KeySecret.String()
+		}
+	}
 	if action == opspec.ActionCertificateDeploy {
 		zadanie.Operation = helperv1.CertificateRequest_OPERATION_DEPLOY
 		zadanie.Certificate = []byte(payload.Certificate)
+		zadanie.PlanHash = payload.PlanHash
+		if !payload.KeySecret.Pusty() {
+			zadanie.KeySecretRef = payload.KeySecret.String()
+		}
 		// Klucz pobieramy dopiero teraz, tuz przed podmiana. Wartosc zyje
 		// przez chwile w pamieci agenta i helpera - nie ma jej w kopercie
 		// zadania, w dzienniku ani w wyniku.
@@ -210,6 +223,7 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		NotAfter:          wynik.GetNotAfter(),
 		Probe:             wynik.GetProbe(),
 		RolledBack:        wynik.GetRolledBack(),
+		Plan:              wynik.GetPlan(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

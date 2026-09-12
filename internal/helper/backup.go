@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -72,6 +73,16 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 	switch action.GetOperation() {
 	case helperv1.BackupRequest_OPERATION_PLAN:
 		stan, err := adapter.Plan(actionCtx, zlecenie)
+		// Plan nazwany po rodzaju jest planem kopii, a nie odczytem
+		// repozytorium: liczy, co z tego hosta naprawde pojedzie i ile go to
+		// kosztuje. Samo zlecenie wyglada tak samo w obu przypadkach.
+		if rodzaj := action.GetPlan(); rodzaj != "" {
+			if err != nil {
+				stan.UnavailableReason = err.Error()
+			}
+			return odpowiedzPlanuKopii(stan, zlecenie.Definicja,
+				rodzaj == backup.PlanSprawdzenie, action.GetReadData())
+		}
 		zakodowany, blad := json.Marshal(stan)
 		if blad != nil {
 			return reject(ErrorExecFailed, blad.Error())
@@ -94,12 +105,39 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		}
 
 	case helperv1.BackupRequest_OPERATION_RUN:
+		if odmowa := sprawdzOdciskPlanuKopii(actionCtx, adapter, zlecenie, action, false); odmowa != nil {
+			return odmowa
+		}
 		wynik, err := adapter.Wykonaj(actionCtx, zlecenie, odbiorca)
-		return odpowiedzBackupu(wynik, err)
+		if err != nil {
+			return odpowiedzBackupu(wynik, err)
+		}
+		// Kopia, ktorej nikt nie sprawdzil, nie jest sukcesem: repozytorium
+		// bywa uszkodzone dokladnie tak, jak wyglada na dzialajace. Host
+		// sprawdza je od razu i dopiero wtedy melduje kopie.
+		if _, err := adapter.Sprawdz(actionCtx, zlecenie); err != nil {
+			odpowiedz := odpowiedzBackupu(wynik, nil)
+			odpowiedz.Accepted = false
+			odpowiedz.ErrorCode = ErrorPreconditionFailed
+			odpowiedz.Message = "kopia powstala, ale repozytorium nie przeszlo sprawdzenia: " + err.Error()
+			odpowiedz.BackupResult.Message = odpowiedz.Message
+			return odpowiedz
+		}
+		odpowiedz := odpowiedzBackupu(wynik, nil)
+		odpowiedz.BackupResult.Verified = true
+		odpowiedz.BackupResult.Message = wynik.Message + "; repozytorium sprawdzone"
+		return odpowiedz
 
 	case helperv1.BackupRequest_OPERATION_VERIFY:
+		if odmowa := sprawdzOdciskPlanuKopii(actionCtx, adapter, zlecenie, action, true); odmowa != nil {
+			return odmowa
+		}
 		wynik, err := adapter.Sprawdz(actionCtx, zlecenie)
-		return odpowiedzBackupu(wynik, err)
+		odpowiedz := odpowiedzBackupu(wynik, err)
+		if err == nil {
+			odpowiedz.BackupResult.Verified = true
+		}
+		return odpowiedz
 
 	case helperv1.BackupRequest_OPERATION_RESTORE:
 		if err := backup.WalidujOdtworzenie(zlecenie.Odtworzenie); err != nil {
@@ -149,4 +187,53 @@ func kodBledu(err error) string {
 		return ErrorTimeout
 	}
 	return ErrorExecFailed
+}
+
+// odpowiedzPlanuKopii sklada plan kopii wobec stanu repozytorium.
+//
+// Rozmiar zakresu liczy host: panel nie wie, ile danych naprawde tam lezy,
+// a operator ma to zobaczyc przed zgoda.
+func odpowiedzPlanuKopii(stan backup.Stan, definicja backup.Definicja,
+	sprawdzenie, readData bool) *helperv1.HelperResponse {
+	plan := backup.Zaplanuj(stan, definicja, sprawdzenie, readData, backup.RozmiarSciezki)
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	stanJSON, err := json.Marshal(stan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "kopia nie powstanie na tym hoscie: " + plan.Refusal
+	if plan.Refusal == "" {
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		BackupResult: &helperv1.BackupResult{
+			State: stanJSON, Plan: zakodowany, Message: komunikat,
+		},
+	}
+}
+
+// sprawdzOdciskPlanuKopii porownuje plan liczony teraz z tym, na ktory
+// operator sie zgodzil. Inny odcisk znaczy, ze zakres albo repozytorium
+// zmienily sie od planowania - i to jest odmowa, nie ostrzezenie.
+func sprawdzOdciskPlanuKopii(ctx context.Context, adapter backup.Adapter,
+	zlecenie backup.Zlecenie, action *helperv1.BackupRequest, sprawdzenie bool) *helperv1.HelperResponse {
+	oczekiwany := action.GetPlanHash()
+	if oczekiwany == "" {
+		return nil
+	}
+	stan, err := adapter.Plan(ctx, zlecenie)
+	if err != nil {
+		stan.UnavailableReason = err.Error()
+	}
+	teraz := backup.Zaplanuj(stan, zlecenie.Definicja, sprawdzenie,
+		zlecenie.ReadData, backup.RozmiarSciezki)
+	if teraz.PlanHash != oczekiwany {
+		return reject(ErrorPreconditionFailed,
+			"zakres kopii albo repozytorium zmienily sie od planowania; operacja wymaga nowego planu")
+	}
+	return nil
 }

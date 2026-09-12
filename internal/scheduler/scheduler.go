@@ -470,9 +470,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Security{Security: ochrona}
 
-	case opspec.ActionCertificateScan, opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew:
+	case opspec.ActionCertificateScan, opspec.ActionCertificatePlan,
+		opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew:
 		operacja := agentv1.CertificateAction_OPERATION_SCAN
 		switch action {
+		case opspec.ActionCertificatePlan:
+			operacja = agentv1.CertificateAction_OPERATION_PLAN
 		case opspec.ActionCertificateDeploy:
 			operacja = agentv1.CertificateAction_OPERATION_DEPLOY
 		case opspec.ActionCertificateRenew:
@@ -503,6 +506,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			certyfikat.ReloadUnit = payload.Certificate.ReloadUnit
 			certyfikat.ProbeTarget = payload.Certificate.ProbeTarget
 			certyfikat.Request = payload.Certificate.Request
+			certyfikat.PlanHash = payload.Certificate.PlanHash
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
 
@@ -551,6 +555,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			kopia.Target = payload.Backup.Target
 			kopia.Include = payload.Backup.Include
 			kopia.Overwrite = payload.Backup.Overwrite
+			kopia.Plan = payload.Backup.Plan
+			kopia.PlanHash = payload.Backup.PlanHash
 			// Koperta niesie odnosniki do poswiadczen, nigdy ich wartosci.
 			if !payload.Backup.PasswordSecret.Pusty() {
 				kopia.PasswordSecret = &agentv1.SecretRef{

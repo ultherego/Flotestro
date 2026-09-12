@@ -647,12 +647,23 @@ message BackupRequest {
   string target = 18;
   repeated string include = 19;
   string overwrite = 20;
+  // Plan nazywa rodzaj planowanej operacji: run albo verify. Puste przy
+  // OPERATION_PLAN znaczy odczyt stanu repozytorium.
+  string plan = 23;
+  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  string plan_hash = 22;
 }
 
 message BackupResult {
   bytes state = 1;
   bytes outcome = 2;
   string message = 3;
+  // Plan kopii w postaci JSON przy OPERATION_PLAN z zakresem. Hasla
+  // repozytorium w nim nie ma.
+  bytes plan = 4;
+  // Verified mowi, ze po kopii host sprawdzil repozytorium. Kopia bez
+  // sprawdzenia nie jest sukcesem.
+  bool verified = 5;
 }
 
 // RepositoryRequest zapisuje albo usuwa zrodlo pakietow.
@@ -708,6 +719,8 @@ message CertificateRequest {
     OPERATION_FACTS = 1;
     OPERATION_DEPLOY = 2;
     OPERATION_RENEW = 3;
+    // Plan wdrozenia bez dotykania hosta i bez siegania po klucz prywatny.
+    OPERATION_PLAN = 4;
   }
   // Fact wylicza to, czego nie da sie odczytac bez roota.
   enum Fact {
@@ -740,6 +753,11 @@ message CertificateRequest {
   // zarzadzanych. Bez tego zakladka pokazywalaby stan sprzed ostatniej zmiany
   // konfiguracji panelu.
   bool authoritative = 15;
+  // KeySecretRef nazywa sekret klucza w postaci "nazwa#wersja". Sama nazwa,
+  // nigdy wartosc: plan ma powiedziec, skad host wezmie klucz.
+  string key_secret_ref = 16;
+  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  string plan_hash = 17;
 }
 
 message CertificateResult {
@@ -750,6 +768,9 @@ message CertificateResult {
   string not_after = 4;
   bytes probe = 5;
   bool rolled_back = 6;
+  // Plan wdrozenia w postaci JSON przy OPERATION_PLAN. Klucza prywatnego
+  // w nim nie ma.
+  bytes plan = 7;
 }
 
 // TimeRequest zmienia zrodla czasu albo strefe hosta.

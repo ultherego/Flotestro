@@ -79,6 +79,13 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"this operation is irreversible and needs its target named; run it host by host")
 		return
 	}
+	// Sa operacje, ktorych masowo nie wolno robic wcale - nie dlatego, ze
+	// panel nie umie, tylko dlatego, ze ich skutek wymaga obecnosci
+	// operatora przy kazdym hoscie z osobna.
+	if powod := opspec.PowodWykluczeniaZKampanii(action); powod != "" {
+		problem(w, http.StatusBadRequest, "not_a_campaign_action", powod)
+		return
+	}
 	// Tryb masowy jest deklaracja operacji, a nie wnioskiem z jej ryzyka.
 	// Brak deklaracji znaczy odmowe: dopisanie nowej operacji do rejestru nie
 	// moze samo z siebie otwierac jej dla calej floty.

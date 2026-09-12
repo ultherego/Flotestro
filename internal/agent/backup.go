@@ -86,6 +86,7 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		Initialize: payload.Initialize, ReadData: payload.ReadData,
 		SnapshotId: payload.SnapshotID, Target: payload.Target,
 		Include: payload.Include, Overwrite: payload.Overwrite,
+		Plan: payload.Plan, PlanHash: payload.PlanHash,
 	}
 
 	// Poswiadczenia pobieramy dopiero teraz, tuz przed operacja. Zyja przez
@@ -122,9 +123,11 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 
 	wynik := response.GetBackupResult()
 	szczegoly := &agentv1.BackupResult{
-		State:   wynik.GetState(),
-		Outcome: wynik.GetOutcome(),
-		Message: wynik.GetMessage(),
+		State:    wynik.GetState(),
+		Outcome:  wynik.GetOutcome(),
+		Message:  wynik.GetMessage(),
+		Plan:     wynik.GetPlan(),
+		Verified: wynik.GetVerified(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
@@ -101,6 +102,7 @@ const (
 	// uslug. Klucz prywatny nie jedzie w zleceniu - payload niesie odnosnik
 	// do magazynu, a host siega po wartosc dopiero przy wykonaniu.
 	ActionCertificateScan   ActionType = "certificate.scan"
+	ActionCertificatePlan   ActionType = "certificate.plan"
 	ActionCertificateDeploy ActionType = "certificate.deploy"
 	// Odnowienie jest osobna operacja, bo robi je host wlasnym demonem:
 	// panel prosi certmongera o nowy certyfikat, a nie podaje mu tresci.
@@ -579,6 +581,10 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Wdrozenie podmienia tozsamosc, ktora usluga pokazuje swiatu, i konczy
 	// sie przeladowaniem tej uslugi. Zly material zatrzymuje usluge, a zle
 	// prawa klucza oddaja ja kazdemu na hoscie - stad ryzyko krytyczne.
+	// Plan wdrozenia: roznica miedzy certyfikatem zastanym a zamowionym.
+	// Nie dotyka hosta i nie siega po klucz prywatny.
+	ActionCertificatePlan: {mutating: false, capability: "certificates", permission: "certificate.plan",
+		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
 	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
 	// Odnowienie konczy sie tak samo jak wdrozenie: nowym plikiem i uslugą,
@@ -1430,6 +1436,13 @@ type BackupPayload struct {
 	EnvSecrets map[string]SecretRef `json:"env_secrets,omitempty"`
 	// ReadData wlacza weryfikacje z odczytem danych, a nie samej struktury.
 	ReadData bool `json:"read_data,omitempty"`
+	// Plan nazywa rodzaj planowanej operacji: run albo verify. Puste znaczy
+	// odczyt stanu repozytorium - to samo zlecenie sluzy obu rzeczom, wiec
+	// rodzaj planu musi byc nazwany, a nie zgadniety z zakresu.
+	Plan string `json:"plan,omitempty"`
+	// PlanHash wiaze kopie z planem policzonym na tym hoscie: zakres albo
+	// repozytorium zmienione od planowania zatrzymuja operacje.
+	PlanHash string `json:"plan_hash,omitempty"`
 
 	// Odtworzenie. Cel i plan nadpisania sa obowiazkowe: operacja bez nich
 	// ma skutek, ktorego nikt nie zna.
@@ -1510,6 +1523,9 @@ type CertificatePayload struct {
 	ProbeTarget string `json:"probe_target,omitempty"`
 	// Request wskazuje zlecenie certmongera przy odnowieniu.
 	Request string `json:"request,omitempty"`
+	// PlanHash wiaze wdrozenie z planem policzonym na tym hoscie; host liczy
+	// plan jeszcze raz przed podmiana plikow.
+	PlanHash string `json:"plan_hash,omitempty"`
 }
 
 // PowerPayload opisuje wylaczenie hosta.
@@ -1580,6 +1596,19 @@ func (r *SecretRef) Waliduj() error {
 
 // Pusty mowi, czy odnosnik na nic nie wskazuje.
 func (r *SecretRef) Pusty() bool { return r == nil || r.Name == "" }
+
+// String opisuje odnosnik w postaci "nazwa#wersja". Sama nazwa i wersja:
+// wartosci sekretu nie ma w tym module i nie moze pojawic sie w planie ani
+// w dzienniku.
+func (r *SecretRef) String() string {
+	if r.Pusty() {
+		return ""
+	}
+	if r.Version <= 0 {
+		return r.Name + "#biezaca"
+	}
+	return r.Name + "#" + strconv.Itoa(r.Version)
+}
 
 // FilePayload opisuje operacje na pliku konfiguracyjnym.
 type FilePayload struct {
@@ -2355,6 +2384,11 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
+		return nil
+
+	case ActionCertificatePlan:
+		// Plan przyjmuje to samo, co wdrozenie, i sam nazywa, czego host nie
+		// przyjmie: odmowa jest trescia planu, nie bledem zlecenia.
 		return nil
 
 	case ActionCertificateDeploy:

@@ -222,7 +222,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.shutdownHost(ctx, task, payload.Power)
 	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet, opspec.ActionAuditRulesReload:
 		return e.applySecurity(ctx, task, action, payload.Security)
-	case opspec.ActionCertificateScan, opspec.ActionCertificateDeploy,
+	case opspec.ActionCertificateScan, opspec.ActionCertificatePlan, opspec.ActionCertificateDeploy,
 		opspec.ActionCertificateRenew:
 		return e.applyCertificate(ctx, task, action, payload.Certificate)
 	case opspec.ActionRepositorySet:
@@ -701,7 +701,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Prune: kopia.GetPrune(), Runbook: kopia.GetRunbook(),
 			Initialize: kopia.GetInitialize(), ReadData: kopia.GetReadData(), SnapshotID: kopia.GetSnapshotId(),
 			Target: kopia.GetTarget(), Include: kopia.GetInclude(),
-			Overwrite: kopia.GetOverwrite(),
+			Overwrite: kopia.GetOverwrite(), Plan: kopia.GetPlan(), PlanHash: kopia.GetPlanHash(),
 		}
 		if ref := kopia.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
 			zawartosc.PasswordSecret = &opspec.SecretRef{
@@ -748,6 +748,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionCertificateDeploy
 		case agentv1.CertificateAction_OPERATION_RENEW:
 			typ = opspec.ActionCertificateRenew
+		case agentv1.CertificateAction_OPERATION_PLAN:
+			typ = opspec.ActionCertificatePlan
 		}
 		odnosnik := (*opspec.SecretRef)(nil)
 		if ref := certyfikat.GetKeySecret(); ref != nil && ref.GetName() != "" {
@@ -765,6 +767,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			ReloadUnit:  certyfikat.GetReloadUnit(),
 			ProbeTarget: certyfikat.GetProbeTarget(),
 			Request:     certyfikat.GetRequest(),
+			PlanHash:    certyfikat.GetPlanHash(),
 		}
 		for _, cel := range certyfikat.GetTargets() {
 			zawartosc.Targets = append(zawartosc.Targets, opspec.CertificateTarget{

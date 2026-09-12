@@ -58,6 +58,9 @@ var trybyMasowe = map[ActionType]CampaignMode{
 	ActionFileEnsure:            CampaignPerHostPlan,
 	ActionFileRemove:            CampaignPerHostPlan,
 	ActionFileRollback:          CampaignPerHostPlan,
+	ActionBackupRun:             CampaignPerHostPlan,
+	ActionBackupVerify:          CampaignPerHostPlan,
+	ActionCertificateDeploy:     CampaignPerHostPlan,
 	ActionMountEnsure:           CampaignPerHostPlan,
 	ActionMountRemove:           CampaignPerHostPlan,
 	ActionFilesystemCheck:       CampaignPerHostPlan,
@@ -159,6 +162,18 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	// Compose: plan liczy digest z manifestu i z digestow obrazow, a wdrozenie
 	// niesie go z powrotem. Wdrozenie z cudzym digestem trafiloby na host,
 	// ktory tego planu nigdy nie widzial.
+	// Certyfikat: plan pokazuje odcisk zastany i docelowy, termin waznosci,
+	// usluge do przeladowania i sonde. Klucz prywatny jedzie na host osobno,
+	// tuz przed podmiana, i nie ma go ani w planie, ani w zgodzie.
+	case ActionCertificateDeploy:
+		return ActionCertificatePlan
+
+	// Kopia: plan mowi, co z tego hosta pojedzie i ile go to kosztuje -
+	// ktore katalogi host naprawde ma, ile w nich lezy, czy repozytorium
+	// odpowiada i co zostanie po retencji.
+	case ActionBackupRun, ActionBackupVerify:
+		return ActionBackupPlan
+
 	case ActionComposeDeploy:
 		return ActionComposePlan
 	}
@@ -166,6 +181,20 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	// host zatwierdzalaby zmiane, ktorej diffu nikt nie policzyl. Planer
 	// jest osobna praca (proto, helper, wydanie agenta), a nie mapowaniem
 	// nazw - tak bylo z kazda rodzina powyzej.
+	return ""
+}
+
+// PowodWykluczeniaZKampanii nazywa operacje, ktore nie maja prawa isc
+// masowo, i mowi dlaczego.
+//
+// To jest inna odmowa niz brak planera: tam panel jeszcze nie umie, tutaj
+// nie wolno. Pusta wartosc znaczy, ze operacja nie jest tu wykluczona.
+func PowodWykluczeniaZKampanii(action ActionType) string {
+	switch action {
+	case ActionBackupRestore:
+		return "odtworzenie rozpakowuje stary stan na dzialajacym systemie i wymaga " +
+			"obecnosci operatora przy kazdym hoscie; kampania go nie kolejkuje"
+	}
 	return ""
 }
 

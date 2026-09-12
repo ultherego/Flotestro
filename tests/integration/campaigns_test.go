@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -2631,6 +2632,309 @@ func planUrzadzenia(h *harness, jobID string) (plan struct {
 	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
 	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
 		if odpowiedz.Items[i].Detail.Kind == "device_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// TestKampaniaCertyfikatuLiczyDiffIChroniKlucz sprawdza dwie rzeczy naraz:
+// wdrozenie certyfikatu w kampanii dostaje plan policzony na hoscie (odcisk
+// zastany i docelowy, termin waznosci), a klucz prywatny nie pojawia sie ani
+// w planie, ani w kopercie zadania, ani w audycie.
+func TestKampaniaCertyfikatuLiczyDiffIChroniKlucz(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	}
+	cele = cele[:2]
+
+	// Katalog musi istniec na kazdym hoscie kampanii: panel zapisuje plik,
+	// a nie zaklada cudzych katalogow.
+	sciezka := fmt.Sprintf("/etc/ssl/certs/flotestro-kampania-%d.crt", time.Now().UnixNano())
+	sciezkaKlucza := strings.Replace(sciezka, ".crt", ".key", 1)
+	stary, staryKlucz, _ := paraTestowa(t, "kampania.flotestro.test", 10*24*time.Hour)
+	nowy, nowyKlucz, odciskNowego := paraTestowa(t, "kampania.flotestro.test", 40*24*time.Hour)
+	sekretStarego := nowySekret(t, h, staryKlucz)
+	sekretNowego := nowySekret(t, h, nowyKlucz)
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.do(http.MethodDelete,
+				"/api/v1/hosts/"+hostID+"/certificates/targets?path="+sciezka, nil, nil, 0)
+		}
+	})
+
+	// Pierwszy host dostaje starszy certyfikat pod ta sama sciezka: plany
+	// hostow maja sie roznic stanem zastanym, a nie zamowieniem.
+	zadanie, proby := h.runOperation(cele[0], map[string]any{
+		"action": "certificate.deploy", "reason": "przygotowanie testu kampanii certyfikatow",
+		"payload": map[string]any{"certificate": map[string]any{
+			"path": sciezka, "key_path": sciezkaKlucza, "certificate": stary,
+			"key_secret": map[string]any{"name": sekretStarego.Name},
+		}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("przygotowanie: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "certyfikat na flocie", "action": "certificate.deploy",
+		"reason": "test integracyjny planow certyfikatow",
+		"payload": map[string]any{"certificate": map[string]any{
+			"path": sciezka, "key_path": sciezkaKlucza, "certificate": nowy,
+			"key_secret": map[string]any{"name": sekretNowego.Name},
+		}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	dzialania := map[string]int{}
+	odciski := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planCertyfikatu(h, target.PlanJobID)
+		dzialania[plan.Action]++
+		odciski[target.Hostname] = plan.PlanHash
+		if plan.DesiredFingerprint != odciskNowego || plan.PlanHash == "" {
+			t.Errorf("host %s planuje %+v", target.Hostname, plan)
+		}
+		// Klucz prywatny ma byc w planie wylacznie odnosnikiem do magazynu.
+		if plan.KeySecret == "" || strings.Contains(plan.KeySecret, "BEGIN") {
+			t.Errorf("host %s: odnosnik do klucza = %q", target.Hostname, plan.KeySecret)
+		}
+	}
+	if dzialania["create"] == 0 || dzialania["update"] == 0 {
+		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		var zadanie struct {
+			Payload struct {
+				Certificate struct {
+					PlanHash string `json:"plan_hash"`
+				} `json:"certificate"`
+			} `json:"payload"`
+		}
+		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
+		if zadanie.Payload.Certificate.PlanHash != odciski[target.Hostname] {
+			t.Errorf("host %s dostal odcisk %q, plan mial %q",
+				target.Hostname, zadanie.Payload.Certificate.PlanHash, odciski[target.Hostname])
+		}
+		wdrozony := znajdzCertyfikat(t, certyfikatyHosta(h, target.HostID), sciezka)
+		if wdrozony.FingerprintSHA256 != odciskNowego {
+			t.Errorf("host %s ma po kampanii certyfikat %q", target.Hostname, wdrozony.FingerprintSHA256)
+		}
+	}
+	// Wartosc klucza nie moze byc nigdzie poza magazynem - takze po drodze
+	// przez plan kampanii i jej zatwierdzenie.
+	sprawdzBrakWartosci(t, h, strings.Split(strings.TrimSpace(nowyKlucz), "\n")[1])
+}
+
+// planCertyfikatu czyta z wyniku zadania planujacego plan wdrozenia.
+func planCertyfikatu(h *harness, jobID string) (plan struct {
+	Action             string `json:"action"`
+	DesiredFingerprint string `json:"desired_fingerprint"`
+	KeySecret          string `json:"key_secret"`
+	Refusal            string `json:"refusal"`
+	PlanHash           string `json:"plan_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "certificate_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// TestKampaniaKopiiLiczyZakresIWymagaSprawdzenia sprawdza trzy rzeczy naraz:
+// kopia w kampanii dostaje plan policzony na hoscie (zakres, rozmiar, stan
+// repozytorium), kopia konczy sie sprawdzeniem repozytorium, a odtworzenie
+// nie idzie masowo w ogole.
+func TestKampaniaKopiiLiczyZakresIWymagaSprawdzenia(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily != "arch" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	}
+	cele = cele[:2]
+
+	nazwa := fmt.Sprintf("kampania-%d", time.Now().UnixNano())
+	repozytorium := "/srv/" + nazwa
+	haslo := "haslo-" + nazwa
+	sekret := nowySekret(t, h, haslo)
+	zlecenie := map[string]any{
+		"id": nazwa, "tool": "restic", "repository": repozytorium,
+		// Pierwszy katalog ma kazdy host; drugiego nie ma zaden i plan ma
+		// to powiedziec, zamiast zapisac pusta kopie.
+		"paths":     []string{"/etc/flotestro", "/srv/flotestro-nie-ma"},
+		"keep_last": 2, "initialize": true,
+		"password_secret": map[string]any{"name": sekret.Name},
+	}
+
+	// Odtworzenie nie ma prawa isc masowo - i to nie dlatego, ze panel nie
+	// umie, tylko dlatego, ze nie wolno.
+	var odmowa struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	odtworzenie := map[string]any{}
+	for klucz, wartosc := range zlecenie {
+		odtworzenie[klucz] = wartosc
+	}
+	odtworzenie["snapshot_id"] = "abc123"
+	odtworzenie["target"] = "/srv/odtworzenie"
+	odtworzenie["overwrite"] = "empty-target"
+	h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
+		"name": "odtworzenie na flocie", "action": "backup.restore",
+		"payload":  map[string]any{"backup": odtworzenie},
+		"selector": map[string]any{"host_ids": cele},
+	}, &odmowa, http.StatusBadRequest)
+	if odmowa.Code != "not_a_campaign_action" || !strings.Contains(odmowa.Detail, "obecnosci operatora") {
+		t.Errorf("odmowa odtworzenia: %s (%s)", odmowa.Code, odmowa.Detail)
+	}
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "kopia na flocie", "action": "backup.run",
+		"reason":                     "test integracyjny planow kopii",
+		"payload":                    map[string]any{"backup": zlecenie},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 5*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	odciski := map[string]string{}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planKopii(h, target.PlanJobID)
+		if plan.Action != "run" || plan.Refusal != "" || plan.PlanHash == "" {
+			t.Errorf("host %s planuje %+v", target.Hostname, plan)
+		}
+		if len(plan.Paths) != 1 || len(plan.MissingPaths) != 1 {
+			t.Errorf("host %s: zakres %v, brakuje %v", target.Hostname, plan.Paths, plan.MissingPaths)
+		}
+		if !plan.Verified || plan.WillInitialize != true {
+			t.Errorf("host %s: plan bez sprawdzenia albo bez zalozenia repozytorium: %+v",
+				target.Hostname, plan)
+		}
+		odciski[target.Hostname] = plan.PlanHash
+	}
+
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 10*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		var zadanie struct {
+			Payload struct {
+				Backup struct {
+					PlanHash string `json:"plan_hash"`
+				} `json:"backup"`
+			} `json:"payload"`
+		}
+		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
+		if zadanie.Payload.Backup.PlanHash != odciski[target.Hostname] {
+			t.Errorf("host %s dostal odcisk %q, plan mial %q",
+				target.Hostname, zadanie.Payload.Backup.PlanHash, odciski[target.Hostname])
+		}
+		// Kopia bez sprawdzenia repozytorium nie jest sukcesem, wiec wynik
+		// ma powiedziec, ze sprawdzenie sie odbylo.
+		var proby struct {
+			Items []struct {
+				Message string `json:"message"`
+			} `json:"items"`
+		}
+		h.get("/api/v1/jobs/"+target.JobID+"/attempts", &proby)
+		if len(proby.Items) == 0 || !strings.Contains(proby.Items[len(proby.Items)-1].Message, "sprawdzone") {
+			t.Errorf("host %s: kopia bez sprawdzenia: %+v", target.Hostname, proby.Items)
+		}
+	}
+	// Haslo repozytorium nie moze byc nigdzie poza magazynem - takze po
+	// drodze przez plan kampanii.
+	sprawdzBrakWartosci(t, h, haslo)
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "file.remove", "reason": "sprzatanie po tescie kampanii kopii",
+				"payload": map[string]any{"file": map[string]any{"path": repozytorium + "/config"}},
+			}, 2*time.Minute)
+		}
+	})
+}
+
+// planKopii czyta z wyniku zadania planujacego plan kopii.
+func planKopii(h *harness, jobID string) (plan struct {
+	Action         string   `json:"action"`
+	Paths          []string `json:"paths"`
+	MissingPaths   []string `json:"missing_paths"`
+	WillInitialize bool     `json:"will_initialize"`
+	Verified       bool     `json:"verified"`
+	Refusal        string   `json:"refusal"`
+	PlanHash       string   `json:"plan_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "backup_plan" {
 			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
 			return plan
 		}

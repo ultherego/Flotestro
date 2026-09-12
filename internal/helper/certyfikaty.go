@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -45,6 +46,8 @@ func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperR
 	switch action.GetOperation() {
 	case helperv1.CertificateRequest_OPERATION_FACTS:
 		return s.faktyCertyfikatow(actionCtx, action)
+	case helperv1.CertificateRequest_OPERATION_PLAN:
+		return s.zaplanujCertyfikat(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_DEPLOY:
 		return s.wdrozCertyfikat(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_RENEW:
@@ -119,8 +122,67 @@ func (s *Server) faktyCertyfikatow(ctx context.Context,
 // w pamieci; a jesli usluga po przeladowaniu nie pokazuje nowego certyfikatu,
 // wracamy do poprzedniego i mowimy o tym wprost. Wdrozenie, ktore zostawia
 // usluge martwa, nie jest wdrozeniem.
+// zaplanujCertyfikat liczy roznice miedzy certyfikatem, ktory host ma pod
+// sciezka, a tym z zamowienia. Nie dotyka plikow i nie siega po klucz
+// prywatny: plan trafia do bazy panelu, wiec nie moze niesc materialu.
+func (s *Server) zaplanujCertyfikat(ctx context.Context,
+	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
+	plan := s.planCertyfikatu(action)
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "wdrozenie nie wejdzie na ten host: " + plan.Refusal
+	switch {
+	case plan.Refusal != "":
+	case plan.Action == certificates.PlanBezZmian:
+		komunikat = "host ma juz ten certyfikat pod " + plan.Path
+	default:
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		CertificateResult: &helperv1.CertificateResult{
+			Message: komunikat, Plan: zakodowany,
+			FingerprintSha256: plan.DesiredFingerprint,
+		},
+	}
+}
+
+// planCertyfikatu sklada plan wdrozenia wobec pliku, ktory host ma teraz.
+func (s *Server) planCertyfikatu(action *helperv1.CertificateRequest) certificates.Plan {
+	obecny := certificates.Certyfikat{}
+	if err := certificates.WalidujSciezke(action.GetPath()); err == nil {
+		migawka := certificates.Skanuj([]certificates.Cel{{
+			Path: action.GetPath(), KeyPath: action.GetKeyPath(),
+			Service: action.GetReloadUnit(),
+		}})
+		if len(migawka.Certificates) > 0 {
+			obecny = migawka.Certificates[0]
+		}
+	}
+	return certificates.Zaplanuj(obecny, certificates.Zamowienie{
+		Path:       action.GetPath(),
+		KeyPath:    action.GetKeyPath(),
+		Certyfikat: string(action.GetCertificate()),
+		KeySecret:  action.GetKeySecretRef(),
+		Jednostka:  action.GetReloadUnit(),
+		Cel:        action.GetProbeTarget(),
+		MaKlucz:    action.GetKeySecretRef() != "" || len(action.GetKey()) > 0,
+	}, time.Now())
+}
+
 func (s *Server) wdrozCertyfikat(ctx context.Context,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
+	// Wdrozenie zatwierdzone na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal: inny certyfikat pod ta sciezka od planowania jest
+	// odmowa, a nie ostrzezeniem.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		if teraz := s.planCertyfikatu(action); teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"certyfikat pod "+action.GetPath()+" zmienil sie od planowania; wdrozenie wymaga nowego planu")
+		}
+	}
 	wdrozenie := certificates.Wdrozenie{
 		Path:       action.GetPath(),
 		KeyPath:    action.GetKeyPath(),

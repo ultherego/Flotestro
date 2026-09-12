@@ -1160,6 +1160,23 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// Stan repozytorium i wynik kopii naleza do zadania: to odpowiedz na
 	// pytanie zadane w jednej chwili, a nie stan hosta. Lista kopii jest tez
 	// jedynym miejscem, z ktorego operator moze wybrac te do odtworzenia.
+	// Plan kopii jest wynikiem zadania, nie stanem repozytorium: opisuje
+	// kopie, ktora sie jeszcze nie wydarzyla, i zakres tego hosta.
+	if kopia := result.GetBackupResult(); kopia != nil && len(kopia.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(kopia.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "backup_plan",
+			"plan":      json.RawMessage(kopia.GetPlan()),
+			"plan_hash": plan.PlanHash,
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if kopia := result.GetBackupResult(); kopia != nil &&
 		(len(kopia.GetState()) > 0 || len(kopia.GetOutcome()) > 0) {
 		encoded, err := json.Marshal(map[string]any{
@@ -1182,6 +1199,24 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"message":             zrodla.GetMessage(),
 			"gpg_key_fingerprint": zrodla.GetGpgKeyFingerprint(),
 			"rolled_back":         zrodla.GetRolledBack(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// Plan wdrozenia certyfikatu jest wynikiem zadania, nie stanem hosta:
+	// opisuje zmiane, ktora sie jeszcze nie wydarzyla. Klucza prywatnego
+	// w planie nie ma, wiec nie ma go takze tutaj.
+	if certyfikat := result.GetCertificateResult(); certyfikat != nil && len(certyfikat.GetPlan()) > 0 {
+		var plan struct {
+			PlanHash string `json:"plan_hash"`
+		}
+		_ = json.Unmarshal(certyfikat.GetPlan(), &plan)
+		encoded, err := json.Marshal(map[string]any{
+			"kind":      "certificate_plan",
+			"plan":      json.RawMessage(certyfikat.GetPlan()),
+			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
 			return encoded

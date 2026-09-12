@@ -281,6 +281,8 @@ const (
 	// podmieniaja tozsamosc, ktora usluga pokazuje swiatu, wiec maja wlasne
 	// uprawnienia. Wskazanie panelowi pliku do obserwacji nie zmienia hosta
 	// i jest osobna, lzejsza decyzja.
+	// Plan wdrozenia jest odczytem: liczy roznice, niczego nie zmienia.
+	PermCertificatePlan   Permission = "certificate.plan"
 	PermCertificateRead   Permission = "certificate.read"
 	PermCertificateWatch  Permission = "certificate.watch"
 	PermCertificateDeploy Permission = "certificate.deploy"
@@ -313,7 +315,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermDockerEvents, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
-		PermTimeRead, PermTimePlan, PermSecurityRead, PermFilePlan, PermCertificateRead,
+		PermTimeRead, PermTimePlan, PermSecurityRead, PermFilePlan, PermCertificateRead, PermCertificatePlan,
 		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
 	},
 	RoleAuditor: {
@@ -327,7 +329,7 @@ var rolePermissions = map[Role][]Permission{
 		PermSecurityRead, PermSecurityScan,
 		// Terminy certyfikatow sa materialem audytu tak samo jak stan
 		// ochronny: wygasajacy certyfikat jest ustaleniem, a nie awaria.
-		PermCertificateRead,
+		PermCertificateRead, PermCertificatePlan,
 		// Backup, ktorego nikt nie sprawdzil, jest ustaleniem audytu,
 		// a nie awaria dyzuru.
 		PermBackupRead,
@@ -374,7 +376,7 @@ var rolePermissions = map[Role][]Permission{
 		PermVulnerabilityRead,
 		// Operator oglada certyfikaty i wskazuje panelowi, ktorych plikow
 		// pilnowac; wdrozenie nowego jest juz decyzja administratora.
-		PermCertificateRead, PermCertificateWatch,
+		PermCertificateRead, PermCertificatePlan, PermCertificateWatch,
 		// Operator robi i sprawdza kopie; odtworzenie jest osobna decyzja,
 		// bo rozpakowuje stary stan na dzialajacym systemie.
 		PermBackupRead, PermBackupRun, PermBackupVerify,
@@ -442,7 +444,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,
 		PermSecretRead, PermSecretWrite, PermSecretDestroy,
-		PermCertificateRead, PermCertificateWatch,
+		PermCertificateRead, PermCertificatePlan, PermCertificateWatch,
 		PermCertificateDeploy, PermCertificateRenew,
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
