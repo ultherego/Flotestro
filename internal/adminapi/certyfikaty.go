@@ -461,3 +461,118 @@ func fragmentModulu(fragmenty []inventory.Fragment, modul string) *inventory.Fra
 	}
 	return nil
 }
+
+// kotwicaFloty opisuje jeden urzad widziany z calej floty.
+type kotwicaFloty struct {
+	FingerprintSHA256 string     `json:"fingerprint_sha256,omitempty"`
+	Subject           string     `json:"subject,omitempty"`
+	AnchorID          string     `json:"anchor_id,omitempty"`
+	Managed           bool       `json:"managed"`
+	NotAfter          *time.Time `json:"not_after,omitempty"`
+	Hosts             int        `json:"hosts"`
+	Sample            []string   `json:"sample,omitempty"`
+	// Reason niesie powod, dla ktorego kotwicy nie udalo sie opisac.
+	Reason string `json:"unavailable_reason,omitempty"`
+}
+
+// handleFleetTrust pokazuje, ktoremu urzedowi ufa ktory host.
+//
+// To jest ekran rotacji: w jej trakcie czesc floty ufa obu urzedom naraz,
+// i dopiero ten widok mowi, czy mozna juz wycofac stary. Bez niego operator
+// wnioskowalby o tym z kampanii, ktore skonczyly sie tydzien temu.
+func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermCertificateRead, "fleet")
+	if !ok {
+		return
+	}
+	lista, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	widoczne := make([]hosts.Host, 0, len(lista))
+	identyfikatory := make([]string, 0, len(lista))
+	for _, host := range lista {
+		if principal.Can(authz.PermCertificateRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
+			widoczne = append(widoczne, host)
+			identyfikatory = append(identyfikatory, host.ID)
+		}
+	}
+	fragmenty, err := s.inventory.FragmentyHostow(r.Context(), identyfikatory)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	kolejnosc := []string{}
+	wedlug := map[string]*kotwicaFloty{}
+	bezMagazynu := map[string]int{}
+	nieznane := 0
+
+	for _, host := range widoczne {
+		fragment := fragmentModulu(fragmenty[host.ID], "certificates")
+		if fragment == nil || len(fragment.Payload) == 0 {
+			nieznane++
+			continue
+		}
+		var snapshot modul.Snapshot
+		if err := json.Unmarshal(fragment.Payload, &snapshot); err != nil || snapshot.Trust == nil {
+			// Host, ktory nie zglosil jeszcze magazynu, nie jest hostem bez
+			// zaufania: to brak wiedzy i tak ma byc policzony.
+			nieznane++
+			continue
+		}
+		if snapshot.Trust.UnavailableReason != "" {
+			bezMagazynu[snapshot.Trust.UnavailableReason]++
+			continue
+		}
+		for _, kotwica := range snapshot.Trust.Anchors {
+			// Magazyn ma setki urzedow dystrybucji; panel pokazuje te, ktore
+			// sam zalozyl. Reszta jest trescia obrazu hosta, a nie floty.
+			if !kotwica.Managed {
+				continue
+			}
+			klucz := kotwica.FingerprintSHA256
+			if klucz == "" {
+				klucz = kotwica.Path + ":" + kotwica.UnavailableReason
+			}
+			wpis, mamy := wedlug[klucz]
+			if !mamy {
+				wpis = &kotwicaFloty{
+					FingerprintSHA256: kotwica.FingerprintSHA256,
+					Subject:           kotwica.Subject,
+					AnchorID:          kotwica.ID,
+					Managed:           kotwica.Managed,
+					NotAfter:          kotwica.NotAfter,
+					Reason:            kotwica.UnavailableReason,
+				}
+				wedlug[klucz] = wpis
+				kolejnosc = append(kolejnosc, klucz)
+			}
+			wpis.Hosts++
+			if len(wpis.Sample) < 12 {
+				wpis.Sample = append(wpis.Sample, host.Hostname)
+			}
+		}
+	}
+
+	kotwice := make([]kotwicaFloty, 0, len(kolejnosc))
+	for _, klucz := range kolejnosc {
+		kotwice = append(kotwice, *wedlug[klucz])
+	}
+	// Najpierw te, ktorym ufa najwiecej hostow: w trakcie rotacji to one
+	// mowia, jak daleko zaszla.
+	sort.SliceStable(kotwice, func(i, j int) bool { return kotwice[i].Hosts > kotwice[j].Hosts })
+
+	powody := make([]grupaHostow, 0, len(bezMagazynu))
+	for powod, ile := range bezMagazynu {
+		powody = append(powody, grupaHostow{Powod: powod, Liczba: ile})
+	}
+	sort.SliceStable(powody, func(i, j int) bool { return powody[i].Powod < powody[j].Powod })
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": kotwice, "hosts_total": len(widoczne),
+		"hosts_without_trust_store": powody,
+		"hosts_unknown":             nieznane,
+	})
+}

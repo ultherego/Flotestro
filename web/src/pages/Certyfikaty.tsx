@@ -77,6 +77,8 @@ export function CertyfikatyFloty() {
         </span>
       </div>
 
+      <Zaufanie />
+
       {!data.items.length ? (
         <Pusto>
           No host reports a certificate yet. Open a host, watch a path and scan it.
@@ -137,5 +139,78 @@ export function CertyfikatyFloty() {
         </p>
       )}
     </>
+  );
+}
+
+type WidokZaufania = {
+  items: {
+    fingerprint_sha256?: string;
+    subject?: string;
+    anchor_id?: string;
+    not_after?: string;
+    hosts: number;
+    sample?: string[];
+    unavailable_reason?: string;
+  }[];
+  hosts_total: number;
+  hosts_unknown: number;
+  hosts_without_trust_store?: { reason: string; count: number }[];
+};
+
+/**
+ * Urzedy, ktorym ufa flota.
+ *
+ * To jest ekran rotacji: w jej trakcie czesc hostow ufa staremu i nowemu
+ * urzedowi naraz, i dopiero ten widok mowi, czy mozna juz wycofac stary.
+ * Pokazujemy wylacznie kotwice zalozone przez panel - magazyn ma setki
+ * urzedow dystrybucji i one nie sa tu zadna informacja.
+ */
+function Zaufanie() {
+  const { data } = useQuery({
+    queryKey: ["certificates", "trust"],
+    queryFn: () => api.get<WidokZaufania>("/api/v1/certificates/trust"),
+  });
+  if (!data) return null;
+  const bezMagazynu = data.hosts_without_trust_store ?? [];
+  return (
+    <section style={{ marginTop: 16 }}>
+      <h2>Trusted authorities</h2>
+      <p className="podtytul">
+        Anchors the panel put on hosts. During a rotation a host trusts both the
+        old and the new authority; the old one may only be withdrawn once nothing
+        signs with it any more.
+      </p>
+      {!data.items.length ? (
+        <Pusto>No panel-managed authority on any host.</Pusto>
+      ) : (
+        <table>
+          <thead>
+            <tr><th>Authority</th><th>Hosts</th><th>Valid until</th><th>Fingerprint</th></tr>
+          </thead>
+          <tbody>
+            {data.items.map((kotwica) => (
+              <tr key={(kotwica.fingerprint_sha256 || kotwica.anchor_id) ?? ""}>
+                <td>
+                  {kotwica.subject || kotwica.anchor_id || "—"}
+                  {kotwica.unavailable_reason && (
+                    <div className="zrodlo">{kotwica.unavailable_reason}</div>
+                  )}
+                </td>
+                <td>
+                  {kotwica.hosts} of {data.hosts_total}
+                  <div className="zrodlo">{(kotwica.sample ?? []).join(", ")}</div>
+                </td>
+                <td>{kotwica.not_after ? <Czas wartosc={kotwica.not_after} /> : "—"}</td>
+                <td className="zrodlo">{(kotwica.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="zrodlo">
+        {data.hosts_unknown} hosts have not reported a trust store yet
+        {bezMagazynu.map((grupa) => `; ${grupa.count}: ${grupa.reason}`).join("")}
+      </div>
+    </section>
   );
 }

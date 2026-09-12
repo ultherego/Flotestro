@@ -189,6 +189,9 @@ type Podglad = {
   notes?: Grupa[];
   campaign_mode?: string;
   requires_plan?: boolean;
+  // Rozklad migawki: trzydziesci hostow z jednej lokalizacji to inna
+  // zmiana niz trzydziesci rozrzuconych po trzech.
+  distribution?: Record<string, Grupa[]>;
 };
 
 /**
@@ -409,7 +412,39 @@ function KrokCelow({
         .
       </p>
       <div className="zrodlo">{(podglad?.sample ?? []).join(", ")}</div>
+      <Rozklad podglad={podglad} />
     </section>
+  );
+}
+
+/**
+ * Rozklad zamrozonej migawki po lokalizacji, srodowisku, rodzinie systemu
+ * i wymaganej zdolnosci.
+ *
+ * Sama liczba gotowych hostow nie mowi, co sie zaraz stanie: trzydziesci
+ * hostow z jednej lokalizacji to inna zmiana niz trzydziesci rozrzuconych
+ * po trzech.
+ */
+function Rozklad({ podglad }: { podglad?: Podglad }) {
+  const wymiary = Object.entries(podglad?.distribution ?? {}).filter(
+    ([, grupy]) => grupy.length > 0,
+  );
+  if (!wymiary.length) return null;
+  const nazwy: Record<string, string> = {
+    site: "site",
+    environment: "environment",
+    os_family: "os family",
+    capability: "capability",
+  };
+  return (
+    <div style={{ marginTop: 12 }}>
+      {wymiary.map(([wymiar, grupy]) => (
+        <div key={wymiar} className="zrodlo">
+          {nazwy[wymiar] ?? wymiar}:{" "}
+          {grupy.map((grupa) => `${grupa.reason} ${grupa.count}`).join(", ")}
+        </div>
+      ))}
+    </div>
   );
 }
 

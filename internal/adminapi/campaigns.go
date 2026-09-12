@@ -376,7 +376,61 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	odpowiedz["notes"] = ocena.Uwagi
 	odpowiedz["campaign_mode"] = string(akcja.CampaignMode())
 	odpowiedz["requires_plan"] = opspec.AkcjaPlanowania(akcja) != ""
+	odpowiedz["distribution"] = rozklad(ocena.Gotowe, akcja)
 	writeJSON(w, http.StatusOK, odpowiedz)
+}
+
+// rozklad opisuje, z czego sklada sie zamrozona migawka celow.
+//
+// Liczba gotowych hostow nie mowi, co sie zaraz stanie: trzydziesci hostow
+// z jednej lokalizacji to inna zmiana niz trzydziesci rozrzuconych po trzech,
+// a rodzina systemu decyduje o tym, co host w ogole zrobi. Operator ma to
+// zobaczyc przed zgoda, a nie wywnioskowac z nazw w probce.
+func rozklad(gotowe []hosts.Host, akcja opspec.ActionType) map[string][]grupaHostow {
+	wymaganie := akcja.RequiredCapability()
+	wedlug := map[string]map[string]*grupaHostow{
+		"site": {}, "environment": {}, "os_family": {}, "capability": {},
+	}
+	kolejnosc := map[string][]string{}
+	dodajDo := func(wymiar, klucz string, host hosts.Host) {
+		if klucz == "" {
+			klucz = "nieznane"
+		}
+		grupa, mamy := wedlug[wymiar][klucz]
+		if !mamy {
+			grupa = &grupaHostow{Powod: klucz}
+			wedlug[wymiar][klucz] = grupa
+			kolejnosc[wymiar] = append(kolejnosc[wymiar], klucz)
+		}
+		dodaj(grupa, host)
+	}
+
+	for _, host := range gotowe {
+		dodajDo("site", host.Site, host)
+		dodajDo("environment", host.Environment, host)
+		dodajDo("os_family", host.OSFamily, host)
+		// Zdolnosc rozroznia hosty, ktore operacje przyjma, od tych, ktore
+		// jeszcze nie zglosily rejestru adapterow - a te drugie ida do
+		// kampanii i rozstrzygaja sie dopiero na hoscie.
+		switch {
+		case wymaganie == "":
+			dodajDo("capability", "bez wymagan", host)
+		case len(host.Capabilities) == 0:
+			dodajDo("capability", "nieznana", host)
+		default:
+			dodajDo("capability", wymaganie, host)
+		}
+	}
+
+	wynik := map[string][]grupaHostow{}
+	for wymiar, nazwy := range kolejnosc {
+		grupy := make([]grupaHostow, 0, len(nazwy))
+		for _, nazwa := range nazwy {
+			grupy = append(grupy, *wedlug[wymiar][nazwa])
+		}
+		wynik[wymiar] = grupy
+	}
+	return wynik
 }
 
 func nazwyHostow(lista []hosts.Host) []string {

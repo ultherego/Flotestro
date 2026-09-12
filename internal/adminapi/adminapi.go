@@ -230,6 +230,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts/{id}/backups/runs", s.handleBackupRuns)
 
 	mux.HandleFunc("GET /api/v1/certificates", s.handleFleetCertificates)
+	mux.HandleFunc("GET /api/v1/certificates/trust", s.handleFleetTrust)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/certificates", s.handleHostCertificates)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/certificates/deployments", s.handleCertificateDeployments)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/certificates/targets", s.handleWatchCertificate)

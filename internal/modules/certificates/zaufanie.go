@@ -71,6 +71,13 @@ type MagazynZaufania struct {
 	ObservedAt        time.Time `json:"observed_at"`
 }
 
+// Istnieje mowi, czy sciezka jest na hoscie. Katalog i plik znacza tu to
+// samo: magazyn zaufania sklada sie z obu.
+func Istnieje(sciezka string) bool {
+	_, err := os.Stat(sciezka)
+	return err == nil
+}
+
 // WykryjMagazyn rozpoznaje magazyn zaufania hosta.
 //
 // Rozstrzyga narzedzie, a nie nazwa dystrybucji: ten sam pakiet bywa w roznych

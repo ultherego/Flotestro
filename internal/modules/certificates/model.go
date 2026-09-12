@@ -173,6 +173,10 @@ type Snapshot struct {
 	KeysKnown bool `json:"keys_known"`
 	// Missing wylicza fakty, ktorych nie zebrano, wraz z powodem.
 	Missing map[string]string `json:"missing,omitempty"`
+	// Trust opisuje magazyn zaufania hosta: ktorym urzedom host wierzy
+	// i ktore z nich zalozyl panel. Bez tego rotacja urzedu jest niewidoczna
+	// z panelu: nie widac, kto juz ufa nowemu, a kto jeszcze nie.
+	Trust *MagazynZaufania `json:"trust,omitempty"`
 	// Truncated liczy cele pominiete przez limit jednego odczytu, a
 	// TruncatedReason mowi o tym wprost. Lista urwana po cichu wygladalaby
 	// jak pelna odpowiedz.

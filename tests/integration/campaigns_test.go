@@ -3512,3 +3512,135 @@ func TestPlanyKampaniiSaPogrupowanePoOdcisku(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
 		map[string]any{"reason": "test grupowania planow"}, nil, 0)
 }
+
+// TestPodgladPokazujeRozkladMigawki sprawdza to, czego sama liczba gotowych
+// hostow nie mowi: z czego sklada sie zamrozona migawka. Trzydziesci hostow
+// z jednej lokalizacji to inna zmiana niz trzydziesci rozrzuconych po trzech.
+func TestPodgladPokazujeRozkladMigawki(t *testing.T) {
+	h := newHarness(t)
+
+	var podglad struct {
+		Eligible     int `json:"eligible"`
+		Distribution map[string][]struct {
+			Reason string   `json:"reason"`
+			Count  int      `json:"count"`
+			Sample []string `json:"sample"`
+		} `json:"distribution"`
+	}
+	h.get("/api/v1/campaigns/preview?action=unit.restart", &podglad)
+	if podglad.Eligible == 0 {
+		t.Skip("zaden host nie jest gotowy do restartu jednostki")
+	}
+
+	for _, wymiar := range []string{"site", "environment", "os_family", "capability"} {
+		grupy, mamy := podglad.Distribution[wymiar]
+		if !mamy || len(grupy) == 0 {
+			t.Errorf("rozklad nie ma wymiaru %q", wymiar)
+			continue
+		}
+		suma := 0
+		for _, grupa := range grupy {
+			if grupa.Reason == "" || grupa.Count == 0 {
+				t.Errorf("%s: grupa bez nazwy albo pusta: %+v", wymiar, grupa)
+			}
+			suma += grupa.Count
+		}
+		// Kazdy gotowy host nalezy dokladnie do jednej grupy w kazdym
+		// wymiarze: rozklad, ktory nie sumuje sie do calosci, mowi o innej
+		// migawce niz ta, ktora wejdzie do kampanii.
+		if suma != podglad.Eligible {
+			t.Errorf("%s: rozklad sumuje sie do %d, gotowych jest %d", wymiar, suma, podglad.Eligible)
+		}
+	}
+
+	// Rodzina systemu jest w labie wiecej niz jedna, wiec rozklad ma to
+	// pokazac - inaczej ten ekran nie odroznialby niczego.
+	if len(podglad.Distribution["os_family"]) < 2 {
+		t.Errorf("rozklad po rodzinie systemu: %+v", podglad.Distribution["os_family"])
+	}
+}
+
+// TestFlotaPokazujeKomuUfaWTrakcieRotacji sprawdza ekran, bez ktorego rotacja
+// urzedu jest niewidoczna: w jej trakcie czesc floty ufa obu urzedom naraz,
+// i dopiero to mowi, czy wolno wycofac stary.
+func TestFlotaPokazujeKomuUfaWTrakcieRotacji(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	}
+	cele = cele[:2]
+
+	kotwica := fmt.Sprintf("widok-%d", time.Now().Unix())
+	urzad, _ := urzadTestowy(t, "Flotestro Widok "+kotwica)
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "certificate.trust.remove", "reason": "sprzatanie po tescie widoku zaufania",
+				"payload": map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
+			}, 2*time.Minute)
+		}
+	})
+
+	// Jeden host dostaje urzad, drugi nie: w trakcie rotacji tak wlasnie
+	// wyglada flota, i widok ma to pokazac.
+	zadanie, proby := h.runOperation(cele[0], map[string]any{
+		"action": "certificate.trust.ensure", "reason": "test widoku zaufania",
+		"payload": map[string]any{"certificate": map[string]any{
+			"anchor_id": kotwica, "certificate": urzad}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("rozdanie urzedu: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+	// Widok floty czyta inwentarz, wiec host musi go odswiezyc.
+	h.runOperation(cele[0], map[string]any{
+		"action": "inventory.refresh", "reason": "test widoku zaufania",
+		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"certificates"}}},
+	}, 2*time.Minute)
+
+	var widok struct {
+		Items []struct {
+			Subject           string   `json:"subject"`
+			AnchorID          string   `json:"anchor_id"`
+			FingerprintSHA256 string   `json:"fingerprint_sha256"`
+			Hosts             int      `json:"hosts"`
+			Sample            []string `json:"sample"`
+		} `json:"items"`
+		HostsTotal   int `json:"hosts_total"`
+		HostsUnknown int `json:"hosts_unknown"`
+	}
+	znaleziona := false
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) && !znaleziona {
+		h.get("/api/v1/certificates/trust", &widok)
+		for _, pozycja := range widok.Items {
+			if pozycja.AnchorID != kotwica {
+				continue
+			}
+			znaleziona = true
+			// Urzad rozdany jednemu hostowi ma byc policzony jednemu, a nie
+			// calej flocie: to jest cala tresc tego ekranu.
+			if pozycja.Hosts != 1 || len(pozycja.Sample) != 1 {
+				t.Errorf("urzad na %d hostach: %+v", pozycja.Hosts, pozycja.Sample)
+			}
+			if pozycja.FingerprintSHA256 == "" || pozycja.Subject == "" {
+				t.Errorf("kotwica bez opisu: %+v", pozycja)
+			}
+		}
+		if !znaleziona {
+			time.Sleep(3 * time.Second)
+		}
+	}
+	if !znaleziona {
+		t.Fatalf("widok floty nie zna kotwicy %s: %+v", kotwica, widok.Items)
+	}
+	if widok.HostsTotal == 0 {
+		t.Error("widok nie policzyl zadnego hosta")
+	}
+}
