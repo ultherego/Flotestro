@@ -515,9 +515,19 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		// pierwsza.
 		CampaignMode  string `json:"campaign_mode"`
 		CampaignReady bool   `json:"campaign_ready"`
+		// CampaignRefusal niesie powod, dla ktorego operacji nie da sie
+		// zlecic masowo. Odmowa bez powodu wyglada w interfejsie jak brak
+		// funkcji, a bywa granica postawiona swiadomie.
+		CampaignRefusal string `json:"campaign_refusal,omitempty"`
 	}
 	items := make([]actionInfo, 0)
 	for _, action := range opspec.AllActions() {
+		wykluczenie := opspec.PowodWykluczeniaZKampanii(action)
+		gotowa := wykluczenie == "" && opspec.TrybWykonywalny(action)
+		powod := wykluczenie
+		if powod == "" && !gotowa {
+			powod = powodOdmowyTrybu(action)
+		}
 		items = append(items, actionInfo{
 			Action:             string(action),
 			Mutating:           action.Mutating(),
@@ -527,7 +537,8 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			Risk:               string(action.Risk()),
 			LockClass:          action.LockClass(),
 			CampaignMode:       string(action.CampaignMode()),
-			CampaignReady:      opspec.TrybWykonywalny(action),
+			CampaignReady:      gotowa,
+			CampaignRefusal:    powod,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})

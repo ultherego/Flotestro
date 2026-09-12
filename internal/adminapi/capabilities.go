@@ -21,6 +21,16 @@ type serverCapabilities struct {
 	DirectoryWrite bool `json:"directory_write"`
 	// LocalUsers mowi, czy panel zarzadza kontami lokalnymi na hostach.
 	LocalUsers bool `json:"local_users"`
+	// CampaignV2 mowi, czy ta instalacja prowadzi kampanie z faza planowania:
+	// planem per host, zgoda na zestaw planow, budzetami i kwalifikacja celow.
+	// Interfejs nie moze pokazywac kreatora masowego tam, gdzie backend go nie
+	// obsluguje - zamowienie skonczyloby sie bledem po wypelnieniu formularza.
+	//
+	// Odstepstwo od dokumentu: rozdzial o zgodnosci API kaze oznaczyc stare
+	// /api/v1/campaigns jako legacy i zwracac link deprecation. W tej
+	// instalacji nie ma starego silnika - pod tym adresem od poczatku stoi
+	// ten z faza planowania, wiec nie ma czego oznaczac jako przestarzale.
+	CampaignV2 bool `json:"campaign_v2"`
 }
 
 // handleCapabilities zwraca wlaczone integracje. Endpoint nie wymaga
@@ -31,6 +41,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		Directory:        s.directory != nil,
 		DirectoryWrite:   s.directory != nil && s.directoryWrite,
 		LocalUsers:       true,
+		// Kampanie sa opcjonalne: panel bez ich magazynu nadal prowadzi
+		// operacje na pojedynczych hostach.
+		CampaignV2: s.campaigns != nil,
 	}
 	if s.oidc != nil {
 		capabilities.Issuer = s.oidc.Issuer()

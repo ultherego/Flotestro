@@ -2941,3 +2941,65 @@ func planKopii(h *harness, jobID string) (plan struct {
 	}
 	return plan
 }
+
+// TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego sprawdza to, po czym
+// interfejs poznaje granice: instalacja mowi, czy w ogole prowadzi kampanie,
+// a katalog operacji - ktorej zmiany nie zleci masowo i z jakiego powodu.
+// Odmowa bez powodu wyglada w panelu jak brak funkcji.
+func TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego(t *testing.T) {
+	h := newHarness(t)
+
+	var zdolnosci struct {
+		CampaignV2 bool `json:"campaign_v2"`
+	}
+	h.get("/api/v1/capabilities", &zdolnosci)
+	if !zdolnosci.CampaignV2 {
+		t.Fatal("instalacja z silnikiem kampanii nie zglasza campaign_v2")
+	}
+
+	var katalog struct {
+		Items []struct {
+			Action   string `json:"action"`
+			Mutating bool   `json:"mutating"`
+			Mode     string `json:"campaign_mode"`
+			Ready    bool   `json:"campaign_ready"`
+			Refusal  string `json:"campaign_refusal"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/actions", &katalog)
+	if len(katalog.Items) == 0 {
+		t.Fatal("katalog operacji jest pusty")
+	}
+
+	var gotowe, zOdmowa int
+	for _, pozycja := range katalog.Items {
+		switch {
+		case pozycja.Ready:
+			gotowe++
+			if pozycja.Refusal != "" {
+				t.Errorf("%s jest gotowa masowo i ma odmowe %q", pozycja.Action, pozycja.Refusal)
+			}
+			if pozycja.Mode == "" {
+				t.Errorf("%s jest gotowa masowo bez zadeklarowanego trybu", pozycja.Action)
+			}
+		case pozycja.Mutating:
+			zOdmowa++
+			if pozycja.Refusal == "" {
+				t.Errorf("%s nie idzie masowo i nie mowi dlaczego", pozycja.Action)
+			}
+		}
+		// Odtworzenie kopii jest granica, a nie brakiem funkcji: powod ma
+		// mowic o operatorze przy hoscie, a nie o silniku kampanii.
+		if pozycja.Action == "backup.restore" {
+			if pozycja.Ready || !strings.Contains(pozycja.Refusal, "obecnosci operatora") {
+				t.Errorf("odtworzenie: ready=%v, powod=%q", pozycja.Ready, pozycja.Refusal)
+			}
+		}
+		if pozycja.Action == "backup.run" && !pozycja.Ready {
+			t.Errorf("kopia nie jest gotowa masowo: %q", pozycja.Refusal)
+		}
+	}
+	if gotowe == 0 || zOdmowa == 0 {
+		t.Errorf("katalog nie rozroznia gotowych od odmownych: %d/%d", gotowe, zOdmowa)
+	}
+}

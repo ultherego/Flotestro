@@ -14,6 +14,9 @@ export type Capabilities = {
   directory: boolean;
   directory_write: boolean;
   local_users: boolean;
+  // campaign_v2 mowi, czy backend prowadzi kampanie z faza planowania.
+  // Kreator masowy bez tego skonczylby sie bledem po wypelnieniu formularza.
+  campaign_v2: boolean;
 };
 
 const domyslne: Capabilities = {
@@ -21,6 +24,7 @@ const domyslne: Capabilities = {
   directory: false,
   directory_write: false,
   local_users: false,
+  campaign_v2: false,
 };
 
 export function useCapabilities(): Capabilities {

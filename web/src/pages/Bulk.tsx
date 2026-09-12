@@ -5,6 +5,7 @@ import { api, type Collection } from "../lib/api";
 import type { Campaign, CampaignTarget } from "../lib/types";
 import { Blad, Pusto, StanZadania } from "../components/ui";
 import { ODSTEP_OPERACJI } from "../lib/strumien";
+import { useCapabilities } from "../lib/capabilities";
 
 /**
  * Bulk Workspace: druga rownorzedna sciezka pracy obok zakladek hosta.
@@ -38,11 +39,20 @@ export function Bulk() {
   const zmien = (zmiana: Partial<Zamowienie>) =>
     setZamowienie((poprzednie) => ({ ...poprzednie, ...zmiana }));
 
+  const zdolnosci = useCapabilities();
   const operacje = useQuery({
-    queryKey: ["operations"],
-    queryFn: () => api.get<Collection<Operacja>>("/api/v1/operations"),
+    queryKey: ["actions"],
+    // Katalog operacji stoi pod /api/v1/actions. Kreator pytal o adres,
+    // ktorego nie ma, wiec lista operacji byla pusta od poczatku.
+    queryFn: () => api.get<Collection<Operacja>>("/api/v1/actions"),
   });
   const masowe = (operacje.data?.items ?? []).filter((pozycja) => pozycja.campaign_ready);
+  // Odmowy pokazujemy razem z powodem. Operacja, ktorej nie ma na liscie bez
+  // slowa wyjasnienia, wyglada jak brak funkcji - a bywa granica postawiona
+  // swiadomie, na przyklad odtworzenie kopii.
+  const odmowy = (operacje.data?.items ?? []).filter(
+    (pozycja) => pozycja.mutating && !pozycja.campaign_ready && pozycja.campaign_refusal,
+  );
 
   const parametry = new URLSearchParams();
   if (zamowienie.site) parametry.set("site", zamowienie.site);
@@ -64,6 +74,21 @@ export function Bulk() {
 
   const gotowy = podglad.data?.eligible ?? 0;
   const bramki = bramkiKrokow(zamowienie, podglad.data, kampania.data);
+
+  // Backend bez fazy planowania nie poprowadzi zadnej z tych zmian. Kreator,
+  // ktory konczy sie bledem po wypelnieniu formularza, jest gorszy niz jego
+  // brak razem z powodem.
+  if (!zdolnosci.campaign_v2) {
+    return (
+      <>
+        <h1>Bulk Workspace</h1>
+        <Pusto>
+          This installation runs operations host by host: the backend has no campaign engine,
+          so there is no set of per-host plans to approve.
+        </Pusto>
+      </>
+    );
+  }
 
   return (
     <>
@@ -100,7 +125,13 @@ export function Bulk() {
       </ol>
 
       {krok === 0 && (
-        <KrokZakresu zamowienie={zamowienie} zmien={zmien} masowe={masowe} podglad={podglad.data} />
+        <KrokZakresu
+          zamowienie={zamowienie}
+          zmien={zmien}
+          masowe={masowe}
+          odmowy={odmowy}
+          podglad={podglad.data}
+        />
       )}
       {krok === 1 && <KrokCelow zamowienie={zamowienie} zmien={zmien} podglad={podglad.data} />}
       {krok === 2 && <KrokKwalifikacji podglad={podglad.data} pytanie={podglad.isLoading} />}
@@ -140,6 +171,7 @@ type Zamowienie = {
 
 type Operacja = {
   action: string;
+  campaign_refusal?: string;
   mutating: boolean;
   campaign_mode: string;
   campaign_ready: boolean;
@@ -252,11 +284,13 @@ function KrokZakresu({
   zamowienie,
   zmien,
   masowe,
+  odmowy,
   podglad,
 }: {
   zamowienie: Zamowienie;
   zmien: (zmiana: Partial<Zamowienie>) => void;
   masowe: Operacja[];
+  odmowy: Operacja[];
   podglad?: Podglad;
 }) {
   const wymagaJednostki = OPERACJE_JEDNOSTKI.includes(zamowienie.akcja);
@@ -310,6 +344,24 @@ function KrokZakresu({
           Every host computes its own plan first. You approve the set of plans, not one payload,
           and a host whose plan changed in the meantime refuses the change.
         </p>
+      )}
+      {odmowy.length > 0 && (
+        <details style={{ marginTop: 12 }}>
+          <summary className="podtytul">
+            {odmowy.length} operations change hosts but cannot run as a campaign — with reasons
+          </summary>
+          <table>
+            <thead><tr><th>Operation</th><th>Why not</th></tr></thead>
+            <tbody>
+              {odmowy.map((pozycja) => (
+                <tr key={pozycja.action}>
+                  <td>{pozycja.action}</td>
+                  <td className="zrodlo">{pozycja.campaign_refusal}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
       )}
     </section>
   );
