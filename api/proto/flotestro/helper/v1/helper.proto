@@ -721,6 +721,11 @@ message CertificateRequest {
     OPERATION_RENEW = 3;
     // Plan wdrozenia bez dotykania hosta i bez siegania po klucz prywatny.
     OPERATION_PLAN = 4;
+    // Magazyn zaufania: plan kroku rotacji urzedu i sam krok. Kotwica jest
+    // materialem publicznym, wiec jedzie w zleceniu jawnie.
+    OPERATION_TRUST_PLAN = 5;
+    OPERATION_TRUST_ENSURE = 6;
+    OPERATION_TRUST_REMOVE = 7;
   }
   // Fact wylicza to, czego nie da sie odczytac bez roota.
   enum Fact {
@@ -758,6 +763,8 @@ message CertificateRequest {
   string key_secret_ref = 16;
   // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
   string plan_hash = 17;
+  // AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+  string anchor_id = 18;
 }
 
 message CertificateResult {
@@ -771,6 +778,9 @@ message CertificateResult {
   // Plan wdrozenia w postaci JSON przy OPERATION_PLAN. Klucza prywatnego
   // w nim nie ma.
   bytes plan = 7;
+  // Trust niesie magazyn zaufania hosta w postaci JSON: kotwice panelu
+  // i te, ktore administrator hosta polozyl tam sam.
+  bytes trust = 8;
 }
 
 // TimeRequest zmienia zrodla czasu albo strefe hosta.

@@ -471,11 +471,19 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		envelope.Action = &agentv1.TaskEnvelope_Security{Security: ochrona}
 
 	case opspec.ActionCertificateScan, opspec.ActionCertificatePlan,
-		opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew:
+		opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew,
+		opspec.ActionCertificateTrustPlan, opspec.ActionCertificateTrustEnsure,
+		opspec.ActionCertificateTrustRemove:
 		operacja := agentv1.CertificateAction_OPERATION_SCAN
 		switch action {
 		case opspec.ActionCertificatePlan:
 			operacja = agentv1.CertificateAction_OPERATION_PLAN
+		case opspec.ActionCertificateTrustPlan:
+			operacja = agentv1.CertificateAction_OPERATION_TRUST_PLAN
+		case opspec.ActionCertificateTrustEnsure:
+			operacja = agentv1.CertificateAction_OPERATION_TRUST_ENSURE
+		case opspec.ActionCertificateTrustRemove:
+			operacja = agentv1.CertificateAction_OPERATION_TRUST_REMOVE
 		case opspec.ActionCertificateDeploy:
 			operacja = agentv1.CertificateAction_OPERATION_DEPLOY
 		case opspec.ActionCertificateRenew:
@@ -507,6 +515,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			certyfikat.ProbeTarget = payload.Certificate.ProbeTarget
 			certyfikat.Request = payload.Certificate.Request
 			certyfikat.PlanHash = payload.Certificate.PlanHash
+			certyfikat.AnchorId = payload.Certificate.AnchorID
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
 

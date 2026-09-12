@@ -30,7 +30,7 @@ const NAZWY_DZIALAN: Record<string, string> = {
 };
 
 export function jestPlanemHosta(kind: string | undefined): boolean {
-  return kind === "file_plan" || kind === "firewall_plan" || kind === "mount_plan" || kind === "network_plan" || kind === "dns_plan" || kind === "ssh_plan" || kind === "kernel_module_plan" || kind === "time_plan" || kind === "device_plan" || kind === "certificate_plan" || kind === "backup_plan";
+  return kind === "file_plan" || kind === "firewall_plan" || kind === "mount_plan" || kind === "network_plan" || kind === "dns_plan" || kind === "ssh_plan" || kind === "kernel_module_plan" || kind === "time_plan" || kind === "device_plan" || kind === "certificate_plan" || kind === "backup_plan" || kind === "trust_plan";
 }
 
 /** Streszczenie planu z wyniku typowanego operacji planujacej. */

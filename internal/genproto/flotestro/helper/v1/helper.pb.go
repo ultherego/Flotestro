@@ -884,6 +884,11 @@ const (
 	CertificateRequest_OPERATION_RENEW  CertificateRequest_Operation = 3
 	// Plan wdrozenia bez dotykania hosta i bez siegania po klucz prywatny.
 	CertificateRequest_OPERATION_PLAN CertificateRequest_Operation = 4
+	// Magazyn zaufania: plan kroku rotacji urzedu i sam krok. Kotwica jest
+	// materialem publicznym, wiec jedzie w zleceniu jawnie.
+	CertificateRequest_OPERATION_TRUST_PLAN   CertificateRequest_Operation = 5
+	CertificateRequest_OPERATION_TRUST_ENSURE CertificateRequest_Operation = 6
+	CertificateRequest_OPERATION_TRUST_REMOVE CertificateRequest_Operation = 7
 )
 
 // Enum value maps for CertificateRequest_Operation.
@@ -894,13 +899,19 @@ var (
 		2: "OPERATION_DEPLOY",
 		3: "OPERATION_RENEW",
 		4: "OPERATION_PLAN",
+		5: "OPERATION_TRUST_PLAN",
+		6: "OPERATION_TRUST_ENSURE",
+		7: "OPERATION_TRUST_REMOVE",
 	}
 	CertificateRequest_Operation_value = map[string]int32{
-		"OPERATION_UNSPECIFIED": 0,
-		"OPERATION_FACTS":       1,
-		"OPERATION_DEPLOY":      2,
-		"OPERATION_RENEW":       3,
-		"OPERATION_PLAN":        4,
+		"OPERATION_UNSPECIFIED":  0,
+		"OPERATION_FACTS":        1,
+		"OPERATION_DEPLOY":       2,
+		"OPERATION_RENEW":        3,
+		"OPERATION_PLAN":         4,
+		"OPERATION_TRUST_PLAN":   5,
+		"OPERATION_TRUST_ENSURE": 6,
+		"OPERATION_TRUST_REMOVE": 7,
 	}
 )
 
@@ -5018,7 +5029,9 @@ type CertificateRequest struct {
 	// nigdy wartosc: plan ma powiedziec, skad host wezmie klucz.
 	KeySecretRef string `protobuf:"bytes,16,opt,name=key_secret_ref,json=keySecretRef,proto3" json:"key_secret_ref,omitempty"`
 	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
-	PlanHash      string `protobuf:"bytes,17,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	PlanHash string `protobuf:"bytes,17,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	// AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+	AnchorId      string `protobuf:"bytes,18,opt,name=anchor_id,json=anchorId,proto3" json:"anchor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5172,6 +5185,13 @@ func (x *CertificateRequest) GetPlanHash() string {
 	return ""
 }
 
+func (x *CertificateRequest) GetAnchorId() string {
+	if x != nil {
+		return x.AnchorId
+	}
+	return ""
+}
+
 type CertificateResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Facts niesie wylacznie to, o co pytano.
@@ -5183,7 +5203,10 @@ type CertificateResult struct {
 	RolledBack        bool   `protobuf:"varint,6,opt,name=rolled_back,json=rolledBack,proto3" json:"rolled_back,omitempty"`
 	// Plan wdrozenia w postaci JSON przy OPERATION_PLAN. Klucza prywatnego
 	// w nim nie ma.
-	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	Plan []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Trust niesie magazyn zaufania hosta w postaci JSON: kotwice panelu
+	// i te, ktore administrator hosta polozyl tam sam.
+	Trust         []byte `protobuf:"bytes,8,opt,name=trust,proto3" json:"trust,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5263,6 +5286,13 @@ func (x *CertificateResult) GetRolledBack() bool {
 func (x *CertificateResult) GetPlan() []byte {
 	if x != nil {
 		return x.Plan
+	}
+	return nil
+}
+
+func (x *CertificateResult) GetTrust() []byte {
+	if x != nil {
+		return x.Trust
 	}
 	return nil
 }
@@ -7884,7 +7914,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x11CertificateTarget\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bkey_path\x18\x02 \x01(\tR\akeyPath\x12\x18\n" +
-	"\aservice\x18\x03 \x01(\tR\aservice\"\xd8\x06\n" +
+	"\aservice\x18\x03 \x01(\tR\aservice\"\xc8\a\n" +
 	"\x12CertificateRequest\x12O\n" +
 	"\toperation\x18\x01 \x01(\x0e21.flotestro.helper.v1.CertificateRequest.OperationR\toperation\x12B\n" +
 	"\x05facts\x18\x02 \x03(\x0e2,.flotestro.helper.v1.CertificateRequest.FactR\x05facts\x12@\n" +
@@ -7904,18 +7934,22 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\arequest\x18\x0e \x01(\tR\arequest\x12$\n" +
 	"\rauthoritative\x18\x0f \x01(\bR\rauthoritative\x12$\n" +
 	"\x0ekey_secret_ref\x18\x10 \x01(\tR\fkeySecretRef\x12\x1b\n" +
-	"\tplan_hash\x18\x11 \x01(\tR\bplanHash\"z\n" +
+	"\tplan_hash\x18\x11 \x01(\tR\bplanHash\x12\x1b\n" +
+	"\tanchor_id\x18\x12 \x01(\tR\banchorId\"\xcc\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fOPERATION_FACTS\x10\x01\x12\x14\n" +
 	"\x10OPERATION_DEPLOY\x10\x02\x12\x13\n" +
 	"\x0fOPERATION_RENEW\x10\x03\x12\x12\n" +
-	"\x0eOPERATION_PLAN\x10\x04\"j\n" +
+	"\x0eOPERATION_PLAN\x10\x04\x12\x18\n" +
+	"\x14OPERATION_TRUST_PLAN\x10\x05\x12\x1a\n" +
+	"\x16OPERATION_TRUST_ENSURE\x10\x06\x12\x1a\n" +
+	"\x16OPERATION_TRUST_REMOVE\x10\a\"j\n" +
 	"\x04Fact\x12\x14\n" +
 	"\x10FACT_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11FACT_KEY_METADATA\x10\x01\x12\x19\n" +
 	"\x15FACT_RENEWAL_TRACKING\x10\x02\x12\x1a\n" +
-	"\x16FACT_CERTIFICATE_FILES\x10\x03\"\xda\x01\n" +
+	"\x16FACT_CERTIFICATE_FILES\x10\x03\"\xf0\x01\n" +
 	"\x11CertificateResult\x12\x14\n" +
 	"\x05facts\x18\x01 \x01(\fR\x05facts\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12-\n" +
@@ -7924,7 +7958,8 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x05probe\x18\x05 \x01(\fR\x05probe\x12\x1f\n" +
 	"\vrolled_back\x18\x06 \x01(\bR\n" +
 	"rolledBack\x12\x12\n" +
-	"\x04plan\x18\a \x01(\fR\x04plan\"\xe2\x02\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\x12\x14\n" +
+	"\x05trust\x18\b \x01(\fR\x05trust\"\xe2\x02\n" +
 	"\vTimeRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.TimeRequest.OperationR\toperation\x12\x18\n" +
 	"\aservers\x18\x02 \x03(\tR\aservers\x12\x1a\n" +

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
@@ -101,9 +102,16 @@ const (
 	// po calym systemie plikow, znajduje magazyn zaufania zamiast certyfikatow
 	// uslug. Klucz prywatny nie jedzie w zleceniu - payload niesie odnosnik
 	// do magazynu, a host siega po wartosc dopiero przy wykonaniu.
-	ActionCertificateScan   ActionType = "certificate.scan"
-	ActionCertificatePlan   ActionType = "certificate.plan"
-	ActionCertificateDeploy ActionType = "certificate.deploy"
+	ActionCertificateScan ActionType = "certificate.scan"
+	ActionCertificatePlan ActionType = "certificate.plan"
+	// Rotacja urzedu jest ciagiem stanow, a nie jedna zmiana: host najpierw
+	// ufa staremu i nowemu urzedowi naraz, potem dostaje nowy certyfikat,
+	// a stary urzad znika na koncu - i tylko tam, gdzie nic go juz nie
+	// podpisuje.
+	ActionCertificateTrustPlan   ActionType = "certificate.trust.plan"
+	ActionCertificateTrustEnsure ActionType = "certificate.trust.ensure"
+	ActionCertificateTrustRemove ActionType = "certificate.trust.remove"
+	ActionCertificateDeploy      ActionType = "certificate.deploy"
 	// Odnowienie jest osobna operacja, bo robi je host wlasnym demonem:
 	// panel prosi certmongera o nowy certyfikat, a nie podaje mu tresci.
 	ActionCertificateRenew ActionType = "certificate.renew"
@@ -271,6 +279,10 @@ const (
 	// wlasna blokade, a druga operacja i tak czekalaby pod nia - tyle ze bez
 	// wiedzy panelu i do konca limitu czasu.
 	LockBackup = "backup"
+	// Magazyn zaufania jest jeden na host, a narzedzie przeliczajace go
+	// przepisuje cala wiazke: dwie zmiany kotwic naraz daja wiazke, ktorej
+	// nie widzial ani jeden z planow.
+	LockCertificates = "certificates"
 )
 
 // CampaignMode mowi, czy i jak operacja moze dzialac na wielu hostach naraz.
@@ -585,6 +597,16 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Nie dotyka hosta i nie siega po klucz prywatny.
 	ActionCertificatePlan: {mutating: false, capability: "certificates", permission: "certificate.plan",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
+	ActionCertificateTrustPlan: {mutating: false, capability: "certificates", permission: "certificate.trust.plan",
+		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
+	// Zaufanie do urzedu jest decyzja szersza niz jeden plik: od tej chwili
+	// host przyjmuje kazdy certyfikat, ktory ten urzad podpisze.
+	ActionCertificateTrustEnsure: {mutating: true, capability: "certificates", permission: "certificate.trust.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates},
+	// Wycofanie zaufania zrywa polaczenia, ktorych nikt nie zmienial, jesli
+	// urzad nadal cokolwiek podpisuje. Host sprawdza to u siebie.
+	ActionCertificateTrustRemove: {mutating: true, capability: "certificates", permission: "certificate.trust.remove",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates},
 	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
 	// Odnowienie konczy sie tak samo jak wdrozenie: nowym plikiem i uslugą,
@@ -1523,6 +1545,9 @@ type CertificatePayload struct {
 	ProbeTarget string `json:"probe_target,omitempty"`
 	// Request wskazuje zlecenie certmongera przy odnowieniu.
 	Request string `json:"request,omitempty"`
+	// AnchorID nazywa kotwice panelu w magazynie zaufania hosta. Plik na
+	// hoscie nazywa sie od niej, wiec po niej panel pozna swoja kotwice.
+	AnchorID string `json:"anchor_id,omitempty"`
 	// PlanHash wiaze wdrozenie z planem policzonym na tym hoscie; host liczy
 	// plan jeszcze raz przed podmiana plikow.
 	PlanHash string `json:"plan_hash,omitempty"`
@@ -2385,6 +2410,25 @@ func Validate(action ActionType, payload Payload) error {
 			}
 		}
 		return nil
+
+	case ActionCertificateTrustPlan:
+		return nil
+
+	case ActionCertificateTrustEnsure:
+		if payload.Certificate == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+		}
+		if err := certificates.WalidujKotwice(payload.Certificate.AnchorID); err != nil {
+			return err
+		}
+		_, _, err := certificates.SkladajKotwice(payload.Certificate.Certificate, time.Now())
+		return err
+
+	case ActionCertificateTrustRemove:
+		if payload.Certificate == nil {
+			return fmt.Errorf("operacja %s wymaga payloadu certificate", action)
+		}
+		return certificates.WalidujKotwice(payload.Certificate.AnchorID)
 
 	case ActionCertificatePlan:
 		// Plan przyjmuje to samo, co wdrozenie, i sam nazywa, czego host nie

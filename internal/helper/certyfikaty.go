@@ -48,6 +48,11 @@ func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperR
 		return s.faktyCertyfikatow(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_PLAN:
 		return s.zaplanujCertyfikat(actionCtx, action)
+	case helperv1.CertificateRequest_OPERATION_TRUST_PLAN:
+		return s.zaplanujZaufanie(actionCtx, action)
+	case helperv1.CertificateRequest_OPERATION_TRUST_ENSURE,
+		helperv1.CertificateRequest_OPERATION_TRUST_REMOVE:
+		return s.zmienZaufanie(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_DEPLOY:
 		return s.wdrozCertyfikat(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_RENEW:
@@ -445,4 +450,162 @@ func (s *Server) zapiszRejestrCertyfikatow(cele []certificates.Cel) {
 		return
 	}
 	_ = os.Rename(tymczasowy, PlikRejestruCertyfikatow)
+}
+
+// magazynZaufania czyta kotwice, ktore host ma teraz.
+func (s *Server) magazynZaufania() certificates.MagazynZaufania {
+	return certificates.CzytajKotwice(certificates.WykryjMagazyn(exists))
+}
+
+// planZaufania sklada plan kroku rotacji wobec stanu magazynu.
+//
+// Usuniecie patrzy takze na certyfikaty hosta: urzad, ktory nadal cos
+// podpisuje, nie moze zniknac z magazynu, bo zerwaloby to zaufanie
+// klientom, ktorzy niczego nie zmieniali.
+func (s *Server) planZaufania(ctx context.Context, action *helperv1.CertificateRequest,
+	magazyn certificates.MagazynZaufania) certificates.PlanZaufania {
+	// Plan bez materialu jest planem wycofania: zaufanie zawsze niesie
+	// zaswiadczenie urzedu, wycofanie nigdy. Operacja planujaca jest jedna
+	// dla obu krokow rotacji, wiec rodzaj poznaje sie po polach.
+	usuwanie := action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_REMOVE ||
+		(action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_PLAN &&
+			len(action.GetCertificate()) == 0)
+	if usuwanie {
+		return certificates.ZaplanujUsuniecieKotwicy(magazyn, action.GetAnchorId(),
+			s.certyfikatyHosta(ctx))
+	}
+	return certificates.ZaplanujKotwice(magazyn, action.GetAnchorId(),
+		string(action.GetCertificate()), time.Now())
+}
+
+// certyfikatyHosta czyta certyfikaty, ktore host ma pod obserwacja panelu.
+func (s *Server) certyfikatyHosta(ctx context.Context) []certificates.Certyfikat {
+	cele := s.rejestrCertyfikatow()
+	if len(cele) == 0 {
+		return nil
+	}
+	migawka := certificates.Skanuj(cele)
+	migawka = migawka.Uzupelnij(certificates.ZbierzUzupelnienie(ctx, wyjscieNarzedzia,
+		migawka.Brakujace(), cele))
+	return migawka.Certificates
+}
+
+// zaplanujZaufanie liczy krok rotacji bez dotykania magazynu.
+func (s *Server) zaplanujZaufanie(ctx context.Context,
+	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
+	magazyn := s.magazynZaufania()
+	plan := s.planZaufania(ctx, action, magazyn)
+	return odpowiedzZaufania(magazyn, plan, opisPlanuZaufania(plan), nil)
+}
+
+// zmienZaufanie zaklada albo wycofuje kotwice panelu i przelicza magazyn.
+//
+// Kolejnosc jest tu cala trescia: plik wchodzi do katalogu kotwic, narzedzie
+// przelicza wiazke, a dopiero gotowa wiazka jest odpowiedzia. Sam plik bez
+// przeliczenia nie zmienia niczego - i wygladalby jak zmiana, ktorej nie ma.
+func (s *Server) zmienZaufanie(ctx context.Context,
+	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
+	magazyn := s.magazynZaufania()
+	if magazyn.UnavailableReason != "" {
+		return reject(ErrorUnsupported, magazyn.UnavailableReason)
+	}
+	plan := s.planZaufania(ctx, action, magazyn)
+	if plan.Refusal != "" {
+		return reject(ErrorPreconditionFailed, plan.Refusal)
+	}
+	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
+	// operator ogladal: inna kotwica pod ta nazwa od planowania jest odmowa.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" && plan.PlanHash != oczekiwany {
+		return reject(ErrorPreconditionFailed,
+			"magazyn zaufania zmienil sie od planowania; krok wymaga nowego planu")
+	}
+
+	usuwanie := action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_REMOVE
+	sciezka := certificates.SciezkaKotwicy(magazyn, action.GetAnchorId())
+	if sciezka == "" {
+		return reject(ErrorMalformed, "nie da sie zlozyc sciezki kotwicy")
+	}
+	poprzednia, err := certificates.Zapamietaj(sciezka)
+	if err != nil {
+		return reject(ErrorExecFailed, "nie odczytano poprzedniej kotwicy: "+err.Error())
+	}
+
+	switch {
+	case usuwanie:
+		if plan.Action == certificates.PlanJuzUsuniety {
+			return odpowiedzZaufania(s.magazynZaufania(), plan,
+				"host nie ufal temu urzedowi, wiec nie ma czego wycofywac", nil)
+		}
+		if err := os.Remove(sciezka); err != nil && !os.IsNotExist(err) {
+			return reject(ErrorExecFailed, "usuniecie kotwicy: "+err.Error())
+		}
+	default:
+		if plan.Action == certificates.PlanBezZmian {
+			return odpowiedzZaufania(magazyn, plan,
+				"host juz ufa temu urzedowi", nil)
+		}
+		material, _, err := certificates.SkladajKotwice(string(action.GetCertificate()), time.Now())
+		if err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+		if err := zapiszPlikJadra(sciezka, string(material), 0o644); err != nil {
+			return reject(ErrorExecFailed, "zapis kotwicy: "+err.Error())
+		}
+	}
+
+	if wyjscie, err := uruchomNarzedzie(ctx, poleceniePrzeliczenia(magazyn)); err != nil {
+		// Magazyn, ktorego nie da sie przeliczyc, zostawilby host z wiazka
+		// sprzed zmiany i kotwica, ktorej nikt nie widzial. Wracamy do
+		// poprzedniego pliku i probujemy przeliczyc jeszcze raz.
+		_ = poprzednia.Przywroc()
+		_, _ = uruchomNarzedzie(ctx, poleceniePrzeliczenia(magazyn))
+		return reject(ErrorExecFailed, "przeliczenie magazynu zaufania: "+err.Error()+": "+wyjscie)
+	}
+
+	komunikat := "host ufa urzedowi " + plan.DesiredSubject
+	if usuwanie {
+		komunikat = "host przestal ufac urzedowi " + plan.AnchorID
+	}
+	return odpowiedzZaufania(s.magazynZaufania(), plan, komunikat, nil)
+}
+
+// poleceniePrzeliczenia sklada wywolanie narzedzia magazynu.
+func poleceniePrzeliczenia(magazyn certificates.MagazynZaufania) []string {
+	if magazyn.Adapter == certificates.AdapterRHEL {
+		return []string{magazyn.Tool, "extract"}
+	}
+	return []string{magazyn.Tool}
+}
+
+// opisPlanuZaufania streszcza plan jednym zdaniem dla dziennika operacji.
+func opisPlanuZaufania(plan certificates.PlanZaufania) string {
+	switch {
+	case plan.Refusal != "":
+		return "krok nie wejdzie na ten host: " + plan.Refusal
+	case plan.Action == certificates.PlanBezZmian:
+		return "host juz ufa temu urzedowi"
+	case plan.Action == certificates.PlanJuzUsuniety:
+		return "host nie ufa temu urzedowi, wiec nie ma czego wycofywac"
+	default:
+		return strings.Join(plan.Changes, "; ")
+	}
+}
+
+func odpowiedzZaufania(magazyn certificates.MagazynZaufania, plan certificates.PlanZaufania,
+	komunikat string, _ error) *helperv1.HelperResponse {
+	zakodowanyPlan, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	zakodowanyMagazyn, err := json.Marshal(magazyn)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		CertificateResult: &helperv1.CertificateResult{
+			Message: komunikat, Plan: zakodowanyPlan, Trust: zakodowanyMagazyn,
+			FingerprintSha256: plan.DesiredFingerprint,
+		},
+	}
 }

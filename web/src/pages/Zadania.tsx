@@ -214,6 +214,7 @@ function WynikTypowany({ detail }: { detail: Record<string, any> }) {
     case "device_plan":
     case "certificate_plan":
     case "backup_plan":
+    case "trust_plan":
       return (
         <div className="zrodlo">
           <StreszczeniePlanu plan={(detail.plan ?? {}) as Record<string, any>} />

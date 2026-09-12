@@ -322,3 +322,79 @@ func sprawdzBrakWartosci(t *testing.T, h *harness, fragment string) {
 		}
 	}
 }
+
+// urzadTestowy wystawia urzad na potrzeby jednego przebiegu testu rotacji.
+func urzadTestowy(t *testing.T, nazwa string) (certPEM, kluczPEM string) {
+	t.Helper()
+	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("klucz urzedu: %v", err)
+	}
+	szablon := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: nazwa},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(8760 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, szablon, szablon, &klucz.PublicKey, klucz)
+	if err != nil {
+		t.Fatalf("urzad: %v", err)
+	}
+	dane, err := x509.MarshalPKCS8PrivateKey(klucz)
+	if err != nil {
+		t.Fatalf("zapis klucza urzedu: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: dane}))
+}
+
+// paraZUrzedu wystawia certyfikat uslugi podpisany wskazanym urzedem.
+type paraZUrzedu struct {
+	certyfikat string
+	klucz      string
+	odcisk     string
+}
+
+func liscZUrzedu(t *testing.T, nazwa, urzadPEM, kluczUrzeduPEM string) paraZUrzedu {
+	t.Helper()
+	blokUrzedu, _ := pem.Decode([]byte(urzadPEM))
+	urzad, err := x509.ParseCertificate(blokUrzedu.Bytes)
+	if err != nil {
+		t.Fatalf("urzad: %v", err)
+	}
+	blokKlucza, _ := pem.Decode([]byte(kluczUrzeduPEM))
+	kluczUrzedu, err := x509.ParsePKCS8PrivateKey(blokKlucza.Bytes)
+	if err != nil {
+		t.Fatalf("klucz urzedu: %v", err)
+	}
+	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("klucz liscia: %v", err)
+	}
+	szablon := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: nazwa},
+		DNSNames:              []string{nazwa},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(720 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, szablon, urzad, &klucz.PublicKey, kluczUrzedu)
+	if err != nil {
+		t.Fatalf("lisc: %v", err)
+	}
+	dane, err := x509.MarshalPKCS8PrivateKey(klucz)
+	if err != nil {
+		t.Fatalf("zapis klucza liscia: %v", err)
+	}
+	suma := sha256.Sum256(der)
+	return paraZUrzedu{
+		certyfikat: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		klucz:      string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: dane})),
+		odcisk:     hex.EncodeToString(suma[:]),
+	}
+}

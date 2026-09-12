@@ -223,6 +223,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet, opspec.ActionAuditRulesReload:
 		return e.applySecurity(ctx, task, action, payload.Security)
 	case opspec.ActionCertificateScan, opspec.ActionCertificatePlan, opspec.ActionCertificateDeploy,
+		opspec.ActionCertificateTrustPlan, opspec.ActionCertificateTrustEnsure,
+		opspec.ActionCertificateTrustRemove,
 		opspec.ActionCertificateRenew:
 		return e.applyCertificate(ctx, task, action, payload.Certificate)
 	case opspec.ActionRepositorySet:
@@ -750,6 +752,12 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			typ = opspec.ActionCertificateRenew
 		case agentv1.CertificateAction_OPERATION_PLAN:
 			typ = opspec.ActionCertificatePlan
+		case agentv1.CertificateAction_OPERATION_TRUST_PLAN:
+			typ = opspec.ActionCertificateTrustPlan
+		case agentv1.CertificateAction_OPERATION_TRUST_ENSURE:
+			typ = opspec.ActionCertificateTrustEnsure
+		case agentv1.CertificateAction_OPERATION_TRUST_REMOVE:
+			typ = opspec.ActionCertificateTrustRemove
 		}
 		odnosnik := (*opspec.SecretRef)(nil)
 		if ref := certyfikat.GetKeySecret(); ref != nil && ref.GetName() != "" {
@@ -768,6 +776,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			ProbeTarget: certyfikat.GetProbeTarget(),
 			Request:     certyfikat.GetRequest(),
 			PlanHash:    certyfikat.GetPlanHash(),
+			AnchorID:    certyfikat.GetAnchorId(),
 		}
 		for _, cel := range certyfikat.GetTargets() {
 			zawartosc.Targets = append(zawartosc.Targets, opspec.CertificateTarget{

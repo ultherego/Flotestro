@@ -89,30 +89,32 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 	// powstaje z manifestu i z digestow obrazow, ktore ten host naprawde
 	// widzi, i wraca do niego razem ze zmiana.
 	for zmiana, planer := range map[ActionType]ActionType{
-		ActionComposeDeploy:         ActionComposePlan,
-		ActionFileEnsure:            ActionFilePlan,
-		ActionFileRemove:            ActionFilePlan,
-		ActionFileRollback:          ActionFilePlan,
-		ActionFirewallRuleEnsure:    ActionFirewallPlan,
-		ActionFirewallRuleRemove:    ActionFirewallPlan,
-		ActionFirewallZonePort:      ActionFirewallPlan,
-		ActionFirewallZoneService:   ActionFirewallPlan,
-		ActionMountEnsure:           ActionStoragePlan,
-		ActionMountRemove:           ActionStoragePlan,
-		ActionNetworkMTUSet:         ActionNetworkPlan,
-		ActionNetworkRouteEnsure:    ActionNetworkPlan,
-		ActionNetworkProfileApply:   ActionNetworkPlan,
-		ActionDNSHostApply:          ActionDNSPlan,
-		ActionSSHConfigApply:        ActionSSHConfigPlan,
-		ActionKernelModuleBlacklist: ActionKernelModulePlan,
-		ActionTimeConfigApply:       ActionTimePlan,
-		ActionFilesystemCheck:       ActionStoragePlan,
-		ActionFilesystemResize:      ActionStoragePlan,
-		ActionLVMExtend:             ActionStoragePlan,
-		ActionPackageInstall:        ActionPackagePlan,
-		ActionCertificateDeploy:     ActionCertificatePlan,
-		ActionBackupRun:             ActionBackupPlan,
-		ActionBackupVerify:          ActionBackupPlan,
+		ActionComposeDeploy:          ActionComposePlan,
+		ActionFileEnsure:             ActionFilePlan,
+		ActionFileRemove:             ActionFilePlan,
+		ActionFileRollback:           ActionFilePlan,
+		ActionFirewallRuleEnsure:     ActionFirewallPlan,
+		ActionFirewallRuleRemove:     ActionFirewallPlan,
+		ActionFirewallZonePort:       ActionFirewallPlan,
+		ActionFirewallZoneService:    ActionFirewallPlan,
+		ActionMountEnsure:            ActionStoragePlan,
+		ActionMountRemove:            ActionStoragePlan,
+		ActionNetworkMTUSet:          ActionNetworkPlan,
+		ActionNetworkRouteEnsure:     ActionNetworkPlan,
+		ActionNetworkProfileApply:    ActionNetworkPlan,
+		ActionDNSHostApply:           ActionDNSPlan,
+		ActionSSHConfigApply:         ActionSSHConfigPlan,
+		ActionKernelModuleBlacklist:  ActionKernelModulePlan,
+		ActionTimeConfigApply:        ActionTimePlan,
+		ActionFilesystemCheck:        ActionStoragePlan,
+		ActionFilesystemResize:       ActionStoragePlan,
+		ActionLVMExtend:              ActionStoragePlan,
+		ActionPackageInstall:         ActionPackagePlan,
+		ActionCertificateDeploy:      ActionCertificatePlan,
+		ActionCertificateTrustEnsure: ActionCertificateTrustPlan,
+		ActionCertificateTrustRemove: ActionCertificateTrustPlan,
+		ActionBackupRun:              ActionBackupPlan,
+		ActionBackupVerify:           ActionBackupPlan,
 	} {
 		if AkcjaPlanowania(zmiana) != planer {
 			t.Errorf("%s planuje sie operacja %q, oczekiwano %q",
@@ -155,5 +157,23 @@ func TestOdtworzenieNieIdzieMasowo(t *testing.T) {
 	}
 	if PowodWykluczeniaZKampanii(ActionBackupRun) != "" {
 		t.Error("kopia wykluczona z kampanii razem z odtworzeniem")
+	}
+}
+
+// TestWycofanieUrzeduWymagaPelnejFloty pilnuje granicy, ktorej nie widac
+// w pojedynczym hoscie: wycofanie urzedu jest poprawne dopiero wtedy, gdy
+// obejmie kazdy cel. Host pominiety zostaje z zaufaniem, ktorego reszta
+// floty juz nie ma.
+func TestWycofanieUrzeduWymagaPelnejFloty(t *testing.T) {
+	if PowodPelnegoPokrycia(ActionCertificateTrustRemove) == "" {
+		t.Error("wycofanie urzedu wolno prowadzic na czesci floty")
+	}
+	// Rozdanie zaufania jest bezpieczne czesciowo: host, ktory je dostanie
+	// pozniej, do tego czasu ufa temu, czemu ufal.
+	if PowodPelnegoPokrycia(ActionCertificateTrustEnsure) != "" {
+		t.Error("rozdanie zaufania wymaga pelnej floty")
+	}
+	if PowodPelnegoPokrycia(ActionPackageUpgrade) != "" {
+		t.Error("aktualizacja pakietow wymaga pelnej floty")
 	}
 }

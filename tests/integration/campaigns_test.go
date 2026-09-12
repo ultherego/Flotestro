@@ -3112,3 +3112,202 @@ func TestBudzetBackenduZatrzymujeDrugaKampanie(t *testing.T) {
 		}
 	})
 }
+
+// TestKampaniaZaufaniaRozdajeUrzadIChroniUzywany przechodzi dwa kroki rotacji
+// urzedu: flota zaczyna ufac nowemu urzedowi, a wycofanie urzedu, ktory nadal
+// podpisuje certyfikat hosta, odpada w planie. Miedzy tymi krokami host ufa
+// obu urzedom naraz - i to jest cala tresc rotacji.
+func TestKampaniaZaufaniaRozdajeUrzadIChroniUzywany(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	}
+	cele = cele[:2]
+
+	kotwica := fmt.Sprintf("test-%d", time.Now().Unix())
+	urzad, urzadKlucz := urzadTestowy(t, "Flotestro Rotacja "+kotwica)
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "certificate.trust.remove", "reason": "sprzatanie po tescie rotacji",
+				"payload": map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
+			}, 2*time.Minute)
+		}
+	})
+
+	// Krok pierwszy: flota zaczyna ufac nowemu urzedowi.
+	campaign := h.createCampaign(map[string]any{
+		"name": "rozdanie urzedu", "action": "certificate.trust.ensure",
+		"reason": "test integracyjny rotacji urzedu",
+		"payload": map[string]any{"certificate": map[string]any{
+			"anchor_id": kotwica, "certificate": urzad}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		plan := planZaufania(h, target.PlanJobID)
+		if plan.Action != "create" || plan.Refusal != "" || plan.PlanHash == "" {
+			t.Errorf("host %s planuje %+v zamiast zaufania nowemu urzedowi", target.Hostname, plan)
+		}
+	}
+	h.approveCampaign(poPlanowaniu)
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("rozdanie urzedu skonczylo sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+
+	// Krok drugi, zanim cokolwiek zostalo wymienione: certyfikat podpisany
+	// tym urzedem lezy na pierwszym hoscie, wiec wycofanie ma tam odpasc.
+	sciezka := fmt.Sprintf("/etc/ssl/certs/flotestro-rotacja-%d.crt", time.Now().UnixNano())
+	lisc := liscZUrzedu(t, "rotacja.flotestro.test", urzad, urzadKlucz)
+	sekret := nowySekret(t, h, lisc.klucz)
+	t.Cleanup(func() {
+		h.do(http.MethodDelete,
+			"/api/v1/hosts/"+cele[0]+"/certificates/targets?path="+sciezka, nil, nil, 0)
+	})
+	zadanie, proby := h.runOperation(cele[0], map[string]any{
+		"action": "certificate.deploy", "reason": "przygotowanie testu wycofania urzedu",
+		"payload": map[string]any{"certificate": map[string]any{
+			"path": sciezka, "key_path": strings.Replace(sciezka, ".crt", ".key", 1),
+			"certificate": lisc.certyfikat,
+			"key_secret":  map[string]any{"name": sekret.Name},
+		}},
+	}, 3*time.Minute)
+	if zadanie.State != "succeeded" {
+		t.Fatalf("wdrozenie liscia: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	}
+
+	// Wycofanie urzedu obowiazuje cala flote naraz: kampania obejmujaca host
+	// niepodlaczony nie zaczyna sie wcale, bo ten host zostalby z zaufaniem,
+	// ktorego reszta floty juz nie ma.
+	var niepelne struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
+		"name": "wycofanie urzedu poza flota", "action": "certificate.trust.remove",
+		"payload":  map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
+		"selector": map[string]any{"host_ids": append(append([]string{}, cele...), hostPoza(t, h, cele))},
+	}, &niepelne, http.StatusBadRequest)
+	if niepelne.Code != "incomplete_coverage" || !strings.Contains(niepelne.Detail, "cala flote") {
+		t.Errorf("kampania z niepewnym celem: %s (%s)", niepelne.Code, niepelne.Detail)
+	}
+
+	wycofanie := h.createCampaign(map[string]any{
+		"name": "wycofanie urzedu", "action": "certificate.trust.remove",
+		"reason":      "test odmowy wycofania urzedu w uzyciu",
+		"payload":     map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
+		"selector":    map[string]any{"host_ids": cele},
+		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
+		"reboot_policy": "never",
+	})
+	poDrugim := h.awaitCampaign(wycofanie.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+
+	var odmowil, zgodzil int
+	for _, target := range h.campaignTargets(wycofanie.ID) {
+		if target.HostID == cele[0] {
+			// Host z certyfikatem z tego urzedu ma odpasc w planie.
+			if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
+				t.Errorf("host z certyfikatem z tego urzedu: %s/%s", target.State, target.ErrorCode)
+			}
+			odmowil++
+			continue
+		}
+		plan := planZaufania(h, target.PlanJobID)
+		if plan.Action != "remove" || plan.Refusal != "" {
+			t.Errorf("host bez certyfikatu z tego urzedu planuje %+v", plan)
+		}
+		zgodzil++
+	}
+	if odmowil == 0 || zgodzil == 0 {
+		t.Errorf("wycofanie nie rozroznilo hostow: odmowa=%d, zgoda=%d", odmowil, zgodzil)
+	}
+	if poDrugim.State == "awaiting_approval" {
+		h.do(http.MethodPost, "/api/v1/campaigns/"+wycofanie.ID+"/cancel",
+			map[string]any{"reason": "test odmowy wycofania"}, nil, 0)
+	}
+}
+
+// planZaufania czyta z wyniku zadania planujacego plan kroku rotacji.
+func planZaufania(h *harness, jobID string) (plan struct {
+	AnchorID string   `json:"anchor_id"`
+	Action   string   `json:"action"`
+	InUseBy  []string `json:"in_use_by"`
+	Refusal  string   `json:"refusal"`
+	PlanHash string   `json:"plan_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "trust_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// hostPoza zwraca host, ktory nie wykona teraz zmiany: niepodlaczony albo
+// w oknie serwisowym. Bez takiego hosta nie da sie pokazac reguly pelnego
+// pokrycia, wiec test bez niego nie ma czego sprawdzac.
+func hostPoza(t *testing.T, h *harness, uzyte []string) string {
+	t.Helper()
+	wziete := map[string]bool{}
+	for _, id := range uzyte {
+		wziete[id] = true
+	}
+	for _, host := range h.hosts() {
+		if !wziete[host.ID] && host.ConnectionState != "online" {
+			return host.ID
+		}
+	}
+	// Flota testowa bywa cala podlaczona. Host w oknie serwisowym jest tu
+	// rownowaznym celem niepewnym: tez nie wykona zmiany teraz.
+	for _, host := range h.hosts() {
+		if wziete[host.ID] {
+			continue
+		}
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/maintenance", map[string]any{
+			"duration_minutes": 10,
+			"reason":           "test pelnego pokrycia przy wycofaniu urzedu",
+		}, nil, http.StatusOK)
+		hostID := host.ID
+		t.Cleanup(func() {
+			h.do(http.MethodPost, "/api/v1/hosts/"+hostID+"/maintenance",
+				map[string]any{"clear": true}, nil, 0)
+		})
+		return hostID
+	}
+	t.Skip("flota nie ma hosta poza kampania, ktorym mozna pokazac niepelne pokrycie")
+	return ""
+}

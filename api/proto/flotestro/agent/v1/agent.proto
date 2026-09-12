@@ -1367,6 +1367,10 @@ message CertificateAction {
     OPERATION_RENEW = 3;
     // Plan wdrozenia liczony na hoscie, bez siegania po klucz prywatny.
     OPERATION_PLAN = 4;
+    // Magazyn zaufania: plan kroku rotacji urzedu i sam krok.
+    OPERATION_TRUST_PLAN = 5;
+    OPERATION_TRUST_ENSURE = 6;
+    OPERATION_TRUST_REMOVE = 7;
   }
   Operation operation = 1;
   repeated CertificateTarget targets = 2;
@@ -1387,6 +1391,8 @@ message CertificateAction {
   string request = 13;
   // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
   string plan_hash = 14;
+  // AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+  string anchor_id = 15;
 }
 
 message CertificateResult {
@@ -1404,6 +1410,8 @@ message CertificateResult {
   bool rolled_back = 6;
   // Plan wdrozenia w postaci JSON przy OPERATION_PLAN.
   bytes plan = 7;
+  // Trust niesie magazyn zaufania hosta w postaci JSON.
+  bytes trust = 8;
 }
 
 // TimeAction opisuje operacje na czasie hosta.

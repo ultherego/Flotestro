@@ -850,6 +850,10 @@ const (
 	CertificateAction_OPERATION_RENEW       CertificateAction_Operation = 3
 	// Plan wdrozenia liczony na hoscie, bez siegania po klucz prywatny.
 	CertificateAction_OPERATION_PLAN CertificateAction_Operation = 4
+	// Magazyn zaufania: plan kroku rotacji urzedu i sam krok.
+	CertificateAction_OPERATION_TRUST_PLAN   CertificateAction_Operation = 5
+	CertificateAction_OPERATION_TRUST_ENSURE CertificateAction_Operation = 6
+	CertificateAction_OPERATION_TRUST_REMOVE CertificateAction_Operation = 7
 )
 
 // Enum value maps for CertificateAction_Operation.
@@ -860,13 +864,19 @@ var (
 		2: "OPERATION_DEPLOY",
 		3: "OPERATION_RENEW",
 		4: "OPERATION_PLAN",
+		5: "OPERATION_TRUST_PLAN",
+		6: "OPERATION_TRUST_ENSURE",
+		7: "OPERATION_TRUST_REMOVE",
 	}
 	CertificateAction_Operation_value = map[string]int32{
-		"OPERATION_UNSPECIFIED": 0,
-		"OPERATION_SCAN":        1,
-		"OPERATION_DEPLOY":      2,
-		"OPERATION_RENEW":       3,
-		"OPERATION_PLAN":        4,
+		"OPERATION_UNSPECIFIED":  0,
+		"OPERATION_SCAN":         1,
+		"OPERATION_DEPLOY":       2,
+		"OPERATION_RENEW":        3,
+		"OPERATION_PLAN":         4,
+		"OPERATION_TRUST_PLAN":   5,
+		"OPERATION_TRUST_ENSURE": 6,
+		"OPERATION_TRUST_REMOVE": 7,
 	}
 )
 
@@ -9469,7 +9479,9 @@ type CertificateAction struct {
 	// Request wskazuje zlecenie certmongera przy odnowieniu.
 	Request string `protobuf:"bytes,13,opt,name=request,proto3" json:"request,omitempty"`
 	// Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
-	PlanHash      string `protobuf:"bytes,14,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	PlanHash string `protobuf:"bytes,14,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	// AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+	AnchorId      string `protobuf:"bytes,15,opt,name=anchor_id,json=anchorId,proto3" json:"anchor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9602,6 +9614,13 @@ func (x *CertificateAction) GetPlanHash() string {
 	return ""
 }
 
+func (x *CertificateAction) GetAnchorId() string {
+	if x != nil {
+		return x.AnchorId
+	}
+	return ""
+}
+
 type CertificateResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
@@ -9617,7 +9636,9 @@ type CertificateResult struct {
 	// w polowie.
 	RolledBack bool `protobuf:"varint,6,opt,name=rolled_back,json=rolledBack,proto3" json:"rolled_back,omitempty"`
 	// Plan wdrozenia w postaci JSON przy OPERATION_PLAN.
-	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	Plan []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Trust niesie magazyn zaufania hosta w postaci JSON.
+	Trust         []byte `protobuf:"bytes,8,opt,name=trust,proto3" json:"trust,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9697,6 +9718,13 @@ func (x *CertificateResult) GetRolledBack() bool {
 func (x *CertificateResult) GetPlan() []byte {
 	if x != nil {
 		return x.Plan
+	}
+	return nil
+}
+
+func (x *CertificateResult) GetTrust() []byte {
+	if x != nil {
+		return x.Trust
 	}
 	return nil
 }
@@ -12147,7 +12175,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x11CertificateTarget\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bkey_path\x18\x02 \x01(\tR\akeyPath\x12\x18\n" +
-	"\aservice\x18\x03 \x01(\tR\aservice\"\x83\x05\n" +
+	"\aservice\x18\x03 \x01(\tR\aservice\"\xf3\x05\n" +
 	"\x11CertificateAction\x12M\n" +
 	"\toperation\x18\x01 \x01(\x0e2/.flotestro.agent.v1.CertificateAction.OperationR\toperation\x12?\n" +
 	"\atargets\x18\x02 \x03(\v2%.flotestro.agent.v1.CertificateTargetR\atargets\x12\x12\n" +
@@ -12165,13 +12193,17 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"reloadUnit\x12!\n" +
 	"\fprobe_target\x18\f \x01(\tR\vprobeTarget\x12\x18\n" +
 	"\arequest\x18\r \x01(\tR\arequest\x12\x1b\n" +
-	"\tplan_hash\x18\x0e \x01(\tR\bplanHash\"y\n" +
+	"\tplan_hash\x18\x0e \x01(\tR\bplanHash\x12\x1b\n" +
+	"\tanchor_id\x18\x0f \x01(\tR\banchorId\"\xcb\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_SCAN\x10\x01\x12\x14\n" +
 	"\x10OPERATION_DEPLOY\x10\x02\x12\x13\n" +
 	"\x0fOPERATION_RENEW\x10\x03\x12\x12\n" +
-	"\x0eOPERATION_PLAN\x10\x04\"\xe0\x01\n" +
+	"\x0eOPERATION_PLAN\x10\x04\x12\x18\n" +
+	"\x14OPERATION_TRUST_PLAN\x10\x05\x12\x1a\n" +
+	"\x16OPERATION_TRUST_ENSURE\x10\x06\x12\x1a\n" +
+	"\x16OPERATION_TRUST_REMOVE\x10\a\"\xf6\x01\n" +
 	"\x11CertificateResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12-\n" +
@@ -12180,7 +12212,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x05probe\x18\x05 \x01(\fR\x05probe\x12\x1f\n" +
 	"\vrolled_back\x18\x06 \x01(\bR\n" +
 	"rolledBack\x12\x12\n" +
-	"\x04plan\x18\a \x01(\fR\x04plan\"\x8f\x03\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\x12\x14\n" +
+	"\x05trust\x18\b \x01(\fR\x05trust\"\x8f\x03\n" +
 	"\n" +
 	"TimeAction\x12F\n" +
 	"\toperation\x18\x01 \x01(\x0e2(.flotestro.agent.v1.TimeAction.OperationR\toperation\x12\x18\n" +

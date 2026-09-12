@@ -385,6 +385,15 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.Backup = &kopia
 		}
 
+	case opspec.ActionCertificateTrustEnsure, opspec.ActionCertificateTrustRemove:
+		// Kotwica wiaze sie odciskiem planu: magazyn zaufania zmieniony od
+		// planowania zatrzymuje krok rotacji.
+		if payload.Certificate != nil {
+			certyfikat := *payload.Certificate
+			certyfikat.PlanHash = hash
+			payload.Certificate = &certyfikat
+		}
+
 	case opspec.ActionCertificateDeploy:
 		// Certyfikat wiaze sie odciskiem planu: plik pod ta sciezka zmieniony
 		// od planowania zatrzymuje wdrozenie zamiast nadpisac cudzy material.

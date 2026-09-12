@@ -61,9 +61,11 @@ type Plan struct {
 
 // Nazwy dzialan planu.
 const (
-	PlanTworzy   = "create"
-	PlanZmienia  = "update"
-	PlanBezZmian = "no_change"
+	PlanTworzy      = "create"
+	PlanZmienia     = "update"
+	PlanBezZmian    = "no_change"
+	PlanUsuwa       = "remove"
+	PlanJuzUsuniety = "remove_absent"
 )
 
 // Zamowienie opisuje wdrozenie widziane przez planer. Klucza tu nie ma:

@@ -53,31 +53,36 @@ var trybyMasowe = map[ActionType]CampaignMode{
 	// Zmiany, ktore na kazdym hoscie licza inny diff. Zatwierdzenie musi
 	// dotyczyc zestawu planow, a nie jednego payloadu - dopoki panel tego nie
 	// umie, planer kampanii odmawia z wlasnym kodem.
-	ActionPackageInstall:        CampaignPerHostPlan,
-	ActionPackageUpgrade:        CampaignPerHostPlan,
-	ActionFileEnsure:            CampaignPerHostPlan,
-	ActionFileRemove:            CampaignPerHostPlan,
-	ActionFileRollback:          CampaignPerHostPlan,
-	ActionBackupRun:             CampaignPerHostPlan,
-	ActionBackupVerify:          CampaignPerHostPlan,
-	ActionCertificateDeploy:     CampaignPerHostPlan,
-	ActionMountEnsure:           CampaignPerHostPlan,
-	ActionMountRemove:           CampaignPerHostPlan,
-	ActionFilesystemCheck:       CampaignPerHostPlan,
-	ActionFilesystemResize:      CampaignPerHostPlan,
-	ActionLVMExtend:             CampaignPerHostPlan,
-	ActionNetworkProfileApply:   CampaignPerHostPlan,
-	ActionNetworkRouteEnsure:    CampaignPerHostPlan,
-	ActionNetworkMTUSet:         CampaignPerHostPlan,
-	ActionDNSHostApply:          CampaignPerHostPlan,
-	ActionFirewallRuleEnsure:    CampaignPerHostPlan,
-	ActionFirewallRuleRemove:    CampaignPerHostPlan,
-	ActionFirewallZonePort:      CampaignPerHostPlan,
-	ActionFirewallZoneService:   CampaignPerHostPlan,
-	ActionSSHConfigApply:        CampaignPerHostPlan,
-	ActionTimeConfigApply:       CampaignPerHostPlan,
-	ActionComposeDeploy:         CampaignPerHostPlan,
-	ActionKernelModuleBlacklist: CampaignPerHostPlan,
+	ActionPackageInstall:    CampaignPerHostPlan,
+	ActionPackageUpgrade:    CampaignPerHostPlan,
+	ActionFileEnsure:        CampaignPerHostPlan,
+	ActionFileRemove:        CampaignPerHostPlan,
+	ActionFileRollback:      CampaignPerHostPlan,
+	ActionBackupRun:         CampaignPerHostPlan,
+	ActionBackupVerify:      CampaignPerHostPlan,
+	ActionCertificateDeploy: CampaignPerHostPlan,
+	// Rotacja urzedu jest ciagiem krokow, ale kazdy krok jest osobna zmiana
+	// z wlasnym planem per host: host ufa obu urzedom naraz, dostaje nowy
+	// certyfikat, i dopiero wtedy stary urzad znika.
+	ActionCertificateTrustEnsure: CampaignPerHostPlan,
+	ActionCertificateTrustRemove: CampaignPerHostPlan,
+	ActionMountEnsure:            CampaignPerHostPlan,
+	ActionMountRemove:            CampaignPerHostPlan,
+	ActionFilesystemCheck:        CampaignPerHostPlan,
+	ActionFilesystemResize:       CampaignPerHostPlan,
+	ActionLVMExtend:              CampaignPerHostPlan,
+	ActionNetworkProfileApply:    CampaignPerHostPlan,
+	ActionNetworkRouteEnsure:     CampaignPerHostPlan,
+	ActionNetworkMTUSet:          CampaignPerHostPlan,
+	ActionDNSHostApply:           CampaignPerHostPlan,
+	ActionFirewallRuleEnsure:     CampaignPerHostPlan,
+	ActionFirewallRuleRemove:     CampaignPerHostPlan,
+	ActionFirewallZonePort:       CampaignPerHostPlan,
+	ActionFirewallZoneService:    CampaignPerHostPlan,
+	ActionSSHConfigApply:         CampaignPerHostPlan,
+	ActionTimeConfigApply:        CampaignPerHostPlan,
+	ActionComposeDeploy:          CampaignPerHostPlan,
+	ActionKernelModuleBlacklist:  CampaignPerHostPlan,
 
 	// Operacje z wlasna maszyna stanow. Restart rozlicza sie powrotem hosta
 	// z nowym boot ID, a nie wyslaniem polecenia.
@@ -168,6 +173,11 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	case ActionCertificateDeploy:
 		return ActionCertificatePlan
 
+	// Kotwica: plan mowi, czy host juz ufa temu urzedowi, a przy wycofaniu -
+	// czy urzad nadal podpisuje cokolwiek, co host pokazuje klientom.
+	case ActionCertificateTrustEnsure, ActionCertificateTrustRemove:
+		return ActionCertificateTrustPlan
+
 	// Kopia: plan mowi, co z tego hosta pojedzie i ile go to kosztuje -
 	// ktore katalogi host naprawde ma, ile w nich lezy, czy repozytorium
 	// odpowiada i co zostanie po retencji.
@@ -194,6 +204,25 @@ func PowodWykluczeniaZKampanii(action ActionType) string {
 	case ActionBackupRestore:
 		return "odtworzenie rozpakowuje stary stan na dzialajacym systemie i wymaga " +
 			"obecnosci operatora przy kazdym hoscie; kampania go nie kolejkuje"
+	}
+	return ""
+}
+
+// PowodPelnegoPokrycia nazywa operacje, ktorych nie wolno przeprowadzic na
+// czesci floty, i mowi dlaczego.
+//
+// Zwykla kampania moze ominac host offline: wroci i dostanie swoja zmiane.
+// Sa jednak zmiany, ktore dopiero razem sa poprawne. Wycofanie urzedu jest
+// tego przykladem: host, ktory nie dostal jeszcze nowego zaufania, po
+// usunieciu starego przestaje byc rozpoznawany przez reszte floty - i nie
+// dowie sie o tym nikt, dopoki nie zerwie sie polaczenie.
+//
+// Pusta wartosc znaczy operacje, ktora wolno prowadzic czesciowo.
+func PowodPelnegoPokrycia(action ActionType) string {
+	switch action {
+	case ActionCertificateTrustRemove:
+		return "wycofanie urzedu obowiazuje cala flote naraz: dopoki choc jeden " +
+			"host nie potwierdzil nowego zaufania, stary urzad musi zostac"
 	}
 	return ""
 }

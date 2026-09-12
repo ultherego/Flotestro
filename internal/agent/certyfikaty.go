@@ -161,6 +161,7 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 
 	zadanie := &helperv1.CertificateRequest{
 		Operation:   helperv1.CertificateRequest_OPERATION_RENEW,
+		AnchorId:    payload.AnchorID,
 		Path:        payload.Path,
 		KeyPath:     payload.KeyPath,
 		Owner:       payload.Owner,
@@ -171,6 +172,21 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		ProbeTarget: payload.ProbeTarget,
 		Request:     payload.Request,
 	}
+	switch action {
+	case opspec.ActionCertificateTrustPlan:
+		zadanie.Operation = helperv1.CertificateRequest_OPERATION_TRUST_PLAN
+		zadanie.Certificate = []byte(payload.Certificate)
+	case opspec.ActionCertificateTrustEnsure:
+		// Kotwica jest materialem publicznym: jedzie w zleceniu jawnie,
+		// a plan pokazuje ja operatorowi przed zgoda.
+		zadanie.Operation = helperv1.CertificateRequest_OPERATION_TRUST_ENSURE
+		zadanie.Certificate = []byte(payload.Certificate)
+		zadanie.PlanHash = payload.PlanHash
+	case opspec.ActionCertificateTrustRemove:
+		zadanie.Operation = helperv1.CertificateRequest_OPERATION_TRUST_REMOVE
+		zadanie.PlanHash = payload.PlanHash
+	}
+
 	if action == opspec.ActionCertificatePlan {
 		// Plan nie siega po klucz prywatny: opisuje wdrozenie, ktore sie
 		// jeszcze nie wydarzylo, i sam plan trafia do bazy panelu.
@@ -224,6 +240,7 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		Probe:             wynik.GetProbe(),
 		RolledBack:        wynik.GetRolledBack(),
 		Plan:              wynik.GetPlan(),
+		Trust:             wynik.GetTrust(),
 	}
 	if !response.GetAccepted() {
 		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,

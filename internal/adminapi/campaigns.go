@@ -141,6 +141,18 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sa zmiany, ktore dopiero razem sa poprawne: wycofanie urzedu na
+	// czesci floty zostawia hosty, ktorych reszta przestaje rozpoznawac.
+	// Taka kampania nie zaczyna sie wcale, dopoki ktorykolwiek cel jest
+	// niepewny - i mowi, ktory.
+	if powod := opspec.PowodPelnegoPokrycia(action); powod != "" {
+		if niepewne := ocena.Niepewne(); len(niepewne) > 0 {
+			problem(w, http.StatusBadRequest, "incomplete_coverage",
+				powod+"; "+opisWykluczen(niepewne))
+			return
+		}
+	}
+
 	// Uprawnienie sprawdzamy dla kazdego hosta z migawki. Kampania obejmujaca
 	// jeden host poza zakresem nie moze przejsc dlatego, ze reszta jest w nim.
 	principal := authz.FromContext(r.Context())

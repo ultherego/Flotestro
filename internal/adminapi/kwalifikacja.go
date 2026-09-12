@@ -117,6 +117,21 @@ func oceniKandydatow(kandydaci []hosts.Host, action opspec.ActionType,
 	return wynik
 }
 
+// Niepewne wylicza hosty, ktore nie wykonaja zmiany teraz: zamkniete
+// w migawce i te, na ktore kampania dopiero czeka.
+//
+// Dla wiekszosci operacji to sa tylko uwagi. Dla zmiany, ktora obowiazuje
+// cala flote naraz, sa powodem, zeby jej nie zaczynac.
+func (k kwalifikacja) Niepewne() []grupaHostow {
+	grupy := k.Wykluczenia()
+	for _, uwaga := range k.Uwagi {
+		if uwaga.Powod == PowodOffline || uwaga.Powod == PowodNieznanaZdolnosc {
+			grupy = append(grupy, uwaga)
+		}
+	}
+	return grupy
+}
+
 func (k *kwalifikacja) zamknij(host hosts.Host, stan campaigns.TargetState, powod, opis string) {
 	k.Zamkniete = append(k.Zamkniete, zamknietyHost{
 		Host: host, Stan: stan, Powod: powod, Opis: opis,

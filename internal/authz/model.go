@@ -286,7 +286,15 @@ const (
 	PermCertificateRead   Permission = "certificate.read"
 	PermCertificateWatch  Permission = "certificate.watch"
 	PermCertificateDeploy Permission = "certificate.deploy"
-	PermCertificateRenew  Permission = "certificate.renew"
+	// Zaufanie do urzedu jest szersze niz jeden plik: od tej chwili host
+	// przyjmuje kazdy certyfikat, ktory ten urzad podpisze. Wycofanie ma
+	// osobne uprawnienie, bo zrywa polaczenia, ktorych nikt nie zmienial.
+	// Plan kroku rotacji jest odczytem: czyta magazyn zaufania i liczy
+	// roznice, niczego nie zmieniajac.
+	PermCertificateTrustPlan   Permission = "certificate.trust.plan"
+	PermCertificateTrustWrite  Permission = "certificate.trust.write"
+	PermCertificateTrustRemove Permission = "certificate.trust.remove"
+	PermCertificateRenew       Permission = "certificate.renew"
 
 	// CA floty jest korzeniem zaufania dla kazdego hosta. Jego wymiana ma
 	// wlasne uprawnienie, osobne od reszty administracji: blad w tym miejscu
@@ -315,7 +323,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermDockerEvents, PermProcessRead,
 		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
-		PermTimeRead, PermTimePlan, PermSecurityRead, PermFilePlan, PermCertificateRead, PermCertificatePlan,
+		PermTimeRead, PermTimePlan, PermSecurityRead, PermFilePlan, PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan,
 		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
 	},
 	RoleAuditor: {
@@ -329,7 +337,7 @@ var rolePermissions = map[Role][]Permission{
 		PermSecurityRead, PermSecurityScan,
 		// Terminy certyfikatow sa materialem audytu tak samo jak stan
 		// ochronny: wygasajacy certyfikat jest ustaleniem, a nie awaria.
-		PermCertificateRead, PermCertificatePlan,
+		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan,
 		// Backup, ktorego nikt nie sprawdzil, jest ustaleniem audytu,
 		// a nie awaria dyzuru.
 		PermBackupRead,
@@ -376,7 +384,7 @@ var rolePermissions = map[Role][]Permission{
 		PermVulnerabilityRead,
 		// Operator oglada certyfikaty i wskazuje panelowi, ktorych plikow
 		// pilnowac; wdrozenie nowego jest juz decyzja administratora.
-		PermCertificateRead, PermCertificatePlan, PermCertificateWatch,
+		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan, PermCertificateWatch,
 		// Operator robi i sprawdza kopie; odtworzenie jest osobna decyzja,
 		// bo rozpakowuje stary stan na dzialajacym systemie.
 		PermBackupRead, PermBackupRun, PermBackupVerify,
@@ -444,8 +452,9 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,
 		PermSecretRead, PermSecretWrite, PermSecretDestroy,
-		PermCertificateRead, PermCertificatePlan, PermCertificateWatch,
+		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan, PermCertificateWatch,
 		PermCertificateDeploy, PermCertificateRenew,
+		PermCertificateTrustWrite, PermCertificateTrustRemove,
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
 		PermVulnerabilityRead,
