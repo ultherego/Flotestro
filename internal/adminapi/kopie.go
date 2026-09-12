@@ -23,7 +23,7 @@ import (
 // jest aktualna, czy ktokolwiek ja kiedykolwiek sprawdzil i ile zajmuje. Na to
 // odpowiada dopiero historia przebiegow.
 type definicjaWidok struct {
-	kopie.Definicja
+	kopie.Definition
 	// Status jest ocena panelu, a nie faktem z hosta.
 	Status string `json:"status"`
 	// LastSuccessAt jest czasem ostatniej udanej kopii - z planu, czyli
@@ -60,12 +60,12 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	definicje, err := s.kopie.Definicje(r.Context(), hostID)
+	definicje, err := s.kopie.Definitions(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	ostatnie, err := s.kopie.Ostatnie(r.Context(), hostID)
+	ostatnie, err := s.kopie.Latest(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -74,7 +74,7 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 	teraz := time.Now().UTC()
 	raport := raportKopii{HostID: hostID, Definitions: []definicjaWidok{}}
 	for _, definicja := range definicje {
-		widok := definicjaWidok{Definicja: definicja}
+		widok := definicjaWidok{Definition: definicja}
 		przebiegi := ostatnie[definicja.Name]
 
 		// Czas ostatniej udanej kopii bierzemy z planu, bo plan czyta
@@ -98,13 +98,13 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 			widok.LastVerifyAt = &czas
 		}
 
-		widok.Status = kopie.Stan(widok.LastSuccessAt, teraz)
+		widok.Status = kopie.State(widok.LastSuccessAt, teraz)
 		if widok.LastSuccessAt != nil {
 			wiek := teraz.Sub(*widok.LastSuccessAt).Hours()
 			widok.AgeHours = &wiek
 		}
-		widok.Unverified = kopie.Niesprawdzona(widok.LastVerifyAt, teraz)
-		raport.Status = kopie.Gorszy(raport.Status, widok.Status)
+		widok.Unverified = kopie.Unverified(widok.LastVerifyAt, teraz)
+		raport.Status = kopie.Worse(raport.Status, widok.Status)
 		raport.Definitions = append(raport.Definitions, widok)
 	}
 
@@ -203,7 +203,7 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	zapisana, err := s.kopie.Ustaw(r.Context(), kopie.Definicja{
+	zapisana, err := s.kopie.Set(r.Context(), kopie.Definition{
 		HostID: hostID, Name: zadanie.Name, Tool: zadanie.Tool,
 		Repository: zadanie.Repository, Paths: zadanie.Paths,
 		Excludes: zadanie.Excludes, Tags: zadanie.Tags,
@@ -245,8 +245,8 @@ func (s *Server) handleDeleteBackupDefinition(w http.ResponseWriter, r *http.Req
 		problem(w, http.StatusBadRequest, "name_required", "name query parameter is required")
 		return
 	}
-	err := s.kopie.Usun(r.Context(), hostID, nazwa)
-	if errors.Is(err, kopie.ErrNieZnaleziono) {
+	err := s.kopie.Delete(r.Context(), hostID, nazwa)
+	if errors.Is(err, kopie.ErrNotFound) {
 		problem(w, http.StatusNotFound, "definition_not_found", "no such backup definition")
 		return
 	}
@@ -273,13 +273,13 @@ func (s *Server) handleBackupRuns(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermBackupRead, scope, "host", hostID); !ok {
 		return
 	}
-	przebiegi, err := s.kopie.Przebiegi(r.Context(), hostID, r.URL.Query().Get("definition"), 0)
+	przebiegi, err := s.kopie.Runs(r.Context(), hostID, r.URL.Query().Get("definition"), 0)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	if przebiegi == nil {
-		przebiegi = []kopie.Przebieg{}
+		przebiegi = []kopie.Run{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": przebiegi, "count": len(przebiegi)})
 }
@@ -326,22 +326,22 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	definicje, err := s.kopie.DefinicjeFloty(r.Context(), identyfikatory)
+	definicje, err := s.kopie.FleetDefinitions(r.Context(), identyfikatory)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	plany, err := s.kopie.OstatnieWeFlocie(r.Context(), identyfikatory, modul.OperacjaPlan)
+	plany, err := s.kopie.LatestInFleet(r.Context(), identyfikatory, modul.OperacjaPlan)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	sprawdzenia, err := s.kopie.OstatnieWeFlocie(r.Context(), identyfikatory, modul.OperacjaSprawdz)
+	sprawdzenia, err := s.kopie.LatestInFleet(r.Context(), identyfikatory, modul.OperacjaSprawdz)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	uruchomienia, err := s.kopie.OstatnieWeFlocie(r.Context(), identyfikatory, modul.OperacjaBackup)
+	uruchomienia, err := s.kopie.LatestInFleet(r.Context(), identyfikatory, modul.OperacjaBackup)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -349,26 +349,26 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	// Kopia, ktorej nikt nigdy nie odtworzyl, jest nadzieja, a nie kopia.
 	// Panel nie zmusza do proby odtworzenia, ale ma powiedziec, kiedy byla
 	// ostatnia - i kiedy nie bylo jej nigdy.
-	odtworzenia, err := s.kopie.OstatnieWeFlocie(r.Context(), identyfikatory, modul.OperacjaOdtworzen)
+	odtworzenia, err := s.kopie.LatestInFleet(r.Context(), identyfikatory, modul.OperacjaOdtworzen)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 
 	klucz := func(hostID, definicja string) string { return hostID + "\x1f" + definicja }
-	ostatniPlan := map[string]kopie.Przebieg{}
+	ostatniPlan := map[string]kopie.Run{}
 	for _, plan := range plany {
 		ostatniPlan[klucz(plan.HostID, plan.Definition)] = plan
 	}
-	ostatnieSprawdzenie := map[string]kopie.Przebieg{}
+	ostatnieSprawdzenie := map[string]kopie.Run{}
 	for _, sprawdzenie := range sprawdzenia {
 		ostatnieSprawdzenie[klucz(sprawdzenie.HostID, sprawdzenie.Definition)] = sprawdzenie
 	}
-	ostatnieUruchomienie := map[string]kopie.Przebieg{}
+	ostatnieUruchomienie := map[string]kopie.Run{}
 	for _, uruchomienie := range uruchomienia {
 		ostatnieUruchomienie[klucz(uruchomienie.HostID, uruchomienie.Definition)] = uruchomienie
 	}
-	ostatnieOdtworzenie := map[string]kopie.Przebieg{}
+	ostatnieOdtworzenie := map[string]kopie.Run{}
 	for _, odtworzenie := range odtworzenia {
 		ostatnieOdtworzenie[klucz(odtworzenie.HostID, odtworzenie.Definition)] = odtworzenie
 	}
@@ -399,12 +399,12 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 			czas := sprawdzenie.RecordedAt.UTC()
 			sprawdzone = &czas
 		}
-		pozycja.Status = kopie.Stan(pozycja.LastSuccessAt, teraz)
+		pozycja.Status = kopie.State(pozycja.LastSuccessAt, teraz)
 		if pozycja.LastSuccessAt != nil {
 			wiek := teraz.Sub(*pozycja.LastSuccessAt).Hours()
 			pozycja.AgeHours = &wiek
 		}
-		pozycja.Unverified = kopie.Niesprawdzona(sprawdzone, teraz)
+		pozycja.Unverified = kopie.Unverified(sprawdzone, teraz)
 		if pozycja.Unverified {
 			niesprawdzone++
 		}
@@ -422,7 +422,7 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	// odpowiada na pytanie operatora bez przewijania.
 	sort.SliceStable(pozycje, func(i, j int) bool {
 		if pozycje[i].Status != pozycje[j].Status {
-			return kopie.Gorszy(pozycje[i].Status, pozycje[j].Status) == pozycje[i].Status
+			return kopie.Worse(pozycje[i].Status, pozycje[j].Status) == pozycje[i].Status
 		}
 		if (pozycje[i].LastSuccessAt == nil) != (pozycje[j].LastSuccessAt == nil) {
 			return pozycje[i].LastSuccessAt == nil
@@ -439,9 +439,9 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 		"repositories":   s.obciazenieRepozytoriow(r.Context(), pozycje),
 		"hosts_total":    len(identyfikatory),
 		"thresholds": map[string]int{
-			"warning_hours":     int(kopie.ProgOstrzezenia.Hours()),
-			"critical_hours":    int(kopie.ProgPilny.Hours()),
-			"verification_days": int(kopie.ProgWeryfikacji.Hours() / 24),
+			"warning_hours":     int(kopie.WarningThreshold.Hours()),
+			"critical_hours":    int(kopie.CriticalThreshold.Hours()),
+			"verification_days": int(kopie.VerificationThreshold.Hours() / 24),
 		},
 	})
 }

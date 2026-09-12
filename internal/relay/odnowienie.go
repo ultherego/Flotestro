@@ -35,13 +35,13 @@ const (
 	odstepPoBledzie      = 10 * time.Minute
 )
 
-// Tozsamosc relaya wraz z materialem, ktory trzeba przelaczyc atomowo.
-type Tozsamosc struct {
+// Identity relaya wraz z materialem, ktory trzeba przelaczyc atomowo.
+type Identity struct {
 	RelayID     string
 	Certificate tls.Certificate
 	CAPool      *x509.CertPool
 	NotAfter    time.Time
-	ZaufaniePEM []byte
+	TrustPEM []byte
 }
 
 // Zywa tozsamosc trzyma biezacy material relaya i pozwala podmienic go
@@ -52,24 +52,24 @@ type Tozsamosc struct {
 // sesje wszystkich agentow lokalizacji naraz, a odnowienie zdarza sie
 // regularnie i samo z siebie nie jest zdarzeniem operacyjnym.
 type Zywa struct {
-	biezaca atomic.Pointer[Tozsamosc]
+	biezaca atomic.Pointer[Identity]
 	// rejestracja mowi, czy listener ma wpuszczac polaczenia bez certyfikatu
 	// klienta. Wlaczana tylko wtedy, gdy relay posredniczy w rejestracji.
 	rejestracja atomic.Bool
 }
 
 // NowaZywa tworzy uchwyt na biezaca tozsamosc relaya.
-func NowaZywa(tozsamosc Tozsamosc) *Zywa {
+func NowaZywa(tozsamosc Identity) *Zywa {
 	zywa := &Zywa{}
 	zywa.biezaca.Store(&tozsamosc)
 	return zywa
 }
 
 // Biezaca zwraca obecna tozsamosc.
-func (z *Zywa) Biezaca() Tozsamosc { return *z.biezaca.Load() }
+func (z *Zywa) Biezaca() Identity { return *z.biezaca.Load() }
 
 // Podmien wstawia nowa tozsamosc.
-func (z *Zywa) Podmien(tozsamosc Tozsamosc) { z.biezaca.Store(&tozsamosc) }
+func (z *Zywa) Podmien(tozsamosc Identity) { z.biezaca.Store(&tozsamosc) }
 
 // Certyfikat zwraca certyfikat serwerowy dla uscisku TLS z agentem.
 func (z *Zywa) Certyfikat(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -115,7 +115,7 @@ type OpcjeOdnowienia struct {
 	Log    *slog.Logger
 	// PoOdnowieniu jest wolane po podmianie tozsamosci. Relay odswieza
 	// wtedy polaczenie do centrali, zeby szlo juz nowym certyfikatem.
-	PoOdnowieniu func(Tozsamosc)
+	PoOdnowieniu func(Identity)
 }
 
 // UtrzymujCertyfikat odnawia certyfikat relaya, zanim wygasnie.
@@ -166,7 +166,7 @@ func UtrzymujCertyfikat(ctx context.Context, zywa *Zywa, opcje OpcjeOdnowienia) 
 }
 
 // odstepSprawdzenia skaluje sprawdzanie do dlugosci zycia certyfikatu.
-func odstepSprawdzenia(tozsamosc Tozsamosc) time.Duration {
+func odstepSprawdzenia(tozsamosc Identity) time.Duration {
 	caly := tozsamosc.NotAfter.Sub(poczatek(tozsamosc))
 	if caly <= 0 {
 		return minOdstepSprawdzenia
@@ -184,7 +184,7 @@ func odstepSprawdzenia(tozsamosc Tozsamosc) time.Duration {
 }
 
 // wymagaOdnowienia decyduje na podstawie pozostalej czesci okresu waznosci.
-func wymagaOdnowienia(tozsamosc Tozsamosc) bool {
+func wymagaOdnowienia(tozsamosc Identity) bool {
 	if tozsamosc.NotAfter.IsZero() {
 		// Nieznany termin nie znaczy "jeszcze dlugo". Proba odnowienia jest
 		// tania, a brak wiedzy o waznosci jest sam w sobie powodem.
@@ -197,7 +197,7 @@ func wymagaOdnowienia(tozsamosc Tozsamosc) bool {
 	return time.Until(tozsamosc.NotAfter) < time.Duration(float64(caly)*progOdnowienia)
 }
 
-func poczatek(tozsamosc Tozsamosc) time.Time {
+func poczatek(tozsamosc Identity) time.Time {
 	if len(tozsamosc.Certificate.Certificate) == 0 {
 		return time.Time{}
 	}
@@ -209,16 +209,16 @@ func poczatek(tozsamosc Tozsamosc) time.Time {
 }
 
 // odnow wymienia nowa pare kluczy na certyfikat i zapisuje ja atomowo.
-func odnow(ctx context.Context, obecna Tozsamosc, opcje OpcjeOdnowienia) (Tozsamosc, error) {
-	magazyn := identitystore.Nowy(opcje.StateDir)
-	klucz, err := magazyn.NowyKlucz()
+func odnow(ctx context.Context, obecna Identity, opcje OpcjeOdnowienia) (Identity, error) {
+	magazyn := identitystore.New(opcje.StateDir)
+	klucz, err := magazyn.NewKey()
 	if err != nil {
-		return Tozsamosc{}, err
+		return Identity{}, err
 	}
 	dns, adresy := rozdzielNazwy(opcje.Nazwy)
-	csrPEM, err := identitystore.Wniosek(klucz, obecna.RelayID, dns, adresy)
+	csrPEM, err := identitystore.Request(klucz, obecna.RelayID, dns, adresy)
 	if err != nil {
-		return Tozsamosc{}, err
+		return Identity{}, err
 	}
 
 	// Odnowienie idzie przez mTLS obecnym certyfikatem: to on jest dowodem
@@ -241,7 +241,7 @@ func odnow(ctx context.Context, obecna Tozsamosc, opcje OpcjeOdnowienia) (Tozsam
 			AdvertisedNames: opcje.Nazwy,
 		}))
 	if err != nil {
-		return Tozsamosc{}, fmt.Errorf("odnowienie odrzucone: %w", err)
+		return Identity{}, fmt.Errorf("odnowienie odrzucone: %w", err)
 	}
 
 	// Bundle zaufania zmienia sie tylko przy rotacji CA floty. Gdy centrala
@@ -249,29 +249,29 @@ func odnow(ctx context.Context, obecna Tozsamosc, opcje OpcjeOdnowienia) (Tozsam
 	// musi byc kompletem, a nie kluczem bez wskazania zaufania.
 	bundle := odpowiedz.Msg.GetClientCaBundlePem()
 	if len(bundle) == 0 {
-		bundle = obecna.ZaufaniePEM
+		bundle = obecna.TrustPEM
 	}
 	if len(bundle) == 0 {
-		return Tozsamosc{}, fmt.Errorf("odnowienie bez bundla zaufania")
+		return Identity{}, fmt.Errorf("odnowienie bez bundla zaufania")
 	}
 
-	zapisana, err := magazyn.Zatwierdz(identitystore.Generacja{
-		Klucz:         klucz,
-		CertyfikatPEM: odpowiedz.Msg.GetCertificatePem(),
-		ZaufaniePEM:   bundle,
+	zapisana, err := magazyn.Commit(identitystore.Generation{
+		Key:         klucz,
+		CertificatePEM: odpowiedz.Msg.GetCertificatePem(),
+		TrustPEM:   bundle,
 	})
 	if err != nil {
 		// Odrzucona generacja nie rusza tego, czym relay pracuje: lepiej
 		// zostac na starym certyfikacie i sprobowac za chwile niz zostac
 		// z polowa pary i odciac cala lokalizacje.
-		return Tozsamosc{}, fmt.Errorf("nowa tozsamosc odrzucona: %w", err)
+		return Identity{}, fmt.Errorf("nowa tozsamosc odrzucona: %w", err)
 	}
-	return Tozsamosc{
+	return Identity{
 		RelayID:     zapisana.HostID,
 		Certificate: zapisana.Certificate,
 		CAPool:      zapisana.CAPool,
 		NotAfter:    zapisana.NotAfter,
-		ZaufaniePEM: zapisana.ZaufaniePEM,
+		TrustPEM: zapisana.TrustPEM,
 	}, nil
 }
 

@@ -501,7 +501,7 @@ func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		limit = 0
 	}
-	przebieg, err := s.campaigns.Przebieg(r.Context(), campaign.ID, limit)
+	przebieg, err := s.campaigns.Course(r.Context(), campaign.ID, limit)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -521,7 +521,7 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	wpisy, err := s.campaigns.PlanyZTrescia(r.Context(), campaign.ID)
+	wpisy, err := s.campaigns.PlansWithContent(r.Context(), campaign.ID)
 	if err != nil {
 		s.fail(w, err)
 		return

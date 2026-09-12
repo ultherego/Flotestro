@@ -446,7 +446,7 @@ var dozwolonePrefiksy = []string{
 // zakazanePrefiksy wylicza miejsca, ktorych panel nie tyka nigdy - takze
 // wtedy, gdy leza wewnatrz katalogu dozwolonego.
 //
-// Magazyn zaufania odpowiada na inne pytanie niz certyfikat uslugi: mowi,
+// Store zaufania odpowiada na inne pytanie niz certyfikat uslugi: mowi,
 // komu host wierzy, a nie czym sie przedstawia. Dopisanie tam urzedu jest
 // zmiana o innej wadze i nie moze wygladac jak wdrozenie certyfikatu.
 var zakazanePrefiksy = []string{
@@ -456,7 +456,7 @@ var zakazanePrefiksy = []string{
 	"/etc/ca-certificates/",
 	"/usr/share/ca-certificates/",
 	"/usr/local/share/ca-certificates/",
-	// Tozsamosc agenta jest osobnym podsystemem z wlasnym odnowieniem:
+	// Identity agenta jest osobnym podsystemem z wlasnym odnowieniem:
 	// podmiana jego certyfikatu przez zwykla operacje odcielaby panel od
 	// hosta w chwili, w ktorej host przestalby byc soba.
 	"/etc/flotestro/agent/",

@@ -15,17 +15,17 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
-const hostTestowy = "3f2a9c1e-0000-4000-8000-000000000001"
+const testHost = "3f2a9c1e-0000-4000-8000-000000000001"
 
-// generacja wystawia komplet materialu przez to samo CA, ktorego uzywa panel.
-func generacja(t *testing.T, ca *pki.CA, hostID string) Generacja {
+// generation wystawia komplet materialu przez to samo CA, ktorego uzywa panel.
+func generation(t *testing.T, ca *pki.CA, hostID string) Generation {
 	t.Helper()
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
-		&x509.CertificateRequest{Subject: pkix.Name{CommonName: hostID}}, klucz)
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: hostID}}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,251 +34,253 @@ func generacja(t *testing.T, ca *pki.CA, hostID string) Generacja {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kluczDER, err := x509.MarshalECPrivateKey(klucz)
+	keyDER, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Generacja{
-		KluczPEM:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kluczDER}),
-		CertyfikatPEM: wydany.PEM,
-		ZaufaniePEM:   ca.PEM,
+	return Generation{
+		KeyPEM:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		CertificatePEM: wydany.PEM,
+		TrustPEM:   ca.PEM,
 	}
 }
 
-func magazynZTozsamoscia(t *testing.T) (*Magazyn, *pki.CA, string) {
+func storeWithIdentity(t *testing.T) (*Store, *pki.CA, string) {
 	t.Helper()
-	katalogCA := t.TempDir()
-	ca, err := pki.EnsureCA(katalogCA)
+	caDir := t.TempDir()
+	ca, err := pki.EnsureCA(caDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stan := t.TempDir()
-	magazyn := Nowy(stan)
-	if _, err := magazyn.Zatwierdz(generacja(t, ca, hostTestowy)); err != nil {
-		t.Fatalf("pierwsza generacja: %v", err)
+	stateDir := t.TempDir()
+	store := New(stateDir)
+	if _, err := store.Commit(generation(t, ca, testHost)); err != nil {
+		t.Fatalf("first generation: %v", err)
 	}
-	return magazyn, ca, stan
+	return store, ca, stateDir
 }
 
-func TestZatwierdzenieDajeKompletnaTozsamosc(t *testing.T) {
-	magazyn, _, _ := magazynZTozsamoscia(t)
-	tozsamosc, err := magazyn.Biezaca()
+func TestACommitGivesACompleteIdentity(t *testing.T) {
+	store, _, _ := storeWithIdentity(t)
+	identity, err := store.Current()
 	if err != nil {
-		t.Fatalf("odczyt tozsamosci: %v", err)
+		t.Fatalf("reading the identity: %v", err)
 	}
-	if tozsamosc.HostID != hostTestowy {
-		t.Fatalf("host_id = %q", tozsamosc.HostID)
+	if identity.HostID != testHost {
+		t.Fatalf("host_id = %q", identity.HostID)
 	}
-	// Klucz prywatny nie moze byc czytelny dla nikogo poza wlascicielem.
-	info, err := os.Stat(filepath.Join(tozsamosc.Katalog, NazwaKlucza))
+	// The private key must not be readable by anyone but its owner.
+	info, err := os.Stat(filepath.Join(identity.Dir, KeyName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("prawa klucza = %04o", info.Mode().Perm())
+		t.Fatalf("key permissions = %04o", info.Mode().Perm())
 	}
 }
 
-func TestOdnowienieZostawiaPoprzedniaGeneracje(t *testing.T) {
-	magazyn, ca, _ := magazynZTozsamoscia(t)
-	pierwsza, err := magazyn.Biezaca()
+func TestARenewalLeavesThePreviousGeneration(t *testing.T) {
+	store, ca, _ := storeWithIdentity(t)
+	first, err := store.Current()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := magazyn.Zatwierdz(generacja(t, ca, hostTestowy)); err != nil {
-		t.Fatalf("druga generacja: %v", err)
+	if _, err := store.Commit(generation(t, ca, testHost)); err != nil {
+		t.Fatalf("second generation: %v", err)
 	}
-	druga, err := magazyn.Biezaca()
+	second, err := store.Current()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if druga.Katalog == pierwsza.Katalog {
-		t.Fatal("odnowienie nie zmienilo generacji")
+	if second.Dir == first.Dir {
+		t.Fatal("the renewal did not change the generation")
 	}
-	// Poprzednia zostaje: gdy nowa okaze sie zla, musi byc do czego wrocic.
-	poprzednia, err := magazyn.Poprzednia()
+	// The previous one stays: when the new one turns out to be bad, there has to be something to go back to.
+	previous, err := store.Previous()
 	if err != nil {
-		t.Fatalf("brak poprzedniej generacji: %v", err)
+		t.Fatalf("no previous generation: %v", err)
 	}
-	if poprzednia.Katalog != pierwsza.Katalog {
-		t.Fatalf("poprzednia = %s, chcemy %s", poprzednia.Katalog, pierwsza.Katalog)
+	if previous.Dir != first.Dir {
+		t.Fatalf("previous = %s, want %s", previous.Dir, first.Dir)
 	}
 }
 
-func TestStareGeneracjeSaSprzatane(t *testing.T) {
-	magazyn, ca, _ := magazynZTozsamoscia(t)
+func TestOldGenerationsAreCleanedUp(t *testing.T) {
+	store, ca, _ := storeWithIdentity(t)
 	for i := 0; i < 3; i++ {
-		if _, err := magazyn.Zatwierdz(generacja(t, ca, hostTestowy)); err != nil {
-			t.Fatalf("generacja %d: %v", i, err)
+		if _, err := store.Commit(generation(t, ca, testHost)); err != nil {
+			t.Fatalf("generation %d: %v", i, err)
 		}
 	}
-	nazwy, err := magazyn.generacje()
+	names, err := store.generations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Klucz prywatny nie ma lezec na dysku dluzej, niz jest potrzebny.
-	if len(nazwy) != GeneracjiDoZachowania {
-		t.Fatalf("generacji na dysku = %d (%v)", len(nazwy), nazwy)
+	// The private key is not to lie on disk longer than it is needed.
+	if len(names) != GenerationsKept {
+		t.Fatalf("generations on disk = %d (%v)", len(names), names)
 	}
-	if _, err := magazyn.Biezaca(); err != nil {
-		t.Fatalf("biezaca po sprzataniu: %v", err)
+	if _, err := store.Current(); err != nil {
+		t.Fatalf("the current one after cleaning: %v", err)
 	}
 }
 
-// TestPrzerwanieZapisuNieNiszczyTozsamosci odtwarza punkty awarii z dokumentu.
+// TestAnInterruptedWriteDoesNotDestroyTheIdentity replays the failure points
+// from the document.
 //
-// Kazdy z nich kiedys konczyl sie hostem, ktory ma klucz z jednej pary
-// i certyfikat z drugiej - czyli hostem do odzyskania recznie.
-func TestPrzerwanieZapisuNieNiszczyTozsamosci(t *testing.T) {
-	magazyn, ca, _ := magazynZTozsamoscia(t)
-	pierwsza, err := magazyn.Biezaca()
+// Each of them once ended with a host that has the key of one pair and the
+// certificate of another - that is, a host to be recovered by hand.
+func TestAnInterruptedWriteDoesNotDestroyTheIdentity(t *testing.T) {
+	store, ca, _ := storeWithIdentity(t)
+	first, err := store.Current()
 	if err != nil {
 		t.Fatal(err)
 	}
-	generacje := filepath.Join(magazyn.Katalog(), KatalogGeneracji)
+	generations := filepath.Join(store.Dir(), GenerationsDir)
 
-	t.Run("przerwanie po zapisie klucza", func(t *testing.T) {
-		polowiczna, err := os.MkdirTemp(generacje, przedrostekNowej)
+	t.Run("interrupted after writing the key", func(t *testing.T) {
+		halfWritten, err := os.MkdirTemp(generations, newPrefix)
 		if err != nil {
 			t.Fatal(err)
 		}
-		nowa := generacja(t, ca, hostTestowy)
-		if err := os.WriteFile(filepath.Join(polowiczna, NazwaKlucza), nowa.KluczPEM, 0o600); err != nil {
+		newOne := generation(t, ca, testHost)
+		if err := os.WriteFile(filepath.Join(halfWritten, KeyName), newOne.KeyPEM, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		biezaca, err := magazyn.Biezaca()
-		if err != nil || biezaca.Katalog != pierwsza.Katalog {
-			t.Fatalf("biezaca = %+v, blad = %v", biezaca, err)
+		current, err := store.Current()
+		if err != nil || current.Dir != first.Dir {
+			t.Fatalf("current = %+v, error = %v", current, err)
 		}
-		if err := magazyn.Sprzataj(); err != nil {
+		if err := store.Clean(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(polowiczna); !os.IsNotExist(err) {
-			t.Fatal("polowiczny zapis zostal na dysku")
+		if _, err := os.Stat(halfWritten); !os.IsNotExist(err) {
+			t.Fatal("a half-written generation stayed on disk")
 		}
 	})
 
-	t.Run("przerwanie przed przelaczeniem", func(t *testing.T) {
-		nowa := generacja(t, ca, hostTestowy)
-		numer, err := numerSeryjny(nowa.CertyfikatPEM)
+	t.Run("interrupted before the switch", func(t *testing.T) {
+		newOne := generation(t, ca, testHost)
+		serial, err := serialNumber(newOne.CertificatePEM)
 		if err != nil {
 			t.Fatal(err)
 		}
-		katalog := filepath.Join(generacje, numer)
-		if err := os.MkdirAll(katalog, 0o700); err != nil {
+		dir := filepath.Join(generations, serial)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		for nazwa, dane := range map[string][]byte{
-			NazwaKlucza: nowa.KluczPEM, NazwaCertyfikatu: nowa.CertyfikatPEM,
-			NazwaZaufania: nowa.ZaufaniePEM,
+		for name, data := range map[string][]byte{
+			KeyName: newOne.KeyPEM, CertificateName: newOne.CertificatePEM,
+			TrustName: newOne.TrustPEM,
 		} {
-			if err := os.WriteFile(filepath.Join(katalog, nazwa), dane, 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
-		// Generacja lezy kompletna, ale nikt na nia nie przelaczyl: host ma
-		// dzialac dalej na poprzedniej.
-		biezaca, err := magazyn.Biezaca()
-		if err != nil || biezaca.Katalog != pierwsza.Katalog {
-			t.Fatalf("biezaca = %+v, blad = %v", biezaca, err)
+		// The generation lies complete, but nobody switched to it: the host
+		// is to keep running on the previous one.
+		current, err := store.Current()
+		if err != nil || current.Dir != first.Dir {
+			t.Fatalf("current = %+v, error = %v", current, err)
 		}
-		_ = os.RemoveAll(katalog)
+		_ = os.RemoveAll(dir)
 	})
 
-	t.Run("przerwanie po utworzeniu dowiazania tymczasowego", func(t *testing.T) {
-		nastepna := filepath.Join(magazyn.Katalog(), nazwaNastepnej)
-		if err := os.Symlink(filepath.Join(KatalogGeneracji, "nie-ma-takiej"), nastepna); err != nil {
+	t.Run("interrupted after creating the temporary symlink", func(t *testing.T) {
+		next := filepath.Join(store.Dir(), nextName)
+		if err := os.Symlink(filepath.Join(GenerationsDir, "no-such-one"), next); err != nil {
 			t.Fatal(err)
 		}
-		biezaca, err := magazyn.Biezaca()
-		if err != nil || biezaca.Katalog != pierwsza.Katalog {
-			t.Fatalf("biezaca = %+v, blad = %v", biezaca, err)
+		current, err := store.Current()
+		if err != nil || current.Dir != first.Dir {
+			t.Fatalf("current = %+v, error = %v", current, err)
 		}
-		if err := magazyn.Sprzataj(); err != nil {
+		if err := store.Clean(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Lstat(nastepna); !os.IsNotExist(err) {
-			t.Fatal("tymczasowe dowiazanie zostalo po sprzataniu")
+		if _, err := os.Lstat(next); !os.IsNotExist(err) {
+			t.Fatal("the temporary symlink stayed after the cleanup")
 		}
 	})
 }
 
-func TestNiepasujacaParaJestOdrzucana(t *testing.T) {
-	magazyn, ca, _ := magazynZTozsamoscia(t)
-	pierwsza, err := magazyn.Biezaca()
+func TestAMismatchedPairIsRejected(t *testing.T) {
+	store, ca, _ := storeWithIdentity(t)
+	first, err := store.Current()
 	if err != nil {
 		t.Fatal(err)
 	}
-	pierwszaGeneracja := generacja(t, ca, hostTestowy)
-	drugaGeneracja := generacja(t, ca, hostTestowy)
-	pomieszana := Generacja{
-		KluczPEM:      pierwszaGeneracja.KluczPEM,
-		CertyfikatPEM: drugaGeneracja.CertyfikatPEM,
-		ZaufaniePEM:   ca.PEM,
+	pierwszaGeneracja := generation(t, ca, testHost)
+	drugaGeneracja := generation(t, ca, testHost)
+	pomieszana := Generation{
+		KeyPEM:      pierwszaGeneracja.KeyPEM,
+		CertificatePEM: drugaGeneracja.CertificatePEM,
+		TrustPEM:   ca.PEM,
 	}
-	if _, err := magazyn.Zatwierdz(pomieszana); !errors.Is(err, ErrParaKluczy) {
-		t.Fatalf("blad = %v, chcemy %v", err, ErrParaKluczy)
+	if _, err := store.Commit(pomieszana); !errors.Is(err, ErrKeyPair) {
+		t.Fatalf("blad = %v, chcemy %v", err, ErrKeyPair)
 	}
 	// Odrzucenie musi nastapic przed jakakolwiek zmiana: host zostaje na tym,
 	// co dzialalo.
-	biezaca, err := magazyn.Biezaca()
-	if err != nil || biezaca.Katalog != pierwsza.Katalog {
-		t.Fatalf("biezaca = %+v, blad = %v", biezaca, err)
+	current, err := store.Current()
+	if err != nil || current.Dir != first.Dir {
+		t.Fatalf("current = %+v, blad = %v", current, err)
 	}
 }
 
-func TestCertyfikatObcegoCAJestOdrzucany(t *testing.T) {
-	magazyn, _, _ := magazynZTozsamoscia(t)
+func TestACertificateFromAnotherCAIsRejected(t *testing.T) {
+	store, _, _ := storeWithIdentity(t)
 	obceCA, err := pki.EnsureCA(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	obca := generacja(t, obceCA, hostTestowy)
-	nasze, err := magazyn.Biezaca()
+	obca := generation(t, obceCA, testHost)
+	nasze, err := store.Current()
 	if err != nil {
 		t.Fatal(err)
 	}
-	obca.ZaufaniePEM = nasze.ZaufaniePEM
-	if _, err := magazyn.Zatwierdz(obca); !errors.Is(err, ErrLancuch) {
-		t.Fatalf("blad = %v, chcemy %v", err, ErrLancuch)
+	obca.TrustPEM = nasze.TrustPEM
+	if _, err := store.Commit(obca); !errors.Is(err, ErrChain) {
+		t.Fatalf("error = %v, want %v", err, ErrChain)
 	}
 }
 
-func TestMigracjaZeStaregoUkladu(t *testing.T) {
-	katalogCA := t.TempDir()
-	ca, err := pki.EnsureCA(katalogCA)
+func TestMigrationFromTheOldLayout(t *testing.T) {
+	caDir := t.TempDir()
+	ca, err := pki.EnsureCA(caDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stan := t.TempDir()
-	stara := generacja(t, ca, hostTestowy)
-	kluczPath := filepath.Join(stan, "agent.key")
-	certPath := filepath.Join(stan, "agent.pem")
-	caPath := filepath.Join(stan, "ca.pem")
-	for sciezka, dane := range map[string][]byte{
-		kluczPath: stara.KluczPEM, certPath: stara.CertyfikatPEM, caPath: stara.ZaufaniePEM,
+	stateDir := t.TempDir()
+	old := generation(t, ca, testHost)
+	keyPath := filepath.Join(stateDir, "agent.key")
+	certPath := filepath.Join(stateDir, "agent.pem")
+	caPath := filepath.Join(stateDir, "ca.pem")
+	for path, data := range map[string][]byte{
+		keyPath: old.KeyPEM, certPath: old.CertificatePEM, caPath: old.TrustPEM,
 	} {
-		if err := os.WriteFile(sciezka, dane, 0o600); err != nil {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	magazyn := Nowy(stan)
-	przeniesiona, err := magazyn.Migruj(kluczPath, certPath, caPath)
-	if err != nil || !przeniesiona {
-		t.Fatalf("migracja = %v, blad = %v", przeniesiona, err)
+	store := New(stateDir)
+	moved, err := store.Migrate(keyPath, certPath, caPath)
+	if err != nil || !moved {
+		t.Fatalf("migration = %v, error = %v", moved, err)
 	}
-	tozsamosc, err := magazyn.Biezaca()
-	if err != nil || tozsamosc.HostID != hostTestowy {
-		t.Fatalf("tozsamosc po migracji = %+v, blad = %v", tozsamosc, err)
+	identity, err := store.Current()
+	if err != nil || identity.HostID != testHost {
+		t.Fatalf("the identity after migration = %+v, error = %v", identity, err)
 	}
-	// Oryginaly zostaja: poprzednia wersja agenta ma z czego wystartowac.
-	if _, err := os.Stat(kluczPath); err != nil {
-		t.Fatalf("stary klucz zniknal: %v", err)
+	// The originals stay: the previous version of the agent has something to
+	// start from.
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("the old key disappeared: %v", err)
 	}
-	// Druga migracja jest bezczynna - tozsamosc jest juz w magazynie.
-	ponowna, err := magazyn.Migruj(kluczPath, certPath, caPath)
-	if err != nil || ponowna {
-		t.Fatalf("ponowna migracja = %v, blad = %v", ponowna, err)
+	// A second migration does nothing - the identity is already in the store.
+	again, err := store.Migrate(keyPath, certPath, caPath)
+	if err != nil || again {
+		t.Fatalf("the second migration = %v, error = %v", again, err)
 	}
 }

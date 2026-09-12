@@ -138,16 +138,16 @@ func leafNotBefore(identity *Identity) time.Time {
 // atomowo. Stary material zostaje na dysku do chwili, w ktorej nowy jest
 // kompletny: przerwanie w polowie nie moze zostawic hosta bez tozsamosci.
 func renewCertificate(ctx context.Context, identity *Identity, options RenewalOptions) error {
-	magazyn := identitystore.Nowy(options.StateDir)
+	magazyn := identitystore.New(options.StateDir)
 	// Klucz tworzy magazyn: przy profilu sprzetowym nowa generacja powstaje
 	// w ukladzie i nigdy go nie opuszcza, a odnawianie tego nie zauwaza.
-	key, err := magazyn.NowyKlucz()
+	key, err := magazyn.NewKey()
 	if err != nil {
 		return err
 	}
 	// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane
 	// na podstawie certyfikatu, ktorym agent sie uwierzytelnia.
-	csrPEM, err := identitystore.Wniosek(key, identity.HostID, nil, nil)
+	csrPEM, err := identitystore.Request(key, identity.HostID, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -178,16 +178,16 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 	// kompletem, a nie kluczem i certyfikatem bez wskazania zaufania.
 	bundle := response.Msg.GetCaBundlePem()
 	if len(bundle) == 0 {
-		bundle = identity.ZaufaniePEM
+		bundle = identity.TrustPEM
 	}
 	if len(bundle) == 0 {
 		return fmt.Errorf("odnowienie bez bundla zaufania")
 	}
 
-	odnowiona, err := magazyn.Zatwierdz(identitystore.Generacja{
-		Klucz:         key,
-		CertyfikatPEM: response.Msg.GetCertificatePem(),
-		ZaufaniePEM:   bundle,
+	odnowiona, err := magazyn.Commit(identitystore.Generation{
+		Key:         key,
+		CertificatePEM: response.Msg.GetCertificatePem(),
+		TrustPEM:   bundle,
 	})
 	if err != nil {
 		// Odrzucona generacja nie rusza tego, czym host pracuje: lepiej

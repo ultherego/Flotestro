@@ -1,9 +1,10 @@
-// Package backup przechowuje definicje kopii i historie ich przebiegow.
+// Package backup stores the definitions of copies and the history of their
+// runs.
 //
-// Danych backupowych tu nie ma i nie bedzie: host rozmawia z repozytorium
-// wprost. Panel trzyma to, czego host sam nie powie - co ma byc backupowane,
-// dokad i jak dlugo zostaje - oraz to, czego host nie pamieta miedzy
-// operacjami: kiedy ostatnia kopia sie udala.
+// There is no backup data here and there never will be: the host talks to the
+// repository directly. The panel keeps what the host will not say by itself -
+// what is to be backed up, where to and for how long it stays - and what the
+// host does not remember between operations: when the last copy succeeded.
 package backup
 
 import (
@@ -17,17 +18,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNieZnaleziono oznacza brak definicji.
-var ErrNieZnaleziono = errors.New("panel nie zna takiej definicji kopii")
+// ErrNotFound means there is no such definition.
+var ErrNotFound = errors.New("the panel does not know such a backup definition")
 
-// Definicja opisuje, co i dokad backupowac.
-type Definicja struct {
+// Definition describes what to back up and where to.
+type Definition struct {
 	ID     string `json:"id"`
 	HostID string `json:"host_id"`
 	Name   string `json:"name"`
 	Tool   string `json:"tool"`
-	// Repository jest odnosnikiem do celu backupu. Panel go pokazuje, ale
-	// przez niego nie posredniczy.
+	// Repository is a reference to the backup target. The panel shows it but
+	// does not mediate through it.
 	Repository  string   `json:"repository,omitempty"`
 	Paths       []string `json:"paths,omitempty"`
 	Excludes    []string `json:"excludes,omitempty"`
@@ -38,10 +39,10 @@ type Definicja struct {
 	KeepMonthly int      `json:"keep_monthly,omitempty"`
 	Prune       bool     `json:"prune,omitempty"`
 	Runbook     string   `json:"runbook,omitempty"`
-	// Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+	// Initialize is the consent to create the repository on the first copy.
 	Initialize bool `json:"initialize,omitempty"`
-	// PasswordSecret i EnvSecrets sa nazwami sekretow. Wartosci nie zna ani
-	// ta tabela, ani nikt poza magazynem.
+	// PasswordSecret and EnvSecrets are the names of secrets. Neither this
+	// table nor anyone outside the store knows the values.
 	PasswordSecret string            `json:"password_secret,omitempty"`
 	EnvSecrets     map[string]string `json:"env_secrets,omitempty"`
 	Note           string            `json:"note,omitempty"`
@@ -51,16 +52,16 @@ type Definicja struct {
 	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
-// Przebieg jest jednym wykonaniem operacji backupu.
-type Przebieg struct {
+// Run is one execution of a backup operation.
+type Run struct {
 	HostID     string `json:"host_id"`
 	Definition string `json:"definition"`
 	Kind       string `json:"kind"`
 	JobID      string `json:"job_id,omitempty"`
 	Outcome    string `json:"outcome"`
 	SnapshotID string `json:"snapshot_id,omitempty"`
-	// Liczniki sa wskaznikami: narzedzie, ktore ich nie poda, zostawia brak
-	// wiedzy, a nie zero.
+	// The counters are pointers: a tool that does not give them leaves
+	// missing knowledge rather than zero.
 	BytesAdded      *int64     `json:"bytes_added,omitempty"`
 	TotalBytes      *int64     `json:"total_bytes,omitempty"`
 	FilesNew        *int64     `json:"files_new,omitempty"`
@@ -73,86 +74,87 @@ type Przebieg struct {
 	RecordedAt      time.Time  `json:"recorded_at"`
 }
 
-// wykonawca pozwala wolac te same zapytania w transakcji i poza nia.
-type wykonawca interface {
+// executor allows calling the same queries inside and outside a transaction.
+type executor interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-// Store realizuje dostep do tabel backupu.
+// Store provides access to the backup tables.
 type Store struct {
 	pool *pgxpool.Pool
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-const koluminyDefinicji = `id::text, host_id::text, name, tool, repository, paths, excludes,
+const definitionColumns = `id::text, host_id::text, name, tool, repository, paths, excludes,
 	tags, keep_last, keep_daily, keep_weekly, keep_monthly, prune, runbook, initialize,
 	password_secret, env_secrets, note, created_by, created_at, updated_by, updated_at`
 
-// Definicje zwraca definicje kopii hosta.
-func (s *Store) Definicje(ctx context.Context, hostID string) ([]Definicja, error) {
+// Definitions returns the host's backup definitions.
+func (s *Store) Definitions(ctx context.Context, hostID string) ([]Definition, error) {
 	rows, err := s.pool.Query(ctx,
-		`select `+koluminyDefinicji+` from backup_definitions where host_id = $1 order by name`, hostID)
+		`select `+definitionColumns+` from backup_definitions where host_id = $1 order by name`, hostID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var wynik []Definicja
+	var result []Definition
 	for rows.Next() {
-		definicja, err := czytajDefinicje(rows)
+		definition, err := readDefinition(rows)
 		if err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, definicja)
+		result = append(result, definition)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-// Definicja zwraca jedna definicje.
-func (s *Store) Definicja(ctx context.Context, hostID, nazwa string) (Definicja, error) {
+// Definition returns a single definition.
+func (s *Store) Definition(ctx context.Context, hostID, name string) (Definition, error) {
 	rows, err := s.pool.Query(ctx,
-		`select `+koluminyDefinicji+` from backup_definitions where host_id = $1 and name = $2`,
-		hostID, nazwa)
+		`select `+definitionColumns+` from backup_definitions where host_id = $1 and name = $2`,
+		hostID, name)
 	if err != nil {
-		return Definicja{}, err
+		return Definition{}, err
 	}
 	defer rows.Close()
 	if !rows.Next() {
-		return Definicja{}, ErrNieZnaleziono
+		return Definition{}, ErrNotFound
 	}
-	return czytajDefinicje(rows)
+	return readDefinition(rows)
 }
 
-func czytajDefinicje(rows pgx.Rows) (Definicja, error) {
-	var definicja Definicja
+func readDefinition(rows pgx.Rows) (Definition, error) {
+	var definition Definition
 	var zmienne []byte
-	if err := rows.Scan(&definicja.ID, &definicja.HostID, &definicja.Name, &definicja.Tool,
-		&definicja.Repository, &definicja.Paths, &definicja.Excludes, &definicja.Tags,
-		&definicja.KeepLast, &definicja.KeepDaily, &definicja.KeepWeekly, &definicja.KeepMonthly,
-		&definicja.Prune, &definicja.Runbook, &definicja.Initialize,
-		&definicja.PasswordSecret, &zmienne,
-		&definicja.Note, &definicja.CreatedBy, &definicja.CreatedAt,
-		&definicja.UpdatedBy, &definicja.UpdatedAt); err != nil {
-		return Definicja{}, err
+	if err := rows.Scan(&definition.ID, &definition.HostID, &definition.Name, &definition.Tool,
+		&definition.Repository, &definition.Paths, &definition.Excludes, &definition.Tags,
+		&definition.KeepLast, &definition.KeepDaily, &definition.KeepWeekly, &definition.KeepMonthly,
+		&definition.Prune, &definition.Runbook, &definition.Initialize,
+		&definition.PasswordSecret, &zmienne,
+		&definition.Note, &definition.CreatedBy, &definition.CreatedAt,
+		&definition.UpdatedBy, &definition.UpdatedAt); err != nil {
+		return Definition{}, err
 	}
 	if len(zmienne) > 0 {
-		_ = json.Unmarshal(zmienne, &definicja.EnvSecrets)
+		_ = json.Unmarshal(zmienne, &definition.EnvSecrets)
 	}
-	return definicja, nil
+	return definition, nil
 }
 
-// Ustaw zaklada albo aktualizuje definicje.
-func (s *Store) Ustaw(ctx context.Context, definicja Definicja) (Definicja, error) {
-	// Pusta lista i brak listy znacza w bazie to samo - kolumna nie przyjmuje
-	// wartosci pustej, a definicja bez wykluczen jest zwyczajna definicja.
-	definicja.Paths = niepustaLista(definicja.Paths)
-	definicja.Excludes = niepustaLista(definicja.Excludes)
-	definicja.Tags = niepustaLista(definicja.Tags)
-	zmienne, err := json.Marshal(definicja.EnvSecrets)
+// Set creates or updates a definition.
+func (s *Store) Set(ctx context.Context, definition Definition) (Definition, error) {
+	// An empty list and a missing list mean the same thing in the database -
+	// the column does not accept an empty value, and a definition without
+	// exclusions is an ordinary definition.
+	definition.Paths = nonNilList(definition.Paths)
+	definition.Excludes = nonNilList(definition.Excludes)
+	definition.Tags = nonNilList(definition.Tags)
+	zmienne, err := json.Marshal(definition.EnvSecrets)
 	if err != nil {
-		return Definicja{}, err
+		return Definition{}, err
 	}
-	if definicja.EnvSecrets == nil {
+	if definition.EnvSecrets == nil {
 		zmienne = []byte("{}")
 	}
 	const query = `
@@ -171,40 +173,40 @@ func (s *Store) Ustaw(ctx context.Context, definicja Definicja) (Definicja, erro
 			env_secrets = excluded.env_secrets, note = excluded.note,
 			updated_by = excluded.updated_by, updated_at = now()
 		returning id::text, created_at, updated_at`
-	err = s.pool.QueryRow(ctx, query, definicja.HostID, definicja.Name, definicja.Tool,
-		definicja.Repository, definicja.Paths, definicja.Excludes, definicja.Tags,
-		definicja.KeepLast, definicja.KeepDaily, definicja.KeepWeekly, definicja.KeepMonthly,
-		definicja.Prune, definicja.Runbook, definicja.Initialize,
-		definicja.PasswordSecret, zmienne, definicja.Note, definicja.UpdatedBy).
-		Scan(&definicja.ID, &definicja.CreatedAt, &definicja.UpdatedAt)
-	definicja.CreatedBy = definicja.UpdatedBy
-	return definicja, err
+	err = s.pool.QueryRow(ctx, query, definition.HostID, definition.Name, definition.Tool,
+		definition.Repository, definition.Paths, definition.Excludes, definition.Tags,
+		definition.KeepLast, definition.KeepDaily, definition.KeepWeekly, definition.KeepMonthly,
+		definition.Prune, definition.Runbook, definition.Initialize,
+		definition.PasswordSecret, zmienne, definition.Note, definition.UpdatedBy).
+		Scan(&definition.ID, &definition.CreatedAt, &definition.UpdatedAt)
+	definition.CreatedBy = definition.UpdatedBy
+	return definition, err
 }
 
-// Usun kasuje definicje. Historia przebiegow zostaje.
-func (s *Store) Usun(ctx context.Context, hostID, nazwa string) error {
+// Delete removes a definition. The history of runs stays.
+func (s *Store) Delete(ctx context.Context, hostID, name string) error {
 	znacznik, err := s.pool.Exec(ctx,
-		`delete from backup_definitions where host_id = $1 and name = $2`, hostID, nazwa)
+		`delete from backup_definitions where host_id = $1 and name = $2`, hostID, name)
 	if err != nil {
 		return err
 	}
 	if znacznik.RowsAffected() == 0 {
-		return ErrNieZnaleziono
+		return ErrNotFound
 	}
 	return nil
 }
 
-// ZapiszPrzebieg dopisuje wynik operacji do historii.
-func (s *Store) ZapiszPrzebieg(ctx context.Context, q wykonawca, przebieg Przebieg) error {
+// RecordRun appends the result of an operation to the history.
+func (s *Store) RecordRun(ctx context.Context, q executor, run Run) error {
 	const query = `
 		insert into backup_runs (host_id, definition, kind, job_id, outcome, snapshot_id,
 		                         bytes_added, total_bytes, files_new, duration_seconds,
 		                         snapshots, repository_size, last_success_at, message, started_by)
 		values ($1, $2, $3, nullif($4, '')::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
-	_, err := q.Exec(ctx, query, przebieg.HostID, przebieg.Definition, przebieg.Kind,
-		przebieg.JobID, przebieg.Outcome, przebieg.SnapshotID, przebieg.BytesAdded,
-		przebieg.TotalBytes, przebieg.FilesNew, przebieg.DurationSeconds, przebieg.Snapshots,
-		przebieg.RepositorySize, przebieg.LastSuccessAt, przebieg.Message, przebieg.StartedBy)
+	_, err := q.Exec(ctx, query, run.HostID, run.Definition, run.Kind,
+		run.JobID, run.Outcome, run.SnapshotID, run.BytesAdded,
+		run.TotalBytes, run.FilesNew, run.DurationSeconds, run.Snapshots,
+		run.RepositorySize, run.LastSuccessAt, run.Message, run.StartedBy)
 	return err
 }
 
@@ -212,35 +214,35 @@ const kolumnyPrzebiegu = `host_id::text, definition, kind, coalesce(job_id::text
 	snapshot_id, bytes_added, total_bytes, files_new, duration_seconds, snapshots,
 	repository_size, last_success_at, message, started_by, recorded_at`
 
-// Przebiegi zwraca historie operacji hosta, od najnowszej.
-func (s *Store) Przebiegi(ctx context.Context, hostID, definicja string, limit int) ([]Przebieg, error) {
+// Runs returns the history of the host's operations, newest first.
+func (s *Store) Runs(ctx context.Context, hostID, definition string, limit int) ([]Run, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	rows, err := s.pool.Query(ctx, `select `+kolumnyPrzebiegu+`
 		from backup_runs where host_id = $1 and ($2 = '' or definition = $2)
-		order by recorded_at desc limit $3`, hostID, definicja, limit)
+		order by recorded_at desc limit $3`, hostID, definition, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var wynik []Przebieg
+	var result []Run
 	for rows.Next() {
-		przebieg, err := czytajPrzebieg(rows)
+		run, err := readRun(rows)
 		if err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, przebieg)
+		result = append(result, run)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-// Ostatnie zwraca najnowszy przebieg kazdego rodzaju dla kazdej definicji.
+// Latest returns the newest run of every kind for every definition.
 //
-// To z niego bierze sie odpowiedz na dwa pytania, ktore operator zadaje
-// najczesciej: kiedy ostatnia kopia sie udala i czy ktos ja kiedykolwiek
-// sprawdzil.
-func (s *Store) Ostatnie(ctx context.Context, hostID string) (map[string]map[string]Przebieg, error) {
+// It is where the answer to the two questions the operator asks most often
+// comes from: when the last copy succeeded and whether anybody has ever
+// verified it.
+func (s *Store) Latest(ctx context.Context, hostID string) (map[string]map[string]Run, error) {
 	rows, err := s.pool.Query(ctx, `select distinct on (definition, kind) `+kolumnyPrzebiegu+`
 		from backup_runs where host_id = $1 and outcome = 'succeeded'
 		order by definition, kind, recorded_at desc`, hostID)
@@ -248,82 +250,82 @@ func (s *Store) Ostatnie(ctx context.Context, hostID string) (map[string]map[str
 		return nil, err
 	}
 	defer rows.Close()
-	wynik := map[string]map[string]Przebieg{}
+	result := map[string]map[string]Run{}
 	for rows.Next() {
-		przebieg, err := czytajPrzebieg(rows)
+		run, err := readRun(rows)
 		if err != nil {
 			return nil, err
 		}
-		if wynik[przebieg.Definition] == nil {
-			wynik[przebieg.Definition] = map[string]Przebieg{}
+		if result[run.Definition] == nil {
+			result[run.Definition] = map[string]Run{}
 		}
-		wynik[przebieg.Definition][przebieg.Kind] = przebieg
+		result[run.Definition][run.Kind] = run
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-// OstatnieWeFlocie zwraca najnowszy udany przebieg danego rodzaju dla kazdego
-// hosta i kazdej definicji.
-func (s *Store) OstatnieWeFlocie(ctx context.Context, hostIDs []string, rodzaj string) ([]Przebieg, error) {
+// LatestInFleet returns the newest successful run of a given kind for every
+// host and every definition.
+func (s *Store) LatestInFleet(ctx context.Context, hostIDs []string, kind string) ([]Run, error) {
 	if len(hostIDs) == 0 {
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `select distinct on (host_id, definition) `+kolumnyPrzebiegu+`
 		from backup_runs where host_id = any($1) and kind = $2 and outcome = 'succeeded'
-		order by host_id, definition, recorded_at desc`, hostIDs, rodzaj)
+		order by host_id, definition, recorded_at desc`, hostIDs, kind)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var wynik []Przebieg
+	var result []Run
 	for rows.Next() {
-		przebieg, err := czytajPrzebieg(rows)
+		run, err := readRun(rows)
 		if err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, przebieg)
+		result = append(result, run)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-// DefinicjeFloty zwraca definicje wielu hostow naraz.
-func (s *Store) DefinicjeFloty(ctx context.Context, hostIDs []string) ([]Definicja, error) {
+// FleetDefinitions returns the definitions of many hosts at once.
+func (s *Store) FleetDefinitions(ctx context.Context, hostIDs []string) ([]Definition, error) {
 	if len(hostIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `select `+koluminyDefinicji+`
+	rows, err := s.pool.Query(ctx, `select `+definitionColumns+`
 		from backup_definitions where host_id = any($1) order by host_id, name`, hostIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var wynik []Definicja
+	var result []Definition
 	for rows.Next() {
-		definicja, err := czytajDefinicje(rows)
+		definition, err := readDefinition(rows)
 		if err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, definicja)
+		result = append(result, definition)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-func czytajPrzebieg(rows pgx.Rows) (Przebieg, error) {
-	var przebieg Przebieg
-	if err := rows.Scan(&przebieg.HostID, &przebieg.Definition, &przebieg.Kind,
-		&przebieg.JobID, &przebieg.Outcome, &przebieg.SnapshotID, &przebieg.BytesAdded,
-		&przebieg.TotalBytes, &przebieg.FilesNew, &przebieg.DurationSeconds,
-		&przebieg.Snapshots, &przebieg.RepositorySize, &przebieg.LastSuccessAt,
-		&przebieg.Message, &przebieg.StartedBy, &przebieg.RecordedAt); err != nil {
-		return Przebieg{}, err
+func readRun(rows pgx.Rows) (Run, error) {
+	var run Run
+	if err := rows.Scan(&run.HostID, &run.Definition, &run.Kind,
+		&run.JobID, &run.Outcome, &run.SnapshotID, &run.BytesAdded,
+		&run.TotalBytes, &run.FilesNew, &run.DurationSeconds,
+		&run.Snapshots, &run.RepositorySize, &run.LastSuccessAt,
+		&run.Message, &run.StartedBy, &run.RecordedAt); err != nil {
+		return Run{}, err
 	}
-	return przebieg, nil
+	return run, nil
 }
 
-// niepustaLista zamienia brak listy na liste pusta.
-func niepustaLista(wartosci []string) []string {
-	if wartosci == nil {
+// nonNilList turns a missing list into an empty list.
+func nonNilList(values []string) []string {
+	if values == nil {
 		return []string{}
 	}
-	return wartosci
+	return values
 }

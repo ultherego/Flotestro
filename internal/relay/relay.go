@@ -252,7 +252,7 @@ func (r *Relay) Ping(ctx context.Context,
 
 // Connect przekazuje sesje agenta do centrali.
 //
-// Tozsamosc hosta pochodzi z certyfikatu agenta zweryfikowanego w uscisku TLS
+// Identity hosta pochodzi z certyfikatu agenta zweryfikowanego w uscisku TLS
 // po stronie relaya i jest doklejana do polaczenia w gore. Relay nie przeglada
 // tresci zadan; jego rola konczy sie na przekazaniu i zbuforowaniu.
 func (r *Relay) Connect(ctx context.Context,

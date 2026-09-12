@@ -1,5 +1,5 @@
-// Package scheduler pobiera zatwierdzone zadania z kolejki i dostarcza je
-// agentom. Nie podejmuje decyzji biznesowych poza limitami wykonania.
+// Package scheduler takes approved tasks from the queue and delivers them to
+// the agents. It takes no business decisions beyond the execution limits.
 package scheduler
 
 import (
@@ -22,38 +22,38 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// EnrollmentCredentials wystawia jednorazowe poswiadczenie dolaczenia hosta
-// do domeny. Poswiadczenie powstaje w chwili wysylki i nie jest przechowywane
-// w bazie razem z zadaniem.
+// EnrollmentCredentials issues the single-use credential for joining a host
+// to a domain. The credential comes into being at send time and is not stored
+// in the database together with the task.
 type EnrollmentCredentials interface {
 	EnsureHostWithOTP(ctx context.Context, fqdn string) (string, error)
 }
 
-// Options konfiguruje petle schedulera.
+// Options configures the scheduler's loop.
 type Options struct {
 	GatewayID string
-	// Interval jest podstawowym odstepem miedzy przebiegami. Okresowy skan
-	// gwarantuje postep nawet wtedy, gdy powiadomienie zaginie.
+	// Interval is the basic gap between passes. A periodic scan guarantees
+	// progress even when a notification is lost.
 	Interval time.Duration
-	// LeaseDuration musi byc dluzszy niz najdluzsza operacja, inaczej lease
-	// wygasnie w trakcie poprawnego wykonania.
+	// LeaseDuration has to be longer than the longest operation, otherwise
+	// the lease expires during a correct execution.
 	LeaseDuration time.Duration
-	// BatchSize ogranicza liczbe zadan pobieranych w jednym przebiegu.
+	// BatchSize bounds the number of tasks taken in one pass.
 	BatchSize int
-	// SendTimeout ogranicza czekanie na przyjecie zadania przez sesje.
+	// SendTimeout bounds the wait for a session to accept a task.
 	SendTimeout time.Duration
 }
 
-// SecretLeases wystawia krotkie dzierzawy na sekrety wskazane w zadaniu.
+// SecretLeases issues short leases for the secrets named in a task.
 //
-// Interfejs zamiast konkretnego magazynu: scheduler ma wystawic prawo do
-// pobrania, a nie wiedziec, jak sekrety sa przechowywane.
+// An interface instead of a concrete store: the scheduler is to issue the
+// right to fetch rather than know how the secrets are kept.
 type SecretLeases interface {
 	Issue(ctx context.Context, name string, version int,
-		jobID, hostID string, okno time.Duration) (*secrets.Lease, error)
+		jobID, hostID string, window time.Duration) (*secrets.Lease, error)
 }
 
-// Scheduler laczy kolejke zadan z aktywnymi sesjami agentow.
+// Scheduler joins the task queue with the active agent sessions.
 type Scheduler struct {
 	store       *jobs.Store
 	registry    *gateway.Registry
@@ -64,9 +64,9 @@ type Scheduler struct {
 	options     Options
 }
 
-// SetSecrets podlacza magazyn sekretow. Bez niego zadanie wskazujace sekret
-// nie zostanie dostarczone: host dostalby odnosnik, po ktory nie ma jak
-// siegnac, i operacja padlaby dopiero na hoscie.
+// SetSecrets attaches the secret store. Without it a task naming a secret
+// will not be delivered: the host would get a reference it has no way of
+// following, and the operation would fail only on the host.
 func (s *Scheduler) SetSecrets(leases SecretLeases) { s.secrets = leases }
 
 func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder,
@@ -87,7 +87,7 @@ func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder
 		credentials: credentials, log: log, options: options}
 }
 
-// Run utrzymuje petle dostarczania do zamkniecia kontekstu.
+// Run keeps the delivery loop going until the context is closed.
 func (s *Scheduler) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.options.Interval)
 	defer ticker.Stop()
@@ -107,18 +107,19 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-// housekeep zwraca do kolejki zadania po wygaslym lease i konczy zadania
-// po TTL. Bez tego zadanie utracone razem z gatewayem zostaloby na zawsze.
+// housekeep returns tasks with an expired lease to the queue and ends tasks
+// that passed their TTL. Without it a task lost together with a gateway would
+// stay forever.
 func (s *Scheduler) housekeep(ctx context.Context) {
 	if count, err := s.store.ReclaimExpiredLeases(ctx); err != nil {
-		s.log.Error("nie odzyskano wygaslych lease", "err", err)
+		s.log.Error("the expired leases were not reclaimed", "err", err)
 	} else if count > 0 {
-		s.log.Warn("zadania wrocily do kolejki po wygasnieciu lease", "liczba", count)
+		s.log.Warn("tasks went back to the queue after their lease expired", "count", count)
 	}
 	if count, err := s.store.ExpireOverdue(ctx); err != nil {
-		s.log.Error("nie oznaczono zadan po TTL", "err", err)
+		s.log.Error("the tasks past their TTL were not marked", "err", err)
 	} else if count > 0 {
-		s.log.Info("zadania wygasly przed uruchomieniem", "liczba", count)
+		s.log.Info("tasks expired before they started", "count", count)
 	}
 }
 
@@ -130,7 +131,7 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 
 	leased, err := s.store.Lease(ctx, s.options.GatewayID, hosts, s.options.BatchSize, s.options.LeaseDuration)
 	if err != nil {
-		s.log.Error("nie pobrano zadan z kolejki", "err", err)
+		s.log.Error("the tasks were not taken from the queue", "err", err)
 		return
 	}
 	for _, item := range leased {
@@ -141,7 +142,7 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	envelope, err := s.buildEnvelopeFor(ctx, item)
 	if err != nil {
-		s.log.Error("nie zbudowano koperty zadania", "job_id", item.Job.ID, "err", err)
+		s.log.Error("the task envelope was not built", "job_id", item.Job.ID, "err", err)
 		_ = s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "invalid_envelope")
 		return
 	}
@@ -150,18 +151,18 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 		&agentv1.ServerMessage{Payload: &agentv1.ServerMessage_Task{Task: envelope}},
 		s.options.SendTimeout)
 	if err != nil {
-		// Host rozlaczyl sie miedzy pobraniem a wysylka. Zadanie wraca do
-		// kolejki i zostanie dostarczone przy nastepnym polaczeniu.
-		s.log.Info("nie dostarczono zadania, powrot do kolejki",
-			"job_id", item.Job.ID, "host_id", item.Job.HostID, "powod", err)
+		// The host disconnected between the fetch and the send. The task goes
+		// back to the queue and will be delivered on the next connection.
+		s.log.Info("the task was not delivered, going back to the queue",
+			"job_id", item.Job.ID, "host_id", item.Job.HostID, "reason", err)
 		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, err.Error()); releaseErr != nil {
-			s.log.Error("nie zwrocono zadania do kolejki", "job_id", item.Job.ID, "err", releaseErr)
+			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
 		}
 		return
 	}
 
 	if err := s.store.MarkDispatched(ctx, item.Job.ID, item.AttemptID, sessionID); err != nil {
-		s.log.Error("nie odnotowano dostarczenia", "job_id", item.Job.ID, "err", err)
+		s.log.Error("the delivery was not recorded", "job_id", item.Job.ID, "err", err)
 		return
 	}
 
@@ -174,23 +175,23 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 			"action_type": item.Job.ActionType, "session_id": sessionID,
 		},
 	})
-	s.log.Info("zadanie dostarczone",
+	s.log.Info("the task was delivered",
 		"job_id", item.Job.ID, "host_id", item.Job.HostID,
 		"action", item.Job.ActionType, "attempt", item.Attempt)
 }
 
-// buildEnvelopeFor buduje koperte i uzupelnia ja o poswiadczenia, ktore
-// celowo nie sa przechowywane w bazie.
+// buildEnvelopeFor builds the envelope and fills in the credentials that are
+// deliberately not stored in the database.
 func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	envelope, err := buildEnvelope(item)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sekrety wskazane w zadaniu dostaja dzierzawy dokladnie w chwili
-	// dostarczenia: krotkie okno zaczyna sie wtedy, gdy host zaczyna prace,
-	// a nie wtedy, gdy operator klikal.
-	if err := s.wystawDzierzawy(ctx, item); err != nil {
+	// The secrets named in the task get their leases exactly at delivery
+	// time: the short window starts when the host starts working rather than
+	// when the operator clicked.
+	if err := s.issueLeases(ctx, item); err != nil {
 		return nil, err
 	}
 
@@ -199,15 +200,15 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 		return envelope, nil
 	}
 	if s.credentials == nil {
-		return nil, errUnknownAction("brak zrodla poswiadczen dolaczenia do domeny")
+		return nil, errUnknownAction("there is no source of domain join credentials")
 	}
 
 	hostname := enroll.DomainEnroll.GetHostname()
 	if hostname == "" {
-		return nil, errUnknownAction("dolaczenie wymaga nazwy FQDN hosta")
+		return nil, errUnknownAction("joining requires the host's FQDN")
 	}
-	// Haslo powstaje teraz i jest wazne do pierwszego uzycia; nie trafia
-	// do bazy ani do audytu.
+	// The password comes into being now and is valid until its first use; it
+	// reaches neither the database nor the audit trail.
 	password, err := s.credentials.EnsureHostWithOTP(ctx, hostname)
 	if err != nil {
 		return nil, err
@@ -216,46 +217,48 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 	return envelope, nil
 }
 
-// wystawDzierzawy zaklada prawo do pobrania sekretow tego zadania.
+// issueLeases creates the right to fetch this task's secrets.
 //
-// Wersje ustala magazyn w tej chwili: zadanie zlecone wobec wersji biezacej
-// dostanie te, ktora jest biezaca przy dostarczeniu - i tylko ona bedzie
-// wydana, takze gdy w trakcie powstanie nastepna.
-func (s *Scheduler) wystawDzierzawy(ctx context.Context, item jobs.LeasedJob) error {
+// The store fixes the version at this moment: a task ordered against the
+// current version gets the one that is current at delivery - and only that
+// one will be issued, even if another comes into being in the meantime.
+func (s *Scheduler) issueLeases(ctx context.Context, item jobs.LeasedJob) error {
 	var payload opspec.Payload
 	if err := json.Unmarshal(item.Job.Payload, &payload); err != nil {
 		return err
 	}
-	odnosniki := payload.Secrets()
-	if len(odnosniki) == 0 {
+	references := payload.Secrets()
+	if len(references) == 0 {
 		return nil
 	}
 	if s.secrets == nil {
-		return errUnknownAction("ten panel nie ma magazynu sekretow")
+		return errUnknownAction("this panel has no secret store")
 	}
-	for _, odnosnik := range odnosniki {
-		dzierzawa, err := s.secrets.Issue(ctx, odnosnik.Name, odnosnik.Version,
+	for _, reference := range references {
+		lease, err := s.secrets.Issue(ctx, reference.Name, reference.Version,
 			item.Job.ID, item.Job.HostID, 0)
 		if err != nil {
 			return err
 		}
-		// Audyt notuje fakt wydania prawa, nazwe i wersje - nigdy wartosc.
+		// The audit trail records the fact that the right was issued, the
+		// name and the version - never the value.
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorSystem, ActorID: s.options.GatewayID,
-			Action: "secret.lease", TargetType: "secret", TargetID: odnosnik.Name,
+			Action: "secret.lease", TargetType: "secret", TargetID: reference.Name,
 			RequestID: item.Job.RequestID, Outcome: audit.OutcomeSuccess,
 			Detail: map[string]any{
 				"job_id": item.Job.ID, "host_id": item.Job.HostID,
-				"version": dzierzawa.Version, "expires_at": dzierzawa.ExpiresAt,
+				"version": lease.Version, "expires_at": lease.ExpiresAt,
 			},
 		})
 	}
 	return nil
 }
 
-// buildEnvelope zamienia zadanie z bazy na koperte protokolu agenta.
-// task_id wskazuje konkretna probe, a idempotency_key cala operacje - dzieki
-// temu ponowne dostarczenie tej samej operacji zwraca poprzedni wynik.
+// buildEnvelope turns a task from the database into an envelope of the agent
+// protocol. task_id names one specific attempt and idempotency_key the whole
+// operation - thanks to that delivering the same operation again returns the
+// previous result.
 func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	var payload opspec.Payload
 	if err := json.Unmarshal(item.Job.Payload, &payload); err != nil {
@@ -318,7 +321,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		if payload.PackageUpgrade.PlanHash != "" {
 			hash, err := hex.DecodeString(payload.PackageUpgrade.PlanHash)
 			if err != nil {
-				return nil, fmt.Errorf("nieprawidlowy hash planu: %w", err)
+				return nil, fmt.Errorf("invalid plan hash: %w", err)
 			}
 			request.PlanHash = hash
 		}
@@ -376,20 +379,21 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		envelope.Action = &agentv1.TaskEnvelope_DockerRead{DockerRead: &agentv1.DockerRead{}}
 
 	case opspec.ActionDockerEvents:
-		// Okno jest opcjonalne: brak payloadu znaczy domyslne okno modulu.
-		// Wartosci ida do koperty w calosci, bo hash planu liczy sie z nich -
+		// The window is optional: no payload means the module's default
+		// window. The values go into the envelope in full, because the plan
+		// hash is computed from them -
 		// pominiete pole daloby na hoscie inny plan niz w panelu.
-		zdarzenia := &agentv1.ReadDockerEvents{}
+		events := &agentv1.ReadDockerEvents{}
 		if payload.DockerEvents != nil {
-			zdarzenia.SinceSeconds = uint32(payload.DockerEvents.SinceSeconds)
-			zdarzenia.FollowSeconds = uint32(payload.DockerEvents.FollowSeconds)
-			zdarzenia.Types = payload.DockerEvents.Types
-			zdarzenia.MaxEvents = uint32(payload.DockerEvents.MaxEvents)
+			events.SinceSeconds = uint32(payload.DockerEvents.SinceSeconds)
+			events.FollowSeconds = uint32(payload.DockerEvents.FollowSeconds)
+			events.Types = payload.DockerEvents.Types
+			events.MaxEvents = uint32(payload.DockerEvents.MaxEvents)
 		}
-		envelope.Action = &agentv1.TaskEnvelope_ReadDockerEvents{ReadDockerEvents: zdarzenia}
+		envelope.Action = &agentv1.TaskEnvelope_ReadDockerEvents{ReadDockerEvents: events}
 
 	case opspec.ActionInventoryRefresh:
-		// Zakres jest opcjonalny: brak payloadu znaczy caly inwentarz.
+		// The scope is optional: no payload means the whole inventory.
 		var moduly []string
 		if payload.Inventory != nil {
 			moduly = payload.Inventory.Modules
@@ -399,16 +403,16 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
-		operacja := agentv1.PackageLifecycle_OPERATION_INSTALL
+		operation := agentv1.PackageLifecycle_OPERATION_INSTALL
 		switch action {
 		case opspec.ActionPackageRemove:
-			operacja = agentv1.PackageLifecycle_OPERATION_REMOVE
+			operation = agentv1.PackageLifecycle_OPERATION_REMOVE
 		case opspec.ActionPackageHoldSet:
-			operacja = agentv1.PackageLifecycle_OPERATION_HOLD
+			operation = agentv1.PackageLifecycle_OPERATION_HOLD
 		}
 		envelope.Action = &agentv1.TaskEnvelope_PackageLifecycle{
 			PackageLifecycle: &agentv1.PackageLifecycle{
-				Operation:        operacja,
+				Operation:        operation,
 				Packages:         payload.PackageChange.Packages,
 				ExpectedRemovals: payload.PackageChange.ExpectedRemovals,
 				Hold:             payload.PackageChange.Hold,
@@ -418,53 +422,55 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionFilePlan, opspec.ActionFileRead, opspec.ActionFileEnsure,
 		opspec.ActionFileRemove, opspec.ActionFileRollback:
-		operacja := agentv1.FileAction_OPERATION_LIST
+		operation := agentv1.FileAction_OPERATION_LIST
 		switch action {
 		case opspec.ActionFileRead:
-			operacja = agentv1.FileAction_OPERATION_READ
+			operation = agentv1.FileAction_OPERATION_READ
 		case opspec.ActionFileEnsure:
-			operacja = agentv1.FileAction_OPERATION_ENSURE
+			operation = agentv1.FileAction_OPERATION_ENSURE
 		case opspec.ActionFileRollback:
-			operacja = agentv1.FileAction_OPERATION_ROLLBACK
+			operation = agentv1.FileAction_OPERATION_ROLLBACK
 		case opspec.ActionFileRemove:
-			operacja = agentv1.FileAction_OPERATION_REMOVE
+			operation = agentv1.FileAction_OPERATION_REMOVE
 		case opspec.ActionFilePlan:
-			// Plan bez sciezki jest odczytem stanu wszystkich plikow panelu -
-			// tak dziala zakladka hosta. Plan ze sciezka liczy roznice dla tego
-			// jednego pliku i to jest faza planowania kampanii.
+			// A plan without a path is a read of the state of every file the
+			// panel manages - that is how the host tab works. A plan with a
+			// path computes the difference for that one file, and that is the
+			// planning phase of a campaign.
 			if payload.File != nil && strings.TrimSpace(payload.File.Path) != "" {
-				operacja = agentv1.FileAction_OPERATION_PLAN
+				operation = agentv1.FileAction_OPERATION_PLAN
 			}
 		}
-		plik := &agentv1.FileAction{Operation: operacja}
+		file := &agentv1.FileAction{Operation: operation}
 		if payload.File != nil {
-			plik.Path = payload.File.Path
-			plik.Content = []byte(payload.File.Content)
-			// Koperta niesie odnosnik, nie wartosc: host siegnie po tresc
-			// osobnym wywolaniem, gdy zacznie operacje.
+			file.Path = payload.File.Path
+			file.Content = []byte(payload.File.Content)
+			// The envelope carries a reference rather than a value: the host
+			// fetches the content with a separate call when it starts the
+			// operation.
 			if !payload.File.ContentSecret.Empty() {
-				plik.ContentSecret = &agentv1.SecretRef{
+				file.ContentSecret = &agentv1.SecretRef{
 					Name:    payload.File.ContentSecret.Name,
 					Version: uint32(payload.File.ContentSecret.Version),
 				}
 			}
-			plik.Mode = payload.File.Mode
-			plik.Owner = payload.File.Owner
-			plik.Group = payload.File.Group
-			plik.ExpectedSha256 = payload.File.ExpectedSHA256
-			plik.Validator = payload.File.Validator
+			file.Mode = payload.File.Mode
+			file.Owner = payload.File.Owner
+			file.Group = payload.File.Group
+			file.ExpectedSha256 = payload.File.ExpectedSHA256
+			file.Validator = payload.File.Validator
 		}
-		envelope.Action = &agentv1.TaskEnvelope_File{File: plik}
+		envelope.Action = &agentv1.TaskEnvelope_File{File: file}
 
 	case opspec.ActionSecurityScan, opspec.ActionSELinuxModeSet, opspec.ActionAuditRulesReload:
-		operacja := agentv1.SecurityAction_OPERATION_SCAN
+		operation := agentv1.SecurityAction_OPERATION_SCAN
 		switch action {
 		case opspec.ActionSELinuxModeSet:
-			operacja = agentv1.SecurityAction_OPERATION_SELINUX_MODE
+			operation = agentv1.SecurityAction_OPERATION_SELINUX_MODE
 		case opspec.ActionAuditRulesReload:
-			operacja = agentv1.SecurityAction_OPERATION_AUDIT_RELOAD
+			operation = agentv1.SecurityAction_OPERATION_AUDIT_RELOAD
 		}
-		ochrona := &agentv1.SecurityAction{Operation: operacja}
+		ochrona := &agentv1.SecurityAction{Operation: operation}
 		if payload.Security != nil {
 			ochrona.Mode = payload.Security.Mode
 		}
@@ -474,140 +480,142 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew,
 		opspec.ActionCertificateTrustPlan, opspec.ActionCertificateTrustEnsure,
 		opspec.ActionCertificateTrustRemove:
-		operacja := agentv1.CertificateAction_OPERATION_SCAN
+		operation := agentv1.CertificateAction_OPERATION_SCAN
 		switch action {
 		case opspec.ActionCertificatePlan:
-			operacja = agentv1.CertificateAction_OPERATION_PLAN
+			operation = agentv1.CertificateAction_OPERATION_PLAN
 		case opspec.ActionCertificateTrustPlan:
-			operacja = agentv1.CertificateAction_OPERATION_TRUST_PLAN
+			operation = agentv1.CertificateAction_OPERATION_TRUST_PLAN
 		case opspec.ActionCertificateTrustEnsure:
-			operacja = agentv1.CertificateAction_OPERATION_TRUST_ENSURE
+			operation = agentv1.CertificateAction_OPERATION_TRUST_ENSURE
 		case opspec.ActionCertificateTrustRemove:
-			operacja = agentv1.CertificateAction_OPERATION_TRUST_REMOVE
+			operation = agentv1.CertificateAction_OPERATION_TRUST_REMOVE
 		case opspec.ActionCertificateDeploy:
-			operacja = agentv1.CertificateAction_OPERATION_DEPLOY
+			operation = agentv1.CertificateAction_OPERATION_DEPLOY
 		case opspec.ActionCertificateRenew:
-			operacja = agentv1.CertificateAction_OPERATION_RENEW
+			operation = agentv1.CertificateAction_OPERATION_RENEW
 		}
-		certyfikat := &agentv1.CertificateAction{Operation: operacja}
+		certificate := &agentv1.CertificateAction{Operation: operation}
 		if payload.Certificate != nil {
-			for _, cel := range payload.Certificate.Targets {
-				certyfikat.Targets = append(certyfikat.Targets, &agentv1.CertificateTarget{
-					Path: cel.Path, KeyPath: cel.KeyPath, Service: cel.Service,
+			for _, target := range payload.Certificate.Targets {
+				certificate.Targets = append(certificate.Targets, &agentv1.CertificateTarget{
+					Path: target.Path, KeyPath: target.KeyPath, Service: target.Service,
 				})
 			}
-			certyfikat.Path = payload.Certificate.Path
-			certyfikat.KeyPath = payload.Certificate.KeyPath
-			certyfikat.Certificate = payload.Certificate.Certificate
-			// Koperta niesie odnosnik do klucza, nie klucz: host siegnie po
-			// wartosc osobnym wywolaniem, gdy zacznie operacje.
+			certificate.Path = payload.Certificate.Path
+			certificate.KeyPath = payload.Certificate.KeyPath
+			certificate.Certificate = payload.Certificate.Certificate
+			// The envelope carries a reference to the key rather than the key
+			// itself: the host fetches
+			// value osobnym wywolaniem, gdy zacznie operacje.
 			if !payload.Certificate.KeySecret.Empty() {
-				certyfikat.KeySecret = &agentv1.SecretRef{
+				certificate.KeySecret = &agentv1.SecretRef{
 					Name:    payload.Certificate.KeySecret.Name,
 					Version: uint32(payload.Certificate.KeySecret.Version),
 				}
 			}
-			certyfikat.Owner = payload.Certificate.Owner
-			certyfikat.Group = payload.Certificate.Group
-			certyfikat.Mode = payload.Certificate.Mode
-			certyfikat.KeyMode = payload.Certificate.KeyMode
-			certyfikat.ReloadUnit = payload.Certificate.ReloadUnit
-			certyfikat.ProbeTarget = payload.Certificate.ProbeTarget
-			certyfikat.Request = payload.Certificate.Request
-			certyfikat.PlanHash = payload.Certificate.PlanHash
-			certyfikat.AnchorId = payload.Certificate.AnchorID
+			certificate.Owner = payload.Certificate.Owner
+			certificate.Group = payload.Certificate.Group
+			certificate.Mode = payload.Certificate.Mode
+			certificate.KeyMode = payload.Certificate.KeyMode
+			certificate.ReloadUnit = payload.Certificate.ReloadUnit
+			certificate.ProbeTarget = payload.Certificate.ProbeTarget
+			certificate.Request = payload.Certificate.Request
+			certificate.PlanHash = payload.Certificate.PlanHash
+			certificate.AnchorId = payload.Certificate.AnchorID
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certyfikat}
+		envelope.Action = &agentv1.TaskEnvelope_Certificate{Certificate: certificate}
 
 	case opspec.ActionPackageList:
 		envelope.Action = &agentv1.TaskEnvelope_ListPackages{ListPackages: &agentv1.ListPackages{}}
 
 	case opspec.ActionMonitoringProbe:
-		sonda := &agentv1.MonitoringProbe{}
+		probe := &agentv1.MonitoringProbe{}
 		if payload.Monitoring != nil {
-			sonda.Kind = payload.Monitoring.Kind
-			sonda.Target = payload.Monitoring.Target
-			sonda.ExpectStatus = int32(payload.Monitoring.ExpectStatus)
-			sonda.ExpectBody = payload.Monitoring.ExpectBody
-			sonda.TimeoutSeconds = int32(payload.Monitoring.TimeoutSeconds)
+			probe.Kind = payload.Monitoring.Kind
+			probe.Target = payload.Monitoring.Target
+			probe.ExpectStatus = int32(payload.Monitoring.ExpectStatus)
+			probe.ExpectBody = payload.Monitoring.ExpectBody
+			probe.TimeoutSeconds = int32(payload.Monitoring.TimeoutSeconds)
 		}
-		envelope.Action = &agentv1.TaskEnvelope_MonitoringProbe{MonitoringProbe: sonda}
+		envelope.Action = &agentv1.TaskEnvelope_MonitoringProbe{MonitoringProbe: probe}
 
 	case opspec.ActionBackupPlan, opspec.ActionBackupRun,
 		opspec.ActionBackupVerify, opspec.ActionBackupRestore:
-		operacja := agentv1.BackupAction_OPERATION_PLAN
+		operation := agentv1.BackupAction_OPERATION_PLAN
 		switch action {
 		case opspec.ActionBackupRun:
-			operacja = agentv1.BackupAction_OPERATION_RUN
+			operation = agentv1.BackupAction_OPERATION_RUN
 		case opspec.ActionBackupVerify:
-			operacja = agentv1.BackupAction_OPERATION_VERIFY
+			operation = agentv1.BackupAction_OPERATION_VERIFY
 		case opspec.ActionBackupRestore:
-			operacja = agentv1.BackupAction_OPERATION_RESTORE
+			operation = agentv1.BackupAction_OPERATION_RESTORE
 		}
-		kopia := &agentv1.BackupAction{Operation: operacja}
+		backup := &agentv1.BackupAction{Operation: operation}
 		if payload.Backup != nil {
-			kopia.Id = payload.Backup.ID
-			kopia.Tool = payload.Backup.Tool
-			kopia.Repository = payload.Backup.Repository
-			kopia.Paths = payload.Backup.Paths
-			kopia.Excludes = payload.Backup.Excludes
-			kopia.Tags = payload.Backup.Tags
-			kopia.KeepLast = int32(payload.Backup.KeepLast)
-			kopia.KeepDaily = int32(payload.Backup.KeepDaily)
-			kopia.KeepWeekly = int32(payload.Backup.KeepWeekly)
-			kopia.KeepMonthly = int32(payload.Backup.KeepMonthly)
-			kopia.Prune = payload.Backup.Prune
-			kopia.Runbook = payload.Backup.Runbook
-			kopia.Initialize = payload.Backup.Initialize
-			kopia.ReadData = payload.Backup.ReadData
-			kopia.SnapshotId = payload.Backup.SnapshotID
-			kopia.Target = payload.Backup.Target
-			kopia.Include = payload.Backup.Include
-			kopia.Overwrite = payload.Backup.Overwrite
-			kopia.Plan = payload.Backup.Plan
-			kopia.PlanHash = payload.Backup.PlanHash
-			// Koperta niesie odnosniki do poswiadczen, nigdy ich wartosci.
+			backup.Id = payload.Backup.ID
+			backup.Tool = payload.Backup.Tool
+			backup.Repository = payload.Backup.Repository
+			backup.Paths = payload.Backup.Paths
+			backup.Excludes = payload.Backup.Excludes
+			backup.Tags = payload.Backup.Tags
+			backup.KeepLast = int32(payload.Backup.KeepLast)
+			backup.KeepDaily = int32(payload.Backup.KeepDaily)
+			backup.KeepWeekly = int32(payload.Backup.KeepWeekly)
+			backup.KeepMonthly = int32(payload.Backup.KeepMonthly)
+			backup.Prune = payload.Backup.Prune
+			backup.Runbook = payload.Backup.Runbook
+			backup.Initialize = payload.Backup.Initialize
+			backup.ReadData = payload.Backup.ReadData
+			backup.SnapshotId = payload.Backup.SnapshotID
+			backup.Target = payload.Backup.Target
+			backup.Include = payload.Backup.Include
+			backup.Overwrite = payload.Backup.Overwrite
+			backup.Plan = payload.Backup.Plan
+			backup.PlanHash = payload.Backup.PlanHash
+			// Koperta niesie odnosniki do poswiadczen, nigdy ich values.
 			if !payload.Backup.PasswordSecret.Empty() {
-				kopia.PasswordSecret = &agentv1.SecretRef{
+				backup.PasswordSecret = &agentv1.SecretRef{
 					Name:    payload.Backup.PasswordSecret.Name,
 					Version: uint32(payload.Backup.PasswordSecret.Version),
 				}
 			}
 			if len(payload.Backup.EnvSecrets) > 0 {
-				kopia.EnvSecrets = map[string]*agentv1.SecretRef{}
-				for nazwa, odnosnik := range payload.Backup.EnvSecrets {
-					kopia.EnvSecrets[nazwa] = &agentv1.SecretRef{
-						Name: odnosnik.Name, Version: uint32(odnosnik.Version),
+				backup.EnvSecrets = map[string]*agentv1.SecretRef{}
+				for name, reference := range payload.Backup.EnvSecrets {
+					backup.EnvSecrets[name] = &agentv1.SecretRef{
+						Name: reference.Name, Version: uint32(reference.Version),
 					}
 				}
 			}
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Backup{Backup: kopia}
+		envelope.Action = &agentv1.TaskEnvelope_Backup{Backup: backup}
 
 	case opspec.ActionRepositorySet:
-		zrodlo := &agentv1.RepositoryAction{}
+		source := &agentv1.RepositoryAction{}
 		if payload.Repository != nil {
-			zrodlo.Id = payload.Repository.ID
-			zrodlo.Name = payload.Repository.Name
-			zrodlo.Url = payload.Repository.URL
-			zrodlo.Suites = payload.Repository.Suites
-			zrodlo.Components = payload.Repository.Components
-			zrodlo.Architectures = payload.Repository.Architectures
-			zrodlo.Enabled = payload.Repository.Enabled
-			zrodlo.Priority = int32(payload.Repository.Priority)
-			zrodlo.GpgKey = payload.Repository.GPGKey
-			zrodlo.AllowUnsigned = payload.Repository.AllowUnsigned
-			zrodlo.Username = payload.Repository.Username
-			zrodlo.Remove = payload.Repository.Remove
-			// Koperta niesie odnosnik do hasla, nie haslo.
+			source.Id = payload.Repository.ID
+			source.Name = payload.Repository.Name
+			source.Url = payload.Repository.URL
+			source.Suites = payload.Repository.Suites
+			source.Components = payload.Repository.Components
+			source.Architectures = payload.Repository.Architectures
+			source.Enabled = payload.Repository.Enabled
+			source.Priority = int32(payload.Repository.Priority)
+			source.GpgKey = payload.Repository.GPGKey
+			source.AllowUnsigned = payload.Repository.AllowUnsigned
+			source.Username = payload.Repository.Username
+			source.Remove = payload.Repository.Remove
+			// The envelope carries a reference to the password rather than the
+			// password.
 			if !payload.Repository.PasswordSecret.Empty() {
-				zrodlo.PasswordSecret = &agentv1.SecretRef{
+				source.PasswordSecret = &agentv1.SecretRef{
 					Name:    payload.Repository.PasswordSecret.Name,
 					Version: uint32(payload.Repository.PasswordSecret.Version),
 				}
 			}
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Repository{Repository: zrodlo}
+		envelope.Action = &agentv1.TaskEnvelope_Repository{Repository: source}
 
 	case opspec.ActionSystemShutdown:
 		wylaczenie := &agentv1.SystemShutdown{}
@@ -621,155 +629,157 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionTimeSyncTest, opspec.ActionTimePlan, opspec.ActionTimeConfigApply,
 		opspec.ActionTimezoneSet:
-		operacja := agentv1.TimeAction_OPERATION_SYNC_TEST
+		operation := agentv1.TimeAction_OPERATION_SYNC_TEST
 		switch action {
 		case opspec.ActionTimePlan:
-			operacja = agentv1.TimeAction_OPERATION_PLAN
+			operation = agentv1.TimeAction_OPERATION_PLAN
 		case opspec.ActionTimeConfigApply:
-			operacja = agentv1.TimeAction_OPERATION_CONFIG_APPLY
+			operation = agentv1.TimeAction_OPERATION_CONFIG_APPLY
 		case opspec.ActionTimezoneSet:
-			operacja = agentv1.TimeAction_OPERATION_TIMEZONE_SET
+			operation = agentv1.TimeAction_OPERATION_TIMEZONE_SET
 		}
-		zegar := &agentv1.TimeAction{Operation: operacja}
+		clock := &agentv1.TimeAction{Operation: operation}
 		if payload.Time != nil {
-			zegar.Servers = payload.Time.Servers
-			zegar.Probe = payload.Time.Probe
-			zegar.Timezone = payload.Time.Timezone
-			zegar.AllowStep = payload.Time.AllowStep
-			zegar.EnableDropin = payload.Time.EnableDropIn
-			zegar.PlanHash = payload.Time.PlanHash
+			clock.Servers = payload.Time.Servers
+			clock.Probe = payload.Time.Probe
+			clock.Timezone = payload.Time.Timezone
+			clock.AllowStep = payload.Time.AllowStep
+			clock.EnableDropin = payload.Time.EnableDropIn
+			clock.PlanHash = payload.Time.PlanHash
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Time{Time: zegar}
+		envelope.Action = &agentv1.TaskEnvelope_Time{Time: clock}
 
 	case opspec.ActionSysctlPlan, opspec.ActionSysctlEnsure, opspec.ActionKernelModulePlan,
 		opspec.ActionKernelModuleLoad, opspec.ActionKernelModuleBlacklist:
-		operacja := agentv1.KernelAction_OPERATION_READ
+		operation := agentv1.KernelAction_OPERATION_READ
 		switch action {
 		case opspec.ActionKernelModulePlan:
-			operacja = agentv1.KernelAction_OPERATION_MODULE_PLAN
+			operation = agentv1.KernelAction_OPERATION_MODULE_PLAN
 		case opspec.ActionSysctlEnsure:
-			operacja = agentv1.KernelAction_OPERATION_SYSCTL_ENSURE
+			operation = agentv1.KernelAction_OPERATION_SYSCTL_ENSURE
 		case opspec.ActionKernelModuleLoad:
-			operacja = agentv1.KernelAction_OPERATION_MODULE_LOAD
+			operation = agentv1.KernelAction_OPERATION_MODULE_LOAD
 		case opspec.ActionKernelModuleBlacklist:
-			operacja = agentv1.KernelAction_OPERATION_MODULE_BLACKLIST
+			operation = agentv1.KernelAction_OPERATION_MODULE_BLACKLIST
 		}
-		jadro := &agentv1.KernelAction{Operation: operacja}
+		kernel := &agentv1.KernelAction{Operation: operation}
 		if payload.Kernel != nil {
-			jadro.Settings = payload.Kernel.Settings
-			jadro.Keys = payload.Kernel.Keys
-			jadro.Module = payload.Kernel.Module
-			jadro.Blacklist = payload.Kernel.Blacklist
-			jadro.PlanHash = payload.Kernel.PlanHash
+			kernel.Settings = payload.Kernel.Settings
+			kernel.Keys = payload.Kernel.Keys
+			kernel.Module = payload.Kernel.Module
+			kernel.Blacklist = payload.Kernel.Blacklist
+			kernel.PlanHash = payload.Kernel.PlanHash
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Kernel{Kernel: jadro}
+		envelope.Action = &agentv1.TaskEnvelope_Kernel{Kernel: kernel}
 
 	case opspec.ActionSSHConfigPlan, opspec.ActionSSHConfigApply,
 		opspec.ActionSSHHostKeyRotate:
-		operacja := agentv1.SshAction_OPERATION_READ
+		operation := agentv1.SshAction_OPERATION_READ
 		switch action {
 		case opspec.ActionSSHConfigPlan:
-			// Plan bez ustawien jest odczytem stanu (zakladka hosta); plan
+			// A plan without settings is a read of state (the host tab); a plan
 			// z ustawieniami liczy roznice wobec nich - faza planowania.
 			if payload.SSH != nil && payload.SSH.DescribesChange() {
-				operacja = agentv1.SshAction_OPERATION_PLAN
+				operation = agentv1.SshAction_OPERATION_PLAN
 			}
 		case opspec.ActionSSHConfigApply:
-			operacja = agentv1.SshAction_OPERATION_APPLY
+			operation = agentv1.SshAction_OPERATION_APPLY
 		case opspec.ActionSSHHostKeyRotate:
-			operacja = agentv1.SshAction_OPERATION_ROTATE_HOSTKEY
+			operation = agentv1.SshAction_OPERATION_ROTATE_HOSTKEY
 		}
-		serwer := &agentv1.SshAction{Operation: operacja}
+		server := &agentv1.SshAction{Operation: operation}
 		if payload.SSH != nil {
-			serwer.Port = payload.SSH.Port
-			serwer.PermitRootLogin = payload.SSH.PermitRootLogin
-			serwer.PasswordAuthentication = payload.SSH.PasswordAuthentication
-			serwer.PubkeyAuthentication = payload.SSH.PubkeyAuthentication
-			serwer.KbdInteractiveAuthentication = payload.SSH.KbdInteractive
-			serwer.MaxAuthTries = payload.SSH.MaxAuthTries
-			serwer.AllowUsers = payload.SSH.AllowUsers
-			serwer.AllowGroups = payload.SSH.AllowGroups
-			serwer.DenyUsers = payload.SSH.DenyUsers
-			serwer.AllowLockout = payload.SSH.AllowLockout
-			serwer.KeyType = payload.SSH.KeyType
-			serwer.PlanHash = payload.SSH.PlanHash
+			server.Port = payload.SSH.Port
+			server.PermitRootLogin = payload.SSH.PermitRootLogin
+			server.PasswordAuthentication = payload.SSH.PasswordAuthentication
+			server.PubkeyAuthentication = payload.SSH.PubkeyAuthentication
+			server.KbdInteractiveAuthentication = payload.SSH.KbdInteractive
+			server.MaxAuthTries = payload.SSH.MaxAuthTries
+			server.AllowUsers = payload.SSH.AllowUsers
+			server.AllowGroups = payload.SSH.AllowGroups
+			server.DenyUsers = payload.SSH.DenyUsers
+			server.AllowLockout = payload.SSH.AllowLockout
+			server.KeyType = payload.SSH.KeyType
+			server.PlanHash = payload.SSH.PlanHash
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Ssh{Ssh: serwer}
+		envelope.Action = &agentv1.TaskEnvelope_Ssh{Ssh: server}
 
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
 		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
 		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
 		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe:
-		operacja := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
+		operation := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
 		switch action {
 		case opspec.ActionStoragePlan:
-			// Plan bez celu jest odczytem topologii (zakladka hosta); plan
-			// z celem liczy roznice dla jednego montowania - faza planowania
+			// A plan without a target is a read of the topology (the host
+			// tab); a plan with a target computes the difference for one
+			// mount - the planning phase
 			// kampanii.
-			operacja = agentv1.StorageAction_OPERATION_READ
+			operation = agentv1.StorageAction_OPERATION_READ
 			if payload.Storage != nil && strings.TrimSpace(payload.Storage.Target) != "" {
-				operacja = agentv1.StorageAction_OPERATION_MOUNT_PLAN
+				operation = agentv1.StorageAction_OPERATION_MOUNT_PLAN
 			}
 			// Plan nazwany po rodzaju dotyczy urzadzenia: sprawdzenia albo
 			// rozszerzenia filesystemu lub wolumenu.
 			if payload.Storage != nil && payload.Storage.Plan != "" {
-				operacja = agentv1.StorageAction_OPERATION_DEVICE_PLAN
+				operation = agentv1.StorageAction_OPERATION_DEVICE_PLAN
 			}
 		case opspec.ActionMountRemove:
-			operacja = agentv1.StorageAction_OPERATION_MOUNT_REMOVE
+			operation = agentv1.StorageAction_OPERATION_MOUNT_REMOVE
 		case opspec.ActionFilesystemCheck:
-			operacja = agentv1.StorageAction_OPERATION_FS_CHECK
+			operation = agentv1.StorageAction_OPERATION_FS_CHECK
 		case opspec.ActionLVMExtend:
-			operacja = agentv1.StorageAction_OPERATION_LVM_EXTEND
+			operation = agentv1.StorageAction_OPERATION_LVM_EXTEND
 		case opspec.ActionFilesystemResize:
-			operacja = agentv1.StorageAction_OPERATION_FS_RESIZE
+			operation = agentv1.StorageAction_OPERATION_FS_RESIZE
 		case opspec.ActionFilesystemCreate:
-			operacja = agentv1.StorageAction_OPERATION_FS_CREATE
+			operation = agentv1.StorageAction_OPERATION_FS_CREATE
 		case opspec.ActionDiskWipe:
-			operacja = agentv1.StorageAction_OPERATION_DISK_WIPE
+			operation = agentv1.StorageAction_OPERATION_DISK_WIPE
 		}
-		przestrzen := &agentv1.StorageAction{Operation: operacja}
+		storage := &agentv1.StorageAction{Operation: operation}
 		if payload.Storage != nil {
-			przestrzen.Source = payload.Storage.Source
-			przestrzen.Target = payload.Storage.Target
-			przestrzen.FsType = payload.Storage.FSType
-			przestrzen.Options = payload.Storage.Options
-			przestrzen.Persist = payload.Storage.Persist
-			przestrzen.Device = payload.Storage.Device
-			przestrzen.ExpectedUuid = payload.Storage.ExpectedUUID
-			przestrzen.Repair = payload.Storage.Repair
-			przestrzen.ExpectedSerial = payload.Storage.ExpectedSerial
-			przestrzen.ExpectedSizeBytes = payload.Storage.ExpectedSizeBytes
-			przestrzen.Size = payload.Storage.Size
-			przestrzen.Label = payload.Storage.Label
-			przestrzen.Plan = payload.Storage.Plan
-			przestrzen.PlanHash = payload.Storage.PlanHash
+			storage.Source = payload.Storage.Source
+			storage.Target = payload.Storage.Target
+			storage.FsType = payload.Storage.FSType
+			storage.Options = payload.Storage.Options
+			storage.Persist = payload.Storage.Persist
+			storage.Device = payload.Storage.Device
+			storage.ExpectedUuid = payload.Storage.ExpectedUUID
+			storage.Repair = payload.Storage.Repair
+			storage.ExpectedSerial = payload.Storage.ExpectedSerial
+			storage.ExpectedSizeBytes = payload.Storage.ExpectedSizeBytes
+			storage.Size = payload.Storage.Size
+			storage.Label = payload.Storage.Label
+			storage.Plan = payload.Storage.Plan
+			storage.PlanHash = payload.Storage.PlanHash
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Storage{Storage: przestrzen}
+		envelope.Action = &agentv1.TaskEnvelope_Storage{Storage: storage}
 
 	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
 		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
 		opspec.ActionFirewallZoneService, opspec.ActionFirewallRulesetRestore:
-		operacja := agentv1.FirewallAction_OPERATION_RULE_ENSURE
+		operation := agentv1.FirewallAction_OPERATION_RULE_ENSURE
 		switch action {
 		case opspec.ActionFirewallPlan:
-			// Plan bez reguly jest odczytem zestawu (zakladka hosta); plan
-			// z regula liczy roznice dla niej - faza planowania kampanii.
-			operacja = agentv1.FirewallAction_OPERATION_READ
+			// A plan without a rule is a read of the ruleset (the host tab); a
+			// plan with a rule computes the difference for it - the planning
+			// phase of a campaign.
+			operation = agentv1.FirewallAction_OPERATION_READ
 			if payload.Firewall != nil && (strings.TrimSpace(payload.Firewall.RuleID) != "" ||
 				strings.TrimSpace(payload.Firewall.Zone) != "") {
-				operacja = agentv1.FirewallAction_OPERATION_PLAN
+				operation = agentv1.FirewallAction_OPERATION_PLAN
 			}
 		case opspec.ActionFirewallRuleRemove:
-			operacja = agentv1.FirewallAction_OPERATION_RULE_REMOVE
+			operation = agentv1.FirewallAction_OPERATION_RULE_REMOVE
 		case opspec.ActionFirewallZonePort:
-			operacja = agentv1.FirewallAction_OPERATION_ZONE_PORT
+			operation = agentv1.FirewallAction_OPERATION_ZONE_PORT
 		case opspec.ActionFirewallZoneService:
-			operacja = agentv1.FirewallAction_OPERATION_ZONE_SERVICE
+			operation = agentv1.FirewallAction_OPERATION_ZONE_SERVICE
 		case opspec.ActionFirewallRulesetRestore:
-			operacja = agentv1.FirewallAction_OPERATION_RESTORE
+			operation = agentv1.FirewallAction_OPERATION_RESTORE
 		}
-		zapora := &agentv1.FirewallAction{Operation: operacja}
+		zapora := &agentv1.FirewallAction{Operation: operation}
 		if payload.Firewall != nil {
 			zapora.RuleId = payload.Firewall.RuleID
 			zapora.Chain = payload.Firewall.Chain
@@ -790,14 +800,14 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		envelope.Action = &agentv1.TaskEnvelope_Firewall{Firewall: zapora}
 
 	case opspec.ActionDNSResolveTest, opspec.ActionDNSPlan, opspec.ActionDNSHostApply:
-		operacja := agentv1.DnsAction_OPERATION_APPLY
+		operation := agentv1.DnsAction_OPERATION_APPLY
 		switch action {
 		case opspec.ActionDNSResolveTest:
-			operacja = agentv1.DnsAction_OPERATION_RESOLVE_TEST
+			operation = agentv1.DnsAction_OPERATION_RESOLVE_TEST
 		case opspec.ActionDNSPlan:
-			operacja = agentv1.DnsAction_OPERATION_PLAN
+			operation = agentv1.DnsAction_OPERATION_PLAN
 		}
-		resolver := &agentv1.DnsAction{Operation: operacja}
+		resolver := &agentv1.DnsAction{Operation: operation}
 		if payload.DNS != nil {
 			resolver.Interface = payload.DNS.Interface
 			resolver.Servers = payload.DNS.Servers
@@ -812,51 +822,52 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
 		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
 		opspec.ActionNetworkRollback:
-		operacja := agentv1.NetworkAction_OPERATION_APPLY_PROFILE
+		operation := agentv1.NetworkAction_OPERATION_APPLY_PROFILE
 		switch action {
 		case opspec.ActionNetworkPlan:
-			// Plan bez opisu zmiany jest odczytem profili; z opisem zmiany
-			// liczy roznice wobec niej na hoscie.
-			operacja = agentv1.NetworkAction_OPERATION_READ
+			// A plan without a description of the change is a read of the
+			// profiles; with one it computes the difference against it on the
+			// host.
+			operation = agentv1.NetworkAction_OPERATION_READ
 			if payload.Network != nil && payload.Network.DescribesChange() {
-				operacja = agentv1.NetworkAction_OPERATION_PLAN
+				operation = agentv1.NetworkAction_OPERATION_PLAN
 			}
 		case opspec.ActionNetworkMTUSet:
-			operacja = agentv1.NetworkAction_OPERATION_SET_MTU
+			operation = agentv1.NetworkAction_OPERATION_SET_MTU
 		case opspec.ActionNetworkRouteEnsure:
-			operacja = agentv1.NetworkAction_OPERATION_ENSURE_ROUTES
+			operation = agentv1.NetworkAction_OPERATION_ENSURE_ROUTES
 		case opspec.ActionNetworkRollback:
-			operacja = agentv1.NetworkAction_OPERATION_ROLLBACK
+			operation = agentv1.NetworkAction_OPERATION_ROLLBACK
 		}
-		siec := &agentv1.NetworkAction{Operation: operacja}
+		network := &agentv1.NetworkAction{Operation: operation}
 		if payload.Network != nil {
-			siec.Interface = payload.Network.Interface
-			siec.Mtu = payload.Network.MTU
-			siec.Routes = payload.Network.Routes
-			siec.Method = payload.Network.Method
-			siec.Addresses = payload.Network.Addresses
-			siec.Gateway = payload.Network.Gateway
-			siec.Dns = payload.Network.DNS
-			siec.RollbackSeconds = payload.Network.RollbackSeconds
-			siec.RollbackId = payload.Network.RollbackID
-			siec.PlanHash = payload.Network.PlanHash
+			network.Interface = payload.Network.Interface
+			network.Mtu = payload.Network.MTU
+			network.Routes = payload.Network.Routes
+			network.Method = payload.Network.Method
+			network.Addresses = payload.Network.Addresses
+			network.Gateway = payload.Network.Gateway
+			network.Dns = payload.Network.DNS
+			network.RollbackSeconds = payload.Network.RollbackSeconds
+			network.RollbackId = payload.Network.RollbackID
+			network.PlanHash = payload.Network.PlanHash
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Network{Network: siec}
+		envelope.Action = &agentv1.TaskEnvelope_Network{Network: network}
 
 	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
 		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
-		operacja := agentv1.ScheduleAction_OPERATION_ENSURE
+		operation := agentv1.ScheduleAction_OPERATION_ENSURE
 		switch action {
 		case opspec.ActionScheduleDisable:
-			operacja = agentv1.ScheduleAction_OPERATION_DISABLE
+			operation = agentv1.ScheduleAction_OPERATION_DISABLE
 		case opspec.ActionScheduleRemove:
-			operacja = agentv1.ScheduleAction_OPERATION_REMOVE
+			operation = agentv1.ScheduleAction_OPERATION_REMOVE
 		case opspec.ActionScheduleRunNow:
-			operacja = agentv1.ScheduleAction_OPERATION_RUN_NOW
+			operation = agentv1.ScheduleAction_OPERATION_RUN_NOW
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Schedule{
 			Schedule: &agentv1.ScheduleAction{
-				Operation:  operacja,
+				Operation:  operation,
 				Id:         payload.Schedule.ID,
 				Expression: payload.Schedule.Expression,
 				Command:    payload.Schedule.Command,
@@ -917,13 +928,13 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 
 	case opspec.ActionComposePlan, opspec.ActionComposeDeploy:
-		operacja := agentv1.ComposeAction_OPERATION_PLAN
+		operation := agentv1.ComposeAction_OPERATION_PLAN
 		if action == opspec.ActionComposeDeploy {
-			operacja = agentv1.ComposeAction_OPERATION_DEPLOY
+			operation = agentv1.ComposeAction_OPERATION_DEPLOY
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Compose{
 			Compose: &agentv1.ComposeAction{
-				Operation:  operacja,
+				Operation:  operation,
 				Project:    payload.Compose.Project,
 				Manifest:   payload.Compose.Manifest,
 				PlanDigest: payload.Compose.PlanDigest,
@@ -933,7 +944,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
 		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
 		envelope.Action = &agentv1.TaskEnvelope_DockerAction{
-			DockerAction: kopertaDockera(action, payload),
+			DockerAction: dockerEnvelope(action, payload),
 		}
 
 	case opspec.ActionUnitStatus:
@@ -981,8 +992,9 @@ var unitOperations = map[opspec.ActionType]agentv1.UnitAction_Operation{
 	opspec.ActionUnitReload:  agentv1.UnitAction_OPERATION_RELOAD,
 }
 
-// localUserOperations tlumaczy typ operacji na wartosc kontraktu. Mapa jest
-// jawna, wiec dodanie akcji bez odwzorowania nie przechodzi przez testy.
+// localUserOperations translates an operation type into the contract's
+// value. The map is explicit, so adding an action without a mapping does not
+// pass the tests.
 var localUserOperations = map[opspec.ActionType]agentv1.LocalUserAction_Operation{
 	opspec.ActionLocalUserCreate: agentv1.LocalUserAction_OPERATION_CREATE,
 	opspec.ActionLocalUserLock:   agentv1.LocalUserAction_OPERATION_LOCK,
@@ -999,12 +1011,12 @@ func approvalsOf(job jobs.Job) []string {
 
 type unknownActionError string
 
-func (e unknownActionError) Error() string { return "nieznany typ operacji: " + string(e) }
+func (e unknownActionError) Error() string { return "unknown operation type: " + string(e) }
 
 func errUnknownAction(action string) error { return unknownActionError(action) }
 
-// Jitter rozklada start pierwszej petli, zeby restart wielu replik nie
-// wywolal jednoczesnego uderzenia w baze.
+// Jitter spreads the start of the first loop, so that restarting many
+// replicas does not hit the database all at once.
 func Jitter(base time.Duration) time.Duration {
 	if base <= 0 {
 		return 0
@@ -1012,37 +1024,38 @@ func Jitter(base time.Duration) time.Duration {
 	return time.Duration(rand.Int64N(int64(base)))
 }
 
-// kopertaDockera sklada koperte operacji kontenerowej. Kazdy typ operacji ma
-// wlasny payload, wiec tlumaczenie jest jawne, a nie po nazwie pola.
-func kopertaDockera(action opspec.ActionType, payload opspec.Payload) *agentv1.DockerAction {
-	koperta := &agentv1.DockerAction{}
-	if kontener := payload.DockerContainer; kontener != nil {
-		koperta.ContainerId = kontener.ContainerID
-		koperta.ContainerName = kontener.Name
-		koperta.TimeoutSeconds = kontener.TimeoutSeconds
-		koperta.RemoveVolumes = kontener.RemoveVolumes
+// dockerEnvelope builds the envelope of a container operation. Every
+// operation type has its own payload, so the translation is explicit rather
+// than by field name.
+func dockerEnvelope(action opspec.ActionType, payload opspec.Payload) *agentv1.DockerAction {
+	envelope := &agentv1.DockerAction{}
+	if container := payload.DockerContainer; container != nil {
+		envelope.ContainerId = container.ContainerID
+		envelope.ContainerName = container.Name
+		envelope.TimeoutSeconds = container.TimeoutSeconds
+		envelope.RemoveVolumes = container.RemoveVolumes
 	}
-	if obraz := payload.DockerImage; obraz != nil {
-		koperta.ImageReference = obraz.Reference
+	if image := payload.DockerImage; image != nil {
+		envelope.ImageReference = image.Reference
 	}
-	if sprzatanie := payload.DockerPrune; sprzatanie != nil {
-		koperta.ImageIds = sprzatanie.ImageIDs
-		koperta.VolumeNames = sprzatanie.VolumeName
-		koperta.NetworkIds = sprzatanie.NetworkIDs
+	if prune := payload.DockerPrune; prune != nil {
+		envelope.ImageIds = prune.ImageIDs
+		envelope.VolumeNames = prune.VolumeName
+		envelope.NetworkIds = prune.NetworkIDs
 	}
 	switch action {
 	case opspec.ActionDockerStart:
-		koperta.Operation = agentv1.DockerAction_OPERATION_START
+		envelope.Operation = agentv1.DockerAction_OPERATION_START
 	case opspec.ActionDockerStop:
-		koperta.Operation = agentv1.DockerAction_OPERATION_STOP
+		envelope.Operation = agentv1.DockerAction_OPERATION_STOP
 	case opspec.ActionDockerRestart:
-		koperta.Operation = agentv1.DockerAction_OPERATION_RESTART
+		envelope.Operation = agentv1.DockerAction_OPERATION_RESTART
 	case opspec.ActionDockerRemove:
-		koperta.Operation = agentv1.DockerAction_OPERATION_REMOVE
+		envelope.Operation = agentv1.DockerAction_OPERATION_REMOVE
 	case opspec.ActionDockerPull:
-		koperta.Operation = agentv1.DockerAction_OPERATION_PULL_IMAGE
+		envelope.Operation = agentv1.DockerAction_OPERATION_PULL_IMAGE
 	case opspec.ActionDockerPrune:
-		koperta.Operation = agentv1.DockerAction_OPERATION_PRUNE
+		envelope.Operation = agentv1.DockerAction_OPERATION_PRUNE
 	}
-	return koperta
+	return envelope
 }

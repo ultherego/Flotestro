@@ -6,187 +6,187 @@ import (
 	"time"
 )
 
-func TestProgBezwzglednyDzialaOdPierwszegoBledu(t *testing.T) {
-	// Prog bezwzgledny jest po to, zeby zatrzymac kampanie zanim uszkodzi
-	// wiele hostow, wiec nie czeka na statystyke.
+func TestTheAbsoluteThresholdWorksFromTheFirstFailure(t *testing.T) {
+	// The absolute threshold exists to stop a campaign before it damages many
+	// hosts, so it does not wait for statistics.
 	exceeded, reason := ThresholdExceeded(1, 1, 100, 0, 1)
 	if !exceeded {
-		t.Fatal("prog bezwzgledny 1 nie zatrzymal kampanii po pierwszym bledzie")
+		t.Fatal("the absolute threshold of 1 did not stop the campaign after the first failure")
 	}
 	if reason == "" {
-		t.Error("brak opisu powodu zatrzymania")
+		t.Error("no description of the reason for stopping")
 	}
 	if exceeded, _ := ThresholdExceeded(1, 1, 100, 0, 2); exceeded {
-		t.Error("prog 2 zatrzymal kampanie po jednym bledzie")
+		t.Error("the threshold of 2 stopped the campaign after one failure")
 	}
 }
 
-func TestProgProcentowyNieDzialaBezDanych(t *testing.T) {
-	// Bez zakonczonych hostow nie ma z czego liczyc udzialu; liczenie
-	// procentu z zera zatrzymaloby kazda kampanie na starcie.
+func TestThePercentageThresholdDoesNotWorkWithoutData(t *testing.T) {
+	// Without finished hosts there is nothing to compute the share from;
+	// computing a percentage of zero would stop every campaign at the start.
 	if exceeded, _ := ThresholdExceeded(0, 0, 50, 20, 0); exceeded {
-		t.Fatal("prog procentowy zadzialal bez zakonczonych hostow")
+		t.Fatal("the percentage threshold fired without finished hosts")
 	}
 }
 
-func TestProgProcentowyLiczySieOdZakonczonych(t *testing.T) {
-	// 2 bledy na 10 zakonczonych to 20%, czyli prog 20% jest osiagniety,
-	// mimo ze kampania ma 100 celow.
+func TestThePercentageThresholdCountsFromTheFinishedOnes(t *testing.T) {
+	// 2 failures out of 10 finished is 20%, so a threshold of 20% is reached
+	// even though the campaign has 100 targets.
 	exceeded, _ := ThresholdExceeded(2, 10, 100, 20, 0)
 	if !exceeded {
-		t.Fatal("prog 20% nie zadzialal przy 2 bledach na 10 zakonczonych")
+		t.Fatal("the threshold of 20% did not fire at 2 failures out of 10 finished")
 	}
-	// Ten sam wynik liczony od calosci bylby 2%, wiec kampania jechalaby dalej
-	// mimo ze co piaty host padl.
+	// The same result counted against the whole would be 2%, so the campaign
+	// would roll on even though every fifth host had failed.
 	if exceeded, _ := ThresholdExceeded(1, 10, 100, 20, 0); exceeded {
-		t.Error("prog 20% zadzialal przy 10% bledow")
+		t.Error("the threshold of 20% fired at 10% of failures")
 	}
 }
 
-func TestOknoSerwisoweOgraniczaCzas(t *testing.T) {
+func TestTheMaintenanceWindowLimitsTheTime(t *testing.T) {
 	base := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	start := base.Add(time.Hour)
 	end := base.Add(2 * time.Hour)
 
 	if WithinMaintenanceWindow(base, &start, &end) {
-		t.Error("kampania ruszyla przed oknem serwisowym")
+		t.Error("the campaign started before the maintenance window")
 	}
 	if !WithinMaintenanceWindow(base.Add(90*time.Minute), &start, &end) {
-		t.Error("kampania nie ruszyla w oknie serwisowym")
+		t.Error("the campaign did not start inside the maintenance window")
 	}
 	if WithinMaintenanceWindow(base.Add(3*time.Hour), &start, &end) {
-		t.Error("kampania jechala po zamknieciu okna")
+		t.Error("the campaign ran after the window closed")
 	}
-	// Brak okna oznacza brak ograniczenia.
+	// No window means no limitation.
 	if !WithinMaintenanceWindow(base, nil, nil) {
-		t.Error("brak okna zablokowal kampanie")
+		t.Error("the absence of a window blocked the campaign")
 	}
 }
 
-func TestStanKampaniiRozrozniaAktywnoscIKoniec(t *testing.T) {
+func TestTheCampaignStateTellsActivityFromTheEnd(t *testing.T) {
 	for _, state := range []State{StateCanary, StateRunning} {
 		if !state.Active() {
-			t.Errorf("%s powinien byc stanem aktywnym", state)
+			t.Errorf("%s should be an active state", state)
 		}
 		if state.Terminal() {
-			t.Errorf("%s nie jest stanem koncowym", state)
+			t.Errorf("%s is not a final state", state)
 		}
 	}
-	// Wstrzymana kampania nie jest aktywna, ale tez nie jest zakonczona:
-	// czeka na decyzje czlowieka.
+	// A paused campaign is not active, but it is not finished either: it
+	// waits for a human decision.
 	if StatePaused.Active() || StatePaused.Terminal() {
-		t.Error("stan paused zle sklasyfikowany")
+		t.Error("the paused state is classified wrongly")
 	}
 	for _, state := range []State{StateCompleted, StateFailed, StateCanceled} {
 		if !state.Terminal() || state.Active() {
-			t.Errorf("%s powinien byc stanem koncowym", state)
+			t.Errorf("%s should be a final state", state)
 		}
 	}
 }
 
-func TestStanCeluRozrozniaZakonczenie(t *testing.T) {
+func TestTheTargetStateTellsTheEndApart(t *testing.T) {
 	for _, state := range []TargetState{TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled} {
 		if !state.Finished() {
-			t.Errorf("%s powinien konczyc udzial hosta", state)
+			t.Errorf("%s should end the host's participation", state)
 		}
 	}
 	for _, state := range []TargetState{TargetPending, TargetRunning, TargetRebooting, TargetVerifying} {
 		if state.Finished() {
-			t.Errorf("%s nie konczy udzialu hosta", state)
+			t.Errorf("%s does not end the host's participation", state)
 		}
 	}
 }
 
-func TestWalidacjaSpecu(t *testing.T) {
+func TestSpecValidation(t *testing.T) {
 	valid := Spec{Name: "test", WaveSize: 10, MaxConcurrent: 5, RebootPolicy: RebootNever}
 	if err := valid.Validate(); err != nil {
-		t.Fatalf("poprawny opis odrzucony: %v", err)
+		t.Fatalf("a valid description was rejected: %v", err)
 	}
 
 	cases := map[string]func(*Spec){
-		"brak nazwy":          func(s *Spec) { s.Name = "" },
-		"zerowa fala":         func(s *Spec) { s.WaveSize = 0 },
-		"zerowa rownoleglosc": func(s *Spec) { s.MaxConcurrent = 0 },
-		"ujemne canary":       func(s *Spec) { s.CanarySize = -1 },
-		"prog ponad 100%":     func(s *Spec) { s.FailureThresholdPercent = 101 },
-		"nieznana polityka":   func(s *Spec) { s.RebootPolicy = "sometimes" },
+		"no name":              func(s *Spec) { s.Name = "" },
+		"zero wave":            func(s *Spec) { s.WaveSize = 0 },
+		"zero concurrency":     func(s *Spec) { s.MaxConcurrent = 0 },
+		"negative canary":      func(s *Spec) { s.CanarySize = -1 },
+		"threshold above 100%": func(s *Spec) { s.FailureThresholdPercent = 101 },
+		"unknown policy":       func(s *Spec) { s.RebootPolicy = "sometimes" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			spec := valid
 			mutate(&spec)
 			if err := spec.Validate(); err == nil {
-				t.Fatal("nieprawidlowy opis przeszedl walidacje")
+				t.Fatal("an invalid description passed validation")
 			}
 		})
 	}
 
-	t.Run("odwrocone okno serwisowe", func(t *testing.T) {
+	t.Run("reversed maintenance window", func(t *testing.T) {
 		spec := valid
 		start := time.Now().Add(time.Hour)
 		end := time.Now()
 		spec.MaintenanceStart, spec.MaintenanceEnd = &start, &end
 		if err := spec.Validate(); err == nil {
-			t.Fatal("okno konczace sie przed startem przeszlo walidacje")
+			t.Fatal("a window ending before it starts passed validation")
 		}
 	})
 }
 
-// TestOdciskZmieniaSieZKazdaDecyzja pilnuje, po co odcisk istnieje: zgoda ma
-// dotyczyc dokladnie tego, co zatwierdzajacy zobaczyl. Kazda zmiana, ktora
-// przesuwa ryzyko, musi go uniewaznic.
-func TestOdciskZmieniaSieZKazdaDecyzja(t *testing.T) {
-	podstawa := Spec{
+// TestTheFingerprintChangesWithEveryDecision guards what the fingerprint
+// exists for: the consent is to concern exactly what the approver saw. Every
+// change that shifts the risk has to invalidate it.
+func TestTheFingerprintChangesWithEveryDecision(t *testing.T) {
+	base := Spec{
 		Name: "restart", ActionType: "unit.restart",
 		Payload:       json.RawMessage(`{"unit":{"unit":"cron.service"}}`),
 		CanarySize:    1,
 		WaveSize:      5,
 		MaxConcurrent: 2, FailureThresholdPercent: 20, RebootPolicy: RebootNever,
 	}
-	hosty := []TargetHost{{ID: "host-b"}, {ID: "host-a"}}
+	hosts := []TargetHost{{ID: "host-b"}, {ID: "host-a"}}
 
-	odcisk, err := Odcisk(podstawa, hosty)
+	fingerprint, err := Fingerprint(base, hosts)
 	if err != nil {
-		t.Fatalf("odcisk: %v", err)
+		t.Fatalf("fingerprint: %v", err)
 	}
-	if odcisk == "" {
-		t.Fatal("pusty odcisk")
+	if fingerprint == "" {
+		t.Fatal("empty fingerprint")
 	}
 
-	// Kolejnosc hostow w migawce nie jest decyzja.
-	inaczej, err := Odcisk(podstawa, []TargetHost{{ID: "host-a"}, {ID: "host-b"}})
+	// The order of the hosts in the snapshot is not a decision.
+	reordered, err := Fingerprint(base, []TargetHost{{ID: "host-a"}, {ID: "host-b"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inaczej != odcisk {
-		t.Error("kolejnosc hostow zmienila odcisk")
+	if reordered != fingerprint {
+		t.Error("the order of the hosts changed the fingerprint")
 	}
 
-	zmiany := map[string]func(*Spec, *[]TargetHost){
-		"inny host": func(_ *Spec, hosty *[]TargetHost) {
-			*hosty = append(*hosty, TargetHost{ID: "host-c"})
+	changes := map[string]func(*Spec, *[]TargetHost){
+		"another host": func(_ *Spec, hosts *[]TargetHost) {
+			*hosts = append(*hosts, TargetHost{ID: "host-c"})
 		},
-		"inny payload": func(s *Spec, _ *[]TargetHost) {
+		"another payload": func(s *Spec, _ *[]TargetHost) {
 			s.Payload = json.RawMessage(`{"unit":{"unit":"ssh.service"}}`)
 		},
-		"inna operacja":     func(s *Spec, _ *[]TargetHost) { s.ActionType = "unit.stop" },
-		"wiecej rownolegle": func(s *Spec, _ *[]TargetHost) { s.MaxConcurrent = 50 },
-		"wieksza fala":      func(s *Spec, _ *[]TargetHost) { s.WaveSize = 500 },
-		"brak canary":       func(s *Spec, _ *[]TargetHost) { s.CanarySize = 0 },
-		"wyzszy prog":       func(s *Spec, _ *[]TargetHost) { s.FailureThresholdPercent = 100 },
-		"restart hostow":    func(s *Spec, _ *[]TargetHost) { s.RebootPolicy = RebootAlways },
+		"another operation":  func(s *Spec, _ *[]TargetHost) { s.ActionType = "unit.stop" },
+		"more concurrency":   func(s *Spec, _ *[]TargetHost) { s.MaxConcurrent = 50 },
+		"a larger wave":      func(s *Spec, _ *[]TargetHost) { s.WaveSize = 500 },
+		"no canary":          func(s *Spec, _ *[]TargetHost) { s.CanarySize = 0 },
+		"a higher threshold": func(s *Spec, _ *[]TargetHost) { s.FailureThresholdPercent = 100 },
+		"rebooting hosts":    func(s *Spec, _ *[]TargetHost) { s.RebootPolicy = RebootAlways },
 	}
-	for nazwa, zmien := range zmiany {
-		t.Run(nazwa, func(t *testing.T) {
-			zmieniona := podstawa
-			cele := append([]TargetHost(nil), hosty...)
-			zmien(&zmieniona, &cele)
-			inny, err := Odcisk(zmieniona, cele)
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			changed := base
+			targets := append([]TargetHost(nil), hosts...)
+			change(&changed, &targets)
+			other, err := Fingerprint(changed, targets)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if inny == odcisk {
-				t.Error("zmiana nie uniewaznila odcisku zatwierdzenia")
+			if other == fingerprint {
+				t.Error("the change did not invalidate the approval fingerprint")
 			}
 		})
 	}

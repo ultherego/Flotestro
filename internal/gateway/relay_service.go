@@ -91,7 +91,7 @@ func (s *RelayService) ProxyEnroll(ctx context.Context,
 
 // RenewCertificate wymienia CSR relaya na nowy certyfikat.
 //
-// Tozsamosc pochodzi wylacznie z obecnego certyfikatu klienta. Nazwy sieciowe
+// Identity pochodzi wylacznie z obecnego certyfikatu klienta. Nazwy sieciowe
 // pochodza z rejestru, a nie z zadania: gdyby relay mogl je sobie wybrac,
 // odnowienie bylo by droga do wystawienia sie agentom pod cudza nazwa.
 func (s *RelayService) RenewCertificate(ctx context.Context,

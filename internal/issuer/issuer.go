@@ -44,7 +44,7 @@ type Certyfikat struct {
 // potrzebuje: podpis w HSM albo w zdalnej usludze jest wywolaniem sieciowym
 // i musi dac sie przerwac razem z zadaniem, ktore go zamowilo.
 type Wystawca interface {
-	// PodpiszHosta wystawia certyfikat hosta. Tozsamosc nadaje panel:
+	// PodpiszHosta wystawia certyfikat hosta. Identity nadaje panel:
 	// wszystko z wniosku poza kluczem publicznym jest ignorowane.
 	PodpiszHosta(ctx context.Context, csrPEM []byte, hostID string) (*Certyfikat, error)
 	// PodpiszRelay wystawia certyfikat relaya. Nazwy sieciowe pochodza

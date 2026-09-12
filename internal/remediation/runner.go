@@ -12,11 +12,12 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Runner prowadzi plany naprawy przez kolejne kroki.
+// Runner drives remediation plans through their steps.
 //
-// Sam niczego nie wykonuje: tworzy zadania, ktore dostarcza scheduler, i czeka
-// na ich wynik. Krok rusza dopiero, gdy poprzedni sie udal - to jest cala
-// zaleznosc miedzy krokami i cale zatrzymanie po bledzie.
+// It carries out nothing itself: it creates the tasks the scheduler delivers
+// and waits for their result. A step starts only once the previous one
+// succeeded - that is the whole dependency between the steps and the whole
+// stop after a failure.
 type Runner struct {
 	store    *Store
 	jobs     *jobs.Store
@@ -35,7 +36,7 @@ func NewRunner(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
 		audit: recorder, log: log, interval: interval}
 }
 
-// Run prowadzi plany do zamkniecia kontekstu.
+// Run drives the plans until the context is closed.
 func (r *Runner) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -50,95 +51,96 @@ func (r *Runner) Run(ctx context.Context) {
 }
 
 func (r *Runner) tick(ctx context.Context) {
-	plany, err := r.store.WToku(ctx)
+	plans, err := r.store.Running(ctx)
 	if err != nil {
-		r.log.Error("nie pobrano planow naprawy", "err", err)
+		r.log.Error("the remediation plans were not read", "err", err)
 		return
 	}
-	for _, plan := range plany {
-		if err := r.przesun(ctx, plan); err != nil {
-			r.log.Error("blad prowadzenia planu naprawy", "plan_id", plan.ID, "err", err)
+	for _, plan := range plans {
+		if err := r.advance(ctx, plan); err != nil {
+			r.log.Error("failure while running a remediation plan", "plan_id", plan.ID, "err", err)
 		}
 	}
 }
 
-// przesun przesuwa plan o jeden krok.
-func (r *Runner) przesun(ctx context.Context, plan Plan) error {
-	krok := plan.Biezacy()
-	if krok == nil {
-		return r.zakoncz(ctx, plan, StanUdany, "")
+// advance moves a plan forward by one step.
+func (r *Runner) advance(ctx context.Context, plan Plan) error {
+	step := plan.Current()
+	if step == nil {
+		return r.finish(ctx, plan, StateSucceeded, "")
 	}
 
-	if krok.State == KrokOczekuje {
-		return r.zacznij(ctx, plan, krok)
+	if step.State == StepPending {
+		return r.start(ctx, plan, step)
 	}
 
-	// Krok trwa: czekamy na wynik zadania, a przy kroku z restartem takze na
-	// powrot hosta. Wyslane polecenie restartu nie jest jeszcze hostem, ktory
-	// wstal - i to jest granica, na ktorej plan sie konczy.
-	zadanie, err := r.jobs.Get(ctx, krok.JobID)
+	// The step is running: we wait for the task's result and, for a step with
+	// a reboot, also for the host to come back. A reboot command that was
+	// sent is not yet a host that came up - and that is the boundary where
+	// the plan ends.
+	task, err := r.jobs.Get(ctx, step.JobID)
 	if err != nil {
 		return err
 	}
-	if !zadanie.State.Terminal() {
+	if !task.State.Terminal() {
 		return nil
 	}
-	if zadanie.State != jobs.StateSucceeded {
-		powod := "zadanie zakonczylo sie stanem " + string(zadanie.State)
-		if zadanie.ResultMessage != "" {
-			powod += ": " + zadanie.ResultMessage
+	if task.State != jobs.StateSucceeded {
+		reason := "the task finished in the state " + string(task.State)
+		if task.ResultMessage != "" {
+			reason += ": " + task.ResultMessage
 		}
-		if err := r.store.ZamknijKrok(ctx, krok.ID, KrokNieudany, powod); err != nil {
+		if err := r.store.FinishStep(ctx, step.ID, StepFailed, reason); err != nil {
 			return err
 		}
 		if !plan.StopOnFailure {
 			return nil
 		}
-		if err := r.store.PomijPozostale(ctx, plan.ID,
-			"poprzedni krok sie nie udal, a plan zatrzymuje sie po bledzie"); err != nil {
+		if err := r.store.SkipRemaining(ctx, plan.ID,
+			"the previous step failed and the plan stops after a failure"); err != nil {
 			return err
 		}
-		return r.zakoncz(ctx, plan, StanNieudany, powod)
+		return r.finish(ctx, plan, StateFailed, reason)
 	}
 
-	if krok.RequiresReboot {
-		wrocil, powod := r.hostWrocil(ctx, plan)
-		if !wrocil {
-			if time.Now().UTC().Before(TerminPowrotu(*krok)) {
+	if step.RequiresReboot {
+		cameBack, reason := r.hostCameBack(ctx, plan)
+		if !cameBack {
+			if time.Now().UTC().Before(ReturnDeadline(*step)) {
 				return nil
 			}
-			if err := r.store.ZamknijKrok(ctx, krok.ID, KrokNieudany, powod); err != nil {
+			if err := r.store.FinishStep(ctx, step.ID, StepFailed, reason); err != nil {
 				return err
 			}
-			return r.zakoncz(ctx, plan, StanNieudany, powod)
+			return r.finish(ctx, plan, StateFailed, reason)
 		}
 	}
 
-	if err := r.store.ZamknijKrok(ctx, krok.ID, KrokUdany, ""); err != nil {
+	if err := r.store.FinishStep(ctx, step.ID, StepSucceeded, ""); err != nil {
 		return err
 	}
 	return nil
 }
 
-// zacznij tworzy zadanie kroku.
-func (r *Runner) zacznij(ctx context.Context, plan Plan, krok *Krok) error {
+// start creates the task of a step.
+func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 	host, err := r.hosts.Get(ctx, plan.HostID)
 	if err != nil {
-		if err := r.store.ZamknijKrok(ctx, krok.ID, KrokNieudany, err.Error()); err != nil {
+		if err := r.store.FinishStep(ctx, step.ID, StepFailed, err.Error()); err != nil {
 			return err
 		}
-		return r.zakoncz(ctx, plan, StanNieudany, err.Error())
+		return r.finish(ctx, plan, StateFailed, err.Error())
 	}
 
-	akcja := opspec.ActionType(krok.ActionType)
+	action := opspec.ActionType(step.ActionType)
 	var payload opspec.Payload
-	if len(krok.Payload) > 0 {
-		if err := json.Unmarshal(krok.Payload, &payload); err != nil {
-			return r.przerwijKrok(ctx, plan, krok, "payload kroku: "+err.Error())
+	if len(step.Payload) > 0 {
+		if err := json.Unmarshal(step.Payload, &payload); err != nil {
+			return r.abortStep(ctx, plan, step, "the step payload: "+err.Error())
 		}
 	}
-	if err := opspec.Validate(akcja, payload); err != nil {
-		return r.przerwijKrok(ctx, plan, krok, "payload kroku odrzucony: "+err.Error())
+	if err := opspec.Validate(action, payload); err != nil {
+		return r.abortStep(ctx, plan, step, "the step payload was rejected: "+err.Error())
 	}
 
 	tx, err := r.jobs.Pool().Begin(ctx)
@@ -147,31 +149,31 @@ func (r *Runner) zacznij(ctx context.Context, plan Plan, krok *Krok) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	zadanie, err := r.jobs.Create(ctx, tx, jobs.Spec{
+	task, err := r.jobs.Create(ctx, tx, jobs.Spec{
 		HostID:  plan.HostID,
-		Action:  akcja,
+		Action:  action,
 		Payload: payload,
-		// Klucz wiaze zadanie z konkretnym krokiem konkretnego planu:
-		// ponowne przejscie runnera nie tworzy drugiego zadania.
-		IdempotencyKey:  "remediation:" + plan.ID + ":" + krok.CheckID,
-		RequiresApprova: akcja.Mutating(),
+		// The key binds the task to one specific step of one specific plan:
+		// another pass of the runner does not create a second task.
+		IdempotencyKey:  "remediation:" + plan.ID + ":" + step.CheckID,
+		RequiresApprova: action.Mutating(),
 		CreatedBy:       plan.CreatedBy,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,
-			RequiredCapabilities: []string{akcja.RequiredCapability()},
+			RequiredCapabilities: []string{action.RequiredCapability()},
 		},
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return r.przerwijKrok(ctx, plan, krok, "nie zlozono zadania: "+err.Error())
+		return r.abortStep(ctx, plan, step, "the task was not created: "+err.Error())
 	}
 	if err := r.audit.RecordTx(ctx, tx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "remediation:" + plan.ID,
-		Action: "security.remediate.step", TargetType: "job", TargetID: zadanie.ID,
+		Action: "security.remediate.step", TargetType: "job", TargetID: task.ID,
 		Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
-			"host_id": plan.HostID, "plan_id": plan.ID, "check_id": krok.CheckID,
-			"position": krok.Position, "action_type": krok.ActionType,
+			"host_id": plan.HostID, "plan_id": plan.ID, "check_id": step.CheckID,
+			"position": step.Position, "action_type": step.ActionType,
 			"plan_hash": plan.PlanHash, "created_by": plan.CreatedBy,
 		},
 	}); err != nil {
@@ -180,61 +182,61 @@ func (r *Runner) zacznij(ctx context.Context, plan Plan, krok *Krok) error {
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	return r.store.ZaczniKrok(ctx, krok.ID, zadanie.ID)
+	return r.store.StartStep(ctx, step.ID, task.ID)
 }
 
-// przerwijKrok zamyka krok bledem i konczy plan, jesli tak ustalono.
-func (r *Runner) przerwijKrok(ctx context.Context, plan Plan, krok *Krok, powod string) error {
-	if err := r.store.ZamknijKrok(ctx, krok.ID, KrokNieudany, powod); err != nil {
+// abortStep settles a step with a failure and ends the plan if that was decided.
+func (r *Runner) abortStep(ctx context.Context, plan Plan, step *Step, reason string) error {
+	if err := r.store.FinishStep(ctx, step.ID, StepFailed, reason); err != nil {
 		return err
 	}
 	if !plan.StopOnFailure {
 		return nil
 	}
-	if err := r.store.PomijPozostale(ctx, plan.ID, "plan zatrzymal sie po bledzie"); err != nil {
+	if err := r.store.SkipRemaining(ctx, plan.ID, "the plan stopped after a failure"); err != nil {
 		return err
 	}
-	return r.zakoncz(ctx, plan, StanNieudany, powod)
+	return r.finish(ctx, plan, StateFailed, reason)
 }
 
-// hostWrocil sprawdza, czy host wstal po restarcie.
+// hostCameBack checks whether the host came up after the reboot.
 //
-// Rozstrzyga identyfikator startu, a nie sam fakt polaczenia: host, ktory
-// odpowiada z tym samym boot_id, jeszcze sie nie restartowal.
-func (r *Runner) hostWrocil(ctx context.Context, plan Plan) (bool, string) {
+// The boot identifier settles it rather than the mere fact of a connection: a
+// host that answers with the same boot_id has not restarted yet.
+func (r *Runner) hostCameBack(ctx context.Context, plan Plan) (bool, string) {
 	host, err := r.hosts.Get(ctx, plan.HostID)
 	if err != nil {
-		return false, "nie odczytano stanu hosta: " + err.Error()
+		return false, "the host's state was not read: " + err.Error()
 	}
 	if host.ConnectionState != "online" {
-		return false, "host nie wrocil po restarcie w " + OknoPowrotu.String()
+		return false, "host nie cameBack po restarcie w " + ReturnWindow.String()
 	}
 	if plan.BootIDBefore != "" && host.BootID == plan.BootIDBefore {
-		return false, "host odpowiada, ale z tym samym identyfikatorem startu"
+		return false, "the host answers, but with the same boot identifier"
 	}
 	return true, ""
 }
 
-// zakoncz zamyka plan i zapisuje to w audycie.
-func (r *Runner) zakoncz(ctx context.Context, plan Plan, stan, powod string) error {
-	if err := r.store.ZamknijPlan(ctx, plan.ID, stan); err != nil {
+// finish closes a plan and records that in the audit trail.
+func (r *Runner) finish(ctx context.Context, plan Plan, state, reason string) error {
+	if err := r.store.FinishPlan(ctx, plan.ID, state); err != nil {
 		return err
 	}
 	r.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "remediation:" + plan.ID,
 		Action: "security.remediate.finish", TargetType: "host", TargetID: plan.HostID,
-		Outcome: wynikAudytu(stan),
+		Outcome: auditOutcome(state),
 		Detail: map[string]any{
-			"plan_id": plan.ID, "state": stan, "reason": powod,
+			"plan_id": plan.ID, "state": state, "reason": reason,
 			"plan_hash": plan.PlanHash, "created_by": plan.CreatedBy,
 		},
 	})
-	r.log.Info("plan naprawy zamkniety", "plan_id", plan.ID, "host_id", plan.HostID, "stan", stan)
+	r.log.Info("the remediation plan was settled", "plan_id", plan.ID, "host_id", plan.HostID, "state", state)
 	return nil
 }
 
-func wynikAudytu(stan string) audit.Outcome {
-	if stan == StanUdany {
+func auditOutcome(state string) audit.Outcome {
+	if state == StateSucceeded {
 		return audit.OutcomeSuccess
 	}
 	return audit.OutcomeFailure

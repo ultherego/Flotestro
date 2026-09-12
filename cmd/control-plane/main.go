@@ -461,7 +461,7 @@ func run() error {
 	packageStore := vuln.NowyMagazynPakietow(pool)
 	panelServer.SetPodatnosci(vulnStore, packageStore, podatnosci.MaxSnapshotAge)
 
-	// Magazyn sekretow. Klucz lezy w pliku poza baza: kopia bazy bez niego
+	// Store sekretow. Klucz lezy w pliku poza baza: kopia bazy bez niego
 	// nie wystarcza, zeby odczytac cokolwiek.
 	sciezkaKlucza := *secretsKeyFile
 	if sciezkaKlucza == "" {

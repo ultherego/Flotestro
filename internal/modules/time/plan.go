@@ -56,7 +56,7 @@ func Zaplanuj(stan Snapshot, serwery []string, zgodaNaKatalog bool) Plan {
 	plan := Plan{Service: stan.Service, DesiredServers: append([]string(nil), serwery...),
 		ManagedPath: stan.ManagedPath}
 	if stan.Managed != "" {
-		plan.ManagedHash = odciskTekstu(stan.Managed)
+		plan.ManagedHash = textFingerprint(stan.Managed)
 	}
 	for _, serwer := range stan.Configured {
 		if serwer.Managed {
@@ -166,7 +166,7 @@ func lista(elementy []string) string {
 	return strings.Join(elementy, ",")
 }
 
-func odciskTekstu(tekst string) string {
+func textFingerprint(tekst string) string {
 	suma := sha256.Sum256([]byte(tekst))
 	return hex.EncodeToString(suma[:])
 }

@@ -57,7 +57,7 @@ func TestZmianaRegulDostepuWymagaPowodu(t *testing.T) {
 	}
 
 	// Slad audytowy musi niesc powod i to, na jakiej podstawie operacja
-	// przeszla. Tozsamosc automatyczna nie moze byc opisana jako uwierzytelniona
+	// przeszla. Identity automatyczna nie moze byc opisana jako uwierzytelniona
 	// ponownie, bo nie ma za nia czlowieka.
 	var audyt struct {
 		Items []struct {

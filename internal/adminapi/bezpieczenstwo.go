@@ -114,7 +114,7 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, host := range widoczne {
-		raport := compliance.Ocen(host.ID, wejscieHosta(host, fragmenty[host.ID]), teraz)
+		raport := compliance.Evaluate(host.ID, wejscieHosta(host, fragmenty[host.ID]), teraz)
 		for _, ustalenie := range raport.Findings {
 			widok, ok := sprawdzenia[ustalenie.CheckID]
 			if !ok {
@@ -157,7 +157,7 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func akcjaNaprawy(ustalenie compliance.Ustalenie) string {
+func akcjaNaprawy(ustalenie compliance.Finding) string {
 	if ustalenie.Remediation == nil {
 		return ""
 	}
@@ -231,7 +231,7 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	for _, id := range request.CheckIDs {
 		wybrane[id] = true
 	}
-	kroki := make([]compliance.Ustalenie, 0, len(request.CheckIDs))
+	kroki := make([]compliance.Finding, 0, len(request.CheckIDs))
 	for _, ustalenie := range raport.Findings {
 		if wybrane[ustalenie.CheckID] {
 			kroki = append(kroki, ustalenie)
@@ -243,7 +243,7 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ulozony, err := remediation.Ulozenie(kroki)
+	arranged, err := remediation.Arrange(kroki)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_plan", err.Error())
 		return
@@ -253,7 +253,7 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	// polowa naprawy jest gorsza niz zadna, bo zostawia host w stanie,
 	// ktorego nikt nie planowal.
 	wymagaSwiezosci := false
-	for _, krok := range ulozony.Kroki {
+	for _, krok := range arranged.Steps {
 		akcja := opspec.ActionType(krok.ActionType)
 		if _, ok := s.authorize(w, r, authz.Permission(akcja.Permission()), scope, "host", hostID); !ok {
 			return
@@ -297,7 +297,7 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	plan, err := s.remediation.Zaloz(r.Context(), tx, remediation.Spec{
+	plan, err := s.remediation.Create(r.Context(), tx, remediation.Spec{
 		HostID:          hostID,
 		PlanHash:        raport.PlanHash,
 		PlanHashVersion: raport.PlanHashVersion,
@@ -305,8 +305,8 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:       principal.Subject,
 		StopOnFailure:   zatrzymajPoBledzie,
 		BootIDBefore:    host.BootID,
-	}, ulozony.Kroki)
-	if errors.Is(err, remediation.ErrPlanWToku) {
+	}, arranged.Steps)
+	if errors.Is(err, remediation.ErrPlanRunning) {
 		problem(w, http.StatusConflict, "plan_in_progress",
 			"a remediation plan is already running on this host")
 		return
@@ -322,7 +322,7 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{
 			"plan_id": plan.ID, "plan_hash": raport.PlanHash,
 			"plan_hash_version": raport.PlanHashVersion,
-			"steps":             nazwyKrokow(ulozony.Kroki), "skipped": ulozony.Pominiete,
+			"steps":             nazwyKrokow(arranged.Steps), "skipped": arranged.Skipped,
 			"stop_on_failure": zatrzymajPoBledzie, "reason": request.Reason,
 			"step_up": dowodStepUp,
 		},
@@ -336,7 +336,7 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"plan": plan, "skipped": ulozony.Pominiete,
+		"plan": plan, "skipped": arranged.Skipped,
 	})
 }
 
@@ -355,7 +355,7 @@ func (s *Server) handleListRemediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	plany, err := s.remediation.Hosta(r.Context(), hostID, limit)
+	plany, err := s.remediation.ForHost(r.Context(), hostID, limit)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -368,7 +368,7 @@ func (s *Server) handleListRemediation(w http.ResponseWriter, r *http.Request) {
 
 // handleStopRemediation zatrzymuje plan w toku.
 //
-// Krok juz dostarczony hostowi konczy sie po swojemu - panel nie udaje, ze
+// Step juz dostarczony hostowi konczy sie po swojemu - panel nie udaje, ze
 // odwolal cos, co host wlasnie wykonuje - ale jego zadanie jest anulowane,
 // a kroki jeszcze nierozpoczete nie ruszaja.
 func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
@@ -396,12 +396,12 @@ func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if plan.State != remediation.StanWToku {
+	if plan.State != remediation.StateRunning {
 		problem(w, http.StatusConflict, "plan_finished", "this plan is already finished")
 		return
 	}
 
-	if biezacy := plan.Biezacy(); biezacy != nil && biezacy.JobID != "" {
+	if biezacy := plan.Current(); biezacy != nil && biezacy.JobID != "" {
 		tx, err := s.jobs.Pool().Begin(r.Context())
 		if err != nil {
 			s.fail(w, err)
@@ -413,11 +413,11 @@ func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
 			_ = tx.Commit(r.Context())
 		}
 	}
-	if err := s.remediation.PomijPozostale(r.Context(), plan.ID, "plan zatrzymany przez operatora"); err != nil {
+	if err := s.remediation.SkipRemaining(r.Context(), plan.ID, "plan zatrzymany przez operatora"); err != nil {
 		s.fail(w, err)
 		return
 	}
-	if err := s.remediation.ZamknijPlan(r.Context(), plan.ID, remediation.StanZatrzymany); err != nil {
+	if err := s.remediation.FinishPlan(r.Context(), plan.ID, remediation.StateStopped); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -436,7 +436,7 @@ func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, zaktualizowany)
 }
 
-func nazwyKrokow(kroki []remediation.Krok) []string {
+func nazwyKrokow(kroki []remediation.Step) []string {
 	nazwy := make([]string, 0, len(kroki))
 	for _, krok := range kroki {
 		nazwy = append(nazwy, krok.CheckID+":"+krok.ActionType)
@@ -445,27 +445,27 @@ func nazwyKrokow(kroki []remediation.Krok) []string {
 }
 
 // ocenZgodnosc liczy ustalenia dla hosta z fragmentow inwentarza.
-func (s *Server) ocenZgodnosc(r *http.Request, host *hosts.Host) (compliance.Raport, error) {
+func (s *Server) ocenZgodnosc(r *http.Request, host *hosts.Host) (compliance.Report, error) {
 	fragmenty, err := s.inventory.Fragments(r.Context(), host.ID)
 	if err != nil {
-		return compliance.Raport{}, err
+		return compliance.Report{}, err
 	}
-	return compliance.Ocen(host.ID, wejscieHosta(*host, fragmenty), time.Now().UTC()), nil
+	return compliance.Evaluate(host.ID, wejscieHosta(*host, fragmenty), time.Now().UTC()), nil
 }
 
 // wejscieHosta sklada wszystko, z czego licza sie sprawdzenia.
-func wejscieHosta(host hosts.Host, fragmenty []inventory.Fragment) compliance.Wejscie {
-	wejscie := compliance.Wejscie{
+func wejscieHosta(host hosts.Host, fragmenty []inventory.Fragment) compliance.Input {
+	wejscie := compliance.Input{
 		Host: compliance.Host{
 			Hostname:               host.Hostname,
 			OSFamily:               host.OSFamily,
 			PendingSecurityUpdates: host.PendingSecurityUpdates,
 			RebootRequired:         host.RebootRequired,
 		},
-		Fragmenty: map[string]compliance.Fragment{},
+		Fragments: map[string]compliance.Fragment{},
 	}
 	for _, fragment := range fragmenty {
-		wejscie.Fragmenty[fragment.Module] = przenies(fragment)
+		wejscie.Fragments[fragment.Module] = przenies(fragment)
 	}
 	return wejscie
 }

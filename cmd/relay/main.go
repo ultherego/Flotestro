@@ -160,7 +160,7 @@ func odczytajToken(plik string) (string, error) {
 }
 
 // zarejestruj tworzy tozsamosc relaya na podstawie konfiguracji i tokenu.
-func zarejestruj(ctx context.Context, cfg relayconfig.Config, token string) (relay.Tozsamosc, error) {
+func zarejestruj(ctx context.Context, cfg relayconfig.Config, token string) (relay.Identity, error) {
 	tozsamosc, err := agent.EnsureIdentityFor(ctx, agent.IdentityRequest{
 		StateDir:        cfg.Relay.StateDir,
 		EnrollmentURL:   cfg.Upstream.EnrollmentURL,
@@ -171,14 +171,14 @@ func zarejestruj(ctx context.Context, cfg relayconfig.Config, token string) (rel
 		Advertised:      strings.Join(cfg.Relay.AdvertisedNames, ","),
 	})
 	if err != nil {
-		return relay.Tozsamosc{}, fmt.Errorf("tozsamosc relaya: %w", err)
+		return relay.Identity{}, fmt.Errorf("tozsamosc relaya: %w", err)
 	}
-	return relay.Tozsamosc{
+	return relay.Identity{
 		RelayID:     tozsamosc.HostID,
 		Certificate: tozsamosc.Certificate,
 		CAPool:      tozsamosc.CAPool,
 		NotAfter:    tozsamosc.NotAfter,
-		ZaufaniePEM: tozsamosc.ZaufaniePEM,
+		TrustPEM: tozsamosc.TrustPEM,
 	}, nil
 }
 
@@ -252,7 +252,7 @@ func polecenieRun(args []string, log *slog.Logger) error {
 		Nazwy:      cfg.Relay.AdvertisedNames,
 		Wersja:     wersja,
 		Log:        log,
-		PoOdnowieniu: func(nowa relay.Tozsamosc) {
+		PoOdnowieniu: func(nowa relay.Identity) {
 			posrednik.OdswiezTozsamosc(nowa.Certificate, nowa.CAPool)
 		},
 	})

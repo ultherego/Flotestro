@@ -149,7 +149,7 @@ func (s *AgentService) SetOdswiezenieOceny(odswiez func(hostID string)) {
 // tylko postep dlugiej operacji nie dociera na ekran operatora.
 func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
 
-// Connect obsluguje sesje agenta. Tozsamosc hosta pochodzi wylacznie z
+// Connect obsluguje sesje agenta. Identity hosta pochodzi wylacznie z
 // certyfikatu klienta; tresc wiadomosci nigdy nie moze jej nadpisac.
 func (s *AgentService) Connect(ctx context.Context,
 	stream *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage]) error {
@@ -170,7 +170,7 @@ func (s *AgentService) Connect(ctx context.Context,
 	}
 
 	// Certyfikat relaya nie opisuje hosta, wiec stan certyfikatu hosta
-	// sprawdzamy wylacznie przy polaczeniu bezposrednim. Tozsamosc hosta
+	// sprawdzamy wylacznie przy polaczeniu bezposrednim. Identity hosta
 	// z poswiadczenia relaya zostala juz sprawdzona wyzej.
 	if relayID == "" {
 		status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
@@ -2144,7 +2144,7 @@ func (s *AgentService) zapiszPrzebiegKopii(ctx context.Context, hostID, jobID st
 		return
 	}
 
-	przebieg := backupstore.Przebieg{
+	przebieg := backupstore.Run{
 		HostID: hostID, Definition: payload.Backup.ID, Kind: rodzaj,
 		JobID: jobID, Outcome: "failed", Message: wynik.GetMessage(),
 		StartedBy: zadanie.CreatedBy,
@@ -2172,7 +2172,7 @@ func (s *AgentService) zapiszPrzebiegKopii(ctx context.Context, hostID, jobID st
 			przebieg.Message = efekt.Message
 		}
 	}
-	if err := s.backups.ZapiszPrzebieg(ctx, s.pool, przebieg); err != nil {
+	if err := s.backups.RecordRun(ctx, s.pool, przebieg); err != nil {
 		s.log.Error("nie zapisano przebiegu kopii", "host_id", hostID, "err", err)
 	}
 }

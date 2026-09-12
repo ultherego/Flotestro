@@ -154,7 +154,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		s.log.Error("nie odczytano tozsamosci rozmowcy", "err", err)
 		return
 	}
-	// Tozsamosc rozmowcy pochodzi z jadra. Wiadomosc nie moze jej podmienic.
+	// Identity rozmowcy pochodzi z jadra. Wiadomosc nie moze jej podmienic.
 	if uid != s.allowedUID {
 		s.log.Warn("odrzucono polaczenie od obcego uzytkownika", "uid", uid, "pid", pid)
 		return

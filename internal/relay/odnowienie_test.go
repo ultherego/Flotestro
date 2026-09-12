@@ -49,7 +49,7 @@ func TestOdnowieniePrzedOstatniaTrzecia(t *testing.T) {
 	}
 	for _, przypadek := range przypadki {
 		t.Run(przypadek.nazwa, func(t *testing.T) {
-			tozsamosc := Tozsamosc{
+			tozsamosc := Identity{
 				Certificate: certyfikatOd(t, przypadek.od, przypadek.do),
 				NotAfter:    przypadek.do,
 			}
@@ -63,7 +63,7 @@ func TestOdnowieniePrzedOstatniaTrzecia(t *testing.T) {
 // TestNieznanyTerminJestPowodem pilnuje zasady, ze nieznane nie jest zerem:
 // certyfikat bez czytelnego terminu nie moze znaczyc "jeszcze dlugo".
 func TestNieznanyTerminJestPowodem(t *testing.T) {
-	if !wymagaOdnowienia(Tozsamosc{}) {
+	if !wymagaOdnowienia(Identity{}) {
 		t.Fatal("tozsamosc bez terminu nie wymaga odnowienia")
 	}
 }
@@ -74,13 +74,13 @@ func TestNieznanyTerminJestPowodem(t *testing.T) {
 func TestPodmianaJestWidocznaOdRazu(t *testing.T) {
 	stary := certyfikatOd(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	nowy := certyfikatOd(t, time.Now(), time.Now().Add(7*24*time.Hour))
-	zywa := NowaZywa(Tozsamosc{RelayID: "r1", Certificate: stary})
+	zywa := NowaZywa(Identity{RelayID: "r1", Certificate: stary})
 
 	przed, err := zywa.Certyfikat(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	zywa.Podmien(Tozsamosc{RelayID: "r1", Certificate: nowy})
+	zywa.Podmien(Identity{RelayID: "r1", Certificate: nowy})
 	po, err := zywa.Certyfikat(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestPodmianaJestWidocznaOdRazu(t *testing.T) {
 // wypuszcza sprawdzania poza rozsadne granice.
 func TestOdstepMiesciSieWGranicach(t *testing.T) {
 	teraz := time.Now()
-	tozsamosc := Tozsamosc{
+	tozsamosc := Identity{
 		Certificate: certyfikatOd(t, teraz, teraz.Add(7*24*time.Hour)),
 		NotAfter:    teraz.Add(7 * 24 * time.Hour),
 	}

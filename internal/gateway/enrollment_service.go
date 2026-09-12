@@ -74,13 +74,13 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	proba := enrollment.ProbaWejscie{
+	proba := enrollment.AttemptInput{
 		Token:           msg.GetEnrollmentToken(),
 		MachineID:       msg.GetMachineId(),
 		ClientRequestID: msg.GetClientRequestId(),
 		CSR:             msg.GetCsrPem(),
 	}
-	wynik, err := s.tokens.Redeem(ctx, tx, proba)
+	result, err := s.tokens.Redeem(ctx, tx, proba)
 	if err != nil {
 		if errors.Is(err, enrollment.ErrInvalidToken) {
 			// Odmowa jest zdarzeniem audytowym tak samo jak sukces. Powod
@@ -95,7 +95,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	scope := wynik.Scope
+	scope := result.Scope
 
 	// Trasa zgloszenia jest czescia zakresu, a nie szczegolem sieci. Token
 	// zwiazany z relayem wyniesiony do innej lokalizacji nie moze niczego
@@ -115,7 +115,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	// Powtorzenie proby, ktorej odpowiedz zginela w sieci: agent dostaje ten
 	// sam certyfikat, ktory juz zostal dla niego wydany. Nic sie nie zuzywa
 	// i nic nie powstaje po raz drugi.
-	if powtorzone := wynik.Powtorzenie; powtorzone != nil {
+	if powtorzone := result.Replay; powtorzone != nil {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
@@ -174,7 +174,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		hostID  string
 		created bool
 	)
-	if scope.Purpose == enrollment.CelWymiana {
+	if scope.Purpose == enrollment.PurposeReplace {
 		// Odtworzenie tozsamosci nie zaklada nowego hosta: przeinstalowana
 		// maszyna wraca do tego samego wiersza, z ta sama historia.
 		hostID = scope.ExpectedHostID
@@ -213,7 +213,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 
 	// Proba zapisuje sie w tej samej transakcji co host i certyfikat: zapis
 	// po commicie moglby nie dojsc, a wtedy idempotencja bylaby pozorna.
-	if err := s.tokens.ZapiszProbe(ctx, tx, scope.TokenID, proba, enrollment.Powtorzenie{
+	if err := s.tokens.RecordAttempt(ctx, tx, scope.TokenID, proba, enrollment.Replay{
 		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: zaufanie,
 		CertificateSerial: issued.Serial,
 	}); err != nil {
@@ -334,11 +334,11 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 		return err
 	}
 	switch scope.Purpose {
-	case enrollment.CelNowy:
+	case enrollment.PurposeNew:
 		if istniejacy != "" {
 			return errors.New("machine_id_known")
 		}
-	case enrollment.CelWymiana:
+	case enrollment.PurposeReplace:
 		if scope.ExpectedHostID == "" {
 			return errors.New("recovery_without_host")
 		}
@@ -361,7 +361,7 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 		if istniejacy != "" && istniejacy != scope.ExpectedHostID {
 			return errors.New("machine_id_other_host")
 		}
-	case enrollment.CelRelay:
+	case enrollment.PurposeRelay:
 		return errors.New("relay_purpose_for_host")
 	default:
 		return errors.New("unknown_purpose")

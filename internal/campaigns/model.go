@@ -1,6 +1,6 @@
-// Package campaigns realizuje kampanie: zmiane flotowa prowadzona przez canary
-// i fale, z progami zatrzymania i raportem koncowym. Kampania jest glownym
-// mechanizmem zmian, a nie petla po hostach.
+// Package campaigns runs campaigns: a fleet-wide change carried out through a
+// canary and waves, with stop thresholds and a final report. A campaign is the
+// main mechanism of change rather than a loop over hosts.
 package campaigns
 
 import (
@@ -13,13 +13,13 @@ import (
 	"time"
 )
 
-// State jest stanem kampanii.
+// State is the state of a campaign.
 type State string
 
 const (
-	// StatePlanning jest faza, w ktorej kazdy host liczy wlasny plan.
-	// Kampania niczego jeszcze nie zmienia: plan jest odczytem, a jego
-	// zestaw - tym, co operator za chwile zatwierdzi.
+	// StatePlanning is the phase in which every host computes its own plan.
+	// The campaign changes nothing yet: a plan is a read, and the set of them
+	// is what the operator is about to approve.
 	StatePlanning         State = "planning"
 	StatePlanned          State = "planned"
 	StateAwaitingApproval State = "awaiting_approval"
@@ -31,12 +31,12 @@ const (
 	StateCanceled         State = "canceled"
 )
 
-// Active mowi, czy kampania jest w toku.
+// Active says whether the campaign is under way.
 func (s State) Active() bool {
 	return s == StateCanary || s == StateRunning
 }
 
-// Terminal mowi, czy stan jest koncowy.
+// Terminal says whether the state is final.
 func (s State) Terminal() bool {
 	switch s {
 	case StateCompleted, StateFailed, StateCanceled:
@@ -46,22 +46,23 @@ func (s State) Terminal() bool {
 	}
 }
 
-// TargetState jest stanem pojedynczego hosta w kampanii.
+// TargetState is the state of a single host in a campaign.
 type TargetState string
 
 const (
 	TargetPending TargetState = "pending"
-	// TargetPlanning oznacza hosta, ktory liczy wlasny plan zmiany.
+	// TargetPlanning marks a host that is computing its own plan of the change.
 	TargetPlanning TargetState = "planning"
-	// TargetAwaitingBudget oznacza hosta gotowego do zmiany, ktory czeka na
-	// pojemnosc floty albo lokalizacji. Nie zajmuje slotu wykonania i nie
-	// jest bledem - ale musi byc widoczny, bo inaczej kampania stoi bez
-	// podanego powodu.
+	// TargetAwaitingBudget marks a host ready for the change that waits for
+	// the capacity of the fleet or of the site. It takes no execution slot
+	// and is not an error - but it has to be visible, because otherwise the
+	// campaign stands still with no reason given.
 	TargetAwaitingBudget TargetState = "awaiting_budget"
-	// TargetIneligible oznacza hosta, ktory nie moze wykonac tej operacji:
-	// nie ma wymaganego adaptera albo nie spelnia warunku wstepnego. To nie
-	// jest awaria wykonania i nie liczy sie do progu bledow - ale host zostaje
-	// w migawce, bo zniknieciem po cichu nikt nie moze zarzadzac.
+	// TargetIneligible marks a host that cannot carry out this operation: it
+	// lacks the required adapter or does not meet a precondition. That is not
+	// an execution failure and does not count towards the failure threshold -
+	// but the host stays in the snapshot, because nobody can manage something
+	// that disappears silently.
 	TargetIneligible TargetState = "ineligible"
 	TargetRunning    TargetState = "running"
 	TargetRebooting  TargetState = "rebooting"
@@ -72,15 +73,15 @@ const (
 	TargetCanceled   TargetState = "canceled"
 )
 
-// Czeka mowi, czy host jest gotowy do uruchomienia, ale jeszcze nie ruszyl.
+// Waiting says whether the host is ready to start but has not started yet.
 //
-// Oczekiwanie na budzet jest tym samym miejscem w kolejce co pending: host nie
-// zajmuje slotu, a przy kazdym obiegu prosi o pojemnosc jeszcze raz.
-func (t TargetState) Czeka() bool {
+// Waiting for a budget is the same place in the queue as pending: the host
+// takes no slot and asks for capacity again on every pass.
+func (t TargetState) Waiting() bool {
 	return t == TargetPending || t == TargetAwaitingBudget
 }
 
-// Finished mowi, czy host zakonczyl udzial w kampanii.
+// Finished says whether the host has finished taking part in the campaign.
 func (t TargetState) Finished() bool {
 	switch t {
 	case TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled, TargetIneligible:
@@ -90,7 +91,7 @@ func (t TargetState) Finished() bool {
 	}
 }
 
-// RebootPolicy okresla, kiedy kampania restartuje hosta.
+// RebootPolicy decides when a campaign reboots a host.
 type RebootPolicy string
 
 const (
@@ -99,7 +100,7 @@ const (
 	RebootAlways     RebootPolicy = "always"
 )
 
-// KnownRebootPolicy sprawdza poprawnosc polityki.
+// KnownRebootPolicy checks that the policy is valid.
 func KnownRebootPolicy(policy RebootPolicy) bool {
 	switch policy {
 	case RebootNever, RebootIfRequired, RebootAlways:
@@ -109,8 +110,9 @@ func KnownRebootPolicy(policy RebootPolicy) bool {
 	}
 }
 
-// Selector opisuje, ktore hosty wchodza do kampanii. Jest zapisywany dla
-// audytu; wiazaca jest migawka celow utworzona przy planowaniu.
+// Selector describes which hosts enter a campaign. It is recorded for the
+// audit trail; what binds is the snapshot of targets created while
+// planning.
 type Selector struct {
 	Site        string   `json:"site,omitempty"`
 	Environment string   `json:"environment,omitempty"`
@@ -118,12 +120,12 @@ type Selector struct {
 	HostIDs     []string `json:"host_ids,omitempty"`
 }
 
-// Empty mowi, czy selektor niczego nie zawezа.
+// Empty says whether the selector narrows nothing.
 func (s Selector) Empty() bool {
 	return s.Site == "" && s.Environment == "" && s.OSFamily == "" && len(s.HostIDs) == 0
 }
 
-// Spec opisuje kampanie do utworzenia.
+// Spec describes the campaign to create.
 type Spec struct {
 	Name                     string
 	ActionType               string
@@ -144,123 +146,127 @@ type Spec struct {
 	RequestID                string
 }
 
-// Validate sprawdza spojnosc opisu kampanii.
+// Validate checks that the description of the campaign holds together.
 func (s Spec) Validate() error {
 	if s.Name == "" {
-		return fmt.Errorf("kampania wymaga nazwy")
+		return fmt.Errorf("a campaign requires a name")
 	}
 	if s.WaveSize <= 0 {
-		return fmt.Errorf("rozmiar fali musi byc dodatni")
+		return fmt.Errorf("the wave size has to be positive")
 	}
 	if s.MaxConcurrent <= 0 {
-		return fmt.Errorf("limit rownoleglosci musi byc dodatni")
+		return fmt.Errorf("the concurrency limit has to be positive")
 	}
 	if s.CanarySize < 0 {
-		return fmt.Errorf("rozmiar canary nie moze byc ujemny")
+		return fmt.Errorf("the canary size must not be negative")
 	}
 	if s.FailureThresholdPercent < 0 || s.FailureThresholdPercent > 100 {
-		return fmt.Errorf("prog bledow w procentach musi byc z zakresu 0-100")
+		return fmt.Errorf("the failure threshold in percent has to be in the range 0-100")
 	}
 	if !KnownRebootPolicy(s.RebootPolicy) {
-		return fmt.Errorf("nieznana polityka restartu %q", s.RebootPolicy)
+		return fmt.Errorf("unknown reboot policy %q", s.RebootPolicy)
 	}
 	if s.MaintenanceStart != nil && s.MaintenanceEnd != nil &&
 		!s.MaintenanceEnd.After(*s.MaintenanceStart) {
-		return fmt.Errorf("okno serwisowe konczy sie przed rozpoczeciem")
+		return fmt.Errorf("the maintenance window ends before it starts")
 	}
 	return nil
 }
 
-// Odcisk liczy odcisk zatwierdzenia kampanii.
+// Fingerprint computes the approval fingerprint of a campaign.
 //
-// Zgoda ma dotyczyc dokladnie tego, co operator zobaczyl: tej samej operacji,
-// tego samego payloadu, tej samej listy hostow i tej samej polityki
-// rozwijania. Gdyby odcisk obejmowal sam identyfikator kampanii, zatwierdzenie
-// przenosiloby sie na kazda zmiane, ktora ktos wprowadzilby po drodze.
+// The consent is to concern exactly what the operator saw: the same
+// operation, the same payload, the same list of hosts and the same rollout
+// policy. If the fingerprint covered the campaign identifier alone, an
+// approval would carry over to every change somebody made along the way.
 //
-// Hosty sa sortowane, bo kolejnosc migawki nie jest decyzja. Wszystko inne
-// wchodzi w takiej postaci, w jakiej zostalo zapisane.
-func Odcisk(spec Spec, targets []TargetHost) (string, error) {
-	// Odcisk niesie takze stan wyjsciowy hosta. Zgoda dotyczy tego, co
-	// naprawde ruszy: kampania, w ktorej host byl niezdolny, a po ponownym
-	// policzeniu jest gotowy, jest inna kampania niz ta zatwierdzona.
-	hosty := make([]string, 0, len(targets))
+// The hosts are sorted, because the order of the snapshot is not a decision.
+// Everything else enters in the shape in which it was recorded.
+func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
+	// The fingerprint also carries the host's starting state. The consent
+	// concerns what will really run: a campaign in which a host was
+	// ineligible and, after being computed again, is ready, is a different
+	// campaign from the approved one.
+	hosts := make([]string, 0, len(targets))
 	for _, target := range targets {
-		wpis := target.ID
-		if target.Stan != "" {
-			wpis += ":" + string(target.Stan)
+		entry := target.ID
+		if target.State != "" {
+			entry += ":" + string(target.State)
 		}
-		hosty = append(hosty, wpis)
+		hosts = append(hosts, entry)
 	}
-	sort.Strings(hosty)
+	sort.Strings(hosts)
 
 	payload := spec.Payload
 	if len(payload) == 0 {
 		payload = json.RawMessage("{}")
 	}
-	tresc := struct {
-		Wersja     int             `json:"campaign_version"`
-		Akcja      string          `json:"action"`
-		Payload    json.RawMessage `json:"payload"`
-		Hosty      []string        `json:"targets"`
-		Rozwijanie struct {
-			Canary      int          `json:"canary_size"`
-			Fala        int          `json:"wave_size"`
-			Rownolegle  int          `json:"max_concurrent"`
-			ProgProcent int          `json:"failure_threshold_percent"`
-			ProgLiczba  int          `json:"failure_threshold_absolute"`
-			Restart     RebootPolicy `json:"reboot_policy"`
-			Jednostki   []string     `json:"health_check_units"`
-			LimitCzasu  int          `json:"job_timeout_seconds"`
-			OknoOd      *time.Time   `json:"maintenance_start,omitempty"`
-			OknoDo      *time.Time   `json:"maintenance_end,omitempty"`
+	content := struct {
+		Version int             `json:"campaign_version"`
+		Action  string          `json:"action"`
+		Payload json.RawMessage `json:"payload"`
+		Targets []string        `json:"targets"`
+		Rollout struct {
+			Canary           int          `json:"canary_size"`
+			Wave             int          `json:"wave_size"`
+			Concurrent       int          `json:"max_concurrent"`
+			ThresholdPercent int          `json:"failure_threshold_percent"`
+			ThresholdCount   int          `json:"failure_threshold_absolute"`
+			Reboot           RebootPolicy `json:"reboot_policy"`
+			Units            []string     `json:"health_check_units"`
+			Timeout          int          `json:"job_timeout_seconds"`
+			WindowFrom       *time.Time   `json:"maintenance_start,omitempty"`
+			WindowTo         *time.Time   `json:"maintenance_end,omitempty"`
 		} `json:"rollout"`
-	}{Wersja: WersjaKampanii, Akcja: spec.ActionType, Payload: payload, Hosty: hosty}
-	tresc.Rozwijanie.Canary = spec.CanarySize
-	tresc.Rozwijanie.Fala = spec.WaveSize
-	tresc.Rozwijanie.Rownolegle = spec.MaxConcurrent
-	tresc.Rozwijanie.ProgProcent = spec.FailureThresholdPercent
-	tresc.Rozwijanie.ProgLiczba = spec.FailureThresholdAbsolute
-	tresc.Rozwijanie.Restart = spec.RebootPolicy
-	tresc.Rozwijanie.Jednostki = spec.HealthCheckUnits
-	tresc.Rozwijanie.LimitCzasu = spec.JobTimeoutSeconds
-	tresc.Rozwijanie.OknoOd = spec.MaintenanceStart
-	tresc.Rozwijanie.OknoDo = spec.MaintenanceEnd
+	}{Version: CampaignVersion, Action: spec.ActionType, Payload: payload, Targets: hosts}
+	content.Rollout.Canary = spec.CanarySize
+	content.Rollout.Wave = spec.WaveSize
+	content.Rollout.Concurrent = spec.MaxConcurrent
+	content.Rollout.ThresholdPercent = spec.FailureThresholdPercent
+	content.Rollout.ThresholdCount = spec.FailureThresholdAbsolute
+	content.Rollout.Reboot = spec.RebootPolicy
+	content.Rollout.Units = spec.HealthCheckUnits
+	content.Rollout.Timeout = spec.JobTimeoutSeconds
+	content.Rollout.WindowFrom = spec.MaintenanceStart
+	content.Rollout.WindowTo = spec.MaintenanceEnd
 
-	encoded, err := json.Marshal(tresc)
+	encoded, err := json.Marshal(content)
 	if err != nil {
 		return "", err
 	}
-	suma := sha256.Sum256(encoded)
-	return hex.EncodeToString(suma[:]), nil
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
 }
 
-// OdciskZPlanami przelicza odcisk zatwierdzenia razem z zestawem planow.
+// FingerprintWithPlans recomputes the approval fingerprint together with the
+// set of plans.
 //
-// Po fazie planowania zgoda dotyczy juz nie samego zamowienia, tylko tego,
-// co kazdy host naprawde zrobi. Plan przeliczony na innym stanie hosta daje
-// inny odcisk zestawu, wiec uniewaznia zgode.
-func OdciskZPlanami(campaign Campaign, planSetHash string) (string, error) {
+// After the planning phase the consent no longer concerns the request alone
+// but what every host will really do. A plan computed against a different
+// host state gives a different set digest and therefore invalidates the
+// consent.
+func FingerprintWithPlans(campaign Campaign, planSetHash string) (string, error) {
 	if campaign.ApprovalFingerprint == "" {
-		return "", fmt.Errorf("kampania %s nie ma odcisku zamowienia", campaign.ID)
+		return "", fmt.Errorf("the campaign %s has no request fingerprint", campaign.ID)
 	}
-	// Odcisk zamowienia powstal przy tworzeniu kampanii i obejmuje operacje,
-	// payload, liste hostow i polityke rozwijania. Zestaw planow dokleja sie
-	// do niego, wiec zgoda dotyczy jednego i drugiego.
-	return odciskTekstu([]string{campaign.ApprovalFingerprint, planSetHash}), nil
+	// The request fingerprint came into being when the campaign was created
+	// and covers the operation, the payload, the list of hosts and the
+	// rollout policy. The set of plans is appended to it, so the consent
+	// concerns both.
+	return textFingerprint([]string{campaign.ApprovalFingerprint, planSetHash}), nil
 }
 
-// odciskTekstu liczy odcisk z uporzadkowanej listy tekstow.
-func odciskTekstu(czesci []string) string {
-	suma := sha256.Sum256([]byte(strings.Join(czesci, "\n")))
-	return hex.EncodeToString(suma[:])
+// textFingerprint computes a fingerprint from an ordered list of strings.
+func textFingerprint(parts []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
-// WersjaKampanii jest wersja semantyki kampanii. Zmiana wersji uniewaznia
-// zatwierdzenia: zgoda dotyczyla innych regul.
-const WersjaKampanii = 2
+// CampaignVersion is the version of the campaign semantics. Changing the
+// version invalidates approvals: the consent concerned different rules.
+const CampaignVersion = 2
 
-// Campaign jest widokiem kampanii zwracanym przez API.
+// Campaign is the view of a campaign returned by the API.
 type Campaign struct {
 	ID                       string          `json:"id"`
 	Name                     string          `json:"name"`
@@ -279,11 +285,12 @@ type Campaign struct {
 	HealthCheckUnits         []string        `json:"health_check_units"`
 	JobTimeoutSeconds        int             `json:"job_timeout_seconds"`
 	RequiresApproval         bool            `json:"requires_approval"`
-	// ApprovalFingerprint jest odciskiem tego, co zatwierdzajacy widzi.
-	// Zgoda podana wobec innego odcisku dotyczy innej kampanii.
+	// ApprovalFingerprint is the fingerprint of what the approver sees. A
+	// consent given against a different fingerprint concerns a different
+	// campaign.
 	ApprovalFingerprint string `json:"approval_fingerprint"`
-	// PlanSetHash jest odciskiem zestawu planow per host. Pusty oznacza
-	// kampanie, ktora planow nie potrzebuje.
+	// PlanSetHash is the digest of the set of per-host plans. Empty means a
+	// campaign that needs no plans.
 	PlanSetHash string     `json:"plan_set_hash,omitempty"`
 	ApprovedBy  string     `json:"approved_by,omitempty"`
 	ApprovedAt  *time.Time `json:"approved_at,omitempty"`
@@ -298,7 +305,7 @@ type Campaign struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
-// Target jest hostem w kampanii.
+// Target is a host within a campaign.
 type Target struct {
 	ID         string      `json:"id"`
 	CampaignID string      `json:"campaign_id"`
@@ -308,7 +315,7 @@ type Target struct {
 	Position   int         `json:"position"`
 	State      TargetState `json:"state"`
 	JobID      *string     `json:"job_id,omitempty"`
-	// PlanJobID jest zadaniem, ktore policzylo plan tego hosta.
+	// PlanJobID is the task that computed this host's plan.
 	PlanJobID    *string    `json:"plan_job_id,omitempty"`
 	RebootJobID  *string    `json:"reboot_job_id,omitempty"`
 	HealthJobID  *string    `json:"health_job_id,omitempty"`
@@ -319,18 +326,18 @@ type Target struct {
 	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
-// Report podsumowuje przebieg kampanii.
+// Report summarises the course of a campaign.
 type Report struct {
 	CampaignID string         `json:"campaign_id"`
 	State      State          `json:"state"`
 	Totals     map[string]int `json:"totals"`
 	Waves      []WaveSummary  `json:"waves"`
 	Failures   []Target       `json:"failures"`
-	// RebootRequired to hosty, ktore po zmianie nadal czekaja na restart.
+	// RebootPending are the hosts that still wait for a reboot after the change.
 	RebootPending []string `json:"reboot_pending,omitempty"`
 }
 
-// WaveSummary opisuje jedna fale.
+// WaveSummary describes one wave.
 type WaveSummary struct {
 	Wave      int            `json:"wave"`
 	IsCanary  bool           `json:"is_canary"`
@@ -338,24 +345,25 @@ type WaveSummary struct {
 	Completed bool           `json:"completed"`
 }
 
-// ThresholdExceeded sprawdza, czy liczba bledow przekroczyla prog kampanii.
-// Prog bezwzgledny liczy sie od pierwszego bledu, procentowy dopiero gdy jest
-// z czego liczyc - inaczej pojedynczy blad w canary zawsze konczylby kampanie.
+// ThresholdExceeded checks whether the number of failures has crossed the
+// campaign's threshold. The absolute threshold counts from the first failure,
+// the percentage one only once there is something to compute it from -
+// otherwise a single failure in the canary would always end the campaign.
 func ThresholdExceeded(failed, finished, total, percentThreshold, absoluteThreshold int) (bool, string) {
 	if absoluteThreshold > 0 && failed >= absoluteThreshold {
-		return true, fmt.Sprintf("liczba bledow %d osiagnela prog %d", failed, absoluteThreshold)
+		return true, fmt.Sprintf("the number of failures %d reached the threshold %d", failed, absoluteThreshold)
 	}
 	if percentThreshold > 0 && finished > 0 {
 		percent := failed * 100 / finished
 		if percent >= percentThreshold {
-			return true, fmt.Sprintf("udzial bledow %d%% osiagnal prog %d%%", percent, percentThreshold)
+			return true, fmt.Sprintf("the failure share %d%% reached the threshold %d%%", percent, percentThreshold)
 		}
 	}
 	return false, ""
 }
 
-// WithinMaintenanceWindow mowi, czy w danej chwili wolno prowadzic kampanie.
-// Brak okna oznacza brak ograniczenia.
+// WithinMaintenanceWindow says whether the campaign may run at the given
+// moment. No window means no limitation.
 func WithinMaintenanceWindow(now time.Time, start, end *time.Time) bool {
 	if start != nil && now.Before(*start) {
 		return false

@@ -42,7 +42,7 @@ func poleceniaEnrollmentu(argumenty []string, wejscie io.Reader, wyjscie, bledy 
 		return 1
 	}
 
-	// Tozsamosc, ktora juz dziala, nie moze zostac zastapiona przy okazji.
+	// Identity, ktora juz dziala, nie moze zostac zastapiona przy okazji.
 	// Wymiana istniejacej tozsamosci jest osobna decyzja i idzie przez
 	// zamowienie odtworzenia w panelu.
 	stan := agent.OdczytajTozsamosc(cfg.Agent.StateDir)

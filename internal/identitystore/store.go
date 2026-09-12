@@ -1,14 +1,16 @@
-// Package identitystore trzyma tozsamosc agenta jako niepodzielne generacje.
+// Package identitystore keeps the agent's identity as indivisible
+// generations.
 //
-// Klucz, certyfikat i bundle zaufania sa jedna caloscia. Zapisane osobno,
-// kazde swoim atomowym zapisem, daja okno, w ktorym host ma klucz z jednej
-// pary i certyfikat z drugiej - i nie potrafi sie juz zalogowac do floty.
-// Odzyskanie takiego hosta wymaga wejscia na niego recznie, wiec to jest ta
-// awaria, ktorej caly ten pakiet ma nie dopuscic.
+// The key, the certificate and the trust bundle are one whole. Written
+// separately, each with its own atomic write, they give a window in which the
+// host has the key of one pair and the certificate of another - and can no
+// longer log in to the fleet. Recovering such a host requires walking up to
+// it, so that is the failure this whole package exists to prevent.
 //
-// Nowa generacja powstaje obok, jest sprawdzana i fsyncowana, a dopiero potem
-// wskazuje ja atomowo podmieniany dowiazanie "current". Poprzednia zostaje na
-// dysku: gdy nowa okaze sie zla, jest do czego wrocic.
+// A new generation comes into being alongside, is checked and fsynced, and
+// only then is it pointed at by the atomically replaced "current" symlink.
+// The previous one stays on disk: when the new one turns out to be bad, there
+// is something to go back to.
 package identitystore
 
 import (
@@ -27,459 +29,467 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
-// Nazwy plikow i katalogow magazynu.
+// The names of the store's files and directories.
 const (
-	KatalogTozsamosci = "identity"
-	KatalogGeneracji  = "generations"
-	NazwaBiezacej     = "current"
-	nazwaNastepnej    = ".current-next"
-	przedrostekNowej  = ".new-"
+	IdentityDir    = "identity"
+	GenerationsDir = "generations"
+	CurrentName    = "current"
+	nextName       = ".current-next"
+	newPrefix      = ".new-"
 
-	NazwaKlucza      = "agent.key"
-	NazwaCertyfikatu = "agent.pem"
-	NazwaZaufania    = "trust-bundle.pem"
+	KeyName         = "agent.key"
+	CertificateName = "agent.pem"
+	TrustName       = "trust-bundle.pem"
 )
 
-// GeneracjiDoZachowania mowi, ile generacji zostaje na dysku.
+// GenerationsKept says how many generations stay on disk.
 //
-// Biezaca i jedna poprzednia: wiecej nie jest do niczego potrzebne, a kazda
-// z nich to klucz prywatny, ktory lepiej, zeby nie lezal dluzej niz musi.
-const GeneracjiDoZachowania = 2
+// The current one and one previous: more is needed for nothing, and each of
+// them is a private key that had better not lie around longer than it must.
+const GenerationsKept = 2
 
-// Bledy magazynu. Kody sa czescia kontraktu z operatorem - to one pokazuja
-// sie na hoscie, ktory nie ma polaczenia z panelem.
+// The store's errors. The codes are part of the contract with the operator -
+// they are what shows up on a host that has no connection with the panel.
 var (
-	ErrBrakTozsamosci = errors.New("identity_missing")
-	ErrParaKluczy     = errors.New("key_pair")
-	ErrZaufanie       = errors.New("trust_bundle_invalid")
-	ErrLancuch        = errors.New("certificate_chain")
-	ErrTozsamoscCert  = errors.New("identity_uri_missing")
+	ErrIdentityMissing = errors.New("identity_missing")
+	ErrKeyPair         = errors.New("key_pair")
+	ErrTrust           = errors.New("trust_bundle_invalid")
+	ErrChain           = errors.New("certificate_chain")
+	ErrIdentityURI     = errors.New("identity_uri_missing")
 )
 
-// Generacja jest kompletem materialu kryptograficznego hosta.
-type Generacja struct {
-	// Klucz jest zrodlem materialu prywatnego. Interfejs, bo klucz nie
-	// zawsze da sie wyeksportowac - profil sprzetowy zostawia go w ukladzie
-	// i oddaje wylacznie podpisywanie.
-	Klucz Klucz
-	// KluczPEM jest droga dla klucza, ktory jest zwyklym plikiem. Puste, gdy
-	// podano Klucz; podane, gdy wolajacy ma juz gotowy material.
-	KluczPEM      []byte
-	CertyfikatPEM []byte
-	ZaufaniePEM   []byte
+// Generation is the complete cryptographic material of a host.
+type Generation struct {
+	// Key is the source of the private material. An interface, because a key
+	// cannot always be exported - a hardware profile leaves it in the chip
+	// and gives out signing only.
+	Key Key
+	// KeyPEM is the way for a key that is an ordinary file. Empty when Key is
+	// given; given when the caller already has the material.
+	KeyPEM          []byte
+	CertificatePEM  []byte
+	TrustPEM        []byte
 }
 
-// klucz zwraca klucz generacji niezaleznie od drogi, ktora zostal podany.
-func (g Generacja) klucz() (Klucz, error) {
-	if g.Klucz != nil {
-		return g.Klucz, nil
+// key returns the generation's key regardless of the way it was given.
+func (g Generation) key() (Key, error) {
+	if g.Key != nil {
+		return g.Key, nil
 	}
-	if len(g.KluczPEM) == 0 {
-		return nil, fmt.Errorf("%w: generacja bez klucza", ErrParaKluczy)
+	if len(g.KeyPEM) == 0 {
+		return nil, fmt.Errorf("%w: a generation without a key", ErrKeyPair)
 	}
-	return KluczZPEM(g.KluczPEM)
+	return KeyFromPEM(g.KeyPEM)
 }
 
-// Tozsamosc jest wczytana generacja gotowa do uzycia w polaczeniu.
-type Tozsamosc struct {
+// Identity is a loaded generation ready to be used in a connection.
+type Identity struct {
 	HostID      string
 	Certificate tls.Certificate
 	CAPool      *x509.CertPool
 	NotBefore   time.Time
 	NotAfter    time.Time
-	// Katalog wskazuje generacje, z ktorej pochodzi ta tozsamosc.
-	Katalog string
-	// ZaufaniePEM zostaje w pamieci, bo odnowienie musi zapisac komplet
-	// nawet wtedy, gdy panel nie przyslal nowego bundla.
-	ZaufaniePEM []byte
+	// Dir names the generation this identity comes from.
+	Dir string
+	// TrustPEM stays in memory, because a renewal has to write the complete
+	// set even when the panel sent no new bundle.
+	TrustPEM []byte
 }
 
-// Magazyn zarzadza katalogiem tozsamosci hosta.
-type Magazyn struct {
+// Store manages the host's identity directory.
+type Store struct {
 	root   string
-	zrodlo ZrodloKlucza
+	source KeySource
 }
 
-// Nowy tworzy magazyn w katalogu stanu agenta.
-func Nowy(katalogStanu string) *Magazyn {
-	return NowyZeZrodlem(katalogStanu, Programowe())
+// New creates the store in the agent's state directory.
+func New(stateDir string) *Store {
+	return NewWithSource(stateDir, Software())
 }
 
-// NowyZeZrodlem tworzy magazyn z wskazanym zrodlem kluczy.
+// NewWithSource creates the store with the given source of keys.
 //
-// Profil sprzetowy podmienia wylacznie zrodlo: reszta magazynu, enrollment
-// i odnawianie nie wiedza, gdzie lezy klucz, i nie maja wiedziec.
-func NowyZeZrodlem(katalogStanu string, zrodlo ZrodloKlucza) *Magazyn {
-	if zrodlo == nil {
-		zrodlo = Programowe()
+// A hardware profile replaces the source alone: the rest of the store, the
+// enrollment and the renewal do not know where the key lies, and are not
+// meant to.
+func NewWithSource(stateDir string, source KeySource) *Store {
+	if source == nil {
+		source = Software()
 	}
-	return &Magazyn{root: filepath.Join(katalogStanu, KatalogTozsamosci), zrodlo: zrodlo}
+	return &Store{root: filepath.Join(stateDir, IdentityDir), source: source}
 }
 
-// NowyKlucz tworzy klucz zgodny ze zrodlem tego magazynu.
-func (m *Magazyn) NowyKlucz() (Klucz, error) { return m.zrodlo.Nowy() }
+// NewKey creates a key matching this store's source.
+func (m *Store) NewKey() (Key, error) { return m.source.New() }
 
-// Katalog zwraca katalog tozsamosci.
-func (m *Magazyn) Katalog() string { return m.root }
+// Dir returns the identity directory.
+func (m *Store) Dir() string { return m.root }
 
-// Sprawdz weryfikuje generacje przed jakakolwiek zmiana na dysku.
+// Check verifies a generation before any change on disk.
 //
-// Kolejnosc ma znaczenie: najpierw para klucz-certyfikat, potem lancuch do
-// bundla zaufania, na koncu tozsamosc w certyfikacie. Kazde z nich osobno
-// oznacza cos innego dla operatora.
-func Sprawdz(g Generacja) error {
-	klucz, err := g.klucz()
+// The order matters: first the key-certificate pair, then the chain to the
+// trust bundle, and the identity in the certificate last. Each of them means
+// something different to the operator.
+func Check(g Generation) error {
+	key, err := g.key()
 	if err != nil {
 		return err
 	}
-	blok, _ := pem.Decode(g.CertyfikatPEM)
-	if blok == nil {
-		return fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrParaKluczy)
+	block, _ := pem.Decode(g.CertificatePEM)
+	if block == nil {
+		return fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrKeyPair)
 	}
-	lisc, err := x509.ParseCertificate(blok.Bytes)
+	leaf, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParaKluczy, err)
+		return fmt.Errorf("%w: %v", ErrKeyPair, err)
 	}
-	// Para jest sprawdzana przez klucz publiczny, a nie przez zlozenie
-	// certyfikatu z materialem prywatnym: klucza sprzetowego nie da sie
-	// zlozyc, a i tak wiadomo, czy pasuje.
-	if !pasujaKlucze(lisc.PublicKey, klucz.Publiczny()) {
-		return fmt.Errorf("%w: certyfikat nie pasuje do klucza", ErrParaKluczy)
+	// The pair is checked through the public key rather than by combining the
+	// certificate with the private material: a hardware key cannot be
+	// combined, and it is known anyway whether it matches.
+	if !keysMatch(leaf.PublicKey, key.Public()) {
+		return fmt.Errorf("%w: certyfikat nie pasuje do klucza", ErrKeyPair)
 	}
-	korzenie := x509.NewCertPool()
-	if !korzenie.AppendCertsFromPEM(g.ZaufaniePEM) {
-		return ErrZaufanie
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(g.TrustPEM) {
+		return ErrTrust
 	}
-	if _, err := lisc.Verify(x509.VerifyOptions{
-		Roots:       korzenie,
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:       roots,
 		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		CurrentTime: time.Now(),
 	}); err != nil {
-		return fmt.Errorf("%w: %v", ErrLancuch, err)
+		return fmt.Errorf("%w: %v", ErrChain, err)
 	}
-	// Magazyn trzyma tozsamosc agenta i tozsamosc relaya: zapisuje klucz
-	// z certyfikatem, a nie role. Rodzaj rozstrzyga to, co sie tym
-	// certyfikatem robi, i sprawdzaja go uslugi po drugiej stronie.
-	if _, _, err := pki.IdentityFromCert(lisc); err != nil {
-		return fmt.Errorf("%w: %v", ErrTozsamoscCert, err)
+	// The store keeps the agent's identity and the relay's identity: it
+	// records a key with a certificate rather than a role. The kind is
+	// settled by what is done with that certificate, and the services on the
+	// other side check it.
+	if _, _, err := pki.IdentityFromCert(leaf); err != nil {
+		return fmt.Errorf("%w: %v", ErrIdentityURI, err)
 	}
 	return nil
 }
 
-// Zatwierdz zapisuje nowa generacje i przelacza na nia "current".
+// Commit records a new generation and switches "current" to it.
 //
-// Kolejnosc jest cala trescia tej funkcji: nic nie przelacza tozsamosci, zanim
-// komplet nie lezy na dysku i nie przejdzie weryfikacji. Przerwanie w kazdym
-// punkcie zostawia hosta na poprzedniej, dzialajacej generacji.
-func (m *Magazyn) Zatwierdz(g Generacja) (*Tozsamosc, error) {
-	if err := Sprawdz(g); err != nil {
+// The order is the whole content of this function: nothing switches the
+// identity before the complete set lies on disk and passes verification. An
+// interruption at any point leaves the host on the previous, working
+// generation.
+func (m *Store) Commit(g Generation) (*Identity, error) {
+	if err := Check(g); err != nil {
 		return nil, err
 	}
-	generacje := filepath.Join(m.root, KatalogGeneracji)
-	if err := os.MkdirAll(generacje, 0o700); err != nil {
+	generations := filepath.Join(m.root, GenerationsDir)
+	if err := os.MkdirAll(generations, 0o700); err != nil {
 		return nil, err
 	}
 
-	tymczasowy, err := os.MkdirTemp(generacje, przedrostekNowej)
+	temporary, err := os.MkdirTemp(generations, newPrefix)
 	if err != nil {
 		return nil, err
 	}
-	zatwierdzona := false
+	committed := false
 	defer func() {
-		if !zatwierdzona {
-			_ = os.RemoveAll(tymczasowy)
+		if !committed {
+			_ = os.RemoveAll(temporary)
 		}
 	}()
-	if err := os.Chmod(tymczasowy, 0o700); err != nil {
+	if err := os.Chmod(temporary, 0o700); err != nil {
 		return nil, err
 	}
 
-	// Klucz zapisuje sie sam: tylko on wie, co znaczy jego utrwalenie.
-	// Certyfikat i bundle nie sa tajne i moga byc czytane przez narzedzia
-	// diagnostyczne.
-	klucz, err := g.klucz()
+	// The key writes itself: only it knows what persisting it means. The
+	// certificate and the bundle are not secret and can be read by diagnostic
+	// tools.
+	key, err := g.key()
 	if err != nil {
 		return nil, err
 	}
-	if err := klucz.Zapisz(tymczasowy); err != nil {
+	if err := key.Save(temporary); err != nil {
 		return nil, err
 	}
-	if err := zapiszZSync(filepath.Join(tymczasowy, NazwaCertyfikatu), g.CertyfikatPEM, 0o644); err != nil {
+	if err := writeWithSync(filepath.Join(temporary, CertificateName), g.CertificatePEM, 0o644); err != nil {
 		return nil, err
 	}
-	if err := zapiszZSync(filepath.Join(tymczasowy, NazwaZaufania), g.ZaufaniePEM, 0o644); err != nil {
+	if err := writeWithSync(filepath.Join(temporary, TrustName), g.TrustPEM, 0o644); err != nil {
 		return nil, err
 	}
-	if err := syncKatalog(tymczasowy); err != nil {
+	if err := syncDir(temporary); err != nil {
 		return nil, err
 	}
 
-	numer, err := numerSeryjny(g.CertyfikatPEM)
+	serial, err := serialNumber(g.CertificatePEM)
 	if err != nil {
 		return nil, err
 	}
-	docelowy := filepath.Join(generacje, numer)
-	// Ten sam numer seryjny znaczy ten sam certyfikat: zapis powtorzony po
-	// przerwanym starcie ma dac ten sam wynik, a nie blad.
-	if _, err := os.Stat(docelowy); err == nil {
-		if err := os.RemoveAll(docelowy); err != nil {
+	target := filepath.Join(generations, serial)
+	// The same serial number means the same certificate: a write repeated
+	// after an interrupted start is to give the same result rather than an
+	// error.
+	if _, err := os.Stat(target); err == nil {
+		if err := os.RemoveAll(target); err != nil {
 			return nil, err
 		}
 	}
-	if err := os.Rename(tymczasowy, docelowy); err != nil {
+	if err := os.Rename(temporary, target); err != nil {
 		return nil, err
 	}
-	zatwierdzona = true
-	if err := syncKatalog(generacje); err != nil {
+	committed = true
+	if err := syncDir(generations); err != nil {
 		return nil, err
 	}
 
-	if err := m.przelacz(numer); err != nil {
+	if err := m.switchTo(serial); err != nil {
 		return nil, err
 	}
-	if err := m.Sprzataj(); err != nil {
+	if err := m.Clean(); err != nil {
 		return nil, err
 	}
-	return m.Biezaca()
+	return m.Current()
 }
 
-// przelacz podmienia dowiazanie "current" jednym atomowym ruchem.
-func (m *Magazyn) przelacz(numer string) error {
-	nastepna := filepath.Join(m.root, nazwaNastepnej)
-	_ = os.Remove(nastepna)
-	if err := os.Symlink(filepath.Join(KatalogGeneracji, numer), nastepna); err != nil {
+// switchTo replaces the "current" symlink in one atomic move.
+func (m *Store) switchTo(serial string) error {
+	next := filepath.Join(m.root, nextName)
+	_ = os.Remove(next)
+	if err := os.Symlink(filepath.Join(GenerationsDir, serial), next); err != nil {
 		return err
 	}
-	if err := os.Rename(nastepna, filepath.Join(m.root, NazwaBiezacej)); err != nil {
-		_ = os.Remove(nastepna)
+	if err := os.Rename(next, filepath.Join(m.root, CurrentName)); err != nil {
+		_ = os.Remove(next)
 		return err
 	}
-	return syncKatalog(m.root)
+	return syncDir(m.root)
 }
 
-// Biezaca wczytuje tozsamosc wskazywana przez "current".
+// Current loads the identity pointed at by "current".
 //
-// Dowiazanie rozwiazujemy do prawdziwego katalogu generacji: to on jest
-// odpowiedzia na pytanie "z czego host teraz korzysta", a nie sciezka
-// dowiazania, ktora jest zawsze ta sama.
-func (m *Magazyn) Biezaca() (*Tozsamosc, error) {
-	katalog, err := filepath.EvalSymlinks(filepath.Join(m.root, NazwaBiezacej))
+// We resolve the symlink to the real generation directory: that directory is
+// the answer to "what is the host using now", not the symlink path, which is
+// always the same.
+func (m *Store) Current() (*Identity, error) {
+	dir, err := filepath.EvalSymlinks(filepath.Join(m.root, CurrentName))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
+		return nil, fmt.Errorf("%w: %v", ErrIdentityMissing, err)
 	}
-	return wczytaj(katalog, m.zrodlo)
+	return load(dir, m.source)
 }
 
-// Poprzednia wczytuje generacje sprzed biezacej.
+// Previous loads the generation from before the current one.
 //
-// Zostaje na dysku po to, zeby bylo do czego wrocic, gdy nowa okaze sie zla -
-// na przyklad gdy panel wyda certyfikat, ktorego sam potem nie uznaje.
-func (m *Magazyn) Poprzednia() (*Tozsamosc, error) {
-	biezaca, err := os.Readlink(filepath.Join(m.root, NazwaBiezacej))
+// It stays on disk so that there is something to go back to when the new one
+// turns out to be bad - for example when the panel issues a certificate it
+// then does not recognise itself.
+func (m *Store) Previous() (*Identity, error) {
+	current, err := os.Readlink(filepath.Join(m.root, CurrentName))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
+		return nil, fmt.Errorf("%w: %v", ErrIdentityMissing, err)
 	}
-	nazwy, err := m.generacje()
+	names, err := m.generations()
 	if err != nil {
 		return nil, err
 	}
-	aktualna := filepath.Base(biezaca)
-	for i := len(nazwy) - 1; i >= 0; i-- {
-		if nazwy[i] == aktualna {
+	currentName := filepath.Base(current)
+	for i := len(names) - 1; i >= 0; i-- {
+		if names[i] == currentName {
 			continue
 		}
-		return wczytaj(filepath.Join(m.root, KatalogGeneracji, nazwy[i]), m.zrodlo)
+		return load(filepath.Join(m.root, GenerationsDir, names[i]), m.source)
 	}
-	return nil, ErrBrakTozsamosci
+	return nil, ErrIdentityMissing
 }
 
-// Sprzataj usuwa slady przerwanych zapisow i nadmiarowe generacje.
+// Clean removes the traces of interrupted writes and the surplus
+// generations.
 //
-// Wolane przy starcie i po kazdym zatwierdzeniu: katalog tymczasowy, ktory
-// zostal po awarii, i dowiazanie ".current-next" sa smieciami, a nie stanem.
-func (m *Magazyn) Sprzataj() error {
-	// Dowiazanie tymczasowe nigdy nie jest tozsamoscia hosta: albo zdazylo
-	// zostac przemianowane na "current", albo nie istnieje.
-	_ = os.Remove(filepath.Join(m.root, nazwaNastepnej))
+// Called at start and after every commit: a temporary directory left after a
+// crash and the ".current-next" symlink are rubbish rather than state.
+func (m *Store) Clean() error {
+	// A temporary symlink is never the host's identity: either it was renamed
+	// to "current" or it does not exist.
+	_ = os.Remove(filepath.Join(m.root, nextName))
 
-	generacje := filepath.Join(m.root, KatalogGeneracji)
-	wpisy, err := os.ReadDir(generacje)
+	generations := filepath.Join(m.root, GenerationsDir)
+	entries, err := os.ReadDir(generations)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	for _, wpis := range wpisy {
-		if strings.HasPrefix(wpis.Name(), przedrostekNowej) {
-			_ = os.RemoveAll(filepath.Join(generacje, wpis.Name()))
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), newPrefix) {
+			_ = os.RemoveAll(filepath.Join(generations, entry.Name()))
 		}
 	}
 
-	biezaca := ""
-	if cel, err := os.Readlink(filepath.Join(m.root, NazwaBiezacej)); err == nil {
-		biezaca = filepath.Base(cel)
+	current := ""
+	if target, err := os.Readlink(filepath.Join(m.root, CurrentName)); err == nil {
+		current = filepath.Base(target)
 	}
-	nazwy, err := m.generacje()
+	names, err := m.generations()
 	if err != nil {
 		return err
 	}
-	// Kasujemy od najstarszych i nigdy biezacej: generacja, na ktorej host
-	// wlasnie pracuje, nie jest nadmiarowa nawet wtedy, gdy jest najstarsza.
-	doUsuniecia := len(nazwy) - GeneracjiDoZachowania
-	for i := 0; i < len(nazwy) && doUsuniecia > 0; i++ {
-		if nazwy[i] == biezaca {
+	// We delete from the oldest and never the current one: the generation the
+	// host is working on is not surplus even when it is the oldest.
+	toRemove := len(names) - GenerationsKept
+	for i := 0; i < len(names) && toRemove > 0; i++ {
+		if names[i] == current {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(generacje, nazwy[i])); err != nil {
+		if err := os.RemoveAll(filepath.Join(generations, names[i])); err != nil {
 			return err
 		}
-		doUsuniecia--
+		toRemove--
 	}
 	return nil
 }
 
-// generacje zwraca nazwy generacji uporzadkowane od najstarszej.
-func (m *Magazyn) generacje() ([]string, error) {
-	wpisy, err := os.ReadDir(filepath.Join(m.root, KatalogGeneracji))
+// generations returns the names of the generations ordered from the oldest.
+func (m *Store) generations() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(m.root, GenerationsDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	type wpisGeneracji struct {
-		nazwa string
-		czas  time.Time
+	type generationEntry struct {
+		name string
+		time time.Time
 	}
-	var zebrane []wpisGeneracji
-	for _, wpis := range wpisy {
-		if !wpis.IsDir() || strings.HasPrefix(wpis.Name(), przedrostekNowej) {
+	var collected []generationEntry
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), newPrefix) {
 			continue
 		}
-		info, err := wpis.Info()
+		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		zebrane = append(zebrane, wpisGeneracji{nazwa: wpis.Name(), czas: info.ModTime()})
+		collected = append(collected, generationEntry{name: entry.Name(), time: info.ModTime()})
 	}
-	sort.Slice(zebrane, func(i, j int) bool {
-		if zebrane[i].czas.Equal(zebrane[j].czas) {
-			return zebrane[i].nazwa < zebrane[j].nazwa
+	sort.Slice(collected, func(i, j int) bool {
+		if collected[i].time.Equal(collected[j].time) {
+			return collected[i].name < collected[j].name
 		}
-		return zebrane[i].czas.Before(zebrane[j].czas)
+		return collected[i].time.Before(collected[j].time)
 	})
-	nazwy := make([]string, 0, len(zebrane))
-	for _, wpis := range zebrane {
-		nazwy = append(nazwy, wpis.nazwa)
+	names := make([]string, 0, len(collected))
+	for _, entry := range collected {
+		names = append(names, entry.name)
 	}
-	return nazwy, nil
+	return names, nil
 }
 
-// wczytaj czyta komplet z katalogu generacji.
+// load reads the complete set from a generation directory.
 //
-// Klucz wczytuje zrodlo, a nie ta funkcja: dla klucza sprzetowego w katalogu
-// lezy uchwyt, a nie material, i tylko zrodlo wie, co z nim zrobic.
-func wczytaj(katalog string, zrodlo ZrodloKlucza) (*Tozsamosc, error) {
-	if zrodlo == nil {
-		zrodlo = Programowe()
+// The source loads the key rather than this function: for a hardware key the
+// directory holds a handle rather than material, and only the source knows
+// what to do with it.
+func load(dir string, source KeySource) (*Identity, error) {
+	if source == nil {
+		source = Software()
 	}
-	klucz, err := zrodlo.Wczytaj(katalog)
+	key, err := source.Load(dir)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
+		return nil, fmt.Errorf("%w: %v", ErrIdentityMissing, err)
 	}
-	certPEM, err := os.ReadFile(filepath.Join(katalog, NazwaCertyfikatu))
+	certPEM, err := os.ReadFile(filepath.Join(dir, CertificateName))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
+		return nil, fmt.Errorf("%w: %v", ErrIdentityMissing, err)
 	}
-	zaufaniePEM, err := os.ReadFile(filepath.Join(katalog, NazwaZaufania))
+	trustPEM, err := os.ReadFile(filepath.Join(dir, TrustName))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBrakTozsamosci, err)
+		return nil, fmt.Errorf("%w: %v", ErrIdentityMissing, err)
 	}
 
-	blok, _ := pem.Decode(certPEM)
-	if blok == nil {
-		return nil, fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrParaKluczy)
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("%w: certyfikat nie zawiera bloku PEM", ErrKeyPair)
 	}
-	para := tls.Certificate{Certificate: [][]byte{blok.Bytes}, PrivateKey: klucz.Signer()}
-	lisc, err := x509.ParseCertificate(para.Certificate[0])
+	pair := tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: key.Signer()}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrParaKluczy, err)
+		return nil, fmt.Errorf("%w: %v", ErrKeyPair, err)
 	}
-	pula := x509.NewCertPool()
-	if !pula.AppendCertsFromPEM(zaufaniePEM) {
-		return nil, ErrZaufanie
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(trustPEM) {
+		return nil, ErrTrust
 	}
-	_, hostID, err := pki.IdentityFromCert(lisc)
+	_, hostID, err := pki.IdentityFromCert(leaf)
 	if err != nil {
-		// Starsze certyfikaty floty moga nie miec URI SAN. Nazwa wlasna jest
-		// wtedy jedynym, co host o sobie wie - i lepsza niz odmowa startu.
-		hostID = lisc.Subject.CommonName
+		// Older fleet certificates may have no URI SAN. The common name is
+		// then the only thing the host knows about itself - and better than
+		// refusing to start.
+		hostID = leaf.Subject.CommonName
 	}
-	para.Leaf = lisc
-	return &Tozsamosc{
-		HostID: hostID, Certificate: para, CAPool: pula,
-		NotBefore: lisc.NotBefore, NotAfter: lisc.NotAfter,
-		Katalog: katalog, ZaufaniePEM: zaufaniePEM,
+	pair.Leaf = leaf
+	return &Identity{
+		HostID: hostID, Certificate: pair, CAPool: pool,
+		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter,
+		Dir: dir, TrustPEM: trustPEM,
 	}, nil
 }
 
-// numerSeryjny nazywa generacje numerem seryjnym certyfikatu.
+// serialNumber names a generation by the certificate's serial number.
 //
-// Nazwa musi byc rozna dla roznych certyfikatow i taka sama dla powtorzonego
-// zapisu tego samego - numer seryjny spelnia jedno i drugie.
-func numerSeryjny(certPEM []byte) (string, error) {
-	blok, _ := pem.Decode(certPEM)
-	if blok == nil {
-		return "", fmt.Errorf("%w: certyfikat nie jest poprawnym PEM", ErrParaKluczy)
+// The name has to be different for different certificates and the same for a
+// repeated write of the same one - a serial number does both.
+func serialNumber(certPEM []byte) (string, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return "", fmt.Errorf("%w: certyfikat nie jest poprawnym PEM", ErrKeyPair)
 	}
-	cert, err := x509.ParseCertificate(blok.Bytes)
+	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrParaKluczy, err)
+		return "", fmt.Errorf("%w: %v", ErrKeyPair, err)
 	}
 	return cert.SerialNumber.Text(16), nil
 }
 
-// zapiszZSync zapisuje plik i wymusza jego trwalosc.
-func zapiszZSync(sciezka string, dane []byte, tryb os.FileMode) error {
-	plik, err := os.OpenFile(sciezka, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, tryb)
+// writeWithSync writes a file and forces it to be durable.
+func writeWithSync(path string, data []byte, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	if _, err := plik.Write(dane); err != nil {
-		plik.Close()
+	if _, err := file.Write(data); err != nil {
+		file.Close()
 		return err
 	}
-	if err := plik.Sync(); err != nil {
-		plik.Close()
+	if err := file.Sync(); err != nil {
+		file.Close()
 		return err
 	}
-	return plik.Close()
+	return file.Close()
 }
 
-// syncKatalog wymusza trwalosc samej zmiany nazw w katalogu.
-func syncKatalog(sciezka string) error {
-	katalog, err := os.Open(sciezka)
+// syncDir forces the durability of the rename within a directory itself.
+func syncDir(path string) error {
+	dir, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer katalog.Close()
-	return katalog.Sync()
+	defer dir.Close()
+	return dir.Sync()
 }
 
-// Migruj przenosi tozsamosc ze starego ukladu plikow do generacji.
+// Migrate moves an identity from the old file layout into generations.
 //
-// Host postawiony przed wprowadzeniem magazynu ma klucz, certyfikat i bundle
-// luzem w katalogu stanu. Przeniesienie ich w calosc jest jednorazowe i nie
-// kasuje oryginalow: gdyby cos poszlo nie tak, poprzednia wersja agenta ma
-// z czego wystartowac.
+// A host set up before the store was introduced has its key, certificate and
+// bundle loose in the state directory. Moving them as a whole happens once
+// and does not delete the originals: should anything go wrong, the previous
+// version of the agent has something to start from.
 //
-// Zwraca true, gdy migracja naprawde sie odbyla.
-func (m *Magazyn) Migruj(kluczPath, certPath, zaufaniePath string) (bool, error) {
-	if _, err := os.Lstat(filepath.Join(m.root, NazwaBiezacej)); err == nil {
+// It returns true when a migration really happened.
+func (m *Store) Migrate(keyPath, certPath, trustPath string) (bool, error) {
+	if _, err := os.Lstat(filepath.Join(m.root, CurrentName)); err == nil {
 		return false, nil
 	}
-	kluczPEM, err := os.ReadFile(kluczPath)
+	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
 		return false, nil
 	}
@@ -487,28 +497,28 @@ func (m *Magazyn) Migruj(kluczPath, certPath, zaufaniePath string) (bool, error)
 	if err != nil {
 		return false, nil
 	}
-	zaufaniePEM, err := os.ReadFile(zaufaniePath)
+	trustPEM, err := os.ReadFile(trustPath)
 	if err != nil {
 		return false, nil
 	}
 	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return false, err
 	}
-	if _, err := m.Zatwierdz(Generacja{
-		KluczPEM: kluczPEM, CertyfikatPEM: certPEM, ZaufaniePEM: zaufaniePEM,
+	if _, err := m.Commit(Generation{
+		KeyPEM: keyPEM, CertificatePEM: certPEM, TrustPEM: trustPEM,
 	}); err != nil {
-		// Tozsamosc, ktorej nie da sie zweryfikowac, nie jest tozsamoscia do
-		// przeniesienia: host musi przejsc enrollment jeszcze raz.
+		// An identity that cannot be verified is not an identity to move:
+		// the host has to go through enrollment again.
 		return false, err
 	}
 	return true, nil
 }
 
-// pasujaKlucze mowi, czy certyfikat opisuje ten klucz.
-func pasujaKlucze(zCertyfikatu, publiczny crypto.PublicKey) bool {
-	porownywalny, ok := publiczny.(interface{ Equal(crypto.PublicKey) bool })
+// keysMatch says whether the certificate describes this key.
+func keysMatch(fromCertificate, public crypto.PublicKey) bool {
+	comparable, ok := public.(interface{ Equal(crypto.PublicKey) bool })
 	if !ok {
 		return false
 	}
-	return porownywalny.Equal(zCertyfikatu)
+	return comparable.Equal(fromCertificate)
 }

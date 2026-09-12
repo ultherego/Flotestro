@@ -145,13 +145,13 @@ type StanTozsamosci struct {
 // Najpierw magazyn generacji, potem stary uklad plikow: narzedzie na hoscie
 // ma odpowiadac tak samo przed migracja i po niej.
 func OdczytajTozsamosc(stateDir string) StanTozsamosci {
-	magazyn := identitystore.Nowy(stateDir)
-	if tozsamosc, err := magazyn.Biezaca(); err == nil {
+	magazyn := identitystore.New(stateDir)
+	if tozsamosc, err := magazyn.Current(); err == nil {
 		return StanTozsamosci{
 			Sciezki: IdentityPaths{
-				Key:  filepath.Join(tozsamosc.Katalog, identitystore.NazwaKlucza),
-				Cert: filepath.Join(tozsamosc.Katalog, identitystore.NazwaCertyfikatu),
-				CA:   filepath.Join(tozsamosc.Katalog, identitystore.NazwaZaufania),
+				Key:  filepath.Join(tozsamosc.Dir, identitystore.KeyName),
+				Cert: filepath.Join(tozsamosc.Dir, identitystore.CertificateName),
+				CA:   filepath.Join(tozsamosc.Dir, identitystore.TrustName),
 			},
 			Obecna:   true,
 			HostID:   tozsamosc.HostID,

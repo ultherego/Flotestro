@@ -46,7 +46,7 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	}
 	// Odtworzenie tozsamosci ma wlasne wejscie na hoscie i wlasne prawo:
 	// tutaj przyjmujemy wylacznie zamowienia nowych maszyn i relayow.
-	if req.Purpose == enrollment.CelWymiana {
+	if req.Purpose == enrollment.PurposeReplace {
 		problem(w, http.StatusBadRequest, "purpose_not_allowed",
 			"identity recovery is requested on the host itself")
 		return
@@ -75,7 +75,7 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 
 // tworzZamowienie sklada wejscie magazynu z zadania HTTP.
 func (s *Server) tworzZamowienie(r *http.Request, req zamowienieRequest, aktor,
-	hostID string) (*enrollment.Zamowienie, error) {
+	hostID string) (*enrollment.Request, error) {
 	if req.Site == "" {
 		req.Site = "default"
 	}
@@ -86,7 +86,7 @@ func (s *Server) tworzZamowienie(r *http.Request, req zamowienieRequest, aktor,
 	if req.TTLMinutes <= 0 {
 		ttl = 15 * time.Minute
 	}
-	return s.tokens.Create(r.Context(), enrollment.TworzenieWejscie{
+	return s.tokens.Create(r.Context(), enrollment.CreateInput{
 		Description: req.Description, Site: req.Site, Environment: req.Environment,
 		Kind: req.Kind, Purpose: req.Purpose,
 		ExpectedMachineID: req.ExpectedMachineID, ExpectedHostID: hostID,
@@ -114,12 +114,12 @@ const (
 	KrokInwentarz  = "inventory"
 	StanCzeka      = "waiting"
 	StanZrobione   = "done"
-	StanNieudany   = "failed"
+	StateFailed   = "failed"
 )
 
 // zamowienieZKrokami dokleda do zamowienia postep instalacji.
 type zamowienieZKrokami struct {
-	*enrollment.Zamowienie
+	*enrollment.Request
 	Steps []krokInstalacji `json:"steps"`
 }
 
@@ -129,10 +129,10 @@ type zamowienieZKrokami struct {
 // certyfikat z zapisanego hosta, sesja ze stanu polaczenia, a inwentarz
 // z fragmentow, ktore juz doszly.
 func (s *Server) krokiInstalacji(r *http.Request,
-	zamowienie *enrollment.Zamowienie) []krokInstalacji {
-	nieudane := zamowienie.Status == enrollment.StatusWygasl ||
-		zamowienie.Status == enrollment.StatusUniewazniony ||
-		zamowienie.Status == enrollment.StatusNieudany
+	zamowienie *enrollment.Request) []krokInstalacji {
+	nieudane := zamowienie.Status == enrollment.StatusExpired ||
+		zamowienie.Status == enrollment.StatusRevoked ||
+		zamowienie.Status == enrollment.StatusFailed
 
 	stanKroku := func(zrobiony bool) string {
 		switch {
@@ -140,7 +140,7 @@ func (s *Server) krokiInstalacji(r *http.Request,
 			return StanZrobione
 		case nieudane:
 			// Zamowienie zamkniete bez tego kroku juz go nie wykona.
-			return StanNieudany
+			return StateFailed
 		default:
 			return StanCzeka
 		}
@@ -183,8 +183,8 @@ func (s *Server) handleGetEnrollmentRequest(w http.ResponseWriter, r *http.Reque
 		"enrollment_request", r.PathValue("id")); !ok {
 		return
 	}
-	zamowienie, err := s.tokens.Zamowienie(r.Context(), r.PathValue("id"))
-	if errors.Is(err, enrollment.ErrNieznaneZamowienie) {
+	zamowienie, err := s.tokens.Request(r.Context(), r.PathValue("id"))
+	if errors.Is(err, enrollment.ErrUnknownRequest) {
 		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
 		return
 	}
@@ -193,7 +193,7 @@ func (s *Server) handleGetEnrollmentRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, zamowienieZKrokami{
-		Zamowienie: zamowienie, Steps: s.krokiInstalacji(r, zamowienie),
+		Request: zamowienie, Steps: s.krokiInstalacji(r, zamowienie),
 	})
 }
 
@@ -204,8 +204,8 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	err := s.tokens.Uniewaznij(r.Context(), r.PathValue("id"))
-	if errors.Is(err, enrollment.ErrNieznaneZamowienie) {
+	err := s.tokens.Revoke(r.Context(), r.PathValue("id"))
+	if errors.Is(err, enrollment.ErrUnknownRequest) {
 		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
 		return
 	}
@@ -256,7 +256,7 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	// Zakres bierze sie z hosta, a nie z zadania: odtworzenie tozsamosci nie
 	// jest okazja do przeniesienia hosta do innego site albo srodowiska.
 	req.Site, req.Environment = host.Site, host.Environment
-	req.Kind, req.Purpose = enrollment.KindAgent, enrollment.CelWymiana
+	req.Kind, req.Purpose = enrollment.KindAgent, enrollment.PurposeReplace
 	req.MaxUses = 1
 
 	zamowienie, err := s.tworzZamowienie(r, req, principal.Subject, hostID)

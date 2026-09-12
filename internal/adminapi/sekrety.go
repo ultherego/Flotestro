@@ -10,7 +10,7 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// Magazyn sekretow ma jedna wlasciwosc, ktorej nie wolno zgubic: wartosc
+// Store sekretow ma jedna wlasciwosc, ktorej nie wolno zgubic: wartosc
 // wchodzi i nie wychodzi. API pozwala sekret zalozyc, obrocic, wycofac
 // i zniszczyc wersje - ale nie ma sposobu, zeby przez nie odczytac tresc.
 // Jedyna droga wyjscia wartosci prowadzi przez dzierzawe wystawiona hostowi

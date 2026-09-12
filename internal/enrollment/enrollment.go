@@ -1,13 +1,15 @@
-// Package enrollment realizuje przyjmowanie nowych hostow do floty.
+// Package enrollment admits new hosts into the fleet.
 //
-// Zamowienie enrollmentu jest trwalym rekordem oczekujacej instalacji: kto ja
-// zamowil, w jakim celu, w jakim zakresie i czym sie skonczyla. Token jest
-// tylko sekretem, ktory autoryzuje jedna probe - jego jawna wartosc istnieje
-// wylacznie w odpowiedzi na utworzenie zamowienia, a w bazie zostaje sam skrot.
+// An enrollment request is a durable record of a pending installation: who
+// ordered it, for what purpose, in what scope and how it ended. The token is
+// only a secret authorising one attempt - its clear value exists solely in
+// the response to creating the request, and only its digest stays in the
+// database.
 //
-// Cel zamowienia jest tu najwazniejszym polem. "Nowy host" i "wymiana
-// tozsamosci istniejacego hosta" to dwie rozne decyzje: bez tego rozroznienia
-// ktokolwiek z tokenem moglby cicho przejac tozsamosc dzialajacej maszyny.
+// The purpose of the request is the most important field here. "A new host"
+// and "restoring the identity of an existing host" are two different
+// decisions: without that distinction anybody with a token could silently
+// take over the identity of a running machine.
 package enrollment
 
 import (
@@ -26,66 +28,68 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TokenPrefix odroznia token enrollmentu od innych sekretow w logach i configach.
+// TokenPrefix distinguishes an enrollment token from other secrets in logs and configuration.
 const TokenPrefix = "flt_"
 
-// ErrInvalidToken jest zwracany dla kazdego powodu odrzucenia tokenu, aby nie
-// ujawniac, czy token istnieje, wygasl, czy wyczerpal limit uzyc.
-var ErrInvalidToken = errors.New("token enrollmentu jest nieprawidlowy")
+// ErrInvalidToken is returned for every reason a token is refused, so as not
+// to reveal whether the token exists, has expired or has used up its uses.
+var ErrInvalidToken = errors.New("the enrollment token is invalid")
 
-// ErrNieznaneZamowienie oznacza zamowienie, ktorego nie ma.
-var ErrNieznaneZamowienie = errors.New("zamowienie enrollmentu nie istnieje")
+// ErrUnknownRequest means a request that does not exist.
+var ErrUnknownRequest = errors.New("the enrollment request does not exist")
 
-// Rodzaje tozsamosci, ktore mozna zarejestrowac.
+// The kinds of identity that can be registered.
 const (
 	KindAgent = "agent"
 	KindRelay = "relay"
 )
 
-// Cele zamowienia.
+// The purposes of a request.
 const (
-	// CelNowy przyjmuje maszyne, ktorej panel jeszcze nie zna.
-	CelNowy = "new"
-	// CelWymiana odtwarza tozsamosc istniejacego hosta - po przeinstalowaniu
-	// albo po utracie klucza. Zawsze wskazuje konkretny host.
-	CelWymiana = "replace_identity"
-	// CelRelay rejestruje relay lokalizacji.
-	CelRelay = "relay"
+	// PurposeNew admits a machine the panel does not know yet.
+	PurposeNew = "new"
+	// PurposeReplace restores the identity of an existing host - after a
+	// reinstall or after the key was lost. It always names one specific host.
+	PurposeReplace = "replace_identity"
+	// PurposeRelay registers a site's relay.
+	PurposeRelay = "relay"
 )
 
-// Statusy zamowienia. Sa dla operatora i audytu, nigdy podstawa autoryzacji -
-// o tym rozstrzyga wylacznie stan tokenu sprawdzany w transakcji.
+// The statuses of a request. They are for the operator and the audit trail,
+// never a basis for authorisation - that is settled solely by the state of
+// the token checked inside the transaction.
 const (
-	StatusOczekuje       = "pending"
-	StatusZarejestrowany = "enrolled"
-	StatusWygasl         = "expired"
-	StatusUniewazniony   = "revoked"
-	StatusNieudany       = "failed"
+	StatusPending  = "pending"
+	StatusEnrolled = "enrolled"
+	StatusExpired  = "expired"
+	StatusRevoked  = "revoked"
+	StatusFailed   = "failed"
 )
 
-// MaksymalnyTTL ogranicza czas zycia zamowienia.
+// MaxTTL bounds the lifetime of a request.
 //
-// Token, ktory lezy tygodniami, jest sekretem czekajacym na wyciek. Dluzsze
-// automatyzacje maja pobierac krotkie tokeny na zadanie, a nie trzymac jeden
-// na zapas.
-const MaksymalnyTTL = 24 * time.Hour
+// A token that lies around for weeks is a secret waiting to leak. Longer
+// automations are to fetch short tokens on demand rather than keep one in
+// reserve.
+const MaxTTL = 24 * time.Hour
 
-// Zamowienie opisuje oczekujaca instalacje.
-type Zamowienie struct {
+// Request describes a pending installation.
+type Request struct {
 	ID string `json:"id"`
-	// Value jest jawnym tokenem i pojawia sie wylacznie w odpowiedzi na
-	// utworzenie zamowienia. Nigdzie indziej - ani w liscie, ani w audycie.
+	// Value is the clear token and appears solely in the response to creating
+	// the request. Nowhere else - neither in a listing nor in the audit
+	// trail.
 	Value       string `json:"token,omitempty"`
 	Description string `json:"description,omitempty"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
 	Kind        string `json:"kind"`
 	Purpose     string `json:"purpose"`
-	// ExpectedMachineID i ExpectedHostID zawezaja zamowienie do konkretnej
-	// maszyny i konkretnego hosta.
+	// ExpectedMachineID and ExpectedHostID narrow the request to one specific
+	// machine and one specific host.
 	ExpectedMachineID string `json:"expected_machine_id,omitempty"`
 	ExpectedHostID    string `json:"expected_host_id,omitempty"`
-	// RelayID ogranicza trase zgloszenia do jednego relaya.
+	// RelayID limits the route of the request to one relay.
 	RelayID        string `json:"relay_id,omitempty"`
 	MaxUses        int    `json:"max_uses"`
 	Uses           int    `json:"uses"`
@@ -99,10 +103,10 @@ type Zamowienie struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
-// Scope to zakres, w ktorym zamowienie pozwala zarejestrowac tozsamosc.
+// Scope is the scope within which a request allows registering an identity.
 type Scope struct {
-	// TokenID jest identyfikatorem zamowienia. Nazwa zostaje ze wzgledu na
-	// audyt, ktory zapisuje ja od poczatku istnienia floty.
+	// TokenID is the identifier of the request. The name stays for the sake
+	// of the audit trail, which has recorded it since the fleet began.
 	TokenID           string
 	Site              string
 	Environment       string
@@ -110,48 +114,50 @@ type Scope struct {
 	Purpose           string
 	ExpectedMachineID string
 	ExpectedHostID    string
-	// RelayID ogranicza trase zgloszenia. Puste znaczy "dowolna": token
-	// zwiazany z relayem nie zadziala poza jego lokalizacja, a token bez
-	// zwiazku dziala tak jak dotad.
+	// RelayID limits the route of the request. Empty means "any": a token
+	// bound to a relay will not work outside its site, and a token without
+	// such a binding works as before.
 	RelayID string
 }
 
-// Powtorzenie jest zapisem proby, ktora juz sie udala.
+// Replay is the record of an attempt that has already succeeded.
 //
-// Odpowiedz moze zginac w sieci po tym, jak serwer zapisal hosta i wystawil
-// certyfikat. Wtedy agent ponawia probe i musi dostac to samo, co juz zostalo
-// wydane - inaczej token jest zuzyty, a host zostaje bez tozsamosci.
-type Powtorzenie struct {
+// The answer can be lost in the network after the server recorded the host
+// and issued the certificate. The agent then retries and has to get exactly
+// what was already issued - otherwise the token is used up and the host is
+// left without an identity.
+type Replay struct {
 	HostID            string
 	CertificatePEM    []byte
 	CABundlePEM       []byte
 	CertificateSerial string
 }
 
-// ProbaWejscie opisuje jedna probe enrollmentu.
-type ProbaWejscie struct {
+// AttemptInput describes one enrollment attempt.
+type AttemptInput struct {
 	Token           string
 	MachineID       string
 	ClientRequestID string
 	CSR             []byte
 }
 
-// Wynik mowi, co zrobic z proba: wydac nowa tozsamosc albo powtorzyc stara.
-type Wynik struct {
-	Scope       Scope
-	Powtorzenie *Powtorzenie
+// Outcome says what to do with an attempt: issue a new identity or repeat the
+// old one.
+type Outcome struct {
+	Scope  Scope
+	Replay *Replay
 }
 
-// Store zarzadza zamowieniami enrollmentu.
+// Store manages the enrollment requests.
 type Store struct {
 	pool *pgxpool.Pool
 }
 
-// NewTokenStore tworzy magazyn zamowien.
+// NewTokenStore creates the store of requests.
 func NewTokenStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// TworzenieWejscie opisuje nowe zamowienie.
-type TworzenieWejscie struct {
+// CreateInput describes a new request.
+type CreateInput struct {
 	Description       string
 	Site              string
 	Environment       string
@@ -159,68 +165,68 @@ type TworzenieWejscie struct {
 	Purpose           string
 	ExpectedMachineID string
 	ExpectedHostID    string
-	// RelayID zamyka zamowienie w jednej lokalizacji. Token wyniesiony poza
-	// nia nie zarejestruje niczego: centrala sprawdza, ktory relay podpisal
-	// zgloszenie swoim kanalem mTLS.
+	// RelayID closes the request within one site. A token taken outside it
+	// registers nothing: the centre checks which relay signed the request
+	// with its own mTLS channel.
 	RelayID   string
 	MaxUses   int
 	TTL       time.Duration
 	CreatedBy string
 }
 
-// Create wystawia nowe zamowienie. W bazie zapisywany jest wylacznie skrot.
-func (s *Store) Create(ctx context.Context, wejscie TworzenieWejscie) (*Zamowienie, error) {
-	kind := wejscie.Kind
+// Create issues a new request. Only the digest is recorded in the database.
+func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error) {
+	kind := input.Kind
 	if kind == "" {
 		kind = KindAgent
 	}
 	if kind != KindAgent && kind != KindRelay {
-		return nil, fmt.Errorf("nieznany rodzaj tozsamosci %q", kind)
+		return nil, fmt.Errorf("unknown kind of identity %q", kind)
 	}
-	purpose := wejscie.Purpose
+	purpose := input.Purpose
 	if purpose == "" {
 		if kind == KindRelay {
-			purpose = CelRelay
+			purpose = PurposeRelay
 		} else {
-			purpose = CelNowy
+			purpose = PurposeNew
 		}
 	}
-	if err := sprawdzCel(kind, purpose, wejscie.ExpectedHostID); err != nil {
+	if err := checkPurpose(kind, purpose, input.ExpectedHostID); err != nil {
 		return nil, err
 	}
 
-	maxUses := wejscie.MaxUses
+	maxUses := input.MaxUses
 	if maxUses <= 0 {
 		maxUses = 1
 	}
-	// Wymiana tozsamosci dotyczy jednego hosta, wiec i jednego uzycia:
-	// zamowienie wielokrotne bylo by kluczem do tej samej maszyny na zapas.
-	if purpose == CelWymiana {
+	// Replacing an identity concerns one host, so it concerns one use as
+	// well: a multi-use request would be a spare key to the same machine.
+	if purpose == PurposeReplace {
 		maxUses = 1
 	}
-	ttl := wejscie.TTL
+	ttl := input.TTL
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	if ttl > MaksymalnyTTL {
-		return nil, fmt.Errorf("czas zycia zamowienia przekracza %s", MaksymalnyTTL)
+	if ttl > MaxTTL {
+		return nil, fmt.Errorf("the lifetime of the request exceeds %s", MaxTTL)
 	}
 
-	surowy := make([]byte, 32)
-	if _, err := rand.Read(surowy); err != nil {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
 		return nil, err
 	}
-	value := TokenPrefix + base64.RawURLEncoding.EncodeToString(surowy)
+	value := TokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
 	hash := hashToken(value)
 
-	zamowienie := &Zamowienie{
-		ID: uuid.NewString(), Value: value, Description: wejscie.Description,
-		Site: wejscie.Site, Environment: wejscie.Environment,
+	request := &Request{
+		ID: uuid.NewString(), Value: value, Description: input.Description,
+		Site: input.Site, Environment: input.Environment,
 		Kind: kind, Purpose: purpose,
-		ExpectedMachineID: wejscie.ExpectedMachineID, ExpectedHostID: wejscie.ExpectedHostID,
-		RelayID: wejscie.RelayID,
-		MaxUses: maxUses, Status: StatusOczekuje,
-		ExpiresAt: time.Now().Add(ttl), CreatedBy: wejscie.CreatedBy,
+		ExpectedMachineID: input.ExpectedMachineID, ExpectedHostID: input.ExpectedHostID,
+		RelayID: input.RelayID,
+		MaxUses: maxUses, Status: StatusPending,
+		ExpiresAt: time.Now().Add(ttl), CreatedBy: input.CreatedBy,
 	}
 	const query = `
 		insert into enrollment_requests
@@ -228,56 +234,57 @@ func (s *Store) Create(ctx context.Context, wejscie TworzenieWejscie) (*Zamowien
 			 expected_machine_id, expected_host_id, relay_id, max_uses, expires_at, created_by)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, nullif($10, '')::uuid, $11, $12, $13)
 		returning created_at, updated_at`
-	err := s.pool.QueryRow(ctx, query, zamowienie.ID, hash[:], nullable(wejscie.Description),
-		wejscie.Site, wejscie.Environment, kind, purpose,
-		nullable(wejscie.ExpectedMachineID), nullable(wejscie.ExpectedHostID),
-		wejscie.RelayID, maxUses, zamowienie.ExpiresAt, wejscie.CreatedBy).
-		Scan(&zamowienie.CreatedAt, &zamowienie.UpdatedAt)
+	err := s.pool.QueryRow(ctx, query, request.ID, hash[:], nullable(input.Description),
+		input.Site, input.Environment, kind, purpose,
+		nullable(input.ExpectedMachineID), nullable(input.ExpectedHostID),
+		input.RelayID, maxUses, request.ExpiresAt, input.CreatedBy).
+		Scan(&request.CreatedAt, &request.UpdatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("zapis zamowienia: %w", err)
+		return nil, fmt.Errorf("recording the request: %w", err)
 	}
-	return zamowienie, nil
+	return request, nil
 }
 
-// sprawdzCel pilnuje, ze cel, rodzaj i wskazany host trzymaja sie razem.
-func sprawdzCel(kind, purpose, hostID string) error {
+// checkPurpose guards that the purpose, the kind and the named host hold
+// together.
+func checkPurpose(kind, purpose, hostID string) error {
 	switch purpose {
-	case CelNowy:
+	case PurposeNew:
 		if kind != KindAgent {
-			return fmt.Errorf("cel %q wymaga rodzaju %q", purpose, KindAgent)
+			return fmt.Errorf("the purpose %q requires the kind %q", purpose, KindAgent)
 		}
 		if hostID != "" {
-			return fmt.Errorf("cel %q nie wskazuje istniejacego hosta", purpose)
+			return fmt.Errorf("the purpose %q does not name an existing host", purpose)
 		}
-	case CelWymiana:
+	case PurposeReplace:
 		if kind != KindAgent {
-			return fmt.Errorf("cel %q wymaga rodzaju %q", purpose, KindAgent)
+			return fmt.Errorf("the purpose %q requires the kind %q", purpose, KindAgent)
 		}
 		if hostID == "" {
-			return fmt.Errorf("cel %q wymaga wskazania hosta", purpose)
+			return fmt.Errorf("the purpose %q requires naming a host", purpose)
 		}
-	case CelRelay:
+	case PurposeRelay:
 		if kind != KindRelay {
-			return fmt.Errorf("cel %q wymaga rodzaju %q", purpose, KindRelay)
+			return fmt.Errorf("the purpose %q requires the kind %q", purpose, KindRelay)
 		}
 		if hostID != "" {
-			return fmt.Errorf("cel %q nie wskazuje hosta", purpose)
+			return fmt.Errorf("the purpose %q does not name a host", purpose)
 		}
 	default:
-		return fmt.Errorf("nieznany cel zamowienia %q", purpose)
+		return fmt.Errorf("unknown purpose of a request %q", purpose)
 	}
 	return nil
 }
 
-// Redeem sprawdza token i rozstrzyga, czy to nowa proba, czy powtorzenie.
+// Redeem checks the token and decides whether this is a new attempt or a
+// replay.
 //
-// Wiersz jest blokowany, wiec rownolegly enrollment nie przekroczy limitu
-// uzyc. Powtorzenie nie zuzywa uzycia: to ta sama proba, ktorej odpowiedz
-// zginela.
-func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, wejscie ProbaWejscie) (Wynik, error) {
-	value := strings.TrimSpace(wejscie.Token)
+// The row is locked, so a parallel enrollment will not exceed the limit of
+// uses. A replay uses none: it is the same attempt whose answer was lost.
+func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outcome, error) {
+	value := strings.TrimSpace(input.Token)
 	if value == "" {
-		return Wynik{}, ErrInvalidToken
+		return Outcome{}, ErrInvalidToken
 	}
 	hash := hashToken(value)
 
@@ -301,51 +308,52 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, wejscie ProbaWejscie) (Wy
 			&scope.ExpectedMachineID, &scope.ExpectedHostID, &scope.RelayID,
 			&maxUses, &uses, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Wynik{}, ErrInvalidToken
+		return Outcome{}, ErrInvalidToken
 	}
 	if err != nil {
-		return Wynik{}, err
+		return Outcome{}, err
 	}
 
-	// Powtorzenie sprawdzamy przed limitami: proba, ktora juz sie udala, ma
-	// dostac swoja odpowiedz takze wtedy, gdy zamowienie zdazylo sie wyczerpac.
-	powtorzenie, err := s.powtorzenie(ctx, tx, scope.TokenID, wejscie)
+	// We check the replay before the limits: an attempt that has already
+	// succeeded is to get its answer even when the request has used itself
+	// up in the meantime.
+	replay, err := s.replay(ctx, tx, scope.TokenID, input)
 	if err != nil {
-		return Wynik{}, err
+		return Outcome{}, err
 	}
-	if powtorzenie != nil {
-		return Wynik{Scope: scope, Powtorzenie: powtorzenie}, nil
+	if replay != nil {
+		return Outcome{Scope: scope, Replay: replay}, nil
 	}
 
 	switch {
 	case revokedAt != nil:
-		return Wynik{}, ErrInvalidToken
+		return Outcome{}, ErrInvalidToken
 	case time.Now().After(expiresAt):
-		return Wynik{}, ErrInvalidToken
+		return Outcome{}, ErrInvalidToken
 	case uses >= maxUses:
-		return Wynik{}, ErrInvalidToken
+		return Outcome{}, ErrInvalidToken
 	}
-	// Zamowienie zwiazane z maszyna nie pasuje do zadnej innej.
-	if scope.ExpectedMachineID != "" && scope.ExpectedMachineID != wejscie.MachineID {
-		return Wynik{}, ErrInvalidToken
+	// A request bound to a machine matches no other one.
+	if scope.ExpectedMachineID != "" && scope.ExpectedMachineID != input.MachineID {
+		return Outcome{}, ErrInvalidToken
 	}
 
 	if _, err := tx.Exec(ctx,
 		`update enrollment_requests set uses = uses + 1, updated_at = now() where id = $1::uuid`,
 		scope.TokenID); err != nil {
-		return Wynik{}, err
+		return Outcome{}, err
 	}
-	return Wynik{Scope: scope}, nil
+	return Outcome{Scope: scope}, nil
 }
 
-// powtorzenie szuka proby, ktora juz sie udala.
+// replay looks for an attempt that has already succeeded.
 //
-// Szukamy po identyfikatorze proby i po odcisku CSR: agent, ktory zgubil
-// odpowiedz i ponawia z nowym identyfikatorem, ale tym samym kluczem, pyta
-// o dokladnie te sama tozsamosc.
-func (s *Store) powtorzenie(ctx context.Context, tx pgx.Tx, requestID string,
-	wejscie ProbaWejscie) (*Powtorzenie, error) {
-	odcisk := sha256.Sum256(wejscie.CSR)
+// We look by the attempt identifier and by the CSR digest: an agent that lost
+// the answer and retries with a new identifier but the same key is asking for
+// exactly the same identity.
+func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
+	input AttemptInput) (*Replay, error) {
+	fingerprint := sha256.Sum256(input.CSR)
 	const query = `
 		select coalesce(host_id::text, ''), certificate_pem, ca_bundle_pem,
 		       coalesce(certificate_serial, ''), csr_sha256
@@ -353,47 +361,50 @@ func (s *Store) powtorzenie(ctx context.Context, tx pgx.Tx, requestID string,
 		where request_id = $1::uuid and (client_request_id = $2::uuid or csr_sha256 = $3)
 		  and completed_at is not null
 		limit 1`
-	klient := wejscie.ClientRequestID
-	if klient == "" {
-		// Agent bez identyfikatora proby moze byc rozpoznany tylko po CSR.
-		klient = uuid.Nil.String()
+	client := input.ClientRequestID
+	if client == "" {
+		// An agent without an attempt identifier can only be recognised by its CSR.
+		client = uuid.Nil.String()
 	}
 	var (
 		hostID      string
 		certPEM     []byte
 		bundlePEM   []byte
 		serial      string
-		zapisanyCSR []byte
+		storedCSR []byte
 	)
-	err := tx.QueryRow(ctx, query, requestID, klient, odcisk[:]).
-		Scan(&hostID, &certPEM, &bundlePEM, &serial, &zapisanyCSR)
+	err := tx.QueryRow(ctx, query, requestID, client, fingerprint[:]).
+		Scan(&hostID, &certPEM, &bundlePEM, &serial, &storedCSR)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	// Ten sam identyfikator proby z innym CSR to nie jest powtorzenie, tylko
-	// inna proba pod cudzym numerem. Odmawiamy, zamiast wydawac tozsamosc.
-	if !bytes.Equal(zapisanyCSR, odcisk[:]) {
+	// The same attempt identifier with a different CSR is not a replay but a
+	// different attempt under somebody else's number. We refuse instead of
+	// issuing an identity.
+	if !bytes.Equal(storedCSR, fingerprint[:]) {
 		return nil, ErrInvalidToken
 	}
-	return &Powtorzenie{
+	return &Replay{
 		HostID: hostID, CertificatePEM: certPEM,
 		CABundlePEM: bundlePEM, CertificateSerial: serial,
 	}, nil
 }
 
-// ZapiszProbe utrwala udana probe razem z wydanym certyfikatem.
+// RecordAttempt persists a successful attempt together with the issued
+// certificate.
 //
-// W tej samej transakcji, w ktorej powstaje host i certyfikat: zapis proby po
-// commicie moglby nie dojsc do skutku i cala idempotencja bylaby pozorna.
-func (s *Store) ZapiszProbe(ctx context.Context, tx pgx.Tx, requestID string,
-	wejscie ProbaWejscie, wynik Powtorzenie) error {
-	odcisk := sha256.Sum256(wejscie.CSR)
-	klient := wejscie.ClientRequestID
-	if klient == "" {
-		klient = uuid.NewString()
+// In the same transaction in which the host and the certificate come into
+// being: recording the attempt after the commit might never happen, and the
+// whole idempotency would be make-believe.
+func (s *Store) RecordAttempt(ctx context.Context, tx pgx.Tx, requestID string,
+	input AttemptInput, result Replay) error {
+	fingerprint := sha256.Sum256(input.CSR)
+	client := input.ClientRequestID
+	if client == "" {
+		client = uuid.NewString()
 	}
 	const query = `
 		insert into enrollment_attempts
@@ -404,84 +415,84 @@ func (s *Store) ZapiszProbe(ctx context.Context, tx pgx.Tx, requestID string,
 			host_id = excluded.host_id, certificate_pem = excluded.certificate_pem,
 			ca_bundle_pem = excluded.ca_bundle_pem,
 			certificate_serial = excluded.certificate_serial, completed_at = now()`
-	if _, err := tx.Exec(ctx, query, requestID, klient, odcisk[:], wejscie.MachineID,
-		nullable(wynik.HostID), wynik.CertificatePEM, wynik.CABundlePEM,
-		nullable(wynik.CertificateSerial)); err != nil {
-		return fmt.Errorf("zapis proby enrollmentu: %w", err)
+	if _, err := tx.Exec(ctx, query, requestID, client, fingerprint[:], input.MachineID,
+		nullable(result.HostID), result.CertificatePEM, result.CABundlePEM,
+		nullable(result.CertificateSerial)); err != nil {
+		return fmt.Errorf("recording the enrollment attempt: %w", err)
 	}
 
-	const domkniecie = `
+	const settle = `
 		update enrollment_requests
 		set enrolled_host_id = coalesce($2::uuid, enrolled_host_id),
 		    status = case when uses >= max_uses then $3 else status end,
 		    updated_at = now()
 		where id = $1::uuid`
-	if _, err := tx.Exec(ctx, domkniecie, requestID, nullable(wynik.HostID),
-		StatusZarejestrowany); err != nil {
-		return fmt.Errorf("domkniecie zamowienia: %w", err)
+	if _, err := tx.Exec(ctx, settle, requestID, nullable(result.HostID),
+		StatusEnrolled); err != nil {
+		return fmt.Errorf("settling the request: %w", err)
 	}
 	return nil
 }
 
-// Uniewaznij blokuje pozostale uzycia zamowienia.
+// Revoke blocks the remaining uses of a request.
 //
-// Dziala takze wtedy, gdy czesc puli zostala juz wykorzystana: cofniecie ma
-// zamknac to, co zostalo, a nie udawac, ze nic sie nie stalo.
-func (s *Store) Uniewaznij(ctx context.Context, id string) error {
+// It works also when part of the pool has already been used: revoking is to
+// close what is left rather than pretend nothing happened.
+func (s *Store) Revoke(ctx context.Context, id string) error {
 	const query = `
 		update enrollment_requests
 		set revoked_at = coalesce(revoked_at, now()),
 		    status = $2, updated_at = now()
 		where id = $1::uuid`
-	znacznik, err := s.pool.Exec(ctx, query, id, StatusUniewazniony)
+	tag, err := s.pool.Exec(ctx, query, id, StatusRevoked)
 	if err != nil {
 		return err
 	}
-	if znacznik.RowsAffected() == 0 {
-		return ErrNieznaneZamowienie
+	if tag.RowsAffected() == 0 {
+		return ErrUnknownRequest
 	}
 	return nil
 }
 
-// Zamowienie zwraca jedno zamowienie bez wartosci tokenu.
-func (s *Store) Zamowienie(ctx context.Context, id string) (*Zamowienie, error) {
-	const query = kolumnyZamowienia + ` where id = $1::uuid`
-	wiersz := s.pool.QueryRow(ctx, query, id)
-	zamowienie, err := skanujZamowienie(wiersz)
+// Request returns one request without the token value.
+func (s *Store) Request(ctx context.Context, id string) (*Request, error) {
+	const query = requestColumns + ` where id = $1::uuid`
+	row := s.pool.QueryRow(ctx, query, id)
+	request, err := scanRequest(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNieznaneZamowienie
+		return nil, ErrUnknownRequest
 	}
 	if err != nil {
 		return nil, err
 	}
-	return zamowienie, nil
+	return request, nil
 }
 
-// List zwraca zamowienia bez wartosci jawnej.
+// List returns the requests without the clear value.
 //
-// Takze zamkniete i cofniete: operator musi widziec, co sie stalo z instalacja,
-// ktora zamowil, a nie tylko to, co jeszcze czeka.
-func (s *Store) List(ctx context.Context) ([]Zamowienie, error) {
-	const query = kolumnyZamowienia + ` order by created_at desc limit 200`
+// Settled and revoked ones too: the operator has to see what happened to the
+// installation they ordered, not only what is still waiting.
+func (s *Store) List(ctx context.Context) ([]Request, error) {
+	const query = requestColumns + ` order by created_at desc limit 200`
 	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var zamowienia []Zamowienie
+	var requests []Request
 	for rows.Next() {
-		zamowienie, err := skanujZamowienie(rows)
+		request, err := scanRequest(rows)
 		if err != nil {
 			return nil, err
 		}
-		zamowienia = append(zamowienia, *zamowienie)
+		requests = append(requests, *request)
 	}
-	return zamowienia, rows.Err()
+	return requests, rows.Err()
 }
 
-// kolumnyZamowienia jest wspolna lista kolumn odczytu.
-const kolumnyZamowienia = `
+// requestColumns is the shared list of columns for reads.
+const requestColumns = `
 	select id, coalesce(description, ''), site, environment, kind, purpose,
 	       coalesce(expected_machine_id, ''), coalesce(expected_host_id::text, ''),
 	       coalesce(relay_id::text, ''),
@@ -489,22 +500,22 @@ const kolumnyZamowienia = `
 	       expires_at, revoked_at, created_by, created_at, updated_at
 	from enrollment_requests`
 
-// skaner pozwala czytac zamowienie z wiersza i z kursora.
-type skaner interface {
-	Scan(cele ...any) error
+// scanner allows reading a request from a row and from a cursor.
+type scanner interface {
+	Scan(targets ...any) error
 }
 
-func skanujZamowienie(wiersz skaner) (*Zamowienie, error) {
-	var z Zamowienie
-	if err := wiersz.Scan(&z.ID, &z.Description, &z.Site, &z.Environment, &z.Kind, &z.Purpose,
+func scanRequest(row scanner) (*Request, error) {
+	var z Request
+	if err := row.Scan(&z.ID, &z.Description, &z.Site, &z.Environment, &z.Kind, &z.Purpose,
 		&z.ExpectedMachineID, &z.ExpectedHostID, &z.RelayID, &z.MaxUses, &z.Uses, &z.Status,
 		&z.EnrolledHostID, &z.ExpiresAt, &z.RevokedAt, &z.CreatedBy,
 		&z.CreatedAt, &z.UpdatedAt); err != nil {
 		return nil, err
 	}
-	// Status "pending" po terminie jest nieprawda: token juz nie dziala.
-	if z.Status == StatusOczekuje && time.Now().After(z.ExpiresAt) {
-		z.Status = StatusWygasl
+	// The status "pending" past the deadline is untrue: the token no longer works.
+	if z.Status == StatusPending && time.Now().After(z.ExpiresAt) {
+		z.Status = StatusExpired
 	}
 	return &z, nil
 }

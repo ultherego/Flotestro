@@ -16,7 +16,7 @@ import (
 
 // RenewCertificate wymienia CSR na nowy certyfikat hosta.
 //
-// Tozsamosc pochodzi wylacznie z obecnego certyfikatu klienta, nigdy z tresci
+// Identity pochodzi wylacznie z obecnego certyfikatu klienta, nigdy z tresci
 // zadania. Odnowienie nie uzywa tokenu enrollmentu: token jest jednorazowym
 // wejsciem dla hosta bez tozsamosci, a host, ktory juz ja ma, potwierdza sie
 // kluczem prywatnym w uscisku TLS.

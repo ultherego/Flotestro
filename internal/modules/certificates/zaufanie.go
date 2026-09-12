@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Magazyn zaufania hosta: katalog kotwic i narzedzie, ktore z nich sklada
+// Store zaufania hosta: katalog kotwic i narzedzie, ktore z nich sklada
 // wiazke.
 //
 // Panel nie pisze do samej wiazki ani do katalogu dystrybucji: wiazka jest

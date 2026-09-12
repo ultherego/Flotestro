@@ -850,7 +850,7 @@ const (
 	CertificateAction_OPERATION_RENEW       CertificateAction_Operation = 3
 	// Plan wdrozenia liczony na hoscie, bez siegania po klucz prywatny.
 	CertificateAction_OPERATION_PLAN CertificateAction_Operation = 4
-	// Magazyn zaufania: plan kroku rotacji urzedu i sam krok.
+	// Store zaufania: plan kroku rotacji urzedu i sam krok.
 	CertificateAction_OPERATION_TRUST_PLAN   CertificateAction_Operation = 5
 	CertificateAction_OPERATION_TRUST_ENSURE CertificateAction_Operation = 6
 	CertificateAction_OPERATION_TRUST_REMOVE CertificateAction_Operation = 7
@@ -8047,7 +8047,7 @@ type StorageAction struct {
 	Device       string                  `protobuf:"bytes,7,opt,name=device,proto3" json:"device,omitempty"`
 	ExpectedUuid string                  `protobuf:"bytes,8,opt,name=expected_uuid,json=expectedUuid,proto3" json:"expected_uuid,omitempty"`
 	Repair       bool                    `protobuf:"varint,9,opt,name=repair,proto3" json:"repair,omitempty"`
-	// Tozsamosc urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
+	// Identity urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
 	// /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
 	// ogladal.
 	ExpectedSerial    string `protobuf:"bytes,10,opt,name=expected_serial,json=expectedSerial,proto3" json:"expected_serial,omitempty"`

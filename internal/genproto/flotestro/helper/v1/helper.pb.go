@@ -884,7 +884,7 @@ const (
 	CertificateRequest_OPERATION_RENEW  CertificateRequest_Operation = 3
 	// Plan wdrozenia bez dotykania hosta i bez siegania po klucz prywatny.
 	CertificateRequest_OPERATION_PLAN CertificateRequest_Operation = 4
-	// Magazyn zaufania: plan kroku rotacji urzedu i sam krok. Kotwica jest
+	// Store zaufania: plan kroku rotacji urzedu i sam krok. Kotwica jest
 	// materialem publicznym, wiec jedzie w zleceniu jawnie.
 	CertificateRequest_OPERATION_TRUST_PLAN   CertificateRequest_Operation = 5
 	CertificateRequest_OPERATION_TRUST_ENSURE CertificateRequest_Operation = 6
@@ -3832,7 +3832,7 @@ type StorageRequest struct {
 	ExpectedUuid string `protobuf:"bytes,8,opt,name=expected_uuid,json=expectedUuid,proto3" json:"expected_uuid,omitempty"`
 	// Repair wlacza naprawe zamiast samego sprawdzenia.
 	Repair bool `protobuf:"varint,9,opt,name=repair,proto3" json:"repair,omitempty"`
-	// Tozsamosc urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
+	// Identity urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
 	// /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
 	// ogladal - a przy formatowaniu to jest roznica miedzy pustym dyskiem
 	// a cudzymi danymi.

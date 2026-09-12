@@ -48,7 +48,7 @@ const (
 func ZaplanujBlokade(stan Snapshot, modul string, blokuj bool) ModulePlan {
 	plan := ModulePlan{Module: modul, Blacklist: blokuj}
 	if stan.Managed != "" {
-		plan.ManagedHash = odciskTekstu(stan.Managed)
+		plan.ManagedHash = textFingerprint(stan.Managed)
 	}
 	if stan.UnavailableReason != "" {
 		return plan.zOdmowa(stan.UnavailableReason)
@@ -102,7 +102,7 @@ func (p ModulePlan) zOdmowa(powod string) ModulePlan {
 	return p
 }
 
-func odciskTekstu(tekst string) string {
+func textFingerprint(tekst string) string {
 	suma := sha256.Sum256([]byte(tekst))
 	return hex.EncodeToString(suma[:])
 }

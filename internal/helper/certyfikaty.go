@@ -579,7 +579,7 @@ func (s *Server) zmienZaufanie(ctx context.Context,
 	}
 
 	if wyjscie, err := uruchomNarzedzie(ctx, poleceniePrzeliczenia(magazyn)); err != nil {
-		// Magazyn, ktorego nie da sie przeliczyc, zostawilby host z wiazka
+		// Store, ktorego nie da sie przeliczyc, zostawilby host z wiazka
 		// sprzed zmiany i kotwica, ktorej nikt nie widzial. Wracamy do
 		// poprzedniego pliku i probujemy przeliczyc jeszcze raz.
 		_ = poprzednia.Przywroc()

@@ -52,7 +52,7 @@ const (
 func Zaplanuj(stan Snapshot, chciane Ustawienia, allowLockout bool) Plan {
 	plan := Plan{Desired: chciane, ManagedPresent: stan.ManagedPresent}
 	if stan.ManagedPresent {
-		plan.ManagedHash = odciskTekstu(stan.Managed)
+		plan.ManagedHash = textFingerprint(stan.Managed)
 	}
 	if stan.UnavailableReason != "" {
 		return plan.zOdmowa(stan.UnavailableReason)
@@ -158,7 +158,7 @@ func lubBrak(wartosc string) string {
 	return wartosc
 }
 
-func odciskTekstu(tekst string) string {
+func textFingerprint(tekst string) string {
 	suma := sha256.Sum256([]byte(tekst))
 	return hex.EncodeToString(suma[:])
 }

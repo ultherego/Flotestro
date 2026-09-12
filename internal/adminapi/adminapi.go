@@ -211,7 +211,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts/{id}/security/remediation", s.handleListRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation", s.handleHostRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
-	// Magazyn sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
+	// Store sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
 	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
 	mux.HandleFunc("GET /api/v1/budgets", s.handleListBudgets)
 	mux.HandleFunc("PUT /api/v1/budgets/{key...}", s.handleSetBudget)

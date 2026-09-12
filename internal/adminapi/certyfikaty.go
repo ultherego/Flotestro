@@ -531,7 +531,7 @@ func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, kotwica := range snapshot.Trust.Anchors {
-			// Magazyn ma setki urzedow dystrybucji; panel pokazuje te, ktore
+			// Store ma setki urzedow dystrybucji; panel pokazuje te, ktore
 			// sam zalozyl. Reszta jest trescia obrazu hosta, a nie floty.
 			if !kotwica.Managed {
 				continue

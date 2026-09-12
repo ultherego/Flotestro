@@ -11,8 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// progressTarget domyka jeden krok hosta w kampanii: zmiane, restart albo
-// weryfikacje po restarcie.
+// progressTarget settles one step of a host in a campaign: the change, the
+// reboot or the verification after the reboot.
 func (o *Orchestrator) progressTarget(ctx context.Context, campaign Campaign, target *Target) error {
 	switch target.State {
 	case TargetRunning:
@@ -26,7 +26,7 @@ func (o *Orchestrator) progressTarget(ctx context.Context, campaign Campaign, ta
 	}
 }
 
-// afterMainJob reaguje na wynik zadania glownego i decyduje o restarcie.
+// afterMainJob reacts to the result of the main task and decides about a reboot.
 func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, target *Target) error {
 	if target.JobID == nil {
 		return nil
@@ -58,8 +58,9 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 		o.finishTarget(ctx, campaign, target, TargetFailed, "host_unavailable", err.Error())
 		return nil
 	}
-	// Boot ID sprzed restartu jest jedynym pewnym dowodem, ze host faktycznie
-	// wstal, a nie tylko nie zdazyl sie rozlaczyc.
+	// The boot ID from before the reboot is the only certain proof that the
+	// host really came back rather than merely failed to disconnect in
+	// time.
 	if err := o.store.SetBootIDBefore(ctx, target.ID, host.BootID); err != nil {
 		return err
 	}
@@ -68,7 +69,7 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	rebootJobID, err := o.submitJob(ctx, campaign, host, opspec.ActionSystemReboot,
 		opspec.Payload{Reboot: &opspec.RebootPayload{
 			DelaySeconds: 15,
-			Reason:       "Flotestro: kampania " + campaign.Name,
+			Reason:       "Flotestro: campaign " + campaign.Name,
 		}}, "campaign:"+campaign.ID+":reboot:"+target.HostID)
 	if err != nil {
 		o.finishTarget(ctx, campaign, target, TargetFailed, "reboot_create_failed", err.Error())
@@ -77,18 +78,18 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	if err := o.store.AttachJob(ctx, target.ID, "reboot_job_id", rebootJobID); err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetRebooting, "", "zaplanowano restart"); err != nil {
+	if err := o.store.UpdateTarget(ctx, target.ID, TargetRebooting, "", "a reboot was scheduled"); err != nil {
 		return err
 	}
 	target.State = TargetRebooting
 
-	o.log.Info("kampania zleca restart hosta",
+	o.log.Info("the campaign orders a reboot of a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", rebootJobID)
 	return nil
 }
 
-// rebootNeeded odpowiada, czy polityka kampanii i wynik zadania wymagaja
-// restartu hosta.
+// rebootNeeded answers whether the campaign's policy and the task's result
+// require a reboot of the host.
 func (o *Orchestrator) rebootNeeded(ctx context.Context, campaign Campaign, jobID string) (bool, error) {
 	switch RebootPolicy(campaign.RebootPolicy) {
 	case RebootNever:
@@ -118,9 +119,9 @@ func (o *Orchestrator) rebootNeeded(ctx context.Context, campaign Campaign, jobI
 	return parsed.Kind == "package_apply" && parsed.RebootRequired, nil
 }
 
-// afterReboot czeka, az host wroci z nowym boot ID, i zleca health check.
-// Host jest uznany za przywrocony dopiero po nowej sesji i weryfikacji, a nie
-// po samym wyslaniu polecenia restartu.
+// afterReboot waits for the host to come back with a new boot ID and orders
+// the health check. The host counts as restored only after a new session and
+// the verification, not after the reboot command has merely been sent.
 func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, target *Target) error {
 	if target.RebootJobID != nil {
 		job, err := o.jobs.Get(ctx, *target.RebootJobID)
@@ -138,17 +139,17 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 	if err != nil {
 		return err
 	}
-	// Nowy boot ID i aktywna sesja oznaczaja, ze host wrocil.
+	// A new boot ID and an active session mean the host has come back.
 	if host.ConnectionState != "online" || host.BootID == "" || host.BootID == target.BootIDBefore {
 		if o.rebootTimedOut(target) {
 			o.finishTarget(ctx, campaign, target, TargetFailed, "reboot_timeout",
-				"host nie wrocil po restarcie w zadanym czasie")
+				"the host did not come back after the reboot within the given time")
 		}
 		return nil
 	}
 
 	if len(campaign.HealthCheckUnits) == 0 {
-		o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "host wrocil po restarcie")
+		o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "the host came back after the reboot")
 		return nil
 	}
 
@@ -162,18 +163,18 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 	if err := o.store.AttachJob(ctx, target.ID, "health_job_id", healthJobID); err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetVerifying, "", "host wrocil, trwa weryfikacja"); err != nil {
+	if err := o.store.UpdateTarget(ctx, target.ID, TargetVerifying, "", "the host came back, verification is under way"); err != nil {
 		return err
 	}
 	target.State = TargetVerifying
 
-	o.log.Info("host wrocil po restarcie, trwa weryfikacja",
+	o.log.Info("the host came back after the reboot, verification is under way",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "boot_id", host.BootID)
 	return nil
 }
 
-// rebootTimeout ogranicza czekanie na powrot hosta. Bez tego kampania
-// czekalaby w nieskonczonosc na maszyne, ktora nie wstala.
+// rebootTimeout bounds the wait for the host to come back. Without it the
+// campaign would wait forever for a machine that never came up.
 const rebootTimeout = 15 * time.Minute
 
 func (o *Orchestrator) rebootTimedOut(target *Target) bool {
@@ -183,7 +184,7 @@ func (o *Orchestrator) rebootTimedOut(target *Target) bool {
 	return time.Since(*target.StartedAt) > rebootTimeout
 }
 
-// afterHealthCheck domyka hosta po weryfikacji jednostek.
+// afterHealthCheck settles a host after the units are verified.
 func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, target *Target) error {
 	if target.HealthJobID == nil {
 		return nil
@@ -196,28 +197,30 @@ func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, 
 		return nil
 	}
 	if job.State != jobs.StateSucceeded {
-		// Negatywny health check jest bledem hosta w kampanii: zmiana zostala
-		// wykonana, ale host nie wrocil do sprawnego stanu.
+		// A failed health check is a failure of the host in the campaign: the
+		// change was carried out, but the host did not return to a working
+		// state.
 		o.finishTarget(ctx, campaign, target, TargetFailed,
 			firstNonEmpty(job.ResultErrorCode, "health_check_failed"), job.ResultMessage)
 		return nil
 	}
-	o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "health check przeszedl")
+	o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "the health check passed")
 	return nil
 }
 
-// finishTarget zamyka host w kampanii i odnotowuje to w audycie.
+// finishTarget settles a host in a campaign and records that in the audit trail.
 func (o *Orchestrator) finishTarget(ctx context.Context, campaign Campaign, target *Target,
 	state TargetState, errorCode, message string) {
 	if err := o.store.UpdateTarget(ctx, target.ID, state, errorCode, message); err != nil {
-		o.log.Error("nie zapisano stanu celu kampanii",
+		o.log.Error("the state of a campaign target was not recorded",
 			"campaign_id", campaign.ID, "host_id", target.HostID, "err", err)
 		return
 	}
 	target.State = state
-	// Tokeny wracaja do puli razem z koncem hosta. Zwolnienie jest osobne od
-	// wygasniecia dzierzawy: pojemnosc ma wrocic teraz, a nie za dwie minuty.
-	o.zwolnijPojemnosc(ctx, target)
+	// The tokens go back to the pool together with the end of the host. The
+	// release is separate from the expiry of the lease: the capacity is to
+	// come back now rather than in two minutes.
+	o.releaseCapacity(ctx, target)
 
 	outcome := audit.OutcomeSuccess
 	if state == TargetFailed {
@@ -232,13 +235,14 @@ func (o *Orchestrator) finishTarget(ctx context.Context, campaign Campaign, targ
 			"error_code": errorCode, "message": message,
 		},
 	})
-	o.log.Info("kampania zamknela host",
+	o.log.Info("the campaign settled a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID,
-		"stan", state, "kod", errorCode)
+		"state", state, "code", errorCode)
 }
 
-// pauseOnThreshold wstrzymuje kampanie po przekroczeniu progu bledow.
-// Hosty juz uruchomione dokoncza swoje zadania; nowe nie ruszaja.
+// pauseOnThreshold holds a campaign back once the failure threshold is
+// crossed. The hosts already started finish their tasks; new ones do not
+// start.
 func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign,
 	reason string, failed, finished int) error {
 	if err := o.store.SetState(ctx, campaign.ID, StatePaused, reason); err != nil {
@@ -254,28 +258,28 @@ func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign,
 			"threshold_absolute": campaign.FailureThresholdAbsolute,
 		},
 	})
-	o.log.Warn("kampania wstrzymana po przekroczeniu progu bledow",
-		"campaign_id", campaign.ID, "powod", reason, "bledow", failed, "zakonczonych", finished)
+	o.log.Warn("the campaign was held back after crossing the failure threshold",
+		"campaign_id", campaign.ID, "reason", reason, "failed", failed, "finished", finished)
 	return nil
 }
 
-// complete zamyka kampanie i odnotowuje raport w audycie.
+// complete closes a campaign and records the report in the audit trail.
 func (o *Orchestrator) complete(ctx context.Context, campaign Campaign,
 	targets []Target, failed int) error {
 	state := StateCompleted
 	if failed > 0 && failed == len(targets) {
-		// Kampania, w ktorej padly wszystkie hosty, nie jest ukonczona.
+		// A campaign in which every host failed is not completed.
 		state = StateFailed
 	}
 	if err := o.store.SetState(ctx, campaign.ID, state, ""); err != nil {
 		return err
 	}
-	// Hosty oddaly swoje tokeny, konczac sie po kolei. Zostaja zapisy
-	// oczekiwania - i one tez musza zniknac, bo licza sie do udzialu
-	// nastepnych kampanii.
-	if o.budzety != nil {
-		if err := o.budzety.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
-			o.log.Error("nie zwolniono pojemnosci zakonczonej kampanii",
+	// The hosts gave their tokens back as they finished one by one. What
+	// remains are the waiting records - and those have to disappear too,
+	// because they count towards the share of the next campaigns.
+	if o.budgets != nil {
+		if err := o.budgets.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
+			o.log.Error("the capacity of a finished campaign was not released",
 				"campaign_id", campaign.ID, "err", err)
 		}
 	}
@@ -290,8 +294,8 @@ func (o *Orchestrator) complete(ctx context.Context, campaign Campaign,
 		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"state": string(state), "totals": counts},
 	})
-	o.log.Info("kampania zakonczona",
-		"campaign_id", campaign.ID, "stan", state, "podsumowanie", fmt.Sprint(counts))
+	o.log.Info("the campaign finished",
+		"campaign_id", campaign.ID, "state", state, "totals", fmt.Sprint(counts))
 	return nil
 }
 

@@ -14,34 +14,34 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Orchestrator prowadzi kampanie: canary, fale, progi zatrzymania i faze
-// restartu z weryfikacja. Nie wykonuje niczego sam - tworzy zadania, ktore
-// dostarcza scheduler.
+// Orchestrator runs campaigns: the canary, the waves, the stop thresholds
+// and the reboot phase with verification. It carries out nothing itself - it
+// creates the tasks the scheduler delivers.
 type Orchestrator struct {
 	store *Store
 	jobs  *jobs.Store
 	hosts *hosts.Store
 	audit *audit.Recorder
-	// budzety pilnuja pojemnosci floty i lokalizacji. Limit rownoleglosci
-	// kampanii odpowiada na inne pytanie: ile hostow ma ruszyc naraz w tej
-	// zmianie. Dziesiec kampanii po piec hostow to nadal piecdziesiat
-	// jednoczesnych mutacji, o ktorych nikt nie zdecydowal.
-	budzety  *budgets.Store
+	// budgets guard the capacity of the fleet and of the sites. A campaign's
+	// concurrency limit answers a different question: how many hosts are to
+	// start at once within this change. Ten campaigns of five hosts each are
+	// still fifty simultaneous mutations nobody decided on.
+	budgets  *budgets.Store
 	log      *slog.Logger
 	interval time.Duration
 }
 
 func NewOrchestrator(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
-	recorder *audit.Recorder, budzety *budgets.Store, log *slog.Logger,
+	recorder *audit.Recorder, budgetStore *budgets.Store, log *slog.Logger,
 	interval time.Duration) *Orchestrator {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
 	return &Orchestrator{store: store, jobs: jobStore, hosts: hostStore,
-		audit: recorder, budzety: budzety, log: log, interval: interval}
+		audit: recorder, budgets: budgetStore, log: log, interval: interval}
 }
 
-// Run prowadzi kampanie do zamkniecia kontekstu.
+// Run drives the campaigns until the context is closed.
 func (o *Orchestrator) Run(ctx context.Context) {
 	ticker := time.NewTicker(o.interval)
 	defer ticker.Stop()
@@ -58,39 +58,39 @@ func (o *Orchestrator) Run(ctx context.Context) {
 func (o *Orchestrator) tick(ctx context.Context) {
 	active, err := o.store.Active(ctx)
 	if err != nil {
-		o.log.Error("nie pobrano aktywnych kampanii", "err", err)
+		o.log.Error("the active campaigns could not be read", "err", err)
 		return
 	}
 	for _, campaign := range active {
 		if err := o.advance(ctx, campaign); err != nil {
-			o.log.Error("blad prowadzenia kampanii", "campaign_id", campaign.ID, "err", err)
+			o.log.Error("failure while running a campaign", "campaign_id", campaign.ID, "err", err)
 		}
 	}
 }
 
-// advance przesuwa kampanie o jeden krok.
+// advance moves a campaign forward by one step.
 func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	targets, err := o.store.Targets(ctx, campaign.ID)
 	if err != nil {
 		return err
 	}
 
-	// Faza planowania jest osobna droga: nic sie jeszcze nie zmienia, wiec
-	// nie ma fal, progow ani limitu rownoleglosci kampanii.
+	// The planning phase is a separate way: nothing changes yet, so there are
+	// no waves, no thresholds and no campaign concurrency limit.
 	if campaign.State == StatePlanning {
-		return o.planuj(ctx, campaign, targets)
+		return o.plan(ctx, campaign, targets)
 	}
 
-	// Dzierzawy tokenow odnawiamy przed domknieciem: host, ktory wlasnie
-	// konczy, i tak je zaraz odda, a host w polowie transakcji nie moze ich
-	// stracic z powodu uplywu czasu.
-	o.odnowPojemnosc(ctx, targets)
+	// We renew the token leases before settling anything: a host that is just
+	// finishing will give them back in a moment anyway, and a host halfway
+	// through a transaction must not lose them to the passage of time.
+	o.renewCapacity(ctx, targets)
 
-	// Najpierw domykamy to, co juz biegnie: bez tego progi liczylyby sie na
-	// nieaktualnym stanie.
+	// First we settle what is already running: without that the thresholds
+	// would be computed against a stale state.
 	for i := range targets {
 		if err := o.progressTarget(ctx, campaign, &targets[i]); err != nil {
-			o.log.Error("blad obslugi celu kampanii",
+			o.log.Error("failure while handling a campaign target",
 				"campaign_id", campaign.ID, "host_id", targets[i].HostID, "err", err)
 		}
 	}
@@ -105,7 +105,7 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		}
 	}
 
-	// Prog zatrzymania sprawdzamy przed uruchomieniem czegokolwiek nowego.
+	// We check the stop threshold before starting anything new.
 	if exceeded, reason := ThresholdExceeded(failed, finished, len(targets),
 		campaign.FailureThresholdPercent, campaign.FailureThresholdAbsolute); exceeded {
 		return o.pauseOnThreshold(ctx, campaign, reason, failed, finished)
@@ -115,8 +115,8 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		return o.complete(ctx, campaign, targets, failed)
 	}
 
-	// Okno serwisowe wstrzymuje uruchamianie nowych hostow, ale nie przerywa
-	// tych, ktore juz pracuja.
+	// A maintenance window holds back the start of new hosts but does not
+	// interrupt those already working.
 	if !WithinMaintenanceWindow(time.Now(), campaign.MaintenanceStart, campaign.MaintenanceEnd) {
 		return nil
 	}
@@ -125,8 +125,9 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	if wave < 0 {
 		return nil
 	}
-	// Fala rusza dopiero, gdy poprzednia jest w calosci zamknieta. Canary jest
-	// fala zero, wiec ta sama regula daje wymagany przez dokument etap canary.
+	// A wave starts only once the previous one is settled in full. The canary
+	// is wave zero, so the same rule gives the canary stage the document
+	// requires.
 	if !waveFinished(targets, wave-1) {
 		return nil
 	}
@@ -139,29 +140,29 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		if err := o.store.SetState(ctx, campaign.ID, desiredState, ""); err != nil {
 			return err
 		}
-		o.log.Info("kampania wchodzi w faze",
-			"campaign_id", campaign.ID, "faza", desiredState, "fala", wave)
+		o.log.Info("the campaign enters a phase",
+			"campaign_id", campaign.ID, "phase", desiredState, "wave", wave)
 	}
 
 	return o.launchWave(ctx, campaign, targets, wave)
 }
 
-// launchWave uruchamia hosty biezacej fali z zachowaniem limitu rownoleglosci.
+// launchWave starts the hosts of the current wave within the concurrency limit.
 func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 	targets []Target, wave int) error {
 	running := 0
 	for _, target := range targets {
-		// Host czekajacy na budzet nie zajmuje slotu rownoleglosci: nic
-		// jeszcze nie robi, a policzony jako pracujacy blokowalby fale, ktora
-		// ma wolna pojemnosc gdzie indziej.
-		if target.Wave == wave && !target.State.Finished() && !target.State.Czeka() {
+		// A host waiting for a budget takes no concurrency slot: it is doing
+		// nothing yet, and counted as working it would block a wave that has
+		// free capacity elsewhere.
+		if target.Wave == wave && !target.State.Finished() && !target.State.Waiting() {
 			running++
 		}
 	}
 
 	for i := range targets {
 		target := &targets[i]
-		if target.Wave != wave || !target.State.Czeka() {
+		if target.Wave != wave || !target.State.Waiting() {
 			continue
 		}
 		if running >= campaign.MaxConcurrent {
@@ -173,36 +174,38 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			o.finishTarget(ctx, campaign, target, TargetSkipped, "host_unavailable", err.Error())
 			continue
 		}
-		// Host niepodlaczony nie jest bledem kampanii: zadanie i tak czekaloby
-		// w kolejce, ale wtedy limit rownoleglosci blokowalby cala fale.
+		// A disconnected host is not a campaign failure: the task would wait
+		// in the queue anyway, but then the concurrency limit would block the
+		// whole wave.
 		if host.ConnectionState != "online" {
 			continue
 		}
-		// Okno serwisowe znaczy "ktos przy tej maszynie pracuje". Kampania
-		// nie czeka na jego koniec, tylko omija host i mowi o tym wprost:
-		// inaczej fala staloby w miejscu przez host, ktory lezy w serwisie.
+		// A maintenance window means "somebody is working on this machine".
+		// The campaign does not wait for it to end; it skips the host and
+		// says so outright: otherwise a wave would stand still because of a
+		// host that is under repair.
 		if host.Maintenance.Active(time.Now().UTC()) {
 			o.finishTarget(ctx, campaign, target, TargetSkipped, "maintenance",
-				"host jest w oknie serwisowym do "+host.Maintenance.Until.Format(time.RFC3339))
+				"the host is in a maintenance window until "+host.Maintenance.Until.Format(time.RFC3339))
 			continue
 		}
 
-		// Pojemnosci pytamy dopiero tutaj: host jest podlaczony, poza oknem
-		// serwisowym i naprawde gotowy ruszyc. Token wziety wczesniej
-		// zmniejszalby pojemnosc floty dla kogos, kto moglby z niej
-		// skorzystac.
-		wolne, err := o.zajmijPojemnosc(ctx, campaign, target, host)
+		// We ask for capacity only here: the host is connected, outside a
+		// maintenance window and really ready to start. A token taken earlier
+		// would reduce the fleet's capacity for somebody who could have used
+		// it.
+		free, err := o.takeCapacity(ctx, campaign, target, host)
 		if err != nil {
 			return err
 		}
-		if !wolne {
+		if !free {
 			continue
 		}
 
 		jobID, err := o.createJob(ctx, campaign, target, host)
 		if err != nil {
-			// Zadanie nie powstalo, wiec tokeny nie maja czego pilnowac.
-			o.zwolnijPojemnosc(ctx, target)
+			// The task was not created, so the tokens have nothing to guard.
+			o.releaseCapacity(ctx, target)
 			o.finishTarget(ctx, campaign, target, TargetFailed, "job_create_failed", err.Error())
 			continue
 		}
@@ -218,14 +221,14 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		target.State = TargetRunning
 		running++
 
-		o.log.Info("kampania uruchomila host",
+		o.log.Info("the campaign started a host",
 			"campaign_id", campaign.ID, "host_id", target.HostID,
-			"fala", wave, "job_id", jobID)
+			"wave", wave, "job_id", jobID)
 	}
 	return nil
 }
 
-// createJob tworzy zadanie glowne kampanii dla hosta.
+// createJob creates the campaign's main task for a host.
 func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 	target *Target, host *hosts.Host) (string, error) {
 	var payload opspec.Payload
@@ -236,26 +239,26 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 	}
 	action := opspec.ActionType(campaign.ActionType)
 
-	// Zmiana liczona per host jedzie z odciskiem planu tego hosta. Host
-	// porownuje go ze stanem, ktory ma teraz, i odmawia, gdy plan sie
-	// zdezaktualizowal - zgoda dotyczyla tamtego diffu, nie tego.
+	// A change computed per host travels with that host's plan digest. The
+	// host compares it with the state it has now and refuses when the plan
+	// has gone stale - the consent concerned that diff, not this one.
 	if opspec.PlanningAction(action) != "" {
-		hash, plan, err := o.store.PlanHosta(ctx, campaign.ID, target.HostID)
+		hash, plan, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
 		if err != nil {
 			return "", err
 		}
 		if hash == "" {
-			return "", fmt.Errorf("host %s nie ma policzonego planu", target.HostID)
+			return "", fmt.Errorf("the host %s has no computed plan", target.HostID)
 		}
-		payload = zPlanem(action, payload, hash, plan)
+		payload = withPlan(action, payload, hash, plan)
 	}
 
 	return o.submitJob(ctx, campaign, host, action, payload,
 		"campaign:"+campaign.ID+":main:"+target.HostID)
 }
 
-// submitJob tworzy zadanie zatwierdzone przez kampanie. Zatwierdzenie kampanii
-// jest zatwierdzeniem jej zadan: operator nie klika osobno kazdego hosta.
+// submitJob creates a task approved by the campaign. Approving a campaign is
+// approving its tasks: the operator does not click every host separately.
 func (o *Orchestrator) submitJob(ctx context.Context, campaign Campaign, host *hosts.Host,
 	action opspec.ActionType, payload opspec.Payload, idempotencyKey string) (string, error) {
 	tx, err := o.jobs.Pool().Begin(ctx)
@@ -309,7 +312,7 @@ func allFinished(targets []Target) bool {
 	return true
 }
 
-// currentWave zwraca najnizsza fale z niezakonczonymi celami.
+// currentWave returns the lowest wave that still has unfinished targets.
 func currentWave(targets []Target) int {
 	wave := -1
 	for _, target := range targets {
@@ -323,7 +326,7 @@ func currentWave(targets []Target) int {
 	return wave
 }
 
-// waveFinished mowi, czy wszystkie cele danej fali sa zamkniete.
+// waveFinished says whether every target of the given wave is settled.
 func waveFinished(targets []Target, wave int) bool {
 	if wave < 0 {
 		return true

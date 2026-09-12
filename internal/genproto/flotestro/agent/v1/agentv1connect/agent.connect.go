@@ -134,7 +134,7 @@ func (UnimplementedEnrollmentServiceHandler) Enroll(context.Context, *connect.Re
 // AgentServiceClient is a client for the flotestro.agent.v1.AgentService service.
 type AgentServiceClient interface {
 	Connect(context.Context) *connect.BidiStreamForClient[v1.AgentMessage, v1.ServerMessage]
-	// RenewCertificate wymienia nowy CSR na certyfikat. Tozsamosc pochodzi
+	// RenewCertificate wymienia nowy CSR na certyfikat. Identity pochodzi
 	// z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
 	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
 	// wejsciem dla hosta bez tozsamosci.
@@ -223,7 +223,7 @@ func (c *agentServiceClient) FetchSecret(ctx context.Context, req *connect.Reque
 // AgentServiceHandler is an implementation of the flotestro.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	Connect(context.Context, *connect.BidiStream[v1.AgentMessage, v1.ServerMessage]) error
-	// RenewCertificate wymienia nowy CSR na certyfikat. Tozsamosc pochodzi
+	// RenewCertificate wymienia nowy CSR na certyfikat. Identity pochodzi
 	// z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
 	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
 	// wejsciem dla hosta bez tozsamosci.
@@ -311,7 +311,7 @@ func (UnimplementedAgentServiceHandler) FetchSecret(context.Context, *connect.Re
 
 // RelayServiceClient is a client for the flotestro.agent.v1.RelayService service.
 type RelayServiceClient interface {
-	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
+	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Identity
 	// pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
 	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
@@ -382,7 +382,7 @@ func (c *relayServiceClient) ProxyEnroll(ctx context.Context, req *connect.Reque
 
 // RelayServiceHandler is an implementation of the flotestro.agent.v1.RelayService service.
 type RelayServiceHandler interface {
-	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
+	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Identity
 	// pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
 	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.

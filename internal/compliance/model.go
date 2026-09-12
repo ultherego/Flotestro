@@ -1,15 +1,16 @@
-// Package compliance liczy zgodnosc hosta z profilem hardeningu.
+// Package compliance computes a host's conformance with a hardening profile.
 //
-// Sprawdzenia zyja w panelu, a nie na hoscie, z trzech powodow. Sa
-// wersjonowane, wiec wynik da sie powtorzyc i porownac miedzy hostami. Licza
-// sie z faktow, ktore host i tak zglasza w inwentarzu, wiec nie potrzeba
-// dodatkowego przebiegu po flocie. I nie sa skryptami: kazde sprawdzenie ma
-// typ, oczekiwana wartosc, dowod i - jesli naprawa istnieje - wskazanie
-// konkretnej typowanej operacji modulu, ktory za dana rzecz odpowiada.
+// The checks live in the panel rather than on the host, for three reasons.
+// They are versioned, so a result can be repeated and compared between hosts.
+// They are computed from facts the host reports in its inventory anyway, so no
+// extra pass over the fleet is needed. And they are not scripts: every check
+// has a type, an expected value, evidence and - where a remediation exists -
+// a reference to one specific typed operation of the module responsible for
+// that thing.
 //
-// Panel nie ma przycisku "napraw wszystko". Naprawa jest planem, ktory
-// operator oglada, i osobnymi zadaniami, ktore przechodza przez uprawnienia
-// swoich modulow.
+// The panel has no "fix everything" button. Remediation is a plan the
+// operator reviews and separate tasks that pass through the permissions of
+// their own modules.
 package compliance
 
 import (
@@ -22,50 +23,54 @@ import (
 	"time"
 )
 
-// Wagi ustalen. Waga mowi, co sie stanie, gdy nikt nic nie zrobi, a nie jak
-// trudno to naprawic.
+// The severities of findings. The severity says what happens if nobody does
+// anything, not how hard it is to fix.
 const (
-	WagaHigh   = "high"
-	WagaMedium = "medium"
-	WagaLow    = "low"
-	WagaInfo   = "info"
+	SeverityHigh   = "high"
+	SeverityMedium = "medium"
+	SeverityLow    = "low"
+	SeverityInfo   = "info"
 )
 
-// Kody powodu dla ustalen bez wyniku.
+// The reason codes for findings without a result.
 //
-// Stan nieustalony bez kodu jest bezuzyteczny: operator nie wie, czy ma
-// poczekac na nastepny odczyt, naprawic agenta, czy dac komus uprawnienia.
+// An undetermined state without a code is useless: the operator does not know
+// whether to wait for the next read, repair the agent or grant somebody a
+// permission.
 const (
-	// PowodBrakFaktu: host nie zglosil modulu, z ktorego sprawdzenie liczy.
-	PowodBrakFaktu = "fact_missing"
-	// PowodNieobslugiwane: host nie ma komponentu, ktorego sprawdzenie dotyczy.
-	// Uzywany przy stanie "nie dotyczy", a nie przy nieustalonym.
-	PowodNieobslugiwane = "unsupported_system"
-	// PowodBladOdczytu: fakt istnieje, ale odczyt sie nie powiodl.
-	PowodBladOdczytu = "read_failed"
-	// PowodBrakUprawnienia: odczytu odmowiono z braku uprawnien.
-	PowodBrakUprawnienia = "permission_denied"
-	// PowodNieaktualny: odczyt jest za stary, zeby cokolwiek z niego orzekac.
-	PowodNieaktualny = "inventory_stale"
+	// ReasonFactMissing: the host did not report the module the check is
+	// computed from.
+	ReasonFactMissing = "fact_missing"
+	// ReasonUnsupported: the host does not have the component the check
+	// concerns. Used with the "not applicable" state rather than with the
+	// undetermined one.
+	ReasonUnsupported = "unsupported_system"
+	// ReasonReadFailed: the fact exists, but the read did not succeed.
+	ReasonReadFailed = "read_failed"
+	// ReasonPermissionDenied: the read was refused for lack of permissions.
+	ReasonPermissionDenied = "permission_denied"
+	// ReasonStaleInventory: the read is too old to judge anything from it.
+	ReasonStaleInventory = "inventory_stale"
 )
 
-// MaksymalnyWiekOdczytu wyznacza, jak stary moze byc fakt, zeby dalo sie na
-// nim oprzec ocene.
+// MaxReadAge sets how old a fact may be for an assessment to rest on it.
 //
-// Cykl inwentarza jest krotszy o rzad wielkosci, wiec przekroczenie tego progu
-// oznacza hosta, ktory nie odzywa sie od dawna - a nie hosta zgodnego.
-const MaksymalnyWiekOdczytu = 6 * time.Hour
+// The inventory cycle is an order of magnitude shorter, so crossing this
+// threshold means a host that has been silent for a long time - not a
+// conformant host.
+const MaxReadAge = 6 * time.Hour
 
-// WersjaKanonizacji wersjonuje postac, z ktorej liczy sie odcisk planu.
+// CanonicalVersion versions the form the plan digest is computed from.
 //
-// Zmiana postaci zmienia wszystkie odciski, wiec numer jest czescia napisu:
-// plan zatwierdzony przy poprzedniej wersji nie moze zostac wykonany po
-// zmianie zasad liczenia, bo nie wiadomo, co wtedy zatwierdzono.
-const WersjaKanonizacji = 1
+// Changing the form changes every digest, so the number is part of the text:
+// a plan approved under the previous version must not be carried out after
+// the rules of computation change, because it is not known what was approved
+// then.
+const CanonicalVersion = 1
 
-const naglowekKanonizacji = "flotestro/compliance-plan/v"
+const canonicalHeader = "flotestro/compliance-plan/v"
 
-// Fragment to stan jednego modulu hosta wraz z jego rewizja.
+// Fragment is the state of one host module together with its revision.
 type Fragment struct {
 	Module            string
 	Revision          string
@@ -74,275 +79,279 @@ type Fragment struct {
 	UnavailableReason string
 }
 
-// Host niesie fakty, ktore panel zna sam, bez pytania modulu.
+// Host carries the facts the panel knows by itself, without asking a module.
 type Host struct {
 	Hostname string
 	OSFamily string
-	// Puste wskazniki oznaczaja stan nieustalony, nie zero.
+	// Empty pointers mean an undetermined state, not zero.
 	PendingSecurityUpdates *int
 	RebootRequired         *bool
 }
 
-// Wejscie to wszystko, z czego licza sie sprawdzenia.
-type Wejscie struct {
+// Input is everything the checks are computed from.
+type Input struct {
 	Host      Host
-	Fragmenty map[string]Fragment
+	Fragments map[string]Fragment
 }
 
-// Fragment zwraca fragment modulu i informacje, czy w ogole jest.
-func (w Wejscie) Fragment(modul string) (Fragment, bool) {
-	fragment, ok := w.Fragmenty[modul]
+// Fragment returns a module's fragment and whether it exists at all.
+func (w Input) Fragment(module string) (Fragment, bool) {
+	fragment, ok := w.Fragments[module]
 	if !ok || len(fragment.Payload) == 0 {
 		return Fragment{}, false
 	}
 	return fragment, true
 }
 
-// Naprawa wskazuje typowana operacje, ktora usunie ustalenie.
+// Remediation names the typed operation that removes a finding.
 //
-// Naprawa nie jest osobnym mechanizmem: to zwykla operacja modulu, ktory za
-// dana rzecz odpowiada, z jej wlasnym uprawnieniem i wlasnym ryzykiem.
-// Ustalenie bez naprawy nie jest bledem - czesc rzeczy wymaga decyzji, ktorej
-// panel nie moze podjac za operatora.
-type Naprawa struct {
+// A remediation is not a separate mechanism: it is an ordinary operation of
+// the module responsible for the thing, with its own permission and its own
+// risk. A finding without a remediation is not an error - some things require
+// a decision the panel cannot take for the operator.
+type Remediation struct {
 	Action  string          `json:"action"`
 	Payload json.RawMessage `json:"payload,omitempty"`
-	// Note mowi, czego operacja nie zalatwia albo dlaczego naprawy nie ma.
+	// Note says what the operation does not settle or why there is no remediation.
 	Note string `json:"note,omitempty"`
-	// RequiresReboot oznacza krok, po ktorym host musi wstac na nowo.
-	// Plan moze miec najwyzej jeden taki krok i konczy sie nim.
+	// RequiresReboot marks a step after which the host has to come up again.
+	// A plan may have at most one such step and ends with it.
 	RequiresReboot bool `json:"requires_reboot,omitempty"`
 }
 
-// Ustalenie to wynik jednego sprawdzenia na jednym hoscie.
-type Ustalenie struct {
+// Finding is the result of one check on one host.
+type Finding struct {
 	CheckID      string `json:"check_id"`
 	CheckVersion int    `json:"check_version"`
 	Title        string `json:"title"`
 	Severity     string `json:"severity"`
-	// Rationale mowi, co sie stanie, gdy nikt nic nie zrobi.
+	// Rationale says what happens if nobody does anything.
 	Rationale string `json:"rationale"`
-	// Applicable mowi, czy sprawdzenie ma na tym hoscie zastosowanie. Host
-	// z AppArmorem nie przegrywa sprawdzenia wymagajacego SELinuksa - ono go
-	// po prostu nie dotyczy, i to jest osobna odpowiedz od "nie przeszedl".
+	// Applicable says whether the check applies on this host. A host with
+	// AppArmor does not fail a check that requires SELinux - it simply does
+	// not concern it, and that is a different answer from "did not pass".
 	Applicable bool `json:"applicable"`
-	// Passed i Unknown maja sens wylacznie dla sprawdzen, ktore dotycza.
+	// Passed and Unknown make sense only for checks that apply.
 	Passed  bool `json:"passed"`
 	Unknown bool `json:"unknown"`
-	// ReasonCode nazywa powod braku wyniku. Stan nieustalony bez kodu zmusza
-	// operatora do zgadywania, czy czekac, naprawiac agenta, czy nadac prawa.
+	// ReasonCode names the reason for a missing result. An undetermined state
+	// without a code forces the operator to guess whether to wait, repair the
+	// agent or grant rights.
 	ReasonCode string `json:"reason_code,omitempty"`
-	// Expected i Observed sa zapisane tak, zeby dalo sie je pokazac obok
-	// siebie bez tlumaczenia.
+	// Expected and Observed are written so that they can be shown side by
+	// side without translation.
 	Expected string `json:"expected"`
 	Observed string `json:"observed"`
 	Evidence string `json:"evidence,omitempty"`
-	// Module, Revision i ObservedAt czynia wynik powtarzalnym: mowia,
-	// z ktorego odczytu powstal.
+	// Module, Revision and ObservedAt make the result repeatable: they say
+	// which read it came from.
 	Module     string    `json:"module"`
 	Revision   string    `json:"revision,omitempty"`
 	ObservedAt time.Time `json:"observed_at"`
 
-	Remediation *Naprawa `json:"remediation,omitempty"`
+	Remediation *Remediation `json:"remediation,omitempty"`
 }
 
-// Wymaga mowi, czy ustalenie czeka na dzialanie.
-func (u Ustalenie) Wymaga() bool { return u.Applicable && !u.Passed && !u.Unknown }
+// NeedsAction says whether a finding waits for action.
+func (u Finding) NeedsAction() bool { return u.Applicable && !u.Passed && !u.Unknown }
 
-// Wynik jest odpowiedzia sprawdzenia.
-type Wynik struct {
+// Result is a check's answer.
+type Result struct {
 	Passed bool
-	// NotApplicable zwraca sprawdzenie, ktore na tym hoscie nie ma sensu.
+	// NotApplicable is returned by a check that makes no sense on this host.
 	NotApplicable bool
 	Unknown       bool
-	// ReasonCode jest wymagany przy Unknown i przy NotApplicable.
+	// ReasonCode is required with Unknown and with NotApplicable.
 	ReasonCode  string
 	Observed    string
 	Evidence    string
-	Remediation *Naprawa
+	Remediation *Remediation
 }
 
-// Check to jedno wersjonowane sprawdzenie.
+// Check is one versioned check.
 type Check struct {
 	ID        string
 	Version   int
 	Title     string
 	Severity  string
 	Rationale string
-	// Module wskazuje fragment inwentarza, z ktorego sprawdzenie liczy wynik.
+	// Module names the inventory fragment the check computes its result from.
 	Module string
-	// Expected opisuje stan docelowy slowami operatora.
+	// Expected describes the target state in the operator's words.
 	Expected string
-	Ocen     func(Wejscie) Wynik
+	Evaluate func(Input) Result
 }
 
-// Raport to komplet ustalen dla jednego hosta.
-type Raport struct {
-	HostID   string      `json:"host_id"`
-	Findings []Ustalenie `json:"findings"`
-	// PlanHash wiaze plan naprawy z ustaleniami, z ktorych powstal. Zmiana
-	// stanu hosta zmienia hash, wiec zatwierdzony plan nie moze zostac
-	// wykonany wobec innego stanu, niz operator ogladal.
+// Report is the complete set of findings for one host.
+type Report struct {
+	HostID   string    `json:"host_id"`
+	Findings []Finding `json:"findings"`
+	// PlanHash binds a remediation plan to the findings it came from. A
+	// change in the host's state changes the hash, so an approved plan cannot
+	// be carried out against a state other than the one the operator
+	// reviewed.
 	PlanHash string `json:"plan_hash"`
-	// PlanHashVersion mowi, ktora postac kanoniczna liczyla odcisk.
+	// PlanHashVersion says which canonical form computed the digest.
 	PlanHashVersion int       `json:"plan_hash_version"`
 	GeneratedAt     time.Time `json:"generated_at"`
-	// Counts streszcza raport bez liczenia po stronie interfejsu.
+	// Counts summarise the report without the interface having to count.
 	Counts map[string]int `json:"counts"`
 }
 
-// Ocen liczy ustalenia dla hosta.
-func Ocen(hostID string, wejscie Wejscie, teraz time.Time) Raport {
-	ustalenia := make([]Ustalenie, 0, len(Checks))
+// Evaluate computes the findings for a host.
+func Evaluate(hostID string, input Input, now time.Time) Report {
+	findings := make([]Finding, 0, len(Checks))
 	for _, check := range Checks {
-		ustalenia = append(ustalenia, uruchom(check, wejscie, teraz))
+		findings = append(findings, run(check, input, now))
 	}
-	sort.SliceStable(ustalenia, func(i, j int) bool {
-		if kolejnoscWagi(ustalenia[i]) != kolejnoscWagi(ustalenia[j]) {
-			return kolejnoscWagi(ustalenia[i]) < kolejnoscWagi(ustalenia[j])
+	sort.SliceStable(findings, func(i, j int) bool {
+		if severityOrder(findings[i]) != severityOrder(findings[j]) {
+			return severityOrder(findings[i]) < severityOrder(findings[j])
 		}
-		return ustalenia[i].CheckID < ustalenia[j].CheckID
+		return findings[i].CheckID < findings[j].CheckID
 	})
-	return Raport{
+	return Report{
 		HostID:          hostID,
-		Findings:        ustalenia,
-		PlanHash:        HashPlanu(hostID, ustalenia),
-		PlanHashVersion: WersjaKanonizacji,
-		GeneratedAt:     teraz,
-		Counts:          podsumowanie(ustalenia),
+		Findings:        findings,
+		PlanHash:        PlanHash(hostID, findings),
+		PlanHashVersion: CanonicalVersion,
+		GeneratedAt:     now,
+		Counts:          summarise(findings),
 	}
 }
 
-// uruchom wykonuje jedno sprawdzenie i opisuje wynik.
-func uruchom(check Check, wejscie Wejscie, teraz time.Time) Ustalenie {
-	ustalenie := Ustalenie{
+// run carries out one check and describes the result.
+func run(check Check, input Input, now time.Time) Finding {
+	finding := Finding{
 		CheckID: check.ID, CheckVersion: check.Version, Title: check.Title,
 		Severity: check.Severity, Rationale: check.Rationale,
 		Expected: check.Expected, Module: check.Module, Applicable: true,
 	}
 	if check.Module != "" {
-		fragment, ok := wejscie.Fragment(check.Module)
+		fragment, ok := input.Fragment(check.Module)
 		if !ok {
-			ustalenie.Unknown = true
-			ustalenie.ReasonCode = PowodBrakFaktu
-			ustalenie.Observed = "host nie zglosil modulu " + check.Module
-			return ustalenie
+			finding.Unknown = true
+			finding.ReasonCode = ReasonFactMissing
+			finding.Observed = "the host did not report the module " + check.Module
+			return finding
 		}
-		ustalenie.Revision = fragment.Revision
-		ustalenie.ObservedAt = fragment.ObservedAt
-		// Modul, ktorego host nie odczytal, nie jest modulem pustym.
+		finding.Revision = fragment.Revision
+		finding.ObservedAt = fragment.ObservedAt
+		// A module the host failed to read is not an empty module.
 		if fragment.UnavailableReason != "" {
-			ustalenie.Unknown = true
-			ustalenie.ReasonCode = PowodBladOdczytu
-			ustalenie.Observed = "nie odczytano: " + fragment.UnavailableReason
-			return ustalenie
+			finding.Unknown = true
+			finding.ReasonCode = ReasonReadFailed
+			finding.Observed = "not read: " + fragment.UnavailableReason
+			return finding
 		}
-		// Odczyt sprzed doby opisuje hosta sprzed doby. Ocena na nim oparta
-		// mowilaby o stanie, ktorego juz moze nie byc.
-		if !fragment.ObservedAt.IsZero() && teraz.Sub(fragment.ObservedAt) > MaksymalnyWiekOdczytu {
-			ustalenie.Unknown = true
-			ustalenie.ReasonCode = PowodNieaktualny
-			ustalenie.Observed = "ostatni odczyt: " + fragment.ObservedAt.Format(time.RFC3339)
-			return ustalenie
+		// A read from a day ago describes the host of a day ago. An
+		// assessment resting on it would speak about a state that may no
+		// longer exist.
+		if !fragment.ObservedAt.IsZero() && now.Sub(fragment.ObservedAt) > MaxReadAge {
+			finding.Unknown = true
+			finding.ReasonCode = ReasonStaleInventory
+			finding.Observed = "last read: " + fragment.ObservedAt.Format(time.RFC3339)
+			return finding
 		}
 	}
 
-	wynik := check.Ocen(wejscie)
-	ustalenie.Observed = wynik.Observed
-	ustalenie.Evidence = wynik.Evidence
-	ustalenie.ReasonCode = wynik.ReasonCode
+	result := check.Evaluate(input)
+	finding.Observed = result.Observed
+	finding.Evidence = result.Evidence
+	finding.ReasonCode = result.ReasonCode
 
 	switch {
-	case wynik.NotApplicable:
-		// Sprawdzenie, ktore hosta nie dotyczy, nie jest ani przejsciem, ani
-		// porazka: nie wchodzi do zadnej z tych liczb.
-		ustalenie.Applicable = false
-		if ustalenie.ReasonCode == "" {
-			ustalenie.ReasonCode = PowodNieobslugiwane
+	case result.NotApplicable:
+		// A check that does not concern the host is neither a pass nor a
+		// failure: it enters neither of those counts.
+		finding.Applicable = false
+		if finding.ReasonCode == "" {
+			finding.ReasonCode = ReasonUnsupported
 		}
-	case wynik.Unknown:
-		ustalenie.Unknown = true
-		if ustalenie.ReasonCode == "" {
-			ustalenie.ReasonCode = PowodBrakFaktu
+	case result.Unknown:
+		finding.Unknown = true
+		if finding.ReasonCode == "" {
+			finding.ReasonCode = ReasonFactMissing
 		}
-	case wynik.Passed:
-		ustalenie.Passed = true
+	case result.Passed:
+		finding.Passed = true
 	}
 
-	// Naprawe niesie wylacznie ustalenie, ktore czeka na dzialanie: plan
-	// naprawy stanu poprawnego byl by zaproszeniem do zmiany bez powodu.
-	if ustalenie.Wymaga() {
-		ustalenie.Remediation = wynik.Remediation
+	// Only a finding that waits for action carries a remediation: a plan to
+	// fix a correct state would be an invitation to change for no reason.
+	if finding.NeedsAction() {
+		finding.Remediation = result.Remediation
 	}
-	return ustalenie
+	return finding
 }
 
-// HashPlanu liczy odcisk ustalen, ktore czekaja na dzialanie.
+// PlanHash computes the digest of the findings that wait for action.
 //
-// Postac kanoniczna niesie wersje kanonizacji, hosta, a dla kazdego kroku:
-// sprawdzenie, jego wersje, rewizje odczytu, z ktorego wynik powstal, oraz
-// operacje naprawcza z payloadem. Zmiana czegokolwiek z tej listy zmienia
-// odcisk - i plan trzeba obejrzec na nowo.
-func HashPlanu(hostID string, ustalenia []Ustalenie) string {
-	kroki := make([]string, 0, len(ustalenia))
-	for _, ustalenie := range ustalenia {
-		if !ustalenie.Wymaga() {
+// The canonical form carries the canonicalisation version, the host and, for
+// every step: the check, its version, the revision of the read the result
+// came from, and the remediating operation with its payload. Changing
+// anything from that list changes the digest - and the plan has to be
+// reviewed anew.
+func PlanHash(hostID string, findings []Finding) string {
+	steps := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		if !finding.NeedsAction() {
 			continue
 		}
-		pola := []string{
-			ustalenie.CheckID,
-			strconv.Itoa(ustalenie.CheckVersion),
-			ustalenie.Module,
-			ustalenie.Revision,
-			ustalenie.Observed,
+		fields := []string{
+			finding.CheckID,
+			strconv.Itoa(finding.CheckVersion),
+			finding.Module,
+			finding.Revision,
+			finding.Observed,
 		}
-		if ustalenie.Remediation != nil {
-			pola = append(pola, ustalenie.Remediation.Action, string(ustalenie.Remediation.Payload))
+		if finding.Remediation != nil {
+			fields = append(fields, finding.Remediation.Action, string(finding.Remediation.Payload))
 		} else {
-			pola = append(pola, "", "")
+			fields = append(fields, "", "")
 		}
-		kroki = append(kroki, strings.Join(pola, "\x1f"))
+		steps = append(steps, strings.Join(fields, "\x1f"))
 	}
-	sort.Strings(kroki)
+	sort.Strings(steps)
 
-	kanoniczna := naglowekKanonizacji + strconv.Itoa(WersjaKanonizacji) + "\n" + hostID + "\n" +
-		strings.Join(kroki, "\n")
-	suma := sha256.Sum256([]byte(kanoniczna))
-	return hex.EncodeToString(suma[:])
+	canonical := canonicalHeader + strconv.Itoa(CanonicalVersion) + "\n" + hostID + "\n" +
+		strings.Join(steps, "\n")
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
 }
 
-// podsumowanie liczy ustalenia wedlug stanu i wagi.
-func podsumowanie(ustalenia []Ustalenie) map[string]int {
-	liczby := map[string]int{"passed": 0, "failed": 0, "unknown": 0, "not_applicable": 0}
-	for _, ustalenie := range ustalenia {
+// summarise counts the findings by state and severity.
+func summarise(findings []Finding) map[string]int {
+	counts := map[string]int{"passed": 0, "failed": 0, "unknown": 0, "not_applicable": 0}
+	for _, finding := range findings {
 		switch {
-		case !ustalenie.Applicable:
-			liczby["not_applicable"]++
-		case ustalenie.Unknown:
-			liczby["unknown"]++
-		case ustalenie.Passed:
-			liczby["passed"]++
+		case !finding.Applicable:
+			counts["not_applicable"]++
+		case finding.Unknown:
+			counts["unknown"]++
+		case finding.Passed:
+			counts["passed"]++
 		default:
-			liczby["failed"]++
-			liczby[ustalenie.Severity]++
+			counts["failed"]++
+			counts[finding.Severity]++
 		}
 	}
-	return liczby
+	return counts
 }
 
-func kolejnoscWagi(ustalenie Ustalenie) int {
-	if !ustalenie.Applicable {
+func severityOrder(finding Finding) int {
+	if !finding.Applicable {
 		return 8
 	}
-	if ustalenie.Passed {
+	if finding.Passed {
 		return 9
 	}
-	switch ustalenie.Severity {
-	case WagaHigh:
+	switch finding.Severity {
+	case SeverityHigh:
 		return 0
-	case WagaMedium:
+	case SeverityMedium:
 		return 1
-	case WagaLow:
+	case SeverityLow:
 		return 2
 	}
 	return 3

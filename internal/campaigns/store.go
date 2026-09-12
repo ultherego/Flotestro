@@ -16,15 +16,15 @@ import (
 )
 
 var (
-	// ErrNotFound oznacza brak kampanii.
-	ErrNotFound = errors.New("kampania nie istnieje")
-	// ErrConflict oznacza operacje niedozwolona w obecnym stanie.
-	ErrConflict = errors.New("operacja niedozwolona w obecnym stanie kampanii")
-	// ErrNoTargets oznacza selektor, ktory nie wskazal zadnego hosta.
-	ErrNoTargets = errors.New("selektor nie wskazal zadnego hosta")
+	// ErrNotFound means there is no such campaign.
+	ErrNotFound = errors.New("the campaign does not exist")
+	// ErrConflict means an operation not allowed in the current state.
+	ErrConflict = errors.New("the operation is not allowed in the current state of the campaign")
+	// ErrNoTargets means a selector that named no host.
+	ErrNoTargets = errors.New("the selector named no host")
 )
 
-// Store realizuje dostep do tabel kampanii.
+// Store provides access to the campaign tables.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -35,21 +35,22 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// TargetHost jest hostem wybranym do kampanii.
+// TargetHost is a host picked for a campaign.
 type TargetHost struct {
 	ID     string
 	BootID string
-	// Stan i powod opisuja host zamkniety juz w chwili tworzenia kampanii:
-	// niezdolny do tej operacji albo w oknie serwisowym. Pusty stan znaczy
-	// host gotowy do pracy.
-	Stan  TargetState
-	Powod string
-	Opis  string
+	// State and Reason describe a host that is already settled at the moment
+	// the campaign is created: ineligible for this operation or inside a
+	// maintenance window. An empty state means a host ready to work.
+	State   TargetState
+	Reason  string
+	Message string
 }
 
-// Create tworzy kampanie wraz z niemutowalna migawka celow. Podzial na fale
-// nastepuje w chwili planowania: host dodany do floty pozniej nie wejdzie do
-// trwajacej kampanii bez wiedzy operatora.
+// Create creates a campaign together with an immutable snapshot of its
+// targets. The division into waves happens at planning time: a host added to
+// the fleet later will not enter a campaign under way without the operator
+// knowing.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []TargetHost) (*Campaign, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
@@ -66,24 +67,25 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	if len(payload) == 0 {
 		payload = json.RawMessage("{}")
 	}
-	// Pusty wycinek w Go trafilby do bazy jako NULL, a kolumna wymaga tablicy.
+	// An empty Go slice would reach the database as NULL, and the column requires an array.
 	healthChecks := spec.HealthCheckUnits
 	if healthChecks == nil {
 		healthChecks = []string{}
 	}
 
 	state := StateQueuedOrApproval(spec.RequiresApproval)
-	// Zmiana liczona per host zaczyna od planowania: zgoda ma dotyczyc
-	// diffow, a te dopiero powstana.
+	// A change computed per host starts with planning: the consent is to
+	// concern the diffs, and those are yet to come into being.
 	if opspec.PlanningAction(opspec.ActionType(spec.ActionType)) != "" {
 		state = StatePlanning
 	}
 	campaignID := uuid.NewString()
 
-	// Odcisk powstaje z tego samego opisu, ktory trafia do bazy. Zatwierdzenie
-	// bedzie musialo go podac, wiec zgoda dotyczy tej listy hostow i tej
-	// polityki, a nie samego identyfikatora kampanii.
-	odcisk, err := Odcisk(spec, hosts)
+	// The fingerprint comes from the same description that reaches the
+	// database. The approval will have to quote it, so the consent concerns
+	// this list of hosts and this policy rather than the campaign identifier
+	// alone.
+	fingerprint, err := Fingerprint(spec, hosts)
 	if err != nil {
 		return nil, err
 	}
@@ -103,23 +105,23 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		spec.MaintenanceStart, spec.MaintenanceEnd, string(spec.RebootPolicy),
 		healthChecks, spec.JobTimeoutSeconds,
 		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID),
-		odcisk); err != nil {
-		return nil, fmt.Errorf("utworzenie kampanii: %w", err)
+		fingerprint); err != nil {
+		return nil, fmt.Errorf("creating the campaign: %w", err)
 	}
 
-	// Fale liczymy tylko z hostow gotowych. Host zamkniety od razu nie moze
-	// zajac miejsca w canary: canary zlozone z hostow, ktore nic nie zrobia,
-	// nie jest proba na malej grupie.
-	gotowych := 0
+	// We count the waves from the ready hosts only. A host settled right away
+	// must not take a place in the canary: a canary made of hosts that will
+	// do nothing is not a trial on a small group.
+	ready := 0
 	for _, host := range hosts {
-		stan := host.Stan
-		if stan == "" {
-			stan = TargetPending
+		state := host.State
+		if state == "" {
+			state = TargetPending
 		}
 		wave, position := 0, 0
-		if stan == TargetPending {
-			wave, position = AssignWave(gotowych, spec.CanarySize, spec.WaveSize)
-			gotowych++
+		if state == TargetPending {
+			wave, position = AssignWave(ready, spec.CanarySize, spec.WaveSize)
+			ready++
 		}
 		const insertTarget = `
 			insert into campaign_targets (id, campaign_id, host_id, wave, position,
@@ -128,19 +130,19 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
 			        case when $7 = 'pending' then null else now() end)`
 		if _, err := tx.Exec(ctx, insertTarget, uuid.NewString(), campaignID,
-			host.ID, wave, position, nullable(host.BootID), string(stan),
-			nullable(host.Powod), nullable(host.Opis)); err != nil {
-			return nil, fmt.Errorf("zapis celu kampanii: %w", err)
+			host.ID, wave, position, nullable(host.BootID), string(state),
+			nullable(host.Reason), nullable(host.Message)); err != nil {
+			return nil, fmt.Errorf("recording a campaign target: %w", err)
 		}
 	}
-	if gotowych == 0 {
+	if ready == 0 {
 		return nil, ErrNoTargets
 	}
 
 	return s.getTx(ctx, tx, campaignID)
 }
 
-// StateQueuedOrApproval zwraca stan poczatkowy kampanii.
+// StateQueuedOrApproval returns the initial state of a campaign.
 func StateQueuedOrApproval(requiresApproval bool) State {
 	if requiresApproval {
 		return StateAwaitingApproval
@@ -148,8 +150,8 @@ func StateQueuedOrApproval(requiresApproval bool) State {
 	return StatePlanned
 }
 
-// AssignWave przydziela hosta do fali. Fala 0 jest canary i ma wlasny rozmiar;
-// kolejne fale maja staly rozmiar.
+// AssignWave assigns a host to a wave. Wave 0 is the canary and has its own
+// size; the following waves have a fixed size.
 func AssignWave(index, canarySize, waveSize int) (wave, position int) {
 	if index < canarySize {
 		return 0, index
@@ -158,7 +160,7 @@ func AssignWave(index, canarySize, waveSize int) (wave, position int) {
 	return remaining/waveSize + 1, remaining % waveSize
 }
 
-// Approve zatwierdza kampanie i pozwala jej ruszyc.
+// Approve approves a campaign and lets it start.
 func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID, actor string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, approved_by = $3, approved_at = now(), updated_at = now()
@@ -176,7 +178,7 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID, actor string
 	return s.getTx(ctx, tx, campaignID)
 }
 
-// Pause wstrzymuje kampanie. Hosty juz uruchomione dokoncza swoje zadania.
+// Pause holds a campaign back. The hosts already started finish their tasks.
 func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, paused_by = $3, paused_at = now(),
@@ -194,7 +196,7 @@ func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*C
 	return s.Get(ctx, campaignID)
 }
 
-// Resume wznawia wstrzymana kampanie.
+// Resume restarts a campaign that was held back.
 func (s *Store) Resume(ctx context.Context, campaignID, actor string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, paused_by = null, paused_at = null,
@@ -212,7 +214,7 @@ func (s *Store) Resume(ctx context.Context, campaignID, actor string) (*Campaign
 	return s.Get(ctx, campaignID)
 }
 
-// Cancel konczy kampanie. Cele, ktore jeszcze nie ruszyly, sa pomijane.
+// Cancel ends a campaign. The targets that have not started are skipped.
 func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -234,7 +236,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		return nil, err
 	}
 
-	// Hosty, ktore jeszcze nie ruszyly, nie zostana ruszone.
+	// The hosts that have not started will not be started.
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets set state = 'canceled', finished_at = now()
 		where campaign_id = $1 and state in ('pending', 'awaiting_budget')`,
@@ -247,7 +249,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	return s.Get(ctx, campaignID)
 }
 
-// SetState zmienia stan kampanii.
+// SetState changes the state of a campaign.
 func (s *Store) SetState(ctx context.Context, campaignID string, state State, reason string) error {
 	const query = `
 		update campaigns set state = $2, updated_at = now(),
@@ -261,19 +263,19 @@ func (s *Store) SetState(ctx context.Context, campaignID string, state State, re
 	return err
 }
 
-// Active zwraca kampanie wymagajace obslugi przez orkiestrator.
+// Active returns the campaigns the orchestrator has to handle.
 func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
-	// Planowanie jest stanem aktywnym: kampania nic jeszcze nie zmienia, ale
+	// Planning is an active state: the campaign changes nothing yet, but
 	// orchestrator ma co robic - kazdy host liczy wlasny plan.
 	return s.query(ctx,
 		"where state in ('planning', 'planned', 'canary', 'running') order by created_at")
 }
 
-// ZapiszPlan zapisuje plan wyliczony na jednym hoscie.
+// SavePlan records the plan computed on one host.
 //
-// Plan powstaje raz i nie jest przeliczany po zatwierdzeniu: zgoda dotyczy
-// tego diffu, a nie tego, co host wylicza teraz.
-func (s *Store) ZapiszPlan(ctx context.Context, campaignID, hostID, hash string,
+// A plan comes into being once and is not recomputed after the approval: the
+// consent concerns that diff, not what the host computes now.
+func (s *Store) SavePlan(ctx context.Context, campaignID, hostID, hash string,
 	plan json.RawMessage) error {
 	if len(plan) == 0 {
 		plan = json.RawMessage("{}")
@@ -288,8 +290,8 @@ func (s *Store) ZapiszPlan(ctx context.Context, campaignID, hostID, hash string,
 	return err
 }
 
-// Plany zwraca odciski planow kampanii w podziale na hosty.
-func (s *Store) Plany(ctx context.Context, campaignID string) (map[string]string, error) {
+// Plans returns the digests of a campaign's plans broken down by host.
+func (s *Store) Plans(ctx context.Context, campaignID string) (map[string]string, error) {
 	rows, err := s.pool.Query(ctx,
 		`select host_id, plan_hash from campaign_plans where campaign_id = $1`, campaignID)
 	if err != nil {
@@ -297,23 +299,24 @@ func (s *Store) Plany(ctx context.Context, campaignID string) (map[string]string
 	}
 	defer rows.Close()
 
-	plany := map[string]string{}
+	plans := map[string]string{}
 	for rows.Next() {
 		var host, hash string
 		if err := rows.Scan(&host, &hash); err != nil {
 			return nil, err
 		}
-		plany[host] = hash
+		plans[host] = hash
 	}
-	return plany, rows.Err()
+	return plans, rows.Err()
 }
 
-// PlanHosta zwraca plan policzony na jednym hoscie razem z jego trescia.
+// HostPlan returns the plan computed on one host together with its content.
 //
-// Sam odcisk wystarcza do zwiazania zgody, ale nie do wykonania: zapis pliku
-// musi wrocic na host z odciskiem tresci, ktora operator ogladal, a ten lezy
-// w tresci planu, nie w jego odcisku.
-func (s *Store) PlanHosta(ctx context.Context, campaignID, hostID string) (string, json.RawMessage, error) {
+// The digest alone is enough to bind the consent but not to execute: a file
+// write has to come back to the host with the digest of the content the
+// operator reviewed, and that lies in the plan's content rather than in its
+// digest.
+func (s *Store) HostPlan(ctx context.Context, campaignID, hostID string) (string, json.RawMessage, error) {
 	var hash string
 	var plan json.RawMessage
 	const query = `
@@ -326,20 +329,21 @@ func (s *Store) PlanHosta(ctx context.Context, campaignID, hostID string) (strin
 	return hash, plan, err
 }
 
-// WpisPlanu to plan jednego hosta wraz z jego trescia.
-type WpisPlanu struct {
+// PlanEntry is one host's plan together with its content.
+type PlanEntry struct {
 	HostID   string          `json:"host_id"`
 	Hostname string          `json:"hostname,omitempty"`
 	PlanHash string          `json:"plan_hash"`
 	Plan     json.RawMessage `json:"plan,omitempty"`
 }
 
-// PlanyZTrescia zwraca plany wszystkich hostow kampanii.
+// PlansWithContent returns the plans of every host in a campaign.
 //
-// Zgoda dotyczy zestawu planow, wiec operator musi go zobaczyc w calosci -
-// a nie wnioskowac o nim z jednego odcisku. Nazwa hosta idzie razem
-// z planem, bo lista identyfikatorow nie mowi nikomu nic.
-func (s *Store) PlanyZTrescia(ctx context.Context, campaignID string) ([]WpisPlanu, error) {
+// The consent concerns the set of plans, so the operator has to see it in
+// full rather than infer it from a single digest. The host name travels
+// together with the plan, because a list of identifiers tells nobody
+// anything.
+func (s *Store) PlansWithContent(ctx context.Context, campaignID string) ([]PlanEntry, error) {
 	const query = `
 		select p.host_id, coalesce(h.hostname, ''), p.plan_hash, p.plan
 		  from campaign_plans p
@@ -352,30 +356,32 @@ func (s *Store) PlanyZTrescia(ctx context.Context, campaignID string) ([]WpisPla
 	}
 	defer rows.Close()
 
-	wpisy := []WpisPlanu{}
+	entries := []PlanEntry{}
 	for rows.Next() {
-		var wpis WpisPlanu
-		if err := rows.Scan(&wpis.HostID, &wpis.Hostname, &wpis.PlanHash, &wpis.Plan); err != nil {
+		var entry PlanEntry
+		if err := rows.Scan(&entry.HostID, &entry.Hostname, &entry.PlanHash, &entry.Plan); err != nil {
 			return nil, err
 		}
-		wpisy = append(wpisy, wpis)
+		entries = append(entries, entry)
 	}
-	return wpisy, rows.Err()
+	return entries, rows.Err()
 }
 
-// ZamknijPlanowanie zapisuje odcisk zestawu planow razem z odciskiem
-// zatwierdzenia i przenosi kampanie do stanu, w ktorym czeka na decyzje.
+// FinishPlanning records the digest of the set of plans together with the
+// approval fingerprint and moves the campaign into the state where it waits
+// for a decision.
 //
-// Odcisk zatwierdzenia zmienia sie tu po raz ostatni: od tej chwili zgoda
-// dotyczy konkretnego zestawu planow, a nie samego zamowienia.
-func (s *Store) ZamknijPlanowanie(ctx context.Context, campaignID, planSetHash,
-	odcisk string, dalej State) error {
+// The approval fingerprint changes here for the last time: from this moment
+// the consent concerns one specific set of plans rather than the request
+// alone.
+func (s *Store) FinishPlanning(ctx context.Context, campaignID, planSetHash,
+	fingerprint string, next State) error {
 	const query = `
 		update campaigns
 		   set plan_set_hash = $2, approval_fingerprint = $3, state = $4, updated_at = now()
 		 where id = $1 and state = $5`
-	tag, err := s.pool.Exec(ctx, query, campaignID, planSetHash, odcisk,
-		string(dalej), string(StatePlanning))
+	tag, err := s.pool.Exec(ctx, query, campaignID, planSetHash, fingerprint,
+		string(next), string(StatePlanning))
 	if err != nil {
 		return err
 	}
@@ -385,8 +391,8 @@ func (s *Store) ZamknijPlanowanie(ctx context.Context, campaignID, planSetHash,
 	return nil
 }
 
-// Zdarzenie jest jednym wpisem przebiegu kampanii.
-type Zdarzenie struct {
+// Event is one entry in the course of a campaign.
+type Event struct {
 	ID         int64           `json:"id"`
 	Aggregate  string          `json:"aggregate_type"`
 	Type       string          `json:"event_type"`
@@ -394,15 +400,17 @@ type Zdarzenie struct {
 	OccurredAt time.Time       `json:"occurred_at"`
 }
 
-// Przebieg zwraca trwaly slad kampanii: co i kiedy sie w niej stalo.
+// Course returns the durable trail of a campaign: what happened in it and
+// when.
 //
-// Stan koncowy widac w tabelach, ale przebieg jest tym, czego operator
-// potrzebuje w trakcie: kiedy ruszylo canary, ktory host padl jako pierwszy
-// i o ktorej kampania sie zatrzymala. Powiadomienia tego nie utrzymaja -
-// zdarzenie wyslane w chwili restartu panelu nie istnieje juz nigdzie.
-func (s *Store) Przebieg(ctx context.Context, campaignID string, limit int) ([]Zdarzenie, error) {
-	if limit <= 0 || limit > maksymalnyPrzebieg {
-		limit = maksymalnyPrzebieg
+// The final state is visible in the tables, but the course is what the
+// operator needs while it runs: when the canary started, which host failed
+// first and at what time the campaign stopped. Notifications will not keep
+// that - an event sent at the moment the panel restarts exists nowhere any
+// more.
+func (s *Store) Course(ctx context.Context, campaignID string, limit int) ([]Event, error) {
+	if limit <= 0 || limit > maxCourseEntries {
+		limit = maxCourseEntries
 	}
 	const query = `
 		select id, aggregate_type, event_type, payload, occurred_at
@@ -416,29 +424,30 @@ func (s *Store) Przebieg(ctx context.Context, campaignID string, limit int) ([]Z
 	}
 	defer rows.Close()
 
-	przebieg := []Zdarzenie{}
+	course := []Event{}
 	for rows.Next() {
-		var wpis Zdarzenie
-		if err := rows.Scan(&wpis.ID, &wpis.Aggregate, &wpis.Type,
-			&wpis.Payload, &wpis.OccurredAt); err != nil {
+		var entry Event
+		if err := rows.Scan(&entry.ID, &entry.Aggregate, &entry.Type,
+			&entry.Payload, &entry.OccurredAt); err != nil {
 			return nil, err
 		}
-		przebieg = append(przebieg, wpis)
+		course = append(course, entry)
 	}
-	return przebieg, rows.Err()
+	return course, rows.Err()
 }
 
-// maksymalnyPrzebieg ogranicza jeden odczyt przebiegu. Kampania na tysiacu
-// hostow ma kilka tysiecy zdarzen i nie ma powodu wysylac ich wszystkich naraz.
-const maksymalnyPrzebieg = 2000
+// maxCourseEntries bounds a single read of the course. A campaign on a
+// thousand hosts has a few thousand events and there is no reason to send
+// them all at once.
+const maxCourseEntries = 2000
 
-// AktywneCele mowi, ktore hosty sa juz celami trwajacych kampanii.
+// ActiveTargets says which hosts are already targets of campaigns under way.
 //
-// Kolizja nie zatrzymuje nowego zamowienia: blokady zasobow na hoscie i tak
-// ustawia operacje w kolejce. Ale operator ma to wiedziec przed startem -
-// kampania, ktora czeka na cudza transakcje pakietowa, wyglada jak kampania,
-// ktora stoi bez powodu.
-func (s *Store) AktywneCele(ctx context.Context) (map[string]string, error) {
+// A collision does not stop a new request: the resource locks on the host
+// will queue the operations anyway. But the operator is to know before the
+// start - a campaign waiting for somebody else's package transaction looks
+// like a campaign standing still for no reason.
+func (s *Store) ActiveTargets(ctx context.Context) (map[string]string, error) {
 	const query = `
 		select t.host_id, t.campaign_id
 		  from campaign_targets t
@@ -452,18 +461,18 @@ func (s *Store) AktywneCele(ctx context.Context) (map[string]string, error) {
 	}
 	defer rows.Close()
 
-	kolizje := map[string]string{}
+	collisions := map[string]string{}
 	for rows.Next() {
 		var host, campaign string
 		if err := rows.Scan(&host, &campaign); err != nil {
 			return nil, err
 		}
-		kolizje[host] = campaign
+		collisions[host] = campaign
 	}
-	return kolizje, rows.Err()
+	return collisions, rows.Err()
 }
 
-// Get zwraca kampanie.
+// Get returns a campaign.
 func (s *Store) Get(ctx context.Context, campaignID string) (*Campaign, error) {
 	found, err := s.query(ctx, "where id = $1", campaignID)
 	if err != nil {
@@ -491,19 +500,20 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, campaignID string) (*Campa
 	return &campaigns[0], nil
 }
 
-// List zwraca kampanie, opcjonalnie zawezone stanem.
-// Scope jest para lokalizacja-srodowisko. Pusta wartosc pola znaczy "dowolne".
+// List returns the campaigns, optionally narrowed by state.
+// Scope is a site-environment pair. An empty field means "any".
 type Scope struct {
 	Site        string
 	Environment string
 }
 
-// List zwraca kampanie zawezone do zakresow, w ktorych wolajacy ma prawo
-// odczytu.
+// List returns the campaigns narrowed to the scopes in which the caller has
+// the right to read.
 //
-// Kampania nie ma wlasnego zakresu - ma cele. Widoczna jest wiec ta, ktora
-// dotyka choc jednego hosta z zakresu wolajacego; operator jednego srodowiska
-// widzi kampanie, ktore go dotycza, i nie widzi cudzych.
+// A campaign has no scope of its own - it has targets. Visible is therefore
+// the one that touches at least one host from the caller's scope; the
+// operator of one environment sees the campaigns that concern them and does
+// not see anybody else's.
 func (s *Store) List(ctx context.Context, state string, limit int, scopes []Scope) ([]Campaign, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -521,7 +531,7 @@ func (s *Store) List(ctx context.Context, state string, limit int, scopes []Scop
 	return s.query(ctx, clause+" order by created_at desc limit "+itoa(limit), args...)
 }
 
-// scopeCondition buduje warunek widocznosci po celach kampanii.
+// scopeCondition builds the visibility condition over a campaign's targets.
 func scopeCondition(scopes []Scope, offset int) (string, []any) {
 	przelozone := make([]authz.Scope, 0, len(scopes))
 	for _, scope := range scopes {
@@ -574,7 +584,7 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 	return campaigns, rows.Err()
 }
 
-// Targets zwraca cele kampanii w kolejnosci fal.
+// Targets returns the campaign's targets in wave order.
 func (s *Store) Targets(ctx context.Context, campaignID string) ([]Target, error) {
 	const query = `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,
@@ -604,7 +614,7 @@ func (s *Store) Targets(ctx context.Context, campaignID string) ([]Target, error
 	return targets, rows.Err()
 }
 
-// UpdateTarget zapisuje stan celu kampanii.
+// UpdateTarget records the state of a campaign target.
 func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetState,
 	errorCode, message string) error {
 	const query = `
@@ -622,7 +632,7 @@ func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetS
 	return err
 }
 
-// AttachJob wiaze cel z utworzonym zadaniem.
+// AttachJob binds a target to the task that was created.
 func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) error {
 	var query string
 	switch column {
@@ -635,7 +645,7 @@ func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) e
 	case "plan_job_id":
 		query = `update campaign_targets set plan_job_id = $2 where id = $1`
 	default:
-		return fmt.Errorf("nieznana kolumna zadania %q", column)
+		return fmt.Errorf("unknown task column %q", column)
 	}
 	_, err := s.pool.Exec(ctx, query, targetID, jobID)
 	return err
@@ -648,7 +658,7 @@ func (s *Store) SetBootIDBefore(ctx context.Context, targetID, bootID string) er
 	return err
 }
 
-// Counts zwraca liczbe celow w kazdym stanie.
+// Counts returns the number of targets in each state.
 func (s *Store) Counts(ctx context.Context, campaignID string) (map[string]int, error) {
 	const query = `select state, count(*) from campaign_targets where campaign_id = $1 group by state`
 	rows, err := s.pool.Query(ctx, query, campaignID)

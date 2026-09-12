@@ -55,7 +55,7 @@ func (e *TaskExecutor) ZbierzCertyfikaty(ctx context.Context,
 	if sledzenie != nil {
 		snapshot = snapshot.Uzupelnij(*sledzenie)
 	}
-	// Magazyn zaufania czyta agent: katalog kotwic jest czytelny dla
+	// Store zaufania czyta agent: katalog kotwic jest czytelny dla
 	// wszystkich, wiec nie ma powodu isc po to do roota. Bez tego odczytu
 	// rotacja urzedu jest niewidoczna z panelu.
 	magazyn := certificates.CzytajKotwice(certificates.WykryjMagazyn(certificates.Istnieje))

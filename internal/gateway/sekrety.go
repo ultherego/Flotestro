@@ -41,7 +41,7 @@ func (s *AgentService) SetSecretLeases(store SekretyDzierzawione) { s.leases = s
 // wtedy, gdy panel sam wystawil dzierzawe: dla tego hosta, dla tego zadania
 // i na krotka chwile. Dzierzawa jest jednorazowa.
 //
-// Tozsamosc hosta pochodzi z certyfikatu klienta, nigdy z tresci zadania:
+// Identity hosta pochodzi z certyfikatu klienta, nigdy z tresci zadania:
 // inaczej wystarczyloby znac cudzy identyfikator proby.
 func (s *AgentService) FetchSecret(ctx context.Context,
 	req *connect.Request[agentv1.FetchSecretRequest],

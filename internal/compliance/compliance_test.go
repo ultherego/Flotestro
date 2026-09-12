@@ -13,259 +13,261 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// odczytano jest chwila, w ktorej host zglosil fakty, a terazTestowe -
-// chwila oceny. Roznica jest mala celowo: ocena liczona wobec starego odczytu
-// konczy sie stanem nieustalonym, i to jest osobny test.
-var odczytano = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-var terazTestowe = odczytano.Add(time.Minute)
+// readAt is the moment the host reported its facts, and testNow the moment of
+// the assessment. The difference is small on purpose: an assessment computed
+// against an old read ends with an undetermined state, and that is a separate
+// test.
+var readAt = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+var testNow = readAt.Add(time.Minute)
 
-func fragmentZ(t *testing.T, modul string, tresc any) Fragment {
+func fragmentOf(t *testing.T, module string, content any) Fragment {
 	t.Helper()
-	zakodowane, err := json.Marshal(tresc)
+	encoded, err := json.Marshal(content)
 	if err != nil {
-		t.Fatalf("serializacja %s: %v", modul, err)
+		t.Fatalf("serialising %s: %v", module, err)
 	}
 	return Fragment{
-		Module: modul, Revision: "rew-" + modul, Payload: zakodowane,
-		ObservedAt: odczytano,
+		Module: module, Revision: "rev-" + module, Payload: encoded,
+		ObservedAt: readAt,
 	}
 }
 
-func ustalenie(raport Raport, id string) Ustalenie {
-	for _, wynik := range raport.Findings {
-		if wynik.CheckID == id {
-			return wynik
+func finding(report Report, id string) Finding {
+	for _, result := range report.Findings {
+		if result.CheckID == id {
+			return result
 		}
 	}
-	return Ustalenie{}
+	return Finding{}
 }
 
-// Host, ktory nie zglosil modulu, nie jest hostem niezgodnym: brak odczytu
-// i zla wartosc to dwie rozne odpowiedzi.
-func TestBrakModuluDajeStanNieznany(t *testing.T) {
-	raport := Ocen("host", Wejscie{}, terazTestowe)
+// A host that did not report a module is not a non-conformant host: a missing
+// read and a wrong value are two different answers.
+func TestAMissingModuleGivesAnUnknownState(t *testing.T) {
+	report := Evaluate("host", Input{}, testNow)
 
-	for _, wynik := range raport.Findings {
-		if wynik.Module == "" {
+	for _, result := range report.Findings {
+		if result.Module == "" {
 			continue
 		}
-		if !wynik.Unknown {
-			t.Errorf("%s bez modulu ma stan znany: %+v", wynik.CheckID, wynik)
+		if !result.Unknown {
+			t.Errorf("%s without a module has a known state: %+v", result.CheckID, result)
 		}
-		if wynik.Remediation != nil {
-			t.Errorf("%s bez odczytu ma plan naprawy", wynik.CheckID)
+		if result.Remediation != nil {
+			t.Errorf("%s without a read has a remediation plan", result.CheckID)
 		}
 	}
-	if raport.Counts["failed"] != 0 {
-		t.Errorf("niezgodnosci bez odczytu: %d", raport.Counts["failed"])
+	if report.Counts["failed"] != 0 {
+		t.Errorf("non-conformances without a read: %d", report.Counts["failed"])
 	}
-	// Plan bez ustalen wymagajacych dzialania jest pusty, ale nadal ma odcisk.
-	if raport.PlanHash == "" {
-		t.Error("raport bez odcisku planu")
+	// A plan without findings that need action is empty but still has a digest.
+	if report.PlanHash == "" {
+		t.Error("a report without a plan digest")
 	}
 }
 
-// Modul odczytany z bledem tez nie jest niezgodnoscia - niesie powod.
-func TestNieodczytanyModulNiesiePowod(t *testing.T) {
-	fragment := fragmentZ(t, modulSecurity, security.Snapshot{})
-	fragment.UnavailableReason = "helper: brak odpowiedzi"
-	raport := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{modulSecurity: fragment}}, terazTestowe)
+// A module read with an error is not a non-conformance either - it carries a reason.
+func TestAModuleThatWasNotReadCarriesAReason(t *testing.T) {
+	fragment := fragmentOf(t, moduleSecurity, security.Snapshot{})
+	fragment.UnavailableReason = "helper: no answer"
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{moduleSecurity: fragment}}, testNow)
 
-	wynik := ustalenie(raport, "mac.enforcing")
-	if !wynik.Unknown {
-		t.Fatalf("ustalenie = %+v", wynik)
+	result := finding(report, "mac.enforcing")
+	if !result.Unknown {
+		t.Fatalf("finding = %+v", result)
 	}
-	if wynik.Observed == "" || wynik.Revision != "rew-security" {
-		t.Errorf("ustalenie bez powodu albo bez rewizji: %+v", wynik)
+	if result.Observed == "" || result.Revision != "rev-security" {
+		t.Errorf("a finding without a reason or without a revision: %+v", result)
 	}
 }
 
-func TestSELinuxWTrybiePermissiveMaNaprawe(t *testing.T) {
-	stan := security.Snapshot{
+func TestSELinuxInPermissiveHasARemediation(t *testing.T) {
+	state := security.Snapshot{
 		MAC: security.Mandatory{
 			System: security.SystemSELinux, Mode: security.TrybPermissive,
 			ConfiguredMode: security.TrybEnforcing, Policy: "targeted",
 		},
 	}
-	raport := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, stan)}}, terazTestowe)
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}, testNow)
 
-	wynik := ustalenie(raport, "mac.enforcing")
-	if wynik.Passed || wynik.Unknown {
-		t.Fatalf("permissive uznane za ochrone: %+v", wynik)
+	result := finding(report, "mac.enforcing")
+	if result.Passed || result.Unknown {
+		t.Fatalf("permissive treated as protection: %+v", result)
 	}
-	if wynik.Remediation == nil || wynik.Remediation.Action != "selinux.mode.set" {
-		t.Fatalf("naprawa = %+v", wynik.Remediation)
+	if result.Remediation == nil || result.Remediation.Action != "selinux.mode.set" {
+		t.Fatalf("remediation = %+v", result.Remediation)
 	}
-	// Naprawa jest zwykla operacja modulu, wiec niesie gotowy payload.
+	// A remediation is an ordinary module operation, so it carries a ready payload.
 	var payload struct {
 		Security struct {
 			Mode string `json:"mode"`
 		} `json:"security"`
 	}
-	if err := json.Unmarshal(wynik.Remediation.Payload, &payload); err != nil {
-		t.Fatalf("payload naprawy: %v", err)
+	if err := json.Unmarshal(result.Remediation.Payload, &payload); err != nil {
+		t.Fatalf("remediation payload: %v", err)
 	}
 	if payload.Security.Mode != security.TrybEnforcing {
-		t.Errorf("payload naprawy = %+v", payload)
+		t.Errorf("remediation payload = %+v", payload)
 	}
-	// Rozjazd trybu dzialajacego i skonfigurowanego jest osobnym ustaleniem.
-	trwalosc := ustalenie(raport, "mac.persistent")
+	// A drift between the running and the configured mode is a separate finding.
+	trwalosc := finding(report, "mac.persistent")
 	if trwalosc.Passed {
-		t.Error("rozjazd trybu uznany za zgodnosc")
+		t.Error("a mode drift treated as conformance")
 	}
 }
 
-// AppArmor z samymi profilami w trybie skarg nie chroni, ale panel nie ma
-// czym tego naprawic - i mowi to zamiast proponowac operacje, ktorej nie ma.
-func TestAppArmorBezProfiliWymuszanychNieMaOperacjiNaprawczej(t *testing.T) {
+// AppArmor with profiles in complain mode alone does not protect, but the
+// panel has nothing to fix it with - and it says so instead of proposing an
+// operation that does not exist.
+func TestAppArmorWithoutEnforcedProfilesHasNoRemediatingOperation(t *testing.T) {
 	zero, dwa := 0, 2
-	stan := security.Snapshot{MAC: security.Mandatory{
+	state := security.Snapshot{MAC: security.Mandatory{
 		System: security.SystemAppArmor, Mode: security.TrybEnforcing,
 		ProfilesEnforcing: &zero, ProfilesComplain: &dwa,
 	}}
-	raport := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, stan)}}, terazTestowe)
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}, testNow)
 
-	wynik := ustalenie(raport, "mac.enforcing")
-	if wynik.Passed {
-		t.Fatal("profile w trybie skarg uznane za ochrone")
+	result := finding(report, "mac.enforcing")
+	if result.Passed {
+		t.Fatal("profiles in complain mode treated as protection")
 	}
-	if wynik.Remediation == nil || wynik.Remediation.Action != "" {
-		t.Fatalf("naprawa = %+v", wynik.Remediation)
+	if result.Remediation == nil || result.Remediation.Action != "" {
+		t.Fatalf("remediation = %+v", result.Remediation)
 	}
-	if wynik.Remediation.Note == "" {
-		t.Error("brak naprawy bez wyjasnienia")
+	if result.Remediation.Note == "" {
+		t.Error("a missing remediation without an explanation")
 	}
 }
 
-func TestUstalenieSpelnioneNieNiesieNaprawy(t *testing.T) {
-	stan := security.Snapshot{
+func TestAPassedFindingCarriesNoRemediation(t *testing.T) {
+	state := security.Snapshot{
 		MAC: security.Mandatory{System: security.SystemSELinux, Mode: security.TrybEnforcing, ConfiguredMode: security.TrybEnforcing},
 		Audit: security.Audyt{Present: true, Active: wskaznikPrawdy(),
-			RulesLoaded: wskaznikLiczby(12), RulesConfigured: wskaznikLiczby(12)},
+			RulesLoaded: countPointer(12), RulesConfigured: countPointer(12)},
 	}
-	raport := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, stan)}}, terazTestowe)
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}, testNow)
 
 	for _, id := range []string{"mac.enforcing", "mac.persistent", "audit.running", "audit.rules-loaded"} {
-		wynik := ustalenie(raport, id)
-		if !wynik.Passed {
-			t.Errorf("%s = %+v", id, wynik)
+		result := finding(report, id)
+		if !result.Passed {
+			t.Errorf("%s = %+v", id, result)
 		}
-		if wynik.Remediation != nil {
-			t.Errorf("%s spelnione, a niesie naprawe", id)
+		if result.Remediation != nil {
+			t.Errorf("%s passed and still carries a remediation", id)
 		}
 	}
 }
 
-// Odcisk planu wiaze zatwierdzenie ze stanem, ktory operator ogladal.
-func TestOdciskPlanuZalezyOdStanu(t *testing.T) {
+// The plan digest binds the approval to the state the operator reviewed.
+func TestThePlanDigestDependsOnTheState(t *testing.T) {
 	permissive := security.Snapshot{MAC: security.Mandatory{
 		System: security.SystemSELinux, Mode: security.TrybPermissive, ConfiguredMode: security.TrybPermissive}}
 	enforcing := security.Snapshot{MAC: security.Mandatory{
 		System: security.SystemSELinux, Mode: security.TrybEnforcing, ConfiguredMode: security.TrybEnforcing}}
 
-	pierwszy := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, permissive)}}, terazTestowe)
-	drugi := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, permissive)}}, terazTestowe.Add(time.Hour))
-	trzeci := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, enforcing)}}, terazTestowe)
+	first := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, permissive)}}, testNow)
+	second := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, permissive)}}, testNow.Add(time.Hour))
+	third := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, enforcing)}}, testNow)
 
-	// Ten sam stan daje ten sam odcisk niezaleznie od chwili policzenia.
-	if pierwszy.PlanHash != drugi.PlanHash {
-		t.Error("odcisk planu zmienil sie bez zmiany stanu")
+	// Ten sam state daje ten sam digest niezaleznie od chwili policzenia.
+	if first.PlanHash != second.PlanHash {
+		t.Error("the plan digest changed without a change of state")
 	}
-	if pierwszy.PlanHash == trzeci.PlanHash {
-		t.Error("zmiana stanu nie zmienila odcisku planu")
+	if first.PlanHash == third.PlanHash {
+		t.Error("a change of state did not change the plan digest")
 	}
 }
 
-// Poprawki bezpieczenstwa licza sie z faktu, ktory panel zna sam.
-func TestPoprawkiBezpieczenstwaZInwentarzaPanelu(t *testing.T) {
-	zero, siedem := 0, 7
-	spelnione := Ocen("host", Wejscie{Host: Host{PendingSecurityUpdates: &zero}}, terazTestowe)
-	if !ustalenie(spelnione, "packages.security-updates").Passed {
-		t.Error("brak poprawek uznany za niezgodnosc")
+// Security updates are computed from a fact the panel knows by itself.
+func TestSecurityUpdatesComeFromThePanelsInventory(t *testing.T) {
+	zero, seven := 0, 7
+	passed := Evaluate("host", Input{Host: Host{PendingSecurityUpdates: &zero}}, testNow)
+	if !finding(passed, "packages.security-updates").Passed {
+		t.Error("no pending updates treated as non-conformance")
 	}
 
-	zalegle := Ocen("host", Wejscie{Host: Host{PendingSecurityUpdates: &siedem}}, terazTestowe)
-	wynik := ustalenie(zalegle, "packages.security-updates")
-	if wynik.Passed || wynik.Remediation == nil || wynik.Remediation.Action != "packages.plan" {
-		t.Fatalf("ustalenie = %+v", wynik)
+	pending := Evaluate("host", Input{Host: Host{PendingSecurityUpdates: &seven}}, testNow)
+	result := finding(pending, "packages.security-updates")
+	if result.Passed || result.Remediation == nil || result.Remediation.Action != "packages.plan" {
+		t.Fatalf("finding = %+v", result)
 	}
 
-	// Nieustalona liczba nie jest zerem.
-	nieznana := Ocen("host", Wejscie{}, terazTestowe)
-	if !ustalenie(nieznana, "packages.security-updates").Unknown {
-		t.Error("nieustalona liczba poprawek uznana za brak poprawek")
+	// An undetermined number is not zero.
+	undetermined := Evaluate("host", Input{}, testNow)
+	if !finding(undetermined, "packages.security-updates").Unknown {
+		t.Error("an undetermined number of updates treated as no updates")
 	}
 }
 
 // Kazda naprawa musi wskazywac operacje, ktora panel zna. Sprawdzenie
 // proponujace nieistniejacy typ operacji zostaloby odrzucone dopiero przy
 // zlecaniu, a wtedy operator widzi blad zamiast planu.
-func TestNaprawyWskazujaOperacjeZKatalogu(t *testing.T) {
+func TestRemediationsPointAtOperationsFromTheCatalogue(t *testing.T) {
 	for _, check := range Checks {
 		if check.ID == "" || check.Version == 0 || check.Severity == "" {
 			t.Errorf("sprawdzenie bez tozsamosci: %+v", check)
 		}
 		if check.Rationale == "" || check.Expected == "" {
-			t.Errorf("%s bez uzasadnienia albo stanu docelowego", check.ID)
+			t.Errorf("%s without a rationale or a target state", check.ID)
 		}
 	}
-	raport := Ocen("host", hostZeWszystkimiNiezgodnosciami(t), terazTestowe)
-	naprawy := 0
-	for _, wynik := range raport.Findings {
-		if wynik.Remediation == nil || wynik.Remediation.Action == "" {
+	report := Evaluate("host", hostWithEveryNonConformance(t), testNow)
+	remediations := 0
+	for _, result := range report.Findings {
+		if result.Remediation == nil || result.Remediation.Action == "" {
 			continue
 		}
-		naprawy++
-		akcja := opspec.ActionType(wynik.Remediation.Action)
-		if !akcja.Known() {
-			t.Errorf("%s proponuje nieznana operacje %q", wynik.CheckID, akcja)
+		remediations++
+		action := opspec.ActionType(result.Remediation.Action)
+		if !action.Known() {
+			t.Errorf("%s proposes the unknown operation %q", result.CheckID, action)
 			continue
 		}
-		// Payload naprawy musi przejsc walidacje tej operacji tak samo jak
-		// payload wpisany recznie: plan, ktory da sie zlecic dopiero po
-		// poprawce, nie jest planem.
-		// Operacja bez payloadu jest poprawna: skan czy przeladowanie regul
-		// nie maja czego niesc.
+		// Payload remediations musi przejsc walidacje tej operacji tak samo jak
+		// A payload typed by hand: a plan that can only be ordered after a
+		// fix is not a plan.
+		// An operation without a payload is valid: a scan or a reload of the
+		// rules has nothing to carry.
 		var payload opspec.Payload
-		if len(wynik.Remediation.Payload) == 0 {
-			if err := opspec.Validate(akcja, payload); err != nil {
-				t.Errorf("%s: operacja %s wymaga payloadu, ktorego naprawa nie niesie: %v",
-					wynik.CheckID, akcja, err)
+		if len(result.Remediation.Payload) == 0 {
+			if err := opspec.Validate(action, payload); err != nil {
+				t.Errorf("%s: the operation %s requires a payload the remediation does not carry: %v",
+					result.CheckID, action, err)
 			}
 			continue
 		}
-		if err := json.Unmarshal(wynik.Remediation.Payload, &payload); err != nil {
-			t.Errorf("%s: payload naprawy nie jest payloadem operacji: %v", wynik.CheckID, err)
+		if err := json.Unmarshal(result.Remediation.Payload, &payload); err != nil {
+			t.Errorf("%s: the remediation payload is not a payload of the operation: %v", result.CheckID, err)
 			continue
 		}
-		if err := opspec.Validate(akcja, payload); err != nil {
-			t.Errorf("%s: payload naprawy odrzucony przez %s: %v", wynik.CheckID, akcja, err)
+		if err := opspec.Validate(action, payload); err != nil {
+			t.Errorf("%s: the remediation payload was rejected by %s: %v", result.CheckID, action, err)
 		}
 	}
-	// Gdyby scenariusz przestal wywolywac niezgodnosci, test przechodzilby
-	// nie sprawdziwszy niczego.
-	if naprawy < 6 {
-		t.Fatalf("scenariusz wywolal tylko %d napraw z operacja", naprawy)
+	// If the scenario stopped producing non-conformances, the test would pass
+	// without checking anything.
+	if remediations < 6 {
+		t.Fatalf("the scenario produced only %d remediations with an operation", remediations)
 	}
 }
 
-// hostZeWszystkimiNiezgodnosciami buduje stan, w ktorym kazde sprawdzenie
+// hostWithEveryNonConformance builds a state in which every check
 // z naprawa ma co naprawiac.
-func hostZeWszystkimiNiezgodnosciami(t *testing.T) Wejscie {
+func hostWithEveryNonConformance(t *testing.T) Input {
 	t.Helper()
-	falsz, siedem := false, 7
+	falsz, seven := false, 7
 	ochrona := security.Snapshot{
 		MAC: security.Mandatory{
 			System: security.SystemSELinux, Mode: security.TrybPermissive,
 			ConfiguredMode: security.TrybEnforcing, Policy: "targeted",
 		},
-		Audit:          security.Audyt{Present: true, Active: &falsz, RulesLoaded: wskaznikLiczby(0), RulesConfigured: wskaznikLiczby(4)},
+		Audit:          security.Audyt{Present: true, Active: &falsz, RulesLoaded: countPointer(0), RulesConfigured: countPointer(4)},
 		SecureBoot:     &falsz,
 		ListeningKnown: true,
 		OwnersKnown:    true,
@@ -282,115 +284,116 @@ func hostZeWszystkimiNiezgodnosciami(t *testing.T) Wejscie {
 	prawda := true
 	zasilanie := power.Snapshot{RebootRequired: &prawda, RebootReasons: []string{"linux-image-amd64"}}
 
-	return Wejscie{
-		Host: Host{PendingSecurityUpdates: &siedem},
-		Fragmenty: map[string]Fragment{
-			modulSecurity: fragmentZ(t, modulSecurity, ochrona),
-			modulSSH:      fragmentZ(t, modulSSH, serwer),
-			modulKernel:   fragmentZ(t, modulKernel, jadro),
-			modulTime:     fragmentZ(t, modulTime, zegar),
-			modulPower:    fragmentZ(t, modulPower, zasilanie),
+	return Input{
+		Host: Host{PendingSecurityUpdates: &seven},
+		Fragments: map[string]Fragment{
+			moduleSecurity: fragmentOf(t, moduleSecurity, ochrona),
+			moduleSSH:      fragmentOf(t, moduleSSH, serwer),
+			moduleKernel:   fragmentOf(t, moduleKernel, jadro),
+			moduleTime:     fragmentOf(t, moduleTime, zegar),
+			modulePower:    fragmentOf(t, modulePower, zasilanie),
 		},
 	}
 }
 
 func wskaznikPrawdy() *bool           { prawda := true; return &prawda }
-func wskaznikLiczby(wartosc int) *int { return &wartosc }
+func countPointer(value int) *int { return &value }
 
-// Host z AppArmorem nie przegrywa sprawdzenia wymagajacego SELinuksa. Stan
-// "nie dotyczy" jest osobna odpowiedzia: nie wchodzi ani do zgodnosci, ani do
-// niezgodnosci, i nie tworzy kroku planu.
-func TestSprawdzenieNiedotyczaceNieJestPorazka(t *testing.T) {
-	trzy, zero := 3, 0
-	stan := security.Snapshot{
+// A host with AppArmor does not fail a check requiring SELinux. The "not
+// applicable" state is a separate answer: it enters neither conformance nor
+// non-conformance, and it creates no plan step.
+func TestACheckThatDoesNotApplyIsNotAFailure(t *testing.T) {
+	three, zero := 3, 0
+	state := security.Snapshot{
 		MAC: security.Mandatory{
 			System: security.SystemAppArmor, Mode: security.TrybEnforcing,
-			ProfilesEnforcing: &trzy, ProfilesComplain: &zero,
+			ProfilesEnforcing: &three, ProfilesComplain: &zero,
 		},
 	}
-	raport := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, stan)}}, terazTestowe)
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}, testNow)
 
-	trwalosc := ustalenie(raport, "mac.persistent")
+	trwalosc := finding(report, "mac.persistent")
 	if trwalosc.Applicable {
 		t.Fatalf("sprawdzenie SELinuksa dotyczy hosta z AppArmorem: %+v", trwalosc)
 	}
 	if trwalosc.Passed || trwalosc.Unknown {
-		t.Error("stan nie dotyczy zmieszany ze zgodnoscia albo z nieustalonym")
+		t.Error("the not-applicable state was mixed with conformance or with undetermined")
 	}
-	if trwalosc.ReasonCode != PowodNieobslugiwane {
-		t.Errorf("kod powodu = %q", trwalosc.ReasonCode)
+	if trwalosc.ReasonCode != ReasonUnsupported {
+		t.Errorf("reason code = %q", trwalosc.ReasonCode)
 	}
 	if trwalosc.Remediation != nil {
-		t.Error("sprawdzenie niedotyczace niesie naprawe")
+		t.Error("a check that does not apply carries a remediation")
 	}
-	if raport.Counts["not_applicable"] == 0 {
-		t.Errorf("podsumowanie bez stanu nie dotyczy: %v", raport.Counts)
+	if report.Counts["not_applicable"] == 0 {
+		t.Errorf("the summary has no not-applicable state: %v", report.Counts)
 	}
 
-	// Host bez sshd i bez demona audytu tez nie przegrywa ich sprawdzen.
-	bezUslug := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, security.Snapshot{MAC: stan.MAC}),
-		modulSSH:      fragmentZ(t, modulSSH, sshmodul.Snapshot{}),
-	}}, terazTestowe)
+	// A host without sshd and without an audit daemon does not fail their checks either.
+	bezUslug := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, security.Snapshot{MAC: state.MAC}),
+		moduleSSH:      fragmentOf(t, moduleSSH, sshmodul.Snapshot{}),
+	}}, testNow)
 	for _, id := range []string{"ssh.root-login", "ssh.password-auth", "audit.rules-loaded"} {
-		if wynik := ustalenie(bezUslug, id); wynik.Applicable {
-			t.Errorf("%s dotyczy hosta bez tej uslugi: %+v", id, wynik)
+		if result := finding(bezUslug, id); result.Applicable {
+			t.Errorf("%s applies to a host without that service: %+v", id, result)
 		}
 	}
 }
 
-// Kazdy stan nieustalony niesie kod powodu: bez niego operator nie wie, czy
-// czekac na odczyt, naprawic agenta, czy nadac uprawnienia.
-func TestKazdeNieustaloneMaKodPowodu(t *testing.T) {
-	przypadki := map[string]Wejscie{
-		"bez modulow": {},
-		"modul z bledem": {Fragmenty: map[string]Fragment{
-			modulSecurity: fragmentZBledem(t, modulSecurity, "helper: brak odpowiedzi"),
+// Every undetermined state carries a reason code: without it the operator
+// does not know whether to wait for a read, repair the agent or grant
+// permissions.
+func TestEveryUndeterminedFindingHasAReasonCode(t *testing.T) {
+	cases := map[string]Input{
+		"without modules": {},
+		"a module with an error": {Fragments: map[string]Fragment{
+			moduleSecurity: fragmentZBledem(t, moduleSecurity, "helper: no answer"),
 		}},
-		"brakujace fakty": {Fragmenty: map[string]Fragment{
-			modulSecurity: fragmentZ(t, modulSecurity, security.Snapshot{
+		"missing facts": {Fragments: map[string]Fragment{
+			moduleSecurity: fragmentOf(t, moduleSecurity, security.Snapshot{
 				MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.TrybEnforcing},
 				Audit: security.Audyt{Present: true},
 				Missing: map[string]string{
-					security.FaktProfileAppArmor: "profile AppArmora leza w securityfs",
-					security.FaktRegulyAudytu:    "auditctl: brak uprawnien",
-					security.FaktSecureBoot:      "nie odczytano zmiennej EFI: permission denied",
+					security.FaktProfileAppArmor: "the AppArmor profiles lie in securityfs",
+					security.FaktRegulyAudytu:    "auditctl: permission denied",
+					security.FaktSecureBoot:      "the EFI variable was not read: permission denied",
 				},
 			}),
 		}},
 	}
 	dozwolone := map[string]bool{
-		PowodBrakFaktu: true, PowodBladOdczytu: true,
-		PowodBrakUprawnienia: true, PowodNieaktualny: true,
+		ReasonFactMissing: true, ReasonReadFailed: true,
+		ReasonPermissionDenied: true, ReasonStaleInventory: true,
 	}
-	for nazwa, wejscie := range przypadki {
+	for nazwa, input := range cases {
 		t.Run(nazwa, func(t *testing.T) {
-			raport := Ocen("host", wejscie, terazTestowe)
+			report := Evaluate("host", input, testNow)
 			nieustalone := 0
-			for _, wynik := range raport.Findings {
-				if !wynik.Unknown {
+			for _, result := range report.Findings {
+				if !result.Unknown {
 					continue
 				}
 				nieustalone++
-				if !dozwolone[wynik.ReasonCode] {
-					t.Errorf("%s: kod powodu = %q", wynik.CheckID, wynik.ReasonCode)
+				if !dozwolone[result.ReasonCode] {
+					t.Errorf("%s: code powodu = %q", result.CheckID, result.ReasonCode)
 				}
-				if wynik.Observed == "" {
-					t.Errorf("%s: stan nieustalony bez opisu", wynik.CheckID)
+				if result.Observed == "" {
+					t.Errorf("%s: an undetermined state without a description", result.CheckID)
 				}
 			}
 			if nieustalone == 0 {
-				t.Fatal("przypadek nie wywolal zadnego stanu nieustalonego")
+				t.Fatal("the case produced no undetermined state")
 			}
 		})
 	}
 }
 
 // Odmowa dostepu i nieudany odczyt prowadza do dwoch roznych dzialan
-// operatora, wiec maja dwa rozne kody.
-func TestKodPowoduRozrozniaBrakUprawnienia(t *testing.T) {
-	stan := security.Snapshot{
+// of the operator, so they have two different codes.
+func TestTheReasonCodeTellsAPermissionDenialApart(t *testing.T) {
+	state := security.Snapshot{
 		MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.TrybEnforcing},
 		Audit: security.Audyt{Present: true},
 		Missing: map[string]string{
@@ -398,89 +401,89 @@ func TestKodPowoduRozrozniaBrakUprawnienia(t *testing.T) {
 			security.FaktRegulyAudytu:    "helper: polaczenie zerwane",
 		},
 	}
-	raport := Ocen("host", Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, stan)}}, terazTestowe)
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}, testNow)
 
-	if kod := ustalenie(raport, "mac.enforcing").ReasonCode; kod != PowodBrakUprawnienia {
-		t.Errorf("brak uprawnienia zgloszony jako %q", kod)
+	if code := finding(report, "mac.enforcing").ReasonCode; code != ReasonPermissionDenied {
+		t.Errorf("a permission denial was reported as %q", code)
 	}
-	if kod := ustalenie(raport, "audit.rules-loaded").ReasonCode; kod != PowodBladOdczytu {
-		t.Errorf("blad odczytu zgloszony jako %q", kod)
+	if code := finding(report, "audit.rules-loaded").ReasonCode; code != ReasonReadFailed {
+		t.Errorf("a read failure was reported as %q", code)
 	}
 }
 
-// Odczyt sprzed doby opisuje hosta sprzed doby: ocena na nim oparta mowilaby
-// o stanie, ktorego juz moze nie byc.
-func TestNieaktualnyOdczytNieJestZgodnoscia(t *testing.T) {
-	stan := security.Snapshot{MAC: security.Mandatory{
+// A read from a day ago describes the host of a day ago: an assessment
+// resting on it would speak about a state that may no longer exist.
+func TestAStaleReadIsNotConformance(t *testing.T) {
+	state := security.Snapshot{MAC: security.Mandatory{
 		System: security.SystemSELinux, Mode: security.TrybEnforcing, ConfiguredMode: security.TrybEnforcing}}
-	wejscie := Wejscie{Fragmenty: map[string]Fragment{
-		modulSecurity: fragmentZ(t, modulSecurity, stan)}}
+	input := Input{Fragments: map[string]Fragment{
+		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}
 
-	swiezy := Ocen("host", wejscie, odczytano.Add(MaksymalnyWiekOdczytu-time.Minute))
-	if !ustalenie(swiezy, "mac.enforcing").Passed {
-		t.Fatal("swiezy odczyt nie dal wyniku")
+	fresh := Evaluate("host", input, readAt.Add(MaxReadAge-time.Minute))
+	if !finding(fresh, "mac.enforcing").Passed {
+		t.Fatal("a fresh read gave no result")
 	}
 
-	stary := Ocen("host", wejscie, odczytano.Add(MaksymalnyWiekOdczytu+time.Minute))
-	przeterminowane := ustalenie(stary, "mac.enforcing")
-	if !przeterminowane.Unknown || przeterminowane.ReasonCode != PowodNieaktualny {
-		t.Fatalf("stary odczyt = %+v", przeterminowane)
+	staleReport := Evaluate("host", input, readAt.Add(MaxReadAge+time.Minute))
+	staleFinding := finding(staleReport, "mac.enforcing")
+	if !staleFinding.Unknown || staleFinding.ReasonCode != ReasonStaleInventory {
+		t.Fatalf("a stale read = %+v", staleFinding)
 	}
 }
 
-// Odcisk planu ma stala postac kanoniczna, wersjonowana i zwiazana z hostem.
-// Wektory sa przybite na sztywno: zmiana postaci ma zepsuc ten test, a nie
-// po cichu uniewaznic zatwierdzone plany.
-func TestWektoryOdciskuPlanu(t *testing.T) {
-	pusty := HashPlanu("host-a", nil)
-	if pusty != "974678b3d16d9c31041a89a484c91bf837cb0921e5584c9a6d634ccc51ad38e8" {
-		t.Errorf("odcisk pustego planu = %q", pusty)
+// The plan digest has a fixed canonical form, versioned and bound to the
+// host. The vectors are nailed down: a change of the form is to break this
+// test rather than silently invalidate approved plans.
+func TestPlanDigestVectors(t *testing.T) {
+	empty := PlanHash("host-a", nil)
+	if empty != "974678b3d16d9c31041a89a484c91bf837cb0921e5584c9a6d634ccc51ad38e8" {
+		t.Errorf("the digest of an empty plan = %q", empty)
 	}
 
-	krok := []Ustalenie{{
+	step := []Finding{{
 		CheckID: "mac.enforcing", CheckVersion: 1, Applicable: true,
 		Module: "security", Revision: "rew-1", Observed: "SELinux: permissive",
-		Remediation: &Naprawa{
+		Remediation: &Remediation{
 			Action:  "selinux.mode.set",
 			Payload: json.RawMessage(`{"security":{"mode":"enforcing"}}`),
 		},
 	}}
-	odcisk := HashPlanu("host-a", krok)
-	if odcisk != "17c5837bb4b81f944318287154302912f59e00f2294e4c27057fdc1eaab5e77a" {
-		t.Errorf("odcisk kroku = %q", odcisk)
+	digest := PlanHash("host-a", step)
+	if digest != "17c5837bb4b81f944318287154302912f59e00f2294e4c27057fdc1eaab5e77a" {
+		t.Errorf("the digest of the step = %q", digest)
 	}
 
-	// Ten sam krok na innym hoscie to inny plan.
-	if HashPlanu("host-b", krok) == odcisk {
-		t.Error("odcisk nie zalezy od hosta")
+	// Ten sam step na innym hoscie to inny plan.
+	if PlanHash("host-b", step) == digest {
+		t.Error("the digest does not depend on the host")
 	}
 	// Zmiana wersji sprawdzenia zmienia znaczenie kroku.
-	inna := append([]Ustalenie(nil), krok...)
-	inna[0].CheckVersion = 2
-	if HashPlanu("host-a", inna) == odcisk {
-		t.Error("odcisk nie zalezy od wersji sprawdzenia")
+	other := append([]Finding(nil), step...)
+	other[0].CheckVersion = 2
+	if PlanHash("host-a", other) == digest {
+		t.Error("the digest does not depend on the check version")
 	}
 	// Zmiana rewizji odczytu znaczy, ze plan liczono z innych faktow.
-	inna[0].CheckVersion = 1
-	inna[0].Revision = "rew-2"
-	if HashPlanu("host-a", inna) == odcisk {
-		t.Error("odcisk nie zalezy od rewizji inwentarza")
+	other[0].CheckVersion = 1
+	other[0].Revision = "rew-2"
+	if PlanHash("host-a", other) == digest {
+		t.Error("the digest does not depend on the inventory revision")
 	}
-	// Zmiana payloadu naprawy zmienia to, co zostanie wykonane.
-	inna[0].Revision = "rew-1"
-	inna[0].Remediation = &Naprawa{
+	// Zmiana payloadu remediations zmienia to, co zostanie wykonane.
+	other[0].Revision = "rew-1"
+	other[0].Remediation = &Remediation{
 		Action:  "selinux.mode.set",
 		Payload: json.RawMessage(`{"security":{"mode":"permissive"}}`),
 	}
-	if HashPlanu("host-a", inna) == odcisk {
-		t.Error("odcisk nie zalezy od payloadu naprawy")
+	if PlanHash("host-a", other) == digest {
+		t.Error("the digest does not depend on the remediation payload")
 	}
 }
 
-func fragmentZBledem(t *testing.T, modul, powod string) Fragment {
+func fragmentZBledem(t *testing.T, module, powod string) Fragment {
 	t.Helper()
-	fragment := fragmentZ(t, modul, security.Snapshot{})
+	fragment := fragmentOf(t, module, security.Snapshot{})
 	fragment.UnavailableReason = powod
 	return fragment
 }

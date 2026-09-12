@@ -13,559 +13,564 @@ import (
 	czas "github.com/ultherego/flotestro/internal/modules/time"
 )
 
-// Nazwy modulow inwentarza, z ktorych licza sie sprawdzenia.
+// The names of the inventory modules the checks are computed from.
 const (
-	modulSecurity = "security"
-	modulSSH      = "ssh"
-	modulKernel   = "kernel"
-	modulTime     = "time"
-	modulPower    = "power"
-	modulPackages = "packages"
+	moduleSecurity = "security"
+	moduleSSH      = "ssh"
+	moduleKernel   = "kernel"
+	moduleTime     = "time"
+	modulePower    = "power"
+	modulePackages = "packages"
 )
 
-// Checks to profil hardeningu panelu.
+// Checks is the panel's hardening profile.
 //
-// Lista jest krotka i celowo: kazde sprawdzenie musi dac sie wytlumaczyc
-// jednym zdaniem, wskazac dowod i - jesli naprawa istnieje - konkretna
-// typowana operacje. Sprawdzenie, ktore nie spelnia tych trzech warunkow,
-// jest opinia, a nie sprawdzeniem.
+// The list is short, and deliberately so: every check has to be explainable
+// in one sentence, point at evidence and - where a remediation exists - at
+// one specific typed operation. A check that does not meet those three
+// conditions is an opinion rather than a check.
 var Checks = []Check{
 	{
-		ID: "mac.enforcing", Version: 1, Severity: WagaHigh, Module: modulSecurity,
-		Title:     "Obowiazkowa kontrola dostepu wymusza polityke",
-		Expected:  "SELinux w trybie enforcing albo AppArmor z profilami wymuszanymi",
-		Rationale: "Bez MAC bledna usluga siega tam, dokad pozwala jej samo prawo pliku.",
-		Ocen:      ocenMAC,
+		ID: "mac.enforcing", Version: 1, Severity: SeverityHigh, Module: moduleSecurity,
+		Title:     "Mandatory access control enforces its policy",
+		Expected:  "SELinux in enforcing mode or AppArmor with enforced profiles",
+		Rationale: "Without MAC a faulty service reaches as far as the file permissions alone allow it.",
+		Evaluate:      evaluateMAC,
 	},
 	{
-		ID: "mac.persistent", Version: 1, Severity: WagaHigh, Module: modulSecurity,
-		Title:     "Ochrona przetrwa restart hosta",
-		Expected:  "tryb dzialajacy jest tym samym, co tryb z konfiguracji",
-		Rationale: "Host, ktory po restarcie wstaje bez ochrony, wyglada na chroniony do pierwszego restartu.",
-		Ocen:      ocenTrwaloscMAC,
+		ID: "mac.persistent", Version: 1, Severity: SeverityHigh, Module: moduleSecurity,
+		Title:     "The protection survives a reboot of the host",
+		Expected:  "the running mode is the same as the configured one",
+		Rationale: "A host that comes up unprotected after a reboot looks protected until the first reboot.",
+		Evaluate:      evaluateMACPersistence,
 	},
 	{
-		ID: "audit.running", Version: 1, Severity: WagaMedium, Module: modulSecurity,
-		Title:     "Demon audytu dziala",
-		Expected:  "auditd aktywny",
-		Rationale: "Bez audytu nie da sie po fakcie powiedziec, kto co zrobil na hoscie.",
-		Ocen:      ocenAudyt,
+		ID: "audit.running", Version: 1, Severity: SeverityMedium, Module: moduleSecurity,
+		Title:     "The audit daemon is running",
+		Expected:  "auditd active",
+		Rationale: "Without auditing there is no way to say afterwards who did what on the host.",
+		Evaluate:      evaluateAudit,
 	},
 	{
-		ID: "audit.rules-loaded", Version: 1, Severity: WagaMedium, Module: modulSecurity,
-		Title:     "Reguly audytu sa zaladowane",
-		Expected:  "jadro zna wszystkie reguly zapisane w plikach",
-		Rationale: "Regula zapisana i niezaladowana nie notuje niczego, a wyglada jak wlaczony audyt.",
-		Ocen:      ocenRegulAudytu,
+		ID: "audit.rules-loaded", Version: 1, Severity: SeverityMedium, Module: moduleSecurity,
+		Title:     "The audit rules are loaded",
+		Expected:  "the kernel knows every rule written in the files",
+		Rationale: "A rule that is written and not loaded records nothing while looking like auditing is on.",
+		Evaluate:      evaluateAuditRules,
 	},
 	{
-		ID: "boot.secure-boot", Version: 1, Severity: WagaInfo, Module: modulSecurity,
+		ID: "boot.secure-boot", Version: 1, Severity: SeverityInfo, Module: moduleSecurity,
 		Title:     "Secure boot",
-		Expected:  "secure boot wlaczony",
-		Rationale: "Bez secure boota nikt nie sprawdza, co host uruchamia przed startem systemu.",
-		Ocen:      ocenSecureBoot,
+		Expected:  "secure boot enabled",
+		Rationale: "Without secure boot nobody checks what the host runs before the system starts.",
+		Evaluate:      evaluateSecureBoot,
 	},
 	{
-		ID: "exposure.listening", Version: 1, Severity: WagaMedium, Module: modulSecurity,
-		Title:     "Uslugi wystawione poza host",
-		Expected:  "wystawione wylacznie uslugi, ktore maja byc wystawione",
-		Rationale: "Kazde gniazdo poza petla zwrotna jest droga do hosta dla kazdego, kto widzi jego siec.",
-		Ocen:      ocenWystawienie,
+		ID: "exposure.listening", Version: 1, Severity: SeverityMedium, Module: moduleSecurity,
+		Title:     "Services exposed beyond the host",
+		Expected:  "only the services that are meant to be exposed are exposed",
+		Rationale: "Every socket outside the loopback is a way into the host for anyone who sees its network.",
+		Evaluate:      evaluateExposure,
 	},
 	{
-		ID: "ssh.root-login", Version: 1, Severity: WagaHigh, Module: modulSSH,
-		Title:     "Logowanie roota po SSH",
+		ID: "ssh.root-login", Version: 1, Severity: SeverityHigh, Module: moduleSSH,
+		Title:     "Root login over SSH",
 		Expected:  "PermitRootLogin no",
-		Rationale: "Konto roota jest wspolne, wiec logowanie na nie nie zostawia sladu, kto to byl.",
-		Ocen:      ocenRootLogin,
+		Rationale: "The root account is shared, so logging into it leaves no trace of who it was.",
+		Evaluate:      evaluateRootLogin,
 	},
 	{
-		ID: "ssh.password-auth", Version: 1, Severity: WagaMedium, Module: modulSSH,
-		Title:     "Logowanie haslem po SSH",
+		ID: "ssh.password-auth", Version: 1, Severity: SeverityMedium, Module: moduleSSH,
+		Title:     "Password login over SSH",
 		Expected:  "PasswordAuthentication no",
-		Rationale: "Haslo da sie zgadnac zdalnie; klucz nie.",
-		Ocen:      ocenHasla,
+		Rationale: "A password can be guessed remotely; a key cannot.",
+		Evaluate:      evaluatePasswords,
 	},
 	{
-		ID: "kernel.rp-filter", Version: 1, Severity: WagaLow, Module: modulKernel,
-		Title:     "Filtrowanie po adresie zrodlowym",
+		ID: "kernel.rp-filter", Version: 1, Severity: SeverityLow, Module: moduleKernel,
+		Title:     "Filtering by source address",
 		Expected:  "net.ipv4.conf.all.rp_filter = 1",
-		Rationale: "Bez tego host przyjmuje pakiety z podszytym adresem zrodlowym.",
-		Ocen:      ocenUstawienia("net.ipv4.conf.all.rp_filter", "1"),
+		Rationale: "Without it the host accepts packets with a spoofed source address.",
+		Evaluate:      evaluateSetting("net.ipv4.conf.all.rp_filter", "1"),
 	},
 	{
-		ID: "kernel.syncookies", Version: 1, Severity: WagaLow, Module: modulKernel,
-		Title:     "Ciasteczka SYN",
+		ID: "kernel.syncookies", Version: 1, Severity: SeverityLow, Module: moduleKernel,
+		Title:     "SYN cookies",
 		Expected:  "net.ipv4.tcp_syncookies = 1",
-		Rationale: "Bez nich zalew polaczen wyczerpuje kolejke i usluga przestaje odpowiadac.",
-		Ocen:      ocenUstawienia("net.ipv4.tcp_syncookies", "1"),
+		Rationale: "Without them a flood of connections exhausts the queue and the service stops answering.",
+		Evaluate:      evaluateSetting("net.ipv4.tcp_syncookies", "1"),
 	},
 	{
-		ID: "time.synchronized", Version: 1, Severity: WagaMedium, Module: modulTime,
-		Title:     "Zegar zsynchronizowany",
-		Expected:  "host synchronizuje czas ze zrodlem",
-		Rationale: "Przesuniety zegar odrzuca bilety Kerberosa i certyfikaty, a dziennik uklada w zla kolejnosc.",
-		Ocen:      ocenCzas,
+		ID: "time.synchronized", Version: 1, Severity: SeverityMedium, Module: moduleTime,
+		Title:     "The clock is synchronised",
+		Expected:  "the host synchronises its time with a source",
+		Rationale: "A drifted clock rejects Kerberos tickets and certificates and puts the journal in the wrong order.",
+		Evaluate:      evaluateTime,
 	},
 	{
-		ID: "packages.security-updates", Version: 1, Severity: WagaHigh, Module: "",
-		Title:     "Poprawki bezpieczenstwa zainstalowane",
-		Expected:  "brak oczekujacych poprawek bezpieczenstwa",
-		Rationale: "Kazda oczekujaca poprawka jest publicznie opisana - razem z tym, co bez niej mozna zrobic.",
-		Ocen:      ocenPoprawek,
+		ID: "packages.security-updates", Version: 1, Severity: SeverityHigh, Module: "",
+		Title:     "The security updates are installed",
+		Expected:  "no pending security updates",
+		Rationale: "Every pending update is publicly described - together with what can be done without it.",
+		Evaluate:      evaluateUpdates,
 	},
 	{
-		ID: "reboot.pending", Version: 1, Severity: WagaMedium, Module: modulPower,
-		Title:     "Host nie czeka na restart",
-		Expected:  "restart niewymagany",
-		Rationale: "Host, ktory czeka na restart, dziala na starym jadrze albo starych bibliotekach mimo zainstalowanej poprawki.",
-		Ocen:      ocenRestartu,
+		ID: "reboot.pending", Version: 1, Severity: SeverityMedium, Module: modulePower,
+		Title:     "The host is not waiting for a reboot",
+		Expected:  "no reboot required",
+		Rationale: "A host waiting for a reboot runs on an old kernel or old libraries despite the update being installed.",
+		Evaluate:      evaluateReboot,
 	},
 }
 
-// ocenMAC sprawdza, czy hosta chroni obowiazkowa kontrola dostepu.
-func ocenMAC(wejscie Wejscie) Wynik {
-	stan, ok := stanOchrony(wejscie)
+// evaluateMAC checks whether mandatory access control protects the host.
+func evaluateMAC(input Input) Result {
+	state, ok := protectiveState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
-	if stan.MAC.System == "" {
-		return Wynik{
-			Observed: "host nie ma ani SELinuksa, ani AppArmora",
-			Evidence: stan.MAC.Reason,
-			Remediation: &Naprawa{Note: "wlaczenie MAC na dzialajacym hoscie wymaga instalacji polityki " +
-				"i przeetykietowania systemu plikow; panel tego nie robi jedna operacja"},
+	if state.MAC.System == "" {
+		return Result{
+			Observed: "the host has neither SELinux nor AppArmor",
+			Evidence: state.MAC.Reason,
+			Remediation: &Remediation{Note: "turning MAC on on a running host requires installing a policy " +
+				"and relabelling the filesystem; the panel does not do that in one operation"},
 		}
 	}
-	// AppArmor bez odczytanych profili nie jest AppArmorem bez ochrony:
-	// bez tego faktu nie da sie orzec niczego.
-	if stan.MAC.System == security.SystemAppArmor && stan.MAC.ProfilesEnforcing == nil {
-		if powod, brakuje := stan.Missing[security.FaktProfileAppArmor]; brakuje {
-			return nieznane(kodBraku(powod), powod)
+	// AppArmor without profiles read is not AppArmor without protection:
+	// without that fact nothing can be judged.
+	if state.MAC.System == security.SystemAppArmor && state.MAC.ProfilesEnforcing == nil {
+		if reason, missing := state.Missing[security.FaktProfileAppArmor]; missing {
+			return unknown(missingCode(reason), reason)
 		}
-		return nieznane(PowodBrakFaktu, "host nie zglosil liczby profili AppArmora")
+		return unknown(ReasonFactMissing, "the host did not report the number of AppArmor profiles")
 	}
-	if stan.MAC.Chroni() {
-		return Wynik{Passed: true, Observed: opisMAC(stan.MAC)}
+	if state.MAC.Chroni() {
+		return Result{Passed: true, Observed: describeMAC(state.MAC)}
 	}
 
-	wynik := Wynik{Observed: opisMAC(stan.MAC), Evidence: stan.MAC.Reason}
-	// Naprawa istnieje tylko tam, gdzie zmiana dziala od reki: SELinux
-	// w permissive wraca do enforcing jednym poleceniem, AppArmor bez
-	// profili wymuszanych potrzebuje profili, a tych panel nie pisze.
-	if stan.MAC.System == security.SystemSELinux && stan.MAC.Mode == security.TrybPermissive {
-		wynik.Remediation = &Naprawa{
+	result := Result{Observed: describeMAC(state.MAC), Evidence: state.MAC.Reason}
+	// A remediation exists only where the change takes effect at once:
+	// SELinux in permissive returns to enforcing with one command, AppArmor
+	// without enforced profiles needs profiles, and the panel does not write
+	// those.
+	if state.MAC.System == security.SystemSELinux && state.MAC.Mode == security.TrybPermissive {
+		result.Remediation = &Remediation{
 			Action:  "selinux.mode.set",
 			Payload: json.RawMessage(`{"security":{"mode":"enforcing"}}`),
-			Note:    "przelaczenie dziala od reki i zostaje zapisane w konfiguracji",
+			Note:    "the switch takes effect at once and is written to the configuration",
 		}
-		return wynik
+		return result
 	}
-	if stan.MAC.System == security.SystemSELinux {
-		wynik.Remediation = &Naprawa{Note: "SELinux jest wylaczony w jadrze; powrot wymaga " +
-			"przeetykietowania systemu plikow i restartu"}
-		return wynik
+	if state.MAC.System == security.SystemSELinux {
+		result.Remediation = &Remediation{Note: "SELinux is disabled in the kernel; coming back requires " +
+			"relabelling the filesystem and a reboot"}
+		return result
 	}
-	wynik.Remediation = &Naprawa{Note: "AppArmor nie ma profili wymuszanych; profile pochodza z pakietow, " +
-		"a nie z panelu"}
-	return wynik
+	result.Remediation = &Remediation{Note: "AppArmor has no enforced profiles; profiles come from packages " +
+		"rather than from the panel"}
+	return result
 }
 
-// ocenTrwaloscMAC sprawdza, czy ochrona przetrwa restart.
-func ocenTrwaloscMAC(wejscie Wejscie) Wynik {
-	stan, ok := stanOchrony(wejscie)
+// evaluateMACPersistence checks whether the protection survives a reboot.
+func evaluateMACPersistence(input Input) Result {
+	state, ok := protectiveState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
-	if stan.MAC.System != security.SystemSELinux {
-		// Host z AppArmorem nie przegrywa sprawdzenia wymagajacego SELinuksa
-		// i nie zalicza go po cichu: ono go nie dotyczy.
-		return nieDotyczy("ten host nie uzywa SELinuksa; AppArmor nie ma osobnego trybu w konfiguracji")
+	if state.MAC.System != security.SystemSELinux {
+		// A host with AppArmor neither fails a check requiring SELinux nor
+		// passes it silently: it does not concern it.
+		return notApplicable("this host does not use SELinux; AppArmor has no separate mode in its configuration")
 	}
-	if stan.MAC.ConfiguredMode == "" {
-		return nieznane(PowodBrakFaktu, "host nie zglosil trybu z konfiguracji")
+	if state.MAC.ConfiguredMode == "" {
+		return unknown(ReasonFactMissing, "the host did not report the configured mode")
 	}
-	if stan.MAC.ConfiguredMode == stan.MAC.Mode {
-		return Wynik{Passed: true, Observed: "teraz i po restarcie: " + stan.MAC.Mode}
+	if state.MAC.ConfiguredMode == state.MAC.Mode {
+		return Result{Passed: true, Observed: "now and after a reboot: " + state.MAC.Mode}
 	}
-	wynik := Wynik{
-		Observed: "teraz " + stan.MAC.Mode + ", po restarcie " + stan.MAC.ConfiguredMode,
+	result := Result{
+		Observed: "now " + state.MAC.Mode + ", after a reboot " + state.MAC.ConfiguredMode,
 		Evidence: security.KonfiguracjaMAC,
 	}
-	// Zmiana trybu przez panel zapisuje takze konfiguracje, wiec ta sama
-	// operacja usuwa rozjazd - o ile SELinux w ogole dziala w jadrze.
-	if stan.MAC.Mode == security.TrybEnforcing || stan.MAC.Mode == security.TrybPermissive {
-		wynik.Remediation = &Naprawa{
+	// Changing the mode through the panel also writes the configuration, so
+	// the same operation removes the drift - as long as SELinux runs in the
+	// kernel at all.
+	if state.MAC.Mode == security.TrybEnforcing || state.MAC.Mode == security.TrybPermissive {
+		result.Remediation = &Remediation{
 			Action:  "selinux.mode.set",
-			Payload: json.RawMessage(`{"security":{"mode":"` + stan.MAC.Mode + `"}}`),
-			Note:    "utrwala tryb, ktory obowiazuje teraz",
+			Payload: json.RawMessage(`{"security":{"mode":"` + state.MAC.Mode + `"}}`),
+			Note:    "makes the mode that applies now persistent",
 		}
 	} else {
-		wynik.Remediation = &Naprawa{Note: "SELinux jest wylaczony w jadrze; wlaczenie wymaga " +
-			"przeetykietowania systemu plikow i restartu"}
+		result.Remediation = &Remediation{Note: "SELinux is disabled in the kernel; turning it on requires " +
+			"relabelling the filesystem and a reboot"}
 	}
-	return wynik
+	return result
 }
 
-func ocenAudyt(wejscie Wejscie) Wynik {
-	stan, ok := stanOchrony(wejscie)
+func evaluateAudit(input Input) Result {
+	state, ok := protectiveState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
-	if !stan.Audit.Present {
-		return Wynik{
-			Observed:    "host nie ma demona audytu",
-			Evidence:    stan.Audit.Reason,
-			Remediation: &Naprawa{Note: "auditd trzeba najpierw zainstalowac operacja packages.install"},
+	if !state.Audit.Present {
+		return Result{
+			Observed:    "the host has no audit daemon",
+			Evidence:    state.Audit.Reason,
+			Remediation: &Remediation{Note: "auditd has to be installed first with the packages.install operation"},
 		}
 	}
-	if stan.Audit.Active == nil {
-		return nieznane(PowodBrakFaktu, "nie ustalono stanu demona audytu")
+	if state.Audit.Active == nil {
+		return unknown(ReasonFactMissing, "the state of the audit daemon was not determined")
 	}
-	if *stan.Audit.Active {
-		opis := "auditd dziala"
-		if stan.Audit.RulesLoaded != nil {
-			opis += ", regul w jadrze: " + strconv.Itoa(*stan.Audit.RulesLoaded)
+	if *state.Audit.Active {
+		description := "auditd is running"
+		if state.Audit.RulesLoaded != nil {
+			description += ", rules in the kernel: " + strconv.Itoa(*state.Audit.RulesLoaded)
 		}
-		return Wynik{Passed: true, Observed: opis}
+		return Result{Passed: true, Observed: description}
 	}
-	return Wynik{
-		Observed: "auditd jest zainstalowany, ale nie dziala",
-		Remediation: &Naprawa{
+	return Result{
+		Observed: "auditd is installed but not running",
+		Remediation: &Remediation{
 			Action:  "unit.enable.set",
 			Payload: json.RawMessage(`{"unit_toggle":{"unit":"auditd.service","enabled":true}}`),
-			Note:    "wlacza jednostke na trwale; uruchomienie teraz to osobna operacja unit.start",
+			Note:    "enables the unit persistently; starting it now is a separate unit.start operation",
 		},
 	}
 }
 
-func ocenSecureBoot(wejscie Wejscie) Wynik {
-	stan, ok := stanOchrony(wejscie)
+func evaluateSecureBoot(input Input) Result {
+	state, ok := protectiveState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
-	if stan.SecureBoot == nil {
-		if powod, brakuje := stan.Missing[security.FaktSecureBoot]; brakuje {
-			return nieznane(kodBraku(powod), powod)
+	if state.SecureBoot == nil {
+		if reason, missing := state.Missing[security.FaktSecureBoot]; missing {
+			return unknown(missingCode(reason), reason)
 		}
-		// Host wstajacy w trybie BIOS nie ma secure boota wylaczonego -
-		// nie ma go w ogole, wiec sprawdzenie go nie dotyczy.
-		return nieDotyczy(pierwszyNiepusty(stan.SecureBootReason, "ten host nie wstaje przez EFI"))
+		// A host booting in BIOS mode does not have secure boot disabled - it
+		// does not have it at all, so the check does not concern it.
+		return notApplicable(firstNonEmpty(state.SecureBootReason, "this host does not boot through EFI"))
 	}
-	if *stan.SecureBoot {
-		return Wynik{Passed: true, Observed: "wlaczony"}
+	if *state.SecureBoot {
+		return Result{Passed: true, Observed: "enabled"}
 	}
-	return Wynik{
-		Observed:    "wylaczony",
-		Remediation: &Naprawa{Note: "secure boot wlacza sie w firmware maszyny, nie z panelu"},
+	return Result{
+		Observed:    "disabled",
+		Remediation: &Remediation{Note: "secure boot is turned on in the machine's firmware, not from the panel"},
 	}
 }
 
-func ocenWystawienie(wejscie Wejscie) Wynik {
-	stan, ok := stanOchrony(wejscie)
+func evaluateExposure(input Input) Result {
+	state, ok := protectiveState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
-	if !stan.ListeningKnown {
-		return nieznane(PowodBrakFaktu, "nie odczytano listy gniazd nasluchujacych")
+	if !state.ListeningKnown {
+		return unknown(ReasonFactMissing, "the list of listening sockets was not read")
 	}
-	poza := stan.PozaPetla()
-	if len(poza) == 0 {
-		return Wynik{Passed: true, Observed: "host nasluchuje wylacznie na petli zwrotnej"}
+	beyond := state.PozaPetla()
+	if len(beyond) == 0 {
+		return Result{Passed: true, Observed: "the host listens on the loopback only"}
 	}
 
-	liczby := stan.WedlugZasiegu()
-	opisy := make([]string, 0, len(poza))
-	for _, gniazdo := range poza {
-		opis := gniazdo.Protocol + "/" + strconv.Itoa(gniazdo.Port) + " " + gniazdo.Reach
-		if gniazdo.Process != "" {
-			opis += " (" + gniazdo.Process + ")"
+	counts := state.WedlugZasiegu()
+	descriptions := make([]string, 0, len(beyond))
+	for _, socket := range beyond {
+		description := socket.Protocol + "/" + strconv.Itoa(socket.Port) + " " + socket.Reach
+		if socket.Process != "" {
+			description += " (" + socket.Process + ")"
 		}
-		opisy = append(opisy, opis)
+		descriptions = append(descriptions, description)
 	}
-	dowod := strings.Join(opisy, ", ")
-	// Bez wlascicieli gniazd lista jest pelna, ale bezimienna - i operator ma
-	// o tym wiedziec, zanim zacznie szukac, co to za usluga.
-	if !stan.OwnersKnown {
-		dowod += "; wlasciciele gniazd nieznani"
+	evidence := strings.Join(descriptions, ", ")
+	// Without the owners of the sockets the list is complete but nameless -
+	// and the operator is to know that before they start looking for what
+	// service it is.
+	if !state.OwnersKnown {
+		evidence += "; the owners of the sockets are unknown"
 	}
 
-	// Panel nie orzeka, ze usluga jest widoczna z internetu: tego nie widac
-	// z adresu. Mowi, na czym gniazdo stoi, a decyzje zostawia czlowiekowi.
-	return Wynik{
-		Observed: fmt.Sprintf("%d na wszystkich interfejsach, %d na adresie hosta",
-			liczby[security.ZasiegWszystkie], liczby[security.ZasiegAdresHosta]),
-		Evidence: dowod,
-		Remediation: &Naprawa{Note: "kazde gniazdo zamyka sie inaczej: regula zapory, konfiguracja uslugi " +
-			"albo jej wylaczenie; panel nie zgaduje, ktora z tych rzeczy jest tu wlasciwa"},
+	// The panel does not declare that a service is visible from the internet:
+	// that cannot be seen from an address. It says what the socket stands on
+	// and leaves the decision to a human.
+	return Result{
+		Observed: fmt.Sprintf("%d on every interface, %d on the host's address",
+			counts[security.ZasiegWszystkie], counts[security.ZasiegAdresHosta]),
+		Evidence: evidence,
+		Remediation: &Remediation{Note: "every socket is closed differently: a firewall rule, the service's " +
+			"configuration or switching it off; the panel does not guess which of those fits here"},
 	}
 }
 
-// ocenRegulAudytu porownuje reguly zapisane w plikach z tymi, ktore zna jadro.
-func ocenRegulAudytu(wejscie Wejscie) Wynik {
-	stan, ok := stanOchrony(wejscie)
+// evaluateAuditRules compares the rules written in files with those the kernel knows.
+func evaluateAuditRules(input Input) Result {
+	state, ok := protectiveState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu ochronnego")
+		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
-	if !stan.Audit.Present {
-		return nieDotyczy("ten host nie ma demona audytu")
+	if !state.Audit.Present {
+		return notApplicable("this host has no audit daemon")
 	}
-	if stan.Audit.RulesConfigured == nil || stan.Audit.RulesLoaded == nil {
-		if powod, brakuje := stan.Missing[security.FaktRegulyAudytu]; brakuje {
-			return nieznane(kodBraku(powod), powod)
+	if state.Audit.RulesConfigured == nil || state.Audit.RulesLoaded == nil {
+		if reason, missing := state.Missing[security.FaktRegulyAudytu]; missing {
+			return unknown(missingCode(reason), reason)
 		}
-		return nieznane(PowodBrakFaktu, "host nie zglosil regul audytu")
+		return unknown(ReasonFactMissing, "the host did not report its audit rules")
 	}
-	if *stan.Audit.RulesConfigured == 0 {
-		return nieDotyczy("ten host nie ma zapisanych regul audytu")
+	if *state.Audit.RulesConfigured == 0 {
+		return notApplicable("this host has no audit rules written down")
 	}
-	opis := strconv.Itoa(*stan.Audit.RulesLoaded) + " z " +
-		strconv.Itoa(*stan.Audit.RulesConfigured) + " regul zaladowanych do jadra"
-	if *stan.Audit.RulesLoaded >= *stan.Audit.RulesConfigured {
-		return Wynik{Passed: true, Observed: opis}
+	description := strconv.Itoa(*state.Audit.RulesLoaded) + " of " +
+		strconv.Itoa(*state.Audit.RulesConfigured) + " rules loaded into the kernel"
+	if *state.Audit.RulesLoaded >= *state.Audit.RulesConfigured {
+		return Result{Passed: true, Observed: description}
 	}
-	// Plik regul dopisany i niezaladowany opisuje audyt, ktorego nie ma.
-	return Wynik{
-		Observed: opis,
-		Remediation: &Naprawa{
+	// A rules file added and not loaded describes auditing that does not exist.
+	return Result{
+		Observed: description,
+		Remediation: &Remediation{
 			Action: "security.audit.reload",
-			Note: "reguly wczytuje augenrules; restart jednostki nie jest tu droga, " +
-				"bo auditd na czesci dystrybucji odmawia recznego restartu",
+			Note: "augenrules loads the rules; restarting the unit is not the way here, " +
+				"because auditd on some distributions refuses a manual restart",
 		},
 	}
 }
 
-func ocenRootLogin(wejscie Wejscie) Wynik {
-	stan, ok := stanSSH(wejscie)
+func evaluateRootLogin(input Input) Result {
+	state, ok := sshState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano konfiguracji sshd")
+		return unknown(ReasonReadFailed, "the sshd configuration was not read")
 	}
-	if stan.Unit == "" && len(stan.Ports) == 0 {
-		return nieDotyczy("ten host nie ma serwera sshd")
+	if state.Unit == "" && len(state.Ports) == 0 {
+		return notApplicable("this host has no sshd server")
 	}
-	wartosc := strings.ToLower(stan.PermitRootLogin)
-	if wartosc == "" {
-		return nieznane(PowodBrakFaktu, "sshd nie zglosil ustawienia PermitRootLogin")
+	value := strings.ToLower(state.PermitRootLogin)
+	if value == "" {
+		return unknown(ReasonFactMissing, "sshd did not report the PermitRootLogin setting")
 	}
-	if wartosc == "no" {
-		return Wynik{Passed: true, Observed: wartosc}
+	if value == "no" {
+		return Result{Passed: true, Observed: value}
 	}
-	return Wynik{
-		Observed: wartosc,
+	return Result{
+		Observed: value,
 		Evidence: "sshd -T",
-		Remediation: &Naprawa{
+		Remediation: &Remediation{
 			Action:  "ssh.config.apply",
 			Payload: json.RawMessage(`{"ssh":{"permit_root_login":"no"}}`),
-			Note:    "upewnij sie, ze ktos poza rootem ma dostep do tego hosta",
+			Note:    "make sure somebody other than root has access to this host",
 		},
 	}
 }
 
-func ocenHasla(wejscie Wejscie) Wynik {
-	stan, ok := stanSSH(wejscie)
+func evaluatePasswords(input Input) Result {
+	state, ok := sshState(input)
 	if !ok {
-		return nieznane(PowodBladOdczytu, "nie odczytano konfiguracji sshd")
+		return unknown(ReasonReadFailed, "the sshd configuration was not read")
 	}
-	if stan.Unit == "" && len(stan.Ports) == 0 {
-		return nieDotyczy("ten host nie ma serwera sshd")
+	if state.Unit == "" && len(state.Ports) == 0 {
+		return notApplicable("this host has no sshd server")
 	}
-	wartosc := strings.ToLower(stan.PasswordAuthentication)
-	if wartosc == "" {
-		return nieznane(PowodBrakFaktu, "sshd nie zglosil ustawienia PasswordAuthentication")
+	value := strings.ToLower(state.PasswordAuthentication)
+	if value == "" {
+		return unknown(ReasonFactMissing, "sshd did not report the PasswordAuthentication setting")
 	}
-	if wartosc == "no" {
-		return Wynik{Passed: true, Observed: wartosc}
+	if value == "no" {
+		return Result{Passed: true, Observed: value}
 	}
-	return Wynik{
-		Observed: wartosc,
+	return Result{
+		Observed: value,
 		Evidence: "sshd -T",
-		Remediation: &Naprawa{
+		Remediation: &Remediation{
 			Action:  "ssh.config.apply",
 			Payload: json.RawMessage(`{"ssh":{"password_authentication":"no"}}`),
-			Note:    "host odrzuci zmiane, ktora nie zostawia zadnej dzialajacej metody logowania",
+			Note:    "the host refuses a change that leaves no working login method",
 		},
 	}
 }
 
-// ocenUstawienia buduje sprawdzenie jednego klucza sysctl.
-func ocenUstawienia(klucz, oczekiwana string) func(Wejscie) Wynik {
-	return func(wejscie Wejscie) Wynik {
-		fragment, ok := wejscie.Fragment(modulKernel)
+// evaluateSetting builds the check of one sysctl key.
+func evaluateSetting(key, expected string) func(Input) Result {
+	return func(input Input) Result {
+		fragment, ok := input.Fragment(moduleKernel)
 		if !ok {
-			return nieznane(PowodBrakFaktu, "nie odczytano ustawien jadra")
+			return unknown(ReasonFactMissing, "the kernel settings were not read")
 		}
-		var stan kernel.Snapshot
-		if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-			return nieznane(PowodBladOdczytu, "nie odczytano ustawien jadra: "+err.Error())
+		var state kernel.Snapshot
+		if err := json.Unmarshal(fragment.Payload, &state); err != nil {
+			return unknown(ReasonReadFailed, "the kernel settings were not read: "+err.Error())
 		}
-		for _, ustawienie := range stan.Settings {
-			if ustawienie.Key != klucz {
+		for _, setting := range state.Settings {
+			if setting.Key != key {
 				continue
 			}
-			if ustawienie.Current == "" {
-				return nieznane(PowodBrakFaktu, "host nie zglosil wartosci "+klucz)
+			if setting.Current == "" {
+				return unknown(ReasonFactMissing, "the host did not report the value of "+key)
 			}
-			if ustawienie.Current == oczekiwana {
-				return Wynik{Passed: true, Observed: klucz + " = " + ustawienie.Current}
+			if setting.Current == expected {
+				return Result{Passed: true, Observed: key + " = " + setting.Current}
 			}
-			return Wynik{
-				Observed: klucz + " = " + ustawienie.Current,
-				Evidence: pierwszyNiepusty(ustawienie.Source, "wartosc domyslna jadra"),
-				Remediation: &Naprawa{
+			return Result{
+				Observed: key + " = " + setting.Current,
+				Evidence: firstNonEmpty(setting.Source, "the kernel default"),
+				Remediation: &Remediation{
 					Action:  "sysctl.ensure",
-					Payload: json.RawMessage(`{"kernel":{"settings":{"` + klucz + `":"` + oczekiwana + `"}}}`),
+					Payload: json.RawMessage(`{"kernel":{"settings":{"` + key + `":"` + expected + `"}}}`),
 				},
 			}
 		}
-		return nieznane(PowodBrakFaktu, "host nie zglosil klucza "+klucz)
+		return unknown(ReasonFactMissing, "the host did not report the key "+key)
 	}
 }
 
-func ocenCzas(wejscie Wejscie) Wynik {
-	fragment, ok := wejscie.Fragment(modulTime)
+func evaluateTime(input Input) Result {
+	fragment, ok := input.Fragment(moduleTime)
 	if !ok {
-		return nieznane(PowodBrakFaktu, "nie odczytano stanu czasu")
+		return unknown(ReasonFactMissing, "the time state was not read")
 	}
-	var stan czas.Snapshot
-	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu czasu: "+err.Error())
+	var state czas.Snapshot
+	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
+		return unknown(ReasonReadFailed, "the time state was not read: "+err.Error())
 	}
-	if stan.Synchronized == nil {
-		return nieznane(PowodBrakFaktu, "host nie zglosil stanu synchronizacji")
+	if state.Synchronized == nil {
+		return unknown(ReasonFactMissing, "the host did not report its synchronisation state")
 	}
-	if *stan.Synchronized {
-		opis := "zsynchronizowany"
-		if stan.ReferenceName != "" {
-			opis += " z " + stan.ReferenceName
+	if *state.Synchronized {
+		description := "synchronised"
+		if state.ReferenceName != "" {
+			description += " of " + state.ReferenceName
 		}
-		return Wynik{Passed: true, Observed: opis}
+		return Result{Passed: true, Observed: description}
 	}
-	return Wynik{
-		Observed: "niezsynchronizowany",
-		Evidence: pierwszyNiepusty(stan.Service, "brak demona czasu"),
-		Remediation: &Naprawa{Note: "wskazanie serwerow czasu jest decyzja o infrastrukturze; " +
-			"zrob to operacja time.config.apply po sprawdzeniu zrodel testem"},
+	return Result{
+		Observed: "not synchronised",
+		Evidence: firstNonEmpty(state.Service, "no time daemon"),
+		Remediation: &Remediation{Note: "naming the time servers is a decision about infrastructure; " +
+			"do it with the time.config.apply operation after testing the sources"},
 	}
 }
 
-func ocenPoprawek(wejscie Wejscie) Wynik {
-	// To sprawdzenie nie liczy sie z fragmentu: liczbe poprawek panel zna
-	// z inwentarza pakietow, ktory normalizuje sam.
-	if wejscie.Host.PendingSecurityUpdates == nil {
-		return nieznane(PowodBrakFaktu, "host nie zglosil liczby poprawek bezpieczenstwa")
+func evaluateUpdates(input Input) Result {
+	// This check is not computed from a fragment: the panel knows the number
+	// of updates from the package inventory, which it normalises itself.
+	if input.Host.PendingSecurityUpdates == nil {
+		return unknown(ReasonFactMissing, "the host did not report the number of security updates")
 	}
-	liczba := *wejscie.Host.PendingSecurityUpdates
-	if liczba == 0 {
-		return Wynik{Passed: true, Observed: "brak oczekujacych poprawek"}
+	count := *input.Host.PendingSecurityUpdates
+	if count == 0 {
+		return Result{Passed: true, Observed: "no pending updates"}
 	}
-	return Wynik{
-		Observed: strconv.Itoa(liczba) + " oczekujacych poprawek bezpieczenstwa",
-		Remediation: &Naprawa{
+	return Result{
+		Observed: strconv.Itoa(count) + " pending security updates",
+		Remediation: &Remediation{
 			Action:  "packages.plan",
 			Payload: json.RawMessage(`{"package_plan":{"mode":"upgrade","security_only":true}}`),
-			Note:    "aktualizacja idzie dopiero po zatwierdzonym planie; plan pokazuje, co sie zmieni",
+			Note:    "the upgrade goes out only after an approved plan; the plan shows what will change",
 		},
 	}
 }
 
-func ocenRestartu(wejscie Wejscie) Wynik {
-	fragment, ok := wejscie.Fragment(modulPower)
+func evaluateReboot(input Input) Result {
+	fragment, ok := input.Fragment(modulePower)
 	if !ok {
-		return nieznane(PowodBrakFaktu, "nie odczytano stanu startu")
+		return unknown(ReasonFactMissing, "the boot state was not read")
 	}
-	var stan power.Snapshot
-	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-		return nieznane(PowodBladOdczytu, "nie odczytano stanu startu: "+err.Error())
+	var state power.Snapshot
+	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
+		return unknown(ReasonReadFailed, "the boot state was not read: "+err.Error())
 	}
-	if stan.RebootRequired == nil {
-		return nieznane(PowodBrakFaktu, "host nie zglosil, czy wymaga restartu")
+	if state.RebootRequired == nil {
+		return unknown(ReasonFactMissing, "the host did not report whether it requires a reboot")
 	}
-	if !*stan.RebootRequired {
-		return Wynik{Passed: true, Observed: "restart niewymagany"}
+	if !*state.RebootRequired {
+		return Result{Passed: true, Observed: "no reboot required"}
 	}
-	return Wynik{
-		Observed: "host czeka na restart",
-		Evidence: strings.Join(stan.RebootReasons, ", "),
-		Remediation: &Naprawa{
+	return Result{
+		Observed: "the host is waiting for a reboot",
+		Evidence: strings.Join(state.RebootReasons, ", "),
+		Remediation: &Remediation{
 			Action:         "system.reboot",
-			Payload:        json.RawMessage(`{"reboot":{"delay_seconds":15,"reason":"restart po poprawkach"}}`),
-			Note:           "restart konczy plan: to, co po nim, i tak trzeba ocenic na nowo",
+			Payload:        json.RawMessage(`{"reboot":{"delay_seconds":15,"reason":"reboot after updates"}}`),
+			Note:           "a reboot ends the plan: whatever comes after it has to be assessed anew",
 			RequiresReboot: true,
 		},
 	}
 }
 
-func stanOchrony(wejscie Wejscie) (security.Snapshot, bool) {
-	fragment, ok := wejscie.Fragment(modulSecurity)
+func protectiveState(input Input) (security.Snapshot, bool) {
+	fragment, ok := input.Fragment(moduleSecurity)
 	if !ok {
 		return security.Snapshot{}, false
 	}
-	var stan security.Snapshot
-	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
+	var state security.Snapshot
+	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
 		return security.Snapshot{}, false
 	}
-	return stan, true
+	return state, true
 }
 
-func stanSSH(wejscie Wejscie) (sshmodul.Snapshot, bool) {
-	fragment, ok := wejscie.Fragment(modulSSH)
+func sshState(input Input) (sshmodul.Snapshot, bool) {
+	fragment, ok := input.Fragment(moduleSSH)
 	if !ok {
 		return sshmodul.Snapshot{}, false
 	}
-	var stan sshmodul.Snapshot
-	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
+	var state sshmodul.Snapshot
+	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
 		return sshmodul.Snapshot{}, false
 	}
-	return stan, true
+	return state, true
 }
 
-func opisMAC(mac security.Mandatory) string {
+func describeMAC(mac security.Mandatory) string {
 	switch mac.System {
 	case security.SystemSELinux:
-		return "SELinux: " + pierwszyNiepusty(mac.Mode, "tryb nieustalony")
+		return "SELinux: " + firstNonEmpty(mac.Mode, "mode not determined")
 	case security.SystemAppArmor:
-		opis := "AppArmor"
+		description := "AppArmor"
 		if mac.ProfilesEnforcing != nil {
-			opis += ": profili wymuszanych " + strconv.Itoa(*mac.ProfilesEnforcing)
+			description += ": enforced profiles " + strconv.Itoa(*mac.ProfilesEnforcing)
 		}
 		if mac.ProfilesComplain != nil {
-			opis += ", w trybie skarg " + strconv.Itoa(*mac.ProfilesComplain)
+			description += ", in complain mode " + strconv.Itoa(*mac.ProfilesComplain)
 		}
-		return opis
+		return description
 	}
-	return "brak"
+	return "none"
 }
 
-// nieznane zwraca stan nieustalony wraz z kodem powodu. Kod jest obowiazkowy:
-// bez niego operator nie wie, czy czekac na odczyt, naprawic agenta, czy nadac
-// uprawnienia.
-func nieznane(kod, powod string) Wynik {
-	return Wynik{Unknown: true, ReasonCode: kod, Observed: powod}
+// unknown returns an undetermined state together with a reason code. The code
+// is mandatory: without it the operator does not know whether to wait for a
+// read, repair the agent or grant permissions.
+func unknown(code, reason string) Result {
+	return Result{Unknown: true, ReasonCode: code, Observed: reason}
 }
 
-// nieDotyczy zwraca stan "nie dotyczy": host nie ma komponentu, o ktory pyta
-// sprawdzenie. To nie jest ani przejscie, ani porazka.
-func nieDotyczy(powod string) Wynik {
-	return Wynik{NotApplicable: true, ReasonCode: PowodNieobslugiwane, Observed: powod}
+// notApplicable returns the "not applicable" state: the host does not have
+// the component the check asks about. That is neither a pass nor a
+// failure.
+func notApplicable(reason string) Result {
+	return Result{NotApplicable: true, ReasonCode: ReasonUnsupported, Observed: reason}
 }
 
-// kodBraku tlumaczy powod braku faktu na kod. Odmowa dostepu i nieudany odczyt
-// prowadza do dwoch roznych dzialan operatora.
-func kodBraku(powod string) string {
-	nizszy := strings.ToLower(powod)
+// missingCode translates the reason a fact is missing into a code. A refused
+// access and a failed read lead to two different actions by the operator.
+func missingCode(reason string) string {
+	lowered := strings.ToLower(reason)
 	switch {
-	case strings.Contains(nizszy, "uprawnien"), strings.Contains(nizszy, "permission denied"),
-		strings.Contains(nizszy, "tylko root"), strings.Contains(nizszy, "securityfs"):
-		return PowodBrakUprawnienia
+	case strings.Contains(lowered, "uprawnien"), strings.Contains(lowered, "permission denied"),
+		strings.Contains(lowered, "tylko root"), strings.Contains(lowered, "securityfs"):
+		return ReasonPermissionDenied
 	default:
-		return PowodBladOdczytu
+		return ReasonReadFailed
 	}
 }
 
-func pierwszyNiepusty(wartosci ...string) string {
-	for _, wartosc := range wartosci {
-		if wartosc != "" {
-			return wartosc
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
 		}
 	}
 	return ""

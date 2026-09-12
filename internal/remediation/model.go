@@ -1,9 +1,10 @@
-// Package remediation prowadzi plan naprawy przez kolejne kroki.
+// Package remediation drives a remediation plan through its steps.
 //
-// Naprawa nie jest jedna operacja. Kroki ida po kolei, kazdy jest zwyklym
-// zadaniem modulu, ktory za dana rzecz odpowiada, i kazdy moze sie nie udac.
-// Plan jest tu po to, zeby bylo wiadomo, co juz poszlo, co czeka i dlaczego
-// reszta nie ruszyla - bez tego zostaje garsc niepowiazanych zadan.
+// A remediation is not one operation. The steps go in order, each is an
+// ordinary task of the module responsible for the thing, and each can fail.
+// The plan exists so that it is known what has already gone out, what waits
+// and why the rest did not start - without it a handful of unrelated tasks is
+// all that is left.
 package remediation
 
 import (
@@ -16,38 +17,39 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Stany planu.
+// The states of a plan.
 const (
-	StanWToku      = "running"
-	StanUdany      = "succeeded"
-	StanNieudany   = "failed"
-	StanZatrzymany = "stopped"
+	StateRunning   = "running"
+	StateSucceeded = "succeeded"
+	StateFailed    = "failed"
+	StateStopped   = "stopped"
 )
 
-// Stany kroku.
+// The states of a step.
 const (
-	KrokOczekuje  = "pending"
-	KrokWToku     = "running"
-	KrokUdany     = "succeeded"
-	KrokNieudany  = "failed"
-	KrokPominiety = "skipped"
+	StepPending   = "pending"
+	StepRunning   = "running"
+	StepSucceeded = "succeeded"
+	StepFailed    = "failed"
+	StepSkipped   = "skipped"
 )
 
-// OknoPowrotu ogranicza czekanie na host po kroku wymagajacym restartu.
+// ReturnWindow bounds the wait for a host after a step that requires a
+// reboot.
 //
-// Restart konczy plan, ale plan konczy sie dopiero wtedy, gdy host wroci:
-// wyslane polecenie nie jest jeszcze dzialajacym hostem.
-const OknoPowrotu = 15 * time.Minute
+// A reboot ends the plan, but the plan ends only once the host comes back: a
+// command that was sent is not yet a running host.
+const ReturnWindow = 15 * time.Minute
 
-// Krok to jeden etap planu.
-type Krok struct {
+// Step is one stage of a plan.
+type Step struct {
 	ID           string          `json:"id"`
 	Position     int             `json:"position"`
 	CheckID      string          `json:"check_id"`
 	CheckVersion int             `json:"check_version"`
 	ActionType   string          `json:"action_type"`
 	Payload      json.RawMessage `json:"payload"`
-	// LockClass nazywa zasob hosta, ktorego krok uzywa na wylacznosc.
+	// LockClass names the host resource the step uses exclusively.
 	LockClass      string     `json:"lock_class,omitempty"`
 	RequiresReboot bool       `json:"requires_reboot"`
 	JobID          string     `json:"job_id,omitempty"`
@@ -57,7 +59,7 @@ type Krok struct {
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 }
 
-// Plan to komplet krokow zatwierdzony przez operatora.
+// Plan is the complete set of steps approved by the operator.
 type Plan struct {
 	ID              string     `json:"id"`
 	HostID          string     `json:"host_id"`
@@ -69,102 +71,103 @@ type Plan struct {
 	State           string     `json:"state"`
 	CreatedAt       time.Time  `json:"created_at"`
 	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	Steps           []Krok     `json:"steps,omitempty"`
-	// BootIDBefore pozwala rozpoznac, czy host naprawde wstal na nowo.
+	Steps           []Step     `json:"steps,omitempty"`
+	// BootIDBefore makes it possible to tell whether the host really came up anew.
 	BootIDBefore string `json:"boot_id_before,omitempty"`
 }
 
-// Ulozony to plan krokow gotowy do zapisania.
-type Ulozony struct {
-	Kroki []Krok
-	// Pominiete wylicza ustalenia, ktore nie weszly do planu, wraz z powodem.
-	Pominiete map[string]string
+// Arranged is a plan of steps ready to be recorded.
+type Arranged struct {
+	Steps []Step
+	// Skipped lists the findings that did not enter the plan, with the reason.
+	Skipped map[string]string
 }
 
-// Ulozenie ustala kolejnosc krokow i pilnuje granicy restartu.
+// Arrange fixes the order of the steps and guards the reboot boundary.
 //
-// Kolejnosc nie jest dowolna. Najpierw zmiany konfiguracji, potem to, co
-// wymaga restartu - i restart jest ostatni, bo po nim stan hosta trzeba ocenic
-// na nowo, a kroki zaplanowane wczesniej odnosilyby sie do faktow sprzed
-// restartu. Plan z dwoma restartami nie powstaje: to sa dwa plany.
-func Ulozenie(ustalenia []compliance.Ustalenie) (Ulozony, error) {
-	wynik := Ulozony{Pominiete: map[string]string{}}
-	var zwykle, restarty []Krok
+// The order is not arbitrary. First the configuration changes, then what
+// requires a reboot - and the reboot comes last, because after it the host's
+// state has to be assessed anew, and steps planned earlier would refer to
+// facts from before the reboot. A plan with two reboots does not come into
+// being: those are two plans.
+func Arrange(findings []compliance.Finding) (Arranged, error) {
+	result := Arranged{Skipped: map[string]string{}}
+	var ordinary, reboots []Step
 
-	for _, ustalenie := range ustalenia {
-		if !ustalenie.Wymaga() {
-			wynik.Pominiete[ustalenie.CheckID] = "ustalenie nie wymaga dzialania"
+	for _, finding := range findings {
+		if !finding.NeedsAction() {
+			result.Skipped[finding.CheckID] = "the finding needs no action"
 			continue
 		}
-		if ustalenie.Remediation == nil || ustalenie.Remediation.Action == "" {
-			powod := "to ustalenie nie ma operacji naprawczej"
-			if ustalenie.Remediation != nil && ustalenie.Remediation.Note != "" {
-				powod = ustalenie.Remediation.Note
+		if finding.Remediation == nil || finding.Remediation.Action == "" {
+			reason := "this finding has no remediating operation"
+			if finding.Remediation != nil && finding.Remediation.Note != "" {
+				reason = finding.Remediation.Note
 			}
-			wynik.Pominiete[ustalenie.CheckID] = powod
+			result.Skipped[finding.CheckID] = reason
 			continue
 		}
-		akcja := opspec.ActionType(ustalenie.Remediation.Action)
-		if !akcja.Known() {
-			return Ulozony{}, fmt.Errorf("ustalenie %s wskazuje nieznana operacje %s",
-				ustalenie.CheckID, akcja)
+		action := opspec.ActionType(finding.Remediation.Action)
+		if !action.Known() {
+			return Arranged{}, fmt.Errorf("the finding %s names the unknown operation %s",
+				finding.CheckID, action)
 		}
-		krok := Krok{
-			CheckID:        ustalenie.CheckID,
-			CheckVersion:   ustalenie.CheckVersion,
-			ActionType:     string(akcja),
-			Payload:        ustalenie.Remediation.Payload,
-			LockClass:      akcja.LockClass(),
-			RequiresReboot: ustalenie.Remediation.RequiresReboot,
-			State:          KrokOczekuje,
+		step := Step{
+			CheckID:        finding.CheckID,
+			CheckVersion:   finding.CheckVersion,
+			ActionType:     string(action),
+			Payload:        finding.Remediation.Payload,
+			LockClass:      action.LockClass(),
+			RequiresReboot: finding.Remediation.RequiresReboot,
+			State:          StepPending,
 		}
-		if krok.RequiresReboot {
-			restarty = append(restarty, krok)
+		if step.RequiresReboot {
+			reboots = append(reboots, step)
 			continue
 		}
-		zwykle = append(zwykle, krok)
+		ordinary = append(ordinary, step)
 	}
 
-	if len(restarty) > 1 {
-		return Ulozony{}, fmt.Errorf("plan mialby %d restartow; restart konczy plan, wiec to sa osobne plany",
-			len(restarty))
+	if len(reboots) > 1 {
+		return Arranged{}, fmt.Errorf("the plan would have %d reboots; a reboot ends a plan, so those are separate plans",
+			len(reboots))
 	}
-	// Kolejnosc w obrebie zwyklych krokow jest stala, zeby dwa te same plany
-	// wygladaly tak samo: najpierw klasa blokady, potem nazwa sprawdzenia.
-	sort.SliceStable(zwykle, func(i, j int) bool {
-		if zwykle[i].LockClass != zwykle[j].LockClass {
-			return zwykle[i].LockClass < zwykle[j].LockClass
+	// The order within the ordinary steps is fixed so that two identical
+	// plans look the same: first the lock class, then the name of the check.
+	sort.SliceStable(ordinary, func(i, j int) bool {
+		if ordinary[i].LockClass != ordinary[j].LockClass {
+			return ordinary[i].LockClass < ordinary[j].LockClass
 		}
-		return zwykle[i].CheckID < zwykle[j].CheckID
+		return ordinary[i].CheckID < ordinary[j].CheckID
 	})
 
-	kroki := append(zwykle, restarty...)
-	for i := range kroki {
-		kroki[i].Position = i + 1
+	steps := append(ordinary, reboots...)
+	for i := range steps {
+		steps[i].Position = i + 1
 	}
-	wynik.Kroki = kroki
-	if len(kroki) == 0 {
-		return wynik, fmt.Errorf("zadne ze wskazanych ustalen nie ma operacji naprawczej")
+	result.Steps = steps
+	if len(steps) == 0 {
+		return result, fmt.Errorf("none of the named findings has a remediating operation")
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// Biezacy zwraca pierwszy krok, ktory nie jest zamkniety.
-func (p Plan) Biezacy() *Krok {
+// Current returns the first step that is not settled.
+func (p Plan) Current() *Step {
 	for i := range p.Steps {
 		switch p.Steps[i].State {
-		case KrokOczekuje, KrokWToku:
+		case StepPending, StepRunning:
 			return &p.Steps[i]
 		}
 	}
 	return nil
 }
 
-// Postep streszcza wykonanie planu.
-func (p Plan) Postep() map[string]int {
-	liczby := map[string]int{}
-	for _, krok := range p.Steps {
-		liczby[krok.State]++
+// Progress summarises the execution of a plan.
+func (p Plan) Progress() map[string]int {
+	counts := map[string]int{}
+	for _, step := range p.Steps {
+		counts[step.State]++
 	}
-	return liczby
+	return counts
 }

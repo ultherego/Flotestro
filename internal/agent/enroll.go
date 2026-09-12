@@ -35,17 +35,17 @@ type Identity struct {
 	Certificate tls.Certificate
 	CAPool      *x509.CertPool
 	NotAfter    time.Time
-	// ZaufaniePEM jest bundlem, ktory rozstrzyga o zaufaniu tej tozsamosci.
+	// TrustPEM jest bundlem, ktory rozstrzyga o zaufaniu tej tozsamosci.
 	// Trzymamy go w pamieci, bo odnowienie zapisuje cala generacje naraz -
 	// takze wtedy, gdy panel nie przyslal nowego bundla.
-	ZaufaniePEM []byte
+	TrustPEM []byte
 }
 
 // zTozsamosci tlumaczy generacje z magazynu na tozsamosc agenta.
-func zTozsamosci(t *identitystore.Tozsamosc) *Identity {
+func zTozsamosci(t *identitystore.Identity) *Identity {
 	return &Identity{
 		HostID: t.HostID, Certificate: t.Certificate, CAPool: t.CAPool,
-		NotAfter: t.NotAfter, ZaufaniePEM: t.ZaufaniePEM,
+		NotAfter: t.NotAfter, TrustPEM: t.TrustPEM,
 	}
 }
 
@@ -115,19 +115,19 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	}
 	p := paths(stateDir)
 
-	// Magazyn generacji jest zrodlem tozsamosci. Slady przerwanych zapisow
+	// Store generacji jest zrodlem tozsamosci. Slady przerwanych zapisow
 	// sprzatamy przy starcie: katalog tymczasowy po awarii nie jest stanem.
-	magazyn := identitystore.Nowy(stateDir)
-	if err := magazyn.Sprzataj(); err != nil {
+	magazyn := identitystore.New(stateDir)
+	if err := magazyn.Clean(); err != nil {
 		return nil, fmt.Errorf("porzadkowanie tozsamosci: %w", err)
 	}
-	if tozsamosc, err := magazyn.Biezaca(); err == nil && time.Now().Before(tozsamosc.NotAfter) {
+	if tozsamosc, err := magazyn.Current(); err == nil && time.Now().Before(tozsamosc.NotAfter) {
 		return zTozsamosci(tozsamosc), nil
 	}
 	// Host postawiony przed wprowadzeniem magazynu ma komplet luzem
 	// w katalogu stanu. Przenosimy go raz, bez kasowania oryginalow.
-	if przeniesiona, err := magazyn.Migruj(p.Key, p.Cert, p.CA); przeniesiona && err == nil {
-		if tozsamosc, err := magazyn.Biezaca(); err == nil && time.Now().Before(tozsamosc.NotAfter) {
+	if przeniesiona, err := magazyn.Migrate(p.Key, p.Cert, p.CA); przeniesiona && err == nil {
+		if tozsamosc, err := magazyn.Current(); err == nil && time.Now().Before(tozsamosc.NotAfter) {
 			return zTozsamosci(tozsamosc), nil
 		}
 	}
@@ -144,7 +144,7 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	// Klucz tworzy magazyn, a nie ta funkcja: to on wie, czy klucz jest
 	// plikiem, czy zostaje w ukladzie sprzetowym. Enrollment ma dzialac tak
 	// samo w obu profilach.
-	key, err := magazyn.NowyKlucz()
+	key, err := magazyn.NewKey()
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 		dns = append(dns, nazwa)
 	}
 	// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane.
-	csrPEM, err := identitystore.Wniosek(key, machineID, dns, adresy)
+	csrPEM, err := identitystore.Request(key, machineID, dns, adresy)
 	if err != nil {
 		return nil, err
 	}
@@ -209,8 +209,8 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	if len(bundle) == 0 {
 		bundle = caPEM
 	}
-	tozsamosc, err := magazyn.Zatwierdz(identitystore.Generacja{
-		Klucz: key, CertyfikatPEM: resp.Msg.GetCertificatePem(), ZaufaniePEM: bundle,
+	tozsamosc, err := magazyn.Commit(identitystore.Generation{
+		Key: key, CertificatePEM: resp.Msg.GetCertificatePem(), TrustPEM: bundle,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("zapis tozsamosci: %w", err)

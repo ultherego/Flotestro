@@ -208,7 +208,7 @@ func TestProdukcjaWymagaDrugiejOsoby(t *testing.T) {
 			`update hosts set environment = $2 where id = $1`, host.ID, host.Environment)
 	})
 
-	// Tozsamosc z obiema rolami: sam rozdzial rol nie wystarcza, bo jedna
+	// Identity z obiema rolami: sam rozdzial rol nie wystarcza, bo jedna
 	// osoba moze miec obie.
 	obie := h.withToken(h.createPrincipal(uniqueSubject("operator-approver"), []map[string]string{
 		{"role": "operator", "site": host.Site, "environment": "prod"},

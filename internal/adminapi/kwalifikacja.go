@@ -167,7 +167,7 @@ func (k kwalifikacja) Cele() []campaigns.TargetHost {
 	for _, wpis := range k.Zamkniete {
 		cele = append(cele, campaigns.TargetHost{
 			ID: wpis.Host.ID, BootID: wpis.Host.BootID,
-			Stan: wpis.Stan, Powod: wpis.Powod, Opis: wpis.Opis,
+			State: wpis.Stan, Reason: wpis.Powod, Message: wpis.Opis,
 		})
 	}
 	return cele
@@ -186,7 +186,7 @@ func dodaj(grupa *grupaHostow, host hosts.Host) {
 
 // aktywneKolizje mowi, ktore hosty sa juz celami trwajacych kampanii.
 func (s *Server) aktywneKolizje(ctx context.Context) map[string]string {
-	kolizje, err := s.campaigns.AktywneCele(ctx)
+	kolizje, err := s.campaigns.ActiveTargets(ctx)
 	if err != nil {
 		// Brak tej wiedzy nie zatrzymuje zamowienia: kolizja jest uwaga,
 		// a nie wykluczeniem. Milczymy o niej, zamiast zmyslac.

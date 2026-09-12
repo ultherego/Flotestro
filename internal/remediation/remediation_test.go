@@ -7,147 +7,148 @@ import (
 	"github.com/ultherego/flotestro/internal/compliance"
 )
 
-func ustalenie(id, akcja string, restart bool) compliance.Ustalenie {
-	wynik := compliance.Ustalenie{
-		CheckID: id, CheckVersion: 1, Applicable: true, Severity: compliance.WagaMedium,
+func finding(id, action string, reboot bool) compliance.Finding {
+	result := compliance.Finding{
+		CheckID: id, CheckVersion: 1, Applicable: true, Severity: compliance.SeverityMedium,
 	}
-	if akcja != "" {
-		wynik.Remediation = &compliance.Naprawa{
-			Action: akcja, Payload: json.RawMessage(`{}`), RequiresReboot: restart,
+	if action != "" {
+		result.Remediation = &compliance.Remediation{
+			Action: action, Payload: json.RawMessage(`{}`), RequiresReboot: reboot,
 		}
 	}
-	return wynik
+	return result
 }
 
-// Restart konczy plan: to, co po nim, i tak trzeba ocenic na nowo, bo kroki
-// zaplanowane wczesniej odnosza sie do faktow sprzed restartu.
-func TestRestartJestOstatnimKrokiem(t *testing.T) {
-	ulozony, err := Ulozenie([]compliance.Ustalenie{
-		ustalenie("reboot.pending", "system.reboot", true),
-		ustalenie("kernel.rp-filter", "sysctl.ensure", false),
-		ustalenie("ssh.root-login", "ssh.config.apply", false),
+// A reboot ends the plan: whatever comes after it has to be assessed anew,
+// because steps planned earlier refer to facts from before the reboot.
+func TestARebootIsTheLastStep(t *testing.T) {
+	arranged, err := Arrange([]compliance.Finding{
+		finding("reboot.pending", "system.reboot", true),
+		finding("kernel.rp-filter", "sysctl.ensure", false),
+		finding("ssh.root-login", "ssh.config.apply", false),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ulozony.Kroki) != 3 {
-		t.Fatalf("krokow = %d", len(ulozony.Kroki))
+	if len(arranged.Steps) != 3 {
+		t.Fatalf("steps = %d", len(arranged.Steps))
 	}
-	if !ulozony.Kroki[2].RequiresReboot {
-		t.Errorf("restart nie jest ostatni: %+v", ulozony.Kroki)
+	if !arranged.Steps[2].RequiresReboot {
+		t.Errorf("the reboot is not last: %+v", arranged.Steps)
 	}
-	// Pozycje sa zaleznoscia: krok rusza dopiero po poprzednim.
-	for i, krok := range ulozony.Kroki {
-		if krok.Position != i+1 {
-			t.Errorf("krok %s ma pozycje %d", krok.CheckID, krok.Position)
+	// The positions are a dependency: a step starts only after the previous one.
+	for i, step := range arranged.Steps {
+		if step.Position != i+1 {
+			t.Errorf("the step %s has position %d", step.CheckID, step.Position)
 		}
-		if krok.State != KrokOczekuje {
-			t.Errorf("krok %s zaczyna w stanie %q", krok.CheckID, krok.State)
+		if step.State != StepPending {
+			t.Errorf("the step %s starts in the state %q", step.CheckID, step.State)
 		}
 	}
-	// Klasa blokady zasobu pochodzi z kontraktu operacji, a nie z planu.
-	for _, krok := range ulozony.Kroki {
-		if krok.ActionType == "ssh.config.apply" && krok.LockClass == "" {
-			t.Error("krok zmieniajacy sshd nie niesie klasy blokady")
+	// The resource lock class comes from the operation's contract rather than from the plan.
+	for _, step := range arranged.Steps {
+		if step.ActionType == "ssh.config.apply" && step.LockClass == "" {
+			t.Error("a step changing sshd carries no lock class")
 		}
 	}
 }
 
-// Dwa restarty to dwa plany: po pierwszym stan hosta trzeba ocenic na nowo.
-func TestDwaRestartyNieTworzaJednegoPlanu(t *testing.T) {
-	_, err := Ulozenie([]compliance.Ustalenie{
-		ustalenie("reboot.pending", "system.reboot", true),
-		ustalenie("kernel.blacklist", "system.reboot", true),
+// Two reboots are two plans: after the first one the host's state has to be
+// assessed anew.
+func TestTwoRebootsDoNotMakeOnePlan(t *testing.T) {
+	_, err := Arrange([]compliance.Finding{
+		finding("reboot.pending", "system.reboot", true),
+		finding("kernel.blacklist", "system.reboot", true),
 	})
 	if err == nil {
-		t.Fatal("plan z dwoma restartami zostal ulozony")
+		t.Fatal("a plan with two reboots was arranged")
 	}
 }
 
-// Ustalenie bez operacji naprawczej nie tworzy kroku - i mowi dlaczego.
-func TestUstalenieBezOperacjiJestPominiete(t *testing.T) {
-	bezOperacji := ustalenie("exposure.listening", "", false)
-	bezOperacji.Remediation = &compliance.Naprawa{Note: "kazde gniazdo zamyka sie inaczej"}
-	spelnione := ustalenie("mac.enforcing", "selinux.mode.set", false)
-	spelnione.Passed = true
+// A finding without a remediating operation creates no step - and says why.
+func TestAFindingWithoutAnOperationIsSkipped(t *testing.T) {
+	withoutOperation := finding("exposure.listening", "", false)
+	withoutOperation.Remediation = &compliance.Remediation{Note: "every socket is closed differently"}
+	passed := finding("mac.enforcing", "selinux.mode.set", false)
+	passed.Passed = true
 
-	ulozony, err := Ulozenie([]compliance.Ustalenie{
-		bezOperacji, spelnione, ustalenie("kernel.rp-filter", "sysctl.ensure", false),
+	arranged, err := Arrange([]compliance.Finding{
+		withoutOperation, passed, finding("kernel.rp-filter", "sysctl.ensure", false),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ulozony.Kroki) != 1 || ulozony.Kroki[0].CheckID != "kernel.rp-filter" {
-		t.Fatalf("kroki = %+v", ulozony.Kroki)
+	if len(arranged.Steps) != 1 || arranged.Steps[0].CheckID != "kernel.rp-filter" {
+		t.Fatalf("steps = %+v", arranged.Steps)
 	}
-	if ulozony.Pominiete["exposure.listening"] != "kazde gniazdo zamyka sie inaczej" {
-		t.Errorf("pominiete = %v", ulozony.Pominiete)
+	if arranged.Skipped["exposure.listening"] != "every socket is closed differently" {
+		t.Errorf("skipped = %v", arranged.Skipped)
 	}
-	if ulozony.Pominiete["mac.enforcing"] == "" {
-		t.Error("ustalenie spelnione pominieto bez powodu")
-	}
-}
-
-// Plan bez ani jednego wykonalnego kroku nie jest planem.
-func TestPlanBezKrokowJestBledem(t *testing.T) {
-	bezOperacji := ustalenie("exposure.listening", "", false)
-	if _, err := Ulozenie([]compliance.Ustalenie{bezOperacji}); err == nil {
-		t.Fatal("plan bez krokow zostal ulozony")
+	if arranged.Skipped["mac.enforcing"] == "" {
+		t.Error("a passed finding was skipped without a reason")
 	}
 }
 
-// Nieznana operacja nie moze trafic do planu: odrzucilby ja dopiero runner,
-// juz po zatwierdzeniu przez operatora.
-func TestNieznanaOperacjaNieWchodziDoPlanu(t *testing.T) {
-	if _, err := Ulozenie([]compliance.Ustalenie{
-		ustalenie("wymyslone", "nie.ma.takiej.operacji", false),
+// A plan without a single workable step is not a plan.
+func TestAPlanWithoutStepsIsAnError(t *testing.T) {
+	withoutOperation := finding("exposure.listening", "", false)
+	if _, err := Arrange([]compliance.Finding{withoutOperation}); err == nil {
+		t.Fatal("a plan without steps was arranged")
+	}
+}
+
+// An unknown operation must not enter a plan: the runner would reject it only
+// after the operator had approved it.
+func TestAnUnknownOperationDoesNotEnterAPlan(t *testing.T) {
+	if _, err := Arrange([]compliance.Finding{
+		finding("invented", "no.such.operation", false),
 	}); err == nil {
-		t.Fatal("plan przyjal nieznana operacje")
+		t.Fatal("the plan accepted an unknown operation")
 	}
 }
 
-// Ten sam zbior ustalen daje ten sam plan: kolejnosc nie zalezy od tego,
-// w jakiej kolejnosci przyszly ustalenia.
-func TestKolejnoscKrokowJestPowtarzalna(t *testing.T) {
-	pierwszy, err := Ulozenie([]compliance.Ustalenie{
-		ustalenie("ssh.root-login", "ssh.config.apply", false),
-		ustalenie("kernel.rp-filter", "sysctl.ensure", false),
-		ustalenie("audit.rules-loaded", "unit.restart", false),
+// The same set of findings gives the same plan: the order does not depend on
+// the order the findings arrived in.
+func TestTheOrderOfStepsIsRepeatable(t *testing.T) {
+	first, err := Arrange([]compliance.Finding{
+		finding("ssh.root-login", "ssh.config.apply", false),
+		finding("kernel.rp-filter", "sysctl.ensure", false),
+		finding("audit.rules-loaded", "unit.restart", false),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	drugi, err := Ulozenie([]compliance.Ustalenie{
-		ustalenie("audit.rules-loaded", "unit.restart", false),
-		ustalenie("kernel.rp-filter", "sysctl.ensure", false),
-		ustalenie("ssh.root-login", "ssh.config.apply", false),
+	second, err := Arrange([]compliance.Finding{
+		finding("audit.rules-loaded", "unit.restart", false),
+		finding("kernel.rp-filter", "sysctl.ensure", false),
+		finding("ssh.root-login", "ssh.config.apply", false),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range pierwszy.Kroki {
-		if pierwszy.Kroki[i].CheckID != drugi.Kroki[i].CheckID {
-			t.Fatalf("kolejnosc rozna: %s vs %s", pierwszy.Kroki[i].CheckID, drugi.Kroki[i].CheckID)
+	for i := range first.Steps {
+		if first.Steps[i].CheckID != second.Steps[i].CheckID {
+			t.Fatalf("different order: %s vs %s", first.Steps[i].CheckID, second.Steps[i].CheckID)
 		}
 	}
 }
 
-// Biezacy krok to pierwszy niezamkniety - na nim plan czeka.
-func TestBiezacyKrokIPostep(t *testing.T) {
-	plan := Plan{Steps: []Krok{
-		{CheckID: "a", State: KrokUdany},
-		{CheckID: "b", State: KrokWToku},
-		{CheckID: "c", State: KrokOczekuje},
+// The current step is the first unsettled one - that is where the plan waits.
+func TestTheCurrentStepAndTheProgress(t *testing.T) {
+	plan := Plan{Steps: []Step{
+		{CheckID: "a", State: StepSucceeded},
+		{CheckID: "b", State: StepRunning},
+		{CheckID: "c", State: StepPending},
 	}}
-	if biezacy := plan.Biezacy(); biezacy == nil || biezacy.CheckID != "b" {
-		t.Fatalf("biezacy = %+v", plan.Biezacy())
+	if current := plan.Current(); current == nil || current.CheckID != "b" {
+		t.Fatalf("current = %+v", plan.Current())
 	}
-	if postep := plan.Postep(); postep[KrokUdany] != 1 || postep[KrokOczekuje] != 1 {
-		t.Errorf("postep = %v", postep)
+	if progress := plan.Progress(); progress[StepSucceeded] != 1 || progress[StepPending] != 1 {
+		t.Errorf("progress = %v", progress)
 	}
 
-	zamkniety := Plan{Steps: []Krok{{State: KrokUdany}, {State: KrokPominiety}}}
-	if zamkniety.Biezacy() != nil {
-		t.Error("plan bez otwartych krokow ma krok biezacy")
+	settled := Plan{Steps: []Step{{State: StepSucceeded}, {State: StepSkipped}}}
+	if settled.Current() != nil {
+		t.Error("a plan without open steps has a current step")
 	}
 }

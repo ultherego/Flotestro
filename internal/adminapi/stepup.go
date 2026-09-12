@@ -56,7 +56,7 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	}
 
 	if session == nil {
-		// Tozsamosc automatyczna nie moze przejsc ponownego uwierzytelnienia:
+		// Identity automatyczna nie moze przejsc ponownego uwierzytelnienia:
 		// nie ma za nia czlowieka. Operacja jest dopuszczona, ale audyt
 		// zapisuje wprost, ze uwierzytelnienia nie odswiezono.
 		return map[string]any{
