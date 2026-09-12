@@ -1,11 +1,12 @@
-// Package alerts czyta alerty i zaklada wyciszenia w systemie, ktory nimi
-// zarzadza.
+// Package alerts reads the alerts and creates silences in the system that
+// manages them.
 //
-// Panel nie ma wlasnej regulki alertowej i miec nie bedzie: druga definicja
-// tego, co jest awaria, oznaczalaby dwa rozne zdania o tym samym hoscie.
-// Wyciszenie zakladamy tam, gdzie alerty powstaja - i zawsze z terminem,
-// wlascicielem i powodem, bo cisza bez terminu to alert wylaczony na zawsze
-// przez kogos, kogo juz nie ma w firmie.
+// The panel has no alert rules of its own and will not have any: a second
+// definition of what a failure is would mean two different statements about
+// the same host. A silence is created where the alerts are born - and always
+// with a deadline, an owner and a reason, because a silence without a deadline
+// is an alert switched off for good by somebody who is no longer with the
+// company.
 package alerts
 
 import (
@@ -22,17 +23,17 @@ import (
 	"github.com/ultherego/flotestro/internal/integrations"
 )
 
-// MaksymalnaCisza ogranicza wyciszenie zakladane z panelu.
+// MaxSilence limits a silence created from the panel.
 //
-// Cisza dluzsza niz doba przestaje byc "wiem, pracuje nad tym", a staje sie
-// wylaczeniem alertu. Takie wylaczenie ma inne miejsce i innego wlasciciela
-// niz przycisk w panelu hosta.
-const MaksymalnaCisza = 24 * time.Hour
+// A silence longer than a day stops being "I know, I am working on it" and
+// becomes switching the alert off. Such a switch-off has a different place and
+// a different owner than a button in the panel of a host.
+const MaxSilence = 24 * time.Hour
 
-// DomyslnaCisza obowiazuje, gdy operator nie poda innego czasu.
-const DomyslnaCisza = 2 * time.Hour
+// DefaultSilence holds when the operator gives no other duration.
+const DefaultSilence = 2 * time.Hour
 
-// Alert jest jednym alertem widzianym u zrodla.
+// Alert is one alert as seen at the source.
 type Alert struct {
 	Name        string            `json:"name"`
 	Severity    string            `json:"severity,omitempty"`
@@ -41,118 +42,120 @@ type Alert struct {
 	Description string            `json:"description,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
 	StartsAt    *time.Time        `json:"starts_at,omitempty"`
-	// SilencedBy wylicza wyciszenia, ktore ten alert obejmuja.
+	// SilencedBy lists the silences that cover this alert.
 	SilencedBy []string `json:"silenced_by,omitempty"`
-	// GeneratorURL prowadzi do reguly u zrodla; panel nie kopiuje jej tresci.
+	// GeneratorURL leads to the rule at the source; the panel does not copy
+	// its content.
 	GeneratorURL string `json:"generator_url,omitempty"`
 }
 
-// Cisza jest wyciszeniem alertow.
-type Cisza struct {
+// Silence is a silence of alerts.
+type Silence struct {
 	ID string `json:"id,omitempty"`
-	// Matchers opisuja, czego cisza dotyczy.
-	Matchers  []Dopasowanie `json:"matchers"`
-	StartsAt  time.Time     `json:"starts_at"`
-	EndsAt    time.Time     `json:"ends_at"`
-	CreatedBy string        `json:"created_by"`
-	Comment   string        `json:"comment"`
-	Status    string        `json:"status,omitempty"`
+	// Matchers describe what the silence covers.
+	Matchers  []Matcher `json:"matchers"`
+	StartsAt  time.Time `json:"starts_at"`
+	EndsAt    time.Time `json:"ends_at"`
+	CreatedBy string    `json:"created_by"`
+	Comment   string    `json:"comment"`
+	Status    string    `json:"status,omitempty"`
 }
 
-// Dopasowanie jest jednym warunkiem ciszy.
-type Dopasowanie struct {
+// Matcher is one condition of a silence.
+type Matcher struct {
 	Name    string `json:"name"`
 	Value   string `json:"value"`
 	IsRegex bool   `json:"is_regex,omitempty"`
 }
 
-// Provider jest zrodlem alertow.
+// Provider is a source of alerts.
 type Provider interface {
-	Nazwa() string
-	Skonfigurowany() bool
-	Zdrowie(ctx context.Context) integrations.Stan
-	Alerty(ctx context.Context, filtry []string) ([]Alert, error)
-	Ciszy(ctx context.Context, filtry []string) ([]Cisza, error)
-	Ucisz(ctx context.Context, cisza Cisza) (string, error)
-	Odcisz(ctx context.Context, id string) error
+	Name() string
+	Configured() bool
+	Health(ctx context.Context) integrations.State
+	Alerts(ctx context.Context, filters []string) ([]Alert, error)
+	Silences(ctx context.Context, filters []string) ([]Silence, error)
+	Silence(ctx context.Context, silence Silence) (string, error)
+	Unsilence(ctx context.Context, id string) error
 }
 
-// Alertmanager jest adapterem Alertmanagera.
+// Alertmanager is the adapter of Alertmanager.
 type Alertmanager struct {
-	URL    string
-	Client *http.Client
-	Limit  time.Duration
-	obwod  *integrations.Obwod
+	URL     string
+	Client  *http.Client
+	Limit   time.Duration
+	breaker *integrations.Breaker
 }
 
-// NowyAlertmanager tworzy adapter. Pusty adres oznacza instalacje bez alertow.
-func NowyAlertmanager(adres string, limit time.Duration) *Alertmanager {
+// NewAlertmanager creates the adapter. An empty address means an installation
+// without alerts.
+func NewAlertmanager(address string, limit time.Duration) *Alertmanager {
 	return &Alertmanager{
-		URL:    strings.TrimRight(adres, "/"),
-		Client: &http.Client{Timeout: limit + time.Second},
-		Limit:  limit,
-		obwod:  integrations.NowyObwod(),
+		URL:     strings.TrimRight(address, "/"),
+		Client:  &http.Client{Timeout: limit + time.Second},
+		Limit:   limit,
+		breaker: integrations.NewBreaker(),
 	}
 }
 
-func (a *Alertmanager) Nazwa() string { return "alertmanager" }
+func (a *Alertmanager) Name() string { return "alertmanager" }
 
-func (a *Alertmanager) Skonfigurowany() bool { return a != nil && a.URL != "" }
+func (a *Alertmanager) Configured() bool { return a != nil && a.URL != "" }
 
-// Zdrowie pyta zrodlo o gotowosc.
-func (a *Alertmanager) Zdrowie(ctx context.Context) integrations.Stan {
-	stan := integrations.Stan{Name: a.Nazwa(), Configured: a.Skonfigurowany(), URL: a.URL}
-	if !a.Skonfigurowany() {
-		stan.Reason = "this installation has no alert source configured"
-		return stan
+// Health asks the source about its readiness.
+func (a *Alertmanager) Health(ctx context.Context) integrations.State {
+	state := integrations.State{Name: a.Name(), Configured: a.Configured(), URL: a.URL}
+	if !a.Configured() {
+		state.Reason = "this installation has no alert source configured"
+		return state
 	}
-	if a.obwod.Otwarty() {
-		stan.Reason = integrations.ErrOtwartyObwod.Error()
-		return stan
+	if a.breaker.Open() {
+		state.Reason = integrations.ErrBreakerOpen.Error()
+		return state
 	}
-	zapytanieCtx, cancel := integrations.ZLimitem(ctx, a.Limit)
+	queryCtx, cancel := integrations.WithTimeout(ctx, a.Limit)
 	defer cancel()
 
 	start := time.Now()
-	err := a.obwod.Wykonaj(func() error {
-		odpowiedz, err := a.wyslij(zapytanieCtx, http.MethodGet, "/-/ready", nil, nil)
+	err := a.breaker.Do(func() error {
+		response, err := a.send(queryCtx, http.MethodGet, "/-/ready", nil, nil)
 		if err != nil {
 			return err
 		}
-		defer odpowiedz.Body.Close()
-		if odpowiedz.StatusCode != http.StatusOK {
-			return fmt.Errorf("zrodlo alertow odpowiedzialo %s", odpowiedz.Status)
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("the alert source answered %s", response.Status)
 		}
 		return nil
 	})
-	czas := time.Since(start).Milliseconds()
-	sprawdzone := time.Now().UTC()
-	stan.LatencyMillis = &czas
-	stan.CheckedAt = &sprawdzone
+	elapsed := time.Since(start).Milliseconds()
+	checked := time.Now().UTC()
+	state.LatencyMillis = &elapsed
+	state.CheckedAt = &checked
 	if err != nil {
-		stan.Reason = err.Error()
-		return stan
+		state.Reason = err.Error()
+		return state
 	}
-	stan.Healthy = true
-	return stan
+	state.Healthy = true
+	return state
 }
 
-// Alerty czyta aktywne alerty pasujace do filtrow.
-func (a *Alertmanager) Alerty(ctx context.Context, filtry []string) ([]Alert, error) {
-	if !a.Skonfigurowany() {
+// Alerts reads the active alerts matching the filters.
+func (a *Alertmanager) Alerts(ctx context.Context, filters []string) ([]Alert, error) {
+	if !a.Configured() {
 		return nil, nil
 	}
-	parametry := url.Values{}
-	for _, filtr := range filtry {
-		parametry.Add("filter", filtr)
+	params := url.Values{}
+	for _, filtr := range filters {
+		params.Add("filter", filtr)
 	}
-	parametry.Set("silenced", "true")
-	parametry.Set("active", "true")
-	parametry.Set("inhibited", "false")
+	params.Set("silenced", "true")
+	params.Set("active", "true")
+	params.Set("inhibited", "false")
 
 	var alerty []Alert
-	err := a.zapytaj(ctx, http.MethodGet, "/api/v2/alerts", parametry, nil, func(dane []byte) error {
-		var wynik []struct {
+	err := a.ask(ctx, http.MethodGet, "/api/v2/alerts", params, nil, func(data []byte) error {
+		var result []struct {
 			Labels       map[string]string `json:"labels"`
 			Annotations  map[string]string `json:"annotations"`
 			StartsAt     time.Time         `json:"startsAt"`
@@ -162,10 +165,10 @@ func (a *Alertmanager) Alerty(ctx context.Context, filtry []string) ([]Alert, er
 				SilencedBy []string `json:"silencedBy"`
 			} `json:"status"`
 		}
-		if err := json.Unmarshal(dane, &wynik); err != nil {
-			return fmt.Errorf("nie rozpoznano odpowiedzi zrodla alertow: %w", err)
+		if err := json.Unmarshal(data, &result); err != nil {
+			return fmt.Errorf("the answer of the alert source was not recognised: %w", err)
 		}
-		for _, wpis := range wynik {
+		for _, wpis := range result {
 			start := wpis.StartsAt.UTC()
 			alerty = append(alerty, Alert{
 				Name:         wpis.Labels["alertname"],
@@ -184,18 +187,18 @@ func (a *Alertmanager) Alerty(ctx context.Context, filtry []string) ([]Alert, er
 	return alerty, err
 }
 
-// Ciszy czyta wyciszenia pasujace do filtrow.
-func (a *Alertmanager) Ciszy(ctx context.Context, filtry []string) ([]Cisza, error) {
-	if !a.Skonfigurowany() {
+// Silences reads the silences matching the filters.
+func (a *Alertmanager) Silences(ctx context.Context, filters []string) ([]Silence, error) {
+	if !a.Configured() {
 		return nil, nil
 	}
-	parametry := url.Values{}
-	for _, filtr := range filtry {
-		parametry.Add("filter", filtr)
+	params := url.Values{}
+	for _, filtr := range filters {
+		params.Add("filter", filtr)
 	}
-	var ciszy []Cisza
-	err := a.zapytaj(ctx, http.MethodGet, "/api/v2/silences", parametry, nil, func(dane []byte) error {
-		var wynik []struct {
+	var ciszy []Silence
+	err := a.ask(ctx, http.MethodGet, "/api/v2/silences", params, nil, func(data []byte) error {
+		var result []struct {
 			ID        string    `json:"id"`
 			StartsAt  time.Time `json:"startsAt"`
 			EndsAt    time.Time `json:"endsAt"`
@@ -210,163 +213,164 @@ func (a *Alertmanager) Ciszy(ctx context.Context, filtry []string) ([]Cisza, err
 				IsRegex bool   `json:"isRegex"`
 			} `json:"matchers"`
 		}
-		if err := json.Unmarshal(dane, &wynik); err != nil {
-			return fmt.Errorf("nie rozpoznano odpowiedzi zrodla alertow: %w", err)
+		if err := json.Unmarshal(data, &result); err != nil {
+			return fmt.Errorf("the answer of the alert source was not recognised: %w", err)
 		}
-		for _, wpis := range wynik {
-			// Cisza wygasla jest historia, a nie stanem: pokazujemy te,
-			// ktore jeszcze obowiazuja albo dopiero zaczna obowiazywac.
+		for _, wpis := range result {
+			// An expired silence is history rather than state: we show the
+			// ones still in force or about to come into force.
 			if wpis.Status.State == "expired" {
 				continue
 			}
-			cisza := Cisza{
+			silence := Silence{
 				ID: wpis.ID, StartsAt: wpis.StartsAt.UTC(), EndsAt: wpis.EndsAt.UTC(),
 				CreatedBy: wpis.CreatedBy, Comment: wpis.Comment, Status: wpis.Status.State,
 			}
-			for _, dopasowanie := range wpis.Matchers {
-				cisza.Matchers = append(cisza.Matchers, Dopasowanie{
-					Name: dopasowanie.Name, Value: dopasowanie.Value, IsRegex: dopasowanie.IsRegex,
+			for _, matcher := range wpis.Matchers {
+				silence.Matchers = append(silence.Matchers, Matcher{
+					Name: matcher.Name, Value: matcher.Value, IsRegex: matcher.IsRegex,
 				})
 			}
-			ciszy = append(ciszy, cisza)
+			ciszy = append(ciszy, silence)
 		}
 		return nil
 	})
 	return ciszy, err
 }
 
-// Ucisz zaklada wyciszenie i zwraca jego identyfikator.
-func (a *Alertmanager) Ucisz(ctx context.Context, cisza Cisza) (string, error) {
-	if !a.Skonfigurowany() {
-		return "", fmt.Errorf("ta instalacja nie ma zrodla alertow")
+// Silence creates a silence and returns its identifier.
+func (a *Alertmanager) Silence(ctx context.Context, silence Silence) (string, error) {
+	if !a.Configured() {
+		return "", fmt.Errorf("this installation has no alert source")
 	}
-	if err := WalidujCisze(cisza); err != nil {
+	if err := ValidateSilence(silence); err != nil {
 		return "", err
 	}
-	tresc, err := json.Marshal(map[string]any{
-		"matchers":  dopasowaniaJSON(cisza.Matchers),
-		"startsAt":  cisza.StartsAt.UTC().Format(time.RFC3339),
-		"endsAt":    cisza.EndsAt.UTC().Format(time.RFC3339),
-		"createdBy": cisza.CreatedBy,
-		"comment":   cisza.Comment,
+	body, err := json.Marshal(map[string]any{
+		"matchers":  matchersJSON(silence.Matchers),
+		"startsAt":  silence.StartsAt.UTC().Format(time.RFC3339),
+		"endsAt":    silence.EndsAt.UTC().Format(time.RFC3339),
+		"createdBy": silence.CreatedBy,
+		"comment":   silence.Comment,
 	})
 	if err != nil {
 		return "", err
 	}
 	var identyfikator string
-	err = a.zapytaj(ctx, http.MethodPost, "/api/v2/silences", nil, tresc, func(dane []byte) error {
-		var wynik struct {
+	err = a.ask(ctx, http.MethodPost, "/api/v2/silences", nil, body, func(data []byte) error {
+		var result struct {
 			SilenceID string `json:"silenceID"`
 		}
-		if err := json.Unmarshal(dane, &wynik); err != nil {
-			return fmt.Errorf("nie rozpoznano odpowiedzi zrodla alertow: %w", err)
+		if err := json.Unmarshal(data, &result); err != nil {
+			return fmt.Errorf("the answer of the alert source was not recognised: %w", err)
 		}
-		identyfikator = wynik.SilenceID
+		identyfikator = result.SilenceID
 		return nil
 	})
 	return identyfikator, err
 }
 
-// Odcisz konczy wyciszenie przed czasem.
-func (a *Alertmanager) Odcisz(ctx context.Context, id string) error {
-	if !a.Skonfigurowany() {
-		return fmt.Errorf("ta instalacja nie ma zrodla alertow")
+// Unsilence ends a silence ahead of time.
+func (a *Alertmanager) Unsilence(ctx context.Context, id string) error {
+	if !a.Configured() {
+		return fmt.Errorf("this installation has no alert source")
 	}
 	if id == "" || strings.ContainsAny(id, "/?#") {
-		return fmt.Errorf("nieprawidlowy identyfikator wyciszenia")
+		return fmt.Errorf("an invalid identifier of a silence")
 	}
-	return a.zapytaj(ctx, http.MethodDelete, "/api/v2/silence/"+url.PathEscape(id), nil, nil, nil)
+	return a.ask(ctx, http.MethodDelete, "/api/v2/silence/"+url.PathEscape(id), nil, nil, nil)
 }
 
-// WalidujCisze sprawdza wyciszenie przed wyslaniem.
+// ValidateSilence checks a silence before it is sent.
 //
-// Cisza bez terminu jest alertem wylaczonym na zawsze; cisza bez powodu jest
-// alertem wylaczonym bez wiadomo czemu. Ani jedno, ani drugie nie moze wyjsc
-// z panelu.
-func WalidujCisze(cisza Cisza) error {
-	if len(cisza.Matchers) == 0 {
-		return fmt.Errorf("wyciszenie musi wskazywac, czego dotyczy")
+// A silence without a deadline is an alert switched off for good; a silence
+// without a reason is an alert switched off for who knows why. Neither may
+// leave the panel.
+func ValidateSilence(silence Silence) error {
+	if len(silence.Matchers) == 0 {
+		return fmt.Errorf("a silence has to name what it covers")
 	}
-	for _, dopasowanie := range cisza.Matchers {
-		if dopasowanie.Name == "" || strings.ContainsAny(dopasowanie.Name, " \t\n=") {
-			return fmt.Errorf("nieprawidlowa nazwa etykiety %q", dopasowanie.Name)
+	for _, matcher := range silence.Matchers {
+		if matcher.Name == "" || strings.ContainsAny(matcher.Name, " \t\n=") {
+			return fmt.Errorf("an invalid name of a label %q", matcher.Name)
 		}
-		if strings.ContainsAny(dopasowanie.Value, "\n") {
-			return fmt.Errorf("wartosc etykiety zawiera znak nowej linii")
+		if strings.ContainsAny(matcher.Value, "\n") {
+			return fmt.Errorf("the value of a label contains a newline character")
 		}
 	}
-	if cisza.EndsAt.IsZero() || !cisza.EndsAt.After(cisza.StartsAt) {
-		return fmt.Errorf("wyciszenie wymaga terminu konca")
+	if silence.EndsAt.IsZero() || !silence.EndsAt.After(silence.StartsAt) {
+		return fmt.Errorf("a silence requires an end date")
 	}
-	if cisza.EndsAt.Sub(cisza.StartsAt) > MaksymalnaCisza {
-		return fmt.Errorf("wyciszenie z panelu trwa najwyzej %s", MaksymalnaCisza)
+	if silence.EndsAt.Sub(silence.StartsAt) > MaxSilence {
+		return fmt.Errorf("a silence from the panel lasts at most %s", MaxSilence)
 	}
-	if len(strings.TrimSpace(cisza.Comment)) < 8 {
-		return fmt.Errorf("wyciszenie wymaga powodu (co najmniej 8 znakow)")
+	if len(strings.TrimSpace(silence.Comment)) < 8 {
+		return fmt.Errorf("a silence requires a reason (at least 8 characters)")
 	}
-	if cisza.CreatedBy == "" {
-		return fmt.Errorf("wyciszenie wymaga wlasciciela")
+	if silence.CreatedBy == "" {
+		return fmt.Errorf("a silence requires an owner")
 	}
 	return nil
 }
 
-func dopasowaniaJSON(dopasowania []Dopasowanie) []map[string]any {
-	wynik := make([]map[string]any, 0, len(dopasowania))
-	for _, dopasowanie := range dopasowania {
-		wynik = append(wynik, map[string]any{
-			"name": dopasowanie.Name, "value": dopasowanie.Value,
-			"isRegex": dopasowanie.IsRegex, "isEqual": true,
+func matchersJSON(matchers []Matcher) []map[string]any {
+	result := make([]map[string]any, 0, len(matchers))
+	for _, matcher := range matchers {
+		result = append(result, map[string]any{
+			"name": matcher.Name, "value": matcher.Value,
+			"isRegex": matcher.IsRegex, "isEqual": true,
 		})
 	}
-	return wynik
+	return result
 }
 
-// zapytaj wysyla zadanie przez bezpiecznik i przekazuje tresc odpowiedzi.
-func (a *Alertmanager) zapytaj(ctx context.Context, metoda, sciezka string,
-	parametry url.Values, tresc []byte, odbierz func([]byte) error) error {
-	zapytanieCtx, cancel := integrations.ZLimitem(ctx, a.Limit)
+// ask sends a request through the breaker and passes the content of the
+// answer on.
+func (a *Alertmanager) ask(ctx context.Context, method, path string,
+	params url.Values, body []byte, accept func([]byte) error) error {
+	queryCtx, cancel := integrations.WithTimeout(ctx, a.Limit)
 	defer cancel()
 
-	return a.obwod.Wykonaj(func() error {
-		odpowiedz, err := a.wyslij(zapytanieCtx, metoda, sciezka, parametry, tresc)
+	return a.breaker.Do(func() error {
+		response, err := a.send(queryCtx, method, path, params, body)
 		if err != nil {
 			return err
 		}
-		defer odpowiedz.Body.Close()
-		dane, err := io.ReadAll(io.LimitReader(odpowiedz.Body, 8<<20))
+		defer response.Body.Close()
+		data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 		if err != nil {
 			return err
 		}
-		if odpowiedz.StatusCode >= 300 {
-			opis := strings.TrimSpace(string(dane))
-			if len(opis) > 200 {
-				opis = opis[:200]
+		if response.StatusCode >= 300 {
+			description := strings.TrimSpace(string(data))
+			if len(description) > 200 {
+				description = description[:200]
 			}
-			return fmt.Errorf("zrodlo alertow odpowiedzialo %s: %s", odpowiedz.Status, opis)
+			return fmt.Errorf("the alert source answered %s: %s", response.Status, description)
 		}
-		if odbierz == nil {
+		if accept == nil {
 			return nil
 		}
-		return odbierz(dane)
+		return accept(data)
 	})
 }
 
-func (a *Alertmanager) wyslij(ctx context.Context, metoda, sciezka string,
-	parametry url.Values, tresc []byte) (*http.Response, error) {
-	adres := a.URL + sciezka
-	if len(parametry) > 0 {
-		adres += "?" + parametry.Encode()
+func (a *Alertmanager) send(ctx context.Context, method, path string,
+	params url.Values, payload []byte) (*http.Response, error) {
+	address := a.URL + path
+	if len(params) > 0 {
+		address += "?" + params.Encode()
 	}
 	var body io.Reader
-	if tresc != nil {
-		body = bytes.NewReader(tresc)
+	if payload != nil {
+		body = bytes.NewReader(payload)
 	}
-	zadanie, err := http.NewRequestWithContext(ctx, metoda, adres, body)
+	request, err := http.NewRequestWithContext(ctx, method, address, body)
 	if err != nil {
 		return nil, err
 	}
-	if tresc != nil {
-		zadanie.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		request.Header.Set("Content-Type", "application/json")
 	}
-	return a.Client.Do(zadanie)
+	return a.Client.Do(request)
 }

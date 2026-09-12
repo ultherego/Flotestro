@@ -184,7 +184,7 @@ func (h *Scheduler) RecalculateHosts(ctx context.Context, ids []string) {
 // describedHosts gathers what the assessment needs about the named hosts.
 func (h *Scheduler) describedHosts(ctx context.Context,
 	ids []string) ([]HostDescription, error) {
-	fragments, err := h.inventory.FragmentyHostow(ctx, ids)
+	fragments, err := h.inventory.HostFragments(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +303,7 @@ func (h *Scheduler) hostDescriptions(ctx context.Context) ([]HostDescription, er
 		// The inventory fragments are taken for the page rather than for the
 		// whole fleet: they carry the full payloads of the modules and as a
 		// whole they do not fit in memory.
-		fragments, err := h.inventory.FragmentyHostow(ctx, ids)
+		fragments, err := h.inventory.HostFragments(ctx, ids)
 		if err != nil {
 			return nil, err
 		}

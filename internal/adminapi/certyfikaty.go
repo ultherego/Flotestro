@@ -50,8 +50,8 @@ type raportCertyfikatow struct {
 	// Targets wylicza zakres obserwacji panelu. Cel bez obserwacji jest
 	// osobna wiadomoscia: panel pilnuje pliku, ktorego host jeszcze nie
 	// zglosil - najczesciej dlatego, ze nikt nie zlecil skanu.
-	Targets []certyfikaty.Cel `json:"targets"`
-	Status  string            `json:"status"`
+	Targets []certyfikaty.Target `json:"targets"`
+	Status  string               `json:"status"`
 	// TrackingKnown i KeysKnown mowia, czego nie udalo sie ustalic.
 	TrackingKnown     bool              `json:"tracking_known"`
 	TrackingReason    string            `json:"tracking_reason,omitempty"`
@@ -74,12 +74,12 @@ func (s *Server) handleHostCertificates(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cele, err := s.certyfikaty.Cele(r.Context(), hostID)
+	cele, err := s.certyfikaty.Targets(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	wdrozenia, err := s.certyfikaty.Ostatnie(r.Context(), hostID)
+	wdrozenia, err := s.certyfikaty.Latest(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -96,17 +96,17 @@ func (s *Server) handleHostCertificates(w http.ResponseWriter, r *http.Request) 
 
 // zlozRaportCertyfikatow laczy obserwacje hosta z wiedza panelu.
 func zlozRaportCertyfikatow(hostID string, fragment *inventory.Fragment,
-	cele []certyfikaty.Cel, wdrozenia map[string]certyfikaty.Wdrozenie,
+	cele []certyfikaty.Target, wdrozenia map[string]certyfikaty.Deployment,
 	teraz time.Time) raportCertyfikatow {
 	// Pusty stan oznacza hosta, ktorego certyfikatow nikt jeszcze nie
 	// wskazal: panel nie ocenia czegos, o co nie zapytano.
 	raport := raportCertyfikatow{HostID: hostID, Targets: cele}
 	if raport.Targets == nil {
-		raport.Targets = []certyfikaty.Cel{}
+		raport.Targets = []certyfikaty.Target{}
 	}
 	raport.Certificates = []certyfikatWidok{}
 
-	obserwowane := map[string]certyfikaty.Cel{}
+	obserwowane := map[string]certyfikaty.Target{}
 	for _, cel := range cele {
 		obserwowane[cel.Path] = cel
 	}
@@ -120,7 +120,7 @@ func zlozRaportCertyfikatow(hostID string, fragment *inventory.Fragment,
 		}
 		obserwacja := fragment.ObservedAt.UTC()
 		raport.ObservedAt = &obserwacja
-		raport.Stale = certyfikaty.Nieswiezy(obserwacja, teraz)
+		raport.Stale = certyfikaty.Stale(obserwacja, teraz)
 	} else {
 		// Brak fragmentu nie jest pusta lista certyfikatow: to host, ktorego
 		// jeszcze o nie nie zapytano.
@@ -134,9 +134,9 @@ func zlozRaportCertyfikatow(hostID string, fragment *inventory.Fragment,
 
 	for _, certyfikat := range snapshot.Certificates {
 		widok := certyfikatWidok{Certyfikat: certyfikat}
-		widok.Status = certyfikaty.Stan(certyfikat.NotAfter, teraz)
+		widok.Status = certyfikaty.State(certyfikat.NotAfter, teraz)
 		if certyfikat.UnavailableReason != "" {
-			widok.Status = certyfikaty.StanNieznany
+			widok.Status = certyfikaty.StateUnknown
 		}
 		widok.DaysToExpiry = certyfikat.DniDoWygasniecia(teraz)
 		if cel, pilnowany := obserwowane[certyfikat.Path]; pilnowany {
@@ -160,7 +160,7 @@ func zlozRaportCertyfikatow(hostID string, fragment *inventory.Fragment,
 				widok.Source = modul.ZrodloPanel
 			}
 		}
-		raport.Status = certyfikaty.Gorszy(raport.Status, widok.Status)
+		raport.Status = certyfikaty.Worse(raport.Status, widok.Status)
 		raport.Certificates = append(raport.Certificates, widok)
 	}
 
@@ -183,10 +183,10 @@ func zlozRaportCertyfikatow(hostID string, fragment *inventory.Fragment,
 				Renewal:           modul.OdnawianieNieznane,
 				UnavailableReason: "the host has not reported this file yet; scan it",
 			},
-			Status: certyfikaty.StanNieznany, Watched: true,
+			Status: certyfikaty.StateUnknown, Watched: true,
 			KeySecret: cel.KeySecret, ReloadUnit: cel.ReloadUnit, ProbeTarget: cel.ProbeTarget,
 		})
-		raport.Status = certyfikaty.Gorszy(raport.Status, certyfikaty.StanNieznany)
+		raport.Status = certyfikaty.Worse(raport.Status, certyfikaty.StateUnknown)
 	}
 
 	sort.SliceStable(raport.Certificates, func(i, j int) bool {
@@ -264,7 +264,7 @@ func (s *Server) handleWatchCertificate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	cel, err := s.certyfikaty.Ustaw(r.Context(), certyfikaty.Cel{
+	cel, err := s.certyfikaty.Set(r.Context(), certyfikaty.Target{
 		HostID: hostID, Path: zadanie.Path, KeyPath: zadanie.KeyPath,
 		KeySecret: zadanie.KeySecret, ReloadUnit: zadanie.ReloadUnit,
 		ProbeTarget: zadanie.ProbeTarget, Service: zadanie.Service, Note: zadanie.Note,
@@ -301,8 +301,8 @@ func (s *Server) handleUnwatchCertificate(w http.ResponseWriter, r *http.Request
 		problem(w, http.StatusBadRequest, "path_required", "path query parameter is required")
 		return
 	}
-	err := s.certyfikaty.Usun(r.Context(), hostID, sciezka)
-	if errors.Is(err, certyfikaty.ErrNieZnaleziono) {
+	err := s.certyfikaty.Delete(r.Context(), hostID, sciezka)
+	if errors.Is(err, certyfikaty.ErrNotFound) {
 		problem(w, http.StatusNotFound, "target_not_found", "the panel does not watch that path")
 		return
 	}
@@ -329,13 +329,13 @@ func (s *Server) handleCertificateDeployments(w http.ResponseWriter, r *http.Req
 	if _, ok := s.authorize(w, r, authz.PermCertificateRead, scope, "host", hostID); !ok {
 		return
 	}
-	wdrozenia, err := s.certyfikaty.Wdrozenia(r.Context(), hostID, r.URL.Query().Get("path"), 0)
+	wdrozenia, err := s.certyfikaty.Deployments(r.Context(), hostID, r.URL.Query().Get("path"), 0)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	if wdrozenia == nil {
-		wdrozenia = []certyfikaty.Wdrozenie{}
+		wdrozenia = []certyfikaty.Deployment{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": wdrozenia, "count": len(wdrozenia)})
 }
@@ -382,7 +382,7 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 			identyfikatory = append(identyfikatory, host.ID)
 		}
 	}
-	fragmenty, err := s.inventory.FragmentyHostow(r.Context(), identyfikatory)
+	fragmenty, err := s.inventory.HostFragments(r.Context(), identyfikatory)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -408,9 +408,9 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		for _, certyfikat := range snapshot.Certificates {
-			stan := certyfikaty.Stan(certyfikat.NotAfter, teraz)
+			stan := certyfikaty.State(certyfikat.NotAfter, teraz)
 			if certyfikat.UnavailableReason != "" {
-				stan = certyfikaty.StanNieznany
+				stan = certyfikaty.StateUnknown
 			}
 			liczby[stan]++
 			pozycja := certyfikatFloty{
@@ -450,8 +450,8 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 		"timeline":    osWaznosci(wszystkie),
 		"hosts_total": len(widoczne), "hosts_without_certificates": bezObserwacji,
 		"thresholds": map[string]int{
-			"critical_days": int(certyfikaty.ProgPilny.Hours() / 24),
-			"warning_days":  int(certyfikaty.ProgOstrzezenia.Hours() / 24),
+			"critical_days": int(certyfikaty.CriticalThreshold.Hours() / 24),
+			"warning_days":  int(certyfikaty.WarningThreshold.Hours() / 24),
 		},
 	})
 }
@@ -502,7 +502,7 @@ func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 			identyfikatory = append(identyfikatory, host.ID)
 		}
 	}
-	fragmenty, err := s.inventory.FragmentyHostow(r.Context(), identyfikatory)
+	fragmenty, err := s.inventory.HostFragments(r.Context(), identyfikatory)
 	if err != nil {
 		s.fail(w, err)
 		return

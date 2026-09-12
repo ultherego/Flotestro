@@ -1,4 +1,4 @@
-// Package inventory przechowuje niemutowalne rewizje inventory hostow.
+// Package inventory keeps the immutable inventory revisions of the hosts.
 package inventory
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Report to znormalizowany raport przyjety od agenta.
+// Report is a normalised report accepted from an agent.
 type Report struct {
 	Revision       string
 	Full           bool
@@ -24,23 +24,27 @@ type Report struct {
 	Architecture   string
 	RawJSON        []byte
 
-	// Identity opisuje integracje hosta z domena. Puste wskazniki oznaczaja
-	// stan nieustalony i nie nadpisuja poprzedniej wiedzy.
+	// The identity describes the integration of the host with a domain. Empty
+	// pointers mean an undetermined state and do not overwrite the previous
+	// knowledge.
 	IdentityEnrolled   bool
 	IdentityDomain     string
 	IdentityRealm      string
 	IdentitySSSDOnline *bool
 
-	// LocalAccounts jest pelna lista kont widzianych na hoscie. Nil oznacza
-	// brak danych w tym raporcie i nie kasuje poprzedniej obserwacji.
+	// LocalAccounts is the full list of the accounts seen on the host. Nil
+	// means no data in this report and does not erase the previous
+	// observation.
 	LocalAccounts []LocalAccount
 
-	// Fragments to raport rozbity na moduly. Pusta lista oznacza agenta
-	// sprzed podzialu i nie kasuje tego, co juz wiadomo o modulach.
+	// Fragments is the report split into modules. An empty list means an agent
+	// from before the split and does not erase what is already known about the
+	// modules.
 	Fragments []Fragment
 }
 
-// Fragment to stan jednego modulu hosta wraz z wlasna rewizja i swiezoscia.
+// Fragment is the state of one module of a host together with a revision and
+// a freshness of its own.
 type Fragment struct {
 	HostID            string          `json:"host_id"`
 	Module            string          `json:"module"`
@@ -51,7 +55,7 @@ type Fragment struct {
 	ObservedAt        time.Time       `json:"observed_at"`
 }
 
-// LocalAccount jest obserwacja konta na hoscie.
+// LocalAccount is an observation of an account on a host.
 type LocalAccount struct {
 	Name              string          `json:"name"`
 	UID               int64           `json:"uid"`
@@ -68,7 +72,7 @@ type LocalAccount struct {
 	ObservedAt        time.Time       `json:"observed_at"`
 }
 
-// Revision opisuje zapisana rewizje.
+// Revision describes a stored revision.
 type Revision struct {
 	ID            string          `json:"id"`
 	HostID        string          `json:"host_id"`
@@ -87,9 +91,9 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// Save zapisuje rewizje i normalizuje pola uzywane w selektorach.
-// Powtorzony raport o tej samej rewizji nie tworzy nowego wiersza, ale nadal
-// odswieza znacznik obserwacji hosta.
+// Save writes a revision and normalises the fields used in the selectors. A
+// repeated report about the same revision does not create a new row but still
+// refreshes the observation mark of the host.
 func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored bool, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -110,7 +114,7 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 	case errors.Is(err, pgx.ErrNoRows):
 		stored = false
 	case err != nil:
-		return false, fmt.Errorf("zapis rewizji inventory: %w", err)
+		return false, fmt.Errorf("writing the inventory revision: %w", err)
 	default:
 		stored = true
 	}
@@ -133,7 +137,7 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 		report.OSFamily, report.OSDistribution, report.OSVersion, report.Architecture,
 		report.IdentityEnrolled, report.IdentityDomain, report.IdentityRealm,
 		report.IdentitySSSDOnline); err != nil {
-		return false, fmt.Errorf("normalizacja inventory hosta: %w", err)
+		return false, fmt.Errorf("normalising the inventory of the host: %w", err)
 	}
 
 	if report.LocalAccounts != nil {
@@ -152,8 +156,9 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 	return stored, nil
 }
 
-// replaceLocalAccounts podmienia obserwacje kont hosta. Konta usuniete na
-// hoscie znikaja z panelu, bo lista w raporcie jest pelna, a nie przyrostowa.
+// replaceLocalAccounts swaps the observation of the accounts of a host. The
+// accounts removed on the host disappear from the panel, because the list in
+// the report is full rather than incremental.
 func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, accounts []LocalAccount) error {
 	names := make([]string, 0, len(accounts))
 	for _, account := range accounts {
@@ -161,7 +166,7 @@ func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, account
 	}
 	const deleteStale = `delete from host_local_accounts where host_id = $1 and name <> all($2)`
 	if _, err := tx.Exec(ctx, deleteStale, hostID, names); err != nil {
-		return fmt.Errorf("czyszczenie kont lokalnych: %w", err)
+		return fmt.Errorf("clearing the local accounts: %w", err)
 	}
 
 	batch := &pgx.Batch{}
@@ -172,15 +177,15 @@ func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, account
 	defer results.Close()
 	for range accounts {
 		if _, err := results.Exec(); err != nil {
-			return fmt.Errorf("zapis kont lokalnych: %w", err)
+			return fmt.Errorf("writing the local accounts: %w", err)
 		}
 	}
 	return nil
 }
 
-// queueLocalAccount dokleja zapis obserwacji konta do partii. Zapytanie jest
-// jedno dla raportu pelnego i dla wyniku pojedynczej operacji, wiec obie
-// sciezki zapisuja dokladnie ten sam zestaw pol.
+// queueLocalAccount adds the write of an account observation to the batch.
+// The query is one for a full report and for the result of a single operation,
+// so both paths write exactly the same set of fields.
 func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 	const upsert = `
 		insert into host_local_accounts
@@ -208,9 +213,10 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 		account.Locked, account.PasswordSet, keys, account.UnavailableReason)
 }
 
-// UpsertLocalAccount zapisuje obserwacje pojedynczego konta. Sluzy do
-// domkniecia petli po operacji: wynik zadania niesie stan konta odczytany
-// z hosta po zmianie, a pelny raport inventory przyjdzie dopiero pozniej.
+// UpsertLocalAccount writes the observation of a single account. It serves to
+// close the loop after an operation: the result of a job carries the state of
+// the account read from the host after the change, and the full inventory
+// report comes only later.
 func (s *Store) UpsertLocalAccount(ctx context.Context, hostID string, account LocalAccount) error {
 	batch := &pgx.Batch{}
 	queueLocalAccount(batch, hostID, account)
@@ -220,7 +226,7 @@ func (s *Store) UpsertLocalAccount(ctx context.Context, hostID string, account L
 	return err
 }
 
-// LocalAccounts zwraca ostatnia obserwacje kont hosta.
+// LocalAccounts returns the latest observation of the accounts of a host.
 func (s *Store) LocalAccounts(ctx context.Context, hostID string) ([]LocalAccount, error) {
 	const query = `
 		select name, uid, gid, coalesce(home, ''), coalesce(shell, ''),
@@ -250,7 +256,7 @@ func (s *Store) LocalAccounts(ctx context.Context, hostID string) ([]LocalAccoun
 	return accounts, rows.Err()
 }
 
-// Latest zwraca ostatnia rewizje hosta.
+// Latest returns the latest revision of a host.
 func (s *Store) Latest(ctx context.Context, hostID string) (*Revision, error) {
 	const query = `
 		select id, host_id, revision, is_full, schema_version, payload, observed_at
@@ -270,10 +276,11 @@ func (s *Store) Latest(ctx context.Context, hostID string) (*Revision, error) {
 	return &rev, nil
 }
 
-// saveFragments zapisuje moduly, ktore sie zmienily. Modul o tej samej rewizji
-// nie jest przepisywany: dane sa te same, wiec przesuniecie updated_at
-// udawaloby zmiane, ktorej nie bylo. Znacznik obserwacji odswiezamy zawsze -
-// to, ze stan sie nie zmienil, tez zostalo zaobserwowane teraz.
+// saveFragments writes the modules that have changed. A module with the same
+// revision is not rewritten: the data are the same, so moving updated_at would
+// pretend a change that did not happen. The observation mark is always
+// refreshed - the fact that the state has not changed was observed now as
+// well.
 func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment) error {
 	const query = `
 		insert into host_module_inventory
@@ -300,15 +307,16 @@ func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fr
 		}
 		if _, err := tx.Exec(ctx, query, hostID, fragment.Module, fragment.Revision,
 			fragment.Source, fragment.Payload, fragment.UnavailableReason, observed); err != nil {
-			return fmt.Errorf("zapis modulu %s: %w", fragment.Module, err)
+			return fmt.Errorf("writing the module %s: %w", fragment.Module, err)
 		}
 	}
 	return nil
 }
 
-// SaveFragment zapisuje jeden modul poza cyklem inwentarza. Uzywaja tego
-// odczyty na zadanie: operator otwiera zakladke, host odsyla stan, a stan
-// nalezy do hosta - nie do historii zadan, w ktorej trzeba go szukac.
+// SaveFragment writes one module outside the inventory cycle. The on-demand
+// reads use it: the operator opens a tab, the host sends the state back, and
+// the state belongs to the host - not to the history of the jobs, where one
+// would have to look for it.
 func (s *Store) SaveFragment(ctx context.Context, hostID string, fragment Fragment) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -321,8 +329,8 @@ func (s *Store) SaveFragment(ctx context.Context, hostID string, fragment Fragme
 	return tx.Commit(ctx)
 }
 
-// Fragment zwraca stan jednego modulu hosta. Brak wiersza oznacza modul,
-// ktorego host jeszcze nie zglosil.
+// Fragment returns the state of one module of a host. A missing row means a
+// module the host has not reported yet.
 func (s *Store) Fragment(ctx context.Context, hostID, module string) (*Fragment, error) {
 	const query = `
 		select host_id, module, revision, source, payload,
@@ -342,7 +350,7 @@ func (s *Store) Fragment(ctx context.Context, hostID, module string) (*Fragment,
 	return &fragment, nil
 }
 
-// Fragments zwraca wszystkie moduly hosta, po nazwie.
+// Fragments returns every module of a host, by name.
 func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error) {
 	const query = `
 		select host_id, module, revision, source, payload,
@@ -369,11 +377,12 @@ func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error
 	return wynik, rows.Err()
 }
 
-// FragmentyHostow zwraca moduly wielu hostow jednym zapytaniem.
+// HostFragments returns the modules of many hosts in one query.
 //
-// Widok floty liczy zgodnosc dla kazdego hosta osobno, ale pytanie bazy raz na
-// host zamienialo by jeden ekran w setki zapytan.
-func (s *Store) FragmentyHostow(ctx context.Context, hostIDs []string) (map[string][]Fragment, error) {
+// The fleet view computes the compliance for every host separately, but asking
+// the database once per host would turn one screen into hundreds of
+// queries.
+func (s *Store) HostFragments(ctx context.Context, hostIDs []string) (map[string][]Fragment, error) {
 	wynik := map[string][]Fragment{}
 	if len(hostIDs) == 0 {
 		return wynik, nil

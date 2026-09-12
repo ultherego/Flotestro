@@ -17,55 +17,57 @@ import (
 	"github.com/ultherego/flotestro/internal/relays"
 )
 
-// EnrollmentService przyjmuje hosty, ktore nie maja jeszcze tozsamosci.
-// Jest to jedyny endpoint dostepny bez certyfikatu klienta.
+// EnrollmentService accepts the hosts that have no identity yet. It is the
+// only endpoint available without a client certificate.
 type EnrollmentService struct {
-	// wystawca podpisuje certyfikaty tozsamosci. Interfejs, a nie urzad:
-	// przeniesienie klucza CA do HSM ma zmienic implementacje, a nie te
-	// usluge i nie protokol agenta.
-	wystawca issuer.Wystawca
-	relays   *relays.Store
-	hosts    *hosts.Store
-	tokens   *enrollment.Store
-	audit    *audit.Recorder
-	log      *slog.Logger
+	// certIssuer signs the identity certificates. An interface rather than an
+	// authority: moving the CA key into an HSM is to change the
+	// implementation rather than this service and the protocol of the
+	// agent.
+	certIssuer issuer.Issuer
+	relays     *relays.Store
+	hosts      *hosts.Store
+	tokens     *enrollment.Store
+	audit      *audit.Recorder
+	log        *slog.Logger
 }
 
-func NewEnrollmentService(wystawca issuer.Wystawca, hostStore *hosts.Store,
+func NewEnrollmentService(certIssuer issuer.Issuer, hostStore *hosts.Store,
 	relayStore *relays.Store, tokens *enrollment.Store, recorder *audit.Recorder,
 	log *slog.Logger) *EnrollmentService {
-	return &EnrollmentService{wystawca: wystawca, hosts: hostStore, relays: relayStore,
+	return &EnrollmentService{certIssuer: certIssuer, hosts: hostStore, relays: relayStore,
 		tokens: tokens, audit: recorder, log: log}
 }
 
-// poswiadczenieRelaya opisuje relay, ktory przekazal zgloszenie hosta.
+// relayAttestation describes the relay that forwarded the registration of a
+// host.
 //
-// Puste znaczy zgloszenie bezposrednie. Rozroznienie jest istotne: token
-// zwiazany z lokalizacja nie moze zadzialac poza nia, a token bez zwiazku
-// dziala tak samo obiema drogami.
-type poswiadczenieRelaya struct {
-	ID    string
-	Site  string
-	Nazwa string
+// Empty means a direct registration. The distinction matters: a token tied to
+// a site must not work outside it, and a token without a tie works the same
+// way over both paths.
+type relayAttestation struct {
+	ID   string
+	Site string
+	Name string
 }
 
-// Enroll wymienia wazny token i CSR na certyfikat agenta.
+// Enroll exchanges a valid token and a CSR for the certificate of an agent.
 func (s *EnrollmentService) Enroll(ctx context.Context,
 	req *connect.Request[agentv1.EnrollRequest]) (*connect.Response[agentv1.EnrollResponse], error) {
-	return s.enrollZaRelayem(ctx, req.Msg, poswiadczenieRelaya{})
+	return s.enrollThroughRelay(ctx, req.Msg, relayAttestation{})
 }
 
-// enrollZaRelayem obsluguje zgloszenie hosta. Cala operacja jest jedna
-// transakcja: token, host, certyfikat i zdarzenie audytowe albo powstaja
-// razem, albo wcale.
-func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
-	msg *agentv1.EnrollRequest, przezRelay poswiadczenieRelaya,
+// enrollThroughRelay handles the registration of a host. The whole operation
+// is one transaction: the token, the host, the certificate and the audit event
+// either come into being together or not at all.
+func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
+	msg *agentv1.EnrollRequest, viaRelay relayAttestation,
 ) (*connect.Response[agentv1.EnrollResponse], error) {
 	if msg.GetMachineId() == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("brak machine_id"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("machine_id is missing"))
 	}
 	if len(msg.GetCsrPem()) == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("brak CSR"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("the CSR is missing"))
 	}
 
 	tx, err := s.hosts.Pool().Begin(ctx)
@@ -74,18 +76,18 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	proba := enrollment.AttemptInput{
+	attempt := enrollment.AttemptInput{
 		Token:           msg.GetEnrollmentToken(),
 		MachineID:       msg.GetMachineId(),
 		ClientRequestID: msg.GetClientRequestId(),
 		CSR:             msg.GetCsrPem(),
 	}
-	result, err := s.tokens.Redeem(ctx, tx, proba)
+	result, err := s.tokens.Redeem(ctx, tx, attempt)
 	if err != nil {
 		if errors.Is(err, enrollment.ErrInvalidToken) {
-			// Odmowa jest zdarzeniem audytowym tak samo jak sukces. Powod
-			// zostaje w audycie serwera; agent dostaje zawsze te sama
-			// odpowiedz, zeby nie dalo sie po niej zgadywac tokenow.
+			// A refusal is an audit event just as a success is. The reason
+			// stays in the audit of the server; the agent always gets the same
+			// answer, so that tokens cannot be guessed from it.
 			s.audit.Record(ctx, audit.Event{
 				ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
 				Action: "host.enroll", Outcome: audit.OutcomeDenied,
@@ -97,57 +99,59 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	}
 	scope := result.Scope
 
-	// Trasa zgloszenia jest czescia zakresu, a nie szczegolem sieci. Token
-	// zwiazany z relayem wyniesiony do innej lokalizacji nie moze niczego
-	// zarejestrowac; token bez zwiazku dziala tak samo obiema drogami.
-	if err := sprawdzTrase(scope, przezRelay); err != nil {
+	// The route of a registration is part of the scope rather than a detail of
+	// the network. A token tied to a relay and carried to another site must
+	// not register anything; a token without a tie works the same way over
+	// both paths.
+	if err := checkRoute(scope, viaRelay); err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
 			Action: "host.enroll", Outcome: audit.OutcomeDenied,
 			Detail: map[string]any{
 				"reason": err.Error(), "token_id": scope.TokenID,
-				"relay_id": nullableRelay(przezRelay.ID), "hostname": msg.GetHostname(),
+				"relay_id": nullableRelay(viaRelay.ID), "hostname": msg.GetHostname(),
 			},
 		})
 		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
 	}
 
-	// Powtorzenie proby, ktorej odpowiedz zginela w sieci: agent dostaje ten
-	// sam certyfikat, ktory juz zostal dla niego wydany. Nic sie nie zuzywa
-	// i nic nie powstaje po raz drugi.
-	if powtorzone := result.Replay; powtorzone != nil {
+	// A repeat of an attempt whose answer was lost in the network: the agent
+	// gets the same certificate that has already been issued for it. Nothing
+	// is used up and nothing comes into being a second time.
+	if replayed := result.Replay; replayed != nil {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
-			Action: "host.enroll", TargetType: "host", TargetID: powtorzone.HostID,
+			Action: "host.enroll", TargetType: "host", TargetID: replayed.HostID,
 			Outcome: audit.OutcomeSuccess,
 			Detail: map[string]any{
 				"replay": true, "token_id": scope.TokenID,
-				"cert_serial": powtorzone.CertificateSerial,
+				"cert_serial": replayed.CertificateSerial,
 			},
 		})
-		s.log.Info("powtorzona proba enrollmentu", "host_id", powtorzone.HostID,
+		s.log.Info("a repeated enrollment attempt", "host_id", replayed.HostID,
 			"machine_id", msg.GetMachineId())
 		return connect.NewResponse(&agentv1.EnrollResponse{
-			HostId:         powtorzone.HostID,
-			CertificatePem: powtorzone.CertificatePEM,
-			CaBundlePem:    powtorzone.CABundlePEM,
+			HostId:         replayed.HostID,
+			CertificatePem: replayed.CertificatePEM,
+			CaBundlePem:    replayed.CABundlePEM,
 		}), nil
 	}
 
-	// Token rozstrzyga, co powstaje. Rejestracja relaya tokenem wystawionym
-	// dla agenta bylaby cicha zmiana granicy zaufania: relay konczy sesje
-	// agentow i poswiadcza ich tozsamosc.
+	// The token settles what comes into being. Registering a relay with a
+	// token issued for an agent would be a silent change of a trust boundary:
+	// a relay terminates the sessions of the agents and attests their
+	// identity.
 	if scope.Kind == enrollment.KindRelay {
 		return s.enrollRelay(ctx, tx, msg, scope)
 	}
 
-	// Cel zamowienia rozstrzyga, co wolno zrobic z maszyna, ktora panel juz
-	// zna. Bez tego kazdy token bylby kluczem do przejecia tozsamosci
-	// dzialajacego hosta.
-	if err := s.sprawdzCel(ctx, tx, msg, scope); err != nil {
+	// The purpose of the order settles what may be done with a machine the
+	// panel already knows. Without it every token would be a key to taking
+	// over the identity of a running host.
+	if err := s.checkPurpose(ctx, tx, msg, scope); err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
 			Action: "host.enroll", Outcome: audit.OutcomeDenied,
@@ -160,7 +164,7 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 	}
 
 	build := msg.GetBuild()
-	tozsamosc := hosts.Identity{
+	identity := hosts.Identity{
 		MachineID:    msg.GetMachineId(),
 		Hostname:     msg.GetHostname(),
 		Site:         scope.Site,
@@ -175,20 +179,20 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		created bool
 	)
 	if scope.Purpose == enrollment.PurposeReplace {
-		// Odtworzenie tozsamosci nie zaklada nowego hosta: przeinstalowana
-		// maszyna wraca do tego samego wiersza, z ta sama historia.
+		// Recovering an identity does not create a new host: a reinstalled
+		// machine comes back to the same row, with the same history.
 		hostID = scope.ExpectedHostID
-		if err := s.hosts.AdoptMachine(ctx, tx, hostID, tozsamosc); err != nil {
+		if err := s.hosts.AdoptMachine(ctx, tx, hostID, identity); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	} else {
-		hostID, created, err = s.hosts.Upsert(ctx, tx, tozsamosc)
+		hostID, created, err = s.hosts.Upsert(ctx, tx, identity)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	}
 
-	issued, err := s.wystawca.PodpiszHosta(ctx, msg.GetCsrPem(), hostID)
+	issued, err := s.certIssuer.SignHost(ctx, msg.GetCsrPem(), hostID)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
@@ -198,9 +202,9 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	// Bundle zaufania idzie w tej samej odpowiedzi co certyfikat: host bez
-	// niego nie wie, komu ufac, i nie zestawi sesji.
-	zaufanie, err := s.wystawca.Zaufanie(ctx)
+	// The trust bundle goes in the same answer as the certificate: without it
+	// the host does not know whom to trust and will not establish a session.
+	trust, err := s.certIssuer.Trust(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -211,10 +215,11 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Proba zapisuje sie w tej samej transakcji co host i certyfikat: zapis
-	// po commicie moglby nie dojsc, a wtedy idempotencja bylaby pozorna.
-	if err := s.tokens.RecordAttempt(ctx, tx, scope.TokenID, proba, enrollment.Replay{
-		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: zaufanie,
+	// The attempt is written in the same transaction as the host and the
+	// certificate: a write after the commit might not arrive, and the
+	// idempotence would then be only apparent.
+	if err := s.tokens.RecordAttempt(ctx, tx, scope.TokenID, attempt, enrollment.Replay{
+		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: trust,
 		CertificateSerial: issued.Serial,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -242,37 +247,37 @@ func (s *EnrollmentService) enrollZaRelayem(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	s.log.Info("host zarejestrowany",
+	s.log.Info("the host was registered",
 		"host_id", hostID, "hostname", msg.GetHostname(), "site", scope.Site, "created", created)
 
 	return connect.NewResponse(&agentv1.EnrollResponse{
 		HostId:         hostID,
 		CertificatePem: issued.PEM,
-		CaBundlePem:    zaufanie,
+		CaBundlePem:    trust,
 		NotAfter:       timestamppb.New(issued.NotAfter),
 	}), nil
 }
 
-// enrollRelay rejestruje relay lokalizacji i wystawia mu certyfikat.
+// enrollRelay registers the relay of a site and issues a certificate for it.
 //
-// Relay dostaje tozsamosc innego rodzaju niz host: panel czyta rodzaj z URI
-// SAN, wiec certyfikatem relaya nie da sie podszyc pod agenta ani odwrotnie.
-// Zakres relaya pochodzi z tokenu i ogranicza, za ktore hosty wolno mu
-// posredniczyc.
+// A relay gets an identity of a kind other than a host: the panel reads the
+// kind from the URI SAN, so a certificate of a relay cannot impersonate an
+// agent or the other way round. The scope of a relay comes from the token and
+// limits which hosts it may mediate for.
 func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	msg *agentv1.EnrollRequest, scope enrollment.Scope,
 ) (*connect.Response[agentv1.EnrollResponse], error) {
 	name := msg.GetHostname()
 	if name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			errors.New("relay wymaga nazwy"))
+			errors.New("a relay requires a name"))
 	}
 
 	relayID, err := s.relays.Upsert(ctx, tx, name, scope.Site, scope.Environment)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	issued, err := s.wystawca.PodpiszRelay(ctx, msg.GetCsrPem(), relayID, nil)
+	issued, err := s.certIssuer.SignRelay(ctx, msg.GetCsrPem(), relayID, nil)
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: name,
@@ -282,7 +287,7 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	zaufanie, err := s.wystawca.Zaufanie(ctx)
+	trust, err := s.certIssuer.Trust(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -290,9 +295,10 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		issued.Fingerprint, issued.NotAfter); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	// Nazwy sieciowe z pierwszego CSR staja sie zapisem w rejestrze. Odtad
-	// to panel mowi, jakie nazwy relay poswiadcza; odnowienie ich nie zmienia.
-	if err := s.relays.ZapiszNazwy(ctx, tx, relayID, nazwySieciowe(issued)); err != nil {
+	// The network names from the first CSR become a record in the registry.
+	// From then on the panel says which names the relay attests; a renewal
+	// does not change them.
+	if err := s.relays.SaveNames(ctx, tx, relayID, networkNames(issued)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -311,40 +317,40 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	s.log.Info("relay zarejestrowany", "relay_id", relayID, "nazwa", name, "site", scope.Site)
+	s.log.Info("the relay was registered", "relay_id", relayID, "name", name, "site", scope.Site)
 	return connect.NewResponse(&agentv1.EnrollResponse{
 		HostId:         relayID,
 		CertificatePem: issued.PEM,
-		CaBundlePem:    zaufanie,
+		CaBundlePem:    trust,
 		NotAfter:       timestamppb.New(issued.NotAfter),
 	}), nil
 }
 
-// sprawdzCel pilnuje, ze zamowienie pasuje do tego, co naprawde sie dzieje.
+// checkPurpose guards that the order matches what is really happening.
 //
-// Rozroznienie jest calym sensem tej funkcji. "Nowy host" oznacza maszyne,
-// ktorej panel nie zna: token o tym celu nie moze przejac tozsamosci
-// dzialajacej maszyny, nawet gdy ktos poda jej machine_id. "Wymiana
-// tozsamosci" oznacza konkretnego hosta wskazanego przy zamawianiu - i tylko
-// jego.
-func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
+// The distinction is the whole point of this function. "A new host" means a
+// machine the panel does not know: a token with that purpose must not take
+// over the identity of a running machine, even when somebody gives its
+// machine_id. "A replacement of an identity" means the specific host named
+// when ordering - and only it.
+func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 	msg *agentv1.EnrollRequest, scope enrollment.Scope) error {
-	istniejacy, err := s.hosts.IDByMachineID(ctx, tx, msg.GetMachineId())
+	existing, err := s.hosts.IDByMachineID(ctx, tx, msg.GetMachineId())
 	if err != nil {
 		return err
 	}
 	switch scope.Purpose {
 	case enrollment.PurposeNew:
-		if istniejacy != "" {
+		if existing != "" {
 			return errors.New("machine_id_known")
 		}
 	case enrollment.PurposeReplace:
 		if scope.ExpectedHostID == "" {
 			return errors.New("recovery_without_host")
 		}
-		// Host wycofany nie wraca do floty odtworzeniem tozsamosci. Utrata
-		// zaufania jest decyzja operatora i cofa sie ja w panelu, a nie
-		// tokenem na hoscie.
+		// A withdrawn host does not come back to the fleet through a recovery
+		// of its identity. The loss of trust is a decision of the operator and
+		// is taken back in the panel rather than with a token on the host.
 		host, err := s.hosts.Get(ctx, scope.ExpectedHostID)
 		if err != nil {
 			return err
@@ -355,10 +361,10 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 		if host.LifecycleState == hosts.StateRetired {
 			return errors.New("host_retired")
 		}
-		// Maszyna nieznana panelowi jest tu w porzadku: po przeinstalowaniu
-		// host ma nowe machine_id, a tozsamosc odtwarzamy po wskazanym
-		// host_id. Znana maszyna musi byc tym samym hostem.
-		if istniejacy != "" && istniejacy != scope.ExpectedHostID {
+		// A machine unknown to the panel is fine here: after a reinstall a
+		// host has a new machine_id, and we recover the identity by the named
+		// host_id. A known machine has to be the same host.
+		if existing != "" && existing != scope.ExpectedHostID {
 			return errors.New("machine_id_other_host")
 		}
 	case enrollment.PurposeRelay:
@@ -369,36 +375,37 @@ func (s *EnrollmentService) sprawdzCel(ctx context.Context, tx pgx.Tx,
 	return nil
 }
 
-// nazwySieciowe zbiera nazwy, ktore panel wystawil w certyfikacie relaya.
+// networkNames gathers the names the panel issued in the certificate of a
+// relay.
 //
-// Zrodlem jest wystawiony certyfikat, a nie zadanie: to on rozstrzyga, co
-// relay naprawde poswiadcza wobec agentow swojej lokalizacji.
-func nazwySieciowe(issued *issuer.Certyfikat) []string {
-	nazwy := append([]string{}, issued.DNSNames...)
-	return append(nazwy, issued.IPAddresses...)
+// The source is the issued certificate rather than the request: it is the
+// certificate that settles what the relay really attests towards the agents of
+// its site.
+func networkNames(issued *issuer.Certificate) []string {
+	names := append([]string{}, issued.DNSNames...)
+	return append(names, issued.IPAddresses...)
 }
 
-// sprawdzTrase pilnuje, ze zgloszenie przyszlo droga, ktora zamowienie
-// dopuszcza.
+// checkRoute guards that a registration arrived over a path the order allows.
 //
-// Relay jest terminatorem TLS, wiec widzi token swojej lokalizacji. To jest
-// cena za rejestracje w izolowanym site i dlatego zakres tokenu ma byc waski:
-// zamowienie zwiazane z relayem dziala wylacznie przez niego, a zamowienie
-// lokalizacji nie przechodzi przez relay innej lokalizacji.
-func sprawdzTrase(scope enrollment.Scope, przezRelay poswiadczenieRelaya) error {
-	if przezRelay.ID == "" {
-		// Zgloszenie bezposrednie. Zamowienie zwiazane z relayem nie moze
-		// pojsc ta droga: inaczej zwiazek nie znaczylby nic.
+// A relay terminates TLS, so it sees the token of its site. That is the price
+// of registering in an isolated site, and that is why the scope of a token is
+// to be narrow: an order tied to a relay works through it alone, and an order
+// of a site does not pass through the relay of another site.
+func checkRoute(scope enrollment.Scope, viaRelay relayAttestation) error {
+	if viaRelay.ID == "" {
+		// A direct registration. An order tied to a relay must not go this
+		// way: otherwise the tie would mean nothing.
 		if scope.RelayID != "" {
-			return errors.New("zamowienie wymaga rejestracji przez relay")
+			return errors.New("the order requires a registration through a relay")
 		}
 		return nil
 	}
-	if scope.RelayID != "" && scope.RelayID != przezRelay.ID {
-		return errors.New("zamowienie nalezy do innego relaya")
+	if scope.RelayID != "" && scope.RelayID != viaRelay.ID {
+		return errors.New("the order belongs to another relay")
 	}
-	if scope.Site != "" && przezRelay.Site != "" && scope.Site != przezRelay.Site {
-		return errors.New("zamowienie nalezy do innej lokalizacji")
+	if scope.Site != "" && viaRelay.Site != "" && scope.Site != viaRelay.Site {
+		return errors.New("the order belongs to another site")
 	}
 	return nil
 }

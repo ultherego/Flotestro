@@ -9,13 +9,13 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// ErrNotConnected oznacza, ze host nie ma aktywnej sesji na tym gatewayu.
-var ErrNotConnected = errors.New("host nie ma aktywnej sesji")
+// ErrNotConnected means the host has no active session on this gateway.
+var ErrNotConnected = errors.New("the host has no active session")
 
-// ErrSendTimeout oznacza, ze sesja nie nadaza odbierac wiadomosci.
-var ErrSendTimeout = errors.New("sesja nie przyjela wiadomosci w zadanym czasie")
+// ErrSendTimeout means the session does not keep up with receiving messages.
+var ErrSendTimeout = errors.New("the session did not accept the message within the given time")
 
-// Session opisuje aktywne polaczenie agenta obslugiwane przez ten gateway.
+// Session describes an active connection of an agent served by this gateway.
 type Session struct {
 	ID           string
 	HostID       string
@@ -23,27 +23,28 @@ type Session struct {
 	BootID       string
 	RemoteAddr   string
 	StartedAt    time.Time
-	// RelayID jest pusty przy polaczeniu bezposrednim. Panel musi umiec
-	// powiedziec, ktory relay poswiadczyl tozsamosc hosta: to dwie rozne
-	// podstawy zaufania, a nie szczegol trasy.
+	// RelayID is empty for a direct connection. The panel has to be able to
+	// say which relay attested the identity of a host: these are two different
+	// grounds of trust rather than a detail of the route.
 	RelayID string
-	// Epoka rosnie w obrebie hosta i rozstrzyga, ktora sesja jest wlasciwa.
-	// Dwie bramy nie widza siebie nawzajem; widza wspolna baze, wiec to
-	// z niej pochodzi numer i to on wskazuje zwyciezce.
-	Epoka int64
+	// Epoch grows within a host and settles which session is the right one.
+	// Two gateways do not see each other; they see a shared database, so the
+	// number comes from it and it points at the winner.
+	Epoch int64
 
-	// outbound jest jedyna droga wysylki do agenta. Stream nie jest bezpieczny
-	// dla rownoleglych Send, wiec pisze do niego wylacznie jedna goroutine.
+	// outbound is the only path of sending to the agent. A stream is not safe
+	// for concurrent Sends, so only one goroutine writes to it.
 	outbound chan *agentv1.ServerMessage
-	// zamkniecie konczy sesje z inicjatywy panelu. Kwarantanna sprawdzana
-	// dopiero przy nastepnym polaczeniu nie odcina hosta, ktory wlasnie jest
-	// przejety - a to jest ta chwila, w ktorej odciecie ma znaczenie.
-	zamkniecie chan struct{}
-	raz        sync.Once
-	powod      atomic.Pointer[string]
+	// closed ends the session on the initiative of the panel. A quarantine
+	// checked only at the next connection does not cut off a host that is
+	// being taken over right now - and that is the moment when cutting it off
+	// matters.
+	closed chan struct{}
+	once   sync.Once
+	reason atomic.Pointer[string]
 }
 
-// NewSession tworzy sesje z buforem wiadomosci wychodzacych.
+// NewSession creates a session with a buffer of outgoing messages.
 func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int) *Session {
 	if buffer <= 0 {
 		buffer = 16
@@ -51,37 +52,37 @@ func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int)
 	return &Session{
 		ID: id, HostID: hostID, AgentVersion: agentVersion, BootID: bootID,
 		RemoteAddr: remoteAddr, StartedAt: time.Now(),
-		outbound:   make(chan *agentv1.ServerMessage, buffer),
-		zamkniecie: make(chan struct{}),
+		outbound: make(chan *agentv1.ServerMessage, buffer),
+		closed:   make(chan struct{}),
 	}
 }
 
-// Zakoncz zamyka sesje z inicjatywy panelu.
+// End closes the session on the initiative of the panel.
 //
-// Idempotentne: kwarantanna wydana dwa razy nie moze wywrocic gatewaya.
-func (s *Session) Zakoncz(powod string) {
-	s.raz.Do(func() {
-		s.powod.Store(&powod)
-		close(s.zamkniecie)
+// Idempotent: a quarantine issued twice must not topple the gateway.
+func (s *Session) End(reason string) {
+	s.once.Do(func() {
+		s.reason.Store(&reason)
+		close(s.closed)
 	})
 }
 
-// Zamknieta jest kanalem, ktory zamyka sie razem z sesja.
-func (s *Session) Zamknieta() <-chan struct{} { return s.zamkniecie }
+// Closed is the channel that closes together with the session.
+func (s *Session) Closed() <-chan struct{} { return s.closed }
 
-// PowodZamkniecia mowi, dlaczego panel zakonczyl sesje.
-func (s *Session) PowodZamkniecia() string {
-	if powod := s.powod.Load(); powod != nil {
-		return *powod
+// CloseReason says why the panel ended the session.
+func (s *Session) CloseReason() string {
+	if reason := s.reason.Load(); reason != nil {
+		return *reason
 	}
 	return ""
 }
 
-// Outbound zwraca kanal wiadomosci do wyslania do agenta.
+// Outbound returns the channel of the messages to send to the agent.
 func (s *Session) Outbound() <-chan *agentv1.ServerMessage { return s.outbound }
 
-// Send kolejkuje wiadomosc do agenta. Blokada jest ograniczona czasowo, zeby
-// wolny agent nie zatrzymal schedulera.
+// Send queues a message to the agent. The block is bounded in time so that a
+// slow agent does not stop the scheduler.
 func (s *Session) Send(message *agentv1.ServerMessage, timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -93,24 +94,25 @@ func (s *Session) Send(message *agentv1.ServerMessage, timeout time.Duration) er
 	}
 }
 
-// ZakonczSesje konczy sesje hosta, jesli jakas trwa.
+// EndSession ends the session of a host if one is running.
 //
-// Zwraca, czy bylo co konczyc: host offline w chwili kwarantanny nie jest
-// bledem, tylko hostem, ktory i tak nie wroci - warunek przy polaczeniu go
-// nie wpusci.
-func (r *Registry) ZakonczSesje(hostID, powod string) bool {
+// It returns whether there was anything to end: a host offline at the moment
+// of a quarantine is not an error but a host that will not come back anyway -
+// the condition at the connection will not let it in.
+func (r *Registry) EndSession(hostID, reason string) bool {
 	r.mu.RLock()
 	session, ok := r.sessions[hostID]
 	r.mu.RUnlock()
 	if !ok {
 		return false
 	}
-	session.Zakoncz(powod)
+	session.End(reason)
 	return true
 }
 
-// Registry jest krotkotrwalym rejestrem aktywnych sesji. Jest to jedyny stan
-// trzymany w pamieci gatewaya; zrodlem prawdy pozostaje PostgreSQL.
+// Registry is the short-lived registry of the active sessions. It is the only
+// state kept in the memory of the gateway; PostgreSQL remains the source of
+// truth.
 type Registry struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
@@ -126,9 +128,9 @@ func (r *Registry) Add(session *Session) {
 	r.sessions[session.HostID] = session
 }
 
-// Remove usuwa sesje tylko wtedy, gdy nadal nalezy do podanego identyfikatora.
-// Dzieki temu zamkniecie starej sesji nie kasuje nowszej, ktora zdazyla ja
-// zastapic po reconnekcie.
+// Remove deletes a session only when it still belongs to the given
+// identifier. Thanks to that closing an old session does not delete a newer
+// one that has already replaced it after a reconnect.
 func (r *Registry) Remove(hostID, sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -144,7 +146,7 @@ func (r *Registry) Get(hostID string) (*Session, bool) {
 	return session, ok
 }
 
-// Dispatch wysyla wiadomosc do hosta, jesli jest polaczony z tym gatewayem.
+// Dispatch sends a message to a host if it is connected to this gateway.
 func (r *Registry) Dispatch(hostID string, message *agentv1.ServerMessage, timeout time.Duration) (string, error) {
 	session, ok := r.Get(hostID)
 	if !ok {
@@ -156,7 +158,7 @@ func (r *Registry) Dispatch(hostID string, message *agentv1.ServerMessage, timeo
 	return session.ID, nil
 }
 
-// ConnectedHosts zwraca identyfikatory hostow z aktywna sesja.
+// ConnectedHosts returns the identifiers of the hosts with an active session.
 func (r *Registry) ConnectedHosts() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -167,23 +169,23 @@ func (r *Registry) ConnectedHosts() []string {
 	return hosts
 }
 
-// SesjeRelaya liczy sesje poswiadczone przez wskazany relay.
+// RelaySessions counts the sessions attested by the named relay.
 //
-// Relay porownuje te liczbe ze swoja: rozjazd oznacza sesje, ktora zawisla po
-// jednej stronie, a tego nie widac z zadnej strony osobno.
-func (r *Registry) SesjeRelaya(relayID string) int {
+// The relay compares this number with its own: a divergence means a session
+// that hangs on one side, and that cannot be seen from either side alone.
+func (r *Registry) RelaySessions(relayID string) int {
 	if relayID == "" {
 		return 0
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var ile int
+	var count int
 	for _, session := range r.sessions {
 		if session.RelayID == relayID {
-			ile++
+			count++
 		}
 	}
-	return ile
+	return count
 }
 
 func (r *Registry) Count() int {
@@ -192,8 +194,8 @@ func (r *Registry) Count() int {
 	return len(r.sessions)
 }
 
-// SessionIDs zwraca identyfikatory sesji utrzymywanych przez te instancje.
-// Sluzy zamykaniu wpisow po sesjach, ktore juz nie istnieja.
+// SessionIDs returns the identifiers of the sessions kept by this instance. It
+// serves to close the rows of sessions that no longer exist.
 func (r *Registry) SessionIDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

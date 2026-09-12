@@ -1,10 +1,13 @@
-// Package metrics czyta metryki z systemu, ktory juz je zbiera.
+// Package metrics reads the metrics from the system that already collects
+// them.
 //
-// Panel nie ma wlasnej bazy szeregow czasowych i miec nie bedzie: pytanie
-// "ile ten host mial procesora o trzeciej w nocy" ma odpowiedz w Prometheusie,
-// a duplikowanie jej w panelu oznaczaloby druga baze, drugi retencyjny problem
-// i dwie rozne prawdy. Panel pokazuje wiec cudzy wykres razem z nazwa zrodla
-// i zakresem czasu - i mowi wprost, gdy zrodlo nie odpowiada.
+// The panel has no time series database of its own and will not have one: the
+// question "how much processor did this host use at three in the morning" has
+// its answer in Prometheus, and duplicating it in the panel would mean a
+// second database, a second retention problem and two different truths. The
+// panel therefore shows somebody else's chart together with the name of the
+// source and the time range - and says outright when the source does not
+// answer.
 package metrics
 
 import (
@@ -21,60 +24,63 @@ import (
 	"github.com/ultherego/flotestro/internal/integrations"
 )
 
-// Punkt jest jedna probka szeregu.
-type Punkt struct {
+// Point is a single sample of a series.
+type Point struct {
 	At    time.Time `json:"at"`
 	Value float64   `json:"value"`
 }
 
-// Szereg to nazwany przebieg wartosci.
-type Szereg struct {
+// Series is a named run of values.
+type Series struct {
 	Name string `json:"name"`
-	// Unit opisuje, w czym jest wartosc - panel nie zgaduje tego z nazwy.
+	// Unit describes what the value is in - the panel does not guess it from
+	// the name.
 	Unit   string  `json:"unit,omitempty"`
-	Points []Punkt `json:"points,omitempty"`
-	// Last jest ostatnia wartoscia. Pusty wskaznik oznacza brak danych,
-	// a nie zero: host bez metryk i host z zerowym obciazeniem to co innego.
+	Points []Point `json:"points,omitempty"`
+	// Last is the latest value. An empty pointer means missing data rather
+	// than zero: a host without metrics and a host with zero load are
+	// different things.
 	Last *float64 `json:"last,omitempty"`
-	// Query jest zapytaniem, ktore panel wyslal. Operator ma widziec, skad
-	// wzial sie wykres, zeby moc go powtorzyc u zrodla.
+	// Query is the query the panel sent. The operator is to see where the
+	// chart came from, so that they can repeat it at the source.
 	Query string `json:"query,omitempty"`
-	// UnavailableReason mowi, dlaczego szeregu nie ma.
+	// UnavailableReason says why the series is missing.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// Zapytanie opisuje jeden panel wykresu.
-type Zapytanie struct {
+// Query describes one panel of a chart.
+type Query struct {
 	Name   string
 	Unit   string
 	PromQL string
 }
 
-// Provider jest zrodlem metryk.
+// Provider is a source of metrics.
 type Provider interface {
-	Nazwa() string
-	Skonfigurowany() bool
-	Zdrowie(ctx context.Context) integrations.Stan
-	// Szeregi liczy wykresy dla jednego hosta.
-	Szeregi(ctx context.Context, etykieta string, od, do time.Time) []Szereg
+	Name() string
+	Configured() bool
+	Health(ctx context.Context) integrations.State
+	// Series computes the charts for one host.
+	Series(ctx context.Context, label string, od, do time.Time) []Series
 }
 
-// Prometheus jest adapterem Prometheusa i wszystkiego, co mowi jego jezykiem.
+// Prometheus is the adapter of Prometheus and of everything that speaks its
+// language.
 type Prometheus struct {
 	URL    string
 	Client *http.Client
 	Limit  time.Duration
-	// Zapytania opisuja panele wykresu. Puste oznacza zestaw domyslny.
-	Zapytania []Zapytanie
-	obwod     *integrations.Obwod
+	// Queries describe the panels of the chart. Empty means the default set.
+	Queries []Query
+	breaker *integrations.Breaker
 }
 
-// DomyslneZapytania sa napisane pod nazewnictwo node_exportera, bo to ono
-// jest de facto standardem w instalacjach, do ktorych panel sie podlacza.
-// Instalacja z innym zestawem metryk podmienia je w konfiguracji, zamiast
-// dostawac puste wykresy bez wyjasnienia.
-func DomyslneZapytania() []Zapytanie {
-	return []Zapytanie{
+// DefaultQueries are written for the vocabulary of node_exporter, because it
+// is the de facto standard in the installations the panel connects to. An
+// installation with a different set of metrics replaces them in the
+// configuration instead of getting empty charts without an explanation.
+func DefaultQueries() []Query {
+	return []Query{
 		{
 			Name: "cpu", Unit: "%",
 			PromQL: `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle",instance="%s"}[5m])) * 100)`,
@@ -94,147 +100,149 @@ func DomyslneZapytania() []Zapytanie {
 	}
 }
 
-// NowyPrometheus tworzy adapter. Pusty adres oznacza instalacje bez metryk -
-// i to jest stan poprawny, a nie awaria.
-func NowyPrometheus(adres string, limit time.Duration, zapytania []Zapytanie) *Prometheus {
-	if len(zapytania) == 0 {
-		zapytania = DomyslneZapytania()
+// NewPrometheus creates the adapter. An empty address means an installation
+// without metrics - and that is a correct state rather than a failure.
+func NewPrometheus(address string, limit time.Duration, queries []Query) *Prometheus {
+	if len(queries) == 0 {
+		queries = DefaultQueries()
 	}
 	return &Prometheus{
-		URL:       strings.TrimRight(adres, "/"),
-		Client:    &http.Client{Timeout: limit + time.Second},
-		Limit:     limit,
-		Zapytania: zapytania,
-		obwod:     integrations.NowyObwod(),
+		URL:     strings.TrimRight(address, "/"),
+		Client:  &http.Client{Timeout: limit + time.Second},
+		Limit:   limit,
+		Queries: queries,
+		breaker: integrations.NewBreaker(),
 	}
 }
 
-func (p *Prometheus) Nazwa() string { return "prometheus" }
+func (p *Prometheus) Name() string { return "prometheus" }
 
-func (p *Prometheus) Skonfigurowany() bool { return p != nil && p.URL != "" }
+func (p *Prometheus) Configured() bool { return p != nil && p.URL != "" }
 
-// Zdrowie pyta zrodlo o gotowosc.
-func (p *Prometheus) Zdrowie(ctx context.Context) integrations.Stan {
-	stan := integrations.Stan{Name: p.Nazwa(), Configured: p.Skonfigurowany(), URL: p.URL}
-	if !p.Skonfigurowany() {
-		stan.Reason = "this installation has no metrics source configured"
-		return stan
+// Health asks the source about its readiness.
+func (p *Prometheus) Health(ctx context.Context) integrations.State {
+	state := integrations.State{Name: p.Name(), Configured: p.Configured(), URL: p.URL}
+	if !p.Configured() {
+		state.Reason = "this installation has no metrics source configured"
+		return state
 	}
-	if p.obwod.Otwarty() {
-		stan.Reason = integrations.ErrOtwartyObwod.Error()
-		return stan
+	if p.breaker.Open() {
+		state.Reason = integrations.ErrBreakerOpen.Error()
+		return state
 	}
-	zapytanieCtx, cancel := integrations.ZLimitem(ctx, p.Limit)
+	queryCtx, cancel := integrations.WithTimeout(ctx, p.Limit)
 	defer cancel()
 
 	start := time.Now()
-	err := p.obwod.Wykonaj(func() error {
-		odpowiedz, err := p.get(zapytanieCtx, "/-/ready", nil)
+	err := p.breaker.Do(func() error {
+		response, err := p.get(queryCtx, "/-/ready", nil)
 		if err != nil {
 			return err
 		}
-		odpowiedz.Body.Close()
-		if odpowiedz.StatusCode != http.StatusOK {
-			return fmt.Errorf("zrodlo metryk odpowiedzialo %s", odpowiedz.Status)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("the metrics source answered %s", response.Status)
 		}
 		return nil
 	})
-	czas := time.Since(start).Milliseconds()
-	sprawdzone := time.Now().UTC()
-	stan.LatencyMillis = &czas
-	stan.CheckedAt = &sprawdzone
+	elapsed := time.Since(start).Milliseconds()
+	checked := time.Now().UTC()
+	state.LatencyMillis = &elapsed
+	state.CheckedAt = &checked
 	if err != nil {
-		stan.Reason = err.Error()
-		return stan
+		state.Reason = err.Error()
+		return state
 	}
-	stan.Healthy = true
-	return stan
+	state.Healthy = true
+	return state
 }
 
-// Szeregi liczy wykresy dla jednego hosta.
+// Series computes the charts for one host.
 //
-// Blad jednego panelu nie moze zabrac pozostalych: kazdy szereg niesie swoj
-// powod niedostepnosci, a operator widzi te wykresy, ktore sie udalo policzyc.
-func (p *Prometheus) Szeregi(ctx context.Context, etykieta string, od, do time.Time) []Szereg {
-	wynik := make([]Szereg, 0, len(p.Zapytania))
-	if !p.Skonfigurowany() {
-		return wynik
+// An error of one panel must not take the others away: every series carries
+// its own reason for being unavailable, and the operator sees the charts that
+// could be computed.
+func (p *Prometheus) Series(ctx context.Context, label string, od, do time.Time) []Series {
+	result := make([]Series, 0, len(p.Queries))
+	if !p.Configured() {
+		return result
 	}
-	krok := do.Sub(od) / 60
-	if krok < 15*time.Second {
-		krok = 15 * time.Second
+	step := do.Sub(od) / 60
+	if step < 15*time.Second {
+		step = 15 * time.Second
 	}
-	for _, zapytanie := range p.Zapytania {
-		szereg := Szereg{Name: zapytanie.Name, Unit: zapytanie.Unit}
-		szereg.Query = podstawEtykiete(zapytanie.PromQL, etykieta)
-		punkty, err := p.zakres(ctx, szereg.Query, od, do, krok)
+	for _, query := range p.Queries {
+		series := Series{Name: query.Name, Unit: query.Unit}
+		series.Query = substituteLabel(query.PromQL, label)
+		points, err := p.rangeQuery(ctx, series.Query, od, do, step)
 		if err != nil {
-			szereg.UnavailableReason = err.Error()
-			wynik = append(wynik, szereg)
+			series.UnavailableReason = err.Error()
+			result = append(result, series)
 			continue
 		}
-		szereg.Points = punkty
-		if len(punkty) > 0 {
-			ostatni := punkty[len(punkty)-1].Value
-			szereg.Last = &ostatni
+		series.Points = points
+		if len(points) > 0 {
+			last := points[len(points)-1].Value
+			series.Last = &last
 		}
-		wynik = append(wynik, szereg)
+		result = append(result, series)
 	}
-	return wynik
+	return result
 }
 
-// podstawEtykiete wstawia wartosc etykiety hosta w kazde miejsce zapytania.
-func podstawEtykiete(zapytanie, etykieta string) string {
-	ile := strings.Count(zapytanie, "%s")
-	wartosci := make([]any, ile)
-	for i := range wartosci {
-		wartosci[i] = etykieta
+// substituteLabel puts the value of the label of a host into every place of a
+// query.
+func substituteLabel(query, label string) string {
+	count := strings.Count(query, "%s")
+	values := make([]any, count)
+	for i := range values {
+		values[i] = label
 	}
-	return fmt.Sprintf(zapytanie, wartosci...)
+	return fmt.Sprintf(query, values...)
 }
 
-// zakres pyta o szereg w oknie czasu.
-func (p *Prometheus) zakres(ctx context.Context, zapytanie string,
-	od, do time.Time, krok time.Duration) ([]Punkt, error) {
-	zapytanieCtx, cancel := integrations.ZLimitem(ctx, p.Limit)
+// rangeQuery asks for a series in a window of time.
+func (p *Prometheus) rangeQuery(ctx context.Context, query string,
+	od, do time.Time, step time.Duration) ([]Point, error) {
+	queryCtx, cancel := integrations.WithTimeout(ctx, p.Limit)
 	defer cancel()
 
-	parametry := url.Values{}
-	parametry.Set("query", zapytanie)
-	parametry.Set("start", strconv.FormatInt(od.Unix(), 10))
-	parametry.Set("end", strconv.FormatInt(do.Unix(), 10))
-	parametry.Set("step", strconv.Itoa(int(krok.Seconds()))+"s")
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("start", strconv.FormatInt(od.Unix(), 10))
+	params.Set("end", strconv.FormatInt(do.Unix(), 10))
+	params.Set("step", strconv.Itoa(int(step.Seconds()))+"s")
 
-	var punkty []Punkt
-	err := p.obwod.Wykonaj(func() error {
-		odpowiedz, err := p.get(zapytanieCtx, "/api/v1/query_range", parametry)
+	var points []Point
+	err := p.breaker.Do(func() error {
+		response, err := p.get(queryCtx, "/api/v1/query_range", params)
 		if err != nil {
 			return err
 		}
-		defer odpowiedz.Body.Close()
-		if odpowiedz.StatusCode != http.StatusOK {
-			return fmt.Errorf("zrodlo metryk odpowiedzialo %s", odpowiedz.Status)
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("the metrics source answered %s", response.Status)
 		}
-		dane, err := io.ReadAll(io.LimitReader(odpowiedz.Body, 8<<20))
+		data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 		if err != nil {
 			return err
 		}
-		punkty, err = ParsujZakres(dane)
+		points, err = ParseRange(data)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	return punkty, nil
+	return points, nil
 }
 
-// ParsujZakres czyta odpowiedz query_range.
+// ParseRange reads the answer of query_range.
 //
-// Bierzemy pierwszy szereg: zapytanie panelu jest tak napisane, zeby dotyczylo
-// jednego hosta. Kilka szeregow oznacza, ze etykieta nie identyfikuje hosta
-// jednoznacznie - i wtedy lepiej pokazac jeden wykres niz sklejke kilku.
-func ParsujZakres(dane []byte) ([]Punkt, error) {
-	var odpowiedz struct {
+// We take the first series: the query of a panel is written to concern one
+// host. Several series mean the label does not identify a host unambiguously -
+// and it is then better to show one chart than a blend of several.
+func ParseRange(data []byte) ([]Point, error) {
+	var response struct {
 		Status string `json:"status"`
 		Error  string `json:"error"`
 		Data   struct {
@@ -243,50 +251,51 @@ func ParsujZakres(dane []byte) ([]Punkt, error) {
 			} `json:"result"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(dane, &odpowiedz); err != nil {
-		return nil, fmt.Errorf("nie rozpoznano odpowiedzi zrodla metryk: %w", err)
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("the answer of the metrics source was not recognised: %w", err)
 	}
-	if odpowiedz.Status != "success" {
-		if odpowiedz.Error != "" {
-			return nil, fmt.Errorf("zrodlo metryk: %s", odpowiedz.Error)
+	if response.Status != "success" {
+		if response.Error != "" {
+			return nil, fmt.Errorf("the metrics source: %s", response.Error)
 		}
-		return nil, fmt.Errorf("zrodlo metryk odrzucilo zapytanie")
+		return nil, fmt.Errorf("the metrics source rejected the query")
 	}
-	if len(odpowiedz.Data.Result) == 0 {
+	if len(response.Data.Result) == 0 {
 		return nil, nil
 	}
-	var punkty []Punkt
-	for _, para := range odpowiedz.Data.Result[0].Values {
-		var znacznik float64
-		if err := json.Unmarshal(para[0], &znacznik); err != nil {
+	var points []Point
+	for _, pair := range response.Data.Result[0].Values {
+		var mark float64
+		if err := json.Unmarshal(pair[0], &mark); err != nil {
 			continue
 		}
-		var tekst string
-		if err := json.Unmarshal(para[1], &tekst); err != nil {
+		var text string
+		if err := json.Unmarshal(pair[1], &text); err != nil {
 			continue
 		}
-		wartosc, err := strconv.ParseFloat(tekst, 64)
+		value, err := strconv.ParseFloat(text, 64)
 		if err != nil {
-			// NaN w szeregu jest normalny: oznacza przerwe w zbieraniu,
-			// a nie wartosc zerowa. Pomijamy punkt, zamiast rysowac zero.
+			// A NaN in a series is normal: it means a break in the collection
+			// rather than a value of zero. We skip the point instead of
+			// drawing a zero.
 			continue
 		}
-		punkty = append(punkty, Punkt{
-			At:    time.Unix(int64(znacznik), 0).UTC(),
-			Value: wartosc,
+		points = append(points, Point{
+			At:    time.Unix(int64(mark), 0).UTC(),
+			Value: value,
 		})
 	}
-	return punkty, nil
+	return points, nil
 }
 
-func (p *Prometheus) get(ctx context.Context, sciezka string, parametry url.Values) (*http.Response, error) {
-	adres := p.URL + sciezka
-	if len(parametry) > 0 {
-		adres += "?" + parametry.Encode()
+func (p *Prometheus) get(ctx context.Context, path string, params url.Values) (*http.Response, error) {
+	address := p.URL + path
+	if len(params) > 0 {
+		address += "?" + params.Encode()
 	}
-	zadanie, err := http.NewRequestWithContext(ctx, http.MethodGet, adres, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
 	}
-	return p.Client.Do(zadanie)
+	return p.Client.Do(request)
 }

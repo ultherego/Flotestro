@@ -173,7 +173,7 @@ func (s *Server) zmienCyklZycia(w http.ResponseWriter, r *http.Request, przejsci
 	// host zostalby rozlaczony bez powodu zapisanego w panelu.
 	rozlaczony := false
 	if przejscie.ZamknijSesje && s.registry != nil {
-		rozlaczony = s.registry.ZakonczSesje(hostID, przejscie.Akcja)
+		rozlaczony = s.registry.EndSession(hostID, przejscie.Akcja)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"host_id": hostID, "lifecycle_state": przejscie.Nowy, "reason": req.Reason,

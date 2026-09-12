@@ -45,8 +45,9 @@ const (
 	remoteAddrKey contextKey = "flotestro.remote-addr"
 )
 
-// WithClientCertificate przenosi certyfikat klienta z warstwy TLS do kontekstu,
-// dzieki czemu handler nie musi znac szczegolow serwera HTTP.
+// WithClientCertificate carries the client certificate from the TLS layer
+// into the context, so that the handler does not have to know the details of
+// the HTTP server.
 func WithClientCertificate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -68,8 +69,8 @@ func remoteAddr(ctx context.Context) string {
 	return addr
 }
 
-// AgentService obsluguje dlugotrwaly stream agenta. Stream jest jedynym
-// kanalem polecen; helper root nigdy nie rozmawia z centrala.
+// AgentService serves the long-lived stream of an agent. The stream is the
+// only channel of commands; the root helper never speaks to the centre.
 type AgentService struct {
 	pool      *pgxpool.Pool
 	hosts     *hosts.Store
@@ -77,51 +78,58 @@ type AgentService struct {
 	jobs      *jobs.Store
 	audit     *audit.Recorder
 	registry  *Registry
-	// wystawca podpisuje odnowienia i opisuje, komu panel ufa. Interfejs,
-	// a nie urzad: wymiana CA zmienia zbior zaufania w trakcie pracy, a
-	// przeniesienie klucza do HSM ma nie dotknac tej uslugi.
-	wystawca issuer.Wystawca
-	// relays rozpoznaje relaye lokalizacji. Puste wylacza posredniczenie.
+	// certIssuer signs the renewals and describes whom the panel trusts. An
+	// interface rather than an authority: an exchange of the CA changes the
+	// trust set while the panel works, and moving the key into an HSM is not
+	// to touch this service.
+	certIssuer issuer.Issuer
+	// relays recognises the relays of the sites. Empty disables the
+	// mediation.
 	relays *relays.Store
-	// events rozglasza postep operacji do otwartych ekranow panelu.
+	// events broadcasts the progress of the operations to the open screens of
+	// the panel.
 	events *events.Bus
-	// odswiezOcene prosi korelator o przeliczenie hosta poza kolejnoscia.
-	// Puste, gdy korelator jest wylaczony.
-	odswiezOcene func(hostID string)
-	// files trzyma stan docelowy plikow konfiguracyjnych. Zapisujemy go
-	// dopiero po udanej operacji: panel nie moze twierdzic, ze zarzadza
-	// plikiem, ktorego host nie przyjal.
+	// refreshAssessment asks the correlator to recompute a host out of turn.
+	// Empty when the correlator is disabled.
+	refreshAssessment func(hostID string)
+	// files keeps the desired state of the configuration files. We write it
+	// only after a successful operation: the panel must not claim it manages
+	// a file the host did not accept.
 	files *managedfiles.Store
-	// certificates trzyma historie wdrozonych certyfikatow. Zapisujemy ja
-	// dopiero po udanej operacji, i to na podstawie odcisku, ktory odeslal
-	// host - a nie tego, ktory panel wyslal.
+	// certificates keeps the history of the deployed certificates. We write it
+	// only after a successful operation, and on the basis of the fingerprint
+	// the host sent back - not the one the panel sent.
 	certificates *certyfikaty.Store
-	// backups trzyma historie przebiegow kopii. Panel nie wie, kiedy kopia
-	// sie udala, jesli tego nie zapisze: host nie pamieta tego miedzy
-	// operacjami, a repozytorium odpowiada dopiero po podaniu hasla.
+	// backups keeps the history of the backup runs. The panel does not know
+	// when a copy succeeded unless it records it: the host does not remember
+	// that between operations, and the repository answers only once a
+	// password is given.
 	backups *backupstore.Store
-	// pakiety trzymaja pelna liste pakietow hostow. Bez niej nie da sie
-	// powiedziec nic o podatnosciach - a brak listy musi byc widoczny jako
-	// brak wiedzy, nie jako host bez znalezisk.
-	pakiety *vuln.PackageStore
-	// secrets wydaje wartosci sekretow na dzierzawe. Pusty oznacza panel bez
-	// magazynu: operacje wskazujace sekret nie beda wtedy dostarczane.
-	secrets SekretyWydawane
-	// leases pozwala sprawdzic, ktora wersje sekretu panel naprawde wydal.
-	leases SekretyDzierzawione
-	// proby tlumaczy identyfikator proby na identyfikator operacji. Agent
-	// melduje postep dla proby, a operator patrzy na operacje.
-	probyMu   sync.RWMutex
-	proby     map[string]kontekstZadania
-	log       *slog.Logger
-	gatewayID string
+	// packages keep the full package lists of the hosts. Without them nothing
+	// can be said about vulnerabilities - and a missing list has to be visible
+	// as missing knowledge rather than as a host without findings.
+	pkgs *vuln.PackageStore
+	// secrets releases the values of the secrets against a lease. Empty means
+	// a panel without a store: the operations that name a secret are then not
+	// delivered.
+	secrets SecretIssuing
+	// leases makes it possible to check which version of a secret the panel
+	// really released.
+	leases SecretLeases
+	// attempts translates the identifier of an attempt into the identifier of
+	// an operation. The agent reports progress for an attempt, and the
+	// operator looks at an operation.
+	attemptsMu sync.RWMutex
+	attempts   map[string]attemptContextEntry
+	log        *slog.Logger
+	gatewayID  string
 
 	heartbeatSeconds int
 	heartbeatJitter  int
 }
 
 func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inventory.Store,
-	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, wystawca issuer.Wystawca,
+	jobStore *jobs.Store, recorder *audit.Recorder, registry *Registry, certIssuer issuer.Issuer,
 	relayStore *relays.Store, log *slog.Logger, gatewayID string,
 	heartbeatSeconds, heartbeatJitter int) *AgentService {
 	return &AgentService{
@@ -129,28 +137,31 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		files:        managedfiles.NewStore(pool),
 		certificates: certyfikaty.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
-		pakiety:      vuln.NewPackageStore(pool),
-		audit:        recorder, registry: registry, wystawca: wystawca, relays: relayStore,
+		pkgs:         vuln.NewPackageStore(pool),
+		audit:        recorder, registry: registry, certIssuer: certIssuer, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
-		proby: map[string]kontekstZadania{},
+		attempts: map[string]attemptContextEntry{},
 	}
 }
 
-// SetOdswiezenieOceny podlacza prosbe o przeliczenie oceny podatnosci.
+// SetAssessmentRefresh connects the request to recompute the vulnerability
+// assessment.
 //
-// Opcjonalne: bez korelatora gateway dziala tak samo, tylko nikt nie czeka
-// na te dane.
-func (s *AgentService) SetOdswiezenieOceny(odswiez func(hostID string)) {
-	s.odswiezOcene = odswiez
+// Optional: without the correlator the gateway works the same, only nobody
+// waits for these data.
+func (s *AgentService) SetAssessmentRefresh(refresh func(hostID string)) {
+	s.refreshAssessment = refresh
 }
 
-// SetEvents podlacza magistrale zdarzen. Bez niej agent dziala tak samo,
-// tylko postep dlugiej operacji nie dociera na ekran operatora.
+// SetEvents connects the event bus. Without it the agent works the same, only
+// the progress of a long operation does not reach the screen of the
+// operator.
 func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
 
-// Connect obsluguje sesje agenta. Identity hosta pochodzi wylacznie z
-// certyfikatu klienta; tresc wiadomosci nigdy nie moze jej nadpisac.
+// Connect serves the session of an agent. The identity of the host comes from
+// the client certificate alone; the content of a message must never overwrite
+// it.
 func (s *AgentService) Connect(ctx context.Context,
 	stream *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage]) error {
 	cert, ok := clientCertificate(ctx)
@@ -158,9 +169,10 @@ func (s *AgentService) Connect(ctx context.Context,
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
 	}
 
-	// Sesja moze przyjsc bezposrednio od agenta albo przez relay lokalizacji.
-	// W drugim przypadku tozsamosc hosta nie pochodzi z uscisku TLS, tylko
-	// z poswiadczenia relaya, i wlasnie dlatego jest sprawdzana osobno.
+	// A session can come straight from an agent or through the relay of a
+	// site. In the second case the identity of the host does not come from the
+	// TLS handshake but from the attestation of the relay, and that is exactly
+	// why it is checked separately.
 	hostID, relayID, err := s.identifyPeer(ctx, cert, stream.RequestHeader().Get(relayHostHeader))
 	if err != nil {
 		return err
@@ -169,9 +181,10 @@ func (s *AgentService) Connect(ctx context.Context,
 		s.relays.MarkSeen(ctx, relayID)
 	}
 
-	// Certyfikat relaya nie opisuje hosta, wiec stan certyfikatu hosta
-	// sprawdzamy wylacznie przy polaczeniu bezposrednim. Identity hosta
-	// z poswiadczenia relaya zostala juz sprawdzona wyzej.
+	// The certificate of a relay does not describe a host, so the state of the
+	// certificate of a host is checked only for a direct connection. The
+	// identity of a host from the attestation of a relay has already been
+	// checked above.
 	if relayID == "" {
 		status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
 		if err != nil {
@@ -182,23 +195,24 @@ func (s *AgentService) Connect(ctx context.Context,
 		}
 	}
 
-	// Pierwsza wiadomosc musi byc Hello. Inny start konczy sesje.
+	// The first message has to be Hello. Any other start ends the session.
 	first, err := stream.Receive()
 	if err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("oczekiwano Hello: %w", err))
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("Hello was expected: %w", err))
 	}
 	hello := first.GetHello()
 	if hello == nil {
-		return connect.NewError(connect.CodeInvalidArgument, errors.New("pierwsza wiadomosc musi byc Hello"))
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("the first message has to be Hello"))
 	}
 
 	caps := capabilitiesFromProto(hello.GetCapabilities())
 	if err := s.hosts.ApplyHello(ctx, hostID, hello.GetAgentVersion(), hello.GetBootId(), caps); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	// Wymiane agenta rozstrzyga jego powrot, a nie kod wyjscia menedzera
-	// pakietow: proces, ktory wykonywal zadanie, zostal w polowie zastapiony.
-	s.rozstrzygnijAktualizacjeAgenta(ctx, hostID, hello.GetAgentVersion())
+	// The return of the agent settles its replacement rather than the exit code
+	// of the package manager: the process that carried the job out was
+	// replaced halfway.
+	s.settleAgentUpgrade(ctx, hostID, hello.GetAgentVersion())
 
 	session := NewSession(uuid.NewString(), hostID, hello.GetAgentVersion(),
 		hello.GetBootId(), remoteAddr(ctx), 32)
@@ -206,29 +220,31 @@ func (s *AgentService) Connect(ctx context.Context,
 	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	// Adres zarzadzania jest odswiezany przy kazdym polaczeniu: host moze
-	// zmienic adres, przeniesc sie za relay albo wrocic sprzed niego.
+	// The management address is refreshed at every connection: a host can
+	// change its address, move behind a relay or come back from behind one.
 	if address, source := managementAddress(session.RemoteAddr, hello.GetLocalAddress(), relayID); address != "" {
 		if err := s.hosts.SetManagementAddress(ctx, hostID, address, source); err != nil {
-			s.log.Error("nie zapisano adresu zarzadzania", "host_id", hostID, "err", err)
+			s.log.Error("the management address was not written", "host_id", hostID, "err", err)
 		}
 	}
 
 	s.registry.Add(session)
-	s.log.Info("sesja agenta otwarta",
+	s.log.Info("the session of the agent was opened",
 		"host_id", hostID, "session_id", session.ID, "agent_version", session.AgentVersion,
 		"boot_id", session.BootID, "sessions", s.registry.Count())
 
 	defer func() {
 		s.registry.Remove(hostID, session.ID)
-		// Kontekst zadania jest juz anulowany, wiec sprzatanie ma wlasny.
+		// The context of the request is already cancelled, so the cleanup has
+		// one of its own.
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		s.closeSession(cleanupCtx, session, hostID)
 	}()
 
-	// Jedna goroutine pisze do streamu, bo Send nie jest bezpieczny wspolbieznie.
-	// Scheduler kolejkuje zadania przez kanal sesji, nie przez stream wprost.
+	// One goroutine writes to the stream, because Send is not safe
+	// concurrently. The scheduler queues the jobs over the channel of the
+	// session rather than over the stream directly.
 	sendCtx, stopSender := context.WithCancel(ctx)
 	defer stopSender()
 	senderErr := make(chan error, 1)
@@ -246,8 +262,9 @@ func (s *AgentService) Connect(ctx context.Context,
 		}
 	}()
 
-	// Serwer natychmiast odsyla parametry sesji. Pelny inventory jest zamawiany
-	// wtedy, gdy agent zglasza inna rewizje niz zapisana.
+	// The server sends the parameters of the session back at once. A full
+	// inventory is ordered when the agent reports a revision other than the
+	// recorded one.
 	if err := stream.Send(&agentv1.ServerMessage{
 		Payload: &agentv1.ServerMessage_SessionConfig{
 			SessionConfig: &agentv1.SessionConfig{
@@ -283,25 +300,25 @@ func (s *AgentService) Connect(ctx context.Context,
 		case <-ctx.Done():
 			return nil
 
-		case <-session.Zamknieta():
-			// Panel zakonczyl sesje: kwarantanna albo wycofanie hosta.
-			// Sprawdzenie przy nastepnym polaczeniu nie odcieloby maszyny,
-			// ktora wlasnie teraz wykonuje czyjes polecenia.
-			s.log.Info("sesja agenta zamknieta przez panel",
+		case <-session.Closed():
+			// The panel ended the session: a quarantine or a withdrawal of the
+			// host. A check at the next connection would not cut off a machine
+			// that is carrying out somebody's commands right now.
+			s.log.Info("the session of the agent was closed by the panel",
 				"host_id", hostID, "session_id", session.ID,
-				"powod", session.PowodZamkniecia())
+				"reason", session.CloseReason())
 			return connect.NewError(connect.CodePermissionDenied,
-				errors.New(session.PowodZamkniecia()))
+				errors.New(session.CloseReason()))
 
 		case err := <-senderErr:
-			s.log.Info("wysylka do agenta zakonczona", "host_id", hostID, "err", err)
+			s.log.Info("the sending to the agent has ended", "host_id", hostID, "err", err)
 			return nil
 
 		case err := <-receiveErr:
 			if errors.Is(err, io.EOF) || errors.Is(ctx.Err(), context.Canceled) {
 				return nil
 			}
-			s.log.Info("stream agenta zakonczony", "host_id", hostID, "err", err)
+			s.log.Info("the stream of the agent has ended", "host_id", hostID, "err", err)
 			return nil
 
 		case msg, ok := <-received:
@@ -309,7 +326,7 @@ func (s *AgentService) Connect(ctx context.Context,
 				return nil
 			}
 			if err := s.handle(ctx, hostID, session, msg); err != nil {
-				s.log.Error("blad obslugi wiadomosci agenta", "host_id", hostID, "err", err)
+				s.log.Error("an error while handling a message of the agent", "host_id", hostID, "err", err)
 			}
 		}
 	}
@@ -320,8 +337,8 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	switch payload := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Heartbeat:
 		health := payload.Heartbeat.GetHealth()
-		// Pola nieobecne w wiadomosci oznaczaja stan nieustalony i przechodza
-		// dalej jako brak wartosci, nie jako zero.
+		// The fields absent from a message mean an undetermined state and go on
+		// as a missing value rather than as zero.
 		if err := s.hosts.ApplyHeartbeat(ctx, hostID, hosts.Health{
 			FailedUnits:            health.FailedUnits,
 			RebootRequired:         health.RebootRequired,
@@ -344,7 +361,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			raw = []byte("{}")
 		}
 		if !json.Valid(raw) {
-			return fmt.Errorf("inventory nie jest poprawnym JSON")
+			return fmt.Errorf("the inventory is not valid JSON")
 		}
 		os := report.GetOs()
 		identity := report.GetIdentity()
@@ -370,7 +387,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			return err
 		}
 		if stored {
-			s.log.Info("nowa rewizja inventory",
+			s.log.Info("a new inventory revision",
 				"host_id", hostID, "revision", report.GetRevision(), "full", report.GetFull())
 		}
 		return nil
@@ -379,37 +396,39 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		return s.recordTaskResult(ctx, hostID, payload.TaskResult)
 
 	case *agentv1.AgentMessage_TaskLogLines:
-		// Podglad dziennika idzie prosto na ekran operatora i nie jest
-		// zapisywany. Blad rozgloszenia nie moze zerwac sesji agenta.
+		// The live view of a log goes straight to the screen of the operator
+		// and is not recorded. An error of the broadcast must not tear down the
+		// session of the agent.
 		if s.events != nil {
-			linie := payload.TaskLogLines
-			jobID, campaignID := s.kontekstProby(ctx, linie.GetTaskId())
+			lines := payload.TaskLogLines
+			jobID, campaignID := s.attemptContext(ctx, lines.GetTaskId())
 			if jobID == "" {
 				return nil
 			}
 			if err := s.events.PublishLog(ctx, events.Event{
 				JobID: jobID, CampaignID: campaignID,
 				Log: &events.LogLines{
-					Lines: linie.GetLines(), Dropped: linie.GetDropped(),
+					Lines: lines.GetLines(), Dropped: lines.GetDropped(),
 				},
 			}); err != nil {
-				s.log.Debug("nie rozgloszono podgladu dziennika",
-					"host_id", hostID, "task_id", linie.GetTaskId(), "err", err)
+				s.log.Debug("the live view of the log was not broadcast",
+					"host_id", hostID, "task_id", lines.GetTaskId(), "err", err)
 			}
 		}
 		return nil
 
 	case *agentv1.AgentMessage_TaskProgress:
-		// Postep idzie prosto na ekran operatora i nie jest zapisywany:
-		// jest ulotny z zalozenia, a trwaly jest wynik. Blad rozgloszenia
-		// nie moze zerwac sesji agenta - stracony podglad jest mniejsza
-		// szkoda niz przerwana operacja.
+		// The progress goes straight to the screen of the operator and is not
+		// recorded: it is transient by design, and what lasts is the result. An
+		// error of the broadcast must not tear down the session of the agent -
+		// a lost view is a smaller harm than an interrupted operation.
 		if s.events != nil {
 			progress := payload.TaskProgress
-			// Agent zna identyfikator proby, a operator patrzy na operacje.
-			// Tlumaczenie jest zapamietywane, bo postep melduje sie kilka
-			// razy na sekunde, a przypisanie proby do operacji sie nie zmienia.
-			jobID, campaignID := s.kontekstProby(ctx, progress.GetTaskId())
+			// The agent knows the identifier of the attempt, and the operator
+			// looks at the operation. The translation is remembered, because
+			// progress reports several times a second while the assignment of
+			// an attempt to an operation does not change.
+			jobID, campaignID := s.attemptContext(ctx, progress.GetTaskId())
 			if jobID == "" {
 				return nil
 			}
@@ -421,285 +440,297 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 					Percent: progress.Percent, Message: progress.GetMessage(),
 				},
 			}); err != nil {
-				s.log.Debug("nie rozgloszono postepu",
+				s.log.Debug("the progress was not broadcast",
 					"host_id", hostID, "task_id", progress.GetTaskId(), "err", err)
 			}
 		}
 		return nil
 
 	case *agentv1.AgentMessage_Hello:
-		// Powtorzone Hello w trakcie sesji jest ignorowane, ale odnotowane.
-		s.log.Warn("powtorzone Hello w aktywnej sesji", "host_id", hostID)
+		// A repeated Hello during a session is ignored but noted.
+		s.log.Warn("a repeated Hello in an active session", "host_id", hostID)
 		return nil
 
 	default:
-		return fmt.Errorf("nieznany typ wiadomosci agenta")
+		return fmt.Errorf("an unknown type of an agent message")
 	}
 }
 
-// kontekstProby tlumaczy identyfikator proby na operacje i jej kampanie.
-// Nieznana proba zwraca pustke: postep bez operacji nie ma komu trafic.
-func (s *AgentService) kontekstProby(ctx context.Context, attemptID string) (string, string) {
+// attemptContext translates the identifier of an attempt into the operation
+// and its campaign. An unknown attempt returns nothing: progress without an
+// operation has nobody to reach.
+func (s *AgentService) attemptContext(ctx context.Context, attemptID string) (string, string) {
 	if attemptID == "" {
 		return "", ""
 	}
-	s.probyMu.RLock()
-	kontekst, znane := s.proby[attemptID]
-	s.probyMu.RUnlock()
-	if znane {
-		return kontekst.jobID, kontekst.campaignID
+	s.attemptsMu.RLock()
+	entry, known := s.attempts[attemptID]
+	s.attemptsMu.RUnlock()
+	if known {
+		return entry.jobID, entry.campaignID
 	}
 
 	jobID, campaignID, err := s.jobs.AttemptContext(ctx, attemptID)
 	if err != nil {
 		return "", ""
 	}
-	s.probyMu.Lock()
-	// Mapa jest czyszczona przy wyniku proby, ale operacja moze skonczyc sie
-	// bez wyniku - zerwana sesja, wygasly lease. Twardy limit trzyma pamiec
-	// w ryzach niezaleznie od tego, co poszlo nie tak.
-	if len(s.proby) >= maksymalnieZapamietanychProb {
-		s.proby = map[string]kontekstZadania{}
+	s.attemptsMu.Lock()
+	// The map is cleared at the result of an attempt, but an operation can end
+	// without a result - a broken session, an expired lease. A hard limit
+	// keeps the memory in check regardless of what went wrong.
+	if len(s.attempts) >= maxRememberedAttempts {
+		s.attempts = map[string]attemptContextEntry{}
 	}
-	s.proby[attemptID] = kontekstZadania{jobID: jobID, campaignID: campaignID}
-	s.probyMu.Unlock()
+	s.attempts[attemptID] = attemptContextEntry{jobID: jobID, campaignID: campaignID}
+	s.attemptsMu.Unlock()
 	return jobID, campaignID
 }
 
-// kontekstZadania wiaze probe z operacja i kampania, w ktorej powstala.
-type kontekstZadania struct {
+// attemptContextEntry binds an attempt to the operation and the campaign it
+// was created in.
+type attemptContextEntry struct {
 	jobID      string
 	campaignID string
 }
 
-// maksymalnieZapamietanychProb ogranicza pamiec tlumaczen proba -> operacja.
-const maksymalnieZapamietanychProb = 4096
+// maxRememberedAttempts limits the memory of the attempt -> operation
+// translations.
+const maxRememberedAttempts = 4096
 
-// recordTaskResult zapisuje wynik zgloszony przez agenta i przenosi zadanie
-// do stanu koncowego. Wynik zawsze trafia do proby; o tym, czy zmienia stan
-// zadania, decyduje maszyna stanow.
+// recordTaskResult writes the result reported by the agent and moves the job
+// into a final state. The result always reaches the attempt; whether it
+// changes the state of the job is decided by the state machine.
 func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	result *agentv1.TaskResult) error {
 	attemptID := result.GetTaskId()
-	jobID, akcja, err := s.jobs.AttemptOwner(ctx, attemptID)
+	jobID, action, err := s.jobs.AttemptOwner(ctx, attemptID)
 	if err != nil {
-		return fmt.Errorf("wynik dla nieznanej proby %s: %w", attemptID, err)
+		return fmt.Errorf("a result for the unknown attempt %s: %w", attemptID, err)
 	}
 
-	s.probyMu.Lock()
-	delete(s.proby, attemptID)
-	s.probyMu.Unlock()
+	s.attemptsMu.Lock()
+	delete(s.attempts, attemptID)
+	s.attemptsMu.Unlock()
 
-	// Stan docelowy pliku zapisujemy po udanej operacji, a nie przy jej
-	// zlecaniu: panel nie moze twierdzic, ze zarzadza plikiem, ktorego host
-	// odrzucil.
-	// Zadanie, ktore sie skonczylo, nie ma po co trzymac otwartego prawa do
-	// sekretu. Dzierzawa i tak wygasnie sama, ale okno ma byc tak krotkie,
-	// jak sie da - a nie tak dlugie, jak pozwala zegar.
+	// The desired state of a file is written after a successful operation
+	// rather than at the ordering: the panel must not claim it manages a file
+	// the host rejected.
+	// A job that has finished has no reason to keep an open right to a secret.
+	// The lease will expire on its own anyway, but the window is to be as
+	// short as it can be - not as long as the clock allows.
 	if s.leases != nil {
 		if err := s.leases.Revoke(ctx, jobID); err != nil {
-			s.log.Debug("nie zamknieto dzierzaw sekretow", "job_id", jobID, "err", err)
+			s.log.Debug("the leases of the secrets were not closed", "job_id", jobID, "err", err)
 		}
 	}
 
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
-		s.zapiszStanPliku(ctx, hostID, jobID)
-		s.zapiszWdrozenieCertyfikatu(ctx, hostID, jobID, result.GetCertificateResult())
-		// Odczytana tresc trafia do magazynu wersji: bez tego nie da sie
-		// wrocic do stanu sprzed pierwszej zmiany z panelu, bo tej tresci
-		// panel nigdy nie zapisywal.
-		if plik := result.GetFileResult(); plik != nil && len(plik.GetContent()) > 0 &&
-			!plik.GetTruncated() {
-			if _, err := s.files.ZapiszWersje(ctx, s.pool, plik.GetContent()); err != nil {
-				s.log.Error("nie zapisano odczytanej wersji pliku", "host_id", hostID, "err", err)
+		s.saveFileState(ctx, hostID, jobID)
+		s.saveCertificateDeployment(ctx, hostID, jobID, result.GetCertificateResult())
+		// The content that was read goes into the store of versions: without
+		// that there is no getting back to the state from before the first
+		// change from the panel, because the panel never recorded that
+		// content.
+		if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 &&
+			!file.GetTruncated() {
+			if _, err := s.files.SaveVersion(ctx, s.pool, file.GetContent()); err != nil {
+				s.log.Error("the version of the file that was read was not written", "host_id", hostID, "err", err)
 			}
 		}
 	}
 
-	// Stan plikow zarzadzanych trafia do inwentarza: to on pokazuje drift,
-	// czyli plik zmieniony poza panelem.
-	if plik := result.GetFileResult(); plik != nil && len(plik.GetSnapshot()) > 0 {
+	// The state of the managed files goes into the inventory: it is what shows
+	// the drift, that is a file changed outside the panel.
+	if file := result.GetFileResult(); file != nil && len(file.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "files",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(plik.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(file.GetSnapshot())),
 			Source:     "agent/managed-files",
-			Payload:    plik.GetSnapshot(),
+			Payload:    file.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano stanu plikow", "host_id", hostID, "err", err)
+			s.log.Error("the state of the files was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Pelna lista pakietow trafia do wlasnej tabeli: to z niej liczy sie
-	// ocena podatnosci, wiec potrzebne sa wiersze do zlaczen, a nie blob
-	// w inwentarzu.
-	if lista := result.GetInstalledPackagesResult(); lista != nil &&
+	// The full package list goes into a table of its own: the vulnerability
+	// assessment is computed from it, so rows for joins are needed rather than
+	// a blob in the inventory.
+	if list := result.GetInstalledPackagesResult(); list != nil &&
 		result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
-		s.zapiszListePakietow(ctx, hostID, jobID, lista)
+		s.savePackageList(ctx, hostID, jobID, list)
 	}
 
-	// Przebieg kopii zapisujemy takze wtedy, gdy sie nie udal: "backup nie
-	// zadzialal" jest wazniejsza wiadomoscia niz "backup zadzialal", a bez
-	// wpisu w historii nie byloby jej gdzie zobaczyc.
-	if kopia := result.GetBackupResult(); kopia != nil {
-		s.zapiszPrzebiegKopii(ctx, hostID, jobID, kopia,
+	// A backup run is recorded also when it failed: "the backup did not work"
+	// is a more important message than "the backup worked", and without an
+	// entry in the history there would be nowhere to see it.
+	if backup := result.GetBackupResult(); backup != nil {
+		s.saveBackupRun(ctx, hostID, jobID, backup,
 			result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED)
 	}
 
-	// Zrodla pakietow trafiaja do inwentarza po kazdej zmianie. Fragment
-	// pakietow niesie takze liczniki, wiec podmieniamy w nim same zrodla -
-	// nadpisanie calosci skasowaloby to, czego ta operacja nie dotyczyla.
-	if zrodla := result.GetRepositoryResult(); zrodla != nil && len(zrodla.GetSnapshot()) > 0 {
-		if err := s.scalRepozytoria(ctx, hostID, zrodla.GetSnapshot()); err != nil {
-			s.log.Error("nie zapisano zrodel pakietow", "host_id", hostID, "err", err)
+	// The package sources go into the inventory after every change. The
+	// package fragment also carries the counters, so only the sources in it
+	// are replaced - overwriting the whole thing would erase what this
+	// operation did not concern.
+	if sources := result.GetRepositoryResult(); sources != nil && len(sources.GetSnapshot()) > 0 {
+		if err := s.mergeRepositories(ctx, hostID, sources.GetSnapshot()); err != nil {
+			s.log.Error("the package sources were not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Obraz certyfikatow trafia do inwentarza po skanie i po wdrozeniu:
-	// zakladka ma pokazywac plik, ktory naprawde lezy na hoscie, a nie ten,
-	// ktory panel wyslal.
-	if certyfikat := result.GetCertificateResult(); certyfikat != nil &&
-		len(certyfikat.GetSnapshot()) > 0 {
+	// The image of the certificates goes into the inventory after a scan and
+	// after a deployment: the tab is to show the file that really lies on the
+	// host rather than the one the panel sent.
+	if certificate := result.GetCertificateResult(); certificate != nil &&
+		len(certificate.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "certificates",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(certyfikat.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(certificate.GetSnapshot())),
 			Source:     "agent/certificates+certmonger",
-			Payload:    certyfikat.GetSnapshot(),
+			Payload:    certificate.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano obrazu certyfikatow", "host_id", hostID, "err", err)
+			s.log.Error("the image of the certificates was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Ustawienia jadra trafiaja do inwentarza po kazdej zmianie.
-	if jadro := result.GetKernelResult(); jadro != nil && len(jadro.GetSnapshot()) > 0 {
+	// The settings of the kernel go into the inventory after every change.
+	if kernel := result.GetKernelResult(); kernel != nil && len(kernel.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "kernel",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(jadro.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(kernel.GetSnapshot())),
 			Source:     "agent/procfs+sysctl",
-			Payload:    jadro.GetSnapshot(),
+			Payload:    kernel.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano ustawien jadra", "host_id", hostID, "err", err)
+			s.log.Error("the settings of the kernel were not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Stan ochronny trafia do inwentarza po kazdej operacji: skan istnieje
-	// wlasnie po to, zeby odswiezyc go na zadanie, a przelaczenie MAC ma byc
-	// widoczne w ustaleniach od razu, a nie po nastepnym cyklu.
-	if ochrona := result.GetSecurityResult(); ochrona != nil && len(ochrona.GetSnapshot()) > 0 {
+	// The protective state goes into the inventory after every operation: a
+	// scan exists exactly to refresh it on demand, and a switch of MAC is to
+	// be visible in the findings at once rather than after the next cycle.
+	if protection := result.GetSecurityResult(); protection != nil && len(protection.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "security",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(ochrona.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(protection.GetSnapshot())),
 			Source:     "agent/selinux+audit+ss",
-			Payload:    ochrona.GetSnapshot(),
+			Payload:    protection.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano stanu ochronnego", "host_id", hostID, "err", err)
+			s.log.Error("the protective state was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Stan startu trafia do inwentarza: to ostatni obraz hosta, ktory panel
-	// dostanie, zanim maszyna zejdzie.
-	if zasilanie := result.GetPowerResult(); zasilanie != nil && len(zasilanie.GetSnapshot()) > 0 {
+	// The boot state goes into the inventory: it is the last image of the host
+	// the panel gets before the machine goes down.
+	if power := result.GetPowerResult(); power != nil && len(power.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "power",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(zasilanie.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(power.GetSnapshot())),
 			Source:     "agent/procfs+logind",
-			Payload:    zasilanie.GetSnapshot(),
+			Payload:    power.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano stanu zasilania", "host_id", hostID, "err", err)
+			s.log.Error("the power state was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Stan czasu trafia do inwentarza po kazdej operacji. Zegar zmienia sie
-	// sam miedzy cyklami, wiec swiezy odczyt zaraz po zmianie jest tu
-	// jedynym, ktory mowi cos o skutku tej zmiany.
-	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetSnapshot()) > 0 {
+	// The state of time goes into the inventory after every operation. The
+	// clock changes on its own between cycles, so a fresh read right after a
+	// change is the only one that says anything about the effect of that
+	// change.
+	if clock := result.GetTimeResult(); clock != nil && len(clock.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "time",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(zegar.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(clock.GetSnapshot())),
 			Source:     "agent/timedatectl+chronyc",
-			Payload:    zegar.GetSnapshot(),
+			Payload:    clock.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano stanu czasu", "host_id", hostID, "err", err)
+			s.log.Error("the state of time was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Konfiguracja sshd trafia do inwentarza po kazdej zmianie: zakladka ma
-	// pokazac stan po operacji, a nie ten sprzed cyklu.
-	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetSnapshot()) > 0 {
+	// The configuration of sshd goes into the inventory after every change: the
+	// tab is to show the state after the operation rather than the one from
+	// before the cycle.
+	if server := result.GetSshResult(); server != nil && len(server.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "ssh",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(serwer.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(server.GetSnapshot())),
 			Source:     "agent/sshd",
-			Payload:    serwer.GetSnapshot(),
+			Payload:    server.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano konfiguracji sshd", "host_id", hostID, "err", err)
+			s.log.Error("the configuration of sshd was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Obraz przestrzeni dyskowej trafia do inwentarza: kazda operacja odsyla
-	// stan po sobie, wiec zakladka nie czeka na nastepny cykl.
-	if przestrzen := result.GetStorageResult(); przestrzen != nil && len(przestrzen.GetSnapshot()) > 0 {
+	// The image of the disk space goes into the inventory: every operation
+	// sends the state back after itself, so the tab does not wait for the next
+	// cycle.
+	if storage := result.GetStorageResult(); storage != nil && len(storage.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "storage",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(przestrzen.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(storage.GetSnapshot())),
 			Source:     "agent/lsblk+mountinfo",
-			Payload:    przestrzen.GetSnapshot(),
+			Payload:    storage.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano obrazu przestrzeni", "host_id", hostID, "err", err)
+			s.log.Error("the image of the storage was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Stan zapory trafia do inwentarza: zakladka pyta o zestaw regul, a kazda
-	// zmiana i tak odsyla pelny obraz po sobie.
-	if zapora := result.GetFirewallResult(); zapora != nil && len(zapora.GetSnapshot()) > 0 {
+	// The state of the firewall goes into the inventory: the tab asks about the
+	// set of rules, and every change sends the full image back after itself
+	// anyway.
+	if firewall := result.GetFirewallResult(); firewall != nil && len(firewall.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "firewall",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(zapora.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(firewall.GetSnapshot())),
 			Source:     "agent/nftables",
-			Payload:    zapora.GetSnapshot(),
+			Payload:    firewall.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano stanu zapory", "host_id", hostID, "err", err)
+			s.log.Error("the state of the firewall was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Harmonogramy trafiaja do modulu inwentarza: zakladka pyta o stan hosta,
-	// a kazda operacja i tak odsyla pelny obraz po zmianie.
-	if plan := result.GetScheduleResult(); plan != nil && len(plan.GetSnapshot()) > 0 {
+	// The schedules go into the inventory module: the tab asks about the state
+	// of the host, and every operation sends the full image back after a change
+	// anyway.
+	if schedule := result.GetScheduleResult(); schedule != nil && len(schedule.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "schedules",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(plan.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(schedule.GetSnapshot())),
 			Source:     "agent/cron+systemd",
-			Payload:    plan.GetSnapshot(),
+			Payload:    schedule.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano harmonogramow", "host_id", hostID, "err", err)
+			s.log.Error("the schedules were not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Snapshot procesow trafia do modulu inwentarza, jak stan kontenerow
-	// i wykaz jednostek: zakladka pyta o stan hosta, a nie o historie zadan.
-	if lista := result.GetProcessListResult(); lista != nil && len(lista.GetSnapshot()) > 0 {
+	// The snapshot of the processes goes into an inventory module, like the
+	// state of the containers and the list of the units: the tab asks about the
+	// state of the host rather than about the history of the jobs.
+	if list := result.GetProcessListResult(); list != nil && len(list.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "processes",
-			Revision:   fmt.Sprintf("%x", sha256.Sum256(lista.GetSnapshot())),
+			Revision:   fmt.Sprintf("%x", sha256.Sum256(list.GetSnapshot())),
 			Source:     "agent/procfs",
-			Payload:    lista.GetSnapshot(),
+			Payload:    list.GetSnapshot(),
 			ObservedAt: time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano snapshotu procesow", "host_id", hostID, "err", err)
+			s.log.Error("the snapshot of the processes was not written", "host_id", hostID, "err", err)
 		}
 	}
 
-	// Pelny wykaz jednostek trafia do modulu inwentarza z tego samego powodu
-	// co stan kontenerow: zakladka pyta o stan hosta, a nie o historie zadan.
+	// The full list of the units goes into an inventory module for the same
+	// reason as the state of the containers: the tab asks about the state of
+	// the host rather than about the history of the jobs.
 	if status := result.GetUnitStatus(); status != nil && len(status.GetUnits()) > 0 {
 		if encoded, err := json.Marshal(map[string]any{
 			"units":     unitStatesJSON(status.GetUnits()),
@@ -712,14 +743,15 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 				Payload:    encoded,
 				ObservedAt: time.Now().UTC(),
 			}); err != nil {
-				s.log.Error("nie zapisano wykazu jednostek", "host_id", hostID, "err", err)
+				s.log.Error("the list of the units was not written", "host_id", hostID, "err", err)
 			}
 		}
 	}
 
-	// Pelny stan kontenerow jest zapisywany jako modul inwentarza, a nie tylko
-	// jako wynik operacji. Wynik jest zapisem tego, co sie stalo; zakladka
-	// pyta o stan hosta i ma go dostac bez przegladania historii zadan.
+	// The full state of the containers is written as an inventory module rather
+	// than only as the result of an operation. A result is a record of what
+	// happened; the tab asks about the state of the host and is to get it
+	// without browsing the history of the jobs.
 	if docker := result.GetDockerResult(); docker != nil && len(docker.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:            "containers.full",
@@ -729,22 +761,23 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 			UnavailableReason: docker.GetUnavailableReason(),
 			ObservedAt:        time.Now().UTC(),
 		}); err != nil {
-			s.log.Error("nie zapisano stanu kontenerow", "host_id", hostID, "err", err)
+			s.log.Error("the state of the containers was not written", "host_id", hostID, "err", err)
 		}
 	}
 
 	state, statusName := jobStateFor(result.GetStatus())
 
-	// Odswiezenie inwentarza rozliczamy pojawieniem sie rewizji, a nie
-	// zgloszeniem agenta. Agent wysyla obraz tym samym strumieniem tuz przed
-	// wynikiem, wiec zanim tu dojdziemy, rewizja jest juz zapisana. Gdy jej
-	// nie ma, obraz nie dojechal - a zadanie, ktore mowi "odswiezono" nad
-	// stanem sprzed kwadransa, jest gorsze niz zadanie nieudane.
-	kodBledu, opisBledu := result.GetErrorCode(), result.GetMessage()
-	if state == jobs.StateSucceeded && akcja == string(opspec.ActionInventoryRefresh) {
-		if kod, opis := s.sprawdzOdswiezenie(ctx, hostID, result); kod != "" {
+	// A refresh of the inventory is settled by the appearance of a revision
+	// rather than by the report of the agent. The agent sends the image over
+	// the same stream right before the result, so by the time we get here the
+	// revision is already recorded. When it is not there, the image did not
+	// arrive - and a job that says "refreshed" over a state from a quarter of
+	// an hour ago is worse than a failed job.
+	errorCode, errorMessage := result.GetErrorCode(), result.GetMessage()
+	if state == jobs.StateSucceeded && action == string(opspec.ActionInventoryRefresh) {
+		if code, message := s.checkRefresh(ctx, hostID, result); code != "" {
 			state, statusName = jobs.StateFailed, "failed"
-			kodBledu, opisBledu = kod, opis
+			errorCode, errorMessage = code, message
 		}
 	}
 
@@ -754,8 +787,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		Stdout:          result.GetStdout(),
 		Stderr:          result.GetStderr(),
 		OutputTruncated: result.GetOutputTruncated(),
-		ErrorCode:       kodBledu,
-		Message:         opisBledu,
+		ErrorCode:       errorCode,
+		Message:         errorMessage,
 		Replayed:        result.GetReplayed(),
 		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
 		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
@@ -765,10 +798,11 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		return err
 	}
 
-	// Operacja na koncie zmienia stan hosta natychmiast, a pelny raport
-	// inventory przyjdzie dopiero za kilkanascie minut. Agent odczytuje konto
-	// po zmianie, wiec zapisujemy stan faktyczny hosta zamiast czekac;
-	// bez tego panel pokazywalby stan sprzed operacji.
+	// An operation on an account changes the state of the host at once, while
+	// the full inventory report comes only in a dozen or so minutes. The agent
+	// reads the account after the change, so we record the actual state of the
+	// host instead of waiting; without that the panel would show the state from
+	// before the operation.
 	if user, ok := result.GetDetail().(*agentv1.TaskResult_LocalUser); ok &&
 		state == jobs.StateSucceeded && user.LocalUser.GetAccount() != nil {
 		accounts := localAccountsFromReport(&agentv1.InventoryReport{
@@ -776,24 +810,24 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 			LocalAccounts: []*agentv1.LocalAccount{user.LocalUser.GetAccount()},
 		})
 		if err := s.inventory.UpsertLocalAccount(ctx, hostID, accounts[0]); err != nil {
-			s.log.Error("nie zapisano stanu konta po operacji",
-				"host_id", hostID, "konto", user.LocalUser.GetName(), "err", err)
+			s.log.Error("the state of the account was not written after the operation",
+				"host_id", hostID, "account", user.LocalUser.GetName(), "err", err)
 		}
 	}
 
-	// Stan bazy pakietow aktualizuje kazdy wynik, ktory go zna: transakcja,
-	// plan i naprawa.
+	// The state of the package database is updated by every result that knows
+	// it: a transaction, a plan and a repair.
 	//
-	// Wczesniej robila to wylacznie transakcja, a poniewaz uszkodzona baza
-	// blokuje transakcje, host nie mial jak wrocic do stanu sprawnego z poziomu
-	// panelu - nawet po udanej naprawie. Plan jest tu rownie wiarygodny:
-	// czyta stan pakietow i niczego nie zmienia.
-	if uszkodzona, znane := stanBazyPakietow(result); znane {
-		if err := s.hosts.SetPackageDatabaseBroken(ctx, hostID, uszkodzona); err != nil {
-			s.log.Error("nie zapisano stanu bazy pakietow", "host_id", hostID, "err", err)
+	// Earlier only a transaction did it, and because a damaged database blocks
+	// transactions, the host had no way back to a working state from the panel
+	// - not even after a successful repair. A plan is just as credible here: it
+	// reads the state of the packages and changes nothing.
+	if broken, known := packageDatabaseState(result); known {
+		if err := s.hosts.SetPackageDatabaseBroken(ctx, hostID, broken); err != nil {
+			s.log.Error("the state of the package database was not written", "host_id", hostID, "err", err)
 		}
-		if uszkodzona {
-			s.log.Error("baza pakietow hosta wymaga naprawy; operacje pakietowe wstrzymane",
+		if broken {
+			s.log.Error("the package database of the host needs repairing; the package operations are held back",
 				"host_id", hostID)
 		}
 	}
@@ -813,19 +847,20 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	})
 
 	if !accepted {
-		// Pozny wynik jest zachowany diagnostycznie w probie, ale nie cofa
-		// decyzji podjetej w miedzyczasie.
-		s.log.Warn("wynik nie zmienil stanu zadania",
+		// A late result is kept in the attempt for diagnostics but does not take
+		// back a decision made in the meantime.
+		s.log.Warn("the result did not change the state of the job",
 			"job_id", jobID, "attempt_id", attemptID, "status", statusName)
 		return nil
 	}
-	s.log.Info("wynik zadania zapisany",
+	s.log.Info("the result of the job was written",
 		"job_id", jobID, "host_id", hostID, "status", statusName,
 		"exit_code", result.GetExitCode(), "replayed", result.GetReplayed())
 	return nil
 }
 
-// jobStateFor tlumaczy status zgloszony przez agenta na stan zadania.
+// jobStateFor translates the status reported by the agent into the state of a
+// job.
 func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 	switch status {
 	case agentv1.TaskResult_STATUS_SUCCEEDED:
@@ -837,23 +872,26 @@ func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 	case agentv1.TaskResult_STATUS_CANCELED:
 		return jobs.StateCanceled, "canceled"
 	case agentv1.TaskResult_STATUS_REJECTED:
-		// Odrzucenie lokalne jest niepowodzeniem zadania, ale zachowuje wlasny
-		// kod bledu, zeby operator widzial, ze nic nie zostalo zmienione.
+		// A local rejection is a failure of the job but keeps an error code of
+		// its own, so that the operator sees that nothing was changed.
 		return jobs.StateFailed, "rejected"
 	default:
 		return jobs.StateFailed, "failed"
 	}
 }
 
-// resultDetailJSON zapisuje wynik wlasciwy dla typu operacji. Plan aktualizacji
-// i raport transakcji maja rozny ksztalt, wiec trafiaja do JSONB.
+// resultDetailJSON writes the result proper for the type of the operation. An
+// upgrade plan and a transaction report have different shapes, so they go into
+// JSONB.
 func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
-	// Dziennik zdarzen jest odpowiedzia na pytanie z jednej chwili, a nie
-	// stanem hosta: zostaje w wyniku zadania i nie trafia do inwentarza.
+	// The event log is the answer to a question from one moment rather than the
+	// state of the host: it stays in the result of the job and does not reach
+	// the inventory.
 	if zdarzenia := result.GetDockerEventsResult(); zdarzenia != nil &&
 		(len(zdarzenia.GetEvents()) > 0 || zdarzenia.GetUnavailableReason() != "") {
-		// Silnik niedostepny nie niesie zadnego dziennika, a wynik i tak ma
-		// powstac: to on mowi operatorowi, dlaczego niczego nie widzi.
+		// An unavailable engine carries no log at all, and the result is to
+		// come into being anyway: it is what tells the operator why they see
+		// nothing.
 		odczyt := json.RawMessage(zdarzenia.GetEvents())
 		if len(odczyt) == 0 {
 			odczyt = json.RawMessage("{}")
@@ -870,25 +908,28 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Odswiezenie inwentarza niesie dowod: rewizje obrazu, ktory z niego
-	// powstal. Bez niej wynik mowilby tylko, ze zadanie sie nie wywrocilo.
-	if odswiezenie := result.GetInventoryRefreshResult(); odswiezenie != nil &&
-		odswiezenie.GetRevision() != "" {
+	// A refresh of the inventory carries proof: the revision of the image that
+	// came out of it. Without it the result would only say that the job did not
+	// topple.
+	if refresh := result.GetInventoryRefreshResult(); refresh != nil &&
+		refresh.GetRevision() != "" {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":     "inventory_refresh",
-			"revision": odswiezenie.GetRevision(),
-			"changed":  odswiezenie.GetChanged(),
-			"modules":  odswiezenie.GetModules(),
+			"revision": refresh.GetRevision(),
+			"changed":  refresh.GetChanged(),
+			"modules":  refresh.GetModules(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Wynik operacji kontenerowej jest osobnym polem, a nie wariantem sumy:
-	// niesie stan przed i po, ktory dotyczy takze operacji zakonczonej bledem.
-	// Wynik projektu Compose jest osobnym polem: niesie plan albo stan
-	// wdrozenia, ktory dotyczy takze operacji zakonczonej bledem.
+	// The result of a container operation is a field of its own rather than a
+	// variant of a sum: it carries the state before and after, which concerns a
+	// failed operation as well.
+	// The result of a Compose project is a field of its own: it carries the plan
+	// or the state of the deployment, which concerns a failed operation as
+	// well.
 	if compose := result.GetComposeResult(); compose != nil && len(compose.GetPayload()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":               "compose",
@@ -900,10 +941,12 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Wynik testu rozwiazywania nazw nalezy do zadania, a nie do inwentarza:
-	// to odpowiedz na jedno pytanie zadane w jednej chwili, a nie stan hosta.
-	// Plan resolvera jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
-	// ktora sie jeszcze nie wydarzyla, wobec profilu, ktory host ma teraz.
+	// The result of a name resolution test belongs to the job rather than to
+	// the inventory: it is the answer to one question asked at one moment
+	// rather than the state of the host.
+	// The plan of the resolver is a result of the job rather than the state of
+	// the host: it describes a change that has not happened yet, against the
+	// profile the host has now.
 	if resolver := result.GetDnsResult(); resolver != nil && len(resolver.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -913,7 +956,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":      "dns_plan",
 			"plan":      json.RawMessage(resolver.GetPlan()),
 			"plan_hash": plan.PlanHash,
-			"profiles":  surowyJSON(resolver.GetProfiles()),
+			"profiles":  rawJSON(resolver.GetProfiles()),
 		})
 		if err == nil {
 			return encoded
@@ -924,8 +967,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		(len(resolver.GetQueries()) > 0 || resolver.GetRollbackId() != "") {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":              "dns",
-			"queries":           surowyJSON(resolver.GetQueries()),
-			"profiles":          surowyJSON(resolver.GetProfiles()),
+			"queries":           rawJSON(resolver.GetQueries()),
+			"profiles":          rawJSON(resolver.GetProfiles()),
 			"rollback_id":       resolver.GetRollbackId(),
 			"rollback_deadline": resolver.GetRollbackDeadline(),
 			"confirmed":         resolver.GetConfirmed(),
@@ -935,8 +978,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Plan sieci jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
-	// ktora sie jeszcze nie wydarzyla, wobec profilu, ktory host ma teraz.
+	// A network plan is a result of the job rather than the state of the host:
+	// it describes a change that has not happened yet, against the profile the
+	// host has now.
 	if siec := result.GetNetworkResult(); siec != nil && len(siec.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -946,7 +990,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"kind":      "network_plan",
 			"plan":      json.RawMessage(siec.GetPlan()),
 			"plan_hash": plan.PlanHash,
-			"profiles":  surowyJSON(siec.GetProfiles()),
+			"profiles":  rawJSON(siec.GetProfiles()),
 		})
 		if err == nil {
 			return encoded
@@ -954,13 +998,14 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// Zmiana sieci niesie identyfikator wycofania i to, czy zdazylo je
-	// rozbroic potwierdzenie lacznosci. Bez tego operator nie wie, czy host
+	// disarm the confirmation of connectivity. Without that the operator does
+	// not know whether the host
 	// za chwile wroci do poprzedniej konfiguracji.
 	if siec := result.GetNetworkResult(); siec != nil &&
 		(len(siec.GetProfiles()) > 0 || siec.GetRollbackId() != "") {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":              "network",
-			"profiles":          surowyJSON(siec.GetProfiles()),
+			"profiles":          rawJSON(siec.GetProfiles()),
 			"rollback_id":       siec.GetRollbackId(),
 			"rollback_deadline": siec.GetRollbackDeadline(),
 			"confirmed":         siec.GetConfirmed(),
@@ -970,16 +1015,17 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Plan reguly jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
-	// ktora sie jeszcze nie wydarzyla, wobec zestawu regul, jaki host ma teraz.
-	if zapora := result.GetFirewallResult(); zapora != nil && len(zapora.GetPlan()) > 0 {
+	// A rule plan is a result of the job rather than the state of the host: it
+	// describes a change that has not happened yet, against the set of rules
+	// the host has now.
+	if firewall := result.GetFirewallResult(); firewall != nil && len(firewall.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(zapora.GetPlan(), &plan)
+		_ = json.Unmarshal(firewall.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "firewall_plan",
-			"plan":      json.RawMessage(zapora.GetPlan()),
+			"plan":      json.RawMessage(firewall.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -987,36 +1033,37 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Zmiana zapory niesie identyfikator wycofania i odcisk zestawu regul.
-	if zapora := result.GetFirewallResult(); zapora != nil && zapora.GetRollbackId() != "" {
+	// Zmiana zapory niesie identyfikator wycofania i digest zestawu regul.
+	if firewall := result.GetFirewallResult(); firewall != nil && firewall.GetRollbackId() != "" {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":              "firewall",
-			"rollback_id":       zapora.GetRollbackId(),
-			"rollback_deadline": zapora.GetRollbackDeadline(),
-			"confirmed":         zapora.GetConfirmed(),
+			"rollback_id":       firewall.GetRollbackId(),
+			"rollback_deadline": firewall.GetRollbackDeadline(),
+			"confirmed":         firewall.GetConfirmed(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Plan montowania jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
-	// ktora sie jeszcze nie wydarzyla, i zrodlo rozwiazane do UUID tego hosta.
-	if przestrzen := result.GetStorageResult(); przestrzen != nil && len(przestrzen.GetPlan()) > 0 {
+	// A mount plan is a result of the job rather than the state of the host: it
+	// describes a change that has not happened yet, and a source resolved to
+	// the UUID of this host.
+	if storage := result.GetStorageResult(); storage != nil && len(storage.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash  string `json:"plan_hash"`
 			Operation string `json:"operation"`
 		}
-		_ = json.Unmarshal(przestrzen.GetPlan(), &plan)
-		// Plan montowania i plan urzadzenia (fsck, rozszerzenie) sa dwoma
-		// ksztaltami; rodzaj wyniku ma to nazwac.
-		rodzaj := "mount_plan"
+		_ = json.Unmarshal(storage.GetPlan(), &plan)
+		// A mount plan and a device plan (fsck, extension) are two shapes; the
+		// kind of the result is to name that.
+		kind := "mount_plan"
 		if plan.Operation != "" {
-			rodzaj = "device_plan"
+			kind = "device_plan"
 		}
 		encoded, err := json.Marshal(map[string]any{
-			"kind":      rodzaj,
-			"plan":      json.RawMessage(przestrzen.GetPlan()),
+			"kind":      kind,
+			"plan":      json.RawMessage(storage.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -1025,31 +1072,33 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// Wynik sprawdzenia filesystemu nalezy do zadania: to odpowiedz na jedno
-	// pytanie zadane w jednej chwili.
-	if przestrzen := result.GetStorageResult(); przestrzen != nil && przestrzen.GetOutput() != "" {
+	// question zadane w jednej chwili.
+	if storage := result.GetStorageResult(); storage != nil && storage.GetOutput() != "" {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "storage",
-			"message": przestrzen.GetMessage(),
-			"output":  przestrzen.GetOutput(),
+			"message": storage.GetMessage(),
+			"output":  storage.GetOutput(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Ustawienia, ktore nie doszly do skutku, sa trescia wyniku: zmiana
+	// The settings that did not come into effect are the content of the result:
+	// a change
 	// zapisana i przeslonieta wyglada z zewnatrz tak samo jak udana.
-	// Plan sshd jest wynikiem zadania, nie stanem hosta: opisuje zmiane,
-	// ktora sie jeszcze nie wydarzyla, wobec konfiguracji, ktora serwer
-	// stosuje teraz.
-	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetPlan()) > 0 {
+	// An sshd plan is a result of the job rather than the state of the host: it
+	// describes a change that has not happened yet, against the configuration
+	// the server
+	// stosuje now.
+	if server := result.GetSshResult(); server != nil && len(server.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(serwer.GetPlan(), &plan)
+		_ = json.Unmarshal(server.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "ssh_plan",
-			"plan":      json.RawMessage(serwer.GetPlan()),
+			"plan":      json.RawMessage(server.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -1057,26 +1106,27 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	if serwer := result.GetSshResult(); serwer != nil && len(serwer.GetMismatches()) > 0 {
+	if server := result.GetSshResult(); server != nil && len(server.GetMismatches()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":       "ssh",
-			"message":    serwer.GetMessage(),
-			"mismatches": serwer.GetMismatches(),
+			"message":    server.GetMessage(),
+			"mismatches": server.GetMismatches(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Plan blokady modulu jest wynikiem zadania, nie stanem hosta.
-	if jadro := result.GetKernelResult(); jadro != nil && len(jadro.GetPlan()) > 0 {
+	// A module blacklist plan is a result of the job rather than the state of
+	// the host.
+	if kernel := result.GetKernelResult(); kernel != nil && len(kernel.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(jadro.GetPlan(), &plan)
+		_ = json.Unmarshal(kernel.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "kernel_module_plan",
-			"plan":      json.RawMessage(jadro.GetPlan()),
+			"plan":      json.RawMessage(kernel.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -1086,13 +1136,13 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	// Ustawienia zapisane, ale nieprzyjete od reki, sa trescia wyniku:
 	// zapis i skutek to dwie rozne rzeczy.
-	if jadro := result.GetKernelResult(); jadro != nil &&
-		(len(jadro.GetPendingReboot()) > 0 || len(jadro.GetAppliedRuntime()) > 0) {
+	if kernel := result.GetKernelResult(); kernel != nil &&
+		(len(kernel.GetPendingReboot()) > 0 || len(kernel.GetAppliedRuntime()) > 0) {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":            "kernel",
-			"message":         jadro.GetMessage(),
-			"pending_reboot":  jadro.GetPendingReboot(),
-			"applied_runtime": jadro.GetAppliedRuntime(),
+			"message":         kernel.GetMessage(),
+			"pending_reboot":  kernel.GetPendingReboot(),
+			"applied_runtime": kernel.GetAppliedRuntime(),
 		})
 		if err == nil {
 			return encoded
@@ -1101,31 +1151,32 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	// Blokady wylaczenia naleza do zadania: to one mowia, dlaczego host
 	// zostal na nogach albo co operator postanowil pominac.
-	if zasilanie := result.GetPowerResult(); zasilanie != nil &&
-		(len(zasilanie.GetInhibitors()) > 0 || zasilanie.GetScheduledAt() != "") {
+	if power := result.GetPowerResult(); power != nil &&
+		(len(power.GetInhibitors()) > 0 || power.GetScheduledAt() != "") {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":         "power",
-			"message":      zasilanie.GetMessage(),
-			"inhibitors":   surowyJSON(zasilanie.GetInhibitors()),
-			"scheduled_at": zasilanie.GetScheduledAt(),
+			"message":      power.GetMessage(),
+			"inhibitors":   rawJSON(power.GetInhibitors()),
+			"scheduled_at": power.GetScheduledAt(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Pomiary zrodel czasu naleza do zadania, a nie do stanu hosta: to
-	// odpowiedz na pytanie zadane w jednej chwili, wobec serwerow, ktorych
-	// host jeszcze moze nie uzywac.
-	// Plan zrodel czasu jest wynikiem zadania, nie stanem hosta.
-	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetPlan()) > 0 {
+	// The measurements of the time sources belong to the job rather than to the
+	// state of the host: they are the answer to a question asked at one moment,
+	// against servers the host may not be using yet.
+	// A plan of the time sources is a result of the job rather than the state
+	// of the host.
+	if clock := result.GetTimeResult(); clock != nil && len(clock.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(zegar.GetPlan(), &plan)
+		_ = json.Unmarshal(clock.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "time_plan",
-			"plan":      json.RawMessage(zegar.GetPlan()),
+			"plan":      json.RawMessage(clock.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -1133,11 +1184,11 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	if zegar := result.GetTimeResult(); zegar != nil && len(zegar.GetProbes()) > 0 {
+	if clock := result.GetTimeResult(); clock != nil && len(clock.GetProbes()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "time",
-			"message": zegar.GetMessage(),
-			"probes":  surowyJSON(zegar.GetProbes()),
+			"message": clock.GetMessage(),
+			"probes":  rawJSON(clock.GetProbes()),
 		})
 		if err == nil {
 			return encoded
@@ -1150,26 +1201,28 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "monitoring",
 			"message": sonda.GetMessage(),
-			"probe":   surowyJSON(sonda.GetProbe()),
+			"probe":   rawJSON(sonda.GetProbe()),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Stan repozytorium i wynik kopii naleza do zadania: to odpowiedz na
-	// pytanie zadane w jednej chwili, a nie stan hosta. Lista kopii jest tez
-	// jedynym miejscem, z ktorego operator moze wybrac te do odtworzenia.
-	// Plan kopii jest wynikiem zadania, nie stanem repozytorium: opisuje
-	// kopie, ktora sie jeszcze nie wydarzyla, i zakres tego hosta.
-	if kopia := result.GetBackupResult(); kopia != nil && len(kopia.GetPlan()) > 0 {
+	// Stan repozytorium i result kopii naleza do zadania: to odpowiedz na
+	// a question asked at one moment rather than the state of the host. The
+	// list of the copies is also the only place the operator can pick the one
+	// to restore from.
+	// A backup plan is a result of the job rather than the state of the
+	// repository: it describes a copy that has not happened yet, and the scope
+	// of this host.
+	if backup := result.GetBackupResult(); backup != nil && len(backup.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(kopia.GetPlan(), &plan)
+		_ = json.Unmarshal(backup.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "backup_plan",
-			"plan":      json.RawMessage(kopia.GetPlan()),
+			"plan":      json.RawMessage(backup.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -1177,95 +1230,101 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	if kopia := result.GetBackupResult(); kopia != nil &&
-		(len(kopia.GetState()) > 0 || len(kopia.GetOutcome()) > 0) {
+	if backup := result.GetBackupResult(); backup != nil &&
+		(len(backup.GetState()) > 0 || len(backup.GetOutcome()) > 0) {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "backup",
-			"message": kopia.GetMessage(),
-			"state":   surowyJSON(kopia.GetState()),
-			"outcome": surowyJSON(kopia.GetOutcome()),
+			"message": backup.GetMessage(),
+			"state":   rawJSON(backup.GetState()),
+			"outcome": rawJSON(backup.GetOutcome()),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Odcisk klucza zrodla nalezy do zadania: to jedyna chwila, w ktorej
+	// The fingerprint of the key of a source belongs to the job: it is the only
+	// moment in which
 	// czlowiek moze porownac go z odciskiem podanym przez dostawce.
-	if zrodla := result.GetRepositoryResult(); zrodla != nil &&
-		(zrodla.GetGpgKeyFingerprint() != "" || zrodla.GetRolledBack()) {
+	if sources := result.GetRepositoryResult(); sources != nil &&
+		(sources.GetGpgKeyFingerprint() != "" || sources.GetRolledBack()) {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":                "repository",
-			"message":             zrodla.GetMessage(),
-			"gpg_key_fingerprint": zrodla.GetGpgKeyFingerprint(),
-			"rolled_back":         zrodla.GetRolledBack(),
+			"message":             sources.GetMessage(),
+			"gpg_key_fingerprint": sources.GetGpgKeyFingerprint(),
+			"rolled_back":         sources.GetRolledBack(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Plan wdrozenia certyfikatu jest wynikiem zadania, nie stanem hosta:
-	// opisuje zmiane, ktora sie jeszcze nie wydarzyla. Klucza prywatnego
-	// w planie nie ma, wiec nie ma go takze tutaj.
-	if certyfikat := result.GetCertificateResult(); certyfikat != nil && len(certyfikat.GetPlan()) > 0 {
+	// A certificate deployment plan is a result of the job rather than the
+	// state of the host: it describes a change that has not happened yet. The
+	// private key is not in the plan, so it is not here either.
+	if certificate := result.GetCertificateResult(); certificate != nil && len(certificate.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
-			// Rodzaj planu nazywa modul. Zgadywanie go z pustych pol
-			// myliloby plan odmowiony z planem innego rodzaju.
+			// The module names the kind of the plan. Guessing it from empty
+			// fields would confuse a refused plan with a plan of another
+			// kind.
 			Kind string `json:"kind"`
 		}
-		_ = json.Unmarshal(certyfikat.GetPlan(), &plan)
-		// Plan kotwicy i plan wdrozenia sa dwoma ksztaltami; rodzaj wyniku
-		// ma to nazwac, bo operator oglada je w tym samym miejscu.
-		rodzaj := "certificate_plan"
+		_ = json.Unmarshal(certificate.GetPlan(), &plan)
+		// An anchor plan and a deployment plan are two shapes; the kind of the
+		// result is to name that, because the operator looks at them in the
+		// same place.
+		kind := "certificate_plan"
 		switch plan.Kind {
 		case "trust":
-			rodzaj = "trust_plan"
+			kind = "trust_plan"
 		case "renewal":
-			rodzaj = "renewal_plan"
+			kind = "renewal_plan"
 		}
 		encoded, err := json.Marshal(map[string]any{
-			"kind":      rodzaj,
-			"plan":      json.RawMessage(certyfikat.GetPlan()),
+			"kind":      kind,
+			"plan":      json.RawMessage(certificate.GetPlan()),
 			"plan_hash": plan.PlanHash,
-			"trust":     surowyJSON(certyfikat.GetTrust()),
+			"trust":     rawJSON(certificate.GetTrust()),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Odpowiedz uslugi po wdrozeniu nalezy do zadania, a nie do stanu hosta:
-	// to pomiar z jednej chwili, tuz po podmianie. Razem z nim idzie odcisk
-	// tego, co naprawde wyladowalo, i informacja, czy host sie wycofal.
-	if certyfikat := result.GetCertificateResult(); certyfikat != nil &&
-		(len(certyfikat.GetProbe()) > 0 || certyfikat.GetFingerprintSha256() != "" ||
-			certyfikat.GetRolledBack()) {
+	// The answer of a service after a deployment belongs to the job rather than
+	// to the state of the host:
+	// to pomiar z jednej chwili, tuz po podmianie. Razem z nim idzie digest
+	// of what really landed, and the information whether the host rolled
+	// back.
+	if certificate := result.GetCertificateResult(); certificate != nil &&
+		(len(certificate.GetProbe()) > 0 || certificate.GetFingerprintSha256() != "" ||
+			certificate.GetRolledBack()) {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":               "certificate",
-			"message":            certyfikat.GetMessage(),
-			"fingerprint_sha256": certyfikat.GetFingerprintSha256(),
-			"not_after":          certyfikat.GetNotAfter(),
-			"probe":              surowyJSON(certyfikat.GetProbe()),
-			"rolled_back":        certyfikat.GetRolledBack(),
+			"message":            certificate.GetMessage(),
+			"fingerprint_sha256": certificate.GetFingerprintSha256(),
+			"not_after":          certificate.GetNotAfter(),
+			"probe":              rawJSON(certificate.GetProbe()),
+			"rolled_back":        certificate.GetRolledBack(),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Plan pliku jest wynikiem zadania, a nie stanem hosta: opisuje zmiane,
-	// ktora sie jeszcze nie wydarzyla. Odcisk planu wyjmujemy na wierzch, bo
-	// to po nim kampania wiaze zgode z tym konkretnym diffem.
-	if plik := result.GetFileResult(); plik != nil && len(plik.GetPlan()) > 0 {
+	// A file plan is a result of the job rather than the state of the host: it
+	// describes a change that has not happened yet. The digest of the plan is
+	// lifted to the surface, because it is what a campaign binds the approval
+	// to this specific diff by.
+	if file := result.GetFileResult(); file != nil && len(file.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(plik.GetPlan(), &plan)
+		_ = json.Unmarshal(file.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "file_plan",
-			"plan":      json.RawMessage(plik.GetPlan()),
+			"plan":      json.RawMessage(file.GetPlan()),
 			"plan_hash": plan.PlanHash,
 		})
 		if err == nil {
@@ -1273,14 +1332,14 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Tresc odczytanego pliku nalezy do zadania: to odpowiedz na pytanie
-	// zadane w jednej chwili, a nie stan hosta.
-	if plik := result.GetFileResult(); plik != nil && len(plik.GetContent()) > 0 {
+	// Tresc odczytanego pliku nalezy do zadania: to odpowiedz na question
+	// asked at one moment rather than the state of the host.
+	if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "file",
-			"content":   string(plik.GetContent()),
-			"sha256":    plik.GetSha256(),
-			"truncated": plik.GetTruncated(),
+			"content":   string(file.GetContent()),
+			"sha256":    file.GetSha256(),
+			"truncated": file.GetTruncated(),
 		})
 		if err == nil {
 			return encoded
@@ -1316,8 +1375,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	if docker := result.GetDockerActionResult(); docker != nil {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":            "docker_action",
-			"before":          surowyJSON(docker.GetBefore()),
-			"after":           surowyJSON(docker.GetAfter()),
+			"before":          rawJSON(docker.GetBefore()),
+			"after":           rawJSON(docker.GetAfter()),
 			"removed":         docker.GetRemoved(),
 			"reclaimed_bytes": docker.ReclaimedBytes,
 			"image_digest":    docker.GetImageDigest(),
@@ -1329,20 +1388,20 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	switch detail := result.GetDetail().(type) {
 	case *agentv1.TaskResult_PackagePlan:
-		plan := detail.PackagePlan
+		schedule := detail.PackagePlan
 		encoded, err := json.Marshal(map[string]any{
 			"kind":                 "package_plan",
-			"mode":                 plan.GetMode(),
-			"removals":             plan.GetRemovals(),
-			"protected":            plan.GetProtected(),
-			"manager":              plan.GetManager(),
-			"changes":              packageChangesJSON(plan.GetChanges()),
-			"download_bytes":       plan.GetDownloadBytes(),
-			"disk_available_bytes": plan.GetDiskAvailableBytes(),
-			"plan_hash":            hex.EncodeToString(plan.GetPlanHash()),
-			"reboot_predicted":     plan.GetRebootPredicted(),
-			"metadata_refreshed":   plan.GetMetadataRefreshed(),
-			"blocked":              blockedJSON(plan.GetBlocked()),
+			"mode":                 schedule.GetMode(),
+			"removals":             schedule.GetRemovals(),
+			"protected":            schedule.GetProtected(),
+			"manager":              schedule.GetManager(),
+			"changes":              packageChangesJSON(schedule.GetChanges()),
+			"download_bytes":       schedule.GetDownloadBytes(),
+			"disk_available_bytes": schedule.GetDiskAvailableBytes(),
+			"plan_hash":            hex.EncodeToString(schedule.GetPlanHash()),
+			"reboot_predicted":     schedule.GetRebootPredicted(),
+			"metadata_refreshed":   schedule.GetMetadataRefreshed(),
+			"blocked":              blockedJSON(schedule.GetBlocked()),
 		})
 		if err != nil {
 			return nil
@@ -1433,17 +1492,17 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 }
 
-// surowyJSON przenosi zakodowany stan bez ponownego kodowania. Pusty zostaje
-// pusty: kontener usuniety nie ma stanu po operacji.
-func surowyJSON(dane []byte) json.RawMessage {
-	if len(dane) == 0 {
+// rawJSON przenosi zakodowany state bez ponownego kodowania. Pusty zostaje
+// empty: a removed container has no state after the operation.
+func rawJSON(data []byte) json.RawMessage {
+	if len(data) == 0 {
 		return nil
 	}
-	return json.RawMessage(dane)
+	return json.RawMessage(data)
 }
 
-// preflightChecksJSON zachowuje trojstanowy wynik sprawdzenia: przeszlo,
-// nie przeszlo albo nie udalo sie ustalic.
+// preflightChecksJSON zachowuje trojstanowy result sprawdzenia: przeszlo,
+// did not go through or could not be established.
 func preflightChecksJSON(checks []*agentv1.PreflightCheck) []map[string]any {
 	items := make([]map[string]any, 0, len(checks))
 	for _, check := range checks {
@@ -1495,13 +1554,15 @@ func unitStateJSON(state *agentv1.UnitState) json.RawMessage {
 	return encoded
 }
 
-// managementAddress wybiera adres zarzadzania hosta i mowi, skad pochodzi.
+// managementAddress picks the management address of a host and says where it
+// comes from.
 //
-// Przy polaczeniu bezposrednim panel widzi adres hosta na wlasnym koncu
-// polaczenia i to jest fakt najmocniejszy, jaki ma. Za relayem widzi adres
-// relaya - podanie go jako adresu hosta byloby falszem, wiec jedynym zrodlem
-// pozostaje to, co host deklaruje o sobie. Gdy nie ma ani jednego, adres
-// zostaje nieustalony; poprzednio znanego nie kasujemy.
+// With a direct connection the panel sees the address of the host at its own
+// end of the connection, and that is the strongest fact it has. Behind a relay
+// it sees the address of the relay - giving it as the address of the host
+// would be a falsehood, so the only source left is what the host declares
+// about itself. When there is neither, the address stays undetermined; a
+// previously known one is not erased.
 func managementAddress(remoteAddr, declared, relayID string) (address, source string) {
 	if relayID == "" {
 		if host, _, err := net.SplitHostPort(remoteAddr); err == nil && host != "" {
@@ -1514,14 +1575,15 @@ func managementAddress(remoteAddr, declared, relayID string) (address, source st
 	return "", ""
 }
 
-// openSession zapisuje sesje. relayID jest pusty przy polaczeniu bezposrednim;
-// wypelniony mowi, ktory relay poswiadczyl tozsamosc hosta - bez tego slad
-// audytowy nie odroznia dwoch roznych podstaw zaufania.
+// openSession records the session. relayID is empty for a direct connection;
+// filled in it says which relay attested the identity of the host - without it
+// the audit trail does not tell two different grounds of trust apart.
 func (s *AgentService) openSession(ctx context.Context, session *Session,
 	fingerprint []byte, relayID string) error {
-	// Numer epoki i wpis sesji powstaja w jednej transakcji. Dwie bramy
-	// otwierajace sesje temu samemu hostowi w tej samej chwili musza dostac
-	// rozne numery, bo to numer rozstrzyga, ktora z nich jest ta wlasciwa.
+	// The epoch number and the session row come into being in one transaction.
+	// Two gateways opening a session for the same host at the same moment have
+	// to get different numbers, because it is the number that settles which of
+	// them is the right one.
 	const query = `
 		insert into agent_sessions
 			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id, epoch)
@@ -1530,31 +1592,32 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		returning epoch`
 	if err := s.pool.QueryRow(ctx, query, session.ID, session.HostID, s.gatewayID,
 		fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID).
-		Scan(&session.Epoka); err != nil {
+		Scan(&session.Epoch); err != nil {
 		return err
 	}
 
-	// Starsze sesje tego hosta sa zamykane w bazie od razu: wpis otwarty na
-	// bramie, ktora juz nie obsluguje hosta, zawyza kazdy pomiar liczacy
-	// polaczenia i kaze schedulerowi wysylac zadania w prozne miejsce.
+	// The older sessions of this host are closed in the database at once: a row
+	// left open on a gateway that no longer serves the host inflates every
+	// measurement that counts connections and has the scheduler send jobs into
+	// the void.
 	if _, err := s.pool.Exec(ctx, `
 		update agent_sessions set ended_at = now(), end_reason = 'superseded'
 		where host_id = $1 and epoch < $2 and ended_at is null`,
-		session.HostID, session.Epoka); err != nil {
-		s.log.Error("nie zamknieto starszych sesji hosta",
+		session.HostID, session.Epoch); err != nil {
+		s.log.Error("the older sessions of the host were not closed",
 			"host_id", session.HostID, "err", err)
 	}
-	// Lokalna starsza sesja moze byc wciaz w rejestrze tej bramy: rejestr
-	// trzyma jedna sesje na hosta, wiec dopiero Add ja zastapi, a stream
-	// trwalby dalej i odbieral wiadomosci.
-	if poprzednia, trwa := s.registry.Get(session.HostID); trwa && poprzednia.Epoka < session.Epoka {
-		poprzednia.Zakoncz("superseded")
+	// An older local session may still be in the registry of this gateway: the
+	// registry keeps one session per host, so only Add replaces it, while the
+	// stream would go on and keep receiving messages.
+	if previous, running := s.registry.Get(session.HostID); running && previous.Epoch < session.Epoch {
+		previous.End("superseded")
 	}
-	// Pozostale bramy dowiaduja sie przez baze - to jedyny punkt, ktory
-	// widzi je wszystkie.
-	if err := ogloszEpoke(ctx, s.pool, session.HostID, session.Epoka, s.gatewayID); err != nil {
-		s.log.Error("nie ogloszono epoki sesji",
-			"host_id", session.HostID, "epoka", session.Epoka, "err", err)
+	// The other gateways learn about it through the database - the only point
+	// that sees all of them.
+	if err := announceEpoch(ctx, s.pool, session.HostID, session.Epoch, s.gatewayID); err != nil {
+		s.log.Error("the epoch of the session was not announced",
+			"host_id", session.HostID, "epoch", session.Epoch, "err", err)
 	}
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: session.HostID,
@@ -1563,7 +1626,7 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		Detail: map[string]any{
 			"relay_id":   nullableRelay(relayID),
 			"session_id": session.ID, "gateway_id": s.gatewayID,
-			"epoch":         session.Epoka,
+			"epoch":         session.Epoch,
 			"agent_version": session.AgentVersion, "boot_id": session.BootID,
 		},
 	})
@@ -1573,12 +1636,12 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 func (s *AgentService) closeSession(ctx context.Context, session *Session, hostID string) {
 	const query = `update agent_sessions set ended_at = now(), end_reason = $2 where id = $1`
 	if _, err := s.pool.Exec(ctx, query, session.ID, "stream_closed"); err != nil {
-		s.log.Error("nie zamknieto sesji", "session_id", session.ID, "err", err)
+		s.log.Error("the session was not closed", "session_id", session.ID, "err", err)
 	}
-	// Host jest offline tylko wtedy, gdy nie zdazyl otworzyc nowszej sesji.
+	// A host is offline only when it has not managed to open a newer session.
 	if _, active := s.registry.Get(hostID); !active {
 		if err := s.hosts.MarkDisconnected(ctx, hostID); err != nil {
-			s.log.Error("nie oznaczono hosta jako offline", "host_id", hostID, "err", err)
+			s.log.Error("the host was not marked as offline", "host_id", hostID, "err", err)
 		}
 	}
 	s.audit.Record(ctx, audit.Event{
@@ -1590,7 +1653,7 @@ func (s *AgentService) closeSession(ctx context.Context, session *Session, hostI
 			"duration_s": int(time.Since(session.StartedAt).Seconds()),
 		},
 	})
-	s.log.Info("sesja agenta zamknieta",
+	s.log.Info("the session of the agent was closed",
 		"host_id", hostID, "session_id", session.ID, "sessions", s.registry.Count())
 }
 
@@ -1600,17 +1663,18 @@ func (s *AgentService) denied(ctx context.Context, hostID, reason string) {
 		Action: "agent.session.open", TargetType: "host", TargetID: hostID,
 		Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": reason},
 	})
-	s.log.Warn("odrzucono sesje agenta", "host_id", hostID, "reason", reason)
+	s.log.Warn("the session of the agent was rejected", "host_id", hostID, "reason", reason)
 }
 
-// capabilitiesFromProto czyta rejestr adapterow. Agent w starszej wersji
-// rejestru nie przysyla wcale, a flota aktualizuje sie stopniowo - rejestr
-// jest wtedy odtwarzany z pol logicznych sprzed jego wprowadzenia. Uznanie
-// takiego hosta za pozbawiony wszystkich adapterow odcieloby go od zarzadzania.
+// capabilitiesFromProto reads the registry of the adapters. An agent of an
+// older version does not send the registry at all, and a fleet upgrades
+// gradually - the registry is then reconstructed from the boolean fields from
+// before it was introduced. Treating such a host as one without any adapters
+// would cut it off from management.
 func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
-	if zgloszone := caps.GetRegistry(); len(zgloszone) > 0 {
-		registry := make(hosts.Capabilities, 0, len(zgloszone))
-		for _, capability := range zgloszone {
+	if reported := caps.GetRegistry(); len(reported) > 0 {
+		registry := make(hosts.Capabilities, 0, len(reported))
+		for _, capability := range reported {
 			registry = append(registry, hosts.Capability{
 				Name:      capability.GetName(),
 				Version:   capability.GetVersion(),
@@ -1623,11 +1687,12 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 		return registry
 	}
 
-	// Pola logiczne nie niosly powodu ani cech, wiec odtworzony rejestr tez
-	// ich nie ma. Zmyslony powod bylby gorszy niz jego brak.
-	sprzedRejestru := []struct {
-		nazwa    string
-		dostepny bool
+	// The boolean fields carried neither a reason nor features, so the
+	// reconstructed registry has none either. A made-up reason would be worse
+	// than none.
+	beforeTheRegistry := []struct {
+		name      string
+		available bool
 	}{
 		{hosts.CapSystemd, caps.GetSystemd()},
 		{hosts.CapAPT, caps.GetApt()},
@@ -1635,19 +1700,21 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 		{hosts.CapDocker, caps.GetDocker()},
 		{hosts.CapJournald, caps.GetJournald()},
 	}
-	registry := make(hosts.Capabilities, 0, len(sprzedRejestru))
-	for _, pozycja := range sprzedRejestru {
+	registry := make(hosts.Capabilities, 0, len(beforeTheRegistry))
+	for _, entry := range beforeTheRegistry {
 		registry = append(registry, hosts.Capability{
-			Name: pozycja.nazwa, Version: 0, Available: pozycja.dostepny,
+			Name: entry.name, Version: 0, Available: entry.available,
 		})
 	}
 	return registry
 }
 
-// localAccountsFromReport przenosi konta z raportu do modelu inventory.
+// localAccountsFromReport moves the accounts from a report into the inventory
+// model.
 //
-// Raport przyrostowy bez sekcji kont zwraca nil, a nie pusta liste: brak
-// danych nie moze skasowac ostatniej znanej listy kont hosta.
+// An incremental report without a section of accounts returns nil rather than
+// an empty list: missing data must not erase the last known list of the
+// accounts of a host.
 func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalAccount {
 	if !report.GetFull() && len(report.GetLocalAccounts()) == 0 {
 		return nil
@@ -1676,7 +1743,7 @@ func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalA
 	return accounts
 }
 
-// accountSourceName odwzorowuje zrodlo konta na nazwe uzywana w bazie i API.
+// accountSourceName odwzorowuje source konta na nazwe uzywana w bazie i API.
 // Wartosc nieokreslona zostaje nieokreslona: "local" byloby zgadywaniem.
 func accountSourceName(source agentv1.LocalAccount_Source) string {
 	switch source {
@@ -1704,8 +1771,9 @@ func sshKeysJSON(keys []*agentv1.SSHKey) []map[string]any {
 	return encoded
 }
 
-// localAccountResultJSON opisuje stan konta po operacji. Brak konta daje nil,
-// bo konto usuniete lub nieutworzone nie ma stanu do pokazania.
+// localAccountResultJSON describes the state of an account after an operation.
+// A missing account gives nil, because an account that was removed or never
+// created has no state to show.
 func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
 	if account == nil {
 		return nil
@@ -1724,27 +1792,29 @@ func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
 	}
 }
 
-// relayHostHeader niesie tozsamosc hosta poswiadczona przez relay.
+// relayHostHeader carries the identity of a host attested by a relay.
 const relayHostHeader = "Flotestro-Relay-Host"
 
-// identifyPeer ustala, czyja jest sesja i kto za nia rreczy.
+// identifyPeer establishes whose session it is and who vouches for it.
 //
-// Polaczenie bezposrednie: tozsamosc pochodzi z certyfikatu klienta i jest
-// dowodem posiadania klucza prywatnego hosta.
+// A direct connection: the identity comes from the client certificate and is
+// proof of holding the private key of the host.
 //
-// Polaczenie przez relay: certyfikat nalezy do relaya, a tozsamosc hosta jest
-// poswiadczeniem relaya. Panel nie moze jej sprawdzic kryptograficznie, wiec
-// sprawdza to, co moze: czy relay jest znany, nieodwolany i czy host nalezy
-// do jego lokalizacji. To jest wlasnie ta granica zaufania, o ktorej mowi
-// dokument - i dlatego jest zapisana w sesji.
+// A connection through a relay: the certificate belongs to the relay, and the
+// identity of the host is an attestation of the relay. The panel cannot check
+// it cryptographically, so it checks what it can: whether the relay is known,
+// not revoked, and whether the host belongs to its site. That is exactly the
+// trust boundary the document speaks about - and that is why it is recorded in
+// the session.
 func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 	asserted string) (hostID string, relayID string, err error) {
 	if hostID, hostErr := pki.HostIDFromCert(cert); hostErr == nil {
 		if asserted != "" {
-			// Agent nie moze udawac relaya: poswiadczanie cudzej tozsamosci
-			// jest uprawnieniem relaya, a nie naglowkiem do dopisania.
+			// An agent must not impersonate a relay: attesting somebody
+			// else's identity is a permission of a relay rather than a header
+			// to be added.
 			return "", "", connect.NewError(connect.CodePermissionDenied,
-				errors.New("certyfikat hosta nie pozwala poswiadczac innych hostow"))
+				errors.New("the certificate of a host does not allow attesting other hosts"))
 		}
 		return hostID, "", nil
 	}
@@ -1755,11 +1825,11 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 	}
 	if s.relays == nil {
 		return "", "", connect.NewError(connect.CodePermissionDenied,
-			errors.New("posredniczenie przez relay nie jest wlaczone"))
+			errors.New("the mediation through a relay is not enabled"))
 	}
 	if asserted == "" {
 		return "", "", connect.NewError(connect.CodeInvalidArgument,
-			errors.New("relay musi wskazac host w naglowku "+relayHostHeader))
+			errors.New("a relay has to name the host in the header "+relayHostHeader))
 	}
 
 	status, err := s.relays.LookupCertificate(ctx, pki.Fingerprint(cert))
@@ -1769,37 +1839,37 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 	switch {
 	case !status.Known:
 		s.denied(ctx, relayIdentity, "unknown_relay_certificate")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("certyfikat relaya nieznany"))
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate of the relay is unknown"))
 	case status.Revoked:
 		s.denied(ctx, relayIdentity, "revoked_relay")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("relay odwolany"))
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the relay was revoked"))
 	case status.ID != relayIdentity:
 		s.denied(ctx, relayIdentity, "relay_identity_mismatch")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc relaya nie zgadza sie z certyfikatem"))
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the identity of the relay does not match the certificate"))
 	}
 
 	host, err := s.hosts.Get(ctx, asserted)
 	if err != nil {
 		s.denied(ctx, asserted, "relay_unknown_host")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("host nieznany"))
+		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the host is unknown"))
 	}
-	// Relay posredniczy wylacznie za swoja lokalizacje. Bez tego jeden
-	// przejety relay obslugiwalby cala flote.
+	// A relay mediates for its own site alone. Without that one compromised
+	// relay would serve the whole fleet.
 	if host.Site != status.Site {
 		s.denied(ctx, asserted, "relay_scope_mismatch")
 		return "", "", connect.NewError(connect.CodePermissionDenied,
-			errors.New("host nie nalezy do lokalizacji relaya"))
+			errors.New("the host does not belong to the site of the relay"))
 	}
 	if !hosts.Active(host.LifecycleState) {
 		s.denied(ctx, asserted, "lifecycle_"+host.LifecycleState)
 		return "", "", connect.NewError(connect.CodePermissionDenied,
-			fmt.Errorf("host jest w stanie %s", host.LifecycleState))
+			fmt.Errorf("the host is in the state %s", host.LifecycleState))
 	}
 	return asserted, status.ID, nil
 }
 
-// rejectCertificate sprawdza stan certyfikatu hosta przy polaczeniu
-// bezposrednim.
+// rejectCertificate checks the state of the certificate of a host for a
+// direct connection.
 func (s *AgentService) rejectCertificate(ctx context.Context,
 	status hosts.CertificateStatus, hostID string) error {
 	switch {
@@ -1811,19 +1881,21 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate was revoked"))
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("tozsamosc nie zgadza sie z certyfikatem"))
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("the identity does not match the certificate"))
 	case !hosts.Active(status.LifecycleState):
-		// Kwarantanna, wycofywanie i wycofanie roznia sie dla operatora,
-		// ale dla polaczenia znacza to samo: ten host nie ma prawa pracowac.
+		// A quarantine, a withdrawal in progress and a withdrawal differ for
+		// the operator, but for a connection they mean the same: this host has
+		// no right to work.
 		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
 		return connect.NewError(connect.CodePermissionDenied,
-			fmt.Errorf("host jest w stanie %s", status.LifecycleState))
+			fmt.Errorf("the host is in the state %s", status.LifecycleState))
 	}
 	return nil
 }
 
-// nullableRelay zwraca nil dla polaczenia bezposredniego. Pusty ciag w sladzie
-// audytowym wygladalby jak relay bez nazwy, a nie jak jego brak.
+// nullableRelay returns nil for a direct connection. An empty string in the
+// audit trail would look like a relay without a name rather than like its
+// absence.
 func nullableRelay(relayID string) any {
 	if relayID == "" {
 		return nil
@@ -1831,16 +1903,15 @@ func nullableRelay(relayID string) any {
 	return relayID
 }
 
-// CloseOrphanSessions zamyka wpisy sesji, ktorych ta instancja juz nie
-// utrzymuje.
+// CloseOrphanSessions closes the session rows this instance no longer keeps.
 //
-// Sesja konczy sie zapisem przy rozlaczeniu, ale przy padzie procesu ten zapis
-// nie ma jak powstac i wpis zostaje otwarty na zawsze. Kazdy pomiar liczacy
-// aktywne sesje z bazy widzialby wtedy fikcyjna flote, a slad audytowy -
-// polaczenia, ktorych nie ma.
+// A session ends with a write at the disconnect, but when the process crashes
+// that write has no way of happening and the row stays open for good. Every
+// measurement counting the active sessions from the database would then see a
+// fictional fleet, and the audit trail - connections that do not exist.
 //
-// Wolno zamykac wylacznie sesje wlasnego gatewaya: sesje innej instancji sa
-// zywe, a jej stan zna tylko ona.
+// Only the sessions of one's own gateway may be closed: the sessions of
+// another instance are alive, and only it knows their state.
 func (s *AgentService) CloseOrphanSessions(ctx context.Context) (int64, error) {
 	const query = `
 		update agent_sessions set ended_at = now(), end_reason = 'orphaned'
@@ -1852,14 +1923,14 @@ func (s *AgentService) CloseOrphanSessions(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// ReapOrphanSessions zamyka osierocone wpisy przy starcie i okresowo w trakcie
-// pracy. Pojedynczy strumien moze zginac bez zapisu konca takze wtedy, gdy
-// proces zyje dalej.
+// ReapOrphanSessions closes the orphaned rows at the start and periodically
+// while working. A single stream can die without a write of its end also when
+// the process lives on.
 func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Duration) {
-	if zamkniete, err := s.CloseOrphanSessions(ctx); err != nil {
-		s.log.Error("nie zamknieto osieroconych sesji", "err", err)
-	} else if zamkniete > 0 {
-		s.log.Info("zamknieto osierocone sesje po starcie", "wpisow", zamkniete)
+	if closed, err := s.CloseOrphanSessions(ctx); err != nil {
+		s.log.Error("the orphaned sessions were not closed", "err", err)
+	} else if closed > 0 {
+		s.log.Info("the orphaned sessions were closed after the start", "rows", closed)
 	}
 
 	ticker := time.NewTicker(interval)
@@ -1869,40 +1940,42 @@ func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Dur
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if zamkniete, err := s.CloseOrphanSessions(ctx); err != nil {
-				s.log.Error("nie zamknieto osieroconych sesji", "err", err)
-			} else if zamkniete > 0 {
-				s.log.Warn("zamknieto osierocone sesje", "wpisow", zamkniete)
+			if closed, err := s.CloseOrphanSessions(ctx); err != nil {
+				s.log.Error("the orphaned sessions were not closed", "err", err)
+			} else if closed > 0 {
+				s.log.Warn("the orphaned sessions were closed", "rows", closed)
 			}
 		}
 	}
 }
 
-// blockedJSON opisuje pakiety blokujace operacje pakietowe wraz z pytaniami
-// konfiguracyjnymi. Panel pokazuje je operatorowi, bo to on podejmuje decyzje.
+// blockedJSON describes the packages that block the package operations
+// together with their configuration questions. The panel shows them to the
+// operator, because it is the operator who makes the decision.
 func blockedJSON(blocked []*agentv1.BlockedPackage) []map[string]any {
 	result := make([]map[string]any, 0, len(blocked))
-	for _, pakiet := range blocked {
-		pytania := make([]map[string]any, 0, len(pakiet.GetQuestions()))
-		for _, pytanie := range pakiet.GetQuestions() {
-			pytania = append(pytania, map[string]any{
-				"name": pytanie.GetName(), "value": pytanie.GetValue(),
-				"answered": pytanie.Answered,
+	for _, pkg := range blocked {
+		questions := make([]map[string]any, 0, len(pkg.GetQuestions()))
+		for _, question := range pkg.GetQuestions() {
+			questions = append(questions, map[string]any{
+				"name": question.GetName(), "value": question.GetValue(),
+				"answered": question.Answered,
 			})
 		}
 		result = append(result, map[string]any{
-			"name": pakiet.GetName(), "status": pakiet.GetStatus(), "questions": pytania,
+			"name": pkg.GetName(), "status": pkg.GetStatus(), "questions": questions,
 		})
 	}
 	return result
 }
 
-// stanBazyPakietow odczytuje stan bazy pakietow z wyniku zadania.
+// packageDatabaseState reads the state of the package database out of the
+// result of a job.
 //
-// Drugi zwracany parametr mowi, czy wynik w ogole cokolwiek o tym stanie wie.
-// Zadanie niepakietowe nie moze zdejmowac ani nakladac tej flagi: brak wiedzy
-// to nie to samo co stwierdzenie, ze baza jest sprawna.
-func stanBazyPakietow(result *agentv1.TaskResult) (uszkodzona bool, znane bool) {
+// The second returned value says whether the result knows anything about that
+// state at all. A non-package job must not lift or place this flag: missing
+// knowledge is not the same as stating that the database is sound.
+func packageDatabaseState(result *agentv1.TaskResult) (broken bool, known bool) {
 	switch detail := result.GetDetail().(type) {
 	case *agentv1.TaskResult_PackageApply:
 		return detail.PackageApply.GetPackageDatabaseBroken(), true
@@ -1914,16 +1987,17 @@ func stanBazyPakietow(result *agentv1.TaskResult) (uszkodzona bool, znane bool) 
 	return false, false
 }
 
-// fragmentsFromReport czyta moduly raportu. Agent sprzed podzialu ich nie
-// przysyla; pusta lista nie kasuje tego, co juz wiadomo o modulach hosta.
+// fragmentsFromReport reads the modules of a report. An agent from before the
+// split does not send them; an empty list does not erase what is already known
+// about the modules of a host.
 func fragmentsFromReport(report *agentv1.InventoryReport) []inventory.Fragment {
-	zgloszone := report.GetFragments()
-	if len(zgloszone) == 0 {
+	reported := report.GetFragments()
+	if len(reported) == 0 {
 		return nil
 	}
-	wynik := make([]inventory.Fragment, 0, len(zgloszone))
-	for _, fragment := range zgloszone {
-		wynik = append(wynik, inventory.Fragment{
+	result := make([]inventory.Fragment, 0, len(reported))
+	for _, fragment := range reported {
+		result = append(result, inventory.Fragment{
 			Module:            fragment.GetModule(),
 			Revision:          fragment.GetRevision(),
 			Source:            fragment.GetSource(),
@@ -1932,408 +2006,421 @@ func fragmentsFromReport(report *agentv1.InventoryReport) []inventory.Fragment {
 			ObservedAt:        fragment.GetObservedAt().AsTime(),
 		})
 	}
-	return wynik
+	return result
 }
 
 // unitStatesJSON zamienia stany jednostek na postac czytana przez interfejs.
 func unitStatesJSON(stany []*agentv1.UnitState) []map[string]any {
-	wynik := make([]map[string]any, 0, len(stany))
-	for _, stan := range stany {
-		wynik = append(wynik, map[string]any{
-			"name":            stan.GetName(),
-			"load_state":      stan.GetLoadState(),
-			"active_state":    stan.GetActiveState(),
-			"sub_state":       stan.GetSubState(),
-			"unit_file_state": stan.GetUnitFileState(),
-			"result":          stan.GetResult(),
-			"main_pid":        stan.GetMainPid(),
-			"n_restarts":      stan.GetNRestarts(),
+	result := make([]map[string]any, 0, len(stany))
+	for _, state := range stany {
+		result = append(result, map[string]any{
+			"name":            state.GetName(),
+			"load_state":      state.GetLoadState(),
+			"active_state":    state.GetActiveState(),
+			"sub_state":       state.GetSubState(),
+			"unit_file_state": state.GetUnitFileState(),
+			"result":          state.GetResult(),
+			"main_pid":        state.GetMainPid(),
+			"n_restarts":      state.GetNRestarts(),
 		})
 	}
-	return wynik
+	return result
 }
 
-// wersjaZDzierzawy odczytuje wersje sekretu, ktora panel naprawde wydal.
+// versionFromLease reads the version of a secret the panel really released.
 //
-// Zlecenie moze wskazywac "wersje biezaca"; ta ustala sie dopiero przy
-// dostarczeniu zadania, wiec stan docelowy zapisujemy z dzierzawy, a nie
-// z payloadu.
-func wersjaZDzierzawy(ctx context.Context, s *AgentService, jobID, nazwa string) int {
+// An order may name "the current version"; that one is settled only when the
+// job is delivered, so the desired state is recorded from the lease rather
+// than from the payload.
+func versionFromLease(ctx context.Context, s *AgentService, jobID, name string) int {
 	if s.leases == nil {
 		return 0
 	}
-	dzierzawy, err := s.leases.Leases(ctx, jobID)
+	leases, err := s.leases.Leases(ctx, jobID)
 	if err != nil {
 		return 0
 	}
-	for _, dzierzawa := range dzierzawy {
-		if dzierzawa.SecretName == nazwa {
-			return dzierzawa.Version
+	for _, lease := range leases {
+		if lease.SecretName == name {
+			return lease.Version
 		}
 	}
 	return 0
 }
 
-// zapiszStanPliku zapisuje stan docelowy pliku po udanej operacji.
-func (s *AgentService) zapiszStanPliku(ctx context.Context, hostID, jobID string) {
-	zadanie, err := s.jobs.Get(ctx, jobID)
+// saveFileState writes the desired state of a file after a successful
+// operation.
+func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string) {
+	job, err := s.jobs.Get(ctx, jobID)
 	if err != nil {
 		return
 	}
-	switch opspec.ActionType(zadanie.ActionType) {
+	switch opspec.ActionType(job.ActionType) {
 	case opspec.ActionFileEnsure, opspec.ActionFileRollback, opspec.ActionFileRemove:
 	default:
 		return
 	}
 
 	var payload opspec.Payload
-	if err := json.Unmarshal(zadanie.Payload, &payload); err != nil || payload.File == nil {
+	if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.File == nil {
 		return
 	}
-	if opspec.ActionType(zadanie.ActionType) == opspec.ActionFileRemove {
-		if err := s.files.Usun(ctx, s.pool, hostID, payload.File.Path); err != nil {
-			s.log.Error("nie usunieto stanu pliku", "host_id", hostID, "err", err)
+	if opspec.ActionType(job.ActionType) == opspec.ActionFileRemove {
+		if err := s.files.Delete(ctx, s.pool, hostID, payload.File.Path); err != nil {
+			s.log.Error("the state of the file was not removed", "host_id", hostID, "err", err)
 		}
 		return
 	}
-	stan := managedfiles.StanDocelowy{
+	state := managedfiles.DesiredState{
 		HostID: hostID, Path: payload.File.Path,
 		Mode: payload.File.Mode, Owner: payload.File.Owner, Group: payload.File.Group,
-		Validator: payload.File.Validator, UpdatedBy: zadanie.CreatedBy,
+		Validator: payload.File.Validator, UpdatedBy: job.CreatedBy,
 	}
-	// Plik z sekretu nie zostawia w panelu ani tresci, ani jej odcisku:
-	// stanem docelowym jest nazwa sekretu i wersja. Kosztem jest to, ze panel
-	// nie wykryje podmiany tresci na hoscie - i tak ma byc powiedziane.
+	// A file from a secret leaves neither the content nor its digest in the
+	// panel: the desired state is the name of the secret and its version. The
+	// cost is that the panel will not detect a replacement of the content on
+	// the host - and that is to be said outright.
 	if !payload.File.ContentSecret.Empty() {
-		stan.SecretName = payload.File.ContentSecret.Name
-		stan.SecretVersion = payload.File.ContentSecret.Version
-		if stan.SecretVersion == 0 {
-			stan.SecretVersion = wersjaZDzierzawy(ctx, s, jobID, stan.SecretName)
+		state.SecretName = payload.File.ContentSecret.Name
+		state.SecretVersion = payload.File.ContentSecret.Version
+		if state.SecretVersion == 0 {
+			state.SecretVersion = versionFromLease(ctx, s, jobID, state.SecretName)
 		}
 	} else {
-		odcisk, err := s.files.ZapiszWersje(ctx, s.pool, []byte(payload.File.Content))
+		digest, err := s.files.SaveVersion(ctx, s.pool, []byte(payload.File.Content))
 		if err != nil {
-			s.log.Error("nie zapisano wersji pliku", "host_id", hostID, "err", err)
+			s.log.Error("the version of the file was not written", "host_id", hostID, "err", err)
 			return
 		}
-		stan.SHA256 = odcisk
+		state.SHA256 = digest
 	}
-	if err := s.files.Ustaw(ctx, s.pool, stan, jobID); err != nil {
-		s.log.Error("nie zapisano stanu pliku", "host_id", hostID, "err", err)
+	if err := s.files.Set(ctx, s.pool, state, jobID); err != nil {
+		s.log.Error("the state of the file was not written", "host_id", hostID, "err", err)
 	}
 }
 
-// zapiszWdrozenieCertyfikatu dopisuje wdrozenie do historii po udanej operacji.
+// saveCertificateDeployment adds a deployment to the history after a
+// successful operation.
 //
-// Odcisk bierzemy z wyniku hosta, a nie z payloadu: panel ma zapisac to, co
-// naprawde wyladowalo na dysku. Klucz jest w historii sama nazwa sekretu
-// i wersja - wartosci nie ma tu ani nigdzie indziej poza magazynem.
-func (s *AgentService) zapiszWdrozenieCertyfikatu(ctx context.Context, hostID, jobID string,
-	wynik *agentv1.CertificateResult) {
-	if wynik == nil || wynik.GetFingerprintSha256() == "" {
+// The fingerprint is taken from the result of the host rather than from the
+// payload: the panel is to record what really landed on the disk. The key is
+// in the history as the name of the secret and its version alone - the value
+// is neither here nor anywhere else outside the store.
+func (s *AgentService) saveCertificateDeployment(ctx context.Context, hostID, jobID string,
+	result *agentv1.CertificateResult) {
+	if result == nil || result.GetFingerprintSha256() == "" {
 		return
 	}
-	zadanie, err := s.jobs.Get(ctx, jobID)
+	job, err := s.jobs.Get(ctx, jobID)
 	if err != nil {
 		return
 	}
-	switch opspec.ActionType(zadanie.ActionType) {
+	switch opspec.ActionType(job.ActionType) {
 	case opspec.ActionCertificateDeploy, opspec.ActionCertificateRenew:
 	default:
 		return
 	}
 
 	var payload opspec.Payload
-	if err := json.Unmarshal(zadanie.Payload, &payload); err != nil || payload.Certificate == nil {
+	if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.Certificate == nil {
 		return
 	}
-	wdrozenie := certyfikaty.Wdrozenie{
+	deployment := certyfikaty.Deployment{
 		HostID:            hostID,
 		Path:              payload.Certificate.Path,
-		FingerprintSHA256: wynik.GetFingerprintSha256(),
+		FingerprintSHA256: result.GetFingerprintSha256(),
 		JobID:             jobID,
-		DeployedBy:        zadanie.CreatedBy,
+		DeployedBy:        job.CreatedBy,
 	}
-	if termin, err := time.Parse(time.RFC3339, wynik.GetNotAfter()); err == nil {
-		wdrozenie.NotAfter = &termin
+	if notAfter, err := time.Parse(time.RFC3339, result.GetNotAfter()); err == nil {
+		deployment.NotAfter = &notAfter
 	}
-	// Tresc zapisujemy tylko przy wdrozeniu z panelu: odnowienie robi demon
-	// hosta i panel nie zna certyfikatu, ktory z niego wyszedl. Zostaje wtedy
-	// sam odcisk i termin - czyli to, co host odeslal.
+	// The content is recorded only for a deployment from the panel: a renewal
+	// is done by a daemon of the host and the panel does not know the
+	// certificate that came out of it. What is left is the digest and the date
+	// alone - that is, what the host sent back.
 	if payload.Certificate.Certificate != "" {
-		wdrozenie.Certificate = payload.Certificate.Certificate
-		if certy, err := modulcerts.ParsujPEM([]byte(payload.Certificate.Certificate)); err == nil {
-			wdrozenie.Subject = certy[0].Subject.String()
-			wdrozenie.Issuer = certy[0].Issuer.String()
+		deployment.Certificate = payload.Certificate.Certificate
+		if certs, err := modulcerts.ParsujPEM([]byte(payload.Certificate.Certificate)); err == nil {
+			deployment.Subject = certs[0].Subject.String()
+			deployment.Issuer = certs[0].Issuer.String()
 		}
 	}
 	if !payload.Certificate.KeySecret.Empty() {
-		wdrozenie.KeySecret = payload.Certificate.KeySecret.Name
-		wdrozenie.KeyVersion = payload.Certificate.KeySecret.Version
-		if wdrozenie.KeyVersion == 0 {
-			wdrozenie.KeyVersion = wersjaZDzierzawy(ctx, s, jobID, wdrozenie.KeySecret)
+		deployment.KeySecret = payload.Certificate.KeySecret.Name
+		deployment.KeyVersion = payload.Certificate.KeySecret.Version
+		if deployment.KeyVersion == 0 {
+			deployment.KeyVersion = versionFromLease(ctx, s, jobID, deployment.KeySecret)
 		}
 	}
-	if err := s.certificates.ZapiszWdrozenie(ctx, s.pool, wdrozenie); err != nil {
-		s.log.Error("nie zapisano wdrozenia certyfikatu", "host_id", hostID, "err", err)
+	if err := s.certificates.SaveDeployment(ctx, s.pool, deployment); err != nil {
+		s.log.Error("the deployment of the certificate was not written", "host_id", hostID, "err", err)
 	}
 }
 
-// scalRepozytoria wstawia nowa liste zrodel do fragmentu pakietow.
+// mergeRepositories puts a new list of sources into the package fragment.
 //
-// Fragment niesie takze liczniki pakietow, ktorych ta operacja nie dotyczyla:
-// nadpisanie go w calosci zamienialoby zmiane zrodla w utrate wiedzy o tym,
-// ile pakietow czeka na aktualizacje.
-func (s *AgentService) scalRepozytoria(ctx context.Context, hostID string, zrodla []byte) error {
+// The fragment also carries the package counters this operation did not
+// concern: overwriting it as a whole would turn a change of the sources into a
+// loss of the knowledge of how many packages wait for an upgrade.
+func (s *AgentService) mergeRepositories(ctx context.Context, hostID string, sources []byte) error {
 	fragment, err := s.inventory.Fragment(ctx, hostID, "packages")
 	if err != nil {
 		return err
 	}
-	tresc := map[string]json.RawMessage{}
-	zrodlo := "agent/packages"
-	powod := ""
+	content := map[string]json.RawMessage{}
+	source := "agent/packages"
+	reason := ""
 	if fragment != nil {
 		if len(fragment.Payload) > 0 {
-			if err := json.Unmarshal(fragment.Payload, &tresc); err != nil {
+			if err := json.Unmarshal(fragment.Payload, &content); err != nil {
 				return err
 			}
 		}
-		zrodlo, powod = fragment.Source, fragment.UnavailableReason
+		source, reason = fragment.Source, fragment.UnavailableReason
 	}
-	tresc["repositories"] = zrodla
+	content["repositories"] = sources
 
-	payload, err := json.Marshal(tresc)
+	payload, err := json.Marshal(content)
 	if err != nil {
 		return err
 	}
 	return s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 		Module:            "packages",
 		Revision:          fmt.Sprintf("%x", sha256.Sum256(payload)),
-		Source:            zrodlo,
+		Source:            source,
 		Payload:           payload,
-		UnavailableReason: powod,
+		UnavailableReason: reason,
 		ObservedAt:        time.Now().UTC(),
 	})
 }
 
-// rodzajeKopii tlumaczy typ operacji na rodzaj wpisu w historii.
-var rodzajeKopii = map[opspec.ActionType]string{
+// backupKinds translate the type of an operation into the kind of an entry in
+// the history.
+var backupKinds = map[opspec.ActionType]string{
 	opspec.ActionBackupPlan:    modulbackup.OperacjaPlan,
 	opspec.ActionBackupRun:     modulbackup.OperacjaBackup,
 	opspec.ActionBackupVerify:  modulbackup.OperacjaSprawdz,
 	opspec.ActionBackupRestore: modulbackup.OperacjaOdtworzen,
 }
 
-// zapiszPrzebiegKopii dopisuje wynik operacji backupu do historii.
+// saveBackupRun adds the result of a backup operation to the history.
 //
-// Zapisujemy metadane, a nie dane: identyfikator kopii, liczniki i to, kiedy
-// ostatnia kopia w repozytorium powstala. Samych danych panel nie widzi
-// i widziec nie ma.
-func (s *AgentService) zapiszPrzebiegKopii(ctx context.Context, hostID, jobID string,
-	wynik *agentv1.BackupResult, udane bool) {
-	zadanie, err := s.jobs.Get(ctx, jobID)
+// We record metadata rather than data: the identifier of the copy, the
+// counters and when the last copy in the repository was made. The panel
+// neither sees the data themselves nor is it to see them.
+func (s *AgentService) saveBackupRun(ctx context.Context, hostID, jobID string,
+	result *agentv1.BackupResult, succeeded bool) {
+	job, err := s.jobs.Get(ctx, jobID)
 	if err != nil {
 		return
 	}
-	rodzaj, znany := rodzajeKopii[opspec.ActionType(zadanie.ActionType)]
-	if !znany {
+	kind, known := backupKinds[opspec.ActionType(job.ActionType)]
+	if !known {
 		return
 	}
 	var payload opspec.Payload
-	if err := json.Unmarshal(zadanie.Payload, &payload); err != nil || payload.Backup == nil {
+	if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.Backup == nil {
 		return
 	}
 
-	przebieg := backupstore.Run{
-		HostID: hostID, Definition: payload.Backup.ID, Kind: rodzaj,
-		JobID: jobID, Outcome: "failed", Message: wynik.GetMessage(),
-		StartedBy: zadanie.CreatedBy,
+	run := backupstore.Run{
+		HostID: hostID, Definition: payload.Backup.ID, Kind: kind,
+		JobID: jobID, Outcome: "failed", Message: result.GetMessage(),
+		StartedBy: job.CreatedBy,
 	}
-	if udane {
-		przebieg.Outcome = "succeeded"
+	if succeeded {
+		run.Outcome = "succeeded"
 	}
 
-	if stan, ok := stanKopii(wynik.GetState()); ok {
-		liczba := len(stan.Snapshots)
-		przebieg.Snapshots = &liczba
-		przebieg.LastSuccessAt = stan.LastSuccessAt
-		if stan.TotalSizeBytes != nil {
-			rozmiar := int64(*stan.TotalSizeBytes)
-			przebieg.RepositorySize = &rozmiar
+	if state, ok := backupState(result.GetState()); ok {
+		count := len(state.Snapshots)
+		run.Snapshots = &count
+		run.LastSuccessAt = state.LastSuccessAt
+		if state.TotalSizeBytes != nil {
+			size := int64(*state.TotalSizeBytes)
+			run.RepositorySize = &size
 		}
 	}
-	if efekt, ok := wynikKopii(wynik.GetOutcome()); ok {
-		przebieg.SnapshotID = efekt.SnapshotID
-		przebieg.BytesAdded = liczbaZBajtow(efekt.BytesAdded)
-		przebieg.TotalBytes = liczbaZBajtow(efekt.TotalBytesProcessed)
-		przebieg.FilesNew = liczbaZBajtow(efekt.FilesNew)
-		przebieg.DurationSeconds = efekt.DurationSeconds
-		if przebieg.Message == "" {
-			przebieg.Message = efekt.Message
+	if outcome, ok := backupOutcome(result.GetOutcome()); ok {
+		run.SnapshotID = outcome.SnapshotID
+		run.BytesAdded = countFromBytes(outcome.BytesAdded)
+		run.TotalBytes = countFromBytes(outcome.TotalBytesProcessed)
+		run.FilesNew = countFromBytes(outcome.FilesNew)
+		run.DurationSeconds = outcome.DurationSeconds
+		if run.Message == "" {
+			run.Message = outcome.Message
 		}
 	}
-	if err := s.backups.RecordRun(ctx, s.pool, przebieg); err != nil {
-		s.log.Error("nie zapisano przebiegu kopii", "host_id", hostID, "err", err)
+	if err := s.backups.RecordRun(ctx, s.pool, run); err != nil {
+		s.log.Error("the backup run was not written", "host_id", hostID, "err", err)
 	}
 }
 
-func stanKopii(dane []byte) (modulbackup.Stan, bool) {
-	var stan modulbackup.Stan
-	if len(dane) == 0 {
-		return stan, false
+func backupState(data []byte) (modulbackup.Stan, bool) {
+	var state modulbackup.Stan
+	if len(data) == 0 {
+		return state, false
 	}
-	if err := json.Unmarshal(dane, &stan); err != nil {
-		return stan, false
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, false
 	}
-	return stan, true
+	return state, true
 }
 
-func wynikKopii(dane []byte) (modulbackup.Wynik, bool) {
-	var wynik modulbackup.Wynik
-	if len(dane) == 0 {
-		return wynik, false
+func backupOutcome(data []byte) (modulbackup.Wynik, bool) {
+	var result modulbackup.Wynik
+	if len(data) == 0 {
+		return result, false
 	}
-	if err := json.Unmarshal(dane, &wynik); err != nil {
-		return wynik, false
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, false
 	}
-	return wynik, true
+	return result, true
 }
 
-// liczbaZBajtow zamienia licznik narzedzia na wartosc zapisywalna w bazie.
-// Brak wartosci zostaje brakiem, a nie zerem.
-func liczbaZBajtow(wartosc *uint64) *int64 {
-	if wartosc == nil {
+// countFromBytes turns a counter of a tool into a value writable in the
+// database. A missing value stays missing rather than becoming zero.
+func countFromBytes(value *uint64) *int64 {
+	if value == nil {
 		return nil
 	}
-	liczba := int64(*wartosc)
-	return &liczba
+	count := int64(*value)
+	return &count
 }
 
-// zapiszListePakietow zapisuje pelna liste pakietow hosta.
+// savePackageList writes the full package list of a host.
 //
-// Lista czesciowa jest gorsza niz jej brak, bo wyglada jak komplet, wiec
-// zapisujemy ja w jednej transakcji razem z odciskiem. Nieodczytana lista
-// zostawia sam powod - i to on trafia potem do oceny podatnosci jako stan
-// nieustalony, a nie jako host bez znalezisk.
-func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID string,
-	wynik *agentv1.InstalledPackagesResult) {
-	stan := vuln.PackageListState{
-		HostID: hostID, Digest: wynik.GetDigest(),
-		PackageCount: int(wynik.GetCount()), JobID: jobID,
-		UnavailableReason: wynik.GetUnavailableReason(),
+// A partial list is worse than a missing one, because it looks like the whole
+// thing, so it is written in one transaction together with its digest. A list
+// that was not read leaves the reason alone - and it is the reason that later
+// reaches the vulnerability assessment as an undetermined state rather than as
+// a host without findings.
+func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string,
+	result *agentv1.InstalledPackagesResult) {
+	state := vuln.PackageListState{
+		HostID: hostID, Digest: result.GetDigest(),
+		PackageCount: int(result.GetCount()), JobID: jobID,
+		UnavailableReason: result.GetUnavailableReason(),
 	}
-	teraz := time.Now().UTC()
-	stan.CollectedAt = &teraz
+	now := time.Now().UTC()
+	state.CollectedAt = &now
 
-	var pakiety []modulpakiety.InstalledPackage
-	if len(wynik.GetPackages()) > 0 {
-		if err := json.Unmarshal(wynik.GetPackages(), &pakiety); err != nil {
-			s.log.Error("nie rozpoznano listy pakietow", "host_id", hostID, "err", err)
+	var pkgs []modulpakiety.InstalledPackage
+	if len(result.GetPackages()) > 0 {
+		if err := json.Unmarshal(result.GetPackages(), &pkgs); err != nil {
+			s.log.Error("the package list was not recognised", "host_id", hostID, "err", err)
 			return
 		}
 	}
-	if stan.UnavailableReason != "" {
-		// Hosta, ktorego listy nie udalo sie odczytac, nie zostawiamy ze
-		// stara lista udajaca aktualna: kasujemy wiersze i zapisujemy powod.
-		pakiety = nil
-		stan.PackageCount = 0
+	if state.UnavailableReason != "" {
+		// A host whose list could not be read is not left with an old list
+		// pretending to be current: we delete the rows and record the
+		// reason.
+		pkgs = nil
+		state.PackageCount = 0
 	}
 
-	// Ustalenia producenta znane hostowi zapisujemy razem z lista: pochodza
-	// z tego samego odczytu i opisuja ten sam moment. Blad ich odczytu nie
-	// moze wygladac jak host bez ustalen - dlatego niesie wlasny powod.
-	ustalenia, powod := ustaleniaZWyniku(wynik, teraz)
-	stanUstalen := vuln.AdvisoryState{
-		HostID: hostID, JobID: jobID, CollectedAt: &teraz,
-		AdvisoryCount: len(ustalenia), UnavailableReason: powod,
+	// The vendor findings known to the host are written together with the
+	// list: they come from the same read and describe the same moment. An
+	// error of reading them must not look like a host without findings - which
+	// is why it carries a reason of its own.
+	advisories, reason := advisoriesFromResult(result, now)
+	advisoryState := vuln.AdvisoryState{
+		HostID: hostID, JobID: jobID, CollectedAt: &now,
+		AdvisoryCount: len(advisories), UnavailableReason: reason,
 	}
-	if powod == "" {
-		stanUstalen.Digest = vuln.AdvisoriesDigest(ustalenia)
+	if reason == "" {
+		advisoryState.Digest = vuln.AdvisoriesDigest(advisories)
 	} else {
-		ustalenia = nil
-		stanUstalen.AdvisoryCount = 0
+		advisories = nil
+		advisoryState.AdvisoryCount = 0
 	}
 
-	if err := s.pakiety.ReplaceImage(ctx, hostID, pakiety, stan, ustalenia, stanUstalen); err != nil {
-		s.log.Error("nie zapisano obrazu pakietow", "host_id", hostID, "err", err)
+	if err := s.pkgs.ReplaceImage(ctx, hostID, pkgs, state, advisories, advisoryState); err != nil {
+		s.log.Error("the image of the packages was not written", "host_id", hostID, "err", err)
 		return
 	}
-	s.log.Info("zapisano liste pakietow", "host_id", hostID,
-		"pakietow", len(pakiety), "ustalen", len(ustalenia), "odcisk", stan.Digest)
+	s.log.Info("the package list was written", "host_id", hostID,
+		"packages", len(pkgs), "findings", len(advisories), "digest", state.Digest)
 
-	// Ocena ma nadazac za tym, co ja rozstrzyga. Host, ktory wlasnie
-	// odpowiedzial na prosbe o odczyt, nie moze do nastepnego cyklu widniec
-	// jako host bez listy albo z ustaleniami sprzed polowy doby.
-	if s.odswiezOcene != nil {
-		s.odswiezOcene(hostID)
+	// The assessment is to keep up with what settles it. A host that has just
+	// answered a request for a read must not show up until the next cycle as a
+	// host without a list or with findings from half a day ago.
+	if s.refreshAssessment != nil {
+		s.refreshAssessment(hostID)
 	}
 }
 
-// ustaleniaZWyniku rozpakowuje ustalenia producenta z wyniku odczytu.
+// advisoriesFromResult unpacks the vendor findings out of the result of a
+// read.
 //
-// Jedno ustalenie dotyczy zwykle kilku pakietow; panel przechowuje je po
-// pakiecie, bo tak przebiega korelacja.
-func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult,
-	teraz time.Time) ([]vuln.HostAdvisory, string) {
-	if powod := wynik.GetAdvisoriesUnavailableReason(); powod != "" {
-		return nil, powod
+// One finding usually concerns several packages; the panel keeps them per
+// package, because that is how the correlation runs.
+func advisoriesFromResult(result *agentv1.InstalledPackagesResult,
+	now time.Time) ([]vuln.HostAdvisory, string) {
+	if reason := result.GetAdvisoriesUnavailableReason(); reason != "" {
+		return nil, reason
 	}
-	if len(wynik.GetAdvisories()) == 0 {
+	if len(result.GetAdvisories()) == 0 {
 		return nil, ""
 	}
-	var zebrane []modulpakiety.Advisory
-	if err := json.Unmarshal(wynik.GetAdvisories(), &zebrane); err != nil {
-		// Metadanych nie dalo sie rozpoznac. Pusta lista znaczylaby tu "host
-		// nie ma zadnych ustalen producenta" - czyli cos, czego nikt nie
-		// sprawdzil.
+	var gathered []modulpakiety.Advisory
+	if err := json.Unmarshal(result.GetAdvisories(), &gathered); err != nil {
+		// The metadata could not be recognised. An empty list would mean here
+		// "the host has no vendor findings at all" - that is, something nobody
+		// checked.
 		return nil, vuln.ReasonHostAdvisoriesUnreadable
 	}
-	var ustalenia []vuln.HostAdvisory
-	for _, ustalenie := range zebrane {
-		// Ustalenie bez CVE jest normalne: producent nie zawsze je przypisuje.
-		// Kolumna nie przyjmuje jednak wartosci pustej, a brak listy i lista
-		// pusta znacza tu to samo.
-		cve := ustalenie.CVEIDs
+	var advisories []vuln.HostAdvisory
+	for _, advisory := range gathered {
+		// A finding without a CVE is normal: the vendor does not always assign
+		// one. The column does not take a null, though, and a missing list and
+		// an empty list mean the same thing here.
+		cve := advisory.CVEIDs
 		if cve == nil {
 			cve = []string{}
 		}
-		for _, pakiet := range ustalenie.Packages {
-			ustalenia = append(ustalenia, vuln.HostAdvisory{
-				AdvisoryID: ustalenie.ID, PackageName: pakiet.Name,
-				Architecture: pakiet.Architecture, FixedEVR: pakiet.EVR,
-				CVEIDs: cve, Severity: ustalenie.Severity,
-				Title: ustalenie.Title, IssuedAt: ustalenie.IssuedAt, CollectedAt: teraz,
+		for _, pkg := range advisory.Packages {
+			advisories = append(advisories, vuln.HostAdvisory{
+				AdvisoryID: advisory.ID, PackageName: pkg.Name,
+				Architecture: pkg.Architecture, FixedEVR: pkg.EVR,
+				CVEIDs: cve, Severity: advisory.Severity,
+				Title: advisory.Title, IssuedAt: advisory.IssuedAt, CollectedAt: now,
 			})
 		}
 	}
-	return ustalenia, ""
+	return advisories, ""
 }
 
-// sprawdzOdswiezenie potwierdza, ze rewizja zgloszona przez agenta jest ta,
-// ktora panel naprawde ma. Wolane tylko dla operacji odswiezenia inwentarza.
+// checkRefresh confirms that the revision reported by the agent is the one
+// the panel really has. Called only for the operation of refreshing the
+// inventory.
 //
-// Zwraca pusty kod, gdy wszystko sie zgadza. Rozjazd jest bledem zadania,
-// a nie awaria hosta: host zebral obraz, tylko panel go nie dostal.
-func (s *AgentService) sprawdzOdswiezenie(ctx context.Context, hostID string,
-	result *agentv1.TaskResult) (kod, opis string) {
-	odswiezenie := result.GetInventoryRefreshResult()
-	if odswiezenie.GetRevision() == "" {
-		// Sukces bez rewizji jest milczeniem: nie wiadomo, czy obraz powstal.
-		return "inventory_revision_missing", "agent nie podal rewizji odswiezonego inwentarza"
+// It returns an empty code when everything matches. A divergence is a failure
+// of the job rather than of the host: the host collected the image, only the
+// panel did not get it.
+func (s *AgentService) checkRefresh(ctx context.Context, hostID string,
+	result *agentv1.TaskResult) (code, message string) {
+	refresh := result.GetInventoryRefreshResult()
+	if refresh.GetRevision() == "" {
+		// A success without a revision is silence: there is no telling whether
+		// the image came into being.
+		return "inventory_revision_missing", "the agent did not give the revision of the refreshed inventory"
 	}
-	rewizja, err := s.inventory.Latest(ctx, hostID)
+	revision, err := s.inventory.Latest(ctx, hostID)
 	if err != nil {
-		s.log.Error("nie odczytano rewizji inwentarza", "host_id", hostID, "err", err)
+		s.log.Error("the revision of the inventory was not read", "host_id", hostID, "err", err)
 		return "", ""
 	}
-	if rewizja == nil || rewizja.Revision != odswiezenie.GetRevision() {
-		zapisana := "brak"
-		if rewizja != nil {
-			zapisana = rewizja.Revision
+	if revision == nil || revision.Revision != refresh.GetRevision() {
+		recorded := "none"
+		if revision != nil {
+			recorded = revision.Revision
 		}
 		return "inventory_revision_missing",
-			fmt.Sprintf("agent zglosil rewizje %s, panel ma %s",
-				odswiezenie.GetRevision(), zapisana)
+			fmt.Sprintf("the agent reported the revision %s, the panel has %s",
+				refresh.GetRevision(), recorded)
 	}
 	return "", ""
 }

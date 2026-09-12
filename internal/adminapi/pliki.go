@@ -19,7 +19,7 @@ var odciskHex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // zmieniony poza panelem wyglada tak samo jak plik zgodny, dopoki nie
 // porowna sie odciskow.
 type plikWidok struct {
-	managedfiles.StanDocelowy
+	managedfiles.DesiredState
 	ObservedSHA256 string `json:"observed_sha256,omitempty"`
 	Exists         bool   `json:"exists"`
 	Drift          bool   `json:"drift"`
@@ -42,7 +42,7 @@ func (s *Server) handleListManagedFiles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	stany, err := s.files.Lista(r.Context(), hostID)
+	stany, err := s.files.List(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -63,7 +63,7 @@ func (s *Server) handleListManagedFiles(w http.ResponseWriter, r *http.Request) 
 
 	widoki := make([]plikWidok, 0, len(stany))
 	for _, stan := range stany {
-		widok := plikWidok{StanDocelowy: stan}
+		widok := plikWidok{DesiredState: stan}
 		if plik, znany := obserwowane[stan.Path]; znany {
 			widok.ObservedSHA256 = plik.SHA256
 			widok.Exists = plik.Exists
@@ -102,7 +102,7 @@ func (s *Server) handleFileHistory(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "path_required", "path query parameter is required")
 		return
 	}
-	wersje, err := s.files.Historia(r.Context(), hostID, sciezka, 0)
+	wersje, err := s.files.History(r.Context(), hostID, sciezka, 0)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -124,8 +124,8 @@ func (s *Server) handleFileVersion(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeCollection(w, r, authz.PermFileRead, "file"); !ok {
 		return
 	}
-	tresc, err := s.files.Tresc(r.Context(), odcisk)
-	if errors.Is(err, managedfiles.ErrNieZnaleziono) {
+	tresc, err := s.files.Content(r.Context(), odcisk)
+	if errors.Is(err, managedfiles.ErrNotFound) {
 		problem(w, http.StatusNotFound, "version_not_found", "no such file version")
 		return
 	}

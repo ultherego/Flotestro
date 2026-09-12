@@ -6,68 +6,69 @@ import (
 	"time"
 )
 
-func TestObwodOtwieraSieDopieroPoSeriiBledow(t *testing.T) {
-	teraz := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
-	obwod := NowyObwod()
-	obwod.zegar = func() time.Time { return teraz }
-	blad := errors.New("zrodlo milczy")
+func TestTheBreakerOpensOnlyAfterARunOfErrors(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	breaker := NewBreaker()
+	breaker.clock = func() time.Time { return now }
+	failure := errors.New("the source says nothing")
 
-	// Jeden blad nie moze odciac zrodla: awarie bywaja chwilowe.
-	for i := 0; i < ProgBledow-1; i++ {
-		if err := obwod.Wykonaj(func() error { return blad }); !errors.Is(err, blad) {
-			t.Fatalf("proba %d: %v", i, err)
+	// One error must not cut a source off: failures are sometimes momentary.
+	for i := 0; i < ErrorThreshold-1; i++ {
+		if err := breaker.Do(func() error { return failure }); !errors.Is(err, failure) {
+			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
-	if obwod.Otwarty() {
-		t.Fatal("bezpiecznik otworzyl sie przed progiem")
+	if breaker.Open() {
+		t.Fatal("the breaker opened before the threshold")
 	}
 
-	if err := obwod.Wykonaj(func() error { return blad }); !errors.Is(err, blad) {
-		t.Fatalf("ostatnia proba: %v", err)
+	if err := breaker.Do(func() error { return failure }); !errors.Is(err, failure) {
+		t.Fatalf("the last attempt: %v", err)
 	}
-	if !obwod.Otwarty() {
-		t.Fatal("bezpiecznik nie otworzyl sie po serii bledow")
-	}
-
-	// Otwarty bezpiecznik odmawia od reki i ma wlasny blad: ekran, ktory
-	// czeka po piec sekund na kazdy panel, jest ekranem bez uzytkownikow.
-	wywolano := false
-	err := obwod.Wykonaj(func() error { wywolano = true; return nil })
-	if !errors.Is(err, ErrOtwartyObwod) {
-		t.Fatalf("otwarty bezpiecznik zwrocil %v", err)
-	}
-	if wywolano {
-		t.Fatal("otwarty bezpiecznik przepuscil wywolanie")
+	if !breaker.Open() {
+		t.Fatal("the breaker did not open after a run of errors")
 	}
 
-	// Po przerwie probujemy ponownie; jedna udana odpowiedz zamyka obwod.
-	teraz = teraz.Add(PrzerwaObwodu + time.Second)
-	if err := obwod.Wykonaj(func() error { return nil }); err != nil {
-		t.Fatalf("po przerwie: %v", err)
+	// An open breaker refuses outright and carries an error of its own: a
+	// screen that waits five seconds for each panel is a screen without
+	// users.
+	called := false
+	err := breaker.Do(func() error { called = true; return nil })
+	if !errors.Is(err, ErrBreakerOpen) {
+		t.Fatalf("the open breaker returned %v", err)
 	}
-	if obwod.Otwarty() {
-		t.Fatal("bezpiecznik nie zamknal sie po udanej odpowiedzi")
+	if called {
+		t.Fatal("the open breaker let a call through")
+	}
+
+	// After the pause we try again; one successful answer closes the breaker.
+	now = now.Add(BreakerPause + time.Second)
+	if err := breaker.Do(func() error { return nil }); err != nil {
+		t.Fatalf("after the pause: %v", err)
+	}
+	if breaker.Open() {
+		t.Fatal("the breaker did not close after a successful answer")
 	}
 }
 
-func TestMapowaniePodstawiaDaneHosta(t *testing.T) {
-	mapowanie := DomyslneMapowanie()
-	mapowanie.DashboardURL = "https://grafana.example.test/d/hosts?var-host={hostname}&var-site={site}"
+func TestTheMappingSubstitutesTheDataOfAHost(t *testing.T) {
+	mapping := DefaultMapping()
+	mapping.DashboardURL = "https://grafana.example.test/d/hosts?var-host={hostname}&var-site={site}"
 	host := Host{ID: "abc", Hostname: "web-01", Site: "waw", Environment: "prod"}
 
-	if etykieta := mapowanie.Etykieta(host); etykieta != "web-01:9100" {
-		t.Fatalf("etykieta hosta = %q", etykieta)
+	if label := mapping.Label(host); label != "web-01:9100" {
+		t.Fatalf("the label of the host = %q", label)
 	}
-	if filtr := mapowanie.FiltrHosta(host); filtr != `instance="web-01:9100"` {
-		t.Fatalf("filtr alertow = %q", filtr)
+	if filter := mapping.HostFilter(host); filter != `instance="web-01:9100"` {
+		t.Fatalf("the filter of the alerts = %q", filter)
 	}
-	odnosniki := mapowanie.Dla(host)
-	if odnosniki.Dashboard != "https://grafana.example.test/d/hosts?var-host=web-01&var-site=waw" {
-		t.Fatalf("odnosnik do dashboardu = %q", odnosniki.Dashboard)
+	links := mapping.For(host)
+	if links.Dashboard != "https://grafana.example.test/d/hosts?var-host=web-01&var-site=waw" {
+		t.Fatalf("the link to the dashboard = %q", links.Dashboard)
 	}
-	// Instalacja bez dashboardu nie dostaje odnosnika prowadzacego donikad.
-	puste := DomyslneMapowanie()
-	if puste.Dla(host).Dashboard != "" {
-		t.Fatal("panel wymyslil odnosnik do dashboardu, ktorego nie ma")
+	// An installation without a dashboard gets no link leading nowhere.
+	empty := DefaultMapping()
+	if empty.For(host).Dashboard != "" {
+		t.Fatal("the panel invented a link to a dashboard that does not exist")
 	}
 }

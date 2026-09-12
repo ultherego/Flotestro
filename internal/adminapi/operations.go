@@ -149,7 +149,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// tutaj, zeby plan i to, co trafi na host, byly tym samym. Zlecenie
 	// z pustym plikiem i odciskiem wersji zapisaloby pustke.
 	if action == opspec.ActionFileRollback && payload.File != nil {
-		tresc, err := s.files.Tresc(r.Context(), payload.File.VersionSHA256)
+		tresc, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
 		if err != nil {
 			problem(w, http.StatusBadRequest, "version_not_found",
 				"no stored version with that checksum")
@@ -254,7 +254,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// wartosc istnieje wylacznie w magazynie i przez chwile na hoscie.
 	if payload.File != nil && payload.File.ContentSecret.Empty() &&
 		(action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
-		if _, err := s.files.ZapiszWersje(r.Context(), tx, []byte(payload.File.Content)); err != nil {
+		if _, err := s.files.SaveVersion(r.Context(), tx, []byte(payload.File.Content)); err != nil {
 			s.fail(w, err)
 			return
 		}

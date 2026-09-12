@@ -23,7 +23,7 @@ import (
 type Monitoring struct {
 	Metryki   metrics.Provider
 	Alerty    alerts.Provider
-	Mapowanie integrations.Mapowanie
+	Mapowanie integrations.Mapping
 }
 
 // SetMonitoring podlacza integracje monitoringowe.
@@ -34,14 +34,14 @@ type raportMonitoringu struct {
 	HostID string `json:"host_id"`
 	// Sources opisuje stan zrodel: nieskonfigurowane, dzialajace albo takie,
 	// ktore nie odpowiadaja. To trzy rozne odpowiedzi.
-	Sources []integrations.Stan `json:"sources"`
+	Sources []integrations.State `json:"sources"`
 	// Label mowi, po czym panel rozpoznaje ten host u zrodel. Bez tego pusty
 	// wykres nie ma wyjasnienia.
-	Label    string                 `json:"label"`
-	Links    integrations.Odnosniki `json:"links"`
-	Alerts   []alerts.Alert         `json:"alerts"`
-	Silences []alerts.Cisza         `json:"silences"`
-	Series   []metrics.Szereg       `json:"series"`
+	Label    string             `json:"label"`
+	Links    integrations.Links `json:"links"`
+	Alerts   []alerts.Alert     `json:"alerts"`
+	Silences []alerts.Silence   `json:"silences"`
+	Series   []metrics.Series   `json:"series"`
 	// From i To opisuja zakres czasu wykresow: panel pokazuje cudze dane
 	// i mowi, z jakiego okna pochodza.
 	From time.Time `json:"from"`
@@ -63,22 +63,22 @@ func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opis := opisHosta(*host)
-	okno := s.monitoring.Mapowanie.OknoAlbo(oknoZapytania(r))
+	okno := s.monitoring.Mapowanie.WindowOr(oknoZapytania(r))
 	do := time.Now().UTC()
 	od := do.Add(-okno)
 
 	raport := raportMonitoringu{
 		HostID: hostID,
-		Label:  s.monitoring.Mapowanie.Etykieta(opis),
-		Links:  s.monitoring.Mapowanie.Dla(opis),
+		Label:  s.monitoring.Mapowanie.Label(opis),
+		Links:  s.monitoring.Mapowanie.For(opis),
 		From:   od, To: do,
-		Alerts: []alerts.Alert{}, Silences: []alerts.Cisza{}, Series: []metrics.Szereg{},
+		Alerts: []alerts.Alert{}, Silences: []alerts.Silence{}, Series: []metrics.Series{},
 	}
 	raport.Sources = s.stanZrodel(r)
 
-	if s.monitoring.Alerty != nil && s.monitoring.Alerty.Skonfigurowany() {
-		filtr := []string{s.monitoring.Mapowanie.FiltrHosta(opis)}
-		if lista, err := s.monitoring.Alerty.Alerty(r.Context(), filtr); err != nil {
+	if s.monitoring.Alerty != nil && s.monitoring.Alerty.Configured() {
+		filtr := []string{s.monitoring.Mapowanie.HostFilter(opis)}
+		if lista, err := s.monitoring.Alerty.Alerts(r.Context(), filtr); err != nil {
 			// Awaria zrodla alertow nie moze wywrocic zakladki: mowimy,
 			// czego nie wiadomo, i pokazujemy reszte.
 			raport.AlertsUnavailable = err.Error()
@@ -87,7 +87,7 @@ func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 			// ma pokazac "nic sie nie pali", a nie "nie wiadomo".
 			raport.Alerts = lista
 		}
-		if ciszy, err := s.monitoring.Alerty.Ciszy(r.Context(), filtr); err != nil {
+		if ciszy, err := s.monitoring.Alerty.Silences(r.Context(), filtr); err != nil {
 			if raport.AlertsUnavailable == "" {
 				raport.AlertsUnavailable = err.Error()
 			}
@@ -95,8 +95,8 @@ func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 			raport.Silences = ciszy
 		}
 	}
-	if s.monitoring.Metryki != nil && s.monitoring.Metryki.Skonfigurowany() {
-		raport.Series = s.monitoring.Metryki.Szeregi(r.Context(), raport.Label, od, do)
+	if s.monitoring.Metryki != nil && s.monitoring.Metryki.Configured() {
+		raport.Series = s.monitoring.Metryki.Series(r.Context(), raport.Label, od, do)
 	} else {
 		raport.MetricsUnavailable = "this installation has no metrics source configured"
 	}
@@ -104,13 +104,13 @@ func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 }
 
 // stanZrodel pyta integracje o zdrowie.
-func (s *Server) stanZrodel(r *http.Request) []integrations.Stan {
-	stany := make([]integrations.Stan, 0, 2)
+func (s *Server) stanZrodel(r *http.Request) []integrations.State {
+	stany := make([]integrations.State, 0, 2)
 	if s.monitoring.Metryki != nil {
-		stany = append(stany, s.monitoring.Metryki.Zdrowie(r.Context()))
+		stany = append(stany, s.monitoring.Metryki.Health(r.Context()))
 	}
 	if s.monitoring.Alerty != nil {
-		stany = append(stany, s.monitoring.Alerty.Zdrowie(r.Context()))
+		stany = append(stany, s.monitoring.Alerty.Health(r.Context()))
 	}
 	return stany
 }
@@ -162,7 +162,7 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Skonfigurowany() {
+	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Configured() {
 		problem(w, http.StatusServiceUnavailable, "alerts_not_configured",
 			"this installation has no alert source configured")
 		return
@@ -175,29 +175,29 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	}
 	trwanie := time.Duration(zadanie.DurationMinutes) * time.Minute
 	if trwanie <= 0 {
-		trwanie = alerts.DomyslnaCisza
+		trwanie = alerts.DefaultSilence
 	}
 
 	opis := opisHosta(*host)
 	teraz := time.Now().UTC()
-	cisza := alerts.Cisza{
-		Matchers: []alerts.Dopasowanie{{
+	cisza := alerts.Silence{
+		Matchers: []alerts.Matcher{{
 			Name:  s.monitoring.Mapowanie.HostLabel,
-			Value: s.monitoring.Mapowanie.Etykieta(opis),
+			Value: s.monitoring.Mapowanie.Label(opis),
 		}},
 		StartsAt: teraz, EndsAt: teraz.Add(trwanie),
 		CreatedBy: principal.Subject, Comment: zadanie.Comment,
 	}
 	if zadanie.AlertName != "" {
 		cisza.Matchers = append(cisza.Matchers,
-			alerts.Dopasowanie{Name: "alertname", Value: zadanie.AlertName})
+			alerts.Matcher{Name: "alertname", Value: zadanie.AlertName})
 	}
-	if err := alerts.WalidujCisze(cisza); err != nil {
+	if err := alerts.ValidateSilence(cisza); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_silence", err.Error())
 		return
 	}
 
-	identyfikator, err := s.monitoring.Alerty.Ucisz(r.Context(), cisza)
+	identyfikator, err := s.monitoring.Alerty.Silence(r.Context(), cisza)
 	if err != nil {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: principal.Subject,
@@ -234,13 +234,13 @@ func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Skonfigurowany() {
+	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Configured() {
 		problem(w, http.StatusServiceUnavailable, "alerts_not_configured",
 			"this installation has no alert source configured")
 		return
 	}
 	identyfikator := r.PathValue("silence")
-	if err := s.monitoring.Alerty.Odcisz(r.Context(), identyfikator); err != nil {
+	if err := s.monitoring.Alerty.Unsilence(r.Context(), identyfikator); err != nil {
 		problem(w, http.StatusBadGateway, "alerts_unavailable", err.Error())
 		return
 	}
@@ -275,7 +275,7 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 		"sources": s.stanZrodel(r),
 		"items":   []alertFloty{},
 	}
-	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Skonfigurowany() {
+	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Configured() {
 		odpowiedz["alerts_unavailable_reason"] = "this installation has no alert source configured"
 		writeJSON(w, http.StatusOK, odpowiedz)
 		return
@@ -289,11 +289,11 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 	poEtykiecie := map[string]hosts.Host{}
 	for _, host := range lista {
 		if principal.Can(authz.PermMonitoringRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			poEtykiecie[s.monitoring.Mapowanie.Etykieta(opisHosta(host))] = host
+			poEtykiecie[s.monitoring.Mapowanie.Label(opisHosta(host))] = host
 		}
 	}
 
-	wszystkie, err := s.monitoring.Alerty.Alerty(r.Context(), nil)
+	wszystkie, err := s.monitoring.Alerty.Alerts(r.Context(), nil)
 	if err != nil {
 		odpowiedz["alerts_unavailable_reason"] = err.Error()
 		writeJSON(w, http.StatusOK, odpowiedz)

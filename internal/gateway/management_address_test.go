@@ -6,49 +6,50 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// Adres widziany przez panel na wlasnym koncu polaczenia jest najmocniejszym
-// faktem, jaki ma o hoscie - ale tylko wtedy, gdy miedzy nimi nikogo nie ma.
-func TestAdresZPolaczeniaBezposredniego(t *testing.T) {
+// The address the panel sees at its own end of a connection is the strongest
+// fact it has about a host - but only when there is nobody between them.
+func TestTheAddressFromADirectConnection(t *testing.T) {
 	address, source := managementAddress("192.168.56.30:41234", "10.0.0.5", "")
 	if address != "192.168.56.30" {
-		t.Errorf("adres = %q, oczekiwano adresu z polaczenia", address)
+		t.Errorf("address = %q, expected the address from the connection", address)
 	}
 	if source != hosts.AddressFromSession {
-		t.Errorf("zrodlo = %q, oczekiwano %q", source, hosts.AddressFromSession)
+		t.Errorf("source = %q, expected %q", source, hosts.AddressFromSession)
 	}
 }
 
-// Za relayem panel widzi adres relaya. Podanie go jako adresu hosta byloby
-// falszem, wiec liczy sie wylacznie deklaracja hosta.
-func TestZaRelayemLiczySieDeklaracjaHosta(t *testing.T) {
+// Behind a relay the panel sees the address of the relay. Giving it as the
+// address of the host would be a falsehood, so only the declaration of the
+// host counts.
+func TestBehindARelayTheDeclarationOfTheHostCounts(t *testing.T) {
 	address, source := managementAddress("192.168.56.60:9000", "10.20.4.17", "b7c0-relay")
 	if address != "10.20.4.17" {
-		t.Errorf("adres = %q, oczekiwano adresu zadeklarowanego przez hosta", address)
+		t.Errorf("address = %q, expected the address declared by the host", address)
 	}
 	if source != hosts.AddressFromAgent {
-		t.Errorf("zrodlo = %q, oczekiwano %q", source, hosts.AddressFromAgent)
+		t.Errorf("source = %q, expected %q", source, hosts.AddressFromAgent)
 	}
 }
 
-// Brak obu zrodel zostawia adres nieustalony. Adres relaya nie moze podszyc
-// sie pod adres hosta tylko dlatego, ze innego nie ma.
-func TestBrakZrodelZostawiaAdresNieustalony(t *testing.T) {
+// Missing both sources leaves the address undetermined. The address of a relay
+// must not impersonate the address of a host just because there is no other.
+func TestMissingSourcesLeaveTheAddressUndetermined(t *testing.T) {
 	address, source := managementAddress("192.168.56.60:9000", "", "b7c0-relay")
 	if address != "" || source != "" {
-		t.Fatalf("adres = %q, zrodlo = %q; oczekiwano stanu nieustalonego", address, source)
+		t.Fatalf("address = %q, source = %q; expected an undetermined state", address, source)
 	}
 }
 
-// Adres bez portu nie da sie rozdzielic. Zamiast zapisac smiec, zostaje
-// deklaracja hosta albo stan nieustalony.
-func TestNiepoprawnyAdresPolaczeniaNieJestZapisywany(t *testing.T) {
-	address, source := managementAddress("bez-portu", "", "")
+// An address without a port cannot be split. Instead of recording rubbish what
+// stays is the declaration of the host or an undetermined state.
+func TestAnInvalidConnectionAddressIsNotRecorded(t *testing.T) {
+	address, source := managementAddress("without-a-port", "", "")
 	if address != "" || source != "" {
-		t.Fatalf("adres = %q, zrodlo = %q; oczekiwano stanu nieustalonego", address, source)
+		t.Fatalf("address = %q, source = %q; expected an undetermined state", address, source)
 	}
 
-	address, source = managementAddress("bez-portu", "10.20.4.17", "")
+	address, source = managementAddress("without-a-port", "10.20.4.17", "")
 	if address != "10.20.4.17" || source != hosts.AddressFromAgent {
-		t.Fatalf("adres = %q, zrodlo = %q; oczekiwano deklaracji hosta", address, source)
+		t.Fatalf("address = %q, source = %q; expected the declaration of the host", address, source)
 	}
 }

@@ -139,7 +139,7 @@ func run() error {
 		config.Env("FLOTESTRO_ALERTMANAGER_URL", ""),
 		"the address of the alert source (the Alertmanager API); empty disables alerts and silences")
 	flag.DurationVar(&monitoring.Timeout, "monitoring-timeout",
-		config.EnvDuration("FLOTESTRO_MONITORING_TIMEOUT", integrations.DomyslnyLimitCzasu),
+		config.EnvDuration("FLOTESTRO_MONITORING_TIMEOUT", integrations.DefaultTimeout),
 		"the time limit of a single question to the monitoring")
 	flag.StringVar(&monitoring.HostLabel, "monitoring-host-label",
 		config.Env("FLOTESTRO_MONITORING_HOST_LABEL", "instance"),
@@ -349,7 +349,7 @@ func run() error {
 	// The issuer stands between the services and the certificate authority.
 	// Today the CA key lies in a file of the panel; moving it into an HSM is
 	// to change this one line alone rather than the protocol of the agent.
-	certIssuer := issuer.ZZaufania(trust)
+	certIssuer := issuer.FromTrust(trust)
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
 		registry, certIssuer, relayStore, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
@@ -359,7 +359,7 @@ func run() error {
 	// A host switching between gateways leaves a session on the previous one
 	// that still looks alive. Without this listener both gateways would
 	// consider themselves the right one and the same job would go out twice.
-	go gateway.NasluchujEpok(ctx, pool, registry, cfg.GatewayID, log)
+	go gateway.WatchEpochs(ctx, pool, registry, cfg.GatewayID, log)
 
 	// The relay has a service of its own on the same listener: its certificate
 	// is a certificate of the fleet, only of a different kind, so it goes
@@ -440,16 +440,16 @@ func run() error {
 	// tab then says outright that no sources were named instead of drawing
 	// empty charts.
 	panelServer.SetMonitoring(adminapi.Monitoring{
-		Metryki: metricsIntegration.NowyPrometheus(monitoring.PrometheusURL, monitoring.Timeout, nil),
-		Alerty:  alertsIntegration.NowyAlertmanager(monitoring.AlertmanagerURL, monitoring.Timeout),
-		Mapowanie: integrations.Mapowanie{
+		Metryki: metricsIntegration.NewPrometheus(monitoring.PrometheusURL, monitoring.Timeout, nil),
+		Alerty:  alertsIntegration.NewAlertmanager(monitoring.AlertmanagerURL, monitoring.Timeout),
+		Mapowanie: integrations.Mapping{
 			HostLabel:        monitoring.HostLabel,
 			HostValue:        monitoring.HostValue,
 			SiteLabel:        monitoring.SiteLabel,
 			EnvironmentLabel: monitoring.EnvironmentLabel,
 			DashboardURL:     monitoring.DashboardURL,
 			LogsURL:          monitoring.LogsURL,
-			Okno:             monitoring.Window,
+			Window:           monitoring.Window,
 		},
 	})
 	if monitoring.PrometheusURL != "" || monitoring.AlertmanagerURL != "" {
@@ -571,7 +571,7 @@ func run() error {
 			// its repositories gets a recomputation at once. Otherwise it
 			// would show up for half an hour as a host the panel knows
 			// nothing about - although it has just answered it.
-			agentService.SetOdswiezenieOceny(vulnScheduler.Refresh)
+			agentService.SetAssessmentRefresh(vulnScheduler.Refresh)
 			go vulnScheduler.Run(ctx)
 		}
 		// The enrichment runs in a separate, rarer cycle and by a separate

@@ -1,11 +1,11 @@
-// Package oidc obsluguje logowanie operatorow przez zewnetrznego dostawce
-// tozsamosci. Panel nigdy nie przyjmuje samej nazwy grupy z requestu: role
-// pochodza wylacznie z podpisanego tokenu o zweryfikowanym issuer i audience.
+// Package oidc handles the login of operators through an external identity
+// provider. The panel never accepts the name of a group from a request: the
+// roles come from a signed token with a verified issuer and audience alone.
 //
-// Weryfikacja podpisu i rotacja kluczy sa realizowane przez biblioteke
-// go-oidc. Wlasna implementacja walidacji JWT jest czestym zrodlem luk
-// (alg=none, pomylenie kid, brak sprawdzenia audience), a to jest kod, od
-// ktorego zalezy caly dostep do panelu.
+// The verification of the signature and the rotation of the keys are done by
+// the go-oidc library. A JWT validation of one's own is a common source of
+// holes (alg=none, a confused kid, a missing audience check), and this is the
+// code the whole access to the panel depends on.
 package oidc
 
 import (
@@ -23,24 +23,25 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Config opisuje polaczenie z dostawca tozsamosci.
+// Config describes the connection to an identity provider.
 type Config struct {
 	IssuerURL    string
 	ClientID     string
 	ClientSecret string
 	RedirectURL  string
 	Scopes       []string
-	// GroupsClaim wskazuje pole tokenu z lista grup uzytkownika.
+	// GroupsClaim names the field of the token with the list of the groups of
+	// the user.
 	GroupsClaim string
 	HTTPClient  *http.Client
 }
 
-// Enabled mowi, czy logowanie przez dostawce jest skonfigurowane.
+// Enabled says whether the login through a provider is configured.
 func (c Config) Enabled() bool {
 	return c.IssuerURL != "" && c.ClientID != ""
 }
 
-// Provider realizuje przeplyw Authorization Code z PKCE.
+// Provider implements the Authorization Code flow with PKCE.
 type Provider struct {
 	config   Config
 	provider *coreoidc.Provider
@@ -49,10 +50,11 @@ type Provider struct {
 	client   *http.Client
 }
 
-// Discover pobiera konfiguracje dostawcy wraz z adresem kluczy podpisujacych.
+// Discover fetches the configuration of the provider together with the
+// address of the signing keys.
 func Discover(ctx context.Context, config Config) (*Provider, error) {
 	if !config.Enabled() {
-		return nil, fmt.Errorf("dostawca tozsamosci nie jest skonfigurowany")
+		return nil, fmt.Errorf("the identity provider is not configured")
 	}
 	if len(config.Scopes) == 0 {
 		config.Scopes = []string{coreoidc.ScopeOpenID, "profile", "email"}
@@ -74,7 +76,8 @@ func Discover(ctx context.Context, config Config) (*Provider, error) {
 	return &Provider{
 		config:   config,
 		provider: provider,
-		// Weryfikator sprawdza podpis, issuer, audience i czasy waznosci.
+		// The verifier checks the signature, the issuer, the audience and the
+		// validity times.
 		verifier: provider.Verifier(&coreoidc.Config{ClientID: config.ClientID}),
 		oauth: oauth2.Config{
 			ClientID:     config.ClientID,
@@ -87,10 +90,10 @@ func Discover(ctx context.Context, config Config) (*Provider, error) {
 	}, nil
 }
 
-// Issuer zwraca identyfikator dostawcy.
+// Issuer returns the identifier of the provider.
 func (p *Provider) Issuer() string { return strings.TrimSuffix(p.config.IssuerURL, "/") }
 
-// AuthFlow to jednorazowy stan rozpoczetego logowania.
+// AuthFlow is the one-time state of a login that has been started.
 type AuthFlow struct {
 	State        string
 	Nonce        string
@@ -98,19 +101,21 @@ type AuthFlow struct {
 	AuthURL      string
 }
 
-// StepUp opisuje zadanie ponownego uwierzytelnienia. Operacje o najwiekszym
-// wplywie wymagaja swiezego logowania, a nie samego posiadania sesji.
+// StepUp describes a demand for another authentication. The operations of the
+// greatest impact require a fresh login rather than merely holding a
+// session.
 type StepUp struct {
-	// Force wymusza ponowne uwierzytelnienie nawet przy waznej sesji
-	// u dostawcy (prompt=login, max_age=0).
+	// Force demands another authentication even with a valid session at the
+	// provider (prompt=login, max_age=0).
 	Force bool
-	// ACRValues zada konkretnego poziomu uwierzytelnienia. Puste oznacza, ze
-	// instalacja nie zdefiniowala poziomu i panel poprzestaje na swiezosci.
+	// ACRValues demand a specific level of authentication. Empty means the
+	// installation defined no level and the panel settles for freshness.
 	ACRValues string
 }
 
-// BeginAuth buduje adres logowania wraz z PKCE. Weryfikator zostaje po stronie
-// serwera; do przegladarki trafia wylacznie jego skrot w challenge.
+// BeginAuth builds the login address together with PKCE. The verifier stays on
+// the side of the server; only its digest reaches the browser in the
+// challenge.
 func (p *Provider) BeginAuth(stepUp StepUp) (*AuthFlow, error) {
 	state, err := randomString(32)
 	if err != nil {
@@ -130,9 +135,10 @@ func (p *Provider) BeginAuth(stepUp StepUp) (*AuthFlow, error) {
 	}, nil
 }
 
-// authOptions sklada parametry zadania autoryzacji. Przy step-up dokladamy
-// prompt=login i max_age=0: bez nich dostawca odeslalby istniejaca sesje
-// i panel uznalby stare uwierzytelnienie za swieze.
+// authOptions assembles the parameters of the authorisation request. At a
+// step-up we add prompt=login and max_age=0: without them the provider would
+// send the existing session back and the panel would treat an old
+// authentication as fresh.
 func authOptions(nonce, verifier string, stepUp StepUp) []oauth2.AuthCodeOption {
 	options := []oauth2.AuthCodeOption{
 		coreoidc.Nonce(nonce),
@@ -149,7 +155,7 @@ func authOptions(nonce, verifier string, stepUp StepUp) []oauth2.AuthCodeOption 
 	return options
 }
 
-// TokenSet to komplet tokenow zwrocony przez dostawce.
+// TokenSet is the set of tokens returned by the provider.
 type TokenSet struct {
 	AccessToken  string
 	IDToken      string
@@ -157,7 +163,7 @@ type TokenSet struct {
 	ExpiresAt    time.Time
 }
 
-// Claims to zweryfikowana tozsamosc uzytkownika.
+// Claims are the verified identity of a user.
 type Claims struct {
 	Subject           string
 	PreferredUsername string
@@ -165,30 +171,30 @@ type Claims struct {
 	Name              string
 	Groups            []string
 
-	// AuthTime jest chwila, w ktorej dostawca faktycznie uwierzytelnil
-	// uzytkownika. Zerowa wartosc oznacza, ze dostawca jej nie podal, i nie
-	// moze byc czytana jako "przed chwila".
+	// AuthTime is the moment the provider actually authenticated the user. A
+	// zero value means the provider did not give it and must not be read as "a
+	// moment ago".
 	AuthTime time.Time
-	// ACR i AMR opisuja sposob uwierzytelnienia. Panel ich nie interpretuje
-	// po swojemu: MFA nalezy do dostawcy tozsamosci, a panel jedynie sprawdza,
-	// czy dostal zadeklarowany poziom.
+	// ACR and AMR describe the way of the authentication. The panel does not
+	// interpret them in its own way: MFA belongs to the identity provider, and
+	// the panel only checks whether it got the declared level.
 	ACR string
 	AMR []string
 }
 
-// Exchange wymienia kod autoryzacyjny na tokeny i weryfikuje token tozsamosci.
-// Nonce jest sprawdzany, bo bez tego token z innej sesji logowania mogłby
-// zostac wstrzykniety w trwajacy przeplyw.
+// Exchange exchanges the authorisation code for the tokens and verifies the
+// identity token. The nonce is checked, because without it a token from
+// another login session could be injected into a running flow.
 func (p *Provider) Exchange(ctx context.Context, code, codeVerifier, nonce string) (*TokenSet, *Claims, error) {
 	exchangeCtx := coreoidc.ClientContext(ctx, p.client)
 	token, err := p.oauth.Exchange(exchangeCtx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
-		return nil, nil, fmt.Errorf("wymiana kodu: %w", err)
+		return nil, nil, fmt.Errorf("exchanging the code: %w", err)
 	}
 
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
-		return nil, nil, fmt.Errorf("odpowiedz nie zawiera id_token")
+		return nil, nil, fmt.Errorf("the answer carries no id_token")
 	}
 	claims, err := p.verify(ctx, rawIDToken, nonce)
 	if err != nil {
@@ -203,13 +209,13 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier, nonce strin
 	}, claims, nil
 }
 
-// Refresh odnawia sesje. Refresh token nigdy nie opuszcza serwera.
+// Refresh renews the session. The refresh token never leaves the server.
 func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*TokenSet, *Claims, error) {
 	refreshCtx := coreoidc.ClientContext(ctx, p.client)
 	source := p.oauth.TokenSource(refreshCtx, &oauth2.Token{RefreshToken: refreshToken})
 	token, err := source.Token()
 	if err != nil {
-		return nil, nil, fmt.Errorf("odnowienie sesji: %w", err)
+		return nil, nil, fmt.Errorf("renewing the session: %w", err)
 	}
 
 	set := &TokenSet{
@@ -221,8 +227,8 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*TokenSet,
 		set.RefreshToken = refreshToken
 	}
 
-	// Przy odnowieniu nonce nie obowiazuje: token nie pochodzi z nowego
-	// logowania uzytkownika.
+	// At a renewal the nonce does not hold: the token does not come from a new
+	// login of the user.
 	if rawIDToken, ok := token.Extra("id_token").(string); ok && rawIDToken != "" {
 		set.IDToken = rawIDToken
 		claims, err := p.verify(ctx, rawIDToken, "")
@@ -234,20 +240,21 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*TokenSet,
 	return set, nil, nil
 }
 
-// verify sprawdza podpis, issuer, audience, czasy waznosci i nonce.
+// verify checks the signature, the issuer, the audience, the validity times
+// and the nonce.
 func (p *Provider) verify(ctx context.Context, rawIDToken, expectedNonce string) (*Claims, error) {
 	verifyCtx := coreoidc.ClientContext(ctx, p.client)
 	idToken, err := p.verifier.Verify(verifyCtx, rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("weryfikacja tokenu tozsamosci: %w", err)
+		return nil, fmt.Errorf("verifying the identity token: %w", err)
 	}
 	if expectedNonce != "" && idToken.Nonce != expectedNonce {
-		return nil, fmt.Errorf("nonce tokenu nie zgadza sie z rozpoczetym logowaniem")
+		return nil, fmt.Errorf("the nonce of the token does not match the login that was started")
 	}
 
 	raw := map[string]any{}
 	if err := idToken.Claims(&raw); err != nil {
-		return nil, fmt.Errorf("odczyt claims: %w", err)
+		return nil, fmt.Errorf("reading the claims: %w", err)
 	}
 
 	claims := &Claims{
@@ -261,13 +268,14 @@ func (p *Provider) verify(ctx context.Context, rawIDToken, expectedNonce string)
 		AuthTime:          timeClaim(raw, "auth_time"),
 	}
 	if claims.Subject == "" {
-		return nil, fmt.Errorf("token nie zawiera identyfikatora podmiotu")
+		return nil, fmt.Errorf("the token carries no subject identifier")
 	}
 	return claims, nil
 }
 
-// LogoutURL buduje adres wylogowania u dostawcy. Uniewaznienie sesji panelu
-// nie wystarcza: bez tego dostawca zalogowalby uzytkownika ponownie bez pytania.
+// LogoutURL builds the logout address at the provider. Invalidating the
+// session of the panel is not enough: without this the provider would log the
+// user in again without asking.
 func (p *Provider) LogoutURL(idToken, redirectAfter string) string {
 	var endpoint struct {
 		EndSessionEndpoint string `json:"end_session_endpoint"`
@@ -285,9 +293,10 @@ func (p *Provider) LogoutURL(idToken, redirectAfter string) string {
 	return url
 }
 
-// timeClaim czyta znacznik czasu wyrazony w sekundach epoki. Brak wartosci
-// daje czas zerowy, ktory znaczy "nieustalony": panel nie moze zalozyc, ze
-// uwierzytelnienie nastapilo przed chwila, skoro dostawca tego nie powiedzial.
+// timeClaim reads a timestamp expressed in seconds of the epoch. A missing
+// value gives the zero time, which means "undetermined": the panel must not
+// assume the authentication happened a moment ago when the provider did not
+// say so.
 func timeClaim(claims map[string]any, name string) time.Time {
 	switch value := claims[name].(type) {
 	case float64:
@@ -309,8 +318,8 @@ func stringClaim(claims map[string]any, name string) string {
 	return value
 }
 
-// stringsClaim czyta liste grup. Dostawcy zwracaja ja raz jako tablice,
-// raz jako pojedynczy ciag, wiec przyjmujemy obie postacie.
+// stringsClaim reads the list of groups. The providers return it one time as
+// an array and another as a single string, so we accept both shapes.
 func stringsClaim(claims map[string]any, name string) []string {
 	switch value := claims[name].(type) {
 	case []any:

@@ -96,7 +96,7 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fragmenty, err := s.inventory.FragmentyHostow(r.Context(), identyfikatory)
+	fragmenty, err := s.inventory.HostFragments(r.Context(), identyfikatory)
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -66,9 +66,9 @@ type Vulnerabilities struct {
 	// RedHatURL names the directory with the CSAF/VEX data of Red Hat; empty
 	// disables this source.
 	RedHatURL string
-	// RedHatCache jest katalogiem, w ktorym panel trzyma odczytane
-	// ustalenia Red Hata miedzy cyklami. Pelne dane to trzysta megabajtow
-	// archiwum, wiec bez pamieci kazdy cykl pobieralby je od nowa.
+	// RedHatCache is the directory the panel keeps the Red Hat findings it
+	// has read in between cycles. The full data are a three hundred megabyte
+	// archive, so without a memory every cycle would fetch them anew.
 	RedHatCache string
 	// NVDURL wskazuje API bazy NVD; pusty wylacza wzbogacanie. To zrodlo
 	// settles nothing - it only adds the CVSS score and the description of a

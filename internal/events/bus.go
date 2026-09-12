@@ -1,9 +1,10 @@
-// Package events rozglasza zmiany stanu operacji do otwartych ekranow panelu.
+// Package events broadcasts the changes of the state of operations to the open
+// screens of the panel.
 //
-// Zrodlem jest powiadomienie z PostgreSQL, a nie kanal w pamieci procesu.
-// Panel moze dzialac w kilku instancjach, a agent laczy sie z ta, ktora
-// akurat go przyjela - operator patrzacy przez inna instancje musi widziec
-// to samo.
+// The source is a notification from PostgreSQL rather than a channel in the
+// memory of the process. The panel may run in several instances, and an agent
+// connects to the one that happened to accept it - an operator looking through
+// another instance has to see the same thing.
 package events
 
 import (
@@ -16,37 +17,41 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Kanaly powiadomien w bazie. Postep jest osobny, bo jest ulotny: nie
-// zapisujemy go i nie wolno wnioskowac z niego o wyniku.
+// The notification channels in the database. Progress has one of its own,
+// because it is transient: we do not record it and one must not infer the
+// result from it.
+//
+// The names of the channels stay as they are until a migration renames them
+// together with the triggers that publish on them.
 const (
-	kanal         = "flotestro_zadania"
-	kanalPostep   = "flotestro_postep"
-	kanalKampanie = "flotestro_kampanie"
-	kanalLogow    = "flotestro_logi"
+	jobChannel      = "flotestro_zadania"
+	progressChannel = "flotestro_postep"
+	campaignChannel = "flotestro_kampanie"
+	logChannel      = "flotestro_logi"
 )
 
-// Event opisuje zmiane stanu jednej operacji albo jej postep.
+// Event describes the change of the state of one operation or its progress.
 type Event struct {
 	JobID      string `json:"job_id"`
 	State      string `json:"state,omitempty"`
 	CampaignID string `json:"campaign_id,omitempty"`
-	// Progress jest wypelniony dla zdarzen postepu. Postep nie zmienia stanu
-	// operacji i nie zastepuje jej wyniku.
+	// Progress is filled in for progress events. Progress does not change the
+	// state of an operation and does not replace its result.
 	Progress *Progress `json:"progress,omitempty"`
-	// Log jest wypelniony dla podgladu dziennika. Linie sa ulotne: nie sa
-	// zapisywane i nie da sie ich odczytac po fakcie.
+	// Log is filled in for the live view of a log. The lines are transient:
+	// they are not recorded and cannot be read after the fact.
 	Log *LogLines `json:"log,omitempty"`
 }
 
-// LogLines to kawalek podgladu dziennika.
+// LogLines is a piece of the live view of a log.
 type LogLines struct {
 	Lines []string `json:"lines"`
-	// Dropped mowi, ile linii pominieto przez limit tempa. Ciche pominiecie
-	// kazaloby operatorowi wierzyc, ze widzi wszystko.
+	// Dropped says how many lines were skipped because of the rate limit. A
+	// silent skip would have the operator believe they see everything.
 	Dropped uint32 `json:"dropped,omitempty"`
 }
 
-// Progress opisuje postep operacji w toku.
+// Progress describes the progress of a running operation.
 type Progress struct {
 	Step    uint32  `json:"step,omitempty"`
 	Total   uint32  `json:"total,omitempty"`
@@ -54,56 +59,58 @@ type Progress struct {
 	Message string  `json:"message,omitempty"`
 }
 
-// Bus rozglasza zdarzenia do subskrybentow w tym procesie.
+// Bus broadcasts the events to the subscribers in this process.
 type Bus struct {
 	pool *pgxpool.Pool
 
-	mu          sync.Mutex
-	subskrypcje map[int]subskrypcja
-	nastepny    int
+	mu            sync.Mutex
+	subscriptions map[int]subscription
+	next          int
 }
 
-type subskrypcja struct {
-	filtr func(Event) bool
-	kanal chan Event
+type subscription struct {
+	filter  func(Event) bool
+	channel chan Event
 }
 
 func NewBus(pool *pgxpool.Pool) *Bus {
-	return &Bus{pool: pool, subskrypcje: map[int]subskrypcja{}}
+	return &Bus{pool: pool, subscriptions: map[int]subscription{}}
 }
 
-// Run nasluchuje powiadomien do konca kontekstu. Zerwane polaczenie jest
-// odtwarzane: utrata nasluchu nie moze cicho zatrzymac postepu na ekranach.
+// Run listens for the notifications until the context ends. A broken
+// connection is recreated: losing the listener must not silently stop the
+// progress on the screens.
 func (b *Bus) Run(ctx context.Context, log interface{ Error(string, ...any) }) {
-	odstep := time.Second
+	interval := time.Second
 	for ctx.Err() == nil {
-		if err := b.nasluchuj(ctx); err != nil && ctx.Err() == nil {
-			log.Error("nasluch powiadomien przerwany", "err", err, "ponowienie_za", odstep.String())
+		if err := b.listen(ctx); err != nil && ctx.Err() == nil {
+			log.Error("the listening for notifications was interrupted",
+				"err", err, "retry_in", interval.String())
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(odstep):
+			case <-time.After(interval):
 			}
-			if odstep < 30*time.Second {
-				odstep *= 2
+			if interval < 30*time.Second {
+				interval *= 2
 			}
 			continue
 		}
-		odstep = time.Second
+		interval = time.Second
 	}
 }
 
-func (b *Bus) nasluchuj(ctx context.Context) error {
-	// Nasluch zajmuje polaczenie na wylacznosc, wiec bierzemy je z puli
-	// i trzymamy, zamiast wypozyczac przy kazdym powiadomieniu.
+func (b *Bus) listen(ctx context.Context) error {
+	// The listening occupies a connection exclusively, so we take one from the
+	// pool and keep it instead of borrowing one for every notification.
 	conn, err := b.pool.Acquire(ctx)
 	if err != nil {
 		return err
 	}
 	defer conn.Release()
 
-	for _, nazwa := range []string{kanal, kanalPostep, kanalKampanie, kanalLogow} {
-		if _, err := conn.Exec(ctx, "listen "+nazwa); err != nil {
+	for _, name := range []string{jobChannel, progressChannel, campaignChannel, logChannel} {
+		if _, err := conn.Exec(ctx, "listen "+name); err != nil {
 			return err
 		}
 	}
@@ -113,51 +120,53 @@ func (b *Bus) nasluchuj(ctx context.Context) error {
 			return err
 		}
 		switch notification.Channel {
-		case kanalPostep:
-			b.rozglos(parsujPostep(notification.Payload))
-		case kanalKampanie:
-			b.rozglos(parsujCel(notification.Payload))
-		case kanalLogow:
-			b.rozglos(parsujPostep(notification.Payload))
+		case progressChannel:
+			b.broadcast(parseProgress(notification.Payload))
+		case campaignChannel:
+			b.broadcast(parseTarget(notification.Payload))
+		case logChannel:
+			b.broadcast(parseProgress(notification.Payload))
 		default:
-			b.rozglos(parsuj(notification.Payload))
+			b.broadcast(parse(notification.Payload))
 		}
 	}
 }
 
-// parsuj czyta tresc powiadomienia: identyfikator, stan i opcjonalna kampanie.
-func parsuj(payload string) Event {
-	czesci := strings.SplitN(payload, " ", 3)
+// parse reads the content of a notification: the identifier, the state and an
+// optional campaign.
+func parse(payload string) Event {
+	parts := strings.SplitN(payload, " ", 3)
 	event := Event{}
-	if len(czesci) > 0 {
-		event.JobID = czesci[0]
+	if len(parts) > 0 {
+		event.JobID = parts[0]
 	}
-	if len(czesci) > 1 {
-		event.State = czesci[1]
+	if len(parts) > 1 {
+		event.State = parts[1]
 	}
-	if len(czesci) > 2 {
-		event.CampaignID = strings.TrimSpace(czesci[2])
+	if len(parts) > 2 {
+		event.CampaignID = strings.TrimSpace(parts[2])
 	}
 	return event
 }
 
-// parsujCel czyta powiadomienie o zmianie stanu celu kampanii. Cel nie jest
-// operacja: przechodzi przez wlasne stany, ktorych zadne zadanie nie
-// odzwierciedla, wiec jego zdarzenie nie niesie identyfikatora operacji.
-func parsujCel(payload string) Event {
-	czesci := strings.SplitN(payload, " ", 2)
+// parseTarget reads the notification about a change of the state of a target
+// of a campaign. A target is not an operation: it goes through states of its
+// own that no job reflects, so its event carries no identifier of an
+// operation.
+func parseTarget(payload string) Event {
+	parts := strings.SplitN(payload, " ", 2)
 	event := Event{}
-	if len(czesci) > 0 {
-		event.CampaignID = czesci[0]
+	if len(parts) > 0 {
+		event.CampaignID = parts[0]
 	}
-	if len(czesci) > 1 {
-		event.State = strings.TrimSpace(czesci[1])
+	if len(parts) > 1 {
+		event.State = strings.TrimSpace(parts[1])
 	}
 	return event
 }
 
-// parsujPostep czyta powiadomienie o postepie zapisane jako JSON.
-func parsujPostep(payload string) Event {
+// parseProgress reads a progress notification written as JSON.
+func parseProgress(payload string) Event {
 	var event Event
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		return Event{}
@@ -165,8 +174,9 @@ func parsujPostep(payload string) Event {
 	return event
 }
 
-// PublishLog rozglasza kawalek podgladu dziennika. Linie ida osobnym kanalem
-// niz postep: postep opisuje operacje, a podglad jest jej trescia.
+// PublishLog broadcasts a piece of the live view of a log. The lines go over a
+// channel separate from the progress: the progress describes the operation and
+// the view is its content.
 func (b *Bus) PublishLog(ctx context.Context, event Event) error {
 	if event.JobID == "" {
 		return nil
@@ -175,13 +185,14 @@ func (b *Bus) PublishLog(ctx context.Context, event Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = b.pool.Exec(ctx, "select pg_notify($1, $2)", kanalLogow, string(payload))
+	_, err = b.pool.Exec(ctx, "select pg_notify($1, $2)", logChannel, string(payload))
 	return err
 }
 
-// PublishProgress rozglasza postep operacji. Postep nie jest zapisywany:
-// idzie przez powiadomienie i znika. Ekran, ktory sie wlasnie podlaczyl,
-// zobaczy dopiero nastepny - i to wystarczy, bo wynik i tak jest w bazie.
+// PublishProgress broadcasts the progress of an operation. The progress is not
+// recorded: it goes through a notification and disappears. A screen that has
+// just connected will see the next one - and that is enough, because the
+// result is in the database anyway.
 func (b *Bus) PublishProgress(ctx context.Context, event Event) error {
 	if event.JobID == "" {
 		return nil
@@ -190,50 +201,50 @@ func (b *Bus) PublishProgress(ctx context.Context, event Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = b.pool.Exec(ctx, "select pg_notify($1, $2)", kanalPostep, string(payload))
+	_, err = b.pool.Exec(ctx, "select pg_notify($1, $2)", progressChannel, string(payload))
 	return err
 }
 
-func (b *Bus) rozglos(event Event) {
+func (b *Bus) broadcast(event Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, sub := range b.subskrypcje {
-		if !sub.filtr(event) {
+	for _, sub := range b.subscriptions {
+		if !sub.filter(event) {
 			continue
 		}
 		select {
-		case sub.kanal <- event:
+		case sub.channel <- event:
 		default:
-			// Wolny odbiorca nie moze wstrzymac rozglaszania. Zgubione
-			// zdarzenie nie gubi stanu: ekran i tak odczytuje go z bazy,
-			// a kolejne zdarzenie go dogoni.
+			// A slow receiver must not hold the broadcasting back. A lost
+			// event does not lose the state: the screen reads it from the
+			// database anyway, and the next event catches up with it.
 		}
 	}
 }
 
-// Subscribe zwraca kanal zdarzen pasujacych do filtru oraz funkcje konczaca
-// subskrypcje.
-func (b *Bus) Subscribe(filtr func(Event) bool) (<-chan Event, func()) {
-	kanalZdarzen := make(chan Event, 16)
+// Subscribe returns the channel of the events matching the filter along with
+// the function that ends the subscription.
+func (b *Bus) Subscribe(filter func(Event) bool) (<-chan Event, func()) {
+	eventChannel := make(chan Event, 16)
 	b.mu.Lock()
-	id := b.nastepny
-	b.nastepny++
-	b.subskrypcje[id] = subskrypcja{filtr: filtr, kanal: kanalZdarzen}
+	id := b.next
+	b.next++
+	b.subscriptions[id] = subscription{filter: filter, channel: eventChannel}
 	b.mu.Unlock()
 
-	return kanalZdarzen, func() {
+	return eventChannel, func() {
 		b.mu.Lock()
-		delete(b.subskrypcje, id)
+		delete(b.subscriptions, id)
 		b.mu.Unlock()
 	}
 }
 
-// ForJob filtruje zdarzenia jednej operacji.
+// ForJob filters the events of one operation.
 func ForJob(jobID string) func(Event) bool {
 	return func(event Event) bool { return event.JobID == jobID }
 }
 
-// ForCampaign filtruje zdarzenia operacji jednej kampanii.
+// ForCampaign filters the events of the operations of one campaign.
 func ForCampaign(campaignID string) func(Event) bool {
 	return func(event Event) bool { return event.CampaignID == campaignID }
 }

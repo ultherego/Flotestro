@@ -1,14 +1,14 @@
-// Package issuer oddziela wystawianie certyfikatow floty od tego, gdzie lezy
-// klucz urzedu.
+// Package issuer separates the issuing of the certificates of the fleet from
+// where the key of the authority lies.
 //
-// Dzis klucz CA jest plikiem, ktory panel czyta przy starcie. Kiedys moze
-// lezec w HSM albo w zdalnej usludze podpisujacej - i wtedy zmienia sie
-// wylacznie implementacja tego interfejsu. Protokol agenta, kontrakt
-// enrollmentu i reguly zakresu zostaja te same, bo nie wiedza, czym jest
-// podpisujacy.
+// Today the CA key is a file the panel reads at start. One day it may lie in
+// an HSM or in a remote signing service - and only the implementation of this
+// interface changes then. The protocol of the agent, the contract of the
+// enrollment and the rules of scope stay the same, because they do not know
+// what the signer is.
 //
-// Rozdzielenie jest tez granica testow: usluge da sie sprawdzic z wystawca,
-// ktory zawodzi na zadanie, bez budowania calego PKI.
+// The separation is a boundary for the tests as well: a service can be checked
+// with an issuer that fails on demand, without building a whole PKI.
 package issuer
 
 import (
@@ -18,86 +18,90 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
-// Certyfikat jest wystawionym certyfikatem tozsamosci floty.
+// Certificate is an issued certificate of an identity of the fleet.
 //
-// Typ jest wlasny, a nie zapozyczony z pki: uslugi maja zalezec od tego
-// kontraktu, a nie od struktury urzedu certyfikacji.
-type Certyfikat struct {
+// The type is our own rather than borrowed from pki: the services are to
+// depend on this contract rather than on the structure of the certificate
+// authority.
+type Certificate struct {
 	PEM         []byte
 	Serial      string
 	Fingerprint []byte
 	NotBefore   time.Time
 	NotAfter    time.Time
 	CommonName  string
-	// Wystawca pozwala policzyc, ilu hostow dotyczy wycofanie danego CA.
+	// The issuer allows counting how many hosts the withdrawal of a given CA
+	// concerns.
 	IssuerSubject string
 	IssuerSerial  string
-	// Nazwy sieciowe wystawione w certyfikacie. Puste dla hostow: tylko
-	// relay wystepuje wobec kogokolwiek jako serwer.
+	// The network names issued in the certificate. Empty for hosts: only a
+	// relay appears to anyone as a server.
 	DNSNames    []string
 	IPAddresses []string
 }
 
-// Wystawca podpisuje wnioski tozsamosci floty i opisuje, komu panel ufa.
+// Issuer signs the identity requests of the fleet and describes who the panel
+// trusts.
 //
-// Kontekst jest w podpisie od poczatku, choc dzisiejsza implementacja go nie
-// potrzebuje: podpis w HSM albo w zdalnej usludze jest wywolaniem sieciowym
-// i musi dac sie przerwac razem z zadaniem, ktore go zamowilo.
-type Wystawca interface {
-	// PodpiszHosta wystawia certyfikat hosta. Identity nadaje panel:
-	// wszystko z wniosku poza kluczem publicznym jest ignorowane.
-	PodpiszHosta(ctx context.Context, csrPEM []byte, hostID string) (*Certyfikat, error)
-	// PodpiszRelay wystawia certyfikat relaya. Nazwy sieciowe pochodza
-	// z rejestru panelu; puste znaczy "wez je z wniosku", co jest dozwolone
-	// wylacznie przy pierwszej rejestracji.
-	PodpiszRelay(ctx context.Context, csrPEM []byte, relayID string, nazwy []string) (*Certyfikat, error)
-	// Zaufanie zwraca bundle CA floty obowiazujacy teraz.
-	Zaufanie(ctx context.Context) ([]byte, error)
+// The context is in the signature from the start even though today's
+// implementation does not need it: a signature in an HSM or in a remote
+// service is a network call and has to be interruptible together with the
+// request that ordered it.
+type Issuer interface {
+	// SignHost issues the certificate of a host. The panel grants the
+	// identity: everything in the request but the public key is ignored.
+	SignHost(ctx context.Context, csrPEM []byte, hostID string) (*Certificate, error)
+	// SignRelay issues the certificate of a relay. The network names come
+	// from the registry of the panel; empty means "take them from the
+	// request", which is allowed at the first registration alone.
+	SignRelay(ctx context.Context, csrPEM []byte, relayID string, names []string) (*Certificate, error)
+	// Trust returns the CA bundle of the fleet in force now.
+	Trust(ctx context.Context) ([]byte, error)
 }
 
-// ZZaufania buduje wystawce nad urzedem certyfikacji panelu.
+// FromTrust builds an issuer over the certificate authority of the panel.
 //
-// Trust jest czytany przy kazdym podpisie, a nie kopiowany przy tworzeniu:
-// rotacja CA zmienia aktywny urzad w trakcie pracy i wystawca ma o tym
-// wiedziec bez restartu panelu.
-func ZZaufania(trust *pki.Trust) Wystawca { return &lokalny{trust: trust} }
+// The trust is read at every signature rather than copied at creation: a
+// rotation of the CA changes the active authority while the panel works and
+// the issuer is to know about it without a restart.
+func FromTrust(trust *pki.Trust) Issuer { return &local{trust: trust} }
 
-// lokalny podpisuje kluczem, ktory panel trzyma u siebie.
-type lokalny struct {
+// local signs with the key the panel keeps itself.
+type local struct {
 	trust *pki.Trust
 }
 
-func (l *lokalny) PodpiszHosta(_ context.Context, csrPEM []byte, hostID string) (*Certyfikat, error) {
-	wydany, err := l.trust.Active().SignAgentCSR(csrPEM, hostID)
+func (l *local) SignHost(_ context.Context, csrPEM []byte, hostID string) (*Certificate, error) {
+	issued, err := l.trust.Active().SignAgentCSR(csrPEM, hostID)
 	if err != nil {
 		return nil, err
 	}
-	return zPKI(wydany), nil
+	return fromPKI(issued), nil
 }
 
-func (l *lokalny) PodpiszRelay(_ context.Context, csrPEM []byte, relayID string,
-	nazwy []string) (*Certyfikat, error) {
-	var wydany *pki.IssuedCert
+func (l *local) SignRelay(_ context.Context, csrPEM []byte, relayID string,
+	names []string) (*Certificate, error) {
+	var issued *pki.IssuedCert
 	var err error
-	if len(nazwy) == 0 {
-		wydany, err = l.trust.Active().SignRelayCSR(csrPEM, relayID)
+	if len(names) == 0 {
+		issued, err = l.trust.Active().SignRelayCSR(csrPEM, relayID)
 	} else {
-		wydany, err = l.trust.Active().SignRelayCSRWithNames(csrPEM, relayID, nazwy)
+		issued, err = l.trust.Active().SignRelayCSRWithNames(csrPEM, relayID, names)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return zPKI(wydany), nil
+	return fromPKI(issued), nil
 }
 
-func (l *lokalny) Zaufanie(context.Context) ([]byte, error) { return l.trust.Bundle(), nil }
+func (l *local) Trust(context.Context) ([]byte, error) { return l.trust.Bundle(), nil }
 
-func zPKI(wydany *pki.IssuedCert) *Certyfikat {
-	return &Certyfikat{
-		PEM: wydany.PEM, Serial: wydany.Serial, Fingerprint: wydany.Fingerprint,
-		NotBefore: wydany.NotBefore, NotAfter: wydany.NotAfter,
-		CommonName:    wydany.CommonName,
-		IssuerSubject: wydany.IssuerSubject, IssuerSerial: wydany.IssuerSerial,
-		DNSNames: wydany.DNSNames, IPAddresses: wydany.IPAddresses,
+func fromPKI(issued *pki.IssuedCert) *Certificate {
+	return &Certificate{
+		PEM: issued.PEM, Serial: issued.Serial, Fingerprint: issued.Fingerprint,
+		NotBefore: issued.NotBefore, NotAfter: issued.NotAfter,
+		CommonName:    issued.CommonName,
+		IssuerSubject: issued.IssuerSubject, IssuerSerial: issued.IssuerSerial,
+		DNSNames: issued.DNSNames, IPAddresses: issued.IPAddresses,
 	}
 }

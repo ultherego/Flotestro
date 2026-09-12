@@ -1,5 +1,5 @@
-// Package audit zapisuje append-only slad zdarzen. Kazda sciezka sukcesu
-// i bledu musi tworzyc zdarzenie, takze odmowa dostepu.
+// Package audit writes an append-only trail of events. Every path of success
+// and of failure has to create an event, a refusal of access included.
 package audit
 
 import (
@@ -30,7 +30,7 @@ const (
 	OutcomeDenied  Outcome = "denied"
 )
 
-// Event opisuje pojedyncze zdarzenie audytowe.
+// Event describes a single audit event.
 type Event struct {
 	ActorType  ActorType
 	ActorID    string
@@ -42,7 +42,7 @@ type Event struct {
 	Detail     map[string]any
 }
 
-// Recorder zapisuje zdarzenia do bazy.
+// Recorder writes the events into the database.
 type Recorder struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger
@@ -52,23 +52,24 @@ func NewRecorder(pool *pgxpool.Pool, log *slog.Logger) *Recorder {
 	return &Recorder{pool: pool, log: log}
 }
 
-// Record zapisuje zdarzenie poza transakcja wywolujacego.
+// Record writes an event outside the transaction of the caller.
 func (r *Recorder) Record(ctx context.Context, event Event) {
 	if err := r.record(ctx, r.pool, event); err != nil {
-		// Brak audytu nie moze cicho zniknac, nawet jesli operacja sie udala.
-		r.log.Error("nie zapisano zdarzenia audytowego",
+		// A missing audit entry must not disappear silently, even when the
+		// operation succeeded.
+		r.log.Error("the audit event was not written",
 			"action", event.Action, "target", event.TargetID, "err", err)
 	}
 }
 
-// RecordTx zapisuje zdarzenie w transakcji wywolujacego, dzieki czemu zmiana
-// stanu i jej slad audytowy sa zatwierdzane razem.
+// RecordTx writes an event inside the transaction of the caller, so that the
+// change of state and its audit trail are committed together.
 func (r *Recorder) RecordTx(ctx context.Context, tx pgx.Tx, event Event) error {
 	return r.record(ctx, tx, event)
 }
 
-// queryExecutor pozwala zapisac zdarzenie zarowno przez pule, jak i wewnatrz
-// transakcji wywolujacego. Spelniaja go *pgxpool.Pool oraz pgx.Tx.
+// queryExecutor allows writing an event both through the pool and inside the
+// transaction of the caller. Both *pgxpool.Pool and pgx.Tx satisfy it.
 type queryExecutor interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
@@ -80,7 +81,7 @@ func (r *Recorder) record(ctx context.Context, q queryExecutor, event Event) err
 	}
 	payload, err := json.Marshal(detail)
 	if err != nil {
-		return fmt.Errorf("serializacja detail: %w", err)
+		return fmt.Errorf("serialising the detail: %w", err)
 	}
 	const query = `
 		insert into audit_events
@@ -100,7 +101,7 @@ func nullable(value string) any {
 	return value
 }
 
-// Record opisuje zapisane zdarzenie zwracane przez API.
+// Record describes a written event as the API returns it.
 type Record struct {
 	ID         int64           `json:"id"`
 	OccurredAt time.Time       `json:"occurred_at"`
@@ -114,7 +115,7 @@ type Record struct {
 	Detail     json.RawMessage `json:"detail"`
 }
 
-// List zwraca ostatnie zdarzenia, opcjonalnie zawezone do jednego celu.
+// List returns the latest events, optionally narrowed to one target.
 func (r *Recorder) List(ctx context.Context, targetID string, limit int) ([]Record, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
