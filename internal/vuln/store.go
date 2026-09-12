@@ -10,172 +10,177 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrBrakSnapshotu oznacza dostawce bez aktywnego snapshotu.
-var ErrBrakSnapshotu = errors.New("ten dostawca nie ma aktywnego snapshotu")
+// ErrNoSnapshot means a provider without an active snapshot.
+var ErrNoSnapshot = errors.New("this provider has no active snapshot")
 
-// Store trzyma snapshoty feedow, ustalenia producentow i wyniki oceny.
+// Store holds feed snapshots, vendor findings and the results of the
+// assessment.
 type Store struct {
 	pool *pgxpool.Pool
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// Pool udostepnia pule polaczen operacjom, ktore prowadza wlasna transakcje.
+// Pool exposes the connection pool to the operations that run a transaction
+// of their own.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// ZapiszSnapshot zapisuje snapshot razem z ustaleniami i aktywuje go.
+// SaveSnapshot writes a snapshot together with its findings and activates
+// it.
 //
-// Wszystko w jednej transakcji i dopiero na koncu: import, ktory sie nie uda,
-// nie moze zostawic polowy ustalen ani odebrac panelowi poprzedniego
-// snapshotu. Lepiej ocenic starszymi danymi i powiedziec, ze sa starsze, niz
-// nie ocenic wcale.
-func (s *Store) ZapiszSnapshot(ctx context.Context, snapshot Snapshot,
-	ustalenia []Advisory) (string, error) {
+// Everything in one transaction and only at the very end: an import that
+// fails must not leave half the findings behind or take the previous
+// snapshot away from the panel. Better to assess with older data and say
+// they are older than not to assess at all.
+func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
+	advisories []Advisory) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Ten sam odcisk oznacza te same dane: powtorzone pobranie nie tworzy
-	// drugiego snapshotu, tylko odswieza znacznik czasu.
-	var identyfikator string
-	const istniejacy = `
+	// The same digest means the same data: a repeated fetch does not create
+	// a second snapshot, it only refreshes the timestamp.
+	var id string
+	const existing = `
 		select id::text from vuln_snapshots where provider = $1 and digest = $2`
-	err = tx.QueryRow(ctx, istniejacy, snapshot.Provider, snapshot.Digest).Scan(&identyfikator)
+	err = tx.QueryRow(ctx, existing, snapshot.Provider, snapshot.Digest).Scan(&id)
 	if err == nil {
-		const odswiez = `
+		const refresh = `
 			update vuln_snapshots set fetched_at = now(), checked_at = now(),
 			                          etag = $2, error = ''
 			where id = $1::uuid`
-		if _, err := tx.Exec(ctx, odswiez, identyfikator, snapshot.ETag); err != nil {
+		if _, err := tx.Exec(ctx, refresh, id, snapshot.ETag); err != nil {
 			return "", err
 		}
-		if err := aktywuj(ctx, tx, snapshot.Provider, identyfikator); err != nil {
+		if err := activate(ctx, tx, snapshot.Provider, id); err != nil {
 			return "", err
 		}
-		if err := sprzatnijSnapshoty(ctx, tx, snapshot.Provider); err != nil {
+		if err := pruneSnapshots(ctx, tx, snapshot.Provider); err != nil {
 			return "", err
 		}
-		return identyfikator, tx.Commit(ctx)
+		return id, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
 	}
 
-	const wstaw = `
+	const insert = `
 		insert into vuln_snapshots (provider, digest, releases, advisory_count,
 		                            source_modified_at, etag, active, checked_at)
 		values ($1, $2, $3, $4, $5, $6, false, now())
 		returning id::text`
-	if err := tx.QueryRow(ctx, wstaw, snapshot.Provider, snapshot.Digest, snapshot.Releases,
-		len(ustalenia), snapshot.SourceModifiedAt, snapshot.ETag).Scan(&identyfikator); err != nil {
+	if err := tx.QueryRow(ctx, insert, snapshot.Provider, snapshot.Digest, snapshot.Releases,
+		len(advisories), snapshot.SourceModifiedAt, snapshot.ETag).Scan(&id); err != nil {
 		return "", err
 	}
 
-	if len(ustalenia) > 0 {
-		// Wiersze podajemy po jednym, a nie z gotowej tablicy: feed Red Hata
-		// ma blisko miliona ustalen na wydanie i przepisanie ich najpierw do
-		// pamieci kosztowaloby panel wiecej niz sam zapis.
-		zrodlo := pgx.CopyFromSlice(len(ustalenia), func(i int) ([]any, error) {
-			ustalenie := ustalenia[i]
+	if len(advisories) > 0 {
+		// The rows are handed over one at a time rather than from a ready
+		// array: the Red Hat feed carries close to a million findings per
+		// release and copying them into memory first would cost the panel
+		// more than the write itself.
+		source := pgx.CopyFromSlice(len(advisories), func(i int) ([]any, error) {
+			advisory := advisories[i]
 			return []any{
-				identyfikator, ustalenie.Provider, ustalenie.AdvisoryID, ustalenie.CVEIDs,
-				ustalenie.Distribution, ustalenie.Release, ustalenie.SourcePackage,
-				ustalenie.BinaryPackage, ustalenie.FixedVersion, ustalenie.Status,
-				ustalenie.VendorSeverity, ustalenie.Title, ustalenie.URL, ustalenie.PublishedAt,
+				id, advisory.Provider, advisory.AdvisoryID, advisory.CVEIDs,
+				advisory.Distribution, advisory.Release, advisory.SourcePackage,
+				advisory.BinaryPackage, advisory.FixedVersion, advisory.Status,
+				advisory.VendorSeverity, advisory.Title, advisory.URL, advisory.PublishedAt,
 			}, nil
 		})
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"vuln_advisories"}, []string{
 			"snapshot_id", "provider", "advisory_id", "cve_ids", "distribution", "release",
 			"source_package", "binary_package", "fixed_version", "status", "vendor_severity",
 			"title", "url", "published_at",
-		}, zrodlo); err != nil {
-			return "", fmt.Errorf("zapis ustalen: %w", err)
+		}, source); err != nil {
+			return "", fmt.Errorf("writing the findings: %w", err)
 		}
 	}
 
-	if err := aktywuj(ctx, tx, snapshot.Provider, identyfikator); err != nil {
+	if err := activate(ctx, tx, snapshot.Provider, id); err != nil {
 		return "", err
 	}
-	if err := sprzatnijSnapshoty(ctx, tx, snapshot.Provider); err != nil {
+	if err := pruneSnapshots(ctx, tx, snapshot.Provider); err != nil {
 		return "", err
 	}
-	return identyfikator, tx.Commit(ctx)
+	return id, tx.Commit(ctx)
 }
 
-// SnapshotowNieaktywnych mowi, ile poprzednich pobran zostaje obok aktywnego.
+// InactiveSnapshotsKept says how many previous fetches stay next to the
+// active one.
 //
-// Zostaja, bo ocena wskazuje odcisk danych, ktore ja rozstrzygnely, i bez
-// nich nie da sie powiedziec, czemu panel powiedzial to, co powiedzial.
-// Nie zostaja wszystkie, bo jedno pobranie feedu producenta to od
-// kilkudziesieciu tysiecy do miliona ustalen na dobe.
-const SnapshotowNieaktywnych = 2
+// They stay, because an assessment names the digest of the data that settled
+// it, and without them there is no saying why the panel said what it said.
+// Not all of them stay, because one fetch of a vendor feed is anything from
+// tens of thousands to a million findings a day.
+const InactiveSnapshotsKept = 2
 
-// sprzatnijSnapshoty kasuje pobrania starsze niz kilka ostatnich.
-func sprzatnijSnapshoty(ctx context.Context, tx pgx.Tx, dostawca string) error {
-	const kasuj = `
+// pruneSnapshots deletes the fetches older than the last few.
+func pruneSnapshots(ctx context.Context, tx pgx.Tx, provider string) error {
+	const remove = `
 		delete from vuln_snapshots
 		where provider = $1 and not active and id not in (
 		    select id from vuln_snapshots
 		    where provider = $1 and not active
 		    order by fetched_at desc limit $2)`
-	_, err := tx.Exec(ctx, kasuj, dostawca, SnapshotowNieaktywnych)
+	_, err := tx.Exec(ctx, remove, provider, InactiveSnapshotsKept)
 	return err
 }
 
-// aktywuj przelacza aktywny snapshot dostawcy jednym ruchem.
-func aktywuj(ctx context.Context, tx pgx.Tx, dostawca, identyfikator string) error {
+// activate switches the active snapshot of a provider in one move.
+func activate(ctx context.Context, tx pgx.Tx, provider, id string) error {
 	if _, err := tx.Exec(ctx,
-		`update vuln_snapshots set active = false where provider = $1 and active`, dostawca); err != nil {
+		`update vuln_snapshots set active = false where provider = $1 and active`, provider); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx,
-		`update vuln_snapshots set active = true where id = $1::uuid`, identyfikator)
+		`update vuln_snapshots set active = true where id = $1::uuid`, id)
 	return err
 }
 
-// PotwierdzSnapshot odnotowuje, ze dane sa nadal aktualne.
+// ConfirmSnapshot records that the data are still current.
 //
-// Feed, ktory sie nie zmienil, nie jest feedem nieswiezym: panel wlasnie
-// o niego zapytal i dostal odpowiedz "bez zmian". Bez tego zapisu zrodlo
-// zmieniajace sie raz na dobe wygladaloby na porzucone po kilku godzinach.
-func (s *Store) PotwierdzSnapshot(ctx context.Context, dostawca string) error {
+// A feed that has not changed is not a stale feed: the panel has just asked
+// about it and got the answer "no changes". Without this record a source
+// that changes once a day would look abandoned after a few hours.
+func (s *Store) ConfirmSnapshot(ctx context.Context, provider string) error {
 	const query = `
 		update vuln_snapshots set checked_at = now(), error = ''
 		where provider = $1 and active`
-	_, err := s.pool.Exec(ctx, query, dostawca)
+	_, err := s.pool.Exec(ctx, query, provider)
 	return err
 }
 
-// ZapiszBladPobrania odnotowuje nieudane pobranie, nie ruszajac aktywnego
-// snapshotu.
-func (s *Store) ZapiszBladPobrania(ctx context.Context, dostawca, powod string) error {
+// SaveFetchError records a failed fetch without touching the active
+// snapshot.
+func (s *Store) SaveFetchError(ctx context.Context, provider, reason string) error {
 	const query = `
 		update vuln_snapshots set error = $2 where provider = $1 and active`
-	_, err := s.pool.Exec(ctx, query, dostawca, powod)
+	_, err := s.pool.Exec(ctx, query, provider, reason)
 	return err
 }
 
-// AktywnySnapshot zwraca snapshot, ktorym panel ocenia teraz.
-func (s *Store) AktywnySnapshot(ctx context.Context, dostawca string) (Snapshot, error) {
+// ActiveSnapshot returns the snapshot the panel assesses with right now.
+func (s *Store) ActiveSnapshot(ctx context.Context, provider string) (Snapshot, error) {
 	const query = `
 		select id::text, provider, digest, releases, advisory_count, fetched_at,
 		       checked_at, source_modified_at, etag, active, error
 		from vuln_snapshots where provider = $1 and active`
 	var snapshot Snapshot
-	err := s.pool.QueryRow(ctx, query, dostawca).Scan(&snapshot.ID, &snapshot.Provider,
+	err := s.pool.QueryRow(ctx, query, provider).Scan(&snapshot.ID, &snapshot.Provider,
 		&snapshot.Digest, &snapshot.Releases, &snapshot.AdvisoryCount, &snapshot.FetchedAt,
 		&snapshot.CheckedAt, &snapshot.SourceModifiedAt, &snapshot.ETag,
 		&snapshot.Active, &snapshot.Error)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Snapshot{Provider: dostawca}, ErrBrakSnapshotu
+		return Snapshot{Provider: provider}, ErrNoSnapshot
 	}
 	return snapshot, err
 }
 
-// Snapshoty zwraca aktywne snapshoty wszystkich dostawcow.
-func (s *Store) Snapshoty(ctx context.Context) ([]Snapshot, error) {
+// Snapshots returns the active snapshots of every provider.
+func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	const query = `
 		select id::text, provider, digest, releases, advisory_count, fetched_at,
 		       checked_at, source_modified_at, etag, active, error
@@ -185,7 +190,7 @@ func (s *Store) Snapshoty(ctx context.Context) ([]Snapshot, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var snapshoty []Snapshot
+	var snapshots []Snapshot
 	for rows.Next() {
 		var snapshot Snapshot
 		if err := rows.Scan(&snapshot.ID, &snapshot.Provider, &snapshot.Digest,
@@ -194,46 +199,48 @@ func (s *Store) Snapshoty(ctx context.Context) ([]Snapshot, error) {
 			&snapshot.Active, &snapshot.Error); err != nil {
 			return nil, err
 		}
-		snapshoty = append(snapshoty, snapshot)
+		snapshots = append(snapshots, snapshot)
 	}
-	return snapshoty, rows.Err()
+	return snapshots, rows.Err()
 }
 
-// UstaleniaDlaWydania zwraca ustalenia snapshotu dla jednego wydania.
+// AdvisoriesForRelease returns the findings of a snapshot for one release.
 //
-// Zwracamy je zebrane po pakiecie zrodlowym, bo tak wlasnie przebiega
-// korelacja: host ma pakiety binarne, a tracker mowi o zrodlowych.
-func (s *Store) UstaleniaDlaWydania(ctx context.Context, snapshotID, dystrybucja,
-	wydanie string) (map[string][]Advisory, error) {
+// They come back gathered by the source package, because that is how the
+// correlation runs: a host has binary packages and a tracker speaks about
+// source ones.
+func (s *Store) AdvisoriesForRelease(ctx context.Context, snapshotID, distribution,
+	release string) (map[string][]Advisory, error) {
 	const query = `
 		select provider, advisory_id, cve_ids, distribution, release, source_package,
 		       binary_package, fixed_version, status, vendor_severity, title, url, published_at
 		from vuln_advisories
 		where snapshot_id = $1::uuid and distribution = $2 and release = $3`
-	rows, err := s.pool.Query(ctx, query, snapshotID, dystrybucja, wydanie)
+	rows, err := s.pool.Query(ctx, query, snapshotID, distribution, release)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	wynik := map[string][]Advisory{}
+	result := map[string][]Advisory{}
 	for rows.Next() {
-		var ustalenie Advisory
-		if err := rows.Scan(&ustalenie.Provider, &ustalenie.AdvisoryID, &ustalenie.CVEIDs,
-			&ustalenie.Distribution, &ustalenie.Release, &ustalenie.SourcePackage,
-			&ustalenie.BinaryPackage, &ustalenie.FixedVersion, &ustalenie.Status,
-			&ustalenie.VendorSeverity, &ustalenie.Title, &ustalenie.URL,
-			&ustalenie.PublishedAt); err != nil {
+		var advisory Advisory
+		if err := rows.Scan(&advisory.Provider, &advisory.AdvisoryID, &advisory.CVEIDs,
+			&advisory.Distribution, &advisory.Release, &advisory.SourcePackage,
+			&advisory.BinaryPackage, &advisory.FixedVersion, &advisory.Status,
+			&advisory.VendorSeverity, &advisory.Title, &advisory.URL,
+			&advisory.PublishedAt); err != nil {
 			return nil, err
 		}
-		wynik[ustalenie.SourcePackage] = append(wynik[ustalenie.SourcePackage], ustalenie)
+		result[advisory.SourcePackage] = append(result[advisory.SourcePackage], advisory)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-// ZapiszUstalenia podmienia ustalenia hosta razem z jego stanem oceny.
-func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
-	ustalenia []Assessment, stan StanHosta) error {
+// SaveAdvisories swaps the findings of a host together with the state of
+// its assessment.
+func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
+	advisories []Assessment, state HostState) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -243,27 +250,27 @@ func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
 	if _, err := tx.Exec(ctx, `delete from vuln_findings where host_id = $1`, hostID); err != nil {
 		return err
 	}
-	if len(ustalenia) > 0 {
-		wiersze := make([][]any, 0, len(ustalenia))
-		for _, ustalenie := range ustalenia {
-			// Ustalenie bez CVE jest normalne: producent nie zawsze je
-			// przypisuje, a kolumna nie przyjmuje wartosci pustej. Brak listy
-			// i lista pusta znacza tu to samo.
-			cve := ustalenie.CVEIDs
+	if len(advisories) > 0 {
+		rows := make([][]any, 0, len(advisories))
+		for _, advisory := range advisories {
+			// A finding without a CVE is normal: the vendor does not always
+			// assign one and the column does not take a null. A missing list
+			// and an empty list mean the same thing here.
+			cve := advisory.CVEIDs
 			if cve == nil {
 				cve = []string{}
 			}
-			wiersze = append(wiersze, []any{
-				hostID, ustalenie.Provider, ustalenie.AdvisoryID, cve,
-				ustalenie.Distribution, ustalenie.Release, ustalenie.SourcePackage,
-				ustalenie.BinaryPackage, ustalenie.Architecture, ustalenie.InstalledVersion,
-				ustalenie.FixedVersion, string(ustalenie.State), ustalenie.ReasonCode,
-				string(ustalenie.VendorFix), string(ustalenie.RepositoryCandidate),
-				string(ustalenie.Transaction), ustalenie.ComparisonVersion,
-				ustalenie.ComparisonBasis, ustalenie.PackageOrigin,
-				ustalenie.VendorSeverity, ustalenie.SnapshotDigest,
-				ustalenie.InventoryDigest, ustalenie.AdvisoryDigest,
-				ustalenie.ComparatorVersion, ustalenie.EvaluatedAt,
+			rows = append(rows, []any{
+				hostID, advisory.Provider, advisory.AdvisoryID, cve,
+				advisory.Distribution, advisory.Release, advisory.SourcePackage,
+				advisory.BinaryPackage, advisory.Architecture, advisory.InstalledVersion,
+				advisory.FixedVersion, string(advisory.State), advisory.ReasonCode,
+				string(advisory.VendorFix), string(advisory.RepositoryCandidate),
+				string(advisory.Transaction), advisory.ComparisonVersion,
+				advisory.ComparisonBasis, advisory.PackageOrigin,
+				advisory.VendorSeverity, advisory.SnapshotDigest,
+				advisory.InventoryDigest, advisory.AdvisoryDigest,
+				advisory.ComparatorVersion, advisory.EvaluatedAt,
 			})
 		}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"vuln_findings"}, []string{
@@ -273,12 +280,12 @@ func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
 			"transaction_state", "comparison_version", "comparison_basis", "package_origin",
 			"vendor_severity", "snapshot_digest", "inventory_digest", "advisory_digest",
 			"comparator_version", "evaluated_at",
-		}, pgx.CopyFromRows(wiersze)); err != nil {
-			return fmt.Errorf("zapis ustalen hosta: %w", err)
+		}, pgx.CopyFromRows(rows)); err != nil {
+			return fmt.Errorf("writing the findings of the host: %w", err)
 		}
 	}
 
-	const zapisStanu = `
+	const saveState = `
 		insert into vuln_host_state (host_id, distribution, release, provider,
 		                             snapshot_digest, inventory_digest, advisory_digest,
 		                             packages_total, packages_covered, affected,
@@ -303,19 +310,19 @@ func (s *Store) ZapiszUstalenia(ctx context.Context, hostID string,
 			coverage_reason = excluded.coverage_reason,
 			advisories_reason = excluded.advisories_reason,
 			evaluated_at = excluded.evaluated_at`
-	if _, err := tx.Exec(ctx, zapisStanu, hostID, stan.Distribution, stan.Release,
-		stan.Provider, stan.SnapshotDigest, stan.InventoryDigest, stan.AdvisoryDigest,
-		stan.PackagesTotal, stan.PackagesCovered, stan.Affected, stan.AffectedWithVendorFix,
-		stan.AffectedNoFix, stan.Unknown, stan.AffectedPackages, stan.UniqueAdvisories,
-		stan.UniqueCVEs, stan.CoverageReason, stan.AdvisoriesReason,
-		stan.EvaluatedAt); err != nil {
+	if _, err := tx.Exec(ctx, saveState, hostID, state.Distribution, state.Release,
+		state.Provider, state.SnapshotDigest, state.InventoryDigest, state.AdvisoryDigest,
+		state.PackagesTotal, state.PackagesCovered, state.Affected, state.AffectedWithVendorFix,
+		state.AffectedNoFix, state.Unknown, state.AffectedPackages, state.UniqueAdvisories,
+		state.UniqueCVEs, state.CoverageReason, state.AdvisoriesReason,
+		state.EvaluatedAt); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// Ustalenia zwraca ustalenia hosta.
-func (s *Store) Ustalenia(ctx context.Context, hostID string, tylkoPodatne bool) ([]Assessment, error) {
+// Advisories returns the findings of a host.
+func (s *Store) Advisories(ctx context.Context, hostID string, onlyAffected bool) ([]Assessment, error) {
 	const query = `
 		select provider, advisory_id, cve_ids, distribution, release, source_package,
 		       binary_package, architecture, installed_version, fixed_version, state,
@@ -329,38 +336,39 @@ func (s *Store) Ustalenia(ctx context.Context, hostID string, tylkoPodatne bool)
 		           when 'critical' then 0 when 'high' then 1 when 'medium' then 2
 		           when 'low' then 3 else 4 end,
 		         source_package, advisory_id`
-	rows, err := s.pool.Query(ctx, query, hostID, tylkoPodatne)
+	rows, err := s.pool.Query(ctx, query, hostID, onlyAffected)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var wynik []Assessment
+	var result []Assessment
 	for rows.Next() {
-		var ustalenie Assessment
-		var stan, poprawka, kandydat, transakcja string
-		if err := rows.Scan(&ustalenie.Provider, &ustalenie.AdvisoryID, &ustalenie.CVEIDs,
-			&ustalenie.Distribution, &ustalenie.Release, &ustalenie.SourcePackage,
-			&ustalenie.BinaryPackage, &ustalenie.Architecture, &ustalenie.InstalledVersion,
-			&ustalenie.FixedVersion, &stan, &ustalenie.ReasonCode, &poprawka, &kandydat,
-			&transakcja, &ustalenie.ComparisonVersion, &ustalenie.ComparisonBasis,
-			&ustalenie.PackageOrigin, &ustalenie.VendorSeverity, &ustalenie.SnapshotDigest,
-			&ustalenie.InventoryDigest, &ustalenie.AdvisoryDigest,
-			&ustalenie.ComparatorVersion, &ustalenie.EvaluatedAt); err != nil {
+		var advisory Assessment
+		var state, fix, candidate, transaction string
+		if err := rows.Scan(&advisory.Provider, &advisory.AdvisoryID, &advisory.CVEIDs,
+			&advisory.Distribution, &advisory.Release, &advisory.SourcePackage,
+			&advisory.BinaryPackage, &advisory.Architecture, &advisory.InstalledVersion,
+			&advisory.FixedVersion, &state, &advisory.ReasonCode, &fix, &candidate,
+			&transaction, &advisory.ComparisonVersion, &advisory.ComparisonBasis,
+			&advisory.PackageOrigin, &advisory.VendorSeverity, &advisory.SnapshotDigest,
+			&advisory.InventoryDigest, &advisory.AdvisoryDigest,
+			&advisory.ComparatorVersion, &advisory.EvaluatedAt); err != nil {
 			return nil, err
 		}
-		ustalenie.HostID = hostID
-		ustalenie.State = AssessmentState(stan)
-		ustalenie.VendorFix = VendorFixState(poprawka)
-		ustalenie.RepositoryCandidate = RepositoryCandidateState(kandydat)
-		ustalenie.Transaction = TransactionState(transakcja)
-		wynik = append(wynik, ustalenie)
+		advisory.HostID = hostID
+		advisory.State = AssessmentState(state)
+		advisory.VendorFix = VendorFixState(fix)
+		advisory.RepositoryCandidate = RepositoryCandidateState(candidate)
+		advisory.Transaction = TransactionState(transaction)
+		result = append(result, advisory)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
-// StanHosta opisuje ocene jednego hosta razem z jej pokryciem.
-type StanHosta struct {
+// HostState describes the assessment of one host together with its
+// coverage.
+type HostState struct {
 	HostID          string `json:"host_id"`
 	Hostname        string `json:"hostname,omitempty"`
 	Distribution    string `json:"distribution,omitempty"`
@@ -368,85 +376,90 @@ type StanHosta struct {
 	Provider        string `json:"provider,omitempty"`
 	SnapshotDigest  string `json:"snapshot_digest,omitempty"`
 	InventoryDigest string `json:"inventory_digest,omitempty"`
-	// AdvisoryDigest wiaze ocene z zestawem ustalen producenta. To osobne
-	// zrodlo niz lista pakietow i zmienia sie niezaleznie od niej.
+	// AdvisoryDigest binds the assessment to the set of vendor findings.
+	// That is a source separate from the package list and it changes
+	// independently of it.
 	AdvisoryDigest  string `json:"advisory_digest,omitempty"`
 	PackagesTotal   int    `json:"packages_total"`
 	PackagesCovered int    `json:"packages_covered"`
 	Affected        int    `json:"affected"`
-	// AffectedWithVendorFix i AffectedNoFix rozdzielaja to, na co producent
-	// wydal poprawke, od tego, czego nie naprawil. To sa dwie rozne decyzje
-	// operatora, a sklejone w jedna liczbe daja sciane, ktorej nikt nie
-	// przeczyta. Uwaga: "producent wydal poprawke" to jeszcze nie znaczy, ze
-	// host ja widzi - o tym mowi osobna os przy kazdym znalezisku.
+	// AffectedWithVendorFix and AffectedNoFix separate what the vendor
+	// released a fix for from what it has not fixed. These are two different
+	// decisions for the operator, and glued into one number they give a wall
+	// nobody reads. Note: "the vendor released a fix" does not yet mean the
+	// host sees it - a separate axis next to every finding says that.
 	AffectedWithVendorFix int `json:"affected_with_vendor_fix"`
 	AffectedNoFix         int `json:"affected_no_fix"`
 	Unknown               int `json:"unknown"`
-	// Trzy liczniki tego samego zbioru, bo to trzy rozne pytania: ile
-	// pakietow trzeba ruszyc, ile spraw producenta zamknac i ilu CVE to
-	// dotyczy. Jedno advisory niesie kilka CVE i kilka pakietow, wiec te
-	// liczby nigdy sie nie zgadzaja - i o to chodzi.
+	// Three counters of the same set, because these are three different
+	// questions: how many packages have to be touched, how many vendor
+	// matters closed and how many CVEs it concerns. One advisory carries
+	// several CVEs and several packages, so these numbers never agree - and
+	// that is the point.
 	AffectedPackages int `json:"affected_packages"`
 	UniqueAdvisories int `json:"unique_advisories"`
 	UniqueCVEs       int `json:"unique_cves"`
-	// CoverageReason mowi, dlaczego ocena jest niepelna. Pusty oznacza pelne
-	// pokrycie; kazdy inny stan musi byc widoczny obok liczby znalezisk.
+	// CoverageReason says why the assessment is incomplete. Empty means full
+	// coverage; every other state has to be visible next to the number of
+	// findings.
 	CoverageReason string `json:"coverage_reason,omitempty"`
-	// AdvisoriesReason mowi, dlaczego nie ma ustalen producenta. Blad odczytu
-	// metadanych nie moze wygladac jak host bez ustalen.
+	// AdvisoriesReason says why there are no vendor findings. An error
+	// reading the metadata must not look like a host without findings.
 	AdvisoriesReason string     `json:"advisories_reason,omitempty"`
 	EvaluatedAt      *time.Time `json:"evaluated_at,omitempty"`
 }
 
-// PelnaOcena mowi, czy ocena tego hosta jest kompletna.
+// FullAssessment says whether the assessment of this host is complete.
 //
-// Kompletna znaczy trzy rzeczy naraz: nie bylo przeszkody w pokryciu, feed
-// objal wszystkie pakiety hosta i zaden z nich nie zostal nieustalony. Sam
-// pusty powod nie wystarczy - host z jednym pakietem spoza dystrybucji ma
-// ocene niepelna, choc nic jej nie zablokowalo.
-func (s StanHosta) PelnaOcena() bool {
+// Complete means three things at once: nothing stood in the way of coverage,
+// the feed covered every package of the host and none of them was left
+// undetermined. An empty reason alone is not enough - a host with a single
+// package from outside the distribution has an incomplete assessment even
+// though nothing blocked it.
+func (s HostState) FullAssessment() bool {
 	return s.EvaluatedAt != nil && s.CoverageReason == "" &&
 		s.PackagesTotal > 0 && s.PackagesCovered == s.PackagesTotal && s.Unknown == 0
 }
 
-// Pokrycie liczy udzial pakietow objetych feedem.
-func (s StanHosta) Pokrycie() float64 {
+// Coverage computes the share of packages covered by the feed.
+func (s HostState) Coverage() float64 {
 	if s.PackagesTotal == 0 {
 		return 0
 	}
 	return float64(s.PackagesCovered) / float64(s.PackagesTotal)
 }
 
-// Unikaty liczy rozne sprawy w zbiorze hostow.
+// UniqueCounts counts the distinct matters in a set of hosts.
 //
-// Rozne, a nie zsumowane: to samo CVE na dwudziestu hostach jest jedna sprawa
-// producenta i dwudziestoma hostami do ruszenia. Suma licznikow hostow miesza
-// jedno z drugim i daje liczbe, ktora nie odpowiada na zadne pytanie.
-type Unikatowe struct {
+// Distinct rather than summed: the same CVE on twenty hosts is one matter of
+// the vendor and twenty hosts to touch. A sum of per-host counters mixes one
+// with the other and gives a number that answers no question at all.
+type UniqueCounts struct {
 	CVE        int `json:"unique_cves"`
 	Advisories int `json:"unique_advisories"`
 }
 
-// Unikaty zwraca liczbe roznych CVE i roznych ustalen wsrod znalezisk.
-func (s *Store) Unikaty(ctx context.Context, hostIDs []string) (Unikatowe, error) {
-	var wynik Unikatowe
+// Uniques returns the number of distinct CVEs and distinct advisories among
+// the findings.
+func (s *Store) Uniques(ctx context.Context, hostIDs []string) (UniqueCounts, error) {
+	var result UniqueCounts
 	if len(hostIDs) == 0 {
-		return wynik, nil
+		return result, nil
 	}
 	const query = `
 		select coalesce(count(distinct cve), 0), count(distinct advisory_id)
 		from vuln_findings
 		left join lateral unnest(cve_ids) as cve on true
 		where host_id = any($1) and state = 'affected'`
-	err := s.pool.QueryRow(ctx, query, hostIDs).Scan(&wynik.CVE, &wynik.Advisories)
-	return wynik, err
+	err := s.pool.QueryRow(ctx, query, hostIDs).Scan(&result.CVE, &result.Advisories)
+	return result, err
 }
 
-// StanyHostow zwraca stan oceny wielu hostow.
-func (s *Store) StanyHostow(ctx context.Context, hostIDs []string) (map[string]StanHosta, error) {
-	wynik := map[string]StanHosta{}
+// HostStates returns the assessment state of many hosts.
+func (s *Store) HostStates(ctx context.Context, hostIDs []string) (map[string]HostState, error) {
+	result := map[string]HostState{}
 	if len(hostIDs) == 0 {
-		return wynik, nil
+		return result, nil
 	}
 	const query = `
 		select host_id::text, distribution, release, provider, snapshot_digest,
@@ -461,16 +474,16 @@ func (s *Store) StanyHostow(ctx context.Context, hostIDs []string) (map[string]S
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var stan StanHosta
-		if err := rows.Scan(&stan.HostID, &stan.Distribution, &stan.Release, &stan.Provider,
-			&stan.SnapshotDigest, &stan.InventoryDigest, &stan.AdvisoryDigest,
-			&stan.PackagesTotal, &stan.PackagesCovered, &stan.Affected,
-			&stan.AffectedWithVendorFix, &stan.AffectedNoFix, &stan.Unknown,
-			&stan.AffectedPackages, &stan.UniqueAdvisories, &stan.UniqueCVEs,
-			&stan.CoverageReason, &stan.AdvisoriesReason, &stan.EvaluatedAt); err != nil {
+		var state HostState
+		if err := rows.Scan(&state.HostID, &state.Distribution, &state.Release, &state.Provider,
+			&state.SnapshotDigest, &state.InventoryDigest, &state.AdvisoryDigest,
+			&state.PackagesTotal, &state.PackagesCovered, &state.Affected,
+			&state.AffectedWithVendorFix, &state.AffectedNoFix, &state.Unknown,
+			&state.AffectedPackages, &state.UniqueAdvisories, &state.UniqueCVEs,
+			&state.CoverageReason, &state.AdvisoriesReason, &state.EvaluatedAt); err != nil {
 			return nil, err
 		}
-		wynik[stan.HostID] = stan
+		result[state.HostID] = state
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }

@@ -7,9 +7,9 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
-// przykladOVAL jest wycinkiem danych Canonical o ksztalcie takim jak zrzut
-// produkcyjny: definicje przed testami, testy przed stanami.
-const przykladOVAL = `<?xml version="1.0" encoding="utf-8"?>
+// ovalSample is a slice of the Canonical data with the same shape as a
+// production dump: definitions before tests, tests before states.
+const ovalSample = `<?xml version="1.0" encoding="utf-8"?>
 <oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5"
   xmlns:ind-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent"
   xmlns:unix-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#unix"
@@ -24,7 +24,7 @@ const przykladOVAL = `<?xml version="1.0" encoding="utf-8"?>
         <title>CVE-2026-1111 on Ubuntu 24.04 LTS (noble) - high</title>
         <reference source="CVE" ref_id="CVE-2026-1111" ref_url="https://www.cve.org/CVERecord?id=CVE-2026-1111" />
         <reference source="USN" ref_id="USN-1000-1" ref_url="https://ubuntu.com/security/notices/USN-1000-1" />
-        <description>Dziura w accountsservice.  Update Instructions:  Run ` + "`sudo pro fix`" + ` accountsservice - 23.13.9-2ubuntu6.1</description>
+        <description>A hole in accountsservice.  Update Instructions:  Run ` + "`sudo pro fix`" + ` accountsservice - 23.13.9-2ubuntu6.1</description>
         <advisory from="security@ubuntu.com">
           <severity>High</severity>
           <public_date>2026-07-21T16:00:00Z</public_date>
@@ -41,7 +41,7 @@ const przykladOVAL = `<?xml version="1.0" encoding="utf-8"?>
       <metadata>
         <title>CVE-2026-2222 on Ubuntu 24.04 LTS (noble) - medium</title>
         <reference source="CVE" ref_id="CVE-2026-2222" ref_url="https://www.cve.org/CVERecord?id=CVE-2026-2222" />
-        <description>Dziura w curl bez poprawki.</description>
+        <description>A hole in curl without a fix.</description>
         <advisory from="security@ubuntu.com">
           <severity>Medium</severity>
           <public_date>2026-08-01T00:00:00Z</public_date>
@@ -56,7 +56,7 @@ const przykladOVAL = `<?xml version="1.0" encoding="utf-8"?>
       <metadata>
         <title>CVE-2026-3333 on Ubuntu 24.04 LTS (noble) - high</title>
         <reference source="CVE" ref_id="CVE-2026-3333" ref_url="https://www.cve.org/CVERecord?id=CVE-2026-3333" />
-        <description>Dziura w jadrze.</description>
+        <description>A hole in the kernel.</description>
         <advisory from="security@ubuntu.com">
           <severity>High</severity>
           <public_date>2026-08-02T00:00:00Z</public_date>
@@ -93,10 +93,10 @@ const przykladOVAL = `<?xml version="1.0" encoding="utf-8"?>
     </ind-def:variable_test>
   </tests>
   <states>
-    <linux-def:dpkginfo_state id="oval:com.ubuntu.noble:ste:1" version="1" comment="mniej niz">
+    <linux-def:dpkginfo_state id="oval:com.ubuntu.noble:ste:1" version="1" comment="less than">
       <linux-def:evr datatype="debian_evr_string" operation="less than">23.13.9-2ubuntu6.1</linux-def:evr>
     </linux-def:dpkginfo_state>
-    <linux-def:dpkginfo_state id="oval:com.ubuntu.noble:ste:2" version="1" comment="mniej niz">
+    <linux-def:dpkginfo_state id="oval:com.ubuntu.noble:ste:2" version="1" comment="less than">
       <linux-def:evr datatype="debian_evr_string" operation="less than">23.13.9-2ubuntu6.1~esm1</linux-def:evr>
     </linux-def:dpkginfo_state>
     <ind-def:variable_state id="oval:com.ubuntu.noble:ste:11" version="1" comment="'linux' kernel version">
@@ -106,122 +106,123 @@ const przykladOVAL = `<?xml version="1.0" encoding="utf-8"?>
 </oval_definitions>
 `
 
-func ustaleniaTestowe(t *testing.T) map[string]vuln.Advisory {
+func testAdvisories(t *testing.T) map[string]vuln.Advisory {
 	t.Helper()
-	ustalenia, err := Parsuj(strings.NewReader(przykladOVAL), "noble")
+	advisories, err := Parse(strings.NewReader(ovalSample), "noble")
 	if err != nil {
-		t.Fatalf("parsowanie: %v", err)
+		t.Fatalf("parsing: %v", err)
 	}
-	wedlug := map[string]vuln.Advisory{}
-	for _, ustalenie := range ustalenia {
-		wedlug[ustalenie.AdvisoryID+"/"+ustalenie.SourcePackage] = ustalenie
+	byKey := map[string]vuln.Advisory{}
+	for _, advisory := range advisories {
+		byKey[advisory.AdvisoryID+"/"+advisory.SourcePackage] = advisory
 	}
-	return wedlug
+	return byKey
 }
 
-func TestPoprawkaMaWersjeZrodlowaIWydanie(t *testing.T) {
-	ustalenie := ustaleniaTestowe(t)["CVE-2026-1111/accountsservice"]
-	if ustalenie.Status != vuln.StatusNaprawione {
-		t.Fatalf("status = %q, chcemy %q", ustalenie.Status, vuln.StatusNaprawione)
+func TestAFixCarriesTheSourceVersionAndTheRelease(t *testing.T) {
+	advisory := testAdvisories(t)["CVE-2026-1111/accountsservice"]
+	if advisory.Status != vuln.StatusFixed {
+		t.Fatalf("status = %q, we want %q", advisory.Status, vuln.StatusFixed)
 	}
-	// Z dwoch kieszeni wygrywa nizsza wersja: od niej pakiet ma poprawke,
-	// wiec host z wersja glowna nie moze wyjsc jako podatny.
-	if ustalenie.FixedVersion != "23.13.9-2ubuntu6.1~esm1" {
-		t.Fatalf("wersja naprawiona = %q", ustalenie.FixedVersion)
+	// Of two pockets the lower version wins: it is from that one that the
+	// package carries the fix, so a host with the main version must not come
+	// out as vulnerable.
+	if advisory.FixedVersion != "23.13.9-2ubuntu6.1~esm1" {
+		t.Fatalf("fixed version = %q", advisory.FixedVersion)
 	}
-	if ustalenie.Release != "noble" || ustalenie.Distribution != "ubuntu" {
-		t.Fatalf("wydanie = %q, dystrybucja = %q", ustalenie.Release, ustalenie.Distribution)
+	if advisory.Release != "noble" || advisory.Distribution != "ubuntu" {
+		t.Fatalf("release = %q, distribution = %q", advisory.Release, advisory.Distribution)
 	}
-	if ustalenie.VendorSeverity != "high" {
-		t.Fatalf("waga = %q", ustalenie.VendorSeverity)
+	if advisory.VendorSeverity != "high" {
+		t.Fatalf("severity = %q", advisory.VendorSeverity)
 	}
-	if strings.Contains(ustalenie.Title, "Update Instructions") {
-		t.Fatalf("tytul niesie instrukcje aktualizacji: %q", ustalenie.Title)
+	if strings.Contains(advisory.Title, "Update Instructions") {
+		t.Fatalf("the title carries update instructions: %q", advisory.Title)
 	}
-	if ustalenie.PublishedAt == nil {
-		t.Fatal("ustalenie bez daty publikacji")
-	}
-}
-
-func TestPakietBezPoprawkiJestOtwarty(t *testing.T) {
-	ustalenie := ustaleniaTestowe(t)["CVE-2026-2222/curl"]
-	if ustalenie.Status != vuln.StatusOtwarte {
-		t.Fatalf("status = %q, chcemy %q", ustalenie.Status, vuln.StatusOtwarte)
-	}
-	if ustalenie.FixedVersion != "" {
-		t.Fatalf("ustalenie bez poprawki ma wersje %q", ustalenie.FixedVersion)
-	}
-	// "untriaged" nie jest waga: producent jeszcze nie ocenil.
-	if ustalenie.VendorSeverity != "medium" {
-		t.Fatalf("waga = %q", ustalenie.VendorSeverity)
+	if advisory.PublishedAt == nil {
+		t.Fatal("a finding without a publication date")
 	}
 }
 
-func TestJadroMaUstalenieZWersjaWariantu(t *testing.T) {
-	wedlug := ustaleniaTestowe(t)
-	ustalenie, ok := wedlug["CVE-2026-3333/linux"]
+func TestAPackageWithoutAFixIsOpen(t *testing.T) {
+	advisory := testAdvisories(t)["CVE-2026-2222/curl"]
+	if advisory.Status != vuln.StatusOpen {
+		t.Fatalf("status = %q, we want %q", advisory.Status, vuln.StatusOpen)
+	}
+	if advisory.FixedVersion != "" {
+		t.Fatalf("a finding without a fix carries the version %q", advisory.FixedVersion)
+	}
+	// "untriaged" is not a severity: the vendor has not scored it yet.
+	if advisory.VendorSeverity != "medium" {
+		t.Fatalf("severity = %q", advisory.VendorSeverity)
+	}
+}
+
+func TestTheKernelHasAFindingWithTheVersionOfTheVariant(t *testing.T) {
+	byKey := testAdvisories(t)
+	advisory, ok := byKey["CVE-2026-3333/linux"]
 	if !ok {
-		t.Fatal("brak ustalenia dla jadra - CVE jadra znikaja z oceny")
+		t.Fatal("no finding for the kernel - kernel CVEs disappear from the assessment")
 	}
-	if ustalenie.Status != vuln.StatusNaprawione || ustalenie.FixedVersion != "6.8.0-35.35" {
-		t.Fatalf("jadro: status = %q, wersja = %q", ustalenie.Status, ustalenie.FixedVersion)
+	if advisory.Status != vuln.StatusFixed || advisory.FixedVersion != "6.8.0-35.35" {
+		t.Fatalf("kernel: status = %q, version = %q", advisory.Status, advisory.FixedVersion)
 	}
-	// Kryterium "czy dziala" nie jest osobnym ustaleniem: nie ma wersji,
-	// wiec nie ma o czym mowic.
-	if len(wedlug) != 3 {
-		t.Fatalf("ustalen = %d, chcemy 3: %v", len(wedlug), wedlug)
-	}
-}
-
-func TestDokumentUrwanyNieJestKompletem(t *testing.T) {
-	urwany := przykladOVAL[:len(przykladOVAL)/2]
-	if _, err := Parsuj(strings.NewReader(urwany), "noble"); err == nil {
-		t.Fatal("urwany dokument przeszedl jako komplet")
+	// The "is it running" criterion is not a finding of its own: it carries no
+	// version, so there is nothing to speak about.
+	if len(byKey) != 3 {
+		t.Fatalf("findings = %d, we want 3: %v", len(byKey), byKey)
 	}
 }
 
-func TestDefinicjeBezUstalenSaBledem(t *testing.T) {
-	// Dokument poprawny skladniowo, w ktorym definicja nie wskazuje zadnego
-	// testu, jaki panel rozumie. Cisza jest tu najgorsza odpowiedzia.
-	obcy := `<oval_definitions><definitions>
+func TestACutDocumentIsNotTheFullThing(t *testing.T) {
+	cut := ovalSample[:len(ovalSample)/2]
+	if _, err := Parse(strings.NewReader(cut), "noble"); err == nil {
+		t.Fatal("a cut document went through as the whole thing")
+	}
+}
+
+func TestDefinitionsWithoutFindingsAreAnError(t *testing.T) {
+	// A syntactically correct document in which the definition points at no
+	// test the panel understands. Silence is the worst answer here.
+	foreign := `<oval_definitions><definitions>
       <definition id="oval:com.ubuntu.noble:def:1" class="vulnerability" version="1">
         <metadata>
           <reference source="CVE" ref_id="CVE-2026-9999" />
-          <description>nowy ksztalt dokumentu</description>
+          <description>a new shape of the document</description>
         </metadata>
-        <criteria><criterion test_ref="oval:com.ubuntu.noble:tst:999" comment="cos nowego" /></criteria>
+        <criteria><criterion test_ref="oval:com.ubuntu.noble:tst:999" comment="something new" /></criteria>
       </definition>
     </definitions></oval_definitions>`
-	if _, err := Parsuj(strings.NewReader(obcy), "noble"); err == nil {
-		t.Fatal("dokument bez ustalen przeszedl jako pusty feed")
+	if _, err := Parse(strings.NewReader(foreign), "noble"); err == nil {
+		t.Fatal("a document without findings went through as an empty feed")
 	}
 }
 
-func TestZnacznikiWydanSaOsobne(t *testing.T) {
-	znaczniki := map[string]string{"noble": `"aaa"`, "jammy": `"bbb"`, "focal": "z spacja"}
-	zlozone := ZlozZnaczniki(znaczniki)
-	odczytane := ParsujZnaczniki(zlozone)
-	if odczytane["noble"] != `"aaa"` || odczytane["jammy"] != `"bbb"` {
-		t.Fatalf("znaczniki po odczycie: %v", odczytane)
+func TestTheETagsOfReleasesAreSeparate(t *testing.T) {
+	etags := map[string]string{"noble": `"aaa"`, "jammy": `"bbb"`, "focal": "with a space"}
+	joined := JoinETags(etags)
+	read := ParseETags(joined)
+	if read["noble"] != `"aaa"` || read["jammy"] != `"bbb"` {
+		t.Fatalf("etags after reading: %v", read)
 	}
-	// Znacznik ze spacja rozpadlby sie na dwa wpisy - lepiej pobrac
-	// bezwarunkowo niz pobrac warunkowo bledna wartoscia.
-	if _, jest := odczytane["focal"]; jest {
-		t.Fatalf("znacznik ze spacja przeszedl: %v", odczytane)
+	// An etag with a space would fall apart into two entries - better to fetch
+	// unconditionally than to fetch conditionally with a wrong value.
+	if _, ok := read["focal"]; ok {
+		t.Fatalf("an etag with a space went through: %v", read)
 	}
 }
 
-func TestOdciskNieZalezyOdKolejnosci(t *testing.T) {
-	ustalenia, err := Parsuj(strings.NewReader(przykladOVAL), "noble")
+func TestTheDigestDoesNotDependOnTheOrder(t *testing.T) {
+	advisories, err := Parse(strings.NewReader(ovalSample), "noble")
 	if err != nil {
-		t.Fatalf("parsowanie: %v", err)
+		t.Fatalf("parsing: %v", err)
 	}
-	odwrotne := make([]vuln.Advisory, 0, len(ustalenia))
-	for i := len(ustalenia) - 1; i >= 0; i-- {
-		odwrotne = append(odwrotne, ustalenia[i])
+	reversed := make([]vuln.Advisory, 0, len(advisories))
+	for i := len(advisories) - 1; i >= 0; i-- {
+		reversed = append(reversed, advisories[i])
 	}
-	Uporzadkuj(odwrotne)
-	if Odcisk(ustalenia) != Odcisk(odwrotne) {
-		t.Fatal("odcisk zalezy od kolejnosci - kazde pobranie zakladaloby nowy snapshot")
+	SortAdvisories(reversed)
+	if Digest(advisories) != Digest(reversed) {
+		t.Fatal("the digest depends on the order - every fetch would start a new snapshot")
 	}
 }

@@ -1,9 +1,10 @@
-// Command agent-simulator utrzymuje wiele symulowanych agentow wobec
-// prawdziwego control plane.
+// Command agent-simulator keeps many simulated agents against a real control
+// plane.
 //
-// Dokument stawia symulator floty przed dashboardem: warunkiem wyjscia etapu
-// agenta jest 2000 jednoczesnych sesji bezczynnych, a etapu skalowania 10 000.
-// Bez symulatora nie da sie tego zmierzyc inaczej niz na produkcji.
+// The document puts the fleet simulator before the dashboard: the exit
+// condition of the agent stage is 2000 concurrent idle sessions, and of the
+// scaling stage 10 000. Without the simulator there is no measuring that
+// other than in production.
 package main
 
 import (
@@ -26,7 +27,7 @@ import (
 	"github.com/ultherego/flotestro/internal/config"
 )
 
-// stats zbiera przebieg symulacji.
+// stats gathers the course of the simulation.
 type stats struct {
 	enrolled  atomic.Int64
 	connected atomic.Int64
@@ -36,38 +37,38 @@ type stats struct {
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("symulator zakonczony bledem", "err", err)
+		slog.Error("the simulator ended with an error", "err", err)
 		os.Exit(1)
 	}
 }
 
 func run() error {
 	var (
-		count    = flag.Int("count", 100, "liczba symulowanych agentow")
-		prefix   = flag.String("prefix", "sim", "prefiks nazw hostow")
+		count    = flag.Int("count", 100, "the number of simulated agents")
+		prefix   = flag.String("prefix", "sim", "the prefix of the host names")
 		stateDir = flag.String("state-dir",
 			config.Env("FLOTESTRO_SIM_STATE_DIR", "/var/tmp/flotestro-sim"),
-			"katalog tozsamosci symulowanych agentow")
+			"the directory of the identities of the simulated agents")
 		enrollmentURL = flag.String("enrollment-url", config.Env("FLOTESTRO_ENROLLMENT_URL", ""),
-			"adres endpointu enrollmentu")
+			"the address of the enrollment endpoint")
 		gatewayURL = flag.String("gateway-url", config.Env("FLOTESTRO_GATEWAY_URL", ""),
-			"adres gatewaya agentow")
+			"the address of the agent gateway")
 		token = flag.String("enrollment-token", config.Env("FLOTESTRO_ENROLLMENT_TOKEN", ""),
-			"token enrollmentu")
-		caFile = flag.String("ca-file", config.Env("FLOTESTRO_CA_FILE", ""), "bundle CA")
+			"the enrollment token")
+		caFile = flag.String("ca-file", config.Env("FLOTESTRO_CA_FILE", ""), "the CA bundle")
 		rampUp = flag.Duration("ramp-up", 30*time.Second,
-			"czas rozlozenia startu agentow; jednoczesny start calej floty to lawina")
-		duration = flag.Duration("duration", 0, "czas trwania symulacji; zero oznacza bez limitu")
-		report   = flag.Duration("report-interval", 15*time.Second, "odstep raportow")
-		verbose  = flag.Bool("verbose", false, "logi pojedynczych agentow")
+			"the time the start of the agents is spread over; starting the whole fleet at once is an avalanche")
+		duration = flag.Duration("duration", 0, "how long the simulation lasts; zero means without a limit")
+		report   = flag.Duration("report-interval", 15*time.Second, "the interval of the reports")
+		verbose  = flag.Bool("verbose", false, "the logs of individual agents")
 	)
 	flag.Parse()
 
 	if *enrollmentURL == "" || *gatewayURL == "" {
-		return fmt.Errorf("wymagane sa --enrollment-url i --gateway-url")
+		return fmt.Errorf("--enrollment-url and --gateway-url are required")
 	}
 	if *count <= 0 {
-		return fmt.Errorf("liczba agentow musi byc dodatnia")
+		return fmt.Errorf("the number of agents has to be positive")
 	}
 
 	level := slog.LevelWarn
@@ -90,15 +91,15 @@ func run() error {
 	}
 
 	if err := os.MkdirAll(*stateDir, 0o700); err != nil {
-		return fmt.Errorf("katalog stanu: %w", err)
+		return fmt.Errorf("the state directory: %w", err)
 	}
 
 	counters := &stats{}
 	go reportLoop(ctx, counters, *count, *report)
 
 	var wg sync.WaitGroup
-	// Start jest rozlozony w czasie: jednoczesne polaczenie calej floty jest
-	// dokladnie tym uderzeniem, przed ktorym broni sie control plane.
+	// The start is spread over time: the whole fleet connecting at once is
+	// exactly the blow the control plane defends itself against.
 	interval := time.Duration(0)
 	if *rampUp > 0 && *count > 1 {
 		interval = *rampUp / time.Duration(*count)
@@ -126,12 +127,12 @@ func run() error {
 	return nil
 }
 
-// simulate utrzymuje jednego agenta o syntetycznej tozsamosci.
+// simulate keeps one agent with a synthetic identity.
 func simulate(ctx context.Context, index int, prefix, stateDir, enrollmentURL, gatewayURL,
 	token, caFile string, counters *stats, log *slog.Logger) {
 	hostname := fmt.Sprintf("%s-%05d", prefix, index)
-	// Identyfikator maszyny jest stabilny miedzy uruchomieniami symulatora,
-	// wiec ponowny start nie tworzy nowych hostow we flocie.
+	// The machine identifier is stable between runs of the simulator, so a
+	// restart does not create new hosts in the fleet.
 	sum := sha256.Sum256([]byte(hostname))
 	machineID := hex.EncodeToString(sum[:16])
 
@@ -148,7 +149,7 @@ func simulate(ctx context.Context, index int, prefix, stateDir, enrollmentURL, g
 	})
 	if err != nil {
 		counters.failed.Add(1)
-		log.Error("enrollment symulowanego agenta nie powiodl sie",
+		log.Error("the enrollment of a simulated agent failed",
 			"hostname", hostname, "err", err)
 		return
 	}
@@ -162,8 +163,8 @@ func simulate(ctx context.Context, index int, prefix, stateDir, enrollmentURL, g
 		GatewayURLs:  []string{gatewayURL},
 		Identity:     identity,
 		CollectFacts: func(context.Context) (agent.Facts, error) { return facts, nil },
-		// Symulowany agent nie wykonuje zadan mutujacych; celem jest pomiar
-		// kosztu samych sesji i inventory.
+		// A simulated agent carries out no mutating jobs; the goal is to
+		// measure the cost of the sessions and the inventory alone.
 		InventoryInterval:  30 * time.Minute,
 		MaxConcurrentTasks: 1,
 		Log:                log,
@@ -173,8 +174,9 @@ func simulate(ctx context.Context, index int, prefix, stateDir, enrollmentURL, g
 	}
 }
 
-// syntheticFacts buduje wiarygodne, ale rozne fakty dla kazdego agenta.
-// Identyczne fakty dawalyby te sama rewizje inventory i ukrywaly koszt zapisu.
+// syntheticFacts builds believable but different facts for every agent.
+// Identical facts would give the same inventory revision and hide the cost of
+// the write.
 func syntheticFacts(hostname, machineID string) agent.Facts {
 	sum := sha256.Sum256([]byte(machineID))
 	seed := int(sum[0])<<8 | int(sum[1])
@@ -188,7 +190,7 @@ func syntheticFacts(hostname, machineID string) agent.Facts {
 		OS: agent.OSInfo{
 			Family: "debian", Distribution: "debian", Version: "13",
 			Kernel: "6.12.0-sim", Architecture: runtime.GOARCH,
-			PrettyName: "Debian GNU/Linux 13 (symulacja)",
+			PrettyName: "Debian GNU/Linux 13 (simulation)",
 		},
 		Hardware: agent.Hardware{
 			CPUCores:       uint32(2 + seed%6),
@@ -225,7 +227,7 @@ func reportLoop(ctx context.Context, counters *stats, target int, interval time.
 			return
 		case <-ticker.C:
 			runtime.ReadMemStats(&memory)
-			fmt.Printf("polaczonych %d/%d | enrollment %d | bledow %d | reconnect %d | goroutines %d | RSS symulatora %.0f MiB\n",
+			fmt.Printf("connected %d/%d | enrolled %d | errors %d | reconnects %d | goroutines %d | RSS of the simulator %.0f MiB\n",
 				counters.connected.Load(), target, counters.enrolled.Load(),
 				counters.failed.Load(), counters.reconnect.Load(),
 				runtime.NumGoroutine(), float64(memory.Sys)/1048576)
@@ -234,6 +236,6 @@ func reportLoop(ctx context.Context, counters *stats, target int, interval time.
 }
 
 func printSummary(counters *stats, target int) {
-	fmt.Printf("\npodsumowanie: cel %d | zarejestrowanych %d | bledow %d | reconnect %d\n",
+	fmt.Printf("\nsummary: target %d | registered %d | errors %d | reconnects %d\n",
 		target, counters.enrolled.Load(), counters.failed.Load(), counters.reconnect.Load())
 }

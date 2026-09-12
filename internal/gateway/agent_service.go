@@ -103,7 +103,7 @@ type AgentService struct {
 	// pakiety trzymaja pelna liste pakietow hostow. Bez niej nie da sie
 	// powiedziec nic o podatnosciach - a brak listy musi byc widoczny jako
 	// brak wiedzy, nie jako host bez znalezisk.
-	pakiety *vuln.MagazynPakietow
+	pakiety *vuln.PackageStore
 	// secrets wydaje wartosci sekretow na dzierzawe. Pusty oznacza panel bez
 	// magazynu: operacje wskazujace sekret nie beda wtedy dostarczane.
 	secrets SekretyWydawane
@@ -129,7 +129,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		files:        managedfiles.NewStore(pool),
 		certificates: certyfikaty.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
-		pakiety:      vuln.NowyMagazynPakietow(pool),
+		pakiety:      vuln.NewPackageStore(pool),
 		audit:        recorder, registry: registry, wystawca: wystawca, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
@@ -2217,7 +2217,7 @@ func liczbaZBajtow(wartosc *uint64) *int64 {
 // nieustalony, a nie jako host bez znalezisk.
 func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID string,
 	wynik *agentv1.InstalledPackagesResult) {
-	stan := vuln.StanListy{
+	stan := vuln.PackageListState{
 		HostID: hostID, Digest: wynik.GetDigest(),
 		PackageCount: int(wynik.GetCount()), JobID: jobID,
 		UnavailableReason: wynik.GetUnavailableReason(),
@@ -2243,18 +2243,18 @@ func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID st
 	// z tego samego odczytu i opisuja ten sam moment. Blad ich odczytu nie
 	// moze wygladac jak host bez ustalen - dlatego niesie wlasny powod.
 	ustalenia, powod := ustaleniaZWyniku(wynik, teraz)
-	stanUstalen := vuln.StanUstalen{
+	stanUstalen := vuln.AdvisoryState{
 		HostID: hostID, JobID: jobID, CollectedAt: &teraz,
 		AdvisoryCount: len(ustalenia), UnavailableReason: powod,
 	}
 	if powod == "" {
-		stanUstalen.Digest = vuln.OdciskUstalen(ustalenia)
+		stanUstalen.Digest = vuln.AdvisoriesDigest(ustalenia)
 	} else {
 		ustalenia = nil
 		stanUstalen.AdvisoryCount = 0
 	}
 
-	if err := s.pakiety.ZastapObraz(ctx, hostID, pakiety, stan, ustalenia, stanUstalen); err != nil {
+	if err := s.pakiety.ReplaceImage(ctx, hostID, pakiety, stan, ustalenia, stanUstalen); err != nil {
 		s.log.Error("nie zapisano obrazu pakietow", "host_id", hostID, "err", err)
 		return
 	}
@@ -2274,7 +2274,7 @@ func (s *AgentService) zapiszListePakietow(ctx context.Context, hostID, jobID st
 // Jedno ustalenie dotyczy zwykle kilku pakietow; panel przechowuje je po
 // pakiecie, bo tak przebiega korelacja.
 func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult,
-	teraz time.Time) ([]vuln.UstalenieHosta, string) {
+	teraz time.Time) ([]vuln.HostAdvisory, string) {
 	if powod := wynik.GetAdvisoriesUnavailableReason(); powod != "" {
 		return nil, powod
 	}
@@ -2286,9 +2286,9 @@ func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult,
 		// Metadanych nie dalo sie rozpoznac. Pusta lista znaczylaby tu "host
 		// nie ma zadnych ustalen producenta" - czyli cos, czego nikt nie
 		// sprawdzil.
-		return nil, vuln.RodzajUstaleniaNieczytelne
+		return nil, vuln.ReasonHostAdvisoriesUnreadable
 	}
-	var ustalenia []vuln.UstalenieHosta
+	var ustalenia []vuln.HostAdvisory
 	for _, ustalenie := range zebrane {
 		// Ustalenie bez CVE jest normalne: producent nie zawsze je przypisuje.
 		// Kolumna nie przyjmuje jednak wartosci pustej, a brak listy i lista
@@ -2298,7 +2298,7 @@ func ustaleniaZWyniku(wynik *agentv1.InstalledPackagesResult,
 			cve = []string{}
 		}
 		for _, pakiet := range ustalenie.Packages {
-			ustalenia = append(ustalenia, vuln.UstalenieHosta{
+			ustalenia = append(ustalenia, vuln.HostAdvisory{
 				AdvisoryID: ustalenie.ID, PackageName: pakiet.Name,
 				Architecture: pakiet.Architecture, FixedEVR: pakiet.EVR,
 				CVEIDs: cve, Severity: ustalenie.Severity,

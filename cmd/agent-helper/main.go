@@ -1,8 +1,10 @@
-// Command agent-helper wykonuje operacje wymagajace roota w imieniu agenta.
+// Command agent-helper carries out the operations that require root on
+// behalf of the agent.
 //
-// Helper jest aktywowany przez systemd na zadanie, nasluchuje wylacznie na
-// gniezdzie unixowym i nigdy nie laczy sie z siecia. Kompromitacja agenta nie
-// daje wiec dostepu do roota poza tym, co helper jawnie obsluguje.
+// The helper is activated by systemd on demand, listens on a unix socket
+// alone and never connects to the network. A compromise of the agent
+// therefore gives no access to root beyond what the helper explicitly
+// supports.
 package main
 
 import (
@@ -25,7 +27,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("helper zakonczony bledem", "err", err)
+		slog.Error("the helper ended with an error", "err", err)
 		os.Exit(1)
 	}
 }
@@ -34,59 +36,59 @@ func run() error {
 	var (
 		socketPath = flag.String("socket",
 			config.Env("FLOTESTRO_HELPER_SOCKET", "/run/flotestro/helper.sock"),
-			"sciezka gniazda, gdy nie ma socket activation")
+			"the path of the socket when there is no socket activation")
 		agentUser = flag.String("agent-user",
 			config.Env("FLOTESTRO_AGENT_USER", "flotestro-agent"),
-			"uzytkownik, ktoremu wolno wydawac polecenia")
+			"the user who is allowed to issue commands")
 		rollback = flag.String("rollback", "",
-			"wykonaj zapisany plan wycofania zmiany sieci i zakoncz")
+			"carry out the recorded plan of rolling a network change back and finish")
 		rollbackFirewall = flag.String("rollback-firewall", "",
-			"wykonaj zapisany plan wycofania zmiany zapory i zakoncz")
-		wymianaAgenta = flag.String("wymiana-agenta", "",
-			"zainstaluj wskazana wersje pakietu agenta i zakoncz")
+			"carry out the recorded plan of rolling a firewall change back and finish")
+		agentReplacement = flag.String("agent-replacement", "",
+			"install the named version of the agent package and finish")
 		idleTimeout = flag.Duration("idle-timeout",
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
-			"czas bezczynnosci, po ktorym helper konczy prace")
+			"the idle time after which the helper finishes its work")
 	)
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	// Tryb wymiany agenta jest wolany przez przejsciowa jednostke systemd.
-	// Instalacja pakietu agenta zatrzymuje helpera i restartuje agenta, wiec
-	// nie moze biec w procesie, ktory ja zlecil: ten proces nie dozylby
-	// konca wlasnej transakcji.
-	if *wymianaAgenta != "" {
+	// The agent replacement mode is called by a transient systemd unit.
+	// Installing the agent package stops the helper and restarts the agent,
+	// so it must not run in the process that ordered it: that process would
+	// not live to the end of its own transaction.
+	if *agentReplacement != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		log.Info("wymiana agenta", "pakiet", *wymianaAgenta)
-		return helper.WykonajWymianeAgenta(ctx, *wymianaAgenta, log)
+		log.Info("the replacement of the agent", "package", *agentReplacement)
+		return helper.WykonajWymianeAgenta(ctx, *agentReplacement, log)
 	}
 
-	// Tryb wycofania jest wolany przez przejsciowa jednostke systemd, gdy
-	// nikt nie potwierdzil lacznosci po zmianie sieci. Dziala bez gniazda,
-	// bez agenta i bez panelu - to ostatnia rzecz, ktora dziala, gdy zmiana
-	// odetnie host od swiata.
+	// The rollback mode is called by a transient systemd unit when nobody has
+	// confirmed connectivity after a network change. It works without a
+	// socket, without the agent and without the panel - it is the last thing
+	// that works when a change cuts the host off from the world.
 	if *rollbackFirewall != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		log.Warn("wycofanie zmiany zapory", "plan", *rollbackFirewall)
+		log.Warn("rolling the firewall change back", "plan", *rollbackFirewall)
 		if err := helper.WycofajZapore(ctx, *rollbackFirewall); err != nil {
 			return err
 		}
-		log.Info("zmiana zapory wycofana", "plan", *rollbackFirewall)
+		log.Info("the firewall change was rolled back", "plan", *rollbackFirewall)
 		return nil
 	}
 
 	if *rollback != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		log.Warn("wycofanie zmiany sieci", "plan", *rollback)
+		log.Warn("rolling the network change back", "plan", *rollback)
 		if err := helper.WycofajZPlanu(ctx, *rollback); err != nil {
 			return err
 		}
-		log.Info("zmiana sieci wycofana", "plan", *rollback)
+		log.Info("the network change was rolled back", "plan", *rollback)
 		return nil
 	}
 
@@ -95,9 +97,10 @@ func run() error {
 		return err
 	}
 
-	// Helper dziala jako root, wiec narzedzia pakietowe uzywaja katalogu roota.
+	// The helper runs as root, so the package tools use the directory of
+	// root.
 	if err := packages.SetRuntimeDir("/var/lib/flotestro-helper"); err != nil {
-		return fmt.Errorf("katalog roboczy helpera: %w", err)
+		return fmt.Errorf("the working directory of the helper: %w", err)
 	}
 
 	listener, activated, err := helper.ListenerFromSystemd()
@@ -105,18 +108,19 @@ func run() error {
 		return err
 	}
 	if !activated {
-		// Tryb bez socket activation sluzy testom; wtedy helper sam pilnuje
-		// praw gniazda, zeby nie bylo dostepne dla calego systemu.
+		// The mode without socket activation serves the tests; the helper then
+		// watches over the permissions of the socket itself so that it is not
+		// available to the whole system.
 		_ = os.Remove(*socketPath)
 		if err := os.MkdirAll(dirOf(*socketPath), 0o755); err != nil {
 			return err
 		}
 		listener, err = net.Listen("unix", *socketPath)
 		if err != nil {
-			return fmt.Errorf("gniazdo %s: %w", *socketPath, err)
+			return fmt.Errorf("the socket %s: %w", *socketPath, err)
 		}
 		if err := os.Chown(*socketPath, 0, int(gidOf(*agentUser))); err != nil {
-			log.Warn("nie ustawiono grupy gniazda", "err", err)
+			log.Warn("the group of the socket was not set", "err", err)
 		}
 		if err := os.Chmod(*socketPath, 0o660); err != nil {
 			return err
@@ -127,25 +131,26 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("helper gotowy",
+	log.Info("the helper is ready",
 		"agent_user", *agentUser, "uid", allowedUID,
 		"socket_activated", activated, "protocol_version", helper.ProtocolVersion)
 
-	// Transakcja pakietowa wstrzymuje na swoj czas pakiet agenta, zeby nie
-	// wymienic go w polowie wlasnej pracy. Gdy zginela razem z procesem,
-	// wstrzymanie zostawalo na zawsze i blokowalo kazda pozniejsza wymiane
-	// agenta. Sprzatamy je przy starcie - ale tylko wtedy, gdy to my je
-	// zalozylismy.
-	if zwolniono, err := packages.ZwolnijPorzuconeWstrzymanie(ctx); err != nil {
-		log.Warn("nie zwolniono porzuconego wstrzymania pakietu agenta", "err", err)
-	} else if zwolniono {
-		log.Info("zwolniono porzucone wstrzymanie pakietu agenta")
+	// A package transaction holds the agent package for its own duration so
+	// as not to replace it halfway through its own work. When it died with
+	// the process, the hold stayed for good and blocked every later
+	// replacement of the agent. We clean it up at the start - but only when
+	// it was us who placed it.
+	if released, err := packages.ZwolnijPorzuconeWstrzymanie(ctx); err != nil {
+		log.Warn("the abandoned hold on the agent package was not released", "err", err)
+	} else if released {
+		log.Info("the abandoned hold on the agent package was released")
 	}
 
-	// Helper konczy prace po okresie bezczynnosci. W stanie spoczynku floty
-	// nie dziala zaden proces roota. Bezczynnosc liczy serwer od ostatniego
-	// polaczenia i nigdy w trakcie zadania: zegar liczony tu od startu
-	// przecinal transakcje, ktora akurat trwala w piatej minucie.
+	// The helper finishes its work after a period of idleness. With the fleet
+	// at rest not a single root process runs. The server counts the idleness
+	// from the last connection and never during a job: a clock counted here
+	// from the start cut a transaction that happened to be running in its
+	// fifth minute.
 	server := helper.NewServer(allowedUID, log)
 	server.IdleTimeout = *idleTimeout
 	return server.Serve(ctx, listener)
@@ -154,7 +159,7 @@ func run() error {
 func lookupUID(name string) (uint32, error) {
 	entry, err := user.Lookup(name)
 	if err != nil {
-		return 0, fmt.Errorf("uzytkownik %s: %w", name, err)
+		return 0, fmt.Errorf("the user %s: %w", name, err)
 	}
 	uid, err := strconv.ParseUint(entry.Uid, 10, 32)
 	if err != nil {

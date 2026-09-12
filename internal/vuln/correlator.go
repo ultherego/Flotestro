@@ -8,405 +8,423 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
-// WersjaKomparatora opisuje regule porownania wersji uzyta przy ocenie.
+// ComparatorRule describes the version comparison rule used in an
+// assessment.
 //
-// Zapisujemy ja przy kazdym ustaleniu, bo zmiana reguly zmienia odpowiedz:
-// bez tego nie da sie powiedziec, czy stare ustalenie liczono tak samo.
-const WersjaKomparatora = "deb/dpkg-1,rpm/rpmvercmp-1"
+// It is written down with every finding, because a change of the rule
+// changes the answer: without it there is no telling whether an old finding
+// was computed the same way.
+const ComparatorRule = "deb/dpkg-1,rpm/rpmvercmp-1"
 
-// Wejscie jest wszystkim, z czego liczy sie ocena jednego hosta.
-type Wejscie struct {
+// Input is everything the assessment of one host is computed from.
+type Input struct {
 	HostID   string
 	Hostname string
-	// Distribution i Release opisuja host tak, jak nazywa go jego producent:
-	// "debian"/"trixie", "fedora"/"42". Feed mowi tym samym jezykiem.
+	// Distribution and Release describe the host the way its vendor names
+	// it: "debian"/"trixie", "fedora"/"42". The feed speaks the same
+	// language.
 	Distribution string
 	Release      string
 	Packages     []packages.InstalledPackage
-	// InventoryDigest wiaze ocene z konkretnym obrazem listy pakietow,
-	// a AdvisoryDigest - z konkretnym zestawem ustalen producenta.
+	// InventoryDigest binds the assessment to a specific image of the
+	// package list, and AdvisoryDigest - to a specific set of vendor
+	// findings.
 	InventoryDigest string
 	AdvisoryDigest  string
-	// AdvisoriesReason mowi, dlaczego nie ma ustalen producenta albo dlaczego
-	// sa stare. Dotyczy dystrybucji, dla ktorych rozstrzygaja metadane
-	// repozytoriow samego hosta.
+	// AdvisoriesReason says why there are no vendor findings or why they are
+	// old. It applies to the distributions where the repository metadata of
+	// the host itself settle the matter.
 	AdvisoriesReason string
-	// ListaNieaktualna oznacza, ze host zglasza inny odcisk listy niz ten,
-	// ktory panel ma u siebie.
-	ListaNieaktualna bool
-	// BrakListy oznacza hosta, ktorego listy panel jeszcze nie pobral.
-	BrakListy bool
+	// ListStale means the host reports a package list digest other than the
+	// one the panel holds.
+	ListStale bool
+	// ListMissing means a host whose list the panel has not fetched yet.
+	ListMissing bool
 }
 
-// Ocena jest wynikiem korelacji dla jednego hosta.
-type Ocena struct {
+// Evaluation is the result of the correlation for one host.
+type Evaluation struct {
 	Findings []Assessment
-	Stan     StanHosta
+	State    HostState
 }
 
-// Ocen koreluje pakiety hosta z ustaleniami producenta dystrybucji.
+// Evaluate correlates the packages of a host with the findings of the
+// distribution vendor.
 //
-// Reguly sa trzy i wszystkie sluza jednemu: panel nie moze powiedziec
-// "bezpieczny", gdy naprawde znaczy "nie wiem".
+// There are three rules and all of them serve one purpose: the panel must
+// not say "safe" when it really means "I do not know".
 //
-// Po pierwsze, brak danych nie jest brakiem podatnosci - host bez feedu,
-// z feedem nieswiezym albo z wydaniem spoza feedu dostaje stan nieustalony
-// z kodem powodu, a nie zero znalezisk.
+// First, missing data is not a missing vulnerability - a host without a
+// feed, with a stale feed or with a release outside the feed gets an
+// undetermined state with a reason code rather than zero findings.
 //
-// Po drugie, rozstrzyga producent: jego "not affected" jest odpowiedzia, jego
-// "under investigation" jest brakiem odpowiedzi, a wersja naprawiona jest
-// wersja z jego numeracji, nie z upstreamu.
+// Second, the vendor settles the matter: its "not affected" is an answer,
+// its "under investigation" is a missing answer, and the fixed version is a
+// version from its own numbering, not from upstream.
 //
-// Po trzecie, ocena mowi tylko o tym, czy pakiet jest podatny. Czy poprawke da
-// sie teraz zainstalowac, rozstrzyga plan pakietowy hosta - nie advisory.
-func Ocen(wejscie Wejscie, snapshot Snapshot, ustalenia map[string][]Advisory,
-	maksymalnyWiekFeedu time.Duration, teraz time.Time) Ocena {
-	stan := StanHosta{
-		HostID: wejscie.HostID, Hostname: wejscie.Hostname,
-		Distribution: wejscie.Distribution, Release: wejscie.Release,
+// Third, the assessment only says whether a package is vulnerable. Whether
+// the fix can be installed right now is settled by the package plan of the
+// host - not by an advisory.
+func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
+	maxFeedAge time.Duration, now time.Time) Evaluation {
+	state := HostState{
+		HostID: input.HostID, Hostname: input.Hostname,
+		Distribution: input.Distribution, Release: input.Release,
 		Provider: snapshot.Provider, SnapshotDigest: snapshot.Digest,
-		InventoryDigest:  wejscie.InventoryDigest,
-		AdvisoryDigest:   wejscie.AdvisoryDigest,
-		AdvisoriesReason: wejscie.AdvisoriesReason,
-		PackagesTotal:    len(wejscie.Packages),
-		EvaluatedAt:      &teraz,
+		InventoryDigest:  input.InventoryDigest,
+		AdvisoryDigest:   input.AdvisoryDigest,
+		AdvisoriesReason: input.AdvisoriesReason,
+		PackagesTotal:    len(input.Packages),
+		EvaluatedAt:      &now,
 	}
 
-	powod, blokuje := PowodPokrycia(wejscie, snapshot, maksymalnyWiekFeedu, teraz)
-	stan.CoverageReason = powod
-	if blokuje {
-		return Ocena{Stan: stan}
+	reason, blocking := CoverageReasonFor(input, snapshot, maxFeedAge, now)
+	state.CoverageReason = reason
+	if blocking {
+		return Evaluation{State: state}
 	}
 
-	var wynik []Assessment
-	for _, pakiet := range wejscie.Packages {
-		if powod := PowodPominiecia(pakiet, wejscie.Distribution); powod != "" {
-			// Pakiet spoza dystrybucji: przebudowany lokalnie albo z obcego
-			// repozytorium. Producent o nim nic nie mowi i nie ma prawa
-			// mowic - to jest stan nieustalony, a nie pakiet bezpieczny.
-			wynik = append(wynik, ustalenieNieznane(wejscie, snapshot, pakiet, powod, teraz))
+	var findings []Assessment
+	for _, pkg := range input.Packages {
+		if reason := SkipReason(pkg, input.Distribution); reason != "" {
+			// A package from outside the distribution: rebuilt locally or
+			// taken from a foreign repository. The vendor says nothing about
+			// it and has no right to - this is an undetermined state rather
+			// than a safe package.
+			findings = append(findings, unknownFinding(input, snapshot, pkg, reason, now))
 			continue
 		}
-		stan.PackagesCovered++
+		state.PackagesCovered++
 
-		for _, ustalenie := range ustalenia[KluczKorelacji(pakiet, wejscie.Distribution)] {
-			if ustalenie.BinaryPackage != "" && ustalenie.BinaryPackage != pakiet.Name {
+		for _, advisory := range advisories[CorrelationKey(pkg, input.Distribution)] {
+			if advisory.BinaryPackage != "" && advisory.BinaryPackage != pkg.Name {
 				continue
 			}
-			// Poprawka dla innej architektury nie naprawia tego pakietu:
-			// producent wydaje je osobno i osobno je numeruje.
-			if ustalenie.Architecture != "" && pakiet.Architecture != "" &&
-				ustalenie.Architecture != pakiet.Architecture {
+			// A fix for another architecture does not fix this package: the
+			// vendor releases them separately and numbers them separately.
+			if advisory.Architecture != "" && pkg.Architecture != "" &&
+				advisory.Architecture != pkg.Architecture {
 				continue
 			}
-			ocena := ocenPakiet(wejscie, snapshot, pakiet, ustalenie, teraz)
-			if ocena.State == StateNotAffected {
-				// Ustalen "nie dotyczy" nie zapisujemy: byloby ich miliony,
-				// a niosa tyle samo, co ich brak przy pelnym pokryciu.
+			assessment := evaluatePackage(input, snapshot, pkg, advisory, now)
+			if assessment.State == StateNotAffected {
+				// "Not affected" findings are not written down: there would
+				// be millions of them and they carry as much as their
+				// absence does under full coverage.
 				continue
 			}
-			wynik = append(wynik, ocena)
+			findings = append(findings, assessment)
 		}
 	}
 
-	// Liczniki unikatow: jedno advisory niesie kilka CVE i kilka pakietow,
-	// wiec "1354 znalezisk" nie mowi, ile to naprawde roznych spraw.
-	pakiety := map[string]bool{}
-	sprawy := map[string]bool{}
-	cve := map[string]bool{}
-	for _, ustalenie := range wynik {
-		switch ustalenie.State {
+	// Counters of unique items: one advisory carries several CVEs and
+	// several packages, so "1354 findings" does not say how many genuinely
+	// different matters that is.
+	affectedPackages := map[string]bool{}
+	matters := map[string]bool{}
+	cves := map[string]bool{}
+	for _, finding := range findings {
+		switch finding.State {
 		case StateAffected:
-			stan.Affected++
-			pakiety[ustalenie.BinaryPackage+"\x1f"+ustalenie.Architecture+"\x1f"+
-				ustalenie.InstalledVersion] = true
-			if ustalenie.AdvisoryID != "" {
-				sprawy[ustalenie.AdvisoryID] = true
+			state.Affected++
+			affectedPackages[finding.BinaryPackage+"\x1f"+finding.Architecture+"\x1f"+
+				finding.InstalledVersion] = true
+			if finding.AdvisoryID != "" {
+				matters[finding.AdvisoryID] = true
 			}
-			for _, numer := range ustalenie.CVEIDs {
-				cve[numer] = true
+			for _, number := range finding.CVEIDs {
+				cves[number] = true
 			}
-			// Podatnosc z poprawka jest do zainstalowania dzis; podatnosc bez
-			// poprawki jest do oceny ryzyka. Sklejone w jedna liczbe daja
-			// sciane, ktorej nikt nie przeczyta - a w niej gina te, ktore
-			// naprawde da sie zamknac.
-			if ustalenie.VendorFix == VendorFixKnown {
-				stan.AffectedWithVendorFix++
+			// A vulnerability with a fix can be installed today; one without
+			// a fix is a matter of risk assessment. Glued into one number
+			// they give a wall nobody reads - and the ones that really can
+			// be closed are lost in it.
+			if finding.VendorFix == VendorFixKnown {
+				state.AffectedWithVendorFix++
 			} else {
-				stan.AffectedNoFix++
+				state.AffectedNoFix++
 			}
 		case StateUnknown:
-			stan.Unknown++
+			state.Unknown++
 		}
 	}
-	stan.AffectedPackages = len(pakiety)
-	stan.UniqueAdvisories = len(sprawy)
-	stan.UniqueCVEs = len(cve)
-	return Ocena{Findings: wynik, Stan: stan}
+	state.AffectedPackages = len(affectedPackages)
+	state.UniqueAdvisories = len(matters)
+	state.UniqueCVEs = len(cves)
+	return Evaluation{Findings: findings, State: state}
 }
 
-// PowodPokrycia mowi, co przeszkadza w pelnej ocenie hosta i czy przeszkoda
-// zatrzymuje ocene.
+// CoverageReasonFor says what stands in the way of a full assessment of a
+// host and whether that obstacle stops the assessment.
 //
-// Jedna funkcja, bo ten sam rachunek robia dwa miejsca: ocena i decyzja, czy
-// hosta w ogole trzeba przeliczac. Rozjazd miedzy nimi zamrozilby ocene
-// w stanie, ktory przestal byc prawdziwy.
+// One function, because the same reckoning is done in two places: the
+// assessment itself and the decision whether the host has to be recomputed
+// at all. A divergence between them would freeze an assessment in a state
+// that had stopped being true.
 //
-// Kolejnosc powodow ma znaczenie: mowimy o najpowazniejszej przeszkodzie,
-// a nie o pierwszej napotkanej.
-func PowodPokrycia(wejscie Wejscie, snapshot Snapshot,
-	maksymalnyWiekFeedu time.Duration, teraz time.Time) (string, bool) {
+// The order of the reasons matters: we name the most serious obstacle rather
+// than the first one encountered.
+func CoverageReasonFor(input Input, snapshot Snapshot,
+	maxFeedAge time.Duration, now time.Time) (string, bool) {
 	switch {
-	case wejscie.BrakListy:
-		return RodzajBrakListy, true
-	case wejscie.AdvisoriesReason != "" && wejscie.AdvisoriesReason != RodzajUstaleniaNieswieze:
-		// Host, ktorego metadanych repozytoriow panel nie odczytal, nie jest
-		// hostem bez ustalen producenta: jest hostem, o ktorym nikt nie
-		// sprawdzil, czy jakies ma.
-		return wejscie.AdvisoriesReason, true
+	case input.ListMissing:
+		return ReasonPackageListMissing, true
+	case input.AdvisoriesReason != "" && input.AdvisoriesReason != ReasonHostAdvisoriesStale:
+		// A host whose repository metadata the panel has not read is not a
+		// host without vendor findings: it is a host nobody has checked for
+		// any.
+		return input.AdvisoriesReason, true
 	case snapshot.Digest == "":
-		return RodzajBrakFeedu, true
-	case !ObejmujeWydanie(snapshot, wejscie.Release):
-		return RodzajWydanieNieobslugiwane, true
+		return ReasonFeedMissing, true
+	case !CoversRelease(snapshot, input.Release):
+		return ReasonReleaseUnsupported, true
 	}
-	// Nieswiezy feed nie zatrzymuje oceny: dane sprzed doby sa lepsze niz ich
-	// brak. Ale operator ma wiedziec, ze patrzy na wczorajszy obraz.
-	if snapshot.Nieswiezy(maksymalnyWiekFeedu, teraz) {
-		return RodzajFeedNieswiezy, false
+	// A stale feed does not stop the assessment: data from a day ago are
+	// better than none. But the operator is to know they are looking at
+	// yesterday's picture.
+	if snapshot.Stale(maxFeedAge, now) {
+		return ReasonFeedStale, false
 	}
-	if wejscie.ListaNieaktualna {
-		return RodzajListaNieaktualna, false
+	if input.ListStale {
+		return ReasonPackageListStale, false
 	}
-	if wejscie.AdvisoriesReason != "" {
-		return wejscie.AdvisoriesReason, false
+	if input.AdvisoriesReason != "" {
+		return input.AdvisoriesReason, false
 	}
 	return "", false
 }
 
-// ocenPakiet rozstrzyga jeden pakiet wobec jednego ustalenia producenta.
-func ocenPakiet(wejscie Wejscie, snapshot Snapshot, pakiet packages.InstalledPackage,
-	ustalenie Advisory, teraz time.Time) Assessment {
-	wersjaPorownania, podstawa := WersjaPorownania(pakiet, wejscie.Distribution)
-	ocena := Assessment{
-		HostID: wejscie.HostID, InventoryDigest: wejscie.InventoryDigest,
-		AdvisoryDigest: wejscie.AdvisoryDigest,
-		Provider:       ustalenie.Provider, SnapshotDigest: snapshot.Digest,
-		AdvisoryID: ustalenie.AdvisoryID, CVEIDs: ustalenie.CVEIDs,
-		Distribution: wejscie.Distribution, Release: wejscie.Release,
-		SourcePackage: ustalenie.SourcePackage, BinaryPackage: pakiet.Name,
-		Architecture:      pakiet.Architecture,
-		InstalledVersion:  WersjaPakietu(pakiet, wejscie.Distribution),
-		ComparisonVersion: wersjaPorownania, ComparisonBasis: podstawa,
-		FixedVersion: ustalenie.FixedVersion, VendorSeverity: ustalenie.VendorSeverity,
-		ComparatorVersion: WersjaKomparatora, EvaluatedAt: teraz,
-		PackageOrigin:       KlasaPochodzenia(pakiet, wejscie.Distribution),
+// evaluatePackage settles one package against one vendor finding.
+func evaluatePackage(input Input, snapshot Snapshot, pkg packages.InstalledPackage,
+	advisory Advisory, now time.Time) Assessment {
+	comparisonVersion, basis := ComparisonVersionFor(pkg, input.Distribution)
+	assessment := Assessment{
+		HostID: input.HostID, InventoryDigest: input.InventoryDigest,
+		AdvisoryDigest: input.AdvisoryDigest,
+		Provider:       advisory.Provider, SnapshotDigest: snapshot.Digest,
+		AdvisoryID: advisory.AdvisoryID, CVEIDs: advisory.CVEIDs,
+		Distribution: input.Distribution, Release: input.Release,
+		SourcePackage: advisory.SourcePackage, BinaryPackage: pkg.Name,
+		Architecture:      pkg.Architecture,
+		InstalledVersion:  PackageVersion(pkg, input.Distribution),
+		ComparisonVersion: comparisonVersion, ComparisonBasis: basis,
+		FixedVersion: advisory.FixedVersion, VendorSeverity: advisory.VendorSeverity,
+		ComparatorVersion: ComparatorRule, EvaluatedAt: now,
+		PackageOrigin:       OriginClassOf(pkg, input.Distribution),
 		VendorFix:           VendorFixUnknown,
 		RepositoryCandidate: CandidateUnknown,
-		// Czy transakcje da sie wykonac, wie wylacznie plan pakietowy hosta:
-		// on widzi wstrzymania, wykluczenia i konflikty. Dopoki go nie ma,
-		// panel nie ma prawa niczego obiecywac.
+		// Only the package plan of the host knows whether the transaction
+		// can be carried out: it is the one that sees holds, exclusions and
+		// conflicts. Until there is one, the panel has no right to promise
+		// anything.
 		Transaction: TransactionUnknown,
 	}
 
-	switch ustalenie.Status {
-	case StatusNieDotyczy:
-		// Producent to rozstrzygnal - i to jest odpowiedz, a nie brak wiedzy.
-		ocena.State = StateNotAffected
-		return ocena
-	case StatusBadane:
-		ocena.State = StateUnknown
-		ocena.ReasonCode = RodzajProducentBada
-		return ocena
-	case StatusOtwarte, StatusOdroczone:
-		// Podatnosc bez poprawki: pakiet jest podatny i nie ma czym tego
-		// naprawic. To wazniejsza wiadomosc niz podatnosc z poprawka.
-		ocena.State = StateAffected
-		ocena.VendorFix = VendorFixUnavailable
-		ocena.RepositoryCandidate = CandidateAbsent
-		return ocena
+	switch advisory.Status {
+	case StatusNotAffected:
+		// The vendor settled this - and that is an answer, not a gap in
+		// knowledge.
+		assessment.State = StateNotAffected
+		return assessment
+	case StatusUnderInvestigation:
+		assessment.State = StateUnknown
+		assessment.ReasonCode = ReasonVendorInvestigating
+		return assessment
+	case StatusOpen, StatusDeferred:
+		// A vulnerability without a fix: the package is vulnerable and there
+		// is nothing to fix it with. That is a more important message than a
+		// vulnerability with a fix.
+		assessment.State = StateAffected
+		assessment.VendorFix = VendorFixUnavailable
+		assessment.RepositoryCandidate = CandidateAbsent
+		return assessment
 	}
 
-	if ustalenie.FixedVersion == "" {
-		ocena.State = StateAffected
-		ocena.VendorFix = VendorFixUnavailable
-		ocena.RepositoryCandidate = CandidateAbsent
-		return ocena
+	if advisory.FixedVersion == "" {
+		assessment.State = StateAffected
+		assessment.VendorFix = VendorFixUnavailable
+		assessment.RepositoryCandidate = CandidateAbsent
+		return assessment
 	}
-	wynik, ok := Porownaj(wejscie.Distribution, wersjaPorownania, ustalenie.FixedVersion)
+	result, ok := Compare(input.Distribution, comparisonVersion, advisory.FixedVersion)
 	if !ok {
-		ocena.State = StateUnknown
-		ocena.ReasonCode = RodzajWersjaNieczytelna
-		return ocena
+		assessment.State = StateUnknown
+		assessment.ReasonCode = ReasonVersionUnparseable
+		return assessment
 	}
-	ocena.VendorFix = VendorFixKnown
-	if wynik < 0 {
-		ocena.State = StateAffected
-		// Ustalenie odczytane z metadanych samego hosta znaczy, ze poprawka
-		// jest widoczna w repozytorium, z ktorego host bierze pakiety. To
-		// nadal nie znaczy, ze transakcja przejdzie - o tym mowi plan.
-		if ustalenie.FromHostRepositories {
-			ocena.RepositoryCandidate = CandidateVisible
+	assessment.VendorFix = VendorFixKnown
+	if result < 0 {
+		assessment.State = StateAffected
+		// A finding read from the metadata of the host itself means the fix
+		// is visible in a repository the host takes packages from. That
+		// still does not mean the transaction will go through - the plan
+		// says that.
+		if advisory.FromHostRepositories {
+			assessment.RepositoryCandidate = CandidateVisible
 		}
-		return ocena
+		return assessment
 	}
-	ocena.State = StateNotAffected
-	return ocena
+	assessment.State = StateNotAffected
+	return assessment
 }
 
-// ustalenieNieznane opisuje pakiet, o ktorym producent nie ma prawa nic mowic.
-func ustalenieNieznane(wejscie Wejscie, snapshot Snapshot, pakiet packages.InstalledPackage,
-	powod string, teraz time.Time) Assessment {
+// unknownFinding describes a package the vendor has no right to say anything
+// about.
+func unknownFinding(input Input, snapshot Snapshot, pkg packages.InstalledPackage,
+	reason string, now time.Time) Assessment {
 	return Assessment{
-		HostID: wejscie.HostID, InventoryDigest: wejscie.InventoryDigest,
+		HostID: input.HostID, InventoryDigest: input.InventoryDigest,
 		Provider: snapshot.Provider, SnapshotDigest: snapshot.Digest,
-		Distribution: wejscie.Distribution, Release: wejscie.Release,
-		SourcePackage: zrodloPakietu(pakiet), BinaryPackage: pakiet.Name,
-		Architecture:     pakiet.Architecture,
-		InstalledVersion: WersjaPakietu(pakiet, wejscie.Distribution),
-		State:            StateUnknown, ReasonCode: powod,
+		Distribution: input.Distribution, Release: input.Release,
+		SourcePackage: sourcePackageName(pkg), BinaryPackage: pkg.Name,
+		Architecture:     pkg.Architecture,
+		InstalledVersion: PackageVersion(pkg, input.Distribution),
+		State:            StateUnknown, ReasonCode: reason,
 		VendorFix: VendorFixUnknown, RepositoryCandidate: CandidateUnknown,
-		Transaction: TransactionUnknown, ComparatorVersion: WersjaKomparatora,
-		PackageOrigin:  KlasaPochodzenia(pakiet, wejscie.Distribution),
-		AdvisoryDigest: wejscie.AdvisoryDigest, EvaluatedAt: teraz,
+		Transaction: TransactionUnknown, ComparatorVersion: ComparatorRule,
+		PackageOrigin:  OriginClassOf(pkg, input.Distribution),
+		AdvisoryDigest: input.AdvisoryDigest, EvaluatedAt: now,
 	}
 }
 
-// KlasaPochodzenia mowi, czyj jest pakiet.
+// OriginClassOf says whose package this is.
 //
-// Producent dystrybucji ma prawo wypowiadac sie wylacznie o swoich pakietach.
-// Pakiet z obcego repozytorium albo zbudowany lokalnie ma wersje, ktorej jego
-// ustalenia nie opisuja - liczenie takiego pakietu jako objetego dawaloby
-// pokrycie "sto procent" tam, gdzie panel nie wie nic.
-func KlasaPochodzenia(pakiet packages.InstalledPackage, dystrybucja string) string {
-	if rodzinaRPM(dystrybucja) {
-		// RPM niesie producenta w metadanych pakietu.
+// A distribution vendor has the right to speak only about its own packages.
+// A package from a foreign repository or built locally has a version its
+// findings do not describe - counting such a package as covered would give
+// "a hundred per cent" coverage where the panel knows nothing.
+func OriginClassOf(pkg packages.InstalledPackage, distribution string) string {
+	if isRPMFamily(distribution) {
+		// RPM carries the vendor in the package metadata.
 		switch {
-		case pakiet.Vendor == "":
-			return PochodzenieNieznane
-		case producentDystrybucji(pakiet.Vendor, dystrybucja):
-			return PochodzenieDystrybucja
+		case pkg.Vendor == "":
+			return OriginUnknown
+		case isDistributionVendor(pkg.Vendor, distribution):
+			return OriginDistribution
 		default:
-			return PochodzenieObce
+			return OriginThirdParty
 		}
 	}
-	// APT nie zapisuje producenta przy pakiecie: pochodzenie bierze sie
-	// z repozytorium, z ktorego wersja przyszla, i zbiera je agent.
-	switch pakiet.OriginClass {
-	case PochodzenieDystrybucja, PochodzenieObce, PochodzenieLokalne:
-		return pakiet.OriginClass
+	// APT does not record a vendor with the package: the origin comes from
+	// the repository the version arrived from, and the agent collects it.
+	switch pkg.OriginClass {
+	case OriginDistribution, OriginThirdParty, OriginLocal:
+		return pkg.OriginClass
 	}
-	return PochodzenieNieznane
+	return OriginUnknown
 }
 
-// PowodPominiecia mowi, dlaczego pakiet nie podlega ocenie producenta.
-func PowodPominiecia(pakiet packages.InstalledPackage, dystrybucja string) string {
-	if zrodloPakietu(pakiet) == "" {
-		return RodzajBrakZrodla
+// SkipReason says why a package is not subject to the vendor assessment.
+func SkipReason(pkg packages.InstalledPackage, distribution string) string {
+	if sourcePackageName(pkg) == "" {
+		return ReasonSourcePackageUnknown
 	}
-	if KlasaPochodzenia(pakiet, dystrybucja) != PochodzenieDystrybucja {
-		return RodzajPochodzenieNieznane
+	if OriginClassOf(pkg, distribution) != OriginDistribution {
+		return ReasonPackageOriginUnknown
 	}
 	return ""
 }
 
-// producentDystrybucji rozpoznaje producenta pakietu.
-func producentDystrybucji(vendor, dystrybucja string) bool {
-	maly := strings.ToLower(vendor)
-	switch dystrybucja {
+// isDistributionVendor recognises the vendor of a package.
+func isDistributionVendor(vendor, distribution string) bool {
+	lower := strings.ToLower(vendor)
+	switch distribution {
 	case "fedora":
-		return strings.Contains(maly, "fedora")
+		return strings.Contains(lower, "fedora")
 	case "rhel", "centos":
-		return strings.Contains(maly, "red hat") || strings.Contains(maly, "centos")
+		return strings.Contains(lower, "red hat") || strings.Contains(lower, "centos")
 	case "almalinux":
-		return strings.Contains(maly, "alma")
+		return strings.Contains(lower, "alma")
 	case "rocky":
-		return strings.Contains(maly, "rocky")
+		return strings.Contains(lower, "rocky")
 	}
 	return false
 }
 
-// KluczKorelacji zwraca klucz, po ktorym szuka sie ustalen dla pakietu.
+// CorrelationKey returns the key the findings for a package are looked up
+// by.
 //
-// Debian i Ubuntu prowadza bezpieczenstwo po pakiecie zrodlowym: jedno
-// ustalenie dotyczy wszystkich binarnych z tego samego zrodla. Fedora mowi
-// w updateinfo o pakietach binarnych, bo tam ustalenie jest lista konkretnych
-// wersji do zainstalowania.
-func KluczKorelacji(pakiet packages.InstalledPackage, dystrybucja string) string {
-	if rodzinaRPM(dystrybucja) {
-		return pakiet.Name
+// Debian and Ubuntu track security by the source package: one finding covers
+// every binary package from the same source. Fedora speaks about binary
+// packages in updateinfo, because a finding there is a list of specific
+// versions to install.
+func CorrelationKey(pkg packages.InstalledPackage, distribution string) string {
+	if isRPMFamily(distribution) {
+		return pkg.Name
 	}
-	return zrodloPakietu(pakiet)
+	return sourcePackageName(pkg)
 }
 
-// zrodloPakietu zwraca nazwe pakietu zrodlowego.
-func zrodloPakietu(pakiet packages.InstalledPackage) string {
-	if pakiet.SourceName != "" {
-		return pakiet.SourceName
+// sourcePackageName returns the name of the source package.
+func sourcePackageName(pkg packages.InstalledPackage) string {
+	if pkg.SourceName != "" {
+		return pkg.SourceName
 	}
-	return pakiet.Name
+	return pkg.Name
 }
 
-// WersjaPakietu sklada wersje pakietu binarnego - te, ktora widzi operator.
-func WersjaPakietu(pakiet packages.InstalledPackage, dystrybucja string) string {
-	if rodzinaRPM(dystrybucja) {
-		return pakiet.EVR()
+// PackageVersion assembles the version of the binary package - the one the
+// operator sees.
+func PackageVersion(pkg packages.InstalledPackage, distribution string) string {
+	if isRPMFamily(distribution) {
+		return pkg.EVR()
 	}
-	return pakiet.WersjaDeb()
+	return pkg.WersjaDeb()
 }
 
-// WersjaPorownania zwraca wersje, ktora nalezy porownac z ustaleniem, oraz to,
-// skad ona pochodzi.
+// ComparisonVersionFor returns the version that has to be compared against
+// the finding, along with where it came from.
 //
-// Debian i Ubuntu prowadza bezpieczenstwo po pakiecie zrodlowym i podaja
-// wersje zrodlowa - a wersja binarna bywa inna: przebudowa binarna dokleja
-// sufiks ("+b9"), wiec binarna jest wyzsza od zrodlowej przy tym samym kodzie.
-// Porownanie binarnej z ustaleniem zrodlowym potrafi wiec uznac pakiet za
-// naprawiony, choc poprawki w nim nie ma.
+// Debian and Ubuntu track security by the source package and give the source
+// version - and the binary version is sometimes different: a binary rebuild
+// appends a suffix ("+b9"), so the binary one is higher than the source one
+// for the same code. Comparing a binary version against a source finding can
+// therefore call a package fixed although it does not carry the fix.
 //
-// Gdy wersji zrodlowej nie znamy, porownujemy binarna i mowimy o tym wprost:
-// to jest przyblizenie, a nie ta sama odpowiedz.
-func WersjaPorownania(pakiet packages.InstalledPackage, dystrybucja string) (string, string) {
-	if rodzinaRPM(dystrybucja) {
-		return pakiet.EVR(), PodstawaBinarna
+// When the source version is unknown, we compare the binary one and say so
+// outright: this is an approximation rather than the same answer.
+func ComparisonVersionFor(pkg packages.InstalledPackage, distribution string) (string, string) {
+	if isRPMFamily(distribution) {
+		return pkg.EVR(), BasisBinary
 	}
-	if pakiet.SourceVersion != "" {
-		return pakiet.SourceVersion, PodstawaZrodlowa
+	if pkg.SourceVersion != "" {
+		return pkg.SourceVersion, BasisSource
 	}
-	return pakiet.WersjaDeb(), PodstawaBinarna
+	return pkg.WersjaDeb(), BasisBinary
 }
 
-// Podstawy porownania wersji.
+// The bases of a version comparison.
 const (
-	PodstawaZrodlowa = "source"
-	PodstawaBinarna  = "binary"
+	BasisSource = "source"
+	BasisBinary = "binary"
 )
 
-// Porownaj porownuje wersje regulami wlasciwymi dla dystrybucji.
-func Porownaj(dystrybucja, zainstalowana, naprawiona string) (int, bool) {
-	if strings.TrimSpace(zainstalowana) == "" || strings.TrimSpace(naprawiona) == "" {
+// Compare compares versions by the rules proper to the distribution.
+func Compare(distribution, installed, fixed string) (int, bool) {
+	if strings.TrimSpace(installed) == "" || strings.TrimSpace(fixed) == "" {
 		return 0, false
 	}
-	if rodzinaRPM(dystrybucja) {
-		return version.PorownajRPM(zainstalowana, naprawiona), true
+	if isRPMFamily(distribution) {
+		return version.CompareRPM(installed, fixed), true
 	}
-	return version.PorownajDeb(zainstalowana, naprawiona), true
+	return version.CompareDeb(installed, fixed), true
 }
 
-func rodzinaRPM(dystrybucja string) bool {
-	switch dystrybucja {
+func isRPMFamily(distribution string) bool {
+	switch distribution {
 	case "fedora", "rhel", "centos", "almalinux", "rocky", "opensuse", "sles":
 		return true
 	}
 	return false
 }
 
-// ObejmujeWydanie mowi, czy snapshot obejmuje wydanie hosta.
-func ObejmujeWydanie(snapshot Snapshot, wydanie string) bool {
-	if wydanie == "" {
+// CoversRelease says whether the snapshot covers the release of the host.
+func CoversRelease(snapshot Snapshot, release string) bool {
+	if release == "" {
 		return false
 	}
-	for _, objete := range snapshot.Releases {
-		if objete == wydanie {
+	for _, covered := range snapshot.Releases {
+		if covered == release {
 			return true
 		}
 	}

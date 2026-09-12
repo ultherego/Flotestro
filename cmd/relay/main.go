@@ -1,13 +1,15 @@
-// Command flotestro-relay posredniczy miedzy agentami jednej lokalizacji
-// a centrala.
+// Command flotestro-relay mediates between the agents of one site and the
+// centre.
 //
-// Relay jest opcjonalny. Ma sens tam, gdzie lokalizacja laczy sie z centrala
-// przez WAN: utrzymuje jedno polaczenie w gore zamiast setek, buforuje wyniki
-// na czas awarii lacza i nie przekazuje zadan, ktorym uplynal TTL.
+// The relay is optional. It makes sense where a site connects to the centre
+// over a WAN: it keeps one connection upwards instead of hundreds, buffers
+// the results while the link is down and does not pass on jobs whose TTL has
+// run out.
 //
-// Kanonicznym zrodlem ustawien jest /etc/flotestro/relay.yaml. Relay jest
-// osobna granica zaufania i ma osobny plik: wspolny z agentem znaczylby, ze
-// jedno ustawienie opisuje dwie role o roznych uprawnieniach.
+// The canonical source of the settings is /etc/flotestro/relay.yaml. The
+// relay is a separate trust boundary and has a separate file: one shared with
+// the agent would mean that a single setting describes two roles with
+// different permissions.
 package main
 
 import (
@@ -34,134 +36,138 @@ import (
 	"github.com/ultherego/flotestro/internal/relayconfig"
 )
 
-// wersja relaya jest wersja calego wydania: relay i agent ida z jednego
-// zrodla i nie moga rozjechac sie numerem.
-var wersja = buildinfo.Wersja
+// the version of the relay is the version of the whole release: the relay and
+// the agent come from one source and must not drift apart in their number.
+var version = buildinfo.Wersja
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	if err := uruchom(os.Args[1:], log); err != nil {
-		log.Error("relay zakonczony bledem", "err", err)
+	if err := run(os.Args[1:], log); err != nil {
+		log.Error("the relay ended with an error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func uruchom(args []string, log *slog.Logger) error {
+func run(args []string, log *slog.Logger) error {
 	if len(args) == 0 {
-		return fmt.Errorf("uzycie: flotestro-relay <run|enroll|config|version>")
+		return fmt.Errorf("usage: flotestro-relay <run|enroll|config|version>")
 	}
 	switch args[0] {
 	case "run":
-		return polecenieRun(args[1:], log)
+		return runCommand(args[1:], log)
 	case "enroll":
-		return polecenieEnroll(args[1:], log)
+		return enrollCommand(args[1:], log)
 	case "config":
-		return polecenieConfig(args[1:])
+		return configCommand(args[1:])
 	case "version":
 		fmt.Println(buildinfo.Opis("flotestro-relay"))
 		return nil
 	default:
-		return fmt.Errorf("nieznane polecenie %q", args[0])
+		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
 
-// polecenieConfig sprawdza plik konfiguracji i pokazuje, co z niego wynika.
+// configCommand checks the configuration file and shows what follows from
+// it.
 //
-// Relay stoi zwykle w lokalizacji bez operatora, wiec bledna konfiguracja ma
-// byc widoczna przed startem uslugi, a nie w dzienniku po nieudanym starcie.
-func polecenieConfig(args []string) error {
-	zestaw := flag.NewFlagSet("config", flag.ContinueOnError)
-	sciezka := zestaw.String("config", relayconfig.SciezkaDomyslna, "plik konfiguracji relaya")
-	if err := zestaw.Parse(args); err != nil {
+// The relay usually stands in a site without an operator, so a wrong
+// configuration is to be visible before the service starts rather than in the
+// log after a failed start.
+func configCommand(args []string) error {
+	flags := flag.NewFlagSet("config", flag.ContinueOnError)
+	path := flags.String("config", relayconfig.SciezkaDomyslna, "the configuration file of the relay")
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	dzialanie := "validate"
-	if zestaw.NArg() > 0 {
-		dzialanie = zestaw.Arg(0)
+	action := "validate"
+	if flags.NArg() > 0 {
+		action = flags.Arg(0)
 	}
-	cfg, err := relayconfig.Wczytaj(*sciezka)
+	cfg, err := relayconfig.Wczytaj(*path)
 	if err != nil {
 		return err
 	}
-	switch dzialanie {
+	switch action {
 	case "validate":
-		fmt.Printf("konfiguracja poprawna: %s\n", *sciezka)
+		fmt.Printf("the configuration is correct: %s\n", *path)
 		return nil
 	case "show":
-		fmt.Printf("nazwa:           %s\n", cfg.Relay.Name)
+		fmt.Printf("name:            %s\n", cfg.Relay.Name)
 		fmt.Printf("site:            %s\n", cfg.Relay.Site)
-		fmt.Printf("nasluch:         %s\n", cfg.Relay.Listen)
-		fmt.Printf("nazwy sieciowe:  %s\n", strings.Join(cfg.Relay.AdvertisedNames, ", "))
-		fmt.Printf("katalog stanu:   %s\n", cfg.Relay.StateDir)
-		fmt.Printf("bufor (bajty):   %d\n", cfg.Bufor())
+		fmt.Printf("listen:          %s\n", cfg.Relay.Listen)
+		fmt.Printf("network names:   %s\n", strings.Join(cfg.Relay.AdvertisedNames, ", "))
+		fmt.Printf("state directory: %s\n", cfg.Relay.StateDir)
+		fmt.Printf("buffer (bytes):  %d\n", cfg.Bufor())
 		fmt.Printf("enrollment:      %s\n", cfg.Upstream.EnrollmentURL)
-		fmt.Printf("bramy:           %s\n", strings.Join(cfg.Upstream.GatewayURLs, ", "))
+		fmt.Printf("gateways:        %s\n", strings.Join(cfg.Upstream.GatewayURLs, ", "))
 		return nil
 	default:
-		return fmt.Errorf("nieznane dzialanie %q; uzyj validate albo show", dzialanie)
+		return fmt.Errorf("unknown action %q; use validate or show", action)
 	}
 }
 
-// polecenieEnroll rejestruje relay tokenem i konczy prace.
+// enrollCommand registers the relay with a token and finishes.
 //
-// Osobne polecenie, a nie krok startu uslugi: token jest sekretem
-// jednorazowym i nie moze lezec w pliku, ktory przezywa restart. Rejestracja
-// jest decyzja operatora i wykonuje sie raz.
-func polecenieEnroll(args []string, log *slog.Logger) error {
-	zestaw := flag.NewFlagSet("enroll", flag.ContinueOnError)
-	sciezka := zestaw.String("config", relayconfig.SciezkaDomyslna, "plik konfiguracji relaya")
-	tokenPlik := zestaw.String("token-file", "", "plik z tokenem enrollmentu")
-	if err := zestaw.Parse(args); err != nil {
+// A separate command rather than a step of the start of the service: the
+// token is a one-time secret and must not lie in a file that survives a
+// restart. The registration is a decision of the operator and happens once.
+func enrollCommand(args []string, log *slog.Logger) error {
+	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
+	path := flags.String("config", relayconfig.SciezkaDomyslna, "the configuration file of the relay")
+	tokenFile := flags.String("token-file", "", "the file with the enrollment token")
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := relayconfig.Wczytaj(*sciezka)
+	cfg, err := relayconfig.Wczytaj(*path)
 	if err != nil {
 		return err
 	}
-	token, err := odczytajToken(*tokenPlik)
+	token, err := readToken(*tokenFile)
 	if err != nil {
 		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	tozsamosc, err := zarejestruj(ctx, cfg, token)
+	identity, err := register(ctx, cfg, token)
 	if err != nil {
 		return err
 	}
-	log.Info("relay zarejestrowany", "relay_id", tozsamosc.RelayID,
-		"nazwa", cfg.Relay.Name, "wygasa", tozsamosc.NotAfter.Format(time.RFC3339))
+	log.Info("the relay was registered", "relay_id", identity.RelayID,
+		"name", cfg.Relay.Name, "expires", identity.NotAfter.Format(time.RFC3339))
 	return nil
 }
 
-// odczytajToken bierze token z pliku albo ze standardowego wejscia.
+// readToken takes the token from a file or from the standard input.
 //
-// Tokenu nie przyjmujemy z argumentu wiersza polecen: argument widzi kazdy
-// proces na maszynie, a token jest kluczem do tozsamosci calej lokalizacji.
-func odczytajToken(plik string) (string, error) {
-	if plik != "" {
-		tresc, err := os.ReadFile(plik)
+// We do not take the token from a command line argument: every process on the
+// machine sees an argument, and the token is the key to the identity of a
+// whole site.
+func readToken(file string) (string, error) {
+	if file != "" {
+		content, err := os.ReadFile(file)
 		if err != nil {
 			return "", fmt.Errorf("token: %w", err)
 		}
-		return strings.TrimSpace(string(tresc)), nil
+		return strings.TrimSpace(string(content)), nil
 	}
 	if token := strings.TrimSpace(config.Env("FLOTESTRO_ENROLLMENT_TOKEN", "")); token != "" {
 		return token, nil
 	}
-	stan, err := os.Stdin.Stat()
-	if err == nil && stan.Mode()&os.ModeCharDevice == 0 {
-		tresc, err := os.ReadFile("/dev/stdin")
-		if err == nil && strings.TrimSpace(string(tresc)) != "" {
-			return strings.TrimSpace(string(tresc)), nil
+	info, err := os.Stdin.Stat()
+	if err == nil && info.Mode()&os.ModeCharDevice == 0 {
+		content, err := os.ReadFile("/dev/stdin")
+		if err == nil && strings.TrimSpace(string(content)) != "" {
+			return strings.TrimSpace(string(content)), nil
 		}
 	}
-	return "", errors.New("brak tokenu enrollmentu: podaj -token-file albo przekaz go potokiem")
+	return "", errors.New("no enrollment token: give -token-file or pass it through a pipe")
 }
 
-// zarejestruj tworzy tozsamosc relaya na podstawie konfiguracji i tokenu.
-func zarejestruj(ctx context.Context, cfg relayconfig.Config, token string) (relay.Identity, error) {
-	tozsamosc, err := agent.EnsureIdentityFor(ctx, agent.IdentityRequest{
+// register creates the identity of the relay out of the configuration and
+// the token.
+func register(ctx context.Context, cfg relayconfig.Config, token string) (relay.Identity, error) {
+	identity, err := agent.EnsureIdentityFor(ctx, agent.IdentityRequest{
 		StateDir:        cfg.Relay.StateDir,
 		EnrollmentURL:   cfg.Upstream.EnrollmentURL,
 		Token:           token,
@@ -171,72 +177,76 @@ func zarejestruj(ctx context.Context, cfg relayconfig.Config, token string) (rel
 		Advertised:      strings.Join(cfg.Relay.AdvertisedNames, ","),
 	})
 	if err != nil {
-		return relay.Identity{}, fmt.Errorf("tozsamosc relaya: %w", err)
+		return relay.Identity{}, fmt.Errorf("the identity of the relay: %w", err)
 	}
 	return relay.Identity{
-		RelayID:     tozsamosc.HostID,
-		Certificate: tozsamosc.Certificate,
-		CAPool:      tozsamosc.CAPool,
-		NotAfter:    tozsamosc.NotAfter,
-		TrustPEM:    tozsamosc.TrustPEM,
+		RelayID:     identity.HostID,
+		Certificate: identity.Certificate,
+		CAPool:      identity.CAPool,
+		NotAfter:    identity.NotAfter,
+		TrustPEM:    identity.TrustPEM,
 	}, nil
 }
 
-// polecenieRun uruchamia relay na podstawie pliku konfiguracji.
-func polecenieRun(args []string, log *slog.Logger) error {
-	zestaw := flag.NewFlagSet("run", flag.ContinueOnError)
-	sciezka := zestaw.String("config", relayconfig.SciezkaDomyslna, "plik konfiguracji relaya")
-	if err := zestaw.Parse(args); err != nil {
+// runCommand starts the relay from the configuration file.
+func runCommand(args []string, log *slog.Logger) error {
+	flags := flag.NewFlagSet("run", flag.ContinueOnError)
+	path := flags.String("config", relayconfig.SciezkaDomyslna, "the configuration file of the relay")
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := relayconfig.Wczytaj(*sciezka)
+	cfg, err := relayconfig.Wczytaj(*path)
 	if err != nil {
 		return err
 	}
-	log.Info("konfiguracja wczytana", "plik", *sciezka,
-		"nazwa", cfg.Relay.Name, "bram", len(cfg.Upstream.GatewayURLs))
+	log.Info("the configuration was read", "file", *path,
+		"name", cfg.Relay.Name, "gateways", len(cfg.Upstream.GatewayURLs))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Relay bez tozsamosci nie wstaje. Jednostka ma warunek startu na plik
-	// certyfikatu, wiec normalnie nie dojdzie tu bez rejestracji; komunikat
-	// jest dla operatora, ktory uruchomil binarke recznie.
-	tozsamosc, err := zarejestruj(ctx, cfg, "")
+	// A relay without an identity does not come up. The unit has a start
+	// condition on the certificate file, so it normally does not get here
+	// without a registration; the message is for the operator who started the
+	// binary by hand.
+	identity, err := register(ctx, cfg, "")
 	if err != nil {
-		return fmt.Errorf("%w; zarejestruj relay: flotestro-relay enroll", err)
+		return fmt.Errorf("%w; register the relay: flotestro-relay enroll", err)
 	}
-	log.Info("tozsamosc relaya gotowa", "relay_id", tozsamosc.RelayID,
-		"nazwa", cfg.Relay.Name, "cert_not_after", tozsamosc.NotAfter.Format(time.RFC3339))
+	log.Info("the identity of the relay is ready", "relay_id", identity.RelayID,
+		"name", cfg.Relay.Name, "cert_not_after", identity.NotAfter.Format(time.RFC3339))
 
-	zywa := relay.NowaZywa(tozsamosc)
-	brama := cfg.Upstream.GatewayURLs[0]
-	posrednik := relay.New(relay.Options{
-		UpstreamURL:  brama,
+	live := relay.NowaZywa(identity)
+	gateway := cfg.Upstream.GatewayURLs[0]
+	proxy := relay.New(relay.Options{
+		UpstreamURL:  gateway,
 		UpstreamURLs: cfg.Upstream.GatewayURLs,
-		// Adres enrollmentu wlacza posredniczenie w rejestracji. W izolowanej
-		// lokalizacji host nie widzi centrali i relay jest jedyna droga.
+		// The enrollment address enables the mediation of registrations. In an
+		// isolated site a host does not see the centre and the relay is the
+		// only path.
 		EnrollmentURL: cfg.Upstream.EnrollmentURL,
-		Identity:      tozsamosc.Certificate,
-		TrustPool:     tozsamosc.CAPool,
+		Identity:      identity.Certificate,
+		TrustPool:     identity.CAPool,
 		BufferBytes:   int(cfg.Bufor()),
 		Log:           log,
 	})
-	// Host przed rejestracja nie ma certyfikatu, wiec uscisk nie moze go
-	// zadac. Kazde RPC poza rejestracja sprawdza go z osobna.
-	zywa.PosredniczyWRejestracji(cfg.Upstream.EnrollmentURL != "")
+	// A host has no certificate before its registration, so the handshake
+	// must not demand one. Every RPC other than the registration checks it
+	// separately.
+	live.PosredniczyWRejestracji(cfg.Upstream.EnrollmentURL != "")
 
-	// Agenci lacza sie do relaya tym samym protokolem co do centrali, wiec
-	// wymagany jest certyfikat klienta wystawiony przez CA floty. Certyfikat
-	// serwerowy pochodzi z zywej tozsamosci: odnowienie podmienia go bez
-	// restartu, ktory zerwalby sesje calej lokalizacji naraz.
+	// The agents connect to the relay with the same protocol as to the
+	// centre, so a client certificate issued by the CA of the fleet is
+	// required. The server certificate comes from the live identity: a
+	// renewal swaps it without a restart, which would tear down the sessions
+	// of the whole site at once.
 	server := &http.Server{
 		Addr:    cfg.Relay.Listen,
-		Handler: relay.WithClientCertificate(posrednik.Handler()),
+		Handler: relay.WithClientCertificate(proxy.Handler()),
 		TLSConfig: &tls.Config{
-			GetCertificate:     zywa.Certyfikat,
-			GetConfigForClient: zywa.KonfiguracjaKlienta,
-			ClientCAs:          tozsamosc.CAPool,
+			GetCertificate:     live.Certyfikat,
+			GetConfigForClient: live.KonfiguracjaKlienta,
+			ClientCAs:          identity.CAPool,
 			MinVersion:         tls.VersionTLS13,
 			NextProtos:         []string{"h2"},
 		},
@@ -246,46 +256,47 @@ func polecenieRun(args []string, log *slog.Logger) error {
 		return err
 	}
 
-	go relay.UtrzymujCertyfikat(ctx, zywa, relay.OpcjeOdnowienia{
+	go relay.UtrzymujCertyfikat(ctx, live, relay.OpcjeOdnowienia{
 		StateDir:   cfg.Relay.StateDir,
-		GatewayURL: brama,
+		GatewayURL: gateway,
 		Nazwy:      cfg.Relay.AdvertisedNames,
-		Wersja:     wersja,
+		Wersja:     version,
 		Log:        log,
-		PoOdnowieniu: func(nowa relay.Identity) {
-			posrednik.OdswiezTozsamosc(nowa.Certificate, nowa.CAPool)
+		PoOdnowieniu: func(renewed relay.Identity) {
+			proxy.OdswiezTozsamosc(renewed.Certificate, renewed.CAPool)
 		},
 	})
 
-	// Po awarii lacza relay musi sam zauwazyc, ze centrala wrocila.
-	go posrednik.WatchUpstream(ctx, 15*time.Second)
-	go raportuj(ctx, posrednik, log)
+	// After a failure of the link the relay has to notice on its own that the
+	// centre is back.
+	go proxy.WatchUpstream(ctx, 15*time.Second)
+	go report(ctx, proxy, log)
 
 	listener, err := net.Listen("tcp", cfg.Relay.Listen)
 	if err != nil {
 		return err
 	}
-	log.Info("relay nasluchuje", "adres", cfg.Relay.Listen,
-		"centrala", posrednik.Brama(), "bram", len(cfg.Upstream.GatewayURLs),
-		"bufor_bajtow", cfg.Bufor())
+	log.Info("the relay is listening", "address", cfg.Relay.Listen,
+		"centre", proxy.Brama(), "gateways", len(cfg.Upstream.GatewayURLs),
+		"buffer_bytes", cfg.Bufor())
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ServeTLS(listener, "", "") }()
 
 	select {
 	case <-ctx.Done():
-		zamkniecie, anuluj := context.WithTimeout(context.Background(), 10*time.Second)
-		defer anuluj()
-		return server.Shutdown(zamkniecie)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
 	}
 }
 
-// raportuj oproznia bufor po powrocie lacza i pokazuje stan relaya.
-// Zajetosc bufora jest sygnalem operacyjnym: rosnaca oznacza, ze lokalizacja
-// pracuje, ale wyniki nie docieraja do centrali.
-func raportuj(ctx context.Context, posrednik *relay.Relay, log *slog.Logger) {
+// report empties the buffer after the link is back and shows the state of the
+// relay. The fill of the buffer is an operational signal: a growing one means
+// the site works but the results do not reach the centre.
+func report(ctx context.Context, proxy *relay.Relay, log *slog.Logger) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -293,10 +304,10 @@ func raportuj(ctx context.Context, posrednik *relay.Relay, log *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sesje, bufor, lacznosc := posrednik.Stats()
-			log.Info("stan relaya", "sesje", sesje, "bufor_wiadomosci", bufor.Messages,
-				"bufor_bajtow", bufor.Bytes, "odrzuconych", bufor.Dropped,
-				"lacznosc_z_centrala", lacznosc)
+			sessions, buffer, connectivity := proxy.Stats()
+			log.Info("the state of the relay", "sessions", sessions,
+				"buffer_messages", buffer.Messages, "buffer_bytes", buffer.Bytes,
+				"dropped", buffer.Dropped, "connectivity_with_the_centre", connectivity)
 		}
 	}
 }

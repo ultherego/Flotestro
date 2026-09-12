@@ -15,7 +15,7 @@ import (
 // sie wymiana agenta. Nazwa jest stala: dwie wymiany naraz na jednym hoscie
 // nie maja sensu, a systemd odmowi drugiej zamiast wpuscic je obie na te sama
 // baze pakietow.
-const JednostkaWymianyAgenta = "flotestro-wymiana-agenta"
+const JednostkaWymianyAgenta = "flotestro-agent-replacement"
 
 // ErrorSamowymiana oznacza, ze hosta nie da sie bezpiecznie wymienic.
 const ErrorSamowymiana = "self_replacement_unavailable"
@@ -112,7 +112,7 @@ func UruchomWymianeAgenta(ctx context.Context, spec string) error {
 		// Transakcja pakietowa ma wlasny limit czasu; ten jest ostatnia
 		// siatka, zeby zawieszona instalacja nie zostala na hoscie na zawsze.
 		"--property=TimeoutStartSec=3600",
-		"--", binarny, "-wymiana-agenta", spec)
+		"--", binarny, "-agent-replacement", spec)
 	cmd.Env = srodowiskoNarzedzi()
 	if wyjscie, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(wyjscie)))

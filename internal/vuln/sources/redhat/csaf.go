@@ -1,18 +1,21 @@
-// Package redhat czyta dane CSAF/VEX Red Hata.
+// Package redhat reads the CSAF/VEX date of Red Hat.
 //
-// To jest zrodlo rozstrzygajace dla hostow RHEL. Red Hat publikuje jeden
-// dokument VEX na CVE i mowi w nim trzy rzeczy naraz: ktore produkty sa
-// podatne, ktorych to nie dotyczy i w ktorej wersji pakietu jest poprawka.
+// This is the settling source for RHEL hosts. Red Hat publishes one VEX
+// document per CVE and says three things in it at once: which products are
+// vulnerable, which ones it does not concern and in which version of a
+// package the fix is.
 //
-// Czytamy wylacznie bazowy RHEL. Strumienie EUS, AUS i E4S maja wlasne
-// wersje poprawek i przysluguja tylko czesci klientow, a produkty warstwowe
-// (OpenShift, RHEM) to osobne dystrybucje pakietow. Ustalenie z takiego
-// strumienia opisywaloby host, ktorego panel nie ma przed soba.
+// We read the base RHEL alone. The EUS, AUS and E4S streams have fixes of
+// their own and are available only to some customers, and the layered
+// products (OpenShift, RHEM) are separate package distributions. A finding
+// from such a stream would describe a host the panel does not have in front
+// of it.
 //
-// AlmaLinux, Rocky i CentOS Stream nie sa tu obslugiwane celowo: ich pakiety
-// maja wlasne numery wersji, wiec ustalenia Red Hata mowilyby o czym innym.
-// Do czasu, az panel przeczyta ich wlasne zrodla, ich hosty maja dostawac
-// powod "brak feedu" - to jest uczciwsza odpowiedz niz cudza ocena.
+// AlmaLinux, Rocky and CentOS Stream are deliberately not supported here:
+// their packages carry version numbers of their own, so the findings of Red
+// Hat would speak about something else. Until the panel reads their own
+// sources, their hosts are to get the reason "feed missing" - that is a more
+// honest answer than somebody else's assessment.
 package redhat
 
 import (
@@ -26,13 +29,13 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
-// Dostawca jest nazwa zrodla zapisywana przy kazdym ustaleniu.
-const Dostawca = "redhat"
+// Provider is the name of the source written down with every finding.
+const Provider = "redhat"
 
-// Dystrybucja jest nazwa dystrybucji, dla ktorej te ustalenia obowiazuja.
-const Dystrybucja = "rhel"
+// Distribution is the name of the distribution these findings hold for.
+const Distribution = "rhel"
 
-type naglowek struct {
+type documentHeader struct {
 	Title    string `json:"title"`
 	Tracking struct {
 		ID                 string `json:"id"`
@@ -43,21 +46,21 @@ type naglowek struct {
 	} `json:"aggregate_severity"`
 }
 
-type galaz struct {
-	Category string  `json:"category"`
-	Name     string  `json:"name"`
-	Product  produkt `json:"product"`
-	Branches []galaz `json:"branches"`
+type branch struct {
+	Category string   `json:"category"`
+	Name     string   `json:"name"`
+	Product  product  `json:"product"`
+	Branches []branch `json:"branches"`
 }
 
-type produkt struct {
+type product struct {
 	ProductID string `json:"product_id"`
 	Helper    struct {
 		CPE string `json:"cpe"`
 	} `json:"product_identification_helper"`
 }
 
-type relacja struct {
+type relationship struct {
 	Category        string `json:"category"`
 	FullProductName struct {
 		ProductID string `json:"product_id"`
@@ -66,638 +69,655 @@ type relacja struct {
 	RelatesTo        string `json:"relates_to_product_reference"`
 }
 
-// Ustalenia tlumaczy jeden dokument VEX na ustalenia panelu.
+// Advisories translates one VEX document into findings of the panel.
 //
-// Bierze wylacznie wskazane wydania bazowego RHEL-a. Filtr jest tu, a nie
-// wyzej, z powodu rozmiaru: dokument CVE, ktory dotyka wszystkich produktow
-// producenta, ma kilkadziesiat megabajtow i kilkaset tysiecy identyfikatorow.
-// Wczytany w calosci do pamieci kosztowalby wielokrotnosc tego rozmiaru,
-// wiec czytamy go strumieniowo i odrzucamy obce produkty od razu.
-func Ustalenia(dokument []byte, wydania map[string]bool) ([]vuln.Advisory, error) {
-	dekoder := json.NewDecoder(bytes.NewReader(dokument))
-	otwarcie, err := dekoder.Token()
+// It takes the named releases of the base RHEL alone. The filter is here
+// rather than higher up because of the size: a CVE document that touches
+// every product of the vendor is dozens of megabytes and several hundred
+// thousand identifiers. Read into memory as a whole it would cost a multiple
+// of that size, so we read it as a stream and reject foreign products at
+// once.
+func Advisories(document []byte, releases map[string]bool) ([]vuln.Advisory, error) {
+	decoder := json.NewDecoder(bytes.NewReader(document))
+	opening, err := decoder.Token()
 	if err != nil {
-		return nil, fmt.Errorf("dokument VEX: %w", err)
+		return nil, fmt.Errorf("the VEX document: %w", err)
 	}
-	if otwarcie != json.Delim('{') {
-		return nil, fmt.Errorf("dokument VEX zaczyna sie od %v, a nie od obiektu", otwarcie)
+	if opening != json.Delim('{') {
+		return nil, fmt.Errorf("the VEX document starts with %v rather than with an object", opening)
 	}
 
-	var naglowekDokumentu naglowek
-	produkty := map[string]string{}
-	strumienie := map[string]string{}
-	drzewoPrzeczytane := false
-	var wynik []vuln.Advisory
+	var header documentHeader
+	products := map[string]string{}
+	streams := map[string]string{}
+	treeRead := false
+	var result []vuln.Advisory
 
-	for dekoder.More() {
-		token, err := dekoder.Token()
+	for decoder.More() {
+		token, err := decoder.Token()
 		if err != nil {
 			return nil, err
 		}
-		klucz, _ := token.(string)
-		switch klucz {
+		mergeKey, _ := token.(string)
+		switch mergeKey {
 		case "document":
-			if err := dekoder.Decode(&naglowekDokumentu); err != nil {
-				return nil, fmt.Errorf("naglowek dokumentu: %w", err)
+			if err := decoder.Decode(&header); err != nil {
+				return nil, fmt.Errorf("the header of the document: %w", err)
 			}
 		case "product_tree":
-			if err := czytajDrzewo(dekoder, wydania, produkty, strumienie); err != nil {
+			if err := readTree(decoder, releases, products, streams); err != nil {
 				return nil, err
 			}
-			drzewoPrzeczytane = true
+			treeRead = true
 		case "vulnerabilities":
-			// Drzewo produktow jest w dokumencie przed podatnosciami i tylko
-			// ono mowi, ktorego wydania dotyczy identyfikator. Dokument
-			// w innej kolejnosci odrzucamy, zamiast zgadywac.
-			if !drzewoPrzeczytane {
-				return nil, fmt.Errorf("dokument VEX ma podatnosci przed drzewem produktow")
+			// The product tree comes in the document before the
+			// vulnerabilities and it alone says which release an identifier
+			// concerns. A document in another order is rejected rather than
+			// guessed at.
+			if !treeRead {
+				return nil, fmt.Errorf("the VEX document has vulnerabilities before the product tree")
 			}
-			zebrane, err := czytajPodatnosci(dekoder, naglowekDokumentu, produkty, strumienie)
+			gathered, err := readVulnerabilities(decoder, header, products, streams)
 			if err != nil {
 				return nil, err
 			}
-			wynik = append(wynik, zebrane...)
+			result = append(result, gathered...)
 		default:
-			if err := pomin(dekoder); err != nil {
+			if err := skip(decoder); err != nil {
 				return nil, err
 			}
 		}
 	}
-	if _, err := dekoder.Token(); err != nil {
-		return nil, fmt.Errorf("dokument VEX urwany przed zamknieciem: %w", err)
+	if _, err := decoder.Token(); err != nil {
+		return nil, fmt.Errorf("the VEX document was cut before the closing: %w", err)
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// czytajDrzewo czyta drzewo produktow: ktory produkt jest ktorym wydaniem
-// i ktory identyfikator zlozony nalezy do ktorego strumienia.
-func czytajDrzewo(dekoder *json.Decoder, wydania map[string]bool,
-	produkty, strumienie map[string]string) error {
-	otwarcie, err := dekoder.Token()
+// readTree reads the product tree: which product is which release and which
+// compound identifier belongs to which stream.
+func readTree(decoder *json.Decoder, releases map[string]bool,
+	products, streams map[string]string) error {
+	opening, err := decoder.Token()
 	if err != nil {
 		return err
 	}
-	if otwarcie != json.Delim('{') {
-		return fmt.Errorf("drzewo produktow nie jest obiektem")
+	if opening != json.Delim('{') {
+		return fmt.Errorf("the product tree is not an object")
 	}
-	for dekoder.More() {
-		token, err := dekoder.Token()
+	for decoder.More() {
+		token, err := decoder.Token()
 		if err != nil {
 			return err
 		}
-		klucz, _ := token.(string)
-		switch klucz {
+		mergeKey, _ := token.(string)
+		switch mergeKey {
 		case "branches":
-			// Galezi jest kilkaset i to one nios CPE - je czytamy w calosci.
-			var galezie []galaz
-			if err := dekoder.Decode(&galezie); err != nil {
-				return fmt.Errorf("galezie produktow: %w", err)
+			// There are a few hundred branches and they carry the CPEs - those
+			// we read as a whole.
+			var branches []branch
+			if err := decoder.Decode(&branches); err != nil {
+				return fmt.Errorf("the product branches: %w", err)
 			}
-			for _, wpis := range galezie {
-				zbierzWydania(wpis, wydania, produkty)
+			for _, entry := range branches {
+				collectReleases(entry, releases, products)
 			}
 		case "relationships":
-			if err := czytajRelacje(dekoder, produkty, strumienie); err != nil {
+			if err := readRelationships(decoder, products, streams); err != nil {
 				return err
 			}
 		default:
-			if err := pomin(dekoder); err != nil {
+			if err := skip(decoder); err != nil {
 				return err
 			}
 		}
 	}
-	// Zamkniecie obiektu drzewa.
-	_, err = dekoder.Token()
+	// The closing of the tree object.
+	_, err = decoder.Token()
 	return err
 }
 
-// czytajRelacje wiaze pakiety z produktami, pomijajac obce produkty od razu.
+// readRelationships binds packages to products, skipping foreign products at
+// once.
 //
-// Relacji jest w duzym dokumencie kilkanascie tysiecy i wiekszosc dotyczy
-// produktow warstwowych. Trzymanie ich wszystkich w pamieci po to, zeby je
-// zaraz odrzucic, jest tym, czego panel nie moze sobie pozwolic.
-func czytajRelacje(dekoder *json.Decoder, produkty, strumienie map[string]string) error {
-	otwarcie, err := dekoder.Token()
+// A large document holds more than ten thousand relationships and most of
+// them concern layered products. Keeping all of them in memory only to reject
+// them right away is what the panel cannot afford.
+func readRelationships(decoder *json.Decoder, products, streams map[string]string) error {
+	opening, err := decoder.Token()
 	if err != nil {
 		return err
 	}
-	if otwarcie != json.Delim('[') {
-		return fmt.Errorf("relacje produktow nie sa lista")
+	if opening != json.Delim('[') {
+		return fmt.Errorf("the product relationships are not a list")
 	}
-	for dekoder.More() {
-		var wpis relacja
-		if err := dekoder.Decode(&wpis); err != nil {
-			return fmt.Errorf("relacja produktu: %w", err)
+	for decoder.More() {
+		var entry relationship
+		if err := decoder.Decode(&entry); err != nil {
+			return fmt.Errorf("a product relationship: %w", err)
 		}
-		if wpis.FullProductName.ProductID == "" || wpis.RelatesTo == "" {
+		if entry.FullProductName.ProductID == "" || entry.RelatesTo == "" {
 			continue
 		}
-		if produkty[wpis.RelatesTo] == "" {
+		if products[entry.RelatesTo] == "" {
 			continue
 		}
-		strumienie[wpis.FullProductName.ProductID] = wpis.RelatesTo
+		streams[entry.FullProductName.ProductID] = entry.RelatesTo
 	}
-	_, err = dekoder.Token()
+	_, err = decoder.Token()
 	return err
 }
 
-// czytajPodatnosci sklada ustalenia wszystkich podatnosci dokumentu.
-func czytajPodatnosci(dekoder *json.Decoder, naglowekDokumentu naglowek,
-	produkty, strumienie map[string]string) ([]vuln.Advisory, error) {
-	otwarcie, err := dekoder.Token()
+// readVulnerabilities assembles the findings of every vulnerability in the
+// document.
+func readVulnerabilities(decoder *json.Decoder, header documentHeader,
+	products, streams map[string]string) ([]vuln.Advisory, error) {
+	opening, err := decoder.Token()
 	if err != nil {
 		return nil, err
 	}
-	if otwarcie != json.Delim('[') {
-		return nil, fmt.Errorf("podatnosci nie sa lista")
+	if opening != json.Delim('[') {
+		return nil, fmt.Errorf("the vulnerabilities are not a list")
 	}
-	waga := strings.ToLower(strings.TrimSpace(naglowekDokumentu.AggregateSeverity.Text))
-	var wynik []vuln.Advisory
-	for dekoder.More() {
-		zebrane, err := czytajPodatnosc(dekoder, naglowekDokumentu, waga, produkty, strumienie)
+	severity := strings.ToLower(strings.TrimSpace(header.AggregateSeverity.Text))
+	var result []vuln.Advisory
+	for decoder.More() {
+		gathered, err := readVulnerability(decoder, header, severity, products, streams)
 		if err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, zebrane...)
+		result = append(result, gathered...)
 	}
-	if _, err := dekoder.Token(); err != nil {
+	if _, err := decoder.Token(); err != nil {
 		return nil, err
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// stanProduktu jest jednym identyfikatorem produktu ze stanem, ktory
-// producent mu przypisal.
-type stanProduktu struct {
+// productState is one product identifier with the state the vendor assigned
+// to it.
+type productState struct {
 	id     string
 	status string
 }
 
-// czytajPodatnosc sklada ustalenia jednej podatnosci.
+// readVulnerability assembles the findings of one vulnerability.
 //
-// Klucze dokumentu ida alfabetycznie, wiec stany produktow przychodza przed
-// naprawami i przed tytulem. Zbieramy najpierw stany - juz przefiltrowane do
-// bazowego RHEL-a - a rozstrzygamy je dopiero, gdy caly obiekt jest odczytany.
-func czytajPodatnosc(dekoder *json.Decoder, naglowekDokumentu naglowek, waga string,
-	produkty, strumienie map[string]string) ([]vuln.Advisory, error) {
-	otwarcie, err := dekoder.Token()
+// The keys of the document run alphabetically, so the product states arrive
+// before the remediations and before the title. We gather the states first -
+// already filtered down to the base RHEL - and settle them only once the
+// whole object has been read.
+func readVulnerability(decoder *json.Decoder, header documentHeader, severity string,
+	products, streams map[string]string) ([]vuln.Advisory, error) {
+	opening, err := decoder.Token()
 	if err != nil {
 		return nil, err
 	}
-	if otwarcie != json.Delim('{') {
-		return nil, fmt.Errorf("podatnosc nie jest obiektem")
+	if opening != json.Delim('{') {
+		return nil, fmt.Errorf("a vulnerability is not an object")
 	}
 
-	var numerCVE, tytul, dataWydania string
-	var stany []stanProduktu
+	var cveNumber, title, releaseDate string
+	var states []productState
 	errata := map[string]string{}
-	bezPlanu := map[string]bool{}
+	noFixPlanned := map[string]bool{}
 
-	for dekoder.More() {
-		token, err := dekoder.Token()
+	for decoder.More() {
+		token, err := decoder.Token()
 		if err != nil {
 			return nil, err
 		}
-		klucz, _ := token.(string)
-		switch klucz {
+		mergeKey, _ := token.(string)
+		switch mergeKey {
 		case "cve":
-			if err := dekoder.Decode(&numerCVE); err != nil {
+			if err := decoder.Decode(&cveNumber); err != nil {
 				return nil, err
 			}
 		case "title":
-			if err := dekoder.Decode(&tytul); err != nil {
+			if err := decoder.Decode(&title); err != nil {
 				return nil, err
 			}
 		case "release_date":
-			if err := dekoder.Decode(&dataWydania); err != nil {
+			if err := decoder.Decode(&releaseDate); err != nil {
 				return nil, err
 			}
 		case "product_status":
-			zebrane, err := czytajStany(dekoder, produkty, strumienie)
+			gathered, err := readStates(decoder, products, streams)
 			if err != nil {
 				return nil, err
 			}
-			stany = append(stany, zebrane...)
+			states = append(states, gathered...)
 		case "remediations":
-			if err := czytajNaprawy(dekoder, produkty, strumienie, errata, bezPlanu); err != nil {
+			if err := readRemediations(decoder, products, streams, errata, noFixPlanned); err != nil {
 				return nil, err
 			}
 		default:
-			if err := pomin(dekoder); err != nil {
+			if err := skip(decoder); err != nil {
 				return nil, err
 			}
 		}
 	}
-	if _, err := dekoder.Token(); err != nil {
+	if _, err := decoder.Token(); err != nil {
 		return nil, err
 	}
 
-	numerCVE = strings.ToValidUTF8(strings.TrimSpace(numerCVE), "")
-	if numerCVE == "" || len(stany) == 0 {
+	cveNumber = strings.ToValidUTF8(strings.TrimSpace(cveNumber), "")
+	if cveNumber == "" || len(states) == 0 {
 		return nil, nil
 	}
-	if tytul == "" {
-		tytul = naglowekDokumentu.Title
+	if title == "" {
+		title = header.Title
 	}
-	return zloz(stany, numerCVE, skrocony(tytul), waga, dataWydania,
-		naglowekDokumentu, produkty, strumienie, errata, bezPlanu), nil
+	return assemble(states, cveNumber, shortened(title), severity, releaseDate,
+		header, products, streams, errata, noFixPlanned), nil
 }
 
-// czytajStany czyta stany produktow, zostawiajac tylko bazowy RHEL.
-func czytajStany(dekoder *json.Decoder, produkty, strumienie map[string]string) ([]stanProduktu, error) {
-	otwarcie, err := dekoder.Token()
+// readStates reads the product states, leaving the base RHEL alone.
+func readStates(decoder *json.Decoder, products, streams map[string]string) ([]productState, error) {
+	opening, err := decoder.Token()
 	if err != nil {
 		return nil, err
 	}
-	if otwarcie != json.Delim('{') {
-		return nil, fmt.Errorf("stany produktow nie sa obiektem")
+	if opening != json.Delim('{') {
+		return nil, fmt.Errorf("the product states are not an object")
 	}
-	var zebrane []stanProduktu
-	for dekoder.More() {
-		token, err := dekoder.Token()
+	var gathered []productState
+	for decoder.More() {
+		token, err := decoder.Token()
 		if err != nil {
 			return nil, err
 		}
-		klucz, _ := token.(string)
+		mergeKey, _ := token.(string)
 		status := ""
-		switch klucz {
+		switch mergeKey {
 		case "fixed":
-			status = vuln.StatusNaprawione
+			status = vuln.StatusFixed
 		case "known_affected":
-			status = vuln.StatusOtwarte
+			status = vuln.StatusOpen
 		case "under_investigation":
-			status = vuln.StatusBadane
+			status = vuln.StatusUnderInvestigation
 		}
-		// Stanu "nie dotyczy" nie zapisujemy: korelator i tak nie robi z niego
-		// znaleziska, a producent wymienia w nim tysiace pakietow na CVE.
+		// The "not affected" state is not written down: the correlator makes
+		// no finding out of it anyway, and the vendor lists thousands of
+		// packages per CVE in it.
 		if status == "" {
-			if err := pomin(dekoder); err != nil {
+			if err := skip(decoder); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		identyfikatory, err := czytajIdentyfikatory(dekoder, produkty, strumienie)
+		ids, err := readIdentifiers(decoder, products, streams)
 		if err != nil {
 			return nil, err
 		}
-		for _, id := range identyfikatory {
-			zebrane = append(zebrane, stanProduktu{id: id, status: status})
+		for _, id := range ids {
+			gathered = append(gathered, productState{id: id, status: status})
 		}
 	}
-	_, err = dekoder.Token()
-	return zebrane, err
+	_, err = decoder.Token()
+	return gathered, err
 }
 
-// czytajIdentyfikatory czyta liste identyfikatorow produktow i zostawia te,
-// ktore dotycza wydan branych pod uwage.
-func czytajIdentyfikatory(dekoder *json.Decoder, produkty, strumienie map[string]string) ([]string, error) {
-	otwarcie, err := dekoder.Token()
+// readIdentifiers reads the list of product identifiers and keeps the ones
+// that concern the releases under consideration.
+func readIdentifiers(decoder *json.Decoder, products, streams map[string]string) ([]string, error) {
+	opening, err := decoder.Token()
 	if err != nil {
 		return nil, err
 	}
-	if otwarcie != json.Delim('[') {
-		return nil, fmt.Errorf("lista produktow nie jest lista")
+	if opening != json.Delim('[') {
+		return nil, fmt.Errorf("the product list is not a list")
 	}
-	var wynik []string
-	for dekoder.More() {
+	var result []string
+	for decoder.More() {
 		var id string
-		if err := dekoder.Decode(&id); err != nil {
+		if err := decoder.Decode(&id); err != nil {
 			return nil, err
 		}
-		if nasz(id, produkty, strumienie) {
-			wynik = append(wynik, id)
+		if ours(id, products, streams) {
+			result = append(result, id)
 		}
 	}
-	_, err = dekoder.Token()
-	return wynik, err
+	_, err = decoder.Token()
+	return result, err
 }
 
-// czytajNaprawy czyta naprawy, zostawiajac errate i decyzje "nie naprawimy".
-func czytajNaprawy(dekoder *json.Decoder, produkty, strumienie map[string]string,
-	errata map[string]string, bezPlanu map[string]bool) error {
-	otwarcie, err := dekoder.Token()
+// readRemediations reads the remediations, keeping the errata and the "we
+// will not fix it" decisions.
+func readRemediations(decoder *json.Decoder, products, streams map[string]string,
+	errata map[string]string, noFixPlanned map[string]bool) error {
+	opening, err := decoder.Token()
 	if err != nil {
 		return err
 	}
-	if otwarcie != json.Delim('[') {
-		return fmt.Errorf("naprawy nie sa lista")
+	if opening != json.Delim('[') {
+		return fmt.Errorf("the remediations are not a list")
 	}
-	for dekoder.More() {
-		otwarcieNaprawy, err := dekoder.Token()
+	for decoder.More() {
+		remediationOpening, err := decoder.Token()
 		if err != nil {
 			return err
 		}
-		if otwarcieNaprawy != json.Delim('{') {
-			return fmt.Errorf("naprawa nie jest obiektem")
+		if remediationOpening != json.Delim('{') {
+			return fmt.Errorf("a remediation is not an object")
 		}
-		var kategoria, adres string
-		var identyfikatory []string
-		for dekoder.More() {
-			token, err := dekoder.Token()
+		var category, address string
+		var ids []string
+		for decoder.More() {
+			token, err := decoder.Token()
 			if err != nil {
 				return err
 			}
-			klucz, _ := token.(string)
-			switch klucz {
+			mergeKey, _ := token.(string)
+			switch mergeKey {
 			case "category":
-				if err := dekoder.Decode(&kategoria); err != nil {
+				if err := decoder.Decode(&category); err != nil {
 					return err
 				}
 			case "url":
-				if err := dekoder.Decode(&adres); err != nil {
+				if err := decoder.Decode(&address); err != nil {
 					return err
 				}
 			case "product_ids":
-				identyfikatory, err = czytajIdentyfikatory(dekoder, produkty, strumienie)
+				ids, err = readIdentifiers(decoder, products, streams)
 				if err != nil {
 					return err
 				}
 			default:
-				if err := pomin(dekoder); err != nil {
+				if err := skip(decoder); err != nil {
 					return err
 				}
 			}
 		}
-		if _, err := dekoder.Token(); err != nil {
+		if _, err := decoder.Token(); err != nil {
 			return err
 		}
-		switch kategoria {
+		switch category {
 		case "vendor_fix":
-			for _, id := range identyfikatory {
-				errata[id] = adres
+			for _, id := range ids {
+				errata[id] = address
 			}
 		case "no_fix_planned":
-			for _, id := range identyfikatory {
-				bezPlanu[id] = true
+			for _, id := range ids {
+				noFixPlanned[id] = true
 			}
 		}
 	}
-	_, err = dekoder.Token()
+	_, err = decoder.Token()
 	return err
 }
 
-// nasz mowi, czy identyfikator produktu dotyczy wydania, ktore czytamy.
-func nasz(id string, produkty, strumienie map[string]string) bool {
-	if strumienie[id] != "" {
+// ours says whether a product identifier concerns the release we are
+// reading.
+func ours(id string, products, streams map[string]string) bool {
+	if streams[id] != "" {
 		return true
 	}
-	produktID, _, ok := strings.Cut(id, ":")
-	return ok && produkty[produktID] != ""
+	productID, _, ok := strings.Cut(id, ":")
+	return ok && products[productID] != ""
 }
 
-// pomin przeskakuje wartosc, ktorej panel nie czyta.
+// skip jumps over a value the panel does not read.
 //
-// Same opisy i oceny CVSS to wiekszosc objetosci dokumentu, a nie wnosza nic
-// do odpowiedzi "czy ten pakiet jest podatny".
-func pomin(dekoder *json.Decoder) error {
-	token, err := dekoder.Token()
+// The descriptions and the CVSS scores alone are most of the volume of the
+// document, and they add nothing to the answer "is this package
+// vulnerable".
+func skip(decoder *json.Decoder) error {
+	token, err := decoder.Token()
 	if err != nil {
 		return err
 	}
 	if token != json.Delim('{') && token != json.Delim('[') {
 		return nil
 	}
-	poziom := 1
-	for poziom > 0 {
-		token, err := dekoder.Token()
+	depth := 1
+	for depth > 0 {
+		token, err := decoder.Token()
 		if err != nil {
 			return err
 		}
 		switch token {
 		case json.Delim('{'), json.Delim('['):
-			poziom++
+			depth++
 		case json.Delim('}'), json.Delim(']'):
-			poziom--
+			depth--
 		}
 	}
 	return nil
 }
 
-// klucz jednoznacznie wskazuje pakiet w wydaniu: po nim scalamy ustalenia
-// z kilku strumieni tego samego wydania.
-type klucz struct {
-	wydanie string
-	pakiet  string
+// mergeKey points unambiguously at a package in a release: we merge the
+// findings from several streams of the same release by it.
+type mergeKey struct {
+	release string
+	pkg     string
 }
 
-// zloz rozstrzyga zebrane stany produktow w ustalenia panelu.
-func zloz(stany []stanProduktu, numerCVE, tytul, waga, dataWydania string,
-	naglowekDokumentu naglowek, produkty, strumienie map[string]string,
-	errata map[string]string, bezPlanu map[string]bool) []vuln.Advisory {
-	opublikowano := data(dataWydania, naglowekDokumentu.Tracking.InitialReleaseDate)
-	zebrane := map[klucz]vuln.Advisory{}
-	for _, stan := range stany {
-		wydanie, pakiet, wersja, ok := rozbij(stan.id, produkty, strumienie)
+// assemble settles the gathered product states into findings of the panel.
+func assemble(states []productState, cveNumber, title, severity, releaseDate string,
+	header documentHeader, products, streams map[string]string,
+	errata map[string]string, noFixPlanned map[string]bool) []vuln.Advisory {
+	published := date(releaseDate, header.Tracking.InitialReleaseDate)
+	gathered := map[mergeKey]vuln.Advisory{}
+	for _, state := range states {
+		release, pkg, version, ok := split(state.id, products, streams)
 		if !ok {
 			continue
 		}
-		status := stan.status
-		if status == vuln.StatusOtwarte && bezPlanu[stan.id] {
-			// Producent rozstrzygnal, ze nie wyda poprawki. To jest
-			// odpowiedz, a nie brak odpowiedzi - i host nadal jest podatny.
-			status = vuln.StatusOdroczone
+		status := state.status
+		if status == vuln.StatusOpen && noFixPlanned[state.id] {
+			// The vendor settled that it will not release a fix. That is an
+			// answer rather than a missing answer - and the host is still
+			// vulnerable.
+			status = vuln.StatusDeferred
 		}
-		nowe := vuln.Advisory{
-			Provider: Dostawca, AdvisoryID: numerCVE, CVEIDs: []string{numerCVE},
-			Distribution: Dystrybucja, Release: wydanie,
-			// Rodzina RPM koreluje po pakiecie binarnym: ustalenie Red Hata
-			// mowi o konkretnej wersji do zainstalowania, a nie o zrodle.
-			SourcePackage: pakiet, BinaryPackage: pakiet,
-			FixedVersion: wersja, Status: status, VendorSeverity: waga,
-			Title: tytul, URL: odnosnik(errata[stan.id], numerCVE),
-			PublishedAt: opublikowano,
+		current := vuln.Advisory{
+			Provider: Provider, AdvisoryID: cveNumber, CVEIDs: []string{cveNumber},
+			Distribution: Distribution, Release: release,
+			// The RPM family correlates by the binary package: a Red Hat
+			// finding speaks about a specific version to install rather than
+			// about a source.
+			SourcePackage: pkg, BinaryPackage: pkg,
+			FixedVersion: version, Status: status, VendorSeverity: severity,
+			Title: title, URL: link(errata[state.id], cveNumber),
+			PublishedAt: published,
 		}
-		if numer := numerErraty(errata[stan.id]); numer != "" {
-			nowe.AdvisoryID = numer
+		if number := erratumNumber(errata[state.id]); number != "" {
+			current.AdvisoryID = number
 		}
-		wpisz(zebrane, klucz{wydanie, pakiet}, nowe)
+		put(gathered, mergeKey{release, pkg}, current)
 	}
 
-	wynik := make([]vuln.Advisory, 0, len(zebrane))
-	for _, ustalenie := range zebrane {
-		wynik = append(wynik, ustalenie)
+	result := make([]vuln.Advisory, 0, len(gathered))
+	for _, advisory := range gathered {
+		result = append(result, advisory)
 	}
-	return wynik
+	return result
 }
 
-// wpisz scala ustalenia o tym samym pakiecie w tym samym wydaniu.
+// put merges the findings about the same package in the same release.
 //
-// Jedno wydanie ma kilka strumieni (BaseOS, AppStream) i kilka architektur,
-// a poprawka jest wydana w kazdym osobno - z tym samym numerem wersji, bo
-// producent buduje ja raz. Wygrywa poprawka, a z kilku wersji ta najnizsza:
-// od niej pakiet zawiera poprawke, wiec host z wersja wyzsza jest naprawiony.
-func wpisz(zebrane map[klucz]vuln.Advisory, gdzie klucz, nowe vuln.Advisory) {
-	poprzednie, jest := zebrane[gdzie]
-	if !jest {
-		zebrane[gdzie] = nowe
+// One release has several streams (BaseOS, AppStream) and several
+// architectures, and the fix is released in each of them separately - with
+// the same version number, because the vendor builds it once. The fix wins,
+// and of several versions the lowest one: it is from that one that the
+// package carries the fix, so a host with a higher version is fixed.
+func put(gathered map[mergeKey]vuln.Advisory, where mergeKey, current vuln.Advisory) {
+	previous, ok := gathered[where]
+	if !ok {
+		gathered[where] = current
 		return
 	}
-	if poprzednie.Status != vuln.StatusNaprawione {
-		zebrane[gdzie] = nowe
+	if previous.Status != vuln.StatusFixed {
+		gathered[where] = current
 		return
 	}
-	if nowe.Status != vuln.StatusNaprawione {
+	if current.Status != vuln.StatusFixed {
 		return
 	}
-	if version.PorownajRPM(nowe.FixedVersion, poprzednie.FixedVersion) < 0 {
-		zebrane[gdzie] = nowe
+	if version.CompareRPM(current.FixedVersion, previous.FixedVersion) < 0 {
+		gathered[where] = current
 	}
 }
 
-// rozbij tlumaczy identyfikator produktu na wydanie, pakiet i wersje.
+// split translates a product identifier into the release, the package and
+// the version.
 //
-// Identyfikator ma dwie postacie: "produkt:pakiet" dla podatnosci bez
-// poprawki i "strumien:NEVRA" dla wersji naprawionej.
+// The identifier has two shapes: "product:package" for a vulnerability
+// without a fix and "stream:NEVRA" for a fixed version.
 //
-// Architektury nie zapisujemy. Producent buduje poprawke raz i wydaje ja pod
-// tym samym numerem dla kazdej architektury, wiec ustalenie na architekture
-// bylo by tym samym zdaniem powiedzianym piec razy.
-func rozbij(id string, produkty, strumienie map[string]string) (string, string, string, bool) {
-	produktID, reszta, ok := strings.Cut(id, ":")
-	if !ok || reszta == "" {
+// The architecture is not written down. The vendor builds the fix once and
+// releases it under the same number for every architecture, so a finding per
+// architecture would be the same sentence said five times.
+func split(id string, products, streams map[string]string) (string, string, string, bool) {
+	productID, rest, ok := strings.Cut(id, ":")
+	if !ok || rest == "" {
 		return "", "", "", false
 	}
-	// Identyfikator zlozony wskazuje strumien przez relacje; prosty wskazuje
-	// produkt wprost.
-	odniesienie := produktID
-	if cel, jest := strumienie[id]; jest {
-		odniesienie = cel
+	// A compound identifier points at the stream through a relationship; a
+	// simple one points at the product directly.
+	reference := productID
+	if target, ok := streams[id]; ok {
+		reference = target
 	}
-	wydanie := produkty[odniesienie]
-	if wydanie == "" {
+	release := products[reference]
+	if release == "" {
 		return "", "", "", false
 	}
-	// Komponenty kontenerowe maja w nazwie sciezke obrazu, a nie pakiet
-	// systemowy - panel nie ma ich na liscie pakietow hosta.
-	if strings.Contains(reszta, "/") {
+	// Container components carry an image path in their name rather than a
+	// system package - the panel does not have them on the package list of a
+	// host.
+	if strings.Contains(rest, "/") {
 		return "", "", "", false
 	}
-	if !strings.Contains(reszta, ":") {
-		return wydanie, strings.ToValidUTF8(reszta, ""), "", true
+	if !strings.Contains(rest, ":") {
+		return release, strings.ToValidUTF8(rest, ""), "", true
 	}
-	nazwa, arch, wersja, ok := RozbijNEVRA(reszta)
+	name, arch, version, ok := SplitNEVRA(rest)
 	if !ok || arch == "src" {
-		// Pakiet zrodlowy nie jest zainstalowany na hoscie, wiec ustalenie
-		// o nim nie ma czego dotyczyc.
+		// A source package is not installed on the host, so a finding about
+		// it has nothing to concern.
 		return "", "", "", false
 	}
-	return wydanie, nazwa, wersja, true
+	return release, name, version, true
 }
 
-// RozbijNEVRA rozklada "nazwa-epoka:wersja-wydanie.arch" na czesci.
-func RozbijNEVRA(nevra string) (string, string, string, bool) {
-	kropka := strings.LastIndex(nevra, ".")
-	if kropka <= 0 {
+// SplitNEVRA breaks "name-epoch:version-release.arch" into parts.
+func SplitNEVRA(nevra string) (string, string, string, bool) {
+	dot := strings.LastIndex(nevra, ".")
+	if dot <= 0 {
 		return "", "", "", false
 	}
-	arch := nevra[kropka+1:]
-	reszta := nevra[:kropka]
+	arch := nevra[dot+1:]
+	rest := nevra[:dot]
 
-	dwukropek := strings.Index(reszta, ":")
-	if dwukropek <= 0 {
+	colon := strings.Index(rest, ":")
+	if colon <= 0 {
 		return "", "", "", false
 	}
-	lewa, prawa := reszta[:dwukropek], reszta[dwukropek+1:]
-	mysnik := strings.LastIndex(lewa, "-")
-	if mysnik <= 0 || prawa == "" {
+	left, right := rest[:colon], rest[colon+1:]
+	dash := strings.LastIndex(left, "-")
+	if dash <= 0 || right == "" {
 		return "", "", "", false
 	}
-	nazwa, epoka := lewa[:mysnik], lewa[mysnik+1:]
-	wersja := prawa
-	// Epoke zapisujemy tak samo jak host: zero jest domyslne i nie nalezy
-	// do numeru wersji.
-	if epoka != "" && epoka != "0" {
-		wersja = epoka + ":" + wersja
+	name, epoch := left[:dash], left[dash+1:]
+	version := right
+	// The epoch is written down the way the host writes it: zero is the
+	// default and does not belong to the version number.
+	if epoch != "" && epoch != "0" {
+		version = epoch + ":" + version
 	}
-	return strings.ToValidUTF8(nazwa, ""), strings.ToValidUTF8(arch, ""),
-		strings.ToValidUTF8(wersja, ""), true
+	return strings.ToValidUTF8(name, ""), strings.ToValidUTF8(arch, ""),
+		strings.ToValidUTF8(version, ""), true
 }
 
-// zbierzWydania schodzi po drzewie produktow i zapisuje wydanie kazdego
-// produktu, ktory jest bazowym RHEL-em z branych pod uwage wydan.
-func zbierzWydania(wpis galaz, wydania map[string]bool, produkty map[string]string) {
-	if wpis.Product.ProductID != "" {
-		if wydanie := WydanieZCPE(wpis.Product.Helper.CPE); wydanie != "" {
-			if len(wydania) == 0 || wydania[wydanie] {
-				produkty[wpis.Product.ProductID] = wydanie
+// collectReleases walks down the product tree and records the release of
+// every product that is a base RHEL of the releases under consideration.
+func collectReleases(entry branch, releases map[string]bool, products map[string]string) {
+	if entry.Product.ProductID != "" {
+		if release := ReleaseFromCPE(entry.Product.Helper.CPE); release != "" {
+			if len(releases) == 0 || releases[release] {
+				products[entry.Product.ProductID] = release
 			}
 		}
 	}
-	for _, galezie := range wpis.Branches {
-		zbierzWydania(galezie, wydania, produkty)
+	for _, branches := range entry.Branches {
+		collectReleases(branches, releases, products)
 	}
 }
 
-// WydanieZCPE zwraca wydanie bazowego RHEL-a albo puste, gdy CPE opisuje
-// inny produkt.
+// ReleaseFromCPE returns the release of the base RHEL, or empty when the CPE
+// describes another product.
 //
-// Bazowy RHEL ma w CPE "enterprise_linux". Strumienie rozszerzone
-// (rhel_eus, rhel_aus, rhel_e4s, rhel_tus) maja wlasne nazwy i wlasne wersje
-// poprawek - host, ktory ich nie kupil, nie moze byc nimi oceniany.
-func WydanieZCPE(cpe string) string {
-	czesci := strings.Split(cpe, ":")
-	if len(czesci) < 5 {
+// The base RHEL carries "enterprise_linux" in its CPE. The extended streams
+// (rhel_eus, rhel_aus, rhel_e4s, rhel_tus) have names of their own and fixes
+// of their own - a host that has not bought them must not be assessed with
+// them.
+func ReleaseFromCPE(cpe string) string {
+	parts := strings.Split(cpe, ":")
+	if len(parts) < 5 {
 		return ""
 	}
-	if czesci[2] != "redhat" || czesci[3] != "enterprise_linux" {
+	if parts[2] != "redhat" || parts[3] != "enterprise_linux" {
 		return ""
 	}
-	wersja := czesci[4]
-	if glowna, _, ok := strings.Cut(wersja, "."); ok {
-		wersja = glowna
+	version := parts[4]
+	if major, _, ok := strings.Cut(version, "."); ok {
+		version = major
 	}
-	if wersja == "" {
+	if version == "" {
 		return ""
 	}
-	for _, znak := range wersja {
-		if znak < '0' || znak > '9' {
+	for _, c := range version {
+		if c < '0' || c > '9' {
 			return ""
 		}
 	}
-	return wersja
+	return version
 }
 
-// numerErraty wyciaga identyfikator erraty z odnosnika producenta.
-func numerErraty(url string) string {
-	ciecie := strings.LastIndex(url, "/")
-	if ciecie < 0 {
+// erratumNumber extracts the identifier of an erratum out of a vendor link.
+func erratumNumber(url string) string {
+	cut := strings.LastIndex(url, "/")
+	if cut < 0 {
 		return ""
 	}
-	numer := url[ciecie+1:]
-	if !strings.HasPrefix(numer, "RHSA-") && !strings.HasPrefix(numer, "RHBA-") &&
-		!strings.HasPrefix(numer, "RHEA-") {
+	number := url[cut+1:]
+	if !strings.HasPrefix(number, "RHSA-") && !strings.HasPrefix(number, "RHBA-") &&
+		!strings.HasPrefix(number, "RHEA-") {
 		return ""
 	}
-	return strings.ToValidUTF8(numer, "")
+	return strings.ToValidUTF8(number, "")
 }
 
-// odnosnik wskazuje errate producenta, a gdy jej nie ma - strone CVE.
-func odnosnik(errata, numerCVE string) string {
+// link points at the erratum of the vendor, and when there is none - at the
+// CVE page.
+func link(errata, cveNumber string) string {
 	if errata != "" {
 		return strings.ToValidUTF8(errata, "")
 	}
-	return "https://access.redhat.com/security/cve/" + numerCVE
+	return "https://access.redhat.com/security/cve/" + cveNumber
 }
 
-// skrocony przycina tytul do 300 znakow, a nie bajtow.
-func skrocony(tytul string) string {
-	tytul = strings.ToValidUTF8(strings.TrimSpace(tytul), "")
-	znaki := []rune(tytul)
+// shortened trims a title to 300 characters rather than bytes.
+func shortened(title string) string {
+	title = strings.ToValidUTF8(strings.TrimSpace(title), "")
+	znaki := []rune(title)
 	if len(znaki) > 300 {
 		return string(znaki[:300])
 	}
-	return tytul
+	return title
 }
 
-// data czyta pierwsza czytelna date z podanych.
-func data(kandydaci ...string) *time.Time {
-	for _, kandydat := range kandydaci {
-		chwila, err := time.Parse(time.RFC3339, strings.TrimSpace(kandydat))
+// date reads the first readable date of the ones given.
+func date(candidates ...string) *time.Time {
+	for _, candidate := range candidates {
+		moment, err := time.Parse(time.RFC3339, strings.TrimSpace(candidate))
 		if err != nil {
 			continue
 		}
-		chwilaUTC := chwila.UTC()
-		return &chwilaUTC
+		momentUTC := moment.UTC()
+		return &momentUTC
 	}
 	return nil
 }

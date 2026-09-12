@@ -411,7 +411,7 @@ func (h *harness) najnowszaWersjaAgenta() string {
 			pakiet = strings.TrimSpace(strings.TrimPrefix(linia, "Package: "))
 		case strings.HasPrefix(linia, "Version: ") && pakiet == "flotestro-agent":
 			wersja := strings.TrimSpace(strings.TrimPrefix(linia, "Version: "))
-			if najnowsza == "" || version.PorownajDeb(wersja, najnowsza) > 0 {
+			if najnowsza == "" || version.CompareDeb(wersja, najnowsza) > 0 {
 				najnowsza = wersja
 			}
 		}

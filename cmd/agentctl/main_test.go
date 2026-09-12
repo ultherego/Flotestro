@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const dobraKonfiguracja = `
+const goodConfiguration = `
 schema_version: 1
 connection:
   enrollment_url: "https://enroll.example.com"
@@ -17,145 +17,147 @@ agent:
   state_dir: "/var/lib/flotestro-agent"
 `
 
-func plikKonfiguracji(t *testing.T, tresc string, prawa os.FileMode) string {
+func configurationFile(t *testing.T, content string, permissions os.FileMode) string {
 	t.Helper()
-	sciezka := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := os.WriteFile(sciezka, []byte(tresc), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(sciezka, prawa); err != nil {
+	if err := os.Chmod(path, permissions); err != nil {
 		t.Fatal(err)
 	}
-	return sciezka
+	return path
 }
 
-func TestKodyWyjscia(t *testing.T) {
-	przypadki := []struct {
-		nazwa     string
-		argumenty []string
-		kod       int
+func TestExitCodes(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		code int
 	}{
-		{"bez polecenia", nil, 2},
-		{"nieznane polecenie", []string{"polec"}, 2},
-		{"wersja", []string{"version"}, 0},
-		{"pomoc", []string{"help"}, 0},
-		{"config bez podpolecenia", []string{"config"}, 2},
-		{"config z nieznanym podpoleceniem", []string{"config", "napraw"}, 2},
+		{"without a command", nil, 2},
+		{"an unknown command", []string{"order"}, 2},
+		{"version", []string{"version"}, 0},
+		{"usage", []string{"help"}, 0},
+		{"config without a subcommand", []string{"config"}, 2},
+		{"config with an unknown subcommand", []string{"config", "fix"}, 2},
 	}
-	for _, przypadek := range przypadki {
-		t.Run(przypadek.nazwa, func(t *testing.T) {
-			var wyjscie, bledy bytes.Buffer
-			if kod := uruchom(przypadek.argumenty, &wyjscie, &bledy); kod != przypadek.kod {
-				t.Fatalf("kod = %d, chcemy %d (%s%s)", kod, przypadek.kod,
-					wyjscie.String(), bledy.String())
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := run(c.args, &out, &errOut); code != c.code {
+				t.Fatalf("code = %d, we want %d (%s%s)", code, c.code,
+					out.String(), errOut.String())
 			}
 		})
 	}
 }
 
-func TestConfigValidatePrzepuszczaPoprawnyPlik(t *testing.T) {
-	sciezka := plikKonfiguracji(t, dobraKonfiguracja, 0o640)
-	var wyjscie, bledy bytes.Buffer
-	if kod := uruchom([]string{"config", "validate", "--config", sciezka}, &wyjscie, &bledy); kod != 0 {
-		t.Fatalf("kod = %d, bledy: %s", kod, bledy.String())
+func TestConfigValidateLetsACorrectFileThrough(t *testing.T) {
+	path := configurationFile(t, goodConfiguration, 0o640)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"config", "validate", "--config", path}, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d, errors: %s", code, errOut.String())
 	}
-	if !strings.Contains(wyjscie.String(), "poprawny") {
-		t.Fatalf("wyjscie = %q", wyjscie.String())
-	}
-}
-
-func TestConfigValidateZglaszaBlad(t *testing.T) {
-	zly := plikKonfiguracji(t, "schema_version: 2\n", 0o640)
-	var wyjscie, bledy bytes.Buffer
-	if kod := uruchom([]string{"config", "validate", "--config", zly}, &wyjscie, &bledy); kod != 1 {
-		t.Fatalf("kod = %d", kod)
-	}
-	// Kod bledu jest czescia kontraktu: to on trafia do zgloszenia z hosta,
-	// ktory nie rozmawia jeszcze z panelem.
-	if !strings.Contains(bledy.String(), "config_schema_unsupported") {
-		t.Fatalf("bledy = %q", bledy.String())
+	if !strings.Contains(out.String(), "correct") {
+		t.Fatalf("output = %q", out.String())
 	}
 }
 
-func TestConfigValidatePilnujePrawDoPliku(t *testing.T) {
-	// Prawo zapisu do konfiguracji jest prawem przekierowania hosta na cudzy
-	// panel: plik poprawny skladniowo, ale otwarty dla wszystkich, nie moze
-	// przejsc jako poprawny.
-	otwarty := plikKonfiguracji(t, dobraKonfiguracja, 0o666)
-	var wyjscie, bledy bytes.Buffer
-	if kod := uruchom([]string{"config", "validate", "--config", otwarty}, &wyjscie, &bledy); kod != 1 {
-		t.Fatalf("kod = %d, wyjscie: %s", kod, wyjscie.String())
+func TestConfigValidateReportsAnError(t *testing.T) {
+	bad := configurationFile(t, "schema_version: 2\n", 0o640)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"config", "validate", "--config", bad}, &out, &errOut); code != 1 {
+		t.Fatalf("code = %d", code)
 	}
-	if !strings.Contains(bledy.String(), "zapisywalny") {
-		t.Fatalf("bledy = %q", bledy.String())
+	// The error code is part of the contract: it is what reaches a report
+	// from a host that does not speak to the panel yet.
+	if !strings.Contains(errOut.String(), "config_schema_unsupported") {
+		t.Fatalf("errors = %q", errOut.String())
 	}
 }
 
-func TestConfigShowNiePokazujeSekretow(t *testing.T) {
-	sciezka := plikKonfiguracji(t, dobraKonfiguracja, 0o640)
-	var wyjscie, bledy bytes.Buffer
-	if kod := uruchom([]string{"config", "show", "--config", sciezka}, &wyjscie, &bledy); kod != 0 {
-		t.Fatalf("kod = %d, bledy: %s", kod, bledy.String())
+func TestConfigValidateWatchesThePermissionsOfTheFile(t *testing.T) {
+	// The right to write to the configuration is the right to redirect the
+	// host to somebody else's panel: a file that is syntactically correct but
+	// open to everybody must not pass as correct.
+	open := configurationFile(t, goodConfiguration, 0o666)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"config", "validate", "--config", open}, &out, &errOut); code != 1 {
+		t.Fatalf("code = %d, output: %s", code, out.String())
 	}
-	tresc := wyjscie.String()
-	for _, zakazane := range []string{"token", "TOKEN", "secret", "password"} {
-		if strings.Contains(tresc, zakazane) {
-			t.Fatalf("wyjscie niesie %q: %s", zakazane, tresc)
+	if !strings.Contains(errOut.String(), "writable") {
+		t.Fatalf("errors = %q", errOut.String())
+	}
+}
+
+func TestConfigShowDoesNotShowSecrets(t *testing.T) {
+	path := configurationFile(t, goodConfiguration, 0o640)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"config", "show", "--config", path}, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d, errors: %s", code, errOut.String())
+	}
+	content := out.String()
+	for _, forbidden := range []string{"token", "TOKEN", "secret", "password"} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("the output carries %q: %s", forbidden, content)
 		}
 	}
-	if !strings.Contains(tresc, "https://gw.example.com:8443") {
-		t.Fatalf("wyjscie bez adresu bramy: %s", tresc)
+	if !strings.Contains(content, "https://gw.example.com:8443") {
+		t.Fatalf("the output has no gateway address: %s", content)
 	}
 }
 
-func TestStatusMowiOBrakuTozsamosci(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "agent.yaml")
-	tresc := strings.Replace(dobraKonfiguracja, `  state_dir: "/var/lib/flotestro-agent"`,
-		`  state_dir: "`+katalog+`"`, 1)
-	if err := os.WriteFile(sciezka, []byte(tresc), 0o640); err != nil {
+func TestStatusSaysThatTheIdentityIsMissing(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "agent.yaml")
+	content := strings.Replace(goodConfiguration, `  state_dir: "/var/lib/flotestro-agent"`,
+		`  state_dir: "`+directory+`"`, 1)
+	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	var wyjscie, bledy bytes.Buffer
-	// Host bez tozsamosci to problem do naprawy, a nie blad uzycia.
-	if kod := uruchom([]string{"status", "--config", sciezka}, &wyjscie, &bledy); kod != 1 {
-		t.Fatalf("kod = %d, wyjscie: %s", kod, wyjscie.String())
+	var out, errOut bytes.Buffer
+	// A host without an identity is a problem to fix rather than a usage
+	// error.
+	if code := run([]string{"status", "--config", path}, &out, &errOut); code != 1 {
+		t.Fatalf("code = %d, output: %s", code, out.String())
 	}
-	if !strings.Contains(wyjscie.String(), "Identity:     brak") {
-		t.Fatalf("wyjscie = %q", wyjscie.String())
+	if !strings.Contains(out.String(), "Identity:     missing") {
+		t.Fatalf("output = %q", out.String())
 	}
 }
 
-func TestEnrollOdmawiaGdyTozsamoscJestWazna(t *testing.T) {
-	// Rejestracja hosta, ktory juz jest we flocie, byla by cicha wymiana
-	// tozsamosci. To jest osobna decyzja i idzie przez zamowienie w panelu.
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "agent.yaml")
-	tresc := strings.Replace(dobraKonfiguracja, `  state_dir: "/var/lib/flotestro-agent"`,
-		`  state_dir: "`+katalog+`"`, 1)
-	if err := os.WriteFile(sciezka, []byte(tresc), 0o640); err != nil {
+func TestEnrollRefusesWhenTheIdentityIsValid(t *testing.T) {
+	// Registering a host that is already in the fleet would be a silent
+	// replacement of the identity. That is a separate decision and goes
+	// through a request in the panel.
+	directory := t.TempDir()
+	path := filepath.Join(directory, "agent.yaml")
+	content := strings.Replace(goodConfiguration, `  state_dir: "/var/lib/flotestro-agent"`,
+		`  state_dir: "`+directory+`"`, 1)
+	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	// Bez tozsamosci polecenie ma pytac o token, a nie odmawiac - wiec
-	// podajemy pusty, zeby sprawdzic sama sciezke bledu.
-	var wyjscie, bledy bytes.Buffer
-	kod := uruchomZWejsciem([]string{"enroll", "--config", sciezka},
-		strings.NewReader(""), &wyjscie, &bledy)
-	if kod != 1 {
-		t.Fatalf("kod = %d, wyjscie: %s %s", kod, wyjscie.String(), bledy.String())
+	// Without an identity the command is to ask for a token rather than
+	// refuse - so we give an empty one to check the error path itself.
+	var out, errOut bytes.Buffer
+	code := runWithInput([]string{"enroll", "--config", path},
+		strings.NewReader(""), &out, &errOut)
+	if code != 1 {
+		t.Fatalf("code = %d, output: %s %s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(bledy.String(), "token enrollmentu jest pusty") {
-		t.Fatalf("bledy = %q", bledy.String())
+	if !strings.Contains(errOut.String(), "the enrollment token is empty") {
+		t.Fatalf("errors = %q", errOut.String())
 	}
 }
 
-func TestEnrollNiePrzyjmujeTokenuWArgumencie(t *testing.T) {
-	// Argument wiersza polecenia widzi kazdy uzytkownik hosta w liscie
-	// procesow, wiec takiej flagi nie ma i nie moze byc.
-	var wyjscie, bledy bytes.Buffer
-	kod := uruchomZWejsciem([]string{"enroll", "--token", "flt_cokolwiek"},
-		strings.NewReader(""), &wyjscie, &bledy)
-	if kod != 2 {
-		t.Fatalf("kod = %d - flaga z tokenem zostala przyjeta", kod)
+func TestEnrollDoesNotTakeTheTokenFromAnArgument(t *testing.T) {
+	// Every user of the host sees a command line argument in the process
+	// list, so there is no such flag and there must not be one.
+	var out, errOut bytes.Buffer
+	code := runWithInput([]string{"enroll", "--token", "flt_whatever"},
+		strings.NewReader(""), &out, &errOut)
+	if code != 2 {
+		t.Fatalf("code = %d - the flag with the token was accepted", code)
 	}
 }

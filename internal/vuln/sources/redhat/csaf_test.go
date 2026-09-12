@@ -7,13 +7,13 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
-// przykladVEX ma ksztalt dokumentu produkcyjnego: bazowy RHEL obok strumienia
-// rozszerzonego i produktu warstwowego, poprawki w kilku strumieniach jednego
-// wydania i podatnosci bez poprawki.
-const przykladVEX = `{
+// vexSample has the shape of a production document: the base RHEL next to an
+// extended stream and a layered product, fixes in several streams of one
+// release and vulnerabilities without a fix.
+const vexSample = `{
   "document": {
     "category": "csaf_vex",
-    "title": "zlib: przepelnienie bufora",
+    "title": "zlib: a buffer overflow",
     "aggregate_severity": {"text": "Important"},
     "tracking": {"id": "CVE-2026-1234", "initial_release_date": "2026-07-01T10:00:00+00:00"}
   },
@@ -79,7 +79,7 @@ const przykladVEX = `{
   "vulnerabilities": [
     {
       "cve": "CVE-2026-1234",
-      "title": "zlib: przepelnienie bufora przy dekompresji",
+      "title": "zlib: a buffer overflow during decompression",
       "release_date": "2026-07-01T10:00:00+00:00",
       "product_status": {
         "fixed": [
@@ -109,91 +109,92 @@ const przykladVEX = `{
   ]
 }`
 
-func ustaleniaPrzykladu(t *testing.T) map[string]vuln.Advisory {
+func sampleAdvisories(t *testing.T) map[string]vuln.Advisory {
 	t.Helper()
-	ustalenia, err := Ustalenia([]byte(przykladVEX), nil)
+	advisories, err := Advisories([]byte(vexSample), nil)
 	if err != nil {
-		t.Fatalf("czytanie dokumentu: %v", err)
+		t.Fatalf("reading the document: %v", err)
 	}
-	wedlug := map[string]vuln.Advisory{}
-	for _, ustalenie := range ustalenia {
-		wedlug[ustalenie.Release+"/"+ustalenie.SourcePackage] = ustalenie
+	byKey := map[string]vuln.Advisory{}
+	for _, advisory := range advisories {
+		byKey[advisory.Release+"/"+advisory.SourcePackage] = advisory
 	}
-	return wedlug
+	return byKey
 }
 
-func TestPoprawkaMaWersjeZNEVRA(t *testing.T) {
-	ustalenie := ustaleniaPrzykladu(t)["9/zlib"]
-	if ustalenie.Status != vuln.StatusNaprawione {
-		t.Fatalf("status = %q, chcemy %q", ustalenie.Status, vuln.StatusNaprawione)
+func TestAFixCarriesTheVersionFromTheNEVRA(t *testing.T) {
+	advisory := sampleAdvisories(t)["9/zlib"]
+	if advisory.Status != vuln.StatusFixed {
+		t.Fatalf("status = %q, we want %q", advisory.Status, vuln.StatusFixed)
 	}
-	// Z dwoch strumieni tego samego wydania zostaje nizsza wersja: od niej
-	// pakiet zawiera poprawke.
-	if ustalenie.FixedVersion != "1.2.11-40.el9" {
-		t.Fatalf("wersja naprawiona = %q", ustalenie.FixedVersion)
+	// Of two streams of the same release the lower version stays: it is from
+	// that one that the package carries the fix.
+	if advisory.FixedVersion != "1.2.11-40.el9" {
+		t.Fatalf("fixed version = %q", advisory.FixedVersion)
 	}
-	if ustalenie.AdvisoryID != "RHSA-2026:1111" {
-		t.Fatalf("ustalenie nazwane %q zamiast errata producenta", ustalenie.AdvisoryID)
+	if advisory.AdvisoryID != "RHSA-2026:1111" {
+		t.Fatalf("the finding is named %q instead of the erratum of the vendor", advisory.AdvisoryID)
 	}
-	if ustalenie.Distribution != Dystrybucja || ustalenie.Provider != Dostawca {
-		t.Fatalf("dystrybucja = %q, dostawca = %q", ustalenie.Distribution, ustalenie.Provider)
+	if advisory.Distribution != Distribution || advisory.Provider != Provider {
+		t.Fatalf("distribution = %q, provider = %q", advisory.Distribution, advisory.Provider)
 	}
-	if len(ustalenie.CVEIDs) != 1 || ustalenie.CVEIDs[0] != "CVE-2026-1234" {
-		t.Fatalf("numery CVE = %v", ustalenie.CVEIDs)
+	if len(advisory.CVEIDs) != 1 || advisory.CVEIDs[0] != "CVE-2026-1234" {
+		t.Fatalf("CVE numbers = %v", advisory.CVEIDs)
 	}
-	if ustalenie.VendorSeverity != "important" {
-		t.Fatalf("waga = %q - zapisujemy slownik producenta", ustalenie.VendorSeverity)
+	if advisory.VendorSeverity != "important" {
+		t.Fatalf("severity = %q - we record the vocabulary of the vendor", advisory.VendorSeverity)
 	}
-	if ustalenie.PublishedAt == nil {
-		t.Fatal("ustalenie bez daty publikacji")
-	}
-}
-
-func TestStanyBezPoprawkiMajaSwojeOdpowiedzi(t *testing.T) {
-	wedlug := ustaleniaPrzykladu(t)
-	if wedlug["9/curl"].Status != vuln.StatusOtwarte {
-		t.Errorf("curl: status = %q", wedlug["9/curl"].Status)
-	}
-	// "Nie naprawimy" jest rozstrzygnieciem producenta, a nie brakiem
-	// odpowiedzi - i host nadal jest podatny.
-	if wedlug["9/emacs"].Status != vuln.StatusOdroczone {
-		t.Errorf("emacs: status = %q, chcemy %q", wedlug["9/emacs"].Status, vuln.StatusOdroczone)
-	}
-	if wedlug["9/vim"].Status != vuln.StatusBadane {
-		t.Errorf("vim: status = %q, chcemy %q", wedlug["9/vim"].Status, vuln.StatusBadane)
-	}
-	// Stanu "nie dotyczy" nie zapisujemy: korelator i tak nie robi z niego
-	// znaleziska, a Red Hat wymienia w nim tysiace pakietow na CVE.
-	if _, jest := wedlug["9/nano"]; jest {
-		t.Error("ustalenie 'nie dotyczy' zajmuje miejsce w snapshocie")
+	if advisory.PublishedAt == nil {
+		t.Fatal("a finding without a publication date")
 	}
 }
 
-func TestObceProduktyNieTrafiajaDoOceny(t *testing.T) {
-	for klucz, ustalenie := range ustaleniaPrzykladu(t) {
-		if ustalenie.Release != "9" {
-			t.Errorf("%s: wydanie %q spoza bazowego RHEL-a", klucz, ustalenie.Release)
-		}
-		if ustalenie.SourcePackage == "podman" {
-			t.Error("pakiet produktu warstwowego trafil do oceny bazowego RHEL-a")
-		}
-		if strings.Contains(ustalenie.SourcePackage, "/") {
-			t.Errorf("komponent kontenerowy trafil do oceny: %q", ustalenie.SourcePackage)
-		}
-		if ustalenie.Architecture != "" {
-			t.Errorf("%s: ustalenie na architekture %q - producent buduje poprawke raz",
-				klucz, ustalenie.Architecture)
-		}
+func TestTheStatesWithoutAFixHaveAnswersOfTheirOwn(t *testing.T) {
+	byKey := sampleAdvisories(t)
+	if byKey["9/curl"].Status != vuln.StatusOpen {
+		t.Errorf("curl: status = %q", byKey["9/curl"].Status)
 	}
-	// Strumien EUS ma wlasne wersje poprawek i przysluguje czesci klientow:
-	// host bazowy nie moze byc nimi oceniany.
-	if wersja := ustaleniaPrzykladu(t)["9/zlib"].FixedVersion; strings.Contains(wersja, "el9_4") {
-		t.Errorf("ocena wziela wersje ze strumienia EUS: %q", wersja)
+	// "We will not fix it" is a verdict of the vendor rather than a missing
+	// answer - and the host is still vulnerable.
+	if byKey["9/emacs"].Status != vuln.StatusDeferred {
+		t.Errorf("emacs: status = %q, we want %q", byKey["9/emacs"].Status, vuln.StatusDeferred)
+	}
+	if byKey["9/vim"].Status != vuln.StatusUnderInvestigation {
+		t.Errorf("vim: status = %q, we want %q", byKey["9/vim"].Status, vuln.StatusUnderInvestigation)
+	}
+	// The "not affected" state is not written down: the correlator makes no
+	// finding out of it anyway, and Red Hat lists thousands of packages per
+	// CVE in it.
+	if _, ok := byKey["9/nano"]; ok {
+		t.Error("a 'not affected' finding takes space in the snapshot")
 	}
 }
 
-func TestWydanieZCPE(t *testing.T) {
-	przypadki := map[string]string{
+func TestForeignProductsDoNotReachTheAssessment(t *testing.T) {
+	for key, advisory := range sampleAdvisories(t) {
+		if advisory.Release != "9" {
+			t.Errorf("%s: the release %q from outside the base RHEL", key, advisory.Release)
+		}
+		if advisory.SourcePackage == "podman" {
+			t.Error("a package of a layered product reached the assessment of the base RHEL")
+		}
+		if strings.Contains(advisory.SourcePackage, "/") {
+			t.Errorf("a container component reached the assessment: %q", advisory.SourcePackage)
+		}
+		if advisory.Architecture != "" {
+			t.Errorf("%s: a finding per architecture %q - the vendor builds the fix once",
+				key, advisory.Architecture)
+		}
+	}
+	// The EUS stream has fixes of its own and is available to some customers:
+	// a base host must not be assessed with them.
+	if version := sampleAdvisories(t)["9/zlib"].FixedVersion; strings.Contains(version, "el9_4") {
+		t.Errorf("the assessment took a version from the EUS stream: %q", version)
+	}
+}
+
+func TestReleaseFromCPE(t *testing.T) {
+	cases := map[string]string{
 		"cpe:/o:redhat:enterprise_linux:9":            "9",
 		"cpe:/a:redhat:enterprise_linux:9::appstream": "9",
 		"cpe:/o:redhat:enterprise_linux:10":           "10",
@@ -203,32 +204,32 @@ func TestWydanieZCPE(t *testing.T) {
 		"cpe:/a:redhat:enterprise_linux:9::crb":       "9",
 		"":                                            "",
 	}
-	for cpe, chcemy := range przypadki {
-		if mamy := WydanieZCPE(cpe); mamy != chcemy {
-			t.Errorf("%q: wydanie = %q, chcemy %q", cpe, mamy, chcemy)
+	for cpe, want := range cases {
+		if got := ReleaseFromCPE(cpe); got != want {
+			t.Errorf("%q: release = %q, want %q", cpe, got, want)
 		}
 	}
 }
 
-func TestRozbijNEVRA(t *testing.T) {
-	przypadki := []struct {
-		nevra, nazwa, arch, wersja string
+func TestSplitNEVRA(t *testing.T) {
+	cases := []struct {
+		nevra, name, arch, version string
 		ok                         bool
 	}{
 		{"zlib-0:1.2.11-40.el9.x86_64", "zlib", "x86_64", "1.2.11-40.el9", true},
 		{"kernel-rt-0:5.14.0-284.el9.x86_64", "kernel-rt", "x86_64", "5.14.0-284.el9", true},
-		// Epoka niezerowa nalezy do wersji i musi byc zapisana tak samo jak
-		// na hoscie - inaczej porownanie wychodzi odwrotnie.
+		// A non-zero epoch belongs to the version and has to be written down
+		// the way the host writes it - otherwise the comparison comes out the
+		// other way round.
 		{"podman-3:4.4.1-19.el9.aarch64", "podman", "aarch64", "3:4.4.1-19.el9", true},
 		{"zlib-0:1.2.11-40.el9.noarch", "zlib", "noarch", "1.2.11-40.el9", true},
 		{"zlib", "", "", "", false},
 		{"zlib-1.2.11-40.el9.x86_64", "", "", "", false},
 	}
-	for _, przypadek := range przypadki {
-		nazwa, arch, wersja, ok := RozbijNEVRA(przypadek.nevra)
-		if ok != przypadek.ok || nazwa != przypadek.nazwa || arch != przypadek.arch ||
-			wersja != przypadek.wersja {
-			t.Errorf("%q -> (%q, %q, %q, %v)", przypadek.nevra, nazwa, arch, wersja, ok)
+	for _, c := range cases {
+		name, arch, version, ok := SplitNEVRA(c.nevra)
+		if ok != c.ok || name != c.name || arch != c.arch || version != c.version {
+			t.Errorf("%q -> (%q, %q, %q, %v)", c.nevra, name, arch, version, ok)
 		}
 	}
 }

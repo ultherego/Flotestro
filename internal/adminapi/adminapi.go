@@ -64,7 +64,7 @@ type Server struct {
 	// na ktorej te ustalenia sie oparly. Pusty korelator oznacza instalacje
 	// bez oceny podatnosci.
 	podatnosci    *vuln.Store
-	pakietyHostow *vuln.MagazynPakietow
+	pakietyHostow *vuln.PackageStore
 	wiekFeedu     time.Duration
 	// kopie trzymaja definicje backupu i historie przebiegow. Danych
 	// backupowych panel nie widzi: plyna z hosta wprost do repozytorium.

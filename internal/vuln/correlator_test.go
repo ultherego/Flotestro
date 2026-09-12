@@ -7,485 +7,494 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-var teraz = time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+var now = time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 
-func snapshotDebiana(wydania ...string) Snapshot {
+func debianSnapshot(releases ...string) Snapshot {
 	return Snapshot{
-		Provider: "debian", Digest: "abc123", Releases: wydania,
-		FetchedAt: teraz.Add(-time.Hour), Active: true,
+		Provider: "debian", Digest: "abc123", Releases: releases,
+		FetchedAt: now.Add(-time.Hour), Active: true,
 	}
 }
 
-func wejscieDebiana(pakiety ...packages.InstalledPackage) Wejscie {
-	return Wejscie{
+func debianInput(pkgs ...packages.InstalledPackage) Input {
+	return Input{
 		HostID: "host-1", Hostname: "web-01", Distribution: "debian", Release: "trixie",
-		Packages: pakiety, InventoryDigest: "lista-1",
+		Packages: pkgs, InventoryDigest: "list-1",
 	}
 }
 
-func pakietDeb(nazwa, wersja, zrodlo string) packages.InstalledPackage {
-	if zrodlo == "" {
-		zrodlo = nazwa
+func debPackage(name, version, source string) packages.InstalledPackage {
+	if source == "" {
+		source = name
 	}
-	// APT nie zapisuje producenta przy pakiecie, wiec pochodzenie zbiera agent
-	// z metadanych repozytoriow. Pakiet bez niego jest nieustalony - i tak ma
-	// byc, ale tu opisujemy pakiet dystrybucji.
+	// APT does not record a vendor with the package, so the origin is
+	// collected by the agent from the repository metadata. A package without
+	// one is undetermined - and that is how it should be, but here we
+	// describe a package of the distribution.
 	return packages.InstalledPackage{
-		Name: nazwa, Version: wersja, Architecture: "amd64", SourceName: zrodlo,
-		SourceVersion: wersja, Origin: "deb.debian.org",
-		OriginClass: packages.PochodzenieDystrybucja,
+		Name: name, Version: version, Architecture: "amd64", SourceName: source,
+		SourceVersion: version, Origin: "deb.debian.org",
+		OriginClass: packages.OriginDistribution,
 	}
 }
 
-// TestBrakDanychNieJestBrakiemPodatnosci pilnuje wlasciwosci, dla ktorej ten
-// modul w ogole ma sens: panel nie moze powiedziec "bezpieczny", gdy naprawde
-// znaczy "nie wiem".
-func TestBrakDanychNieJestBrakiemPodatnosci(t *testing.T) {
-	pakiety := []packages.InstalledPackage{pakietDeb("openssl", "3.0.11-1", "openssl")}
+// TestMissingDataIsNotAMissingVulnerability guards the property this module
+// exists for at all: the panel must not say "safe" when it really means "I do
+// not know".
+func TestMissingDataIsNotAMissingVulnerability(t *testing.T) {
+	pkgs := []packages.InstalledPackage{debPackage("openssl", "3.0.11-1", "openssl")}
 
-	przypadki := map[string]struct {
-		wejscie  Wejscie
+	cases := map[string]struct {
+		input    Input
 		snapshot Snapshot
-		powod    string
+		reason   string
 	}{
-		"brak listy pakietow": {
-			wejscie: func() Wejscie {
-				w := wejscieDebiana(pakiety...)
-				w.BrakListy = true
-				return w
+		"a missing package list": {
+			input: func() Input {
+				i := debianInput(pkgs...)
+				i.ListMissing = true
+				return i
 			}(),
-			snapshot: snapshotDebiana("trixie"),
-			powod:    RodzajBrakListy,
+			snapshot: debianSnapshot("trixie"),
+			reason:   ReasonPackageListMissing,
 		},
-		"brak feedu": {
-			wejscie: wejscieDebiana(pakiety...), snapshot: Snapshot{Provider: "debian"},
-			powod: RodzajBrakFeedu,
+		"a missing feed": {
+			input: debianInput(pkgs...), snapshot: Snapshot{Provider: "debian"},
+			reason: ReasonFeedMissing,
 		},
-		"wydanie spoza feedu": {
-			wejscie: wejscieDebiana(pakiety...), snapshot: snapshotDebiana("bookworm"),
-			powod: RodzajWydanieNieobslugiwane,
+		"a release outside the feed": {
+			input: debianInput(pkgs...), snapshot: debianSnapshot("bookworm"),
+			reason: ReasonReleaseUnsupported,
 		},
 	}
-	for nazwa, przypadek := range przypadki {
-		ocena := Ocen(przypadek.wejscie, przypadek.snapshot, nil, 6*time.Hour, teraz)
-		if ocena.Stan.CoverageReason != przypadek.powod {
-			t.Errorf("%s: powod pokrycia = %q, oczekiwano %q",
-				nazwa, ocena.Stan.CoverageReason, przypadek.powod)
+	for name, c := range cases {
+		evaluation := Evaluate(c.input, c.snapshot, nil, 6*time.Hour, now)
+		if evaluation.State.CoverageReason != c.reason {
+			t.Errorf("%s: coverage reason = %q, expected %q",
+				name, evaluation.State.CoverageReason, c.reason)
 		}
-		if len(ocena.Findings) != 0 {
-			t.Errorf("%s: ocena bez danych zwrocila %d ustalen", nazwa, len(ocena.Findings))
+		if len(evaluation.Findings) != 0 {
+			t.Errorf("%s: an assessment without data returned %d findings", name, len(evaluation.Findings))
 		}
-		if ocena.Stan.PackagesCovered != 0 {
-			t.Errorf("%s: pokrycie %d pakietow bez danych", nazwa, ocena.Stan.PackagesCovered)
+		if evaluation.State.PackagesCovered != 0 {
+			t.Errorf("%s: coverage of %d packages without data", name, evaluation.State.PackagesCovered)
 		}
 	}
 }
 
-func TestFeedNieswiezyNieZatrzymujeOcenyAleJestWidoczny(t *testing.T) {
-	snapshot := snapshotDebiana("trixie")
-	snapshot.FetchedAt = teraz.Add(-48 * time.Hour)
-	ustalenia := map[string][]Advisory{
+func TestAStaleFeedDoesNotStopTheAssessmentButIsVisible(t *testing.T) {
+	snapshot := debianSnapshot("trixie")
+	snapshot.FetchedAt = now.Add(-48 * time.Hour)
+	advisories := map[string][]Advisory{
 		"openssl": {{
 			Provider: "debian", AdvisoryID: "CVE-2026-1000", CVEIDs: []string{"CVE-2026-1000"},
 			Distribution: "debian", Release: "trixie", SourcePackage: "openssl",
-			FixedVersion: "3.0.15-1", Status: StatusNaprawione, VendorSeverity: "high",
+			FixedVersion: "3.0.15-1", Status: StatusFixed, VendorSeverity: "high",
 		}},
 	}
-	ocena := Ocen(wejscieDebiana(pakietDeb("openssl", "3.0.11-1", "openssl")),
-		snapshot, ustalenia, 6*time.Hour, teraz)
+	evaluation := Evaluate(debianInput(debPackage("openssl", "3.0.11-1", "openssl")),
+		snapshot, advisories, 6*time.Hour, now)
 
-	// Dane sprzed dwoch dob sa lepsze niz ich brak, ale operator ma wiedziec,
-	// ze patrzy na wczorajszy obraz.
-	if ocena.Stan.CoverageReason != RodzajFeedNieswiezy {
-		t.Fatalf("powod pokrycia = %q", ocena.Stan.CoverageReason)
+	// Data from two days ago are better than none, but the operator is to
+	// know they are looking at yesterday's picture.
+	if evaluation.State.CoverageReason != ReasonFeedStale {
+		t.Fatalf("coverage reason = %q", evaluation.State.CoverageReason)
 	}
-	if ocena.Stan.Affected != 1 {
-		t.Fatalf("ocena nieswiezym feedem nie wykryla podatnosci: %+v", ocena.Stan)
+	if evaluation.State.Affected != 1 {
+		t.Fatalf("an assessment with a stale feed found no vulnerability: %+v", evaluation.State)
 	}
 }
 
-func TestOcenaRozstrzygaWersjaProducenta(t *testing.T) {
-	ustalenia := map[string][]Advisory{
+func TestTheVendorVersionSettlesTheAssessment(t *testing.T) {
+	advisories := map[string][]Advisory{
 		"openssl": {{
 			Provider: "debian", AdvisoryID: "CVE-2026-1000", CVEIDs: []string{"CVE-2026-1000"},
 			Distribution: "debian", Release: "trixie", SourcePackage: "openssl",
-			FixedVersion: "3.0.11-1~deb13u2", Status: StatusNaprawione, VendorSeverity: "high",
+			FixedVersion: "3.0.11-1~deb13u2", Status: StatusFixed, VendorSeverity: "high",
 		}},
 	}
 
-	// Wersja z poprawka backportowana wyglada wedlug numeracji upstream tak
-	// samo jak podatna - i tylko regula dystrybucji je rozroznia.
-	podatny := Ocen(wejscieDebiana(pakietDeb("openssl", "3.0.11-1~deb13u1", "openssl")),
-		snapshotDebiana("trixie"), ustalenia, 6*time.Hour, teraz)
-	if podatny.Stan.Affected != 1 || len(podatny.Findings) != 1 {
-		t.Fatalf("host z podatna wersja: %+v", podatny.Stan)
+	// A version with a backported fix looks by the upstream numbering exactly
+	// like a vulnerable one - and only the rule of the distribution tells
+	// them apart.
+	vulnerable := Evaluate(debianInput(debPackage("openssl", "3.0.11-1~deb13u1", "openssl")),
+		debianSnapshot("trixie"), advisories, 6*time.Hour, now)
+	if vulnerable.State.Affected != 1 || len(vulnerable.Findings) != 1 {
+		t.Fatalf("a host with a vulnerable version: %+v", vulnerable.State)
 	}
-	if podatny.Findings[0].State != StateAffected {
-		t.Fatalf("stan = %q", podatny.Findings[0].State)
+	if vulnerable.Findings[0].State != StateAffected {
+		t.Fatalf("state = %q", vulnerable.Findings[0].State)
 	}
-	if podatny.Findings[0].ComparatorVersion != WersjaKomparatora {
-		t.Error("ustalenie nie mowi, ktora regula porownania je rozstrzygnela")
+	if vulnerable.Findings[0].ComparatorVersion != ComparatorRule {
+		t.Error("the finding does not say which comparison rule settled it")
 	}
 
-	naprawiony := Ocen(wejscieDebiana(pakietDeb("openssl", "3.0.11-1~deb13u2", "openssl")),
-		snapshotDebiana("trixie"), ustalenia, 6*time.Hour, teraz)
-	if naprawiony.Stan.Affected != 0 || len(naprawiony.Findings) != 0 {
-		t.Fatalf("host z wersja naprawiona: %+v", naprawiony)
+	fixed := Evaluate(debianInput(debPackage("openssl", "3.0.11-1~deb13u2", "openssl")),
+		debianSnapshot("trixie"), advisories, 6*time.Hour, now)
+	if fixed.State.Affected != 0 || len(fixed.Findings) != 0 {
+		t.Fatalf("a host with the fixed version: %+v", fixed)
 	}
-	// Pakiet nie dotyczy oceny - ale nadal jest objety feedem.
-	if naprawiony.Stan.PackagesCovered != 1 {
-		t.Fatalf("pokrycie = %d", naprawiony.Stan.PackagesCovered)
+	// The package does not concern the assessment - but it is still covered
+	// by the feed.
+	if fixed.State.PackagesCovered != 1 {
+		t.Fatalf("coverage = %d", fixed.State.PackagesCovered)
 	}
 }
 
-func TestStatusyProducentaMajaOsobneZnaczenia(t *testing.T) {
-	przypadki := map[string]struct {
-		status   string
-		stan     AssessmentState
-		powod    string
-		poprawka VendorFixState
-		kandydat RepositoryCandidateState
+func TestTheVendorStatusesHaveSeparateMeanings(t *testing.T) {
+	cases := map[string]struct {
+		status    string
+		state     AssessmentState
+		reason    string
+		fix       VendorFixState
+		candidate RepositoryCandidateState
 	}{
-		"nie dotyczy": {StatusNieDotyczy, StateNotAffected, "",
+		"not affected": {StatusNotAffected, StateNotAffected, "",
 			VendorFixUnknown, CandidateUnknown},
-		"badane": {StatusBadane, StateUnknown, RodzajProducentBada,
+		"under investigation": {StatusUnderInvestigation, StateUnknown, ReasonVendorInvestigating,
 			VendorFixUnknown, CandidateUnknown},
-		"otwarte bez poprawki": {StatusOtwarte, StateAffected, "",
+		"open without a fix": {StatusOpen, StateAffected, "",
 			VendorFixUnavailable, CandidateAbsent},
-		"odroczone": {StatusOdroczone, StateAffected, "",
+		"deferred": {StatusDeferred, StateAffected, "",
 			VendorFixUnavailable, CandidateAbsent},
 	}
-	for nazwa, przypadek := range przypadki {
-		ustalenia := map[string][]Advisory{
+	for name, c := range cases {
+		advisories := map[string][]Advisory{
 			"openssl": {{
 				Provider: "debian", AdvisoryID: "CVE-2026-2000", Distribution: "debian",
-				Release: "trixie", SourcePackage: "openssl", Status: przypadek.status,
+				Release: "trixie", SourcePackage: "openssl", Status: c.status,
 			}},
 		}
-		ocena := Ocen(wejscieDebiana(pakietDeb("openssl", "3.0.11-1", "openssl")),
-			snapshotDebiana("trixie"), ustalenia, 6*time.Hour, teraz)
-		if przypadek.stan == StateNotAffected {
-			if len(ocena.Findings) != 0 {
-				t.Errorf("%s: ustalenie 'nie dotyczy' trafilo na liste", nazwa)
+		evaluation := Evaluate(debianInput(debPackage("openssl", "3.0.11-1", "openssl")),
+			debianSnapshot("trixie"), advisories, 6*time.Hour, now)
+		if c.state == StateNotAffected {
+			if len(evaluation.Findings) != 0 {
+				t.Errorf("%s: a 'not affected' finding landed on the list", name)
 			}
 			continue
 		}
-		if len(ocena.Findings) != 1 {
-			t.Fatalf("%s: %d ustalen", nazwa, len(ocena.Findings))
+		if len(evaluation.Findings) != 1 {
+			t.Fatalf("%s: %d findings", name, len(evaluation.Findings))
 		}
-		ustalenie := ocena.Findings[0]
-		if ustalenie.State != przypadek.stan {
-			t.Errorf("%s: stan = %q", nazwa, ustalenie.State)
+		finding := evaluation.Findings[0]
+		if finding.State != c.state {
+			t.Errorf("%s: state = %q", name, finding.State)
 		}
-		if ustalenie.ReasonCode != przypadek.powod {
-			t.Errorf("%s: powod = %q, oczekiwano %q", nazwa, ustalenie.ReasonCode, przypadek.powod)
+		if finding.ReasonCode != c.reason {
+			t.Errorf("%s: reason = %q, expected %q", name, finding.ReasonCode, c.reason)
 		}
-		if ustalenie.State == StateUnknown && ustalenie.ReasonCode == "" {
-			t.Errorf("%s: stan nieustalony bez kodu powodu", nazwa)
+		if finding.State == StateUnknown && finding.ReasonCode == "" {
+			t.Errorf("%s: an undetermined state without a reason code", name)
 		}
-		if ustalenie.VendorFix != przypadek.poprawka {
-			t.Errorf("%s: poprawka producenta = %q", nazwa, ustalenie.VendorFix)
+		if finding.VendorFix != c.fix {
+			t.Errorf("%s: vendor fix = %q", name, finding.VendorFix)
 		}
-		if ustalenie.RepositoryCandidate != przypadek.kandydat {
-			t.Errorf("%s: kandydat w repozytoriach = %q", nazwa, ustalenie.RepositoryCandidate)
+		if finding.RepositoryCandidate != c.candidate {
+			t.Errorf("%s: candidate in the repositories = %q", name, finding.RepositoryCandidate)
 		}
-		// Czy transakcje da sie wykonac, wie wylacznie plan pakietowy hosta.
-		// Panel nie ma prawa tego obiecywac z samego advisory.
-		if ustalenie.Transaction != TransactionUnknown {
-			t.Errorf("%s: transakcja = %q, a planu nikt nie liczyl",
-				nazwa, ustalenie.Transaction)
+		// Only the package plan of the host knows whether the transaction can
+		// be carried out. The panel has no right to promise that from an
+		// advisory alone.
+		if finding.Transaction != TransactionUnknown {
+			t.Errorf("%s: transaction = %q, and nobody computed a plan",
+				name, finding.Transaction)
 		}
 	}
 }
 
-func TestPakietSpozaDystrybucjiJestNieznany(t *testing.T) {
-	// RPM przebudowany lokalnie albo z obcego repozytorium ma wersje, ktorej
-	// producent nie zna. Udawanie, ze jego ustalenia tego dotycza, dawaloby
-	// falszywe "bezpieczny".
-	wlasny := packages.InstalledPackage{
+func TestAPackageFromOutsideTheDistributionIsUnknown(t *testing.T) {
+	// An RPM rebuilt locally or taken from a foreign repository has a version
+	// the vendor does not know. Pretending its findings apply to it would
+	// give a false "safe".
+	own := packages.InstalledPackage{
 		Name: "docker-ce", Version: "27.1.1", Release: "1.fc42", Architecture: "x86_64",
 		SourceName: "docker-ce", Vendor: "Docker Inc.",
 	}
-	fedorowy := packages.InstalledPackage{
+	fromFedora := packages.InstalledPackage{
 		Name: "openssl", Epoch: "1", Version: "3.2.6", Release: "4.fc42",
 		Architecture: "x86_64", SourceName: "openssl", Vendor: "Fedora Project",
 	}
-	wejscie := Wejscie{
+	input := Input{
 		HostID: "host-2", Distribution: "fedora", Release: "42",
-		Packages: []packages.InstalledPackage{wlasny, fedorowy}, InventoryDigest: "lista-2",
+		Packages: []packages.InstalledPackage{own, fromFedora}, InventoryDigest: "list-2",
 	}
 	snapshot := Snapshot{Provider: "fedora", Digest: "f1", Releases: []string{"42"},
-		FetchedAt: teraz.Add(-time.Hour)}
+		FetchedAt: now.Add(-time.Hour)}
 
-	ocena := Ocen(wejscie, snapshot, nil, 6*time.Hour, teraz)
-	if ocena.Stan.PackagesCovered != 1 {
-		t.Fatalf("pokrycie = %d z %d", ocena.Stan.PackagesCovered, ocena.Stan.PackagesTotal)
+	evaluation := Evaluate(input, snapshot, nil, 6*time.Hour, now)
+	if evaluation.State.PackagesCovered != 1 {
+		t.Fatalf("coverage = %d of %d", evaluation.State.PackagesCovered, evaluation.State.PackagesTotal)
 	}
-	if len(ocena.Findings) != 1 || ocena.Findings[0].BinaryPackage != "docker-ce" {
-		t.Fatalf("ustalenia = %+v", ocena.Findings)
+	if len(evaluation.Findings) != 1 || evaluation.Findings[0].BinaryPackage != "docker-ce" {
+		t.Fatalf("findings = %+v", evaluation.Findings)
 	}
-	if ocena.Findings[0].ReasonCode != RodzajPochodzenieNieznane {
-		t.Errorf("powod = %q", ocena.Findings[0].ReasonCode)
+	if evaluation.Findings[0].ReasonCode != ReasonPackageOriginUnknown {
+		t.Errorf("reason = %q", evaluation.Findings[0].ReasonCode)
 	}
-	if ocena.Stan.Unknown != 1 {
-		t.Errorf("licznik nieustalonych = %d", ocena.Stan.Unknown)
+	if evaluation.State.Unknown != 1 {
+		t.Errorf("counter of undetermined findings = %d", evaluation.State.Unknown)
 	}
 }
 
-func TestOcenaRPMUwzgledniaEpoke(t *testing.T) {
-	// Bez epoki "3.2.6" i "1:3.2.6" wygladaja tak samo, a znacza co innego.
-	pakiet := packages.InstalledPackage{
+func TestAnRPMAssessmentTakesTheEpochIntoAccount(t *testing.T) {
+	// Without the epoch "3.2.6" and "1:3.2.6" look the same and mean
+	// different things.
+	pkg := packages.InstalledPackage{
 		Name: "openssl", Epoch: "1", Version: "3.2.6", Release: "4.fc42",
 		Architecture: "x86_64", SourceName: "openssl", Vendor: "Fedora Project",
 	}
-	ustalenia := map[string][]Advisory{
+	advisories := map[string][]Advisory{
 		"openssl": {{
 			Provider: "fedora", AdvisoryID: "FEDORA-2026-abc", Distribution: "fedora",
 			Release: "42", SourcePackage: "openssl", FixedVersion: "1:3.2.7-1.fc42",
-			Status: StatusNaprawione, VendorSeverity: "important",
+			Status: StatusFixed, VendorSeverity: "important",
 		}},
 	}
-	wejscie := Wejscie{
+	input := Input{
 		HostID: "host-3", Distribution: "fedora", Release: "42",
-		Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-3",
+		Packages: []packages.InstalledPackage{pkg}, InventoryDigest: "list-3",
 	}
 	snapshot := Snapshot{Provider: "fedora", Digest: "f1", Releases: []string{"42"},
-		FetchedAt: teraz.Add(-time.Hour)}
+		FetchedAt: now.Add(-time.Hour)}
 
-	ocena := Ocen(wejscie, snapshot, ustalenia, 6*time.Hour, teraz)
-	if ocena.Stan.Affected != 1 {
-		t.Fatalf("stan = %+v", ocena.Stan)
+	evaluation := Evaluate(input, snapshot, advisories, 6*time.Hour, now)
+	if evaluation.State.Affected != 1 {
+		t.Fatalf("state = %+v", evaluation.State)
 	}
-	if ocena.Findings[0].InstalledVersion != "1:3.2.6-4.fc42" {
-		t.Fatalf("wersja zainstalowana = %q", ocena.Findings[0].InstalledVersion)
+	if evaluation.Findings[0].InstalledVersion != "1:3.2.6-4.fc42" {
+		t.Fatalf("installed version = %q", evaluation.Findings[0].InstalledVersion)
 	}
 }
 
-func TestUstalenieDlaInnejArchitekturyNieDotyczyPakietu(t *testing.T) {
-	// Producent wydaje osobne pakiety dla kazdej architektury; ustalenie dla
-	// i686 nie naprawia pakietu x86_64 - a przypisane do niego dawaloby dwa
-	// ustalenia o tym samym pakiecie.
-	pakiet := packages.InstalledPackage{
+func TestAFindingForAnotherArchitectureDoesNotConcernThePackage(t *testing.T) {
+	// The vendor releases separate packages for every architecture; a finding
+	// for i686 does not fix the x86_64 package - and attached to it would give
+	// two findings about the same package.
+	pkg := packages.InstalledPackage{
 		Name: "openssh", Version: "9.9p1", Release: "13.fc42", Architecture: "x86_64",
 		SourceName: "openssh", Vendor: "Fedora Project",
 	}
-	ustalenia := map[string][]Advisory{
+	advisories := map[string][]Advisory{
 		"openssh": {
 			{Provider: "fedora", AdvisoryID: "FEDORA-2026-a", SourcePackage: "openssh",
 				BinaryPackage: "openssh", Architecture: "i686", FixedVersion: "9.9p1-14.fc42",
-				Status: StatusNaprawione, FromHostRepositories: true},
+				Status: StatusFixed, FromHostRepositories: true},
 			{Provider: "fedora", AdvisoryID: "FEDORA-2026-a", SourcePackage: "openssh",
 				BinaryPackage: "openssh", Architecture: "x86_64", FixedVersion: "9.9p1-14.fc42",
-				Status: StatusNaprawione, FromHostRepositories: true},
+				Status: StatusFixed, FromHostRepositories: true},
 		},
 	}
-	wejscie := Wejscie{
+	input := Input{
 		HostID: "host-4", Distribution: "fedora", Release: "42",
-		Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-4",
+		Packages: []packages.InstalledPackage{pkg}, InventoryDigest: "list-4",
 	}
 	snapshot := Snapshot{Provider: "fedora", Digest: "f1", Releases: []string{"42"},
-		FetchedAt: teraz.Add(-time.Hour)}
+		FetchedAt: now.Add(-time.Hour)}
 
-	ocena := Ocen(wejscie, snapshot, ustalenia, 6*time.Hour, teraz)
-	if len(ocena.Findings) != 1 {
-		t.Fatalf("odczytano %d ustalen: %+v", len(ocena.Findings), ocena.Findings)
+	evaluation := Evaluate(input, snapshot, advisories, 6*time.Hour, now)
+	if len(evaluation.Findings) != 1 {
+		t.Fatalf("read %d findings: %+v", len(evaluation.Findings), evaluation.Findings)
 	}
-	// Ustalenie z metadanych hosta znaczy, ze producent wydal poprawke i ze
-	// lezy ona w repozytorium, z ktorego host bierze pakiety. Czy transakcja
-	// przejdzie, to trzecie pytanie - i odpowiada na nie plan pakietowy.
-	znalezisko := ocena.Findings[0]
-	if znalezisko.VendorFix != VendorFixKnown {
-		t.Errorf("poprawka producenta = %q", znalezisko.VendorFix)
+	// A finding from the metadata of the host means the vendor released a fix
+	// and that it lies in a repository the host takes packages from. Whether
+	// the transaction goes through is a third question - and the package plan
+	// answers it.
+	finding := evaluation.Findings[0]
+	if finding.VendorFix != VendorFixKnown {
+		t.Errorf("vendor fix = %q", finding.VendorFix)
 	}
-	if znalezisko.RepositoryCandidate != CandidateVisible {
-		t.Errorf("kandydat w repozytoriach = %q", znalezisko.RepositoryCandidate)
+	if finding.RepositoryCandidate != CandidateVisible {
+		t.Errorf("candidate in the repositories = %q", finding.RepositoryCandidate)
 	}
-	if znalezisko.Transaction != TransactionUnknown {
-		t.Errorf("transakcja = %q, a planu nikt nie liczyl", znalezisko.Transaction)
+	if finding.Transaction != TransactionUnknown {
+		t.Errorf("transaction = %q, and nobody computed a plan", finding.Transaction)
 	}
 }
 
-// TestDebianPorownujeWersjeZrodlowa pilnuje reguly, ktora dla Debiana
-// rozstrzyga o poprawnosci calej oceny.
+// TestDebianComparesTheSourceVersion guards the rule that settles the
+// correctness of the whole assessment for Debian.
 //
-// Tracker mowi o pakiecie zrodlowym i podaje jego wersje. Wersja binarna bywa
-// z zupelnie innej numeracji: metapakiet "gcc" ze zrodla "gcc-defaults" ma
-// wersje kompilatora, na ktory wskazuje, a nie wersje swojego zrodla.
-// Porownanie binarnej z ustaleniem zrodlowym uznaje wtedy pakiet za naprawiony,
-// choc poprawki w nim nie ma - i to jest przeoczenie, nie falszywy alarm.
-func TestDebianPorownujeWersjeZrodlowa(t *testing.T) {
-	metapakiet := packages.InstalledPackage{
+// The tracker speaks about the source package and gives its version. The
+// binary version is sometimes from an entirely different numbering: the
+// metapackage "gcc" from the source "gcc-defaults" carries the version of the
+// compiler it points at rather than the version of its own source. Comparing
+// the binary one against a source finding then calls the package fixed
+// although it does not carry the fix - and that is a miss, not a false alarm.
+func TestDebianComparesTheSourceVersion(t *testing.T) {
+	metapackage := packages.InstalledPackage{
 		Name: "gcc", Epoch: "4", Version: "12.2.0", Release: "3", Architecture: "amd64",
 		SourceName: "gcc-defaults", SourceVersion: "1.220",
-		Origin: "deb.debian.org", OriginClass: packages.PochodzenieDystrybucja,
+		Origin: "deb.debian.org", OriginClass: packages.OriginDistribution,
 	}
-	ustalenia := map[string][]Advisory{
+	advisories := map[string][]Advisory{
 		"gcc-defaults": {{
 			Provider: "debian", AdvisoryID: "CVE-2026-3000", CVEIDs: []string{"CVE-2026-3000"},
 			Distribution: "debian", Release: "trixie", SourcePackage: "gcc-defaults",
-			FixedVersion: "1.221", Status: StatusNaprawione, VendorSeverity: "high",
+			FixedVersion: "1.221", Status: StatusFixed, VendorSeverity: "high",
 		}},
 	}
-	wejscie := wejscieDebiana(metapakiet)
+	input := debianInput(metapackage)
 
-	ocena := Ocen(wejscie, snapshotDebiana("trixie"), ustalenia, 6*time.Hour, teraz)
-	if ocena.Stan.Affected != 1 {
-		t.Fatalf("wersja binarna przeslonila ustalenie zrodlowe: %+v", ocena.Stan)
+	evaluation := Evaluate(input, debianSnapshot("trixie"), advisories, 6*time.Hour, now)
+	if evaluation.State.Affected != 1 {
+		t.Fatalf("the binary version hid the source finding: %+v", evaluation.State)
 	}
-	znalezisko := ocena.Findings[0]
-	if znalezisko.ComparisonVersion != "1.220" || znalezisko.ComparisonBasis != PodstawaZrodlowa {
-		t.Errorf("porownano %q na podstawie %q",
-			znalezisko.ComparisonVersion, znalezisko.ComparisonBasis)
+	finding := evaluation.Findings[0]
+	if finding.ComparisonVersion != "1.220" || finding.ComparisonBasis != BasisSource {
+		t.Errorf("compared %q on the basis of %q",
+			finding.ComparisonVersion, finding.ComparisonBasis)
 	}
-	// Operator widzi na hoscie wersje binarna i ona tez musi byc zapisana.
-	if znalezisko.InstalledVersion != "4:12.2.0-3" {
-		t.Errorf("wersja zainstalowana = %q", znalezisko.InstalledVersion)
+	// The operator sees the binary version on the host and it has to be
+	// written down as well.
+	if finding.InstalledVersion != "4:12.2.0-3" {
+		t.Errorf("installed version = %q", finding.InstalledVersion)
 	}
 
-	// Bez wersji zrodlowej porownujemy binarna i mowimy o tym wprost: to jest
-	// przyblizenie, a nie ta sama odpowiedz.
-	bezZrodla := metapakiet
-	bezZrodla.SourceVersion = ""
-	przyblizona := Ocen(wejscieDebiana(bezZrodla), snapshotDebiana("trixie"),
-		ustalenia, 6*time.Hour, teraz)
-	if len(przyblizona.Findings) != 0 {
-		t.Fatalf("porownanie binarne mialo dac inna odpowiedz: %+v", przyblizona.Findings)
+	// Without the source version we compare the binary one and say so
+	// outright: this is an approximation rather than the same answer.
+	withoutSource := metapackage
+	withoutSource.SourceVersion = ""
+	approximate := Evaluate(debianInput(withoutSource), debianSnapshot("trixie"),
+		advisories, 6*time.Hour, now)
+	if len(approximate.Findings) != 0 {
+		t.Fatalf("the binary comparison was to give a different answer: %+v", approximate.Findings)
 	}
 }
 
-// TestPakietAPTZObcegoRepozytoriumJestNieznany pilnuje, zeby pokrycie liczylo
-// tylko pakiety, o ktorych producent dystrybucji ma prawo cokolwiek mowic.
-func TestPakietAPTZObcegoRepozytoriumJestNieznany(t *testing.T) {
-	przypadki := map[string]struct {
-		klasa string
-		powod string
+// TestAnAPTPackageFromAForeignRepositoryIsUnknown guards that the coverage
+// counts only the packages the distribution vendor has any right to speak
+// about.
+func TestAnAPTPackageFromAForeignRepositoryIsUnknown(t *testing.T) {
+	cases := map[string]struct {
+		class  string
+		reason string
 	}{
-		"obce repozytorium":    {packages.PochodzenieObce, RodzajPochodzenieNieznane},
-		"pakiet lokalny":       {packages.PochodzenieLokalne, RodzajPochodzenieNieznane},
-		"pochodzenie nieznane": {packages.PochodzenieNieznane, RodzajPochodzenieNieznane},
+		"a foreign repository": {packages.OriginThirdParty, ReasonPackageOriginUnknown},
+		"a local package":      {packages.OriginLocal, ReasonPackageOriginUnknown},
+		"an unknown origin":    {packages.OriginUnknown, ReasonPackageOriginUnknown},
 	}
-	for nazwa, przypadek := range przypadki {
-		pakiet := pakietDeb("nginx", "1.27.0-1", "nginx")
-		pakiet.OriginClass = przypadek.klasa
-		pakiet.Origin = "nginx.org"
-		ocena := Ocen(wejscieDebiana(pakiet), snapshotDebiana("trixie"), nil, 6*time.Hour, teraz)
-		if ocena.Stan.PackagesCovered != 0 {
-			t.Errorf("%s: pokrycie = %d", nazwa, ocena.Stan.PackagesCovered)
+	for name, c := range cases {
+		pkg := debPackage("nginx", "1.27.0-1", "nginx")
+		pkg.OriginClass = c.class
+		pkg.Origin = "nginx.org"
+		evaluation := Evaluate(debianInput(pkg), debianSnapshot("trixie"), nil, 6*time.Hour, now)
+		if evaluation.State.PackagesCovered != 0 {
+			t.Errorf("%s: coverage = %d", name, evaluation.State.PackagesCovered)
 		}
-		if len(ocena.Findings) != 1 || ocena.Findings[0].ReasonCode != przypadek.powod {
-			t.Fatalf("%s: ustalenia = %+v", nazwa, ocena.Findings)
+		if len(evaluation.Findings) != 1 || evaluation.Findings[0].ReasonCode != c.reason {
+			t.Fatalf("%s: findings = %+v", name, evaluation.Findings)
 		}
-		if ocena.Findings[0].PackageOrigin != przypadek.klasa {
-			t.Errorf("%s: pochodzenie = %q", nazwa, ocena.Findings[0].PackageOrigin)
+		if evaluation.Findings[0].PackageOrigin != c.class {
+			t.Errorf("%s: origin = %q", name, evaluation.Findings[0].PackageOrigin)
 		}
-		// Host z pakietem nieustalonym nie ma oceny pelnej, choc nic jej nie
-		// zablokowalo.
-		if ocena.Stan.PelnaOcena() {
-			t.Errorf("%s: ocena z pakietem nieustalonym uznana za pelna", nazwa)
+		// A host with an undetermined package has no full assessment even
+		// though nothing blocked it.
+		if evaluation.State.FullAssessment() {
+			t.Errorf("%s: an assessment with an undetermined package was called full", name)
 		}
 	}
 }
 
-// TestPelnaOcenaWymagaPelnegoPokrycia pilnuje, zeby "wszystko sprawdzone"
-// znaczylo wszystko, a nie "nic nie przeszkodzilo".
-func TestPelnaOcenaWymagaPelnegoPokrycia(t *testing.T) {
-	pelna := Ocen(wejscieDebiana(pakietDeb("openssl", "3.0.11-1", "openssl")),
-		snapshotDebiana("trixie"), nil, 6*time.Hour, teraz)
-	if !pelna.Stan.PelnaOcena() {
-		t.Fatalf("ocena bez przeszkod nie uznana za pelna: %+v", pelna.Stan)
+// TestAFullAssessmentRequiresFullCoverage guards that "everything checked"
+// means everything rather than "nothing got in the way".
+func TestAFullAssessmentRequiresFullCoverage(t *testing.T) {
+	full := Evaluate(debianInput(debPackage("openssl", "3.0.11-1", "openssl")),
+		debianSnapshot("trixie"), nil, 6*time.Hour, now)
+	if !full.State.FullAssessment() {
+		t.Fatalf("an assessment without obstacles was not called full: %+v", full.State)
 	}
 
-	// Host, ktorego jeszcze nie oceniono, nie ma oceny pelnej.
-	if (StanHosta{}).PelnaOcena() {
-		t.Error("host bez oceny uznany za w pelni oceniony")
+	// A host that has not been assessed yet has no full assessment.
+	if (HostState{}).FullAssessment() {
+		t.Error("a host without an assessment was called fully assessed")
 	}
-	// Host bez ani jednego pakietu tez nie: to nie jest host czysty.
-	pusta := StanHosta{EvaluatedAt: &teraz}
-	if pusta.PelnaOcena() {
-		t.Error("host bez pakietow uznany za w pelni oceniony")
+	// Neither does a host without a single package: that is not a clean host.
+	empty := HostState{EvaluatedAt: &now}
+	if empty.FullAssessment() {
+		t.Error("a host without packages was called fully assessed")
 	}
 }
 
-// TestUstaleniaHostaMajaWlasnyPowodBraku pilnuje, zeby nieodczytane metadane
-// repozytoriow nie wygladaly jak host bez ustalen producenta.
-func TestUstaleniaHostaMajaWlasnyPowodBraku(t *testing.T) {
-	pakiet := packages.InstalledPackage{
+// TestTheFindingsOfAHostHaveTheirOwnReasonForBeingMissing guards that unread
+// repository metadata do not look like a host without vendor findings.
+func TestTheFindingsOfAHostHaveTheirOwnReasonForBeingMissing(t *testing.T) {
+	pkg := packages.InstalledPackage{
 		Name: "openssl", Epoch: "1", Version: "3.2.6", Release: "4.fc42",
 		Architecture: "x86_64", SourceName: "openssl", Vendor: "Fedora Project",
 	}
-	for _, powod := range []string{RodzajBrakUstalen, RodzajUstaleniaNieczytelne} {
-		wejscie := Wejscie{
+	for _, reason := range []string{ReasonHostAdvisoriesMissing, ReasonHostAdvisoriesUnreadable} {
+		input := Input{
 			HostID: "host-5", Distribution: "fedora", Release: "42",
-			Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-5",
-			AdvisoriesReason: powod,
+			Packages: []packages.InstalledPackage{pkg}, InventoryDigest: "list-5",
+			AdvisoriesReason: reason,
 		}
 		snapshot := Snapshot{Provider: "fedora", Digest: "", Releases: []string{"42"}}
-		ocena := Ocen(wejscie, snapshot, nil, 6*time.Hour, teraz)
-		if ocena.Stan.CoverageReason != powod {
-			t.Errorf("powod pokrycia = %q, oczekiwano %q", ocena.Stan.CoverageReason, powod)
+		evaluation := Evaluate(input, snapshot, nil, 6*time.Hour, now)
+		if evaluation.State.CoverageReason != reason {
+			t.Errorf("coverage reason = %q, expected %q", evaluation.State.CoverageReason, reason)
 		}
-		if ocena.Stan.AdvisoriesReason != powod {
-			t.Errorf("powod ustalen = %q", ocena.Stan.AdvisoriesReason)
+		if evaluation.State.AdvisoriesReason != reason {
+			t.Errorf("reason for the findings = %q", evaluation.State.AdvisoriesReason)
 		}
 	}
 
-	// Ustalenia stare nie zatrzymuja oceny - tak samo jak nieswiezy feed.
-	wejscie := Wejscie{
+	// Old findings do not stop the assessment - just like a stale feed.
+	input := Input{
 		HostID: "host-5", Distribution: "fedora", Release: "42",
-		Packages: []packages.InstalledPackage{pakiet}, InventoryDigest: "lista-5",
-		AdvisoriesReason: RodzajUstaleniaNieswieze, AdvisoryDigest: "u1",
+		Packages: []packages.InstalledPackage{pkg}, InventoryDigest: "list-5",
+		AdvisoriesReason: ReasonHostAdvisoriesStale, AdvisoryDigest: "a1",
 	}
-	ustalenia := map[string][]Advisory{
+	advisories := map[string][]Advisory{
 		"openssl": {{
 			Provider: "fedora", AdvisoryID: "FEDORA-2026-abc", Distribution: "fedora",
 			Release: "42", SourcePackage: "openssl", FixedVersion: "1:3.2.7-1.fc42",
-			Status: StatusNaprawione, FromHostRepositories: true,
+			Status: StatusFixed, FromHostRepositories: true,
 		}},
 	}
-	snapshot := Snapshot{Provider: "fedora", Digest: "u1", Releases: []string{"42"},
-		FetchedAt: teraz.Add(-time.Hour)}
-	ocena := Ocen(wejscie, snapshot, ustalenia, 6*time.Hour, teraz)
-	if ocena.Stan.Affected != 1 {
-		t.Fatalf("stare ustalenia zatrzymaly ocene: %+v", ocena.Stan)
+	snapshot := Snapshot{Provider: "fedora", Digest: "a1", Releases: []string{"42"},
+		FetchedAt: now.Add(-time.Hour)}
+	evaluation := Evaluate(input, snapshot, advisories, 6*time.Hour, now)
+	if evaluation.State.Affected != 1 {
+		t.Fatalf("old findings stopped the assessment: %+v", evaluation.State)
 	}
-	if ocena.Stan.CoverageReason != RodzajUstaleniaNieswieze {
-		t.Errorf("powod pokrycia = %q", ocena.Stan.CoverageReason)
+	if evaluation.State.CoverageReason != ReasonHostAdvisoriesStale {
+		t.Errorf("coverage reason = %q", evaluation.State.CoverageReason)
 	}
-	if ocena.Findings[0].AdvisoryDigest != "u1" {
-		t.Error("ustalenie nie mowi, ktory zestaw ustalen je rozstrzygnal")
+	if evaluation.Findings[0].AdvisoryDigest != "a1" {
+		t.Error("the finding does not say which set of findings settled it")
 	}
 }
 
-// TestLicznikiUnikatowSaOsobne pilnuje, zeby jedna liczba nie udawala
-// odpowiedzi na cztery rozne pytania.
-func TestLicznikiUnikatowSaOsobne(t *testing.T) {
-	openssl := pakietDeb("openssl", "3.0.11-1", "openssl")
-	libssl := pakietDeb("libssl3", "3.0.11-1", "openssl")
-	ustalenia := map[string][]Advisory{
+// TestTheUniqueCountersAreSeparate guards that one number does not pretend to
+// answer four different questions.
+func TestTheUniqueCountersAreSeparate(t *testing.T) {
+	openssl := debPackage("openssl", "3.0.11-1", "openssl")
+	libssl := debPackage("libssl3", "3.0.11-1", "openssl")
+	advisories := map[string][]Advisory{
 		"openssl": {
 			{Provider: "debian", AdvisoryID: "DSA-5000", CVEIDs: []string{"CVE-2026-1", "CVE-2026-2"},
 				Distribution: "debian", Release: "trixie", SourcePackage: "openssl",
-				FixedVersion: "3.0.12-1", Status: StatusNaprawione},
+				FixedVersion: "3.0.12-1", Status: StatusFixed},
 			{Provider: "debian", AdvisoryID: "DSA-5001", CVEIDs: []string{"CVE-2026-2"},
 				Distribution: "debian", Release: "trixie", SourcePackage: "openssl",
-				FixedVersion: "3.0.13-1", Status: StatusNaprawione},
+				FixedVersion: "3.0.13-1", Status: StatusFixed},
 		},
 	}
-	ocena := Ocen(wejscieDebiana(openssl, libssl), snapshotDebiana("trixie"),
-		ustalenia, 6*time.Hour, teraz)
+	evaluation := Evaluate(debianInput(openssl, libssl), debianSnapshot("trixie"),
+		advisories, 6*time.Hour, now)
 
-	// Dwa pakiety binarne razy dwa ustalenia daja cztery znaleziska - ale to
-	// sa dwie sprawy producenta, dwa CVE i dwie instancje pakietow.
-	if ocena.Stan.Affected != 4 {
-		t.Fatalf("znalezisk = %d", ocena.Stan.Affected)
+	// Two binary packages times two findings give four findings - but these
+	// are two matters of the vendor, two CVEs and two package instances.
+	if evaluation.State.Affected != 4 {
+		t.Fatalf("findings = %d", evaluation.State.Affected)
 	}
-	if ocena.Stan.AffectedPackages != 2 {
-		t.Errorf("instancji pakietow = %d", ocena.Stan.AffectedPackages)
+	if evaluation.State.AffectedPackages != 2 {
+		t.Errorf("package instances = %d", evaluation.State.AffectedPackages)
 	}
-	if ocena.Stan.UniqueAdvisories != 2 {
-		t.Errorf("spraw producenta = %d", ocena.Stan.UniqueAdvisories)
+	if evaluation.State.UniqueAdvisories != 2 {
+		t.Errorf("matters of the vendor = %d", evaluation.State.UniqueAdvisories)
 	}
-	if ocena.Stan.UniqueCVEs != 2 {
-		t.Errorf("roznych CVE = %d", ocena.Stan.UniqueCVEs)
+	if evaluation.State.UniqueCVEs != 2 {
+		t.Errorf("distinct CVEs = %d", evaluation.State.UniqueCVEs)
 	}
 }

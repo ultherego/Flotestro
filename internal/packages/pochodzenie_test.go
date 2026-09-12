@@ -56,15 +56,15 @@ nieobecny:
 	wynik := ParsujPolicyAPT(wyjscie)
 
 	oczekiwane := map[string]WpisPochodzenia{
-		"openssl":      {Origin: "http://deb.debian.org/debian", Class: PochodzenieDystrybucja},
-		"nginx":        {Origin: "http://nginx.org/packages/debian", Class: PochodzenieObce},
-		"wlasny-agent": {Origin: "/var/lib/dpkg/status", Class: PochodzenieLokalne},
+		"openssl":      {Origin: "http://deb.debian.org/debian", Class: OriginDistribution},
+		"nginx":        {Origin: "http://nginx.org/packages/debian", Class: OriginThirdParty},
+		"wlasny-agent": {Origin: "/var/lib/dpkg/status", Class: OriginLocal},
 		// Wersja wycofana z repozytorium wyglada w policy tak samo jak pakiet
 		// zbudowany lokalnie - a to jest stare jadro, ktore lezy na dysku po
 		// aktualizacji. Wypchniete poza pokrycie ukrywaloby dokladnie te
 		// podatnosci, ktore najbardziej trzeba widziec.
 		"linux-image-amd64": {Origin: "http://deb.debian.org/debian",
-			Class: PochodzenieDystrybucja},
+			Class: OriginDistribution},
 	}
 	for nazwa, chciane := range oczekiwane {
 		if wynik[nazwa] != chciane {
@@ -79,7 +79,7 @@ nieobecny:
 	// Pakiet, ktorego zadnej wersji nie ma juz w repozytoriach, zostaje
 	// lokalny: nie ma po czym poznac, skad przyszedl.
 	wersjonowane := wynik["linux-image-6.12.43+deb13-amd64"]
-	if wersjonowane.Class != PochodzenieLokalne {
+	if wersjonowane.Class != OriginLocal {
 		t.Errorf("pakiet bez ani jednego zrodla = %+v", wersjonowane)
 	}
 }
@@ -87,10 +87,10 @@ nieobecny:
 // TestBrakPochodzeniaJestNieznanym pilnuje, zeby nieodczytane pochodzenie
 // zostawalo nieznanym, a nie stawalo sie pakietem dystrybucji.
 func TestBrakPochodzeniaJestNieznanym(t *testing.T) {
-	if wpis := KlasaZrodlaAPT(""); wpis.Class != PochodzenieNieznane {
+	if wpis := KlasaZrodlaAPT(""); wpis.Class != OriginUnknown {
 		t.Errorf("pusty wiersz zrodla = %+v", wpis)
 	}
-	if wpis := KlasaZrodlaAPT("500 http://ppa.example.net/x ./ Packages"); wpis.Class != PochodzenieObce {
+	if wpis := KlasaZrodlaAPT("500 http://ppa.example.net/x ./ Packages"); wpis.Class != OriginThirdParty {
 		t.Errorf("obce repozytorium = %+v", wpis)
 	}
 }

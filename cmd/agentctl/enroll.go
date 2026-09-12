@@ -15,109 +15,113 @@ import (
 	"github.com/ultherego/flotestro/internal/agentconfig"
 )
 
-// poleceniaEnrollmentu przeprowadza jednorazowe przyjecie hosta do floty.
+// enrollmentCommand carries out the one-time admission of a host into the
+// fleet.
 //
-// Osobne polecenie, a nie skutek uboczny startu demona: enrollment jest
-// jednorazowa decyzja operatora i wymaga sekretu, ktory nie ma prawa lezec
-// w pliku srodowiska uslugi. Demon startuje dopiero wtedy, gdy tozsamosc juz
-// jest - i wtedy nie potrzebuje zadnego tokenu.
-func poleceniaEnrollmentu(argumenty []string, wejscie io.Reader, wyjscie, bledy io.Writer) int {
-	zestaw := flag.NewFlagSet("enroll", flag.ContinueOnError)
-	zestaw.SetOutput(bledy)
-	sciezka := zestaw.String("config", agentconfig.DefaultPath, "plik konfiguracji agenta")
-	plikTokenu := zestaw.String("token-file", "", "plik z tokenem enrollmentu")
-	nazwa := zestaw.String("hostname", "", "nazwa hosta zglaszana do panelu")
-	limit := zestaw.Duration("timeout", 2*time.Minute, "limit czasu na enrollment")
-	if err := zestaw.Parse(argumenty); err != nil {
+// A separate command rather than a side effect of the start of the daemon:
+// enrollment is a one-time decision of the operator and requires a secret
+// that has no right to lie in the environment file of a service. The daemon
+// starts only once the identity is there - and then it needs no token at
+// all.
+func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int {
+	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
+	flags.SetOutput(errOut)
+	path := flags.String("config", agentconfig.DefaultPath, "the configuration file of the agent")
+	tokenFile := flags.String("token-file", "", "the file with the enrollment token")
+	name := flags.String("hostname", "", "the name of the host reported to the panel")
+	timeout := flags.Duration("timeout", 2*time.Minute, "the time timeout for the enrollment")
+	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 
-	cfg, err := agentconfig.Load(*sciezka)
+	cfg, err := agentconfig.Load(*path)
 	if err != nil {
-		fmt.Fprintf(bledy, "config: %s\n  %v\n", *sciezka, err)
+		fmt.Fprintf(errOut, "config: %s\n  %v\n", *path, err)
 		return 1
 	}
 	if err := cfg.CheckBootstrapCA(); err != nil {
-		fmt.Fprintf(bledy, "bootstrap_ca_file: %v\n", err)
+		fmt.Fprintf(errOut, "bootstrap_ca_file: %v\n", err)
 		return 1
 	}
 
-	// Identity, ktora juz dziala, nie moze zostac zastapiona przy okazji.
-	// Wymiana istniejacej tozsamosci jest osobna decyzja i idzie przez
-	// zamowienie odtworzenia w panelu.
-	stan := agent.OdczytajTozsamosc(cfg.Agent.StateDir)
-	if stan.Obecna && !stan.Wygasl {
-		fmt.Fprintf(bledy, "host jest juz zarejestrowany jako host/%s (certyfikat wazny do %s)\n",
-			stan.HostID, stan.NotAfter.UTC().Format(time.RFC3339))
-		fmt.Fprintln(bledy, "wymiane tozsamosci zamawia sie w panelu: POST /hosts/{id}/identity-recovery")
+	// An identity that already works must not be replaced in passing.
+	// Replacing an existing identity is a separate decision and goes through
+	// a recovery request in the panel.
+	state := agent.OdczytajTozsamosc(cfg.Agent.StateDir)
+	if state.Obecna && !state.Wygasl {
+		fmt.Fprintf(errOut, "the host is already registered as host/%s (the certificate is valid until %s)\n",
+			state.HostID, state.NotAfter.UTC().Format(time.RFC3339))
+		fmt.Fprintln(errOut, "a replacement of the identity is requested in the panel: POST /hosts/{id}/identity-recovery")
 		return 1
 	}
 
-	token, err := odczytajToken(*plikTokenu, wejscie, bledy)
+	token, err := readToken(*tokenFile, in_, errOut)
 	if err != nil {
-		fmt.Fprintf(bledy, "token enrollmentu: %v\n", err)
+		fmt.Fprintf(errOut, "the enrollment token: %v\n", err)
 		return 1
 	}
-	defer wyczysc(token)
+	defer wipe(token)
 	if len(token) == 0 {
-		fmt.Fprintln(bledy, "token enrollmentu jest pusty")
+		fmt.Fprintln(errOut, "the enrollment token is empty")
 		return 1
 	}
 
-	ctx, anuluj := context.WithTimeout(context.Background(), *limit)
-	defer anuluj()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
 
-	if *nazwa == "" {
-		*nazwa, _ = os.Hostname()
+	if *name == "" {
+		*name, _ = os.Hostname()
 	}
-	tozsamosc, err := agent.EnsureIdentity(ctx, cfg.Agent.StateDir,
+	identity, err := agent.EnsureIdentity(ctx, cfg.Agent.StateDir,
 		cfg.Connection.EnrollmentURL, string(token), cfg.Connection.BootstrapCA)
 	if err != nil {
-		fmt.Fprintf(bledy, "enrollment nieudany: %v\n", err)
+		fmt.Fprintf(errOut, "the enrollment failed: %v\n", err)
 		return 1
 	}
 
-	fmt.Fprintf(wyjscie, "Zarejestrowany: host/%s\n", tozsamosc.HostID)
-	fmt.Fprintf(wyjscie, "Certyfikat:     wazny do %s\n",
-		tozsamosc.NotAfter.UTC().Format(time.RFC3339))
-	fmt.Fprintln(wyjscie, "Uruchom usluge: systemctl start flotestro-agent.service")
+	fmt.Fprintf(out, "Registered:   host/%s\n", identity.HostID)
+	fmt.Fprintf(out, "Certificate:  valid until %s\n",
+		identity.NotAfter.UTC().Format(time.RFC3339))
+	fmt.Fprintln(out, "Start the service: systemctl start flotestro-agent.service")
 	return 0
 }
 
-// odczytajToken pobiera token, nie zostawiajac go w argumentach ani
-// w srodowisku procesu.
+// readToken takes the token without leaving it in the arguments or in the
+// environment of the process.
 //
-// Argument wiersza polecenia widzi kazdy uzytkownik hosta w liscie procesow,
-// a zmienna srodowiskowa zostaje w pliku uslugi. Zostaje plik o zawezonych
-// prawach, potok albo pytanie z wygaszonym echem.
-func odczytajToken(sciezka string, wejscie io.Reader, bledy io.Writer) ([]byte, error) {
-	if sciezka != "" {
-		tresc, err := os.ReadFile(sciezka)
+// Every user of the host sees a command line argument in the process list,
+// and an environment variable stays in the file of the service. What is left
+// is a file with narrowed permissions, a pipe or a question with the echo
+// turned off.
+func readToken(path string, in_ io.Reader, errOut io.Writer) ([]byte, error) {
+	if path != "" {
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}
-		return bytes.TrimSpace(tresc), nil
+		return bytes.TrimSpace(content), nil
 	}
-	if plik, ok := wejscie.(*os.File); ok && term.IsTerminal(int(plik.Fd())) {
-		fmt.Fprint(bledy, "Token enrollmentu: ")
-		wartosc, err := term.ReadPassword(int(plik.Fd()))
-		fmt.Fprintln(bledy)
-		return bytes.TrimSpace(wartosc), err
+	if file, ok := in_.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		fmt.Fprint(errOut, "Enrollment token: ")
+		value, err := term.ReadPassword(int(file.Fd()))
+		fmt.Fprintln(errOut)
+		return bytes.TrimSpace(value), err
 	}
-	tresc, err := io.ReadAll(io.LimitReader(wejscie, 4096))
+	content, err := io.ReadAll(io.LimitReader(in_, 4096))
 	if err != nil {
 		return nil, err
 	}
-	return bytes.TrimSpace(tresc), nil
+	return bytes.TrimSpace(content), nil
 }
 
-// wyczysc nadpisuje token w pamieci.
+// wipe overwrites the token in memory.
 //
-// Bez zludzen: runtime i jadro moga miec wlasne kopie, a jedyna prawdziwa
-// ochrona to krotki termin waznosci, jedno uzycie i uniewaznienie po
-// rejestracji. To jest sprzatniecie po sobie, a nie gwarancja.
-func wyczysc(wartosc []byte) {
-	for i := range wartosc {
-		wartosc[i] = 0
+// Without illusions: the runtime and the kernel may hold copies of their own,
+// and the only real protection is a short validity, a single use and a
+// revocation after the registration. This is cleaning up after oneself rather
+// than a guarantee.
+func wipe(value []byte) {
+	for i := range value {
+		value[i] = 0
 	}
 }

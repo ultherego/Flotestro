@@ -14,126 +14,133 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Zrodlo jest adapterem trackera bezpieczenstwa jednej dystrybucji.
+// Source is the adapter of the security tracker of one distribution.
 //
-// Rozstrzyga producent: adapter tlumaczy jego jezyk na ustalenia panelu i nic
-// wiecej. Wzbogacenie o CVSS czy opis upstreamowy moze przyjsc pozniej i nie
-// ma prawa zmienic odpowiedzi "podatny / niepodatny".
-type Zrodlo interface {
-	Nazwa() string
-	// Pobierz sciaga ustalenia dla wskazanych wydan. Zwraca ErrBezZmian, gdy
-	// feed nie zmienil sie od pobrania opisanego etagiem.
-	Pobierz(ctx context.Context, wydania []string, etag string) (Snapshot, []Advisory, error)
+// The vendor settles the matter: the adapter translates its language into
+// the findings of the panel and nothing more. Enrichment with a CVSS score or
+// an upstream description may come later and has no right to change the
+// answer "vulnerable / not vulnerable".
+type Source interface {
+	Name() string
+	// Fetch pulls the findings for the named releases. It returns
+	// ErrNotModified when the feed has not changed since the fetch described
+	// by the etag.
+	Fetch(ctx context.Context, releases []string, etag string) (Snapshot, []Advisory, error)
 }
 
-// ErrBezZmian oznacza feed bez zmian od ostatniego pobrania.
-var ErrBezZmian = errors.New("feed nie zmienil sie od ostatniego pobrania")
+// ErrNotModified means a feed unchanged since the last fetch.
+var ErrNotModified = errors.New("the feed has not changed since the last fetch")
 
-// Ustawienia opisuja polityke korelatora.
-type Ustawienia struct {
-	// Interval mowi, jak czesto panel pyta trackery o zmiany.
+// Settings describe the policy of the correlator.
+type Settings struct {
+	// Interval says how often the panel asks the trackers about changes.
 	Interval time.Duration
-	// MaxSnapshotAge jest wiekiem, powyzej ktorego dane uznajemy za
-	// nieswieze. Nie zatrzymuje to oceny - dane sprzed doby sa lepsze niz ich
-	// brak - ale musi byc widoczne obok wyniku.
+	// MaxSnapshotAge is the age above which we consider the data stale. It
+	// does not stop the assessment - data from a day ago are better than
+	// none - but it has to be visible next to the result.
 	MaxSnapshotAge time.Duration
-	// Debounce mowi, jak dlugo zbieramy prosby o przeliczenie hosta, zanim
-	// je wykonamy. Host melduje liste pakietow i ustalenia osobno, a kilka
-	// hostow potrafi odpowiedziec naraz - jedno przeliczenie dla calej
-	// grupy kosztuje tyle, co jedno dla pierwszego z nich.
+	// Debounce says how long we gather requests to recompute a host before
+	// carrying them out. A host reports its package list and its findings
+	// separately, and several hosts can answer at once - one recomputation
+	// for the whole group costs as much as one for the first of them.
 	Debounce time.Duration
-	// MaxAdvisoryAge jest wiekiem, po ktorym panel prosi hosta o ponowny
-	// odczyt metadanych jego repozytoriow.
+	// MaxAdvisoryAge is the age after which the panel asks a host to read
+	// the metadata of its repositories again.
 	//
-	// Osobny od wieku snapshotu, bo to osobne zrodlo i osobny cykl: producent
-	// wydaje poprawki takze wtedy, gdy na hoscie nie zmienil sie ani jeden
-	// pakiet. Panel wiazacy odswiezenie ustalen ze zmiana listy pakietow
-	// odswiezalby je czasem nigdy.
+	// Separate from the age of a snapshot, because it is a separate source
+	// and a separate cycle: the vendor releases fixes also when not a single
+	// package on the host has changed. A panel that tied the refresh of the
+	// findings to a change of the package list would sometimes refresh them
+	// never.
 	MaxAdvisoryAge time.Duration
 }
 
-// Domyslne zwraca ustawienia domyslne.
-func Domyslne() Ustawienia {
-	return Ustawienia{
+// DefaultSettings returns the default settings.
+func DefaultSettings() Settings {
+	return Settings{
 		Interval: 30 * time.Minute, MaxSnapshotAge: 6 * time.Hour,
 		MaxAdvisoryAge: 30 * time.Minute, Debounce: 15 * time.Second,
 	}
 }
 
-// Harmonogram synchronizuje feedy i przelicza ocene floty.
-type Harmonogram struct {
-	store      *Store
-	pakiety    *MagazynPakietow
-	hosts      *hosts.Store
-	inventory  *inventory.Store
-	jobs       *jobs.Store
-	zrodla     []Zrodlo
-	ustawienia Ustawienia
-	log        *slog.Logger
-	// odswiezenia niosa hosty, ktore wlasnie przyslaly nowe dane. Ocena ma
-	// nadazac za tym, co ja rozstrzyga: host, ktory odpowiedzial na prosbe
-	// o odczyt, nie moze przez pol godziny widniec jako host bez odczytu.
-	odswiezenia chan string
+// Scheduler synchronises the feeds and recomputes the assessment of the
+// fleet.
+type Scheduler struct {
+	store     *Store
+	packages  *PackageStore
+	hosts     *hosts.Store
+	inventory *inventory.Store
+	jobs      *jobs.Store
+	sources   []Source
+	settings  Settings
+	log       *slog.Logger
+	// refreshes carries the hosts that have just sent new data. The
+	// assessment is to keep up with what settles it: a host that answered a
+	// request for a read must not show up as a host without one for half an
+	// hour.
+	refreshes chan string
 }
 
-// NowyHarmonogram tworzy harmonogram korelatora.
-func NowyHarmonogram(store *Store, pakiety *MagazynPakietow, hostStore *hosts.Store,
-	inventoryStore *inventory.Store, jobStore *jobs.Store, zrodla []Zrodlo,
-	ustawienia Ustawienia, log *slog.Logger) *Harmonogram {
-	if ustawienia.Interval <= 0 {
-		ustawienia.Interval = Domyslne().Interval
+// NewScheduler creates the schedule of the correlator.
+func NewScheduler(store *Store, packageStore *PackageStore, hostStore *hosts.Store,
+	inventoryStore *inventory.Store, jobStore *jobs.Store, sources []Source,
+	settings Settings, log *slog.Logger) *Scheduler {
+	if settings.Interval <= 0 {
+		settings.Interval = DefaultSettings().Interval
 	}
-	if ustawienia.MaxSnapshotAge <= 0 {
-		ustawienia.MaxSnapshotAge = Domyslne().MaxSnapshotAge
+	if settings.MaxSnapshotAge <= 0 {
+		settings.MaxSnapshotAge = DefaultSettings().MaxSnapshotAge
 	}
-	if ustawienia.MaxAdvisoryAge <= 0 {
-		ustawienia.MaxAdvisoryAge = Domyslne().MaxAdvisoryAge
+	if settings.MaxAdvisoryAge <= 0 {
+		settings.MaxAdvisoryAge = DefaultSettings().MaxAdvisoryAge
 	}
-	if ustawienia.Debounce <= 0 {
-		ustawienia.Debounce = Domyslne().Debounce
+	if settings.Debounce <= 0 {
+		settings.Debounce = DefaultSettings().Debounce
 	}
-	return &Harmonogram{
-		store: store, pakiety: pakiety, hosts: hostStore, inventory: inventoryStore,
-		jobs: jobStore, zrodla: zrodla, ustawienia: ustawienia, log: log,
-		odswiezenia: make(chan string, 1024),
+	return &Scheduler{
+		store: store, packages: packageStore, hosts: hostStore, inventory: inventoryStore,
+		jobs: jobStore, sources: sources, settings: settings, log: log,
+		refreshes: make(chan string, 1024),
 	}
 }
 
-// Odswiez prosi o przeliczenie oceny hosta poza kolejnoscia.
+// Refresh asks for the assessment of a host to be recomputed out of turn.
 //
-// Wolane przez gateway, gdy host przysle liste pakietow albo ustalenia swoich
-// repozytoriow. Prosba jest tylko prosba: gdy kolejka jest pelna, host
-// poczeka na zwykly cykl - to jest gorsze o kilkanascie minut, a nie
-// o odpowiedz.
-func (h *Harmonogram) Odswiez(hostID string) {
+// Called by the gateway when a host sends its package list or the findings of
+// its repositories. The request is only a request: when the queue is full the
+// host waits for the ordinary cycle - that is worse by a dozen minutes, not
+// by an answer.
+func (h *Scheduler) Refresh(hostID string) {
 	if hostID == "" {
 		return
 	}
 	select {
-	case h.odswiezenia <- hostID:
+	case h.refreshes <- hostID:
 	default:
-		h.log.Debug("kolejka odswiezen oceny pelna", "host_id", hostID)
+		h.log.Debug("the queue of assessment refreshes is full", "host_id", hostID)
 	}
 }
 
-// Run prowadzi synchronizacje i ocene do zamkniecia kontekstu.
-func (h *Harmonogram) Run(ctx context.Context) {
-	// Pierwszy przebieg od razu: panel po starcie nie moze przez pol godziny
-	// pokazywac oceny sprzed restartu bez zaznaczenia, ze jest stara.
-	h.Cykl(ctx)
-	ticker := time.NewTicker(h.ustawienia.Interval)
+// Run carries the synchronisation and the assessment on until the context is
+// closed.
+func (h *Scheduler) Run(ctx context.Context) {
+	// The first pass at once: after a start the panel must not show an
+	// assessment from before the restart for half an hour without marking it
+	// as old.
+	h.Cycle(ctx)
+	ticker := time.NewTicker(h.settings.Interval)
 	defer ticker.Stop()
 
-	// Prosby o przeliczenie zbieramy przez chwile i wykonujemy razem. Host
-	// odpowiada na liste pakietow i na ustalenia osobno, a odczyt ustalen
-	// feedu dla jednego wydania to nawet milion wierszy - nie ma powodu
-	// robic tego dwa razy pod rzad.
-	czekajace := map[string]bool{}
-	var zwloka *time.Timer
-	var sygnal <-chan time.Time
+	// Requests to recompute are gathered for a moment and carried out
+	// together. A host answers about its package list and about its findings
+	// separately, and reading the feed findings for one release is up to a
+	// million rows - there is no reason to do that twice in a row.
+	pending := map[string]bool{}
+	var delay *time.Timer
+	var signal <-chan time.Time
 	defer func() {
-		if zwloka != nil {
-			zwloka.Stop()
+		if delay != nil {
+			delay.Stop()
 		}
 	}()
 
@@ -142,113 +149,119 @@ func (h *Harmonogram) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			h.Cykl(ctx)
-		case hostID := <-h.odswiezenia:
-			czekajace[hostID] = true
-			if zwloka == nil {
-				zwloka = time.NewTimer(h.ustawienia.Debounce)
-				sygnal = zwloka.C
+			h.Cycle(ctx)
+		case hostID := <-h.refreshes:
+			pending[hostID] = true
+			if delay == nil {
+				delay = time.NewTimer(h.settings.Debounce)
+				signal = delay.C
 			}
-		case <-sygnal:
-			identyfikatory := make([]string, 0, len(czekajace))
-			for hostID := range czekajace {
-				identyfikatory = append(identyfikatory, hostID)
+		case <-signal:
+			ids := make([]string, 0, len(pending))
+			for hostID := range pending {
+				ids = append(ids, hostID)
 			}
-			czekajace = map[string]bool{}
-			zwloka, sygnal = nil, nil
-			h.PrzeliczHosty(ctx, identyfikatory)
+			pending = map[string]bool{}
+			delay, signal = nil, nil
+			h.RecalculateHosts(ctx, ids)
 		}
 	}
 }
 
-// PrzeliczHosty przelicza ocene wskazanych hostow.
-func (h *Harmonogram) PrzeliczHosty(ctx context.Context, identyfikatory []string) {
-	if len(identyfikatory) == 0 {
+// RecalculateHosts recomputes the assessment of the named hosts.
+func (h *Scheduler) RecalculateHosts(ctx context.Context, ids []string) {
+	if len(ids) == 0 {
 		return
 	}
-	opisy, err := h.opisyWskazanych(ctx, identyfikatory)
+	descriptions, err := h.describedHosts(ctx, ids)
 	if err != nil {
-		h.log.Error("nie odczytano hostow do przeliczenia oceny", "err", err)
+		h.log.Error("the hosts to recompute the assessment for were not read", "err", err)
 		return
 	}
-	h.Przelicz(ctx, opisy)
+	h.Recalculate(ctx, descriptions)
 }
 
-// opisyWskazanych zbiera to, czego ocena potrzebuje o wskazanych hostach.
-func (h *Harmonogram) opisyWskazanych(ctx context.Context,
-	identyfikatory []string) ([]OpisHosta, error) {
-	fragmenty, err := h.inventory.FragmentyHostow(ctx, identyfikatory)
+// describedHosts gathers what the assessment needs about the named hosts.
+func (h *Scheduler) describedHosts(ctx context.Context,
+	ids []string) ([]HostDescription, error) {
+	fragments, err := h.inventory.FragmentyHostow(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	opisy := make([]OpisHosta, 0, len(identyfikatory))
-	for _, hostID := range identyfikatory {
+	descriptions := make([]HostDescription, 0, len(ids))
+	for _, hostID := range ids {
 		host, err := h.hosts.Get(ctx, hostID)
 		if err != nil || host == nil {
-			// Host skasowany miedzy prosba a przeliczeniem nie jest bledem
-			// przegladu: po prostu go nie ma.
+			// A host deleted between the request and the recomputation is
+			// not an error of the sweep: it is simply not there.
 			continue
 		}
-		skrot := hosts.Summary{
+		summary := hosts.Summary{
 			ID: host.ID, Hostname: host.Hostname,
 			OSDistribution: host.OSDistribution, OSVersion: host.OSVersion,
 		}
-		opis := OpisHosta{ID: host.ID, Hostname: host.Hostname}
-		opis.Distribution, opis.Release = dystrybucjaHosta(skrot, fragmenty[host.ID])
-		opis.InventoryDigest, opis.InventoryReason = odciskZInwentarza(fragmenty[host.ID])
-		opisy = append(opisy, opis)
+		description := HostDescription{ID: host.ID, Hostname: host.Hostname}
+		description.Distribution, description.Release = hostDistribution(summary, fragments[host.ID])
+		description.InventoryDigest, description.InventoryReason = digestFromInventory(fragments[host.ID])
+		descriptions = append(descriptions, description)
 	}
-	return opisy, nil
+	return descriptions, nil
 }
 
-// Cykl wykonuje jedno przejscie: synchronizacje feedow i ocene hostow.
-func (h *Harmonogram) Cykl(ctx context.Context) {
-	opisy, err := h.opisyHostow(ctx)
+// Cycle makes one pass: the synchronisation of the feeds and the assessment
+// of the hosts.
+func (h *Scheduler) Cycle(ctx context.Context) {
+	descriptions, err := h.hostDescriptions(ctx)
 	if err != nil {
-		h.log.Error("nie odczytano floty do oceny podatnosci", "err", err)
+		h.log.Error("the fleet to assess for vulnerabilities was not read", "err", err)
 		return
 	}
-	h.Synchronizuj(ctx, opisy)
-	h.Przelicz(ctx, opisy)
+	h.Synchronize(ctx, descriptions)
+	h.Recalculate(ctx, descriptions)
 }
 
-// OpisHosta jest tym, co panel wie o hoscie przed ocena.
-type OpisHosta struct {
+// HostDescription is what the panel knows about a host before the
+// assessment.
+type HostDescription struct {
 	ID           string
 	Hostname     string
 	Distribution string
-	// Release jest nazwa wydania w jezyku producenta: codename dla Debiana
-	// i Ubuntu, numer dla Fedory.
+	// Release is the name of the release in the language of the vendor: the
+	// codename for Debian and Ubuntu, the number for Fedora.
 	Release string
-	// InventoryDigest jest odciskiem listy pakietow zgloszonym przez hosta.
+	// InventoryDigest is the digest of the package list reported by the
+	// host.
 	InventoryDigest string
 	InventoryReason string
 }
 
-// UstaleniaZHosta mowi, czy ustalenia dla tej dystrybucji czyta sie
-// z metadanych repozytoriow hosta, a nie z centralnego feedu.
+// AdvisoriesFromHost says whether the findings for this distribution are read
+// from the repository metadata of the host rather than from a central feed.
 //
-// Na razie wylacznie Fedora. Jej updateinfo niesie pelne ustalenia
-// bezpieczenstwa razem z pakietami, wiec host czyta je z tego samego zrodla,
-// z ktorego bierze poprawki.
+// For now Fedora alone. Its updateinfo carries full security findings along
+// with the packages, so the host reads them from the same source it takes
+// the fixes from.
 //
-// RHEL, AlmaLinux i Rocky maja updateinfo ubozsze albo niepelne, a ich
-// rozstrzygajacym zrodlem sa CSAF/VEX producenta - i dopoki panel ich nie
-// czyta, host tych dystrybucji zostaje z powodem "brak feedu". To jest
-// uczciwsza odpowiedz niz ocena z metadanych, ktore nie opisuja wszystkiego.
-func UstaleniaZHosta(dystrybucja string) bool {
-	return strings.ToLower(dystrybucja) == "fedora"
+// RHEL, AlmaLinux and Rocky have a poorer or incomplete updateinfo, and their
+// settling source is the CSAF/VEX of the vendor - and until the panel reads
+// those, a host of these distributions is left with the reason "feed
+// missing". That is a more honest answer than an assessment from metadata
+// that do not describe everything.
+func AdvisoriesFromHost(distribution string) bool {
+	return strings.ToLower(distribution) == "fedora"
 }
 
-// Dostawca zwraca nazwe trackera wlasciwego dla dystrybucji hosta.
+// ProviderFor returns the name of the tracker proper for the distribution of
+// a host.
 //
-// CentOS Stream, AlmaLinux i Rocky nie dostaja trackera Red Hata, choc
-// pakiety maja te same nazwy: ich wersje sa wlasne (przebudowa dokleja swoj
-// sufiks, Stream idzie przed RHEL-em), wiec ustalenie Red Hata mowiloby o
-// czym innym. Do czasu, az panel przeczyta ich wlasne zrodla, ich hosty maja
-// dostawac powod "brak feedu" - to jest uczciwsza odpowiedz niz cudza ocena.
-func Dostawca(dystrybucja string) string {
-	switch strings.ToLower(dystrybucja) {
+// CentOS Stream, AlmaLinux and Rocky do not get the Red Hat tracker even
+// though their packages carry the same names: their versions are their own
+// (a rebuild appends a suffix of its own, Stream runs ahead of RHEL), so a
+// Red Hat finding would speak about something else. Until the panel reads
+// their own sources, their hosts are to get the reason "feed missing" - that
+// is a more honest answer than somebody else's assessment.
+func ProviderFor(distribution string) string {
+	switch strings.ToLower(distribution) {
 	case "debian":
 		return "debian"
 	case "ubuntu":
@@ -261,389 +274,415 @@ func Dostawca(dystrybucja string) string {
 	return ""
 }
 
-// opisyHostow zbiera to, czego ocena potrzebuje o kazdym hoscie.
+// hostDescriptions gathers what the assessment needs about every host.
 //
-// Cala flote, strona po stronie. Lista dla UI ma limit i przy zbyt duzej
-// wartosci cicho spada do stu pozycji - przeglad, ktory na tym polegal,
-// ocenial sto hostow i milczal o reszcie. Host nieoceniony wyglada na ekranie
-// tak samo jak host bez podatnosci, wiec cisza jest tu najgorsza odpowiedzia.
-func (h *Harmonogram) opisyHostow(ctx context.Context) ([]OpisHosta, error) {
+// The whole fleet, page by page. The list for the UI has a limit and with too
+// large a value it silently falls back to a hundred entries - a sweep that
+// relied on it assessed a hundred hosts and said nothing about the rest. An
+// unassessed host looks on the screen exactly like a host without
+// vulnerabilities, so silence is the worst answer here.
+func (h *Scheduler) hostDescriptions(ctx context.Context) ([]HostDescription, error) {
 	var (
-		opisy    []OpisHosta
-		poNazwie string
-		poID     string
+		descriptions []HostDescription
+		afterName    string
+		afterID      string
 	)
 	for {
-		strona, err := h.hosts.Sweep(ctx, poNazwie, poID, hosts.PageSize)
+		page, err := h.hosts.Sweep(ctx, afterName, afterID, hosts.PageSize)
 		if err != nil {
 			return nil, err
 		}
-		if len(strona) == 0 {
-			return opisy, nil
+		if len(page) == 0 {
+			return descriptions, nil
 		}
 
-		identyfikatory := make([]string, 0, len(strona))
-		for _, host := range strona {
-			identyfikatory = append(identyfikatory, host.ID)
+		ids := make([]string, 0, len(page))
+		for _, host := range page {
+			ids = append(ids, host.ID)
 		}
-		// Fragmenty inwentarza bierzemy dla strony, a nie dla calej floty:
-		// niosa pelne payloady modulow i w calosci nie zmieszcza sie w pamieci.
-		fragmenty, err := h.inventory.FragmentyHostow(ctx, identyfikatory)
+		// The inventory fragments are taken for the page rather than for the
+		// whole fleet: they carry the full payloads of the modules and as a
+		// whole they do not fit in memory.
+		fragments, err := h.inventory.FragmentyHostow(ctx, ids)
 		if err != nil {
 			return nil, err
 		}
-		for _, host := range strona {
-			opis := OpisHosta{ID: host.ID, Hostname: host.Hostname}
-			opis.Distribution, opis.Release = dystrybucjaHosta(host, fragmenty[host.ID])
-			opis.InventoryDigest, opis.InventoryReason = odciskZInwentarza(fragmenty[host.ID])
-			opisy = append(opisy, opis)
+		for _, host := range page {
+			description := HostDescription{ID: host.ID, Hostname: host.Hostname}
+			description.Distribution, description.Release = hostDistribution(host, fragments[host.ID])
+			description.InventoryDigest, description.InventoryReason = digestFromInventory(fragments[host.ID])
+			descriptions = append(descriptions, description)
 		}
 
-		ostatni := strona[len(strona)-1]
-		poNazwie, poID = ostatni.Hostname, ostatni.ID
-		if len(strona) < hosts.PageSize {
-			return opisy, nil
+		last := page[len(page)-1]
+		afterName, afterID = last.Hostname, last.ID
+		if len(page) < hosts.PageSize {
+			return descriptions, nil
 		}
 	}
 }
 
-// dystrybucjaHosta ustala dystrybucje i wydanie w jezyku producenta.
-func dystrybucjaHosta(host hosts.Summary, fragmenty []inventory.Fragment) (string, string) {
-	dystrybucja := strings.ToLower(host.OSDistribution)
-	wydanie := host.OSVersion
+// hostDistribution establishes the distribution and the release in the
+// language of the vendor.
+func hostDistribution(host hosts.Summary, fragments []inventory.Fragment) (string, string) {
+	distribution := strings.ToLower(host.OSDistribution)
+	release := host.OSVersion
 
-	// Trackery Debiana i Ubuntu mowia nazwami wydan, nie numerami. Nazwa
-	// jest w inwentarzu, bo tylko host wie, jak nazywa sie jego wydanie.
-	for _, fragment := range fragmenty {
+	// The Debian and Ubuntu trackers speak in the names of releases rather
+	// than in numbers. The name is in the inventory, because only the host
+	// knows what its release is called.
+	for _, fragment := range fragments {
 		if fragment.Module != "system" || len(fragment.Payload) == 0 {
 			continue
 		}
-		var tresc struct {
+		var content struct {
 			OS struct {
 				Distribution string `json:"distribution"`
 				Version      string `json:"version"`
 				Codename     string `json:"codename"`
 			} `json:"os"`
 		}
-		if err := json.Unmarshal(fragment.Payload, &tresc); err != nil {
+		if err := json.Unmarshal(fragment.Payload, &content); err != nil {
 			continue
 		}
-		if tresc.OS.Distribution != "" {
-			dystrybucja = strings.ToLower(tresc.OS.Distribution)
+		if content.OS.Distribution != "" {
+			distribution = strings.ToLower(content.OS.Distribution)
 		}
-		if tresc.OS.Codename != "" && (dystrybucja == "debian" || dystrybucja == "ubuntu") {
-			wydanie = tresc.OS.Codename
-		} else if tresc.OS.Version != "" {
-			wydanie = tresc.OS.Version
+		if content.OS.Codename != "" && (distribution == "debian" || distribution == "ubuntu") {
+			release = content.OS.Codename
+		} else if content.OS.Version != "" {
+			release = content.OS.Version
 		}
 	}
-	return dystrybucja, WydanieTrackera(dystrybucja, wydanie)
+	return distribution, TrackerRelease(distribution, release)
 }
 
-// WydanieTrackera sprowadza wydanie hosta do postaci, ktora zna tracker.
+// TrackerRelease reduces the release of a host to the form the tracker knows.
 //
-// Red Hat mowi o wydaniu glownym: host zglasza 9.4, a ustalenia dotycza
-// dziewiatki. Bez tego kazdy host RHEL-a wychodzilby jako "wydanie spoza
-// feedu". Debian, Ubuntu i Fedora nazywaja wydania tak samo jak ich hosty.
-func WydanieTrackera(dystrybucja, wydanie string) string {
-	if Dostawca(dystrybucja) != "redhat" {
-		return wydanie
+// Red Hat speaks about the major release: a host reports 9.4 and the findings
+// concern the nine. Without this every RHEL host would come out as "a release
+// outside the feed". Debian, Ubuntu and Fedora name their releases the same
+// way their hosts do.
+func TrackerRelease(distribution, release string) string {
+	if ProviderFor(distribution) != "redhat" {
+		return release
 	}
-	if glowne, _, ok := strings.Cut(wydanie, "."); ok {
-		return glowne
+	if major, _, ok := strings.Cut(release, "."); ok {
+		return major
 	}
-	return wydanie
+	return release
 }
 
-// odciskZInwentarza czyta odcisk listy pakietow zgloszony przez hosta.
-func odciskZInwentarza(fragmenty []inventory.Fragment) (string, string) {
-	for _, fragment := range fragmenty {
+// digestFromInventory reads the digest of the package list reported by the
+// host.
+func digestFromInventory(fragments []inventory.Fragment) (string, string) {
+	for _, fragment := range fragments {
 		if fragment.Module != "packages" || len(fragment.Payload) == 0 {
 			continue
 		}
-		var tresc struct {
+		var content struct {
 			InstalledDigest string `json:"installed_digest"`
 			InstalledReason string `json:"installed_unavailable_reason"`
 		}
-		if err := json.Unmarshal(fragment.Payload, &tresc); err != nil {
+		if err := json.Unmarshal(fragment.Payload, &content); err != nil {
 			continue
 		}
-		return tresc.InstalledDigest, tresc.InstalledReason
+		return content.InstalledDigest, content.InstalledReason
 	}
 	return "", ""
 }
 
-// Synchronizuj pobiera feedy dla wydan, ktore flota naprawde ma.
+// Synchronize fetches the feeds for the releases the fleet really has.
 //
-// Pobieramy tylko to, co dotyczy hostow w tej instalacji: pelny zrzut opisuje
-// kilkanascie wydan i kilkaset tysiecy ustalen, a panel potrzebuje tych, na
-// ktore ma czym odpowiedziec.
-func (h *Harmonogram) Synchronizuj(ctx context.Context, opisy []OpisHosta) {
-	wydania := map[string]map[string]bool{}
-	for _, opis := range opisy {
-		dostawca := Dostawca(opis.Distribution)
-		if dostawca == "" || opis.Release == "" {
+// We fetch only what concerns the hosts in this installation: a full dump
+// describes more than a dozen releases and several hundred thousand findings,
+// and the panel needs the ones it has something to answer about.
+func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescription) {
+	releases := map[string]map[string]bool{}
+	for _, description := range descriptions {
+		provider := ProviderFor(description.Distribution)
+		if provider == "" || description.Release == "" {
 			continue
 		}
-		if wydania[dostawca] == nil {
-			wydania[dostawca] = map[string]bool{}
+		if releases[provider] == nil {
+			releases[provider] = map[string]bool{}
 		}
-		wydania[dostawca][opis.Release] = true
+		releases[provider][description.Release] = true
 	}
 
-	for _, zrodlo := range h.zrodla {
-		zbior := wydania[zrodlo.Nazwa()]
-		if len(zbior) == 0 {
-			// Nie pobieramy feedu dystrybucji, ktorej w tej instalacji nie ma.
+	for _, source := range h.sources {
+		set := releases[source.Name()]
+		if len(set) == 0 {
+			// We do not fetch the feed of a distribution this installation
+			// does not have.
 			continue
 		}
-		lista := make([]string, 0, len(zbior))
-		for wydanie := range zbior {
-			lista = append(lista, wydanie)
+		list := make([]string, 0, len(set))
+		for release := range set {
+			list = append(list, release)
 		}
 
 		etag := ""
-		if poprzedni, err := h.store.AktywnySnapshot(ctx, zrodlo.Nazwa()); err == nil {
-			// Etag ma sens tylko wtedy, gdy pytamy o ten sam zakres wydan:
-			// inaczej "bez zmian" znaczyloby "bez zmian w innym zakresie".
-			if tenSamZakres(poprzedni.Releases, lista) {
-				etag = poprzedni.ETag
+		if previous, err := h.store.ActiveSnapshot(ctx, source.Name()); err == nil {
+			// An etag makes sense only when we ask about the same range of
+			// releases: otherwise "no changes" would mean "no changes in a
+			// different range".
+			if sameRange(previous.Releases, list) {
+				etag = previous.ETag
 			}
 		}
 
-		snapshot, ustalenia, err := zrodlo.Pobierz(ctx, lista, etag)
-		if errors.Is(err, ErrBezZmian) || (err != nil && strings.Contains(err.Error(), "nie zmienil sie")) {
-			// "Bez zmian" jest potwierdzeniem, a nie brakiem odpowiedzi:
-			// dane sa nadal te, ktore obowiazuja. Bez tego zapisu feed
-			// zmieniajacy sie raz na dobe wygladalby na porzucony.
-			if err := h.store.PotwierdzSnapshot(ctx, zrodlo.Nazwa()); err != nil {
-				h.log.Error("nie odnotowano potwierdzenia feedu",
-					"dostawca", zrodlo.Nazwa(), "err", err)
+		snapshot, advisories, err := source.Fetch(ctx, list, etag)
+		if errors.Is(err, ErrNotModified) || (err != nil && strings.Contains(err.Error(), "has not changed")) {
+			// "No changes" is a confirmation rather than a missing answer:
+			// the data are still the ones in force. Without this record a
+			// feed that changes once a day would look abandoned.
+			if err := h.store.ConfirmSnapshot(ctx, source.Name()); err != nil {
+				h.log.Error("the confirmation of the feed was not recorded",
+					"provider", source.Name(), "err", err)
 			}
-			h.log.Debug("feed bez zmian", "dostawca", zrodlo.Nazwa())
+			h.log.Debug("the feed has not changed", "provider", source.Name())
 			continue
 		}
 		if err != nil {
-			// Nieudane pobranie nie zabiera panelowi poprzedniego snapshotu:
-			// lepiej ocenic starszymi danymi i powiedziec, ze sa starsze.
-			h.log.Error("nie pobrano feedu", "dostawca", zrodlo.Nazwa(), "err", err)
-			_ = h.store.ZapiszBladPobrania(ctx, zrodlo.Nazwa(), err.Error())
+			// A failed fetch does not take the previous snapshot away from
+			// the panel: better to assess with older data and say they are
+			// older.
+			h.log.Error("the feed was not fetched", "provider", source.Name(), "err", err)
+			_ = h.store.SaveFetchError(ctx, source.Name(), err.Error())
 			continue
 		}
-		if _, err := h.store.ZapiszSnapshot(ctx, snapshot, ustalenia); err != nil {
-			h.log.Error("nie zapisano snapshotu feedu", "dostawca", zrodlo.Nazwa(), "err", err)
+		if _, err := h.store.SaveSnapshot(ctx, snapshot, advisories); err != nil {
+			h.log.Error("the feed snapshot was not saved", "provider", source.Name(), "err", err)
 			continue
 		}
-		h.log.Info("snapshot feedu zapisany", "dostawca", zrodlo.Nazwa(),
-			"ustalen", len(ustalenia), "wydania", lista, "odcisk", snapshot.Digest[:12])
+		h.log.Info("the feed snapshot was saved", "provider", source.Name(),
+			"findings", len(advisories), "releases", list, "digest", snapshot.Digest[:12])
 	}
 }
 
-func tenSamZakres(a, b []string) bool {
+func sameRange(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	zbior := map[string]bool{}
-	for _, wpis := range a {
-		zbior[wpis] = true
+	set := map[string]bool{}
+	for _, entry := range a {
+		set[entry] = true
 	}
-	for _, wpis := range b {
-		if !zbior[wpis] {
+	for _, entry := range b {
+		if !set[entry] {
 			return false
 		}
 	}
 	return true
 }
 
-// Przelicz ocenia hosty aktywnym snapshotem ich dystrybucji.
+// Recalculate assesses the hosts with the active snapshot of their
+// distribution.
 //
-// Przelicza tylko te, ktorych wejscie sie zmienilo. Ocena zalezy od trzech
-// odciskow - snapshotu feedu, listy pakietow i zestawu ustalen hosta - oraz od
-// tego, co przeszkadza w pelnym pokryciu. Gdy zadne z nich sie nie ruszylo,
-// wynik bylby co do bajta ten sam, a koszt to odczyt kilkuset pakietow
-// i przepisanie kilku tysiecy wierszy na host.
+// It recomputes only the ones whose input has changed. The assessment depends
+// on three digests - of the feed snapshot, of the package list and of the set
+// of findings of the host - and on what stands in the way of full coverage.
+// When none of them has moved, the result would be the same to the byte, and
+// the cost is reading several hundred packages and rewriting several thousand
+// rows per host.
 //
-// Zostaje siatka bezpieczenstwa: ocena starsza niz dopuszczalny wiek feedu
-// liczy sie od nowa bez wzgledu na odciski. Blad w rachunku "co sie zmienilo"
-// ma kosztowac opoznienie, a nie ocene zamrozona na zawsze.
-func (h *Harmonogram) Przelicz(ctx context.Context, opisy []OpisHosta) {
-	snapshoty := map[string]Snapshot{}
-	ustalenia := map[string]map[string][]Advisory{}
-	teraz := time.Now().UTC()
-	poprzednie := h.poprzednieStany(ctx, opisy)
-	pominietych := 0
+// A safety net stays in place: an assessment older than the age allowed for a
+// feed is computed again regardless of the digests. An error in the reckoning
+// of "what has changed" is to cost a delay rather than an assessment frozen
+// for good.
+func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescription) {
+	snapshots := map[string]Snapshot{}
+	feedAdvisories := map[string]map[string][]Advisory{}
+	now := time.Now().UTC()
+	previous := h.previousStates(ctx, descriptions)
+	skipped := 0
 
-	for _, opis := range opisy {
-		dostawca := Dostawca(opis.Distribution)
-		snapshot, mamy := snapshoty[dostawca]
-		if !mamy && dostawca != "" {
-			if pobrany, err := h.store.AktywnySnapshot(ctx, dostawca); err == nil {
-				snapshot = pobrany
+	for _, description := range descriptions {
+		provider := ProviderFor(description.Distribution)
+		snapshot, ok := snapshots[provider]
+		if !ok && provider != "" {
+			if fetched, err := h.store.ActiveSnapshot(ctx, provider); err == nil {
+				snapshot = fetched
 			}
-			snapshoty[dostawca] = snapshot
+			snapshots[provider] = snapshot
 		}
 
-		stanListy, err := h.pakiety.Stan(ctx, opis.ID)
+		listState, err := h.packages.State(ctx, description.ID)
 		if err != nil {
-			h.log.Error("nie odczytano stanu listy pakietow", "host_id", opis.ID, "err", err)
+			h.log.Error("the state of the package list was not read", "host_id", description.ID, "err", err)
 			continue
 		}
 
-		wejscie := Wejscie{
-			HostID: opis.ID, Hostname: opis.Hostname,
-			Distribution: opis.Distribution, Release: opis.Release,
-			InventoryDigest: stanListy.Digest,
-			BrakListy:       stanListy.Digest == "" || stanListy.PackageCount == 0,
-			// Host zglasza inny odcisk niz ten, ktory panel ma u siebie:
-			// ocena opisuje wtedy stan sprzed zmiany.
-			ListaNieaktualna: opis.InventoryDigest != "" && stanListy.Digest != "" &&
-				opis.InventoryDigest != stanListy.Digest,
+		input := Input{
+			HostID: description.ID, Hostname: description.Hostname,
+			Distribution: description.Distribution, Release: description.Release,
+			InventoryDigest: listState.Digest,
+			ListMissing:     listState.Digest == "" || listState.PackageCount == 0,
+			// The host reports a digest other than the one the panel holds:
+			// the assessment then describes the state from before the change.
+			ListStale: description.InventoryDigest != "" && listState.Digest != "" &&
+				description.InventoryDigest != listState.Digest,
 		}
 
-		// Dla Fedory zrodlem rozstrzygajacym sa metadane repozytoriow samego
-		// hosta: to one mowia, ktora wersja zamyka ustalenie i czy lezy
-		// w repozytorium, z ktorego ten host bierze pakiety.
-		zestaw := map[string][]Advisory(nil)
-		odswiezUstalenia := false
-		if UstaleniaZHosta(opis.Distribution) {
-			stanUstalen, err := h.pakiety.StanUstalenHosta(ctx, opis.ID)
+		// For Fedora the settling source is the repository metadata of the
+		// host itself: they say which version closes a finding and whether it
+		// lies in a repository this host takes packages from.
+		set := map[string][]Advisory(nil)
+		refreshAdvisories := false
+		if AdvisoriesFromHost(description.Distribution) {
+			advisoryState, err := h.packages.HostAdvisoryState(ctx, description.ID)
 			if err != nil {
-				h.log.Error("nie odczytano stanu ustalen hosta", "host_id", opis.ID, "err", err)
+				h.log.Error("the state of the findings of the host was not read",
+					"host_id", description.ID, "err", err)
 				continue
 			}
-			zHosta, zebrane, err := h.pakiety.UstaleniaHosta(ctx, opis.ID)
+			fromHost, collected, err := h.packages.HostAdvisories(ctx, description.ID)
 			if err != nil {
-				h.log.Error("nie odczytano ustalen hosta", "host_id", opis.ID, "err", err)
+				h.log.Error("the findings of the host were not read",
+					"host_id", description.ID, "err", err)
 			}
-			zestaw = zHosta
-			wejscie.AdvisoryDigest = stanUstalen.Digest
-			wejscie.AdvisoriesReason = stanUstalen.UnavailableReason
+			set = fromHost
+			input.AdvisoryDigest = advisoryState.Digest
+			input.AdvisoriesReason = advisoryState.UnavailableReason
 			switch {
-			case wejscie.AdvisoriesReason != "":
-				// Powod juz jest - odczyt sie nie udal albo go nie bylo.
-				odswiezUstalenia = true
-			case stanUstalen.CollectedAt == nil:
-				wejscie.AdvisoriesReason = RodzajBrakUstalen
-				odswiezUstalenia = true
-			case teraz.Sub(*stanUstalen.CollectedAt) > h.ustawienia.MaxAdvisoryAge:
-				// Producent wydaje poprawki takze wtedy, gdy na hoscie nie
-				// zmienil sie ani jeden pakiet. Ustalenia maja wiec wlasny
-				// cykl odswiezania, niezalezny od odcisku listy pakietow.
-				wejscie.AdvisoriesReason = RodzajUstaleniaNieswieze
-				odswiezUstalenia = true
+			case input.AdvisoriesReason != "":
+				// There already is a reason - the read failed or there was
+				// none.
+				refreshAdvisories = true
+			case advisoryState.CollectedAt == nil:
+				input.AdvisoriesReason = ReasonHostAdvisoriesMissing
+				refreshAdvisories = true
+			case now.Sub(*advisoryState.CollectedAt) > h.settings.MaxAdvisoryAge:
+				// The vendor releases fixes also when not a single package on
+				// the host has changed. The findings therefore have a refresh
+				// cycle of their own, independent of the digest of the
+				// package list.
+				input.AdvisoriesReason = ReasonHostAdvisoriesStale
+				refreshAdvisories = true
 			}
 
-			// Snapshot jest tu wlasnoscia hosta: jego odciskiem jest odcisk
-			// zestawu ustalen, a wiekiem - chwila odczytu metadanych.
+			// The snapshot here belongs to the host: its digest is the digest
+			// of the set of findings, and its age - the moment the metadata
+			// were read.
 			snapshot = Snapshot{
-				Provider: dostawca, Digest: stanUstalen.Digest,
-				Releases: []string{opis.Release}, AdvisoryCount: len(zHosta),
-				FetchedAt: zebrane, Active: true,
+				Provider: provider, Digest: advisoryState.Digest,
+				Releases: []string{description.Release}, AdvisoryCount: len(fromHost),
+				FetchedAt: collected, Active: true,
 			}
 		} else {
-			klucz := dostawca + "\x1f" + opis.Release
-			if _, mamy := ustalenia[klucz]; !mamy && snapshot.ID != "" &&
-				ObejmujeWydanie(snapshot, opis.Release) {
-				pobrane, err := h.store.UstaleniaDlaWydania(ctx, snapshot.ID, opis.Distribution, opis.Release)
+			key := provider + "\x1f" + description.Release
+			if _, ok := feedAdvisories[key]; !ok && snapshot.ID != "" &&
+				CoversRelease(snapshot, description.Release) {
+				fetched, err := h.store.AdvisoriesForRelease(ctx, snapshot.ID,
+					description.Distribution, description.Release)
 				if err != nil {
-					h.log.Error("nie odczytano ustalen feedu", "dostawca", dostawca, "err", err)
+					h.log.Error("the findings of the feed were not read",
+						"provider", provider, "err", err)
 				}
-				ustalenia[klucz] = pobrane
+				feedAdvisories[key] = fetched
 			}
-			zestaw = ustalenia[klucz]
+			set = feedAdvisories[key]
 		}
 
-		// Zamowienie odczytu jest niezalezne od przeliczania: host bez listy
-		// ma ja dostac tak samo wtedy, gdy jego ocena od cyklu sie nie
-		// zmienila. Inaczej host raz pominiety nigdy by o nia nie poprosil.
-		if wejscie.BrakListy || wejscie.ListaNieaktualna || odswiezUstalenia {
-			h.poprosOOdczyt(ctx, opis, teraz)
+		// Ordering a read is independent of the recomputation: a host without
+		// a list is to get one just as well when its assessment has not
+		// changed since the last cycle. Otherwise a host skipped once would
+		// never ask for it again.
+		if input.ListMissing || input.ListStale || refreshAdvisories {
+			h.requestRead(ctx, description, now)
 		}
 
-		if !h.doPrzeliczenia(poprzednie[opis.ID], wejscie, snapshot, teraz) {
-			pominietych++
+		if !h.toRecalculate(previous[description.ID], input, snapshot, now) {
+			skipped++
 			continue
 		}
-		pakiety, err := h.pakiety.Pakiety(ctx, opis.ID)
+		pkgs, err := h.packages.Packages(ctx, description.ID)
 		if err != nil {
-			h.log.Error("nie odczytano listy pakietow", "host_id", opis.ID, "err", err)
+			h.log.Error("the package list was not read", "host_id", description.ID, "err", err)
 			continue
 		}
-		wejscie.Packages = pakiety
+		input.Packages = pkgs
 
-		ocena := Ocen(wejscie, snapshot, zestaw, h.ustawienia.MaxSnapshotAge, teraz)
-		if err := h.store.ZapiszUstalenia(ctx, opis.ID, ocena.Findings, ocena.Stan); err != nil {
-			h.log.Error("nie zapisano oceny podatnosci", "host_id", opis.ID, "err", err)
+		evaluation := Evaluate(input, snapshot, set, h.settings.MaxSnapshotAge, now)
+		if err := h.store.SaveAdvisories(ctx, description.ID,
+			evaluation.Findings, evaluation.State); err != nil {
+			h.log.Error("the vulnerability assessment was not saved",
+				"host_id", description.ID, "err", err)
 			continue
 		}
 	}
-	if pominietych > 0 {
-		// Pominiecia mowimy glosno: cichy przeglad, ktory nic nie policzyl,
-		// wyglada tak samo jak przeglad, ktory nic nie znalazl.
-		h.log.Info("ocena podatnosci przeliczona", "hostow", len(opisy),
-			"pominietych_bez_zmian", pominietych)
+	if skipped > 0 {
+		// The skips are said out loud: a silent sweep that computed nothing
+		// looks exactly like a sweep that found nothing.
+		h.log.Info("the vulnerability assessment was recomputed", "hosts", len(descriptions),
+			"skipped_unchanged", skipped)
 	}
 }
 
-// poprzednieStany czyta zapisane oceny hostow, strona po stronie.
-func (h *Harmonogram) poprzednieStany(ctx context.Context, opisy []OpisHosta) map[string]StanHosta {
-	wynik := map[string]StanHosta{}
-	for poczatek := 0; poczatek < len(opisy); poczatek += hosts.PageSize {
-		koniec := min(poczatek+hosts.PageSize, len(opisy))
-		identyfikatory := make([]string, 0, koniec-poczatek)
-		for _, opis := range opisy[poczatek:koniec] {
-			identyfikatory = append(identyfikatory, opis.ID)
+// previousStates reads the recorded assessments of the hosts, page by page.
+func (h *Scheduler) previousStates(ctx context.Context, descriptions []HostDescription) map[string]HostState {
+	result := map[string]HostState{}
+	for start := 0; start < len(descriptions); start += hosts.PageSize {
+		end := min(start+hosts.PageSize, len(descriptions))
+		ids := make([]string, 0, end-start)
+		for _, description := range descriptions[start:end] {
+			ids = append(ids, description.ID)
 		}
-		stany, err := h.store.StanyHostow(ctx, identyfikatory)
+		states, err := h.store.HostStates(ctx, ids)
 		if err != nil {
-			// Bez poprzednich stanow przeliczamy wszystko. Kosztuje wiecej,
-			// ale nie zostawia oceny zamrozonej na nieznanym wejsciu.
-			h.log.Error("nie odczytano poprzednich ocen", "err", err)
-			return map[string]StanHosta{}
+			// Without the previous states we recompute everything. It costs
+			// more, but it does not leave an assessment frozen on an unknown
+			// input.
+			h.log.Error("the previous assessments were not read", "err", err)
+			return map[string]HostState{}
 		}
-		for identyfikator, stan := range stany {
-			wynik[identyfikator] = stan
+		for id, state := range states {
+			result[id] = state
 		}
 	}
-	return wynik
+	return result
 }
 
-// doPrzeliczenia mowi, czy ocene hosta trzeba policzyc od nowa.
+// toRecalculate says whether the assessment of a host has to be computed
+// again.
 //
-// Wejsciem oceny sa trzy odciski i powod niepelnego pokrycia. Gdy zaden z nich
-// sie nie zmienil, nowa ocena bylaby kopia poprzedniej - a jej policzenie
-// kosztuje odczyt calej listy pakietow i przepisanie wszystkich znalezisk.
-func (h *Harmonogram) doPrzeliczenia(poprzedni StanHosta, wejscie Wejscie,
-	snapshot Snapshot, teraz time.Time) bool {
-	if poprzedni.EvaluatedAt == nil {
+// The input of an assessment is three digests and the reason for incomplete
+// coverage. When none of them has changed, a new assessment would be a copy
+// of the previous one - and computing it costs reading the whole package list
+// and rewriting every finding.
+func (h *Scheduler) toRecalculate(previous HostState, input Input,
+	snapshot Snapshot, now time.Time) bool {
+	if previous.EvaluatedAt == nil {
 		return true
 	}
-	// Siatka bezpieczenstwa: ocena, ktorej nikt nie ruszal dluzej niz wiek
-	// dopuszczalny dla feedu, liczy sie od nowa bez wzgledu na odciski.
-	if teraz.Sub(*poprzedni.EvaluatedAt) > h.ustawienia.MaxSnapshotAge {
+	// The safety net: an assessment nobody has touched for longer than the
+	// age allowed for a feed is computed again regardless of the digests.
+	if now.Sub(*previous.EvaluatedAt) > h.settings.MaxSnapshotAge {
 		return true
 	}
-	if poprzedni.Distribution != wejscie.Distribution ||
-		poprzedni.Release != wejscie.Release ||
-		poprzedni.Provider != snapshot.Provider ||
-		poprzedni.SnapshotDigest != snapshot.Digest ||
-		poprzedni.InventoryDigest != wejscie.InventoryDigest ||
-		poprzedni.AdvisoryDigest != wejscie.AdvisoryDigest {
+	if previous.Distribution != input.Distribution ||
+		previous.Release != input.Release ||
+		previous.Provider != snapshot.Provider ||
+		previous.SnapshotDigest != snapshot.Digest ||
+		previous.InventoryDigest != input.InventoryDigest ||
+		previous.AdvisoryDigest != input.AdvisoryDigest {
 		return true
 	}
-	// Powod pokrycia zalezy takze od czasu: feed swiezy o poranku bywa
-	// nieswiezy wieczorem, a to zmienia wynik bez zmiany ani jednego odcisku.
-	powod, _ := PowodPokrycia(wejscie, snapshot, h.ustawienia.MaxSnapshotAge, teraz)
-	return powod != poprzedni.CoverageReason
+	// The coverage reason depends on time as well: a feed fresh in the
+	// morning is sometimes stale in the evening, and that changes the result
+	// without a change of a single digest.
+	reason, _ := CoverageReasonFor(input, snapshot, h.settings.MaxSnapshotAge, now)
+	return reason != previous.CoverageReason
 }
 
-// poprosOOdczyt zamawia u hosta pelna liste pakietow razem z ustaleniami
-// producenta z metadanych jego repozytoriow.
+// requestRead orders the full package list from a host together with the
+// vendor findings from the metadata of its repositories.
 //
-// Zamawiamy ja sami, bo bez niej ocena tego hosta jest pusta - a pusta ocena
-// wyglada jak host bez podatnosci.
-func (h *Harmonogram) poprosOOdczyt(ctx context.Context, opis OpisHosta, teraz time.Time) {
-	if h.jobs == nil || opis.InventoryReason != "" {
+// We order it ourselves, because without it the assessment of this host is
+// empty - and an empty assessment looks like a host without vulnerabilities.
+func (h *Scheduler) requestRead(ctx context.Context, description HostDescription, now time.Time) {
+	if h.jobs == nil || description.InventoryReason != "" {
 		return
 	}
 	tx, err := h.jobs.Pool().Begin(ctx)
@@ -652,17 +691,17 @@ func (h *Harmonogram) poprosOOdczyt(ctx context.Context, opis OpisHosta, teraz t
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Klucz niesie kubelek czasu, a nie sam odcisk listy. Klucz oparty na
-	// odcisku byl staly dopoki host sie nie zmienil - a zadanie, ktore raz sie
-	// nie powiodlo, nigdy juz nie wracalo: kolejne cykle trafialy w ten sam
-	// klucz i dostawaly to samo nieudane zlecenie. Kubelek zamyka to okno po
-	// jednym interwale, a w jego obrebie nadal chroni przed powtorzeniem.
-	kubelek := teraz.Truncate(h.ustawienia.Interval).UTC().Format(time.RFC3339)
-	klucz := "vuln:packages:" + opis.ID + ":" + kubelek
+	// The key carries a time bucket rather than the digest of the list alone.
+	// A key based on the digest stayed the same until the host changed - and
+	// a job that failed once never came back: the following cycles hit the
+	// same key and got the same failed order. A bucket closes that window
+	// after one interval, and within it still guards against a repetition.
+	bucket := now.Truncate(h.settings.Interval).UTC().Format(time.RFC3339)
+	key := "vuln:packages:" + description.ID + ":" + bucket
 	_, err = h.jobs.Create(ctx, tx, jobs.Spec{
-		HostID:          opis.ID,
+		HostID:          description.ID,
 		Action:          opspec.ActionPackageList,
-		IdempotencyKey:  klucz,
+		IdempotencyKey:  key,
 		RequiresApprova: false,
 		CreatedBy:       "flotestro/vuln",
 		Preconditions: jobs.Preconditions{
@@ -675,6 +714,6 @@ func (h *Harmonogram) poprosOOdczyt(ctx context.Context, opis OpisHosta, teraz t
 	if err := tx.Commit(ctx); err != nil {
 		return
 	}
-	h.log.Info("zamowiono odczyt pakietow", "host_id", opis.ID,
-		"odcisk_hosta", opis.InventoryDigest, "kubelek", kubelek)
+	h.log.Info("a package read was ordered", "host_id", description.ID,
+		"host_digest", description.InventoryDigest, "bucket", bucket)
 }

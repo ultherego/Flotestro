@@ -1,5 +1,6 @@
-// Command agent laczy hosta z control plane Flotestro.
-// Proces dziala bez uprawnien roota; mutacje beda przekazywane do helpera.
+// Command agent connects a host to the Flotestro control plane.
+// The process runs without root privileges; mutations are handed over to the
+// helper.
 package main
 
 import (
@@ -21,135 +22,143 @@ import (
 func main() {
 	var (
 		stateDir = flag.String("state-dir",
-			config.Env("FLOTESTRO_AGENT_STATE_DIR", "/var/lib/flotestro-agent"), "katalog stanu agenta")
+			config.Env("FLOTESTRO_AGENT_STATE_DIR", "/var/lib/flotestro-agent"), "the state directory of the agent")
 		enrollmentURL = flag.String("enrollment-url",
-			config.Env("FLOTESTRO_ENROLLMENT_URL", ""), "adres endpointu enrollmentu")
+			config.Env("FLOTESTRO_ENROLLMENT_URL", ""), "the address of the enrollment endpoint")
 		gatewayURL = flag.String("gateway-url",
 			config.Env("FLOTESTRO_GATEWAY_URL", ""),
-			"adres gatewaya agentow; nadpisuje cala liste z pliku")
+			"the address of the agent gateway; it overrides the whole list from the file")
 		token = flag.String("enrollment-token",
-			config.Env("FLOTESTRO_ENROLLMENT_TOKEN", ""), "token enrollmentu (tylko pierwszy start)")
+			config.Env("FLOTESTRO_ENROLLMENT_TOKEN", ""), "the enrollment token (the first start only)")
 		caFile = flag.String("ca-file",
-			config.Env("FLOTESTRO_CA_FILE", ""), "bundle CA do bootstrapu zaufania")
+			config.Env("FLOTESTRO_CA_FILE", ""), "the CA bundle for bootstrapping the trust")
 		inventoryMinutes = flag.Int("inventory-minutes",
-			config.EnvInt("FLOTESTRO_INVENTORY_MINUTES", 15), "odstep pelnego inventory")
+			config.EnvInt("FLOTESTRO_INVENTORY_MINUTES", 15), "the interval of a full inventory")
 		helperSocket = flag.String("helper-socket",
 			config.Env("FLOTESTRO_HELPER_SOCKET", "/run/flotestro/helper.sock"),
-			"gniazdo helpera roota")
+			"the socket of the root helper")
 		maxTasks = flag.Int("max-concurrent-tasks",
-			config.EnvInt("FLOTESTRO_MAX_CONCURRENT_TASKS", 2), "limit rownoleglych zadan")
-		once = flag.Bool("collect-once", false, "wypisz zebrane fakty i zakoncz")
-		// Plik YAML jest kanonicznym zrodlem ustawien; flagi i zmienne
-		// srodowiskowe zostaja jako override dla obrazow i testow.
+			config.EnvInt("FLOTESTRO_MAX_CONCURRENT_TASKS", 2), "the limit of concurrent jobs")
+		once = flag.Bool("collect-once", false, "print the collected facts and finish")
+		// The YAML file is the canonical source of the settings; the flags and
+		// the environment variables stay as an override for images and
+		// tests.
 		configPath = flag.String("config",
 			config.Env("FLOTESTRO_AGENT_CONFIG", agentconfig.DefaultPath),
-			"plik konfiguracji agenta")
-		tryb = flag.String("mode", config.Env("FLOTESTRO_AGENT_MODE", ""),
-			"tryb pracy: full albo read_only")
+			"the configuration file of the agent")
+		mode = flag.String("mode", config.Env("FLOTESTRO_AGENT_MODE", ""),
+			"the mode of work: full or read_only")
 	)
 	flag.Parse()
 
-	// Co ustawil operator, a co przyszlo z domyslnych - to rozroznienie jest
-	// cala trescia pierwszenstwa: plik nie moze nadpisac tego, co ktos podal
-	// jawnie, a domyslna wartosc flagi nie moze udawac decyzji.
-	jawne := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { jawne[f.Name] = true })
+	// What the operator set and what came from the defaults - that
+	// distinction is the whole content of the precedence: a file must not
+	// override what somebody gave explicitly, and the default value of a flag
+	// must not pretend to be a decision.
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	// Bramy w kolejnosci priorytetu. Pusta lista znaczy "tylko to, co podano
-	// flaga albo zmienna" - i wtedy wypelnia sie nizej pojedynczym adresem.
-	var bramy []string
+	// The gateways in order of priority. An empty list means "only what was
+	// given by a flag or a variable" - and it is then filled in below with a
+	// single address.
+	var gateways []string
 
-	cfg, zPliku, err := wczytajKonfiguracje(*configPath)
+	cfg, fromFile, err := readConfiguration(*configPath)
 	if err != nil {
-		log.Error("konfiguracja agenta", "plik", *configPath, "err", err)
+		log.Error("the configuration of the agent", "file", *configPath, "err", err)
 		os.Exit(1)
 	}
-	if zPliku {
-		zastosuj(cfg, jawne, ustawienia{
+	if fromFile {
+		apply(cfg, explicit, settings{
 			stateDir: stateDir, enrollmentURL: enrollmentURL, gatewayURL: gatewayURL,
-			bramy: &bramy, caFile: caFile, helperSocket: helperSocket,
-			inventoryMinutes: inventoryMinutes, maxTasks: maxTasks, tryb: tryb,
+			gateways: &gateways, caFile: caFile, helperSocket: helperSocket,
+			inventoryMinutes: inventoryMinutes, maxTasks: maxTasks, mode: mode,
 		})
-		log.Info("konfiguracja wczytana", "plik", *configPath,
-			"bram", len(cfg.Connection.GatewayURLs), "tryb", *tryb)
+		log.Info("the configuration was read", "file", *configPath,
+			"gateways", len(cfg.Connection.GatewayURLs), "mode", *mode)
 	} else {
-		// Zgodnosc wstecz: host postawiony przed wprowadzeniem pliku YAML
-		// dziala dalej na zmiennych srodowiskowych. Musi jednak wiedziec,
-		// ze idzie stara droga - inaczej zostanie na niej na zawsze.
-		log.Warn("brak pliku konfiguracji, uzywam zmiennych srodowiskowych",
-			"plik", *configPath)
+		// Backwards compatibility: a host set up before the YAML file was
+		// introduced goes on working with the environment variables. It has
+		// to know it is taking the old path, though - otherwise it stays on
+		// it for good.
+		log.Warn("no configuration file, using the environment variables",
+			"file", *configPath)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Narzedzia systemowe potrzebuja zapisywalnego HOME. Agent nie ma katalogu
-	// domowego, wiec wskazujemy im katalog stanu; bez tego dnf konczy sie
-	// bledem, ktory latwo pomylic z wynikiem.
+	// The system tools need a writable HOME. The agent has no home directory,
+	// so we point them at the state directory; without that dnf ends with an
+	// error that is easy to mistake for a result.
 	runtimeDir := filepath.Join(*stateDir, "run")
 	if err := agent.SetRuntimeDir(runtimeDir); err != nil {
-		log.Error("nie przygotowano katalogu roboczego", "err", err)
+		log.Error("the working directory was not prepared", "err", err)
 		os.Exit(1)
 	}
 	if err := packages.SetRuntimeDir(runtimeDir); err != nil {
-		log.Error("nie przygotowano katalogu roboczego adaptera pakietow", "err", err)
+		log.Error("the working directory of the package adapter was not prepared", "err", err)
 		os.Exit(1)
 	}
 
 	if *once {
 		if err := printFacts(ctx); err != nil {
-			log.Error("nie zebrano faktow", "err", err)
+			log.Error("the facts were not collected", "err", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	if len(bramy) == 0 && *gatewayURL != "" {
-		bramy = []string{*gatewayURL}
+	if len(gateways) == 0 && *gatewayURL != "" {
+		gateways = []string{*gatewayURL}
 	}
-	if *enrollmentURL == "" || len(bramy) == 0 {
-		log.Error("wymagane sa --enrollment-url i --gateway-url")
+	if *enrollmentURL == "" || len(gateways) == 0 {
+		log.Error("--enrollment-url and --gateway-url are required")
 		os.Exit(1)
 	}
 
 	identity, err := agent.EnsureIdentity(ctx, *stateDir, *enrollmentURL, *token, *caFile)
 	if err != nil {
-		log.Error("brak tozsamosci agenta", "err", err)
+		log.Error("no identity of the agent", "err", err)
 		os.Exit(1)
 	}
-	log.Info("tozsamosc agenta gotowa",
+	log.Info("the identity of the agent is ready",
 		"host_id", identity.HostID, "cert_not_after", identity.NotAfter.Format(time.RFC3339))
 
-	// Dziennik idempotencji przezywa restart agenta: ponownie dostarczone
-	// zadanie musi zwrocic poprzedni wynik, a nie wykonac mutacje drugi raz.
+	// The idempotency journal survives a restart of the agent: a job delivered
+	// again has to return the previous result rather than carry the mutation
+	// out a second time.
 	journal, err := agent.NewIdempotencyJournal(filepath.Join(*stateDir, "tasks"), 24*time.Hour)
 	if err != nil {
-		log.Error("nie otwarto dziennika idempotencji", "err", err)
+		log.Error("the idempotency journal was not opened", "err", err)
 		os.Exit(1)
 	}
 
 	executor := agent.NewTaskExecutor(
 		agent.NewHelperClient(*helperSocket), journal, func() agent.Facts { return agent.Facts{} }, log)
-	// Tryb obserwacji jest decyzja wlasciciela hosta, a nie brakiem
-	// zdolnosci: agent raportuje fakty, ale nie wykona zadnej zmiany.
-	if *tryb == agentconfig.ModeReadOnly {
+	// The observation mode is a decision of the owner of the host rather than
+	// a missing capability: the agent reports facts but carries out no
+	// change.
+	if *mode == agentconfig.ModeReadOnly {
 		executor.UstawTrybOdczytu(true)
-		log.Info("agent pracuje w trybie obserwacji", "tryb", *tryb)
+		log.Info("the agent works in the observation mode", "mode", *mode)
 	}
 
-	// Uprzywilejowana czesc stanu domeny idzie przez helpera; agent nie ma
-	// dostepu do keytab hosta ani bazy cache SSSD.
+	// The privileged part of the domain state goes through the helper; the
+	// agent has access neither to the keytab of the host nor to the cache
+	// database of SSSD.
 	agent.SetPrivilegedIdentityProbe(executor.ProbePrivilegedIdentity)
 	agent.SetPrivilegedAccountProbe(executor.ProbeLocalAccounts)
 	agent.SetDockerProbe(executor.ProbeDocker)
 	agent.SetScheduleProbe(executor.ProbeSchedules)
-	// Modul sieci sprawdza po zmianie, czy host nadal dosiega panelu.
-	// Wystarczy jedna brama: chodzi o to, czy host w ogole ma droge do
-	// centrali, a nie o to, ktora z nich obsluguje biezaca sesje.
-	agent.SetGatewayURL(bramy[0])
+	// The network module checks after a change whether the host still reaches
+	// the panel. One gateway is enough: the question is whether the host has
+	// a path to the centre at all, not which of them serves the current
+	// session.
+	agent.SetGatewayURL(gateways[0])
 	agent.SetFirewallProbe(executor.ProbeFirewall)
 	agent.SetLVMProbe(executor.ProbeLVM)
 	agent.SetSSHProbe(executor.ProbeSSH)
@@ -158,37 +167,38 @@ func main() {
 	agent.SetSecurityProbe(executor.ProbeSecurity)
 	agent.SetCertificateProbe(executor.ProbeCertificates)
 
-	// Certyfikat agenta jest krotkotrwaly. Bez odnawiania caly host wypadlby
-	// z floty w dniu wygasniecia, bo tokenu enrollmentu juz na nim nie ma.
-	odnowienia := make(chan struct{}, 1)
+	// The certificate of the agent is short-lived. Without renewal the whole
+	// host would drop out of the fleet on the day it expires, because the
+	// enrollment token is no longer on it.
+	renewals := make(chan struct{}, 1)
 	go agent.KeepCertificateFresh(ctx, identity, agent.RenewalOptions{
 		StateDir: *stateDir,
-		// Odnowienie idzie do bramy pierwszego wyboru. Nie jest pilne co do
-		// minuty: do wygasniecia zostaje wtedy jeszcze jedna trzecia zycia
-		// certyfikatu, wiec awaria tej jednej bramy nie odcina hosta.
-		GatewayURL: bramy[0],
+		// The renewal goes to the gateway of first choice. It is not urgent to
+		// the minute: a third of the life of the certificate is still left
+		// then, so a failure of that one gateway does not cut the host off.
+		GatewayURL: gateways[0],
 		Log:        log,
 		OnRenewed: func() {
 			select {
-			case odnowienia <- struct{}{}:
+			case renewals <- struct{}{}:
 			default:
 			}
 		},
 	})
 
 	if err := agent.Run(ctx, agent.SessionOptions{
-		GatewayURLs:        bramy,
+		GatewayURLs:        gateways,
 		Identity:           identity,
 		InventoryInterval:  time.Duration(*inventoryMinutes) * time.Minute,
 		Executor:           executor,
 		MaxConcurrentTasks: *maxTasks,
 		Log:                log,
-		Renewed:            odnowienia,
-		// Stan na dysku jest jedynym zrodlem, z ktorego agentctl na hoscie
-		// bez panelu dowie sie, czy agent naprawde rozmawia z gatewayem.
+		Renewed:            renewals,
+		// The state on disk is the only source agentctl on a host without the
+		// panel learns from whether the agent really speaks to the gateway.
 		Stan: agent.NowyPisarzStanu(*stateDir, identity.HostID),
 	}); err != nil {
-		log.Error("agent zakonczony bledem", "err", err)
+		log.Error("the agent ended with an error", "err", err)
 		os.Exit(1)
 	}
 }
@@ -206,36 +216,36 @@ func printFacts(ctx context.Context) error {
 	return err
 }
 
-// ustawienia zbiera wskazniki do wartosci, ktore moze podac plik.
-type ustawienia struct {
+// settings gathers the pointers to the values the file can give.
+type settings struct {
 	stateDir         *string
 	enrollmentURL    *string
 	gatewayURL       *string
-	bramy            *[]string
+	gateways         *[]string
 	caFile           *string
 	helperSocket     *string
 	inventoryMinutes *int
 	maxTasks         *int
-	tryb             *string
+	mode             *string
 }
 
-// wczytajKonfiguracje czyta plik YAML, jesli istnieje.
+// readConfiguration reads the YAML file if it exists.
 //
-// Brak pliku nie jest bledem: host postawiony przed jego wprowadzeniem ma
-// dzialac dalej. Plik, ktory jest i jest zly, bledem jest - agent, ktory
-// wystartowal z domyslnymi ustawieniami zamiast z zapisanych, laczylby sie
-// gdzie indziej niz operator zapisal.
-func wczytajKonfiguracje(sciezka string) (agentconfig.Config, bool, error) {
-	if sciezka == "" {
+// A missing file is not an error: a host set up before it was introduced is to
+// go on working. A file that is there and is wrong is an error - an agent that
+// started with the default settings instead of the recorded ones would connect
+// somewhere other than the operator wrote down.
+func readConfiguration(path string) (agentconfig.Config, bool, error) {
+	if path == "" {
 		return agentconfig.Config{}, false, nil
 	}
-	if _, err := os.Stat(sciezka); err != nil {
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return agentconfig.Config{}, false, nil
 		}
 		return agentconfig.Config{}, false, err
 	}
-	cfg, err := agentconfig.Load(sciezka)
+	cfg, err := agentconfig.Load(path)
 	if err != nil {
 		return agentconfig.Config{}, false, err
 	}
@@ -245,36 +255,38 @@ func wczytajKonfiguracje(sciezka string) (agentconfig.Config, bool, error) {
 	return cfg, true, nil
 }
 
-// zastosuj wpisuje wartosci z pliku tam, gdzie nikt nie podal wlasnych.
+// apply writes the values from the file wherever nobody gave their own.
 //
-// Pierwszenstwo: jawna flaga > zmienna srodowiskowa > plik > domyslne.
-func zastosuj(cfg agentconfig.Config, jawne map[string]bool, cel ustawienia) {
-	ustaw := func(flaga, zmienna string, wartosc string, docelowy *string) {
-		if wartosc == "" || jawne[flaga] || os.Getenv(zmienna) != "" {
+// The precedence: an explicit flag > an environment variable > the file > the
+// defaults.
+func apply(cfg agentconfig.Config, explicit map[string]bool, target settings) {
+	set := func(flagName, variable string, value string, destination *string) {
+		if value == "" || explicit[flagName] || os.Getenv(variable) != "" {
 			return
 		}
-		*docelowy = wartosc
+		*destination = value
 	}
-	ustaw("state-dir", "FLOTESTRO_AGENT_STATE_DIR", cfg.Agent.StateDir, cel.stateDir)
-	ustaw("enrollment-url", "FLOTESTRO_ENROLLMENT_URL", cfg.Connection.EnrollmentURL, cel.enrollmentURL)
-	// Lista bram jest priorytetowa i idzie do agenta w calosci: przelaczenie
-	// na brame zapasowa nie moze byc reczna czynnoscia operatora w chwili
-	// awarii centrali. Jawna flaga albo zmienna srodowiskowa zastepuje cala
-	// liste - kto podaje jeden adres, ten chce dokladnie jego.
+	set("state-dir", "FLOTESTRO_AGENT_STATE_DIR", cfg.Agent.StateDir, target.stateDir)
+	set("enrollment-url", "FLOTESTRO_ENROLLMENT_URL", cfg.Connection.EnrollmentURL, target.enrollmentURL)
+	// The list of gateways is ordered by priority and goes to the agent as a
+	// whole: switching to a backup gateway must not be a manual act of the
+	// operator at the moment the centre fails. An explicit flag or an
+	// environment variable replaces the whole list - whoever gives one address
+	// wants exactly that one.
 	if len(cfg.Connection.GatewayURLs) > 0 {
-		ustaw("gateway-url", "FLOTESTRO_GATEWAY_URL", cfg.Connection.GatewayURLs[0], cel.gatewayURL)
-		if !jawne["gateway-url"] && os.Getenv("FLOTESTRO_GATEWAY_URL") == "" {
-			*cel.bramy = append([]string{}, cfg.Connection.GatewayURLs...)
+		set("gateway-url", "FLOTESTRO_GATEWAY_URL", cfg.Connection.GatewayURLs[0], target.gatewayURL)
+		if !explicit["gateway-url"] && os.Getenv("FLOTESTRO_GATEWAY_URL") == "" {
+			*target.gateways = append([]string{}, cfg.Connection.GatewayURLs...)
 		}
 	}
-	ustaw("ca-file", "FLOTESTRO_CA_FILE", cfg.Connection.BootstrapCA, cel.caFile)
-	ustaw("helper-socket", "FLOTESTRO_HELPER_SOCKET", cfg.Helper.Socket, cel.helperSocket)
-	ustaw("mode", "FLOTESTRO_AGENT_MODE", cfg.Agent.Mode, cel.tryb)
+	set("ca-file", "FLOTESTRO_CA_FILE", cfg.Connection.BootstrapCA, target.caFile)
+	set("helper-socket", "FLOTESTRO_HELPER_SOCKET", cfg.Helper.Socket, target.helperSocket)
+	set("mode", "FLOTESTRO_AGENT_MODE", cfg.Agent.Mode, target.mode)
 
-	if !jawne["inventory-minutes"] && os.Getenv("FLOTESTRO_INVENTORY_MINUTES") == "" {
-		*cel.inventoryMinutes = int(cfg.Agent.InventoryInterval / time.Minute)
+	if !explicit["inventory-minutes"] && os.Getenv("FLOTESTRO_INVENTORY_MINUTES") == "" {
+		*target.inventoryMinutes = int(cfg.Agent.InventoryInterval / time.Minute)
 	}
-	if !jawne["max-concurrent-tasks"] && os.Getenv("FLOTESTRO_MAX_CONCURRENT_TASKS") == "" {
-		*cel.maxTasks = cfg.Agent.MaxConcurrentTasks
+	if !explicit["max-concurrent-tasks"] && os.Getenv("FLOTESTRO_MAX_CONCURRENT_TASKS") == "" {
+		*target.maxTasks = cfg.Agent.MaxConcurrentTasks
 	}
 }

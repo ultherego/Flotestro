@@ -1,9 +1,9 @@
-// Package debian czyta tracker bezpieczenstwa Debiana.
+// Package debian reads the security tracker of Debian.
 //
-// To jest zrodlo rozstrzygajace dla hostow Debiana: mowi, ktora wersja pakietu
-// zrodlowego zawiera poprawke w danym wydaniu. Wersje te sa backportowane,
-// wiec wedlug numeracji upstream wygladaja na podatne - i zaden zakres
-// z feedu upstreamowego ich nie obejmuje.
+// This is the settling source for Debian hosts: it says which version of a
+// source package carries the fix in a given release. Those versions are
+// backported, so by the upstream numbering they look vulnerable - and no
+// range from an upstream feed covers them.
 package debian
 
 import (
@@ -22,250 +22,252 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
-// Dostawca jest nazwa zrodla zapisywana przy kazdym ustaleniu.
-const Dostawca = "debian"
+// Provider is the name of the source written down with every finding.
+const Provider = "debian"
 
-// AdresDomyslny wskazuje pelny zrzut trackera.
-const AdresDomyslny = "https://security-tracker.debian.org/tracker/data/json"
+// DefaultURL points at the full dump of the tracker.
+const DefaultURL = "https://security-tracker.debian.org/tracker/data/json"
 
-// MaksymalnyRozmiar ogranicza pobranie. Zrzut ma kilkadziesiat megabajtow;
-// odpowiedz istotnie wieksza oznacza, ze pobieramy cos innego, niz myslimy.
-const MaksymalnyRozmiar = 512 << 20
+// MaxSize limits the fetch. The dump is a few dozen megabytes; a
+// substantially larger answer means we are fetching something other than we
+// think.
+const MaxSize = 512 << 20
 
-// ErrBezZmian oznacza feed, ktory sie nie zmienil od ostatniego pobrania.
-var ErrBezZmian = fmt.Errorf("feed nie zmienil sie od ostatniego pobrania")
+// ErrNotModified means a feed unchanged since the last fetch.
+var ErrNotModified = fmt.Errorf("the feed has not changed since the last fetch")
 
-// Zrodlo pobiera i parsuje zrzut trackera.
-type Zrodlo struct {
+// Source fetches and parses the dump of the tracker.
+type Source struct {
 	URL    string
 	Client *http.Client
 }
 
-// Nowe tworzy zrodlo.
-func Nowe(adres string, limit time.Duration) *Zrodlo {
-	if adres == "" {
-		adres = AdresDomyslny
+// New creates the source.
+func New(address string, limit time.Duration) *Source {
+	if address == "" {
+		address = DefaultURL
 	}
 	if limit <= 0 {
 		limit = 10 * time.Minute
 	}
-	return &Zrodlo{URL: adres, Client: &http.Client{Timeout: limit}}
+	return &Source{URL: address, Client: &http.Client{Timeout: limit}}
 }
 
-func (z *Zrodlo) Nazwa() string { return Dostawca }
+func (z *Source) Name() string { return Provider }
 
-// wpisWydania jest opisem jednego wydania w ustaleniu trackera.
-type wpisWydania struct {
+// releaseEntry is the description of one release in a tracker finding.
+type releaseEntry struct {
 	Status       string `json:"status"`
 	Urgency      string `json:"urgency"`
 	FixedVersion string `json:"fixed_version"`
-	// NoDSA oznacza podatnosc, ktorej producent nie zamierza naprawiac
-	// w tym wydaniu. To nie to samo, co brak poprawki: to decyzja.
+	// NoDSA marks a vulnerability the vendor does not intend to fix in this
+	// release. That is not the same as a missing fix: it is a decision.
 	NoDSA       string `json:"nodsa"`
 	NoDSAReason string `json:"nodsa_reason"`
 }
 
-// wpisCVE jest jednym ustaleniem dla pakietu zrodlowego.
-type wpisCVE struct {
-	Description string                 `json:"description"`
-	Scope       string                 `json:"scope"`
-	Releases    map[string]wpisWydania `json:"releases"`
+// cveEntry is one finding for a source package.
+type cveEntry struct {
+	Description string                  `json:"description"`
+	Scope       string                  `json:"scope"`
+	Releases    map[string]releaseEntry `json:"releases"`
 }
 
-// Pobierz sciaga zrzut i zamienia go na ustalenia dla wskazanych wydan.
+// Fetch pulls the dump and turns it into findings for the named releases.
 //
-// Filtrujemy po wydaniach floty, bo pelny zrzut opisuje kilkanascie wydan
-// i kilkaset tysiecy ustalen - a panel potrzebuje tych, ktore dotycza hostow,
-// ktore naprawde ma.
-func (z *Zrodlo) Pobierz(ctx context.Context, wydania []string,
+// We filter by the releases of the fleet, because the full dump describes
+// more than a dozen releases and several hundred thousand findings - and the
+// panel needs the ones that concern the hosts it really has.
+func (z *Source) Fetch(ctx context.Context, releases []string,
 	etag string) (vuln.Snapshot, []vuln.Advisory, error) {
-	snapshot := vuln.Snapshot{Provider: Dostawca, Releases: wydania}
+	snapshot := vuln.Snapshot{Provider: Provider, Releases: releases}
 
-	zadanie, err := http.NewRequestWithContext(ctx, http.MethodGet, z.URL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, z.URL, nil)
 	if err != nil {
 		return snapshot, nil, err
 	}
-	// Warunkowe pobranie: zrzut zmienia sie kilka razy dziennie, a ma
-	// kilkadziesiat megabajtow. Pobieranie go co cykl bez potrzeby jest
-	// kosztem, ktory ponosi takze druga strona.
+	// A conditional fetch: the dump changes a few times a day and is a few
+	// dozen megabytes. Fetching it every cycle without need is a cost the
+	// other side bears as well.
 	if etag != "" {
-		zadanie.Header.Set("If-None-Match", etag)
+		request.Header.Set("If-None-Match", etag)
 	}
-	// Naglowka Accept-Encoding nie ustawiamy sami: gdy zrobi to klient,
-	// biblioteka przestaje rozpakowywac odpowiedz i do parsera trafia
-	// strumien gzip. Zostawiony bibliotece, kompresja dziala i jest
-	// rozpakowywana przezroczyscie.
-	zadanie.Header.Set("User-Agent", "flotestro-vuln/1")
+	// We do not set the Accept-Encoding header ourselves: when the client
+	// does, the library stops decompressing the answer and a gzip stream
+	// reaches the parser. Left to the library, the compression works and is
+	// decompressed transparently.
+	request.Header.Set("User-Agent", "flotestro-vuln/1")
 
-	odpowiedz, err := z.Client.Do(zadanie)
+	response, err := z.Client.Do(request)
 	if err != nil {
 		return snapshot, nil, err
 	}
-	defer odpowiedz.Body.Close()
+	defer response.Body.Close()
 
-	if odpowiedz.StatusCode == http.StatusNotModified {
-		return snapshot, nil, ErrBezZmian
+	if response.StatusCode == http.StatusNotModified {
+		return snapshot, nil, ErrNotModified
 	}
-	if odpowiedz.StatusCode != http.StatusOK {
-		return snapshot, nil, fmt.Errorf("tracker odpowiedzial %s", odpowiedz.Status)
+	if response.StatusCode != http.StatusOK {
+		return snapshot, nil, fmt.Errorf("the tracker answered %s", response.Status)
 	}
-	snapshot.ETag = odpowiedz.Header.Get("ETag")
-	if zmodyfikowano := odpowiedz.Header.Get("Last-Modified"); zmodyfikowano != "" {
-		if chwila, err := http.ParseTime(zmodyfikowano); err == nil {
-			chwilaUTC := chwila.UTC()
-			snapshot.SourceModifiedAt = &chwilaUTC
+	snapshot.ETag = response.Header.Get("ETag")
+	if modified := response.Header.Get("Last-Modified"); modified != "" {
+		if moment, err := http.ParseTime(modified); err == nil {
+			momentUTC := moment.UTC()
+			snapshot.SourceModifiedAt = &momentUTC
 		}
 	}
 
-	// Czytamy o bajt wiecej niz wolno: gdyby odpowiedz byla wieksza, obciety
-	// strumien konczylby sie w srodku danych. Parser zglosilby wtedy blad,
-	// ale nie kazdy blad da sie odroznic od bledu skladni - a zrzut przyciety
-	// w polowie ma wygladac na to, czym jest.
-	licznik := &licznikBajtow{zrodlo: io.LimitReader(odpowiedz.Body, MaksymalnyRozmiar+1)}
-	ustalenia, err := Parsuj(licznik, wydania)
-	if licznik.przeczytane > MaksymalnyRozmiar {
+	// We read one byte more than allowed: were the answer larger, the cut
+	// stream would end in the middle of the data. The parser would report an
+	// error then, but not every error can be told from a syntax error - and a
+	// dump trimmed in half is to look like what it is.
+	counter := &byteCounter{source: io.LimitReader(response.Body, MaxSize+1)}
+	advisories, err := Parse(counter, releases)
+	if counter.read > MaxSize {
 		return snapshot, nil, fmt.Errorf(
-			"zrzut trackera przekracza %d bajtow - to nie jest zrzut, ktorego oczekujemy",
-			MaksymalnyRozmiar)
+			"the tracker dump exceeds %d bytes - this is not the dump we expect",
+			MaxSize)
 	}
 	if err != nil {
 		return snapshot, nil, err
 	}
-	snapshot.Digest = Odcisk(ustalenia)
-	snapshot.AdvisoryCount = len(ustalenia)
+	snapshot.Digest = Digest(advisories)
+	snapshot.AdvisoryCount = len(advisories)
 	snapshot.FetchedAt = time.Now().UTC()
-	return snapshot, ustalenia, nil
+	return snapshot, advisories, nil
 }
 
-// licznikBajtow liczy, ile naprawde przeczytano ze strumienia.
-type licznikBajtow struct {
-	zrodlo      io.Reader
-	przeczytane int64
+// byteCounter counts how much was really read from the stream.
+type byteCounter struct {
+	source io.Reader
+	read   int64
 }
 
-func (l *licznikBajtow) Read(bufor []byte) (int, error) {
-	ile, err := l.zrodlo.Read(bufor)
-	l.przeczytane += int64(ile)
-	return ile, err
+func (l *byteCounter) Read(buffer []byte) (int, error) {
+	n, err := l.source.Read(buffer)
+	l.read += int64(n)
+	return n, err
 }
 
-// Parsuj czyta zrzut strumieniowo i zwraca ustalenia dla wskazanych wydan.
+// Parse reads the dump as a stream and returns the findings for the named
+// releases.
 //
-// Strumieniowo, bo zrzut ma kilkadziesiat megabajtow: wczytany w calosci do
-// pamieci kosztowalby wielokrotnosc tego rozmiaru po zdekodowaniu.
-func Parsuj(zrodlo io.Reader, wydania []string) ([]vuln.Advisory, error) {
-	interesujace := map[string]bool{}
-	for _, wydanie := range wydania {
-		interesujace[wydanie] = true
+// As a stream, because the dump is a few dozen megabytes: read into memory as
+// a whole it would cost a multiple of that size once decoded.
+func Parse(source io.Reader, releases []string) ([]vuln.Advisory, error) {
+	wanted := map[string]bool{}
+	for _, release := range releases {
+		wanted[release] = true
 	}
 
-	dekoder := json.NewDecoder(zrodlo)
-	otwarcie, err := dekoder.Token()
+	decoder := json.NewDecoder(source)
+	opening, err := decoder.Token()
 	if err != nil {
-		return nil, fmt.Errorf("zrzut trackera: %w", err)
+		return nil, fmt.Errorf("the tracker dump: %w", err)
 	}
-	if otwarcie != json.Delim('{') {
-		return nil, fmt.Errorf("zrzut trackera zaczyna sie od %v, a nie od obiektu", otwarcie)
+	if opening != json.Delim('{') {
+		return nil, fmt.Errorf("the tracker dump starts with %v rather than with an object", opening)
 	}
 
-	var ustalenia []vuln.Advisory
-	for dekoder.More() {
-		klucz, err := dekoder.Token()
+	var advisories []vuln.Advisory
+	for decoder.More() {
+		key, err := decoder.Token()
 		if err != nil {
 			return nil, err
 		}
-		pakiet, ok := klucz.(string)
+		pkg, ok := key.(string)
 		if !ok {
-			return nil, fmt.Errorf("zrzut trackera: nieoczekiwany klucz %v", klucz)
+			return nil, fmt.Errorf("the tracker dump: an unexpected key %v", key)
 		}
-		var wpisy map[string]wpisCVE
-		if err := dekoder.Decode(&wpisy); err != nil {
-			return nil, fmt.Errorf("pakiet %s: %w", pakiet, err)
+		var entries map[string]cveEntry
+		if err := decoder.Decode(&entries); err != nil {
+			return nil, fmt.Errorf("package %s: %w", pkg, err)
 		}
-		for nazwaCVE, wpis := range wpisy {
-			for wydanie, opis := range wpis.Releases {
-				if !interesujace[wydanie] {
+		for cveName, entry := range entries {
+			for release, description := range entry.Releases {
+				if !wanted[release] {
 					continue
 				}
-				ustalenia = append(ustalenia, ustalenieZWpisu(pakiet, nazwaCVE, wydanie, opis, wpis))
+				advisories = append(advisories, advisoryFromEntry(pkg, cveName, release, description, entry))
 			}
 		}
 	}
 
-	// Zamkniecie obiektu i koniec strumienia sprawdzamy jawnie. Strumien
-	// urwany w polowie konczy sie po prostu brakiem kolejnego klucza - petla
-	// wychodzi cicho, a panel dostaje polowe zrzutu jako komplet i uznaje
-	// brakujace ustalenia za nieistniejace.
-	zamkniecie, err := dekoder.Token()
+	// The closing of the object and the end of the stream are checked
+	// explicitly. A stream cut in half simply ends with no further key - the
+	// loop exits silently, and the panel gets half the dump as the full thing
+	// and treats the missing findings as non-existent.
+	closing, err := decoder.Token()
 	if err != nil {
-		return nil, fmt.Errorf("zrzut trackera urwany przed zamknieciem: %w", err)
+		return nil, fmt.Errorf("the tracker dump was cut before the closing: %w", err)
 	}
-	if zamkniecie != json.Delim('}') {
-		return nil, fmt.Errorf("zrzut trackera konczy sie %v, a nie zamknieciem obiektu", zamkniecie)
+	if closing != json.Delim('}') {
+		return nil, fmt.Errorf("the tracker dump ends with %v rather than with the closing of the object", closing)
 	}
-	if _, err := dekoder.Token(); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("zrzut trackera ma dane po zamknieciu obiektu")
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("the tracker dump carries data after the closing of the object")
 	}
 
-	sort.Slice(ustalenia, func(i, j int) bool {
-		if ustalenia[i].SourcePackage != ustalenia[j].SourcePackage {
-			return ustalenia[i].SourcePackage < ustalenia[j].SourcePackage
+	sort.Slice(advisories, func(i, j int) bool {
+		if advisories[i].SourcePackage != advisories[j].SourcePackage {
+			return advisories[i].SourcePackage < advisories[j].SourcePackage
 		}
-		if ustalenia[i].Release != ustalenia[j].Release {
-			return ustalenia[i].Release < ustalenia[j].Release
+		if advisories[i].Release != advisories[j].Release {
+			return advisories[i].Release < advisories[j].Release
 		}
-		return ustalenia[i].AdvisoryID < ustalenia[j].AdvisoryID
+		return advisories[i].AdvisoryID < advisories[j].AdvisoryID
 	})
-	return ustalenia, nil
+	return advisories, nil
 }
 
-// ustalenieZWpisu tlumaczy jeden wpis trackera na ustalenie panelu.
-func ustalenieZWpisu(pakiet, nazwaCVE, wydanie string, opis wpisWydania, wpis wpisCVE) vuln.Advisory {
-	ustalenie := vuln.Advisory{
-		Provider: Dostawca, AdvisoryID: nazwaCVE, CVEIDs: []string{nazwaCVE},
-		Distribution: "debian", Release: wydanie, SourcePackage: pakiet,
-		VendorSeverity: Waga(opis.Urgency),
-		Title:          skrocony(wpis.Description),
-		URL:            "https://security-tracker.debian.org/tracker/" + nazwaCVE,
+// advisoryFromEntry translates one tracker entry into a finding of the panel.
+func advisoryFromEntry(pkg, cveName, release string, description releaseEntry, entry cveEntry) vuln.Advisory {
+	advisory := vuln.Advisory{
+		Provider: Provider, AdvisoryID: cveName, CVEIDs: []string{cveName},
+		Distribution: "debian", Release: release, SourcePackage: pkg,
+		VendorSeverity: Severity(description.Urgency),
+		Title:          shortened(entry.Description),
+		URL:            "https://security-tracker.debian.org/tracker/" + cveName,
 	}
-	ustalenie.Status, ustalenie.FixedVersion = Status(opis)
-	// Wersje i identyfikatory tez czyscimy: zrzut jest tekstem z zewnatrz,
-	// a jeden bledny bajt nie moze przewrocic calego importu.
-	ustalenie.FixedVersion = strings.ToValidUTF8(ustalenie.FixedVersion, "")
-	ustalenie.SourcePackage = strings.ToValidUTF8(ustalenie.SourcePackage, "")
-	ustalenie.AdvisoryID = strings.ToValidUTF8(ustalenie.AdvisoryID, "")
-	return ustalenie
+	advisory.Status, advisory.FixedVersion = Status(description)
+	// The versions and identifiers are cleaned as well: the dump is text from
+	// outside, and a single bad byte must not topple the whole import.
+	advisory.FixedVersion = strings.ToValidUTF8(advisory.FixedVersion, "")
+	advisory.SourcePackage = strings.ToValidUTF8(advisory.SourcePackage, "")
+	advisory.AdvisoryID = strings.ToValidUTF8(advisory.AdvisoryID, "")
+	return advisory
 }
 
-// Status tlumaczy stan wpisu trackera na stan ustalenia.
+// Status translates the state of a tracker entry into the state of a finding.
 //
-// Tracker ma trzy stany i jedna pulapke: "resolved" z wersja naprawiona "0"
-// nie znaczy "naprawione w wersji zero", tylko "to wydanie nigdy nie bylo
-// podatne". Potraktowanie tego jako wersji dawaloby podatnosc na kazdym
-// hoscie, bo kazda wersja jest wieksza od zera.
-func Status(opis wpisWydania) (string, string) {
-	switch opis.Status {
+// The tracker has three states and one trap: "resolved" with the fixed
+// version "0" does not mean "fixed in version zero" but "this release was
+// never vulnerable". Treating that as a version would give a vulnerability on
+// every host, because every version is greater than zero.
+func Status(description releaseEntry) (string, string) {
+	switch description.Status {
 	case "resolved":
-		if opis.FixedVersion == "" || opis.FixedVersion == "0" {
-			return vuln.StatusNieDotyczy, ""
+		if description.FixedVersion == "" || description.FixedVersion == "0" {
+			return vuln.StatusNotAffected, ""
 		}
-		return vuln.StatusNaprawione, opis.FixedVersion
+		return vuln.StatusFixed, description.FixedVersion
 	case "open":
-		if opis.NoDSA != "" || opis.NoDSAReason != "" {
-			// Producent rozstrzygnal, ze nie wyda poprawki w tym wydaniu.
-			// To jest odpowiedz, a nie brak odpowiedzi - i host nadal jest
-			// podatny.
-			return vuln.StatusOdroczone, ""
+		if description.NoDSA != "" || description.NoDSAReason != "" {
+			// The vendor settled that it will not release a fix in this
+			// release. That is an answer rather than a missing answer - and
+			// the host is still vulnerable.
+			return vuln.StatusDeferred, ""
 		}
-		return vuln.StatusOtwarte, ""
+		return vuln.StatusOpen, ""
 	case "undetermined":
-		return vuln.StatusBadane, ""
+		return vuln.StatusUnderInvestigation, ""
 	}
-	return vuln.StatusBadane, ""
+	return vuln.StatusUnderInvestigation, ""
 }
 
-// Waga tlumaczy pilnosc trackera na wage producenta.
-func Waga(urgency string) string {
+// Severity translates the urgency of the tracker into a vendor severity.
+func Severity(urgency string) string {
 	switch strings.ToLower(strings.TrimSpace(urgency)) {
 	case "high", "high**":
 		return "high"
@@ -278,38 +280,41 @@ func Waga(urgency string) string {
 	case "end-of-life":
 		return "end-of-life"
 	}
-	// "not yet assigned" nie jest waga: to brak wagi i tak ma zostac.
+	// "not yet assigned" is not a severity: it is a missing severity and is
+	// to stay one.
 	return ""
 }
 
-// Odcisk liczy odcisk kanonicznej postaci ustalen.
+// Digest computes the digest of the canonical form of the findings.
 //
-// Kanonizacja jest jawna: te same dane musza dac ten sam odcisk, inaczej
-// panel co pobranie zakladalby nowy snapshot i przeliczal cala flote.
-func Odcisk(ustalenia []vuln.Advisory) string {
-	suma := sha256.New()
-	suma.Write([]byte("flotestro/vuln/debian/v1\n"))
-	for _, ustalenie := range ustalenia {
-		suma.Write([]byte(strings.Join([]string{
-			ustalenie.SourcePackage, ustalenie.Release, ustalenie.AdvisoryID,
-			ustalenie.Status, ustalenie.FixedVersion, ustalenie.VendorSeverity,
+// The canonicalisation is explicit: the same data have to give the same
+// digest, otherwise the panel would start a new snapshot on every fetch and
+// recompute the whole fleet.
+func Digest(advisories []vuln.Advisory) string {
+	sum := sha256.New()
+	sum.Write([]byte("flotestro/vuln/debian/v1\n"))
+	for _, advisory := range advisories {
+		sum.Write([]byte(strings.Join([]string{
+			advisory.SourcePackage, advisory.Release, advisory.AdvisoryID,
+			advisory.Status, advisory.FixedVersion, advisory.VendorSeverity,
 		}, "\x1f")))
-		suma.Write([]byte{'\n'})
+		sum.Write([]byte{'\n'})
 	}
-	return hex.EncodeToString(suma.Sum(nil))
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// skrocony przycina opis do 300 znakow, a nie bajtow.
+// shortened trims a description to 300 characters rather than bytes.
 //
-// Ciecie po bajtach rozcina znak wielobajtowy na pol i zostawia sekwencje,
-// ktorej nie da sie zapisac w bazie: caly import konczyl sie wtedy bledem
-// kodowania, a panel zostawal bez feedu. Opisy trackera sa po angielsku, ale
-// cytuja nazwy i znaki interpunkcyjne spoza ASCII.
-func skrocony(opis string) string {
-	opis = strings.ToValidUTF8(strings.TrimSpace(opis), "")
-	znaki := []rune(opis)
-	if len(znaki) > 300 {
-		return string(znaki[:300])
+// Cutting by bytes splits a multi-byte character in half and leaves a
+// sequence that cannot be written to the database: the whole import then
+// ended with an encoding error and the panel was left without a feed. The
+// descriptions of the tracker are in English, but they quote names and
+// punctuation from outside ASCII.
+func shortened(description string) string {
+	description = strings.ToValidUTF8(strings.TrimSpace(description), "")
+	runes := []rune(description)
+	if len(runes) > 300 {
+		return string(runes[:300])
 	}
-	return opis
+	return description
 }

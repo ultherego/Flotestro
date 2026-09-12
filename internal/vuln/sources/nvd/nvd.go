@@ -1,9 +1,11 @@
-// Package nvd czyta opisy podatnosci z bazy NVD.
+// Package nvd reads the descriptions of vulnerabilities from the NVD
+// database.
 //
-// To zrodlo niczego nie rozstrzyga. Zakresy wersji z NVD nie obejmuja
-// poprawek backportowanych przez producenta dystrybucji, wiec uzyte do oceny
-// hosta mowilyby o czym innym niz zainstalowany pakiet. Panel bierze stad
-// wylacznie to, czego producent nie mowi: ocene CVSS i opis podatnosci.
+// This source settles nothing. Version ranges from NVD do not cover the
+// fixes backported by a distribution vendor, so used to assess a host they
+// would speak about something other than the installed package. The panel
+// takes from here only what the vendor does not say: the CVSS score and the
+// description of the vulnerability.
 package nvd
 
 import (
@@ -20,156 +22,157 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
-// Dostawca jest nazwa zrodla zapisywana przy kazdym opisie.
-const Dostawca = "nvd"
+// Provider is the name of the source written down with every description.
+const Provider = "nvd"
 
-// AdresDomyslny wskazuje API NVD w wersji 2.0.
-const AdresDomyslny = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+// DefaultURL points at the NVD API in version 2.0.
+const DefaultURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
-// RozmiarStrony jest najwiekszym, na ktory pozwala NVD.
-const RozmiarStrony = 2000
+// PageSize is the largest one NVD allows.
+const PageSize = 2000
 
-// MaksymalneOkno jest najdluzszym okresem, o ktory NVD pozwala zapytac naraz.
-const MaksymalneOkno = 120 * 24 * time.Hour
+// MaxWindow is the longest period NVD allows asking about at once.
+const MaxWindow = 120 * 24 * time.Hour
 
-// MaksymalnaOdpowiedz ogranicza pojedyncza strone wynikow.
-const MaksymalnaOdpowiedz = 128 << 20
+// MaxResponse limits a single page of results.
+const MaxResponse = 128 << 20
 
-// Odstepy miedzy zadaniami. NVD prosi o piec zadan na trzydziesci sekund bez
-// klucza i piecdziesiat z kluczem; przekroczenie konczy sie odcieciem.
+// The intervals between requests. NVD asks for five requests per thirty
+// seconds without a key and fifty with one; exceeding that ends in being cut
+// off.
 const (
-	OdstepBezKlucza = 6 * time.Second
-	OdstepZKluczem  = 700 * time.Millisecond
+	IntervalWithoutKey = 6 * time.Second
+	IntervalWithKey    = 700 * time.Millisecond
 )
 
-// Czytnik pobiera opisy podatnosci z NVD.
-type Czytnik struct {
+// Reader fetches the descriptions of vulnerabilities from NVD.
+type Reader struct {
 	URL    string
-	Klucz  string
+	Key    string
 	Client *http.Client
-	// Odstep miedzy zadaniami; zero oznacza odstep wlasciwy dla klucza.
-	Odstep time.Duration
+	// Interval between requests; zero means the interval proper for the key.
+	Interval time.Duration
 }
 
-// Nowy tworzy czytnik.
-func Nowy(adres, klucz string, limit time.Duration) *Czytnik {
-	if adres == "" {
-		adres = AdresDomyslny
+// New creates a reader.
+func New(address, key string, limit time.Duration) *Reader {
+	if address == "" {
+		address = DefaultURL
 	}
 	if limit <= 0 {
 		limit = 5 * time.Minute
 	}
-	return &Czytnik{URL: adres, Klucz: klucz, Client: &http.Client{Timeout: limit}}
+	return &Reader{URL: address, Key: key, Client: &http.Client{Timeout: limit}}
 }
 
-func (c *Czytnik) Nazwa() string { return Dostawca }
+func (c *Reader) Name() string { return Provider }
 
-// odstep zwraca przerwe miedzy zadaniami.
-func (c *Czytnik) odstep() time.Duration {
-	if c.Odstep > 0 {
-		return c.Odstep
+// interval returns the pause between requests.
+func (c *Reader) interval() time.Duration {
+	if c.Interval > 0 {
+		return c.Interval
 	}
-	if c.Klucz != "" {
-		return OdstepZKluczem
+	if c.Key != "" {
+		return IntervalWithKey
 	}
-	return OdstepBezKlucza
+	return IntervalWithoutKey
 }
 
-// Pobierz sciaga opisy zmienione od wskazanej chwili, strona po stronie.
+// Fetch pulls the descriptions changed since the given moment, page by page.
 //
-// Zwraca chwile, do ktorej dane sa odczytane. Gdy poprzedni odczyt jest
-// starszy niz okno, o ktore wolno zapytac, bierzemy caly zbior: to jest
-// dluzsze, ale jedyne, co daje komplet.
-func (c *Czytnik) Pobierz(ctx context.Context, od time.Time,
-	przyjmij func([]vuln.SzczegolyCVE) error) (time.Time, error) {
-	teraz := time.Now().UTC()
-	pelne := od.IsZero() || teraz.Sub(od) > MaksymalneOkno
+// It returns the moment the data are read up to. When the previous read is
+// older than the window one is allowed to ask about, we take the whole set:
+// that takes longer, but it is the only thing that gives the full picture.
+func (c *Reader) Fetch(ctx context.Context, since time.Time,
+	accept func([]vuln.CVEDetails) error) (time.Time, error) {
+	now := time.Now().UTC()
+	full := since.IsZero() || now.Sub(since) > MaxWindow
 
-	indeks := 0
-	najnowszy := od
+	index := 0
+	newest := since
 	for {
-		strona, wszystkich, err := c.strona(ctx, od, teraz, indeks, pelne)
+		page, total, err := c.page(ctx, since, now, index, full)
 		if err != nil {
 			return time.Time{}, err
 		}
-		if len(strona) == 0 {
+		if len(page) == 0 {
 			break
 		}
-		for _, wpis := range strona {
-			if wpis.ModifiedAt != nil && wpis.ModifiedAt.After(najnowszy) {
-				najnowszy = *wpis.ModifiedAt
+		for _, entry := range page {
+			if entry.ModifiedAt != nil && entry.ModifiedAt.After(newest) {
+				newest = *entry.ModifiedAt
 			}
 		}
-		if err := przyjmij(strona); err != nil {
+		if err := accept(page); err != nil {
 			return time.Time{}, err
 		}
-		indeks += len(strona)
-		if indeks >= wszystkich {
+		index += len(page)
+		if index >= total {
 			break
 		}
 		select {
 		case <-ctx.Done():
 			return time.Time{}, ctx.Err()
-		case <-time.After(c.odstep()):
+		case <-time.After(c.interval()):
 		}
 	}
-	if najnowszy.IsZero() {
-		najnowszy = teraz
+	if newest.IsZero() {
+		newest = now
 	}
-	return najnowszy, nil
+	return newest, nil
 }
 
-// strona pobiera jedna strone wynikow.
-func (c *Czytnik) strona(ctx context.Context, od, teraz time.Time, indeks int,
-	pelne bool) ([]vuln.SzczegolyCVE, int, error) {
-	parametry := url.Values{}
-	parametry.Set("resultsPerPage", strconv.Itoa(RozmiarStrony))
-	parametry.Set("startIndex", strconv.Itoa(indeks))
-	if !pelne {
-		parametry.Set("lastModStartDate", ZnacznikNVD(od))
-		parametry.Set("lastModEndDate", ZnacznikNVD(teraz))
+// page fetches one page of results.
+func (c *Reader) page(ctx context.Context, since, now time.Time, index int,
+	full bool) ([]vuln.CVEDetails, int, error) {
+	params := url.Values{}
+	params.Set("resultsPerPage", strconv.Itoa(PageSize))
+	params.Set("startIndex", strconv.Itoa(index))
+	if !full {
+		params.Set("lastModStartDate", Timestamp(since))
+		params.Set("lastModEndDate", Timestamp(now))
 	}
 
-	zadanie, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.URL+"?"+parametry.Encode(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.URL+"?"+params.Encode(), nil)
 	if err != nil {
 		return nil, 0, err
 	}
-	zadanie.Header.Set("User-Agent", "flotestro-vuln/1")
-	if c.Klucz != "" {
-		zadanie.Header.Set("apiKey", c.Klucz)
+	request.Header.Set("User-Agent", "flotestro-vuln/1")
+	if c.Key != "" {
+		request.Header.Set("apiKey", c.Key)
 	}
 
-	odpowiedz, err := c.Client.Do(zadanie)
+	response, err := c.Client.Do(request)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer odpowiedz.Body.Close()
-	if odpowiedz.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("NVD odpowiedzial %s", odpowiedz.Status)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, 0, fmt.Errorf("NVD answered %s", response.Status)
 	}
 
-	tresc, err := io.ReadAll(io.LimitReader(odpowiedz.Body, MaksymalnaOdpowiedz))
+	body, err := io.ReadAll(io.LimitReader(response.Body, MaxResponse))
 	if err != nil {
 		return nil, 0, err
 	}
-	return Parsuj(tresc)
+	return Parse(body)
 }
 
-// ZnacznikNVD zapisuje chwile w postaci, ktorej oczekuje NVD.
-func ZnacznikNVD(chwila time.Time) string {
-	return chwila.UTC().Format("2006-01-02T15:04:05.000") + "Z"
+// Timestamp writes a moment in the form NVD expects.
+func Timestamp(moment time.Time) string {
+	return moment.UTC().Format("2006-01-02T15:04:05.000") + "Z"
 }
 
-// odpowiedzNVD jest ta czescia odpowiedzi, ktora panel czyta.
-type odpowiedzNVD struct {
+// nvdResponse is the part of the answer the panel reads.
+type nvdResponse struct {
 	TotalResults    int `json:"totalResults"`
 	Vulnerabilities []struct {
-		CVE wpisCVE `json:"cve"`
+		CVE cveEntry `json:"cve"`
 	} `json:"vulnerabilities"`
 }
 
-type wpisCVE struct {
+type cveEntry struct {
 	ID           string `json:"id"`
 	Published    string `json:"published"`
 	LastModified string `json:"lastModified"`
@@ -177,14 +180,15 @@ type wpisCVE struct {
 		Lang  string `json:"lang"`
 		Value string `json:"value"`
 	} `json:"descriptions"`
-	Metrics map[string][]metryka `json:"metrics"`
+	Metrics map[string][]metric `json:"metrics"`
 }
 
-// metryka jest jedna ocena CVSS podana przez NVD.
+// metric is one CVSS score given by NVD.
 //
-// Waga w wersji drugiej stoi obok danych, a nie w nich: tak wyglada
-// odpowiedz NVD i bez tego oceny sprzed CVSS 3 zostawalyby bez slowa.
-type metryka struct {
+// The severity in version two stands next to the data rather than inside
+// them: that is what an NVD answer looks like, and without it the scores
+// from before CVSS 3 would be left without a word.
+type metric struct {
 	Type         string `json:"type"`
 	BaseSeverity string `json:"baseSeverity"`
 	CVSSData     struct {
@@ -195,101 +199,104 @@ type metryka struct {
 	} `json:"cvssData"`
 }
 
-// Parsuj czyta strone odpowiedzi NVD.
-func Parsuj(tresc []byte) ([]vuln.SzczegolyCVE, int, error) {
-	var odpowiedz odpowiedzNVD
-	if err := json.Unmarshal(tresc, &odpowiedz); err != nil {
-		return nil, 0, fmt.Errorf("odpowiedz NVD: %w", err)
+// Parse reads one page of an NVD answer.
+func Parse(body []byte) ([]vuln.CVEDetails, int, error) {
+	var response nvdResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, 0, fmt.Errorf("NVD answer: %w", err)
 	}
-	wynik := make([]vuln.SzczegolyCVE, 0, len(odpowiedz.Vulnerabilities))
-	for _, wpis := range odpowiedz.Vulnerabilities {
-		szczegoly := szczegolyZWpisu(wpis.CVE)
-		if szczegoly.CVE == "" {
+	result := make([]vuln.CVEDetails, 0, len(response.Vulnerabilities))
+	for _, entry := range response.Vulnerabilities {
+		details := detailsFromEntry(entry.CVE)
+		if details.CVE == "" {
 			continue
 		}
-		wynik = append(wynik, szczegoly)
+		result = append(result, details)
 	}
-	return wynik, odpowiedz.TotalResults, nil
+	return result, response.TotalResults, nil
 }
 
-// szczegolyZWpisu tlumaczy jeden wpis NVD na opis panelu.
-func szczegolyZWpisu(wpis wpisCVE) vuln.SzczegolyCVE {
-	szczegoly := vuln.SzczegolyCVE{
-		CVE:    strings.ToValidUTF8(strings.TrimSpace(wpis.ID), ""),
-		Source: Dostawca,
+// detailsFromEntry translates one NVD entry into a description of the panel.
+func detailsFromEntry(entry cveEntry) vuln.CVEDetails {
+	details := vuln.CVEDetails{
+		CVE:    strings.ToValidUTF8(strings.TrimSpace(entry.ID), ""),
+		Source: Provider,
 	}
-	for _, opis := range wpis.Descriptions {
-		if opis.Lang == "en" {
-			szczegoly.Summary = skrocony(opis.Value)
+	for _, description := range entry.Descriptions {
+		if description.Lang == "en" {
+			details.Summary = shortened(description.Value)
 			break
 		}
 	}
-	if ocena, wersja, waga, wektor, ok := NajlepszaOcena(wpis.Metrics); ok {
-		szczegoly.CVSSScore = &ocena
-		szczegoly.CVSSVersion = wersja
-		szczegoly.CVSSSeverity = strings.ToLower(waga)
-		szczegoly.CVSSVector = wektor
+	if score, version, severity, vector, ok := BestScore(entry.Metrics); ok {
+		details.CVSSScore = &score
+		details.CVSSVersion = version
+		details.CVSSSeverity = strings.ToLower(severity)
+		details.CVSSVector = vector
 	}
-	szczegoly.PublishedAt = czas(wpis.Published)
-	szczegoly.ModifiedAt = czas(wpis.LastModified)
-	return szczegoly
+	details.PublishedAt = timestamp(entry.Published)
+	details.ModifiedAt = timestamp(entry.LastModified)
+	return details
 }
 
-// KolejnoscMetryk mowi, ktora ocena wygrywa, gdy jest ich kilka.
+// MetricOrder says which score wins when there are several.
 //
-// Nowsza wersja CVSS opisuje te sama podatnosc dokladniej, wiec bierzemy
-// najnowsza, ktora zrodlo podalo - a nie pierwsza z brzegu.
-var KolejnoscMetryk = []string{"cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"}
+// A newer version of CVSS describes the same vulnerability more precisely,
+// so we take the newest one the source gave - rather than the first one at
+// hand.
+var MetricOrder = []string{"cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"}
 
-// NajlepszaOcena wybiera ocene CVSS z metryk wpisu.
-func NajlepszaOcena(metryki map[string][]metryka) (float64, string, string, string, bool) {
-	for _, nazwa := range KolejnoscMetryk {
-		wpisy := metryki[nazwa]
-		if len(wpisy) == 0 {
+// BestScore picks the CVSS score out of the metrics of an entry.
+func BestScore(metrics map[string][]metric) (float64, string, string, string, bool) {
+	for _, name := range MetricOrder {
+		entries := metrics[name]
+		if len(entries) == 0 {
 			continue
 		}
-		wybrany := wpisy[0]
-		// Ocena producenta danych ma pierwszenstwo przed wtorna.
-		for _, wpis := range wpisy {
-			if strings.EqualFold(wpis.Type, "Primary") {
-				wybrany = wpis
+		chosen := entries[0]
+		// A score from the producer of the data takes precedence over a
+		// secondary one.
+		for _, entry := range entries {
+			if strings.EqualFold(entry.Type, "Primary") {
+				chosen = entry
 				break
 			}
 		}
-		dane := wybrany.CVSSData
-		if dane.BaseScore == 0 && dane.VectorString == "" {
+		data := chosen.CVSSData
+		if data.BaseScore == 0 && data.VectorString == "" {
 			continue
 		}
-		waga := dane.BaseSeverity
-		if waga == "" {
-			waga = wybrany.BaseSeverity
+		severity := data.BaseSeverity
+		if severity == "" {
+			severity = chosen.BaseSeverity
 		}
-		return dane.BaseScore, dane.Version, waga, dane.VectorString, true
+		return data.BaseScore, data.Version, severity, data.VectorString, true
 	}
 	return 0, "", "", "", false
 }
 
-// czas czyta znacznik NVD. Znaczniki przychodza bez strefy i sa w UTC.
-func czas(znacznik string) *time.Time {
-	znacznik = strings.TrimSpace(znacznik)
-	if znacznik == "" {
+// timestamp reads an NVD timestamp. The timestamps arrive without a zone and
+// are in UTC.
+func timestamp(mark string) *time.Time {
+	mark = strings.TrimSpace(mark)
+	if mark == "" {
 		return nil
 	}
-	for _, wzorzec := range []string{"2006-01-02T15:04:05.000", "2006-01-02T15:04:05", time.RFC3339} {
-		if chwila, err := time.Parse(wzorzec, znacznik); err == nil {
-			chwilaUTC := chwila.UTC()
-			return &chwilaUTC
+	for _, layout := range []string{"2006-01-02T15:04:05.000", "2006-01-02T15:04:05", time.RFC3339} {
+		if moment, err := time.Parse(layout, mark); err == nil {
+			momentUTC := moment.UTC()
+			return &momentUTC
 		}
 	}
 	return nil
 }
 
-// skrocony przycina opis do 500 znakow, a nie bajtow.
-func skrocony(opis string) string {
-	opis = strings.ToValidUTF8(strings.TrimSpace(opis), "")
-	znaki := []rune(opis)
-	if len(znaki) > 500 {
-		return string(znaki[:500])
+// shortened trims a description to 500 characters rather than bytes.
+func shortened(description string) string {
+	description = strings.ToValidUTF8(strings.TrimSpace(description), "")
+	runes := []rune(description)
+	if len(runes) > 500 {
+		return string(runes[:500])
 	}
-	return opis
+	return description
 }

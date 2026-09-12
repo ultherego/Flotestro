@@ -4,63 +4,67 @@ import (
 	"strings"
 )
 
-// PorownajRPM porownuje pelne wersje RPM w postaci EVR (epoka:wersja-wydanie).
+// CompareRPM compares full RPM versions in the EVR form
+// (epoch:version-release).
 //
-// Zwraca liczbe ujemna, zero albo dodatnia - tak jak rpmvercmp z librpm.
-func PorownajRPM(a, b string) int {
-	epokaA, wersjaA, wydanieA := rozbijEVR(a)
-	epokaB, wersjaB, wydanieB := rozbijEVR(b)
+// It returns a negative number, zero or a positive one - just like rpmvercmp
+// from librpm.
+func CompareRPM(a, b string) int {
+	epochA, versionA, releaseA := splitEVR(a)
+	epochB, versionB, releaseB := splitEVR(b)
 
-	if wynik := PorownajOdcinekRPM(epokaA, epokaB); wynik != 0 {
-		return wynik
+	if result := CompareRPMSegment(epochA, epochB); result != 0 {
+		return result
 	}
-	if wynik := PorownajOdcinekRPM(wersjaA, wersjaB); wynik != 0 {
-		return wynik
+	if result := CompareRPMSegment(versionA, versionB); result != 0 {
+		return result
 	}
-	// Wydanie porownujemy tylko wtedy, gdy obie strony je maja: advisory
-	// czesto podaje sama wersje, a wtedy "2.4.6" i "2.4.6-1" znacza to samo
-	// pytanie, a nie dwie rozne wersje.
-	if wydanieA == "" || wydanieB == "" {
+	// The release is compared only when both sides carry one: an advisory
+	// often gives the version alone, and then "2.4.6" and "2.4.6-1" mean the
+	// same question rather than two different versions.
+	if releaseA == "" || releaseB == "" {
 		return 0
 	}
-	return PorownajOdcinekRPM(wydanieA, wydanieB)
+	return CompareRPMSegment(releaseA, releaseB)
 }
 
-// rozbijEVR dzieli wersje RPM na epoke, wersje i wydanie.
-func rozbijEVR(evr string) (epoka, wersja, wydanie string) {
+// splitEVR divides an RPM version into the epoch, the version and the
+// release.
+func splitEVR(evr string) (epoch, version, release string) {
 	evr = strings.TrimSpace(evr)
-	epoka = "0"
-	if dwukropek := strings.Index(evr, ":"); dwukropek >= 0 {
-		epoka = evr[:dwukropek]
-		if strings.TrimSpace(epoka) == "" {
-			epoka = "0"
+	epoch = "0"
+	if colon := strings.Index(evr, ":"); colon >= 0 {
+		epoch = evr[:colon]
+		if strings.TrimSpace(epoch) == "" {
+			epoch = "0"
 		}
-		evr = evr[dwukropek+1:]
+		evr = evr[colon+1:]
 	}
-	if myslnik := strings.Index(evr, "-"); myslnik >= 0 {
-		return epoka, evr[:myslnik], evr[myslnik+1:]
+	if dash := strings.Index(evr, "-"); dash >= 0 {
+		return epoch, evr[:dash], evr[dash+1:]
 	}
-	return epoka, evr, ""
+	return epoch, evr, ""
 }
 
-// PorownajOdcinekRPM realizuje rpmvercmp dla jednego odcinka wersji.
+// CompareRPMSegment implements rpmvercmp for one segment of a version.
 //
-// Algorytm librpm: napisy dzielimy na ciagi cyfr, ciagi liter i reszte;
-// separatory sa pomijane, ciag cyfr jest zawsze nowszy od ciagu liter,
-// a tylda jest mniejsza od wszystkiego. Znak "^" oznacza wersje posrednia
-// i jest wiekszy od konca napisu, ale mniejszy od kazdego innego znaku.
-func PorownajOdcinekRPM(a, b string) int {
+// The librpm algorithm: strings are split into runs of digits, runs of
+// letters and the rest; separators are skipped, a run of digits is always
+// newer than a run of letters, and a tilde is smaller than everything. The
+// "^" character marks an intermediate version and is greater than the end of
+// the string but smaller than any other character.
+func CompareRPMSegment(a, b string) int {
 	i, j := 0, 0
 	for i < len(a) || j < len(b) {
-		// Separatory pomijamy po obu stronach.
-		for i < len(a) && !alfanumeryczny(a[i]) && a[i] != '~' && a[i] != '^' {
+		// Separators are skipped on both sides.
+		for i < len(a) && !isAlphanumeric(a[i]) && a[i] != '~' && a[i] != '^' {
 			i++
 		}
-		for j < len(b) && !alfanumeryczny(b[j]) && b[j] != '~' && b[j] != '^' {
+		for j < len(b) && !isAlphanumeric(b[j]) && b[j] != '~' && b[j] != '^' {
 			j++
 		}
 
-		// Tylda: mniejsza od wszystkiego, takze od konca napisu.
+		// A tilde: smaller than everything, including the end of the string.
 		if (i < len(a) && a[i] == '~') || (j < len(b) && b[j] == '~') {
 			switch {
 			case i >= len(a) || a[i] != '~':
@@ -72,7 +76,8 @@ func PorownajOdcinekRPM(a, b string) int {
 			j++
 			continue
 		}
-		// Daszek: wiekszy od konca napisu, mniejszy od kazdego innego znaku.
+		// A caret: greater than the end of the string, smaller than any other
+		// character.
 		if (i < len(a) && a[i] == '^') || (j < len(b) && b[j] == '^') {
 			switch {
 			case i >= len(a):
@@ -93,43 +98,43 @@ func PorownajOdcinekRPM(a, b string) int {
 			break
 		}
 
-		poczatekA, poczatekB := i, j
-		liczbowy := cyfra(a[i])
-		if liczbowy {
-			for i < len(a) && cyfra(a[i]) {
+		startA, startB := i, j
+		numeric := isDigit(a[i])
+		if numeric {
+			for i < len(a) && isDigit(a[i]) {
 				i++
 			}
-			for j < len(b) && cyfra(b[j]) {
+			for j < len(b) && isDigit(b[j]) {
 				j++
 			}
 		} else {
-			for i < len(a) && litera(a[i]) {
+			for i < len(a) && isLetter(a[i]) {
 				i++
 			}
-			for j < len(b) && litera(b[j]) {
+			for j < len(b) && isLetter(b[j]) {
 				j++
 			}
 		}
-		odcinekA, odcinekB := a[poczatekA:i], b[poczatekB:j]
-		if odcinekB == "" {
-			// Ciag cyfr jest zawsze nowszy od ciagu liter.
-			if liczbowy {
+		segmentA, segmentB := a[startA:i], b[startB:j]
+		if segmentB == "" {
+			// A run of digits is always newer than a run of letters.
+			if numeric {
 				return 1
 			}
 			return -1
 		}
-		if liczbowy {
-			odcinekA = strings.TrimLeft(odcinekA, "0")
-			odcinekB = strings.TrimLeft(odcinekB, "0")
-			if len(odcinekA) != len(odcinekB) {
-				if len(odcinekA) > len(odcinekB) {
+		if numeric {
+			segmentA = strings.TrimLeft(segmentA, "0")
+			segmentB = strings.TrimLeft(segmentB, "0")
+			if len(segmentA) != len(segmentB) {
+				if len(segmentA) > len(segmentB) {
 					return 1
 				}
 				return -1
 			}
 		}
-		if wynik := strings.Compare(odcinekA, odcinekB); wynik != 0 {
-			if wynik > 0 {
+		if result := strings.Compare(segmentA, segmentB); result != 0 {
+			if result > 0 {
 				return 1
 			}
 			return -1
@@ -146,8 +151,8 @@ func PorownajOdcinekRPM(a, b string) int {
 	}
 }
 
-func litera(znak byte) bool {
-	return (znak >= 'a' && znak <= 'z') || (znak >= 'A' && znak <= 'Z')
+func isLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-func alfanumeryczny(znak byte) bool { return cyfra(znak) || litera(znak) }
+func isAlphanumeric(c byte) bool { return isDigit(c) || isLetter(c) }

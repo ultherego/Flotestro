@@ -1,11 +1,12 @@
-// Command agentctl obsluguje agenta Flotestro na hoscie.
+// Command agentctl operates the Flotestro agent on a host.
 //
-// Narzedzie jest osobne od demona celowo. Operator, ktory stawia hosta albo
-// szuka przyczyny ciszy, potrzebuje odpowiedzi natychmiast i bez panelu -
-// a demon w tym czasie albo nie wstaje, albo wlasnie probuje sie polaczyc.
+// The tool is deliberately separate from the daemon. An operator who is
+// setting a host up or looking for the cause of silence needs an answer at
+// once and without the panel - and the daemon at that moment either does not
+// come up or is just trying to connect.
 //
-// Zadne polecenie nie zmienia stanu hosta poza jawnym poleceniem operatora
-// i zadne nie wypisuje sekretow.
+// No command changes the state of the host beyond an explicit command of the
+// operator, and none prints secrets.
 package main
 
 import (
@@ -17,52 +18,53 @@ import (
 )
 
 func main() {
-	os.Exit(uruchom(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func uruchom(argumenty []string, wyjscie, bledy io.Writer) int {
-	return uruchomZWejsciem(argumenty, os.Stdin, wyjscie, bledy)
+func run(args []string, out, errOut io.Writer) int {
+	return runWithInput(args, os.Stdin, out, errOut)
 }
 
-func uruchomZWejsciem(argumenty []string, wejscie io.Reader, wyjscie, bledy io.Writer) int {
-	if len(argumenty) == 0 {
-		pomoc(bledy)
+func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
+	if len(args) == 0 {
+		usage(errOut)
 		return 2
 	}
-	switch argumenty[0] {
+	switch args[0] {
 	case "config":
-		return poleceniaKonfiguracji(argumenty[1:], wyjscie, bledy)
+		return configurationCommands(args[1:], out, errOut)
 	case "status":
-		return poleceniaStanu(argumenty[1:], wyjscie, bledy)
+		return statusCommand(args[1:], out, errOut)
 	case "diagnose":
-		return poleceniaDiagnozy(argumenty[1:], wyjscie, bledy)
+		return diagnoseCommand(args[1:], out, errOut)
 	case "enroll":
-		return poleceniaEnrollmentu(argumenty[1:], wejscie, wyjscie, bledy)
+		return enrollmentCommand(args[1:], in_, out, errOut)
 	case "version":
-		// Sam numer wersji nie wystarcza, gdy pakiet zachowuje sie inaczej
-		// niz powinien: pierwsze pytanie brzmi "z ktorego commita to jest".
-		fmt.Fprintln(wyjscie, buildinfo.Opis("flotestro-agentctl"))
+		// The version number alone is not enough when a package behaves
+		// differently than it should: the first question is "which commit is
+		// this from".
+		fmt.Fprintln(out, buildinfo.Opis("flotestro-agentctl"))
 		return 0
 	case "help", "-h", "--help":
-		pomoc(wyjscie)
+		usage(out)
 		return 0
 	default:
-		fmt.Fprintf(bledy, "nieznane polecenie: %s\n", argumenty[0])
-		pomoc(bledy)
+		fmt.Fprintf(errOut, "unknown command: %s\n", args[0])
+		usage(errOut)
 		return 2
 	}
 }
 
-func pomoc(gdzie io.Writer) {
-	fmt.Fprint(gdzie, `flotestro-agentctl - narzedzie hosta
+func usage(where io.Writer) {
+	fmt.Fprint(where, `flotestro-agentctl - the tool of the host
 
-  enroll          [--token-file PLIK]  rejestruje host we flocie i zapisuje tozsamosc
-  config validate [--config PLIK]   sprawdza plik konfiguracji i prawa do niego
-  config show     [--config PLIK]   pokazuje ustawienia po uzupelnieniu domyslnych
-  status          [--config PLIK]   tozsamosc, certyfikat, sesja i helper
-  diagnose        [--config PLIK]   DNS, TCP, TLS, zegar, gniazdo i zdolnosci
-  version                           wersja narzedzia
+  enroll          [--token-file FILE]  registers the host in the fleet and writes the identity
+  config validate [--config FILE]   checks the configuration file and the permissions on it
+  config show     [--config FILE]   shows the settings once the defaults are filled in
+  status          [--config FILE]   the identity, the certificate, the session and the helper
+  diagnose        [--config FILE]   DNS, TCP, TLS, the clock, the socket and the capabilities
+  version                           the version of the tool
 
-Kody wyjscia: 0 gotowe, 1 problem do naprawy, 2 blad uzycia.
+Exit codes: 0 ready, 1 a problem to fix, 2 a usage error.
 `)
 }

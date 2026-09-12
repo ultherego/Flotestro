@@ -49,10 +49,10 @@ type InstalledPackage struct {
 // Klasy pochodzenia pakietu. Te same wartosci czyta korelator: pakiet spoza
 // dystrybucji nie podlega ustaleniom jej producenta.
 const (
-	PochodzenieDystrybucja = "vendor_distribution"
-	PochodzenieObce        = "third_party_repository"
-	PochodzenieLokalne     = "local_package"
-	PochodzenieNieznane    = "origin_unknown"
+	OriginDistribution = "vendor_distribution"
+	OriginThirdParty   = "third_party_repository"
+	OriginLocal        = "local_package"
+	OriginUnknown      = "origin_unknown"
 )
 
 // EVR sklada wersje w postaci, ktorej uzywa porownanie RPM.
@@ -233,7 +233,7 @@ func UzupelnijPochodzenieAPT(ctx context.Context, pakiety []InstalledPackage) {
 			pakiety[i].Origin = wpis.Origin
 			pakiety[i].OriginClass = wpis.Class
 		} else {
-			pakiety[i].OriginClass = PochodzenieNieznane
+			pakiety[i].OriginClass = OriginUnknown
 		}
 	}
 }
@@ -269,7 +269,7 @@ func ParsujPolicyAPT(wyjscie string) map[string]WpisPochodzenia {
 			return
 		}
 		switch {
-		case zWersji.Class != "" && zWersji.Class != PochodzenieLokalne:
+		case zWersji.Class != "" && zWersji.Class != OriginLocal:
 			wynik[nazwa] = zWersji
 		case zPakietu.Class != "":
 			// Wersja wycofana: pakiet nadal nalezy do repozytorium, z ktorego
@@ -278,7 +278,7 @@ func ParsujPolicyAPT(wyjscie string) map[string]WpisPochodzenia {
 		case zWersji.Class != "":
 			wynik[nazwa] = zWersji
 		default:
-			wynik[nazwa] = WpisPochodzenia{Class: PochodzenieNieznane}
+			wynik[nazwa] = WpisPochodzenia{Class: OriginUnknown}
 		}
 	}
 
@@ -318,8 +318,8 @@ func ParsujPolicyAPT(wyjscie string) map[string]WpisPochodzenia {
 			if wInstalowanej && zWersji.Class == "" {
 				zWersji = wpis
 			}
-			if wpis.Class == PochodzenieDystrybucja ||
-				(wpis.Class == PochodzenieObce && zPakietu.Class == "") {
+			if wpis.Class == OriginDistribution ||
+				(wpis.Class == OriginThirdParty && zPakietu.Class == "") {
 				zPakietu = wpis
 			}
 		case len(pola) >= 2 && sameCyfry(pola[len(pola)-1]):
@@ -358,20 +358,20 @@ var adresyDystrybucji = []string{
 func KlasaZrodlaAPT(wiersz string) WpisPochodzenia {
 	pola := strings.Fields(wiersz)
 	if len(pola) < 2 {
-		return WpisPochodzenia{Class: PochodzenieNieznane}
+		return WpisPochodzenia{Class: OriginUnknown}
 	}
 	adres := pola[1]
 	if strings.Contains(adres, "/var/lib/dpkg/status") {
 		// Wersja znana wylacznie z pliku stanu: pakiet przyszedl spoza
 		// repozytoriow - recznie albo z budowy lokalnej.
-		return WpisPochodzenia{Origin: adres, Class: PochodzenieLokalne}
+		return WpisPochodzenia{Origin: adres, Class: OriginLocal}
 	}
 	for _, producent := range adresyDystrybucji {
 		if strings.Contains(adres, producent) {
-			return WpisPochodzenia{Origin: adres, Class: PochodzenieDystrybucja}
+			return WpisPochodzenia{Origin: adres, Class: OriginDistribution}
 		}
 	}
-	return WpisPochodzenia{Origin: adres, Class: PochodzenieObce}
+	return WpisPochodzenia{Origin: adres, Class: OriginThirdParty}
 }
 
 // zainstalowaneRPM czyta baze RPM w pelnej postaci NEVRA.

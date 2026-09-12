@@ -1,23 +1,26 @@
-// Package ubuntu czyta dane OVAL Canonical.
+// Package ubuntu reads the OVAL data of Canonical.
 //
-// To jest zrodlo rozstrzygajace dla hostow Ubuntu. Canonical publikuje osobny
-// plik dla kazdego wydania, a w nim definicje per CVE: ktory pakiet zrodlowy
-// jest podatny i w ktorej wersji zostal naprawiony. Wersje sa backportowane,
-// wiec wedlug numeracji upstream wygladaja na podatne.
+// This is the settling source for Ubuntu hosts. Canonical publishes a
+// separate file for every release, and in it definitions per CVE: which
+// source package is vulnerable and in which version it was fixed. The
+// versions are backported, so by the upstream numbering they look
+// vulnerable.
 //
-// Czego to zrodlo nie mowi i czego panel po nim nie udaje:
+// What this source does not say and what the panel does not pretend to know
+// from it:
 //
-// Kieszen. Poprawka wydana w esm-apps albo esm-infra wymaga subskrypcji Ubuntu
-// Pro, a plik zapisuje kieszen wylacznie w komentarzu kryterium. Panel
-// traktuje ja jak kazda inna poprawke producenta: "producent wydal" to os
-// vendor_fix, a "da sie wziac z repozytorium tego hosta" to osobna os, ktora
-// bez metadanych repozytoriow zostaje nieustalona. Zadna z nich nie obiecuje
-// wiecej, niz panel sprawdzil.
+// The pocket. A fix released in esm-apps or esm-infra requires an Ubuntu Pro
+// subscription, and the file records the pocket in the comment of a criterion
+// alone. The panel treats it like any other vendor fix: "the vendor released
+// it" is the vendor_fix axis, and "it can be taken from a repository of this
+// host" is a separate axis that stays undetermined without the repository
+// metadata. Neither of them promises more than the panel has checked.
 //
-// Jadro. OVAL rozstrzyga jadro po wersji tej, ktora aktualnie dziala. Panel
-// ocenia pakiety zainstalowane, wiec stare jadro lezace obok dzialajacego tez
-// dostaje znalezisko. To jest swiadome: podatny plik na dysku jest podatny,
-// a "czy dziala" to pytanie, na ktore ocena pakietow nie odpowiada.
+// The kernel. OVAL settles the kernel by the version of the one currently
+// running. The panel assesses installed packages, so an old kernel lying next
+// to the running one gets a finding as well. That is deliberate: a vulnerable
+// file on disk is vulnerable, and "is it running" is a question a package
+// assessment does not answer.
 package ubuntu
 
 import (
@@ -37,327 +40,335 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
-// Dostawca jest nazwa zrodla zapisywana przy kazdym ustaleniu.
-const Dostawca = "ubuntu"
+// Provider is the name of the source written down with every finding.
+const Provider = "ubuntu"
 
-// AdresDomyslny wskazuje katalog z danymi OVAL.
-const AdresDomyslny = "https://security-metadata.canonical.com/oval/"
+// DefaultURL points at the directory with the OVAL data.
+const DefaultURL = "https://security-metadata.canonical.com/oval/"
 
-// Limity pobrania. Plik jednego wydania ma kilkanascie megabajtow spakowany
-// i okolo dwustu rozpakowany; odpowiedz istotnie wieksza oznacza, ze
-// pobieramy cos innego, niz myslimy - albo ze ktos podstawil bombe.
+// The limits of a fetch. The file of one release is more than a dozen
+// megabytes compressed and around two hundred decompressed; a substantially
+// larger answer means we are fetching something other than we think - or that
+// somebody planted a bomb.
 const (
-	MaksymalnyRozmiarSpakowany = 256 << 20
-	MaksymalnyRozmiar          = 2 << 30
+	MaxCompressedSize = 256 << 20
+	MaxSize           = 2 << 30
 )
 
-// ErrBezZmian oznacza feed, ktory sie nie zmienil od ostatniego pobrania.
-var ErrBezZmian = fmt.Errorf("feed nie zmienil sie od ostatniego pobrania")
+// ErrNotModified means a feed unchanged since the last fetch.
+var ErrNotModified = fmt.Errorf("the feed has not changed since the last fetch")
 
-// Zrodlo pobiera i parsuje dane OVAL Canonical.
-type Zrodlo struct {
-	Baza   string
+// Source fetches and parses the OVAL data of Canonical.
+type Source struct {
+	Base   string
 	Client *http.Client
 }
 
-// Nowe tworzy zrodlo.
-func Nowe(adres string, limit time.Duration) *Zrodlo {
-	if adres == "" {
-		adres = AdresDomyslny
+// New creates the source.
+func New(address string, limit time.Duration) *Source {
+	if address == "" {
+		address = DefaultURL
 	}
-	if !strings.HasSuffix(adres, "/") {
-		adres += "/"
+	if !strings.HasSuffix(address, "/") {
+		address += "/"
 	}
 	if limit <= 0 {
 		limit = 10 * time.Minute
 	}
-	return &Zrodlo{Baza: adres, Client: &http.Client{Timeout: limit}}
+	return &Source{Base: address, Client: &http.Client{Timeout: limit}}
 }
 
-func (z *Zrodlo) Nazwa() string { return Dostawca }
+func (z *Source) Name() string { return Provider }
 
-// Pobierz sciaga dane dla wskazanych wydan i skleja je w jeden snapshot.
+// Fetch pulls the data for the named releases and glues them into one
+// snapshot.
 //
-// Canonical publikuje plik na wydanie, wiec pobranie jest tyle razy, ile
-// wydan ma flota. Wydanie, ktorego Canonical nie publikuje, nie trafia do
-// snapshotu - i dobrze: host takiego wydania ma dostac powod "wydanie spoza
-// feedu", a nie ciche zero znalezisk.
-func (z *Zrodlo) Pobierz(ctx context.Context, wydania []string,
+// Canonical publishes a file per release, so there are as many fetches as the
+// fleet has releases. A release Canonical does not publish does not reach the
+// snapshot - and rightly so: a host of such a release is to get the reason "a
+// release outside the feed" rather than a silent zero findings.
+func (z *Source) Fetch(ctx context.Context, releases []string,
 	etag string) (vuln.Snapshot, []vuln.Advisory, error) {
-	snapshot := vuln.Snapshot{Provider: Dostawca}
-	lista := append([]string(nil), wydania...)
-	sort.Strings(lista)
+	snapshot := vuln.Snapshot{Provider: Provider}
+	list := append([]string(nil), releases...)
+	sort.Strings(list)
 
-	znaczniki := ParsujZnaczniki(etag)
-	nowe := map[string]string{}
-	var ustalenia []vuln.Advisory
-	var objete, bezZmian []string
-	var najnowszy time.Time
-	var zmienilo, pobralismy bool
-	for _, wydanie := range lista {
-		wynik, err := z.pobierzWydanie(ctx, wydanie, znaczniki[wydanie])
+	etags := ParseETags(etag)
+	updated := map[string]string{}
+	var advisories []vuln.Advisory
+	var covered, unchanged []string
+	var newest time.Time
+	var changed, fetchedAny bool
+	for _, release := range list {
+		result, err := z.fetchRelease(ctx, release, etags[release])
 		if err != nil {
 			return snapshot, nil, err
 		}
-		if wynik.brakWydania {
+		if result.releaseMissing {
 			continue
 		}
-		pobralismy = true
-		if wynik.bezZmian {
-			bezZmian = append(bezZmian, wydanie)
-			nowe[wydanie] = znaczniki[wydanie]
-			objete = append(objete, wydanie)
+		fetchedAny = true
+		if result.unchanged {
+			unchanged = append(unchanged, release)
+			updated[release] = etags[release]
+			covered = append(covered, release)
 			continue
 		}
-		zmienilo = true
-		ustalenia = append(ustalenia, wynik.ustalenia...)
-		nowe[wydanie] = wynik.etag
-		objete = append(objete, wydanie)
-		if wynik.zmodyfikowano.After(najnowszy) {
-			najnowszy = wynik.zmodyfikowano
+		changed = true
+		advisories = append(advisories, result.advisories...)
+		updated[release] = result.etag
+		covered = append(covered, release)
+		if result.modified.After(newest) {
+			newest = result.modified
 		}
 	}
 
-	if !pobralismy {
-		return snapshot, nil, fmt.Errorf("zadne z wydan %v nie ma danych OVAL", lista)
+	if !fetchedAny {
+		return snapshot, nil, fmt.Errorf("none of the releases %v has OVAL data", list)
 	}
-	if !zmienilo {
-		return snapshot, nil, ErrBezZmian
+	if !changed {
+		return snapshot, nil, ErrNotModified
 	}
-	// Snapshot jest jeden i musi byc kompletny: wydania, ktore odpowiedzialy
-	// "bez zmian", pobieramy jeszcze raz bezwarunkowo. Inaczej zapisalibysmy
-	// snapshot bez ich ustalen i ich hosty wygladalyby na czyste.
-	for _, wydanie := range bezZmian {
-		wynik, err := z.pobierzWydanie(ctx, wydanie, "")
+	// There is one snapshot and it has to be complete: the releases that
+	// answered "no changes" are fetched once more unconditionally. Otherwise
+	// we would write a snapshot without their findings and their hosts would
+	// look clean.
+	for _, release := range unchanged {
+		result, err := z.fetchRelease(ctx, release, "")
 		if err != nil {
 			return snapshot, nil, err
 		}
-		if wynik.brakWydania {
+		if result.releaseMissing {
 			continue
 		}
-		ustalenia = append(ustalenia, wynik.ustalenia...)
-		nowe[wydanie] = wynik.etag
-		if wynik.zmodyfikowano.After(najnowszy) {
-			najnowszy = wynik.zmodyfikowano
+		advisories = append(advisories, result.advisories...)
+		updated[release] = result.etag
+		if result.modified.After(newest) {
+			newest = result.modified
 		}
 	}
 
-	Uporzadkuj(ustalenia)
-	snapshot.Releases = objete
-	snapshot.ETag = ZlozZnaczniki(nowe)
-	snapshot.Digest = Odcisk(ustalenia)
-	snapshot.AdvisoryCount = len(ustalenia)
+	SortAdvisories(advisories)
+	snapshot.Releases = covered
+	snapshot.ETag = JoinETags(updated)
+	snapshot.Digest = Digest(advisories)
+	snapshot.AdvisoryCount = len(advisories)
 	snapshot.FetchedAt = time.Now().UTC()
-	if !najnowszy.IsZero() {
-		chwila := najnowszy.UTC()
-		snapshot.SourceModifiedAt = &chwila
+	if !newest.IsZero() {
+		moment := newest.UTC()
+		snapshot.SourceModifiedAt = &moment
 	}
-	return snapshot, ustalenia, nil
+	return snapshot, advisories, nil
 }
 
-// wynikWydania jest jednym pobraniem jednego pliku wydania.
-type wynikWydania struct {
-	ustalenia     []vuln.Advisory
-	etag          string
-	zmodyfikowano time.Time
-	bezZmian      bool
-	brakWydania   bool
+// releaseResult is one fetch of one release file.
+type releaseResult struct {
+	advisories     []vuln.Advisory
+	etag           string
+	modified       time.Time
+	unchanged      bool
+	releaseMissing bool
 }
 
-// pobierzWydanie sciaga i parsuje plik jednego wydania.
-func (z *Zrodlo) pobierzWydanie(ctx context.Context, wydanie, etag string) (wynikWydania, error) {
-	var wynik wynikWydania
-	adres := z.Baza + "com.ubuntu." + wydanie + ".cve.oval.xml.bz2"
-	zadanie, err := http.NewRequestWithContext(ctx, http.MethodGet, adres, nil)
+// fetchRelease pulls and parses the file of one release.
+func (z *Source) fetchRelease(ctx context.Context, release, etag string) (releaseResult, error) {
+	var result releaseResult
+	address := z.Base + "com.ubuntu." + release + ".cve.oval.xml.bz2"
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		return wynik, err
+		return result, err
 	}
 	if etag != "" {
-		zadanie.Header.Set("If-None-Match", etag)
+		request.Header.Set("If-None-Match", etag)
 	}
-	zadanie.Header.Set("User-Agent", "flotestro-vuln/1")
+	request.Header.Set("User-Agent", "flotestro-vuln/1")
 
-	odpowiedz, err := z.Client.Do(zadanie)
+	response, err := z.Client.Do(request)
 	if err != nil {
-		return wynik, err
+		return result, err
 	}
-	defer odpowiedz.Body.Close()
+	defer response.Body.Close()
 
-	switch odpowiedz.StatusCode {
+	switch response.StatusCode {
 	case http.StatusNotModified:
-		wynik.bezZmian = true
-		return wynik, nil
+		result.unchanged = true
+		return result, nil
 	case http.StatusNotFound, http.StatusGone:
-		// Canonical nie publikuje tego wydania. To nie jest blad pobrania:
-		// to odpowiedz "tego wydania nie obejmujemy".
-		wynik.brakWydania = true
-		return wynik, nil
+		// Canonical does not publish this release. That is not a fetch
+		// error: it is the answer "we do not cover this release".
+		result.releaseMissing = true
+		return result, nil
 	case http.StatusOK:
 	default:
-		return wynik, fmt.Errorf("OVAL %s odpowiedzial %s", wydanie, odpowiedz.Status)
+		return result, fmt.Errorf("OVAL %s answered %s", release, response.Status)
 	}
-	wynik.etag = odpowiedz.Header.Get("ETag")
-	if zmodyfikowano := odpowiedz.Header.Get("Last-Modified"); zmodyfikowano != "" {
-		if chwila, err := http.ParseTime(zmodyfikowano); err == nil {
-			wynik.zmodyfikowano = chwila
+	result.etag = response.Header.Get("ETag")
+	if modified := response.Header.Get("Last-Modified"); modified != "" {
+		if moment, err := http.ParseTime(modified); err == nil {
+			result.modified = moment
 		}
 	}
 
-	// Dwa liczniki, bo sa dwa rozmiary: spakowany chroni lacze, rozpakowany
-	// chroni pamiec. Archiwum o kilku megabajtach potrafi rozpakowac sie do
-	// gigabajtow, a strumien urwany w polowie wygladalby na komplet.
-	spakowany := &licznikBajtow{zrodlo: io.LimitReader(odpowiedz.Body, MaksymalnyRozmiarSpakowany+1)}
-	rozpakowany := &licznikBajtow{
-		zrodlo: io.LimitReader(bzip2.NewReader(spakowany), MaksymalnyRozmiar+1),
+	// Two counters, because there are two sizes: the compressed one guards
+	// the link, the decompressed one guards memory. An archive of a few
+	// megabytes can decompress into gigabytes, and a stream cut in half would
+	// look like the whole thing.
+	compressed := &byteCounter{source: io.LimitReader(response.Body, MaxCompressedSize+1)}
+	decompressed := &byteCounter{
+		source: io.LimitReader(bzip2.NewReader(compressed), MaxSize+1),
 	}
-	ustalenia, err := Parsuj(rozpakowany, wydanie)
-	if spakowany.przeczytane > MaksymalnyRozmiarSpakowany {
-		return wynik, fmt.Errorf("dane OVAL %s przekraczaja %d bajtow po pobraniu",
-			wydanie, MaksymalnyRozmiarSpakowany)
+	advisories, err := Parse(decompressed, release)
+	if compressed.read > MaxCompressedSize {
+		return result, fmt.Errorf("the OVAL data %s exceed %d bytes when fetched",
+			release, MaxCompressedSize)
 	}
-	if rozpakowany.przeczytane > MaksymalnyRozmiar {
-		return wynik, fmt.Errorf("dane OVAL %s przekraczaja %d bajtow po rozpakowaniu",
-			wydanie, MaksymalnyRozmiar)
+	if decompressed.read > MaxSize {
+		return result, fmt.Errorf("the OVAL data %s exceed %d bytes when decompressed",
+			release, MaxSize)
 	}
 	if err != nil {
-		return wynik, fmt.Errorf("OVAL %s: %w", wydanie, err)
+		return result, fmt.Errorf("OVAL %s: %w", release, err)
 	}
-	wynik.ustalenia = ustalenia
-	return wynik, nil
+	result.advisories = advisories
+	return result, nil
 }
 
-// licznikBajtow liczy, ile naprawde przeczytano ze strumienia.
-type licznikBajtow struct {
-	zrodlo      io.Reader
-	przeczytane int64
+// byteCounter counts how much was really read from the stream.
+type byteCounter struct {
+	source io.Reader
+	read   int64
 }
 
-func (l *licznikBajtow) Read(bufor []byte) (int, error) {
-	ile, err := l.zrodlo.Read(bufor)
-	l.przeczytane += int64(ile)
-	return ile, err
+func (l *byteCounter) Read(buffer []byte) (int, error) {
+	n, err := l.source.Read(buffer)
+	l.read += int64(n)
+	return n, err
 }
 
-// Elementy dokumentu OVAL, ktore cokolwiek rozstrzygaja. Reszty nie czytamy:
-// dokument opisuje takze testy rodziny systemu i wydania, a te panel zna
-// z inwentarza hosta.
-type definicja struct {
-	Klasa    string   `xml:"class,attr"`
-	Metadane metadane `xml:"metadata"`
-	Kryteria kryteria `xml:"criteria"`
+// The elements of an OVAL document that settle anything. We do not read the
+// rest: the document also describes the tests of the system family and of the
+// release, and the panel knows those from the inventory of the host.
+type definition struct {
+	Class    string   `xml:"class,attr"`
+	Metadata metadata `xml:"metadata"`
+	Criteria criteria `xml:"criteria"`
 }
 
-type metadane struct {
-	Tytul     string     `xml:"title"`
-	Opis      string     `xml:"description"`
-	Odnosniki []odnosnik `xml:"reference"`
-	Advisory  wpisPorady `xml:"advisory"`
+type metadata struct {
+	Title       string        `xml:"title"`
+	Description string        `xml:"description"`
+	References  []reference   `xml:"reference"`
+	Advisory    advisoryEntry `xml:"advisory"`
 }
 
-type odnosnik struct {
-	Zrodlo string `xml:"source,attr"`
+type reference struct {
+	Source string `xml:"source,attr"`
 	RefID  string `xml:"ref_id,attr"`
 }
 
-type wpisPorady struct {
-	Waga string  `xml:"severity"`
-	Data string  `xml:"public_date"`
-	CVE  wpisCVE `xml:"cve"`
+type advisoryEntry struct {
+	Severity string   `xml:"severity"`
+	Date     string   `xml:"public_date"`
+	CVE      cveEntry `xml:"cve"`
 }
 
-type wpisCVE struct {
-	Priorytet string `xml:"priority,attr"`
+type cveEntry struct {
+	Priority string `xml:"priority,attr"`
 }
 
-// kryteria sa drzewem: definicja jadra ma kryteria zagniezdzone na kilka
-// poziomow, po jednym na wariant jadra.
-type kryteria struct {
-	Kryteria  []kryteria  `xml:"criteria"`
-	Kryterium []kryterium `xml:"criterion"`
+// criteria are a tree: a kernel definition has criteria nested several
+// levels deep, one per kernel variant.
+type criteria struct {
+	Criteria  []criteria  `xml:"criteria"`
+	Criterion []criterion `xml:"criterion"`
 }
 
-type kryterium struct {
+type criterion struct {
 	TestRef string `xml:"test_ref,attr"`
 }
 
-type wpisTestu struct {
-	ID        string       `xml:"id,attr"`
-	Komentarz string       `xml:"comment,attr"`
-	Stan      odnosnikStan `xml:"state"`
+type testEntry struct {
+	ID      string   `xml:"id,attr"`
+	Comment string   `xml:"comment,attr"`
+	State   stateRef `xml:"state"`
 }
 
-type odnosnikStan struct {
+type stateRef struct {
 	Ref string `xml:"state_ref,attr"`
 }
 
-type wpisStanu struct {
-	ID      string   `xml:"id,attr"`
-	EVR     *wartosc `xml:"evr"`
-	Wartosc *wartosc `xml:"value"`
+type stateEntry struct {
+	ID    string `xml:"id,attr"`
+	EVR   *value `xml:"evr"`
+	Value *value `xml:"value"`
 }
 
-type wartosc struct {
-	Operacja string `xml:"operation,attr"`
-	Tresc    string `xml:",chardata"`
+type value struct {
+	Operation string `xml:"operation,attr"`
+	Content   string `xml:",chardata"`
 }
 
-// testKorelacji jest tym, co z testu OVAL zostaje po tlumaczeniu na jezyk
-// panelu: czyj to pakiet i ktory stan mowi o wersji naprawionej.
-type testKorelacji struct {
-	pakiet string
-	stan   string
-	jadro  bool
+// correlationTest is what is left of an OVAL test after the translation into
+// the language of the panel: whose package it is and which state says the
+// fixed version.
+type correlationTest struct {
+	pkg    string
+	state  string
+	kernel bool
 }
 
-// wpisDefinicji jest definicja po odchudzeniu.
+// definitionEntry is a definition after slimming down.
 //
-// Definicje sa w dokumencie przed testami, wiec musimy je przetrzymac do
-// konca pliku - a w calosci nie zmieszcza sie w pamieci panelu: same opisy
-// jednego wydania to grubo ponad sto megabajtow, bo Canonical dokleja do
-// kazdego instrukcje aktualizacji dla kilkudziesieciu wariantow jadra.
-// Zostawiamy z definicji tylko to, co trafi do ustalenia.
-type wpisDefinicji struct {
-	cve   string
-	waga  string
-	data  string
-	tytul string
-	testy []string
+// The definitions come in the document before the tests, so we have to keep
+// them until the end of the file - and as a whole they do not fit in the
+// memory of the panel: the descriptions of one release alone are well over a
+// hundred megabytes, because Canonical appends to each of them update
+// instructions for dozens of kernel variants. We keep from a definition only
+// what reaches the finding.
+type definitionEntry struct {
+	cve      string
+	severity string
+	data     string
+	title    string
+	tests    []string
 }
 
-// odchudz zostawia z definicji to, co panel naprawde zapisze.
-func odchudz(wpis definicja) wpisDefinicji {
-	wynik := wpisDefinicji{
-		waga:  Waga(wpis.Metadane.Advisory.CVE.Priorytet, wpis.Metadane.Advisory.Waga),
-		data:  strings.TrimSpace(wpis.Metadane.Advisory.Data),
-		tytul: skrocony(bezInstrukcji(wpis.Metadane.Opis)),
-		testy: zbierzTesty(wpis.Kryteria),
+// slim leaves from a definition what the panel really writes down.
+func slim(entry definition) definitionEntry {
+	result := definitionEntry{
+		severity: Severity(entry.Metadata.Advisory.CVE.Priority, entry.Metadata.Advisory.Severity),
+		data:     strings.TrimSpace(entry.Metadata.Advisory.Date),
+		title:    shortened(withoutInstructions(entry.Metadata.Description)),
+		tests:    collectTests(entry.Criteria),
 	}
-	if wynik.tytul == "" {
-		wynik.tytul = skrocony(wpis.Metadane.Tytul)
+	if result.title == "" {
+		result.title = shortened(entry.Metadata.Title)
 	}
-	for _, odn := range wpis.Metadane.Odnosniki {
-		if strings.EqualFold(odn.Zrodlo, "CVE") {
-			wynik.cve = strings.ToValidUTF8(odn.RefID, "")
+	for _, ref := range entry.Metadata.References {
+		if strings.EqualFold(ref.Source, "CVE") {
+			result.cve = strings.ToValidUTF8(ref.RefID, "")
 			break
 		}
 	}
-	return wynik
+	return result
 }
 
-// Parsuj czyta dane OVAL jednego wydania i zwraca ustalenia panelu.
+// Parse reads the OVAL data of one release and returns the findings of the
+// panel.
 //
-// Strumieniowo, bo plik wydania ma po rozpakowaniu okolo dwustu megabajtow.
-// Definicje sa w dokumencie przed testami i stanami, wiec zlaczenie robimy na
-// koncu - trzymamy z definicji tylko to, co do niego potrzebne.
-func Parsuj(zrodlo io.Reader, wydanie string) ([]vuln.Advisory, error) {
-	dekoder := xml.NewDecoder(zrodlo)
-	var definicje []wpisDefinicji
-	testy := map[string]testKorelacji{}
-	stany := map[string]string{}
-	zamkniete := false
+// As a stream, because the file of a release is around two hundred megabytes
+// once decompressed. The definitions come in the document before the tests
+// and the states, so the join is made at the end - we keep from a definition
+// only what it needs.
+func Parse(source io.Reader, release string) ([]vuln.Advisory, error) {
+	decoder := xml.NewDecoder(source)
+	var definitions []definitionEntry
+	tests := map[string]correlationTest{}
+	states := map[string]string{}
+	closed := false
 
 	for {
-		token, err := dekoder.Token()
+		token, err := decoder.Token()
 		if err == io.EOF {
 			break
 		}
@@ -368,186 +379,189 @@ func Parsuj(zrodlo io.Reader, wydanie string) ([]vuln.Advisory, error) {
 		case xml.StartElement:
 			switch element.Name.Local {
 			case "definition":
-				var wpis definicja
-				if err := dekoder.DecodeElement(&wpis, &element); err != nil {
+				var entry definition
+				if err := decoder.DecodeElement(&entry, &element); err != nil {
 					return nil, err
 				}
-				if wpis.Klasa == "vulnerability" {
-					definicje = append(definicje, odchudz(wpis))
+				if entry.Class == "vulnerability" {
+					definitions = append(definitions, slim(entry))
 				}
 			case "dpkginfo_test", "variable_test":
-				var wpis wpisTestu
-				if err := dekoder.DecodeElement(&wpis, &element); err != nil {
+				var entry testEntry
+				if err := decoder.DecodeElement(&entry, &element); err != nil {
 					return nil, err
 				}
-				jadro := element.Name.Local == "variable_test"
-				if jadro && !strings.Contains(wpis.Komentarz, "kernel") {
+				kernel := element.Name.Local == "variable_test"
+				if kernel && !strings.Contains(entry.Comment, "kernel") {
 					continue
 				}
-				// Nazwa pakietu zrodlowego jest w komentarzu testu:
-				// struktura OVAL niesie w obiekcie tylko pakiety binarne,
-				// a Canonical prowadzi bezpieczenstwo po zrodle.
-				pakiet := wCudzyslowie(wpis.Komentarz)
-				if pakiet == "" {
+				// The name of the source package is in the comment of the
+				// test: the OVAL structure carries only binary packages in
+				// the object, and Canonical tracks security by the source.
+				pkg := inQuotes(entry.Comment)
+				if pkg == "" {
 					continue
 				}
-				testy[wpis.ID] = testKorelacji{pakiet: pakiet, stan: wpis.Stan.Ref, jadro: jadro}
+				tests[entry.ID] = correlationTest{pkg: pkg, state: entry.State.Ref, kernel: kernel}
 			case "dpkginfo_state", "variable_state":
-				var wpis wpisStanu
-				if err := dekoder.DecodeElement(&wpis, &element); err != nil {
+				var entry stateEntry
+				if err := decoder.DecodeElement(&entry, &element); err != nil {
 					return nil, err
 				}
-				if wersja := wersjaStanu(wpis); wersja != "" {
-					stany[wpis.ID] = wersja
+				if version := stateVersion(entry); version != "" {
+					states[entry.ID] = version
 				}
 			}
 		case xml.EndElement:
 			if element.Name.Local == "oval_definitions" {
-				zamkniete = true
+				closed = true
 			}
 		}
 	}
 
-	// Dokument urwany w polowie konczy sie po prostu brakiem kolejnego
-	// tokenu. Bez tego sprawdzenia panel dostalby polowe danych jako komplet
-	// i uznal brakujace ustalenia za nieistniejace.
-	if !zamkniete {
-		return nil, fmt.Errorf("dokument OVAL urwany przed zamknieciem")
+	// A document cut in half simply ends with no further token. Without this
+	// check the panel would get half the data as the whole thing and treat
+	// the missing findings as non-existent.
+	if !closed {
+		return nil, fmt.Errorf("the OVAL document was cut before the closing")
 	}
 
-	ustalenia := zlacz(definicje, testy, stany, wydanie)
-	// Dane, ktorych nie umiemy przeczytac, nie sa danymi pustymi. Gdyby
-	// Canonical zmienil ksztalt dokumentu, panel ma powiedziec "blad", a nie
-	// pokazac floty bez podatnosci.
-	if len(definicje) > 0 && len(ustalenia) == 0 {
-		return nil, fmt.Errorf("dokument OVAL ma %d definicji, z ktorych zadna nic nie ustala",
-			len(definicje))
+	advisories := join(definitions, tests, states, release)
+	// Date we cannot read are not empty data. Were Canonical to change the
+	// shape of the document, the panel is to say "error" rather than show a
+	// fleet without vulnerabilities.
+	if len(definitions) > 0 && len(advisories) == 0 {
+		return nil, fmt.Errorf("the OVAL document has %d definitions, none of which settles anything",
+			len(definitions))
 	}
-	Uporzadkuj(ustalenia)
-	return ustalenia, nil
+	SortAdvisories(advisories)
+	return advisories, nil
 }
 
-// wersjaStanu wyciaga wersje naprawiona ze stanu OVAL.
+// stateVersion extracts the fixed version out of an OVAL state.
 //
-// Rozumiemy wylacznie porownanie "mniejsza niz": tak Canonical zapisuje
-// "naprawione od tej wersji". Innego operatora nie zgadujemy - stan, ktorego
-// nie rozumiemy, zostaje bez wersji i pakiet wyjdzie jako podatny bez
-// poprawki, a nie jako naprawiony.
-func wersjaStanu(wpis wpisStanu) string {
-	for _, pole := range []*wartosc{wpis.EVR, wpis.Wartosc} {
-		if pole == nil || pole.Operacja != "less than" {
+// We understand only the comparison "less than": that is how Canonical writes
+// "fixed from this version". We do not guess any other operator - a state we
+// do not understand is left without a version and the package comes out as
+// vulnerable without a fix rather than as fixed.
+func stateVersion(entry stateEntry) string {
+	for _, field := range []*value{entry.EVR, entry.Value} {
+		if field == nil || field.Operation != "less than" {
 			continue
 		}
-		if wersja := strings.TrimSpace(pole.Tresc); wersja != "" {
-			return strings.ToValidUTF8(wersja, "")
+		if version := strings.TrimSpace(field.Content); version != "" {
+			return strings.ToValidUTF8(version, "")
 		}
 	}
 	return ""
 }
 
-// stanPakietu jest ustaleniem dla jednego pakietu zrodlowego w jednym CVE.
-type stanPakietu struct {
-	status string
-	wersja string
+// packageState is the finding for one source package in one CVE.
+type packageState struct {
+	status  string
+	version string
 }
 
-// zlacz laczy definicje z testami i stanami w ustalenia panelu.
-func zlacz(definicje []wpisDefinicji, testy map[string]testKorelacji,
-	stany map[string]string, wydanie string) []vuln.Advisory {
-	var ustalenia []vuln.Advisory
-	for _, wpis := range definicje {
-		if wpis.cve == "" {
+// join joins the definitions with the tests and the states into findings of
+// the panel.
+func join(definitions []definitionEntry, tests map[string]correlationTest,
+	states map[string]string, release string) []vuln.Advisory {
+	var advisories []vuln.Advisory
+	for _, entry := range definitions {
+		if entry.cve == "" {
 			continue
 		}
 
-		pakiety := map[string]stanPakietu{}
-		for _, ref := range wpis.testy {
-			test, ok := testy[ref]
+		pkgStates := map[string]packageState{}
+		for _, ref := range entry.tests {
+			test, ok := tests[ref]
 			if !ok {
 				continue
 			}
-			wersja := stany[test.stan]
-			// Kryterium jadra bez wersji nie mowi o podatnosci, tylko
-			// o tym, ktory wariant jadra dziala.
-			if test.jadro && wersja == "" {
+			version := states[test.state]
+			// A kernel criterion without a version does not speak about a
+			// vulnerability, only about which kernel variant is running.
+			if test.kernel && version == "" {
 				continue
 			}
-			status := vuln.StatusOtwarte
-			if wersja != "" {
-				status = vuln.StatusNaprawione
+			status := vuln.StatusOpen
+			if version != "" {
+				status = vuln.StatusFixed
 			}
-			pakiety[test.pakiet] = polacz(pakiety[test.pakiet], stanPakietu{status, wersja})
+			pkgStates[test.pkg] = merge(pkgStates[test.pkg], packageState{status, version})
 		}
 
-		for pakiet, stan := range pakiety {
-			ustalenia = append(ustalenia, ustalenie(wpis, wydanie, pakiet, stan))
+		for pkg, state := range pkgStates {
+			advisories = append(advisories, advisoryFor(entry, release, pkg, state))
 		}
 	}
-	return ustalenia
+	return advisories
 }
 
-// polacz rozstrzyga dwa ustalenia o tym samym pakiecie w jednym CVE.
+// merge settles two findings about the same package in one CVE.
 //
-// Jedno CVE potrafi opisac ten sam pakiet w kilku kieszeniach: w glownej bez
-// poprawki, w esm-apps z poprawka. Wygrywa poprawka - producent ja wydal.
-// Gdy wersji jest kilka, bierzemy najnizsza: to od niej pakiet zawiera
-// poprawke, wiec host z wersja wyzsza jest naprawiony w kazdej z kieszeni.
-func polacz(poprzedni, nowy stanPakietu) stanPakietu {
-	if poprzedni.status == "" {
-		return nowy
+// One CVE can describe the same package in several pockets: in the main one
+// without a fix, in esm-apps with one. The fix wins - the vendor released it.
+// When there are several versions we take the lowest: it is from that one
+// that the package carries the fix, so a host with a higher version is fixed
+// in every pocket.
+func merge(previous, current packageState) packageState {
+	if previous.status == "" {
+		return current
 	}
-	if poprzedni.status != vuln.StatusNaprawione {
-		return nowy
+	if previous.status != vuln.StatusFixed {
+		return current
 	}
-	if nowy.status != vuln.StatusNaprawione {
-		return poprzedni
+	if current.status != vuln.StatusFixed {
+		return previous
 	}
-	if version.PorownajDeb(nowy.wersja, poprzedni.wersja) < 0 {
-		return nowy
+	if version.CompareDeb(current.version, previous.version) < 0 {
+		return current
 	}
-	return poprzedni
+	return previous
 }
 
-// zbierzTesty schodzi po drzewie kryteriow i zbiera odnosniki do testow.
-func zbierzTesty(drzewo kryteria) []string {
-	var refy []string
-	for _, wpis := range drzewo.Kryterium {
-		if wpis.TestRef != "" {
-			refy = append(refy, wpis.TestRef)
+// collectTests walks down the tree of criteria and gathers the references to
+// the tests.
+func collectTests(tree criteria) []string {
+	var refs []string
+	for _, entry := range tree.Criterion {
+		if entry.TestRef != "" {
+			refs = append(refs, entry.TestRef)
 		}
 	}
-	for _, galaz := range drzewo.Kryteria {
-		refy = append(refy, zbierzTesty(galaz)...)
+	for _, branch := range tree.Criteria {
+		refs = append(refs, collectTests(branch)...)
 	}
-	return refy
+	return refs
 }
 
-// ustalenie sklada jedno ustalenie panelu.
-func ustalenie(wpis wpisDefinicji, wydanie, pakiet string, stan stanPakietu) vuln.Advisory {
-	wynik := vuln.Advisory{
-		Provider: Dostawca, AdvisoryID: wpis.cve, CVEIDs: []string{wpis.cve},
-		Distribution: "ubuntu", Release: wydanie,
-		SourcePackage:  strings.ToValidUTF8(pakiet, ""),
-		Status:         stan.status,
-		FixedVersion:   stan.wersja,
-		VendorSeverity: wpis.waga,
-		Title:          wpis.tytul,
-		URL:            "https://ubuntu.com/security/" + wpis.cve,
+// advisoryFor assembles one finding of the panel.
+func advisoryFor(entry definitionEntry, release, pkg string, state packageState) vuln.Advisory {
+	result := vuln.Advisory{
+		Provider: Provider, AdvisoryID: entry.cve, CVEIDs: []string{entry.cve},
+		Distribution: "ubuntu", Release: release,
+		SourcePackage:  strings.ToValidUTF8(pkg, ""),
+		Status:         state.status,
+		FixedVersion:   state.version,
+		VendorSeverity: entry.severity,
+		Title:          entry.title,
+		URL:            "https://ubuntu.com/security/" + entry.cve,
 	}
-	if chwila, err := time.Parse(time.RFC3339, wpis.data); err == nil {
-		chwilaUTC := chwila.UTC()
-		wynik.PublishedAt = &chwilaUTC
+	if moment, err := time.Parse(time.RFC3339, entry.data); err == nil {
+		momentUTC := moment.UTC()
+		result.PublishedAt = &momentUTC
 	}
-	return wynik
+	return result
 }
 
-// Waga tlumaczy priorytet Canonical na wage producenta.
+// Severity translates the priority of Canonical into a vendor severity.
 //
-// "untriaged" nie jest waga: to brak wagi i tak ma zostac. Producent, ktory
-// jeszcze nie ocenil, nie powiedzial "nieistotne".
-func Waga(priorytet, waga string) string {
-	for _, kandydat := range []string{priorytet, waga} {
-		switch strings.ToLower(strings.TrimSpace(kandydat)) {
+// "untriaged" is not a severity: it is a missing severity and is to stay one.
+// A vendor that has not scored yet has not said "negligible".
+func Severity(priority, severity string) string {
+	for _, candidate := range []string{priority, severity} {
+		switch strings.ToLower(strings.TrimSpace(candidate)) {
 		case "critical":
 			return "critical"
 		case "high":
@@ -563,105 +577,105 @@ func Waga(priorytet, waga string) string {
 	return ""
 }
 
-// Uporzadkuj ustawia ustalenia w kolejnosci niezaleznej od kolejnosci
-// pobrania: odcisk musi byc ten sam dla tych samych danych.
-func Uporzadkuj(ustalenia []vuln.Advisory) {
-	sort.Slice(ustalenia, func(i, j int) bool {
-		if ustalenia[i].SourcePackage != ustalenia[j].SourcePackage {
-			return ustalenia[i].SourcePackage < ustalenia[j].SourcePackage
+// SortAdvisories puts the findings in an order independent of the order of
+// the fetch: the digest has to be the same for the same data.
+func SortAdvisories(advisories []vuln.Advisory) {
+	sort.Slice(advisories, func(i, j int) bool {
+		if advisories[i].SourcePackage != advisories[j].SourcePackage {
+			return advisories[i].SourcePackage < advisories[j].SourcePackage
 		}
-		if ustalenia[i].Release != ustalenia[j].Release {
-			return ustalenia[i].Release < ustalenia[j].Release
+		if advisories[i].Release != advisories[j].Release {
+			return advisories[i].Release < advisories[j].Release
 		}
-		return ustalenia[i].AdvisoryID < ustalenia[j].AdvisoryID
+		return advisories[i].AdvisoryID < advisories[j].AdvisoryID
 	})
 }
 
-// Odcisk liczy odcisk kanonicznej postaci ustalen.
-func Odcisk(ustalenia []vuln.Advisory) string {
-	suma := sha256.New()
-	suma.Write([]byte("flotestro/vuln/ubuntu/v1\n"))
-	for _, ustalenie := range ustalenia {
-		suma.Write([]byte(strings.Join([]string{
-			ustalenie.SourcePackage, ustalenie.Release, ustalenie.AdvisoryID,
-			ustalenie.Status, ustalenie.FixedVersion, ustalenie.VendorSeverity,
+// Digest computes the digest of the canonical form of the findings.
+func Digest(advisories []vuln.Advisory) string {
+	sum := sha256.New()
+	sum.Write([]byte("flotestro/vuln/ubuntu/v1\n"))
+	for _, advisoryFor := range advisories {
+		sum.Write([]byte(strings.Join([]string{
+			advisoryFor.SourcePackage, advisoryFor.Release, advisoryFor.AdvisoryID,
+			advisoryFor.Status, advisoryFor.FixedVersion, advisoryFor.VendorSeverity,
 		}, "\x1f")))
-		suma.Write([]byte{'\n'})
+		sum.Write([]byte{'\n'})
 	}
-	return hex.EncodeToString(suma.Sum(nil))
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// ParsujZnaczniki czyta znaczniki ETag zapisane przy poprzednim snapshocie.
+// ParseETags reads the ETags written down with the previous snapshot.
 //
-// Snapshot jest jeden, a plikow tyle, ile wydan - wiec w jednym polu siedzi
-// mapa "wydanie=znacznik". Wpisu, ktory nie ma tego ksztaltu, nie zgadujemy:
-// gorzej niz pobrac za duzo jest nie pobrac zmiany.
-func ParsujZnaczniki(etag string) map[string]string {
-	znaczniki := map[string]string{}
-	for _, wpis := range strings.Fields(etag) {
-		wydanie, znacznik, ok := strings.Cut(wpis, "=")
-		if !ok || wydanie == "" || znacznik == "" {
+// There is one snapshot and as many files as releases - so one field holds a
+// map "release=etag". An entry that does not have that shape is not guessed
+// at: worse than fetching too much is not fetching a change.
+func ParseETags(etag string) map[string]string {
+	etags := map[string]string{}
+	for _, entry := range strings.Fields(etag) {
+		release, tag, ok := strings.Cut(entry, "=")
+		if !ok || release == "" || tag == "" {
 			continue
 		}
-		znaczniki[wydanie] = znacznik
+		etags[release] = tag
 	}
-	return znaczniki
+	return etags
 }
 
-// ZlozZnaczniki zapisuje znaczniki wydan w jednym polu snapshotu.
-func ZlozZnaczniki(znaczniki map[string]string) string {
-	wydania := make([]string, 0, len(znaczniki))
-	for wydanie := range znaczniki {
-		wydania = append(wydania, wydanie)
+// JoinETags writes the etags of the releases into one field of the snapshot.
+func JoinETags(etags map[string]string) string {
+	releases := make([]string, 0, len(etags))
+	for release := range etags {
+		releases = append(releases, release)
 	}
-	sort.Strings(wydania)
-	wpisy := make([]string, 0, len(wydania))
-	for _, wydanie := range wydania {
-		znacznik := znaczniki[wydanie]
-		// Znacznik ze spacja rozpadlby sie przy odczycie na dwa wpisy.
-		// Pomijamy go: pobranie bezwarunkowe jest tanszym bledem niz
-		// pobranie warunkowe z bledna wartoscia.
-		if znacznik == "" || strings.ContainsAny(znacznik, " \t\n") {
+	sort.Strings(releases)
+	entries := make([]string, 0, len(releases))
+	for _, release := range releases {
+		tag := etags[release]
+		// An etag with a space would fall apart into two entries when read
+		// back. We skip it: an unconditional fetch is a cheaper mistake than
+		// a conditional fetch with a wrong value.
+		if tag == "" || strings.ContainsAny(tag, " \t\n") {
 			continue
 		}
-		wpisy = append(wpisy, wydanie+"="+znacznik)
+		entries = append(entries, release+"="+tag)
 	}
-	return strings.Join(wpisy, " ")
+	return strings.Join(entries, " ")
 }
 
-// wCudzyslowie zwraca pierwszy tekst w apostrofach.
-func wCudzyslowie(tekst string) string {
-	poczatek := strings.Index(tekst, "'")
-	if poczatek < 0 {
+// inQuotes returns the first text in apostrophes.
+func inQuotes(text string) string {
+	start := strings.Index(text, "'")
+	if start < 0 {
 		return ""
 	}
-	reszta := tekst[poczatek+1:]
-	koniec := strings.Index(reszta, "'")
-	if koniec <= 0 {
+	rest := text[start+1:]
+	end := strings.Index(rest, "'")
+	if end <= 0 {
 		return ""
 	}
-	return strings.ToValidUTF8(reszta[:koniec], "")
+	return strings.ToValidUTF8(rest[:end], "")
 }
 
-// bezInstrukcji ucina z opisu instrukcje aktualizacji.
+// withoutInstructions cuts the update instructions out of a description.
 //
-// Canonical doklada do opisu liste pakietow do zainstalowania - dla kazdego
-// wariantu jadra osobno. To jest instrukcja, a nie opis podatnosci, i po
-// przycieciu do trzystu znakow zostawalaby z niej sama polowa pierwszej
-// komendy.
-func bezInstrukcji(opis string) string {
-	if ciecie := strings.Index(opis, "Update Instructions:"); ciecie >= 0 {
-		opis = opis[:ciecie]
+// Canonical appends to the description a list of packages to install - for
+// every kernel variant separately. That is an instruction rather than a
+// description of the vulnerability, and after trimming to three hundred
+// characters only half of the first command would be left of it.
+func withoutInstructions(description string) string {
+	if cut := strings.Index(description, "Update Instructions:"); cut >= 0 {
+		description = description[:cut]
 	}
-	return opis
+	return description
 }
 
-// skrocony przycina opis do 300 znakow, a nie bajtow.
-func skrocony(opis string) string {
-	opis = strings.ToValidUTF8(strings.TrimSpace(opis), "")
-	znaki := []rune(opis)
-	if len(znaki) > 300 {
-		return string(znaki[:300])
+// shortened trims a description to 300 characters rather than bytes.
+func shortened(description string) string {
+	description = strings.ToValidUTF8(strings.TrimSpace(description), "")
+	runes := []rune(description)
+	if len(runes) > 300 {
+		return string(runes[:300])
 	}
-	return opis
+	return description
 }

@@ -12,7 +12,7 @@ import (
 )
 
 // SetPodatnosci podlacza korelator podatnosci.
-func (s *Server) SetPodatnosci(store *vuln.Store, pakiety *vuln.MagazynPakietow,
+func (s *Server) SetPodatnosci(store *vuln.Store, pakiety *vuln.PackageStore,
 	maksymalnyWiekFeedu time.Duration) {
 	s.podatnosci = store
 	s.pakietyHostow = pakiety
@@ -26,13 +26,13 @@ func (s *Server) SetPodatnosci(store *vuln.Store, pakiety *vuln.MagazynPakietow,
 // pokrycie i powod jego braku stoja tu obok listy, a nie pod nia.
 type raportPodatnosci struct {
 	HostID   string            `json:"host_id"`
-	State    vuln.StanHosta    `json:"state"`
+	State    vuln.HostState    `json:"state"`
 	Findings []vuln.Assessment `json:"findings"`
 	// PackageState opisuje liste pakietow, na ktorej oparto ocene,
 	// a AdvisoryState - zestaw ustalen producenta znany hostowi. To dwa
 	// osobne zrodla i dwa osobne cykle odswiezania.
-	PackageState  vuln.StanListy   `json:"package_state"`
-	AdvisoryState vuln.StanUstalen `json:"advisory_state"`
+	PackageState  vuln.PackageListState `json:"package_state"`
+	AdvisoryState vuln.AdvisoryState    `json:"advisory_state"`
 	// Snapshot opisuje dane, ktore rozstrzygnely.
 	Snapshot *vuln.Snapshot `json:"snapshot,omitempty"`
 	// SnapshotStale mowi, ze dane sa starsze, niz dopuszcza polityka.
@@ -47,7 +47,7 @@ type raportPodatnosci struct {
 	// upstreamowej. Stoja obok znalezisk, a nie w nich, bo niczego w nich
 	// nie zmieniaja - o tym, czy pakiet jest podatny, mowi wylacznie
 	// producent dystrybucji. Brak wpisu jest normalny.
-	CVEDetails map[string]vuln.SzczegolyCVE `json:"cve_details,omitempty"`
+	CVEDetails map[string]vuln.CVEDetails `json:"cve_details,omitempty"`
 }
 
 // szczegolyCVE dobiera wzbogacenie do znalezisk.
@@ -55,7 +55,7 @@ type raportPodatnosci struct {
 // Bezglosnie: brak opisow nie moze przeszkodzic w pokazaniu oceny, bo ocena
 // z nich nie korzysta. Gdy zrodla wzbogacajacego nie ma albo odczyt sie nie
 // uda, zakladka pokazuje to samo co zawsze, tylko bez wagi upstreamowej.
-func (s *Server) szczegolyCVE(ctx context.Context, ustalenia []vuln.Assessment) map[string]vuln.SzczegolyCVE {
+func (s *Server) szczegolyCVE(ctx context.Context, ustalenia []vuln.Assessment) map[string]vuln.CVEDetails {
 	widziane := map[string]bool{}
 	numery := make([]string, 0, len(ustalenia))
 	for _, ustalenie := range ustalenia {
@@ -70,7 +70,7 @@ func (s *Server) szczegolyCVE(ctx context.Context, ustalenia []vuln.Assessment) 
 	if len(numery) == 0 {
 		return nil
 	}
-	szczegoly, err := s.podatnosci.Szczegoly(ctx, numery)
+	szczegoly, err := s.podatnosci.Details(ctx, numery)
 	if err != nil {
 		s.log.Error("nie odczytano opisow podatnosci", "err", err)
 		return nil
@@ -94,23 +94,23 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	stany, err := s.podatnosci.StanyHostow(r.Context(), []string{hostID})
+	stany, err := s.podatnosci.HostStates(r.Context(), []string{hostID})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	ustalenia, err := s.podatnosci.Ustalenia(r.Context(), hostID, false)
+	ustalenia, err := s.podatnosci.Advisories(r.Context(), hostID, false)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	stanListy, err := s.pakietyHostow.Stan(r.Context(), hostID)
+	stanListy, err := s.pakietyHostow.State(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 
-	stanUstalen, err := s.pakietyHostow.StanUstalenHosta(r.Context(), hostID)
+	stanUstalen, err := s.pakietyHostow.HostAdvisoryState(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -123,18 +123,18 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 	if raport.Findings == nil {
 		raport.Findings = []vuln.Assessment{}
 	}
-	raport.CoveragePercent = raport.State.Pokrycie() * 100
-	raport.FullyAssessed = raport.State.PelnaOcena()
+	raport.CoveragePercent = raport.State.Coverage() * 100
+	raport.FullyAssessed = raport.State.FullAssessment()
 	raport.CVEDetails = s.szczegolyCVE(r.Context(), raport.Findings)
 	if raport.State.Provider != "" {
-		if snapshot, err := s.podatnosci.AktywnySnapshot(r.Context(), raport.State.Provider); err == nil {
+		if snapshot, err := s.podatnosci.ActiveSnapshot(r.Context(), raport.State.Provider); err == nil {
 			raport.Snapshot = &snapshot
-			raport.SnapshotStale = snapshot.Nieswiezy(s.wiekFeedu, time.Now().UTC())
+			raport.SnapshotStale = snapshot.Stale(s.wiekFeedu, time.Now().UTC())
 		} else if raport.State.SnapshotDigest != "" {
 			// Rodzina RPM czyta ustalenia z metadanych wlasnych repozytoriow,
 			// wiec nie ma centralnego snapshotu. Panel i tak musi powiedziec,
 			// co rozstrzygnelo ocene - inaczej wynik jest bez zrodla.
-			ustalenia, zebrane, err := s.pakietyHostow.UstaleniaHosta(r.Context(), hostID)
+			ustalenia, zebrane, err := s.pakietyHostow.HostAdvisories(r.Context(), hostID)
 			if err == nil {
 				ile := 0
 				for _, dla := range ustalenia {
@@ -146,7 +146,7 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 					Releases: []string{raport.State.Release}, FetchedAt: zebrane, Active: true,
 				}
 				raport.Snapshot = &snapshot
-				raport.SnapshotStale = snapshot.Nieswiezy(s.wiekFeedu, time.Now().UTC())
+				raport.SnapshotStale = snapshot.Stale(s.wiekFeedu, time.Now().UTC())
 			}
 		}
 	}
@@ -155,7 +155,7 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 
 // hostPodatnosci opisuje jeden host na ekranie floty.
 type hostPodatnosci struct {
-	vuln.StanHosta
+	vuln.HostState
 	CoveragePercent float64 `json:"coverage_percent"`
 	// FullyAssessed mowi, czy ocena tego hosta jest kompletna. Bez tego pola
 	// ekran musialby zgadywac z samego pustego powodu - a host z jednym
@@ -193,12 +193,12 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	stany, err := s.podatnosci.StanyHostow(r.Context(), identyfikatory)
+	stany, err := s.podatnosci.HostStates(r.Context(), identyfikatory)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	snapshoty, err := s.podatnosci.Snapshoty(r.Context())
+	snapshoty, err := s.podatnosci.Snapshots(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -212,7 +212,7 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	// Unikaty licza sie na poziomie floty, a nie sumowaniem po hostach: to samo
 	// CVE na dwudziestu hostach jest jedna sprawa producenta i dwudziestoma
 	// hostami do ruszenia. Sumowanie licznikow hostow zamienia jedno w drugie.
-	sprawy, err := s.podatnosci.Unikaty(r.Context(), identyfikatory)
+	sprawy, err := s.podatnosci.Uniques(r.Context(), identyfikatory)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -224,8 +224,8 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		if !oceniony || stan.EvaluatedAt == nil {
 			// Host jeszcze nieoceniony nie jest hostem bez podatnosci.
 			bezOceny++
-			stan.CoverageReason = vuln.RodzajBrakListy
-		} else if stan.PelnaOcena() {
+			stan.CoverageReason = vuln.ReasonPackageListMissing
+		} else if stan.FullAssessment() {
 			// Kompletna ocena to nie tylko brak przeszkody: feed musi objac
 			// wszystkie pakiety hosta i zaden nie moze zostac nieustalony.
 			ocenionych++
@@ -242,8 +242,8 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 			hostowPodatnych++
 		}
 		pozycje = append(pozycje, hostPodatnosci{
-			StanHosta: stan, CoveragePercent: stan.Pokrycie() * 100,
-			FullyAssessed: stan.PelnaOcena(),
+			HostState: stan, CoveragePercent: stan.Coverage() * 100,
+			FullyAssessed: stan.FullAssessment(),
 		})
 	}
 
@@ -264,7 +264,7 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		stanZrodel = append(stanZrodel, map[string]any{
 			"provider": snapshot.Provider, "digest": snapshot.Digest,
 			"advisories": snapshot.AdvisoryCount, "releases": snapshot.Releases,
-			"fetched_at": snapshot.FetchedAt, "stale": snapshot.Nieswiezy(s.wiekFeedu, teraz),
+			"fetched_at": snapshot.FetchedAt, "stale": snapshot.Stale(s.wiekFeedu, teraz),
 			"error": snapshot.Error,
 		})
 	}

@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// przykladNVD ma ksztalt odpowiedzi API w wersji 2.0.
-const przykladNVD = `{
+// nvdSample has the shape of an API answer in version 2.0.
+const nvdSample = `{
   "resultsPerPage": 2,
   "startIndex": 0,
   "totalResults": 2,
@@ -42,61 +42,62 @@ const przykladNVD = `{
         "published": "2026-08-01T00:00:00.000",
         "lastModified": "2026-08-01T00:00:00.000",
         "vulnStatus": "Awaiting Analysis",
-        "descriptions": [{"lang": "en", "value": "Nieoceniona jeszcze podatnosc."}],
+        "descriptions": [{"lang": "en", "value": "A vulnerability not scored yet."}],
         "metrics": {}
       }
     }
   ]
 }`
 
-func TestParsujBierzeOceneIOpis(t *testing.T) {
-	szczegoly, wszystkich, err := Parsuj([]byte(przykladNVD))
+func TestParseTakesTheScoreAndTheDescription(t *testing.T) {
+	details, total, err := Parse([]byte(nvdSample))
 	if err != nil {
-		t.Fatalf("parsowanie: %v", err)
+		t.Fatalf("parsing: %v", err)
 	}
-	if wszystkich != 2 || len(szczegoly) != 2 {
-		t.Fatalf("wpisow = %d z %d", len(szczegoly), wszystkich)
+	if total != 2 || len(details) != 2 {
+		t.Fatalf("entries = %d of %d", len(details), total)
 	}
 
-	pierwszy := szczegoly[0]
-	if pierwszy.CVSSScore == nil || *pierwszy.CVSSScore != 7.8 {
-		t.Fatalf("ocena = %v - nowsza wersja CVSS i ocena glowna maja wygrywac", pierwszy.CVSSScore)
+	first := details[0]
+	if first.CVSSScore == nil || *first.CVSSScore != 7.8 {
+		t.Fatalf("score = %v - the newer CVSS version and the primary score are to win", first.CVSSScore)
 	}
-	if pierwszy.CVSSVersion != "3.1" || pierwszy.CVSSSeverity != "high" {
-		t.Fatalf("wersja = %q, waga = %q", pierwszy.CVSSVersion, pierwszy.CVSSSeverity)
+	if first.CVSSVersion != "3.1" || first.CVSSSeverity != "high" {
+		t.Fatalf("version = %q, severity = %q", first.CVSSVersion, first.CVSSSeverity)
 	}
-	if pierwszy.Source != Dostawca {
-		t.Fatalf("zrodlo = %q", pierwszy.Source)
+	if first.Source != Provider {
+		t.Fatalf("source = %q", first.Source)
 	}
-	if pierwszy.Summary == "" || pierwszy.Summary[:6] != "A flaw" {
-		t.Fatalf("opis = %q - bierzemy angielski", pierwszy.Summary)
+	if first.Summary == "" || first.Summary[:6] != "A flaw" {
+		t.Fatalf("description = %q - we take the English one", first.Summary)
 	}
-	// Znaczniki NVD przychodza bez strefy i sa w UTC.
-	if pierwszy.ModifiedAt == nil ||
-		!pierwszy.ModifiedAt.Equal(time.Date(2026, 8, 2, 9, 10, 11, 123000000, time.UTC)) {
-		t.Fatalf("znacznik zmiany = %v", pierwszy.ModifiedAt)
+	// NVD timestamps arrive without a zone and are in UTC.
+	if first.ModifiedAt == nil ||
+		!first.ModifiedAt.Equal(time.Date(2026, 8, 2, 9, 10, 11, 123000000, time.UTC)) {
+		t.Fatalf("change timestamp = %v", first.ModifiedAt)
 	}
 }
 
-func TestPodatnoscBezOcenyMaSamOpis(t *testing.T) {
-	szczegoly, _, err := Parsuj([]byte(przykladNVD))
+func TestAVulnerabilityWithoutAScoreKeepsTheDescription(t *testing.T) {
+	details, _, err := Parse([]byte(nvdSample))
 	if err != nil {
-		t.Fatalf("parsowanie: %v", err)
+		t.Fatalf("parsing: %v", err)
 	}
-	drugi := szczegoly[1]
-	// Brak oceny nie jest ocena zero: pole zostaje puste.
-	if drugi.CVSSScore != nil {
-		t.Fatalf("nieoceniona podatnosc dostala ocene %v", *drugi.CVSSScore)
+	second := details[1]
+	// A missing score is not a score of zero: the field stays empty.
+	if second.CVSSScore != nil {
+		t.Fatalf("an unscored vulnerability got the score %v", *second.CVSSScore)
 	}
-	if drugi.Summary == "" {
-		t.Fatal("wpis bez opisu")
+	if second.Summary == "" {
+		t.Fatal("an entry without a description")
 	}
 }
 
-func TestWagaWersjiDrugiejStoiObokDanych(t *testing.T) {
-	// W CVSS 2 waga jest przy metryce, a nie w danych oceny. Bez tego
-	// starsze podatnosci mialyby liczbe i zadnego slowa obok niej.
-	metryki := map[string][]metryka{"cvssMetricV2": {{
+func TestTheSeverityOfVersionTwoStandsNextToTheData(t *testing.T) {
+	// In CVSS 2 the severity sits with the metric rather than in the data of
+	// the score. Without that older vulnerabilities would carry a number and
+	// not a word next to it.
+	metrics := map[string][]metric{"cvssMetricV2": {{
 		Type: "Primary", BaseSeverity: "MEDIUM",
 		CVSSData: struct {
 			Version      string  `json:"version"`
@@ -105,26 +106,26 @@ func TestWagaWersjiDrugiejStoiObokDanych(t *testing.T) {
 			VectorString string  `json:"vectorString"`
 		}{Version: "2.0", BaseScore: 4.6, VectorString: "AV:L/AC:L/Au:N/C:P/I:P/A:P"},
 	}}}
-	ocena, wersja, waga, wektor, ok := NajlepszaOcena(metryki)
-	if !ok || ocena != 4.6 || wersja != "2.0" || waga != "MEDIUM" || wektor == "" {
-		t.Fatalf("ocena = %v %q %q %q (%v)", ocena, wersja, waga, wektor, ok)
+	score, version, severity, vector, ok := BestScore(metrics)
+	if !ok || score != 4.6 || version != "2.0" || severity != "MEDIUM" || vector == "" {
+		t.Fatalf("score = %v %q %q %q (%v)", score, version, severity, vector, ok)
 	}
 }
 
-func TestZnacznikNVD(t *testing.T) {
-	chwila := time.Date(2026, 9, 6, 12, 30, 45, 0, time.UTC)
-	if mamy := ZnacznikNVD(chwila); mamy != "2026-09-06T12:30:45.000Z" {
-		t.Fatalf("znacznik = %q", mamy)
+func TestTimestamp(t *testing.T) {
+	moment := time.Date(2026, 9, 6, 12, 30, 45, 0, time.UTC)
+	if got := Timestamp(moment); got != "2026-09-06T12:30:45.000Z" {
+		t.Fatalf("timestamp = %q", got)
 	}
 }
 
-func TestOdstepZalezyOdKlucza(t *testing.T) {
-	// Bez klucza NVD pozwala na piec zadan na trzydziesci sekund; szybciej
-	// znaczy odciecie, a odciecie znaczy brak opisow.
-	if odstep := Nowy("", "", 0).odstep(); odstep != OdstepBezKlucza {
-		t.Fatalf("odstep bez klucza = %s", odstep)
+func TestTheIntervalDependsOnTheKey(t *testing.T) {
+	// Without a key NVD allows five requests per thirty seconds; faster means
+	// being cut off, and being cut off means no descriptions.
+	if interval := New("", "", 0).interval(); interval != IntervalWithoutKey {
+		t.Fatalf("interval without a key = %s", interval)
 	}
-	if odstep := Nowy("", "klucz", 0).odstep(); odstep != OdstepZKluczem {
-		t.Fatalf("odstep z kluczem = %s", odstep)
+	if interval := New("", "key", 0).interval(); interval != IntervalWithKey {
+		t.Fatalf("interval with a key = %s", interval)
 	}
 }
