@@ -18,42 +18,43 @@ import (
 	"github.com/ultherego/flotestro/internal/systemd"
 )
 
-// Server obsluguje zadania mutujace w imieniu agenta.
+// Server handles mutating tasks on behalf of the agent.
 type Server struct {
-	// allowedUID jest jedynym identyfikatorem, ktory moze wydawac polecenia.
-	// Weryfikacja idzie przez SO_PEERCRED jadra, nie przez tresc wiadomosci.
+	// allowedUID is the only identifier allowed to issue commands. The check
+	// goes through the kernel's SO_PEERCRED, not through the message body.
 	allowedUID uint32
 	log        *slog.Logger
 
-	// Jednoczesnie wykonuje sie najwyzej jedna mutacja jednostek. Rownolegle
-	// start i stop tej samej jednostki daja nieprzewidywalny wynik.
+	// At most one unit mutation runs at a time. A concurrent start and stop of
+	// the same unit give an unpredictable result.
 	unitMutex sync.Mutex
-	// Osobna blokada dla operacji pakietowych: transakcja moze trwac minuty,
-	// a operacje na jednostkach nie musza na nia czekac.
+	// A separate lock for package operations: a transaction can take minutes,
+	// and unit operations do not have to wait for it.
 	packageMutex sync.Mutex
-	// Dolaczenie do domeny zmienia SSSD, Kerberosa i PAM naraz.
+	// Joining a domain changes SSSD, Kerberos and PAM at once.
 	enrollMutex sync.Mutex
-	// Zmiany kont lokalnych sa serializowane: useradd i usermod pisza do
-	// tych samych plikow.
+	// Local account changes are serialized: useradd and usermod write to the
+	// same files.
 	accountMutex sync.Mutex
-	// Rownolegly restart i usuniecie tego samego kontenera daja
-	// nieprzewidywalny wynik.
+	// A concurrent restart and removal of the same container give an
+	// unpredictable result.
 	containerMutex sync.Mutex
 
-	// Bezczynnosc liczy sie od zamkniecia ostatniego polaczenia, a nie od
-	// startu procesu. Zegar liczony od startu przecinal transakcje pakietowa
-	// albo odczyt zdarzen w polowie - dokladnie w piatej minucie pracy.
+	// Idleness is counted from the closing of the last connection, not from
+	// the start of the process. A clock counted from the start used to cut a
+	// package transaction or an event read in half - exactly in the fifth
+	// minute of work.
 	IdleTimeout time.Duration
-	aktywne     sync.WaitGroup
-	ruch        chan struct{}
+	active      sync.WaitGroup
+	traffic     chan struct{}
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
-	return &Server{allowedUID: allowedUID, log: log, ruch: make(chan struct{}, 1)}
+	return &Server{allowedUID: allowedUID, log: log, traffic: make(chan struct{}, 1)}
 }
 
-// Serve przyjmuje polaczenia do zamkniecia kontekstu albo do uplywu
-// bezczynnosci, gdy IdleTimeout jest ustawiony.
+// Serve accepts connections until the context is closed or until the idle
+// window elapses, when IdleTimeout is set.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -62,16 +63,16 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		_ = listener.Close()
 	}()
 	if s.IdleTimeout > 0 {
-		go s.pilnujBezczynnosci(ctx, cancel)
+		go s.watchIdleness(ctx, cancel)
 	}
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				// Polaczenia w toku koncza swoja prace: zamkniecie gniazda
-				// nie jest przerwaniem zadania.
-				s.aktywne.Wait()
+				// Connections in flight finish their work: closing the socket
+				// is not an interruption of the task.
+				s.active.Wait()
 				return nil
 			}
 			var netErr net.Error
@@ -80,25 +81,25 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			}
 			return fmt.Errorf("accept: %w", err)
 		}
-		s.aktywne.Add(1)
+		s.active.Add(1)
 		go func() {
-			defer s.aktywne.Done()
-			defer s.zaznaczRuch()
+			defer s.active.Done()
+			defer s.markTraffic()
 			s.handleConnection(context.WithoutCancel(ctx), conn)
 		}()
 	}
 }
 
-// pilnujBezczynnosci konczy prace, gdy przez IdleTimeout nie zamknelo sie
-// zadne polaczenie i zadne nie jest w toku.
-func (s *Server) pilnujBezczynnosci(ctx context.Context, cancel context.CancelFunc) {
+// watchIdleness ends the work when no connection has closed for IdleTimeout
+// and none is in flight.
+func (s *Server) watchIdleness(ctx context.Context, cancel context.CancelFunc) {
 	timer := time.NewTimer(s.IdleTimeout)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.ruch:
+		case <-s.traffic:
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -107,36 +108,36 @@ func (s *Server) pilnujBezczynnosci(ctx context.Context, cancel context.CancelFu
 			}
 			timer.Reset(s.IdleTimeout)
 		case <-timer.C:
-			if wToku := s.polaczeniaWToku(); wToku {
-				// Zadanie trwa dluzej niz okno bezczynnosci; liczymy od nowa.
+			if inFlight := s.connectionsInFlight(); inFlight {
+				// The task takes longer than the idle window; count from scratch.
 				timer.Reset(s.IdleTimeout)
 				continue
 			}
-			s.log.Info("koniec pracy po okresie bezczynnosci", "timeout", s.IdleTimeout.String())
+			s.log.Info("work ended after an idle period", "timeout", s.IdleTimeout.String())
 			cancel()
 			return
 		}
 	}
 }
 
-// polaczeniaWToku mowi, czy jakies polaczenie jest wlasnie obslugiwane.
-func (s *Server) polaczeniaWToku() bool {
-	gotowe := make(chan struct{})
+// connectionsInFlight says whether some connection is being handled right now.
+func (s *Server) connectionsInFlight() bool {
+	ready := make(chan struct{})
 	go func() {
-		s.aktywne.Wait()
-		close(gotowe)
+		s.active.Wait()
+		close(ready)
 	}()
 	select {
-	case <-gotowe:
+	case <-ready:
 		return false
 	case <-time.After(10 * time.Millisecond):
 		return true
 	}
 }
 
-func (s *Server) zaznaczRuch() {
+func (s *Server) markTraffic() {
 	select {
-	case s.ruch <- struct{}{}:
+	case s.traffic <- struct{}{}:
 	default:
 	}
 }
@@ -146,17 +147,17 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
-		s.log.Warn("odrzucono polaczenie spoza gniazda unixowego")
+		s.log.Warn("rejected a connection from outside a unix socket")
 		return
 	}
 	uid, pid, err := peerCredentials(unixConn)
 	if err != nil {
-		s.log.Error("nie odczytano tozsamosci rozmowcy", "err", err)
+		s.log.Error("the identity of the peer was not read", "err", err)
 		return
 	}
-	// Identity rozmowcy pochodzi z jadra. Wiadomosc nie moze jej podmienic.
+	// The peer identity comes from the kernel. The message cannot swap it.
 	if uid != s.allowedUID {
-		s.log.Warn("odrzucono polaczenie od obcego uzytkownika", "uid", uid, "pid", pid)
+		s.log.Warn("rejected a connection from a foreign user", "uid", uid, "pid", pid)
 		return
 	}
 
@@ -164,60 +165,60 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 
 	var request helperv1.HelperRequest
 	if err := ReadMessage(conn, &request); err != nil {
-		s.log.Error("nieczytelne zadanie", "err", err)
+		s.log.Error("unreadable request", "err", err)
 		_ = WriteMessage(conn, reject(ErrorMalformed, err.Error()))
 		return
 	}
 
-	// Postep dlugiej operacji leci osobnymi wiadomosciami, zanim przyjdzie
-	// odpowiedz koncowa. Klient, ktory o niego nie prosil, dostaje jedna
-	// wiadomosc jak dotad - starszy agent nie moze wziac postepu za wynik.
-	var wysylkaMu sync.Mutex
-	var postep func(*helperv1.TaskProgress)
+	// The progress of a long operation travels in separate messages, before
+	// the final answer arrives. A client that did not ask for it gets a single
+	// message as before - an older agent must not take progress for a result.
+	var sendMu sync.Mutex
+	var progress func(*helperv1.TaskProgress)
 	if request.GetWantProgress() {
-		postep = func(p *helperv1.TaskProgress) {
-			wysylkaMu.Lock()
-			defer wysylkaMu.Unlock()
+		progress = func(p *helperv1.TaskProgress) {
+			sendMu.Lock()
+			defer sendMu.Unlock()
 			if err := WriteMessage(conn, &helperv1.HelperResponse{Progress: p}); err != nil {
-				// Zerwana wysylka postepu nie moze przerwac operacji: sama
-				// transakcja jest wazniejsza od jej podgladu.
-				s.log.Debug("nie wyslano postepu", "task_id", request.GetTaskId(), "err", err)
+				// A broken progress send must not interrupt the operation: the
+				// transaction itself matters more than its preview.
+				s.log.Debug("progress was not sent", "task_id", request.GetTaskId(), "err", err)
 			}
 		}
 	}
 
-	response := s.handle(ctx, &request, postep)
+	response := s.handle(ctx, &request, progress)
 	response.Final = true
-	wysylkaMu.Lock()
-	defer wysylkaMu.Unlock()
+	sendMu.Lock()
+	defer sendMu.Unlock()
 	if err := WriteMessage(conn, response); err != nil {
-		s.log.Error("nie odeslano odpowiedzi", "task_id", request.GetTaskId(), "err", err)
+		s.log.Error("the answer was not sent back", "task_id", request.GetTaskId(), "err", err)
 	}
 }
 
-// handle waliduje zadanie i wykonuje operacje. Kazde odrzucenie ma stabilny
-// kod maszynowy, zeby agent mogl je zaraportowac bez parsowania tekstu.
-// handle obsluguje zadanie. Odbiorca postepu jest przekazywany wglab wywolan,
-// a nie trzymany w serwerze: polaczenia sa obslugiwane rownolegle i pole
-// wspoldzielone laczyloby postep jednej operacji z inna.
+// handle validates the request and performs the operation. Every refusal has
+// a stable machine code, so that the agent can report it without parsing text.
+// The progress receiver is passed down the calls rather than kept in the
+// server: connections are handled concurrently and a shared field would mix
+// the progress of one operation with another.
 func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
-	postep func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
+	progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	if request.GetProtocolVersion() != ProtocolVersion {
 		return reject(ErrorUnsupportedVersion,
-			fmt.Sprintf("wersja %d, obslugiwana %d", request.GetProtocolVersion(), ProtocolVersion))
+			fmt.Sprintf("version %d, supported %d", request.GetProtocolVersion(), ProtocolVersion))
 	}
-	// Helper sprawdza TTL samodzielnie. Agent moze byc opozniony albo bledny,
-	// a zadanie po terminie nie moze zostac wykonane.
+	// The helper checks the TTL on its own. The agent may be delayed or wrong,
+	// and a task past its deadline must not be performed.
 	if expires := request.GetExpiresAt(); expires != nil && time.Now().After(expires.AsTime()) {
 		return reject(ErrorExpired,
-			fmt.Sprintf("zadanie wygaslo %s", expires.AsTime().Format(time.RFC3339)))
+			fmt.Sprintf("the task expired at %s", expires.AsTime().Format(time.RFC3339)))
 	}
 
 	switch action := request.GetAction().(type) {
 	case *helperv1.HelperRequest_UnitAction:
 		return s.applyUnitAction(ctx, request, action.UnitAction)
 	case *helperv1.HelperRequest_PackageAction:
-		return s.applyPackageAction(ctx, request, action.PackageAction, postep)
+		return s.applyPackageAction(ctx, request, action.PackageAction, progress)
 	case *helperv1.HelperRequest_File:
 		return s.applyFile(ctx, request, action.File)
 
@@ -234,7 +235,7 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 	case *helperv1.HelperRequest_Repository:
 		return s.applyRepository(ctx, request, action.Repository)
 	case *helperv1.HelperRequest_Backup:
-		return s.applyBackup(ctx, request, action.Backup, postep)
+		return s.applyBackup(ctx, request, action.Backup, progress)
 
 	case *helperv1.HelperRequest_Ssh:
 		return s.applySSH(ctx, request, action.Ssh)
@@ -285,30 +286,30 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 	case *helperv1.HelperRequest_LocalUserAction:
 		return s.applyLocalUserAction(ctx, request, action.LocalUserAction)
 	default:
-		return reject(ErrorUnknownAction, "brak obslugiwanej akcji")
+		return reject(ErrorUnknownAction, "no supported action")
 	}
 }
 
-// applyPackageAction odswieza metadane albo wykonuje transakcje pakietowa.
-// Jednoczesnie moze dzialac najwyzej jedna transakcja: rownolegle operacje na
-// tej samej bazie pakietow moga ja uszkodzic.
+// applyPackageAction refreshes the metadata or performs a package transaction.
+// At most one transaction runs at a time: concurrent operations on the same
+// package database can damage it.
 func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.HelperRequest,
-	action *helperv1.PackageActionRequest, postep func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
+	action *helperv1.PackageActionRequest, progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	manager, err := packages.Detect()
 	if err != nil {
 		return reject(packages.ErrorUnsupported, err.Error())
 	}
 
 	if !s.packageMutex.TryLock() {
-		return reject(ErrorLocked, "inna operacja pakietowa jest w toku")
+		return reject(ErrorLocked, "another package operation is in flight")
 	}
 	defer s.packageMutex.Unlock()
 
-	// Blokade menedzera sprawdzamy jawnie i jej nie obchodzimy. Reczna praca
-	// administratora ma pierwszenstwo przed zadaniem z panelu.
+	// The manager lock is checked explicitly and never worked around. Manual
+	// work by the administrator takes precedence over a task from the panel.
 	if held, path := manager.LockHeld(); held {
 		return reject(packages.ErrorLocked,
-			fmt.Sprintf("menedzer pakietow jest zajety (%s)", path))
+			fmt.Sprintf("the package manager is busy (%s)", path))
 	}
 
 	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
@@ -322,9 +323,9 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 		Packages:     action.GetPackages(),
 		SecurityOnly: action.GetSecurityOnly(),
 	}
-	if postep != nil {
+	if progress != nil {
 		options.Progress = func(p packages.Progress) {
-			postep(&helperv1.TaskProgress{
+			progress(&helperv1.TaskProgress{
 				Step: p.Step, Total: p.Total, Percent: p.Percent, Message: p.Message,
 			})
 		}
@@ -334,13 +335,13 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 	case helperv1.PackageActionRequest_OPERATION_INSTALL,
 		helperv1.PackageActionRequest_OPERATION_REMOVE,
 		helperv1.PackageActionRequest_OPERATION_HOLD:
-		return s.cyklZyciaPakietow(operationCtx, manager, action, options)
+		return s.packageLifecycle(operationCtx, manager, action, options)
 
 	case helperv1.PackageActionRequest_OPERATION_REFRESH:
 		if err := manager.Refresh(operationCtx); err != nil {
 			return packageFailure(manager.Name(), err)
 		}
-		s.log.Info("odswiezono metadane repozytorium",
+		s.log.Info("repository metadata refreshed",
 			"task_id", request.GetTaskId(), "manager", manager.Name())
 		return &helperv1.HelperResponse{
 			Accepted:      true,
@@ -353,32 +354,32 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 			PackageResult: packageResultToProto(apply),
 		}
 		if err != nil {
-			// Wynik czesciowy jest zwracany takze przy bledzie: administrator
-			// musi wiedziec, co zdazylo sie zmienic przed awaria.
+			// A partial result is returned on failure as well: the administrator
+			// has to know what managed to change before the breakdown.
 			response.Accepted = false
 			response.ErrorCode = packageErrorCode(err)
 			response.Message = err.Error()
 			response.ExitCode = -1
-			s.log.Error("transakcja pakietowa nie powiodla sie",
+			s.log.Error("the package transaction failed",
 				"task_id", request.GetTaskId(), "manager", manager.Name(),
-				"zmienionych", len(apply.Applied), "baza_uszkodzona", apply.DatabaseBroken,
+				"changed", len(apply.Applied), "database_broken", apply.DatabaseBroken,
 				"err", err)
 			return response
 		}
 		response.Accepted = true
-		s.log.Info("transakcja pakietowa zakonczona",
+		s.log.Info("package transaction finished",
 			"task_id", request.GetTaskId(), "manager", manager.Name(),
-			"zmienionych", len(apply.Applied), "reboot", apply.RebootRequired)
+			"changed", len(apply.Applied), "reboot", apply.RebootRequired)
 		return response
 
 	default:
-		return reject(ErrorUnknownAction, "nieznana operacja pakietowa")
+		return reject(ErrorUnknownAction, "unknown package operation")
 	}
 }
 
-// applyReboot zleca restart z opoznieniem. Opoznienie jest konieczne: bez
-// niego host znika, zanim agent zdazy odeslac wynik, i zadanie wygladaloby na
-// zerwane zamiast wykonane.
+// applyReboot orders a delayed restart. The delay is necessary: without it
+// the host disappears before the agent manages to send the result back, and
+// the task would look broken instead of done.
 func (s *Server) applyReboot(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.RebootRequest) *helperv1.HelperResponse {
 	delay := action.GetDelaySeconds()
@@ -386,16 +387,16 @@ func (s *Server) applyReboot(ctx context.Context, request *helperv1.HelperReques
 		delay = 10
 	}
 	if delay > 3600 {
-		return reject(ErrorUnknownAction, "opoznienie restartu przekracza godzine")
+		return reject(ErrorUnknownAction, "the restart delay exceeds an hour")
 	}
 
 	reason := action.GetReason()
 	if reason == "" {
-		reason = "Flotestro: kontrolowany restart"
+		reason = "Flotestro: controlled restart"
 	}
 
-	// shutdown -r przyjmuje czas w minutach albo slowo now, wiec krotkie
-	// opoznienia realizujemy przez transient timer systemd.
+	// shutdown -r takes time in minutes or the word now, so short delays are
+	// carried out through a transient systemd timer.
 	stdout, stderr, exitCode, err := systemd.ScheduleReboot(ctx, time.Duration(delay)*time.Second, reason)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -406,8 +407,8 @@ func (s *Server) applyReboot(ctx context.Context, request *helperv1.HelperReques
 		return response
 	}
 
-	s.log.Warn("zaplanowano restart hosta",
-		"task_id", request.GetTaskId(), "za_sekund", delay, "powod", reason)
+	s.log.Warn("a host restart was scheduled",
+		"task_id", request.GetTaskId(), "in_seconds", delay, "reason", reason)
 
 	limit := int(request.GetMaxOutputBytes())
 	out, truncated := clamp([]byte(stdout), limit)
@@ -422,7 +423,7 @@ func packageFailure(manager string, err error) *helperv1.HelperResponse {
 	return response
 }
 
-// packageErrorCode zamienia blad adaptera na stabilny kod maszynowy.
+// packageErrorCode turns an adapter error into a stable machine code.
 func packageErrorCode(err error) string {
 	switch {
 	case errors.Is(err, packages.ErrLocked):
@@ -461,12 +462,12 @@ func (s *Server) applyUnitAction(ctx context.Context, request *helperv1.HelperRe
 	action *helperv1.UnitActionRequest) *helperv1.HelperResponse {
 	operation, ok := unitOperations[action.GetOperation()]
 	if !ok {
-		return reject(ErrorUnknownAction, fmt.Sprintf("operacja %s", action.GetOperation()))
+		return reject(ErrorUnknownAction, fmt.Sprintf("operation %s", action.GetOperation()))
 	}
 	unit := action.GetUnit()
 
-	// Walidacja powtorzona po stronie roota: helper nie ufa temu, ze agent
-	// sprawdzil nazwe i polityke ochrony.
+	// Validation repeated on the root side: the helper does not trust that the
+	// agent checked the name and the protection policy.
 	if err := systemd.ValidateUnit(unit); err != nil {
 		switch {
 		case errors.Is(err, systemd.ErrProtectedUnit):
@@ -482,7 +483,7 @@ func (s *Server) applyUnitAction(ctx context.Context, request *helperv1.HelperRe
 	}
 
 	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "inna mutacja jednostek jest w toku")
+		return reject(ErrorLocked, "another unit mutation is in flight")
 	}
 	defer s.unitMutex.Unlock()
 
@@ -503,7 +504,7 @@ func (s *Server) applyUnitAction(ctx context.Context, request *helperv1.HelperRe
 	outBytes, outTruncated := clamp([]byte(stdout), limit)
 	errBytes, errTruncated := clamp([]byte(stderr), limit)
 
-	s.log.Info("wykonano operacje na jednostce",
+	s.log.Info("a unit operation was performed",
 		"task_id", request.GetTaskId(), "unit", unit, "operation", operation,
 		"exit_code", exitCode, "active_before", before.ActiveState, "active_after", after.ActiveState)
 
@@ -523,7 +524,7 @@ var unitOperations = map[helperv1.UnitActionRequest_Operation]systemd.Operation{
 	helperv1.UnitActionRequest_OPERATION_STOP:    systemd.OperationStop,
 	helperv1.UnitActionRequest_OPERATION_RESTART: systemd.OperationRestart,
 	helperv1.UnitActionRequest_OPERATION_RELOAD:  systemd.OperationReload,
-	// Wlaczenie i maskowanie zmieniaja to, co host zrobi po restarcie.
+	// Enabling and masking change what the host will do after a restart.
 	helperv1.UnitActionRequest_OPERATION_ENABLE:  systemd.OperationEnable,
 	helperv1.UnitActionRequest_OPERATION_DISABLE: systemd.OperationDisable,
 	helperv1.UnitActionRequest_OPERATION_MASK:    systemd.OperationMask,
@@ -534,8 +535,8 @@ func reject(code, message string) *helperv1.HelperResponse {
 	return &helperv1.HelperResponse{Accepted: false, ErrorCode: code, Message: message, ExitCode: -1}
 }
 
-// clamp przycina output do limitu i sygnalizuje obciecie. Wynik zadania nie
-// moze urosnac do dowolnego rozmiaru.
+// clamp trims the output to the limit and signals the cut. A task result must
+// not grow to an arbitrary size.
 func clamp(data []byte, limit int) ([]byte, bool) {
 	if limit <= 0 {
 		limit = 64 << 10
@@ -559,7 +560,7 @@ func toProtoState(state systemd.UnitState) *helperv1.UnitState {
 	}
 }
 
-// peerCredentials odczytuje tozsamosc rozmowcy z jadra przez SO_PEERCRED.
+// peerCredentials reads the peer identity from the kernel through SO_PEERCRED.
 func peerCredentials(conn *net.UnixConn) (uid uint32, pid int32, err error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {
@@ -578,8 +579,9 @@ func peerCredentials(conn *net.UnixConn) (uid uint32, pid int32, err error) {
 	return credentials.Uid, credentials.Pid, nil
 }
 
-// ListenerFromSystemd zwraca gniazdo przekazane przez socket activation.
-// Helper nie tworzy gniazda sam, wiec nie musi decydowac o jego prawach.
+// ListenerFromSystemd returns the socket passed through socket activation.
+// The helper does not create the socket itself, so it does not have to decide
+// about its permissions.
 func ListenerFromSystemd() (net.Listener, bool, error) {
 	if os.Getenv("LISTEN_PID") != fmt.Sprint(os.Getpid()) {
 		return nil, false, nil
@@ -591,18 +593,18 @@ func ListenerFromSystemd() (net.Listener, bool, error) {
 	file := os.NewFile(firstSocketFD, "flotestro-helper.socket")
 	listener, err := net.FileListener(file)
 	if err != nil {
-		return nil, false, fmt.Errorf("gniazdo z systemd: %w", err)
+		return nil, false, fmt.Errorf("socket from systemd: %w", err)
 	}
 	return listener, true, nil
 }
 
-// repairPackages odblokowuje operacje pakietowe na hoscie.
+// repairPackages unblocks package operations on the host.
 //
-// Odpowiedzi na pytania konfiguracyjne pochodza od operatora i dotycza
-// wylacznie pakietow, ktore faktycznie blokuja transakcje. Helper nie
-// wymysla odpowiedzi za nikogo: wybor urzadzenia rozruchowego czy sposobu
-// obslugi plikow konfiguracyjnych jest decyzja czlowieka, a maszyna moze
-// nia jedynie wykonac.
+// The answers to configuration questions come from the operator and concern
+// only the packages that actually block the transaction. The helper does not
+// invent answers for anybody: the choice of a boot device or of the way
+// configuration files are handled is a human decision, and the machine can
+// only carry it out.
 func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.PackageRepairRequest) *helperv1.HelperResponse {
 	manager, err := packages.Detect()
@@ -611,11 +613,11 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 	}
 	apt, ok := manager.(*packages.APT)
 	if !ok {
-		// Na innych rodzinach systemow blokada wyglada inaczej i naprawa tez
-		// wygladalaby inaczej; udawanie, ze operacja dziala, byloby gorsze
-		// niz jasna odmowa.
+		// On other system families the block looks different and the repair
+		// would look different too; pretending the operation works would be
+		// worse than a clear refusal.
 		return reject(ErrorUnsupported,
-			"naprawa pakietow jest obslugiwana wylacznie dla menedzera apt")
+			"package repair is supported only for the apt manager")
 	}
 
 	answers := make([]packages.Answer, 0, len(action.GetAnswers()))
@@ -635,16 +637,16 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 	repairCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	ustawione, pozostale, err := apt.Repair(repairCtx, answers)
+	answered, remaining, err := apt.Repair(repairCtx, answers)
 	response := &helperv1.PackageRepairResponse{
 		Manager:      apt.Name(),
-		Answered:     ustawione,
-		StillBlocked: blockedToProto(pozostale),
-		Repaired:     len(pozostale) == 0,
+		Answered:     answered,
+		StillBlocked: blockedToProto(remaining),
+		Repaired:     len(remaining) == 0,
 	}
 	if err != nil {
-		s.log.Warn("naprawa pakietow nie powiodla sie",
-			"task_id", request.GetTaskId(), "err", err, "pozostalo", len(pozostale))
+		s.log.Warn("the package repair failed",
+			"task_id", request.GetTaskId(), "err", err, "remaining", len(remaining))
 		return &helperv1.HelperResponse{
 			Accepted:     false,
 			ErrorCode:    ErrorExecFailed,
@@ -653,38 +655,38 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 		}
 	}
 
-	s.log.Info("pakiety odblokowane",
-		"task_id", request.GetTaskId(), "odpowiedzi", len(ustawione))
+	s.log.Info("packages unblocked",
+		"task_id", request.GetTaskId(), "answers", len(answered))
 	return &helperv1.HelperResponse{Accepted: true, RepairResult: response}
 }
 
 func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail {
 	result := make([]*helperv1.BlockedPackageDetail, 0, len(blocked))
-	for _, pakiet := range blocked {
-		pytania := make([]*helperv1.DebconfQuestionDetail, 0, len(pakiet.Questions))
-		for _, pytanie := range pakiet.Questions {
-			pytania = append(pytania, &helperv1.DebconfQuestionDetail{
-				Name: pytanie.Name, Value: pytanie.Value, Answered: pytanie.Answered,
+	for _, pkg := range blocked {
+		questions := make([]*helperv1.DebconfQuestionDetail, 0, len(pkg.Questions))
+		for _, question := range pkg.Questions {
+			questions = append(questions, &helperv1.DebconfQuestionDetail{
+				Name: question.Name, Value: question.Value, Answered: question.Answered,
 			})
 		}
 		result = append(result, &helperv1.BlockedPackageDetail{
-			Name: pakiet.Name, Status: pakiet.Status, Questions: pytania,
+			Name: pkg.Name, Status: pkg.Status, Questions: questions,
 		})
 	}
 	return result
 }
 
-// cyklZyciaPakietow wykonuje instalacje, usuniecie albo wstrzymanie.
+// packageLifecycle performs an installation, a removal or a hold.
 //
-// Kazda z tych operacji istnieje tylko dla menedzerow, ktore ja obsluguja.
-// Jasna odmowa jest lepsza niz udawanie, ze operacja sie wykonala - a udawac
-// bylo by latwo, bo wynik "zero zmian" wyglada tak samo jak sukces.
-func (s *Server) cyklZyciaPakietow(ctx context.Context, manager packages.Manager,
+// Each of these operations exists only for managers that support it. A clear
+// refusal is better than pretending the operation ran - and pretending would
+// be easy, because a "zero changes" result looks exactly like a success.
+func (s *Server) packageLifecycle(ctx context.Context, manager packages.Manager,
 	action *helperv1.PackageActionRequest, options packages.Options) *helperv1.HelperResponse {
-	cykl, ok := manager.(packages.Lifecycle)
+	lifecycle, ok := manager.(packages.Lifecycle)
 	if !ok {
 		return reject(ErrorUnsupported,
-			"menedzer "+manager.Name()+" nie obsluguje pelnego cyklu zycia pakietow")
+			"the manager "+manager.Name()+" does not support the full package lifecycle")
 	}
 
 	var apply packages.Apply
@@ -692,17 +694,17 @@ func (s *Server) cyklZyciaPakietow(ctx context.Context, manager packages.Manager
 	switch action.GetOperation() {
 	case helperv1.PackageActionRequest_OPERATION_INSTALL:
 		options.AllowDowngrade = action.GetAllowDowngrade()
-		// Wymiana samego agenta nie moze isc w grupie kontrolnej helpera:
-		// skrypty tego pakietu zatrzymuja helpera, a razem z nim menedzera
-		// pakietow w polowie transakcji.
-		if spec, samowymiana := wymianaAgenta(options.Packages); samowymiana {
-			return s.zlecWymianeAgenta(ctx, manager, spec)
+		// Replacing the agent itself must not run in the helper's control group:
+		// the scripts of that package stop the helper, and with it the package
+		// manager in the middle of the transaction.
+		if spec, selfReplacement := agentReplacement(options.Packages); selfReplacement {
+			return s.orderAgentReplacement(ctx, manager, spec)
 		}
-		apply, err = cykl.Install(ctx, options)
+		apply, err = lifecycle.Install(ctx, options)
 	case helperv1.PackageActionRequest_OPERATION_REMOVE:
-		apply, err = cykl.Remove(ctx, options, action.GetExpectedRemovals())
+		apply, err = lifecycle.Remove(ctx, options, action.GetExpectedRemovals())
 	case helperv1.PackageActionRequest_OPERATION_HOLD:
-		apply, err = cykl.SetHold(ctx, options.Packages, action.GetHold())
+		apply, err = lifecycle.SetHold(ctx, options.Packages, action.GetHold())
 	}
 	if err != nil {
 		response := packageFailure(manager.Name(), err)

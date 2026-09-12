@@ -6,39 +6,40 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// TestSprzatanieOdrzucaNazweZeSciezka pilnuje granicy zaufania helpera:
-// nazwa wolumenu trafia do sciezki zapytania Engine API, a helper dziala
-// jako root i nie moze ufac tresci wiadomosci, choc panel juz ja sprawdzil.
-func TestSprzatanieOdrzucaNazweZeSciezka(t *testing.T) {
-	przypadki := []struct {
-		nazwa   string
-		zadanie *helperv1.DockerActionRequest
+// TestCleanupRejectsANameWithAPath guards the trust boundary of the helper:
+// a volume name lands in the query path of the Engine API, and the helper runs
+// as root and cannot trust the content of the message, even though the panel
+// has already checked it.
+func TestCleanupRejectsANameWithAPath(t *testing.T) {
+	cases := []struct {
+		name    string
+		request *helperv1.DockerActionRequest
 	}{
-		{"wolumen ze sciezka", &helperv1.DockerActionRequest{
+		{"a volume with a path", &helperv1.DockerActionRequest{
 			VolumeNames: []string{"../containers/aaaa/kill"}}},
-		{"wolumen z ukosnikiem", &helperv1.DockerActionRequest{
-			VolumeNames: []string{"dane/../.."}}},
-		{"obraz bez algorytmu", &helperv1.DockerActionRequest{
+		{"a volume with a slash", &helperv1.DockerActionRequest{
+			VolumeNames: []string{"data/../.."}}},
+		{"an image without an algorithm", &helperv1.DockerActionRequest{
 			ImageIds: []string{"latest"}}},
-		{"siec spoza szesnastkowych", &helperv1.DockerActionRequest{
-			NetworkIds: []string{"sklep_default"}}},
+		{"a network outside hexadecimal", &helperv1.DockerActionRequest{
+			NetworkIds: []string{"shop_default"}}},
 	}
-	for _, przypadek := range przypadki {
-		t.Run(przypadek.nazwa, func(t *testing.T) {
-			if powod := sprawdzListeSprzatania(przypadek.zadanie); powod == "" {
-				t.Fatal("helper przyjal zadanie, ktore powinien odrzucic")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if reason := checkCleanupList(tc.request); reason == "" {
+				t.Fatal("the helper accepted a request it should have rejected")
 			}
 		})
 	}
 }
 
-func TestSprzatanieDopuszczaPoprawneObiekty(t *testing.T) {
-	zadanie := &helperv1.DockerActionRequest{
+func TestCleanupAllowsValidObjects(t *testing.T) {
+	request := &helperv1.DockerActionRequest{
 		ImageIds:    []string{"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
-		VolumeNames: []string{"sklep_dane"},
+		VolumeNames: []string{"shop_data"},
 		NetworkIds:  []string{"2701db76242ee094c5535ecd6ddde9ffea5d38c4ce5de57f13bfd924da4a9a10"},
 	}
-	if powod := sprawdzListeSprzatania(zadanie); powod != "" {
-		t.Fatalf("poprawne zadanie odrzucone: %s", powod)
+	if reason := checkCleanupList(request); reason != "" {
+		t.Fatalf("a valid request was rejected: %s", reason)
 	}
 }

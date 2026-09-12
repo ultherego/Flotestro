@@ -10,10 +10,11 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// enrollDomain sprawdza warunki i dolacza hosta do domeny katalogu.
+// enrollDomain checks the conditions and joins the host to the directory
+// domain.
 //
-// Preflight jest zawsze wykonywany, takze przy pelnym dolaczeniu: nieudany
-// warunek blokujacy zatrzymuje operacje, zanim cokolwiek zmieni sie na hoscie.
+// The preflight always runs, also during a full join: a failed blocking
+// condition stops the operation before anything changes on the host.
 func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DomainEnrollRequest) *helperv1.HelperResponse {
 	result := &helperv1.DomainEnrollResult{}
@@ -25,29 +26,29 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	result.Checks = runPreflight(ctx, action, hostname)
 
 	if action.GetPreflightOnly() {
-		s.log.Info("preflight dolaczenia do domeny",
+		s.log.Info("preflight of the domain join",
 			"task_id", request.GetTaskId(), "hostname", hostname,
-			"sprawdzen", len(result.Checks))
+			"checks", len(result.Checks))
 		return &helperv1.HelperResponse{Accepted: true, EnrollResult: result}
 	}
 
 	if blocked := blockingFailures(result.Checks); len(blocked) > 0 {
 		response := reject("preflight_failed",
-			"warunki dolaczenia nie sa spelnione: "+strings.Join(blocked, "; "))
+			"the conditions of the join are not met: "+strings.Join(blocked, "; "))
 		response.EnrollResult = result
 		return response
 	}
 	if action.GetOneTimePassword() == "" {
 		response := reject("missing_credential",
-			"brak jednorazowego hasla dolaczenia")
+			"the one-time join password is missing")
 		response.EnrollResult = result
 		return response
 	}
 
-	// Jednoczesnie dziala najwyzej jedno dolaczenie: zmienia konfiguracje
-	// SSSD, Kerberosa i PAM naraz.
+	// At most one join runs at a time: it changes the configuration of SSSD,
+	// Kerberos and PAM at once.
 	if !s.enrollMutex.TryLock() {
-		response := reject(ErrorLocked, "inne dolaczenie do domeny jest w toku")
+		response := reject(ErrorLocked, "another domain join is in flight")
 		response.EnrollResult = result
 		return response
 	}
@@ -73,7 +74,7 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 
 	stdout, stderr, err := runIdentityTool(enrollCtx, timeout, "ipa-client-install", args...)
 	if err != nil {
-		// Haslo jednorazowe nie moze trafic do komunikatu bledu ani do logow.
+		// The one-time password must not reach the error message or the logs.
 		response := reject("enroll_failed", redactSecret(err.Error(), action.GetOneTimePassword()))
 		response.EnrollResult = result
 		response.Stderr = []byte(redactSecret(stderr, action.GetOneTimePassword()))
@@ -87,23 +88,23 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 		result.HostPrincipal = principal
 	}
 
-	s.log.Info("host dolaczony do domeny",
+	s.log.Info("the host joined the domain",
 		"task_id", request.GetTaskId(), "hostname", hostname,
-		"domena", action.GetDomain(), "principal", result.HostPrincipal)
+		"domain", action.GetDomain(), "principal", result.HostPrincipal)
 
 	return &helperv1.HelperResponse{Accepted: true, EnrollResult: result}
 }
 
-// runPreflight sprawdza warunki dolaczenia. Kazdy warunek ma wlasny wynik,
-// bo operator musi wiedziec, ktory dokladnie nie jest spelniony.
+// runPreflight checks the conditions of the join. Every condition has its own
+// result, because the operator has to know which one exactly is not met.
 func runPreflight(ctx context.Context, action *helperv1.DomainEnrollRequest, hostname string) []*helperv1.EnrollCheck {
 	var checks []*helperv1.EnrollCheck
 
-	// Nazwa FQDN: ipa-client-install odmawia pracy na samej nazwie krotkiej.
+	// The FQDN: ipa-client-install refuses to work with a short name alone.
 	checks = append(checks, check("fqdn", strings.Contains(hostname, "."), true,
-		"nazwa hosta: "+hostname))
+		"host name: "+hostname))
 
-	// Rozwiazywanie nazwy w przod i wstecz.
+	// Forward and reverse name resolution.
 	addresses, err := net.LookupHost(hostname)
 	forward := err == nil && len(addresses) > 0
 	checks = append(checks, check("dns_forward", forward, true, describeLookup(addresses, err)))
@@ -111,12 +112,12 @@ func runPreflight(ctx context.Context, action *helperv1.DomainEnrollRequest, hos
 	if forward {
 		names, reverseErr := net.LookupAddr(addresses[0])
 		matches := reverseErr == nil && containsHost(names, hostname)
-		// Brak rekordu wstecznego nie blokuje dolaczenia, ale bywa przyczyna
-		// pozniejszych problemow z Kerberosem.
+		// A missing reverse record does not block the join, but it is sometimes
+		// the cause of later Kerberos problems.
 		checks = append(checks, check("dns_reverse", matches, false, describeLookup(names, reverseErr)))
 	}
 
-	// Serwer katalogu musi byc osiagalny na portach Kerberosa i LDAP.
+	// The directory server has to be reachable on the Kerberos and LDAP ports.
 	if server := action.GetServer(); server != "" {
 		for _, port := range []string{"88", "389", "443"} {
 			reachable := dialable(ctx, server, port)
@@ -125,33 +126,33 @@ func runPreflight(ctx context.Context, action *helperv1.DomainEnrollRequest, hos
 		}
 	}
 
-	// Konflikt istniejacej domeny: ponowne dolaczenie do innego realm
-	// zniszczyloby dzialajaca konfiguracje.
+	// A conflict with an existing domain: joining another realm again would
+	// destroy a working configuration.
 	existing := parseExistingRealm()
 	switch {
 	case existing == "":
-		checks = append(checks, check("realm_conflict", true, true, "host nie jest w zadnej domenie"))
+		checks = append(checks, check("realm_conflict", true, true, "the host is in no domain"))
 	case existing == action.GetRealm():
 		checks = append(checks, check("realm_conflict", true, true,
-			"host jest juz w domenie "+existing))
+			"the host is already in the domain "+existing))
 	default:
 		checks = append(checks, check("realm_conflict", false, true,
-			"host nalezy do innej domeny: "+existing))
+			"the host belongs to another domain: "+existing))
 	}
 
-	// Pakiety klienta.
+	// The client packages.
 	_, _, clientErr := runIdentityTool(ctx, 10*time.Second, "ipa-client-install", "--version")
-	checks = append(checks, check("klient_ipa", clientErr == nil, true, describeError(clientErr)))
+	checks = append(checks, check("ipa_client", clientErr == nil, true, describeError(clientErr)))
 
-	// Synchronizacja czasu: Kerberos przestaje dzialac przy rozjezdzie rzedu minut.
+	// Time synchronization: Kerberos stops working at a drift of minutes.
 	skew, synchronized := clockStatus(ctx)
-	checks = append(checks, check("czas", synchronized, false, skew))
+	checks = append(checks, check("time", synchronized, false, skew))
 
 	return checks
 }
 
-// verifyEnrollment potwierdza, ze host faktycznie korzysta z domeny.
-// Dopiero pozytywny wynik pozwala uznac dolaczenie za zakonczone.
+// verifyEnrollment confirms that the host really uses the domain. Only a
+// positive result allows the join to count as finished.
 func verifyEnrollment(ctx context.Context, domain, hostname string) []*helperv1.EnrollCheck {
 	var checks []*helperv1.EnrollCheck
 
@@ -162,12 +163,13 @@ func verifyEnrollment(ctx context.Context, domain, hostname string) []*helperv1.
 	checks = append(checks, check("sssd", statusErr == nil && online != nil && *online, true,
 		describeError(statusErr)))
 
-	// NSS musi rozwiazywac konta domenowe; bez tego dolaczenie jest pozorne.
+	// NSS has to resolve domain accounts; without that the join is only
+	// apparent.
 	out, _, nssErr := runIdentityTool(ctx, 20*time.Second, "getent", "passwd", "admin")
 	checks = append(checks, check("nss", nssErr == nil && strings.TrimSpace(out) != "", true,
 		describeError(nssErr)))
 
-	// Responder sudo dostarcza reguly z katalogu.
+	// The sudo responder delivers the rules from the directory.
 	sudoOut, _, sudoErr := runIdentityTool(ctx, 20*time.Second, "sssctl", "domain-status", domain)
 	checks = append(checks, check("sudo_responder", sudoErr == nil, false,
 		firstLineOf(sudoOut)))
@@ -190,7 +192,7 @@ func blockingFailures(checks []*helperv1.EnrollCheck) []string {
 	return failures
 }
 
-// parseExistingRealm czyta realm z istniejacej konfiguracji IPA.
+// parseExistingRealm reads the realm from the existing IPA configuration.
 func parseExistingRealm() string {
 	data, err := os.ReadFile("/etc/ipa/default.conf")
 	if err != nil {
@@ -222,10 +224,10 @@ func clockStatus(ctx context.Context) (string, bool) {
 	}
 	fields := strings.Split(strings.TrimSpace(out), ",")
 	if len(fields) < 6 {
-		return "nieczytelny wynik chronyc", false
+		return "unreadable chronyc output", false
 	}
 	synchronized := fields[1] != "" && fields[1] != "0.0.0.0"
-	return "odchylenie " + fields[4] + " s", synchronized
+	return "offset " + fields[4] + " s", synchronized
 }
 
 func containsHost(names []string, hostname string) bool {
@@ -252,11 +254,11 @@ func describeError(err error) string {
 	return err.Error()
 }
 
-// redactSecret usuwa haslo jednorazowe z komunikatow. Sekret w logu jest
-// sekretem ujawnionym.
+// redactSecret removes the one-time password from messages. A secret in a log
+// is a disclosed secret.
 func redactSecret(text, secret string) string {
 	if secret == "" {
 		return text
 	}
-	return strings.ReplaceAll(text, secret, "[usuniete]")
+	return strings.ReplaceAll(text, secret, "[removed]")
 }

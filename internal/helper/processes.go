@@ -7,11 +7,12 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/processes"
 )
 
-// signalProcess wysyla sygnal do procesu.
+// signalProcess sends a signal to a process.
 //
-// Ograniczenia sa sprawdzane tutaj, choc panel juz je sprawdzil: helper dziala
-// jako root i nie moze ufac tresci wiadomosci. Czas startu wiaze zadanie
-// z konkretnym procesem, bo jadro uzywa numerow PID ponownie.
+// The limits are checked here even though the panel already checked them: the
+// helper runs as root and cannot trust the content of the message. The start
+// time binds the request to one concrete process, because the kernel reuses
+// PID numbers.
 func (s *Server) signalProcess(_ context.Context, _ *helperv1.HelperRequest,
 	action *helperv1.ProcessSignalRequest) *helperv1.HelperResponse {
 	err := processes.Wyslij("/proc", action.GetPid(), action.GetExpectedStartTicks(),

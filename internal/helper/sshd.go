@@ -9,20 +9,20 @@ import (
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
+	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
 )
 
-// Sciezki narzedzi sshd.
+// The paths of the sshd tools.
 const (
-	sciezkaSshd      = "/usr/sbin/sshd"
-	sciezkaSshKeygen = "/usr/bin/ssh-keygen"
+	sshdPath      = "/usr/sbin/sshd"
+	sshKeygenPath = "/usr/bin/ssh-keygen"
 )
 
-// applySSH obsluguje operacje na serwerze sshd.
+// applySSH handles the operations on the sshd server.
 func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.SshRequest) *helperv1.HelperResponse {
 	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "inna operacja na jednostkach jest w toku")
+		return reject(ErrorLocked, "another unit operation is in flight")
 	}
 	defer s.unitMutex.Unlock()
 
@@ -33,207 +33,210 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if !exists(sciezkaSshd) {
+	if !exists(sshdPath) {
 		if action.GetOperation() == helperv1.SshRequest_OPERATION_PLAN {
-			// Brak serwera jest odpowiedzia planu, nie bledem odczytu:
-			// kampania ma zobaczyc ten host jako odmowe.
-			return odpowiedzPlanuSSH(sshmodul.Snapshot{}, sshmodul.Zaplanuj(
-				sshmodul.Snapshot{UnavailableReason: "ten host nie ma serwera sshd"},
-				ustawieniaZZadania(action), action.GetAllowLockout()))
+			// A missing server is an answer of the plan, not a read error: the
+			// campaign is to see this host as a refusal.
+			return sshPlanResponse(sshmodule.Snapshot{}, sshmodule.Zaplanuj(
+				sshmodule.Snapshot{UnavailableReason: "this host has no sshd server"},
+				settingsFromRequest(action), action.GetAllowLockout()))
 		}
-		return reject(ErrorUnsupported, "ten host nie ma serwera sshd")
+		return reject(ErrorUnsupported, "this host has no sshd server")
 	}
 
 	switch action.GetOperation() {
 	case helperv1.SshRequest_OPERATION_READ:
-		return odpowiedzSSH(s.czytajSSH(actionCtx), "", nil)
+		return sshResponse(s.readSSH(actionCtx), "", nil)
 	case helperv1.SshRequest_OPERATION_PLAN:
-		stan := s.czytajSSH(actionCtx)
-		return odpowiedzPlanuSSH(stan, sshmodul.Zaplanuj(stan,
-			ustawieniaZZadania(action), action.GetAllowLockout()))
+		state := s.readSSH(actionCtx)
+		return sshPlanResponse(state, sshmodule.Zaplanuj(state,
+			settingsFromRequest(action), action.GetAllowLockout()))
 	case helperv1.SshRequest_OPERATION_APPLY:
-		return s.zapiszKonfiguracjeSSH(actionCtx, action)
+		return s.writeSSHConfiguration(actionCtx, action)
 	case helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY:
-		return s.wymienKluczHosta(actionCtx, action)
+		return s.rotateHostKey(actionCtx, action)
 	}
-	return reject(ErrorUnknownAction, "nieznana operacja na sshd")
+	return reject(ErrorUnknownAction, "unknown sshd operation")
 }
 
-// zapiszKonfiguracjeSSH zapisuje plik panelu i przeladowuje serwer.
+// writeSSHConfiguration writes the panel file and reloads the server.
 //
-// Kolejnosc jest tu cala trescia operacji: zapis, sprawdzenie skladni przez
-// sam sshd, dopiero potem przeladowanie. Serwer przeladowany z bledna
-// konfiguracja nie wstaje, a wtedy nie ma juz czym go naprawic zdalnie.
-func (s *Server) zapiszKonfiguracjeSSH(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
-	ustawienia := ustawieniaZZadania(action)
-	stan := s.czytajSSH(ctx)
+// The order is the whole content of the operation: the write, the syntax check
+// by sshd itself, and only then the reload. A server reloaded with a broken
+// configuration does not come up, and then there is nothing left to repair it
+// with remotely.
+func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
+	settings := settingsFromRequest(action)
+	state := s.readSSH(ctx)
 
-	// Zmiana zatwierdzona na podstawie planu ma wejsc w ten stan, ktory
-	// operator ogladal. Inny odcisk znaczy, ze serwer albo plik panelu
-	// zmienil sie od planowania - i to jest odmowa, nie ostrzezenie.
-	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
-		if teraz := sshmodul.Zaplanuj(stan, ustawienia, action.GetAllowLockout()); teraz.PlanHash != oczekiwany {
+	// A change approved on the basis of a plan is to enter the state the
+	// operator looked at. A different digest means the server or the panel file
+	// changed since the planning - and that is a refusal, not a warning.
+	if expected := action.GetPlanHash(); expected != "" {
+		if now := sshmodule.Zaplanuj(state, settings, action.GetAllowLockout()); now.PlanHash != expected {
 			return reject(ErrorPreconditionFailed,
-				"konfiguracja sshd zmienila sie od planowania; zmiana wymaga nowego planu")
+				"the sshd configuration changed since the planning; the change needs a new plan")
 		}
 	}
 
-	// Serwer, do ktorego nie da sie zalogowac zadna metoda, nie jest
-	// zabezpieczony - jest niedostepny.
-	if !action.GetAllowLockout() && sshmodul.OdcinaWszystkieMetody(ustawienia, stan) {
+	// A server nobody can log into by any method is not secured - it is
+	// unreachable.
+	if !action.GetAllowLockout() && sshmodule.OdcinaWszystkieMetody(settings, state) {
 		return reject(ErrorUnsupported,
-			"po tej zmianie nie zostalaby zadna dzialajaca metoda uwierzytelnienia; "+
-				"swiadome odciecie wymaga jawnej zgody operatora")
+			"after this change no working authentication method would be left; "+
+				"cutting access off deliberately needs explicit operator consent")
 	}
 
-	tresc, err := sshmodul.SkladajDropIn(ustawienia)
+	content, err := sshmodule.SkladajDropIn(settings)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
-	poprzednia, bylaWczesniej := poprzedniDropIn()
-	if err := zapiszDropIn(tresc); err != nil {
-		return reject(ErrorExecFailed, "zapis konfiguracji: "+err.Error())
+	previous, existedBefore := previousDropIn()
+	if err := writeDropIn(content); err != nil {
+		return reject(ErrorExecFailed, "writing the configuration: "+err.Error())
 	}
 
-	// sshd -t czyta cala konfiguracje razem z dolaczanymi plikami, wiec
-	// sprawdza dokladnie to, co zaraz przeczyta serwer.
-	if wyjscie, err := uruchomNarzedzie(ctx, []string{sciezkaSshd, "-t"}); err != nil {
-		przywrocDropIn(poprzednia, bylaWczesniej)
-		return reject(ErrorMalformed, "sshd odrzucil konfiguracje: "+wyjscie)
+	// sshd -t reads the whole configuration together with the included files,
+	// so it checks exactly what the server is about to read.
+	if output, err := runTool(ctx, []string{sshdPath, "-t"}); err != nil {
+		restoreDropIn(previous, existedBefore)
+		return reject(ErrorMalformed, "sshd rejected the configuration: "+output)
 	}
 
-	jednostka := stan.Unit
-	if jednostka == "" {
-		jednostka = jednostkaSSH()
+	unit := state.Unit
+	if unit == "" {
+		unit = sshUnit()
 	}
-	// Przeladowanie, a nie restart: sesje, ktore juz trwaja, maja przezyc
-	// zmiane. Operator siedzacy na tym hoscie po ssh jest jedna z nich.
-	if wyjscie, err := uruchomNarzedzie(ctx,
-		[]string{"/usr/bin/systemctl", "reload", jednostka}); err != nil {
-		przywrocDropIn(poprzednia, bylaWczesniej)
-		_, _ = uruchomNarzedzie(ctx, []string{"/usr/bin/systemctl", "reload", jednostka})
-		return reject(ErrorExecFailed, "przeladowanie "+jednostka+": "+wyjscie)
+	// A reload and not a restart: the sessions already running are to survive
+	// the change. The operator sitting on this host over ssh is one of them.
+	if output, err := runTool(ctx,
+		[]string{"/usr/bin/systemctl", "reload", unit}); err != nil {
+		restoreDropIn(previous, existedBefore)
+		_, _ = runTool(ctx, []string{"/usr/bin/systemctl", "reload", unit})
+		return reject(ErrorExecFailed, "reloading "+unit+": "+output)
 	}
 
-	po := s.czytajSSH(ctx)
-	// W sshd wygrywa pierwsza wartosc, a pliki dolaczane maja kolejnosc
-	// alfabetyczna: wczesniejszy plik administratora hosta przeslania nasz.
-	// Cisza w tym miejscu bylaby falszywym sukcesem.
-	rozbiezne := sshmodul.RozbiezneUstawienia(ustawienia, po)
-	komunikat := "konfiguracja zapisana i przeladowana"
-	if len(rozbiezne) > 0 {
-		komunikat = "konfiguracja zapisana, ale czesc ustawien nie doszla do skutku"
+	after := s.readSSH(ctx)
+	// In sshd the first value wins, and the included files are read in
+	// alphabetical order: an earlier file of the host administrator shadows
+	// ours. Silence in this place would be a false success.
+	mismatches := sshmodule.RozbiezneUstawienia(settings, after)
+	message := "the configuration was written and reloaded"
+	if len(mismatches) > 0 {
+		message = "the configuration was written, but some settings did not take effect"
 	}
-	return odpowiedzSSH(po, komunikat, rozbiezne)
+	return sshResponse(after, message, mismatches)
 }
 
-// wymienKluczHosta generuje nowy klucz hosta wskazanego typu.
+// rotateHostKey generates a new host key of the given type.
 //
-// Wymiana klucza zmienia tozsamosc hosta widziana przez wszystkich klientow:
-// kazdy z nich zobaczy ostrzezenie o zmianie known_hosts, a automatyzacja
-// oparta o odcisk przestanie dzialac. Dlatego stary klucz zostaje obok,
-// z data w nazwie - zeby dalo sie go przywrocic recznie.
-func (s *Server) wymienKluczHosta(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
-	typ := action.GetKeyType()
-	if typ != "ed25519" && typ != "rsa" && typ != "ecdsa" {
-		return reject(ErrorMalformed, "panel wymienia klucze ed25519, rsa albo ecdsa, nie "+typ)
+// Rotating the key changes the identity of the host as every client sees it:
+// each of them will get a warning about a changed known_hosts, and automation
+// based on the fingerprint will stop working. That is why the old key stays
+// next to it, with a date in its name - so that it can be restored by hand.
+func (s *Server) rotateHostKey(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
+	keyType := action.GetKeyType()
+	if keyType != "ed25519" && keyType != "rsa" && keyType != "ecdsa" {
+		return reject(ErrorMalformed, "the panel rotates ed25519, rsa or ecdsa keys, not "+keyType)
 	}
-	if !exists(sciezkaSshKeygen) {
-		return reject(ErrorUnsupported, "ten host nie ma ssh-keygen")
+	if !exists(sshKeygenPath) {
+		return reject(ErrorUnsupported, "this host has no ssh-keygen")
 	}
-	sciezka := "/etc/ssh/ssh_host_" + typ + "_key"
-	kopia := sciezka + ".flotestro-" + time.Now().UTC().Format("20060102T150405")
+	path := "/etc/ssh/ssh_host_" + keyType + "_key"
+	backupPath := path + ".flotestro-" + time.Now().UTC().Format("20060102T150405")
 
-	if exists(sciezka) {
-		if err := os.Rename(sciezka, kopia); err != nil {
-			return reject(ErrorExecFailed, "odlozenie starego klucza: "+err.Error())
+	if exists(path) {
+		if err := os.Rename(path, backupPath); err != nil {
+			return reject(ErrorExecFailed, "putting the old key aside: "+err.Error())
 		}
-		if exists(sciezka + ".pub") {
-			_ = os.Rename(sciezka+".pub", kopia+".pub")
+		if exists(path + ".pub") {
+			_ = os.Rename(path+".pub", backupPath+".pub")
 		}
-	}
-
-	if wyjscie, err := uruchomNarzedzie(ctx, []string{sciezkaSshKeygen,
-		"-q", "-t", typ, "-N", "", "-f", sciezka}); err != nil {
-		// Bez klucza serwer nie wstanie, wiec wracamy do poprzedniego.
-		if exists(kopia) {
-			_ = os.Rename(kopia, sciezka)
-			_ = os.Rename(kopia+".pub", sciezka+".pub")
-		}
-		return reject(ErrorExecFailed, "generowanie klucza: "+wyjscie)
 	}
 
-	jednostka := jednostkaSSH()
-	if wyjscie, err := uruchomNarzedzie(ctx,
-		[]string{"/usr/bin/systemctl", "reload", jednostka}); err != nil {
-		return reject(ErrorExecFailed, "przeladowanie "+jednostka+": "+wyjscie)
+	if output, err := runTool(ctx, []string{sshKeygenPath,
+		"-q", "-t", keyType, "-N", "", "-f", path}); err != nil {
+		// Without a key the server will not come up, so the previous one comes
+		// back.
+		if exists(backupPath) {
+			_ = os.Rename(backupPath, path)
+			_ = os.Rename(backupPath+".pub", path+".pub")
+		}
+		return reject(ErrorExecFailed, "generating the key: "+output)
 	}
-	return odpowiedzSSH(s.czytajSSH(ctx),
-		"klucz "+typ+" wymieniony; stary zostal jako "+kopia+
-			"; kazdy klient zobaczy zmiane odcisku w known_hosts", nil)
+
+	unit := sshUnit()
+	if output, err := runTool(ctx,
+		[]string{"/usr/bin/systemctl", "reload", unit}); err != nil {
+		return reject(ErrorExecFailed, "reloading "+unit+": "+output)
+	}
+	return sshResponse(s.readSSH(ctx),
+		"the "+keyType+" key was rotated; the old one stayed as "+backupPath+
+			"; every client will see the changed fingerprint in known_hosts", nil)
 }
 
-// czytajSSH sklada obraz konfiguracji serwera.
-func (s *Server) czytajSSH(ctx context.Context) sshmodul.Snapshot {
-	snapshot := sshmodul.Snapshot{ObservedAt: time.Now().UTC(), ManagedPath: sshmodul.SciezkaDropIn}
+// readSSH assembles the picture of the server configuration.
+func (s *Server) readSSH(ctx context.Context) sshmodule.Snapshot {
+	snapshot := sshmodule.Snapshot{ObservedAt: time.Now().UTC(), ManagedPath: sshmodule.SciezkaDropIn}
 
-	wyjscie, err := wyjscieNarzedzia(ctx, sciezkaSshd, "-T")
+	output, err := toolOutput(ctx, sshdPath, "-T")
 	if err != nil {
 		snapshot.UnavailableReason = "sshd -T: " + err.Error()
 		return snapshot
 	}
-	efektywna := sshmodul.ParsujEffective(wyjscie)
-	efektywna.ObservedAt = snapshot.ObservedAt
-	efektywna.ManagedPath = snapshot.ManagedPath
-	snapshot = efektywna
+	effective := sshmodule.ParsujEffective(output)
+	effective.ObservedAt = snapshot.ObservedAt
+	effective.ManagedPath = snapshot.ManagedPath
+	snapshot = effective
 
-	if tresc, err := os.ReadFile(sshmodul.SciezkaDropIn); err == nil {
-		snapshot.Managed = string(tresc)
+	if content, err := os.ReadFile(sshmodule.SciezkaDropIn); err == nil {
+		snapshot.Managed = string(content)
 		snapshot.ManagedPresent = true
 	}
-	snapshot.Unit = jednostkaSSH()
-	snapshot.HostKeys = odciskiKluczy(ctx)
+	snapshot.Unit = sshUnit()
+	snapshot.HostKeys = keyFingerprints(ctx)
 	return snapshot
 }
 
-// odciskiKluczy zbiera odciski kluczy hosta.
-func odciskiKluczy(ctx context.Context) []sshmodul.HostKey {
-	if !exists(sciezkaSshKeygen) {
+// keyFingerprints collects the fingerprints of the host keys.
+func keyFingerprints(ctx context.Context) []sshmodule.HostKey {
+	if !exists(sshKeygenPath) {
 		return nil
 	}
-	pliki, err := filepath.Glob("/etc/ssh/ssh_host_*_key.pub")
+	files, err := filepath.Glob("/etc/ssh/ssh_host_*_key.pub")
 	if err != nil {
 		return nil
 	}
-	var klucze []sshmodul.HostKey
-	for _, plik := range pliki {
-		wyjscie, err := wyjscieNarzedzia(ctx, sciezkaSshKeygen, "-l", "-f", plik)
+	var keys []sshmodule.HostKey
+	for _, file := range files {
+		output, err := toolOutput(ctx, sshKeygenPath, "-l", "-f", file)
 		if err != nil {
 			continue
 		}
-		if klucz, ok := sshmodul.ParsujOdcisk(wyjscie, plik); ok {
-			klucze = append(klucze, klucz)
+		if key, ok := sshmodule.ParsujOdcisk(output, file); ok {
+			keys = append(keys, key)
 		}
 	}
-	return klucze
+	return keys
 }
 
-// jednostkaSSH nazywa jednostke systemd serwera.
+// sshUnit names the systemd unit of the server.
 //
-// Debian ma ssh.service, Fedora sshd.service. Przeladowanie niewlasciwej nie
-// robi nic i nie zglasza bledu, wiec nazwa nie moze byc zgadywana na stale.
-func jednostkaSSH() string {
-	for _, nazwa := range []string{"sshd.service", "ssh.service"} {
-		if exists("/usr/lib/systemd/system/"+nazwa) || exists("/lib/systemd/system/"+nazwa) {
-			return nazwa
+// Debian has ssh.service, Fedora sshd.service. Reloading the wrong one does
+// nothing and reports no error, so the name must not be guessed once and for
+// all.
+func sshUnit() string {
+	for _, name := range []string{"sshd.service", "ssh.service"} {
+		if exists("/usr/lib/systemd/system/"+name) || exists("/lib/systemd/system/"+name) {
+			return name
 		}
 	}
 	return "sshd.service"
 }
 
-func ustawieniaZZadania(action *helperv1.SshRequest) sshmodul.Ustawienia {
-	return sshmodul.Ustawienia{
+func settingsFromRequest(action *helperv1.SshRequest) sshmodule.Ustawienia {
+	return sshmodule.Ustawienia{
 		Port:                   action.GetPort(),
 		PermitRootLogin:        action.GetPermitRootLogin(),
 		PasswordAuthentication: action.GetPasswordAuthentication(),
@@ -246,65 +249,65 @@ func ustawieniaZZadania(action *helperv1.SshRequest) sshmodul.Ustawienia {
 	}
 }
 
-func poprzedniDropIn() (string, bool) {
-	tresc, err := os.ReadFile(sshmodul.SciezkaDropIn)
+func previousDropIn() (string, bool) {
+	content, err := os.ReadFile(sshmodule.SciezkaDropIn)
 	if err != nil {
 		return "", false
 	}
-	return string(tresc), true
+	return string(content), true
 }
 
-func zapiszDropIn(tresc string) error {
-	if err := os.MkdirAll(sshmodul.KatalogDropIn, 0o755); err != nil {
+func writeDropIn(content string) error {
+	if err := os.MkdirAll(sshmodule.KatalogDropIn, 0o755); err != nil {
 		return err
 	}
-	// Plik tymczasowy nie moze konczyc sie na .conf: katalog jest dolaczany
-	// wzorcem i sshd przeczytalby polowe zapisu jako konfiguracje.
-	tymczasowy := sshmodul.SciezkaDropIn + ".nowy"
-	if err := os.WriteFile(tymczasowy, []byte(tresc), 0o600); err != nil {
+	// The temporary file must not end in .conf: the directory is included by a
+	// pattern and sshd would read half of the write as configuration.
+	temporary := sshmodule.SciezkaDropIn + ".new"
+	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tymczasowy, sshmodul.SciezkaDropIn)
+	return os.Rename(temporary, sshmodule.SciezkaDropIn)
 }
 
-func przywrocDropIn(tresc string, byla bool) {
-	if !byla {
-		_ = os.Remove(sshmodul.SciezkaDropIn)
+func restoreDropIn(content string, existed bool) {
+	if !existed {
+		_ = os.Remove(sshmodule.SciezkaDropIn)
 		return
 	}
-	_ = zapiszDropIn(tresc)
+	_ = writeDropIn(content)
 }
 
-func odpowiedzSSH(snapshot sshmodul.Snapshot, komunikat string, rozbiezne []string) *helperv1.HelperResponse {
-	zakodowane, err := json.Marshal(snapshot)
+func sshResponse(snapshot sshmodule.Snapshot, message string, mismatches []string) *helperv1.HelperResponse {
+	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	return &helperv1.HelperResponse{
 		Accepted: true,
 		SshResult: &helperv1.SshResult{
-			Snapshot: zakodowane, Message: komunikat, Mismatches: rozbiezne,
+			Snapshot: encoded, Message: message, Mismatches: mismatches,
 		},
 	}
 }
 
-// odpowiedzPlanuSSH dokleda plan do stanu serwera.
-func odpowiedzPlanuSSH(stan sshmodul.Snapshot, plan sshmodul.Plan) *helperv1.HelperResponse {
-	zakodowany, err := json.Marshal(plan)
+// sshPlanResponse attaches the plan to the state of the server.
+func sshPlanResponse(state sshmodule.Snapshot, plan sshmodule.Plan) *helperv1.HelperResponse {
+	encoded, err := json.Marshal(plan)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	komunikat := "zmiana nie wejdzie na ten host: " + plan.Refusal
+	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == sshmodul.PlanBezZmian:
-		komunikat = "konfiguracja sshd jest juz w stanie docelowym"
+	case plan.Action == sshmodule.PlanBezZmian:
+		message = "the sshd configuration is already in the desired state"
 	default:
-		komunikat = strings.Join(plan.Changes, "; ")
+		message = strings.Join(plan.Changes, "; ")
 	}
-	odpowiedz := odpowiedzSSH(stan, komunikat, nil)
-	if odpowiedz.GetSshResult() != nil {
-		odpowiedz.SshResult.Plan = zakodowany
+	response := sshResponse(state, message, nil)
+	if response.GetSshResult() != nil {
+		response.SshResult.Plan = encoded
 	}
-	return odpowiedz
+	return response
 }

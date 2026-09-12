@@ -63,7 +63,7 @@ func run() error {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		log.Info("the replacement of the agent", "package", *agentReplacement)
-		return helper.WykonajWymianeAgenta(ctx, *agentReplacement, log)
+		return helper.RunAgentReplacement(ctx, *agentReplacement, log)
 	}
 
 	// The rollback mode is called by a transient systemd unit when nobody has
@@ -74,7 +74,7 @@ func run() error {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		log.Warn("rolling the firewall change back", "plan", *rollbackFirewall)
-		if err := helper.WycofajZapore(ctx, *rollbackFirewall); err != nil {
+		if err := helper.RollbackFirewall(ctx, *rollbackFirewall); err != nil {
 			return err
 		}
 		log.Info("the firewall change was rolled back", "plan", *rollbackFirewall)
@@ -85,7 +85,7 @@ func run() error {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		log.Warn("rolling the network change back", "plan", *rollback)
-		if err := helper.WycofajZPlanu(ctx, *rollback); err != nil {
+		if err := helper.RollbackFromPlan(ctx, *rollback); err != nil {
 			return err
 		}
 		log.Info("the network change was rolled back", "plan", *rollback)

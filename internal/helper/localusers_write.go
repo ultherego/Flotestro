@@ -14,11 +14,11 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// localUserNamePattern odrzuca nazwy, ktore nie moga byc kontem POSIX.
-// Nazwa nigdy nie trafia do powloki, ale walidacja jest druga linia obrony.
+// localUserNamePattern rejects names that cannot be a POSIX account. The name
+// never reaches a shell, but the validation is the second line of defence.
 var localUserNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}\$?$`)
 
-// Stabilne kody bledow operacji na kontach lokalnych.
+// Stable error codes of the operations on local accounts.
 const (
 	ErrorInvalidAccount   = "invalid_account"
 	ErrorShadowsDirectory = "shadows_directory_account"
@@ -27,19 +27,21 @@ const (
 	ErrorAccountMissing   = "account_missing"
 )
 
-// systemUIDCeiling oddziela konta uslug od kont ludzi. Konta ponizej tej
-// granicy naleza do systemu i panel ich nie zmienia.
+// systemUIDCeiling separates service accounts from the accounts of people.
+// Accounts below this boundary belong to the system and the panel does not
+// change them.
 const systemUIDCeiling = 1000
 
-// applyLocalUserAction zmienia konto lokalne na hoscie.
+// applyLocalUserAction changes a local account on the host.
 //
-// Panel nie zarzadza haslami: konta powstaja zablokowane, a dostep daje sie
-// kluczem SSH. Haslo w kopercie zadania byloby sekretem w bazie i w logach.
+// The panel does not manage passwords: accounts are created locked and access
+// is granted with an SSH key. A password in the envelope of a task would be a
+// secret in the database and in the logs.
 func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.LocalUserActionRequest) *helperv1.HelperResponse {
 	name := action.GetName()
 	if !localUserNamePattern.MatchString(name) {
-		return reject(ErrorInvalidAccount, fmt.Sprintf("nieprawidlowa nazwa konta %q", name))
+		return reject(ErrorInvalidAccount, fmt.Sprintf("invalid account name %q", name))
 	}
 
 	s.accountMutex.Lock()
@@ -62,7 +64,7 @@ func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.Hel
 	case helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS:
 		return s.setLocalUserKeys(operationCtx, name, action.GetSshKeys())
 	default:
-		return reject(ErrorUnknownAction, "nieznana operacja na koncie lokalnym")
+		return reject(ErrorUnknownAction, "unknown local account operation")
 	}
 }
 
@@ -71,15 +73,15 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	name := action.GetName()
 
 	if existing, err := user.Lookup(name); err == nil {
-		// Konto rozwiazywane przez NSS, ale nieobecne w /etc/passwd, pochodzi
-		// z katalogu. Utworzenie lokalnej kopii przeslonilo by tozsamosc
-		// z katalogu i rozjechalo UID miedzy hostami.
+		// An account resolved through NSS but absent from /etc/passwd comes from
+		// the directory. Creating a local copy would shadow the identity from the
+		// directory and make the UIDs diverge between hosts.
 		if !inPasswdFile(name) {
 			return reject(ErrorShadowsDirectory, fmt.Sprintf(
-				"konto %s pochodzi z katalogu (UID %s); lokalna kopia przeslonilaby je",
+				"the account %s comes from the directory (UID %s); a local copy would shadow it",
 				name, existing.Uid))
 		}
-		return reject(ErrorAccountExists, fmt.Sprintf("konto %s juz istnieje lokalnie", name))
+		return reject(ErrorAccountExists, fmt.Sprintf("the account %s already exists locally", name))
 	}
 
 	args := []string{"--shell", shellOrDefault(action.GetShell())}
@@ -88,7 +90,7 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	}
 	for _, group := range action.GetGroups() {
 		if !localUserNamePattern.MatchString(group) {
-			return reject(ErrorInvalidAccount, fmt.Sprintf("nieprawidlowa nazwa grupy %q", group))
+			return reject(ErrorInvalidAccount, fmt.Sprintf("invalid group name %q", group))
 		}
 	}
 	if groups := action.GetGroups(); len(groups) > 0 {
@@ -97,10 +99,10 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	if action.GetCreateHome() {
 		args = append(args, "--create-home")
 	}
-	// Konto powstaje z wylaczonym logowaniem haslem, a nie zablokowane.
-	// useradd zostawia w shadow wykrzyknik, ktory znaczy "zablokowane przez
-	// administratora"; dla konta obslugiwanego kluczem SSH to falszywy stan,
-	// a do tego uniemozliwia pozniejsze odblokowanie.
+	// The account is created with password login disabled, not locked. useradd
+	// leaves an exclamation mark in shadow, which means "locked by the
+	// administrator"; for an account served by an SSH key that is a false state,
+	// and on top of that it makes a later unlock impossible.
 	args = append(args, "--password", "*")
 	args = append(args, name)
 
@@ -114,8 +116,8 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 		}
 	}
 
-	s.log.Info("utworzono konto lokalne",
-		"task_id", request.GetTaskId(), "konto", name, "grup", len(action.GetGroups()))
+	s.log.Info("a local account was created",
+		"task_id", request.GetTaskId(), "account", name, "groups", len(action.GetGroups()))
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
@@ -130,11 +132,11 @@ func (s *Server) setLocalUserLock(ctx context.Context, name string, lock bool) *
 	if _, stderr, err := runIdentityTool(ctx, 30*time.Second, "usermod", flag, name); err != nil {
 		return reject(ErrorExecFailed, "usermod: "+firstLineOf(stderr))
 	}
-	s.log.Info("zmieniono stan konta lokalnego", "konto", name, "zablokowane", lock)
+	s.log.Info("the state of a local account was changed", "account", name, "locked", lock)
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// setLocalUserKeys ustawia komplet kluczy publicznych konta.
+// setLocalUserKeys sets the complete set of public keys of an account.
 func (s *Server) setLocalUserKeys(ctx context.Context, name string, keys []string) *helperv1.HelperResponse {
 	if response := s.requireLocalAccount(name); response != nil {
 		return response
@@ -166,8 +168,8 @@ func (s *Server) setLocalUserKeys(ctx context.Context, name string, keys []strin
 		content += strings.TrimSpace(key) + "\n"
 	}
 
-	// Zapis atomowy: przerwany zapis nie moze zostawic pliku, ktory odcina
-	// dostep albo daje go czesciowo.
+	// An atomic write: an interrupted write must not leave a file that cuts off
+	// access or grants it only in part.
 	temporary := path + ".flotestro-tmp"
 	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -181,30 +183,31 @@ func (s *Server) setLocalUserKeys(ctx context.Context, name string, keys []strin
 		return reject(ErrorExecFailed, err.Error())
 	}
 
-	s.log.Info("ustawiono klucze SSH konta lokalnego", "konto", name, "kluczy", len(keys))
+	s.log.Info("the SSH keys of a local account were set", "account", name, "keys", len(keys))
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// requireLocalAccount odrzuca operacje na kontach systemowych i na kontach
-// pochodzacych z katalogu.
+// requireLocalAccount rejects operations on system accounts and on accounts
+// that come from the directory.
 func (s *Server) requireLocalAccount(name string) *helperv1.HelperResponse {
 	account, err := user.Lookup(name)
 	if err != nil {
-		return reject(ErrorAccountMissing, fmt.Sprintf("konto %s nie istnieje", name))
+		return reject(ErrorAccountMissing, fmt.Sprintf("the account %s does not exist", name))
 	}
 	if !inPasswdFile(name) {
 		return reject(ErrorShadowsDirectory, fmt.Sprintf(
-			"konto %s pochodzi z katalogu; zmiany naleza do katalogu, nie do hosta", name))
+			"the account %s comes from the directory; changes belong to the directory, not to the host", name))
 	}
 	if uid, convErr := strconv.Atoi(account.Uid); convErr == nil && uid < systemUIDCeiling {
-		// Konta uslug naleza do pakietow, ktore je utworzyly.
+		// Service accounts belong to the packages that created them.
 		return reject(ErrorSystemAccount, fmt.Sprintf(
-			"konto %s jest kontem systemowym (UID %s)", name, account.Uid))
+			"the account %s is a system account (UID %s)", name, account.Uid))
 	}
 	return nil
 }
 
-// inPasswdFile mowi, czy konto pochodzi z pliku, a nie z katalogu przez NSS.
+// inPasswdFile says whether the account comes from the file and not from the
+// directory through NSS.
 func inPasswdFile(name string) bool {
 	data, err := os.ReadFile("/etc/passwd")
 	if err != nil {
@@ -227,28 +230,28 @@ func shellOrDefault(shell string) string {
 	}
 }
 
-// validatePublicKey odrzuca material, ktory nie jest kluczem publicznym.
+// validatePublicKey rejects material that is not a public key.
 func validatePublicKey(key string) error {
 	trimmed := strings.TrimSpace(key)
 	if trimmed == "" {
-		return fmt.Errorf("pusty klucz SSH")
+		return fmt.Errorf("an empty SSH key")
 	}
 	if strings.Contains(trimmed, "PRIVATE KEY") {
-		return fmt.Errorf("podano klucz prywatny; na hosta trafia wylacznie klucz publiczny")
+		return fmt.Errorf("a private key was given; only a public key goes to the host")
 	}
 	if strings.ContainsAny(trimmed, "\n\r") {
-		// Wiele linii w jednym kluczu pozwolilo by dopisac dodatkowy wpis.
-		return fmt.Errorf("klucz zawiera znak nowej linii")
+		// Several lines in one key would allow an extra entry to be appended.
+		return fmt.Errorf("the key contains a newline character")
 	}
 	fields := strings.Fields(trimmed)
 	if len(fields) < 2 {
-		return fmt.Errorf("klucz SSH nie ma postaci <typ> <material>")
+		return fmt.Errorf("the SSH key does not have the form <type> <material>")
 	}
 	switch fields[0] {
 	case "ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
 		"ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com":
 		return nil
 	default:
-		return fmt.Errorf("nieobslugiwany typ klucza SSH %q", fields[0])
+		return fmt.Errorf("unsupported SSH key type %q", fields[0])
 	}
 }

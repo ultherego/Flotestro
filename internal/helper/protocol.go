@@ -1,6 +1,6 @@
-// Package helper zawiera protokol i serwer helpera roota. Helper nasluchuje
-// wylacznie na gniezdzie unixowym, jest aktywowany przez systemd na zadanie
-// i nigdy nie rozmawia z control plane.
+// Package helper holds the protocol and the server of the root helper. The
+// helper listens only on a unix socket, is activated by systemd on demand and
+// never talks to the control plane.
 package helper
 
 import (
@@ -12,18 +12,20 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ProtocolVersion zmienia sie przy kazdej niezgodnej zmianie kontraktu.
-// Helper odrzuca wersje, ktorej nie zna, zamiast zgadywac znaczenie pol.
+// ProtocolVersion changes with every incompatible change of the contract. The
+// helper rejects a version it does not know instead of guessing the meaning of
+// the fields.
 const ProtocolVersion = 1
 
-// maxFrameBytes ogranicza pojedyncza wiadomosc. Helper dziala jako root, wiec
-// nie moze pozwolic rozmowcy zaalokowac dowolnej ilosci pamieci.
+// maxFrameBytes limits a single message. The helper runs as root, so it must
+// not let the peer allocate an arbitrary amount of memory.
 const maxFrameBytes = 1 << 20
 
-// ErrFrameTooLarge oznacza ramke przekraczajaca limit.
-var ErrFrameTooLarge = errors.New("ramka przekracza dozwolony rozmiar")
+// ErrFrameTooLarge means a frame exceeding the limit.
+var ErrFrameTooLarge = errors.New("the frame exceeds the allowed size")
 
-// Stabilne kody bledow helpera. Sa czescia kontraktu i nie zaleza od jezyka.
+// Stable helper error codes. They are part of the contract and do not depend
+// on the language.
 const (
 	ErrorUnsupportedVersion = "unsupported_version"
 	ErrorUnknownAction      = "unknown_action"
@@ -33,23 +35,23 @@ const (
 	ErrorLocked             = "locked"
 	ErrorExecFailed         = "exec_failed"
 	ErrorTimeout            = "timeout"
-	// ErrorUnsupported oznacza operacje, ktorej ten host nie obsluguje.
-	// Jasna odmowa jest lepsza niz udawanie, ze operacja sie wykonala.
+	// ErrorUnsupported means an operation this host does not support. A clear
+	// refusal is better than pretending the operation ran.
 	ErrorUnsupported = "unsupported"
 	ErrorMalformed   = "malformed_request"
-	// ErrorPreconditionFailed oznacza zlecenie zlozone wobec innego stanu
-	// hosta niz ten, ktory host ma teraz. To nie jest wada zlecenia ani
-	// awaria wykonania: to zmiana, ktora w miedzyczasie zaszla.
+	// ErrorPreconditionFailed means an order placed against a host state other
+	// than the one the host has now. This is neither a flaw of the order nor a
+	// failure of the execution: it is a change that happened in between.
 	ErrorPreconditionFailed = "precondition_failed"
-	// Odmowy sprzatania silnika kontenerow. Rozne powody, bo rozne sa
-	// wnioski: obiektu w uzyciu nie usuwa sie do czasu zatrzymania uslugi,
-	// a sieci wbudowanej nie usuwa sie nigdy.
+	// Refusals of container engine cleanup. Different reasons, because the
+	// conclusions differ: an object in use is not removed until the service is
+	// stopped, and a built-in network is never removed.
 	ErrorDockerInUse         = "docker_object_in_use"
 	ErrorDockerPredefined    = "docker_network_predefined"
 	ErrorDockerObjectMissing = "docker_object_missing"
 )
 
-// WriteMessage zapisuje wiadomosc poprzedzona 4-bajtowa dlugoscia.
+// WriteMessage writes a message preceded by a 4-byte length.
 func WriteMessage(w io.Writer, message proto.Message) error {
 	payload, err := proto.Marshal(message)
 	if err != nil {
@@ -67,7 +69,7 @@ func WriteMessage(w io.Writer, message proto.Message) error {
 	return err
 }
 
-// ReadMessage czyta wiadomosc poprzedzona 4-bajtowa dlugoscia.
+// ReadMessage reads a message preceded by a 4-byte length.
 func ReadMessage(r io.Reader, message proto.Message) error {
 	var header [4]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
@@ -75,7 +77,7 @@ func ReadMessage(r io.Reader, message proto.Message) error {
 	}
 	length := binary.BigEndian.Uint32(header[:])
 	if length > maxFrameBytes {
-		return fmt.Errorf("%w: %d bajtow", ErrFrameTooLarge, length)
+		return fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, length)
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {

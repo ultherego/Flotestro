@@ -14,11 +14,11 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// readLocalAccounts odczytuje te dane o kontach, ktore wymagaja roota: stan
-// blokady z /etc/shadow i klucze SSH z katalogow domowych.
+// readLocalAccounts reads the account data that needs root: the lock state
+// from /etc/shadow and the SSH keys from the home directories.
 //
-// Agent nie ma i nie powinien miec dostepu do tych plikow: /etc/shadow zawiera
-// skroty hasel, a katalogi domowe naleza do uzytkownikow.
+// The agent has no access to these files and should have none: /etc/shadow
+// holds password hashes, and the home directories belong to the users.
 func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.LocalAccountsRequest) *helperv1.HelperResponse {
 	result := &helperv1.LocalAccountsResult{}
@@ -48,31 +48,33 @@ func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.Helper
 	}
 
 	if len(problems) > 0 {
-		// Brak czesci danych jest raportowany, a nie przemilczany: pusty
-		// wynik wygladalby jak konto bez kluczy.
+		// Missing parts of the data are reported and not passed over in silence:
+		// an empty result would look like an account without keys.
 		result.UnavailableReason = strings.Join(problems, "; ")
 	}
-	s.log.Debug("odczytano konta lokalne",
-		"task_id", request.GetTaskId(), "kont", len(result.Accounts))
+	s.log.Debug("the local accounts were read",
+		"task_id", request.GetTaskId(), "accounts", len(result.Accounts))
 	return &helperv1.HelperResponse{Accepted: true, AccountsResult: result}
 }
 
-// shadowState opisuje stan uwierzytelniania haslem. Blokada i brak hasla to
-// dwa rozne stany: konto zalozone przez panel nie ma hasla, ale nie jest
-// odciete, bo loguje sie kluczem SSH.
+// shadowState describes the state of password authentication. A lock and a
+// missing password are two different states: an account created by the panel
+// has no password but is not cut off, because it logs in with an SSH key.
 type shadowState struct {
 	locked      bool
 	passwordSet bool
 }
 
-// readShadowStates czyta stan hasel kont. Skroty hasel nie opuszczaja pliku:
-// interesuje nas wylacznie to, czy haslo istnieje i czy jest zablokowane.
+// readShadowStates reads the password state of the accounts. The password
+// hashes never leave the file: all that matters is whether a password exists
+// and whether it is locked.
 func readShadowStates() (map[string]shadowState, error) {
 	return parseShadow("/etc/shadow")
 }
 
-// parseShadow czyta stan hasel z podanego pliku. Sciezka jest parametrem,
-// zeby semantyke prefiksow dalo sie sprawdzic bez dostepu do /etc/shadow.
+// parseShadow reads the password state from the given file. The path is a
+// parameter so that the meaning of the prefixes can be checked without access
+// to /etc/shadow.
 func parseShadow(path string) (map[string]shadowState, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -88,9 +90,10 @@ func parseShadow(path string) (map[string]shadowState, error) {
 			continue
 		}
 		hash := fields[1]
-		// Wykrzyknik na poczatku wstawia usermod -L; to jedyny znacznik
-		// blokady administracyjnej. Gwiazdka oznacza wylaczone logowanie
-		// haslem i jest normalnym stanem konta obslugiwanego kluczem SSH.
+		// The exclamation mark at the start is put there by usermod -L; it is
+		// the only marker of an administrative lock. An asterisk means password
+		// login is disabled and is the normal state of an account served by an
+		// SSH key.
 		state := shadowState{locked: strings.HasPrefix(hash, "!")}
 		remaining := strings.TrimLeft(hash, "!")
 		state.passwordSet = remaining != "" && remaining != "*"
@@ -99,8 +102,9 @@ func parseShadow(path string) (map[string]shadowState, error) {
 	return states, scanner.Err()
 }
 
-// readAuthorizedKeys zwraca odciski kluczy publicznych konta. Sama tresc
-// klucza nie jest zwracana: do identyfikacji wystarcza odcisk.
+// readAuthorizedKeys returns the fingerprints of the public keys of an
+// account. The key content itself is not returned: the fingerprint is enough
+// to identify it.
 func readAuthorizedKeys(ctx context.Context, name string) ([]*helperv1.LocalSSHKey, error) {
 	home, err := homeDirectory(name)
 	if err != nil {
@@ -109,31 +113,32 @@ func readAuthorizedKeys(ctx context.Context, name string) ([]*helperv1.LocalSSHK
 	path := filepath.Join(home, ".ssh", "authorized_keys")
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// Brak pliku to normalny stan, a nie blad.
+			// A missing file is a normal state, not an error.
 			return nil, nil
 		}
-		// Plik niewidoczny dla helpera to co innego niz konto bez kluczy.
-		// Milczace zwrocenie pustej listy zglaszaloby panelowi, ze konto nie
-		// ma dostepu, podczas gdy stanu po prostu nie udalo sie ustalic.
-		return nil, fmt.Errorf("odczyt %s: %w", path, err)
+		// A file the helper cannot see is something other than an account
+		// without keys. Silently returning an empty list would tell the panel
+		// that the account has no access, while the state simply could not be
+		// determined.
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 
 	stdout, _, err := runIdentityTool(ctx, 15*time.Second, "ssh-keygen", "-l", "-f", path)
 	if err != nil {
-		return nil, fmt.Errorf("odczyt kluczy: %v", err)
+		return nil, fmt.Errorf("reading the keys: %v", err)
 	}
 
 	var keys []*helperv1.LocalSSHKey
 	for _, line := range strings.Split(stdout, "\n") {
-		// Format: <bity> <odcisk> <komentarz> (<typ>)
+		// Format: <bits> <fingerprint> <comment> (<type>)
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) < 3 {
 			continue
 		}
-		typ := strings.Trim(fields[len(fields)-1], "()")
+		keyType := strings.Trim(fields[len(fields)-1], "()")
 		comment := strings.Join(fields[2:len(fields)-1], " ")
 		keys = append(keys, &helperv1.LocalSSHKey{
-			Fingerprint: fields[1], Type: typ, Comment: comment,
+			Fingerprint: fields[1], Type: keyType, Comment: comment,
 		})
 	}
 	return keys, nil
@@ -153,5 +158,5 @@ func homeDirectory(name string) (string, error) {
 			return fields[5], nil
 		}
 	}
-	return "", fmt.Errorf("konto nie ma wpisu w /etc/passwd")
+	return "", fmt.Errorf("the account has no entry in /etc/passwd")
 }

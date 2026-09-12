@@ -11,12 +11,12 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/docker"
 )
 
-// readDocker odczytuje stan silnika kontenerow.
+// readDocker reads the state of the container engine.
 //
-// Gniazdo Dockera nalezy do roota, a czlonkostwo w grupie docker jest
-// rownowazne rootowi - agent dzialajacy bez uprawnien nie moze go dostac.
-// Dlatego rozmowa z silnikiem odbywa sie tutaj, a helper przyjmuje wylacznie
-// wyliczony zakres odczytu, nie sciezke do Engine API.
+// The Docker socket belongs to root, and membership in the docker group is
+// equivalent to root - an agent running without privileges cannot get it. That
+// is why the conversation with the engine happens here, and the helper accepts
+// only an enumerated read scope, not a path into the Engine API.
 func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerReadRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -37,8 +37,8 @@ func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest
 	defer cancel()
 
 	snapshot := docker.Collect(readCtx, client)
-	// Zakres podsumowania nie niesie pelnych list: inventory ma byc lekkie,
-	// a lista kontenerow hosta budowlanego potrafi miec setki pozycji.
+	// The summary scope carries no full lists: the inventory is to stay light,
+	// and the container list of a build host can have hundreds of entries.
 	if action.GetScope() != helperv1.DockerReadRequest_SCOPE_FULL {
 		snapshot.Containers = nil
 		snapshot.Images = nil
@@ -59,11 +59,13 @@ func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest
 	}
 }
 
-// readDockerEvents czyta dziennik zdarzen silnika w zamknietym oknie.
+// readDockerEvents reads the event journal of the engine within a closed
+// window.
 //
-// Zadanie konczy sie samo: okno i limity sa domykane w module, a nie brane
-// na slowo z wiadomosci. Odczyt "do odwolania" zostalby na hoscie na zawsze,
-// takze wtedy, gdy panel dawno przestal go sluchac.
+// The task ends on its own: the window and the limits are closed in the module
+// and not taken from the message at its word. A read "until further notice"
+// would stay on the host forever, also when the panel stopped listening to it
+// long ago.
 func (s *Server) readDockerEvents(ctx context.Context,
 	action *helperv1.DockerEventsRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -105,11 +107,11 @@ func (s *Server) readDockerEvents(ctx context.Context,
 	}
 }
 
-// applyDocker wykonuje operacje na silniku kontenerow.
+// applyDocker performs an operation on the container engine.
 //
-// Identyfikator kontenera jest sprawdzany ponownie, choc panel juz go
-// sprawdzil. Helper dziala jako root i nie moze ufac tresci wiadomosci:
-// identyfikator trafia do sciezki zapytania Engine API.
+// The container identifier is checked again even though the panel already
+// checked it. The helper runs as root and cannot trust the content of the
+// message: the identifier lands in the query path of the Engine API.
 func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerActionRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -117,10 +119,10 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 		return reject(ErrorUnsupported, err.Error())
 	}
 
-	// Jednoczesnie wykonuje sie najwyzej jedna mutacja kontenerow: rownolegly
-	// restart i usuniecie tego samego kontenera daja nieprzewidywalny wynik.
+	// At most one container mutation runs at a time: a concurrent restart and
+	// removal of the same container give an unpredictable result.
 	if !s.containerMutex.TryLock() {
-		return reject(ErrorLocked, "inna operacja na kontenerach jest w toku")
+		return reject(ErrorLocked, "another container operation is in flight")
 	}
 	defer s.containerMutex.Unlock()
 
@@ -131,93 +133,93 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	identyfikator := action.GetContainerId()
-	if wymagaKontenera(action.GetOperation()) {
-		if !identyfikatorKontenera.MatchString(identyfikator) {
-			return reject(ErrorMalformed, "nieprawidlowy identyfikator kontenera")
+	identifier := action.GetContainerId()
+	if needsContainer(action.GetOperation()) {
+		if !containerIdentifier.MatchString(identifier) {
+			return reject(ErrorMalformed, "invalid container identifier")
 		}
 	}
 
-	wynik := docker.Result{}
-	if wymagaKontenera(action.GetOperation()) {
-		wynik.Before = client.ContainerByID(actionCtx, identyfikator)
-		if wynik.Before == nil {
-			return reject(ErrorUnsupported, "kontener nie istnieje na tym hoscie")
+	result := docker.Result{}
+	if needsContainer(action.GetOperation()) {
+		result.Before = client.ContainerByID(actionCtx, identifier)
+		if result.Before == nil {
+			return reject(ErrorUnsupported, "the container does not exist on this host")
 		}
 	}
 
 	switch action.GetOperation() {
 	case helperv1.DockerActionRequest_OPERATION_START:
-		err = client.StartContainer(actionCtx, identyfikator)
+		err = client.StartContainer(actionCtx, identifier)
 	case helperv1.DockerActionRequest_OPERATION_STOP:
-		err = client.StopContainer(actionCtx, identyfikator, action.GetTimeoutSeconds())
+		err = client.StopContainer(actionCtx, identifier, action.GetTimeoutSeconds())
 	case helperv1.DockerActionRequest_OPERATION_RESTART:
-		err = client.RestartContainer(actionCtx, identyfikator, action.GetTimeoutSeconds())
+		err = client.RestartContainer(actionCtx, identifier, action.GetTimeoutSeconds())
 	case helperv1.DockerActionRequest_OPERATION_REMOVE:
-		err = client.RemoveContainer(actionCtx, identyfikator, action.GetRemoveVolumes())
+		err = client.RemoveContainer(actionCtx, identifier, action.GetRemoveVolumes())
 	case helperv1.DockerActionRequest_OPERATION_PULL_IMAGE:
 		var digest string
 		digest, err = client.PullImage(actionCtx, action.GetImageReference())
-		wynik.ImageDigest = digest
+		result.ImageDigest = digest
 	case helperv1.DockerActionRequest_OPERATION_PRUNE:
-		// Nazwy i identyfikatory trafiaja do sciezki zapytania Engine API,
-		// a helper dziala jako root: panel juz je sprawdzil, ale helper nie
-		// moze ufac tresci wiadomosci.
-		if powod := sprawdzListeSprzatania(action); powod != "" {
-			return reject(ErrorMalformed, powod)
+		// The names and identifiers land in the query path of the Engine API,
+		// and the helper runs as root: the panel already checked them, but the
+		// helper cannot trust the content of the message.
+		if reason := checkCleanupList(action); reason != "" {
+			return reject(ErrorMalformed, reason)
 		}
-		wynik, err = docker.Prune(actionCtx, client,
+		result, err = docker.Prune(actionCtx, client,
 			action.GetImageIds(), action.GetVolumeNames(), action.GetNetworkIds())
 	default:
-		return reject(ErrorUnknownAction, "nieznana operacja na kontenerach")
+		return reject(ErrorUnknownAction, "unknown container operation")
 	}
 
-	// Stan po operacji jest odczytywany takze wtedy, gdy operacja padla:
-	// bez tego nie wiadomo, czy zmiana zdazyla wejsc w zycie.
-	if wymagaKontenera(action.GetOperation()) {
-		wynik.After = client.ContainerByID(actionCtx, identyfikator)
+	// The state after the operation is read also when the operation failed:
+	// without it there is no telling whether the change managed to take hold.
+	if needsContainer(action.GetOperation()) {
+		result.After = client.ContainerByID(actionCtx, identifier)
 	}
 
-	odpowiedz := &helperv1.DockerActionResult{
-		Before:         zakoduj(wynik.Before),
-		After:          zakoduj(wynik.After),
-		Removed:        wynik.Removed,
-		ReclaimedBytes: wynik.ReclaimedBytes,
-		ImageDigest:    wynik.ImageDigest,
+	actionResult := &helperv1.DockerActionResult{
+		Before:         encodeContainer(result.Before),
+		After:          encodeContainer(result.After),
+		Removed:        result.Removed,
+		ReclaimedBytes: result.ReclaimedBytes,
+		ImageDigest:    result.ImageDigest,
 	}
 	if err != nil {
-		response := reject(kodBleduDockera(err), err.Error())
-		response.DockerActionResult = odpowiedz
+		response := reject(dockerErrorCode(err), err.Error())
+		response.DockerActionResult = actionResult
 		return response
 	}
-	return &helperv1.HelperResponse{Accepted: true, DockerActionResult: odpowiedz}
+	return &helperv1.HelperResponse{Accepted: true, DockerActionResult: actionResult}
 }
 
-// sprawdzListeSprzatania powtarza walidacje panelu dla obiektow sprzatania.
-// Zwraca pusty tekst, gdy lista jest w porzadku.
-func sprawdzListeSprzatania(action *helperv1.DockerActionRequest) string {
+// checkCleanupList repeats the validation of the panel for cleanup objects.
+// It returns an empty text when the list is fine.
+func checkCleanupList(action *helperv1.DockerActionRequest) string {
 	for _, id := range action.GetImageIds() {
-		if !identyfikatorObrazu.MatchString(id) {
-			return "nieprawidlowy identyfikator obrazu"
+		if !imageIdentifier.MatchString(id) {
+			return "invalid image identifier"
 		}
 	}
-	for _, nazwa := range action.GetVolumeNames() {
-		if !nazwaWolumenu.MatchString(nazwa) {
-			return "nieprawidlowa nazwa wolumenu"
+	for _, name := range action.GetVolumeNames() {
+		if !volumeName.MatchString(name) {
+			return "invalid volume name"
 		}
 	}
 	for _, id := range action.GetNetworkIds() {
-		if !identyfikatorKontenera.MatchString(id) {
-			return "nieprawidlowy identyfikator sieci"
+		if !containerIdentifier.MatchString(id) {
+			return "invalid network identifier"
 		}
 	}
 	return ""
 }
 
-// kodBleduDockera rozdziela odmowe od awarii. Operator, ktory prosil
-// o usuniecie wolumenu w uzyciu, ma zobaczyc, ze host odmowil - a nie, ze
-// wykonanie sie nie powiodlo.
-func kodBleduDockera(err error) string {
+// dockerErrorCode separates a refusal from a failure. An operator who asked to
+// remove a volume in use is to see that the host refused - not that the
+// execution failed.
+func dockerErrorCode(err error) string {
 	switch {
 	case errors.Is(err, docker.ErrWUzyciu):
 		return ErrorDockerInUse
@@ -229,8 +231,8 @@ func kodBleduDockera(err error) string {
 	return ErrorExecFailed
 }
 
-// wymagaKontenera mowi, czy operacja dotyczy konkretnego kontenera.
-func wymagaKontenera(operation helperv1.DockerActionRequest_Operation) bool {
+// needsContainer says whether the operation concerns one concrete container.
+func needsContainer(operation helperv1.DockerActionRequest_Operation) bool {
 	switch operation {
 	case helperv1.DockerActionRequest_OPERATION_START,
 		helperv1.DockerActionRequest_OPERATION_STOP,
@@ -241,21 +243,23 @@ func wymagaKontenera(operation helperv1.DockerActionRequest_Operation) bool {
 	return false
 }
 
-// Wzorce powtarzaja walidacje panelu. Helper nie ufa tresci wiadomosci, bo
-// dziala jako root, a te wartosci trafiaja do sciezki zapytania Engine API.
+// The patterns repeat the validation of the panel. The helper does not trust
+// the content of the message, because it runs as root and these values land in
+// the query path of the Engine API.
 var (
-	identyfikatorKontenera = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
-	identyfikatorObrazu    = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-	nazwaWolumenu          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+	containerIdentifier = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+	imageIdentifier     = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+	volumeName          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
 )
 
-// zakoduj zamienia stan kontenera na JSON. Brak kontenera zostaje pusty:
-// kontener usuniety nie ma stanu po operacji i nie wolno go zmyslac.
-func zakoduj(kontener *docker.Container) []byte {
-	if kontener == nil {
+// encodeContainer turns the container state into JSON. A missing container
+// stays empty: a removed container has no state after the operation and it
+// must not be invented.
+func encodeContainer(container *docker.Container) []byte {
+	if container == nil {
 		return nil
 	}
-	encoded, err := json.Marshal(kontener)
+	encoded, err := json.Marshal(container)
 	if err != nil {
 		return nil
 	}

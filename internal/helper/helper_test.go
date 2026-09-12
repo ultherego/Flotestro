@@ -37,119 +37,120 @@ func unitRequest(unit string, mutate func(*helperv1.HelperRequest)) *helperv1.He
 	return request
 }
 
-func TestHelperOdrzucaNieznanaWersjeProtokolu(t *testing.T) {
-	// Helper dziala jako root: nieznana wersja oznacza, ze nie rozumie
-	// znaczenia pol, wiec nie wolno mu zgadywac.
+func TestTheHelperRejectsAnUnknownProtocolVersion(t *testing.T) {
+	// The helper runs as root: an unknown version means it does not understand
+	// the meaning of the fields, so it must not guess.
 	request := unitRequest("nginx.service", func(r *helperv1.HelperRequest) {
 		r.ProtocolVersion = ProtocolVersion + 1
 	})
 	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() {
-		t.Fatal("przyjeto zadanie w nieznanej wersji protokolu")
+		t.Fatal("a request in an unknown protocol version was accepted")
 	}
 	if response.GetErrorCode() != ErrorUnsupportedVersion {
-		t.Fatalf("kod = %q, oczekiwano %q", response.GetErrorCode(), ErrorUnsupportedVersion)
+		t.Fatalf("code = %q, expected %q", response.GetErrorCode(), ErrorUnsupportedVersion)
 	}
 }
 
-func TestHelperOdrzucaZadaniePoTerminie(t *testing.T) {
-	// TTL sprawdza takze helper, nie tylko agent. Zadanie, ktore dotarlo po
-	// powrocie sieci, nie moze zostac wykonane.
+func TestTheHelperRejectsARequestPastItsDeadline(t *testing.T) {
+	// The TTL is checked by the helper as well, not only by the agent. A
+	// request that arrived after the network came back must not be performed.
 	request := unitRequest("nginx.service", func(r *helperv1.HelperRequest) {
 		r.ExpiresAt = timestamppb.New(time.Now().Add(-time.Second))
 	})
 	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() {
-		t.Fatal("wykonano zadanie po terminie")
+		t.Fatal("a request past its deadline was performed")
 	}
 	if response.GetErrorCode() != ErrorExpired {
-		t.Fatalf("kod = %q, oczekiwano %q", response.GetErrorCode(), ErrorExpired)
+		t.Fatalf("code = %q, expected %q", response.GetErrorCode(), ErrorExpired)
 	}
 }
 
-func TestHelperChroniKrytyczneJednostki(t *testing.T) {
-	// Walidacja jest powtorzona po stronie roota: helper nie ufa temu, ze
-	// agent sprawdzil polityke ochrony.
+func TestTheHelperProtectsCriticalUnits(t *testing.T) {
+	// The validation is repeated on the root side: the helper does not trust
+	// that the agent checked the protection policy.
 	for _, unit := range []string{"flotestro-agent.service", "sshd.service", "NetworkManager.service"} {
 		response := testServer().handle(context.Background(), unitRequest(unit, nil), nil)
 		if response.GetAccepted() {
-			t.Errorf("dopuszczono operacje na jednostce chronionej %q", unit)
+			t.Errorf("an operation on the protected unit %q was allowed", unit)
 			continue
 		}
 		if response.GetErrorCode() != ErrorProtectedUnit {
-			t.Errorf("dla %q kod = %q, oczekiwano %q", unit, response.GetErrorCode(), ErrorProtectedUnit)
+			t.Errorf("for %q code = %q, expected %q", unit, response.GetErrorCode(), ErrorProtectedUnit)
 		}
 	}
 }
 
-func TestHelperOdrzucaNieprawidlowaNazweJednostki(t *testing.T) {
+func TestTheHelperRejectsAnInvalidUnitName(t *testing.T) {
 	for _, unit := range []string{"nginx.service; reboot", "../../x.service", "nginx"} {
 		response := testServer().handle(context.Background(), unitRequest(unit, nil), nil)
 		if response.GetAccepted() {
-			t.Errorf("dopuszczono nazwe %q", unit)
+			t.Errorf("the name %q was allowed", unit)
 			continue
 		}
 		if response.GetErrorCode() != ErrorInvalidUnit {
-			t.Errorf("dla %q kod = %q, oczekiwano %q", unit, response.GetErrorCode(), ErrorInvalidUnit)
+			t.Errorf("for %q code = %q, expected %q", unit, response.GetErrorCode(), ErrorInvalidUnit)
 		}
 	}
 }
 
-func TestHelperOdrzucaBrakAkcji(t *testing.T) {
+func TestTheHelperRejectsAMissingAction(t *testing.T) {
 	request := &helperv1.HelperRequest{ProtocolVersion: ProtocolVersion, TaskId: "task-2"}
 	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() || response.GetErrorCode() != ErrorUnknownAction {
-		t.Fatalf("kod = %q, oczekiwano %q", response.GetErrorCode(), ErrorUnknownAction)
+		t.Fatalf("code = %q, expected %q", response.GetErrorCode(), ErrorUnknownAction)
 	}
 }
 
-func TestHelperOdrzucaNieznanaOperacje(t *testing.T) {
+func TestTheHelperRejectsAnUnknownOperation(t *testing.T) {
 	request := unitRequest("nginx.service", func(r *helperv1.HelperRequest) {
 		r.GetUnitAction().Operation = helperv1.UnitActionRequest_OPERATION_UNSPECIFIED
 	})
 	response := testServer().handle(context.Background(), request, nil)
 	if response.GetAccepted() || response.GetErrorCode() != ErrorUnknownAction {
-		t.Fatalf("kod = %q, oczekiwano %q", response.GetErrorCode(), ErrorUnknownAction)
+		t.Fatalf("code = %q, expected %q", response.GetErrorCode(), ErrorUnknownAction)
 	}
 }
 
-func TestRamkowanieWiadomosci(t *testing.T) {
+func TestMessageFraming(t *testing.T) {
 	var buffer bytes.Buffer
 	original := unitRequest("nginx.service", nil)
 	if err := WriteMessage(&buffer, original); err != nil {
-		t.Fatalf("zapis: %v", err)
+		t.Fatalf("write: %v", err)
 	}
 
 	var decoded helperv1.HelperRequest
 	if err := ReadMessage(&buffer, &decoded); err != nil {
-		t.Fatalf("odczyt: %v", err)
+		t.Fatalf("read: %v", err)
 	}
 	if decoded.GetTaskId() != original.GetTaskId() {
-		t.Fatalf("task_id = %q, oczekiwano %q", decoded.GetTaskId(), original.GetTaskId())
+		t.Fatalf("task_id = %q, expected %q", decoded.GetTaskId(), original.GetTaskId())
 	}
 	if decoded.GetUnitAction().GetUnit() != "nginx.service" {
 		t.Fatalf("unit = %q", decoded.GetUnitAction().GetUnit())
 	}
 }
 
-func TestOdczytOdrzucaZbytDuzaRamke(t *testing.T) {
-	// Rozmowca helpera nie moze wymusic dowolnej alokacji w procesie roota.
+func TestTheReadRejectsAnOversizedFrame(t *testing.T) {
+	// The peer of the helper must not force an arbitrary allocation in the root
+	// process.
 	header := []byte{0xff, 0xff, 0xff, 0xff}
 	var decoded helperv1.HelperRequest
 	err := ReadMessage(bytes.NewReader(header), &decoded)
 	if err == nil {
-		t.Fatal("przyjeto ramke ponad limitem")
+		t.Fatal("a frame over the limit was accepted")
 	}
 }
 
-func TestClampPrzycinaOutput(t *testing.T) {
+func TestClampTrimsTheOutput(t *testing.T) {
 	data := bytes.Repeat([]byte("x"), 100)
 	clamped, truncated := clamp(data, 10)
 	if len(clamped) != 10 || !truncated {
-		t.Fatalf("len=%d truncated=%v, oczekiwano 10/true", len(clamped), truncated)
+		t.Fatalf("len=%d truncated=%v, expected 10/true", len(clamped), truncated)
 	}
 	short, truncated := clamp([]byte("abc"), 10)
 	if len(short) != 3 || truncated {
-		t.Fatalf("krotki output zostal obciety")
+		t.Fatalf("a short output was cut")
 	}
 }

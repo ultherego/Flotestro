@@ -12,32 +12,32 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/docker/compose"
 )
 
-// dockerCLI jest jedynym punktem wejscia do compose. Argumenty sa skladane
-// w kodzie, nigdy przez powloke: nie istnieje operacja "wykonaj to polecenie".
+// dockerCLI is the only entry point into compose. The arguments are assembled
+// in code, never through a shell: there is no "run this command" operation.
 const dockerCLI = "/usr/bin/docker"
 
-// katalogCompose trzyma manifesty w trakcie operacji. Nalezy do roota
-// i nie jest wspoldzielony z niczym innym.
-func (s *Server) katalogCompose() string {
-	katalog := os.Getenv("STATE_DIRECTORY")
-	if katalog == "" {
-		katalog = "/var/lib/flotestro-helper"
+// composeDirectory holds the manifests during an operation. It belongs to root
+// and is shared with nothing else.
+func (s *Server) composeDirectory() string {
+	directory := os.Getenv("STATE_DIRECTORY")
+	if directory == "" {
+		directory = "/var/lib/flotestro-helper"
 	}
-	return filepath.Join(katalog, "compose")
+	return filepath.Join(directory, "compose")
 }
 
-// runnerCompose uruchamia compose z ustalonymi argumentami.
-func runnerCompose(ctx context.Context) compose.Runner {
+// composeRunner runs compose with a fixed set of arguments.
+func composeRunner(ctx context.Context) compose.Runner {
 	return func(callCtx context.Context, args ...string) (string, string, error) {
-		pelne := append([]string{"compose"}, args...)
-		cmd := exec.CommandContext(callCtx, dockerCLI, pelne...)
+		full := append([]string{"compose"}, args...)
+		cmd := exec.CommandContext(callCtx, dockerCLI, full...)
 		cmd.Env = []string{
 			"LC_ALL=C", "LANG=C",
 			"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
 			"HOME=/var/lib/flotestro-helper",
 		}
-		stdoutPipe := &bufor{limit: 4 << 20}
-		stderrPipe := &bufor{limit: 1 << 20}
+		stdoutPipe := &buffer{limit: 4 << 20}
+		stderrPipe := &buffer{limit: 1 << 20}
 		cmd.Stdout = stdoutPipe
 		cmd.Stderr = stderrPipe
 		err := cmd.Run()
@@ -45,18 +45,18 @@ func runnerCompose(ctx context.Context) compose.Runner {
 	}
 }
 
-// applyCompose obsluguje plan i wdrozenie projektu.
+// applyCompose handles the plan and the deployment of a project.
 func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.ComposeRequest) *helperv1.HelperResponse {
 	if info, err := os.Stat(dockerCLI); err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
-		return reject(ErrorUnsupported, "host nie ma klienta Dockera")
+		return reject(ErrorUnsupported, "the host has no Docker client")
 	}
 
-	// Projekty Compose dziel z pozostalymi operacjami kontenerowymi ten sam
-	// zasob: wdrozenie i restart tego samego projektu naraz daja
-	// nieprzewidywalny wynik.
+	// Compose projects share the same resource with the other container
+	// operations: a deployment and a restart of the same project at once give
+	// an unpredictable result.
 	if !s.containerMutex.TryLock() {
-		return reject(ErrorLocked, "inna operacja na kontenerach jest w toku")
+		return reject(ErrorLocked, "another container operation is in flight")
 	}
 	defer s.containerMutex.Unlock()
 
@@ -67,7 +67,7 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	planner := compose.Planner{Runner: runnerCompose(actionCtx), Dir: s.katalogCompose()}
+	planner := compose.Planner{Runner: composeRunner(actionCtx), Dir: s.composeDirectory()}
 
 	switch action.GetOperation() {
 	case helperv1.ComposeRequest_OPERATION_PLAN:
@@ -75,28 +75,28 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 		if err != nil {
 			return reject(ErrorExecFailed, err.Error())
 		}
-		return odpowiedzCompose(plan)
+		return composeResponse(plan)
 
 	case helperv1.ComposeRequest_OPERATION_DEPLOY:
 		executor := compose.Executor{Planner: planner}
-		wynik, err := executor.Deploy(actionCtx, action.GetProject(),
+		result, err := executor.Deploy(actionCtx, action.GetProject(),
 			action.GetManifest(), action.GetPlanDigest())
 		if err != nil {
-			// Wynik czesciowy trafia do odpowiedzi takze przy bledzie:
-			// bez tego nie wiadomo, co zdazylo wejsc w zycie.
+			// The partial result goes into the answer on failure as well:
+			// without it there is no telling what managed to take hold.
 			response := reject(ErrorExecFailed, err.Error())
-			if encoded, blad := json.Marshal(wynik); blad == nil {
+			if encoded, marshalErr := json.Marshal(result); marshalErr == nil {
 				response.ComposeResult = &helperv1.ComposeResult{Payload: encoded}
 			}
 			return response
 		}
-		return odpowiedzCompose(wynik)
+		return composeResponse(result)
 	}
-	return reject(ErrorUnknownAction, "nieznana operacja projektu Compose")
+	return reject(ErrorUnknownAction, "unknown Compose project operation")
 }
 
-func odpowiedzCompose(tresc any) *helperv1.HelperResponse {
-	encoded, err := json.Marshal(tresc)
+func composeResponse(content any) *helperv1.HelperResponse {
+	encoded, err := json.Marshal(content)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
@@ -106,22 +106,22 @@ func odpowiedzCompose(tresc any) *helperv1.HelperResponse {
 	}
 }
 
-// bufor zbiera wyjscie do limitu. Compose potrafi wypisac duzo, a helper
-// dziala jako root i nie moze pozwolic sobie na nieograniczona alokacje.
-type bufor struct {
-	dane  []byte
+// buffer collects the output up to a limit. Compose can print a lot, and the
+// helper runs as root and cannot afford an unbounded allocation.
+type buffer struct {
+	data  []byte
 	limit int
 }
 
-func (b *bufor) Write(p []byte) (int, error) {
-	if len(b.dane) < b.limit {
-		dozwolone := b.limit - len(b.dane)
-		if dozwolone > len(p) {
-			dozwolone = len(p)
+func (b *buffer) Write(p []byte) (int, error) {
+	if len(b.data) < b.limit {
+		allowed := b.limit - len(b.data)
+		if allowed > len(p) {
+			allowed = len(p)
 		}
-		b.dane = append(b.dane, p[:dozwolone]...)
+		b.data = append(b.data, p[:allowed]...)
 	}
 	return len(p), nil
 }
 
-func (b *bufor) Bytes() []byte { return b.dane }
+func (b *buffer) Bytes() []byte { return b.data }

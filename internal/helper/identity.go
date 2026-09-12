@@ -15,8 +15,9 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// probeIdentity odczytuje uprzywilejowana czesc stanu domeny: keytab hosta
-// i baze cache SSSD. Agent nie ma do nich dostepu i nie powinien go miec.
+// probeIdentity reads the privileged part of the domain state: the host keytab
+// and the SSSD cache database. The agent has no access to them and should not
+// have one.
 func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.IdentityProbeRequest) *helperv1.HelperResponse {
 	result := &helperv1.IdentityProbeResult{}
@@ -47,23 +48,23 @@ func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequ
 	}
 
 	if len(missing) > 0 {
-		// Brak czesci danych nie jest bledem operacji: raportujemy powod,
-		// zeby operator wiedzial, czego nie wiadomo i dlaczego.
+		// Missing parts of the data are not an error of the operation: the
+		// reason is reported so that the operator knows what is unknown and why.
 		result.UnavailableReason = strings.Join(missing, "; ")
 	}
 
-	s.log.Info("odczytano stan tozsamosci hosta",
+	s.log.Info("the identity state of the host was read",
 		"task_id", request.GetTaskId(), "principal", result.GetHostPrincipal(),
-		"braki", len(missing))
+		"missing", len(missing))
 	return &helperv1.HelperResponse{Accepted: true, IdentityResult: result}
 }
 
-// readHostKeytab odczytuje principal hosta i numer wersji klucza. Rozjazd KVNO
-// miedzy hostem a katalogiem oznacza, ze Kerberos przestanie dzialac.
+// readHostKeytab reads the host principal and the key version number. A KVNO
+// mismatch between the host and the directory means Kerberos will stop working.
 func readHostKeytab(ctx context.Context) (principal string, kvno *uint32, err error) {
 	const keytabPath = "/etc/krb5.keytab"
 	if _, statErr := os.Stat(keytabPath); statErr != nil {
-		return "", nil, fmt.Errorf("brak %s", keytabPath)
+		return "", nil, fmt.Errorf("%s is missing", keytabPath)
 	}
 	stdout, _, err := runIdentityTool(ctx, 15*time.Second, "klist", "-k", keytabPath)
 	if err != nil {
@@ -81,28 +82,28 @@ func readHostKeytab(ctx context.Context) (principal string, kvno *uint32, err er
 		}
 		return principal, kvno, nil
 	}
-	return "", nil, fmt.Errorf("keytab nie zawiera principala hosta")
+	return "", nil, fmt.Errorf("the keytab contains no host principal")
 }
 
-// sssdCacheAge zwraca wiek bazy cache. Rosnacy wiek przy hoscie odcietym od
-// katalogu oznacza, ze polityki dostepu sa coraz starsze.
+// sssdCacheAge returns the age of the cache database. A growing age on a host
+// cut off from the directory means the access policies grow older and older.
 func sssdCacheAge(domain string) (*uint64, error) {
 	if domain == "" {
-		return nil, fmt.Errorf("brak nazwy domeny")
+		return nil, fmt.Errorf("the domain name is missing")
 	}
 	path := filepath.Join("/var/lib/sss/db", "cache_"+domain+".ldb")
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("brak %s", path)
+		return nil, fmt.Errorf("%s is missing", path)
 	}
 	age := uint64(time.Since(info.ModTime()).Seconds())
 	return &age, nil
 }
 
-// sssdStatus pyta SSSD o stan polaczenia i sprawdza konfiguracje.
+// sssdStatus asks SSSD about the connection state and checks the configuration.
 func sssdStatus(ctx context.Context, domain string) (*bool, []string, error) {
 	if domain == "" {
-		return nil, nil, fmt.Errorf("brak nazwy domeny")
+		return nil, nil, fmt.Errorf("the domain name is missing")
 	}
 	stdout, _, err := runIdentityTool(ctx, 20*time.Second, "sssctl", "domain-status", domain, "--online")
 	if err != nil {
@@ -124,12 +125,12 @@ func sssdStatus(ctx context.Context, domain string) (*bool, []string, error) {
 	return online, issues, nil
 }
 
-// parseConfigCheck czyta wynik kontroli konfiguracji SSSD.
+// parseConfigCheck reads the result of the SSSD configuration check.
 //
-// Narzedzie konczy wyjscie linia podsumowania "Issues identified by
-// validators: N". Zliczanie jej jako problemu zamienialoby raport "wszystko
-// w porzadku" w ostrzezenie, wiec podsumowanie sluzy wylacznie do decyzji,
-// czy w ogole zwracac szczegoly.
+// The tool ends its output with the summary line "Issues identified by
+// validators: N". Counting it as a problem would turn an "everything is fine"
+// report into a warning, so the summary serves only to decide whether to return
+// any details at all.
 func parseConfigCheck(ctx context.Context) []string {
 	output, _, err := runIdentityTool(ctx, 20*time.Second, "sssctl", "config-check")
 	if err != nil {
@@ -160,16 +161,16 @@ func parseConfigCheck(ctx context.Context) []string {
 		}
 	}
 
-	// Podsumowanie mowiace o zerze jest wiazace: brak szczegolow nie oznacza
-	// wtedy, ze czegos nie odczytalismy.
+	// A summary saying zero is binding: a lack of details does not then mean
+	// that something was not read.
 	if total == 0 {
 		return nil
 	}
 	return details
 }
 
-// runIdentityTool uruchamia narzedzie z ustalonej listy sciezek. Nazwa nigdy
-// nie pochodzi z zadania, wiec nie moze wskazac dowolnego programu.
+// runIdentityTool runs a tool from a fixed list of paths. The name never comes
+// from the request, so it cannot point at an arbitrary program.
 func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, args ...string) (string, string, error) {
 	path := ""
 	for _, candidate := range []string{"/usr/bin/" + tool, "/usr/sbin/" + tool, "/sbin/" + tool} {
@@ -179,7 +180,7 @@ func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, ar
 		}
 	}
 	if path == "" {
-		return "", "", fmt.Errorf("brak narzedzia %s", tool)
+		return "", "", fmt.Errorf("the tool %s is missing", tool)
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -193,11 +194,11 @@ func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, ar
 
 	err := cmd.Run()
 	if cmdCtx.Err() != nil {
-		return stdout.String(), stderr.String(), fmt.Errorf("przekroczony czas")
+		return stdout.String(), stderr.String(), fmt.Errorf("the time was exceeded")
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && stdout.Len() > 0 {
-		// Narzedzie moglo zwrocic wynik mimo niezerowego kodu.
+		// The tool may have returned a result despite a non-zero code.
 		return stdout.String(), stderr.String(), nil
 	}
 	if err != nil {
@@ -212,7 +213,7 @@ func firstLineOf(text string) string {
 		return strings.TrimSpace(trimmed[:index])
 	}
 	if trimmed == "" {
-		return "brak szczegolow"
+		return "no details"
 	}
 	return trimmed
 }
