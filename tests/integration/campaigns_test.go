@@ -3003,3 +3003,112 @@ func TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego(t *testing.T) {
 		t.Errorf("katalog nie rozroznia gotowych od odmownych: %d/%d", gotowe, zOdmowa)
 	}
 }
+
+// TestBudzetBackenduZatrzymujeDrugaKampanie pilnuje limitu, ktorego nie ma
+// ani w kampanii, ani w lokalizacji: repozytorium backupu jest jedno, a
+// kampanii piszacych do niego moze byc kilka naraz. Limit backendu ma je
+// rozsunac, choc kazda z osobna miesci sie w swoim limicie rownoleglosci.
+func TestBudzetBackenduZatrzymujeDrugaKampanie(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily != "arch" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty z narzedziem backupu")
+	}
+	cele = cele[:2]
+
+	nazwa := fmt.Sprintf("budzet-%d", time.Now().UnixNano())
+	repozytorium := "/srv/" + nazwa
+	sekret := nowySekret(t, h, "haslo-"+nazwa)
+	zlecenie := map[string]any{
+		"id": nazwa, "tool": "restic", "repository": repozytorium,
+		"paths": []string{"/etc/flotestro"}, "keep_last": 1, "initialize": true,
+		"password_secret": map[string]any{"name": sekret.Name},
+	}
+	// Repozytorium jest jedno na obu hostach, wiec budzet backendu tez jeden.
+	h.ustawBudzet("backend:"+repozytorium+":backup", 1, 50)
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "kopia z budzetem backendu", "action": "backup.run",
+		"reason":                     "test budzetu repozytorium",
+		"payload":                    map[string]any{"backup": zlecenie},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 5*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+	h.approveCampaign(poPlanowaniu)
+
+	// Stan oczekiwania jest przejsciowy, wiec patrzymy w trakcie.
+	czekal := false
+	deadline := time.Now().Add(6 * time.Minute)
+	for time.Now().Before(deadline) {
+		for _, target := range h.campaignTargets(campaign.ID) {
+			if target.State == "awaiting_budget" {
+				czekal = true
+				if target.ErrorCode != "budget_capacity" && target.ErrorCode != "budget_fair_share" {
+					t.Errorf("host czeka na backend bez powodu: %+v", target)
+				}
+			}
+		}
+		stan := h.campaign(campaign.ID)
+		if stan.State == "completed" || stan.State == "failed" || stan.State == "paused" {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	koncowa := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 6*time.Minute)
+	if koncowa.State != "completed" {
+		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	}
+	if !czekal {
+		t.Error("zaden host nie czekal na pojemnosc repozytorium")
+	}
+
+	// Sedno inwariantu: kampania miala zgode na dwa hosty naraz, a backend
+	// dopuszczal jeden strumien. Zachodzace okna znaczylyby, ze budzet
+	// repozytorium nie wiazal.
+	okna := make([]okno, 0, len(cele))
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.JobID == "" {
+			continue
+		}
+		for _, proba := range h.probyZadania(target.JobID) {
+			if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+				continue
+			}
+			okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+		}
+	}
+	if len(okna) < 2 {
+		t.Fatalf("kampania zostawila %d prob z czasami", len(okna))
+	}
+	if zachodzaNaSiebie(okna) {
+		t.Errorf("dwie kopie pisaly do repozytorium naraz mimo budzetu 1: %+v", okna)
+	}
+
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "file.remove", "reason": "sprzatanie po tescie budzetu backendu",
+				"payload": map[string]any{"file": map[string]any{"path": repozytorium + "/config"}},
+			}, 2*time.Minute)
+		}
+	})
+}

@@ -10,7 +10,10 @@
 package budgets
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -150,6 +153,31 @@ func KluczLokalizacji(site, rodzina string) string {
 	return "site:" + site + ":" + rodzina
 }
 
+// KluczBackendu sklada klucz budzetu repozytorium backupu.
+//
+// Limit lokalizacji nie chroni repozytorium: dziesiec hostow z trzech
+// lokalizacji miesci sie w kazdym budzecie lokalizacji i nadal jest
+// dziesiecioma strumieniami do jednego backendu, ktory ma jedno lacze
+// i jeden dysk.
+//
+// Adres repozytorium bywa dowolnym tekstem - ze schematem, uzytkownikiem
+// i sciezka. Klucz musi zostac trzyczesciowy, zeby polityka domyslna
+// ("backend:*:backup") dzialala, wiec dwukropki ida na podkreslenia, a
+// dlugi adres konczy sie odciskiem: dwa rozne repozytoria nie moga trafic
+// do jednego budzetu przez samo obciecie.
+func KluczBackendu(repozytorium string) string {
+	repozytorium = strings.TrimSpace(repozytorium)
+	if repozytorium == "" {
+		return ""
+	}
+	nazwa := strings.NewReplacer(":", "_", " ", "_").Replace(repozytorium)
+	if len(nazwa) > 100 {
+		suma := sha256.Sum256([]byte(repozytorium))
+		nazwa = nazwa[:100] + "_" + hex.EncodeToString(suma[:])[:16]
+	}
+	return "backend:" + nazwa + ":backup"
+}
+
 // Wzorzec zamienia klucz scisly na wzorzec polityki domyslnej.
 //
 // Lokalizacji jest tyle, ile ich zalozono, i nikt nie opisuje kazdej z osobna.
@@ -181,7 +209,7 @@ func rozbij(klucz string) []string {
 // jeszcze topologii, ktora by je definiowala - i lepiej, zeby ich nie bylo
 // widac, niz zeby udawaly limit liczony z niczego. Dolozenie ich to dolozenie
 // pozycji do tej listy.
-func Potrzeby(action opspec.ActionType, site string) []Potrzeba {
+func Potrzeby(action opspec.ActionType, site, repozytorium string) []Potrzeba {
 	globalny := KluczGlobalneOdczyty
 	if action.Mutating() {
 		globalny = KluczGlobalneMutacje
@@ -192,6 +220,21 @@ func Potrzeby(action opspec.ActionType, site string) []Potrzeba {
 	// maja wlasne limity po stronie agenta.
 	if action.Mutating() {
 		if klucz := KluczLokalizacji(site, RodzinaLokalizacji(action)); klucz != "" {
+			potrzeby = append(potrzeby, Potrzeba{Klucz: klucz, Waga: 1})
+		}
+	}
+
+	// Repozytorium backupu jest zasobem wspolnym dla calej floty, wiec ma
+	// wlasny budzet - takze przy odczycie, bo sprawdzenie kopii czyta z tego
+	// samego lacza co jej zapis.
+	//
+	// Waga jest jedna dla kazdej operacji. Dokument mowi o budzetach
+	// wazonych, ale waga kopii wobec sprawdzenia zalezy od rozmiaru danych
+	// i od backendu - a liczba wzieta bez pomiaru udawalaby limit policzony
+	// z niczego.
+	switch action {
+	case opspec.ActionBackupRun, opspec.ActionBackupVerify, opspec.ActionBackupRestore:
+		if klucz := KluczBackendu(repozytorium); klucz != "" {
 			potrzeby = append(potrzeby, Potrzeba{Klucz: klucz, Waga: 1})
 		}
 	}

@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -24,11 +25,14 @@ func (o *Orchestrator) zajmijPojemnosc(ctx context.Context, campaign Campaign,
 		return true, nil
 	}
 	action := opspec.ActionType(campaign.ActionType)
+	// Repozytorium backupu jest zasobem wspolnym: budzet lokalizacji nie
+	// wie nic o backendzie, do ktorego pisze pol floty naraz.
+	repozytorium := repozytoriumKampanii(campaign)
 	// Roszczacym jest kampania, a nie host: sprawiedliwosc dzieli tokeny
 	// miedzy zmiany, nie miedzy maszyny. Inaczej kampania na tysiacu hostow
 	// mialaby tysiac razy wiekszy udzial niz kampania na jednym.
 	odmowa, err := o.budzety.Zajmij(ctx, target.ID, "campaign:"+campaign.ID,
-		budgets.KlasaUtrzymanie, budgets.Potrzeby(action, host.Site))
+		budgets.KlasaUtrzymanie, budgets.Potrzeby(action, host.Site, repozytorium))
 	if err != nil {
 		return false, err
 	}
@@ -90,4 +94,22 @@ func (o *Orchestrator) odnowPojemnosc(ctx context.Context, targets []Target) {
 	if err := o.budzety.Odnow(ctx, pracujace); err != nil {
 		o.log.Error("nie odnowiono pojemnosci kampanii", "err", err)
 	}
+}
+
+// repozytoriumKampanii wyjmuje z zamowienia adres repozytorium backupu.
+//
+// Puste znaczy kampanie, ktora backendu nie dotyka - a nie backend nieznany:
+// operacje spoza modulu kopii nie maja tu czego szukac.
+func repozytoriumKampanii(campaign Campaign) string {
+	if len(campaign.Payload) == 0 {
+		return ""
+	}
+	var payload opspec.Payload
+	if err := json.Unmarshal(campaign.Payload, &payload); err != nil {
+		return ""
+	}
+	if payload.Backup == nil {
+		return ""
+	}
+	return payload.Backup.Repository
 }

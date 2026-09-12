@@ -1,6 +1,7 @@
 package budgets
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -11,12 +12,12 @@ import (
 // w ogole istnieja: sto odczytow stanu to nie to samo obciazenie co sto
 // transakcji pakietowych.
 func TestPotrzebyRozrozniajaOdczytIMutacje(t *testing.T) {
-	odczyt := Potrzeby(opspec.ActionPackageList, "warsaw")
+	odczyt := Potrzeby(opspec.ActionPackageList, "warsaw", "")
 	if len(odczyt) != 1 || odczyt[0].Klucz != KluczGlobalneOdczyty {
 		t.Fatalf("odczyt obciaza budzety %+v", odczyt)
 	}
 
-	mutacja := Potrzeby(opspec.ActionPackageUpgrade, "warsaw")
+	mutacja := Potrzeby(opspec.ActionPackageUpgrade, "warsaw", "")
 	if len(mutacja) != 2 {
 		t.Fatalf("transakcja pakietowa obciaza budzety %+v", mutacja)
 	}
@@ -35,7 +36,7 @@ func TestRestartMaWlasnaRodzineLokalizacji(t *testing.T) {
 	if rodzina := RodzinaLokalizacji(opspec.ActionSystemReboot); rodzina != "reboot" {
 		t.Fatalf("restart w rodzinie %q", rodzina)
 	}
-	potrzeby := Potrzeby(opspec.ActionSystemReboot, "warsaw")
+	potrzeby := Potrzeby(opspec.ActionSystemReboot, "warsaw", "")
 	if len(potrzeby) != 2 || potrzeby[1].Klucz != "site:warsaw:reboot" {
 		t.Fatalf("restart obciaza budzety %+v", potrzeby)
 	}
@@ -45,7 +46,7 @@ func TestRestartMaWlasnaRodzineLokalizacji(t *testing.T) {
 // nie zamienil sie w klucz "site::packages" - czyli w jeden wspolny budzet
 // dla wszystkich hostow, ktorych nikt nie przypisal.
 func TestHostBezLokalizacjiNieDostajeKluczaZDziura(t *testing.T) {
-	potrzeby := Potrzeby(opspec.ActionPackageUpgrade, "")
+	potrzeby := Potrzeby(opspec.ActionPackageUpgrade, "", "")
 	if len(potrzeby) != 1 || potrzeby[0].Klucz != KluczGlobalneMutacje {
 		t.Fatalf("host bez lokalizacji obciaza budzety %+v", potrzeby)
 	}
@@ -114,4 +115,52 @@ func zawiera(tekst, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// Repozytorium backupu jest zasobem wspolnym floty: budzet lokalizacji nie
+// wie nic o backendzie, do ktorego pisze pol floty naraz.
+func TestBudzetBackenduDotyczyRepozytorium(t *testing.T) {
+	kopia := Potrzeby(opspec.ActionBackupRun, "warsaw", "/srv/kopie")
+	var backend string
+	for _, potrzeba := range kopia {
+		if strings.HasPrefix(potrzeba.Klucz, "backend:") {
+			backend = potrzeba.Klucz
+		}
+	}
+	if backend != "backend:/srv/kopie:backup" {
+		t.Fatalf("klucz backendu = %q", backend)
+	}
+	// Polityka domyslna musi dzialac takze dla repozytorium, ktorego nikt
+	// nie opisal osobno.
+	if Wzorzec(backend) != "backend:*:backup" {
+		t.Errorf("wzorzec backendu = %q", Wzorzec(backend))
+	}
+
+	// Sprawdzenie kopii czyta z tego samego lacza, wiec tez obciaza backend.
+	sprawdzenie := Potrzeby(opspec.ActionBackupVerify, "warsaw", "/srv/kopie")
+	if len(sprawdzenie) != len(kopia) {
+		t.Errorf("sprawdzenie kopii omija budzet backendu: %+v", sprawdzenie)
+	}
+
+	// Adres ze schematem i uzytkownikiem nadal musi dac klucz trzyczesciowy,
+	// a dwa rozne repozytoria - dwa rozne klucze.
+	zdalny := KluczBackendu("sftp:kopie@backup.example:/srv/kopie")
+	if Wzorzec(zdalny) != "backend:*:backup" {
+		t.Errorf("wzorzec zdalnego repozytorium = %q (%s)", Wzorzec(zdalny), zdalny)
+	}
+	dlugi := KluczBackendu("s3:https://example.invalid/" + strings.Repeat("a", 200))
+	inny := KluczBackendu("s3:https://example.invalid/" + strings.Repeat("a", 199) + "b")
+	if dlugi == inny {
+		t.Error("dwa dlugie adresy trafily do jednego budzetu")
+	}
+	if Wzorzec(dlugi) != "backend:*:backup" {
+		t.Errorf("wzorzec dlugiego adresu = %q", Wzorzec(dlugi))
+	}
+	if KluczBackendu("") != "" {
+		t.Error("pusty adres dostal klucz budzetu")
+	}
+	// Operacja spoza modulu kopii nie obciaza backendu, nawet gdy adres jest.
+	if len(Potrzeby(opspec.ActionUnitRestart, "warsaw", "/srv/kopie")) != 2 {
+		t.Error("restart jednostki obciazyl budzet backendu")
+	}
 }
