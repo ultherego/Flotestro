@@ -61,6 +61,7 @@ var trybyMasowe = map[ActionType]CampaignMode{
 	ActionBackupRun:         CampaignPerHostPlan,
 	ActionBackupVerify:      CampaignPerHostPlan,
 	ActionCertificateDeploy: CampaignPerHostPlan,
+	ActionCertificateRenew:  CampaignPerHostPlan,
 	// Rotacja urzedu jest ciagiem krokow, ale kazdy krok jest osobna zmiana
 	// z wlasnym planem per host: host ufa obu urzedom naraz, dostaje nowy
 	// certyfikat, i dopiero wtedy stary urzad znika.
@@ -170,7 +171,10 @@ func AkcjaPlanowania(action ActionType) ActionType {
 	// Certyfikat: plan pokazuje odcisk zastany i docelowy, termin waznosci,
 	// usluge do przeladowania i sonde. Klucz prywatny jedzie na host osobno,
 	// tuz przed podmiana, i nie ma go ani w planie, ani w zgodzie.
-	case ActionCertificateDeploy:
+	// Odnowienie: plan mowi, czy host ma komu je zlecic i co pilnuje tego
+	// pliku teraz. Materialu tu nie ma - po nowy certyfikat idzie demon
+	// hosta do swojego urzedu.
+	case ActionCertificateDeploy, ActionCertificateRenew:
 		return ActionCertificatePlan
 
 	// Kotwica: plan mowi, czy host juz ufa temu urzedowi, a przy wycofaniu -

@@ -326,6 +326,43 @@ func (s *Store) PlanHosta(ctx context.Context, campaignID, hostID string) (strin
 	return hash, plan, err
 }
 
+// WpisPlanu to plan jednego hosta wraz z jego trescia.
+type WpisPlanu struct {
+	HostID   string          `json:"host_id"`
+	Hostname string          `json:"hostname,omitempty"`
+	PlanHash string          `json:"plan_hash"`
+	Plan     json.RawMessage `json:"plan,omitempty"`
+}
+
+// PlanyZTrescia zwraca plany wszystkich hostow kampanii.
+//
+// Zgoda dotyczy zestawu planow, wiec operator musi go zobaczyc w calosci -
+// a nie wnioskowac o nim z jednego odcisku. Nazwa hosta idzie razem
+// z planem, bo lista identyfikatorow nie mowi nikomu nic.
+func (s *Store) PlanyZTrescia(ctx context.Context, campaignID string) ([]WpisPlanu, error) {
+	const query = `
+		select p.host_id, coalesce(h.hostname, ''), p.plan_hash, p.plan
+		  from campaign_plans p
+		  left join hosts h on h.id = p.host_id
+		 where p.campaign_id = $1
+		 order by coalesce(h.hostname, p.host_id::text)`
+	rows, err := s.pool.Query(ctx, query, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	wpisy := []WpisPlanu{}
+	for rows.Next() {
+		var wpis WpisPlanu
+		if err := rows.Scan(&wpis.HostID, &wpis.Hostname, &wpis.PlanHash, &wpis.Plan); err != nil {
+			return nil, err
+		}
+		wpisy = append(wpisy, wpis)
+	}
+	return wpisy, rows.Err()
+}
+
 // ZamknijPlanowanie zapisuje odcisk zestawu planow razem z odciskiem
 // zatwierdzenia i przenosi kampanie do stanu, w ktorym czeka na decyzje.
 //

@@ -263,6 +263,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/targets", s.handleCampaignTargets)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/report", s.handleCampaignReport)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/timeline", s.handleCampaignTimeline)
+	mux.HandleFunc("GET /api/v1/campaigns/{id}/plans", s.handleCampaignPlans)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/events", s.handleCampaignEvents)
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/approve", s.handleApproveCampaign)
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/pause", s.handlePauseCampaign)

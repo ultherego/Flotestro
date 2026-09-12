@@ -158,3 +158,19 @@ func TestWykryjMagazynRozstrzygaNarzedziem(t *testing.T) {
 		t.Errorf("host bez magazynu: %+v", brak)
 	}
 }
+
+func TestPlanZaufaniaNazywaSwojRodzaj(t *testing.T) {
+	teraz := time.Now()
+	material := urzadTestowy(t, "Flotestro Lab CA", teraz.Add(8760*time.Hour))
+	if p := ZaplanujKotwice(magazynTestowy(), "lab-ca", material, teraz); p.Kind != RodzajZaufania {
+		t.Errorf("plan zaufania: %q", p.Kind)
+	}
+	// Takze plan odmowiony: rodzaj nie moze zalezec od tego, jak daleko
+	// doszlo liczenie.
+	if p := ZaplanujKotwice(magazynTestowy(), "../zle", material, teraz); p.Kind != RodzajZaufania {
+		t.Errorf("odmowiony plan zaufania: %+v", p)
+	}
+	if p := ZaplanujUsuniecieKotwicy(magazynTestowy(), "lab-ca", nil); p.Kind != RodzajZaufania {
+		t.Errorf("plan wycofania: %q", p.Kind)
+	}
+}

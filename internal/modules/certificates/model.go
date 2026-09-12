@@ -173,6 +173,11 @@ type Snapshot struct {
 	KeysKnown bool `json:"keys_known"`
 	// Missing wylicza fakty, ktorych nie zebrano, wraz z powodem.
 	Missing map[string]string `json:"missing,omitempty"`
+	// Truncated liczy cele pominiete przez limit jednego odczytu, a
+	// TruncatedReason mowi o tym wprost. Lista urwana po cichu wygladalaby
+	// jak pelna odpowiedz.
+	Truncated       int    `json:"truncated,omitempty"`
+	TruncatedReason string `json:"truncated_reason,omitempty"`
 
 	ObservedAt        time.Time `json:"observed_at"`
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`

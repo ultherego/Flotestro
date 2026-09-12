@@ -185,6 +185,7 @@ func identyfikatorKotwicy(nazwa string) string {
 // i dopiero na koncu stary urzad znika. Plan opisuje jeden krok tego ciagu
 // i mowi, czego host jeszcze nie jest gotow zrobic.
 type PlanZaufania struct {
+	Kind     string `json:"kind"`
 	AnchorID string `json:"anchor_id"`
 	Path     string `json:"path,omitempty"`
 	Adapter  string `json:"adapter,omitempty"`
@@ -215,7 +216,7 @@ type PlanZaufania struct {
 
 // ZaplanujKotwice liczy roznice dla zalozenia albo podmiany kotwicy.
 func ZaplanujKotwice(magazyn MagazynZaufania, id, material string, teraz time.Time) PlanZaufania {
-	plan := PlanZaufania{AnchorID: id, Adapter: magazyn.Adapter,
+	plan := PlanZaufania{Kind: RodzajZaufania, AnchorID: id, Adapter: magazyn.Adapter,
 		Path: SciezkaKotwicy(magazyn, id)}
 	if err := WalidujKotwice(id); err != nil {
 		return plan.zOdmowa(err.Error())
@@ -269,7 +270,7 @@ func ZaplanujKotwice(magazyn MagazynZaufania, id, material string, teraz time.Ti
 // zrywa zaufanie klientom, ktorzy niczego nie zmieniali.
 func ZaplanujUsuniecieKotwicy(magazyn MagazynZaufania, id string,
 	certyfikaty []Certyfikat) PlanZaufania {
-	plan := PlanZaufania{AnchorID: id, Adapter: magazyn.Adapter,
+	plan := PlanZaufania{Kind: RodzajZaufania, AnchorID: id, Adapter: magazyn.Adapter,
 		Path: SciezkaKotwicy(magazyn, id)}
 	if err := WalidujKotwice(id); err != nil {
 		return plan.zOdmowa(err.Error())

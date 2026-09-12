@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"strings"
@@ -334,5 +335,27 @@ func TestDodajSledzonePomijaSciezkiPozaZakresem(t *testing.T) {
 		if strings.HasPrefix(cel.Path, "/etc/pki/ca-trust/") {
 			t.Fatal("magazyn zaufania trafil do zakresu skanu")
 		}
+	}
+}
+
+// Lista urwana limitem musi to powiedziec: cisza w tym miejscu wyglada jak
+// host, ktory nie ma wiecej certyfikatow, a to host, o ktorego reszte nikt
+// nie zapytal.
+func TestSkanMowiOUrwanejLiscie(t *testing.T) {
+	cele := make([]Cel, 0, MaksymalnaLiczbaCertyfikatow+5)
+	for i := 0; i < MaksymalnaLiczbaCertyfikatow+5; i++ {
+		cele = append(cele, Cel{Path: fmt.Sprintf("/etc/ssl/certs/nie-ma-%d.pem", i)})
+	}
+	snapshot := Skanuj(cele)
+	if len(snapshot.Certificates) != MaksymalnaLiczbaCertyfikatow {
+		t.Fatalf("opisano %d celow", len(snapshot.Certificates))
+	}
+	if snapshot.Truncated != 5 || snapshot.TruncatedReason == "" {
+		t.Errorf("urwanie listy: %d, %q", snapshot.Truncated, snapshot.TruncatedReason)
+	}
+
+	krotka := Skanuj(cele[:2])
+	if krotka.Truncated != 0 || krotka.TruncatedReason != "" {
+		t.Errorf("pelna lista opisana jako urwana: %+v", krotka)
 	}
 }

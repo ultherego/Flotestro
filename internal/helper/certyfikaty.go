@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +48,11 @@ func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperR
 	case helperv1.CertificateRequest_OPERATION_FACTS:
 		return s.faktyCertyfikatow(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_PLAN:
+		// Plan bez materialu jest planem odnowienia: wdrozenie zawsze niesie
+		// certyfikat, odnowienie nigdy - po nowy idzie demon hosta.
+		if len(action.GetCertificate()) == 0 {
+			return s.zaplanujOdnowienie(actionCtx, action)
+		}
 		return s.zaplanujCertyfikat(actionCtx, action)
 	case helperv1.CertificateRequest_OPERATION_TRUST_PLAN:
 		return s.zaplanujZaufanie(actionCtx, action)
@@ -107,6 +113,15 @@ func (s *Server) faktyCertyfikatow(ctx context.Context,
 		s.zapiszRejestrCertyfikatow(cele)
 	}
 	znane := polaczCele(s.rejestrCertyfikatow(), cele)
+	// Rejestr pamieta cele wdrozen, a pliki z nich bywaja kasowane poza
+	// panelem. Cel bez pliku nie jest wiedza - jest smieciem, ktory zajmuje
+	// miejsce w odczycie i wypycha z niego certyfikaty, ktore host naprawde
+	// ma. Zapominamy go dopiero, gdy pliku nie ma: plik nieczytelny to inna
+	// odpowiedz niz plik nieistniejacy.
+	if zyjace := celeZIstniejacymPlikiem(znane); len(zyjace) != len(znane) {
+		znane = zyjace
+		s.zapiszRejestrCertyfikatow(zyjace)
+	}
 
 	dodatki := certificates.ZbierzUzupelnienie(ctx, wyjscieNarzedzia, nazwy, znane)
 	dodatki.Targets = znane
@@ -288,6 +303,16 @@ func (s *Server) odnowCertyfikat(ctx context.Context,
 	narzedzie := certificates.SciezkaNarzedzia()
 	if narzedzie == "" {
 		return reject(ErrorUnsupported, "ten host nie ma certmongera")
+	}
+	// Odnowienie zatwierdzone na podstawie planu ma dotyczyc tego zlecenia,
+	// ktore operator ogladal: inne zlecenie pod ta sciezka od planowania
+	// jest odmowa, a nie cichym odnowieniem czegos innego.
+	if oczekiwany := action.GetPlanHash(); oczekiwany != "" {
+		if teraz := s.planOdnowienia(ctx, action); teraz.PlanHash != oczekiwany {
+			return reject(ErrorPreconditionFailed,
+				"zlecenie certmongera pod "+action.GetPath()+
+					" zmienilo sie od planowania; odnowienie wymaga nowego planu")
+		}
 	}
 
 	// Zlecenie wskazuje panel identyfikatorem albo sciezka pliku. Identyfikator
@@ -608,4 +633,69 @@ func odpowiedzZaufania(magazyn certificates.MagazynZaufania, plan certificates.P
 			FingerprintSha256: plan.DesiredFingerprint,
 		},
 	}
+}
+
+// zaplanujOdnowienie liczy plan odnowienia bez proszenia urzedu o cokolwiek.
+func (s *Server) zaplanujOdnowienie(ctx context.Context,
+	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
+	plan := s.planOdnowienia(ctx, action)
+	zakodowany, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	komunikat := "odnowienie nie wejdzie na ten host: " + plan.Refusal
+	if plan.Refusal == "" {
+		komunikat = strings.Join(plan.Changes, "; ")
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		CertificateResult: &helperv1.CertificateResult{
+			Message: komunikat, Plan: zakodowany,
+			FingerprintSha256: plan.CurrentFingerprint,
+		},
+	}
+}
+
+// planOdnowienia sklada plan wobec tego, co host ma i co pilnuje certyfikatu.
+func (s *Server) planOdnowienia(ctx context.Context,
+	action *helperv1.CertificateRequest) certificates.PlanOdnowienia {
+	sciezka := action.GetPath()
+	narzedzie := certificates.SciezkaNarzedzia()
+
+	obecny := certificates.Certyfikat{}
+	if err := certificates.WalidujSciezke(sciezka); err == nil {
+		migawka := certificates.Skanuj([]certificates.Cel{{
+			Path: sciezka, KeyPath: action.GetKeyPath(), Service: action.GetReloadUnit(),
+		}})
+		if len(migawka.Certificates) > 0 {
+			obecny = migawka.Certificates[0]
+		}
+	}
+
+	var sledzenie *certificates.Sledzenie
+	if narzedzie != "" {
+		if wyjscie, err := wyjscieNarzedzia(ctx, narzedzie, "list"); err == nil {
+			if wpis, pilnowany := certificates.ParsujGetcert(wyjscie)[sciezka]; pilnowany {
+				kopia := wpis
+				sledzenie = &kopia
+			}
+		}
+	}
+	return certificates.ZaplanujOdnowienie(obecny, sledzenie, narzedzie != "",
+		sciezka, action.GetReloadUnit(), time.Now())
+}
+
+// celeZIstniejacymPlikiem odsiewa cele, ktorych pliku juz nie ma.
+//
+// Brak pliku rozstrzygamy bledem ENOENT, a nie kazdym bledem odczytu: plik
+// w katalogu zamknietym dla helpera nadal istnieje i nadal jest celem.
+func celeZIstniejacymPlikiem(cele []certificates.Cel) []certificates.Cel {
+	zyjace := make([]certificates.Cel, 0, len(cele))
+	for _, cel := range cele {
+		if _, err := os.Lstat(cel.Path); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		zyjace = append(zyjace, cel)
+	}
+	return zyjace
 }

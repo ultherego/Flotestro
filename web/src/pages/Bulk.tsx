@@ -6,6 +6,7 @@ import type { Campaign, CampaignTarget } from "../lib/types";
 import { Blad, Pusto, StanZadania } from "../components/ui";
 import { ODSTEP_OPERACJI } from "../lib/strumien";
 import { useCapabilities } from "../lib/capabilities";
+import { StreszczeniePlanu } from "../components/plan";
 
 /**
  * Bulk Workspace: druga rownorzedna sciezka pracy obok zakladek hosta.
@@ -592,9 +593,19 @@ function KrokPlanow({ kampaniaID, kampania }: { kampaniaID: string; kampania?: C
     enabled: Boolean(kampaniaID),
     refetchInterval: ODSTEP_OPERACJI,
   });
+  // Zgoda dotyczy zestawu planow, wiec operator ma zobaczyc ten zestaw -
+  // pogrupowany, bo sto hostow z identycznym diffem to jedna zmiana, a nie
+  // sto.
+  const plany = useQuery({
+    queryKey: ["campaign-plans", kampaniaID],
+    queryFn: () => api.get<GrupyPlanow>(`/api/v1/campaigns/${kampaniaID}/plans`),
+    enabled: Boolean(kampaniaID),
+    refetchInterval: ODSTEP_OPERACJI,
+  });
   if (cele.error) return <Blad error={cele.error} />;
 
   const planuje = kampania?.state === "planning";
+  const grupy = plany.data?.items ?? [];
   return (
     <section className="kafelek">
       <h2 style={{ marginTop: 0 }}>6. Plans</h2>
@@ -603,10 +614,40 @@ function KrokPlanow({ kampaniaID, kampania }: { kampaniaID: string; kampania?: C
           ? "Each host is computing its own diff. Nothing is applied while this runs."
           : "Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change."}
       </p>
+      {grupy.length > 0 && (
+        <table>
+          <thead>
+            <tr><th>Change</th><th>Hosts</th><th>Plan fingerprint</th></tr>
+          </thead>
+          <tbody>
+            {grupy.map((grupa) => (
+              <tr key={grupa.plan_hash}>
+                <td><StreszczeniePlanu plan={(grupa.plan?.plan ?? grupa.plan ?? {}) as Record<string, any>} /></td>
+                <td>
+                  {grupa.count}
+                  <div className="zrodlo">{grupa.hosts.join(", ")}</div>
+                </td>
+                <td className="zrodlo">{grupa.plan_hash.slice(0, 16)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       <TabelaCelow cele={cele.data?.items ?? []} />
     </section>
   );
 }
+
+type GrupyPlanow = {
+  items: {
+    plan_hash: string;
+    count: number;
+    hosts: string[];
+    // Tresc planu przychodzi w ksztalcie wyniku zadania: rodzaj i plan.
+    plan?: { plan?: Record<string, unknown> } & Record<string, unknown>;
+  }[];
+  plan_set_hash?: string;
+};
 
 function KrokZgody({ kampaniaID, kampania }: { kampaniaID: string; kampania?: Campaign }) {
   const [blad, setBlad] = useState("");

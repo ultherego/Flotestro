@@ -115,6 +115,15 @@ func TestWdrozenieCertyfikatuZMagazynu(t *testing.T) {
 	t.Cleanup(func() {
 		h.do(http.MethodDelete,
 			"/api/v1/hosts/"+host.ID+"/certificates/targets?path="+sciezka, nil, nil, 0)
+		// Plik zostaje na hoscie, jesli go nie usuniemy: kolejne przebiegi
+		// zapelniaja rejestr celow i wypychaja z odczytu certyfikaty, ktore
+		// host naprawde ma.
+		for _, doUsuniecia := range []string{sciezka, sciezkaKlucza} {
+			h.runOperation(host.ID, map[string]any{
+				"action": "file.remove", "reason": powodCertyfikatu,
+				"payload": map[string]any{"file": map[string]any{"path": doUsuniecia}},
+			}, 2*time.Minute)
+		}
 	})
 
 	zadanie, proby := h.runOperation(host.ID, map[string]any{

@@ -187,6 +187,9 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		zadanie.PlanHash = payload.PlanHash
 	}
 
+	if action == opspec.ActionCertificateRenew {
+		zadanie.PlanHash = payload.PlanHash
+	}
 	if action == opspec.ActionCertificatePlan {
 		// Plan nie siega po klucz prywatny: opisuje wdrozenie, ktore sie
 		// jeszcze nie wydarzylo, i sam plan trafia do bazy panelu.

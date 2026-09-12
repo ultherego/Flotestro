@@ -3,6 +3,7 @@ package certificates
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/user"
@@ -43,6 +44,15 @@ func Skanuj(cele []Cel) Snapshot {
 		snapshot.Scanned = append(snapshot.Scanned, cel.Path)
 		snapshot.Certificates = append(snapshot.Certificates, obejrzyj(cel, snapshot.Missing))
 		if len(snapshot.Certificates) >= MaksymalnaLiczbaCertyfikatow {
+			// Urwana lista musi to powiedziec. Cisza w tym miejscu wyglada
+			// jak host, ktory nie ma wiecej certyfikatow - a to host,
+			// o ktorego reszte nikt nie zapytal.
+			if len(cele) > len(snapshot.Certificates) {
+				snapshot.Truncated = len(cele) - len(snapshot.Certificates)
+				snapshot.TruncatedReason = fmt.Sprintf(
+					"lista celow jest dluzsza niz %d: opisano pierwsze %d, pominieto %d",
+					MaksymalnaLiczbaCertyfikatow, len(snapshot.Certificates), snapshot.Truncated)
+			}
 			break
 		}
 	}

@@ -455,6 +455,56 @@ func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"items": przebieg, "count": len(przebieg)})
 }
 
+// handleCampaignPlans grupuje plany hostow po ich odcisku.
+//
+// Zgoda dotyczy zestawu planow, a nie jednego payloadu, wiec operator musi go
+// zobaczyc przed decyzja. Lista stu hostow z identycznym diffem nie jest
+// jednak wiedza - jest scianą tekstu. Grupujemy po odcisku planu: jedna
+// pozycja to jeden rzeczywisty ksztalt zmiany razem z lista hostow, ktore go
+// dostana.
+func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
+	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
+	if !ok {
+		return
+	}
+	wpisy, err := s.campaigns.PlanyZTrescia(r.Context(), campaign.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	type grupaPlanow struct {
+		PlanHash string          `json:"plan_hash"`
+		Count    int             `json:"count"`
+		Hosts    []string        `json:"hosts"`
+		Plan     json.RawMessage `json:"plan,omitempty"`
+	}
+	kolejnosc := []string{}
+	wedlug := map[string]*grupaPlanow{}
+	for _, wpis := range wpisy {
+		grupa, mamy := wedlug[wpis.PlanHash]
+		if !mamy {
+			grupa = &grupaPlanow{PlanHash: wpis.PlanHash, Plan: wpis.Plan}
+			wedlug[wpis.PlanHash] = grupa
+			kolejnosc = append(kolejnosc, wpis.PlanHash)
+		}
+		grupa.Count++
+		// Lista hostow jest tu istotna, ale nie musi byc pelna sciana:
+		// pierwsze nazwy wystarcza, zeby poznac, kogo grupa dotyczy.
+		if len(grupa.Hosts) < 20 {
+			grupa.Hosts = append(grupa.Hosts, orDefault(wpis.Hostname, wpis.HostID))
+		}
+	}
+	grupy := make([]grupaPlanow, 0, len(kolejnosc))
+	for _, hash := range kolejnosc {
+		grupy = append(grupy, *wedlug[hash])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": grupy, "count": len(grupy), "hosts": len(wpisy),
+		"plan_set_hash": campaign.PlanSetHash,
+	})
+}
+
 // handleCampaignReport buduje raport koncowy: wersje stanu, podzial na fale
 // i liste hostow, ktore wymagaja uwagi.
 func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {

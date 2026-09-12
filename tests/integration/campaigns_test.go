@@ -2670,6 +2670,14 @@ func TestKampaniaCertyfikatuLiczyDiffIChroniKlucz(t *testing.T) {
 		for _, hostID := range cele {
 			h.do(http.MethodDelete,
 				"/api/v1/hosts/"+hostID+"/certificates/targets?path="+sciezka, nil, nil, 0)
+			// Plik zostaje na hoscie, jesli go nie usuniemy - a rejestr celow
+			// ma limit, ktory kolejne przebiegi w koncu wyczerpia.
+			for _, doUsuniecia := range []string{sciezka, sciezkaKlucza} {
+				h.runOperation(hostID, map[string]any{
+					"action": "file.remove", "reason": "sprzatanie po tescie kampanii certyfikatow",
+					"payload": map[string]any{"file": map[string]any{"path": doUsuniecia}},
+				}, 2*time.Minute)
+			}
 		}
 	})
 
@@ -3310,4 +3318,197 @@ func hostPoza(t *testing.T, h *harness, uzyte []string) string {
 	}
 	t.Skip("flota nie ma hosta poza kampania, ktorym mozna pokazac niepelne pokrycie")
 	return ""
+}
+
+// TestKampaniaOdnowieniaMowiKtoPilnujeCertyfikatu sprawdza krok rotacji,
+// ktorego panel nie robi sam: o nowy certyfikat prosi demon hosta. Odpowiedzi
+// sa tu dwie i obie musza byc slyszalne - host bez certmongera odpada juz na
+// zdolnosci, a host z certmongerem, ktory tego pliku nie pilnuje, odpada
+// w planie. Jedno nie moze udawac drugiego.
+func TestKampaniaOdnowieniaMowiKtoPilnujeCertyfikatu(t *testing.T) {
+	h := newHarness(t)
+
+	var cele []string
+	zDemonem := map[string]bool{}
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		cele = append(cele, host.ID)
+		if maZdolnosc(host, "certificates.renew") {
+			zDemonem[host.ID] = true
+		}
+	}
+	if len(zDemonem) == 0 {
+		t.Skip("flota nie ma hosta z certmongerem")
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	}
+
+	sciezka := "/etc/pki/tls/certs/flotestro-odnowienie.pem"
+	campaign := h.createCampaign(map[string]any{
+		"name": "odnowienie na flocie", "action": "certificate.renew",
+		"reason":                     "test integracyjny planow odnowienia",
+		"payload":                    map[string]any{"certificate": map[string]any{"path": sciezka}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	stan := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if stan.State == "awaiting_approval" {
+		t.Fatal("kampania odnowienia pliku, ktorego nikt nie pilnuje, doszla do zgody")
+	}
+
+	var bezDemona, zPlanem int
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if !zDemonem[target.HostID] {
+			// Host bez certmongera nie jest hostem, ktoremu plan cos powie:
+			// on tej operacji nie przyjmie w ogole.
+			if target.State != "ineligible" || target.ErrorCode != "capability_missing" {
+				t.Errorf("host bez certmongera: %s/%s", target.State, target.ErrorCode)
+			}
+			bezDemona++
+			continue
+		}
+		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
+			t.Errorf("host z certmongerem: %s/%s", target.State, target.ErrorCode)
+		}
+		plan := planOdnowienia(h, target.PlanJobID)
+		if !strings.Contains(plan.Refusal, "nie pilnuje pliku") || plan.PlanHash == "" {
+			t.Errorf("host z certmongerem, plan: %+v", plan)
+		}
+		zPlanem++
+	}
+	if bezDemona == 0 || zPlanem == 0 {
+		t.Errorf("kampania nie rozroznila hostow: bez demona=%d, z planem=%d", bezDemona, zPlanem)
+	}
+}
+
+// planOdnowienia czyta z wyniku zadania planujacego plan odnowienia.
+func planOdnowienia(h *harness, jobID string) (plan struct {
+	Path     string `json:"path"`
+	Request  string `json:"request"`
+	Status   string `json:"status"`
+	Refusal  string `json:"refusal"`
+	PlanHash string `json:"plan_hash"`
+}) {
+	h.t.Helper()
+	var odpowiedz struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
+	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
+		if odpowiedz.Items[i].Detail.Kind == "renewal_plan" {
+			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+			return plan
+		}
+	}
+	return plan
+}
+
+// TestPlanyKampaniiSaPogrupowanePoOdcisku sprawdza ekran, na ktorym operator
+// podejmuje decyzje: zgoda dotyczy zestawu planow, wiec zestaw musi byc
+// widoczny - a sto hostow z identycznym diffem ma byc jedna pozycja, nie
+// sciana tekstu.
+func TestPlanyKampaniiSaPogrupowanePoOdcisku(t *testing.T) {
+	h := newHarness(t)
+	const nazwa = "test-planow-pogrupowanych"
+
+	var cele []string
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			cele = append(cele, host.ID)
+		}
+	}
+	if len(cele) < 2 {
+		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	}
+
+	// Sciezka musi lezec w allowliscie plikow panelu: kampania nie jest
+	// droga naokolo tej granicy.
+	sciezka := "/etc/flotestro-" + nazwa + ".conf"
+	t.Cleanup(func() {
+		for _, hostID := range cele {
+			h.runOperation(hostID, map[string]any{
+				"action": "file.remove", "reason": "sprzatanie po tescie grupowania planow",
+				"payload": map[string]any{"file": map[string]any{"path": sciezka}},
+			}, 2*time.Minute)
+		}
+	})
+
+	// Wszystkie hosty dostaja te sama tresc do tego samego pliku, ktorego
+	// zaden z nich nie ma: plany maja byc identyczne, wiec grupa jedna.
+	campaign := h.createCampaign(map[string]any{
+		"name": "plik na flocie", "action": "file.ensure",
+		"reason": "test grupowania planow",
+		"payload": map[string]any{"file": map[string]any{
+			"path": sciezka, "content": "# " + nazwa + "\n", "mode": "0644"}},
+		"selector":                   map[string]any{"host_ids": cele},
+		"canary_size":                0,
+		"wave_size":                  len(cele),
+		"max_concurrent":             len(cele),
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	poPlanowaniu := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if poPlanowaniu.State != "awaiting_approval" {
+		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
+			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	}
+
+	var grupy struct {
+		Items []struct {
+			PlanHash string   `json:"plan_hash"`
+			Count    int      `json:"count"`
+			Hosts    []string `json:"hosts"`
+			Plan     struct {
+				Kind string `json:"kind"`
+				Plan struct {
+					Action  string   `json:"action"`
+					Changes []string `json:"changes"`
+				} `json:"plan"`
+			} `json:"plan"`
+		} `json:"items"`
+		Count       int    `json:"count"`
+		Hosts       int    `json:"hosts"`
+		PlanSetHash string `json:"plan_set_hash"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/plans", &grupy)
+
+	if grupy.Hosts != len(cele) {
+		t.Errorf("plany opisuja %d hostow, celow bylo %d", grupy.Hosts, len(cele))
+	}
+	// Ten sam plik o tej samej tresci na hostach, ktore go nie maja, daje
+	// jeden ksztalt zmiany - i tak ma byc pokazany.
+	if grupy.Count != 1 || len(grupy.Items) != 1 {
+		t.Fatalf("plany rozbite na %d grup: %+v", grupy.Count, grupy.Items)
+	}
+	grupa := grupy.Items[0]
+	if grupa.Count != len(cele) || len(grupa.Hosts) != len(cele) {
+		t.Errorf("grupa obejmuje %d hostow (%v)", grupa.Count, grupa.Hosts)
+	}
+	if grupa.PlanHash == "" || grupy.PlanSetHash == "" {
+		t.Errorf("grupa bez odcisku: %q, zestaw: %q", grupa.PlanHash, grupy.PlanSetHash)
+	}
+	// Tresc planu ma dojsc az tutaj: bez niej operator oglada odciski, a nie
+	// zmiane, na ktora sie zgadza.
+	if grupa.Plan.Plan.Action != "create" || len(grupa.Plan.Plan.Changes) == 0 {
+		t.Errorf("grupa bez tresci planu: %+v", grupa.Plan)
+	}
+
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
+		map[string]any{"reason": "test grupowania planow"}, nil, 0)
 }

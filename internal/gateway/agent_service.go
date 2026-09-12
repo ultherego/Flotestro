@@ -1211,14 +1211,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	if certyfikat := result.GetCertificateResult(); certyfikat != nil && len(certyfikat.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
-			AnchorID string `json:"anchor_id"`
+			// Rodzaj planu nazywa modul. Zgadywanie go z pustych pol
+			// myliloby plan odmowiony z planem innego rodzaju.
+			Kind string `json:"kind"`
 		}
 		_ = json.Unmarshal(certyfikat.GetPlan(), &plan)
 		// Plan kotwicy i plan wdrozenia sa dwoma ksztaltami; rodzaj wyniku
 		// ma to nazwac, bo operator oglada je w tym samym miejscu.
 		rodzaj := "certificate_plan"
-		if plan.AnchorID != "" {
+		switch plan.Kind {
+		case "trust":
 			rodzaj = "trust_plan"
+		case "renewal":
+			rodzaj = "renewal_plan"
 		}
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      rodzaj,

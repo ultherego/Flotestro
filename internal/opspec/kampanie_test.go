@@ -111,6 +111,7 @@ func TestWykonywalneTrybyToSamPayloadIRestart(t *testing.T) {
 		ActionLVMExtend:              ActionStoragePlan,
 		ActionPackageInstall:         ActionPackagePlan,
 		ActionCertificateDeploy:      ActionCertificatePlan,
+		ActionCertificateRenew:       ActionCertificatePlan,
 		ActionCertificateTrustEnsure: ActionCertificateTrustPlan,
 		ActionCertificateTrustRemove: ActionCertificateTrustPlan,
 		ActionBackupRun:              ActionBackupPlan,

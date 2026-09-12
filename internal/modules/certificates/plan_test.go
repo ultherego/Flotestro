@@ -115,3 +115,78 @@ func TestPlanCertyfikatuOdrozniaBrakPlikuOdNieodczytanego(t *testing.T) {
 		t.Errorf("plik nieodczytany: %+v", nieodczytany)
 	}
 }
+
+func TestPlanOdnowieniaPatrzyNaDemonaHosta(t *testing.T) {
+	teraz := time.Now()
+	koniec := teraz.Add(240 * time.Hour)
+	obecny := Certyfikat{Path: "/etc/pki/tls/certs/usluga.pem",
+		FingerprintSHA256: strings.Repeat("d", 64), NotAfter: &koniec}
+	monitoring := "MONITORING"
+	sledzenie := &Sledzenie{Request: "20260101000000", Status: monitoring, CA: "IPA"}
+
+	plan := ZaplanujOdnowienie(obecny, sledzenie, true, obecny.Path, "httpd.service", teraz)
+	if plan.Refusal != "" || plan.Request != "20260101000000" || plan.PlanHash == "" {
+		t.Fatalf("plan odnowienia: %+v", plan)
+	}
+	if plan.DaysToExpiry == nil || *plan.DaysToExpiry != 10 {
+		t.Errorf("dni do wygasniecia: %v", plan.DaysToExpiry)
+	}
+	if len(plan.Changes) != 3 {
+		t.Errorf("zmiany: %v", plan.Changes)
+	}
+
+	// Opieka, ktora nie dziala, ma byc widoczna przed zgoda, a nie po niej.
+	zepsute := *sledzenie
+	zepsute.Status = "CA_UNREACHABLE"
+	zGlosem := ZaplanujOdnowienie(obecny, &zepsute, true, obecny.Path, "", teraz)
+	if !strings.Contains(strings.Join(zGlosem.Changes, ";"), "CA_UNREACHABLE") {
+		t.Errorf("stan zlecenia nie doszedl do planu: %v", zGlosem.Changes)
+	}
+
+	// Inny identyfikator zlecenia to inne odnowienie: zgoda nie moze przejsc
+	// z jednego na drugie.
+	inne := *sledzenie
+	inne.Request = "20260202000000"
+	if ZaplanujOdnowienie(obecny, &inne, true, obecny.Path, "httpd.service", teraz).PlanHash == plan.PlanHash {
+		t.Error("plan dla innego zlecenia ma ten sam odcisk")
+	}
+}
+
+func TestPlanOdnowieniaOdmawiaBezDemonaIBezZlecenia(t *testing.T) {
+	teraz := time.Now()
+	sciezka := "/etc/pki/tls/certs/usluga.pem"
+	bezDemona := ZaplanujOdnowienie(Certyfikat{}, nil, false, sciezka, "", teraz)
+	if !strings.Contains(bezDemona.Refusal, "nie ma certmongera") || bezDemona.PlanHash == "" {
+		t.Errorf("host bez demona: %+v", bezDemona)
+	}
+	bezZlecenia := ZaplanujOdnowienie(Certyfikat{}, nil, true, sciezka, "", teraz)
+	if !strings.Contains(bezZlecenia.Refusal, "nie pilnuje pliku") {
+		t.Errorf("plik spoza opieki demona: %+v", bezZlecenia)
+	}
+	zlaSciezka := ZaplanujOdnowienie(Certyfikat{}, nil, true, "/etc/passwd", "", teraz)
+	if zlaSciezka.Refusal == "" {
+		t.Error("sciezka poza katalogami certyfikatow przeszla bez odmowy")
+	}
+}
+
+// Trzy rozne plany modulu wracaja ta sama droga, wiec odbiorca musi je
+// rozroznic bez zgadywania z pustych pol: plan odmowiony ma puste wszystko
+// poza powodem i nadal nazywa swoj rodzaj.
+func TestPlanyNazywajaSwojRodzaj(t *testing.T) {
+	teraz := time.Now()
+	dobry := certyfikatTestowy(t, "panel.flotestro.test", teraz.Add(-time.Hour), teraz.Add(time.Hour))
+	wdrozenie := Zaplanuj(Certyfikat{}, Zamowienie{
+		Path: "/etc/ssl/certs/flotestro.pem", Certyfikat: dobry}, teraz)
+	if wdrozenie.Kind != RodzajWdrozenia {
+		t.Errorf("plan wdrozenia: %q", wdrozenie.Kind)
+	}
+	odmowa := Zaplanuj(Certyfikat{}, Zamowienie{Path: "/etc/passwd"}, teraz)
+	if odmowa.Kind != RodzajWdrozenia || odmowa.Refusal == "" {
+		t.Errorf("odmowiony plan wdrozenia: %+v", odmowa)
+	}
+	odnowienie := ZaplanujOdnowienie(Certyfikat{}, nil, false,
+		"/etc/pki/tls/certs/usluga.pem", "", teraz)
+	if odnowienie.Kind != RodzajOdnowienia {
+		t.Errorf("plan odnowienia: %q", odnowienie.Kind)
+	}
+}

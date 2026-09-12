@@ -394,6 +394,15 @@ func zPlanem(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.Certificate = &certyfikat
 		}
 
+	case opspec.ActionCertificateRenew:
+		// Odnowienie wiaze sie odciskiem planu: inne zlecenie certmongera
+		// pod ta sciezka od planowania zatrzymuje zmiane.
+		if payload.Certificate != nil {
+			certyfikat := *payload.Certificate
+			certyfikat.PlanHash = hash
+			payload.Certificate = &certyfikat
+		}
+
 	case opspec.ActionCertificateDeploy:
 		// Certyfikat wiaze sie odciskiem planu: plik pod ta sciezka zmieniony
 		// od planowania zatrzymuje wdrozenie zamiast nadpisac cudzy material.
