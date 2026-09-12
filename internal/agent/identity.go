@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// IdentityState opisuje integracje hosta z domena. Zbierany jest w cyklu
-// inventory, nigdy przy heartbeacie: odpytywanie katalogu kilka razy na minute
-// z kazdego hosta floty byloby dokladnie tym obciazeniem, przed ktorym broni
-// sie dokument.
+// IdentityState describes the integration of the host with the domain. It is
+// collected in the inventory cycle, never in the heartbeat: querying the
+// directory several times a minute from every host of the fleet would be
+// exactly the load the document guards against.
 type IdentityState struct {
 	Enrolled bool     `json:"enrolled"`
 	Domain   string   `json:"domain,omitempty"`
@@ -35,12 +35,14 @@ type IdentityState struct {
 
 const ipaConfigPath = "/etc/ipa/default.conf"
 
-// ReadIdentityState zbiera stan domeny lokalnie. Zadne zapytanie nie idzie do
-// serwera katalogu: interesuje nas stan hosta, a nie zawartosc katalogu.
+// ReadIdentityState collects the domain state locally. No query goes to the
+// directory server: what matters is the state of the host and not the content
+// of the directory.
 //
-// Keytab hosta i baza cache SSSD sa czytelne wylacznie dla roota, wiec ta
-// czesc idzie przez helpera. Agent nie ma do nich dostepu i nie powinien go
-// miec: odczyt keytab to material uwierzytelniajacy hosta.
+// The host keytab and the SSSD cache database are readable only by root, so
+// that part goes through the helper. The agent has no access to them and should
+// have none: reading the keytab means reading the authentication material of
+// the host.
 func ReadIdentityState(ctx context.Context) IdentityState {
 	state := IdentityState{
 		SSSDInstalled: exists("/usr/sbin/sssd") || exists("/usr/lib/systemd/system/sssd.service"),
@@ -54,7 +56,7 @@ func ReadIdentityState(ctx context.Context) IdentityState {
 		state.Servers = append(state.Servers, server)
 	}
 	if !state.Enrolled {
-		// Host poza domena to poprawny stan, a nie brak danych.
+		// A host outside a domain is a valid state, not missing data.
 		return state
 	}
 
@@ -63,7 +65,7 @@ func ReadIdentityState(ctx context.Context) IdentityState {
 	return state
 }
 
-// PrivilegedIdentity uzupelnia stan o dane wymagajace roota.
+// PrivilegedIdentity uzupelnia stan o data wymagajace roota.
 type PrivilegedIdentity struct {
 	HostPrincipal     string
 	KeytabKVNO        *uint32
@@ -73,7 +75,8 @@ type PrivilegedIdentity struct {
 	UnavailableReason string
 }
 
-// Merge dolacza wynik z helpera do stanu odczytanego bez uprawnien.
+// Merge joins the result from the helper into the state read without
+// privileges.
 func (s IdentityState) Merge(privileged PrivilegedIdentity) IdentityState {
 	s.HostPrincipal = privileged.HostPrincipal
 	s.KeytabKVNO = privileged.KeytabKVNO
@@ -84,8 +87,8 @@ func (s IdentityState) Merge(privileged PrivilegedIdentity) IdentityState {
 	return s
 }
 
-// parseIPAConfig czyta /etc/ipa/default.conf. Obecnosc pliku jest jedynym
-// pewnym lokalnym dowodem, ze host zostal dolaczony do domeny.
+// parseIPAConfig reads /etc/ipa/default.conf. The presence of the file is the
+// only certain local proof that the host was joined to a domain.
 func parseIPAConfig() map[string]string {
 	file, err := os.Open(ipaConfigPath)
 	if err != nil {
@@ -113,14 +116,16 @@ func unitActive(ctx context.Context, unit string) bool {
 	return result.Ran && result.ExitCode == 0
 }
 
-// sssdOnline pyta SSSD o stan polaczenia z domena. Kod niezerowy bez wyniku
+// sssdOnline asks SSSD about the state of the connection to the domain. A
+// non-zero code without a result
 
 // sssdCacheAge zwraca wiek pliku cache. Rosnacy wiek przy hoscie offline
 
-// hostKeytab odczytuje principal hosta i numer wersji klucza. Rozjazd KVNO
+// hostKeytab reads the host principal and the key version number. A KVNO
+// mismatch
 
-// clockState czyta rozjazd zegara. Kerberos przestaje dzialac przy roznicy
-// rzedu minut, wiec ta wartosc jest wczesnym ostrzezeniem.
+// clockState reads the drift of the clock. Kerberos stops working at a
+// difference of minutes, so this value is an early warning.
 func clockState(ctx context.Context) (skew *float64, synchronized bool) {
 	result := runCommand(ctx, 15*time.Second, "/usr/bin/chronyc", "-c", "tracking")
 	if !result.Ran || result.ExitCode != 0 {

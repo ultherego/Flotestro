@@ -5,60 +5,67 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/security"
-	czas "github.com/ultherego/flotestro/internal/modules/time"
+	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 )
 
-// Nazwy adapterow. Nazwa mowi, co host ma, a nie czego chce operacja:
-// operacja pyta o "packages", host odpowiada "packages.apt".
+// The names of the adapters. A name says what the host has and not what an
+// operation wants: the operation asks about "packages", the host answers
+// "packages.apt".
 const (
 	CapSystemd  = "systemd"
 	CapAPT      = "packages.apt"
 	CapDNF      = "packages.dnf"
 	CapJournald = "journald"
 	CapDocker   = "docker"
-	// Compose jest osobnym adapterem: silnik kontenerow bywa bez niego,
-	// a projekt bez wtyczki compose nie da sie ani zaplanowac, ani wdrozyc.
+	// Compose is a separate adapter: a container engine is sometimes without it,
+	// and without the compose plugin a project can neither be planned nor
+	// deployed.
 	CapCompose = "docker.compose"
-	// Zadania cykliczne. Cron i timery systemd sa dwoma mechanizmami tego
-	// samego, wiec jedna zdolnosc obejmuje oba.
+	// Recurring jobs. Cron and systemd timers are two mechanisms for the same
+	// thing, so one capability covers both.
 	CapSchedules = "schedules"
-	// Siec. Odczyt dziala wszedzie, gdzie jest iproute2; zapis wymaga
-	// mechanizmu, ktory potrafi wycofac zmiane.
+	// The network. The read works everywhere iproute2 is; the write needs a
+	// mechanism that can roll a change back.
 	CapNetwork = "network"
-	// Resolver hosta. Odczyt dziala wszedzie, gdzie jest resolv.conf; zapis
-	// wymaga mechanizmu, ktory zmiane utrwali.
+	// The resolver of the host. The read works everywhere resolv.conf is; the
+	// write needs a mechanism that makes the change stick.
 	CapDNS = "dns"
-	// Zapora. Adapter mowi, kto na tym hoscie trzyma reguly.
+	// The firewall. The adapter says who holds the rules on this host.
 	CapFirewall = "firewall"
-	// Przestrzen dyskowa. Odczyt wymaga lsblk; LVM i macierze sa osobnymi
-	// cechami, bo host bywa bez nich.
+	// The disk space. The read needs lsblk; LVM and the arrays are separate
+	// features, because a host is sometimes without them.
 	CapStorage = "storage"
 	// Serwer sshd. Konfiguracja idzie do wlasnego pliku w sshd_config.d.
 	CapSSHD = "sshd"
 	// Jadro: ustawienia sysctl i moduly.
 	CapKernel = "kernel"
-	// Czas hosta. Odczyt dziala wszedzie, gdzie jest timedatectl; zapis
-	// wymaga demona, ktoremu panel ma gdzie dopisac serwery.
+	// The time of the host. The read works everywhere timedatectl is; the write
+	// needs a daemon the panel has somewhere to add servers to.
 	CapTime = "time"
-	// Stan ochronny hosta. Odczyt dziala wszedzie; przelaczenie trybu MAC
-	// jest osobna zdolnoscia, bo host bez SELinuksa nie ma czego przelaczac.
+	// The protection state of the host. The read works everywhere; switching the
+	// MAC mode
+	// is a separate capability, because a host without SELinux has nothing to
+	// switch.
 	CapSecurity    = "security"
 	CapSecurityMAC = "security.mac"
-	// Audyt jest osobna zdolnoscia: host bez auditd nie ma czego przeladowac,
-	// a przeladowanie idzie przez augenrules, nie przez restart jednostki.
+	// The audit is a separate capability: a host without auditd has nothing to
+	// reload, and the reload goes through augenrules, not through a restart of
+	// the unit.
 	CapSecurityAudit = "security.audit"
 	// Certyfikaty na hostach. Modul dziala wszedzie, bo oglada wskazane pliki
-	// i wdraza nowe. Odnowienie jest osobna zdolnoscia: robi je demon hosta,
-	// a host bez certmongera nie ma czym odnawiac.
+	// and deploys new ones. The renewal is a separate capability: it is done by
+	// the daemon of the host, and a host without certmonger has nothing to renew
+	// with.
 	CapCertificates      = "certificates"
 	CapCertificatesRenew = "certificates.renew"
-	// Pliki konfiguracyjne. Zakres sciezek wyznacza administrator hosta.
+	// The configuration files. The scope of the paths is set by the
+	// administrator of the host.
 	CapFiles = "files.managed"
-	// Sonda z hosta. Dziala wszedzie: to zwykle polaczenie, bez roota
-	// i bez dodatkowego narzedzia.
+	// A probe from the host. It works everywhere: it is an ordinary connection,
+	// without root and without an extra tool.
 	CapMonitoring = "monitoring"
-	// Backup. Modul steruje narzedziem, ktore host juz ma: bez narzedzia
-	// i bez runbookow nie ma czym zrobic kopii.
+	// Backup. The module drives a tool the host already has: without the tool
+	// and without runbooks there is nothing to make a copy with.
 	CapBackup = "backup"
 )
 
@@ -77,11 +84,11 @@ const (
 	NeedLVM           = "storage.lvm"
 )
 
-// Wersja kontraktu adaptera. Podnosi sie, gdy zmienia sie znaczenie operacji
-// adaptera, a nie gdy zmienia sie wersja narzedzia na hoscie.
-const wersjaAdaptera = 1
+// The version of the adapter contract. It goes up when the meaning of an
+// adapter operation changes, not when the version of a tool on the host does.
+const adapterVersion = 1
 
-// Capability opisuje jeden adapter wykryty na hoscie.
+// Capability describes one adapter detected on the host.
 type Capability struct {
 	Name      string          `json:"name"`
 	Version   uint32          `json:"version"`
@@ -91,10 +98,10 @@ type Capability struct {
 	Features  map[string]bool `json:"features,omitempty"`
 }
 
-// Capabilities to rejestr adapterow hosta.
+// Capabilities is the registry of the adapters of the host.
 type Capabilities []Capability
 
-// Available mowi, czy adapter o tej nazwie dziala na hoscie.
+// Available says whether the adapter with this name works on the host.
 func (c Capabilities) Available(name string) bool {
 	for _, cap := range c {
 		if cap.Name == name {
@@ -106,8 +113,8 @@ func (c Capabilities) Available(name string) bool {
 
 // Feature mowi, czy adapter ma dana czesc.
 func (c Capabilities) Feature(name, feature string) bool {
-	wartosc, _ := c.FeatureState(name, feature)
-	return wartosc
+	value, _ := c.FeatureState(name, feature)
+	return value
 }
 
 // FeatureState separates "it does not have this part" from "it is not known
@@ -194,23 +201,25 @@ func (c Capabilities) Satisfies(requirement string) bool {
 	}
 }
 
-// DetectCapabilities sprawdza obecnosc adapterow bez uruchamiania procesow.
+// DetectCapabilities checks the presence of the adapters without starting any
+// process.
 //
-// Niedostepny adapter niesie powod. Bez niego interfejs musialby zgadywac,
-// dlaczego zakladki nie ma - i zgadywalby w kodzie przegladarki, wiec zle:
-// przyczyna jest faktem o hoscie i host ma ja podac.
+// An unavailable adapter carries a reason. Without it the interface would have
+// to guess why a tab is missing - and it would guess in the code of the
+// browser, so badly: the cause is a fact about the host and the host is to give
+// it.
 func DetectCapabilities() Capabilities {
 	systemd := isDir("/run/systemd/system")
 	apt := isExecutable("/usr/bin/apt-get")
 	dnf := isExecutable("/usr/bin/dnf") || isExecutable("/usr/bin/dnf5")
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
-	compose := docker && wtyczkaCompose() != ""
+	compose := docker && composePlugin() != ""
 	journald := exists("/run/systemd/journal/socket")
-	// Wpisy zarzadzane trafiaja do /etc/cron.d, wiec bez tego katalogu modul
-	// nie ma gdzie ich zalozyc - nawet gdy timery systemd dzialaja.
-	harmonogramy := isDir("/etc/cron.d")
-	odczytSieci := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
-	zapisSieci := network.WykryjAdapter(network.Istnieje)
+	// The managed entries go to /etc/cron.d, so without that directory the
+	// module has nowhere to create them - even when the systemd timers work.
+	schedules := isDir("/etc/cron.d")
+	networkRead := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
+	networkWrite := network.WykryjAdapter(network.Istnieje)
 	resolver := exists("/etc/resolv.conf")
 	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
 	nft := exists("/usr/sbin/nft")
@@ -218,41 +227,42 @@ func DetectCapabilities() Capabilities {
 	sshd := exists("/usr/sbin/sshd")
 	sysctl := exists("/usr/sbin/sysctl") || exists("/sbin/sysctl")
 	modprobe := exists("/usr/sbin/modprobe") || exists("/sbin/modprobe")
-	// Panel zapisuje wylacznie do wlasnego pliku, wiec bez katalogu
-	// dolaczanego moglby tylko czytac: sshd_config nalezy do dystrybucji.
+	// The panel writes only to its own file, so without an include directory it
+	// could only read: sshd_config belongs to the distribution.
 	dropIn := isDir("/etc/ssh/sshd_config.d")
 	lvm := exists("/usr/sbin/vgs") && exists("/usr/sbin/lvs")
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
-	timedatectl := exists(czas.SciezkaTimedatectl)
+	timedatectl := exists(hosttime.SciezkaTimedatectl)
 	selinux := isDir(security.KatalogSELinux) && exists(security.SciezkaSetenforce)
-	audyt := exists(security.SciezkaAuditctl) && exists(security.SciezkaAugenrules)
+	audit := exists(security.SciezkaAuditctl) && exists(security.SciezkaAugenrules)
 	apparmor := exists(security.PlikAppArmor)
 	certmonger := exists(certificates.SciezkaGetcert) || exists(certificates.SciezkaGetcertAlt)
 	restic := exists("/usr/bin/restic") || exists("/usr/local/bin/restic")
 	borg := exists("/usr/bin/borg") || exists("/usr/local/bin/borg")
-	runbooki, _ := backup.WykazRunbookow()
-	chrony := exists(czas.SciezkaChronyc)
-	// Timesyncd bywa zainstalowany i zamaskowany, gdy host ma chronyego.
-	// Obecnosc jednostki mowi tylko tyle, ze jest czym pisac - ktory demon
-	// naprawde trzyma zegar, rozstrzyga dopiero odczyt stanu.
+	runbooks, _ := backup.WykazRunbookow()
+	chrony := exists(hosttime.SciezkaChronyc)
+	// Timesyncd is sometimes installed and masked when the host has chrony. The
+	// presence of the unit says only that there is something to write with -
+	// which daemon really keeps the clock is decided by the state read.
 	timesyncd := exists("/usr/lib/systemd/systemd-timesyncd") ||
 		exists("/lib/systemd/systemd-timesyncd")
 
 	return Capabilities{
 		{
 			Name:      CapSystemd,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: systemd,
-			Reason:    powod(systemd, "this host does not run systemd"),
+			Reason:    reason(systemd, "this host does not run systemd"),
 		},
 		{
 			Name:      CapAPT,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: apt,
-			Reason:    powod(apt, "apt-get is not installed on this host"),
-			// Naprawa bazy pakietow odpowiada na pytania debconfa. Bez jego
-			// narzedzi operacja padlaby dopiero na hoscie, po zatwierdzeniu.
+			Reason:    reason(apt, "apt-get is not installed on this host"),
+			// Repairing the package database means answering the questions of
+			// debconf. Without its tools the operation would only break on the
+			// host, after the approval.
 			Features: map[string]bool{
 				"repair": apt &&
 					isExecutable("/usr/bin/debconf-show") &&
@@ -261,43 +271,43 @@ func DetectCapabilities() Capabilities {
 		},
 		{
 			Name:      CapDNF,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: dnf,
-			Reason:    powod(dnf, "dnf is not installed on this host"),
+			Reason:    reason(dnf, "dnf is not installed on this host"),
 			// Blokada bazy rpm wyglada inaczej niz pytanie debconfa i naprawa
-			// tez wygladalaby inaczej, wiec adapter jej nie ma.
+			// would look different too, so the adapter does not have it.
 			Features: map[string]bool{"repair": false},
 		},
 		{
 			Name:      CapNetwork,
-			Version:   wersjaAdaptera,
-			Available: odczytSieci,
-			// Host bez mechanizmu zapisu nie jest hostem bez sieci: modul
-			// dziala, tylko w trybie odczytu - i mowi, dlaczego.
-			ReadOnly: zapisSieci == "",
+			Version:   adapterVersion,
+			Available: networkRead,
+			// A host without a write mechanism is not a host without a network:
+			// the module works, only in read mode - and it says why.
+			ReadOnly: networkWrite == "",
 			Features: map[string]bool{
-				"routes":                      odczytSieci,
-				"write":                       zapisSieci != "",
-				network.AdapterNetworkManager: zapisSieci == network.AdapterNetworkManager,
-				network.AdapterNmstate:        zapisSieci == network.AdapterNmstate,
-				network.AdapterNetplan:        zapisSieci == network.AdapterNetplan,
+				"routes":                      networkRead,
+				"write":                       networkWrite != "",
+				network.AdapterNetworkManager: networkWrite == network.AdapterNetworkManager,
+				network.AdapterNmstate:        networkWrite == network.AdapterNmstate,
+				network.AdapterNetplan:        networkWrite == network.AdapterNetplan,
 			},
-			Reason: powodSieciowy(odczytSieci, zapisSieci),
+			Reason: networkAdapterReason(networkRead, networkWrite),
 		},
 		{
 			Name:    CapFiles,
-			Version: wersjaAdaptera,
-			// Modul dziala wszedzie: zakres pochodzi z allowlisty, a jej brak
-			// oznacza liste domyslna, a nie brak modulu.
+			Version: adapterVersion,
+			// The module works everywhere: the scope comes from the allowlist,
+			// and its absence means the default list, not a missing module.
 			Available: true,
 			Features:  map[string]bool{"allowlist": exists("/etc/flotestro/files.allow")},
 		},
 		{
 			Name:      CapTime,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: timedatectl,
-			// Host, na ktorym nie ma czego skonfigurowac, nadal pokazuje
-			// czas i przesuniecie - modul jest wtedy do odczytu.
+			// A host on which there is nothing to configure still shows the time
+			// and the offset - the module is read-only then.
 			ReadOnly: !chrony && !timesyncd,
 			Features: map[string]bool{
 				"chrony":    chrony,
@@ -305,13 +315,13 @@ func DetectCapabilities() Capabilities {
 				"write":     chrony || timesyncd,
 				"timezone":  timedatectl,
 			},
-			Reason: powod(timedatectl, "this host has no timedatectl"),
+			Reason: reason(timedatectl, "this host has no timedatectl"),
 		},
 		{
 			Name:    CapSecurity,
-			Version: wersjaAdaptera,
-			// Modul dziala wszedzie: brak SELinuksa czy audytu jest faktem
-			// o hoscie, a nie brakiem modulu.
+			Version: adapterVersion,
+			// The module works everywhere: a missing SELinux or audit is a fact
+			// about the host and not a missing module.
 			Available: true,
 			Features: map[string]bool{
 				"selinux":    selinux,
@@ -323,9 +333,9 @@ func DetectCapabilities() Capabilities {
 		},
 		{
 			Name:    CapCertificates,
-			Version: wersjaAdaptera,
-			// Modul dziala wszedzie: brak certyfikatow jest faktem o hoscie,
-			// a nie brakiem modulu.
+			Version: adapterVersion,
+			// The module works everywhere: missing certificates are a fact about
+			// the host and not a missing module.
 			Available: true,
 			Features: map[string]bool{
 				"certmonger": certmonger,
@@ -334,71 +344,71 @@ func DetectCapabilities() Capabilities {
 		},
 		{
 			Name:    CapMonitoring,
-			Version: wersjaAdaptera,
-			// Sonda nie wymaga niczego poza siecia, wiec modul dziala
+			Version: adapterVersion,
+			// A probe needs nothing beyond the network, so the module works
 			// wszedzie. Metryki i alerty czyta panel z systemow centralnych,
-			// a nie agent - host nie dostaje z tego powodu ani jednego
+			// and not the agent - the host gets not a single
 			// dodatkowego collectora.
 			Available: true,
 			Features:  map[string]bool{"probe.http": true, "probe.tcp": true},
 		},
 		{
 			Name:      CapBackup,
-			Version:   wersjaAdaptera,
-			Available: restic || borg || len(runbooki) > 0,
+			Version:   adapterVersion,
+			Available: restic || borg || len(runbooks) > 0,
 			Features: map[string]bool{
-				"restic": restic, "borg": borg, "runbook": len(runbooki) > 0,
+				"restic": restic, "borg": borg, "runbook": len(runbooks) > 0,
 			},
-			Reason: powod(restic || borg || len(runbooki) > 0,
+			Reason: reason(restic || borg || len(runbooks) > 0,
 				"this host has no backup tool the panel can drive"),
 		},
 		{
 			Name:      CapCertificatesRenew,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: certmonger,
-			Reason:    powod(certmonger, "this host does not run certmonger"),
+			Reason:    reason(certmonger, "this host does not run certmonger"),
 		},
 		{
 			Name:      CapSecurityAudit,
-			Version:   wersjaAdaptera,
-			Available: audyt,
-			Reason:    powod(audyt, "this host has no auditd rule tooling"),
+			Version:   adapterVersion,
+			Available: audit,
+			Reason:    reason(audit, "this host has no auditd rule tooling"),
 		},
 		{
 			Name:      CapSecurityMAC,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: selinux,
-			Reason:    powod(selinux, "this host has no SELinux to switch"),
+			Reason:    reason(selinux, "this host has no SELinux to switch"),
 		},
 		{
 			Name:      CapKernel,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: sysctl,
 			Features:  map[string]bool{"sysctl": sysctl, "modules": modprobe},
-			Reason:    powod(sysctl, "this host has no sysctl binary"),
+			Reason:    reason(sysctl, "this host has no sysctl binary"),
 		},
 		{
 			Name:      CapSSHD,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: sshd,
 			ReadOnly:  !dropIn,
 			Features:  map[string]bool{"dropin": dropIn, "hostkeys": exists("/usr/bin/ssh-keygen")},
-			Reason:    powodSSHD(sshd, dropIn),
+			Reason:    sshdReason(sshd, dropIn),
 		},
 		{
 			Name:      CapStorage,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: lsblk,
 			Features: map[string]bool{
 				"lvm":  lvm,
 				"fsck": fsck,
 				"raid": exists("/proc/mdstat"),
 			},
-			Reason: powod(lsblk, "this host has no lsblk binary"),
+			Reason: reason(lsblk, "this host has no lsblk binary"),
 		},
 		{
 			Name:      CapFirewall,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: nft || firewalld,
 			ReadOnly:  !nft && !firewalld,
 			Features: map[string]bool{
@@ -407,99 +417,100 @@ func DetectCapabilities() Capabilities {
 				"write":     nft,
 				"zones":     firewalld,
 			},
-			Reason: powod(nft || firewalld, "this host has neither nftables nor firewalld"),
+			Reason: reason(nft || firewalld, "this host has neither nftables nor firewalld"),
 		},
 		{
 			Name:      CapDNS,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: resolver,
-			ReadOnly:  zapisSieci != network.AdapterNetworkManager,
+			ReadOnly:  networkWrite != network.AdapterNetworkManager,
 			Features: map[string]bool{
 				"resolved": resolved,
-				"write":    zapisSieci == network.AdapterNetworkManager,
+				"write":    networkWrite == network.AdapterNetworkManager,
 			},
-			Reason: powodResolvera(resolver, zapisSieci),
+			Reason: resolverAdapterReason(resolver, networkWrite),
 		},
 		{
 			Name:      CapSchedules,
-			Version:   wersjaAdaptera,
-			Available: harmonogramy,
-			Features:  map[string]bool{"cron": harmonogramy, "timers": systemd},
-			Reason:    powod(harmonogramy, "this host has no /etc/cron.d directory"),
+			Version:   adapterVersion,
+			Available: schedules,
+			Features:  map[string]bool{"cron": schedules, "timers": systemd},
+			Reason:    reason(schedules, "this host has no /etc/cron.d directory"),
 		},
 		{
 			Name:      CapJournald,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: journald,
-			Reason:    powod(journald, "this host has no journald socket"),
+			Reason:    reason(journald, "this host has no journald socket"),
 		},
 		{
 			Name:      CapCompose,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: compose,
-			Reason: powod(compose,
+			Reason: reason(compose,
 				"this host has no Docker Compose plugin"),
 		},
 		{
 			Name:      CapDocker,
-			Version:   wersjaAdaptera,
+			Version:   adapterVersion,
 			Available: docker,
 			// Adapter czyta stan silnika i wykonuje operacje na kontenerach.
-			// Projekty Compose sa osobna cecha: silnik bywa bez wtyczki.
+			// Compose projects are a separate feature: an engine is sometimes
+			// without the plugin.
 			Features: map[string]bool{"read": docker, "write": docker, "compose": compose},
-			Reason:   powod(docker, "this host has no Docker socket"),
+			Reason:   reason(docker, "this host has no Docker socket"),
 		},
 	}
 }
 
-// sciezkiWtyczkiCompose to miejsca, w ktorych dystrybucje instaluja wtyczke.
-var sciezkiWtyczkiCompose = []string{
+// composePluginPaths to miejsca, w ktorych dystrybucje instaluja wtyczke.
+var composePluginPaths = []string{
 	"/usr/libexec/docker/cli-plugins/docker-compose",
 	"/usr/lib/docker/cli-plugins/docker-compose",
 	"/usr/local/lib/docker/cli-plugins/docker-compose",
 	"/root/.docker/cli-plugins/docker-compose",
 }
 
-// wtyczkaCompose zwraca sciezke wtyczki albo pustke. Sprawdzamy obecnosc
-// pliku, a nie uruchamiamy narzedzia: wykrywanie zdolnosci nie moze
-// uruchamiac procesow.
-func wtyczkaCompose() string {
-	for _, sciezka := range sciezkiWtyczkiCompose {
-		if isExecutable(sciezka) {
-			return sciezka
+// composePlugin returns the path of the plugin or an empty string. The presence
+// of the file is checked and the tool is not started: capability detection must
+// not start processes.
+func composePlugin() string {
+	for _, path := range composePluginPaths {
+		if isExecutable(path) {
+			return path
 		}
 	}
 	return ""
 }
 
-// powod zwraca wyjasnienie tylko dla adaptera niedostepnego.
-func powod(dostepny bool, gdyBrak string) string {
-	if dostepny {
+// reason returns an explanation only for an unavailable adapter.
+func reason(available bool, whenMissing string) string {
+	if available {
 		return ""
 	}
-	return gdyBrak
+	return whenMissing
 }
 
-// powodGdy wyjasnia oba stany: adapter obecny bywa ograniczony i to tez
-// wymaga zdania, a nie ciszy.
-func powodGdy(dostepny bool, gdyJest, gdyBrak string) string {
-	if dostepny {
-		return gdyJest
+// reasonWhen explains both states: an adapter that is present is sometimes
+// limited, and that also needs a sentence rather than silence.
+func reasonWhen(available bool, whenPresent, whenMissing string) string {
+	if available {
+		return whenPresent
 	}
-	return gdyBrak
+	return whenMissing
 }
 
-// powodSieciowy tlumaczy, czego modulowi sieci brakuje na tym hoscie.
-// Brak zapisu i brak calego modulu to dwie rozne odpowiedzi.
-func powodSieciowy(odczyt bool, adapter string) string {
-	if !odczyt {
+// networkReason explains what the network module is missing on this host. A
+// missing write and a missing module are two different answers.
+func networkAdapterReason(read bool, adapter string) string {
+	if !read {
 		return "this host has no iproute2 (ip) binary"
 	}
 	return network.PowodBrakuZapisu(adapter)
 }
 
-// powodResolvera tlumaczy, czego brakuje modulowi DNS.
-func powodResolvera(resolver bool, adapter string) string {
+// resolverReason explains what the DNS module is missing.
+func resolverAdapterReason(resolver bool, adapter string) string {
 	if !resolver {
 		return "this host has no /etc/resolv.conf"
 	}
@@ -510,8 +521,8 @@ func powodResolvera(resolver bool, adapter string) string {
 	return ""
 }
 
-// powodSSHD tlumaczy, czego brakuje modulowi sshd.
-func powodSSHD(sshd, dropIn bool) string {
+// sshdReason explains what the sshd module is missing.
+func sshdReason(sshd, dropIn bool) string {
 	if !sshd {
 		return "this host has no sshd"
 	}

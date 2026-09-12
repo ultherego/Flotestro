@@ -11,8 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// sshProbe czyta konfiguracje sshd przez helpera: "sshd -T" wymaga roota,
-// bo czyta takze klucze hosta.
+// sshProbe reads the sshd configuration through the helper: "sshd -T" needs
+// root, because it also reads the host keys.
 var sshProbe func(context.Context) (sshmodul.Snapshot, error)
 
 // SetSSHProbe wskazuje funkcje odczytujaca konfiguracje sshd.
@@ -32,90 +32,91 @@ func (e *TaskExecutor) ProbeSSH(ctx context.Context) (sshmodul.Snapshot, error) 
 		return sshmodul.Snapshot{}, err
 	}
 	var snapshot sshmodul.Snapshot
-	dane := response.GetSshResult().GetSnapshot()
-	if len(dane) == 0 {
+	data := response.GetSshResult().GetSnapshot()
+	if len(data) == 0 {
 		return snapshot, nil
 	}
-	if err := json.Unmarshal(dane, &snapshot); err != nil {
+	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return sshmodul.Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// applySSH wykonuje operacje modulu sshd.
+// applySSH performs the operations of the sshd module.
 func (e *TaskExecutor) applySSH(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.SSHPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
 	defer cancel()
 
-	operacja := helperv1.SshRequest_OPERATION_READ
+	operation := helperv1.SshRequest_OPERATION_READ
 	switch action {
 	case opspec.ActionSSHConfigPlan:
-		// Plan bez ustawien jest odczytem stanu; z ustawieniami liczy
-		// roznice wobec nich, bez dotykania serwera.
+		// A plan without settings is a read of the state; with settings it
+		// computes the difference against them, without touching the server.
 		if payload != nil && payload.DescribesChange() {
-			operacja = helperv1.SshRequest_OPERATION_PLAN
+			operation = helperv1.SshRequest_OPERATION_PLAN
 		}
 	case opspec.ActionSSHConfigApply:
-		operacja = helperv1.SshRequest_OPERATION_APPLY
+		operation = helperv1.SshRequest_OPERATION_APPLY
 	case opspec.ActionSSHHostKeyRotate:
-		operacja = helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY
+		operation = helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY
 	}
-	zadanie := &helperv1.SshRequest{Operation: operacja}
+	request := &helperv1.SshRequest{Operation: operation}
 	if payload != nil {
-		zadanie.Port = payload.Port
-		zadanie.PermitRootLogin = payload.PermitRootLogin
-		zadanie.PasswordAuthentication = payload.PasswordAuthentication
-		zadanie.PubkeyAuthentication = payload.PubkeyAuthentication
-		zadanie.KbdInteractiveAuthentication = payload.KbdInteractive
-		zadanie.MaxAuthTries = payload.MaxAuthTries
-		zadanie.AllowUsers = payload.AllowUsers
-		zadanie.AllowGroups = payload.AllowGroups
-		zadanie.DenyUsers = payload.DenyUsers
-		zadanie.AllowLockout = payload.AllowLockout
-		zadanie.KeyType = payload.KeyType
-		zadanie.PlanHash = payload.PlanHash
+		request.Port = payload.Port
+		request.PermitRootLogin = payload.PermitRootLogin
+		request.PasswordAuthentication = payload.PasswordAuthentication
+		request.PubkeyAuthentication = payload.PubkeyAuthentication
+		request.KbdInteractiveAuthentication = payload.KbdInteractive
+		request.MaxAuthTries = payload.MaxAuthTries
+		request.AllowUsers = payload.AllowUsers
+		request.AllowGroups = payload.AllowGroups
+		request.DenyUsers = payload.DenyUsers
+		request.AllowLockout = payload.AllowLockout
+		request.KeyType = payload.KeyType
+		request.PlanHash = payload.PlanHash
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
-		Action:         &helperv1.HelperRequest_Ssh{Ssh: zadanie},
+		Action:         &helperv1.HelperRequest_Ssh{Ssh: request},
 	}, timeout)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetSshResult()
-	szczegoly := &agentv1.SshResult{
-		Snapshot:   wynik.GetSnapshot(),
-		Message:    wynik.GetMessage(),
-		Mismatches: wynik.GetMismatches(),
-		Plan:       wynik.GetPlan(),
+	result := response.GetSshResult()
+	details := &agentv1.SshResult{
+		Snapshot:   result.GetSnapshot(),
+		Message:    result.GetMessage(),
+		Mismatches: result.GetMismatches(),
+		Plan:       result.GetPlan(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.SshResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.SshResult = details
+		return refused
 	}
 
-	// Ustawienie, ktore nie doszlo do skutku, jest wynikiem negatywnym mimo
-	// udanego zapisu: operator prosil o zmiane, a serwer stosuje co innego.
-	if len(wynik.GetMismatches()) > 0 {
+	// A setting that did not take effect is a negative result despite a
+	// successful write: the operator asked for a change and the server applies
+	// something else.
+	if len(result.GetMismatches()) > 0 {
 		return &agentv1.TaskResult{
 			TaskId: task.GetTaskId(), Status: agentv1.TaskResult_STATUS_FAILED,
-			ErrorCode: RejectPrecondition, Message: wynik.GetMessage(),
-			SshResult: szczegoly,
+			ErrorCode: RejectPrecondition, Message: result.GetMessage(),
+			SshResult: details,
 		}
 	}
 	return &agentv1.TaskResult{
 		TaskId:    task.GetTaskId(),
 		Status:    agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:   wynik.GetMessage(),
-		SshResult: szczegoly,
+		Message:   result.GetMessage(),
+		SshResult: details,
 	}
 }

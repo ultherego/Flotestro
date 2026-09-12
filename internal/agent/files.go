@@ -12,15 +12,15 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// fileProbe czyta stan plikow zarzadzanych przez panel.
+// fileProbe reads the state of the files managed by the panel.
 var fileProbe func(context.Context) (files.Snapshot, error)
 
-// SetFileProbe wskazuje funkcje odczytujaca stan plikow.
+// SetFileProbe points at the function that reads the state of the files.
 func SetFileProbe(probe func(context.Context) (files.Snapshot, error)) {
 	fileProbe = probe
 }
 
-// ProbeFiles odczytuje stan plikow zarzadzanych na hoscie.
+// ProbeFiles reads the state of the managed files on the host.
 func (e *TaskExecutor) ProbeFiles(ctx context.Context) (files.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
@@ -32,60 +32,61 @@ func (e *TaskExecutor) ProbeFiles(ctx context.Context) (files.Snapshot, error) {
 		return files.Snapshot{}, err
 	}
 	var snapshot files.Snapshot
-	dane := response.GetFileResult().GetSnapshot()
-	if len(dane) == 0 {
+	data := response.GetFileResult().GetSnapshot()
+	if len(data) == 0 {
 		return snapshot, nil
 	}
-	if err := json.Unmarshal(dane, &snapshot); err != nil {
+	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return files.Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// applyFile wykonuje operacje modulu plikow.
+// applyFile performs the operations of the file module.
 func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.FilePayload) *agentv1.TaskResult {
 	if payload == nil {
-		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "brak payloadu pliku")
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "the file payload is missing")
 	}
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
 	defer cancel()
 
-	operacja := helperv1.FileRequest_OPERATION_LIST
+	operation := helperv1.FileRequest_OPERATION_LIST
 	switch action {
 	case opspec.ActionFileRead:
-		operacja = helperv1.FileRequest_OPERATION_READ
+		operation = helperv1.FileRequest_OPERATION_READ
 	case opspec.ActionFileEnsure, opspec.ActionFileRollback:
-		operacja = helperv1.FileRequest_OPERATION_ENSURE
+		operation = helperv1.FileRequest_OPERATION_ENSURE
 	case opspec.ActionFileRemove:
-		operacja = helperv1.FileRequest_OPERATION_REMOVE
+		operation = helperv1.FileRequest_OPERATION_REMOVE
 	case opspec.ActionFilePlan:
-		// Plan bez sciezki jest odczytem stanu wszystkich plikow panelu:
-		// tak dziala zakladka hosta i tak ma dzialac dalej. Plan ze sciezka
-		// liczy roznice dla tego jednego pliku.
+		// A plan without a path is a read of the state of all the panel files:
+		// that is how the host tab works and how it is to keep working. A plan
+		// with a path computes the difference for that one file.
 		if strings.TrimSpace(payload.Path) != "" {
-			operacja = helperv1.FileRequest_OPERATION_PLAN
+			operation = helperv1.FileRequest_OPERATION_PLAN
 		}
 	}
 
-	// Tresc z magazynu pobieramy dopiero teraz, tuz przed zapisem. Wartosc
-	// zyje przez chwile w pamieci agenta i helpera - nie ma jej w kopercie
-	// zadania, w dzienniku ani w wyniku.
-	tresc := []byte(payload.Content)
+	// The content from the store is fetched only now, right before the write.
+	// The value lives for a moment in the memory of the agent and of the helper
+	// - it is not in the envelope of the task, in the journal or in the result.
+	content := []byte(payload.Content)
 	if !payload.ContentSecret.Empty() {
-		if e.sekrety == nil {
+		if e.secrets == nil {
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
-				"agent nie ma polaczenia, przez ktore mozna pobrac sekret")
+				"the agent has no connection through which a secret could be fetched")
 		}
-		wartosc, err := e.sekrety(callCtx, task.GetTaskId(),
+		value, err := e.secrets(callCtx, task.GetTaskId(),
 			payload.ContentSecret.Name, payload.ContentSecret.Version)
 		if err != nil {
-			// Powod odmowy jest tresci wyniku; wartosci w nim nie ma.
+			// The reason for the refusal is the content of the result; the value
+			// is not in it.
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
-				"nie pobrano sekretu "+payload.ContentSecret.Name+": "+err.Error())
+				"the secret "+payload.ContentSecret.Name+" was not fetched: "+err.Error())
 		}
-		tresc = wartosc
+		content = value
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -94,9 +95,9 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_File{
 			File: &helperv1.FileRequest{
-				Operation:      operacja,
+				Operation:      operation,
 				Path:           payload.Path,
-				Content:        tresc,
+				Content:        content,
 				Mode:           payload.Mode,
 				Owner:          payload.Owner,
 				Group:          payload.Group,
@@ -110,36 +111,36 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetFileResult()
-	szczegoly := &agentv1.FileResult{
-		Snapshot:        wynik.GetSnapshot(),
-		Message:         wynik.GetMessage(),
-		Content:         wynik.GetContent(),
-		Sha256:          wynik.GetSha256(),
-		Truncated:       wynik.GetTruncated(),
-		ValidatorOutput: wynik.GetValidatorOutput(),
-		Plan:            wynik.GetPlan(),
+	result := response.GetFileResult()
+	details := &agentv1.FileResult{
+		Snapshot:        result.GetSnapshot(),
+		Message:         result.GetMessage(),
+		Content:         result.GetContent(),
+		Sha256:          result.GetSha256(),
+		Truncated:       result.GetTruncated(),
+		ValidatorOutput: result.GetValidatorOutput(),
+		Plan:            result.GetPlan(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.FileResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.FileResult = details
+		return refused
 	}
-	komunikat := wynik.GetMessage()
-	if komunikat == "" && action == opspec.ActionFileRead {
-		komunikat = "plik odczytany"
-		if wynik.GetTruncated() {
-			// Urwana tresc bez oznaczenia wygladalaby jak caly plik i tak
-			// samo wrocilaby na host przy nastepnym zapisie.
-			komunikat = "plik odczytany, tresc urwana na granicy modulu"
+	message := result.GetMessage()
+	if message == "" && action == opspec.ActionFileRead {
+		message = "the file was read"
+		if result.GetTruncated() {
+			// Truncated content without a marker would look like the whole file
+			// and would go back to the host the same way at the next write.
+			message = "the file was read, the content was cut at the module boundary"
 		}
 	}
 	return &agentv1.TaskResult{
 		TaskId:     task.GetTaskId(),
 		Status:     agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:    komunikat,
-		FileResult: szczegoly,
+		Message:    message,
+		FileResult: details,
 	}
 }

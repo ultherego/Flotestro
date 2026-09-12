@@ -143,7 +143,7 @@ func main() {
 	// a missing capability: the agent reports facts but carries out no
 	// change.
 	if *mode == agentconfig.ModeReadOnly {
-		executor.UstawTrybOdczytu(true)
+		executor.SetReadOnlyMode(true)
 		log.Info("the agent works in the observation mode", "mode", *mode)
 	}
 
@@ -196,7 +196,7 @@ func main() {
 		Renewed:            renewals,
 		// The state on disk is the only source agentctl on a host without the
 		// panel learns from whether the agent really speaks to the gateway.
-		Stan: agent.NowyPisarzStanu(*stateDir, identity.HostID),
+		State: agent.NewStateWriter(*stateDir, identity.HostID),
 	}); err != nil {
 		log.Error("the agent ended with an error", "err", err)
 		os.Exit(1)

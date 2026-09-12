@@ -12,91 +12,91 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Ograniczenia podgladu na zywo.
+// The limits of the live preview.
 //
-// Podglad jest jedyna operacja, ktora trzyma proces na hoscie tak dlugo, jak
-// ktos patrzy - i tak dlugo, jak nikt nie patrzy, gdy operator zamknie karte.
-// Dlatego kazdy jego wymiar ma gorna granice: czas trwania, tempo i wielkosc
-// pojedynczej paczki.
+// The preview is the only operation that keeps a process on the host for as
+// long as somebody is watching - and for as long as nobody is watching, once
+// the operator closes the tab. That is why every dimension of it has an upper
+// bound: the duration, the rate and the size of a single batch.
 const (
-	// maksymalneTempoPodgladu ogranicza ilosc danych na sekunde. Host, ktory
-	// wypisuje megabajty logow, nie moze przez to obciazyc ani lacza, ani
-	// bazy powiadomien.
-	maksymalneTempoPodgladu = 32 << 10
-	// odstepPaczki zbiera linie, zanim je wysle. Wysylanie kazdej z osobna
-	// kosztowaloby powiadomienie na kazda linie dziennika.
-	odstepPaczki = 250 * time.Millisecond
-	// maksymalnaPaczka ogranicza jedna wiadomosc. Powiadomienie w bazie ma
-	// wlasny limit rozmiaru, wiec paczka musi sie w nim miescic z zapasem.
-	maksymalnaPaczka = 6 << 10
-	// domyslnyCzasPodgladu obowiazuje, gdy operator nie poda wlasnego.
-	domyslnyCzasPodgladu = 5 * time.Minute
+	// maxPreviewRate limits the amount of data per second. A host printing
+	// megabytes of logs must not load either the link or the notification
+	// database because of it.
+	maxPreviewRate = 32 << 10
+	// batchInterval collects the lines before sending them. Sending each of them
+	// separately would cost one notification per journal line.
+	batchInterval = 250 * time.Millisecond
+	// maxBatch limits a single message. A notification in the database has its
+	// own size limit, so a batch has to fit in it with room to spare.
+	maxBatch = 6 << 10
+	// defaultPreviewTime applies when the operator gives none of their own.
+	defaultPreviewTime = 5 * time.Minute
 )
 
-// anulowania trzyma funkcje przerywajace zadania, ktore da sie bezpiecznie
-// przerwac. Nie kazda operacja systemowa taka jest - transakcji pakietowej
-// nie wolno urwac w polowie - ale podglad dziennika jest odczytem i jego
-// przerwanie niczego nie psuje.
-type anulowania struct {
-	mu    sync.Mutex
-	akcje map[string]context.CancelFunc
+// cancellations holds the functions that interrupt the tasks which can be
+// interrupted safely. Not every system operation is one of those - a package
+// transaction must not be cut in half - but a journal preview is a read and
+// interrupting it breaks nothing.
+type cancellations struct {
+	mu      sync.Mutex
+	actions map[string]context.CancelFunc
 }
 
-func nowaTablicaAnulowan() *anulowania {
-	return &anulowania{akcje: map[string]context.CancelFunc{}}
+func newCancellationTable() *cancellations {
+	return &cancellations{actions: map[string]context.CancelFunc{}}
 }
 
-func (a *anulowania) zarejestruj(taskID string, cancel context.CancelFunc) func() {
-	a.mu.Lock()
-	a.akcje[taskID] = cancel
-	a.mu.Unlock()
+func (c *cancellations) register(taskID string, cancel context.CancelFunc) func() {
+	c.mu.Lock()
+	c.actions[taskID] = cancel
+	c.mu.Unlock()
 	return func() {
-		a.mu.Lock()
-		delete(a.akcje, taskID)
-		a.mu.Unlock()
+		c.mu.Lock()
+		delete(c.actions, taskID)
+		c.mu.Unlock()
 	}
 }
 
-// Anuluj przerywa zadanie, jesli da sie je przerwac. Zwraca informacje, czy
-// bylo czego przerywac - anulowanie nieznanego zadania nie jest bledem, bo
-// mogło sie wlasnie zakonczyc.
-func (a *anulowania) Anuluj(taskID string) bool {
-	a.mu.Lock()
-	cancel, znane := a.akcje[taskID]
-	a.mu.Unlock()
-	if znane {
+// Cancel interrupts a task if it can be interrupted. It returns whether there
+// was anything to interrupt - cancelling an unknown task is not an error,
+// because it may have just finished.
+func (c *cancellations) Cancel(taskID string) bool {
+	c.mu.Lock()
+	cancel, known := c.actions[taskID]
+	c.mu.Unlock()
+	if known {
 		cancel()
 	}
-	return znane
+	return known
 }
 
-// followJournal strumieniuje dziennik do control plane.
+// followJournal streams the journal to the control plane.
 func (e *TaskExecutor) followJournal(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.JournalPayload) *agentv1.TaskResult {
 	if payload == nil {
-		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "brak payloadu podgladu")
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "the preview payload is missing")
 	}
 	if e.logLines == nil {
-		// Bez odbiorcy podglad nie ma sensu i nie ma powodu uruchamiac
-		// procesu na hoscie.
+		// Without a receiver the preview makes no sense and there is no reason to
+		// start a process on the host.
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectUnsupported,
-			"agent nie ma otwartej sesji do przekazania podgladu")
+			"the agent has no open session to pass the preview through")
 	}
 
-	czas := time.Duration(payload.FollowSeconds) * time.Second
-	if czas <= 0 || czas > 15*time.Minute {
-		czas = domyslnyCzasPodgladu
+	duration := time.Duration(payload.FollowSeconds) * time.Second
+	if duration <= 0 || duration > 15*time.Minute {
+		duration = defaultPreviewTime
 	}
-	followCtx, cancel := context.WithTimeout(ctx, czas)
+	followCtx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
 
-	// Operator moze zamknac podglad wczesniej. Anulowanie odczytu niczego
-	// nie psuje, wiec tutaj jest wykonywane, a nie tylko odnotowane.
+	// The operator can close the preview earlier. Cancelling a read breaks
+	// nothing, so here it is carried out and not only recorded.
 	if e.cancels != nil {
-		defer e.cancels.zarejestruj(task.GetTaskId(), cancel)()
+		defer e.cancels.register(task.GetTaskId(), cancel)()
 	}
 
-	args := argumentyPodgladu(payload)
+	args := previewArguments(payload)
 	cmd := exec.CommandContext(followCtx, journalctlPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -106,141 +106,141 @@ func (e *TaskExecutor) followJournal(ctx context.Context, task *agentv1.TaskEnve
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
 	}
 
-	wyslane, pominiete := e.przekazujLinie(followCtx, task.GetTaskId(), stdout)
+	sent, dropped := e.forwardLines(followCtx, task.GetTaskId(), stdout)
 	_ = cmd.Wait()
 
-	// Koniec podgladu jest sukcesem: strumien mial sie skonczyc. Wynik mowi,
-	// ile linii przeszlo i ile pominieto, bo cicha strata kazalaby operatorowi
-	// wierzyc, ze widzial wszystko.
+	// The end of the preview is a success: the stream was meant to end. The
+	// result says how many lines went through and how many were dropped, because
+	// a silent loss would make the operator believe they saw everything.
 	return &agentv1.TaskResult{
 		TaskId:  task.GetTaskId(),
 		Status:  agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message: podsumowaniePodgladu(wyslane, pominiete),
+		Message: previewSummary(sent, dropped),
 	}
 }
 
-// przekazujLinie czyta wyjscie i wysyla je paczkami z ograniczonym tempem.
-func (e *TaskExecutor) przekazujLinie(ctx context.Context, taskID string,
-	wyjscie interface{ Read([]byte) (int, error) }) (wyslane, pominiete int) {
-	linie := make(chan string, 256)
+// forwardLines reads the output and sends it in batches at a limited rate.
+func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
+	output interface{ Read([]byte) (int, error) }) (sent, dropped int) {
+	lines := make(chan string, 256)
 	go func() {
-		defer close(linie)
-		skaner := bufio.NewScanner(wyjscie)
-		skaner.Buffer(make([]byte, 0, 16<<10), 256<<10)
-		for skaner.Scan() {
+		defer close(lines)
+		scanner := bufio.NewScanner(output)
+		scanner.Buffer(make([]byte, 0, 16<<10), 256<<10)
+		for scanner.Scan() {
 			select {
-			case linie <- skaner.Text():
+			case lines <- scanner.Text():
 			default:
-				// Kanal pelny oznacza, ze host produkuje szybciej, niz
-				// zdazymy wyslac. Linia przepada, ale liczba przepadnietych
-				// jedzie dalej.
-				pominiete++
+				// A full channel means the host produces faster than we manage
+				// to send. The line is lost, but the number of lost ones travels
+				// on.
+				dropped++
 			}
 		}
 	}()
 
-	budzet := nowyBudzetTempa(maksymalneTempoPodgladu)
-	tyknięcie := time.NewTicker(odstepPaczki)
-	defer tyknięcie.Stop()
+	rate := newRateBudget(maxPreviewRate)
+	ticker := time.NewTicker(batchInterval)
+	defer ticker.Stop()
 
-	paczka := make([]string, 0, 32)
-	rozmiar := 0
-	pominietePaczka := 0
+	batch := make([]string, 0, 32)
+	size := 0
+	droppedInBatch := 0
 
-	wyslij := func() {
-		if len(paczka) == 0 && pominietePaczka == 0 {
+	flush := func() {
+		if len(batch) == 0 && droppedInBatch == 0 {
 			return
 		}
 		e.logLines(&agentv1.TaskLogLines{
 			TaskId:  taskID,
-			Lines:   append([]string(nil), paczka...),
-			Dropped: uint32(pominietePaczka),
+			Lines:   append([]string(nil), batch...),
+			Dropped: uint32(droppedInBatch),
 		})
-		wyslane += len(paczka)
-		paczka = paczka[:0]
-		rozmiar = 0
-		pominietePaczka = 0
+		sent += len(batch)
+		batch = batch[:0]
+		size = 0
+		droppedInBatch = 0
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			wyslij()
-			return wyslane, pominiete + pominietePaczka
-		case <-tyknięcie.C:
-			wyslij()
-		case linia, otwarty := <-linie:
-			if !otwarty {
-				wyslij()
-				return wyslane, pominiete + pominietePaczka
+			flush()
+			return sent, dropped + droppedInBatch
+		case <-ticker.C:
+			flush()
+		case line, open := <-lines:
+			if !open {
+				flush()
+				return sent, dropped + droppedInBatch
 			}
-			if !budzet.pozwala(len(linia) + 1) {
-				pominiete++
-				pominietePaczka++
+			if !rate.allows(len(line) + 1) {
+				dropped++
+				droppedInBatch++
 				continue
 			}
-			paczka = append(paczka, linia)
-			rozmiar += len(linia) + 1
-			if rozmiar >= maksymalnaPaczka {
-				wyslij()
+			batch = append(batch, line)
+			size += len(line) + 1
+			if size >= maxBatch {
+				flush()
 			}
 		}
 	}
 }
 
-// budzetTempa ogranicza ilosc danych na sekunde.
-type budzetTempa struct {
-	naSekunde int
-	dostepne  int
-	ostatnie  time.Time
+// rateBudget limits the amount of data per second.
+type rateBudget struct {
+	perSecond int
+	available int
+	last      time.Time
 }
 
-func nowyBudzetTempa(naSekunde int) *budzetTempa {
-	return &budzetTempa{naSekunde: naSekunde, dostepne: naSekunde, ostatnie: time.Now()}
+func newRateBudget(perSecond int) *rateBudget {
+	return &rateBudget{perSecond: perSecond, available: perSecond, last: time.Now()}
 }
 
-func (b *budzetTempa) pozwala(bajtow int) bool {
-	teraz := time.Now()
-	uplynelo := teraz.Sub(b.ostatnie)
-	b.ostatnie = teraz
-	b.dostepne += int(float64(b.naSekunde) * uplynelo.Seconds())
-	if b.dostepne > b.naSekunde {
-		b.dostepne = b.naSekunde
+func (b *rateBudget) allows(bytes int) bool {
+	now := time.Now()
+	elapsed := now.Sub(b.last)
+	b.last = now
+	b.available += int(float64(b.perSecond) * elapsed.Seconds())
+	if b.available > b.perSecond {
+		b.available = b.perSecond
 	}
-	if b.dostepne < bajtow {
+	if b.available < bytes {
 		return false
 	}
-	b.dostepne -= bajtow
+	b.available -= bytes
 	return true
 }
 
-// argumentyPodgladu sklada wywolanie z pol typowanych, nigdy ze sklejonego
-// ciagu.
-func argumentyPodgladu(payload *opspec.JournalPayload) []string {
+// previewArguments assembles the invocation from typed fields, never from a
+// concatenated string.
+func previewArguments(payload *opspec.JournalPayload) []string {
 	args := []string{"--follow", "--no-pager", "--output=short-iso"}
 	backlog := payload.Lines
 	if backlog == 0 || backlog > 500 {
 		backlog = 50
 	}
-	args = append(args, "--lines", liczba(backlog))
+	args = append(args, "--lines", number(backlog))
 	if payload.Unit != "" {
 		args = append(args, "--unit", payload.Unit)
 	}
 	if payload.MaxPriority != nil {
-		args = append(args, "--priority", liczba(*payload.MaxPriority))
+		args = append(args, "--priority", number(*payload.MaxPriority))
 	}
 	return args
 }
 
-func podsumowaniePodgladu(wyslane, pominiete int) string {
-	if pominiete == 0 {
-		return "podglad zakonczony, linii: " + liczba(uint32(wyslane))
+func previewSummary(sent, dropped int) string {
+	if dropped == 0 {
+		return "the preview ended, lines: " + number(uint32(sent))
 	}
-	return "podglad zakonczony, linii: " + liczba(uint32(wyslane)) +
-		", pominietych przez limit tempa: " + liczba(uint32(pominiete))
+	return "the preview ended, lines: " + number(uint32(sent)) +
+		", dropped by the rate limit: " + number(uint32(dropped))
 }
 
-// liczba zamienia licznik na tekst argumentu.
-func liczba(wartosc uint32) string {
-	return strconv.FormatUint(uint64(wartosc), 10)
+// number turns a counter into the text of an argument.
+func number(value uint32) string {
+	return strconv.FormatUint(uint64(value), 10)
 }

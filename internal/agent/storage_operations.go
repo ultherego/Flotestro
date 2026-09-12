@@ -13,7 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// ProbeLVM odczytuje grupy i wolumeny LVM przez helpera.
+// ProbeLVM reads the LVM groups and volumes through the helper.
 func (e *TaskExecutor) ProbeLVM(ctx context.Context) (storage.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
@@ -26,60 +26,61 @@ func (e *TaskExecutor) ProbeLVM(ctx context.Context) (storage.Snapshot, error) {
 	if err != nil {
 		return storage.Snapshot{}, err
 	}
-	return dekodujPrzestrzen(response.GetStorageResult().GetSnapshot())
+	return decodeStorage(response.GetStorageResult().GetSnapshot())
 }
 
-// applyStorage wykonuje operacje modulu przestrzeni dyskowej.
+// applyStorage performs the operations of the disk space module.
 func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.StoragePayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, action)
 
-	// Odczyt topologii nie wymaga roota poza czescia LVM, wiec sklada go
-	// agent: kazde przejscie przez roota trzeba uzasadnic. Plan z celem jest
-	// czym innym: liczy roznice dla jednego montowania i rozwiazuje zrodlo
-	// do UUID - to robi helper, bo to on potem montuje.
+	// Reading the topology needs no root beyond the LVM part, so it is assembled
+	// by the agent: every trip through root has to be justified. A plan with a
+	// target is something else: it computes the difference for one mount and
+	// resolves the source to a UUID - that is done by the helper, because it is
+	// the one that mounts afterwards.
 	if action == opspec.ActionStoragePlan && (payload == nil ||
 		(strings.TrimSpace(payload.Target) == "" && payload.Plan == "")) {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		snapshot := ZbierzPrzestrzen(callCtx)
-		zakodowane, err := json.Marshal(snapshot)
+		snapshot := CollectStorage(callCtx)
+		encoded, err := json.Marshal(snapshot)
 		if err != nil {
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
 		}
 		return &agentv1.TaskResult{
 			TaskId:  task.GetTaskId(),
 			Status:  agentv1.TaskResult_STATUS_SUCCEEDED,
-			Message: podsumowaniePrzestrzeni(snapshot),
+			Message: storageSummary(snapshot),
 			StorageResult: &agentv1.StorageResult{
-				Snapshot: zakodowane,
+				Snapshot: encoded,
 			},
 		}
 	}
 
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu przestrzeni dyskowej")
+			"the disk space payload is missing")
 	}
-	operacja := helperv1.StorageRequest_OPERATION_MOUNT_ENSURE
+	operation := helperv1.StorageRequest_OPERATION_MOUNT_ENSURE
 	switch action {
 	case opspec.ActionStoragePlan:
-		operacja = helperv1.StorageRequest_OPERATION_MOUNT_PLAN
+		operation = helperv1.StorageRequest_OPERATION_MOUNT_PLAN
 		if payload.Plan != "" {
-			operacja = helperv1.StorageRequest_OPERATION_DEVICE_PLAN
+			operation = helperv1.StorageRequest_OPERATION_DEVICE_PLAN
 		}
 	case opspec.ActionMountRemove:
-		operacja = helperv1.StorageRequest_OPERATION_MOUNT_REMOVE
+		operation = helperv1.StorageRequest_OPERATION_MOUNT_REMOVE
 	case opspec.ActionFilesystemCheck:
-		operacja = helperv1.StorageRequest_OPERATION_FS_CHECK
+		operation = helperv1.StorageRequest_OPERATION_FS_CHECK
 	case opspec.ActionLVMExtend:
-		operacja = helperv1.StorageRequest_OPERATION_LVM_EXTEND
+		operation = helperv1.StorageRequest_OPERATION_LVM_EXTEND
 	case opspec.ActionFilesystemResize:
-		operacja = helperv1.StorageRequest_OPERATION_FS_RESIZE
+		operation = helperv1.StorageRequest_OPERATION_FS_RESIZE
 	case opspec.ActionFilesystemCreate:
-		operacja = helperv1.StorageRequest_OPERATION_FS_CREATE
+		operation = helperv1.StorageRequest_OPERATION_FS_CREATE
 	case opspec.ActionDiskWipe:
-		operacja = helperv1.StorageRequest_OPERATION_DISK_WIPE
+		operation = helperv1.StorageRequest_OPERATION_DISK_WIPE
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
@@ -90,7 +91,7 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_Storage{
 			Storage: &helperv1.StorageRequest{
-				Operation:         operacja,
+				Operation:         operation,
 				Source:            payload.Source,
 				Target:            payload.Target,
 				FsType:            payload.FSType,
@@ -112,54 +113,55 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetStorageResult()
-	szczegoly := &agentv1.StorageResult{
-		Snapshot: wynik.GetSnapshot(),
-		Message:  wynik.GetMessage(),
-		Output:   wynik.GetOutput(),
-		Plan:     wynik.GetPlan(),
+	result := response.GetStorageResult()
+	details := &agentv1.StorageResult{
+		Snapshot: result.GetSnapshot(),
+		Message:  result.GetMessage(),
+		Output:   result.GetOutput(),
+		Plan:     result.GetPlan(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.StorageResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.StorageResult = details
+		return refused
 	}
 
-	// Po zmianie odsylamy pelny obraz przestrzeni: zakladka ma pokazac stan
-	// po operacji, a nie ten sprzed cyklu inwentarza.
-	snapshot := ZbierzPrzestrzen(ctx)
-	if zakodowane, err := json.Marshal(snapshot); err == nil {
-		szczegoly.Snapshot = zakodowane
+	// After the change the full picture of the space is sent back: the tab is to
+	// show the state after the operation and not the one from before the
+	// inventory cycle.
+	snapshot := CollectStorage(ctx)
+	if encoded, err := json.Marshal(snapshot); err == nil {
+		details.Snapshot = encoded
 	}
 	return &agentv1.TaskResult{
 		TaskId:        task.GetTaskId(),
 		Status:        agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:       wynik.GetMessage(),
-		StorageResult: szczegoly,
+		Message:       result.GetMessage(),
+		StorageResult: details,
 	}
 }
 
-func dekodujPrzestrzen(dane []byte) (storage.Snapshot, error) {
+func decodeStorage(data []byte) (storage.Snapshot, error) {
 	var snapshot storage.Snapshot
-	if len(dane) == 0 {
+	if len(data) == 0 {
 		return snapshot, nil
 	}
-	if err := json.Unmarshal(dane, &snapshot); err != nil {
+	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return storage.Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// podsumowaniePrzestrzeni opisuje wynik odczytu jednym zdaniem.
-func podsumowaniePrzestrzeni(snapshot storage.Snapshot) string {
-	zamontowane := 0
-	for _, montowanie := range snapshot.Mounts {
-		if montowanie.Mounted {
-			zamontowane++
+// storageSummary describes the result of the read in one sentence.
+func storageSummary(snapshot storage.Snapshot) string {
+	mounted := 0
+	for _, mount := range snapshot.Mounts {
+		if mount.Mounted {
+			mounted++
 		}
 	}
 	return "urzadzen: " + strconv.Itoa(len(snapshot.Devices)) +
-		", zamontowanych filesystemow: " + strconv.Itoa(zamontowane)
+		", zamontowanych filesystemow: " + strconv.Itoa(mounted)
 }

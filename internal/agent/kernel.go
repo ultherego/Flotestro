@@ -11,7 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// kernelProbe czyta ustawienia jadra przez helpera.
+// kernelProbe reads the kernel settings through the helper.
 var kernelProbe func(context.Context) (kernel.Snapshot, error)
 
 // SetKernelProbe wskazuje funkcje odczytujaca ustawienia jadra.
@@ -19,7 +19,7 @@ func SetKernelProbe(probe func(context.Context) (kernel.Snapshot, error)) {
 	kernelProbe = probe
 }
 
-// ProbeKernel odczytuje ustawienia jadra hosta.
+// ProbeKernel reads the kernel settings of the host.
 func (e *TaskExecutor) ProbeKernel(ctx context.Context) (kernel.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
@@ -31,72 +31,72 @@ func (e *TaskExecutor) ProbeKernel(ctx context.Context) (kernel.Snapshot, error)
 		return kernel.Snapshot{}, err
 	}
 	var snapshot kernel.Snapshot
-	dane := response.GetKernelResult().GetSnapshot()
-	if len(dane) == 0 {
+	data := response.GetKernelResult().GetSnapshot()
+	if len(data) == 0 {
 		return snapshot, nil
 	}
-	if err := json.Unmarshal(dane, &snapshot); err != nil {
+	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// applyKernel wykonuje operacje modulu jadra.
+// applyKernel performs the operations of the kernel module.
 func (e *TaskExecutor) applyKernel(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.KernelPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
 	defer cancel()
 
-	operacja := helperv1.KernelRequest_OPERATION_READ
+	operation := helperv1.KernelRequest_OPERATION_READ
 	switch action {
 	case opspec.ActionSysctlEnsure:
-		operacja = helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE
+		operation = helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE
 	case opspec.ActionKernelModuleLoad:
-		operacja = helperv1.KernelRequest_OPERATION_MODULE_LOAD
+		operation = helperv1.KernelRequest_OPERATION_MODULE_LOAD
 	case opspec.ActionKernelModuleBlacklist:
-		operacja = helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST
+		operation = helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST
 	case opspec.ActionKernelModulePlan:
-		operacja = helperv1.KernelRequest_OPERATION_MODULE_PLAN
+		operation = helperv1.KernelRequest_OPERATION_MODULE_PLAN
 	}
-	zadanie := &helperv1.KernelRequest{Operation: operacja}
+	request := &helperv1.KernelRequest{Operation: operation}
 	if payload != nil {
-		zadanie.Settings = payload.Settings
-		zadanie.Keys = payload.Keys
-		zadanie.Module = payload.Module
-		zadanie.Blacklist = payload.Blacklist
-		zadanie.PlanHash = payload.PlanHash
+		request.Settings = payload.Settings
+		request.Keys = payload.Keys
+		request.Module = payload.Module
+		request.Blacklist = payload.Blacklist
+		request.PlanHash = payload.PlanHash
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
-		Action:         &helperv1.HelperRequest_Kernel{Kernel: zadanie},
+		Action:         &helperv1.HelperRequest_Kernel{Kernel: request},
 	}, timeout)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetKernelResult()
-	szczegoly := &agentv1.KernelResult{
-		Snapshot:       wynik.GetSnapshot(),
-		Message:        wynik.GetMessage(),
-		PendingReboot:  wynik.GetPendingReboot(),
-		AppliedRuntime: wynik.GetAppliedRuntime(),
-		Plan:           wynik.GetPlan(),
+	result := response.GetKernelResult()
+	details := &agentv1.KernelResult{
+		Snapshot:       result.GetSnapshot(),
+		Message:        result.GetMessage(),
+		PendingReboot:  result.GetPendingReboot(),
+		AppliedRuntime: result.GetAppliedRuntime(),
+		Plan:           result.GetPlan(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.KernelResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.KernelResult = details
+		return refused
 	}
 	return &agentv1.TaskResult{
 		TaskId:       task.GetTaskId(),
 		Status:       agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:      wynik.GetMessage(),
-		KernelResult: szczegoly,
+		Message:      result.GetMessage(),
+		KernelResult: details,
 	}
 }

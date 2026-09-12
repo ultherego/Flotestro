@@ -11,16 +11,16 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// scheduleProbe czyta harmonogramy hosta przez helpera. Katalog /etc/cron.d
-// nalezy do roota, wiec agent nie odczyta go samodzielnie.
+// scheduleProbe reads the schedules of the host through the helper. The
+// /etc/cron.d directory belongs to root, so the agent cannot read it itself.
 var scheduleProbe func(context.Context) (schedules.Snapshot, error)
 
-// SetScheduleProbe wskazuje funkcje odczytujaca harmonogramy.
+// SetScheduleProbe points at the function that reads the schedules.
 func SetScheduleProbe(probe func(context.Context) (schedules.Snapshot, error)) {
 	scheduleProbe = probe
 }
 
-// ProbeSchedules odczytuje harmonogramy hosta.
+// ProbeSchedules reads the schedules of the host.
 func (e *TaskExecutor) ProbeSchedules(ctx context.Context) (schedules.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
@@ -41,20 +41,20 @@ func (e *TaskExecutor) applySchedule(ctx context.Context, task *agentv1.TaskEnve
 	action opspec.ActionType, payload *opspec.SchedulePayload) *agentv1.TaskResult {
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu harmonogramu")
+			"the schedule payload is missing")
 	}
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
 	defer cancel()
 
-	operacja := helperv1.ScheduleRequest_OPERATION_ENSURE
+	operation := helperv1.ScheduleRequest_OPERATION_ENSURE
 	switch action {
 	case opspec.ActionScheduleDisable:
-		operacja = helperv1.ScheduleRequest_OPERATION_DISABLE
+		operation = helperv1.ScheduleRequest_OPERATION_DISABLE
 	case opspec.ActionScheduleRemove:
-		operacja = helperv1.ScheduleRequest_OPERATION_REMOVE
+		operation = helperv1.ScheduleRequest_OPERATION_REMOVE
 	case opspec.ActionScheduleRunNow:
-		operacja = helperv1.ScheduleRequest_OPERATION_RUN_NOW
+		operation = helperv1.ScheduleRequest_OPERATION_RUN_NOW
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -63,7 +63,7 @@ func (e *TaskExecutor) applySchedule(ctx context.Context, task *agentv1.TaskEnve
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_Schedule{
 			Schedule: &helperv1.ScheduleRequest{
-				Operation:  operacja,
+				Operation:  operation,
 				Id:         payload.ID,
 				Expression: payload.Expression,
 				Command:    payload.Command,
@@ -78,32 +78,32 @@ func (e *TaskExecutor) applySchedule(ctx context.Context, task *agentv1.TaskEnve
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetScheduleResult()
-	szczegoly := &agentv1.ScheduleResult{
-		Snapshot: wynik.GetSnapshot(),
-		Message:  wynik.GetMessage(),
+	result := response.GetScheduleResult()
+	details := &agentv1.ScheduleResult{
+		Snapshot: result.GetSnapshot(),
+		Message:  result.GetMessage(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.ScheduleResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.ScheduleResult = details
+		return refused
 	}
 	return &agentv1.TaskResult{
 		TaskId:         task.GetTaskId(),
 		Status:         agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:        wynik.GetMessage(),
-		ScheduleResult: szczegoly,
+		Message:        result.GetMessage(),
+		ScheduleResult: details,
 	}
 }
 
-func dekodujHarmonogramy(wynik *helperv1.ScheduleResult) (schedules.Snapshot, error) {
-	if wynik == nil || len(wynik.GetSnapshot()) == 0 {
+func dekodujHarmonogramy(result *helperv1.ScheduleResult) (schedules.Snapshot, error) {
+	if result == nil || len(result.GetSnapshot()) == 0 {
 		return schedules.Snapshot{}, nil
 	}
 	var snapshot schedules.Snapshot
-	if err := json.Unmarshal(wynik.GetSnapshot(), &snapshot); err != nil {
+	if err := json.Unmarshal(result.GetSnapshot(), &snapshot); err != nil {
 		return schedules.Snapshot{}, err
 	}
 	return snapshot, nil

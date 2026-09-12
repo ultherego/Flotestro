@@ -9,58 +9,60 @@ import (
 	"time"
 )
 
-func TestRunCommandOdrozniaWynikOdBleduWykonania(t *testing.T) {
+func TestRunCommandTellsAResultFromAnExecutionError(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("proces zakonczony sukcesem", func(t *testing.T) {
+	t.Run("a process that finished successfully", func(t *testing.T) {
 		result := runCommand(ctx, 5*time.Second, "/bin/true")
 		if !result.Ran || result.ExitCode != 0 {
-			t.Fatalf("Ran=%v ExitCode=%d, oczekiwano true/0", result.Ran, result.ExitCode)
+			t.Fatalf("Ran=%v ExitCode=%d, expected true/0", result.Ran, result.ExitCode)
 		}
 	})
 
-	t.Run("proces zwrocil kod bledu", func(t *testing.T) {
-		// Niezerowy kod z dzialajacego procesu jest wynikiem, nie awaria.
+	t.Run("a process that returned an error code", func(t *testing.T) {
+		// A non-zero code from a process that ran is a result, not a failure.
 		result := runCommand(ctx, 5*time.Second, "/bin/false")
 		if !result.Ran {
-			t.Fatal("proces sie wykonal, a Ran=false")
+			t.Fatal("the process ran and Ran=false")
 		}
 		if result.ExitCode != 1 {
-			t.Fatalf("ExitCode=%d, oczekiwano 1", result.ExitCode)
+			t.Fatalf("ExitCode=%d, expected 1", result.ExitCode)
 		}
 	})
 
-	t.Run("brak binarki", func(t *testing.T) {
-		result := runCommand(ctx, 5*time.Second, "/nie/ma/takiego/programu")
+	t.Run("a missing binary", func(t *testing.T) {
+		result := runCommand(ctx, 5*time.Second, "/there/is/no/such/program")
 		if result.Ran {
-			t.Fatal("nieistniejacy program zostal uznany za wykonany")
+			t.Fatal("a program that does not exist was taken for one that ran")
 		}
 		if result.Err == nil {
-			t.Fatal("brak bledu dla nieistniejacego programu")
+			t.Fatal("no error for a program that does not exist")
 		}
 	})
 
-	t.Run("przekroczony timeout", func(t *testing.T) {
-		// Timeout nie jest wynikiem merytorycznym, choc proces zwroci kod.
+	t.Run("an exceeded timeout", func(t *testing.T) {
+		// A timeout is not a substantive result, even though the process returns
+		// a code.
 		result := runCommand(ctx, 100*time.Millisecond, "/bin/sleep", "5")
 		if result.Ran {
-			t.Fatal("przerwany timeoutem proces zostal uznany za wykonany")
+			t.Fatal("a process interrupted by the timeout was taken for one that ran")
 		}
 	})
 }
 
-func TestRunCommandUstawiaZapisywalneHome(t *testing.T) {
+func TestRunCommandSetsAWritableHome(t *testing.T) {
 	dir := t.TempDir()
 	if err := SetRuntimeDir(dir); err != nil {
-		t.Fatalf("katalog roboczy: %v", err)
+		t.Fatalf("the working directory: %v", err)
 	}
 	t.Cleanup(func() { runtimeDir = os.TempDir() })
 
-	// Narzedzia takie jak dnf tworza pliki w HOME i XDG. Agent nie ma katalogu
-	// domowego, wiec brak tych zmiennych konczyl sie bledem branym za wynik.
+	// Tools such as dnf create files in HOME and XDG. The agent has no home
+	// directory, so the absence of those variables used to end in an error taken
+	// for a result.
 	result := runCommand(context.Background(), 5*time.Second, "/usr/bin/env")
 	if !result.Ran {
-		t.Skip("brak /usr/bin/env")
+		t.Skip("/usr/bin/env is missing")
 	}
 	for _, want := range []string{
 		"HOME=" + dir,
@@ -68,12 +70,12 @@ func TestRunCommandUstawiaZapisywalneHome(t *testing.T) {
 		"XDG_CACHE_HOME=" + filepath.Join(dir, "cache"),
 	} {
 		if !strings.Contains(result.Stdout, want) {
-			t.Errorf("brak %s w srodowisku procesu", want)
+			t.Errorf("%s is missing from the environment of the process", want)
 		}
 	}
 	for _, sub := range []string{"state", "cache", "config"} {
 		if info, err := os.Stat(filepath.Join(dir, sub)); err != nil || !info.IsDir() {
-			t.Errorf("nie utworzono katalogu %s", sub)
+			t.Errorf("the directory %s was not created", sub)
 		}
 	}
 }
@@ -85,20 +87,20 @@ func TestInterpretNeedsRestarting(t *testing.T) {
 		want   *bool
 	}{
 		{
-			name:   "kod 0 oznacza brak potrzeby restartu",
+			name:   "code 0 means no restart is needed",
 			result: commandResult{Ran: true, ExitCode: 0, Stdout: "Reboot should not be necessary.\n"},
 			want:   boolPtr(false),
 		},
 		{
-			name:   "kod 1 z odpowiedzia oznacza wymagany restart",
+			name:   "code 1 with an answer means a restart is required",
 			result: commandResult{Ran: true, ExitCode: 1, Stdout: "Core libraries or services have been updated.\n"},
 			want:   boolPtr(true),
 		},
 		{
-			// To jest regresja: dnf bez zapisywalnego HOME konczy sie kodem 1
-			// i milczy na stdout. Wczesniej bylo to raportowane jako
-			// "wymagany restart" na kazdym hoscie Fedory.
-			name: "kod 1 bez odpowiedzi to blad, nie wynik",
+			// This is a regression: dnf without a writable HOME ends with code 1
+			// and stays silent on stdout. That used to be reported as "a restart
+			// is required" on every Fedora host.
+			name: "code 1 without an answer is an error, not a result",
 			result: commandResult{
 				Ran: true, ExitCode: 1, Stdout: "",
 				Stderr: "filesystem error: cannot create directories: Permission denied",
@@ -106,13 +108,13 @@ func TestInterpretNeedsRestarting(t *testing.T) {
 			want: nil,
 		},
 		{
-			name:   "proces sie nie wykonal",
+			name:   "the process did not run",
 			result: commandResult{Ran: false, ExitCode: -1},
 			want:   nil,
 		},
 		{
-			name:   "nieznany kod wyjscia",
-			result: commandResult{Ran: true, ExitCode: 127, Stdout: "cos"},
+			name:   "an unknown exit code",
+			result: commandResult{Ran: true, ExitCode: 127, Stdout: "something"},
 			want:   nil,
 		},
 	}
@@ -122,29 +124,29 @@ func TestInterpretNeedsRestarting(t *testing.T) {
 			got := interpretNeedsRestarting(tc.result)
 			switch {
 			case tc.want == nil && got != nil:
-				t.Fatalf("oczekiwano stanu nieustalonego, otrzymano %v", *got)
+				t.Fatalf("an undetermined state was expected, got %v", *got)
 			case tc.want != nil && got == nil:
-				t.Fatalf("oczekiwano %v, otrzymano stan nieustalony", *tc.want)
+				t.Fatalf("%v was expected, got an undetermined state", *tc.want)
 			case tc.want != nil && *got != *tc.want:
-				t.Fatalf("otrzymano %v, oczekiwano %v", *got, *tc.want)
+				t.Fatalf("got %v, expected %v", *got, *tc.want)
 			}
 		})
 	}
 }
 
-func TestCommandResultReasonOpisujeBlad(t *testing.T) {
+func TestCommandResultReasonDescribesTheError(t *testing.T) {
 	result := commandResult{
 		Ran: true, ExitCode: 1,
-		Stderr: "filesystem error: cannot create directories: Permission denied\ndalsza linia",
+		Stderr: "filesystem error: cannot create directories: Permission denied\na further line",
 	}
 	reason := result.Reason()
-	if !strings.Contains(reason, "kod 1") {
-		t.Errorf("powod nie zawiera kodu wyjscia: %q", reason)
+	if !strings.Contains(reason, "code 1") {
+		t.Errorf("the reason does not contain the exit code: %q", reason)
 	}
 	if !strings.Contains(reason, "Permission denied") {
-		t.Errorf("powod nie zawiera tresci bledu: %q", reason)
+		t.Errorf("the reason does not contain the content of the error: %q", reason)
 	}
-	if strings.Contains(reason, "dalsza linia") {
-		t.Errorf("powod powinien byc jednolinijkowy: %q", reason)
+	if strings.Contains(reason, "a further line") {
+		t.Errorf("the reason should be a single line: %q", reason)
 	}
 }

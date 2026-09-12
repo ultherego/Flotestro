@@ -47,8 +47,8 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 	// An identity that already works must not be replaced in passing.
 	// Replacing an existing identity is a separate decision and goes through
 	// a recovery request in the panel.
-	state := agent.OdczytajTozsamosc(cfg.Agent.StateDir)
-	if state.Obecna && !state.Wygasl {
+	state := agent.ReadIdentity(cfg.Agent.StateDir)
+	if state.Present && !state.Expired {
 		fmt.Fprintf(errOut, "the host is already registered as host/%s (the certificate is valid until %s)\n",
 			state.HostID, state.NotAfter.UTC().Format(time.RFC3339))
 		fmt.Fprintln(errOut, "a replacement of the identity is requested in the panel: POST /hosts/{id}/identity-recovery")

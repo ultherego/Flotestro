@@ -11,15 +11,15 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// listProcesses czyta procesy hosta.
+// listProcesses reads the processes of the host.
 //
-// Odczyt idzie wprost z /proc i nie wymaga roota: panel pokazuje to, co widzi
-// kazdy uzytkownik hosta. Dopiero wyslanie sygnalu wymaga uprawnien.
+// The read goes straight from /proc and needs no root: the panel shows what
+// every user of the host sees. Only sending a signal needs privileges.
 func (e *TaskExecutor) listProcesses(_ context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.ProcessListPayload) *agentv1.TaskResult {
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu listy procesow")
+			"the process list payload is missing")
 	}
 	snapshot := processes.Collect("/proc", payload.SortBy, int(payload.Limit))
 	encoded, err := json.Marshal(snapshot)
@@ -33,12 +33,12 @@ func (e *TaskExecutor) listProcesses(_ context.Context, task *agentv1.TaskEnvelo
 	}
 }
 
-// signalProcess wysyla sygnal przez helpera.
+// signalProcess sends a signal through the helper.
 func (e *TaskExecutor) signalProcess(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.ProcessSignalPayload) *agentv1.TaskResult {
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu sygnalu")
+			"the signal payload is missing")
 	}
 	timeout := timeoutOf(task, opspec.ActionProcessSignal)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+15*time.Second)
@@ -60,13 +60,13 @@ func (e *TaskExecutor) signalProcess(ctx context.Context, task *agentv1.TaskEnve
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 	if !response.GetAccepted() {
-		wynik := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		result := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		wynik.TaskId = task.GetTaskId()
-		return wynik
+		result.TaskId = task.GetTaskId()
+		return result
 	}
-	// Polecenie zapisane w chwili wyslania: audyt ma pokazac, co zostalo
-	// ubite, a nie sam numer, ktory zaraz przestanie cokolwiek znaczyc.
+	// The command recorded at the moment of sending: the audit is to show what
+	// was killed, not just a number that stops meaning anything a moment later.
 	return &agentv1.TaskResult{
 		TaskId: task.GetTaskId(),
 		Status: agentv1.TaskResult_STATUS_SUCCEEDED,

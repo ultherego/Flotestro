@@ -5,55 +5,57 @@ import (
 	"time"
 )
 
-// TestProgOdnowienia pilnuje zapasu na awarie centrali. Odnowienie ma sie
-// zaczac na dlugo przed wygasnieciem, a nie w ostatniej godzinie: agent bez
-// waznego certyfikatu nie ma jak wrocic do floty, bo tokenu enrollmentu juz
-// na hoscie nie ma.
-func TestProgOdnowienia(t *testing.T) {
-	teraz := time.Now()
-	wydany := teraz.Add(-20 * 24 * time.Hour)
-	wygasa := teraz.Add(10 * 24 * time.Hour)
+// TestTheRenewalThreshold guards the margin for a failure of the centre. The
+// renewal is to start long before the expiry and not in the last hour: an agent
+// without a valid certificate has no way back into the fleet, because the
+// enrollment token is no longer on the host.
+func TestTheRenewalThreshold(t *testing.T) {
+	now := time.Now()
+	issued := now.Add(-20 * 24 * time.Hour)
+	expires := now.Add(10 * 24 * time.Hour)
 
-	// Swiezy certyfikat: dwie trzecie okresu jeszcze przed nami.
-	if needsRenewal(teraz.Add(25*24*time.Hour), teraz.Add(-5*24*time.Hour)) {
-		t.Error("swiezy certyfikat nie wymaga odnowienia")
+	// A fresh certificate: two thirds of the period still ahead.
+	if needsRenewal(now.Add(25*24*time.Hour), now.Add(-5*24*time.Hour)) {
+		t.Error("a fresh certificate needs no renewal")
 	}
-	// Zostala mniej niz jedna trzecia okresu.
-	if !needsRenewal(wygasa, wydany.Add(-10*24*time.Hour)) {
-		t.Error("certyfikat po dwoch trzecich okresu wymaga odnowienia")
+	// Less than a third of the period is left.
+	if !needsRenewal(expires, issued.Add(-10*24*time.Hour)) {
+		t.Error("a certificate past two thirds of its period needs a renewal")
 	}
-	// Certyfikat juz wygasly tym bardziej.
-	if !needsRenewal(teraz.Add(-time.Hour), wydany) {
-		t.Error("wygasly certyfikat wymaga odnowienia")
+	// An already expired certificate all the more so.
+	if !needsRenewal(now.Add(-time.Hour), issued) {
+		t.Error("an expired certificate needs a renewal")
 	}
-	// Nieznany termin nie moze znaczyc "jeszcze dlugo".
+	// An unknown deadline must not mean "there is still plenty of time".
 	if !needsRenewal(time.Time{}, time.Time{}) {
-		t.Error("nieustalony termin wymaga proby odnowienia")
+		t.Error("an undetermined deadline needs an attempt to renew")
 	}
 }
 
-// TestOdstepSprawdzaniaSkaluje sie do dlugosci zycia certyfikatu: staly odstep
-// bylby bezuzyteczny przy krotkim terminie i niepotrzebnie czesty przy dlugim.
-func TestOdstepSprawdzaniaSkaluje(t *testing.T) {
-	teraz := time.Now()
+// TestTheCheckIntervalScales with the lifetime of the certificate: a fixed
+// interval would be useless with a short deadline and needlessly frequent with
+// a long one.
+func TestTheCheckIntervalScales(t *testing.T) {
+	now := time.Now()
 
-	dlugi := checkInterval(teraz.Add(365*24*time.Hour), teraz)
-	if dlugi != maxRenewalCheckInterval {
-		t.Errorf("dla certyfikatu rocznego odstep = %s, oczekiwano %s", dlugi, maxRenewalCheckInterval)
+	long := checkInterval(now.Add(365*24*time.Hour), now)
+	if long != maxRenewalCheckInterval {
+		t.Errorf("for a one-year certificate the interval = %s, expected %s", long, maxRenewalCheckInterval)
 	}
 
-	krotki := checkInterval(teraz.Add(20*time.Minute), teraz)
-	if krotki != minRenewalCheckInterval {
-		t.Errorf("dla certyfikatu 20-minutowego odstep = %s, oczekiwano %s", krotki, minRenewalCheckInterval)
+	short := checkInterval(now.Add(20*time.Minute), now)
+	if short != minRenewalCheckInterval {
+		t.Errorf("for a 20-minute certificate the interval = %s, expected %s", short, minRenewalCheckInterval)
 	}
 
-	sredni := checkInterval(teraz.Add(24*time.Hour), teraz)
-	if sredni != 24*time.Hour/20 {
-		t.Errorf("dla certyfikatu dobowego odstep = %s", sredni)
+	medium := checkInterval(now.Add(24*time.Hour), now)
+	if medium != 24*time.Hour/20 {
+		t.Errorf("for a one-day certificate the interval = %s", medium)
 	}
 
-	// Termin sprzed chwili nie moze dac odstepu zerowego i petli odpytywania.
-	if zerowy := checkInterval(teraz, teraz); zerowy < minRenewalCheckInterval {
-		t.Errorf("odstep %s grozi odpytywaniem w petli", zerowy)
+	// A deadline from a moment ago must not give a zero interval and a polling
+	// loop.
+	if zero := checkInterval(now, now); zero < minRenewalCheckInterval {
+		t.Errorf("the interval %s risks polling in a loop", zero)
 	}
 }

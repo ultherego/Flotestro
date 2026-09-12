@@ -1,5 +1,5 @@
-// Package agent zawiera logike agenta hosta: zbieranie faktow, enrollment
-// i obsluge sesji z control plane.
+// Package agent holds the logic of the host agent: collecting facts, enrollment
+// and handling the session with the control plane.
 package agent
 
 import (
@@ -36,10 +36,11 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// SchemaVersion opisuje wersje formatu raportu inventory zapisywanego w JSONB.
+// SchemaVersion describes the version of the format of the inventory report
+// stored in JSONB.
 const SchemaVersion = "1"
 
-// OSInfo opisuje system operacyjny hosta.
+// OSInfo describes the operating system of the host.
 type OSInfo struct {
 	Family       string `json:"family"`
 	Distribution string `json:"distribution"`
@@ -47,13 +48,13 @@ type OSInfo struct {
 	Kernel       string `json:"kernel"`
 	Architecture string `json:"architecture"`
 	PrettyName   string `json:"pretty_name"`
-	// Codename jest nazwa wydania (bookworm, trixie, noble). Trackery
-	// bezpieczenstwa Debiana i Ubuntu mowia wlasnie nia, a nie numerem -
-	// bez niej nie da sie powiedziec, ktore ustalenia dotycza tego hosta.
+	// Codename is the name of the release (bookworm, trixie, noble). The
+	// security trackers of Debian and Ubuntu speak in it and not in numbers -
+	// without it there is no telling which findings concern this host.
 	Codename string `json:"codename,omitempty"`
 }
 
-// Hardware opisuje zasoby hosta.
+// Hardware describes the resources of the host.
 type Hardware struct {
 	CPUCores       uint32 `json:"cpu_cores"`
 	MemoryBytes    uint64 `json:"memory_bytes"`
@@ -62,25 +63,25 @@ type Hardware struct {
 	Virtualization string `json:"virtualization"`
 }
 
-// Packages podsumowuje stan pakietow. Puste liczniki oznaczaja stan
-// nieustalony, nie zero: nieudany odczyt nie jest faktem o hoscie.
+// Packages sums up the state of the packages. Empty counters mean a state that
+// was not determined, not zero: a failed read is not a fact about the host.
 type Packages struct {
 	Manager            string  `json:"manager"`
 	Installed          *uint32 `json:"installed,omitempty"`
 	Upgradable         *uint32 `json:"upgradable,omitempty"`
 	SecurityUpgradable *uint32 `json:"security_upgradable,omitempty"`
-	// InstalledDigest i InstalledCount opisuja pelna liste pakietow, ktorej
-	// inwentarz nie niesie: panel porownuje odcisk ze swoja kopia i wie,
-	// kiedy jego lista przestala opisywac host. Bez tego brak wiersza
-	// w bazie panelu wygladalby jak host bez podatnosci.
+	// InstalledDigest and InstalledCount describe the full package list the
+	// inventory does not carry: the panel compares the digest with its own copy
+	// and knows when its list stopped describing the host. Without it a missing
+	// row in the panel database would look like a host without vulnerabilities.
 	InstalledDigest   string  `json:"installed_digest,omitempty"`
 	InstalledCount    *uint32 `json:"installed_count,omitempty"`
 	InstalledReason   string  `json:"installed_unavailable_reason,omitempty"`
 	UnavailableReason string  `json:"unavailable_reason,omitempty"`
 }
 
-// Health to sygnaly wysylane w heartbeacie. Wskazniki puste oznaczaja stan
-// nieustalony i nie sa wysylane do control plane.
+// Health holds the signals sent in the heartbeat. Empty indicators mean a state
+// that was not determined and are not sent to the control plane.
 type Health struct {
 	FailedUnits            *uint32
 	RebootRequired         *bool
@@ -91,7 +92,7 @@ type Health struct {
 	PendingSecurityUpdates *uint32
 }
 
-// Facts to pelny raport inventory hosta.
+// Facts is the full inventory report of the host.
 type Facts struct {
 	Hostname  string   `json:"hostname"`
 	MachineID string   `json:"machine_id"`
@@ -99,64 +100,68 @@ type Facts struct {
 	OS        OSInfo   `json:"os"`
 	Hardware  Hardware `json:"hardware"`
 	Packages  Packages `json:"packages"`
-	// Repositories jest lista zrodel pakietow. Pusta lista i lista
-	// nieodczytana to dwie rozne odpowiedzi, wiec obraz niesie swoj wlasny
-	// znacznik i powod.
+	// Repositories is the list of the package sources. An empty list and a list
+	// that was not read are two different answers, so the picture carries its own
+	// marker and reason.
 	Repositories *packages.RepositoryImage `json:"repositories,omitempty"`
 	Capabilities Capabilities              `json:"capabilities"`
 	FailedUnits  []string                  `json:"failed_units"`
-	// Puste pola oznaczaja, ze stanu nie udalo sie ustalic.
+	// Empty fields mean the state could not be determined.
 	FailedUnitsKnown bool           `json:"failed_units_known"`
 	RebootRequired   *bool          `json:"reboot_required,omitempty"`
 	Identity         IdentityState  `json:"identity"`
 	LocalAccounts    []LocalAccount `json:"local_accounts,omitempty"`
 	Interfaces       []string       `json:"network_interfaces"`
-	// Containers jest podsumowaniem silnika kontenerow. Puste oznacza host
-	// bez silnika albo silnik nieodpytany - rozroznia je unavailable_reason.
+	// Containers is the summary of the container engine. Empty means a host
+	// without an engine or an engine that was not queried - unavailable_reason
+	// tells them apart.
 	Containers *docker.Summary `json:"containers,omitempty"`
-	// Network jest obrazem interfejsow i tras z jadra. Brak wartosci oznacza
-	// cykl, w ktorym stanu nie zbierano.
+	// Network is the picture of the interfaces and the routes from the kernel. A
+	// missing value means a cycle in which the state was not collected.
 	Network *network.Snapshot `json:"network,omitempty"`
-	// Files jest stanem plikow, ktore panel zapisal na tym hoscie.
+	// Files is the state of the files the panel has written on this host.
 	Files *files.Snapshot `json:"files,omitempty"`
-	// Kernel jest ustawieniami jadra i lista modulow.
+	// Kernel holds the kernel settings and the list of modules.
 	Kernel *kernel.Snapshot `json:"kernel,omitempty"`
-	// Security jest stanem ochronnym hosta: MAC, audyt, tryb rozruchu
-	// i to, czym host wystaje na zewnatrz.
+	// Security is the protection state of the host: MAC, the audit, the boot mode
+	// and what the host exposes to the outside.
 	Security *security.Snapshot `json:"security,omitempty"`
-	// Backup jest tym, co da sie powiedziec o kopiach bez poswiadczen:
-	// czym host moze je zrobic. Stan repozytorium wymaga hasla, wiec jest
-	// operacja, a nie inwentarzem.
-	Backup *StanBackupu `json:"backup,omitempty"`
-	// Certificates jest obrazem certyfikatow, o ktore panel prosil, oraz
-	// tych, ktorych host pilnuje sam. Modul nie przeszukuje dysku, wiec pusta
-	// lista oznacza brak wskazanych plikow, a nie host bez certyfikatow.
+	// Backup is what can be said about the copies without credentials: what the
+	// host can make them with. The state of the repository needs a password, so
+	// it is an operation and not inventory.
+	Backup *BackupState `json:"backup,omitempty"`
+	// Certificates is the picture of the certificates the panel asked about and
+	// of those the host watches on its own. The module does not search the disk,
+	// so an empty list means the named files are missing, not a host without
+	// certificates.
 	Certificates *certificates.Snapshot `json:"certificates,omitempty"`
-	// Power jest stanem startu hosta: boot_id, czas dzialania i to, co
-	// wstrzymuje wylaczenie.
+	// Power is the boot state of the host: the boot_id, the uptime and what holds
+	// a shutdown back.
 	Power *power.Snapshot `json:"power,omitempty"`
-	// Time jest czasem hosta i stanem jego synchronizacji. Przesuniety zegar
-	// psuje Kerberosa i mTLS, wiec jest faktem o hoscie, a nie ciekawostka.
+	// Time is the time of the host and the state of its synchronization. A
+	// shifted clock breaks Kerberos and mTLS, so it is a fact about the host and
+	// not a curiosity.
 	Time *czas.Snapshot `json:"time,omitempty"`
-	// SSH jest konfiguracja serwera sshd.
+	// SSH is the configuration of the sshd server.
 	SSH *sshmodul.Snapshot `json:"ssh,omitempty"`
-	// Storage jest obrazem przestrzeni dyskowej hosta.
+	// Storage is the picture of the disk space of the host.
 	Storage *storage.Snapshot `json:"storage,omitempty"`
-	// Firewall jest stanem zapory hosta.
+	// Firewall is the state of the firewall of the host.
 	Firewall *firewall.Snapshot `json:"firewall,omitempty"`
-	// DNS jest stanem resolvera hosta.
+	// DNS is the state of the resolver of the host.
 	DNS *dnsmodul.Snapshot `json:"dns,omitempty"`
-	// Schedules to zadania cykliczne hosta. Brak wartosci oznacza host bez
-	// crona albo odczyt, ktory sie nie powiodl - rozroznia je pole
-	// unavailable_reason w srodku migawki.
+	// Schedules are the recurring jobs of the host. A missing value means a host
+	// without cron or a read that failed - the unavailable_reason field inside
+	// the snapshot tells them apart.
 	Schedules   *schedules.Snapshot `json:"schedules,omitempty"`
 	CollectedAt time.Time           `json:"collected_at"`
 }
 
-// Revision liczy stabilna rewizje z tresci raportu. Identyczny stan hosta daje
-// identyczna rewizje, wiec serwer nie zapisuje kolejnego wiersza bez zmian.
+// Revision computes a stable revision from the content of the report. An
+// identical host state gives an identical revision, so the server does not
+// store another row without changes.
 func (f Facts) Revision() (string, []byte, error) {
-	// Znacznik czasu nie moze wplywac na rewizje.
+	// The timestamp must not affect the revision.
 	stable := f
 	stable.CollectedAt = time.Time{}
 	payload, err := json.Marshal(stable)
@@ -171,7 +176,7 @@ func (f Facts) Revision() (string, []byte, error) {
 	return hex.EncodeToString(sum[:16]), full, nil
 }
 
-// MachineID zwraca stabilny identyfikator maszyny.
+// MachineID returns the stable identifier of the machine.
 func MachineID() (string, error) {
 	for _, path := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
 		data, err := os.ReadFile(path)
@@ -184,7 +189,7 @@ func MachineID() (string, error) {
 	return "", os.ErrNotExist
 }
 
-// BootID zmienia sie przy kazdym restarcie hosta i konczy faze reboot.
+// BootID changes at every restart of the host and ends the reboot phase.
 func BootID() string {
 	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
 	if err != nil {
@@ -193,7 +198,7 @@ func BootID() string {
 	return strings.TrimSpace(string(data))
 }
 
-// ReadOSInfo czyta /etc/os-release i wersje jadra.
+// ReadOSInfo reads /etc/os-release and the kernel version.
 func ReadOSInfo() OSInfo {
 	info := OSInfo{Architecture: runtime.GOARCH}
 	release := parseKeyValueFile("/etc/os-release")
@@ -209,7 +214,8 @@ func ReadOSInfo() OSInfo {
 	return info
 }
 
-// osFamily mapuje dystrybucje na rodzine adapterow, a nie na marketingowa nazwe.
+// osFamily maps a distribution to a family of adapters and not to a marketing
+// name.
 func osFamily(release map[string]string) string {
 	candidates := append([]string{release["ID"]}, strings.Fields(release["ID_LIKE"])...)
 	for _, candidate := range candidates {
@@ -227,7 +233,7 @@ func osFamily(release map[string]string) string {
 	return firstNonEmpty(release["ID"], "unknown")
 }
 
-// ReadHardware czyta zasoby hosta wylacznie z /proc i statfs.
+// ReadHardware reads the resources of the host only from /proc and statfs.
 func ReadHardware() Hardware {
 	hw := Hardware{CPUCores: uint32(runtime.NumCPU())}
 	for line := range iterLines("/proc/meminfo") {
@@ -263,8 +269,8 @@ func detectVirtualization() string {
 	return strings.TrimSpace(string(data))
 }
 
-// ReadHealth zbiera sygnaly heartbeatu bez uruchamiania procesow potomnych.
-// Wartosci wymagajace procesu pochodza z ostatniego cyklu inventory.
+// ReadHealth collects the heartbeat signals without starting child processes.
+// The values that need a process come from the last inventory cycle.
 func ReadHealth(cached Facts) Health {
 	health := Health{
 		RebootRequired:         cached.RebootRequired,
@@ -295,13 +301,13 @@ func ReadHealth(cached Facts) Health {
 	return health
 }
 
-// runtimeDir jest katalogiem zapisywalnym dla uzytkownika agenta. Narzedzia
-// systemowe takie jak dnf potrzebuja HOME i katalogow XDG; agent nie ma
-// katalogu domowego, wiec bez tego koncza sie bledem, ktory latwo pomylic
-// z wynikiem merytorycznym.
+// runtimeDir is a directory writable for the user of the agent. System tools
+// such as dnf need HOME and the XDG directories; the agent has no home
+// directory, so without it they end with an error that is easy to mistake for a
+// substantive result.
 var runtimeDir = os.TempDir()
 
-// SetRuntimeDir wskazuje katalog roboczy dla uruchamianych narzedzi.
+// SetRuntimeDir points at the working directory for the tools that are started.
 func SetRuntimeDir(dir string) error {
 	if dir == "" {
 		return nil
@@ -315,8 +321,8 @@ func SetRuntimeDir(dir string) error {
 	return nil
 }
 
-// commandResult oddziela fakt uruchomienia procesu od jego wyniku. Kod wyjscia
-// ma znaczenie wylacznie wtedy, gdy proces faktycznie sie wykonal.
+// commandResult separates the fact that a process ran from its result. The exit
+// code means something only when the process really ran.
 type commandResult struct {
 	Stdout   string
 	Stderr   string
@@ -325,21 +331,21 @@ type commandResult struct {
 	Err      error
 }
 
-// Reason opisuje powod, dla ktorego nie udalo sie ustalic wartosci.
+// Reason describes the reason why the value could not be determined.
 func (r commandResult) Reason() string {
 	switch {
 	case r.Err != nil && !r.Ran:
 		return r.Err.Error()
 	case strings.TrimSpace(r.Stderr) != "":
-		return fmt.Sprintf("kod %d: %s", r.ExitCode, firstLine(r.Stderr))
+		return fmt.Sprintf("code %d: %s", r.ExitCode, firstLine(r.Stderr))
 	default:
-		return fmt.Sprintf("kod %d", r.ExitCode)
+		return fmt.Sprintf("code %d", r.ExitCode)
 	}
 }
 
-// runCommand uruchamia proces ze stala sciezka i tablica argumentow.
-// Nigdy nie uzywamy sh -c, wiec tresc danych nie moze stac sie poleceniem.
-// LC_ALL=C stabilizuje output, ktory musimy parsowac.
+// runCommand starts a process with a fixed path and an array of arguments.
+// sh -c is never used, so the content of the data cannot become a command.
+// LC_ALL=C stabilizes the output that has to be parsed.
 func runCommand(ctx context.Context, timeout time.Duration, path string, args ...string) commandResult {
 	if !isExecutable(path) {
 		return commandResult{ExitCode: -1, Err: fmt.Errorf("%s: %w", path, os.ErrNotExist)}
@@ -370,11 +376,12 @@ func runCommand(ctx context.Context, timeout time.Duration, path string, args ..
 	case err == nil:
 		result.Ran, result.ExitCode = true, 0
 	case errors.As(err, &exitErr):
-		// Proces sie wykonal i sam zwrocil kod, wiec kod cos znaczy.
+		// The process ran and returned the code itself, so the code means
+		// something.
 		result.Ran, result.ExitCode = true, exitErr.ExitCode()
 	}
 	if cmdCtx.Err() != nil {
-		// Przekroczony timeout nie jest wynikiem merytorycznym.
+		// An exceeded timeout is not a substantive result.
 		result.Ran = false
 	}
 	return result

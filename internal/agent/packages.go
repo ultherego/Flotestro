@@ -13,9 +13,10 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// planPackages liczy, co zostaloby zaktualizowane. Symulacja nie wymaga roota
-// ani blokady, wiec nie koliduje z reczna praca administratora. Odswiezenie
-// metadanych wymaga roota i idzie przez helper.
+// planPackages computes what would be upgraded. The simulation needs neither
+// root nor a lock, so it does not collide with the manual work of the
+// administrator. Refreshing the metadata needs root and goes through the
+// helper.
 func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackagePlanPayload) *agentv1.TaskResult {
 	manager, err := packages.Detect()
@@ -70,9 +71,9 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 	}
 }
 
-// upgradePackages wykonuje transakcje przez helpera. Przed wykonaniem plan
-// jest przeliczany i porownywany z zatwierdzonym: metadane repozytorium mogly
-// zmienic sie miedzy planem a wykonaniem.
+// upgradePackages performs the transaction through the helper. Before the
+// execution the plan is recomputed and compared with the approved one: the
+// repository metadata may have changed between the plan and the execution.
 func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackageUpgradePayload) *agentv1.TaskResult {
 	manager, err := packages.Detect()
@@ -92,18 +93,18 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 			return rejected(agentv1.TaskResult_STATUS_FAILED, packageErrorCode(err), err.Error())
 		}
 		if hex.EncodeToString(current.Hash()) != strings.ToLower(payload.PlanHash) {
-			// Odmowa jest tu wlasciwa reakcja: administrator zatwierdzil inny
-			// zestaw zmian niz ten, ktory zostalby teraz zastosowany.
+			// A refusal is the right reaction here: the administrator approved a
+			// different set of changes than the one that would be applied now.
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorPlanMismatch,
-				"metadane repozytorium zmienily sie od zatwierdzenia planu")
+				"the repository metadata changed since the plan was approved")
 		}
 	}
 
-	// Transakcja pakietowa trwa minutami. Operator ma widziec, na czym stoi,
-	// a nie czekac na wynik przy pustym ekranie.
-	var meldujPostep func(*helperv1.TaskProgress)
+	// A package transaction takes minutes. The operator is to see where it
+	// stands instead of waiting for the result in front of an empty screen.
+	var reportProgress func(*helperv1.TaskProgress)
 	if e.progress != nil {
-		meldujPostep = func(p *helperv1.TaskProgress) {
+		reportProgress = func(p *helperv1.TaskProgress) {
 			e.progress(&agentv1.TaskProgress{
 				TaskId:  task.GetTaskId(),
 				Step:    p.GetStep(),
@@ -125,13 +126,13 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 				SecurityOnly: payload.SecurityOnly,
 			},
 		},
-	}, timeout, meldujPostep)
+	}, timeout, reportProgress)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	// Wynik czesciowy trafia do rezultatu takze przy bledzie: bez tego
-	// administrator nie wie, co zdazylo sie zmienic przed awaria.
+	// The partial result goes into the result on failure as well: without it the
+	// administrator does not know what managed to change before the breakdown.
 	detail := applyToProto(response.GetPackageResult())
 	if !response.GetAccepted() {
 		result := rejected(agentv1.TaskResult_STATUS_FAILED,
@@ -180,19 +181,20 @@ func planToProto(plan packages.Plan) *agentv1.PackagePlanResult {
 	}
 }
 
-// blockedPlanToProto przenosi blokady wraz z pytaniami konfiguracyjnymi.
-// Operator ma je zobaczyc juz na etapie planu, a nie po nieudanej transakcji.
+// blockedPlanToProto carries the blocks together with the configuration
+// questions. The operator is to see them already at the plan stage and not
+// after a failed transaction.
 func blockedPlanToProto(blocked []packages.Blocked) []*agentv1.BlockedPackage {
 	result := make([]*agentv1.BlockedPackage, 0, len(blocked))
-	for _, pakiet := range blocked {
-		pytania := make([]*agentv1.DebconfQuestion, 0, len(pakiet.Questions))
-		for _, pytanie := range pakiet.Questions {
-			pytania = append(pytania, &agentv1.DebconfQuestion{
-				Name: pytanie.Name, Value: pytanie.Value, Answered: pytanie.Answered,
+	for _, pkg := range blocked {
+		questions := make([]*agentv1.DebconfQuestion, 0, len(pkg.Questions))
+		for _, question := range pkg.Questions {
+			questions = append(questions, &agentv1.DebconfQuestion{
+				Name: question.Name, Value: question.Value, Answered: question.Answered,
 			})
 		}
 		result = append(result, &agentv1.BlockedPackage{
-			Name: pakiet.Name, Status: pakiet.Status, Questions: pytania,
+			Name: pkg.Name, Status: pkg.Status, Questions: questions,
 		})
 	}
 	return result
@@ -222,8 +224,8 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 	}
 }
 
-// ProbePrivilegedIdentity odczytuje przez helpera te elementy stanu domeny,
-// ktore wymagaja roota: keytab hosta i baze cache SSSD.
+// ProbePrivilegedIdentity reads through the helper the parts of the domain
+// state that need root: the host keytab and the SSSD cache database.
 func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain string) (PrivilegedIdentity, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TaskId:         "identity-probe",
@@ -249,29 +251,29 @@ func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain strin
 	}, nil
 }
 
-// applyPackageLifecycle zleca helperowi instalacje, usuniecie albo
-// wstrzymanie pakietow.
+// applyPackageLifecycle asks the helper for an installation, a removal or a
+// hold of packages.
 func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.PackageChangePayload) *agentv1.TaskResult {
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu zmiany pakietow")
+			"the package change payload is missing")
 	}
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
 	defer cancel()
 
-	operacja := helperv1.PackageActionRequest_OPERATION_INSTALL
+	operation := helperv1.PackageActionRequest_OPERATION_INSTALL
 	switch action {
 	case opspec.ActionPackageRemove:
-		operacja = helperv1.PackageActionRequest_OPERATION_REMOVE
+		operation = helperv1.PackageActionRequest_OPERATION_REMOVE
 	case opspec.ActionPackageHoldSet:
-		operacja = helperv1.PackageActionRequest_OPERATION_HOLD
+		operation = helperv1.PackageActionRequest_OPERATION_HOLD
 	}
 
-	// Instalacja zatwierdzona na podstawie planu ma zainstalowac to, co
-	// operator ogladal. Metadane repozytorium zmienione od planowania daja
-	// inny plan - i to jest odmowa, nie ostrzezenie.
+	// An installation approved on the basis of a plan is to install what the
+	// operator looked at. Repository metadata changed since the planning gives a
+	// different plan - and that is a refusal, not a warning.
 	if action == opspec.ActionPackageInstall && payload.PlanHash != "" {
 		manager, err := packages.Detect()
 		if err != nil {
@@ -283,14 +285,14 @@ func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.
 		}
 		if hex.EncodeToString(current.Hash()) != strings.ToLower(payload.PlanHash) {
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorPlanMismatch,
-				"metadane repozytorium zmienily sie od zatwierdzenia planu")
+				"the repository metadata changed since the plan was approved")
 		}
 	}
 
-	// Postep dotyczy instalacji i usuwania: obie potrafia trwac minutami.
-	var meldujPostep func(*helperv1.TaskProgress)
+	// The progress concerns installation and removal: both can take minutes.
+	var reportProgress func(*helperv1.TaskProgress)
 	if e.progress != nil && action != opspec.ActionPackageHoldSet {
-		meldujPostep = func(p *helperv1.TaskProgress) {
+		reportProgress = func(p *helperv1.TaskProgress) {
 			e.progress(&agentv1.TaskProgress{
 				TaskId:  task.GetTaskId(),
 				Step:    p.GetStep(),
@@ -307,24 +309,24 @@ func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_PackageAction{
 			PackageAction: &helperv1.PackageActionRequest{
-				Operation:        operacja,
+				Operation:        operation,
 				Packages:         payload.Packages,
 				ExpectedRemovals: payload.ExpectedRemovals,
 				Hold:             payload.Hold,
 			},
 		},
-	}, timeout, meldujPostep)
+	}, timeout, reportProgress)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
 	detail := applyToProto(response.GetPackageResult())
 	if !response.GetAccepted() {
-		wynik := rejected(agentv1.TaskResult_STATUS_FAILED,
+		result := rejected(agentv1.TaskResult_STATUS_FAILED,
 			response.GetErrorCode(), response.GetMessage())
-		wynik.TaskId = task.GetTaskId()
-		wynik.Detail = &agentv1.TaskResult_PackageApply{PackageApply: detail}
-		return wynik
+		result.TaskId = task.GetTaskId()
+		result.Detail = &agentv1.TaskResult_PackageApply{PackageApply: detail}
+		return result
 	}
 	return &agentv1.TaskResult{
 		TaskId:   task.GetTaskId(),

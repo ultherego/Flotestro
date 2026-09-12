@@ -8,10 +8,10 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// applyCompose zleca helperowi plan albo wdrozenie projektu Compose.
+// applyCompose asks the helper for a plan or a deployment of a Compose project.
 //
-// Agent nie ma dostepu ani do gniazda Dockera, ani do katalogu manifestow:
-// jedno i drugie nalezy do roota, a agent dziala bez uprawnien.
+// The agent has access neither to the Docker socket nor to the manifest
+// directory: both belong to root, and the agent runs without privileges.
 func (e *TaskExecutor) applyCompose(ctx context.Context, task *agentv1.TaskEnvelope,
 	action *agentv1.ComposeAction) *agentv1.TaskResult {
 	timeout := time.Duration(task.GetLimits().GetTimeoutSeconds()) * time.Second
@@ -21,9 +21,9 @@ func (e *TaskExecutor) applyCompose(ctx context.Context, task *agentv1.TaskEnvel
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	operacja := helperv1.ComposeRequest_OPERATION_PLAN
+	operation := helperv1.ComposeRequest_OPERATION_PLAN
 	if action.GetOperation() == agentv1.ComposeAction_OPERATION_DEPLOY {
-		operacja = helperv1.ComposeRequest_OPERATION_DEPLOY
+		operation = helperv1.ComposeRequest_OPERATION_DEPLOY
 	}
 
 	response, err := e.helper.Call(actionCtx, &helperv1.HelperRequest{
@@ -32,7 +32,7 @@ func (e *TaskExecutor) applyCompose(ctx context.Context, task *agentv1.TaskEnvel
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_Compose{
 			Compose: &helperv1.ComposeRequest{
-				Operation:  operacja,
+				Operation:  operation,
 				Project:    action.GetProject(),
 				Manifest:   action.GetManifest(),
 				PlanDigest: action.GetPlanDigest(),
@@ -43,20 +43,20 @@ func (e *TaskExecutor) applyCompose(ctx context.Context, task *agentv1.TaskEnvel
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	szczegoly := &agentv1.ComposeResult{
+	details := &agentv1.ComposeResult{
 		Payload:           response.GetComposeResult().GetPayload(),
 		UnavailableReason: response.GetComposeResult().GetUnavailableReason(),
 	}
 	if !response.GetAccepted() {
-		wynik := rejected(agentv1.TaskResult_STATUS_FAILED,
+		result := rejected(agentv1.TaskResult_STATUS_FAILED,
 			response.GetErrorCode(), response.GetMessage())
-		wynik.TaskId = task.GetTaskId()
-		wynik.ComposeResult = szczegoly
-		return wynik
+		result.TaskId = task.GetTaskId()
+		result.ComposeResult = details
+		return result
 	}
 	return &agentv1.TaskResult{
 		TaskId:        task.GetTaskId(),
 		Status:        agentv1.TaskResult_STATUS_SUCCEEDED,
-		ComposeResult: szczegoly,
+		ComposeResult: details,
 	}
 }

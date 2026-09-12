@@ -9,52 +9,54 @@ import (
 	"time"
 )
 
-// privilegedIdentity jest opcjonalnym zrodlem danych wymagajacych roota.
-// Bez niego inventory nadal powstaje, ale bez keytab i stanu SSSD.
+// privilegedIdentity is an optional source of data that needs root. Without it
+// the inventory is still built, but without the keytab and the SSSD state.
 var privilegedIdentity func(context.Context, string) (PrivilegedIdentity, error)
 
-// SetPrivilegedIdentityProbe wskazuje funkcje odczytujaca uprzywilejowana
-// czesc stanu domeny. Agent uzywa do tego helpera roota.
+// SetPrivilegedIdentityProbe points at the function that reads the privileged
+// part of the domain state. The agent uses the root helper for that.
 func SetPrivilegedIdentityProbe(probe func(context.Context, string) (PrivilegedIdentity, error)) {
 	privilegedIdentity = probe
 }
 
-// privilegedAccounts uzupelnia konta o stan blokady i klucze SSH. Odczyt
-// /etc/shadow i katalogow domowych nalezy do roota.
+// privilegedAccounts fills the accounts in with the lock state and the SSH
+// keys. Reading /etc/shadow and the home directories belongs to root.
 var privilegedAccounts func(context.Context, []string) (*helperv1.LocalAccountsResult, error)
 
-// SetPrivilegedAccountProbe wskazuje funkcje odczytujaca uprzywilejowana
-// czesc danych o kontach.
+// SetPrivilegedAccountProbe points at the function that reads the privileged
+// part of the account data.
 func SetPrivilegedAccountProbe(probe func(context.Context, []string) (*helperv1.LocalAccountsResult, error)) {
 	privilegedAccounts = probe
 }
 
-// Collect zbiera pelny inventory. Ta funkcja moze uruchamiac procesy potomne,
-// dlatego wolamy ja w cyklu inventory, nigdy w heartbeacie.
+// Collect gathers the full inventory. This function can start child processes,
+// which is why it is called in the inventory cycle and never in the heartbeat.
 func Collect(ctx context.Context) (Facts, error) {
 	return CollectFrom(ctx, "")
 }
 
-// CollectFrom zbiera inventory, znajac adres, ktorym host rozmawia z panelem.
-// Bez tego adresu modul sieci nie potrafi wskazac interfejsu zarzadzania,
-// a zgadywanie go z pierwszej pozycji listy konczy sie zmiana konfiguracji
-// interfejsu, przez ktory wlasnie przyszlo polecenie.
-func CollectFrom(ctx context.Context, adresZarzadzania string) (Facts, error) {
-	return ZbierzModuly(ctx, adresZarzadzania, Facts{}, nil)
+// CollectFrom gathers the inventory knowing the address the host talks to the
+// panel through. Without that address the network module cannot point at the
+// management interface, and guessing it from the first entry of the list ends
+// with a change to the configuration of the interface the command just came
+// through.
+func CollectFrom(ctx context.Context, managementAddress string) (Facts, error) {
+	return CollectModules(ctx, managementAddress, Facts{}, nil)
 }
 
-// ZbierzModuly zbiera inventory ograniczone do wskazanych modulow.
+// CollectModules gathers the inventory limited to the given modules.
 //
-// Pusta lista znaczy caly inventory. Lista niepusta znaczy odswiezenie
-// czesciowe: zbierane sa wylacznie wskazane moduly, a reszta jest przepisana
-// z poprzedniego obrazu. Inaczej inventory po odswiezeniu jednego modulu
-// bylby obrazem hosta bez calej reszty - a to nie jest to samo, co host,
-// ktory tej reszty nie ma.
+// An empty list means the whole inventory. A non-empty list means a partial
+// refresh: only the given modules are collected and the rest is carried over
+// from the previous picture. Otherwise the inventory after refreshing one
+// module would be a picture of a host without all the rest - and that is not
+// the same as a host that does not have that rest.
 //
-// Fakty podstawowe - tozsamosc maszyny, system, sprzet, zdolnosci - sa
-// zbierane zawsze. Sa tanie i to one rozstrzygaja, ktore moduly maja sens.
-func ZbierzModuly(ctx context.Context, adresZarzadzania string,
-	poprzednie Facts, moduly []string) (Facts, error) {
+// The basic facts - the identity of the machine, the system, the hardware, the
+// capabilities - are always collected. They are cheap and they are what decides
+// which modules make sense.
+func CollectModules(ctx context.Context, managementAddress string,
+	previous Facts, modules []string) (Facts, error) {
 	machineID, err := MachineID()
 	if err != nil {
 		return Facts{}, err
@@ -74,40 +76,40 @@ func ZbierzModuly(ctx context.Context, adresZarzadzania string,
 	}
 	facts.RebootRequired = rebootRequired(ctx, caps)
 
-	wybrane := zbiorModulow(moduly)
-	for _, nazwa := range KolejnoscModulow {
-		zbieracz := zbieraczeModulow[nazwa]
-		if len(wybrane) > 0 && !wybrane[nazwa] {
-			// Modul spoza zakresu odswiezenia zostaje taki, jaki byl.
-			// Przepisanie jest swiadome: brak danych oznaczalby, ze host
-			// ich nie ma, a on ich w tym cyklu nie byl pytany.
-			zbieracz.przepisz(&facts, poprzednie)
+	selected := moduleSet(modules)
+	for _, name := range ModuleOrder {
+		collector := moduleCollectors[name]
+		if len(selected) > 0 && !selected[name] {
+			// A module outside the scope of the refresh stays as it was. The
+			// carry-over is deliberate: missing data would mean the host does
+			// not have it, and it simply was not asked in this cycle.
+			collector.carry(&facts, previous)
 			continue
 		}
-		zbieracz.zbierz(ctx, &facts, adresZarzadzania)
+		collector.collect(ctx, &facts, managementAddress)
 	}
 	return facts, nil
 }
 
-// zbiorModulow zamienia liste nazw na zbior. Puste wejscie daje pusty zbior,
-// ktory znaczy "wszystko".
-func zbiorModulow(moduly []string) map[string]bool {
-	if len(moduly) == 0 {
+// moduleSet turns a list of names into a set. An empty input gives an empty
+// set, which means "everything".
+func moduleSet(modules []string) map[string]bool {
+	if len(modules) == 0 {
 		return nil
 	}
-	zbior := make(map[string]bool, len(moduly))
-	for _, nazwa := range moduly {
-		nazwa = strings.ToLower(strings.TrimSpace(nazwa))
-		if nazwa != "" {
-			zbior[nazwa] = true
+	set := make(map[string]bool, len(modules))
+	for _, name := range modules {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			set[name] = true
 		}
 	}
-	return zbior
+	return set
 }
 
-// failedUnits zwraca nazwy jednostek w stanie failed oraz informacje, czy w
-// ogole udalo sie je ustalic. Nieudane zapytanie nie moze wygladac jak zero
-// jednostek w bledzie.
+// failedUnits returns the names of the units in the failed state together with
+// whether they could be determined at all. A failed query must not look like
+// zero units in error.
 func failedUnits(ctx context.Context) ([]string, bool) {
 	result := runCommand(ctx, 15*time.Second,
 		"/usr/bin/systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager")
@@ -124,8 +126,8 @@ func failedUnits(ctx context.Context) ([]string, bool) {
 	return units, true
 }
 
-// aptSummary liczy pakiety do aktualizacji przez symulacje, ktora nie zmienia
-// stanu systemu i nie potrzebuje blokady dpkg.
+// aptSummary counts the packages to upgrade through a simulation that changes
+// no system state and needs no dpkg lock.
 func aptSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: "apt"}
 
@@ -148,8 +150,8 @@ func aptSummary(ctx context.Context) Packages {
 			continue
 		}
 		upgradable++
-		// Origin jest w nawiasie na koncu linii; repozytorium bezpieczenstwa
-		// Debiana i Ubuntu zawiera w nazwie "-security".
+		// The origin is in brackets at the end of the line; the security
+		// repository of Debian and Ubuntu carries "-security" in its name.
 		if strings.Contains(line, "-security") || strings.Contains(line, "Debian-Security") {
 			security++
 		}
@@ -159,9 +161,9 @@ func aptSummary(ctx context.Context) Packages {
 	return summary
 }
 
-// dnfSummary liczy aktualizacje bez odswiezania metadanych.
-// check-update zwraca 0 przy braku aktualizacji i 100, gdy jakies sa.
-// Kazdy inny kod jest bledem wykonania, a nie liczba zero.
+// dnfSummary counts the updates without refreshing the metadata. check-update
+// returns 0 when there are no updates and 100 when there are some. Every other
+// code is an execution error, not the number zero.
 func dnfSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: "dnf"}
 
@@ -181,25 +183,25 @@ func dnfSummary(ctx context.Context) Packages {
 	var upgradable uint32
 	for _, line := range strings.Split(result.Stdout, "\n") {
 		fields := strings.Fields(line)
-		// Linia aktualizacji to: nazwa.arch  wersja  repozytorium.
+		// An update line is: name.arch  version  repository.
 		if len(fields) == 3 && strings.Contains(fields[0], ".") && !strings.HasPrefix(line, " ") {
 			upgradable++
 		}
 	}
 	summary.Upgradable = &upgradable
-	// Fedora nie publikuje spojnych metadanych security dla wszystkich repo,
-	// wiec licznik bezpieczenstwa zostaje nieustalony zamiast falszywego zera.
+	// Fedora does not publish consistent security metadata for all repositories,
+	// so the security counter stays undetermined instead of a false zero.
 	return summary
 }
 
-// rebootRequired sprawdza wskaznik restartu wlasciwy dla dystrybucji.
-// Zwraca nil, gdy stanu nie da sie ustalic.
+// rebootRequired checks the restart marker proper to the distribution. It
+// returns nil when the state cannot be determined.
 func rebootRequired(ctx context.Context, caps Capabilities) *bool {
 	if exists("/var/run/reboot-required") || exists("/run/reboot-required") {
 		return boolPtr(true)
 	}
 	if caps.Available(CapAPT) {
-		// Na Debianie brak pliku jest jednoznaczna odpowiedzia.
+		// On Debian a missing file is an unambiguous answer.
 		return boolPtr(false)
 	}
 	if caps.Available(CapDNF) {
@@ -209,11 +211,12 @@ func rebootRequired(ctx context.Context, caps Capabilities) *bool {
 	return nil
 }
 
-// interpretNeedsRestarting tlumaczy wynik "dnf needs-restarting -r" na odpowiedz
-// o restarcie. Narzedzie zwraca 0 przy braku potrzeby i 1, gdy restart jest
-// wymagany - ale tym samym kodem konczy sie blad wykonania, na przyklad brak
-// zapisywalnego HOME. Kodowi 1 ufamy wiec tylko wtedy, gdy narzedzie cokolwiek
-// wypisalo na stdout; w bledzie milczy tam i pisze na stderr.
+// interpretNeedsRestarting translates the result of "dnf needs-restarting -r"
+// into an answer about a restart. The tool returns 0 when none is needed and 1
+// when a restart is required - but an execution error, for example a HOME that
+// is not writable, ends with the same code. Code 1 is therefore trusted only
+// when the tool printed something on stdout; on an error it stays silent there
+// and writes to stderr.
 func interpretNeedsRestarting(result commandResult) *bool {
 	switch {
 	case !result.Ran:

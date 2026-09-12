@@ -12,14 +12,15 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// Domyslny zakres UID kont ludzi. Wartosci pochodza z /etc/login.defs, gdy
-// plik jest czytelny; te sa awaryjne i zgodne z ustawieniami dystrybucji.
+// The default UID range of the accounts of people. The values come from
+// /etc/login.defs when the file is readable; these are the fallback and match
+// the settings of the distributions.
 const (
 	defaultUIDMin = 1000
 	defaultUIDMax = 60000
 )
 
-// AccountSource opisuje pochodzenie konta.
+// AccountSource describes where an account comes from.
 type AccountSource string
 
 const (
@@ -28,8 +29,8 @@ const (
 	SourceSystem    AccountSource = "system"
 )
 
-// SSHKeyInfo opisuje klucz publiczny odciskiem. Sama tresc klucza nie jest
-// przesylana: do identyfikacji wystarcza odcisk.
+// SSHKeyInfo describes a public key by its fingerprint. The content of the key
+// itself is not transmitted: the fingerprint is enough to identify it.
 type SSHKeyInfo struct {
 	Fingerprint string `json:"fingerprint"`
 	Type        string `json:"type,omitempty"`
@@ -37,7 +38,7 @@ type SSHKeyInfo struct {
 	Source      string `json:"source,omitempty"`
 }
 
-// LocalAccount opisuje konto widoczne na hoscie.
+// LocalAccount describes an account visible on the host.
 type LocalAccount struct {
 	Name   string        `json:"name"`
 	UID    uint32        `json:"uid"`
@@ -48,27 +49,29 @@ type LocalAccount struct {
 	Source AccountSource `json:"source"`
 	Groups []string      `json:"groups,omitempty"`
 	Locked *bool         `json:"locked,omitempty"`
-	// PasswordSet rozroznia konto bez hasla od konta z haslem. Nil oznacza
-	// stan nieustalony i nie moze byc pokazany jako "brak hasla".
+	// PasswordSet tells an account without a password from one with a password.
+	// Nil means a state that was not determined and must not be shown as "no
+	// password".
 	PasswordSet *bool        `json:"password_set,omitempty"`
 	SSHKeys     []SSHKeyInfo `json:"ssh_keys,omitempty"`
 
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// ReadLocalAccounts czyta konta z /etc/passwd. Plik jest czytelny dla
-// wszystkich, wiec ta czesc nie wymaga helpera.
+// ReadLocalAccounts reads the accounts from /etc/passwd. The file is readable
+// by everyone, so this part needs no helper.
 //
-// Konta z katalogu nie sa tu widoczne: NSS rozwiazuje je dopiero na zadanie,
-// a pobieranie pelnej listy uzytkownikow domeny z kazdego hosta byloby
-// dokladnie tym obciazeniem katalogu, przed ktorym broni sie dokument.
+// The accounts from the directory are not visible here: NSS resolves them only
+// on request, and fetching the full list of domain users from every host would
+// be exactly the load on the directory the document guards against.
 func ReadLocalAccounts() []LocalAccount {
 	uidMin, uidMax := parseUIDRange("/etc/login.defs")
 	return parsePasswd("/etc/passwd", uidMin, uidMax, groupsOf)
 }
 
-// parsePasswd czyta konta z podanego pliku. Sciezka i zrodlo grup sa
-// parametrami, zeby klasyfikacja dala sie sprawdzic bez zmieniania systemu.
+// parsePasswd reads the accounts from the given file. The path and the source
+// of the groups are parameters so that the classification can be checked
+// without changing the system.
 func parsePasswd(path string, uidMin, uidMax int64, groups func(string) []string) []LocalAccount {
 	var accounts []LocalAccount
 	for line := range iterLines(path) {
@@ -91,9 +94,9 @@ func parsePasswd(path string, uidMin, uidMax int64, groups func(string) []string
 			Shell:  fields[6],
 			Source: SourceLocal,
 		}
-		// Konto spoza zakresu kont ludzi nalezy do uslugi. Sam prog dolny nie
-		// wystarcza: "nobody" ma UID 65534 i lezy powyzej zakresu, a nie jest
-		// kontem czlowieka.
+		// An account outside the range of the accounts of people belongs to a
+		// service. The lower bound alone is not enough: "nobody" has UID 65534,
+		// which lies above the range, and is not the account of a person.
 		if uid < uint64(uidMin) || uid > uint64(uidMax) {
 			account.Source = SourceSystem
 		}
@@ -103,9 +106,9 @@ func parsePasswd(path string, uidMin, uidMax int64, groups func(string) []string
 	return accounts
 }
 
-// loginDefsUIDRange odczytuje zakres UID kont ludzi z konfiguracji systemu.
-// Dystrybucje roznia sie tu miedzy soba, a useradd trzyma sie tego pliku,
-// wiec klasyfikacja panelu musi wynikac z tego samego zrodla.
+// parseUIDRange reads the UID range of the accounts of people from the system
+// configuration. Distributions differ here, and useradd follows this file, so
+// the classification of the panel has to follow the same source.
 func parseUIDRange(path string) (int64, int64) {
 	uidMin, uidMax := int64(defaultUIDMin), int64(defaultUIDMax)
 	for line := range iterLines(path) {
@@ -130,8 +133,9 @@ func parseUIDRange(path string) (int64, int64) {
 	return uidMin, uidMax
 }
 
-// groupsOf zwraca grupy konta. Blad odczytu daje pusta liste, a nie brak
-// wpisu: konto istnieje niezaleznie od tego, czy znamy jego grupy.
+// groupsOf returns the groups of an account. A read error gives an empty list
+// and not a missing entry: the account exists regardless of whether its groups
+// are known.
 func groupsOf(name string) []string {
 	account, err := user.Lookup(name)
 	if err != nil {
@@ -150,8 +154,8 @@ func groupsOf(name string) []string {
 	return groups
 }
 
-// mergePrivilegedAccounts uzupelnia konta o dane wymagajace roota: stan
-// blokady i klucze SSH.
+// mergePrivilegedAccounts fills the accounts in with the data that needs root:
+// the lock state and the SSH keys.
 func mergePrivilegedAccounts(accounts []LocalAccount, result *helperv1.LocalAccountsResult) []LocalAccount {
 	if result == nil {
 		return accounts
@@ -224,7 +228,8 @@ func sourceToProto(source AccountSource) agentv1.LocalAccount_Source {
 	}
 }
 
-// ProbeLocalAccounts uzupelnia konta przez helpera o stan blokady i klucze.
+// ProbeLocalAccounts fills the accounts in through the helper with the lock
+// state and the keys.
 func (e *TaskExecutor) ProbeLocalAccounts(ctx context.Context, names []string) (*helperv1.LocalAccountsResult, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TaskId:         "local-accounts",

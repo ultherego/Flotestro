@@ -10,15 +10,16 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// shutdownHost wylacza hosta przez helpera.
+// shutdownHost powers the host off through the helper.
 //
-// Wynik jest odsylany, zanim host zniknie: opoznienie po stronie helpera daje
-// na to czas. Inaczej niz przy restarcie, panel nie zobaczy juz powrotu tego
-// hosta - i to jest cala roznica miedzy tymi dwiema operacjami.
+// The result is sent back before the host disappears: the delay on the helper
+// side leaves time for that. Unlike with a restart, the panel will not see this
+// host come back - and that is the whole difference between the two
+// operations.
 func (e *TaskExecutor) shutdownHost(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PowerPayload) *agentv1.TaskResult {
 	if payload == nil {
-		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "brak payloadu power")
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "the power payload is missing")
 	}
 	timeout := timeoutOf(task, opspec.ActionSystemShutdown)
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -28,9 +29,9 @@ func (e *TaskExecutor) shutdownHost(ctx context.Context, task *agentv1.TaskEnvel
 	if delay == 0 {
 		delay = 15
 	}
-	tryb := payload.Mode
-	if tryb == "" {
-		tryb = power.TrybWylaczyc
+	mode := payload.Mode
+	if mode == "" {
+		mode = power.TrybWylaczyc
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -42,7 +43,7 @@ func (e *TaskExecutor) shutdownHost(ctx context.Context, task *agentv1.TaskEnvel
 			Shutdown: &helperv1.ShutdownRequest{
 				DelaySeconds:     delay,
 				Reason:           payload.Reason,
-				Mode:             tryb,
+				Mode:             mode,
 				IgnoreInhibitors: payload.IgnoreInhibitors,
 			},
 		},
@@ -51,32 +52,32 @@ func (e *TaskExecutor) shutdownHost(ctx context.Context, task *agentv1.TaskEnvel
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetPowerResult()
-	szczegoly := &agentv1.PowerResult{
-		Snapshot:    wynik.GetSnapshot(),
-		Message:     wynik.GetMessage(),
-		Inhibitors:  wynik.GetInhibitors(),
-		ScheduledAt: wynik.GetScheduledAt(),
+	result := response.GetPowerResult()
+	details := &agentv1.PowerResult{
+		Snapshot:    result.GetSnapshot(),
+		Message:     result.GetMessage(),
+		Inhibitors:  result.GetInhibitors(),
+		ScheduledAt: result.GetScheduledAt(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.PowerResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.PowerResult = details
+		return refused
 	}
 
-	// Stan startu zbieramy tuz przed zejsciem hosta: to ostatni obraz, jaki
-	// panel bedzie mial, dopoki ktos tej maszyny nie wlaczy.
-	snapshot := ZbierzZasilanie(ctx, e.facts().BootID, e.facts().RebootRequired)
-	if zakodowany, err := json.Marshal(snapshot); err == nil {
-		szczegoly.Snapshot = zakodowany
+	// The boot state is collected right before the host goes down: it is the
+	// last picture the panel will have until somebody powers that machine on.
+	snapshot := CollectPower(ctx, e.facts().BootID, e.facts().RebootRequired)
+	if encoded, err := json.Marshal(snapshot); err == nil {
+		details.Snapshot = encoded
 	}
 	return &agentv1.TaskResult{
 		TaskId:      task.GetTaskId(),
 		Status:      agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode:    0,
-		Message:     wynik.GetMessage(),
-		PowerResult: szczegoly,
+		Message:     result.GetMessage(),
+		PowerResult: details,
 	}
 }

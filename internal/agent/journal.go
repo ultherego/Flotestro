@@ -14,13 +14,14 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// IdempotencyJournal pamieta wyniki wykonanych zadan. Siec dziala w trybie
-// at-least-once, wiec to samo zadanie moze dotrzec kilka razy - handler musi
-// wtedy zwrocic poprzedni wynik, a nie wykonac mutacje ponownie.
+// IdempotencyJournal remembers the results of performed tasks. The network
+// works at-least-once, so the same task can arrive several times - the handler
+// has to return the previous result then instead of performing the mutation
+// again.
 //
-// Kluczem jest idempotency_key, a nie task_id. Ponowne zlecenie tej samej
-// operacji tworzy nowa probe z nowym task_id, wiec kluczowanie po task_id
-// pozwolilo by wykonac mutacje drugi raz.
+// The key is the idempotency_key and not the task_id. Ordering the same
+// operation again creates a new attempt with a new task_id, so keying by
+// task_id would allow the mutation to be performed a second time.
 type IdempotencyJournal struct {
 	dir string
 	mu  sync.Mutex
@@ -29,7 +30,7 @@ type IdempotencyJournal struct {
 
 func NewIdempotencyJournal(dir string, ttl time.Duration) (*IdempotencyJournal, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("katalog dziennika: %w", err)
+		return nil, fmt.Errorf("the journal directory: %w", err)
 	}
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
@@ -39,7 +40,8 @@ func NewIdempotencyJournal(dir string, ttl time.Duration) (*IdempotencyJournal, 
 	return journal, nil
 }
 
-// Lookup zwraca zapisany wynik zadania albo nil, gdy zadania jeszcze nie bylo.
+// Lookup returns the stored result of a task or nil when the task has not been
+// seen yet.
 func (j *IdempotencyJournal) Lookup(idempotencyKey string) *agentv1.TaskResult {
 	if idempotencyKey == "" {
 		return nil
@@ -58,11 +60,11 @@ func (j *IdempotencyJournal) Lookup(idempotencyKey string) *agentv1.TaskResult {
 	return &result
 }
 
-// Store zapisuje wynik zadania. Zapis jest atomowy, zeby przerwany agent nie
-// zostawil obcietego wpisu, ktory wygladalby jak poprawny wynik.
+// Store writes the result of a task. The write is atomic so that an interrupted
+// agent does not leave a truncated entry that would look like a valid result.
 func (j *IdempotencyJournal) Store(idempotencyKey string, result *agentv1.TaskResult) error {
 	if idempotencyKey == "" {
-		return fmt.Errorf("pusty klucz idempotencji")
+		return fmt.Errorf("an empty idempotency key")
 	}
 	data, err := proto.Marshal(result)
 	if err != nil {
@@ -79,7 +81,8 @@ func (j *IdempotencyJournal) Store(idempotencyKey string, result *agentv1.TaskRe
 	return os.Rename(temporary, j.path(idempotencyKey))
 }
 
-// Prune usuwa wpisy starsze niz TTL. Dziennik nie moze rosnac bez konca.
+// Prune removes the entries older than the TTL. The journal must not grow
+// without end.
 func (j *IdempotencyJournal) Prune() {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -100,8 +103,9 @@ func (j *IdempotencyJournal) Prune() {
 	}
 }
 
-// path zamienia klucz na nazwe pliku przez skrot. Klucz pochodzi z sieci
-// i moze zawierac dowolne znaki, wiec nie trafia do sciezki wprost.
+// path turns the key into a file name through a digest. The key comes from the
+// network and can contain any characters, so it does not go into a path
+// directly.
 func (j *IdempotencyJournal) path(idempotencyKey string) string {
 	sum := sha256.Sum256([]byte(idempotencyKey))
 	return filepath.Join(j.dir, hex.EncodeToString(sum[:]))

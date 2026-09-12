@@ -7,99 +7,101 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Limit tempa chroni lacze i baze powiadomien przed hostem, ktory wypisuje
-// megabajty logow. Bez niego jeden host w petli bledow zalewalby panel.
-func TestBudzetTempaOgraniczaPrzeplyw(t *testing.T) {
-	budzet := nowyBudzetTempa(100)
+// The rate limit protects the link and the notification database from a host
+// printing megabytes of logs. Without it one host in an error loop would flood
+// the panel.
+func TestTheRateBudgetLimitsTheFlow(t *testing.T) {
+	budget := newRateBudget(100)
 
-	if !budzet.pozwala(80) {
-		t.Fatal("pierwsze 80 bajtow nie zmiescilo sie w budzecie 100")
+	if !budget.allows(80) {
+		t.Fatal("the first 80 bytes did not fit in a budget of 100")
 	}
-	if !budzet.pozwala(20) {
-		t.Fatal("kolejne 20 bajtow nie zmiescilo sie w budzecie")
+	if !budget.allows(20) {
+		t.Fatal("the next 20 bytes did not fit in the budget")
 	}
-	if budzet.pozwala(50) {
-		t.Error("budzet przepuscil dane ponad limit")
+	if budget.allows(50) {
+		t.Error("the budget let data through above the limit")
 	}
 }
 
-// Budzet odbudowuje sie z czasem: podglad ma dzialac dalej, a nie zamknac
-// sie po pierwszym wybuchu logow.
-func TestBudzetTempaOdbudowujeSie(t *testing.T) {
-	budzet := nowyBudzetTempa(1000)
-	if !budzet.pozwala(1000) {
-		t.Fatal("budzet nie przepuscil pelnej sekundy danych")
+// The budget refills over time: the preview is to keep working and not close
+// after the first burst of logs.
+func TestTheRateBudgetRefills(t *testing.T) {
+	budget := newRateBudget(1000)
+	if !budget.allows(1000) {
+		t.Fatal("the budget did not let a full second of data through")
 	}
-	if budzet.pozwala(500) {
-		t.Fatal("budzet przepuscil dane ponad limit")
+	if budget.allows(500) {
+		t.Fatal("the budget let data through above the limit")
 	}
 
-	// Po pol sekundzie wraca polowa budzetu.
-	budzet.ostatnie = budzet.ostatnie.Add(-500 * time.Millisecond)
-	if !budzet.pozwala(400) {
-		t.Error("budzet nie odbudowal sie po uplywie czasu")
+	// After half a second half of the budget comes back.
+	budget.last = budget.last.Add(-500 * time.Millisecond)
+	if !budget.allows(400) {
+		t.Error("the budget did not refill as time passed")
 	}
 }
 
-// Budzet nie moze rosnac w nieskonczonosc podczas ciszy: host milczacy przez
-// godzine nie dostaje prawa do wyslania godziny logow naraz.
-func TestBudzetTempaNieKumulujeSieBezKonca(t *testing.T) {
-	budzet := nowyBudzetTempa(100)
-	budzet.ostatnie = budzet.ostatnie.Add(-time.Hour)
-	if !budzet.pozwala(100) {
-		t.Fatal("budzet nie przepuscil pelnej sekundy danych")
+// The budget must not grow without end during silence: a host quiet for an hour
+// does not get the right to send an hour of logs at once.
+func TestTheRateBudgetDoesNotAccumulateWithoutEnd(t *testing.T) {
+	budget := newRateBudget(100)
+	budget.last = budget.last.Add(-time.Hour)
+	if !budget.allows(100) {
+		t.Fatal("the budget did not let a full second of data through")
 	}
-	if budzet.pozwala(100) {
-		t.Error("budzet skumulowal sie ponad limit sekundy")
-	}
-}
-
-// Anulowanie dziala tam, gdzie zostalo zgloszone jako bezpieczne. Anulowanie
-// zadania, ktore wlasnie sie skonczylo, nie jest bledem.
-func TestAnulowanieDzialaTylkoDlaZarejestrowanych(t *testing.T) {
-	tablica := nowaTablicaAnulowan()
-	przerwane := false
-	wyrejestruj := tablica.zarejestruj("zadanie-1", func() { przerwane = true })
-
-	if !tablica.Anuluj("zadanie-1") {
-		t.Error("nie znaleziono zarejestrowanego zadania")
-	}
-	if !przerwane {
-		t.Error("zadanie nie zostalo przerwane")
-	}
-	if tablica.Anuluj("zadanie-nieznane") {
-		t.Error("uznano nieznane zadanie za przerwane")
-	}
-
-	wyrejestruj()
-	if tablica.Anuluj("zadanie-1") {
-		t.Error("zadanie zostalo przerwane po wyrejestrowaniu")
+	if budget.allows(100) {
+		t.Error("the budget accumulated above the limit of one second")
 	}
 }
 
-// Argumenty podgladu powstaja z pol typowanych, nigdy ze sklejonego ciagu.
-func TestArgumentyPodgladuMajaLimity(t *testing.T) {
-	priorytet := uint32(3)
-	args := argumentyPodgladu(&opspec.JournalPayload{
-		Unit: "cron.service", Lines: 0, MaxPriority: &priorytet,
+// Cancellation works where it was declared safe. Cancelling a task that has
+// just finished is not an error.
+func TestCancellationWorksOnlyForRegisteredTasks(t *testing.T) {
+	table := newCancellationTable()
+	interrupted := false
+	unregister := table.register("task-1", func() { interrupted = true })
+
+	if !table.Cancel("task-1") {
+		t.Error("the registered task was not found")
+	}
+	if !interrupted {
+		t.Error("the task was not interrupted")
+	}
+	if table.Cancel("task-unknown") {
+		t.Error("an unknown task was taken for interrupted")
+	}
+
+	unregister()
+	if table.Cancel("task-1") {
+		t.Error("the task was interrupted after it had been unregistered")
+	}
+}
+
+// The preview arguments are built from typed fields, never from a concatenated
+// string.
+func TestThePreviewArgumentsHaveLimits(t *testing.T) {
+	priority := uint32(3)
+	args := previewArguments(&opspec.JournalPayload{
+		Unit: "cron.service", Lines: 0, MaxPriority: &priority,
 	})
 
-	czy := func(wartosc string) bool {
+	has := func(value string) bool {
 		for _, arg := range args {
-			if arg == wartosc {
+			if arg == value {
 				return true
 			}
 		}
 		return false
 	}
-	if !czy("--follow") || !czy("--lines") {
-		t.Errorf("argumenty = %v", args)
+	if !has("--follow") || !has("--lines") {
+		t.Errorf("arguments = %v", args)
 	}
-	// Zerowy backlog oznacza wartosc domyslna, a nie brak ograniczenia.
-	if !czy("50") {
-		t.Errorf("brak domyslnego limitu backlogu: %v", args)
+	// A zero backlog means the default value and not the absence of a limit.
+	if !has("50") {
+		t.Errorf("the default backlog limit is missing: %v", args)
 	}
-	if !czy("cron.service") || !czy("3") {
-		t.Errorf("filtry nie trafily do argumentow: %v", args)
+	if !has("cron.service") || !has("3") {
+		t.Errorf("the filters did not reach the arguments: %v", args)
 	}
 }

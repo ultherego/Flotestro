@@ -10,8 +10,8 @@ import (
 	"github.com/ultherego/flotestro/internal/helper"
 )
 
-// HelperClient rozmawia z helperem roota przez gniazdo unixowe.
-// Agent nie ma innej drogi do uprawnien roota.
+// HelperClient talks to the root helper over a unix socket. The agent has no
+// other way to root privileges.
 type HelperClient struct {
 	socketPath string
 }
@@ -20,24 +20,24 @@ func NewHelperClient(socketPath string) *HelperClient {
 	return &HelperClient{socketPath: socketPath}
 }
 
-// Call wysyla jedno zadanie i czeka na odpowiedz.
+// Call sends one request and waits for the answer.
 func (c *HelperClient) Call(ctx context.Context, request *helperv1.HelperRequest,
 	timeout time.Duration) (*helperv1.HelperResponse, error) {
 	return c.CallWithProgress(ctx, request, timeout, nil)
 }
 
-// CallWithProgress wysyla zadanie i przekazuje postep, ktory helper melduje
-// w trakcie. Polaczenie jest jednorazowe: helper jest aktywowany na zadanie
-// i konczy prace po bezczynnosci.
+// CallWithProgress sends a request and passes on the progress the helper
+// reports along the way. The connection is single-use: the helper is activated
+// on demand and ends its work after an idle period.
 //
-// Odbiorca postepu nil oznacza brak zainteresowania - helper nie wysyla wtedy
-// zadnej wiadomosci posredniej.
+// A nil progress receiver means no interest - the helper then sends no
+// intermediate message at all.
 func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.HelperRequest,
-	timeout time.Duration, postep func(*helperv1.TaskProgress)) (*helperv1.HelperResponse, error) {
+	timeout time.Duration, progress func(*helperv1.TaskProgress)) (*helperv1.HelperResponse, error) {
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "unix", c.socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("polaczenie z helperem: %w", err)
+		return nil, fmt.Errorf("connecting to the helper: %w", err)
 	}
 	defer conn.Close()
 
@@ -48,21 +48,22 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 	}
 
 	request.ProtocolVersion = helper.ProtocolVersion
-	request.WantProgress = postep != nil
+	request.WantProgress = progress != nil
 	if err := helper.WriteMessage(conn, request); err != nil {
-		return nil, fmt.Errorf("wyslanie zadania do helpera: %w", err)
+		return nil, fmt.Errorf("sending the request to the helper: %w", err)
 	}
 
-	// Wiadomosci z postepem poprzedzaja odpowiedz koncowa. Czytamy do skutku,
-	// a nie pierwsza z brzegu: postep nie jest wynikiem operacji.
+	// The progress messages precede the final answer. The read continues until
+	// that answer arrives instead of taking the first message: progress is not
+	// the result of the operation.
 	for {
 		var response helperv1.HelperResponse
 		if err := helper.ReadMessage(conn, &response); err != nil {
-			return nil, fmt.Errorf("odpowiedz helpera: %w", err)
+			return nil, fmt.Errorf("the answer of the helper: %w", err)
 		}
 		if p := response.GetProgress(); p != nil && !response.GetFinal() {
-			if postep != nil {
-				postep(p)
+			if progress != nil {
+				progress(p)
 			}
 			continue
 		}

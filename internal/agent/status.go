@@ -12,21 +12,24 @@ import (
 	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
-// NazwaPlikuStanu jest plikiem, w ktorym agent zapisuje, co sie z nim dzieje.
-const NazwaPlikuStanu = "status.json"
+// StateFileName is the file in which the agent writes what is happening with
+// it.
+const StateFileName = "status.json"
 
-// StanAgenta jest obrazem pracy agenta widocznym z zewnatrz procesu.
+// AgentState is the picture of the work of the agent as seen from outside the
+// process.
 //
-// Bez niego narzedzie diagnostyczne moze powiedziec tylko tyle, co widac
-// w systemie plikow: ze certyfikat istnieje i ze usluga jest uruchomiona.
-// Operator na hoscie bez panelu potrzebuje odpowiedzi na inne pytanie -
-// czy agent naprawde rozmawia z panelem i kiedy ostatnio cos wyslal.
-type StanAgenta struct {
+// Without it a diagnostic tool can say only as much as the file system shows:
+// that the certificate exists and that the service is running. An operator on
+// the host without the panel needs an answer to a different question - whether
+// the agent really talks to the panel and when it last sent anything.
+type AgentState struct {
 	AgentVersion string `json:"agent_version"`
 	HostID       string `json:"host_id,omitempty"`
-	// Gateway jest adresem, z ktorym agent rozmawia w tej sesji.
+	// Gateway is the address the agent talks to in this session.
 	Gateway string `json:"gateway,omitempty"`
-	// ConnectedAt jest pusty, gdy sesji nie ma. Wtedy liczy sie LastError.
+	// ConnectedAt is empty when there is no session. LastError is what counts
+	// then.
 	ConnectedAt       *time.Time `json:"connected_at,omitempty"`
 	DisconnectedAt    *time.Time `json:"disconnected_at,omitempty"`
 	LastInventoryAt   *time.Time `json:"last_inventory_at,omitempty"`
@@ -35,152 +38,155 @@ type StanAgenta struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
-// PisarzStanu utrwala stan agenta miedzy zdarzeniami sesji.
-type PisarzStanu struct {
-	sciezka string
-	mu      sync.Mutex
-	stan    StanAgenta
+// StateWriter persists the state of the agent between session events.
+type StateWriter struct {
+	path  string
+	mu    sync.Mutex
+	state AgentState
 }
 
-// NowyPisarzStanu tworzy pisarza w katalogu stanu agenta. Pusty katalog
-// wylacza zapis: symulator floty nie ma po co pisac tysiaca plikow.
-func NowyPisarzStanu(stateDir, hostID string) *PisarzStanu {
+// NewStateWriter creates a writer in the state directory of the agent. An empty
+// directory turns the write off: the fleet simulator has no reason to write a
+// thousand files.
+func NewStateWriter(stateDir, hostID string) *StateWriter {
 	if stateDir == "" {
 		return nil
 	}
-	return &PisarzStanu{
-		sciezka: filepath.Join(stateDir, NazwaPlikuStanu),
-		stan:    StanAgenta{AgentVersion: Version, HostID: hostID},
+	return &StateWriter{
+		path:  filepath.Join(stateDir, StateFileName),
+		state: AgentState{AgentVersion: Version, HostID: hostID},
 	}
 }
 
-// Polaczony odnotowuje nawiazana sesje.
-func (p *PisarzStanu) Polaczony(gateway string, chwila time.Time) {
-	if p == nil {
+// Connected records an established session.
+func (w *StateWriter) Connected(gateway string, moment time.Time) {
+	if w == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	chwilaUTC := chwila.UTC()
-	p.stan.Gateway = gateway
-	p.stan.ConnectedAt = &chwilaUTC
-	p.stan.DisconnectedAt = nil
-	p.stan.LastError = ""
-	p.zapisz()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	momentUTC := moment.UTC()
+	w.state.Gateway = gateway
+	w.state.ConnectedAt = &momentUTC
+	w.state.DisconnectedAt = nil
+	w.state.LastError = ""
+	w.write()
 }
 
-// Rozlaczony odnotowuje koniec sesji razem z powodem.
-func (p *PisarzStanu) Rozlaczony(powod string, chwila time.Time) {
-	if p == nil {
+// Disconnected records the end of a session together with the reason.
+func (w *StateWriter) Disconnected(reason string, moment time.Time) {
+	if w == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	chwilaUTC := chwila.UTC()
-	p.stan.ConnectedAt = nil
-	p.stan.DisconnectedAt = &chwilaUTC
-	p.stan.LastError = powod
-	p.zapisz()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	momentUTC := moment.UTC()
+	w.state.ConnectedAt = nil
+	w.state.DisconnectedAt = &momentUTC
+	w.state.LastError = reason
+	w.write()
 }
 
-// Inwentarz odnotowuje wyslany raport.
-func (p *PisarzStanu) Inwentarz(rewizja string, chwila time.Time) {
-	if p == nil {
+// Inventory records a report that was sent.
+func (w *StateWriter) Inventory(revision string, moment time.Time) {
+	if w == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	chwilaUTC := chwila.UTC()
-	p.stan.LastInventoryAt = &chwilaUTC
-	p.stan.InventoryRevision = rewizja
-	p.zapisz()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	momentUTC := moment.UTC()
+	w.state.LastInventoryAt = &momentUTC
+	w.state.InventoryRevision = revision
+	w.write()
 }
 
-// zapisz utrwala stan przez plik tymczasowy i zmiane nazwy.
+// write persists the state through a temporary file and a rename.
 //
-// Przerwany zapis nie moze zostawic polowy pliku: narzedzie diagnostyczne
-// czytaloby wtedy blad skladni zamiast stanu i wygladaloby to jak awaria
-// agenta, ktorej nie ma.
-func (p *PisarzStanu) zapisz() {
-	p.stan.UpdatedAt = time.Now().UTC()
-	tresc, err := json.MarshalIndent(p.stan, "", "  ")
+// An interrupted write must not leave half a file: a diagnostic tool would then
+// read a syntax error instead of a state, and that would look like a failure of
+// the agent that is not there.
+func (w *StateWriter) write() {
+	w.state.UpdatedAt = time.Now().UTC()
+	content, err := json.MarshalIndent(w.state, "", "  ")
 	if err != nil {
 		return
 	}
-	tymczasowy := p.sciezka + ".tmp"
-	if err := os.WriteFile(tymczasowy, append(tresc, '\n'), 0o640); err != nil {
+	temporary := w.path + ".tmp"
+	if err := os.WriteFile(temporary, append(content, '\n'), 0o640); err != nil {
 		return
 	}
-	_ = os.Rename(tymczasowy, p.sciezka)
+	_ = os.Rename(temporary, w.path)
 }
 
-// OdczytajStan czyta stan zapisany przez agenta.
-func OdczytajStan(stateDir string) (StanAgenta, error) {
-	var stan StanAgenta
-	tresc, err := os.ReadFile(filepath.Join(stateDir, NazwaPlikuStanu))
+// ReadState reads the state written by the agent.
+func ReadState(stateDir string) (AgentState, error) {
+	var state AgentState
+	content, err := os.ReadFile(filepath.Join(stateDir, StateFileName))
 	if err != nil {
-		return stan, err
+		return state, err
 	}
-	if err := json.Unmarshal(tresc, &stan); err != nil {
-		return stan, err
+	if err := json.Unmarshal(content, &state); err != nil {
+		return state, err
 	}
-	return stan, nil
+	return state, nil
 }
 
-// StanTozsamosci opisuje tozsamosc zapisana na hoscie.
+// StoredIdentity describes the identity stored on the host.
 //
-// Takze wtedy, gdy certyfikat wygasl albo jest nieczytelny: status ma o tym
-// powiedziec, a nie zamilknac. Cisza wyglada tak samo jak host bez problemu.
-type StanTozsamosci struct {
-	Sciezki  IdentityPaths
-	Obecna   bool
+// Also when the certificate has expired or is unreadable: the status is to say
+// so and not to fall silent. Silence looks the same as a host without a
+// problem.
+type StoredIdentity struct {
+	Paths    IdentityPaths
+	Present  bool
 	HostID   string
 	NotAfter time.Time
-	Wygasl   bool
-	Blad     string
+	Expired  bool
+	Err      string
 }
 
-// OdczytajTozsamosc czyta tozsamosc z katalogu stanu bez zadnego polaczenia.
+// ReadIdentity reads the identity from the state directory without any
+// connection.
 //
-// Najpierw magazyn generacji, potem stary uklad plikow: narzedzie na hoscie
-// ma odpowiadac tak samo przed migracja i po niej.
-func OdczytajTozsamosc(stateDir string) StanTozsamosci {
-	magazyn := identitystore.New(stateDir)
-	if tozsamosc, err := magazyn.Current(); err == nil {
-		return StanTozsamosci{
-			Sciezki: IdentityPaths{
-				Key:  filepath.Join(tozsamosc.Dir, identitystore.KeyName),
-				Cert: filepath.Join(tozsamosc.Dir, identitystore.CertificateName),
-				CA:   filepath.Join(tozsamosc.Dir, identitystore.TrustName),
+// First the generation store, then the old file layout: the tool on the host is
+// to answer the same way before a migration and after it.
+func ReadIdentity(stateDir string) StoredIdentity {
+	store := identitystore.New(stateDir)
+	if identity, err := store.Current(); err == nil {
+		return StoredIdentity{
+			Paths: IdentityPaths{
+				Key:  filepath.Join(identity.Dir, identitystore.KeyName),
+				Cert: filepath.Join(identity.Dir, identitystore.CertificateName),
+				CA:   filepath.Join(identity.Dir, identitystore.TrustName),
 			},
-			Obecna:   true,
-			HostID:   tozsamosc.HostID,
-			NotAfter: tozsamosc.NotAfter,
-			Wygasl:   time.Now().After(tozsamosc.NotAfter),
+			Present:  true,
+			HostID:   identity.HostID,
+			NotAfter: identity.NotAfter,
+			Expired:  time.Now().After(identity.NotAfter),
 		}
 	}
 
-	sciezki := paths(stateDir)
-	stan := StanTozsamosci{Sciezki: sciezki}
+	identityPaths := paths(stateDir)
+	state := StoredIdentity{Paths: identityPaths}
 
-	certPEM, err := os.ReadFile(sciezki.Cert)
+	certPEM, err := os.ReadFile(identityPaths.Cert)
 	if err != nil {
-		stan.Blad = err.Error()
-		return stan
+		state.Err = err.Error()
+		return state
 	}
-	blok, _ := pem.Decode(certPEM)
-	if blok == nil {
-		stan.Blad = "certyfikat nie jest poprawnym PEM"
-		return stan
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		state.Err = "the certificate is not valid PEM"
+		return state
 	}
-	certyfikat, err := x509.ParseCertificate(blok.Bytes)
+	certificate, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		stan.Blad = err.Error()
-		return stan
+		state.Err = err.Error()
+		return state
 	}
-	stan.Obecna = true
-	stan.HostID = certyfikat.Subject.CommonName
-	stan.NotAfter = certyfikat.NotAfter
-	stan.Wygasl = time.Now().After(certyfikat.NotAfter)
-	return stan
+	state.Present = true
+	state.HostID = certificate.Subject.CommonName
+	state.NotAfter = certificate.NotAfter
+	state.Expired = time.Now().After(certificate.NotAfter)
+	return state
 }

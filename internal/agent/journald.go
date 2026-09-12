@@ -12,16 +12,17 @@ import (
 
 const journalctlPath = "/usr/bin/journalctl"
 
-// readJournal czyta dziennik lokalnie i zwraca ograniczony wynik.
-// Host nie wykonuje zadnej pracy, gdy nikt nie oglada logow: czytamy wylacznie
-// na zadanie, bez stalego shippera.
+// readJournal reads the journal locally and returns a bounded result. The host
+// does no work when nobody is looking at the logs: the read happens only on
+// request, without a permanent shipper.
 func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.JournalPayload) *agentv1.TaskResult {
 	if payload == nil {
-		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "brak payloadu odczytu")
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, "the read payload is missing")
 	}
 
-	// Argumenty budujemy z pol typowanych, nigdy ze sklejonego ciagu.
+	// The arguments are built from typed fields, never from a concatenated
+	// string.
 	args := []string{"--no-pager", "--output=short-iso", "--lines=" + strconv.FormatUint(uint64(payload.Lines), 10)}
 	if payload.Unit != "" {
 		args = append(args, "--unit="+payload.Unit)
@@ -60,25 +61,26 @@ func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelo
 	}
 }
 
-// clampBytes przycina wynik do limitu i sygnalizuje obciecie. Wynik zadania
-// nie moze urosnac do dowolnego rozmiaru.
+// clampBytes trims the result to the limit and signals the cut. The result of a
+// task must not grow to an arbitrary size.
 func clampBytes(data []byte, limit int) ([]byte, bool) {
 	if len(data) <= limit {
 		return data, false
 	}
-	// Przycinamy od poczatku: przy odczycie dziennika najswiezsze wpisy sa
-	// na koncu i to one sa potrzebne.
+	// The cut is made from the start: in a journal read the freshest entries are
+	// at the end and those are the ones needed.
 	return data[len(data)-limit:], true
 }
 
-// readLogFile czyta plik logu przez helpera. Agent nie ma dostepu do plikow
-// roota i nie moze go miec - allowlista jest wlasnoscia hosta, a jej
-// rozstrzyganie nalezy do procesu, ktory ma czym czytac.
+// readLogFile reads a log file through the helper. The agent has no access to
+// the files of root and must not have one - the allowlist is the property of
+// the host, and deciding on it belongs to the process that has something to
+// read with.
 func (e *TaskExecutor) readLogFile(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.LogFilePayload) *agentv1.TaskResult {
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu odczytu pliku")
+			"the file read payload is missing")
 	}
 	timeout := timeoutOf(task, opspec.ActionReadLogFile)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+15*time.Second)
@@ -99,21 +101,21 @@ func (e *TaskExecutor) readLogFile(ctx context.Context, task *agentv1.TaskEnvelo
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 	if !response.GetAccepted() {
-		wynik := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		wynik.TaskId = task.GetTaskId()
-		return wynik
+		refused.TaskId = task.GetTaskId()
+		return refused
 	}
-	wynik := response.GetLogFileResult()
+	result := response.GetLogFileResult()
 	return &agentv1.TaskResult{
 		TaskId: task.GetTaskId(),
 		Status: agentv1.TaskResult_STATUS_SUCCEEDED,
 		LogFileResult: &agentv1.LogFileResult{
-			Path:      wynik.GetPath(),
-			Lines:     wynik.GetLines(),
-			Truncated: wynik.GetTruncated(),
-			SizeBytes: wynik.GetSizeBytes(),
-			Allowlist: wynik.GetAllowlist(),
+			Path:      result.GetPath(),
+			Lines:     result.GetLines(),
+			Truncated: result.GetTruncated(),
+			SizeBytes: result.GetSizeBytes(),
+			Allowlist: result.GetAllowlist(),
 		},
 	}
 }

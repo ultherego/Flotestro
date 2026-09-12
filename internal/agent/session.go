@@ -26,35 +26,36 @@ import (
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 )
 
-// SessionOptions konfiguruje polaczenie agenta z control plane.
+// SessionOptions configures the connection of the agent to the control plane.
 type SessionOptions struct {
-	// GatewayURLs sa bramami w kolejnosci priorytetu. Agent utrzymuje jedna
-	// aktywna sesje, ale zna cala liste: przelaczenie na brame zapasowa nie
-	// moze byc reczna czynnoscia operatora w chwili awarii centrali.
+	// GatewayURLs are the gateways in order of priority. The agent keeps one
+	// active session but knows the whole list: switching to a standby gateway
+	// must not be a manual action of the operator at the moment the centre
+	// fails.
 	GatewayURLs       []string
 	Identity          *Identity
 	InventoryInterval time.Duration
 	Executor          *TaskExecutor
-	// CollectFacts pozwala podstawic fakty syntetyczne. Symulator floty nie
-	// czyta prawdziwego hosta, bo tysiac agentow na jednej maszynie
-	// raportowaloby ten sam stan.
+	// CollectFacts allows synthetic facts to be substituted. The fleet simulator
+	// does not read a real host, because a thousand agents on one machine would
+	// report the same state.
 	CollectFacts func(context.Context) (Facts, error)
-	// MaxConcurrentTasks ogranicza liczbe zadan wykonywanych rownolegle.
-	// Host nie moze zostac zalany praca przez control plane.
+	// MaxConcurrentTasks limits the number of tasks performed in parallel. The
+	// host must not be flooded with work by the control plane.
 	MaxConcurrentTasks int
 	Log                *slog.Logger
-	// Renewed sygnalizuje odnowienie certyfikatu. Sesja konczy sie wtedy
-	// natychmiast, zeby nastepna poszla juz nowa tozsamoscia; czekanie do
-	// naturalnego zerwania oznaczaloby prace na certyfikacie, ktory wlasnie
-	// zostal zastapiony.
+	// Renewed signals a renewal of the certificate. The session then ends at
+	// once so that the next one goes with the new identity; waiting for a natural
+	// break would mean working on a certificate that has just been replaced.
 	Renewed <-chan struct{}
-	// Stan zapisuje na dysk to, co sie z agentem dzieje. Bez tego narzedzie
-	// diagnostyczne na hoscie widzi tylko pliki tozsamosci i nie umie
-	// odpowiedziec, czy agent naprawde rozmawia z panelem.
-	Stan *PisarzStanu
+	// State writes to disk what is happening with the agent. Without it the
+	// diagnostic tool on the host sees only the identity files and cannot answer
+	// whether the agent really talks to the panel.
+	State *StateWriter
 
-	// gatewayURL jest brama wybrana na te jedna sesje. Nie pochodzi
-	// z konfiguracji, tylko z menedzera bram, wiec nie jest polem publicznym.
+	// gatewayURL is the gateway chosen for this one session. It does not come
+	// from the configuration but from the gateway manager, so it is not a public
+	// field.
 	gatewayURL string
 }
 
@@ -63,110 +64,112 @@ const (
 	maxBackoff = 5 * time.Minute
 )
 
-// Run utrzymuje polaczenie z gatewayem i wznawia je z backoffem oraz jitterem.
-// Awaria control plane nie moze wywolac lawiny reconnectow z calej floty.
+// Run keeps the connection to the gateway and resumes it with backoff and
+// jitter. A failure of the control plane must not cause an avalanche of
+// reconnects from the whole fleet.
 func Run(ctx context.Context, opts SessionOptions) error {
-	menedzer := endpoints.New(opts.GatewayURLs, minBackoff, maxBackoff)
-	if len(menedzer.Gateways()) == 0 {
-		return errors.New("agent nie ma zadnej bramy do polaczenia")
+	manager := endpoints.New(opts.GatewayURLs, minBackoff, maxBackoff)
+	if len(manager.Gateways()) == 0 {
+		return errors.New("the agent has no gateway to connect to")
 	}
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		brama, err := menedzer.Choose(time.Now())
+		gateway, err := manager.Choose(time.Now())
 		if err != nil {
-			// Odwolana tozsamosc nie jest awaria lacza. Agent przestaje sie
-			// dobijac i zostawia powod tam, gdzie zajrzy operator hosta:
-			// dalsze proby niczego nie naprawia, a enrollment jest decyzja
-			// czlowieka, nie skutkiem ubocznym reconnectu.
-			opts.Log.Error("polaczenie zatrzymane", "err", err)
-			opts.Stan.Rozlaczony(err.Error(), time.Now())
+			// A revoked identity is not a failure of the link. The agent stops
+			// knocking and leaves the reason where the operator of the host will
+			// look: further attempts repair nothing, and enrollment is a decision
+			// of a human, not a side effect of a reconnect.
+			opts.Log.Error("the connection was stopped", "err", err)
+			opts.State.Disconnected(err.Error(), time.Now())
 			return err
 		}
-		if brama == nil {
-			// Kazda brama ma jeszcze okno ponowienia. Czekamy do najblizszej,
-			// zamiast krecic sie w petli.
-			czekanie := menedzer.UntilNext(time.Now())
-			opts.Log.Info("wszystkie bramy w oknie ponowienia",
-				"za", czekanie.Round(time.Second).String())
+		if gateway == nil {
+			// Every gateway still has a retry window. The wait goes until the
+			// nearest one instead of spinning in a loop.
+			waiting := manager.UntilNext(time.Now())
+			opts.Log.Info("all the gateways are in their retry window",
+				"in", waiting.Round(time.Second).String())
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-time.After(czekanie):
+			case <-time.After(waiting):
 			}
 			continue
 		}
 
-		// Klient powstaje przy kazdym polaczeniu, bo tozsamosc moze sie
-		// w miedzyczasie zmienic: odnowiony certyfikat musi wejsc do uzycia
-		// bez restartu agenta.
+		// The client is created at every connection, because the identity may
+		// change in the meantime: a renewed certificate has to come into use
+		// without restarting the agent.
 		client := agentv1connect.NewAgentServiceClient(
 			newHTTP2Client(opts.Identity),
-			brama.URL,
-			// Protokol Connect nie obsluguje pelnego dupleksu, wiec stream
-			// dwukierunkowy jedzie po gRPC nad HTTP/2.
+			gateway.URL,
+			// The Connect protocol does not support full duplex, so the
+			// bidirectional stream travels over gRPC on top of HTTP/2.
 			connect.WithGRPC(),
 		)
 		start := time.Now()
-		sesja := opts
-		sesja.gatewayURL = brama.URL
-		err = runSession(ctx, client, sesja)
+		session := opts
+		session.gatewayURL = gateway.URL
+		err = runSession(ctx, client, session)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if err != nil {
-			opts.Log.Warn("sesja zakonczona", "brama", brama.URL, "err", err)
-			opts.Stan.Rozlaczony(err.Error(), time.Now())
+			opts.Log.Warn("the session ended", "gateway", gateway.URL, "err", err)
+			opts.State.Disconnected(err.Error(), time.Now())
 		} else {
-			opts.Stan.Rozlaczony("", time.Now())
+			opts.State.Disconnected("", time.Now())
 		}
 
 		switch {
 		case errors.Is(err, errIdentityRenewed):
-			// Przerwanie po odnowieniu certyfikatu nie jest bledem bramy:
-			// nastepne polaczenie idzie nowa tozsamoscia i to samo miejsce.
-			menedzer.Success(brama.URL, time.Now())
+			// A break after a certificate renewal is not an error of the gateway:
+			// the next connection goes with the new identity and to the same
+			// place.
+			manager.Success(gateway.URL, time.Now())
 			continue
 		case time.Since(start) > time.Minute:
-			// Sesja, ktora pracowala dluzej niz minute, nie jest objawem
-			// petli bledu - nawet jesli skonczyla sie zerwaniem.
-			menedzer.Success(brama.URL, time.Now())
+			// A session that worked for longer than a minute is not a symptom of
+			// an error loop - even when it ended with a break.
+			manager.Success(gateway.URL, time.Now())
 			if err == nil {
 				continue
 			}
 		}
 
-		klasa := endpoints.Classify(err)
-		menedzer.Error(brama.URL, klasa, time.Now())
-		if klasa == endpoints.ClassConfiguration {
-			// Zla konfiguracja nie naprawi sie ponowieniem, wiec mowimy
-			// o niej wprost i tam, gdzie widac ja bez panelu.
-			opts.Log.Error("brama odrzucila polaczenie z powodu konfiguracji",
-				"brama", brama.URL, "err", err,
-				"podpowiedz", "sprawdz bootstrap_ca_file i nazwe w gateway_urls")
+		class := endpoints.Classify(err)
+		manager.Error(gateway.URL, class, time.Now())
+		if class == endpoints.ClassConfiguration {
+			// A bad configuration does not repair itself with a retry, so it is
+			// named directly and where it can be seen without the panel.
+			opts.Log.Error("the gateway refused the connection because of the configuration",
+				"gateway", gateway.URL, "err", err,
+				"hint", "check bootstrap_ca_file and the name in gateway_urls")
 		}
 	}
 }
 
-// errIdentityRenewed konczy sesje po odnowieniu certyfikatu. Nastepne
-// polaczenie idzie juz nowa tozsamoscia.
-var errIdentityRenewed = errors.New("tozsamosc agenta odnowiona")
+// errIdentityRenewed ends the session after a certificate renewal. The next
+// connection already goes with the new identity.
+var errIdentityRenewed = errors.New("the identity of the agent was renewed")
 
 func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
-	opts SessionOptions) (wynik error) {
+	opts SessionOptions) (result error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Odnowienie certyfikatu konczy sesje: nastepna ma isc nowa tozsamoscia.
-	// Zerwanie streamu wyglada wtedy jak zwykly blad, wiec powod jest
-	// podmieniany przy wyjsciu - Run nie ma czekac z ponownym polaczeniem.
-	odnowiona := make(chan struct{})
+	// A certificate renewal ends the session: the next one is to go with the new
+	// identity. The break of the stream then looks like an ordinary error, so the
+	// reason is swapped on the way out - Run is not to wait before reconnecting.
+	renewed := make(chan struct{})
 	if opts.Renewed != nil {
 		go func() {
 			select {
 			case <-opts.Renewed:
-				close(odnowiona)
+				close(renewed)
 				cancel()
 			case <-sessionCtx.Done():
 			}
@@ -174,8 +177,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 	defer func() {
 		select {
-		case <-odnowiona:
-			wynik = errIdentityRenewed
+		case <-renewed:
+			result = errIdentityRenewed
 		default:
 		}
 	}()
@@ -183,15 +186,16 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	stream := client.Connect(sessionCtx)
 	defer func() { _ = stream.CloseRequest() }()
 
-	// Adres, ktorym host dosiega panelu, jest ustalany raz na sesje i podany
-	// modulowi sieci: to on rozstrzyga, ktory interfejs jest kanalem
-	// zarzadzania, a wiec ktorej zmiany nie wolno zrobic bez ostrzezenia.
-	adresLokalny := adresDoPanelu(opts.gatewayURL)
+	// The address the host reaches the panel with is determined once per session
+	// and passed to the network module: it is what decides which interface is the
+	// management channel, and therefore which change must not be made without a
+	// warning.
+	localAddress := panelAddress(opts.gatewayURL)
 
 	collect := opts.CollectFacts
 	if collect == nil {
 		collect = func(ctx context.Context) (Facts, error) {
-			return CollectFrom(ctx, adresLokalny)
+			return CollectFrom(ctx, localAddress)
 		}
 	}
 
@@ -210,7 +214,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			BootId:            facts.BootID,
 			Capabilities:      capabilitiesToProto(facts.Capabilities),
 			InventoryRevision: revision,
-			LocalAddress:      adresLokalny,
+			LocalAddress:      localAddress,
 		}},
 	}); err != nil {
 		return err
@@ -222,7 +226,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 	sessionConfig := first.GetSessionConfig()
 	if sessionConfig == nil {
-		return errors.New("serwer nie odeslal konfiguracji sesji")
+		return errors.New("the server did not send back the session configuration")
 	}
 	heartbeatInterval := time.Duration(sessionConfig.GetHeartbeatSeconds()) * time.Second
 	if heartbeatInterval <= 0 {
@@ -230,11 +234,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 	jitterWindow := time.Duration(sessionConfig.GetHeartbeatJitterSeconds()) * time.Second
 
-	opts.Log.Info("sesja nawiazana",
+	opts.Log.Info("the session was established",
 		"host_id", opts.Identity.HostID, "heartbeat", heartbeatInterval.String())
-	opts.Stan.Polaczony(opts.gatewayURL, time.Now())
+	opts.State.Connected(opts.gatewayURL, time.Now())
 
-	// Send nie jest bezpieczny dla rownoleglych wywolan.
+	// Send is not safe for concurrent calls.
 	var sendMu sync.Mutex
 	send := func(msg *agentv1.AgentMessage) error {
 		sendMu.Lock()
@@ -252,7 +256,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		}); err != nil {
 			return err
 		}
-		opts.Stan.Inwentarz(rev, time.Now())
+		opts.State.Inventory(rev, time.Now())
 		return nil
 	}
 
@@ -260,8 +264,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		return err
 	}
 
-	// Fakty sa czytane przez wykonawce zadan przy sprawdzaniu preconditions,
-	// a aktualizowane przez cykl inventory, wiec wymagaja synchronizacji.
+	// The facts are read by the task executor while checking the preconditions
+	// and updated by the inventory cycle, so they need synchronization.
 	var factsMu sync.RWMutex
 	cachedFacts := facts
 	currentFacts := func() Facts {
@@ -276,98 +280,100 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 	if opts.Executor != nil {
 		opts.Executor.facts = currentFacts
-		// Postep idzie tym samym strumieniem co wyniki. Bledu wysylki nie
-		// eskalujemy: utrata podgladu nie moze przerwac trwajacej operacji.
-		// Podglad dziennika idzie tym samym strumieniem co wyniki.
-		opts.Executor.logLines = func(linie *agentv1.TaskLogLines) {
+		// The progress travels in the same stream as the results. A send error is
+		// not escalated: losing the preview must not interrupt an operation in
+		// progress. The journal preview travels in the same stream as the results.
+		opts.Executor.logLines = func(lines *agentv1.TaskLogLines) {
 			if err := send(&agentv1.AgentMessage{
-				Payload: &agentv1.AgentMessage_TaskLogLines{TaskLogLines: linie},
+				Payload: &agentv1.AgentMessage_TaskLogLines{TaskLogLines: lines},
 			}); err != nil {
-				opts.Log.Debug("nie wyslano podgladu dziennika",
-					"task_id", linie.GetTaskId(), "err", err)
+				opts.Log.Debug("the journal preview was not sent",
+					"task_id", lines.GetTaskId(), "err", err)
 			}
 		}
-		// Sekret pobiera sie osobnym wywolaniem, w chwili wykonania operacji.
-		// Wartosc zyje wtedy w pamieci hosta i nigdzie jej nie zapisujemy -
-		// ani w dzienniku agenta, ani w wyniku zadania.
-		opts.Executor.sekrety = func(ctx context.Context, taskID, nazwa string, wersja int) ([]byte, error) {
-			odpowiedz, err := client.FetchSecret(ctx, connect.NewRequest(&agentv1.FetchSecretRequest{
-				TaskId: taskID, SecretName: nazwa, SecretVersion: uint32(wersja),
+		// A secret is fetched with a separate call, at the moment the operation
+		// runs. The value then lives in the memory of the host and is written
+		// nowhere - neither in the journal of the agent nor in the result of the
+		// task.
+		opts.Executor.secrets = func(ctx context.Context, taskID, name string, version int) ([]byte, error) {
+			response, err := client.FetchSecret(ctx, connect.NewRequest(&agentv1.FetchSecretRequest{
+				TaskId: taskID, SecretName: name, SecretVersion: uint32(version),
 			}))
 			if err != nil {
 				return nil, err
 			}
-			wartosc := odpowiedz.Msg.GetValue()
-			// Panel podaje odcisk tego, co wydal: sprawdzamy, ze dostalismy
-			// dokladnie to, a nie tresc uszkodzona po drodze.
-			if odcisk := odpowiedz.Msg.GetSha256(); odcisk != "" && odcisk != odciskWartosci(wartosc) {
-				return nil, errors.New("odcisk pobranego sekretu nie zgadza sie z podanym przez panel")
+			value := response.Msg.GetValue()
+			// The panel gives the digest of what it issued: this checks that
+			// exactly that arrived and not content damaged on the way.
+			if digest := response.Msg.GetSha256(); digest != "" && digest != valueDigest(value) {
+				return nil, errors.New("the digest of the fetched secret does not match the one given by the panel")
 			}
-			return wartosc, nil
+			return value, nil
 		}
 		opts.Executor.progress = func(p *agentv1.TaskProgress) {
 			if err := send(&agentv1.AgentMessage{
 				Payload: &agentv1.AgentMessage_TaskProgress{TaskProgress: p},
 			}); err != nil {
-				opts.Log.Debug("nie wyslano postepu zadania",
+				opts.Log.Debug("the progress of the task was not sent",
 					"task_id", p.GetTaskId(), "err", err)
 			}
 		}
 	}
 
-	// Miejsca sa liczone osobno dla kazdej klasy zasobu: dlugi odczyt
-	// pakietow nie moze zajac calej puli i zatrzymac operacji, ktore trwaja
-	// milisekundy.
-	miejsca := nowyBudzet(opts.MaxConcurrentTasks)
-	// Blokady zasobow sa druga warstwa obok budzetu: budzet mowi, ile zadan
-	// host uniesie, a zamki - ktore z nich nie moga isc obok siebie.
-	zasoby := noweZamki()
+	// The slots are counted separately for every resource class: a long package
+	// read must not take the whole pool and stop the operations that last
+	// milliseconds.
+	slots := newBudget(opts.MaxConcurrentTasks)
+	// The resource locks are a second layer next to the budget: the budget says
+	// how many tasks the host can carry, and the locks - which of them cannot
+	// run side by side.
+	resources := newLocks()
 
 	receiveErr := make(chan error, 1)
-	zglosBlad := func(err error) {
+	reportError := func(err error) {
 		select {
 		case receiveErr <- err:
 		default:
 		}
 	}
 
-	// Zbieranie inventory idzie obok petli odbioru: ciezki odczyt nie moze
-	// zatrzymac przyjmowania zadan.
-	inventory := nowyKolektor()
+	// The inventory collection runs next to the receive loop: a heavy read must
+	// not stop the acceptance of tasks.
+	inventory := newCollector()
 	go func() {
-		zbierz := func(ctx context.Context, moduly []string) (Facts, error) {
-			if len(moduly) == 0 {
+		collectScope := func(ctx context.Context, modules []string) (Facts, error) {
+			if len(modules) == 0 {
 				return collect(ctx)
 			}
-			// Odswiezenie czesciowe wchodzi w poprzedni obraz: modul spoza
-			// zakresu ma zostac taki, jaki byl, a nie zniknac.
-			return ZbierzModuly(ctx, adresLokalny, currentFacts(), moduly)
+			// A partial refresh enters the previous picture: a module outside the
+			// scope is to stay as it was and not disappear.
+			return CollectModules(ctx, localAddress, currentFacts(), modules)
 		}
-		przyjmij := func(fresh Facts) (Odswiezenie, error) {
-			poprzednia := ""
+		accept := func(fresh Facts) (Refresh, error) {
+			previous := ""
 			if rev, _, err := currentFacts().Revision(); err == nil {
-				poprzednia = rev
+				previous = rev
 			}
 			updateFacts(fresh)
 			if err := sendInventory(fresh); err != nil {
-				return Odswiezenie{}, err
+				return Refresh{}, err
 			}
-			nowa, _, err := fresh.Revision()
+			current, _, err := fresh.Revision()
 			if err != nil {
-				return Odswiezenie{}, err
+				return Refresh{}, err
 			}
-			return Odswiezenie{Rewizja: nowa, Zmieniona: nowa != poprzednia}, nil
+			return Refresh{Revision: current, Changed: current != previous}, nil
 		}
-		if err := inventory.pracuj(sessionCtx, zbierz, przyjmij, opts.Log); err != nil {
-			zglosBlad(err)
+		if err := inventory.run(sessionCtx, collectScope, accept, opts.Log); err != nil {
+			reportError(err)
 		}
 	}()
 
-	// Odswiezenie na zadanie jest operacja typowana, wiec wykonawca musi
-	// umiec o nie poprosic - i doczekac sie rewizji, ktora z niego powstala.
+	// A refresh on request is a typed operation, so the executor has to be able
+	// to ask for one - and to wait for the revision that came out of it.
 	if opts.Executor != nil {
-		opts.Executor.odswiezInwentarz = func(ctx context.Context, moduly []string) Odswiezenie {
-			return inventory.odswiez(ctx, moduly)
+		opts.Executor.inventoryRefresh = func(ctx context.Context, modules []string) Refresh {
+			return inventory.refresh(ctx, modules)
 		}
 	}
 
@@ -380,87 +386,87 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 			switch payload := msg.GetPayload().(type) {
 			case *agentv1.ServerMessage_InventoryRequest:
-				inventory.zazadaj()
+				inventory.request()
 
 			case *agentv1.ServerMessage_Task:
-				// Zadanie wykonuje sie obok petli odbioru: restart jednostki
-				// trwa, a heartbeat i kolejne zadania nie moga na niego czekac.
+				// A task runs next to the receive loop: a unit restart takes time,
+				// and the heartbeat and the next tasks must not wait for it.
 				task := payload.Task
 				go func() {
-					// Najpierw zasoby, potem miejsce w budzecie: zadanie
-					// czekajace na zajety zasob nie ma powodu trzymac miejsca,
-					// ktore przydaloby sie operacji bez kolizji.
-					roszczenia := roszczeniaZadania(task)
-					oddajZasoby, powod := zajmijZasoby(sessionCtx, zasoby, task, roszczenia)
-					if powod != "" {
-						// Odmowa z nazwa blokujacego zadania jest odpowiedzia;
-						// cisza do konca limitu czasu operacji nia nie jest.
-						odmowa := rejected(agentv1.TaskResult_STATUS_REJECTED,
-							RejectResourceBusy, powod)
-						odmowa.TaskId = task.GetTaskId()
-						opts.Log.Info("zadanie odrzucone przez blokade zasobu",
-							"task_id", task.GetTaskId(), "powod", powod)
+					// The resources first, the budget slot second: a task waiting
+					// for a busy resource has no reason to hold a slot that would
+					// be useful to an operation without a collision.
+					claims := taskClaims(task)
+					releaseResources, reason := acquireResources(sessionCtx, resources, task, claims)
+					if reason != "" {
+						// A refusal naming the blocking task is an answer; silence
+						// until the end of the time limit of the operation is not.
+						refusal := rejected(agentv1.TaskResult_STATUS_REJECTED,
+							RejectResourceBusy, reason)
+						refusal.TaskId = task.GetTaskId()
+						opts.Log.Info("the task was refused by a resource lock",
+							"task_id", task.GetTaskId(), "reason", reason)
 						if err := send(&agentv1.AgentMessage{
-							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: odmowa},
+							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: refusal},
 						}); err != nil {
-							opts.Log.Error("nie odeslano odmowy zadania",
+							opts.Log.Error("the refusal of the task was not sent back",
 								"task_id", task.GetTaskId(), "err", err)
 						}
 						return
 					}
-					if oddajZasoby == nil {
+					if releaseResources == nil {
 						return
 					}
-					defer oddajZasoby()
+					defer releaseResources()
 
-					zwolnij := miejsca.zajmij(sessionCtx, klasaZadania(task))
-					if zwolnij == nil {
+					releaseSlot := slots.acquire(sessionCtx, taskClass(task))
+					if releaseSlot == nil {
 						return
 					}
-					defer zwolnij()
-					if len(roszczenia) > 0 {
-						opts.Log.Info("zasoby zajete", "task_id", task.GetTaskId(),
-							"roszczenia", strings.Join(roszczenia, ","))
+					defer releaseSlot()
+					if len(claims) > 0 {
+						opts.Log.Info("the resources were taken", "task_id", task.GetTaskId(),
+							"claims", strings.Join(claims, ","))
 					}
 					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
-					// Wymiana agenta nie ma wyniku do odeslania: proces,
-					// ktory ja wykonal, wlasnie jest zastepowany, a o tym,
-					// czy sie udala, rozstrzyga powrot hosta z nowa wersja.
-					// Kazda inna odpowiedz bylaby zgadywaniem.
-					if result.GetErrorCode() == StatusPoWymianie {
-						opts.Log.Info("wymiana agenta w toku",
-							"task_id", task.GetTaskId(), "opis", result.GetMessage())
+					// An agent replacement has no result to send back: the process
+					// that performed it is being replaced right now, and whether it
+					// worked is decided by the return of the host with the new
+					// version. Any other answer would be a guess.
+					if result.GetErrorCode() == StatusAfterReplacement {
+						opts.Log.Info("the agent replacement is in flight",
+							"task_id", task.GetTaskId(), "description", result.GetMessage())
 						return
 					}
-					opts.Log.Info("zadanie zakonczone",
+					opts.Log.Info("the task finished",
 						"task_id", task.GetTaskId(), "status", result.GetStatus(),
 						"error_code", result.GetErrorCode(), "replayed", result.GetReplayed())
 					if err := send(&agentv1.AgentMessage{
 						Payload: &agentv1.AgentMessage_TaskResult{TaskResult: result},
 					}); err != nil {
-						opts.Log.Error("nie odeslano wyniku zadania",
+						opts.Log.Error("the result of the task was not sent back",
 							"task_id", task.GetTaskId(), "err", err)
 					}
 				}()
 
 			case *agentv1.ServerMessage_CancelTask:
-				// Nie kazda operacja systemowa da sie bezpiecznie przerwac -
-				// transakcji pakietowej nie wolno urwac w polowie - wiec
-				// anulowanie dziala tam, gdzie zostalo zgloszone jako
-				// bezpieczne, a poza tym zostaje odnotowane.
-				przerwane := false
+				// Not every system operation can be interrupted safely - a package
+				// transaction must not be cut in half - so the cancellation works
+				// where it was declared safe, and beyond that it is recorded.
+				interrupted := false
 				if opts.Executor != nil && opts.Executor.cancels != nil {
-					przerwane = opts.Executor.cancels.Anuluj(payload.CancelTask.GetTaskId())
+					interrupted = opts.Executor.cancels.Cancel(payload.CancelTask.GetTaskId())
 				}
-				opts.Log.Info("zadano anulowania zadania",
+				opts.Log.Info("a cancellation of the task was requested",
 					"task_id", payload.CancelTask.GetTaskId(),
 					"reason", payload.CancelTask.GetReason(),
-					"przerwane", przerwane)
+					"interrupted", interrupted)
 			}
 		}
 	}()
 
-	// Stabilny offset per host rozklada heartbeaty calej floty w czasie.
+	// A stable per-host offset spreads the heartbeats of the whole fleet over
+	// time.
 	heartbeatTimer := time.NewTimer(stableOffset(facts.MachineID, heartbeatInterval))
 	defer heartbeatTimer.Stop()
 	inventoryTicker := time.NewTicker(opts.InventoryInterval)
@@ -487,19 +493,20 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			heartbeatTimer.Reset(nextHeartbeat(heartbeatInterval, jitterWindow))
 
 		case <-inventoryTicker.C:
-			inventory.zazadaj()
+			inventory.request()
 		}
 	}
 }
 
-// adresDoPanelu zwraca adres lokalny, ktorym host dosiegnie control plane.
-// Gniazdo UDP nie wysyla zadnego pakietu - samo przypisanie adresu wybiera
-// tablica routingu. To odpowiedz na pytanie "ktorym adresem ten host rozmawia
-// z panelem", a nie pierwszy adres z listy interfejsow, ktory nie znaczy nic.
+// panelAddress returns the local address the host reaches the control plane
+// with. The UDP socket sends no packet - the address is chosen by the routing
+// table at bind time. This is the answer to the question "which address does
+// this host talk to the panel with", and not the first address from the list of
+// interfaces, which means nothing.
 //
-// Nieustalony adres zostaje pusty. Panel woli nie znac adresu, niz pokazac
-// operatorowi adres, pod ktorym hosta nie ma.
-func adresDoPanelu(gatewayURL string) string {
+// An address that was not determined stays empty. The panel prefers not to know
+// the address over showing the operator an address the host is not at.
+func panelAddress(gatewayURL string) string {
 	parsed, err := url.Parse(gatewayURL)
 	if err != nil || parsed.Hostname() == "" {
 		return ""
@@ -534,8 +541,8 @@ func newHTTP2Client(identity *Identity) *http.Client {
 	}
 }
 
-// stableOffset rozklada pierwszy heartbeat deterministycznie wedlug machine-id,
-// wiec ten sam host zawsze trafia w to samo miejsce okna.
+// stableOffset spreads the first heartbeat deterministically by machine-id, so
+// the same host always lands in the same place of the window.
 func stableOffset(machineID string, window time.Duration) time.Duration {
 	if window <= 0 {
 		return 0
@@ -559,61 +566,61 @@ func withJitter(base time.Duration) time.Duration {
 	return base/2 + time.Duration(rand.Int64N(int64(base)))
 }
 
-// executeTask uruchamia zadanie za bariera odpornosci.
+// executeTask runs a task behind a resilience barrier.
 //
-// Panika w obsludze jednego zadania nie moze zabic agenta: host stracilby
-// wtedy zarzadzanie przez blad w jednej operacji, a control plane zobaczylby
-// zerwana sesje zamiast informacji, co poszlo nie tak. Zadanie konczy sie
-// wynikiem negatywnym, a agent dziala dalej.
+// A panic while handling one task must not kill the agent: the host would then
+// lose its management because of an error in one operation, and the control
+// plane would see a broken session instead of information about what went
+// wrong. The task ends with a negative result and the agent keeps working.
 func executeTask(ctx context.Context, executor *TaskExecutor, task *agentv1.TaskEnvelope,
 	log *slog.Logger) (result *agentv1.TaskResult) {
 	if executor == nil {
-		// Agent bez wykonawcy zadan nie jest zepsuty - taka jest na przyklad
-		// rola symulatora. Odrzucenie jest odpowiedzia, a nie awaria.
+		// An agent without a task executor is not broken - that is, for example,
+		// the role of the simulator. A refusal is an answer, not a failure.
 		return &agentv1.TaskResult{
 			TaskId:    task.GetTaskId(),
 			Status:    agentv1.TaskResult_STATUS_REJECTED,
 			ExitCode:  -1,
 			ErrorCode: RejectUnsupported,
-			Message:   "agent nie wykonuje zadan",
+			Message:   "the agent performs no tasks",
 		}
 	}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			log.Error("panika przy wykonaniu zadania",
-				"task_id", task.GetTaskId(), "powod", fmt.Sprint(recovered),
-				"stos", string(debug.Stack()))
+			log.Error("a panic while performing the task",
+				"task_id", task.GetTaskId(), "reason", fmt.Sprint(recovered),
+				"stack", string(debug.Stack()))
 			result = &agentv1.TaskResult{
 				TaskId:    task.GetTaskId(),
 				Status:    agentv1.TaskResult_STATUS_FAILED,
 				ExitCode:  -1,
 				ErrorCode: RejectInternalError,
-				Message:   "wewnetrzny blad agenta przy wykonaniu zadania",
+				Message:   "an internal error of the agent while performing the task",
 			}
 		}
 	}()
 
 	result = executor.Execute(ctx, task)
 	if result == nil {
-		// Milczenie agenta jest dla control plane nieodrozninalne od zerwanego
-		// polaczenia, wiec brak wyniku jest tu bledem, a nie pustka.
+		// Silence from the agent is indistinguishable for the control plane from a
+		// broken connection, so a missing result is an error here and not a void.
 		result = &agentv1.TaskResult{
 			TaskId:    task.GetTaskId(),
 			Status:    agentv1.TaskResult_STATUS_FAILED,
 			ExitCode:  -1,
 			ErrorCode: RejectInternalError,
-			Message:   "wykonawca nie zwrocil wyniku",
+			Message:   "the executor returned no result",
 		}
 	}
 	return result
 }
 
-// odciskWartosci liczy sume kontrolna pobranej wartosci sekretu.
+// valueDigest computes the checksum of a fetched secret value.
 //
-// Sluzy wylacznie do sprawdzenia, ze host dostal to, co panel wydal. Odcisku
-// nigdzie nie zapisujemy: dla krotkiej wartosci sam odcisk bywa wskazowka.
-func odciskWartosci(wartosc []byte) string {
-	suma := sha256.Sum256(wartosc)
-	return hex.EncodeToString(suma[:])
+// It serves only to check that the host got what the panel issued. The digest
+// is written nowhere: for a short value the digest alone can be a hint.
+func valueDigest(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
 }

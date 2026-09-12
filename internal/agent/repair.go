@@ -8,12 +8,12 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// repairPackages odblokowuje operacje pakietowe przez helpera roota.
+// repairPackages unblocks the package operations through the root helper.
 //
-// Operacja konczy sie sukcesem tylko wtedy, gdy po naprawie nie zostal zaden
-// pakiet blokujacy. Czesciowa naprawa jest wynikiem negatywnym z lista tego,
-// co zostalo: host, na ktorym aktualizacje nadal nie przejda, nie moze byc
-// raportowany jako naprawiony.
+// The operation ends in success only when no blocking package is left after the
+// repair. A partial repair is a negative result with a list of what remains: a
+// host on which the updates still will not go through must not be reported as
+// repaired.
 func (e *TaskExecutor) repairPackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackageRepairPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, opspec.ActionPackageRepair)
@@ -57,22 +57,22 @@ func (e *TaskExecutor) repairPackages(ctx context.Context, task *agentv1.TaskEnv
 			Status:    agentv1.TaskResult_STATUS_FAILED,
 			ExitCode:  1,
 			ErrorCode: "packages_still_blocked",
-			Message:   "po naprawie nadal blokuja: " + nazwyPakietow(detail.GetStillBlocked()),
+			Message:   "still blocking after the repair: " + packageNames(detail.GetStillBlocked()),
 			Detail:    &agentv1.TaskResult_PackageRepair{PackageRepair: detail},
 		}
 	}
 
-	komunikat := "operacje pakietowe odblokowane"
+	message := "the package operations were unblocked"
 	if len(detail.GetAnswered()) == 0 {
-		// Naprawa hosta, ktory niczego nie potrzebowal, jest powodzeniem.
-		// Kampania obejmujaca cala flote trafi na takie hosty i nie moze
-		// z tego powodu raportowac bledow.
-		komunikat = "nic nie wymagalo naprawy"
+		// A repair of a host that needed nothing is a success. A campaign
+		// covering the whole fleet will meet such hosts and must not report
+		// errors because of them.
+		message = "nothing needed a repair"
 	}
 	return &agentv1.TaskResult{
 		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode: 0,
-		Message:  komunikat,
+		Message:  message,
 		Detail:   &agentv1.TaskResult_PackageRepair{PackageRepair: detail},
 	}
 }
@@ -91,24 +91,24 @@ func repairResultToAgent(response *helperv1.PackageRepairResponse) *agentv1.Pack
 
 func blockedToAgent(blocked []*helperv1.BlockedPackageDetail) []*agentv1.BlockedPackage {
 	result := make([]*agentv1.BlockedPackage, 0, len(blocked))
-	for _, pakiet := range blocked {
-		pytania := make([]*agentv1.DebconfQuestion, 0, len(pakiet.GetQuestions()))
-		for _, pytanie := range pakiet.GetQuestions() {
-			pytania = append(pytania, &agentv1.DebconfQuestion{
-				Name: pytanie.GetName(), Value: pytanie.GetValue(), Answered: pytanie.Answered,
+	for _, pkg := range blocked {
+		questions := make([]*agentv1.DebconfQuestion, 0, len(pkg.GetQuestions()))
+		for _, question := range pkg.GetQuestions() {
+			questions = append(questions, &agentv1.DebconfQuestion{
+				Name: question.GetName(), Value: question.GetValue(), Answered: question.Answered,
 			})
 		}
 		result = append(result, &agentv1.BlockedPackage{
-			Name: pakiet.GetName(), Status: pakiet.GetStatus(), Questions: pytania,
+			Name: pkg.GetName(), Status: pkg.GetStatus(), Questions: questions,
 		})
 	}
 	return result
 }
 
-func nazwyPakietow(blocked []*agentv1.BlockedPackage) string {
-	nazwy := make([]string, 0, len(blocked))
-	for _, pakiet := range blocked {
-		nazwy = append(nazwy, pakiet.GetName())
+func packageNames(blocked []*agentv1.BlockedPackage) string {
+	names := make([]string, 0, len(blocked))
+	for _, pkg := range blocked {
+		names = append(names, pkg.GetName())
 	}
-	return joinNames(nazwy)
+	return joinNames(names)
 }

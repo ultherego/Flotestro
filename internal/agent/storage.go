@@ -8,37 +8,38 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/storage"
 )
 
-// lvmProbe czyta stan LVM przez helpera: narzedzia LVM wymagaja roota.
+// lvmProbe reads the LVM state through the helper: the LVM tools need root.
 var lvmProbe func(context.Context) (storage.Snapshot, error)
 
-// SetLVMProbe wskazuje funkcje odczytujaca grupy i wolumeny.
+// SetLVMProbe points at the function that reads the groups and the volumes.
 func SetLVMProbe(probe func(context.Context) (storage.Snapshot, error)) {
 	lvmProbe = probe
 }
 
-// ZbierzPrzestrzen czyta topologie dyskow i punkty montowania.
+// CollectStorage reads the disk topology and the mount points.
 //
-// Odczyt urzadzen i montowan nie wymaga roota. LVM juz tak, wiec idzie przez
-// helpera - a host bez LVM dostaje powod, nie pusta liste.
-func ZbierzPrzestrzen(ctx context.Context) storage.Snapshot {
+// Reading the devices and the mounts needs no root. LVM does, so it goes
+// through the helper - and a host without LVM gets a reason, not an empty
+// list.
+func CollectStorage(ctx context.Context) storage.Snapshot {
 	snapshot := storage.Snapshot{ObservedAt: time.Now().UTC()}
 
 	if !exists(storage.SciezkaLsblk) {
 		snapshot.UnavailableReason = "this host has no lsblk binary"
 		return snapshot
 	}
-	wyjscie, err := wyjsciePolecenia(ctx, storage.SciezkaLsblk, "-J", "-b", "-o",
-		kolumny(storage.KolumnyLsblk))
+	output, err := commandOutput(ctx, storage.SciezkaLsblk, "-J", "-b", "-o",
+		columns(storage.KolumnyLsblk))
 	if err != nil {
 		snapshot.UnavailableReason = "lsblk: " + err.Error()
 		return snapshot
 	}
-	urzadzenia, err := storage.ParsujUrzadzenia(wyjscie)
+	devices, err := storage.ParsujUrzadzenia(output)
 	if err != nil {
 		snapshot.UnavailableReason = err.Error()
 		return snapshot
 	}
-	snapshot.Devices = urzadzenia
+	snapshot.Devices = devices
 
 	mountinfo, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
@@ -48,7 +49,7 @@ func ZbierzPrzestrzen(ctx context.Context) storage.Snapshot {
 	fstab, _ := os.ReadFile("/etc/fstab")
 	snapshot.Mounts = storage.PolaczMontowania(
 		storage.ParsujMountinfo(string(mountinfo)), storage.ParsujFstab(string(fstab)))
-	uzupelnijZajetosc(snapshot.Mounts)
+	fillUsage(snapshot.Mounts)
 
 	if lvmProbe != nil {
 		lvm, err := lvmProbe(ctx)
@@ -60,22 +61,22 @@ func ZbierzPrzestrzen(ctx context.Context) storage.Snapshot {
 			snapshot.LVMUnavailableReason = lvm.LVMUnavailableReason
 		}
 	}
-	// Macierze programowe czytamy z /proc/mdstat: brak pliku oznacza jadro
-	// bez modulu md, a nie host bez macierzy.
+	// The software arrays are read from /proc/mdstat: a missing file means a
+	// kernel without the md module, not a host without arrays.
 	if _, err := os.Stat("/proc/mdstat"); err != nil {
 		snapshot.RAIDUnavailableReason = "this kernel has no software RAID support (/proc/mdstat)"
 	}
 	return snapshot
 }
 
-// kolumny sklada liste kolumn dla lsblk.
-func kolumny(nazwy []string) string {
-	wynik := ""
-	for i, nazwa := range nazwy {
+// columns assembles the list of columns for lsblk.
+func columns(names []string) string {
+	result := ""
+	for i, name := range names {
 		if i > 0 {
-			wynik += ","
+			result += ","
 		}
-		wynik += nazwa
+		result += name
 	}
-	return wynik
+	return result
 }

@@ -8,12 +8,14 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// Mapowanie miedzy modelem agenta a kontraktem protokolu jest w jednym miejscu,
-// dzieki czemu zmiana kontraktu nie rozlewa sie po logice zbierania faktow.
+// The mapping between the model of the agent and the contract of the protocol
+// lives in one place, so a change of the contract does not spill over the logic
+// of collecting facts.
 
-// capabilitiesToProto wysyla rejestr i - dla starszego serwera - pola logiczne
-// sprzed rejestru. Flota aktualizuje sie stopniowo, wiec obie strony przez
-// jakis czas musza sie rozumiec.
+// capabilitiesToProto sends the registry and - for an older server - the
+// boolean fields
+// from before the registry. A fleet upgrades gradually, so both sides have to
+// understand each other for a while.
 func capabilitiesToProto(c Capabilities) *agentv1.Capabilities {
 	registry := make([]*agentv1.Capability, 0, len(c))
 	for _, cap := range c {
@@ -36,8 +38,8 @@ func capabilitiesToProto(c Capabilities) *agentv1.Capabilities {
 	}
 }
 
-// Wartosci nieustalone nie sa wysylane: brak pola w wiadomosci oznacza
-// "nie wiem", a nie zero.
+// Values that were not determined are not sent: a missing field in the message
+// means "I do not know" and not zero.
 func healthToProto(h Health) *agentv1.HealthSignals {
 	return &agentv1.HealthSignals{
 		FailedUnits:            h.FailedUnits,
@@ -51,9 +53,9 @@ func healthToProto(h Health) *agentv1.HealthSignals {
 }
 
 func inventoryToProto(f Facts, revision string, rawJSON []byte) *agentv1.InventoryReport {
-	// Blad rozbicia na moduly nie moze zabrac serwerowi calego raportu:
-	// pelna tresc jest w raw_json i zostaje wyslana tak czy inaczej.
-	fragmenty, _ := f.Fragments()
+	// An error while splitting into modules must not take the whole report away
+	// from the server: the full content is in raw_json and is sent either way.
+	fragments, _ := f.Fragments()
 	return &agentv1.InventoryReport{
 		Revision:      revision,
 		Full:          true,
@@ -83,7 +85,7 @@ func inventoryToProto(f Facts, revision string, rawJSON []byte) *agentv1.Invento
 		Identity:      identityToProto(f.Identity),
 		LocalAccounts: localAccountsToProto(f.LocalAccounts),
 		RawJson:       rawJSON,
-		Fragments:     fragmentsToProto(fragmenty),
+		Fragments:     fragmentsToProto(fragments),
 	}
 }
 
@@ -110,10 +112,10 @@ func timestampNow() *timestamppb.Timestamp {
 	return timestamppb.New(time.Now().UTC())
 }
 
-func fragmentsToProto(fragmenty []Fragment) []*agentv1.InventoryFragment {
-	wynik := make([]*agentv1.InventoryFragment, 0, len(fragmenty))
-	for _, fragment := range fragmenty {
-		wynik = append(wynik, &agentv1.InventoryFragment{
+func fragmentsToProto(fragments []Fragment) []*agentv1.InventoryFragment {
+	result := make([]*agentv1.InventoryFragment, 0, len(fragments))
+	for _, fragment := range fragments {
+		result = append(result, &agentv1.InventoryFragment{
 			Module:            fragment.Module,
 			Revision:          fragment.Revision,
 			Source:            fragment.Source,
@@ -122,5 +124,5 @@ func fragmentsToProto(fragmenty []Fragment) []*agentv1.InventoryFragment {
 			ObservedAt:        timestamppb.New(fragment.ObservedAt),
 		})
 	}
-	return wynik
+	return result
 }

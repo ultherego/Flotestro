@@ -8,138 +8,141 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-func TestPorownanieStanuKonta(t *testing.T) {
-	prawda, falsz := true, false
+func TestComparingTheStateOfAnAccount(t *testing.T) {
+	trueValue, falseValue := true, false
 
-	konto := func() *LocalAccount {
+	account := func() *LocalAccount {
 		return &LocalAccount{
-			Name: "kowalski", Shell: "/bin/bash", Groups: []string{"sudo", "kowalski"},
-			Locked: &falsz, PasswordSet: &falsz,
+			Name: "smith", Shell: "/bin/bash", Groups: []string{"sudo", "smith"},
+			Locked: &falseValue, PasswordSet: &falseValue,
 			SSHKeys: []SSHKeyInfo{{Fingerprint: "SHA256:aaa"}},
 		}
 	}
 
-	if !sameAccountState(konto(), konto()) {
-		t.Error("identyczny stan musi byc rozpoznany jako niezmieniony")
+	if !sameAccountState(account(), account()) {
+		t.Error("an identical state has to be recognized as unchanged")
 	}
 
-	// Kolejnosc grup i kluczy zalezy od systemu i nie jest zmiana stanu.
-	inna := konto()
-	inna.Groups = []string{"kowalski", "sudo"}
-	if !sameAccountState(konto(), inna) {
-		t.Error("kolejnosc grup nie jest zmiana")
+	// The order of the groups and of the keys depends on the system and is not a
+	// change of state.
+	other := account()
+	other.Groups = []string{"smith", "sudo"}
+	if !sameAccountState(account(), other) {
+		t.Error("the order of the groups is not a change")
 	}
 
-	zablokowane := konto()
-	zablokowane.Locked = &prawda
-	if sameAccountState(konto(), zablokowane) {
-		t.Error("zmiana blokady musi byc wykryta")
+	locked := account()
+	locked.Locked = &trueValue
+	if sameAccountState(account(), locked) {
+		t.Error("a change of the lock has to be detected")
 	}
 
-	// Stan nieznany rozni sie od kazdego znanego: przejscie z "nie wiadomo"
-	// na "zablokowane" jest zmiana wiedzy panelu, a nie brakiem zmiany.
-	nieznane := konto()
-	nieznane.Locked = nil
-	if sameAccountState(konto(), nieznane) {
-		t.Error("stan nieznany nie moze byc rowny stanowi znanemu")
+	// An unknown state differs from every known one: a move from "not known" to
+	// "locked" is a change in the knowledge of the panel, not the absence of a
+	// change.
+	unknown := account()
+	unknown.Locked = nil
+	if sameAccountState(account(), unknown) {
+		t.Error("an unknown state must not equal a known one")
 	}
 
-	bezKlucza := konto()
-	bezKlucza.SSHKeys = nil
-	if sameAccountState(konto(), bezKlucza) {
-		t.Error("odebranie klucza musi byc wykryte")
+	withoutKey := account()
+	withoutKey.SSHKeys = nil
+	if sameAccountState(account(), withoutKey) {
+		t.Error("taking a key away has to be detected")
 	}
 
-	if sameAccountState(nil, konto()) {
-		t.Error("zalozenie konta jest zmiana")
+	if sameAccountState(nil, account()) {
+		t.Error("creating an account is a change")
 	}
 	if !sameAccountState(nil, nil) {
-		t.Error("brak konta przed i po nie jest zmiana")
+		t.Error("no account before and after is not a change")
 	}
 }
 
-func TestUzupelnienieDanychUprzywilejowanych(t *testing.T) {
-	prawda := true
-	accounts := []LocalAccount{{Name: "kowalski"}, {Name: "nowak"}}
+func TestFillingInThePrivilegedData(t *testing.T) {
+	trueValue := true
+	accounts := []LocalAccount{{Name: "smith"}, {Name: "jones"}}
 	result := &helperv1.LocalAccountsResult{
 		Accounts: []*helperv1.LocalAccountDetail{{
-			Name:        "kowalski",
-			Locked:      &prawda,
-			PasswordSet: &prawda,
+			Name:        "smith",
+			Locked:      &trueValue,
+			PasswordSet: &trueValue,
 			SshKeys:     []*helperv1.LocalSSHKey{{Fingerprint: "SHA256:aaa", Type: "ED25519"}},
 		}},
 	}
 
 	merged := mergePrivilegedAccounts(accounts, result)
 	if merged[0].Locked == nil || !*merged[0].Locked {
-		t.Error("stan blokady nie zostal przeniesiony")
+		t.Error("the lock state was not carried over")
 	}
 	if len(merged[0].SSHKeys) != 1 || merged[0].SSHKeys[0].Source != "authorized_keys" {
-		t.Error("klucze nie zostaly przeniesione ze zrodlem")
+		t.Error("the keys were not carried over with their source")
 	}
-	// Konto, o ktorym helper nic nie powiedzial, zostaje ze stanem nieznanym.
-	// Wpisanie tu "odblokowane" byloby zmyslonym faktem.
+	// An account the helper said nothing about stays with an unknown state.
+	// Writing "unlocked" here would be an invented fact.
 	if merged[1].Locked != nil {
-		t.Error("brak danych musi zostac stanem nieznanym")
+		t.Error("missing data has to stay an unknown state")
 	}
 }
 
-func TestZakresUIDZLoginDefs(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "login.defs")
-	zawartosc := "# komentarz\nUID_MIN\t\t 500\nUID_MAX\t\t 50000\nGID_MIN 1000\n"
-	if err := os.WriteFile(sciezka, []byte(zawartosc), 0o644); err != nil {
+func TestTheUIDRangeFromLoginDefs(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "login.defs")
+	content := "# a comment\nUID_MIN\t\t 500\nUID_MAX\t\t 50000\nGID_MIN 1000\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	uidMin, uidMax := parseUIDRange(sciezka)
+	uidMin, uidMax := parseUIDRange(path)
 	if uidMin != 500 || uidMax != 50000 {
-		t.Fatalf("odczytano zakres %d-%d, oczekiwano 500-50000", uidMin, uidMax)
+		t.Fatalf("read the range %d-%d, expected 500-50000", uidMin, uidMax)
 	}
 
-	// Brak pliku nie moze przesunac klasyfikacji: wartosci awaryjne odpowiadaja
-	// ustawieniom dystrybucji.
-	uidMin, uidMax = parseUIDRange(filepath.Join(katalog, "nie-istnieje"))
+	// A missing file must not shift the classification: the fallback values match
+	// the settings of the distributions.
+	uidMin, uidMax = parseUIDRange(filepath.Join(directory, "does-not-exist"))
 	if uidMin != defaultUIDMin || uidMax != defaultUIDMax {
-		t.Fatalf("brak pliku dal zakres %d-%d", uidMin, uidMax)
+		t.Fatalf("a missing file gave the range %d-%d", uidMin, uidMax)
 	}
 }
 
-func TestKlasyfikacjaKont(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "passwd")
-	zawartosc := "root:x:0:0:root:/root:/bin/bash\n" +
+func TestTheClassificationOfAccounts(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "passwd")
+	content := "root:x:0:0:root:/root:/bin/bash\n" +
 		"daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n" +
-		"kowalski:x:1001:1001:Jan Kowalski,,,:/home/kowalski:/bin/bash\n" +
-		// "nobody" lezy powyzej zakresu kont ludzi i jest kontem systemowym
-		// mimo wysokiego UID; sam prog dolny by tego nie wykryl.
+		"smith:x:1001:1001:John Smith,,,:/home/smith:/bin/bash\n" +
+		// "nobody" lies above the range of the accounts of people and is a
+		// system account despite its high UID; the lower bound alone would not
+		// detect that.
 		"nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n" +
-		"uszkodzony:x:nie-liczba:0::/tmp:/bin/sh\n"
-	if err := os.WriteFile(sciezka, []byte(zawartosc), 0o644); err != nil {
+		"broken:x:not-a-number:0::/tmp:/bin/sh\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	accounts := parsePasswd(sciezka, 1000, 60000, func(string) []string { return nil })
-	zrodla := map[string]AccountSource{}
-	for _, konto := range accounts {
-		zrodla[konto.Name] = konto.Source
+	accounts := parsePasswd(path, 1000, 60000, func(string) []string { return nil })
+	sources := map[string]AccountSource{}
+	for _, account := range accounts {
+		sources[account.Name] = account.Source
 	}
 
 	if len(accounts) != 4 {
-		t.Fatalf("odczytano %d kont, oczekiwano 4 (wiersz uszkodzony pomijany)", len(accounts))
+		t.Fatalf("read %d accounts, expected 4 (the broken line is skipped)", len(accounts))
 	}
-	for nazwa, oczekiwane := range map[string]AccountSource{
+	for name, expected := range map[string]AccountSource{
 		"root": SourceSystem, "daemon": SourceSystem,
-		"kowalski": SourceLocal, "nobody": SourceSystem,
+		"smith": SourceLocal, "nobody": SourceSystem,
 	} {
-		if zrodla[nazwa] != oczekiwane {
-			t.Errorf("konto %s sklasyfikowane jako %s, oczekiwano %s", nazwa, zrodla[nazwa], oczekiwane)
+		if sources[name] != expected {
+			t.Errorf("the account %s was classified as %s, expected %s", name, sources[name], expected)
 		}
 	}
 
-	for _, konto := range accounts {
-		if konto.Name == "kowalski" && konto.Gecos != "Jan Kowalski" {
-			t.Errorf("opis konta odczytany jako %q", konto.Gecos)
+	for _, account := range accounts {
+		if account.Name == "smith" && account.Gecos != "John Smith" {
+			t.Errorf("the description of the account was read as %q", account.Gecos)
 		}
 	}
 }

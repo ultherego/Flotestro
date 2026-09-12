@@ -11,57 +11,58 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/docker"
 )
 
-// dockerProbe czyta stan silnika kontenerow przez helpera. Agent nie ma
-// dostepu do gniazda Dockera i nie moze go miec: czlonkostwo w grupie docker
-// jest rownowazne rootowi.
+// dockerProbe reads the state of the container engine through the helper. The
+// agent has no access to the Docker socket and must not have one: membership in
+// the docker group is equivalent to root.
 var dockerProbe func(context.Context, bool) (docker.Snapshot, error)
 
-// SetDockerProbe wskazuje funkcje odczytujaca stan kontenerow.
+// SetDockerProbe points at the function that reads the state of the containers.
 func SetDockerProbe(probe func(context.Context, bool) (docker.Snapshot, error)) {
 	dockerProbe = probe
 }
 
-// ProbeDocker odczytuje stan silnika kontenerow przez helpera.
-// full decyduje, czy odpowiedz niesie pelne listy, czy samo podsumowanie.
+// ProbeDocker reads the state of the container engine through the helper. full
+// decides whether the answer carries the complete lists or only the summary.
 func (e *TaskExecutor) ProbeDocker(ctx context.Context, full bool) (docker.Snapshot, error) {
-	zakres := helperv1.DockerReadRequest_SCOPE_SUMMARY
+	scope := helperv1.DockerReadRequest_SCOPE_SUMMARY
 	timeout := 30 * time.Second
 	if full {
-		zakres = helperv1.DockerReadRequest_SCOPE_FULL
+		scope = helperv1.DockerReadRequest_SCOPE_FULL
 		timeout = 2 * time.Minute
 	}
 
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_DockerRead{
-			DockerRead: &helperv1.DockerReadRequest{Scope: zakres},
+			DockerRead: &helperv1.DockerReadRequest{Scope: scope},
 		},
 	}, timeout)
 	if err != nil {
 		return docker.Snapshot{}, err
 	}
-	wynik := response.GetDockerResult()
-	if wynik == nil {
-		return docker.Snapshot{}, errors.New("helper nie odeslal stanu kontenerow")
+	result := response.GetDockerResult()
+	if result == nil {
+		return docker.Snapshot{}, errors.New("the helper did not send back the state of the containers")
 	}
-	if len(wynik.GetSnapshot()) == 0 {
+	if len(result.GetSnapshot()) == 0 {
 		return docker.Snapshot{
-			Summary: docker.Summary{UnavailableReason: wynik.GetUnavailableReason()},
+			Summary: docker.Summary{UnavailableReason: result.GetUnavailableReason()},
 		}, nil
 	}
 
 	var snapshot docker.Snapshot
-	if err := json.Unmarshal(wynik.GetSnapshot(), &snapshot); err != nil {
+	if err := json.Unmarshal(result.GetSnapshot(), &snapshot); err != nil {
 		return docker.Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// readDocker wykonuje operacje odczytu stanu kontenerow.
+// readDocker performs the read of the state of the containers.
 //
-// Odczyt jest pelny: operator otworzyl zakladke i chce zobaczyc kontenery,
-// obrazy, sieci i wolumeny. Cykl inwentarza pobiera samo podsumowanie, wiec
-// te dwie sciezki nie obciazaja hosta tym samym.
+// The read is complete: the operator opened the tab and wants to see the
+// containers, the images, the networks and the volumes. The inventory cycle
+// fetches only the summary, so these two paths do not load the host with the
+// same thing.
 func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 	snapshot, err := e.ProbeDocker(ctx, true)
 	if err != nil {
@@ -71,8 +72,8 @@ func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelop
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
 	}
-	// Niedostepny silnik nie jest bledem operacji: odczyt sie udal, a jego
-	// trescia jest informacja, ze silnik nie odpowiada.
+	// An unavailable engine is not an error of the operation: the read succeeded,
+	// and its content is the information that the engine does not answer.
 	return &agentv1.TaskResult{
 		TaskId: task.GetTaskId(),
 		Status: agentv1.TaskResult_STATUS_SUCCEEDED,
@@ -83,16 +84,17 @@ func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelop
 	}
 }
 
-// readDockerEvents czyta dziennik zdarzen silnika w zamknietym oknie.
+// readDockerEvents reads the event journal of the engine within a closed
+// window.
 //
-// Zadanie konczy sie samo, bo okno jest domkniete z obu stron. Odczyt bez
-// konca zostalby na hoscie na zawsze - takze wtedy, gdy panel dawno przestal
-// go sluchac.
+// The task ends on its own, because the window is closed on both sides. A read
+// without an end would stay on the host forever - also when the panel stopped
+// listening to it long ago.
 func (e *TaskExecutor) readDockerEvents(ctx context.Context,
 	task *agentv1.TaskEnvelope) *agentv1.TaskResult {
-	zamowienie := task.GetReadDockerEvents()
-	// Limit helpera obejmuje okno sledzenia z zapasem na sam odczyt.
-	timeout := time.Duration(zamowienie.GetFollowSeconds())*time.Second + 90*time.Second
+	order := task.GetReadDockerEvents()
+	// The helper limit covers the follow window with room for the read itself.
+	timeout := time.Duration(order.GetFollowSeconds())*time.Second + 90*time.Second
 
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
@@ -100,37 +102,37 @@ func (e *TaskExecutor) readDockerEvents(ctx context.Context,
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_DockerEvents{
 			DockerEvents: &helperv1.DockerEventsRequest{
-				SinceSeconds:  zamowienie.GetSinceSeconds(),
-				FollowSeconds: zamowienie.GetFollowSeconds(),
-				Types:         zamowienie.GetTypes(),
-				MaxEvents:     zamowienie.GetMaxEvents(),
+				SinceSeconds:  order.GetSinceSeconds(),
+				FollowSeconds: order.GetFollowSeconds(),
+				Types:         order.GetTypes(),
+				MaxEvents:     order.GetMaxEvents(),
 			},
 		},
 	}, timeout)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
-	wynik := response.GetDockerEventsResult()
-	if wynik == nil {
+	result := response.GetDockerEventsResult()
+	if result == nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed,
-			"helper nie odeslal dziennika zdarzen")
+			"the helper did not send back the event journal")
 	}
 
-	// Niedostepny silnik nie jest bledem operacji: odczyt sie udal, a jego
-	// trescia jest informacja, ze silnik nie odpowiada.
+	// An unavailable engine is not an error of the operation: the read succeeded,
+	// and its content is the information that the engine does not answer.
 	return &agentv1.TaskResult{
 		TaskId: task.GetTaskId(),
 		Status: agentv1.TaskResult_STATUS_SUCCEEDED,
 		DockerEventsResult: &agentv1.DockerEventsResult{
-			Events:            wynik.GetEvents(),
-			Truncated:         wynik.GetTruncated(),
-			TruncatedReason:   wynik.GetTruncatedReason(),
-			UnavailableReason: wynik.GetUnavailableReason(),
+			Events:            result.GetEvents(),
+			Truncated:         result.GetTruncated(),
+			TruncatedReason:   result.GetTruncatedReason(),
+			UnavailableReason: result.GetUnavailableReason(),
 		},
 	}
 }
 
-// applyDocker wykonuje operacje na kontenerach przez helpera.
+// applyDocker performs an operation on the containers through the helper.
 func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelope,
 	action *agentv1.DockerAction) *agentv1.TaskResult {
 	timeout := time.Duration(task.GetLimits().GetTimeoutSeconds()) * time.Second
@@ -146,7 +148,7 @@ func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelo
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_DockerAction{
 			DockerAction: &helperv1.DockerActionRequest{
-				Operation:      operacjaDoHelpera(action.GetOperation()),
+				Operation:      helperDockerOperation(action.GetOperation()),
 				ContainerId:    action.GetContainerId(),
 				TimeoutSeconds: action.GetTimeoutSeconds(),
 				RemoveVolumes:  action.GetRemoveVolumes(),
@@ -161,25 +163,26 @@ func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelo
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	// Stan przed i po trafia do wyniku takze przy bledzie: administrator musi
-	// wiedziec, czy zmiana zdazyla wejsc w zycie, zanim operacja padla.
-	szczegoly := wynikDockeraDoProto(response.GetDockerActionResult())
+	// The state before and after goes into the result on failure as well: the
+	// administrator has to know whether the change managed to take hold before
+	// the operation broke down.
+	details := dockerResultToProto(response.GetDockerActionResult())
 	if !response.GetAccepted() {
-		wynik := rejected(agentv1.TaskResult_STATUS_FAILED,
+		result := rejected(agentv1.TaskResult_STATUS_FAILED,
 			response.GetErrorCode(), response.GetMessage())
-		wynik.TaskId = task.GetTaskId()
-		wynik.DockerActionResult = szczegoly
-		return wynik
+		result.TaskId = task.GetTaskId()
+		result.DockerActionResult = details
+		return result
 	}
 	return &agentv1.TaskResult{
 		TaskId:             task.GetTaskId(),
 		Status:             agentv1.TaskResult_STATUS_SUCCEEDED,
-		DockerActionResult: szczegoly,
+		DockerActionResult: details,
 	}
 }
 
-func operacjaDoHelpera(operacja agentv1.DockerAction_Operation) helperv1.DockerActionRequest_Operation {
-	switch operacja {
+func helperDockerOperation(operation agentv1.DockerAction_Operation) helperv1.DockerActionRequest_Operation {
+	switch operation {
 	case agentv1.DockerAction_OPERATION_START:
 		return helperv1.DockerActionRequest_OPERATION_START
 	case agentv1.DockerAction_OPERATION_STOP:
@@ -196,15 +199,15 @@ func operacjaDoHelpera(operacja agentv1.DockerAction_Operation) helperv1.DockerA
 	return helperv1.DockerActionRequest_OPERATION_UNSPECIFIED
 }
 
-func wynikDockeraDoProto(wynik *helperv1.DockerActionResult) *agentv1.DockerActionResult {
-	if wynik == nil {
+func dockerResultToProto(result *helperv1.DockerActionResult) *agentv1.DockerActionResult {
+	if result == nil {
 		return nil
 	}
 	return &agentv1.DockerActionResult{
-		Before:         wynik.GetBefore(),
-		After:          wynik.GetAfter(),
-		Removed:        wynik.GetRemoved(),
-		ReclaimedBytes: wynik.ReclaimedBytes,
-		ImageDigest:    wynik.GetImageDigest(),
+		Before:         result.GetBefore(),
+		After:          result.GetAfter(),
+		Removed:        result.GetRemoved(),
+		ReclaimedBytes: result.ReclaimedBytes,
+		ImageDigest:    result.GetImageDigest(),
 	}
 }

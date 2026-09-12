@@ -29,16 +29,16 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 	}
 	fmt.Fprintf(out, "Config:       correct (%s)\n", path)
 
-	identity := agent.OdczytajTozsamosc(cfg.Agent.StateDir)
+	identity := agent.ReadIdentity(cfg.Agent.StateDir)
 	switch {
-	case !identity.Obecna:
-		fmt.Fprintf(out, "Identity:     missing (%s)\n", identity.Blad)
+	case !identity.Present:
+		fmt.Fprintf(out, "Identity:     missing (%s)\n", identity.Err)
 		problems++
 	default:
 		fmt.Fprintf(out, "Identity:     host/%s\n", identity.HostID)
 		left := time.Until(identity.NotAfter)
 		switch {
-		case identity.Wygasl:
+		case identity.Expired:
 			fmt.Fprintf(out, "Certificate:  EXPIRED %s\n",
 				identity.NotAfter.UTC().Format(time.RFC3339))
 			problems++
@@ -48,7 +48,7 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 		}
 	}
 
-	state, err := agent.OdczytajStan(cfg.Agent.StateDir)
+	state, err := agent.ReadState(cfg.Agent.StateDir)
 	switch {
 	case os.IsNotExist(err):
 		// A missing state file is not a failure: the agent may have just been

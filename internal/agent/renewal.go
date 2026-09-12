@@ -19,15 +19,15 @@ import (
 	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
-// renewalThreshold mowi, kiedy zaczac odnawianie: gdy zostala mniej niz jedna
-// trzecia okresu waznosci. Przy certyfikacie 30-dniowym daje to okolo dziesieciu
-// dni na ponowienia, co jest zapasem na awarie centrali wymaganym przez
-// dokument - a nie ostatnia godzina przed wygasnieciem.
+// renewalThreshold says when to start renewing: when less than a third of the
+// validity period is left. With a 30-day certificate that gives about ten days
+// for retries, which is the margin for a failure of the centre required by the
+// document - and not the last hour before the expiry.
 const renewalThreshold = 1.0 / 3.0
 
-// maxRenewalCheckInterval ogranicza odstep miedzy sprawdzeniami od gory.
-// Odnowienie nie jest pilne co do minuty; czestsze sprawdzanie obciazaloby
-// flote bez powodu.
+// maxRenewalCheckInterval bounds the interval between checks from above. A
+// renewal is not urgent to the minute; checking more often would load the fleet
+// for no reason.
 const maxRenewalCheckInterval = 6 * time.Hour
 
 // minRenewalCheckInterval chroni przed odpytywaniem w petli, gdyby certyfikat
@@ -52,25 +52,25 @@ func checkInterval(notAfter, notBefore time.Time) time.Duration {
 	return interval
 }
 
-// renewalRetryInterval obowiazuje po nieudanej probie. Centrala moze byc
-// chwilowo niedostepna, a do wygasniecia zostaje jeszcze wiele dni.
+// renewalRetryInterval applies after a failed attempt. The centre may be
+// unavailable for the moment, and there are still many days until the expiry.
 const renewalRetryInterval = 30 * time.Minute
 
-// RenewalOptions opisuje odnawianie certyfikatu agenta.
+// RenewalOptions describes the renewal of the certificate of the agent.
 type RenewalOptions struct {
 	StateDir   string
 	GatewayURL string
 	Log        *slog.Logger
-	// OnRenewed jest wywolywane po zapisaniu nowego certyfikatu. Agent
-	// przerywa wtedy sesje, zeby nastepna poszla juz nowa tozsamoscia.
+	// OnRenewed is called after a new certificate has been written. The agent
+	// then breaks the session so that the next one goes with the new identity.
 	OnRenewed func()
 }
 
-// KeepCertificateFresh odnawia certyfikat agenta, zanim wygasnie.
+// KeepCertificateFresh renews the certificate of the agent before it expires.
 //
-// Bez tego cala flota przestaje sie laczyc w dniu wygasniecia certyfikatow,
-// bo agent nie ma innej drogi powrotu niz ponowny enrollment tokenem, ktorego
-// na hoscie juz nie ma.
+// Without it the whole fleet stops connecting on the day the certificates
+// expire, because the agent has no way back other than a new enrollment with a
+// token that is no longer on the host.
 func KeepCertificateFresh(ctx context.Context, identity *Identity, options RenewalOptions) {
 	log := options.Log
 	if log == nil {
@@ -82,8 +82,8 @@ func KeepCertificateFresh(ctx context.Context, identity *Identity, options Renew
 	for {
 		if needsRenewal(identity.NotAfter, leafNotBefore(identity)) {
 			if err := renewCertificate(ctx, identity, options); err != nil {
-				log.Warn("nie udalo sie odnowic certyfikatu agenta",
-					"err", err, "wygasa", identity.NotAfter.Format(time.RFC3339))
+				log.Warn("the certificate of the agent was not renewed",
+					"err", err, "expires", identity.NotAfter.Format(time.RFC3339))
 				select {
 				case <-ctx.Done():
 					return
@@ -91,14 +91,14 @@ func KeepCertificateFresh(ctx context.Context, identity *Identity, options Renew
 					continue
 				}
 			}
-			log.Info("certyfikat agenta odnowiony", "wygasa", identity.NotAfter.Format(time.RFC3339))
+			log.Info("the certificate of the agent was renewed", "expires", identity.NotAfter.Format(time.RFC3339))
 			if options.OnRenewed != nil {
 				options.OnRenewed()
 			}
 		}
 
-		// Odstep wynika z aktualnego certyfikatu, wiec po odnowieniu
-		// dostosowuje sie do nowego terminu.
+		// The interval follows from the current certificate, so after a renewal it
+		// adjusts to the new deadline.
 		timer.Reset(checkInterval(identity.NotAfter, leafNotBefore(identity)))
 		select {
 		case <-ctx.Done():
@@ -108,12 +108,14 @@ func KeepCertificateFresh(ctx context.Context, identity *Identity, options Renew
 	}
 }
 
-// needsRenewal decyduje na podstawie pozostalej czesci okresu waznosci, a nie
-// stalej liczby dni: krotszy certyfikat ma byc odnawiany czesciej.
+// needsRenewal decides on the basis of the remaining share of the validity
+// period and not on a fixed number of days: a shorter certificate is to be
+// renewed more often.
 func needsRenewal(notAfter, notBefore time.Time) bool {
 	if notAfter.IsZero() {
-		// Nieznany termin nie moze znaczyc "jeszcze dlugo". Proba odnowienia
-		// jest tania, a brak wiedzy o waznosci jest sam w sobie powodem.
+		// An unknown deadline must not mean "there is still plenty of time". An
+		// attempt to renew is cheap, and the lack of knowledge about the validity
+		// is a reason in itself.
 		return true
 	}
 	total := notAfter.Sub(notBefore)
@@ -134,26 +136,28 @@ func leafNotBefore(identity *Identity) time.Time {
 	return leaf.NotBefore
 }
 
-// renewCertificate wymienia nowa pare kluczy na certyfikat i zapisuje ja
-// atomowo. Stary material zostaje na dysku do chwili, w ktorej nowy jest
-// kompletny: przerwanie w polowie nie moze zostawic hosta bez tozsamosci.
+// renewCertificate exchanges a new key pair for a certificate and stores it
+// atomically. The old material stays on the disk until the new one is complete:
+// an interruption halfway must not leave the host without an identity.
 func renewCertificate(ctx context.Context, identity *Identity, options RenewalOptions) error {
-	magazyn := identitystore.New(options.StateDir)
-	// Klucz tworzy magazyn: przy profilu sprzetowym nowa generacja powstaje
-	// w ukladzie i nigdy go nie opuszcza, a odnawianie tego nie zauwaza.
-	key, err := magazyn.NewKey()
+	store := identitystore.New(options.StateDir)
+	// The key is created by the store: with a hardware profile a new generation
+	// is created inside the chip and never leaves it, and the renewal does not
+	// notice that.
+	key, err := store.NewKey()
 	if err != nil {
 		return err
 	}
-	// Podmiot w CSR jest tylko wskazowka; tozsamosc nadaje control plane
-	// na podstawie certyfikatu, ktorym agent sie uwierzytelnia.
+	// The subject in the CSR is only a hint; the identity is granted by the
+	// control plane on the basis of the certificate the agent authenticates
+	// with.
 	csrPEM, err := identitystore.Request(key, identity.HostID, nil, nil)
 	if err != nil {
 		return err
 	}
 
-	// Odnowienie idzie przez mTLS obecnym certyfikatem: to on jest dowodem
-	// tozsamosci. Token enrollmentu nie bierze w tym udzialu.
+	// The renewal goes over mTLS with the current certificate: that is the proof
+	// of identity. The enrollment token takes no part in it.
 	client := agentv1connect.NewAgentServiceClient(&http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http2.Transport{
@@ -170,40 +174,41 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		Build:  &agentv1.AgentBuild{AgentVersion: Version},
 	}))
 	if err != nil {
-		return fmt.Errorf("odnowienie odrzucone: %w", err)
+		return fmt.Errorf("the renewal was refused: %w", err)
 	}
 
-	// Bundle zaufania zmienia sie tylko przy rotacji CA. Gdy panel go nie
-	// przyslal, do generacji idzie ten, ktory obowiazuje: generacja musi byc
-	// kompletem, a nie kluczem i certyfikatem bez wskazania zaufania.
+	// The trust bundle changes only when the CA rotates. When the panel did not
+	// send one, the generation gets the one in force: a generation has to be a
+	// complete set and not a key and a certificate without a statement of
+	// trust.
 	bundle := response.Msg.GetCaBundlePem()
 	if len(bundle) == 0 {
 		bundle = identity.TrustPEM
 	}
 	if len(bundle) == 0 {
-		return fmt.Errorf("odnowienie bez bundla zaufania")
+		return fmt.Errorf("a renewal without a trust bundle")
 	}
 
-	odnowiona, err := magazyn.Commit(identitystore.Generation{
+	renewed, err := store.Commit(identitystore.Generation{
 		Key:            key,
 		CertificatePEM: response.Msg.GetCertificatePem(),
 		TrustPEM:       bundle,
 	})
 	if err != nil {
-		// Odrzucona generacja nie rusza tego, czym host pracuje: lepiej
-		// zostac na starym certyfikacie i sprobowac za pol godziny niz
-		// zostac z polowa pary.
-		return fmt.Errorf("nowa tozsamosc odrzucona: %w", err)
+		// A refused generation does not touch what the host works with: better to
+		// stay on the old certificate and try again in half an hour than to be
+		// left with half a pair.
+		return fmt.Errorf("the new identity was refused: %w", err)
 	}
-	*identity = *zTozsamosci(odnowiona)
+	*identity = *fromIdentity(renewed)
 	return nil
 }
 
-// writeAtomic zapisuje plik przez plik tymczasowy i zmiane nazwy. Przerwanie
-// w polowie zapisu zostawiloby agenta z uszkodzonym kluczem, czyli bez drogi
-// powrotu do floty.
+// writeAtomic writes a file through a temporary file and a rename. An
+// interruption halfway through the write would leave the agent with a damaged
+// key, that is without a way back into the fleet.
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	temporary := path + ".nowy"
+	temporary := path + ".new"
 	if err := os.WriteFile(temporary, data, mode); err != nil {
 		return err
 	}
@@ -211,8 +216,9 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 		_ = os.Remove(temporary)
 		return err
 	}
-	// Katalog musi trafic na dysk razem z plikiem, inaczej po awarii zasilania
-	// zmiana nazwy moze zniknac, a plik tymczasowy zostac.
+	// The directory has to reach the disk together with the file, otherwise
+	// after a power failure the rename can disappear and the temporary file
+	// stay.
 	if dir, err := os.Open(filepath.Dir(path)); err == nil {
 		_ = dir.Sync()
 		_ = dir.Close()

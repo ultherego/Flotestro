@@ -9,41 +9,42 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// TestPanikaZadaniaNieZabijaAgenta pilnuje bariery odpornosci. Blad w obsludze
-// jednej operacji nie moze pozbawic hosta zarzadzania: control plane zobaczylby
-// wtedy zerwana sesje zamiast informacji, co poszlo nie tak.
-func TestPanikaZadaniaNieZabijaAgenta(t *testing.T) {
+// TestAPanicInATaskDoesNotKillTheAgent guards the resilience barrier. An error
+// while handling one operation must not take the management of the host away:
+// the control plane would then see a broken session instead of information
+// about what went wrong.
+func TestAPanicInATaskDoesNotKillTheAgent(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	task := &agentv1.TaskEnvelope{TaskId: "zadanie-1"}
+	task := &agentv1.TaskEnvelope{TaskId: "task-1"}
 
-	// Wykonawca z pustym dziennikiem panikuje przy pierwszym odwolaniu.
-	pusty := &TaskExecutor{log: log}
-	result := executeTask(context.Background(), pusty, task, log)
+	// An executor with an empty journal panics at the first reference.
+	empty := &TaskExecutor{log: log}
+	result := executeTask(context.Background(), empty, task, log)
 	if result == nil {
-		t.Fatal("brak wyniku po panice")
+		t.Fatal("no result after the panic")
 	}
 	if result.GetStatus() != agentv1.TaskResult_STATUS_FAILED {
-		t.Errorf("status = %s, oczekiwano FAILED", result.GetStatus())
+		t.Errorf("status = %s, expected FAILED", result.GetStatus())
 	}
 	if result.GetErrorCode() != RejectInternalError {
-		t.Errorf("kod bledu = %q", result.GetErrorCode())
+		t.Errorf("error code = %q", result.GetErrorCode())
 	}
-	if result.GetTaskId() != "zadanie-1" {
-		t.Errorf("wynik nie wskazuje proby: %q", result.GetTaskId())
+	if result.GetTaskId() != "task-1" {
+		t.Errorf("the result does not point at the attempt: %q", result.GetTaskId())
 	}
 }
 
-// TestAgentBezWykonawcyOdrzucaZadanie sprawdza agenta, ktory z zalozenia nie
-// wykonuje operacji. Odrzucenie jest odpowiedzia, a nie awaria.
-func TestAgentBezWykonawcyOdrzucaZadanie(t *testing.T) {
+// TestAnAgentWithoutAnExecutorRefusesATask checks an agent that by design
+// performs no operations. A refusal is an answer, not a failure.
+func TestAnAgentWithoutAnExecutorRefusesATask(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	result := executeTask(context.Background(), nil,
-		&agentv1.TaskEnvelope{TaskId: "zadanie-2"}, log)
+		&agentv1.TaskEnvelope{TaskId: "task-2"}, log)
 
 	if result.GetStatus() != agentv1.TaskResult_STATUS_REJECTED {
-		t.Errorf("status = %s, oczekiwano REJECTED", result.GetStatus())
+		t.Errorf("status = %s, expected REJECTED", result.GetStatus())
 	}
 	if result.GetErrorCode() != RejectUnsupported {
-		t.Errorf("kod bledu = %q, oczekiwano %q", result.GetErrorCode(), RejectUnsupported)
+		t.Errorf("error code = %q, expected %q", result.GetErrorCode(), RejectUnsupported)
 	}
 }

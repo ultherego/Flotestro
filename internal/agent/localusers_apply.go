@@ -10,11 +10,13 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// applyLocalUser wykonuje operacje na koncie lokalnym przez helpera roota.
+// applyLocalUser performs an operation on a local account through the root
+// helper.
 //
-// Stan konta jest odczytywany przed zmiana i po niej. Dzieki temu wynik
-// odroznia realna zmiane od zgodnosci ze stanem zadanym, a panel dostaje
-// stan faktyczny hosta zamiast powtorzenia tresci zadania.
+// The state of the account is read before the change and after it. That lets
+// the result tell a real change from an agreement with the requested state, and
+// the panel gets the actual state of the host instead of a repetition of the
+// content of the task.
 func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.LocalUserPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, action)
@@ -23,9 +25,9 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 
 	before := e.readSingleAccount(callCtx, payload.Name)
 
-	// Odmowa dotyczaca konta systemowego nalezy do helpera, ktory widzi
-	// /etc/passwd i NSS. Agent nie powtarza tej decyzji, zeby nie istnialy
-	// dwie rozne granice bezpieczenstwa dla tej samej operacji.
+	// The refusal concerning a system account belongs to the helper, which sees
+	// /etc/passwd and NSS. The agent does not repeat that decision so that there
+	// are not two different security boundaries for the same operation.
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
@@ -70,8 +72,9 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 	}
 }
 
-// readSingleAccount zwraca stan jednego konta wraz z czescia uprzywilejowana.
-// Brak konta daje nil: nieistnienie jest tu informacja, a nie bledem.
+// readSingleAccount returns the state of one account together with the
+// privileged part. A missing account gives nil: non-existence is information
+// here and not an error.
 func (e *TaskExecutor) readSingleAccount(ctx context.Context, name string) *LocalAccount {
 	accounts := ReadLocalAccounts()
 	index := -1
@@ -88,15 +91,15 @@ func (e *TaskExecutor) readSingleAccount(ctx context.Context, name string) *Loca
 	if result, err := e.ProbeLocalAccounts(ctx, []string{name}); err == nil {
 		found = mergePrivilegedAccounts(found, result)
 	} else {
-		// Nieudany odczyt uprzywilejowany zostawia stan blokady nieznanym.
-		// Wpisanie tu "odblokowane" bylo by zmyslonym faktem.
+		// A failed privileged read leaves the lock state unknown. Writing
+		// "unlocked" here would be an invented fact.
 		found[0].UnavailableReason = "helper_unavailable"
 	}
 	return &found[0]
 }
 
-// sameAccountState porownuje te cechy konta, ktorymi zarzadza panel. Roznice
-// w polach spoza tego zakresu nie sa zmiana wykonana przez zadanie.
+// sameAccountState compares the properties of an account the panel manages.
+// Differences in fields outside that scope are not a change made by the task.
 func sameAccountState(before, after *LocalAccount) bool {
 	if before == nil || after == nil {
 		return before == after
@@ -116,8 +119,8 @@ func sameAccountState(before, after *LocalAccount) bool {
 	return sameStrings(fingerprintsOf(before), fingerprintsOf(after))
 }
 
-// sameOptionalBool traktuje stan nieznany jako rozny od kazdego znanego:
-// przejscie z "nie wiadomo" na "zablokowane" jest zmiana wiedzy panelu.
+// sameOptionalBool treats an unknown state as different from every known one: a
+// move from "not known" to "locked" is a change in the knowledge of the panel.
 func sameOptionalBool(before, after *bool) bool {
 	if before == nil || after == nil {
 		return before == nil && after == nil
@@ -152,8 +155,8 @@ var helperUserOperations = map[opspec.ActionType]helperv1.LocalUserActionRequest
 }
 
 var localUserMessages = map[opspec.ActionType]string{
-	opspec.ActionLocalUserCreate: "konto lokalne utworzone",
-	opspec.ActionLocalUserLock:   "konto lokalne zablokowane",
-	opspec.ActionLocalUserUnlock: "konto lokalne odblokowane",
-	opspec.ActionLocalSSHKeysSet: "klucze SSH ustawione",
+	opspec.ActionLocalUserCreate: "the local account was created",
+	opspec.ActionLocalUserLock:   "the local account was locked",
+	opspec.ActionLocalUserUnlock: "the local account was unlocked",
+	opspec.ActionLocalSSHKeysSet: "the SSH keys were set",
 }

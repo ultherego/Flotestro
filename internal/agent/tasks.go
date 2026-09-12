@@ -18,16 +18,18 @@ import (
 	"github.com/ultherego/flotestro/internal/systemd"
 )
 
-// StatusPoWymianie oznacza wynik, ktorego nie ma po co odsylac: agent wlasnie
-// zostal zastapiony i o powodzeniu rozstrzygnie jego powrot.
+// StatusAfterReplacement marks a result there is no point in sending back: the
+// agent has just been replaced and its return is what decides on the success.
 //
-// Zwykle milczenie agenta jest bledem - control plane nie odrozni go od
-// zerwanego polaczenia. Tu jest odwrotnie: kazdy wynik odeslany w tej chwili
-// bylby nieprawda, bo proces, ktory go liczy, za sekunde przestanie istniec,
-// a to, czy wymiana sie udala, widac dopiero po nowym Hello.
-const StatusPoWymianie = "agent_upgrade_in_flight"
+// Normally silence from the agent is an error - the control plane cannot tell
+// it from a broken connection. Here it is the other way round: any result sent
+// at this moment would be untrue, because the process computing it stops
+// existing a second later, and whether the replacement worked shows only after
+// a new Hello.
+const StatusAfterReplacement = "agent_upgrade_in_flight"
 
-// Stabilne kody odrzucenia. Sa czescia kontraktu i nie zaleza od jezyka.
+// Stable refusal codes. They are part of the contract and do not depend on the
+// language.
 const (
 	RejectExpired        = "expired"
 	RejectPrecondition   = "precondition_failed"
@@ -36,85 +38,90 @@ const (
 	RejectHelperFailed   = "helper_unavailable"
 	RejectCapability     = "capability_missing"
 	RejectInvalidRequest = "invalid_request"
-	// RejectUnsupported oznacza agenta, ktory z zalozenia nie wykonuje zadan.
+	// RejectUnsupported marks an agent that by design performs no tasks.
 	RejectUnsupported = "unsupported"
-	// RejectInternalError oznacza blad po stronie agenta. Zadanie konczy sie
-	// wynikiem negatywnym zamiast zabierac ze soba caly proces.
+	// RejectInternalError marks an error on the side of the agent. The task ends
+	// with a negative result instead of taking the whole process with it.
 	RejectInternalError = "agent_internal_error"
-	// RejectNetworkUnreachable oznacza zmiane sieci, po ktorej host stracil
-	// droge do panelu. Zmiana nie zostaje potwierdzona, wiec host wroci sam
-	// do konfiguracji sprzed niej.
+	// RejectNetworkUnreachable marks a network change after which the host lost
+	// its route to the panel. The change is not confirmed, so the host goes back
+	// on its own to the configuration from before it.
 	RejectNetworkUnreachable = "network_unreachable"
-	// RejectReadOnly oznacza hosta wlaczonego w trybie obserwacji. To nie
-	// jest awaria ani brak zdolnosci: wlasciciel hosta tak go skonfigurowal
-	// i panel ma to zobaczyc jako decyzje, a nie jako usterke.
+	// RejectReadOnly marks a host running in observation mode. This is neither a
+	// failure nor a missing capability: the owner of the host configured it that
+	// way and the panel is to see it as a decision, not as a fault.
 	RejectReadOnly = "agent_read_only"
-	// RejectResourceBusy oznacza zadanie, ktore czekalo na zasob hosta i go
-	// nie doczekalo. To nie jest awaria: host pracuje, tylko nad czyms innym,
-	// czego ta operacja nie moze robic rownolegle.
+	// RejectResourceBusy marks a task that waited for a resource of the host and
+	// did not get it. This is not a failure: the host is working, only on
+	// something else this operation cannot run in parallel with.
 	RejectResourceBusy = "resource_busy"
 )
 
-// TaskExecutor wykonuje zadania dostarczone przez control plane.
+// TaskExecutor performs the tasks delivered by the control plane.
 type TaskExecutor struct {
 	helper  *HelperClient
 	journal *IdempotencyJournal
 	facts   func() Facts
 	log     *slog.Logger
-	// progress melduje postep dlugiej operacji do control plane. Nil oznacza
-	// brak sesji - postep bez odbiorcy nie jest zbierany.
+	// progress reports the progress of a long operation to the control plane.
+	// Nil means there is no session - progress without a receiver is not
+	// collected.
 	progress func(*agentv1.TaskProgress)
-	// logLines przekazuje podglad dziennika. Nil oznacza brak sesji, a wtedy
-	// podglad nie jest w ogole uruchamiany: host nie ma pracowac dla nikogo.
+	// logLines passes on the journal preview. Nil means there is no session, and
+	// then the preview is not started at all: the host is not to work for
+	// nobody.
 	logLines func(*agentv1.TaskLogLines)
-	// cancels pozwala przerwac zadania, ktore da sie bezpiecznie przerwac.
-	cancels *anulowania
-	// sekrety pobiera wartosc sekretu na czas jednej operacji. Nil oznacza
-	// brak sesji z panelem - a bez niej nie ma po co pytac o sekret.
-	sekrety PobranieSekretu
-	// tylkoOdczyt oznacza hosta w trybie obserwacji: agent raportuje fakty
-	// i wykonuje odczyty, ale nie zmienia niczego na hoscie.
-	tylkoOdczyt bool
-	// odswiezInwentarz zamawia zebranie inwentarza i czeka na rewizje, ktora
-	// z niego powstala. Nil oznacza brak sesji - a bez niej nie ma dokad
-	// wyslac nowego obrazu, wiec i nie ma czego odswiezac.
-	odswiezInwentarz func(ctx context.Context, moduly []string) Odswiezenie
+	// cancels allows interrupting the tasks that can be interrupted safely.
+	cancels *cancellations
+	// secrets fetches the value of a secret for the duration of one operation.
+	// Nil means there is no session with the panel - and without one there is no
+	// point in asking for a secret.
+	secrets SecretFetch
+	// readOnly marks a host in observation mode: the agent reports facts and
+	// performs reads, but changes nothing on the host.
+	readOnly bool
+	// inventoryRefresh orders an inventory collection and waits for the revision
+	// that came out of it. Nil means there is no session - and without one there
+	// is nowhere to send a new picture, so there is nothing to refresh either.
+	inventoryRefresh func(ctx context.Context, modules []string) Refresh
 }
 
-// PobranieSekretu siega po wartosc sekretu wskazanego w zadaniu.
+// SecretFetch reaches for the value of the secret named in the task.
 //
-// Wartosc nie przychodzi w kopercie: koperta niesie odnosnik, a host pobiera
-// tresc dopiero wtedy, gdy zaczyna operacje. Funkcja jest wstrzykiwana przez
-// sesje, bo to ona ma polaczenie z panelem.
-type PobranieSekretu func(ctx context.Context, taskID, nazwa string, wersja int) ([]byte, error)
+// The value does not come in the envelope: the envelope carries a reference,
+// and the host fetches the content only when it starts the operation. The
+// function is injected by the session, because the session is what has the
+// connection to the panel.
+type SecretFetch func(ctx context.Context, taskID, name string, version int) ([]byte, error)
 
 func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	facts func() Facts, log *slog.Logger) *TaskExecutor {
 	return &TaskExecutor{
 		helper: helperClient, journal: journal, facts: facts, log: log,
-		cancels: nowaTablicaAnulowan(),
+		cancels: newCancellationTable(),
 	}
 }
 
-// UstawTrybOdczytu wlacza tryb obserwacji: agent nie wykona zadnej mutacji.
-func (e *TaskExecutor) UstawTrybOdczytu(tylkoOdczyt bool) {
-	e.tylkoOdczyt = tylkoOdczyt
+// SetReadOnlyMode turns on observation mode: the agent performs no mutation.
+func (e *TaskExecutor) SetReadOnlyMode(readOnly bool) {
+	e.readOnly = readOnly
 }
 
-// Execute realizuje zadanie i zawsze zwraca wynik - takze wtedy, gdy zadanie
-// zostalo odrzucone. Milczenie agenta byloby dla control plane nieodrozninalne
-// od zerwanego polaczenia.
+// Execute carries out a task and always returns a result - also when the task
+// was refused. Silence from the agent would be indistinguishable for the
+// control plane from a broken connection.
 func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 	taskID := task.GetTaskId()
 	idempotencyKey := task.GetIdempotencyKey()
 
-	// Ponowne dostarczenie zwraca poprzedni wynik zamiast wykonywac mutacje
-	// drugi raz. To jest cala istota at-least-once.
+	// A repeated delivery returns the previous result instead of performing the
+	// mutation a second time. That is the whole point of at-least-once.
 	if previous := e.journal.Lookup(idempotencyKey); previous != nil {
-		e.log.Info("ponowne dostarczenie operacji, zwracam zapisany wynik",
+		e.log.Info("a repeated delivery of the operation, returning the stored result",
 			"task_id", taskID, "idempotency_key", idempotencyKey, "status", previous.GetStatus())
 		replayed := cloneResult(previous)
-		// task_id wskazuje biezaca probe, zeby serwer mogl skorelowac wynik.
+		// task_id points at the current attempt so that the server can correlate
+		// the result.
 		replayed.TaskId = taskID
 		replayed.Replayed = true
 		return replayed
@@ -128,18 +135,18 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 	result.FinishedAt = timestamppb.New(time.Now().UTC())
 
 	if err := e.journal.Store(idempotencyKey, result); err != nil {
-		e.log.Error("nie zapisano wyniku w dzienniku idempotencji",
+		e.log.Error("the result was not stored in the idempotency journal",
 			"task_id", taskID, "idempotency_key", idempotencyKey, "err", err)
 	}
 	return result
 }
 
 func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now time.Time) *agentv1.TaskResult {
-	// TTL sprawdzamy przed czymkolwiek innym: zadanie, ktore dotarlo po
-	// powrocie sieci, nie moze zostac wykonane.
+	// The TTL is checked before anything else: a task that arrived after the
+	// network came back must not be performed.
 	if expires := task.GetExpiresAt(); expires != nil && now.After(expires.AsTime()) {
 		return rejected(agentv1.TaskResult_STATUS_EXPIRED, RejectExpired,
-			fmt.Sprintf("zadanie wygaslo %s", expires.AsTime().Format(time.RFC3339)))
+			fmt.Sprintf("the task expired at %s", expires.AsTime().Format(time.RFC3339)))
 	}
 
 	facts := e.facts()
@@ -151,19 +158,20 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectUnknownAction, err.Error())
 	}
-	// Tryb obserwacji odrzuca mutacje przed sprawdzeniem czegokolwiek
-	// innego: host, ktory ma tylko patrzec, nie ma prawa nawet sprobowac.
-	if e.tylkoOdczyt && action.Mutating() {
+	// Observation mode refuses a mutation before anything else is checked: a
+	// host that is only to watch has no right even to try.
+	if e.readOnly && action.Mutating() {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectReadOnly,
-			"agent pracuje w trybie read_only i nie wykonuje zmian")
+			"the agent works in read_only mode and performs no changes")
 	}
 	if capability := action.RequiredCapability(); !facts.Capabilities.Satisfies(capability) {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectCapability,
-			fmt.Sprintf("host nie ma zdolnosci %s", capability))
+			fmt.Sprintf("the host does not have the capability %s", capability))
 	}
 
-	// Hash planu liczymy lokalnie i porownujemy z koperta. Podmiana payloadu
-	// miedzy zatwierdzeniem a dostarczeniem jest w ten sposob wykrywalna.
+	// The hash of the plan is computed locally and compared with the envelope. A
+	// swap of the payload between the approval and the delivery is detectable
+	// this way.
 	if expected := task.GetPayloadHash(); len(expected) > 0 {
 		computed, err := opspec.PayloadHash(action, opspec.ActionVersion, payload)
 		if err != nil {
@@ -171,7 +179,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		}
 		if !bytes.Equal(expected, computed) {
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPayloadHash,
-				"tresc zadania nie odpowiada zatwierdzonemu planowi")
+				"the content of the task does not match the approved plan")
 		}
 	}
 
@@ -195,7 +203,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionDockerEvents:
 		return e.readDockerEvents(ctx, task)
 	case opspec.ActionInventoryRefresh:
-		return e.odswiezInwentarza(ctx, task)
+		return e.refreshInventory(ctx, task)
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
 		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
 		return e.applyDocker(ctx, task, task.GetDockerAction())
@@ -273,17 +281,17 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	}
 }
 
-// readUnitStatus odczytuje stan jednostek. Operacja jest niemutujaca i dziala
-// bez roota, wiec nie idzie przez helpera.
+// readUnitStatus reads the state of the units. The operation is non-mutating
+// and works without root, so it does not go through the helper.
 func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.UnitStatusPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, opspec.ActionUnitStatus)
 	statusCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Pelny wykaz jednostek jest osobna sciezka: nie pytamy systemd o kazda
-	// z nich z osobna, bo host miewa ich kilkaset i kazde zapytanie to
-	// osobny proces.
+	// The full list of units is a separate path: systemd is not asked about each
+	// of them separately, because a host sometimes has hundreds of them and
+	// every query is a separate process.
 	if payload.All {
 		return e.listUnits(statusCtx, task)
 	}
@@ -315,19 +323,20 @@ func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnv
 		ExitCode: 0,
 		Detail:   &agentv1.TaskResult_UnitStatus{UnitStatus: &agentv1.UnitStatusResult{Units: states}},
 	}
-	// Niezdrowa jednostka jest wynikiem negatywnym, a nie bledem wykonania:
-	// odczyt sie udal, tylko stan hosta nie spelnia oczekiwan.
+	// An unhealthy unit is a negative result and not an execution error: the
+	// read succeeded, only the state of the host does not meet expectations.
 	if len(unhealthy) > 0 {
 		result.Status = agentv1.TaskResult_STATUS_FAILED
 		result.ExitCode = 1
 		result.ErrorCode = "unit_unhealthy"
-		result.Message = "jednostki w zlym stanie: " + strings.Join(unhealthy, ", ")
+		result.Message = "units in a bad state: " + strings.Join(unhealthy, ", ")
 	}
 	return result
 }
 
-// rebootHost zleca restart przez helpera. Wynik jest odsylany, zanim host
-// zniknie: opoznienie po stronie helpera daje na to czas.
+// rebootHost orders a restart through the helper. The result is sent back
+// before the host disappears: the delay on the helper side leaves time for
+// that.
 func (e *TaskExecutor) rebootHost(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.RebootPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, opspec.ActionSystemReboot)
@@ -377,12 +386,13 @@ func (e *TaskExecutor) applyUnitAction(ctx context.Context, task *agentv1.TaskEn
 		Action: &helperv1.HelperRequest_UnitAction{
 			UnitAction: &helperv1.UnitActionRequest{
 				Unit:      payload.Unit,
-				Operation: operacjaHelpera(action, task),
+				Operation: helperOperation(action, task),
 			},
 		},
 	}, timeout)
 	if err != nil {
-		// Niedostepny helper jest awaria agenta, nie wynikiem operacji.
+		// An unavailable helper is a failure of the agent, not a result of the
+		// operation.
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
@@ -405,9 +415,10 @@ func (e *TaskExecutor) applyUnitAction(ctx context.Context, task *agentv1.TaskEn
 		UnitStateBefore: unitStateToAgent(response.GetStateBefore()),
 		UnitStateAfter:  unitStateToAgent(response.GetStateAfter()),
 	}
-	// Niezerowy kod wyjscia jest niepowodzeniem operacji, a nie awaria agenta.
-	// Kod bledu i komunikat musza dotrzec do raportu kampanii, inaczej operator
-	// widzi samo slowo "failed" i musi szukac przyczyny w wyjsciu zadania.
+	// A non-zero exit code is a failure of the operation and not of the agent.
+	// The error code and the message have to reach the campaign report, otherwise
+	// the operator sees the bare word "failed" and has to look for the cause in
+	// the output of the task.
 	if response.GetExitCode() != 0 {
 		result.Status = agentv1.TaskResult_STATUS_FAILED
 		result.ErrorCode = systemd.ErrorCodeForExit(int(response.GetExitCode()))
@@ -416,10 +427,11 @@ func (e *TaskExecutor) applyUnitAction(ctx context.Context, task *agentv1.TaskEn
 	return result
 }
 
-// operacjaHelpera tlumaczy typ operacji na polecenie helpera. Wlaczenie
-// i maskowanie zaleza dodatkowo od wartosci docelowej: jedna operacja opisuje
-// obie strony przelacznika, bo obie sa ta sama decyzja o tej samej wlasciwosci.
-func operacjaHelpera(action opspec.ActionType, task *agentv1.TaskEnvelope) helperv1.UnitActionRequest_Operation {
+// helperOperation translates the type of an operation into a helper command.
+// Enabling and masking additionally depend on the desired value: one operation
+// describes both sides of the toggle, because both are the same decision about
+// the same property.
+func helperOperation(action opspec.ActionType, task *agentv1.TaskEnvelope) helperv1.UnitActionRequest_Operation {
 	toggle := task.GetUnitToggle()
 	switch action {
 	case opspec.ActionUnitEnableSet:
@@ -443,33 +455,35 @@ var helperOperations = map[opspec.ActionType]helperv1.UnitActionRequest_Operatio
 	opspec.ActionUnitReload:  helperv1.UnitActionRequest_OPERATION_RELOAD,
 }
 
-// checkPreconditions sprawdza, czy stan bazowy nie zmienil sie od planowania.
+// checkPreconditions checks whether the base state has changed since the
+// planning.
 func checkPreconditions(preconditions *agentv1.Preconditions, facts Facts) error {
 	if preconditions == nil {
 		return nil
 	}
 	if want := preconditions.GetOsFamily(); want != "" && want != facts.OS.Family {
-		return fmt.Errorf("oczekiwano systemu %s, host ma %s", want, facts.OS.Family)
+		return fmt.Errorf("the system %s was expected, the host has %s", want, facts.OS.Family)
 	}
 	for _, capability := range preconditions.GetRequiredCapabilities() {
 		if !facts.Capabilities.Satisfies(capability) {
-			return fmt.Errorf("host nie ma zdolnosci %s", capability)
+			return fmt.Errorf("the host does not have the capability %s", capability)
 		}
 	}
-	// Zmiana boot_id oznacza, ze host zdazyl sie zrestartowac od planowania.
+	// A changed boot_id means the host managed to restart since the planning.
 	if want := preconditions.GetExpectedBootId(); want != "" && want != facts.BootID {
-		return fmt.Errorf("host zostal zrestartowany od czasu planowania")
+		return fmt.Errorf("the host has been restarted since the planning")
 	}
 	return nil
 }
 
-// decodeAction tlumaczy koperte na typ operacji i payload w postaci kanonicznej.
+// decodeAction translates an envelope into the type of the operation and the
+// payload in its canonical form.
 func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload, error) {
 	switch action := task.GetAction().(type) {
 	case *agentv1.TaskEnvelope_UnitAction:
 		actionType, ok := unitActionTypes[action.UnitAction.GetOperation()]
 		if !ok {
-			return "", opspec.Payload{}, fmt.Errorf("nieznana operacja na jednostce")
+			return "", opspec.Payload{}, fmt.Errorf("unknown unit operation")
 		}
 		return actionType, opspec.Payload{
 			Unit: &opspec.UnitPayload{Unit: action.UnitAction.GetUnit()},
@@ -522,8 +536,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		if request.GetPreflightOnly() {
 			actionType = opspec.ActionDomainPreflight
 		}
-		// Haslo jednorazowe nie wchodzi do payloadu kanonicznego, wiec nie
-		// wplywa na hash planu i nie jest z niego odtwarzalne.
+		// The one-time password does not enter the canonical payload, so it does
+		// not affect the hash of the plan and cannot be recovered from it.
 		return actionType, opspec.Payload{
 			DomainEnroll: &opspec.DomainEnrollPayload{
 				Domain:   request.GetDomain(),
@@ -534,9 +548,10 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}, nil
 
 	case *agentv1.TaskEnvelope_PackagesRepair:
-		// Lista pusta i brak listy musza dac ten sam payload: hash planu liczy
-		// sie z JSON-a, a pusta tablica zapisuje sie inaczej niz jej brak.
-		// Naprawa bez odpowiedzi konczyla sie przez to payload_hash_mismatch.
+		// An empty list and a missing list have to give the same payload: the hash
+		// of the plan is computed from the JSON, and an empty array is written
+		// differently than a missing one. A repair without answers used to end in
+		// payload_hash_mismatch because of that.
 		var odpowiedzi []opspec.DebconfAnswer
 		for _, answer := range action.PackagesRepair.GetAnswers() {
 			odpowiedzi = append(odpowiedzi, opspec.DebconfAnswer{
@@ -554,7 +569,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		request := action.LocalUserAction
 		actionType, known := localUserActions[request.GetOperation()]
 		if !known {
-			return "", opspec.Payload{}, fmt.Errorf("nieznana operacja na koncie: %v", request.GetOperation())
+			return "", opspec.Payload{}, fmt.Errorf("unknown account operation: %v", request.GetOperation())
 		}
 		return actionType, opspec.Payload{
 			LocalUser: &opspec.LocalUserPayload{
@@ -587,88 +602,89 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}, nil
 
 	case *agentv1.TaskEnvelope_DockerAction:
-		return akcjaDockera(action.DockerAction)
+		return dockerAction(action.DockerAction)
 
 	case *agentv1.TaskEnvelope_Compose:
-		typ := opspec.ActionComposePlan
+		kind := opspec.ActionComposePlan
 		if action.Compose.GetOperation() == agentv1.ComposeAction_OPERATION_DEPLOY {
-			typ = opspec.ActionComposeDeploy
+			kind = opspec.ActionComposeDeploy
 		}
-		return typ, opspec.Payload{Compose: &opspec.ComposePayload{
+		return kind, opspec.Payload{Compose: &opspec.ComposePayload{
 			Project:    action.Compose.GetProject(),
 			Manifest:   action.Compose.GetManifest(),
 			PlanDigest: action.Compose.GetPlanDigest(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_UnitToggle:
-		typ := opspec.ActionUnitEnableSet
+		kind := opspec.ActionUnitEnableSet
 		if action.UnitToggle.GetProperty() == agentv1.UnitToggle_PROPERTY_MASKED {
-			typ = opspec.ActionUnitMaskSet
+			kind = opspec.ActionUnitMaskSet
 		}
-		return typ, opspec.Payload{UnitToggle: &opspec.UnitToggle{
+		return kind, opspec.Payload{UnitToggle: &opspec.UnitToggle{
 			Unit:    action.UnitToggle.GetUnit(),
 			Enabled: action.UnitToggle.GetValue(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_PackageLifecycle:
-		zmiana := action.PackageLifecycle
-		typ := opspec.ActionPackageInstall
-		switch zmiana.GetOperation() {
+		change := action.PackageLifecycle
+		kind := opspec.ActionPackageInstall
+		switch change.GetOperation() {
 		case agentv1.PackageLifecycle_OPERATION_REMOVE:
-			typ = opspec.ActionPackageRemove
+			kind = opspec.ActionPackageRemove
 		case agentv1.PackageLifecycle_OPERATION_HOLD:
-			typ = opspec.ActionPackageHoldSet
+			kind = opspec.ActionPackageHoldSet
 		}
-		return typ, opspec.Payload{PackageChange: &opspec.PackageChangePayload{
-			Packages:         zmiana.GetPackages(),
-			ExpectedRemovals: zmiana.GetExpectedRemovals(),
-			Hold:             zmiana.GetHold(),
-			PlanHash:         zmiana.GetPlanHash(),
+		return kind, opspec.Payload{PackageChange: &opspec.PackageChangePayload{
+			Packages:         change.GetPackages(),
+			ExpectedRemovals: change.GetExpectedRemovals(),
+			Hold:             change.GetHold(),
+			PlanHash:         change.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_File:
-		plik := action.File
-		typ := opspec.ActionFilePlan
-		switch plik.GetOperation() {
+		file := action.File
+		kind := opspec.ActionFilePlan
+		switch file.GetOperation() {
 		case agentv1.FileAction_OPERATION_READ:
-			typ = opspec.ActionFileRead
+			kind = opspec.ActionFileRead
 		case agentv1.FileAction_OPERATION_ENSURE:
-			typ = opspec.ActionFileEnsure
+			kind = opspec.ActionFileEnsure
 		case agentv1.FileAction_OPERATION_ROLLBACK:
-			typ = opspec.ActionFileRollback
+			kind = opspec.ActionFileRollback
 		case agentv1.FileAction_OPERATION_REMOVE:
-			typ = opspec.ActionFileRemove
+			kind = opspec.ActionFileRemove
 		case agentv1.FileAction_OPERATION_PLAN:
-			// Plan i odczyt listy sa ta sama operacja panelu: rozroznia je
-			// obecnosc sciezki, a nie nazwa. Hash payloadu musi wyjsc taki
-			// sam po obu stronach, wiec typ jest tu jeden.
-			typ = opspec.ActionFilePlan
+			// The plan and the read of the list are the same operation of the
+			// panel: they are told apart by the presence of a path, not by a
+			// name. The hash of the payload has to come out the same on both
+			// sides, so the type here is one.
+			kind = opspec.ActionFilePlan
 		}
-		odnosnik := (*opspec.SecretRef)(nil)
-		if ref := plik.GetContentSecret(); ref != nil && ref.GetName() != "" {
-			odnosnik = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
+		reference := (*opspec.SecretRef)(nil)
+		if ref := file.GetContentSecret(); ref != nil && ref.GetName() != "" {
+			reference = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
 		}
-		return typ, opspec.Payload{File: &opspec.FilePayload{
-			ContentSecret:  odnosnik,
-			Path:           plik.GetPath(),
-			Content:        string(plik.GetContent()),
-			Mode:           plik.GetMode(),
-			Owner:          plik.GetOwner(),
-			Group:          plik.GetGroup(),
-			ExpectedSHA256: plik.GetExpectedSha256(),
-			Validator:      plik.GetValidator(),
+		return kind, opspec.Payload{File: &opspec.FilePayload{
+			ContentSecret:  reference,
+			Path:           file.GetPath(),
+			Content:        string(file.GetContent()),
+			Mode:           file.GetMode(),
+			Owner:          file.GetOwner(),
+			Group:          file.GetGroup(),
+			ExpectedSHA256: file.GetExpectedSha256(),
+			Validator:      file.GetValidator(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Security:
 		ochrona := action.Security
-		typ := opspec.ActionSecurityScan
+		kind := opspec.ActionSecurityScan
 		switch ochrona.GetOperation() {
 		case agentv1.SecurityAction_OPERATION_SELINUX_MODE:
-			typ = opspec.ActionSELinuxModeSet
+			kind = opspec.ActionSELinuxModeSet
 		case agentv1.SecurityAction_OPERATION_AUDIT_RELOAD:
-			typ = opspec.ActionAuditRulesReload
+			kind = opspec.ActionAuditRulesReload
 		}
-		return typ, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
+		return kind, opspec.Payload{Security: &opspec.SecurityPayload{Mode: ochrona.GetMode()}}, nil
 
 	case *agentv1.TaskEnvelope_ListPackages:
 		return opspec.ActionPackageList, opspec.Payload{}, nil
@@ -686,14 +702,14 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Backup:
 		kopia := action.Backup
-		typ := opspec.ActionBackupPlan
+		kind := opspec.ActionBackupPlan
 		switch kopia.GetOperation() {
 		case agentv1.BackupAction_OPERATION_RUN:
-			typ = opspec.ActionBackupRun
+			kind = opspec.ActionBackupRun
 		case agentv1.BackupAction_OPERATION_VERIFY:
-			typ = opspec.ActionBackupVerify
+			kind = opspec.ActionBackupVerify
 		case agentv1.BackupAction_OPERATION_RESTORE:
-			typ = opspec.ActionBackupRestore
+			kind = opspec.ActionBackupRestore
 		}
 		zawartosc := &opspec.BackupPayload{
 			ID: kopia.GetId(), Tool: kopia.GetTool(), Repository: kopia.GetRepository(),
@@ -712,19 +728,19 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}
 		if len(kopia.GetEnvSecrets()) > 0 {
 			zawartosc.EnvSecrets = map[string]opspec.SecretRef{}
-			for nazwa, ref := range kopia.GetEnvSecrets() {
-				zawartosc.EnvSecrets[nazwa] = opspec.SecretRef{
+			for name, ref := range kopia.GetEnvSecrets() {
+				zawartosc.EnvSecrets[name] = opspec.SecretRef{
 					Name: ref.GetName(), Version: int(ref.GetVersion()),
 				}
 			}
 		}
-		return typ, opspec.Payload{Backup: zawartosc}, nil
+		return kind, opspec.Payload{Backup: zawartosc}, nil
 
 	case *agentv1.TaskEnvelope_Repository:
 		zrodlo := action.Repository
-		odnosnik := (*opspec.SecretRef)(nil)
+		reference := (*opspec.SecretRef)(nil)
 		if ref := zrodlo.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
-			odnosnik = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
+			reference = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
 		}
 		return opspec.ActionRepositorySet, opspec.Payload{Repository: &opspec.RepositoryPayload{
 			ID:             zrodlo.GetId(),
@@ -738,36 +754,36 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			GPGKey:         zrodlo.GetGpgKey(),
 			AllowUnsigned:  zrodlo.GetAllowUnsigned(),
 			Username:       zrodlo.GetUsername(),
-			PasswordSecret: odnosnik,
+			PasswordSecret: reference,
 			Remove:         zrodlo.GetRemove(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Certificate:
 		certyfikat := action.Certificate
-		typ := opspec.ActionCertificateScan
+		kind := opspec.ActionCertificateScan
 		switch certyfikat.GetOperation() {
 		case agentv1.CertificateAction_OPERATION_DEPLOY:
-			typ = opspec.ActionCertificateDeploy
+			kind = opspec.ActionCertificateDeploy
 		case agentv1.CertificateAction_OPERATION_RENEW:
-			typ = opspec.ActionCertificateRenew
+			kind = opspec.ActionCertificateRenew
 		case agentv1.CertificateAction_OPERATION_PLAN:
-			typ = opspec.ActionCertificatePlan
+			kind = opspec.ActionCertificatePlan
 		case agentv1.CertificateAction_OPERATION_TRUST_PLAN:
-			typ = opspec.ActionCertificateTrustPlan
+			kind = opspec.ActionCertificateTrustPlan
 		case agentv1.CertificateAction_OPERATION_TRUST_ENSURE:
-			typ = opspec.ActionCertificateTrustEnsure
+			kind = opspec.ActionCertificateTrustEnsure
 		case agentv1.CertificateAction_OPERATION_TRUST_REMOVE:
-			typ = opspec.ActionCertificateTrustRemove
+			kind = opspec.ActionCertificateTrustRemove
 		}
-		odnosnik := (*opspec.SecretRef)(nil)
+		reference := (*opspec.SecretRef)(nil)
 		if ref := certyfikat.GetKeySecret(); ref != nil && ref.GetName() != "" {
-			odnosnik = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
+			reference = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
 		}
 		zawartosc := &opspec.CertificatePayload{
 			Path:        certyfikat.GetPath(),
 			KeyPath:     certyfikat.GetKeyPath(),
 			Certificate: certyfikat.GetCertificate(),
-			KeySecret:   odnosnik,
+			KeySecret:   reference,
 			Owner:       certyfikat.GetOwner(),
 			Group:       certyfikat.GetGroup(),
 			Mode:        certyfikat.GetMode(),
@@ -783,7 +799,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 				Path: cel.GetPath(), KeyPath: cel.GetKeyPath(), Service: cel.GetService(),
 			})
 		}
-		return typ, opspec.Payload{Certificate: zawartosc}, nil
+		return kind, opspec.Payload{Certificate: zawartosc}, nil
 
 	case *agentv1.TaskEnvelope_SystemShutdown:
 		wylaczenie := action.SystemShutdown
@@ -796,16 +812,16 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Time:
 		zegar := action.Time
-		typ := opspec.ActionTimeSyncTest
+		kind := opspec.ActionTimeSyncTest
 		switch zegar.GetOperation() {
 		case agentv1.TimeAction_OPERATION_CONFIG_APPLY:
-			typ = opspec.ActionTimeConfigApply
+			kind = opspec.ActionTimeConfigApply
 		case agentv1.TimeAction_OPERATION_TIMEZONE_SET:
-			typ = opspec.ActionTimezoneSet
+			kind = opspec.ActionTimezoneSet
 		case agentv1.TimeAction_OPERATION_PLAN:
-			typ = opspec.ActionTimePlan
+			kind = opspec.ActionTimePlan
 		}
-		return typ, opspec.Payload{Time: &opspec.TimePayload{
+		return kind, opspec.Payload{Time: &opspec.TimePayload{
 			Servers:      zegar.GetServers(),
 			Probe:        zegar.GetProbe(),
 			Timezone:     zegar.GetTimezone(),
@@ -816,18 +832,18 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Kernel:
 		jadro := action.Kernel
-		typ := opspec.ActionSysctlPlan
+		kind := opspec.ActionSysctlPlan
 		switch jadro.GetOperation() {
 		case agentv1.KernelAction_OPERATION_SYSCTL_ENSURE:
-			typ = opspec.ActionSysctlEnsure
+			kind = opspec.ActionSysctlEnsure
 		case agentv1.KernelAction_OPERATION_MODULE_LOAD:
-			typ = opspec.ActionKernelModuleLoad
+			kind = opspec.ActionKernelModuleLoad
 		case agentv1.KernelAction_OPERATION_MODULE_BLACKLIST:
-			typ = opspec.ActionKernelModuleBlacklist
+			kind = opspec.ActionKernelModuleBlacklist
 		case agentv1.KernelAction_OPERATION_MODULE_PLAN:
-			typ = opspec.ActionKernelModulePlan
+			kind = opspec.ActionKernelModulePlan
 		}
-		return typ, opspec.Payload{Kernel: &opspec.KernelPayload{
+		return kind, opspec.Payload{Kernel: &opspec.KernelPayload{
 			Settings:  jadro.GetSettings(),
 			Keys:      jadro.GetKeys(),
 			Module:    jadro.GetModule(),
@@ -837,14 +853,14 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Ssh:
 		serwer := action.Ssh
-		typ := opspec.ActionSSHConfigPlan
+		kind := opspec.ActionSSHConfigPlan
 		switch serwer.GetOperation() {
 		case agentv1.SshAction_OPERATION_APPLY:
-			typ = opspec.ActionSSHConfigApply
+			kind = opspec.ActionSSHConfigApply
 		case agentv1.SshAction_OPERATION_ROTATE_HOSTKEY:
-			typ = opspec.ActionSSHHostKeyRotate
+			kind = opspec.ActionSSHHostKeyRotate
 		}
-		return typ, opspec.Payload{SSH: &opspec.SSHPayload{
+		return kind, opspec.Payload{SSH: &opspec.SSHPayload{
 			Port:                   serwer.GetPort(),
 			PermitRootLogin:        serwer.GetPermitRootLogin(),
 			PasswordAuthentication: serwer.GetPasswordAuthentication(),
@@ -861,28 +877,29 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Storage:
 		przestrzen := action.Storage
-		typ := opspec.ActionMountEnsure
+		kind := opspec.ActionMountEnsure
 		switch przestrzen.GetOperation() {
 		case agentv1.StorageAction_OPERATION_READ, agentv1.StorageAction_OPERATION_MOUNT_PLAN,
 			agentv1.StorageAction_OPERATION_DEVICE_PLAN:
-			// Odczyt i plan sa ta sama operacja panelu; rozroznia je obecnosc
-			// celu. Typ jest jeden, bo hash payloadu liczy sie z typu po obu
+			// The read and the plan are the same operation of the panel; they are
+			// told apart by the presence of a target. The type is one, because the
+			// hash of the payload is computed from the type on both
 			// stronach.
-			typ = opspec.ActionStoragePlan
+			kind = opspec.ActionStoragePlan
 		case agentv1.StorageAction_OPERATION_MOUNT_REMOVE:
-			typ = opspec.ActionMountRemove
+			kind = opspec.ActionMountRemove
 		case agentv1.StorageAction_OPERATION_FS_CHECK:
-			typ = opspec.ActionFilesystemCheck
+			kind = opspec.ActionFilesystemCheck
 		case agentv1.StorageAction_OPERATION_LVM_EXTEND:
-			typ = opspec.ActionLVMExtend
+			kind = opspec.ActionLVMExtend
 		case agentv1.StorageAction_OPERATION_FS_RESIZE:
-			typ = opspec.ActionFilesystemResize
+			kind = opspec.ActionFilesystemResize
 		case agentv1.StorageAction_OPERATION_FS_CREATE:
-			typ = opspec.ActionFilesystemCreate
+			kind = opspec.ActionFilesystemCreate
 		case agentv1.StorageAction_OPERATION_DISK_WIPE:
-			typ = opspec.ActionDiskWipe
+			kind = opspec.ActionDiskWipe
 		}
-		return typ, opspec.Payload{Storage: &opspec.StoragePayload{
+		return kind, opspec.Payload{Storage: &opspec.StoragePayload{
 			Source:            przestrzen.GetSource(),
 			Target:            przestrzen.GetTarget(),
 			FSType:            przestrzen.GetFsType(),
@@ -901,23 +918,24 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Firewall:
 		zapora := action.Firewall
-		typ := opspec.ActionFirewallRuleEnsure
+		kind := opspec.ActionFirewallRuleEnsure
 		switch zapora.GetOperation() {
 		case agentv1.FirewallAction_OPERATION_READ, agentv1.FirewallAction_OPERATION_PLAN:
-			// Odczyt i plan sa ta sama operacja panelu; rozroznia je obecnosc
-			// reguly. Typ musi byc jeden, bo hash payloadu liczy sie po obu
+			// The read and the plan are the same operation of the panel; they are
+			// told apart by the presence of a rule. The type has to be one, because
+			// the hash of the payload is computed on both
 			// stronach z tego samego typu.
-			typ = opspec.ActionFirewallPlan
+			kind = opspec.ActionFirewallPlan
 		case agentv1.FirewallAction_OPERATION_RULE_REMOVE:
-			typ = opspec.ActionFirewallRuleRemove
+			kind = opspec.ActionFirewallRuleRemove
 		case agentv1.FirewallAction_OPERATION_ZONE_PORT:
-			typ = opspec.ActionFirewallZonePort
+			kind = opspec.ActionFirewallZonePort
 		case agentv1.FirewallAction_OPERATION_ZONE_SERVICE:
-			typ = opspec.ActionFirewallZoneService
+			kind = opspec.ActionFirewallZoneService
 		case agentv1.FirewallAction_OPERATION_RESTORE:
-			typ = opspec.ActionFirewallRulesetRestore
+			kind = opspec.ActionFirewallRulesetRestore
 		}
-		return typ, opspec.Payload{Firewall: &opspec.FirewallPayload{
+		return kind, opspec.Payload{Firewall: &opspec.FirewallPayload{
 			RuleID:          zapora.GetRuleId(),
 			Chain:           zapora.GetChain(),
 			Action:          zapora.GetAction(),
@@ -937,14 +955,14 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Dns:
 		resolver := action.Dns
-		typ := opspec.ActionDNSHostApply
+		kind := opspec.ActionDNSHostApply
 		switch resolver.GetOperation() {
 		case agentv1.DnsAction_OPERATION_RESOLVE_TEST:
-			typ = opspec.ActionDNSResolveTest
+			kind = opspec.ActionDNSResolveTest
 		case agentv1.DnsAction_OPERATION_PLAN:
-			typ = opspec.ActionDNSPlan
+			kind = opspec.ActionDNSPlan
 		}
-		return typ, opspec.Payload{DNS: &opspec.DNSPayload{
+		return kind, opspec.Payload{DNS: &opspec.DNSPayload{
 			Interface:       resolver.GetInterface(),
 			Servers:         resolver.GetServers(),
 			SearchDomains:   resolver.GetSearchDomains(),
@@ -956,18 +974,18 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Network:
 		siec := action.Network
-		typ := opspec.ActionNetworkProfileApply
+		kind := opspec.ActionNetworkProfileApply
 		switch siec.GetOperation() {
 		case agentv1.NetworkAction_OPERATION_READ, agentv1.NetworkAction_OPERATION_PLAN:
-			typ = opspec.ActionNetworkPlan
+			kind = opspec.ActionNetworkPlan
 		case agentv1.NetworkAction_OPERATION_SET_MTU:
-			typ = opspec.ActionNetworkMTUSet
+			kind = opspec.ActionNetworkMTUSet
 		case agentv1.NetworkAction_OPERATION_ENSURE_ROUTES:
-			typ = opspec.ActionNetworkRouteEnsure
+			kind = opspec.ActionNetworkRouteEnsure
 		case agentv1.NetworkAction_OPERATION_ROLLBACK:
-			typ = opspec.ActionNetworkRollback
+			kind = opspec.ActionNetworkRollback
 		}
-		return typ, opspec.Payload{Network: &opspec.NetworkPayload{
+		return kind, opspec.Payload{Network: &opspec.NetworkPayload{
 			Interface:       siec.GetInterface(),
 			MTU:             siec.GetMtu(),
 			Routes:          siec.GetRoutes(),
@@ -982,16 +1000,16 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 
 	case *agentv1.TaskEnvelope_Schedule:
 		harmonogram := action.Schedule
-		typ := opspec.ActionScheduleEnsure
+		kind := opspec.ActionScheduleEnsure
 		switch harmonogram.GetOperation() {
 		case agentv1.ScheduleAction_OPERATION_DISABLE:
-			typ = opspec.ActionScheduleDisable
+			kind = opspec.ActionScheduleDisable
 		case agentv1.ScheduleAction_OPERATION_REMOVE:
-			typ = opspec.ActionScheduleRemove
+			kind = opspec.ActionScheduleRemove
 		case agentv1.ScheduleAction_OPERATION_RUN_NOW:
-			typ = opspec.ActionScheduleRunNow
+			kind = opspec.ActionScheduleRunNow
 		}
-		return typ, opspec.Payload{Schedule: &opspec.SchedulePayload{
+		return kind, opspec.Payload{Schedule: &opspec.SchedulePayload{
 			ID:         harmonogram.GetId(),
 			Expression: harmonogram.GetExpression(),
 			Command:    harmonogram.GetCommand(),
@@ -1052,7 +1070,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		return opspec.ActionReadJournal, opspec.Payload{Journal: &payload}, nil
 
 	default:
-		return "", opspec.Payload{}, fmt.Errorf("koperta nie zawiera obslugiwanej akcji")
+		return "", opspec.Payload{}, fmt.Errorf("the envelope contains no supported action")
 	}
 }
 
@@ -1083,8 +1101,9 @@ func rejected(status agentv1.TaskResult_Status, code, message string) *agentv1.T
 	}
 }
 
-// cloneResult kopiuje wynik przez proto.Clone. Kopiowanie struktury przez
-// przypisanie skopiowaloby wewnetrzny stan wiadomosci wraz z mutexem.
+// cloneResult copies the result through proto.Clone. Copying the struct by
+// assignment would copy the internal state of the message together with its
+// mutex.
 func cloneResult(result *agentv1.TaskResult) *agentv1.TaskResult {
 	return proto.Clone(result).(*agentv1.TaskResult)
 }
@@ -1105,9 +1124,9 @@ func unitStateToAgent(state *helperv1.UnitState) *agentv1.UnitState {
 	}
 }
 
-// localUserActions tlumaczy operacje kontraktu na typ operacji. Agent nie
-// przyjmuje operacji spoza mapy, wiec rozszerzenie kontraktu przez strone
-// trzecia nie da mu nowych mozliwosci.
+// localUserActions translates the operations of the contract into operation
+// types. The agent accepts no operation from outside the map, so an extension
+// of the contract by a third party gives it no new abilities.
 var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
 	agentv1.LocalUserAction_OPERATION_CREATE:       opspec.ActionLocalUserCreate,
 	agentv1.LocalUserAction_OPERATION_LOCK:         opspec.ActionLocalUserLock,
@@ -1115,15 +1134,17 @@ var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
 	agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS: opspec.ActionLocalSSHKeysSet,
 }
 
-// joinNames sklada nazwy w czytelna liste dla komunikatu operatora.
-func joinNames(nazwy []string) string {
-	return strings.Join(nazwy, ", ")
+// joinNames assembles the names into a readable list for the message shown to
+// the operator.
+func joinNames(names []string) string {
+	return strings.Join(names, ", ")
 }
 
-// akcjaDockera tlumaczy koperte operacji kontenerowej na typ i payload.
-// Kazda operacja ma wlasny typ, bo kazda ma inne ryzyko i inne uprawnienie.
-func akcjaDockera(action *agentv1.DockerAction) (opspec.ActionType, opspec.Payload, error) {
-	kontener := &opspec.DockerContainerPayload{
+// dockerAction translates the envelope of a container operation into a type and
+// a payload. Every operation has its own type, because every one carries a
+// different risk and a different permission.
+func dockerAction(action *agentv1.DockerAction) (opspec.ActionType, opspec.Payload, error) {
+	container := &opspec.DockerContainerPayload{
 		ContainerID:    action.GetContainerId(),
 		Name:           action.GetContainerName(),
 		TimeoutSeconds: action.GetTimeoutSeconds(),
@@ -1131,13 +1152,13 @@ func akcjaDockera(action *agentv1.DockerAction) (opspec.ActionType, opspec.Paylo
 	}
 	switch action.GetOperation() {
 	case agentv1.DockerAction_OPERATION_START:
-		return opspec.ActionDockerStart, opspec.Payload{DockerContainer: kontener}, nil
+		return opspec.ActionDockerStart, opspec.Payload{DockerContainer: container}, nil
 	case agentv1.DockerAction_OPERATION_STOP:
-		return opspec.ActionDockerStop, opspec.Payload{DockerContainer: kontener}, nil
+		return opspec.ActionDockerStop, opspec.Payload{DockerContainer: container}, nil
 	case agentv1.DockerAction_OPERATION_RESTART:
-		return opspec.ActionDockerRestart, opspec.Payload{DockerContainer: kontener}, nil
+		return opspec.ActionDockerRestart, opspec.Payload{DockerContainer: container}, nil
 	case agentv1.DockerAction_OPERATION_REMOVE:
-		return opspec.ActionDockerRemove, opspec.Payload{DockerContainer: kontener}, nil
+		return opspec.ActionDockerRemove, opspec.Payload{DockerContainer: container}, nil
 	case agentv1.DockerAction_OPERATION_PULL_IMAGE:
 		return opspec.ActionDockerPull, opspec.Payload{
 			DockerImage: &opspec.DockerImagePayload{Reference: action.GetImageReference()},
@@ -1151,23 +1172,23 @@ func akcjaDockera(action *agentv1.DockerAction) (opspec.ActionType, opspec.Paylo
 			},
 		}, nil
 	}
-	return "", opspec.Payload{}, fmt.Errorf("nieznana operacja na kontenerach")
+	return "", opspec.Payload{}, fmt.Errorf("unknown container operation")
 }
 
-// listUnits zwraca pelny wykaz jednostek hosta.
+// listUnits returns the full list of the units of the host.
 func (e *TaskExecutor) listUnits(ctx context.Context, task *agentv1.TaskEnvelope) *agentv1.TaskResult {
-	jednostki, urwane, err := systemd.List(ctx)
+	units, truncated, err := systemd.List(ctx)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
 	}
-	stany := make([]*agentv1.UnitState, 0, len(jednostki))
-	for _, jednostka := range jednostki {
-		stany = append(stany, &agentv1.UnitState{
-			Name:          jednostka.Name,
-			LoadState:     jednostka.LoadState,
-			ActiveState:   jednostka.ActiveState,
-			SubState:      jednostka.SubState,
-			UnitFileState: jednostka.UnitFileState,
+	states := make([]*agentv1.UnitState, 0, len(units))
+	for _, unit := range units {
+		states = append(states, &agentv1.UnitState{
+			Name:          unit.Name,
+			LoadState:     unit.LoadState,
+			ActiveState:   unit.ActiveState,
+			SubState:      unit.SubState,
+			UnitFileState: unit.UnitFileState,
 		})
 	}
 	return &agentv1.TaskResult{
@@ -1175,21 +1196,22 @@ func (e *TaskExecutor) listUnits(ctx context.Context, task *agentv1.TaskEnvelope
 		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode: 0,
 		Detail: &agentv1.TaskResult_UnitStatus{
-			UnitStatus: &agentv1.UnitStatusResult{Units: stany, Truncated: urwane},
+			UnitStatus: &agentv1.UnitStatusResult{Units: states, Truncated: truncated},
 		},
 	}
 }
 
-// applyUnitToggle wlacza albo maskuje jednostke.
+// applyUnitToggle enables or masks a unit.
 //
-// Operacja opisuje stan docelowy, a nie przelacznik: powtorzenie jej nie
-// odwraca zmiany. Sciezka jest ta sama co przy start i stop, wiec stan przed
-// i po oraz kody bledow pozostaja jednakowe dla calego modulu.
+// The operation describes the desired state and not a switch: repeating it does
+// not reverse the change. The path is the same as with start and stop, so the
+// state before and after and the error codes stay the same for the whole
+// module.
 func (e *TaskExecutor) applyUnitToggle(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, toggle *agentv1.UnitToggle) *agentv1.TaskResult {
 	if toggle == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak opisu zmiany jednostki")
+			"the description of the unit change is missing")
 	}
 	return e.applyUnitAction(ctx, task, action, &opspec.UnitPayload{Unit: toggle.GetUnit()})
 }

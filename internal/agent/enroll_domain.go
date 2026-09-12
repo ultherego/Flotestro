@@ -22,8 +22,8 @@ func (e *TaskExecutor) enrollDomain(ctx context.Context, task *agentv1.TaskEnvel
 	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
 	defer cancel()
 
-	// Haslo jednorazowe pochodzi wylacznie z koperty i nie jest nigdzie
-	// zapisywane po stronie agenta.
+	// The one-time password comes only from the envelope and is written nowhere
+	// on the side of the agent.
 	var oneTimePassword string
 	if enroll := task.GetDomainEnroll(); enroll != nil {
 		oneTimePassword = enroll.GetOneTimePassword()
@@ -51,8 +51,8 @@ func (e *TaskExecutor) enrollDomain(ctx context.Context, task *agentv1.TaskEnvel
 
 	detail := enrollResultToAgent(response.GetEnrollResult())
 	if !response.GetAccepted() {
-		// Nieudany preflight jest wynikiem negatywnym, a nie awaria: warunki
-		// sa opisane w szczegolach, zeby dalo sie je naprawic.
+		// A failed preflight is a negative result and not a breakdown: the
+		// conditions are described in the details so that they can be fixed.
 		result := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
 		result.Stderr = response.GetStderr()
@@ -61,27 +61,27 @@ func (e *TaskExecutor) enrollDomain(ctx context.Context, task *agentv1.TaskEnvel
 	}
 
 	status := agentv1.TaskResult_STATUS_SUCCEEDED
-	message := "warunki sprawdzone"
+	message := "the conditions were checked"
 	if preflightOnly {
-		// Niespelniony warunek blokujacy jest wynikiem negatywnym, a nie
-		// awaria odczytu. Zadanie zakonczone sukcesem przeslanialoby werdykt.
+		// An unmet blocking condition is a negative result and not a read
+		// failure. A task ending in success would hide the verdict.
 		if blocked := blockingChecks(detail); len(blocked) > 0 {
 			return &agentv1.TaskResult{
 				Status:    agentv1.TaskResult_STATUS_FAILED,
 				ExitCode:  1,
 				ErrorCode: "preflight_failed",
-				Message:   "host nie spelnia warunkow: " + strings.Join(blocked, "; "),
+				Message:   "the host does not meet the conditions: " + strings.Join(blocked, "; "),
 				Detail:    &agentv1.TaskResult_DomainEnroll{DomainEnroll: detail},
 			}
 		}
 	}
 	if !preflightOnly {
-		message = "host dolaczony do domeny"
-		// Weryfikacja po dolaczeniu decyduje o wyniku: samo wykonanie
-		// polecenia nie oznacza dzialajacej integracji.
+		message = "the host joined the domain"
+		// The verification after the join decides the result: running the command
+		// alone does not mean a working integration.
 		if failed := failedVerifications(detail); len(failed) > 0 {
 			status = agentv1.TaskResult_STATUS_FAILED
-			message = "host dolaczony, ale weryfikacja nie przeszla: " + failed[0]
+			message = "the host joined, but the verification did not pass: " + failed[0]
 		}
 	}
 

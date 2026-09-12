@@ -36,12 +36,12 @@ func diagnoseCommand(args []string, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "config      ok    %s\n", path)
 
 	problems := 0
-	identity := agent.OdczytajTozsamosc(cfg.Agent.StateDir)
-	if identity.Obecna {
+	identity := agent.ReadIdentity(cfg.Agent.StateDir)
+	if identity.Present {
 		fmt.Fprintf(out, "identity    ok    host/%s, the certificate until %s\n",
 			identity.HostID, identity.NotAfter.UTC().Format(time.RFC3339))
 	} else {
-		fmt.Fprintf(out, "identity    none  %s\n", identity.Blad)
+		fmt.Fprintf(out, "identity    none  %s\n", identity.Err)
 		problems++
 	}
 
@@ -79,10 +79,10 @@ func diagnoseCommand(args []string, out, errOut io.Writer) int {
 }
 
 // caPool assembles the trust for checking the connection.
-func caPool(cfg agentconfig.Config, identity agent.StanTozsamosci) *x509.CertPool {
+func caPool(cfg agentconfig.Config, identity agent.StoredIdentity) *x509.CertPool {
 	pool := x509.NewCertPool()
 	added := false
-	for _, path := range []string{identity.Sciezki.CA, cfg.Connection.BootstrapCA} {
+	for _, path := range []string{identity.Paths.CA, cfg.Connection.BootstrapCA} {
 		if path == "" {
 			continue
 		}

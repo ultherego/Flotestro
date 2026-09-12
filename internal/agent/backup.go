@@ -11,73 +11,75 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// StanBackupu opisuje narzedzia backupu widoczne na hoscie.
+// BackupState describes the backup tools visible on the host.
 //
-// To jest wszystko, co da sie powiedziec o backupie bez poswiadczen:
-// czy host ma czym go zrobic. Stan repozytorium - kiedy ostatnia kopia sie
-// udala i ile zajmuje - wymaga hasla, wiec jest operacja, a nie inwentarzem.
-type StanBackupu struct {
-	Tools []NarzedzieBackupu `json:"tools"`
-	// Runbooks wylicza skrypty, ktore administrator hosta udostepnil panelowi.
+// This is everything that can be said about backups without credentials:
+// whether the host has anything to make them with. The state of the repository
+// - when the last copy succeeded and how much room it takes - needs a password,
+// so it is an operation and not inventory.
+type BackupState struct {
+	Tools []BackupTool `json:"tools"`
+	// Runbooks lists the scripts the administrator of the host made available to
+	// the panel.
 	Runbooks []string `json:"runbooks,omitempty"`
-	// RunbooksKnown mowi, czy katalog runbookow w ogole dalo sie odczytac.
+	// RunbooksKnown says whether the runbook directory could be read at all.
 	RunbooksKnown bool   `json:"runbooks_known"`
 	ObservedAt    string `json:"observed_at"`
 }
 
-// NarzedzieBackupu opisuje jedno narzedzie na hoscie.
-type NarzedzieBackupu struct {
+// BackupTool describes one tool on the host.
+type BackupTool struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
 	Version   string `json:"version,omitempty"`
 }
 
-// ZbierzBackup czyta, czym host moze zrobic kopie.
-func ZbierzBackup(ctx context.Context) StanBackupu {
-	stan := StanBackupu{ObservedAt: time.Now().UTC().Format(time.RFC3339)}
-	for _, nazwa := range []string{backup.NarzedzieRestic, backup.NarzedzieBorg} {
-		adapter, err := backup.Wybierz(nazwa)
+// CollectBackup reads what the host can make copies with.
+func CollectBackup(ctx context.Context) BackupState {
+	state := BackupState{ObservedAt: time.Now().UTC().Format(time.RFC3339)}
+	for _, name := range []string{backup.NarzedzieRestic, backup.NarzedzieBorg} {
+		adapter, err := backup.Wybierz(name)
 		if err != nil {
 			continue
 		}
-		opis := NarzedzieBackupu{Name: nazwa, Available: adapter.Dostepny()}
-		if opis.Available {
-			opis.Version = adapter.Wersja(ctx)
+		description := BackupTool{Name: name, Available: adapter.Dostepny()}
+		if description.Available {
+			description.Version = adapter.Wersja(ctx)
 		}
-		stan.Tools = append(stan.Tools, opis)
+		state.Tools = append(state.Tools, description)
 	}
-	runbooki, znane := backup.WykazRunbookow()
-	stan.Runbooks = runbooki
-	stan.RunbooksKnown = znane
-	stan.Tools = append(stan.Tools, NarzedzieBackupu{
-		Name: backup.NarzedzieRunbook, Available: len(runbooki) > 0,
+	runbooks, known := backup.WykazRunbookow()
+	state.Runbooks = runbooks
+	state.RunbooksKnown = known
+	state.Tools = append(state.Tools, BackupTool{
+		Name: backup.NarzedzieRunbook, Available: len(runbooks) > 0,
 	})
-	return stan
+	return state
 }
 
-// applyBackup wykonuje operacje backupu.
+// applyBackup performs a backup operation.
 func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.BackupPayload) *agentv1.TaskResult {
 	if payload == nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
-			"brak payloadu backupu")
+			"the backup payload is missing")
 	}
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
 	defer cancel()
 
-	operacja := helperv1.BackupRequest_OPERATION_PLAN
+	operation := helperv1.BackupRequest_OPERATION_PLAN
 	switch action {
 	case opspec.ActionBackupRun:
-		operacja = helperv1.BackupRequest_OPERATION_RUN
+		operation = helperv1.BackupRequest_OPERATION_RUN
 	case opspec.ActionBackupVerify:
-		operacja = helperv1.BackupRequest_OPERATION_VERIFY
+		operation = helperv1.BackupRequest_OPERATION_VERIFY
 	case opspec.ActionBackupRestore:
-		operacja = helperv1.BackupRequest_OPERATION_RESTORE
+		operation = helperv1.BackupRequest_OPERATION_RESTORE
 	}
 
-	zadanie := &helperv1.BackupRequest{
-		Operation: operacja,
+	request := &helperv1.BackupRequest{
+		Operation: operation,
 		Id:        payload.ID, Tool: payload.Tool, Repository: payload.Repository,
 		Paths: payload.Paths, Excludes: payload.Excludes, Tags: payload.Tags,
 		KeepLast: int32(payload.KeepLast), KeepDaily: int32(payload.KeepDaily),
@@ -89,24 +91,24 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		Plan: payload.Plan, PlanHash: payload.PlanHash,
 	}
 
-	// Poswiadczenia pobieramy dopiero teraz, tuz przed operacja. Zyja przez
-	// chwile w pamieci agenta i helpera - nie ma ich w kopercie zadania,
-	// w dzienniku ani w wyniku.
+	// The credentials are fetched only now, right before the operation. They
+	// live for a moment in the memory of the agent and of the helper - they are
+	// not in the envelope of the task, in the journal or in the result.
 	if !payload.PasswordSecret.Empty() {
-		wartosc, wynik := e.pobierzSekret(callCtx, task, *payload.PasswordSecret)
-		if wynik != nil {
-			return wynik
+		value, refusal := e.fetchSecret(callCtx, task, *payload.PasswordSecret)
+		if refusal != nil {
+			return refusal
 		}
-		zadanie.Password = wartosc
+		request.Password = value
 	}
 	if len(payload.EnvSecrets) > 0 {
-		zadanie.Env = map[string][]byte{}
-		for nazwa, odnosnik := range payload.EnvSecrets {
-			wartosc, wynik := e.pobierzSekret(callCtx, task, odnosnik)
-			if wynik != nil {
-				return wynik
+		request.Env = map[string][]byte{}
+		for name, reference := range payload.EnvSecrets {
+			value, refusal := e.fetchSecret(callCtx, task, reference)
+			if refusal != nil {
+				return refusal
 			}
-			zadanie.Env[nazwa] = wartosc
+			request.Env[name] = value
 		}
 	}
 
@@ -115,59 +117,60 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		WantProgress:   action == opspec.ActionBackupRun,
-		Action:         &helperv1.HelperRequest_Backup{Backup: zadanie},
+		Action:         &helperv1.HelperRequest_Backup{Backup: request},
 	}, timeout)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	wynik := response.GetBackupResult()
-	szczegoly := &agentv1.BackupResult{
-		State:    wynik.GetState(),
-		Outcome:  wynik.GetOutcome(),
-		Message:  wynik.GetMessage(),
-		Plan:     wynik.GetPlan(),
-		Verified: wynik.GetVerified(),
+	result := response.GetBackupResult()
+	details := &agentv1.BackupResult{
+		State:    result.GetState(),
+		Outcome:  result.GetOutcome(),
+		Message:  result.GetMessage(),
+		Plan:     result.GetPlan(),
+		Verified: result.GetVerified(),
 	}
 	if !response.GetAccepted() {
-		odrzucone := rejected(agentv1.TaskResult_STATUS_REJECTED,
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,
 			response.GetErrorCode(), response.GetMessage())
-		odrzucone.TaskId = task.GetTaskId()
-		odrzucone.BackupResult = szczegoly
-		return odrzucone
+		refused.TaskId = task.GetTaskId()
+		refused.BackupResult = details
+		return refused
 	}
 	return &agentv1.TaskResult{
 		TaskId:       task.GetTaskId(),
 		Status:       agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:      wynik.GetMessage(),
-		BackupResult: szczegoly,
+		Message:      result.GetMessage(),
+		BackupResult: details,
 	}
 }
 
-// pobierzSekret pobiera wartosc z magazynu tuz przed operacja.
-func (e *TaskExecutor) pobierzSekret(ctx context.Context, task *agentv1.TaskEnvelope,
-	odnosnik opspec.SecretRef) ([]byte, *agentv1.TaskResult) {
-	if e.sekrety == nil {
+// fetchSecret fetches the value from the store right before the operation.
+func (e *TaskExecutor) fetchSecret(ctx context.Context, task *agentv1.TaskEnvelope,
+	reference opspec.SecretRef) ([]byte, *agentv1.TaskResult) {
+	if e.secrets == nil {
 		return nil, rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
-			"agent nie ma polaczenia, przez ktore mozna pobrac sekret")
+			"the agent has no connection through which a secret could be fetched")
 	}
-	wartosc, err := e.sekrety(ctx, task.GetTaskId(), odnosnik.Name, odnosnik.Version)
+	value, err := e.secrets(ctx, task.GetTaskId(), reference.Name, reference.Version)
 	if err != nil {
-		// Powod odmowy jest trescia wyniku; wartosci w nim nie ma.
+		// The reason for the refusal is the content of the result; the value is
+		// not in it.
 		return nil, rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
-			"nie pobrano sekretu "+odnosnik.Name+": "+err.Error())
+			"the secret "+reference.Name+" was not fetched: "+err.Error())
 	}
-	return wartosc, nil
+	return value, nil
 }
 
-// backupJSON dekoduje stan repozytorium z wyniku zadania.
-func backupJSON(dane []byte) (backup.Stan, bool) {
-	var stan backup.Stan
-	if len(dane) == 0 {
-		return stan, false
+// backupJSON decodes the state of the repository from the result of the task.
+func backupJSON(data []byte) (backup.Stan, bool) {
+	var state backup.Stan
+	if len(data) == 0 {
+		return state, false
 	}
-	if err := json.Unmarshal(dane, &stan); err != nil {
-		return stan, false
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, false
 	}
-	return stan, true
+	return state, true
 }
