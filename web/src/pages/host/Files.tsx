@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
-import { useHost } from "./shared";
+import {
+  Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -82,98 +84,115 @@ export function Files() {
 
   if (files.error) return <ErrorBox error={files.error} />;
   const list = files.data?.items ?? [];
+  const drifted = list.filter((file) => file.exists && file.drift).length;
+  const missing = list.filter((file) => !file.unavailable_reason && !file.exists).length;
 
   return (
-    <>
-      <p className="subtitle">
-        {t("Files the panel manages, with the content it expects and the content the host actually has. Paths are limited by the host's own allowlist, and password files, private keys and sudo rules are never editable here.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Files")}
+        description={t("Files the panel manages, with the content it expects and the content the host actually has. Paths are limited by the host's own allowlist, and password files, private keys and sudo rules are never editable here.")}
+        actions={
+          <button onClick={() => setAdding((open) => !open)}>
+            {adding ? t("Cancel") : t("Manage a file")}
+          </button>
+        }
+      />
+      <Message text={message} />
 
-      <div className="filters">
-        <button onClick={() => setAdding((open) => !open)}>
-          {adding ? t("Cancel") : t("Manage a file")}
-        </button>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+      {list.length > 0 && (
+        <Stats>
+          <Stat label={t("Files")} value={list.length} />
+          <Stat label={t("changed outside the panel")} value={drifted} tone={drifted > 0 ? "warn" : "ok"} />
+          <Stat label={t("missing on host")} value={missing} tone={missing > 0 ? "error" : "ok"} />
+        </Stats>
+      )}
 
       {adding && <NewFile onIntent={setIntent} />}
 
-      {!list.length ? (
-        <Empty>{t("The panel does not manage any file on this host yet.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Path")}</th><th>{t("State")}</th><th>{t("Mode")}</th><th>{t("Last change")}</th><th>{t("Actions")}</th></tr>
-          </thead>
-          <tbody>
-            {list.map((file) => (
-              <tr key={file.path}>
-                <td>
-                  <a href="#" onClick={(e) => { e.preventDefault(); setSelected(selected === file.path ? "" : file.path); }}>
-                    {file.path}
-                  </a>
-                </td>
-                {/* Drift is an established divergence, not a default one: a
-                    file the host did not read is neither matching nor
-                    drifted. */}
-                <td>
-                  {file.unavailable_reason ? (
-                    <span className="badge unknown">{file.unavailable_reason}</span>
-                  ) : !file.exists ? (
-                    <span className="badge unknown">{t("missing on host")}</span>
-                  ) : file.drift ? (
-                    <span className="badge unknown">{t("changed outside the panel")}</span>
-                  ) : file.drift_unknown_reason ? (
-                    // The panel holds no fingerprint of content from a
-                    // secret, so it does not pretend the file matches - it
-                    // says what it does not check.
-                    <span className="badge unknown" title={file.drift_unknown_reason}>
-                      {t("content not compared")}
-                    </span>
-                  ) : (
-                    t("matches")
-                  )}
-                </td>
-                <td>
-                  {file.observed_mode || file.mode || "—"}
-                  {file.mode && file.observed_mode && file.mode.replace(/^0+/, "") !== file.observed_mode.replace(/^0+/, "") && (
-                    <span className="badge unknown"> {t("want {mode}", { mode: file.mode })}</span>
-                  )}
-                </td>
-                <td>
-                  <Time value={file.updated_at} /> <span className="source">{t("by {who}", { who: file.updated_by })}</span>
-                </td>
-                <td>
-                  <div className="operations">
+      <Section title={t("Files")} count={list.length} flush>
+        {!list.length ? (
+          <Empty>{t("The panel does not manage any file on this host yet.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Path")}</th><th>{t("State")}</th><th>{t("Mode")}</th><th>{t("Last change")}</th><th>{t("Actions")}</th></tr>
+            </thead>
+            <tbody>
+              {list.map((file) => (
+                <tr key={file.path} className={selected === file.path ? "selected" : undefined}>
+                  <td>
                     <button
-                      onClick={() =>
-                        request.mutate({ action: "file.read", payload: { file: { path: file.path } } })
-                      }
+                      type="button"
+                      className="hm-link hm-mono"
+                      onClick={() => setSelected(selected === file.path ? "" : file.path)}
                     >
-                      {t("Read")}
+                      {file.path}
                     </button>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "file.remove",
-                          label: t("Stop managing and remove"),
-                          description: t("{path} will be removed from {host} and the panel will stop tracking it. Its history stays.", { path: file.path, host: host.hostname }),
-                          payload: {
-                            file: { path: file.path, expected_sha256: file.observed_sha256 ?? "" },
-                          },
-                        })
-                      }
-                    >
-                      {t("Remove")}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                  </td>
+                  {/* Drift is an established divergence, not a default one: a
+                      file the host did not read is neither matching nor
+                      drifted. */}
+                  <td>
+                    {file.unavailable_reason ? (
+                      <span className="badge unknown">{file.unavailable_reason}</span>
+                    ) : !file.exists ? (
+                      <span className="badge error">{t("missing on host")}</span>
+                    ) : file.drift ? (
+                      <span className="badge warn">{t("changed outside the panel")}</span>
+                    ) : file.drift_unknown_reason ? (
+                      // The panel holds no fingerprint of content from a
+                      // secret, so it does not pretend the file matches - it
+                      // says what it does not check.
+                      <span className="badge unknown" title={file.drift_unknown_reason}>
+                        {t("content not compared")}
+                      </span>
+                    ) : (
+                      <span className="badge ok">{t("matches")}</span>
+                    )}
+                  </td>
+                  <td className="hm-mono">
+                    {file.observed_mode || file.mode || "—"}
+                    {file.mode && file.observed_mode && file.mode.replace(/^0+/, "") !== file.observed_mode.replace(/^0+/, "") && (
+                      <span className="badge unknown"> {t("want {mode}", { mode: file.mode })}</span>
+                    )}
+                  </td>
+                  <td>
+                    <Time value={file.updated_at} /> <span className="source">{t("by {who}", { who: file.updated_by })}</span>
+                  </td>
+                  <td>
+                    <div className="operations">
+                      <button
+                        className="secondary"
+                        onClick={() =>
+                          request.mutate({ action: "file.read", payload: { file: { path: file.path } } })
+                        }
+                      >
+                        {t("Read")}
+                      </button>
+                      <button
+                        className="hm-danger"
+                        onClick={() =>
+                          setIntent({
+                            action: "file.remove",
+                            label: t("Stop managing and remove"),
+                            description: t("{path} will be removed from {host} and the panel will stop tracking it. Its history stays.", { path: file.path, host: host.hostname }),
+                            payload: {
+                              file: { path: file.path, expected_sha256: file.observed_sha256 ?? "" },
+                            },
+                          })
+                        }
+                      >
+                        {t("Remove")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
       {selected && (
         <History
@@ -196,7 +215,7 @@ export function Files() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -242,69 +261,69 @@ function History({
 
   return (
     <>
-      <h2>{file.path}</h2>
-      <table>
-        <thead><tr><th>{t("Version")}</th><th>{t("Size")}</th><th>{t("Applied")}</th><th>{t("By")}</th><th>{t("Actions")}</th></tr></thead>
-        <tbody>
-          {(history.data?.items ?? []).map((version) => (
-            <tr key={`${version.sha256 || version.secret_name}-${version.applied_at}`}>
-              <td className="source">
-                {/* An entry from a secret has no content in the panel: we
-                    show which secret version was deployed, because that is
-                    all the panel knows. */}
-                {version.sha256
-                  ? version.sha256.slice(0, 12)
-                  : `${version.secret_name}@v${version.secret_version}`}
-                {version.sha256 && version.sha256 === file.desired_sha256 && (
-                  <span className="badge"> {t("current")}</span>
-                )}
-              </td>
-              <td>{version.sha256 ? `${version.size_bytes} B` : "—"}</td>
-              <td><Time value={version.applied_at} /></td>
-              <td>{version.applied_by}</td>
-              <td>
-                <div className="operations">
-                  <button onClick={() => setComparison(version.sha256 ?? "")} disabled={!version.sha256}>
-                    {t("Compare")}
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={!version.sha256 || (version.sha256 === file.desired_sha256 && !file.drift)}
-                    onClick={() =>
-                      onIntent({
-                        action: "file.rollback",
-                        label: t("Roll back file"),
-                        description: t("{path} on {host} goes back to version {version} from {when}.", {
-                          path: file.path, host: hostname, version: (version.sha256 ?? "").slice(0, 12), when: new Date(version.applied_at).toLocaleString(),
-                        }),
-                        payload: {
-                          file: {
-                            path: file.path,
-                            version_sha256: version.sha256,
-                            expected_sha256: file.observed_sha256 ?? "",
-                            mode: file.mode ?? "",
+      <Section title={<span className="hm-mono">{file.path}</span>} count={(history.data?.items ?? []).length} flush>
+        <Table>
+          <thead><tr><th>{t("Version")}</th><th className="hm-num">{t("Size")}</th><th>{t("Applied")}</th><th>{t("By")}</th><th>{t("Actions")}</th></tr></thead>
+          <tbody>
+            {(history.data?.items ?? []).map((version) => (
+              <tr key={`${version.sha256 || version.secret_name}-${version.applied_at}`}>
+                <td className="hm-mono">
+                  {/* An entry from a secret has no content in the panel: we
+                      show which secret version was deployed, because that is
+                      all the panel knows. */}
+                  {version.sha256
+                    ? version.sha256.slice(0, 12)
+                    : `${version.secret_name}@v${version.secret_version}`}
+                  {version.sha256 && version.sha256 === file.desired_sha256 && (
+                    <span className="badge ok"> {t("current")}</span>
+                  )}
+                </td>
+                <td className="hm-num">{version.sha256 ? `${version.size_bytes} B` : "—"}</td>
+                <td><Time value={version.applied_at} /></td>
+                <td>{version.applied_by}</td>
+                <td>
+                  <div className="operations">
+                    <button className="secondary" onClick={() => setComparison(version.sha256 ?? "")} disabled={!version.sha256}>
+                      {t("Compare")}
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={!version.sha256 || (version.sha256 === file.desired_sha256 && !file.drift)}
+                      onClick={() =>
+                        onIntent({
+                          action: "file.rollback",
+                          label: t("Roll back file"),
+                          description: t("{path} on {host} goes back to version {version} from {when}.", {
+                            path: file.path, host: hostname, version: (version.sha256 ?? "").slice(0, 12), when: new Date(version.applied_at).toLocaleString(),
+                          }),
+                          payload: {
+                            file: {
+                              path: file.path,
+                              version_sha256: version.sha256,
+                              expected_sha256: file.observed_sha256 ?? "",
+                              mode: file.mode ?? "",
+                            },
                           },
-                        },
-                      })
-                    }
-                  >
-                    {t("Roll back")}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                        })
+                      }
+                    >
+                      {t("Roll back")}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Section>
 
       {comparison && chosen.data && current.data && (
-        <>
-          <h2>{t("Difference")}</h2>
-          <p className="subtitle">
-            {t("Left: version {version}. Right: what the panel expects now.", { version: comparison.slice(0, 12) })}
-          </p>
+        <Section
+          title={t("Difference")}
+          description={t("Left: version {version}. Right: what the panel expects now.", { version: comparison.slice(0, 12) })}
+        >
           <Difference before={chosen.data.content} after={current.data.content} />
-        </>
+        </Section>
       )}
     </>
   );
@@ -354,14 +373,9 @@ function Difference({ before, after }: { before: string; after: string }) {
   }
 
   return (
-    <pre style={{ marginTop: 8, maxHeight: 420, overflowY: "auto" }}>
+    <pre className="hm-diff">
       {rows.map((row, index) => (
-        <div
-          key={index}
-          style={{
-            color: row.sign === "+" ? "#3fa34d" : row.sign === "-" ? "#c0392b" : undefined,
-          }}
-        >
+        <div key={index} className={row.sign === "+" ? "add" : row.sign === "-" ? "del" : undefined}>
           {row.sign} {row.text}
         </div>
       ))}
@@ -383,59 +397,64 @@ function NewFile({ onIntent }: { onIntent: (intent: Intent) => void }) {
   const fromSecret = secret.trim() !== "";
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Manage a file")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("A file that already exists needs the checksum of the content you reviewed — read it first. Without that, a change someone made after you looked would vanish under this write.")}
-      </p>
-      <label>
-        {t("From a secret (leave empty to write the content below)")}
-        <input
-          value={secret}
-          onChange={(e) => setSecret(e.target.value)}
-          placeholder="repo.token"
-        />
-      </label>
-      {fromSecret && (
-        <p className="subtitle" style={{ margin: 0 }}>
-          {t("The value never travels in the job: the host fetches it from the store when it starts the operation. The panel keeps no copy and no checksum of it, so it will not be able to tell you later whether somebody changed this file on the host — only which secret version was deployed.")}
-        </p>
-      )}
-      <div className="filters">
-        <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/etc/example.conf" style={{ minWidth: 280 }} />
-        <input value={mode} onChange={(e) => setMode(e.target.value)} placeholder={t("Mode")} style={{ width: 100 }} />
-        <input value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} placeholder={t("Expected sha256 (existing file)")} style={{ minWidth: 260 }} />
-      </div>
-      {!fromSecret && (
-        <label>
-          {t("Content")}
-          <textarea rows={10} value={content} onChange={(e) => setContent(e.target.value)} />
-        </label>
-      )}
-      <button
-        onClick={() =>
-          onIntent({
-            action: "file.ensure",
-            label: t("Write file"),
-            description: fromSecret
-              ? t("{path} will be written with the value of secret {secret}, mode {mode}. The value is fetched by the host at execution time and is stored nowhere else.", { path, secret, mode })
-              : t("{path} will be written with {lines} lines, mode {mode}. The host validates the content first where it knows how.", { path, lines: content.split("\n").length, mode }),
-            payload: {
-              file: fromSecret
-                ? {
-                    path,
-                    content_secret: { name: secret.trim() },
-                    mode,
-                    expected_sha256: fingerprint,
-                  }
-                : { path, content, mode, expected_sha256: fingerprint },
-            },
-          })
-        }
-        disabled={!path || (!content && !fromSecret)}
-      >
-        {t("Write")}
-      </button>
-    </div>
+    <Section
+      title={t("Manage a file")}
+      description={t("A file that already exists needs the checksum of the content you reviewed — read it first. Without that, a change someone made after you looked would vanish under this write.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Path")} wide>
+            <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/etc/example.conf" />
+          </Field>
+          <Field label={t("Mode")} narrow>
+            <input value={mode} onChange={(e) => setMode(e.target.value)} placeholder={t("Mode")} />
+          </Field>
+          <Field label={t("Expected sha256 (existing file)")}>
+            <input value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} />
+          </Field>
+          <Field
+            label={t("From a secret (leave empty to write the content below)")}
+            help={fromSecret ? t("The value never travels in the job: the host fetches it from the store when it starts the operation. The panel keeps no copy and no checksum of it, so it will not be able to tell you later whether somebody changed this file on the host — only which secret version was deployed.") : undefined}
+          >
+            <input
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder="repo.token"
+            />
+          </Field>
+          {!fromSecret && (
+            <Field label={t("Content")} wide>
+              <textarea rows={10} value={content} onChange={(e) => setContent(e.target.value)} />
+            </Field>
+          )}
+        </Fields>
+        <FormActions>
+          <button
+            onClick={() =>
+              onIntent({
+                action: "file.ensure",
+                label: t("Write file"),
+                description: fromSecret
+                  ? t("{path} will be written with the value of secret {secret}, mode {mode}. The value is fetched by the host at execution time and is stored nowhere else.", { path, secret, mode })
+                  : t("{path} will be written with {lines} lines, mode {mode}. The host validates the content first where it knows how.", { path, lines: content.split("\n").length, mode }),
+                payload: {
+                  file: fromSecret
+                    ? {
+                        path,
+                        content_secret: { name: secret.trim() },
+                        mode,
+                        expected_sha256: fingerprint,
+                      }
+                    : { path, content, mode, expected_sha256: fingerprint },
+                },
+              })
+            }
+            disabled={!path || (!content && !fromSecret)}
+          >
+            {t("Write")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }

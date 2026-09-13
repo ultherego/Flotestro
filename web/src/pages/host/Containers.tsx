@@ -2,9 +2,12 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Pair, Pairs, Empty } from "../../components/ui";
+import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Stat, Stats, Table, Unknown, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -208,125 +211,150 @@ export function Containers() {
   const read = full.data !== undefined;
 
   return (
-    <>
-      <Pairs>
-        <Pair label={t("Engine")}>{state?.engine_version || unknown}</Pair>
-        <Pair label="API">{state?.api_version || "—"}</Pair>
-        <Pair label={t("Containers")}>
-          {state?.containers ?? unknown}
-          {state?.running !== undefined && ` (${t("{running} running, {stopped} stopped", { running: state.running, stopped: state.stopped ?? 0 })})`}
-        </Pair>
-        <Pair label={t("Unhealthy")}>
-          {state?.unhealthy ? <span className="badge error">{state.unhealthy}</span> : (state?.unhealthy ?? "—")}
-        </Pair>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Containers")}
+        description={t("Full lists are read from the host on request, not on every inventory cycle.")}
+        actions={
+          <button
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending || host.connection_state !== "online"}
+          >
+            {refresh.isPending ? t("Requesting…") : t("Read from host")}
+          </button>
+        }
+      />
+      <ModuleFreshness fragment={summary.data} />
+      <Message text={message} />
+
+      <Stats>
+        <Stat
+          label={t("Containers")}
+          value={state?.containers ?? <Unknown />}
+          hint={state?.running !== undefined ? t("{running} running, {stopped} stopped", { running: state.running, stopped: state.stopped ?? 0 }) : undefined}
+        />
+        <Stat
+          label={t("Unhealthy")}
+          value={state?.unhealthy ?? "—"}
+          tone={state?.unhealthy ? "error" : undefined}
+        />
         {/* A container that keeps coming up is healthy at every single
             moment and broken nonetheless - without this counter that is
             not visible at all. */}
-        <Pair label={t("Restart looping")}>
-          {state?.restart_looping ? <span className="badge warn">{state.restart_looping}</span> : (state?.restart_looping ?? "—")}
-        </Pair>
-        <Pair label={t("Images")}>{state?.images ?? "—"}</Pair>
+        <Stat
+          label={t("Restart looping")}
+          value={state?.restart_looping ?? "—"}
+          tone={state?.restart_looping ? "warn" : undefined}
+        />
+        <Stat label={t("Images")} value={state?.images ?? "—"} />
         {/* The unused counter says how much of this can be cleaned up - and
             that is the only reason these numbers are in the summary at all. */}
-        <Pair label={t("Networks")}>
-          {state?.networks ?? "—"}
-          {state?.networks_unused ? ` (${t("{n} unused", { n: state.networks_unused })})` : ""}
-        </Pair>
-        <Pair label={t("Volumes")}>
-          {state?.volumes ?? "—"}
-          {state?.volumes_unused ? ` (${t("{n} unused", { n: state.volumes_unused })})` : ""}
-        </Pair>
-      </Pairs>
-      <ModuleFreshness fragment={summary.data} />
+        <Stat
+          label={t("Networks")}
+          value={state?.networks ?? "—"}
+          hint={state?.networks_unused ? t("{n} unused", { n: state.networks_unused }) : undefined}
+        />
+        <Stat
+          label={t("Volumes")}
+          value={state?.volumes ?? "—"}
+          hint={state?.volumes_unused ? t("{n} unused", { n: state.volumes_unused }) : undefined}
+        />
+      </Stats>
+
+      <Section title={t("Engine")} flush>
+        <Facts>
+          <Fact label={t("Engine")}>{state?.engine_version || unknown}</Fact>
+          <Fact label="API">{state?.api_version || "—"}</Fact>
+        </Facts>
+      </Section>
 
       {state?.projects && state.projects.length > 0 && (
-        <>
-          <h2>{t("Compose projects")}</h2>
-          <table>
-            <thead><tr><th>{t("Project")}</th><th>{t("Services")}</th><th>{t("Running")}</th></tr></thead>
+        <Section title={t("Compose projects")} count={state.projects.length} flush>
+          <Table>
+            <thead><tr><th>{t("Project")}</th><th>{t("Services")}</th><th className="hm-num">{t("Running")}</th></tr></thead>
             <tbody>
               {state.projects.map((project) => (
                 <tr key={project.name}>
-                  <td>{project.name}</td>
+                  <td className="hm-mono hm-primary">{project.name}</td>
                   <td>{project.services.join(", ") || "—"}</td>
-                  <td>{project.running} / {project.total}</td>
+                  <td className="hm-num">{project.running} / {project.total}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </>
+          </Table>
+        </Section>
       )}
 
-      <p className="subtitle" style={{ marginTop: 16 }}>
-        {t("Full lists are read from the host on request, not on every inventory cycle.")}{" "}
-        <button
-          className="secondary"
-          onClick={() => refresh.mutate()}
-          disabled={refresh.isPending || host.connection_state !== "online"}
-        >
-          {refresh.isPending ? t("Requesting…") : t("Read from host")}
-        </button>
-      </p>
+      <Section title={t("Engine objects")} flush>
+        <div className="tabs">
+          <button className={view === "containers" ? "active" : ""} onClick={() => setView("containers")}>
+            {t("Containers")}{lists?.containers?.length ? ` (${lists.containers.length})` : ""}
+          </button>
+          <button className={view === "images" ? "active" : ""} onClick={() => setView("images")}>
+            {t("Images")}{lists?.images?.length ? ` (${lists.images.length})` : ""}
+          </button>
+          <button className={view === "networks" ? "active" : ""} onClick={() => setView("networks")}>
+            {t("Networks")}{lists?.networks?.length ? ` (${lists.networks.length})` : ""}
+          </button>
+          <button className={view === "volumes" ? "active" : ""} onClick={() => setView("volumes")}>
+            {t("Volumes")}{lists?.volumes?.length ? ` (${lists.volumes.length})` : ""}
+          </button>
+          <button className={view === "events" ? "active" : ""} onClick={() => setView("events")}>
+            {t("Events")}
+          </button>
+        </div>
 
-      <div className="tabs">
-        <button className={view === "containers" ? "active" : ""} onClick={() => setView("containers")}>
-          {t("Containers")}{lists?.containers?.length ? ` (${lists.containers.length})` : ""}
-        </button>
-        <button className={view === "images" ? "active" : ""} onClick={() => setView("images")}>
-          {t("Images")}{lists?.images?.length ? ` (${lists.images.length})` : ""}
-        </button>
-        <button className={view === "networks" ? "active" : ""} onClick={() => setView("networks")}>
-          {t("Networks")}{lists?.networks?.length ? ` (${lists.networks.length})` : ""}
-        </button>
-        <button className={view === "volumes" ? "active" : ""} onClick={() => setView("volumes")}>
-          {t("Volumes")}{lists?.volumes?.length ? ` (${lists.volumes.length})` : ""}
-        </button>
-        <button className={view === "events" ? "active" : ""} onClick={() => setView("events")}>
-          {t("Events")}
-        </button>
-      </div>
+        {view === "containers" && (
+          <ContainerTable
+            containers={lists?.containers}
+            read={read}
+            operation={containerOperation}
+            remove={(container) =>
+              setPending({ kind: "remove-container", id: container.id, name: container.name })
+            }
+          />
+        )}
+        {view === "images" && (
+          <ImageTable
+            images={lists?.images}
+            read={read}
+            remove={(image) =>
+              setPending({
+                kind: "remove-image",
+                id: image.id,
+                name: image.tags?.[0] || image.id.slice(7, 19),
+              })
+            }
+          />
+        )}
+        {view === "networks" && (
+          <NetworkTable
+            networks={lists?.networks}
+            read={read}
+            remove={(network) => setPending({ kind: "remove-network", id: network.id, name: network.name })}
+          />
+        )}
+        {view === "volumes" && (
+          <VolumeTable
+            volumes={lists?.volumes}
+            read={read}
+            remove={(volume) =>
+              setPending({ kind: "remove-volume", id: volume.name, name: volume.name })
+            }
+          />
+        )}
 
-      {view === "containers" && (
-        <ContainerTable
-          containers={lists?.containers}
-          read={read}
-          operation={containerOperation}
-          remove={(container) =>
-            setPending({ kind: "remove-container", id: container.id, name: container.name })
-          }
-        />
-      )}
-      {view === "images" && (
-        <ImageTable
-          images={lists?.images}
-          read={read}
-          remove={(image) =>
-            setPending({
-              kind: "remove-image",
-              id: image.id,
-              name: image.tags?.[0] || image.id.slice(7, 19),
-            })
-          }
-        />
-      )}
-      {view === "networks" && (
-        <NetworkTable
-          networks={lists?.networks}
-          read={read}
-          remove={(network) => setPending({ kind: "remove-network", id: network.id, name: network.name })}
-        />
-      )}
-      {view === "volumes" && (
-        <VolumeTable
-          volumes={lists?.volumes}
-          read={read}
-          remove={(volume) =>
-            setPending({ kind: "remove-volume", id: volume.name, name: volume.name })
-          }
-        />
-      )}
+        {view === "events" && <Events />}
 
-      {view === "events" && <Events />}
+        {full.data && (
+          <Foot>
+            <span>
+              {t("Full state read from the host")} <Time value={full.data.observed_at} />
+              {lists?.summary?.unavailable_reason && ` · ${lists.summary.unavailable_reason}`}
+            </span>
+          </Foot>
+        )}
+      </Section>
 
       {pending && (
         <TargetConfirmation
@@ -338,16 +366,7 @@ export function Containers() {
           onCancel={() => setPending(null)}
         />
       )}
-
-      {message && <p className="source" style={{ marginTop: 12 }}>{message}</p>}
-
-      {full.data && (
-        <p className="source" style={{ marginTop: 16 }}>
-          {t("Full state read from the host")} <Time value={full.data.observed_at} />
-          {lists?.summary?.unavailable_reason && ` · ${lists.summary.unavailable_reason}`}
-        </p>
-      )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -422,48 +441,57 @@ function Events() {
 
   return (
     <>
-      <div className="form" style={{ marginBottom: 12 }}>
-        <label>
-          {t("Look back")}
-          <select value={window} onChange={(e) => setWindow(Number(e.target.value))}>
-            <option value={900}>{t("15 minutes")}</option>
-            <option value={3600}>{t("1 hour")}</option>
-            <option value={21600}>{t("6 hours")}</option>
-            <option value={86400}>{t("24 hours")}</option>
-          </select>
-        </label>
-        {/* Following has a hard limit: a job without an end would stay on
-            the host forever, even when nobody looks at it any more. */}
-        <label>
-          {t("Then watch for")}
-          <select value={follow} onChange={(e) => setFollow(Number(e.target.value))}>
-            <option value={0}>{t("nothing, past only")}</option>
-            <option value={15}>{t("15 seconds")}</option>
-            <option value={30}>{t("30 seconds")}</option>
-            <option value={60}>{t("60 seconds")}</option>
-          </select>
-        </label>
-        <span className="operations">
-          {["container", "image", "network", "volume"].map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className={kinds.includes(kind) ? "" : "secondary"}
-              onClick={() => toggle(kind)}
-            >
-              {kind}
+      <div className="hm-section-body">
+        <Form>
+          <Fields>
+            <Field label={t("Look back")}>
+              <select value={window} onChange={(e) => setWindow(Number(e.target.value))}>
+                <option value={900}>{t("15 minutes")}</option>
+                <option value={3600}>{t("1 hour")}</option>
+                <option value={21600}>{t("6 hours")}</option>
+                <option value={86400}>{t("24 hours")}</option>
+              </select>
+            </Field>
+            {/* Following has a hard limit: a job without an end would stay on
+                the host forever, even when nobody looks at it any more. */}
+            <Field label={t("Then watch for")}>
+              <select value={follow} onChange={(e) => setFollow(Number(e.target.value))}>
+                <option value={0}>{t("nothing, past only")}</option>
+                <option value={15}>{t("15 seconds")}</option>
+                <option value={30}>{t("30 seconds")}</option>
+                <option value={60}>{t("60 seconds")}</option>
+              </select>
+            </Field>
+            {/* Not a label: a label around buttons would click the first
+                one whenever the caption is clicked. */}
+            <div className="hm-field">
+              <span className="hm-field-label">{t("Kind")}</span>
+              <span className="hm-choices">
+                {["container", "image", "network", "volume"].map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className={kinds.includes(kind) ? "" : "secondary"}
+                    onClick={() => toggle(kind)}
+                  >
+                    {kind}
+                  </button>
+                ))}
+              </span>
+            </div>
+          </Fields>
+          <FormActions>
+            <button onClick={() => request.mutate()} disabled={busy || host.connection_state !== "online"}>
+              {busy ? t("Reading…") : t("Read events")}
             </button>
-          ))}
-        </span>
-        <button onClick={() => request.mutate()} disabled={busy || host.connection_state !== "online"}>
-          {busy ? t("Reading…") : t("Read events")}
-        </button>
+          </FormActions>
+          <FormNote>
+            {t("The host reads a closed window and the task ends by itself. No filter selected means all four kinds.")}
+          </FormNote>
+          <Message text={message} error />
+        </Form>
       </div>
-      <p className="subtitle">
-        {t("The host reads a closed window and the task ends by itself. No filter selected means all four kinds.")}
-      </p>
 
-      {message && <p className="source">{message}</p>}
       {reading?.unavailable_reason && (
         <Empty>{t("The container engine did not answer: {reason}", { reason: reading.unavailable_reason })}</Empty>
       )}
@@ -479,16 +507,16 @@ function Events() {
           .
         </Empty>
       ) : (
-        <table>
+        <Table>
           <thead><tr><th>{t("Time")}</th><th>{t("Kind")}</th><th>{t("Action")}</th><th>{t("Object")}</th><th>{t("Details")}</th></tr></thead>
           <tbody>
             {list.map((event, index) => (
               <tr key={`${event.time}-${index}`}>
                 <td><Time value={event.time} /></td>
                 <td>{event.type}</td>
-                <td>{event.action}</td>
-                <td>{event.actor_name || event.actor_id?.slice(0, 12) || "—"}</td>
-                <td>
+                <td className="hm-mono">{event.action}</td>
+                <td className="hm-mono">{event.actor_name || event.actor_id?.slice(0, 12) || "—"}</td>
+                <td className="source hm-mono">
                   {Object.entries(event.attributes ?? {})
                     .filter(([key]) => key !== "name")
                     .map(([key, value]) => `${key}=${value}`)
@@ -497,16 +525,16 @@ function Events() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
 
       {/* A cut-off list without this sentence would look complete, and the
           operator would draw conclusions from a log they did not see in
           full. */}
       {(reading?.truncated || reading?.events?.truncated) && (
-        <p className="source">
-          {t("Truncated: {reason}. Narrow the window or the kinds.", { reason: reading.truncated_reason || reading.events?.truncated_reason || "" })}
-        </p>
+        <Foot>
+          <span>{t("Truncated: {reason}. Narrow the window or the kinds.", { reason: reading.truncated_reason || reading.events?.truncated_reason || "" })}</span>
+        </Foot>
       )}
     </>
   );
@@ -568,23 +596,23 @@ function ContainerTable({
   const t = useT();
   if (!containers?.length) return <EmptyList read={read} what={t("containers")} />;
   return (
-    <table>
+    <Table>
       <thead>
         <tr>
           <th>{t("Name")}</th><th>{t("State")}</th><th>{t("Image")}</th><th>{t("Health")}</th>
-          <th>{t("Restarts")}</th><th>{t("Ports")}</th><th>{t("Networks")}</th><th>Compose</th><th>{t("Actions")}</th>
+          <th className="hm-num">{t("Restarts")}</th><th>{t("Ports")}</th><th>{t("Networks")}</th><th>Compose</th><th>{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>
         {containers.map((container) => (
           <tr key={container.id}>
-            <td>{container.name}</td>
+            <td className="hm-mono hm-primary">{container.name}</td>
             <td>
               <span className={container.state === "running" ? "badge ok" : "badge"}>
                 {container.state}
               </span>
             </td>
-            <td>{container.image}</td>
+            <td className="hm-mono">{container.image}</td>
             {/* An image without a health check and an unhealthy image are
                 two different things. */}
             <td>
@@ -596,8 +624,8 @@ function ContainerTable({
                 <span className="badge error">{container.health}</span>
               )}
             </td>
-            <td>{container.restart_count}</td>
-            <td>
+            <td className="hm-num">{container.restart_count}</td>
+            <td className="hm-mono">
               {(container.ports ?? [])
                 .map((port) =>
                   port.host_port
@@ -624,13 +652,13 @@ function ContainerTable({
                 )}
                 {/* Removal is irreversible, so it does not go straight from
                     the click - it opens the target confirmation. */}
-                <button onClick={() => remove(container)}>{t("Remove")}</button>
+                <button className="hm-danger" onClick={() => remove(container)}>{t("Remove")}</button>
               </div>
             </td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -646,13 +674,13 @@ function ImageTable({
   const t = useT();
   if (!images?.length) return <EmptyList read={read} what={t("images")} />;
   return (
-    <table>
-      <thead><tr><th>{t("Tags")}</th><th>{t("Size")}</th><th>{t("In use")}</th><th>{t("Actions")}</th></tr></thead>
+    <Table>
+      <thead><tr><th>{t("Tags")}</th><th className="hm-num">{t("Size")}</th><th>{t("In use")}</th><th>{t("Actions")}</th></tr></thead>
       <tbody>
         {images.map((image) => (
           <tr key={image.id}>
-            <td>{image.tags?.join(", ") || <span className="badge unknown">{t("untagged")}</span>}</td>
-            <td>{bytes(image.size_bytes)}</td>
+            <td className="hm-mono">{image.tags?.join(", ") || <span className="badge unknown">{t("untagged")}</span>}</td>
+            <td className="hm-num">{bytes(image.size_bytes)}</td>
             <td>{image.in_use ? t("yes") : t("no")}</td>
             <td>
               {/* An image in use cannot be removed by mistake: the button is
@@ -660,13 +688,13 @@ function ImageTable({
               {image.in_use ? (
                 "—"
               ) : (
-                <button className="secondary" onClick={() => remove(image)}>{t("Remove")}</button>
+                <button className="hm-danger" onClick={() => remove(image)}>{t("Remove")}</button>
               )}
             </td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -690,7 +718,7 @@ function NetworkTable({
   const t = useT();
   if (!networks?.length) return <EmptyList read={read} what={t("networks")} />;
   return (
-    <table>
+    <Table>
       <thead>
         <tr>
           <th>{t("Name")}</th><th>{t("Driver")}</th><th>{t("Subnets")}</th><th>{t("Flags")}</th>
@@ -701,11 +729,11 @@ function NetworkTable({
         {networks.map((network) => (
           <tr key={network.id}>
             <td>
-              {network.name}
+              <span className="hm-mono hm-primary">{network.name}</span>
               {network.predefined && <span className="badge" style={{ marginLeft: 6 }}>{t("built-in")}</span>}
             </td>
             <td>{network.driver}{network.scope && network.scope !== "local" ? ` · ${network.scope}` : ""}</td>
-            <td>
+            <td className="hm-mono">
               {(network.subnets ?? []).length ? (
                 <>
                   {network.subnets!.join(", ")}
@@ -736,13 +764,13 @@ function NetworkTable({
               {network.predefined || network.in_use ? (
                 "—"
               ) : (
-                <button className="secondary" onClick={() => remove(network)}>{t("Remove")}</button>
+                <button className="hm-danger" onClick={() => remove(network)}>{t("Remove")}</button>
               )}
             </td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -766,26 +794,26 @@ function VolumeTable({
   const t = useT();
   if (!volumes?.length) return <EmptyList read={read} what={t("volumes")} />;
   return (
-    <table>
+    <Table>
       <thead>
         <tr>
-          <th>{t("Name")}</th><th>{t("Driver")}</th><th>{t("Size")}</th><th>{t("Mountpoint")}</th>
+          <th>{t("Name")}</th><th>{t("Driver")}</th><th className="hm-num">{t("Size")}</th><th>{t("Mountpoint")}</th>
           <th>Compose</th><th>{t("Used by")}</th><th>{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>
         {volumes.map((volume) => (
           <tr key={volume.name}>
-            <td>{volume.name}</td>
+            <td className="hm-mono hm-primary">{volume.name}</td>
             <td>{volume.driver}</td>
-            <td>
+            <td className="hm-num">
               {volume.size_bytes !== undefined ? (
                 bytes(volume.size_bytes)
               ) : (
                 <span className="badge unknown" title={volume.size_reason || undefined}>{t("unknown")}</span>
               )}
             </td>
-            <td>{volume.mountpoint || "—"}</td>
+            <td className="hm-mono">{volume.mountpoint || "—"}</td>
             <td>{volume.compose || "—"}</td>
             <td>
               {volume.used_by?.length
@@ -804,12 +832,12 @@ function VolumeTable({
               {volume.in_use ? (
                 "—"
               ) : (
-                <button className="secondary" onClick={() => remove(volume)}>{t("Remove")}</button>
+                <button className="hm-danger" onClick={() => remove(volume)}>{t("Remove")}</button>
               )}
             </td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }

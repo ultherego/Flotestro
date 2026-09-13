@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
-import { useHost } from "./shared";
+import {
+  Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, useHost,
+} from "./shared";
 import { useJournalPreview } from "../../lib/stream";
 import { useT } from "../../i18n";
 
@@ -125,127 +127,147 @@ export function Logs() {
   });
 
   return (
-    <>
-      <div className="form">
-        <div className="filters">
-          <label className="toggle">
-            <input
-              type="radio"
-              checked={source === "journal"}
-              onChange={() => { setSource("journal"); setLines(null); }}
-            />
-            journald
-          </label>
-          <label className="toggle">
-            <input
-              type="radio"
-              checked={source === "file"}
-              onChange={() => { setSource("file"); setLines(null); }}
-            />
-            {t("log file")}
-          </label>
-        </div>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Logs")}
+        description={t("The journal and log files, read from the host on request and always bounded.")}
+      />
+      <Message text={errorMessage} error />
 
-        {source === "journal" ? (
-          <div className="filters">
-            <input placeholder={t("unit (optional)")} value={unit} onChange={(e) => setUnit(e.target.value)} />
-            <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-              <option value="">{t("any priority")}</option>
-              <option value="3">{t("error and above")}</option>
-              <option value="4">{t("warning and above")}</option>
-              <option value="6">{t("info and above")}</option>
-            </select>
-            <input placeholder={t("since, e.g. -1h")} value={since} onChange={(e) => setSince(e.target.value)} />
-          </div>
-        ) : (
-          <div className="filters">
-            <input
-              placeholder="/var/log/syslog"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              style={{ minWidth: 320 }}
-            />
-          </div>
-        )}
+      <Section
+        title={t("Read")}
+        tools={
+          <>
+            <label className="toggle">
+              <input
+                type="radio"
+                checked={source === "journal"}
+                onChange={() => { setSource("journal"); setLines(null); }}
+              />
+              journald
+            </label>
+            <label className="toggle">
+              <input
+                type="radio"
+                checked={source === "file"}
+                onChange={() => { setSource("file"); setLines(null); }}
+              />
+              {t("log file")}
+            </label>
+          </>
+        }
+      >
+        <Form>
+          {source === "journal" ? (
+            <Fields>
+              <Field label={t("Unit")}>
+                <input placeholder={t("unit (optional)")} value={unit} onChange={(e) => setUnit(e.target.value)} />
+              </Field>
+              <Field label={t("Severity")}>
+                <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                  <option value="">{t("any priority")}</option>
+                  <option value="3">{t("error and above")}</option>
+                  <option value="4">{t("warning and above")}</option>
+                  <option value="6">{t("info and above")}</option>
+                </select>
+              </Field>
+              <Field label={t("Since")}>
+                <input placeholder={t("since, e.g. -1h")} value={since} onChange={(e) => setSince(e.target.value)} />
+              </Field>
+              <Field label={t("lines")} narrow>
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={lineCount}
+                  onChange={(e) => setLineCount(Number(e.target.value))}
+                />
+              </Field>
+            </Fields>
+          ) : (
+            <Fields>
+              <Field label={t("log file")} wide help={t("Only paths on the host's allowlist can be read, and symlinks are not followed.")}>
+                <input
+                  placeholder="/var/log/syslog"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                />
+              </Field>
+              <Field label={t("lines")} narrow>
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={lineCount}
+                  onChange={(e) => setLineCount(Number(e.target.value))}
+                />
+              </Field>
+            </Fields>
+          )}
 
-        <div className="filters">
-          <label className="toggle">
-            {t("lines")}
-            <input
-              type="number"
-              min={1}
-              max={2000}
-              value={lineCount}
-              onChange={(e) => setLineCount(Number(e.target.value))}
-              style={{ width: 90 }}
-            />
-          </label>
-          <button onClick={() => read.mutate()} disabled={read.isPending || host.connection_state !== "online"}>
-            {read.isPending ? t("Reading…") : t("Read")}
-          </button>
-          {/* The live preview applies to the journal only: a file has no
-              events that could be followed without polling the host in a
-              loop. */}
-          {source === "journal" && !preview && (
-            <button
-              className="secondary"
-              onClick={() => follow.mutate()}
-              disabled={follow.isPending || host.connection_state !== "online"}
-            >
-              {follow.isPending ? t("Starting…") : t("Follow")}
+          <FormActions>
+            <button onClick={() => read.mutate()} disabled={read.isPending || host.connection_state !== "online"}>
+              {read.isPending ? t("Reading…") : t("Read")}
             </button>
-          )}
-          {preview && (
-            <>
-              <button className="secondary" onClick={() => setPaused((state) => !state)}>
-                {paused ? t("Resume") : t("Pause")}
+            {/* The live preview applies to the journal only: a file has no
+                events that could be followed without polling the host in a
+                loop. */}
+            {source === "journal" && !preview && (
+              <button
+                className="secondary"
+                onClick={() => follow.mutate()}
+                disabled={follow.isPending || host.connection_state !== "online"}
+              >
+                {follow.isPending ? t("Starting…") : t("Follow")}
               </button>
-              <button className="secondary" onClick={() => setPreview(null)}>{t("Stop")}</button>
-            </>
-          )}
-        </div>
-        {/* A file read is bounded by a range that belongs to the host, not
-            to the panel. */}
-        {source === "file" && (
-          <p className="source" style={{ margin: 0 }}>
-            {t("Only paths on the host's allowlist can be read, and symlinks are not followed.")}
-          </p>
-        )}
-      </div>
+            )}
+            {preview && (
+              <>
+                <button className="secondary" onClick={() => setPaused((state) => !state)}>
+                  {paused ? t("Resume") : t("Pause")}
+                </button>
+                <button className="secondary" onClick={() => setPreview(null)}>{t("Stop")}</button>
+              </>
+            )}
+          </FormActions>
+        </Form>
+      </Section>
 
-      {errorMessage && <p className="page-error" style={{ marginTop: 12 }}>{errorMessage}</p>}
-
+      {/* The limit is visible: the operator is to know that the preview
+          ends on its own and that some lines may be skipped. */}
       {preview && (
-        <>
-          <h2>{t("Live")}</h2>
-          {/* The limit is visible: the operator is to know that the preview
-              ends on its own and that some lines may be skipped. */}
-          <p className="subtitle">
-            {t("Streaming for up to 5 minutes, capped at 32 KiB/s.")}
-            {paused && ` ${t("Paused — the host keeps sending, the screen does not.")}`}
-            {stream.dropped > 0 && ` ${t("{n} lines dropped by the rate limit.", { n: stream.dropped })}`}
-          </p>
+        <Section
+          title={t("Live")}
+          description={
+            <>
+              {t("Streaming for up to 5 minutes, capped at 32 KiB/s.")}
+              {paused && ` ${t("Paused — the host keeps sending, the screen does not.")}`}
+              {stream.dropped > 0 && ` ${t("{n} lines dropped by the rate limit.", { n: stream.dropped })}`}
+            </>
+          }
+        >
           {stream.lines.length === 0 ? (
             <Empty>{t("Waiting for the first lines…")}</Empty>
           ) : (
-            <pre style={{ marginTop: 8, maxHeight: 520, overflowY: "auto" }}>
+            <pre className="hm-log">
               {stream.lines.join("\n")}
             </pre>
           )}
-        </>
+        </Section>
       )}
 
       {lines !== null && !preview && (
-        <>
-          <h2>{t("Output")}</h2>
+        <Section title={t("Output")} count={lines.length} flush>
           {lines.length === 0 ? (
             <Empty>{t("Nothing matched.")}</Empty>
           ) : (
-            <pre style={{ marginTop: 8, maxHeight: 520, overflowY: "auto" }}>{lines.join("\n")}</pre>
+            <div className="hm-section-body">
+              <pre className="hm-log">{lines.join("\n")}</pre>
+            </div>
           )}
-          {footer && <p className="source" style={{ marginTop: 8 }}>{footer}</p>}
-        </>
+          {footer && <Foot><span>{footer}</span></Foot>}
+        </Section>
       )}
-    </>
+    </ModulePage>
   );
 }

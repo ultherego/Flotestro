@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time as Timestamp, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Stat, Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -143,10 +146,13 @@ export function Time() {
   const drifted = offset !== undefined && offset !== null && Math.abs(offset) >= STEP_THRESHOLD;
 
   return (
-    <>
-      <p className="subtitle">
-        {t("The clock is what everything else assumes. Kerberos refuses tickets from outside its window, mTLS refuses certificates that are not valid yet, and a journal from a host with a shifted clock sorts into the wrong order.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Time")}
+        description={t("The clock is what everything else assumes. Kerberos refuses tickets from outside its window, mTLS refuses certificates that are not valid yet, and a journal from a host with a shifted clock sorts into the wrong order.")}
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -168,227 +174,246 @@ export function Time() {
         </p>
       )}
 
-      <table>
-        <tbody>
-          <tr><th>{t("Host time")}</th><td>{snapshot?.now ? <Timestamp value={snapshot.now} /> : unknown}</td></tr>
-          <tr><th>{t("Timezone")}</th><td>{snapshot?.timezone || unknown}</td></tr>
-          <tr>
-            <th>{t("UTC offset")}</th>
-            <td>
-              {snapshot?.utc_offset_seconds === undefined || snapshot?.utc_offset_seconds === null
-                ? unknown
-                : `${snapshot.utc_offset_seconds / 3600} h`}
-            </td>
-          </tr>
+      <Stats>
+        <Stat
+          label={t("Synchronized")}
+          value={flag(snapshot?.synchronized)}
+          tone={snapshot?.synchronized === true ? "ok" : snapshot?.synchronized === false ? "error" : "unknown"}
+        />
+        <Stat
+          label={t("Offset")}
+          value={seconds(snapshot?.offset_seconds, 3)}
+          tone={drifted ? "error" : snapshot?.offset_seconds === undefined || snapshot?.offset_seconds === null ? "unknown" : "ok"}
+        />
+        <Stat label={t("Stratum")} value={snapshot?.stratum ?? unknown} />
+        <Stat
+          label={t("Daemon")}
+          value={snapshot?.service || unknown}
+          hint={snapshot?.service_active === false ? t("not running") : snapshot?.unit}
+          tone={snapshot?.service_active === false ? "error" : undefined}
+        />
+        <Stat label={t("Sources")} value={(snapshot?.sources ?? []).length} />
+      </Stats>
+
+      <Section title={t("Time")} flush>
+        <Facts>
+          <Fact label={t("Host time")}>{snapshot?.now ? <Timestamp value={snapshot.now} /> : unknown}</Fact>
+          <Fact label={t("Timezone")}>{snapshot?.timezone || unknown}</Fact>
+          <Fact label={t("UTC offset")}>
+            {snapshot?.utc_offset_seconds === undefined || snapshot?.utc_offset_seconds === null
+              ? unknown
+              : `${snapshot.utc_offset_seconds / 3600} h`}
+          </Fact>
           {/* A hardware clock in local time breaks the hour at every
               daylight saving change - and only after a reboot. */}
-          <tr><th>{t("Hardware clock in local time")}</th><td>{flag(snapshot?.rtc_in_local_time)}</td></tr>
-          <tr><th>{t("Synchronized")}</th><td>{flag(snapshot?.synchronized)}</td></tr>
-          <tr>
-            <th>{t("Daemon")}</th>
-            <td>
-              {snapshot?.service || unknown}
-              {snapshot?.unit && ` · ${snapshot.unit}`}
-              {snapshot?.service_active === false && ` · ${t("not running")}`}
-            </td>
-          </tr>
-          <tr><th>{t("Reference")}</th><td>{snapshot?.reference_name || unknown}</td></tr>
-          <tr><th>{t("Stratum")}</th><td>{snapshot?.stratum ?? unknown}</td></tr>
-          <tr><th>{t("Offset")}</th><td>{seconds(snapshot?.offset_seconds)}</td></tr>
-          <tr><th>{t("Root delay")}</th><td>{seconds(snapshot?.root_delay_seconds)}</td></tr>
-          <tr><th>{t("Root dispersion")}</th><td>{seconds(snapshot?.root_dispersion_seconds)}</td></tr>
-          <tr><th>{t("Leap status")}</th><td>{snapshot?.leap_status || unknown}</td></tr>
-          <tr>
-            <th>{t("Last sync")}</th>
-            <td>{snapshot?.last_sync_at ? <Timestamp value={snapshot.last_sync_at} /> : unknown}</td>
-          </tr>
-          <tr><th>{t("Managed file")}</th><td>{snapshot?.managed_path || "—"}</td></tr>
+          <Fact label={t("Hardware clock in local time")}>{flag(snapshot?.rtc_in_local_time)}</Fact>
+          <Fact label={t("Synchronized")}>{flag(snapshot?.synchronized)}</Fact>
+          <Fact label={t("Daemon")}>
+            {snapshot?.service || unknown}
+            {snapshot?.unit && ` · ${snapshot.unit}`}
+            {snapshot?.service_active === false && ` · ${t("not running")}`}
+          </Fact>
+          <Fact label={t("Reference")}>{snapshot?.reference_name || unknown}</Fact>
+          <Fact label={t("Stratum")}>{snapshot?.stratum ?? unknown}</Fact>
+          <Fact label={t("Offset")}>{seconds(snapshot?.offset_seconds)}</Fact>
+          <Fact label={t("Root delay")}>{seconds(snapshot?.root_delay_seconds)}</Fact>
+          <Fact label={t("Root dispersion")}>{seconds(snapshot?.root_dispersion_seconds)}</Fact>
+          <Fact label={t("Leap status")}>{snapshot?.leap_status || unknown}</Fact>
+          <Fact label={t("Last sync")}>{snapshot?.last_sync_at ? <Timestamp value={snapshot.last_sync_at} /> : unknown}</Fact>
+          <Fact label={t("Managed file")}><span className="hm-mono">{snapshot?.managed_path || "—"}</span></Fact>
           {/* The daemon's main file belongs to the distribution. It is shown
               so that it is visible what the panel's change does not touch. */}
           {snapshot?.config_path && (
-            <tr><th>{t("Daemon config")}</th><td>{snapshot.config_path}</td></tr>
+            <Fact label={t("Daemon config")}><span className="hm-mono">{snapshot.config_path}</span></Fact>
           )}
-        </tbody>
-      </table>
+        </Facts>
+      </Section>
 
-      <h2>{t("Sources")}</h2>
-      {!snapshot?.sources?.length ? (
-        <Empty>{t("The time daemon reports no sources on this host.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Address")}</th><th>{t("Mode")}</th><th>{t("State")}</th><th>{t("Stratum")}</th><th>{t("Poll")}</th><th>{t("Reach")}</th><th>{t("Offset")}</th></tr>
-          </thead>
-          <tbody>
-            {snapshot.sources.map((source) => (
-              <tr key={source.address}>
-                <td>{source.address}</td>
-                <td>{source.mode || "—"}</td>
-                <td>{source.state || "—"}</td>
-                <td>{source.stratum ?? unknown}</td>
-                <td>{source.poll_seconds ? `${source.poll_seconds} s` : unknown}</td>
-                <td>{source.reachability || "—"}</td>
-                <td>{seconds(source.offset_seconds)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Section title={t("Sources")} count={snapshot?.sources?.length} flush>
+        {!snapshot?.sources?.length ? (
+          <Empty>{t("The time daemon reports no sources on this host.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Address")}</th><th>{t("Mode")}</th><th>{t("State")}</th><th className="hm-num">{t("Stratum")}</th><th className="hm-num">{t("Poll")}</th><th>{t("Reach")}</th><th className="hm-num">{t("Offset")}</th></tr>
+            </thead>
+            <tbody>
+              {snapshot.sources.map((source) => (
+                <tr key={source.address}>
+                  <td className="hm-mono hm-primary">{source.address}</td>
+                  <td>{source.mode || "—"}</td>
+                  <td>{source.state || "—"}</td>
+                  <td className="hm-num">{source.stratum ?? unknown}</td>
+                  <td className="hm-num">{source.poll_seconds ? `${source.poll_seconds} s` : unknown}</td>
+                  <td className="hm-mono">{source.reachability || "—"}</td>
+                  <td className="hm-num">{seconds(source.offset_seconds)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
-      <h2>{t("Configured servers")}</h2>
-      <p className="subtitle">
-        {t("Configuration, not reachability: a server written here that never answers does not show up in the source list above at all.")}
-      </p>
-      {!snapshot?.configured_servers?.length ? (
-        <Empty>{t("No time servers are configured on this host.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("Address")}</th><th>{t("From")}</th><th>{t("Kind")}</th><th>{t("Owner")}</th></tr></thead>
-          <tbody>
-            {snapshot.configured_servers.map((server, i) => (
-              <tr key={`${server.address}-${i}`}>
-                <td>{server.address}</td>
-                <td>{server.source || "—"}</td>
-                <td>{server.pool ? "pool" : "server"}</td>
-                <td>{server.managed ? "Flotestro" : t("host admin")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Section
+        title={t("Configured servers")}
+        count={snapshot?.configured_servers?.length}
+        description={t("Configuration, not reachability: a server written here that never answers does not show up in the source list above at all.")}
+        flush
+      >
+        {!snapshot?.configured_servers?.length ? (
+          <Empty>{t("No time servers are configured on this host.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th>{t("Address")}</th><th>{t("From")}</th><th>{t("Kind")}</th><th>{t("Owner")}</th></tr></thead>
+            <tbody>
+              {snapshot.configured_servers.map((server, i) => (
+                <tr key={`${server.address}-${i}`}>
+                  <td className="hm-mono hm-primary">{server.address}</td>
+                  <td className="hm-mono">{server.source || "—"}</td>
+                  <td>{server.pool ? "pool" : "server"}</td>
+                  <td>{server.managed ? "Flotestro" : t("host admin")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
-      <h2>{t("Test time sources")}</h2>
-      <p className="subtitle">
-        {t("The query goes out from the host, not from the panel. Leave the field empty to ask the sources this host already uses.")}
-      </p>
-      <div className="filters">
-        <input
-          value={servers}
-          onChange={(e) => setServers(e.target.value)}
-          placeholder={t("Servers, comma separated (optional)")}
-          style={{ minWidth: 320 }}
-        />
-        <button
-          onClick={() =>
-            request.mutate({
-              action: "time.sync.test",
-              payload: { time: { probe: serverList } },
-            })
-          }
-          disabled={request.isPending}
-        >
-          {t("Test")}
-        </button>
-        <button
-          className="secondary"
-          onClick={() =>
-            setIntent({
-              action: "time.config.apply",
-              label: t("Set time servers"),
-              description:
-                t("{host} will use {servers} as its time sources. Each server is queried before the change; if none answers, the host keeps what it has.", {
-                  host: host.hostname, servers: serverList.join(", "),
-                }) + " " +
-                (allowDropin
-                  ? t("One line will be appended to {path} so chrony reads the panel's sources directory.", { path: snapshot?.config_path ?? "" }) + " "
-                  : "") +
-                (allowStep
-                  ? t("A step of the clock is allowed: databases, tokens and certificates will see time move.")
-                  : t("A change that would step the clock by more than a second is refused.")),
-              payload: {
-                time: {
-                  servers: serverList,
-                  allow_step: allowStep,
-                  enable_dropin: allowDropin,
-                },
-              },
-            })
-          }
-          disabled={!serverList.length || (Boolean(snapshot?.write_reason) && !allowDropin)}
-          title={snapshot?.write_reason}
-        >
-          {t("Set as sources")}
-        </button>
-        <label>
-          <input type="checkbox" checked={allowStep} onChange={(e) => setAllowStep(e.target.checked)} />
-          {" "}{t("allow a step of the clock")}
-        </label>
-      </div>
-
-      {/* A host on which chrony includes no directory can be brought to a
-          writable state with one appended line. It is the only place where
-          the panel touches somebody else's configuration, so it asks for
-          consent separately and says exactly what it will append. */}
-      {snapshot?.can_add_source_dir && (
-        <p className="subtitle">
-          <label>
-            <input
-              type="checkbox"
-              checked={allowDropin}
-              onChange={(e) => setAllowDropin(e.target.checked)}
-            />
-            {" "}{t("append one line to {path} so that chrony reads /etc/chrony/sources.d — a directory that accepts nothing but time servers. Nothing already in that file is changed or removed.", { path: snapshot.config_path ?? "" })}
-          </label>
-        </p>
-      )}
-
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
-
-      {testJob && (
-        <table>
-          <thead>
-            <tr><th>{t("Server")}</th><th>{t("Answered from")}</th><th>{t("Stratum")}</th><th>{t("Offset")}</th><th>{t("Round trip")}</th></tr>
-          </thead>
-          <tbody>
-            {probes.map((probe) => (
-              <tr key={probe.server}>
-                <td>{probe.server}</td>
-                <td>
-                  {probe.reachable
-                    ? probe.address || "—"
-                    : <span className="badge unknown">{probe.error || t("no answer")}</span>}
-                </td>
-                <td>{probe.stratum ?? unknown}</td>
-                <td>{seconds(probe.offset_seconds)}</td>
-                <td>{seconds(probe.delay_seconds, 3)}</td>
-              </tr>
-            ))}
-            {!probes.length && (
-              <tr><td colSpan={5}>{lastAttempt?.status ? t("No measurements.") : t("Running…")}</td></tr>
+      <Section
+        title={t("Test time sources")}
+        description={t("The query goes out from the host, not from the panel. Leave the field empty to ask the sources this host already uses.")}
+        flush
+      >
+        <div className="hm-section-body">
+          <Form>
+            <Fields>
+              <Field label={t("Servers, comma separated (optional)")} wide>
+                <input
+                  value={servers}
+                  onChange={(e) => setServers(e.target.value)}
+                  placeholder={t("Servers, comma separated (optional)")}
+                />
+              </Field>
+            </Fields>
+            <Check checked={allowStep} onChange={setAllowStep}>
+              {t("allow a step of the clock")}
+            </Check>
+            {/* A host on which chrony includes no directory can be brought to a
+                writable state with one appended line. It is the only place where
+                the panel touches somebody else's configuration, so it asks for
+                consent separately and says exactly what it will append. */}
+            {snapshot?.can_add_source_dir && (
+              <Check checked={allowDropin} onChange={setAllowDropin}>
+                {t("append one line to {path} so that chrony reads /etc/chrony/sources.d — a directory that accepts nothing but time servers. Nothing already in that file is changed or removed.", { path: snapshot.config_path ?? "" })}
+              </Check>
             )}
-          </tbody>
-        </table>
-      )}
+            <FormActions>
+              <button
+                onClick={() =>
+                  request.mutate({
+                    action: "time.sync.test",
+                    payload: { time: { probe: serverList } },
+                  })
+                }
+                disabled={request.isPending}
+              >
+                {t("Test")}
+              </button>
+              <button
+                className="secondary"
+                onClick={() =>
+                  setIntent({
+                    action: "time.config.apply",
+                    label: t("Set time servers"),
+                    description:
+                      t("{host} will use {servers} as its time sources. Each server is queried before the change; if none answers, the host keeps what it has.", {
+                        host: host.hostname, servers: serverList.join(", "),
+                      }) + " " +
+                      (allowDropin
+                        ? t("One line will be appended to {path} so chrony reads the panel's sources directory.", { path: snapshot?.config_path ?? "" }) + " "
+                        : "") +
+                      (allowStep
+                        ? t("A step of the clock is allowed: databases, tokens and certificates will see time move.")
+                        : t("A change that would step the clock by more than a second is refused.")),
+                    payload: {
+                      time: {
+                        servers: serverList,
+                        allow_step: allowStep,
+                        enable_dropin: allowDropin,
+                      },
+                    },
+                  })
+                }
+                disabled={!serverList.length || (Boolean(snapshot?.write_reason) && !allowDropin)}
+                title={snapshot?.write_reason}
+              >
+                {t("Set as sources")}
+              </button>
+            </FormActions>
+          </Form>
+        </div>
 
-      <h2>{t("Timezone")}</h2>
-      <div className="filters">
-        <input
-          value={timezone}
-          onChange={(e) => setTimezone(e.target.value)}
-          placeholder={t("e.g. Europe/Warsaw")}
-          style={{ minWidth: 240 }}
-        />
-        <button
-          onClick={() =>
-            setIntent({
-              action: "time.timezone.set",
-              label: t("Set timezone"),
-              description: t("{host} will report local time as {zone}. This changes what the host shows people and writes to the journal; it does not move the moment the host lives in.", {
-                host: host.hostname, zone: timezone,
-              }),
-              payload: { time: { timezone } },
-            })
-          }
-          disabled={!timezone}
-        >
-          {t("Set timezone")}
-        </button>
-      </div>
+        {testJob && (
+          <Table>
+            <thead>
+              <tr><th>{t("Server")}</th><th>{t("Answered from")}</th><th className="hm-num">{t("Stratum")}</th><th className="hm-num">{t("Offset")}</th><th className="hm-num">{t("Round trip")}</th></tr>
+            </thead>
+            <tbody>
+              {probes.map((probe) => (
+                <tr key={probe.server}>
+                  <td className="hm-mono hm-primary">{probe.server}</td>
+                  <td className="hm-mono">
+                    {probe.reachable
+                      ? probe.address || "—"
+                      : <span className="badge unknown">{probe.error || t("no answer")}</span>}
+                  </td>
+                  <td className="hm-num">{probe.stratum ?? unknown}</td>
+                  <td className="hm-num">{seconds(probe.offset_seconds)}</td>
+                  <td className="hm-num">{seconds(probe.delay_seconds, 3)}</td>
+                </tr>
+              ))}
+              {!probes.length && (
+                <tr><td colSpan={5}>{lastAttempt?.status ? t("No measurements.") : t("Running…")}</td></tr>
+              )}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
-      <ModuleFreshness fragment={module.data} />
+      <Section title={t("Timezone")}>
+        <Form>
+          <Fields>
+            <Field label={t("Timezone")}>
+              <input
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder={t("e.g. Europe/Warsaw")}
+              />
+            </Field>
+          </Fields>
+          <FormActions>
+            <button
+              onClick={() =>
+                setIntent({
+                  action: "time.timezone.set",
+                  label: t("Set timezone"),
+                  description: t("{host} will report local time as {zone}. This changes what the host shows people and writes to the journal; it does not move the moment the host lives in.", {
+                    host: host.hostname, zone: timezone,
+                  }),
+                  payload: { time: { timezone } },
+                })
+              }
+              disabled={!timezone}
+            >
+              {t("Set timezone")}
+            </button>
+          </FormActions>
+        </Form>
+      </Section>
+
       {snapshot?.observed_at && (
-        <p className="source">
-          {t("Clock read")} <Timestamp value={snapshot.observed_at} />
+        <p className="hm-freshness">
+          <span>{t("Clock read")} <Timestamp value={snapshot.observed_at} /></span>
         </p>
       )}
 
@@ -411,6 +436,6 @@ export function Time() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }

@@ -4,7 +4,9 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -70,99 +72,109 @@ export function Processes() {
   });
 
   return (
-    <>
-      <p className="subtitle">
-        {t("A snapshot is read from the host on request. Long-term metrics belong to Prometheus, not to this panel.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Processes")}
+        description={t("A snapshot is read from the host on request. Long-term metrics belong to Prometheus, not to this panel.")}
+        actions={
+          <>
+            <select value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="rss">{t("by memory")}</option>
+              <option value="cpu">{t("by CPU time")}</option>
+              <option value="started">{t("by start time")}</option>
+              <option value="pid">{t("by PID")}</option>
+            </select>
+            <button
+              onClick={() =>
+                request.mutate({
+                  action: "process.list",
+                  payload: { process_list: { sort_by: sort, limit: 200 } },
+                })
+              }
+              disabled={request.isPending || host.connection_state !== "online"}
+            >
+              {request.isPending ? t("Requesting…") : t("Read from host")}
+            </button>
+          </>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
-      <div className="filters">
-        <select value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value="rss">{t("by memory")}</option>
-          <option value="cpu">{t("by CPU time")}</option>
-          <option value="started">{t("by start time")}</option>
-          <option value="pid">{t("by PID")}</option>
-        </select>
-        <input
-          placeholder={t("Filter by command, user, unit or PID")}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          style={{ minWidth: 260 }}
-        />
-        <button
-          onClick={() =>
-            request.mutate({
-              action: "process.list",
-              payload: { process_list: { sort_by: sort, limit: 200 } },
-            })
-          }
-          disabled={request.isPending || host.connection_state !== "online"}
-        >
-          {request.isPending ? t("Requesting…") : t("Read from host")}
-        </button>
-      </div>
-
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
-
-      {!snapshot ? (
-        <Empty>{t("This host has not been read yet. Use “Read from host”.")}</Empty>
-      ) : (
-        <>
-          {/* A cut-off list is marked together with the count of all the
-              processes: without it, it would look like a full picture of
-              the host. */}
-          {snapshot.truncated && (
-            <p className="warning">
-              <span>
-                {t("Showing {shown} of {total} processes. Change the sort order to see a different slice.", {
-                  shown: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
-                })}
-              </span>
-            </p>
-          )}
-          <table>
-            <thead>
-              <tr>
-                <th>PID</th><th>{t("User")}</th><th>{t("Memory")}</th><th>{t("Threads")}</th>
-                <th>{t("State")}</th><th>{t("Managed by")}</th><th>{t("Command")}</th><th>{t("Actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processes.map((process) => (
-                <tr key={process.pid}>
-                  <td>{process.pid}</td>
-                  <td>{process.user || <span className="badge unknown">{t("unknown")}</span>}</td>
-                  <td>{bytes(process.rss_bytes)}</td>
-                  <td>{process.threads}</td>
-                  <td>{process.state}</td>
-                  {/* The PID alone says nothing about whose process it is. */}
-                  <td>
-                    {process.container
-                      ? `${t("container")} ${process.container.slice(0, 12)}`
-                      : process.unit || "—"}
-                  </td>
-                  <td title={process.command || process.name}>
-                    {(process.command || process.name).slice(0, 60)}
-                  </td>
-                  <td>
-                    <div className="operations">
-                      <button onClick={() => setToSignal({ process, signal: "TERM" })}>Term</button>
-                      <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
-                      <button onClick={() => setToSignal({ process, signal: "KILL" })}>Kill</button>
-                    </div>
-                  </td>
+      <Section
+        title={t("Processes")}
+        count={snapshot ? processes.length : undefined}
+        tools={snapshot && (
+          <input
+            placeholder={t("Filter by command, user, unit or PID")}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        )}
+        flush
+      >
+        {!snapshot ? (
+          <Empty>{t("This host has not been read yet. Use “Read from host”.")}</Empty>
+        ) : (
+          <>
+            {/* A cut-off list is marked together with the count of all the
+                processes: without it, it would look like a full picture of
+                the host. */}
+            {snapshot.truncated && (
+              <p className="warning">
+                <span>
+                  {t("Showing {shown} of {total} processes. Change the sort order to see a different slice.", {
+                    shown: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
+                  })}
+                </span>
+              </p>
+            )}
+            <Table>
+              <thead>
+                <tr>
+                  <th className="hm-num">PID</th><th>{t("User")}</th><th className="hm-num">{t("Memory")}</th><th className="hm-num">{t("Threads")}</th>
+                  <th>{t("State")}</th><th>{t("Managed by")}</th><th>{t("Command")}</th><th>{t("Actions")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="source" style={{ marginTop: 12 }}>
-            {t("{shown} of {listed} shown · {total} on the host · read", {
-              shown: processes.length, listed: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
-            })}{" "}
-            <Time value={module.data?.observed_at} />
-          </p>
-          <ModuleFreshness fragment={module.data} />
-        </>
-      )}
+              </thead>
+              <tbody>
+                {processes.map((process) => (
+                  <tr key={process.pid}>
+                    <td className="hm-num">{process.pid}</td>
+                    <td>{process.user || <span className="badge unknown">{t("unknown")}</span>}</td>
+                    <td className="hm-num">{bytes(process.rss_bytes)}</td>
+                    <td className="hm-num">{process.threads}</td>
+                    <td>{process.state}</td>
+                    {/* The PID alone says nothing about whose process it is. */}
+                    <td className="hm-mono">
+                      {process.container
+                        ? `${t("container")} ${process.container.slice(0, 12)}`
+                        : process.unit || "—"}
+                    </td>
+                    <td className="hm-mono" title={process.command || process.name}>
+                      {(process.command || process.name).slice(0, 60)}
+                    </td>
+                    <td>
+                      <div className="operations">
+                        <button onClick={() => setToSignal({ process, signal: "TERM" })}>Term</button>
+                        <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
+                        <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>Kill</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Foot>
+              <span>
+                {t("{shown} of {listed} shown · {total} on the host · read", {
+                  shown: processes.length, listed: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
+                })}{" "}
+                <Time value={module.data?.observed_at} />
+              </span>
+            </Foot>
+          </>
+        )}
+      </Section>
 
       {toSignal && (
         <TargetConfirmation
@@ -197,6 +209,6 @@ export function Processes() {
           onCancel={() => setToSignal(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }

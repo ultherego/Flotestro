@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Stat, Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -110,10 +113,23 @@ export function Resolver() {
   const managementLink = snapshot?.links?.find((link) => (link.servers ?? []).length > 0);
 
   return (
-    <>
-      <p className="subtitle">
-        {t("What the host resolves with, and who writes that configuration. A file owned by a service is rewritten on the next network event, so ownership decides whether the panel can change anything here.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("DNS")}
+        description={t("What the host resolves with, and who writes that configuration. A file owned by a service is rewritten on the next network event, so ownership decides whether the panel can change anything here.")}
+        actions={
+          <button
+            className="secondary"
+            onClick={() => setForm((open) => !open)}
+            disabled={!snapshot?.writable}
+            title={snapshot?.writable ? "" : snapshot?.read_only_reason}
+          >
+            {form ? t("Cancel") : t("Change resolver")}
+          </button>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -126,113 +142,31 @@ export function Resolver() {
         </p>
       )}
 
-      <table>
-        <tbody>
-          <tr><th>{t("Owner")}</th><td>{snapshot?.owner || unknown}</td></tr>
-          <tr><th>{t("Mode")}</th><td>{snapshot?.mode || "—"}</td></tr>
-          <tr>
-            <th>resolv.conf</th>
-            <td>
+      <Stats>
+        <Stat label={t("Owner")} value={snapshot?.owner || unknown} tone={snapshot?.owner ? undefined : "unknown"} hint={snapshot?.mode || undefined} />
+        <Stat label={t("Servers")} value={(snapshot?.servers ?? []).length} hint={<span className="hm-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span>} />
+        <Stat label="DNSSEC" value={snapshot?.dnssec || unknown} />
+        <Stat label="DNS over TLS" value={snapshot?.dns_over_tls || unknown} />
+      </Stats>
+
+      <Section title={t("DNS")} flush>
+        <Facts>
+          <Fact label={t("Owner")}>{snapshot?.owner || unknown}</Fact>
+          <Fact label={t("Mode")}>{snapshot?.mode || "—"}</Fact>
+          <Fact label="resolv.conf">
+            <span className="hm-mono">
               {snapshot?.resolv_conf}
               {snapshot?.resolv_conf_target && ` → ${snapshot.resolv_conf_target}`}
-            </td>
-          </tr>
-          <tr><th>{t("Servers")}</th><td>{(snapshot?.servers ?? []).join(", ") || "—"}</td></tr>
-          <tr><th>{t("Search domains")}</th><td>{(snapshot?.search_domains ?? []).join(", ") || "—"}</td></tr>
+            </span>
+          </Fact>
+          <Fact label={t("Servers")}><span className="hm-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Search domains")}><span className="hm-mono">{(snapshot?.search_domains ?? []).join(", ") || "—"}</span></Fact>
           {/* "unsupported" and "disabled" are two different answers, so we
               show what the host said, not yes/no. */}
-          <tr><th>DNSSEC</th><td>{snapshot?.dnssec || unknown}</td></tr>
-          <tr><th>DNS over TLS</th><td>{snapshot?.dns_over_tls || unknown}</td></tr>
-        </tbody>
-      </table>
-
-      <h2>{t("Per-link resolvers")}</h2>
-      {!snapshot?.links?.length ? (
-        <Empty>{t("This host does not report per-link resolvers; it has one global list.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th>DoT</th></tr>
-          </thead>
-          <tbody>
-            {snapshot.links.map((link) => (
-              <tr key={link.name}>
-                <td>{link.name}</td>
-                <td>{(link.servers ?? []).join(", ") || "—"}</td>
-                <td>{(link.domains ?? []).join(", ") || "—"}</td>
-                {/* The default route decides which link answers a name
-                    outside its domains - and that is the operator's
-                    question. */}
-                <td>
-                  {link.default_route === undefined ? (
-                    unknown
-                  ) : link.default_route ? (
-                    t("yes")
-                  ) : (
-                    t("no")
-                  )}
-                </td>
-                <td>{link.dnssec || "—"}</td>
-                <td>{link.dns_over_tls || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h2>{t("Test resolution from the host")}</h2>
-      <p className="subtitle">
-        {t("The panel sits in a different network, so its own answer says nothing about what this host sees. The query runs on the host.")}
-      </p>
-      <div className="filters">
-        <input
-          value={names}
-          onChange={(e) => setNames(e.target.value)}
-          placeholder={t("Names, comma separated")}
-          style={{ minWidth: 320 }}
-        />
-        <button
-          onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
-          disabled={!nameList.length || request.isPending}
-        >
-          {t("Resolve")}
-        </button>
-        <button
-          className="secondary"
-          onClick={() => setForm((open) => !open)}
-          disabled={!snapshot?.writable}
-          title={snapshot?.writable ? "" : snapshot?.read_only_reason}
-        >
-          {form ? t("Cancel") : t("Change resolver")}
-        </button>
-      </div>
-
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
-
-      {/* The answers arrive with the job result: a fact from the host at a
-          specific moment, not a state that could be refreshed. */}
-      {testJob && (
-        <table>
-          <thead><tr><th>{t("Name")}</th><th>{t("Addresses")}</th><th>{t("Answered by")}</th><th>{t("Took")}</th></tr></thead>
-          <tbody>
-            {answers.map((query) => (
-              <tr key={query.name}>
-                <td>{query.name}</td>
-                <td>
-                  {query.addresses?.length
-                    ? query.addresses.join(", ")
-                    : <span className="badge unknown">{query.error || t("no answer")}</span>}
-                </td>
-                <td>{query.server || "—"}</td>
-                <td>{query.took_millis} ms</td>
-              </tr>
-            ))}
-            {!answers.length && (
-              <tr><td colSpan={4}>{lastAttempt?.status ? t("No answers.") : t("Running…")}</td></tr>
-            )}
-          </tbody>
-        </table>
-      )}
+          <Fact label="DNSSEC">{snapshot?.dnssec || unknown}</Fact>
+          <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknown}</Fact>
+        </Facts>
+      </Section>
 
       {form && (
         <ResolverChange
@@ -243,10 +177,97 @@ export function Resolver() {
         />
       )}
 
-      <ModuleFreshness fragment={module.data} />
+      <Section title={t("Per-link resolvers")} count={snapshot?.links?.length} flush>
+        {!snapshot?.links?.length ? (
+          <Empty>{t("This host does not report per-link resolvers; it has one global list.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th>DoT</th></tr>
+            </thead>
+            <tbody>
+              {snapshot.links.map((link) => (
+                <tr key={link.name}>
+                  <td className="hm-mono hm-primary">{link.name}</td>
+                  <td className="hm-mono">{(link.servers ?? []).join(", ") || "—"}</td>
+                  <td className="hm-mono">{(link.domains ?? []).join(", ") || "—"}</td>
+                  {/* The default route decides which link answers a name
+                      outside its domains - and that is the operator's
+                      question. */}
+                  <td>
+                    {link.default_route === undefined ? (
+                      unknown
+                    ) : link.default_route ? (
+                      t("yes")
+                    ) : (
+                      t("no")
+                    )}
+                  </td>
+                  <td>{link.dnssec || "—"}</td>
+                  <td>{link.dns_over_tls || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+
+      <Section
+        title={t("Test resolution from the host")}
+        description={t("The panel sits in a different network, so its own answer says nothing about what this host sees. The query runs on the host.")}
+        flush
+      >
+        <div className="hm-section-body">
+          <Form>
+            <Fields>
+              <Field label={t("Names, comma separated")} wide>
+                <input
+                  value={names}
+                  onChange={(e) => setNames(e.target.value)}
+                  placeholder={t("Names, comma separated")}
+                />
+              </Field>
+            </Fields>
+            <FormActions>
+              <button
+                onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
+                disabled={!nameList.length || request.isPending}
+              >
+                {t("Resolve")}
+              </button>
+            </FormActions>
+          </Form>
+        </div>
+
+        {/* The answers arrive with the job result: a fact from the host at a
+            specific moment, not a state that could be refreshed. */}
+        {testJob && (
+          <Table>
+            <thead><tr><th>{t("Name")}</th><th>{t("Addresses")}</th><th>{t("Answered by")}</th><th className="hm-num">{t("Took")}</th></tr></thead>
+            <tbody>
+              {answers.map((query) => (
+                <tr key={query.name}>
+                  <td className="hm-mono hm-primary">{query.name}</td>
+                  <td className="hm-mono">
+                    {query.addresses?.length
+                      ? query.addresses.join(", ")
+                      : <span className="badge unknown">{query.error || t("no answer")}</span>}
+                  </td>
+                  <td className="hm-mono">{query.server || "—"}</td>
+                  <td className="hm-num">{query.took_millis} ms</td>
+                </tr>
+              ))}
+              {!answers.length && (
+                <tr><td colSpan={4}>{lastAttempt?.status ? t("No answers.") : t("Running…")}</td></tr>
+              )}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+
       {snapshot?.observed_at && (
-        <p className="source">
-          {t("Resolver read")} <Time value={snapshot.observed_at} />
+        <p className="hm-freshness">
+          <span>{t("Resolver read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
 
@@ -262,7 +283,7 @@ export function Resolver() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -290,52 +311,59 @@ function ResolverChange({
     value.split(",").map((element) => element.trim()).filter(Boolean);
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Change resolver")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("A host that cannot resolve names loses the directory, Kerberos and with them logins — so this change is armed with the same rollback timer as an address change.")}
-      </p>
-      <div className="filters">
-        <input value={iface} onChange={(e) => setIface(e.target.value)} placeholder={t("Interface")} />
-        <input
-          value={servers}
-          onChange={(e) => setServers(e.target.value)}
-          placeholder={t("DNS servers, comma separated")}
-          style={{ minWidth: 260 }}
-        />
-        <input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={t("Search domains")} />
-      </div>
-      <div className="filters">
-        <label className="toggle">
-          <input type="checkbox" checked={ignoreDHCP} onChange={(e) => setIgnoreDHCP(e.target.checked)} />
+    <Section
+      title={t("Change resolver")}
+      description={t("A host that cannot resolve names loses the directory, Kerberos and with them logins — so this change is armed with the same rollback timer as an address change.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Interface")} narrow>
+            <input value={iface} onChange={(e) => setIface(e.target.value)} placeholder={t("Interface")} />
+          </Field>
+          <Field label={t("DNS servers, comma separated")}>
+            <input
+              value={servers}
+              onChange={(e) => setServers(e.target.value)}
+              placeholder={t("DNS servers, comma separated")}
+            />
+          </Field>
+          <Field label={t("Search domains")}>
+            <input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={t("Search domains")} />
+          </Field>
+          <Field label={t("Rollback seconds")} narrow>
+            <input value={window} onChange={(e) => setWindow(e.target.value)} placeholder={t("Rollback seconds")} />
+          </Field>
+        </Fields>
+        <Check checked={ignoreDHCP} onChange={setIgnoreDHCP}>
           {t("Ignore DNS servers offered by DHCP")}
-        </label>
-        <input value={window} onChange={(e) => setWindow(e.target.value)} placeholder={t("Rollback seconds")} />
-        <button
-          onClick={() =>
-            onIntent({
-              description: t("{iface} will resolve through {servers}{domains}. The host rolls back after {seconds}s unless the agent confirms it still reaches the panel.", {
-                iface,
-                servers: list(servers).join(", "),
-                domains: list(domains).length ? `, ${t("searching {domains}", { domains: list(domains).join(", ") })}` : "",
-                seconds: Number(window) || 0,
-              }),
-              payload: {
-                dns: {
-                  interface: iface,
-                  servers: list(servers),
-                  search_domains: list(domains),
-                  ignore_auto_dns: ignoreDHCP,
-                  rollback_seconds: Number(window) || 0,
+        </Check>
+        <FormActions>
+          <button
+            onClick={() =>
+              onIntent({
+                description: t("{iface} will resolve through {servers}{domains}. The host rolls back after {seconds}s unless the agent confirms it still reaches the panel.", {
+                  iface,
+                  servers: list(servers).join(", "),
+                  domains: list(domains).length ? `, ${t("searching {domains}", { domains: list(domains).join(", ") })}` : "",
+                  seconds: Number(window) || 0,
+                }),
+                payload: {
+                  dns: {
+                    interface: iface,
+                    servers: list(servers),
+                    search_domains: list(domains),
+                    ignore_auto_dns: ignoreDHCP,
+                    rollback_seconds: Number(window) || 0,
+                  },
                 },
-              },
-            })
-          }
-          disabled={!iface || list(servers).length === 0}
-        >
-          {t("Apply resolver")}
-        </button>
-      </div>
-    </div>
+              })
+            }
+            disabled={!iface || list(servers).length === 0}
+          >
+            {t("Apply resolver")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }

@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
-import { useHost } from "./shared";
+import {
+  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -229,13 +231,21 @@ export function Backups() {
     ...extra,
   });
 
-  return (
-    <>
-      <p className="subtitle">
-        {t("Backups run with the tools this host already has. The data never passes through the panel — the host talks to the repository directly, and what you see here is metadata: when a copy last succeeded, how much it takes and whether anyone has ever read it back.")}
-      </p>
+  const stale = definitions.filter((item) => item.status !== "ok" && item.status !== "unknown").length;
+  const unverified = definitions.filter((item) => item.unverified).length;
 
-      <div className="filters">
+  return (
+    <ModulePage>
+      <ModuleHeader
+        title={t("Backups")}
+        description={t("Backups run with the tools this host already has. The data never passes through the panel — the host talks to the repository directly, and what you see here is metadata: when a copy last succeeded, how much it takes and whether anyone has ever read it back.")}
+        actions={
+          <button onClick={() => setForm((open) => !open)}>
+            {form ? t("Cancel") : t("Define a backup")}
+          </button>
+        }
+      />
+      <p className="hm-freshness">
         {tools.map((tool) => (
           <span key={tool.name} className={`badge ${tool.available ? "ok" : ""}`}>
             {tool.name}
@@ -244,135 +254,144 @@ export function Backups() {
           </span>
         ))}
         {runbooks.length > 0 && (
-          <span className="source">{t("runbooks")}: {runbooks.join(", ")}</span>
+          <span>{t("runbooks")}: {runbooks.join(", ")}</span>
         )}
-        <button className="secondary" onClick={() => setForm((open) => !open)}>
-          {form ? t("Cancel") : t("Define a backup")}
-        </button>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+      </p>
+      <Message text={message} />
+
+      {definitions.length > 0 && (
+        <Stats>
+          <Stat label={t("Backups")} value={definitions.length} />
+          <Stat label={t("Need action")} value={stale} tone={stale > 0 ? "error" : "ok"} />
+          <Stat
+            label={t("Verified")}
+            value={definitions.length - unverified}
+            tone={unverified > 0 ? "warn" : "ok"}
+            hint={unverified > 0 ? `${unverified} ${t("not verified")}` : undefined}
+          />
+        </Stats>
+      )}
 
       {form && <DefinitionForm runbooks={runbooks} onSave={(body) => save.mutate(body)} />}
 
-      {!definitions.length ? (
-        <Empty>
-          {t("The panel does not back up anything on this host yet. A definition says what to copy, where to and how long it stays.")}
-        </Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Definition")}</th><th>{t("Destination")}</th><th>{t("Last copy")}</th>
-              <th>{t("Verified")}</th><th>{t("Size")}</th><th>{t("Actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {definitions.map((item) => (
-              <tr key={item.name}>
-                <td>
-                  <a
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setSelected(selected === item.name ? "" : item.name);
-                    }}
-                  >
-                    {item.name}
-                  </a>
-                  <div className="source">
-                    {item.tool}
-                    {item.runbook ? ` · ${item.runbook}` : ""}
-                    {item.paths?.length ? ` · ${item.paths.join(", ")}` : ""}
-                  </div>
-                </td>
-                <td className="source">
-                  {item.repository}
-                  {item.password_secret && (
-                    <div>{t("password from {secret}", { secret: item.password_secret })}</div>
-                  )}
-                </td>
-                <td>
-                  <StatusBadge status={item.status} age={item.age_hours} />
-                  {item.last_success_at && (
-                    <div className="source"><Time value={item.last_success_at} /></div>
-                  )}
-                </td>
-                <td>
-                  {/* A copy nobody has ever read back is a promise, not a
-                      safeguard - and it is to look like one. */}
-                  {item.unverified ? (
-                    <span className="badge warn">{t("not verified")}</span>
-                  ) : (
-                    <>
-                      <span className="badge ok">{t("verified")}</span>
-                      <div className="source"><Time value={item.last_verify_at} /></div>
-                    </>
-                  )}
-                </td>
-                <td>
-                  <Size bytes={item.repository_size} />
-                  {item.snapshots !== undefined && (
-                    <div className="source">{t("{n} copies", { n: item.snapshots })}</div>
-                  )}
-                </td>
-                <td>
-                  <div className="operations">
-                    <button
-                      className="secondary"
-                      disabled={host.connection_state !== "online"}
-                      onClick={() =>
-                        request.mutate({
-                          action: "backup.plan",
-                          payload: { backup: definitionRequest(item) },
-                        })
-                      }
-                    >
-                      {t("Read repository")}
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "backup.run",
-                          label: t("Run backup"),
-                          description: t("{name} copies {paths} from {host} to {repository}. The data goes straight from the host; the panel only records that it happened.", {
-                            name: item.name, paths: (item.paths ?? []).join(", "), host: host.hostname, repository: item.repository ?? "",
-                          }),
-                          payload: { backup: definitionRequest(item) },
-                        })
-                      }
-                    >
-                      {t("Back up now")}
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "backup.verify",
-                          label: t("Verify backup"),
-                          description: t("{name} is checked on {host}, including reading part of the data back. Until something reads a copy, it is a promise, not a safeguard.", {
-                            name: item.name, host: host.hostname,
-                          }),
-                          payload: { backup: definitionRequest(item, { read_data: true }) },
-                        })
-                      }
-                    >
-                      {t("Verify")}
-                    </button>
-                    <button className="secondary" onClick={() => remove.mutate(item.name)}>
-                      {t("Forget")}
-                    </button>
-                  </div>
-                </td>
+      <Section title={t("Backups")} count={definitions.length} flush>
+        {!definitions.length ? (
+          <Empty>
+            {t("The panel does not back up anything on this host yet. A definition says what to copy, where to and how long it stays.")}
+          </Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <th>{t("Definition")}</th><th>{t("Destination")}</th><th>{t("Last copy")}</th>
+                <th>{t("Verified")}</th><th className="hm-num">{t("Size")}</th><th>{t("Actions")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {definitions.map((item) => (
+                <tr key={item.name} className={selected === item.name ? "selected" : undefined}>
+                  <td>
+                    <button
+                      type="button"
+                      className="hm-link hm-primary"
+                      onClick={() => setSelected(selected === item.name ? "" : item.name)}
+                    >
+                      {item.name}
+                    </button>
+                    <div className="source">
+                      {item.tool}
+                      {item.runbook ? ` · ${item.runbook}` : ""}
+                      {item.paths?.length ? ` · ${item.paths.join(", ")}` : ""}
+                    </div>
+                  </td>
+                  <td className="source hm-mono">
+                    {item.repository}
+                    {item.password_secret && (
+                      <div>{t("password from {secret}", { secret: item.password_secret })}</div>
+                    )}
+                  </td>
+                  <td>
+                    <StatusBadge status={item.status} age={item.age_hours} />
+                    {item.last_success_at && (
+                      <div className="source"><Time value={item.last_success_at} /></div>
+                    )}
+                  </td>
+                  <td>
+                    {/* A copy nobody has ever read back is a promise, not a
+                        safeguard - and it is to look like one. */}
+                    {item.unverified ? (
+                      <span className="badge warn">{t("not verified")}</span>
+                    ) : (
+                      <>
+                        <span className="badge ok">{t("verified")}</span>
+                        <div className="source"><Time value={item.last_verify_at} /></div>
+                      </>
+                    )}
+                  </td>
+                  <td className="hm-num">
+                    <Size bytes={item.repository_size} />
+                    {item.snapshots !== undefined && (
+                      <div className="source">{t("{n} copies", { n: item.snapshots })}</div>
+                    )}
+                  </td>
+                  <td>
+                    <div className="operations">
+                      <button
+                        className="secondary"
+                        disabled={host.connection_state !== "online"}
+                        onClick={() =>
+                          request.mutate({
+                            action: "backup.plan",
+                            payload: { backup: definitionRequest(item) },
+                          })
+                        }
+                      >
+                        {t("Read repository")}
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() =>
+                          setIntent({
+                            action: "backup.run",
+                            label: t("Run backup"),
+                            description: t("{name} copies {paths} from {host} to {repository}. The data goes straight from the host; the panel only records that it happened.", {
+                              name: item.name, paths: (item.paths ?? []).join(", "), host: host.hostname, repository: item.repository ?? "",
+                            }),
+                            payload: { backup: definitionRequest(item) },
+                          })
+                        }
+                      >
+                        {t("Back up now")}
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() =>
+                          setIntent({
+                            action: "backup.verify",
+                            label: t("Verify backup"),
+                            description: t("{name} is checked on {host}, including reading part of the data back. Until something reads a copy, it is a promise, not a safeguard.", {
+                              name: item.name, host: host.hostname,
+                            }),
+                            payload: { backup: definitionRequest(item, { read_data: true }) },
+                          })
+                        }
+                      >
+                        {t("Verify")}
+                      </button>
+                      <button className="hm-danger" onClick={() => remove.mutate(item.name)}>
+                        {t("Forget")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
       {repositoryState && (
-        <>
-          <h2>{t("Copies in the repository")}</h2>
+        <Section title={t("Copies in the repository")} count={repositoryState.snapshots?.length} flush>
           {repositoryState.unavailable_reason ? (
             <p className="warning">
               <span>{t("The repository could not be read: {reason}", { reason: repositoryState.unavailable_reason })}</span>
@@ -380,16 +399,16 @@ export function Backups() {
           ) : !repositoryState.snapshots?.length ? (
             <Empty>{t("The repository holds no copy yet.")}</Empty>
           ) : (
-            <table>
+            <Table>
               <thead>
                 <tr><th>{t("Copy")}</th><th>{t("Taken")}</th><th>{t("Paths")}</th><th>{t("Restore")}</th></tr>
               </thead>
               <tbody>
                 {[...repositoryState.snapshots].reverse().map((snapshot) => (
                   <tr key={snapshot.id}>
-                    <td className="source">{snapshot.id}</td>
+                    <td className="hm-mono">{snapshot.id}</td>
                     <td><Time value={snapshot.time} /></td>
-                    <td className="source">{snapshot.paths?.join(", ")}</td>
+                    <td className="source hm-mono">{snapshot.paths?.join(", ")}</td>
                     <td>
                       <button
                         className="danger"
@@ -423,26 +442,27 @@ export function Backups() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
-          <p className="source">
-            {t("Read from the repository by job {id}", { id: planJob.slice(0, 8) })}
-            {repositoryState.tool_version
-              ? ` · ${repositoryState.tool_version.split("\n")[0]}`
-              : ""}
-          </p>
-        </>
+          <Foot>
+            <span>
+              {t("Read from the repository by job {id}", { id: planJob.slice(0, 8) })}
+              {repositoryState.tool_version
+                ? ` · ${repositoryState.tool_version.split("\n")[0]}`
+                : ""}
+            </span>
+          </Foot>
+        </Section>
       )}
 
       {selected && (
-        <>
-          <h2>{t("History of {name}", { name: selected })}</h2>
+        <Section title={t("History of {name}", { name: selected })} count={(history.data?.items ?? []).length} flush>
           {!(history.data?.items ?? []).length ? (
             <Empty>{t("Nothing has run for this definition yet.")}</Empty>
           ) : (
-            <table>
+            <Table>
               <thead>
-                <tr><th>{t("When")}</th><th>{t("Operation")}</th><th>{t("Result")}</th><th>{t("Copy")}</th><th>{t("Added")}</th><th>{t("By")}</th></tr>
+                <tr><th>{t("When")}</th><th>{t("Operation")}</th><th>{t("Result")}</th><th>{t("Copy")}</th><th className="hm-num">{t("Added")}</th><th>{t("By")}</th></tr>
               </thead>
               <tbody>
                 {(history.data?.items ?? []).map((run, index) => (
@@ -457,15 +477,15 @@ export function Backups() {
                       )}
                       {run.message && <div className="source">{run.message}</div>}
                     </td>
-                    <td className="source">{run.snapshot_id || "—"}</td>
-                    <td>{run.bytes_added === undefined ? "—" : <Size bytes={run.bytes_added} />}</td>
+                    <td className="source hm-mono">{run.snapshot_id || "—"}</td>
+                    <td className="hm-num">{run.bytes_added === undefined ? "—" : <Size bytes={run.bytes_added} />}</td>
                     <td className="source">{run.started_by}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
-        </>
+        </Section>
       )}
 
       {intent && (
@@ -481,7 +501,7 @@ export function Backups() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -507,59 +527,70 @@ function DefinitionForm({
   const ready = name !== "" && (byRunbook ? runbook !== "" : repository !== "" && paths !== "");
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Backup definition")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("The repository password is named, not pasted: the host fetches its value from the secret store once, while the backup runs, and passes it to the tool through the environment — never as a command-line argument, which every user on the host can read.")}
-      </p>
-      <div className="filters">
-        <input value={name} onChange={(e) => setName(e.target.value)}
-               placeholder="nightly" style={{ minWidth: 160 }} />
-        <select value={tool} onChange={(e) => setTool(e.target.value)}>
-          <option value="restic">restic</option>
-          <option value="borg">borg</option>
-          <option value="runbook">runbook</option>
-        </select>
-        {byRunbook ? (
-          <select value={runbook} onChange={(e) => setRunbook(e.target.value)}>
-            <option value="">{t("choose a runbook")}</option>
-            {runbooks.map((runbookName) => (
-              <option key={runbookName} value={runbookName}>{runbookName}</option>
-            ))}
-          </select>
-        ) : null}
-        <input value={repository} onChange={(e) => setRepository(e.target.value)}
-               placeholder="/srv/backup or s3:https://…" style={{ minWidth: 280 }} />
-      </div>
-      <div className="filters">
-        <input value={paths} onChange={(e) => setPaths(e.target.value)}
-               placeholder={t("Paths (/etc /var/lib/app)")} style={{ minWidth: 280 }} />
-        <input value={excludes} onChange={(e) => setExcludes(e.target.value)}
-               placeholder={t("Excludes (*.tmp)")} style={{ minWidth: 200 }} />
-        <input value={secret} onChange={(e) => setSecret(e.target.value)}
-               placeholder={t("Password secret (name only)")} style={{ minWidth: 220 }} />
-        <input value={keepLast} onChange={(e) => setKeepLast(e.target.value)}
-               placeholder={t("Keep last")} style={{ width: 110 }} />
-      </div>
-      <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <input type="checkbox" checked={initialize} onChange={(e) => setInitialize(e.target.checked)} />
-        {t("Create the repository on the first backup if it does not exist yet")}
-      </label>
-      <button
-        disabled={!ready}
-        onClick={() =>
-          onSave({
-            name, tool, repository, initialize,
-            paths: paths.split(/[\s,]+/).filter(Boolean),
-            excludes: excludes.split(/[\s,]+/).filter(Boolean),
-            keep_last: Number(keepLast) || 0,
-            runbook: byRunbook ? runbook : "",
-            password_secret: secret,
-          })
-        }
-      >
-        {t("Save definition")}
-      </button>
-    </div>
+    <Section
+      title={t("Backup definition")}
+      description={t("The repository password is named, not pasted: the host fetches its value from the secret store once, while the backup runs, and passes it to the tool through the environment — never as a command-line argument, which every user on the host can read.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Name")}>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nightly" />
+          </Field>
+          <Field label={t("Tool")} narrow>
+            <select value={tool} onChange={(e) => setTool(e.target.value)}>
+              <option value="restic">restic</option>
+              <option value="borg">borg</option>
+              <option value="runbook">runbook</option>
+            </select>
+          </Field>
+          {byRunbook ? (
+            <Field label={t("runbooks")}>
+              <select value={runbook} onChange={(e) => setRunbook(e.target.value)}>
+                <option value="">{t("choose a runbook")}</option>
+                {runbooks.map((runbookName) => (
+                  <option key={runbookName} value={runbookName}>{runbookName}</option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
+          <Field label={t("Destination")} wide>
+            <input value={repository} onChange={(e) => setRepository(e.target.value)}
+                   placeholder="/srv/backup or s3:https://…" />
+          </Field>
+          <Field label={t("Paths (/etc /var/lib/app)")} wide>
+            <input value={paths} onChange={(e) => setPaths(e.target.value)} />
+          </Field>
+          <Field label={t("Excludes (*.tmp)")}>
+            <input value={excludes} onChange={(e) => setExcludes(e.target.value)} />
+          </Field>
+          <Field label={t("Password secret (name only)")}>
+            <input value={secret} onChange={(e) => setSecret(e.target.value)} />
+          </Field>
+          <Field label={t("Keep last")} narrow>
+            <input value={keepLast} onChange={(e) => setKeepLast(e.target.value)} />
+          </Field>
+        </Fields>
+        <Check checked={initialize} onChange={setInitialize}>
+          {t("Create the repository on the first backup if it does not exist yet")}
+        </Check>
+        <FormActions>
+          <button
+            disabled={!ready}
+            onClick={() =>
+              onSave({
+                name, tool, repository, initialize,
+                paths: paths.split(/[\s,]+/).filter(Boolean),
+                excludes: excludes.split(/[\s,]+/).filter(Boolean),
+                keep_last: Number(keepLast) || 0,
+                runbook: byRunbook ? runbook : "",
+                password_secret: secret,
+              })
+            }
+          >
+            {t("Save definition")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }

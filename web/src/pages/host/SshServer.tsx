@@ -3,7 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Stat, Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -77,10 +80,18 @@ export function SshServer() {
   ];
 
   return (
-    <>
-      <p className="subtitle">
-        {t("Effective configuration as sshd itself reports it. The panel writes only its own file in sshd_config.d — the main config belongs to the distribution and to whoever runs this host.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("SSH")}
+        description={t("Effective configuration as sshd itself reports it. The panel writes only its own file in sshd_config.d — the main config belongs to the distribution and to whoever runs this host.")}
+        actions={
+          <button onClick={() => setEditor((open) => !open)}>
+            {editor ? t("Cancel") : t("Change configuration")}
+          </button>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -88,88 +99,102 @@ export function SshServer() {
         </p>
       )}
 
-      <table>
-        <tbody>
-          <tr><th>{t("Port")}</th><td>{(snapshot?.ports ?? []).join(", ") || "—"}</td></tr>
-          <tr><th>{t("Listening on")}</th><td>{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</td></tr>
-          {/* "prohibit-password" is neither yes nor no - we show what the
-              server said, not a translation into a flag. */}
-          <tr><th>{t("Root login")}</th><td>{snapshot?.permit_root_login || "—"}</td></tr>
-          <tr><th>{t("Max auth tries")}</th><td>{snapshot?.max_auth_tries ?? "—"}</td></tr>
-          <tr><th>{t("Allow users")}</th><td>{(snapshot?.allow_users ?? []).join(" ") || "—"}</td></tr>
-          <tr><th>{t("Allow groups")}</th><td>{(snapshot?.allow_groups ?? []).join(" ") || "—"}</td></tr>
-          <tr><th>{t("Deny users")}</th><td>{(snapshot?.deny_users ?? []).join(" ") || "—"}</td></tr>
-          <tr><th>{t("Service unit")}</th><td>{snapshot?.unit || "—"}</td></tr>
-        </tbody>
-      </table>
+      <Stats>
+        <Stat label={t("Port")} value={<span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span>} />
+        {/* "prohibit-password" is neither yes nor no - we show what the
+            server said, not a translation into a flag. */}
+        <Stat
+          label={t("Root login")}
+          value={snapshot?.permit_root_login || "—"}
+          tone={snapshot?.permit_root_login === "yes" ? "warn" : snapshot?.permit_root_login === "no" ? "ok" : undefined}
+        />
+        <Stat
+          label={t("Password")}
+          value={snapshot?.password_authentication || <span className="badge unknown">{t("unknown")}</span>}
+          tone={snapshot?.password_authentication === "yes" ? "warn" : snapshot?.password_authentication === "no" ? "ok" : undefined}
+        />
+        <Stat label={t("Host keys")} value={(snapshot?.host_keys ?? []).length} />
+      </Stats>
 
-      <h2>{t("Authentication methods")}</h2>
-      <table>
-        <thead><tr><th>{t("Method")}</th><th>{t("Enabled")}</th></tr></thead>
-        <tbody>
-          {methods.map(([name, value]) => (
-            <tr key={name}>
-              <td>{name}</td>
-              <td>{value || <span className="badge unknown">{t("unknown")}</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2>{t("Host keys")}</h2>
-      <p className="subtitle">
-        {t("Fingerprints only — the panel has no reason to see a host's private key. Rotating one changes this host's identity for every client that has it in known_hosts.")}
-      </p>
-      <table>
-        <thead><tr><th>{t("Type")}</th><th>{t("Bits")}</th><th>{t("Fingerprint")}</th><th>{t("Actions")}</th></tr></thead>
-        <tbody>
-          {(snapshot?.host_keys ?? []).map((key) => (
-            <tr key={key.path}>
-              <td>{key.type}</td>
-              <td>{key.bits}</td>
-              <td className="source">{key.fingerprint}</td>
-              <td>
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    setIntent({
-                      action: "ssh.hostkey.rotate",
-                      label: t("Rotate host key"),
-                      description: t("A new {type} host key will be generated on {host}. Every client with the old fingerprint in known_hosts will warn, and anything keyed to the old fingerprint stops working. The old key is kept on the host with a timestamp.", {
-                        type: key.type, host: host.hostname,
-                      }),
-                      payload: { ssh: { key_type: key.type } },
-                    })
-                  }
-                >
-                  {t("Rotate")}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2>{t("Managed drop-in")}</h2>
-      <p className="source">{snapshot?.managed_path}</p>
-      {snapshot?.managed_present ? (
-        <pre style={{ marginTop: 8 }}>{snapshot.managed_config}</pre>
-      ) : (
-        <Empty>{t("The panel has not written anything to this host yet.")}</Empty>
-      )}
-
-      <div className="filters">
-        <button onClick={() => setEditor((open) => !open)}>
-          {editor ? t("Cancel") : t("Change configuration")}
-        </button>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
       {editor && <SshEditor state={snapshot} onIntent={setIntent} />}
 
-      <ModuleFreshness fragment={module.data} />
+      <Section title={t("SSH")} flush>
+        <Facts>
+          <Fact label={t("Port")}><span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Listening on")}><span className="hm-mono">{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Root login")}>{snapshot?.permit_root_login || "—"}</Fact>
+          <Fact label={t("Max auth tries")}>{snapshot?.max_auth_tries ?? "—"}</Fact>
+          <Fact label={t("Allow users")}><span className="hm-mono">{(snapshot?.allow_users ?? []).join(" ") || "—"}</span></Fact>
+          <Fact label={t("Allow groups")}><span className="hm-mono">{(snapshot?.allow_groups ?? []).join(" ") || "—"}</span></Fact>
+          <Fact label={t("Deny users")}><span className="hm-mono">{(snapshot?.deny_users ?? []).join(" ") || "—"}</span></Fact>
+          <Fact label={t("Service unit")}><span className="hm-mono">{snapshot?.unit || "—"}</span></Fact>
+        </Facts>
+      </Section>
+
+      <Section title={t("Authentication methods")} flush>
+        <Table>
+          <thead><tr><th>{t("Method")}</th><th>{t("Enabled")}</th></tr></thead>
+          <tbody>
+            {methods.map(([name, value]) => (
+              <tr key={name}>
+                <td className="hm-primary">{name}</td>
+                <td>{value || <span className="badge unknown">{t("unknown")}</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Section>
+
+      <Section
+        title={t("Host keys")}
+        count={(snapshot?.host_keys ?? []).length}
+        description={t("Fingerprints only — the panel has no reason to see a host's private key. Rotating one changes this host's identity for every client that has it in known_hosts.")}
+        flush
+      >
+        <Table>
+          <thead><tr><th>{t("Type")}</th><th className="hm-num">{t("Bits")}</th><th>{t("Fingerprint")}</th><th>{t("Actions")}</th></tr></thead>
+          <tbody>
+            {(snapshot?.host_keys ?? []).map((key) => (
+              <tr key={key.path}>
+                <td className="hm-primary">{key.type}</td>
+                <td className="hm-num">{key.bits}</td>
+                <td className="source hm-mono">{key.fingerprint}</td>
+                <td>
+                  <button
+                    className="hm-danger"
+                    onClick={() =>
+                      setIntent({
+                        action: "ssh.hostkey.rotate",
+                        label: t("Rotate host key"),
+                        description: t("A new {type} host key will be generated on {host}. Every client with the old fingerprint in known_hosts will warn, and anything keyed to the old fingerprint stops working. The old key is kept on the host with a timestamp.", {
+                          type: key.type, host: host.hostname,
+                        }),
+                        payload: { ssh: { key_type: key.type } },
+                      })
+                    }
+                  >
+                    {t("Rotate")}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Section>
+
+      <Section title={t("Managed drop-in")} description={<span className="hm-mono">{snapshot?.managed_path}</span>} flush>
+        {snapshot?.managed_present ? (
+          <div className="hm-section-body">
+            <pre>{snapshot.managed_config}</pre>
+          </div>
+        ) : (
+          <Empty>{t("The panel has not written anything to this host yet.")}</Empty>
+        )}
+      </Section>
+
       {snapshot?.observed_at && (
-        <p className="source">
-          {t("Configuration read")} <Time value={snapshot.observed_at} />
+        <p className="hm-freshness">
+          <span>{t("Configuration read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
 
@@ -185,7 +210,7 @@ export function SshServer() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -218,56 +243,68 @@ function SshEditor({
   if (lockout) change.allow_lockout = true;
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Change configuration")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("Empty means “leave it alone”. The host validates the file with sshd itself before reloading, and reloads instead of restarting so open sessions survive.")}
-      </p>
-      <div className="filters">
-        <select value={root} onChange={(e) => setRoot(e.target.value)}>
-          <option value="">{t("root login: leave")}</option>
-          <option value="no">{t("root login: no")}</option>
-          <option value="prohibit-password">{t("root login: keys only")}</option>
-          <option value="yes">{t("root login: yes")}</option>
-        </select>
-        <select value={password} onChange={(e) => setPassword(e.target.value)}>
-          <option value="">{t("password auth: leave")}</option>
-          <option value="no">{t("password auth: no")}</option>
-          <option value="yes">{t("password auth: yes")}</option>
-        </select>
-        <select value={pubkey} onChange={(e) => setPubkey(e.target.value)}>
-          <option value="">{t("public key auth: leave")}</option>
-          <option value="yes">{t("public key auth: yes")}</option>
-          <option value="no">{t("public key auth: no")}</option>
-        </select>
-        <input value={tries} onChange={(e) => setTries(e.target.value)} placeholder="MaxAuthTries" style={{ width: 130 }} />
-        <input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="AllowGroups" />
-      </div>
-      {/* A server nobody can log into by any method is not secured - it is
-          unreachable. */}
-      <label className="toggle">
-        <input type="checkbox" checked={lockout} onChange={(e) => setLockout(e.target.checked)} />
-        {t("Allow a configuration that leaves no working authentication method")}
-      </label>
-      <button
-        onClick={() =>
-          onIntent({
-            action: "ssh.config.apply",
-            label: t("Apply sshd configuration"),
-            description: t("{changes} on {unit}. Existing sessions stay open.", {
-              changes: Object.entries(change)
-                .filter(([key]) => key !== "allow_lockout")
-                .map(([key, value]) => `${key} = ${Array.isArray(value) ? value.join(" ") : value}`)
-                .join(", "),
-              unit: state?.unit ?? "sshd",
-            }),
-            payload: { ssh: change },
-          })
-        }
-        disabled={Object.keys(change).filter((key) => key !== "allow_lockout").length === 0}
-      >
-        {t("Apply")}
-      </button>
-    </div>
+    <Section
+      title={t("Change configuration")}
+      description={t("Empty means “leave it alone”. The host validates the file with sshd itself before reloading, and reloads instead of restarting so open sessions survive.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Root login")}>
+            <select value={root} onChange={(e) => setRoot(e.target.value)}>
+              <option value="">{t("root login: leave")}</option>
+              <option value="no">{t("root login: no")}</option>
+              <option value="prohibit-password">{t("root login: keys only")}</option>
+              <option value="yes">{t("root login: yes")}</option>
+            </select>
+          </Field>
+          <Field label={t("Password")}>
+            <select value={password} onChange={(e) => setPassword(e.target.value)}>
+              <option value="">{t("password auth: leave")}</option>
+              <option value="no">{t("password auth: no")}</option>
+              <option value="yes">{t("password auth: yes")}</option>
+            </select>
+          </Field>
+          <Field label={t("Public key")}>
+            <select value={pubkey} onChange={(e) => setPubkey(e.target.value)}>
+              <option value="">{t("public key auth: leave")}</option>
+              <option value="yes">{t("public key auth: yes")}</option>
+              <option value="no">{t("public key auth: no")}</option>
+            </select>
+          </Field>
+          <Field label="MaxAuthTries" narrow>
+            <input value={tries} onChange={(e) => setTries(e.target.value)} placeholder="MaxAuthTries" />
+          </Field>
+          <Field label="AllowGroups">
+            <input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="AllowGroups" />
+          </Field>
+        </Fields>
+        {/* A server nobody can log into by any method is not secured - it is
+            unreachable. */}
+        <Check checked={lockout} onChange={setLockout}>
+          {t("Allow a configuration that leaves no working authentication method")}
+        </Check>
+        <FormActions>
+          <button
+            onClick={() =>
+              onIntent({
+                action: "ssh.config.apply",
+                label: t("Apply sshd configuration"),
+                description: t("{changes} on {unit}. Existing sessions stay open.", {
+                  changes: Object.entries(change)
+                    .filter(([key]) => key !== "allow_lockout")
+                    .map(([key, value]) => `${key} = ${Array.isArray(value) ? value.join(" ") : value}`)
+                    .join(", "),
+                  unit: state?.unit ?? "sshd",
+                }),
+                payload: { ssh: change },
+              })
+            }
+            disabled={Object.keys(change).filter((key) => key !== "allow_lockout").length === 0}
+          >
+            {t("Apply")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }

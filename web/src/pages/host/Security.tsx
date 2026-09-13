@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -188,12 +190,22 @@ export function Security() {
   const snapshot = module.data?.payload;
   const findings = report.data?.findings ?? [];
   const fixable = findings.filter((f) => !f.passed && !f.unknown && f.remediation?.action);
+  const counts = report.data?.counts;
+  const exposed = (snapshot?.listening ?? []).filter((socket) => socket.exposed).length;
 
   return (
-    <>
-      <p className="subtitle">
-        {t("The host reports facts; the panel judges them. Checks are versioned and run against inventory the host already sends, so a result can be repeated and two hosts are judged by the same check. Every fix maps to a typed operation of the module that owns the thing being fixed.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Security")}
+        description={t("The host reports facts; the panel judges them. Checks are versioned and run against inventory the host already sends, so a result can be repeated and two hosts are judged by the same check. Every fix maps to a typed operation of the module that owns the thing being fixed.")}
+        actions={
+          <button onClick={() => scan.mutate()} disabled={scan.isPending}>
+            {t("Scan now")}
+          </button>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -201,279 +213,294 @@ export function Security() {
         </p>
       )}
 
-      <table>
-        <tbody>
-          <tr>
-            <th>{t("Mandatory access control")}</th>
-            <td>
-              {snapshot?.mac?.system
-                ? `${snapshot.mac.system}: ${snapshot.mac.mode || t("unknown")}`
-                : snapshot?.mac?.reason || unknown}
-              {snapshot?.mac?.policy && <span className="source"> · {snapshot.mac.policy}</span>}
-              {/* The running mode and the configured mode may differ - and
-                  that is the whole difference between protection and
-                  protection until the reboot. */}
-              {snapshot?.mac?.configured_mode &&
-                snapshot.mac.configured_mode !== snapshot.mac.mode && (
-                  <span className="badge warn"> {t("after reboot: {mode}", { mode: snapshot.mac.configured_mode })}</span>
-                )}
-              {snapshot?.mac?.profiles_enforcing !== undefined &&
-                snapshot?.mac?.profiles_enforcing !== null && (
-                  <span className="source">
-                    {" "}· {t("{enforcing} enforcing, {complaining} complaining", {
-                      enforcing: snapshot.mac.profiles_enforcing, complaining: snapshot.mac.profiles_complain ?? 0,
-                    })}
-                  </span>
-                )}
-            </td>
-          </tr>
-          <tr>
-            <th>{t("Audit daemon")}</th>
-            <td>
-              {!snapshot?.audit?.present
-                ? snapshot?.audit?.reason || t("not installed")
-                : <>
-                    {flag(snapshot.audit.active)}
-                    {snapshot.audit.rules !== undefined && snapshot.audit.rules !== null
-                      ? ` · ${t("{n} rules", { n: snapshot.audit.rules })}`
-                      : ""}
-                  </>}
-            </td>
-          </tr>
-          <tr>
-            <th>{t("Secure boot")}</th>
-            <td>
-              {snapshot?.secure_boot === undefined || snapshot?.secure_boot === null ? (
-                <>
-                  {unknown}
-                  {snapshot?.secure_boot_reason && (
-                    <span className="source"> · {snapshot.secure_boot_reason}</span>
-                  )}
-                </>
-              ) : (
-                flag(snapshot.secure_boot)
-              )}
-            </td>
-          </tr>
-          <tr><th>{t("FIPS mode")}</th><td>{flag(snapshot?.fips_enabled)}</td></tr>
-          <tr><th>{t("Kernel lockdown")}</th><td>{snapshot?.lockdown || unknown}</td></tr>
-        </tbody>
-      </table>
+      {/* The counts of the findings decide whether the list is worth
+          reading; while the report computes, the tiles say so rather than
+          showing zeros. */}
+      <Stats>
+        <Stat
+          label={t("Need action")}
+          value={counts ? counts.failed ?? 0 : "…"}
+          tone={counts && (counts.failed ?? 0) > 0 ? "error" : counts ? "ok" : undefined}
+        />
+        <Stat label={t("Passed")} value={counts ? counts.passed ?? 0 : "…"} tone={counts ? "ok" : undefined} />
+        <Stat label={t("Unknown")} value={counts ? counts.unknown ?? 0 : "…"} tone={counts && (counts.unknown ?? 0) > 0 ? "unknown" : undefined} />
+        <Stat label={t("n/a")} value={counts ? counts.not_applicable ?? 0 : "…"} />
+        <Stat
+          label={t("Exposed services")}
+          value={snapshot?.listening_known ? exposed : unknown}
+          tone={!snapshot?.listening_known ? "unknown" : exposed > 0 ? "warn" : "ok"}
+        />
+      </Stats>
 
-      <h2>{t("Exposed services")}</h2>
-      <p className="subtitle">
-        {t("Sockets listening beyond the loopback interface. Each one is a way into this host for anyone who can see its network.")}
-      </p>
-      {!snapshot?.listening_known ? (
-        <Empty>{t("This host did not report its listening sockets.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("Proto")}</th><th>{t("Address")}</th><th>{t("Port")}</th><th>{t("Process")}</th><th>{t("Reach")}</th></tr></thead>
-          <tbody>
-            {(snapshot.listening ?? [])
-              .slice()
-              .sort((a, b) => Number(b.exposed) - Number(a.exposed) || a.port - b.port)
-              .map((socket, i) => (
-                <tr key={`${socket.protocol}-${socket.address}-${socket.port}-${i}`}>
-                  <td>{socket.protocol}</td>
-                  <td>{socket.address}</td>
-                  <td>{socket.port}</td>
-                  <td>{socket.process || "—"}</td>
+      <Section title={t("Protective state")} flush>
+        <Facts>
+          <Fact label={t("Mandatory access control")}>
+            {snapshot?.mac?.system
+              ? `${snapshot.mac.system}: ${snapshot.mac.mode || t("unknown")}`
+              : snapshot?.mac?.reason || unknown}
+            {snapshot?.mac?.policy && <span className="source"> · {snapshot.mac.policy}</span>}
+            {/* The running mode and the configured mode may differ - and
+                that is the whole difference between protection and
+                protection until the reboot. */}
+            {snapshot?.mac?.configured_mode &&
+              snapshot.mac.configured_mode !== snapshot.mac.mode && (
+                <span className="badge warn"> {t("after reboot: {mode}", { mode: snapshot.mac.configured_mode })}</span>
+              )}
+            {snapshot?.mac?.profiles_enforcing !== undefined &&
+              snapshot?.mac?.profiles_enforcing !== null && (
+                <span className="source">
+                  {" "}· {t("{enforcing} enforcing, {complaining} complaining", {
+                    enforcing: snapshot.mac.profiles_enforcing, complaining: snapshot.mac.profiles_complain ?? 0,
+                  })}
+                </span>
+              )}
+          </Fact>
+          <Fact label={t("Audit daemon")}>
+            {!snapshot?.audit?.present
+              ? snapshot?.audit?.reason || t("not installed")
+              : <>
+                  {flag(snapshot.audit.active)}
+                  {snapshot.audit.rules !== undefined && snapshot.audit.rules !== null
+                    ? ` · ${t("{n} rules", { n: snapshot.audit.rules })}`
+                    : ""}
+                </>}
+          </Fact>
+          <Fact label={t("Secure boot")}>
+            {snapshot?.secure_boot === undefined || snapshot?.secure_boot === null ? (
+              <>
+                {unknown}
+                {snapshot?.secure_boot_reason && (
+                  <span className="source"> · {snapshot.secure_boot_reason}</span>
+                )}
+              </>
+            ) : (
+              flag(snapshot.secure_boot)
+            )}
+          </Fact>
+          <Fact label={t("FIPS mode")}>{flag(snapshot?.fips_enabled)}</Fact>
+          <Fact label={t("Kernel lockdown")}>{snapshot?.lockdown || unknown}</Fact>
+        </Facts>
+      </Section>
+
+      <Section
+        title={t("Exposed services")}
+        count={snapshot?.listening_known ? (snapshot.listening ?? []).length : undefined}
+        description={t("Sockets listening beyond the loopback interface. Each one is a way into this host for anyone who can see its network.")}
+        flush
+      >
+        {!snapshot?.listening_known ? (
+          <Empty>{t("This host did not report its listening sockets.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th>{t("Proto")}</th><th>{t("Address")}</th><th className="hm-num">{t("Port")}</th><th>{t("Process")}</th><th>{t("Reach")}</th></tr></thead>
+            <tbody>
+              {(snapshot.listening ?? [])
+                .slice()
+                .sort((a, b) => Number(b.exposed) - Number(a.exposed) || a.port - b.port)
+                .map((socket, i) => (
+                  <tr key={`${socket.protocol}-${socket.address}-${socket.port}-${i}`}>
+                    <td>{socket.protocol}</td>
+                    <td className="hm-mono">{socket.address}</td>
+                    <td className="hm-num">{socket.port}</td>
+                    <td className="hm-mono">{socket.process || "—"}</td>
+                    <td>
+                      {socket.exposed ? (
+                        <span className="badge warn">{t("exposed")}</span>
+                      ) : (
+                        <span className="source">loopback</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+
+      <Section
+        title={t("Findings")}
+        count={report.data ? findings.length : undefined}
+        tools={
+          <span className="source">
+            {report.data
+              ? t("{failed} need action · {passed} passed · {unknown} unknown · {na} n/a", {
+                  failed: report.data.counts.failed ?? 0, passed: report.data.counts.passed ?? 0,
+                  unknown: report.data.counts.unknown ?? 0, na: report.data.counts.not_applicable ?? 0,
+                })
+              : "…"}
+          </span>
+        }
+        flush
+      >
+        {!report.data ? (
+          <Empty>{t("Computing findings…")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <th></th><th>{t("Check")}</th><th>{t("State")}</th><th>{t("Expected")}</th><th>{t("Observed")}</th><th>{t("Fix")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {findings.map((finding) => (
+                <tr key={finding.check_id}>
                   <td>
-                    {socket.exposed ? (
-                      <span className="badge warn">{t("exposed")}</span>
+                    {/* Only a finding with a remediation operation can be
+                        ticked. The rest needs a decision the panel will not
+                        make for the operator. */}
+                    <input
+                      type="checkbox"
+                      disabled={
+                        !finding.remediation?.action ||
+                        !finding.applicable ||
+                        finding.passed ||
+                        finding.unknown ||
+                        Boolean(running)
+                      }
+                      checked={selected.includes(finding.check_id)}
+                      onChange={(e) =>
+                        setSelected((list) =>
+                          e.target.checked
+                            ? [...list, finding.check_id]
+                            : list.filter((id) => id !== finding.check_id),
+                        )
+                      }
+                    />
+                  </td>
+                  <td>
+                    <span className="hm-primary">{finding.title}</span>
+                    <div className="source">
+                      {finding.check_id} v{finding.check_version} · {finding.rationale}
+                    </div>
+                  </td>
+                  <td><SeverityBadge finding={finding} /></td>
+                  <td>{finding.expected}</td>
+                  <td>
+                    {finding.observed}
+                    {/* The reason code says what to do about it: wait for a
+                        read, fix the agent or grant permissions. */}
+                    {finding.reason_code && (
+                      <div className="source">{t("reason")}: {finding.reason_code}</div>
+                    )}
+                    {finding.evidence && <div className="source">{finding.evidence}</div>}
+                    {/* The evidence carries the module and the revision the
+                        result came from. */}
+                    {finding.revision && (
+                      <div className="source">
+                        {finding.module} @ {finding.revision.slice(0, 8)}
+                        {finding.observed_at && (
+                          <>
+                            {" · "}
+                            <Time value={finding.observed_at} />
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {finding.remediation?.action ? (
+                      <>
+                        <code>{finding.remediation.action}</code>
+                        {finding.remediation.note && (
+                          <div className="source">{finding.remediation.note}</div>
+                        )}
+                      </>
                     ) : (
-                      <span className="source">loopback</span>
+                      <span className="source">{finding.remediation?.note || "—"}</span>
                     )}
                   </td>
                 </tr>
               ))}
-          </tbody>
-        </table>
-      )}
-
-      <h2>{t("Findings")}</h2>
-      <div className="filters">
-        <button onClick={() => scan.mutate()} disabled={scan.isPending}>
-          {t("Scan now")}
-        </button>
-        <span className="source">
-          {report.data
-            ? t("{failed} need action · {passed} passed · {unknown} unknown · {na} n/a", {
-                failed: report.data.counts.failed ?? 0, passed: report.data.counts.passed ?? 0,
-                unknown: report.data.counts.unknown ?? 0, na: report.data.counts.not_applicable ?? 0,
+            </tbody>
+          </Table>
+        )}
+        <Foot>
+          <button
+            onClick={() =>
+              setIntent({
+                label: t("Apply remediation"),
+                description: t("{n} finding(s) on {host} will be fixed step by step, each step an ordinary job of the module that owns it, with its own permissions and approval. The next step starts only once the previous one succeeded, and the plan stops at the first failure. It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.", {
+                  n: selected.length, host: host.hostname,
+                }),
               })
-            : "…"}
-        </span>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+            }
+            disabled={!selected.length || remediate.isPending || Boolean(running)}
+            title={running ? t("a remediation plan is already running on this host") : undefined}
+          >
+            {t("Fix selected ({n})", { n: selected.length })}
+          </button>
+          <span>
+            {t("{n} of the findings that need action have an operation behind them", { n: fixable.length })}
+          </span>
+          {report.data?.generated_at && (
+            <span>
+              {t("Findings computed")} <Time value={report.data.generated_at} /> · {t("plan")}{" "}
+              {report.data.plan_hash.slice(0, 12)} ({t("canonical form v{n}", { n: report.data.plan_hash_version })})
+            </span>
+          )}
+        </Foot>
+      </Section>
 
-      {!report.data ? (
-        <Empty>{t("Computing findings…")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th></th><th>{t("Check")}</th><th>{t("State")}</th><th>{t("Expected")}</th><th>{t("Observed")}</th><th>{t("Fix")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {findings.map((finding) => (
-              <tr key={finding.check_id}>
-                <td>
-                  {/* Only a finding with a remediation operation can be
-                      ticked. The rest needs a decision the panel will not
-                      make for the operator. */}
-                  <input
-                    type="checkbox"
-                    disabled={
-                      !finding.remediation?.action ||
-                      !finding.applicable ||
-                      finding.passed ||
-                      finding.unknown ||
-                      Boolean(running)
-                    }
-                    checked={selected.includes(finding.check_id)}
-                    onChange={(e) =>
-                      setSelected((list) =>
-                        e.target.checked
-                          ? [...list, finding.check_id]
-                          : list.filter((id) => id !== finding.check_id),
-                      )
-                    }
-                  />
-                </td>
-                <td>
-                  {finding.title}
-                  <div className="source">
-                    {finding.check_id} v{finding.check_version} · {finding.rationale}
+      <Message text={planMessage} />
+
+      <Section
+        title={t("Remediation plans")}
+        count={(plans.data?.items ?? []).length}
+        description={t("Steps run one after another: each is an ordinary job of the module that owns it, and the next one starts only once the previous succeeded. A step that needs a reboot ends the plan — what comes after a reboot has to be judged against the host that came back.")}
+        flush
+      >
+        {!(plans.data?.items ?? []).length ? (
+          <Empty>{t("No remediation has been planned on this host.")}</Empty>
+        ) : (
+          (plans.data?.items ?? []).map((plan) => (
+            <div key={plan.id} className="hm-plan">
+              <div className="hm-section-head">
+                <strong className="hm-mono">{plan.id.slice(0, 8)}</strong>
+                <span className={`badge ${plan.state === "succeeded" ? "ok" : plan.state === "running" ? "warn" : "error"}`}>
+                  {plan.state}
+                </span>
+                <span className="source">
+                  {plan.created_by} · <Time value={plan.created_at} />
+                  {plan.stop_on_failure ? ` · ${t("stops on failure")}` : ` · ${t("continues after failure")}`}
+                </span>
+                {plan.state === "running" && (
+                  <div className="hm-tools">
+                    <button className="hm-danger" onClick={() => stop.mutate(plan.id)} disabled={stop.isPending}>
+                      {t("Stop")}
+                    </button>
                   </div>
-                </td>
-                <td><SeverityBadge finding={finding} /></td>
-                <td>{finding.expected}</td>
-                <td>
-                  {finding.observed}
-                  {/* The reason code says what to do about it: wait for a
-                      read, fix the agent or grant permissions. */}
-                  {finding.reason_code && (
-                    <div className="source">{t("reason")}: {finding.reason_code}</div>
-                  )}
-                  {finding.evidence && <div className="source">{finding.evidence}</div>}
-                  {/* The evidence carries the module and the revision the
-                      result came from. */}
-                  {finding.revision && (
-                    <div className="source">
-                      {finding.module} @ {finding.revision.slice(0, 8)}
-                      {finding.observed_at && (
-                        <>
-                          {" · "}
-                          <Time value={finding.observed_at} />
-                        </>
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td>
-                  {finding.remediation?.action ? (
-                    <>
-                      <code>{finding.remediation.action}</code>
-                      {finding.remediation.note && (
-                        <div className="source">{finding.remediation.note}</div>
-                      )}
-                    </>
-                  ) : (
-                    <span className="source">{finding.remediation?.note || "—"}</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <div className="filters">
-        <button
-          onClick={() =>
-            setIntent({
-              label: t("Apply remediation"),
-              description: t("{n} finding(s) on {host} will be fixed step by step, each step an ordinary job of the module that owns it, with its own permissions and approval. The next step starts only once the previous one succeeded, and the plan stops at the first failure. It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.", {
-                n: selected.length, host: host.hostname,
-              }),
-            })
-          }
-          disabled={!selected.length || remediate.isPending || Boolean(running)}
-          title={running ? t("a remediation plan is already running on this host") : undefined}
-        >
-          {t("Fix selected ({n})", { n: selected.length })}
-        </button>
-        <span className="source">
-          {t("{n} of the findings that need action have an operation behind them", { n: fixable.length })}
-        </span>
-      </div>
-
-      {planMessage && <p className="source" style={{ marginBottom: 12 }}>{planMessage}</p>}
-
-      <h2>{t("Remediation plans")}</h2>
-      <p className="subtitle">
-        {t("Steps run one after another: each is an ordinary job of the module that owns it, and the next one starts only once the previous succeeded. A step that needs a reboot ends the plan — what comes after a reboot has to be judged against the host that came back.")}
-      </p>
-      {!(plans.data?.items ?? []).length ? (
-        <Empty>{t("No remediation has been planned on this host.")}</Empty>
-      ) : (
-        (plans.data?.items ?? []).map((plan) => (
-          <div key={plan.id} style={{ marginBottom: 16 }}>
-            <div className="filters">
-              <strong>{plan.id.slice(0, 8)}</strong>
-              <span className={`badge ${plan.state === "succeeded" ? "ok" : plan.state === "running" ? "warn" : "error"}`}>
-                {plan.state}
-              </span>
-              <span className="source">
-                {plan.created_by} · <Time value={plan.created_at} />
-                {plan.stop_on_failure ? ` · ${t("stops on failure")}` : ` · ${t("continues after failure")}`}
-              </span>
-              {plan.state === "running" && (
-                <button className="secondary" onClick={() => stop.mutate(plan.id)} disabled={stop.isPending}>
-                  {t("Stop")}
-                </button>
-              )}
+                )}
+              </div>
+              <Table>
+                <thead>
+                  <tr><th className="hm-num">#</th><th>{t("Check")}</th><th>{t("Operation")}</th><th>{t("Lock")}</th><th>{t("Job")}</th><th>{t("State")}</th></tr>
+                </thead>
+                <tbody>
+                  {(plan.steps ?? []).map((step) => (
+                    <tr key={step.position}>
+                      <td className="hm-num">{step.position}</td>
+                      <td className="hm-mono">{step.check_id}</td>
+                      <td>
+                        <code>{step.action_type}</code>
+                        {step.requires_reboot && <span className="badge warn"> {t("reboot")}</span>}
+                      </td>
+                      {/* The lock class says which host resource the step
+                          reaches for - two steps of the same class do not run
+                          at once. */}
+                      <td>{step.lock_class || <span className="source">—</span>}</td>
+                      <td className="hm-mono">{step.job_id ? step.job_id.slice(0, 8) : "—"}</td>
+                      <td>
+                        {step.state}
+                        {step.reason && <div className="source">{step.reason}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
             </div>
-            <table>
-              <thead>
-                <tr><th>#</th><th>{t("Check")}</th><th>{t("Operation")}</th><th>{t("Lock")}</th><th>{t("Job")}</th><th>{t("State")}</th></tr>
-              </thead>
-              <tbody>
-                {(plan.steps ?? []).map((step) => (
-                  <tr key={step.position}>
-                    <td>{step.position}</td>
-                    <td>{step.check_id}</td>
-                    <td>
-                      <code>{step.action_type}</code>
-                      {step.requires_reboot && <span className="badge warn"> {t("reboot")}</span>}
-                    </td>
-                    {/* The lock class says which host resource the step
-                        reaches for - two steps of the same class do not run
-                        at once. */}
-                    <td>{step.lock_class || <span className="source">—</span>}</td>
-                    <td>{step.job_id ? step.job_id.slice(0, 8) : "—"}</td>
-                    <td>
-                      {step.state}
-                      {step.reason && <div className="source">{step.reason}</div>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))
-      )}
-
-      <ModuleFreshness fragment={module.data} />
-      {report.data?.generated_at && (
-        <p className="source">
-          {t("Findings computed")} <Time value={report.data.generated_at} /> · {t("plan")}{" "}
-          {report.data.plan_hash.slice(0, 12)} ({t("canonical form v{n}", { n: report.data.plan_hash_version })})
-        </p>
-      )}
+          ))
+        )}
+      </Section>
 
       {intent && (
         <TargetConfirmation
@@ -485,6 +512,6 @@ export function Security() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }

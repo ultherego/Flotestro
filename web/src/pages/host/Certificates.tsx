@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
+  Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -183,12 +186,45 @@ export function Certificates() {
   const list = data?.certificates ?? [];
   const targets = data?.targets ?? [];
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const byStatus = (status: string) => list.filter((certificate) => certificate.status === status).length;
 
   return (
-    <>
-      <p className="subtitle">
-        {t("Certificates on the paths the panel watches, plus everything certmonger tracks on this host. Nothing here comes from walking the filesystem, and the private key is never read — only its location and permissions.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Certificates")}
+        description={t("Certificates on the paths the panel watches, plus everything certmonger tracks on this host. Nothing here comes from walking the filesystem, and the private key is never read — only its location and permissions.")}
+        actions={
+          <>
+            <button className="secondary" onClick={() => setForm(form === "watch" ? "" : "watch")}>
+              {form === "watch" ? t("Cancel") : t("Watch a path")}
+            </button>
+            <button className="secondary" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
+              {form === "deploy" ? t("Cancel") : t("Deploy a certificate")}
+            </button>
+            <button
+              onClick={() =>
+                request.mutate({
+                  action: "certificate.scan",
+                  payload: {
+                    certificate: {
+                      targets: targets.map((target) => ({
+                        path: target.path,
+                        key_path: target.key_path ?? "",
+                        service: target.service ?? "",
+                      })),
+                    },
+                  },
+                })
+              }
+              disabled={host.connection_state !== "online" || request.isPending}
+            >
+              {t("Scan host")}
+            </button>
+          </>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {data?.stale && (
         <p className="warning">
@@ -206,198 +242,185 @@ export function Certificates() {
         </p>
       )}
 
-      <div className="filters">
-        <button
-          onClick={() =>
-            request.mutate({
-              action: "certificate.scan",
-              payload: {
-                certificate: {
-                  targets: targets.map((target) => ({
-                    path: target.path,
-                    key_path: target.key_path ?? "",
-                    service: target.service ?? "",
-                  })),
-                },
-              },
-            })
-          }
-          disabled={host.connection_state !== "online" || request.isPending}
-        >
-          {t("Scan host")}
-        </button>
-        <button className="secondary" onClick={() => setForm(form === "watch" ? "" : "watch")}>
-          {form === "watch" ? t("Cancel") : t("Watch a path")}
-        </button>
-        <button className="secondary" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
-          {form === "deploy" ? t("Cancel") : t("Deploy a certificate")}
-        </button>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+      {data && (
+        <Stats>
+          <Stat label={t("Certificates")} value={list.length} />
+          <Stat label={t("Expired")} value={byStatus("expired")} tone={byStatus("expired") > 0 ? "error" : undefined} />
+          <Stat
+            label={t("Expiring soon")}
+            value={byStatus("critical") + byStatus("warning")}
+            tone={byStatus("critical") > 0 ? "error" : byStatus("warning") > 0 ? "warn" : undefined}
+          />
+          <Stat
+            label={t("Manual renewal")}
+            value={list.filter((certificate) => certificate.renewal === "manual").length}
+            tone={list.some((certificate) => certificate.renewal === "manual") ? "warn" : undefined}
+          />
+        </Stats>
+      )}
 
       {form === "watch" && <WatchForm onSave={(body) => watch.mutate(body)} />}
       {form === "deploy" && (
         <DeployForm targets={targets} hostname={host.hostname} onIntent={setIntent} />
       )}
 
-      {!list.length ? (
-        <Empty>
-          {t("No certificate is watched on this host yet. Add a path, or scan the host if certmonger tracks something here.")}
-        </Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Path")}</th><th>{t("Subject")}</th><th>{t("Expires")}</th><th>{t("Renewal")}</th>
-              <th>{t("Source")}</th><th>{t("Key")}</th><th>{t("Actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((certificate) => (
-              <tr key={certificate.path}>
-                <td>
-                  <a
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setSelected(selected === certificate.path ? "" : certificate.path);
-                    }}
-                  >
-                    {certificate.path}
-                  </a>
-                  {certificate.owner_service && (
-                    <div className="source">{certificate.owner_service}</div>
-                  )}
-                </td>
-                <td>
-                  {certificate.unavailable_reason ? (
-                    <span className="badge unknown">{certificate.unavailable_reason}</span>
-                  ) : (
-                    <>
-                      {certificate.subject}
-                      {certificate.sans?.length ? (
-                        <div className="source">{certificate.sans.join(", ")}</div>
-                      ) : null}
-                    </>
-                  )}
-                </td>
-                <td>
-                  <StatusBadge status={certificate.status} days={certificate.days_to_expiry} />
-                  {certificate.not_after && (
-                    <div className="source"><Time value={certificate.not_after} /></div>
-                  )}
-                </td>
-                <td>
-                  {/* "Manual" is a finding: the daemon answered that it does
-                      not watch this file. "Unknown" is a missing answer. */}
-                  {certificate.renewal === "tracked" ? (
-                    <>
-                      <span className="badge ok">certmonger</span>
-                      {certificate.tracking?.status && (
-                        <div className="source">{certificate.tracking.status}</div>
-                      )}
-                    </>
-                  ) : certificate.renewal === "manual" ? (
-                    <span className="badge warn">{t("manual")}</span>
-                  ) : (
-                    unknown
-                  )}
-                </td>
-                <td>
-                  {certificate.managed ? (
-                    <>
-                      <span className="badge ok">{t("panel")}</span>
-                      {certificate.deployed_at && (
-                        <div className="source">
-                          <Time value={certificate.deployed_at} /> · {certificate.deployed_by}
-                        </div>
-                      )}
-                    </>
-                  ) : certificate.source === "certmonger" ? (
-                    <span className="badge">certmonger</span>
-                  ) : (
-                    <span className="badge">{t("outside the panel")}</span>
-                  )}
-                </td>
-                <td>
-                  {!certificate.key ? (
-                    <span className="source">—</span>
-                  ) : certificate.key.reason ? (
-                    <span className="badge unknown">{certificate.key.reason}</span>
-                  ) : !certificate.key.exists ? (
-                    <span className="badge error">{t("missing")}</span>
-                  ) : certificate.key.world_readable ? (
-                    <span className="badge error">{t("mode {mode}, world-readable", { mode: certificate.key.mode ?? "" })}</span>
-                  ) : (
-                    <span className="source">
-                      {certificate.key.mode} {certificate.key.owner}
-                    </span>
-                  )}
-                  {certificate.key_secret && (
-                    <div className="source">{t("secret")} {certificate.key_secret}</div>
-                  )}
-                </td>
-                <td>
-                  <div className="operations">
-                    <button
-                      className="secondary"
-                      disabled={certificate.renewal !== "tracked" || !certificate.tracking?.request}
-                      onClick={() =>
-                        setIntent({
-                          action: "certificate.renew",
-                          label: t("Renew certificate"),
-                          description:
-                            t("certmonger on {host} is asked to reissue request {request} for {path}", {
-                              host: host.hostname, request: certificate.tracking?.request ?? "", path: certificate.path,
-                            }) +
-                            (certificate.reload_unit ? `, ${t("then {unit} is reloaded", { unit: certificate.reload_unit })}` : "") +
-                            ".",
-                          payload: {
-                            certificate: {
-                              request: certificate.tracking?.request ?? "",
-                              path: certificate.path,
-                              reload_unit: certificate.reload_unit ?? "",
-                              probe_target: certificate.probe_target ?? "",
-                            },
-                          },
-                        })
-                      }
-                    >
-                      {t("Renew")}
-                    </button>
-                    {certificate.watched && (
-                      <button className="secondary" onClick={() => forget.mutate(certificate.path)}>
-                        {t("Stop watching")}
-                      </button>
-                    )}
-                  </div>
-                </td>
+      <Section title={t("Certificates")} count={list.length} flush>
+        {!list.length ? (
+          <Empty>
+            {t("No certificate is watched on this host yet. Add a path, or scan the host if certmonger tracks something here.")}
+          </Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <th>{t("Path")}</th><th>{t("Subject")}</th><th>{t("Expires")}</th><th>{t("Renewal")}</th>
+                <th>{t("Source")}</th><th>{t("Key")}</th><th>{t("Actions")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {list.map((certificate) => (
+                <tr key={certificate.path} className={selected === certificate.path ? "selected" : undefined}>
+                  <td>
+                    <button
+                      type="button"
+                      className="hm-link hm-mono"
+                      onClick={() => setSelected(selected === certificate.path ? "" : certificate.path)}
+                    >
+                      {certificate.path}
+                    </button>
+                    {certificate.owner_service && (
+                      <div className="source">{certificate.owner_service}</div>
+                    )}
+                  </td>
+                  <td>
+                    {certificate.unavailable_reason ? (
+                      <span className="badge unknown">{certificate.unavailable_reason}</span>
+                    ) : (
+                      <>
+                        {certificate.subject}
+                        {certificate.sans?.length ? (
+                          <div className="source">{certificate.sans.join(", ")}</div>
+                        ) : null}
+                      </>
+                    )}
+                  </td>
+                  <td>
+                    <StatusBadge status={certificate.status} days={certificate.days_to_expiry} />
+                    {certificate.not_after && (
+                      <div className="source"><Time value={certificate.not_after} /></div>
+                    )}
+                  </td>
+                  <td>
+                    {/* "Manual" is a finding: the daemon answered that it does
+                        not watch this file. "Unknown" is a missing answer. */}
+                    {certificate.renewal === "tracked" ? (
+                      <>
+                        <span className="badge ok">certmonger</span>
+                        {certificate.tracking?.status && (
+                          <div className="source">{certificate.tracking.status}</div>
+                        )}
+                      </>
+                    ) : certificate.renewal === "manual" ? (
+                      <span className="badge warn">{t("manual")}</span>
+                    ) : (
+                      unknown
+                    )}
+                  </td>
+                  <td>
+                    {certificate.managed ? (
+                      <>
+                        <span className="badge ok">{t("panel")}</span>
+                        {certificate.deployed_at && (
+                          <div className="source">
+                            <Time value={certificate.deployed_at} /> · {certificate.deployed_by}
+                          </div>
+                        )}
+                      </>
+                    ) : certificate.source === "certmonger" ? (
+                      <span className="badge">certmonger</span>
+                    ) : (
+                      <span className="badge">{t("outside the panel")}</span>
+                    )}
+                  </td>
+                  <td>
+                    {!certificate.key ? (
+                      <span className="source">—</span>
+                    ) : certificate.key.reason ? (
+                      <span className="badge unknown">{certificate.key.reason}</span>
+                    ) : !certificate.key.exists ? (
+                      <span className="badge error">{t("missing")}</span>
+                    ) : certificate.key.world_readable ? (
+                      <span className="badge error">{t("mode {mode}, world-readable", { mode: certificate.key.mode ?? "" })}</span>
+                    ) : (
+                      <span className="source hm-mono">
+                        {certificate.key.mode} {certificate.key.owner}
+                      </span>
+                    )}
+                    {certificate.key_secret && (
+                      <div className="source">{t("secret")} {certificate.key_secret}</div>
+                    )}
+                  </td>
+                  <td>
+                    <div className="operations">
+                      <button
+                        className="secondary"
+                        disabled={certificate.renewal !== "tracked" || !certificate.tracking?.request}
+                        onClick={() =>
+                          setIntent({
+                            action: "certificate.renew",
+                            label: t("Renew certificate"),
+                            description:
+                              t("certmonger on {host} is asked to reissue request {request} for {path}", {
+                                host: host.hostname, request: certificate.tracking?.request ?? "", path: certificate.path,
+                              }) +
+                              (certificate.reload_unit ? `, ${t("then {unit} is reloaded", { unit: certificate.reload_unit })}` : "") +
+                              ".",
+                            payload: {
+                              certificate: {
+                                request: certificate.tracking?.request ?? "",
+                                path: certificate.path,
+                                reload_unit: certificate.reload_unit ?? "",
+                                probe_target: certificate.probe_target ?? "",
+                              },
+                            },
+                          })
+                        }
+                      >
+                        {t("Renew")}
+                      </button>
+                      {certificate.watched && (
+                        <button className="secondary" onClick={() => forget.mutate(certificate.path)}>
+                          {t("Stop watching")}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
       {selected && <Details hostID={host.id} certificate={list.find((c) => c.path === selected)} />}
 
       {data?.missing && Object.keys(data.missing).length > 0 && (
-        <>
-          <h2>{t("Not established")}</h2>
-          <p className="subtitle">
-            {t("Facts the host could not collect. Each one is an answer of \"not known\", not a value of zero.")}
-          </p>
-          <table>
+        <Section
+          title={t("Not established")}
+          count={Object.keys(data.missing).length}
+          description={t("Facts the host could not collect. Each one is an answer of \"not known\", not a value of zero.")}
+          flush
+        >
+          <Table>
             <thead><tr><th>{t("Fact")}</th><th>{t("Reason")}</th></tr></thead>
             <tbody>
               {Object.entries(data.missing).map(([fact, reason]) => (
-                <tr key={fact}><td>{fact}</td><td className="source">{reason}</td></tr>
+                <tr key={fact}><td className="hm-mono">{fact}</td><td className="source">{reason}</td></tr>
               ))}
             </tbody>
-          </table>
-        </>
+          </Table>
+        </Section>
       )}
-
-      <ModuleFreshness fragment={module.data} />
 
       {intent && (
         <TargetConfirmation
@@ -411,7 +434,7 @@ export function Certificates() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -431,79 +454,71 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
 
   return (
     <>
-      <h2>{certificate.path}</h2>
-      <table>
-        <tbody>
-          <tr><td>{t("Issuer")}</td><td>{certificate.issuer || unknown}</td></tr>
-          <tr><td>{t("Serial")}</td><td className="source">{certificate.serial || "—"}</td></tr>
-          <tr>
-            <td>{t("Fingerprint")}</td>
-            <td className="source">{certificate.fingerprint_sha256 || "—"}</td>
-          </tr>
-          <tr>
-            <td>{t("Key")}</td>
-            <td>
-              {certificate.key_algorithm
-                ? `${certificate.key_algorithm} ${certificate.key_bits}`
-                : unknown}
-            </td>
-          </tr>
-          <tr>
-            <td>{t("Chain")}</td>
-            <td>
-              {/* A bare leaf without the chain is the most common reason a
-                  client rejects the connection despite a valid certificate. */}
-              {certificate.chain_length
-                ? certificate.chain_length === 1
-                  ? t("leaf only — clients that need the issuer will reject it")
-                  : t("{n} certificates", { n: certificate.chain_length })
-                : unknown}
-            </td>
-          </tr>
-          <tr><td>{t("Valid from")}</td><td><Time value={certificate.not_before} /></td></tr>
-          <tr><td>{t("Valid until")}</td><td><Time value={certificate.not_after} /></td></tr>
+      <Section title={<span className="hm-mono">{certificate.path}</span>} flush>
+        <Facts>
+          <Fact label={t("Issuer")}>{certificate.issuer || unknown}</Fact>
+          <Fact label={t("Serial")}><span className="hm-mono">{certificate.serial || "—"}</span></Fact>
+          <Fact label={t("Key")}>
+            {certificate.key_algorithm
+              ? `${certificate.key_algorithm} ${certificate.key_bits}`
+              : unknown}
+          </Fact>
+          <Fact label={t("Chain")}>
+            {/* A bare leaf without the chain is the most common reason a
+                client rejects the connection despite a valid certificate. */}
+            {certificate.chain_length
+              ? certificate.chain_length === 1
+                ? t("leaf only — clients that need the issuer will reject it")
+                : t("{n} certificates", { n: certificate.chain_length })
+              : unknown}
+          </Fact>
+          <Fact label={t("Valid from")}><Time value={certificate.not_before} /></Fact>
+          <Fact label={t("Valid until")}><Time value={certificate.not_after} /></Fact>
+          <Fact label={t("Fingerprint")} wide>
+            <span className="hm-mono">{certificate.fingerprint_sha256 || "—"}</span>
+          </Fact>
           {certificate.tracking?.request && (
-            <tr>
-              <td>certmonger</td>
-              <td className="source">
+            <Fact label="certmonger" wide>
+              <span className="source">
                 {t("request")} {certificate.tracking.request} · CA {certificate.tracking.ca} ·{" "}
                 {t("auto-renew")} {certificate.tracking.auto_renew ? t("yes") : t("no")}
-              </td>
-            </tr>
+              </span>
+            </Fact>
           )}
-        </tbody>
-      </table>
+        </Facts>
+      </Section>
 
-      <h2>{t("Deployments from the panel")}</h2>
-      {!(history.data?.items ?? []).length ? (
-        <Empty>{t("The panel has never deployed this file.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Fingerprint")}</th><th>{t("Expires")}</th><th>{t("Key")}</th><th>{t("Deployed")}</th><th>{t("By")}</th></tr>
-          </thead>
-          <tbody>
-            {(history.data?.items ?? []).map((deployment) => (
-              <tr key={`${deployment.fingerprint_sha256}-${deployment.deployed_at}`}>
-                <td className="source">
-                  {deployment.fingerprint_sha256.slice(0, 16)}
-                  {deployment.fingerprint_sha256 === certificate.fingerprint_sha256 && (
-                    <span className="badge"> {t("on host")}</span>
-                  )}
-                </td>
-                <td><Time value={deployment.not_after} /></td>
-                <td className="source">
-                  {deployment.key_secret
-                    ? `${deployment.key_secret}@v${deployment.key_secret_version}`
-                    : "—"}
-                </td>
-                <td><Time value={deployment.deployed_at} /></td>
-                <td>{deployment.deployed_by}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Section title={t("Deployments from the panel")} count={(history.data?.items ?? []).length} flush>
+        {!(history.data?.items ?? []).length ? (
+          <Empty>{t("The panel has never deployed this file.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Fingerprint")}</th><th>{t("Expires")}</th><th>{t("Key")}</th><th>{t("Deployed")}</th><th>{t("By")}</th></tr>
+            </thead>
+            <tbody>
+              {(history.data?.items ?? []).map((deployment) => (
+                <tr key={`${deployment.fingerprint_sha256}-${deployment.deployed_at}`}>
+                  <td className="hm-mono">
+                    {deployment.fingerprint_sha256.slice(0, 16)}
+                    {deployment.fingerprint_sha256 === certificate.fingerprint_sha256 && (
+                      <span className="badge"> {t("on host")}</span>
+                    )}
+                  </td>
+                  <td><Time value={deployment.not_after} /></td>
+                  <td className="source hm-mono">
+                    {deployment.key_secret
+                      ? `${deployment.key_secret}@v${deployment.key_secret_version}`
+                      : "—"}
+                  </td>
+                  <td><Time value={deployment.deployed_at} /></td>
+                  <td>{deployment.deployed_by}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
     </>
   );
 }
@@ -519,39 +534,48 @@ function WatchForm({ onSave }: { onSave: (body: Record<string, unknown>) => void
   const [service, setService] = useState("");
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Watch a path")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("This changes what the panel looks at, not the host. The service that reads the file and the address where the result is visible are yours to fill in — the panel does not guess them from a directory name.")}
-      </p>
-      <div className="filters">
-        <input value={path} onChange={(e) => setPath(e.target.value)}
-          placeholder="/etc/pki/tls/certs/service.crt" style={{ minWidth: 300 }} />
-        <input value={keyPath} onChange={(e) => setKeyPath(e.target.value)}
-          placeholder="/etc/pki/tls/private/service.key" style={{ minWidth: 300 }} />
-      </div>
-      <div className="filters">
-        <input value={secret} onChange={(e) => setSecret(e.target.value)}
-          placeholder={t("Key secret (name only)")} style={{ minWidth: 200 }} />
-        <input value={unit} onChange={(e) => setUnit(e.target.value)}
-          placeholder={t("Reload unit (httpd.service)")} style={{ minWidth: 200 }} />
-        <input value={probe} onChange={(e) => setProbe(e.target.value)}
-          placeholder={t("Probe target (host:443)")} style={{ minWidth: 180 }} />
-        <input value={service} onChange={(e) => setService(e.target.value)}
-          placeholder={t("Owner service")} style={{ minWidth: 160 }} />
-      </div>
-      <button
-        disabled={!path}
-        onClick={() =>
-          onSave({
-            path, key_path: keyPath, key_secret: secret,
-            reload_unit: unit, probe_target: probe, service,
-          })
-        }
-      >
-        {t("Watch")}
-      </button>
-    </div>
+    <Section
+      title={t("Watch a path")}
+      description={t("This changes what the panel looks at, not the host. The service that reads the file and the address where the result is visible are yours to fill in — the panel does not guess them from a directory name.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Path")}>
+            <input value={path} onChange={(e) => setPath(e.target.value)}
+              placeholder="/etc/pki/tls/certs/service.crt" />
+          </Field>
+          <Field label={t("Key")}>
+            <input value={keyPath} onChange={(e) => setKeyPath(e.target.value)}
+              placeholder="/etc/pki/tls/private/service.key" />
+          </Field>
+          <Field label={t("Key secret (name only)")}>
+            <input value={secret} onChange={(e) => setSecret(e.target.value)} />
+          </Field>
+          <Field label={t("Reload unit (httpd.service)")}>
+            <input value={unit} onChange={(e) => setUnit(e.target.value)} />
+          </Field>
+          <Field label={t("Probe target (host:443)")}>
+            <input value={probe} onChange={(e) => setProbe(e.target.value)} />
+          </Field>
+          <Field label={t("Owner service")}>
+            <input value={service} onChange={(e) => setService(e.target.value)} />
+          </Field>
+        </Fields>
+        <FormActions>
+          <button
+            disabled={!path}
+            onClick={() =>
+              onSave({
+                path, key_path: keyPath, key_secret: secret,
+                reload_unit: unit, probe_target: probe, service,
+              })
+            }
+          >
+            {t("Watch")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }
 
@@ -569,60 +593,66 @@ function DeployForm({
   const chosen = targets.find((target) => target.path === path);
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Deploy a certificate")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("Paste the certificate with its chain, leaf first. The private key is not pasted here and never travels in the job: the host fetches it from the secret named on the watched path, once, while it runs the operation.")}
-      </p>
-      <label>
-        {t("Watched path")}
-        <select value={path} onChange={(e) => setPath(e.target.value)}>
-          {targets.length === 0 && <option value="">{t("no watched path on this host")}</option>}
-          {targets.map((target) => (
-            <option key={target.id} value={target.path}>{target.path}</option>
-          ))}
-        </select>
-      </label>
-      {chosen && (
-        <p className="source" style={{ margin: 0 }}>
-          {t("Key")}: {chosen.key_path || t("not set")}
-          {chosen.key_secret ? ` ${t("from secret {secret}", { secret: chosen.key_secret })}` : ` — ${t("no secret set, the key stays as it is")}`} ·{" "}
-          {t("reload")} {chosen.reload_unit || t("nothing")} ·{" "}
-          {t("probe")} {chosen.probe_target || t("none")}
-        </p>
-      )}
-      <label>
-        {t("Certificate (PEM, leaf first)")}
-        <textarea rows={10} value={content} onChange={(e) => setContent(e.target.value)}
-          placeholder="-----BEGIN CERTIFICATE-----" />
-      </label>
-      <button
-        disabled={!path || !content.includes("BEGIN CERTIFICATE")}
-        onClick={() =>
-          onIntent({
-            action: "certificate.deploy",
-            label: t("Deploy certificate"),
-            description:
-              t("{path} on {host} is replaced", { path, host: hostname }) +
-              (chosen?.key_secret ? `, ${t("with the key from secret {secret}", { secret: chosen.key_secret })}` : "") +
-              (chosen?.reload_unit ? `, ${t("then {unit} is reloaded", { unit: chosen.reload_unit })}` : "") +
-              (chosen?.probe_target ? ` ${t("and {target} is checked", { target: chosen.probe_target })}` : "") +
-              `. ${t("The host verifies key and chain before the swap and rolls back if the service does not come back with the new certificate.")}`,
-            payload: {
-              certificate: {
-                path,
-                key_path: chosen?.key_path ?? "",
-                certificate: content,
-                reload_unit: chosen?.reload_unit ?? "",
-                probe_target: chosen?.probe_target ?? "",
-                ...(chosen?.key_secret ? { key_secret: { name: chosen.key_secret } } : {}),
-              },
-            },
-          })
-        }
-      >
-        {t("Deploy")}
-      </button>
-    </div>
+    <Section
+      title={t("Deploy a certificate")}
+      description={t("Paste the certificate with its chain, leaf first. The private key is not pasted here and never travels in the job: the host fetches it from the secret named on the watched path, once, while it runs the operation.")}
+    >
+      <Form>
+        <Fields>
+          <Field
+            label={t("Watched path")}
+            wide
+            help={chosen && (
+              <>
+                {t("Key")}: {chosen.key_path || t("not set")}
+                {chosen.key_secret ? ` ${t("from secret {secret}", { secret: chosen.key_secret })}` : ` — ${t("no secret set, the key stays as it is")}`} ·{" "}
+                {t("reload")} {chosen.reload_unit || t("nothing")} ·{" "}
+                {t("probe")} {chosen.probe_target || t("none")}
+              </>
+            )}
+          >
+            <select value={path} onChange={(e) => setPath(e.target.value)}>
+              {targets.length === 0 && <option value="">{t("no watched path on this host")}</option>}
+              {targets.map((target) => (
+                <option key={target.id} value={target.path}>{target.path}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t("Certificate (PEM, leaf first)")} wide>
+            <textarea rows={10} value={content} onChange={(e) => setContent(e.target.value)}
+              placeholder="-----BEGIN CERTIFICATE-----" />
+          </Field>
+        </Fields>
+        <FormActions>
+          <button
+            disabled={!path || !content.includes("BEGIN CERTIFICATE")}
+            onClick={() =>
+              onIntent({
+                action: "certificate.deploy",
+                label: t("Deploy certificate"),
+                description:
+                  t("{path} on {host} is replaced", { path, host: hostname }) +
+                  (chosen?.key_secret ? `, ${t("with the key from secret {secret}", { secret: chosen.key_secret })}` : "") +
+                  (chosen?.reload_unit ? `, ${t("then {unit} is reloaded", { unit: chosen.reload_unit })}` : "") +
+                  (chosen?.probe_target ? ` ${t("and {target} is checked", { target: chosen.probe_target })}` : "") +
+                  `. ${t("The host verifies key and chain before the swap and rolls back if the service does not come back with the new certificate.")}`,
+                payload: {
+                  certificate: {
+                    path,
+                    key_path: chosen?.key_path ?? "",
+                    certificate: content,
+                    reload_unit: chosen?.reload_unit ?? "",
+                    probe_target: chosen?.probe_target ?? "",
+                    ...(chosen?.key_secret ? { key_secret: { name: chosen.key_secret } } : {}),
+                  },
+                },
+              })
+            }
+          >
+            {t("Deploy")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }

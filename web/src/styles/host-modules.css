@@ -1,0 +1,355 @@
+/*
+ * The host module pages.
+ *
+ * Every module follows one pattern: a header with the module title, one
+ * line on what the module shows and its primary actions; a freshness line;
+ * then titled sections. A section is a raised panel holding one thing - a
+ * table, a fact grid or a form - so that the eye can tell where one topic
+ * ends and the next begins without reading the headings.
+ *
+ * Everything here uses the theme tokens only; the classes carry the hm-
+ * prefix so they cannot collide with the shell's own.
+ */
+
+/* ---------------------------------------------------------------------- */
+/* The page and its header.                                                */
+/* ---------------------------------------------------------------------- */
+.hm-page { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+.hm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.hm-header-text { flex: 1 1 320px; min-width: 0; }
+.hm-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.hm-lede { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
+/* The primary actions of the module sit on the right of the header, so the
+   operator finds "read", "add" and "plan" in the same place on every page. */
+.hm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
+
+/* Where the data comes from and how fresh it is. One quiet line: it is read
+   when the operator doubts the picture, not every time. */
+.hm-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.hm-freshness .hm-mono { color: var(--text-muted); }
+.hm-freshness .unread { color: var(--warn-text); }
+
+/* The result of a request: one sentence with the job id, or the error. It
+   stays visible until the next request replaces it. */
+.hm-message {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.hm-message.error { border-left-color: var(--error); color: var(--error-text); }
+
+/* ---------------------------------------------------------------------- */
+/* Summary tiles: the numbers that decide whether to read further.         */
+/* ---------------------------------------------------------------------- */
+.hm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.hm-stat {
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.hm-stat-label { display: block; color: var(--text-muted); font-size: 12px; }
+.hm-stat-value {
+  display: block;
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+/* A tile may show a badge instead of a number: unknown is not zero. */
+.hm-stat-value .badge { font-size: 12px; vertical-align: middle; }
+.hm-stat-hint { display: block; margin-top: 3px; color: var(--text-faint); font-size: 11px; overflow-wrap: anywhere; }
+.hm-stat.ok .hm-stat-value { color: var(--ok-text); }
+.hm-stat.warn .hm-stat-value { color: var(--warn-text); }
+.hm-stat.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.hm-stat.error .hm-stat-value { color: var(--error-text); }
+.hm-stat.error { border-color: color-mix(in srgb, var(--error) 45%, var(--border)); }
+.hm-stat.unknown .hm-stat-value { color: var(--unknown-text); }
+
+/* ---------------------------------------------------------------------- */
+/* Sections.                                                               */
+/* ---------------------------------------------------------------------- */
+.hm-section {
+  min-width: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.hm-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.hm-section-head h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+/* The count beside a title: how many rows the section holds, read before
+   the section is. */
+.hm-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+/* The tools of a section (a filter, a toggle, a secondary action) keep to
+   the right of its title. */
+.hm-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+.hm-tools input, .hm-tools select { padding: 4px 9px; font-size: 13px; }
+.hm-tools .toggle { margin: 0; }
+.hm-section-desc {
+  margin: 0;
+  padding: 10px 16px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  max-width: 80ch;
+}
+.hm-section-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
+.hm-section-body > pre { margin: 0; }
+/* Anything the section places without the body wrapper keeps the same
+   inset: warnings, empty states and footers align with the title. */
+.hm-section > .warning { margin: 12px 16px; }
+.hm-section > .warning + .warning { margin-top: 0; }
+.hm-section > .empty { padding: 20px 16px; margin: 0; }
+.hm-section > .source { padding: 10px 16px; margin: 0; }
+.hm-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 9px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.hm-table + .hm-foot, .hm-section-body + .hm-foot { border-top-color: var(--border); }
+/* A form under a table in the same section: the rule keeps them apart. */
+.hm-table + .hm-section-body, .empty + .hm-section-body, .hm-facts + .hm-section-body,
+.hm-section-body + .hm-table, .hm-section-body + .empty, .hm-section-body + .hm-facts { border-top: 1px solid var(--border); }
+/* Buttons in the section chrome are compact; the page's primary actions in
+   the header keep the full size. */
+.hm-section-head button, .hm-foot button, .hm-message button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+/* Several groups in one section (the remediation plans): each has its own
+   head, and a rule separates it from the previous group's table. */
+.hm-plan + .hm-plan { border-top: 1px solid var(--border); }
+/* The sub-tabs of a section (the container views) sit right under its head. */
+.hm-section > .tabs { margin: 0; padding: 0 8px; }
+
+/* ---------------------------------------------------------------------- */
+/* Tables.                                                                 */
+/* ---------------------------------------------------------------------- */
+/* The wrapper scrolls sideways on a narrow screen; the page never does. */
+.hm-table { overflow-x: auto; min-width: 0; }
+.hm-table table { width: 100%; }
+.hm-table th {
+  padding: 9px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-strong);
+  background: transparent;
+}
+.hm-table th:first-child, .hm-table td:first-child { padding-left: 16px; }
+.hm-table th:last-child, .hm-table td:last-child { padding-right: 16px; }
+.hm-table td { padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.hm-table tbody tr:last-child td { border-bottom: none; }
+.hm-table tbody tr:hover { background: var(--bg-hover); }
+/* A key/value table: keys as a quiet column on the left, no header row. */
+.hm-table.keyed th {
+  width: 220px;
+  padding: 8px 14px 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: normal;
+  vertical-align: top;
+}
+.hm-table.keyed tbody tr:last-child th { border-bottom: none; }
+.hm-table.keyed tbody tr:hover { background: transparent; }
+/* Numbers are read down a column, so they are right-aligned and equal-width. */
+.hm-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+th.hm-num { text-align: right; }
+/* Names, identifiers and paths are read character by character. */
+.hm-mono { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+td.hm-mono { white-space: nowrap; }
+/* The primary text of a cell, above its source line. */
+.hm-primary { font-weight: 500; }
+/* A cell that is a strip of small buttons; the table keeps its row height. */
+.hm-table .operations { flex-wrap: nowrap; }
+.hm-table .operations button, .hm-table td > button {
+  padding: 2px 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.hm-table .operations input { padding: 2px 8px; font-size: 12px; }
+/* A cut-off text that reveals the whole on hover. */
+.hm-clip { display: inline-block; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* A row the operator opened: the details below belong to it. */
+.hm-table tr.selected td { background: var(--accent-soft); }
+.hm-table tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* A row of the topology one level in: a partition under its disk. */
+.hm-table td.hm-indent { padding-left: 34px; }
+
+/* ---------------------------------------------------------------------- */
+/* Facts: label over value, in as many columns as the width allows.        */
+/* ---------------------------------------------------------------------- */
+.hm-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px 24px;
+  margin: 0;
+  padding: 14px 16px;
+}
+/* Facts inside a padded body (after a form) bring no inset of their own. */
+.hm-section-body > .hm-facts { padding: 0; }
+.hm-fact { min-width: 0; }
+.hm-fact dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.hm-fact dd { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+/* A long value (a command line, a fingerprint) takes the whole row. */
+.hm-fact.wide { grid-column: 1 / -1; }
+
+/* ---------------------------------------------------------------------- */
+/* Forms: labelled fields in a grid, help under the field, one primary      */
+/* button at the end.                                                      */
+/* ---------------------------------------------------------------------- */
+.hm-form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.hm-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px 16px;
+}
+.hm-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hm-field-label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.hm-field-label code { font-size: 12px; }
+.hm-field input, .hm-field select, .hm-field textarea { width: 100%; }
+.hm-field textarea { font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+.hm-field-help { font-size: 11px; color: var(--text-faint); }
+.hm-field.wide { grid-column: 1 / -1; }
+.hm-field.narrow { max-width: 180px; }
+/* A checkbox with its sentence: the box aligns with the first line. */
+.hm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.hm-check input { margin-top: 3px; flex: none; }
+.hm-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hm-form-actions .source { margin: 0; }
+.hm-form-note { margin: 0; font-size: 12px; color: var(--text-faint); max-width: 80ch; }
+/* A group of buttons that pick one value (an event kind, a filter). */
+.hm-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.hm-choices button { padding: 3px 10px; font-size: 12px; }
+
+/* A destructive action in a row: red at rest, so it is never clicked in
+   passing among the ordinary buttons. The full red button stays for the
+   confirmation step. */
+button.hm-danger, .operations button.hm-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--error) 50%, var(--border-strong));
+  color: var(--error-text);
+}
+button.hm-danger:hover:not(:disabled), .operations button.hm-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  border-color: var(--error);
+  color: var(--error-text);
+}
+/* A link-styled button inside a cell: opens details below the table. */
+button.hm-link, .hm-table td > button.hm-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent-text);
+  cursor: pointer;
+  text-align: left;
+}
+button.hm-link:where(:hover:not(:disabled)) { background: none; text-decoration: underline; }
+
+/* A difference preview: an added line in the ok colour, a removed one in
+   the error colour, the rest as the text. */
+.hm-diff { max-height: 420px; overflow: auto; }
+.hm-diff .add { color: var(--ok-text); }
+.hm-diff .del { color: var(--error-text); }
+
+/* A log output block. */
+.hm-log { max-height: 520px; overflow: auto; }
+
+/* The sparkline takes the text colour of its cell. */
+.hm-spark { display: block; color: var(--accent-text); }
+
+/* Two sections side by side where both are short; one column when narrow. */
+.hm-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; align-items: start; }
+
+@media (max-width: 600px) {
+  .hm-title { font-size: 18px; }
+  .hm-actions { width: 100%; }
+  .hm-actions button { flex: 1 1 auto; }
+  .hm-table.keyed th { width: 130px; }
+  .hm-columns { grid-template-columns: minmax(0, 1fr); }
+}

@@ -4,7 +4,10 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
+  Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -77,12 +80,17 @@ export function Kernel() {
   const modules = (snapshot?.modules ?? []).filter((entry) =>
     filter ? entry.name.toLowerCase().includes(filter.toLowerCase()) : true,
   );
+  const settings = snapshot?.settings ?? [];
+  const pendingSettings = settings.filter((setting) => setting.desired && setting.desired !== setting.current).length;
 
   return (
-    <>
-      <p className="subtitle">
-        {t("A profile of settings, not all of /proc/sys — there are thousands of keys there and most answer no question anyone asks. Anything the panel wrote is listed too, with the value the kernel currently applies.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Kernel")}
+        description={t("A profile of settings, not all of /proc/sys — there are thousands of keys there and most answer no question anyone asks. Anything the panel wrote is listed too, with the value the kernel currently applies.")}
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -90,108 +98,128 @@ export function Kernel() {
         </p>
       )}
 
-      <table>
-        <tbody>
-          <tr><th>{t("Kernel")}</th><td>{snapshot?.release || "—"}</td></tr>
+      <Stats>
+        <Stat label={t("Settings")} value={settings.length} hint={pendingSettings ? `${pendingSettings} ${t("not applied yet")}` : undefined} tone={pendingSettings ? "warn" : undefined} />
+        <Stat label={t("Modules")} value={(snapshot?.modules ?? []).length} hint={t("{loaded} loaded · {blocked} blocked", { loaded: (snapshot?.modules ?? []).length, blocked: (snapshot?.blacklist ?? []).length })} />
+      </Stats>
+
+      <Section title={t("Kernel")} flush>
+        <Facts>
+          <Fact label={t("Kernel")}><span className="hm-mono">{snapshot?.release || "—"}</span></Fact>
+          <Fact label={t("Managed file")}><span className="hm-mono">{snapshot?.managed_path}</span></Fact>
           {/* Some settings can only be changed on the kernel command line
               and only after a reboot - that is why it is visible. */}
-          <tr><th>{t("Command line")}</th><td className="source">{snapshot?.command_line || "—"}</td></tr>
-          <tr><th>{t("Managed file")}</th><td>{snapshot?.managed_path}</td></tr>
-        </tbody>
-      </table>
+          <Fact label={t("Command line")} wide><span className="source hm-mono">{snapshot?.command_line || "—"}</span></Fact>
+        </Facts>
+      </Section>
 
-      <h2>{t("Settings")}</h2>
-      <table>
-        <thead>
-          <tr><th>{t("Key")}</th><th>{t("Current")}</th><th>{t("Desired")}</th><th>{t("Owner")}</th></tr>
-        </thead>
-        <tbody>
-          {(snapshot?.settings ?? []).map((setting) => (
-            <tr key={setting.key}>
-              <td>{setting.key}</td>
-              <td>{setting.current ?? <span className="badge unknown">{t("unknown")}</span>}</td>
-              {/* Differing values mark a setting that waits for a reboot or
-                  was changed outside the panel. */}
-              <td>
-                {setting.desired ?? "—"}
-                {setting.desired && setting.desired !== setting.current && (
-                  <span className="badge unknown"> {t("not applied yet")}</span>
-                )}
-              </td>
-              <td>{setting.managed ? "Flotestro" : t("kernel default or host admin")}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Section title={t("Settings")} count={settings.length} flush>
+        <Table>
+          <thead>
+            <tr><th>{t("Key")}</th><th>{t("Current")}</th><th>{t("Desired")}</th><th>{t("Owner")}</th></tr>
+          </thead>
+          <tbody>
+            {settings.map((setting) => (
+              <tr key={setting.key}>
+                <td className="hm-mono hm-primary">{setting.key}</td>
+                <td className="hm-mono">{setting.current ?? <span className="badge unknown">{t("unknown")}</span>}</td>
+                {/* Differing values mark a setting that waits for a reboot or
+                    was changed outside the panel. */}
+                <td className="hm-mono">
+                  {setting.desired ?? "—"}
+                  {setting.desired && setting.desired !== setting.current && (
+                    <span className="badge unknown"> {t("not applied yet")}</span>
+                  )}
+                </td>
+                <td>{setting.managed ? "Flotestro" : t("kernel default or host admin")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        <div className="hm-section-body">
+          <Form>
+            <Fields>
+              <Field label={t("Key")}>
+                <input value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("Key, e.g. vm.swappiness")} />
+              </Field>
+              <Field label={t("Value")} narrow>
+                <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("Value")} />
+              </Field>
+            </Fields>
+            <FormActions>
+              <button
+                onClick={() =>
+                  setIntent({
+                    action: "sysctl.ensure",
+                    label: t("Set kernel setting"),
+                    description: t("{key} will be set to {value} on {host}, both now and after reboot. If the kernel does not take it immediately, the result says so.", {
+                      key, value, host: host.hostname,
+                    }),
+                    payload: { kernel: { settings: { [key]: value } } },
+                  })
+                }
+                disabled={!key || !value}
+              >
+                {t("Set")}
+              </button>
+            </FormActions>
+          </Form>
+        </div>
+      </Section>
 
-      <div className="filters">
-        <input value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("Key, e.g. vm.swappiness")} style={{ minWidth: 240 }} />
-        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("Value")} style={{ width: 140 }} />
-        <button
-          onClick={() =>
-            setIntent({
-              action: "sysctl.ensure",
-              label: t("Set kernel setting"),
-              description: t("{key} will be set to {value} on {host}, both now and after reboot. If the kernel does not take it immediately, the result says so.", {
-                key, value, host: host.hostname,
-              }),
-              payload: { kernel: { settings: { [key]: value } } },
-            })
-          }
-          disabled={!key || !value}
-        >
-          {t("Set")}
-        </button>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+      <Section
+        title={t("Modules")}
+        count={modules.length}
+        tools={
+          <>
+            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter modules")} />
+            <span className="source">
+              {t("{loaded} loaded · {blocked} blocked", { loaded: (snapshot?.modules ?? []).length, blocked: (snapshot?.blacklist ?? []).length })}
+            </span>
+          </>
+        }
+        flush
+      >
+        <Table>
+          <thead>
+            <tr><th>{t("Module")}</th><th className="hm-num">{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
+          </thead>
+          <tbody>
+            {modules.slice(0, 60).map((entry) => (
+              <tr key={entry.name}>
+                <td className="hm-mono hm-primary">{entry.name}</td>
+                <td className="hm-num">{bytes(entry.size_bytes)}</td>
+                <td className="hm-mono">{(entry.used_by ?? []).join(", ") || "—"}</td>
+                <td>{entry.blacklisted ? <span className="badge warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
+                <td>
+                  <button
+                    className={entry.blacklisted ? "secondary" : "hm-danger"}
+                    onClick={() =>
+                      setIntent({
+                        action: "kernel.module.blacklist",
+                        label: entry.blacklisted ? t("Unblock module") : t("Block module"),
+                        description: entry.blacklisted
+                          ? t("{module} will be allowed to load again.", { module: entry.name })
+                          : t("{module} will be blocked from loading. A module already loaded stays loaded until reboot, and one pulled in by the initramfs needs that rebuilt too.", { module: entry.name }),
+                        payload: { kernel: { module: entry.name, blacklist: !entry.blacklisted } },
+                      })
+                    }
+                  >
+                    {entry.blacklisted ? t("Unblock") : t("Block")}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {modules.length > 60 && (
+          <Foot><span>{t("Showing 60 of {n} modules; narrow the filter to see the rest.", { n: modules.length })}</span></Foot>
+        )}
+      </Section>
 
-      <h2>{t("Modules")}</h2>
-      <div className="filters">
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter modules")} />
-        <span className="source">
-          {t("{loaded} loaded · {blocked} blocked", { loaded: (snapshot?.modules ?? []).length, blocked: (snapshot?.blacklist ?? []).length })}
-        </span>
-      </div>
-      <table>
-        <thead>
-          <tr><th>{t("Module")}</th><th>{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
-        </thead>
-        <tbody>
-          {modules.slice(0, 60).map((entry) => (
-            <tr key={entry.name}>
-              <td>{entry.name}</td>
-              <td>{bytes(entry.size_bytes)}</td>
-              <td>{(entry.used_by ?? []).join(", ") || "—"}</td>
-              <td>{entry.blacklisted ? t("blocked by Flotestro") : t("loaded")}</td>
-              <td>
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    setIntent({
-                      action: "kernel.module.blacklist",
-                      label: entry.blacklisted ? t("Unblock module") : t("Block module"),
-                      description: entry.blacklisted
-                        ? t("{module} will be allowed to load again.", { module: entry.name })
-                        : t("{module} will be blocked from loading. A module already loaded stays loaded until reboot, and one pulled in by the initramfs needs that rebuilt too.", { module: entry.name }),
-                      payload: { kernel: { module: entry.name, blacklist: !entry.blacklisted } },
-                    })
-                  }
-                >
-                  {entry.blacklisted ? t("Unblock") : t("Block")}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {modules.length > 60 && (
-        <p className="source">{t("Showing 60 of {n} modules; narrow the filter to see the rest.", { n: modules.length })}</p>
-      )}
-
-      <ModuleFreshness fragment={module.data} />
       {snapshot?.observed_at && (
-        <p className="source">
-          {t("Kernel state read")} <Time value={snapshot.observed_at} />
+        <p className="hm-freshness">
+          <span>{t("Kernel state read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
 
@@ -207,6 +235,6 @@ export function Kernel() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }

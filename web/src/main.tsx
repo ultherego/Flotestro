@@ -6,6 +6,7 @@ import { App } from "./App";
 import { ApiError } from "./lib/api";
 import { I18nProvider } from "./i18n";
 import "./styles.css";
+import "./styles/host-modules.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

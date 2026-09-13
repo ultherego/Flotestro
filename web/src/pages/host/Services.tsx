@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat, Stats, Table, Unknown, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -64,59 +66,73 @@ export function Services() {
     });
   }
 
-  const units = (listing.data?.payload?.units ?? []).filter((unit) => {
+  const allUnits = listing.data?.payload?.units ?? [];
+  const units = allUnits.filter((unit) => {
     if (activeOnly && unit.active_state !== "active") return false;
     if (!filter) return true;
     return unit.name.toLowerCase().includes(filter.toLowerCase());
   });
+  const active = allUnits.filter((unit) => unit.active_state === "active").length;
 
   return (
-    <>
-      <h2>{t("Failed units")}</h2>
-      {/* An unread state must not look like no failed units. */}
-      {!known ? (
-        <Empty>{t("Unit states could not be determined.")}</Empty>
-      ) : failed.length === 0 ? (
-        <Empty>{t("No unit is in a failed state.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("Unit")}</th><th>{t("Actions")}</th></tr></thead>
-          <tbody>
-            {failed.map((unit) => (
-              <tr key={unit}>
-                <td>{unit}</td>
-                <td>
-                  <div className="operations">
-                    <button onClick={() => operation("unit.restart", unit)}>{t("Restart")}</button>
-                    <button onClick={() => operation("unit.start", unit)}>{t("Start")}</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <ModulePage>
+      <ModuleHeader
+        title={t("Services")}
+        description={t("systemd units: what failed, what runs and what starts at boot.")}
+        actions={
+          <button
+            onClick={() => request.mutate({ action: "unit.status", payload: { unit_status: { all: true } } })}
+            disabled={request.isPending || host.connection_state !== "online"}
+          >
+            {request.isPending ? t("Requesting…") : t("Read from host")}
+          </button>
+        }
+      />
       <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
-      <h2>{t("All units")}</h2>
-      <p className="subtitle">
-        {t("The full list is read from the host on request, not on every inventory cycle.")}{" "}
-        <button
-          className="secondary"
-          onClick={() => request.mutate({ action: "unit.status", payload: { unit_status: { all: true } } })}
-          disabled={request.isPending || host.connection_state !== "online"}
-        >
-          {request.isPending ? t("Requesting…") : t("Read from host")}
-        </button>
-      </p>
+      {/* An unread state must not look like no failed units. */}
+      <Stats>
+        <Stat
+          label={t("Failed units")}
+          value={known ? failed.length : <Unknown />}
+          tone={!known ? "unknown" : failed.length > 0 ? "error" : "ok"}
+        />
+        <Stat label={t("Active")} value={listing.data ? active : <Unknown />} />
+        <Stat label={t("All units")} value={listing.data ? allUnits.length : <Unknown />} />
+      </Stats>
 
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+      <Section title={t("Failed units")} count={known ? failed.length : undefined} flush>
+        {!known ? (
+          <Empty>{t("Unit states could not be determined.")}</Empty>
+        ) : failed.length === 0 ? (
+          <Empty>{t("No unit is in a failed state.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th>{t("Unit")}</th><th>{t("Actions")}</th></tr></thead>
+            <tbody>
+              {failed.map((unit) => (
+                <tr key={unit}>
+                  <td className="hm-mono">{unit}</td>
+                  <td>
+                    <div className="operations">
+                      <button onClick={() => operation("unit.restart", unit)}>{t("Restart")}</button>
+                      <button onClick={() => operation("unit.start", unit)}>{t("Start")}</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
 
-      {!listing.data ? (
-        <Empty>{t("This host has not been read yet. Use “Read from host”.")}</Empty>
-      ) : (
-        <>
-          <div className="filters">
+      <Section
+        title={t("All units")}
+        count={listing.data ? units.length : undefined}
+        description={t("The full list is read from the host on request, not on every inventory cycle.")}
+        tools={listing.data && (
+          <>
             <input
               placeholder={t("Filter by name")}
               value={filter}
@@ -130,65 +146,75 @@ export function Services() {
               />
               {t("active only")}
             </label>
-          </div>
-          {/* A cut-off listing is marked: a list without that mark would
-              look complete. */}
-          {listing.data.payload?.truncated && (
-            <p className="warning">
-              <span>{t("The list was truncated by the host limit; narrow the filter on the host.")}</span>
-            </p>
-          )}
-          <table>
-            <thead>
-              <tr>
-                <th>{t("Unit")}</th><th>{t("Active")}</th><th>{t("Sub")}</th><th>{t("On boot")}</th><th>{t("Actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {units.map((unit) => (
-                <tr key={unit.name}>
-                  <td>{unit.name}</td>
-                  <td>
-                    <span className={unit.active_state === "active" ? "badge ok" : "badge"}>
-                      {unit.active_state}
-                    </span>
-                  </td>
-                  <td>{unit.sub_state}</td>
-                  <td>{unit.unit_file_state || "—"}</td>
-                  <td>
-                    <div className="operations">
-                      {unit.active_state === "active" ? (
-                        <>
-                          <button onClick={() => operation("unit.restart", unit.name)}>{t("Restart")}</button>
-                          <button onClick={() => operation("unit.stop", unit.name)}>{t("Stop")}</button>
-                        </>
-                      ) : (
-                        <button onClick={() => operation("unit.start", unit.name)}>{t("Start")}</button>
-                      )}
-                      {/* Enabling changes the host's behaviour after a
-                          reboot, so it is separate from starting now. */}
-                      {unit.unit_file_state === "enabled" ? (
-                        <button onClick={() => toggle("unit.enable.set", unit.name, false)}>{t("Disable")}</button>
-                      ) : unit.unit_file_state === "disabled" ? (
-                        <button onClick={() => toggle("unit.enable.set", unit.name, true)}>{t("Enable")}</button>
-                      ) : null}
-                      {unit.unit_file_state === "masked" ? (
-                        <button onClick={() => toggle("unit.mask.set", unit.name, false)}>{t("Unmask")}</button>
-                      ) : (
-                        <button onClick={() => setToMask(unit)}>{t("Mask")}</button>
-                      )}
-                    </div>
-                  </td>
+          </>
+        )}
+        flush
+      >
+        {!listing.data ? (
+          <Empty>{t("This host has not been read yet. Use “Read from host”.")}</Empty>
+        ) : (
+          <>
+            {/* A cut-off listing is marked: a list without that mark would
+                look complete. */}
+            {listing.data.payload?.truncated && (
+              <p className="warning">
+                <span>{t("The list was truncated by the host limit; narrow the filter on the host.")}</span>
+              </p>
+            )}
+            <Table>
+              <thead>
+                <tr>
+                  <th>{t("Unit")}</th><th>{t("Active")}</th><th>{t("Sub")}</th><th>{t("On boot")}</th><th>{t("Actions")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="source" style={{ marginTop: 12 }}>
-            {t("{shown} of {total} units shown · read", { shown: units.length, total: listing.data.payload?.units?.length ?? 0 })}{" "}
-            <Time value={listing.data.observed_at} />
-          </p>
-        </>
-      )}
+              </thead>
+              <tbody>
+                {units.map((unit) => (
+                  <tr key={unit.name}>
+                    <td className="hm-mono">{unit.name}</td>
+                    <td>
+                      <span className={unit.active_state === "active" ? "badge ok" : "badge"}>
+                        {unit.active_state}
+                      </span>
+                    </td>
+                    <td>{unit.sub_state}</td>
+                    <td>{unit.unit_file_state || "—"}</td>
+                    <td>
+                      <div className="operations">
+                        {unit.active_state === "active" ? (
+                          <>
+                            <button onClick={() => operation("unit.restart", unit.name)}>{t("Restart")}</button>
+                            <button onClick={() => operation("unit.stop", unit.name)}>{t("Stop")}</button>
+                          </>
+                        ) : (
+                          <button onClick={() => operation("unit.start", unit.name)}>{t("Start")}</button>
+                        )}
+                        {/* Enabling changes the host's behaviour after a
+                            reboot, so it is separate from starting now. */}
+                        {unit.unit_file_state === "enabled" ? (
+                          <button onClick={() => toggle("unit.enable.set", unit.name, false)}>{t("Disable")}</button>
+                        ) : unit.unit_file_state === "disabled" ? (
+                          <button onClick={() => toggle("unit.enable.set", unit.name, true)}>{t("Enable")}</button>
+                        ) : null}
+                        {unit.unit_file_state === "masked" ? (
+                          <button onClick={() => toggle("unit.mask.set", unit.name, false)}>{t("Unmask")}</button>
+                        ) : (
+                          <button className="hm-danger" onClick={() => setToMask(unit)}>{t("Mask")}</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Foot>
+              <span>
+                {t("{shown} of {total} units shown · read", { shown: units.length, total: allUnits.length })}{" "}
+                <Time value={listing.data.observed_at} />
+              </span>
+            </Foot>
+          </>
+        )}
+      </Section>
 
       {toMask && (
         <TargetConfirmation
@@ -206,6 +232,6 @@ export function Services() {
           onCancel={() => setToMask(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }

@@ -4,7 +4,10 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
+  Stats, Table, Unknown, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -91,11 +94,34 @@ export function Storage() {
   const snapshot = module.data?.payload;
   if (!module.data) return <Empty>{t("This host has not reported its storage yet.")}</Empty>;
 
+  const mounts = snapshot?.mounts ?? [];
+  const devices = snapshot?.devices ?? [];
+  // The fullest mount is the one the operator will hear about first.
+  const fullest = mounts
+    .filter((mount) => mount.mounted && mount.used_percent !== undefined)
+    .sort((a, b) => (b.used_percent ?? 0) - (a.used_percent ?? 0))[0];
+
   return (
-    <>
-      <p className="subtitle">
-        {t("Devices from the kernel, mounts from mountinfo, persistence from fstab — kept apart on purpose: the file says what should be mounted after a reboot, not what is mounted now.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Storage")}
+        description={t("Devices from the kernel, mounts from mountinfo, persistence from fstab — kept apart on purpose: the file says what should be mounted after a reboot, not what is mounted now.")}
+        actions={
+          <>
+            <button className="secondary" onClick={() => setWizard((open) => !open)}>
+              {wizard ? t("Cancel") : t("Mount a filesystem")}
+            </button>
+            <button
+              onClick={() => request.mutate({ action: "storage.plan", payload: { storage: {} } })}
+              disabled={request.isPending || host.connection_state !== "online"}
+            >
+              {t("Read from host")}
+            </button>
+          </>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -103,256 +129,264 @@ export function Storage() {
         </p>
       )}
 
-      <div className="filters">
-        <button
-          onClick={() => request.mutate({ action: "storage.plan", payload: { storage: {} } })}
-          disabled={request.isPending || host.connection_state !== "online"}
-        >
-          {t("Read from host")}
-        </button>
-        <button className="secondary" onClick={() => setWizard((open) => !open)}>
-          {wizard ? t("Cancel") : t("Mount a filesystem")}
-        </button>
-      </div>
+      <Stats>
+        <Stat label={t("Mounts")} value={mounts.length} />
+        <Stat label={t("Devices")} value={devices.length} />
+        <Stat
+          label={t("Space used")}
+          value={fullest ? `${fullest.used_percent}%` : <Unknown />}
+          hint={fullest ? <span className="hm-mono">{fullest.target}</span> : undefined}
+          tone={!fullest ? "unknown" : (fullest.used_percent ?? 0) >= 90 ? "error" : (fullest.used_percent ?? 0) >= 75 ? "warn" : undefined}
+        />
+        <Stat
+          label={t("Volume groups")}
+          value={snapshot?.lvm_unavailable_reason ? <Unknown /> : (snapshot?.groups ?? []).length}
+          hint={snapshot?.lvm_unavailable_reason || undefined}
+        />
+      </Stats>
 
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
       {wizard && <MountWizard onIntent={setIntent} />}
 
-      <h2>{t("Mounts")}</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>{t("Mount point")}</th><th>{t("Source")}</th><th>{t("Type")}</th><th>{t("State")}</th>
-            <th>{t("Space used")}</th><th>{t("Inodes used")}</th><th>{t("Owner")}</th><th>{t("Actions")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(snapshot?.mounts ?? []).map((mount) => (
-            <tr key={mount.target}>
-              <td>{mount.target}</td>
-              <td title={mount.source}>{mount.source.slice(0, 40)}</td>
-              <td>{mount.fs_type}</td>
-              {/* The four "mounted / in fstab" combinations mean four
-                  different things, and all of them matter to the operator. */}
-              <td>
-                {mount.mounted && mount.in_fstab && t("mounted, persistent")}
-                {mount.mounted && !mount.in_fstab && (
-                  <span className="badge unknown">{t("mounted, gone after reboot")}</span>
-                )}
-                {!mount.mounted && mount.in_fstab && (
-                  <span className="badge unknown">{t("in fstab, not mounted")}</span>
-                )}
-              </td>
-              {/* Unknown usage stays unknown: a network filesystem may not
-                  report an inode count at all. */}
-              <td>
-                {mount.used_percent === undefined ? (
-                  unknown
-                ) : (
-                  <>
-                    {mount.used_percent}%
-                    {mount.size_bytes !== undefined && (
-                      <span className="source"> {t("of {size}", { size: bytes(mount.size_bytes) })}</span>
-                    )}
-                  </>
-                )}
-              </td>
-              <td>
-                {mount.inodes_used_percent === undefined ? (
-                  unknown
-                ) : (
-                  `${mount.inodes_used_percent}%`
-                )}
-              </td>
-              <td>{mount.managed ? "Flotestro" : <span className="badge unknown">{t("host admin")}</span>}</td>
-              <td>
-                {mount.managed && mount.mounted && (
-                  <button
-                    className="secondary"
-                    onClick={() =>
-                      setIntent({
-                        action: "mount.remove",
-                        label: t("Unmount"),
-                        description: t("{target} will be unmounted and its fstab entry removed. Processes holding it are checked first.", { target: mount.target }),
-                        payload: { storage: { target: mount.target } },
-                      })
-                    }
-                  >
-                    {t("Unmount")}
-                  </button>
-                )}
-              </td>
+      <Section title={t("Mounts")} count={mounts.length} flush>
+        <Table>
+          <thead>
+            <tr>
+              <th>{t("Mount point")}</th><th>{t("Source")}</th><th>{t("Type")}</th><th>{t("State")}</th>
+              <th className="hm-num">{t("Space used")}</th><th className="hm-num">{t("Inodes used")}</th><th>{t("Owner")}</th><th>{t("Actions")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2>{t("Devices")}</h2>
-      <table>
-        <thead>
-          <tr><th>{t("Device")}</th><th>{t("Type")}</th><th>{t("Size")}</th><th>{t("Filesystem")}</th><th>{t("Mounted at")}</th><th>{t("Identity")}</th><th>{t("Actions")}</th></tr>
-        </thead>
-        <tbody>
-          {(snapshot?.devices ?? []).map((device) => (
-            <tr key={device.path}>
-              {/* The indentation reflects the disk -> partition -> volume topology. */}
-              <td style={{ paddingLeft: device.parent ? 24 : undefined }}>
-                {device.path}
-                {device.read_only && <span className="badge"> {t("read-only")}</span>}
-              </td>
-              <td>{device.type}</td>
-              <td>{bytes(device.size_bytes)}</td>
-              <td>
-                {device.fs_type || "—"}
-                {device.fs_size_bytes !== undefined && device.fs_size_bytes < device.size_bytes && (
-                  <span className="source"> · fs {bytes(device.fs_size_bytes)}</span>
-                )}
-              </td>
-              <td>{(device.mountpoints ?? []).join(", ") || "—"}</td>
-              {/* Identification goes by UUID and serial: /dev/sdX depends on
-                  the detection order and points at another disk after a
-                  reboot. */}
-              <td className="source">
-                {device.uuid ? `UUID=${device.uuid.slice(0, 13)}…` : ""}
-                {device.serial ? ` ${device.model ?? ""} ${device.serial}` : ""}
-                {!device.uuid && !device.serial && "—"}
-              </td>
-              <td>
-                {/* Operations on a device make sense only when nothing sits
-                    on it - and the host checks that once more anyway. */}
-                {(device.mountpoints ?? []).length === 0 && (
-                  <div className="operations">
-                    {device.fs_type && (
-                      <button
-                        onClick={() =>
-                          setIntent({
-                            action: "filesystem.check",
-                            label: t("Check filesystem"),
-                            description: t("{device} will be checked read-only. The check refuses to run if the filesystem is mounted.", { device: device.path }),
-                            payload: { storage: { device: device.path } },
-                          })
-                        }
-                      >
-                        {t("Check")}
-                      </button>
-                    )}
-                    {device.fs_type && (
-                      <button
-                        onClick={() =>
-                          setIntent({
-                            action: "filesystem.resize",
-                            label: t("Grow filesystem"),
-                            description: t("The filesystem on {device} will grow to fill the device ({size}).", { device: device.path, size: bytes(device.size_bytes) }),
-                            payload: { storage: identity(device) },
-                          })
-                        }
-                      >
-                        {t("Grow")}
-                      </button>
-                    )}
-                    {/* Formatting and wiping carry the device identity from
-                        this row: the host refuses if it hits something else. */}
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "filesystem.create",
-                          label: t("Format device"),
-                          description: t("Everything on {device} ({details}) will be destroyed and a new ext4 filesystem created. This needs two approvals.", {
-                            device: device.path,
-                            details: `${bytes(device.size_bytes)}${device.serial ? `, ${t("serial")} ${device.serial}` : ""}`,
-                          }),
-                          payload: {
-                            storage: { ...identity(device), fs_type: "ext4" },
-                          },
-                        })
-                      }
-                    >
-                      {t("Format")}
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "disk.wipe",
-                          label: t("Wipe signatures"),
-                          description: t("Filesystem signatures on {device} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.", { device: device.path }),
-                          payload: { storage: identity(device) },
-                        })
-                      }
-                    >
-                      {t("Wipe")}
-                    </button>
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2>{t("Volume groups")}</h2>
-      {snapshot?.lvm_unavailable_reason ? (
-        <Empty>{snapshot.lvm_unavailable_reason}</Empty>
-      ) : !snapshot?.groups?.length ? (
-        <Empty>{t("This host has LVM but no volume groups.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("Group")}</th><th>{t("Size")}</th><th>{t("Free")}</th><th>{t("Volumes")}</th></tr></thead>
+          </thead>
           <tbody>
-            {snapshot.groups.map((group) => (
-              <tr key={group.name}>
-                <td>{group.name}</td>
-                <td>{bytes(group.size_bytes)}</td>
-                {/* Zero free space decides whether anything can be extended
-                    - and it is a number, not an absence. */}
-                <td>{bytes(group.free_bytes)}</td>
-                <td>{group.lv_count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {snapshot?.volumes?.length ? (
-        <table>
-          <thead><tr><th>{t("Logical volume")}</th><th>{t("Group")}</th><th>{t("Size")}</th><th>{t("Actions")}</th></tr></thead>
-          <tbody>
-            {snapshot.volumes.map((volume) => (
-              <tr key={volume.path}>
-                <td>{volume.path}</td>
-                <td>{volume.group}</td>
-                <td>{bytes(volume.size_bytes)}</td>
+            {mounts.map((mount) => (
+              <tr key={mount.target}>
+                <td className="hm-mono hm-primary">{mount.target}</td>
+                <td className="hm-mono" title={mount.source}>{mount.source.slice(0, 40)}</td>
+                <td>{mount.fs_type}</td>
+                {/* The four "mounted / in fstab" combinations mean four
+                    different things, and all of them matter to the operator. */}
                 <td>
-                  {/* We extend upwards only and together with the
-                      filesystem: a volume bigger than its filesystem gives
-                      not a single byte. */}
-                  <button
-                    onClick={() =>
-                      setIntent({
-                        action: "lvm.extend",
-                        label: t("Extend volume"),
-                        description: t("{volume} will grow by 512M together with its filesystem, if the group has room.", { volume: volume.path }),
-                        payload: { storage: { device: volume.path, size: "+512M" } },
-                      })
-                    }
-                  >
-                    {t("Extend by 512M")}
-                  </button>
+                  {mount.mounted && mount.in_fstab && <span className="badge ok">{t("mounted, persistent")}</span>}
+                  {mount.mounted && !mount.in_fstab && (
+                    <span className="badge warn">{t("mounted, gone after reboot")}</span>
+                  )}
+                  {!mount.mounted && mount.in_fstab && (
+                    <span className="badge unknown">{t("in fstab, not mounted")}</span>
+                  )}
+                </td>
+                {/* Unknown usage stays unknown: a network filesystem may not
+                    report an inode count at all. */}
+                <td className="hm-num">
+                  {mount.used_percent === undefined ? (
+                    unknown
+                  ) : (
+                    <>
+                      {mount.used_percent}%
+                      {mount.size_bytes !== undefined && (
+                        <span className="source"> {t("of {size}", { size: bytes(mount.size_bytes) })}</span>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td className="hm-num">
+                  {mount.inodes_used_percent === undefined ? (
+                    unknown
+                  ) : (
+                    `${mount.inodes_used_percent}%`
+                  )}
+                </td>
+                <td>{mount.managed ? "Flotestro" : <span className="badge unknown">{t("host admin")}</span>}</td>
+                <td>
+                  {mount.managed && mount.mounted && (
+                    <button
+                      className="hm-danger"
+                      onClick={() =>
+                        setIntent({
+                          action: "mount.remove",
+                          label: t("Unmount"),
+                          description: t("{target} will be unmounted and its fstab entry removed. Processes holding it are checked first.", { target: mount.target }),
+                          payload: { storage: { target: mount.target } },
+                        })
+                      }
+                    >
+                      {t("Unmount")}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
+      </Section>
+
+      <Section title={t("Devices")} count={devices.length} flush>
+        <Table>
+          <thead>
+            <tr><th>{t("Device")}</th><th>{t("Type")}</th><th className="hm-num">{t("Size")}</th><th>{t("Filesystem")}</th><th>{t("Mounted at")}</th><th>{t("Identity")}</th><th>{t("Actions")}</th></tr>
+          </thead>
+          <tbody>
+            {devices.map((device) => (
+              <tr key={device.path}>
+                {/* The indentation reflects the disk -> partition -> volume topology. */}
+                <td className={device.parent ? "hm-mono hm-indent" : "hm-mono hm-primary"}>
+                  {device.path}
+                  {device.read_only && <span className="badge"> {t("read-only")}</span>}
+                </td>
+                <td>{device.type}</td>
+                <td className="hm-num">{bytes(device.size_bytes)}</td>
+                <td>
+                  {device.fs_type || "—"}
+                  {device.fs_size_bytes !== undefined && device.fs_size_bytes < device.size_bytes && (
+                    <span className="source"> · fs {bytes(device.fs_size_bytes)}</span>
+                  )}
+                </td>
+                <td className="hm-mono">{(device.mountpoints ?? []).join(", ") || "—"}</td>
+                {/* Identification goes by UUID and serial: /dev/sdX depends on
+                    the detection order and points at another disk after a
+                    reboot. */}
+                <td className="source hm-mono">
+                  {device.uuid ? `UUID=${device.uuid.slice(0, 13)}…` : ""}
+                  {device.serial ? ` ${device.model ?? ""} ${device.serial}` : ""}
+                  {!device.uuid && !device.serial && "—"}
+                </td>
+                <td>
+                  {/* Operations on a device make sense only when nothing sits
+                      on it - and the host checks that once more anyway. */}
+                  {(device.mountpoints ?? []).length === 0 && (
+                    <div className="operations">
+                      {device.fs_type && (
+                        <button
+                          onClick={() =>
+                            setIntent({
+                              action: "filesystem.check",
+                              label: t("Check filesystem"),
+                              description: t("{device} will be checked read-only. The check refuses to run if the filesystem is mounted.", { device: device.path }),
+                              payload: { storage: { device: device.path } },
+                            })
+                          }
+                        >
+                          {t("Check")}
+                        </button>
+                      )}
+                      {device.fs_type && (
+                        <button
+                          onClick={() =>
+                            setIntent({
+                              action: "filesystem.resize",
+                              label: t("Grow filesystem"),
+                              description: t("The filesystem on {device} will grow to fill the device ({size}).", { device: device.path, size: bytes(device.size_bytes) }),
+                              payload: { storage: identity(device) },
+                            })
+                          }
+                        >
+                          {t("Grow")}
+                        </button>
+                      )}
+                      {/* Formatting and wiping carry the device identity from
+                          this row: the host refuses if it hits something else. */}
+                      <button
+                        className="hm-danger"
+                        onClick={() =>
+                          setIntent({
+                            action: "filesystem.create",
+                            label: t("Format device"),
+                            description: t("Everything on {device} ({details}) will be destroyed and a new ext4 filesystem created. This needs two approvals.", {
+                              device: device.path,
+                              details: `${bytes(device.size_bytes)}${device.serial ? `, ${t("serial")} ${device.serial}` : ""}`,
+                            }),
+                            payload: {
+                              storage: { ...identity(device), fs_type: "ext4" },
+                            },
+                          })
+                        }
+                      >
+                        {t("Format")}
+                      </button>
+                      <button
+                        className="hm-danger"
+                        onClick={() =>
+                          setIntent({
+                            action: "disk.wipe",
+                            label: t("Wipe signatures"),
+                            description: t("Filesystem signatures on {device} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.", { device: device.path }),
+                            payload: { storage: identity(device) },
+                          })
+                        }
+                      >
+                        {t("Wipe")}
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Section>
+
+      <Section title={t("Volume groups")} count={snapshot?.groups?.length} flush>
+        {snapshot?.lvm_unavailable_reason ? (
+          <Empty>{snapshot.lvm_unavailable_reason}</Empty>
+        ) : !snapshot?.groups?.length ? (
+          <Empty>{t("This host has LVM but no volume groups.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th className="hm-num">{t("Free")}</th><th className="hm-num">{t("Volumes")}</th></tr></thead>
+            <tbody>
+              {snapshot.groups.map((group) => (
+                <tr key={group.name}>
+                  <td className="hm-mono hm-primary">{group.name}</td>
+                  <td className="hm-num">{bytes(group.size_bytes)}</td>
+                  {/* Zero free space decides whether anything can be extended
+                      - and it is a number, not an absence. */}
+                  <td className="hm-num">{bytes(group.free_bytes)}</td>
+                  <td className="hm-num">{group.lv_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        {snapshot?.raid_unavailable_reason && (
+          <Foot><span>{snapshot.raid_unavailable_reason}</span></Foot>
+        )}
+      </Section>
+
+      {snapshot?.volumes?.length ? (
+        <Section title={t("Volumes")} count={snapshot.volumes.length} flush>
+          <Table>
+            <thead><tr><th>{t("Logical volume")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Actions")}</th></tr></thead>
+            <tbody>
+              {snapshot.volumes.map((volume) => (
+                <tr key={volume.path}>
+                  <td className="hm-mono hm-primary">{volume.path}</td>
+                  <td className="hm-mono">{volume.group}</td>
+                  <td className="hm-num">{bytes(volume.size_bytes)}</td>
+                  <td>
+                    {/* We extend upwards only and together with the
+                        filesystem: a volume bigger than its filesystem gives
+                        not a single byte. */}
+                    <button
+                      className="secondary"
+                      onClick={() =>
+                        setIntent({
+                          action: "lvm.extend",
+                          label: t("Extend volume"),
+                          description: t("{volume} will grow by 512M together with its filesystem, if the group has room.", { volume: volume.path }),
+                          payload: { storage: { device: volume.path, size: "+512M" } },
+                        })
+                      }
+                    >
+                      {t("Extend by 512M")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Section>
       ) : null}
 
-      {snapshot?.raid_unavailable_reason && (
-        <p className="source">{snapshot.raid_unavailable_reason}</p>
-      )}
-
-      <ModuleFreshness fragment={module.data} />
       {snapshot?.observed_at && (
-        <p className="source">
-          {t("Storage read")} <Time value={snapshot.observed_at} />
+        <p className="hm-freshness">
+          <span>{t("Storage read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
 
@@ -376,7 +410,7 @@ export function Storage() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -409,42 +443,51 @@ function MountWizard({ onIntent }: { onIntent: (intent: Intent) => void }) {
   const [persist, setPersist] = useState(true);
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("Mount a filesystem")}</h2>
-      <div className="filters">
-        <input
-          value={source}
-          onChange={(e) => setSource(e.target.value)}
-          placeholder="UUID=… or /dev/mapper/…"
-          style={{ minWidth: 300 }}
-        />
-        <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={t("Mount point, e.g. /mnt/data")} />
-        <input value={type} onChange={(e) => setType(e.target.value)} placeholder={t("Filesystem type")} style={{ width: 120 }} />
-        <input value={options} onChange={(e) => setOptions(e.target.value)} placeholder={t("Options")} />
-      </div>
-      {/* Without an fstab entry the mount disappears after a reboot; the
-          operator is to know that before, not after the failure. */}
-      <label className="toggle">
-        <input type="checkbox" checked={persist} onChange={(e) => setPersist(e.target.checked)} />
-        {t("Keep it after reboot (write an fstab entry)")}
-      </label>
-      <button
-        onClick={() =>
-          onIntent({
-            action: "mount.ensure",
-            label: t("Mount filesystem"),
-            description: persist
-              ? t("{source} will be mounted at {target} as {type} and written to fstab.", { source, target, type })
-              : t("{source} will be mounted at {target} as {type} for this boot only.", { source, target, type }),
-            payload: {
-              storage: { source, target, fs_type: type, options, persist },
-            },
-          })
-        }
-        disabled={!source || !target || !type}
-      >
-        {t("Mount")}
-      </button>
-    </div>
+    <Section title={t("Mount a filesystem")}>
+      <Form>
+        <Fields>
+          <Field label={t("Source")}>
+            <input
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="UUID=… or /dev/mapper/…"
+            />
+          </Field>
+          <Field label={t("Mount point")}>
+            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={t("Mount point, e.g. /mnt/data")} />
+          </Field>
+          <Field label={t("Filesystem type")} narrow>
+            <input value={type} onChange={(e) => setType(e.target.value)} placeholder={t("Filesystem type")} />
+          </Field>
+          <Field label={t("Options")}>
+            <input value={options} onChange={(e) => setOptions(e.target.value)} placeholder={t("Options")} />
+          </Field>
+        </Fields>
+        {/* Without an fstab entry the mount disappears after a reboot; the
+            operator is to know that before, not after the failure. */}
+        <Check checked={persist} onChange={setPersist}>
+          {t("Keep it after reboot (write an fstab entry)")}
+        </Check>
+        <FormActions>
+          <button
+            onClick={() =>
+              onIntent({
+                action: "mount.ensure",
+                label: t("Mount filesystem"),
+                description: persist
+                  ? t("{source} will be mounted at {target} as {type} and written to fstab.", { source, target, type })
+                  : t("{source} will be mounted at {target} as {type} for this boot only.", { source, target, type }),
+                payload: {
+                  storage: { source, target, fs_type: type, options, persist },
+                },
+              })
+            }
+            disabled={!source || !target || !type}
+          >
+            {t("Mount")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }

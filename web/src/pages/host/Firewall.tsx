@@ -3,7 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
-import { ModuleFreshness, useHost, useModule } from "./shared";
+import {
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Stat, Stats, Table, useHost, useModule,
+} from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -94,12 +97,21 @@ export function Firewall() {
     );
   });
   const own = (snapshot?.rules ?? []).filter((rule) => rule.source === "managed");
+  const zones = (snapshot?.zones ?? []).filter((zone) => zone.active || zone.default || (zone.ports ?? []).length > 0);
 
   return (
-    <>
-      <p className="subtitle">
-        {t("Read from the kernel with nft. Flotestro owns one table of its own — docker, firewalld and iptables-nft rewrite theirs without asking, so a rule placed in those would vanish at the next container start or reload.")}
-      </p>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Firewall")}
+        description={t("Read from the kernel with nft. Flotestro owns one table of its own — docker, firewalld and iptables-nft rewrite theirs without asking, so a rule placed in those would vanish at the next container start or reload.")}
+        actions={
+          <button onClick={() => setWizard((open) => !open)} disabled={!snapshot?.writable}>
+            {wizard ? t("Cancel") : t("New rule")}
+          </button>
+        }
+      />
+      <ModuleFreshness fragment={module.data} />
+      <Message text={message} />
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -107,132 +119,141 @@ export function Firewall() {
         </p>
       )}
 
-      <table>
-        <tbody>
-          <tr><th>{t("Adapter")}</th><td>{snapshot?.adapter || <span className="badge unknown">{t("unknown")}</span>}</td></tr>
+      <Stats>
+        <Stat label={t("Effective rules")} value={(snapshot?.rules ?? []).length} />
+        <Stat label={t("Rules owned by Flotestro")} value={own.length} />
+        {snapshot?.zones?.length ? <Stat label={t("Zones")} value={zones.length} /> : null}
+        <Stat
+          label={t("Adapter")}
+          value={snapshot?.adapter || <span className="badge unknown">{t("unknown")}</span>}
+          tone={snapshot?.writable ? "ok" : "unknown"}
+          hint={snapshot?.read_only_reason || undefined}
+        />
+      </Stats>
+
+      <Section title={t("Firewall")} flush>
+        <Facts>
+          <Fact label={t("Adapter")}>{snapshot?.adapter || <span className="badge unknown">{t("unknown")}</span>}</Fact>
           {/* The fingerprint ties the plan to the rule set: a change
               requested against a different set is not the same change the
               operator looked at. */}
-          <tr><th>{t("Ruleset fingerprint")}</th><td>{snapshot?.hash || "—"}</td></tr>
-          <tr><th>{t("Rules owned by Flotestro")}</th><td>{own.length}</td></tr>
-          <tr><th>{t("Read")}</th><td>{snapshot?.observed_at ? <Time value={snapshot.observed_at} /> : "—"}</td></tr>
-        </tbody>
-      </table>
+          <Fact label={t("Ruleset fingerprint")}><span className="hm-mono">{snapshot?.hash || "—"}</span></Fact>
+          <Fact label={t("Rules owned by Flotestro")}>{own.length}</Fact>
+          <Fact label={t("Read")}>{snapshot?.observed_at ? <Time value={snapshot.observed_at} /> : "—"}</Fact>
+        </Facts>
+      </Section>
+
+      {wizard && <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />}
 
       {snapshot?.zones?.length ? (
-        <>
-          <h2>{t("Zones")}</h2>
-          <p className="subtitle">
-            {t("firewalld describes access by zone, not by rule order: the question is what is open on an interface, not which rule matches first.")}
-          </p>
-          <table>
+        <Section
+          title={t("Zones")}
+          count={zones.length}
+          description={t("firewalld describes access by zone, not by rule order: the question is what is open on an interface, not which rule matches first.")}
+          flush
+        >
+          <Table>
             <thead>
               <tr><th>{t("Zone")}</th><th>{t("State")}</th><th>{t("Target")}</th><th>{t("Interfaces")}</th><th>{t("Services")}</th><th>{t("Ports")}</th><th>{t("Actions")}</th></tr>
             </thead>
             <tbody>
-              {snapshot.zones
-                .filter((zone) => zone.active || zone.default || (zone.ports ?? []).length > 0)
-                .map((zone) => (
-                  <tr key={zone.name}>
-                    <td>{zone.name}</td>
-                    <td>
-                      {zone.active ? t("active") : t("inactive")}
-                      {zone.default && <span className="badge"> {t("default")}</span>}
-                    </td>
-                    <td>{zone.target || "—"}</td>
-                    <td>{(zone.interfaces ?? []).join(", ") || "—"}</td>
-                    <td>{(zone.services ?? []).join(", ") || "—"}</td>
-                    <td>{(zone.ports ?? []).join(", ") || "—"}</td>
-                    <td>
-                      <ZonePort zone={zone.name} onIntent={setIntent} hostname={host.hostname} />
-                    </td>
-                  </tr>
-                ))}
+              {zones.map((zone) => (
+                <tr key={zone.name}>
+                  <td className="hm-mono hm-primary">{zone.name}</td>
+                  <td>
+                    {zone.active ? <span className="badge ok">{t("active")}</span> : <span className="badge">{t("inactive")}</span>}
+                    {zone.default && <span className="badge"> {t("default")}</span>}
+                  </td>
+                  <td>{zone.target || "—"}</td>
+                  <td className="hm-mono">{(zone.interfaces ?? []).join(", ") || "—"}</td>
+                  <td>{(zone.services ?? []).join(", ") || "—"}</td>
+                  <td className="hm-mono">{(zone.ports ?? []).join(", ") || "—"}</td>
+                  <td>
+                    <ZonePort zone={zone.name} onIntent={setIntent} hostname={host.hostname} />
+                  </td>
+                </tr>
+              ))}
             </tbody>
-          </table>
-        </>
+          </Table>
+        </Section>
       ) : null}
 
-      <h2>{t("Effective rules")}</h2>
-      <div className="filters">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder={t("Filter by rule, chain or table")}
-          style={{ minWidth: 280 }}
-        />
-        <label className="toggle">
-          <input type="checkbox" checked={ownOnly} onChange={(e) => setOwnOnly(e.target.checked)} />
-          {t("Only rules owned by Flotestro")}
-        </label>
-        <button onClick={() => setWizard((open) => !open)} disabled={!snapshot?.writable}>
-          {wizard ? t("Cancel") : t("New rule")}
-        </button>
-      </div>
-
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
-
-      {wizard && <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />}
-
-      {!rules.length ? (
-        <Empty>{t("No rules match.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Table")}</th><th>{t("Chain")}</th><th>{t("Rule")}</th><th>{t("Owner")}</th><th>{t("Counters")}</th><th>{t("Actions")}</th></tr>
-          </thead>
-          <tbody>
-            {rules.map((rule) => (
-              <tr key={`${rule.family}-${rule.table}-${rule.chain}-${rule.handle}`}>
-                <td>{rule.family} {rule.table}</td>
-                <td>{rule.chain}</td>
-                <td title={rule.text} style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-                  {rule.text.slice(0, 70)}
-                </td>
-                {/* A rule in somebody else's table is neither ours nor durable. */}
-                <td>
-                  {rule.source === "managed" ? (
-                    "Flotestro"
-                  ) : (
-                    <span className="badge unknown">{rule.source}</span>
-                  )}
-                </td>
-                {/* A rule without a counter must not pretend nothing passed
-                    through it. */}
-                <td>
-                  {rule.packets === undefined ? (
-                    <span className="badge unknown">{t("no counter")}</span>
-                  ) : (
-                    `${rule.packets} pkt / ${rule.bytes} B`
-                  )}
-                </td>
-                <td>
-                  {rule.source === "managed" && (
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "firewall.rule.remove",
-                          label: t("Remove rule"),
-                          description: t("{rule} will be removed from {host}. The remaining Flotestro rules are rebuilt in order.", { rule: ruleName(rule), host: host.hostname }),
-                          payload: { firewall: { rule_id: ruleName(rule), rollback_seconds: 120 } },
-                        })
-                      }
-                    >
-                      {t("Remove")}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <p className="source" style={{ marginTop: 12 }}>
-        {t("{shown} of {total} rules shown", { shown: rules.length, total: (snapshot?.rules ?? []).length })}
-      </p>
-      <ModuleFreshness fragment={module.data} />
+      <Section
+        title={t("Effective rules")}
+        count={rules.length}
+        tools={
+          <>
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t("Filter by rule, chain or table")}
+            />
+            <label className="toggle">
+              <input type="checkbox" checked={ownOnly} onChange={(e) => setOwnOnly(e.target.checked)} />
+              {t("Only rules owned by Flotestro")}
+            </label>
+          </>
+        }
+        flush
+      >
+        {!rules.length ? (
+          <Empty>{t("No rules match.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Table")}</th><th>{t("Chain")}</th><th>{t("Rule")}</th><th>{t("Owner")}</th><th className="hm-num">{t("Counters")}</th><th>{t("Actions")}</th></tr>
+            </thead>
+            <tbody>
+              {rules.map((rule) => (
+                <tr key={`${rule.family}-${rule.table}-${rule.chain}-${rule.handle}`}>
+                  <td className="hm-mono">{rule.family} {rule.table}</td>
+                  <td className="hm-mono">{rule.chain}</td>
+                  <td className="hm-mono" title={rule.text}>
+                    {rule.text.slice(0, 70)}
+                  </td>
+                  {/* A rule in somebody else's table is neither ours nor durable. */}
+                  <td>
+                    {rule.source === "managed" ? (
+                      "Flotestro"
+                    ) : (
+                      <span className="badge unknown">{rule.source}</span>
+                    )}
+                  </td>
+                  {/* A rule without a counter must not pretend nothing passed
+                      through it. */}
+                  <td className="hm-num">
+                    {rule.packets === undefined ? (
+                      <span className="badge unknown">{t("no counter")}</span>
+                    ) : (
+                      `${rule.packets} pkt / ${rule.bytes} B`
+                    )}
+                  </td>
+                  <td>
+                    {rule.source === "managed" && (
+                      <button
+                        className="hm-danger"
+                        onClick={() =>
+                          setIntent({
+                            action: "firewall.rule.remove",
+                            label: t("Remove rule"),
+                            description: t("{rule} will be removed from {host}. The remaining Flotestro rules are rebuilt in order.", { rule: ruleName(rule), host: host.hostname }),
+                            payload: { firewall: { rule_id: ruleName(rule), rollback_seconds: 120 } },
+                          })
+                        }
+                      >
+                        {t("Remove")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        <Foot>
+          <span>{t("{shown} of {total} rules shown", { shown: rules.length, total: (snapshot?.rules ?? []).length })}</span>
+        </Foot>
+      </Section>
 
       {intent && (
         <TargetConfirmation
@@ -246,7 +267,7 @@ export function Firewall() {
           onCancel={() => setIntent(null)}
         />
       )}
-    </>
+    </ModulePage>
   );
 }
 
@@ -276,76 +297,89 @@ function RuleWizard({ fingerprint, onIntent }: { fingerprint: string; onIntent: 
     value.split(",").map((element) => element.trim()).filter(Boolean);
 
   return (
-    <div className="form" style={{ marginBottom: 16 }}>
-      <h2>{t("New rule")}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>
-        {t("The rule goes into Flotestro's own table. The host arms a rollback before applying it and cancels it only after the agent proves it can still reach the panel.")}
-      </p>
-      <div className="filters">
-        <input value={id} onChange={(e) => setId(e.target.value)} placeholder={t("Rule name, e.g. block-smtp")} />
-        <select value={chain} onChange={(e) => setChain(e.target.value)}>
-          <option value="input">{t("incoming")}</option>
-          <option value="output">{t("outgoing")}</option>
-        </select>
-        <select value={action} onChange={(e) => setAction(e.target.value)}>
-          <option value="accept">accept</option>
-          <option value="drop">drop</option>
-          <option value="reject">reject</option>
-        </select>
-        <select value={protocol} onChange={(e) => setProtocol(e.target.value)}>
-          <option value="tcp">tcp</option>
-          <option value="udp">udp</option>
-          <option value="icmp">icmp</option>
-          <option value="">{t("any protocol")}</option>
-        </select>
-      </div>
-      <div className="filters">
-        <input value={ports} onChange={(e) => setPorts(e.target.value)} placeholder={t("Ports, e.g. 25, 1000-2000")} />
-        <input
-          value={sources}
-          onChange={(e) => setSources(e.target.value)}
-          placeholder={t("Sources with masks, e.g. 10.0.0.0/8")}
-          style={{ minWidth: 220 }}
-        />
-        <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t("Comment (optional)")} />
-      </div>
-      {/* Breaking the management channel protection is an explicit
-          decision: the consequence tends to be a host one has to drive to. */}
-      <label className="toggle">
-        <input type="checkbox" checked={breakGlass} onChange={(e) => setBreakGlass(e.target.checked)} />
-        {t("Allow a rule that can cut this host off from the panel (break glass)")}
-      </label>
-      <button
-        onClick={() =>
-          onIntent({
-            action: "firewall.rule.ensure",
-            label: t("Create rule"),
-            description: `${action} ${protocol || t("any protocol")}${
-              list(ports).length ? ` ${t("port")} ${list(ports).join(", ")}` : ""
-            }${list(sources).length ? ` ${t("from")} ${list(sources).join(", ")}` : ""} (${
-              chain === "input" ? t("incoming") : t("outgoing")
-            })`,
-            payload: {
-              firewall: {
-                rule_id: id,
-                chain,
-                action,
-                protocol,
-                ports: list(ports),
-                sources: list(sources),
-                comment,
-                break_glass: breakGlass,
-                rollback_seconds: 120,
-                expected_hash: fingerprint,
-              },
-            },
-          })
-        }
-        disabled={!id}
-      >
-        {t("Create rule")}
-      </button>
-    </div>
+    <Section
+      title={t("New rule")}
+      description={t("The rule goes into Flotestro's own table. The host arms a rollback before applying it and cancels it only after the agent proves it can still reach the panel.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Rule")}>
+            <input value={id} onChange={(e) => setId(e.target.value)} placeholder={t("Rule name, e.g. block-smtp")} />
+          </Field>
+          <Field label={t("Chain")} narrow>
+            <select value={chain} onChange={(e) => setChain(e.target.value)}>
+              <option value="input">{t("incoming")}</option>
+              <option value="output">{t("outgoing")}</option>
+            </select>
+          </Field>
+          <Field label={t("Action")} narrow>
+            <select value={action} onChange={(e) => setAction(e.target.value)}>
+              <option value="accept">accept</option>
+              <option value="drop">drop</option>
+              <option value="reject">reject</option>
+            </select>
+          </Field>
+          <Field label={t("Protocol")} narrow>
+            <select value={protocol} onChange={(e) => setProtocol(e.target.value)}>
+              <option value="tcp">tcp</option>
+              <option value="udp">udp</option>
+              <option value="icmp">icmp</option>
+              <option value="">{t("any protocol")}</option>
+            </select>
+          </Field>
+          <Field label={t("Ports")}>
+            <input value={ports} onChange={(e) => setPorts(e.target.value)} placeholder={t("Ports, e.g. 25, 1000-2000")} />
+          </Field>
+          <Field label={t("Sources")}>
+            <input
+              value={sources}
+              onChange={(e) => setSources(e.target.value)}
+              placeholder={t("Sources with masks, e.g. 10.0.0.0/8")}
+            />
+          </Field>
+          <Field label={t("Comment (optional)")}>
+            <input value={comment} onChange={(e) => setComment(e.target.value)} />
+          </Field>
+        </Fields>
+        {/* Breaking the management channel protection is an explicit
+            decision: the consequence tends to be a host one has to drive to. */}
+        <Check checked={breakGlass} onChange={setBreakGlass}>
+          {t("Allow a rule that can cut this host off from the panel (break glass)")}
+        </Check>
+        <FormActions>
+          <button
+            onClick={() =>
+              onIntent({
+                action: "firewall.rule.ensure",
+                label: t("Create rule"),
+                description: `${action} ${protocol || t("any protocol")}${
+                  list(ports).length ? ` ${t("port")} ${list(ports).join(", ")}` : ""
+                }${list(sources).length ? ` ${t("from")} ${list(sources).join(", ")}` : ""} (${
+                  chain === "input" ? t("incoming") : t("outgoing")
+                })`,
+                payload: {
+                  firewall: {
+                    rule_id: id,
+                    chain,
+                    action,
+                    protocol,
+                    ports: list(ports),
+                    sources: list(sources),
+                    comment,
+                    break_glass: breakGlass,
+                    rollback_seconds: 120,
+                    expected_hash: fingerprint,
+                  },
+                },
+              })
+            }
+            disabled={!id}
+          >
+            {t("Create rule")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }
 
@@ -366,11 +400,12 @@ function ZonePort({
         value={port}
         onChange={(e) => setPort(e.target.value)}
         placeholder="port/tcp"
-        style={{ width: 110 }}
+        style={{ width: 100 }}
       />
       {["open", "close"].map((operation) => (
         <button
           key={operation}
+          className="secondary"
           onClick={() => {
             const [number, protocol = "tcp"] = port.split("/");
             onIntent({

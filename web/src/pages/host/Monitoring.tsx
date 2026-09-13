@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
-import { useHost } from "./shared";
+import {
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table,
+  useHost,
+} from "./shared";
 import { useT } from "../../i18n";
 
 type Source = {
@@ -106,7 +109,7 @@ function Sparkline({ series }: { series: Series }) {
     })
     .join(" ");
   return (
-    <svg width={width} height={height} role="img" aria-label={series.name}>
+    <svg className="hm-spark" width={width} height={height} role="img" aria-label={series.name}>
       <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   );
@@ -191,14 +194,32 @@ export function Monitoring() {
 
   if (report.error) return <ErrorBox error={report.error} />;
   const data = report.data;
+  const alerts = data?.alerts ?? [];
+  const critical = alerts.filter((alert) => alert.severity === "critical").length;
 
   return (
-    <>
-      <p className="subtitle">
-        {t("Metrics and alerts come from the systems that already collect them. The panel shows where each number is from and for what window of time — it has no time series database of its own, and no alerting rules of its own.")}
-      </p>
-
-      <div className="filters">
+    <ModulePage>
+      <ModuleHeader
+        title={t("Monitoring")}
+        description={t("Metrics and alerts come from the systems that already collect them. The panel shows where each number is from and for what window of time — it has no time series database of its own, and no alerting rules of its own.")}
+        actions={
+          <>
+            {data?.links.dashboard && (
+              <a className="button" href={data.links.dashboard} target="_blank" rel="noreferrer">{t("Dashboard")}</a>
+            )}
+            {data?.links.logs && (
+              <a className="button" href={data.links.logs} target="_blank" rel="noreferrer">{t("Logs")}</a>
+            )}
+            <select value={range} onChange={(e) => setRange(e.target.value)}>
+              <option value="1h">{t("last hour")}</option>
+              <option value="3h">{t("last 3 hours")}</option>
+              <option value="12h">{t("last 12 hours")}</option>
+              <option value="24h">{t("last day")}</option>
+            </select>
+          </>
+        }
+      />
+      <p className="hm-freshness">
         {(data?.sources ?? []).map((source) => (
           <span
             key={source.name}
@@ -213,100 +234,105 @@ export function Monitoring() {
                 : ` · ${t("not answering")}`}
           </span>
         ))}
-        {data?.label && <span className="source">{t("seen as {label}", { label: data.label })}</span>}
-        {data?.links.dashboard && (
-          <a href={data.links.dashboard} target="_blank" rel="noreferrer">{t("Dashboard")}</a>
-        )}
-        {data?.links.logs && (
-          <a href={data.links.logs} target="_blank" rel="noreferrer">{t("Logs")}</a>
-        )}
-        <select value={range} onChange={(e) => setRange(e.target.value)}>
-          <option value="1h">{t("last hour")}</option>
-          <option value="3h">{t("last 3 hours")}</option>
-          <option value="12h">{t("last 12 hours")}</option>
-          <option value="24h">{t("last day")}</option>
-        </select>
-      </div>
-      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
+        {data?.label && <span>{t("seen as {label}", { label: data.label })}</span>}
+      </p>
+      <Message text={message} />
 
-      <h2>{t("Active alerts")}</h2>
-      {data?.alerts_unavailable_reason ? (
-        <p className="warning">
-          <span>{t("Alerts could not be read: {reason}", { reason: data.alerts_unavailable_reason })}</span>
-        </p>
-      ) : !(data?.alerts ?? []).length ? (
-        <Empty>{t("No alert is firing for this host.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Alert")}</th><th>{t("Severity")}</th><th>{t("Since")}</th><th>{t("Summary")}</th><th>{t("Silence")}</th></tr>
-          </thead>
-          <tbody>
-            {(data?.alerts ?? []).map((alert, index) => (
-              <tr key={`${alert.name}-${index}`}>
-                <td>
-                  {alert.generator_url ? (
-                    <a href={alert.generator_url} target="_blank" rel="noreferrer">{alert.name}</a>
-                  ) : (
-                    alert.name
-                  )}
-                  {alert.silenced_by?.length ? (
-                    <div className="source">{t("silenced")}</div>
-                  ) : null}
-                </td>
-                <td>
-                  <span
-                    className={`badge ${alert.severity === "critical" ? "error" : alert.severity === "warning" ? "warn" : ""}`}
-                  >
-                    {alert.severity || t("unknown")}
-                  </span>
-                </td>
-                <td><Time value={alert.starts_at} /></td>
-                <td className="source">{alert.summary || alert.description}</td>
-                <td>
-                  <button
-                    className="secondary"
-                    disabled={silenceReason.trim().length < 8 || silence.isPending}
-                    onClick={() =>
-                      silence.mutate({
-                        duration_minutes: Number(minutes) || 0,
-                        comment: silenceReason,
-                        alert_name: alert.name,
-                      })
-                    }
-                  >
-                    {t("Silence this")}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {data && (
+        <Stats>
+          <Stat
+            label={t("Active alerts")}
+            value={data.alerts_unavailable_reason ? <span className="badge unknown">{t("unknown")}</span> : alerts.length}
+            tone={data.alerts_unavailable_reason ? "unknown" : critical > 0 ? "error" : alerts.length > 0 ? "warn" : "ok"}
+          />
+          <Stat label={t("Silences in force")} value={(data.silences ?? []).length} tone={(data.silences ?? []).length > 0 ? "warn" : undefined} />
+          <Stat label={t("Metrics")} value={data.metrics_unavailable_reason ? <span className="badge unknown">{t("unknown")}</span> : (data.series ?? []).length} />
+        </Stats>
       )}
 
-      <div className="form" style={{ marginTop: 12 }}>
-        <h2>{t("Silence")}</h2>
-        <p className="subtitle" style={{ margin: 0 }}>
-          {t("A silence turns a sensor off, so it always ends: no open-ended silences from here, at most a day, and always with a reason and an owner in the audit trail.")}
-        </p>
-        <div className="filters">
-          <input value={silenceReason} onChange={(e) => setSilenceReason(e.target.value)}
-                 placeholder={t("Reason (at least 8 characters)")} style={{ minWidth: 320 }} />
-          <input value={minutes} onChange={(e) => setMinutes(e.target.value)}
-                 placeholder={t("Minutes")} style={{ width: 110 }} />
-          <button
-            disabled={silenceReason.trim().length < 8 || silence.isPending}
-            onClick={() => silence.mutate({ duration_minutes: Number(minutes) || 0, comment: silenceReason })}
-          >
-            {t("Silence every alert of this host")}
-          </button>
-        </div>
-      </div>
+      <Section title={t("Active alerts")} count={data && !data.alerts_unavailable_reason ? alerts.length : undefined} flush>
+        {data?.alerts_unavailable_reason ? (
+          <p className="warning">
+            <span>{t("Alerts could not be read: {reason}", { reason: data.alerts_unavailable_reason })}</span>
+          </p>
+        ) : !alerts.length ? (
+          <Empty>{t("No alert is firing for this host.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Alert")}</th><th>{t("Severity")}</th><th>{t("Since")}</th><th>{t("Summary")}</th><th>{t("Silence")}</th></tr>
+            </thead>
+            <tbody>
+              {alerts.map((alert, index) => (
+                <tr key={`${alert.name}-${index}`}>
+                  <td>
+                    {alert.generator_url ? (
+                      <a href={alert.generator_url} target="_blank" rel="noreferrer">{alert.name}</a>
+                    ) : (
+                      <span className="hm-primary">{alert.name}</span>
+                    )}
+                    {alert.silenced_by?.length ? (
+                      <div className="source">{t("silenced")}</div>
+                    ) : null}
+                  </td>
+                  <td>
+                    <span
+                      className={`badge ${alert.severity === "critical" ? "error" : alert.severity === "warning" ? "warn" : ""}`}
+                    >
+                      {alert.severity || t("unknown")}
+                    </span>
+                  </td>
+                  <td><Time value={alert.starts_at} /></td>
+                  <td className="source">{alert.summary || alert.description}</td>
+                  <td>
+                    <button
+                      className="secondary"
+                      disabled={silenceReason.trim().length < 8 || silence.isPending}
+                      onClick={() =>
+                        silence.mutate({
+                          duration_minutes: Number(minutes) || 0,
+                          comment: silenceReason,
+                          alert_name: alert.name,
+                        })
+                      }
+                    >
+                      {t("Silence this")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+
+      <Section
+        title={t("Silence")}
+        description={t("A silence turns a sensor off, so it always ends: no open-ended silences from here, at most a day, and always with a reason and an owner in the audit trail.")}
+      >
+        <Form>
+          <Fields>
+            <Field label={t("Reason (at least 8 characters)")} wide>
+              <input value={silenceReason} onChange={(e) => setSilenceReason(e.target.value)} />
+            </Field>
+            <Field label={t("Minutes")} narrow>
+              <input value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+            </Field>
+          </Fields>
+          <FormActions>
+            <button
+              disabled={silenceReason.trim().length < 8 || silence.isPending}
+              onClick={() => silence.mutate({ duration_minutes: Number(minutes) || 0, comment: silenceReason })}
+            >
+              {t("Silence every alert of this host")}
+            </button>
+          </FormActions>
+        </Form>
+      </Section>
 
       {(data?.silences ?? []).length > 0 && (
-        <>
-          <h2>{t("Silences in force")}</h2>
-          <table>
+        <Section title={t("Silences in force")} count={(data?.silences ?? []).length} flush>
+          <Table>
             <thead>
               <tr><th>{t("Until")}</th><th>{t("Scope")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
             </thead>
@@ -314,7 +340,7 @@ export function Monitoring() {
               {(data?.silences ?? []).map((entry) => (
                 <tr key={entry.id}>
                   <td><Time value={entry.ends_at} /></td>
-                  <td className="source">
+                  <td className="source hm-mono">
                     {(entry.matchers ?? []).map((m) => `${m.name}="${m.value}"`).join(", ")}
                   </td>
                   <td>{entry.comment}</td>
@@ -327,91 +353,92 @@ export function Monitoring() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </>
+          </Table>
+        </Section>
       )}
 
-      <h2>{t("Metrics")}</h2>
-      {data?.metrics_unavailable_reason ? (
-        <Empty>{data.metrics_unavailable_reason}</Empty>
-      ) : (
-        <>
-          <table>
-            <thead><tr><th>{t("Series")}</th><th>{t("Last")}</th><th>{t("Window")}</th><th>{t("Query")}</th></tr></thead>
-            <tbody>
-              {(data?.series ?? []).map((series) => (
-                <tr key={series.name}>
-                  <td>{series.name}</td>
-                  <td>
-                    {series.last === undefined
-                      ? <span className="badge unknown">{t("unknown")}</span>
-                      : `${series.last.toFixed(2)}${series.unit ?? ""}`}
-                  </td>
-                  <td><Sparkline series={series} /></td>
-                  <td className="source" style={{ maxWidth: 420, overflowWrap: "anywhere" }}>
-                    {series.query}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {data && (
-            <p className="source">
-              {t("Source")}: {(data.sources.find((s) => s.name === "prometheus")?.url) || "—"} ·{" "}
-              {t("window")} <Time value={data.from} /> {t("to")} <Time value={data.to} />
-            </p>
-          )}
-        </>
-      )}
+      <Section title={t("Metrics")} count={data && !data.metrics_unavailable_reason ? (data.series ?? []).length : undefined} flush>
+        {data?.metrics_unavailable_reason ? (
+          <Empty>{data.metrics_unavailable_reason}</Empty>
+        ) : (
+          <>
+            <Table>
+              <thead><tr><th>{t("Series")}</th><th className="hm-num">{t("Last")}</th><th>{t("Window")}</th><th>{t("Query")}</th></tr></thead>
+              <tbody>
+                {(data?.series ?? []).map((series) => (
+                  <tr key={series.name}>
+                    <td className="hm-primary">{series.name}</td>
+                    <td className="hm-num">
+                      {series.last === undefined
+                        ? <span className="badge unknown">{t("unknown")}</span>
+                        : `${series.last.toFixed(2)}${series.unit ?? ""}`}
+                    </td>
+                    <td><Sparkline series={series} /></td>
+                    <td className="source hm-mono" style={{ maxWidth: 420, overflowWrap: "anywhere" }}>
+                      {series.query}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {data && (
+              <Foot>
+                <span>
+                  {t("Source")}: {(data.sources.find((s) => s.name === "prometheus")?.url) || "—"} ·{" "}
+                  {t("window")} <Time value={data.from} /> {t("to")} <Time value={data.to} />
+                </span>
+              </Foot>
+            )}
+          </>
+        )}
+      </Section>
 
-      <h2>{t("Probe from this host")}</h2>
-      <p className="subtitle">
-        {t("What the host itself sees. An alert can say a service is down while it answers from here — and then the problem is the network between them, not the service.")}
-      </p>
-      <div className="filters">
-        <input value={probe} onChange={(e) => setProbe(e.target.value)}
-               placeholder="https://service.example.test/health or db.example.test:5432"
-               style={{ minWidth: 380 }} />
-        <button
-          disabled={!probe || runProbe.isPending || host.connection_state !== "online"}
-          onClick={() => runProbe.mutate(probe)}
-        >
-          {t("Probe")}
-        </button>
-      </div>
-      {probeResult && (
-        <table>
-          <tbody>
-            <tr>
-              <td>{t("Result")}</td>
-              <td>
-                {probeResult.passed ? (
-                  <span className="badge ok">{t("as expected")}</span>
-                ) : probeResult.reachable ? (
-                  <span className="badge warn">{t("answers, but not as expected")}</span>
-                ) : (
-                  <span className="badge error">{t("no answer")}</span>
-                )}
-              </td>
-            </tr>
-            <tr><td>{t("Target")}</td><td className="source">{probeResult.target}</td></tr>
-            <tr><td>{t("Took")}</td><td>{probeResult.duration_millis} ms</td></tr>
+      <Section
+        title={t("Probe from this host")}
+        description={t("What the host itself sees. An alert can say a service is down while it answers from here — and then the problem is the network between them, not the service.")}
+      >
+        <Form>
+          <Fields>
+            <Field label={t("Target")} wide>
+              <input value={probe} onChange={(e) => setProbe(e.target.value)}
+                     placeholder="https://service.example.test/health or db.example.test:5432" />
+            </Field>
+          </Fields>
+          <FormActions>
+            <button
+              disabled={!probe || runProbe.isPending || host.connection_state !== "online"}
+              onClick={() => runProbe.mutate(probe)}
+            >
+              {t("Probe")}
+            </button>
+          </FormActions>
+        </Form>
+        {probeResult && (
+          <Facts>
+            <Fact label={t("Result")}>
+              {probeResult.passed ? (
+                <span className="badge ok">{t("as expected")}</span>
+              ) : probeResult.reachable ? (
+                <span className="badge warn">{t("answers, but not as expected")}</span>
+              ) : (
+                <span className="badge error">{t("no answer")}</span>
+              )}
+            </Fact>
+            <Fact label={t("Target")}><span className="source hm-mono">{probeResult.target}</span></Fact>
+            <Fact label={t("Took")}>{probeResult.duration_millis} ms</Fact>
             {probeResult.status_code !== undefined && (
-              <tr><td>{t("Status")}</td><td>{probeResult.status_code}</td></tr>
+              <Fact label={t("Status")}>{probeResult.status_code}</Fact>
             )}
             {probeResult.tls_expiry && (
-              <tr>
-                <td>{t("Certificate")}</td>
-                <td>
-                  {t("valid until")} <Time value={probeResult.tls_expiry} />
-                  <div className="source">{probeResult.tls_issuer}</div>
-                </td>
-              </tr>
+              <Fact label={t("Certificate")}>
+                {t("valid until")} <Time value={probeResult.tls_expiry} />
+                <div className="source">{probeResult.tls_issuer}</div>
+              </Fact>
             )}
-            {probeResult.error && <tr><td>{t("Detail")}</td><td className="source">{probeResult.error}</td></tr>}
-          </tbody>
-        </table>
-      )}
-    </>
+            {probeResult.error && <Fact label={t("Detail")} wide><span className="source">{probeResult.error}</span></Fact>}
+          </Facts>
+        )}
+      </Section>
+    </ModulePage>
   );
 }

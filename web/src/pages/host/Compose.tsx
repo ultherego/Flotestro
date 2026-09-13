@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty, JobState } from "../../components/ui";
-import { useHost } from "./shared";
+import {
+  Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Table, useHost,
+} from "./shared";
 import { useT } from "../../i18n";
 
 type ProjectVersion = {
@@ -110,84 +112,92 @@ export function Compose() {
   });
 
   return (
-    <>
-      <h2>{t("Project")}</h2>
-      <div className="form">
-        <label>
-          {t("Project name")}
-          <input
-            value={project}
-            onChange={(e) => setProject(e.target.value)}
-            placeholder="shop"
-          />
-        </label>
-        <label>
-          {t("Manifest (docker-compose.yml)")}
-          <textarea
-            rows={12}
-            value={manifest}
-            onChange={(e) => { setManifest(e.target.value); setPlan(null); }}
-            placeholder={"services:\n  web:\n    image: nginx@sha256:…"}
-          />
-        </label>
-        <div className="operations">
-          <button
-            onClick={() => planProject.mutate()}
-            disabled={planProject.isPending || !project || !manifest}
-          >
-            {planProject.isPending ? t("Planning…") : t("Plan")}
-          </button>
-        </div>
-        {/* The manifest is stored in the panel together with the version
-            history, so a password typed into it stops being a secret. */}
-        <p className="source" style={{ margin: 0 }}>
-          {t("The manifest is stored with the operation and stays in the panel's history. Keep credentials out of it.")}
-        </p>
-      </div>
+    <ModulePage>
+      <ModuleHeader
+        title={t("Compose")}
+        description={t("Docker Compose projects deployed from the panel: plan first, then deploy exactly that plan.")}
+      />
+      <Message text={message} />
 
-      {message && <p className="source" style={{ marginTop: 12 }}>{message}</p>}
+      <Section title={t("Project")}>
+        <Form>
+          <Fields>
+            <Field label={t("Project name")}>
+              <input
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                placeholder="shop"
+              />
+            </Field>
+            <Field label={t("Manifest (docker-compose.yml)")} wide>
+              <textarea
+                rows={12}
+                value={manifest}
+                onChange={(e) => { setManifest(e.target.value); setPlan(null); }}
+                placeholder={"services:\n  web:\n    image: nginx@sha256:…"}
+              />
+            </Field>
+          </Fields>
+          <FormActions>
+            <button
+              onClick={() => planProject.mutate()}
+              disabled={planProject.isPending || !project || !manifest}
+            >
+              {planProject.isPending ? t("Planning…") : t("Plan")}
+            </button>
+          </FormActions>
+          {/* The manifest is stored in the panel together with the version
+              history, so a password typed into it stops being a secret. */}
+          <FormNote>
+            {t("The manifest is stored with the operation and stays in the panel's history. Keep credentials out of it.")}
+          </FormNote>
+        </Form>
+      </Section>
 
       {plan && (
         <>
-          <h2>{t("Plan")}</h2>
-          <p className="subtitle">
-            {t("Digest {digest} · deploying uses exactly this plan; if the manifest or the images change, the deployment is refused.", { digest: plan.digest.slice(0, 16) })}
-          </p>
+          <Section
+            title={t("Plan")}
+            count={plan.changes?.length ?? 0}
+            description={t("Digest {digest} · deploying uses exactly this plan; if the manifest or the images change, the deployment is refused.", { digest: plan.digest.slice(0, 16) })}
+            flush
+          >
+            {plan.warnings?.map((warning) => (
+              <p key={warning} className="warning"><span>{warning}</span></p>
+            ))}
 
-          {plan.warnings?.map((warning) => (
-            <p key={warning} className="warning"><span>{warning}</span></p>
-          ))}
+            <Table>
+              <thead><tr><th>{t("Object")}</th><th>{t("Name")}</th><th>{t("Change")}</th></tr></thead>
+              <tbody>
+                {!plan.changes?.length ? (
+                  <tr><td colSpan={3} className="empty">{t("Nothing would change on this host.")}</td></tr>
+                ) : (
+                  plan.changes.map((change) => (
+                    <tr key={`${change.kind}/${change.name}`}>
+                      <td>{change.kind}</td>
+                      <td className="hm-mono">{change.name}</td>
+                      <td>{change.action}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </Table>
+          </Section>
 
-          <table>
-            <thead><tr><th>{t("Object")}</th><th>{t("Name")}</th><th>{t("Change")}</th></tr></thead>
-            <tbody>
-              {!plan.changes?.length ? (
-                <tr><td colSpan={3} className="empty">{t("Nothing would change on this host.")}</td></tr>
-              ) : (
-                plan.changes.map((change) => (
-                  <tr key={`${change.kind}/${change.name}`}>
-                    <td>{change.kind}</td>
-                    <td>{change.name}</td>
-                    <td>{change.action}</td>
+          <Section title={t("Services after deployment")} count={(plan.services ?? []).length} flush>
+            <Table>
+              <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th className="hm-num">{t("Replicas")}</th></tr></thead>
+              <tbody>
+                {(plan.services ?? []).map((service) => (
+                  <tr key={service.name}>
+                    <td className="hm-mono hm-primary">{service.name}</td>
+                    <td className="hm-mono">{service.image}</td>
+                    <td className="hm-num">{service.replicas ?? 1}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-
-          <h2>{t("Services after deployment")}</h2>
-          <table>
-            <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th>{t("Replicas")}</th></tr></thead>
-            <tbody>
-              {(plan.services ?? []).map((service) => (
-                <tr key={service.name}>
-                  <td>{service.name}</td>
-                  <td>{service.image}</td>
-                  <td>{service.replicas ?? 1}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </Table>
+          </Section>
 
           <DeployConfirmation
             busy={deploy.isPending}
@@ -196,38 +206,39 @@ export function Compose() {
         </>
       )}
 
-      <h2>{t("History")}</h2>
-      {!project ? (
-        <Empty>{t("Name a project to see its deployment history.")}</Empty>
-      ) : !versions.data?.items.length ? (
-        <Empty>{t("This project has not been deployed from the panel yet.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("When")}</th><th>{t("By")}</th><th>{t("State")}</th><th>{t("Plan")}</th><th></th></tr></thead>
-          <tbody>
-            {versions.data.items.map((version) => (
-              <tr key={version.job_id}>
-                <td><Time value={version.created_at} /></td>
-                <td>{version.created_by}</td>
-                <td><JobState state={version.state} /></td>
-                <td>{version.plan_digest?.slice(0, 12) || "—"}</td>
-                <td>
-                  {/* Rolling a change back is deploying an earlier version.
-                      It is loaded into the editor so that it goes through
-                      a plan - the host state may have changed since then. */}
-                  <button
-                    className="secondary"
-                    onClick={() => { setManifest(version.manifest); setPlan(null); }}
-                  >
-                    {t("Load into editor")}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </>
+      <Section title={t("History")} count={project ? versions.data?.items.length : undefined} flush>
+        {!project ? (
+          <Empty>{t("Name a project to see its deployment history.")}</Empty>
+        ) : !versions.data?.items.length ? (
+          <Empty>{t("This project has not been deployed from the panel yet.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th>{t("When")}</th><th>{t("By")}</th><th>{t("State")}</th><th>{t("Plan")}</th><th></th></tr></thead>
+            <tbody>
+              {versions.data.items.map((version) => (
+                <tr key={version.job_id}>
+                  <td><Time value={version.created_at} /></td>
+                  <td>{version.created_by}</td>
+                  <td><JobState state={version.state} /></td>
+                  <td className="hm-mono">{version.plan_digest?.slice(0, 12) || "—"}</td>
+                  <td>
+                    {/* Rolling a change back is deploying an earlier version.
+                        It is loaded into the editor so that it goes through
+                        a plan - the host state may have changed since then. */}
+                    <button
+                      className="secondary"
+                      onClick={() => { setManifest(version.manifest); setPlan(null); }}
+                    >
+                      {t("Load into editor")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+    </ModulePage>
   );
 }
 
@@ -238,16 +249,19 @@ function DeployConfirmation({
   const t = useT();
   const [reason, setReason] = useState("");
   return (
-    <div className="form" style={{ marginTop: 16 }}>
-      <label>
-        {t("Reason (at least 8 characters, kept in the audit trail)")}
-        <input value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <div className="operations">
-        <button disabled={busy || reason.trim().length < 8} onClick={() => onDeploy(reason)}>
-          {busy ? t("Requesting…") : t("Deploy this plan")}
-        </button>
-      </div>
-    </div>
+    <Section title={t("Deploy this plan")}>
+      <Form>
+        <Fields>
+          <Field label={t("Reason (at least 8 characters, kept in the audit trail)")} wide>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+        </Fields>
+        <FormActions>
+          <button disabled={busy || reason.trim().length < 8} onClick={() => onDeploy(reason)}>
+            {busy ? t("Requesting…") : t("Deploy this plan")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }
