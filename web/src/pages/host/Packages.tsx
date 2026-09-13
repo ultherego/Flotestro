@@ -125,6 +125,10 @@ export function Packages() {
   const upToDate = packages?.installed !== undefined && pending !== undefined
     ? Math.max(0, packages.installed - pending)
     : undefined;
+  // pacman plans with checkupdates and upgrades the whole system at once;
+  // the labels say so, because the operator will not find a partial upgrade
+  // here and should not look for a security count Arch cannot give.
+  const pacman = packages?.manager === "pacman";
 
   return (
     <ModulePage>
@@ -180,7 +184,9 @@ export function Packages() {
           when there is one, follows the row; the sources come last. */}
       <RequestOperation
         host={host}
-        description={t("Count available updates without changing host state.")}
+        description={pacman
+          ? t("Count available updates without changing host state. On Arch the plan comes from checkupdates, the whole system upgrades at once and the security count is unknown.")
+          : t("Count available updates without changing host state.")}
         action="packages.plan"
         payload={{ package_plan: { refresh_metadata: true } }}
         label={t("Plan updates")}
@@ -522,6 +528,7 @@ function SourceForm({
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
   const apt = manager === "apt";
+  const pacman = manager === "pacman";
 
   const ready = id !== "" && url !== "" && (unsigned || key.includes("BEGIN PGP")) &&
     (!apt || suites.trim() !== "");
@@ -529,7 +536,9 @@ function SourceForm({
   return (
     <Section
       title={t("Package source")}
-      description={t("The key travels in the job — it is public, and the plan should show what the host will trust. The password does not: name a secret and the host fetches its value once, while it writes the file.")}
+      description={pacman
+        ? t("The key travels in the job — it is public, and the plan should show what the host will trust. pacman writes the source as a section of /etc/pacman.conf and signs the key in its keyring; a pacman source carries no password.")
+        : t("The key travels in the job — it is public, and the plan should show what the host will trust. The password does not: name a secret and the host fetches its value once, while it writes the file.")}
     >
       <Form>
         <Fields>
@@ -538,7 +547,7 @@ function SourceForm({
           </Field>
           <Field label={t("Address")} wide>
             <input value={url} onChange={(e) => setUrl(e.target.value)}
-                   placeholder="https://packages.example.com/debian" />
+                   placeholder={pacman ? "https://packages.example.com/arch/$arch" : "https://packages.example.com/debian"} />
           </Field>
           {apt && (
             <>

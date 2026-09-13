@@ -106,6 +106,10 @@ var brokenDownloadSymptoms = []string{
 	"unexpected end of file",
 	"is not the expected size",
 	"package does not match intended download",
+	// pacman: a package file that fails its check. The signature case reads
+	// the same way when the key is unknown, and a retry then changes nothing
+	// - one retry costs less than a campaign stopped on a truncated file.
+	"invalid or corrupted package",
 }
 
 // BrokenDownload says whether the transaction failed because of a damaged

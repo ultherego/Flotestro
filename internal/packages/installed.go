@@ -158,6 +158,8 @@ func Installed(ctx context.Context, manager string) InstalledList {
 		list.Packages, list.UnavailableReason = installedAPT(ctx)
 	case "dnf":
 		list.Packages, list.UnavailableReason = installedRPM(ctx)
+	case PacmanName:
+		list.Packages, list.UnavailableReason = installedPacman(ctx)
 	default:
 		list.UnavailableReason = "this package manager cannot list installed packages"
 	}

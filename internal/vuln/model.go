@@ -68,6 +68,11 @@ const (
 const (
 	// ReasonFeedMissing means there is no snapshot for this distribution.
 	ReasonFeedMissing = "feed_missing"
+	// ReasonFamilyUnsupported means a system family no tracker of the panel
+	// speaks about at all. Arch and its derivatives have no release and no
+	// feed of fixed versions the panel could read, so there is nothing to
+	// wait for: the assessment cannot be made rather than is not made yet.
+	ReasonFamilyUnsupported = "family_unsupported"
 	// ReasonFeedStale means a snapshot older than the policy allows.
 	ReasonFeedStale = "feed_stale"
 	// ReasonReleaseUnsupported means a release outside the feed.

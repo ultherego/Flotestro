@@ -423,16 +423,13 @@ func packageFailure(manager string, err error) *helperv1.HelperResponse {
 
 // packageErrorCode turns an adapter error into a stable machine code.
 func packageErrorCode(err error) string {
-	switch {
-	case errors.Is(err, packages.ErrLocked):
-		return packages.ErrorLocked
-	case errors.Is(err, packages.ErrModulesHidden):
-		return packages.ErrorModulesHidden
-	case errors.Is(err, context.DeadlineExceeded):
-		return ErrorTimeout
-	default:
-		return packages.ErrorTransaction
+	if code, ok := packages.ErrorCodeOf(err); ok {
+		return code
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ErrorTimeout
+	}
+	return packages.ErrorTransaction
 }
 
 func packageResultToProto(apply packages.Apply) *helperv1.PackageActionResult {
@@ -612,13 +609,18 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 	if err != nil {
 		return reject(ErrorUnsupported, err.Error())
 	}
+	// pacman has no configuration questions: its repair removes the lock a
+	// crashed pacman left behind and checks the local database.
+	if pacman, ok := manager.(*packages.Pacman); ok {
+		return s.repairPacman(ctx, request, pacman)
+	}
 	apt, ok := manager.(*packages.APT)
 	if !ok {
 		// On other system families the block looks different and the repair
 		// would look different too; pretending the operation works would be
 		// worse than a clear refusal.
 		return reject(ErrorUnsupported,
-			"package repair is supported only for the apt manager")
+			"package repair is supported only for the apt and pacman managers")
 	}
 
 	answers := make([]packages.Answer, 0, len(action.GetAnswers()))
@@ -662,6 +664,44 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 
 	s.log.Info("packages unblocked",
 		"task_id", request.GetTaskId(), "answers", len(answered))
+	return &helperv1.HelperResponse{Accepted: true, RepairResult: response}
+}
+
+// repairPacman unblocks package operations on Arch.
+//
+// The steps the repair carried out come back in the field the agent reads as
+// "what was done": on Arch nothing is answered, and a repair that removed a
+// stale lock is not a repair that did nothing.
+func (s *Server) repairPacman(ctx context.Context, request *helperv1.HelperRequest,
+	pacman *packages.Pacman) *helperv1.HelperResponse {
+	release, busy := s.hold(GuardPackages, request)
+	if busy != nil {
+		return busy
+	}
+	defer release()
+
+	repairCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
+	defer cancel()
+
+	steps, remaining, err := pacman.Repair(repairCtx)
+	response := &helperv1.PackageRepairResponse{
+		Manager:      pacman.Name(),
+		Answered:     steps,
+		StillBlocked: blockedToProto(remaining),
+		Repaired:     err == nil && len(remaining) == 0,
+	}
+	if err != nil {
+		s.log.Warn("the package repair failed",
+			"task_id", request.GetTaskId(), "err", err, "remaining", len(remaining))
+		return &helperv1.HelperResponse{
+			Accepted:     false,
+			ErrorCode:    packageErrorCode(err),
+			Message:      err.Error(),
+			RepairResult: response,
+		}
+	}
+	s.log.Info("the package database was checked",
+		"task_id", request.GetTaskId(), "steps", len(steps))
 	return &helperv1.HelperResponse{Accepted: true, RepairResult: response}
 }
 

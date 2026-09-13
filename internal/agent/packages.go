@@ -57,7 +57,10 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 	})
 	if err != nil {
 		status := agentv1.TaskResult_STATUS_FAILED
-		if errors.Is(err, packages.ErrLocked) {
+		// A refusal of the host - a lock, a distribution that does not do
+		// partial upgrades, a missing planning tool - is a rejection rather
+		// than a failed attempt: nothing was tried.
+		if packages.Refused(err) {
 			status = agentv1.TaskResult_STATUS_REJECTED
 		}
 		return rejected(status, packageErrorCode(err), err.Error())
@@ -149,8 +152,8 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 }
 
 func packageErrorCode(err error) string {
-	if errors.Is(err, packages.ErrLocked) {
-		return packages.ErrorLocked
+	if code, ok := packages.ErrorCodeOf(err); ok {
+		return code
 	}
 	return packages.ErrorTransaction
 }

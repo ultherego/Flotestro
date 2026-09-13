@@ -74,8 +74,15 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	}
 
 	paths := packages.SourcePaths(repo.ID, managerName)
-	copies := make([]fileCopy, 0, len(paths))
-	for _, path := range paths {
+	// A pacman source is a section of the shared configuration file rather
+	// than a file of its own: the file is remembered for the undo like the
+	// rest, but it is never removed with the source.
+	remembered := paths
+	if managerName == packages.PacmanName {
+		remembered = append(append([]string{}, paths...), packages.PacmanConfPath)
+	}
+	copies := make([]fileCopy, 0, len(remembered))
+	for _, path := range remembered {
 		saved, err := rememberFile(path)
 		if err != nil {
 			return reject(ErrorExecFailed, "the previous state was not read: "+err.Error())
@@ -93,6 +100,14 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	}
 
 	if action.GetRemove() {
+		if managerName == packages.PacmanName {
+			// The section and the key in the keyring go first, while the key
+			// file still says which key that is.
+			if err := packages.DropPacmanSource(actionCtx, repo.ID); err != nil {
+				undo()
+				return reject(ErrorExecFailed, err.Error())
+			}
+		}
 		for _, path := range paths {
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				undo()
@@ -122,6 +137,16 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 			filepath.Dir(file.Path) == packages.DNFSourcesDir {
 			sourcePath = file.Path
 		}
+	}
+	if managerName == packages.PacmanName {
+		// The section is edited into pacman.conf and the key, once on disk,
+		// goes into the keyring: a key nobody signed locally makes every
+		// package of the source "unknown trust".
+		if err := packages.WritePacmanSource(actionCtx, repo); err != nil {
+			undo()
+			return reject(ErrorExecFailed, err.Error())
+		}
+		sourcePath = packages.PacmanConfPath
 	}
 
 	// A write does not mean an effect: the manager is asked whether anything can

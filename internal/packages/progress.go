@@ -47,6 +47,13 @@ var dnfStep = regexp.MustCompile(`^\[\s*(\d+)/(\d+)\]\s+(.+?)\s+\d{1,3}%`)
 // dnfStepWithoutPercent handles the steps printed without a progress column.
 var dnfStepWithoutPercent = regexp.MustCompile(`^\[\s*(\d+)/(\d+)\]\s+(.+?)\s*$`)
 
+// pacmanStep recognises the steps of pacman, which numbers them in
+// parentheses and, without a progress bar, prints the description alone:
+//
+//	(3/12) upgrading glibc
+//	(1/5) Arming ConditionNeedsUpdate...
+var pacmanStep = regexp.MustCompile(`^\(\s*(\d+)/(\d+)\)\s+(.+?)\s*$`)
+
 // throttler lets the progress through no more often than every
 // minimumProgressInterval, but does not lose the last state.
 type throttler struct {
@@ -165,11 +172,15 @@ func readOutput(r io.Reader, buffer *limitedBuffer, throttle *throttler) {
 	}
 }
 
-// dnfStepFrom reads the number of a step out of a progress line of dnf.
+// dnfStepFrom reads the number of a step out of a progress line of dnf or
+// of pacman: both count their steps, only the brackets differ.
 func dnfStepFrom(line string) (Progress, bool) {
 	match := dnfStep.FindStringSubmatch(line)
 	if match == nil {
 		match = dnfStepWithoutPercent.FindStringSubmatch(line)
+	}
+	if match == nil {
+		match = pacmanStep.FindStringSubmatch(line)
 	}
 	if match == nil {
 		return Progress{}, false

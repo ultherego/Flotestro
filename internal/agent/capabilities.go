@@ -15,6 +15,7 @@ const (
 	CapSystemd  = "systemd"
 	CapAPT      = "packages.apt"
 	CapDNF      = "packages.dnf"
+	CapPacman   = "packages.pacman"
 	CapJournald = "journald"
 	CapDocker   = "docker"
 	// Compose is a separate adapter: a container engine is sometimes without it,
@@ -149,9 +150,9 @@ func (c Capabilities) Satisfies(requirement string) bool {
 	case "":
 		return true
 	case NeedPackages:
-		return c.Available(CapAPT) || c.Available(CapDNF)
+		return c.Available(CapAPT) || c.Available(CapDNF) || c.Available(CapPacman)
 	case NeedPackageRepair:
-		for _, adapter := range []string{CapAPT, CapDNF} {
+		for _, adapter := range []string{CapAPT, CapDNF, CapPacman} {
 			value, known := c.FeatureState(adapter, "repair")
 			if value {
 				return true
@@ -212,6 +213,11 @@ func DetectCapabilities() Capabilities {
 	systemd := isDir("/run/systemd/system")
 	apt := isExecutable("/usr/bin/apt-get")
 	dnf := isExecutable("/usr/bin/dnf") || isExecutable("/usr/bin/dnf5")
+	pacman := isExecutable("/usr/bin/pacman")
+	// checkupdates from pacman-contrib is the only way to see the pending
+	// updates without syncing the system database; without it the module
+	// works, only without a plan.
+	checkupdates := pacman && isExecutable("/usr/bin/checkupdates")
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
 	compose := docker && composePlugin() != ""
 	journald := exists("/run/systemd/journal/socket")
@@ -277,6 +283,22 @@ func DetectCapabilities() Capabilities {
 			// An rpm database lock looks different from a debconf question, and the repair
 			// would look different too, so the adapter does not have it.
 			Features: map[string]bool{"repair": false},
+		},
+		{
+			Name:      CapPacman,
+			Version:   adapterVersion,
+			Available: pacman,
+			Reason:    pacmanReason(pacman, checkupdates),
+			Features: map[string]bool{
+				// The repair removes a stale database lock and checks the
+				// local database; the hold is a line in pacman.conf.
+				"repair": pacman,
+				"hold":   pacman,
+				"plan":   checkupdates,
+				// The Arch repositories carry no security metadata, so the
+				// number of security updates is unknown rather than zero.
+				"security": false,
+			},
 		},
 		{
 			Name:      CapNetwork,
@@ -519,6 +541,20 @@ func resolverAdapterReason(resolver bool, adapter string) string {
 			"would be overwritten by whoever owns the file"
 	}
 	return ""
+}
+
+// pacmanReason explains what the pacman module is missing. A host without
+// checkupdates has the module, only without a plan - and it is to say so
+// rather than fail a plan after the order.
+func pacmanReason(pacman, checkupdates bool) string {
+	if !pacman {
+		return "pacman is not installed on this host"
+	}
+	if !checkupdates {
+		return "checkupdates (pacman-contrib) is not installed, so upgrades cannot be planned " +
+			"without touching the sync database; the security count is unknown on Arch"
+	}
+	return "the Arch repositories carry no security metadata, so the security count is unknown"
 }
 
 // sshdReason explains what the sshd module is missing.

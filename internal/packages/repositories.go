@@ -178,6 +178,17 @@ func ValidateRepository(repo Repository, manager string, withSecret bool) error 
 		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
 			return fmt.Errorf("a DNF source is described by its address alone, without suites and components")
 		}
+	case PacmanName:
+		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
+			return fmt.Errorf("a pacman source is described by its address alone, without suites and components")
+		}
+		// pacman keeps the address of a source in a file readable by
+		// everyone and has no separate store for credentials: a password
+		// would lie next to the address in plain sight.
+		if withSecret || repo.Username != "" {
+			return fmt.Errorf("a pacman source cannot carry credentials: pacman has no place " +
+				"to keep them outside the public configuration file")
+		}
 	default:
 		return fmt.Errorf("%s: the manager %q does not support managing sources",
 			ErrorUnsupported, manager)
@@ -200,6 +211,8 @@ func SourceFiles(repo Repository, manager, key string, password []byte) ([]File,
 		return aptFiles(repo, key, password)
 	case "dnf":
 		return dnfFiles(repo, key, password)
+	case PacmanName:
+		return pacmanFiles(repo, key)
 	}
 	return nil, fmt.Errorf("%s: the manager %q does not support managing sources",
 		ErrorUnsupported, manager)
@@ -221,8 +234,22 @@ func SourcePaths(id, manager string) []string {
 			filepath.Join(DNFSourcesDir, id+".repo"),
 			filepath.Join(DNFKeysDir, "RPM-GPG-KEY-"+flotestroFilePrefix+id),
 		}
+	case PacmanName:
+		// The section itself is a part of pacman.conf rather than a file of
+		// its own; the key is the only file the source brings.
+		return []string{PacmanKeyPath(id)}
 	}
 	return nil
+}
+
+// pacmanFiles assembles the files of a pacman source: the key alone. The
+// section goes into pacman.conf by an edit rather than a write, because the
+// file is shared with the distribution and the administrator.
+func pacmanFiles(repo Repository, key string) ([]File, error) {
+	if !repo.Signed {
+		return nil, nil
+	}
+	return []File{{Path: PacmanKeyPath(repo.ID), Content: []byte(key), Mode: 0o644}}, nil
 }
 
 // aptFiles assembles a source in the deb822 format.
@@ -358,6 +385,9 @@ func ReadRepositories(manager string) RepositoryImage {
 		image.Known = true
 	case "dnf":
 		image.Repositories = readDNF()
+		image.Known = true
+	case PacmanName:
+		image.Repositories = readPacman()
 		image.Known = true
 	default:
 		image.UnavailableReason = "this package manager does not expose repositories"
@@ -645,6 +675,8 @@ func RefreshSource(ctx context.Context, manager, id string, sourcePath string) e
 			return fmt.Errorf("dnf makecache: %s", line)
 		}
 		return nil
+	case PacmanName:
+		return pacmanRefreshSource(ctx, id)
 	}
 	return fmt.Errorf("%s: the manager %q does not support managing sources",
 		ErrorUnsupported, manager)

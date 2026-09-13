@@ -76,7 +76,7 @@ function requires(...names: string[]) {
 // and the grouped navigation agree on where a module stands.
 const MODULES: Module[] = [
   { segment: "overview", name: "Overview", group: "system", icon: "overview", reason: () => "" },
-  { segment: "packages", name: "Packages", group: "system", icon: "packages", reason: requires("packages.apt", "packages.dnf"), inventory: "packages" },
+  { segment: "packages", name: "Packages", group: "system", icon: "packages", reason: requires("packages.apt", "packages.dnf", "packages.pacman"), inventory: "packages" },
   { segment: "services", name: "Services", group: "system", icon: "services", reason: requires("systemd"), inventory: "services" },
   { segment: "processes", name: "Processes", group: "system", icon: "processes", reason: () => "" },
   { segment: "schedules", name: "Schedules", group: "system", icon: "schedules", reason: requires("schedules"), inventory: "schedules" },
@@ -102,7 +102,7 @@ const MODULES: Module[] = [
     name: "Vulnerabilities",
     group: "security",
     icon: "vulnerabilities",
-    reason: requires("packages.apt", "packages.dnf"),
+    reason: requires("packages.apt", "packages.dnf", "packages.pacman"),
     // The panel computes vulnerabilities from the package list, so the
     // freshness comes from there.
     inventory: "packages",

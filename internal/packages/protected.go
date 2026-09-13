@@ -22,6 +22,13 @@ var protectedNames = []string{
 	"openssh-server",
 	"systemd",
 	"sudo",
+	// The base set of Arch: the meta package of the system, the kernel, the
+	// manager, the C library and the one ssh package the distribution has.
+	"base",
+	"linux",
+	"pacman",
+	"glibc",
+	"openssh",
 }
 
 // protectedPrefixes cover the families of packages whose removal leaves the

@@ -127,6 +127,7 @@ function highestScore(
 /** The reasons an assessment is incomplete - in the operator's language, not codes. */
 const REASONS: Record<string, string> = {
   feed_missing: "no security feed for this distribution",
+  family_unsupported: "no vulnerability feed for this family",
   feed_stale: "the feed is older than the policy allows",
   release_unsupported: "this release is not covered by the feed",
   package_origin_unknown: "the package does not come from the distribution",

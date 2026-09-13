@@ -121,10 +121,12 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 // the given manager.
 //
 // Every manager selects a version differently and that cannot be hidden behind
-// a common notation: apt expects "package=version", dnf "package-version".
+// a common notation: apt expects "package=version", dnf "package-version",
+// pacman a dependency spec "package=version" that its repository has to
+// satisfy exactly.
 func agentPackage(manager, version string) (string, error) {
 	switch manager {
-	case "apt":
+	case "apt", packages.PacmanName:
 		return packages.AgentPackage + "=" + version, nil
 	case "dnf":
 		return packages.AgentPackage + "-" + version, nil

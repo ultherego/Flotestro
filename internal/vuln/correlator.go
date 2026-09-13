@@ -174,6 +174,10 @@ func CoverageReasonFor(input Input, snapshot Snapshot,
 		// host without vendor findings: it is a host nobody has checked for
 		// any.
 		return input.AdvisoriesReason, true
+	case FamilyWithoutFeed(input.Distribution):
+		// No feed for the family is a different answer than a feed not yet
+		// fetched: nothing will arrive later.
+		return ReasonFamilyUnsupported, true
 	case snapshot.Digest == "":
 		return ReasonFeedMissing, true
 	case !CoversRelease(snapshot, input.Release):
@@ -192,6 +196,18 @@ func CoverageReasonFor(input Input, snapshot Snapshot,
 		return input.AdvisoriesReason, false
 	}
 	return "", false
+}
+
+// FamilyWithoutFeed says whether the distribution belongs to a family no
+// vulnerability feed of the panel describes. Arch and the distributions
+// built on it are rolling: they have no release a finding could name a fixed
+// version for, and the panel reads no feed for them.
+func FamilyWithoutFeed(distribution string) bool {
+	switch strings.ToLower(strings.TrimSpace(distribution)) {
+	case "arch", "archlinux", "archarm", "cachyos", "manjaro", "endeavouros", "artix", "garuda":
+		return true
+	}
+	return false
 }
 
 // evaluatePackage settles one package against one vendor finding.

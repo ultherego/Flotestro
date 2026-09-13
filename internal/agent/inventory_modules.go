@@ -58,6 +58,8 @@ var moduleCollectors = map[string]InventoryModule{
 				facts.Packages = aptSummary(ctx)
 			case facts.Capabilities.Available(CapDNF):
 				facts.Packages = dnfSummary(ctx)
+			case facts.Capabilities.Available(CapPacman):
+				facts.Packages = pacmanSummary(ctx)
 			}
 			// The digest of the full package list: the list itself is too big to
 			// travel in every cycle, but the panel has to know when its copy

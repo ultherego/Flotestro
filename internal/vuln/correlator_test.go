@@ -66,6 +66,17 @@ func TestMissingDataIsNotAMissingVulnerability(t *testing.T) {
 			input: debianInput(pkgs...), snapshot: debianSnapshot("bookworm"),
 			reason: ReasonReleaseUnsupported,
 		},
+		// A family without a feed is not waiting for one: Arch has no
+		// release a finding could name a fixed version for.
+		"a family without a feed": {
+			input: func() Input {
+				i := debianInput(pkgs...)
+				i.Distribution, i.Release = "arch", ""
+				return i
+			}(),
+			snapshot: Snapshot{},
+			reason:   ReasonFamilyUnsupported,
+		},
 	}
 	for name, c := range cases {
 		evaluation := Evaluate(c.input, c.snapshot, nil, 6*time.Hour, now)

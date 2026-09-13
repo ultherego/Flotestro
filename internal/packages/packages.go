@@ -48,6 +48,36 @@ var ErrProtectedPackage = errors.New("a protected package")
 // plan was approved.
 var ErrPlanChanged = errors.New("the removal plan has changed since it was approved")
 
+// ErrorCodeOf maps the errors of the adapters to their stable codes. The
+// agent and the helper both translate errors into codes, and one table keeps
+// them from translating the same error two ways. An error without a code of
+// its own is a transaction failure, which the callers settle themselves.
+func ErrorCodeOf(err error) (string, bool) {
+	switch {
+	case errors.Is(err, ErrLocked):
+		return ErrorLocked, true
+	case errors.Is(err, ErrModulesHidden):
+		return ErrorModulesHidden, true
+	case errors.Is(err, ErrDatabaseBroken):
+		return ErrorDatabaseBroken, true
+	case errors.Is(err, ErrCheckupdatesMissing):
+		return ErrorCheckupdatesMissing, true
+	case errors.Is(err, ErrPartialUpgrade):
+		return ErrorPartialUpgrade, true
+	case errors.Is(err, ErrSecurityUnknown):
+		return ErrorSecurityUnknown, true
+	}
+	return "", false
+}
+
+// Refused says whether the error is a refusal of the host rather than a
+// failure of a transaction: the operation asked for something this host
+// cannot do or its distribution does not allow, and nothing was attempted.
+func Refused(err error) bool {
+	return errors.Is(err, ErrLocked) || errors.Is(err, ErrCheckupdatesMissing) ||
+		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown)
+}
+
 // compareSets returns a description of the difference, or nothing when the
 // sets are equal. An empty expected set means there is no approved plan and is
 // a difference as well: an irreversible operation must not go without a
@@ -214,7 +244,7 @@ type Lifecycle interface {
 
 // Detect returns the adapter proper for the host.
 func Detect() (Manager, error) {
-	for _, manager := range []Manager{&APT{}, &DNF{}} {
+	for _, manager := range []Manager{&APT{}, &DNF{}, &Pacman{}} {
 		if manager.Available() {
 			return manager, nil
 		}
@@ -343,6 +373,11 @@ func environment() []string {
 		// stat").
 		"COLUMNS=200",
 		"HOME=" + runtimeDir,
+		// checkupdates syncs a copy of the pacman database in a directory of
+		// its own. Named here, the copy lands in the working directory of the
+		// process rather than in /tmp, and the plan reads the same copy it
+		// asked for.
+		"CHECKUPDATES_DB=" + checkupdatesDB(),
 		"XDG_STATE_HOME=" + filepath.Join(runtimeDir, "state"),
 		"XDG_CACHE_HOME=" + filepath.Join(runtimeDir, "cache"),
 		"XDG_CONFIG_HOME=" + filepath.Join(runtimeDir, "config"),
