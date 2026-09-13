@@ -22,7 +22,39 @@ export function JobState({ state }: { state: string }) {
   const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused",
     "awaiting_budget"].includes(state);
   const kind = succeeded ? "ok" : failed ? "error" : skipped ? "unknown" : waiting ? "warn" : "";
-  return <span className={`badge ${kind}`}>{t(stateName(state))}</span>;
+  // The legend travels with the badge: every state says what it means for
+  // the host and what, if anything, the operator has to do about it.
+  const meaning = stateMeaning(state);
+  return <span className={`badge ${kind}`} title={meaning ? t(meaning) : undefined}>{t(stateName(state))}</span>;
+}
+
+/** One sentence per state, shown on hover. States are not self-explanatory. */
+function stateMeaning(state: string): string {
+  const meanings: Record<string, string> = {
+    queued: "Approved and waiting for delivery to the host.",
+    leased: "Taken by a scheduler; delivery to the host is under way.",
+    dispatched: "Handed to the agent; the host has not reported a start yet.",
+    running: "The host is carrying out the operation.",
+    awaiting_approval: "Nothing happens until somebody approves; the approval confirms the plan hash.",
+    planning: "Every host computes its own plan; nothing is applied yet.",
+    planned: "The plans are in; the campaign waits for the consent.",
+    awaiting_budget: "The host is ready, but the fleet or the site has no capacity now; it starts when a token frees up.",
+    pending: "In the snapshot, waiting for its wave.",
+    rebooting: "The host is rebooting; done only when it comes back with a new boot ID.",
+    verifying: "The change is applied; the post-change check is running.",
+    ineligible: "This host will not run the operation: it lacks the adapter or does not meet a condition. Not a failure and not counted towards the threshold.",
+    skipped: "Left out on purpose, e.g. a maintenance window. Not a failure.",
+    no_change: "The host already had the desired state; nothing was changed.",
+    succeeded: "Done and verified on the host.",
+    failed: "The host reported a failure; the error code and the message say what.",
+    timed_out: "No result within the allowed time; the state of the host is unknown until it reports.",
+    expired: "Not approved in time; it will not run.",
+    canceled: "Stopped before it started, or the running work was left to finish.",
+    partially_applied: "Some of the change landed and some did not; the result lists both.",
+    paused: "No new hosts start until resumed; work under way finishes on its own.",
+    completed: "Every host is settled.",
+  };
+  return meanings[state] ?? "";
 }
 
 /**
