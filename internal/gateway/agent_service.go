@@ -1686,7 +1686,7 @@ func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Ses
 			"previous_addr": previousAddr, "previous_seen_at": lastSeen.UTC().Format(time.RFC3339),
 			"session_id": session.ID, "boot_id": session.BootID, "remote_addr": session.RemoteAddr,
 			"gateway_id": s.gatewayID,
-			"action": "the older session was superseded; assess the host and quarantine it if the identity was copied",
+			"action":     "the older session was superseded; assess the host and quarantine it if the identity was copied",
 		},
 	})
 }
