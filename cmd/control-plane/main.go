@@ -192,6 +192,15 @@ func run() error {
 	flag.DurationVar(&vulnerabilities.NVDInterval, "vulnerability-nvd-interval",
 		config.EnvDuration("FLOTESTRO_VULN_NVD_INTERVAL", 6*time.Hour),
 		"how often the panel asks NVD about changes to the descriptions")
+	webhookURL := flag.String("webhook-url",
+		config.Env("FLOTESTRO_WEBHOOK_URL", ""),
+		"the address the events of the durable trail are posted to; empty disables the webhook")
+	webhookSecret := flag.String("webhook-secret",
+		config.Env("FLOTESTRO_WEBHOOK_SECRET", ""),
+		"the secret the webhook deliveries are signed with (HMAC-SHA256)")
+	webhookEvents := flag.String("webhook-events",
+		config.Env("FLOTESTRO_WEBHOOK_EVENTS", ""),
+		"the prefixes of the event types to deliver, comma separated; empty means every event")
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"the environments where a change has to be approved by a second person")
@@ -422,17 +431,34 @@ func run() error {
 	// the delay of one round trip rather than of the polling interval.
 	trailPublisher := outbox.NewPublisher(pool, outbox.NotifySink{}, log, 2*time.Second)
 	go trailPublisher.Run(ctx)
+	// The webhook is a consumer of the trail with a cursor of its own: it
+	// moves only after the receiver took the batch, so a receiver that is
+	// down loses nothing and shows as a growing lag.
+	var webhook *outbox.Consumer
+	if *webhookURL != "" {
+		if *webhookSecret == "" {
+			log.Warn("the webhook has no secret; the deliveries are not signed in a way the receiver can verify")
+		}
+		webhook = outbox.NewConsumer(pool, "webhook", outbox.Webhook{
+			URL: *webhookURL, Secret: *webhookSecret, Prefixes: splitList(*webhookEvents),
+		}, log, 2*time.Second)
+		go webhook.Run(ctx)
+	}
 	go func() {
 		wakes, unsubscribe := eventBus.Subscribe(func(event events.Event) bool {
-			return event.CampaignID != "" && event.Outbox == nil
+			return event.CampaignID != ""
 		})
 		defer unsubscribe()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-wakes:
-				trailPublisher.Wake()
+			case event := <-wakes:
+				if event.Outbox == nil {
+					trailPublisher.Wake()
+				} else if webhook != nil {
+					webhook.Wake()
+				}
 			}
 		}
 	}()

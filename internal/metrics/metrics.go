@@ -315,7 +315,39 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 			samples: samples,
 		})
 	}
+	// An external consumer that stopped shows as a distance from the end of
+	// the trail and as its failures; both say the receiver, not the panel,
+	// needs looking at.
+	if samples, err := c.consumerLag(ctx); err == nil && len(samples) > 0 {
+		result = append(result, metric{
+			name: "flotestro_outbox_consumer_lag_events", kind: "gauge",
+			help:    "Events of the durable trail not yet delivered to an external consumer.",
+			samples: samples,
+		})
+	}
 	return result
+}
+
+func (c *Collector) consumerLag(ctx context.Context) ([]sample, error) {
+	rows, err := c.pool.Query(ctx, `
+		select name, (select coalesce(max(id), 0) from outbox_events) - last_id, failures
+		  from outbox_consumers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	samples := []sample{}
+	for rows.Next() {
+		var name string
+		var lag, failures float64
+		if err := rows.Scan(&name, &lag, &failures); err != nil {
+			return nil, err
+		}
+		samples = append(samples,
+			sample{labels: map[string]string{"consumer": name, "kind": "behind"}, value: lag},
+			sample{labels: map[string]string{"consumer": name, "kind": "failures"}, value: failures})
+	}
+	return samples, rows.Err()
 }
 
 // outboxLag measures the unpublished part of the trail. A type with nothing

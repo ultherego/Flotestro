@@ -6,13 +6,17 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/outbox"
 )
 
 type campaignView struct {
@@ -4062,4 +4066,100 @@ func TestActionCatalogueCarriesTemplates(t *testing.T) {
 	if withMaterial != 2 {
 		t.Errorf("%d operations need certificate material, expected the deployment and the trust anchor", withMaterial)
 	}
+}
+
+// TestTrailConsumerMovesOnlyAfterDelivery guards the contract of an external
+// consumer of the trail: the cursor moves only after the receiver took the
+// batch, a refusal leaves it in place and holds the consumer back, and the
+// events arrive in order without a gap.
+func TestTrailConsumerMovesOnlyAfterDelivery(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := h.database(ctx)
+	defer pool.Close()
+
+	name := "integration-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	defer pool.Exec(context.Background(), `delete from outbox_consumers where name = $1`, name)
+
+	// The consumer starts at the end of the trail, so the test sees only
+	// what it causes itself.
+	var end int64
+	if err := pool.QueryRow(ctx, `select coalesce(max(id), 0) from outbox_events`).Scan(&end); err != nil {
+		t.Fatalf("reading the end of the trail: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `insert into outbox_consumers (name, last_id) values ($1, $2)`, name, end); err != nil {
+		t.Fatalf("creating the consumer: %v", err)
+	}
+
+	host := h.hostByFamily("debian")
+	campaign := h.createCampaign(labCampaign("consumer", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": []string{host.ID}},
+	}))
+	h.approveCampaign(campaign)
+	h.awaitCampaign(campaign.ID, map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+
+	receiver := &recordingReceiver{}
+	consumer := outbox.NewConsumer(pool, name, receiver, slog.Default(), time.Second)
+
+	// A refusing receiver: nothing is marked delivered and the consumer is
+	// held back until its next attempt time.
+	receiver.refuse = true
+	if _, err := consumer.Deliver(ctx); err == nil {
+		t.Fatal("a refused delivery counted as success")
+	}
+	var lastID int64
+	var failures int
+	if err := pool.QueryRow(ctx, `select last_id, failures from outbox_consumers where name = $1`, name).
+		Scan(&lastID, &failures); err != nil {
+		t.Fatalf("reading the cursor: %v", err)
+	}
+	if lastID != end || failures != 1 {
+		t.Fatalf("after a refusal the cursor is %d (was %d) with %d failures", lastID, end, failures)
+	}
+	if n, err := consumer.Deliver(ctx); err != nil || n != 0 {
+		t.Fatalf("a held-back consumer delivered %d events (%v)", n, err)
+	}
+
+	// Once the pause is over and the receiver accepts, everything after the
+	// cursor arrives in order and the cursor lands on the last event.
+	if _, err := pool.Exec(ctx, `update outbox_consumers set next_attempt_at = now() where name = $1`, name); err != nil {
+		t.Fatalf("lifting the pause: %v", err)
+	}
+	receiver.refuse = false
+	delivered, err := consumer.Deliver(ctx)
+	if err != nil || delivered == 0 {
+		t.Fatalf("delivered %d events: %v", delivered, err)
+	}
+	for i := 1; i < len(receiver.got); i++ {
+		if receiver.got[i].ID <= receiver.got[i-1].ID {
+			t.Fatalf("out of order: %d after %d", receiver.got[i].ID, receiver.got[i-1].ID)
+		}
+	}
+	kinds := map[string]bool{}
+	for _, event := range receiver.got {
+		kinds[event.Type] = true
+	}
+	if !kinds["campaign.completed"] || !kinds["target.succeeded"] {
+		t.Fatalf("the delivery misses the campaign events: %v", kinds)
+	}
+	if err := pool.QueryRow(ctx, `select last_id from outbox_consumers where name = $1`, name).Scan(&lastID); err != nil {
+		t.Fatalf("reading the cursor: %v", err)
+	}
+	if lastID != receiver.got[len(receiver.got)-1].ID {
+		t.Fatalf("the cursor %d is not on the last delivered event %d", lastID, receiver.got[len(receiver.got)-1].ID)
+	}
+}
+
+type recordingReceiver struct {
+	refuse bool
+	got    []outbox.Event
+}
+
+func (r *recordingReceiver) Deliver(_ context.Context, events []outbox.Event) error {
+	if r.refuse {
+		return errors.New("the receiver is down")
+	}
+	r.got = append(r.got, events...)
+	return nil
 }
