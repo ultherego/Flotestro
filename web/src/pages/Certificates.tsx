@@ -83,7 +83,7 @@ export function FleetCertificates() {
 
       <ExpiryTimeline timeline={data.timeline ?? []} />
 
-      <Trust />
+      <Trust leaves={data.items} />
 
       {!data.items.length ? (
         <Empty>
@@ -171,7 +171,7 @@ type TrustView = {
  * holds hundreds of distribution authorities, and they are no information
  * here.
  */
-function Trust() {
+function Trust({ leaves }: { leaves: Item[] }) {
   const t = useT();
   const { data } = useQuery({
     queryKey: ["certificates", "trust"],
@@ -179,21 +179,41 @@ function Trust() {
   });
   if (!data) return null;
   const withoutStore = data.hosts_without_trust_store ?? [];
+
+  // The rotation goes in four stages - distribute the trust, verify it
+  // reached every host, rotate the leaves, withdraw the old trust - and
+  // every stage is an ordinary campaign. The table says where each
+  // authority stands: how many hosts trust it and how many leaves still
+  // hang on it, because the last stage is only safe at zero.
+  const issuedBy = (anchor: TrustView["items"][number]) =>
+    leaves.filter((leaf) => anchor.subject && leaf.issuer === anchor.subject).length;
+  const bulk = (action: string, name: string, payload: Record<string, unknown>) =>
+    `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+
   return (
     <section style={{ marginTop: 16 }}>
       <h2>{t("Trusted authorities")}</h2>
       <p className="subtitle">
         {t("Anchors the panel put on hosts. During a rotation a host trusts both the old and the new authority; the old one may only be withdrawn once nothing signs with it any more.")}
       </p>
+      <p className="source">
+        {t("Rotation in four stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old authority. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.")}{" "}
+        <Link to={bulk("certificate.trust.ensure", t("Distribute a new authority"), {
+          certificate: { anchor_id: "fleet-ca-" + new Date().getFullYear(), certificate: "-----BEGIN CERTIFICATE-----\nREPLACE WITH THE AUTHORITY CERTIFICATE\n-----END CERTIFICATE-----\n" },
+        })}>{t("Distribute a new authority")}</Link>
+      </p>
       {!data.items.length ? (
         <Empty>{t("No panel-managed authority on any host.")}</Empty>
       ) : (
         <table>
           <thead>
-            <tr><th>{t("Authority")}</th><th>{t("Hosts")}</th><th>{t("Valid until")}</th><th>{t("Fingerprint")}</th></tr>
+            <tr><th>{t("Authority")}</th><th>{t("Hosts")}</th><th>{t("Leaves issued by it")}</th><th>{t("Valid until")}</th><th>{t("Fingerprint")}</th><th>{t("Stage")}</th></tr>
           </thead>
           <tbody>
-            {data.items.map((anchor) => (
+            {data.items.map((anchor) => {
+              const covered = anchor.hosts >= data.hosts_total && data.hosts_unknown === 0;
+              const issued = issuedBy(anchor);
+              return (
               <tr key={(anchor.fingerprint_sha256 || anchor.anchor_id) ?? ""}>
                 <td>
                   {anchor.subject || anchor.anchor_id || "—"}
@@ -205,10 +225,34 @@ function Trust() {
                   {t("{n} of {total}", { n: anchor.hosts, total: data.hosts_total })}
                   <div className="source">{(anchor.sample ?? []).join(", ")}</div>
                 </td>
+                <td>
+                  {issued}
+                  {issued > 0 && <div className="source">{t("rotate the leaves before withdrawing")}</div>}
+                </td>
                 <td>{anchor.not_after ? <Time value={anchor.not_after} /> : "—"}</td>
                 <td className="source">{(anchor.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
+                <td>
+                  {!covered ? (
+                    <>
+                      <span className="badge warn">{t("distributing")}</span>{" "}
+                      <Link to={bulk("certificate.trust.ensure", t("Distribute {anchor}", { anchor: anchor.anchor_id ?? anchor.subject ?? "" }), {
+                        certificate: { anchor_id: anchor.anchor_id ?? "", certificate: "-----BEGIN CERTIFICATE-----\nREPLACE WITH THE AUTHORITY CERTIFICATE\n-----END CERTIFICATE-----\n" },
+                      })}>{t("distribute to the rest")}</Link>
+                    </>
+                  ) : issued > 0 ? (
+                    <span className="badge ok">{t("in use")}</span>
+                  ) : (
+                    <>
+                      <span className="badge">{t("withdrawable")}</span>{" "}
+                      <Link to={bulk("certificate.trust.remove", t("Withdraw {anchor}", { anchor: anchor.anchor_id ?? anchor.subject ?? "" }), {
+                        certificate: { anchor_id: anchor.anchor_id ?? "" },
+                      })}>{t("withdraw")}</Link>
+                    </>
+                  )}
+                </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}

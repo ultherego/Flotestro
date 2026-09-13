@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign, CampaignTarget } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
@@ -26,12 +26,17 @@ export function Bulk() {
   // order, afterwards - on a campaign that computes its plans itself and
   // waits for consent.
   const [campaignID, setCampaignID] = useState("");
+  // Another screen may open the workspace with an order half written - the
+  // certificate view hands over a rotation stage this way. The address
+  // carries the operation, a name and a payload; everything else is
+  // decided here.
+  const [prefill] = useSearchParams();
   const [order, setOrder] = useState<Order>({
-    name: "",
-    action: "",
+    name: prefill.get("name") ?? "",
+    action: prefill.get("action") ?? "",
     unit: "",
     securityOnly: true,
-    payloadText: "",
+    payloadText: prefill.get("payload") ?? "",
     site: "",
     environment: "",
     osFamily: "",
@@ -55,6 +60,16 @@ export function Bulk() {
     queryFn: () => api.get<Collection<Operation>>("/api/v1/actions"),
   });
   const bulk = (operations.data?.items ?? []).filter((item) => item.campaign_ready);
+  // A prefilled operation without a payload takes the template once the
+  // catalogue is in, exactly as choosing it by hand would.
+  const prefilledTemplate = order.action && !order.payloadText && !WIZARD_OPERATIONS.includes(order.action)
+    ? bulk.find((item) => item.action === order.action)?.payload_template
+    : undefined;
+  useEffect(() => {
+    if (prefilledTemplate) {
+      setOrder((previous) => ({ ...previous, payloadText: JSON.stringify(prefilledTemplate, null, 2) }));
+    }
+  }, [prefilledTemplate]);
   // Refusals are shown together with the reason. An operation missing from
   // the list without a word of explanation looks like a missing feature -
   // while it may be a boundary drawn on purpose, e.g. restoring a backup.
