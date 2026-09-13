@@ -5,7 +5,14 @@ set -e
 case "$1" in
 configure)
     # A service account without a shell and without a home directory: the
-    # agent is not an identity anybody logs into the host with.
+    # agent is not an identity anybody logs into the host with. The
+    # declaration in sysusers.d is the source; adduser is the fallback for
+    # a system without systemd-sysusers.
+    if ! getent passwd flotestro-agent >/dev/null; then
+        if command -v systemd-sysusers >/dev/null 2>&1; then
+            systemd-sysusers /usr/lib/sysusers.d/flotestro-agent.conf >/dev/null 2>&1 || true
+        fi
+    fi
     if ! getent passwd flotestro-agent >/dev/null; then
         adduser --system --group --no-create-home \
             --home /var/lib/flotestro-agent --shell /usr/sbin/nologin \
