@@ -226,7 +226,7 @@ func TestSondaMowiCoWidziHost(t *testing.T) {
 	if wynikZamkniety.Reachable || wynikZamkniety.Error == "" {
 		t.Fatalf("zamkniety port opisany jako %+v", wynikZamkniety)
 	}
-	if len(proby) > 0 && !strings.Contains(proby[len(proby)-1].Message, "nie odpowiada") {
+	if len(proby) > 0 && !strings.Contains(proby[len(proby)-1].Message, "does not answer") {
 		t.Errorf("komunikat nie mowi, ze usluga nie odpowiada: %q",
 			proby[len(proby)-1].Message)
 	}

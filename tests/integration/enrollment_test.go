@@ -189,7 +189,7 @@ func TestKwarantannaOdcinaHostaINieBlokujeGo(t *testing.T) {
 		// Agent wraca dopiero po swoim backoffie. Bez czekania kolejne testy
 		// zastaja host offline i przewracaja sie z powodu, ktory nie ma nic
 		// wspolnego z tym, co sprawdzaja.
-		h.poczekajNaPolaczenie(host.ID, time.Minute)
+		h.awaitConnection(host.ID, time.Minute)
 	})
 
 	// Powod jest wymagany: host odciety bez powodu jest hostem, o ktorym za
@@ -235,7 +235,7 @@ func TestWycofanieWymagaPrzepisaniaNazwy(t *testing.T) {
 func TestWycofanyHostNieWracaTokenem(t *testing.T) {
 	h := newHarness(t)
 	// Maszyny syntetycznej nie ma we flocie, wiec mozemy ja naprawde wycofac.
-	host := h.zarejestrujSyntetycznyHost(t)
+	host := h.enrollSyntheticHost(t)
 
 	var wynik struct {
 		LifecycleState      string `json:"lifecycle_state"`
@@ -293,7 +293,7 @@ func TestPostepInstalacjiOpisujeKroki(t *testing.T) {
 	// Maszyna syntetyczna rejestruje sie i na tym poprzestaje: nie laczy sie
 	// sesja i nie przysyla inwentarza, wiec dwa pierwsze kroki maja byc
 	// zrobione, a dwa kolejne dalej czekac.
-	host := h.zarejestrujSyntetycznyHostZamowieniem(t, utworzone.Token)
+	host := h.enrollSyntheticHostWithToken(t, utworzone.Token)
 	var po zamowienieView
 	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &po)
 	stany := map[string]string{}
@@ -350,7 +350,7 @@ func TestWymianaAgentaKonczySiePowrotemHosta(t *testing.T) {
 	}
 	// Wymiana agenta jest operacja wysokiego ryzyka: odcina host od
 	// zarzadzania na czas restartu, wiec wymaga zatwierdzenia.
-	if !job.RequiresApprova {
+	if !job.RequiresApproval {
 		t.Fatal("wymiana agenta nie wymaga zatwierdzenia")
 	}
 	job = h.approve(job.ID, job.PayloadHash)
@@ -377,7 +377,7 @@ func TestWymianaAgentaKonczySiePowrotemHosta(t *testing.T) {
 	if po.AgentVersion != cel {
 		t.Fatalf("host zglasza wersje %q, oczekiwano %q", po.AgentVersion, cel)
 	}
-	h.poczekajNaPolaczenie(host.ID, time.Minute)
+	h.awaitConnection(host.ID, time.Minute)
 }
 
 // najnowszaWersjaAgenta czyta z repozytorium floty testowej najwyzsza wersje

@@ -10,181 +10,185 @@ import (
 	"os"
 	"time"
 
-	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
+	filesmodule "github.com/ultherego/flotestro/internal/modules/files"
 )
 
-// Prawa domyslne. Certyfikat jest jawny i musi go przeczytac usluga; klucz
-// nie jest jawny i nie moze go przeczytac nikt poza wlascicielem.
+// Default permissions. The certificate is public and the service must read
+// it; the key is not public and nobody but the owner may read it.
 const (
-	TrybCertyfikatu = "0644"
-	TrybKlucza      = "0600"
+	CertificateMode = "0644"
+	KeyMode         = "0600"
 )
 
-// OknoSondy ogranicza czekanie na odpowiedz uslugi po przeladowaniu.
-const OknoSondy = 10 * time.Second
+// ProbeWindow bounds the wait for the service answer after a reload.
+const ProbeWindow = 10 * time.Second
 
-// Wdrozenie opisuje jedna podmiane certyfikatu na hoscie.
+// Deployment describes one certificate replacement on the host.
 //
-// Klucz jest w tej strukturze jako bajty i tylko tutaj: przychodzi z magazynu
-// tuz przed operacja, zyje w pamieci procesu przez czas jej trwania i nie
-// trafia ani do wyniku, ani do dziennika, ani do zadnego pliku poza tym,
-// ktory ma powstac.
-type Wdrozenie struct {
-	Path       string
-	KeyPath    string
-	Certyfikat []byte
-	Klucz      []byte
-	Owner      string
-	Group      string
-	Mode       string
-	KeyMode    string
-	Jednostka  string
-	Cel        string
+// The key is in this structure as bytes and only here: it comes from the
+// store right before the operation, lives in the process memory for its
+// duration and goes neither into the result, nor the log, nor any file but
+// the one that is to be created.
+type Deployment struct {
+	Path        string
+	KeyPath     string
+	Certificate []byte
+	Key         []byte
+	Owner       string
+	Group       string
+	Mode        string
+	KeyMode     string
+	Unit        string
+	Target      string
 }
 
-// Sprawdz weryfikuje material przed podmiana.
+// Check verifies the material before the replacement.
 //
-// Kolejnosc pytan jest tu cala trescia: certyfikat, ktory nie pasuje do
-// klucza, zatrzyma usluge dopiero przy starcie - juz po tym, jak stary plik
-// przestanie istniec. Dlatego wszystko, co da sie sprawdzic bez dotykania
-// dysku, sprawdzamy przed pierwszym zapisem.
-func Sprawdz(wdrozenie Wdrozenie, teraz time.Time) ([]*x509.Certificate, error) {
-	if err := WalidujSciezke(wdrozenie.Path); err != nil {
+// The order of the questions is the whole point here: a certificate that
+// does not match the key stops the service only at start - after the old
+// file has already ceased to exist. That is why everything that can be
+// checked without touching the disk is checked before the first write.
+func Check(deployment Deployment, now time.Time) ([]*x509.Certificate, error) {
+	if err := ValidatePath(deployment.Path); err != nil {
 		return nil, err
 	}
-	if wdrozenie.KeyPath != "" {
-		if err := WalidujSciezke(wdrozenie.KeyPath); err != nil {
+	if deployment.KeyPath != "" {
+		if err := ValidatePath(deployment.KeyPath); err != nil {
 			return nil, err
 		}
 	}
-	if err := WalidujJednostke(wdrozenie.Jednostka); err != nil {
+	if err := ValidateUnit(deployment.Unit); err != nil {
 		return nil, err
 	}
-	if err := WalidujCel(wdrozenie.Cel); err != nil {
+	if err := ValidateTarget(deployment.Target); err != nil {
 		return nil, err
 	}
 
-	certy, err := ParsujPEM(wdrozenie.Certyfikat)
+	certs, err := ParsePEM(deployment.Certificate)
 	if err != nil {
 		return nil, err
 	}
-	if err := SprawdzTerminy(certy[0], teraz); err != nil {
+	if err := CheckDates(certs[0], now); err != nil {
 		return nil, err
 	}
-	if err := SprawdzLancuch(certy); err != nil {
+	if err := CheckChain(certs); err != nil {
 		return nil, err
 	}
-	if len(wdrozenie.Klucz) > 0 {
-		if wdrozenie.KeyPath == "" {
-			return nil, errors.New("klucz przyszedl z magazynu, ale zlecenie nie mowi, gdzie go zapisac")
+	if len(deployment.Key) > 0 {
+		if deployment.KeyPath == "" {
+			return nil, errors.New("the key came from the store, but the order does not say where to write it")
 		}
-		if err := DopasujKlucz(certy[0], wdrozenie.Klucz); err != nil {
+		if err := MatchKey(certs[0], deployment.Key); err != nil {
 			return nil, err
 		}
 	}
-	// Sonda ma sprawdzic ten certyfikat, a nie dowolny. Nazwa celu spoza
-	// certyfikatu oznacza, ze test i tak nie potwierdzilby wdrozenia.
-	if wdrozenie.Cel != "" {
-		if gospodarz, _, err := net.SplitHostPort(wdrozenie.Cel); err == nil {
-			if net.ParseIP(gospodarz) == nil && !Obejmuje(certy[0], gospodarz) {
-				return nil, fmt.Errorf("certyfikat nie obejmuje nazwy %q, wiec sonda nie potwierdzi wdrozenia", gospodarz)
+	// The probe is meant to check this certificate, not any. A target name
+	// outside the certificate means the test would not confirm the
+	// deployment anyway.
+	if deployment.Target != "" {
+		if host, _, err := net.SplitHostPort(deployment.Target); err == nil {
+			if net.ParseIP(host) == nil && !Covers(certs[0], host) {
+				return nil, fmt.Errorf("the certificate does not cover the name %q, so the probe will not confirm the deployment", host)
 			}
 		}
 	}
-	return certy, nil
+	return certs, nil
 }
 
-// Kopia trzyma poprzednia zawartosc pliku na czas operacji.
+// Backup holds the previous file content for the duration of the
+// operation.
 //
-// Kopia zyje w pamieci, a nie obok pliku: zapis starego klucza do drugiego
-// pliku zostawilby na dysku klucz, ktorego nikt juz nie pilnuje - takze
-// wtedy, gdy wdrozenie sie powiedzie.
-type Kopia struct {
+// The backup lives in memory, not next to the file: writing the old key to
+// a second file would leave a key nobody watches any more on the disk -
+// also when the deployment succeeds.
+type Backup struct {
 	Path     string
-	Istnial  bool
-	Tresc    []byte
-	Tryb     os.FileMode
+	Existed  bool
+	Content  []byte
+	Mode     os.FileMode
 	UID, GID int
 }
 
-// Zapamietaj czyta plik, ktory za chwile zostanie podmieniony.
-func Zapamietaj(sciezka string) (Kopia, error) {
-	kopia := Kopia{Path: sciezka, Tryb: 0o644, UID: -1, GID: -1}
-	if sciezka == "" {
-		return kopia, nil
+// Remember reads the file that is about to be replaced.
+func Remember(path string) (Backup, error) {
+	backup := Backup{Path: path, Mode: 0o644, UID: -1, GID: -1}
+	if path == "" {
+		return backup, nil
 	}
-	dane, err := CzytajPlik(sciezka)
+	data, err := ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return kopia, nil
+		return backup, nil
 	}
 	if err != nil {
-		return kopia, err
+		return backup, err
 	}
-	info, err := os.Lstat(sciezka)
+	info, err := os.Lstat(path)
 	if err != nil {
-		return kopia, err
+		return backup, err
 	}
-	kopia.Istnial = true
-	kopia.Tresc = dane
-	kopia.Tryb = info.Mode().Perm()
-	if uid, gid, ok := wlascicielPliku(info); ok {
-		kopia.UID, kopia.GID = uid, gid
+	backup.Existed = true
+	backup.Content = data
+	backup.Mode = info.Mode().Perm()
+	if uid, gid, ok := fileOwner(info); ok {
+		backup.UID, backup.GID = uid, gid
 	}
-	return kopia, nil
+	return backup, nil
 }
 
-// Przywroc wraca do zapamietanej zawartosci pliku.
+// Restore returns to the remembered file content.
 //
-// Plik, ktorego przed operacja nie bylo, znika: powrot do stanu sprzed
-// zmiany oznacza takze brak pliku, ktory zmiana stworzyla.
-func (k Kopia) Przywroc() error {
-	if k.Path == "" {
+// A file that did not exist before the operation vanishes: returning to
+// the state before the change also means the absence of the file the
+// change created.
+func (b Backup) Restore() error {
+	if b.Path == "" {
 		return nil
 	}
-	if !k.Istnial {
-		if err := os.Remove(k.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if !b.Existed {
+		if err := os.Remove(b.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
-	return filesmodul.ZapiszAtomowo(k.Path, k.Tresc, k.Tryb, k.UID, k.GID)
+	return filesmodule.WriteAtomically(b.Path, b.Content, b.Mode, b.UID, b.GID)
 }
 
-// Zapisz kladzie certyfikat i klucz na swoich miejscach.
+// Write puts the certificate and the key in their places.
 //
-// Klucz idzie pierwszy: usluga przeladowana miedzy jednym zapisem a drugim
-// zobaczy stary certyfikat z nowym kluczem albo nowy certyfikat ze starym
-// kluczem, a tylko pierwsza z tych par nie konczy sie bledem uzgadniania.
-func Zapisz(wdrozenie Wdrozenie, uid, gid int) error {
-	if len(wdrozenie.Klucz) > 0 {
-		tryb, err := filesmodul.WalidujTryb(wartoscAlbo(wdrozenie.KeyMode, TrybKlucza))
+// The key goes first: a service reloaded between one write and the other
+// sees the old certificate with the new key or the new certificate with the
+// old key, and only the first of these pairs does not end in a handshake
+// error.
+func Write(deployment Deployment, uid, gid int) error {
+	if len(deployment.Key) > 0 {
+		mode, err := filesmodule.ValidateMode(valueOr(deployment.KeyMode, KeyMode))
 		if err != nil {
 			return err
 		}
-		if tryb.Perm()&0o044 != 0 {
-			return fmt.Errorf("prawa %q pozwalaja czytac klucz prywatny poza wlascicielem",
-				wartoscAlbo(wdrozenie.KeyMode, TrybKlucza))
+		if mode.Perm()&0o044 != 0 {
+			return fmt.Errorf("the permissions %q let the private key be read outside the owner",
+				valueOr(deployment.KeyMode, KeyMode))
 		}
-		if err := filesmodul.ZapiszAtomowo(wdrozenie.KeyPath, wdrozenie.Klucz, tryb, uid, gid); err != nil {
+		if err := filesmodule.WriteAtomically(deployment.KeyPath, deployment.Key, mode, uid, gid); err != nil {
 			return err
 		}
 	}
-	tryb, err := filesmodul.WalidujTryb(wartoscAlbo(wdrozenie.Mode, TrybCertyfikatu))
+	mode, err := filesmodule.ValidateMode(valueOr(deployment.Mode, CertificateMode))
 	if err != nil {
 		return err
 	}
-	return filesmodul.ZapiszAtomowo(wdrozenie.Path, wdrozenie.Certyfikat, tryb, uid, gid)
+	return filesmodule.WriteAtomically(deployment.Path, deployment.Certificate, mode, uid, gid)
 }
 
-func wartoscAlbo(wartosc, domyslna string) string {
-	if wartosc == "" {
-		return domyslna
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
 	}
-	return wartosc
+	return value
 }
 
-// WynikSondy opisuje to, co usluga pokazuje po przeladowaniu.
-type WynikSondy struct {
+// ProbeResult describes what the service shows after a reload.
+type ProbeResult struct {
 	Target            string `json:"target"`
 	Reachable         bool   `json:"reachable"`
 	FingerprintSHA256 string `json:"fingerprint_sha256,omitempty"`
@@ -193,53 +197,54 @@ type WynikSondy struct {
 	Error             string `json:"error,omitempty"`
 }
 
-// Sonda pyta usluge, czym sie teraz przedstawia.
+// Probe asks the service what it presents itself as now.
 //
-// Polaczenie nie sprawdza zaufania i nie powinno: pytanie brzmi "czy usluga
-// podaje ten certyfikat, ktory wlasnie wdrozylismy", a nie "czy ten host
-// ufa temu urzedowi". Weryfikacja lancucha wobec magazynu zaufania hosta
-// odrzucalaby kazdy certyfikat z wlasnego CA - czyli wiekszosc tych, ktore
-// panel wdraza.
-func Sonda(ctx context.Context, cel string) WynikSondy {
-	wynik := WynikSondy{Target: cel}
-	if err := WalidujCel(cel); err != nil || cel == "" {
+// The connection does not check trust and should not: the question is
+// "does the service present the certificate we have just deployed", not
+// "does this host trust this authority". Chain verification against the
+// host trust store would reject every certificate from a private CA - that
+// is most of those the panel deploys.
+func Probe(ctx context.Context, target string) ProbeResult {
+	result := ProbeResult{Target: target}
+	if err := ValidateTarget(target); err != nil || target == "" {
 		if err != nil {
-			wynik.Error = err.Error()
+			result.Error = err.Error()
 		}
-		return wynik
+		return result
 	}
-	gospodarz, _, _ := net.SplitHostPort(cel)
+	host, _, _ := net.SplitHostPort(target)
 	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: OknoSondy},
+		NetDialer: &net.Dialer{Timeout: ProbeWindow},
 		Config: &tls.Config{
-			// Nazwe podajemy, zeby serwer wybral wlasciwy certyfikat przy
-			// SNI; weryfikacje robimy sami, porownujac odcisk.
-			ServerName:         gospodarz,
+			// The name is given so the server picks the right certificate
+			// for SNI; the verification is done by us, comparing the
+			// fingerprint.
+			ServerName:         host,
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,
 		},
 	}
-	polaczenie, err := dialer.DialContext(ctx, "tcp", cel)
+	conn, err := dialer.DialContext(ctx, "tcp", target)
 	if err != nil {
-		wynik.Error = err.Error()
-		return wynik
+		result.Error = err.Error()
+		return result
 	}
-	defer polaczenie.Close()
+	defer conn.Close()
 
-	stan := polaczenie.(*tls.Conn).ConnectionState()
-	if len(stan.PeerCertificates) == 0 {
-		wynik.Error = "usluga nie przedstawila certyfikatu"
-		return wynik
+	state := conn.(*tls.Conn).ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		result.Error = "the service presented no certificate"
+		return result
 	}
-	lisc := stan.PeerCertificates[0]
-	wynik.Reachable = true
-	wynik.FingerprintSHA256 = Odcisk(lisc)
-	wynik.Subject = lisc.Subject.String()
-	wynik.NotAfter = lisc.NotAfter.UTC().Format(time.RFC3339)
-	return wynik
+	leaf := state.PeerCertificates[0]
+	result.Reachable = true
+	result.FingerprintSHA256 = Fingerprint(leaf)
+	result.Subject = leaf.Subject.String()
+	result.NotAfter = leaf.NotAfter.UTC().Format(time.RFC3339)
+	return result
 }
 
-// Potwierdza mowi, czy usluga pokazuje dokladnie ten certyfikat.
-func (w WynikSondy) Potwierdza(odcisk string) bool {
-	return w.Reachable && w.FingerprintSHA256 == odcisk
+// Confirms says whether the service shows exactly this certificate.
+func (r ProbeResult) Confirms(fingerprint string) bool {
+	return r.Reachable && r.FingerprintSHA256 == fingerprint
 }

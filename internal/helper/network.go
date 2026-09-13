@@ -45,11 +45,11 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if !network.Istnieje(network.SciezkaNmcli) {
+	if !network.Exists(network.NmcliPath) {
 		if action.GetOperation() == helperv1.NetworkRequest_OPERATION_PLAN {
 			// A missing NetworkManager is an answer of the plan, not a read
 			// error: the campaign is to see this host as a refusal.
-			return networkPlanResponse(nil, network.OdmowaPlanu(action.GetInterface(),
+			return networkPlanResponse(nil, network.RefusedPlan(action.GetInterface(),
 				networkChangeKind(action),
 				"this host has no NetworkManager; the network configuration is read-only here"))
 		}
@@ -85,7 +85,7 @@ func (s *Server) planNetwork(ctx context.Context, action *helperv1.NetworkReques
 	profiles := s.readProfiles(ctx)
 	_, profile, err := s.interfaceProfile(ctx, action.GetInterface())
 	if err != nil {
-		return networkPlanResponse(profiles, network.OdmowaPlanu(action.GetInterface(),
+		return networkPlanResponse(profiles, network.RefusedPlan(action.GetInterface(),
 			networkChangeKind(action), err.Error()))
 	}
 	return networkPlanResponse(profiles, networkPlan(action, profile))
@@ -93,15 +93,15 @@ func (s *Server) planNetwork(ctx context.Context, action *helperv1.NetworkReques
 
 // networkPlan computes the plan for the change described by the order against
 // the profile found.
-func networkPlan(action *helperv1.NetworkRequest, profile network.Profil) network.Plan {
+func networkPlan(action *helperv1.NetworkRequest, profile network.Profile) network.Plan {
 	switch networkChangeKind(action) {
-	case network.PlanProfil:
-		return network.ZaplanujProfil(action.GetInterface(), profile, action.GetMethod(),
+	case network.PlanProfile:
+		return network.ComputeProfile(action.GetInterface(), profile, action.GetMethod(),
 			action.GetAddresses(), action.GetGateway(), action.GetDns())
-	case network.PlanTrasy:
-		return network.ZaplanujTrasy(action.GetInterface(), profile, action.GetRoutes())
+	case network.PlanRoutes:
+		return network.ComputeRoutes(action.GetInterface(), profile, action.GetRoutes())
 	default:
-		return network.ZaplanujMTU(action.GetInterface(), profile, action.GetMtu())
+		return network.ComputeMTU(action.GetInterface(), profile, action.GetMtu())
 	}
 }
 
@@ -111,23 +111,23 @@ func networkPlan(action *helperv1.NetworkRequest, profile network.Profil) networ
 func networkChangeKind(action *helperv1.NetworkRequest) string {
 	switch action.GetOperation() {
 	case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
-		return network.PlanProfil
+		return network.PlanProfile
 	case helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES:
-		return network.PlanTrasy
+		return network.PlanRoutes
 	case helperv1.NetworkRequest_OPERATION_SET_MTU:
 		return network.PlanMTU
 	}
 	switch {
 	case action.GetMethod() != "":
-		return network.PlanProfil
+		return network.PlanProfile
 	case action.Routes != nil:
-		return network.PlanTrasy
+		return network.PlanRoutes
 	default:
 		return network.PlanMTU
 	}
 }
 
-func networkPlanResponse(profiles []network.Profil, plan network.Plan) *helperv1.HelperResponse {
+func networkPlanResponse(profiles []network.Profile, plan network.Plan) *helperv1.HelperResponse {
 	encoded, err := json.Marshal(plan)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -135,7 +135,7 @@ func networkPlanResponse(profiles []network.Profil, plan network.Plan) *helperv1
 	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == network.PlanBezZmian:
+	case plan.Action == network.PlanNoChange:
 		message = "the profile " + plan.Connection + " is already in the desired state"
 	default:
 		message = "the profile " + plan.Connection + ": " + strings.Join(plan.Changes, "; ")
@@ -176,26 +176,26 @@ func (s *Server) changeNetwork(ctx context.Context, action *helperv1.NetworkRequ
 	// The rollback plan is built from the state read before the change. It is
 	// written to disk, because the helper ends its work after an idle period -
 	// a timer in its memory would disappear together with the process.
-	plan := network.PlanWycofania{
-		ID:           rollbackIdentifier(),
-		Profil:       profile,
-		Interfejs:    action.GetInterface(),
-		Zarzadzajacy: false,
-		Utworzony:    time.Now().UTC(),
-		Powod:        action.GetReason(),
+	plan := network.RollbackPlan{
+		ID:         rollbackIdentifier(),
+		Profile:    profile,
+		Interface:  action.GetInterface(),
+		Management: false,
+		CreatedAt:  time.Now().UTC(),
+		Reason:     action.GetReason(),
 	}
 	window := rollbackWindow(action.GetRollbackSeconds())
-	plan.Termin = plan.Utworzony.Add(window)
+	plan.Deadline = plan.CreatedAt.Add(window)
 
-	if _, err := network.KrokiWycofania(plan); err != nil {
+	if _, err := network.RollbackSteps(plan); err != nil {
 		// Without a verified way back the change is not made at all.
 		return reject(ErrorUnsupported, "the rollback cannot be assembled: "+err.Error())
 	}
-	if err := network.ZapiszPlan(network.KatalogWycofan, plan); err != nil {
+	if err := network.SavePlan(network.RollbackDir, plan); err != nil {
 		return reject(ErrorExecFailed, "writing the rollback plan: "+err.Error())
 	}
 	if err := s.armRollback(ctx, plan, window); err != nil {
-		_ = network.UsunPlan(network.KatalogWycofan, plan.ID)
+		_ = network.RemovePlan(network.RollbackDir, plan.ID)
 		return reject(ErrorExecFailed, "arming the rollback: "+err.Error())
 	}
 
@@ -209,40 +209,40 @@ func (s *Server) changeNetwork(ctx context.Context, action *helperv1.NetworkRequ
 
 	return networkResponse(s.readProfiles(ctx),
 		fmt.Sprintf("the change was applied; rollback at %s unless the agent confirms connectivity",
-			plan.Termin.Format(time.RFC3339)), &plan)
+			plan.Deadline.Format(time.RFC3339)), &plan)
 }
 
 // changeSteps assembles the commands for one concrete operation.
 func changeSteps(action *helperv1.NetworkRequest, connection string,
-	current network.Profil) ([][]string, error) {
+	current network.Profile) ([][]string, error) {
 	switch action.GetOperation() {
 	case helperv1.NetworkRequest_OPERATION_SET_MTU:
-		return network.ArgumentyMTU(connection, action.GetMtu())
+		return network.MTUArguments(connection, action.GetMtu())
 	case helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES:
-		return network.ArgumentyTras(connection, action.GetRoutes())
+		return network.RouteArguments(connection, action.GetRoutes())
 	case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
-		desired := network.Profil{
-			Polaczenie: connection,
-			Metoda:     action.GetMethod(),
-			Adresy:     action.GetAddresses(),
-			Brama:      action.GetGateway(),
+		desired := network.Profile{
+			Connection: connection,
+			Method:     action.GetMethod(),
+			Addresses:  action.GetAddresses(),
+			Gateway:    action.GetGateway(),
 			DNS:        action.GetDns(),
 			// Routes, MTU and the rest of the resolver stay as they were: the
 			// address profile is a separate operation and must not silently
 			// erase settings the operator was never asked about.
 			DNSSearch:     current.DNSSearch,
 			IgnoreAutoDNS: current.IgnoreAutoDNS,
-			Trasy:         current.Trasy,
+			Routes:        current.Routes,
 			MTU:           current.MTU,
 		}
-		return network.ArgumentyProfilu(desired)
+		return network.ProfileArguments(desired)
 	}
 	return nil, fmt.Errorf("unknown network operation")
 }
 
 // confirmChange disarms the rollback after the agent confirmed connectivity.
 func (s *Server) confirmChange(ctx context.Context, id string) *helperv1.HelperResponse {
-	plan, err := network.WczytajPlan(network.KatalogWycofan, id)
+	plan, err := network.LoadPlan(network.RollbackDir, id)
 	if err != nil {
 		// A missing plan means the rollback was already performed or already
 		// disarmed. This is not an error of the order, but the operator is to
@@ -253,7 +253,7 @@ func (s *Server) confirmChange(ctx context.Context, id string) *helperv1.HelperR
 	if err := s.disarmRollback(ctx, plan.ID); err != nil {
 		return reject(ErrorExecFailed, "disarming the rollback: "+err.Error())
 	}
-	if err := network.UsunPlan(network.KatalogWycofan, plan.ID); err != nil {
+	if err := network.RemovePlan(network.RollbackDir, plan.ID); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	response := networkResponse(s.readProfiles(ctx), "the change was confirmed", nil)
@@ -264,11 +264,11 @@ func (s *Server) confirmChange(ctx context.Context, id string) *helperv1.HelperR
 // rollbackNow restores the state from before the change at the request of the
 // operator.
 func (s *Server) rollbackNow(ctx context.Context, id string) *helperv1.HelperResponse {
-	plan, err := network.WczytajPlan(network.KatalogWycofan, id)
+	plan, err := network.LoadPlan(network.RollbackDir, id)
 	if err != nil {
 		return reject(ErrorUnsupported, "there is no rollback plan "+id)
 	}
-	steps, err := network.KrokiWycofania(plan)
+	steps, err := network.RollbackSteps(plan)
 	if err != nil {
 		return reject(ErrorUnsupported, err.Error())
 	}
@@ -278,7 +278,7 @@ func (s *Server) rollbackNow(ctx context.Context, id string) *helperv1.HelperRes
 		}
 	}
 	_ = s.disarmRollback(ctx, plan.ID)
-	_ = network.UsunPlan(network.KatalogWycofan, plan.ID)
+	_ = network.RemovePlan(network.RollbackDir, plan.ID)
 	return networkResponse(s.readProfiles(ctx), "the change was rolled back on request", nil)
 }
 
@@ -288,8 +288,8 @@ func (s *Server) rollbackNow(ctx context.Context, id string) *helperv1.HelperRes
 // period, and the rollback has to fire also when nobody talks to it any more.
 // The unit calls this same helper binary in rollback mode - the command does
 // not come from the plan, so the plan cannot express anything else.
-func (s *Server) armRollback(ctx context.Context, plan network.PlanWycofania, window time.Duration) error {
-	return s.armTimer(ctx, network.NazwaJednostkiWycofania(plan.ID), window, "-rollback", plan.ID)
+func (s *Server) armRollback(ctx context.Context, plan network.RollbackPlan, window time.Duration) error {
+	return s.armTimer(ctx, network.RollbackUnitName(plan.ID), window, "-rollback", plan.ID)
 }
 
 // armTimer starts a transient unit that, after the given time, calls the
@@ -324,7 +324,7 @@ func (s *Server) armTimer(ctx context.Context, unit string, window time.Duration
 
 // disarmRollback stops the rollback timer of a network change.
 func (s *Server) disarmRollback(ctx context.Context, id string) error {
-	return s.disarmTimer(ctx, network.NazwaJednostkiWycofania(id))
+	return s.disarmTimer(ctx, network.RollbackUnitName(id))
 }
 
 // disarmTimer stops the transient rollback unit.
@@ -340,29 +340,29 @@ func (s *Server) disarmTimer(ctx context.Context, unit string) error {
 // validPlanIdentifier allows only characters that cannot lead a path outside
 // the plan directory.
 func validPlanIdentifier(id string) bool {
-	return network.PoprawnyIdentyfikatorPlanu(id)
+	return network.ValidPlanID(id)
 }
 
 // readProfiles collects the NetworkManager profiles together with their
 // settings.
-func (s *Server) readProfiles(ctx context.Context) []network.Profil {
+func (s *Server) readProfiles(ctx context.Context) []network.Profile {
 	output, err := nmcliOutput(ctx, "-t", "-f", "NAME,UUID,DEVICE,TYPE,STATE", "connection", "show")
 	if err != nil {
 		return nil
 	}
-	var profiles []network.Profil
-	for _, connection := range network.ParsujPolaczenia(output) {
+	var profiles []network.Profile
+	for _, connection := range network.ParseConnections(output) {
 		settings, err := nmcliOutput(ctx, "-t", "-f",
-			strings.Join(network.PolaProfilu, ","), "connection", "show", connection.Nazwa)
+			strings.Join(network.ProfileFields, ","), "connection", "show", connection.Name)
 		if err != nil {
 			continue
 		}
-		profile := network.ParsujProfil(settings)
-		if profile.Polaczenie == "" {
-			profile.Polaczenie = connection.Nazwa
+		profile := network.ParseProfile(settings)
+		if profile.Connection == "" {
+			profile.Connection = connection.Name
 		}
-		if profile.Interfejs == "" {
-			profile.Interfejs = connection.Urzadzenie
+		if profile.Interface == "" {
+			profile.Interface = connection.Device
 		}
 		profiles = append(profiles, profile)
 	}
@@ -370,29 +370,29 @@ func (s *Server) readProfiles(ctx context.Context) []network.Profil {
 }
 
 // interfaceProfile finds the profile active on an interface.
-func (s *Server) interfaceProfile(ctx context.Context, iface string) (string, network.Profil, error) {
+func (s *Server) interfaceProfile(ctx context.Context, iface string) (string, network.Profile, error) {
 	if iface == "" {
-		return "", network.Profil{}, fmt.Errorf("the operation needs an interface name")
+		return "", network.Profile{}, fmt.Errorf("the operation needs an interface name")
 	}
 	output, err := nmcliOutput(ctx, "-t", "-f", "NAME,UUID,DEVICE,TYPE,STATE", "connection", "show")
 	if err != nil {
-		return "", network.Profil{}, fmt.Errorf("reading the connections: %w", err)
+		return "", network.Profile{}, fmt.Errorf("reading the connections: %w", err)
 	}
-	connection := network.PolaczenieUrzadzenia(network.ParsujPolaczenia(output), iface)
+	connection := network.DeviceConnection(network.ParseConnections(output), iface)
 	if connection == nil {
-		return "", network.Profil{}, fmt.Errorf(
+		return "", network.Profile{}, fmt.Errorf(
 			"the interface %s has no NetworkManager profile; the panel does not create new profiles here", iface)
 	}
 	settings, err := nmcliOutput(ctx, "-t", "-f",
-		strings.Join(network.PolaProfilu, ","), "connection", "show", connection.Nazwa)
+		strings.Join(network.ProfileFields, ","), "connection", "show", connection.Name)
 	if err != nil {
-		return "", network.Profil{}, fmt.Errorf("reading the profile %s: %w", connection.Nazwa, err)
+		return "", network.Profile{}, fmt.Errorf("reading the profile %s: %w", connection.Name, err)
 	}
-	profile := network.ParsujProfil(settings)
-	if profile.Polaczenie == "" {
-		profile.Polaczenie = connection.Nazwa
+	profile := network.ParseProfile(settings)
+	if profile.Connection == "" {
+		profile.Connection = connection.Name
 	}
-	return connection.Nazwa, profile, nil
+	return connection.Name, profile, nil
 }
 
 func rollbackWindow(seconds uint32) time.Duration {
@@ -424,7 +424,7 @@ func runNmcli(ctx context.Context, arguments []string) (string, error) {
 }
 
 func nmcliOutput(ctx context.Context, arguments ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, network.SciezkaNmcli, arguments...)
+	cmd := exec.CommandContext(ctx, network.NmcliPath, arguments...)
 	cmd.Env = toolEnvironment()
 	output, err := cmd.Output()
 	if err != nil {
@@ -438,14 +438,14 @@ func toolEnvironment() []string {
 }
 
 // encodeProfiles turns the profiles into the body of the answer.
-func encodeProfiles(profiles []network.Profil) ([]byte, error) {
+func encodeProfiles(profiles []network.Profile) ([]byte, error) {
 	return json.Marshal(struct {
-		Profiles []network.Profil `json:"profiles"`
+		Profiles []network.Profile `json:"profiles"`
 	}{profiles})
 }
 
-func networkResponse(profiles []network.Profil, message string,
-	plan *network.PlanWycofania) *helperv1.HelperResponse {
+func networkResponse(profiles []network.Profile, message string,
+	plan *network.RollbackPlan) *helperv1.HelperResponse {
 	encoded, err := encodeProfiles(profiles)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -453,19 +453,19 @@ func networkResponse(profiles []network.Profil, message string,
 	result := &helperv1.NetworkResult{Profiles: encoded, Message: message}
 	if plan != nil {
 		result.RollbackId = plan.ID
-		result.RollbackDeadline = plan.Termin.Format(time.RFC3339)
+		result.RollbackDeadline = plan.Deadline.Format(time.RFC3339)
 	}
 	return &helperv1.HelperResponse{Accepted: true, NetworkResult: result}
 }
 
 // networkErrorResponse describes a change that failed but left the rollback
 // armed. The operator is to know that the host will come back on its own.
-func networkErrorResponse(plan network.PlanWycofania, message string) *helperv1.HelperResponse {
+func networkErrorResponse(plan network.RollbackPlan, message string) *helperv1.HelperResponse {
 	response := reject(ErrorExecFailed, message)
 	response.NetworkResult = &helperv1.NetworkResult{
 		Message:          message,
 		RollbackId:       plan.ID,
-		RollbackDeadline: plan.Termin.Format(time.RFC3339),
+		RollbackDeadline: plan.Deadline.Format(time.RFC3339),
 	}
 	return response
 }
@@ -489,13 +489,13 @@ func helperPath() (string, error) {
 // The function works without the agent and without the panel: it is the last
 // thing that works when a change cuts the host off from the world.
 func RollbackFromPlan(ctx context.Context, id string) error {
-	plan, err := network.WczytajPlan(network.KatalogWycofan, id)
+	plan, err := network.LoadPlan(network.RollbackDir, id)
 	if err != nil {
 		return fmt.Errorf("the rollback plan %s: %w", id, err)
 	}
-	steps, err := network.KrokiWycofania(plan)
+	steps, err := network.RollbackSteps(plan)
 	if err != nil {
-		_ = network.OdlozNieudanyPlan(network.KatalogWycofan, id)
+		_ = network.SetAsideFailedPlan(network.RollbackDir, id)
 		return err
 	}
 	for _, step := range steps {
@@ -503,9 +503,9 @@ func RollbackFromPlan(ctx context.Context, id string) error {
 			// A plan whose timer has already fired is dead also when the
 			// rollback failed. Left in the directory it would look like a
 			// rollback still waiting for its moment.
-			_ = network.OdlozNieudanyPlan(network.KatalogWycofan, id)
+			_ = network.SetAsideFailedPlan(network.RollbackDir, id)
 			return fmt.Errorf("%s: %w: %s", strings.Join(step, " "), err, output)
 		}
 	}
-	return network.UsunPlan(network.KatalogWycofan, id)
+	return network.RemovePlan(network.RollbackDir, id)
 }

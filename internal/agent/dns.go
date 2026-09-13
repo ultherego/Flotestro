@@ -36,14 +36,14 @@ func CollectDNS(ctx context.Context) dns.Snapshot {
 	if err != nil {
 		snapshot.UnavailableReason = "resolv.conf: " + err.Error()
 	}
-	snapshot.Owner = dns.WlascicielResolvConf(target, string(content))
+	snapshot.Owner = dns.ResolvConfOwner(target, string(content))
 
 	// resolvectl gives more than the file: the per-link state, DNSSEC and
 	// DNS-over-TLS. Without it only the file is left, and it says no more than
 	// where the queries go.
-	if network.Istnieje(resolvectlPath) {
+	if network.Exists(resolvectlPath) {
 		if output, err := commandOutput(ctx, resolvectlPath, "status", "--no-pager"); err == nil {
-			fromResolved := dns.ParsujResolvectl(output)
+			fromResolved := dns.ParseResolvectl(output)
 			fromResolved.ObservedAt = snapshot.ObservedAt
 			fromResolved.ResolvConf = snapshot.ResolvConf
 			fromResolved.ResolvConfTarget = snapshot.ResolvConfTarget
@@ -52,11 +52,11 @@ func CollectDNS(ctx context.Context) dns.Snapshot {
 		}
 	}
 	if len(snapshot.Servers) == 0 {
-		servers, domains := dns.ParsujResolvConf(string(content))
+		servers, domains := dns.ParseResolvConf(string(content))
 		snapshot.Servers = servers
 		snapshot.SearchDomains = append(snapshot.SearchDomains, domains...)
 		if snapshot.Mode == "" {
-			snapshot.Mode = dns.TrybPlikowy
+			snapshot.Mode = dns.ModeFile
 		}
 	}
 
@@ -64,7 +64,7 @@ func CollectDNS(ctx context.Context) dns.Snapshot {
 	// panel has nothing to change the resolver with in a way that survives the
 	// next network event - and it says so directly instead of writing to a file
 	// that will disappear anyway.
-	if network.Istnieje(network.SciezkaNmcli) {
+	if network.Exists(network.NmcliPath) {
 		snapshot.Writable = true
 		snapshot.WriteAdapter = network.AdapterNetworkManager
 	} else {
@@ -96,7 +96,7 @@ func (e *TaskExecutor) applyDNS(ctx context.Context, task *agentv1.TaskEnvelope,
 		defer cancel()
 		results := testNames(callCtx, payload.Names)
 		encoded, err := json.Marshal(struct {
-			Queries []dns.WynikZapytania `json:"queries"`
+			Queries []dns.QueryResult `json:"queries"`
 		}{results})
 		if err != nil {
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
@@ -200,8 +200,8 @@ func (e *TaskExecutor) applyDNS(ctx context.Context, task *agentv1.TaskEnvelope,
 }
 
 // testNames resolves the names from the host.
-func testNames(ctx context.Context, names []string) []dns.WynikZapytania {
-	results := make([]dns.WynikZapytania, 0, len(names))
+func testNames(ctx context.Context, names []string) []dns.QueryResult {
+	results := make([]dns.QueryResult, 0, len(names))
 	for _, name := range names {
 		results = append(results, testName(ctx, name))
 	}
@@ -213,16 +213,16 @@ func testNames(ctx context.Context, names []string) []dns.WynikZapytania {
 // The result is named, because the duration is filled in from a defer: without
 // that the measurement would be lost at every early return and every query
 // would seem to take zero milliseconds.
-func testName(ctx context.Context, name string) (result dns.WynikZapytania) {
-	result = dns.WynikZapytania{Name: name}
-	if !dns.PoprawnaNazwaDoTestu(name) {
+func testName(ctx context.Context, name string) (result dns.QueryResult) {
+	result = dns.QueryResult{Name: name}
+	if !dns.ValidTestName(name) {
 		result.Error = "the name was rejected by the agent"
 		return result
 	}
 	start := time.Now()
 	defer func() { result.TookMillis = time.Since(start).Milliseconds() }()
 
-	if network.Istnieje(resolvectlPath) {
+	if network.Exists(resolvectlPath) {
 		// The legend carries the protocol and the source of the answer, so it is
 		// not switched off: the operator asks not only "which address" but also
 		// "who told me that".
@@ -312,7 +312,7 @@ func firstMeaningfulLine(content string) string {
 	return ""
 }
 
-func testSummary(results []dns.WynikZapytania) string {
+func testSummary(results []dns.QueryResult) string {
 	resolved := 0
 	for _, result := range results {
 		if len(result.Addresses) > 0 {

@@ -219,7 +219,7 @@ func DetectCapabilities() Capabilities {
 	// module has nowhere to create them - even when the systemd timers work.
 	schedules := isDir("/etc/cron.d")
 	networkRead := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
-	networkWrite := network.WykryjAdapter(network.Istnieje)
+	networkWrite := network.DetectAdapter(network.Exists)
 	resolver := exists("/etc/resolv.conf")
 	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
 	nft := exists("/usr/sbin/nft")
@@ -233,15 +233,15 @@ func DetectCapabilities() Capabilities {
 	lvm := exists("/usr/sbin/vgs") && exists("/usr/sbin/lvs")
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
-	timedatectl := exists(hosttime.SciezkaTimedatectl)
-	selinux := isDir(security.KatalogSELinux) && exists(security.SciezkaSetenforce)
-	audit := exists(security.SciezkaAuditctl) && exists(security.SciezkaAugenrules)
-	apparmor := exists(security.PlikAppArmor)
-	certmonger := exists(certificates.SciezkaGetcert) || exists(certificates.SciezkaGetcertAlt)
+	timedatectl := exists(hosttime.TimedatectlPath)
+	selinux := isDir(security.SELinuxDir) && exists(security.SetenforcePath)
+	audit := exists(security.AuditctlPath) && exists(security.AugenrulesPath)
+	apparmor := exists(security.AppArmorFile)
+	certmonger := exists(certificates.GetcertPath) || exists(certificates.GetcertPathAlt)
 	restic := exists("/usr/bin/restic") || exists("/usr/local/bin/restic")
 	borg := exists("/usr/bin/borg") || exists("/usr/local/bin/borg")
-	runbooks, _ := backup.WykazRunbookow()
-	chrony := exists(hosttime.SciezkaChronyc)
+	runbooks, _ := backup.ListRunbooks()
+	chrony := exists(hosttime.ChronycPath)
 	// Timesyncd is sometimes installed and masked when the host has chrony. The
 	// presence of the unit says only that there is something to write with -
 	// which daemon really keeps the clock is decided by the state read.
@@ -326,9 +326,9 @@ func DetectCapabilities() Capabilities {
 			Features: map[string]bool{
 				"selinux":    selinux,
 				"apparmor":   apparmor,
-				"auditd":     exists(security.SciezkaAuditctl),
-				"augenrules": exists(security.SciezkaAugenrules),
-				"sockets":    exists(security.SciezkaSS) || exists(security.SciezkaSSAlt),
+				"auditd":     exists(security.AuditctlPath),
+				"augenrules": exists(security.AugenrulesPath),
+				"sockets":    exists(security.SSPath) || exists(security.SSPathAlt),
 			},
 		},
 		{
@@ -506,7 +506,7 @@ func networkAdapterReason(read bool, adapter string) string {
 	if !read {
 		return "this host has no iproute2 (ip) binary"
 	}
-	return network.PowodBrakuZapisu(adapter)
+	return network.ReadOnlyReason(adapter)
 }
 
 // resolverReason explains what the DNS module is missing.

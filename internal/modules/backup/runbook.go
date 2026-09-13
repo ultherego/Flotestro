@@ -12,125 +12,127 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Runbook uruchamia skrypt przygotowany przez administratora hosta.
+// Runbook runs a script prepared by the host administrator.
 //
-// To jest jedyne miejsce w calym systemie, w ktorym panel uruchamia cos, czego
-// sam nie zna - i dlatego jest obwarowane trzema regulami. Panel nie przesyla
-// tresci skryptu, tylko jego nazwe. Skrypt musi juz lezec w katalogu, do
-// ktorego pisze wylacznie root. I musi odpowiadac ustalonym kontraktem, a nie
-// dowolnym tekstem: inaczej "runbook" bylby zdalnym wykonaniem dowolnego kodu
-// z ladniejsza nazwa.
+// This is the only place in the whole system where the panel runs something
+// it does not know itself - and that is why it is fenced with three rules.
+// The panel does not send the script content, only its name. The script
+// must already lie in a directory only root writes to. And it must answer
+// with an agreed contract, not arbitrary text: otherwise a "runbook" would
+// be remote execution of arbitrary code under a prettier name.
 type Runbook struct{}
 
-func (r *Runbook) Nazwa() string { return NarzedzieRunbook }
+func (r *Runbook) Name() string { return ToolRunbook }
 
-// Dostepny mowi, czy host w ogole ma katalog runbookow.
-func (r *Runbook) Dostepny() bool {
-	info, err := os.Stat(KatalogRunbookow)
+// Available says whether the host has the runbook directory at all.
+func (r *Runbook) Available() bool {
+	info, err := os.Stat(RunbookDir)
 	return err == nil && info.IsDir()
 }
 
-func (r *Runbook) Wersja(context.Context) string { return "" }
+func (r *Runbook) Version(context.Context) string { return "" }
 
-// Sciezka sprawdza skrypt i zwraca jego pelna sciezke.
+// Path checks the script and returns its full path.
 //
-// Sprawdzamy wlasciciela i prawa, a nie tylko istnienie: skrypt zapisywalny
-// dla zwyklego uzytkownika oznaczalby, ze kazdy uzytkownik hosta moze
-// podstawic panelowi kod do wykonania z prawami roota.
-func (r *Runbook) Sciezka(nazwa string) (string, error) {
-	if !nazwaRunbooka.MatchString(nazwa) {
-		return "", fmt.Errorf("nieprawidlowa nazwa runbooka %q", nazwa)
+// The owner and the permissions are checked, not only existence: a script
+// writable by an ordinary user would mean every user of the host can plant
+// code for the panel to run with root privileges.
+func (r *Runbook) Path(name string) (string, error) {
+	if !runbookName.MatchString(name) {
+		return "", fmt.Errorf("invalid runbook name %q", name)
 	}
-	sciezka := filepath.Join(KatalogRunbookow, nazwa)
-	info, err := os.Lstat(sciezka)
+	path := filepath.Join(RunbookDir, name)
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
-		return "", fmt.Errorf("na tym hoscie nie ma runbooka %q", nazwa)
+		return "", fmt.Errorf("this host has no runbook %q", name)
 	}
 	if err != nil {
 		return "", err
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("runbook %q nie jest zwyklym plikiem", nazwa)
+		return "", fmt.Errorf("the runbook %q is not a regular file", name)
 	}
 	stat, ok := info.Sys().(*unix.Stat_t)
 	if !ok {
-		return "", fmt.Errorf("nie udalo sie odczytac wlasciciela runbooka %q", nazwa)
+		return "", fmt.Errorf("the owner of the runbook %q could not be read", name)
 	}
 	if stat.Uid != 0 {
-		return "", fmt.Errorf("runbook %q nie nalezy do roota", nazwa)
+		return "", fmt.Errorf("the runbook %q does not belong to root", name)
 	}
 	if info.Mode().Perm()&0o022 != 0 {
-		return "", fmt.Errorf("runbook %q jest zapisywalny poza rootem", nazwa)
+		return "", fmt.Errorf("the runbook %q is writable outside root", name)
 	}
 	if info.Mode().Perm()&0o100 == 0 {
-		return "", fmt.Errorf("runbook %q nie jest wykonywalny", nazwa)
+		return "", fmt.Errorf("the runbook %q is not executable", name)
 	}
-	return sciezka, nil
+	return path, nil
 }
 
-// srodowisko sklada zmienne opisujace zlecenie.
+// environment assembles the variables describing the order.
 //
-// Wszystko idzie srodowiskiem, a nie argumentami: argumenty widzi kazdy
-// uzytkownik hosta przez /proc, a wsrod zmiennych jest haslo repozytorium.
-func (r *Runbook) srodowisko(zlecenie Zlecenie, operacja string) []string {
-	srodowisko := append(srodowiskoNarzedzia(zlecenie, "FLOTESTRO_BACKUP_PASSWORD"),
-		"FLOTESTRO_BACKUP_OPERATION="+operacja,
-		"FLOTESTRO_BACKUP_ID="+zlecenie.ID,
-		"FLOTESTRO_BACKUP_REPOSITORY="+zlecenie.Repository,
-		"FLOTESTRO_BACKUP_PATHS="+strings.Join(zlecenie.Paths, "\n"),
-		"FLOTESTRO_BACKUP_EXCLUDES="+strings.Join(zlecenie.Excludes, "\n"),
-		"FLOTESTRO_BACKUP_TAGS="+strings.Join(zlecenie.Tags, "\n"),
+// Everything goes through the environment, not the arguments: the
+// arguments are seen by every user of the host through /proc, and the
+// variables include the repository password.
+func (r *Runbook) environment(order Order, operation string) []string {
+	environment := append(toolEnvironment(order, "FLOTESTRO_BACKUP_PASSWORD"),
+		"FLOTESTRO_BACKUP_OPERATION="+operation,
+		"FLOTESTRO_BACKUP_ID="+order.ID,
+		"FLOTESTRO_BACKUP_REPOSITORY="+order.Repository,
+		"FLOTESTRO_BACKUP_PATHS="+strings.Join(order.Paths, "\n"),
+		"FLOTESTRO_BACKUP_EXCLUDES="+strings.Join(order.Excludes, "\n"),
+		"FLOTESTRO_BACKUP_TAGS="+strings.Join(order.Tags, "\n"),
 	)
-	if operacja == OperacjaOdtworzen {
-		srodowisko = append(srodowisko,
-			"FLOTESTRO_BACKUP_SNAPSHOT="+zlecenie.Odtworzenie.SnapshotID,
-			"FLOTESTRO_BACKUP_TARGET="+zlecenie.Odtworzenie.Target,
-			"FLOTESTRO_BACKUP_INCLUDE="+strings.Join(zlecenie.Odtworzenie.Include, "\n"),
-			"FLOTESTRO_BACKUP_OVERWRITE="+zlecenie.Odtworzenie.Overwrite,
+	if operation == OperationRestore {
+		environment = append(environment,
+			"FLOTESTRO_BACKUP_SNAPSHOT="+order.Restore.SnapshotID,
+			"FLOTESTRO_BACKUP_TARGET="+order.Restore.Target,
+			"FLOTESTRO_BACKUP_INCLUDE="+strings.Join(order.Restore.Include, "\n"),
+			"FLOTESTRO_BACKUP_OVERWRITE="+order.Restore.Overwrite,
 		)
 	}
-	if operacja == OperacjaSprawdz && zlecenie.ReadData {
-		srodowisko = append(srodowisko, "FLOTESTRO_BACKUP_READ_DATA=1")
+	if operation == OperationVerify && order.ReadData {
+		environment = append(environment, "FLOTESTRO_BACKUP_READ_DATA=1")
 	}
-	return srodowisko
+	return environment
 }
 
-// wywolaj uruchamia runbook i zwraca ostatnia linie jego wyjscia oraz calosc.
+// invoke runs the runbook and returns the last line of its output and the
+// whole of it.
 //
-// Kontrakt jest waski celowo: runbook moze pisac, co chce, ale ostatnia linia
-// musi byc dokumentem JSON. Panel czyta wylacznie ja - reszta jest dziennikiem
-// dla czlowieka, a nie danymi.
-func (r *Runbook) wywolaj(ctx context.Context, zlecenie Zlecenie,
-	operacja string, postep PostepFunc) (string, wynikPolecenia, error) {
-	sciezka, err := r.Sciezka(zlecenie.Runbook)
+// The contract is deliberately narrow: the runbook may write what it wants,
+// but the last line must be a JSON document. The panel reads only that -
+// the rest is a log for a human, not data.
+func (r *Runbook) invoke(ctx context.Context, order Order,
+	operation string, progress ProgressFunc) (string, commandResult, error) {
+	path, err := r.Path(order.Runbook)
 	if err != nil {
-		return "", wynikPolecenia{}, err
+		return "", commandResult{}, err
 	}
-	var ostatnia string
-	uruchomienie := uruchom(ctx, sciezka, []string{operacja},
-		r.srodowisko(zlecenie, operacja), tajneZlecenia(zlecenie),
-		func(linia string) {
-			przycieta := strings.TrimSpace(linia)
-			if przycieta == "" {
+	var last string
+	execution := run(ctx, path, []string{operation},
+		r.environment(order, operation), orderSecrets(order),
+		func(line string) {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
 				return
 			}
-			if strings.HasPrefix(przycieta, "{") {
-				ostatnia = przycieta
+			if strings.HasPrefix(trimmed, "{") {
+				last = trimmed
 				return
 			}
-			if postep != nil {
-				postep(Postep{Message: przycieta})
+			if progress != nil {
+				progress(Progress{Message: trimmed})
 			}
 		})
-	if !uruchomienie.Ran || uruchomienie.Err != nil || uruchomienie.ExitCode != 0 {
-		return ostatnia, uruchomienie, fmt.Errorf("runbook %s %s: %s",
-			zlecenie.Runbook, operacja, uruchomienie.Powod())
+	if !execution.Ran || execution.Err != nil || execution.ExitCode != 0 {
+		return last, execution, fmt.Errorf("runbook %s %s: %s",
+			order.Runbook, operation, execution.Reason())
 	}
-	return ostatnia, uruchomienie, nil
+	return last, execution, nil
 }
 
-// odpowiedzRunbooka jest kontraktem wyjscia skryptu.
-type odpowiedzRunbooka struct {
+// runbookAnswer is the contract of the script output.
+type runbookAnswer struct {
 	Snapshots []struct {
 		ID        string   `json:"id"`
 		Time      string   `json:"time"`
@@ -146,123 +148,123 @@ type odpowiedzRunbooka struct {
 	Message         string  `json:"message"`
 }
 
-// Plan pyta runbook o stan repozytorium.
-func (r *Runbook) Plan(ctx context.Context, zlecenie Zlecenie) (Stan, error) {
-	stan := Stan{Tool: NarzedzieRunbook, Repository: zlecenie.Repository, ObservedAt: time.Now().UTC()}
-	linia, uruchomienie, err := r.wywolaj(ctx, zlecenie, OperacjaPlan, nil)
+// Plan asks the runbook about the repository state.
+func (r *Runbook) Plan(ctx context.Context, order Order) (State, error) {
+	state := State{Tool: ToolRunbook, Repository: order.Repository, ObservedAt: time.Now().UTC()}
+	line, execution, err := r.invoke(ctx, order, OperationPlan, nil)
 	if err != nil {
-		stan.UnavailableReason = uruchomienie.Powod()
-		if stan.UnavailableReason == "" {
-			stan.UnavailableReason = err.Error()
+		state.UnavailableReason = execution.Reason()
+		if state.UnavailableReason == "" {
+			state.UnavailableReason = err.Error()
 		}
-		return stan, err
+		return state, err
 	}
-	if linia == "" {
-		stan.UnavailableReason = "runbook nie odpowiedzial dokumentem JSON"
-		return stan, fmt.Errorf("runbook %s nie odpowiedzial dokumentem JSON", zlecenie.Runbook)
+	if line == "" {
+		state.UnavailableReason = "the runbook did not answer with a JSON document"
+		return state, fmt.Errorf("the runbook %s did not answer with a JSON document", order.Runbook)
 	}
-	var odpowiedz odpowiedzRunbooka
-	if err := json.Unmarshal([]byte(linia), &odpowiedz); err != nil {
-		stan.UnavailableReason = "nie rozpoznano odpowiedzi runbooka: " + err.Error()
-		return stan, err
+	var answer runbookAnswer
+	if err := json.Unmarshal([]byte(line), &answer); err != nil {
+		state.UnavailableReason = "the runbook answer was not recognised: " + err.Error()
+		return state, err
 	}
-	for _, wpis := range odpowiedz.Snapshots {
-		snapshot := Snapshot{ID: wpis.ID, Paths: wpis.Paths}
-		if chwila, err := time.Parse(time.RFC3339, wpis.Time); err == nil {
-			snapshot.Time = chwila.UTC()
+	for _, entry := range answer.Snapshots {
+		snapshot := Snapshot{ID: entry.ID, Paths: entry.Paths}
+		if moment, err := time.Parse(time.RFC3339, entry.Time); err == nil {
+			snapshot.Time = moment.UTC()
 		}
-		if wpis.SizeBytes > 0 {
-			rozmiar := wpis.SizeBytes
-			snapshot.SizeBytes = &rozmiar
+		if entry.SizeBytes > 0 {
+			size := entry.SizeBytes
+			snapshot.SizeBytes = &size
 		}
-		stan.Snapshots = append(stan.Snapshots, snapshot)
+		state.Snapshots = append(state.Snapshots, snapshot)
 	}
-	PosortujSnapshoty(stan.Snapshots)
-	stan.LastSuccessAt = OstatniUdany(stan.Snapshots)
-	if odpowiedz.TotalSizeBytes > 0 {
-		rozmiar := odpowiedz.TotalSizeBytes
-		stan.TotalSizeBytes = &rozmiar
+	SortSnapshots(state.Snapshots)
+	state.LastSuccessAt = LastSuccess(state.Snapshots)
+	if answer.TotalSizeBytes > 0 {
+		size := answer.TotalSizeBytes
+		state.TotalSizeBytes = &size
 	}
-	return stan, nil
+	return state, nil
 }
 
-// Wykonaj zleca runbookowi zrobienie kopii.
-func (r *Runbook) Wykonaj(ctx context.Context, zlecenie Zlecenie, postep PostepFunc) (Wynik, error) {
-	return r.wynikOperacji(ctx, zlecenie, OperacjaBackup, postep)
+// Run orders the runbook to make a copy.
+func (r *Runbook) Run(ctx context.Context, order Order, progress ProgressFunc) (Result, error) {
+	return r.operationResult(ctx, order, OperationBackup, progress)
 }
 
-// Sprawdz zleca runbookowi weryfikacje kopii.
-func (r *Runbook) Sprawdz(ctx context.Context, zlecenie Zlecenie) (Wynik, error) {
-	return r.wynikOperacji(ctx, zlecenie, OperacjaSprawdz, nil)
+// Verify orders the runbook to verify the copy.
+func (r *Runbook) Verify(ctx context.Context, order Order) (Result, error) {
+	return r.operationResult(ctx, order, OperationVerify, nil)
 }
 
-// Odtworz zleca runbookowi odtworzenie kopii.
-func (r *Runbook) Odtworz(ctx context.Context, zlecenie Zlecenie) (Wynik, error) {
-	return r.wynikOperacji(ctx, zlecenie, OperacjaOdtworzen, nil)
+// RestoreData orders the runbook to restore the copy.
+func (r *Runbook) RestoreData(ctx context.Context, order Order) (Result, error) {
+	return r.operationResult(ctx, order, OperationRestore, nil)
 }
 
-func (r *Runbook) wynikOperacji(ctx context.Context, zlecenie Zlecenie,
-	operacja string, postep PostepFunc) (Wynik, error) {
-	wynik := Wynik{}
-	linia, uruchomienie, err := r.wywolaj(ctx, zlecenie, operacja, postep)
-	wynik.Output = uruchomienie.Stdout + uruchomienie.Stderr
+func (r *Runbook) operationResult(ctx context.Context, order Order,
+	operation string, progress ProgressFunc) (Result, error) {
+	result := Result{}
+	line, execution, err := r.invoke(ctx, order, operation, progress)
+	result.Output = execution.Stdout + execution.Stderr
 	if err != nil {
-		return wynik, err
+		return result, err
 	}
-	if linia == "" {
-		// Milczenie po operacji zmieniajacej stan jest gorsze niz blad:
-		// nie wiadomo, czy kopia powstala.
-		return wynik, fmt.Errorf("runbook %s nie odpowiedzial dokumentem JSON", zlecenie.Runbook)
+	if line == "" {
+		// Silence after an operation changing the state is worse than an
+		// error: it is unknown whether the copy was made.
+		return result, fmt.Errorf("the runbook %s did not answer with a JSON document", order.Runbook)
 	}
-	var odpowiedz odpowiedzRunbooka
-	if err := json.Unmarshal([]byte(linia), &odpowiedz); err != nil {
-		return wynik, fmt.Errorf("nie rozpoznano odpowiedzi runbooka: %w", err)
+	var answer runbookAnswer
+	if err := json.Unmarshal([]byte(line), &answer); err != nil {
+		return result, fmt.Errorf("the runbook answer was not recognised: %w", err)
 	}
-	wynik.SnapshotID = odpowiedz.SnapshotID
-	wynik.Message = odpowiedz.Message
-	if odpowiedz.BytesAdded > 0 {
-		wartosc := odpowiedz.BytesAdded
-		wynik.BytesAdded = &wartosc
+	result.SnapshotID = answer.SnapshotID
+	result.Message = answer.Message
+	if answer.BytesAdded > 0 {
+		value := answer.BytesAdded
+		result.BytesAdded = &value
 	}
-	if odpowiedz.FilesNew > 0 {
-		wartosc := odpowiedz.FilesNew
-		wynik.FilesNew = &wartosc
+	if answer.FilesNew > 0 {
+		value := answer.FilesNew
+		result.FilesNew = &value
 	}
-	if odpowiedz.FilesRestored > 0 {
-		wartosc := odpowiedz.FilesRestored
-		wynik.FilesRestored = &wartosc
+	if answer.FilesRestored > 0 {
+		value := answer.FilesRestored
+		result.FilesRestored = &value
 	}
-	if odpowiedz.DurationSeconds > 0 {
-		wartosc := odpowiedz.DurationSeconds
-		wynik.DurationSeconds = &wartosc
+	if answer.DurationSeconds > 0 {
+		value := answer.DurationSeconds
+		result.DurationSeconds = &value
 	}
-	if wynik.Message == "" {
-		wynik.Message = "runbook " + zlecenie.Runbook + " zakonczyl operacje " + operacja
+	if result.Message == "" {
+		result.Message = "the runbook " + order.Runbook + " finished the operation " + operation
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// WykazRunbookow wylicza skrypty, ktore panel moze uruchomic na tym hoscie.
+// ListRunbooks lists the scripts the panel may run on this host.
 //
-// Zwracamy takze informacje, czy katalog dalo sie odczytac: katalog bez
-// runbookow i katalog nieodczytany to dwie rozne odpowiedzi.
-func WykazRunbookow() ([]string, bool) {
-	wpisy, err := os.ReadDir(KatalogRunbookow)
+// Whether the directory could be read is returned too: a directory without
+// runbooks and an unread directory are two different answers.
+func ListRunbooks() ([]string, bool) {
+	entries, err := os.ReadDir(RunbookDir)
 	if err != nil {
 		return nil, false
 	}
 	runbook := &Runbook{}
-	var nazwy []string
-	for _, wpis := range wpisy {
-		if wpis.IsDir() {
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
-		// Pokazujemy wylacznie te, ktore panel naprawde uruchomi: skrypt
-		// zapisywalny poza rootem nie jest runbookiem, tylko luka.
-		if _, err := runbook.Sciezka(wpis.Name()); err != nil {
+		// Only those the panel really runs are shown: a script writable
+		// outside root is not a runbook, only a hole.
+		if _, err := runbook.Path(entry.Name()); err != nil {
 			continue
 		}
-		nazwy = append(nazwy, wpis.Name())
+		names = append(names, entry.Name())
 	}
-	return nazwy, true
+	return names, true
 }

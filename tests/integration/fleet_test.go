@@ -88,7 +88,7 @@ func TestOperacjaMutujacaWymagaZatwierdzenia(t *testing.T) {
 		"action":  "unit.restart",
 		"payload": unitPayload("cron.service"),
 	})
-	if !job.RequiresApprova {
+	if !job.RequiresApproval {
 		t.Fatal("restart uslugi nie wymaga zatwierdzenia")
 	}
 	if job.State != "awaiting_approval" {
@@ -189,7 +189,7 @@ func TestOdczytDziennikaNieWymagaZatwierdzenia(t *testing.T) {
 		},
 	}, 60*time.Second)
 
-	if job.RequiresApprova {
+	if job.RequiresApproval {
 		t.Error("odczyt dziennika nie powinien wymagac zatwierdzenia")
 	}
 	if job.State != "succeeded" {
@@ -316,7 +316,7 @@ func TestOdczytKontenerowNaZadanie(t *testing.T) {
 		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
 	}
 	// Odczyt niczego nie zmienia, wiec nie moze wymagac zatwierdzenia.
-	if job.RequiresApprova {
+	if job.RequiresApproval {
 		t.Error("odczyt kontenerow wymaga zatwierdzenia, choc niczego nie zmienia")
 	}
 
@@ -448,7 +448,7 @@ func TestWdrozenieProjektuWymagaZatwierdzonegoPlanu(t *testing.T) {
 	if job.State != "succeeded" {
 		t.Fatalf("plan: stan = %s, kod = %s", job.State, job.ResultErrorCode)
 	}
-	if job.RequiresApprova {
+	if job.RequiresApproval {
 		t.Error("planowanie projektu wymaga zatwierdzenia, choc niczego nie zmienia")
 	}
 	if len(attempts) == 0 || attempts[len(attempts)-1].Detail == nil {

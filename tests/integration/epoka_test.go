@@ -57,13 +57,13 @@ func TestNowaSesjaZastepujeStara(t *testing.T) {
 			h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 				map[string]any{"reason": "koniec testu"}, nil, http.StatusOK)
 		}
-		h.poczekajNaPolaczenie(host.ID, 2*time.Minute)
+		h.awaitConnection(host.ID, 2*time.Minute)
 	})
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
 		map[string]any{"reason": "test epoki sesji"}, nil, http.StatusOK)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": "test epoki sesji"}, nil, http.StatusOK)
-	h.poczekajNaPolaczenie(host.ID, 2*time.Minute)
+	h.awaitConnection(host.ID, 2*time.Minute)
 
 	po := h.sesjeHosta(t, host.ID)
 	if po[0].Epoka <= najwyzsza {

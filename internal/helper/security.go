@@ -18,10 +18,10 @@ import (
 // The translation exists so that the helper does not accept an arbitrary
 // string: the scope of its work is a closed list, not a text from the agent.
 var factNames = map[helperv1.SecurityRequest_Fact]string{
-	helperv1.SecurityRequest_FACT_APPARMOR_PROFILES: security.FaktProfileAppArmor,
-	helperv1.SecurityRequest_FACT_AUDIT_RULES:       security.FaktRegulyAudytu,
-	helperv1.SecurityRequest_FACT_SECURE_BOOT:       security.FaktSecureBoot,
-	helperv1.SecurityRequest_FACT_SOCKET_OWNERS:     security.FaktWlascicieleGniazd,
+	helperv1.SecurityRequest_FACT_APPARMOR_PROFILES: security.FactAppArmorProfiles,
+	helperv1.SecurityRequest_FACT_AUDIT_RULES:       security.FactAuditRules,
+	helperv1.SecurityRequest_FACT_SECURE_BOOT:       security.FactSecureBoot,
+	helperv1.SecurityRequest_FACT_SOCKET_OWNERS:     security.FactSocketOwners,
 }
 
 // applySecurity handles the operations of the security module.
@@ -64,7 +64,7 @@ func collectFacts(ctx context.Context, requested []helperv1.SecurityRequest_Fact
 		names = append(names, name)
 	}
 
-	supplement := security.ZbierzUzupelnienie(ctx, toolOutput, names)
+	supplement := security.CollectSupplement(ctx, toolOutput, names)
 	encoded, err := json.Marshal(supplement)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -77,26 +77,26 @@ func collectFacts(ctx context.Context, requested []helperv1.SecurityRequest_Fact
 
 // setMACMode switches SELinux between enforcing and permissive.
 func setMACMode(ctx context.Context, mode string) *helperv1.HelperResponse {
-	if err := security.WalidujTryb(mode); err != nil {
+	if err := security.ValidateMode(mode); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	state := security.StanMAC()
+	state := security.MACState()
 	if state.System != security.SystemSELinux {
 		return reject(ErrorUnsupported, "this host has no SELinux")
 	}
-	if state.Mode == security.TrybDisabled {
+	if state.Mode == security.ModeDisabled {
 		return reject(ErrorPreconditionFailed,
 			"SELinux is disabled in the kernel; enabling it needs a relabeling of the file system and a restart")
 	}
-	if !exists(security.SciezkaSetenforce) {
+	if !exists(security.SetenforcePath) {
 		return reject(ErrorUnsupported, "this host has no setenforce tool")
 	}
 
 	value := "0"
-	if mode == security.TrybEnforcing {
+	if mode == security.ModeEnforcing {
 		value = "1"
 	}
-	if output, err := toolOutput(ctx, security.SciezkaSetenforce, value); err != nil {
+	if output, err := toolOutput(ctx, security.SetenforcePath, value); err != nil {
 		return reject(ErrorExecFailed, "setenforce: "+err.Error()+" "+output)
 	}
 
@@ -113,7 +113,7 @@ func setMACMode(ctx context.Context, mode string) *helperv1.HelperResponse {
 
 	// A write does not mean an effect: the kernel is asked which mode it is in
 	// now.
-	after := security.StanMAC()
+	after := security.MACState()
 	if after.Mode != mode {
 		return &helperv1.HelperResponse{
 			Accepted: true,
@@ -134,10 +134,10 @@ func setMACMode(ctx context.Context, mode string) *helperv1.HelperResponse {
 // some distributions has RefuseManualStop and a restart ends in a refusal that
 // looks like a panel error while it is a distribution policy.
 func reloadRules(ctx context.Context) *helperv1.HelperResponse {
-	if !exists(security.SciezkaAugenrules) {
+	if !exists(security.AugenrulesPath) {
 		return reject(ErrorUnsupported, "this host has no augenrules tool")
 	}
-	output, err := toolOutput(ctx, security.SciezkaAugenrules, "--load")
+	output, err := toolOutput(ctx, security.AugenrulesPath, "--load")
 	if err != nil {
 		return reject(ErrorExecFailed, "augenrules: "+err.Error()+" "+output)
 	}
@@ -145,8 +145,8 @@ func reloadRules(ctx context.Context) *helperv1.HelperResponse {
 	// A write does not mean an effect: the kernel is asked how many rules it
 	// knows now.
 	message := "the rules were reloaded"
-	if result, err := toolOutput(ctx, security.SciezkaAuditctl, "-l"); err == nil {
-		message += "; the kernel knows " + strconv.Itoa(security.ParsujReguly(result)) + " rules"
+	if result, err := toolOutput(ctx, security.AuditctlPath, "-l"); err == nil {
+		message += "; the kernel knows " + strconv.Itoa(security.ParseRules(result)) + " rules"
 	}
 	return &helperv1.HelperResponse{
 		Accepted:       true,
@@ -157,7 +157,7 @@ func reloadRules(ctx context.Context) *helperv1.HelperResponse {
 // writeModeToConfiguration replaces the SELINUX= value in the configuration
 // file.
 func writeModeToConfiguration(mode string) error {
-	content, err := os.ReadFile(security.KonfiguracjaMAC)
+	content, err := os.ReadFile(security.MACConfiguration)
 	if err != nil {
 		return err
 	}
@@ -172,5 +172,5 @@ func writeModeToConfiguration(mode string) error {
 	if !changed {
 		lines = append(lines, "SELINUX="+mode)
 	}
-	return writeKernelFile(security.KonfiguracjaMAC, strings.Join(lines, "\n"), 0o644)
+	return writeKernelFile(security.MACConfiguration, strings.Join(lines, "\n"), 0o644)
 }

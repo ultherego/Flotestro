@@ -10,108 +10,108 @@ import (
 	"syscall"
 )
 
-// Sygnaly dozwolone przez modul. Lista jest zamknieta: nie istnieje operacja
-// "wyslij dowolny sygnal". Sygnaly zatrzymujace proces albo zmieniajace jego
-// zachowanie w sposob trudny do cofniecia nie naleza do diagnostyki.
+// Signals allowed by the module. The list is closed: there is no "send any
+// signal" operation. Signals that stop a process or change its behaviour in
+// a way that is hard to undo do not belong to diagnostics.
 const (
 	SignalTERM = "TERM"
 	SignalKILL = "KILL"
 	SignalHUP  = "HUP"
 )
 
-var numerySygnalow = map[string]syscall.Signal{
+var signalNumbers = map[string]syscall.Signal{
 	SignalTERM: syscall.SIGTERM,
 	SignalKILL: syscall.SIGKILL,
 	SignalHUP:  syscall.SIGHUP,
 }
 
 var (
-	// ErrNieznanySygnal oznacza sygnal spoza zamknietej listy.
-	ErrNieznanySygnal = errors.New("nieobslugiwany sygnal")
-	// ErrProcesChroniony oznacza proces, ktorego ubicie odcieloby host od
-	// zarzadzania albo zatrzymalo caly system.
-	ErrProcesChroniony = errors.New("proces chroniony")
-	// ErrProcesZmieniony oznacza PID uzyty ponownie przez jadro.
-	ErrProcesZmieniony = errors.New("pod tym PID dziala juz inny proces")
+	// ErrUnknownSignal means a signal outside the closed list.
+	ErrUnknownSignal = errors.New("unsupported signal")
+	// ErrProtectedProcess means a process whose killing would cut the host
+	// off from management or stop the whole system.
+	ErrProtectedProcess = errors.New("protected process")
+	// ErrProcessChanged means a PID reused by the kernel.
+	ErrProcessChanged = errors.New("a different process is already running under this PID")
 )
 
-// ZnanySygnal sprawdza, czy sygnal jest obslugiwany.
-func ZnanySygnal(nazwa string) bool {
-	_, ok := numerySygnalow[nazwa]
+// KnownSignal checks whether the signal is supported.
+func KnownSignal(name string) bool {
+	_, ok := signalNumbers[name]
 	return ok
 }
 
-// Chronione opisuje procesy, ktorych nie wolno ruszac.
-type Chronione struct {
-	// PIDy wlasnych procesow: agenta i helpera. Ubicie ktoregokolwiek
-	// odcieloby host od panelu, a wiec takze od naprawy tego, co wlasnie
-	// zostalo zepsute.
-	Wlasne []int32
+// Protected describes the processes that must not be touched.
+type Protected struct {
+	// PIDs of our own processes: the agent and the helper. Killing either
+	// would cut the host off from the panel, and therefore also from
+	// repairing what has just been broken.
+	Own []int32
 }
 
-// Wyslij wysyla sygnal do procesu zwiazanego z czasem startu.
+// Send sends a signal to a process bound to its start time.
 //
-// Sam PID nie identyfikuje procesu: jadro uzywa numerow ponownie, wiec sygnal
-// wyslany chwile po obejrzeniu listy moze trafic w cos zupelnie innego niz
-// operator zamierzal. Dlatego czas startu jest sprawdzany tuz przed wyslaniem.
-func Wyslij(root string, pid int32, oczekiwanyStart uint64, sygnal string, chronione Chronione) error {
-	numer, ok := numerySygnalow[sygnal]
+// The PID alone does not identify a process: the kernel reuses numbers, so a
+// signal sent a moment after viewing the list may hit something entirely
+// different from what the operator intended. That is why the start time is
+// checked right before sending.
+func Send(root string, pid int32, expectedStart uint64, signal string, protected Protected) error {
+	number, ok := signalNumbers[signal]
 	if !ok {
-		return fmt.Errorf("%w: %s", ErrNieznanySygnal, sygnal)
+		return fmt.Errorf("%w: %s", ErrUnknownSignal, signal)
 	}
 	if pid <= 1 {
-		// PID 1 jest systemem inicjujacym: jego zatrzymanie konczy prace
-		// calego hosta.
-		return fmt.Errorf("%w: PID %d", ErrProcesChroniony, pid)
+		// PID 1 is the init system: stopping it ends the whole host.
+		return fmt.Errorf("%w: PID %d", ErrProtectedProcess, pid)
 	}
-	for _, wlasny := range chronione.Wlasne {
-		if pid == wlasny {
-			return fmt.Errorf("%w: PID %d nalezy do agenta zarzadzajacego", ErrProcesChroniony, pid)
+	for _, own := range protected.Own {
+		if pid == own {
+			return fmt.Errorf("%w: PID %d belongs to the management agent", ErrProtectedProcess, pid)
 		}
 	}
 
-	obecny, err := startProcesu(root, pid)
+	current, err := processStart(root, pid)
 	if err != nil {
 		return err
 	}
-	if oczekiwanyStart != 0 && obecny != oczekiwanyStart {
-		return fmt.Errorf("%w: PID %d", ErrProcesZmieniony, pid)
+	if expectedStart != 0 && current != expectedStart {
+		return fmt.Errorf("%w: PID %d", ErrProcessChanged, pid)
 	}
-	return syscall.Kill(int(pid), numer)
+	return syscall.Kill(int(pid), number)
 }
 
-// startProcesu odczytuje czas startu procesu.
-func startProcesu(root string, pid int32) (uint64, error) {
+// processStart reads the process start time.
+func processStart(root string, pid int32) (uint64, error) {
 	if root == "" {
 		root = "/proc"
 	}
-	dane, err := os.ReadFile(filepath.Join(root, strconv.FormatInt(int64(pid), 10), "stat"))
+	data, err := os.ReadFile(filepath.Join(root, strconv.FormatInt(int64(pid), 10), "stat"))
 	if err != nil {
-		return 0, fmt.Errorf("proces %d nie istnieje", pid)
+		return 0, fmt.Errorf("process %d does not exist", pid)
 	}
-	proces, ok := parsujStat(string(dane))
+	process, ok := parseStat(string(data))
 	if !ok {
-		return 0, fmt.Errorf("nieczytelny stan procesu %d", pid)
+		return 0, fmt.Errorf("unreadable state of process %d", pid)
 	}
-	return proces.StartTimeTicks, nil
+	return process.StartTimeTicks, nil
 }
 
-// WlasnePID zwraca PIDy procesow, ktorych modul nie moze ubic: samego siebie
-// i swojego rodzica. Helper jest uruchamiany przez systemd, wiec jego rodzicem
-// jest pid 1 - chroniony osobno.
-func WlasnePID() []int32 {
+// OwnPIDs returns the PIDs of the processes the module must not kill: itself
+// and its parent. The helper is started by systemd, so its parent is pid 1 -
+// protected separately.
+func OwnPIDs() []int32 {
 	return []int32{int32(os.Getpid()), int32(os.Getppid())}
 }
 
-// OpisSygnalu tlumaczy sygnal na zdanie dla operatora.
-func OpisSygnalu(sygnal string) string {
-	switch strings.ToUpper(sygnal) {
+// DescribeSignal translates a signal into a sentence for the operator.
+func DescribeSignal(signal string) string {
+	switch strings.ToUpper(signal) {
 	case SignalTERM:
-		return "prosba o zakonczenie pracy"
+		return "request to terminate"
 	case SignalKILL:
-		return "wymuszone zabicie bez mozliwosci sprzatniecia"
+		return "forced kill with no chance to clean up"
 	case SignalHUP:
-		return "przeladowanie konfiguracji"
+		return "configuration reload"
 	}
-	return sygnal
+	return signal
 }

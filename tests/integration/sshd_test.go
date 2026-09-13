@@ -86,7 +86,7 @@ func TestZmianaOdcinajacaLogowanieJestOdrzucana(t *testing.T) {
 	if zadanie.State == "succeeded" {
 		t.Fatal("panel przyjal konfiguracje bez zadnej metody uwierzytelnienia")
 	}
-	if !strings.Contains(ostatniKomunikat(proby), "uwierzytelnienia") {
+	if !strings.Contains(ostatniKomunikat(proby), "authentication method") {
 		t.Errorf("odmowa bez powodu: %q", ostatniKomunikat(proby))
 	}
 }

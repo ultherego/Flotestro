@@ -11,272 +11,277 @@ import (
 	"time"
 )
 
-// Katalog wpisow crona i prefiks plikow nalezacych do panelu.
+// The cron entries directory and the prefix of the files belonging to the
+// panel.
 //
-// Jeden plik na wpis, a nie wspolny plik z wieloma liniami: dzieki temu zmiana
-// jednego harmonogramu nie przepisuje pozostalych, a usuniecie jest
-// skasowaniem pliku, a nie edycja wiersza w srodku cudzej tresci.
+// One file per entry, not a shared file with many lines: thanks to that a
+// change of one schedule does not rewrite the others, and removal is
+// deleting a file, not editing a line inside somebody else's content.
 const (
-	KatalogCronD    = "/etc/cron.d"
-	PrefiksPlikow   = "flotestro-"
-	NaglowekPliku   = "# Zarzadzane przez Flotestro. Recznych zmian nie zachowa kolejna operacja."
-	SciezkaCrontabu = "/etc/crontab"
+	CronDDir    = "/etc/cron.d"
+	FilePrefix  = "flotestro-"
+	FileHeader  = "# Managed by Flotestro. Manual changes will not survive the next operation."
+	CrontabPath = "/etc/crontab"
 )
 
-// identyfikatorWpisu dopuszcza nazwy, ktore moga byc czescia nazwy pliku
-// w /etc/cron.d. Cron pomija pliki z kropka i innymi znakami specjalnymi,
-// wiec wpis o zlej nazwie po cichu nigdy by sie nie uruchomil.
+// entryIdentifier allows names that can be part of a file name in
+// /etc/cron.d. Cron skips files with a dot and other special characters, so
+// an entry with a bad name would silently never run.
 //
-// Zbior znakow jest ten sam, ktory dopuszcza cron: litery, cyfry, podkreslnik
-// i myslnik. Wezszy zbior uniemozliwialby przejecie wpisu zastanego o nazwie
-// takiej jak "e2scrub_all" - a takie wlasnie stoja na hostach.
-var identyfikatorWpisu = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+// The character set is the one cron allows: letters, digits, underscore and
+// hyphen. A narrower set would make it impossible to take over a found
+// entry with a name like "e2scrub_all" - and exactly those stand on hosts.
+var entryIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
 
-// PoprawnyIdentyfikator sprawdza nazwe wpisu zarzadzanego.
-func PoprawnyIdentyfikator(id string) bool {
-	return identyfikatorWpisu.MatchString(id)
+// ValidIdentifier checks the name of a managed entry.
+func ValidIdentifier(id string) bool {
+	return entryIdentifier.MatchString(id)
 }
 
-// SciezkaWpisu zwraca plik wpisu zarzadzanego.
-func SciezkaWpisu(katalog, id string) string {
-	return filepath.Join(katalog, PrefiksPlikow+id)
+// EntryPath returns the file of a managed entry.
+func EntryPath(dir, id string) string {
+	return filepath.Join(dir, FilePrefix+id)
 }
 
-// CzytajCron zbiera wpisy crona z /etc/crontab i /etc/cron.d.
+// ReadCron gathers the cron entries from /etc/crontab and /etc/cron.d.
 //
-// Wpisy uzytkownikow nie sa czytane w tym module: leza w katalogu spool,
-// naleza do konkretnych kont i ich odczyt jest osobna decyzja o prywatnosci.
-func CzytajCron(crontab, katalog string, teraz time.Time) []Schedule {
-	var wpisy []Schedule
-	wpisy = append(wpisy, czytajPlikCrona(crontab, true, teraz)...)
+// User entries are not read in this module: they live in the spool
+// directory, belong to specific accounts and reading them is a separate
+// privacy decision.
+func ReadCron(crontab, dir string, now time.Time) []Schedule {
+	var entries []Schedule
+	entries = append(entries, readCronFile(crontab, true, now)...)
 
-	pliki, err := os.ReadDir(katalog)
+	files, err := os.ReadDir(dir)
 	if err != nil {
-		return wpisy
+		return entries
 	}
-	nazwy := make([]string, 0, len(pliki))
-	for _, plik := range pliki {
-		if plik.IsDir() {
+	names := make([]string, 0, len(files))
+	for _, file := range files {
+		if file.IsDir() {
 			continue
 		}
-		nazwy = append(nazwy, plik.Name())
+		names = append(names, file.Name())
 	}
-	sort.Strings(nazwy)
-	for _, nazwa := range nazwy {
-		wpisy = append(wpisy, czytajPlikCrona(filepath.Join(katalog, nazwa), true, teraz)...)
+	sort.Strings(names)
+	for _, name := range names {
+		entries = append(entries, readCronFile(filepath.Join(dir, name), true, now)...)
 	}
-	return wpisy
+	return entries
 }
 
-// czytajPlikCrona parsuje jeden plik. zUzytkownikiem odroznia format
-// /etc/crontab i /etc/cron.d - tam po piatym polu jest nazwa uzytkownika -
-// od crontaba uzytkownika, gdzie jej nie ma.
-func czytajPlikCrona(sciezka string, zUzytkownikiem bool, teraz time.Time) []Schedule {
-	plik, err := os.Open(sciezka)
+// readCronFile parses one file. withUser distinguishes the /etc/crontab
+// and /etc/cron.d format - there the user name follows the fifth field -
+// from a user crontab, where it is absent.
+func readCronFile(path string, withUser bool, now time.Time) []Schedule {
+	file, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
-	defer plik.Close()
+	defer file.Close()
 
-	zarzadzany := strings.HasPrefix(filepath.Base(sciezka), PrefiksPlikow)
-	identyfikator := strings.TrimPrefix(filepath.Base(sciezka), PrefiksPlikow)
+	managed := strings.HasPrefix(filepath.Base(path), FilePrefix)
+	identifier := strings.TrimPrefix(filepath.Base(path), FilePrefix)
 
-	var wpisy []Schedule
-	skaner := bufio.NewScanner(plik)
-	numer := 0
-	var komentarz string
-	for skaner.Scan() {
-		numer++
-		linia := strings.TrimSpace(skaner.Text())
-		if linia == "" {
+	var entries []Schedule
+	scanner := bufio.NewScanner(file)
+	number := 0
+	var comment string
+	for scanner.Scan() {
+		number++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
 			continue
 		}
-		// Wpis wylaczony jest zakomentowany, a nie skasowany: wylaczenie nie
-		// jest usunieciem i tresc ma przetrwac.
-		wylaczony := strings.HasPrefix(linia, "#@")
-		if wylaczony {
-			linia = strings.TrimSpace(strings.TrimPrefix(linia, "#@"))
-		} else if strings.HasPrefix(linia, "#") {
-			// Komentarz przypisujemy wylacznie wpisom wlasnym: w cudzym pliku
-			// nad wpisem stoi zwykle naglowek formatu albo notatka o czyms
-			// innym, a pokazana przy wpisie wygladalaby na jego opis.
-			if zarzadzany && linia != NaglowekPliku {
-				komentarz = strings.TrimSpace(strings.TrimPrefix(linia, "#"))
+		// A disabled entry is commented out, not deleted: disabling is not
+		// removal and the content is meant to survive.
+		disabled := strings.HasPrefix(line, "#@")
+		if disabled {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "#@"))
+		} else if strings.HasPrefix(line, "#") {
+			// A comment is attributed only to our own entries: in somebody
+			// else's file the line above an entry is usually a format header
+			// or a note about something else, and shown next to the entry it
+			// would look like its description.
+			if managed && line != FileHeader {
+				comment = strings.TrimSpace(strings.TrimPrefix(line, "#"))
 			}
 			continue
 		}
-		// Przypisania zmiennych srodowiskowych nie sa harmonogramem.
-		if !strings.HasPrefix(linia, "@") && strings.Contains(strings.Fields(linia)[0], "=") {
+		// Environment variable assignments are not a schedule.
+		if !strings.HasPrefix(line, "@") && strings.Contains(strings.Fields(line)[0], "=") {
 			continue
 		}
 
-		wpis, ok := parsujLinieCrona(linia, zUzytkownikiem)
+		entry, ok := parseCronLine(line, withUser)
 		if !ok {
 			continue
 		}
-		wpis.Path = sciezka
-		wpis.Line = numer
-		wpis.Enabled = !wylaczony
-		wpis.Comment = komentarz
-		komentarz = ""
-		if zarzadzany {
-			wpis.Source = SourceManaged
-			wpis.ID = identyfikator
-			// Wpis wlasny panel zapisal sam, wiec wie, ze wiersz jest lista
-			// argumentow i moze go tak pokazac.
-			wpis.Command = strings.Fields(wpis.CommandLine)
+		entry.Path = path
+		entry.Line = number
+		entry.Enabled = !disabled
+		entry.Comment = comment
+		comment = ""
+		if managed {
+			entry.Source = SourceManaged
+			entry.ID = identifier
+			// The panel wrote its own entry itself, so it knows the line is
+			// an argument list and may show it as such.
+			entry.Command = strings.Fields(entry.CommandLine)
 		} else {
-			wpis.Source = SourceManual
-			wpis.ID = fmt.Sprintf("%s:%d", sciezka, numer)
+			entry.Source = SourceManual
+			entry.ID = fmt.Sprintf("%s:%d", path, number)
 		}
-		// Termin liczymy tylko dla wpisow aktywnych: wylaczony wpis nie ma
-		// nastepnego uruchomienia i podanie go byloby falszem.
-		if wpis.Enabled {
-			if wyrazenie, err := ParsujWyrazenie(wpis.Expression); err == nil {
-				if terminy := wyrazenie.NastepneUruchomienia(teraz, 1); len(terminy) > 0 {
-					termin := terminy[0]
-					wpis.NextRun = &termin
+		// The date is computed only for active entries: a disabled entry
+		// has no next run and giving one would be false.
+		if entry.Enabled {
+			if expression, err := ParseExpression(entry.Expression); err == nil {
+				if dates := expression.NextRuns(now, 1); len(dates) > 0 {
+					date := dates[0]
+					entry.NextRun = &date
 				}
 			}
 		}
-		wpisy = append(wpisy, wpis)
+		entries = append(entries, entry)
 	}
-	return wpisy
+	return entries
 }
 
-// parsujLinieCrona rozdziela wyrazenie, uzytkownika i polecenie.
-func parsujLinieCrona(linia string, zUzytkownikiem bool) (Schedule, bool) {
-	pola := strings.Fields(linia)
-	polWyrazenia := polCrona
-	if strings.HasPrefix(linia, "@") {
-		polWyrazenia = 1
+// parseCronLine separates the expression, the user and the command.
+func parseCronLine(line string, withUser bool) (Schedule, bool) {
+	fields := strings.Fields(line)
+	expressionFields := cronFields
+	if strings.HasPrefix(line, "@") {
+		expressionFields = 1
 	}
-	minimum := polWyrazenia + 1
-	if zUzytkownikiem {
+	minimum := expressionFields + 1
+	if withUser {
 		minimum++
 	}
-	if len(pola) < minimum {
+	if len(fields) < minimum {
 		return Schedule{}, false
 	}
 
-	wpis := Schedule{
+	entry := Schedule{
 		Kind:       KindCron,
-		Expression: strings.Join(pola[:polWyrazenia], " "),
+		Expression: strings.Join(fields[:expressionFields], " "),
 	}
-	reszta := pola[polWyrazenia:]
-	if zUzytkownikiem {
-		wpis.User = reszta[0]
-		reszta = reszta[1:]
+	rest := fields[expressionFields:]
+	if withUser {
+		entry.User = rest[0]
+		rest = rest[1:]
 	}
-	wpis.CommandLine = strings.Join(reszta, " ")
-	return wpis, true
+	entry.CommandLine = strings.Join(rest, " ")
+	return entry, true
 }
 
-// ZapiszWpis zapisuje wpis zarzadzany.
+// WriteEntry writes a managed entry.
 //
-// Zapis jest atomowy: plik powstaje obok i dopiero gotowy zastepuje poprzedni.
-// Cron czyta katalog w dowolnej chwili, wiec plik pisany w miejscu moglby
-// zostac odczytany w polowie - z wpisem, ktorego nikt nie zlecil.
-func ZapiszWpis(katalog string, wpis Schedule) error {
-	if !PoprawnyIdentyfikator(wpis.ID) {
-		return fmt.Errorf("nieprawidlowy identyfikator wpisu %q", wpis.ID)
+// The write is atomic: the file is created next to the target and replaces
+// the previous one only when complete. Cron reads the directory at any
+// moment, so a file written in place could be read half-way - with an entry
+// nobody ordered.
+func WriteEntry(dir string, entry Schedule) error {
+	if !ValidIdentifier(entry.ID) {
+		return fmt.Errorf("invalid entry identifier %q", entry.ID)
 	}
-	if _, err := ParsujWyrazenie(wpis.Expression); err != nil {
+	if _, err := ParseExpression(entry.Expression); err != nil {
 		return err
 	}
-	polecenie, err := ZlozPolecenie(wpis.Command)
+	command, err := ComposeCommand(entry.Command)
 	if err != nil {
 		return err
 	}
-	uzytkownik := wpis.User
-	if uzytkownik == "" {
-		uzytkownik = "root"
+	user := entry.User
+	if user == "" {
+		user = "root"
 	}
 
-	prefiks := ""
-	if !wpis.Enabled {
-		prefiks = "#@"
+	prefix := ""
+	if !entry.Enabled {
+		prefix = "#@"
 	}
-	tresc := NaglowekPliku + "\n"
-	if wpis.Comment != "" {
-		tresc += "# " + strings.ReplaceAll(wpis.Comment, "\n", " ") + "\n"
+	content := FileHeader + "\n"
+	if entry.Comment != "" {
+		content += "# " + strings.ReplaceAll(entry.Comment, "\n", " ") + "\n"
 	}
-	tresc += fmt.Sprintf("%s%s %s %s\n", prefiks, wpis.Expression, uzytkownik, polecenie)
+	content += fmt.Sprintf("%s%s %s %s\n", prefix, entry.Expression, user, command)
 
-	docelowy := SciezkaWpisu(katalog, wpis.ID)
-	tymczasowy := docelowy + ".nowy"
-	if err := os.WriteFile(tymczasowy, []byte(tresc), 0o644); err != nil {
+	target := EntryPath(dir, entry.ID)
+	temporary := target + ".new"
+	if err := os.WriteFile(temporary, []byte(content), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tymczasowy, docelowy)
+	return os.Rename(temporary, target)
 }
 
-// UsunWpis kasuje plik wpisu zarzadzanego.
-func UsunWpis(katalog, id string) error {
-	if !PoprawnyIdentyfikator(id) {
-		return fmt.Errorf("nieprawidlowy identyfikator wpisu %q", id)
+// RemoveEntry deletes the file of a managed entry.
+func RemoveEntry(dir, id string) error {
+	if !ValidIdentifier(id) {
+		return fmt.Errorf("invalid entry identifier %q", id)
 	}
-	err := os.Remove(SciezkaWpisu(katalog, id))
+	err := os.Remove(EntryPath(dir, id))
 	if os.IsNotExist(err) {
-		// Wpis, ktorego nie ma, jest stanem docelowym operacji usuwajacej.
+		// An entry that does not exist is the target state of a removal.
 		return nil
 	}
 	return err
 }
 
-// znakiPowloki sa niedozwolone w argumentach polecenia.
+// shellCharacters are disallowed in command arguments.
 //
-// Cron uruchamia polecenie przez powloke, wiec argument z metaznakiem
-// przestaje byc argumentem, a staje sie druga komenda. Modul podstawowy nie
-// przyjmuje dowolnego wiersza powloki - polecenie jest tablica argumentow.
-const znakiPowloki = "|&;<>()$`\\\"'\n\r\t*?[]{}~!#"
+// Cron runs the command through a shell, so an argument with a
+// metacharacter stops being an argument and becomes a second command. The
+// basic module does not accept an arbitrary shell line - the command is an
+// argument array.
+const shellCharacters = "|&;<>()$`\\\"'\n\r\t*?[]{}~!#"
 
-// ZlozPolecenie sklada argumenty w wiersz dla crona.
-func ZlozPolecenie(argumenty []string) (string, error) {
-	if len(argumenty) == 0 {
-		return "", fmt.Errorf("polecenie jest puste")
+// ComposeCommand assembles the arguments into a line for cron.
+func ComposeCommand(arguments []string) (string, error) {
+	if len(arguments) == 0 {
+		return "", fmt.Errorf("the command is empty")
 	}
-	if !strings.HasPrefix(argumenty[0], "/") {
-		// Sciezka wzgledna zalezy od PATH crona, ktory bywa inny niz PATH
-		// operatora. Wpis dzialajacy recznie i niedzialajacy z crona jest
-		// najtrudniejsza do zdiagnozowania awaria w tym module.
-		return "", fmt.Errorf("polecenie musi byc sciezka bezwzgledna, jest %q", argumenty[0])
+	if !strings.HasPrefix(arguments[0], "/") {
+		// A relative path depends on cron's PATH, which is often different
+		// from the operator's PATH. An entry working by hand and not from
+		// cron is the hardest failure to diagnose in this module.
+		return "", fmt.Errorf("the command must be an absolute path, is %q", arguments[0])
 	}
-	for _, argument := range argumenty {
+	for _, argument := range arguments {
 		if argument == "" {
-			return "", fmt.Errorf("pusty argument polecenia")
+			return "", fmt.Errorf("empty command argument")
 		}
-		if strings.ContainsAny(argument, znakiPowloki) {
-			return "", fmt.Errorf("argument %q zawiera znak powloki", argument)
+		if strings.ContainsAny(argument, shellCharacters) {
+			return "", fmt.Errorf("the argument %q contains a shell character", argument)
 		}
-		// Procent ma w cronie wlasne znaczenie: konczy polecenie i zaczyna
-		// wejscie standardowe.
+		// The percent sign has its own meaning in cron: it ends the command
+		// and starts the standard input.
 		if strings.Contains(argument, "%") {
-			return "", fmt.Errorf("argument %q zawiera znak procentu", argument)
+			return "", fmt.Errorf("the argument %q contains a percent sign", argument)
 		}
 	}
-	return strings.Join(argumenty, " "), nil
+	return strings.Join(arguments, " "), nil
 }
 
-// StrefaHosta zwraca strefe czasowa hosta.
+// HostTimezone returns the host time zone.
 //
-// Nazwa strefy pochodzi z konfiguracji systemu, a nie z time.Local: ta
-// ostatnia zawsze nazywa sie "Local" i nie odpowiada na pytanie, o ktorej
-// naprawde uruchomi sie wpis. Nieustalona strefa zostaje pusta - "UTC"
-// wpisane na wszelki wypadek byloby zgadywaniem.
-func StrefaHosta() string {
-	if dane, err := os.ReadFile("/etc/timezone"); err == nil {
-		if nazwa := strings.TrimSpace(string(dane)); nazwa != "" {
-			return nazwa
+// The zone name comes from the system configuration, not from time.Local:
+// the latter is always called "Local" and does not answer at what time the
+// entry really runs. An undetermined zone stays empty - "UTC" written just
+// in case would be guessing.
+func HostTimezone() string {
+	if data, err := os.ReadFile("/etc/timezone"); err == nil {
+		if name := strings.TrimSpace(string(data)); name != "" {
+			return name
 		}
 	}
-	cel, err := filepath.EvalSymlinks("/etc/localtime")
+	target, err := filepath.EvalSymlinks("/etc/localtime")
 	if err != nil {
 		return ""
 	}
-	const katalogStref = "/usr/share/zoneinfo/"
-	if indeks := strings.Index(cel, katalogStref); indeks >= 0 {
-		return cel[indeks+len(katalogStref):]
+	const zoneDir = "/usr/share/zoneinfo/"
+	if index := strings.Index(target, zoneDir); index >= 0 {
+		return target[index+len(zoneDir):]
 	}
 	return ""
 }

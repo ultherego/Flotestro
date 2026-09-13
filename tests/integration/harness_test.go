@@ -1,7 +1,8 @@
 //go:build integration
 
-// Package integration testuje control plane wobec dzialajacej floty.
-// Testy wymagaja postawionego srodowiska: panel, baza i hosty z agentem.
+// Package integration tests the control plane against a running fleet.
+// The tests need a provisioned environment: the panel, the database and
+// hosts with the agent.
 package integration
 
 import (
@@ -28,12 +29,12 @@ import (
 const (
 	defaultAPI      = "http://192.168.56.10:8080"
 	defaultDatabase = "postgres://flotestro:flotestro@192.168.56.20:5432/flotestro?sslmode=disable"
-	// Repozytorium pakietow floty testowej. Stoi obok panelu, bo w labie
-	// panel jest tez maszyna wydania.
+	// The package repository of the test fleet. It stands next to the panel,
+	// because in the lab the panel is also the release machine.
 	defaultRepo = "http://192.168.56.10:8090"
 )
 
-// harness zbiera dostep do API i bazy floty testowej.
+// harness gathers the API and database access of the test fleet.
 type harness struct {
 	t      *testing.T
 	api    string
@@ -46,7 +47,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	token := os.Getenv("FLOTESTRO_TEST_TOKEN")
 	if token == "" {
-		t.Skip("brak FLOTESTRO_TEST_TOKEN; uruchom przez Vagrant/test-integration.sh")
+		t.Skip("FLOTESTRO_TEST_TOKEN is not set; run through Vagrant/test-integration.sh")
 	}
 	h := &harness{
 		t:      t,
@@ -58,7 +59,7 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// withToken zwraca kopie harnessu dzialajaca jako inna tozsamosc.
+// withToken returns a copy of the harness acting as a different identity.
 func (h *harness) withToken(token string) *harness {
 	copied := *h
 	copied.token = token
@@ -72,12 +73,13 @@ func (h *harness) requireHealthy() {
 	}
 	h.get("/healthz", &health)
 	if health.Status != "ok" {
-		h.t.Fatalf("control plane nie jest zdrowy: %s", health.Status)
+		h.t.Fatalf("the control plane is not healthy: %s", health.Status)
 	}
 }
 
-// database otwiera polaczenie do bazy floty. Sluzy wylacznie do symulacji
-// zdarzen, ktorych nie da sie wywolac przez API, jak wygasniecie lease.
+// database opens a connection to the fleet database. It serves only to
+// simulate events that cannot be triggered through the API, such as a lease
+// expiring.
 func (h *harness) database(ctx context.Context) *pgxpool.Pool {
 	h.t.Helper()
 	if h.pool != nil {
@@ -85,18 +87,18 @@ func (h *harness) database(ctx context.Context) *pgxpool.Pool {
 	}
 	pool, err := pgxpool.New(ctx, envOr("FLOTESTRO_TEST_DATABASE_URL", defaultDatabase))
 	if err != nil {
-		h.t.Skipf("brak dostepu do bazy floty: %v", err)
+		h.t.Skipf("no access to the fleet database: %v", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		h.t.Skipf("baza floty nie odpowiada: %v", err)
+		h.t.Skipf("the fleet database does not answer: %v", err)
 	}
 	h.pool = pool
 	h.t.Cleanup(pool.Close)
 	return pool
 }
 
-// createPrincipal tworzy tozsamosc z rolami i zwraca jej token.
+// createPrincipal creates an identity with roles and returns its token.
 func (h *harness) createPrincipal(subject string, bindings []map[string]string) string {
 	h.t.Helper()
 	var response struct {
@@ -106,11 +108,12 @@ func (h *harness) createPrincipal(subject string, bindings []map[string]string) 
 		"subject":     subject,
 		"roles":       bindings,
 		"issue_token": true,
-		// Nadanie dostepu wymaga powodu; w tescie powodem jest sam test.
-		"reason": "przygotowanie tozsamosci na potrzeby testu integracyjnego",
+		// Granting access requires a reason; in a test the reason is the test
+		// itself.
+		"reason": "identity prepared for an integration test",
 	}, &response, http.StatusCreated)
 	if response.Token == "" {
-		h.t.Fatalf("nie wystawiono tokenu dla %s", subject)
+		h.t.Fatalf("no token was issued for %s", subject)
 	}
 	return response.Token
 }
@@ -120,16 +123,16 @@ func (h *harness) get(path string, out any) {
 	h.do(http.MethodGet, path, nil, out, http.StatusOK)
 }
 
-// tekst pobiera odpowiedz, ktora nie jest JSON-em.
+// text fetches a response that is not JSON.
 //
-// Ekspozycja metryk jest tekstem w formacie Prometheusa i ma nim zostac:
-// przepuszczenie jej przez JSON tylko po to, zeby test mial wygodniej,
-// sprawdzaloby cos innego niz to, co czyta Prometheus.
-func (h *harness) tekst(path string) string {
+// The metrics exposition is text in the Prometheus format and is to stay
+// that way: passing it through JSON just for the test's convenience would
+// check something other than what Prometheus reads.
+func (h *harness) text(path string) string {
 	h.t.Helper()
 	request, err := http.NewRequest(http.MethodGet, h.api+path, nil)
 	if err != nil {
-		h.t.Fatalf("budowa zadania: %v", err)
+		h.t.Fatalf("building the request: %v", err)
 	}
 	if h.token != "" {
 		request.Header.Set("Authorization", "Bearer "+h.token)
@@ -142,26 +145,26 @@ func (h *harness) tekst(path string) string {
 
 	raw, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusOK {
-		h.t.Fatalf("GET %s: kod %d; tresc: %s", path, response.StatusCode, truncate(raw, 300))
+		h.t.Fatalf("GET %s: status %d; body: %s", path, response.StatusCode, truncate(raw, 300))
 	}
 	return string(raw)
 }
 
-// do wykonuje zadanie i sprawdza kod odpowiedzi.
+// do performs a request and checks the response status.
 func (h *harness) do(method, path string, body any, out any, wantStatus int) {
 	h.t.Helper()
 	var payload io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			h.t.Fatalf("serializacja zadania: %v", err)
+			h.t.Fatalf("encoding the request: %v", err)
 		}
 		payload = bytes.NewReader(encoded)
 	}
 
 	request, err := http.NewRequest(method, h.api+path, payload)
 	if err != nil {
-		h.t.Fatalf("budowa zadania: %v", err)
+		h.t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if h.token != "" {
@@ -179,12 +182,12 @@ func (h *harness) do(method, path string, body any, out any, wantStatus int) {
 		return
 	}
 	if response.StatusCode != wantStatus {
-		h.t.Fatalf("%s %s: kod %d, oczekiwano %d; tresc: %s",
+		h.t.Fatalf("%s %s: status %d, expected %d; body: %s",
 			method, path, response.StatusCode, wantStatus, truncate(raw, 300))
 	}
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {
-			h.t.Fatalf("odpowiedz %s %s: %v; tresc: %s", method, path, err, truncate(raw, 300))
+			h.t.Fatalf("response of %s %s: %v; body: %s", method, path, err, truncate(raw, 300))
 		}
 	}
 }
@@ -202,19 +205,19 @@ type hostView struct {
 	FailedUnits     *int   `json:"failed_units"`
 	PendingUpdates  *int   `json:"pending_updates"`
 	RebootRequired  *bool  `json:"reboot_required"`
-	// Maintenance jest puste, gdy host nie jest w oknie serwisowym.
-	Maintenance  *oknoSerwisoweView `json:"maintenance"`
-	Capabilities []hostCapability   `json:"capabilities"`
+	// Maintenance is empty when the host is not in a maintenance window.
+	Maintenance  *maintenanceWindowView `json:"maintenance"`
+	Capabilities []hostCapability       `json:"capabilities"`
 }
 
-// oknoSerwisoweView odwzorowuje okno serwisowe hosta.
-type oknoSerwisoweView struct {
+// maintenanceWindowView mirrors the maintenance window of a host.
+type maintenanceWindowView struct {
 	Until  time.Time `json:"until"`
 	Reason string    `json:"reason"`
 	SetBy  string    `json:"set_by"`
 }
 
-// inventoryFragment odwzorowuje stan jednego modulu inventory.
+// inventoryFragment mirrors the state of one inventory module.
 type inventoryFragment struct {
 	HostID            string          `json:"host_id"`
 	Module            string          `json:"module"`
@@ -225,7 +228,7 @@ type inventoryFragment struct {
 	ObservedAt        time.Time       `json:"observed_at"`
 }
 
-// hostCapability odwzorowuje rejestr adapterow hosta.
+// hostCapability mirrors the adapter registry of a host.
 type hostCapability struct {
 	Name      string          `json:"name"`
 	Version   uint32          `json:"version"`
@@ -236,8 +239,8 @@ type hostCapability struct {
 }
 
 type jobView struct {
-	// Zgody: operacja niszczaca wymaga dwoch osob, wiec sama flaga
-	// requires_approval nie wystarczy.
+	// Approvals: a destructive operation requires two people, so the
+	// requires_approval flag alone is not enough.
 	RequiredApprovals  int    `json:"required_approvals"`
 	CollectedApprovals int    `json:"collected_approvals"`
 	ID                 string `json:"id"`
@@ -245,7 +248,7 @@ type jobView struct {
 	ActionType         string `json:"action_type"`
 	State              string `json:"state"`
 	PayloadHash        string `json:"payload_hash"`
-	RequiresApprova    bool   `json:"requires_approval"`
+	RequiresApproval   bool   `json:"requires_approval"`
 	CreatedBy          string `json:"created_by"`
 	ApprovedBy         string `json:"approved_by"`
 	ResultStatus       string `json:"result_status"`
@@ -258,8 +261,9 @@ type attemptView struct {
 	Status    string `json:"status"`
 	ExitCode  *int   `json:"exit_code"`
 	ErrorCode string `json:"error_code"`
-	// Message niesie powod odmowy. Odmowa bez powodu zmusza operatora do
-	// zgadywania, czy pliku nie ma, czy jest poza dozwolonym zakresem.
+	// Message carries the refusal reason. A refusal without a reason forces
+	// the operator to guess whether the file is missing or outside the
+	// allowed scope.
 	Message         string `json:"message"`
 	Stdout          string `json:"stdout"`
 	Stderr          string `json:"stderr"`
@@ -275,7 +279,7 @@ type attemptView struct {
 	Detail *packageDetail `json:"detail"`
 }
 
-// packageDetail jest typowanym wynikiem operacji pakietowej.
+// packageDetail is the typed result of a package operation.
 type packageDetail struct {
 	Kind    string `json:"kind"`
 	Manager string `json:"manager"`
@@ -290,8 +294,9 @@ type packageDetail struct {
 		CurrentVersion   string `json:"current_version"`
 		CandidateVersion string `json:"candidate_version"`
 	} `json:"applied"`
-	// Removals i Protected sa trescia planu usuniecia: co zniknie razem
-	// z pakietem i czego panel nie usunie mimo prosby.
+	// Removals and Protected are the content of a removal plan: what goes
+	// away together with the package and what the panel will not remove
+	// despite the request.
 	Removals              []string `json:"removals"`
 	Protected             []string `json:"protected"`
 	PlanHash              string   `json:"plan_hash"`
@@ -310,7 +315,7 @@ func (h *harness) hosts() []hostView {
 	return result.Items
 }
 
-// hostByFamily zwraca pierwszy online host danej rodziny systemow.
+// hostByFamily returns the first online host of the given OS family.
 func (h *harness) hostByFamily(family string) hostView {
 	h.t.Helper()
 	for _, host := range h.hosts() {
@@ -318,11 +323,11 @@ func (h *harness) hostByFamily(family string) hostView {
 			return host
 		}
 	}
-	h.t.Skipf("brak podlaczonego hosta rodziny %s", family)
+	h.t.Skipf("no connected host of the %s family", family)
 	return hostView{}
 }
 
-// createOperation zleca operacje i zwraca powstale zadanie.
+// createOperation orders an operation and returns the resulting job.
 func (h *harness) createOperation(hostID string, body map[string]any) jobView {
 	h.t.Helper()
 	var job jobView
@@ -354,7 +359,7 @@ func (h *harness) attempts(jobID string) []attemptView {
 	return result.Items
 }
 
-// awaitTerminal czeka, az zadanie osiagnie stan koncowy.
+// awaitTerminal waits until the job reaches a terminal state.
 func (h *harness) awaitTerminal(jobID string, timeout time.Duration) jobView {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -367,15 +372,16 @@ func (h *harness) awaitTerminal(jobID string, timeout time.Duration) jobView {
 		}
 		time.Sleep(time.Second)
 	}
-	h.t.Fatalf("zadanie %s nie zakonczylo sie w %s (stan: %s)", jobID, timeout, last.State)
+	h.t.Fatalf("job %s did not finish within %s (state: %s)", jobID, timeout, last.State)
 	return last
 }
 
-// runOperation zleca operacje, zatwierdza ja w razie potrzeby i czeka na wynik.
+// runOperation orders an operation, approves it when needed and waits for
+// the result.
 func (h *harness) runOperation(hostID string, body map[string]any, timeout time.Duration) (jobView, []attemptView) {
 	h.t.Helper()
 	job := h.createOperation(hostID, body)
-	if job.RequiresApprova {
+	if job.RequiresApproval {
 		job = h.approve(job.ID, job.PayloadHash)
 	}
 	final := h.awaitTerminal(job.ID, timeout)
@@ -400,64 +406,67 @@ func unitPayload(unit string) map[string]any {
 	return map[string]any{"unit": map[string]any{"unit": unit}}
 }
 
-// poczekajNaPolaczenie czeka, az host wroci do floty.
+// awaitConnection waits until the host comes back to the fleet.
 //
-// Agent laczy sie z wlasnym backoffem, wiec po zamknieciu sesji przez panel
-// jest chwila, w ktorej host jest offline i nie jest to awaria.
-func (h *harness) poczekajNaPolaczenie(hostID string, limit time.Duration) {
+// The agent connects with its own backoff, so after the panel closes the
+// session there is a moment when the host is offline and that is not a
+// failure.
+func (h *harness) awaitConnection(hostID string, limit time.Duration) {
 	h.t.Helper()
-	koniec := time.Now().Add(limit)
+	deadline := time.Now().Add(limit)
 	for {
 		for _, host := range h.hosts() {
 			if host.ID == hostID && host.ConnectionState == "online" {
 				return
 			}
 		}
-		if time.Now().After(koniec) {
-			h.t.Fatalf("host %s nie wrocil do floty w %s", hostID, limit)
+		if time.Now().After(deadline) {
+			h.t.Fatalf("host %s did not come back to the fleet within %s", hostID, limit)
 		}
 		time.Sleep(2 * time.Second)
 	}
 }
 
-// domyslnyEnrollment wskazuje publiczny endpoint enrollmentu floty testowej.
-const domyslnyEnrollment = "https://192.168.56.10:8444"
+// defaultEnrollment points at the public enrollment endpoint of the test
+// fleet.
+const defaultEnrollment = "https://192.168.56.10:8444"
 
-// zarejestrujSyntetycznyHost wprowadza do floty maszyne, ktorej nie ma.
+// enrollSyntheticHost brings a machine that does not exist into the fleet.
 //
-// Testy cyklu zycia musza czegos naprawde wycofac, a hosta floty testowej nie
-// wolno: wycofanie jest nieodwracalne i zabralo by pozostalym testom maszyne.
-func (h *harness) zarejestrujSyntetycznyHost(t *testing.T) hostView {
+// The lifecycle tests have to really retire something, and a test fleet host
+// must not be: retirement is irreversible and would take the machine away
+// from the remaining tests.
+func (h *harness) enrollSyntheticHost(t *testing.T) hostView {
 	t.Helper()
-	var zamowienie struct {
+	var order struct {
 		Token string `json:"token"`
 	}
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "host syntetyczny testu", "site": "lab", "environment": "test",
-	}, &zamowienie, http.StatusCreated)
-	return h.zarejestrujSyntetycznyHostZamowieniem(t, zamowienie.Token)
+		"description": "synthetic test host", "site": "lab", "environment": "test",
+	}, &order, http.StatusCreated)
+	return h.enrollSyntheticHostWithToken(t, order.Token)
 }
 
-// zarejestrujSyntetycznyHostZamowieniem uzywa tokenu, ktory juz istnieje.
-func (h *harness) zarejestrujSyntetycznyHostZamowieniem(t *testing.T, token string) hostView {
+// enrollSyntheticHostWithToken uses a token that already exists.
+func (h *harness) enrollSyntheticHostWithToken(t *testing.T, token string) hostView {
 	t.Helper()
 
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	maszyna := uniqueSubject("maszyna-testowa")
+	machine := uniqueSubject("test-machine")
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
-		&x509.CertificateRequest{Subject: pkix.Name{CommonName: maszyna}}, klucz)
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: machine}}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
-	tresc, err := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"enrollmentToken": token,
-		"machineId":       maszyna,
-		"hostname":        maszyna,
+		"machineId":       machine,
+		"hostname":        machine,
 		"csrPem":          csrPEM,
 		"clientRequestId": uuid.NewString(),
 		"build":           map[string]any{"agentVersion": "test"},
@@ -466,61 +475,61 @@ func (h *harness) zarejestrujSyntetycznyHostZamowieniem(t *testing.T, token stri
 		t.Fatal(err)
 	}
 
-	adres := envOr("FLOTESTRO_TEST_ENROLLMENT", domyslnyEnrollment) +
+	address := envOr("FLOTESTRO_TEST_ENROLLMENT", defaultEnrollment) +
 		"/flotestro.agent.v1.EnrollmentService/Enroll"
-	// Zaufanie do panelu bierzemy z tego samego bundla, ktorego uzywaja
-	// agenci: test, ktory wylacza weryfikacje, nie sprawdza tej drogi.
-	pula, err := x509.SystemCertPool()
-	if err != nil || pula == nil {
-		pula = x509.NewCertPool()
+	// Trust in the panel comes from the same bundle the agents use: a test
+	// that disables verification would not check that path.
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
 	}
 	if bundle, err := os.ReadFile(envOr("FLOTESTRO_TEST_CA", "/var/lib/flotestro/ca.pem")); err == nil {
-		pula.AppendCertsFromPEM(bundle)
+		pool.AppendCertsFromPEM(bundle)
 	}
-	klient := &http.Client{
+	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			RootCAs: pula, MinVersion: tls.VersionTLS12,
+			RootCAs: pool, MinVersion: tls.VersionTLS12,
 		}},
 	}
-	zadanie, err := http.NewRequest(http.MethodPost, adres, bytes.NewReader(tresc))
+	request, err := http.NewRequest(http.MethodPost, address, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	zadanie.Header.Set("Content-Type", "application/json")
-	odpowiedz, err := klient.Do(zadanie)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
 	if err != nil {
-		t.Fatalf("enrollment syntetycznego hosta: %v", err)
+		t.Fatalf("enrolling the synthetic host: %v", err)
 	}
-	defer odpowiedz.Body.Close()
-	if odpowiedz.StatusCode != http.StatusOK {
-		tresc2, _ := io.ReadAll(io.LimitReader(odpowiedz.Body, 1<<12))
-		t.Fatalf("enrollment odrzucony: %s %s", odpowiedz.Status, tresc2)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<12))
+		t.Fatalf("enrollment rejected: %s %s", response.Status, raw)
 	}
-	var wynik struct {
+	var result struct {
 		HostID string `json:"hostId"`
 	}
-	if err := json.NewDecoder(odpowiedz.Body).Decode(&wynik); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
 
-	// Maszyna syntetyczna znika razem z testem. Wycofany host zostaje we
-	// flocie na zawsze - i po kilku przebiegach ekran floty pokazywalby
-	// wylacznie smieci po testach. Kasujemy wprost w bazie, bo w produkcie
-	// takiej operacji nie ma i nie powinno byc.
+	// The synthetic machine disappears together with the test. A retired
+	// host stays in the fleet forever - and after a few runs the fleet screen
+	// would show nothing but test leftovers. It is deleted straight in the
+	// database, because the product has no such operation and should not.
 	t.Cleanup(func() {
 		ctx := context.Background()
 		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, wynik.HostID); err != nil {
-			t.Logf("nie posprzatano syntetycznego hosta %s: %v", wynik.HostID, err)
+			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
+			t.Logf("the synthetic host %s was not cleaned up: %v", result.HostID, err)
 		}
 	})
 
 	for _, host := range h.hosts() {
-		if host.ID == wynik.HostID {
+		if host.ID == result.HostID {
 			return host
 		}
 	}
-	t.Fatalf("host %s nie pojawil sie na liscie floty", wynik.HostID)
+	t.Fatalf("host %s did not appear on the fleet list", result.HostID)
 	return hostView{}
 }

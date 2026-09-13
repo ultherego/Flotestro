@@ -1,14 +1,15 @@
-// Package backup steruje narzedziami backupu, ktore juz sa na hoscie.
+// Package backup drives the backup tools already present on the host.
 //
-// Dane backupowe nie plyna przez Flotestro i plynac nie beda: host rozmawia
-// z repozytorium wprost, a panel widzi wylacznie metadane - kiedy backup sie
-// udal, ile zajmuje i co obejmuje. Panel, przez ktory plynelyby kopie stu
-// hostow, bylby waskim gardlem i najciekawszym celem w calej instalacji.
+// Backup data does not flow through Flotestro and never will: the host
+// talks to the repository directly, and the panel sees only metadata - when
+// the backup succeeded, how much it takes and what it covers. A panel the
+// copies of a hundred hosts flowed through would be a bottleneck and the
+// most interesting target in the whole installation.
 //
-// Poswiadczenia repozytorium nie ida w argumentach polecenia. Wiersz polecen
-// procesu jest czytelny dla kazdego uzytkownika hosta przez /proc, wiec haslo
-// podane jako argument byloby haslem podanym publicznie. Ida srodowiskiem,
-// ktore czyta wylacznie wlasciciel procesu.
+// Repository credentials do not go in command arguments. A process command
+// line is readable by every user of the host through /proc, so a password
+// given as an argument would be a password given publicly. They go through
+// the environment, which only the process owner reads.
 package backup
 
 import (
@@ -22,313 +23,323 @@ import (
 	"time"
 )
 
-// Narzedzia obslugiwane przez modul.
+// Tools supported by the module.
 const (
-	NarzedzieRestic  = "restic"
-	NarzedzieBorg    = "borg"
-	NarzedzieRunbook = "runbook"
+	ToolRestic  = "restic"
+	ToolBorg    = "borg"
+	ToolRunbook = "runbook"
 )
 
-// Rodzaje operacji. Runbook dostaje je jako pierwszy argument, wiec sa
-// czescia kontraktu widocznego poza tym pakietem.
+// Operation kinds. A runbook receives them as the first argument, so they
+// are part of the contract visible outside this package.
 const (
-	OperacjaPlan      = "plan"
-	OperacjaBackup    = "run"
-	OperacjaSprawdz   = "verify"
-	OperacjaOdtworzen = "restore"
+	OperationPlan    = "plan"
+	OperationBackup  = "run"
+	OperationVerify  = "verify"
+	OperationRestore = "restore"
 )
 
-// Plan nadpisania przy odtwarzaniu.
+// Overwrite plan on restore.
 //
-// Odtworzenie bez planu nadpisania jest operacja, ktorej skutku nikt nie zna:
-// pliki moga trafic obok istniejacych, na nie albo wcale. Dlatego panel wymaga
-// decyzji, a host ja sprawdza przed rozpakowaniem czegokolwiek.
+// A restore without an overwrite plan is an operation whose effect nobody
+// knows: the files may land next to the existing ones, on them or not at
+// all. That is why the panel requires a decision, and the host checks it
+// before unpacking anything.
 const (
-	// NadpisaniePuste wymaga, zeby katalog docelowy byl pusty.
-	NadpisaniePuste = "empty-target"
-	// NadpisanieDozwolone pozwala nadpisac to, co w katalogu juz jest.
-	NadpisanieDozwolone = "overwrite"
+	// OverwriteEmpty requires the target directory to be empty.
+	OverwriteEmpty = "empty-target"
+	// OverwriteAllowed allows overwriting what is already in the directory.
+	OverwriteAllowed = "overwrite"
 )
 
-// KatalogRunbookow trzyma skrypty, ktore panel moze uruchomic.
+// RunbookDir holds the scripts the panel may run.
 //
-// Panel nie przesyla tresci skryptu i nie moze go zalozyc: wskazuje wylacznie
-// nazwe pliku, ktory administrator hosta wczesniej tam polozyl. Inaczej
-// "runbook" bylby zdalnym wykonaniem dowolnego kodu z inna nazwa.
-const KatalogRunbookow = "/etc/flotestro/backup-runbooks"
+// The panel does not send the script content and cannot create it: it only
+// names a file the host administrator placed there earlier. Otherwise a
+// "runbook" would be remote execution of arbitrary code under a different
+// name.
+const RunbookDir = "/etc/flotestro/backup-runbooks"
 
-// Ograniczenia wielkosci. Wyjscie narzedzia backupu bywa dlugie, a panel
-// przechowuje je w wyniku zadania.
+// Size limits. The output of a backup tool can be long, and the panel
+// stores it in the task result.
 const (
-	MaksymalneWyjscie   = 256 << 10
-	MaksymalnaLiczbaSci = 64
+	MaxOutput = 256 << 10
+	MaxPaths  = 64
 )
 
 var (
-	nazwaDefinicji = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
-	nazwaRunbooka  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
-	nazwaZmiennej  = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,63}$`)
+	definitionName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
+	runbookName    = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
+	variableName   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,63}$`)
 )
 
-// Definicja opisuje, co i dokad backupowac.
+// Definition describes what to back up and where to.
 //
-// Poswiadczen tu nie ma: sa osobno, bo maja inne zycie - przychodza z magazynu
-// tuz przed operacja i nie zostaja nigdzie poza pamiecia procesu.
-type Definicja struct {
+// There are no credentials here: they are separate, because they have a
+// different life - they come from the store right before the operation and
+// stay nowhere but in the process memory.
+type Definition struct {
 	ID   string `json:"id"`
 	Tool string `json:"tool"`
-	// Repository jest odnosnikiem do celu backupu. Panel go pokazuje, ale
-	// nie przechowuje jego zawartosci ani przez niego nie posredniczy.
+	// Repository is the reference to the backup target. The panel shows it,
+	// but stores neither its content nor mediates through it.
 	Repository string   `json:"repository"`
 	Paths      []string `json:"paths,omitempty"`
 	Excludes   []string `json:"excludes,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
-	// Retencja opisuje, ile kopii zostaje. Zero oznacza "nie sprzataj":
-	// skasowanie starych kopii jest osobna decyzja od zrobienia nowej.
+	// Retention describes how many copies stay. Zero means "do not clean
+	// up": deleting old copies is a decision separate from making a new
+	// one.
 	KeepLast    int  `json:"keep_last,omitempty"`
 	KeepDaily   int  `json:"keep_daily,omitempty"`
 	KeepWeekly  int  `json:"keep_weekly,omitempty"`
 	KeepMonthly int  `json:"keep_monthly,omitempty"`
 	Prune       bool `json:"prune,omitempty"`
-	// Runbook wskazuje nazwe skryptu w katalogu runbookow.
+	// Runbook names the script in the runbook directory.
 	Runbook string `json:"runbook,omitempty"`
-	// Initialize pozwala zalozyc repozytorium przy pierwszej kopii. Bez tej
-	// zgody host nie tworzy niczego: repozytorium powstale przez pomylke
-	// w adresie wyglada jak backup, ktory dziala, a jest pustym katalogiem
-	// obok tego wlasciwego.
+	// Initialize allows creating the repository at the first copy. Without
+	// this consent the host creates nothing: a repository created by a typo
+	// in the address looks like a working backup and is an empty directory
+	// next to the right one.
 	Initialize bool `json:"initialize,omitempty"`
 }
 
-// Odtworzenie opisuje zlecone odtworzenie danych.
-type Odtworzenie struct {
+// Restore describes an ordered data restore.
+type Restore struct {
 	SnapshotID string   `json:"snapshot_id"`
 	Target     string   `json:"target"`
 	Include    []string `json:"include,omitempty"`
 	Overwrite  string   `json:"overwrite"`
 }
 
-// Zlecenie jest tym, co adapter dostaje do wykonania.
-type Zlecenie struct {
-	Definicja
-	Odtworzenie Odtworzenie
-	// Haslo i Srodowisko niosa wartosci z magazynu. Zyja w pamieci procesu
-	// przez czas operacji i nie trafiaja do argumentow, wyniku ani dziennika.
-	Haslo      []byte
-	Srodowisko map[string][]byte
-	// Verify moze czytac dane, a nie tylko strukture repozytorium. To inny
-	// koszt i inny czas, wiec jest jawnym wyborem.
+// Order is what the adapter receives to execute.
+type Order struct {
+	Definition
+	Restore Restore
+	// Password and Environment carry values from the store. They live in
+	// the process memory for the duration of the operation and do not go
+	// into the arguments, the result or the log.
+	Password    []byte
+	Environment map[string][]byte
+	// Verify may read data, not only the repository structure. That is a
+	// different cost and a different time, so it is an explicit choice.
 	ReadData bool
 }
 
-// Snapshot to jedna kopia w repozytorium.
+// Snapshot is one copy in the repository.
 type Snapshot struct {
 	ID       string    `json:"id"`
 	Time     time.Time `json:"time"`
 	Hostname string    `json:"hostname,omitempty"`
 	Paths    []string  `json:"paths,omitempty"`
 	Tags     []string  `json:"tags,omitempty"`
-	// SizeBytes bywa nieznany: nie kazde narzedzie liczy rozmiar kopii przy
-	// samym wyliczeniu snapshotow. Pusty wskaznik oznacza brak wiedzy.
+	// SizeBytes may be unknown: not every tool computes the copy size when
+	// merely listing snapshots. A nil pointer means no knowledge.
 	SizeBytes *uint64 `json:"size_bytes,omitempty"`
 }
 
-// Stan opisuje repozytorium widziane z hosta.
-type Stan struct {
+// State describes the repository as seen from the host.
+type State struct {
 	Tool        string `json:"tool"`
 	ToolVersion string `json:"tool_version,omitempty"`
 	Repository  string `json:"repository,omitempty"`
-	// Snapshots jest lista kopii, od najstarszej.
+	// Snapshots is the list of copies, oldest first.
 	Snapshots []Snapshot `json:"snapshots,omitempty"`
-	// LastSuccessAt jest czasem ostatniej udanej kopii. Pusty oznacza
-	// repozytorium bez kopii albo stan nieustalony - rozroznia je powod.
+	// LastSuccessAt is the time of the last successful copy. Nil means a
+	// repository without copies or an undetermined state - the reason tells
+	// them apart.
 	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
 	TotalSizeBytes *uint64    `json:"total_size_bytes,omitempty"`
 	ObservedAt     time.Time  `json:"observed_at"`
-	// UnavailableReason mowi, dlaczego stanu nie ustalono. Puste repozytorium
-	// i repozytorium nieodczytane to dwie rozne odpowiedzi.
+	// UnavailableReason says why the state was not determined. An empty
+	// repository and an unread repository are two different answers.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// Wynik opisuje skutek operacji.
-type Wynik struct {
+// Result describes the effect of an operation.
+type Result struct {
 	SnapshotID string `json:"snapshot_id,omitempty"`
-	// Liczniki sa wskaznikami: narzedzie, ktore ich nie poda, zostawia brak
-	// wiedzy, a nie zero.
+	// The counters are pointers: a tool that does not report them leaves no
+	// knowledge, not zero.
 	BytesAdded          *uint64  `json:"bytes_added,omitempty"`
 	TotalBytesProcessed *uint64  `json:"total_bytes_processed,omitempty"`
 	FilesNew            *uint64  `json:"files_new,omitempty"`
 	FilesChanged        *uint64  `json:"files_changed,omitempty"`
 	FilesRestored       *uint64  `json:"files_restored,omitempty"`
 	DurationSeconds     *float64 `json:"duration_seconds,omitempty"`
-	// Removed liczy kopie skasowane przez retencje.
+	// Removed counts the copies deleted by retention.
 	Removed *int   `json:"snapshots_removed,omitempty"`
 	Message string `json:"message,omitempty"`
-	// Output jest wyjsciem narzedzia po zaslonieciu poswiadczen.
+	// Output is the tool output after masking the credentials.
 	Output string `json:"output,omitempty"`
 }
 
-// Postep opisuje postep dlugiej operacji.
-type Postep struct {
+// Progress describes the progress of a long operation.
+type Progress struct {
 	Percent *uint32
 	Message string
 }
 
-// PostepFunc odbiera postep operacji.
-type PostepFunc func(Postep)
+// ProgressFunc receives the operation progress.
+type ProgressFunc func(Progress)
 
-// Adapter jest sterownikiem jednego narzedzia backupu.
+// Adapter is the driver of one backup tool.
 //
-// Modul nie robi backupu sam i nie bedzie: robia go narzedzia, ktore host juz
-// ma i ktorym administrator juz ufa. Zadaniem panelu jest je uruchomic,
-// odczytac wynik i pokazac go obok stu innych hostow.
+// The module does not make backups itself and will not: the tools the host
+// already has and the administrator already trusts do. The panel's job is
+// to run them, read the result and show it next to a hundred other hosts.
 type Adapter interface {
-	Nazwa() string
-	Dostepny() bool
-	Wersja(ctx context.Context) string
-	Plan(ctx context.Context, zlecenie Zlecenie) (Stan, error)
-	Wykonaj(ctx context.Context, zlecenie Zlecenie, postep PostepFunc) (Wynik, error)
-	Sprawdz(ctx context.Context, zlecenie Zlecenie) (Wynik, error)
-	Odtworz(ctx context.Context, zlecenie Zlecenie) (Wynik, error)
+	Name() string
+	Available() bool
+	Version(ctx context.Context) string
+	Plan(ctx context.Context, order Order) (State, error)
+	Run(ctx context.Context, order Order, progress ProgressFunc) (Result, error)
+	Verify(ctx context.Context, order Order) (Result, error)
+	RestoreData(ctx context.Context, order Order) (Result, error)
 }
 
-// Wybierz zwraca adapter narzedzia wskazanego w definicji.
-func Wybierz(narzedzie string) (Adapter, error) {
-	switch narzedzie {
-	case NarzedzieRestic:
+// Select returns the adapter of the tool named in the definition.
+func Select(tool string) (Adapter, error) {
+	switch tool {
+	case ToolRestic:
 		return &Restic{}, nil
-	case NarzedzieBorg:
+	case ToolBorg:
 		return &Borg{}, nil
-	case NarzedzieRunbook:
+	case ToolRunbook:
 		return &Runbook{}, nil
 	}
-	return nil, fmt.Errorf("nieznane narzedzie backupu %q", narzedzie)
+	return nil, fmt.Errorf("unknown backup tool %q", tool)
 }
 
-// Waliduj sprawdza definicje przed wykonaniem czegokolwiek.
-func (d Definicja) Waliduj() error {
-	if !nazwaDefinicji.MatchString(d.ID) {
-		return fmt.Errorf("nieprawidlowy identyfikator definicji %q", d.ID)
+// Validate checks the definition before executing anything.
+func (d Definition) Validate() error {
+	if !definitionName.MatchString(d.ID) {
+		return fmt.Errorf("invalid definition identifier %q", d.ID)
 	}
 	switch d.Tool {
-	case NarzedzieRestic, NarzedzieBorg:
+	case ToolRestic, ToolBorg:
 		if strings.TrimSpace(d.Repository) == "" {
-			return fmt.Errorf("definicja wymaga adresu repozytorium")
+			return fmt.Errorf("the definition requires a repository address")
 		}
-	case NarzedzieRunbook:
-		if !nazwaRunbooka.MatchString(d.Runbook) {
-			return fmt.Errorf("nieprawidlowa nazwa runbooka %q", d.Runbook)
+	case ToolRunbook:
+		if !runbookName.MatchString(d.Runbook) {
+			return fmt.Errorf("invalid runbook name %q", d.Runbook)
 		}
 	default:
-		return fmt.Errorf("nieznane narzedzie backupu %q", d.Tool)
+		return fmt.Errorf("unknown backup tool %q", d.Tool)
 	}
 	if strings.ContainsAny(d.Repository, "\n\r") || len(d.Repository) > 512 {
-		return fmt.Errorf("adres repozytorium zawiera znak nowej linii albo jest za dlugi")
+		return fmt.Errorf("the repository address contains a newline or is too long")
 	}
-	if len(d.Paths) > MaksymalnaLiczbaSci {
-		return fmt.Errorf("definicja obejmuje najwyzej %d sciezek", MaksymalnaLiczbaSci)
+	if len(d.Paths) > MaxPaths {
+		return fmt.Errorf("the definition covers at most %d paths", MaxPaths)
 	}
-	for _, sciezka := range d.Paths {
-		if !strings.HasPrefix(sciezka, "/") || strings.ContainsAny(sciezka, "\n\r") {
-			return fmt.Errorf("sciezka %q nie jest bezwzgledna", sciezka)
+	for _, path := range d.Paths {
+		if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "\n\r") {
+			return fmt.Errorf("the path %q is not absolute", path)
 		}
 	}
-	for _, wzorzec := range d.Excludes {
-		if strings.ContainsAny(wzorzec, "\n\r") {
-			return fmt.Errorf("wzorzec wykluczenia zawiera znak nowej linii")
+	for _, pattern := range d.Excludes {
+		if strings.ContainsAny(pattern, "\n\r") {
+			return fmt.Errorf("an exclude pattern contains a newline")
 		}
 	}
-	for _, znacznik := range d.Tags {
-		if znacznik == "" || strings.ContainsAny(znacznik, " \t\n\r,") {
-			return fmt.Errorf("nieprawidlowy znacznik %q", znacznik)
+	for _, tag := range d.Tags {
+		if tag == "" || strings.ContainsAny(tag, " \t\n\r,") {
+			return fmt.Errorf("invalid tag %q", tag)
 		}
 	}
-	for _, wartosc := range []int{d.KeepLast, d.KeepDaily, d.KeepWeekly, d.KeepMonthly} {
-		if wartosc < 0 || wartosc > 10000 {
-			return fmt.Errorf("liczba zachowywanych kopii jest poza zakresem")
+	for _, value := range []int{d.KeepLast, d.KeepDaily, d.KeepWeekly, d.KeepMonthly} {
+		if value < 0 || value > 10000 {
+			return fmt.Errorf("the number of kept copies is out of range")
 		}
 	}
 	return nil
 }
 
-// Drzewa, do ktorych panel nie odtwarza danych.
+// Trees the panel does not restore data into.
 //
-// Odtworzenie wprost do systemu plikow hosta zamienia backup w rozpakowanie
-// starego stanu na dzialajacy system: konfiguracja, konta i biblioteki
-// wracaja skokiem, a nikt tego nie przeglada. Odtwarzamy do katalogu roboczego,
-// a to, co z niego wroci na miejsce, jest osobna decyzja i osobna operacja.
-var zakazaneDrzewa = []string{
+// A restore straight into the host filesystem turns a backup into unpacking
+// an old state onto a running system: the configuration, accounts and
+// libraries come back in one jump, and nobody reviews it. Data is restored
+// into a working directory, and what returns from it into place is a
+// separate decision and a separate operation.
+var forbiddenTrees = []string{
 	"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot",
 	"/dev", "/proc", "/sys", "/run",
-	// Stan panelu i jego pomocnika nie jest miejscem na odtworzone dane.
+	// The state of the panel and its helper is no place for restored data.
 	"/var/lib/flotestro", "/var/lib/flotestro-helper",
-	// Helper dziala z PrivateTmp, wiec ma wlasny, prywatny /tmp i /var/tmp.
-	// Dane odtworzone tam znikaja razem z procesem, a operator widzi sukces
-	// i pusty katalog - najgorsza z mozliwych odpowiedzi.
+	// The helper runs with PrivateTmp, so it has its own private /tmp and
+	// /var/tmp. Data restored there vanishes together with the process,
+	// and the operator sees a success and an empty directory - the worst
+	// possible answer.
 	"/tmp", "/var/tmp",
 }
 
-// zakazaneKorzenie wylicza katalogi, ktorych samych nie ruszamy, choc ich
-// wnetrze jest zwyczajnym miejscem na dane. Odtworzenie do /home/anna/kopia
-// jest normalna praca; odtworzenie do /home juz nie.
-var zakazaneKorzenie = []string{"/", "/home", "/root", "/var", "/srv", "/opt", "/mnt", "/media"}
+// forbiddenRoots lists the directories that are not touched themselves,
+// although their interior is an ordinary place for data. A restore into
+// /home/anna/copy is normal work; a restore into /home is not.
+var forbiddenRoots = []string{"/", "/home", "/root", "/var", "/srv", "/opt", "/mnt", "/media"}
 
-// WalidujOdtworzenie sprawdza cel i plan nadpisania.
-func WalidujOdtworzenie(odtworzenie Odtworzenie) error {
-	if strings.TrimSpace(odtworzenie.SnapshotID) == "" {
-		return fmt.Errorf("odtworzenie wymaga wskazania kopii")
+// ValidateRestore checks the target and the overwrite plan.
+func ValidateRestore(restore Restore) error {
+	if strings.TrimSpace(restore.SnapshotID) == "" {
+		return fmt.Errorf("a restore requires naming a copy")
 	}
-	if strings.ContainsAny(odtworzenie.SnapshotID, " \t\n\r/") || len(odtworzenie.SnapshotID) > 128 {
-		return fmt.Errorf("nieprawidlowy identyfikator kopii")
+	if strings.ContainsAny(restore.SnapshotID, " \t\n\r/") || len(restore.SnapshotID) > 128 {
+		return fmt.Errorf("invalid copy identifier")
 	}
-	cel := odtworzenie.Target
-	if !strings.HasPrefix(cel, "/") {
-		return fmt.Errorf("odtworzenie wymaga bezwzglednej sciezki celu")
+	target := restore.Target
+	if !strings.HasPrefix(target, "/") {
+		return fmt.Errorf("a restore requires an absolute target path")
 	}
-	if cel != filepath.Clean(cel) || strings.Contains(cel, "..") {
-		return fmt.Errorf("sciezka celu %q nie jest w postaci znormalizowanej", cel)
+	if target != filepath.Clean(target) || strings.Contains(target, "..") {
+		return fmt.Errorf("the target path %q is not in normalised form", target)
 	}
-	if strings.ContainsAny(cel, "\n\r") {
-		return fmt.Errorf("sciezka celu zawiera znak nowej linii")
+	if strings.ContainsAny(target, "\n\r") {
+		return fmt.Errorf("the target path contains a newline")
 	}
-	for _, zakazany := range zakazaneKorzenie {
-		if cel == zakazany {
-			return fmt.Errorf("panel nie odtwarza danych wprost do %s; wskaz katalog roboczy", zakazany)
+	for _, forbidden := range forbiddenRoots {
+		if target == forbidden {
+			return fmt.Errorf("the panel does not restore data straight into %s; name a working directory", forbidden)
 		}
 	}
-	for _, drzewo := range zakazaneDrzewa {
-		if cel == drzewo || strings.HasPrefix(cel, drzewo+"/") {
-			if drzewo == "/tmp" || drzewo == "/var/tmp" {
-				return fmt.Errorf("pomocnik ma wlasny, prywatny %s: odtworzone tam dane znikaja razem z operacja", drzewo)
+	for _, tree := range forbiddenTrees {
+		if target == tree || strings.HasPrefix(target, tree+"/") {
+			if tree == "/tmp" || tree == "/var/tmp" {
+				return fmt.Errorf("the helper has its own private %s: data restored there vanishes with the operation", tree)
 			}
-			return fmt.Errorf("panel nie odtwarza danych wprost do %s; wskaz katalog roboczy", drzewo)
+			return fmt.Errorf("the panel does not restore data straight into %s; name a working directory", tree)
 		}
 	}
-	switch odtworzenie.Overwrite {
-	case NadpisaniePuste, NadpisanieDozwolone:
+	switch restore.Overwrite {
+	case OverwriteEmpty, OverwriteAllowed:
 	default:
-		return fmt.Errorf("odtworzenie wymaga planu nadpisania (%s albo %s)",
-			NadpisaniePuste, NadpisanieDozwolone)
+		return fmt.Errorf("a restore requires an overwrite plan (%s or %s)",
+			OverwriteEmpty, OverwriteAllowed)
 	}
-	for _, wzorzec := range odtworzenie.Include {
-		if !strings.HasPrefix(wzorzec, "/") || strings.ContainsAny(wzorzec, "\n\r") {
-			return fmt.Errorf("zakres %q nie jest bezwzgledna sciezka", wzorzec)
+	for _, pattern := range restore.Include {
+		if !strings.HasPrefix(pattern, "/") || strings.ContainsAny(pattern, "\n\r") {
+			return fmt.Errorf("the scope %q is not an absolute path", pattern)
 		}
 	}
 	return nil
 }
 
-// SprawdzCel sprawdza katalog docelowy tuz przed rozpakowaniem.
+// CheckTarget checks the target directory right before unpacking.
 //
-// Sprawdzenie jest na hoscie, a nie w panelu, bo tylko host wie, co w tym
-// katalogu naprawde lezy - i wie to dopiero w chwili operacji.
-func SprawdzCel(odtworzenie Odtworzenie) error {
-	info, err := os.Stat(odtworzenie.Target)
+// The check is on the host, not in the panel, because only the host knows
+// what really lies in this directory - and knows it only at the moment of
+// the operation.
+func CheckTarget(restore Restore) error {
+	info, err := os.Stat(restore.Target)
 	if os.IsNotExist(err) {
-		// Katalogu, ktorego nie ma, nie tworzymy w polowie drzewa: rodzic
-		// musi istniec, zeby literowka nie zalozyla katalogu w losowym miejscu.
-		rodzic := filepath.Dir(odtworzenie.Target)
-		if info, err := os.Stat(rodzic); err != nil || !info.IsDir() {
-			return fmt.Errorf("katalog %s nie istnieje", rodzic)
+		// A directory that does not exist is not created half-way down the
+		// tree: the parent must exist so that a typo does not create a
+		// directory in a random place.
+		parent := filepath.Dir(restore.Target)
+		if info, err := os.Stat(parent); err != nil || !info.IsDir() {
+			return fmt.Errorf("the directory %s does not exist", parent)
 		}
 		return nil
 	}
@@ -336,84 +347,86 @@ func SprawdzCel(odtworzenie Odtworzenie) error {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("cel %s nie jest katalogiem", odtworzenie.Target)
+		return fmt.Errorf("the target %s is not a directory", restore.Target)
 	}
-	if odtworzenie.Overwrite == NadpisanieDozwolone {
+	if restore.Overwrite == OverwriteAllowed {
 		return nil
 	}
-	wpisy, err := os.ReadDir(odtworzenie.Target)
+	entries, err := os.ReadDir(restore.Target)
 	if err != nil {
 		return err
 	}
-	if len(wpisy) > 0 {
-		return fmt.Errorf("katalog %s nie jest pusty, a plan nadpisania na to nie pozwala",
-			odtworzenie.Target)
+	if len(entries) > 0 {
+		return fmt.Errorf("the directory %s is not empty, and the overwrite plan does not allow that",
+			restore.Target)
 	}
 	return nil
 }
 
-// WalidujSrodowisko sprawdza nazwy zmiennych, ktore panel ustawia narzedziu.
-func WalidujSrodowisko(zmienne []string) error {
-	for _, nazwa := range zmienne {
-		if !nazwaZmiennej.MatchString(nazwa) {
-			return fmt.Errorf("nieprawidlowa nazwa zmiennej srodowiska %q", nazwa)
+// ValidateEnvironment checks the names of the variables the panel sets for
+// the tool.
+func ValidateEnvironment(variables []string) error {
+	for _, name := range variables {
+		if !variableName.MatchString(name) {
+			return fmt.Errorf("invalid environment variable name %q", name)
 		}
 	}
 	return nil
 }
 
-// Zaslon usuwa z wyjscia wartosci, ktore nie moga z niego wyjsc.
+// Mask removes from the output the values that must not leave it.
 //
-// Narzedzia backupu wypisuja adres repozytorium, a ten bywa adresem
-// z wpisanym haslem. Zaslaniamy takze same wartosci poswiadczen: jedno
-// echo w skrypcie wystarczy, zeby haslo trafilo do wyniku zadania, a stamtad
-// do bazy panelu.
-func Zaslon(wyjscie string, tajne [][]byte) string {
-	wynik := wyjscie
-	for _, wartosc := range tajne {
-		if len(wartosc) < 4 {
-			// Krotka wartosc zaslonieta w tekscie zamienilaby wyjscie
-			// w rzeszoto; takich hasel magazyn i tak nie powinien wydawac.
+// Backup tools print the repository address, and that is at times an
+// address with a password written in. The credential values themselves are
+// masked too: one echo in a script is enough for the password to land in
+// the task result, and from there in the panel database.
+func Mask(output string, secrets [][]byte) string {
+	result := output
+	for _, value := range secrets {
+		if len(value) < 4 {
+			// A short value masked in text would turn the output into a
+			// sieve; the store should not hand out such passwords anyway.
 			continue
 		}
-		wynik = strings.ReplaceAll(wynik, string(wartosc), "[zasloniete]")
+		result = strings.ReplaceAll(result, string(value), "[masked]")
 	}
-	return zaslonAdresy(wynik)
+	return maskAddresses(result)
 }
 
-// wzorzecAdresu wylapuje poswiadczenia wpisane w adres.
-var wzorzecAdresu = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
+// addressPattern catches credentials written into an address.
+var addressPattern = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
 
-func zaslonAdresy(wyjscie string) string {
-	return wzorzecAdresu.ReplaceAllString(wyjscie, "${1}${2}:[zasloniete]@")
+func maskAddresses(output string) string {
+	return addressPattern.ReplaceAllString(output, "${1}${2}:[masked]@")
 }
 
-// Ogranicz przycina wyjscie do rozmiaru, ktory panel przechowa.
-func Ogranicz(wyjscie string) string {
-	if len(wyjscie) <= MaksymalneWyjscie {
-		return wyjscie
+// Limit trims the output to the size the panel stores.
+func Limit(output string) string {
+	if len(output) <= MaxOutput {
+		return output
 	}
-	// Koniec wyjscia jest wazniejszy niz poczatek: tam sa bledy i podsumowanie.
-	return "[wyjscie przyciete na granicy modulu]\n" + wyjscie[len(wyjscie)-MaksymalneWyjscie:]
+	// The end of the output matters more than the beginning: the errors
+	// and the summary are there.
+	return "[output trimmed at the module limit]\n" + output[len(output)-MaxOutput:]
 }
 
-// PosortujSnapshoty ustawia kopie od najstarszej.
-func PosortujSnapshoty(snapshoty []Snapshot) {
-	sort.SliceStable(snapshoty, func(i, j int) bool {
-		return snapshoty[i].Time.Before(snapshoty[j].Time)
+// SortSnapshots orders the copies oldest first.
+func SortSnapshots(snapshots []Snapshot) {
+	sort.SliceStable(snapshots, func(i, j int) bool {
+		return snapshots[i].Time.Before(snapshots[j].Time)
 	})
 }
 
-// OstatniUdany zwraca czas najnowszej kopii albo nil.
-func OstatniUdany(snapshoty []Snapshot) *time.Time {
-	if len(snapshoty) == 0 {
+// LastSuccess returns the time of the newest copy or nil.
+func LastSuccess(snapshots []Snapshot) *time.Time {
+	if len(snapshots) == 0 {
 		return nil
 	}
-	najnowszy := snapshoty[0].Time
-	for _, snapshot := range snapshoty[1:] {
-		if snapshot.Time.After(najnowszy) {
-			najnowszy = snapshot.Time
+	newest := snapshots[0].Time
+	for _, snapshot := range snapshots[1:] {
+		if snapshot.Time.After(newest) {
+			newest = snapshot.Time
 		}
 	}
-	return &najnowszy
+	return &newest
 }

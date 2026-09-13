@@ -5,109 +5,110 @@ import (
 	"testing"
 )
 
-func migawkaZDyskiem(uuid string, montowania ...Mount) Snapshot {
+func snapshotWithDisk(uuid string, mounts ...Mount) Snapshot {
 	return Snapshot{
 		Devices: []Device{
 			{Name: "sdb", Path: "/dev/sdb", Type: "disk", FSType: "ext4", UUID: uuid, SizeBytes: 2 << 30},
 		},
-		Mounts: montowania,
+		Mounts: mounts,
 	}
 }
 
-// TestPlanRozwiazujeZrodloDoUUIDHosta pilnuje sedna planu per host: ta sama
-// sciezka na dwoch hostach to dwa rozne filesystemy, a w zmianie ma jechac
-// ten, ktory host naprawde ma.
-func TestPlanRozwiazujeZrodloDoUUIDHosta(t *testing.T) {
-	pierwszy := ZaplanujMontowanie(migawkaZDyskiem("aaaa-1111"), "/dev/sdb", "/mnt/dane", "ext4", "", true)
-	drugi := ZaplanujMontowanie(migawkaZDyskiem("bbbb-2222"), "/dev/sdb", "/mnt/dane", "ext4", "", true)
+// TestPlanResolvesSourceToHostUUID guards the essence of the per-host plan:
+// the same path on two hosts is two different filesystems, and the change
+// is meant to carry the one the host really has.
+func TestPlanResolvesSourceToHostUUID(t *testing.T) {
+	first := ComputeMount(snapshotWithDisk("aaaa-1111"), "/dev/sdb", "/mnt/data", "ext4", "", true)
+	second := ComputeMount(snapshotWithDisk("bbbb-2222"), "/dev/sdb", "/mnt/data", "ext4", "", true)
 
-	if pierwszy.ResolvedSource != "UUID=aaaa-1111" || drugi.ResolvedSource != "UUID=bbbb-2222" {
-		t.Fatalf("zrodla rozwiazane do %q i %q", pierwszy.ResolvedSource, drugi.ResolvedSource)
+	if first.ResolvedSource != "UUID=aaaa-1111" || second.ResolvedSource != "UUID=bbbb-2222" {
+		t.Fatalf("sources resolved to %q and %q", first.ResolvedSource, second.ResolvedSource)
 	}
-	if pierwszy.Action != PlanTworzy || drugi.Action != PlanTworzy {
-		t.Errorf("plany: %q, %q", pierwszy.Action, drugi.Action)
+	if first.Action != PlanCreate || second.Action != PlanCreate {
+		t.Errorf("plans: %q, %q", first.Action, second.Action)
 	}
-	if pierwszy.PlanHash == drugi.PlanHash {
-		t.Error("dwa rozne filesystemy daly ten sam odcisk planu")
+	if first.PlanHash == second.PlanHash {
+		t.Error("two different filesystems gave the same plan fingerprint")
 	}
 }
 
-// TestPlanOdmawiaZrodlaBezUUID pilnuje, ze zmiana bez czego zwiazac jest
-// odmowa, a nie montowaniem po sciezce, ktora po restarcie wskaze inny dysk.
-func TestPlanOdmawiaZrodlaBezUUID(t *testing.T) {
-	plan := ZaplanujMontowanie(migawkaZDyskiem(""), "/dev/sdb", "/mnt/dane", "ext4", "", true)
+// TestPlanRefusesSourceWithoutUUID guards that a change with nothing to
+// bind to is a refusal, not a mount by a path that points at a different
+// disk after a reboot.
+func TestPlanRefusesSourceWithoutUUID(t *testing.T) {
+	plan := ComputeMount(snapshotWithDisk(""), "/dev/sdb", "/mnt/data", "ext4", "", true)
 	if plan.Refusal == "" || !strings.Contains(plan.Refusal, "UUID") {
-		t.Errorf("filesystem bez UUID nie dal odmowy: %+v", plan)
+		t.Errorf("a filesystem without a UUID gave no refusal: %+v", plan)
 	}
-	brak := ZaplanujMontowanie(Snapshot{}, "/dev/sdb", "/mnt/dane", "ext4", "", true)
-	if brak.Refusal == "" {
-		t.Error("nieistniejace zrodlo nie dalo odmowy")
-	}
-}
-
-// TestPlanOdmawiaCeluZajetegoPrzezInnyFilesystem pilnuje, ze kampania nie
-// przykryje po cichu cudzego montowania.
-func TestPlanOdmawiaCeluZajetegoPrzezInnyFilesystem(t *testing.T) {
-	stan := migawkaZDyskiem("aaaa-1111", Mount{
-		Target: "/mnt/dane", Source: "/dev/sdc", FSType: "xfs", Mounted: true,
-	})
-	plan := ZaplanujMontowanie(stan, "/dev/sdb", "/mnt/dane", "ext4", "", true)
-	if plan.Refusal == "" || !strings.Contains(plan.Refusal, "zajety") {
-		t.Errorf("zajety cel nie dal odmowy: %+v", plan)
+	missing := ComputeMount(Snapshot{}, "/dev/sdb", "/mnt/data", "ext4", "", true)
+	if missing.Refusal == "" {
+		t.Error("a non-existent source gave no refusal")
 	}
 }
 
-// TestPlanWidziBrakWpisuWFstab pilnuje roznicy, po ktora operator tu
-// przychodzi: zamontowane teraz i zamontowane po restarcie to dwa pytania.
-func TestPlanWidziBrakWpisuWFstab(t *testing.T) {
-	stan := migawkaZDyskiem("aaaa-1111", Mount{
-		Target: "/mnt/dane", Source: "UUID=aaaa-1111", FSType: "ext4", Mounted: true, InFstab: false,
+// TestPlanRefusesTargetTakenByOtherFilesystem guards that a campaign does
+// not quietly cover somebody else's mount.
+func TestPlanRefusesTargetTakenByOtherFilesystem(t *testing.T) {
+	state := snapshotWithDisk("aaaa-1111", Mount{
+		Target: "/mnt/data", Source: "/dev/sdc", FSType: "xfs", Mounted: true,
 	})
-	plan := ZaplanujMontowanie(stan, "/dev/sdb", "/mnt/dane", "ext4", "", true)
-	if plan.Action != PlanZmienia {
-		t.Fatalf("montowanie bez wpisu ma plan %q", plan.Action)
+	plan := ComputeMount(state, "/dev/sdb", "/mnt/data", "ext4", "", true)
+	if plan.Refusal == "" || !strings.Contains(plan.Refusal, "taken") {
+		t.Errorf("a taken target gave no refusal: %+v", plan)
 	}
-	if !zawieraZmiane(plan.Changes, "fstab") {
-		t.Errorf("plan nie nazywa brakujacego wpisu: %+v", plan.Changes)
+}
+
+// TestPlanSeesMissingFstabEntry guards the difference the operator comes
+// here for: mounted now and mounted after a reboot are two questions.
+func TestPlanSeesMissingFstabEntry(t *testing.T) {
+	state := snapshotWithDisk("aaaa-1111", Mount{
+		Target: "/mnt/data", Source: "UUID=aaaa-1111", FSType: "ext4", Mounted: true, InFstab: false,
+	})
+	plan := ComputeMount(state, "/dev/sdb", "/mnt/data", "ext4", "", true)
+	if plan.Action != PlanUpdate {
+		t.Fatalf("a mount without an entry has the plan %q", plan.Action)
+	}
+	if !containsChange(plan.Changes, "fstab") {
+		t.Errorf("the plan does not name the missing entry: %+v", plan.Changes)
 	}
 
-	gotowe := migawkaZDyskiem("aaaa-1111", Mount{
-		Target: "/mnt/dane", Source: "UUID=aaaa-1111", FSType: "ext4",
+	ready := snapshotWithDisk("aaaa-1111", Mount{
+		Target: "/mnt/data", Source: "UUID=aaaa-1111", FSType: "ext4",
 		Mounted: true, InFstab: true, FstabOptions: "defaults",
 	})
-	if plan := ZaplanujMontowanie(gotowe, "/dev/sdb", "/mnt/dane", "ext4", "", true); plan.Action != PlanBezZmian {
-		t.Errorf("montowanie w stanie docelowym ma plan %q (%+v)", plan.Action, plan.Changes)
+	if plan := ComputeMount(ready, "/dev/sdb", "/mnt/data", "ext4", "", true); plan.Action != PlanNoChange {
+		t.Errorf("a mount in the target state has the plan %q (%+v)", plan.Action, plan.Changes)
 	}
 }
 
-// TestPlanOdmontowaniaOdrozniaMontowanieIstniejace pilnuje, ze usuniecie
-// czegos, czego nie ma, jest widoczne przed zatwierdzeniem.
-func TestPlanOdmontowaniaOdrozniaMontowanieIstniejace(t *testing.T) {
-	jest := ZaplanujOdmontowanie(migawkaZDyskiem("a", Mount{Target: "/mnt/dane", Mounted: true, InFstab: true}), "/mnt/dane")
-	if jest.Action != PlanUsuwa || len(jest.Changes) != 2 {
-		t.Errorf("odmontowanie ma plan %q (%+v)", jest.Action, jest.Changes)
+// TestUnmountPlanDistinguishesExistingMount guards that removing something
+// that does not exist is visible before approval.
+func TestUnmountPlanDistinguishesExistingMount(t *testing.T) {
+	present := ComputeUnmount(snapshotWithDisk("a", Mount{Target: "/mnt/data", Mounted: true, InFstab: true}), "/mnt/data")
+	if present.Action != PlanRemove || len(present.Changes) != 2 {
+		t.Errorf("the unmount has the plan %q (%+v)", present.Action, present.Changes)
 	}
-	niema := ZaplanujOdmontowanie(migawkaZDyskiem("a"), "/mnt/dane")
-	if niema.Action != PlanJuzUsuniety {
-		t.Errorf("odmontowanie nieistniejacego ma plan %q", niema.Action)
+	absent := ComputeUnmount(snapshotWithDisk("a"), "/mnt/data")
+	if absent.Action != PlanRemoveAbsent {
+		t.Errorf("unmounting a non-existent mount has the plan %q", absent.Action)
 	}
 }
 
-func zawieraZmiane(lista []string, fragment string) bool {
-	for _, wpis := range lista {
-		if strings.Contains(wpis, fragment) {
+func containsChange(items []string, fragment string) bool {
+	for _, item := range items {
+		if strings.Contains(item, fragment) {
 			return true
 		}
 	}
 	return false
 }
 
-func TestOdmowaZmieniaOdciskPlanu(t *testing.T) {
-	stan := Snapshot{Devices: []Device{{Path: "/dev/sdb", FSType: "ext4", UUID: "abc"}}}
-	plan := ZaplanujMontowanie(stan, "/dev/sdb", "/mnt/dane", "ext4", "", true)
-	przed := plan.PlanHash
-	plan.Odmow("filesystem jest w uzyciu przez: PID 1")
-	if plan.Refusal == "" || plan.PlanHash == przed || plan.PlanHash == "" {
-		t.Errorf("odmowa nie zmienila odcisku: przed=%s po=%s", przed, plan.PlanHash)
+func TestRefusalChangesPlanFingerprint(t *testing.T) {
+	state := Snapshot{Devices: []Device{{Path: "/dev/sdb", FSType: "ext4", UUID: "abc"}}}
+	plan := ComputeMount(state, "/dev/sdb", "/mnt/data", "ext4", "", true)
+	before := plan.PlanHash
+	plan.Refuse("the filesystem is in use by: PID 1")
+	if plan.Refusal == "" || plan.PlanHash == before || plan.PlanHash == "" {
+		t.Errorf("the refusal did not change the fingerprint: before=%s after=%s", before, plan.PlanHash)
 	}
 }

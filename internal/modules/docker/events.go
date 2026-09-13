@@ -12,43 +12,43 @@ import (
 	"time"
 )
 
-// Event to jedno zdarzenie dziennika silnika kontenerow.
+// Event is one event of the container engine log.
 //
-// Zdarzenie jest odpowiedzia na pytanie "co sie tu stalo", a nie stanem
-// hosta: nie trafia do inwentarza i nie zastepuje odczytu stanu. Kontener,
-// ktory zostal zabity przez OOM, wyglada w inwentarzu tak samo jak kontener
-// zatrzymany recznie - roznica jest wylacznie tutaj.
+// An event answers the question "what happened here", it is not the host
+// state: it does not go into the inventory and does not replace a state
+// read. A container killed by the OOM killer looks in the inventory the
+// same as a container stopped by hand - the difference is only here.
 type Event struct {
 	Time time.Time `json:"time"`
-	// Type jest rodzajem obiektu: container, image, network, volume.
+	// Type is the object kind: container, image, network, volume.
 	Type string `json:"type"`
-	// Action jest tym, co sie z nim stalo: start, die, destroy, pull.
+	// Action is what happened to it: start, die, destroy, pull.
 	Action    string `json:"action"`
 	ActorID   string `json:"actor_id,omitempty"`
 	ActorName string `json:"actor_name,omitempty"`
-	// Attributes niesie wybrane atrybuty zdarzenia. Silnik wklada tam takze
-	// wszystkie etykiety kontenera, wiec lista jest zawezona: dziennik
-	// zdarzen nie jest miejscem na wyciek sekretu z etykiety.
+	// Attributes carries selected event attributes. The engine also puts
+	// all the container labels there, so the list is narrowed: the event
+	// log is not a place for a secret to leak from a label.
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
-// EventsSnapshot jest wynikiem jednego odczytu dziennika.
+// EventsSnapshot is the result of one log read.
 type EventsSnapshot struct {
 	Events []Event `json:"events"`
-	// Since i Until opisuja okno, ktore naprawde zostalo przeczytane.
-	// Bez nich pusta lista nie mowi nic: cisza w oknie i brak odczytu
-	// wygladaja tak samo.
+	// Since and Until describe the window that was really read. Without
+	// them an empty list says nothing: silence in the window and no read
+	// look the same.
 	Since time.Time `json:"since"`
 	Until time.Time `json:"until"`
 	Types []string  `json:"types,omitempty"`
-	// Truncated oznacza odczyt urwany limitem. Urwana lista bez tego
-	// znacznika wygladalaby na kompletna - i operator wyciagalby wnioski
-	// z dziennika, ktorego nie widzial w calosci.
+	// Truncated marks a read cut off by a limit. A cut-off list without
+	// this marker would look complete - and the operator would draw
+	// conclusions from a log they did not see in full.
 	Truncated bool   `json:"truncated"`
 	Reason    string `json:"truncated_reason,omitempty"`
 }
 
-// EventsOptions opisuje zamkniete okno odczytu.
+// EventsOptions describes a closed read window.
 type EventsOptions struct {
 	Since  time.Duration
 	Follow time.Duration
@@ -56,64 +56,65 @@ type EventsOptions struct {
 	Max    int
 }
 
-// Granice odczytu dziennika. Sa tu, a nie tylko w panelu, bo to host placi
-// za odczyt: zadanie bez konca zostaloby na nim na zawsze.
+// Log read bounds. They are here, not only in the panel, because it is the
+// host that pays for the read: a request without an end would stay on it
+// forever.
 const (
-	// MaksymalneOknoZdarzen ogranicza siegniecie wstecz.
-	MaksymalneOknoZdarzen = 24 * time.Hour
-	// MaksymalneSledzenieZdarzen ogranicza czekanie na zdarzenia przyszle.
-	MaksymalneSledzenieZdarzen = 60 * time.Second
-	// MaksymalnieZdarzen ogranicza liczbe zwroconych zdarzen.
-	MaksymalnieZdarzen = 1000
-	// MaksymalnyRozmiarZdarzen ogranicza rozmiar odczytu. Host, na ktorym
-	// cos wstaje w petli, potrafi wyprodukowac tysiace zdarzen na minute.
-	MaksymalnyRozmiarZdarzen = 256 << 10
-	domyslnieZdarzen         = 200
-	domyslneOknoZdarzen      = time.Hour
+	// MaxEventsWindow bounds the look back.
+	MaxEventsWindow = 24 * time.Hour
+	// MaxEventsFollow bounds the wait for future events.
+	MaxEventsFollow = 60 * time.Second
+	// MaxEvents bounds the number of returned events.
+	MaxEvents = 1000
+	// MaxEventsSize bounds the read size. A host on which something comes
+	// up in a loop can produce thousands of events a minute.
+	MaxEventsSize       = 256 << 10
+	defaultEvents       = 200
+	defaultEventsWindow = time.Hour
 )
 
-// RodzajeZdarzen wylicza rodzaje obiektow, o ktore wolno pytac.
+// EventTypes lists the object kinds that may be asked about.
 //
-// Lista jest zamknieta, bo filtr jedzie do Engine API. Silnik zna takze
-// zdarzenia demona i wtyczek - te nie sa odpowiedzia na zadne pytanie
-// operatora tej zakladki.
-var RodzajeZdarzen = []string{"container", "image", "network", "volume"}
+// The list is closed, because the filter goes to the Engine API. The
+// engine also knows daemon and plugin events - those answer no question of
+// the operator of this tab.
+var EventTypes = []string{"container", "image", "network", "volume"}
 
-// RodzajZdarzenia mowi, czy nazwa jest znanym rodzajem.
-func RodzajZdarzenia(nazwa string) bool {
-	for _, rodzaj := range RodzajeZdarzen {
-		if rodzaj == nazwa {
+// KnownEventType says whether the name is a known kind.
+func KnownEventType(name string) bool {
+	for _, kind := range EventTypes {
+		if kind == name {
 			return true
 		}
 	}
 	return false
 }
 
-// atrybutyZdarzenia wylicza atrybuty, ktore trafiaja do wyniku.
+// eventAttributes lists the attributes that make it into the result.
 //
-// Silnik wklada do zdarzenia wszystkie etykiety obiektu. Etykiety bywaja
-// miejscem, w ktore ktos wpisal token - dziennik zdarzen nie jest miejscem
-// na jego wyciek, wiec lista jest zamknieta.
-var atrybutyZdarzenia = []string{
+// The engine puts all the object's labels into the event. Labels are at
+// times the place somebody wrote a token into - the event log is not a
+// place for it to leak, so the list is closed.
+var eventAttributes = []string{
 	"image", "exitCode", "signal", "container", "name",
 	"com.docker.compose.project", "com.docker.compose.service",
 }
 
-// Events czyta dziennik zdarzen silnika w zamknietym oknie czasu.
+// Events reads the engine event log in a closed time window.
 //
-// Okno jest domkniete z obu stron: until jest wyliczone przy starcie, a nie
-// zostawione otwarte. Dzieki temu odczyt konczy sie sam, takze wtedy, gdy
-// panel przestal go sluchac.
+// The window is closed on both sides: until is computed at the start, not
+// left open. Thanks to that the read ends on its own, also when the panel
+// stopped listening.
 func Events(ctx context.Context, client *Client, opts EventsOptions) (EventsSnapshot, error) {
 	if client == nil {
-		return EventsSnapshot{}, fmt.Errorf("%w: brak adaptera silnika", ErrUnavailable)
+		return EventsSnapshot{}, fmt.Errorf("%w: no engine adapter", ErrUnavailable)
 	}
-	opts = domknijOpcje(opts)
+	opts = boundOptions(opts)
 
-	teraz := time.Now()
+	now := time.Now()
 	snapshot := EventsSnapshot{
-		Since: teraz.Add(-opts.Since).UTC(),
-		Until: teraz.Add(opts.Follow).UTC(),
+		Since: now.Add(-opts.Since).UTC(),
+		Until: now.Add(opts.Follow).UTC(),
 		Types: opts.Types,
 	}
 
@@ -121,44 +122,45 @@ func Events(ctx context.Context, client *Client, opts EventsOptions) (EventsSnap
 	query.Set("since", strconv.FormatInt(snapshot.Since.Unix(), 10))
 	query.Set("until", strconv.FormatInt(snapshot.Until.Unix(), 10))
 	if len(opts.Types) > 0 {
-		filtr := map[string][]string{"type": opts.Types}
-		zakodowany, err := json.Marshal(filtr)
+		filter := map[string][]string{"type": opts.Types}
+		encoded, err := json.Marshal(filter)
 		if err != nil {
 			return snapshot, err
 		}
-		query.Set("filters", string(zakodowany))
+		query.Set("filters", string(encoded))
 	}
 
-	// Odczyt ma wlasny limit czasu, niezalezny od kontekstu zadania: silnik,
-	// ktory nie domknie strumienia, nie moze zatrzymac agenta.
+	// The read has its own time limit, independent of the task context: an
+	// engine that does not close the stream must not stop the agent.
 	limit := opts.Follow + 30*time.Second
-	odczytCtx, anuluj := context.WithTimeout(ctx, limit)
-	defer anuluj()
+	readCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
 
-	err := client.strumien(odczytCtx, "/events", query, func(linia []byte) bool {
-		zdarzenie, ok := zdarzenieZLinii(linia)
+	err := client.stream(readCtx, "/events", query, func(line []byte) bool {
+		event, ok := eventFromLine(line)
 		if !ok {
 			return true
 		}
-		snapshot.Events = append(snapshot.Events, zdarzenie)
+		snapshot.Events = append(snapshot.Events, event)
 		if len(snapshot.Events) >= opts.Max {
 			snapshot.Truncated = true
-			snapshot.Reason = fmt.Sprintf("osiagnieto limit %d zdarzen", opts.Max)
+			snapshot.Reason = fmt.Sprintf("the limit of %d events was reached", opts.Max)
 			return false
 		}
 		return true
-	}, MaksymalnyRozmiarZdarzen)
+	}, MaxEventsSize)
 	switch {
 	case err == nil:
-	case errors.Is(err, errLimitRozmiaru):
-		// Urwanie limitem rozmiaru nie jest bledem odczytu: operator dostaje
-		// to, co zmiescilo sie w limicie, i wie, ze reszta zostala.
+	case errors.Is(err, errSizeLimit):
+		// A cut-off by the size limit is not a read error: the operator
+		// gets what fit within the limit and knows the rest was left.
 		snapshot.Truncated = true
-		snapshot.Reason = fmt.Sprintf("osiagnieto limit %d bajtow odczytu",
-			MaksymalnyRozmiarZdarzen)
+		snapshot.Reason = fmt.Sprintf("the read limit of %d bytes was reached",
+			MaxEventsSize)
 	case errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil:
-		// Koniec okna jest normalnym koncem odczytu, a nie awaria: silnik
-		// trzyma strumien otwarty do until i czasem nie domyka go sam.
+		// The end of the window is a normal end of the read, not a failure:
+		// the engine keeps the stream open until until and sometimes does
+		// not close it itself.
 	default:
 		return snapshot, err
 	}
@@ -169,46 +171,46 @@ func Events(ctx context.Context, client *Client, opts EventsOptions) (EventsSnap
 	return snapshot, nil
 }
 
-// domknijOpcje sprowadza zamowienie do granic, ktore host uniesie.
-func domknijOpcje(opts EventsOptions) EventsOptions {
+// boundOptions brings the order within the limits the host can carry.
+func boundOptions(opts EventsOptions) EventsOptions {
 	if opts.Since <= 0 {
-		opts.Since = domyslneOknoZdarzen
+		opts.Since = defaultEventsWindow
 	}
-	if opts.Since > MaksymalneOknoZdarzen {
-		opts.Since = MaksymalneOknoZdarzen
+	if opts.Since > MaxEventsWindow {
+		opts.Since = MaxEventsWindow
 	}
 	if opts.Follow < 0 {
 		opts.Follow = 0
 	}
-	if opts.Follow > MaksymalneSledzenieZdarzen {
-		opts.Follow = MaksymalneSledzenieZdarzen
+	if opts.Follow > MaxEventsFollow {
+		opts.Follow = MaxEventsFollow
 	}
 	if opts.Max <= 0 {
-		opts.Max = domyslnieZdarzen
+		opts.Max = defaultEvents
 	}
-	if opts.Max > MaksymalnieZdarzen {
-		opts.Max = MaksymalnieZdarzen
+	if opts.Max > MaxEvents {
+		opts.Max = MaxEvents
 	}
-	wybrane := make([]string, 0, len(opts.Types))
-	for _, rodzaj := range opts.Types {
-		rodzaj = strings.ToLower(strings.TrimSpace(rodzaj))
-		if RodzajZdarzenia(rodzaj) && !zawiera(wybrane, rodzaj) {
-			wybrane = append(wybrane, rodzaj)
+	selected := make([]string, 0, len(opts.Types))
+	for _, kind := range opts.Types {
+		kind = strings.ToLower(strings.TrimSpace(kind))
+		if KnownEventType(kind) && !contains(selected, kind) {
+			selected = append(selected, kind)
 		}
 	}
-	if len(wybrane) == 0 {
-		// Brak filtra znaczy cztery rodzaje, a nie "wszystko, co silnik ma":
-		// zdarzenia demona i wtyczek nie sa odpowiedzia na pytanie operatora.
-		wybrane = append(wybrane, RodzajeZdarzen...)
+	if len(selected) == 0 {
+		// No filter means the four kinds, not "everything the engine has":
+		// daemon and plugin events answer no question of the operator.
+		selected = append(selected, EventTypes...)
 	}
-	sort.Strings(wybrane)
-	opts.Types = wybrane
+	sort.Strings(selected)
+	opts.Types = selected
 	return opts
 }
 
-// zdarzenieZLinii tlumaczy jedna linie strumienia na zdarzenie.
-func zdarzenieZLinii(linia []byte) (Event, bool) {
-	var surowe struct {
+// eventFromLine translates one stream line into an event.
+func eventFromLine(line []byte) (Event, bool) {
+	var raw struct {
 		Type   string `json:"Type"`
 		Action string `json:"Action"`
 		Actor  struct {
@@ -218,26 +220,26 @@ func zdarzenieZLinii(linia []byte) (Event, bool) {
 		Time     int64 `json:"time"`
 		TimeNano int64 `json:"timeNano"`
 	}
-	if err := json.Unmarshal(linia, &surowe); err != nil || surowe.Type == "" {
+	if err := json.Unmarshal(line, &raw); err != nil || raw.Type == "" {
 		return Event{}, false
 	}
-	zdarzenie := Event{
-		Type: surowe.Type, Action: surowe.Action, ActorID: surowe.Actor.ID,
-		ActorName: surowe.Actor.Attributes["name"],
+	event := Event{
+		Type: raw.Type, Action: raw.Action, ActorID: raw.Actor.ID,
+		ActorName: raw.Actor.Attributes["name"],
 	}
 	switch {
-	case surowe.TimeNano > 0:
-		zdarzenie.Time = time.Unix(0, surowe.TimeNano).UTC()
-	case surowe.Time > 0:
-		zdarzenie.Time = time.Unix(surowe.Time, 0).UTC()
+	case raw.TimeNano > 0:
+		event.Time = time.Unix(0, raw.TimeNano).UTC()
+	case raw.Time > 0:
+		event.Time = time.Unix(raw.Time, 0).UTC()
 	}
-	for _, nazwa := range atrybutyZdarzenia {
-		if wartosc, ok := surowe.Actor.Attributes[nazwa]; ok && wartosc != "" {
-			if zdarzenie.Attributes == nil {
-				zdarzenie.Attributes = map[string]string{}
+	for _, name := range eventAttributes {
+		if value, ok := raw.Actor.Attributes[name]; ok && value != "" {
+			if event.Attributes == nil {
+				event.Attributes = map[string]string{}
 			}
-			zdarzenie.Attributes[nazwa] = wartosc
+			event.Attributes[name] = value
 		}
 	}
-	return zdarzenie, true
+	return event, true
 }

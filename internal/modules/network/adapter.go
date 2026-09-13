@@ -2,41 +2,43 @@ package network
 
 import "os"
 
-// Nazwy adapterow zapisu. Panel nie zaklada, ze host da sie skonfigurowac:
-// maszyna z recznie utrzymywanym /etc/network/interfaces jest dla tego modulu
-// tylko do odczytu i ma to powiedziec wprost.
+// Write adapter names. The panel does not assume the host can be
+// configured: a machine with a hand-maintained /etc/network/interfaces is
+// read-only for this module and is meant to say so directly.
 const (
 	AdapterNetworkManager = "networkmanager"
 	AdapterNmstate        = "nmstate"
 	AdapterNetplan        = "netplan"
 )
 
-// WykryjAdapter wskazuje mechanizm, ktorym da sie zmieniac konfiguracje sieci.
+// DetectAdapter names the mechanism the network configuration can be
+// changed with.
 //
-// Kolejnosc nie jest przypadkowa: nmstate i NetworkManager opisuja stan
-// docelowy i potrafia go wycofac, netplan wymaga wygenerowania konfiguracji
-// dla warstwy nizej. Pusty wynik oznacza host, na ktorym panel tylko czyta -
-// i to jest odpowiedz, a nie brak odpowiedzi.
-func WykryjAdapter(istnieje func(string) bool) string {
+// The order is not accidental: nmstate and NetworkManager describe a
+// desired state and can roll it back, netplan requires generating the
+// configuration for the layer below. An empty result means a host on which
+// the panel only reads - and that is an answer, not the absence of one.
+func DetectAdapter(exists func(string) bool) string {
 	switch {
-	case istnieje("/usr/bin/nmstatectl") || istnieje("/usr/sbin/nmstatectl"):
+	case exists("/usr/bin/nmstatectl") || exists("/usr/sbin/nmstatectl"):
 		return AdapterNmstate
-	case istnieje("/usr/bin/nmcli") && istnieje("/run/NetworkManager"):
+	case exists("/usr/bin/nmcli") && exists("/run/NetworkManager"):
 		return AdapterNetworkManager
-	case istnieje("/usr/sbin/netplan") && istnieje("/etc/netplan"):
+	case exists("/usr/sbin/netplan") && exists("/etc/netplan"):
 		return AdapterNetplan
 	}
 	return ""
 }
 
-// Istnieje sprawdza obecnosc sciezki w systemie plikow.
-func Istnieje(sciezka string) bool {
-	_, err := os.Stat(sciezka)
+// Exists checks the presence of a path in the filesystem.
+func Exists(path string) bool {
+	_, err := os.Stat(path)
 	return err == nil
 }
 
-// PowodBrakuZapisu tlumaczy, dlaczego panel nie zmieni tu konfiguracji.
-func PowodBrakuZapisu(adapter string) string {
+// ReadOnlyReason explains why the panel will not change the configuration
+// here.
+func ReadOnlyReason(adapter string) string {
 	if adapter != "" {
 		return ""
 	}

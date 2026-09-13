@@ -6,7 +6,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handleIdentityStatus opisuje stan polaczenia z katalogiem.
+// handleIdentityStatus describes the state of the directory connection.
 func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "identity", ""); !ok {
 		return
@@ -21,8 +21,8 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 
 	summary, err := s.directory.Ping(r.Context())
 	if err != nil {
-		// Niedostepny katalog nie jest bledem panelu: raportujemy stan, a nie
-		// udajemy, ze danych nie ma.
+		// An unavailable directory is not a panel error: the state is
+		// reported instead of pretending there is no data.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"configured": true,
 			"reachable":  false,
@@ -39,15 +39,16 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// directoryHandler buduje handler odczytu jednego zasobu katalogu.
-// Kazdy z nich wymaga uprawnienia identity.read w zakresie globalnym: katalog
-// obejmuje cala flote, a nie pojedyncze srodowisko.
+// directoryHandler builds a read handler for one directory resource.
+// Each of them requires the identity.read permission in the global scope:
+// the directory covers the whole fleet, not a single environment.
 func directoryHandler[T any](s *Server, name string,
 	load func(*Server, *http.Request) ([]T, error)) http.HandlerFunc {
 	return directoryHandlerFor(s, name, authz.PermIdentityRead, load)
 }
 
-// policyHandler obsluguje zasoby opisujace dostep i podniesienie uprawnien.
+// policyHandler serves the resources describing access and privilege
+// elevation.
 func policyHandler[T any](s *Server, name string,
 	load func(*Server, *http.Request) ([]T, error)) http.HandlerFunc {
 	return directoryHandlerFor(s, name, authz.PermIdentityPolicyRead, load)
@@ -66,7 +67,7 @@ func directoryHandlerFor[T any](s *Server, name string, permission authz.Permiss
 		}
 		items, err := load(s, r)
 		if err != nil {
-			// Awaria katalogu jest stanem, nie bledem wewnetrznym panelu.
+			// A directory failure is a state, not an internal panel error.
 			problem(w, http.StatusBadGateway, "directory_unavailable", err.Error())
 			return
 		}

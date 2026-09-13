@@ -8,146 +8,155 @@ import (
 	"sort"
 )
 
-// Plan opisuje roznice miedzy plikiem zastanym a stanem docelowym.
+// Plan describes the difference between the file found and the desired
+// state.
 //
-// Dwa hosty z tym samym stanem docelowym prawie nigdy nie maja tego samego
-// diffu: jeden ma plik o innej tresci, drugi nie ma go wcale, trzeci ma go
-// z innymi prawami. Zgoda operatora ma dotyczyc tych roznic, a nie samego
-// zamiaru - i dlatego plan powstaje osobno na kazdym hoscie.
+// Two hosts with the same desired state almost never have the same diff:
+// one has a file with different content, another has none at all, a third
+// has it with different permissions. The operator's approval is meant to
+// cover those differences, not the intent alone - and that is why the plan
+// is made separately on every host.
 type Plan struct {
 	Path string `json:"path"`
-	// Action nazywa to, co by sie stalo: create, update, no_change, remove
-	// albo remove_absent. Bez tego lista planow jest lista sciezek.
+	// Action names what would happen: create, update, no_change, remove or
+	// remove_absent. Without it the list of plans is a list of paths.
 	Action string `json:"action"`
 
-	// Stan zastany. Puste pola przy Exists = false nie sa zerem: pliku nie ma
-	// i nie ma o czym mowic.
-	Exists  bool   `json:"exists"`
-	SHA256  string `json:"sha256,omitempty"`
-	Mode    string `json:"mode,omitempty"`
-	Owner   string `json:"owner,omitempty"`
-	Group   string `json:"group,omitempty"`
-	Size    int64  `json:"size_bytes,omitempty"`
-	Powodem string `json:"unavailable_reason,omitempty"`
+	// The state found. Empty fields with Exists = false are not zero: the
+	// file is absent and there is nothing to talk about.
+	Exists            bool   `json:"exists"`
+	SHA256            string `json:"sha256,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	Owner             string `json:"owner,omitempty"`
+	Group             string `json:"group,omitempty"`
+	Size              int64  `json:"size_bytes,omitempty"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
 
-	// Stan docelowy.
+	// The desired state.
 	DesiredSHA256 string `json:"desired_sha256,omitempty"`
 	DesiredMode   string `json:"desired_mode,omitempty"`
 	DesiredOwner  string `json:"desired_owner,omitempty"`
 	DesiredGroup  string `json:"desired_group,omitempty"`
 
-	// Changes wylicza po ludzku, co sie zmieni. Odcisk tresci nie mowi
-	// operatorowi nic; "tresc" i "prawa z 0644 na 0600" mowia.
+	// Changes lists in human terms what will change. A content fingerprint
+	// tells the operator nothing; "content" and "permissions from 0644 to
+	// 0600" do.
 	Changes []string `json:"changes,omitempty"`
 
-	// ValidatorOutput jest wynikiem sprawdzenia tresci docelowej. Plan, ktory
-	// nie przeszedl walidacji, jest odpowiedzia - a nie bledem odczytu.
+	// ValidatorOutput is the result of checking the desired content. A plan
+	// that failed validation is an answer - not a read error.
 	ValidatorOutput string `json:"validator_output,omitempty"`
 	ValidatorFailed bool   `json:"validator_failed,omitempty"`
 
-	// PlanHash wiaze plan z ta konkretna roznica. Wchodzi do odcisku zgody,
-	// a przy zapisie host sprawdza jeszcze raz, czy plik nadal wyglada tak,
-	// jak w chwili planu.
+	// PlanHash binds the plan to this specific difference. It enters the
+	// approval fingerprint, and at write time the host checks once more
+	// whether the file still looks as it did at plan time.
 	PlanHash string `json:"plan_hash"`
 }
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanTworzy      = "create"
-	PlanZmienia     = "update"
-	PlanBezZmian    = "no_change"
-	PlanUsuwa       = "remove"
-	PlanJuzUsuniety = "remove_absent"
+	PlanCreate       = "create"
+	PlanUpdate       = "update"
+	PlanNoChange     = "no_change"
+	PlanRemove       = "remove"
+	PlanRemoveAbsent = "remove_absent"
 )
 
-// Zaplanuj liczy roznice miedzy plikiem zastanym a stanem docelowym.
+// Compute computes the difference between the file found and the desired
+// state.
 //
-// Tresc docelowa jest tu jawna, bo panel ja przyslal. Plik z sekretu jest
-// wyjatkiem: jego tresci nie ma w planie i nie ma jej w odcisku - inaczej
-// sam plan bylby miejscem wycieku.
-func Zaplanuj(obecny Plik, trescDocelowa []byte, tryb, wlasciciel, grupa string,
-	zSekretu, usuwanie bool) Plan {
+// The desired content is explicit here, because the panel sent it. A file
+// from a secret is the exception: its content is not in the plan and not in
+// the fingerprint - otherwise the plan itself would be the place of the
+// leak.
+func Compute(current File, desiredContent []byte, mode, owner, group string,
+	fromSecret, removal bool) Plan {
 	plan := Plan{
-		Path: obecny.Path, Exists: obecny.Exists, Mode: obecny.Mode,
-		Owner: obecny.Owner, Group: obecny.Group, Size: obecny.SizeBytes,
-		Powodem: obecny.UnavailableReason, SHA256: obecny.SHA256,
-		DesiredMode: tryb, DesiredOwner: wlasciciel, DesiredGroup: grupa,
+		Path: current.Path, Exists: current.Exists, Mode: current.Mode,
+		Owner: current.Owner, Group: current.Group, Size: current.SizeBytes,
+		UnavailableReason: current.UnavailableReason, SHA256: current.SHA256,
+		DesiredMode: mode, DesiredOwner: owner, DesiredGroup: group,
 	}
 
-	if usuwanie {
-		plan.Action = PlanUsuwa
-		if !obecny.Exists {
-			// Usuniecie pliku, ktorego nie ma, nie jest bledem i nie jest
-			// zmiana. Operator ma to zobaczyc przed zatwierdzeniem, a nie
-			// dowiedziec sie z raportu.
-			plan.Action = PlanJuzUsuniety
+	if removal {
+		plan.Action = PlanRemove
+		if !current.Exists {
+			// Removing a file that does not exist is not an error and not a
+			// change. The operator is meant to see it before approving, not
+			// to learn it from the report.
+			plan.Action = PlanRemoveAbsent
 		}
 		plan.DesiredMode, plan.DesiredOwner, plan.DesiredGroup = "", "", ""
-		plan.PlanHash = odciskPlanu(plan)
+		plan.PlanHash = planFingerprint(plan)
 		return plan
 	}
 
-	if !zSekretu {
-		suma := sha256.Sum256(trescDocelowa)
-		plan.DesiredSHA256 = hex.EncodeToString(suma[:])
+	if !fromSecret {
+		sum := sha256.Sum256(desiredContent)
+		plan.DesiredSHA256 = hex.EncodeToString(sum[:])
 	}
 
 	switch {
-	case !obecny.Exists:
-		plan.Action = PlanTworzy
-		plan.Changes = []string{"plik powstanie"}
+	case !current.Exists:
+		plan.Action = PlanCreate
+		plan.Changes = []string{"the file will be created"}
 	default:
-		plan.Changes = roznice(plan, zSekretu)
-		plan.Action = PlanZmienia
+		plan.Changes = differences(plan, fromSecret)
+		plan.Action = PlanUpdate
 		if len(plan.Changes) == 0 {
-			plan.Action = PlanBezZmian
+			plan.Action = PlanNoChange
 		}
 	}
-	plan.PlanHash = odciskPlanu(plan)
+	plan.PlanHash = planFingerprint(plan)
 	return plan
 }
 
-// roznice wylicza zmiany widoczne dla czlowieka.
-func roznice(plan Plan, zSekretu bool) []string {
-	var zmiany []string
+// differences lists the changes visible to a human.
+func differences(plan Plan, fromSecret bool) []string {
+	var changes []string
 	switch {
-	case zSekretu:
-		// Tresci z magazynu nie porownujemy: nie ma jej w planie, wiec nie
-		// mozemy twierdzic ani ze sie zmieni, ani ze nie.
-		zmiany = append(zmiany, "tresc pochodzi z magazynu sekretow i nie jest porownywana")
+	case fromSecret:
+		// Content from the store is not compared: it is not in the plan, so
+		// nobody can claim it will change or that it will not.
+		changes = append(changes, "the content comes from the secret store and is not compared")
 	case plan.SHA256 == "":
-		// Odcisku zastanego nie udalo sie policzyc. To nie znaczy "bez zmian".
-		zmiany = append(zmiany, "tresci zastanej nie udalo sie odczytac")
+		// The fingerprint of the current content could not be computed. That
+		// does not mean "no change".
+		changes = append(changes, "the current content could not be read")
 	case plan.SHA256 != plan.DesiredSHA256:
-		zmiany = append(zmiany, "tresc")
+		changes = append(changes, "content")
 	}
 	if plan.DesiredMode != "" && plan.Mode != "" && plan.DesiredMode != plan.Mode {
-		zmiany = append(zmiany, fmt.Sprintf("prawa z %s na %s", plan.Mode, plan.DesiredMode))
+		changes = append(changes, fmt.Sprintf("permissions from %s to %s", plan.Mode, plan.DesiredMode))
 	}
 	if plan.DesiredOwner != "" && plan.Owner != "" && plan.DesiredOwner != plan.Owner {
-		zmiany = append(zmiany, fmt.Sprintf("wlasciciel z %s na %s", plan.Owner, plan.DesiredOwner))
+		changes = append(changes, fmt.Sprintf("owner from %s to %s", plan.Owner, plan.DesiredOwner))
 	}
 	if plan.DesiredGroup != "" && plan.Group != "" && plan.DesiredGroup != plan.Group {
-		zmiany = append(zmiany, fmt.Sprintf("grupa z %s na %s", plan.Group, plan.DesiredGroup))
+		changes = append(changes, fmt.Sprintf("group from %s to %s", plan.Group, plan.DesiredGroup))
 	}
-	sort.Strings(zmiany)
-	return zmiany
+	sort.Strings(changes)
+	return changes
 }
 
-// odciskPlanu liczy odcisk calego planu poza samym odciskiem.
+// planFingerprint computes the fingerprint of the whole plan excluding the
+// fingerprint itself.
 //
-// Obejmuje stan zastany i docelowy razem: plan policzony na hoscie, ktory
-// w miedzyczasie sie zmienil, ma dac inny odcisk - bo to juz inna zmiana.
-func odciskPlanu(plan Plan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	// Wynik walidatora bywa dlugi i nie opisuje samej roznicy, wiec nie
-	// wchodzi do odcisku: ten sam diff ma dac ten sam odcisk.
-	bezOdcisku.ValidatorOutput = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// It covers the found and the desired state together: a plan computed on a
+// host that changed in the meantime must yield a different fingerprint -
+// because it is a different change by then.
+func planFingerprint(plan Plan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	// The validator output can be long and does not describe the difference
+	// itself, so it does not enter the fingerprint: the same diff must give
+	// the same fingerprint.
+	stripped.ValidatorOutput = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

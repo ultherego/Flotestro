@@ -14,129 +14,132 @@ import (
 	"time"
 )
 
-// nazwaProjektu dopuszcza to, co dopuszcza Compose. Nazwa trafia do argumentu
-// polecenia i do nazw kontenerow, wiec nie moze niesc niczego wiecej.
-var nazwaProjektu = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+// projectName allows what Compose allows. The name goes into a command
+// argument and into container names, so it cannot carry anything more.
+var projectName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
-// PoprawnaNazwaProjektu sprawdza nazwe projektu.
-func PoprawnaNazwaProjektu(nazwa string) bool {
-	return nazwaProjektu.MatchString(nazwa)
+// ValidProjectName checks a project name.
+func ValidProjectName(name string) bool {
+	return projectName.MatchString(name)
 }
 
-// maksymalnyManifest ogranicza rozmiar manifestu. Plik wiekszy od tego nie
-// jest juz konfiguracja projektu, tylko czyms, czego operator nie przeczyta
-// przed zatwierdzeniem.
-const maksymalnyManifest = 256 << 10
+// maxManifest bounds the manifest size. A file bigger than this is no
+// longer a project configuration, only something the operator will not
+// read before approving.
+const maxManifest = 256 << 10
 
-// Planner liczy plan wdrozenia na hoscie.
+// Planner computes the deployment plan on the host.
 type Planner struct {
-	// Runner wykonuje polecenie compose. Wydzielony, zeby plan dal sie
-	// sprawdzic w tescie bez silnika kontenerow.
+	// Runner runs the compose command. Separated so that the plan can be
+	// checked in a test without a container engine.
 	Runner Runner
-	// Dir jest katalogiem roboczym na manifesty. Nalezy do roota i nie jest
-	// wspoldzielony z niczym innym.
+	// Dir is the working directory for manifests. It belongs to root and
+	// is not shared with anything else.
 	Dir string
 }
 
-// Runner uruchamia polecenie compose i zwraca jego wyjscie.
+// Runner runs the compose command and returns its output.
 type Runner func(ctx context.Context, args ...string) (stdout string, stderr string, err error)
 
-// Plan liczy roznice miedzy stanem projektu a manifestem.
+// Plan computes the difference between the project state and the manifest.
 func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, error) {
 	plan := Plan{Project: project, ComputedAt: time.Now().UTC()}
-	if !PoprawnaNazwaProjektu(project) {
-		return plan, fmt.Errorf("nieprawidlowa nazwa projektu %q", project)
+	if !ValidProjectName(project) {
+		return plan, fmt.Errorf("invalid project name %q", project)
 	}
 	if len(manifest) == 0 {
-		return plan, fmt.Errorf("manifest jest pusty")
+		return plan, fmt.Errorf("the manifest is empty")
 	}
-	if len(manifest) > maksymalnyManifest {
-		return plan, fmt.Errorf("manifest jest zbyt duzy (%d bajtow)", len(manifest))
+	if len(manifest) > maxManifest {
+		return plan, fmt.Errorf("the manifest is too big (%d bytes)", len(manifest))
 	}
 
-	sciezka, sprzataj, err := p.zapiszManifest(project, manifest)
+	path, cleanup, err := p.writeManifest(project, manifest)
 	if err != nil {
 		return plan, err
 	}
-	defer sprzataj()
+	defer cleanup()
 
-	// Normalizacja jest jednoczesnie walidacja: Compose odmawia, gdy manifest
-	// jest niepoprawny, i robi to zanim cokolwiek ruszy na hoscie.
-	stdout, stderr, err := p.Runner(ctx, "-p", project, "-f", sciezka, "config", "--format", "json")
+	// Normalisation is validation at the same time: Compose refuses when
+	// the manifest is invalid, and does so before anything moves on the
+	// host.
+	stdout, stderr, err := p.Runner(ctx, "-p", project, "-f", path, "config", "--format", "json")
 	if err != nil {
-		return plan, fmt.Errorf("manifest odrzucony przez compose: %s", pierwszaLinia(stderr))
+		return plan, fmt.Errorf("manifest rejected by compose: %s", firstLine(stderr))
 	}
 
-	uslugi, ostrzezenia, err := uslugiZKonfiguracji(stdout)
+	services, warnings, err := servicesFromConfiguration(stdout)
 	if err != nil {
 		return plan, err
 	}
-	plan.Services = uslugi
-	plan.Warnings = ostrzezenia
+	plan.Services = services
+	plan.Warnings = warnings
 
-	// Suchy przebieg mowi, co naprawde sie zmieni. Roznica liczona z samego
-	// manifestu byłaby zgadywaniem: Compose bierze pod uwage takze to, czy
-	// kontener wymaga odtworzenia z powodu zmiany obrazu albo konfiguracji.
-	// Compose melduje suchy przebieg na strumieniu diagnostycznym, a nie na
-	// wyjsciu, wiec czytamy oba - inaczej lista zmian wychodzi pusta i plan
-	// wyglada, jakby wdrozenie niczego nie zmienialo.
-	suchyOut, suchyErr, err := p.Runner(ctx, "-p", project, "-f", sciezka, "up", "-d", "--dry-run")
+	// The dry run says what will really change. A difference computed from
+	// the manifest alone would be guessing: Compose also takes into account
+	// whether a container needs recreating because of an image or
+	// configuration change. Compose reports the dry run on the diagnostic
+	// stream, not on the output, so both are read - otherwise the change
+	// list comes out empty and the plan looks as if the deployment changed
+	// nothing.
+	dryOut, dryErr, err := p.Runner(ctx, "-p", project, "-f", path, "up", "-d", "--dry-run")
 	if err == nil {
-		plan.Changes = zmianyZSuchegoPrzebiegu(suchyOut + "\n" + suchyErr)
+		plan.Changes = changesFromDryRun(dryOut + "\n" + dryErr)
 	} else {
 		plan.Warnings = append(plan.Warnings,
 			"compose could not compute a dry run; the change list may be incomplete")
 	}
 
-	plan.Digest = Digest(project, stdout, uslugi)
+	plan.Digest = Digest(project, stdout, services)
 	return plan, nil
 }
 
-// Digest wiaze wdrozenie z planem.
+// Digest binds the deployment to the plan.
 //
-// Liczony z calej znormalizowanej konfiguracji projektu, a nie z samej listy
-// uslug. Manifest o tych samych uslugach i obrazach moze publikowac inny port
-// albo uruchamiac inne polecenie - operator zatwierdzil konkretny plan, wiec
-// digest musi objac wszystko, co ten plan opisuje.
+// Computed from the whole normalised project configuration, not from the
+// service list alone. A manifest with the same services and images may
+// publish a different port or run a different command - the operator
+// approved a specific plan, so the digest must cover everything the plan
+// describes.
 //
-// Podstawa jest wyjscie "compose config", bo Compose je kanonizuje: te same
-// znaczenie zapisane inaczej daje ten sam tekst, a rozne znaczenie zawsze
-// rozny.
-func Digest(project string, konfiguracja string, uslugi []Service) string {
-	posortowane := make([]Service, len(uslugi))
-	copy(posortowane, uslugi)
-	sort.Slice(posortowane, func(i, j int) bool { return posortowane[i].Name < posortowane[j].Name })
+// The basis is the "compose config" output, because Compose canonicalises
+// it: the same meaning written differently gives the same text, and a
+// different meaning always a different one.
+func Digest(project string, configuration string, services []Service) string {
+	sorted := make([]Service, len(services))
+	copy(sorted, services)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
-	suma := sha256.New()
-	fmt.Fprintf(suma, "project=%s\n", project)
-	fmt.Fprintf(suma, "config=%s\n", strings.TrimSpace(konfiguracja))
-	// Digesty obrazow sa dopisywane osobno: konfiguracja niesie tag, a tag
-	// jutro moze wskazywac inny obraz. Zmiana tego, co naprawde wstanie,
-	// tez ma uniewazniac zatwierdzenie.
-	for _, usluga := range posortowane {
-		fmt.Fprintf(suma, "image=%s digest=%s\n", usluga.Image, usluga.ImageDigest)
+	sum := sha256.New()
+	fmt.Fprintf(sum, "project=%s\n", project)
+	fmt.Fprintf(sum, "config=%s\n", strings.TrimSpace(configuration))
+	// The image digests are added separately: the configuration carries a
+	// tag, and a tag may point at a different image tomorrow. A change of
+	// what will really come up is also meant to invalidate the approval.
+	for _, service := range sorted {
+		fmt.Fprintf(sum, "image=%s digest=%s\n", service.Image, service.ImageDigest)
 	}
-	return hex.EncodeToString(suma.Sum(nil))
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// zapiszManifest zapisuje manifest w katalogu roboczym helpera.
-func (p Planner) zapiszManifest(project, manifest string) (string, func(), error) {
-	katalog := filepath.Join(p.Dir, project)
-	if err := os.MkdirAll(katalog, 0o700); err != nil {
+// writeManifest writes the manifest in the helper's working directory.
+func (p Planner) writeManifest(project, manifest string) (string, func(), error) {
+	dir := filepath.Join(p.Dir, project)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", func() {}, err
 	}
-	sciezka := filepath.Join(katalog, "docker-compose.yml")
-	// Manifest bywa nosnikiem poswiadczen, wiec plik jest czytelny wylacznie
-	// dla roota i znika po operacji.
-	if err := os.WriteFile(sciezka, []byte(manifest), 0o600); err != nil {
+	path := filepath.Join(dir, "docker-compose.yml")
+	// A manifest sometimes carries credentials, so the file is readable
+	// only by root and vanishes after the operation.
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
 		return "", func() {}, err
 	}
-	return sciezka, func() { _ = os.Remove(sciezka) }, nil
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
-// uslugiZKonfiguracji czyta znormalizowana konfiguracje projektu.
-func uslugiZKonfiguracji(konfiguracja string) ([]Service, []string, error) {
-	var dane struct {
+// servicesFromConfiguration reads the normalised project configuration.
+func servicesFromConfiguration(configuration string) ([]Service, []string, error) {
+	var data struct {
 		Services map[string]struct {
 			Image       string         `json:"image"`
 			Environment map[string]any `json:"environment"`
@@ -146,108 +149,110 @@ func uslugiZKonfiguracji(konfiguracja string) ([]Service, []string, error) {
 			Labels map[string]string `json:"labels"`
 		} `json:"services"`
 	}
-	if err := json.Unmarshal([]byte(konfiguracja), &dane); err != nil {
-		return nil, nil, fmt.Errorf("nieczytelna konfiguracja projektu: %w", err)
+	if err := json.Unmarshal([]byte(configuration), &data); err != nil {
+		return nil, nil, fmt.Errorf("unreadable project configuration: %w", err)
 	}
 
-	uslugi := make([]Service, 0, len(dane.Services))
-	var ostrzezenia []string
-	for nazwa, usluga := range dane.Services {
-		wpis := Service{Name: nazwa, Image: usluga.Image, Replicas: 1}
-		if usluga.Deploy.Replicas != nil {
-			wpis.Replicas = *usluga.Deploy.Replicas
+	services := make([]Service, 0, len(data.Services))
+	var warnings []string
+	for name, service := range data.Services {
+		entry := Service{Name: name, Image: service.Image, Replicas: 1}
+		if service.Deploy.Replicas != nil {
+			entry.Replicas = *service.Deploy.Replicas
 		}
-		// Obraz wskazany tagiem moze jutro znaczyc co innego. To nie blokuje
-		// wdrozenia, ale operator ma wiedziec, ze zatwierdza ruchomy cel.
-		if !strings.Contains(usluga.Image, "@sha256:") {
-			ostrzezenia = append(ostrzezenia,
+		// An image named by a tag may mean something else tomorrow. That
+		// does not block the deployment, but the operator is meant to know
+		// they approve a moving target.
+		if !strings.Contains(service.Image, "@sha256:") {
+			warnings = append(warnings,
 				fmt.Sprintf("service %s uses a mutable tag (%s); pin a digest to know what will run",
-					nazwa, usluga.Image))
+					name, service.Image))
 		}
-		for klucz := range usluga.Environment {
-			if wygladaNaSekret(klucz) {
-				// Manifest jest zapisywany w panelu razem z historia wersji,
-				// wiec wartosc wpisana w nim wprost przestaje byc sekretem.
-				ostrzezenia = append(ostrzezenia,
+		for key := range service.Environment {
+			if looksLikeSecret(key) {
+				// The manifest is stored in the panel together with the
+				// version history, so a value written into it directly stops
+				// being a secret.
+				warnings = append(warnings,
 					fmt.Sprintf("service %s sets %s inline; the manifest is stored in the panel, "+
-						"so use env_file on the host instead", nazwa, klucz))
+						"so use env_file on the host instead", name, key))
 			}
 		}
-		uslugi = append(uslugi, wpis)
+		services = append(services, entry)
 	}
-	sort.Slice(uslugi, func(i, j int) bool { return uslugi[i].Name < uslugi[j].Name })
-	sort.Strings(ostrzezenia)
-	return uslugi, ostrzezenia, nil
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
+	sort.Strings(warnings)
+	return services, warnings, nil
 }
 
-// wzorzecSuchegoPrzebiegu czyta linie w rodzaju:
+// dryRunPattern reads lines like:
 //
-//	DRY-RUN MODE -  Container probny-web-1  Creating
-var wzorzecSuchegoPrzebiegu = regexp.MustCompile(
+//	DRY-RUN MODE -  Container trial-web-1  Creating
+var dryRunPattern = regexp.MustCompile(
 	`(?i)(Container|Network|Volume|Image)\s+(\S+)\s+(Creating|Created|Recreate|Recreated|Starting|Started|Stopping|Stopped|Removing|Removed|Pulling|Pulled)`)
 
-// zmianyZSuchegoPrzebiegu wyciaga liste zmian z wyjscia suchego przebiegu.
-// Compose melduje kazdy krok dwa razy - w trakcie i po - wiec liczy sie
-// pierwsze wystapienie obiektu.
-func zmianyZSuchegoPrzebiegu(wyjscie string) []Change {
-	widziane := map[string]bool{}
-	var zmiany []Change
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		dopasowanie := wzorzecSuchegoPrzebiegu.FindStringSubmatch(linia)
-		if dopasowanie == nil {
+// changesFromDryRun extracts the change list from the dry run output.
+// Compose reports every step twice - during and after - so the first
+// occurrence of an object counts.
+func changesFromDryRun(output string) []Change {
+	seen := map[string]bool{}
+	var changes []Change
+	for _, line := range strings.Split(output, "\n") {
+		match := dryRunPattern.FindStringSubmatch(line)
+		if match == nil {
 			continue
 		}
-		klucz := dopasowanie[1] + "/" + dopasowanie[2]
-		if widziane[klucz] {
+		key := match[1] + "/" + match[2]
+		if seen[key] {
 			continue
 		}
-		widziane[klucz] = true
-		zmiany = append(zmiany, Change{
-			Kind:   strings.ToLower(dopasowanie[1]),
-			Name:   dopasowanie[2],
-			Action: strings.ToLower(strings.TrimSuffix(dopasowanie[3], "d")),
+		seen[key] = true
+		changes = append(changes, Change{
+			Kind:   strings.ToLower(match[1]),
+			Name:   match[2],
+			Action: strings.ToLower(strings.TrimSuffix(match[3], "d")),
 		})
 	}
-	return zmiany
+	return changes
 }
 
-func wygladaNaSekret(klucz string) bool {
-	male := strings.ToLower(klucz)
-	for _, wzorzec := range []string{"secret", "password", "passwd", "token", "apikey", "api_key", "credential"} {
-		if strings.Contains(male, wzorzec) {
+func looksLikeSecret(key string) bool {
+	lowered := strings.ToLower(key)
+	for _, pattern := range []string{"secret", "password", "passwd", "token", "apikey", "api_key", "credential"} {
+		if strings.Contains(lowered, pattern) {
 			return true
 		}
 	}
 	return false
 }
 
-func pierwszaLinia(tekst string) string {
-	tekst = strings.TrimSpace(tekst)
-	if index := strings.IndexByte(tekst, '\n'); index >= 0 {
-		return strings.TrimSpace(tekst[:index])
+func firstLine(text string) string {
+	text = strings.TrimSpace(text)
+	if index := strings.IndexByte(text, '\n'); index >= 0 {
+		return strings.TrimSpace(text[:index])
 	}
-	return tekst
+	return text
 }
 
-// uslugiZListy czyta wyjscie "compose ps --format json". Compose wypisuje
-// jeden obiekt na linie, a nie tablice, wiec czytamy strumieniowo.
-func uslugiZListy(wyjscie string) []Service {
-	var uslugi []Service
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || !strings.HasPrefix(linia, "{") {
+// servicesFromList reads the output of "compose ps --format json". Compose
+// prints one object per line, not an array, so it is read as a stream.
+func servicesFromList(output string) []Service {
+	var services []Service
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
 			continue
 		}
-		var wpis struct {
+		var entry struct {
 			Service string `json:"Service"`
 			Image   string `json:"Image"`
 			State   string `json:"State"`
 		}
-		if err := json.Unmarshal([]byte(linia), &wpis); err != nil {
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		uslugi = append(uslugi, Service{Name: wpis.Service, Image: wpis.Image, Replicas: 1})
+		services = append(services, Service{Name: entry.Service, Image: entry.Image, Replicas: 1})
 	}
-	sort.Slice(uslugi, func(i, j int) bool { return uslugi[i].Name < uslugi[j].Name })
-	return uslugi
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
+	return services
 }

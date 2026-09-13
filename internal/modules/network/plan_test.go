@@ -5,96 +5,96 @@ import (
 	"testing"
 )
 
-func profilTestowy() Profil {
-	return Profil{
-		Polaczenie: "Wired connection 1", Interfejs: "eth1", Metoda: "auto",
-		Trasy: []string{"10.9.0.0/24 192.168.56.1"}, MTU: "1500",
+func testProfile() Profile {
+	return Profile{
+		Connection: "Wired connection 1", Interface: "eth1", Method: "auto",
+		Routes: []string{"10.9.0.0/24 192.168.56.1"}, MTU: "1500",
 	}
 }
 
-func TestPlanMTUOdrozniaZmianeOdBrakuZmian(t *testing.T) {
-	obecny := profilTestowy()
-	zmiana := ZaplanujMTU("eth1", obecny, "9000")
-	if zmiana.Action != PlanZmienia || len(zmiana.Changes) != 1 ||
-		!strings.Contains(zmiana.Changes[0], "MTU z 1500 na 9000") {
-		t.Errorf("plan MTU: %+v", zmiana)
+func TestMTUPlanDistinguishesChangeFromNoChange(t *testing.T) {
+	current := testProfile()
+	change := ComputeMTU("eth1", current, "9000")
+	if change.Action != PlanUpdate || len(change.Changes) != 1 ||
+		!strings.Contains(change.Changes[0], "MTU from 1500 to 9000") {
+		t.Errorf("MTU plan: %+v", change)
 	}
-	bez := ZaplanujMTU("eth1", obecny, "1500")
-	if bez.Action != PlanBezZmian || len(bez.Changes) != 0 {
-		t.Errorf("plan bez zmian: %+v", bez)
+	none := ComputeMTU("eth1", current, "1500")
+	if none.Action != PlanNoChange || len(none.Changes) != 0 {
+		t.Errorf("no-change plan: %+v", none)
 	}
-	if zmiana.PlanHash == bez.PlanHash || zmiana.PlanHash == "" {
-		t.Error("odciski planow nie roznia sie")
+	if change.PlanHash == none.PlanHash || change.PlanHash == "" {
+		t.Error("plan fingerprints do not differ")
 	}
-	if zla := ZaplanujMTU("eth1", obecny, "12"); zla.Refusal == "" {
-		t.Error("MTU 12 przeszlo bez odmowy")
-	}
-}
-
-func TestPlanTrasPorownujeJakoZbior(t *testing.T) {
-	obecny := profilTestowy()
-	obecny.Trasy = []string{"10.9.0.0/24 192.168.56.1", "10.8.0.0/24 192.168.56.1"}
-	plan := ZaplanujTrasy("eth1", obecny, []string{"10.8.0.0/24 192.168.56.1", "10.9.0.0/24 192.168.56.1"})
-	if plan.Action != PlanBezZmian {
-		t.Errorf("kolejnosc tras policzona jako zmiana: %+v", plan)
-	}
-	pusta := ZaplanujTrasy("eth1", obecny, []string{})
-	if pusta.Action != PlanZmienia || !strings.Contains(pusta.Changes[0], "na brak") {
-		t.Errorf("skasowanie tras: %+v", pusta)
+	if bad := ComputeMTU("eth1", current, "12"); bad.Refusal == "" {
+		t.Error("MTU 12 passed without a refusal")
 	}
 }
 
-func TestPlanProfiluZostawiaTrasyIMTU(t *testing.T) {
-	obecny := profilTestowy()
-	plan := ZaplanujProfil("eth1", obecny, "manual", []string{"192.168.56.61/24"}, "", nil)
-	if plan.Action != PlanZmienia {
-		t.Fatalf("plan profilu: %+v", plan)
+func TestRoutesPlanComparesAsSet(t *testing.T) {
+	current := testProfile()
+	current.Routes = []string{"10.9.0.0/24 192.168.56.1", "10.8.0.0/24 192.168.56.1"}
+	plan := ComputeRoutes("eth1", current, []string{"10.8.0.0/24 192.168.56.1", "10.9.0.0/24 192.168.56.1"})
+	if plan.Action != PlanNoChange {
+		t.Errorf("route order counted as a change: %+v", plan)
 	}
-	if plan.Desired.MTU != "1500" || len(plan.Desired.Trasy) != 1 {
-		t.Errorf("profil adresowy ruszyl trasy albo MTU: %+v", plan.Desired)
+	empty := ComputeRoutes("eth1", current, []string{})
+	if empty.Action != PlanUpdate || !strings.Contains(empty.Changes[0], "to none") {
+		t.Errorf("route removal: %+v", empty)
 	}
-	for _, zmiana := range plan.Changes {
-		if strings.HasPrefix(zmiana, "trasy") || strings.HasPrefix(zmiana, "MTU") {
-			t.Errorf("zmiana spoza zamowienia: %s", zmiana)
+}
+
+func TestProfilePlanLeavesRoutesAndMTU(t *testing.T) {
+	current := testProfile()
+	plan := ComputeProfile("eth1", current, "manual", []string{"192.168.56.61/24"}, "", nil)
+	if plan.Action != PlanUpdate {
+		t.Fatalf("profile plan: %+v", plan)
+	}
+	if plan.Desired.MTU != "1500" || len(plan.Desired.Routes) != 1 {
+		t.Errorf("the address profile touched the routes or the MTU: %+v", plan.Desired)
+	}
+	for _, change := range plan.Changes {
+		if strings.HasPrefix(change, "routes") || strings.HasPrefix(change, "MTU") {
+			t.Errorf("change outside the order: %s", change)
 		}
 	}
-	if odmowa := ZaplanujProfil("eth1", obecny, "manual", nil, "", nil); odmowa.Refusal == "" {
-		t.Error("manual bez adresu przeszedl bez odmowy")
+	if refused := ComputeProfile("eth1", current, "manual", nil, "", nil); refused.Refusal == "" {
+		t.Error("manual without an address passed without a refusal")
 	}
 }
 
-func TestOdmowaPlanuMaOdcisk(t *testing.T) {
-	plan := OdmowaPlanu("eth9", PlanMTU, "interfejs eth9 nie ma profilu NetworkManagera")
+func TestRefusedPlanHasFingerprint(t *testing.T) {
+	plan := RefusedPlan("eth9", PlanMTU, "the interface eth9 has no NetworkManager profile")
 	if plan.Refusal == "" || plan.PlanHash == "" || plan.Current != nil {
-		t.Errorf("odmowa: %+v", plan)
+		t.Errorf("refusal: %+v", plan)
 	}
-	zmiana := ZaplanujMTU("eth1", profilTestowy(), "9000")
-	przed := zmiana.PlanHash
-	zmiana.Odmow("kanal zarzadzania")
-	if zmiana.PlanHash == przed {
-		t.Error("odmowa nie zmienila odcisku")
+	change := ComputeMTU("eth1", testProfile(), "9000")
+	before := change.PlanHash
+	change.Refuse("management channel")
+	if change.PlanHash == before {
+		t.Error("the refusal did not change the fingerprint")
 	}
 }
 
-func TestPlanResolveraZmieniaTylkoResolver(t *testing.T) {
-	obecny := profilTestowy()
-	obecny.DNS = []string{"192.168.56.50"}
-	plan := ZaplanujDNS("eth1", obecny, []string{"192.168.56.50"}, []string{"flotestro.test"}, true)
-	if plan.Action != PlanZmienia || plan.Operation != PlanDNS {
-		t.Fatalf("plan resolvera: %+v", plan)
+func TestResolverPlanChangesOnlyResolver(t *testing.T) {
+	current := testProfile()
+	current.DNS = []string{"192.168.56.50"}
+	plan := ComputeDNS("eth1", current, []string{"192.168.56.50"}, []string{"flotestro.test"}, true)
+	if plan.Action != PlanUpdate || plan.Operation != PlanDNS {
+		t.Fatalf("resolver plan: %+v", plan)
 	}
 	if len(plan.Changes) != 2 {
-		t.Errorf("zmiany resolvera: %v", plan.Changes)
+		t.Errorf("resolver changes: %v", plan.Changes)
 	}
-	if plan.Desired.MTU != obecny.MTU || len(plan.Desired.Trasy) != len(obecny.Trasy) ||
-		plan.Desired.Metoda != obecny.Metoda {
-		t.Errorf("plan resolvera ruszyl reszte profilu: %+v", plan.Desired)
+	if plan.Desired.MTU != current.MTU || len(plan.Desired.Routes) != len(current.Routes) ||
+		plan.Desired.Method != current.Method {
+		t.Errorf("the resolver plan touched the rest of the profile: %+v", plan.Desired)
 	}
-	bez := ZaplanujDNS("eth1", obecny, []string{"192.168.56.50"}, nil, false)
-	if bez.Action != PlanBezZmian {
-		t.Errorf("resolver w stanie docelowym policzony jako zmiana: %+v", bez)
+	none := ComputeDNS("eth1", current, []string{"192.168.56.50"}, nil, false)
+	if none.Action != PlanNoChange {
+		t.Errorf("a resolver in the target state counted as a change: %+v", none)
 	}
-	if pusty := ZaplanujDNS("eth1", obecny, nil, nil, false); pusty.Refusal == "" {
-		t.Error("resolver bez serwera przeszedl bez odmowy")
+	if empty := ComputeDNS("eth1", current, nil, nil, false); empty.Refusal == "" {
+		t.Error("a resolver without a server passed without a refusal")
 	}
 }

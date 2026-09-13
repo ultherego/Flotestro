@@ -1,71 +1,72 @@
-// Package schedules zarzadza zadaniami cyklicznymi hosta niezaleznie od
-// mechanizmu: cron i timery systemd sa dwoma adapterami tego samego modelu.
+// Package schedules manages the recurring jobs of a host independently of
+// the mechanism: cron and systemd timers are two adapters of the same model.
 //
-// Wpisy zarzadzane przez panel maja wlasny plik i stabilny identyfikator.
-// Wpisy zastane naleza do administratora hosta i panel ich nie nadpisuje bez
-// jawnego przejecia - inaczej pierwsza operacja z panelu kasowalaby prace,
-// ktorej nikt do panelu nie wprowadzal.
+// Entries managed by the panel have a file of their own and a stable
+// identifier. Entries found on the host belong to the host administrator
+// and the panel does not overwrite them without an explicit takeover -
+// otherwise the first operation from the panel would wipe work nobody
+// entered in the panel.
 package schedules
 
 import "time"
 
-// Rodzaje mechanizmow.
+// Mechanism kinds.
 const (
 	KindCron  = "cron"
 	KindTimer = "timer"
 )
 
-// Pochodzenie wpisu.
+// Entry origin.
 const (
-	// SourceManaged oznacza wpis zalozony przez panel: ma wlasny plik
-	// i stabilny identyfikator.
+	// SourceManaged marks an entry created by the panel: it has a file of
+	// its own and a stable identifier.
 	SourceManaged = "managed"
-	// SourceManual oznacza wpis zastany na hoscie.
+	// SourceManual marks an entry found on the host.
 	SourceManual = "manual"
 )
 
-// Schedule opisuje jedno zadanie cykliczne.
+// Schedule describes one recurring job.
 type Schedule struct {
-	// ID jest stabilne wylacznie dla wpisow zarzadzanych. Wpis zastany
-	// identyfikuje sciezka pliku i numer linii, bo nic trwalszego nie ma.
+	// ID is stable only for managed entries. An entry found on the host is
+	// identified by the file path and the line number, because there is
+	// nothing more durable.
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
-	// Source rozroznia wpis panelu od wpisu administratora hosta.
+	// Source distinguishes a panel entry from a host administrator entry.
 	Source string `json:"source"`
-	// Enabled mowi, czy wpis jest aktywny. Wpis wylaczony zostaje na hoscie
-	// razem ze swoja trescia: wylaczenie nie jest usunieciem.
+	// Enabled says whether the entry is active. A disabled entry stays on
+	// the host together with its content: disabling is not removal.
 	Enabled bool `json:"enabled"`
-	// Expression to wyrazenie crona albo OnCalendar timera.
+	// Expression is the cron expression or the timer's OnCalendar.
 	Expression string `json:"expression"`
-	// Command jest tablica argumentow. Wypelnione tylko dla wpisow
-	// zarzadzanych: tam panel decyduje o kazdym argumencie i zadna powloka
-	// nie bierze udzialu w uruchomieniu.
+	// Command is an argument array. Filled only for managed entries: there
+	// the panel decides every argument and no shell takes part in the run.
 	Command []string `json:"command,omitempty"`
-	// CommandLine jest trescia, ktora cron przekaze do /bin/sh. Wpis zastany
-	// ma tylko ja: rozdzielenie cudzego wiersza powloki na argumenty
-	// pokazywaloby cos, czego host nigdy tak nie uruchomi.
+	// CommandLine is the text cron passes to /bin/sh. An entry found on the
+	// host has only this: splitting somebody else's shell line into
+	// arguments would show something the host never runs that way.
 	CommandLine string `json:"command_line,omitempty"`
 	User        string `json:"user,omitempty"`
-	// Path wskazuje plik, w ktorym wpis zyje. Operator ma wiedziec, gdzie
-	// szukac, gdy panel czegos nie potrafi.
+	// Path points at the file the entry lives in. The operator needs to
+	// know where to look when the panel cannot do something.
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
-	// NextRun jest liczony na hoscie i przesylany jako fakt: panel nie zna
-	// strefy czasowej hosta ani jego kalendarza.
+	// NextRun is computed on the host and sent as a fact: the panel knows
+	// neither the host's time zone nor its calendar.
 	NextRun *time.Time `json:"next_run,omitempty"`
-	// Timezone hosta. Bez niej "03:00" nie znaczy nic konkretnego.
+	// Timezone of the host. Without it "03:00" means nothing specific.
 	Timezone string `json:"timezone,omitempty"`
-	// LastResult opisuje ostatnie znane wykonanie; puste oznacza brak
-	// wiedzy, a nie brak wykonan.
+	// LastResult describes the last known run; empty means no knowledge,
+	// not no runs.
 	LastResult string `json:"last_result,omitempty"`
 	Comment    string `json:"comment,omitempty"`
 }
 
-// Snapshot to wynik odczytu harmonogramow hosta.
+// Snapshot is the result of reading the host schedules.
 type Snapshot struct {
 	Schedules []Schedule `json:"schedules"`
 	Timezone  string     `json:"timezone,omitempty"`
-	// UnavailableReason mowi, dlaczego stanu nie udalo sie ustalic.
-	// Host bez crona i bez timerow to nie to samo co host nieodpytany.
+	// UnavailableReason says why the state could not be determined. A host
+	// without cron and without timers is not the same as a host not asked.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }

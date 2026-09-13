@@ -440,9 +440,9 @@ func run() error {
 	// tab then says outright that no sources were named instead of drawing
 	// empty charts.
 	panelServer.SetMonitoring(adminapi.Monitoring{
-		Metryki: metricsIntegration.NewPrometheus(monitoring.PrometheusURL, monitoring.Timeout, nil),
-		Alerty:  alertsIntegration.NewAlertmanager(monitoring.AlertmanagerURL, monitoring.Timeout),
-		Mapowanie: integrations.Mapping{
+		Metrics: metricsIntegration.NewPrometheus(monitoring.PrometheusURL, monitoring.Timeout, nil),
+		Alerts:  alertsIntegration.NewAlertmanager(monitoring.AlertmanagerURL, monitoring.Timeout),
+		Mapping: integrations.Mapping{
 			HostLabel:        monitoring.HostLabel,
 			HostValue:        monitoring.HostValue,
 			SiteLabel:        monitoring.SiteLabel,
@@ -471,7 +471,7 @@ func run() error {
 	// findings and the package lists of the hosts.
 	vulnStore := vuln.NewStore(pool)
 	packageStore := vuln.NewPackageStore(pool)
-	panelServer.SetPodatnosci(vulnStore, packageStore, vulnerabilities.MaxSnapshotAge)
+	panelServer.SetVulnerabilities(vulnStore, packageStore, vulnerabilities.MaxSnapshotAge)
 
 	// The secret store. The key lies in a file outside the database: a copy of
 	// the database without it is not enough to read anything.

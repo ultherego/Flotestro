@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Wyjscie przepisane z hosta floty testowej: tablice dockera zarzadzane przez
-// iptables-nft oraz wlasna tablica panelu.
-const wyjscieNft = `# Warning: table ip nat is managed by iptables-nft, do not touch!
+// Output copied from a host of the test fleet: docker tables managed by
+// iptables-nft and the panel's own table.
+const nftOutput = `# Warning: table ip nat is managed by iptables-nft, do not touch!
 table ip nat { # handle 1
 	chain DOCKER { # handle 1
 		iifname "docker0" counter packets 0 bytes 0 return # handle 4
@@ -20,104 +20,105 @@ table ip nat { # handle 1
 	}
 }
 table inet flotestro { # handle 7
-	chain wejscie { # handle 1
+	chain input { # handle 1
 		type filter hook input priority filter; policy accept;
-		tcp dport 8443 counter packets 5 bytes 300 accept comment "flotestro: kanal zarzadzania" # handle 2
+		tcp dport 8443 counter packets 5 bytes 300 accept comment "flotestro: management channel" # handle 2
 		ip saddr 10.0.0.0/8 drop # handle 3
 	}
 }`
 
-func TestRegulyNiosaTrescZNft(t *testing.T) {
-	snapshot := ParsujRuleset(wyjscieNft)
+func TestRulesCarryTextFromNft(t *testing.T) {
+	snapshot := ParseRuleset(nftOutput)
 
 	if snapshot.Adapter != AdapterNftables || snapshot.Hash == "" {
-		t.Fatalf("adapter = %q, odcisk = %q", snapshot.Adapter, snapshot.Hash)
+		t.Fatalf("adapter = %q, fingerprint = %q", snapshot.Adapter, snapshot.Hash)
 	}
 	if len(snapshot.Tables) != 2 || len(snapshot.Chains) != 3 || len(snapshot.Rules) != 5 {
-		t.Fatalf("tablic = %d, lancuchow = %d, regul = %d",
+		t.Fatalf("tables = %d, chains = %d, rules = %d",
 			len(snapshot.Tables), len(snapshot.Chains), len(snapshot.Rules))
 	}
 
-	// Tresc reguly jest tekstem od nft, bez uchwytu doklejonego na koncu:
-	// operator zna ten zapis z wiersza polecen.
+	// The rule text is the text from nft, without the handle appended at
+	// the end: the operator knows this notation from the command line.
 	var dnat Rule
-	for _, regula := range snapshot.Rules {
-		if regula.Handle == 13 {
-			dnat = regula
+	for _, rule := range snapshot.Rules {
+		if rule.Handle == 13 {
+			dnat = rule
 		}
 	}
 	if strings.Contains(dnat.Text, "handle") {
-		t.Errorf("tresc reguly niesie uchwyt: %q", dnat.Text)
+		t.Errorf("the rule text carries the handle: %q", dnat.Text)
 	}
 	if !strings.HasSuffix(dnat.Text, "dnat to 172.17.0.2:80") {
-		t.Errorf("tresc reguly = %q", dnat.Text)
+		t.Errorf("rule text = %q", dnat.Text)
 	}
 	if dnat.Packets == nil || *dnat.Packets != 12 || dnat.Bytes == nil || *dnat.Bytes != 640 {
-		t.Errorf("liczniki = %v / %v", dnat.Packets, dnat.Bytes)
+		t.Errorf("counters = %v / %v", dnat.Packets, dnat.Bytes)
 	}
-	// Regula bez licznika nie moze udawac, ze przeszlo przez nia zero pakietow.
-	for _, regula := range snapshot.Rules {
-		if regula.Handle == 3 && regula.Table == TabelaFlotestro && regula.Packets != nil {
-			t.Errorf("regula bez licznika dostala zero: %+v", regula)
+	// A rule without a counter must not pretend zero packets passed through
+	// it.
+	for _, rule := range snapshot.Rules {
+		if rule.Handle == 3 && rule.Table == FlotestroTable && rule.Packets != nil {
+			t.Errorf("a rule without a counter got zero: %+v", rule)
 		}
 	}
 }
 
-// Tablica nalezaca do innego programu jest przepisywana bez udzialu panelu,
-// wiec regula w niej nie jest ani nasza, ani trwala.
-func TestPochodzenieOdrozniaCudzeTablice(t *testing.T) {
-	snapshot := ParsujRuleset(wyjscieNft)
+// A table belonging to another program is rewritten without the panel's
+// participation, so a rule in it is neither ours nor durable.
+func TestOriginDistinguishesForeignTables(t *testing.T) {
+	snapshot := ParseRuleset(nftOutput)
 
-	po := map[string]Table{}
-	for _, tabela := range snapshot.Tables {
-		po[tabela.Name] = tabela
+	byName := map[string]Table{}
+	for _, table := range snapshot.Tables {
+		byName[table.Name] = table
 	}
-	if po["nat"].Source != SourceForeign || po["nat"].Owner != "iptables-nft" {
-		t.Errorf("tablica nat = %+v", po["nat"])
+	if byName["nat"].Source != SourceForeign || byName["nat"].Owner != "iptables-nft" {
+		t.Errorf("nat table = %+v", byName["nat"])
 	}
-	if po["flotestro"].Source != SourceManaged {
-		t.Errorf("tablica panelu = %+v", po["flotestro"])
+	if byName["flotestro"].Source != SourceManaged {
+		t.Errorf("panel table = %+v", byName["flotestro"])
 	}
-	for _, regula := range snapshot.Rules {
-		if regula.Table == "nat" && regula.Source != SourceForeign {
-			t.Errorf("regula w cudzej tablicy = %+v", regula)
+	for _, rule := range snapshot.Rules {
+		if rule.Table == "nat" && rule.Source != SourceForeign {
+			t.Errorf("rule in a foreign table = %+v", rule)
 		}
-		if regula.Table == TabelaFlotestro && regula.Source != SourceManaged {
-			t.Errorf("regula panelu = %+v", regula)
+		if rule.Table == FlotestroTable && rule.Source != SourceManaged {
+			t.Errorf("panel rule = %+v", rule)
 		}
 	}
 }
 
-func TestZaczepienieLancuchaJestCzytane(t *testing.T) {
-	snapshot := ParsujRuleset(wyjscieNft)
+func TestChainHookIsRead(t *testing.T) {
+	snapshot := ParseRuleset(nftOutput)
 
-	po := map[string]Chain{}
-	for _, lancuch := range snapshot.Chains {
-		po[lancuch.Table+"/"+lancuch.Name] = lancuch
+	byName := map[string]Chain{}
+	for _, chain := range snapshot.Chains {
+		byName[chain.Table+"/"+chain.Name] = chain
 	}
-	postrouting := po["nat/POSTROUTING"]
+	postrouting := byName["nat/POSTROUTING"]
 	if postrouting.Hook != "postrouting" || postrouting.Policy != "accept" ||
 		postrouting.Type != "nat" || postrouting.Priority != "srcnat" {
-		t.Errorf("lancuch bazowy = %+v", postrouting)
+		t.Errorf("base chain = %+v", postrouting)
 	}
-	// Lancuch zwykly nie jest zaczepiony w sciezce pakietu i nie ma polityki;
-	// wpisanie tam "accept" byloby falszem.
-	if po["nat/DOCKER"].Hook != "" || po["nat/DOCKER"].Policy != "" {
-		t.Errorf("lancuch zwykly dostal zaczepienie: %+v", po["nat/DOCKER"])
+	// A regular chain is not hooked into the packet path and has no policy;
+	// writing "accept" there would be false.
+	if byName["nat/DOCKER"].Hook != "" || byName["nat/DOCKER"].Policy != "" {
+		t.Errorf("a regular chain got a hook: %+v", byName["nat/DOCKER"])
 	}
 }
 
-// Liczniki rosna same, wiec nie moga zmieniac odcisku: inaczej kazdy odczyt
-// uniewaznialby plan zlozony chwile wczesniej.
-func TestOdciskNieZalezyOdLicznikow(t *testing.T) {
-	pierwszy := ParsujRuleset(wyjscieNft).Hash
-	drugi := ParsujRuleset(strings.ReplaceAll(wyjscieNft,
+// The counters grow on their own, so they must not change the fingerprint:
+// otherwise every read would invalidate a plan made a moment earlier.
+func TestFingerprintDoesNotDependOnCounters(t *testing.T) {
+	first := ParseRuleset(nftOutput).Hash
+	second := ParseRuleset(strings.ReplaceAll(nftOutput,
 		"counter packets 12 bytes 640", "counter packets 99 bytes 9999")).Hash
-	if pierwszy != drugi {
-		t.Errorf("odcisk zmienil sie po zmianie licznikow: %q vs %q", pierwszy, drugi)
+	if first != second {
+		t.Errorf("the fingerprint changed after a counter change: %q vs %q", first, second)
 	}
-	inny := ParsujRuleset(strings.ReplaceAll(wyjscieNft, "tcp dport 8443", "tcp dport 8444")).Hash
-	if pierwszy == inny {
-		t.Error("odcisk nie zmienil sie po zmianie reguly")
+	other := ParseRuleset(strings.ReplaceAll(nftOutput, "tcp dport 8443", "tcp dport 8444")).Hash
+	if first == other {
+		t.Error("the fingerprint did not change after a rule change")
 	}
 }

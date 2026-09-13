@@ -8,47 +8,47 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handleListBudgets pokazuje pojemnosc floty i to, ile z niej zajete.
+// handleListBudgets shows the fleet capacity and how much of it is taken.
 //
-// Bez tego ekranu host stojacy na budzecie wyglada jak host zapomniany:
-// kampania nie posuwa sie do przodu, a nic nie mowi dlaczego. Liczba chetnych
-// jest tu rownie wazna jak zajetosc - to ona tlumaczy, czemu wolne tokeny nie
-// trafiaja do jednej kampanii.
+// Without this screen a host waiting on a budget looks like a forgotten
+// host: the campaign does not move forward, and nothing says why. The
+// number of waiting hosts matters here as much as the usage - it explains
+// why the free tokens do not go to one campaign.
 func (s *Server) handleListBudgets(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeCollection(w, r, authz.PermBudgetRead, "budget"); !ok {
 		return
 	}
-	if s.budzety == nil {
+	if s.budgets == nil {
 		problem(w, http.StatusNotImplemented, "budgets_disabled",
 			"budgets are disabled in this installation")
 		return
 	}
-	stany, err := s.budzety.States(r.Context())
+	states, err := s.budgets.States(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": stany})
+	writeJSON(w, http.StatusOK, map[string]any{"items": states})
 }
 
-// handleSetBudget zmienia pojemnosc jednego budzetu.
+// handleSetBudget changes the capacity of one budget.
 //
-// Pojemnosc jest polityka instalacji, a nie stala w kodzie: lokalizacja
-// z jednym laczem uniesie co innego niz serwerownia. Zmiana jest osobnym
-// uprawnieniem i trafia do audytu, bo podniesiona po cichu odbiera znaczenie
-// kazdemu limitowi ponizej.
+// The capacity is an installation policy, not a constant in the code: a
+// site with one link carries something else than a server room. The change
+// is a separate permission and goes to the audit log, because raised
+// quietly it takes the meaning away from every limit below.
 func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermBudgetWrite, "budget")
 	if !ok {
 		return
 	}
-	if s.budzety == nil {
+	if s.budgets == nil {
 		problem(w, http.StatusNotImplemented, "budgets_disabled",
 			"budgets are disabled in this installation")
 		return
 	}
-	klucz := r.PathValue("key")
-	if klucz == "" {
+	key := r.PathValue("key")
+	if key == "" {
 		problem(w, http.StatusBadRequest, "invalid_request", "budget key is required")
 		return
 	}
@@ -61,24 +61,24 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	// Pojemnosc zerowa nie jest polityka, tylko zatrzymaniem wszystkiego bez
-	// powiedzenia tego wprost. Budzet, ktory ma nic nie przepuszczac, jest
-	// wstrzymaniem kampanii - i tak sie nazywa.
+	// A zero capacity is not a policy, only stopping everything without
+	// saying so directly. A budget that is to let nothing through is a
+	// campaign pause - and that is what it is called.
 	if request.Capacity < 1 {
 		problem(w, http.StatusBadRequest, "invalid_request",
 			"capacity must be at least 1; to stop work, pause the campaign")
 		return
 	}
 
-	if err := s.budzety.SetCapacity(r.Context(), klucz, request.Capacity, request.Note); err != nil {
+	if err := s.budgets.SetCapacity(r.Context(), key, request.Capacity, request.Note); err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
-		Action: string(authz.PermBudgetWrite), TargetType: "budget", TargetID: klucz,
+		Action: string(authz.PermBudgetWrite), TargetType: "budget", TargetID: key,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"capacity": request.Capacity, "note": request.Note},
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"key": klucz, "capacity": request.Capacity})
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "capacity": request.Capacity})
 }

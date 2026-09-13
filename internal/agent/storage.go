@@ -24,17 +24,17 @@ func SetLVMProbe(probe func(context.Context) (storage.Snapshot, error)) {
 func CollectStorage(ctx context.Context) storage.Snapshot {
 	snapshot := storage.Snapshot{ObservedAt: time.Now().UTC()}
 
-	if !exists(storage.SciezkaLsblk) {
+	if !exists(storage.LsblkPath) {
 		snapshot.UnavailableReason = "this host has no lsblk binary"
 		return snapshot
 	}
-	output, err := commandOutput(ctx, storage.SciezkaLsblk, "-J", "-b", "-o",
-		columns(storage.KolumnyLsblk))
+	output, err := commandOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
+		columns(storage.LsblkColumns))
 	if err != nil {
 		snapshot.UnavailableReason = "lsblk: " + err.Error()
 		return snapshot
 	}
-	devices, err := storage.ParsujUrzadzenia(output)
+	devices, err := storage.ParseDevices(output)
 	if err != nil {
 		snapshot.UnavailableReason = err.Error()
 		return snapshot
@@ -47,8 +47,8 @@ func CollectStorage(ctx context.Context) storage.Snapshot {
 		return snapshot
 	}
 	fstab, _ := os.ReadFile("/etc/fstab")
-	snapshot.Mounts = storage.PolaczMontowania(
-		storage.ParsujMountinfo(string(mountinfo)), storage.ParsujFstab(string(fstab)))
+	snapshot.Mounts = storage.MergeMounts(
+		storage.ParseMountinfo(string(mountinfo)), storage.ParseFstab(string(fstab)))
 	fillUsage(snapshot.Mounts)
 
 	if lvmProbe != nil {

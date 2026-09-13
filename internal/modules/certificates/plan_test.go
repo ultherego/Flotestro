@@ -13,180 +13,183 @@ import (
 	"time"
 )
 
-// certyfikatTestowy sklada certyfikat samopodpisany w PEM.
-func certyfikatTestowy(t *testing.T, nazwa string, waznyOd, waznyDo time.Time) string {
+// testCertificate assembles a self-signed certificate in PEM.
+func testCertificate(t *testing.T, name string, validFrom, validTo time.Time) string {
 	t.Helper()
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	szablon := x509.Certificate{
+	template := x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: nazwa},
-		DNSNames:     []string{nazwa},
-		NotBefore:    waznyOd,
-		NotAfter:     waznyDo,
+		Subject:      pkix.Name{CommonName: name},
+		DNSNames:     []string{name},
+		NotBefore:    validFrom,
+		NotAfter:     validTo,
 	}
-	dane, err := x509.CreateCertificate(rand.Reader, &szablon, &szablon, &klucz.PublicKey, klucz)
+	data, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: dane}))
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: data}))
 }
 
-func TestPlanCertyfikatuOdrozniaStanZastany(t *testing.T) {
-	teraz := time.Now()
-	nowy := certyfikatTestowy(t, "panel.flotestro.test", teraz.Add(-time.Hour), teraz.Add(720*time.Hour))
-	zamowienie := Zamowienie{
+func TestCertificatePlanDistinguishesFoundState(t *testing.T) {
+	now := time.Now()
+	fresh := testCertificate(t, "panel.flotestro.test", now.Add(-time.Hour), now.Add(720*time.Hour))
+	order := Order{
 		Path: "/etc/ssl/certs/flotestro.pem", KeyPath: "/etc/ssl/private/flotestro.key",
-		Certyfikat: nowy, KeySecret: "pki/panel#3", MaKlucz: true,
-		Jednostka: "nginx.service", Cel: "panel.flotestro.test:443",
+		Certificate: fresh, KeySecret: "pki/panel#3", HasKey: true,
+		Unit: "nginx.service", Target: "panel.flotestro.test:443",
 	}
 
-	powstanie := Zaplanuj(Certyfikat{}, zamowienie, teraz)
-	if powstanie.Action != PlanTworzy || powstanie.Refusal != "" || powstanie.Exists {
-		t.Fatalf("plik, ktorego nie ma: %+v", powstanie)
+	creation := Compute(Certificate{}, order, now)
+	if creation.Action != PlanCreate || creation.Refusal != "" || creation.Exists {
+		t.Fatalf("a file that does not exist: %+v", creation)
 	}
-	if len(powstanie.Changes) != 4 || powstanie.DesiredFingerprint == "" {
-		t.Errorf("zmiany: %v", powstanie.Changes)
+	if len(creation.Changes) != 4 || creation.DesiredFingerprint == "" {
+		t.Errorf("changes: %v", creation.Changes)
 	}
-	// Klucz prywatny nie ma prawa pojawic sie w planie ani w odcisku.
-	if strings.Contains(strings.Join(powstanie.Changes, " "), "BEGIN") {
-		t.Error("plan niesie material klucza")
+	// The private key has no right to appear in the plan or in the
+	// fingerprint.
+	if strings.Contains(strings.Join(creation.Changes, " "), "BEGIN") {
+		t.Error("the plan carries key material")
 	}
 
-	obecny := Certyfikat{Path: zamowienie.Path, Subject: "CN=stary",
+	current := Certificate{Path: order.Path, Subject: "CN=old",
 		FingerprintSHA256: strings.Repeat("a", 64)}
-	zmiana := Zaplanuj(obecny, zamowienie, teraz)
-	if zmiana.Action != PlanZmienia || !strings.Contains(zmiana.Changes[0], "certyfikat z aaaaaaaaaaaaaaaa na ") {
-		t.Errorf("podmiana certyfikatu: %+v", zmiana)
+	change := Compute(current, order, now)
+	if change.Action != PlanUpdate || !strings.Contains(change.Changes[0], "certificate from aaaaaaaaaaaaaaaa to ") {
+		t.Errorf("certificate replacement: %+v", change)
 	}
 
-	bezZmian := Zaplanuj(Certyfikat{Path: zamowienie.Path,
-		FingerprintSHA256: powstanie.DesiredFingerprint}, zamowienie, teraz)
-	if bezZmian.Action != PlanBezZmian || len(bezZmian.Changes) != 0 {
-		t.Errorf("ten sam certyfikat: %+v", bezZmian)
+	none := Compute(Certificate{Path: order.Path,
+		FingerprintSHA256: creation.DesiredFingerprint}, order, now)
+	if none.Action != PlanNoChange || len(none.Changes) != 0 {
+		t.Errorf("the same certificate: %+v", none)
 	}
-	if powstanie.PlanHash == zmiana.PlanHash || zmiana.PlanHash == bezZmian.PlanHash {
-		t.Error("odciski planow nie roznia sie")
+	if creation.PlanHash == change.PlanHash || change.PlanHash == none.PlanHash {
+		t.Error("plan fingerprints do not differ")
 	}
 }
 
-func TestPlanCertyfikatuOdmawiaMaterialuICeluPozaZakresem(t *testing.T) {
-	teraz := time.Now()
-	wygasly := certyfikatTestowy(t, "panel.flotestro.test", teraz.Add(-48*time.Hour), teraz.Add(-time.Hour))
-	plan := Zaplanuj(Certyfikat{}, Zamowienie{
-		Path: "/etc/ssl/certs/flotestro.pem", Certyfikat: wygasly}, teraz)
-	if !strings.Contains(plan.Refusal, "stracil waznosc") || plan.PlanHash == "" {
-		t.Errorf("wygasly certyfikat: %+v", plan)
+func TestCertificatePlanRefusesMaterialAndTargetOutsideScope(t *testing.T) {
+	now := time.Now()
+	expired := testCertificate(t, "panel.flotestro.test", now.Add(-48*time.Hour), now.Add(-time.Hour))
+	plan := Compute(Certificate{}, Order{
+		Path: "/etc/ssl/certs/flotestro.pem", Certificate: expired}, now)
+	if !strings.Contains(plan.Refusal, "expired") || plan.PlanHash == "" {
+		t.Errorf("expired certificate: %+v", plan)
 	}
 
-	dobry := certyfikatTestowy(t, "panel.flotestro.test", teraz.Add(-time.Hour), teraz.Add(time.Hour))
-	cudzy := Zaplanuj(Certyfikat{}, Zamowienie{
-		Path: "/etc/ssl/certs/flotestro.pem", Certyfikat: dobry,
-		Cel: "inny.flotestro.test:443"}, teraz)
-	if !strings.Contains(cudzy.Refusal, "nie obejmuje nazwy inny.flotestro.test") {
-		t.Errorf("cel poza zakresem: %+v", cudzy)
+	good := testCertificate(t, "panel.flotestro.test", now.Add(-time.Hour), now.Add(time.Hour))
+	foreign := Compute(Certificate{}, Order{
+		Path: "/etc/ssl/certs/flotestro.pem", Certificate: good,
+		Target: "other.flotestro.test:443"}, now)
+	if !strings.Contains(foreign.Refusal, "does not cover the name other.flotestro.test") {
+		t.Errorf("target outside the scope: %+v", foreign)
 	}
 
-	bezSekretu := Zaplanuj(Certyfikat{}, Zamowienie{
+	noSecret := Compute(Certificate{}, Order{
 		Path: "/etc/ssl/certs/flotestro.pem", KeyPath: "/etc/ssl/private/flotestro.key",
-		Certyfikat: dobry}, teraz)
-	if !strings.Contains(bezSekretu.Refusal, "magazynu sekretow") {
-		t.Errorf("klucz bez odnosnika: %+v", bezSekretu)
+		Certificate: good}, now)
+	if !strings.Contains(noSecret.Refusal, "secret store") {
+		t.Errorf("key without a reference: %+v", noSecret)
 	}
 }
 
-func TestPlanCertyfikatuOdrozniaBrakPlikuOdNieodczytanego(t *testing.T) {
-	teraz := time.Now()
-	dobry := certyfikatTestowy(t, "panel.flotestro.test", teraz.Add(-time.Hour), teraz.Add(time.Hour))
-	zamowienie := Zamowienie{Path: "/etc/ssl/certs/flotestro.pem", Certyfikat: dobry}
+func TestCertificatePlanDistinguishesMissingFileFromUnread(t *testing.T) {
+	now := time.Now()
+	good := testCertificate(t, "panel.flotestro.test", now.Add(-time.Hour), now.Add(time.Hour))
+	order := Order{Path: "/etc/ssl/certs/flotestro.pem", Certificate: good}
 
-	brak := Zaplanuj(Certyfikat{Path: zamowienie.Path,
+	missing := Compute(Certificate{Path: order.Path,
 		UnavailableReason: "open /etc/ssl/certs/flotestro.pem: no such file or directory"},
-		zamowienie, teraz)
-	if brak.Action != PlanTworzy || brak.Exists || brak.Refusal != "" {
-		t.Errorf("plik, ktorego nie ma: %+v", brak)
+		order, now)
+	if missing.Action != PlanCreate || missing.Exists || missing.Refusal != "" {
+		t.Errorf("a file that does not exist: %+v", missing)
 	}
 
-	nieodczytany := Zaplanuj(Certyfikat{Path: zamowienie.Path,
-		UnavailableReason: "permission denied"}, zamowienie, teraz)
-	if !strings.Contains(nieodczytany.Refusal, "nie odczytano certyfikatu zastanego") {
-		t.Errorf("plik nieodczytany: %+v", nieodczytany)
+	unread := Compute(Certificate{Path: order.Path,
+		UnavailableReason: "permission denied"}, order, now)
+	if !strings.Contains(unread.Refusal, "the current certificate was not read") {
+		t.Errorf("unread file: %+v", unread)
 	}
 }
 
-func TestPlanOdnowieniaPatrzyNaDemonaHosta(t *testing.T) {
-	teraz := time.Now()
-	koniec := teraz.Add(240 * time.Hour)
-	obecny := Certyfikat{Path: "/etc/pki/tls/certs/usluga.pem",
-		FingerprintSHA256: strings.Repeat("d", 64), NotAfter: &koniec}
+func TestRenewalPlanLooksAtHostDaemon(t *testing.T) {
+	now := time.Now()
+	end := now.Add(240 * time.Hour)
+	current := Certificate{Path: "/etc/pki/tls/certs/service.pem",
+		FingerprintSHA256: strings.Repeat("d", 64), NotAfter: &end}
 	monitoring := "MONITORING"
-	sledzenie := &Sledzenie{Request: "20260101000000", Status: monitoring, CA: "IPA"}
+	tracking := &Tracking{Request: "20260101000000", Status: monitoring, CA: "IPA"}
 
-	plan := ZaplanujOdnowienie(obecny, sledzenie, true, obecny.Path, "httpd.service", teraz)
+	plan := ComputeRenewal(current, tracking, true, current.Path, "httpd.service", now)
 	if plan.Refusal != "" || plan.Request != "20260101000000" || plan.PlanHash == "" {
-		t.Fatalf("plan odnowienia: %+v", plan)
+		t.Fatalf("renewal plan: %+v", plan)
 	}
 	if plan.DaysToExpiry == nil || *plan.DaysToExpiry != 10 {
-		t.Errorf("dni do wygasniecia: %v", plan.DaysToExpiry)
+		t.Errorf("days to expiry: %v", plan.DaysToExpiry)
 	}
 	if len(plan.Changes) != 3 {
-		t.Errorf("zmiany: %v", plan.Changes)
+		t.Errorf("changes: %v", plan.Changes)
 	}
 
-	// Opieka, ktora nie dziala, ma byc widoczna przed zgoda, a nie po niej.
-	zepsute := *sledzenie
-	zepsute.Status = "CA_UNREACHABLE"
-	zGlosem := ZaplanujOdnowienie(obecny, &zepsute, true, obecny.Path, "", teraz)
-	if !strings.Contains(strings.Join(zGlosem.Changes, ";"), "CA_UNREACHABLE") {
-		t.Errorf("stan zlecenia nie doszedl do planu: %v", zGlosem.Changes)
+	// Care that does not work is meant to be visible before approval, not
+	// after.
+	broken := *tracking
+	broken.Status = "CA_UNREACHABLE"
+	withVoice := ComputeRenewal(current, &broken, true, current.Path, "", now)
+	if !strings.Contains(strings.Join(withVoice.Changes, ";"), "CA_UNREACHABLE") {
+		t.Errorf("the request state did not reach the plan: %v", withVoice.Changes)
 	}
 
-	// Inny identyfikator zlecenia to inne odnowienie: zgoda nie moze przejsc
-	// z jednego na drugie.
-	inne := *sledzenie
-	inne.Request = "20260202000000"
-	if ZaplanujOdnowienie(obecny, &inne, true, obecny.Path, "httpd.service", teraz).PlanHash == plan.PlanHash {
-		t.Error("plan dla innego zlecenia ma ten sam odcisk")
+	// A different request identifier is a different renewal: approval
+	// cannot pass from one to the other.
+	other := *tracking
+	other.Request = "20260202000000"
+	if ComputeRenewal(current, &other, true, current.Path, "httpd.service", now).PlanHash == plan.PlanHash {
+		t.Error("the plan for a different request has the same fingerprint")
 	}
 }
 
-func TestPlanOdnowieniaOdmawiaBezDemonaIBezZlecenia(t *testing.T) {
-	teraz := time.Now()
-	sciezka := "/etc/pki/tls/certs/usluga.pem"
-	bezDemona := ZaplanujOdnowienie(Certyfikat{}, nil, false, sciezka, "", teraz)
-	if !strings.Contains(bezDemona.Refusal, "nie ma certmongera") || bezDemona.PlanHash == "" {
-		t.Errorf("host bez demona: %+v", bezDemona)
+func TestRenewalPlanRefusesWithoutDaemonAndWithoutRequest(t *testing.T) {
+	now := time.Now()
+	certPath := "/etc/pki/tls/certs/service.pem"
+	noDaemon := ComputeRenewal(Certificate{}, nil, false, certPath, "", now)
+	if !strings.Contains(noDaemon.Refusal, "has no certmonger") || noDaemon.PlanHash == "" {
+		t.Errorf("host without the daemon: %+v", noDaemon)
 	}
-	bezZlecenia := ZaplanujOdnowienie(Certyfikat{}, nil, true, sciezka, "", teraz)
-	if !strings.Contains(bezZlecenia.Refusal, "nie pilnuje pliku") {
-		t.Errorf("plik spoza opieki demona: %+v", bezZlecenia)
+	noRequest := ComputeRenewal(Certificate{}, nil, true, certPath, "", now)
+	if !strings.Contains(noRequest.Refusal, "does not track the file") {
+		t.Errorf("file outside the daemon's care: %+v", noRequest)
 	}
-	zlaSciezka := ZaplanujOdnowienie(Certyfikat{}, nil, true, "/etc/passwd", "", teraz)
-	if zlaSciezka.Refusal == "" {
-		t.Error("sciezka poza katalogami certyfikatow przeszla bez odmowy")
+	badPath := ComputeRenewal(Certificate{}, nil, true, "/etc/passwd", "", now)
+	if badPath.Refusal == "" {
+		t.Error("a path outside the certificate directories passed without a refusal")
 	}
 }
 
-// Trzy rozne plany modulu wracaja ta sama droga, wiec odbiorca musi je
-// rozroznic bez zgadywania z pustych pol: plan odmowiony ma puste wszystko
-// poza powodem i nadal nazywa swoj rodzaj.
-func TestPlanyNazywajaSwojRodzaj(t *testing.T) {
-	teraz := time.Now()
-	dobry := certyfikatTestowy(t, "panel.flotestro.test", teraz.Add(-time.Hour), teraz.Add(time.Hour))
-	wdrozenie := Zaplanuj(Certyfikat{}, Zamowienie{
-		Path: "/etc/ssl/certs/flotestro.pem", Certyfikat: dobry}, teraz)
-	if wdrozenie.Kind != RodzajWdrozenia {
-		t.Errorf("plan wdrozenia: %q", wdrozenie.Kind)
+// Three different plans of the module come back the same way, so the
+// receiver must tell them apart without guessing from empty fields: a
+// refused plan has everything empty but the reason and still names its
+// kind.
+func TestPlansNameTheirKind(t *testing.T) {
+	now := time.Now()
+	good := testCertificate(t, "panel.flotestro.test", now.Add(-time.Hour), now.Add(time.Hour))
+	deployment := Compute(Certificate{}, Order{
+		Path: "/etc/ssl/certs/flotestro.pem", Certificate: good}, now)
+	if deployment.Kind != KindDeployment {
+		t.Errorf("deployment plan: %q", deployment.Kind)
 	}
-	odmowa := Zaplanuj(Certyfikat{}, Zamowienie{Path: "/etc/passwd"}, teraz)
-	if odmowa.Kind != RodzajWdrozenia || odmowa.Refusal == "" {
-		t.Errorf("odmowiony plan wdrozenia: %+v", odmowa)
+	refused := Compute(Certificate{}, Order{Path: "/etc/passwd"}, now)
+	if refused.Kind != KindDeployment || refused.Refusal == "" {
+		t.Errorf("refused deployment plan: %+v", refused)
 	}
-	odnowienie := ZaplanujOdnowienie(Certyfikat{}, nil, false,
-		"/etc/pki/tls/certs/usluga.pem", "", teraz)
-	if odnowienie.Kind != RodzajOdnowienia {
-		t.Errorf("plan odnowienia: %q", odnowienie.Kind)
+	renewal := ComputeRenewal(Certificate{}, nil, false,
+		"/etc/pki/tls/certs/service.pem", "", now)
+	if renewal.Kind != KindRenewal {
+		t.Errorf("renewal plan: %q", renewal.Kind)
 	}
 }

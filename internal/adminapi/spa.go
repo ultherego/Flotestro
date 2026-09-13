@@ -7,11 +7,12 @@ import (
 	"strings"
 )
 
-// SPAHandler serwuje zbudowany panel. Sciezki nieznane routerowi trafiaja do
-// index.html, bo trasy panelu istnieja tylko po stronie przegladarki.
+// SPAHandler serves the built panel. Paths unknown to the router go to
+// index.html, because the panel routes exist only on the browser side.
 //
-// Handler celowo nie obsluguje sciezek zaczynajacych sie od /api, /auth ani
-// /healthz: te naleza do API i musza zwracac blad, a nie strone HTML.
+// The handler deliberately does not serve paths starting with /api, /auth
+// or /healthz: those belong to the API and must return an error, not an
+// HTML page.
 func SPAHandler(root string) http.Handler {
 	if root == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,8 +24,8 @@ func SPAHandler(root string) http.Handler {
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := filepath.Clean(r.URL.Path)
-		// filepath.Clean usuwa "..", ale sprawdzamy jawnie: sciezka pochodzi
-		// z sieci i nie moze wyjsc poza katalog panelu.
+		// filepath.Clean removes "..", but it is checked explicitly: the path
+		// comes from the network and must not leave the panel directory.
 		if strings.Contains(clean, "..") {
 			problem(w, http.StatusBadRequest, "invalid_path", "invalid path")
 			return
@@ -32,8 +33,8 @@ func SPAHandler(root string) http.Handler {
 
 		if clean != "/" {
 			if info, err := os.Stat(filepath.Join(root, clean)); err == nil && !info.IsDir() {
-				// Zasoby z hashem w nazwie sa niezmienne, wiec moga byc
-				// cache'owane na dlugo; index.html nigdy.
+				// Assets with a hash in the name are immutable, so they may be
+				// cached for long; index.html never.
 				if strings.HasPrefix(clean, "/assets/") {
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 				}

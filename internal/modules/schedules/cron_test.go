@@ -5,123 +5,123 @@ import (
 	"time"
 )
 
-// Wyrazenie, ktorego panel nie rozumie, nie moze zostac zapisane: wpis, ktory
-// nigdy sie nie uruchomi, jest gorszy niz jego brak, bo wyglada na dzialajacy.
-func TestNieprawidloweWyrazeniaSaOdrzucane(t *testing.T) {
-	zle := []string{
+// An expression the panel does not understand must not be written: an entry
+// that never runs is worse than none, because it looks like a working one.
+func TestInvalidExpressionsAreRejected(t *testing.T) {
+	bad := []string{
 		"", "* * * *", "* * * * * *",
 		"60 * * * *", "* 24 * * *", "* * 0 * *", "* * * 13 *", "* * * * 8",
 		"a * * * *", "*/0 * * * *", "5-1 * * * *", "1-2-3 * * * *",
-		"@reboot", "@nieznany",
+		"@reboot", "@unknown",
 	}
-	for _, wyrazenie := range zle {
-		if _, err := ParsujWyrazenie(wyrazenie); err == nil {
-			t.Errorf("przyjeto wyrazenie %q", wyrazenie)
+	for _, expression := range bad {
+		if _, err := ParseExpression(expression); err == nil {
+			t.Errorf("accepted expression %q", expression)
 		}
 	}
 }
 
-// Formaty, ktore cron rozumie, musza przejsc - inaczej panel odmawia pracy,
-// ktora host wykonalby bez problemu.
-func TestPoprawneWyrazeniaSaPrzyjmowane(t *testing.T) {
-	dobre := []string{
+// Formats cron understands must pass - otherwise the panel refuses work the
+// host would do without a problem.
+func TestValidExpressionsAreAccepted(t *testing.T) {
+	good := []string{
 		"* * * * *", "0 3 * * *", "*/15 * * * *", "0 0 1 1 *",
 		"0 9-17 * * 1-5", "30 2,14 * * *", "0 0 * * 0", "0 0 * * 7",
 		"@daily", "@hourly", "@weekly",
 	}
-	for _, wyrazenie := range dobre {
-		if _, err := ParsujWyrazenie(wyrazenie); err != nil {
-			t.Errorf("odrzucono wyrazenie %q: %v", wyrazenie, err)
+	for _, expression := range good {
+		if _, err := ParseExpression(expression); err != nil {
+			t.Errorf("rejected expression %q: %v", expression, err)
 		}
 	}
 }
 
-// Kreator harmonogramu pokazuje kolejne wykonania, wiec musza byc policzone
-// poprawnie, a nie w przyblizeniu.
-func TestNastepneUruchomieniaSaDokladne(t *testing.T) {
-	wyrazenie, err := ParsujWyrazenie("0 3 * * *")
+// The schedule wizard shows the next runs, so they must be computed
+// exactly, not approximately.
+func TestNextRunsAreExact(t *testing.T) {
+	expression, err := ParseExpression("0 3 * * *")
 	if err != nil {
 		t.Fatal(err)
 	}
-	po := time.Date(2026, 8, 23, 15, 30, 0, 0, time.UTC)
-	terminy := wyrazenie.NastepneUruchomienia(po, 3)
+	after := time.Date(2026, 8, 23, 15, 30, 0, 0, time.UTC)
+	dates := expression.NextRuns(after, 3)
 
-	oczekiwane := []time.Time{
+	expected := []time.Time{
 		time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC),
 		time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC),
 		time.Date(2026, 8, 26, 3, 0, 0, 0, time.UTC),
 	}
-	if len(terminy) != 3 {
-		t.Fatalf("terminow = %d: %v", len(terminy), terminy)
+	if len(dates) != 3 {
+		t.Fatalf("dates = %d: %v", len(dates), dates)
 	}
-	for i, termin := range terminy {
-		if !termin.Equal(oczekiwane[i]) {
-			t.Errorf("termin %d = %s, oczekiwano %s", i, termin, oczekiwane[i])
+	for i, date := range dates {
+		if !date.Equal(expected[i]) {
+			t.Errorf("date %d = %s, want %s", i, date, expected[i])
 		}
 	}
 }
 
-// Krok co 15 minut ma dawac cztery terminy w godzinie, a nie jeden.
-func TestKrokDajeWszystkieTerminy(t *testing.T) {
-	wyrazenie, err := ParsujWyrazenie("*/15 * * * *")
+// A step of 15 minutes must give four dates in an hour, not one.
+func TestStepGivesAllDates(t *testing.T) {
+	expression, err := ParseExpression("*/15 * * * *")
 	if err != nil {
 		t.Fatal(err)
 	}
-	po := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
-	terminy := wyrazenie.NastepneUruchomienia(po, 4)
+	after := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	dates := expression.NextRuns(after, 4)
 
-	for i, oczekiwana := range []int{15, 30, 45, 0} {
-		if terminy[i].Minute() != oczekiwana {
-			t.Errorf("termin %d = %s, oczekiwano minuty %d", i, terminy[i], oczekiwana)
+	for i, expected := range []int{15, 30, 45, 0} {
+		if dates[i].Minute() != expected {
+			t.Errorf("date %d = %s, want minute %d", i, dates[i], expected)
 		}
 	}
 }
 
-// Cron traktuje oba pola dni inaczej niz reszte: gdy oba sa ograniczone,
-// zadanie uruchamia sie, gdy pasuje ktorekolwiek. Traktowanie ich jak
-// koniunkcji pomijaloby wiekszosc terminow.
-func TestDniSaSumowaneANiePrzecinane(t *testing.T) {
-	// Pierwszy dzien miesiaca albo poniedzialek.
-	wyrazenie, err := ParsujWyrazenie("0 0 1 * 1")
+// Cron treats both day fields differently from the rest: when both are
+// restricted, the job runs when either matches. Treating them as a
+// conjunction would skip most dates.
+func TestDaysAreUnionedNotIntersected(t *testing.T) {
+	// The first day of the month or a Monday.
+	expression, err := ParseExpression("0 0 1 * 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 2026-08-23 to niedziela; 24 sierpnia to poniedzialek, 1 wrzesnia wtorek.
-	po := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
-	terminy := wyrazenie.NastepneUruchomienia(po, 2)
+	// 2026-08-23 is a Sunday; 24 August is a Monday, 1 September a Tuesday.
+	after := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	dates := expression.NextRuns(after, 2)
 
-	if terminy[0].Day() != 24 {
-		t.Errorf("pierwszy termin = %s, oczekiwano poniedzialku 24 sierpnia", terminy[0])
+	if dates[0].Day() != 24 {
+		t.Errorf("first date = %s, want Monday 24 August", dates[0])
 	}
-	if terminy[1].Day() != 31 {
-		t.Errorf("drugi termin = %s, oczekiwano poniedzialku 31 sierpnia", terminy[1])
+	if dates[1].Day() != 31 {
+		t.Errorf("second date = %s, want Monday 31 August", dates[1])
 	}
 }
 
-// Niedziela ma w cronie dwa numery i oba opisuja ten sam dzien.
-func TestNiedzielaMaDwaNumery(t *testing.T) {
-	zero, err := ParsujWyrazenie("0 0 * * 0")
+// Sunday has two numbers in cron and both describe the same day.
+func TestSundayHasTwoNumbers(t *testing.T) {
+	zero, err := ParseExpression("0 0 * * 0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	siedem, err := ParsujWyrazenie("0 0 * * 7")
+	seven, err := ParseExpression("0 0 * * 7")
 	if err != nil {
 		t.Fatal(err)
 	}
-	po := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
-	if !zero.NastepneUruchomienia(po, 1)[0].Equal(siedem.NastepneUruchomienia(po, 1)[0]) {
-		t.Error("0 i 7 opisuja rozne dni tygodnia")
+	after := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	if !zero.NextRuns(after, 1)[0].Equal(seven.NextRuns(after, 1)[0]) {
+		t.Error("0 and 7 describe different days of the week")
 	}
 }
 
-// Wyrazenie, ktore nigdy nie pasuje, nie moze zawiesic wyszukiwania.
-func TestWyrazenieBezTerminuNieZawiesza(t *testing.T) {
-	// 30 lutego nie istnieje.
-	wyrazenie, err := ParsujWyrazenie("0 0 30 2 *")
+// An expression that never matches must not hang the search.
+func TestExpressionWithoutDateDoesNotHang(t *testing.T) {
+	// 30 February does not exist.
+	expression, err := ParseExpression("0 0 30 2 *")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminy := wyrazenie.NastepneUruchomienia(time.Now(), 1); len(terminy) != 0 {
-		t.Errorf("znaleziono termin dla niemozliwej daty: %v", terminy)
+	if dates := expression.NextRuns(time.Now(), 1); len(dates) != 0 {
+		t.Errorf("found a date for an impossible day: %v", dates)
 	}
 }

@@ -30,7 +30,7 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	definition := backup.Definicja{
+	definition := backup.Definition{
 		ID: action.GetId(), Tool: action.GetTool(), Repository: action.GetRepository(),
 		Paths: action.GetPaths(), Excludes: action.GetExcludes(), Tags: action.GetTags(),
 		KeepLast: int(action.GetKeepLast()), KeepDaily: int(action.GetKeepDaily()),
@@ -38,36 +38,36 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		Prune: action.GetPrune(), Runbook: action.GetRunbook(),
 		Initialize: action.GetInitialize(),
 	}
-	if err := definition.Waliduj(); err != nil {
+	if err := definition.Validate(); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	adapter, err := backup.Wybierz(definition.Tool)
+	adapter, err := backup.Select(definition.Tool)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	if !adapter.Dostepny() {
+	if !adapter.Available() {
 		return reject(ErrorUnsupported, "this host has no "+definition.Tool+" tool")
 	}
 
-	order := backup.Zlecenie{
-		Definicja: definition,
-		Haslo:     action.GetPassword(),
-		ReadData:  action.GetReadData(),
-		Odtworzenie: backup.Odtworzenie{
+	order := backup.Order{
+		Definition: definition,
+		Password:   action.GetPassword(),
+		ReadData:   action.GetReadData(),
+		Restore: backup.Restore{
 			SnapshotID: action.GetSnapshotId(), Target: action.GetTarget(),
 			Include: action.GetInclude(), Overwrite: action.GetOverwrite(),
 		},
 	}
 	if len(action.GetEnv()) > 0 {
-		order.Srodowisko = map[string][]byte{}
+		order.Environment = map[string][]byte{}
 		for name, value := range action.GetEnv() {
-			order.Srodowisko[name] = value
+			order.Environment[name] = value
 		}
 	}
 
-	receiver := backup.PostepFunc(nil)
+	receiver := backup.ProgressFunc(nil)
 	if progress != nil {
-		receiver = func(p backup.Postep) {
+		receiver = func(p backup.Progress) {
 			progress(&helperv1.TaskProgress{Percent: p.Percent, Message: p.Message})
 		}
 	}
@@ -82,8 +82,8 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 			if err != nil {
 				state.UnavailableReason = err.Error()
 			}
-			return backupPlanResponse(state, order.Definicja,
-				kind == backup.PlanSprawdzenie, action.GetReadData())
+			return backupPlanResponse(state, order.Definition,
+				kind == backup.PlanVerify, action.GetReadData())
 		}
 		encoded, marshalErr := json.Marshal(state)
 		if marshalErr != nil {
@@ -111,14 +111,14 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false); refusal != nil {
 			return refusal
 		}
-		result, err := adapter.Wykonaj(actionCtx, order, receiver)
+		result, err := adapter.Run(actionCtx, order, receiver)
 		if err != nil {
 			return backupResponse(result, err)
 		}
 		// A copy nobody checked is not a success: a repository is sometimes
 		// damaged in exactly the way it looks like a working one. The host
 		// checks it right away and only then reports the copy.
-		if _, err := adapter.Sprawdz(actionCtx, order); err != nil {
+		if _, err := adapter.Verify(actionCtx, order); err != nil {
 			response := backupResponse(result, nil)
 			response.Accepted = false
 			response.ErrorCode = ErrorPreconditionFailed
@@ -135,7 +135,7 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, true); refusal != nil {
 			return refusal
 		}
-		result, err := adapter.Sprawdz(actionCtx, order)
+		result, err := adapter.Verify(actionCtx, order)
 		response := backupResponse(result, err)
 		if err == nil {
 			response.BackupResult.Verified = true
@@ -143,15 +143,15 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		return response
 
 	case helperv1.BackupRequest_OPERATION_RESTORE:
-		if err := backup.WalidujOdtworzenie(order.Odtworzenie); err != nil {
+		if err := backup.ValidateRestore(order.Restore); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 		// The target is checked right before unpacking: only the host knows what
 		// really lies in that directory, and it knows it only now.
-		if err := backup.SprawdzCel(order.Odtworzenie); err != nil {
+		if err := backup.CheckTarget(order.Restore); err != nil {
 			return reject(ErrorPreconditionFailed, err.Error())
 		}
-		result, err := adapter.Odtworz(actionCtx, order)
+		result, err := adapter.RestoreData(actionCtx, order)
 		return backupResponse(result, err)
 	}
 	return reject(ErrorUnknownAction, "unknown backup operation")
@@ -161,7 +161,7 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 //
 // The result goes to the panel on failure as well: an interrupted copy leaves a
 // state that has to be named, not the bare words "it failed".
-func backupResponse(result backup.Wynik, err error) *helperv1.HelperResponse {
+func backupResponse(result backup.Result, err error) *helperv1.HelperResponse {
 	encoded, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
 		return reject(ErrorExecFailed, marshalErr.Error())
@@ -186,7 +186,7 @@ func backupResponse(result backup.Wynik, err error) *helperv1.HelperResponse {
 
 // backupErrorCode tells an interruption from an ordinary failure of the tool.
 func backupErrorCode(err error) string {
-	if errors.Is(err, backup.ErrPrzerwane) {
+	if errors.Is(err, backup.ErrInterrupted) {
 		return ErrorTimeout
 	}
 	return ErrorExecFailed
@@ -197,9 +197,9 @@ func backupErrorCode(err error) string {
 //
 // The size of the scope is computed by the host: the panel does not know how
 // much data really lies there, and the operator is to see it before consenting.
-func backupPlanResponse(state backup.Stan, definition backup.Definicja,
+func backupPlanResponse(state backup.State, definition backup.Definition,
 	verification, readData bool) *helperv1.HelperResponse {
-	plan := backup.Zaplanuj(state, definition, verification, readData, backup.RozmiarSciezki)
+	plan := backup.Compute(state, definition, verification, readData, backup.PathSize)
 	encoded, err := json.Marshal(plan)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -224,7 +224,7 @@ func backupPlanResponse(state backup.Stan, definition backup.Definicja,
 // operator consented to. A different digest means the scope or the repository
 // changed since the planning - and that is a refusal, not a warning.
 func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
-	order backup.Zlecenie, action *helperv1.BackupRequest, verification bool) *helperv1.HelperResponse {
+	order backup.Order, action *helperv1.BackupRequest, verification bool) *helperv1.HelperResponse {
 	expected := action.GetPlanHash()
 	if expected == "" {
 		return nil
@@ -233,8 +233,8 @@ func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
 	if err != nil {
 		state.UnavailableReason = err.Error()
 	}
-	now := backup.Zaplanuj(state, order.Definicja, verification,
-		order.ReadData, backup.RozmiarSciezki)
+	now := backup.Compute(state, order.Definition, verification,
+		order.ReadData, backup.PathSize)
 	if now.PlanHash != expected {
 		return reject(ErrorPreconditionFailed,
 			"the scope of the copy or the repository changed since the planning; the operation needs a new plan")

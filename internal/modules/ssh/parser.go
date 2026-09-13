@@ -7,141 +7,141 @@ import (
 	"strings"
 )
 
-// ParsujEffective czyta wyjscie "sshd -T".
+// ParseEffective reads the output of "sshd -T".
 //
-// To jedyne zrodlo, ktore mowi, co serwer naprawde uwaza za swoja
-// konfiguracje: pliki dolaczane maja wlasna kolejnosc i wygrywa w nich
-// pierwsza wartosc, wiec skladanie tego samemu z tresci plikow konczy sie
-// obrazem, ktorego host nie potwierdza.
-func ParsujEffective(wyjscie string) Snapshot {
+// It is the only source that says what the server really considers its
+// configuration: included files have their own order and the first value
+// wins in them, so assembling this by hand from the file contents ends in a
+// picture the host does not confirm.
+func ParseEffective(output string) Snapshot {
 	snapshot := Snapshot{}
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		klucz, wartosc, ok := strings.Cut(linia, " ")
+		key, value, ok := strings.Cut(line, " ")
 		if !ok {
 			continue
 		}
-		wartosc = strings.TrimSpace(wartosc)
-		switch klucz {
+		value = strings.TrimSpace(value)
+		switch key {
 		case "port":
-			snapshot.Ports = append(snapshot.Ports, wartosc)
+			snapshot.Ports = append(snapshot.Ports, value)
 		case "listenaddress":
-			snapshot.ListenAddresses = append(snapshot.ListenAddresses, wartosc)
+			snapshot.ListenAddresses = append(snapshot.ListenAddresses, value)
 		case "permitrootlogin":
-			snapshot.PermitRootLogin = wartosc
+			snapshot.PermitRootLogin = value
 		case "passwordauthentication":
-			snapshot.PasswordAuthentication = wartosc
+			snapshot.PasswordAuthentication = value
 		case "pubkeyauthentication":
-			snapshot.PubkeyAuthentication = wartosc
+			snapshot.PubkeyAuthentication = value
 		case "kbdinteractiveauthentication":
-			snapshot.KbdInteractive = wartosc
+			snapshot.KbdInteractive = value
 		case "gssapiauthentication":
-			snapshot.GSSAPIAuthentication = wartosc
+			snapshot.GSSAPIAuthentication = value
 		case "maxauthtries":
-			snapshot.MaxAuthTries, _ = strconv.Atoi(wartosc)
+			snapshot.MaxAuthTries, _ = strconv.Atoi(value)
 		case "allowusers":
-			snapshot.AllowUsers = append(snapshot.AllowUsers, strings.Fields(wartosc)...)
+			snapshot.AllowUsers = append(snapshot.AllowUsers, strings.Fields(value)...)
 		case "allowgroups":
-			snapshot.AllowGroups = append(snapshot.AllowGroups, strings.Fields(wartosc)...)
+			snapshot.AllowGroups = append(snapshot.AllowGroups, strings.Fields(value)...)
 		case "denyusers":
-			snapshot.DenyUsers = append(snapshot.DenyUsers, strings.Fields(wartosc)...)
+			snapshot.DenyUsers = append(snapshot.DenyUsers, strings.Fields(value)...)
 		case "denygroups":
-			snapshot.DenyGroups = append(snapshot.DenyGroups, strings.Fields(wartosc)...)
+			snapshot.DenyGroups = append(snapshot.DenyGroups, strings.Fields(value)...)
 		}
 	}
 	return snapshot
 }
 
-var odciskKlucza = regexp.MustCompile(`^(\d+)\s+(\S+)\s+.*\((\w+)\)\s*$`)
+var keyFingerprint = regexp.MustCompile(`^(\d+)\s+(\S+)\s+.*\((\w+)\)\s*$`)
 
-// ParsujOdcisk czyta jeden wiersz "ssh-keygen -l -f".
+// ParseFingerprint reads one row of "ssh-keygen -l -f".
 //
-// Bierzemy odcisk i metadane, nigdy klucz prywatny: jego kopia w bazie panelu
-// bylaby kopia tozsamosci hosta.
-func ParsujOdcisk(linia, sciezka string) (HostKey, bool) {
-	pola := odciskKlucza.FindStringSubmatch(strings.TrimSpace(linia))
-	if pola == nil {
+// The fingerprint and metadata are taken, never the private key: its copy in
+// the panel database would be a copy of the host's identity.
+func ParseFingerprint(line, path string) (HostKey, bool) {
+	fields := keyFingerprint.FindStringSubmatch(strings.TrimSpace(line))
+	if fields == nil {
 		return HostKey{}, false
 	}
-	bity, _ := strconv.Atoi(pola[1])
+	bits, _ := strconv.Atoi(fields[1])
 	return HostKey{
-		Type:        strings.ToLower(pola[3]),
-		Bits:        bity,
-		Fingerprint: pola[2],
-		Path:        sciezka,
+		Type:        strings.ToLower(fields[3]),
+		Bits:        bits,
+		Fingerprint: fields[2],
+		Path:        path,
 	}, true
 }
 
-// SkladajDropIn sklada tresc pliku konfiguracyjnego panelu.
+// ComposeDropIn composes the content of the panel's configuration file.
 //
-// Zapisujemy wylacznie te ustawienia, o ktore operator poprosil. Wypisanie
-// calej konfiguracji "dla porzadku" zamrozilby na hoscie wartosci domyslne
-// z dnia zapisu - a te zmieniaja sie razem z wersja OpenSSH.
-func SkladajDropIn(ustawienia Ustawienia) (string, error) {
-	if err := Waliduj(ustawienia); err != nil {
+// Only the settings the operator asked for are written. Printing the whole
+// configuration "for tidiness" would freeze on the host the defaults of the
+// day of the write - and those change with the OpenSSH version.
+func ComposeDropIn(settings Settings) (string, error) {
+	if err := Validate(settings); err != nil {
 		return "", err
 	}
-	wiersze := []string{NaglowekPliku}
-	dopisz := func(klucz, wartosc string) {
-		if wartosc != "" {
-			wiersze = append(wiersze, klucz+" "+wartosc)
+	lines := []string{FileHeader}
+	add := func(key, value string) {
+		if value != "" {
+			lines = append(lines, key+" "+value)
 		}
 	}
-	dopisz("Port", ustawienia.Port)
-	dopisz("PermitRootLogin", ustawienia.PermitRootLogin)
-	dopisz("PasswordAuthentication", ustawienia.PasswordAuthentication)
-	dopisz("PubkeyAuthentication", ustawienia.PubkeyAuthentication)
-	dopisz("KbdInteractiveAuthentication", ustawienia.KbdInteractive)
-	dopisz("MaxAuthTries", ustawienia.MaxAuthTries)
-	if len(ustawienia.AllowUsers) > 0 {
-		dopisz("AllowUsers", strings.Join(ustawienia.AllowUsers, " "))
+	add("Port", settings.Port)
+	add("PermitRootLogin", settings.PermitRootLogin)
+	add("PasswordAuthentication", settings.PasswordAuthentication)
+	add("PubkeyAuthentication", settings.PubkeyAuthentication)
+	add("KbdInteractiveAuthentication", settings.KbdInteractive)
+	add("MaxAuthTries", settings.MaxAuthTries)
+	if len(settings.AllowUsers) > 0 {
+		add("AllowUsers", strings.Join(settings.AllowUsers, " "))
 	}
-	if len(ustawienia.AllowGroups) > 0 {
-		dopisz("AllowGroups", strings.Join(ustawienia.AllowGroups, " "))
+	if len(settings.AllowGroups) > 0 {
+		add("AllowGroups", strings.Join(settings.AllowGroups, " "))
 	}
-	if len(ustawienia.DenyUsers) > 0 {
-		dopisz("DenyUsers", strings.Join(ustawienia.DenyUsers, " "))
+	if len(settings.DenyUsers) > 0 {
+		add("DenyUsers", strings.Join(settings.DenyUsers, " "))
 	}
-	if len(wiersze) == 1 {
-		return "", fmt.Errorf("zmiana nie zawiera zadnego ustawienia")
+	if len(lines) == 1 {
+		return "", fmt.Errorf("the change contains no setting")
 	}
-	return strings.Join(wiersze, "\n") + "\n", nil
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// RozbiezneUstawienia porownuje to, o co poprosil operator, z tym, co serwer
-// naprawde stosuje.
+// DivergentSettings compares what the operator asked for with what the
+// server really applies.
 //
-// W konfiguracji sshd wygrywa pierwsza wartosc, a pliki dolaczane maja
-// kolejnosc alfabetyczna: wczesniejszy plik administratora hosta przeslania
-// nasz i zmiana wyglada na wykonana, choc nic nie zmienia. Zamiast udawac
-// sukces, mowimy wprost, ktore ustawienie nie doszlo do skutku.
-func RozbiezneUstawienia(chciane Ustawienia, stan Snapshot) []string {
-	var rozbiezne []string
-	porownaj := func(nazwa, chciana, obecna string) {
-		if chciana == "" {
+// In the sshd configuration the first value wins, and included files are in
+// alphabetical order: an earlier file of the host administrator shadows ours
+// and the change looks done although it changes nothing. Instead of
+// pretending success, it says directly which setting did not take effect.
+func DivergentSettings(desired Settings, state Snapshot) []string {
+	var divergent []string
+	compare := func(name, wanted, current string) {
+		if wanted == "" {
 			return
 		}
-		if !strings.EqualFold(chciana, obecna) {
-			rozbiezne = append(rozbiezne, fmt.Sprintf("%s: zlecono %q, serwer stosuje %q",
-				nazwa, chciana, obecna))
+		if !strings.EqualFold(wanted, current) {
+			divergent = append(divergent, fmt.Sprintf("%s: ordered %q, the server applies %q",
+				name, wanted, current))
 		}
 	}
-	porownaj("PermitRootLogin", chciane.PermitRootLogin, stan.PermitRootLogin)
-	porownaj("PasswordAuthentication", chciane.PasswordAuthentication, stan.PasswordAuthentication)
-	porownaj("PubkeyAuthentication", chciane.PubkeyAuthentication, stan.PubkeyAuthentication)
-	porownaj("KbdInteractiveAuthentication", chciane.KbdInteractive, stan.KbdInteractive)
-	if chciane.MaxAuthTries != "" {
-		porownaj("MaxAuthTries", chciane.MaxAuthTries, strconv.Itoa(stan.MaxAuthTries))
+	compare("PermitRootLogin", desired.PermitRootLogin, state.PermitRootLogin)
+	compare("PasswordAuthentication", desired.PasswordAuthentication, state.PasswordAuthentication)
+	compare("PubkeyAuthentication", desired.PubkeyAuthentication, state.PubkeyAuthentication)
+	compare("KbdInteractiveAuthentication", desired.KbdInteractive, state.KbdInteractive)
+	if desired.MaxAuthTries != "" {
+		compare("MaxAuthTries", desired.MaxAuthTries, strconv.Itoa(state.MaxAuthTries))
 	}
-	if chciane.Port != "" {
-		obecny := ""
-		if len(stan.Ports) > 0 {
-			obecny = stan.Ports[0]
+	if desired.Port != "" {
+		current := ""
+		if len(state.Ports) > 0 {
+			current = state.Ports[0]
 		}
-		porownaj("Port", chciane.Port, obecny)
+		compare("Port", desired.Port, current)
 	}
-	return rozbiezne
+	return divergent
 }

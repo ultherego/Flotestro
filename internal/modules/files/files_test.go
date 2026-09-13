@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-// Panel, ktory potrafi zapisac dowolna sciezke, potrafi podmienic /etc/shadow
-// i klucze prywatne. Zakaz jest sprawdzany przed allowlista i nie da sie go
-// obejsc wpisem administratora.
-func TestZakazaneSciezkiSaOdrzucaneMimoAllowlisty(t *testing.T) {
-	allowlista := Allowlist{Wzorce: []string{"/etc/*", "/etc/ssh/*", "/root/*"}, Zrodlo: "test"}
+// A panel that can write an arbitrary path can replace /etc/shadow and
+// private keys. The ban is checked before the allowlist and cannot be
+// bypassed by an administrator entry.
+func TestForbiddenPathsAreRejectedDespiteAllowlist(t *testing.T) {
+	allowlist := Allowlist{Patterns: []string{"/etc/*", "/etc/ssh/*", "/root/*"}, Source: "test"}
 
-	for _, sciezka := range []string{
+	for _, path := range []string{
 		"/etc/shadow",
 		"/etc/sudoers",
 		"/etc/sudoers.d/90-admin",
@@ -23,125 +23,125 @@ func TestZakazaneSciezkiSaOdrzucaneMimoAllowlisty(t *testing.T) {
 		"/root/.ssh/authorized_keys",
 		"/etc/pam.d/sshd",
 	} {
-		err := allowlista.Dopuszcza(sciezka)
-		if !errors.Is(err, ErrZakazana) {
-			t.Errorf("sciezka %q: %v", sciezka, err)
+		err := allowlist.Allows(path)
+		if !errors.Is(err, ErrForbidden) {
+			t.Errorf("path %q: %v", path, err)
 		}
 	}
 }
 
-func TestSciezkaSpozaAllowlistyJestOdrzucana(t *testing.T) {
-	allowlista := Allowlist{Wzorce: []string{"/etc/motd", "/opt/flotestro/etc/*"}, Zrodlo: "test"}
+func TestPathOutsideAllowlistIsRejected(t *testing.T) {
+	allowlist := Allowlist{Patterns: []string{"/etc/motd", "/opt/flotestro/etc/*"}, Source: "test"}
 
-	for _, sciezka := range []string{"/etc/hosts", "/var/lib/x", "etc/motd", "/etc/../etc/motd"} {
-		if err := allowlista.Dopuszcza(sciezka); err == nil {
-			t.Errorf("przyjeto sciezke %q", sciezka)
+	for _, path := range []string{"/etc/hosts", "/var/lib/x", "etc/motd", "/etc/../etc/motd"} {
+		if err := allowlist.Allows(path); err == nil {
+			t.Errorf("accepted path %q", path)
 		}
 	}
-	for _, sciezka := range []string{"/etc/motd", "/opt/flotestro/etc/app.conf"} {
-		if err := allowlista.Dopuszcza(sciezka); err != nil {
-			t.Errorf("odrzucono sciezke %q: %v", sciezka, err)
+	for _, path := range []string{"/etc/motd", "/opt/flotestro/etc/app.conf"} {
+		if err := allowlist.Allows(path); err != nil {
+			t.Errorf("rejected path %q: %v", path, err)
 		}
 	}
 }
 
-// Prawa i wlasciciel sa ustawiane na nowym pliku, zanim zajmie on miejsce
-// starego: inaczej zostaje okno, w ktorym plik stoi juz na miejscu z prawami
-// domyslnymi.
-func TestZapisAtomowyUstawiaPrawaPrzedPodmiana(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "app.conf")
+// The permissions and the owner are set on the new file before it takes
+// the place of the old one: otherwise a window remains in which the file
+// already sits in place with default permissions.
+func TestAtomicWriteSetsPermissionsBeforeReplacement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.conf")
 
-	if err := ZapiszAtomowo(sciezka, []byte("a=1\n"), 0o640, -1, -1); err != nil {
+	if err := WriteAtomically(path, []byte("a=1\n"), 0o640, -1, -1); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(sciezka)
+	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o640 {
-		t.Errorf("prawa = %04o", info.Mode().Perm())
+		t.Errorf("permissions = %04o", info.Mode().Perm())
 	}
-	// Po zapisie nie zostaje plik tymczasowy: katalog konfiguracji zbiera
-	// smieci szybciej niz ktokolwiek je zauwazy.
-	wpisy, err := os.ReadDir(katalog)
+	// No temporary file remains after the write: a configuration directory
+	// collects garbage faster than anybody notices it.
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(wpisy) != 1 {
-		t.Errorf("w katalogu zostalo %d plikow", len(wpisy))
+	if len(entries) != 1 {
+		t.Errorf("%d files left in the directory", len(entries))
 	}
 
-	// Zapis bez podanych praw zachowuje prawa istniejacego pliku: zmiana
-	// tresci nie jest decyzja o dostepie.
-	if err := ZapiszAtomowo(sciezka, []byte("a=2\n"), 0, -1, -1); err != nil {
+	// A write without given permissions keeps the permissions of the
+	// existing file: a content change is not a decision about access.
+	if err := WriteAtomically(path, []byte("a=2\n"), 0, -1, -1); err != nil {
 		t.Fatal(err)
 	}
-	info, _ = os.Stat(sciezka)
+	info, _ = os.Stat(path)
 	if info.Mode().Perm() != 0o640 {
-		t.Errorf("prawa po zapisie bez trybu = %04o", info.Mode().Perm())
+		t.Errorf("permissions after a write without a mode = %04o", info.Mode().Perm())
 	}
 }
 
-func TestPrawaZapisuSaSprawdzane(t *testing.T) {
-	for _, tryb := range []string{"777", "666", "4755", "2755", "999", "1234567"} {
-		if _, err := WalidujTryb(tryb); err == nil {
-			t.Errorf("przyjeto prawa %q", tryb)
+func TestWritePermissionsAreChecked(t *testing.T) {
+	for _, mode := range []string{"777", "666", "4755", "2755", "999", "1234567"} {
+		if _, err := ValidateMode(mode); err == nil {
+			t.Errorf("accepted permissions %q", mode)
 		}
 	}
-	for _, tryb := range []string{"", "644", "600", "0640", "755"} {
-		if _, err := WalidujTryb(tryb); err != nil {
-			t.Errorf("odrzucono prawa %q: %v", tryb, err)
+	for _, mode := range []string{"", "644", "600", "0640", "755"} {
+		if _, err := ValidateMode(mode); err != nil {
+			t.Errorf("rejected permissions %q: %v", mode, err)
 		}
 	}
 }
 
-func TestTrescPlikuJestSprawdzana(t *testing.T) {
-	if err := WalidujTresc("klucz = wartosc\n"); err != nil {
-		t.Errorf("odrzucono poprawna tresc: %v", err)
+func TestFileContentIsChecked(t *testing.T) {
+	if err := ValidateContent("key = value\n"); err != nil {
+		t.Errorf("rejected valid content: %v", err)
 	}
-	if err := WalidujTresc("a\x00b"); err == nil {
-		t.Error("przyjeto tresc z bajtem zerowym")
+	if err := ValidateContent("a\x00b"); err == nil {
+		t.Error("accepted content with a zero byte")
 	}
-	if err := WalidujTresc(strings.Repeat("a", MaksymalnyRozmiar+1)); err == nil {
-		t.Error("przyjeto tresc wieksza niz granica modulu")
-	}
-}
-
-func TestWalidatorJestDobieranyDoPliku(t *testing.T) {
-	walidator, ma, err := WybierzWalidator("/etc/app/config.json", "")
-	if err != nil || !ma || walidator.Nazwa != "json" {
-		t.Errorf("walidator = %+v, %v, %v", walidator, ma, err)
-	}
-	if err := walidator.Wbudowany(`{"a": 1}`); err != nil {
-		t.Errorf("odrzucono poprawny JSON: %v", err)
-	}
-	if err := walidator.Wbudowany(`{"a": }`); err == nil {
-		t.Error("przyjeto bledny JSON")
-	}
-
-	if _, _, err := WybierzWalidator("/etc/motd", "nie-ma-takiego"); err == nil {
-		t.Error("przyjeto nieznany walidator")
-	}
-	// Plik, dla ktorego panel nie zna sprawdzenia, nie dostaje go na sile.
-	if _, ma, _ := WybierzWalidator("/etc/motd", ""); ma {
-		t.Error("dobrano walidator do pliku tekstowego")
-	}
-
-	uklad, _, _ := WybierzWalidator("/etc/systemd/system/app.service", "")
-	if uklad.Nazwa != "systemd-unit" || len(uklad.Polecenie) == 0 {
-		t.Errorf("walidator jednostki = %+v", uklad)
+	if err := ValidateContent(strings.Repeat("a", MaxSize+1)); err == nil {
+		t.Error("accepted content bigger than the module limit")
 	}
 }
 
-func TestOdciskTresciJestStabilny(t *testing.T) {
-	if Odcisk([]byte("a")) != Odcisk([]byte("a")) {
-		t.Error("odcisk tej samej tresci sie rozni")
+func TestValidatorIsSelectedForFile(t *testing.T) {
+	validator, has, err := SelectValidator("/etc/app/config.json", "")
+	if err != nil || !has || validator.Name != "json" {
+		t.Errorf("validator = %+v, %v, %v", validator, has, err)
 	}
-	if Odcisk([]byte("a")) == Odcisk([]byte("b")) {
-		t.Error("odcisk roznych tresci jest taki sam")
+	if err := validator.BuiltIn(`{"a": 1}`); err != nil {
+		t.Errorf("rejected valid JSON: %v", err)
 	}
-	if len(Odcisk(nil)) != 64 {
-		t.Errorf("odcisk pustej tresci = %q", Odcisk(nil))
+	if err := validator.BuiltIn(`{"a": }`); err == nil {
+		t.Error("accepted broken JSON")
+	}
+
+	if _, _, err := SelectValidator("/etc/motd", "no-such-thing"); err == nil {
+		t.Error("accepted an unknown validator")
+	}
+	// A file the panel knows no check for does not get one by force.
+	if _, has, _ := SelectValidator("/etc/motd", ""); has {
+		t.Error("a validator was selected for a text file")
+	}
+
+	unit, _, _ := SelectValidator("/etc/systemd/system/app.service", "")
+	if unit.Name != "systemd-unit" || len(unit.Command) == 0 {
+		t.Errorf("unit validator = %+v", unit)
+	}
+}
+
+func TestContentFingerprintIsStable(t *testing.T) {
+	if Fingerprint([]byte("a")) != Fingerprint([]byte("a")) {
+		t.Error("the fingerprint of the same content differs")
+	}
+	if Fingerprint([]byte("a")) == Fingerprint([]byte("b")) {
+		t.Error("the fingerprint of different content is the same")
+	}
+	if len(Fingerprint(nil)) != 64 {
+		t.Errorf("fingerprint of empty content = %q", Fingerprint(nil))
 	}
 }

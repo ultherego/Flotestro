@@ -2,169 +2,175 @@ package security
 
 import "testing"
 
-func TestTrybDzialajacyIKonfiguracjaToDwaPola(t *testing.T) {
-	if tryb := ParsujTrybWymuszania("1\n"); tryb != TrybEnforcing {
-		t.Fatalf("tryb = %q", tryb)
+func TestRunningModeAndConfigurationAreTwoFields(t *testing.T) {
+	if mode := ParseEnforceMode("1\n"); mode != ModeEnforcing {
+		t.Fatalf("mode = %q", mode)
 	}
-	if tryb := ParsujTrybWymuszania("0"); tryb != TrybPermissive {
-		t.Fatalf("tryb = %q", tryb)
+	if mode := ParseEnforceMode("0"); mode != ModePermissive {
+		t.Fatalf("mode = %q", mode)
 	}
-	// Plik, ktorego nie ma, nie oznacza trybu permissive.
-	if tryb := ParsujTrybWymuszania(""); tryb != "" {
-		t.Fatalf("pusty odczyt stal sie trybem %q", tryb)
+	// A file that does not exist does not mean permissive mode.
+	if mode := ParseEnforceMode(""); mode != "" {
+		t.Fatalf("an empty read became the mode %q", mode)
 	}
 
-	tryb, polityka := ParsujKonfiguracjeSELinux("# komentarz\nSELINUX=enforcing\nSELINUXTYPE=targeted\n")
-	if tryb != TrybEnforcing || polityka != "targeted" {
-		t.Fatalf("konfiguracja = %q/%q", tryb, polityka)
+	mode, policy := ParseSELinuxConfiguration("# comment\nSELINUX=enforcing\nSELINUXTYPE=targeted\n")
+	if mode != ModeEnforcing || policy != "targeted" {
+		t.Fatalf("configuration = %q/%q", mode, policy)
 	}
 }
 
-// Profil w trybie skarg nie chroni, tylko notuje - liczenie go razem
-// z wymuszanymi zamienialo by brak ochrony w ochrone.
-func TestProfileAppArmoraLiczaSieOsobno(t *testing.T) {
-	wymuszane, skargi := ParsujProfileAppArmor(
+// A profile in complain mode does not protect, it only records - counting
+// it together with the enforced ones would turn no protection into
+// protection.
+func TestAppArmorProfilesAreCountedSeparately(t *testing.T) {
+	enforcing, complain := ParseAppArmorProfiles(
 		"docker-default (enforce)\nlibreoffice (complain)\nwike (unconfined)\nfoo (enforce)\n")
-	if wymuszane != 2 || skargi != 1 {
-		t.Fatalf("wymuszane = %d, skargi = %d", wymuszane, skargi)
+	if enforcing != 2 || complain != 1 {
+		t.Fatalf("enforcing = %d, complain = %d", enforcing, complain)
 	}
 
-	// Host z samymi profilami w trybie skarg nie jest chroniony.
-	zero, jeden := 0, 1
-	chroniony := Mandatory{System: SystemAppArmor, ProfilesEnforcing: &zero, ProfilesComplain: &jeden}
-	if chroniony.Chroni() {
-		t.Error("same profile w trybie skarg uznane za ochrone")
+	// A host with only complain-mode profiles is not protected.
+	zero, one := 0, 1
+	protected := Mandatory{System: SystemAppArmor, ProfilesEnforcing: &zero, ProfilesComplain: &one}
+	if protected.Protects() {
+		t.Error("complain-mode profiles alone treated as protection")
 	}
-	if !(Mandatory{System: SystemAppArmor, ProfilesEnforcing: &jeden}).Chroni() {
-		t.Error("profil wymuszany nie uznany za ochrone")
+	if !(Mandatory{System: SystemAppArmor, ProfilesEnforcing: &one}).Protects() {
+		t.Error("an enforced profile not treated as protection")
 	}
-	if !(Mandatory{System: SystemSELinux, Mode: TrybEnforcing}).Chroni() {
-		t.Error("SELinux w trybie enforcing nie uznany za ochrone")
+	if !(Mandatory{System: SystemSELinux, Mode: ModeEnforcing}).Protects() {
+		t.Error("SELinux in enforcing mode not treated as protection")
 	}
-	if (Mandatory{System: SystemSELinux, Mode: TrybPermissive}).Chroni() {
-		t.Error("SELinux w trybie permissive uznany za ochrone")
+	if (Mandatory{System: SystemSELinux, Mode: ModePermissive}).Protects() {
+		t.Error("SELinux in permissive mode treated as protection")
 	}
 }
 
-func TestNasluchKlasyfikujeZasiegGniazda(t *testing.T) {
-	wyjscie := `udp   UNCONN 0 0    127.0.0.53%lo:53    0.0.0.0:* users:(("systemd-resolve",pid=560,fd=16))
+func TestListenersClassifySocketReach(t *testing.T) {
+	output := `udp   UNCONN 0 0    127.0.0.53%lo:53    0.0.0.0:* users:(("systemd-resolve",pid=560,fd=16))
 tcp   LISTEN 0 128        0.0.0.0:22    0.0.0.0:* users:(("sshd",pid=1200,fd=3))
 tcp   LISTEN 0 128           [::]:22       [::]:* users:(("sshd",pid=1200,fd=4))
 udp   UNCONN 0 0        127.0.0.1:323    0.0.0.0:*
 raw   UNCONN 0 0          0.0.0.0:1      0.0.0.0:*
 `
-	gniazda := ParsujNasluch(wyjscie)
-	if len(gniazda) != 4 {
-		t.Fatalf("gniazd = %d: %+v", len(gniazda), gniazda)
+	sockets := ParseListeners(output)
+	if len(sockets) != 4 {
+		t.Fatalf("sockets = %d: %+v", len(sockets), sockets)
 	}
-	if gniazda[0].Reach != ZasiegPetla {
-		t.Errorf("gniazdo na petli zwrotnej ma zasieg %q", gniazda[0].Reach)
+	if sockets[0].Reach != ReachLoopback {
+		t.Errorf("a loopback socket has reach %q", sockets[0].Reach)
 	}
-	if gniazda[1].Port != 22 || gniazda[1].Process != "sshd" || gniazda[1].PID != 1200 {
-		t.Errorf("gniazdo sshd = %+v", gniazda[1])
+	if sockets[1].Port != 22 || sockets[1].Process != "sshd" || sockets[1].PID != 1200 {
+		t.Errorf("sshd socket = %+v", sockets[1])
 	}
-	// Nasluch na wszystkich interfejsach jest inna sytuacja niz nasluch na
-	// jednym adresie hosta - i zadna z nich nie znaczy "widoczne z internetu".
-	if gniazda[1].Reach != ZasiegWszystkie || gniazda[2].Reach != ZasiegWszystkie {
-		t.Errorf("zasiegi = %q, %q", gniazda[1].Reach, gniazda[2].Reach)
+	// Listening on all interfaces is a different situation than listening
+	// on one host address - and neither means "visible from the internet".
+	if sockets[1].Reach != ReachAllInterfaces || sockets[2].Reach != ReachAllInterfaces {
+		t.Errorf("reaches = %q, %q", sockets[1].Reach, sockets[2].Reach)
 	}
-	if Zasieg("192.168.56.30") != ZasiegAdresHosta {
-		t.Errorf("adres hosta sklasyfikowany jako %q", Zasieg("192.168.56.30"))
+	if Reach("192.168.56.30") != ReachHostNetwork {
+		t.Errorf("a host address classified as %q", Reach("192.168.56.30"))
 	}
-	if Zasieg("203.0.113.7") != ZasiegAdresHosta {
-		t.Error("adres publiczny nie jest sam z siebie inna klasa niz prywatny")
+	if Reach("203.0.113.7") != ReachHostNetwork {
+		t.Error("a public address is not by itself a different class than a private one")
 	}
-	// Adres IPv6 sam zawiera dwukropki: port bierzemy po ostatnim.
-	if gniazda[2].Address != "::" || gniazda[2].Port != 22 {
-		t.Errorf("gniazdo IPv6 = %+v", gniazda[2])
+	// An IPv6 address contains colons itself: the port is taken after the
+	// last one.
+	if sockets[2].Address != "::" || sockets[2].Port != 22 {
+		t.Errorf("IPv6 socket = %+v", sockets[2])
 	}
-	snapshot := Snapshot{Listening: gniazda}
-	if len(snapshot.PozaPetla()) != 2 {
-		t.Errorf("poza petla = %d", len(snapshot.PozaPetla()))
+	snapshot := Snapshot{Listening: sockets}
+	if len(snapshot.BeyondLoopback()) != 2 {
+		t.Errorf("beyond loopback = %d", len(snapshot.BeyondLoopback()))
 	}
-	if liczby := snapshot.WedlugZasiegu(); liczby[ZasiegWszystkie] != 2 || liczby[ZasiegPetla] != 2 {
-		t.Errorf("podzial wedlug zasiegu = %v", liczby)
+	if counts := snapshot.ByReach(); counts[ReachAllInterfaces] != 2 || counts[ReachLoopback] != 2 {
+		t.Errorf("split by reach = %v", counts)
 	}
 }
 
-// Reguly zapisane w plikach i reguly zaladowane do jadra to dwa pytania.
-func TestRegulyZPlikuNieLiczaKomentarzy(t *testing.T) {
-	tresc := "# reguly panelu\n\n-D\n-w /etc/passwd -p wa -k tozsamosc\n" +
+// Rules written in files and rules loaded into the kernel are two
+// questions.
+func TestRulesFromFileDoNotCountComments(t *testing.T) {
+	content := "# panel rules\n\n-D\n-w /etc/passwd -p wa -k identity\n" +
 		"-a always,exit -F arch=b64 -S execve\n"
-	if reguly := ParsujRegulyZPliku(tresc); reguly != 2 {
-		t.Fatalf("reguly z pliku = %d", reguly)
+	if rules := ParseRulesFromFile(content); rules != 2 {
+		t.Fatalf("rules from file = %d", rules)
 	}
 }
 
-// Fakt, o ktory nie pytano, i fakt nieodczytany to dwie rozne odpowiedzi.
-func TestUzupelnienieZamykaBrakiAlboZostawiaPowod(t *testing.T) {
-	dwa := 2
+// A fact not asked for and a fact not read are two different answers.
+func TestSupplementClosesGapsOrLeavesReason(t *testing.T) {
+	two := 2
 	snapshot := Snapshot{
-		MAC:       Mandatory{System: SystemAppArmor, Mode: TrybEnforcing},
-		Audit:     Audyt{Present: true},
-		Listening: []Nasluch{{Protocol: "tcp", Address: "0.0.0.0", Port: 22, Reach: ZasiegWszystkie}},
+		MAC:       Mandatory{System: SystemAppArmor, Mode: ModeEnforcing},
+		Audit:     Audit{Present: true},
+		Listening: []Listener{{Protocol: "tcp", Address: "0.0.0.0", Port: 22, Reach: ReachAllInterfaces}},
 		Missing: map[string]string{
-			FaktProfileAppArmor:   "profile AppArmora leza w securityfs",
-			FaktWlascicieleGniazd: "wlascicieli gniazd widzi tylko root",
-			FaktRegulyAudytu:      "reguly audytu czyta tylko root",
+			FactAppArmorProfiles: "the AppArmor profiles live in securityfs",
+			FactSocketOwners:     "only root sees the socket owners",
+			FactAuditRules:       "only root reads the audit rules",
 		},
 	}
 
-	uzupelniony := snapshot.Uzupelnij(Uzupelnienie{
-		ProfilesEnforcing: &dwa,
-		SocketOwners: map[string]Wlasciciel{
-			KluczGniazda("tcp", "0.0.0.0", 22): {Process: "sshd", PID: 1200},
+	supplemented := snapshot.Supplemented(Supplement{
+		ProfilesEnforcing: &two,
+		SocketOwners: map[string]Owner{
+			SocketKey("tcp", "0.0.0.0", 22): {Process: "sshd", PID: 1200},
 		},
-		Errors: map[string]string{FaktRegulyAudytu: "auditctl: brak uprawnien"},
+		Errors: map[string]string{FactAuditRules: "auditctl: permission denied"},
 	})
 
-	if uzupelniony.MAC.ProfilesEnforcing == nil || *uzupelniony.MAC.ProfilesEnforcing != 2 {
-		t.Errorf("profile = %v", uzupelniony.MAC.ProfilesEnforcing)
+	if supplemented.MAC.ProfilesEnforcing == nil || *supplemented.MAC.ProfilesEnforcing != 2 {
+		t.Errorf("profiles = %v", supplemented.MAC.ProfilesEnforcing)
 	}
-	if !uzupelniony.OwnersKnown || uzupelniony.Listening[0].Process != "sshd" {
-		t.Errorf("wlasciciele = %+v", uzupelniony.Listening[0])
+	if !supplemented.OwnersKnown || supplemented.Listening[0].Process != "sshd" {
+		t.Errorf("owners = %+v", supplemented.Listening[0])
 	}
-	// Fakt, ktorego helper nie odczytal, zostaje brakiem razem z powodem.
-	if uzupelniony.Missing[FaktRegulyAudytu] == "" {
-		t.Error("nieudany odczyt regul zniknal z listy brakow")
+	// A fact the helper did not read stays missing together with the
+	// reason.
+	if supplemented.Missing[FactAuditRules] == "" {
+		t.Error("a failed rules read vanished from the missing list")
 	}
-	if _, wciazBrakuje := uzupelniony.Missing[FaktProfileAppArmor]; wciazBrakuje {
-		t.Error("odczytany fakt zostal na liscie brakow")
-	}
-}
-
-func TestRegulyIStanyPomocnicze(t *testing.T) {
-	if reguly := ParsujReguly("No rules\n"); reguly != 0 {
-		t.Fatalf("reguly = %d", reguly)
-	}
-	if reguly := ParsujReguly("-a never,task\n-w /etc/passwd -p wa\n"); reguly != 2 {
-		t.Fatalf("reguly = %d", reguly)
-	}
-	if tryb := ParsujLockdown("[none] integrity confidentiality\n"); tryb != "none" {
-		t.Fatalf("lockdown = %q", tryb)
-	}
-	if stan := ParsujSecureBoot([]byte{6, 0, 0, 0, 1}); stan == nil || !*stan {
-		t.Fatalf("secure boot = %v", stan)
-	}
-	// Zmienna krotsza niz naglowek nie mowi nic; nie zmyslamy falszu.
-	if stan := ParsujSecureBoot([]byte{6, 0, 0, 0}); stan != nil {
-		t.Fatalf("niepelna zmienna stala sie %v", *stan)
+	if _, stillMissing := supplemented.Missing[FactAppArmorProfiles]; stillMissing {
+		t.Error("a fact that was read stayed on the missing list")
 	}
 }
 
-// Panel przelacza miedzy enforcing i permissive; wylaczenia nie ustawia, bo
-// powrot wymaga przeetykietowania systemu plikow i restartu.
-func TestPanelNieWylaczaSELinuksa(t *testing.T) {
-	if err := WalidujTryb(TrybEnforcing); err != nil {
-		t.Errorf("enforcing odrzucony: %v", err)
+func TestRulesAndAuxiliaryStates(t *testing.T) {
+	if rules := ParseRules("No rules\n"); rules != 0 {
+		t.Fatalf("rules = %d", rules)
 	}
-	if err := WalidujTryb(TrybPermissive); err != nil {
-		t.Errorf("permissive odrzucony: %v", err)
+	if rules := ParseRules("-a never,task\n-w /etc/passwd -p wa\n"); rules != 2 {
+		t.Fatalf("rules = %d", rules)
 	}
-	if err := WalidujTryb(TrybDisabled); err == nil {
-		t.Error("panel przyjal wylaczenie SELinuksa")
+	if mode := ParseLockdown("[none] integrity confidentiality\n"); mode != "none" {
+		t.Fatalf("lockdown = %q", mode)
 	}
-	if err := WalidujTryb("cokolwiek"); err == nil {
-		t.Error("nieznany tryb przeszedl walidacje")
+	if state := ParseSecureBoot([]byte{6, 0, 0, 0, 1}); state == nil || !*state {
+		t.Fatalf("secure boot = %v", state)
+	}
+	// A variable shorter than the header says nothing; no false is
+	// invented.
+	if state := ParseSecureBoot([]byte{6, 0, 0, 0}); state != nil {
+		t.Fatalf("an incomplete variable became %v", *state)
+	}
+}
+
+// The panel switches between enforcing and permissive; it does not set
+// disabled, because coming back requires relabelling the filesystem and a
+// reboot.
+func TestPanelDoesNotDisableSELinux(t *testing.T) {
+	if err := ValidateMode(ModeEnforcing); err != nil {
+		t.Errorf("enforcing rejected: %v", err)
+	}
+	if err := ValidateMode(ModePermissive); err != nil {
+		t.Errorf("permissive rejected: %v", err)
+	}
+	if err := ValidateMode(ModeDisabled); err == nil {
+		t.Error("the panel accepted disabling SELinux")
+	}
+	if err := ValidateMode("whatever"); err == nil {
+		t.Error("an unknown mode passed validation")
 	}
 }

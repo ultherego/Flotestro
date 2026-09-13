@@ -1,34 +1,35 @@
-// Package storage opisuje dyski, filesystemy i punkty montowania hosta.
+// Package storage describes the disks, filesystems and mount points of a
+// host.
 //
-// Modul czyta stan jadra i menedzera wolumenow, a nie sam /etc/fstab: plik
-// mowi, co ma byc zamontowane po restarcie, a nie co jest zamontowane teraz.
-// Roznica miedzy jednym a drugim jest zwykle powodem, dla ktorego ktos w
-// ogole otwiera te zakladke.
+// The module reads the kernel state and the volume manager, not /etc/fstab
+// itself: the file says what is to be mounted after a reboot, not what is
+// mounted now. The difference between the two is usually the reason
+// somebody opens this tab at all.
 package storage
 
 import "time"
 
-// Rodzaje urzadzen blokowych, ktore modul rozroznia.
+// Block device kinds the module distinguishes.
 const (
-	TypDysk       = "disk"
-	TypPartycja   = "part"
-	TypLVM        = "lvm"
-	TypRAID       = "raid"
-	TypSzyfrowany = "crypt"
+	TypeDisk      = "disk"
+	TypePartition = "part"
+	TypeLVM       = "lvm"
+	TypeRAID      = "raid"
+	TypeCrypt     = "crypt"
 )
 
-// Device to jedno urzadzenie blokowe.
+// Device is one block device.
 //
-// Identyfikacja idzie po WWN, serialu i UUID, a nie po /dev/sdX: nazwa
-// urzadzenia zalezy od kolejnosci wykrywania i po restarcie potrafi wskazac
-// zupelnie inny dysk. Przy operacji niszczacej to jest roznica miedzy
-// wyczyszczeniem wlasciwego dysku a wyczyszczeniem cudzych danych.
+// Identification goes by WWN, serial and UUID, not by /dev/sdX: the device
+// name depends on the detection order and after a reboot can point at an
+// entirely different disk. In a destructive operation that is the
+// difference between wiping the right disk and wiping somebody else's data.
 type Device struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Type string `json:"type"`
-	// SizeBytes jest rozmiarem urzadzenia. Zero oznacza urzadzenie puste
-	// albo nieodczytane - i wtedy niesie je powod przy migawce.
+	// SizeBytes is the device size. Zero means an empty or unread device -
+	// and then the reason is carried by the snapshot.
 	SizeBytes uint64 `json:"size_bytes"`
 	FSType    string `json:"fs_type,omitempty"`
 	Label     string `json:"label,omitempty"`
@@ -37,49 +38,51 @@ type Device struct {
 	Model     string `json:"model,omitempty"`
 	Serial    string `json:"serial,omitempty"`
 	WWN       string `json:"wwn,omitempty"`
-	// Parent wskazuje urzadzenie nadrzedne: partycja ma dysk, wolumen
-	// logiczny ma grupe. Puste dla urzadzen najwyzszego poziomu.
+	// Parent points at the parent device: a partition has a disk, a logical
+	// volume has a group. Empty for top-level devices.
 	Parent string `json:"parent,omitempty"`
-	// Rotational odroznia talerz od SSD. Brak wartosci oznacza, ze jadro
-	// tego nie podalo, a nie ze urzadzenie sie nie kreci.
+	// Rotational tells a spinning disk from an SSD. No value means the
+	// kernel did not report it, not that the device does not spin.
 	Rotational *bool `json:"rotational,omitempty"`
 	ReadOnly   bool  `json:"read_only"`
-	// Mountpoints wylicza miejsca, w ktorych urzadzenie jest zamontowane.
-	// Jedno urzadzenie moze byc zamontowane w kilku miejscach.
+	// Mountpoints lists the places the device is mounted at. One device can
+	// be mounted in several places.
 	Mountpoints []string `json:"mountpoints,omitempty"`
-	// FSSizeBytes i FSUsedBytes opisuja filesystem, a nie urzadzenie:
-	// filesystem bywa mniejszy niz partycja, ktora go trzyma.
+	// FSSizeBytes and FSUsedBytes describe the filesystem, not the device:
+	// a filesystem is at times smaller than the partition holding it.
 	FSSizeBytes  *uint64 `json:"fs_size_bytes,omitempty"`
 	FSUsedBytes  *uint64 `json:"fs_used_bytes,omitempty"`
 	FSAvailBytes *uint64 `json:"fs_avail_bytes,omitempty"`
 }
 
-// Mount to jeden punkt montowania.
+// Mount is one mount point.
 type Mount struct {
 	Target string `json:"target"`
 	Source string `json:"source"`
 	FSType string `json:"fs_type"`
-	// Options sa opcjami, z ktorymi filesystem jest zamontowany teraz.
+	// Options are the options the filesystem is mounted with now.
 	Options string `json:"options,omitempty"`
-	// FstabOptions sa opcjami zapisanymi w /etc/fstab. Roznica miedzy nimi
-	// a Options oznacza montowanie, ktore po restarcie zachowa sie inaczej.
+	// FstabOptions are the options written in /etc/fstab. A difference
+	// between them and Options means a mount that behaves differently after
+	// a reboot.
 	FstabOptions string `json:"fstab_options,omitempty"`
-	// InFstab i Mounted rozdzielaja dwa pytania: czy wpis istnieje i czy
-	// filesystem jest zamontowany. Cztery kombinacje znacza cztery rozne
-	// rzeczy, a operator patrzy na te zakladke wlasnie przez nie.
+	// InFstab and Mounted separate two questions: whether the entry exists
+	// and whether the filesystem is mounted. Four combinations mean four
+	// different things, and the operator looks at this tab precisely because
+	// of them.
 	InFstab bool `json:"in_fstab"`
 	Mounted bool `json:"mounted"`
-	// Managed oznacza wpis zalozony przez panel.
+	// Managed marks an entry created by the panel.
 	Managed bool `json:"managed"`
-	// UsedPercent i InodesUsedPercent sa zajetoscia. Brak wartosci oznacza
-	// filesystem, ktorego nie dalo sie odpytac - nie filesystem pusty.
+	// UsedPercent and InodesUsedPercent are the usage. No value means a
+	// filesystem that could not be queried - not an empty filesystem.
 	UsedPercent       *uint32 `json:"used_percent,omitempty"`
 	InodesUsedPercent *uint32 `json:"inodes_used_percent,omitempty"`
 	SizeBytes         *uint64 `json:"size_bytes,omitempty"`
 	AvailBytes        *uint64 `json:"avail_bytes,omitempty"`
 }
 
-// VolumeGroup to grupa wolumenow LVM.
+// VolumeGroup is an LVM volume group.
 type VolumeGroup struct {
 	Name      string `json:"name"`
 	SizeBytes uint64 `json:"size_bytes"`
@@ -88,7 +91,7 @@ type VolumeGroup struct {
 	LVCount   int    `json:"lv_count"`
 }
 
-// LogicalVolume to wolumen logiczny LVM.
+// LogicalVolume is an LVM logical volume.
 type LogicalVolume struct {
 	Name      string `json:"name"`
 	Group     string `json:"group"`
@@ -96,13 +99,13 @@ type LogicalVolume struct {
 	SizeBytes uint64 `json:"size_bytes"`
 }
 
-// Snapshot to obraz przestrzeni dyskowej hosta.
+// Snapshot is the picture of the host disk space.
 type Snapshot struct {
 	Devices []Device `json:"devices,omitempty"`
 	Mounts  []Mount  `json:"mounts,omitempty"`
-	// Groups i Volumes sa puste na hoscie bez LVM. Powod niedostepnosci
-	// niesie LVMUnavailableReason: brak grup i brak LVM to dwie rozne
-	// odpowiedzi.
+	// Groups and Volumes are empty on a host without LVM. The
+	// unavailability reason is carried by LVMUnavailableReason: no groups
+	// and no LVM are two different answers.
 	Groups                []VolumeGroup   `json:"groups,omitempty"`
 	Volumes               []LogicalVolume `json:"volumes,omitempty"`
 	LVMUnavailableReason  string          `json:"lvm_unavailable_reason,omitempty"`
@@ -111,20 +114,20 @@ type Snapshot struct {
 	UnavailableReason     string          `json:"unavailable_reason,omitempty"`
 }
 
-// Urzadzenie zwraca urzadzenie o podanej sciezce albo nil.
-func (s Snapshot) Urzadzenie(sciezka string) *Device {
+// DeviceAt returns the device with the given path or nil.
+func (s Snapshot) DeviceAt(path string) *Device {
 	for i := range s.Devices {
-		if s.Devices[i].Path == sciezka {
+		if s.Devices[i].Path == path {
 			return &s.Devices[i]
 		}
 	}
 	return nil
 }
 
-// Montowanie zwraca punkt montowania o podanym celu albo nil.
-func (s Snapshot) Montowanie(cel string) *Mount {
+// MountAt returns the mount point with the given target or nil.
+func (s Snapshot) MountAt(target string) *Mount {
 	for i := range s.Mounts {
-		if s.Mounts[i].Target == cel {
+		if s.Mounts[i].Target == target {
 			return &s.Mounts[i]
 		}
 	}

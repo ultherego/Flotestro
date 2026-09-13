@@ -145,7 +145,7 @@ func TestZmianaZrodelWymagaDzialajacegoZrodla(t *testing.T) {
 	if zadanie.State == "succeeded" {
 		t.Fatalf("panel przyjal zrodla, ktore nie odpowiadaja: %s", ostatniKomunikat(proby))
 	}
-	if !strings.Contains(ostatniKomunikat(proby), "nie odpowiedzial") {
+	if !strings.Contains(ostatniKomunikat(proby), "answered") {
 		t.Errorf("odmowa bez powodu: %q", ostatniKomunikat(proby))
 	}
 
@@ -178,7 +178,7 @@ func TestStrefaCzasowaZmieniaSiePoSprawdzeniu(t *testing.T) {
 	if zadanie.State == "succeeded" {
 		t.Error("panel ustawil strefe, ktorej host nie zna")
 	}
-	if !strings.Contains(ostatniKomunikat(proby), "nie zna strefy") {
+	if !strings.Contains(ostatniKomunikat(proby), "does not know the zone") {
 		t.Errorf("odmowa bez powodu: %q", ostatniKomunikat(proby))
 	}
 

@@ -8,8 +8,8 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/security"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
-	czas "github.com/ultherego/flotestro/internal/modules/time"
+	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
+	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -84,8 +84,8 @@ func TestAModuleThatWasNotReadCarriesAReason(t *testing.T) {
 func TestSELinuxInPermissiveHasARemediation(t *testing.T) {
 	state := security.Snapshot{
 		MAC: security.Mandatory{
-			System: security.SystemSELinux, Mode: security.TrybPermissive,
-			ConfiguredMode: security.TrybEnforcing, Policy: "targeted",
+			System: security.SystemSELinux, Mode: security.ModePermissive,
+			ConfiguredMode: security.ModeEnforcing, Policy: "targeted",
 		},
 	}
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
@@ -107,7 +107,7 @@ func TestSELinuxInPermissiveHasARemediation(t *testing.T) {
 	if err := json.Unmarshal(result.Remediation.Payload, &payload); err != nil {
 		t.Fatalf("remediation payload: %v", err)
 	}
-	if payload.Security.Mode != security.TrybEnforcing {
+	if payload.Security.Mode != security.ModeEnforcing {
 		t.Errorf("remediation payload = %+v", payload)
 	}
 	// A drift between the running and the configured mode is a separate finding.
@@ -123,7 +123,7 @@ func TestSELinuxInPermissiveHasARemediation(t *testing.T) {
 func TestAppArmorWithoutEnforcedProfilesHasNoRemediatingOperation(t *testing.T) {
 	zero, dwa := 0, 2
 	state := security.Snapshot{MAC: security.Mandatory{
-		System: security.SystemAppArmor, Mode: security.TrybEnforcing,
+		System: security.SystemAppArmor, Mode: security.ModeEnforcing,
 		ProfilesEnforcing: &zero, ProfilesComplain: &dwa,
 	}}
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
@@ -143,8 +143,8 @@ func TestAppArmorWithoutEnforcedProfilesHasNoRemediatingOperation(t *testing.T) 
 
 func TestAPassedFindingCarriesNoRemediation(t *testing.T) {
 	state := security.Snapshot{
-		MAC: security.Mandatory{System: security.SystemSELinux, Mode: security.TrybEnforcing, ConfiguredMode: security.TrybEnforcing},
-		Audit: security.Audyt{Present: true, Active: wskaznikPrawdy(),
+		MAC: security.Mandatory{System: security.SystemSELinux, Mode: security.ModeEnforcing, ConfiguredMode: security.ModeEnforcing},
+		Audit: security.Audit{Present: true, Active: wskaznikPrawdy(),
 			RulesLoaded: countPointer(12), RulesConfigured: countPointer(12)},
 	}
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
@@ -164,9 +164,9 @@ func TestAPassedFindingCarriesNoRemediation(t *testing.T) {
 // The plan digest binds the approval to the state the operator reviewed.
 func TestThePlanDigestDependsOnTheState(t *testing.T) {
 	permissive := security.Snapshot{MAC: security.Mandatory{
-		System: security.SystemSELinux, Mode: security.TrybPermissive, ConfiguredMode: security.TrybPermissive}}
+		System: security.SystemSELinux, Mode: security.ModePermissive, ConfiguredMode: security.ModePermissive}}
 	enforcing := security.Snapshot{MAC: security.Mandatory{
-		System: security.SystemSELinux, Mode: security.TrybEnforcing, ConfiguredMode: security.TrybEnforcing}}
+		System: security.SystemSELinux, Mode: security.ModeEnforcing, ConfiguredMode: security.ModeEnforcing}}
 
 	first := Evaluate("host", Input{Fragments: map[string]Fragment{
 		moduleSecurity: fragmentOf(t, moduleSecurity, permissive)}}, testNow)
@@ -264,23 +264,23 @@ func hostWithEveryNonConformance(t *testing.T) Input {
 	falsz, seven := false, 7
 	ochrona := security.Snapshot{
 		MAC: security.Mandatory{
-			System: security.SystemSELinux, Mode: security.TrybPermissive,
-			ConfiguredMode: security.TrybEnforcing, Policy: "targeted",
+			System: security.SystemSELinux, Mode: security.ModePermissive,
+			ConfiguredMode: security.ModeEnforcing, Policy: "targeted",
 		},
-		Audit:          security.Audyt{Present: true, Active: &falsz, RulesLoaded: countPointer(0), RulesConfigured: countPointer(4)},
+		Audit:          security.Audit{Present: true, Active: &falsz, RulesLoaded: countPointer(0), RulesConfigured: countPointer(4)},
 		SecureBoot:     &falsz,
 		ListeningKnown: true,
 		OwnersKnown:    true,
-		Listening: []security.Nasluch{
-			{Protocol: "tcp", Address: "0.0.0.0", Port: 22, Process: "sshd", Reach: security.ZasiegWszystkie},
+		Listening: []security.Listener{
+			{Protocol: "tcp", Address: "0.0.0.0", Port: 22, Process: "sshd", Reach: security.ReachAllInterfaces},
 		},
 	}
-	serwer := sshmodul.Snapshot{PermitRootLogin: "yes", PasswordAuthentication: "yes"}
-	jadro := kernel.Snapshot{Settings: []kernel.Ustawienie{
+	serwer := sshmodule.Snapshot{PermitRootLogin: "yes", PasswordAuthentication: "yes"}
+	jadro := kernel.Snapshot{Settings: []kernel.Setting{
 		{Key: "net.ipv4.conf.all.rp_filter", Current: "0"},
 		{Key: "net.ipv4.tcp_syncookies", Current: "0"},
 	}}
-	zegar := czas.Snapshot{Synchronized: &falsz, Service: czas.DemonChrony}
+	zegar := hosttime.Snapshot{Synchronized: &falsz, Service: hosttime.DaemonChrony}
 	prawda := true
 	zasilanie := power.Snapshot{RebootRequired: &prawda, RebootReasons: []string{"linux-image-amd64"}}
 
@@ -306,7 +306,7 @@ func TestACheckThatDoesNotApplyIsNotAFailure(t *testing.T) {
 	three, zero := 3, 0
 	state := security.Snapshot{
 		MAC: security.Mandatory{
-			System: security.SystemAppArmor, Mode: security.TrybEnforcing,
+			System: security.SystemAppArmor, Mode: security.ModeEnforcing,
 			ProfilesEnforcing: &three, ProfilesComplain: &zero,
 		},
 	}
@@ -333,7 +333,7 @@ func TestACheckThatDoesNotApplyIsNotAFailure(t *testing.T) {
 	// A host without sshd and without an audit daemon does not fail their checks either.
 	bezUslug := Evaluate("host", Input{Fragments: map[string]Fragment{
 		moduleSecurity: fragmentOf(t, moduleSecurity, security.Snapshot{MAC: state.MAC}),
-		moduleSSH:      fragmentOf(t, moduleSSH, sshmodul.Snapshot{}),
+		moduleSSH:      fragmentOf(t, moduleSSH, sshmodule.Snapshot{}),
 	}}, testNow)
 	for _, id := range []string{"ssh.root-login", "ssh.password-auth", "audit.rules-loaded"} {
 		if result := finding(bezUslug, id); result.Applicable {
@@ -353,12 +353,12 @@ func TestEveryUndeterminedFindingHasAReasonCode(t *testing.T) {
 		}},
 		"missing facts": {Fragments: map[string]Fragment{
 			moduleSecurity: fragmentOf(t, moduleSecurity, security.Snapshot{
-				MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.TrybEnforcing},
-				Audit: security.Audyt{Present: true},
+				MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.ModeEnforcing},
+				Audit: security.Audit{Present: true},
 				Missing: map[string]string{
-					security.FaktProfileAppArmor: "the AppArmor profiles lie in securityfs",
-					security.FaktRegulyAudytu:    "auditctl: permission denied",
-					security.FaktSecureBoot:      "the EFI variable was not read: permission denied",
+					security.FactAppArmorProfiles: "the AppArmor profiles lie in securityfs",
+					security.FactAuditRules:       "auditctl: permission denied",
+					security.FactSecureBoot:       "the EFI variable was not read: permission denied",
 				},
 			}),
 		}},
@@ -394,11 +394,11 @@ func TestEveryUndeterminedFindingHasAReasonCode(t *testing.T) {
 // of the operator, so they have two different codes.
 func TestTheReasonCodeTellsAPermissionDenialApart(t *testing.T) {
 	state := security.Snapshot{
-		MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.TrybEnforcing},
-		Audit: security.Audyt{Present: true},
+		MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.ModeEnforcing},
+		Audit: security.Audit{Present: true},
 		Missing: map[string]string{
-			security.FaktProfileAppArmor: "profile AppArmora leza w securityfs",
-			security.FaktRegulyAudytu:    "helper: polaczenie zerwane",
+			security.FactAppArmorProfiles: "the AppArmor profiles live in securityfs",
+			security.FactAuditRules:       "helper: polaczenie zerwane",
 		},
 	}
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
@@ -416,7 +416,7 @@ func TestTheReasonCodeTellsAPermissionDenialApart(t *testing.T) {
 // resting on it would speak about a state that may no longer exist.
 func TestAStaleReadIsNotConformance(t *testing.T) {
 	state := security.Snapshot{MAC: security.Mandatory{
-		System: security.SystemSELinux, Mode: security.TrybEnforcing, ConfiguredMode: security.TrybEnforcing}}
+		System: security.SystemSELinux, Mode: security.ModeEnforcing, ConfiguredMode: security.ModeEnforcing}}
 	input := Input{Fragments: map[string]Fragment{
 		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}
 

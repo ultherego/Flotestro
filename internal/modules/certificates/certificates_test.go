@@ -15,205 +15,206 @@ import (
 	"time"
 )
 
-// wystaw tworzy pare klucz-certyfikat do testow.
-func wystaw(t *testing.T, nazwa string, wystawca *x509.Certificate,
-	kluczWystawcy *ecdsa.PrivateKey, waznosc time.Duration, ca bool) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
+// issue creates a key-certificate pair for tests.
+func issue(t *testing.T, name string, issuer *x509.Certificate,
+	issuerKey *ecdsa.PrivateKey, validity time.Duration, ca bool) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
 	t.Helper()
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("klucz: %v", err)
+		t.Fatalf("key: %v", err)
 	}
-	szablon := &x509.Certificate{
+	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(time.Now().UnixNano()),
-		Subject:               pkix.Name{CommonName: nazwa},
+		Subject:               pkix.Name{CommonName: name},
 		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(waznosc),
+		NotAfter:              time.Now().Add(validity),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		IsCA:                  ca,
 		BasicConstraintsValid: true,
 	}
 	if !ca {
-		szablon.DNSNames = []string{nazwa}
-		szablon.IPAddresses = []net.IP{net.ParseIP("10.10.10.10")}
+		template.DNSNames = []string{name}
+		template.IPAddresses = []net.IP{net.ParseIP("10.10.10.10")}
 	}
-	rodzic, kluczRodzica := szablon, klucz
-	if wystawca != nil {
-		rodzic, kluczRodzica = wystawca, kluczWystawcy
+	parent, parentKey := template, key
+	if issuer != nil {
+		parent, parentKey = issuer, issuerKey
 	}
-	der, err := x509.CreateCertificate(rand.Reader, szablon, rodzic, &klucz.PublicKey, kluczRodzica)
+	der, err := x509.CreateCertificate(rand.Reader, template, parent, &key.PublicKey, parentKey)
 	if err != nil {
-		t.Fatalf("certyfikat: %v", err)
+		t.Fatalf("certificate: %v", err)
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
-		t.Fatalf("parsowanie: %v", err)
+		t.Fatalf("parsing: %v", err)
 	}
-	return cert, klucz, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	return cert, key, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-func kluczPEM(t *testing.T, klucz *ecdsa.PrivateKey) []byte {
+func keyPEM(t *testing.T, key *ecdsa.PrivateKey) []byte {
 	t.Helper()
-	dane, err := x509.MarshalPKCS8PrivateKey(klucz)
+	data, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		t.Fatalf("klucz PKCS8: %v", err)
+		t.Fatalf("PKCS8 key: %v", err)
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: dane})
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: data})
 }
 
-func TestOpiszCzytaNazwyITerminy(t *testing.T) {
-	_, _, ca := wystaw(t, "Flotestro Test CA", nil, nil, 24*time.Hour, true)
+func TestDescribeReadsNamesAndDates(t *testing.T) {
+	_, _, ca := issue(t, "Flotestro Test CA", nil, nil, 24*time.Hour, true)
 	_ = ca
-	cert, _, lisc := wystaw(t, "panel.flotestro.test", nil, nil, 48*time.Hour, false)
+	cert, _, leaf := issue(t, "panel.flotestro.test", nil, nil, 48*time.Hour, false)
 
-	certy, err := ParsujPEM(lisc)
+	certs, err := ParsePEM(leaf)
 	if err != nil {
-		t.Fatalf("ParsujPEM: %v", err)
+		t.Fatalf("ParsePEM: %v", err)
 	}
-	opis := Opisz("/etc/pki/tls/certs/panel.crt", certy)
-	if opis.FingerprintSHA256 != Odcisk(cert) {
-		t.Fatalf("odcisk %q nie zgadza sie z certyfikatem", opis.FingerprintSHA256)
+	description := Describe("/etc/pki/tls/certs/panel.crt", certs)
+	if description.FingerprintSHA256 != Fingerprint(cert) {
+		t.Fatalf("the fingerprint %q does not match the certificate", description.FingerprintSHA256)
 	}
-	if opis.KeyAlgorithm != "ECDSA" || opis.KeyBits != 256 {
-		t.Fatalf("klucz opisany jako %s/%d", opis.KeyAlgorithm, opis.KeyBits)
+	if description.KeyAlgorithm != "ECDSA" || description.KeyBits != 256 {
+		t.Fatalf("key described as %s/%d", description.KeyAlgorithm, description.KeyBits)
 	}
-	if len(opis.SANs) != 2 || opis.SANs[0] != "panel.flotestro.test" {
-		t.Fatalf("nazwy alternatywne: %v", opis.SANs)
+	if len(description.SANs) != 2 || description.SANs[0] != "panel.flotestro.test" {
+		t.Fatalf("alternative names: %v", description.SANs)
 	}
-	if !opis.SelfSigned {
-		t.Fatal("certyfikat podpisany sam sobie nie zostal rozpoznany")
+	if !description.SelfSigned {
+		t.Fatal("a self-signed certificate was not recognised")
 	}
-	// Modul zbiera fakty; ocena terminu nalezy do panelu, wiec opis nie
-	// zawiera zadnego stanu poza samym terminem.
-	if opis.NotAfter.IsZero() {
-		t.Fatal("brak terminu waznosci")
+	// The module gathers facts; judging the date belongs to the panel, so
+	// the description holds no state beyond the date itself.
+	if description.NotAfter.IsZero() {
+		t.Fatal("no expiry date")
 	}
 }
 
-func TestParsujPEMPomijaKluczWPliku(t *testing.T) {
-	_, klucz, lisc := wystaw(t, "usluga.test", nil, nil, time.Hour, false)
-	razem := append(append([]byte{}, kluczPEM(t, klucz)...), lisc...)
-	certy, err := ParsujPEM(razem)
+func TestParsePEMSkipsKeyInFile(t *testing.T) {
+	_, key, leaf := issue(t, "service.test", nil, nil, time.Hour, false)
+	together := append(append([]byte{}, keyPEM(t, key)...), leaf...)
+	certs, err := ParsePEM(together)
 	if err != nil {
-		t.Fatalf("ParsujPEM: %v", err)
+		t.Fatalf("ParsePEM: %v", err)
 	}
-	if len(certy) != 1 {
-		t.Fatalf("oczekiwano jednego certyfikatu, jest %d", len(certy))
+	if len(certs) != 1 {
+		t.Fatalf("expected one certificate, got %d", len(certs))
 	}
 }
 
-func TestDopasujKluczRozpoznajeCudzyKlucz(t *testing.T) {
-	cert, klucz, _ := wystaw(t, "usluga.test", nil, nil, time.Hour, false)
-	_, obcy, _ := wystaw(t, "inna.test", nil, nil, time.Hour, false)
+func TestMatchKeyRecognisesForeignKey(t *testing.T) {
+	cert, key, _ := issue(t, "service.test", nil, nil, time.Hour, false)
+	_, foreign, _ := issue(t, "other.test", nil, nil, time.Hour, false)
 
-	if err := DopasujKlucz(cert, kluczPEM(t, klucz)); err != nil {
-		t.Fatalf("wlasny klucz odrzucony: %v", err)
+	if err := MatchKey(cert, keyPEM(t, key)); err != nil {
+		t.Fatalf("own key rejected: %v", err)
 	}
-	err := DopasujKlucz(cert, kluczPEM(t, obcy))
+	err := MatchKey(cert, keyPEM(t, foreign))
 	if err == nil {
-		t.Fatal("cudzy klucz zostal przyjety")
+		t.Fatal("a foreign key was accepted")
 	}
-	// Komunikat nie moze niesc tresci klucza: to jedyne miejsce modulu,
-	// w ktorym klucz w ogole jest czytany.
+	// The message must not carry the key content: this is the only place
+	// in the module where the key is read at all.
 	if strings.Contains(err.Error(), "PRIVATE KEY") {
-		t.Fatalf("komunikat niesie tresc klucza: %v", err)
+		t.Fatalf("the message carries the key content: %v", err)
 	}
 }
 
-func TestSprawdzLancuchOdrzucaZlaKolejnosc(t *testing.T) {
-	ca, kluczCA, caPEM := wystaw(t, "Flotestro Test CA", nil, nil, 72*time.Hour, true)
-	_, _, liscPEM := wystaw(t, "usluga.test", ca, kluczCA, 48*time.Hour, false)
+func TestCheckChainRejectsWrongOrder(t *testing.T) {
+	ca, caKey, caPEM := issue(t, "Flotestro Test CA", nil, nil, 72*time.Hour, true)
+	_, _, leafPEM := issue(t, "service.test", ca, caKey, 48*time.Hour, false)
 
-	dobry, err := ParsujPEM(append(append([]byte{}, liscPEM...), caPEM...))
+	good, err := ParsePEM(append(append([]byte{}, leafPEM...), caPEM...))
 	if err != nil {
-		t.Fatalf("ParsujPEM: %v", err)
+		t.Fatalf("ParsePEM: %v", err)
 	}
-	if err := SprawdzLancuch(dobry); err != nil {
-		t.Fatalf("poprawny lancuch odrzucony: %v", err)
+	if err := CheckChain(good); err != nil {
+		t.Fatalf("a valid chain rejected: %v", err)
 	}
 
-	odwrotny, err := ParsujPEM(append(append([]byte{}, caPEM...), liscPEM...))
+	reversed, err := ParsePEM(append(append([]byte{}, caPEM...), leafPEM...))
 	if err != nil {
-		t.Fatalf("ParsujPEM: %v", err)
+		t.Fatalf("ParsePEM: %v", err)
 	}
-	if err := SprawdzLancuch(odwrotny); err == nil {
-		t.Fatal("lancuch w zlej kolejnosci zostal przyjety")
+	if err := CheckChain(reversed); err == nil {
+		t.Fatal("a chain in the wrong order was accepted")
 	}
 }
 
-func TestSprawdzOdrzucaMaterialPrzedZapisem(t *testing.T) {
-	cert, klucz, liscPEM := wystaw(t, "usluga.test", nil, nil, 48*time.Hour, false)
-	_, obcy, _ := wystaw(t, "inna.test", nil, nil, time.Hour, false)
+func TestCheckRejectsMaterialBeforeWrite(t *testing.T) {
+	cert, key, leafPEM := issue(t, "service.test", nil, nil, 48*time.Hour, false)
+	_, foreign, _ := issue(t, "other.test", nil, nil, time.Hour, false)
 	_ = cert
 
-	podstawa := Wdrozenie{
-		Path: "/etc/pki/tls/certs/usluga.crt", KeyPath: "/etc/pki/tls/private/usluga.key",
-		Certyfikat: liscPEM, Klucz: kluczPEM(t, klucz),
+	base := Deployment{
+		Path: "/etc/pki/tls/certs/service.crt", KeyPath: "/etc/pki/tls/private/service.key",
+		Certificate: leafPEM, Key: keyPEM(t, key),
 	}
-	if _, err := Sprawdz(podstawa, time.Now()); err != nil {
-		t.Fatalf("poprawne wdrozenie odrzucone: %v", err)
-	}
-
-	zObcymKluczem := podstawa
-	zObcymKluczem.Klucz = kluczPEM(t, obcy)
-	if _, err := Sprawdz(zObcymKluczem, time.Now()); err == nil {
-		t.Fatal("wdrozenie z cudzym kluczem zostalo przyjete")
+	if _, err := Check(base, time.Now()); err != nil {
+		t.Fatalf("a valid deployment rejected: %v", err)
 	}
 
-	poTerminie := podstawa
-	if _, err := Sprawdz(poTerminie, time.Now().Add(72*time.Hour)); err == nil {
-		t.Fatal("certyfikat po terminie zostal przyjety")
+	withForeignKey := base
+	withForeignKey.Key = keyPEM(t, foreign)
+	if _, err := Check(withForeignKey, time.Now()); err == nil {
+		t.Fatal("a deployment with a foreign key was accepted")
 	}
 
-	// Sonda ma potwierdzic wlasnie ten certyfikat: cel spoza jego nazw
-	// oznacza test, ktory i tak nie potwierdzilby wdrozenia.
-	obcyCel := podstawa
-	obcyCel.Cel = "inna.test:443"
-	if _, err := Sprawdz(obcyCel, time.Now()); err == nil {
-		t.Fatal("cel spoza certyfikatu zostal przyjety")
+	expired := base
+	if _, err := Check(expired, time.Now().Add(72*time.Hour)); err == nil {
+		t.Fatal("an expired certificate was accepted")
 	}
 
-	wlasnyCel := podstawa
-	wlasnyCel.Cel = "usluga.test:8443"
-	if _, err := Sprawdz(wlasnyCel, time.Now()); err != nil {
-		t.Fatalf("cel z certyfikatu odrzucony: %v", err)
+	// The probe is meant to confirm exactly this certificate: a target
+	// outside its names means a test that would not confirm the deployment
+	// anyway.
+	foreignTarget := base
+	foreignTarget.Target = "other.test:443"
+	if _, err := Check(foreignTarget, time.Now()); err == nil {
+		t.Fatal("a target outside the certificate was accepted")
+	}
+
+	ownTarget := base
+	ownTarget.Target = "service.test:8443"
+	if _, err := Check(ownTarget, time.Now()); err != nil {
+		t.Fatalf("a target from the certificate rejected: %v", err)
 	}
 }
 
-func TestWalidujSciezkaChroniMagazynZaufaniaITozsamoscAgenta(t *testing.T) {
-	dozwolone := []string{
-		"/etc/pki/tls/certs/usluga.crt",
-		"/etc/ssl/private/usluga.key",
+func TestValidatePathProtectsTrustStoreAndAgentIdentity(t *testing.T) {
+	allowed := []string{
+		"/etc/pki/tls/certs/service.crt",
+		"/etc/ssl/private/service.key",
 		"/etc/nginx/ssl/panel.pem",
-		// Debian trzyma certyfikat serwera w katalogu magazynu zaufania:
-		// sam plik lezacy tam niczego nie czyni zaufanym.
-		"/etc/ssl/certs/usluga.pem",
+		// Debian keeps the server certificate in the trust store directory:
+		// a file lying there by itself makes nothing trusted.
+		"/etc/ssl/certs/service.pem",
 	}
-	for _, sciezka := range dozwolone {
-		if err := WalidujSciezke(sciezka); err != nil {
-			t.Fatalf("sciezka %s odrzucona: %v", sciezka, err)
+	for _, p := range allowed {
+		if err := ValidatePath(p); err != nil {
+			t.Fatalf("path %s rejected: %v", p, err)
 		}
 	}
-	zakazane := []string{
-		"/etc/pki/ca-trust/source/anchors/obcy.crt",
+	forbidden := []string{
+		"/etc/pki/ca-trust/source/anchors/foreign.crt",
 		"/etc/ssl/certs/ca-certificates.crt",
-		// Dowiazanie po skrocie nazwy jest wpisem magazynu zaufania:
-		// plik pod taka nazwa dodaje urzad, a nie certyfikat uslugi.
+		// A hash symlink is a trust store entry: a file under such a name
+		// adds an authority, not a service certificate.
 		"/etc/ssl/certs/3513523f.0",
 		"/etc/pki/tls/certs/002c0b4f.1",
 		"/etc/flotestro/agent/agent.crt",
 		"/etc/pki/tls/certs/../../../root/.ssh/id_rsa",
-		"etc/pki/tls/certs/usluga.crt",
+		"etc/pki/tls/certs/service.crt",
 		"/etc/shadow",
 	}
-	for _, sciezka := range zakazane {
-		if err := WalidujSciezke(sciezka); err == nil {
-			t.Fatalf("sciezka %s zostala przyjeta", sciezka)
+	for _, p := range forbidden {
+		if err := ValidatePath(p); err == nil {
+			t.Fatalf("path %s was accepted", p)
 		}
 	}
 }
 
-func TestParsujGetcertLaczyZlecenieZePlikiem(t *testing.T) {
-	wyjscie := `Number of certificates and requests being tracked: 2.
+func TestParseGetcertLinksRequestToFile(t *testing.T) {
+	output := `Number of certificates and requests being tracked: 2.
 Request ID '20250101120000':
 	status: MONITORING
 	stuck: no
@@ -229,133 +230,133 @@ Request ID '20250202130000':
 	CA: IPA
 	auto-renew: no
 `
-	sledzenia := ParsujGetcert(wyjscie)
-	if len(sledzenia) != 2 {
-		t.Fatalf("rozpoznano %d zlecen: %v", len(sledzenia), sledzenia)
+	trackings := ParseGetcert(output)
+	if len(trackings) != 2 {
+		t.Fatalf("recognised %d requests: %v", len(trackings), trackings)
 	}
-	httpd, ok := sledzenia["/etc/pki/tls/certs/httpd.crt"]
+	httpd, ok := trackings["/etc/pki/tls/certs/httpd.crt"]
 	if !ok {
-		t.Fatalf("brak zlecenia dla httpd: %v", sledzenia)
+		t.Fatalf("no request for httpd: %v", trackings)
 	}
 	if httpd.Request != "20250101120000" || httpd.Status != "MONITORING" || httpd.CA != "IPA" {
-		t.Fatalf("zlecenie httpd odczytane jako %+v", httpd)
+		t.Fatalf("httpd request read as %+v", httpd)
 	}
 	if httpd.KeyPath != "/etc/pki/tls/private/httpd.key" {
-		t.Fatalf("klucz httpd: %q", httpd.KeyPath)
+		t.Fatalf("httpd key: %q", httpd.KeyPath)
 	}
 	if httpd.AutoRenew == nil || !*httpd.AutoRenew {
-		t.Fatal("auto-renew httpd nie zostalo odczytane")
+		t.Fatal("httpd auto-renew was not read")
 	}
 	if httpd.Expires == nil || httpd.Expires.Year() != 2026 {
-		t.Fatalf("termin httpd: %v", httpd.Expires)
+		t.Fatalf("httpd expiry: %v", httpd.Expires)
 	}
-	ldap := sledzenia["/etc/pki/tls/certs/ldap.crt"]
+	ldap := trackings["/etc/pki/tls/certs/ldap.crt"]
 	if ldap.AutoRenew == nil || *ldap.AutoRenew {
-		t.Fatal("auto-renew ldap powinno byc falszem, a nie brakiem wiedzy")
+		t.Fatal("ldap auto-renew should be false, not no knowledge")
 	}
 }
 
-func TestSkanBrakWiedzyNieJestBrakiemPliku(t *testing.T) {
-	snapshot := Skanuj([]Cel{{
-		Path:    "/etc/pki/tls/certs/nie-ma-takiego.crt",
-		KeyPath: "/etc/pki/tls/private/nie-ma-takiego.key",
+func TestScanNoKnowledgeIsNotMissingFile(t *testing.T) {
+	snapshot := Scan([]Target{{
+		Path:    "/etc/pki/tls/certs/no-such-thing.crt",
+		KeyPath: "/etc/pki/tls/private/no-such-thing.key",
 	}})
 	if len(snapshot.Certificates) != 1 {
-		t.Fatalf("skan zwrocil %d pozycji", len(snapshot.Certificates))
+		t.Fatalf("the scan returned %d items", len(snapshot.Certificates))
 	}
 	if snapshot.Certificates[0].UnavailableReason == "" {
-		t.Fatal("plik, ktorego nie ma, nie zostal opisany powodem")
+		t.Fatal("a file that does not exist was not described with a reason")
 	}
-	// Metadanych klucza bez roota nie widac: to ma byc brak wiedzy z powodem,
-	// a nie cicha odpowiedz "klucza nie ma".
-	if _, brak := snapshot.Missing[FaktMetadaneKluczy]; !brak {
-		t.Fatalf("brak faktu o kluczach nie zostal zgloszony: %v", snapshot.Missing)
+	// Key metadata is not visible without root: that is meant to be no
+	// knowledge with a reason, not a quiet answer "there is no key".
+	if _, missing := snapshot.Missing[FactKeyMetadata]; !missing {
+		t.Fatalf("the missing key fact was not reported: %v", snapshot.Missing)
 	}
 	if snapshot.KeysKnown {
-		t.Fatal("stan kluczy zostal uznany za znany")
+		t.Fatal("the key state was treated as known")
 	}
 }
 
-func TestUzupelnijWstawiaSledzenieIKlucze(t *testing.T) {
+func TestSupplementedInsertsTrackingAndKeys(t *testing.T) {
 	snapshot := Snapshot{
-		Certificates: []Certyfikat{{
+		Certificates: []Certificate{{
 			Path:    "/etc/pki/tls/certs/httpd.crt",
-			Renewal: OdnawianieNieznane,
-			Source:  ZrodloZewnetrzne,
-			Key:     &MetadaneKlucza{Path: "/etc/pki/tls/private/httpd.key"},
+			Renewal: RenewalUnknown,
+			Source:  SourceExternal,
+			Key:     &KeyMetadata{Path: "/etc/pki/tls/private/httpd.key"},
 		}, {
-			Path:    "/etc/pki/tls/certs/reczny.crt",
-			Renewal: OdnawianieNieznane,
-			Source:  ZrodloZewnetrzne,
+			Path:    "/etc/pki/tls/certs/manual.crt",
+			Renewal: RenewalUnknown,
+			Source:  SourceExternal,
 		}},
-		Missing: map[string]string{FaktSledzenie: "wymaga roota", FaktMetadaneKluczy: "wymaga roota"},
+		Missing: map[string]string{FactTracking: "requires root", FactKeyMetadata: "requires root"},
 	}
-	prawda := true
-	uzupelniony := snapshot.Uzupelnij(Uzupelnienie{
-		Keys: map[string]MetadaneKlucza{
+	yes := true
+	supplemented := snapshot.Supplemented(Supplement{
+		Keys: map[string]KeyMetadata{
 			"/etc/pki/tls/private/httpd.key": {Path: "/etc/pki/tls/private/httpd.key",
 				Exists: true, Mode: "0600", Owner: "root"},
 		},
-		Tracking: map[string]Sledzenie{
-			"/etc/pki/tls/certs/httpd.crt": {Request: "1", Status: "MONITORING", AutoRenew: &prawda},
+		Tracking: map[string]Tracking{
+			"/etc/pki/tls/certs/httpd.crt": {Request: "1", Status: "MONITORING", AutoRenew: &yes},
 		},
 		TrackingKnown: true,
 	})
 
-	if !uzupelniony.KeysKnown || !uzupelniony.TrackingKnown {
-		t.Fatal("fakty helpera nie zostaly odnotowane jako znane")
+	if !supplemented.KeysKnown || !supplemented.TrackingKnown {
+		t.Fatal("the helper facts were not recorded as known")
 	}
-	if len(uzupelniony.Missing) != 0 {
-		t.Fatalf("po uzupelnieniu zostaly braki: %v", uzupelniony.Missing)
+	if len(supplemented.Missing) != 0 {
+		t.Fatalf("gaps remained after the supplement: %v", supplemented.Missing)
 	}
-	if uzupelniony.Certificates[0].Renewal != OdnawianieSledzone ||
-		uzupelniony.Certificates[0].Source != ZrodloCertmonger {
-		t.Fatalf("certyfikat pod opieka certmongera opisany jako %+v", uzupelniony.Certificates[0])
+	if supplemented.Certificates[0].Renewal != RenewalTracked ||
+		supplemented.Certificates[0].Source != SourceCertmonger {
+		t.Fatalf("a certificate under certmonger care described as %+v", supplemented.Certificates[0])
 	}
-	if uzupelniony.Certificates[0].Key.Mode != "0600" {
-		t.Fatalf("metadane klucza nie zostaly wstawione: %+v", uzupelniony.Certificates[0].Key)
+	if supplemented.Certificates[0].Key.Mode != "0600" {
+		t.Fatalf("the key metadata was not inserted: %+v", supplemented.Certificates[0].Key)
 	}
-	// Plik bez zlecenia jest odnawiany recznie - i to jest ustalenie,
-	// a nie brak wiedzy: demon odpowiedzial, ze go nie pilnuje.
-	if uzupelniony.Certificates[1].Renewal != OdnawianieReczne {
-		t.Fatalf("plik bez zlecenia opisany jako %q", uzupelniony.Certificates[1].Renewal)
+	// A file without a request is renewed manually - and that is a finding,
+	// not no knowledge: the daemon answered that it does not watch it.
+	if supplemented.Certificates[1].Renewal != RenewalManual {
+		t.Fatalf("a file without a request described as %q", supplemented.Certificates[1].Renewal)
 	}
 }
 
-func TestDodajSledzonePomijaSciezkiPozaZakresem(t *testing.T) {
-	cele := DodajSledzone([]Cel{{Path: "/etc/pki/tls/certs/znany.crt"}}, map[string]Sledzenie{
-		"/etc/pki/tls/certs/znany.crt": {Request: "1"},
-		"/etc/pki/tls/certs/nowy.crt":  {Request: "2", KeyPath: "/etc/pki/tls/private/nowy.key"},
-		"/etc/pki/ca-trust/obcy.crt":   {Request: "3"},
+func TestAddTrackedSkipsPathsOutsideScope(t *testing.T) {
+	targets := AddTracked([]Target{{Path: "/etc/pki/tls/certs/known.crt"}}, map[string]Tracking{
+		"/etc/pki/tls/certs/known.crt":  {Request: "1"},
+		"/etc/pki/tls/certs/new.crt":    {Request: "2", KeyPath: "/etc/pki/tls/private/new.key"},
+		"/etc/pki/ca-trust/foreign.crt": {Request: "3"},
 	})
-	if len(cele) != 2 {
-		t.Fatalf("zakres ma %d celow: %+v", len(cele), cele)
+	if len(targets) != 2 {
+		t.Fatalf("the scope has %d targets: %+v", len(targets), targets)
 	}
-	for _, cel := range cele {
-		if strings.HasPrefix(cel.Path, "/etc/pki/ca-trust/") {
-			t.Fatal("magazyn zaufania trafil do zakresu skanu")
+	for _, target := range targets {
+		if strings.HasPrefix(target.Path, "/etc/pki/ca-trust/") {
+			t.Fatal("the trust store made it into the scan scope")
 		}
 	}
 }
 
-// Lista urwana limitem musi to powiedziec: cisza w tym miejscu wyglada jak
-// host, ktory nie ma wiecej certyfikatow, a to host, o ktorego reszte nikt
-// nie zapytal.
-func TestSkanMowiOUrwanejLiscie(t *testing.T) {
-	cele := make([]Cel, 0, MaksymalnaLiczbaCertyfikatow+5)
-	for i := 0; i < MaksymalnaLiczbaCertyfikatow+5; i++ {
-		cele = append(cele, Cel{Path: fmt.Sprintf("/etc/ssl/certs/nie-ma-%d.pem", i)})
+// A list cut off by the limit must say so: silence here looks like a host
+// that has no more certificates, and it is a host nobody asked about the
+// rest.
+func TestScanReportsTruncatedList(t *testing.T) {
+	targets := make([]Target, 0, MaxCertificates+5)
+	for i := 0; i < MaxCertificates+5; i++ {
+		targets = append(targets, Target{Path: fmt.Sprintf("/etc/ssl/certs/missing-%d.pem", i)})
 	}
-	snapshot := Skanuj(cele)
-	if len(snapshot.Certificates) != MaksymalnaLiczbaCertyfikatow {
-		t.Fatalf("opisano %d celow", len(snapshot.Certificates))
+	snapshot := Scan(targets)
+	if len(snapshot.Certificates) != MaxCertificates {
+		t.Fatalf("%d targets described", len(snapshot.Certificates))
 	}
 	if snapshot.Truncated != 5 || snapshot.TruncatedReason == "" {
-		t.Errorf("urwanie listy: %d, %q", snapshot.Truncated, snapshot.TruncatedReason)
+		t.Errorf("list truncation: %d, %q", snapshot.Truncated, snapshot.TruncatedReason)
 	}
 
-	krotka := Skanuj(cele[:2])
-	if krotka.Truncated != 0 || krotka.TruncatedReason != "" {
-		t.Errorf("pelna lista opisana jako urwana: %+v", krotka)
+	short := Scan(targets[:2])
+	if short.Truncated != 0 || short.TruncatedReason != "" {
+		t.Errorf("a full list described as truncated: %+v", short)
 	}
 }

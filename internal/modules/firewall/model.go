@@ -1,44 +1,45 @@
-// Package firewall opisuje reguly zapory hosta.
+// Package firewall describes the firewall rules of a host.
 //
-// Modul czyta stan jadra, a nie pliki konfiguracyjne uslug: to, co host
-// naprawde filtruje, i to, co ktos wpisal do konfiguracji, potrafi sie
-// rozjechac - a pakiet odbija sie od pierwszego.
+// The module reads the kernel state, not the configuration files of
+// services: what the host really filters and what somebody wrote into the
+// configuration can drift apart - and a packet bounces off the former.
 package firewall
 
 import "time"
 
-// Adaptery zapory. Nazwa mowi, kto na tym hoscie trzyma reguly.
+// Firewall adapters. The name says who holds the rules on this host.
 const (
 	AdapterNftables  = "nftables"
 	AdapterFirewalld = "firewalld"
 	AdapterUFW       = "ufw"
 )
 
-// Pochodzenie reguly. Panel nie udaje, ze wszystko na hoscie jest jego.
+// Rule origin. The panel does not pretend everything on the host is its
+// own.
 const (
 	SourceManaged = "managed"
 	SourceManual  = "manual"
-	// SourceForeign oznacza tablice nalezaca do innego programu: docker,
-	// firewalld albo iptables-nft. Panel jej nie dotyka.
+	// SourceForeign marks a table belonging to another program: docker,
+	// firewalld or iptables-nft. The panel does not touch it.
 	SourceForeign = "foreign"
 )
 
-// TabelaFlotestro jest jedyna tablica, ktora panel zaklada i zmienia.
+// FlotestroTable is the only table the panel creates and changes.
 //
-// Reguly panelu zyja we wlasnej tablicy, bo zapora hosta zwykle nalezy juz
-// do kogos: docker przepisuje swoje lancuchy przy kazdym starcie kontenera,
-// a firewalld przy kazdym przeladowaniu. Wchodzenie w cudze lancuchy konczy
-// sie regula, ktora znika bez sladu.
+// The panel rules live in a table of their own, because the host firewall
+// usually belongs to somebody already: docker rewrites its chains at every
+// container start, and firewalld at every reload. Entering somebody else's
+// chains ends in a rule that vanishes without a trace.
 const (
-	RodzinaFlotestro = "inet"
-	TabelaFlotestro  = "flotestro"
+	FlotestroFamily = "inet"
+	FlotestroTable  = "flotestro"
 )
 
-// Rule to jedna regula w postaci, w jakiej pokazuje ja nft.
+// Rule is one rule in the form nft shows it.
 //
-// Tresc jest tekstem od nft, a nie zlozona przez panel: operator zna ten
-// zapis z wiersza polecen, a wlasne renderowanie rozjechaloby sie z tym,
-// co host naprawde ma.
+// The text is the text from nft, not assembled by the panel: the operator
+// knows this notation from the command line, and our own rendering would
+// drift from what the host really has.
 type Rule struct {
 	Family string `json:"family"`
 	Table  string `json:"table"`
@@ -46,42 +47,43 @@ type Rule struct {
 	Handle int    `json:"handle"`
 	Text   string `json:"text"`
 	Source string `json:"source"`
-	// Comment niesie znacznik panelu, gdy regula nalezy do Flotestro.
+	// Comment carries the panel marker when the rule belongs to Flotestro.
 	Comment string `json:"comment,omitempty"`
-	// Packets i Bytes sa licznikami reguly. Brak wartosci oznacza regule
-	// bez licznika, a nie regule, przez ktora nic nie przeszlo.
+	// Packets and Bytes are the rule counters. No value means a rule
+	// without a counter, not a rule nothing has passed through.
 	Packets *uint64 `json:"packets,omitempty"`
 	Bytes   *uint64 `json:"bytes,omitempty"`
 }
 
-// Chain to lancuch wraz z zaczepieniem i polityka.
+// Chain is a chain together with its hook and policy.
 type Chain struct {
 	Family string `json:"family"`
 	Table  string `json:"table"`
 	Name   string `json:"name"`
 	Handle int    `json:"handle"`
-	// Type, Hook i Priority sa puste dla lancuchow zwyklych: nie kazdy
-	// lancuch jest zaczepiony w sciezce pakietu.
+	// Type, Hook and Priority are empty for regular chains: not every chain
+	// is hooked into the packet path.
 	Type     string `json:"type,omitempty"`
 	Hook     string `json:"hook,omitempty"`
 	Priority string `json:"priority,omitempty"`
-	// Policy dotyczy wylacznie lancuchow bazowych. Puste oznacza brak
-	// polityki, a nie polityke "accept".
+	// Policy concerns base chains only. Empty means no policy, not the
+	// policy "accept".
 	Policy string `json:"policy,omitempty"`
 	Source string `json:"source"`
 }
 
-// Table to tablica regul wraz z jej wlascicielem.
+// Table is a rule table together with its owner.
 type Table struct {
 	Family string `json:"family"`
 	Name   string `json:"name"`
 	Handle int    `json:"handle"`
 	Source string `json:"source"`
-	// Owner niesie ostrzezenie nft o tablicy nalezacej do innego programu.
+	// Owner carries the nft warning about a table belonging to another
+	// program.
 	Owner string `json:"owner,omitempty"`
 }
 
-// Zone opisuje strefe firewalld.
+// Zone describes a firewalld zone.
 type Zone struct {
 	Name       string   `json:"name"`
 	Active     bool     `json:"active"`
@@ -93,22 +95,23 @@ type Zone struct {
 	Ports      []string `json:"ports,omitempty"`
 }
 
-// Snapshot to obraz zapory hosta w jednej chwili.
+// Snapshot is the picture of the host firewall at one moment.
 type Snapshot struct {
-	// Adapter nazywa mechanizm, ktory na tym hoscie trzyma reguly.
+	// Adapter names the mechanism that holds the rules on this host.
 	Adapter string `json:"adapter,omitempty"`
-	// Hash jest odciskiem calego zestawu regul. Zmiana zlecona wobec innego
-	// zestawu nie jest ta sama zmiana, ktora operator ogladal.
+	// Hash is the fingerprint of the whole ruleset. A change ordered
+	// against a different ruleset is not the same change the operator
+	// viewed.
 	Hash   string  `json:"hash,omitempty"`
 	Tables []Table `json:"tables,omitempty"`
 	Chains []Chain `json:"chains,omitempty"`
 	Rules  []Rule  `json:"rules,omitempty"`
 	Zones  []Zone  `json:"zones,omitempty"`
-	// Writable mowi, czy panel potrafi tu cokolwiek zmienic i dlaczego nie.
+	// Writable says whether the panel can change anything here and why not.
 	Writable       bool      `json:"writable"`
 	ReadOnlyReason string    `json:"read_only_reason,omitempty"`
 	ObservedAt     time.Time `json:"observed_at"`
-	// UnavailableReason mowi, dlaczego stanu nie udalo sie ustalic. Host bez
-	// regul i host nieodpytany to dwie rozne odpowiedzi.
+	// UnavailableReason says why the state could not be determined. A host
+	// without rules and a host not asked are two different answers.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }

@@ -16,28 +16,29 @@ import (
 	"time"
 )
 
-// SocketPaths to miejsca, w ktorych szukamy gniazda silnika.
+// SocketPaths are the places where the engine socket is looked for.
 var SocketPaths = []string{"/run/docker.sock", "/var/run/docker.sock"}
 
-// apiVersion jest przypieta swiadomie. Bez przypiecia silnik odpowiada wersja
-// domyslna, ktora zmienia sie z aktualizacja Dockera - a wtedy zmienia sie
-// znaczenie pol, ktore czytamy, i nikt tego nie zauwaza.
+// apiVersion is pinned deliberately. Without pinning the engine answers
+// with the default version, which changes with a Docker update - and then
+// the meaning of the fields being read changes and nobody notices.
 const apiVersion = "v1.41"
 
-// ErrUnavailable oznacza silnik, ktorego nie da sie odpytac.
-var ErrUnavailable = errors.New("silnik kontenerow jest niedostepny")
+// ErrUnavailable means an engine that cannot be queried.
+var ErrUnavailable = errors.New("the container engine is unavailable")
 
-// Client rozmawia z Engine API po gniezdzie unixowym.
+// Client talks to the Engine API over a unix socket.
 //
-// Klient nie przyjmuje dowolnej sciezki. Kazda operacja ma wlasna metode
-// i wlasne parametry: przekazanie sciezki z zewnatrz oznaczaloby, ze przez
-// helpera da sie wywolac dowolne API silnika, a to jest rownowazne rootowi.
+// The client does not accept an arbitrary path. Every operation has its
+// own method and its own parameters: passing a path from outside would mean
+// any engine API could be called through the helper, and that is
+// equivalent to root.
 type Client struct {
 	http   *http.Client
 	socket string
 }
 
-// New tworzy klienta dla pierwszego znalezionego gniazda.
+// New creates a client for the first socket found.
 func New() (*Client, error) {
 	for _, path := range SocketPaths {
 		info, err := os.Stat(path)
@@ -46,10 +47,10 @@ func New() (*Client, error) {
 		}
 		return NewAt(path), nil
 	}
-	return nil, fmt.Errorf("%w: brak gniazda silnika", ErrUnavailable)
+	return nil, fmt.Errorf("%w: no engine socket", ErrUnavailable)
 }
 
-// NewAt tworzy klienta dla wskazanego gniazda.
+// NewAt creates a client for the given socket.
 func NewAt(socket string) *Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	return &Client{
@@ -59,8 +60,8 @@ func NewAt(socket string) *Client {
 				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 					return dialer.DialContext(ctx, "unix", socket)
 				},
-				// Silnik jest lokalny; zadne z tych polaczen nie wychodzi
-				// poza host, wiec pula moze byc mala.
+				// The engine is local; none of these connections leaves the
+				// host, so the pool can be small.
 				MaxIdleConns:    2,
 				IdleConnTimeout: 30 * time.Second,
 			},
@@ -68,20 +69,20 @@ func NewAt(socket string) *Client {
 	}
 }
 
-// Version zwraca wersje silnika i wersje jego API.
+// Version returns the engine version and its API version.
 func (c *Client) Version(ctx context.Context) (engine, api string, err error) {
-	var wynik struct {
+	var result struct {
 		Version    string `json:"Version"`
 		APIVersion string `json:"ApiVersion"`
 	}
-	if err := c.get(ctx, "/version", nil, &wynik); err != nil {
+	if err := c.get(ctx, "/version", nil, &result); err != nil {
 		return "", "", err
 	}
-	return wynik.Version, wynik.APIVersion, nil
+	return result.Version, result.APIVersion, nil
 }
 
-// get wykonuje zapytanie do sciezki zbudowanej w tym pakiecie. Sciezka nigdy
-// nie pochodzi z zewnatrz modulu.
+// get performs a query to a path built in this package. The path never
+// comes from outside the module.
 func (c *Client) get(ctx context.Context, path string, query url.Values, out any) error {
 	return c.call(ctx, http.MethodGet, path, query, out)
 }
@@ -97,37 +98,38 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrUnavailable, skrocBlad(err))
+		return fmt.Errorf("%w: %s", ErrUnavailable, shortenError(err))
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode >= 400 {
-		// Tresc bledu silnika bywa dluga; do wyniku trafia jej poczatek,
-		// zeby komunikat pozostal czytelny.
+		// The engine error text can be long; its beginning goes into the
+		// result so the message stays readable.
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-		return fmt.Errorf("silnik odpowiedzial %d: %s",
+		return fmt.Errorf("the engine answered %d: %s",
 			response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if out == nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
 		return nil
 	}
-	// Odpowiedzi silnika bywaja duze: lista obrazow na hoscie budowlanym
-	// potrafi miec megabajty. Limit chroni pamiec agenta i helpera.
+	// Engine responses can be big: the image list on a build host can run
+	// to megabytes. The limit protects the memory of the agent and the
+	// helper.
 	return json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(out)
 }
 
-// errLimitRozmiaru oznacza strumien urwany limitem, a nie awarie odczytu.
-var errLimitRozmiaru = errors.New("osiagnieto limit rozmiaru odczytu")
+// errSizeLimit means a stream cut off by the limit, not a read failure.
+var errSizeLimit = errors.New("the read size limit was reached")
 
-// strumien czyta odpowiedz linia po linii i oddaje kazda do wywolania.
+// stream reads the response line by line and hands each to the callback.
 //
-// Sluzy jedynemu zapytaniu, ktore odpowiada strumieniem zamiast jedna
-// wartoscia: dziennikowi zdarzen. Limit bajtow jest twardy - host, na ktorym
-// cos wstaje w petli, potrafi wyprodukowac zdarzenia szybciej, niz panel
-// zdazy je przeczytac. Zwrocenie false przez wywolanie konczy odczyt.
-func (c *Client) strumien(ctx context.Context, path string, query url.Values,
-	dalej func(linia []byte) bool, limitBajtow int64) error {
+// It serves the only query that answers with a stream instead of one value:
+// the event log. The byte limit is hard - a host on which something comes
+// up in a loop can produce events faster than the panel can read them. The
+// callback returning false ends the read.
+func (c *Client) stream(ctx context.Context, path string, query url.Values,
+	next func(line []byte) bool, byteLimit int64) error {
 	target := "http://docker/" + apiVersion + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
@@ -138,57 +140,57 @@ func (c *Client) strumien(ctx context.Context, path string, query url.Values,
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrUnavailable, skrocBlad(err))
+		return fmt.Errorf("%w: %s", ErrUnavailable, shortenError(err))
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-		return fmt.Errorf("silnik odpowiedzial %d: %s",
+		return fmt.Errorf("the engine answered %d: %s",
 			response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	czytnik := bufio.NewScanner(io.LimitReader(response.Body, limitBajtow))
-	// Pojedyncze zdarzenie bywa dlugie: silnik dokleda do niego wszystkie
-	// etykiety obiektu.
-	czytnik.Buffer(make([]byte, 0, 8<<10), 256<<10)
-	var przeczytane int64
-	for czytnik.Scan() {
-		linia := czytnik.Bytes()
-		przeczytane += int64(len(linia)) + 1
-		if len(linia) == 0 {
+	scanner := bufio.NewScanner(io.LimitReader(response.Body, byteLimit))
+	// A single event can be long: the engine attaches all the object's
+	// labels to it.
+	scanner.Buffer(make([]byte, 0, 8<<10), 256<<10)
+	var read int64
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		read += int64(len(line)) + 1
+		if len(line) == 0 {
 			continue
 		}
-		if !dalej(linia) {
+		if !next(line) {
 			return nil
 		}
 	}
-	if err := czytnik.Err(); err != nil {
+	if err := scanner.Err(); err != nil {
 		return err
 	}
-	if przeczytane >= limitBajtow {
-		return errLimitRozmiaru
+	if read >= byteLimit {
+		return errSizeLimit
 	}
 	return nil
 }
 
-// skrocBlad usuwa z komunikatu powtarzalny prefiks transportu HTTP, ktory nic
-// nie wnosi dla operatora.
-func skrocBlad(err error) string {
-	tekst := err.Error()
-	if index := strings.LastIndex(tekst, ": "); index > 0 && index+2 < len(tekst) {
-		return tekst[index+2:]
+// shortenError strips the repetitive HTTP transport prefix that adds
+// nothing for the operator from the message.
+func shortenError(err error) string {
+	text := err.Error()
+	if index := strings.LastIndex(text, ": "); index > 0 && index+2 < len(text) {
+		return text[index+2:]
 	}
-	return tekst
+	return text
 }
 
-// Containers zwraca kontenery hosta. all obejmuje takze zatrzymane: kontener
-// zatrzymany jest faktem o hoscie, a nie jego brakiem.
+// Containers returns the host containers. all includes stopped ones too: a
+// stopped container is a fact about the host, not its absence.
 func (c *Client) Containers(ctx context.Context, all bool) ([]Container, error) {
 	query := url.Values{}
 	if all {
 		query.Set("all", "1")
 	}
-	var surowe []struct {
+	var raw []struct {
 		ID      string            `json:"Id"`
 		Names   []string          `json:"Names"`
 		Image   string            `json:"Image"`
@@ -219,57 +221,58 @@ func (c *Client) Containers(ctx context.Context, all bool) ([]Container, error) 
 			} `json:"Networks"`
 		} `json:"NetworkSettings"`
 	}
-	if err := c.get(ctx, "/containers/json", query, &surowe); err != nil {
+	if err := c.get(ctx, "/containers/json", query, &raw); err != nil {
 		return nil, err
 	}
 
-	kontenery := make([]Container, 0, len(surowe))
-	for _, wpis := range surowe {
-		kontener := Container{
-			ID:          wpis.ID,
-			Name:        nazwaKontenera(wpis.Names),
-			Image:       wpis.Image,
-			ImageDigest: wpis.ImageID,
-			State:       wpis.State,
-			Status:      wpis.Status,
-			CreatedAt:   time.Unix(wpis.Created, 0).UTC(),
-			Labels:      etykietyBezSekretow(wpis.Labels),
-			Compose:     przynaleznoscCompose(wpis.Labels),
+	containers := make([]Container, 0, len(raw))
+	for _, entry := range raw {
+		container := Container{
+			ID:          entry.ID,
+			Name:        containerName(entry.Names),
+			Image:       entry.Image,
+			ImageDigest: entry.ImageID,
+			State:       entry.State,
+			Status:      entry.Status,
+			CreatedAt:   time.Unix(entry.Created, 0).UTC(),
+			Labels:      labelsWithoutSecrets(entry.Labels),
+			Compose:     composeMembership(entry.Labels),
 		}
-		for _, port := range wpis.Ports {
-			kontener.Ports = append(kontener.Ports, Port{
+		for _, port := range entry.Ports {
+			container.Ports = append(container.Ports, Port{
 				HostIP: port.IP, HostPort: port.PublicPort,
 				ContainerPort: port.PrivatePort, Protocol: port.Type,
 			})
 		}
-		for _, mount := range wpis.Mounts {
-			kontener.Mounts = append(kontener.Mounts, Mount{
+		for _, mount := range entry.Mounts {
+			container.Mounts = append(container.Mounts, Mount{
 				Type: mount.Type, Name: mount.Name, Source: mount.Source,
 				Destination: mount.Destination, ReadOnly: !mount.RW,
 			})
 		}
-		// Przynaleznosc do sieci czytamy stad, a nie z listy sieci: silnik
-		// w liscie sieci zwraca pusta mape kontenerow, wiec kazda siec
-		// wygladalaby na nieuzywana.
-		for nazwa, siec := range wpis.NetworkSettings.Networks {
-			kontener.Networks = append(kontener.Networks, ContainerNetwork{
-				Name: nazwa, ID: siec.NetworkID, IPv4: siec.IPAddress,
-				IPv6: siec.GlobalIPv6Address, Aliases: siec.Aliases,
+		// Network membership is read from here, not from the network list:
+		// the engine returns an empty container map in the network list, so
+		// every network would look unused.
+		for name, network := range entry.NetworkSettings.Networks {
+			container.Networks = append(container.Networks, ContainerNetwork{
+				Name: name, ID: network.NetworkID, IPv4: network.IPAddress,
+				IPv6: network.GlobalIPv6Address, Aliases: network.Aliases,
 			})
 		}
-		sort.Slice(kontener.Networks, func(i, j int) bool {
-			return kontener.Networks[i].Name < kontener.Networks[j].Name
+		sort.Slice(container.Networks, func(i, j int) bool {
+			return container.Networks[i].Name < container.Networks[j].Name
 		})
-		kontenery = append(kontenery, kontener)
+		containers = append(containers, container)
 	}
-	return kontenery, nil
+	return containers, nil
 }
 
-// Inspect uzupelnia kontener o dane, ktorych lista nie podaje: stan zdrowia
-// i licznik restartow. Odpytywane sa wylacznie kontenery, dla ktorych to ma
-// znaczenie - pelny inspect calej listy przy kazdym cyklu obciazalby host.
+// Inspect supplements a container with data the list does not report: the
+// health state and the restart counter. Only the containers for which it
+// matters are queried - a full inspect of the whole list at every cycle
+// would load the host.
 func (c *Client) Inspect(ctx context.Context, id string) (health string, restarts int, err error) {
-	var szczegoly struct {
+	var details struct {
 		RestartCount int `json:"RestartCount"`
 		State        struct {
 			Health *struct {
@@ -277,18 +280,18 @@ func (c *Client) Inspect(ctx context.Context, id string) (health string, restart
 			} `json:"Health"`
 		} `json:"State"`
 	}
-	if err := c.get(ctx, "/containers/"+id+"/json", nil, &szczegoly); err != nil {
+	if err := c.get(ctx, "/containers/"+id+"/json", nil, &details); err != nil {
 		return "", 0, err
 	}
-	if szczegoly.State.Health != nil {
-		health = szczegoly.State.Health.Status
+	if details.State.Health != nil {
+		health = details.State.Health.Status
 	}
-	return health, szczegoly.RestartCount, nil
+	return health, details.RestartCount, nil
 }
 
-// Images zwraca obrazy obecne na hoscie.
+// Images returns the images present on the host.
 func (c *Client) Images(ctx context.Context) ([]Image, error) {
-	var surowe []struct {
+	var raw []struct {
 		ID         string   `json:"Id"`
 		RepoTags   []string `json:"RepoTags"`
 		RepoDig    []string `json:"RepoDigests"`
@@ -296,30 +299,30 @@ func (c *Client) Images(ctx context.Context) ([]Image, error) {
 		Created    int64    `json:"Created"`
 		Containers int64    `json:"Containers"`
 	}
-	if err := c.get(ctx, "/images/json", nil, &surowe); err != nil {
+	if err := c.get(ctx, "/images/json", nil, &raw); err != nil {
 		return nil, err
 	}
-	obrazy := make([]Image, 0, len(surowe))
-	for _, wpis := range surowe {
-		obrazy = append(obrazy, Image{
-			ID: wpis.ID, Tags: pomijajBezTagu(wpis.RepoTags), Digests: wpis.RepoDig,
-			SizeBytes: wpis.Size, CreatedAt: time.Unix(wpis.Created, 0).UTC(),
-			// Silnik zwraca -1, gdy liczby kontenerow nie policzono. Nieznane
-			// uzycie nie moze wygladac jak obraz nieuzywany, bo to on trafia
-			// pod sprzatanie.
-			InUse: wpis.Containers != 0,
+	images := make([]Image, 0, len(raw))
+	for _, entry := range raw {
+		images = append(images, Image{
+			ID: entry.ID, Tags: skipUntagged(entry.RepoTags), Digests: entry.RepoDig,
+			SizeBytes: entry.Size, CreatedAt: time.Unix(entry.Created, 0).UTC(),
+			// The engine returns -1 when the container count was not
+			// computed. Unknown usage must not look like an unused image,
+			// because that is the one that goes under the prune.
+			InUse: entry.Containers != 0,
 		})
 	}
-	return obrazy, nil
+	return images, nil
 }
 
-// Networks zwraca sieci Dockera.
+// Networks returns the Docker networks.
 //
-// Uzycie sieci nie pochodzi stad: silnik w liscie sieci zwraca pusta mape
-// kontenerow, wiec kazda siec wygladalaby na nieuzywana. Wylicza je kolektor
-// z listy kontenerow.
+// Network usage does not come from here: the engine returns an empty
+// container map in the network list, so every network would look unused.
+// The collector derives it from the container list.
 func (c *Client) Networks(ctx context.Context) ([]Network, error) {
-	var surowe []struct {
+	var raw []struct {
 		ID         string    `json:"Id"`
 		Name       string    `json:"Name"`
 		Driver     string    `json:"Driver"`
@@ -337,51 +340,52 @@ func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 		} `json:"IPAM"`
 		Labels map[string]string `json:"Labels"`
 	}
-	if err := c.get(ctx, "/networks", nil, &surowe); err != nil {
+	if err := c.get(ctx, "/networks", nil, &raw); err != nil {
 		return nil, err
 	}
-	sieci := make([]Network, 0, len(surowe))
-	for _, wpis := range surowe {
-		siec := Network{
-			ID: wpis.ID, Name: wpis.Name, Driver: wpis.Driver, Scope: wpis.Scope,
-			CreatedAt: wpis.Created.UTC(), IPv6: wpis.EnableIPv6,
-			Internal: wpis.Internal, Attachable: wpis.Attachable, Ingress: wpis.Ingress,
-			Labels:     etykietyBezSekretow(wpis.Labels),
-			Predefined: siecWbudowana(wpis.Name),
-			Compose:    wpis.Labels["com.docker.compose.project"],
+	networks := make([]Network, 0, len(raw))
+	for _, entry := range raw {
+		network := Network{
+			ID: entry.ID, Name: entry.Name, Driver: entry.Driver, Scope: entry.Scope,
+			CreatedAt: entry.Created.UTC(), IPv6: entry.EnableIPv6,
+			Internal: entry.Internal, Attachable: entry.Attachable, Ingress: entry.Ingress,
+			Labels:     labelsWithoutSecrets(entry.Labels),
+			Predefined: predefinedNetwork(entry.Name),
+			Compose:    entry.Labels["com.docker.compose.project"],
 		}
-		for _, config := range wpis.IPAM.Config {
+		for _, config := range entry.IPAM.Config {
 			if config.Subnet != "" {
-				siec.Subnets = append(siec.Subnets, config.Subnet)
+				network.Subnets = append(network.Subnets, config.Subnet)
 			}
 			if config.Gateway != "" {
-				siec.Gateways = append(siec.Gateways, config.Gateway)
+				network.Gateways = append(network.Gateways, config.Gateway)
 			}
 		}
-		sieci = append(sieci, siec)
+		networks = append(networks, network)
 	}
-	sort.Slice(sieci, func(i, j int) bool { return sieci[i].Name < sieci[j].Name })
-	return sieci, nil
+	sort.Slice(networks, func(i, j int) bool { return networks[i].Name < networks[j].Name })
+	return networks, nil
 }
 
-// siecWbudowana mowi, czy siec nalezy do silnika. Silnik nie pozwala jej
-// usunac, wiec panel nie moze tego proponowac ani probowac.
-func siecWbudowana(nazwa string) bool {
-	switch nazwa {
+// predefinedNetwork says whether the network belongs to the engine. The
+// engine does not allow removing it, so the panel must neither propose nor
+// try that.
+func predefinedNetwork(name string) bool {
+	switch name {
 	case "bridge", "host", "none":
 		return true
 	}
 	return false
 }
 
-// Volumes zwraca wolumeny Dockera.
+// Volumes returns the Docker volumes.
 //
-// Uzycie i rozmiar nie pochodza z tego zapytania: silnik podaje UsageData
-// tylko przy osobnym, drogim rachunku miejsca. Uzycie wylicza kolektor
-// z montowan kontenerow, a rozmiar zostaje nieznany z podanym powodem -
-// zero sugerowaloby wolumen pusty i gotowy do skasowania.
+// Usage and size do not come from this query: the engine reports UsageData
+// only with a separate, expensive disk usage computation. The collector
+// derives usage from the container mounts, and the size stays unknown with
+// a stated reason - zero would suggest an empty volume ready to be deleted.
 func (c *Client) Volumes(ctx context.Context) ([]Volume, error) {
-	var odpowiedz struct {
+	var response struct {
 		Volumes []struct {
 			Name       string            `json:"Name"`
 			Driver     string            `json:"Driver"`
@@ -396,89 +400,90 @@ func (c *Client) Volumes(ctx context.Context) ([]Volume, error) {
 			} `json:"UsageData"`
 		} `json:"Volumes"`
 	}
-	if err := c.get(ctx, "/volumes", nil, &odpowiedz); err != nil {
+	if err := c.get(ctx, "/volumes", nil, &response); err != nil {
 		return nil, err
 	}
-	wolumeny := make([]Volume, 0, len(odpowiedz.Volumes))
-	for _, wpis := range odpowiedz.Volumes {
-		wolumen := Volume{
-			Name: wpis.Name, Driver: wpis.Driver, Mountpoint: wpis.Mountpoint,
-			Scope: wpis.Scope, CreatedAt: wpis.CreatedAt.UTC(),
-			Labels:  etykietyBezSekretow(wpis.Labels),
-			Options: wpis.Options,
-			Compose: wpis.Labels["com.docker.compose.project"],
-			// Rozmiar liczy sie przejsciem po calym wolumenie, wiec silnik
-			// nie podaje go w tym zapytaniu.
-			SizeReason: "silnik nie podaje rozmiaru bez rachunku miejsca",
+	volumes := make([]Volume, 0, len(response.Volumes))
+	for _, entry := range response.Volumes {
+		volume := Volume{
+			Name: entry.Name, Driver: entry.Driver, Mountpoint: entry.Mountpoint,
+			Scope: entry.Scope, CreatedAt: entry.CreatedAt.UTC(),
+			Labels:  labelsWithoutSecrets(entry.Labels),
+			Options: entry.Options,
+			Compose: entry.Labels["com.docker.compose.project"],
+			// The size is computed by walking the whole volume, so the
+			// engine does not report it in this query.
+			SizeReason: "the engine does not report the size without a disk usage computation",
 		}
-		if wpis.UsageData != nil && wpis.UsageData.Size >= 0 {
-			rozmiar := wpis.UsageData.Size
-			wolumen.SizeBytes = &rozmiar
-			wolumen.SizeReason = ""
+		if entry.UsageData != nil && entry.UsageData.Size >= 0 {
+			size := entry.UsageData.Size
+			volume.SizeBytes = &size
+			volume.SizeReason = ""
 		}
-		wolumeny = append(wolumeny, wolumen)
+		volumes = append(volumes, volume)
 	}
-	sort.Slice(wolumeny, func(i, j int) bool { return wolumeny[i].Name < wolumeny[j].Name })
-	return wolumeny, nil
+	sort.Slice(volumes, func(i, j int) bool { return volumes[i].Name < volumes[j].Name })
+	return volumes, nil
 }
 
-// nazwaKontenera bierze pierwsza nazwe i obcina wiodacy ukosnik, ktory silnik
-// dokleja do kazdej.
-func nazwaKontenera(nazwy []string) string {
-	if len(nazwy) == 0 {
+// containerName takes the first name and trims the leading slash the engine
+// attaches to each.
+func containerName(names []string) string {
+	if len(names) == 0 {
 		return ""
 	}
-	return strings.TrimPrefix(nazwy[0], "/")
+	return strings.TrimPrefix(names[0], "/")
 }
 
-func pomijajBezTagu(tagi []string) []string {
-	var wynik []string
-	for _, tag := range tagi {
+func skipUntagged(tags []string) []string {
+	var result []string
+	for _, tag := range tags {
 		if tag != "<none>:<none>" && tag != "" {
-			wynik = append(wynik, tag)
+			result = append(result, tag)
 		}
 	}
-	return wynik
+	return result
 }
 
-// przynaleznoscCompose czyta etykiety, ktorymi Compose oznacza swoje kontenery.
-func przynaleznoscCompose(etykiety map[string]string) *ComposeMembership {
-	projekt := etykiety["com.docker.compose.project"]
-	if projekt == "" {
+// composeMembership reads the labels Compose marks its containers with.
+func composeMembership(labels map[string]string) *ComposeMembership {
+	project := labels["com.docker.compose.project"]
+	if project == "" {
 		return nil
 	}
 	return &ComposeMembership{
-		Project:     projekt,
-		Service:     etykiety["com.docker.compose.service"],
-		ConfigFiles: etykiety["com.docker.compose.project.config_files"],
-		WorkingDir:  etykiety["com.docker.compose.project.working_dir"],
+		Project:     project,
+		Service:     labels["com.docker.compose.service"],
+		ConfigFiles: labels["com.docker.compose.project.config_files"],
+		WorkingDir:  labels["com.docker.compose.project.working_dir"],
 	}
 }
 
-// etykietyBezSekretow odsiewa etykiety, ktore z nazwy niosa poswiadczenie.
+// labelsWithoutSecrets filters out labels whose name suggests a credential.
 //
-// Silnik nie odroznia etykiety zwyklej od tajnej, wiec robimy to po nazwie.
-// Wartosci zmiennych srodowiskowych nie zbieramy w ogole - to tam trafiaja
-// hasla, a inventory jest trwale i widoczne szerzej niz sam host.
-func etykietyBezSekretow(etykiety map[string]string) map[string]string {
-	if len(etykiety) == 0 {
+// The engine does not distinguish a plain label from a secret one, so it is
+// done by name. Environment variable values are not collected at all - that
+// is where passwords go, and the inventory is durable and visible more
+// widely than the host itself.
+func labelsWithoutSecrets(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
 		return nil
 	}
-	wynik := make(map[string]string, len(etykiety))
-	for klucz, wartosc := range etykiety {
-		if wygladaNaSekret(klucz) {
-			wynik[klucz] = "[ukryte]"
+	result := make(map[string]string, len(labels))
+	for key, value := range labels {
+		if looksLikeSecret(key) {
+			result[key] = "[hidden]"
 			continue
 		}
-		wynik[klucz] = wartosc
+		result[key] = value
 	}
-	return wynik
+	return result
 }
 
-func wygladaNaSekret(klucz string) bool {
-	male := strings.ToLower(klucz)
-	for _, wzorzec := range []string{"secret", "password", "passwd", "token", "apikey", "api_key", "credential"} {
-		if strings.Contains(male, wzorzec) {
+func looksLikeSecret(key string) bool {
+	lowered := strings.ToLower(key)
+	for _, pattern := range []string{"secret", "password", "passwd", "token", "apikey", "api_key", "credential"} {
+		if strings.Contains(lowered, pattern) {
 			return true
 		}
 	}

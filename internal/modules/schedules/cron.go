@@ -7,28 +7,28 @@ import (
 	"time"
 )
 
-// Wyrazenie crona ma piec pol: minuta, godzina, dzien miesiaca, miesiac,
-// dzien tygodnia.
-const polCrona = 5
+// A cron expression has five fields: minute, hour, day of month, month, day
+// of week.
+const cronFields = 5
 
-// zakresy opisuja dopuszczalne wartosci kolejnych pol.
-var zakresy = [polCrona]struct{ min, max int }{
+// ranges describe the allowed values of the consecutive fields.
+var ranges = [cronFields]struct{ min, max int }{
 	{0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7},
 }
 
-// Wyrazenie to sparsowane wyrazenie crona.
-type Wyrazenie struct {
-	// dozwolone[i] zawiera wartosci dopuszczone w polu i.
-	dozwolone [polCrona]map[int]bool
-	// dzienMiesiacaGwiazdka i dzienTygodniaGwiazdka sa potrzebne, bo cron
-	// traktuje te dwa pola inaczej niz reszte: gdy oba sa ograniczone,
-	// zadanie uruchamia sie, gdy pasuje ktorekolwiek, a nie oba naraz.
-	dzienMiesiacaGwiazdka bool
-	dzienTygodniaGwiazdka bool
+// Expression is a parsed cron expression.
+type Expression struct {
+	// allowed[i] holds the values permitted in field i.
+	allowed [cronFields]map[int]bool
+	// dayOfMonthStar and dayOfWeekStar are needed because cron treats these
+	// two fields differently from the rest: when both are restricted, the
+	// job runs when either matches, not both at once.
+	dayOfMonthStar bool
+	dayOfWeekStar  bool
 }
 
-// Skroty przyjmowane przez crona zamiast pieciu pol.
-var skroty = map[string]string{
+// Shortcuts cron accepts instead of the five fields.
+var shortcuts = map[string]string{
 	"@yearly":   "0 0 1 1 *",
 	"@annually": "0 0 1 1 *",
 	"@monthly":  "0 0 1 * *",
@@ -38,140 +38,142 @@ var skroty = map[string]string{
 	"@hourly":   "0 * * * *",
 }
 
-// ParsujWyrazenie czyta wyrazenie crona.
+// ParseExpression reads a cron expression.
 //
-// Parser jest wlasny, bo wyrazenie trzeba sprawdzic przed zapisem na hoscie
-// i policzyc z niego nastepne uruchomienia dla operatora. Wyrazenie, ktorego
-// panel nie rozumie, nie zostaje zapisane: wpis, ktory nigdy sie nie
-// uruchomi, jest gorszy niz jego brak, bo wyglada jak dzialajacy.
-func ParsujWyrazenie(wyrazenie string) (Wyrazenie, error) {
-	wyrazenie = strings.TrimSpace(wyrazenie)
-	if rozwiniete, ok := skroty[strings.ToLower(wyrazenie)]; ok {
-		wyrazenie = rozwiniete
+// The parser is our own, because the expression has to be checked before
+// the write on the host and the next runs computed from it for the
+// operator. An expression the panel does not understand is not written: an
+// entry that never runs is worse than none, because it looks like a working
+// one.
+func ParseExpression(expression string) (Expression, error) {
+	expression = strings.TrimSpace(expression)
+	if expanded, ok := shortcuts[strings.ToLower(expression)]; ok {
+		expression = expanded
 	}
-	if strings.HasPrefix(wyrazenie, "@") {
-		// @reboot nie ma nastepnego uruchomienia w kalendarzu, wiec panel
-		// nie potrafilby go pokazac ani zaplanowac.
-		return Wyrazenie{}, fmt.Errorf("nieobslugiwane wyrazenie %q", wyrazenie)
-	}
-
-	pola := strings.Fields(wyrazenie)
-	if len(pola) != polCrona {
-		return Wyrazenie{}, fmt.Errorf("wyrazenie crona ma miec %d pol, ma %d", polCrona, len(pola))
+	if strings.HasPrefix(expression, "@") {
+		// @reboot has no next run in the calendar, so the panel could
+		// neither show nor plan it.
+		return Expression{}, fmt.Errorf("unsupported expression %q", expression)
 	}
 
-	var wynik Wyrazenie
-	wynik.dzienMiesiacaGwiazdka = pola[2] == "*"
-	wynik.dzienTygodniaGwiazdka = pola[4] == "*"
-	for i, pole := range pola {
-		dozwolone, err := parsujPole(pole, zakresy[i].min, zakresy[i].max)
+	fields := strings.Fields(expression)
+	if len(fields) != cronFields {
+		return Expression{}, fmt.Errorf("a cron expression must have %d fields, has %d", cronFields, len(fields))
+	}
+
+	var result Expression
+	result.dayOfMonthStar = fields[2] == "*"
+	result.dayOfWeekStar = fields[4] == "*"
+	for i, field := range fields {
+		allowed, err := parseField(field, ranges[i].min, ranges[i].max)
 		if err != nil {
-			return Wyrazenie{}, fmt.Errorf("pole %d (%q): %w", i+1, pole, err)
+			return Expression{}, fmt.Errorf("field %d (%q): %w", i+1, field, err)
 		}
-		wynik.dozwolone[i] = dozwolone
+		result.allowed[i] = allowed
 	}
-	// Niedziela ma w cronie dwa numery. Bez tego "0" i "7" opisywalyby rozne
-	// dni, choc oznaczaja ten sam.
-	if wynik.dozwolone[4][7] {
-		wynik.dozwolone[4][0] = true
+	// Sunday has two numbers in cron. Without this "0" and "7" would
+	// describe different days, although they mean the same one.
+	if result.allowed[4][7] {
+		result.allowed[4][0] = true
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// parsujPole czyta jedno pole: gwiazdke, liczbe, zakres, liste albo krok.
-func parsujPole(pole string, min, max int) (map[int]bool, error) {
-	dozwolone := map[int]bool{}
-	for _, czesc := range strings.Split(pole, ",") {
-		krok := 1
-		if index := strings.Index(czesc, "/"); index >= 0 {
-			wartosc, err := strconv.Atoi(czesc[index+1:])
-			if err != nil || wartosc <= 0 {
-				return nil, fmt.Errorf("nieprawidlowy krok %q", czesc[index+1:])
+// parseField reads one field: an asterisk, a number, a range, a list or a
+// step.
+func parseField(field string, min, max int) (map[int]bool, error) {
+	allowed := map[int]bool{}
+	for _, part := range strings.Split(field, ",") {
+		step := 1
+		if index := strings.Index(part, "/"); index >= 0 {
+			value, err := strconv.Atoi(part[index+1:])
+			if err != nil || value <= 0 {
+				return nil, fmt.Errorf("invalid step %q", part[index+1:])
 			}
-			krok = wartosc
-			czesc = czesc[:index]
+			step = value
+			part = part[:index]
 		}
 
-		od, do_ := min, max
+		from, to := min, max
 		switch {
-		case czesc == "*" || czesc == "":
-		case strings.Contains(czesc, "-"):
-			granice := strings.SplitN(czesc, "-", 2)
-			poczatek, err1 := strconv.Atoi(granice[0])
-			koniec, err2 := strconv.Atoi(granice[1])
+		case part == "*" || part == "":
+		case strings.Contains(part, "-"):
+			bounds := strings.SplitN(part, "-", 2)
+			start, err1 := strconv.Atoi(bounds[0])
+			end, err2 := strconv.Atoi(bounds[1])
 			if err1 != nil || err2 != nil {
-				return nil, fmt.Errorf("nieprawidlowy zakres %q", czesc)
+				return nil, fmt.Errorf("invalid range %q", part)
 			}
-			od, do_ = poczatek, koniec
+			from, to = start, end
 		default:
-			wartosc, err := strconv.Atoi(czesc)
+			value, err := strconv.Atoi(part)
 			if err != nil {
-				return nil, fmt.Errorf("nieprawidlowa wartosc %q", czesc)
+				return nil, fmt.Errorf("invalid value %q", part)
 			}
-			od, do_ = wartosc, wartosc
+			from, to = value, value
 		}
-		if od < min || do_ > max || od > do_ {
-			return nil, fmt.Errorf("wartosc poza zakresem %d-%d", min, max)
+		if from < min || to > max || from > to {
+			return nil, fmt.Errorf("value outside the range %d-%d", min, max)
 		}
-		for wartosc := od; wartosc <= do_; wartosc += krok {
-			dozwolone[wartosc] = true
+		for value := from; value <= to; value += step {
+			allowed[value] = true
 		}
 	}
-	if len(dozwolone) == 0 {
-		return nil, fmt.Errorf("pole nie dopuszcza zadnej wartosci")
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("the field allows no value")
 	}
-	return dozwolone, nil
+	return allowed, nil
 }
 
-// maksymalneSzukanie ogranicza wyszukiwanie nastepnego uruchomienia.
-// Wyrazenie w rodzaju "0 0 30 2 *" nigdy nie pasuje - zamiast szukac
-// w nieskonczonosc, mowimy wprost, ze terminu nie ma.
-const maksymalneSzukanie = 4 * 365 * 24 * time.Hour
+// maxSearch bounds the search for the next run. An expression like
+// "0 0 30 2 *" never matches - instead of searching forever, it is said
+// directly that there is no date.
+const maxSearch = 4 * 365 * 24 * time.Hour
 
-// NastepneUruchomienia zwraca kolejne terminy po podanej chwili.
+// NextRuns returns the consecutive dates after the given moment.
 //
-// Terminy sa liczone na hoscie i w jego strefie czasowej: panel nie zna ani
-// jednej, ani drugiej, a "03:00" bez strefy nie znaczy nic konkretnego.
-func (w Wyrazenie) NastepneUruchomienia(po time.Time, ile int) []time.Time {
-	if ile <= 0 {
-		ile = 1
+// The dates are computed on the host and in its time zone: the panel knows
+// neither, and "03:00" without a zone means nothing specific.
+func (e Expression) NextRuns(after time.Time, count int) []time.Time {
+	if count <= 0 {
+		count = 1
 	}
-	var wyniki []time.Time
-	chwila := po.Truncate(time.Minute)
-	koniec := po.Add(maksymalneSzukanie)
+	var results []time.Time
+	moment := after.Truncate(time.Minute)
+	end := after.Add(maxSearch)
 
-	for len(wyniki) < ile && chwila.Before(koniec) {
-		chwila = chwila.Add(time.Minute)
-		if w.pasuje(chwila) {
-			wyniki = append(wyniki, chwila)
+	for len(results) < count && moment.Before(end) {
+		moment = moment.Add(time.Minute)
+		if e.matches(moment) {
+			results = append(results, moment)
 		}
 	}
-	return wyniki
+	return results
 }
 
-// pasuje sprawdza, czy chwila spelnia wyrazenie.
-func (w Wyrazenie) pasuje(chwila time.Time) bool {
-	if !w.dozwolone[0][chwila.Minute()] || !w.dozwolone[1][chwila.Hour()] {
+// matches checks whether the moment satisfies the expression.
+func (e Expression) matches(moment time.Time) bool {
+	if !e.allowed[0][moment.Minute()] || !e.allowed[1][moment.Hour()] {
 		return false
 	}
-	if !w.dozwolone[3][int(chwila.Month())] {
+	if !e.allowed[3][int(moment.Month())] {
 		return false
 	}
 
-	dzienMiesiaca := w.dozwolone[2][chwila.Day()]
-	dzienTygodnia := w.dozwolone[4][int(chwila.Weekday())]
+	dayOfMonth := e.allowed[2][moment.Day()]
+	dayOfWeek := e.allowed[4][int(moment.Weekday())]
 
-	// Cron traktuje oba pola dni inaczej niz reszte: gdy oba sa ograniczone,
-	// zadanie uruchamia sie, gdy pasuje ktorekolwiek. Traktowanie ich jak
-	// koniunkcji pomijaloby wiekszosc terminow.
+	// Cron treats both day fields differently from the rest: when both are
+	// restricted, the job runs when either matches. Treating them as a
+	// conjunction would skip most dates.
 	switch {
-	case w.dzienMiesiacaGwiazdka && w.dzienTygodniaGwiazdka:
+	case e.dayOfMonthStar && e.dayOfWeekStar:
 		return true
-	case w.dzienMiesiacaGwiazdka:
-		return dzienTygodnia
-	case w.dzienTygodniaGwiazdka:
-		return dzienMiesiaca
+	case e.dayOfMonthStar:
+		return dayOfWeek
+	case e.dayOfWeekStar:
+		return dayOfMonth
 	default:
-		return dzienMiesiaca || dzienTygodnia
+		return dayOfMonth || dayOfWeek
 	}
 }

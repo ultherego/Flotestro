@@ -2,91 +2,91 @@ package docker
 
 import "testing"
 
-// Podsumowanie ma odpowiadac na pytanie "czy cos wymaga uwagi", a nie liczyc
-// wszystko po kolei. Kontener wstajacy w kolko jest sprawny w kazdej
-// pojedynczej chwili i mimo to zepsuty.
-func TestPodsumowanieWykrywaPetleRestartow(t *testing.T) {
+// The summary is meant to answer "does something need attention", not to
+// count everything one by one. A container coming up over and over is fine
+// at every single moment and broken nevertheless.
+func TestSummaryDetectsRestartLoops(t *testing.T) {
 	snapshot := Snapshot{Containers: []Container{
-		{Name: "spokojny", State: "running", RestartCount: 1},
-		{Name: "wstaje-w-kolko", State: "running", RestartCount: 12},
-		{Name: "wlasnie-wstaje", State: "restarting"},
+		{Name: "calm", State: "running", RestartCount: 1},
+		{Name: "comes-up-over-and-over", State: "running", RestartCount: 12},
+		{Name: "coming-up-now", State: "restarting"},
 	}}
-	podsumowanie := podsumuj(snapshot, Summary{})
+	summary := summarise(snapshot, Summary{})
 
-	if podsumowanie.RestartLooping != 2 {
-		t.Errorf("petli restartow = %d, oczekiwano 2", podsumowanie.RestartLooping)
+	if summary.RestartLooping != 2 {
+		t.Errorf("restart loops = %d, want 2", summary.RestartLooping)
 	}
-	if podsumowanie.Running != 2 {
-		t.Errorf("dzialajacych = %d, oczekiwano 2", podsumowanie.Running)
+	if summary.Running != 2 {
+		t.Errorf("running = %d, want 2", summary.Running)
 	}
-	if podsumowanie.Stopped != 1 {
-		t.Errorf("zatrzymanych = %d, oczekiwano 1 (restarting nie dziala)", podsumowanie.Stopped)
+	if summary.Stopped != 1 {
+		t.Errorf("stopped = %d, want 1 (restarting is not running)", summary.Stopped)
 	}
 }
 
-// Kontenery Compose sa grupowane w projekty: operator zarzadza projektem,
-// a nie pojedynczymi kontenerami, ktore Compose sam utworzyl.
-func TestKontenerySaGrupowaneWProjekty(t *testing.T) {
+// Compose containers are grouped into projects: the operator manages the
+// project, not the individual containers Compose created itself.
+func TestContainersAreGroupedIntoProjects(t *testing.T) {
 	snapshot := Snapshot{Containers: []Container{
-		{Name: "sklep-web-1", State: "running", Compose: &ComposeMembership{Project: "sklep", Service: "web"}},
-		{Name: "sklep-db-1", State: "exited", Compose: &ComposeMembership{Project: "sklep", Service: "db"}},
-		{Name: "sklep-web-2", State: "running", Compose: &ComposeMembership{Project: "sklep", Service: "web"}},
-		{Name: "samotny", State: "running"},
+		{Name: "shop-web-1", State: "running", Compose: &ComposeMembership{Project: "shop", Service: "web"}},
+		{Name: "shop-db-1", State: "exited", Compose: &ComposeMembership{Project: "shop", Service: "db"}},
+		{Name: "shop-web-2", State: "running", Compose: &ComposeMembership{Project: "shop", Service: "web"}},
+		{Name: "lonely", State: "running"},
 	}}
-	podsumowanie := podsumuj(snapshot, Summary{})
+	summary := summarise(snapshot, Summary{})
 
-	if len(podsumowanie.Projects) != 1 {
-		t.Fatalf("projektow = %d, oczekiwano 1", len(podsumowanie.Projects))
+	if len(summary.Projects) != 1 {
+		t.Fatalf("projects = %d, want 1", len(summary.Projects))
 	}
-	projekt := podsumowanie.Projects[0]
-	if projekt.Name != "sklep" || projekt.Total != 3 || projekt.Running != 2 {
-		t.Errorf("projekt = %+v", projekt)
+	project := summary.Projects[0]
+	if project.Name != "shop" || project.Total != 3 || project.Running != 2 {
+		t.Errorf("project = %+v", project)
 	}
-	if len(projekt.Services) != 2 {
-		t.Errorf("uslugi = %v, oczekiwano dwoch unikalnych", projekt.Services)
+	if len(project.Services) != 2 {
+		t.Errorf("services = %v, want two unique ones", project.Services)
 	}
 }
 
-// Silnik niedostepny to nie to samo co host bez kontenerow. Pusta lista bez
-// powodu wygladalaby jak porzadek na hoscie.
-func TestBrakAdapteraNiesiePowod(t *testing.T) {
+// An unavailable engine is not the same as a host without containers. An
+// empty list without a reason would look like a tidy host.
+func TestMissingAdapterCarriesReason(t *testing.T) {
 	snapshot := Collect(t.Context(), nil)
 	if snapshot.Summary.UnavailableReason == "" {
-		t.Error("brak adaptera nie zostal wyjasniony")
+		t.Error("the missing adapter was not explained")
 	}
 	if snapshot.Summary.Containers != 0 || snapshot.Containers != nil {
-		t.Error("nieodczytany stan nie moze udawac pustej listy")
+		t.Error("an unread state must not pretend to be an empty list")
 	}
 }
 
-// Etykieta z nazwa sugerujaca poswiadczenie jest ukrywana. Inventory jest
-// trwale i widoczne szerzej niz sam host.
-func TestEtykietyZPoswiadczeniamiSaUkrywane(t *testing.T) {
-	wynik := etykietyBezSekretow(map[string]string{
-		"com.docker.compose.project": "sklep",
-		"DB_PASSWORD":                "tajne",
+// A label with a name suggesting a credential is hidden. The inventory is
+// durable and visible more widely than the host itself.
+func TestLabelsWithCredentialsAreHidden(t *testing.T) {
+	result := labelsWithoutSecrets(map[string]string{
+		"com.docker.compose.project": "shop",
+		"DB_PASSWORD":                "secret",
 		"api_key":                    "abc123",
-		"opis":                       "zwykla etykieta",
+		"description":                "plain label",
 	})
-	if wynik["DB_PASSWORD"] != "[ukryte]" || wynik["api_key"] != "[ukryte]" {
-		t.Errorf("poswiadczenia nie zostaly ukryte: %v", wynik)
+	if result["DB_PASSWORD"] != "[hidden]" || result["api_key"] != "[hidden]" {
+		t.Errorf("credentials were not hidden: %v", result)
 	}
-	if wynik["opis"] != "zwykla etykieta" || wynik["com.docker.compose.project"] != "sklep" {
-		t.Errorf("zwykle etykiety zostaly zmienione: %v", wynik)
+	if result["description"] != "plain label" || result["com.docker.compose.project"] != "shop" {
+		t.Errorf("plain labels were changed: %v", result)
 	}
 }
 
-// Compose oznacza swoje kontenery etykietami; kontener spoza projektu nie
-// moze zostac do zadnego przypisany.
-func TestPrzynaleznoscComposeTylkoZEtykiet(t *testing.T) {
-	if przynaleznoscCompose(map[string]string{"cokolwiek": "x"}) != nil {
-		t.Error("kontener bez etykiet Compose zostal przypisany do projektu")
+// Compose marks its containers with labels; a container outside a project
+// must not be assigned to any.
+func TestComposeMembershipOnlyFromLabels(t *testing.T) {
+	if composeMembership(map[string]string{"whatever": "x"}) != nil {
+		t.Error("a container without Compose labels was assigned to a project")
 	}
-	czlonkostwo := przynaleznoscCompose(map[string]string{
-		"com.docker.compose.project": "sklep",
+	membership := composeMembership(map[string]string{
+		"com.docker.compose.project": "shop",
 		"com.docker.compose.service": "web",
 	})
-	if czlonkostwo == nil || czlonkostwo.Project != "sklep" || czlonkostwo.Service != "web" {
-		t.Errorf("czlonkostwo = %+v", czlonkostwo)
+	if membership == nil || membership.Project != "shop" || membership.Service != "web" {
+		t.Errorf("membership = %+v", membership)
 	}
 }

@@ -18,27 +18,28 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// createOperationRequest opisuje zlecenie operacji na hoscie.
+// createOperationRequest describes an operation order for a host.
 type createOperationRequest struct {
-	Action          string          `json:"action"`
-	Payload         json.RawMessage `json:"payload"`
-	RequiresApprova *bool           `json:"requires_approval,omitempty"`
-	// TargetConfirmation jest nazwa hosta wpisana przez operatora. Wymagana
-	// przy operacjach nieodwracalnych.
+	Action           string          `json:"action"`
+	Payload          json.RawMessage `json:"payload"`
+	RequiresApproval *bool           `json:"requires_approval,omitempty"`
+	// TargetConfirmation is the hostname typed in by the operator. Required
+	// for irreversible operations.
 	TargetConfirmation string `json:"target_confirmation,omitempty"`
-	// Reason uzasadnia operacje o najwyzszym ryzyku i trafia do audytu.
+	// Reason justifies the highest-risk operations and goes to the audit log.
 	Reason         string `json:"reason,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 	MaxOutputBytes int    `json:"max_output_bytes,omitempty"`
 	TTLSeconds     int    `json:"ttl_seconds,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	// PinBootID wiaze zadanie z obecnym uruchomieniem hosta. Po restarcie
-	// zadanie zostanie odrzucone zamiast wykonac sie na innym stanie.
+	// PinBootID binds the job to the current boot of the host. After a
+	// reboot the job is rejected instead of running against a different
+	// state.
 	PinBootID bool `json:"pin_boot_id,omitempty"`
 }
 
-// handleCreateOperation tworzy plan operacji. Mutacja domyslnie wymaga
-// zatwierdzenia; samo zlecenie niczego jeszcze nie zmienia na hoscie.
+// handleCreateOperation creates an operation plan. A mutation requires
+// approval by default; the order itself changes nothing on the host yet.
 func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -64,9 +65,9 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Poza prawem zlecania czegokolwiek potrzebne jest uprawnienie tej
-	// konkretnej operacji: restart uslugi to inny poziom zaufania niz odczyt
-	// dziennika.
+	// Beyond the right to order anything at all, the permission of this
+	// particular operation is needed: restarting a service is a different
+	// level of trust than reading a log.
 	if _, ok := s.authorize(w, r, authz.Permission(action.Permission()), scope, "host", hostID); !ok {
 		return
 	}
@@ -83,8 +84,8 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Host z uszkodzona baza pakietow nie moze dostawac kolejnych operacji
-	// pakietowych, dopoki ktos tego nie wyjasni.
+	// A host with a broken package database must not receive further
+	// package operations until somebody sorts it out.
 	if host.PackageDatabaseBroken && blockedByBrokenDatabase(action) {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
@@ -107,30 +108,30 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Zdolnosc hosta sprawdzamy juz przy planowaniu, zeby nie kolejkowac
-	// operacji, ktorej ten host nigdy nie wykona.
+	// The host capability is checked at planning time already, so as not to
+	// queue an operation this host will never perform.
 	if capability := action.RequiredCapability(); !hostHasCapability(host, capability) {
 		problem(w, http.StatusConflict, "capability_missing",
 			"the host lacks capability "+capability)
 		return
 	}
 
-	// Operacja o najwyzszym ryzyku wymaga swiezego uwierzytelnienia: taka,
-	// ktora moze odciac dostep do hosta albo skasowac dane, nie moze isc
-	// z sesji sprzed godziny.
-	var dowodStepUp map[string]any
+	// A highest-risk operation requires fresh authentication: one that can
+	// cut off access to the host or wipe data must not go from an hour-old
+	// session.
+	var stepUpProof map[string]any
 	if action.RequiresFreshAuth() {
-		dowod, ok := s.requireStepUp(w, r, principal, request.Reason,
+		proof, ok := s.requireStepUp(w, r, principal, request.Reason,
 			string(action), "host", hostID)
 		if !ok {
 			return
 		}
-		dowodStepUp = dowod
+		stepUpProof = proof
 	}
 
-	// Operacja niszczaca wymaga wpisania nazwy celu. Klikniecie nie jest
-	// wystarczajaca decyzja przy zmianie, ktorej nie da sie cofnac - a lista
-	// hostow bywa dluga i podobna.
+	// A destructive operation requires typing in the target name. A click is
+	// not a sufficient decision for a change that cannot be undone - and the
+	// host list tends to be long and alike.
 	if action.RequiresTargetConfirmation() && request.TargetConfirmation != host.Hostname {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
@@ -145,58 +146,60 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Powrot do wczesniejszej wersji pliku niesie sam odcisk: tresc dokladamy
-	// tutaj, zeby plan i to, co trafi na host, byly tym samym. Zlecenie
-	// z pustym plikiem i odciskiem wersji zapisaloby pustke.
+	// A rollback to an earlier file version carries only the digest: the
+	// content is attached here, so that the plan and what reaches the host
+	// are the same thing. An order with an empty file and a version digest
+	// would write emptiness.
 	if action == opspec.ActionFileRollback && payload.File != nil {
-		tresc, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
+		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
 		if err != nil {
 			problem(w, http.StatusBadRequest, "version_not_found",
 				"no stored version with that checksum")
 			return
 		}
-		payload.File.Content = string(tresc)
-		// Odcisk wersji byl sposobem na wskazanie tresci, a nie czescia
-		// zlecenia: po jej wstawieniu payload opisuje to samo, co zwykly
-		// zapis. Zostawiony w payloadzie nie dojechalby do agenta, bo
-		// koperta zadania go nie niesie - i hash planu przestalby sie zgadzac.
+		payload.File.Content = string(content)
+		// The version digest was a way of pointing at the content, not part
+		// of the order: once the content is in, the payload describes the
+		// same thing as an ordinary write. Left in the payload it would not
+		// reach the agent, because the job envelope does not carry it - and
+		// the plan hash would stop matching.
 		payload.File.VersionSHA256 = ""
 	}
 
-	// Sekret wskazany w zleceniu musi istniec i dac sie wydac. Bez tego
-	// zadanie czekaloby na zatwierdzenie, poszlo do hosta i dopiero tam
-	// odpadlo - a operator dowiedzialby sie o literowce po kilku minutach.
-	for _, odnosnik := range payload.Secrets() {
+	// The secret named in the order must exist and be issuable. Otherwise
+	// the job would wait for approval, go to the host and only fail there -
+	// and the operator would learn about the typo minutes later.
+	for _, reference := range payload.Secrets() {
 		if s.secrets == nil {
 			problem(w, http.StatusServiceUnavailable, "secrets_disabled",
 				"this installation has no secret store")
 			return
 		}
-		sekret, err := s.secrets.Secret(r.Context(), odnosnik.Name)
+		secret, err := s.secrets.Secret(r.Context(), reference.Name)
 		if errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusBadRequest, "secret_not_found",
-				"no secret named "+odnosnik.Name)
+				"no secret named "+reference.Name)
 			return
 		}
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		if !sekret.Issuable() {
+		if !secret.Issuable() {
 			problem(w, http.StatusConflict, "secret_unavailable",
-				"secret "+odnosnik.Name+" has no version that can be issued")
+				"secret "+reference.Name+" has no version that can be issued")
 			return
 		}
-		if odnosnik.Version > sekret.CurrentVersion {
+		if reference.Version > secret.CurrentVersion {
 			problem(w, http.StatusBadRequest, "secret_version_not_found",
-				"secret "+odnosnik.Name+" has no such version")
+				"secret "+reference.Name+" has no such version")
 			return
 		}
 	}
 
 	requiresApproval := action.Mutating()
-	if request.RequiresApprova != nil {
-		requiresApproval = *request.RequiresApprova
+	if request.RequiresApproval != nil {
+		requiresApproval = *request.RequiresApproval
 	}
 
 	preconditions := jobs.Preconditions{
@@ -215,17 +218,17 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	job, err := s.jobs.Create(r.Context(), tx, jobs.Spec{
-		HostID:          hostID,
-		Action:          action,
-		Payload:         payload,
-		IdempotencyKey:  request.IdempotencyKey,
-		RequiresApprova: requiresApproval,
-		TimeoutSeconds:  request.TimeoutSeconds,
-		MaxOutputBytes:  request.MaxOutputBytes,
-		TTL:             time.Duration(request.TTLSeconds) * time.Second,
-		CreatedBy:       actor,
-		RequestID:       requestIDOf(r),
-		Preconditions:   preconditions,
+		HostID:           hostID,
+		Action:           action,
+		Payload:          payload,
+		IdempotencyKey:   request.IdempotencyKey,
+		RequiresApproval: requiresApproval,
+		TimeoutSeconds:   request.TimeoutSeconds,
+		MaxOutputBytes:   request.MaxOutputBytes,
+		TTL:              time.Duration(request.TTLSeconds) * time.Second,
+		CreatedBy:        actor,
+		RequestID:        requestIDOf(r),
+		Preconditions:    preconditions,
 	})
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_operation", err.Error())
@@ -238,20 +241,20 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		RequestID: job.RequestID, Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
 			"host_id": hostID, "action_type": job.ActionType,
-			"payload_hash": job.PayloadHash, "requires_approval": job.RequiresApprova,
-			"step_up": dowodStepUp,
+			"payload_hash": job.PayloadHash, "requires_approval": job.RequiresApproval,
+			"step_up": stepUpProof,
 			"state":   string(job.State),
 		},
 	}); err != nil {
 		s.fail(w, err)
 		return
 	}
-	// Tresc zapisujemy juz teraz, zeby historia i powrot do wersji mialy
-	// bajty, ktore operator zatwierdzil. Stan docelowy zapisze dopiero
-	// gateway, po udanej operacji: panel nie moze twierdzic, ze zarzadza
-	// plikiem, ktorego host odrzucil.
-	// Plik z sekretu nie zostawia w panelu ani tresci, ani jej odcisku:
-	// wartosc istnieje wylacznie w magazynie i przez chwile na hoscie.
+	// The content is saved right now, so that the history and the rollback
+	// have the bytes the operator approved. The desired state is recorded
+	// only by the gateway, after a successful operation: the panel must not
+	// claim to manage a file the host rejected.
+	// A file from a secret leaves neither the content nor its digest in the
+	// panel: the value exists only in the store and briefly on the host.
 	if payload.File != nil && payload.File.ContentSecret.Empty() &&
 		(action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
 		if _, err := s.files.SaveVersion(r.Context(), tx, []byte(payload.File.Content)); err != nil {
@@ -278,9 +281,8 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 
 type transitionRequest struct {
 	Reason string `json:"reason,omitempty"`
-	// PayloadHash pozwala zatwierdzajacemu potwierdzic, ze zatwierdza dokladnie
-	// ten plan, ktory widzial. Niezgodnosc oznacza podmiane miedzy obejrzeniem
-	// a zatwierdzeniem.
+	// PayloadHash lets the approver confirm that they approve exactly the
+	// plan they saw. A mismatch means a swap between viewing and approving.
 	PayloadHash string `json:"payload_hash,omitempty"`
 }
 
@@ -316,9 +318,9 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 	}
 	actor := principal.Subject
 
-	// Zasada drugiej osoby: w srodowisku produkcyjnym zlecajacy nie moze
-	// zatwierdzic wlasnej zmiany. Rozdzial rol nie wystarcza, bo jedna osoba
-	// moze miec obie role.
+	// The second-person rule: in a production environment the requester
+	// cannot approve their own change. Role separation is not enough, because
+	// one person may hold both roles.
 	if operation == "approve" && s.requiresSecondPerson(scope.Environment) && current.CreatedBy == actor {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
@@ -330,7 +332,7 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			},
 		})
 		problem(w, http.StatusForbidden, "self_approval",
-			" in environment "+scope.Environment+" changes require approval by a second person")
+			"in environment "+scope.Environment+" changes require approval by a second person")
 		return
 	}
 
@@ -389,9 +391,9 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			"host_id": job.HostID, "action_type": job.ActionType,
 			"payload_hash": job.PayloadHash, "state": string(job.State),
 			"reason": request.Reason,
-			// Slad audytowy niesie takze to, ktora to zgoda z wymaganych:
-			// przy operacji niszczacej pierwsza zgoda niczego jeszcze nie
-			// uruchamia i to ma byc widoczne po fakcie.
+			// The audit trail also carries which of the required approvals
+			// this is: for a destructive operation the first approval starts
+			// nothing yet, and that has to be visible after the fact.
 			"approvals": job.CollectedApprovals, "required_approvals": job.RequiredApprovals,
 		},
 	}); err != nil {
@@ -403,20 +405,20 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
-	// Anulowanie zapisane w bazie nie zatrzymuje pracy na hoscie. Operacja
-	// juz dostarczona trwa dalej - podglad dziennika trzymalby proces przez
-	// caly swoj limit czasu, mimo ze nikt juz nie patrzy. Prosba o przerwanie
-	// idzie wiec takze do agenta; agent przerwie to, co da sie przerwac
-	// bezpiecznie, a reszte odnotuje.
+	// A cancellation recorded in the database does not stop the work on the
+	// host. An operation already delivered keeps going - a log preview would
+	// hold the process for its whole timeout even though nobody is watching
+	// any more. So the interrupt request also goes to the agent; the agent
+	// interrupts what can be interrupted safely and notes the rest.
 	if operation == "cancel" {
-		s.poprosOPrzerwanie(r.Context(), job)
+		s.requestInterrupt(r.Context(), job)
 	}
 
 	writeJSON(w, http.StatusOK, job)
 }
 
-// requiresSecondPerson mowi, czy srodowisko wymaga zatwierdzenia przez inna
-// osobe niz zlecajaca.
+// requiresSecondPerson says whether the environment requires approval by a
+// person other than the requester.
 func (s *Server) requiresSecondPerson(environment string) bool {
 	return s.productionEnvironments[environment]
 }
@@ -427,18 +429,18 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	// Zawezenie robi baza: sprawdzanie zakresu po pobraniu oznaczalo zapytanie
-	// o hosta dla kazdego zadania z osobna.
+	// The database narrows the list: checking the scope after fetching meant
+	// a host query for every job separately.
 	scopes := principal.ScopesFor(authz.PermJobRead)
-	filtr := jobs.ListFilter{
+	filter := jobs.ListFilter{
 		HostID: r.URL.Query().Get("host_id"),
 		State:  r.URL.Query().Get("state"),
 		Limit:  limit,
 	}
 	for _, scope := range scopes {
-		filtr.Scopes = append(filtr.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
+		filter.Scopes = append(filter.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
 	}
-	visible, err := s.jobs.List(r.Context(), filtr)
+	visible, err := s.jobs.List(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -460,11 +462,11 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermJobRead, s.jobScope(r, job.HostID), "job", jobID); !ok {
 		return
 	}
-	// Widok pojedynczego zadania niesie takze osoby, ktore je zatwierdzily:
-	// przy operacji wymagajacej dwoch zgod pytanie "na kogo jeszcze czekamy"
-	// jest tym, po ktore operator tu wchodzi.
-	if zgody, err := s.jobs.Approvals(r.Context(), jobID); err == nil {
-		job.Approvals = zgody
+	// The view of a single job also carries the people who approved it: for
+	// an operation requiring two approvals the question "who are we still
+	// waiting for" is what the operator comes here for.
+	if approvals, err := s.jobs.Approvals(r.Context(), jobID); err == nil {
+		job.Approvals = approvals
 	}
 	writeJSON(w, http.StatusOK, job)
 }
@@ -494,7 +496,8 @@ func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": attempts, "count": len(attempts)})
 }
 
-// handleListActions opisuje katalog operacji obslugiwanych przez control plane.
+// handleListActions describes the catalogue of operations the control plane
+// supports.
 func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 	if principal := authz.FromContext(r.Context()); !principal.Authenticated() {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
@@ -509,24 +512,24 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		DefaultTimeout     int    `json:"default_timeout_seconds"`
 		Risk               string `json:"risk"`
 		LockClass          string `json:"lock_class,omitempty"`
-		// CampaignMode mowi, czym operacja jest wobec floty, a CampaignReady -
-		// co panel dzisiaj naprawde umie przeprowadzic. To dwie rozne
-		// informacje: kreator ma pokazywac tylko drugie, a odmowe tlumaczyc
-		// pierwsza.
+		// CampaignMode says what the operation is with respect to the fleet,
+		// and CampaignReady - what the panel can really carry out today. These
+		// are two different pieces of information: the wizard shows only the
+		// latter and explains a refusal with the former.
 		CampaignMode  string `json:"campaign_mode"`
 		CampaignReady bool   `json:"campaign_ready"`
-		// CampaignRefusal niesie powod, dla ktorego operacji nie da sie
-		// zlecic masowo. Odmowa bez powodu wyglada w interfejsie jak brak
-		// funkcji, a bywa granica postawiona swiadomie.
+		// CampaignRefusal carries the reason the operation cannot be ordered
+		// in bulk. A refusal without a reason looks in the interface like a
+		// missing feature, while it is often a boundary drawn deliberately.
 		CampaignRefusal string `json:"campaign_refusal,omitempty"`
 	}
 	items := make([]actionInfo, 0)
 	for _, action := range opspec.AllActions() {
-		wykluczenie := opspec.CampaignExclusionReason(action)
-		gotowa := wykluczenie == "" && opspec.ExecutableMode(action)
-		powod := wykluczenie
-		if powod == "" && !gotowa {
-			powod = powodOdmowyTrybu(action)
+		exclusion := opspec.CampaignExclusionReason(action)
+		ready := exclusion == "" && opspec.ExecutableMode(action)
+		reason := exclusion
+		if reason == "" && !ready {
+			reason = campaignModeRefusal(action)
 		}
 		items = append(items, actionInfo{
 			Action:             string(action),
@@ -537,16 +540,17 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			Risk:               string(action.Risk()),
 			LockClass:          action.LockClass(),
 			CampaignMode:       string(action.CampaignMode()),
-			CampaignReady:      gotowa,
-			CampaignRefusal:    powod,
+			CampaignReady:      ready,
+			CampaignRefusal:    reason,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})
 }
 
-// hostHasCapability rozstrzyga wymaganie operacji wobec rejestru adapterow
-// hosta. Rozstrzygniecie nalezy do rejestru, a nie do tego pliku: operacja
-// podaje wymaganie logiczne, host mowi, jakie ma adaptery.
+// hostHasCapability resolves the operation requirement against the host's
+// adapter registry. The decision belongs to the registry, not to this file:
+// the operation states a logical requirement, the host says which adapters
+// it has.
 func hostHasCapability(host *hosts.Host, capability string) bool {
 	return host.Capabilities.Satisfies(capability)
 }
@@ -566,14 +570,13 @@ func requestIDOf(r *http.Request) string {
 	return r.Header.Get("X-Request-Id")
 }
 
-// blockedByBrokenDatabase mowi, ktore operacje pakietowe nie maja sensu na
-// hoscie z uszkodzona baza pakietow.
+// blockedByBrokenDatabase says which package operations make no sense on a
+// host with a broken package database.
 //
-// Naprawa i plan sa z tego wylaczone, i to nie jest wyjatek dla wygody:
-// naprawa jest jedynym sposobem wyjscia z tego stanu, wiec zablokowanie jej
-// zamykaloby hosta w petli bez wyjscia z poziomu panelu. Plan niczego nie
-// zmienia i wlasnie na zablokowanym hoscie jest najbardziej potrzebny, bo
-// pokazuje, co blokuje.
+// Repair and plan are excluded from this, and that is not an exception for
+// convenience: repair is the only way out of this state, so blocking it would
+// lock the host in a loop with no exit from the panel. Plan changes nothing
+// and is needed most on a blocked host, because it shows what blocks.
 func blockedByBrokenDatabase(action opspec.ActionType) bool {
 	switch action {
 	case opspec.ActionPackageRepair, opspec.ActionPackagePlan:
@@ -582,11 +585,11 @@ func blockedByBrokenDatabase(action opspec.ActionType) bool {
 	return strings.HasPrefix(string(action), "packages.")
 }
 
-// poprosOPrzerwanie wysyla agentowi prosbe o przerwanie trwajacej proby.
+// requestInterrupt sends the agent a request to interrupt the running attempt.
 //
-// Brak sesji nie jest bledem: host moze byc offline, a zadanie i tak jest juz
-// anulowane w bazie i nie zostanie dostarczone ponownie.
-func (s *Server) poprosOPrzerwanie(ctx context.Context, job *jobs.Job) {
+// A missing session is not an error: the host may be offline, and the job is
+// already cancelled in the database anyway and will not be delivered again.
+func (s *Server) requestInterrupt(ctx context.Context, job *jobs.Job) {
 	attemptID, err := s.jobs.LastAttempt(ctx, job.ID)
 	if err != nil || attemptID == "" {
 		return
@@ -595,11 +598,11 @@ func (s *Server) poprosOPrzerwanie(ctx context.Context, job *jobs.Job) {
 		Payload: &agentv1.ServerMessage_CancelTask{
 			CancelTask: &agentv1.CancelTask{
 				TaskId: attemptID,
-				Reason: "operacja anulowana z panelu",
+				Reason: "operation cancelled from the panel",
 			},
 		},
 	}, 5*time.Second); err != nil {
-		s.log.Debug("nie wyslano prosby o przerwanie",
+		s.log.Debug("interrupt request not sent",
 			"job_id", job.ID, "host_id", job.HostID, "err", err)
 	}
 }

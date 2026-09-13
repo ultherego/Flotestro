@@ -248,7 +248,7 @@ func TestZmianaSieciJestPotwierdzanaLacznoscia(t *testing.T) {
 	// Komunikat ma powiedziec, ze zegar ratunkowy byl uzbrojony i zostal
 	// rozbrojony po sprawdzeniu drogi do panelu. Cicha zmiana sieci nie
 	// odroznialaby sie od zmiany, ktora zadnego zegara nie miala.
-	if !strings.Contains(ostatniKomunikat(proby), "wycofanie rozbrojone") {
+	if !strings.Contains(ostatniKomunikat(proby), "the rollback was disarmed") {
 		t.Errorf("zmiana bez potwierdzenia lacznosci: %s", ostatniKomunikat(proby))
 	}
 

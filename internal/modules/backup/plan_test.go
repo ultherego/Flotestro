@@ -6,77 +6,78 @@ import (
 	"time"
 )
 
-func definicjaTestowa() Definicja {
-	return Definicja{
-		ID: "dane", Tool: NarzedzieRestic, Repository: "/srv/kopie",
-		Paths: []string{"/etc/flotestro", "/srv/dane"}, KeepLast: 7, Prune: true,
+func testDefinition() Definition {
+	return Definition{
+		ID: "data", Tool: ToolRestic, Repository: "/srv/copies",
+		Paths: []string{"/etc/flotestro", "/srv/data"}, KeepLast: 7, Prune: true,
 	}
 }
 
-func rozmiarTestowy(istniejace map[string]uint64) func(string) (uint64, bool) {
-	return func(sciezka string) (uint64, bool) {
-		bajty, jest := istniejace[sciezka]
-		return bajty, jest
+func testSize(existing map[string]uint64) func(string) (uint64, bool) {
+	return func(path string) (uint64, bool) {
+		bytes, present := existing[path]
+		return bytes, present
 	}
 }
 
-func TestPlanKopiiOpisujeZakresZTegoHosta(t *testing.T) {
-	teraz := time.Now()
-	stan := Stan{Tool: NarzedzieRestic, Repository: "/srv/kopie",
-		Snapshots: []Snapshot{{ID: "a"}, {ID: "b"}}, LastSuccessAt: &teraz}
-	plan := Zaplanuj(stan, definicjaTestowa(), false, false,
-		rozmiarTestowy(map[string]uint64{"/etc/flotestro": 3 << 20}))
+func TestCopyPlanDescribesScopeFromThisHost(t *testing.T) {
+	now := time.Now()
+	state := State{Tool: ToolRestic, Repository: "/srv/copies",
+		Snapshots: []Snapshot{{ID: "a"}, {ID: "b"}}, LastSuccessAt: &now}
+	plan := Compute(state, testDefinition(), false, false,
+		testSize(map[string]uint64{"/etc/flotestro": 3 << 20}))
 
-	if plan.Action != PlanKopia || plan.Refusal != "" || !plan.RepositoryReady {
-		t.Fatalf("plan kopii: %+v", plan)
+	if plan.Action != PlanRun || plan.Refusal != "" || !plan.RepositoryReady {
+		t.Fatalf("copy plan: %+v", plan)
 	}
-	if len(plan.Paths) != 1 || len(plan.MissingPaths) != 1 || plan.MissingPaths[0] != "/srv/dane" {
-		t.Errorf("zakres: %+v / %+v", plan.Paths, plan.MissingPaths)
+	if len(plan.Paths) != 1 || len(plan.MissingPaths) != 1 || plan.MissingPaths[0] != "/srv/data" {
+		t.Errorf("scope: %+v / %+v", plan.Paths, plan.MissingPaths)
 	}
 	if plan.BytesOnHost == nil || *plan.BytesOnHost != 3<<20 {
-		t.Errorf("rozmiar zakresu: %v", plan.BytesOnHost)
+		t.Errorf("scope size: %v", plan.BytesOnHost)
 	}
-	if !plan.Verified || !strings.Contains(strings.Join(plan.Changes, ";"), "sprawdzi repozytorium") {
-		t.Errorf("kopia bez sprawdzenia: %+v", plan.Changes)
+	if !plan.Verified || !strings.Contains(strings.Join(plan.Changes, ";"), "check the repository") {
+		t.Errorf("copy without a check: %+v", plan.Changes)
 	}
-	if !strings.Contains(plan.Retention, "7 ostatnich") || !strings.Contains(plan.Retention, "przesprzatane") {
-		t.Errorf("retencja: %q", plan.Retention)
+	if !strings.Contains(plan.Retention, "7 last") || !strings.Contains(plan.Retention, "pruned") {
+		t.Errorf("retention: %q", plan.Retention)
 	}
 
-	// Host bez zadnego z katalogow zapisalby pusta kopie - to jest odmowa.
-	pusty := Zaplanuj(stan, definicjaTestowa(), false, false,
-		rozmiarTestowy(map[string]uint64{}))
-	if !strings.Contains(pusty.Refusal, "zadnego z wskazanych katalogow") {
-		t.Errorf("host bez danych: %+v", pusty)
+	// A host without any of the directories would write an empty copy -
+	// that is a refusal.
+	empty := Compute(state, testDefinition(), false, false,
+		testSize(map[string]uint64{}))
+	if !strings.Contains(empty.Refusal, "none of the named directories") {
+		t.Errorf("host without data: %+v", empty)
 	}
-	if plan.PlanHash == pusty.PlanHash || plan.PlanHash == "" {
-		t.Error("odciski planow nie roznia sie")
+	if plan.PlanHash == empty.PlanHash || plan.PlanHash == "" {
+		t.Error("plan fingerprints do not differ")
 	}
 }
 
-func TestPlanKopiiOdrozniaRepozytoriumNieodczytane(t *testing.T) {
-	nieodczytane := Stan{UnavailableReason: "repository does not exist"}
-	bezZgody := Zaplanuj(nieodczytane, definicjaTestowa(), false, false,
-		rozmiarTestowy(map[string]uint64{"/etc/flotestro": 1}))
-	if !strings.Contains(bezZgody.Refusal, "wymaga jawnej zgody") || bezZgody.WillInitialize {
-		t.Errorf("repozytorium bez zgody: %+v", bezZgody)
+func TestCopyPlanDistinguishesUnreadRepository(t *testing.T) {
+	unread := State{UnavailableReason: "repository does not exist"}
+	noConsent := Compute(unread, testDefinition(), false, false,
+		testSize(map[string]uint64{"/etc/flotestro": 1}))
+	if !strings.Contains(noConsent.Refusal, "requires explicit consent") || noConsent.WillInitialize {
+		t.Errorf("repository without consent: %+v", noConsent)
 	}
 
-	zgoda := definicjaTestowa()
-	zgoda.Initialize = true
-	zZgoda := Zaplanuj(nieodczytane, zgoda, false, false,
-		rozmiarTestowy(map[string]uint64{"/etc/flotestro": 1}))
-	if zZgoda.Refusal != "" || !zZgoda.WillInitialize {
-		t.Errorf("repozytorium ze zgoda: %+v", zZgoda)
+	consent := testDefinition()
+	consent.Initialize = true
+	withConsent := Compute(unread, consent, false, false,
+		testSize(map[string]uint64{"/etc/flotestro": 1}))
+	if withConsent.Refusal != "" || !withConsent.WillInitialize {
+		t.Errorf("repository with consent: %+v", withConsent)
 	}
 
-	// Sprawdzenia nie da sie zrobic na repozytorium, ktore nie odpowiada.
-	sprawdzenie := Zaplanuj(nieodczytane, zgoda, true, false, nil)
-	if !strings.Contains(sprawdzenie.Refusal, "nie odpowiedzialo") {
-		t.Errorf("sprawdzenie bez repozytorium: %+v", sprawdzenie)
+	// A verification cannot be done on a repository that does not answer.
+	verification := Compute(unread, consent, true, false, nil)
+	if !strings.Contains(verification.Refusal, "did not answer") {
+		t.Errorf("verification without a repository: %+v", verification)
 	}
-	ok := Zaplanuj(Stan{Snapshots: []Snapshot{{ID: "a"}}}, definicjaTestowa(), true, true, nil)
-	if ok.Action != PlanSprawdzenie || len(ok.Changes) != 2 || !ok.ReadData {
-		t.Errorf("sprawdzenie z odczytem danych: %+v", ok)
+	ok := Compute(State{Snapshots: []Snapshot{{ID: "a"}}}, testDefinition(), true, true, nil)
+	if ok.Action != PlanVerify || len(ok.Changes) != 2 || !ok.ReadData {
+		t.Errorf("verification with data read: %+v", ok)
 	}
 }

@@ -7,114 +7,118 @@ import (
 	"strings"
 )
 
-// ModulePlan opisuje roznice miedzy blokada modulu zastana a zadana na
-// jednym hoscie.
+// ModulePlan describes the difference between the module block found and
+// the one requested on a single host.
 //
-// "Zablokuj modul X" na jednym hoscie jest wpisem w pliku, na drugim juz
-// jest, a na trzecim modul akurat dziala i trzyma inne moduly - wtedy wpis
-// zadziala dopiero po restarcie. Operator ma to zobaczyc przed zgoda.
+// "Block module X" is a file entry on one host, already present on another,
+// and on a third the module happens to be running and holding other modules
+// - then the entry takes effect only after a reboot. The operator is meant
+// to see this before approving.
 type ModulePlan struct {
 	Module string `json:"module"`
-	// Blacklist mowi, czy zamowienie blokuje, czy odblokowuje.
+	// Blacklist says whether the order blocks or unblocks.
 	Blacklist bool `json:"blacklist"`
 
-	// Stan zastany: czy panel juz blokuje modul i czy jadro go ma
-	// zaladowany, a jesli tak - kto go uzywa.
+	// The state found: whether the panel already blocks the module and
+	// whether the kernel has it loaded, and if so - who uses it.
 	Blacklisted bool     `json:"blacklisted"`
 	Loaded      bool     `json:"loaded"`
 	UsedBy      []string `json:"used_by,omitempty"`
 
-	// Action nazywa to, co by sie stalo: create (blokada powstanie),
-	// remove (blokada zniknie) albo no_change.
+	// Action names what would happen: create (the block appears), remove
+	// (the block disappears) or no_change.
 	Action  string   `json:"action"`
 	Changes []string `json:"changes,omitempty"`
 
-	// ManagedHash jest odciskiem pliku blokad panelu: zapis nadpisuje go
-	// w calosci, wiec plik zmieniony po planowaniu jest inna zmiana.
+	// ManagedHash is the fingerprint of the panel's blacklist file: the
+	// write overwrites it whole, so a file changed after planning is a
+	// different change.
 	ManagedHash string `json:"managed_hash,omitempty"`
 	Refusal     string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanTworzy   = "create"
-	PlanUsuwa    = "remove"
-	PlanBezZmian = "no_change"
+	PlanCreate   = "create"
+	PlanRemove   = "remove"
+	PlanNoChange = "no_change"
 )
 
-// ZaplanujBlokade liczy roznice dla blokady albo odblokowania modulu.
-func ZaplanujBlokade(stan Snapshot, modul string, blokuj bool) ModulePlan {
-	plan := ModulePlan{Module: modul, Blacklist: blokuj}
-	if stan.Managed != "" {
-		plan.ManagedHash = textFingerprint(stan.Managed)
+// PlanBlacklist computes the difference for blocking or unblocking a module.
+func PlanBlacklist(state Snapshot, module string, block bool) ModulePlan {
+	plan := ModulePlan{Module: module, Blacklist: block}
+	if state.Managed != "" {
+		plan.ManagedHash = textFingerprint(state.Managed)
 	}
-	if stan.UnavailableReason != "" {
-		return plan.zOdmowa(stan.UnavailableReason)
+	if state.UnavailableReason != "" {
+		return plan.withRefusal(state.UnavailableReason)
 	}
-	if err := WalidujModul(modul); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := ValidateModule(module); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	for _, nazwa := range stan.Blacklist {
-		if nazwa == modul {
+	for _, name := range state.Blacklist {
+		if name == module {
 			plan.Blacklisted = true
 		}
 	}
-	for _, zaladowany := range stan.Modules {
-		if zaladowany.Name == modul {
+	for _, loaded := range state.Modules {
+		if loaded.Name == module {
 			plan.Loaded = true
-			plan.UsedBy = append([]string(nil), zaladowany.UsedBy...)
+			plan.UsedBy = append([]string(nil), loaded.UsedBy...)
 		}
 	}
 
 	switch {
-	case blokuj && !plan.Blacklisted:
-		plan.Action = PlanTworzy
-		plan.Changes = []string{"blokada modulu " + modul + " powstanie"}
-		if powod := InitramfsWymagany(modul, plan.Loaded); powod != "" {
-			plan.Changes = append(plan.Changes, powod)
+	case block && !plan.Blacklisted:
+		plan.Action = PlanCreate
+		plan.Changes = []string{"the block of the module " + module + " will be created"}
+		if reason := InitramfsRequired(module, plan.Loaded); reason != "" {
+			plan.Changes = append(plan.Changes, reason)
 		}
 		if len(plan.UsedBy) > 0 {
 			plan.Changes = append(plan.Changes,
-				"modulu uzywaja: "+strings.Join(plan.UsedBy, ", "))
+				"the module is used by: "+strings.Join(plan.UsedBy, ", "))
 		}
-	case !blokuj && plan.Blacklisted:
-		plan.Action = PlanUsuwa
-		plan.Changes = []string{"blokada modulu " + modul + " zniknie"}
+	case !block && plan.Blacklisted:
+		plan.Action = PlanRemove
+		plan.Changes = []string{"the block of the module " + module + " will be removed"}
 	default:
-		plan.Action = PlanBezZmian
+		plan.Action = PlanNoChange
 	}
-	plan.PlanHash = odciskPlanuModulu(plan)
+	plan.PlanHash = modulePlanFingerprint(plan)
 	return plan
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu roznic i liczy odcisk
-// na nowo: plan z odmowa jest inna odpowiedzia niz plan bez niej.
-func (p *ModulePlan) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanuModulu(*p)
+// Refuse records a refusal reason learned after the differences were
+// computed and recomputes the fingerprint: a plan with a refusal is a
+// different answer than a plan without one.
+func (p *ModulePlan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = modulePlanFingerprint(*p)
 }
 
-func (p ModulePlan) zOdmowa(powod string) ModulePlan {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanuModulu(p)
+func (p ModulePlan) withRefusal(reason string) ModulePlan {
+	p.Refusal = reason
+	p.PlanHash = modulePlanFingerprint(p)
 	return p
 }
 
-func textFingerprint(tekst string) string {
-	suma := sha256.Sum256([]byte(tekst))
-	return hex.EncodeToString(suma[:])
+func textFingerprint(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
-// odciskPlanuModulu liczy odcisk planu poza samym odciskiem.
-func odciskPlanuModulu(plan ModulePlan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// modulePlanFingerprint computes the plan fingerprint excluding the
+// fingerprint itself.
+func modulePlanFingerprint(plan ModulePlan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

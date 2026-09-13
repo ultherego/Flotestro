@@ -332,7 +332,7 @@ func TestPodgladDziennikaKonczySieSam(t *testing.T) {
 		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
 	}
 	// Koniec podgladu jest sukcesem: strumien mial sie skonczyc.
-	if !strings.Contains(job.ResultMessage, "podglad zakonczony") {
+	if !strings.Contains(job.ResultMessage, "the preview ended") {
 		t.Errorf("wynik nie podsumowuje podgladu: %q", job.ResultMessage)
 	}
 }

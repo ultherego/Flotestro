@@ -6,11 +6,11 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handleMetrics wystawia stan panelu dla monitoringu.
+// handleMetrics exposes the panel state for monitoring.
 //
-// Endpoint wymaga uwierzytelnienia: liczba hostow, stany zadan i czas do
-// wygasniecia CA opisuja flote i nie moga byc dostepne bez uprawnienia,
-// nawet jesli zwyczaj wielu instalacji jest inny.
+// The endpoint requires authentication: the host count, the task states
+// and the time to CA expiry describe the fleet and must not be available
+// without a permission, even if the custom of many installations differs.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.metrics == nil {
 		problem(w, http.StatusNotImplemented, "metrics_disabled",

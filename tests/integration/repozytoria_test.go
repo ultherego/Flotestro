@@ -208,7 +208,7 @@ func TestZrodloNieosiagalneWycofujeZmiane(t *testing.T) {
 			if nieudane.State == "succeeded" {
 				t.Fatal("zrodlo, ktorego nie da sie pobrac, zostalo przyjete")
 			}
-			if len(proby) == 0 || !strings.Contains(proby[len(proby)-1].Message, "przywrocono") {
+			if len(proby) == 0 || !strings.Contains(proby[len(proby)-1].Message, "was restored") {
 				t.Fatalf("odmowa nie mowi o wycofaniu zmiany: %+v", proby)
 			}
 			po := znajdzZrodlo(zrodlaHosta(h, host.ID).Repositories.Repositories, id)

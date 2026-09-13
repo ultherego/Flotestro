@@ -9,9 +9,9 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// authorize sprawdza uprawnienie w zakresie celu. Kazda odmowa trafia do
-// audytu: slad pokazujacy wylacznie udane operacje jest bezuzyteczny przy
-// analizie incydentu.
+// authorize checks the permission in the target scope. Every refusal goes
+// to the audit log: a trail showing only successful operations is useless
+// in an incident analysis.
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request, permission authz.Permission,
 	scope authz.Scope, targetType, targetID string) (authz.Principal, bool) {
 	principal := authz.FromContext(r.Context())
@@ -46,13 +46,13 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, permission au
 	return principal, true
 }
 
-// authorizeCollection autoryzuje odczyt kolekcji, ktora nie ma jednego
-// zakresu: listy hostow, zadan, kampanii czy podsumowania floty.
+// authorizeCollection authorises reading a collection that has no single
+// scope: the lists of hosts, tasks, campaigns or the fleet summary.
 //
-// Wystarczy uprawnienie w dowolnym zakresie, a wynik zawezaja handlery do
-// tego, co tozsamosc faktycznie moze widziec. Wymaganie zakresu globalnego
-// zamienialo zwykle przegladanie panelu w odmowe dla kazdego, kto ma role
-// ograniczona do jednego srodowiska - czyli dla typowego operatora.
+// A permission in any scope is enough, and the handlers narrow the result
+// to what the principal can actually see. Requiring the global scope turned
+// ordinary panel browsing into a refusal for everyone with a role limited
+// to one environment - that is, for a typical operator.
 func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 	permission authz.Permission, targetType string) (authz.Principal, bool) {
 	principal := authz.FromContext(r.Context())
@@ -87,8 +87,8 @@ func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 	return principal, true
 }
 
-// hostScope zwraca zakres autoryzacji hosta. Host, ktorego nie ma, nie moze
-// byc celem zadnej operacji.
+// hostScope returns the authorisation scope of a host. A host that does
+// not exist cannot be the target of any operation.
 func (s *Server) hostScope(w http.ResponseWriter, r *http.Request, hostID string) (*hosts.Host, authz.Scope, bool) {
 	host, err := s.hosts.Get(r.Context(), hostID)
 	if errors.Is(err, hosts.ErrNotFound) {
@@ -102,25 +102,26 @@ func (s *Server) hostScope(w http.ResponseWriter, r *http.Request, hostID string
 	return host, authz.Scope{Site: host.Site, Environment: host.Environment}, true
 }
 
-// jobScope zwraca zakres autoryzacji zadania, czyli zakres hosta, ktorego
-// zadanie dotyczy.
+// jobScope returns the authorisation scope of a task, that is the scope of
+// the host the task concerns.
 func (s *Server) jobScope(r *http.Request, hostID string) authz.Scope {
 	host, err := s.hosts.Get(r.Context(), hostID)
 	if err != nil {
-		// Nieznany zakres nie moze byc dopasowany przez waskie przypisanie,
-		// wiec pusty zakres jest bezpieczna wartoscia domyslna.
+		// An unknown scope cannot be matched by a narrow binding, so an empty
+		// scope is a safe default.
 		return authz.Scope{}
 	}
 	return authz.Scope{Site: host.Site, Environment: host.Environment}
 }
 
-// scopeFilter buduje klauzule WHERE zawezajaca hosty do zakresow tozsamosci.
-// Sama regula zawezania mieszka w pakiecie authz, razem z autoryzacja: dwie
-// osobne implementacje tej samej semantyki juz raz sie rozjechaly.
+// scopeFilter builds the WHERE clause narrowing the hosts to the principal
+// scopes. The narrowing rule itself lives in the authz package, together
+// with the authorisation: two separate implementations of the same
+// semantics have drifted apart once already.
 func scopeFilter(scopes []authz.Scope) (string, []any) {
-	warunek, args := authz.ScopeSQL(scopes, "site", "environment", 0)
-	if warunek == "" {
+	condition, args := authz.ScopeSQL(scopes, "site", "environment", 0)
+	if condition == "" {
 		return "", nil
 	}
-	return " where " + warunek, args
+	return " where " + condition, args
 }

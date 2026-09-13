@@ -29,9 +29,9 @@ const CertificateRegistryPath = "/var/lib/flotestro-helper/certificates.json"
 // The translation exists so that the helper does not accept an arbitrary
 // string: the scope of its work is a closed list, not a text from the agent.
 var certificateFactNames = map[helperv1.CertificateRequest_Fact]string{
-	helperv1.CertificateRequest_FACT_KEY_METADATA:      certificates.FaktMetadaneKluczy,
-	helperv1.CertificateRequest_FACT_RENEWAL_TRACKING:  certificates.FaktSledzenie,
-	helperv1.CertificateRequest_FACT_CERTIFICATE_FILES: certificates.FaktTrescPliku,
+	helperv1.CertificateRequest_FACT_KEY_METADATA:      certificates.FactKeyMetadata,
+	helperv1.CertificateRequest_FACT_RENEWAL_TRACKING:  certificates.FactTracking,
+	helperv1.CertificateRequest_FACT_CERTIFICATE_FILES: certificates.FactCertificateFiles,
 }
 
 // applyCertificate handles the operations of the certificate module.
@@ -69,18 +69,18 @@ func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperR
 
 // requestTargets reads the targets from the order and checks every path with
 // its own rule.
-func requestTargets(action *helperv1.CertificateRequest) ([]certificates.Cel, *helperv1.HelperResponse) {
-	targets := make([]certificates.Cel, 0, len(action.GetTargets()))
+func requestTargets(action *helperv1.CertificateRequest) ([]certificates.Target, *helperv1.HelperResponse) {
+	targets := make([]certificates.Target, 0, len(action.GetTargets()))
 	for _, target := range action.GetTargets() {
-		if err := certificates.WalidujSciezke(target.GetPath()); err != nil {
+		if err := certificates.ValidatePath(target.GetPath()); err != nil {
 			return nil, reject(ErrorMalformed, err.Error())
 		}
 		if target.GetKeyPath() != "" {
-			if err := certificates.WalidujSciezke(target.GetKeyPath()); err != nil {
+			if err := certificates.ValidatePath(target.GetKeyPath()); err != nil {
 				return nil, reject(ErrorMalformed, err.Error())
 			}
 		}
-		targets = append(targets, certificates.Cel{
+		targets = append(targets, certificates.Target{
 			Path: target.GetPath(), KeyPath: target.GetKeyPath(), Service: target.GetService(),
 		})
 	}
@@ -124,7 +124,7 @@ func (s *Server) certificateFacts(ctx context.Context,
 		s.writeCertificateRegistry(alive)
 	}
 
-	supplement := certificates.ZbierzUzupelnienie(ctx, toolOutput, names, knownTargets)
+	supplement := certificates.CollectSupplement(ctx, toolOutput, names, knownTargets)
 	supplement.Targets = knownTargets
 	encoded, err := json.Marshal(supplement)
 	if err != nil {
@@ -150,7 +150,7 @@ func (s *Server) planCertificate(ctx context.Context,
 	message := "the deployment will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == certificates.PlanBezZmian:
+	case plan.Action == certificates.PlanNoChange:
 		message = "the host already has this certificate under " + plan.Path
 	default:
 		message = strings.Join(plan.Changes, "; ")
@@ -167,9 +167,9 @@ func (s *Server) planCertificate(ctx context.Context,
 // certificatePlan assembles the deployment plan against the file the host has
 // now.
 func (s *Server) certificatePlan(action *helperv1.CertificateRequest) certificates.Plan {
-	current := certificates.Certyfikat{}
-	if err := certificates.WalidujSciezke(action.GetPath()); err == nil {
-		snapshot := certificates.Skanuj([]certificates.Cel{{
+	current := certificates.Certificate{}
+	if err := certificates.ValidatePath(action.GetPath()); err == nil {
+		snapshot := certificates.Scan([]certificates.Target{{
 			Path: action.GetPath(), KeyPath: action.GetKeyPath(),
 			Service: action.GetReloadUnit(),
 		}})
@@ -177,14 +177,14 @@ func (s *Server) certificatePlan(action *helperv1.CertificateRequest) certificat
 			current = snapshot.Certificates[0]
 		}
 	}
-	return certificates.Zaplanuj(current, certificates.Zamowienie{
-		Path:       action.GetPath(),
-		KeyPath:    action.GetKeyPath(),
-		Certyfikat: string(action.GetCertificate()),
-		KeySecret:  action.GetKeySecretRef(),
-		Jednostka:  action.GetReloadUnit(),
-		Cel:        action.GetProbeTarget(),
-		MaKlucz:    action.GetKeySecretRef() != "" || len(action.GetKey()) > 0,
+	return certificates.Compute(current, certificates.Order{
+		Path:        action.GetPath(),
+		KeyPath:     action.GetKeyPath(),
+		Certificate: string(action.GetCertificate()),
+		KeySecret:   action.GetKeySecretRef(),
+		Unit:        action.GetReloadUnit(),
+		Target:      action.GetProbeTarget(),
+		HasKey:      action.GetKeySecretRef() != "" || len(action.GetKey()) > 0,
 	}, time.Now())
 }
 
@@ -207,84 +207,84 @@ func (s *Server) deployCertificate(ctx context.Context,
 				"the certificate under "+action.GetPath()+" changed since the planning; the deployment needs a new plan")
 		}
 	}
-	deployment := certificates.Wdrozenie{
-		Path:       action.GetPath(),
-		KeyPath:    action.GetKeyPath(),
-		Certyfikat: action.GetCertificate(),
-		Klucz:      action.GetKey(),
-		Owner:      action.GetOwner(),
-		Group:      action.GetGroup(),
-		Mode:       action.GetMode(),
-		KeyMode:    action.GetKeyMode(),
-		Jednostka:  action.GetReloadUnit(),
-		Cel:        action.GetProbeTarget(),
+	deployment := certificates.Deployment{
+		Path:        action.GetPath(),
+		KeyPath:     action.GetKeyPath(),
+		Certificate: action.GetCertificate(),
+		Key:         action.GetKey(),
+		Owner:       action.GetOwner(),
+		Group:       action.GetGroup(),
+		Mode:        action.GetMode(),
+		KeyMode:     action.GetKeyMode(),
+		Unit:        action.GetReloadUnit(),
+		Target:      action.GetProbeTarget(),
 	}
-	parsed, err := certificates.Sprawdz(deployment, time.Now())
+	parsed, err := certificates.Check(deployment, time.Now())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	fingerprint := certificates.Odcisk(parsed[0])
+	fingerprint := certificates.Fingerprint(parsed[0])
 
-	uid, gid, err := files.Wlasciciel(deployment.Owner, deployment.Group)
+	uid, gid, err := files.Ownership(deployment.Owner, deployment.Group)
 	if err != nil {
 		return reject(ErrorPreconditionFailed, err.Error())
 	}
 
-	certificateCopy, err := certificates.Zapamietaj(deployment.Path)
+	certificateCopy, err := certificates.Remember(deployment.Path)
 	if err != nil {
 		return reject(ErrorExecFailed, "the previous certificate was not read: "+err.Error())
 	}
-	keyCopy, err := certificates.Zapamietaj(deployment.KeyPath)
+	keyCopy, err := certificates.Remember(deployment.KeyPath)
 	if err != nil {
 		return reject(ErrorExecFailed, "the previous key was not read: "+err.Error())
 	}
 	undo := func() bool {
-		certificateErr := certificateCopy.Przywroc()
-		keyErr := keyCopy.Przywroc()
-		if deployment.Jednostka != "" {
+		certificateErr := certificateCopy.Restore()
+		keyErr := keyCopy.Restore()
+		if deployment.Unit != "" {
 			_, _ = runTool(ctx,
-				[]string{"/usr/bin/systemctl", "reload-or-restart", deployment.Jednostka})
+				[]string{"/usr/bin/systemctl", "reload-or-restart", deployment.Unit})
 		}
 		return certificateErr == nil && keyErr == nil
 	}
 
-	if err := certificates.Zapisz(deployment, uid, gid); err != nil {
+	if err := certificates.Write(deployment, uid, gid); err != nil {
 		undo()
 		return reject(ErrorExecFailed, "the certificate was not written: "+err.Error())
 	}
 
 	message := "the certificate was written"
-	if deployment.Jednostka != "" {
+	if deployment.Unit != "" {
 		// A reload and not a restart wherever the service supports one: the
 		// connections already running are to survive the certificate swap.
 		if output, err := runTool(ctx,
-			[]string{"/usr/bin/systemctl", "reload-or-restart", deployment.Jednostka}); err != nil {
+			[]string{"/usr/bin/systemctl", "reload-or-restart", deployment.Unit}); err != nil {
 			undone := undo()
 			return deploymentRefusal(fingerprint, parsed[0].NotAfter,
-				"reloading "+deployment.Jednostka+" failed: "+output, undone)
+				"reloading "+deployment.Unit+" failed: "+output, undone)
 		}
-		message += "; " + deployment.Jednostka + " was reloaded"
+		message += "; " + deployment.Unit + " was reloaded"
 	}
 
-	var probe certificates.WynikSondy
-	if deployment.Cel != "" {
-		probe = certificates.Sonda(ctx, deployment.Cel)
-		if !probe.Potwierdza(fingerprint) {
+	var probe certificates.ProbeResult
+	if deployment.Target != "" {
+		probe = certificates.Probe(ctx, deployment.Target)
+		if !probe.Confirms(fingerprint) {
 			reason := probe.Error
 			if reason == "" {
 				reason = "the service presents a different certificate than the deployed one"
 			}
 			undone := undo()
 			response := deploymentRefusal(fingerprint, parsed[0].NotAfter,
-				"the probe "+deployment.Cel+": "+reason, undone)
+				"the probe "+deployment.Target+": "+reason, undone)
 			response.CertificateResult.Probe = encodeProbe(probe)
 			return response
 		}
 		message += "; the service shows the new certificate"
 	}
 
-	s.rememberCertificate(certificates.Cel{
-		Path: deployment.Path, KeyPath: deployment.KeyPath, Service: deployment.Jednostka,
+	s.rememberCertificate(certificates.Target{
+		Path: deployment.Path, KeyPath: deployment.KeyPath, Service: deployment.Unit,
 	})
 	return &helperv1.HelperResponse{
 		Accepted: true,
@@ -304,7 +304,7 @@ func (s *Server) deployCertificate(ctx context.Context,
 // the panel is to ask and to check whether anything came of it.
 func (s *Server) renewCertificate(ctx context.Context,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
-	tool := certificates.SciezkaNarzedzia()
+	tool := certificates.ToolPath()
 	if tool == "" {
 		return reject(ErrorUnsupported, "this host has no certmonger")
 	}
@@ -326,21 +326,21 @@ func (s *Server) renewCertificate(ctx context.Context,
 	request := action.GetRequest()
 	if request == "" {
 		path := action.GetPath()
-		if err := certificates.WalidujSciezke(path); err != nil {
+		if err := certificates.ValidatePath(path); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 		output, err := toolOutput(ctx, tool, "list")
 		if err != nil {
 			return reject(ErrorExecFailed, "getcert list: "+err.Error()+" "+output)
 		}
-		tracking, watched := certificates.ParsujGetcert(output)[path]
+		tracking, watched := certificates.ParseGetcert(output)[path]
 		if !watched || tracking.Request == "" {
 			return reject(ErrorPreconditionFailed,
 				"certmonger does not watch the file "+path+", so there is nothing to renew")
 		}
 		request = tracking.Request
 	}
-	if err := certificates.WalidujZlecenie(request); err != nil {
+	if err := certificates.ValidateRequest(request); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
@@ -351,9 +351,9 @@ func (s *Server) renewCertificate(ctx context.Context,
 
 	// A request sent is not a certificate renewed: the daemon is asked what
 	// state it is in now and what lies on the disk.
-	state := certificates.Sledzenie{}
+	state := certificates.Tracking{}
 	if output, err := toolOutput(ctx, tool, "list", "-i", request); err == nil {
-		for _, tracking := range certificates.ParsujGetcert(output) {
+		for _, tracking := range certificates.ParseGetcert(output) {
 			state = tracking
 			break
 		}
@@ -369,7 +369,7 @@ func (s *Server) renewCertificate(ctx context.Context,
 	}
 
 	if unit := action.GetReloadUnit(); unit != "" {
-		if err := certificates.WalidujJednostke(unit); err != nil {
+		if err := certificates.ValidateUnit(unit); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 		if output, err := runTool(ctx,
@@ -379,7 +379,7 @@ func (s *Server) renewCertificate(ctx context.Context,
 		result.Message += "; " + unit + " was reloaded"
 	}
 	if target := action.GetProbeTarget(); target != "" {
-		probe := certificates.Sonda(ctx, target)
+		probe := certificates.Probe(ctx, target)
 		result.Probe = encodeProbe(probe)
 		result.FingerprintSha256 = probe.FingerprintSHA256
 		if !probe.Reachable {
@@ -413,7 +413,7 @@ func deploymentRefusal(fingerprint string, deadline time.Time, reason string, un
 	}
 }
 
-func encodeProbe(probe certificates.WynikSondy) []byte {
+func encodeProbe(probe certificates.ProbeResult) []byte {
 	if probe.Target == "" {
 		return nil
 	}
@@ -426,10 +426,10 @@ func encodeProbe(probe certificates.WynikSondy) []byte {
 
 // mergeTargets merges the list from the registry with the list from the order,
 // without repetitions.
-func mergeTargets(registry, targets []certificates.Cel) []certificates.Cel {
-	result := make([]certificates.Cel, 0, len(registry)+len(targets))
+func mergeTargets(registry, targets []certificates.Target) []certificates.Target {
+	result := make([]certificates.Target, 0, len(registry)+len(targets))
 	positions := map[string]int{}
-	add := func(target certificates.Cel) {
+	add := func(target certificates.Target) {
 		if i, known := positions[target.Path]; known {
 			// Newer knowledge wins: the panel can add a key or a service to a
 			// target the host knew earlier from the path alone.
@@ -454,23 +454,23 @@ func mergeTargets(registry, targets []certificates.Cel) []certificates.Cel {
 	return result
 }
 
-func (s *Server) certificateRegistry() []certificates.Cel {
+func (s *Server) certificateRegistry() []certificates.Target {
 	data, err := os.ReadFile(CertificateRegistryPath)
 	if err != nil {
 		return nil
 	}
-	var targets []certificates.Cel
+	var targets []certificates.Target
 	if err := json.Unmarshal(data, &targets); err != nil {
 		return nil
 	}
 	return targets
 }
 
-func (s *Server) rememberCertificate(target certificates.Cel) {
-	s.writeCertificateRegistry(mergeTargets(s.certificateRegistry(), []certificates.Cel{target}))
+func (s *Server) rememberCertificate(target certificates.Target) {
+	s.writeCertificateRegistry(mergeTargets(s.certificateRegistry(), []certificates.Target{target}))
 }
 
-func (s *Server) writeCertificateRegistry(targets []certificates.Cel) {
+func (s *Server) writeCertificateRegistry(targets []certificates.Target) {
 	data, err := json.Marshal(targets)
 	if err != nil {
 		return
@@ -484,8 +484,8 @@ func (s *Server) writeCertificateRegistry(targets []certificates.Cel) {
 }
 
 // trustStore reads the anchors the host has now.
-func (s *Server) trustStore() certificates.MagazynZaufania {
-	return certificates.CzytajKotwice(certificates.WykryjMagazyn(exists))
+func (s *Server) trustStore() certificates.TrustStore {
+	return certificates.ReadAnchors(certificates.DetectStore(exists))
 }
 
 // trustPlan assembles the plan of a rotation step against the state of the
@@ -495,7 +495,7 @@ func (s *Server) trustStore() certificates.MagazynZaufania {
 // something must not disappear from the store, because that would break the
 // trust of clients who changed nothing.
 func (s *Server) trustPlan(ctx context.Context, action *helperv1.CertificateRequest,
-	store certificates.MagazynZaufania) certificates.PlanZaufania {
+	store certificates.TrustStore) certificates.TrustPlan {
 	// A plan without material is a withdrawal plan: trust always carries the
 	// certificate of the authority, a withdrawal never does. The planning
 	// operation is one for both rotation steps, so the kind is recognized by the
@@ -504,23 +504,23 @@ func (s *Server) trustPlan(ctx context.Context, action *helperv1.CertificateRequ
 		(action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_PLAN &&
 			len(action.GetCertificate()) == 0)
 	if removal {
-		return certificates.ZaplanujUsuniecieKotwicy(store, action.GetAnchorId(),
+		return certificates.ComputeAnchorRemoval(store, action.GetAnchorId(),
 			s.hostCertificates(ctx))
 	}
-	return certificates.ZaplanujKotwice(store, action.GetAnchorId(),
+	return certificates.ComputeAnchor(store, action.GetAnchorId(),
 		string(action.GetCertificate()), time.Now())
 }
 
 // hostCertificates reads the certificates the host keeps under the observation
 // of the panel.
-func (s *Server) hostCertificates(ctx context.Context) []certificates.Certyfikat {
+func (s *Server) hostCertificates(ctx context.Context) []certificates.Certificate {
 	targets := s.certificateRegistry()
 	if len(targets) == 0 {
 		return nil
 	}
-	snapshot := certificates.Skanuj(targets)
-	snapshot = snapshot.Uzupelnij(certificates.ZbierzUzupelnienie(ctx, toolOutput,
-		snapshot.Brakujace(), targets))
+	snapshot := certificates.Scan(targets)
+	snapshot = snapshot.Supplemented(certificates.CollectSupplement(ctx, toolOutput,
+		snapshot.MissingFacts(), targets))
 	return snapshot.Certificates
 }
 
@@ -557,18 +557,18 @@ func (s *Server) changeTrust(ctx context.Context,
 	}
 
 	removal := action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_REMOVE
-	path := certificates.SciezkaKotwicy(store, action.GetAnchorId())
+	path := certificates.AnchorPath(store, action.GetAnchorId())
 	if path == "" {
 		return reject(ErrorMalformed, "the path of the anchor cannot be assembled")
 	}
-	previous, err := certificates.Zapamietaj(path)
+	previous, err := certificates.Remember(path)
 	if err != nil {
 		return reject(ErrorExecFailed, "the previous anchor was not read: "+err.Error())
 	}
 
 	switch {
 	case removal:
-		if plan.Action == certificates.PlanJuzUsuniety {
+		if plan.Action == certificates.PlanRemoveAbsent {
 			return trustResponse(s.trustStore(), plan,
 				"the host did not trust this authority, so there is nothing to withdraw", nil)
 		}
@@ -576,11 +576,11 @@ func (s *Server) changeTrust(ctx context.Context,
 			return reject(ErrorExecFailed, "removing the anchor: "+err.Error())
 		}
 	default:
-		if plan.Action == certificates.PlanBezZmian {
+		if plan.Action == certificates.PlanNoChange {
 			return trustResponse(store, plan,
 				"the host already trusts this authority", nil)
 		}
-		material, _, err := certificates.SkladajKotwice(string(action.GetCertificate()), time.Now())
+		material, _, err := certificates.ComposeAnchor(string(action.GetCertificate()), time.Now())
 		if err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
@@ -593,7 +593,7 @@ func (s *Server) changeTrust(ctx context.Context,
 		// A store that cannot be recomputed would leave the host with the bundle
 		// from before the change and an anchor nobody saw. The previous file
 		// comes back and the recomputation is tried once more.
-		_ = previous.Przywroc()
+		_ = previous.Restore()
 		_, _ = runTool(ctx, recomputeCommand(store))
 		return reject(ErrorExecFailed, "recomputing the trust store: "+err.Error()+": "+output)
 	}
@@ -606,7 +606,7 @@ func (s *Server) changeTrust(ctx context.Context,
 }
 
 // recomputeCommand assembles the invocation of the store tool.
-func recomputeCommand(store certificates.MagazynZaufania) []string {
+func recomputeCommand(store certificates.TrustStore) []string {
 	if store.Adapter == certificates.AdapterRHEL {
 		return []string{store.Tool, "extract"}
 	}
@@ -614,20 +614,20 @@ func recomputeCommand(store certificates.MagazynZaufania) []string {
 }
 
 // describeTrustPlan sums the plan up in one sentence for the operation journal.
-func describeTrustPlan(plan certificates.PlanZaufania) string {
+func describeTrustPlan(plan certificates.TrustPlan) string {
 	switch {
 	case plan.Refusal != "":
 		return "the step will not enter this host: " + plan.Refusal
-	case plan.Action == certificates.PlanBezZmian:
+	case plan.Action == certificates.PlanNoChange:
 		return "the host already trusts this authority"
-	case plan.Action == certificates.PlanJuzUsuniety:
+	case plan.Action == certificates.PlanRemoveAbsent:
 		return "the host does not trust this authority, so there is nothing to withdraw"
 	default:
 		return strings.Join(plan.Changes, "; ")
 	}
 }
 
-func trustResponse(store certificates.MagazynZaufania, plan certificates.PlanZaufania,
+func trustResponse(store certificates.TrustStore, plan certificates.TrustPlan,
 	message string, _ error) *helperv1.HelperResponse {
 	encodedPlan, err := json.Marshal(plan)
 	if err != nil {
@@ -671,13 +671,13 @@ func (s *Server) planRenewal(ctx context.Context,
 // renewalPlan assembles the plan against what the host has and what watches the
 // certificate.
 func (s *Server) renewalPlan(ctx context.Context,
-	action *helperv1.CertificateRequest) certificates.PlanOdnowienia {
+	action *helperv1.CertificateRequest) certificates.RenewalPlan {
 	path := action.GetPath()
-	tool := certificates.SciezkaNarzedzia()
+	tool := certificates.ToolPath()
 
-	current := certificates.Certyfikat{}
-	if err := certificates.WalidujSciezke(path); err == nil {
-		snapshot := certificates.Skanuj([]certificates.Cel{{
+	current := certificates.Certificate{}
+	if err := certificates.ValidatePath(path); err == nil {
+		snapshot := certificates.Scan([]certificates.Target{{
 			Path: path, KeyPath: action.GetKeyPath(), Service: action.GetReloadUnit(),
 		}})
 		if len(snapshot.Certificates) > 0 {
@@ -685,16 +685,16 @@ func (s *Server) renewalPlan(ctx context.Context,
 		}
 	}
 
-	var tracking *certificates.Sledzenie
+	var tracking *certificates.Tracking
 	if tool != "" {
 		if output, err := toolOutput(ctx, tool, "list"); err == nil {
-			if entry, watched := certificates.ParsujGetcert(output)[path]; watched {
+			if entry, watched := certificates.ParseGetcert(output)[path]; watched {
 				found := entry
 				tracking = &found
 			}
 		}
 	}
-	return certificates.ZaplanujOdnowienie(current, tracking, tool != "",
+	return certificates.ComputeRenewal(current, tracking, tool != "",
 		path, action.GetReloadUnit(), time.Now())
 }
 
@@ -702,8 +702,8 @@ func (s *Server) renewalPlan(ctx context.Context,
 //
 // A missing file is decided by the ENOENT error and not by every read error: a
 // file in a directory closed to the helper still exists and is still a target.
-func targetsWithAnExistingFile(targets []certificates.Cel) []certificates.Cel {
-	alive := make([]certificates.Cel, 0, len(targets))
+func targetsWithAnExistingFile(targets []certificates.Target) []certificates.Target {
+	alive := make([]certificates.Target, 0, len(targets))
 	for _, target := range targets {
 		if _, err := os.Lstat(target.Path); errors.Is(err, os.ErrNotExist) {
 			continue

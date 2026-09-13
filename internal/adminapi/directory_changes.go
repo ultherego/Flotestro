@@ -17,8 +17,8 @@ type createChangeRequest struct {
 	RequiresApproval *bool           `json:"requires_approval,omitempty"`
 }
 
-// handleCreateDirectoryChange planuje zmiane w katalogu. Samo zlecenie
-// niczego nie zmienia: liczy plan i czeka na zatwierdzenie.
+// handleCreateDirectoryChange plans a change in the directory. The order
+// itself changes nothing: it computes the plan and waits for approval.
 func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Request) {
 	if s.directory == nil || s.changes == nil || !s.directoryWrite {
 		problem(w, http.StatusNotImplemented, "directory_write_disabled",
@@ -37,7 +37,8 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 		problem(w, http.StatusBadRequest, "unknown_action", "unknown change type "+request.Action)
 		return
 	}
-	// Zmiana katalogu obejmuje cala flote, wiec wymaga uprawnienia globalnego.
+	// A directory change covers the whole fleet, so it requires the global
+	// permission.
 	principal, ok := s.authorize(w, r, authz.Permission(action.Permission()),
 		authz.GlobalScope, "directory_change", "")
 	if !ok {
@@ -104,7 +105,8 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusCreated, change)
 }
 
-// handleApproveDirectoryChange zatwierdza zmiane i dopuszcza ja do wykonania.
+// handleApproveDirectoryChange approves the change and admits it for
+// execution.
 func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Request) {
 	change, principal, ok := s.changeFor(w, r, authz.PermIdentityPolicyWrite)
 	if !ok {
@@ -127,8 +129,8 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Zmiana w katalogu jest zawsze operacja o podwyzszonym ryzyku, wiec
-	// zasada drugiej osoby obowiazuje niezaleznie od srodowiska.
+	// A directory change is always an elevated-risk operation, so the
+	// second-person rule binds regardless of the environment.
 	if change.CreatedBy == principal.Subject {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: principal.Subject,
@@ -180,7 +182,7 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, approved)
 }
 
-// handleCancelDirectoryChange anuluje zmiane, ktora jeszcze nie ruszyla.
+// handleCancelDirectoryChange cancels a change that has not started yet.
 func (s *Server) handleCancelDirectoryChange(w http.ResponseWriter, r *http.Request) {
 	change, principal, ok := s.changeFor(w, r, authz.PermIdentityUserWrite)
 	if !ok {
@@ -239,7 +241,7 @@ func (s *Server) handleGetDirectoryChange(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, change)
 }
 
-// changeFor wczytuje zmiane i sprawdza uprawnienie.
+// changeFor loads the change and checks the permission.
 func (s *Server) changeFor(w http.ResponseWriter, r *http.Request,
 	permission authz.Permission) (*identity.Change, authz.Principal, bool) {
 	if s.changes == nil || !s.directoryWrite {

@@ -1,61 +1,62 @@
-// Package compose obsluguje projekty Docker Compose.
+// Package compose handles Docker Compose projects.
 //
-// Manifest opisuje stan docelowy projektu, a nie polecenie do wykonania.
-// Plan liczy roznice miedzy tym, co dziala, a tym, co manifest opisuje;
-// wdrozenie jest zwiazane z konkretnym planem i odmawia, gdy stan podstawy
-// zmienil sie od czasu zatwierdzenia.
+// The manifest describes the desired state of the project, not a command
+// to run. The plan computes the difference between what runs and what the
+// manifest describes; the deployment is bound to a specific plan and
+// refuses when the base state changed since approval.
 package compose
 
 import "time"
 
-// Change opisuje jedna zmiane, ktora przyniesie wdrozenie.
+// Change describes one change the deployment will bring.
 type Change struct {
-	// Kind to rodzaj obiektu: container, network, volume, image.
+	// Kind is the object kind: container, network, volume, image.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
-	// Action mowi, co sie z nim stanie: create, recreate, start, stop,
-	// remove albo pull.
+	// Action says what happens to it: create, recreate, start, stop, remove
+	// or pull.
 	Action string `json:"action"`
 }
 
-// Service to usluga projektu po znormalizowaniu manifestu.
+// Service is a project service after the manifest normalisation.
 type Service struct {
 	Name  string `json:"name"`
 	Image string `json:"image"`
-	// ImageDigest jest wypelniony, gdy obraz jest juz na hoscie. Pusty
-	// oznacza obraz, ktory zostanie dopiero pobrany - i wtedy nie da sie
-	// z gory powiedziec, co dokladnie wstanie.
+	// ImageDigest is filled when the image is already on the host. Empty
+	// means an image yet to be pulled - and then it cannot be said up front
+	// what exactly will come up.
 	ImageDigest string `json:"image_digest,omitempty"`
 	Replicas    int    `json:"replicas,omitempty"`
 }
 
-// Plan opisuje, co wdrozenie zmieni na hoscie.
+// Plan describes what the deployment changes on the host.
 type Plan struct {
 	Project string `json:"project"`
-	// Digest wiaze wdrozenie z tym planem. Liczony ze znormalizowanego
-	// manifestu i z digestow obrazow, wiec zmiana ktoregokolwiek z nich
-	// uniewaznia zatwierdzenie.
+	// Digest binds the deployment to this plan. Computed from the
+	// normalised manifest and the image digests, so a change of either
+	// invalidates the approval.
 	Digest   string    `json:"digest"`
 	Services []Service `json:"services"`
 	Changes  []Change  `json:"changes"`
-	// Warnings mowia o rzeczach, ktore nie blokuja wdrozenia, ale operator
-	// ma o nich wiedziec, zanim je zatwierdzi.
+	// Warnings tell about things that do not block the deployment, but the
+	// operator is meant to know about them before approving.
 	Warnings []string `json:"warnings,omitempty"`
-	// Current opisuje stan projektu przed zmiana.
+	// Current describes the project state before the change.
 	Current []Service `json:"current,omitempty"`
-	// UnavailableReason mowi, dlaczego planu nie udalo sie policzyc.
+	// UnavailableReason says why the plan could not be computed.
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 	ComputedAt        time.Time `json:"computed_at"`
 }
 
-// Result opisuje wynik wdrozenia.
+// Result describes the deployment result.
 type Result struct {
 	Project string `json:"project"`
 	Digest  string `json:"digest"`
-	// Applied wylicza zmiany zgloszone przez silnik w trakcie wdrozenia.
+	// Applied lists the changes reported by the engine during the
+	// deployment.
 	Applied []Change  `json:"applied,omitempty"`
 	Before  []Service `json:"before,omitempty"`
 	After   []Service `json:"after,omitempty"`
-	// Output to koncowka wyjscia narzedzia przy niepowodzeniu.
+	// Output is the tail of the tool output on failure.
 	Output []string `json:"output,omitempty"`
 }

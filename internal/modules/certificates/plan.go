@@ -10,271 +10,280 @@ import (
 	"time"
 )
 
-// Plan opisuje roznice miedzy certyfikatem, ktory host ma pod sciezka,
-// a tym, ktory ma tam trafic.
+// Plan describes the difference between the certificate the host has under
+// a path and the one that is to land there.
 //
-// Ten sam certyfikat wdrazany na dwa hosty prawie nigdy nie jest ta sama
-// zmiana: jeden ma tam certyfikat wygasajacy jutro, drugi ten sam co
-// zamowiony, trzeci nie ma pliku wcale, a kazdy przeladowuje inna usluge.
-// Zgoda operatora ma dotyczyc tych roznic.
+// The same certificate deployed to two hosts is almost never the same
+// change: one has a certificate expiring tomorrow there, another the same
+// as ordered, a third has no file at all, and each reloads a different
+// service. The operator's approval is meant to cover those differences.
 //
-// Klucza prywatnego nie ma w planie i nie ma go w odcisku: plan jest
-// zapisywany w bazie i pokazywany w panelu, wiec bylby miejscem wycieku.
-// Plan mowi o kluczu tyle, skad host go wezmie - nazwa i wersja sekretu.
+// The private key is not in the plan and not in the fingerprint: the plan
+// is stored in the database and shown in the panel, so it would be a place
+// of a leak. The plan says about the key only where the host takes it from
+// - the secret name and version.
 type Plan struct {
-	// Kind nazywa rodzaj planu. Modul certyfikatow liczy trzy rozne plany
-	// tym samym zadaniem, a odbiorca nie ma ich rozpoznawac po tym, ktore
-	// pola akurat sa puste.
+	// Kind names the plan kind. The certificates module computes three
+	// different plans with the same task, and the receiver is not meant to
+	// recognise them by which fields happen to be empty.
 	Kind    string `json:"kind"`
 	Path    string `json:"path"`
 	KeyPath string `json:"key_path,omitempty"`
-	// Action nazywa to, co by sie stalo: create, update albo no_change.
+	// Action names what would happen: create, update or no_change.
 	Action string `json:"action"`
 
-	// Stan zastany. Brak odcisku przy Exists = true oznacza plik, ktorego
-	// nie udalo sie odczytac - i wtedy niesie to Powodem.
+	// The state found. No fingerprint with Exists = true means a file that
+	// could not be read - and then UnavailableReason carries it.
 	Exists             bool       `json:"exists"`
 	CurrentSubject     string     `json:"current_subject,omitempty"`
 	CurrentFingerprint string     `json:"current_fingerprint,omitempty"`
 	CurrentNotAfter    *time.Time `json:"current_not_after,omitempty"`
-	Powodem            string     `json:"unavailable_reason,omitempty"`
+	UnavailableReason  string     `json:"unavailable_reason,omitempty"`
 
-	// Stan docelowy: to, co panel przysłal jawnie. Certyfikat jest
-	// materialem publicznym, wiec plan opisuje go wprost.
+	// The desired state: what the panel sent explicitly. The certificate
+	// is public material, so the plan describes it directly.
 	DesiredSubject     string    `json:"desired_subject,omitempty"`
 	DesiredFingerprint string    `json:"desired_fingerprint,omitempty"`
 	DesiredNotAfter    time.Time `json:"desired_not_after,omitempty"`
 	DesiredSANs        []string  `json:"desired_sans,omitempty"`
 	ChainLength        int       `json:"chain_length,omitempty"`
 
-	// KeySecret nazywa sekret, po ktory host siegnie tuz przed podmiana.
-	// Nigdy jego wartosc.
+	// KeySecret names the secret the host reaches for right before the
+	// replacement. Never its value.
 	KeySecret   string `json:"key_secret,omitempty"`
 	ReloadUnit  string `json:"reload_unit,omitempty"`
 	ProbeTarget string `json:"probe_target,omitempty"`
 
 	Changes []string `json:"changes,omitempty"`
-	// Refusal nazywa powod, dla ktorego wdrozenie nie wejdzie na ten host:
-	// material, ktorego host nie przyjmie, cel poza zakresem certyfikatu,
-	// brak odnosnika do klucza. Plan z odmowa jest odpowiedzia, ktora
-	// operator ma zobaczyc przed zgoda.
+	// Refusal names the reason the deployment will not land on this host:
+	// material the host will not accept, a target outside the certificate
+	// scope, no reference to the key. A plan with a refusal is an answer
+	// the operator is meant to see before approving.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
 
-// Rodzaje planow modulu certyfikatow.
+// Plan kinds of the certificates module.
 const (
-	RodzajWdrozenia  = "certificate"
-	RodzajOdnowienia = "renewal"
-	RodzajZaufania   = "trust"
+	KindDeployment = "certificate"
+	KindRenewal    = "renewal"
+	KindTrust      = "trust"
 )
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanTworzy      = "create"
-	PlanZmienia     = "update"
-	PlanBezZmian    = "no_change"
-	PlanUsuwa       = "remove"
-	PlanJuzUsuniety = "remove_absent"
+	PlanCreate       = "create"
+	PlanUpdate       = "update"
+	PlanNoChange     = "no_change"
+	PlanRemove       = "remove"
+	PlanRemoveAbsent = "remove_absent"
 )
 
-// Zamowienie opisuje wdrozenie widziane przez planer. Klucza tu nie ma:
-// plan powstaje bez siegania do magazynu sekretow.
-type Zamowienie struct {
-	Path       string
-	KeyPath    string
-	Certyfikat string
-	KeySecret  string
-	Jednostka  string
-	Cel        string
-	MaKlucz    bool
+// Order describes a deployment as seen by the planner. There is no key
+// here: the plan is made without reaching into the secret store.
+type Order struct {
+	Path        string
+	KeyPath     string
+	Certificate string
+	KeySecret   string
+	Unit        string
+	Target      string
+	HasKey      bool
 }
 
-// Zaplanuj liczy roznice miedzy certyfikatem zastanym a zamowionym.
+// Compute computes the difference between the certificate found and the
+// ordered one.
 //
-// Brak pliku i plik nieodczytany to dwie rozne odpowiedzi: pierwsza znaczy
-// "certyfikat powstanie", druga "nie wiadomo, co tam lezy" - i ta druga
-// nie moze udawac pierwszej.
-func Zaplanuj(obecny Certyfikat, zamowienie Zamowienie, teraz time.Time) Plan {
+// A missing file and an unread file are two different answers: the first
+// means "the certificate will be created", the second "it is unknown what
+// lies there" - and the second must not pretend to be the first.
+func Compute(current Certificate, order Order, now time.Time) Plan {
 	plan := Plan{
-		Kind: RodzajWdrozenia,
-		Path: zamowienie.Path, KeyPath: zamowienie.KeyPath,
-		KeySecret: zamowienie.KeySecret, ReloadUnit: zamowienie.Jednostka,
-		ProbeTarget: zamowienie.Cel,
+		Kind: KindDeployment,
+		Path: order.Path, KeyPath: order.KeyPath,
+		KeySecret: order.KeySecret, ReloadUnit: order.Unit,
+		ProbeTarget: order.Target,
 	}
-	if obecny.FingerprintSHA256 != "" || (obecny.UnavailableReason != "" && !BrakPliku(obecny.UnavailableReason)) {
+	if current.FingerprintSHA256 != "" || (current.UnavailableReason != "" && !FileMissing(current.UnavailableReason)) {
 		plan.Exists = true
-		plan.CurrentSubject = obecny.Subject
-		plan.CurrentFingerprint = obecny.FingerprintSHA256
-		plan.CurrentNotAfter = obecny.NotAfter
-		plan.Powodem = obecny.UnavailableReason
+		plan.CurrentSubject = current.Subject
+		plan.CurrentFingerprint = current.FingerprintSHA256
+		plan.CurrentNotAfter = current.NotAfter
+		plan.UnavailableReason = current.UnavailableReason
 	}
 
-	if err := WalidujSciezke(zamowienie.Path); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := ValidatePath(order.Path); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	if zamowienie.KeyPath != "" {
-		if err := WalidujSciezke(zamowienie.KeyPath); err != nil {
-			return plan.zOdmowa(err.Error())
+	if order.KeyPath != "" {
+		if err := ValidatePath(order.KeyPath); err != nil {
+			return plan.withRefusal(err.Error())
 		}
 	}
-	if err := WalidujJednostke(zamowienie.Jednostka); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := ValidateUnit(order.Unit); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	if zamowienie.Cel != "" {
-		if err := WalidujCel(zamowienie.Cel); err != nil {
-			return plan.zOdmowa(err.Error())
+	if order.Target != "" {
+		if err := ValidateTarget(order.Target); err != nil {
+			return plan.withRefusal(err.Error())
 		}
 	}
-	// Klucz prywatny jedzie na host wylacznie jako odnosnik do magazynu.
-	// Wdrozenie bez niego zostawiloby nowy certyfikat przy starym kluczu,
-	// a usluga nie wstalaby po przeladowaniu.
-	if zamowienie.KeyPath != "" && !zamowienie.MaKlucz {
-		return plan.zOdmowa("wdrozenie klucza wymaga odnosnika do magazynu sekretow")
+	// The private key travels to the host only as a reference to the
+	// store. A deployment without it would leave the new certificate with
+	// the old key, and the service would not come up after the reload.
+	if order.KeyPath != "" && !order.HasKey {
+		return plan.withRefusal("a key deployment requires a reference to the secret store")
 	}
 
-	certy, err := ParsujPEM([]byte(zamowienie.Certyfikat))
+	certs, err := ParsePEM([]byte(order.Certificate))
 	if err != nil {
-		return plan.zOdmowa(err.Error())
+		return plan.withRefusal(err.Error())
 	}
-	if err := SprawdzTerminy(certy[0], teraz); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := CheckDates(certs[0], now); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	if err := SprawdzLancuch(certy); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := CheckChain(certs); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	// Cel sondy poza zakresem certyfikatu konczylby sie cofnieciem wdrozenia
-	// po podmianie plikow. Lepiej powiedziec to przed zgoda.
-	if zamowienie.Cel != "" {
-		if nazwa := nazwaCelu(zamowienie.Cel); nazwa != "" && !Obejmuje(certy[0], nazwa) {
-			return plan.zOdmowa("certyfikat nie obejmuje nazwy " + nazwa +
-				", pod ktora host mial sprawdzic wdrozenie")
+	// A probe target outside the certificate scope would end in rolling
+	// back the deployment after the files were replaced. Better to say so
+	// before approval.
+	if order.Target != "" {
+		if name := targetName(order.Target); name != "" && !Covers(certs[0], name) {
+			return plan.withRefusal("the certificate does not cover the name " + name +
+				" the host was to check the deployment at")
 		}
 	}
 
-	plan.DesiredSubject = certy[0].Subject.String()
-	plan.DesiredFingerprint = Odcisk(certy[0])
-	plan.DesiredNotAfter = certy[0].NotAfter.UTC()
-	plan.DesiredSANs = NazwyAlternatywne(certy[0])
-	plan.ChainLength = len(certy)
+	plan.DesiredSubject = certs[0].Subject.String()
+	plan.DesiredFingerprint = Fingerprint(certs[0])
+	plan.DesiredNotAfter = certs[0].NotAfter.UTC()
+	plan.DesiredSANs = AlternativeNames(certs[0])
+	plan.ChainLength = len(certs)
 
 	switch {
 	case plan.Exists && plan.CurrentFingerprint == "":
-		// Pliku nie udalo sie odczytac. To nie znaczy "powstanie" i nie
-		// znaczy "bez zmian": operator ma zobaczyc powod przed zgoda.
-		return plan.zOdmowa("nie odczytano certyfikatu zastanego: " + plan.Powodem)
+		// The file could not be read. That means neither "will be created"
+		// nor "no change": the operator is meant to see the reason before
+		// approving.
+		return plan.withRefusal("the current certificate was not read: " + plan.UnavailableReason)
 	case !plan.Exists:
-		plan.Action = PlanTworzy
-		plan.Changes = []string{"certyfikat powstanie, wazny do " +
+		plan.Action = PlanCreate
+		plan.Changes = []string{"the certificate will be created, valid until " +
 			plan.DesiredNotAfter.Format(time.RFC3339)}
 	case plan.CurrentFingerprint == plan.DesiredFingerprint:
-		plan.Action = PlanBezZmian
+		plan.Action = PlanNoChange
 	default:
-		plan.Action = PlanZmienia
-		plan.Changes = []string{fmt.Sprintf("certyfikat z %s na %s",
-			skrocony(plan.CurrentFingerprint), skrocony(plan.DesiredFingerprint))}
+		plan.Action = PlanUpdate
+		plan.Changes = []string{fmt.Sprintf("certificate from %s to %s",
+			shortened(plan.CurrentFingerprint), shortened(plan.DesiredFingerprint))}
 		if plan.CurrentNotAfter != nil {
-			plan.Changes = append(plan.Changes, "waznosc z "+
-				plan.CurrentNotAfter.UTC().Format(time.RFC3339)+" na "+
+			plan.Changes = append(plan.Changes, "validity from "+
+				plan.CurrentNotAfter.UTC().Format(time.RFC3339)+" to "+
 				plan.DesiredNotAfter.Format(time.RFC3339))
 		}
 	}
-	if plan.Action != PlanBezZmian {
-		if zamowienie.KeyPath != "" {
-			plan.Changes = append(plan.Changes, "klucz prywatny zostanie podmieniony z sekretu "+
-				lubBrakSekretu(zamowienie.KeySecret))
+	if plan.Action != PlanNoChange {
+		if order.KeyPath != "" {
+			plan.Changes = append(plan.Changes, "the private key will be replaced from the secret "+
+				orNone(order.KeySecret))
 		}
-		if zamowienie.Jednostka != "" {
-			plan.Changes = append(plan.Changes, "usluga "+zamowienie.Jednostka+" zostanie przeladowana")
+		if order.Unit != "" {
+			plan.Changes = append(plan.Changes, "the service "+order.Unit+" will be reloaded")
 		}
-		if zamowienie.Cel != "" {
-			plan.Changes = append(plan.Changes, "host sprawdzi wdrozenie sonda do "+zamowienie.Cel)
+		if order.Target != "" {
+			plan.Changes = append(plan.Changes, "the host will check the deployment with a probe to "+order.Target)
 		}
 	}
-	plan.PlanHash = odciskPlanu(plan)
+	plan.PlanHash = planFingerprint(plan)
 	return plan
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu roznic i liczy odcisk
-// na nowo: plan z odmowa jest inna odpowiedzia niz plan bez niej.
-func (p *Plan) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(*p)
+// Refuse records a refusal reason learned after the differences were
+// computed and recomputes the fingerprint: a plan with a refusal is a
+// different answer than a plan without one.
+func (p *Plan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(*p)
 }
 
-func (p Plan) zOdmowa(powod string) Plan {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(p)
+func (p Plan) withRefusal(reason string) Plan {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(p)
 	return p
 }
 
-// nazwaCelu wyciaga nazwe hosta z celu sondy "host:port".
-func nazwaCelu(cel string) string {
-	if i := strings.LastIndex(cel, ":"); i > 0 {
-		return cel[:i]
+// targetName extracts the host name from a "host:port" probe target.
+func targetName(target string) string {
+	if i := strings.LastIndex(target, ":"); i > 0 {
+		return target[:i]
 	}
-	return cel
+	return target
 }
 
-func skrocony(odcisk string) string {
-	if len(odcisk) <= 16 {
-		return lubBrakSekretu(odcisk)
+func shortened(fingerprint string) string {
+	if len(fingerprint) <= 16 {
+		return orNone(fingerprint)
 	}
-	return odcisk[:16]
+	return fingerprint[:16]
 }
 
-func lubBrakSekretu(wartosc string) string {
-	if wartosc == "" {
-		return "brak"
+func orNone(value string) string {
+	if value == "" {
+		return "none"
 	}
-	return wartosc
+	return value
 }
 
-// odciskPlanu liczy odcisk planu poza samym odciskiem. Klucza prywatnego
-// w planie nie ma, wiec nie ma go takze w odcisku.
-func odciskPlanu(plan Plan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// planFingerprint computes the plan fingerprint excluding the fingerprint
+// itself. The private key is not in the plan, so it is not in the
+// fingerprint either.
+func planFingerprint(plan Plan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }
 
-// BrakPliku mowi, czy powod niedostepnosci opisuje plik, ktorego nie ma.
+// FileMissing says whether the unavailability reason describes a file that
+// does not exist.
 //
-// Plik nieistniejacy i plik nieodczytany to dwie rozne odpowiedzi: pierwsza
-// jest stanem docelowym do utworzenia, druga jest brakiem wiedzy.
-func BrakPliku(powod string) bool {
-	return strings.Contains(powod, "no such file or directory") ||
-		strings.Contains(powod, os.ErrNotExist.Error())
+// A non-existent file and an unread file are two different answers: the
+// first is a target state to create, the second is no knowledge.
+func FileMissing(reason string) bool {
+	return strings.Contains(reason, "no such file or directory") ||
+		strings.Contains(reason, os.ErrNotExist.Error())
 }
 
-// PlanOdnowienia opisuje odnowienie certyfikatu przez demona hosta.
+// RenewalPlan describes a certificate renewal by the host daemon.
 //
-// Odnowienie jest inna zmiana niz wdrozenie: panel nie przysyla materialu,
-// tylko prosi demona, zeby poszedl po nowy certyfikat do swojego urzedu.
-// Dlatego plan mowi o tym, co host ma teraz i czy w ogole ma komu zlecic
-// odnowienie - a nie o tresci, ktora przyjdzie.
-type PlanOdnowienia struct {
+// A renewal is a different change than a deployment: the panel sends no
+// material, it only asks the daemon to fetch a new certificate from its
+// authority. That is why the plan talks about what the host has now and
+// whether it has anyone to order the renewal from at all - not about the
+// content that will come.
+type RenewalPlan struct {
 	Kind   string `json:"kind"`
 	Path   string `json:"path"`
 	Action string `json:"action"`
 
-	// Stan zastany: certyfikat i to, co go pilnuje.
+	// The state found: the certificate and what watches it.
 	CurrentFingerprint string     `json:"current_fingerprint,omitempty"`
 	CurrentNotAfter    *time.Time `json:"current_not_after,omitempty"`
 	DaysToExpiry       *int       `json:"days_to_expiry,omitempty"`
-	// Request jest identyfikatorem zlecenia certmongera na tym hoscie. Ten
-	// sam certyfikat ma na kazdym hoscie inny identyfikator, wiec kampania
-	// podaje sciezke, a host odnajduje zlecenie sam.
+	// Request is the identifier of the certmonger request on this host.
+	// The same certificate has a different identifier on every host, so
+	// the campaign gives the path and the host finds the request itself.
 	Request string `json:"request,omitempty"`
 	Status  string `json:"status,omitempty"`
 	CA      string `json:"ca,omitempty"`
-	// AutoRenew mowi, czy demon odnowilby ten certyfikat takze sam.
+	// AutoRenew says whether the daemon would renew this certificate on its
+	// own too.
 	AutoRenew *bool `json:"auto_renew,omitempty"`
 
 	ReloadUnit string   `json:"reload_unit,omitempty"`
@@ -284,80 +293,82 @@ type PlanOdnowienia struct {
 	PlanHash string `json:"plan_hash"`
 }
 
-// ZaplanujOdnowienie liczy plan odnowienia wobec stanu hosta.
-func ZaplanujOdnowienie(obecny Certyfikat, sledzenie *Sledzenie, maDemona bool,
-	sciezka, jednostka string, teraz time.Time) PlanOdnowienia {
-	plan := PlanOdnowienia{Kind: RodzajOdnowienia, Path: sciezka,
-		ReloadUnit: jednostka, Action: PlanZmienia}
-	if err := WalidujSciezke(sciezka); err != nil {
-		return plan.zOdmowa(err.Error())
+// ComputeRenewal computes the renewal plan against the host state.
+func ComputeRenewal(current Certificate, tracking *Tracking, hasDaemon bool,
+	path, unit string, now time.Time) RenewalPlan {
+	plan := RenewalPlan{Kind: KindRenewal, Path: path,
+		ReloadUnit: unit, Action: PlanUpdate}
+	if err := ValidatePath(path); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	if err := WalidujJednostke(jednostka); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := ValidateUnit(unit); err != nil {
+		return plan.withRefusal(err.Error())
 	}
-	// Demon hosta jest tu jedynym, kto umie odnowic: panel nie ma klucza ani
-	// uzgodnienia z urzedem. Host bez demona nie jest hostem do naprawienia
-	// zmiana - jest hostem, ktory tej zmiany nie przyjmie.
-	if !maDemona {
-		return plan.zOdmowa("ten host nie ma certmongera, wiec nie ma komu zlecic odnowienia")
+	// The host daemon is the only one here who can renew: the panel has
+	// neither the key nor an agreement with the authority. A host without
+	// the daemon is not a host to be fixed by a change - it is a host that
+	// will not accept this change.
+	if !hasDaemon {
+		return plan.withRefusal("this host has no certmonger, so there is nobody to order the renewal from")
 	}
-	if obecny.FingerprintSHA256 != "" {
-		plan.CurrentFingerprint = obecny.FingerprintSHA256
-		plan.CurrentNotAfter = obecny.NotAfter
-		plan.DaysToExpiry = obecny.DniDoWygasniecia(teraz)
+	if current.FingerprintSHA256 != "" {
+		plan.CurrentFingerprint = current.FingerprintSHA256
+		plan.CurrentNotAfter = current.NotAfter
+		plan.DaysToExpiry = current.DaysToExpiry(now)
 	}
-	if sledzenie == nil || sledzenie.Request == "" {
-		return plan.zOdmowa("certmonger nie pilnuje pliku " + sciezka + ", wiec nie ma czego odnowic")
+	if tracking == nil || tracking.Request == "" {
+		return plan.withRefusal("certmonger does not track the file " + path + ", so there is nothing to renew")
 	}
-	plan.Request = sledzenie.Request
-	plan.Status = sledzenie.Status
-	plan.CA = sledzenie.CA
-	plan.AutoRenew = sledzenie.AutoRenew
+	plan.Request = tracking.Request
+	plan.Status = tracking.Status
+	plan.CA = tracking.CA
+	plan.AutoRenew = tracking.AutoRenew
 
-	plan.Changes = []string{"host poprosi urzad " + lubBrakSekretu(sledzenie.CA) +
-		" o nowy certyfikat dla " + sciezka}
+	plan.Changes = []string{"the host will ask the authority " + orNone(tracking.CA) +
+		" for a new certificate for " + path}
 	if plan.DaysToExpiry != nil {
 		plan.Changes = append(plan.Changes,
-			fmt.Sprintf("obecny certyfikat traci waznosc za %d dni", *plan.DaysToExpiry))
+			fmt.Sprintf("the current certificate expires in %d days", *plan.DaysToExpiry))
 	}
-	// Stan zlecenia jest tu wazniejszy niz sam fakt, ze demon je zna:
-	// CA_UNREACHABLE znaczy opieke, ktora nie dziala, i operator ma to
-	// zobaczyc przed zgoda, a nie po niej.
-	if sledzenie.Status != "" && sledzenie.Status != "MONITORING" {
-		plan.Changes = append(plan.Changes, "certmonger zglasza stan "+sledzenie.Status)
+	// The request state matters more here than the fact that the daemon
+	// knows it: CA_UNREACHABLE means care that does not work, and the
+	// operator is meant to see that before approval, not after.
+	if tracking.Status != "" && tracking.Status != "MONITORING" {
+		plan.Changes = append(plan.Changes, "certmonger reports the state "+tracking.Status)
 	}
-	if jednostka != "" {
-		plan.Changes = append(plan.Changes, "usluga "+jednostka+" zostanie przeladowana")
+	if unit != "" {
+		plan.Changes = append(plan.Changes, "the service "+unit+" will be reloaded")
 	}
-	plan.PlanHash = odciskPlanuOdnowienia(plan)
+	plan.PlanHash = renewalPlanFingerprint(plan)
 	return plan
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu planu.
-func (p *PlanOdnowienia) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanuOdnowienia(*p)
+// Refuse records a refusal reason learned after the plan was computed.
+func (p *RenewalPlan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = renewalPlanFingerprint(*p)
 }
 
-func (p PlanOdnowienia) zOdmowa(powod string) PlanOdnowienia {
-	p.Refusal = powod
+func (p RenewalPlan) withRefusal(reason string) RenewalPlan {
+	p.Refusal = reason
 	p.Action = ""
-	p.PlanHash = odciskPlanuOdnowienia(p)
+	p.PlanHash = renewalPlanFingerprint(p)
 	return p
 }
 
-// odciskPlanuOdnowienia liczy odcisk planu poza samym odciskiem.
+// renewalPlanFingerprint computes the plan fingerprint excluding the
+// fingerprint itself.
 //
-// Identyfikator zlecenia jest inny na kazdym hoscie i zmienia sie przy
-// kazdym nowym zleceniu, wiec wchodzi do odcisku: odnowienie zatwierdzone
-// dla jednego zlecenia nie moze wejsc na inne.
-func odciskPlanuOdnowienia(plan PlanOdnowienia) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// The request identifier is different on every host and changes with every
+// new request, so it enters the fingerprint: a renewal approved for one
+// request must not land on another.
+func renewalPlanFingerprint(plan RenewalPlan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

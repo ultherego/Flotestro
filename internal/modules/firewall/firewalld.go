@@ -6,115 +6,117 @@ import (
 	"strings"
 )
 
-// SciezkaFirewallCmd wskazuje narzedzie firewalld.
-const SciezkaFirewallCmd = "/usr/bin/firewall-cmd"
+// FirewallCmdPath points at the firewalld tool.
+const FirewallCmdPath = "/usr/bin/firewall-cmd"
 
-var naglowekStrefy = regexp.MustCompile(`^(\S+)(?:\s+\(([^)]*)\))?$`)
+var zoneHeader = regexp.MustCompile(`^(\S+)(?:\s+\(([^)]*)\))?$`)
 
-// ParsujStrefy czyta wyjscie "firewall-cmd --list-all-zones".
+// ParseZones reads the output of "firewall-cmd --list-all-zones".
 //
-// firewalld opisuje dostep strefami, a nie regulami: pytanie operatora brzmi
-// "co jest otwarte na tym interfejsie", a nie "ktora regula pasuje jako
-// pierwsza". Przepisywanie tego na liste regul zgubiloby te roznice.
-func ParsujStrefy(wyjscie, domyslna string) []Zone {
-	var strefy []Zone
-	var biezaca *Zone
+// firewalld describes access with zones, not rules: the operator's question
+// is "what is open on this interface", not "which rule matches first".
+// Rewriting that into a rule list would lose the difference.
+func ParseZones(output, defaultZone string) []Zone {
+	var zones []Zone
+	var current *Zone
 
-	for _, surowa := range strings.Split(wyjscie, "\n") {
-		if strings.TrimSpace(surowa) == "" {
+	for _, raw := range strings.Split(output, "\n") {
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		// Naglowek strefy zaczyna sie od poczatku wiersza; pola strefy sa
-		// wciete. To jedyne, co odroznia je w tym formacie.
-		if !strings.HasPrefix(surowa, " ") && !strings.HasPrefix(surowa, "\t") {
-			pola := naglowekStrefy.FindStringSubmatch(strings.TrimSpace(surowa))
-			if pola == nil {
+		// A zone header starts at the beginning of the row; the zone fields
+		// are indented. That is the only thing telling them apart in this
+		// format.
+		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") {
+			fields := zoneHeader.FindStringSubmatch(strings.TrimSpace(raw))
+			if fields == nil {
 				continue
 			}
-			znaczniki := pola[2]
-			strefy = append(strefy, Zone{
-				Name:    pola[1],
-				Active:  strings.Contains(znaczniki, "active"),
-				Default: strings.Contains(znaczniki, "default") || pola[1] == domyslna,
+			markers := fields[2]
+			zones = append(zones, Zone{
+				Name:    fields[1],
+				Active:  strings.Contains(markers, "active"),
+				Default: strings.Contains(markers, "default") || fields[1] == defaultZone,
 			})
-			biezaca = &strefy[len(strefy)-1]
+			current = &zones[len(zones)-1]
 			continue
 		}
-		if biezaca == nil {
+		if current == nil {
 			continue
 		}
-		klucz, wartosc, ok := strings.Cut(strings.TrimSpace(surowa), ":")
+		key, value, ok := strings.Cut(strings.TrimSpace(raw), ":")
 		if !ok {
 			continue
 		}
-		wartosc = strings.TrimSpace(wartosc)
-		switch klucz {
+		value = strings.TrimSpace(value)
+		switch key {
 		case "target":
-			biezaca.Target = wartosc
+			current.Target = value
 		case "interfaces":
-			biezaca.Interfaces = strings.Fields(wartosc)
+			current.Interfaces = strings.Fields(value)
 		case "sources":
-			biezaca.Sources = strings.Fields(wartosc)
+			current.Sources = strings.Fields(value)
 		case "services":
-			biezaca.Services = strings.Fields(wartosc)
+			current.Services = strings.Fields(value)
 		case "ports":
-			biezaca.Ports = strings.Fields(wartosc)
+			current.Ports = strings.Fields(value)
 		}
 	}
-	return strefy
+	return zones
 }
 
-// ArgumentyOtwarciaPortu sklada polecenie otwarcia portu w strefie.
+// PortArguments assembles the command opening a port in a zone.
 //
-// Zmiana jest trwala i przeladowana od razu: firewalld trzyma osobno stan
-// biezacy i stan trwaly, a zmiana tylko w jednym z nich znika po restarcie
-// albo po przeladowaniu - i za kazdym razem w innym momencie.
-func ArgumentyOtwarciaPortu(strefa, port, protokol string, otworz bool) ([][]string, error) {
-	if err := walidujStrefe(strefa); err != nil {
+// The change is permanent and reloaded at once: firewalld keeps the runtime
+// and the permanent state separately, and a change in only one of them
+// vanishes after a reboot or after a reload - each time at a different
+// moment.
+func PortArguments(zone, port, protocol string, open bool) ([][]string, error) {
+	if err := validateZone(zone); err != nil {
 		return nil, err
 	}
-	if err := walidujPort(port); err != nil {
+	if err := validatePort(port); err != nil {
 		return nil, err
 	}
-	if protokol != "tcp" && protokol != "udp" {
-		return nil, fmt.Errorf("port dotyczy tcp albo udp, nie %q", protokol)
+	if protocol != "tcp" && protocol != "udp" {
+		return nil, fmt.Errorf("a port concerns tcp or udp, not %q", protocol)
 	}
-	operacja := "--add-port=" + port + "/" + protokol
-	if !otworz {
-		operacja = "--remove-port=" + port + "/" + protokol
+	operation := "--add-port=" + port + "/" + protocol
+	if !open {
+		operation = "--remove-port=" + port + "/" + protocol
 	}
 	return [][]string{
-		{SciezkaFirewallCmd, "--permanent", "--zone=" + strefa, operacja},
-		{SciezkaFirewallCmd, "--reload"},
+		{FirewallCmdPath, "--permanent", "--zone=" + zone, operation},
+		{FirewallCmdPath, "--reload"},
 	}, nil
 }
 
-// ArgumentyUslugi sklada polecenie wlaczenia uslugi w strefie.
-func ArgumentyUslugi(strefa, usluga string, wlacz bool) ([][]string, error) {
-	if err := walidujStrefe(strefa); err != nil {
+// ServiceArguments assembles the command enabling a service in a zone.
+func ServiceArguments(zone, service string, enable bool) ([][]string, error) {
+	if err := validateZone(zone); err != nil {
 		return nil, err
 	}
-	if !nazwaUslugi.MatchString(usluga) {
-		return nil, fmt.Errorf("nieprawidlowa nazwa uslugi %q", usluga)
+	if !serviceName.MatchString(service) {
+		return nil, fmt.Errorf("invalid service name %q", service)
 	}
-	operacja := "--add-service=" + usluga
-	if !wlacz {
-		operacja = "--remove-service=" + usluga
+	operation := "--add-service=" + service
+	if !enable {
+		operation = "--remove-service=" + service
 	}
 	return [][]string{
-		{SciezkaFirewallCmd, "--permanent", "--zone=" + strefa, operacja},
-		{SciezkaFirewallCmd, "--reload"},
+		{FirewallCmdPath, "--permanent", "--zone=" + zone, operation},
+		{FirewallCmdPath, "--reload"},
 	}, nil
 }
 
 var (
-	nazwaStrefy = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,16}$`)
-	nazwaUslugi = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,31}$`)
+	zoneName    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,16}$`)
+	serviceName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,31}$`)
 )
 
-func walidujStrefe(strefa string) error {
-	if !nazwaStrefy.MatchString(strefa) {
-		return fmt.Errorf("nieprawidlowa nazwa strefy %q", strefa)
+func validateZone(zone string) error {
+	if !zoneName.MatchString(zone) {
+		return fmt.Errorf("invalid zone name %q", zone)
 	}
 	return nil
 }

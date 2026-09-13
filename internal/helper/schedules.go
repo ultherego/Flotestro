@@ -48,7 +48,7 @@ func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequ
 		return s.toggleEntry(actionCtx, action)
 
 	case helperv1.ScheduleRequest_OPERATION_REMOVE:
-		if err := schedules.UsunWpis(schedules.KatalogCronD, action.GetId()); err != nil {
+		if err := schedules.RemoveEntry(schedules.CronDDir, action.GetId()); err != nil {
 			return reject(ErrorExecFailed, err.Error())
 		}
 		return scheduleResponse(s.readSchedules(actionCtx),
@@ -72,7 +72,7 @@ func (s *Server) ensureEntry(ctx context.Context, action *helperv1.ScheduleReque
 	}
 	// The adoption has to remove the entry found. Left next to the panel entry
 	// it would run the same job a second time - and the operator asked for one.
-	if collision != nil && filepath.Dir(collision.Path) != schedules.KatalogCronD {
+	if collision != nil && filepath.Dir(collision.Path) != schedules.CronDDir {
 		return reject(ErrorUnsupported, fmt.Sprintf(
 			"the entry lies in %s (line %d); the panel does not rewrite that file, "+
 				"remove the line there by hand before adopting it", collision.Path, collision.Line))
@@ -86,7 +86,7 @@ func (s *Server) ensureEntry(ctx context.Context, action *helperv1.ScheduleReque
 		Comment:    action.GetComment(),
 		Enabled:    true,
 	}
-	if err := schedules.ZapiszWpis(schedules.KatalogCronD, entry); err != nil {
+	if err := schedules.WriteEntry(schedules.CronDDir, entry); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	message := "the entry " + entry.ID + " was written"
@@ -108,7 +108,7 @@ func (s *Server) toggleEntry(ctx context.Context, action *helperv1.ScheduleReque
 		return reject(ErrorUnsupported, "the entry "+action.GetId()+" does not belong to the panel")
 	}
 	current.Enabled = action.GetEnabled()
-	if err := schedules.ZapiszWpis(schedules.KatalogCronD, *current); err != nil {
+	if err := schedules.WriteEntry(schedules.CronDDir, *current); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	state := "disabled"
@@ -182,14 +182,14 @@ func entryCommand(ctx context.Context, entry *schedules.Schedule) *exec.Cmd {
 func (s *Server) readSchedules(ctx context.Context) schedules.Snapshot {
 	now := time.Now()
 	snapshot := schedules.Snapshot{
-		Schedules: schedules.CzytajCron(schedules.SciezkaCrontabu, schedules.KatalogCronD, now),
+		Schedules: schedules.ReadCron(schedules.CrontabPath, schedules.CronDDir, now),
 		// The zone comes from the host configuration and not from the name
 		// time.Local: the latter is always "Local" and tells the operator
 		// nothing.
-		Timezone: schedules.StrefaHosta(),
+		Timezone: schedules.HostTimezone(),
 	}
 	snapshot.Schedules = append(snapshot.Schedules,
-		schedules.CzytajTimery(
+		schedules.ReadTimers(
 			systemctlOutput(ctx, "list-timers", "--all", "--no-pager", "--no-legend"),
 			systemctlOutput(ctx, "list-units", "--type=timer", "--all", "--no-pager", "--no-legend", "--plain"),
 			systemctlOutput(ctx, "show", "--property=Id", "--property=TimersCalendar", "*.timer"))...)

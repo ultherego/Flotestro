@@ -64,17 +64,17 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 // host has: that UUID then travels in the change, so a disk that got a
 // different path after a restart is not mounted in somebody else's place.
 func (s *Server) planMount(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	if err := storage.WalidujCel(action.GetTarget()); err != nil {
+	if err := storage.ValidateTarget(action.GetTarget()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 	// A plan without a source is an unmount plan: a mount always has a source,
 	// an unmount never does. The result names this directly in the action field.
 	unmounting := action.GetSource() == ""
 	if !unmounting {
-		if err := storage.WalidujZrodlo(action.GetSource()); err != nil {
+		if err := storage.ValidateSource(action.GetSource()); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		if err := storage.WalidujOpcje(action.GetOptions(), action.GetFsType()); err != nil {
+		if err := storage.ValidateOptions(action.GetOptions(), action.GetFsType()); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 	}
@@ -87,31 +87,31 @@ func (s *Server) planMount(ctx context.Context, action *helperv1.StorageRequest)
 	if err != nil {
 		return reject(ErrorExecFailed, "mountinfo: "+err.Error())
 	}
-	fstab, _ := os.ReadFile(storage.SciezkaFstab)
-	state.Mounts = storage.PolaczMontowania(
-		storage.ParsujMountinfo(string(mountinfo)), storage.ParsujFstab(string(fstab)))
+	fstab, _ := os.ReadFile(storage.FstabPath)
+	state.Mounts = storage.MergeMounts(
+		storage.ParseMountinfo(string(mountinfo)), storage.ParseFstab(string(fstab)))
 
 	var plan storage.MountPlan
 	if unmounting {
-		plan = storage.ZaplanujOdmontowanie(state, action.GetTarget())
-		if plan.Action == storage.PlanUsuwa {
+		plan = storage.ComputeUnmount(state, action.GetTarget())
+		if plan.Action == storage.PlanRemove {
 			// Unmounting a busy filesystem will not succeed; better to say so in
 			// the plan than on half the fleet during execution.
 			if users := s.processesOnFilesystem(ctx, action.GetTarget()); users != "" {
-				plan.Odmow("the filesystem is in use by: " + users)
+				plan.Refuse("the filesystem is in use by: " + users)
 			}
 		}
 	} else {
-		plan = storage.ZaplanujMontowanie(state, action.GetSource(), action.GetTarget(),
+		plan = storage.ComputeMount(state, action.GetSource(), action.GetTarget(),
 			action.GetFsType(), action.GetOptions(), action.GetPersist())
 	}
 	// A plan computed in a private mount namespace would describe a change that
 	// never enters the host. The refusal is to stand in the plan, not in the
 	// execution.
-	if plan.Refusal == "" && plan.Action != storage.PlanBezZmian &&
-		plan.Action != storage.PlanJuzUsuniety {
+	if plan.Refusal == "" && plan.Action != storage.PlanNoChange &&
+		plan.Action != storage.PlanRemoveAbsent {
 		if err := sharedMountNamespace(); err != nil {
-			plan.Odmow(err.Error())
+			plan.Refuse(err.Error())
 		}
 	}
 
@@ -132,13 +132,13 @@ func describeMountPlan(plan storage.MountPlan) string {
 		return "the change will not enter this host: " + plan.Refusal
 	}
 	switch plan.Action {
-	case storage.PlanBezZmian:
+	case storage.PlanNoChange:
 		return "the mount is already in the desired state"
-	case storage.PlanTworzy:
+	case storage.PlanCreate:
 		return "the mount will be created from the source " + plan.ResolvedSource
-	case storage.PlanJuzUsuniety:
+	case storage.PlanRemoveAbsent:
 		return "the mount does not exist, so there is nothing to remove"
-	case storage.PlanUsuwa:
+	case storage.PlanRemove:
 		return "the mount will be removed"
 	default:
 		return "what will change: " + strings.Join(plan.Changes, ", ")
@@ -151,13 +151,13 @@ func describeMountPlan(plan storage.MountPlan) string {
 // a host that works now but comes up after a restart without that filesystem -
 // and that is a failure that shows itself at the worst moment.
 func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	if err := storage.WalidujZrodlo(action.GetSource()); err != nil {
+	if err := storage.ValidateSource(action.GetSource()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	if err := storage.WalidujCel(action.GetTarget()); err != nil {
+	if err := storage.ValidateTarget(action.GetTarget()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	if err := storage.WalidujOpcje(action.GetOptions(), action.GetFsType()); err != nil {
+	if err := storage.ValidateOptions(action.GetOptions(), action.GetFsType()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
@@ -176,7 +176,7 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 	}
 
 	if action.GetPersist() {
-		if err := storage.ZapiszWpisFstab(storage.SciezkaFstab, action.GetSource(),
+		if err := storage.WriteFstabEntry(storage.FstabPath, action.GetSource(),
 			action.GetTarget(), action.GetFsType(), action.GetOptions()); err != nil {
 			return reject(ErrorExecFailed, "writing fstab: "+err.Error())
 		}
@@ -187,7 +187,7 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 		// An entry that cannot be mounted now would stop the host at the
 		// restart. It is withdrawn together with the failed mount.
 		if action.GetPersist() {
-			_ = storage.UsunWpisFstab(storage.SciezkaFstab, action.GetTarget())
+			_ = storage.RemoveFstabEntry(storage.FstabPath, action.GetTarget())
 		}
 		return reject(ErrorExecFailed, "mounting: "+err.Error()+": "+output)
 	}
@@ -201,7 +201,7 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 
 // unmount removes the mount and the panel entry.
 func (s *Server) unmount(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	if err := storage.WalidujCel(action.GetTarget()); err != nil {
+	if err := storage.ValidateTarget(action.GetTarget()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 	if err := sharedMountNamespace(); err != nil {
@@ -217,7 +217,7 @@ func (s *Server) unmount(ctx context.Context, action *helperv1.StorageRequest) *
 	if err != nil {
 		return reject(ErrorExecFailed, "unmounting: "+err.Error()+": "+output)
 	}
-	if err := storage.UsunWpisFstab(storage.SciezkaFstab, action.GetTarget()); err != nil {
+	if err := storage.RemoveFstabEntry(storage.FstabPath, action.GetTarget()); err != nil {
 		return reject(ErrorExecFailed, "writing fstab: "+err.Error())
 	}
 	return storageResponse(s.readLVM(ctx), action.GetTarget()+" was unmounted", "")
@@ -226,7 +226,7 @@ func (s *Server) unmount(ctx context.Context, action *helperv1.StorageRequest) *
 // checkFilesystem runs fsck on an unmounted filesystem.
 func (s *Server) checkFilesystem(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
 	device := action.GetDevice()
-	if err := storage.WalidujZrodlo(device); err != nil {
+	if err := storage.ValidateSource(device); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 	if response := s.checkDevicePlanDigest(ctx, action); response != nil {
@@ -260,10 +260,10 @@ func (s *Server) checkFilesystem(ctx context.Context, action *helperv1.StorageRe
 
 // extendVolume grows a logical volume together with its filesystem.
 func (s *Server) extendVolume(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	if !exists(storage.SciezkaLVExtend) {
+	if !exists(storage.LVExtendPath) {
 		return reject(ErrorUnsupported, "this host has no LVM tools")
 	}
-	arguments, err := storage.ArgumentyRozszerzeniaLV(action.GetDevice(), action.GetSize(), true)
+	arguments, err := storage.LVExtendArguments(action.GetDevice(), action.GetSize(), true)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -288,20 +288,20 @@ func (s *Server) extendFilesystem(ctx context.Context, action *helperv1.StorageR
 		return response
 	}
 	state := s.storagePicture(ctx)
-	device := state.Urzadzenie(action.GetDevice())
-	if err := (storage.TozsamoscUrzadzenia{
+	device := state.DeviceAt(action.GetDevice())
+	if err := (storage.DeviceIdentity{
 		Path:      action.GetDevice(),
 		Serial:    action.GetExpectedSerial(),
 		UUID:      action.GetExpectedUuid(),
 		SizeBytes: action.GetExpectedSizeBytes(),
-	}).Zgadza(device); err != nil {
+	}).Matches(device); err != nil {
 		return reject(ErrorPreconditionFailed, err.Error())
 	}
 	point := ""
 	if len(device.Mountpoints) > 0 {
 		point = device.Mountpoints[0]
 	}
-	arguments, err := storage.ArgumentyRozszerzeniaFS(action.GetDevice(), device.FSType, point)
+	arguments, err := storage.FSResizeArguments(action.GetDevice(), device.FSType, point)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -323,7 +323,7 @@ func (s *Server) createFilesystem(ctx context.Context, action *helperv1.StorageR
 	if response := s.checkDestructiveTarget(state, action); response != nil {
 		return response
 	}
-	arguments, err := storage.ArgumentyFormatowania(action.GetDevice(),
+	arguments, err := storage.FormatArguments(action.GetDevice(),
 		action.GetFsType(), action.GetLabel())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
@@ -342,7 +342,7 @@ func (s *Server) wipeDevice(ctx context.Context, action *helperv1.StorageRequest
 	if response := s.checkDestructiveTarget(state, action); response != nil {
 		return response
 	}
-	arguments, err := storage.ArgumentyCzyszczenia(action.GetDevice())
+	arguments, err := storage.WipeArguments(action.GetDevice())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -362,15 +362,15 @@ func (s *Server) wipeDevice(ctx context.Context, action *helperv1.StorageRequest
 // looked at and that nothing stands on it.
 func (s *Server) checkDestructiveTarget(state storage.Snapshot,
 	action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	if err := (storage.TozsamoscUrzadzenia{
+	if err := (storage.DeviceIdentity{
 		Path:      action.GetDevice(),
 		Serial:    action.GetExpectedSerial(),
 		UUID:      action.GetExpectedUuid(),
 		SizeBytes: action.GetExpectedSizeBytes(),
-	}).Zgadza(state.Urzadzenie(action.GetDevice())); err != nil {
+	}).Matches(state.DeviceAt(action.GetDevice())); err != nil {
 		return reject(ErrorPreconditionFailed, err.Error())
 	}
-	if point := storage.WUzyciu(state, action.GetDevice()); point != "" {
+	if point := storage.InUse(state, action.GetDevice()); point != "" {
 		return reject(ErrorUnsupported,
 			"the device is in use (mounted at "+point+"); a destructive operation needs it unmounted")
 	}
@@ -381,7 +381,7 @@ func (s *Server) checkDestructiveTarget(state storage.Snapshot,
 func (s *Server) noSpaceInGroup(ctx context.Context, volume string) string {
 	lvm := s.readLVM(ctx)
 	for _, entry := range lvm.Volumes {
-		if !storage.PasujeWolumen(entry, volume) {
+		if !storage.MatchesVolume(entry, volume) {
 			continue
 		}
 		for _, group := range lvm.Groups {
@@ -396,12 +396,12 @@ func (s *Server) noSpaceInGroup(ctx context.Context, volume string) string {
 
 // storagePicture reads the device topology on the helper side.
 func (s *Server) storagePicture(ctx context.Context) storage.Snapshot {
-	output, err := toolOutput(ctx, storage.SciezkaLsblk, "-J", "-b", "-o",
+	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
 		"NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS,MODEL,SERIAL,WWN,ROTA,RO,PKNAME")
 	if err != nil {
 		return storage.Snapshot{UnavailableReason: "lsblk: " + err.Error()}
 	}
-	devices, err := storage.ParsujUrzadzenia(output)
+	devices, err := storage.ParseDevices(output)
 	if err != nil {
 		return storage.Snapshot{UnavailableReason: err.Error()}
 	}
@@ -435,22 +435,22 @@ func devicePlan(state storage.Snapshot, action *helperv1.StorageRequest) storage
 	kind := action.GetPlan()
 	switch action.GetOperation() {
 	case helperv1.StorageRequest_OPERATION_FS_CHECK:
-		kind = storage.PlanSprawdzenie
+		kind = storage.PlanCheck
 	case helperv1.StorageRequest_OPERATION_FS_RESIZE:
-		kind = storage.PlanRozszerzenieFS
+		kind = storage.PlanFSResize
 	case helperv1.StorageRequest_OPERATION_LVM_EXTEND:
-		kind = storage.PlanRozszerzenieLV
+		kind = storage.PlanLVExtend
 	}
 	switch kind {
-	case storage.PlanRozszerzenieFS:
-		return storage.ZaplanujRozszerzenieFS(state, action.GetDevice())
-	case storage.PlanRozszerzenieLV:
-		return storage.ZaplanujRozszerzenieLV(state, action.GetDevice(), action.GetSize())
-	case storage.PlanSprawdzenie:
-		return storage.ZaplanujSprawdzenie(state, action.GetDevice(), action.GetRepair())
+	case storage.PlanFSResize:
+		return storage.ComputeFSResize(state, action.GetDevice())
+	case storage.PlanLVExtend:
+		return storage.ComputeLVExtend(state, action.GetDevice(), action.GetSize())
+	case storage.PlanCheck:
+		return storage.ComputeCheck(state, action.GetDevice(), action.GetRepair())
 	}
 	plan := storage.DevicePlan{Operation: kind, Device: action.GetDevice()}
-	plan.Odmow("unknown plan kind " + kind)
+	plan.Refuse("unknown plan kind " + kind)
 	return plan
 }
 
@@ -481,21 +481,21 @@ func (s *Server) deviceState(ctx context.Context) storage.Snapshot {
 // readLVM collects the groups and the logical volumes.
 func (s *Server) readLVM(ctx context.Context) storage.Snapshot {
 	snapshot := storage.Snapshot{ObservedAt: time.Now().UTC()}
-	if !exists(storage.SciezkaVGS) || !exists(storage.SciezkaLVS) {
+	if !exists(storage.VGSPath) || !exists(storage.LVSPath) {
 		// A host without LVM is not a host without an answer.
 		snapshot.LVMUnavailableReason = "this host has no LVM tools (vgs, lvs)"
 		return snapshot
 	}
-	if output, err := toolOutput(ctx, storage.SciezkaVGS,
+	if output, err := toolOutput(ctx, storage.VGSPath,
 		"--reportformat", "json", "--units", "b"); err == nil {
-		if groups, err := storage.ParsujGrupy(output); err == nil {
+		if groups, err := storage.ParseGroups(output); err == nil {
 			snapshot.Groups = groups
 		}
 	}
-	if output, err := toolOutput(ctx, storage.SciezkaLVS,
+	if output, err := toolOutput(ctx, storage.LVSPath,
 		"--reportformat", "json", "--units", "b",
 		"-o", "lv_name,vg_name,lv_size,lv_path"); err == nil {
-		if volumes, err := storage.ParsujWolumeny(output); err == nil {
+		if volumes, err := storage.ParseVolumes(output); err == nil {
 			snapshot.Volumes = volumes
 		}
 	}
@@ -524,12 +524,12 @@ func (s *Server) checkSourceExists(ctx context.Context, source string) error {
 
 // mountPoint returns the place where the device is mounted.
 func (s *Server) mountPoint(ctx context.Context, device string) string {
-	output, err := toolOutput(ctx, storage.SciezkaLsblk, "-J", "-b", "-o",
+	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
 		"NAME,PATH,TYPE,SIZE,MOUNTPOINTS")
 	if err != nil {
 		return ""
 	}
-	devices, err := storage.ParsujUrzadzenia(output)
+	devices, err := storage.ParseDevices(output)
 	if err != nil {
 		return ""
 	}

@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/ultherego/flotestro/internal/jobs"
-	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
+	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
@@ -280,9 +280,9 @@ func planPayload(action opspec.ActionType, change opspec.ActionType,
 	if change == opspec.ActionBackupRun || change == opspec.ActionBackupVerify {
 		if payload.Backup != nil {
 			copyPayload := *payload.Backup
-			copyPayload.Plan = backupmodul.PlanKopia
+			copyPayload.Plan = backupmodule.PlanRun
 			if change == opspec.ActionBackupVerify {
-				copyPayload.Plan = backupmodul.PlanSprawdzenie
+				copyPayload.Plan = backupmodule.PlanVerify
 			}
 			payload.Backup = &copyPayload
 		}
@@ -312,11 +312,11 @@ func planPayload(action opspec.ActionType, change opspec.ActionType,
 func devicePlanKind(change opspec.ActionType) string {
 	switch change {
 	case opspec.ActionFilesystemCheck:
-		return storage.PlanSprawdzenie
+		return storage.PlanCheck
 	case opspec.ActionFilesystemResize:
-		return storage.PlanRozszerzenieFS
+		return storage.PlanFSResize
 	case opspec.ActionLVMExtend:
-		return storage.PlanRozszerzenieLV
+		return storage.PlanLVExtend
 	}
 	return ""
 }

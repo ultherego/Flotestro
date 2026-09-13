@@ -1,17 +1,18 @@
-// Package certificates opisuje certyfikaty lezace na hoscie: ich terminy,
-// wystawcow, nazwy, ktore obejmuja, i usluge, ktora z nich korzysta.
+// Package certificates describes the certificates lying on a host: their
+// dates, issuers, the names they cover and the service that uses them.
 //
-// Modul zbiera fakty o wskazanych plikach, a nie przeszukuje hosta. Panel,
-// ktory chodzi po calym systemie plikow w poszukiwaniu certyfikatow, znajduje
-// przede wszystkim magazyn zaufania - kilkaset zaswiadczen urzedow, ktore nie
-// naleza do zadnej uslugi - i zaglada do katalogow, w ktorych nie ma nic do
-// szukania. Zakres jest wiec wyliczony: sciezki wskazane w panelu oraz to,
-// co host sam o sobie wie, bo pilnuje tego certmonger.
+// The module gathers facts about named files, it does not search the host.
+// A panel that walks the whole filesystem looking for certificates finds
+// above all the trust store - a few hundred authority certificates that
+// belong to no service - and looks into directories with nothing to find.
+// The scope is therefore enumerated: the paths named in the panel and what
+// the host knows about itself, because certmonger watches it.
 //
-// Klucza prywatnego modul nie czyta nigdy przy odczycie stanu. O kluczu wie
-// tylko tyle, ile widac z zewnatrz: czy plik istnieje, jakie ma prawa i do
-// kogo nalezy. Zgodnosc klucza z certyfikatem sprawdza sie dokladnie raz -
-// przy wdrozeniu, gdy klucz i tak jest przez chwile w rekach hosta.
+// The module never reads the private key when reading the state. It knows
+// about the key only what is visible from the outside: whether the file
+// exists, what permissions it has and whom it belongs to. The match of the
+// key with the certificate is checked exactly once - at deployment, when
+// the key is in the host's hands for a moment anyway.
 package certificates
 
 import (
@@ -32,90 +33,94 @@ import (
 	"time"
 )
 
-// Zrodlo mowi, skad certyfikat na hoscie sie wzial.
+// Source says where the certificate on the host came from.
 const (
-	// ZrodloPanel oznacza certyfikat wdrozony przez Flotestro.
-	ZrodloPanel = "flotestro"
-	// ZrodloCertmonger oznacza certyfikat, ktorego pilnuje demon certmonger:
-	// to on go zamowil i to on go odnowi.
-	ZrodloCertmonger = "certmonger"
-	// ZrodloZewnetrzne oznacza plik, ktory ktos polozyl poza panelem.
-	ZrodloZewnetrzne = "external"
+	// SourcePanel means a certificate deployed by Flotestro.
+	SourcePanel = "flotestro"
+	// SourceCertmonger means a certificate watched by the certmonger
+	// daemon: it requested it and it renews it.
+	SourceCertmonger = "certmonger"
+	// SourceExternal means a file somebody placed outside the panel.
+	SourceExternal = "external"
 )
 
-// Sposob odnawiania certyfikatu.
+// Certificate renewal method.
 const (
-	// OdnawianieSledzone oznacza certyfikat z zleceniem certmongera: host
-	// odnowi go sam, zanim wygasnie.
-	OdnawianieSledzone = "tracked"
-	// OdnawianieReczne oznacza certyfikat, ktorego nikt na hoscie nie
-	// pilnuje - odnowienie jest decyzja czlowieka albo panelu.
-	OdnawianieReczne = "manual"
-	// OdnawianieNieznane oznacza stan nieustalony: nie udalo sie odczytac,
-	// czy cokolwiek tego certyfikatu pilnuje. To nie to samo, co "reczne".
-	OdnawianieNieznane = "unknown"
+	// RenewalTracked means a certificate with a certmonger request: the
+	// host renews it itself before it expires.
+	RenewalTracked = "tracked"
+	// RenewalManual means a certificate nobody on the host watches - the
+	// renewal is a decision of a human or the panel.
+	RenewalManual = "manual"
+	// RenewalUnknown means an undetermined state: it could not be read
+	// whether anything watches this certificate. That is not the same as
+	// "manual".
+	RenewalUnknown = "unknown"
 )
 
-// Sciezki narzedzi. Certmonger jest jedynym, po ktore modul siega.
+// Tool paths. Certmonger is the only one the module reaches for.
 const (
-	SciezkaGetcert    = "/usr/bin/getcert"
-	SciezkaGetcertAlt = "/usr/sbin/getcert"
+	GetcertPath    = "/usr/bin/getcert"
+	GetcertPathAlt = "/usr/sbin/getcert"
 )
 
-// MaksymalnyRozmiarPliku ogranicza plik, ktory modul w ogole otwiera.
+// MaxFileSize bounds a file the module opens at all.
 //
-// Certyfikat z lancuchem ma kilka kilobajtow. Plik wiekszy niz to nie jest
-// certyfikatem, a jego wczytanie byloby wylacznie sposobem na zajecie pamieci.
-const MaksymalnyRozmiarPliku = 256 << 10
+// A certificate with a chain has a few kilobytes. A file bigger than this
+// is not a certificate, and loading it would only be a way to take up
+// memory.
+const MaxFileSize = 256 << 10
 
-// MaksymalnaLiczbaCertyfikatow ogranicza jeden odczyt.
+// MaxCertificates bounds one read.
 //
-// Granica dotyczy takze pojedynczego pliku: ktos moze wskazac magazyn zaufania
-// jako sciezke do obejrzenia, a wtedy odpowiedz hosta bylaby lista kilkuset
-// urzedow zamiast stanu jego uslug.
-const MaksymalnaLiczbaCertyfikatow = 64
+// The bound applies to a single file too: somebody may name the trust
+// store as a path to look at, and then the host answer would be a list of
+// a few hundred authorities instead of the state of its services.
+const MaxCertificates = 64
 
-// MetadaneKlucza opisuje klucz prywatny bez jego tresci.
+// KeyMetadata describes a private key without its content.
 //
-// Panel nie potrzebuje klucza, zeby powiedziec o nim to, co jest wazne: czy
-// lezy tam, gdzie usluga go szuka, i czy nie jest czytelny dla wszystkich.
-type MetadaneKlucza struct {
+// The panel does not need the key to say what matters about it: whether it
+// lies where the service looks for it and whether it is not readable by
+// everyone.
+type KeyMetadata struct {
 	Path   string `json:"path"`
 	Exists bool   `json:"exists"`
 	Mode   string `json:"mode,omitempty"`
 	Owner  string `json:"owner,omitempty"`
 	Group  string `json:"group,omitempty"`
-	// WorldReadable jest wnioskiem z praw dostepu, a nie osobnym odczytem.
+	// WorldReadable is a conclusion from the permissions, not a separate
+	// read.
 	WorldReadable bool `json:"world_readable,omitempty"`
-	// Reason mowi, dlaczego stanu klucza nie ustalono. Brak wiedzy o kluczu
-	// nie jest tym samym, co klucz, ktorego nie ma.
+	// Reason says why the key state was not determined. No knowledge about
+	// the key is not the same as a key that does not exist.
 	Reason string `json:"reason,omitempty"`
 }
 
-// Sledzenie opisuje zlecenie certmongera dotyczace jednego certyfikatu.
-type Sledzenie struct {
+// Tracking describes a certmonger request concerning one certificate.
+type Tracking struct {
 	Request string `json:"request,omitempty"`
-	// Status jest stanem zlecenia widzianym przez demona: MONITORING oznacza
-	// certyfikat pod opieka, CA_UNREACHABLE - opieke, ktora nie dziala.
+	// Status is the request state as seen by the daemon: MONITORING means a
+	// certificate under care, CA_UNREACHABLE - care that does not work.
 	Status  string `json:"status,omitempty"`
 	CA      string `json:"ca,omitempty"`
 	KeyPath string `json:"key_path,omitempty"`
-	// AutoRenew mowi, czy demon odnowi certyfikat sam. Zlecenie bez tego
-	// wpisu jest tylko obserwacja terminu.
+	// AutoRenew says whether the daemon renews the certificate itself. A
+	// request without this entry is only a date observation.
 	AutoRenew *bool      `json:"auto_renew,omitempty"`
 	Expires   *time.Time `json:"expires,omitempty"`
 }
 
-// Certyfikat opisuje jeden certyfikat lezacy na hoscie.
-type Certyfikat struct {
+// Certificate describes one certificate lying on the host.
+type Certificate struct {
 	Path    string   `json:"path"`
 	Subject string   `json:"subject,omitempty"`
 	Issuer  string   `json:"issuer,omitempty"`
 	Serial  string   `json:"serial,omitempty"`
 	SANs    []string `json:"sans,omitempty"`
-	// Terminy sa wskaznikami, bo plik nieodczytany nie ma terminu zadnego.
-	// Data zerowa w tym miejscu wygladalaby jak certyfikat wystawiony
-	// w pierwszym roku naszej ery - czyli jak wygasly.
+	// The dates are pointers, because an unread file has no date at all. A
+	// zero date here would look like a certificate issued in the first year
+	// of our era - that is, like an expired one.
 	NotBefore         *time.Time `json:"not_before,omitempty"`
 	NotAfter          *time.Time `json:"not_after,omitempty"`
 	FingerprintSHA256 string     `json:"fingerprint_sha256,omitempty"`
@@ -124,62 +129,66 @@ type Certyfikat struct {
 	SignatureAlgo     string     `json:"signature_algorithm,omitempty"`
 	SelfSigned        bool       `json:"self_signed,omitempty"`
 	IsCA              bool       `json:"is_ca,omitempty"`
-	// ChainLength liczy zaswiadczenia w pliku razem z lisciem. Jedynka
-	// oznacza certyfikat bez lancucha - a to najczestszy powod, dla ktorego
-	// klient odrzuca polaczenie mimo waznego certyfikatu.
+	// ChainLength counts the certificates in the file including the leaf.
+	// One means a certificate without a chain - and that is the most common
+	// reason a client rejects the connection despite a valid certificate.
 	ChainLength int `json:"chain_length,omitempty"`
 
-	// Klucz prywatny opisany z zewnatrz; tresci modul nie czyta.
-	Key *MetadaneKlucza `json:"key,omitempty"`
+	// The private key described from the outside; the module does not read
+	// its content.
+	Key *KeyMetadata `json:"key,omitempty"`
 
-	// Powiazania: czym jest ten plik dla hosta.
+	// Relations: what this file is for the host.
 	Source string `json:"source"`
-	// OwnerService jest jednostka, ktora ten plik czyta. Panel jej nie
-	// zgaduje z nazwy katalogu: wpisuje ja czlowiek, ktory wie, co czyta co.
-	OwnerService string     `json:"owner_service,omitempty"`
-	Renewal      string     `json:"renewal"`
-	Tracking     *Sledzenie `json:"tracking,omitempty"`
+	// OwnerService is the unit that reads this file. The panel does not
+	// guess it from the directory name: a human who knows what reads what
+	// enters it.
+	OwnerService string    `json:"owner_service,omitempty"`
+	Renewal      string    `json:"renewal"`
+	Tracking     *Tracking `json:"tracking,omitempty"`
 
-	// UnavailableReason opisuje plik, ktorego nie udalo sie odczytac albo
-	// rozpoznac. Pusta lista certyfikatow w takim pliku nie jest odpowiedzia
-	// "nie ma tu certyfikatu".
+	// UnavailableReason describes a file that could not be read or
+	// recognised. An empty certificate list in such a file is not the
+	// answer "there is no certificate here".
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// DniDoWygasniecia liczy pelne doby do konca waznosci. Wartosc ujemna
-// oznacza certyfikat juz wygasly.
-func (c Certyfikat) DniDoWygasniecia(teraz time.Time) *int {
+// DaysToExpiry counts the full days until the end of validity. A negative
+// value means an already expired certificate.
+func (c Certificate) DaysToExpiry(now time.Time) *int {
 	if c.NotAfter == nil {
 		return nil
 	}
-	dni := int(c.NotAfter.Sub(teraz).Hours() / 24)
-	return &dni
+	days := int(c.NotAfter.Sub(now).Hours() / 24)
+	return &days
 }
 
-// Snapshot to obraz certyfikatow na hoscie.
+// Snapshot is the picture of the certificates on the host.
 type Snapshot struct {
-	Certificates []Certyfikat `json:"certificates,omitempty"`
-	// Scanned wylicza sciezki, o ktore panel poprosil. Bez tego pusta lista
-	// certyfikatow nie odroznialaby hosta bez certyfikatow od hosta, ktorego
-	// nikt jeszcze nie skonfigurowal.
+	Certificates []Certificate `json:"certificates,omitempty"`
+	// Scanned lists the paths the panel asked about. Without it an empty
+	// certificate list would not tell a host without certificates from a
+	// host nobody has configured yet.
 	Scanned []string `json:"scanned,omitempty"`
-	// TrackingKnown mowi, czy udalo sie ustalic, co pilnuje certyfikatow.
+	// TrackingKnown says whether it could be determined what watches the
+	// certificates.
 	TrackingKnown bool `json:"tracking_known"`
-	// TrackingReason mowi, dlaczego nie udalo sie tego ustalic.
+	// TrackingReason says why it could not be determined.
 	TrackingReason string `json:"tracking_reason,omitempty"`
-	// KeysKnown mowi, czy przy certyfikatach jest stan kluczy. Bez roota
-	// katalog kluczy bywa zamkniety i wtedy odpowiedz brzmi "nie wiadomo",
-	// a nie "klucza nie ma".
+	// KeysKnown says whether the certificates carry the key state. Without
+	// root the key directory is at times closed and then the answer is
+	// "unknown", not "there is no key".
 	KeysKnown bool `json:"keys_known"`
-	// Missing wylicza fakty, ktorych nie zebrano, wraz z powodem.
+	// Missing lists the facts not gathered, with the reason.
 	Missing map[string]string `json:"missing,omitempty"`
-	// Trust opisuje magazyn zaufania hosta: ktorym urzedom host wierzy
-	// i ktore z nich zalozyl panel. Bez tego rotacja urzedu jest niewidoczna
-	// z panelu: nie widac, kto juz ufa nowemu, a kto jeszcze nie.
-	Trust *MagazynZaufania `json:"trust,omitempty"`
-	// Truncated liczy cele pominiete przez limit jednego odczytu, a
-	// TruncatedReason mowi o tym wprost. Lista urwana po cichu wygladalaby
-	// jak pelna odpowiedz.
+	// Trust describes the host trust store: which authorities the host
+	// trusts and which of them the panel created. Without it an authority
+	// rotation is invisible from the panel: it cannot be seen who already
+	// trusts the new one and who does not yet.
+	Trust *TrustStore `json:"trust,omitempty"`
+	// Truncated counts the targets skipped by the limit of one read, and
+	// TruncatedReason says so directly. A list cut off quietly would look
+	// like a full answer.
 	Truncated       int    `json:"truncated,omitempty"`
 	TruncatedReason string `json:"truncated_reason,omitempty"`
 
@@ -187,251 +196,257 @@ type Snapshot struct {
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// Nazwy faktow, ktorych agent nie odczyta bez roota. Helper dostaje ich liste,
-// a nie polecenie do wykonania: zakres jego pracy jest wyliczony.
+// Names of the facts the agent cannot read without root. The helper
+// receives a list of them, not a command to run: the scope of its work is
+// enumerated.
 const (
-	FaktMetadaneKluczy = "key_metadata"
-	FaktSledzenie      = "renewal_tracking"
-	FaktTrescPliku     = "certificate_files"
+	FactKeyMetadata      = "key_metadata"
+	FactTracking         = "renewal_tracking"
+	FactCertificateFiles = "certificate_files"
 )
 
-// Brakujace wylicza fakty, po ktore trzeba pojsc do helpera.
-func (s Snapshot) Brakujace() []string {
-	var nazwy []string
-	for nazwa := range s.Missing {
-		nazwy = append(nazwy, nazwa)
+// MissingFacts lists the facts the helper has to be asked for.
+func (s Snapshot) MissingFacts() []string {
+	var names []string
+	for name := range s.Missing {
+		names = append(names, name)
 	}
-	return nazwy
+	return names
 }
 
-// Uzupelnienie to fakty zebrane przez helpera na wyrazne zadanie.
+// Supplement holds the facts gathered by the helper on explicit request.
 //
-// Puste pole oznacza fakt, o ktory nie pytano albo ktorego nie udalo sie
-// odczytac - powod jest wtedy w Errors, pod nazwa faktu.
-type Uzupelnienie struct {
-	// Keys jest metadanymi kluczy, po sciezce klucza.
-	Keys map[string]MetadaneKlucza `json:"keys,omitempty"`
-	// Tracking jest stanem zlecen certmongera, po sciezce certyfikatu.
-	Tracking       map[string]Sledzenie `json:"tracking,omitempty"`
-	TrackingKnown  bool                 `json:"tracking_known,omitempty"`
-	TrackingReason string               `json:"tracking_reason,omitempty"`
-	// Targets jest lista celow, ktore host zna sam z siebie: te wpisane przez
-	// panel wczesniej i te, ktorych pilnuje certmonger. Dzieki niej inwentarz
-	// opisuje ten sam zakres, co ostatni skan.
-	Targets []Cel `json:"targets,omitempty"`
-	// Files jest trescia plikow, ktorych agent nie mogl otworzyc: certyfikat
-	// bywa trzymany w katalogu zamknietym dla wszystkich poza usluga.
+// A nil field means a fact that was not asked for or could not be read -
+// the reason is then in Errors, under the fact name.
+type Supplement struct {
+	// Keys is the key metadata, by key path.
+	Keys map[string]KeyMetadata `json:"keys,omitempty"`
+	// Tracking is the state of the certmonger requests, by certificate
+	// path.
+	Tracking       map[string]Tracking `json:"tracking,omitempty"`
+	TrackingKnown  bool                `json:"tracking_known,omitempty"`
+	TrackingReason string              `json:"tracking_reason,omitempty"`
+	// Targets is the list of targets the host knows on its own: those
+	// entered by the panel earlier and those watched by certmonger. Thanks
+	// to it the inventory describes the same scope as the last scan.
+	Targets []Target `json:"targets,omitempty"`
+	// Files is the content of the files the agent could not open: a
+	// certificate is at times kept in a directory closed to everyone but
+	// the service.
 	Files  map[string]string `json:"files,omitempty"`
 	Errors map[string]string `json:"errors,omitempty"`
 }
 
-// Odcisk liczy skrot certyfikatu w postaci DER.
+// Fingerprint computes the digest of a certificate in DER form.
 //
-// To ten sam odcisk, ktory pokazuje przegladarka i openssl, wiec da sie go
-// porownac z tym, co widac po drugiej stronie polaczenia.
-func Odcisk(cert *x509.Certificate) string {
-	suma := sha256.Sum256(cert.Raw)
-	return hex.EncodeToString(suma[:])
+// It is the same fingerprint a browser and openssl show, so it can be
+// compared with what is visible on the other side of the connection.
+func Fingerprint(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	return hex.EncodeToString(sum[:])
 }
 
-// ParsujPEM wyciaga certyfikaty z pliku PEM w kolejnosci, w jakiej leza.
+// ParsePEM extracts the certificates from a PEM file in the order they lie.
 //
-// Kolejnosc ma znaczenie: pierwszy jest lisciem uslugi, dalsze sa lancuchem.
-// Plik z kluczem prywatnym w srodku nie jest bledem - bloki inne niz
-// CERTIFICATE po prostu pomijamy i nigdzie ich nie przepisujemy.
-func ParsujPEM(dane []byte) ([]*x509.Certificate, error) {
-	var certy []*x509.Certificate
-	reszta := dane
-	for len(reszta) > 0 {
-		var blok *pem.Block
-		blok, reszta = pem.Decode(reszta)
-		if blok == nil {
+// The order matters: the first is the service leaf, the following ones are
+// the chain. A file with a private key inside is not an error - blocks
+// other than CERTIFICATE are simply skipped and copied nowhere.
+func ParsePEM(data []byte) ([]*x509.Certificate, error) {
+	var certs []*x509.Certificate
+	rest := data
+	for len(rest) > 0 {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
 			break
 		}
-		if blok.Type != "CERTIFICATE" {
+		if block.Type != "CERTIFICATE" {
 			continue
 		}
-		cert, err := x509.ParseCertificate(blok.Bytes)
+		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return nil, fmt.Errorf("nie rozpoznano certyfikatu: %w", err)
+			return nil, fmt.Errorf("certificate not recognised: %w", err)
 		}
-		certy = append(certy, cert)
-		if len(certy) >= MaksymalnaLiczbaCertyfikatow {
+		certs = append(certs, cert)
+		if len(certs) >= MaxCertificates {
 			break
 		}
 	}
-	if len(certy) == 0 {
-		return nil, fmt.Errorf("plik nie zawiera certyfikatu w formacie PEM")
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("the file contains no certificate in PEM format")
 	}
-	return certy, nil
+	return certs, nil
 }
 
-// Opisz sklada opis certyfikatu z tego, co niesie on sam.
-func Opisz(sciezka string, certy []*x509.Certificate) Certyfikat {
-	lisc := certy[0]
-	poczatek, koniec := lisc.NotBefore.UTC(), lisc.NotAfter.UTC()
-	opis := Certyfikat{
-		Path:              sciezka,
-		Subject:           lisc.Subject.String(),
-		Issuer:            lisc.Issuer.String(),
-		Serial:            lisc.SerialNumber.String(),
-		SANs:              NazwyAlternatywne(lisc),
-		NotBefore:         &poczatek,
-		NotAfter:          &koniec,
-		FingerprintSHA256: Odcisk(lisc),
-		SignatureAlgo:     lisc.SignatureAlgorithm.String(),
-		IsCA:              lisc.IsCA,
-		ChainLength:       len(certy),
-		Source:            ZrodloZewnetrzne,
-		Renewal:           OdnawianieNieznane,
+// Describe assembles the certificate description from what it carries
+// itself.
+func Describe(path string, certs []*x509.Certificate) Certificate {
+	leaf := certs[0]
+	start, end := leaf.NotBefore.UTC(), leaf.NotAfter.UTC()
+	description := Certificate{
+		Path:              path,
+		Subject:           leaf.Subject.String(),
+		Issuer:            leaf.Issuer.String(),
+		Serial:            leaf.SerialNumber.String(),
+		SANs:              AlternativeNames(leaf),
+		NotBefore:         &start,
+		NotAfter:          &end,
+		FingerprintSHA256: Fingerprint(leaf),
+		SignatureAlgo:     leaf.SignatureAlgorithm.String(),
+		IsCA:              leaf.IsCA,
+		ChainLength:       len(certs),
+		Source:            SourceExternal,
+		Renewal:           RenewalUnknown,
 	}
-	opis.KeyAlgorithm, opis.KeyBits = OpisKlucza(lisc.PublicKey)
-	opis.SelfSigned = lisc.Subject.String() == lisc.Issuer.String()
-	return opis
+	description.KeyAlgorithm, description.KeyBits = KeyDescription(leaf.PublicKey)
+	description.SelfSigned = leaf.Subject.String() == leaf.Issuer.String()
+	return description
 }
 
-// NazwyAlternatywne zbiera wszystkie nazwy, ktore certyfikat obejmuje.
+// AlternativeNames gathers all the names the certificate covers.
 //
-// Adresy, nazwy i identyfikatory URI stoja w jednej liscie z prefiksem typu:
-// operator pyta "czy ten certyfikat obejmuje ten adres", a nie "w ktorym polu
-// rozszerzenia jest ta nazwa".
-func NazwyAlternatywne(cert *x509.Certificate) []string {
-	var nazwy []string
-	nazwy = append(nazwy, cert.DNSNames...)
-	for _, adres := range cert.IPAddresses {
-		nazwy = append(nazwy, adres.String())
+// Addresses, names and URIs stand in one list with a type prefix: the
+// operator asks "does this certificate cover this address", not "in which
+// extension field is this name".
+func AlternativeNames(cert *x509.Certificate) []string {
+	var names []string
+	names = append(names, cert.DNSNames...)
+	for _, address := range cert.IPAddresses {
+		names = append(names, address.String())
 	}
-	nazwy = append(nazwy, cert.EmailAddresses...)
+	names = append(names, cert.EmailAddresses...)
 	for _, uri := range cert.URIs {
-		nazwy = append(nazwy, uri.String())
+		names = append(names, uri.String())
 	}
-	return nazwy
+	return names
 }
 
-// OpisKlucza nazywa algorytm i sile klucza publicznego.
-func OpisKlucza(klucz crypto.PublicKey) (string, int) {
-	switch typ := klucz.(type) {
+// KeyDescription names the algorithm and the strength of a public key.
+func KeyDescription(key crypto.PublicKey) (string, int) {
+	switch typed := key.(type) {
 	case *rsa.PublicKey:
-		return "RSA", typ.N.BitLen()
+		return "RSA", typed.N.BitLen()
 	case *ecdsa.PublicKey:
-		return "ECDSA", typ.Curve.Params().BitSize
+		return "ECDSA", typed.Curve.Params().BitSize
 	case ed25519.PublicKey:
 		return "Ed25519", 256
 	}
 	return "", 0
 }
 
-// Obejmuje mowi, czy certyfikat obejmuje podana nazwe.
+// Covers says whether the certificate covers the given name.
 //
-// Sprawdzenie idzie przez biblioteczna implementacje weryfikacji nazw, wiec
-// wieloznacznik "*.example.com" dziala tak samo, jak zadziala u klienta.
-func Obejmuje(cert *x509.Certificate, nazwa string) bool {
-	return cert.VerifyHostname(nazwa) == nil
+// The check goes through the library name verification, so the wildcard
+// "*.example.com" works the same as it does for a client.
+func Covers(cert *x509.Certificate, name string) bool {
+	return cert.VerifyHostname(name) == nil
 }
 
-// DopasujKlucz sprawdza, czy klucz prywatny nalezy do certyfikatu.
+// MatchKey checks whether the private key belongs to the certificate.
 //
-// To jedyne miejsce w module, w ktorym klucz jest czytany - i dzieje sie to
-// tuz przed wdrozeniem, gdy klucz i tak musi przejsc przez rece hosta.
-// Wynikiem jest sama odpowiedz "pasuje albo nie": tresci klucza nie ma ani
-// w komunikacie bledu, ani w wyniku operacji.
-func DopasujKlucz(cert *x509.Certificate, kluczPEM []byte) error {
-	klucz, err := ParsujKluczPrywatny(kluczPEM)
+// This is the only place in the module where the key is read - and it
+// happens right before deployment, when the key has to pass through the
+// host's hands anyway. The result is the bare answer "matches or not": the
+// key content is neither in the error message nor in the operation result.
+func MatchKey(cert *x509.Certificate, keyPEM []byte) error {
+	key, err := ParsePrivateKey(keyPEM)
 	if err != nil {
 		return err
 	}
-	publiczny, ok := klucz.(interface{ Public() crypto.PublicKey })
+	public, ok := key.(interface{ Public() crypto.PublicKey })
 	if !ok {
-		return fmt.Errorf("klucz nieznanego rodzaju")
+		return fmt.Errorf("key of an unknown kind")
 	}
-	porownywalny, ok := publiczny.Public().(interface{ Equal(crypto.PublicKey) bool })
+	comparable, ok := public.Public().(interface{ Equal(crypto.PublicKey) bool })
 	if !ok {
-		return fmt.Errorf("klucza tego rodzaju nie da sie porownac z certyfikatem")
+		return fmt.Errorf("a key of this kind cannot be compared with the certificate")
 	}
-	if !porownywalny.Equal(cert.PublicKey) {
-		return fmt.Errorf("klucz prywatny nie nalezy do tego certyfikatu")
+	if !comparable.Equal(cert.PublicKey) {
+		return fmt.Errorf("the private key does not belong to this certificate")
 	}
 	return nil
 }
 
-// ParsujKluczPrywatny czyta klucz w jednym z trzech uzywanych zapisow.
-func ParsujKluczPrywatny(dane []byte) (crypto.PrivateKey, error) {
-	reszta := dane
-	for len(reszta) > 0 {
-		var blok *pem.Block
-		blok, reszta = pem.Decode(reszta)
-		if blok == nil {
+// ParsePrivateKey reads a key in one of the three encodings in use.
+func ParsePrivateKey(data []byte) (crypto.PrivateKey, error) {
+	rest := data
+	for len(rest) > 0 {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
 			break
 		}
-		if !strings.Contains(blok.Type, "PRIVATE KEY") {
+		if !strings.Contains(block.Type, "PRIVATE KEY") {
 			continue
 		}
-		// Zaszyfrowany klucz rozpoznajemy po naglowku i mowimy o tym wprost:
-		// panel nie ma gdzie zapytac o haslo, a "nie rozpoznano klucza"
-		// byloby mylaca odpowiedzia na inne pytanie.
-		if _, zaszyfrowany := blok.Headers["DEK-Info"]; zaszyfrowany {
-			return nil, fmt.Errorf("klucz jest zaszyfrowany haslem; magazyn przechowuje klucze bez hasla")
+		// An encrypted key is recognised by the header and said so
+		// directly: the panel has nowhere to ask for the passphrase, and
+		// "key not recognised" would be a misleading answer to a different
+		// question.
+		if _, encrypted := block.Headers["DEK-Info"]; encrypted {
+			return nil, fmt.Errorf("the key is encrypted with a passphrase; the store keeps keys without a passphrase")
 		}
-		if strings.HasPrefix(blok.Type, "ENCRYPTED") {
-			return nil, fmt.Errorf("klucz jest zaszyfrowany haslem; magazyn przechowuje klucze bez hasla")
+		if strings.HasPrefix(block.Type, "ENCRYPTED") {
+			return nil, fmt.Errorf("the key is encrypted with a passphrase; the store keeps keys without a passphrase")
 		}
-		if klucz, err := x509.ParsePKCS8PrivateKey(blok.Bytes); err == nil {
-			return klucz, nil
+		if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+			return key, nil
 		}
-		if klucz, err := x509.ParsePKCS1PrivateKey(blok.Bytes); err == nil {
-			return klucz, nil
+		if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+			return key, nil
 		}
-		if klucz, err := x509.ParseECPrivateKey(blok.Bytes); err == nil {
-			return klucz, nil
+		if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+			return key, nil
 		}
-		return nil, fmt.Errorf("nie rozpoznano zapisu klucza prywatnego")
+		return nil, fmt.Errorf("the private key encoding was not recognised")
 	}
-	return nil, fmt.Errorf("dane nie zawieraja klucza prywatnego w formacie PEM")
+	return nil, fmt.Errorf("the data contains no private key in PEM format")
 }
 
-// SprawdzLancuch sprawdza, czy zaswiadczenia w pliku ida w kolejnosci od
-// liscia do korzenia i czy kazde jest podpisane przez nastepne.
+// CheckChain checks whether the certificates in the file go from the leaf
+// to the root and whether each is signed by the next.
 //
-// Zly porzadek lancucha jest bledem, ktory widac dopiero u klienta: serwer
-// wystartuje, a polaczenie odrzuci co drugi program. Dlatego sprawdzamy to
-// przed podmiana, a nie po niej.
-func SprawdzLancuch(certy []*x509.Certificate) error {
-	for i := 0; i+1 < len(certy); i++ {
-		if err := certy[i].CheckSignatureFrom(certy[i+1]); err != nil {
-			return fmt.Errorf("zaswiadczenie %d w pliku nie podpisuje poprzedniego (%s): %w",
-				i+2, certy[i+1].Subject.CommonName, err)
+// A wrong chain order is an error visible only at the client: the server
+// starts, and every other program rejects the connection. That is why it
+// is checked before the replacement, not after.
+func CheckChain(certs []*x509.Certificate) error {
+	for i := 0; i+1 < len(certs); i++ {
+		if err := certs[i].CheckSignatureFrom(certs[i+1]); err != nil {
+			return fmt.Errorf("certificate %d in the file does not sign the previous one (%s): %w",
+				i+2, certs[i+1].Subject.CommonName, err)
 		}
 	}
 	return nil
 }
 
-// SprawdzTerminy sprawdza, czy certyfikat da sie dzisiaj uzyc.
-func SprawdzTerminy(cert *x509.Certificate, teraz time.Time) error {
-	if teraz.Before(cert.NotBefore) {
-		return fmt.Errorf("certyfikat zaczyna obowiazywac dopiero %s",
+// CheckDates checks whether the certificate can be used today.
+func CheckDates(cert *x509.Certificate, now time.Time) error {
+	if now.Before(cert.NotBefore) {
+		return fmt.Errorf("the certificate becomes valid only on %s",
 			cert.NotBefore.UTC().Format(time.RFC3339))
 	}
-	if !cert.NotAfter.After(teraz) {
-		return fmt.Errorf("certyfikat stracil waznosc %s",
+	if !cert.NotAfter.After(now) {
+		return fmt.Errorf("the certificate expired on %s",
 			cert.NotAfter.UTC().Format(time.RFC3339))
 	}
 	return nil
 }
 
-// Katalogi, w ktorych panel wdraza certyfikaty i klucze.
+// Directories the panel deploys certificates and keys into.
 //
-// Lista jest waska celowo. Zapis certyfikatu w dowolne miejsce systemu plikow
-// jest zapisem dowolnego pliku - a od tego jest modul plikow z wlasnymi
-// zabezpieczeniami, ktory zreszta kluczy i certyfikatow nie tyka.
-var dozwolonePrefiksy = []string{
+// The list is narrow on purpose. Writing a certificate anywhere in the
+// filesystem is writing an arbitrary file - and for that there is the files
+// module with its own safeguards, which does not touch keys and
+// certificates anyway.
+var allowedPrefixes = []string{
 	"/etc/pki/tls/",
 	"/etc/pki/flotestro/",
 	"/etc/ssl/private/",
 	"/etc/ssl/local/",
-	// Debian trzyma certyfikat serwera w tym samym katalogu, co magazyn
-	// zaufania. Sam plik lezacy tam niczego jeszcze nie czyni zaufanym -
-	// zaufanie daje wygenerowana wiazka i dowiazania po skrocie nazwy.
-	// Dlatego katalog jest dozwolony, a te dwie rzeczy nie sa.
+	// Debian keeps the server certificate in the same directory as the
+	// trust store. A file lying there by itself makes nothing trusted yet
+	// - trust comes from the generated bundle and the hash symlinks. That
+	// is why the directory is allowed, and those two things are not.
 	"/etc/ssl/certs/",
 	"/etc/nginx/",
 	"/etc/httpd/",
@@ -443,194 +458,199 @@ var dozwolonePrefiksy = []string{
 	"/opt/flotestro/certs/",
 }
 
-// zakazanePrefiksy wylicza miejsca, ktorych panel nie tyka nigdy - takze
-// wtedy, gdy leza wewnatrz katalogu dozwolonego.
+// forbiddenPrefixes lists the places the panel never touches - even when
+// they lie inside an allowed directory.
 //
-// Store zaufania odpowiada na inne pytanie niz certyfikat uslugi: mowi,
-// komu host wierzy, a nie czym sie przedstawia. Dopisanie tam urzedu jest
-// zmiana o innej wadze i nie moze wygladac jak wdrozenie certyfikatu.
-var zakazanePrefiksy = []string{
+// The trust store answers a different question than a service certificate:
+// it says whom the host trusts, not what it presents itself as. Adding an
+// authority there is a change of a different weight and must not look like
+// a certificate deployment.
+var forbiddenPrefixes = []string{
 	"/etc/pki/ca-trust/",
 	"/etc/pki/tls/certs/ca-bundle.crt",
 	"/etc/ssl/certs/ca-certificates.crt",
 	"/etc/ca-certificates/",
 	"/usr/share/ca-certificates/",
 	"/usr/local/share/ca-certificates/",
-	// Identity agenta jest osobnym podsystemem z wlasnym odnowieniem:
-	// podmiana jego certyfikatu przez zwykla operacje odcielaby panel od
-	// hosta w chwili, w ktorej host przestalby byc soba.
+	// The agent identity is a separate subsystem with its own renewal:
+	// replacing its certificate by an ordinary operation would cut the
+	// panel off from the host at the moment the host stopped being itself.
 	"/etc/flotestro/agent/",
 	"/var/lib/flotestro/agent/",
 }
 
-// dowiazanieSkrotu rozpoznaje nazwe, pod ktora OpenSSL szuka urzedu
-// w katalogu zaufania: osiem cyfr szesnastkowych i numer kolejny. Plik pod
-// taka nazwa nie jest certyfikatem uslugi - jest wpisem do magazynu zaufania.
-var dowiazanieSkrotu = regexp.MustCompile(`^[0-9a-f]{8}\.[0-9]+$`)
+// hashSymlink recognises the name OpenSSL looks an authority up by in the
+// trust directory: eight hex digits and a sequence number. A file under
+// such a name is not a service certificate - it is a trust store entry.
+var hashSymlink = regexp.MustCompile(`^[0-9a-f]{8}\.[0-9]+$`)
 
-// WalidujSciezke sprawdza, czy panel moze wskazac ten plik.
+// ValidatePath checks whether the panel may name this file.
 //
-// Ta sama regula obowiazuje odczyt i zapis: sciezka, ktorej panel nie zapisze,
-// nie jest tez sciezka, o ktorej tresc pyta. Inaczej "obejrzyj ten plik"
-// byloby sposobem na czytanie dowolnego pliku hosta.
-func WalidujSciezke(sciezka string) error {
-	if sciezka == "" {
-		return fmt.Errorf("sciezka jest pusta")
+// The same rule binds reading and writing: a path the panel does not write
+// is not a path whose content it asks about either. Otherwise "look at
+// this file" would be a way to read any file of the host.
+func ValidatePath(p string) error {
+	if p == "" {
+		return fmt.Errorf("the path is empty")
 	}
-	if !strings.HasPrefix(sciezka, "/") {
-		return fmt.Errorf("sciezka %q nie jest bezwzgledna", sciezka)
+	if !strings.HasPrefix(p, "/") {
+		return fmt.Errorf("the path %q is not absolute", p)
 	}
-	if strings.Contains(sciezka, "..") {
-		return fmt.Errorf("sciezka %q wychodzi poza wskazany katalog", sciezka)
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("the path %q leaves the named directory", p)
 	}
-	if strings.ContainsAny(sciezka, "\n\t*?") {
-		return fmt.Errorf("sciezka %q zawiera niedozwolony znak", sciezka)
+	if strings.ContainsAny(p, "\n\t*?") {
+		return fmt.Errorf("the path %q contains a disallowed character", p)
 	}
-	if sciezka != path.Clean(sciezka) {
-		return fmt.Errorf("sciezka %q nie jest w postaci znormalizowanej", sciezka)
+	if p != path.Clean(p) {
+		return fmt.Errorf("the path %q is not in normalised form", p)
 	}
-	if len(sciezka) > 4096 {
-		return fmt.Errorf("sciezka jest dluzsza niz 4096 znakow")
+	if len(p) > 4096 {
+		return fmt.Errorf("the path is longer than 4096 characters")
 	}
-	for _, prefiks := range zakazanePrefiksy {
-		if strings.HasPrefix(sciezka, prefiks) {
-			return fmt.Errorf("sciezka %q nalezy do magazynu zaufania albo do tozsamosci agenta", sciezka)
+	for _, prefix := range forbiddenPrefixes {
+		if strings.HasPrefix(p, prefix) {
+			return fmt.Errorf("the path %q belongs to the trust store or to the agent identity", p)
 		}
 	}
-	if dowiazanieSkrotu.MatchString(path.Base(sciezka)) {
-		return fmt.Errorf("nazwa %q jest wpisem magazynu zaufania, a nie certyfikatem uslugi",
-			path.Base(sciezka))
+	if hashSymlink.MatchString(path.Base(p)) {
+		return fmt.Errorf("the name %q is a trust store entry, not a service certificate",
+			path.Base(p))
 	}
-	for _, prefiks := range dozwolonePrefiksy {
-		if strings.HasPrefix(sciezka, prefiks) {
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(p, prefix) {
 			return nil
 		}
 	}
-	return fmt.Errorf("sciezka %q lezy poza katalogami certyfikatow", sciezka)
+	return fmt.Errorf("the path %q lies outside the certificate directories", p)
 }
 
-// WalidujCel sprawdza adres, pod ktorym panel sprawdzi wdrozony certyfikat.
+// ValidateTarget checks the address the panel checks the deployed
+// certificate at.
 //
-// Sonda laczy sie z hosta, wiec adres bez portu albo z nazwa, ktorej nie da
-// sie rozdzielic, zamienilby test w losowe polaczenie.
-func WalidujCel(cel string) error {
-	if cel == "" {
+// The probe connects from the host, so an address without a port or with a
+// name that cannot be split would turn the test into a random connection.
+func ValidateTarget(target string) error {
+	if target == "" {
 		return nil
 	}
-	gospodarz, port, err := net.SplitHostPort(cel)
+	host, port, err := net.SplitHostPort(target)
 	if err != nil {
-		return fmt.Errorf("cel sondy %q nie ma postaci host:port", cel)
+		return fmt.Errorf("the probe target %q does not have the form host:port", target)
 	}
-	if gospodarz == "" {
-		return fmt.Errorf("cel sondy %q nie wskazuje hosta", cel)
+	if host == "" {
+		return fmt.Errorf("the probe target %q names no host", target)
 	}
-	numer, err := strconv.Atoi(port)
-	if err != nil || numer < 1 || numer > 65535 {
-		return fmt.Errorf("cel sondy %q ma nieprawidlowy port", cel)
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("the probe target %q has an invalid port", target)
 	}
 	return nil
 }
 
-// WalidujJednostke sprawdza nazwe uslugi, ktora ma przeczytac nowy plik.
-func WalidujJednostke(jednostka string) error {
-	if jednostka == "" {
+// ValidateUnit checks the name of the service that is to read the new
+// file.
+func ValidateUnit(unit string) error {
+	if unit == "" {
 		return nil
 	}
-	if strings.ContainsAny(jednostka, " \t\n/;&|$`") {
-		return fmt.Errorf("nazwa jednostki %q zawiera niedozwolony znak", jednostka)
+	if strings.ContainsAny(unit, " \t\n/;&|$`") {
+		return fmt.Errorf("the unit name %q contains a disallowed character", unit)
 	}
-	if len(jednostka) > 256 {
-		return fmt.Errorf("nazwa jednostki jest za dluga")
+	if len(unit) > 256 {
+		return fmt.Errorf("the unit name is too long")
 	}
 	return nil
 }
 
-// WalidujZlecenie ogranicza to, co idzie do certmongera jako nazwa zlecenia.
-// Wartosc pochodzi z panelu, a trafia do argumentu polecenia.
-func WalidujZlecenie(zlecenie string) error {
-	if zlecenie == "" {
-		return fmt.Errorf("odnowienie wymaga identyfikatora zlecenia certmongera")
+// ValidateRequest bounds what goes to certmonger as a request name. The
+// value comes from the panel and lands in a command argument.
+func ValidateRequest(request string) error {
+	if request == "" {
+		return fmt.Errorf("a renewal requires a certmonger request identifier")
 	}
-	if len(zlecenie) > 128 {
-		return fmt.Errorf("identyfikator zlecenia jest za dlugi")
+	if len(request) > 128 {
+		return fmt.Errorf("the request identifier is too long")
 	}
-	for _, znak := range zlecenie {
-		if znak >= 'a' && znak <= 'z' || znak >= 'A' && znak <= 'Z' ||
-			znak >= '0' && znak <= '9' || znak == '-' || znak == '_' || znak == '.' {
+	for _, r := range request {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
 			continue
 		}
-		return fmt.Errorf("identyfikator zlecenia %q zawiera niedozwolony znak", zlecenie)
+		return fmt.Errorf("the request identifier %q contains a disallowed character", request)
 	}
 	return nil
 }
 
-// ParsujGetcert czyta wyjscie "getcert list".
+// ParseGetcert reads the output of "getcert list".
 //
-// Wpisy sa blokami "Request ID 'nazwa':" z wcieciami. Interesuja nas cztery
-// rzeczy: gdzie lezy certyfikat, gdzie klucz, w jakim stanie jest zlecenie
-// i czy demon odnowi je sam. Wynik jest mapowany po sciezce certyfikatu, bo
-// to ona laczy zlecenie z plikiem, ktory widzi panel.
-func ParsujGetcert(wyjscie string) map[string]Sledzenie {
-	sledzenia := map[string]Sledzenie{}
-	var biezace Sledzenie
-	var sciezka string
+// The entries are indented "Request ID 'name':" blocks. Four things are of
+// interest: where the certificate lies, where the key, what state the
+// request is in and whether the daemon renews it itself. The result is
+// mapped by certificate path, because that is what links the request to
+// the file the panel sees.
+func ParseGetcert(output string) map[string]Tracking {
+	trackings := map[string]Tracking{}
+	var current Tracking
+	var certPath string
 
-	zapisz := func() {
-		if sciezka != "" {
-			sledzenia[sciezka] = biezace
+	save := func() {
+		if certPath != "" {
+			trackings[certPath] = current
 		}
-		biezace, sciezka = Sledzenie{}, ""
+		current, certPath = Tracking{}, ""
 	}
 
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		przyciete := strings.TrimSpace(linia)
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
 		switch {
-		case strings.HasPrefix(przyciete, "Request ID"):
-			zapisz()
-			biezace.Request = strings.Trim(strings.TrimSpace(
-				strings.TrimSuffix(strings.TrimPrefix(przyciete, "Request ID"), ":")), "'")
-		case strings.HasPrefix(przyciete, "status:"):
-			biezace.Status = strings.TrimSpace(strings.TrimPrefix(przyciete, "status:"))
-		case strings.HasPrefix(przyciete, "CA:"):
-			biezace.CA = strings.TrimSpace(strings.TrimPrefix(przyciete, "CA:"))
-		case strings.HasPrefix(przyciete, "certificate:"):
-			sciezka = sciezkaZLokalizacji(strings.TrimPrefix(przyciete, "certificate:"))
-		case strings.HasPrefix(przyciete, "key pair storage:"):
-			biezace.KeyPath = sciezkaZLokalizacji(strings.TrimPrefix(przyciete, "key pair storage:"))
-		case strings.HasPrefix(przyciete, "auto-renew:"):
-			wartosc := strings.TrimSpace(strings.TrimPrefix(przyciete, "auto-renew:")) == "yes"
-			biezace.AutoRenew = &wartosc
-		case strings.HasPrefix(przyciete, "expires:"):
-			if chwila, ok := ParsujTerminGetcert(strings.TrimPrefix(przyciete, "expires:")); ok {
-				biezace.Expires = &chwila
+		case strings.HasPrefix(trimmed, "Request ID"):
+			save()
+			current.Request = strings.Trim(strings.TrimSpace(
+				strings.TrimSuffix(strings.TrimPrefix(trimmed, "Request ID"), ":")), "'")
+		case strings.HasPrefix(trimmed, "status:"):
+			current.Status = strings.TrimSpace(strings.TrimPrefix(trimmed, "status:"))
+		case strings.HasPrefix(trimmed, "CA:"):
+			current.CA = strings.TrimSpace(strings.TrimPrefix(trimmed, "CA:"))
+		case strings.HasPrefix(trimmed, "certificate:"):
+			certPath = pathFromLocation(strings.TrimPrefix(trimmed, "certificate:"))
+		case strings.HasPrefix(trimmed, "key pair storage:"):
+			current.KeyPath = pathFromLocation(strings.TrimPrefix(trimmed, "key pair storage:"))
+		case strings.HasPrefix(trimmed, "auto-renew:"):
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "auto-renew:")) == "yes"
+			current.AutoRenew = &value
+		case strings.HasPrefix(trimmed, "expires:"):
+			if moment, ok := ParseGetcertDate(strings.TrimPrefix(trimmed, "expires:")); ok {
+				current.Expires = &moment
 			}
 		}
 	}
-	zapisz()
-	return sledzenia
+	save()
+	return trackings
 }
 
-// sciezkaZLokalizacji wyciaga sciezke z opisu "type=FILE,location='/sciezka'".
-func sciezkaZLokalizacji(opis string) string {
-	for _, pole := range strings.Split(strings.TrimSpace(opis), ",") {
-		klucz, wartosc, ok := strings.Cut(pole, "=")
-		if !ok || strings.TrimSpace(klucz) != "location" {
+// pathFromLocation extracts the path from a "type=FILE,location='/path'"
+// description.
+func pathFromLocation(description string) string {
+	for _, field := range strings.Split(strings.TrimSpace(description), ",") {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok || strings.TrimSpace(key) != "location" {
 			continue
 		}
-		return strings.Trim(strings.TrimSpace(wartosc), "'\"")
+		return strings.Trim(strings.TrimSpace(value), "'\"")
 	}
 	return ""
 }
 
-// ParsujTerminGetcert czyta date w formacie, ktorym odpowiada certmonger.
-func ParsujTerminGetcert(wartosc string) (time.Time, bool) {
-	wartosc = strings.TrimSpace(wartosc)
-	for _, uklad := range []string{
+// ParseGetcertDate reads a date in the format certmonger answers with.
+func ParseGetcertDate(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{
 		"2006-01-02 15:04:05 MST", "2006-01-02 15:04:05 -0700",
 		"2006-01-02 15:04:05", time.RFC3339,
 	} {
-		if chwila, err := time.Parse(uklad, wartosc); err == nil {
-			return chwila.UTC(), true
+		if moment, err := time.Parse(layout, value); err == nil {
+			return moment.UTC(), true
 		}
 	}
 	return time.Time{}, false

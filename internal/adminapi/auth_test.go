@@ -6,25 +6,25 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-func TestLocalPathOdrzucaPrzekierowaniaNaZewnatrz(t *testing.T) {
-	// Cel przekierowania po zalogowaniu pochodzi z parametru zapytania. Bez
-	// walidacji logowanie stalo by sie otwartym przekierowaniem uzywanym
-	// w phishingu: uzytkownik widzi zaufany adres panelu i laduje gdzie indziej.
+func TestLocalPathRejectsExternalRedirects(t *testing.T) {
+	// The redirect target after login comes from a query parameter. Without
+	// validation the login would become an open redirect used in phishing:
+	// the user sees the trusted panel address and lands somewhere else.
 	rejected := []string{
-		"https://zly.example.com/",
-		"//zly.example.com/",
-		"http://zly.example.com",
+		"https://evil.example.com/",
+		"//evil.example.com/",
+		"http://evil.example.com",
 		"javascript:alert(1)",
-		"zly.example.com/sciezka",
+		"evil.example.com/path",
 	}
 	for _, value := range rejected {
 		if got := localPath(value); got != "" {
-			t.Errorf("przyjeto zewnetrzny cel %q jako %q", value, got)
+			t.Errorf("accepted the external target %q as %q", value, got)
 		}
 	}
 }
 
-func TestLocalPathPrzyjmujeSciezkiLokalne(t *testing.T) {
+func TestLocalPathAcceptsLocalPaths(t *testing.T) {
 	accepted := map[string]string{
 		"/":               "/",
 		"/hosts":          "/hosts",
@@ -33,19 +33,19 @@ func TestLocalPathPrzyjmujeSciezkiLokalne(t *testing.T) {
 	}
 	for value, want := range accepted {
 		if got := localPath(value); got != want {
-			t.Errorf("localPath(%q) = %q, oczekiwano %q", value, got, want)
+			t.Errorf("localPath(%q) = %q, want %q", value, got, want)
 		}
 	}
 	if got := localPath(""); got != "" {
-		t.Errorf("pusty cel dal %q", got)
+		t.Errorf("an empty target gave %q", got)
 	}
 }
 
-// TestKolekcjeNieWymagajaZakresuGlobalnego pilnuje regresji, przez ktora
-// operator ograniczony do jednego srodowiska dostawal odmowe na polowie
-// panelu: pulpit, kampanie i zadania sprawdzaly uprawnienie w zakresie
-// globalnym, ktorego waskie przypisanie nigdy nie spelnia.
-func TestKolekcjeNieWymagajaZakresuGlobalnego(t *testing.T) {
+// TestCollectionsDoNotRequireGlobalScope guards against the regression that
+// gave an operator limited to one environment a refusal on half the panel:
+// the dashboard, campaigns and tasks checked the permission in the global
+// scope, which a narrow binding never satisfies.
+func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 	operator := authz.Principal{
 		Subject: "jkowalski", Kind: "user",
 		Bindings: []authz.Binding{{
@@ -54,49 +54,49 @@ func TestKolekcjeNieWymagajaZakresuGlobalnego(t *testing.T) {
 		}},
 	}
 
-	// Zakres globalny nie jest spelniony - i wlasnie dlatego kolekcje nie
-	// moga o niego pytac.
+	// The global scope is not satisfied - and that is exactly why the
+	// collections must not ask for it.
 	if operator.Can(authz.PermCampaignRead, authz.GlobalScope) {
-		t.Fatal("waskie przypisanie nie powinno spelniac celu globalnego")
+		t.Fatal("a narrow binding should not satisfy the global target")
 	}
 	for _, permission := range []authz.Permission{
 		authz.PermHostRead, authz.PermJobRead, authz.PermCampaignRead,
 	} {
 		if !operator.CanAnywhere(permission) {
-			t.Errorf("operator musi miec %s w swoim zakresie", permission)
+			t.Errorf("the operator must have %s in their scope", permission)
 		}
 		if len(operator.ScopesFor(permission)) != 1 {
-			t.Errorf("%s: oczekiwano jednego zakresu", permission)
+			t.Errorf("%s: expected one scope", permission)
 		}
 	}
-	// Uprawnienia, ktorych rola nie ma, nadal nie moga sie pojawic.
+	// Permissions the role does not have still must not appear.
 	if operator.CanAnywhere(authz.PermAuditRead) {
-		t.Error("operator nie ma prawa odczytu audytu")
+		t.Error("the operator has no audit read right")
 	}
 }
 
-// TestUprawnieniaTozsamosciSaKompletne sprawdza liste, na podstawie ktorej
-// interfejs ukrywa sekcje. Zgadywanie po nazwach rol w przegladarce rozjezdza
-// sie z polityka przy kazdej jej zmianie.
-func TestUprawnieniaTozsamosciSaKompletne(t *testing.T) {
+// TestPrincipalPermissionsAreComplete checks the list the interface hides
+// sections by. Guessing by role names in the browser drifts from the policy
+// at every change of it.
+func TestPrincipalPermissionsAreComplete(t *testing.T) {
 	principal := authz.Principal{
 		Bindings: []authz.Binding{
 			{Role: authz.RoleViewer, Scope: authz.Scope{Site: "lab"}},
 			{Role: authz.RoleApprover, Scope: authz.GlobalScope},
 		},
 	}
-	uprawnienia := map[string]bool{}
+	permissions := map[string]bool{}
 	for _, permission := range principal.Permissions() {
-		uprawnienia[permission] = true
+		permissions[permission] = true
 	}
 
-	for _, oczekiwane := range []string{"host.read", "campaign.read", "job.approve", "audit.read"} {
-		if !uprawnienia[oczekiwane] {
-			t.Errorf("brak uprawnienia %s w podsumowaniu tozsamosci", oczekiwane)
+	for _, expected := range []string{"host.read", "campaign.read", "job.approve", "audit.read"} {
+		if !permissions[expected] {
+			t.Errorf("the permission %s is missing from the principal summary", expected)
 		}
 	}
-	// Suma nie moze dodawac niczego, czego zadna z rol nie ma.
-	if uprawnienia["pki.rotate"] {
-		t.Error("podsumowanie zawiera uprawnienie spoza przypisanych rol")
+	// The sum must not add anything none of the roles has.
+	if permissions["pki.rotate"] {
+		t.Error("the summary holds a permission outside the assigned roles")
 	}
 }

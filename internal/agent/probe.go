@@ -26,7 +26,7 @@ func (e *TaskExecutor) applyProbe(ctx context.Context, task *agentv1.TaskEnvelop
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result := monitoring.Wykonaj(probeCtx, monitoring.Zlecenie{
+	result := monitoring.Run(probeCtx, monitoring.Request{
 		Kind: payload.Kind, Target: payload.Target,
 		ExpectStatus: payload.ExpectStatus, ExpectBody: payload.ExpectBody,
 		TimeoutSeconds: payload.TimeoutSeconds,

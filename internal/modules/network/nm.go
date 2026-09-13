@@ -7,297 +7,302 @@ import (
 	"strings"
 )
 
-// SciezkaNmcli wskazuje narzedzie NetworkManagera. Sciezka jest stala,
-// a nie szukana w PATH: helper uruchamia wylacznie znane binaria.
-const SciezkaNmcli = "/usr/bin/nmcli"
+// NmcliPath points at the NetworkManager tool. The path is fixed, not
+// searched in PATH: the helper runs only known binaries.
+const NmcliPath = "/usr/bin/nmcli"
 
-// MTUAuto oznacza wartosc domyslna sterownika. "auto" i konkretna liczba to
-// dwie rozne rzeczy, wiec zero nie moze udawac zadnej z nich.
+// MTUAuto means the driver default. "auto" and a specific number are two
+// different things, so zero cannot stand in for either.
 const MTUAuto = "auto"
 
-// Polaczenie to profil NetworkManagera przypisany urzadzeniu.
-type Polaczenie struct {
-	Nazwa      string
-	UUID       string
-	Urzadzenie string
-	Typ        string
-	Stan       string
+// Connection is a NetworkManager profile assigned to a device.
+type Connection struct {
+	Name   string
+	UUID   string
+	Device string
+	Type   string
+	State  string
 }
 
-// Profil opisuje ustawienia jednego polaczenia w zakresie, ktorym zarzadza
-// panel. Pola puste oznaczaja "NetworkManager nic tu nie ma", a nie "wyczysc".
-type Profil struct {
-	Polaczenie string   `json:"connection"`
-	Interfejs  string   `json:"interface,omitempty"`
-	Metoda     string   `json:"method,omitempty"`
-	Adresy     []string `json:"addresses,omitempty"`
-	Brama      string   `json:"gateway,omitempty"`
+// Profile describes the settings of one connection within the scope the
+// panel manages. Empty fields mean "NetworkManager has nothing here", not
+// "clear".
+type Profile struct {
+	Connection string   `json:"connection"`
+	Interface  string   `json:"interface,omitempty"`
+	Method     string   `json:"method,omitempty"`
+	Addresses  []string `json:"addresses,omitempty"`
+	Gateway    string   `json:"gateway,omitempty"`
 	DNS        []string `json:"dns,omitempty"`
-	// DNSSearch i IgnoreAutoDNS naleza do resolvera tak samo jak serwery:
-	// wycofanie, ktore przywraca same serwery, zostawia host z cudzymi
-	// domenami wyszukiwania i z odrzuconymi serwerami z DHCP.
+	// DNSSearch and IgnoreAutoDNS belong to the resolver just like the
+	// servers: a rollback that restores only the servers leaves the host
+	// with somebody else's search domains and with the DHCP servers
+	// rejected.
 	DNSSearch     []string `json:"dns_search,omitempty"`
 	IgnoreAutoDNS bool     `json:"ignore_auto_dns,omitempty"`
-	Trasy         []string `json:"routes,omitempty"`
-	// MTU jest tekstem, bo "auto" jest tu rownoprawna wartoscia.
+	Routes        []string `json:"routes,omitempty"`
+	// MTU is text, because "auto" is an equal value here.
 	MTU string `json:"mtu,omitempty"`
 }
 
-// PolaProfilu wylicza ustawienia, o ktore panel pyta NetworkManagera.
-var PolaProfilu = []string{
+// ProfileFields lists the settings the panel asks NetworkManager for.
+var ProfileFields = []string{
 	"connection.id", "connection.interface-name", "ipv4.method",
 	"ipv4.addresses", "ipv4.gateway", "ipv4.dns", "ipv4.dns-search",
 	"ipv4.ignore-auto-dns", "ipv4.routes", "802-3-ethernet.mtu",
 }
 
-// ParsujPolaczenia czyta wyjscie "nmcli -t -f NAME,UUID,DEVICE,TYPE,STATE con show".
-func ParsujPolaczenia(wyjscie string) []Polaczenie {
-	var polaczenia []Polaczenie
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" {
+// ParseConnections reads the output of "nmcli -t -f NAME,UUID,DEVICE,TYPE,STATE con show".
+func ParseConnections(output string) []Connection {
+	var connections []Connection
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		pola := strings.Split(linia, ":")
-		if len(pola) < 5 {
+		fields := strings.Split(line, ":")
+		if len(fields) < 5 {
 			continue
 		}
-		polaczenia = append(polaczenia, Polaczenie{
-			Nazwa: pola[0], UUID: pola[1], Urzadzenie: pola[2],
-			Typ: pola[3], Stan: pola[4],
+		connections = append(connections, Connection{
+			Name: fields[0], UUID: fields[1], Device: fields[2],
+			Type: fields[3], State: fields[4],
 		})
 	}
-	return polaczenia
+	return connections
 }
 
-// PolaczenieUrzadzenia zwraca profil aktywny na danym interfejsie.
-func PolaczenieUrzadzenia(polaczenia []Polaczenie, interfejs string) *Polaczenie {
-	for i := range polaczenia {
-		if polaczenia[i].Urzadzenie == interfejs {
-			return &polaczenia[i]
+// DeviceConnection returns the profile active on the given interface.
+func DeviceConnection(connections []Connection, iface string) *Connection {
+	for i := range connections {
+		if connections[i].Device == iface {
+			return &connections[i]
 		}
 	}
 	return nil
 }
 
-// ParsujProfil czyta wyjscie "nmcli -t -f <pola> con show <nazwa>".
+// ParseProfile reads the output of "nmcli -t -f <fields> con show <name>".
 //
-// Wartosc jest wszystkim po pierwszym dwukropku: adresy IPv6 zawieraja
-// dwukropki i podzial po kazdym z nich rozbilby je na kawalki.
-func ParsujProfil(wyjscie string) Profil {
-	profil := Profil{}
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		linia = strings.TrimSpace(linia)
-		podzial := strings.Index(linia, ":")
-		if podzial < 0 {
+// The value is everything after the first colon: IPv6 addresses contain
+// colons and splitting on each of them would break them into pieces.
+func ParseProfile(output string) Profile {
+	profile := Profile{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		split := strings.Index(line, ":")
+		if split < 0 {
 			continue
 		}
-		klucz, wartosc := linia[:podzial], strings.TrimSpace(linia[podzial+1:])
-		if wartosc == "--" {
-			wartosc = ""
+		key, value := line[:split], strings.TrimSpace(line[split+1:])
+		if value == "--" {
+			value = ""
 		}
-		switch klucz {
+		switch key {
 		case "connection.id":
-			profil.Polaczenie = wartosc
+			profile.Connection = value
 		case "connection.interface-name":
-			profil.Interfejs = wartosc
+			profile.Interface = value
 		case "ipv4.method":
-			profil.Metoda = wartosc
+			profile.Method = value
 		case "ipv4.addresses":
-			profil.Adresy = listaWartosci(wartosc)
+			profile.Addresses = valueList(value)
 		case "ipv4.gateway":
-			profil.Brama = wartosc
+			profile.Gateway = value
 		case "ipv4.dns":
-			profil.DNS = listaWartosci(wartosc)
+			profile.DNS = valueList(value)
 		case "ipv4.dns-search":
-			profil.DNSSearch = listaWartosci(wartosc)
+			profile.DNSSearch = valueList(value)
 		case "ipv4.ignore-auto-dns":
-			profil.IgnoreAutoDNS = wartosc == "yes"
+			profile.IgnoreAutoDNS = value == "yes"
 		case "ipv4.routes":
-			profil.Trasy = listaWartosci(wartosc)
+			profile.Routes = valueList(value)
 		case "802-3-ethernet.mtu":
-			profil.MTU = wartosc
+			profile.MTU = value
 		}
 	}
-	return profil
+	return profile
 }
 
-func listaWartosci(wartosc string) []string {
-	if wartosc == "" {
+func valueList(value string) []string {
+	if value == "" {
 		return nil
 	}
-	var wynik []string
-	for _, element := range strings.Split(wartosc, ",") {
+	var result []string
+	for _, element := range strings.Split(value, ",") {
 		element = strings.TrimSpace(element)
 		if element != "" {
-			wynik = append(wynik, element)
+			result = append(result, element)
 		}
 	}
-	return wynik
+	return result
 }
 
-// ArgumentyMTU sklada zmiane MTU profilu.
+// MTUArguments assembles the MTU change of a profile.
 //
-// Zmiana idzie przez profil, a nie przez "ip link set": wartosc ustawiona
-// wprost na urzadzeniu znika przy pierwszym przelaczeniu polaczenia, a
-// operator zobaczylby zmiane, ktora host zapomni po restarcie.
-func ArgumentyMTU(polaczenie, mtu string) ([][]string, error) {
-	if err := WalidujMTU(mtu); err != nil {
+// The change goes through the profile, not through "ip link set": a value
+// set directly on the device vanishes at the first connection switch, and
+// the operator would see a change the host forgets after a reboot.
+func MTUArguments(connection, mtu string) ([][]string, error) {
+	if err := ValidateMTU(mtu); err != nil {
 		return nil, err
 	}
 	return [][]string{
-		{SciezkaNmcli, "connection", "modify", polaczenie, "802-3-ethernet.mtu", mtu},
-		{SciezkaNmcli, "connection", "up", polaczenie},
+		{NmcliPath, "connection", "modify", connection, "802-3-ethernet.mtu", mtu},
+		{NmcliPath, "connection", "up", connection},
 	}, nil
 }
 
-// ArgumentyTras zapisuje pelna liste tras profilu.
+// RouteArguments writes the full route list of a profile.
 //
-// Lista jest stanem docelowym, a nie dopiskiem: operator widzial w planie
-// konkretny zestaw tras i to on ma zostac na hoscie.
-func ArgumentyTras(polaczenie string, trasy []string) ([][]string, error) {
-	for _, trasa := range trasy {
-		if err := WalidujTrase(trasa); err != nil {
+// The list is the desired state, not an addition: the operator saw a
+// specific set of routes in the plan and that is what is to stay on the
+// host.
+func RouteArguments(connection string, routes []string) ([][]string, error) {
+	for _, route := range routes {
+		if err := ValidateRoute(route); err != nil {
 			return nil, err
 		}
 	}
 	return [][]string{
-		{SciezkaNmcli, "connection", "modify", polaczenie, "ipv4.routes", strings.Join(trasy, ",")},
-		{SciezkaNmcli, "connection", "up", polaczenie},
+		{NmcliPath, "connection", "modify", connection, "ipv4.routes", strings.Join(routes, ",")},
+		{NmcliPath, "connection", "up", connection},
 	}, nil
 }
 
-// ArgumentyDNS sklada zmiane samego resolvera.
+// DNSArguments assembles the change of the resolver alone.
 //
-// Zmieniamy wylacznie pola DNS profilu: adres, brama i trasy zostaja takie,
-// jakie byly. Operator prosil o resolver, wiec dostaje resolver - a nie
-// przepisany caly profil, ktorego reszty nie ogladal.
-func ArgumentyDNS(polaczenie string, serwery, domeny []string, pomijajAuto bool) ([][]string, error) {
-	if polaczenie == "" {
-		return nil, fmt.Errorf("zmiana resolvera bez nazwy polaczenia")
+// Only the DNS fields of the profile are changed: the address, the gateway
+// and the routes stay as they were. The operator asked for the resolver, so
+// they get the resolver - not the whole profile rewritten, the rest of
+// which they did not view.
+func DNSArguments(connection string, servers, domains []string, ignoreAuto bool) ([][]string, error) {
+	if connection == "" {
+		return nil, fmt.Errorf("resolver change without a connection name")
 	}
-	// Resolver bez serwera nie rozwiaze niczego, a host bez rozwiazywania
-	// nazw traci katalog, Kerberosa i logowanie.
-	if len(serwery) == 0 {
-		return nil, fmt.Errorf("zmiana resolvera wymaga co najmniej jednego serwera")
+	// A resolver without a server resolves nothing, and a host without name
+	// resolution loses the directory, Kerberos and logins.
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("a resolver change requires at least one server")
 	}
-	for _, serwer := range serwery {
-		if err := WalidujAdresIP(serwer); err != nil {
-			return nil, fmt.Errorf("serwer DNS: %w", err)
+	for _, server := range servers {
+		if err := ValidateIPAddress(server); err != nil {
+			return nil, fmt.Errorf("DNS server: %w", err)
 		}
 	}
-	pomijaj := "no"
-	if pomijajAuto {
-		pomijaj = "yes"
+	ignore := "no"
+	if ignoreAuto {
+		ignore = "yes"
 	}
 	return [][]string{
-		{SciezkaNmcli, "connection", "modify", polaczenie,
-			"ipv4.dns", strings.Join(serwery, ","),
-			"ipv4.dns-search", strings.Join(domeny, ","),
-			"ipv4.ignore-auto-dns", pomijaj},
-		{SciezkaNmcli, "connection", "up", polaczenie},
+		{NmcliPath, "connection", "modify", connection,
+			"ipv4.dns", strings.Join(servers, ","),
+			"ipv4.dns-search", strings.Join(domains, ","),
+			"ipv4.ignore-auto-dns", ignore},
+		{NmcliPath, "connection", "up", connection},
 	}, nil
 }
 
-// ArgumentyProfilu sklada zapis calego profilu adresowego.
-func ArgumentyProfilu(profil Profil) ([][]string, error) {
-	if profil.Polaczenie == "" {
-		return nil, fmt.Errorf("profil bez nazwy polaczenia")
+// ProfileArguments assembles the write of the whole address profile.
+func ProfileArguments(profile Profile) ([][]string, error) {
+	if profile.Connection == "" {
+		return nil, fmt.Errorf("profile without a connection name")
 	}
-	switch profil.Metoda {
+	switch profile.Method {
 	case "auto", "manual", "disabled", "link-local", "shared":
 	default:
-		return nil, fmt.Errorf("nieobslugiwana metoda %q", profil.Metoda)
+		return nil, fmt.Errorf("unsupported method %q", profile.Method)
 	}
-	// Metoda manual bez adresu zostawilaby interfejs bez adresu, a wiec
-	// odcielaby host - to nie jest konfiguracja, tylko pomylka.
-	if profil.Metoda == "manual" && len(profil.Adresy) == 0 {
-		return nil, fmt.Errorf("metoda manual wymaga co najmniej jednego adresu")
+	// The manual method without an address would leave the interface
+	// without an address, and so cut the host off - that is not a
+	// configuration, it is a mistake.
+	if profile.Method == "manual" && len(profile.Addresses) == 0 {
+		return nil, fmt.Errorf("the manual method requires at least one address")
 	}
-	for _, adres := range profil.Adresy {
-		if err := WalidujAdres(adres); err != nil {
+	for _, address := range profile.Addresses {
+		if err := ValidateAddress(address); err != nil {
 			return nil, err
 		}
 	}
-	if profil.Brama != "" {
-		if err := WalidujAdresIP(profil.Brama); err != nil {
-			return nil, fmt.Errorf("brama: %w", err)
+	if profile.Gateway != "" {
+		if err := ValidateIPAddress(profile.Gateway); err != nil {
+			return nil, fmt.Errorf("gateway: %w", err)
 		}
 	}
-	for _, serwer := range profil.DNS {
-		if err := WalidujAdresIP(serwer); err != nil {
-			return nil, fmt.Errorf("serwer DNS: %w", err)
+	for _, server := range profile.DNS {
+		if err := ValidateIPAddress(server); err != nil {
+			return nil, fmt.Errorf("DNS server: %w", err)
 		}
 	}
-	for _, trasa := range profil.Trasy {
-		if err := WalidujTrase(trasa); err != nil {
+	for _, route := range profile.Routes {
+		if err := ValidateRoute(route); err != nil {
 			return nil, err
 		}
 	}
 
-	pomijaj := "no"
-	if profil.IgnoreAutoDNS {
-		pomijaj = "yes"
+	ignore := "no"
+	if profile.IgnoreAutoDNS {
+		ignore = "yes"
 	}
-	modyfikacja := []string{SciezkaNmcli, "connection", "modify", profil.Polaczenie,
-		"ipv4.method", profil.Metoda,
-		"ipv4.addresses", strings.Join(profil.Adresy, ","),
-		"ipv4.gateway", profil.Brama,
-		"ipv4.dns", strings.Join(profil.DNS, ","),
-		"ipv4.dns-search", strings.Join(profil.DNSSearch, ","),
-		"ipv4.ignore-auto-dns", pomijaj,
-		"ipv4.routes", strings.Join(profil.Trasy, ",")}
-	if profil.MTU != "" {
-		modyfikacja = append(modyfikacja, "802-3-ethernet.mtu", profil.MTU)
+	modification := []string{NmcliPath, "connection", "modify", profile.Connection,
+		"ipv4.method", profile.Method,
+		"ipv4.addresses", strings.Join(profile.Addresses, ","),
+		"ipv4.gateway", profile.Gateway,
+		"ipv4.dns", strings.Join(profile.DNS, ","),
+		"ipv4.dns-search", strings.Join(profile.DNSSearch, ","),
+		"ipv4.ignore-auto-dns", ignore,
+		"ipv4.routes", strings.Join(profile.Routes, ",")}
+	if profile.MTU != "" {
+		modification = append(modification, "802-3-ethernet.mtu", profile.MTU)
 	}
-	return [][]string{modyfikacja, {SciezkaNmcli, "connection", "up", profil.Polaczenie}}, nil
+	return [][]string{modification, {NmcliPath, "connection", "up", profile.Connection}}, nil
 }
 
-// WalidujMTU sprawdza wartosc MTU.
-func WalidujMTU(mtu string) error {
+// ValidateMTU checks an MTU value.
+func ValidateMTU(mtu string) error {
 	if mtu == MTUAuto {
 		return nil
 	}
-	wartosc, err := strconv.Atoi(mtu)
+	value, err := strconv.Atoi(mtu)
 	if err != nil {
-		return fmt.Errorf("MTU %q nie jest liczba ani wartoscia auto", mtu)
+		return fmt.Errorf("MTU %q is neither a number nor the value auto", mtu)
 	}
-	// Ponizej 1280 nie przejdzie IPv6, a ponizej 68 nie przejdzie IPv4.
-	// Gorna granica jest granica jadra dla ramek jumbo.
-	if wartosc < 1280 || wartosc > 65536 {
-		return fmt.Errorf("MTU %d jest poza zakresem 1280-65536", wartosc)
-	}
-	return nil
-}
-
-// WalidujAdres sprawdza adres z maska.
-func WalidujAdres(adres string) error {
-	if _, _, err := net.ParseCIDR(adres); err != nil {
-		return fmt.Errorf("adres %q nie jest adresem z maska", adres)
+	// Below 1280 IPv6 does not pass, and below 68 IPv4 does not. The upper
+	// bound is the kernel limit for jumbo frames.
+	if value < 1280 || value > 65536 {
+		return fmt.Errorf("MTU %d is outside the range 1280-65536", value)
 	}
 	return nil
 }
 
-// WalidujAdresIP sprawdza sam adres.
-func WalidujAdresIP(adres string) error {
-	if net.ParseIP(adres) == nil {
-		return fmt.Errorf("%q nie jest adresem IP", adres)
+// ValidateAddress checks an address with a mask.
+func ValidateAddress(address string) error {
+	if _, _, err := net.ParseCIDR(address); err != nil {
+		return fmt.Errorf("the address %q is not an address with a mask", address)
 	}
 	return nil
 }
 
-// WalidujTrase sprawdza trase w postaci "siec/maska [brama]".
-func WalidujTrase(trasa string) error {
-	pola := strings.Fields(trasa)
-	if len(pola) == 0 || len(pola) > 2 {
-		return fmt.Errorf("trasa %q ma miec postac \"siec/maska [brama]\"", trasa)
+// ValidateIPAddress checks a bare address.
+func ValidateIPAddress(address string) error {
+	if net.ParseIP(address) == nil {
+		return fmt.Errorf("%q is not an IP address", address)
 	}
-	if err := WalidujAdres(pola[0]); err != nil {
-		return fmt.Errorf("cel trasy: %w", err)
+	return nil
+}
+
+// ValidateRoute checks a route in the form "network/mask [gateway]".
+func ValidateRoute(route string) error {
+	fields := strings.Fields(route)
+	if len(fields) == 0 || len(fields) > 2 {
+		return fmt.Errorf("the route %q must have the form \"network/mask [gateway]\"", route)
 	}
-	if len(pola) == 2 {
-		if err := WalidujAdresIP(pola[1]); err != nil {
-			return fmt.Errorf("brama trasy: %w", err)
+	if err := ValidateAddress(fields[0]); err != nil {
+		return fmt.Errorf("route destination: %w", err)
+	}
+	if len(fields) == 2 {
+		if err := ValidateIPAddress(fields[1]); err != nil {
+			return fmt.Errorf("route gateway: %w", err)
 		}
 	}
 	return nil

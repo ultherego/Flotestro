@@ -1,27 +1,29 @@
-// Package ssh opisuje konfiguracje serwera sshd na hoscie.
+// Package ssh describes the sshd server configuration on a host.
 //
-// Modul dotyczy serwera, a nie kont: klucze uzytkownikow naleza do modulu
-// kont lokalnych. Rozdzielenie jest celowe, bo to dwie rozne decyzje - jedna
-// mowi, jak host wpuszcza, druga kogo.
+// The module concerns the server, not the accounts: user keys belong to the
+// local accounts module. The split is deliberate, because these are two
+// different decisions - one says how the host lets people in, the other
+// whom.
 package ssh
 
 import "time"
 
-// SciezkaDropIn to plik, ktorym zarzadza panel.
+// DropInPath is the file managed by the panel.
 //
-// Konfiguracja idzie do wlasnego pliku, a nie do sshd_config: plik glowny
-// nalezy do dystrybucji i administratora hosta, a jego przepisywanie kasuje
-// zmiany, ktorych nikt do panelu nie wprowadzal.
+// The configuration goes to a file of its own, not to sshd_config: the main
+// file belongs to the distribution and the host administrator, and
+// rewriting it wipes changes nobody entered in the panel.
 const (
-	KatalogDropIn = "/etc/ssh/sshd_config.d"
-	SciezkaDropIn = KatalogDropIn + "/90-flotestro.conf"
-	NaglowekPliku = "# Zarzadzane przez Flotestro. Recznych zmian nie zachowa kolejna operacja."
+	DropInDir  = "/etc/ssh/sshd_config.d"
+	DropInPath = DropInDir + "/90-flotestro.conf"
+	FileHeader = "# Managed by Flotestro. Manual changes will not survive the next operation."
 )
 
-// HostKey opisuje klucz hosta.
+// HostKey describes a host key.
 //
-// Trzymamy odcisk i metadane, nigdy klucz prywatny: panel nie ma powodu go
-// widziec, a jego kopia w bazie bylaby kopia tozsamosci hosta.
+// The fingerprint and metadata are kept, never the private key: the panel
+// has no reason to see it, and its copy in the database would be a copy of
+// the host's identity.
 type HostKey struct {
 	Type        string `json:"type"`
 	Bits        int    `json:"bits"`
@@ -29,16 +31,17 @@ type HostKey struct {
 	Path        string `json:"path"`
 }
 
-// Snapshot to konfiguracja obowiazujaca na hoscie.
+// Snapshot is the configuration in effect on the host.
 //
-// Wartosci pochodza z "sshd -T", a wiec z tego, co serwer naprawde uwaza za
-// swoja konfiguracje - nie z sumy plikow, ktora trzeba by skladac samemu.
+// The values come from "sshd -T", that is from what the server really
+// considers its configuration - not from a sum of files that would have to
+// be assembled by hand.
 type Snapshot struct {
 	Ports           []string `json:"ports,omitempty"`
 	ListenAddresses []string `json:"listen_addresses,omitempty"`
-	// PermitRootLogin, PasswordAuthentication i PubkeyAuthentication sa
-	// tekstem, bo sshd ma tu wiecej niz dwie wartosci: "prohibit-password"
-	// nie jest ani "yes", ani "no".
+	// PermitRootLogin, PasswordAuthentication and PubkeyAuthentication are
+	// text, because sshd has more than two values here: "prohibit-password"
+	// is neither "yes" nor "no".
 	PermitRootLogin        string    `json:"permit_root_login,omitempty"`
 	PasswordAuthentication string    `json:"password_authentication,omitempty"`
 	PubkeyAuthentication   string    `json:"pubkey_authentication,omitempty"`
@@ -50,22 +53,23 @@ type Snapshot struct {
 	DenyUsers              []string  `json:"deny_users,omitempty"`
 	DenyGroups             []string  `json:"deny_groups,omitempty"`
 	HostKeys               []HostKey `json:"host_keys,omitempty"`
-	// Managed opisuje plik panelu: jego tresc i to, czy w ogole istnieje.
+	// Managed describes the panel's file: its content and whether it exists
+	// at all.
 	Managed        string `json:"managed_config,omitempty"`
 	ManagedPath    string `json:"managed_path,omitempty"`
 	ManagedPresent bool   `json:"managed_present"`
-	// Unit nazywa jednostke systemd serwera. Debian ma ssh.service, Fedora
-	// sshd.service - a przeladowanie niewlasciwej nie robi nic.
+	// Unit names the server's systemd unit. Debian has ssh.service, Fedora
+	// sshd.service - and reloading the wrong one does nothing.
 	Unit              string    `json:"unit,omitempty"`
 	ObservedAt        time.Time `json:"observed_at"`
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// Ustawienia opisuja zmiane zlecona przez panel.
+// Settings describe a change ordered by the panel.
 //
-// Puste pole oznacza "nie zmieniaj": panel nie przepisuje calej konfiguracji
-// serwera, tylko te ustawienia, o ktore operator poprosil.
-type Ustawienia struct {
+// An empty field means "do not change": the panel does not rewrite the whole
+// server configuration, only the settings the operator asked for.
+type Settings struct {
 	Port                   string   `json:"port,omitempty"`
 	PermitRootLogin        string   `json:"permit_root_login,omitempty"`
 	PasswordAuthentication string   `json:"password_authentication,omitempty"`

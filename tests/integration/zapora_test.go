@@ -82,14 +82,14 @@ func TestRegulaOdcinajacaPanelJestOdrzucana(t *testing.T) {
 	zadanie, proby := h.runOperation(host.ID, map[string]any{
 		"action": "firewall.rule.ensure", "reason": powodZapory,
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": "test-blokady-panelu", "chain": "wejscie", "action": "drop",
+			"rule_id": "test-blokady-panelu", "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"8000-9000"}, "rollback_seconds": 60}},
 	}, 2*time.Minute)
 	if zadanie.State == "succeeded" {
 		t.Fatal("panel przyjal regule odcinajaca sam siebie")
 	}
 	komunikat := ostatniKomunikat(proby)
-	if !strings.Contains(komunikat, "kanal") && !strings.Contains(komunikat, "panelem") {
+	if !strings.Contains(komunikat, "management channel") && !strings.Contains(komunikat, "talks to the panel") {
 		t.Errorf("odmowa bez powodu: %q", komunikat)
 	}
 }
@@ -117,7 +117,7 @@ func TestCyklZyciaRegulyPanelu(t *testing.T) {
 	zadanie, proby := h.runOperation(host.ID, map[string]any{
 		"action": "firewall.rule.ensure", "reason": powodZapory,
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": nazwa, "chain": "wejscie", "action": "drop",
+			"rule_id": nazwa, "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"25"},
 			"sources": []string{"10.10.0.0/16"}, "comment": "test",
 			"rollback_seconds": 60, "expected_hash": stan.Hash}},
@@ -127,12 +127,12 @@ func TestCyklZyciaRegulyPanelu(t *testing.T) {
 	}
 	// Zmiana bez potwierdzonej lacznosci zostawialaby uzbrojony zegar, ktory
 	// za chwile cofnalby dzialajaca zmiane.
-	if !strings.Contains(ostatniKomunikat(proby), "wycofanie rozbrojone") {
+	if !strings.Contains(ostatniKomunikat(proby), "the rollback was disarmed") {
 		t.Errorf("zmiana bez potwierdzenia lacznosci: %s", ostatniKomunikat(proby))
 	}
 
 	po := regulaPanelu(t, h, host.ID, nazwa)
-	if po.Table != "flotestro" || po.Chain != "wejscie" {
+	if po.Table != "flotestro" || po.Chain != "input" {
 		t.Errorf("regula trafila poza tablice panelu: %+v", po)
 	}
 	if !strings.Contains(po.Text, "tcp dport 25") || !strings.Contains(po.Text, "drop") {
@@ -149,7 +149,7 @@ func TestCyklZyciaRegulyPanelu(t *testing.T) {
 	zadanie, proby = h.runOperation(host.ID, map[string]any{
 		"action": "firewall.rule.ensure", "reason": powodZapory,
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": "test-nieaktualny", "chain": "wejscie", "action": "drop",
+			"rule_id": "test-nieaktualny", "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"26"},
 			"sources":          []string{"10.10.0.0/16"},
 			"rollback_seconds": 60, "expected_hash": stan.Hash}},
@@ -169,15 +169,15 @@ func TestZlaRegulaNieDojezdzaDoHosta(t *testing.T) {
 		zmiana   map[string]any
 		dlaczego string
 	}{
-		{map[string]any{"rule_id": "Zla Nazwa", "chain": "wejscie", "action": "drop",
+		{map[string]any{"rule_id": "Zla Nazwa", "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"25"}}, "nazwa z odstepem"},
 		{map[string]any{"rule_id": "test", "chain": "POSTROUTING", "action": "drop",
 			"protocol": "tcp", "ports": []string{"25"}}, "cudzy lancuch"},
-		{map[string]any{"rule_id": "test", "chain": "wejscie", "action": "log",
+		{map[string]any{"rule_id": "test", "chain": "input", "action": "log",
 			"protocol": "tcp", "ports": []string{"25"}}, "nieznane dzialanie"},
-		{map[string]any{"rule_id": "test", "chain": "wejscie", "action": "drop"},
+		{map[string]any{"rule_id": "test", "chain": "input", "action": "drop"},
 			"regula bez zadnego dopasowania"},
-		{map[string]any{"rule_id": "test", "chain": "wejscie", "action": "drop",
+		{map[string]any{"rule_id": "test", "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"25"}, "comment": `x" accept #`},
 			"komentarz z cudzyslowem"},
 	}

@@ -171,7 +171,7 @@ func TestSprawdzenieFilesystemuWymagaOdmontowania(t *testing.T) {
 	if zadanie.State == "succeeded" {
 		t.Fatalf("panel sprawdzil zamontowany filesystem %s", zamontowane)
 	}
-	if !strings.Contains(ostatniKomunikat(proby), "zamontowany") {
+	if !strings.Contains(ostatniKomunikat(proby), "is mounted") {
 		t.Errorf("odmowa bez powodu: %q", ostatniKomunikat(proby))
 	}
 }
@@ -275,7 +275,7 @@ func TestOperacjaNiszczacaSprawdzaTozsamoscUrzadzenia(t *testing.T) {
 		t.Fatalf("host wyczyscil %s mimo niezgodnego rozmiaru", pusty.Path)
 	}
 	proby := h.attempts(zadanie.ID)
-	if !strings.Contains(ostatniKomunikat(proby), "bajtow") {
+	if !strings.Contains(ostatniKomunikat(proby), "bytes") {
 		t.Errorf("odmowa nie tlumaczy niezgodnosci: %q", ostatniKomunikat(proby))
 	}
 }

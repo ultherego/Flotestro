@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// Wyjscie przepisane z hosta floty testowej: interfejs fizyczny z adresem
-// statycznym i adresem link-local, oraz most dockera.
-const wyjscieInterfejsow = `[
+// Output copied from a host of the test fleet: a physical interface with a
+// static address and a link-local address, and the docker bridge.
+const interfacesOutput = `[
  {"ifindex":1,"ifname":"lo","flags":["LOOPBACK","UP","LOWER_UP"],"mtu":65536,"operstate":"UNKNOWN","link_type":"loopback","address":"00:00:00:00:00:00",
   "addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8,"scope":"host","valid_life_time":4294967295}]},
  {"ifindex":3,"ifname":"eth1","flags":["BROADCAST","MULTICAST","UP","LOWER_UP"],"mtu":1500,"operstate":"UP","link_type":"ether","address":"08:00:27:9d:b0:1a",
@@ -21,134 +21,137 @@ const wyjscieInterfejsow = `[
   "linkinfo":{"info_kind":"bridge"},
   "addr_info":[{"family":"inet","local":"172.17.0.1","prefixlen":16,"scope":"global","valid_life_time":4294967295}]}]`
 
-const wyjscieTras = `[
+const routesOutput = `[
  {"dst":"default","gateway":"10.0.2.2","dev":"eth0","protocol":"dhcp","prefsrc":"10.0.2.15","metric":1002,"flags":[]},
  {"dst":"192.168.56.0/24","dev":"eth1","protocol":"kernel","scope":"link","prefsrc":"192.168.56.30","flags":[]}]`
 
-func TestInterfejsyMajaAdresyZMaskami(t *testing.T) {
-	interfejsy, err := ParsujInterfejsy(wyjscieInterfejsow)
+func TestInterfacesHaveAddressesWithMasks(t *testing.T) {
+	interfaces, err := ParseInterfaces(interfacesOutput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(interfejsy) != 4 {
-		t.Fatalf("interfejsow = %d", len(interfejsy))
+	if len(interfaces) != 4 {
+		t.Fatalf("interfaces = %d", len(interfaces))
 	}
-	po := map[string]Interface{}
-	for _, interfejs := range interfejsy {
-		po[interfejs.Name] = interfejs
+	byName := map[string]Interface{}
+	for _, iface := range interfaces {
+		byName[iface.Name] = iface
 	}
 
-	// Adres bez maski nie mowi, jaka siec host uwaza za lokalna.
-	if po["eth1"].Addresses[0].Address != "192.168.56.30/24" {
-		t.Errorf("adres eth1 = %q", po["eth1"].Addresses[0].Address)
+	// An address without the mask does not say which network the host
+	// considers local.
+	if byName["eth1"].Addresses[0].Address != "192.168.56.30/24" {
+		t.Errorf("eth1 address = %q", byName["eth1"].Addresses[0].Address)
 	}
-	// Adres z DHCP zniknie razem z dzierzawa; adres staly nie.
-	if !po["eth1"].Addresses[0].Permanent {
-		t.Error("adres statyczny uznany za tymczasowy")
+	// A DHCP address vanishes with the lease; a permanent one does not.
+	if !byName["eth1"].Addresses[0].Permanent {
+		t.Error("a static address treated as temporary")
 	}
-	if po["eth0"].Addresses[0].Permanent {
-		t.Error("adres z DHCP uznany za staly")
+	if byName["eth0"].Addresses[0].Permanent {
+		t.Error("a DHCP address treated as permanent")
 	}
-	// Host z dockerem ma kilkanascie interfejsow i tylko czesc z nich cos
-	// znaczy dla operatora: rodzaj jest tym, co je rozroznia.
-	if po["docker0"].Kind != "bridge" || po["eth1"].Kind != "ethernet" || po["lo"].Kind != "loopback" {
-		t.Errorf("rodzaje = %q %q %q", po["docker0"].Kind, po["eth1"].Kind, po["lo"].Kind)
+	// A host with docker has a dozen interfaces and only some mean anything
+	// to the operator: the kind is what tells them apart.
+	if byName["docker0"].Kind != "bridge" || byName["eth1"].Kind != "ethernet" || byName["lo"].Kind != "loopback" {
+		t.Errorf("kinds = %q %q %q", byName["docker0"].Kind, byName["eth1"].Kind, byName["lo"].Kind)
 	}
-	// Stan "unknown" zostaje slowem: tak raportuja interfejsy wirtualne
-	// i nie wolno go zamieniac w "down".
-	if po["lo"].OperState != "unknown" {
-		t.Errorf("stan lo = %q", po["lo"].OperState)
+	// The state "unknown" stays the word: that is how virtual interfaces
+	// report and it must not be turned into "down".
+	if byName["lo"].OperState != "unknown" {
+		t.Errorf("lo state = %q", byName["lo"].OperState)
 	}
 }
 
-func TestTrasyZachowujaProtokolIMetryke(t *testing.T) {
-	trasy, err := ParsujTrasy(wyjscieTras, FamilyIPv4)
+func TestRoutesKeepProtocolAndMetric(t *testing.T) {
+	routes, err := ParseRoutes(routesOutput, FamilyIPv4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(trasy) != 2 {
-		t.Fatalf("tras = %d", len(trasy))
+	if len(routes) != 2 {
+		t.Fatalf("routes = %d", len(routes))
 	}
-	if trasy[0].Destination != "default" || trasy[0].Gateway != "10.0.2.2" ||
-		trasy[0].Protocol != "dhcp" || trasy[0].Metric != 1002 {
-		t.Errorf("trasa domyslna = %+v", trasy[0])
+	if routes[0].Destination != "default" || routes[0].Gateway != "10.0.2.2" ||
+		routes[0].Protocol != "dhcp" || routes[0].Metric != 1002 {
+		t.Errorf("default route = %+v", routes[0])
 	}
-	if trasy[1].Family != FamilyIPv4 {
-		t.Errorf("rodzina = %q", trasy[1].Family)
+	if routes[1].Family != FamilyIPv4 {
+		t.Errorf("family = %q", routes[1].Family)
 	}
 }
 
-// Kanal zarzadzania jest wskazywany po adresie, ktorym agent naprawde
-// rozmawia z panelem. Zgadywanie z pierwszej pozycji listy skonczyloby sie
-// zmiana interfejsu, przez ktory wlasnie przyszlo polecenie.
-func TestKanalZarzadzaniaWskazujeInterfejsPolaczenia(t *testing.T) {
-	interfejsy, err := ParsujInterfejsy(wyjscieInterfejsow)
+// The management channel is pointed at by the address the agent really
+// talks to the panel with. Guessing from the first position of the list
+// would end in changing the interface the order has just arrived through.
+func TestManagementChannelPointsAtConnectionInterface(t *testing.T) {
+	interfaces, err := ParseInterfaces(interfacesOutput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := Snapshot{Interfaces: interfejsy}
-	OznaczKanalZarzadzania(&snapshot, "192.168.56.30:48212")
+	snapshot := Snapshot{Interfaces: interfaces}
+	MarkManagementChannel(&snapshot, "192.168.56.30:48212")
 
 	if snapshot.ManagementInterface != "eth1" {
-		t.Errorf("interfejs zarzadzania = %q", snapshot.ManagementInterface)
+		t.Errorf("management interface = %q", snapshot.ManagementInterface)
 	}
 	if snapshot.ManagementAddress != "192.168.56.30/24" {
-		t.Errorf("adres zarzadzania = %q", snapshot.ManagementAddress)
+		t.Errorf("management address = %q", snapshot.ManagementAddress)
 	}
-	if !snapshot.Interfejs("eth1").Management || snapshot.Interfejs("eth0").Management {
-		t.Error("oznaczono niewlasciwy interfejs")
+	if !snapshot.InterfaceByName("eth1").Management || snapshot.InterfaceByName("eth0").Management {
+		t.Error("the wrong interface was marked")
 	}
 
-	// Adres spoza hosta nie moze oznaczyc niczego "na wszelki wypadek".
-	pusty := Snapshot{Interfaces: interfejsy}
-	OznaczKanalZarzadzania(&pusty, "10.9.9.9")
-	if pusty.ManagementInterface != "" {
-		t.Errorf("oznaczono interfejs dla obcego adresu: %q", pusty.ManagementInterface)
+	// An address not on the host must not mark anything "just in case".
+	empty := Snapshot{Interfaces: interfaces}
+	MarkManagementChannel(&empty, "10.9.9.9")
+	if empty.ManagementInterface != "" {
+		t.Errorf("an interface was marked for a foreign address: %q", empty.ManagementInterface)
 	}
 }
 
-func TestDaneZSysUzupelniajaLacze(t *testing.T) {
-	katalog := t.TempDir()
-	eth := filepath.Join(katalog, "eth1")
+func TestSysDataSupplementsLink(t *testing.T) {
+	dir := t.TempDir()
+	eth := filepath.Join(dir, "eth1")
 	if err := os.MkdirAll(eth, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(eth, "carrier"), []byte("1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Jadro zwraca -1 dla lacza bez nosnej. Predkosc nieznana ma zostac
-	// nieznana, a nie stac sie zerem.
+	// The kernel returns -1 for a link without a carrier. An unknown speed
+	// must stay unknown, not become zero.
 	if err := os.WriteFile(filepath.Join(eth, "speed"), []byte("-1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	interfejsy := []Interface{{Name: "eth1"}, {Name: "brak"}}
-	UzupelnijZSys(katalog, interfejsy)
+	interfaces := []Interface{{Name: "eth1"}, {Name: "missing"}}
+	SupplementFromSys(dir, interfaces)
 
-	if interfejsy[0].Carrier == nil || !*interfejsy[0].Carrier {
-		t.Errorf("nosna = %v", interfejsy[0].Carrier)
+	if interfaces[0].Carrier == nil || !*interfaces[0].Carrier {
+		t.Errorf("carrier = %v", interfaces[0].Carrier)
 	}
-	if interfejsy[0].SpeedMbps != nil {
-		t.Errorf("predkosc = %v", *interfejsy[0].SpeedMbps)
+	if interfaces[0].SpeedMbps != nil {
+		t.Errorf("speed = %v", *interfaces[0].SpeedMbps)
 	}
-	// Interfejs bez katalogu w /sys nie moze dostac wartosci udajacych fakt.
-	if interfejsy[1].Carrier != nil || interfejsy[1].SpeedMbps != nil {
-		t.Errorf("interfejs bez /sys = %+v", interfejsy[1])
+	// An interface without a directory in /sys must not get values
+	// pretending to be facts.
+	if interfaces[1].Carrier != nil || interfaces[1].SpeedMbps != nil {
+		t.Errorf("interface without /sys = %+v", interfaces[1])
 	}
 }
 
-// Host bez mechanizmu zapisu ma to powiedziec wprost, a nie milczec.
-func TestBrakAdapteraZapisuMaPowod(t *testing.T) {
-	if adapter := WykryjAdapter(func(string) bool { return false }); adapter != "" {
+// A host without a write mechanism is meant to say so directly, not stay
+// silent.
+func TestMissingWriteAdapterHasReason(t *testing.T) {
+	if adapter := DetectAdapter(func(string) bool { return false }); adapter != "" {
 		t.Errorf("adapter = %q", adapter)
 	}
-	if PowodBrakuZapisu("") == "" {
-		t.Error("brak adaptera bez powodu")
+	if ReadOnlyReason("") == "" {
+		t.Error("missing adapter without a reason")
 	}
-	if PowodBrakuZapisu(AdapterNetworkManager) != "" {
-		t.Error("host z adapterem podaje powod niedostepnosci")
+	if ReadOnlyReason(AdapterNetworkManager) != "" {
+		t.Error("a host with an adapter reports an unavailability reason")
 	}
-	obecne := map[string]bool{"/usr/bin/nmcli": true, "/run/NetworkManager": true}
-	if adapter := WykryjAdapter(func(s string) bool { return obecne[s] }); adapter != AdapterNetworkManager {
+	present := map[string]bool{"/usr/bin/nmcli": true, "/run/NetworkManager": true}
+	if adapter := DetectAdapter(func(s string) bool { return present[s] }); adapter != AdapterNetworkManager {
 		t.Errorf("adapter = %q", adapter)
 	}
 }

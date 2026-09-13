@@ -221,11 +221,11 @@ func checkCleanupList(action *helperv1.DockerActionRequest) string {
 // execution failed.
 func dockerErrorCode(err error) string {
 	switch {
-	case errors.Is(err, docker.ErrWUzyciu):
+	case errors.Is(err, docker.ErrInUse):
 		return ErrorDockerInUse
-	case errors.Is(err, docker.ErrSiecWbudowana):
+	case errors.Is(err, docker.ErrPredefinedNetwork):
 		return ErrorDockerPredefined
-	case errors.Is(err, docker.ErrNieIstnieje):
+	case errors.Is(err, docker.ErrNotFound):
 		return ErrorDockerObjectMissing
 	}
 	return ErrorExecFailed

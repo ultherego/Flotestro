@@ -8,191 +8,194 @@ import (
 	"time"
 )
 
-func TestDefinicjaWalidujePodstawy(t *testing.T) {
-	podstawa := Definicja{
-		ID: "nocna", Tool: NarzedzieRestic, Repository: "/srv/backup",
+func TestDefinitionValidatesBasics(t *testing.T) {
+	base := Definition{
+		ID: "nightly", Tool: ToolRestic, Repository: "/srv/backup",
 		Paths: []string{"/etc", "/var/lib/app"}, KeepLast: 7,
 	}
-	if err := podstawa.Waliduj(); err != nil {
-		t.Fatalf("poprawna definicja odrzucona: %v", err)
+	if err := base.Validate(); err != nil {
+		t.Fatalf("a valid definition rejected: %v", err)
 	}
 
-	zle := map[string]Definicja{
-		"bez identyfikatora":         {Tool: NarzedzieRestic, Repository: "/srv/backup"},
-		"identyfikator z ukosnikiem": {ID: "a/b", Tool: NarzedzieRestic, Repository: "/srv/backup"},
-		"nieznane narzedzie":         {ID: "nocna", Tool: "tar", Repository: "/srv/backup"},
-		"bez repozytorium":           {ID: "nocna", Tool: NarzedzieRestic},
-		"sciezka wzgledna":           {ID: "nocna", Tool: NarzedzieRestic, Repository: "/srv/backup", Paths: []string{"etc"}},
-		"runbook bez nazwy":          {ID: "nocna", Tool: NarzedzieRunbook},
-		"runbook z ukosnikiem":       {ID: "nocna", Tool: NarzedzieRunbook, Runbook: "../etc/passwd"},
+	bad := map[string]Definition{
+		"without an identifier":   {Tool: ToolRestic, Repository: "/srv/backup"},
+		"identifier with a slash": {ID: "a/b", Tool: ToolRestic, Repository: "/srv/backup"},
+		"unknown tool":            {ID: "nightly", Tool: "tar", Repository: "/srv/backup"},
+		"without a repository":    {ID: "nightly", Tool: ToolRestic},
+		"relative path":           {ID: "nightly", Tool: ToolRestic, Repository: "/srv/backup", Paths: []string{"etc"}},
+		"runbook without a name":  {ID: "nightly", Tool: ToolRunbook},
+		"runbook with a slash":    {ID: "nightly", Tool: ToolRunbook, Runbook: "../etc/passwd"},
 	}
-	for nazwa, definicja := range zle {
-		if err := definicja.Waliduj(); err == nil {
-			t.Errorf("%s: definicja zostala przyjeta", nazwa)
+	for name, definition := range bad {
+		if err := definition.Validate(); err == nil {
+			t.Errorf("%s: the definition was accepted", name)
 		}
 	}
 }
 
-func TestWalidujOdtworzenieWymagaCeluIPlanu(t *testing.T) {
-	dobre := Odtworzenie{SnapshotID: "abc123", Target: "/srv/odtworzenie", Overwrite: NadpisaniePuste}
-	if err := WalidujOdtworzenie(dobre); err != nil {
-		t.Fatalf("poprawne odtworzenie odrzucone: %v", err)
+func TestValidateRestoreRequiresTargetAndPlan(t *testing.T) {
+	good := Restore{SnapshotID: "abc123", Target: "/srv/restore", Overwrite: OverwriteEmpty}
+	if err := ValidateRestore(good); err != nil {
+		t.Fatalf("a valid restore rejected: %v", err)
 	}
 
-	// Odtworzenie wprost do systemu plikow hosta rozpakowuje stary stan na
-	// dzialajacym systemie - i to jest inna operacja niz odtworzenie kopii.
-	// Osobno stoi prywatny /tmp pomocnika: tam operacja konczy sie sukcesem
-	// i pustym katalogiem, czyli najgorsza z mozliwych odpowiedzi.
-	for _, cel := range []string{
+	// A restore straight into the host filesystem unpacks an old state onto
+	// a running system - and that is a different operation than restoring
+	// a copy. The helper's private /tmp stands apart: there the operation
+	// ends in a success and an empty directory, the worst possible answer.
+	for _, target := range []string{
 		"/", "/etc", "/etc/nginx", "/usr/local", "/var", "/home", "/root",
-		"/tmp/kopia", "/var/tmp/kopia", "/var/lib/flotestro/dane",
+		"/tmp/copy", "/var/tmp/copy", "/var/lib/flotestro/data",
 	} {
-		zle := dobre
-		zle.Target = cel
-		if err := WalidujOdtworzenie(zle); err == nil {
-			t.Errorf("odtworzenie do %s zostalo przyjete", cel)
+		bad := good
+		bad.Target = target
+		if err := ValidateRestore(bad); err == nil {
+			t.Errorf("a restore into %s was accepted", target)
 		}
 	}
-	// Wnetrze katalogow domowych i /srv jest zwyczajnym miejscem na dane.
-	for _, cel := range []string{"/home/anna/kopia", "/srv/odtworzenie", "/var/lib/kopie"} {
-		dobry := dobre
-		dobry.Target = cel
-		if err := WalidujOdtworzenie(dobry); err != nil {
-			t.Errorf("odtworzenie do %s odrzucone: %v", cel, err)
+	// The interior of home directories and /srv is an ordinary place for
+	// data.
+	for _, target := range []string{"/home/anna/copy", "/srv/restore", "/var/lib/copies"} {
+		ok := good
+		ok.Target = target
+		if err := ValidateRestore(ok); err != nil {
+			t.Errorf("a restore into %s rejected: %v", target, err)
 		}
 	}
-	// Bez planu nadpisania skutek operacji jest nieznany.
-	bezPlanu := dobre
-	bezPlanu.Overwrite = ""
-	if err := WalidujOdtworzenie(bezPlanu); err == nil {
-		t.Error("odtworzenie bez planu nadpisania zostalo przyjete")
+	// Without an overwrite plan the effect of the operation is unknown.
+	noPlan := good
+	noPlan.Overwrite = ""
+	if err := ValidateRestore(noPlan); err == nil {
+		t.Error("a restore without an overwrite plan was accepted")
 	}
-	bezKopii := dobre
-	bezKopii.SnapshotID = ""
-	if err := WalidujOdtworzenie(bezKopii); err == nil {
-		t.Error("odtworzenie bez wskazania kopii zostalo przyjete")
+	noCopy := good
+	noCopy.SnapshotID = ""
+	if err := ValidateRestore(noCopy); err == nil {
+		t.Error("a restore without naming a copy was accepted")
 	}
-	wzgledny := dobre
-	wzgledny.Target = "var/tmp/x"
-	if err := WalidujOdtworzenie(wzgledny); err == nil {
-		t.Error("odtworzenie do sciezki wzglednej zostalo przyjete")
+	relative := good
+	relative.Target = "var/tmp/x"
+	if err := ValidateRestore(relative); err == nil {
+		t.Error("a restore into a relative path was accepted")
 	}
-	wyzej := dobre
-	wyzej.Target = "/var/tmp/../../etc"
-	if err := WalidujOdtworzenie(wyzej); err == nil {
-		t.Error("cel wychodzacy poza katalog zostal przyjety")
+	upwards := good
+	upwards.Target = "/var/tmp/../../etc"
+	if err := ValidateRestore(upwards); err == nil {
+		t.Error("a target leaving the directory was accepted")
 	}
 }
 
-func TestSprawdzCelPilnujePlanuNadpisania(t *testing.T) {
-	katalog := t.TempDir()
-	pusty := filepath.Join(katalog, "pusty")
-	if err := os.Mkdir(pusty, 0o700); err != nil {
+func TestCheckTargetGuardsOverwritePlan(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty")
+	if err := os.Mkdir(empty, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := SprawdzCel(Odtworzenie{Target: pusty, Overwrite: NadpisaniePuste}); err != nil {
-		t.Fatalf("pusty katalog odrzucony: %v", err)
+	if err := CheckTarget(Restore{Target: empty, Overwrite: OverwriteEmpty}); err != nil {
+		t.Fatalf("an empty directory rejected: %v", err)
 	}
 
-	zajety := filepath.Join(katalog, "zajety")
-	if err := os.Mkdir(zajety, 0o700); err != nil {
+	busy := filepath.Join(dir, "busy")
+	if err := os.Mkdir(busy, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(zajety, "plik"), []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(busy, "file"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := SprawdzCel(Odtworzenie{Target: zajety, Overwrite: NadpisaniePuste}); err == nil {
-		t.Fatal("odtworzenie do niepustego katalogu przeszlo mimo planu 'pusty'")
+	if err := CheckTarget(Restore{Target: busy, Overwrite: OverwriteEmpty}); err == nil {
+		t.Fatal("a restore into a non-empty directory passed despite the 'empty' plan")
 	}
-	if err := SprawdzCel(Odtworzenie{Target: zajety, Overwrite: NadpisanieDozwolone}); err != nil {
-		t.Fatalf("odtworzenie z jawna zgoda na nadpisanie odrzucone: %v", err)
+	if err := CheckTarget(Restore{Target: busy, Overwrite: OverwriteAllowed}); err != nil {
+		t.Fatalf("a restore with explicit consent to overwrite rejected: %v", err)
 	}
 
-	// Katalogu nie tworzymy w polowie drzewa: literowka nie moze zalozyc
-	// katalogu w losowym miejscu.
-	if err := SprawdzCel(Odtworzenie{
-		Target: filepath.Join(katalog, "nie", "ma", "takiego"), Overwrite: NadpisaniePuste,
+	// The directory is not created half-way down the tree: a typo must not
+	// create a directory in a random place.
+	if err := CheckTarget(Restore{
+		Target: filepath.Join(dir, "no", "such", "thing"), Overwrite: OverwriteEmpty,
 	}); err == nil {
-		t.Fatal("cel z nieistniejacym rodzicem zostal przyjety")
+		t.Fatal("a target with a non-existent parent was accepted")
 	}
 }
 
-func TestZaslonUsuwaPoswiadczeniaZWyjscia(t *testing.T) {
-	wyjscie := "repository /srv/backup opened with password tajne-haslo-repozytorium\n" +
-		"pushing to https://uzytkownik:tajne-haslo-repozytorium@backup.example.test/repo\n"
-	zaslonione := Zaslon(wyjscie, [][]byte{[]byte("tajne-haslo-repozytorium")})
-	if strings.Contains(zaslonione, "tajne-haslo-repozytorium") {
-		t.Fatalf("haslo zostalo w wyjsciu:\n%s", zaslonione)
+func TestMaskRemovesCredentialsFromOutput(t *testing.T) {
+	output := "repository /srv/backup opened with password secret-repository-password\n" +
+		"pushing to https://user:secret-repository-password@backup.example.test/repo\n"
+	masked := Mask(output, [][]byte{[]byte("secret-repository-password")})
+	if strings.Contains(masked, "secret-repository-password") {
+		t.Fatalf("the password stayed in the output:\n%s", masked)
 	}
-	if !strings.Contains(zaslonione, "https://uzytkownik:[zasloniete]@backup.example.test/repo") {
-		t.Fatalf("adres z poswiadczeniami nie zostal zasloniety:\n%s", zaslonione)
+	if !strings.Contains(masked, "https://user:[masked]@backup.example.test/repo") {
+		t.Fatalf("the address with credentials was not masked:\n%s", masked)
 	}
 
-	// Poswiadczenia w adresie zaslaniamy takze wtedy, gdy panel ich nie zna:
-	// haslo moze byc wpisane w sam adres repozytorium.
-	nieznane := Zaslon("https://user:sekret-z-adresu@host/repo", nil)
-	if strings.Contains(nieznane, "sekret-z-adresu") {
-		t.Fatalf("haslo z adresu zostalo w wyjsciu: %s", nieznane)
+	// Credentials in an address are masked also when the panel does not
+	// know them: the password may be written into the repository address
+	// itself.
+	unknown := Mask("https://user:secret-from-address@host/repo", nil)
+	if strings.Contains(unknown, "secret-from-address") {
+		t.Fatalf("the password from the address stayed in the output: %s", unknown)
 	}
 }
 
-func TestOgraniczZostawiaKoniecWyjscia(t *testing.T) {
-	// Koniec wyjscia jest wazniejszy niz poczatek: tam sa bledy
-	// i podsumowanie operacji.
-	dlugie := strings.Repeat("a", MaksymalneWyjscie) + "KONIEC"
-	przyciete := Ogranicz(dlugie)
-	if len(przyciete) > MaksymalneWyjscie+64 {
-		t.Fatalf("wyjscie po przycieciu ma %d bajtow", len(przyciete))
+func TestLimitKeepsEndOfOutput(t *testing.T) {
+	// The end of the output matters more than the beginning: the errors
+	// and the operation summary are there.
+	long := strings.Repeat("a", MaxOutput) + "END"
+	trimmed := Limit(long)
+	if len(trimmed) > MaxOutput+64 {
+		t.Fatalf("the output after trimming has %d bytes", len(trimmed))
 	}
-	if !strings.HasSuffix(przyciete, "KONIEC") {
-		t.Fatal("przyciete wyjscie nie konczy sie tam, gdzie oryginal")
-	}
-}
-
-func TestOstatniUdanyBierzeNajnowszaKopie(t *testing.T) {
-	teraz := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
-	snapshoty := []Snapshot{
-		{ID: "a", Time: teraz.Add(-72 * time.Hour)},
-		{ID: "c", Time: teraz.Add(-2 * time.Hour)},
-		{ID: "b", Time: teraz.Add(-24 * time.Hour)},
-	}
-	PosortujSnapshoty(snapshoty)
-	if snapshoty[0].ID != "a" || snapshoty[2].ID != "c" {
-		t.Fatalf("kopie posortowane jako %+v", snapshoty)
-	}
-	ostatni := OstatniUdany(snapshoty)
-	if ostatni == nil || !ostatni.Equal(teraz.Add(-2*time.Hour)) {
-		t.Fatalf("ostatnia kopia = %v", ostatni)
-	}
-	// Repozytorium bez kopii nie ma daty ostatniej kopii - i to nie jest
-	// data zerowa, tylko jej brak.
-	if OstatniUdany(nil) != nil {
-		t.Fatal("puste repozytorium dostalo date ostatniej kopii")
+	if !strings.HasSuffix(trimmed, "END") {
+		t.Fatal("the trimmed output does not end where the original does")
 	}
 }
 
-func TestWalidujSrodowiskoPilnujeNazwZmiennych(t *testing.T) {
-	if err := WalidujSrodowisko([]string{"AWS_ACCESS_KEY_ID", "B2_ACCOUNT_KEY"}); err != nil {
-		t.Fatalf("poprawne nazwy odrzucone: %v", err)
+func TestLastSuccessTakesNewestCopy(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	snapshots := []Snapshot{
+		{ID: "a", Time: now.Add(-72 * time.Hour)},
+		{ID: "c", Time: now.Add(-2 * time.Hour)},
+		{ID: "b", Time: now.Add(-24 * time.Hour)},
 	}
-	for _, nazwa := range []string{"", "male", "ZE SPACJA", "PATH=x", "A;B"} {
-		if err := WalidujSrodowisko([]string{nazwa}); err == nil {
-			t.Errorf("nazwa %q zostala przyjeta", nazwa)
+	SortSnapshots(snapshots)
+	if snapshots[0].ID != "a" || snapshots[2].ID != "c" {
+		t.Fatalf("copies sorted as %+v", snapshots)
+	}
+	last := LastSuccess(snapshots)
+	if last == nil || !last.Equal(now.Add(-2*time.Hour)) {
+		t.Fatalf("last copy = %v", last)
+	}
+	// A repository without copies has no last copy date - and that is not
+	// a zero date, only its absence.
+	if LastSuccess(nil) != nil {
+		t.Fatal("an empty repository got a last copy date")
+	}
+}
+
+func TestValidateEnvironmentGuardsVariableNames(t *testing.T) {
+	if err := ValidateEnvironment([]string{"AWS_ACCESS_KEY_ID", "B2_ACCOUNT_KEY"}); err != nil {
+		t.Fatalf("valid names rejected: %v", err)
+	}
+	for _, name := range []string{"", "lower", "WITH SPACE", "PATH=x", "A;B"} {
+		if err := ValidateEnvironment([]string{name}); err == nil {
+			t.Errorf("the name %q was accepted", name)
 		}
 	}
 }
 
-func TestRunbookOdmawiaSkryptowiZapisywalnemuPozaRootem(t *testing.T) {
+func TestRunbookRefusesScriptWritableOutsideRoot(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("test sprawdza odmowe dla cudzego pliku; jako root kazdy plik jest wlasny")
+		t.Skip("the test checks the refusal for a foreign file; as root every file is our own")
 	}
 	runbook := &Runbook{}
-	// Nazwa spoza wzorca odpada bez dotykania dysku.
-	if _, err := runbook.Sciezka("../../etc/shadow"); err == nil {
-		t.Fatal("nazwa wychodzaca z katalogu zostala przyjeta")
+	// A name outside the pattern falls off without touching the disk.
+	if _, err := runbook.Path("../../etc/shadow"); err == nil {
+		t.Fatal("a name leaving the directory was accepted")
 	}
-	// Plik, ktorego nie ma, tez jest odmowa - panel nie tworzy runbookow.
-	if _, err := runbook.Sciezka("na-pewno-nie-ma-takiego"); err == nil {
-		t.Fatal("nieistniejacy runbook zostal przyjety")
+	// A file that does not exist is a refusal too - the panel does not
+	// create runbooks.
+	if _, err := runbook.Path("surely-no-such-thing"); err == nil {
+		t.Fatal("a non-existent runbook was accepted")
 	}
 }

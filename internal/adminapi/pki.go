@@ -9,11 +9,11 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handlePKIStatus opisuje zbior CA floty wraz z liczba hostow, ktore nadal
-// maja certyfikat wydany kazdym z nich.
+// handlePKIStatus describes the set of fleet CAs together with the number
+// of hosts that still have a certificate issued by each of them.
 //
-// Bez tej liczby wycofanie CA byloby zgadywaniem: operator nie wiedzialby,
-// ilu hostom odbiera dostep.
+// Without this number retiring a CA would be guessing: the operator would
+// not know how many hosts they take access away from.
 func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPKIRead, authz.GlobalScope, "pki", ""); !ok {
 		return
@@ -23,46 +23,47 @@ func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uzycie, err := s.hosts.CertificateIssuers(r.Context())
+	usage, err := s.hosts.CertificateIssuers(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 
-	lista := make([]map[string]any, 0)
+	list := make([]map[string]any, 0)
 	for _, ca := range s.trust.Authorities() {
-		wpis := map[string]any{
+		entry := map[string]any{
 			"subject": ca.Subject, "serial": ca.Serial, "fingerprint": ca.Fingerprint,
 			"not_before": ca.NotBefore, "not_after": ca.NotAfter, "state": ca.State,
-			"hosts_using": uzycie[ca.Subject+" "+ca.Serial],
+			"hosts_using": usage[ca.Subject+" "+ca.Serial],
 		}
 		if ca.State == "pending" {
-			// Przy CA przygotowanym liczy sie co innego niz liczba hostow,
-			// ktore go uzywaja: ile hostow jeszcze go nie zna.
-			brakujace, err := s.hosts.HostsWithoutCertificateSince(r.Context(), ca.PreparedAt)
+			// For a prepared CA something else counts than the number of hosts
+			// using it: how many hosts do not know it yet.
+			missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), ca.PreparedAt)
 			if err != nil {
 				s.fail(w, err)
 				return
 			}
-			wpis["prepared_at"] = ca.PreparedAt
-			wpis["hosts_missing"] = brakujace
-			wpis["ready_to_activate"] = brakujace == 0
+			entry["prepared_at"] = ca.PreparedAt
+			entry["hosts_missing"] = missing
+			entry["ready_to_activate"] = missing == 0
 		}
-		lista = append(lista, wpis)
+		list = append(list, entry)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authorities": lista})
+	writeJSON(w, http.StatusOK, map[string]any{"authorities": list})
 }
 
 type pkiRequest struct {
 	Reason string `json:"reason"`
 }
 
-// handlePrepareCA tworzy nowe CA floty i wlacza je do zbioru zaufania,
-// jeszcze bez prawa podpisywania.
+// handlePrepareCA creates a new fleet CA and adds it to the trust set,
+// without the right to sign yet.
 //
-// To pierwsza z dwoch faz wymiany. Nowe CA trafia do bundla, ktory agent
-// dostaje przy odnowieniu certyfikatu, wiec flota poznaje je sama - bez
-// osobnej dystrybucji i bez okna, w ktorym host nie ufa panelowi.
+// This is the first of the two rotation phases. The new CA goes into the
+// bundle the agent receives at certificate renewal, so the fleet learns it
+// on its own - without a separate distribution and without a window in
+// which a host does not trust the panel.
 func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.pkiActor(w, r)
 	if !ok {
@@ -73,12 +74,12 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	dowod, ok := s.requireStepUp(w, r, actor, request.Reason, "pki.ca.prepare", "pki", "")
+	evidence, ok := s.requireStepUp(w, r, actor, request.Reason, "pki.ca.prepare", "pki", "")
 	if !ok {
 		return
 	}
 
-	nowe, err := s.trust.Prepare()
+	prepared, err := s.trust.Prepare()
 	if err != nil {
 		problem(w, http.StatusConflict, "prepare_failed", err.Error())
 		return
@@ -86,23 +87,24 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
-		Action: "pki.ca.prepare", TargetType: "pki", TargetID: nowe.Fingerprint,
+		Action: "pki.ca.prepare", TargetType: "pki", TargetID: prepared.Fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
-			"serial": nowe.Serial, "not_after": nowe.NotAfter,
-		}, dowod),
+			"serial": prepared.Serial, "not_after": prepared.NotAfter,
+		}, evidence),
 	})
-	s.log.Warn("przygotowano nowe CA floty; przejmie podpisywanie dopiero po zatwierdzeniu",
-		"serial", nowe.Serial)
+	s.log.Warn("a new fleet CA was prepared; it takes over signing only after approval",
+		"serial", prepared.Serial)
 
-	writeJSON(w, http.StatusCreated, nowe)
+	writeJSON(w, http.StatusCreated, prepared)
 }
 
-// handleActivateCA przekazuje podpisywanie przygotowanemu CA.
+// handleActivateCA hands signing over to the prepared CA.
 //
-// Panel odmawia, dopoki istnieje host, ktory nie dostal jeszcze nowego CA.
-// Taki host po restarcie panelu nie uznalby certyfikatu serwera i wypadlby
-// z floty - a wymiana CA ma byc niewidoczna dla operacji.
+// The panel refuses while a host exists that has not received the new CA
+// yet. Such a host would not accept the server certificate after a panel
+// restart and would drop out of the fleet - and a CA rotation is meant to
+// be invisible to operations.
 func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.pkiActor(w, r)
 	if !ok {
@@ -113,35 +115,35 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	dowod, ok := s.requireStepUp(w, r, actor, request.Reason, "pki.ca.activate", "pki", "")
+	evidence, ok := s.requireStepUp(w, r, actor, request.Reason, "pki.ca.activate", "pki", "")
 	if !ok {
 		return
 	}
 
-	pending, przygotowaneO := s.trust.Pending()
+	pending, preparedAt := s.trust.Pending()
 	if pending == nil {
 		problem(w, http.StatusConflict, "no_pending_ca", "no CA is prepared for handover")
 		return
 	}
-	brakujace, err := s.hosts.HostsWithoutCertificateSince(r.Context(), przygotowaneO)
+	missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), preparedAt)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if brakujace > 0 {
+	if missing > 0 {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor.Subject,
 			Action: "pki.ca.activate", TargetType: "pki", TargetID: "",
 			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
-			Detail: map[string]any{"reason": "hosts_missing_ca", "hosts_missing": brakujace},
+			Detail: map[string]any{"reason": "hosts_missing_ca", "hosts_missing": missing},
 		})
 		problem(w, http.StatusConflict, "hosts_missing_ca", fmt.Sprintf(
 			"%d hosts do not have the new CA yet; wait for their certificates to renew",
-			brakujace))
+			missing))
 		return
 	}
 
-	aktywne, err := s.trust.Activate()
+	active, err := s.trust.Activate()
 	if err != nil {
 		problem(w, http.StatusConflict, "activate_failed", err.Error())
 		return
@@ -149,20 +151,20 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
-		Action: "pki.ca.activate", TargetType: "pki", TargetID: aktywne.Fingerprint,
+		Action: "pki.ca.activate", TargetType: "pki", TargetID: active.Fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
-			"serial": aktywne.Serial, "not_after": aktywne.NotAfter,
-		}, dowod),
+			"serial": active.Serial, "not_after": active.NotAfter,
+		}, evidence),
 	})
-	// Certyfikat serwera pochodzi jeszcze od poprzedniego CA; nowy powstanie
-	// przy najblizszym starcie panelu i bedzie uznany przez cala flote.
-	s.log.Warn("nowe CA floty przejelo podpisywanie", "serial", aktywne.Serial)
+	// The server certificate still comes from the previous CA; a new one is
+	// made at the next panel start and is accepted by the whole fleet.
+	s.log.Warn("the new fleet CA took over signing", "serial", active.Serial)
 
-	writeJSON(w, http.StatusOK, aktywne)
+	writeJSON(w, http.StatusOK, active)
 }
 
-// pkiActor sprawdza uprawnienie i dostepnosc modulu PKI.
+// pkiActor checks the permission and the availability of the PKI module.
 func (s *Server) pkiActor(w http.ResponseWriter, r *http.Request) (authz.Principal, bool) {
 	actor, ok := s.authorize(w, r, authz.PermPKIRotate, authz.GlobalScope, "pki", "")
 	if !ok {
@@ -175,7 +177,7 @@ func (s *Server) pkiActor(w http.ResponseWriter, r *http.Request) (authz.Princip
 	return actor, true
 }
 
-// handleRetireCA usuwa wycofane CA ze zbioru zaufania.
+// handleRetireCA removes a retired CA from the trust set.
 func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.pkiActor(w, r)
 	if !ok {
@@ -183,32 +185,32 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 	}
 	fingerprint := r.PathValue("fingerprint")
 
-	dowod, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
+	evidence, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
 		"pki.ca.retire", "pki", fingerprint)
 	if !ok {
 		return
 	}
 
-	uzycie, err := s.hosts.CertificateIssuers(r.Context())
+	usage, err := s.hosts.CertificateIssuers(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	// Liczbe hostow bierzemy z bazy, a nie z zadania: operator nie moze
-	// obejsc zabezpieczenia, podajac wlasna liczbe.
-	hostow := 0
+	// The host count is taken from the database, not from the request: the
+	// operator must not bypass the safeguard by giving their own number.
+	hostCount := 0
 	for _, ca := range s.trust.Authorities() {
 		if ca.Fingerprint == fingerprint {
-			hostow = uzycie[ca.Subject+" "+ca.Serial]
+			hostCount = usage[ca.Subject+" "+ca.Serial]
 		}
 	}
 
-	if err := s.trust.Retire(fingerprint, hostow); err != nil {
+	if err := s.trust.Retire(fingerprint, hostCount); err != nil {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor.Subject,
 			Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
 			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
-			Detail: map[string]any{"reason": err.Error(), "hosts_using": hostow},
+			Detail: map[string]any{"reason": err.Error(), "hosts_using": hostCount},
 		})
 		problem(w, http.StatusConflict, "ca_in_use", err.Error())
 		return
@@ -218,7 +220,7 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: withStepUp(map[string]any{}, dowod),
+		Detail: withStepUp(map[string]any{}, evidence),
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

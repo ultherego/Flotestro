@@ -9,56 +9,59 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// Operacje o najwiekszym wplywie wymagaja swiezego uwierzytelnienia i podania
-// powodu. Chodzi o zmiany, ktore przestawiaja same reguly dostepu: mapowanie
-// grup na role, nadanie uprawnien tozsamosci, globalne reguly katalogu.
+// The highest-impact operations require fresh authentication and a reason.
+// These are the changes that move the access rules themselves: mapping
+// groups to roles, granting permissions to a principal, global directory
+// rules.
 //
-// Panel nie realizuje MFA i nie udaje, ze je zna. MFA nalezy do dostawcy
-// tozsamosci; panel sprawdza wylacznie, czy dostal zadeklarowany poziom
-// uwierzytelnienia (acr) i czy uwierzytelnienie jest swieze. Gdy instalacja
-// nie zdefiniowala poziomu, zostaje sama swiezosc - i tak jest to zapisane
-// w audycie, zeby nikt nie odczytal tego jako potwierdzenia MFA.
+// The panel does not implement MFA and does not pretend to know it. MFA
+// belongs to the identity provider; the panel checks only whether it got
+// the declared authentication level (acr) and whether the authentication is
+// fresh. When the installation defined no level, freshness alone remains -
+// and that is how it is written in the audit log, so nobody reads it as an
+// MFA confirmation.
 type stepUpPolicy struct {
-	// MaxAge jest dopuszczalnym wiekiem uwierzytelnienia. Zero wylacza
-	// wymaganie swiezosci.
+	// MaxAge is the allowed authentication age. Zero disables the freshness
+	// requirement.
 	MaxAge time.Duration
-	// ACR jest wymaganym poziomem uwierzytelnienia. Puste oznacza, ze
-	// instalacja go nie zdefiniowala.
+	// ACR is the required authentication level. Empty means the
+	// installation did not define it.
 	ACR string
 }
 
 const minimalStepUpReason = 8
 
-// stepUpDenial opisuje odmowe wraz z tym, czego brakuje. Klient ma z tego
-// poznac, ze warto przeprowadzic ponowne uwierzytelnienie i ponowic zadanie.
+// stepUpDenial describes a refusal together with what is missing. The
+// client is meant to learn from it that re-authenticating and retrying the
+// request is worthwhile.
 type stepUpDenial struct {
 	Code    string
 	Message string
 	Detail  map[string]any
-	// BladZadania oznacza odmowe, ktorej ponowne uwierzytelnienie nie
-	// naprawi. Brak powodu jest brakiem w zadaniu, a nie w sesji - odesłanie
-	// klienta do logowania kazaloby mu naprawiac nie to, co jest zepsute.
-	BladZadania bool
+	// RequestError means a refusal re-authentication will not fix. A missing
+	// reason is a gap in the request, not in the session - sending the
+	// client to the login would make them fix what is not broken.
+	RequestError bool
 }
 
-// evaluate rozstrzyga, czy operacja o najwiekszym wplywie moze sie odbyc.
-// Funkcja nie ma skutkow ubocznych: zapis do audytu i odpowiedz HTTP naleza
-// do warstwy wyzej, dzieki czemu sama regula da sie sprawdzic w tescie.
+// evaluate decides whether a highest-impact operation may take place. The
+// function has no side effects: the audit record and the HTTP response
+// belong to the layer above, so the rule itself can be checked in a test.
 func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[string]any, *stepUpDenial) {
 	reason = strings.TrimSpace(reason)
 	if len([]rune(reason)) < minimalStepUpReason {
 		return nil, &stepUpDenial{
-			Code:        "reason_required",
-			Message:     "this operation requires a reason (field reason, min. 8 characters)",
-			Detail:      map[string]any{},
-			BladZadania: true,
+			Code:         "reason_required",
+			Message:      "this operation requires a reason (field reason, min. 8 characters)",
+			Detail:       map[string]any{},
+			RequestError: true,
 		}
 	}
 
 	if session == nil {
-		// Identity automatyczna nie moze przejsc ponownego uwierzytelnienia:
-		// nie ma za nia czlowieka. Operacja jest dopuszczona, ale audyt
-		// zapisuje wprost, ze uwierzytelnienia nie odswiezono.
+		// An automated identity cannot re-authenticate: there is no human
+		// behind it. The operation is allowed, but the audit log records
+		// directly that the authentication was not refreshed.
 		return map[string]any{
 			"high_impact": true, "purpose": reason,
 			"authentication": "api_token", "reauthenticated": false,
@@ -67,8 +70,8 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 
 	if p.MaxAge > 0 {
 		if session.Auth.At.IsZero() {
-			// Dostawca nie podal auth_time. Stan nieustalony nie moze byc
-			// czytany jako "przed chwila".
+			// The provider did not report auth_time. An undetermined state
+			// cannot be read as "a moment ago".
 			return nil, &stepUpDenial{
 				Code:    "reauthentication_required",
 				Message: "the identity provider did not report the authentication time; sign in again",
@@ -97,19 +100,19 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	return map[string]any{
 		"high_impact": true, "purpose": reason,
 		"authentication": "session", "reauthenticated": true,
-		// Sposob uwierzytelnienia zapisujemy tak, jak podal go dostawca.
-		// Panel nie tlumaczy tego na wlasne "mfa: tak".
+		// The authentication method is recorded as the provider reported it.
+		// The panel does not translate it into its own "mfa: yes".
 		"acr": session.Auth.ACR, "amr": session.Auth.AMR,
 		"authenticated_at": session.Auth.At.UTC().Format(time.RFC3339),
 	}, nil
 }
 
-// requireStepUp stosuje regule i zwraca dowod uwierzytelnienia do zapisania
-// w audycie samej operacji.
+// requireStepUp applies the rule and returns the authentication evidence to
+// record in the audit entry of the operation itself.
 //
-// Odmowa jest audytowana tutaj, bo operacja nigdy nie dochodzi do skutku.
-// Powodzenie audytuje handler razem z opisem zmiany: jedna operacja ma
-// zostawiac jeden wpis, a nie dwa mowiace o tym samym.
+// A refusal is audited here, because the operation never takes place. A
+// success is audited by the handler together with the change description:
+// one operation is meant to leave one entry, not two saying the same.
 func (s *Server) requireStepUp(w http.ResponseWriter, r *http.Request,
 	principal authz.Principal, reason, action, targetType, targetID string) (map[string]any, bool) {
 	session, _ := authz.SessionFromContext(r.Context())
@@ -123,19 +126,20 @@ func (s *Server) requireStepUp(w http.ResponseWriter, r *http.Request,
 			Action: action, TargetType: targetType, TargetID: targetID,
 			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied, Detail: denial.Detail,
 		})
-		if denial.BladZadania {
+		if denial.RequestError {
 			problem(w, http.StatusBadRequest, denial.Code, denial.Message)
 			return nil, false
 		}
-		// 401 zamiast 403: brakuje swiezego uwierzytelnienia, a nie uprawnien.
+		// 401 instead of 403: fresh authentication is missing, not permissions.
 		problem(w, http.StatusUnauthorized, denial.Code, denial.Message)
 		return nil, false
 	}
 	return evidence, true
 }
 
-// withStepUp dokleja dowod uwierzytelnienia do opisu zmiany. Dzieki temu
-// jeden wpis audytu mowi i co sie zmienilo, i na jakiej podstawie.
+// withStepUp attaches the authentication evidence to the change
+// description. Thanks to that one audit entry says both what changed and on
+// what basis.
 func withStepUp(detail, evidence map[string]any) map[string]any {
 	for key, value := range evidence {
 		detail[key] = value

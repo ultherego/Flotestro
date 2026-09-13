@@ -1,15 +1,16 @@
-// Package czas opisuje czas hosta i jego synchronizacje.
+// Package hosttime describes the host clock and its synchronisation.
 //
-// Nazwa pakietu rozni sie od katalogu celowo: katalog nazywa modul tak, jak
-// nazywa go dokument (internal/modules/time), a pakiet nie moze nazywac sie
-// "time", bo przeslonilby biblioteke standardowa w kazdym pliku, ktory go
-// uzywa - lacznie z tym.
+// The package name deliberately differs from the directory: the directory
+// names the module the way the document does (internal/modules/time), and
+// the package cannot be called "time", because it would shadow the standard
+// library in every file that uses it - including this one.
 //
-// Czas jest zalozeniem, na ktorym stoi reszta panelu: Kerberos odrzuca bilety
-// spoza okna, mTLS odrzuca certyfikaty jeszcze niewazne, a dziennik z hosta
-// z przesunietym zegarem uklada sie w zla kolejnosc. Dlatego modul mierzy
-// przesuniecie, a nie tylko pokazuje, ze demon czasu dziala.
-package czas
+// Time is an assumption the rest of the panel stands on: Kerberos rejects
+// tickets outside the window, mTLS rejects certificates not yet valid, and
+// a journal from a host with a skewed clock sorts in the wrong order. That
+// is why the module measures the offset instead of only showing that the
+// time daemon runs.
+package hosttime
 
 import (
 	"fmt"
@@ -19,71 +20,73 @@ import (
 	"time"
 )
 
-// Sciezki narzedzi i konfiguracji.
+// Tool and configuration paths.
 const (
-	SciezkaTimedatectl = "/usr/bin/timedatectl"
-	SciezkaChronyc     = "/usr/bin/chronyc"
-	KatalogStref       = "/usr/share/zoneinfo"
+	TimedatectlPath = "/usr/bin/timedatectl"
+	ChronycPath     = "/usr/bin/chronyc"
+	ZoneDir         = "/usr/share/zoneinfo"
 
-	// KatalogTimesyncd trzyma ustawienia panelu dla systemd-timesyncd.
-	KatalogTimesyncd = "/etc/systemd/timesyncd.conf.d"
-	PlikTimesyncd    = KatalogTimesyncd + "/90-flotestro.conf"
+	// TimesyncdDir holds the panel settings for systemd-timesyncd.
+	TimesyncdDir  = "/etc/systemd/timesyncd.conf.d"
+	TimesyncdFile = TimesyncdDir + "/90-flotestro.conf"
 
-	// KatalogZrodelPanelu to katalog, ktory panel zaklada na hoscie, gdzie
-	// chrony nie wlacza zadnego wlasnego. Katalog zrodel, a nie konfiguracji:
-	// przyjmuje wylacznie serwery, wiec plik panelu nie moze zmienic o
-	// chronym niczego innego.
-	KatalogZrodelPanelu = "/etc/chrony/sources.d"
-	// NaglowekWlaczenia oznacza wiersz dopisany przez panel do glownego pliku.
-	NaglowekWlaczenia = "# Dodane przez Flotestro: katalog zrodel czasu zarzadzany przez panel."
+	// PanelSourceDir is the directory the panel creates on a host where
+	// chrony includes none of its own. A sources directory, not a
+	// configuration one: it accepts only servers, so the panel file cannot
+	// change anything else about chrony.
+	PanelSourceDir = "/etc/chrony/sources.d"
+	// EnableHeader marks the line the panel appends to the main file.
+	EnableHeader = "# Added by Flotestro: time sources directory managed by the panel."
 
-	// NaglowekPliku oznacza plik panelu. Bez niego kolejna operacja nie
-	// wiedzialaby, ktore serwery ustawil panel, a ktore administrator hosta.
-	NaglowekPliku = "# Zarzadzane przez Flotestro. Recznych zmian nie zachowa kolejna operacja."
+	// FileHeader marks the panel file. Without it the next operation would
+	// not know which servers the panel set and which the host
+	// administrator.
+	FileHeader = "# Managed by Flotestro. Manual changes will not survive the next operation."
 )
 
-// Nazwy demonow czasu. Nazwa mowi, kto na tym hoscie trzyma zegar.
+// Time daemon names. The name says who keeps the clock on this host.
 const (
-	DemonChrony    = "chrony"
-	DemonTimesyncd = "systemd-timesyncd"
+	DaemonChrony    = "chrony"
+	DaemonTimesyncd = "systemd-timesyncd"
 )
 
-// Rodzaje katalogu wlaczanego przez chrony. Roznica nie jest kosmetyczna:
-// do katalogu konfiguracji wolno wpisac dowolna dyrektywe i trzeba przeladowac
-// demona, a katalog zrodel przyjmuje wylacznie serwery i da sie go przeladowac
-// bez zrywania synchronizacji.
+// Kinds of the directory chrony includes. The difference is not cosmetic:
+// any directive may be written into a configuration directory and the
+// daemon must be reloaded, while a sources directory accepts only servers
+// and can be reloaded without breaking synchronisation.
 const (
-	RodzajKonfiguracji = "confdir"
-	RodzajZrodel       = "sourcedir"
+	KindConfiguration = "confdir"
+	KindSources       = "sourcedir"
 )
 
-// GlowneKonfiguracjeChrony wylicza miejsca, w ktorych dystrybucje trzymaja
-// glowny plik chrony. Panel go nie przepisuje - czyta, zeby dowiedziec sie,
-// ktory katalog demon naprawde wlacza.
-var GlowneKonfiguracjeChrony = []string{
+// ChronyMainConfigurations lists the places where distributions keep the
+// main chrony file. The panel does not rewrite it - it reads it to learn
+// which directory the daemon really includes.
+var ChronyMainConfigurations = []string{
 	"/etc/chrony/chrony.conf",
 	"/etc/chrony.conf",
 }
 
-// LimitSerwerow ogranicza liczbe serwerow w jednej zmianie. Kilka zrodel daje
-// odpornosc na jedno zle; kilkadziesiat nie daje juz nic poza ruchem.
-const LimitSerwerow = 8
+// ServerLimit bounds the number of servers in one change. A few sources
+// give resilience against one bad one; a few dozen give nothing but
+// traffic.
+const ServerLimit = 8
 
-// ProgSkokuSekund wyznacza przesuniecie, ktore panel traktuje jako skok czasu.
+// StepThresholdSeconds sets the offset the panel treats as a time step.
 //
-// Sekunda jest granica praktyczna, a nie teoretyczna: ponizej niej demony
-// czasu koryguja zegar plynnie, a powyzej przestawiaja go skokiem - i wtedy
-// bazy danych, tokeny oraz certyfikaty widza czas, ktory sie cofnal.
-const ProgSkokuSekund = 1.0
+// A second is a practical boundary, not a theoretical one: below it the
+// time daemons slew the clock smoothly, above it they step it - and then
+// databases, tokens and certificates see a clock that went backwards.
+const StepThresholdSeconds = 1.0
 
-// Zrodlo to jeden serwer czasu widziany przez demona.
-type Zrodlo struct {
+// Source is one time server seen by the daemon.
+type Source struct {
 	Address string `json:"address"`
-	// Mode rozroznia serwer, peera i zegar sprzetowy.
+	// Mode distinguishes a server, a peer and a hardware clock.
 	Mode string `json:"mode,omitempty"`
-	// State mowi, czy demon uzywa tego zrodla, czy je odrzucil.
+	// State says whether the daemon uses this source or rejected it.
 	State string `json:"state,omitempty"`
-	// Puste pola oznaczaja pomiar, ktorego nie ma - nie zero.
+	// Nil fields mean a measurement that does not exist - not zero.
 	Stratum       *uint32  `json:"stratum"`
 	PollSeconds   *int     `json:"poll_seconds"`
 	Reachability  string   `json:"reachability,omitempty"`
@@ -92,25 +95,26 @@ type Zrodlo struct {
 	ErrorSeconds  *float64 `json:"error_seconds"`
 }
 
-// Serwer to wpis konfiguracyjny, a nie zrodlo dzialajace.
+// Server is a configuration entry, not a working source.
 //
-// Rozroznienie jest istotne przy diagnozie: serwer wpisany do konfiguracji,
-// ktory nie odpowiada, nie pojawi sie na liscie zrodel demona - i bez tej
-// listy wygladalby na nieistniejacy zamiast na nieosiagalny.
-type Serwer struct {
+// The distinction matters in diagnosis: a server written into the
+// configuration that does not answer does not appear on the daemon's source
+// list - and without this list it would look non-existent instead of
+// unreachable.
+type Server struct {
 	Address string `json:"address"`
-	// Source nazywa plik, z ktorego wpis pochodzi.
+	// Source names the file the entry comes from.
 	Source string `json:"source,omitempty"`
-	// Pool oznacza wpis rozwijany na wiele adresow.
+	// Pool marks an entry expanded to many addresses.
 	Pool bool `json:"pool,omitempty"`
-	// Managed oznacza wpis zapisany przez panel.
+	// Managed marks an entry written by the panel.
 	Managed bool `json:"managed"`
 }
 
-// Pomiar to wynik jednego zapytania SNTP zadanego przez panel.
-type Pomiar struct {
+// Probe is the result of one SNTP query requested by the panel.
+type Probe struct {
 	Server string `json:"server"`
-	// Address jest adresem, pod ktorym serwer odpowiedzial.
+	// Address is the address the server answered from.
 	Address       string   `json:"address,omitempty"`
 	Reachable     bool     `json:"reachable"`
 	Stratum       *uint32  `json:"stratum"`
@@ -120,20 +124,20 @@ type Pomiar struct {
 	Error         string   `json:"error,omitempty"`
 }
 
-// Snapshot to obraz czasu hosta.
+// Snapshot is the picture of the host clock.
 type Snapshot struct {
-	// Now jest czasem hosta odczytanym w chwili zbierania. Panel porownuje go
-	// z wlasnym zegarem, wiec musi pochodzic z hosta, a nie z serwera.
+	// Now is the host time read at collection. The panel compares it with
+	// its own clock, so it must come from the host, not from the server.
 	Now      time.Time `json:"now"`
 	Timezone string    `json:"timezone,omitempty"`
-	// UTCOffsetSeconds jest przesunieciem strefy, nie bledem zegara.
+	// UTCOffsetSeconds is the zone offset, not a clock error.
 	UTCOffsetSeconds *int `json:"utc_offset_seconds"`
-	// RTCInLocalTime oznacza zegar sprzetowy w czasie lokalnym. Taki host po
-	// zmianie czasu letniego wstaje z blednym zegarem.
+	// RTCInLocalTime marks a hardware clock in local time. Such a host
+	// boots with a wrong clock after a daylight saving change.
 	RTCInLocalTime *bool `json:"rtc_in_local_time"`
 	NTPEnabled     *bool `json:"ntp_enabled"`
 	Synchronized   *bool `json:"synchronized"`
-	// Service nazywa demona czasu, Unit - jego jednostke systemd.
+	// Service names the time daemon, Unit - its systemd unit.
 	Service       string `json:"service,omitempty"`
 	Unit          string `json:"unit,omitempty"`
 	ServiceActive *bool  `json:"service_active"`
@@ -147,152 +151,158 @@ type Snapshot struct {
 	LeapStatus            string     `json:"leap_status,omitempty"`
 	LastSyncAt            *time.Time `json:"last_sync_at,omitempty"`
 
-	Sources    []Zrodlo `json:"sources,omitempty"`
-	Configured []Serwer `json:"configured_servers,omitempty"`
-	Probes     []Pomiar `json:"probes,omitempty"`
+	Sources    []Source `json:"sources,omitempty"`
+	Configured []Server `json:"configured_servers,omitempty"`
+	Probes     []Probe  `json:"probes,omitempty"`
 
-	// Managed jest trescia pliku panelu, ManagedPath jego sciezka. Pusta
-	// sciezka oznacza host, na ktorym panel nie ma gdzie zapisac zmiany.
+	// Managed is the content of the panel file, ManagedPath its path. An
+	// empty path means a host on which the panel has nowhere to write the
+	// change.
 	Managed     string `json:"managed_config,omitempty"`
 	ManagedPath string `json:"managed_path,omitempty"`
-	// WriteReason mowi, dlaczego panel nie zmieni tu konfiguracji czasu.
+	// WriteReason says why the panel will not change the time
+	// configuration here.
 	WriteReason string `json:"write_reason,omitempty"`
-	// ConfigPath jest glownym plikiem demona. Panel go nie przepisuje;
-	// pokazuje, zeby operator wiedzial, czego zmiana nie dotyczy.
+	// ConfigPath is the daemon's main file. The panel does not rewrite it;
+	// it is shown so the operator knows what the change does not concern.
 	ConfigPath string `json:"config_path,omitempty"`
-	// CanAddSourceDir mowi, ze host da sie doprowadzic do stanu zapisywalnego
-	// jednym dopisanym wierszem - ale dopiero za jawna zgoda operatora.
+	// CanAddSourceDir says the host can be brought to a writable state
+	// with one appended line - but only with the operator's explicit
+	// consent.
 	CanAddSourceDir bool `json:"can_add_source_dir,omitempty"`
 
 	ObservedAt        time.Time `json:"observed_at"`
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// Zsynchronizowany mowi, czy host jest zsynchronizowany. Nieznany stan nie
-// jest tu falszem: brak odpowiedzi demona to inna sytuacja niz jego "nie".
-func (s Snapshot) Zsynchronizowany() bool {
+// IsSynchronized says whether the host is synchronised. An unknown state is
+// not false here: no answer from the daemon is a different situation than
+// its "no".
+func (s Snapshot) IsSynchronized() bool {
 	return s.Synchronized != nil && *s.Synchronized
 }
 
-var nazwaStrefy = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+_-]*(/[A-Za-z0-9+_.-]+){0,2}$`)
-var nazwaHosta = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$`)
+var zoneName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+_-]*(/[A-Za-z0-9+_.-]+){0,2}$`)
+var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$`)
 
-// WalidujStrefe sprawdza nazwe strefy czasowej.
+// ValidateZone checks a time zone name.
 //
-// Nazwa trafia do polecenia i do sciezki w /usr/share/zoneinfo, wiec nie moze
-// byc sciezka wzgledna ani zawierac czegokolwiek poza nazwa strefy.
-func WalidujStrefe(strefa string) error {
-	if strefa == "" {
-		return fmt.Errorf("strefa czasowa jest pusta")
+// The name goes to the command and to a path in /usr/share/zoneinfo, so it
+// cannot be a relative path or contain anything but a zone name.
+func ValidateZone(zone string) error {
+	if zone == "" {
+		return fmt.Errorf("the time zone is empty")
 	}
-	if len(strefa) > 64 {
-		return fmt.Errorf("nazwa strefy jest dluzsza niz 64 znaki")
+	if len(zone) > 64 {
+		return fmt.Errorf("the zone name is longer than 64 characters")
 	}
-	if strings.Contains(strefa, "..") {
-		return fmt.Errorf("nazwa strefy %q wychodzi poza katalog stref", strefa)
+	if strings.Contains(zone, "..") {
+		return fmt.Errorf("the zone name %q leaves the zone directory", zone)
 	}
-	if !nazwaStrefy.MatchString(strefa) {
-		return fmt.Errorf("nieprawidlowa nazwa strefy %q", strefa)
+	if !zoneName.MatchString(zone) {
+		return fmt.Errorf("invalid zone name %q", zone)
 	}
 	return nil
 }
 
-// SciezkaStrefy zwraca plik strefy w katalogu stref.
-func SciezkaStrefy(strefa string) string {
-	return KatalogStref + "/" + strefa
+// ZonePath returns the zone file in the zone directory.
+func ZonePath(zone string) string {
+	return ZoneDir + "/" + zone
 }
 
-// WalidujSerwer sprawdza adres serwera czasu.
+// ValidateServer checks a time server address.
 //
-// Adres trafia do pliku konfiguracyjnego jako calosc wiersza, wiec nie moze
-// zawierac bialych znakow ani nowej linii: wpis "a\niburst offline" byl by
-// juz inna dyrektywa niz ta, ktora operator zatwierdzil.
-func WalidujSerwer(adres string) error {
-	if adres == "" {
-		return fmt.Errorf("adres serwera czasu jest pusty")
+// The address goes into the configuration file as a whole line, so it must
+// not contain whitespace or a newline: the entry "a\niburst offline" would
+// be a different directive than the one the operator approved.
+func ValidateServer(address string) error {
+	if address == "" {
+		return fmt.Errorf("the time server address is empty")
 	}
-	if len(adres) > 253 {
-		return fmt.Errorf("adres %q jest dluzszy niz 253 znaki", adres)
+	if len(address) > 253 {
+		return fmt.Errorf("the address %q is longer than 253 characters", address)
 	}
-	if net.ParseIP(adres) != nil {
+	if net.ParseIP(address) != nil {
 		return nil
 	}
-	if !nazwaHosta.MatchString(adres) {
-		return fmt.Errorf("%q nie jest adresem IP ani nazwa hosta", adres)
+	if !hostName.MatchString(address) {
+		return fmt.Errorf("%q is neither an IP address nor a host name", address)
 	}
 	return nil
 }
 
-// WalidujSerwery sprawdza cala liste serwerow.
-func WalidujSerwery(serwery []string) error {
-	if len(serwery) == 0 {
-		return fmt.Errorf("zmiana nie wskazuje zadnego serwera czasu")
+// ValidateServers checks the whole server list.
+func ValidateServers(servers []string) error {
+	if len(servers) == 0 {
+		return fmt.Errorf("the change names no time server")
 	}
-	if len(serwery) > LimitSerwerow {
-		return fmt.Errorf("panel przyjmuje najwyzej %d serwerow czasu", LimitSerwerow)
+	if len(servers) > ServerLimit {
+		return fmt.Errorf("the panel accepts at most %d time servers", ServerLimit)
 	}
-	widziane := map[string]bool{}
-	for _, serwer := range serwery {
-		if err := WalidujSerwer(serwer); err != nil {
+	seen := map[string]bool{}
+	for _, server := range servers {
+		if err := ValidateServer(server); err != nil {
 			return err
 		}
-		if widziane[serwer] {
-			return fmt.Errorf("serwer %q powtarza sie na liscie", serwer)
+		if seen[server] {
+			return fmt.Errorf("the server %q repeats on the list", server)
 		}
-		widziane[serwer] = true
+		seen[server] = true
 	}
 	return nil
 }
 
-// SkladajTimesyncd sklada plik ustawien dla systemd-timesyncd.
-func SkladajTimesyncd(serwery []string) (string, error) {
-	if err := WalidujSerwery(serwery); err != nil {
+// ComposeTimesyncd composes the settings file for systemd-timesyncd.
+func ComposeTimesyncd(servers []string) (string, error) {
+	if err := ValidateServers(servers); err != nil {
 		return "", err
 	}
-	return NaglowekPliku + "\n[Time]\nNTP=" + strings.Join(serwery, " ") + "\n", nil
+	return FileHeader + "\n[Time]\nNTP=" + strings.Join(servers, " ") + "\n", nil
 }
 
-// SkladajChrony sklada plik z serwerami dla chrony.
+// ComposeChrony composes the file with servers for chrony.
 //
-// Katalog zrodel przyjmuje wylacznie dyrektywy serwerow, wiec naglowka tam nie
-// piszemy: wlascicielem pliku jest wtedy jego nazwa, a nie komentarz.
-func SkladajChrony(serwery []string, rodzaj string) (string, error) {
-	if err := WalidujSerwery(serwery); err != nil {
+// A sources directory accepts only server directives, so no header is
+// written there: the file is then owned by its name, not by a comment.
+func ComposeChrony(servers []string, kind string) (string, error) {
+	if err := ValidateServers(servers); err != nil {
 		return "", err
 	}
-	wiersze := make([]string, 0, len(serwery)+1)
-	if rodzaj != RodzajZrodel {
-		wiersze = append(wiersze, NaglowekPliku)
+	lines := make([]string, 0, len(servers)+1)
+	if kind != KindSources {
+		lines = append(lines, FileHeader)
 	}
-	for _, serwer := range serwery {
-		// iburst skraca pierwsza synchronizacje z kilkunastu minut do kilku
-		// sekund; bez niego operator patrzy na "not synchronised" i nie wie,
-		// czy zmiana zadzialala.
-		wiersze = append(wiersze, "server "+serwer+" iburst")
+	for _, server := range servers {
+		// iburst shortens the first synchronisation from many minutes to a
+		// few seconds; without it the operator stares at "not synchronised"
+		// and does not know whether the change worked.
+		lines = append(lines, "server "+server+" iburst")
 	}
-	return strings.Join(wiersze, "\n") + "\n", nil
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// WpisWlaczenia sklada wiersze, ktore panel dopisuje do glownego pliku
-// chronyego, gdy host nie ma zadnego katalogu wlaczanego.
+// EnableEntry composes the lines the panel appends to the main chrony file
+// when the host includes no directory.
 //
-// To jedyne miejsce, w ktorym panel dotyka cudzej konfiguracji, i dotyka jej
-// wylacznie dopisaniem: nie zmienia ani nie usuwa niczego, co juz tam jest,
-// a dopisany katalog przyjmuje same serwery. Operator musi sie na to zgodzic
-// osobno - bez zgody host zostaje tylko do odczytu i mowi dlaczego.
-func WpisWlaczenia() string {
-	return "\n" + NaglowekWlaczenia + "\nsourcedir " + KatalogZrodelPanelu + "\n"
+// This is the only place where the panel touches somebody else's
+// configuration, and it touches it only by appending: it changes or removes
+// nothing already there, and the appended directory accepts servers only.
+// The operator must consent to this separately - without consent the host
+// stays read-only and says why.
+func EnableEntry() string {
+	return "\n" + EnableHeader + "\nsourcedir " + PanelSourceDir + "\n"
 }
 
-// MaWpisWlaczenia mowi, czy panel dopisal juz swoj katalog.
-func MaWpisWlaczenia(konfiguracja string) bool {
-	katalog, _ := KatalogDropIn(konfiguracja)
-	return katalog == KatalogZrodelPanelu
+// HasEnableEntry says whether the panel has already appended its directory.
+func HasEnableEntry(configuration string) bool {
+	dir, _ := DropInDir(configuration)
+	return dir == PanelSourceDir
 }
 
-// NazwaPlikuChrony zwraca nazwe pliku panelu w katalogu danego rodzaju.
-func NazwaPlikuChrony(rodzaj string) string {
-	if rodzaj == RodzajZrodel {
+// ChronyFileName returns the panel file name in a directory of the given
+// kind.
+func ChronyFileName(kind string) string {
+	if kind == KindSources {
 		return "flotestro.sources"
 	}
 	return "90-flotestro.conf"

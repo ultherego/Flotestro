@@ -1,9 +1,10 @@
-// Package power opisuje stan zasilania, startu i okna serwisowego hosta.
+// Package power describes the power, boot and maintenance window state of the
+// host.
 //
-// Restart nie konczy sie na wyslaniu polecenia: konczy sie wtedy, gdy host
-// wraca z nowym identyfikatorem startu i zdrowymi jednostkami. Dlatego modul
-// niesie boot_id, czas dzialania i to, co restart wstrzymuje - a nie sam
-// przycisk.
+// A restart does not end with sending the command: it ends when the host comes
+// back with a new boot identifier and healthy units. That is why the module
+// carries the boot_id, the uptime and what holds the restart back - not just
+// the button.
 package power
 
 import (
@@ -14,37 +15,37 @@ import (
 	"time"
 )
 
-// Sciezki, z ktorych czytamy stan.
+// The paths the state is read from.
 const (
-	SciezkaUptime = "/proc/uptime"
-	SciezkaBootID = "/proc/sys/kernel/random/boot_id"
-	// PlikRestartuDebian powstaje, gdy pakiet wymaga restartu; obok niego
-	// lezy lista pakietow, ktore o niego poprosily.
-	PlikRestartu       = "/var/run/reboot-required"
-	PlikRestartuRun    = "/run/reboot-required"
-	PlikPakietow       = "/var/run/reboot-required.pkgs"
-	PlikPakietowRun    = "/run/reboot-required.pkgs"
-	PlikZaplanowanego  = "/run/systemd/shutdown/scheduled"
-	SciezkaInhibit     = "/usr/bin/systemd-inhibit"
-	SciezkaJournalctl  = "/usr/bin/journalctl"
-	SciezkaSystemctl   = "/usr/bin/systemctl"
-	LiczbaOstatnichBoo = 5
+	UptimePath = "/proc/uptime"
+	BootIDPath = "/proc/sys/kernel/random/boot_id"
+	// RebootRequiredFile appears when a package needs a restart; next to it lies
+	// the list of the packages that asked for it.
+	RebootRequiredFile    = "/var/run/reboot-required"
+	RebootRequiredFileRun = "/run/reboot-required"
+	PackagesFile          = "/var/run/reboot-required.pkgs"
+	PackagesFileRun       = "/run/reboot-required.pkgs"
+	ScheduledFile         = "/run/systemd/shutdown/scheduled"
+	InhibitPath           = "/usr/bin/systemd-inhibit"
+	JournalctlPath        = "/usr/bin/journalctl"
+	SystemctlPath         = "/usr/bin/systemctl"
+	RecentBootCount       = 5
 )
 
-// Tryby wylaczenia, ktore panel rozroznia.
+// The shutdown modes the panel tells apart.
 const (
-	TrybRestart   = "reboot"
-	TrybWylaczyc  = "poweroff"
-	TrybZatrzymac = "halt"
+	ModeReboot   = "reboot"
+	ModePoweroff = "poweroff"
+	ModeHalt     = "halt"
 )
 
-// Blokada to inhibitor logind: proces, ktory prosi o zwloke albo blokuje
-// wylaczenie hosta.
+// Inhibitor is a logind inhibitor: a process that asks for a delay or blocks
+// the shutdown of the host.
 //
-// Rozroznienie trybu jest tu istotne: "delay" opoznia wylaczenie o okreslony
-// czas, "block" nie pozwala na nie w ogole. Panel, ktory ich nie rozroznia,
-// obiecuje operatorowi restart, ktorego nie bedzie.
-type Blokada struct {
+// Telling the modes apart matters here: "delay" postpones the shutdown by a
+// given time, "block" does not allow it at all. A panel that does not tell them
+// apart promises the operator a restart that will not happen.
+type Inhibitor struct {
 	Who  string `json:"who"`
 	User string `json:"user,omitempty"`
 	PID  uint32 `json:"pid,omitempty"`
@@ -53,245 +54,248 @@ type Blokada struct {
 	Mode string `json:"mode,omitempty"`
 }
 
-// Blokuje mowi, czy blokada nie pozwala na wylaczenie w ogole.
-func (b Blokada) Blokuje() bool { return b.Mode == "block" }
+// Blocks says whether the inhibitor does not allow a shutdown at all.
+func (b Inhibitor) Blocks() bool { return b.Mode == "block" }
 
-// Uruchomienie to jeden wpis z listy startow hosta.
-type Uruchomienie struct {
+// Boot is one entry of the boot list of the host.
+type Boot struct {
 	Index      int       `json:"index"`
 	BootID     string    `json:"boot_id"`
 	FirstEntry time.Time `json:"first_entry"`
 	LastEntry  time.Time `json:"last_entry"`
 }
 
-// Wylaczenie opisuje wylaczenie juz zaplanowane na hoscie.
-type Wylaczenie struct {
+// Shutdown describes a shutdown already scheduled on the host.
+type Shutdown struct {
 	Mode string    `json:"mode"`
 	At   time.Time `json:"at"`
-	// Owner mowi, kto je zaplanowal: panel zaklada wlasna jednostke, wiec
-	// potrafi odroznic swoje wylaczenie od cudzego.
+	// Owner says who scheduled it: the panel creates its own unit, so it can
+	// tell its own shutdown from somebody else's.
 	Owner string `json:"owner,omitempty"`
 }
 
-// Snapshot to obraz startu i zasilania hosta.
+// Snapshot is the picture of the boot and the power of the host.
 type Snapshot struct {
 	BootID   string    `json:"boot_id,omitempty"`
 	BootedAt time.Time `json:"booted_at,omitempty"`
-	// UptimeSeconds jest pusty, gdy /proc/uptime nie dal sie odczytac -
-	// host dzialajacy zero sekund nie istnieje.
+	// UptimeSeconds is empty when /proc/uptime could not be read - a host
+	// running for zero seconds does not exist.
 	UptimeSeconds  *float64 `json:"uptime_seconds"`
 	RunningKernel  string   `json:"running_kernel,omitempty"`
 	RebootRequired *bool    `json:"reboot_required"`
-	// RebootReasons wylicza pakiety albo powody, ktore o restart poprosily.
-	RebootReasons     []string       `json:"reboot_reasons,omitempty"`
-	Inhibitors        []Blokada      `json:"inhibitors,omitempty"`
-	InhibitorsKnown   bool           `json:"inhibitors_known"`
-	LastBoots         []Uruchomienie `json:"last_boots,omitempty"`
-	Scheduled         *Wylaczenie    `json:"scheduled_shutdown,omitempty"`
-	ObservedAt        time.Time      `json:"observed_at"`
-	UnavailableReason string         `json:"unavailable_reason,omitempty"`
+	// RebootReasons lists the packages or reasons that asked for the restart.
+	RebootReasons     []string    `json:"reboot_reasons,omitempty"`
+	Inhibitors        []Inhibitor `json:"inhibitors,omitempty"`
+	InhibitorsKnown   bool        `json:"inhibitors_known"`
+	LastBoots         []Boot      `json:"last_boots,omitempty"`
+	Scheduled         *Shutdown   `json:"scheduled_shutdown,omitempty"`
+	ObservedAt        time.Time   `json:"observed_at"`
+	UnavailableReason string      `json:"unavailable_reason,omitempty"`
 }
 
-// Blokujace wylicza blokady, ktore nie pozwalaja na wylaczenie.
-func (s Snapshot) Blokujace() []Blokada {
-	var blokady []Blokada
-	for _, blokada := range s.Inhibitors {
-		if blokada.Blokuje() {
-			blokady = append(blokady, blokada)
+// Blocking lists the inhibitors that do not allow a shutdown.
+func (s Snapshot) Blocking() []Inhibitor {
+	var inhibitors []Inhibitor
+	for _, inhibitor := range s.Inhibitors {
+		if inhibitor.Blocks() {
+			inhibitors = append(inhibitors, inhibitor)
 		}
 	}
-	return blokady
+	return inhibitors
 }
 
-// LimitOpoznienia ogranicza opoznienie wylaczenia. Zlecenie, ktore ma sie
-// wykonac za dobe, nie jest operacja - jest harmonogramem.
-const LimitOpoznienia = 3600
+// DelayLimit bounds the delay of a shutdown. An order that is to run in a day
+// is not an operation - it is a schedule.
+const DelayLimit = 3600
 
-// DlugoscPowodu ogranicza uzasadnienie. Powod jest zdaniem dla czlowieka,
-// ktory bedzie czytal slad audytowy, a nie miejscem na zalacznik.
-const DlugoscPowodu = 500
+// ReasonLength bounds the justification. The reason is a sentence for the
+// human who will read the audit trail, not a place for an attachment.
+const ReasonLength = 500
 
-// WalidujPowodWylaczenia sprawdza uzasadnienie wylaczenia hosta.
+// ValidateShutdownReason checks the justification of a host shutdown.
 //
-// Wylaczenie zdalnego hosta wymaga jawnego powodu: nikt go potem nie wlaczy
-// zdalnie, wiec slad audytowy jest jedyna rzecza, ktora zostaje.
-func WalidujPowodWylaczenia(powod string) error {
-	powod = strings.TrimSpace(powod)
-	if len(powod) < 10 {
-		return fmt.Errorf("wylaczenie hosta wymaga powodu; nikt go potem nie wlaczy zdalnie")
+// Shutting a remote host down needs an explicit reason: nobody will power it on
+// remotely afterwards, so the audit trail is the only thing that stays.
+func ValidateShutdownReason(reason string) error {
+	reason = strings.TrimSpace(reason)
+	if len(reason) < 10 {
+		return fmt.Errorf("shutting the host down needs a reason; nobody will power it on remotely afterwards")
 	}
-	if len(powod) > DlugoscPowodu {
-		return fmt.Errorf("powod jest dluzszy niz %d znakow", DlugoscPowodu)
+	if len(reason) > ReasonLength {
+		return fmt.Errorf("the reason is longer than %d characters", ReasonLength)
 	}
-	if strings.ContainsAny(powod, "\n\r") {
-		return fmt.Errorf("powod nie moze zawierac nowej linii")
-	}
-	return nil
-}
-
-// WalidujOpoznienie sprawdza opoznienie operacji.
-func WalidujOpoznienie(sekundy uint32) error {
-	if sekundy > LimitOpoznienia {
-		return fmt.Errorf("opoznienie przekracza godzine")
+	if strings.ContainsAny(reason, "\n\r") {
+		return fmt.Errorf("the reason must not contain a newline")
 	}
 	return nil
 }
 
-// ParsujUptime czyta pierwsza liczbe z /proc/uptime.
-func ParsujUptime(tresc string) *float64 {
-	pola := strings.Fields(tresc)
-	if len(pola) == 0 {
+// ValidateDelay checks the delay of the operation.
+func ValidateDelay(seconds uint32) error {
+	if seconds > DelayLimit {
+		return fmt.Errorf("the delay exceeds an hour")
+	}
+	return nil
+}
+
+// ParseUptime reads the first number from /proc/uptime.
+func ParseUptime(content string) *float64 {
+	fields := strings.Fields(content)
+	if len(fields) == 0 {
 		return nil
 	}
-	sekundy, err := strconv.ParseFloat(pola[0], 64)
+	seconds, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
 		return nil
 	}
-	return &sekundy
+	return &seconds
 }
 
-// ParsujPowodyRestartu czyta liste pakietow, ktore poprosily o restart.
-func ParsujPowodyRestartu(tresc string) []string {
-	var powody []string
-	widziane := map[string]bool{}
-	for _, linia := range strings.Split(tresc, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || widziane[linia] {
+// ParseRebootReasons reads the list of the packages that asked for a restart.
+func ParseRebootReasons(content string) []string {
+	var reasons []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || seen[line] {
 			continue
 		}
-		widziane[linia] = true
-		powody = append(powody, linia)
+		seen[line] = true
+		reasons = append(reasons, line)
 	}
-	return powody
+	return reasons
 }
 
-// ParsujInhibitory czyta tabele "systemd-inhibit --list".
+// ParseInhibitors reads the table of "systemd-inhibit --list".
 //
-// Tabela jest wyrownana do szerokosci najdluzszej wartosci w kolumnie, wiec
-// pozycje naglowkow wyznaczaja granice pol. Podzial po bialych znakach nie
-// zadzialalby: kolumna z uzasadnieniem zawiera spacje.
-func ParsujInhibitory(wyjscie string) ([]Blokada, bool) {
-	linie := strings.Split(strings.ReplaceAll(wyjscie, "\r\n", "\n"), "\n")
-	naglowek := -1
-	for i, linia := range linie {
-		if strings.HasPrefix(strings.TrimSpace(linia), "WHO") {
-			naglowek = i
+// The table is aligned to the width of the longest value in a column, so the
+// positions of the headers mark the boundaries of the fields. Splitting on
+// whitespace would not work: the column with the justification contains
+// spaces.
+func ParseInhibitors(output string) ([]Inhibitor, bool) {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	header := -1
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "WHO") {
+			header = i
 			break
 		}
 	}
-	if naglowek < 0 {
-		// "No inhibitors." jest odpowiedzia, a nie brakiem odpowiedzi.
-		return nil, strings.Contains(wyjscie, "No inhibitors")
+	if header < 0 {
+		// "No inhibitors." is an answer, not the absence of one.
+		return nil, strings.Contains(output, "No inhibitors")
 	}
 
-	granice := granicePol(linie[naglowek], []string{"WHO", "UID", "USER", "PID", "COMM", "WHAT", "WHY", "MODE"})
-	if granice == nil {
+	boundaries := fieldBoundaries(lines[header], []string{"WHO", "UID", "USER", "PID", "COMM", "WHAT", "WHY", "MODE"})
+	if boundaries == nil {
 		return nil, false
 	}
 
-	var blokady []Blokada
-	for _, linia := range linie[naglowek+1:] {
-		if strings.TrimSpace(linia) == "" || strings.Contains(linia, "inhibitors listed") {
+	var inhibitors []Inhibitor
+	for _, line := range lines[header+1:] {
+		if strings.TrimSpace(line) == "" || strings.Contains(line, "inhibitors listed") {
 			continue
 		}
-		pola := tnijPola(linia, granice)
-		if len(pola) < 8 || pola[0] == "" {
+		fields := cutFields(line, boundaries)
+		if len(fields) < 8 || fields[0] == "" {
 			continue
 		}
-		blokada := Blokada{Who: pola[0], User: pola[2], What: pola[5], Why: pola[6], Mode: pola[7]}
-		if pid, err := strconv.ParseUint(pola[3], 10, 32); err == nil {
-			blokada.PID = uint32(pid)
+		inhibitor := Inhibitor{Who: fields[0], User: fields[2], What: fields[5], Why: fields[6], Mode: fields[7]}
+		if pid, err := strconv.ParseUint(fields[3], 10, 32); err == nil {
+			inhibitor.PID = uint32(pid)
 		}
-		blokady = append(blokady, blokada)
+		inhibitors = append(inhibitors, inhibitor)
 	}
-	return blokady, true
+	return inhibitors, true
 }
 
-// granicePol wyznacza pozycje kolumn na podstawie wiersza naglowka.
-func granicePol(naglowek string, kolumny []string) []int {
-	granice := make([]int, 0, len(kolumny))
-	szukajOd := 0
-	for _, kolumna := range kolumny {
-		pozycja := strings.Index(naglowek[szukajOd:], kolumna)
-		if pozycja < 0 {
+// fieldBoundaries determines the positions of the columns from the header
+// line.
+func fieldBoundaries(header string, columns []string) []int {
+	boundaries := make([]int, 0, len(columns))
+	searchFrom := 0
+	for _, column := range columns {
+		position := strings.Index(header[searchFrom:], column)
+		if position < 0 {
 			return nil
 		}
-		granice = append(granice, szukajOd+pozycja)
-		szukajOd += pozycja + len(kolumna)
+		boundaries = append(boundaries, searchFrom+position)
+		searchFrom += position + len(column)
 	}
-	return granice
+	return boundaries
 }
 
-func tnijPola(linia string, granice []int) []string {
-	pola := make([]string, 0, len(granice))
-	for i, poczatek := range granice {
-		if poczatek > len(linia) {
-			pola = append(pola, "")
+func cutFields(line string, boundaries []int) []string {
+	fields := make([]string, 0, len(boundaries))
+	for i, start := range boundaries {
+		if start > len(line) {
+			fields = append(fields, "")
 			continue
 		}
-		koniec := len(linia)
-		if i+1 < len(granice) && granice[i+1] < koniec {
-			koniec = granice[i+1]
+		end := len(line)
+		if i+1 < len(boundaries) && boundaries[i+1] < end {
+			end = boundaries[i+1]
 		}
-		pola = append(pola, strings.TrimSpace(linia[poczatek:koniec]))
+		fields = append(fields, strings.TrimSpace(line[start:end]))
 	}
-	return pola
+	return fields
 }
 
-var wierszStartu = regexp.MustCompile(
+var bootLine = regexp.MustCompile(
 	`^\s*(-?\d+)\s+([0-9a-f]{32})\s+(\S+ \S+ \S+ \S+)\s+(\S+ \S+ \S+ \S+)\s*$`)
 
-// UkladCzasuDziennika jest postacia, w ktorej journalctl pisze daty.
-const UkladCzasuDziennika = "Mon 2006-01-02 15:04:05 MST"
+// JournalTimeLayout is the form in which journalctl writes dates.
+const JournalTimeLayout = "Mon 2006-01-02 15:04:05 MST"
 
-// ParsujListeStartow czyta wyjscie "journalctl --list-boots".
-func ParsujListeStartow(wyjscie string) []Uruchomienie {
-	var starty []Uruchomienie
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		dopasowanie := wierszStartu.FindStringSubmatch(linia)
-		if dopasowanie == nil {
+// ParseBootList reads the output of "journalctl --list-boots".
+func ParseBootList(output string) []Boot {
+	var boots []Boot
+	for _, line := range strings.Split(output, "\n") {
+		match := bootLine.FindStringSubmatch(line)
+		if match == nil {
 			continue
 		}
-		indeks, err := strconv.Atoi(dopasowanie[1])
+		index, err := strconv.Atoi(match[1])
 		if err != nil {
 			continue
 		}
-		start := Uruchomienie{Index: indeks, BootID: dopasowanie[2]}
-		if chwila, err := time.Parse(UkladCzasuDziennika, dopasowanie[3]); err == nil {
-			start.FirstEntry = chwila.UTC()
+		start := Boot{Index: index, BootID: match[2]}
+		if moment, err := time.Parse(JournalTimeLayout, match[3]); err == nil {
+			start.FirstEntry = moment.UTC()
 		}
-		if chwila, err := time.Parse(UkladCzasuDziennika, dopasowanie[4]); err == nil {
-			start.LastEntry = chwila.UTC()
+		if moment, err := time.Parse(JournalTimeLayout, match[4]); err == nil {
+			start.LastEntry = moment.UTC()
 		}
-		starty = append(starty, start)
+		boots = append(boots, start)
 	}
-	return starty
+	return boots
 }
 
-// ParsujZaplanowane czyta /run/systemd/shutdown/scheduled.
+// ParseScheduled reads /run/systemd/shutdown/scheduled.
 //
-// Plik mowi, ze host ma sie wylaczyc, choc nikt z panelu o to nie prosil.
-// Operator ma to zobaczyc przed zleceniem czegokolwiek innego.
-func ParsujZaplanowane(tresc string) *Wylaczenie {
-	wylaczenie := Wylaczenie{}
-	for _, linia := range strings.Split(tresc, "\n") {
-		klucz, wartosc, ok := strings.Cut(strings.TrimSpace(linia), "=")
+// The file says the host is going to shut down even though nobody from the
+// panel asked for it. The operator is to see that before ordering anything
+// else.
+func ParseScheduled(content string) *Shutdown {
+	shutdown := Shutdown{}
+	for _, line := range strings.Split(content, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if !ok {
 			continue
 		}
-		switch klucz {
+		switch key {
 		case "USEC":
-			mikro, err := strconv.ParseInt(wartosc, 10, 64)
+			micro, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return nil
 			}
-			wylaczenie.At = time.UnixMicro(mikro).UTC()
+			shutdown.At = time.UnixMicro(micro).UTC()
 		case "MODE":
-			wylaczenie.Mode = wartosc
+			shutdown.Mode = value
 		}
 	}
-	if wylaczenie.At.IsZero() {
+	if shutdown.At.IsZero() {
 		return nil
 	}
-	return &wylaczenie
+	return &shutdown
 }

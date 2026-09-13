@@ -26,8 +26,8 @@ func CollectPower(ctx context.Context, bootID string, rebootRequired *bool) powe
 		ObservedAt:     now,
 	}
 
-	if content, err := os.ReadFile(power.SciezkaUptime); err == nil {
-		snapshot.UptimeSeconds = power.ParsujUptime(string(content))
+	if content, err := os.ReadFile(power.UptimePath); err == nil {
+		snapshot.UptimeSeconds = power.ParseUptime(string(content))
 		if snapshot.UptimeSeconds != nil {
 			snapshot.BootedAt = now.Add(-time.Duration(*snapshot.UptimeSeconds * float64(time.Second)))
 		}
@@ -41,21 +41,21 @@ func CollectPower(ctx context.Context, bootID string, rebootRequired *bool) powe
 
 	// The reasons for a restart are the names of the packages that asked for it.
 	// A host that needs a restart "just because" tells the operator nothing.
-	for _, path := range []string{power.PlikPakietow, power.PlikPakietowRun} {
+	for _, path := range []string{power.PackagesFile, power.PackagesFileRun} {
 		if content, err := os.ReadFile(path); err == nil {
-			snapshot.RebootReasons = power.ParsujPowodyRestartu(string(content))
+			snapshot.RebootReasons = power.ParseRebootReasons(string(content))
 			break
 		}
 	}
 
-	if exists(power.SciezkaInhibit) {
-		output, _, _ := outputWithError(ctx, power.SciezkaInhibit, "--list", "--no-pager")
-		snapshot.Inhibitors, snapshot.InhibitorsKnown = power.ParsujInhibitory(output)
+	if exists(power.InhibitPath) {
+		output, _, _ := outputWithError(ctx, power.InhibitPath, "--list", "--no-pager")
+		snapshot.Inhibitors, snapshot.InhibitorsKnown = power.ParseInhibitors(output)
 	}
 
-	if exists(power.SciezkaJournalctl) {
-		if output, err := commandOutput(ctx, power.SciezkaJournalctl, "--list-boots", "--no-pager"); err == nil {
-			boots := power.ParsujListeStartow(output)
+	if exists(power.JournalctlPath) {
+		if output, err := commandOutput(ctx, power.JournalctlPath, "--list-boots", "--no-pager"); err == nil {
+			boots := power.ParseBootList(output)
 			if len(boots) > recentBoots {
 				boots = boots[len(boots)-recentBoots:]
 			}
@@ -63,8 +63,8 @@ func CollectPower(ctx context.Context, bootID string, rebootRequired *bool) powe
 		}
 	}
 
-	if content, err := os.ReadFile(power.PlikZaplanowanego); err == nil {
-		snapshot.Scheduled = power.ParsujZaplanowane(string(content))
+	if content, err := os.ReadFile(power.ScheduledFile); err == nil {
+		snapshot.Scheduled = power.ParseScheduled(string(content))
 	}
 	return snapshot
 }

@@ -36,13 +36,14 @@ type createCampaignRequest struct {
 	HealthCheckUnits         []string   `json:"health_check_units,omitempty"`
 	JobTimeoutSeconds        *int       `json:"job_timeout_seconds,omitempty"`
 	RequiresApproval         *bool      `json:"requires_approval,omitempty"`
-	// Reason uzasadnia kampanie o najwyzszym ryzyku i trafia do audytu.
+	// Reason justifies the highest-risk campaigns and goes to the audit log.
 	Reason string `json:"reason,omitempty"`
 }
 
-// powodOdmowyTrybu tlumaczy odmowe na zdanie, z ktorego operator wie, co
-// zrobic dalej. Odmowa bez powodu wyglada jak brak funkcji w produkcie.
-func powodOdmowyTrybu(action opspec.ActionType) string {
+// campaignModeRefusal translates a refusal into a sentence the operator
+// knows what to do next from. A refusal without a reason looks like a
+// missing product feature.
+func campaignModeRefusal(action opspec.ActionType) string {
 	switch action.CampaignMode() {
 	case opspec.CampaignPerHostPlan:
 		return "this operation computes a different plan on every host, " +
@@ -55,8 +56,8 @@ func powodOdmowyTrybu(action opspec.ActionType) string {
 	}
 }
 
-// handleCreateCampaign planuje kampanie. Selektor jest natychmiast zamieniany
-// na niemutowalna migawke hostow; samo utworzenie niczego nie zmienia.
+// handleCreateCampaign plans a campaign. The selector is immediately turned
+// into an immutable host snapshot; the creation itself changes nothing.
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	var request createCampaignRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
@@ -70,28 +71,28 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"a campaign requires an operation that changes host state")
 		return
 	}
-	// Operacja, ktora wymaga wpisania nazwy celu, nie dziala masowo. Nazwa
-	// celu jest tam jedyna bramka miedzy klinieciem a nieodwracalna zmiana,
-	// a kampania z definicji nie ma jednego celu do wpisania: skasowanie
-	// dysku albo wylaczenie zasilania na calej fali nie ma drogi powrotu.
+	// An operation that requires typing the target name does not run in
+	// bulk. The target name is there the only gate between a click and an
+	// irreversible change, and a campaign by definition has no single target
+	// to type: wiping a disk or powering off a whole wave has no way back.
 	if action.RequiresTargetConfirmation() {
 		problem(w, http.StatusBadRequest, "not_a_campaign_action",
 			"this operation is irreversible and needs its target named; run it host by host")
 		return
 	}
-	// Sa operacje, ktorych masowo nie wolno robic wcale - nie dlatego, ze
-	// panel nie umie, tylko dlatego, ze ich skutek wymaga obecnosci
-	// operatora przy kazdym hoscie z osobna.
-	if powod := opspec.CampaignExclusionReason(action); powod != "" {
-		problem(w, http.StatusBadRequest, "not_a_campaign_action", powod)
+	// There are operations that must not be done in bulk at all - not
+	// because the panel cannot, but because their effect requires the
+	// operator's presence at every host separately.
+	if reason := opspec.CampaignExclusionReason(action); reason != "" {
+		problem(w, http.StatusBadRequest, "not_a_campaign_action", reason)
 		return
 	}
-	// Tryb masowy jest deklaracja operacji, a nie wnioskiem z jej ryzyka.
-	// Brak deklaracji znaczy odmowe: dopisanie nowej operacji do rejestru nie
-	// moze samo z siebie otwierac jej dla calej floty.
+	// The bulk mode is a declaration of the operation, not a conclusion from
+	// its risk. No declaration means a refusal: adding a new operation to the
+	// registry must not by itself open it to the whole fleet.
 	if !opspec.ExecutableMode(action) {
 		problem(w, http.StatusBadRequest, "campaign_mode_unsupported",
-			powodOdmowyTrybu(action))
+			campaignModeRefusal(action))
 		return
 	}
 
@@ -102,8 +103,9 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Zamowienie kampanii jest walidowane inaczej niz operacja na jednym
-	// hoscie: odcisku planu jeszcze nie ma, bo plan powstanie na hostach.
+	// A campaign order is validated differently than an operation on one
+	// host: there is no plan fingerprint yet, because the plan is made on the
+	// hosts.
 	if err := opspec.ValidateCampaignRequest(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
 		return
@@ -116,7 +118,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		HostIDs:     request.Selector.HostIDs,
 	}
 	candidates, err := s.resolveTargets(r, selector)
-	if errors.Is(err, ErrZbytSzerokiSelektor) {
+	if errors.Is(err, ErrSelectorTooBroad) {
 		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
 		return
 	}
@@ -129,32 +131,34 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kwalifikacja rozstrzyga, ktore hosty naprawde ruszaja. Host w oknie
-	// serwisowym i host bez wymaganego adaptera zostaja w migawce, ale
-	// zamkniete od razu i z powodem: znikniecie po cichu ukrywaloby decyzje,
-	// a wpisanie ich jako gotowych nazwaloby brak zdolnosci awaria.
-	ocena := oceniKandydatow(candidates, action, s.aktywneKolizje(r.Context()),
+	// The qualification decides which hosts really move. A host in a
+	// maintenance window and a host without the required adapter stay in the
+	// snapshot, but closed at once and with a reason: vanishing quietly would
+	// hide the decision, and listing them as ready would call a missing
+	// capability a failure.
+	assessment := assessCandidates(candidates, action, s.activeConflicts(r.Context()),
 		time.Now().UTC())
-	if len(ocena.Gotowe) == 0 {
+	if len(assessment.Ready) == 0 {
 		problem(w, http.StatusBadRequest, "no_eligible_targets",
-			"no matched host can run this operation: "+opisWykluczen(ocena.Wykluczenia()))
+			"no matched host can run this operation: "+describeExclusions(assessment.Exclusions()))
 		return
 	}
 
-	// Sa zmiany, ktore dopiero razem sa poprawne: wycofanie urzedu na
-	// czesci floty zostawia hosty, ktorych reszta przestaje rozpoznawac.
-	// Taka kampania nie zaczyna sie wcale, dopoki ktorykolwiek cel jest
-	// niepewny - i mowi, ktory.
-	if powod := opspec.FullCoverageReason(action); powod != "" {
-		if niepewne := ocena.Niepewne(); len(niepewne) > 0 {
+	// There are changes that are correct only together: withdrawing an
+	// authority on part of the fleet leaves hosts the rest stops recognising.
+	// Such a campaign does not start at all while any target is uncertain -
+	// and says which.
+	if reason := opspec.FullCoverageReason(action); reason != "" {
+		if uncertain := assessment.Uncertain(); len(uncertain) > 0 {
 			problem(w, http.StatusBadRequest, "incomplete_coverage",
-				powod+"; "+opisWykluczen(niepewne))
+				reason+"; "+describeExclusions(uncertain))
 			return
 		}
 	}
 
-	// Uprawnienie sprawdzamy dla kazdego hosta z migawki. Kampania obejmujaca
-	// jeden host poza zakresem nie moze przejsc dlatego, ze reszta jest w nim.
+	// The permission is checked for every host of the snapshot. A campaign
+	// covering one host outside the scope must not pass because the rest is
+	// inside it.
 	principal := authz.FromContext(r.Context())
 	for _, host := range candidates {
 		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
@@ -166,17 +170,17 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Kampania nie moze byc droga naokolo bramki pojedynczego hosta. Ta sama
-	// operacja zlecona z reki wymaga swiezego uwierzytelnienia, wiec zlecona
-	// na cala flote wymaga go tym bardziej.
-	var dowodStepUp map[string]any
+	// A campaign must not be a way around the single-host gate. The same
+	// operation ordered by hand requires fresh authentication, so ordered on
+	// the whole fleet it requires it all the more.
+	var stepUpEvidence map[string]any
 	if action.RequiresFreshAuth() {
-		dowod, ok := s.requireStepUp(w, r, principal, request.Reason,
+		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
 			"campaign.create", "campaign", "")
 		if !ok {
 			return
 		}
-		dowodStepUp = dowod
+		stepUpEvidence = evidence
 	}
 
 	spec := campaigns.Spec{
@@ -184,10 +188,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		ActionType:               string(action),
 		Payload:                  request.Payload,
 		Selector:                 selector,
-		CanarySize:               wartoscLubDomyslna(request.CanarySize, 1),
+		CanarySize:               valueOrDefault(request.CanarySize, 1),
 		WaveSize:                 valueOr(request.WaveSize, 10),
 		MaxConcurrent:            valueOr(request.MaxConcurrent, 5),
-		FailureThresholdPercent:  wartoscLubDomyslna(request.FailureThresholdPercent, 20),
+		FailureThresholdPercent:  valueOrDefault(request.FailureThresholdPercent, 20),
 		FailureThresholdAbsolute: valueOr(request.FailureThresholdAbsolute, 0),
 		MaintenanceStart:         request.MaintenanceStart,
 		MaintenanceEnd:           request.MaintenanceEnd,
@@ -199,7 +203,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RequestID:                requestIDOf(r),
 	}
 
-	targets := ocena.Cele()
+	targets := assessment.Targets()
 
 	tx, err := s.campaigns.Pool().Begin(r.Context())
 	if err != nil {
@@ -220,12 +224,12 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		Detail: withStepUp(map[string]any{
 			"name": campaign.Name, "action_type": campaign.ActionType,
 			"campaign_mode": string(action.CampaignMode()),
-			"targets":       len(targets), "eligible": len(ocena.Gotowe),
-			"excluded": ocena.Wykluczenia(), "notes": ocena.Uwagi,
+			"targets":       len(targets), "eligible": len(assessment.Ready),
+			"excluded": assessment.Exclusions(), "notes": assessment.Notes,
 			"canary_size": campaign.CanarySize,
 			"wave_size":   campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
 			"approval_fingerprint": campaign.ApprovalFingerprint,
-		}, dowodStepUp),
+		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -237,25 +241,26 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, campaign)
 }
 
-// opisWykluczen sklada powody odmowy w jedno zdanie.
+// describeExclusions joins the refusal reasons into one sentence.
 //
-// Odmowa "zaden host nie moze tego wykonac" bez powodow jest cisza: operator
-// widzi selektor, ktory cos dopasowal, i odmowe bez zwiazku z tym, co widzi.
-func opisWykluczen(grupy []grupaHostow) string {
-	opis := ""
-	for i, grupa := range grupy {
+// The refusal "no host can run this" without reasons is silence: the
+// operator sees a selector that matched something, and a refusal unrelated
+// to what they see.
+func describeExclusions(groups []hostGroup) string {
+	description := ""
+	for i, group := range groups {
 		if i > 0 {
-			opis += ", "
+			description += ", "
 		}
-		opis += fmt.Sprintf("%s: %d", grupa.Powod, grupa.Liczba)
+		description += fmt.Sprintf("%s: %d", group.Reason, group.Count)
 	}
-	if opis == "" {
-		return "brak powodow do podania"
+	if description == "" {
+		return "no reasons to give"
 	}
-	return opis
+	return description
 }
 
-// resolveTargets zamienia selektor na liste hostow.
+// resolveTargets turns the selector into a host list.
 func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([]hosts.Host, error) {
 	if len(selector.HostIDs) > 0 {
 		result := make([]hosts.Host, 0, len(selector.HostIDs))
@@ -271,50 +276,51 @@ func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([
 		}
 		return result, nil
 	}
-	// Selektor jest czytany strona po stronie, bez ukrytego limitu: kampania
-	// obejmujaca tysiac hostow ma znaczyc tysiac hostow, a nie pierwsze
-	// piecset posortowane alfabetycznie. Gorna granica jest jawna i konczy
-	// sie bledem, a nie cichym obcieciem listy.
+	// The selector is read page by page, without a hidden limit: a campaign
+	// covering a thousand hosts is meant to mean a thousand hosts, not the
+	// first five hundred sorted alphabetically. The upper bound is explicit
+	// and ends in an error, not a quiet trimming of the list.
 	filter := hosts.ListFilter{
 		Site:        selector.Site,
 		Environment: selector.Environment,
 		OSFamily:    selector.OSFamily,
 	}
-	wynik := make([]hosts.Host, 0, hosts.PageSize)
-	poNazwie, poID := "", ""
+	result := make([]hosts.Host, 0, hosts.PageSize)
+	afterName, afterID := "", ""
 	for {
-		strona, err := s.hosts.Page(r.Context(), filter, poNazwie, poID, hosts.PageSize)
+		page, err := s.hosts.Page(r.Context(), filter, afterName, afterID, hosts.PageSize)
 		if err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, strona...)
-		if len(strona) < hosts.PageSize {
-			return wynik, nil
+		result = append(result, page...)
+		if len(page) < hosts.PageSize {
+			return result, nil
 		}
-		if len(wynik) > maksymalnaMigawkaKampanii {
-			return nil, fmt.Errorf("%w: selektor obejmuje wiecej niz %d hostow",
-				ErrZbytSzerokiSelektor, maksymalnaMigawkaKampanii)
+		if len(result) > maxCampaignSnapshot {
+			return nil, fmt.Errorf("%w: the selector covers more than %d hosts",
+				ErrSelectorTooBroad, maxCampaignSnapshot)
 		}
-		ostatni := strona[len(strona)-1]
-		poNazwie, poID = ostatni.Hostname, ostatni.ID
+		last := page[len(page)-1]
+		afterName, afterID = last.Hostname, last.ID
 	}
 }
 
-// maksymalnaMigawkaKampanii jest granica jednej kampanii. Nie chroni bazy,
-// tylko czlowieka: migawka wieksza niz to jest zwykle blednym selektorem,
-// a nie zamiarem.
-const maksymalnaMigawkaKampanii = 10000
+// maxCampaignSnapshot is the bound of one campaign. It does not protect the
+// database, only the human: a snapshot bigger than this is usually a wrong
+// selector, not an intent.
+const maxCampaignSnapshot = 10000
 
-// ErrZbytSzerokiSelektor oznacza selektor obejmujacy wiecej hostow, niz
-// jedna kampania ma prowadzic.
-var ErrZbytSzerokiSelektor = errors.New("selektor obejmuje zbyt wiele hostow")
+// ErrSelectorTooBroad means a selector covering more hosts than one
+// campaign is meant to run.
+var ErrSelectorTooBroad = errors.New("the selector covers too many hosts")
 
-// handleCampaignPreview odpowiada na pytanie "ilu hostow to dotyczy".
+// handleCampaignPreview answers the question "how many hosts does this
+// concern".
 //
-// Liczba pochodzi z bazy, a nie z dlugosci pierwszej strony listy hostow:
-// operator zatwierdza zmiane na tylu maszynach, ile mu pokazano, wiec podglad
-// nie moze urywac sie na ukrytym limicie. Probka jest tylko probka i jest tak
-// nazwana.
+// The count comes from the database, not from the length of the first page
+// of the host list: the operator approves a change on as many machines as
+// shown, so the preview must not stop at a hidden limit. The sample is only
+// a sample and is named so.
 func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign"); !ok {
 		return
@@ -324,42 +330,44 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		Environment: r.URL.Query().Get("environment"),
 		OSFamily:    r.URL.Query().Get("os_family"),
 	}
-	ile, err := s.hosts.Count(r.Context(), filter)
+	count, err := s.hosts.Count(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	odpowiedz := map[string]any{
-		"count": ile,
-		"limit": maksymalnaMigawkaKampanii,
+	response := map[string]any{
+		"count": count,
+		"limit": maxCampaignSnapshot,
 	}
 
-	// Bez operacji podglad odpowiada tylko na pytanie "ilu hostow to dotyczy".
-	// Kwalifikacja zalezy od operacji: hosty bez adaptera pakietow sa gotowe
-	// do restartu uslugi i niezdolne do aktualizacji.
-	akcja := opspec.ActionType(r.URL.Query().Get("action"))
-	if akcja == "" {
-		probka, err := s.hosts.Page(r.Context(), filter, "", "", rozmiarProbkiPodgladu)
+	// Without an operation the preview answers only the question "how many
+	// hosts does this concern". The qualification depends on the operation:
+	// hosts without a package adapter are ready for a service restart and
+	// unable to update.
+	action := opspec.ActionType(r.URL.Query().Get("action"))
+	if action == "" {
+		sample, err := s.hosts.Page(r.Context(), filter, "", "", previewSampleSize)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		odpowiedz["sample"] = nazwyHostow(probka)
-		writeJSON(w, http.StatusOK, odpowiedz)
+		response["sample"] = hostNames(sample)
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	if !akcja.Known() {
-		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(akcja))
+	if !action.Known() {
+		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(action))
 		return
 	}
 
-	// Kwalifikacje liczymy na tej samej migawce, ktora weszlaby do kampanii.
-	// Podglad liczony inaczej niz tworzenie bylby gorszy niz jego brak:
-	// operator zatwierdzalby jedna kampanie, a dostawal druga.
-	kandydaci, err := s.resolveTargets(r, campaigns.Selector{
+	// The qualification is computed on the same snapshot that would enter
+	// the campaign. A preview computed differently than the creation would be
+	// worse than none: the operator would approve one campaign and get
+	// another.
+	candidates, err := s.resolveTargets(r, campaigns.Selector{
 		Site: filter.Site, Environment: filter.Environment, OSFamily: filter.OSFamily,
 	})
-	if errors.Is(err, ErrZbytSzerokiSelektor) {
+	if errors.Is(err, ErrSelectorTooBroad) {
 		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
 		return
 	}
@@ -367,82 +375,83 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	ocena := oceniKandydatow(kandydaci, akcja, s.aktywneKolizje(r.Context()),
+	assessment := assessCandidates(candidates, action, s.activeConflicts(r.Context()),
 		time.Now().UTC())
 
-	odpowiedz["sample"] = nazwyHostow(ocena.Gotowe[:min(len(ocena.Gotowe), rozmiarProbkiPodgladu)])
-	odpowiedz["eligible"] = len(ocena.Gotowe)
-	odpowiedz["excluded"] = ocena.Wykluczenia()
-	odpowiedz["notes"] = ocena.Uwagi
-	odpowiedz["campaign_mode"] = string(akcja.CampaignMode())
-	odpowiedz["requires_plan"] = opspec.PlanningAction(akcja) != ""
-	odpowiedz["distribution"] = rozklad(ocena.Gotowe, akcja)
-	writeJSON(w, http.StatusOK, odpowiedz)
+	response["sample"] = hostNames(assessment.Ready[:min(len(assessment.Ready), previewSampleSize)])
+	response["eligible"] = len(assessment.Ready)
+	response["excluded"] = assessment.Exclusions()
+	response["notes"] = assessment.Notes
+	response["campaign_mode"] = string(action.CampaignMode())
+	response["requires_plan"] = opspec.PlanningAction(action) != ""
+	response["distribution"] = distribution(assessment.Ready, action)
+	writeJSON(w, http.StatusOK, response)
 }
 
-// rozklad opisuje, z czego sklada sie zamrozona migawka celow.
+// distribution describes what the frozen target snapshot consists of.
 //
-// Liczba gotowych hostow nie mowi, co sie zaraz stanie: trzydziesci hostow
-// z jednej lokalizacji to inna zmiana niz trzydziesci rozrzuconych po trzech,
-// a rodzina systemu decyduje o tym, co host w ogole zrobi. Operator ma to
-// zobaczyc przed zgoda, a nie wywnioskowac z nazw w probce.
-func rozklad(gotowe []hosts.Host, akcja opspec.ActionType) map[string][]grupaHostow {
-	wymaganie := akcja.RequiredCapability()
-	wedlug := map[string]map[string]*grupaHostow{
+// The count of ready hosts does not say what is about to happen: thirty
+// hosts from one site is a different change than thirty scattered across
+// three, and the OS family decides what the host does at all. The operator
+// is meant to see that before approving, not infer it from the names in
+// the sample.
+func distribution(ready []hosts.Host, action opspec.ActionType) map[string][]hostGroup {
+	requirement := action.RequiredCapability()
+	by := map[string]map[string]*hostGroup{
 		"site": {}, "environment": {}, "os_family": {}, "capability": {},
 	}
-	kolejnosc := map[string][]string{}
-	dodajDo := func(wymiar, klucz string, host hosts.Host) {
-		if klucz == "" {
-			klucz = "nieznane"
+	order := map[string][]string{}
+	addTo := func(dimension, key string, host hosts.Host) {
+		if key == "" {
+			key = "unknown"
 		}
-		grupa, mamy := wedlug[wymiar][klucz]
-		if !mamy {
-			grupa = &grupaHostow{Powod: klucz}
-			wedlug[wymiar][klucz] = grupa
-			kolejnosc[wymiar] = append(kolejnosc[wymiar], klucz)
+		group, present := by[dimension][key]
+		if !present {
+			group = &hostGroup{Reason: key}
+			by[dimension][key] = group
+			order[dimension] = append(order[dimension], key)
 		}
-		dodaj(grupa, host)
+		add(group, host)
 	}
 
-	for _, host := range gotowe {
-		dodajDo("site", host.Site, host)
-		dodajDo("environment", host.Environment, host)
-		dodajDo("os_family", host.OSFamily, host)
-		// Zdolnosc rozroznia hosty, ktore operacje przyjma, od tych, ktore
-		// jeszcze nie zglosily rejestru adapterow - a te drugie ida do
-		// kampanii i rozstrzygaja sie dopiero na hoscie.
+	for _, host := range ready {
+		addTo("site", host.Site, host)
+		addTo("environment", host.Environment, host)
+		addTo("os_family", host.OSFamily, host)
+		// The capability tells the hosts that accept the operation from those
+		// that have not reported their adapter registry yet - and the latter
+		// go into the campaign and are decided only on the host.
 		switch {
-		case wymaganie == "":
-			dodajDo("capability", "bez wymagan", host)
+		case requirement == "":
+			addTo("capability", "no requirements", host)
 		case len(host.Capabilities) == 0:
-			dodajDo("capability", "nieznana", host)
+			addTo("capability", "unknown", host)
 		default:
-			dodajDo("capability", wymaganie, host)
+			addTo("capability", requirement, host)
 		}
 	}
 
-	wynik := map[string][]grupaHostow{}
-	for wymiar, nazwy := range kolejnosc {
-		grupy := make([]grupaHostow, 0, len(nazwy))
-		for _, nazwa := range nazwy {
-			grupy = append(grupy, *wedlug[wymiar][nazwa])
+	result := map[string][]hostGroup{}
+	for dimension, names := range order {
+		groups := make([]hostGroup, 0, len(names))
+		for _, name := range names {
+			groups = append(groups, *by[dimension][name])
 		}
-		wynik[wymiar] = grupy
+		result[dimension] = groups
 	}
-	return wynik
+	return result
 }
 
-func nazwyHostow(lista []hosts.Host) []string {
-	nazwy := make([]string, 0, len(lista))
-	for _, host := range lista {
-		nazwy = append(nazwy, host.Hostname)
+func hostNames(list []hosts.Host) []string {
+	names := make([]string, 0, len(list))
+	for _, host := range list {
+		names = append(names, host.Hostname)
 	}
-	return nazwy
+	return names
 }
 
-// rozmiarProbkiPodgladu ogranicza probke pokazywana przy podgladzie.
-const rozmiarProbkiPodgladu = 12
+// previewSampleSize bounds the sample shown in the preview.
+const previewSampleSize = 12
 
 func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign")
@@ -486,12 +495,13 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": targets, "count": len(targets)})
 }
 
-// handleCampaignTimeline zwraca trwaly przebieg kampanii.
+// handleCampaignTimeline returns the durable course of a campaign.
 //
-// Raport mowi, jak sie skonczylo. Przebieg mowi, jak szlo - i to on jest
-// potrzebny w trakcie: kiedy ruszylo canary, ktory host padl jako pierwszy
-// i o ktorej kampania sie zatrzymala. Powiadomienia tego nie utrzymaja, bo
-// zdarzenie wyslane w chwili restartu panelu nie istnieje juz nigdzie.
+// The report says how it ended. The course says how it went - and that is
+// what is needed during: when the canary started, which host failed first
+// and at what time the campaign stopped. Notifications will not hold this,
+// because an event sent at the moment of a panel restart exists nowhere any
+// more.
 func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -501,66 +511,66 @@ func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		limit = 0
 	}
-	przebieg, err := s.campaigns.Course(r.Context(), campaign.ID, limit)
+	course, err := s.campaigns.Course(r.Context(), campaign.ID, limit)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": przebieg, "count": len(przebieg)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": course, "count": len(course)})
 }
 
-// handleCampaignPlans grupuje plany hostow po ich odcisku.
+// handleCampaignPlans groups the host plans by their fingerprint.
 //
-// Zgoda dotyczy zestawu planow, a nie jednego payloadu, wiec operator musi go
-// zobaczyc przed decyzja. Lista stu hostow z identycznym diffem nie jest
-// jednak wiedza - jest scianą tekstu. Grupujemy po odcisku planu: jedna
-// pozycja to jeden rzeczywisty ksztalt zmiany razem z lista hostow, ktore go
-// dostana.
+// The approval covers a set of plans, not one payload, so the operator must
+// see it before deciding. A list of a hundred hosts with an identical diff
+// is not knowledge though - it is a wall of text. Grouping goes by plan
+// fingerprint: one item is one real shape of the change together with the
+// list of hosts that get it.
 func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
 		return
 	}
-	wpisy, err := s.campaigns.PlansWithContent(r.Context(), campaign.ID)
+	entries, err := s.campaigns.PlansWithContent(r.Context(), campaign.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 
-	type grupaPlanow struct {
+	type planGroup struct {
 		PlanHash string          `json:"plan_hash"`
 		Count    int             `json:"count"`
 		Hosts    []string        `json:"hosts"`
 		Plan     json.RawMessage `json:"plan,omitempty"`
 	}
-	kolejnosc := []string{}
-	wedlug := map[string]*grupaPlanow{}
-	for _, wpis := range wpisy {
-		grupa, mamy := wedlug[wpis.PlanHash]
-		if !mamy {
-			grupa = &grupaPlanow{PlanHash: wpis.PlanHash, Plan: wpis.Plan}
-			wedlug[wpis.PlanHash] = grupa
-			kolejnosc = append(kolejnosc, wpis.PlanHash)
+	order := []string{}
+	by := map[string]*planGroup{}
+	for _, entry := range entries {
+		group, present := by[entry.PlanHash]
+		if !present {
+			group = &planGroup{PlanHash: entry.PlanHash, Plan: entry.Plan}
+			by[entry.PlanHash] = group
+			order = append(order, entry.PlanHash)
 		}
-		grupa.Count++
-		// Lista hostow jest tu istotna, ale nie musi byc pelna sciana:
-		// pierwsze nazwy wystarcza, zeby poznac, kogo grupa dotyczy.
-		if len(grupa.Hosts) < 20 {
-			grupa.Hosts = append(grupa.Hosts, orDefault(wpis.Hostname, wpis.HostID))
+		group.Count++
+		// The host list matters here, but need not be a full wall: the first
+		// names are enough to learn whom the group concerns.
+		if len(group.Hosts) < 20 {
+			group.Hosts = append(group.Hosts, orDefault(entry.Hostname, entry.HostID))
 		}
 	}
-	grupy := make([]grupaPlanow, 0, len(kolejnosc))
-	for _, hash := range kolejnosc {
-		grupy = append(grupy, *wedlug[hash])
+	groups := make([]planGroup, 0, len(order))
+	for _, hash := range order {
+		groups = append(groups, *by[hash])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": grupy, "count": len(grupy), "hosts": len(wpisy),
+		"items": groups, "count": len(groups), "hosts": len(entries),
 		"plan_set_hash": campaign.PlanSetHash,
 	})
 }
 
-// handleCampaignReport buduje raport koncowy: wersje stanu, podzial na fale
-// i liste hostow, ktore wymagaja uwagi.
+// handleCampaignReport builds the final report: the state totals, the
+// split into waves and the list of hosts that need attention.
 func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -618,10 +628,10 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := authz.FromContext(r.Context())
 
-	// Zgoda dotyczy tego, co zatwierdzajacy zobaczyl: tej operacji, tego
-	// payloadu, tej listy hostow i tej polityki rozwijania. Odcisk jest
-	// jedynym dowodem, ze patrzyl na to samo - bez niego zgoda odnosilaby sie
-	// do samego identyfikatora kampanii.
+	// The approval covers what the approver saw: this operation, this
+	// payload, this host list and this rollout policy. The fingerprint is the
+	// only proof they looked at the same thing - without it the approval
+	// would refer to the campaign identifier alone.
 	var request struct {
 		ApprovalFingerprint string `json:"approval_fingerprint"`
 	}
@@ -643,8 +653,8 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Zasada drugiej osoby obowiazuje takze kampanie, i to tym bardziej:
-	// jedno zatwierdzenie uruchamia zmiane na wielu hostach.
+	// The second-person rule binds campaigns too, and all the more: one
+	// approval starts a change on many hosts.
 	if s.campaignNeedsSecondPerson(r, campaign) && campaign.CreatedBy == principal.Subject {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: principal.Subject,
@@ -737,12 +747,13 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 
-	// Kampania zatrzymana jednym zapisem nie zamyka hostow po kolei, wiec
-	// nie ma gdzie oddac tokenow. Oddajemy je tutaj: pojemnosc trzymana przez
-	// kampanie, ktora juz nic nie robi, zatrzymuje nastepna.
-	if operation == "cancel" && s.budzety != nil {
-		if err := s.budzety.ReleaseClaimant(r.Context(), "campaign:"+campaign.ID); err != nil {
-			s.log.Error("nie zwolniono pojemnosci anulowanej kampanii",
+	// A campaign stopped with one write does not close the hosts one by one,
+	// so it has nowhere to return the tokens. They are returned here: the
+	// capacity held by a campaign that does nothing any more stops the next
+	// one.
+	if operation == "cancel" && s.budgets != nil {
+		if err := s.budgets.ReleaseClaimant(r.Context(), "campaign:"+campaign.ID); err != nil {
+			s.log.Error("the capacity of the cancelled campaign was not released",
 				"campaign_id", campaign.ID, "err", err)
 		}
 	}
@@ -756,7 +767,8 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// campaignFor wczytuje kampanie i sprawdza uprawnienie w zakresie jej celow.
+// campaignFor loads the campaign and checks the permission in the scope of
+// its targets.
 func (s *Server) campaignFor(w http.ResponseWriter, r *http.Request,
 	permission authz.Permission) (*campaigns.Campaign, bool) {
 	campaignID := r.PathValue("id")
@@ -781,9 +793,9 @@ func (s *Server) campaignFor(w http.ResponseWriter, r *http.Request,
 	return campaign, true
 }
 
-// campaignScope zwraca zakres obejmujacy wszystkie cele kampanii. Gdy cele leza
-// w roznych zakresach, wymagane jest uprawnienie globalne: kampania jest
-// operacja na calej wskazanej czesci floty.
+// campaignScope returns the scope covering all the campaign targets. When
+// the targets lie in different scopes, the global permission is required: a
+// campaign is an operation on the whole named part of the fleet.
 func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope, error) {
 	targets, err := s.campaigns.Targets(r.Context(), campaignID)
 	if err != nil {
@@ -809,11 +821,12 @@ func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope,
 	return scope, nil
 }
 
-// campaignNeedsSecondPerson mowi, czy kampania dotyka srodowiska produkcyjnego.
+// campaignNeedsSecondPerson says whether the campaign touches a production
+// environment.
 func (s *Server) campaignNeedsSecondPerson(r *http.Request, campaign *campaigns.Campaign) bool {
 	targets, err := s.campaigns.Targets(r.Context(), campaign.ID)
 	if err != nil {
-		// Brak wiedzy o celach nie moze oslabiac kontroli.
+		// Missing knowledge about the targets must not weaken the control.
 		return true
 	}
 	for _, target := range targets {
@@ -828,12 +841,13 @@ func (s *Server) campaignNeedsSecondPerson(r *http.Request, campaign *campaigns.
 	return false
 }
 
-// wartoscLubDomyslna rozni sie od valueOr jedna rzecza: zero jest tu decyzja,
-// a nie brakiem wartosci. Kampania bez canary jest sensowna, tak jak kampania
-// bez progu procentowego - i tak wlasnie wygladaja domyslne profile
-// z dokumentu. Ciche podstawienie wartosci zmienialoby polityke, o ktora
-// operator prosil, a odcisk zatwierdzenia obejmowalby juz co innego.
-func wartoscLubDomyslna(value *int, fallback int) int {
+// valueOrDefault differs from valueOr in one thing: zero is a decision
+// here, not a missing value. A campaign without a canary makes sense, just
+// like a campaign without a percentage threshold - and that is exactly how
+// the default profiles from the document look. Quietly substituting a value
+// would change the policy the operator asked for, and the approval
+// fingerprint would already cover something else.
+func valueOrDefault(value *int, fallback int) int {
 	if value == nil || *value < 0 {
 		return fallback
 	}
@@ -854,8 +868,8 @@ func orDefault(value, fallback string) string {
 	return value
 }
 
-// campaignScopes przenosi zakresy tozsamosci do warstwy magazynu. Zakres
-// globalny znosi zawezenie, wiec wystarczy go przekazac tak, jak jest.
+// campaignScopes carries the principal scopes to the store layer. The
+// global scope lifts the narrowing, so it is enough to pass it as it is.
 func campaignScopes(principal authz.Principal) []campaigns.Scope {
 	scopes := principal.ScopesFor(authz.PermCampaignRead)
 	result := make([]campaigns.Scope, 0, len(scopes))

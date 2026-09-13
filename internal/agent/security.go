@@ -24,10 +24,10 @@ func SetSecurityProbe(probe func(context.Context) (security.Snapshot, error)) {
 // helperFactCodes translates the fact names of the module into the enumeration
 // of the protocol.
 var helperFactCodes = map[string]helperv1.SecurityRequest_Fact{
-	security.FaktProfileAppArmor:   helperv1.SecurityRequest_FACT_APPARMOR_PROFILES,
-	security.FaktRegulyAudytu:      helperv1.SecurityRequest_FACT_AUDIT_RULES,
-	security.FaktSecureBoot:        helperv1.SecurityRequest_FACT_SECURE_BOOT,
-	security.FaktWlascicieleGniazd: helperv1.SecurityRequest_FACT_SOCKET_OWNERS,
+	security.FactAppArmorProfiles: helperv1.SecurityRequest_FACT_APPARMOR_PROFILES,
+	security.FactAuditRules:       helperv1.SecurityRequest_FACT_AUDIT_RULES,
+	security.FactSecureBoot:       helperv1.SecurityRequest_FACT_SECURE_BOOT,
+	security.FactSocketOwners:     helperv1.SecurityRequest_FACT_SOCKET_OWNERS,
 }
 
 // CollectSecurity reads the protection state of the host.
@@ -38,8 +38,8 @@ var helperFactCodes = map[string]helperv1.SecurityRequest_Fact{
 // module does not go through root as a whole just because part of its picture
 // needs it.
 func (e *TaskExecutor) CollectSecurity(ctx context.Context) security.Snapshot {
-	snapshot := security.Zbierz(ctx, commandOutput)
-	missing := snapshot.Brakujace()
+	snapshot := security.Collect(ctx, commandOutput)
+	missing := snapshot.MissingFacts()
 	if len(missing) == 0 {
 		return snapshot
 	}
@@ -78,7 +78,7 @@ func (e *TaskExecutor) CollectSecurity(ctx context.Context) security.Snapshot {
 		return snapshot
 	}
 
-	var supplement security.Uzupelnienie
+	var supplement security.Supplement
 	data := response.GetSecurityResult().GetFacts()
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &supplement); err != nil {
@@ -88,7 +88,7 @@ func (e *TaskExecutor) CollectSecurity(ctx context.Context) security.Snapshot {
 			return snapshot
 		}
 	}
-	return snapshot.Uzupelnij(supplement)
+	return snapshot.Supplemented(supplement)
 }
 
 // ProbeSecurity reads the protection state of the host for the inventory.

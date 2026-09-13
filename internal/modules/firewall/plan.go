@@ -8,174 +8,181 @@ import (
 	"sort"
 )
 
-// Plan opisuje roznice miedzy regula zastana a zadana na jednym hoscie.
+// Plan describes the difference between the rule found and the one
+// requested on a single host.
 //
-// Ta sama regula zamowiona na dwoch hostach prawie nigdy nie jest ta sama
-// zmiana: jeden host juz ja ma, drugi ma ja w innym ksztalcie, trzeci nie ma
-// jej wcale - a kazdy ma inny zestaw regul, wobec ktorego zmiana sie liczy.
-// Zgoda operatora ma dotyczyc tych roznic, a nie samego zamiaru.
+// The same rule ordered on two hosts is almost never the same change: one
+// host already has it, another has it in a different shape, a third does
+// not have it at all - and each has a different ruleset the change counts
+// against. The operator's approval is meant to cover those differences, not
+// the intent alone.
 type Plan struct {
 	RuleID string `json:"rule_id"`
-	// Action nazywa to, co by sie stalo: create, update, no_change, remove
-	// albo remove_absent.
+	// Action names what would happen: create, update, no_change, remove or
+	// remove_absent.
 	Action string `json:"action"`
 
-	// Current jest regula panelu, ktora host ma teraz. Brak oznacza, ze host
-	// tej reguly nie zna.
+	// Current is the panel rule the host has now. Nil means the host does
+	// not know this rule.
 	Current *RuleSpec `json:"current,omitempty"`
-	// Desired jest regula zadana. Brak przy usuwaniu.
+	// Desired is the requested rule. Nil on removal.
 	Desired *RuleSpec `json:"desired,omitempty"`
-	// Changes wylicza po ludzku, co sie zmieni.
+	// Changes lists in human terms what will change.
 	Changes []string `json:"changes,omitempty"`
 
-	// RulesetHash jest odciskiem calego zestawu regul, jaki host mial przy
-	// planowaniu. Zmiana wraca na host z tym odciskiem: zestaw zmieniony po
-	// planowaniu zatrzymuje ja zamiast wejsc na cudza regule.
+	// RulesetHash is the fingerprint of the whole ruleset the host had at
+	// planning. The change comes back to the host with this fingerprint: a
+	// ruleset changed after planning stops it instead of landing on
+	// somebody else's rule.
 	RulesetHash string `json:"ruleset_hash"`
-	// Adapter mowi, jaki mechanizm host ma pod spodem. Plan dla hosta bez
-	// nftables jest odmowa, a nie pusta lista zmian.
+	// Adapter says what mechanism the host has underneath. A plan for a
+	// host without nftables is a refusal, not an empty list of changes.
 	Adapter string `json:"adapter,omitempty"`
-	// Refusal nazywa powod, dla ktorego zmiana nie moze wejsc na ten host:
-	// odcinalaby kanal zarzadzania albo regula nie nalezy do panelu. Plan
-	// z odmowa jest odpowiedzia - operator ma ja zobaczyc przed zgoda.
+	// Refusal names the reason the change cannot land on this host: it
+	// would cut off the management channel or the rule does not belong to
+	// the panel. A plan with a refusal is an answer - the operator is meant
+	// to see it before approving.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanTworzy      = "create"
-	PlanZmienia     = "update"
-	PlanBezZmian    = "no_change"
-	PlanUsuwa       = "remove"
-	PlanJuzUsuniety = "remove_absent"
+	PlanCreate       = "create"
+	PlanUpdate       = "update"
+	PlanNoChange     = "no_change"
+	PlanRemove       = "remove"
+	PlanRemoveAbsent = "remove_absent"
 )
 
-// ZaplanujRegule liczy roznice dla zalozenia albo zmiany reguly.
-func ZaplanujRegule(rejestr Rejestr, zadana RuleSpec, rulesetHash, adapter string) Plan {
-	plan := Plan{RuleID: zadana.ID, RulesetHash: rulesetHash, Adapter: adapter}
-	docelowa := zadana
-	plan.Desired = &docelowa
+// ComputeRule computes the difference for creating or changing a rule.
+func ComputeRule(registry Registry, requested RuleSpec, rulesetHash, adapter string) Plan {
+	plan := Plan{RuleID: requested.ID, RulesetHash: rulesetHash, Adapter: adapter}
+	desired := requested
+	plan.Desired = &desired
 
-	obecna, jest := rejestr.Znajdz(zadana.ID)
+	current, present := registry.Find(requested.ID)
 	switch {
-	case !jest:
-		plan.Action = PlanTworzy
-		plan.Changes = []string{"regula powstanie"}
-	case reflect.DeepEqual(znormalizuj(obecna), znormalizuj(zadana)):
-		zastana := obecna
-		plan.Current = &zastana
-		plan.Action = PlanBezZmian
+	case !present:
+		plan.Action = PlanCreate
+		plan.Changes = []string{"the rule will be created"}
+	case reflect.DeepEqual(normalise(current), normalise(requested)):
+		found := current
+		plan.Current = &found
+		plan.Action = PlanNoChange
 	default:
-		zastana := obecna
-		plan.Current = &zastana
-		plan.Action = PlanZmienia
-		plan.Changes = roznice(obecna, zadana)
+		found := current
+		plan.Current = &found
+		plan.Action = PlanUpdate
+		plan.Changes = differences(current, requested)
 	}
-	plan.PlanHash = odciskPlanu(plan)
+	plan.PlanHash = planFingerprint(plan)
 	return plan
 }
 
-// ZaplanujUsuniecie liczy roznice dla usuniecia reguly.
-func ZaplanujUsuniecie(rejestr Rejestr, id, rulesetHash, adapter string) Plan {
+// ComputeRemoval computes the difference for removing a rule.
+func ComputeRemoval(registry Registry, id, rulesetHash, adapter string) Plan {
 	plan := Plan{RuleID: id, RulesetHash: rulesetHash, Adapter: adapter}
-	obecna, jest := rejestr.Znajdz(id)
-	if !jest {
-		// Usuniecie reguly, ktorej host nie zna, nie jest bledem i nie jest
-		// zmiana. Operator ma to zobaczyc przed zatwierdzeniem.
-		plan.Action = PlanJuzUsuniety
+	current, present := registry.Find(id)
+	if !present {
+		// Removing a rule the host does not know is not an error and not a
+		// change. The operator is meant to see it before approving.
+		plan.Action = PlanRemoveAbsent
 	} else {
-		zastana := obecna
-		plan.Current = &zastana
-		plan.Action = PlanUsuwa
+		found := current
+		plan.Current = &found
+		plan.Action = PlanRemove
 	}
-	plan.PlanHash = odciskPlanu(plan)
+	plan.PlanHash = planFingerprint(plan)
 	return plan
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu roznic - na przyklad
-// ochrone kanalu zarzadzania - i liczy odcisk na nowo: plan z odmowa jest
-// inna odpowiedzia niz plan bez niej.
-func (p *Plan) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(*p)
+// Refuse records a refusal reason learned after the differences were
+// computed - for example the management channel protection - and
+// recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
+func (p *Plan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(*p)
 }
 
-// Znajdz zwraca regule panelu o danym identyfikatorze.
-func (r Rejestr) Znajdz(id string) (RuleSpec, bool) {
-	for _, regula := range r.Rules {
-		if regula.ID == id {
-			return regula, true
+// Find returns the panel rule with the given identifier.
+func (r Registry) Find(id string) (RuleSpec, bool) {
+	for _, rule := range r.Rules {
+		if rule.ID == id {
+			return rule, true
 		}
 	}
 	return RuleSpec{}, false
 }
 
-// znormalizuj sprowadza regule do postaci porownywalnej: kolejnosc portow
-// i zrodel nie jest decyzja operatora.
-func znormalizuj(regula RuleSpec) RuleSpec {
-	kopia := regula
-	kopia.Ports = append([]string(nil), regula.Ports...)
-	kopia.Sources = append([]string(nil), regula.Sources...)
-	sort.Strings(kopia.Ports)
-	sort.Strings(kopia.Sources)
-	if len(kopia.Ports) == 0 {
-		kopia.Ports = nil
+// normalise brings a rule to a comparable form: the order of ports and
+// sources is not the operator's decision.
+func normalise(rule RuleSpec) RuleSpec {
+	copied := rule
+	copied.Ports = append([]string(nil), rule.Ports...)
+	copied.Sources = append([]string(nil), rule.Sources...)
+	sort.Strings(copied.Ports)
+	sort.Strings(copied.Sources)
+	if len(copied.Ports) == 0 {
+		copied.Ports = nil
 	}
-	if len(kopia.Sources) == 0 {
-		kopia.Sources = nil
+	if len(copied.Sources) == 0 {
+		copied.Sources = nil
 	}
-	return kopia
+	return copied
 }
 
-// roznice wylicza zmiany widoczne dla czlowieka.
-func roznice(obecna, zadana RuleSpec) []string {
-	a, b := znormalizuj(obecna), znormalizuj(zadana)
-	var zmiany []string
+// differences lists the changes visible to a human.
+func differences(current, requested RuleSpec) []string {
+	a, b := normalise(current), normalise(requested)
+	var changes []string
 	if a.Chain != b.Chain {
-		zmiany = append(zmiany, "lancuch z "+a.Chain+" na "+b.Chain)
+		changes = append(changes, "chain from "+a.Chain+" to "+b.Chain)
 	}
 	if a.Action != b.Action {
-		zmiany = append(zmiany, "dzialanie z "+a.Action+" na "+b.Action)
+		changes = append(changes, "action from "+a.Action+" to "+b.Action)
 	}
 	if a.Protocol != b.Protocol {
-		zmiany = append(zmiany, "protokol z "+lubDowolny(a.Protocol)+" na "+lubDowolny(b.Protocol))
+		changes = append(changes, "protocol from "+orAny(a.Protocol)+" to "+orAny(b.Protocol))
 	}
 	if !reflect.DeepEqual(a.Ports, b.Ports) {
-		zmiany = append(zmiany, "porty")
+		changes = append(changes, "ports")
 	}
 	if !reflect.DeepEqual(a.Sources, b.Sources) {
-		zmiany = append(zmiany, "zrodla")
+		changes = append(changes, "sources")
 	}
 	if a.Interface != b.Interface {
-		zmiany = append(zmiany, "interfejs z "+lubDowolny(a.Interface)+" na "+lubDowolny(b.Interface))
+		changes = append(changes, "interface from "+orAny(a.Interface)+" to "+orAny(b.Interface))
 	}
 	if a.Comment != b.Comment {
-		zmiany = append(zmiany, "komentarz")
+		changes = append(changes, "comment")
 	}
-	sort.Strings(zmiany)
-	return zmiany
+	sort.Strings(changes)
+	return changes
 }
 
-func lubDowolny(wartosc string) string {
-	if wartosc == "" {
-		return "dowolny"
+func orAny(value string) string {
+	if value == "" {
+		return "any"
 	}
-	return wartosc
+	return value
 }
 
-// odciskPlanu liczy odcisk planu poza samym odciskiem.
+// planFingerprint computes the plan fingerprint excluding the fingerprint
+// itself.
 //
-// Obejmuje odcisk zestawu regul: ten sam diff policzony wobec innego zestawu
-// jest inna zmiana, bo wchodzi w inne sasiedztwo regul.
-func odciskPlanu(plan Plan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// It covers the ruleset fingerprint: the same diff computed against a
+// different ruleset is a different change, because it enters a different
+// neighbourhood of rules.
+func planFingerprint(plan Plan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

@@ -24,7 +24,7 @@ const queryTimeout = 5 * time.Second
 // chronyc talks to the daemon over the loopback, and the time configuration
 // files are readable by everyone.
 func CollectTime(ctx context.Context) hosttime.Snapshot {
-	return hosttime.Zbierz(ctx, commandOutput)
+	return hosttime.Collect(ctx, commandOutput)
 }
 
 // applyTime performs the operations of the time module.
@@ -45,15 +45,15 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 	// test is here and not in the helper, because it needs no root - the helper
 	// checks what concerns the safety of the write, that is the shape of the
 	// entries themselves.
-	var probes []hosttime.Pomiar
+	var probes []hosttime.Probe
 	if action == opspec.ActionTimeConfigApply {
-		probes = hosttime.ZapytajWiele(callCtx, payload.Servers, queryTimeout)
-		if hosttime.Osiagalne(probes) == 0 {
+		probes = hosttime.QueryMany(callCtx, payload.Servers, queryTimeout)
+		if hosttime.Reachable(probes) == 0 {
 			return timeRefusal(task, RejectPrecondition,
 				"none of the given time servers answered: "+describeProbes(probes), probes)
 		}
-		best := hosttime.NajlepszyPomiar(probes)
-		if hosttime.Skok(best) && !payload.AllowStep {
+		best := hosttime.BestProbe(probes)
+		if hosttime.Steps(best) && !payload.AllowStep {
 			return timeRefusal(task, RejectPrecondition, fmt.Sprintf(
 				"the change will move the clock by %s against %s; a time step revokes "+
 					"the validity of tokens and certificates, so it needs explicit consent",
@@ -128,7 +128,7 @@ func (e *TaskExecutor) testTime(ctx context.Context, task *agentv1.TaskEnvelope,
 			"this host has no time server configured", nil)
 	}
 
-	probes := hosttime.ZapytajWiele(ctx, servers, queryTimeout)
+	probes := hosttime.QueryMany(ctx, servers, queryTimeout)
 	snapshot.Probes = probes
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -181,20 +181,20 @@ func serversFromConfiguration(snapshot hosttime.Snapshot) []string {
 }
 
 func limitList(servers []string) []string {
-	if len(servers) > hosttime.LimitSerwerow {
-		return servers[:hosttime.LimitSerwerow]
+	if len(servers) > hosttime.ServerLimit {
+		return servers[:hosttime.ServerLimit]
 	}
 	return servers
 }
 
 // describeProbes sums the result of the test up in one sentence.
-func describeProbes(probes []hosttime.Pomiar) string {
+func describeProbes(probes []hosttime.Probe) string {
 	if len(probes) == 0 {
 		return "no question was asked"
 	}
-	reachable := hosttime.Osiagalne(probes)
+	reachable := hosttime.Reachable(probes)
 	description := strconv.Itoa(reachable) + " of " + strconv.Itoa(len(probes)) + " servers answered"
-	if best := hosttime.NajlepszyPomiar(probes); best != nil {
+	if best := hosttime.BestProbe(probes); best != nil {
 		description += "; offset " + seconds(best.OffsetSeconds) + " against " + best.Server
 	}
 	return description
@@ -208,7 +208,7 @@ func seconds(value *float64) string {
 	return strconv.FormatFloat(*value, 'f', 6, 64) + " s"
 }
 
-func encodeProbes(probes []hosttime.Pomiar) []byte {
+func encodeProbes(probes []hosttime.Probe) []byte {
 	if len(probes) == 0 {
 		return nil
 	}
@@ -221,7 +221,7 @@ func encodeProbes(probes []hosttime.Pomiar) []byte {
 
 // timeRefusal returns a refusal together with the probes that justify it.
 func timeRefusal(task *agentv1.TaskEnvelope, code, message string,
-	probes []hosttime.Pomiar) *agentv1.TaskResult {
+	probes []hosttime.Probe) *agentv1.TaskResult {
 	result := rejected(agentv1.TaskResult_STATUS_REJECTED, code, message)
 	result.TaskId = task.GetTaskId()
 	result.TimeResult = &agentv1.TimeResult{Message: message, Probes: encodeProbes(probes)}

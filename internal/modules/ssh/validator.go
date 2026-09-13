@@ -7,82 +7,82 @@ import (
 	"strings"
 )
 
-// Wzorzec konta dopuszcza forme "uzytkownik@host" i gwiazdke, bo tak dziala
-// AllowUsers w sshd - i to jest cala jego skladnia.
-var wzorzecKonta = regexp.MustCompile(`^[A-Za-z0-9_.*?@-]{1,64}$`)
+// The account pattern allows the "user@host" form and the asterisk, because
+// that is how AllowUsers works in sshd - and that is its whole syntax.
+var accountPattern = regexp.MustCompile(`^[A-Za-z0-9_.*?@-]{1,64}$`)
 
-// Wartosci logiczne sshd. "prohibit-password" nie jest ani yes, ani no,
-// wiec wartosci trzymamy jako tekst i sprawdzamy z listy.
+// sshd boolean values. "prohibit-password" is neither yes nor no, so the
+// values are kept as text and checked against a list.
 var (
-	wartosciLogiczne = map[string]bool{"yes": true, "no": true}
-	wartosciRoota    = map[string]bool{
+	booleanValues = map[string]bool{"yes": true, "no": true}
+	rootValues    = map[string]bool{
 		"yes": true, "no": true, "prohibit-password": true, "forced-commands-only": true,
 	}
 )
 
-// Waliduj sprawdza zmiane konfiguracji przed zapisem.
-func Waliduj(ustawienia Ustawienia) error {
-	if ustawienia.Port != "" {
-		port, err := strconv.Atoi(ustawienia.Port)
+// Validate checks a configuration change before the write.
+func Validate(settings Settings) error {
+	if settings.Port != "" {
+		port, err := strconv.Atoi(settings.Port)
 		if err != nil || port < 1 || port > 65535 {
-			return fmt.Errorf("port %q jest poza zakresem 1-65535", ustawienia.Port)
+			return fmt.Errorf("port %q is outside the range 1-65535", settings.Port)
 		}
 	}
-	if ustawienia.PermitRootLogin != "" && !wartosciRoota[ustawienia.PermitRootLogin] {
-		return fmt.Errorf("nieobslugiwana wartosc PermitRootLogin %q", ustawienia.PermitRootLogin)
+	if settings.PermitRootLogin != "" && !rootValues[settings.PermitRootLogin] {
+		return fmt.Errorf("unsupported PermitRootLogin value %q", settings.PermitRootLogin)
 	}
-	for nazwa, wartosc := range map[string]string{
-		"PasswordAuthentication":       ustawienia.PasswordAuthentication,
-		"PubkeyAuthentication":         ustawienia.PubkeyAuthentication,
-		"KbdInteractiveAuthentication": ustawienia.KbdInteractive,
+	for name, value := range map[string]string{
+		"PasswordAuthentication":       settings.PasswordAuthentication,
+		"PubkeyAuthentication":         settings.PubkeyAuthentication,
+		"KbdInteractiveAuthentication": settings.KbdInteractive,
 	} {
-		if wartosc != "" && !wartosciLogiczne[wartosc] {
-			return fmt.Errorf("%s przyjmuje yes albo no, nie %q", nazwa, wartosc)
+		if value != "" && !booleanValues[value] {
+			return fmt.Errorf("%s accepts yes or no, not %q", name, value)
 		}
 	}
-	if ustawienia.MaxAuthTries != "" {
-		proby, err := strconv.Atoi(ustawienia.MaxAuthTries)
-		if err != nil || proby < 1 || proby > 100 {
-			return fmt.Errorf("MaxAuthTries %q jest poza zakresem 1-100", ustawienia.MaxAuthTries)
+	if settings.MaxAuthTries != "" {
+		tries, err := strconv.Atoi(settings.MaxAuthTries)
+		if err != nil || tries < 1 || tries > 100 {
+			return fmt.Errorf("MaxAuthTries %q is outside the range 1-100", settings.MaxAuthTries)
 		}
 	}
-	for _, lista := range [][]string{ustawienia.AllowUsers, ustawienia.DenyUsers} {
-		for _, wpis := range lista {
-			if !wzorzecKonta.MatchString(wpis) {
-				return fmt.Errorf("nieprawidlowy wzorzec konta %q", wpis)
+	for _, list := range [][]string{settings.AllowUsers, settings.DenyUsers} {
+		for _, entry := range list {
+			if !accountPattern.MatchString(entry) {
+				return fmt.Errorf("invalid account pattern %q", entry)
 			}
 		}
 	}
-	for _, grupa := range ustawienia.AllowGroups {
-		if !wzorzecKonta.MatchString(grupa) {
-			return fmt.Errorf("nieprawidlowa nazwa grupy %q", grupa)
+	for _, group := range settings.AllowGroups {
+		if !accountPattern.MatchString(group) {
+			return fmt.Errorf("invalid group name %q", group)
 		}
 	}
 	return nil
 }
 
-// OdcinaWszystkieMetody mowi, czy po zmianie zostanie choc jedna metoda
-// uwierzytelnienia.
+// CutsOffAllMethods says whether at least one authentication method remains
+// after the change.
 //
-// Serwer, do ktorego nie da sie zalogowac zadna metoda, nie jest
-// zabezpieczony - jest niedostepny. To nie to samo i panel nie moze zrobic
-// z jednego drugiego przez przeoczenie.
-func OdcinaWszystkieMetody(chciane Ustawienia, stan Snapshot) bool {
-	wartosc := func(chciana, obecna string) string {
-		if chciana != "" {
-			return chciana
+// A server nobody can log into by any method is not secured - it is
+// unavailable. These are not the same, and the panel must not turn one into
+// the other by oversight.
+func CutsOffAllMethods(desired Settings, state Snapshot) bool {
+	value := func(wanted, current string) string {
+		if wanted != "" {
+			return wanted
 		}
-		return obecna
+		return current
 	}
-	haslo := wartosc(chciane.PasswordAuthentication, stan.PasswordAuthentication)
-	klucz := wartosc(chciane.PubkeyAuthentication, stan.PubkeyAuthentication)
-	interaktywna := wartosc(chciane.KbdInteractive, stan.KbdInteractive)
-	// GSSAPI zostawiamy po stronie stanu: panel go nie ustawia, ale host
-	// w domenie moze na nim polegac.
-	gssapi := stan.GSSAPIAuthentication
+	password := value(desired.PasswordAuthentication, state.PasswordAuthentication)
+	pubkey := value(desired.PubkeyAuthentication, state.PubkeyAuthentication)
+	interactive := value(desired.KbdInteractive, state.KbdInteractive)
+	// GSSAPI is left to the state: the panel does not set it, but a
+	// domain-joined host may rely on it.
+	gssapi := state.GSSAPIAuthentication
 
-	for _, metoda := range []string{haslo, klucz, interaktywna, gssapi} {
-		if strings.EqualFold(metoda, "yes") {
+	for _, method := range []string{password, pubkey, interactive, gssapi} {
+		if strings.EqualFold(method, "yes") {
 			return false
 		}
 	}

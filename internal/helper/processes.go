@@ -15,8 +15,8 @@ import (
 // PID numbers.
 func (s *Server) signalProcess(_ context.Context, _ *helperv1.HelperRequest,
 	action *helperv1.ProcessSignalRequest) *helperv1.HelperResponse {
-	err := processes.Wyslij("/proc", action.GetPid(), action.GetExpectedStartTicks(),
-		action.GetSignal(), processes.Chronione{Wlasne: processes.WlasnePID()})
+	err := processes.Send("/proc", action.GetPid(), action.GetExpectedStartTicks(),
+		action.GetSignal(), processes.Protected{Own: processes.OwnPIDs()})
 	if err != nil {
 		return reject(ErrorUnsupported, err.Error())
 	}

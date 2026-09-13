@@ -436,7 +436,7 @@ func TestWidokFlotyMaOsWaznosci(t *testing.T) {
 		okna[okno.Reason] = okno.Count
 		suma += okno.Count
 	}
-	for _, nazwa := range []string{"wygasle", "7 dni", "30 dni", "90 dni", "pozniej", "bez terminu"} {
+	for _, nazwa := range []string{"expired", "7 days", "30 days", "90 days", "later", "no expiry"} {
 		if _, mamy := okna[nazwa]; !mamy {
 			t.Errorf("os nie ma okna %q: %+v", widok.Timeline, nazwa)
 		}
@@ -454,7 +454,7 @@ func TestWidokFlotyMaOsWaznosci(t *testing.T) {
 			bezTerminu++
 		}
 	}
-	if bezTerminu > 0 && okna["bez terminu"] == 0 {
+	if bezTerminu > 0 && okna["no expiry"] == 0 {
 		t.Errorf("certyfikaty bez terminu (%d) nie trafily do wlasnego okna", bezTerminu)
 	}
 }

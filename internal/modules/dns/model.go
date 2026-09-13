@@ -1,55 +1,57 @@
-// Package dns opisuje resolver hosta.
+// Package dns describes the host resolver.
 //
-// Modul dotyczy wylacznie tego, jak host rozwiazuje nazwy. Rekordy w katalogu
-// to osobny zakres i osobne uprawnienia: wpis w strefie FreeIPA widza wszyscy
-// klienci domeny, a resolver hosta - tylko ten host.
+// The module covers only how the host resolves names. Records in the
+// directory are a separate scope with separate permissions: a zone entry in
+// FreeIPA is seen by every client of the domain, the host resolver only by
+// this host.
 package dns
 
 import "time"
 
-// Wlasciciele pliku resolv.conf. Wlasciciel rozstrzyga, czy panel w ogole
-// moze cos zmienic: plik zarzadzany przez usluge zostanie i tak nadpisany,
-// wiec zapis w nim byloby zmiana, ktora znika przy nastepnym zdarzeniu sieci.
+// Owners of the resolv.conf file. The owner decides whether the panel may
+// change anything at all: a file managed by a service will be overwritten
+// anyway, so writing into it would be a change that vanishes on the next
+// network event.
 const (
-	WlascicielResolved = "systemd-resolved"
-	WlascicielNM       = "networkmanager"
-	WlascicielDHCP     = "dhcp-client"
-	WlascicielReczny   = "manual"
-	WlascicielNieznany = ""
+	OwnerResolved       = "systemd-resolved"
+	OwnerNetworkManager = "networkmanager"
+	OwnerDHCP           = "dhcp-client"
+	OwnerManual         = "manual"
+	OwnerUnknown        = ""
 )
 
-// Tryby pracy resolvera.
+// Resolver operating modes.
 const (
-	TrybStub    = "stub"
-	TrybStatic  = "static"
-	TrybUplink  = "uplink"
-	TrybPlikowy = "file"
+	ModeStub   = "stub"
+	ModeStatic = "static"
+	ModeUplink = "uplink"
+	ModeFile   = "file"
 )
 
-// Link opisuje resolver przypisany jednemu interfejsowi.
+// Link describes the resolver assigned to a single interface.
 //
-// Per-link DNS jest tu istotny: host w domenie ma zwykle serwer katalogu na
-// jednym interfejsie i serwer dostawcy na drugim, a pytanie "ktory z nich
-// odpowie" ma inna odpowiedz dla kazdej nazwy.
+// Per-link DNS matters here: a domain-joined host usually has the directory
+// server on one interface and the provider's server on the other, and the
+// question "which of them answers" has a different answer for every name.
 type Link struct {
 	Name    string   `json:"name"`
 	Index   int      `json:"index,omitempty"`
 	Servers []string `json:"servers,omitempty"`
 	Domains []string `json:"domains,omitempty"`
-	// DefaultRoute mowi, czy ten link obsluguje nazwy spoza swoich domen.
+	// DefaultRoute says whether this link serves names outside its domains.
 	DefaultRoute *bool  `json:"default_route,omitempty"`
 	DNSSEC       string `json:"dnssec,omitempty"`
 	DNSOverTLS   string `json:"dns_over_tls,omitempty"`
 }
 
-// Snapshot to stan resolvera hosta.
+// Snapshot is the state of the host resolver.
 type Snapshot struct {
-	// Owner mowi, kto pisze resolv.conf. Pusty oznacza wlasciciela
-	// nieustalonego, a nie brak wlasciciela.
+	// Owner says who writes resolv.conf. Empty means the owner is
+	// undetermined, not that there is no owner.
 	Owner string `json:"owner,omitempty"`
 	Mode  string `json:"mode,omitempty"`
-	// ResolvConf i ResolvConfTarget opisuja sam plik: operator ma wiedziec,
-	// czy patrzy na plik, czy na dowiazanie do stubu.
+	// ResolvConf and ResolvConfTarget describe the file itself: the operator
+	// needs to know whether they look at a file or at a symlink to the stub.
 	ResolvConf       string   `json:"resolv_conf,omitempty"`
 	ResolvConfTarget string   `json:"resolv_conf_target,omitempty"`
 	Servers          []string `json:"servers,omitempty"`
@@ -57,7 +59,7 @@ type Snapshot struct {
 	Links            []Link   `json:"links,omitempty"`
 	DNSSEC           string   `json:"dnssec,omitempty"`
 	DNSOverTLS       string   `json:"dns_over_tls,omitempty"`
-	// Writable mowi, czy panel potrafi tu cokolwiek zmienic i dlaczego nie.
+	// Writable says whether the panel can change anything here and why not.
 	Writable          bool      `json:"writable"`
 	WriteAdapter      string    `json:"write_adapter,omitempty"`
 	ReadOnlyReason    string    `json:"read_only_reason,omitempty"`
@@ -65,14 +67,14 @@ type Snapshot struct {
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// WynikZapytania opisuje pojedynczy test rozwiazywania nazwy.
+// QueryResult describes a single name resolution test.
 //
-// Test jest faktem z hosta, a nie z panelu: panel siedzi w innej sieci i jego
-// odpowiedz nie mowi nic o tym, co zobaczy host.
-type WynikZapytania struct {
+// The test is a fact from the host, not from the panel: the panel sits in a
+// different network and its answer says nothing about what the host sees.
+type QueryResult struct {
 	Name string `json:"name"`
-	// Addresses jest pusta lista, gdy nazwa nie ma adresu - i wtedy Error
-	// mowi dlaczego. Pusta lista bez powodu bylaby cisza.
+	// Addresses is an empty list when the name has no address - and then
+	// Error says why. An empty list without a reason would be silence.
 	Addresses  []string `json:"addresses,omitempty"`
 	Server     string   `json:"server,omitempty"`
 	Error      string   `json:"error,omitempty"`

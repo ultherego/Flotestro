@@ -5,205 +5,208 @@ import (
 	"strings"
 )
 
-// ParsujResolvConf czyta klasyczny plik resolvera.
-func ParsujResolvConf(tresc string) (serwery, domeny []string) {
-	for _, linia := range strings.Split(tresc, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || strings.HasPrefix(linia, "#") || strings.HasPrefix(linia, ";") {
+// ParseResolvConf reads the classic resolver file.
+func ParseResolvConf(content string) (servers, domains []string) {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		pola := strings.Fields(linia)
-		switch pola[0] {
+		fields := strings.Fields(line)
+		switch fields[0] {
 		case "nameserver":
-			if len(pola) > 1 {
-				serwery = append(serwery, pola[1])
+			if len(fields) > 1 {
+				servers = append(servers, fields[1])
 			}
 		case "search":
-			domeny = append(domeny, pola[1:]...)
+			domains = append(domains, fields[1:]...)
 		case "domain":
-			// "domain" jest starsza forma pojedynczej domeny wyszukiwania.
-			if len(pola) > 1 {
-				domeny = append(domeny, pola[1])
+			// "domain" is the older form of a single search domain.
+			if len(fields) > 1 {
+				domains = append(domains, fields[1])
 			}
 		}
 	}
-	return serwery, domeny
+	return servers, domains
 }
 
-// WlascicielResolvConf rozstrzyga, kto pisze plik resolvera.
+// ResolvConfOwner decides who writes the resolver file.
 //
-// Wlasciciel decyduje o tym, czy panel moze cokolwiek zmienic: plik nalezacy
-// do uslugi zostanie nadpisany przy nastepnym zdarzeniu sieci, wiec zapis
-// w nim bylby zmiana, ktora znika sama.
-func WlascicielResolvConf(celDowiazania, tresc string) string {
+// The owner decides whether the panel may change anything: a file belonging
+// to a service is overwritten on the next network event, so writing into it
+// would be a change that vanishes on its own.
+func ResolvConfOwner(linkTarget, content string) string {
 	switch {
-	case strings.Contains(celDowiazania, "/systemd/resolve/"):
-		return WlascicielResolved
-	case strings.Contains(celDowiazania, "/NetworkManager/"):
-		return WlascicielNM
+	case strings.Contains(linkTarget, "/systemd/resolve/"):
+		return OwnerResolved
+	case strings.Contains(linkTarget, "/NetworkManager/"):
+		return OwnerNetworkManager
 	}
-	naglowek := strings.ToLower(pierwszeLinie(tresc, 5))
+	header := strings.ToLower(firstLines(content, 5))
 	switch {
-	case strings.Contains(naglowek, "systemd-resolved"):
-		return WlascicielResolved
-	case strings.Contains(naglowek, "networkmanager"):
-		return WlascicielNM
-	case strings.Contains(naglowek, "dhcpcd"), strings.Contains(naglowek, "dhclient"),
-		strings.Contains(naglowek, "resolvconf"):
-		return WlascicielDHCP
-	case tresc == "":
-		// Pusty plik nie mowi nic o wlascicielu, a zgadywanie "reczny"
-		// zachecaloby panel do pisania po czyms, czego nie rozumie.
-		return WlascicielNieznany
+	case strings.Contains(header, "systemd-resolved"):
+		return OwnerResolved
+	case strings.Contains(header, "networkmanager"):
+		return OwnerNetworkManager
+	case strings.Contains(header, "dhcpcd"), strings.Contains(header, "dhclient"),
+		strings.Contains(header, "resolvconf"):
+		return OwnerDHCP
+	case content == "":
+		// An empty file says nothing about the owner, and guessing "manual"
+		// would encourage the panel to write over something it does not
+		// understand.
+		return OwnerUnknown
 	}
-	return WlascicielReczny
+	return OwnerManual
 }
 
-func pierwszeLinie(tresc string, ile int) string {
-	linie := strings.Split(tresc, "\n")
-	if len(linie) > ile {
-		linie = linie[:ile]
+func firstLines(content string, count int) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > count {
+		lines = lines[:count]
 	}
-	return strings.Join(linie, "\n")
+	return strings.Join(lines, "\n")
 }
 
-// ParsujResolvectl czyta wyjscie "resolvectl status".
+// ParseResolvectl reads the output of "resolvectl status".
 //
-// Format jest przeznaczony dla czlowieka, wiec parser trzyma sie wylacznie
-// etykiet, ktore systemd wypisuje od lat, i nie zaklada kolejnosci sekcji.
-// Wartosci, ktorych nie rozumie, po prostu pomija - lepiej pokazac mniej niz
-// zmyslic per-link DNS, na ktory operator sie potem powola.
-func ParsujResolvectl(wyjscie string) Snapshot {
+// The format is meant for humans, so the parser sticks strictly to the labels
+// systemd has printed for years and assumes no section order. Values it does
+// not understand are simply skipped - better to show less than to invent a
+// per-link DNS the operator will later rely on.
+func ParseResolvectl(output string) Snapshot {
 	snapshot := Snapshot{}
-	var biezacy *Link
+	var current *Link
 
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		bezWciecia := strings.TrimSpace(linia)
-		if bezWciecia == "" {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
-		if bezWciecia == "Global" {
-			biezacy = nil
+		if trimmed == "Global" {
+			current = nil
 			continue
 		}
-		if strings.HasPrefix(bezWciecia, "Link ") {
-			snapshot.Links = append(snapshot.Links, parsujNaglowekLinku(bezWciecia))
-			biezacy = &snapshot.Links[len(snapshot.Links)-1]
+		if strings.HasPrefix(trimmed, "Link ") {
+			snapshot.Links = append(snapshot.Links, parseLinkHeader(trimmed))
+			current = &snapshot.Links[len(snapshot.Links)-1]
 			continue
 		}
 
-		klucz, wartosc, ok := strings.Cut(bezWciecia, ":")
+		key, value, ok := strings.Cut(trimmed, ":")
 		if !ok {
-			// Kontynuacja poprzedniego wiersza: systemd lamie liste
-			// protokolow na dwa wiersze, gdy jest dluga.
-			if strings.Contains(bezWciecia, "DNSSEC=") {
-				if biezacy != nil {
-					przypiszProtokoly(biezacy, bezWciecia)
+			// Continuation of the previous row: systemd wraps the protocol
+			// list onto two rows when it is long.
+			if strings.Contains(trimmed, "DNSSEC=") {
+				if current != nil {
+					assignProtocols(current, trimmed)
 				} else {
-					snapshot.DNSSEC, snapshot.DNSOverTLS = zProtokolow(bezWciecia, snapshot.DNSSEC, snapshot.DNSOverTLS)
+					snapshot.DNSSEC, snapshot.DNSOverTLS = fromProtocols(trimmed, snapshot.DNSSEC, snapshot.DNSOverTLS)
 				}
 			}
 			continue
 		}
-		klucz = strings.TrimSpace(klucz)
-		wartosc = strings.TrimSpace(wartosc)
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 
-		switch klucz {
+		switch key {
 		case "Protocols":
-			if biezacy != nil {
-				przypiszProtokoly(biezacy, wartosc)
+			if current != nil {
+				assignProtocols(current, value)
 			} else {
-				snapshot.DNSSEC, snapshot.DNSOverTLS = zProtokolow(wartosc, snapshot.DNSSEC, snapshot.DNSOverTLS)
+				snapshot.DNSSEC, snapshot.DNSOverTLS = fromProtocols(value, snapshot.DNSSEC, snapshot.DNSOverTLS)
 			}
 		case "resolv.conf mode":
-			snapshot.Mode = wartosc
+			snapshot.Mode = value
 		case "DNS Servers":
-			if biezacy != nil {
-				biezacy.Servers = append(biezacy.Servers, strings.Fields(wartosc)...)
+			if current != nil {
+				current.Servers = append(current.Servers, strings.Fields(value)...)
 			} else {
-				snapshot.Servers = append(snapshot.Servers, strings.Fields(wartosc)...)
+				snapshot.Servers = append(snapshot.Servers, strings.Fields(value)...)
 			}
 		case "Current DNS Server":
-			// Serwer biezacy jest jednym z listy; nie dopisujemy go drugi raz.
+			// The current server is one of the list; it is not added twice.
 		case "DNS Domain":
-			domeny := strings.Fields(wartosc)
-			if biezacy != nil {
-				biezacy.Domains = append(biezacy.Domains, domeny...)
+			domains := strings.Fields(value)
+			if current != nil {
+				current.Domains = append(current.Domains, domains...)
 			} else {
-				snapshot.SearchDomains = append(snapshot.SearchDomains, domeny...)
+				snapshot.SearchDomains = append(snapshot.SearchDomains, domains...)
 			}
 		case "Default Route":
-			if biezacy != nil {
-				wartoscLogiczna := wartosc == "yes"
-				biezacy.DefaultRoute = &wartoscLogiczna
+			if current != nil {
+				flag := value == "yes"
+				current.DefaultRoute = &flag
 			}
 		}
 	}
 	return snapshot
 }
 
-func parsujNaglowekLinku(linia string) Link {
+func parseLinkHeader(line string) Link {
 	// Format: "Link 2 (enp0s3)".
 	link := Link{}
-	pola := strings.Fields(linia)
-	if len(pola) >= 2 {
-		if numer, err := strconv.Atoi(pola[1]); err == nil {
-			link.Index = numer
+	fields := strings.Fields(line)
+	if len(fields) >= 2 {
+		if index, err := strconv.Atoi(fields[1]); err == nil {
+			link.Index = index
 		}
 	}
-	if start := strings.Index(linia, "("); start >= 0 {
-		if koniec := strings.Index(linia[start:], ")"); koniec > 0 {
-			link.Name = linia[start+1 : start+koniec]
+	if start := strings.Index(line, "("); start >= 0 {
+		if end := strings.Index(line[start:], ")"); end > 0 {
+			link.Name = line[start+1 : start+end]
 		}
 	}
 	return link
 }
 
-func przypiszProtokoly(link *Link, wartosc string) {
+func assignProtocols(link *Link, value string) {
 	if link == nil {
 		return
 	}
-	link.DNSSEC, link.DNSOverTLS = zProtokolow(wartosc, link.DNSSEC, link.DNSOverTLS)
+	link.DNSSEC, link.DNSOverTLS = fromProtocols(value, link.DNSSEC, link.DNSOverTLS)
 }
 
-// zProtokolow wyluskuje stan DNSSEC i DNS-over-TLS z wiersza protokolow.
+// fromProtocols extracts the DNSSEC and DNS-over-TLS state from a protocol
+// row.
 //
-// systemd zapisuje je jako "DNSSEC=no/unsupported" i "-DNSOverTLS" albo
-// "+DNSOverTLS". Minus i plus to wylaczone i wlaczone; brak wpisu zostawia
-// stan nieustalony, bo starsze wersje nie wypisuja go wcale.
-func zProtokolow(wartosc, dnssec, dot string) (string, string) {
-	for _, pole := range strings.Fields(wartosc) {
+// systemd writes them as "DNSSEC=no/unsupported" and "-DNSOverTLS" or
+// "+DNSOverTLS". Minus and plus mean disabled and enabled; a missing entry
+// leaves the state undetermined, because older versions do not print it at
+// all.
+func fromProtocols(value, dnssec, dot string) (string, string) {
+	for _, field := range strings.Fields(value) {
 		switch {
-		case strings.HasPrefix(pole, "DNSSEC="):
-			dnssec = strings.TrimPrefix(pole, "DNSSEC=")
-		case pole == "+DNSOverTLS":
+		case strings.HasPrefix(field, "DNSSEC="):
+			dnssec = strings.TrimPrefix(field, "DNSSEC=")
+		case field == "+DNSOverTLS":
 			dot = "yes"
-		case pole == "-DNSOverTLS":
+		case field == "-DNSOverTLS":
 			dot = "no"
-		case strings.HasPrefix(pole, "DNSOverTLS="):
-			dot = strings.TrimPrefix(pole, "DNSOverTLS=")
+		case strings.HasPrefix(field, "DNSOverTLS="):
+			dot = strings.TrimPrefix(field, "DNSOverTLS=")
 		}
 	}
 	return dnssec, dot
 }
 
-// PoprawnaNazwaDoTestu sprawdza nazwe zlecona do rozwiazania.
+// ValidTestName checks a name requested for resolution.
 //
-// Nazwa idzie do polecenia jako argument, wiec musi byc nazwa, a nie
-// czymkolwiek: adres, flaga i sciezka nie sa tu zapytaniem.
-func PoprawnaNazwaDoTestu(nazwa string) bool {
-	if nazwa == "" || len(nazwa) > 253 || strings.HasPrefix(nazwa, "-") {
+// The name goes to the command as an argument, so it has to be a name and
+// not anything else: an address, a flag and a path are not a query here.
+func ValidTestName(name string) bool {
+	if name == "" || len(name) > 253 || strings.HasPrefix(name, "-") {
 		return false
 	}
-	etykiety := strings.Split(strings.TrimSuffix(nazwa, "."), ".")
-	for _, etykieta := range etykiety {
-		if etykieta == "" || len(etykieta) > 63 {
+	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
 			return false
 		}
-		for _, znak := range etykieta {
-			czyDozwolony := (znak >= 'a' && znak <= 'z') || (znak >= 'A' && znak <= 'Z') ||
-				(znak >= '0' && znak <= '9') || znak == '-' || znak == '_'
-			if !czyDozwolony {
+		for _, r := range label {
+			allowed := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+				(r >= '0' && r <= '9') || r == '-' || r == '_'
+			if !allowed {
 				return false
 			}
 		}

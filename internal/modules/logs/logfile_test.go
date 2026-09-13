@@ -7,122 +7,121 @@ import (
 	"testing"
 )
 
-// Panel, ktory potrafi przeczytac dowolny plik roota, potrafi przeczytac
-// klucze prywatne i /etc/shadow. Zakres jest wyliczony, a nie podany
-// w zadaniu.
-func TestAllowlistaOgraniczaZakres(t *testing.T) {
-	allowlist := Allowlist{Wzorce: []string{"/var/log/*.log", "/var/log/syslog"}}
+// A panel that can read any file of root can read private keys and
+// /etc/shadow. The scope is enumerated, not given in the task.
+func TestTheAllowlistLimitsTheScope(t *testing.T) {
+	allowlist := Allowlist{Patterns: []string{"/var/log/*.log", "/var/log/syslog"}}
 
-	for _, sciezka := range []string{"/var/log/nginx.log", "/var/log/syslog"} {
-		if !allowlist.Dozwolona(sciezka) {
-			t.Errorf("odrzucono dozwolona sciezke %q", sciezka)
+	for _, path := range []string{"/var/log/nginx.log", "/var/log/syslog"} {
+		if !allowlist.Allows(path) {
+			t.Errorf("an allowed path %q was rejected", path)
 		}
 	}
-	for _, sciezka := range []string{
+	for _, path := range []string{
 		"/etc/shadow",
 		"/root/.ssh/id_ed25519",
 		"var/log/nginx.log",
 		"/var/log/nginx/access.log",
 	} {
-		if allowlist.Dozwolona(sciezka) {
-			t.Errorf("przyjeto sciezke spoza zakresu %q", sciezka)
+		if allowlist.Allows(path) {
+			t.Errorf("a path outside the scope %q was accepted", path)
 		}
 	}
 }
 
-// Wzorzec opisuje sciezke, a nie to, gdzie ona prowadzi. Sciezka z ".."
-// dopasowuje sie tekstowo do wzorca, a wychodzi poza katalog, ktory ten
-// wzorzec opisuje.
-func TestSciezkaZWyjsciemWGoreJestOdrzucana(t *testing.T) {
-	allowlist := Allowlist{Wzorce: []string{"/var/log/*.log", "/var/log/*"}}
-	for _, sciezka := range []string{
+// A pattern describes the path, not where it leads. A path with ".." matches
+// the pattern textually while leaving the directory the pattern describes.
+func TestAPathClimbingUpIsRejected(t *testing.T) {
+	allowlist := Allowlist{Patterns: []string{"/var/log/*.log", "/var/log/*"}}
+	for _, path := range []string{
 		"/var/log/../../etc/shadow",
 		"/var/log/./syslog",
 		"/var/log//syslog",
 	} {
-		if allowlist.Dozwolona(sciezka) {
-			t.Errorf("przyjeto sciezke %q", sciezka)
+		if allowlist.Allows(path) {
+			t.Errorf("the path %q was accepted", path)
 		}
 	}
 }
 
-// Dowiazanie w katalogu logow pozwoliloby przeczytac dowolny plik roota mimo
-// poprawnej allowlisty.
-func TestOdczytNiePodazaZaDowiazaniem(t *testing.T) {
-	katalog := t.TempDir()
-	tajne := filepath.Join(katalog, "tajne.txt")
-	if err := os.WriteFile(tajne, []byte("haslo\n"), 0o600); err != nil {
+// A symlink in the log directory would allow any file of root to be read
+// despite a correct allowlist.
+func TestTheReadDoesNotFollowASymlink(t *testing.T) {
+	directory := t.TempDir()
+	secret := filepath.Join(directory, "secret.txt")
+	if err := os.WriteFile(secret, []byte("password\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dowiazanie := filepath.Join(katalog, "podszywacz.log")
-	if err := os.Symlink(tajne, dowiazanie); err != nil {
-		t.Skipf("system nie pozwala tworzyc dowiazan: %v", err)
+	link := filepath.Join(directory, "impostor.log")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("the system does not allow creating symlinks: %v", err)
 	}
 
-	allowlist := Allowlist{Wzorce: []string{filepath.Join(katalog, "*.log")}}
-	_, err := Czytaj(allowlist, dowiazanie, 10)
+	allowlist := Allowlist{Patterns: []string{filepath.Join(directory, "*.log")}}
+	_, err := Read(allowlist, link, 10)
 	if err == nil {
-		t.Fatal("odczyt podazyl za dowiazaniem")
+		t.Fatal("the read followed the symlink")
 	}
-	if !strings.Contains(err.Error(), "dowiazanie") {
-		t.Errorf("blad = %v, oczekiwano odmowy z powodu dowiazania", err)
+	if !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("error = %v, expected a refusal because of the symlink", err)
 	}
 }
 
-// Przyczyna awarii jest zwykle przy koncu logu, wiec zwracamy koncowke
-// i mowimy wprost, ze reszta zostala pominieta.
-func TestOdczytZwracaKoncowkeIZaznaczaObciecie(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "duzy.log")
-	var tresc strings.Builder
+// The cause of a failure is usually near the end of the log, so the tail is
+// returned and it is said directly that the rest was skipped.
+func TestTheReadReturnsTheTailAndMarksTheCut(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "big.log")
+	var content strings.Builder
 	for i := 0; i < 50; i++ {
-		tresc.WriteString("linia ")
-		tresc.WriteString(strings.Repeat("x", 10))
-		tresc.WriteString("\n")
+		content.WriteString("line ")
+		content.WriteString(strings.Repeat("x", 10))
+		content.WriteString("\n")
 	}
-	if err := os.WriteFile(sciezka, []byte(tresc.String()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(content.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	allowlist := Allowlist{Wzorce: []string{filepath.Join(katalog, "*.log")}}
-	fragment, err := Czytaj(allowlist, sciezka, 10)
+	allowlist := Allowlist{Patterns: []string{filepath.Join(directory, "*.log")}}
+	fragment, err := Read(allowlist, path, 10)
 	if err != nil {
-		t.Fatalf("odczyt: %v", err)
+		t.Fatalf("read: %v", err)
 	}
 	if len(fragment.Lines) != 10 {
-		t.Errorf("linii = %d, oczekiwano 10", len(fragment.Lines))
+		t.Errorf("lines = %d, expected 10", len(fragment.Lines))
 	}
 	if !fragment.Truncated {
-		t.Error("obciecie nie zostalo zaznaczone")
+		t.Error("the cut was not marked")
 	}
 	if fragment.SizeBytes == 0 {
-		t.Error("rozmiar pliku nie zostal podany")
+		t.Error("the size of the file was not given")
 	}
 }
 
-// Katalog i gniazdo nie sa logiem; odczyt z potoku zawisnalby na zawsze.
-func TestOdczytOdmawiaNiepliku(t *testing.T) {
-	katalog := t.TempDir()
-	podkatalog := filepath.Join(katalog, "logi.log")
-	if err := os.Mkdir(podkatalog, 0o755); err != nil {
+// A directory and a socket are not a log; a read from a pipe would hang
+// forever.
+func TestTheReadRefusesANonFile(t *testing.T) {
+	directory := t.TempDir()
+	subdirectory := filepath.Join(directory, "logs.log")
+	if err := os.Mkdir(subdirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	allowlist := Allowlist{Wzorce: []string{filepath.Join(katalog, "*.log")}}
-	if _, err := Czytaj(allowlist, podkatalog, 10); err == nil {
-		t.Error("odczytano katalog jak plik")
+	allowlist := Allowlist{Patterns: []string{filepath.Join(directory, "*.log")}}
+	if _, err := Read(allowlist, subdirectory, 10); err == nil {
+		t.Error("a directory was read like a file")
 	}
 }
 
-// Brak pliku administratora nie moze znaczyc "wszystko wolno".
-func TestBrakPlikuDajeListeDomyslna(t *testing.T) {
-	allowlist := WczytajAllowliste(filepath.Join(t.TempDir(), "nie-ma.allow"))
-	if len(allowlist.Wzorce) == 0 {
-		t.Fatal("pusty zakres przy braku pliku")
+// A missing administrator file must not mean "everything is allowed".
+func TestAMissingFileGivesTheDefaultList(t *testing.T) {
+	allowlist := LoadAllowlist(filepath.Join(t.TempDir(), "missing.allow"))
+	if len(allowlist.Patterns) == 0 {
+		t.Fatal("an empty scope with a missing file")
 	}
-	if allowlist.Dozwolona("/etc/shadow") {
-		t.Error("lista domyslna dopuszcza /etc/shadow")
+	if allowlist.Allows("/etc/shadow") {
+		t.Error("the default list allows /etc/shadow")
 	}
-	if !allowlist.Dozwolona("/var/log/syslog") {
-		t.Error("lista domyslna nie dopuszcza typowego logu")
+	if !allowlist.Allows("/var/log/syslog") {
+		t.Error("the default list does not allow a typical log")
 	}
 }

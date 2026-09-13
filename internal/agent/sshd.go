@@ -7,21 +7,21 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
+	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // sshProbe reads the sshd configuration through the helper: "sshd -T" needs
 // root, because it also reads the host keys.
-var sshProbe func(context.Context) (sshmodul.Snapshot, error)
+var sshProbe func(context.Context) (sshmodule.Snapshot, error)
 
 // SetSSHProbe wskazuje funkcje odczytujaca konfiguracje sshd.
-func SetSSHProbe(probe func(context.Context) (sshmodul.Snapshot, error)) {
+func SetSSHProbe(probe func(context.Context) (sshmodule.Snapshot, error)) {
 	sshProbe = probe
 }
 
 // ProbeSSH odczytuje konfiguracje serwera sshd.
-func (e *TaskExecutor) ProbeSSH(ctx context.Context) (sshmodul.Snapshot, error) {
+func (e *TaskExecutor) ProbeSSH(ctx context.Context) (sshmodule.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
 		Action: &helperv1.HelperRequest_Ssh{
@@ -29,15 +29,15 @@ func (e *TaskExecutor) ProbeSSH(ctx context.Context) (sshmodul.Snapshot, error) 
 		},
 	}, time.Minute)
 	if err != nil {
-		return sshmodul.Snapshot{}, err
+		return sshmodule.Snapshot{}, err
 	}
-	var snapshot sshmodul.Snapshot
+	var snapshot sshmodule.Snapshot
 	data := response.GetSshResult().GetSnapshot()
 	if len(data) == 0 {
 		return snapshot, nil
 	}
 	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return sshmodul.Snapshot{}, err
+		return sshmodule.Snapshot{}, err
 	}
 	return snapshot, nil
 }

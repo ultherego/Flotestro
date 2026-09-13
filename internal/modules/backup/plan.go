@@ -11,230 +11,237 @@ import (
 	"time"
 )
 
-// Plan opisuje kopie, ktora powstanie na tym hoscie.
+// Plan describes the copy that will be made on this host.
 //
-// To samo zlecenie na dwoch hostach jest dwiema roznymi kopiami: jeden ma
-// wszystkie wskazane katalogi, drugi polowy nie ma wcale, trzeci nie ma
-// jeszcze repozytorium. Zgoda operatora ma dotyczyc tego, co naprawde
-// pojedzie z tego hosta - i ile go to bedzie kosztowac.
+// The same order on two hosts is two different copies: one has all the
+// named directories, another has half of them not at all, a third has no
+// repository yet. The operator's approval is meant to cover what really
+// leaves this host - and how much it costs it.
 type Plan struct {
 	ID         string `json:"id"`
 	Tool       string `json:"tool"`
 	Repository string `json:"repository,omitempty"`
-	// Action nazywa to, co by sie stalo: run (kopia powstanie) albo verify.
+	// Action names what would happen: run (the copy is made) or verify.
 	Action string `json:"action"`
 
-	// Zakres danych: katalogi, ktore host naprawde ma, i te, ktorych nie ma.
+	// The data scope: the directories the host really has, and those it
+	// does not.
 	Paths        []string `json:"paths,omitempty"`
 	MissingPaths []string `json:"missing_paths,omitempty"`
-	// BytesOnHost jest suma rozmiarow plikow w zakresie. Nieznany rozmiar
-	// zostaje brakiem wiedzy, a nie zerem.
+	// BytesOnHost is the sum of the file sizes in the scope. An unknown
+	// size stays no knowledge, not zero.
 	BytesOnHost *uint64 `json:"bytes_on_host,omitempty"`
 
-	// Stan repozytorium przed kopia.
+	// The repository state before the copy.
 	RepositoryReady bool       `json:"repository_ready"`
 	Snapshots       int        `json:"snapshots"`
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
-	// WillInitialize mowi, ze kopia zalozy repozytorium.
+	// WillInitialize says the copy creates the repository.
 	WillInitialize bool `json:"will_initialize,omitempty"`
-	// Retention opisuje sprzatanie po kopii. Puste oznacza "nie sprzataj".
+	// Retention describes the cleanup after the copy. Empty means "do not
+	// clean up".
 	Retention string `json:"retention,omitempty"`
-	// Verified mowi, ze po kopii host sprawdzi repozytorium. Kopia bez
-	// sprawdzenia nie jest tu sukcesem, wiec plan mowi o tym wprost.
+	// Verified says the host checks the repository after the copy. A copy
+	// without a check is not a success here, so the plan says so directly.
 	Verified bool `json:"verified"`
 	ReadData bool `json:"read_data,omitempty"`
 
 	Changes []string `json:"changes,omitempty"`
-	// Refusal nazywa powod, dla ktorego kopia nie powstanie na tym hoscie:
-	// brak narzedzia, nieodczytane repozytorium bez zgody na zalozenie,
-	// brak wszystkich wskazanych katalogow.
+	// Refusal names the reason the copy is not made on this host: no tool,
+	// an unread repository without consent to create one, none of the named
+	// directories present.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanKopia       = "run"
-	PlanSprawdzenie = "verify"
+	PlanRun    = "run"
+	PlanVerify = "verify"
 )
 
-// Zaplanuj liczy plan kopii albo sprawdzenia wobec stanu repozytorium.
+// Compute computes the plan of a copy or a verification against the
+// repository state.
 //
-// Rozmiar zakresu liczy przekazana funkcja: modul nie chodzi po dysku sam,
-// bo ta sama struktura sluzy testom i panelowi.
-func Zaplanuj(stan Stan, zlecenie Definicja, sprawdzenie, readData bool,
-	rozmiar func(string) (uint64, bool)) Plan {
+// The scope size is computed by the given function: the module does not
+// walk the disk itself, because the same structure serves the tests and
+// the panel.
+func Compute(state State, order Definition, verification, readData bool,
+	size func(string) (uint64, bool)) Plan {
 	plan := Plan{
-		ID: zlecenie.ID, Tool: zlecenie.Tool, Repository: zlecenie.Repository,
-		Action: PlanKopia, Snapshots: len(stan.Snapshots),
-		LastSuccessAt: stan.LastSuccessAt, ReadData: readData,
-		// Kopia konczy sie sprawdzeniem repozytorium: kopia, ktorej nikt nie
-		// sprawdzil, nie jest tu sukcesem.
+		ID: order.ID, Tool: order.Tool, Repository: order.Repository,
+		Action: PlanRun, Snapshots: len(state.Snapshots),
+		LastSuccessAt: state.LastSuccessAt, ReadData: readData,
+		// The copy ends with a repository check: a copy nobody checked is
+		// not a success here.
 		Verified: true,
 	}
-	if sprawdzenie {
-		plan.Action = PlanSprawdzenie
+	if verification {
+		plan.Action = PlanVerify
 	}
-	if err := zlecenie.Waliduj(); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := order.Validate(); err != nil {
+		return plan.withRefusal(err.Error())
 	}
 
-	plan.RepositoryReady = stan.UnavailableReason == ""
+	plan.RepositoryReady = state.UnavailableReason == ""
 	if !plan.RepositoryReady {
-		// Repozytorium nieodczytane i repozytorium puste to dwie rozne
-		// odpowiedzi. Pierwsza pozwala zalozyc nowe tylko za jawna zgoda.
-		if plan.Action == PlanSprawdzenie {
-			return plan.zOdmowa("repozytorium nie odpowiedzialo: " + stan.UnavailableReason)
+		// An unread repository and an empty repository are two different
+		// answers. The former allows creating a new one only with explicit
+		// consent.
+		if plan.Action == PlanVerify {
+			return plan.withRefusal("the repository did not answer: " + state.UnavailableReason)
 		}
-		if !zlecenie.Initialize {
-			return plan.zOdmowa("repozytorium nie odpowiedzialo (" + stan.UnavailableReason +
-				"); zalozenie nowego wymaga jawnej zgody")
+		if !order.Initialize {
+			return plan.withRefusal("the repository did not answer (" + state.UnavailableReason +
+				"); creating a new one requires explicit consent")
 		}
 		plan.WillInitialize = true
 	}
 
-	if plan.Action == PlanSprawdzenie {
-		plan.Changes = []string{fmt.Sprintf("repozytorium z %d kopiami zostanie sprawdzone", plan.Snapshots)}
+	if plan.Action == PlanVerify {
+		plan.Changes = []string{fmt.Sprintf("the repository with %d copies will be checked", plan.Snapshots)}
 		if readData {
-			plan.Changes = append(plan.Changes, "sprawdzenie odczyta dane, a nie sama strukture")
+			plan.Changes = append(plan.Changes, "the check will read the data, not only the structure")
 		}
-		plan.PlanHash = odciskPlanuKopii(plan)
+		plan.PlanHash = backupPlanFingerprint(plan)
 		return plan
 	}
 
-	var suma uint64
-	var znanaSuma bool
-	for _, sciezka := range zlecenie.Paths {
-		if rozmiar == nil {
-			plan.Paths = append(plan.Paths, sciezka)
+	var sum uint64
+	var sumKnown bool
+	for _, path := range order.Paths {
+		if size == nil {
+			plan.Paths = append(plan.Paths, path)
 			continue
 		}
-		bajty, jest := rozmiar(sciezka)
-		if !jest {
-			plan.MissingPaths = append(plan.MissingPaths, sciezka)
+		bytes, present := size(path)
+		if !present {
+			plan.MissingPaths = append(plan.MissingPaths, path)
 			continue
 		}
-		plan.Paths = append(plan.Paths, sciezka)
-		suma += bajty
-		znanaSuma = true
+		plan.Paths = append(plan.Paths, path)
+		sum += bytes
+		sumKnown = true
 	}
 	sort.Strings(plan.Paths)
 	sort.Strings(plan.MissingPaths)
-	if znanaSuma {
-		kopia := suma
-		plan.BytesOnHost = &kopia
+	if sumKnown {
+		copied := sum
+		plan.BytesOnHost = &copied
 	}
-	// Kopia bez zadnego istniejacego katalogu zapisalaby pusty snapshot,
-	// ktory wyglada jak backup, a nim nie jest.
-	if len(plan.Paths) == 0 && zlecenie.Runbook == "" {
-		return plan.zOdmowa("host nie ma zadnego z wskazanych katalogow")
+	// A copy without any existing directory would write an empty snapshot
+	// that looks like a backup and is not one.
+	if len(plan.Paths) == 0 && order.Runbook == "" {
+		return plan.withRefusal("the host has none of the named directories")
 	}
 
-	plan.Retention = opisRetencji(zlecenie)
+	plan.Retention = describeRetention(order)
 	if plan.WillInitialize {
-		plan.Changes = append(plan.Changes, "repozytorium "+zlecenie.Repository+" zostanie zalozone")
+		plan.Changes = append(plan.Changes, "the repository "+order.Repository+" will be created")
 	}
-	plan.Changes = append(plan.Changes, "kopia obejmie "+strings.Join(plan.Paths, ", ")+
-		rozmiarWZmianie(plan.BytesOnHost))
+	plan.Changes = append(plan.Changes, "the copy will cover "+strings.Join(plan.Paths, ", ")+
+		sizeInChange(plan.BytesOnHost))
 	if len(plan.MissingPaths) > 0 {
 		plan.Changes = append(plan.Changes,
-			"host nie ma: "+strings.Join(plan.MissingPaths, ", "))
+			"the host does not have: "+strings.Join(plan.MissingPaths, ", "))
 	}
-	if zlecenie.Runbook != "" {
-		plan.Changes = append(plan.Changes, "przed kopia uruchomi sie runbook "+zlecenie.Runbook)
+	if order.Runbook != "" {
+		plan.Changes = append(plan.Changes, "the runbook "+order.Runbook+" will run before the copy")
 	}
 	if plan.Retention != "" {
-		plan.Changes = append(plan.Changes, "retencja: "+plan.Retention)
+		plan.Changes = append(plan.Changes, "retention: "+plan.Retention)
 	}
-	plan.Changes = append(plan.Changes, "po kopii host sprawdzi repozytorium")
-	plan.PlanHash = odciskPlanuKopii(plan)
+	plan.Changes = append(plan.Changes, "after the copy the host will check the repository")
+	plan.PlanHash = backupPlanFingerprint(plan)
 	return plan
 }
 
-// RozmiarSciezki liczy rozmiar zakresu na dysku hosta.
-func RozmiarSciezki(sciezka string) (uint64, bool) {
-	info, err := os.Lstat(sciezka)
+// PathSize computes the size of a scope on the host disk.
+func PathSize(path string) (uint64, bool) {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return 0, false
 	}
 	if !info.IsDir() {
 		return uint64(info.Size()), true
 	}
-	var suma uint64
-	wpisy, err := os.ReadDir(sciezka)
+	var sum uint64
+	entries, err := os.ReadDir(path)
 	if err != nil {
-		// Katalog istnieje, ale nie da sie go policzyc: to nadal jest zakres
-		// kopii, tylko o nieznanym rozmiarze.
+		// The directory exists, but cannot be counted: it is still part of
+		// the copy scope, only of unknown size.
 		return 0, true
 	}
-	for _, wpis := range wpisy {
-		info, err := wpis.Info()
+	for _, entry := range entries {
+		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
 		if info.IsDir() {
-			podsuma, _ := RozmiarSciezki(sciezka + "/" + wpis.Name())
-			suma += podsuma
+			subtotal, _ := PathSize(path + "/" + entry.Name())
+			sum += subtotal
 			continue
 		}
-		suma += uint64(info.Size())
+		sum += uint64(info.Size())
 	}
-	return suma, true
+	return sum, true
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu planu i liczy odcisk
-// na nowo: plan z odmowa jest inna odpowiedzia niz plan bez niej.
-func (p *Plan) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanuKopii(*p)
+// Refuse records a refusal reason learned after the plan was computed and
+// recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
+func (p *Plan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = backupPlanFingerprint(*p)
 }
 
-func (p Plan) zOdmowa(powod string) Plan {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanuKopii(p)
+func (p Plan) withRefusal(reason string) Plan {
+	p.Refusal = reason
+	p.PlanHash = backupPlanFingerprint(p)
 	return p
 }
 
-func opisRetencji(zlecenie Definicja) string {
-	var czesci []string
-	for _, para := range []struct {
-		nazwa string
-		ile   int
+func describeRetention(order Definition) string {
+	var parts []string
+	for _, pair := range []struct {
+		name  string
+		count int
 	}{
-		{"ostatnich", zlecenie.KeepLast}, {"dziennych", zlecenie.KeepDaily},
-		{"tygodniowych", zlecenie.KeepWeekly}, {"miesiecznych", zlecenie.KeepMonthly},
+		{"last", order.KeepLast}, {"daily", order.KeepDaily},
+		{"weekly", order.KeepWeekly}, {"monthly", order.KeepMonthly},
 	} {
-		if para.ile > 0 {
-			czesci = append(czesci, fmt.Sprintf("%d %s", para.ile, para.nazwa))
+		if pair.count > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", pair.count, pair.name))
 		}
 	}
-	if len(czesci) == 0 {
+	if len(parts) == 0 {
 		return ""
 	}
-	opis := "zostaje " + strings.Join(czesci, ", ")
-	if zlecenie.Prune {
-		opis += "; repozytorium zostanie przesprzatane"
+	description := "keeps " + strings.Join(parts, ", ")
+	if order.Prune {
+		description += "; the repository will be pruned"
 	}
-	return opis
+	return description
 }
 
-func rozmiarWZmianie(bajty *uint64) string {
-	if bajty == nil {
-		return " (rozmiaru nie policzono)"
+func sizeInChange(bytes *uint64) string {
+	if bytes == nil {
+		return " (size not computed)"
 	}
-	return fmt.Sprintf(" (%d MiB na dysku)", *bajty>>20)
+	return fmt.Sprintf(" (%d MiB on disk)", *bytes>>20)
 }
 
-// odciskPlanuKopii liczy odcisk planu poza samym odciskiem. Hasla
-// repozytorium nie ma w planie, wiec nie ma go takze w odcisku.
-func odciskPlanuKopii(plan Plan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// backupPlanFingerprint computes the plan fingerprint excluding the
+// fingerprint itself. The repository password is not in the plan, so it is
+// not in the fingerprint either.
+func backupPlanFingerprint(plan Plan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

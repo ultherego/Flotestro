@@ -151,7 +151,7 @@ func TestWpisZastanyNieJestNadpisywany(t *testing.T) {
 		t.Fatalf("panel nadpisal wpis zastany %s", zastany.Path)
 	}
 	komunikat := ostatniKomunikat(proby)
-	if !strings.Contains(komunikat, "nie nalezy do panelu") {
+	if !strings.Contains(komunikat, "does not belong to the panel") {
 		t.Errorf("odmowa bez powodu: %q", komunikat)
 	}
 }

@@ -6,84 +6,85 @@ import (
 	"strings"
 )
 
-// Executor wdraza projekt na hoscie.
+// Executor deploys a project on the host.
 type Executor struct {
 	Planner Planner
 }
 
-// ErrPlanMismatch oznacza, ze stan podstawy zmienil sie od zatwierdzenia.
-var ErrPlanMismatch = fmt.Errorf("plan wdrozenia zmienil sie od zatwierdzenia")
+// ErrPlanMismatch means the base state changed since approval.
+var ErrPlanMismatch = fmt.Errorf("the deployment plan changed since approval")
 
-// Deploy wdraza manifest, ale wylacznie ten, ktory operator zatwierdzil.
+// Deploy deploys the manifest, but only the one the operator approved.
 //
-// Digest jest liczony ponownie tuz przed wdrozeniem. Zgodnosc oznacza, ze
-// manifest i obrazy sa te same, ktore operator obejrzal; roznica oznacza, ze
-// wdrozenie przynioslo by cos innego - i wtedy odmowa jest wlasciwa reakcja,
-// a nie wykonanie czegos, czego nikt nie zatwierdzil.
+// The digest is computed again right before the deployment. A match means
+// the manifest and the images are the same the operator viewed; a
+// difference means the deployment would bring something else - and then a
+// refusal is the right reaction, not running something nobody approved.
 func (e Executor) Deploy(ctx context.Context, project, manifest, expectedDigest string) (Result, error) {
-	wynik := Result{Project: project}
+	result := Result{Project: project}
 
 	plan, err := e.Planner.Plan(ctx, project, manifest)
 	if err != nil {
-		return wynik, err
+		return result, err
 	}
-	wynik.Digest = plan.Digest
+	result.Digest = plan.Digest
 	if expectedDigest != "" && !strings.EqualFold(plan.Digest, expectedDigest) {
-		return wynik, fmt.Errorf("%w: zatwierdzono %s, teraz %s",
-			ErrPlanMismatch, skroc(expectedDigest), skroc(plan.Digest))
+		return result, fmt.Errorf("%w: approved %s, now %s",
+			ErrPlanMismatch, shorten(expectedDigest), shorten(plan.Digest))
 	}
-	wynik.Before = e.stanProjektu(ctx, project)
+	result.Before = e.projectState(ctx, project)
 
-	sciezka, sprzataj, err := e.Planner.zapiszManifest(project, manifest)
+	path, cleanup, err := e.Planner.writeManifest(project, manifest)
 	if err != nil {
-		return wynik, err
+		return result, err
 	}
-	defer sprzataj()
+	defer cleanup()
 
-	// --remove-orphans usuwa kontenery, ktorych manifest juz nie opisuje.
-	// Bez tego projekt rozjezdza sie ze swoim opisem po kazdej zmianie,
-	// a operator zatwierdzil stan docelowy, a nie dopisanie do biezacego.
+	// --remove-orphans removes the containers the manifest no longer
+	// describes. Without it the project drifts from its description after
+	// every change, and the operator approved a desired state, not an
+	// addition to the current one.
 	stdout, stderr, err := e.Planner.Runner(ctx,
-		"-p", project, "-f", sciezka, "up", "-d", "--remove-orphans")
-	wynik.Applied = zmianyZSuchegoPrzebiegu(stdout + "\n" + stderr)
-	wynik.After = e.stanProjektu(ctx, project)
+		"-p", project, "-f", path, "up", "-d", "--remove-orphans")
+	result.Applied = changesFromDryRun(stdout + "\n" + stderr)
+	result.After = e.projectState(ctx, project)
 	if err != nil {
-		wynik.Output = koncowkaWyjscia(stderr, stdout)
-		return wynik, fmt.Errorf("compose up: %s", pierwszaLinia(stderr))
+		result.Output = outputTail(stderr, stdout)
+		return result, fmt.Errorf("compose up: %s", firstLine(stderr))
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// stanProjektu odczytuje uslugi projektu dzialajace na hoscie. Nieudany
-// odczyt zwraca pustke, a nie blad: stan przed i po jest dodatkiem do wyniku,
-// a nie warunkiem jego powstania.
-func (e Executor) stanProjektu(ctx context.Context, project string) []Service {
+// projectState reads the project services running on the host. A failed
+// read returns nothing, not an error: the state before and after is an
+// addition to the result, not a condition of its existence.
+func (e Executor) projectState(ctx context.Context, project string) []Service {
 	stdout, _, err := e.Planner.Runner(ctx, "-p", project, "ps", "--format", "json", "--all")
 	if err != nil {
 		return nil
 	}
-	return uslugiZListy(stdout)
+	return servicesFromList(stdout)
 }
 
-// koncowkaWyjscia zwraca ostatnie linie wyjscia narzedzia.
-func koncowkaWyjscia(stderr, stdout string) []string {
-	zrodlo := strings.TrimSpace(stderr)
-	if zrodlo == "" {
-		zrodlo = strings.TrimSpace(stdout)
+// outputTail returns the last lines of the tool output.
+func outputTail(stderr, stdout string) []string {
+	source := strings.TrimSpace(stderr)
+	if source == "" {
+		source = strings.TrimSpace(stdout)
 	}
-	var linie []string
-	for _, linia := range strings.Split(zrodlo, "\n") {
-		if linia = strings.TrimSpace(linia); linia != "" {
-			linie = append(linie, linia)
+	var lines []string
+	for _, line := range strings.Split(source, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
 		}
 	}
-	if len(linie) > 20 {
-		linie = linie[len(linie)-20:]
+	if len(lines) > 20 {
+		lines = lines[len(lines)-20:]
 	}
-	return linie
+	return lines
 }
 
-func skroc(digest string) string {
+func shorten(digest string) string {
 	if len(digest) > 12 {
 		return digest[:12]
 	}

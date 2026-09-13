@@ -9,93 +9,95 @@ import (
 	"time"
 )
 
-var sciezkiBorg = []string{"/usr/bin/borg", "/usr/local/bin/borg"}
+var borgPaths = []string{"/usr/bin/borg", "/usr/local/bin/borg"}
 
-// ZmiennaHaslaBorg jest nazwa zmiennej, ktora borg czyta zamiast pytac.
-const ZmiennaHaslaBorg = "BORG_PASSPHRASE"
+// BorgPasswordVariable is the name of the variable borg reads instead of
+// asking.
+const BorgPasswordVariable = "BORG_PASSPHRASE"
 
-// Borg jest adapterem narzedzia borgbackup.
+// Borg is the adapter of the borgbackup tool.
 type Borg struct{}
 
-func (b *Borg) Nazwa() string { return NarzedzieBorg }
+func (b *Borg) Name() string { return ToolBorg }
 
-func (b *Borg) Dostepny() bool { return b.sciezka() != "" }
+func (b *Borg) Available() bool { return b.path() != "" }
 
-func (b *Borg) sciezka() string {
-	for _, sciezka := range sciezkiBorg {
-		if istnieje(sciezka) {
-			return sciezka
+func (b *Borg) path() string {
+	for _, path := range borgPaths {
+		if exists(path) {
+			return path
 		}
 	}
 	return ""
 }
 
-// srodowisko doklada zmienne, bez ktorych borg zatrzymuje sie na pytaniu.
+// environment adds the variables without which borg stops at a question.
 //
-// Borg pyta czlowieka o zgode, gdy repozytorium jest nieznane albo zmienilo
-// tozsamosc. Proces bez terminala czekalby na odpowiedz do konca limitu czasu,
-// wiec odpowiadamy z gory: relokacji nie akceptujemy, bo zmiana tozsamosci
-// repozytorium jest zdarzeniem, o ktorym operator ma sie dowiedziec.
-func (b *Borg) srodowisko(zlecenie Zlecenie) []string {
-	return append(srodowiskoNarzedzia(zlecenie, ZmiennaHaslaBorg),
+// Borg asks a human for consent when the repository is unknown or changed
+// its identity. A process without a terminal would wait for the answer
+// until the time limit, so the answer is given up front: relocation is not
+// accepted, because a change of repository identity is an event the
+// operator is meant to learn about.
+func (b *Borg) environment(order Order) []string {
+	return append(toolEnvironment(order, BorgPasswordVariable),
 		"BORG_RELOCATED_REPO_ACCESS_IS_OK=no",
 		"BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=no",
 		"BORG_EXIT_CODES=modern")
 }
 
-func (b *Borg) Wersja(ctx context.Context) string {
-	if b.sciezka() == "" {
+func (b *Borg) Version(ctx context.Context) string {
+	if b.path() == "" {
 		return ""
 	}
-	wynik := uruchom(ctx, b.sciezka(), []string{"--version"},
-		srodowiskoNarzedzia(Zlecenie{}, ""), nil, nil)
-	return strings.TrimSpace(wynik.Stdout)
+	result := run(ctx, b.path(), []string{"--version"},
+		toolEnvironment(Order{}, ""), nil, nil)
+	return strings.TrimSpace(result.Stdout)
 }
 
-// Plan czyta archiwa repozytorium.
-func (b *Borg) Plan(ctx context.Context, zlecenie Zlecenie) (Stan, error) {
-	stan := Stan{Tool: NarzedzieBorg, Repository: zlecenie.Repository, ObservedAt: time.Now().UTC()}
-	if b.sciezka() == "" {
-		stan.UnavailableReason = "this host does not have borg"
-		return stan, fmt.Errorf("ten host nie ma borga")
+// Plan reads the repository archives.
+func (b *Borg) Plan(ctx context.Context, order Order) (State, error) {
+	state := State{Tool: ToolBorg, Repository: order.Repository, ObservedAt: time.Now().UTC()}
+	if b.path() == "" {
+		state.UnavailableReason = "this host does not have borg"
+		return state, fmt.Errorf("this host does not have borg")
 	}
-	stan.ToolVersion = b.Wersja(ctx)
+	state.ToolVersion = b.Version(ctx)
 
-	wynik := uruchom(ctx, b.sciezka(), []string{"list", "--json", zlecenie.Repository},
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	if !wynik.Ran || wynik.ExitCode != 0 || wynik.Err != nil {
-		stan.UnavailableReason = wynik.Powod()
-		return stan, fmt.Errorf("borg list: %s", wynik.Powod())
+	result := run(ctx, b.path(), []string{"list", "--json", order.Repository},
+		b.environment(order), orderSecrets(order), nil)
+	if !result.Ran || result.ExitCode != 0 || result.Err != nil {
+		state.UnavailableReason = result.Reason()
+		return state, fmt.Errorf("borg list: %s", result.Reason())
 	}
-	var lista struct {
+	var list struct {
 		Archives []struct {
 			ID    string `json:"id"`
 			Name  string `json:"name"`
 			Start string `json:"start"`
 		} `json:"archives"`
 	}
-	if err := json.Unmarshal([]byte(wynik.Stdout), &lista); err != nil {
-		stan.UnavailableReason = "nie rozpoznano listy archiwow: " + err.Error()
-		return stan, err
+	if err := json.Unmarshal([]byte(result.Stdout), &list); err != nil {
+		state.UnavailableReason = "the archive list was not recognised: " + err.Error()
+		return state, err
 	}
-	for _, archiwum := range lista.Archives {
-		snapshot := Snapshot{ID: archiwum.Name}
-		// Borg podaje czas lokalny hosta bez strefy; czytamy go tak, jak
-		// zostal zapisany, i nie udajemy, ze wiemy wiecej.
-		if chwila, err := time.Parse("2006-01-02T15:04:05.000000", archiwum.Start); err == nil {
-			snapshot.Time = chwila.UTC()
-		} else if chwila, err := time.Parse(time.RFC3339, archiwum.Start); err == nil {
-			snapshot.Time = chwila.UTC()
+	for _, archive := range list.Archives {
+		snapshot := Snapshot{ID: archive.Name}
+		// Borg reports the host local time without a zone; it is read as
+		// written, without pretending to know more.
+		if moment, err := time.Parse("2006-01-02T15:04:05.000000", archive.Start); err == nil {
+			snapshot.Time = moment.UTC()
+		} else if moment, err := time.Parse(time.RFC3339, archive.Start); err == nil {
+			snapshot.Time = moment.UTC()
 		}
-		stan.Snapshots = append(stan.Snapshots, snapshot)
+		state.Snapshots = append(state.Snapshots, snapshot)
 	}
-	PosortujSnapshoty(stan.Snapshots)
-	stan.LastSuccessAt = OstatniUdany(stan.Snapshots)
+	SortSnapshots(state.Snapshots)
+	state.LastSuccessAt = LastSuccess(state.Snapshots)
 
-	info := uruchom(ctx, b.sciezka(), []string{"info", "--json", zlecenie.Repository},
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
+	info := run(ctx, b.path(), []string{"info", "--json", order.Repository},
+		b.environment(order), orderSecrets(order), nil)
 	if info.Ran && info.ExitCode == 0 {
-		var opis struct {
+		var description struct {
 			Cache struct {
 				Stats struct {
 					UniqueCSize uint64 `json:"unique_csize"`
@@ -103,60 +105,61 @@ func (b *Borg) Plan(ctx context.Context, zlecenie Zlecenie) (Stan, error) {
 				} `json:"stats"`
 			} `json:"cache"`
 		}
-		if err := json.Unmarshal([]byte(info.Stdout), &opis); err == nil {
-			rozmiar := opis.Cache.Stats.UniqueCSize
-			if rozmiar == 0 {
-				rozmiar = opis.Cache.Stats.TotalSize
+		if err := json.Unmarshal([]byte(info.Stdout), &description); err == nil {
+			size := description.Cache.Stats.UniqueCSize
+			if size == 0 {
+				size = description.Cache.Stats.TotalSize
 			}
-			if rozmiar > 0 {
-				stan.TotalSizeBytes = &rozmiar
+			if size > 0 {
+				state.TotalSizeBytes = &size
 			}
 		}
 	}
-	return stan, nil
+	return state, nil
 }
 
-// Wykonaj tworzy archiwum i sprzata stare.
-func (b *Borg) Wykonaj(ctx context.Context, zlecenie Zlecenie, postep PostepFunc) (Wynik, error) {
-	wynik := Wynik{}
-	if b.sciezka() == "" {
-		return wynik, fmt.Errorf("ten host nie ma borga")
+// Run creates an archive and cleans up old ones.
+func (b *Borg) Run(ctx context.Context, order Order, progress ProgressFunc) (Result, error) {
+	result := Result{}
+	if b.path() == "" {
+		return result, fmt.Errorf("this host does not have borg")
 	}
-	if len(zlecenie.Paths) == 0 {
-		return wynik, fmt.Errorf("definicja nie wskazuje, co backupowac")
-	}
-
-	if err := b.upewnijSieZeIstnieje(ctx, zlecenie); err != nil {
-		return wynik, err
+	if len(order.Paths) == 0 {
+		return result, fmt.Errorf("the definition does not say what to back up")
 	}
 
-	// Nazwa archiwum musi byc unikalna w repozytorium; znacznik czasu jest
-	// tu jedynym sensownym wyroznikiem i jednoczesnie informacja dla czlowieka.
-	nazwa := zlecenie.ID + "-" + time.Now().UTC().Format("20060102T150405Z")
-	argumenty := []string{"create", "--json", "--stats",
-		zlecenie.Repository + "::" + nazwa}
-	argumenty = append(argumenty, zlecenie.Paths...)
-	for _, wzorzec := range zlecenie.Excludes {
-		argumenty = append(argumenty, "--exclude", wzorzec)
-	}
-	if postep != nil {
-		postep(Postep{Message: "archiwum " + nazwa})
+	if err := b.ensureExists(ctx, order); err != nil {
+		return result, err
 	}
 
-	uruchomienie := uruchom(ctx, b.sciezka(), argumenty,
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	wynik.Output = uruchomienie.Stderr
-	if !uruchomienie.Ran || uruchomienie.Err != nil {
-		return wynik, fmt.Errorf("borg create: %s", uruchomienie.Powod())
+	// The archive name must be unique in the repository; a timestamp is the
+	// only sensible distinguisher here and information for a human at the
+	// same time.
+	name := order.ID + "-" + time.Now().UTC().Format("20060102T150405Z")
+	arguments := []string{"create", "--json", "--stats",
+		order.Repository + "::" + name}
+	arguments = append(arguments, order.Paths...)
+	for _, pattern := range order.Excludes {
+		arguments = append(arguments, "--exclude", pattern)
 	}
-	// Kod 1 borga oznacza ostrzezenia - najczesciej pliki, ktorych nie dalo
-	// sie odczytac. Archiwum powstalo, ale jest niepelne.
-	if uruchomienie.ExitCode != 0 && uruchomienie.ExitCode != 1 {
-		return wynik, fmt.Errorf("borg create: %s", uruchomienie.Powod())
+	if progress != nil {
+		progress(Progress{Message: "archive " + name})
 	}
 
-	wynik.SnapshotID = nazwa
-	var statystyki struct {
+	execution := run(ctx, b.path(), arguments,
+		b.environment(order), orderSecrets(order), nil)
+	result.Output = execution.Stderr
+	if !execution.Ran || execution.Err != nil {
+		return result, fmt.Errorf("borg create: %s", execution.Reason())
+	}
+	// Borg code 1 means warnings - most often files that could not be
+	// read. The archive was created, but is incomplete.
+	if execution.ExitCode != 0 && execution.ExitCode != 1 {
+		return result, fmt.Errorf("borg create: %s", execution.Reason())
+	}
+
+	result.SnapshotID = name
+	var stats struct {
 		Archive struct {
 			Stats struct {
 				DeduplicatedSize uint64  `json:"deduplicated_size"`
@@ -166,134 +169,135 @@ func (b *Borg) Wykonaj(ctx context.Context, zlecenie Zlecenie, postep PostepFunc
 			} `json:"stats"`
 		} `json:"archive"`
 	}
-	if err := json.Unmarshal([]byte(uruchomienie.Stdout), &statystyki); err == nil {
-		dodane := statystyki.Archive.Stats.DeduplicatedSize
-		przetworzone := statystyki.Archive.Stats.OriginalSize
-		pliki := statystyki.Archive.Stats.NFiles
-		czas := statystyki.Archive.Stats.Duration
-		wynik.BytesAdded = &dodane
-		wynik.TotalBytesProcessed = &przetworzone
-		wynik.FilesNew = &pliki
-		wynik.DurationSeconds = &czas
+	if err := json.Unmarshal([]byte(execution.Stdout), &stats); err == nil {
+		added := stats.Archive.Stats.DeduplicatedSize
+		processed := stats.Archive.Stats.OriginalSize
+		files := stats.Archive.Stats.NFiles
+		duration := stats.Archive.Stats.Duration
+		result.BytesAdded = &added
+		result.TotalBytesProcessed = &processed
+		result.FilesNew = &files
+		result.DurationSeconds = &duration
 	}
-	wynik.Message = "archiwum " + nazwa + " utworzone"
-	if uruchomienie.ExitCode == 1 {
-		wynik.Message += "; czesci plikow nie udalo sie odczytac"
+	result.Message = "archive " + name + " created"
+	if execution.ExitCode == 1 {
+		result.Message += "; some files could not be read"
 	}
 
-	if err := b.retencja(ctx, zlecenie); err != nil {
-		wynik.Message += "; retencja nie powiodla sie: " + err.Error()
+	if err := b.retention(ctx, order); err != nil {
+		result.Message += "; retention failed: " + err.Error()
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// retencja kasuje archiwa spoza polityki.
-func (b *Borg) retencja(ctx context.Context, zlecenie Zlecenie) error {
-	argumenty := []string{"prune", "--glob-archives", zlecenie.ID + "-*"}
-	ustawione := false
-	for _, prog := range []struct {
-		flaga   string
-		wartosc int
+// retention deletes the archives outside the policy.
+func (b *Borg) retention(ctx context.Context, order Order) error {
+	arguments := []string{"prune", "--glob-archives", order.ID + "-*"}
+	set := false
+	for _, threshold := range []struct {
+		flag  string
+		value int
 	}{
-		{"--keep-last", zlecenie.KeepLast},
-		{"--keep-daily", zlecenie.KeepDaily},
-		{"--keep-weekly", zlecenie.KeepWeekly},
-		{"--keep-monthly", zlecenie.KeepMonthly},
+		{"--keep-last", order.KeepLast},
+		{"--keep-daily", order.KeepDaily},
+		{"--keep-weekly", order.KeepWeekly},
+		{"--keep-monthly", order.KeepMonthly},
 	} {
-		if prog.wartosc > 0 {
-			argumenty = append(argumenty, prog.flaga, strconv.Itoa(prog.wartosc))
-			ustawione = true
+		if threshold.value > 0 {
+			arguments = append(arguments, threshold.flag, strconv.Itoa(threshold.value))
+			set = true
 		}
 	}
-	if !ustawione {
+	if !set {
 		return nil
 	}
-	argumenty = append(argumenty, zlecenie.Repository)
+	arguments = append(arguments, order.Repository)
 
-	wynik := uruchom(ctx, b.sciezka(), argumenty,
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	if !wynik.Ran || (wynik.ExitCode != 0 && wynik.ExitCode != 1) {
-		return fmt.Errorf("%s", wynik.Powod())
+	result := run(ctx, b.path(), arguments,
+		b.environment(order), orderSecrets(order), nil)
+	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 1) {
+		return fmt.Errorf("%s", result.Reason())
 	}
-	if !zlecenie.Prune {
+	if !order.Prune {
 		return nil
 	}
-	// Sprzatanie w borgu jest osobnym krokiem: prune odpina archiwa,
-	// a miejsce zwalnia dopiero compact.
-	kompakt := uruchom(ctx, b.sciezka(), []string{"compact", zlecenie.Repository},
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	if !kompakt.Ran || (kompakt.ExitCode != 0 && kompakt.ExitCode != 1) {
-		return fmt.Errorf("%s", kompakt.Powod())
+	// Cleanup in borg is a separate step: prune detaches the archives, and
+	// only compact frees the space.
+	compact := run(ctx, b.path(), []string{"compact", order.Repository},
+		b.environment(order), orderSecrets(order), nil)
+	if !compact.Ran || (compact.ExitCode != 0 && compact.ExitCode != 1) {
+		return fmt.Errorf("%s", compact.Reason())
 	}
 	return nil
 }
 
-// Sprawdz weryfikuje repozytorium.
-func (b *Borg) Sprawdz(ctx context.Context, zlecenie Zlecenie) (Wynik, error) {
-	wynik := Wynik{}
-	if b.sciezka() == "" {
-		return wynik, fmt.Errorf("ten host nie ma borga")
+// Verify checks the repository.
+func (b *Borg) Verify(ctx context.Context, order Order) (Result, error) {
+	result := Result{}
+	if b.path() == "" {
+		return result, fmt.Errorf("this host does not have borg")
 	}
-	argumenty := []string{"check"}
-	if zlecenie.ReadData {
-		argumenty = append(argumenty, "--verify-data")
+	arguments := []string{"check"}
+	if order.ReadData {
+		arguments = append(arguments, "--verify-data")
 	}
-	argumenty = append(argumenty, zlecenie.Repository)
+	arguments = append(arguments, order.Repository)
 
-	uruchomienie := uruchom(ctx, b.sciezka(), argumenty,
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	wynik.Output = uruchomienie.Stdout + uruchomienie.Stderr
-	if !uruchomienie.Ran || uruchomienie.ExitCode != 0 || uruchomienie.Err != nil {
-		return wynik, fmt.Errorf("borg check: %s", uruchomienie.Powod())
+	execution := run(ctx, b.path(), arguments,
+		b.environment(order), orderSecrets(order), nil)
+	result.Output = execution.Stdout + execution.Stderr
+	if !execution.Ran || execution.ExitCode != 0 || execution.Err != nil {
+		return result, fmt.Errorf("borg check: %s", execution.Reason())
 	}
-	wynik.Message = "repozytorium sprawdzone"
-	if zlecenie.ReadData {
-		wynik.Message += " razem z odczytem danych"
+	result.Message = "repository checked"
+	if order.ReadData {
+		result.Message += " together with reading the data"
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// Odtworz rozpakowuje archiwum do wskazanego katalogu.
-func (b *Borg) Odtworz(ctx context.Context, zlecenie Zlecenie) (Wynik, error) {
-	wynik := Wynik{}
-	if b.sciezka() == "" {
-		return wynik, fmt.Errorf("ten host nie ma borga")
+// RestoreData unpacks an archive into the named directory.
+func (b *Borg) RestoreData(ctx context.Context, order Order) (Result, error) {
+	result := Result{}
+	if b.path() == "" {
+		return result, fmt.Errorf("this host does not have borg")
 	}
-	argumenty := []string{"extract",
-		zlecenie.Repository + "::" + zlecenie.Odtworzenie.SnapshotID}
-	for _, wzorzec := range zlecenie.Odtworzenie.Include {
-		// Borg dopasowuje sciezki wewnatrz archiwum, czyli bez wiodacego
-		// ukosnika. Zamiana jest tu, a nie w panelu: to szczegol narzedzia.
-		argumenty = append(argumenty, strings.TrimPrefix(wzorzec, "/"))
+	arguments := []string{"extract",
+		order.Repository + "::" + order.Restore.SnapshotID}
+	for _, pattern := range order.Restore.Include {
+		// Borg matches the paths inside the archive, that is without the
+		// leading slash. The conversion is here, not in the panel: it is a
+		// tool detail.
+		arguments = append(arguments, strings.TrimPrefix(pattern, "/"))
 	}
-	uruchomienie := uruchomWKatalogu(ctx, zlecenie.Odtworzenie.Target, b.sciezka(), argumenty,
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	wynik.Output = uruchomienie.Stdout + uruchomienie.Stderr
-	if !uruchomienie.Ran || uruchomienie.ExitCode != 0 || uruchomienie.Err != nil {
-		return wynik, fmt.Errorf("borg extract: %s", uruchomienie.Powod())
+	execution := runInDir(ctx, order.Restore.Target, b.path(), arguments,
+		b.environment(order), orderSecrets(order), nil)
+	result.Output = execution.Stdout + execution.Stderr
+	if !execution.Ran || execution.ExitCode != 0 || execution.Err != nil {
+		return result, fmt.Errorf("borg extract: %s", execution.Reason())
 	}
-	wynik.Message = "archiwum " + zlecenie.Odtworzenie.SnapshotID +
-		" odtworzone do " + zlecenie.Odtworzenie.Target
-	return wynik, nil
+	result.Message = "archive " + order.Restore.SnapshotID +
+		" restored into " + order.Restore.Target
+	return result, nil
 }
 
-// upewnijSieZeIstnieje zaklada repozytorium, jesli definicja na to pozwala.
-func (b *Borg) upewnijSieZeIstnieje(ctx context.Context, zlecenie Zlecenie) error {
-	sprawdzenie := uruchom(ctx, b.sciezka(), []string{"info", "--json", zlecenie.Repository},
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	if sprawdzenie.Ran && sprawdzenie.ExitCode == 0 {
+// ensureExists creates the repository if the definition allows it.
+func (b *Borg) ensureExists(ctx context.Context, order Order) error {
+	check := run(ctx, b.path(), []string{"info", "--json", order.Repository},
+		b.environment(order), orderSecrets(order), nil)
+	if check.Ran && check.ExitCode == 0 {
 		return nil
 	}
-	if !zlecenie.Initialize {
+	if !order.Initialize {
 		return nil
 	}
-	// Szyfrowanie kluczem w repozytorium: haslo mamy z magazynu, a klucz
-	// przy repozytorium przezyje przebudowe hosta.
-	utworzenie := uruchom(ctx, b.sciezka(),
-		[]string{"init", "--encryption", "repokey", zlecenie.Repository},
-		b.srodowisko(zlecenie), tajneZlecenia(zlecenie), nil)
-	if !utworzenie.Ran || utworzenie.ExitCode != 0 {
-		return fmt.Errorf("borg init: %s", utworzenie.Powod())
+	// Encryption with the key in the repository: the password comes from
+	// the store, and a key next to the repository survives a host rebuild.
+	creation := run(ctx, b.path(),
+		[]string{"init", "--encryption", "repokey", order.Repository},
+		b.environment(order), orderSecrets(order), nil)
+	if !creation.Ran || creation.ExitCode != 0 {
+		return fmt.Errorf("borg init: %s", creation.Reason())
 	}
 	return nil
 }

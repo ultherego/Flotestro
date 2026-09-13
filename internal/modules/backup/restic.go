@@ -9,48 +9,50 @@ import (
 	"time"
 )
 
-// Sciezki narzedzia. Restic bywa w /usr/bin albo w /usr/local/bin - to drugie
-// jest miejscem, w ktorym laduje binarka pobrana ze strony projektu.
-var sciezkiRestic = []string{"/usr/bin/restic", "/usr/local/bin/restic"}
+// Tool paths. Restic is at times in /usr/bin or in /usr/local/bin - the
+// latter is where a binary downloaded from the project site lands.
+var resticPaths = []string{"/usr/bin/restic", "/usr/local/bin/restic"}
 
-// ZmiennaHaslaRestic jest nazwa zmiennej, ktora restic czyta zamiast pytac.
-const ZmiennaHaslaRestic = "RESTIC_PASSWORD"
+// ResticPasswordVariable is the name of the variable restic reads instead
+// of asking.
+const ResticPasswordVariable = "RESTIC_PASSWORD"
 
-// Restic jest adapterem narzedzia restic.
+// Restic is the adapter of the restic tool.
 type Restic struct{}
 
-func (r *Restic) Nazwa() string { return NarzedzieRestic }
+func (r *Restic) Name() string { return ToolRestic }
 
-func (r *Restic) Dostepny() bool { return r.sciezka() != "" }
+func (r *Restic) Available() bool { return r.path() != "" }
 
-func (r *Restic) sciezka() string {
-	for _, sciezka := range sciezkiRestic {
-		if istnieje(sciezka) {
-			return sciezka
+func (r *Restic) path() string {
+	for _, path := range resticPaths {
+		if exists(path) {
+			return path
 		}
 	}
 	return ""
 }
 
-func (r *Restic) Wersja(ctx context.Context) string {
-	if r.sciezka() == "" {
+func (r *Restic) Version(ctx context.Context) string {
+	if r.path() == "" {
 		return ""
 	}
-	wynik := uruchom(ctx, r.sciezka(), []string{"version"},
-		srodowiskoNarzedzia(Zlecenie{}, ""), nil, nil)
-	return strings.TrimSpace(wynik.Stdout)
+	result := run(ctx, r.path(), []string{"version"},
+		toolEnvironment(Order{}, ""), nil, nil)
+	return strings.TrimSpace(result.Stdout)
 }
 
-// argumentyPodstawowe sklada argumenty wspolne dla kazdego wywolania.
+// baseArguments assembles the arguments common to every invocation.
 //
-// Adres repozytorium idzie argumentem, bo nim nie jest: to nazwa celu, ktora
-// panel i tak pokazuje. Haslo idzie srodowiskiem.
-func (r *Restic) argumentyPodstawowe(zlecenie Zlecenie) []string {
-	return []string{"--repo", zlecenie.Repository, "--json"}
+// The repository address goes as an argument, because it is not a secret:
+// it is the target name the panel shows anyway. The password goes through
+// the environment.
+func (r *Restic) baseArguments(order Order) []string {
+	return []string{"--repo", order.Repository, "--json"}
 }
 
-// snapshotResticu jest wpisem z "restic snapshots --json".
-type snapshotResticu struct {
+// resticSnapshot is an entry of "restic snapshots --json".
+type resticSnapshot struct {
 	ID       string    `json:"id"`
 	ShortID  string    `json:"short_id"`
 	Time     time.Time `json:"time"`
@@ -59,63 +61,63 @@ type snapshotResticu struct {
 	Tags     []string  `json:"tags"`
 }
 
-// Plan czyta stan repozytorium: kopie i ich rozmiar.
-func (r *Restic) Plan(ctx context.Context, zlecenie Zlecenie) (Stan, error) {
-	stan := Stan{
-		Tool: NarzedzieRestic, Repository: zlecenie.Repository,
+// Plan reads the repository state: the copies and their size.
+func (r *Restic) Plan(ctx context.Context, order Order) (State, error) {
+	state := State{
+		Tool: ToolRestic, Repository: order.Repository,
 		ObservedAt: time.Now().UTC(),
 	}
-	if r.sciezka() == "" {
-		stan.UnavailableReason = "this host does not have restic"
-		return stan, fmt.Errorf("ten host nie ma resticu")
+	if r.path() == "" {
+		state.UnavailableReason = "this host does not have restic"
+		return state, fmt.Errorf("this host does not have restic")
 	}
-	stan.ToolVersion = r.Wersja(ctx)
+	state.ToolVersion = r.Version(ctx)
 
-	argumenty := append(r.argumentyPodstawowe(zlecenie), "snapshots")
-	wynik := uruchom(ctx, r.sciezka(), argumenty,
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	if !wynik.Ran || wynik.ExitCode != 0 || wynik.Err != nil {
-		stan.UnavailableReason = wynik.Powod()
-		return stan, fmt.Errorf("restic snapshots: %s", wynik.Powod())
+	arguments := append(r.baseArguments(order), "snapshots")
+	result := run(ctx, r.path(), arguments,
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	if !result.Ran || result.ExitCode != 0 || result.Err != nil {
+		state.UnavailableReason = result.Reason()
+		return state, fmt.Errorf("restic snapshots: %s", result.Reason())
 	}
 
-	var wpisy []snapshotResticu
-	if err := json.Unmarshal([]byte(wynik.Stdout), &wpisy); err != nil {
-		stan.UnavailableReason = "nie rozpoznano listy kopii: " + err.Error()
-		return stan, err
+	var entries []resticSnapshot
+	if err := json.Unmarshal([]byte(result.Stdout), &entries); err != nil {
+		state.UnavailableReason = "the copy list was not recognised: " + err.Error()
+		return state, err
 	}
-	for _, wpis := range wpisy {
-		identyfikator := wpis.ShortID
-		if identyfikator == "" {
-			identyfikator = wpis.ID
+	for _, entry := range entries {
+		identifier := entry.ShortID
+		if identifier == "" {
+			identifier = entry.ID
 		}
-		stan.Snapshots = append(stan.Snapshots, Snapshot{
-			ID: identyfikator, Time: wpis.Time.UTC(), Hostname: wpis.Hostname,
-			Paths: wpis.Paths, Tags: wpis.Tags,
+		state.Snapshots = append(state.Snapshots, Snapshot{
+			ID: identifier, Time: entry.Time.UTC(), Hostname: entry.Hostname,
+			Paths: entry.Paths, Tags: entry.Tags,
 		})
 	}
-	PosortujSnapshoty(stan.Snapshots)
-	stan.LastSuccessAt = OstatniUdany(stan.Snapshots)
+	SortSnapshots(state.Snapshots)
+	state.LastSuccessAt = LastSuccess(state.Snapshots)
 
-	// Rozmiar repozytorium jest osobnym pytaniem i osobnym kosztem: restic
-	// liczy go, przechodzac po indeksie. Nieudany odczyt zostawia brak
-	// wiedzy, a nie zero - repozytorium bez rozmiaru nadal ma kopie.
-	rozmiar := uruchom(ctx, r.sciezka(),
-		append(r.argumentyPodstawowe(zlecenie), "stats", "--mode", "raw-data"),
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	if rozmiar.Ran && rozmiar.ExitCode == 0 {
-		var statystyki struct {
+	// The repository size is a separate question and a separate cost:
+	// restic computes it by walking the index. A failed read leaves no
+	// knowledge, not zero - a repository without a size still has copies.
+	size := run(ctx, r.path(),
+		append(r.baseArguments(order), "stats", "--mode", "raw-data"),
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	if size.Ran && size.ExitCode == 0 {
+		var stats struct {
 			TotalSize uint64 `json:"total_size"`
 		}
-		if err := json.Unmarshal([]byte(rozmiar.Stdout), &statystyki); err == nil {
-			stan.TotalSizeBytes = &statystyki.TotalSize
+		if err := json.Unmarshal([]byte(size.Stdout), &stats); err == nil {
+			state.TotalSizeBytes = &stats.TotalSize
 		}
 	}
-	return stan, nil
+	return state, nil
 }
 
-// komunikatResticu jest linia strumienia "--json" przy backupie.
-type komunikatResticu struct {
+// resticMessage is a line of the "--json" stream during a backup.
+type resticMessage struct {
 	MessageType    string  `json:"message_type"`
 	PercentDone    float64 `json:"percent_done"`
 	TotalFiles     uint64  `json:"total_files"`
@@ -133,250 +135,251 @@ type komunikatResticu struct {
 	} `json:"error"`
 }
 
-// Wykonaj robi kopie, a po niej - jesli tak mowi definicja - sprzata stare.
-func (r *Restic) Wykonaj(ctx context.Context, zlecenie Zlecenie, postep PostepFunc) (Wynik, error) {
-	wynik := Wynik{}
-	if r.sciezka() == "" {
-		return wynik, fmt.Errorf("ten host nie ma resticu")
+// Run makes a copy and after it - if the definition says so - cleans up
+// old ones.
+func (r *Restic) Run(ctx context.Context, order Order, progress ProgressFunc) (Result, error) {
+	result := Result{}
+	if r.path() == "" {
+		return result, fmt.Errorf("this host does not have restic")
 	}
-	if len(zlecenie.Paths) == 0 {
-		return wynik, fmt.Errorf("definicja nie wskazuje, co backupowac")
-	}
-
-	if err := r.upewnijSieZeIstnieje(ctx, zlecenie); err != nil {
-		return wynik, err
+	if len(order.Paths) == 0 {
+		return result, fmt.Errorf("the definition does not say what to back up")
 	}
 
-	argumenty := append(r.argumentyPodstawowe(zlecenie), "backup")
-	argumenty = append(argumenty, zlecenie.Paths...)
-	for _, wzorzec := range zlecenie.Excludes {
-		argumenty = append(argumenty, "--exclude", wzorzec)
-	}
-	for _, znacznik := range zlecenie.Tags {
-		argumenty = append(argumenty, "--tag", znacznik)
+	if err := r.ensureExists(ctx, order); err != nil {
+		return result, err
 	}
 
-	var podsumowanie komunikatResticu
-	var bledy []string
-	uruchomienie := uruchom(ctx, r.sciezka(), argumenty,
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie),
-		func(linia string) {
-			var komunikat komunikatResticu
-			if err := json.Unmarshal([]byte(linia), &komunikat); err != nil {
+	arguments := append(r.baseArguments(order), "backup")
+	arguments = append(arguments, order.Paths...)
+	for _, pattern := range order.Excludes {
+		arguments = append(arguments, "--exclude", pattern)
+	}
+	for _, tag := range order.Tags {
+		arguments = append(arguments, "--tag", tag)
+	}
+
+	var summary resticMessage
+	var errorsSeen []string
+	execution := run(ctx, r.path(), arguments,
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order),
+		func(line string) {
+			var message resticMessage
+			if err := json.Unmarshal([]byte(line), &message); err != nil {
 				return
 			}
-			switch komunikat.MessageType {
+			switch message.MessageType {
 			case "status":
-				if postep != nil {
-					procent := uint32(komunikat.PercentDone * 100)
-					postep(Postep{
-						Percent: &procent,
-						Message: fmt.Sprintf("%s z %s",
-							rozmiar(komunikat.BytesDone), rozmiar(komunikat.TotalBytes)),
+				if progress != nil {
+					percent := uint32(message.PercentDone * 100)
+					progress(Progress{
+						Percent: &percent,
+						Message: fmt.Sprintf("%s of %s",
+							humanSize(message.BytesDone), humanSize(message.TotalBytes)),
 					})
 				}
 			case "summary":
-				podsumowanie = komunikat
+				summary = message
 			case "error":
-				if komunikat.Error.Message != "" {
-					bledy = append(bledy, komunikat.Error.Message)
+				if message.Error.Message != "" {
+					errorsSeen = append(errorsSeen, message.Error.Message)
 				}
 			}
 		})
-	wynik.Output = uruchomienie.Stderr
+	result.Output = execution.Stderr
 
-	if uruchomienie.Err != nil || !uruchomienie.Ran {
-		return wynik, fmt.Errorf("restic backup: %s", uruchomienie.Powod())
+	if execution.Err != nil || !execution.Ran {
+		return result, fmt.Errorf("restic backup: %s", execution.Reason())
 	}
-	// Kod 3 oznacza kopie zrobiona mimo plikow, ktorych nie dalo sie
-	// odczytac. To nie jest sukces i nie jest awaria: kopia istnieje, ale
-	// jest niepelna - i tak trzeba to nazwac.
-	if uruchomienie.ExitCode != 0 && uruchomienie.ExitCode != 3 {
-		return wynik, fmt.Errorf("restic backup: %s", uruchomienie.Powod())
+	// Code 3 means a copy made despite files that could not be read. That
+	// is not a success and not a failure: the copy exists, but is
+	// incomplete - and that is how it has to be named.
+	if execution.ExitCode != 0 && execution.ExitCode != 3 {
+		return result, fmt.Errorf("restic backup: %s", execution.Reason())
 	}
 
-	wynik.SnapshotID = podsumowanie.SnapshotID
-	if podsumowanie.SnapshotID != "" {
-		dodane, przetworzone := podsumowanie.DataAdded, podsumowanie.TotalBytesProc
-		nowe, zmienione := podsumowanie.FilesNew, podsumowanie.FilesChanged
-		czas := podsumowanie.TotalDuration
-		wynik.BytesAdded = &dodane
-		wynik.TotalBytesProcessed = &przetworzone
-		wynik.FilesNew = &nowe
-		wynik.FilesChanged = &zmienione
-		wynik.DurationSeconds = &czas
-		wynik.Message = fmt.Sprintf("kopia %s: %s nowych danych, %d nowych plikow",
-			podsumowanie.SnapshotID, rozmiar(podsumowanie.DataAdded), podsumowanie.FilesNew)
+	result.SnapshotID = summary.SnapshotID
+	if summary.SnapshotID != "" {
+		added, processed := summary.DataAdded, summary.TotalBytesProc
+		newFiles, changed := summary.FilesNew, summary.FilesChanged
+		duration := summary.TotalDuration
+		result.BytesAdded = &added
+		result.TotalBytesProcessed = &processed
+		result.FilesNew = &newFiles
+		result.FilesChanged = &changed
+		result.DurationSeconds = &duration
+		result.Message = fmt.Sprintf("copy %s: %s of new data, %d new files",
+			summary.SnapshotID, humanSize(summary.DataAdded), summary.FilesNew)
 	}
-	if uruchomienie.ExitCode == 3 || len(bledy) > 0 {
-		wynik.Message += "; czesci plikow nie udalo sie odczytac"
-		if len(bledy) > 0 {
-			wynik.Message += ": " + strings.Join(pierwsze(bledy, 3), "; ")
+	if execution.ExitCode == 3 || len(errorsSeen) > 0 {
+		result.Message += "; some files could not be read"
+		if len(errorsSeen) > 0 {
+			result.Message += ": " + strings.Join(first(errorsSeen, 3), "; ")
 		}
 	}
 
-	if usuniete, err := r.retencja(ctx, zlecenie); err != nil {
-		// Kopia jest zrobiona; nieudane sprzatanie nie moze jej uniewaznic,
-		// ale nie moze tez zniknac z wyniku.
-		wynik.Message += "; retencja nie powiodla sie: " + err.Error()
-	} else if usuniete != nil {
-		wynik.Removed = usuniete
+	if removed, err := r.retention(ctx, order); err != nil {
+		// The copy is made; a failed cleanup cannot invalidate it, but
+		// cannot vanish from the result either.
+		result.Message += "; retention failed: " + err.Error()
+	} else if removed != nil {
+		result.Removed = removed
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// retencja kasuje kopie spoza polityki. Zero we wszystkich progach oznacza
-// "nie sprzataj": skasowanie starych kopii jest osobna decyzja.
-func (r *Restic) retencja(ctx context.Context, zlecenie Zlecenie) (*int, error) {
-	progi := []struct {
-		flaga   string
-		wartosc int
+// retention deletes the copies outside the policy. Zero in all thresholds
+// means "do not clean up": deleting old copies is a separate decision.
+func (r *Restic) retention(ctx context.Context, order Order) (*int, error) {
+	thresholds := []struct {
+		flag  string
+		value int
 	}{
-		{"--keep-last", zlecenie.KeepLast},
-		{"--keep-daily", zlecenie.KeepDaily},
-		{"--keep-weekly", zlecenie.KeepWeekly},
-		{"--keep-monthly", zlecenie.KeepMonthly},
+		{"--keep-last", order.KeepLast},
+		{"--keep-daily", order.KeepDaily},
+		{"--keep-weekly", order.KeepWeekly},
+		{"--keep-monthly", order.KeepMonthly},
 	}
-	argumenty := append(r.argumentyPodstawowe(zlecenie), "forget")
-	ustawione := false
-	for _, prog := range progi {
-		if prog.wartosc > 0 {
-			argumenty = append(argumenty, prog.flaga, strconv.Itoa(prog.wartosc))
-			ustawione = true
+	arguments := append(r.baseArguments(order), "forget")
+	set := false
+	for _, threshold := range thresholds {
+		if threshold.value > 0 {
+			arguments = append(arguments, threshold.flag, strconv.Itoa(threshold.value))
+			set = true
 		}
 	}
-	if !ustawione {
+	if !set {
 		return nil, nil
 	}
-	if zlecenie.Prune {
-		argumenty = append(argumenty, "--prune")
+	if order.Prune {
+		arguments = append(arguments, "--prune")
 	}
 
-	wynik := uruchom(ctx, r.sciezka(), argumenty,
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	if !wynik.Ran || wynik.ExitCode != 0 {
-		return nil, fmt.Errorf("%s", wynik.Powod())
+	result := run(ctx, r.path(), arguments,
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	if !result.Ran || result.ExitCode != 0 {
+		return nil, fmt.Errorf("%s", result.Reason())
 	}
-	var grupy []struct {
-		Remove []snapshotResticu `json:"remove"`
+	var groups []struct {
+		Remove []resticSnapshot `json:"remove"`
 	}
-	if err := json.Unmarshal([]byte(wynik.Stdout), &grupy); err != nil {
+	if err := json.Unmarshal([]byte(result.Stdout), &groups); err != nil {
 		return nil, nil
 	}
-	usuniete := 0
-	for _, grupa := range grupy {
-		usuniete += len(grupa.Remove)
+	removed := 0
+	for _, group := range groups {
+		removed += len(group.Remove)
 	}
-	return &usuniete, nil
+	return &removed, nil
 }
 
-// Sprawdz weryfikuje repozytorium.
-func (r *Restic) Sprawdz(ctx context.Context, zlecenie Zlecenie) (Wynik, error) {
-	wynik := Wynik{}
-	if r.sciezka() == "" {
-		return wynik, fmt.Errorf("ten host nie ma resticu")
+// Verify checks the repository.
+func (r *Restic) Verify(ctx context.Context, order Order) (Result, error) {
+	result := Result{}
+	if r.path() == "" {
+		return result, fmt.Errorf("this host does not have restic")
 	}
-	argumenty := append(r.argumentyPodstawowe(zlecenie), "check")
-	if zlecenie.ReadData {
-		// Sprawdzenie struktury mowi, ze indeks sie zgadza; dopiero odczyt
-		// danych mowi, ze kopia da sie odtworzyc. Drugie kosztuje ruch
-		// i czas, wiec jest jawnym wyborem operatora.
-		argumenty = append(argumenty, "--read-data-subset", "5%")
+	arguments := append(r.baseArguments(order), "check")
+	if order.ReadData {
+		// A structure check says the index agrees; only reading the data
+		// says the copy can be restored. The latter costs traffic and time,
+		// so it is the operator's explicit choice.
+		arguments = append(arguments, "--read-data-subset", "5%")
 	}
-	uruchomienie := uruchom(ctx, r.sciezka(), argumenty,
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	wynik.Output = uruchomienie.Stdout + uruchomienie.Stderr
-	if !uruchomienie.Ran || uruchomienie.ExitCode != 0 || uruchomienie.Err != nil {
-		return wynik, fmt.Errorf("restic check: %s", uruchomienie.Powod())
+	execution := run(ctx, r.path(), arguments,
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	result.Output = execution.Stdout + execution.Stderr
+	if !execution.Ran || execution.ExitCode != 0 || execution.Err != nil {
+		return result, fmt.Errorf("restic check: %s", execution.Reason())
 	}
-	wynik.Message = "repozytorium sprawdzone"
-	if zlecenie.ReadData {
-		wynik.Message += " razem z odczytem czesci danych"
+	result.Message = "repository checked"
+	if order.ReadData {
+		result.Message += " together with reading a subset of the data"
 	}
-	return wynik, nil
+	return result, nil
 }
 
-// Odtworz rozpakowuje kopie do wskazanego katalogu.
-func (r *Restic) Odtworz(ctx context.Context, zlecenie Zlecenie) (Wynik, error) {
-	wynik := Wynik{}
-	if r.sciezka() == "" {
-		return wynik, fmt.Errorf("ten host nie ma resticu")
+// RestoreData unpacks a copy into the named directory.
+func (r *Restic) RestoreData(ctx context.Context, order Order) (Result, error) {
+	result := Result{}
+	if r.path() == "" {
+		return result, fmt.Errorf("this host does not have restic")
 	}
-	argumenty := append(r.argumentyPodstawowe(zlecenie), "restore",
-		zlecenie.Odtworzenie.SnapshotID, "--target", zlecenie.Odtworzenie.Target)
-	for _, wzorzec := range zlecenie.Odtworzenie.Include {
-		argumenty = append(argumenty, "--include", wzorzec)
+	arguments := append(r.baseArguments(order), "restore",
+		order.Restore.SnapshotID, "--target", order.Restore.Target)
+	for _, pattern := range order.Restore.Include {
+		arguments = append(arguments, "--include", pattern)
 	}
-	uruchomienie := uruchom(ctx, r.sciezka(), argumenty,
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	wynik.Output = uruchomienie.Stdout + uruchomienie.Stderr
-	if !uruchomienie.Ran || uruchomienie.ExitCode != 0 || uruchomienie.Err != nil {
-		return wynik, fmt.Errorf("restic restore: %s", uruchomienie.Powod())
+	execution := run(ctx, r.path(), arguments,
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	result.Output = execution.Stdout + execution.Stderr
+	if !execution.Ran || execution.ExitCode != 0 || execution.Err != nil {
+		return result, fmt.Errorf("restic restore: %s", execution.Reason())
 	}
 
-	var podsumowanie struct {
+	var summary struct {
 		MessageType   string `json:"message_type"`
 		FilesRestored uint64 `json:"files_restored"`
 		TotalBytes    uint64 `json:"total_bytes"`
 	}
-	for _, linia := range strings.Split(uruchomienie.Stdout, "\n") {
-		if err := json.Unmarshal([]byte(linia), &podsumowanie); err == nil &&
-			podsumowanie.MessageType == "summary" {
-			pliki, bajty := podsumowanie.FilesRestored, podsumowanie.TotalBytes
-			wynik.FilesRestored = &pliki
-			wynik.TotalBytesProcessed = &bajty
+	for _, line := range strings.Split(execution.Stdout, "\n") {
+		if err := json.Unmarshal([]byte(line), &summary); err == nil &&
+			summary.MessageType == "summary" {
+			files, bytes := summary.FilesRestored, summary.TotalBytes
+			result.FilesRestored = &files
+			result.TotalBytesProcessed = &bytes
 		}
 	}
-	wynik.Message = "kopia " + zlecenie.Odtworzenie.SnapshotID +
-		" odtworzona do " + zlecenie.Odtworzenie.Target
-	return wynik, nil
+	result.Message = "copy " + order.Restore.SnapshotID +
+		" restored into " + order.Restore.Target
+	return result, nil
 }
 
-// rozmiar opisuje liczbe bajtow tak, jak czyta ja czlowiek.
-func rozmiar(bajty uint64) string {
-	jednostki := []string{"B", "KiB", "MiB", "GiB", "TiB"}
-	wartosc := float64(bajty)
-	for _, jednostka := range jednostki {
-		if wartosc < 1024 || jednostka == "TiB" {
-			cyfry := 1
-			if jednostka == "B" {
-				cyfry = 0
+// humanSize describes a byte count the way a human reads it.
+func humanSize(bytes uint64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	value := float64(bytes)
+	for _, unit := range units {
+		if value < 1024 || unit == "TiB" {
+			digits := 1
+			if unit == "B" {
+				digits = 0
 			}
-			return strconv.FormatFloat(wartosc, 'f', cyfry, 64) + " " + jednostka
+			return strconv.FormatFloat(value, 'f', digits, 64) + " " + unit
 		}
-		wartosc /= 1024
+		value /= 1024
 	}
-	return strconv.FormatUint(bajty, 10) + " B"
+	return strconv.FormatUint(bytes, 10) + " B"
 }
 
-// pierwsze przycina liste komunikatow do kilku pierwszych.
-func pierwsze(wartosci []string, ile int) []string {
-	if len(wartosci) <= ile {
-		return wartosci
+// first trims a list of messages to the first few.
+func first(values []string, count int) []string {
+	if len(values) <= count {
+		return values
 	}
-	return wartosci[:ile]
+	return values[:count]
 }
 
-// upewnijSieZeIstnieje zaklada repozytorium, jesli definicja na to pozwala.
+// ensureExists creates the repository if the definition allows it.
 //
-// Zakladamy je tylko wtedy, gdy operator o to poprosil. Repozytorium
-// utworzone po cichu przy literowce w adresie wyglada jak backup, ktory
-// dziala - a jest pustym katalogiem obok tego wlasciwego.
-func (r *Restic) upewnijSieZeIstnieje(ctx context.Context, zlecenie Zlecenie) error {
-	sprawdzenie := uruchom(ctx, r.sciezka(),
-		append(r.argumentyPodstawowe(zlecenie), "cat", "config"),
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	if sprawdzenie.Ran && sprawdzenie.ExitCode == 0 {
+// It is created only when the operator asked for it. A repository created
+// quietly on a typo in the address looks like a working backup - and is an
+// empty directory next to the right one.
+func (r *Restic) ensureExists(ctx context.Context, order Order) error {
+	check := run(ctx, r.path(),
+		append(r.baseArguments(order), "cat", "config"),
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	if check.Ran && check.ExitCode == 0 {
 		return nil
 	}
-	if !zlecenie.Initialize {
+	if !order.Initialize {
 		return nil
 	}
-	utworzenie := uruchom(ctx, r.sciezka(),
-		append(r.argumentyPodstawowe(zlecenie), "init"),
-		srodowiskoNarzedzia(zlecenie, ZmiennaHaslaRestic), tajneZlecenia(zlecenie), nil)
-	if !utworzenie.Ran || utworzenie.ExitCode != 0 {
-		return fmt.Errorf("restic init: %s", utworzenie.Powod())
+	creation := run(ctx, r.path(),
+		append(r.baseArguments(order), "init"),
+		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
+	if !creation.Ran || creation.ExitCode != 0 {
+		return fmt.Errorf("restic init: %s", creation.Reason())
 	}
 	return nil
 }

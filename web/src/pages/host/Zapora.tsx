@@ -262,7 +262,7 @@ function nazwaReguly(regula: Regula): string {
  */
 function KreatorReguly({ odcisk, onZamiar }: { odcisk: string; onZamiar: (zamiar: Zamiar) => void }) {
   const [id, setId] = useState("");
-  const [lancuch, setLancuch] = useState("wejscie");
+  const [lancuch, setLancuch] = useState("input");
   const [dzialanie, setDzialanie] = useState("accept");
   const [protokol, setProtokol] = useState("tcp");
   const [porty, setPorty] = useState("");
@@ -284,8 +284,8 @@ function KreatorReguly({ odcisk, onZamiar }: { odcisk: string; onZamiar: (zamiar
       <div className="filtry">
         <input value={id} onChange={(e) => setId(e.target.value)} placeholder="Rule name, e.g. block-smtp" />
         <select value={lancuch} onChange={(e) => setLancuch(e.target.value)}>
-          <option value="wejscie">incoming</option>
-          <option value="wyjscie">outgoing</option>
+          <option value="input">incoming</option>
+          <option value="output">outgoing</option>
         </select>
         <select value={dzialanie} onChange={(e) => setDzialanie(e.target.value)}>
           <option value="accept">accept</option>

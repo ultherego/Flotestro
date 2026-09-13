@@ -5,91 +5,91 @@ import (
 	"time"
 )
 
-// TestOknoOdczytuJestDomykane pilnuje wlasciwosci, dla ktorej ta operacja
-// w ogole moze istniec: zamowienie spoza granic zostaje przyciete, wiec
-// zadanie zawsze sie konczy. Odczyt bez konca zostalby na hoscie na zawsze.
-func TestOknoOdczytuJestDomykane(t *testing.T) {
-	opcje := domknijOpcje(EventsOptions{
+// TestReadWindowIsBounded guards the property that lets this operation
+// exist at all: an order outside the bounds is trimmed, so the task always
+// ends. A read without an end would stay on the host forever.
+func TestReadWindowIsBounded(t *testing.T) {
+	options := boundOptions(EventsOptions{
 		Since:  7 * 24 * time.Hour,
 		Follow: time.Hour,
 		Max:    100000,
 	})
-	if opcje.Since != MaksymalneOknoZdarzen {
-		t.Errorf("okno wstecz = %s", opcje.Since)
+	if options.Since != MaxEventsWindow {
+		t.Errorf("look back window = %s", options.Since)
 	}
-	if opcje.Follow != MaksymalneSledzenieZdarzen {
-		t.Errorf("sledzenie = %s", opcje.Follow)
+	if options.Follow != MaxEventsFollow {
+		t.Errorf("follow = %s", options.Follow)
 	}
-	if opcje.Max != MaksymalnieZdarzen {
-		t.Errorf("limit zdarzen = %d", opcje.Max)
-	}
-}
-
-// TestBrakZamowieniaDajeDomyslneOkno pilnuje, ze najczestsza droga - "pokaz,
-// co sie tu dzialo" - nie wymaga niczego od operatora, a mimo to jest
-// ograniczona.
-func TestBrakZamowieniaDajeDomyslneOkno(t *testing.T) {
-	opcje := domknijOpcje(EventsOptions{})
-	if opcje.Since != domyslneOknoZdarzen {
-		t.Errorf("domyslne okno = %s", opcje.Since)
-	}
-	if opcje.Follow != 0 {
-		t.Errorf("domyslne sledzenie = %s, a zadanie ma konczyc sie od razu", opcje.Follow)
-	}
-	if opcje.Max != domyslnieZdarzen {
-		t.Errorf("domyslny limit = %d", opcje.Max)
-	}
-	if len(opcje.Types) != len(RodzajeZdarzen) {
-		t.Errorf("domyslne rodzaje = %v", opcje.Types)
+	if options.Max != MaxEvents {
+		t.Errorf("event limit = %d", options.Max)
 	}
 }
 
-// TestNieznaneRodzajeSaPomijane pilnuje granicy filtra: rodzaj jedzie do
-// Engine API, wiec lista jest zamknieta. Zdarzenia demona i wtyczek nie sa
-// odpowiedzia na zadne pytanie tej zakladki.
-func TestNieznaneRodzajeSaPomijane(t *testing.T) {
-	opcje := domknijOpcje(EventsOptions{Types: []string{"daemon", "plugin", "Container", "container"}})
-	if len(opcje.Types) != 1 || opcje.Types[0] != "container" {
-		t.Fatalf("rodzaje = %v", opcje.Types)
+// TestNoOrderGivesDefaultWindow guards that the most common path - "show
+// what happened here" - requires nothing from the operator, and is bounded
+// nevertheless.
+func TestNoOrderGivesDefaultWindow(t *testing.T) {
+	options := boundOptions(EventsOptions{})
+	if options.Since != defaultEventsWindow {
+		t.Errorf("default window = %s", options.Since)
+	}
+	if options.Follow != 0 {
+		t.Errorf("default follow = %s, and the task is meant to end at once", options.Follow)
+	}
+	if options.Max != defaultEvents {
+		t.Errorf("default limit = %d", options.Max)
+	}
+	if len(options.Types) != len(EventTypes) {
+		t.Errorf("default kinds = %v", options.Types)
 	}
 }
 
-// TestZdarzenieNiesieTylkoWybraneAtrybuty pilnuje, ze dziennik zdarzen nie
-// staje sie droga wycieku: silnik dokleda do zdarzenia wszystkie etykiety
-// obiektu, a w etykiecie bywa wpisany token.
-func TestZdarzenieNiesieTylkoWybraneAtrybuty(t *testing.T) {
-	linia := []byte(`{"Type":"container","Action":"die","Actor":{"ID":"abc123",
-		"Attributes":{"name":"sklep-web-1","image":"nginx:alpine","exitCode":"137",
-		"api_token":"sekret-ktory-nie-moze-wyjsc",
-		"com.docker.compose.project":"sklep"}},"timeNano":1700000000000000000}`)
+// TestUnknownKindsAreSkipped guards the filter boundary: the kind goes to
+// the Engine API, so the list is closed. Daemon and plugin events answer no
+// question of this tab.
+func TestUnknownKindsAreSkipped(t *testing.T) {
+	options := boundOptions(EventsOptions{Types: []string{"daemon", "plugin", "Container", "container"}})
+	if len(options.Types) != 1 || options.Types[0] != "container" {
+		t.Fatalf("kinds = %v", options.Types)
+	}
+}
 
-	zdarzenie, ok := zdarzenieZLinii(linia)
+// TestEventCarriesOnlySelectedAttributes guards that the event log does not
+// become a leak path: the engine attaches all the object's labels to the
+// event, and a label sometimes holds a token.
+func TestEventCarriesOnlySelectedAttributes(t *testing.T) {
+	line := []byte(`{"Type":"container","Action":"die","Actor":{"ID":"abc123",
+		"Attributes":{"name":"shop-web-1","image":"nginx:alpine","exitCode":"137",
+		"api_token":"secret-that-must-not-leave",
+		"com.docker.compose.project":"shop"}},"timeNano":1700000000000000000}`)
+
+	event, ok := eventFromLine(line)
 	if !ok {
-		t.Fatal("zdarzenie nieodczytane")
+		t.Fatal("event not read")
 	}
-	if zdarzenie.Type != "container" || zdarzenie.Action != "die" {
-		t.Fatalf("zdarzenie = %+v", zdarzenie)
+	if event.Type != "container" || event.Action != "die" {
+		t.Fatalf("event = %+v", event)
 	}
-	if zdarzenie.ActorName != "sklep-web-1" {
-		t.Errorf("nazwa aktora = %q", zdarzenie.ActorName)
+	if event.ActorName != "shop-web-1" {
+		t.Errorf("actor name = %q", event.ActorName)
 	}
-	if zdarzenie.Attributes["exitCode"] != "137" {
-		t.Errorf("kod wyjscia = %q", zdarzenie.Attributes["exitCode"])
+	if event.Attributes["exitCode"] != "137" {
+		t.Errorf("exit code = %q", event.Attributes["exitCode"])
 	}
-	if _, jest := zdarzenie.Attributes["api_token"]; jest {
-		t.Error("zdarzenie wyniosloby etykiete spoza listy")
+	if _, present := event.Attributes["api_token"]; present {
+		t.Error("the event would carry out a label outside the list")
 	}
-	if zdarzenie.Time.IsZero() {
-		t.Error("zdarzenie bez czasu")
+	if event.Time.IsZero() {
+		t.Error("event without a time")
 	}
 }
 
-// TestZdarzenieBezRodzajuJestPomijane pilnuje, ze linia, ktorej nie da sie
-// zrozumiec, nie staje sie pustym wpisem w dzienniku.
-func TestZdarzenieBezRodzajuJestPomijane(t *testing.T) {
-	for _, linia := range []string{"", "{}", "nie-json", `{"Action":"die"}`} {
-		if _, ok := zdarzenieZLinii([]byte(linia)); ok {
-			t.Errorf("linia %q uznana za zdarzenie", linia)
+// TestEventWithoutKindIsSkipped guards that a line that cannot be
+// understood does not become an empty entry in the log.
+func TestEventWithoutKindIsSkipped(t *testing.T) {
+	for _, line := range []string{"", "{}", "not-json", `{"Action":"die"}`} {
+		if _, ok := eventFromLine([]byte(line)); ok {
+			t.Errorf("line %q taken for an event", line)
 		}
 	}
 }

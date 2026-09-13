@@ -1,42 +1,45 @@
-// Package docker jest adapterem silnika kontenerow. Modul czyta stan przez
-// Engine API i wykonuje wylacznie operacje typowane; nie istnieje operacja
-// "dowolne zadanie do Dockera".
+// Package docker is the container engine adapter. The module reads the
+// state through the Engine API and runs only typed operations; there is no
+// "arbitrary request to Docker" operation.
 //
-// Agent nie dostaje dostepu do gniazda Dockera. Gniazdo nalezy do roota, a
-// czlonkostwo w grupie docker jest rownowazne rootowi - agent dzialajacy bez
-// uprawnien nie moze go miec. Cala rozmowa z silnikiem idzie przez helpera.
+// The agent gets no access to the Docker socket. The socket belongs to
+// root, and membership in the docker group is equivalent to root - an agent
+// running without privileges cannot have it. The whole conversation with
+// the engine goes through the helper.
 package docker
 
 import "time"
 
-// Container to jeden kontener widziany na hoscie.
+// Container is one container seen on the host.
 type Container struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Image string `json:"image"`
-	// ImageDigest jednoznacznie wskazuje obraz. Tag moze wskazywac co innego
-	// jutro, digest nie.
+	// ImageDigest identifies the image unambiguously. A tag may point at
+	// something else tomorrow, a digest does not.
 	ImageDigest string    `json:"image_digest,omitempty"`
 	State       string    `json:"state"`
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
-	// Health jest pusty, gdy obraz nie definiuje sprawdzenia. Brak sprawdzenia
-	// to nie to samo co sprawdzenie nieudane.
+	// Health is empty when the image defines no check. No check is not the
+	// same as a failed check.
 	Health string            `json:"health,omitempty"`
 	Ports  []Port            `json:"ports,omitempty"`
 	Mounts []Mount           `json:"mounts,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
-	// Compose wypelnia sie dla kontenerow zarzadzanych przez Compose.
+	// Compose is filled for containers managed by Compose.
 	Compose *ComposeMembership `json:"compose,omitempty"`
-	// Networks wylicza sieci, do ktorych kontener jest podlaczony. To stad
-	// wiadomo, ktora siec jest w uzyciu: lista sieci silnika tego nie mowi.
+	// Networks lists the networks the container is attached to. This is
+	// how it is known which network is in use: the engine's network list
+	// does not say.
 	Networks []ContainerNetwork `json:"networks,omitempty"`
-	// RestartCount pomaga odroznic kontener zdrowy od takiego, ktory wstaje
-	// w petli.
+	// RestartCount helps to tell a healthy container from one that comes up
+	// in a loop.
 	RestartCount int `json:"restart_count"`
 }
 
-// ComposeMembership opisuje przynaleznosc kontenera do projektu Compose.
+// ComposeMembership describes the membership of a container in a Compose
+// project.
 type ComposeMembership struct {
 	Project     string `json:"project"`
 	Service     string `json:"service"`
@@ -44,18 +47,18 @@ type ComposeMembership struct {
 	WorkingDir  string `json:"working_dir,omitempty"`
 }
 
-// ContainerNetwork opisuje podlaczenie kontenera do jednej sieci.
+// ContainerNetwork describes the attachment of a container to one network.
 type ContainerNetwork struct {
 	Name string `json:"name"`
 	ID   string `json:"id,omitempty"`
-	// IPv4 bywa puste: kontener zatrzymany nie ma adresu, a to nie znaczy,
-	// ze do sieci nie nalezy.
+	// IPv4 may be empty: a stopped container has no address, and that does
+	// not mean it does not belong to the network.
 	IPv4    string   `json:"ipv4,omitempty"`
 	IPv6    string   `json:"ipv6,omitempty"`
 	Aliases []string `json:"aliases,omitempty"`
 }
 
-// Port to opublikowany port kontenera.
+// Port is a published container port.
 type Port struct {
 	HostIP        string `json:"host_ip,omitempty"`
 	HostPort      uint16 `json:"host_port,omitempty"`
@@ -63,7 +66,7 @@ type Port struct {
 	Protocol      string `json:"protocol"`
 }
 
-// Mount to punkt montowania kontenera.
+// Mount is a container mount point.
 type Mount struct {
 	Type        string `json:"type"`
 	Source      string `json:"source,omitempty"`
@@ -72,19 +75,19 @@ type Mount struct {
 	Name        string `json:"name,omitempty"`
 }
 
-// Image to obraz obecny na hoscie.
+// Image is an image present on the host.
 type Image struct {
 	ID        string    `json:"id"`
 	Tags      []string  `json:"tags,omitempty"`
 	Digests   []string  `json:"digests,omitempty"`
 	SizeBytes int64     `json:"size_bytes"`
 	CreatedAt time.Time `json:"created_at"`
-	// InUse mowi, czy jakis kontener korzysta z obrazu. Bez tego operator nie
-	// wie, co skasuje sprzatanie.
+	// InUse says whether any container uses the image. Without it the
+	// operator does not know what a prune deletes.
 	InUse bool `json:"in_use"`
 }
 
-// Network to siec Dockera.
+// Network is a Docker network.
 type Network struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
@@ -92,29 +95,32 @@ type Network struct {
 	Scope    string   `json:"scope,omitempty"`
 	Subnets  []string `json:"subnets,omitempty"`
 	Gateways []string `json:"gateways,omitempty"`
-	// Internal oznacza siec bez wyjscia na zewnatrz, Attachable - siec,
-	// do ktorej wolno podlaczyc kontener spoza uslugi. Jedno i drugie
-	// zmienia to, co przez ta siec przejdzie, wiec nie jest szczegolem.
+	// Internal marks a network without an exit to the outside, Attachable -
+	// a network a container from outside the service may be attached to.
+	// Both change what passes through this network, so they are not a
+	// detail.
 	Internal   bool              `json:"internal"`
 	Attachable bool              `json:"attachable"`
 	IPv6       bool              `json:"ipv6"`
 	Ingress    bool              `json:"ingress,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
 	CreatedAt  time.Time         `json:"created_at,omitempty"`
-	// Predefined oznacza siec wbudowana w silnik - bridge, host, none.
-	// Silnik nie pozwala jej usunac, wiec panel nie moze tego proponowac.
+	// Predefined marks a network built into the engine - bridge, host,
+	// none. The engine does not allow removing it, so the panel must not
+	// propose that.
 	Predefined bool `json:"predefined"`
-	// Compose wskazuje projekt, ktory te siec utworzyl. Siec projektu usunieta
-	// recznie wroci przy nastepnym wdrozeniu, wiec to nie jest sprzatanie.
+	// Compose points at the project that created this network. A project
+	// network removed by hand comes back at the next deployment, so that is
+	// not cleanup.
 	Compose string `json:"compose,omitempty"`
-	// Containers wylicza podlaczone kontenery. Lista sieci silnika ich nie
-	// podaje, wiec sa wyliczane z listy kontenerow - i to one, a nie flaga
-	// z silnika, rozstrzygaja o uzyciu.
+	// Containers lists the attached containers. The engine's network list
+	// does not report them, so they are derived from the container list -
+	// and it is they, not a flag from the engine, that decide about usage.
 	Containers []NetworkMember `json:"containers,omitempty"`
 	InUse      bool            `json:"in_use"`
 }
 
-// NetworkMember to kontener podlaczony do sieci.
+// NetworkMember is a container attached to a network.
 type NetworkMember struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -122,7 +128,7 @@ type NetworkMember struct {
 	IPv4  string `json:"ipv4,omitempty"`
 }
 
-// Volume to wolumen Dockera.
+// Volume is a Docker volume.
 type Volume struct {
 	Name       string            `json:"name"`
 	Driver     string            `json:"driver"`
@@ -131,22 +137,23 @@ type Volume struct {
 	Labels     map[string]string `json:"labels,omitempty"`
 	Options    map[string]string `json:"options,omitempty"`
 	CreatedAt  time.Time         `json:"created_at,omitempty"`
-	// Compose wskazuje projekt, ktory wolumen utworzyl.
+	// Compose points at the project that created the volume.
 	Compose string `json:"compose,omitempty"`
-	// UsedBy wylicza kontenery, ktore ten wolumen montuja - razem
-	// z zatrzymanymi. Wolumen zatrzymanego kontenera nie jest wolumenem
-	// porzuconym, a to on ginie przy sprzataniu.
+	// UsedBy lists the containers that mount this volume - stopped ones
+	// included. The volume of a stopped container is not an abandoned
+	// volume, and it is the abandoned one that dies in a prune.
 	UsedBy []VolumeMount `json:"used_by,omitempty"`
 	InUse  bool          `json:"in_use"`
-	// SizeBytes bywa nieustalony: policzenie rozmiaru wymaga przejscia po
-	// calym wolumenie i silnik nie podaje go w kazdym zapytaniu.
+	// SizeBytes may be undetermined: computing the size requires walking
+	// the whole volume and the engine does not report it in every query.
 	SizeBytes *int64 `json:"size_bytes,omitempty"`
-	// SizeReason mowi, dlaczego rozmiaru nie ma. Zero znaczyloby wolumen
-	// pusty, gotowy do skasowania - a to zupelnie inna informacja.
+	// SizeReason says why there is no size. Zero would mean an empty
+	// volume, ready to be deleted - and that is entirely different
+	// information.
 	SizeReason string `json:"size_reason,omitempty"`
 }
 
-// VolumeMount to montowanie wolumenu w kontenerze.
+// VolumeMount is a volume mount in a container.
 type VolumeMount struct {
 	ContainerID   string `json:"container_id"`
 	ContainerName string `json:"container_name"`
@@ -155,7 +162,7 @@ type VolumeMount struct {
 	ReadOnly      bool   `json:"read_only"`
 }
 
-// Project to projekt Compose zlozony z kontenerow jednego hosta.
+// Project is a Compose project assembled from the containers of one host.
 type Project struct {
 	Name        string   `json:"name"`
 	ConfigFiles string   `json:"config_files,omitempty"`
@@ -165,9 +172,9 @@ type Project struct {
 	Total       int      `json:"total"`
 }
 
-// Summary jest lekkim podsumowaniem do inventory. Pelne listy sa pobierane na
-// zadanie: odpytywanie silnika przy kazdym heartbeacie obciazaloby host bez
-// powodu.
+// Summary is a light summary for the inventory. The full lists are fetched
+// on request: querying the engine at every heartbeat would load the host
+// for no reason.
 type Summary struct {
 	EngineVersion string `json:"engine_version,omitempty"`
 	APIVersion    string `json:"api_version,omitempty"`
@@ -176,18 +183,20 @@ type Summary struct {
 	Paused        int    `json:"paused"`
 	Stopped       int    `json:"stopped"`
 	Unhealthy     int    `json:"unhealthy"`
-	// RestartLooping liczy kontenery, ktore wstaja w kolko. To sygnal
-	// decyzyjny, a nie metryka - dlatego jest w inventory.
+	// RestartLooping counts the containers that come up over and over. It
+	// is a decision signal, not a metric - that is why it is in the
+	// inventory.
 	RestartLooping int `json:"restart_looping"`
 	Images         int `json:"images"`
 	Volumes        int `json:"volumes"`
 	Networks       int `json:"networks"`
-	// Nieuzywane wolumeny i sieci sa sygnalem do sprzatania, a nie metryka:
-	// to one zajmuja miejsce i to one sa kandydatami do usuniecia.
+	// Unused volumes and networks are a cleanup signal, not a metric: they
+	// take up space and they are the candidates for removal.
 	VolumesUnused  int       `json:"volumes_unused"`
 	NetworksUnused int       `json:"networks_unused"`
 	Projects       []Project `json:"projects,omitempty"`
-	// UnavailableReason mowi, dlaczego stanu nie udalo sie ustalic. Pusty
-	// silnik i silnik nieodpytany to dwie rozne informacje.
+	// UnavailableReason says why the state could not be determined. An
+	// empty engine and an engine not asked are two different pieces of
+	// information.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }

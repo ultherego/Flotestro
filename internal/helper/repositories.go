@@ -9,7 +9,7 @@ import (
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
-	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
+	filesmodule "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
@@ -108,7 +108,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 			undo()
 			return reject(ErrorExecFailed, err.Error())
 		}
-		if err := filesmodul.ZapiszAtomowo(file.Path, file.Content, file.Mode, -1, -1); err != nil {
+		if err := filesmodule.WriteAtomically(file.Path, file.Content, file.Mode, -1, -1); err != nil {
 			undo()
 			// The message carries the path, never the content: one of these
 			// files holds a password.
@@ -206,5 +206,5 @@ func (c fileCopy) restore() error {
 		}
 		return nil
 	}
-	return filesmodul.ZapiszAtomowo(c.path, c.content, c.mode, c.uid, c.gid)
+	return filesmodule.WriteAtomically(c.path, c.content, c.mode, c.uid, c.gid)
 }

@@ -37,13 +37,13 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if !network.Istnieje(network.SciezkaNmcli) {
+	if !network.Exists(network.NmcliPath) {
 		reason := "this host has no NetworkManager; the resolver is read-only here"
 		if planning {
 			// A missing write mechanism is an answer of the plan, not a read
 			// error: the campaign is to see this host as a refusal.
 			return resolverPlanResponse(nil,
-				network.OdmowaPlanu(action.GetInterface(), network.PlanDNS, reason))
+				network.RefusedPlan(action.GetInterface(), network.PlanDNS, reason))
 		}
 		return reject(ErrorUnsupported, reason)
 	}
@@ -52,7 +52,7 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	if err != nil {
 		if planning {
 			return resolverPlanResponse(s.readProfiles(actionCtx),
-				network.OdmowaPlanu(action.GetInterface(), network.PlanDNS, err.Error()))
+				network.RefusedPlan(action.GetInterface(), network.PlanDNS, err.Error()))
 		}
 		return reject(ErrorUnsupported, err.Error())
 	}
@@ -70,28 +70,28 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 		}
 	}
 
-	steps, err := network.ArgumentyDNS(connection, action.GetServers(),
+	steps, err := network.DNSArguments(connection, action.GetServers(),
 		action.GetSearchDomains(), action.GetIgnoreAutoDns())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
-	plan := network.PlanWycofania{
+	plan := network.RollbackPlan{
 		ID:        rollbackIdentifier(),
-		Profil:    profile,
-		Interfejs: action.GetInterface(),
-		Utworzony: time.Now().UTC(),
+		Profile:   profile,
+		Interface: action.GetInterface(),
+		CreatedAt: time.Now().UTC(),
 	}
 	window := rollbackWindow(action.GetRollbackSeconds())
-	plan.Termin = plan.Utworzony.Add(window)
-	if _, err := network.KrokiWycofania(plan); err != nil {
+	plan.Deadline = plan.CreatedAt.Add(window)
+	if _, err := network.RollbackSteps(plan); err != nil {
 		return reject(ErrorUnsupported, "the rollback cannot be assembled: "+err.Error())
 	}
-	if err := network.ZapiszPlan(network.KatalogWycofan, plan); err != nil {
+	if err := network.SavePlan(network.RollbackDir, plan); err != nil {
 		return reject(ErrorExecFailed, "writing the rollback plan: "+err.Error())
 	}
 	if err := s.armRollback(actionCtx, plan, window); err != nil {
-		_ = network.UsunPlan(network.KatalogWycofan, plan.ID)
+		_ = network.RemovePlan(network.RollbackDir, plan.ID)
 		return reject(ErrorExecFailed, "arming the rollback: "+err.Error())
 	}
 
@@ -101,7 +101,7 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 			response.DnsResult = &helperv1.DnsResult{
 				Message:          output,
 				RollbackId:       plan.ID,
-				RollbackDeadline: plan.Termin.Format(time.RFC3339),
+				RollbackDeadline: plan.Deadline.Format(time.RFC3339),
 			}
 			return response
 		}
@@ -117,21 +117,21 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 		DnsResult: &helperv1.DnsResult{
 			Profiles: encoded,
 			Message: "the resolver was changed; rollback at " +
-				plan.Termin.Format(time.RFC3339) + " unless the agent confirms connectivity",
+				plan.Deadline.Format(time.RFC3339) + " unless the agent confirms connectivity",
 			RollbackId:       plan.ID,
-			RollbackDeadline: plan.Termin.Format(time.RFC3339),
+			RollbackDeadline: plan.Deadline.Format(time.RFC3339),
 		},
 	}
 }
 
 // resolverPlan computes the plan of a resolver change against the profile
 // found.
-func resolverPlan(action *helperv1.DnsRequest, profile network.Profil) network.Plan {
-	return network.ZaplanujDNS(action.GetInterface(), profile, action.GetServers(),
+func resolverPlan(action *helperv1.DnsRequest, profile network.Profile) network.Plan {
+	return network.ComputeDNS(action.GetInterface(), profile, action.GetServers(),
 		action.GetSearchDomains(), action.GetIgnoreAutoDns())
 }
 
-func resolverPlanResponse(profiles []network.Profil, plan network.Plan) *helperv1.HelperResponse {
+func resolverPlanResponse(profiles []network.Profile, plan network.Plan) *helperv1.HelperResponse {
 	encodedPlan, err := json.Marshal(plan)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -143,7 +143,7 @@ func resolverPlanResponse(profiles []network.Profil, plan network.Plan) *helperv
 	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == network.PlanBezZmian:
+	case plan.Action == network.PlanNoChange:
 		message = "the resolver of the profile " + plan.Connection + " is already in the desired state"
 	default:
 		message = "the resolver of the profile " + plan.Connection + ": " + strings.Join(plan.Changes, "; ")

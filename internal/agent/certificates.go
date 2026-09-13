@@ -25,9 +25,9 @@ func SetCertificateProbe(probe func(context.Context) (certificates.Snapshot, err
 // certificateFactCodes translates the fact names of the module into the
 // enumeration of the protocol.
 var certificateFactCodes = map[string]helperv1.CertificateRequest_Fact{
-	certificates.FaktMetadaneKluczy: helperv1.CertificateRequest_FACT_KEY_METADATA,
-	certificates.FaktSledzenie:      helperv1.CertificateRequest_FACT_RENEWAL_TRACKING,
-	certificates.FaktTrescPliku:     helperv1.CertificateRequest_FACT_CERTIFICATE_FILES,
+	certificates.FactKeyMetadata:      helperv1.CertificateRequest_FACT_KEY_METADATA,
+	certificates.FactTracking:         helperv1.CertificateRequest_FACT_RENEWAL_TRACKING,
+	certificates.FactCertificateFiles: helperv1.CertificateRequest_FACT_CERTIFICATE_FILES,
 }
 
 // CollectCertificates assembles the picture of the certificates of the host.
@@ -39,11 +39,11 @@ var certificateFactCodes = map[string]helperv1.CertificateRequest_Fact{
 // for what cannot be seen without root: the permissions of the keys and the
 // files closed to everyone but the service.
 func (e *TaskExecutor) CollectCertificates(ctx context.Context,
-	targets []certificates.Cel, fullList bool) certificates.Snapshot {
+	targets []certificates.Target, fullList bool) certificates.Snapshot {
 	scope, tracking := e.certificateScope(ctx, targets, fullList)
 
-	snapshot := certificates.Skanuj(scope)
-	missing := snapshot.Brakujace()
+	snapshot := certificates.Scan(scope)
+	missing := snapshot.MissingFacts()
 	if len(missing) > 0 {
 		supplement, err := e.certificateFacts(ctx, missing, scope, false)
 		if err != nil {
@@ -51,28 +51,28 @@ func (e *TaskExecutor) CollectCertificates(ctx context.Context,
 				snapshot.Missing[name] = "helper: " + err.Error()
 			}
 		} else {
-			snapshot = snapshot.Uzupelnij(supplement)
+			snapshot = snapshot.Supplemented(supplement)
 		}
 	}
 	// The state of the certmonger requests is already known from the first
 	// question: it is not asked a second time only because the scan reported it
 	// as missing.
 	if tracking != nil {
-		snapshot = snapshot.Uzupelnij(*tracking)
+		snapshot = snapshot.Supplemented(*tracking)
 	}
 	// The trust store is read by the agent: the anchor directory is readable by
 	// everyone, so there is no reason to go to root for it. Without that read a
 	// rotation of the authority is invisible from the panel.
-	store := certificates.CzytajKotwice(certificates.WykryjMagazyn(certificates.Istnieje))
+	store := certificates.ReadAnchors(certificates.DetectStore(certificates.Exists))
 	snapshot.Trust = &store
 	return snapshot
 }
 
 // certificateScope decides which files to look at.
 func (e *TaskExecutor) certificateScope(ctx context.Context,
-	targets []certificates.Cel, fullList bool) ([]certificates.Cel, *certificates.Uzupelnienie) {
+	targets []certificates.Target, fullList bool) ([]certificates.Target, *certificates.Supplement) {
 	supplement, err := e.certificateFacts(ctx,
-		[]string{certificates.FaktSledzenie}, targets, fullList)
+		[]string{certificates.FactTracking}, targets, fullList)
 	if err != nil {
 		return targets, nil
 	}
@@ -84,13 +84,13 @@ func (e *TaskExecutor) certificateScope(ctx context.Context,
 	// because the host knows about them itself. Without that the tab would show
 	// emptiness on a host that has its own domain certificate and has been
 	// renewing it for months.
-	scope = certificates.DodajSledzone(scope, supplement.Tracking)
+	scope = certificates.AddTracked(scope, supplement.Tracking)
 	return scope, &supplement
 }
 
 // certificateFacts orders the enumerated facts from the helper.
 func (e *TaskExecutor) certificateFacts(ctx context.Context, names []string,
-	targets []certificates.Cel, fullList bool) (certificates.Uzupelnienie, error) {
+	targets []certificates.Target, fullList bool) (certificates.Supplement, error) {
 	requested := make([]helperv1.CertificateRequest_Fact, 0, len(names))
 	for _, name := range names {
 		if fact, known := certificateFactCodes[name]; known {
@@ -98,7 +98,7 @@ func (e *TaskExecutor) certificateFacts(ctx context.Context, names []string,
 		}
 	}
 	if len(requested) == 0 {
-		return certificates.Uzupelnienie{}, nil
+		return certificates.Supplement{}, nil
 	}
 
 	request := &helperv1.CertificateRequest{
@@ -117,18 +117,18 @@ func (e *TaskExecutor) certificateFacts(ctx context.Context, names []string,
 		Action:         &helperv1.HelperRequest_Certificate{Certificate: request},
 	}, time.Minute)
 	if err != nil {
-		return certificates.Uzupelnienie{}, err
+		return certificates.Supplement{}, err
 	}
 	if !response.GetAccepted() {
-		return certificates.Uzupelnienie{}, errors.New("helper: " + response.GetMessage())
+		return certificates.Supplement{}, errors.New("helper: " + response.GetMessage())
 	}
-	var supplement certificates.Uzupelnienie
+	var supplement certificates.Supplement
 	data := response.GetCertificateResult().GetFacts()
 	if len(data) == 0 {
 		return supplement, nil
 	}
 	if err := json.Unmarshal(data, &supplement); err != nil {
-		return certificates.Uzupelnienie{}, err
+		return certificates.Supplement{}, err
 	}
 	return supplement, nil
 }
@@ -151,10 +151,10 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 	defer cancel()
 
 	if action == opspec.ActionCertificateScan {
-		targets := make([]certificates.Cel, 0)
+		targets := make([]certificates.Target, 0)
 		if payload != nil {
 			for _, target := range payload.Targets {
-				targets = append(targets, certificates.Cel{
+				targets = append(targets, certificates.Target{
 					Path: target.Path, KeyPath: target.KeyPath, Service: target.Service,
 				})
 			}

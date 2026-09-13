@@ -1,8 +1,9 @@
-// Package processes czyta procesy hosta z /proc.
+// Package processes reads the host processes from /proc.
 //
-// Modul jest diagnostyka, a nie systemem obserwacji. Snapshot powstaje
-// wylacznie na zadanie operatora i ma gorna granice rozmiaru: ciagly strumien
-// metryk procesow nalezy do Prometheusa, nie do panelu zarzadzania.
+// The module is a diagnostic, not an observability system. A snapshot is
+// taken only on the operator's request and has an upper size bound: a
+// continuous stream of process metrics belongs to Prometheus, not to the
+// management panel.
 package processes
 
 import (
@@ -13,51 +14,53 @@ import (
 	"strings"
 )
 
-// Process opisuje jeden proces hosta.
+// Process describes one host process.
 type Process struct {
 	PID  int32  `json:"pid"`
 	PPID int32  `json:"ppid"`
 	User string `json:"user,omitempty"`
 	UID  uint32 `json:"uid"`
-	// Command jest pelnym wierszem polecenia; puste dla procesow jadra,
-	// ktore go nie maja.
+	// Command is the full command line; empty for kernel processes, which
+	// have none.
 	Command string `json:"command,omitempty"`
-	// Name pochodzi z /proc/<pid>/stat i istnieje takze dla procesow jadra.
+	// Name comes from /proc/<pid>/stat and exists for kernel processes too.
 	Name  string `json:"name"`
 	State string `json:"state"`
-	// RSSBytes to pamiec rezydentna. Zero dla procesu jadra jest prawda,
-	// a nie brakiem danych.
+	// RSSBytes is the resident memory. Zero for a kernel process is the
+	// truth, not missing data.
 	RSSBytes int64 `json:"rss_bytes"`
 	Threads  int32 `json:"threads"`
-	// StartTimeTicks wiaze proces z jego identyfikatorem. Sam PID jest
-	// ponownie uzywany przez jadro, wiec sygnal wyslany po chwili moglby
-	// trafic w zupelnie inny proces.
+	// StartTimeTicks binds the process to its identifier. The PID alone is
+	// reused by the kernel, so a signal sent a moment later could hit an
+	// entirely different process.
 	StartTimeTicks uint64 `json:"start_time_ticks"`
-	// CPUTicks to sumaryczny czas procesora. Panel nie liczy z niego
-	// procentow: do tego trzeba dwoch pomiarow, a snapshot jest jeden.
+	// CPUTicks is the total processor time. The panel does not derive
+	// percentages from it: that needs two measurements and the snapshot is
+	// one.
 	CPUTicks uint64 `json:"cpu_ticks"`
-	// Unit i Container wskazuja, co zarzadza procesem. Bez tego operator
-	// widzi PID i musi sam zgadywac, czyj on jest.
+	// Unit and Container point at what manages the process. Without them
+	// the operator sees a PID and has to guess whose it is.
 	Unit      string `json:"unit,omitempty"`
 	Container string `json:"container,omitempty"`
 }
 
-// Snapshot to wynik jednego odczytu.
+// Snapshot is the result of one read.
 type Snapshot struct {
 	Processes []Process `json:"processes"`
-	// Total mowi, ile procesow bylo na hoscie. Lista bywa krotsza od tej
-	// liczby: urwana lista bez niej wygladalaby na pelna.
+	// Total says how many processes were on the host. The list may be
+	// shorter than this number: a truncated list without it would look
+	// complete.
 	Total     int   `json:"total"`
 	Truncated bool  `json:"truncated"`
 	ClockHz   int64 `json:"clock_hz"`
 }
 
-// MaksymalnieProcesow ogranicza jeden snapshot.
-const MaksymalnieProcesow = 500
+// MaxProcesses bounds one snapshot.
+const MaxProcesses = 500
 
-// Sortowanie decyduje, ktore procesy trafia do wyniku, gdy jest ich wiecej
-// niz limit. Wybor nalezy do operatora: szuka albo zargu pamieci, albo
-// zargu procesora, albo konkretnego polecenia.
+// Sorting decides which processes make it into the result when there are
+// more than the limit. The choice belongs to the operator: they look either
+// for a memory hog, a CPU hog, or a specific command.
 const (
 	SortByRSS     = "rss"
 	SortByCPU     = "cpu"
@@ -65,159 +68,160 @@ const (
 	SortByStarted = "started"
 )
 
-// Collect czyta procesy hosta.
+// Collect reads the host processes.
 //
-// Odczyt idzie z /proc i nie wymaga roota: panel pokazuje to, co widzi kazdy
-// uzytkownik hosta. Wyslanie sygnalu wymaga juz uprawnien i idzie przez
-// helpera.
+// The read comes from /proc and needs no root: the panel shows what every
+// user of the host can see. Sending a signal does need privileges and goes
+// through the helper.
 func Collect(root string, sortBy string, limit int) Snapshot {
 	if root == "" {
 		root = "/proc"
 	}
-	if limit <= 0 || limit > MaksymalnieProcesow {
-		limit = MaksymalnieProcesow
+	if limit <= 0 || limit > MaxProcesses {
+		limit = MaxProcesses
 	}
 
-	wpisy, err := os.ReadDir(root)
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return Snapshot{ClockHz: clockHz}
 	}
 
-	uzytkownicy := czytajUzytkownikow("/etc/passwd")
-	var procesy []Process
-	for _, wpis := range wpisy {
-		pid, err := strconv.ParseInt(wpis.Name(), 10, 32)
+	users := readUsers("/etc/passwd")
+	var list []Process
+	for _, entry := range entries {
+		pid, err := strconv.ParseInt(entry.Name(), 10, 32)
 		if err != nil {
 			continue
 		}
-		proces, ok := czytajProces(root, int32(pid), uzytkownicy)
+		process, ok := readProcess(root, int32(pid), users)
 		if !ok {
-			// Proces, ktory zniknal w trakcie odczytu, nie jest bledem:
-			// snapshot opisuje chwile, a chwila juz minela.
+			// A process that vanished during the read is not an error: the
+			// snapshot describes a moment, and the moment has passed.
 			continue
 		}
-		procesy = append(procesy, proces)
+		list = append(list, process)
 	}
 
-	snapshot := Snapshot{Total: len(procesy), ClockHz: clockHz}
-	posortuj(procesy, sortBy)
-	if len(procesy) > limit {
-		procesy = procesy[:limit]
+	snapshot := Snapshot{Total: len(list), ClockHz: clockHz}
+	sortProcesses(list, sortBy)
+	if len(list) > limit {
+		list = list[:limit]
 		snapshot.Truncated = true
 	}
-	snapshot.Processes = procesy
+	snapshot.Processes = list
 	return snapshot
 }
 
-func posortuj(procesy []Process, sortBy string) {
+func sortProcesses(list []Process, sortBy string) {
 	switch sortBy {
 	case SortByCPU:
-		sort.Slice(procesy, func(i, j int) bool { return procesy[i].CPUTicks > procesy[j].CPUTicks })
+		sort.Slice(list, func(i, j int) bool { return list[i].CPUTicks > list[j].CPUTicks })
 	case SortByPID:
-		sort.Slice(procesy, func(i, j int) bool { return procesy[i].PID < procesy[j].PID })
+		sort.Slice(list, func(i, j int) bool { return list[i].PID < list[j].PID })
 	case SortByStarted:
-		sort.Slice(procesy, func(i, j int) bool {
-			return procesy[i].StartTimeTicks > procesy[j].StartTimeTicks
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].StartTimeTicks > list[j].StartTimeTicks
 		})
 	default:
-		// Domyslnie po pamieci: to ona najczesciej konczy sie na hoscie
-		// i to jej brak widac jako pierwszy.
-		sort.Slice(procesy, func(i, j int) bool { return procesy[i].RSSBytes > procesy[j].RSSBytes })
+		// Memory by default: it is what most often runs out on a host, and
+		// its shortage is the first thing seen.
+		sort.Slice(list, func(i, j int) bool { return list[i].RSSBytes > list[j].RSSBytes })
 	}
 }
 
-// czytajProces sklada opis jednego procesu.
-func czytajProces(root string, pid int32, uzytkownicy map[uint32]string) (Process, bool) {
-	katalog := filepath.Join(root, strconv.FormatInt(int64(pid), 10))
-	stat, err := os.ReadFile(filepath.Join(katalog, "stat"))
+// readProcess assembles the description of one process.
+func readProcess(root string, pid int32, users map[uint32]string) (Process, bool) {
+	dir := filepath.Join(root, strconv.FormatInt(int64(pid), 10))
+	stat, err := os.ReadFile(filepath.Join(dir, "stat"))
 	if err != nil {
 		return Process{}, false
 	}
-	proces, ok := parsujStat(string(stat))
+	process, ok := parseStat(string(stat))
 	if !ok {
 		return Process{}, false
 	}
-	proces.PID = pid
+	process.PID = pid
 
-	if dane, err := os.ReadFile(filepath.Join(katalog, "cmdline")); err == nil {
-		// Argumenty sa rozdzielone bajtem zerowym; pusty cmdline oznacza
-		// proces jadra, a nie brak polecenia.
-		proces.Command = strings.TrimSpace(strings.ReplaceAll(string(dane), "\x00", " "))
+	if data, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
+		// Arguments are separated by a zero byte; an empty cmdline means a
+		// kernel process, not a missing command.
+		process.Command = strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", " "))
 	}
-	if dane, err := os.ReadFile(filepath.Join(katalog, "status")); err == nil {
-		proces.UID = uidZeStatusu(string(dane))
-		proces.User = uzytkownicy[proces.UID]
+	if data, err := os.ReadFile(filepath.Join(dir, "status")); err == nil {
+		process.UID = uidFromStatus(string(data))
+		process.User = users[process.UID]
 	}
-	if dane, err := os.ReadFile(filepath.Join(katalog, "cgroup")); err == nil {
-		proces.Unit, proces.Container = wlascicielZCgroup(string(dane))
+	if data, err := os.ReadFile(filepath.Join(dir, "cgroup")); err == nil {
+		process.Unit, process.Container = ownerFromCgroup(string(data))
 	}
-	return proces, true
+	return process, true
 }
 
-// parsujStat czyta /proc/<pid>/stat.
+// parseStat reads /proc/<pid>/stat.
 //
-// Nazwa procesu jest w nawiasach i moze zawierac spacje oraz same nawiasy,
-// wiec pola liczbowe czytamy dopiero za ostatnim nawiasem zamykajacym -
-// podzial calej linii po spacjach dawalby zle wyniki dla takich nazw.
-func parsujStat(linia string) (Process, bool) {
-	otwarcie := strings.IndexByte(linia, '(')
-	zamkniecie := strings.LastIndexByte(linia, ')')
-	if otwarcie < 0 || zamkniecie < otwarcie {
+// The process name is in parentheses and may contain spaces and parentheses
+// themselves, so the numeric fields are read only after the last closing
+// parenthesis - splitting the whole line on spaces would give wrong results
+// for such names.
+func parseStat(line string) (Process, bool) {
+	open := strings.IndexByte(line, '(')
+	close := strings.LastIndexByte(line, ')')
+	if open < 0 || close < open {
 		return Process{}, false
 	}
-	proces := Process{Name: linia[otwarcie+1 : zamkniecie]}
+	process := Process{Name: line[open+1 : close]}
 
-	pola := strings.Fields(linia[zamkniecie+1:])
-	// Pola liczone od trzeciego pola stat: state, ppid, ...
-	if len(pola) < 20 {
+	fields := strings.Fields(line[close+1:])
+	// Fields counted from the third stat field: state, ppid, ...
+	if len(fields) < 20 {
 		return Process{}, false
 	}
-	proces.State = pola[0]
-	proces.PPID = int32(liczba(pola[1]))
-	proces.CPUTicks = uint64(liczba(pola[11])) + uint64(liczba(pola[12]))
-	proces.Threads = int32(liczba(pola[17]))
-	proces.StartTimeTicks = uint64(liczba(pola[19]))
-	// RSS jest w stronach pamieci.
-	if len(pola) > 21 {
-		proces.RSSBytes = liczba(pola[21]) * int64(os.Getpagesize())
+	process.State = fields[0]
+	process.PPID = int32(number(fields[1]))
+	process.CPUTicks = uint64(number(fields[11])) + uint64(number(fields[12]))
+	process.Threads = int32(number(fields[17]))
+	process.StartTimeTicks = uint64(number(fields[19]))
+	// RSS is in memory pages.
+	if len(fields) > 21 {
+		process.RSSBytes = number(fields[21]) * int64(os.Getpagesize())
 	}
-	return proces, true
+	return process, true
 }
 
-func liczba(tekst string) int64 {
-	wartosc, _ := strconv.ParseInt(tekst, 10, 64)
-	return wartosc
+func number(text string) int64 {
+	value, _ := strconv.ParseInt(text, 10, 64)
+	return value
 }
 
-func uidZeStatusu(status string) uint32 {
-	for _, linia := range strings.Split(status, "\n") {
-		if !strings.HasPrefix(linia, "Uid:") {
+func uidFromStatus(status string) uint32 {
+	for _, line := range strings.Split(status, "\n") {
+		if !strings.HasPrefix(line, "Uid:") {
 			continue
 		}
-		pola := strings.Fields(linia)
-		if len(pola) > 1 {
-			return uint32(liczba(pola[1]))
+		fields := strings.Fields(line)
+		if len(fields) > 1 {
+			return uint32(number(fields[1]))
 		}
 	}
 	return 0
 }
 
-// wlascicielZCgroup rozpoznaje jednostke systemd i kontener Dockera.
-// Operator widzacy sam PID musialby zgadywac, czyj on jest.
-func wlascicielZCgroup(cgroup string) (unit, container string) {
-	for _, linia := range strings.Split(cgroup, "\n") {
-		czesci := strings.SplitN(linia, ":", 3)
-		if len(czesci) < 3 {
+// ownerFromCgroup recognises the systemd unit and the Docker container.
+// An operator seeing only a PID would have to guess whose it is.
+func ownerFromCgroup(cgroup string) (unit, container string) {
+	for _, line := range strings.Split(cgroup, "\n") {
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) < 3 {
 			continue
 		}
-		sciezka := czesci[2]
-		if index := strings.Index(sciezka, "docker-"); index >= 0 {
-			reszta := sciezka[index+len("docker-"):]
-			if koniec := strings.Index(reszta, ".scope"); koniec > 0 {
-				container = reszta[:koniec]
+		path := parts[2]
+		if index := strings.Index(path, "docker-"); index >= 0 {
+			rest := path[index+len("docker-"):]
+			if end := strings.Index(rest, ".scope"); end > 0 {
+				container = rest[:end]
 			}
 		}
-		for _, segment := range strings.Split(sciezka, "/") {
+		for _, segment := range strings.Split(path, "/") {
 			if strings.HasSuffix(segment, ".service") || strings.HasSuffix(segment, ".scope") {
 				if !strings.HasPrefix(segment, "docker-") {
 					unit = segment
@@ -228,24 +232,24 @@ func wlascicielZCgroup(cgroup string) (unit, container string) {
 	return unit, container
 }
 
-// czytajUzytkownikow mapuje UID na nazwe. Nieznany UID zostaje nieznany:
-// pusta nazwa jest uczciwsza niz zmyslona.
-func czytajUzytkownikow(sciezka string) map[uint32]string {
-	dane, err := os.ReadFile(sciezka)
+// readUsers maps a UID to a name. An unknown UID stays unknown: an empty
+// name is more honest than an invented one.
+func readUsers(path string) map[uint32]string {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return map[uint32]string{}
 	}
-	uzytkownicy := map[uint32]string{}
-	for _, linia := range strings.Split(string(dane), "\n") {
-		pola := strings.Split(linia, ":")
-		if len(pola) < 3 {
+	users := map[uint32]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) < 3 {
 			continue
 		}
-		uzytkownicy[uint32(liczba(pola[2]))] = pola[0]
+		users[uint32(number(fields[2]))] = fields[0]
 	}
-	return uzytkownicy
+	return users
 }
 
-// clockHz jest czestotliwoscia tykow jadra. Sluzy do przeliczenia czasu
-// startu procesu na czas rzeczywisty po stronie interfejsu.
+// clockHz is the kernel tick frequency. It converts the process start time
+// to wall-clock time on the interface side.
 const clockHz = 100

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func stanTestowy() Snapshot {
+func testState() Snapshot {
 	return Snapshot{
 		Ports: []string{"22"}, PermitRootLogin: "prohibit-password",
 		PasswordAuthentication: "yes", PubkeyAuthentication: "yes",
@@ -13,62 +13,62 @@ func stanTestowy() Snapshot {
 	}
 }
 
-func TestPlanSSHOdrozniaZmianeOdStanuDocelowego(t *testing.T) {
-	zmiana := Zaplanuj(stanTestowy(), Ustawienia{PasswordAuthentication: "no"}, false)
-	if zmiana.Action != PlanZmienia || zmiana.Refusal != "" {
-		t.Fatalf("plan zmiany: %+v", zmiana)
+func TestSSHPlanDistinguishesChangeFromTargetState(t *testing.T) {
+	change := Compute(testState(), Settings{PasswordAuthentication: "no"}, false)
+	if change.Action != PlanUpdate || change.Refusal != "" {
+		t.Fatalf("change plan: %+v", change)
 	}
-	if len(zmiana.Changes) != 2 || !strings.Contains(zmiana.Changes[0], "PasswordAuthentication z yes na no") ||
-		zmiana.Changes[1] != "plik panelu powstanie" {
-		t.Errorf("zmiany: %v", zmiana.Changes)
+	if len(change.Changes) != 2 || !strings.Contains(change.Changes[0], "PasswordAuthentication from yes to no") ||
+		change.Changes[1] != "the panel's file will be created" {
+		t.Errorf("changes: %v", change.Changes)
 	}
-	if zmiana.Current["PasswordAuthentication"] != "yes" {
-		t.Errorf("stan zastany: %v", zmiana.Current)
-	}
-
-	stan := stanTestowy()
-	stan.PasswordAuthentication = "no"
-	stan.ManagedPresent = true
-	stan.Managed, _ = SkladajDropIn(Ustawienia{PasswordAuthentication: "no"})
-	bez := Zaplanuj(stan, Ustawienia{PasswordAuthentication: "no"}, false)
-	if bez.Action != PlanBezZmian || len(bez.Changes) != 0 {
-		t.Errorf("stan docelowy policzony jako zmiana: %+v", bez)
-	}
-	if bez.PlanHash == zmiana.PlanHash || bez.ManagedHash == "" {
-		t.Error("odciski planow nie roznia sie albo brak odcisku pliku")
+	if change.Current["PasswordAuthentication"] != "yes" {
+		t.Errorf("state found: %v", change.Current)
 	}
 
-	// Serwer stosuje juz zadana wartosc, ale z innego pliku: plik panelu
-	// i tak zostanie nadpisany, wiec to jest zmiana.
-	stan.Managed = "# inny plik\nMaxAuthTries 3\n"
-	inny := Zaplanuj(stan, Ustawienia{PasswordAuthentication: "no"}, false)
-	if inny.Action != PlanZmienia || inny.Changes[0] != "plik panelu zostanie nadpisany" {
-		t.Errorf("nadpisanie pliku panelu bez zmiany: %+v", inny)
+	state := testState()
+	state.PasswordAuthentication = "no"
+	state.ManagedPresent = true
+	state.Managed, _ = ComposeDropIn(Settings{PasswordAuthentication: "no"})
+	none := Compute(state, Settings{PasswordAuthentication: "no"}, false)
+	if none.Action != PlanNoChange || len(none.Changes) != 0 {
+		t.Errorf("target state counted as a change: %+v", none)
+	}
+	if none.PlanHash == change.PlanHash || none.ManagedHash == "" {
+		t.Error("plan fingerprints do not differ or the file fingerprint is missing")
+	}
+
+	// The server already applies the requested value, but from a different
+	// file: the panel's file gets overwritten anyway, so this is a change.
+	state.Managed = "# another file\nMaxAuthTries 3\n"
+	other := Compute(state, Settings{PasswordAuthentication: "no"}, false)
+	if other.Action != PlanUpdate || other.Changes[0] != "the panel's file will be overwritten" {
+		t.Errorf("overwrite of the panel's file without a change: %+v", other)
 	}
 }
 
-func TestPlanSSHOdmawiaOdcieciaIZlejWartosci(t *testing.T) {
-	odciecie := Zaplanuj(stanTestowy(), Ustawienia{
+func TestSSHPlanRefusesLockoutAndBadValue(t *testing.T) {
+	lockout := Compute(testState(), Settings{
 		PasswordAuthentication: "no", PubkeyAuthentication: "no"}, false)
-	if !strings.Contains(odciecie.Refusal, "metoda uwierzytelnienia") {
-		t.Errorf("odciecie bez odmowy: %+v", odciecie)
+	if !strings.Contains(lockout.Refusal, "authentication method") {
+		t.Errorf("lockout without a refusal: %+v", lockout)
 	}
-	zgoda := Zaplanuj(stanTestowy(), Ustawienia{
+	consent := Compute(testState(), Settings{
 		PasswordAuthentication: "no", PubkeyAuthentication: "no"}, true)
-	if zgoda.Refusal != "" {
-		t.Errorf("jawna zgoda nie zdjela odmowy: %+v", zgoda)
+	if consent.Refusal != "" {
+		t.Errorf("explicit consent did not lift the refusal: %+v", consent)
 	}
-	zla := Zaplanuj(stanTestowy(), Ustawienia{PermitRootLogin: "moze"}, false)
-	if zla.Refusal == "" {
-		t.Error("zla wartosc przeszla bez odmowy")
+	bad := Compute(testState(), Settings{PermitRootLogin: "maybe"}, false)
+	if bad.Refusal == "" {
+		t.Error("a bad value passed without a refusal")
 	}
-	pusta := Zaplanuj(stanTestowy(), Ustawienia{}, false)
-	if pusta.Refusal == "" {
-		t.Error("zmiana bez ustawien przeszla bez odmowy")
+	empty := Compute(testState(), Settings{}, false)
+	if empty.Refusal == "" {
+		t.Error("a change without settings passed without a refusal")
 	}
-	bezSerwera := Zaplanuj(Snapshot{UnavailableReason: "ten host nie ma serwera sshd"},
-		Ustawienia{Port: "22"}, false)
-	if bezSerwera.Refusal == "" || bezSerwera.PlanHash == "" {
-		t.Errorf("host bez sshd: %+v", bezSerwera)
+	noServer := Compute(Snapshot{UnavailableReason: "this host has no sshd server"},
+		Settings{Port: "22"}, false)
+	if noServer.Refusal == "" || noServer.PlanHash == "" {
+		t.Errorf("host without sshd: %+v", noServer)
 	}
 }

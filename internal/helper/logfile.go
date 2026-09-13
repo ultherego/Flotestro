@@ -14,13 +14,13 @@ import (
 // as root and without this limit it would be a tool for reading any file.
 func (s *Server) readLogFile(_ context.Context, _ *helperv1.HelperRequest,
 	action *helperv1.LogFileRequest) *helperv1.HelperResponse {
-	allowlist := logs.WczytajAllowliste(logs.SciezkaAllowlisty)
-	fragment, err := logs.Czytaj(allowlist, action.GetPath(), action.GetLines())
+	allowlist := logs.LoadAllowlist(logs.AllowlistPath)
+	fragment, err := logs.Read(allowlist, action.GetPath(), action.GetLines())
 	if err != nil {
 		// The reason for the refusal carries the scope: without it the operator
 		// does not know whether the file is missing or outside the allowed
 		// scope.
-		return reject(ErrorUnsupported, err.Error()+" (scope: "+allowlist.Zrodlo+")")
+		return reject(ErrorUnsupported, err.Error()+" (scope: "+allowlist.Source+")")
 	}
 	return &helperv1.HelperResponse{
 		Accepted: true,

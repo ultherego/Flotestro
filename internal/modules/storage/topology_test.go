@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// Wyjscie przepisane z hosta floty testowej.
-const wyjscieLsblk = `{
+// Output copied from a host of the test fleet.
+const lsblkOutput = `{
  "blockdevices": [
   {"name":"sda","path":"/dev/sda","type":"disk","size":68719476736,"fstype":null,"label":null,
    "uuid":null,"partuuid":null,"mountpoints":[null],"model":"VBOX HARDDISK ","serial":"VB0808c8f2",
@@ -25,240 +25,242 @@ const wyjscieLsblk = `{
          "mountpoints":["/"],"rota":true,"ro":false,"pkname":"sda5",
          "fssize":63256395776,"fsused":8571781120,"fsavail":51442851840}]}]}]}`
 
-func TestTopologiaSplaszczaDrzewoZOdsylaczemDoRodzica(t *testing.T) {
-	urzadzenia, err := ParsujUrzadzenia(wyjscieLsblk)
+func TestTopologyFlattensTreeWithParentReference(t *testing.T) {
+	devices, err := ParseDevices(lsblkOutput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(urzadzenia) != 4 {
-		t.Fatalf("urzadzen = %d", len(urzadzenia))
+	if len(devices) != 4 {
+		t.Fatalf("devices = %d", len(devices))
 	}
-	po := map[string]Device{}
-	for _, urzadzenie := range urzadzenia {
-		po[urzadzenie.Path] = urzadzenie
+	byPath := map[string]Device{}
+	for _, device := range devices {
+		byPath[device.Path] = device
 	}
 
-	if po["/dev/sda"].Type != TypDysk || po["/dev/sda"].Parent != "" {
-		t.Errorf("dysk = %+v", po["/dev/sda"])
+	if byPath["/dev/sda"].Type != TypeDisk || byPath["/dev/sda"].Parent != "" {
+		t.Errorf("disk = %+v", byPath["/dev/sda"])
 	}
-	if po["/dev/sda1"].Parent != "/dev/sda" {
-		t.Errorf("partycja bez rodzica: %+v", po["/dev/sda1"])
+	if byPath["/dev/sda1"].Parent != "/dev/sda" {
+		t.Errorf("partition without a parent: %+v", byPath["/dev/sda1"])
 	}
-	// Wolumen logiczny siedzi na partycji, a nie na dysku: to jest cala
-	// tresc topologii przy planowaniu rozszerzenia.
-	if po["/dev/mapper/debian--13--vg-root"].Parent != "/dev/sda5" {
-		t.Errorf("wolumen = %+v", po["/dev/mapper/debian--13--vg-root"])
+	// A logical volume sits on a partition, not on the disk: that is the
+	// whole content of the topology when planning an extension.
+	if byPath["/dev/mapper/debian--13--vg-root"].Parent != "/dev/sda5" {
+		t.Errorf("volume = %+v", byPath["/dev/mapper/debian--13--vg-root"])
 	}
-	// Identyfikacja idzie po UUID i serialu, bo /dev/sdX zalezy od kolejnosci
-	// wykrywania i po restarcie potrafi wskazac inny dysk.
-	if po["/dev/sda1"].UUID == "" || po["/dev/sda"].Serial == "" {
-		t.Errorf("brak stabilnych identyfikatorow: %+v %+v", po["/dev/sda1"], po["/dev/sda"])
+	// Identification goes by UUID and serial, because /dev/sdX depends on
+	// the detection order and after a reboot can point at a different disk.
+	if byPath["/dev/sda1"].UUID == "" || byPath["/dev/sda"].Serial == "" {
+		t.Errorf("no stable identifiers: %+v %+v", byPath["/dev/sda1"], byPath["/dev/sda"])
 	}
-	// Model przychodzi z odstepami na koncu; zostawiony wygladalby na
-	// dwie rozne wartosci przy porownaniu z planem.
-	if po["/dev/sda"].Model != "VBOX HARDDISK" {
-		t.Errorf("model = %q", po["/dev/sda"].Model)
+	// The model comes with trailing spaces; left in place it would look
+	// like two different values when compared with a plan.
+	if byPath["/dev/sda"].Model != "VBOX HARDDISK" {
+		t.Errorf("model = %q", byPath["/dev/sda"].Model)
 	}
-	// Rozmiar filesystemu bywa mniejszy niz partycja - to wlasnie ta roznica
-	// widac przed rozszerzeniem.
-	root := po["/dev/mapper/debian--13--vg-root"]
+	// The filesystem size is at times smaller than the partition - that is
+	// exactly the difference visible before a resize.
+	root := byPath["/dev/mapper/debian--13--vg-root"]
 	if root.FSSizeBytes == nil || *root.FSSizeBytes >= root.SizeBytes {
-		t.Errorf("filesystem wolumenu = %v z %d", root.FSSizeBytes, root.SizeBytes)
+		t.Errorf("volume filesystem = %v of %d", root.FSSizeBytes, root.SizeBytes)
 	}
-	// Urzadzenie bez filesystemu nie moze udawac, ze ma zero bajtow zajete.
-	if po["/dev/sda"].FSUsedBytes != nil {
-		t.Errorf("dysk bez filesystemu dostal zajetosc: %v", po["/dev/sda"].FSUsedBytes)
+	// A device without a filesystem must not pretend it has zero bytes
+	// used.
+	if byPath["/dev/sda"].FSUsedBytes != nil {
+		t.Errorf("a disk without a filesystem got usage: %v", byPath["/dev/sda"].FSUsedBytes)
 	}
-	// Punkt montowania "null" z lsblk nie jest punktem montowania.
-	if len(po["/dev/sda"].Mountpoints) != 0 {
-		t.Errorf("dysk zamontowany: %v", po["/dev/sda"].Mountpoints)
-	}
-}
-
-const wyjscieVGS = `{"report":[{"vg":[{"vg_name":"debian-13-vg","pv_count":"1","lv_count":"2","vg_size":"67691872256B","vg_free":"0B"}]}]}`
-const wyjscieLVS = `{"report":[{"lv":[{"lv_name":"root","vg_name":"debian-13-vg","lv_size":"64470646784B","lv_path":"/dev/debian-13-vg/root"}]}]}`
-
-func TestLVMCzytaRozmiaryWBajtach(t *testing.T) {
-	grupy, err := ParsujGrupy(wyjscieVGS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(grupy) != 1 || grupy[0].SizeBytes != 67691872256 {
-		t.Fatalf("grupy = %+v", grupy)
-	}
-	// Grupa bez wolnego miejsca to fakt, ktory rozstrzyga o mozliwosci
-	// rozszerzenia - i ma byc zerem, a nie brakiem wartosci.
-	if grupy[0].FreeBytes != 0 || grupy[0].LVCount != 2 {
-		t.Errorf("grupa = %+v", grupy[0])
-	}
-
-	wolumeny, err := ParsujWolumeny(wyjscieLVS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(wolumeny) != 1 || wolumeny[0].Path != "/dev/debian-13-vg/root" {
-		t.Errorf("wolumeny = %+v", wolumeny)
+	// A "null" mount point from lsblk is not a mount point.
+	if len(byPath["/dev/sda"].Mountpoints) != 0 {
+		t.Errorf("disk mounted: %v", byPath["/dev/sda"].Mountpoints)
 	}
 }
 
-const wyjscieMountinfo = `23 28 0:21 / /sys rw,nosuid,nodev,noexec,relatime shared:6 - sysfs sysfs rw
+const vgsOutput = `{"report":[{"vg":[{"vg_name":"debian-13-vg","pv_count":"1","lv_count":"2","vg_size":"67691872256B","vg_free":"0B"}]}]}`
+const lvsOutput = `{"report":[{"lv":[{"lv_name":"root","vg_name":"debian-13-vg","lv_size":"64470646784B","lv_path":"/dev/debian-13-vg/root"}]}]}`
+
+func TestLVMReadsSizesInBytes(t *testing.T) {
+	groups, err := ParseGroups(vgsOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].SizeBytes != 67691872256 {
+		t.Fatalf("groups = %+v", groups)
+	}
+	// A group without free space is a fact that decides about the
+	// possibility of an extension - and is meant to be zero, not a missing
+	// value.
+	if groups[0].FreeBytes != 0 || groups[0].LVCount != 2 {
+		t.Errorf("group = %+v", groups[0])
+	}
+
+	volumes, err := ParseVolumes(lvsOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(volumes) != 1 || volumes[0].Path != "/dev/debian-13-vg/root" {
+		t.Errorf("volumes = %+v", volumes)
+	}
+}
+
+const mountinfoOutput = `23 28 0:21 / /sys rw,nosuid,nodev,noexec,relatime shared:6 - sysfs sysfs rw
 30 28 254:0 / / rw,relatime shared:1 - ext4 /dev/mapper/debian--13--vg-root rw,errors=remount-ro
 36 30 8:1 / /boot rw,relatime shared:25 - ext4 /dev/sda1 rw
 41 30 0:35 / /srv/flotestro ro,relatime shared:30 - vboxsf srv_flotestro ro
-44 30 8:16 / /mnt/kopie\040zapasowe rw,relatime shared:33 - ext4 /dev/sdb1 rw`
+44 30 8:16 / /mnt/backup\040copies rw,relatime shared:33 - ext4 /dev/sdb1 rw`
 
-const trescFstab = `# /etc/fstab
+const fstabContent = `# /etc/fstab
 /dev/mapper/debian--13--vg-root /               ext4    errors=remount-ro 0       1
 UUID=c856d851 /boot           ext4    defaults        0       2
-# flotestro: kopie zapasowe
-/dev/sdb1 /mnt/kopie\040zapasowe ext4 defaults 0 2
-UUID=aaaa /mnt/archiwum ext4 defaults 0 2`
+# flotestro: backup copies
+/dev/sdb1 /mnt/backup\040copies ext4 defaults 0 2
+UUID=aaaa /mnt/archive ext4 defaults 0 2`
 
-func TestMontowaniaLaczaStanJadraZFstab(t *testing.T) {
-	zJadra := ParsujMountinfo(wyjscieMountinfo)
-	// Montowania jadra nie sa przestrzenia dyskowa hosta; pokazane
-	// zaslanialyby obraz.
-	for _, montowanie := range zJadra {
-		if montowanie.FSType == "sysfs" {
-			t.Errorf("systemowe montowanie w wyniku: %+v", montowanie)
+func TestMountsJoinKernelStateWithFstab(t *testing.T) {
+	fromKernel := ParseMountinfo(mountinfoOutput)
+	// Kernel mounts are not the host disk space; shown they would obscure
+	// the picture.
+	for _, mount := range fromKernel {
+		if mount.FSType == "sysfs" {
+			t.Errorf("system mount in the result: %+v", mount)
 		}
 	}
 
-	polaczone := PolaczMontowania(zJadra, ParsujFstab(trescFstab))
-	po := map[string]Mount{}
-	for _, montowanie := range polaczone {
-		po[montowanie.Target] = montowanie
+	merged := MergeMounts(fromKernel, ParseFstab(fstabContent))
+	byTarget := map[string]Mount{}
+	for _, mount := range merged {
+		byTarget[mount.Target] = mount
 	}
 
-	if !po["/"].Mounted || !po["/"].InFstab {
-		t.Errorf("korzen = %+v", po["/"])
+	if !byTarget["/"].Mounted || !byTarget["/"].InFstab {
+		t.Errorf("root = %+v", byTarget["/"])
 	}
-	// Montowanie bez wpisu w fstab zniknie po restarcie - i to jest
-	// odpowiedz, po ktora operator tu przychodzi.
-	if po["/srv/flotestro"].InFstab {
-		t.Errorf("montowanie spoza fstab uznane za wpis: %+v", po["/srv/flotestro"])
+	// A mount without an fstab entry vanishes after a reboot - and that is
+	// the answer the operator comes here for.
+	if byTarget["/srv/flotestro"].InFstab {
+		t.Errorf("a mount outside fstab treated as an entry: %+v", byTarget["/srv/flotestro"])
 	}
-	// Wpis w fstab, ktorego nikt nie zamontowal, tez musi byc widoczny.
-	if !po["/mnt/archiwum"].InFstab || po["/mnt/archiwum"].Mounted {
-		t.Errorf("wpis niezamontowany = %+v", po["/mnt/archiwum"])
+	// An fstab entry nobody mounted must be visible too.
+	if !byTarget["/mnt/archive"].InFstab || byTarget["/mnt/archive"].Mounted {
+		t.Errorf("unmounted entry = %+v", byTarget["/mnt/archive"])
 	}
-	// Sciezka ze spacja jest zapisana osemkowo; bez odkodowania rozpadlaby
-	// sie na dwa pola i nie dopasowala do wpisu fstab.
-	kopie := po["/mnt/kopie zapasowe"]
-	if !kopie.Mounted || !kopie.InFstab || !kopie.Managed {
-		t.Errorf("montowanie ze spacja = %+v", kopie)
+	// A path with a space is written in octal; without decoding it would
+	// fall apart into two fields and not match the fstab entry.
+	copies := byTarget["/mnt/backup copies"]
+	if !copies.Mounted || !copies.InFstab || !copies.Managed {
+		t.Errorf("mount with a space = %+v", copies)
 	}
 }
 
-// Znacznik panelu stoi nad wpisem, ktory panel zalozyl: wpis zastany nalezy
-// do administratora hosta.
-func TestWpisyFstabRozrozniajaWlasnosc(t *testing.T) {
-	wpisy := ParsujFstab(trescFstab)
-	if len(wpisy) != 4 {
-		t.Fatalf("wpisow = %d", len(wpisy))
+// The panel marker stands above the entry the panel created: an entry
+// found on the host belongs to the host administrator.
+func TestFstabEntriesDistinguishOwnership(t *testing.T) {
+	entries := ParseFstab(fstabContent)
+	if len(entries) != 4 {
+		t.Fatalf("entries = %d", len(entries))
 	}
-	var zarzadzane int
-	for _, wpis := range wpisy {
-		if wpis.Managed {
-			zarzadzane++
-			if wpis.Target != "/mnt/kopie zapasowe" {
-				t.Errorf("zly wpis uznany za wlasny: %+v", wpis)
+	var managed int
+	for _, entry := range entries {
+		if entry.Managed {
+			managed++
+			if entry.Target != "/mnt/backup copies" {
+				t.Errorf("the wrong entry treated as our own: %+v", entry)
 			}
 		}
 	}
-	if zarzadzane != 1 {
-		t.Errorf("wpisow wlasnych = %d", zarzadzane)
+	if managed != 1 {
+		t.Errorf("own entries = %d", managed)
 	}
 }
 
-// Zrodlo montowania ma byc identyfikatorem trwalym albo sciezka w /dev:
-// nazwa urzadzenia zalezy od kolejnosci wykrywania.
-func TestZrodloIcelMontowaniaSaSprawdzane(t *testing.T) {
-	for _, zle := range []string{"", "sdb1", "//serwer/udzial", "UUID=$(reboot)", "/etc/passwd"} {
-		if err := WalidujZrodlo(zle); err == nil {
-			t.Errorf("przyjeto zrodlo %q", zle)
+// The mount source must be a durable identifier or a path in /dev: the
+// device name depends on the detection order.
+func TestMountSourceAndTargetAreChecked(t *testing.T) {
+	for _, bad := range []string{"", "sdb1", "//server/share", "UUID=$(reboot)", "/etc/passwd"} {
+		if err := ValidateSource(bad); err == nil {
+			t.Errorf("accepted source %q", bad)
 		}
 	}
-	for _, dobre := range []string{"UUID=c856d851-66da-4c31-a17a-b53a4afdd1f0",
-		"LABEL=kopie", "/dev/sdb1", "/dev/mapper/vg-lv"} {
-		if err := WalidujZrodlo(dobre); err != nil {
-			t.Errorf("odrzucono zrodlo %q: %v", dobre, err)
+	for _, good := range []string{"UUID=c856d851-66da-4c31-a17a-b53a4afdd1f0",
+		"LABEL=backups", "/dev/sdb1", "/dev/mapper/vg-lv"} {
+		if err := ValidateSource(good); err != nil {
+			t.Errorf("rejected source %q: %v", good, err)
 		}
 	}
 
-	// Przeslonienie katalogu systemowego odcina host od samego siebie.
-	for _, chroniony := range []string{"/", "/etc", "/usr", "/var/log", "/boot"} {
-		if err := WalidujCel(chroniony); err == nil {
-			t.Errorf("przyjeto montowanie na %q", chroniony)
+	// Shadowing a system directory cuts the host off from itself.
+	for _, protected := range []string{"/", "/etc", "/usr", "/var/log", "/boot"} {
+		if err := ValidateTarget(protected); err == nil {
+			t.Errorf("accepted a mount on %q", protected)
 		}
 	}
-	for _, zly := range []string{"mnt/dane", "/mnt/../etc", "/mnt/dane/"} {
-		if err := WalidujCel(zly); err == nil {
-			t.Errorf("przyjeto cel %q", zly)
+	for _, bad := range []string{"mnt/data", "/mnt/../etc", "/mnt/data/"} {
+		if err := ValidateTarget(bad); err == nil {
+			t.Errorf("accepted target %q", bad)
 		}
 	}
-	if err := WalidujCel("/mnt/kopie zapasowe"); err != nil {
-		t.Errorf("odrzucono poprawny cel: %v", err)
+	if err := ValidateTarget("/mnt/backup copies"); err != nil {
+		t.Errorf("rejected a valid target: %v", err)
 	}
 }
 
-// Sciezka ze spacja zapisana wprost rozpadlaby sie na dwa pola, a wpis
-// wskazywalby zupelnie inne miejsce.
-func TestWierszFstabZapisujeZnakiSpecjalneOsemkowo(t *testing.T) {
-	wiersz := WierszFstab("/dev/sdb1", "/mnt/kopie zapasowe", "ext4", "")
-	if !strings.Contains(wiersz, `/mnt/kopie\040zapasowe`) {
-		t.Errorf("wiersz = %q", wiersz)
+// A path with a space written directly would fall apart into two fields,
+// and the entry would point at an entirely different place.
+func TestFstabLineWritesSpecialCharactersInOctal(t *testing.T) {
+	line := FstabLine("/dev/sdb1", "/mnt/backup copies", "ext4", "")
+	if !strings.Contains(line, `/mnt/backup\040copies`) {
+		t.Errorf("line = %q", line)
 	}
-	// Brak opcji nie moze dac pustego pola: fstab ma wtedy piec kolumn
-	// zamiast szesciu i wpis staje sie bledny.
-	if !strings.Contains(wiersz, "ext4 defaults 0 0") {
-		t.Errorf("wiersz bez opcji = %q", wiersz)
+	// No options must not give an empty field: fstab then has five columns
+	// instead of six and the entry becomes invalid.
+	if !strings.Contains(line, "ext4 defaults 0 0") {
+		t.Errorf("line without options = %q", line)
 	}
 }
 
-func TestWpisPanelaJestZastepowanyANieDublowany(t *testing.T) {
-	katalog := t.TempDir()
-	sciezka := filepath.Join(katalog, "fstab")
-	poczatek := "# /etc/fstab\nUUID=aaa / ext4 defaults 0 1\n"
-	if err := os.WriteFile(sciezka, []byte(poczatek), 0o644); err != nil {
+func TestPanelEntryIsReplacedNotDuplicated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fstab")
+	initial := "# /etc/fstab\nUUID=aaa / ext4 defaults 0 1\n"
+	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := ZapiszWpisFstab(sciezka, "/dev/sdb1", "/mnt/dane", "ext4", "defaults"); err != nil {
+	if err := WriteFstabEntry(path, "/dev/sdb1", "/mnt/data", "ext4", "defaults"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ZapiszWpisFstab(sciezka, "LABEL=dane", "/mnt/dane", "xfs", "noatime"); err != nil {
+	if err := WriteFstabEntry(path, "LABEL=data", "/mnt/data", "xfs", "noatime"); err != nil {
 		t.Fatal(err)
 	}
-	tresc, err := os.ReadFile(sciezka)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wpisy := ParsujFstab(string(tresc))
-	var dane int
-	for _, wpis := range wpisy {
-		if wpis.Target == "/mnt/dane" {
-			dane++
-			if wpis.Source != "LABEL=dane" || wpis.FSType != "xfs" || !wpis.Managed {
-				t.Errorf("wpis po zmianie = %+v", wpis)
+	entries := ParseFstab(string(content))
+	var data int
+	for _, entry := range entries {
+		if entry.Target == "/mnt/data" {
+			data++
+			if entry.Source != "LABEL=data" || entry.FSType != "xfs" || !entry.Managed {
+				t.Errorf("entry after the change = %+v", entry)
 			}
 		}
 	}
-	if dane != 1 {
-		t.Errorf("wpisow dla /mnt/dane = %d", dane)
+	if data != 1 {
+		t.Errorf("entries for /mnt/data = %d", data)
 	}
-	// Wpis administratora hosta zostaje nietkniety.
-	if !strings.Contains(string(tresc), "UUID=aaa / ext4") {
-		t.Errorf("zgubiono cudzy wpis:\n%s", tresc)
+	// The host administrator entry stays untouched.
+	if !strings.Contains(string(content), "UUID=aaa / ext4") {
+		t.Errorf("a foreign entry was lost:\n%s", content)
 	}
 
-	if err := UsunWpisFstab(sciezka, "/mnt/dane"); err != nil {
+	if err := RemoveFstabEntry(path, "/mnt/data"); err != nil {
 		t.Fatal(err)
 	}
-	tresc, _ = os.ReadFile(sciezka)
-	for _, wpis := range ParsujFstab(string(tresc)) {
-		if wpis.Target == "/mnt/dane" {
-			t.Errorf("wpis przetrwal usuniecie:\n%s", tresc)
+	content, _ = os.ReadFile(path)
+	for _, entry := range ParseFstab(string(content)) {
+		if entry.Target == "/mnt/data" {
+			t.Errorf("the entry survived removal:\n%s", content)
 		}
 	}
 }

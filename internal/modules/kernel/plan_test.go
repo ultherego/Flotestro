@@ -5,38 +5,38 @@ import (
 	"testing"
 )
 
-func TestPlanBlokadyOdrozniaStanZastany(t *testing.T) {
-	stan := Snapshot{
-		Modules:   []Modul{{Name: "pcspkr", UsedBy: []string{"snd"}}},
+func TestBlacklistPlanDistinguishesCurrentState(t *testing.T) {
+	state := Snapshot{
+		Modules:   []Module{{Name: "pcspkr", UsedBy: []string{"snd"}}},
 		Blacklist: []string{"floppy"},
-		Managed:   "# plik\nblacklist floppy\n",
+		Managed:   "# file\nblacklist floppy\n",
 	}
-	nowa := ZaplanujBlokade(stan, "pcspkr", true)
-	if nowa.Action != PlanTworzy || !nowa.Loaded || nowa.Blacklisted || len(nowa.Changes) != 3 {
-		t.Errorf("blokada zaladowanego modulu: %+v", nowa)
+	created := PlanBlacklist(state, "pcspkr", true)
+	if created.Action != PlanCreate || !created.Loaded || created.Blacklisted || len(created.Changes) != 3 {
+		t.Errorf("block of a loaded module: %+v", created)
 	}
-	if !strings.Contains(nowa.Changes[1], "po restarcie") || !strings.Contains(nowa.Changes[2], "snd") {
-		t.Errorf("zmiany bez ostrzezen: %v", nowa.Changes)
+	if !strings.Contains(created.Changes[1], "after a reboot") || !strings.Contains(created.Changes[2], "snd") {
+		t.Errorf("changes without warnings: %v", created.Changes)
 	}
-	juz := ZaplanujBlokade(stan, "floppy", true)
-	if juz.Action != PlanBezZmian || !juz.Blacklisted {
-		t.Errorf("blokada juz obecna: %+v", juz)
+	existing := PlanBlacklist(state, "floppy", true)
+	if existing.Action != PlanNoChange || !existing.Blacklisted {
+		t.Errorf("block already present: %+v", existing)
 	}
-	zdjecie := ZaplanujBlokade(stan, "floppy", false)
-	if zdjecie.Action != PlanUsuwa {
-		t.Errorf("zdjecie blokady: %+v", zdjecie)
+	removed := PlanBlacklist(state, "floppy", false)
+	if removed.Action != PlanRemove {
+		t.Errorf("block removal: %+v", removed)
 	}
-	if nowa.PlanHash == juz.PlanHash || juz.PlanHash == zdjecie.PlanHash || nowa.ManagedHash == "" {
-		t.Error("odciski planow nie roznia sie albo brak odcisku pliku")
+	if created.PlanHash == existing.PlanHash || existing.PlanHash == removed.PlanHash || created.ManagedHash == "" {
+		t.Error("plan fingerprints do not differ or the file fingerprint is missing")
 	}
 }
 
-func TestPlanBlokadyOdmawiaChronionegoModulu(t *testing.T) {
-	plan := ZaplanujBlokade(Snapshot{}, "ext4", true)
-	if !strings.Contains(plan.Refusal, "nie blokuje") || plan.PlanHash == "" {
-		t.Errorf("chroniony modul bez odmowy: %+v", plan)
+func TestBlacklistPlanRefusesProtectedModule(t *testing.T) {
+	plan := PlanBlacklist(Snapshot{}, "ext4", true)
+	if !strings.Contains(plan.Refusal, "does not block") || plan.PlanHash == "" {
+		t.Errorf("protected module without a refusal: %+v", plan)
 	}
-	if zla := ZaplanujBlokade(Snapshot{}, "../x", true); zla.Refusal == "" {
-		t.Error("zla nazwa przeszla bez odmowy")
+	if bad := PlanBlacklist(Snapshot{}, "../x", true); bad.Refusal == "" {
+		t.Error("a bad name passed without a refusal")
 	}
 }

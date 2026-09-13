@@ -34,7 +34,7 @@ func (s *Server) applyFile(ctx context.Context, request *helperv1.HelperRequest,
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	allowlist := files.WczytajAllowliste(files.SciezkaAllowlisty)
+	allowlist := files.LoadAllowlist(files.AllowlistPath)
 
 	switch action.GetOperation() {
 	case helperv1.FileRequest_OPERATION_LIST:
@@ -56,7 +56,7 @@ func (s *Server) readFile(allowlist files.Allowlist, action *helperv1.FileReques
 	if response := checkScope(allowlist, action.GetPath()); response != nil {
 		return response
 	}
-	description := files.OpiszPlik(action.GetPath())
+	description := files.Describe(action.GetPath())
 	if !description.Exists {
 		return reject(ErrorUnsupported, "the file "+action.GetPath()+" does not exist on this host")
 	}
@@ -64,7 +64,7 @@ func (s *Server) readFile(allowlist files.Allowlist, action *helperv1.FileReques
 		return reject(ErrorUnsupported, description.UnavailableReason)
 	}
 
-	file, err := files.OtworzBezDowiazan(action.GetPath(), unix.O_RDONLY, 0)
+	file, err := files.OpenWithoutSymlinks(action.GetPath(), unix.O_RDONLY, 0)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
@@ -72,17 +72,17 @@ func (s *Server) readFile(allowlist files.Allowlist, action *helperv1.FileReques
 
 	// One byte more than the boundary is read: otherwise a file exactly at the
 	// boundary would look truncated and a bigger one - whole.
-	content, err := io.ReadAll(io.LimitReader(file, files.MaksymalnyRozmiar+1))
+	content, err := io.ReadAll(io.LimitReader(file, files.MaxSize+1))
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	truncated := false
-	if len(content) > files.MaksymalnyRozmiar {
-		content = content[:files.MaksymalnyRozmiar]
+	if len(content) > files.MaxSize {
+		content = content[:files.MaxSize]
 		truncated = true
 	}
 
-	response := fileResponse(s.fileState(), "", content, files.Odcisk(content))
+	response := fileResponse(s.fileState(), "", content, files.Fingerprint(content))
 	response.FileResult.Truncated = truncated
 	return response
 }
@@ -100,19 +100,19 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 	if response := checkScope(allowlist, path); response != nil {
 		return response
 	}
-	if err := files.WalidujTresc(string(action.GetContent())); err != nil {
+	if err := files.ValidateContent(string(action.GetContent())); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	mode, err := files.WalidujTryb(action.GetMode())
+	mode, err := files.ValidateMode(action.GetMode())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	uid, gid, err := files.Wlasciciel(action.GetOwner(), action.GetGroup())
+	uid, gid, err := files.Ownership(action.GetOwner(), action.GetGroup())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
-	current := files.OpiszPlik(path)
+	current := files.Describe(path)
 	if current.UnavailableReason != "" {
 		return reject(ErrorUnsupported, current.UnavailableReason)
 	}
@@ -133,7 +133,7 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 			"the file already exists; a write needs the digest of the content that was looked at")
 	}
 
-	validator, hasValidator, err := files.WybierzWalidator(path, action.GetValidator())
+	validator, hasValidator, err := files.SelectValidator(path, action.GetValidator())
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -141,12 +141,12 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 	if hasValidator {
 		validatorOutput, err = s.checkContent(ctx, validator, path, action.GetContent())
 		if err != nil {
-			return reject(ErrorMalformed, "the validator "+validator.Nazwa+": "+err.Error()+
+			return reject(ErrorMalformed, "the validator "+validator.Name+": "+err.Error()+
 				" "+validatorOutput)
 		}
 	}
 
-	if err := files.ZapiszAtomowo(path, action.GetContent(), mode, uid, gid); err != nil {
+	if err := files.WriteAtomically(path, action.GetContent(), mode, uid, gid); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	s.rememberManagedFile(path, action.GetFromSecret())
@@ -157,7 +157,7 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 		// the host accepted the content without checking its meaning.
 		message += "; the panel knows no validator for this file, so the content was not checked"
 	}
-	return fileResponse(s.fileState(), message, nil, files.Odcisk(action.GetContent()))
+	return fileResponse(s.fileState(), message, nil, files.Fingerprint(action.GetContent()))
 }
 
 // planFile computes the difference between the file found and the desired
@@ -190,18 +190,18 @@ func (s *Server) planFile(ctx context.Context, allowlist files.Allowlist,
 		!action.GetFromSecret()
 
 	if !removal {
-		if err := files.WalidujTresc(string(action.GetContent())); err != nil {
+		if err := files.ValidateContent(string(action.GetContent())); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		if _, err := files.WalidujTryb(action.GetMode()); err != nil {
+		if _, err := files.ValidateMode(action.GetMode()); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		if _, _, err := files.Wlasciciel(action.GetOwner(), action.GetGroup()); err != nil {
+		if _, _, err := files.Ownership(action.GetOwner(), action.GetGroup()); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 	}
 
-	current := files.OpiszPlik(path)
+	current := files.Describe(path)
 	if current.Exists && current.UnavailableReason == "" {
 		// The digest of the content found is the heart of the plan: it binds the
 		// later write to the file the operator really looked at.
@@ -213,13 +213,13 @@ func (s *Server) planFile(ctx context.Context, allowlist files.Allowlist,
 		}
 	}
 
-	plan := files.Zaplanuj(current, action.GetContent(), action.GetMode(),
+	plan := files.Compute(current, action.GetContent(), action.GetMode(),
 		action.GetOwner(), action.GetGroup(), action.GetFromSecret(), removal)
 
 	// The validator checks the desired content and not the one found: the
 	// question is whether what we want to write makes sense for this service.
 	if !removal {
-		validator, hasValidator, err := files.WybierzWalidator(path, action.GetValidator())
+		validator, hasValidator, err := files.SelectValidator(path, action.GetValidator())
 		if err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
@@ -250,13 +250,13 @@ func (s *Server) planFile(ctx context.Context, allowlist files.Allowlist,
 // describePlan sums the plan up in one sentence for the operation journal.
 func describePlan(plan files.Plan) string {
 	switch plan.Action {
-	case files.PlanBezZmian:
+	case files.PlanNoChange:
 		return "the file is already in the desired state"
-	case files.PlanTworzy:
+	case files.PlanCreate:
 		return "the file will be created"
-	case files.PlanJuzUsuniety:
+	case files.PlanRemoveAbsent:
 		return "the file does not exist, so there is nothing to remove"
-	case files.PlanUsuwa:
+	case files.PlanRemove:
 		return "the file will be removed"
 	default:
 		return "what will change: " + strings.Join(plan.Changes, ", ")
@@ -291,12 +291,12 @@ func (s *Server) removeFile(allowlist files.Allowlist, action *helperv1.FileRequ
 //
 // The validator gets a temporary file in the same directory, because some tools
 // read relative paths relative to the file they check.
-func (s *Server) checkContent(ctx context.Context, validator files.Walidator,
+func (s *Server) checkContent(ctx context.Context, validator files.Validator,
 	path string, content []byte) (string, error) {
-	if validator.Wbudowany != nil {
-		return "", validator.Wbudowany(string(content))
+	if validator.BuiltIn != nil {
+		return "", validator.BuiltIn(string(content))
 	}
-	if !exists(validator.Polecenie[0]) {
+	if !exists(validator.Command[0]) {
 		// A tool the host does not have is not faked: a write without a check is
 		// then a deliberate decision and not an oversight.
 		return "", nil
@@ -307,7 +307,7 @@ func (s *Server) checkContent(ctx context.Context, validator files.Walidator,
 	}
 	defer os.Remove(temporary)
 
-	arguments := append(append([]string{}, validator.Polecenie...), temporary)
+	arguments := append(append([]string{}, validator.Command...), temporary)
 	output, err := runTool(ctx, arguments)
 	return output, err
 }
@@ -316,7 +316,7 @@ func (s *Server) checkContent(ctx context.Context, validator files.Walidator,
 func (s *Server) fileState() files.Snapshot {
 	snapshot := files.Snapshot{ObservedAt: time.Now().UTC()}
 	for _, entry := range s.fileRegistry() {
-		description := files.OpiszPlik(entry.Path)
+		description := files.Describe(entry.Path)
 		description.Managed = true
 		description.FromSecret = entry.FromSecret
 		switch {
@@ -408,18 +408,18 @@ func (s *Server) writeFileRegistry(entries []registryEntry) {
 }
 
 func checkScope(allowlist files.Allowlist, path string) *helperv1.HelperResponse {
-	if err := allowlist.Dopuszcza(path); err != nil {
-		if errors.Is(err, files.ErrZakazana) {
+	if err := allowlist.Allows(path); err != nil {
+		if errors.Is(err, files.ErrForbidden) {
 			return reject(ErrorUnsupported, err.Error())
 		}
 		return reject(ErrorUnsupported, err.Error()+
-			"; the scope is set by the host administrator in "+files.SciezkaAllowlisty)
+			"; the scope is set by the host administrator in "+files.AllowlistPath)
 	}
 	return nil
 }
 
 func fileDigest(path string) (string, error) {
-	file, err := files.OtworzBezDowiazan(path, unix.O_RDONLY, 0)
+	file, err := files.OpenWithoutSymlinks(path, unix.O_RDONLY, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -427,11 +427,11 @@ func fileDigest(path string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, files.MaksymalnyRozmiar))
+	data, err := io.ReadAll(io.LimitReader(file, files.MaxSize))
 	if err != nil {
 		return "", err
 	}
-	return files.Odcisk(data), nil
+	return files.Fingerprint(data), nil
 }
 
 func shorten(digest string) string {

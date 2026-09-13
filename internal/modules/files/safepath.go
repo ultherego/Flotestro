@@ -10,17 +10,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// SciezkaAllowlisty wskazuje plik z zakresem wyznaczonym przez administratora
-// hosta. Jeden wzorzec na linie; linie puste i zaczynajace sie od # sa
-// pomijane.
-const SciezkaAllowlisty = "/etc/flotestro/files.allow"
+// AllowlistPath points at the file with the scope set by the host
+// administrator. One pattern per line; empty lines and lines starting with
+// # are skipped.
+const AllowlistPath = "/etc/flotestro/files.allow"
 
-// domyslneWzorce obowiazuja, gdy administrator nie wskazal wlasnych.
+// defaultPatterns apply when the administrator has not set their own.
 //
-// Lista jest waska i celowo omija katalogi, w ktorych trzymane sa sekrety.
-// Rozszerzenie jej jest decyzja administratora hosta i wymaga zapisu w /etc,
-// a nie zmiany w panelu.
-var domyslneWzorce = []string{
+// The list is narrow and deliberately avoids the directories where secrets
+// are kept. Extending it is the host administrator's decision and requires
+// a write in /etc, not a change in the panel.
+var defaultPatterns = []string{
 	"/etc/*.conf",
 	"/etc/sysctl.d/*.conf",
 	"/etc/security/limits.d/*.conf",
@@ -38,14 +38,14 @@ var domyslneWzorce = []string{
 	"/opt/flotestro/etc/*",
 }
 
-// zakazaneWzorce wylicza sciezki, ktorych panel nie tyka nigdy - takze wtedy,
-// gdy administrator hosta dopisze je do allowlisty.
+// forbiddenPatterns list the paths the panel never touches - even when the
+// host administrator adds them to the allowlist.
 //
-// To nie jest ostroznosc na wszelki wypadek: plik z hashami hasel, klucz
-// prywatny albo regula sudo wpuszczaja do systemu kazdego, kto potrafi je
-// podmienic. Zmiana kazdej z tych rzeczy ma wlasny modul z wlasnymi
-// zabezpieczeniami, a nie edytor tekstu.
-var zakazaneWzorce = []string{
+// This is not caution just in case: the file with password hashes, a
+// private key or a sudo rule let anyone who can replace them into the
+// system. Changing each of these has its own module with its own
+// safeguards, not a text editor.
+var forbiddenPatterns = []string{
 	"/etc/shadow*",
 	"/etc/gshadow*",
 	"/etc/passwd",
@@ -67,109 +67,112 @@ var zakazaneWzorce = []string{
 }
 
 var (
-	// ErrPozaAllowlista oznacza sciezke spoza dozwolonego zakresu.
-	ErrPozaAllowlista = errors.New("sciezka poza allowlista")
-	// ErrZakazana oznacza sciezke, ktorej panel nie tyka nigdy.
-	ErrZakazana = errors.New("sciezka nalezy do innego modulu i nie jest edytowalna")
-	// ErrDowiazanie oznacza sciezke prowadzaca przez dowiazanie.
-	ErrDowiazanie = errors.New("sciezka prowadzi przez dowiazanie symboliczne")
+	// ErrOutsideAllowlist means a path outside the allowed scope.
+	ErrOutsideAllowlist = errors.New("path outside the allowlist")
+	// ErrForbidden means a path the panel never touches.
+	ErrForbidden = errors.New("the path belongs to another module and is not editable")
+	// ErrSymlink means a path leading through a symlink.
+	ErrSymlink = errors.New("the path leads through a symbolic link")
 )
 
-// Allowlist opisuje dozwolony zakres zapisu.
+// Allowlist describes the allowed write scope.
 type Allowlist struct {
-	Wzorce []string
-	// Zrodlo mowi, skad zakres pochodzi. Operator ma wiedziec, czym jest
-	// ograniczony, zanim zapyta, dlaczego czegos nie moze zmienic.
-	Zrodlo string
+	Patterns []string
+	// Source says where the scope comes from. The operator needs to know
+	// what limits them before asking why they cannot change something.
+	Source string
 }
 
-// WczytajAllowliste czyta zakres z pliku albo zwraca domyslny.
-func WczytajAllowliste(sciezka string) Allowlist {
-	dane, err := os.ReadFile(sciezka)
+// LoadAllowlist reads the scope from a file or returns the default.
+func LoadAllowlist(path string) Allowlist {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return Allowlist{Wzorce: domyslneWzorce, Zrodlo: "wbudowana lista domyslna"}
+		return Allowlist{Patterns: defaultPatterns, Source: "built-in default list"}
 	}
-	var wzorce []string
-	for _, linia := range strings.Split(string(dane), "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || strings.HasPrefix(linia, "#") {
+	var patterns []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		wzorce = append(wzorce, linia)
+		patterns = append(patterns, line)
 	}
-	if len(wzorce) == 0 {
-		return Allowlist{Wzorce: domyslneWzorce, Zrodlo: "wbudowana lista domyslna"}
+	if len(patterns) == 0 {
+		return Allowlist{Patterns: defaultPatterns, Source: "built-in default list"}
 	}
-	return Allowlist{Wzorce: wzorce, Zrodlo: sciezka}
+	return Allowlist{Patterns: patterns, Source: path}
 }
 
-// Zakazana mowi, czy sciezka nalezy do innego modulu i nie jest edytowalna.
+// Forbidden says whether the path belongs to another module and is not
+// editable.
 //
-// Sprawdzenie jest osobne od allowlisty, bo obowiazuje takze panel: zadanie
-// z taka sciezka nie ma powstac, nawet jesli host odmowilby i tak.
-func Zakazana(sciezka string) error {
-	for _, wzorzec := range zakazaneWzorce {
-		if pasuje(wzorzec, sciezka) {
-			return fmt.Errorf("%w: %s", ErrZakazana, sciezka)
+// The check is separate from the allowlist, because it binds the panel
+// too: a task with such a path must not be created, even if the host
+// would refuse it anyway.
+func Forbidden(path string) error {
+	for _, pattern := range forbiddenPatterns {
+		if matches(pattern, path) {
+			return fmt.Errorf("%w: %s", ErrForbidden, path)
 		}
 	}
 	return nil
 }
 
-// Dopuszcza sprawdza, czy sciezka miesci sie w zakresie.
-func (a Allowlist) Dopuszcza(sciezka string) error {
-	if !strings.HasPrefix(sciezka, "/") {
-		return fmt.Errorf("%w: sciezka musi byc bezwzgledna", ErrPozaAllowlista)
+// Allows checks whether the path lies within the scope.
+func (a Allowlist) Allows(path string) error {
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("%w: the path must be absolute", ErrOutsideAllowlist)
 	}
-	if sciezka != filepath.Clean(sciezka) {
-		return fmt.Errorf("%w: sciezka nie jest znormalizowana", ErrPozaAllowlista)
+	if path != filepath.Clean(path) {
+		return fmt.Errorf("%w: the path is not normalised", ErrOutsideAllowlist)
 	}
-	// Zakaz jest sprawdzany pierwszy i nie da sie go obejsc wpisem
-	// w allowliscie: plik z hashami hasel albo klucz prywatny ma wlasny
-	// modul, a nie edytor tekstu.
-	if err := Zakazana(sciezka); err != nil {
+	// The ban is checked first and cannot be bypassed by an allowlist
+	// entry: the file with password hashes or a private key has its own
+	// module, not a text editor.
+	if err := Forbidden(path); err != nil {
 		return err
 	}
-	for _, wzorzec := range a.Wzorce {
-		if pasuje(wzorzec, sciezka) {
+	for _, pattern := range a.Patterns {
+		if matches(pattern, path) {
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: %s (zakres: %s)", ErrPozaAllowlista, sciezka, a.Zrodlo)
+	return fmt.Errorf("%w: %s (scope: %s)", ErrOutsideAllowlist, path, a.Source)
 }
 
-// pasuje porownuje sciezke ze wzorcem.
+// matches compares a path with a pattern.
 //
-// Wzorzec bez ukosnika na koncu dopasowuje takze pliki w podkatalogach, gdy
-// konczy sie gwiazdka obejmujaca caly ogon - inaczej "/root/*" nie objelby
-// "/root/.ssh/id_rsa", a to jest dokladnie ten przypadek, ktory ma objac.
-func pasuje(wzorzec, sciezka string) bool {
-	if ok, _ := filepath.Match(wzorzec, sciezka); ok {
+// A pattern without a trailing slash also matches files in subdirectories
+// when it ends with an asterisk covering the whole tail - otherwise
+// "/root/*" would not cover "/root/.ssh/id_rsa", and that is exactly the
+// case it is meant to cover.
+func matches(pattern, path string) bool {
+	if ok, _ := filepath.Match(pattern, path); ok {
 		return true
 	}
-	if strings.HasSuffix(wzorzec, "/*") {
-		prefiks := strings.TrimSuffix(wzorzec, "*")
-		return strings.HasPrefix(sciezka, prefiks)
+	if strings.HasSuffix(pattern, "/*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(path, prefix)
 	}
 	return false
 }
 
-// OtworzBezDowiazan otwiera plik, odmawiajac przejscia przez dowiazanie.
+// OpenWithoutSymlinks opens a file, refusing to pass through a symlink.
 //
-// Dowiazanie w katalogu konfiguracji pozwoliloby nadpisac dowolny plik roota
-// mimo poprawnej allowlisty: wzorzec opisuje sciezke, a nie to, gdzie ona
-// naprawde prowadzi.
-func OtworzBezDowiazan(sciezka string, flagi int, tryb uint32) (*os.File, error) {
-	fd, err := unix.Openat2(unix.AT_FDCWD, sciezka, &unix.OpenHow{
-		Flags:   uint64(flagi) | unix.O_CLOEXEC,
-		Mode:    uint64(tryb),
+// A symlink in the configuration directory would allow overwriting any root
+// file despite a correct allowlist: the pattern describes the path, not
+// where it really leads.
+func OpenWithoutSymlinks(path string, flags int, mode uint32) (*os.File, error) {
+	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{
+		Flags:   uint64(flags) | unix.O_CLOEXEC,
+		Mode:    uint64(mode),
 		Resolve: unix.RESOLVE_NO_SYMLINKS,
 	})
 	if err != nil {
 		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.EXDEV) {
-			return nil, fmt.Errorf("%w: %s", ErrDowiazanie, sciezka)
+			return nil, fmt.Errorf("%w: %s", ErrSymlink, path)
 		}
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), sciezka), nil
+	return os.NewFile(uintptr(fd), path), nil
 }

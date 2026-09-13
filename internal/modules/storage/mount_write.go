@@ -8,179 +8,181 @@ import (
 	"strings"
 )
 
-// SciezkaFstab wskazuje plik montowan hosta.
-const SciezkaFstab = "/etc/fstab"
+// FstabPath points at the host mount file.
+const FstabPath = "/etc/fstab"
 
 var (
-	// zrodloMontowania dopuszcza to, co da sie sprawdzic i co nie zalezy od
-	// kolejnosci wykrywania dyskow: identyfikatory trwale i sciezki w /dev.
-	// Nazwa sieciowa jest tu osobna forma, bo nie jest sciezka.
-	identyfikatorTrwaly = regexp.MustCompile(`^(UUID|PARTUUID|LABEL|PARTLABEL)=[A-Za-z0-9._:-]{1,64}$`)
-	sciezkaUrzadzenia   = regexp.MustCompile(`^/dev/[A-Za-z0-9/._-]{1,120}$`)
-	opcjeMontowania     = regexp.MustCompile(`^[A-Za-z0-9=,._:/@%+-]{0,256}$`)
-	typFilesystemu      = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
+	// The mount source allows what can be checked and what does not depend
+	// on the disk detection order: durable identifiers and paths in /dev. A
+	// network name is a separate form here, because it is not a path.
+	durableIdentifier = regexp.MustCompile(`^(UUID|PARTUUID|LABEL|PARTLABEL)=[A-Za-z0-9._:-]{1,64}$`)
+	devicePath        = regexp.MustCompile(`^/dev/[A-Za-z0-9/._-]{1,120}$`)
+	mountOptions      = regexp.MustCompile(`^[A-Za-z0-9=,._:/@%+-]{0,256}$`)
+	filesystemType    = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 )
 
-// WalidujZrodlo sprawdza zrodlo montowania.
+// ValidateSource checks a mount source.
 //
-// Panel woli identyfikator trwaly od /dev/sdX: nazwa urzadzenia zalezy od
-// kolejnosci wykrywania i po restarcie potrafi wskazac inny dysk. Sciezke
-// w /dev dopuszczamy, bo wolumeny LVM i macierze maja stabilne nazwy w
-// /dev/mapper i /dev/md.
-func WalidujZrodlo(zrodlo string) error {
-	if identyfikatorTrwaly.MatchString(zrodlo) || sciezkaUrzadzenia.MatchString(zrodlo) {
+// The panel prefers a durable identifier to /dev/sdX: the device name
+// depends on the detection order and after a reboot can point at a
+// different disk. A path in /dev is allowed, because LVM volumes and arrays
+// have stable names in /dev/mapper and /dev/md.
+func ValidateSource(source string) error {
+	if durableIdentifier.MatchString(source) || devicePath.MatchString(source) {
 		return nil
 	}
-	return fmt.Errorf("zrodlo %q ma byc identyfikatorem trwalym (UUID=, LABEL=) albo sciezka w /dev", zrodlo)
+	return fmt.Errorf("the source %q must be a durable identifier (UUID=, LABEL=) or a path in /dev", source)
 }
 
-// WalidujCel sprawdza punkt montowania.
-func WalidujCel(cel string) error {
-	if !strings.HasPrefix(cel, "/") {
-		return fmt.Errorf("punkt montowania %q nie jest sciezka bezwzgledna", cel)
+// ValidateTarget checks a mount point.
+func ValidateTarget(target string) error {
+	if !strings.HasPrefix(target, "/") {
+		return fmt.Errorf("the mount point %q is not an absolute path", target)
 	}
-	if cel != filepath.Clean(cel) || strings.Contains(cel, "..") {
-		return fmt.Errorf("punkt montowania %q nie jest sciezka znormalizowana", cel)
+	if target != filepath.Clean(target) || strings.Contains(target, "..") {
+		return fmt.Errorf("the mount point %q is not a normalised path", target)
 	}
-	// Katalogi, ktorych przeslonienie odcina host od samego siebie.
-	// Montowanie czegokolwiek na nich jest osobna decyzja, a nie operacja
-	// z kreatora.
-	for _, chroniony := range []string{"/", "/boot", "/dev", "/etc", "/proc", "/run",
+	// Directories whose shadowing cuts the host off from itself. Mounting
+	// anything on them is a separate decision, not a wizard operation.
+	for _, protected := range []string{"/", "/boot", "/dev", "/etc", "/proc", "/run",
 		"/sys", "/usr", "/var", "/var/lib", "/var/log", "/bin", "/sbin", "/lib"} {
-		if cel == chroniony {
-			return fmt.Errorf("panel nie montuje niczego na %s", chroniony)
+		if target == protected {
+			return fmt.Errorf("the panel does not mount anything on %s", protected)
 		}
 	}
-	if strings.ContainsAny(cel, "\n\t") {
-		return fmt.Errorf("punkt montowania zawiera znak nowej linii")
+	if strings.ContainsAny(target, "\n\t") {
+		return fmt.Errorf("the mount point contains a newline")
 	}
 	return nil
 }
 
-// WalidujOpcje sprawdza opcje montowania.
-func WalidujOpcje(opcje, typ string) error {
-	if !typFilesystemu.MatchString(typ) {
-		return fmt.Errorf("nieprawidlowy typ filesystemu %q", typ)
+// ValidateOptions checks mount options.
+func ValidateOptions(options, fsType string) error {
+	if !filesystemType.MatchString(fsType) {
+		return fmt.Errorf("invalid filesystem type %q", fsType)
 	}
-	if !opcjeMontowania.MatchString(opcje) {
-		return fmt.Errorf("opcje montowania zawieraja niedozwolony znak")
+	if !mountOptions.MatchString(options) {
+		return fmt.Errorf("the mount options contain a disallowed character")
 	}
 	return nil
 }
 
-// WierszFstab sklada wpis dla /etc/fstab.
+// FstabLine composes an entry for /etc/fstab.
 //
-// Znaki specjalne zapisujemy osemkowo, tak jak robi to sam fstab: sciezka
-// ze spacja zapisana wprost rozpadlaby sie na dwa pola i wpis wskazywalby
-// zupelnie inne miejsce.
-func WierszFstab(zrodlo, cel, typ, opcje string) string {
-	if opcje == "" {
-		opcje = "defaults"
+// Special characters are written in octal, the way fstab itself does it: a
+// path with a space written directly would fall apart into two fields and
+// the entry would point at an entirely different place.
+func FstabLine(source, target, fsType, options string) string {
+	if options == "" {
+		options = "defaults"
 	}
-	return fmt.Sprintf("%s %s %s %s 0 0", zakoduj(zrodlo), zakoduj(cel), typ, opcje)
+	return fmt.Sprintf("%s %s %s %s 0 0", encode(source), encode(target), fsType, options)
 }
 
-func zakoduj(sciezka string) string {
-	var wynik strings.Builder
-	for _, znak := range sciezka {
-		switch znak {
+func encode(path string) string {
+	var result strings.Builder
+	for _, r := range path {
+		switch r {
 		case ' ', '\t', '\\':
-			fmt.Fprintf(&wynik, `\%03o`, znak)
+			fmt.Fprintf(&result, `\%03o`, r)
 		default:
-			wynik.WriteRune(znak)
+			result.WriteRune(r)
 		}
 	}
-	return wynik.String()
+	return result.String()
 }
 
-// ZapiszWpisFstab dodaje albo zastepuje wpis panelu.
+// WriteFstabEntry adds or replaces the panel entry.
 //
-// Zapis jest atomowy: plik powstaje obok i dopiero gotowy zastepuje
-// poprzedni. fstab czytany w polowie przez systemd przy restarcie oznaczalby
-// host, ktory nie wstaje.
-func ZapiszWpisFstab(sciezka, zrodlo, cel, typ, opcje string) error {
-	tresc, err := os.ReadFile(sciezka)
+// The write is atomic: the file is created next to the target and replaces
+// the previous one only when complete. An fstab read half-way by systemd
+// at a reboot would mean a host that does not come up.
+func WriteFstabEntry(path, source, target, fsType, options string) error {
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	linie := strings.Split(string(tresc), "\n")
-	wynik := make([]string, 0, len(linie)+2)
+	lines := strings.Split(string(content), "\n")
+	result := make([]string, 0, len(lines)+2)
 
-	pomijaj := false
-	for _, linia := range linie {
-		przyciety := strings.TrimSpace(linia)
-		if pomijaj {
-			pomijaj = false
-			// Wiersz po znaczniku panelu nalezy do panelu: zastepujemy go.
-			if przyciety != "" && !strings.HasPrefix(przyciety, "#") {
+	skip := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if skip {
+			skip = false
+			// The row after the panel marker belongs to the panel: it is
+			// replaced.
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
 				continue
 			}
 		}
-		if strings.HasPrefix(przyciety, ZnacznikPanelu) {
-			// Znacznik wlasnego wpisu o tym samym celu usuwamy razem z nim.
-			if strings.Contains(przyciety, cel) {
-				pomijaj = true
+		if strings.HasPrefix(trimmed, PanelMarker) {
+			// The marker of our own entry with the same target is removed
+			// together with it.
+			if strings.Contains(trimmed, target) {
+				skip = true
 				continue
 			}
 		}
-		wynik = append(wynik, linia)
+		result = append(result, line)
 	}
 
-	// Usuwamy puste wiersze z konca, zeby plik nie rosl przy kazdej zmianie.
-	for len(wynik) > 0 && strings.TrimSpace(wynik[len(wynik)-1]) == "" {
-		wynik = wynik[:len(wynik)-1]
+	// Empty rows are removed from the end so the file does not grow at
+	// every change.
+	for len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+		result = result[:len(result)-1]
 	}
-	wynik = append(wynik, ZnacznikPanelu+": "+cel, WierszFstab(zrodlo, cel, typ, opcje), "")
+	result = append(result, PanelMarker+": "+target, FstabLine(source, target, fsType, options), "")
 
-	return zapiszAtomowo(sciezka, strings.Join(wynik, "\n"))
+	return writeAtomically(path, strings.Join(result, "\n"))
 }
 
-// UsunWpisFstab kasuje wpis panelu o podanym celu.
-func UsunWpisFstab(sciezka, cel string) error {
-	tresc, err := os.ReadFile(sciezka)
+// RemoveFstabEntry deletes the panel entry with the given target.
+func RemoveFstabEntry(path, target string) error {
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	linie := strings.Split(string(tresc), "\n")
-	wynik := make([]string, 0, len(linie))
-	pomijaj := false
-	for _, linia := range linie {
-		przyciety := strings.TrimSpace(linia)
-		if pomijaj {
-			pomijaj = false
-			if przyciety != "" && !strings.HasPrefix(przyciety, "#") {
+	lines := strings.Split(string(content), "\n")
+	result := make([]string, 0, len(lines))
+	skip := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if skip {
+			skip = false
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
 				continue
 			}
 		}
-		if strings.HasPrefix(przyciety, ZnacznikPanelu) && strings.Contains(przyciety, cel) {
-			pomijaj = true
+		if strings.HasPrefix(trimmed, PanelMarker) && strings.Contains(trimmed, target) {
+			skip = true
 			continue
 		}
-		wynik = append(wynik, linia)
+		result = append(result, line)
 	}
-	return zapiszAtomowo(sciezka, strings.Join(wynik, "\n"))
+	return writeAtomically(path, strings.Join(result, "\n"))
 }
 
-func zapiszAtomowo(sciezka, tresc string) error {
-	tymczasowy := sciezka + ".flotestro-nowy"
-	if err := os.WriteFile(tymczasowy, []byte(tresc), 0o644); err != nil {
+func writeAtomically(path, content string) error {
+	temporary := path + ".flotestro-new"
+	if err := os.WriteFile(temporary, []byte(content), 0o644); err != nil {
 		return err
 	}
-	// fsync pliku i katalogu: bez tego zmiana moze nie przetrwac zaniku
-	// zasilania, a fstab jest plikiem, ktory czyta sie wlasnie po takim
-	// zdarzeniu.
-	plik, err := os.Open(tymczasowy)
+	// fsync of the file and the directory: without it the change may not
+	// survive a power failure, and fstab is a file read precisely after
+	// such an event.
+	file, err := os.Open(temporary)
 	if err == nil {
-		_ = plik.Sync()
-		_ = plik.Close()
+		_ = file.Sync()
+		_ = file.Close()
 	}
-	if err := os.Rename(tymczasowy, sciezka); err != nil {
+	if err := os.Rename(temporary, path); err != nil {
 		return err
 	}
-	katalog, err := os.Open(filepath.Dir(sciezka))
+	dir, err := os.Open(filepath.Dir(path))
 	if err != nil {
 		return nil
 	}
-	defer katalog.Close()
-	return katalog.Sync()
+	defer dir.Close()
+	return dir.Sync()
 }

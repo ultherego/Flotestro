@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	backupmodul "github.com/ultherego/flotestro/internal/modules/backup"
+	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/docker"
-	filesmodul "github.com/ultherego/flotestro/internal/modules/files"
+	filesmodule "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	monitoringmodul "github.com/ultherego/flotestro/internal/modules/monitoring"
@@ -29,9 +29,9 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 	"github.com/ultherego/flotestro/internal/modules/security"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
+	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
-	czas "github.com/ultherego/flotestro/internal/modules/time"
+	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 	pakietymodul "github.com/ultherego/flotestro/internal/packages"
 )
 
@@ -958,7 +958,7 @@ func checkFilePath(path string) error {
 	// Paths the panel never touches are rejected already at ordering time:
 	// the host would refuse anyway, and a queued task with such a target
 	// would look like a change about to happen.
-	if err := filesmodul.Zakazana(path); err != nil {
+	if err := filesmodule.Forbidden(path); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(path, "/") {
@@ -995,7 +995,7 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 		if change.MTU == "" {
 			return fmt.Errorf("an MTU change requires a value")
 		}
-		return network.WalidujMTU(change.MTU)
+		return network.ValidateMTU(change.MTU)
 
 	case ActionNetworkRouteEnsure:
 		// An empty list is a valid target state here: it means "a profile
@@ -1006,7 +1006,7 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 			return fmt.Errorf("a route operation requires a list of routes; an empty list clears the profile's routes")
 		}
 		for _, route := range change.Routes {
-			if err := network.WalidujTrase(route); err != nil {
+			if err := network.ValidateRoute(route); err != nil {
 				return err
 			}
 		}
@@ -1025,17 +1025,17 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 			return fmt.Errorf("the manual method requires at least one address")
 		}
 		for _, address := range change.Addresses {
-			if err := network.WalidujAdres(address); err != nil {
+			if err := network.ValidateAddress(address); err != nil {
 				return err
 			}
 		}
 		if change.Gateway != "" {
-			if err := network.WalidujAdresIP(change.Gateway); err != nil {
+			if err := network.ValidateIPAddress(change.Gateway); err != nil {
 				return fmt.Errorf("gateway: %w", err)
 			}
 		}
 		for _, server := range change.DNS {
-			if err := network.WalidujAdresIP(server); err != nil {
+			if err := network.ValidateIPAddress(server); err != nil {
 				return fmt.Errorf("DNS server: %w", err)
 			}
 		}
@@ -1222,7 +1222,7 @@ func checkEventsRead(payload *DockerEventsPayload) error {
 	}
 	seen := map[string]bool{}
 	for _, kind := range payload.Types {
-		if !docker.RodzajZdarzenia(kind) {
+		if !docker.KnownEventType(kind) {
 			return fmt.Errorf("unknown event kind %q", kind)
 		}
 		if seen[kind] {
@@ -2324,7 +2324,7 @@ func Validate(action ActionType, payload Payload) error {
 		// cron will not understand would never run, and the operator would
 		// learn about it from an execution error instead of a refusal at
 		// ordering time.
-		if _, err := schedules.ParsujWyrazenie(payload.Schedule.Expression); err != nil {
+		if _, err := schedules.ParseExpression(payload.Schedule.Expression); err != nil {
 			return fmt.Errorf("schedule expression: %w", err)
 		}
 		if len(payload.Schedule.Command) == 0 {
@@ -2348,10 +2348,10 @@ func Validate(action ActionType, payload Payload) error {
 		if err := checkFilePath(payload.File.Path); err != nil {
 			return err
 		}
-		if err := filesmodul.WalidujTresc(payload.File.Content); err != nil {
+		if err := filesmodule.ValidateContent(payload.File.Content); err != nil {
 			return err
 		}
-		if _, err := filesmodul.WalidujTryb(payload.File.Mode); err != nil {
+		if _, err := filesmodule.ValidateMode(payload.File.Mode); err != nil {
 			return err
 		}
 		// Clear content and content from the store exclude each other:
@@ -2366,7 +2366,7 @@ func Validate(action ActionType, payload Payload) error {
 			}
 		}
 		if payload.File.Validator != "" {
-			if _, _, err := filesmodul.WybierzWalidator(payload.File.Path, payload.File.Validator); err != nil {
+			if _, _, err := filesmodule.SelectValidator(payload.File.Path, payload.File.Validator); err != nil {
 				return err
 			}
 		}
@@ -2382,19 +2382,19 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Monitoring == nil {
 			return fmt.Errorf("the operation %s requires a monitoring payload", action)
 		}
-		return monitoringmodul.Zlecenie{
+		return monitoringmodul.Request{
 			Kind: payload.Monitoring.Kind, Target: payload.Monitoring.Target,
 			ExpectStatus:   payload.Monitoring.ExpectStatus,
 			ExpectBody:     payload.Monitoring.ExpectBody,
 			TimeoutSeconds: payload.Monitoring.TimeoutSeconds,
-		}.Waliduj()
+		}.Validate()
 
 	case ActionBackupPlan, ActionBackupRun, ActionBackupVerify, ActionBackupRestore:
 		if payload.Backup == nil {
 			return fmt.Errorf("the operation %s requires a backup payload", action)
 		}
 		copyPayload := payload.Backup
-		definition := backupmodul.Definicja{
+		definition := backupmodule.Definition{
 			ID: copyPayload.ID, Tool: copyPayload.Tool, Repository: copyPayload.Repository,
 			Paths: copyPayload.Paths, Excludes: copyPayload.Excludes, Tags: copyPayload.Tags,
 			KeepLast: copyPayload.KeepLast, KeepDaily: copyPayload.KeepDaily,
@@ -2402,7 +2402,7 @@ func Validate(action ActionType, payload Payload) error {
 			Prune: copyPayload.Prune, Runbook: copyPayload.Runbook,
 			Initialize: copyPayload.Initialize,
 		}
-		if err := definition.Waliduj(); err != nil {
+		if err := definition.Validate(); err != nil {
 			return err
 		}
 		if !copyPayload.PasswordSecret.Empty() {
@@ -2418,15 +2418,15 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
-		if err := backupmodul.WalidujSrodowisko(variableNames); err != nil {
+		if err := backupmodule.ValidateEnvironment(variableNames); err != nil {
 			return err
 		}
 		if action == ActionBackupRun && len(copyPayload.Paths) == 0 &&
-			copyPayload.Tool != backupmodul.NarzedzieRunbook {
+			copyPayload.Tool != backupmodule.ToolRunbook {
 			return fmt.Errorf("a copy requires being told what to back up")
 		}
 		if action == ActionBackupRestore {
-			return backupmodul.WalidujOdtworzenie(backupmodul.Odtworzenie{
+			return backupmodule.ValidateRestore(backupmodule.Restore{
 				SnapshotID: copyPayload.SnapshotID, Target: copyPayload.Target,
 				Include: copyPayload.Include, Overwrite: copyPayload.Overwrite,
 			})
@@ -2486,20 +2486,20 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Certificate == nil {
 			return nil
 		}
-		if len(payload.Certificate.Targets) > certificates.MaksymalnaLiczbaCertyfikatow {
+		if len(payload.Certificate.Targets) > certificates.MaxCertificates {
 			return fmt.Errorf("a scan covers at most %d files",
-				certificates.MaksymalnaLiczbaCertyfikatow)
+				certificates.MaxCertificates)
 		}
 		for _, target := range payload.Certificate.Targets {
-			if err := certificates.WalidujSciezke(target.Path); err != nil {
+			if err := certificates.ValidatePath(target.Path); err != nil {
 				return err
 			}
 			if target.KeyPath != "" {
-				if err := certificates.WalidujSciezke(target.KeyPath); err != nil {
+				if err := certificates.ValidatePath(target.KeyPath); err != nil {
 					return err
 				}
 			}
-			if err := certificates.WalidujJednostke(target.Service); err != nil {
+			if err := certificates.ValidateUnit(target.Service); err != nil {
 				return err
 			}
 		}
@@ -2512,17 +2512,17 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Certificate == nil {
 			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
-		if err := certificates.WalidujKotwice(payload.Certificate.AnchorID); err != nil {
+		if err := certificates.ValidateAnchor(payload.Certificate.AnchorID); err != nil {
 			return err
 		}
-		_, _, err := certificates.SkladajKotwice(payload.Certificate.Certificate, time.Now())
+		_, _, err := certificates.ComposeAnchor(payload.Certificate.Certificate, time.Now())
 		return err
 
 	case ActionCertificateTrustRemove:
 		if payload.Certificate == nil {
 			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
-		return certificates.WalidujKotwice(payload.Certificate.AnchorID)
+		return certificates.ValidateAnchor(payload.Certificate.AnchorID)
 
 	case ActionCertificatePlan:
 		// The plan accepts the same thing a deployment does and names by
@@ -2535,7 +2535,7 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
 		cert := payload.Certificate
-		if err := certificates.WalidujSciezke(cert.Path); err != nil {
+		if err := certificates.ValidatePath(cert.Path); err != nil {
 			return err
 		}
 		if cert.Certificate == "" {
@@ -2544,11 +2544,11 @@ func Validate(action ActionType, payload Payload) error {
 		// We check the material here with the same code the host will use: an
 		// order with a broken chain falls out at ordering time rather than
 		// after approval and delivery to the host.
-		parsed, err := certificates.ParsujPEM([]byte(cert.Certificate))
+		parsed, err := certificates.ParsePEM([]byte(cert.Certificate))
 		if err != nil {
 			return err
 		}
-		if err := certificates.SprawdzLancuch(parsed); err != nil {
+		if err := certificates.CheckChain(parsed); err != nil {
 			return err
 		}
 		if !cert.KeySecret.Empty() {
@@ -2560,14 +2560,14 @@ func Validate(action ActionType, payload Payload) error {
 			}
 		}
 		if cert.KeyPath != "" {
-			if err := certificates.WalidujSciezke(cert.KeyPath); err != nil {
+			if err := certificates.ValidatePath(cert.KeyPath); err != nil {
 				return err
 			}
 		}
-		if err := certificates.WalidujJednostke(cert.ReloadUnit); err != nil {
+		if err := certificates.ValidateUnit(cert.ReloadUnit); err != nil {
 			return err
 		}
-		return certificates.WalidujCel(cert.ProbeTarget)
+		return certificates.ValidateTarget(cert.ProbeTarget)
 
 	case ActionCertificateRenew:
 		if payload.Certificate == nil {
@@ -2581,46 +2581,46 @@ func Validate(action ActionType, payload Payload) error {
 			if payload.Certificate.Path == "" {
 				return fmt.Errorf("a renewal requires a request identifier or a certificate path")
 			}
-			if err := certificates.WalidujSciezke(payload.Certificate.Path); err != nil {
+			if err := certificates.ValidatePath(payload.Certificate.Path); err != nil {
 				return err
 			}
-		} else if err := certificates.WalidujZlecenie(payload.Certificate.Request); err != nil {
+		} else if err := certificates.ValidateRequest(payload.Certificate.Request); err != nil {
 			return err
 		}
-		if err := certificates.WalidujJednostke(payload.Certificate.ReloadUnit); err != nil {
+		if err := certificates.ValidateUnit(payload.Certificate.ReloadUnit); err != nil {
 			return err
 		}
-		return certificates.WalidujCel(payload.Certificate.ProbeTarget)
+		return certificates.ValidateTarget(payload.Certificate.ProbeTarget)
 
 	case ActionSELinuxModeSet:
 		if payload.Security == nil {
 			return fmt.Errorf("the operation %s requires a security payload", action)
 		}
-		return security.WalidujTryb(payload.Security.Mode)
+		return security.ValidateMode(payload.Security.Mode)
 
 	case ActionSystemShutdown:
 		if payload.Power == nil {
 			return fmt.Errorf("the operation %s requires a power payload", action)
 		}
 		switch payload.Power.Mode {
-		case "", power.TrybWylaczyc, power.TrybZatrzymac:
+		case "", power.ModePoweroff, power.ModeHalt:
 		default:
 			return fmt.Errorf("unsupported shutdown mode %q", payload.Power.Mode)
 		}
-		if err := power.WalidujOpoznienie(payload.Power.DelaySeconds); err != nil {
+		if err := power.ValidateDelay(payload.Power.DelaySeconds); err != nil {
 			return err
 		}
-		return power.WalidujPowodWylaczenia(payload.Power.Reason)
+		return power.ValidateShutdownReason(payload.Power.Reason)
 
 	case ActionTimeSyncTest:
 		if payload.Time == nil {
 			return nil
 		}
-		if len(payload.Time.Probe) > czas.LimitSerwerow {
-			return fmt.Errorf("a test covers at most %d servers", czas.LimitSerwerow)
+		if len(payload.Time.Probe) > hosttime.ServerLimit {
+			return fmt.Errorf("a test covers at most %d servers", hosttime.ServerLimit)
 		}
 		for _, server := range payload.Time.Probe {
-			if err := czas.WalidujSerwer(server); err != nil {
+			if err := hosttime.ValidateServer(server); err != nil {
 				return err
 			}
 		}
@@ -2636,18 +2636,18 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Time == nil {
 			return fmt.Errorf("the operation %s requires a time payload", action)
 		}
-		return czas.WalidujSerwery(payload.Time.Servers)
+		return hosttime.ValidateServers(payload.Time.Servers)
 
 	case ActionTimezoneSet:
 		if payload.Time == nil {
 			return fmt.Errorf("the operation %s requires a time payload", action)
 		}
-		return czas.WalidujStrefe(payload.Time.Timezone)
+		return hosttime.ValidateZone(payload.Time.Timezone)
 
 	case ActionSysctlPlan:
 		if payload.Kernel != nil {
 			for _, key := range payload.Kernel.Keys {
-				if err := kernel.WalidujKlucz(key); err != nil {
+				if err := kernel.ValidateKey(key); err != nil {
 					return err
 				}
 			}
@@ -2661,7 +2661,7 @@ func Validate(action ActionType, payload Payload) error {
 		if len(payload.Kernel.Settings) > 50 {
 			return fmt.Errorf("one operation covers at most 50 settings")
 		}
-		_, err := kernel.SkladajPlikSysctl(payload.Kernel.Settings)
+		_, err := kernel.ComposeSysctlFile(payload.Kernel.Settings)
 		return err
 
 	case ActionKernelModulePlan:
@@ -2674,7 +2674,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Kernel == nil || payload.Kernel.Module == "" {
 			return fmt.Errorf("the operation %s requires a module name", action)
 		}
-		return kernel.WalidujModul(payload.Kernel.Module)
+		return kernel.ValidateModule(payload.Kernel.Module)
 
 	case ActionSSHConfigPlan:
 		return nil
@@ -2683,7 +2683,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.SSH == nil {
 			return fmt.Errorf("the operation %s requires an ssh payload", action)
 		}
-		return sshmodul.Waliduj(sshmodul.Ustawienia{
+		return sshmodule.Validate(sshmodule.Settings{
 			Port:                   payload.SSH.Port,
 			PermitRootLogin:        payload.SSH.PermitRootLogin,
 			PasswordAuthentication: payload.SSH.PasswordAuthentication,
@@ -2712,38 +2712,38 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		if err := storage.WalidujZrodlo(payload.Storage.Source); err != nil {
+		if err := storage.ValidateSource(payload.Storage.Source); err != nil {
 			return err
 		}
-		if err := storage.WalidujCel(payload.Storage.Target); err != nil {
+		if err := storage.ValidateTarget(payload.Storage.Target); err != nil {
 			return err
 		}
-		return storage.WalidujOpcje(payload.Storage.Options, payload.Storage.FSType)
+		return storage.ValidateOptions(payload.Storage.Options, payload.Storage.FSType)
 
 	case ActionMountRemove:
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		return storage.WalidujCel(payload.Storage.Target)
+		return storage.ValidateTarget(payload.Storage.Target)
 
 	case ActionFilesystemCheck:
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		return storage.WalidujZrodlo(payload.Storage.Device)
+		return storage.ValidateSource(payload.Storage.Device)
 
 	case ActionLVMExtend:
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		_, err := storage.ArgumentyRozszerzeniaLV(payload.Storage.Device, payload.Storage.Size, true)
+		_, err := storage.LVExtendArguments(payload.Storage.Device, payload.Storage.Size, true)
 		return err
 
 	case ActionFilesystemResize:
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		return storage.WalidujZrodlo(payload.Storage.Device)
+		return storage.ValidateSource(payload.Storage.Device)
 
 	case ActionFilesystemCreate:
 		if payload.Storage == nil {
@@ -2756,7 +2756,7 @@ func Validate(action ActionType, payload Payload) error {
 			payload.Storage.ExpectedUUID == "" {
 			return fmt.Errorf("formatting requires the identity of the device (serial, UUID or size)")
 		}
-		_, err := storage.ArgumentyFormatowania(payload.Storage.Device,
+		_, err := storage.FormatArguments(payload.Storage.Device,
 			payload.Storage.FSType, payload.Storage.Label)
 		return err
 
@@ -2768,7 +2768,7 @@ func Validate(action ActionType, payload Payload) error {
 			payload.Storage.ExpectedUUID == "" {
 			return fmt.Errorf("wiping requires the identity of the device (serial, UUID or size)")
 		}
-		_, err := storage.ArgumentyCzyszczenia(payload.Storage.Device)
+		_, err := storage.WipeArguments(payload.Storage.Device)
 		return err
 
 	case ActionFirewallPlan:
@@ -2789,7 +2789,7 @@ func Validate(action ActionType, payload Payload) error {
 			Action: payload.Firewall.Action, Protocol: payload.Firewall.Protocol,
 			Ports: payload.Firewall.Ports, Sources: payload.Firewall.Sources,
 			Interface: payload.Firewall.Interface, Comment: payload.Firewall.Comment,
-		}.Waliduj()
+		}.Validate()
 
 	case ActionFirewallRuleRemove:
 		if payload.Firewall == nil || payload.Firewall.RuleID == "" {
@@ -2801,7 +2801,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Firewall == nil {
 			return fmt.Errorf("the operation %s requires a firewall payload", action)
 		}
-		_, err := firewall.ArgumentyOtwarciaPortu(payload.Firewall.Zone,
+		_, err := firewall.PortArguments(payload.Firewall.Zone,
 			firstPort(payload.Firewall.Ports), payload.Firewall.Protocol, payload.Firewall.Enable)
 		return err
 
@@ -2809,7 +2809,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Firewall == nil {
 			return fmt.Errorf("the operation %s requires a firewall payload", action)
 		}
-		_, err := firewall.ArgumentyUslugi(payload.Firewall.Zone,
+		_, err := firewall.ServiceArguments(payload.Firewall.Zone,
 			payload.Firewall.Service, payload.Firewall.Enable)
 		return err
 
@@ -2821,7 +2821,7 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("a test covers at most 20 names at once")
 		}
 		for _, name := range payload.DNS.Names {
-			if !dns.PoprawnaNazwaDoTestu(name) {
+			if !dns.ValidTestName(name) {
 				return fmt.Errorf("invalid name %q", name)
 			}
 		}
@@ -2846,12 +2846,12 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("a resolver change requires at least one server")
 		}
 		for _, server := range payload.DNS.Servers {
-			if err := network.WalidujAdresIP(server); err != nil {
+			if err := network.ValidateIPAddress(server); err != nil {
 				return fmt.Errorf("DNS server: %w", err)
 			}
 		}
 		for _, domain := range payload.DNS.SearchDomains {
-			if !dns.PoprawnaNazwaDoTestu(domain) {
+			if !dns.ValidTestName(domain) {
 				return fmt.Errorf("invalid search domain %q", domain)
 			}
 		}

@@ -20,17 +20,17 @@ import (
 // back.
 func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.ShutdownRequest) *helperv1.HelperResponse {
-	if err := power.WalidujPowodWylaczenia(action.GetReason()); err != nil {
+	if err := power.ValidateShutdownReason(action.GetReason()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	if err := power.WalidujOpoznienie(action.GetDelaySeconds()); err != nil {
+	if err := power.ValidateDelay(action.GetDelaySeconds()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 	mode := action.GetMode()
 	switch mode {
 	case "":
-		mode = power.TrybWylaczyc
-	case power.TrybWylaczyc, power.TrybZatrzymac:
+		mode = power.ModePoweroff
+	case power.ModePoweroff, power.ModeHalt:
 	default:
 		return reject(ErrorMalformed, "unsupported shutdown mode "+mode)
 	}
@@ -91,25 +91,25 @@ func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequ
 //
 // A delay is not an obstacle: logind waits it out on its own. A block is, and
 // it is the one that has to stop the operation.
-func shutdownInhibitors(ctx context.Context) []power.Blokada {
-	if !exists(power.SciezkaInhibit) {
+func shutdownInhibitors(ctx context.Context) []power.Inhibitor {
+	if !exists(power.InhibitPath) {
 		return nil
 	}
-	output, _, _ := outputWithWarnings(ctx, power.SciezkaInhibit, "--list", "--no-pager")
-	all, known := power.ParsujInhibitory(output)
+	output, _, _ := outputWithWarnings(ctx, power.InhibitPath, "--list", "--no-pager")
+	all, known := power.ParseInhibitors(output)
 	if !known {
 		return nil
 	}
-	var blocking []power.Blokada
+	var blocking []power.Inhibitor
 	for _, inhibitor := range all {
-		if inhibitor.Blokuje() && (inhibitor.What == "" || strings.Contains(inhibitor.What, "shutdown")) {
+		if inhibitor.Blocks() && (inhibitor.What == "" || strings.Contains(inhibitor.What, "shutdown")) {
 			blocking = append(blocking, inhibitor)
 		}
 	}
 	return blocking
 }
 
-func describeInhibitors(inhibitors []power.Blokada) string {
+func describeInhibitors(inhibitors []power.Inhibitor) string {
 	descriptions := make([]string, 0, len(inhibitors))
 	for _, inhibitor := range inhibitors {
 		description := inhibitor.Who
@@ -121,7 +121,7 @@ func describeInhibitors(inhibitors []power.Blokada) string {
 	return strings.Join(descriptions, ", ")
 }
 
-func encodeInhibitors(inhibitors []power.Blokada) []byte {
+func encodeInhibitors(inhibitors []power.Inhibitor) []byte {
 	if len(inhibitors) == 0 {
 		return nil
 	}

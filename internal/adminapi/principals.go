@@ -9,8 +9,8 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handleWhoami zwraca tozsamosc zadania i jej role. Endpoint nie wymaga
-// uprawnien: kazdy moze sprawdzic, kim jest.
+// handleWhoami returns the request principal and its roles. The endpoint
+// needs no permission: everyone may check who they are.
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() {
@@ -28,7 +28,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleListRoles opisuje katalog rol i ich uprawnienia.
+// handleListRoles describes the role catalogue and its permissions.
 func (s *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermHostRead, authz.GlobalScope, "role", ""); !ok {
 		return
@@ -72,16 +72,18 @@ type createPrincipalRequest struct {
 		Site        string `json:"site"`
 		Environment string `json:"environment"`
 	} `json:"roles"`
-	// IssueToken wystawia token API razem z tozsamoscia. Wartosc jest widoczna
-	// wylacznie w tej odpowiedzi.
+	// IssueToken issues an API token together with the principal. The value
+	// is visible only in this response.
 	IssueToken    bool `json:"issue_token"`
 	TokenTTLHours int  `json:"token_ttl_hours"`
-	// Reason opisuje, po co nadawany jest dostep. Operacja przestawia reguly
-	// dostepu do calej floty, wiec powod jest czescia sladu audytowego.
+	// Reason describes what the access is granted for. The operation moves
+	// the access rules of the whole fleet, so the reason is part of the
+	// audit trail.
 	Reason string `json:"reason"`
 }
 
-// handleCreatePrincipal tworzy tozsamosc wraz z przypisaniami rol.
+// handleCreatePrincipal creates a principal together with its role
+// bindings.
 func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", "")
 	if !ok {
@@ -104,9 +106,9 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Nadanie uprawnien jest operacja o najwiekszym wplywie: przestawia to,
-	// kto moze cokolwiek zrobic na flocie.
-	dowod, ok := s.requireStepUp(w, r, actor, request.Reason,
+	// Granting permissions is a highest-impact operation: it moves who can
+	// do anything on the fleet.
+	evidence, ok := s.requireStepUp(w, r, actor, request.Reason,
 		"principal.create", "principal", request.Subject)
 	if !ok {
 		return
@@ -147,7 +149,7 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 			ttl = 30 * 24 * time.Hour
 		}
 		token, err := s.authz.IssueToken(r.Context(), tx, principalID,
-			"token dla "+request.Subject, ttl, actor.Subject)
+			"token for "+request.Subject, ttl, actor.Subject)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -163,7 +165,7 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		Detail: withStepUp(map[string]any{
 			"subject": request.Subject, "roles": granted,
 			"token_issued": request.IssueToken,
-		}, dowod),
+		}, evidence),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -184,7 +186,8 @@ type createGroupMappingRequest struct {
 	Reason      string `json:"reason"`
 }
 
-// handleListGroupMappings zwraca mapowania grup zewnetrznych na role.
+// handleListGroupMappings returns the mappings of external groups to
+// roles.
 func (s *Server) handleListGroupMappings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", ""); !ok {
 		return
@@ -200,8 +203,9 @@ func (s *Server) handleListGroupMappings(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"items": mappings, "count": len(mappings)})
 }
 
-// handleCreateGroupMapping dodaje mapowanie grupy na role w zakresie.
-// Grupa nadaje wylacznie kandydacka role; zakres pozostaje polityka panelu.
+// handleCreateGroupMapping adds a mapping of a group to a role in a scope.
+// The group grants only a candidate role; the scope remains the panel
+// policy.
 func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", "")
 	if !ok {
@@ -221,9 +225,10 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Mapowanie grupy na role decyduje, kogo dostawca tozsamosci wpuszcza
-	// i z jakimi uprawnieniami; to zmiana samej reguly dostepu.
-	dowod, ok := s.requireStepUp(w, r, actor, request.Reason,
+	// The mapping of a group to a role decides whom the identity provider
+	// lets in and with what permissions; it is a change of the access rule
+	// itself.
+	evidence, ok := s.requireStepUp(w, r, actor, request.Reason,
 		"group_mapping.create", "group_mapping", request.GroupName)
 	if !ok {
 		return
@@ -250,7 +255,7 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 		Detail: withStepUp(map[string]any{
 			"issuer": mapping.Issuer, "group": mapping.GroupName, "role": string(mapping.Role),
 			"site": mapping.Site, "environment": mapping.Environment,
-		}, dowod),
+		}, evidence),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -262,16 +267,16 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, mapping)
 }
 
-// handleDeleteGroupMapping usuwa mapowanie.
+// handleDeleteGroupMapping removes a mapping.
 func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", "")
 	if !ok {
 		return
 	}
 	mappingID := r.PathValue("id")
-	// Powod przy usuwaniu przekazuje sie parametrem: zadanie DELETE nie ma
-	// ciala, a warunek jest ten sam co przy tworzeniu mapowania.
-	dowod, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
+	// The reason at removal is passed as a parameter: a DELETE request has
+	// no body, and the condition is the same as at mapping creation.
+	evidence, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
 		"group_mapping.delete", "group_mapping", mappingID)
 	if !ok {
 		return
@@ -289,7 +294,7 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "group_mapping.delete", TargetType: "group_mapping", TargetID: mappingID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: withStepUp(map[string]any{}, dowod),
+		Detail: withStepUp(map[string]any{}, evidence),
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

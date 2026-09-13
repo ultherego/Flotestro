@@ -699,11 +699,11 @@ func (h *Scheduler) requestRead(ctx context.Context, description HostDescription
 	bucket := now.Truncate(h.settings.Interval).UTC().Format(time.RFC3339)
 	key := "vuln:packages:" + description.ID + ":" + bucket
 	_, err = h.jobs.Create(ctx, tx, jobs.Spec{
-		HostID:          description.ID,
-		Action:          opspec.ActionPackageList,
-		IdempotencyKey:  key,
-		RequiresApprova: false,
-		CreatedBy:       "flotestro/vuln",
+		HostID:           description.ID,
+		Action:           opspec.ActionPackageList,
+		IdempotencyKey:   key,
+		RequiresApproval: false,
+		CreatedBy:        "flotestro/vuln",
 		Preconditions: jobs.Preconditions{
 			RequiredCapabilities: []string{opspec.ActionPackageList.RequiredCapability()},
 		},

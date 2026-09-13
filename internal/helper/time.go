@@ -52,24 +52,24 @@ func (s *Server) writeTimeServers(ctx context.Context, action *helperv1.TimeRequ
 	// The shape of the entries is checked here once more even though the panel
 	// already did it: the helper is the last gate before a write as root and it
 	// does not take on faith what came from above.
-	if err := hosttime.WalidujSerwery(servers); err != nil {
+	if err := hosttime.ValidateServers(servers); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
-	snapshot := hosttime.Zbierz(ctx, toolOutput)
+	snapshot := hosttime.Collect(ctx, toolOutput)
 	// A change approved on the basis of a plan is to enter the state the
 	// operator looked at: a different panel file or a different daemon than at
 	// planning time is a refusal, not a warning.
 	if expected := action.GetPlanHash(); expected != "" {
-		if now := hosttime.Zaplanuj(snapshot, servers, action.GetEnableDropin()); now.PlanHash != expected {
+		if now := hosttime.Compute(snapshot, servers, action.GetEnableDropin()); now.PlanHash != expected {
 			return reject(ErrorPreconditionFailed,
 				"the time sources changed since the planning; the change needs a new plan")
 		}
 	}
 	switch snapshot.Service {
-	case hosttime.DemonChrony:
+	case hosttime.DaemonChrony:
 		return s.writeChrony(ctx, servers, snapshot, action.GetEnableDropin())
-	case hosttime.DemonTimesyncd:
+	case hosttime.DaemonTimesyncd:
 		return s.writeTimesyncd(ctx, servers)
 	}
 	return reject(ErrorUnsupported,
@@ -80,8 +80,8 @@ func (s *Server) writeTimeServers(ctx context.Context, action *helperv1.TimeRequ
 // without touching the host. A missing daemon and a missing directory without
 // consent are a refusal in the plan.
 func (s *Server) planTimeServers(ctx context.Context, action *helperv1.TimeRequest) *helperv1.HelperResponse {
-	snapshot := hosttime.Zbierz(ctx, toolOutput)
-	plan := hosttime.Zaplanuj(snapshot, action.GetServers(), action.GetEnableDropin())
+	snapshot := hosttime.Collect(ctx, toolOutput)
+	plan := hosttime.Compute(snapshot, action.GetServers(), action.GetEnableDropin())
 	encoded, err := json.Marshal(plan)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
@@ -89,7 +89,7 @@ func (s *Server) planTimeServers(ctx context.Context, action *helperv1.TimeReque
 	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == hosttime.PlanBezZmian:
+	case plan.Action == hosttime.PlanNoChange:
 		message = "the time sources are already in the desired state"
 	default:
 		message = strings.Join(plan.Changes, "; ")
@@ -119,17 +119,17 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 		if refusal := enableSourceDirectory(snapshot); refusal != nil {
 			return refusal
 		}
-		snapshot.ManagedPath = filepath.Join(hosttime.KatalogZrodelPanelu,
-			hosttime.NazwaPlikuChrony(hosttime.RodzajZrodel))
+		snapshot.ManagedPath = filepath.Join(hosttime.PanelSourceDir,
+			hosttime.ChronyFileName(hosttime.KindSources))
 		// A change of the main file applies only after the daemon starts;
 		// reloading the sources alone does not read it.
 		restartNeeded = true
 	}
-	kind := hosttime.RodzajKonfiguracji
+	kind := hosttime.KindConfiguration
 	if filepath.Ext(snapshot.ManagedPath) == ".sources" {
-		kind = hosttime.RodzajZrodel
+		kind = hosttime.KindSources
 	}
-	content, err := hosttime.SkladajChrony(servers, kind)
+	content, err := hosttime.ComposeChrony(servers, kind)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -145,8 +145,8 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 	// does not lose synchronization during the change. The configuration
 	// directory needs a restart.
 	message := "the servers were written"
-	if kind == hosttime.RodzajZrodel && !restartNeeded {
-		if output, err := toolOutput(ctx, hosttime.SciezkaChronyc, "reload", "sources"); err != nil {
+	if kind == hosttime.KindSources && !restartNeeded {
+		if output, err := toolOutput(ctx, hosttime.ChronycPath, "reload", "sources"); err != nil {
 			restore(snapshot.ManagedPath, previous)
 			return reject(ErrorExecFailed, "chronyc reload sources: "+err.Error()+" "+output)
 		}
@@ -181,7 +181,7 @@ func enableSourceDirectory(snapshot hosttime.Snapshot) *helperv1.HelperResponse 
 	if snapshot.ConfigPath == "" {
 		return reject(ErrorUnsupported, "the main chrony file was not found")
 	}
-	if err := os.MkdirAll(hosttime.KatalogZrodelPanelu, 0o755); err != nil {
+	if err := os.MkdirAll(hosttime.PanelSourceDir, 0o755); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	content, err := os.ReadFile(snapshot.ConfigPath)
@@ -189,7 +189,7 @@ func enableSourceDirectory(snapshot hosttime.Snapshot) *helperv1.HelperResponse 
 		return reject(ErrorExecFailed, "reading "+snapshot.ConfigPath+": "+err.Error())
 	}
 	// A repeated order must not append the line a second time.
-	if hosttime.MaWpisWlaczenia(string(content)) {
+	if hosttime.HasEnableEntry(string(content)) {
 		return nil
 	}
 	file, err := os.OpenFile(snapshot.ConfigPath, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -197,7 +197,7 @@ func enableSourceDirectory(snapshot hosttime.Snapshot) *helperv1.HelperResponse 
 		return reject(ErrorExecFailed, "writing "+snapshot.ConfigPath+": "+err.Error())
 	}
 	defer func() { _ = file.Close() }()
-	if _, err := file.WriteString(hosttime.WpisWlaczenia()); err != nil {
+	if _, err := file.WriteString(hosttime.EnableEntry()); err != nil {
 		return reject(ErrorExecFailed, "writing "+snapshot.ConfigPath+": "+err.Error())
 	}
 	return nil
@@ -205,31 +205,31 @@ func enableSourceDirectory(snapshot hosttime.Snapshot) *helperv1.HelperResponse 
 
 // writeTimesyncd writes the servers for systemd-timesyncd.
 func (s *Server) writeTimesyncd(ctx context.Context, servers []string) *helperv1.HelperResponse {
-	content, err := hosttime.SkladajTimesyncd(servers)
+	content, err := hosttime.ComposeTimesyncd(servers)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	if err := os.MkdirAll(hosttime.KatalogTimesyncd, 0o755); err != nil {
+	if err := os.MkdirAll(hosttime.TimesyncdDir, 0o755); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	previous, _ := os.ReadFile(hosttime.PlikTimesyncd)
-	if err := writeKernelFile(hosttime.PlikTimesyncd, content, 0o644); err != nil {
-		return reject(ErrorExecFailed, "writing "+hosttime.PlikTimesyncd+": "+err.Error())
+	previous, _ := os.ReadFile(hosttime.TimesyncdFile)
+	if err := writeKernelFile(hosttime.TimesyncdFile, content, 0o644); err != nil {
+		return reject(ErrorExecFailed, "writing "+hosttime.TimesyncdFile+": "+err.Error())
 	}
 	// A host with synchronization switched off still has it switched off after
 	// the file is written: timesyncd does not run until timedated enables it. A
 	// write of the servers without this step would look successful and do
 	// nothing.
-	if exists(hosttime.SciezkaTimedatectl) {
-		if output, err := toolOutput(ctx, hosttime.SciezkaTimedatectl, "set-ntp", "true"); err != nil {
-			restore(hosttime.PlikTimesyncd, previous)
+	if exists(hosttime.TimedatectlPath) {
+		if output, err := toolOutput(ctx, hosttime.TimedatectlPath, "set-ntp", "true"); err != nil {
+			restore(hosttime.TimesyncdFile, previous)
 			return reject(ErrorExecFailed, "timedatectl set-ntp: "+err.Error()+" "+output)
 		}
 	}
 	if output, err := toolOutput(ctx, systemctlPath, "restart", "systemd-timesyncd.service"); err != nil {
 		// As above: a host without a time daemon is worse than a host with old
 		// servers, so on an error the previous content comes back.
-		restore(hosttime.PlikTimesyncd, previous)
+		restore(hosttime.TimesyncdFile, previous)
 		_, _ = toolOutput(ctx, systemctlPath, "restart", "systemd-timesyncd.service")
 		return reject(ErrorExecFailed, "restart systemd-timesyncd: "+err.Error()+" "+output)
 	}
@@ -242,23 +242,23 @@ func (s *Server) writeTimesyncd(ctx context.Context, servers []string) *helperv1
 // setTimezone changes the time zone of the host.
 func (s *Server) setTimezone(ctx context.Context, action *helperv1.TimeRequest) *helperv1.HelperResponse {
 	zone := action.GetTimezone()
-	if err := hosttime.WalidujStrefe(zone); err != nil {
+	if err := hosttime.ValidateZone(zone); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 	// A zone the host does not know ends in a tool error without a reason. The
 	// zone file is checked so that what is missing can be named directly.
-	if !exists(hosttime.SciezkaStrefy(zone)) {
+	if !exists(hosttime.ZonePath(zone)) {
 		return reject(ErrorPreconditionFailed, "this host does not know the zone "+zone)
 	}
-	if !exists(hosttime.SciezkaTimedatectl) {
+	if !exists(hosttime.TimedatectlPath) {
 		return reject(ErrorUnsupported, "this host has no timedatectl")
 	}
-	if output, err := toolOutput(ctx, hosttime.SciezkaTimedatectl, "set-timezone", zone); err != nil {
+	if output, err := toolOutput(ctx, hosttime.TimedatectlPath, "set-timezone", zone); err != nil {
 		return reject(ErrorExecFailed, "timedatectl set-timezone: "+err.Error()+" "+output)
 	}
 
 	// A write does not mean an effect: the host is asked which zone it has now.
-	snapshot := hosttime.Zbierz(ctx, toolOutput)
+	snapshot := hosttime.Collect(ctx, toolOutput)
 	if snapshot.Timezone != zone {
 		return timeResponse(snapshot, "the command ran, but the host reports the zone "+
 			snapshot.Timezone+" instead of "+zone)
@@ -276,19 +276,19 @@ func (s *Server) setTimezone(ctx context.Context, action *helperv1.TimeRequest) 
 // waitForSynchronization waits until the daemon picks a source.
 func waitForSynchronization(ctx context.Context) (hosttime.Snapshot, bool) {
 	deadline := time.Now().Add(syncWindow)
-	snapshot := hosttime.Zbierz(ctx, toolOutput)
+	snapshot := hosttime.Collect(ctx, toolOutput)
 	for time.Now().Before(deadline) {
-		if snapshot.Zsynchronizowany() {
+		if snapshot.IsSynchronized() {
 			return snapshot, true
 		}
 		select {
 		case <-ctx.Done():
-			return snapshot, snapshot.Zsynchronizowany()
+			return snapshot, snapshot.IsSynchronized()
 		case <-time.After(syncStep):
 		}
-		snapshot = hosttime.Zbierz(ctx, toolOutput)
+		snapshot = hosttime.Collect(ctx, toolOutput)
 	}
-	return snapshot, snapshot.Zsynchronizowany()
+	return snapshot, snapshot.IsSynchronized()
 }
 
 // describeSynchronization names the state of the clock after the change.

@@ -155,9 +155,9 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 		Payload: payload,
 		// The key binds the task to one specific step of one specific plan:
 		// another pass of the runner does not create a second task.
-		IdempotencyKey:  "remediation:" + plan.ID + ":" + step.CheckID,
-		RequiresApprova: action.Mutating(),
-		CreatedBy:       plan.CreatedBy,
+		IdempotencyKey:   "remediation:" + plan.ID + ":" + step.CheckID,
+		RequiresApproval: action.Mutating(),
+		CreatedBy:        plan.CreatedBy,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,
 			RequiredCapabilities: []string{action.RequiredCapability()},

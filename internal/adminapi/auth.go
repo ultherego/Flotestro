@@ -13,7 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/oidc"
 )
 
-// handleLogin rozpoczyna logowanie u dostawcy tozsamosci.
+// handleLogin starts the login at the identity provider.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.oidc == nil {
 		problem(w, http.StatusNotImplemented, "oidc_disabled",
@@ -21,13 +21,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ponowne uwierzytelnienie ma dwa powody i oba wymagaja tego samego od
-	// dostawcy: zeby zapytal o poswiadczenia zamiast odeslac istniejaca sesje.
+	// Re-authentication has two reasons and both require the same from the
+	// provider: that it asks for credentials instead of handing back the
+	// existing session.
 	//
-	// step_up dotyczy operacji o najwiekszym wplywie i zada tez poziomu
-	// uwierzytelnienia. force zmienia konto: bez niego uzytkownik z aktywna
-	// sesja SSO innego uzytkownika jest logowany po cichu nie tym kontem,
-	// co chcial, i nie ma z tego wyjscia w panelu.
+	// step_up concerns the highest-impact operations and also demands an
+	// authentication level. force changes the account: without it a user
+	// with an active SSO session of another user is quietly logged in with
+	// the wrong account, and there is no way out of it in the panel.
 	query := r.URL.Query()
 	stepUp := oidc.StepUp{}
 	switch {
@@ -42,8 +43,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// Cel przekierowania musi byc lokalny, inaczej logowanie stalo by sie
-	// otwartym przekierowaniem na dowolna strone.
+	// The redirect target must be local, otherwise the login would become an
+	// open redirect to any page.
 	redirectAfter := localPath(query.Get("redirect"))
 
 	if err := s.authz.SaveAuthFlow(r.Context(), flow.State, flow.CodeVerifier,
@@ -54,7 +55,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, flow.AuthURL, http.StatusFound)
 }
 
-// handleAuthCallback wymienia kod na tokeny i zaklada sesje serwerowa.
+// handleAuthCallback exchanges the code for tokens and creates a server
+// session.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if s.oidc == nil {
 		problem(w, http.StatusNotImplemented, "oidc_disabled", "login is not configured")
@@ -80,8 +82,8 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stan jest jednorazowy: odczyt kasuje go, wiec powtorzenie tego samego
-	// przekierowania nie zaloguje nikogo drugi raz.
+	// The state is single-use: reading deletes it, so repeating the same
+	// redirect logs nobody in a second time.
 	verifier, nonce, redirectAfter, err := s.authz.TakeAuthFlow(r.Context(), state)
 	if err != nil {
 		s.audit.Record(r.Context(), audit.Event{
@@ -134,7 +136,8 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rola wynika z mapowania grup; sama nazwa grupy z tokenu niczego nie nadaje.
+	// The role follows from the group mapping; the group name from the token
+	// alone grants nothing.
 	mapped, err := s.authz.MappedBindings(r.Context(), s.oidc.Issuer(), claims.Groups)
 	if err != nil {
 		s.fail(w, err)
@@ -169,16 +172,16 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, redirectAfter, http.StatusFound)
 }
 
-// handleLogout konczy sesje panelu i kieruje do wylogowania u dostawcy.
-// Samo skasowanie ciasteczka nie wystarcza: dostawca zalogowalby uzytkownika
-// ponownie bez pytania o haslo.
+// handleLogout ends the panel session and directs to the logout at the
+// provider. Deleting the cookie alone is not enough: the provider would log
+// the user in again without asking for a password.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	session, hasSession := authz.SessionFromContext(r.Context())
 
 	if hasSession {
-		if err := s.authz.RevokeSession(r.Context(), session.ID, "wylogowanie"); err != nil {
-			s.log.Error("nie uniewazniono sesji", "session_id", session.ID, "err", err)
+		if err := s.authz.RevokeSession(r.Context(), session.ID, "logout"); err != nil {
+			s.log.Error("the session was not revoked", "session_id", session.ID, "err", err)
 		}
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: principal.Subject,
@@ -196,15 +199,15 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"logout_url": target})
 }
 
-// setSessionCookies ustawia ciasteczko sesji oraz token CSRF.
+// setSessionCookies sets the session cookie and the CSRF token.
 func (s *Server) setSessionCookies(w http.ResponseWriter, r *http.Request, sessionValue string) {
 	secure := s.cookieSecure(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:  authz.SessionCookie,
 		Value: sessionValue,
 		Path:  "/",
-		// Refresh token zostaje na serwerze; przegladarka dostaje wylacznie
-		// referencje, niedostepna dla skryptu.
+		// The refresh token stays on the server; the browser gets only a
+		// reference, inaccessible to scripts.
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
@@ -219,7 +222,8 @@ func (s *Server) setSessionCookies(w http.ResponseWriter, r *http.Request, sessi
 		Name:  authz.CSRFCookie,
 		Value: base64.RawURLEncoding.EncodeToString(csrf),
 		Path:  "/",
-		// Token CSRF musi byc czytelny dla skryptu, ktory odsyla go w naglowku.
+		// The CSRF token must be readable by the script that sends it back in
+		// a header.
 		HttpOnly: false,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
@@ -238,8 +242,9 @@ func (s *Server) clearSessionCookies(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// cookieSecure wlacza flage Secure, gdy panel jest wystawiony po HTTPS.
-// W laboratorium po HTTP flaga uniemozliwilaby zalogowanie sie w ogole.
+// cookieSecure enables the Secure flag when the panel is exposed over
+// HTTPS. In a lab over HTTP the flag would make logging in impossible at
+// all.
 func (s *Server) cookieSecure(r *http.Request) bool {
 	if strings.HasPrefix(strings.ToLower(s.publicURL), "https://") {
 		return true
@@ -247,7 +252,7 @@ func (s *Server) cookieSecure(r *http.Request) bool {
 	return r.TLS != nil
 }
 
-// localPath odrzuca cele przekierowania wskazujace poza panel.
+// localPath rejects redirect targets pointing outside the panel.
 func localPath(value string) string {
 	if value == "" {
 		return ""

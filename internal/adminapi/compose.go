@@ -7,8 +7,8 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// wersjaProjektu opisuje jedno wdrozenie manifestu.
-type wersjaProjektu struct {
+// projectVersion describes one manifest deployment.
+type projectVersion struct {
 	JobID     string    `json:"job_id"`
 	State     string    `json:"state"`
 	Digest    string    `json:"plan_digest,omitempty"`
@@ -19,13 +19,15 @@ type wersjaProjektu struct {
 	Applied   bool      `json:"applied"`
 }
 
-// handleComposeVersions zwraca historie manifestow projektu na hoscie.
+// handleComposeVersions returns the manifest history of a project on a
+// host.
 //
-// Historia nie ma wlasnej tabeli. Kazde wdrozenie jest operacja, a operacja
-// niesie juz manifest, autora, czas i wynik - osobny zapis bylby drugim
-// zrodlem prawdy o tym samym i predzej czy pozniej rozjechalby sie z pierwszym.
-// Wycofanie zmiany to wdrozenie wczesniejszej wersji, wiec nie potrzebuje
-// wlasnej operacji.
+// The history has no table of its own. Every deployment is an operation,
+// and an operation already carries the manifest, the author, the time and
+// the result - a separate record would be a second source of truth about
+// the same thing and would sooner or later drift from the first. Reverting
+// a change is deploying an earlier version, so it needs no operation of its
+// own.
 func (s *Server) handleComposeVersions(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -54,22 +56,22 @@ func (s *Server) handleComposeVersions(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	wersje := []wersjaProjektu{}
+	versions := []projectVersion{}
 	for rows.Next() {
-		var wersja wersjaProjektu
-		if err := rows.Scan(&wersja.JobID, &wersja.State, &wersja.CreatedBy,
-			&wersja.CreatedAt, &wersja.Manifest, &wersja.Digest); err != nil {
+		var version projectVersion
+		if err := rows.Scan(&version.JobID, &version.State, &version.CreatedBy,
+			&version.CreatedAt, &version.Manifest, &version.Digest); err != nil {
 			s.fail(w, err)
 			return
 		}
-		// Wdrozona jest ta wersja, ktora sie powiodla. Wersja zlecona
-		// i wersja dzialajaca to dwie rozne rzeczy.
-		wersja.Applied = wersja.State == "succeeded"
-		wersje = append(wersje, wersja)
+		// The deployed version is the one that succeeded. The ordered
+		// version and the running version are two different things.
+		version.Applied = version.State == "succeeded"
+		versions = append(versions, version)
 	}
 	if err := rows.Err(); err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": wersje, "count": len(wersje)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": versions, "count": len(versions)})
 }

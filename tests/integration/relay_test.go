@@ -268,7 +268,7 @@ func pulaZaufaniaTestu() *x509.CertPool {
 // wyslijDoEnrollmentu wola publiczny endpoint enrollmentu floty testowej.
 func (h *harness) wyslijDoEnrollmentu(t *testing.T, tresc []byte) ([]byte, int, []byte) {
 	t.Helper()
-	return h.wyslijDoEnrollmentuNa(t, envOr("FLOTESTRO_TEST_ENROLLMENT", domyslnyEnrollment), tresc)
+	return h.wyslijDoEnrollmentuNa(t, envOr("FLOTESTRO_TEST_ENROLLMENT", defaultEnrollment), tresc)
 }
 
 // wyslijDoEnrollmentuNa wola enrollment pod wskazanym adresem.

@@ -37,22 +37,22 @@ type BackupTool struct {
 // CollectBackup reads what the host can make copies with.
 func CollectBackup(ctx context.Context) BackupState {
 	state := BackupState{ObservedAt: time.Now().UTC().Format(time.RFC3339)}
-	for _, name := range []string{backup.NarzedzieRestic, backup.NarzedzieBorg} {
-		adapter, err := backup.Wybierz(name)
+	for _, name := range []string{backup.ToolRestic, backup.ToolBorg} {
+		adapter, err := backup.Select(name)
 		if err != nil {
 			continue
 		}
-		description := BackupTool{Name: name, Available: adapter.Dostepny()}
+		description := BackupTool{Name: name, Available: adapter.Available()}
 		if description.Available {
-			description.Version = adapter.Wersja(ctx)
+			description.Version = adapter.Version(ctx)
 		}
 		state.Tools = append(state.Tools, description)
 	}
-	runbooks, known := backup.WykazRunbookow()
+	runbooks, known := backup.ListRunbooks()
 	state.Runbooks = runbooks
 	state.RunbooksKnown = known
 	state.Tools = append(state.Tools, BackupTool{
-		Name: backup.NarzedzieRunbook, Available: len(runbooks) > 0,
+		Name: backup.ToolRunbook, Available: len(runbooks) > 0,
 	})
 	return state
 }
@@ -164,8 +164,8 @@ func (e *TaskExecutor) fetchSecret(ctx context.Context, task *agentv1.TaskEnvelo
 }
 
 // backupJSON decodes the state of the repository from the result of the task.
-func backupJSON(data []byte) (backup.Stan, bool) {
-	var state backup.Stan
+func backupJSON(data []byte) (backup.State, bool) {
+	var state backup.State
 	if len(data) == 0 {
 		return state, false
 	}

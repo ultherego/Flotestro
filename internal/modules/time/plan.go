@@ -1,4 +1,4 @@
-package czas
+package hosttime
 
 import (
 	"crypto/sha256"
@@ -9,34 +9,34 @@ import (
 	"strings"
 )
 
-// Plan opisuje roznice miedzy zrodlami czasu, ktore panel ma na hoscie,
-// a zadanymi.
+// Plan describes the difference between the time sources the panel has on
+// the host and the requested ones.
 //
-// Ta sama lista serwerow na dwoch hostach jest dwiema zmianami: jeden ma
-// chrony z katalogiem zrodel i przeladuje sie bez restartu, drugi ma
-// timesyncd i zrestartuje demona, trzeci nie wlacza zadnego katalogu
-// i wymaga dopisania wiersza do cudzego pliku. Operator ma to zobaczyc
-// przed zgoda, nie w polowie floty.
+// The same server list on two hosts is two changes: one has chrony with a
+// sources directory and reloads without a restart, another has timesyncd
+// and restarts the daemon, a third includes no directory and needs a line
+// appended to somebody else's file. The operator is meant to see that
+// before approving, not half-way through the fleet.
 type Plan struct {
-	// Service nazywa demona czasu hosta; Action - to, co by sie stalo:
-	// update albo no_change.
+	// Service names the host time daemon; Action - what would happen:
+	// update or no_change.
 	Service string `json:"service,omitempty"`
 	Action  string `json:"action"`
 
-	// CurrentServers to serwery zapisane przez panel; DesiredServers -
-	// zamowienie.
+	// CurrentServers are the servers written by the panel; DesiredServers -
+	// the order.
 	CurrentServers []string `json:"current_servers,omitempty"`
 	DesiredServers []string `json:"desired_servers"`
-	// ManagedPath jest plikiem, ktory zapis nadpisze; pusty oznacza, ze
-	// host nie ma gdzie przyjac zmiany bez wlaczenia katalogu.
+	// ManagedPath is the file the write overwrites; empty means the host
+	// has nowhere to accept the change without enabling a directory.
 	ManagedPath string `json:"managed_path,omitempty"`
 	ManagedHash string `json:"managed_hash,omitempty"`
-	// EnablesSourceDir mowi, ze zmiana dopisze katalog panelu do glownego
-	// pliku chronyego - jedyne miejsce, w ktorym panel dotyka cudzej
-	// konfiguracji.
+	// EnablesSourceDir says the change appends the panel directory to the
+	// main chrony file - the only place where the panel touches somebody
+	// else's configuration.
 	EnablesSourceDir bool `json:"enables_source_dir,omitempty"`
-	// Restart mowi, czy demon zostanie zrestartowany, czy tylko przeladuje
-	// zrodla. Restart to chwila bez synchronizacji.
+	// Restart says whether the daemon is restarted or only reloads its
+	// sources. A restart is a moment without synchronisation.
 	Restart bool `json:"restart,omitempty"`
 
 	Changes []string `json:"changes,omitempty"`
@@ -45,113 +45,114 @@ type Plan struct {
 	PlanHash string `json:"plan_hash"`
 }
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanZmienia  = "update"
-	PlanBezZmian = "no_change"
+	PlanUpdate   = "update"
+	PlanNoChange = "no_change"
 )
 
-// Zaplanuj liczy roznice dla zmiany zrodel czasu.
-func Zaplanuj(stan Snapshot, serwery []string, zgodaNaKatalog bool) Plan {
-	plan := Plan{Service: stan.Service, DesiredServers: append([]string(nil), serwery...),
-		ManagedPath: stan.ManagedPath}
-	if stan.Managed != "" {
-		plan.ManagedHash = textFingerprint(stan.Managed)
+// Compute computes the difference for a time sources change.
+func Compute(state Snapshot, servers []string, allowSourceDir bool) Plan {
+	plan := Plan{Service: state.Service, DesiredServers: append([]string(nil), servers...),
+		ManagedPath: state.ManagedPath}
+	if state.Managed != "" {
+		plan.ManagedHash = textFingerprint(state.Managed)
 	}
-	for _, serwer := range stan.Configured {
-		if serwer.Managed {
-			plan.CurrentServers = append(plan.CurrentServers, serwer.Address)
+	for _, server := range state.Configured {
+		if server.Managed {
+			plan.CurrentServers = append(plan.CurrentServers, server.Address)
 		}
 	}
-	if stan.UnavailableReason != "" {
-		return plan.zOdmowa(stan.UnavailableReason)
+	if state.UnavailableReason != "" {
+		return plan.withRefusal(state.UnavailableReason)
 	}
-	if err := WalidujSerwery(serwery); err != nil {
-		return plan.zOdmowa(err.Error())
+	if err := ValidateServers(servers); err != nil {
+		return plan.withRefusal(err.Error())
 	}
 
-	var tresc string
-	switch stan.Service {
-	case DemonChrony:
-		if stan.ManagedPath == "" {
-			if !zgodaNaKatalog {
-				powod := stan.WriteReason
-				if powod == "" {
-					powod = "chrony na tym hoscie nie wlacza zadnego katalogu konfiguracji"
+	var content string
+	switch state.Service {
+	case DaemonChrony:
+		if state.ManagedPath == "" {
+			if !allowSourceDir {
+				reason := state.WriteReason
+				if reason == "" {
+					reason = "chrony on this host includes no configuration directory"
 				}
-				return plan.zOdmowa(powod)
+				return plan.withRefusal(reason)
 			}
-			if !stan.CanAddSourceDir || stan.ConfigPath == "" {
-				return plan.zOdmowa("nie znaleziono glownego pliku chronyego, do ktorego mozna dopisac katalog zrodel")
+			if !state.CanAddSourceDir || state.ConfigPath == "" {
+				return plan.withRefusal("no main chrony file found to append the sources directory to")
 			}
 			plan.EnablesSourceDir = true
 			plan.Restart = true
-			plan.ManagedPath = filepath.Join(KatalogZrodelPanelu, NazwaPlikuChrony(RodzajZrodel))
+			plan.ManagedPath = filepath.Join(PanelSourceDir, ChronyFileName(KindSources))
 		}
-		rodzaj := RodzajKonfiguracji
+		kind := KindConfiguration
 		if filepath.Ext(plan.ManagedPath) == ".sources" {
-			rodzaj = RodzajZrodel
+			kind = KindSources
 		}
-		if rodzaj != RodzajZrodel {
+		if kind != KindSources {
 			plan.Restart = true
 		}
-		tresc, _ = SkladajChrony(serwery, rodzaj)
-	case DemonTimesyncd:
-		plan.ManagedPath = PlikTimesyncd
+		content, _ = ComposeChrony(servers, kind)
+	case DaemonTimesyncd:
+		plan.ManagedPath = TimesyncdFile
 		plan.Restart = true
-		tresc, _ = SkladajTimesyncd(serwery)
+		content, _ = ComposeTimesyncd(servers)
 	default:
-		return plan.zOdmowa("ten host nie ma demona czasu, ktoremu panel moglby wskazac serwery")
+		return plan.withRefusal("this host has no time daemon the panel could point at servers")
 	}
 
-	if !tenSamZbior(plan.CurrentServers, serwery) {
-		plan.Changes = append(plan.Changes, "serwery panelu z "+lista(plan.CurrentServers)+
-			" na "+lista(serwery))
+	if !sameSet(plan.CurrentServers, servers) {
+		plan.Changes = append(plan.Changes, "panel servers from "+list(plan.CurrentServers)+
+			" to "+list(servers))
 	}
 	switch {
-	case stan.Managed == "" && stan.ManagedPath == "":
-		plan.Changes = append(plan.Changes, "plik panelu "+plan.ManagedPath+" powstanie")
-	case stan.Managed != tresc:
-		if stan.Managed == "" {
-			plan.Changes = append(plan.Changes, "plik panelu "+plan.ManagedPath+" powstanie")
+	case state.Managed == "" && state.ManagedPath == "":
+		plan.Changes = append(plan.Changes, "the panel file "+plan.ManagedPath+" will be created")
+	case state.Managed != content:
+		if state.Managed == "" {
+			plan.Changes = append(plan.Changes, "the panel file "+plan.ManagedPath+" will be created")
 		} else {
-			plan.Changes = append(plan.Changes, "plik panelu "+plan.ManagedPath+" zostanie nadpisany")
+			plan.Changes = append(plan.Changes, "the panel file "+plan.ManagedPath+" will be overwritten")
 		}
 	}
 	if plan.EnablesSourceDir {
 		plan.Changes = append(plan.Changes,
-			"do "+stan.ConfigPath+" zostanie dopisany katalog zrodel panelu")
+			"the panel sources directory will be appended to "+state.ConfigPath)
 	}
 	if len(plan.Changes) > 0 {
 		if plan.Restart {
-			plan.Changes = append(plan.Changes, "demon czasu zostanie zrestartowany")
+			plan.Changes = append(plan.Changes, "the time daemon will be restarted")
 		} else {
-			plan.Changes = append(plan.Changes, "zrodla zostana przeladowane bez restartu demona")
+			plan.Changes = append(plan.Changes, "the sources will be reloaded without a daemon restart")
 		}
 	}
 
-	plan.Action = PlanZmienia
+	plan.Action = PlanUpdate
 	if len(plan.Changes) == 0 {
-		plan.Action = PlanBezZmian
+		plan.Action = PlanNoChange
 	}
-	plan.PlanHash = odciskPlanu(plan)
+	plan.PlanHash = planFingerprint(plan)
 	return plan
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu roznic i liczy odcisk
-// na nowo: plan z odmowa jest inna odpowiedzia niz plan bez niej.
-func (p *Plan) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(*p)
+// Refuse records a refusal reason learned after the differences were
+// computed and recomputes the fingerprint: a plan with a refusal is a
+// different answer than a plan without one.
+func (p *Plan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(*p)
 }
 
-func (p Plan) zOdmowa(powod string) Plan {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(p)
+func (p Plan) withRefusal(reason string) Plan {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(p)
 	return p
 }
 
-func tenSamZbior(a, b []string) bool {
+func sameSet(a, b []string) bool {
 	x := append([]string(nil), a...)
 	y := append([]string(nil), b...)
 	sort.Strings(x)
@@ -159,26 +160,27 @@ func tenSamZbior(a, b []string) bool {
 	return strings.Join(x, "\x00") == strings.Join(y, "\x00")
 }
 
-func lista(elementy []string) string {
-	if len(elementy) == 0 {
-		return "brak"
+func list(items []string) string {
+	if len(items) == 0 {
+		return "none"
 	}
-	return strings.Join(elementy, ",")
+	return strings.Join(items, ",")
 }
 
-func textFingerprint(tekst string) string {
-	suma := sha256.Sum256([]byte(tekst))
-	return hex.EncodeToString(suma[:])
+func textFingerprint(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
-// odciskPlanu liczy odcisk planu poza samym odciskiem.
-func odciskPlanu(plan Plan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// planFingerprint computes the plan fingerprint excluding the fingerprint
+// itself.
+func planFingerprint(plan Plan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

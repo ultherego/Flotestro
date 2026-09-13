@@ -5,14 +5,15 @@ import (
 	"strings"
 )
 
-// ZnacznikPanelu oznacza wpisy fstab zalozone przez panel. Wpis zastany
-// nalezy do administratora hosta i panel go nie przepisuje.
-const ZnacznikPanelu = "# flotestro"
+// PanelMarker marks the fstab entries created by the panel. An entry found
+// on the host belongs to the host administrator and the panel does not
+// rewrite it.
+const PanelMarker = "# flotestro"
 
-// systemowePunkty wylicza montowania jadra, ktore nie sa przestrzenia
-// dyskowa hosta. Pokazywanie ich zaslanialoby obraz: na zwyklym hoscie jest
-// ich kilkadziesiat, a operator pyta o dyski.
-var systemoweTypy = map[string]bool{
+// systemTypes lists the kernel mounts that are not the host disk space.
+// Showing them would obscure the picture: an ordinary host has dozens of
+// them, and the operator asks about disks.
+var systemTypes = map[string]bool{
 	"sysfs": true, "proc": true, "devtmpfs": true, "devpts": true, "tmpfs": true,
 	"securityfs": true, "cgroup": true, "cgroup2": true, "pstore": true,
 	"efivarfs": true, "bpf": true, "autofs": true, "hugetlbfs": true,
@@ -21,152 +22,153 @@ var systemoweTypy = map[string]bool{
 	"nsfs": true, "squashfs": true, "overlay": true,
 }
 
-// ParsujMountinfo czyta /proc/self/mountinfo.
+// ParseMountinfo reads /proc/self/mountinfo.
 //
-// Czytamy mountinfo, a nie /etc/mtab: mtab bywa dowiazaniem do mountinfo,
-// ale na czesci systemow jest zwyklym plikiem, ktory rozjezdza sie ze stanem
-// jadra. Pytanie "co jest zamontowane teraz" ma tylko jedna wiarygodna
-// odpowiedz i jest nia jadro.
-func ParsujMountinfo(tresc string) []Mount {
-	var montowania []Mount
-	for _, linia := range strings.Split(tresc, "\n") {
-		pola := strings.Fields(linia)
-		if len(pola) < 10 {
+// mountinfo is read, not /etc/mtab: mtab is at times a symlink to
+// mountinfo, but on some systems it is a plain file that drifts from the
+// kernel state. The question "what is mounted now" has only one
+// trustworthy answer and it is the kernel.
+func ParseMountinfo(content string) []Mount {
+	var mounts []Mount
+	for _, line := range strings.Split(content, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 10 {
 			continue
 		}
-		// Format: id rodzic major:minor korzen cel opcje [pola opcjonalne] - typ zrodlo opcje
+		// Format: id parent major:minor root target options [optional fields] - type source options
 		separator := -1
-		for i, pole := range pola {
-			if pole == "-" {
+		for i, field := range fields {
+			if field == "-" {
 				separator = i
 				break
 			}
 		}
-		if separator < 0 || separator+2 >= len(pola) {
+		if separator < 0 || separator+2 >= len(fields) {
 			continue
 		}
-		montowanie := Mount{
-			Target:  odkoduj(pola[4]),
-			Options: pola[5],
-			FSType:  pola[separator+1],
-			Source:  odkoduj(pola[separator+2]),
+		mount := Mount{
+			Target:  decode(fields[4]),
+			Options: fields[5],
+			FSType:  fields[separator+1],
+			Source:  decode(fields[separator+2]),
 			Mounted: true,
 		}
-		if systemoweTypy[montowanie.FSType] {
+		if systemTypes[mount.FSType] {
 			continue
 		}
-		montowania = append(montowania, montowanie)
+		mounts = append(mounts, mount)
 	}
-	return montowania
+	return mounts
 }
 
-// odkoduj zamienia sekwencje osemkowe, ktorymi jadro zapisuje znaki
-// specjalne w sciezkach. Sciezka ze spacja bez tego rozpadlaby sie na dwa
-// pola przy pierwszym podziale.
-var sekwencja = regexp.MustCompile(`\\([0-7]{3})`)
+// decode replaces the octal sequences the kernel writes special characters
+// in paths with. A path with a space would otherwise fall apart into two
+// fields at the first split.
+var sequence = regexp.MustCompile(`\\([0-7]{3})`)
 
-func odkoduj(sciezka string) string {
-	return sekwencja.ReplaceAllStringFunc(sciezka, func(dopasowanie string) string {
-		var wartosc int
-		for _, cyfra := range dopasowanie[1:] {
-			wartosc = wartosc*8 + int(cyfra-'0')
+func decode(path string) string {
+	return sequence.ReplaceAllStringFunc(path, func(match string) string {
+		var value int
+		for _, digit := range match[1:] {
+			value = value*8 + int(digit-'0')
 		}
-		return string(rune(wartosc))
+		return string(rune(value))
 	})
 }
 
-// WpisFstab to jeden wiersz /etc/fstab.
-type WpisFstab struct {
+// FstabEntry is one row of /etc/fstab.
+type FstabEntry struct {
 	Source  string
 	Target  string
 	FSType  string
 	Options string
 	Dump    string
 	Pass    string
-	// Managed oznacza wpis zalozony przez panel.
+	// Managed marks an entry created by the panel.
 	Managed bool
 	Line    int
 }
 
-// ParsujFstab czyta /etc/fstab.
-func ParsujFstab(tresc string) []WpisFstab {
-	var wpisy []WpisFstab
-	zarzadzany := false
-	numer := 0
-	for _, linia := range strings.Split(tresc, "\n") {
-		numer++
-		przyciety := strings.TrimSpace(linia)
-		if przyciety == "" {
-			zarzadzany = false
+// ParseFstab reads /etc/fstab.
+func ParseFstab(content string) []FstabEntry {
+	var entries []FstabEntry
+	managed := false
+	number := 0
+	for _, line := range strings.Split(content, "\n") {
+		number++
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			managed = false
 			continue
 		}
-		if strings.HasPrefix(przyciety, "#") {
-			// Znacznik panelu stoi nad wpisem, ktory panel zalozyl.
-			zarzadzany = strings.HasPrefix(przyciety, ZnacznikPanelu)
+		if strings.HasPrefix(trimmed, "#") {
+			// The panel marker stands above the entry the panel created.
+			managed = strings.HasPrefix(trimmed, PanelMarker)
 			continue
 		}
-		pola := strings.Fields(przyciety)
-		if len(pola) < 3 {
-			zarzadzany = false
+		fields := strings.Fields(trimmed)
+		if len(fields) < 3 {
+			managed = false
 			continue
 		}
-		// fstab zapisuje znaki specjalne tak samo jak jadro w mountinfo:
-		// osemkowo. Bez odkodowania sciezka ze spacja nigdy nie dopasowalaby
-		// sie do montowania, ktore ja realizuje.
-		wpis := WpisFstab{
-			Source: odkoduj(pola[0]), Target: odkoduj(pola[1]), FSType: pola[2],
-			Managed: zarzadzany, Line: numer,
+		// fstab writes special characters the same way the kernel does in
+		// mountinfo: in octal. Without decoding a path with a space would
+		// never match the mount that realises it.
+		entry := FstabEntry{
+			Source: decode(fields[0]), Target: decode(fields[1]), FSType: fields[2],
+			Managed: managed, Line: number,
 		}
-		if len(pola) > 3 {
-			wpis.Options = pola[3]
+		if len(fields) > 3 {
+			entry.Options = fields[3]
 		}
-		if len(pola) > 4 {
-			wpis.Dump = pola[4]
+		if len(fields) > 4 {
+			entry.Dump = fields[4]
 		}
-		if len(pola) > 5 {
-			wpis.Pass = pola[5]
+		if len(fields) > 5 {
+			entry.Pass = fields[5]
 		}
-		wpisy = append(wpisy, wpis)
-		zarzadzany = false
+		entries = append(entries, entry)
+		managed = false
 	}
-	return wpisy
+	return entries
 }
 
-// PolaczMontowania laczy stan jadra z trescia fstab.
+// MergeMounts joins the kernel state with the fstab content.
 //
-// Cztery kombinacje znacza cztery rozne rzeczy i wszystkie sa dla operatora
-// wazne: wpis zamontowany zgodnie z fstab, wpis w fstab niezamontowany
-// (host po restarcie go podniesie albo i nie), montowanie bez wpisu (zniknie
-// po restarcie) oraz montowanie o innych opcjach niz zapisane.
-func PolaczMontowania(zJadra []Mount, zFstab []WpisFstab) []Mount {
-	wynik := make([]Mount, 0, len(zJadra)+len(zFstab))
-	uzyte := map[string]bool{}
+// Four combinations mean four different things and all matter to the
+// operator: an entry mounted as in fstab, an fstab entry not mounted (the
+// host brings it up after a reboot or not), a mount without an entry
+// (vanishes after a reboot) and a mount with different options than
+// written.
+func MergeMounts(fromKernel []Mount, fromFstab []FstabEntry) []Mount {
+	result := make([]Mount, 0, len(fromKernel)+len(fromFstab))
+	used := map[string]bool{}
 
-	for _, montowanie := range zJadra {
-		for _, wpis := range zFstab {
-			if wpis.Target != montowanie.Target {
+	for _, mount := range fromKernel {
+		for _, entry := range fromFstab {
+			if entry.Target != mount.Target {
 				continue
 			}
-			montowanie.InFstab = true
-			montowanie.FstabOptions = wpis.Options
-			montowanie.Managed = wpis.Managed
-			uzyte[wpis.Target] = true
+			mount.InFstab = true
+			mount.FstabOptions = entry.Options
+			mount.Managed = entry.Managed
+			used[entry.Target] = true
 			break
 		}
-		wynik = append(wynik, montowanie)
+		result = append(result, mount)
 	}
 
-	for _, wpis := range zFstab {
-		if uzyte[wpis.Target] || wpis.Target == "none" || wpis.Target == "swap" {
+	for _, entry := range fromFstab {
+		if used[entry.Target] || entry.Target == "none" || entry.Target == "swap" {
 			continue
 		}
-		// Wpis, ktorego nikt nie zamontowal. Montowanie na zadanie (noauto)
-		// jest tu normalne, ale wpis obowiazkowy oznacza host, ktory po
-		// restarcie moze nie wstac tak, jak stoi teraz.
-		wynik = append(wynik, Mount{
-			Target: wpis.Target, Source: wpis.Source, FSType: wpis.FSType,
-			FstabOptions: wpis.Options, InFstab: true, Managed: wpis.Managed,
+		// An entry nobody mounted. Mounting on demand (noauto) is normal
+		// here, but a mandatory entry means a host that after a reboot may
+		// not come up the way it stands now.
+		result = append(result, Mount{
+			Target: entry.Target, Source: entry.Source, FSType: entry.FSType,
+			FstabOptions: entry.Options, InFstab: true, Managed: entry.Managed,
 		})
 	}
-	return wynik
+	return result
 }

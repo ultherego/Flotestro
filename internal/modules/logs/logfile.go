@@ -1,9 +1,10 @@
-// Package logs czyta logi hosta: dziennik systemowy i pliki z allowlisty.
+// Package logs reads the logs of the host: the system journal and the files
+// from the allowlist.
 //
-// Odczyt pliku nie jest operacja ogolna "przeczytaj sciezke". Panel, ktory
-// potrafi przeczytac dowolny plik roota, potrafi przeczytac klucze prywatne
-// i /etc/shadow - dlatego zakres jest wyliczony przez administratora hosta,
-// a nie podany w zadaniu.
+// Reading a file is not a general "read this path" operation. A panel that can
+// read any file of root can read private keys and /etc/shadow - which is why
+// the scope is enumerated by the administrator of the host and not given in the
+// task.
 package logs
 
 import (
@@ -18,16 +19,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// SciezkaAllowlisty wskazuje plik z dozwolonymi wzorcami. Jeden wzorzec na
-// linie; linie puste i zaczynajace sie od # sa pomijane.
-const SciezkaAllowlisty = "/etc/flotestro/logfiles.allow"
+// AllowlistPath points at the file with the allowed patterns. One pattern per
+// line; empty lines and lines starting with # are skipped.
+const AllowlistPath = "/etc/flotestro/logfiles.allow"
 
-// domyslneWzorce obowiazuja, gdy administrator nie wskazal wlasnych.
+// defaultPatterns apply when the administrator named none of their own.
 //
-// Lista jest celowo waska: obejmuje miejsca, w ktorych dystrybucje trzymaja
-// logi, i nic poza nimi. Rozszerzenie jej jest decyzja administratora hosta
-// i wymaga zapisu w /etc, a nie zmiany w panelu.
-var domyslneWzorce = []string{
+// The list is deliberately narrow: it covers the places where distributions
+// keep their logs and nothing beyond them. Extending it is a decision of the
+// administrator of the host and needs a write in /etc, not a change in the
+// panel.
+var defaultPatterns = []string{
 	"/var/log/*.log",
 	"/var/log/syslog",
 	"/var/log/messages",
@@ -42,153 +44,152 @@ var domyslneWzorce = []string{
 }
 
 var (
-	// ErrPozaAllowlista oznacza sciezke spoza dozwolonego zakresu.
-	ErrPozaAllowlista = errors.New("sciezka poza allowlista")
-	// ErrDowiazanie oznacza sciezke prowadzaca przez dowiazanie.
-	ErrDowiazanie = errors.New("sciezka prowadzi przez dowiazanie symboliczne")
+	// ErrOutsideAllowlist marks a path outside the allowed scope.
+	ErrOutsideAllowlist = errors.New("the path is outside the allowlist")
+	// ErrSymlink marks a path leading through a symbolic link.
+	ErrSymlink = errors.New("the path leads through a symbolic link")
 )
 
-// Allowlist opisuje dozwolony zakres odczytu.
+// Allowlist describes the allowed read scope.
 type Allowlist struct {
-	Wzorce []string
-	// Zrodlo mowi, skad zakres pochodzi: plik administratora albo domyslna
-	// lista wbudowana. Operator ma wiedziec, czym jest ograniczony.
-	Zrodlo string
+	Patterns []string
+	// Source says where the scope comes from: the file of the administrator or
+	// the built-in default list. The operator is to know what limits them.
+	Source string
 }
 
-// WczytajAllowliste czyta zakres z pliku albo zwraca domyslny.
-func WczytajAllowliste(sciezka string) Allowlist {
-	plik, err := os.Open(sciezka)
+// LoadAllowlist reads the scope from the file or returns the default one.
+func LoadAllowlist(path string) Allowlist {
+	file, err := os.Open(path)
 	if err != nil {
-		return Allowlist{Wzorce: domyslneWzorce, Zrodlo: "wbudowana lista domyslna"}
+		return Allowlist{Patterns: defaultPatterns, Source: "the built-in default list"}
 	}
-	defer plik.Close()
+	defer file.Close()
 
-	var wzorce []string
-	skaner := bufio.NewScanner(plik)
-	for skaner.Scan() {
-		linia := strings.TrimSpace(skaner.Text())
-		if linia == "" || strings.HasPrefix(linia, "#") {
+	var patterns []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Wzorzec wzgledny nie da sie ocenic, wiec jest pomijany zamiast
-		// dopasowywany do czegokolwiek.
-		if !strings.HasPrefix(linia, "/") {
+		// A relative pattern cannot be evaluated, so it is skipped instead of
+		// being matched against anything.
+		if !strings.HasPrefix(line, "/") {
 			continue
 		}
-		wzorce = append(wzorce, linia)
+		patterns = append(patterns, line)
 	}
-	if len(wzorce) == 0 {
-		return Allowlist{Wzorce: domyslneWzorce, Zrodlo: "wbudowana lista domyslna"}
+	if len(patterns) == 0 {
+		return Allowlist{Patterns: defaultPatterns, Source: "the built-in default list"}
 	}
-	sort.Strings(wzorce)
-	return Allowlist{Wzorce: wzorce, Zrodlo: sciezka}
+	sort.Strings(patterns)
+	return Allowlist{Patterns: patterns, Source: path}
 }
 
-// Dozwolona sprawdza, czy sciezka miesci sie w zakresie.
+// Allows checks whether the path fits within the scope.
 //
-// Sciezka jest najpierw czyszczona: ".." w srodku pozwalaloby wyjsc poza
-// katalog, ktory wzorzec opisuje, mimo ze tekst dopasowuje sie do wzorca.
-func (a Allowlist) Dozwolona(sciezka string) bool {
-	if !strings.HasPrefix(sciezka, "/") {
+// The path is cleaned first: a ".." inside would allow leaving the directory
+// the pattern describes even though the text matches the pattern.
+func (a Allowlist) Allows(path string) bool {
+	if !strings.HasPrefix(path, "/") {
 		return false
 	}
-	czysta := filepath.Clean(sciezka)
-	if czysta != sciezka {
+	clean := filepath.Clean(path)
+	if clean != path {
 		return false
 	}
-	for _, wzorzec := range a.Wzorce {
-		if pasuje, err := filepath.Match(wzorzec, czysta); err == nil && pasuje {
+	for _, pattern := range a.Patterns {
+		if matches, err := filepath.Match(pattern, clean); err == nil && matches {
 			return true
 		}
 	}
 	return false
 }
 
-// Fragment to odczytany kawalek pliku.
+// Fragment is a piece of a file that was read.
 type Fragment struct {
 	Path string `json:"path"`
-	// Lines to koncowka pliku. Poczatek jest pomijany, bo przyczyna awarii
-	// jest zwykle przy koncu logu.
+	// Lines is the tail of the file. The beginning is skipped, because the cause
+	// of a failure is usually near the end of the log.
 	Lines []string `json:"lines"`
-	// Truncated mowi, ze plik jest dluzszy niz zwrocony fragment.
+	// Truncated says the file is longer than the returned fragment.
 	Truncated bool  `json:"truncated"`
 	SizeBytes int64 `json:"size_bytes"`
-	// Allowlist mowi, czym odczyt jest ograniczony.
+	// Allowlist says what limits the read.
 	Allowlist string `json:"allowlist,omitempty"`
 }
 
-// maksymalnieLinii ogranicza jeden odczyt.
-const maksymalnieLinii = 2000
+// maxLines limits a single read.
+const maxLines = 2000
 
-// maksymalnieBajtow ogranicza rozmiar odczytanego ogona.
-const maksymalnieBajtow = 1 << 20
+// maxBytes limits the size of the tail that is read.
+const maxBytes = 1 << 20
 
-// Czytaj zwraca koncowke pliku z allowlisty.
-func Czytaj(allowlist Allowlist, sciezka string, linii uint32) (Fragment, error) {
-	if !allowlist.Dozwolona(sciezka) {
-		return Fragment{}, fmt.Errorf("%w: %s", ErrPozaAllowlista, sciezka)
+// Read returns the tail of a file from the allowlist.
+func Read(allowlist Allowlist, path string, lines uint32) (Fragment, error) {
+	if !allowlist.Allows(path) {
+		return Fragment{}, fmt.Errorf("%w: %s", ErrOutsideAllowlist, path)
 	}
-	if linii == 0 || linii > maksymalnieLinii {
-		linii = 200
+	if lines == 0 || lines > maxLines {
+		lines = 200
 	}
 
-	plik, err := otworzBezDowiazan(sciezka)
+	file, err := openWithoutSymlinks(path)
 	if err != nil {
 		return Fragment{}, err
 	}
-	defer plik.Close()
+	defer file.Close()
 
-	info, err := plik.Stat()
+	info, err := file.Stat()
 	if err != nil {
 		return Fragment{}, err
 	}
-	// Katalog i urzadzenie nie sa logiem; odczyt z gniazda albo potoku
-	// zawisnalby na zawsze.
+	// A directory and a device are not a log; a read from a socket or a pipe
+	// would hang forever.
 	if !info.Mode().IsRegular() {
-		return Fragment{}, fmt.Errorf("%s nie jest zwyklym plikiem", sciezka)
+		return Fragment{}, fmt.Errorf("%s is not a regular file", path)
 	}
 
-	fragment := Fragment{Path: sciezka, SizeBytes: info.Size(), Allowlist: allowlist.Zrodlo}
-	poczatek := int64(0)
-	if info.Size() > maksymalnieBajtow {
-		poczatek = info.Size() - maksymalnieBajtow
+	fragment := Fragment{Path: path, SizeBytes: info.Size(), Allowlist: allowlist.Source}
+	start := int64(0)
+	if info.Size() > maxBytes {
+		start = info.Size() - maxBytes
 		fragment.Truncated = true
 	}
-	if _, err := plik.Seek(poczatek, 0); err != nil {
+	if _, err := file.Seek(start, 0); err != nil {
 		return fragment, err
 	}
 
-	skaner := bufio.NewScanner(plik)
-	skaner.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	var linie []string
-	for skaner.Scan() {
-		linie = append(linie, skaner.Text())
-		if len(linie) > int(linii) {
-			linie = linie[1:]
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	var collected []string
+	for scanner.Scan() {
+		collected = append(collected, scanner.Text())
+		if len(collected) > int(lines) {
+			collected = collected[1:]
 			fragment.Truncated = true
 		}
 	}
-	fragment.Lines = linie
-	return fragment, skaner.Err()
+	fragment.Lines = collected
+	return fragment, scanner.Err()
 }
 
-// otworzBezDowiazan otwiera plik, odmawiajac podazania za dowiazaniami na
-// kazdym poziomie sciezki.
+// openWithoutSymlinks opens a file while refusing to follow symbolic links at
+// any level of the path.
 //
-// Dowiazanie w katalogu logow pozwoliloby przeczytac dowolny plik roota mimo
-// poprawnej allowlisty: wzorzec opisuje sciezke, a nie to, gdzie ona
-// naprawde prowadzi.
-func otworzBezDowiazan(sciezka string) (*os.File, error) {
-	fd, err := unix.Openat2(unix.AT_FDCWD, sciezka, &unix.OpenHow{
+// A symlink in the log directory would allow any file of root to be read despite
+// a correct allowlist: a pattern describes the path, not where it really leads.
+func openWithoutSymlinks(path string) (*os.File, error) {
+	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_CLOEXEC,
 		Resolve: unix.RESOLVE_NO_SYMLINKS,
 	})
 	if err != nil {
 		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.EXDEV) {
-			return nil, fmt.Errorf("%w: %s", ErrDowiazanie, sciezka)
+			return nil, fmt.Errorf("%w: %s", ErrSymlink, path)
 		}
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), sciezka), nil
+	return os.NewFile(uintptr(fd), path), nil
 }

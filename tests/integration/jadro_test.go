@@ -138,7 +138,7 @@ func TestUstawieniaPozaZakresemNieDojezdzajaDoHosta(t *testing.T) {
 	if zadanie.State == "succeeded" {
 		t.Error("panel zapisal ustawienie, ktorego jadro nie zna")
 	}
-	if !strings.Contains(ostatniKomunikat(proby), "nie zna ustawienia") {
+	if !strings.Contains(ostatniKomunikat(proby), "does not know the setting") {
 		t.Errorf("odmowa bez powodu: %q", ostatniKomunikat(proby))
 	}
 }
@@ -186,7 +186,7 @@ func TestBlokadaModuluMowiCoSieStanie(t *testing.T) {
 	}
 	// Modul zaladowany nie znika po zapisaniu blokady i operator ma to
 	// przeczytac, a nie odkryc przy nastepnym restarcie.
-	if !strings.Contains(ostatniKomunikat(proby), "restarcie") {
+	if !strings.Contains(ostatniKomunikat(proby), "after a reboot") {
 		t.Errorf("blokada bez wyjasnienia skutku: %q", ostatniKomunikat(proby))
 	}
 

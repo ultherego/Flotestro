@@ -34,7 +34,7 @@ func TestPlanAktualizacjiNieZmieniaHosta(t *testing.T) {
 				t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
 			}
 			// Plan jest operacja niemutujaca, wiec nie wymaga zatwierdzenia.
-			if job.RequiresApprova {
+			if job.RequiresApproval {
 				t.Error("planowanie wymaga zatwierdzenia, choc niczego nie zmienia")
 			}
 

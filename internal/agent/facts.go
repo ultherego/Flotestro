@@ -30,9 +30,9 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 	"github.com/ultherego/flotestro/internal/modules/security"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
+	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
-	czas "github.com/ultherego/flotestro/internal/modules/time"
+	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
@@ -141,9 +141,9 @@ type Facts struct {
 	// Time is the time of the host and the state of its synchronization. A
 	// shifted clock breaks Kerberos and mTLS, so it is a fact about the host and
 	// not a curiosity.
-	Time *czas.Snapshot `json:"time,omitempty"`
+	Time *hosttime.Snapshot `json:"time,omitempty"`
 	// SSH is the configuration of the sshd server.
-	SSH *sshmodul.Snapshot `json:"ssh,omitempty"`
+	SSH *sshmodule.Snapshot `json:"ssh,omitempty"`
 	// Storage is the picture of the disk space of the host.
 	Storage *storage.Snapshot `json:"storage,omitempty"`
 	// Firewall is the state of the firewall of the host.

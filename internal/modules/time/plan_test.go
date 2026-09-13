@@ -1,54 +1,54 @@
-package czas
+package hosttime
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestPlanCzasuOdrozniaDemonyIStanZastany(t *testing.T) {
-	chrony := Snapshot{Service: DemonChrony,
+func TestTimePlanDistinguishesDaemonsAndFoundState(t *testing.T) {
+	chrony := Snapshot{Service: DaemonChrony,
 		ManagedPath: "/etc/chrony/sources.d/flotestro.sources"}
-	plan := Zaplanuj(chrony, []string{"192.168.56.50"}, false)
-	if plan.Action != PlanZmienia || plan.Restart || plan.Refusal != "" {
-		t.Errorf("chrony z katalogiem zrodel: %+v", plan)
+	plan := Compute(chrony, []string{"192.168.56.50"}, false)
+	if plan.Action != PlanUpdate || plan.Restart || plan.Refusal != "" {
+		t.Errorf("chrony with a sources directory: %+v", plan)
 	}
-	if !strings.Contains(strings.Join(plan.Changes, ";"), "bez restartu") {
-		t.Errorf("zmiany chrony: %v", plan.Changes)
-	}
-
-	chrony.Managed, _ = SkladajChrony([]string{"192.168.56.50"}, RodzajZrodel)
-	chrony.Configured = []Serwer{{Address: "192.168.56.50", Managed: true}}
-	bez := Zaplanuj(chrony, []string{"192.168.56.50"}, false)
-	if bez.Action != PlanBezZmian || len(bez.Changes) != 0 {
-		t.Errorf("stan docelowy policzony jako zmiana: %+v", bez)
+	if !strings.Contains(strings.Join(plan.Changes, ";"), "without a daemon restart") {
+		t.Errorf("chrony changes: %v", plan.Changes)
 	}
 
-	timesyncd := Snapshot{Service: DemonTimesyncd}
-	ts := Zaplanuj(timesyncd, []string{"192.168.56.50"}, false)
-	if ts.Action != PlanZmienia || !ts.Restart || ts.ManagedPath != PlikTimesyncd {
+	chrony.Managed, _ = ComposeChrony([]string{"192.168.56.50"}, KindSources)
+	chrony.Configured = []Server{{Address: "192.168.56.50", Managed: true}}
+	none := Compute(chrony, []string{"192.168.56.50"}, false)
+	if none.Action != PlanNoChange || len(none.Changes) != 0 {
+		t.Errorf("target state counted as a change: %+v", none)
+	}
+
+	timesyncd := Snapshot{Service: DaemonTimesyncd}
+	ts := Compute(timesyncd, []string{"192.168.56.50"}, false)
+	if ts.Action != PlanUpdate || !ts.Restart || ts.ManagedPath != TimesyncdFile {
 		t.Errorf("timesyncd: %+v", ts)
 	}
-	if plan.PlanHash == ts.PlanHash || plan.PlanHash == bez.PlanHash {
-		t.Error("odciski planow nie roznia sie")
+	if plan.PlanHash == ts.PlanHash || plan.PlanHash == none.PlanHash {
+		t.Error("plan fingerprints do not differ")
 	}
 }
 
-func TestPlanCzasuOdmawiaBezKataloguIBezDemona(t *testing.T) {
-	bezKatalogu := Snapshot{Service: DemonChrony, ConfigPath: "/etc/chrony/chrony.conf",
-		CanAddSourceDir: true, WriteReason: "chrony nie wlacza katalogu"}
-	odmowa := Zaplanuj(bezKatalogu, []string{"192.168.56.50"}, false)
-	if odmowa.Refusal != "chrony nie wlacza katalogu" {
-		t.Errorf("brak katalogu bez odmowy: %+v", odmowa)
+func TestTimePlanRefusesWithoutDirectoryAndWithoutDaemon(t *testing.T) {
+	noDir := Snapshot{Service: DaemonChrony, ConfigPath: "/etc/chrony/chrony.conf",
+		CanAddSourceDir: true, WriteReason: "chrony includes no directory"}
+	refused := Compute(noDir, []string{"192.168.56.50"}, false)
+	if refused.Refusal != "chrony includes no directory" {
+		t.Errorf("no directory without a refusal: %+v", refused)
 	}
-	zgoda := Zaplanuj(bezKatalogu, []string{"192.168.56.50"}, true)
-	if zgoda.Refusal != "" || !zgoda.EnablesSourceDir || !zgoda.Restart {
-		t.Errorf("zgoda na katalog: %+v", zgoda)
+	consent := Compute(noDir, []string{"192.168.56.50"}, true)
+	if consent.Refusal != "" || !consent.EnablesSourceDir || !consent.Restart {
+		t.Errorf("consent to the directory: %+v", consent)
 	}
-	bezDemona := Zaplanuj(Snapshot{}, []string{"192.168.56.50"}, false)
-	if !strings.Contains(bezDemona.Refusal, "demona czasu") {
-		t.Errorf("brak demona bez odmowy: %+v", bezDemona)
+	noDaemon := Compute(Snapshot{}, []string{"192.168.56.50"}, false)
+	if !strings.Contains(noDaemon.Refusal, "time daemon") {
+		t.Errorf("no daemon without a refusal: %+v", noDaemon)
 	}
-	if pusty := Zaplanuj(bezKatalogu, nil, true); pusty.Refusal == "" {
-		t.Error("pusta lista serwerow przeszla bez odmowy")
+	if empty := Compute(noDir, nil, true); empty.Refusal == "" {
+		t.Error("an empty server list passed without a refusal")
 	}
 }

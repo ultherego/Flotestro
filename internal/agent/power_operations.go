@@ -31,7 +31,7 @@ func (e *TaskExecutor) shutdownHost(ctx context.Context, task *agentv1.TaskEnvel
 	}
 	mode := payload.Mode
 	if mode == "" {
-		mode = power.TrybWylaczyc
+		mode = power.ModePoweroff
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{

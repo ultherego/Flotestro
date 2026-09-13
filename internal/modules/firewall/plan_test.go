@@ -5,78 +5,81 @@ import (
 	"testing"
 )
 
-func regulaSMTP() RuleSpec {
-	return RuleSpec{ID: "smtp", Chain: "wejscie", Action: "drop", Protocol: "tcp",
+func smtpRule() RuleSpec {
+	return RuleSpec{ID: "smtp", Chain: "input", Action: "drop", Protocol: "tcp",
 		Ports: []string{"25"}, Sources: []string{"10.10.0.0/16"}}
 }
 
-// TestPlanRozrozniaBrakRegulyOdInnejReguly pilnuje sedna planu per host: ta sama
-// regula zamowiona na dwoch hostach to dwie rozne zmiany.
-func TestPlanRozrozniaBrakRegulyOdInnejReguly(t *testing.T) {
-	brak := ZaplanujRegule(Rejestr{}, regulaSMTP(), "aaa", AdapterNftables)
-	if brak.Action != PlanTworzy || brak.Current != nil {
-		t.Errorf("host bez reguly ma plan %q (current=%v)", brak.Action, brak.Current)
+// TestPlanDistinguishesMissingRuleFromDifferentRule guards the essence of
+// the per-host plan: the same rule ordered on two hosts is two different
+// changes.
+func TestPlanDistinguishesMissingRuleFromDifferentRule(t *testing.T) {
+	missing := ComputeRule(Registry{}, smtpRule(), "aaa", AdapterNftables)
+	if missing.Action != PlanCreate || missing.Current != nil {
+		t.Errorf("a host without the rule has the plan %q (current=%v)", missing.Action, missing.Current)
 	}
 
-	inna := regulaSMTP()
-	inna.Ports = []string{"587"}
-	zmiana := ZaplanujRegule(Rejestr{Rules: []RuleSpec{inna}}, regulaSMTP(), "aaa", AdapterNftables)
-	if zmiana.Action != PlanZmienia {
-		t.Errorf("host z inna regula ma plan %q", zmiana.Action)
+	other := smtpRule()
+	other.Ports = []string{"587"}
+	change := ComputeRule(Registry{Rules: []RuleSpec{other}}, smtpRule(), "aaa", AdapterNftables)
+	if change.Action != PlanUpdate {
+		t.Errorf("a host with a different rule has the plan %q", change.Action)
 	}
-	if !zawiera(zmiana.Changes, "porty") {
-		t.Errorf("plan nie nazywa zmiany portow: %+v", zmiana.Changes)
+	if !contains(change.Changes, "ports") {
+		t.Errorf("the plan does not name the port change: %+v", change.Changes)
 	}
-	if brak.PlanHash == zmiana.PlanHash {
-		t.Error("dwa rozne stany zastane daly ten sam odcisk planu")
+	if missing.PlanHash == change.PlanHash {
+		t.Error("two different found states gave the same plan fingerprint")
 	}
 }
 
-// TestPlanBezZmianIgnorujeKolejnosc pilnuje, ze kolejnosc portow i zrodel nie
-// jest decyzja operatora - ta sama regula zapisana inaczej to nadal ta sama.
-func TestPlanBezZmianIgnorujeKolejnosc(t *testing.T) {
-	obecna := regulaSMTP()
-	obecna.Ports = []string{"25", "465"}
-	obecna.Sources = []string{"10.10.0.0/16", "10.20.0.0/16"}
-	zadana := regulaSMTP()
-	zadana.Ports = []string{"465", "25"}
-	zadana.Sources = []string{"10.20.0.0/16", "10.10.0.0/16"}
+// TestNoChangePlanIgnoresOrder guards that the order of ports and sources
+// is not the operator's decision - the same rule written differently is
+// still the same.
+func TestNoChangePlanIgnoresOrder(t *testing.T) {
+	current := smtpRule()
+	current.Ports = []string{"25", "465"}
+	current.Sources = []string{"10.10.0.0/16", "10.20.0.0/16"}
+	requested := smtpRule()
+	requested.Ports = []string{"465", "25"}
+	requested.Sources = []string{"10.20.0.0/16", "10.10.0.0/16"}
 
-	plan := ZaplanujRegule(Rejestr{Rules: []RuleSpec{obecna}}, zadana, "aaa", AdapterNftables)
-	if plan.Action != PlanBezZmian {
-		t.Fatalf("ta sama regula w innej kolejnosci ma plan %q (%+v)", plan.Action, plan.Changes)
+	plan := ComputeRule(Registry{Rules: []RuleSpec{current}}, requested, "aaa", AdapterNftables)
+	if plan.Action != PlanNoChange {
+		t.Fatalf("the same rule in a different order has the plan %q (%+v)", plan.Action, plan.Changes)
 	}
 }
 
-// TestOdciskPlanuZalezyOdZestawuRegul pilnuje, ze ten sam diff wobec innego
-// zestawu jest inna zmiana: wchodzi w inne sasiedztwo regul.
-func TestOdciskPlanuZalezyOdZestawuRegul(t *testing.T) {
-	pierwszy := ZaplanujRegule(Rejestr{}, regulaSMTP(), "zestaw-a", AdapterNftables)
-	drugi := ZaplanujRegule(Rejestr{}, regulaSMTP(), "zestaw-b", AdapterNftables)
-	if pierwszy.PlanHash == drugi.PlanHash {
-		t.Error("plan wobec innego zestawu regul ma ten sam odcisk")
+// TestPlanFingerprintDependsOnRuleset guards that the same diff against a
+// different ruleset is a different change: it enters a different
+// neighbourhood of rules.
+func TestPlanFingerprintDependsOnRuleset(t *testing.T) {
+	first := ComputeRule(Registry{}, smtpRule(), "ruleset-a", AdapterNftables)
+	second := ComputeRule(Registry{}, smtpRule(), "ruleset-b", AdapterNftables)
+	if first.PlanHash == second.PlanHash {
+		t.Error("a plan against a different ruleset has the same fingerprint")
 	}
-	if pierwszy.RulesetHash != "zestaw-a" {
-		t.Errorf("plan nie niesie odcisku zestawu: %q", pierwszy.RulesetHash)
-	}
-}
-
-// TestPlanUsunieciaOdrozniaRegulePanelu pilnuje, ze usuniecie reguly, ktorej
-// host nie zna, jest widoczne przed zatwierdzeniem, a nie po.
-func TestPlanUsunieciaOdrozniaRegulePanelu(t *testing.T) {
-	jest := ZaplanujUsuniecie(Rejestr{Rules: []RuleSpec{regulaSMTP()}}, "smtp", "aaa", AdapterNftables)
-	if jest.Action != PlanUsuwa || jest.Current == nil {
-		t.Errorf("usuniecie istniejacej reguly ma plan %q", jest.Action)
-	}
-	niema := ZaplanujUsuniecie(Rejestr{}, "smtp", "aaa", AdapterNftables)
-	if niema.Action != PlanJuzUsuniety {
-		t.Errorf("usuniecie nieznanej reguly ma plan %q", niema.Action)
+	if first.RulesetHash != "ruleset-a" {
+		t.Errorf("the plan does not carry the ruleset fingerprint: %q", first.RulesetHash)
 	}
 }
 
-func zawiera(lista []string, fragment string) bool {
-	for _, wpis := range lista {
-		if strings.Contains(wpis, fragment) {
+// TestRemovalPlanDistinguishesPanelRule guards that removing a rule the
+// host does not know is visible before approval, not after.
+func TestRemovalPlanDistinguishesPanelRule(t *testing.T) {
+	present := ComputeRemoval(Registry{Rules: []RuleSpec{smtpRule()}}, "smtp", "aaa", AdapterNftables)
+	if present.Action != PlanRemove || present.Current == nil {
+		t.Errorf("removing an existing rule has the plan %q", present.Action)
+	}
+	absent := ComputeRemoval(Registry{}, "smtp", "aaa", AdapterNftables)
+	if absent.Action != PlanRemoveAbsent {
+		t.Errorf("removing an unknown rule has the plan %q", absent.Action)
+	}
+}
+
+func contains(items []string, fragment string) bool {
+	for _, item := range items {
+		if strings.Contains(item, fragment) {
 			return true
 		}
 	}

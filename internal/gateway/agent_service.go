@@ -29,8 +29,8 @@ import (
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/jobs"
-	modulbackup "github.com/ultherego/flotestro/internal/modules/backup"
-	modulcerts "github.com/ultherego/flotestro/internal/modules/certificates"
+	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
+	certmodule "github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/opspec"
 	modulpakiety "github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -2141,7 +2141,7 @@ func (s *AgentService) saveCertificateDeployment(ctx context.Context, hostID, jo
 	// alone - that is, what the host sent back.
 	if payload.Certificate.Certificate != "" {
 		deployment.Certificate = payload.Certificate.Certificate
-		if certs, err := modulcerts.ParsujPEM([]byte(payload.Certificate.Certificate)); err == nil {
+		if certs, err := certmodule.ParsePEM([]byte(payload.Certificate.Certificate)); err == nil {
 			deployment.Subject = certs[0].Subject.String()
 			deployment.Issuer = certs[0].Issuer.String()
 		}
@@ -2198,10 +2198,10 @@ func (s *AgentService) mergeRepositories(ctx context.Context, hostID string, sou
 // backupKinds translate the type of an operation into the kind of an entry in
 // the history.
 var backupKinds = map[opspec.ActionType]string{
-	opspec.ActionBackupPlan:    modulbackup.OperacjaPlan,
-	opspec.ActionBackupRun:     modulbackup.OperacjaBackup,
-	opspec.ActionBackupVerify:  modulbackup.OperacjaSprawdz,
-	opspec.ActionBackupRestore: modulbackup.OperacjaOdtworzen,
+	opspec.ActionBackupPlan:    backupmodule.OperationPlan,
+	opspec.ActionBackupRun:     backupmodule.OperationBackup,
+	opspec.ActionBackupVerify:  backupmodule.OperationVerify,
+	opspec.ActionBackupRestore: backupmodule.OperationRestore,
 }
 
 // saveBackupRun adds the result of a backup operation to the history.
@@ -2257,8 +2257,8 @@ func (s *AgentService) saveBackupRun(ctx context.Context, hostID, jobID string,
 	}
 }
 
-func backupState(data []byte) (modulbackup.Stan, bool) {
-	var state modulbackup.Stan
+func backupState(data []byte) (backupmodule.State, bool) {
+	var state backupmodule.State
 	if len(data) == 0 {
 		return state, false
 	}
@@ -2268,8 +2268,8 @@ func backupState(data []byte) (modulbackup.Stan, bool) {
 	return state, true
 }
 
-func backupOutcome(data []byte) (modulbackup.Wynik, bool) {
-	var result modulbackup.Wynik
+func backupOutcome(data []byte) (backupmodule.Result, bool) {
+	var result backupmodule.Result
 	if len(data) == 0 {
 		return result, false
 	}

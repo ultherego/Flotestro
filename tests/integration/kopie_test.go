@@ -199,7 +199,7 @@ func TestKopiaZapasowaPelnyCykl(t *testing.T) {
 	if powtorne.State == "succeeded" {
 		t.Fatal("odtworzenie do niepustego katalogu przeszlo mimo planu 'pusty katalog'")
 	}
-	if len(proby) == 0 || !strings.Contains(proby[len(proby)-1].Message, "nie jest pusty") {
+	if len(proby) == 0 || !strings.Contains(proby[len(proby)-1].Message, "is not empty") {
 		t.Fatalf("odmowa nie mowi, o co chodzi: %+v", proby)
 	}
 

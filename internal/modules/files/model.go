@@ -1,71 +1,73 @@
-// Package files zarzadza plikami konfiguracyjnymi hosta.
+// Package files manages the configuration files of a host.
 //
-// To nie jest menedzer plikow roota. Panel, ktory potrafi zapisac dowolna
-// sciezke, potrafi podmienic /etc/shadow i klucze prywatne - dlatego zakres
-// jest wyliczony, a kazdy zapis ma znany stan przed i po.
+// This is not a root file manager. A panel that can write an arbitrary path
+// can replace /etc/shadow and private keys - that is why the scope is
+// enumerated and every write has a known state before and after.
 package files
 
 import "time"
 
-// Rozmiar, powyzej ktorego panel nie pobiera tresci pliku.
+// Size above which the panel does not fetch the file content.
 //
-// Modul jest do konfiguracji, a nie do przenoszenia danych: plik wiekszy niz
-// to prawie na pewno nie jest konfiguracja, a jego tresc w bazie panelu
-// bylaby kopia czegos, czego nikt tam nie chcial.
-const MaksymalnyRozmiar = 1 << 20
+// The module is for configuration, not for moving data: a file bigger than
+// this is almost certainly not configuration, and its content in the panel
+// database would be a copy of something nobody wanted there.
+const MaxSize = 1 << 20
 
-// Plik opisuje jeden plik konfiguracyjny.
-type Plik struct {
+// File describes one configuration file.
+type File struct {
 	Path string `json:"path"`
-	// SHA256 jest odciskiem tresci. Pusty oznacza plik, ktorego nie udalo
-	// sie odczytac - i wtedy powod niesie UnavailableReason.
+	// SHA256 is the content fingerprint. Empty means a file that could not
+	// be read - and then UnavailableReason carries the reason.
 	SHA256     string     `json:"sha256,omitempty"`
 	SizeBytes  int64      `json:"size_bytes"`
 	Mode       string     `json:"mode,omitempty"`
 	Owner      string     `json:"owner,omitempty"`
 	Group      string     `json:"group,omitempty"`
 	ModifiedAt *time.Time `json:"modified_at,omitempty"`
-	// Managed oznacza plik, ktory panel zna i ma dla niego stan docelowy.
+	// Managed marks a file the panel knows and has a desired state for.
 	Managed bool `json:"managed"`
-	// FromSecret oznacza plik, ktorego tresc pochodzi z magazynu sekretow.
-	// Dla takiego pliku host nie zglasza odcisku tresci.
+	// FromSecret marks a file whose content comes from the secret store.
+	// For such a file the host does not report the content fingerprint.
 	FromSecret bool `json:"from_secret,omitempty"`
-	// DesiredSHA256 jest odciskiem stanu docelowego. Rozny od SHA256 oznacza
-	// drift: ktos zmienil plik poza panelem.
+	// DesiredSHA256 is the fingerprint of the desired state. Different from
+	// SHA256 means drift: somebody changed the file outside the panel.
 	DesiredSHA256 string `json:"desired_sha256,omitempty"`
-	// Exists rozroznia plik usuniety od nieodczytanego.
+	// Exists distinguishes a deleted file from an unread one.
 	Exists            bool   `json:"exists"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// Tresc to plik wraz z zawartoscia.
-type Tresc struct {
-	Plik
+// Content is a file together with its contents.
+type Content struct {
+	File
 	Content string `json:"content"`
-	// Truncated mowi, ze tresc jest urwana. Urwana tresc bez oznaczenia
-	// wygladalaby jak caly plik - i tak trafilaby z powrotem na host.
+	// Truncated says the content is cut off. Cut-off content without the
+	// mark would look like the whole file - and would go back to the host
+	// as such.
 	Truncated bool `json:"truncated"`
 }
 
-// Snapshot to obraz plikow zarzadzanych na hoscie.
+// Snapshot is the picture of the managed files on the host.
 type Snapshot struct {
-	Files      []Plik    `json:"files,omitempty"`
+	Files      []File    `json:"files,omitempty"`
 	ObservedAt time.Time `json:"observed_at"`
-	// UnavailableReason mowi, dlaczego stanu nie ustalono.
+	// UnavailableReason says why the state was not determined.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// Zapis opisuje zlecona zmiane pliku.
-type Zapis struct {
+// Write describes an ordered file change.
+type Write struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	Mode    string `json:"mode,omitempty"`
 	Owner   string `json:"owner,omitempty"`
 	Group   string `json:"group,omitempty"`
-	// ExpectedSHA256 wiaze zapis z trescia, ktora operator ogladal. Pusty
-	// oznacza plik, ktorego jeszcze nie ma; wartosc niezgodna ze stanem hosta
-	// zatrzymuje zapis, zamiast nadpisac cudza zmiane.
+	// ExpectedSHA256 binds the write to the content the operator viewed.
+	// Empty means a file that does not exist yet; a value that disagrees
+	// with the host state stops the write instead of overwriting somebody
+	// else's change.
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
-	// Validator wskazuje sprawdzenie tresci przed zapisem.
+	// Validator names the content check before the write.
 	Validator string `json:"validator,omitempty"`
 }

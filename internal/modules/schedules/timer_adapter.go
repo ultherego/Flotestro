@@ -5,142 +5,144 @@ import (
 	"time"
 )
 
-// CzytajTimery sklada harmonogramy z wyjscia systemctl.
+// ReadTimers assembles schedules from the systemctl output.
 //
-// Timery i cron sa dwoma mechanizmami tego samego: operator chce zobaczyc
-// jedna tabele zadan cyklicznych, a nie dwie listy, ktore trzeba w glowie
-// laczyc. Panel nie zaklada timerow - zarzadzane wpisy trafiaja do crona,
-// bo tam jeden wpis to jeden plik, a timer wymaga dwoch jednostek i ich
-// wzajemnej spojnosci.
-func CzytajTimery(listaTimerow, listaJednostek, kalendarze string) []Schedule {
-	nastepne := parsujListeTimerow(listaTimerow)
-	stany := parsujStanyJednostek(listaJednostek)
-	wyrazenia := parsujKalendarze(kalendarze)
+// Timers and cron are two mechanisms of the same thing: the operator wants
+// to see one table of recurring jobs, not two lists to merge in their head.
+// The panel does not create timers - managed entries go to cron, because
+// there one entry is one file, while a timer needs two units and their
+// mutual consistency.
+func ReadTimers(timerList, unitList, calendars string) []Schedule {
+	next := parseTimerList(timerList)
+	states := parseUnitStates(unitList)
+	expressions := parseCalendars(calendars)
 
-	var wpisy []Schedule
-	for nazwa, termin := range nastepne {
-		wpis := Schedule{
-			ID:     nazwa,
+	var entries []Schedule
+	for name, date := range next {
+		entry := Schedule{
+			ID:     name,
 			Kind:   KindTimer,
 			Source: SourceManual,
-			// Timer aktywny to taki, ktory jest zaladowany i wlaczony.
-			Enabled: stany[nazwa] != "" && stany[nazwa] != "inactive",
-			// Timer bez OnCalendar chodzi wzgledem zdarzenia (OnBootSec,
-			// OnUnitActiveSec). Nie znamy jego wyrazenia, wiec zostawiamy
-			// puste zamiast wpisywac cokolwiek.
-			Expression: wyrazenia[nazwa],
-			// Timer nie uruchamia polecenia, tylko jednostke. To ona ma
-			// ExecStart, ktorego ten modul nie czyta.
-			CommandLine: strings.TrimSuffix(nazwa, ".timer") + ".service",
+			// An active timer is one that is loaded and enabled.
+			Enabled: states[name] != "" && states[name] != "inactive",
+			// A timer without OnCalendar runs relative to an event
+			// (OnBootSec, OnUnitActiveSec). Its expression is unknown, so it
+			// is left empty instead of writing anything.
+			Expression: expressions[name],
+			// A timer does not run a command, only a unit. It is the unit
+			// that has the ExecStart, which this module does not read.
+			CommandLine: strings.TrimSuffix(name, ".timer") + ".service",
 		}
-		if !termin.IsZero() {
-			kopia := termin
-			wpis.NextRun = &kopia
+		if !date.IsZero() {
+			copied := date
+			entry.NextRun = &copied
 		}
-		wpisy = append(wpisy, wpis)
+		entries = append(entries, entry)
 	}
-	return wpisy
+	return entries
 }
 
-// parsujListeTimerow czyta wyjscie "systemctl list-timers --all".
+// parseTimerList reads the output of "systemctl list-timers --all".
 //
-// Kolumny sa oddzielone spacjami, a data zawiera spacje, wiec nazwa timera
-// jest szukana po sufiksie, a nie po pozycji: format tej listy zmienial sie
-// miedzy wersjami systemd.
-func parsujListeTimerow(wyjscie string) map[string]time.Time {
-	wynik := map[string]time.Time{}
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		pola := strings.Fields(linia)
-		var nazwa string
-		var indeks int
-		for i, pole := range pola {
-			if strings.HasSuffix(pole, ".timer") {
-				nazwa, indeks = pole, i
+// The columns are separated by spaces and the date contains spaces, so the
+// timer name is found by suffix, not by position: the format of this list
+// has changed between systemd versions.
+func parseTimerList(output string) map[string]time.Time {
+	result := map[string]time.Time{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		var name string
+		var index int
+		for i, field := range fields {
+			if strings.HasSuffix(field, ".timer") {
+				name, index = field, i
 				break
 			}
 		}
-		if nazwa == "" {
+		if name == "" {
 			continue
 		}
-		wynik[nazwa] = parsujDateTimera(pola[:indeks])
+		result[name] = parseTimerDate(fields[:index])
 	}
-	return wynik
+	return result
 }
 
-// parsujDateTimera czyta pierwsza date z poczatku wiersza. Wartosc "-"
-// oznacza timer bez zaplanowanego terminu i zostaje pustym czasem, a nie
-// data zerowa udajaca konkretna chwile.
-func parsujDateTimera(pola []string) time.Time {
-	if len(pola) < 2 {
+// parseTimerDate reads the first date at the start of the row. The value
+// "-" means a timer without a scheduled date and stays an empty time, not a
+// zero date pretending to be a specific moment.
+func parseTimerDate(fields []string) time.Time {
+	if len(fields) < 2 {
 		return time.Time{}
 	}
-	// Format: "Sun 2026-08-23 03:10:00 UTC" - bierzemy date i godzine.
-	for i := 0; i+1 < len(pola); i++ {
-		if len(pola[i]) == 10 && strings.Count(pola[i], "-") == 2 {
-			termin, err := time.Parse("2006-01-02 15:04:05", pola[i]+" "+pola[i+1])
+	// Format: "Sun 2026-08-23 03:10:00 UTC" - the date and the time are
+	// taken.
+	for i := 0; i+1 < len(fields); i++ {
+		if len(fields[i]) == 10 && strings.Count(fields[i], "-") == 2 {
+			date, err := time.Parse("2006-01-02 15:04:05", fields[i]+" "+fields[i+1])
 			if err != nil {
 				return time.Time{}
 			}
-			return termin
+			return date
 		}
 	}
 	return time.Time{}
 }
 
-// parsujStanyJednostek czyta wyjscie "systemctl list-units --type=timer".
-func parsujStanyJednostek(wyjscie string) map[string]string {
-	stany := map[string]string{}
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		pola := strings.Fields(linia)
-		if len(pola) < 3 || !strings.HasSuffix(pola[0], ".timer") {
+// parseUnitStates reads the output of "systemctl list-units --type=timer".
+func parseUnitStates(output string) map[string]string {
+	states := map[string]string{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || !strings.HasSuffix(fields[0], ".timer") {
 			continue
 		}
-		stany[pola[0]] = pola[2]
+		states[fields[0]] = fields[2]
 	}
-	return stany
+	return states
 }
 
-// parsujKalendarze czyta wyjscie "systemctl show --property=Id
+// parseCalendars reads the output of "systemctl show --property=Id
 // --property=TimersCalendar '*.timer'".
 //
-// Wyrazenie OnCalendar jest tym, co operator zna z pliku jednostki. Bez niego
-// wiersz timera mowilby tylko "kiedys" - a nastepne uruchomienie samo w sobie
-// nie tlumaczy, co sie za nim kryje.
+// The OnCalendar expression is what the operator knows from the unit file.
+// Without it the timer row would only say "sometime" - and the next run by
+// itself does not explain what is behind it.
 //
-// Rekordy sa rozdzielone pusta linia, a kolejnosc wlasciwosci w rekordzie nie
-// jest kolejnoscia pytania: systemd potrafi wypisac TimersCalendar przed Id.
-// Czytanie linia po linii przypisaloby wiec kalendarz poprzedniemu timerowi.
-func parsujKalendarze(wyjscie string) map[string]string {
-	wynik := map[string]string{}
-	for _, rekord := range strings.Split(wyjscie, "\n\n") {
-		nazwa, wyrazenie := "", ""
-		for _, linia := range strings.Split(rekord, "\n") {
-			linia = strings.TrimSpace(linia)
+// Records are separated by an empty line, and the order of properties in a
+// record is not the order of the question: systemd can print
+// TimersCalendar before Id. Reading line by line would therefore attribute
+// the calendar to the previous timer.
+func parseCalendars(output string) map[string]string {
+	result := map[string]string{}
+	for _, record := range strings.Split(output, "\n\n") {
+		name, expression := "", ""
+		for _, line := range strings.Split(record, "\n") {
+			line = strings.TrimSpace(line)
 			switch {
-			case strings.HasPrefix(linia, "Id="):
-				nazwa = strings.TrimPrefix(linia, "Id=")
-			case strings.HasPrefix(linia, "TimersCalendar="):
-				wyrazenie = onCalendar(strings.TrimPrefix(linia, "TimersCalendar="))
+			case strings.HasPrefix(line, "Id="):
+				name = strings.TrimPrefix(line, "Id=")
+			case strings.HasPrefix(line, "TimersCalendar="):
+				expression = onCalendar(strings.TrimPrefix(line, "TimersCalendar="))
 			}
 		}
-		// Timer bez OnCalendar chodzi wzgledem zdarzenia (OnBootSec,
-		// OnUnitActiveSec) i naprawde nie ma wyrazenia kalendarzowego.
-		if nazwa != "" && wyrazenie != "" {
-			wynik[nazwa] = wyrazenie
+		// A timer without OnCalendar runs relative to an event (OnBootSec,
+		// OnUnitActiveSec) and really has no calendar expression.
+		if name != "" && expression != "" {
+			result[name] = expression
 		}
 	}
-	return wynik
+	return result
 }
 
-// onCalendar wyluskuje wyrazenie z "{ OnCalendar=... ; next_elapse=... }".
-func onCalendar(tresc string) string {
-	poczatek := strings.Index(tresc, "OnCalendar=")
-	if poczatek < 0 {
+// onCalendar extracts the expression from "{ OnCalendar=... ; next_elapse=... }".
+func onCalendar(content string) string {
+	start := strings.Index(content, "OnCalendar=")
+	if start < 0 {
 		return ""
 	}
-	tresc = tresc[poczatek+len("OnCalendar="):]
-	if koniec := strings.Index(tresc, " ; "); koniec >= 0 {
-		tresc = tresc[:koniec]
+	content = content[start+len("OnCalendar="):]
+	if end := strings.Index(content, " ; "); end >= 0 {
+		content = content[:end]
 	}
-	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(tresc), "}"))
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(content), "}"))
 }

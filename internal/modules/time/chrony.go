@@ -1,4 +1,4 @@
-package czas
+package hosttime
 
 import (
 	"strconv"
@@ -6,18 +6,18 @@ import (
 	"time"
 )
 
-// trybyZrodla i staneZrodla tlumacza znaki chronyego na slowa.
+// sourceModes and sourceStates translate the chrony symbols into words.
 //
-// Operator nie ma pamietac, ze "^*" znaczy "wybrany serwer", a "x" - "zrodlo,
-// ktore klamie". Znak zostaje w wyniku tylko wtedy, gdy nie znamy jego
-// znaczenia: nieznany stan nie jest tu stanem pustym.
-var trybyZrodla = map[string]string{
+// The operator is not meant to remember that "^*" means "selected server"
+// and "x" - "a source that lies". The symbol stays in the result only when
+// its meaning is unknown: an unknown state is not an empty state here.
+var sourceModes = map[string]string{
 	"^": "server",
 	"=": "peer",
 	"#": "local clock",
 }
 
-var stanyZrodla = map[string]string{
+var sourceStates = map[string]string{
 	"*": "selected",
 	"+": "candidate",
 	"-": "not combined",
@@ -26,211 +26,214 @@ var stanyZrodla = map[string]string{
 	"~": "too variable",
 }
 
-// ParsujTracking czyta wyjscie "chronyc -c tracking".
+// ParseTracking reads the output of "chronyc -c tracking".
 //
-// Tryb CSV jest tu wyborem swiadomym: zwykle wyjscie chronyego jest tabelka
-// dla czlowieka, a jej naglowki i jednostki zmieniaja sie miedzy wersjami.
-// Kolejnosc pol w CSV jest czescia kontraktu narzedzia.
-func ParsujTracking(wyjscie string) Snapshot {
-	snapshot := Snapshot{Service: DemonChrony}
-	linia := strings.TrimSpace(wyjscie)
-	if linia == "" {
+// The CSV mode is a deliberate choice: the plain chrony output is a table
+// for humans, and its headers and units change between versions. The field
+// order in CSV is part of the tool's contract.
+func ParseTracking(output string) Snapshot {
+	snapshot := Snapshot{Service: DaemonChrony}
+	line := strings.TrimSpace(output)
+	if line == "" {
 		return snapshot
 	}
-	pola := strings.Split(strings.Split(linia, "\n")[0], ",")
-	if len(pola) < 14 {
+	fields := strings.Split(strings.Split(line, "\n")[0], ",")
+	if len(fields) < 14 {
 		return snapshot
 	}
 
-	// Referencja "0.0.0.0" albo pusty identyfikator oznaczaja demona, ktory
-	// jeszcze nie wybral zrodla. To nie jest zrodlo o nazwie zerowej.
-	nazwa := strings.TrimSpace(pola[1])
-	if nazwa != "" && nazwa != "0.0.0.0" && pola[0] != "00000000" {
-		snapshot.ReferenceName = nazwa
+	// The reference "0.0.0.0" or an empty identifier means a daemon that
+	// has not selected a source yet. That is not a source with a zero name.
+	name := strings.TrimSpace(fields[1])
+	if name != "" && name != "0.0.0.0" && fields[0] != "00000000" {
+		snapshot.ReferenceName = name
 	}
-	if stratum, err := strconv.ParseUint(strings.TrimSpace(pola[2]), 10, 32); err == nil && stratum > 0 {
-		wartosc := uint32(stratum)
-		snapshot.Stratum = &wartosc
+	if stratum, err := strconv.ParseUint(strings.TrimSpace(fields[2]), 10, 32); err == nil && stratum > 0 {
+		value := uint32(stratum)
+		snapshot.Stratum = &value
 	}
-	if sekundy, err := strconv.ParseFloat(strings.TrimSpace(pola[3]), 64); err == nil && sekundy > 0 {
-		chwila := time.Unix(int64(sekundy), 0).UTC()
-		snapshot.LastSyncAt = &chwila
+	if seconds, err := strconv.ParseFloat(strings.TrimSpace(fields[3]), 64); err == nil && seconds > 0 {
+		moment := time.Unix(int64(seconds), 0).UTC()
+		snapshot.LastSyncAt = &moment
 	}
-	snapshot.OffsetSeconds = liczba(pola[4])
-	snapshot.FrequencyPPM = liczba(pola[7])
-	snapshot.RootDelaySeconds = liczba(pola[10])
-	snapshot.RootDispersionSeconds = liczba(pola[11])
-	snapshot.LeapStatus = strings.TrimSpace(pola[13])
+	snapshot.OffsetSeconds = number(fields[4])
+	snapshot.FrequencyPPM = number(fields[7])
+	snapshot.RootDelaySeconds = number(fields[10])
+	snapshot.RootDispersionSeconds = number(fields[11])
+	snapshot.LeapStatus = strings.TrimSpace(fields[13])
 
-	// Demon bez wybranego zrodla nie jest zsynchronizowany, choc dziala.
-	zsynchronizowany := snapshot.ReferenceName != "" && snapshot.Stratum != nil
-	snapshot.Synchronized = &zsynchronizowany
+	// A daemon without a selected source is not synchronised, although it
+	// runs.
+	synchronized := snapshot.ReferenceName != "" && snapshot.Stratum != nil
+	snapshot.Synchronized = &synchronized
 	return snapshot
 }
 
-// ParsujZrodla czyta wyjscie "chronyc -c sources".
-func ParsujZrodla(wyjscie string) []Zrodlo {
-	var zrodla []Zrodlo
-	for _, linia := range strings.Split(wyjscie, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" {
+// ParseSources reads the output of "chronyc -c sources".
+func ParseSources(output string) []Source {
+	var sources []Source
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		pola := strings.Split(linia, ",")
-		if len(pola) < 10 {
+		fields := strings.Split(line, ",")
+		if len(fields) < 10 {
 			continue
 		}
-		zrodlo := Zrodlo{
-			Address:      strings.TrimSpace(pola[2]),
-			Mode:         nazwaLubZnak(trybyZrodla, pola[0]),
-			State:        nazwaLubZnak(stanyZrodla, pola[1]),
-			Reachability: strings.TrimSpace(pola[5]),
+		source := Source{
+			Address:      strings.TrimSpace(fields[2]),
+			Mode:         nameOrSymbol(sourceModes, fields[0]),
+			State:        nameOrSymbol(sourceStates, fields[1]),
+			Reachability: strings.TrimSpace(fields[5]),
 		}
-		if zrodlo.Address == "" {
+		if source.Address == "" {
 			continue
 		}
-		if stratum, err := strconv.ParseUint(strings.TrimSpace(pola[3]), 10, 32); err == nil {
-			wartosc := uint32(stratum)
-			zrodlo.Stratum = &wartosc
+		if stratum, err := strconv.ParseUint(strings.TrimSpace(fields[3]), 10, 32); err == nil {
+			value := uint32(stratum)
+			source.Stratum = &value
 		}
-		// Chrony podaje odstep odpytywania jako logarytm dwojkowy sekund.
-		if poll, err := strconv.Atoi(strings.TrimSpace(pola[4])); err == nil && poll >= 0 && poll < 24 {
-			sekundy := 1 << uint(poll)
-			zrodlo.PollSeconds = &sekundy
+		// Chrony reports the polling interval as a base-2 logarithm of
+		// seconds.
+		if poll, err := strconv.Atoi(strings.TrimSpace(fields[4])); err == nil && poll >= 0 && poll < 24 {
+			seconds := 1 << uint(poll)
+			source.PollSeconds = &seconds
 		}
-		if ostatnie, err := strconv.ParseInt(strings.TrimSpace(pola[6]), 10, 64); err == nil {
-			zrodlo.LastRxSeconds = &ostatnie
+		if last, err := strconv.ParseInt(strings.TrimSpace(fields[6]), 10, 64); err == nil {
+			source.LastRxSeconds = &last
 		}
-		zrodlo.OffsetSeconds = liczba(pola[7])
-		zrodlo.ErrorSeconds = liczba(pola[9])
-		zrodla = append(zrodla, zrodlo)
+		source.OffsetSeconds = number(fields[7])
+		source.ErrorSeconds = number(fields[9])
+		sources = append(sources, source)
 	}
-	return zrodla
+	return sources
 }
 
-// KatalogDropIn wskazuje katalog, do ktorego panel dopisze serwery.
+// DropInDir points at the directory the panel writes the servers to.
 //
-// Panel nie przepisuje glownego pliku chronyego: sa w nim decyzje o platformie
-// (klucze, dostep, sterowniki zegarow), ktorych zmiana nie nalezy do operacji
-// "ustaw serwery czasu". Zamiast tego czytamy, ktory katalog demon sam wlacza,
-// i piszemy tylko tam. Host bez takiego katalogu dostaje odmowe z powodem,
-// a nie plik, ktorego chrony nigdy nie przeczyta.
-func KatalogDropIn(konfiguracja string) (katalog, rodzaj string) {
-	for _, linia := range strings.Split(konfiguracja, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || strings.HasPrefix(linia, "#") || strings.HasPrefix(linia, "!") ||
-			strings.HasPrefix(linia, ";") || strings.HasPrefix(linia, "%") {
+// The panel does not rewrite the main chrony file: it holds platform
+// decisions (keys, access, clock drivers) whose change does not belong to
+// the "set time servers" operation. Instead it reads which directory the
+// daemon itself includes, and writes only there. A host without such a
+// directory gets a refusal with a reason, not a file chrony never reads.
+func DropInDir(configuration string) (dir, kind string) {
+	for _, line := range strings.Split(configuration, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") ||
+			strings.HasPrefix(line, ";") || strings.HasPrefix(line, "%") {
 			continue
 		}
-		dyrektywa, reszta, ok := strings.Cut(linia, " ")
+		directive, rest, ok := strings.Cut(line, " ")
 		if !ok {
 			continue
 		}
-		sciezka := strings.TrimSpace(reszta)
-		switch strings.ToLower(dyrektywa) {
+		path := strings.TrimSpace(rest)
+		switch strings.ToLower(directive) {
 		case "confdir":
-			// Dyrektywa przyjmuje kilka katalogow rozdzielonych spacja;
-			// piszemy do pierwszego, bo to on ma pierwszenstwo.
-			if pierwszy := pierwszaSciezka(sciezka); pierwszy != "" {
-				return pierwszy, RodzajKonfiguracji
+			// The directive accepts several space-separated directories;
+			// the first is written to, because it takes precedence.
+			if first := firstPath(path); first != "" {
+				return first, KindConfiguration
 			}
 		case "sourcedir":
-			if pierwszy := pierwszaSciezka(sciezka); pierwszy != "" && !strings.HasPrefix(pierwszy, "/run") {
-				// Katalog w /run znika po restarcie - to miejsce na zrodla
-				// z DHCP, a nie na stan docelowy panelu.
-				return pierwszy, RodzajZrodel
+			if first := firstPath(path); first != "" && !strings.HasPrefix(first, "/run") {
+				// A directory in /run vanishes after a reboot - it is the
+				// place for DHCP sources, not for the panel's desired state.
+				return first, KindSources
 			}
 		case "include":
-			// Wzorzec "include /etc/chrony.d/*.conf" wskazuje katalog
-			// konfiguracji tak samo jak confdir, tylko starsza skladnia.
-			if katalog := katalogZeWzorca(pierwszaSciezka(sciezka)); katalog != "" {
-				return katalog, RodzajKonfiguracji
+			// The pattern "include /etc/chrony.d/*.conf" points at a
+			// configuration directory just like confdir, only in the older
+			// syntax.
+			if dir := dirFromPattern(firstPath(path)); dir != "" {
+				return dir, KindConfiguration
 			}
 		}
 	}
 	return "", ""
 }
 
-// ParsujSerwery czyta serwery czasu z pliku konfiguracyjnego chronyego.
-func ParsujSerwery(tresc, zrodlo string, zarzadzany bool) []Serwer {
-	var serwery []Serwer
-	for _, linia := range strings.Split(tresc, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || strings.HasPrefix(linia, "#") || strings.HasPrefix(linia, ";") {
+// ParseServers reads the time servers from a chrony configuration file.
+func ParseServers(content, source string, managed bool) []Server {
+	var servers []Server
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		dyrektywa, reszta, ok := strings.Cut(linia, " ")
+		directive, rest, ok := strings.Cut(line, " ")
 		if !ok {
 			continue
 		}
-		dyrektywa = strings.ToLower(dyrektywa)
-		if dyrektywa != "server" && dyrektywa != "pool" && dyrektywa != "peer" {
+		directive = strings.ToLower(directive)
+		if directive != "server" && directive != "pool" && directive != "peer" {
 			continue
 		}
-		pola := strings.Fields(reszta)
-		if len(pola) == 0 {
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
 			continue
 		}
-		serwery = append(serwery, Serwer{
-			Address: pola[0],
-			Source:  zrodlo,
-			Pool:    dyrektywa == "pool",
-			Managed: zarzadzany,
+		servers = append(servers, Server{
+			Address: fields[0],
+			Source:  source,
+			Pool:    directive == "pool",
+			Managed: managed,
 		})
 	}
-	return serwery
+	return servers
 }
 
-// ParsujNTPZTimesyncd czyta liste serwerow z pliku timesyncd.
-func ParsujNTPZTimesyncd(tresc, zrodlo string, zarzadzany bool) []Serwer {
-	var serwery []Serwer
-	for _, linia := range strings.Split(tresc, "\n") {
-		linia = strings.TrimSpace(linia)
-		if linia == "" || strings.HasPrefix(linia, "#") || strings.HasPrefix(linia, ";") {
+// ParseTimesyncdNTP reads the server list from a timesyncd file.
+func ParseTimesyncdNTP(content, source string, managed bool) []Server {
+	var servers []Server
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		klucz, wartosc, ok := strings.Cut(linia, "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(klucz), "NTP") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "NTP") {
 			continue
 		}
-		for _, adres := range strings.Fields(wartosc) {
-			serwery = append(serwery, Serwer{Address: adres, Source: zrodlo, Managed: zarzadzany})
+		for _, address := range strings.Fields(value) {
+			servers = append(servers, Server{Address: address, Source: source, Managed: managed})
 		}
 	}
-	return serwery
+	return servers
 }
 
-func pierwszaSciezka(wartosc string) string {
-	pola := strings.Fields(wartosc)
-	if len(pola) == 0 {
+func firstPath(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
 		return ""
 	}
-	return pola[0]
+	return fields[0]
 }
 
-// katalogZeWzorca zamienia "/etc/chrony.d/*.conf" na katalog.
-func katalogZeWzorca(wzorzec string) string {
-	if !strings.Contains(wzorzec, "*") {
+// dirFromPattern turns "/etc/chrony.d/*.conf" into a directory.
+func dirFromPattern(pattern string) string {
+	if !strings.Contains(pattern, "*") {
 		return ""
 	}
-	katalog := wzorzec[:strings.LastIndex(wzorzec, "/")+1]
-	return strings.TrimSuffix(katalog, "/")
+	dir := pattern[:strings.LastIndex(pattern, "/")+1]
+	return strings.TrimSuffix(dir, "/")
 }
 
-func nazwaLubZnak(slownik map[string]string, pole string) string {
-	znak := strings.TrimSpace(pole)
-	if nazwa, ok := slownik[znak]; ok {
-		return nazwa
+func nameOrSymbol(dictionary map[string]string, field string) string {
+	symbol := strings.TrimSpace(field)
+	if name, ok := dictionary[symbol]; ok {
+		return name
 	}
-	return znak
+	return symbol
 }
 
-// liczba czyta pole zmiennoprzecinkowe. Pole nieczytelne zostaje pustym
-// wskaznikiem: brak pomiaru nie jest pomiarem rownym zeru.
-func liczba(pole string) *float64 {
-	wartosc, err := strconv.ParseFloat(strings.TrimSpace(pole), 64)
+// number reads a floating-point field. An unreadable field stays a nil
+// pointer: no measurement is not a measurement equal to zero.
+func number(field string) *float64 {
+	value, err := strconv.ParseFloat(strings.TrimSpace(field), 64)
 	if err != nil {
 		return nil
 	}
-	return &wartosc
+	return &value
 }

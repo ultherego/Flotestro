@@ -13,360 +13,367 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Wykonawca uruchamia narzedzie hosta. Wstrzykniecie zamiast wywolania
-// wprost pozwala sprawdzic parsowanie bez hosta z certmongerem.
-type Wykonawca func(ctx context.Context, nazwa string, argumenty ...string) (string, error)
+// Runner runs a host tool. Injection instead of a direct call lets the
+// parsing be checked without a host with certmonger.
+type Runner func(ctx context.Context, name string, args ...string) (string, error)
 
-// Cel wskazuje plik do obejrzenia wraz z tym, co panel o nim juz wie.
+// Target names a file to look at together with what the panel already
+// knows about it.
 //
-// Sciezka klucza i nazwa uslugi nie sa zgadywane z nazwy katalogu: wpisuje je
-// czlowiek, ktory wie, co czyta co. Panel, ktory by je zgadywal, pokazywalby
-// powiazania wygladajace na sprawdzone, a bedace domyslem.
-type Cel struct {
+// The key path and the service name are not guessed from the directory
+// name: a human who knows what reads what enters them. A panel that
+// guessed them would show relations looking checked and being a guess.
+type Target struct {
 	Path    string `json:"path"`
 	KeyPath string `json:"key_path,omitempty"`
 	Service string `json:"service,omitempty"`
 }
 
-// Skanuj czyta wskazane pliki bez uprawnien roota.
+// Scan reads the named files without root privileges.
 //
-// Zakres jest dokladnie taki, jaki przyszedl w zleceniu, powiekszony pozniej
-// o to, co host wie o sobie sam - czyli o zlecenia certmongera. Modul nie
-// przeszukuje systemu plikow, wiec nie znajdzie certyfikatu, o ktorym nikt
-// nie powiedzial; to jest cena za to, ze nie zaglada tam, gdzie nie powinien.
-func Skanuj(cele []Cel) Snapshot {
+// The scope is exactly what came in the order, later extended by what the
+// host knows about itself - that is the certmonger requests. The module
+// does not search the filesystem, so it will not find a certificate nobody
+// mentioned; that is the price of not looking where it should not.
+func Scan(targets []Target) Snapshot {
 	snapshot := Snapshot{
 		ObservedAt: time.Now().UTC(),
 		Missing:    map[string]string{},
 	}
 
-	for _, cel := range cele {
-		snapshot.Scanned = append(snapshot.Scanned, cel.Path)
-		snapshot.Certificates = append(snapshot.Certificates, obejrzyj(cel, snapshot.Missing))
-		if len(snapshot.Certificates) >= MaksymalnaLiczbaCertyfikatow {
-			// Urwana lista musi to powiedziec. Cisza w tym miejscu wyglada
-			// jak host, ktory nie ma wiecej certyfikatow - a to host,
-			// o ktorego reszte nikt nie zapytal.
-			if len(cele) > len(snapshot.Certificates) {
-				snapshot.Truncated = len(cele) - len(snapshot.Certificates)
+	for _, target := range targets {
+		snapshot.Scanned = append(snapshot.Scanned, target.Path)
+		snapshot.Certificates = append(snapshot.Certificates, inspect(target, snapshot.Missing))
+		if len(snapshot.Certificates) >= MaxCertificates {
+			// A cut-off list must say so. Silence here looks like a host
+			// that has no more certificates - and it is a host nobody asked
+			// about the rest.
+			if len(targets) > len(snapshot.Certificates) {
+				snapshot.Truncated = len(targets) - len(snapshot.Certificates)
 				snapshot.TruncatedReason = fmt.Sprintf(
-					"lista celow jest dluzsza niz %d: opisano pierwsze %d, pominieto %d",
-					MaksymalnaLiczbaCertyfikatow, len(snapshot.Certificates), snapshot.Truncated)
+					"the target list is longer than %d: the first %d described, %d skipped",
+					MaxCertificates, len(snapshot.Certificates), snapshot.Truncated)
 			}
 			break
 		}
 	}
 
-	// Stan zlecen certmongera wymaga roota, ale samo pytanie "czy na tym
-	// hoscie w ogole cos pilnuje certyfikatow" ma odpowiedz bez niego:
-	// host bez narzedzia nie ma czego sledzic i nie jest to stan nieznany.
-	if !MaCertmonger() {
+	// The state of the certmonger requests needs root, but the question
+	// "does anything on this host watch certificates at all" has an answer
+	// without it: a host without the tool has nothing to track and that is
+	// not an unknown state.
+	if !HasCertmonger() {
 		snapshot.TrackingKnown = true
 		snapshot.TrackingReason = "this host does not run certmonger"
 		for i := range snapshot.Certificates {
 			if snapshot.Certificates[i].UnavailableReason == "" {
-				snapshot.Certificates[i].Renewal = OdnawianieReczne
+				snapshot.Certificates[i].Renewal = RenewalManual
 			}
 		}
 	} else {
-		snapshot.Missing[FaktSledzenie] = "certmonger request list requires root"
+		snapshot.Missing[FactTracking] = "certmonger request list requires root"
 	}
 
-	// Klucz prywatny lezy w katalogu zamknietym dla wszystkich poza usluga,
-	// wiec nawet jego prawa dostepu widzi tylko root. Brak wiedzy o kluczu
-	// nie jest tym samym, co klucz, ktorego nie ma.
-	if potrzebneKlucze(cele) {
-		snapshot.Missing[FaktMetadaneKluczy] = "private key metadata requires root"
+	// The private key lies in a directory closed to everyone but the
+	// service, so even its permissions are seen only by root. No knowledge
+	// about the key is not the same as a key that does not exist.
+	if keysNeeded(targets) {
+		snapshot.Missing[FactKeyMetadata] = "private key metadata requires root"
 	} else {
 		snapshot.KeysKnown = true
 	}
 	return snapshot
 }
 
-// potrzebneKlucze mowi, czy ktorykolwiek cel wskazuje klucz.
-func potrzebneKlucze(cele []Cel) bool {
-	for _, cel := range cele {
-		if cel.KeyPath != "" {
+// keysNeeded says whether any target names a key.
+func keysNeeded(targets []Target) bool {
+	for _, target := range targets {
+		if target.KeyPath != "" {
 			return true
 		}
 	}
 	return false
 }
 
-// MaCertmonger mowi, czy na hoscie jest narzedzie certmongera.
-func MaCertmonger() bool {
-	return SciezkaNarzedzia() != ""
+// HasCertmonger says whether the certmonger tool is on the host.
+func HasCertmonger() bool {
+	return ToolPath() != ""
 }
 
-// SciezkaNarzedzia zwraca sciezke do getcert albo pusty napis.
-func SciezkaNarzedzia() string {
-	for _, sciezka := range []string{SciezkaGetcert, SciezkaGetcertAlt} {
-		if info, err := os.Stat(sciezka); err == nil && !info.IsDir() {
-			return sciezka
+// ToolPath returns the path to getcert or an empty string.
+func ToolPath() string {
+	for _, path := range []string{GetcertPath, GetcertPathAlt} {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
 		}
 	}
 	return ""
 }
 
-// obejrzyj czyta jeden plik i sklada z niego opis certyfikatu.
-func obejrzyj(cel Cel, brakujace map[string]string) Certyfikat {
-	opis := Certyfikat{
-		Path:         cel.Path,
-		OwnerService: cel.Service,
-		Source:       ZrodloZewnetrzne,
-		Renewal:      OdnawianieNieznane,
+// inspect reads one file and assembles a certificate description from it.
+func inspect(target Target, missing map[string]string) Certificate {
+	description := Certificate{
+		Path:         target.Path,
+		OwnerService: target.Service,
+		Source:       SourceExternal,
+		Renewal:      RenewalUnknown,
 	}
-	if cel.KeyPath != "" {
-		opis.Key = &MetadaneKlucza{Path: cel.KeyPath, Reason: "not read yet"}
+	if target.KeyPath != "" {
+		description.Key = &KeyMetadata{Path: target.KeyPath, Reason: "not read yet"}
 	}
-	if err := WalidujSciezke(cel.Path); err != nil {
-		opis.UnavailableReason = err.Error()
-		return opis
+	if err := ValidatePath(target.Path); err != nil {
+		description.UnavailableReason = err.Error()
+		return description
 	}
 
-	dane, err := CzytajPlik(cel.Path)
+	data, err := ReadFile(target.Path)
 	if err != nil {
-		opis.UnavailableReason = err.Error()
-		// Plik, ktorego agent nie moze otworzyc, nie jest plikiem, ktorego
-		// nie ma: certyfikat uslugi bywa trzymany w katalogu zamknietym dla
-		// wszystkich poza nia. O tresc pyta wtedy helper, po nazwie pliku.
+		description.UnavailableReason = err.Error()
+		// A file the agent cannot open is not a file that does not exist:
+		// a service certificate is at times kept in a directory closed to
+		// everyone but the service. The helper is then asked for the
+		// content, by file name.
 		if errors.Is(err, os.ErrPermission) {
-			brakujace[FaktTrescPliku] = "certificate files are not readable without root"
+			missing[FactCertificateFiles] = "certificate files are not readable without root"
 		}
-		return opis
+		return description
 	}
 
-	certy, err := ParsujPEM(dane)
+	certs, err := ParsePEM(data)
 	if err != nil {
-		opis.UnavailableReason = err.Error()
-		return opis
+		description.UnavailableReason = err.Error()
+		return description
 	}
-	zebrany := Opisz(cel.Path, certy)
-	zebrany.OwnerService = cel.Service
-	zebrany.Key = opis.Key
-	return zebrany
+	gathered := Describe(target.Path, certs)
+	gathered.OwnerService = target.Service
+	gathered.Key = description.Key
+	return gathered
 }
 
-// CzytajPlik czyta plik certyfikatu z gornym ograniczeniem rozmiaru.
+// ReadFile reads a certificate file with an upper size bound.
 //
-// Otwarcie idzie z O_NOFOLLOW: sciezka certyfikatu bywa dowiazaniem, ale
-// dowiazanie moze tez wskazywac gdziekolwiek indziej - a modul czytalby
-// wtedy plik, ktorego nikt mu nie wskazal.
-func CzytajPlik(sciezka string) ([]byte, error) {
-	uchwyt, err := os.OpenFile(sciezka, os.O_RDONLY|unix.O_NOFOLLOW, 0)
+// The open goes with O_NOFOLLOW: a certificate path is at times a symlink,
+// but a symlink may also point anywhere else - and the module would then
+// read a file nobody named for it.
+func ReadFile(path string) ([]byte, error) {
+	handle, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer uchwyt.Close()
-	info, err := uchwyt.Stat()
+	defer handle.Close()
+	info, err := handle.Stat()
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("sciezka nie wskazuje zwyklego pliku")
+		return nil, errors.New("the path does not point at a regular file")
 	}
-	if info.Size() > MaksymalnyRozmiarPliku {
-		return nil, errors.New("plik jest wiekszy niz " +
-			strconv.Itoa(MaksymalnyRozmiarPliku) + " bajtow; to nie jest certyfikat")
+	if info.Size() > MaxFileSize {
+		return nil, errors.New("the file is bigger than " +
+			strconv.Itoa(MaxFileSize) + " bytes; this is not a certificate")
 	}
-	return io.ReadAll(io.LimitReader(uchwyt, MaksymalnyRozmiarPliku))
+	return io.ReadAll(io.LimitReader(handle, MaxFileSize))
 }
 
-// OpiszKlucz zbiera metadane klucza prywatnego bez czytania jego tresci.
-func OpiszKlucz(sciezka string) MetadaneKlucza {
-	opis := MetadaneKlucza{Path: sciezka}
-	info, err := os.Lstat(sciezka)
+// DescribeKey gathers the private key metadata without reading its
+// content.
+func DescribeKey(path string) KeyMetadata {
+	description := KeyMetadata{Path: path}
+	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Brak pliku jest odpowiedzia, a nie bledem odczytu: usluga
-			// z certyfikatem bez klucza nie wstanie i operator ma to widziec.
-			return opis
+			// A missing file is an answer, not a read error: a service with
+			// a certificate without a key does not come up and the operator
+			// is meant to see that.
+			return description
 		}
-		opis.Reason = err.Error()
-		return opis
+		description.Reason = err.Error()
+		return description
 	}
-	opis.Exists = true
-	opis.Mode = strconv.FormatUint(uint64(info.Mode().Perm()), 8)
-	if len(opis.Mode) < 4 {
-		opis.Mode = "0000"[:4-len(opis.Mode)] + opis.Mode
+	description.Exists = true
+	description.Mode = strconv.FormatUint(uint64(info.Mode().Perm()), 8)
+	if len(description.Mode) < 4 {
+		description.Mode = "0000"[:4-len(description.Mode)] + description.Mode
 	}
-	opis.WorldReadable = info.Mode().Perm()&0o004 != 0
+	description.WorldReadable = info.Mode().Perm()&0o004 != 0
 	if stat, ok := info.Sys().(*unix.Stat_t); ok {
-		opis.Owner = nazwaUzytkownika(int(stat.Uid))
-		opis.Group = nazwaGrupy(int(stat.Gid))
+		description.Owner = userName(int(stat.Uid))
+		description.Group = groupName(int(stat.Gid))
 	}
-	return opis
+	return description
 }
 
-func nazwaUzytkownika(uid int) string {
-	if wpis, err := user.LookupId(strconv.Itoa(uid)); err == nil {
-		return wpis.Username
+func userName(uid int) string {
+	if entry, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+		return entry.Username
 	}
 	return strconv.Itoa(uid)
 }
 
-func nazwaGrupy(gid int) string {
-	if wpis, err := user.LookupGroupId(strconv.Itoa(gid)); err == nil {
-		return wpis.Name
+func groupName(gid int) string {
+	if entry, err := user.LookupGroupId(strconv.Itoa(gid)); err == nil {
+		return entry.Name
 	}
 	return strconv.Itoa(gid)
 }
 
-// ZbierzUzupelnienie odczytuje fakty, o ktore agent poprosil po nazwie.
+// CollectSupplement reads the facts the agent asked for by name.
 //
-// Helper nie dostaje polecenia "przeczytaj plik" ani "uruchom narzedzie":
-// dostaje liste nazw faktow i liste celow, ktore panel juz raz zatwierdzil,
-// a kazda sciezke sprawdza ponownie wlasna regula.
-func ZbierzUzupelnienie(ctx context.Context, uruchom Wykonawca,
-	fakty []string, cele []Cel) Uzupelnienie {
-	dodatki := Uzupelnienie{Errors: map[string]string{}}
+// The helper receives neither a "read this file" nor a "run this tool"
+// command: it receives a list of fact names and a list of targets the panel
+// has already approved once, and checks every path again with its own
+// rule.
+func CollectSupplement(ctx context.Context, run Runner,
+	facts []string, targets []Target) Supplement {
+	extra := Supplement{Errors: map[string]string{}}
 
-	for _, fakt := range fakty {
-		switch fakt {
-		case FaktMetadaneKluczy:
-			dodatki.Keys = map[string]MetadaneKlucza{}
-			for _, cel := range cele {
-				if cel.KeyPath == "" {
+	for _, fact := range facts {
+		switch fact {
+		case FactKeyMetadata:
+			extra.Keys = map[string]KeyMetadata{}
+			for _, target := range targets {
+				if target.KeyPath == "" {
 					continue
 				}
-				if err := WalidujSciezke(cel.KeyPath); err != nil {
-					dodatki.Keys[cel.KeyPath] = MetadaneKlucza{Path: cel.KeyPath, Reason: err.Error()}
+				if err := ValidatePath(target.KeyPath); err != nil {
+					extra.Keys[target.KeyPath] = KeyMetadata{Path: target.KeyPath, Reason: err.Error()}
 					continue
 				}
-				dodatki.Keys[cel.KeyPath] = OpiszKlucz(cel.KeyPath)
+				extra.Keys[target.KeyPath] = DescribeKey(target.KeyPath)
 			}
 
-		case FaktTrescPliku:
-			dodatki.Files = map[string]string{}
-			for _, cel := range cele {
-				if err := WalidujSciezke(cel.Path); err != nil {
-					dodatki.Errors[cel.Path] = err.Error()
+		case FactCertificateFiles:
+			extra.Files = map[string]string{}
+			for _, target := range targets {
+				if err := ValidatePath(target.Path); err != nil {
+					extra.Errors[target.Path] = err.Error()
 					continue
 				}
-				dane, err := CzytajPlik(cel.Path)
+				data, err := ReadFile(target.Path)
 				if err != nil {
-					dodatki.Errors[cel.Path] = err.Error()
+					extra.Errors[target.Path] = err.Error()
 					continue
 				}
-				dodatki.Files[cel.Path] = string(dane)
+				extra.Files[target.Path] = string(data)
 			}
 
-		case FaktSledzenie:
-			narzedzie := SciezkaNarzedzia()
-			if narzedzie == "" {
-				dodatki.TrackingKnown = true
-				dodatki.TrackingReason = "this host does not run certmonger"
+		case FactTracking:
+			tool := ToolPath()
+			if tool == "" {
+				extra.TrackingKnown = true
+				extra.TrackingReason = "this host does not run certmonger"
 				continue
 			}
-			wyjscie, err := uruchom(ctx, narzedzie, "list")
+			output, err := run(ctx, tool, "list")
 			if err != nil {
-				dodatki.Errors[FaktSledzenie] = err.Error()
+				extra.Errors[FactTracking] = err.Error()
 				continue
 			}
-			dodatki.Tracking = ParsujGetcert(wyjscie)
-			dodatki.TrackingKnown = true
+			extra.Tracking = ParseGetcert(output)
+			extra.TrackingKnown = true
 		}
 	}
-	return dodatki
+	return extra
 }
 
-// Uzupelnij wstawia fakty helpera do obrazu zebranego bez roota.
-func (s Snapshot) Uzupelnij(dodatki Uzupelnienie) Snapshot {
-	if dodatki.Keys != nil {
-		delete(s.Missing, FaktMetadaneKluczy)
+// Supplemented inserts the helper facts into the picture gathered without
+// root.
+func (s Snapshot) Supplemented(extra Supplement) Snapshot {
+	if extra.Keys != nil {
+		delete(s.Missing, FactKeyMetadata)
 		s.KeysKnown = true
 		for i := range s.Certificates {
-			klucz := s.Certificates[i].Key
-			if klucz == nil {
+			key := s.Certificates[i].Key
+			if key == nil {
 				continue
 			}
-			if metadane, znany := dodatki.Keys[klucz.Path]; znany {
-				s.Certificates[i].Key = &metadane
+			if metadata, known := extra.Keys[key.Path]; known {
+				s.Certificates[i].Key = &metadata
 			}
 		}
 	}
 
-	if dodatki.Files != nil {
-		for sciezka, tresc := range dodatki.Files {
-			certy, err := ParsujPEM([]byte(tresc))
+	if extra.Files != nil {
+		for path, content := range extra.Files {
+			certs, err := ParsePEM([]byte(content))
 			if err != nil {
 				continue
 			}
 			for i := range s.Certificates {
-				if s.Certificates[i].Path != sciezka {
+				if s.Certificates[i].Path != path {
 					continue
 				}
-				zebrany := Opisz(sciezka, certy)
-				zebrany.OwnerService = s.Certificates[i].OwnerService
-				zebrany.Key = s.Certificates[i].Key
-				s.Certificates[i] = zebrany
+				gathered := Describe(path, certs)
+				gathered.OwnerService = s.Certificates[i].OwnerService
+				gathered.Key = s.Certificates[i].Key
+				s.Certificates[i] = gathered
 			}
 		}
-		if len(dodatki.Files) > 0 {
-			delete(s.Missing, FaktTrescPliku)
+		if len(extra.Files) > 0 {
+			delete(s.Missing, FactCertificateFiles)
 		}
 	}
 
-	if dodatki.TrackingKnown {
-		delete(s.Missing, FaktSledzenie)
+	if extra.TrackingKnown {
+		delete(s.Missing, FactTracking)
 		s.TrackingKnown = true
-		s.TrackingReason = dodatki.TrackingReason
+		s.TrackingReason = extra.TrackingReason
 		for i := range s.Certificates {
 			if s.Certificates[i].UnavailableReason != "" {
 				continue
 			}
-			sledzenie, sledzony := dodatki.Tracking[s.Certificates[i].Path]
-			if !sledzony {
-				s.Certificates[i].Renewal = OdnawianieReczne
+			tracking, tracked := extra.Tracking[s.Certificates[i].Path]
+			if !tracked {
+				s.Certificates[i].Renewal = RenewalManual
 				continue
 			}
-			kopia := sledzenie
-			s.Certificates[i].Tracking = &kopia
-			s.Certificates[i].Renewal = OdnawianieSledzone
-			s.Certificates[i].Source = ZrodloCertmonger
-			if s.Certificates[i].Key == nil && sledzenie.KeyPath != "" {
-				s.Certificates[i].Key = &MetadaneKlucza{
-					Path:   sledzenie.KeyPath,
+			copied := tracking
+			s.Certificates[i].Tracking = &copied
+			s.Certificates[i].Renewal = RenewalTracked
+			s.Certificates[i].Source = SourceCertmonger
+			if s.Certificates[i].Key == nil && tracking.KeyPath != "" {
+				s.Certificates[i].Key = &KeyMetadata{
+					Path:   tracking.KeyPath,
 					Reason: "key is managed by certmonger",
 				}
 			}
 		}
 	}
 
-	for nazwa, powod := range dodatki.Errors {
+	for name, reason := range extra.Errors {
 		if s.Missing == nil {
 			s.Missing = map[string]string{}
 		}
-		s.Missing[nazwa] = powod
+		s.Missing[name] = reason
 	}
 	return s
 }
 
-// DodajSledzone doklada do zakresu certyfikaty, ktorych pilnuje certmonger.
+// AddTracked adds to the scope the certificates watched by certmonger.
 //
-// Host wie o nich sam, wiec panel nie musi ich konfigurowac - a bez nich
-// zakladka pokazywalaby pustke na hoscie, ktory ma wlasny certyfikat
-// domenowy i odnawia go od miesiecy.
-func DodajSledzone(cele []Cel, sledzenia map[string]Sledzenie) []Cel {
-	znane := map[string]bool{}
-	for _, cel := range cele {
-		znane[cel.Path] = true
+// The host knows about them itself, so the panel does not have to configure
+// them - and without them the tab would show emptiness on a host that has
+// its own domain certificate and has been renewing it for months.
+func AddTracked(targets []Target, trackings map[string]Tracking) []Target {
+	known := map[string]bool{}
+	for _, target := range targets {
+		known[target.Path] = true
 	}
-	for sciezka, sledzenie := range sledzenia {
-		if sciezka == "" || znane[sciezka] {
+	for path, tracking := range trackings {
+		if path == "" || known[path] {
 			continue
 		}
-		if WalidujSciezke(sciezka) != nil {
+		if ValidatePath(path) != nil {
 			continue
 		}
-		cele = append(cele, Cel{Path: sciezka, KeyPath: sledzenie.KeyPath})
-		znane[sciezka] = true
+		targets = append(targets, Target{Path: path, KeyPath: tracking.KeyPath})
+		known[path] = true
 	}
-	return cele
+	return targets
 }
 
-// wlascicielPliku odczytuje identyfikatory wlasciciela z metadanych pliku.
-func wlascicielPliku(info os.FileInfo) (int, int, bool) {
+// fileOwner reads the owner identifiers from the file metadata.
+func fileOwner(info os.FileInfo) (int, int, bool) {
 	stat, ok := info.Sys().(*unix.Stat_t)
 	if !ok {
 		return -1, -1, false

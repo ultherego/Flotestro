@@ -37,7 +37,7 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 		if action.GetOperation() == helperv1.SshRequest_OPERATION_PLAN {
 			// A missing server is an answer of the plan, not a read error: the
 			// campaign is to see this host as a refusal.
-			return sshPlanResponse(sshmodule.Snapshot{}, sshmodule.Zaplanuj(
+			return sshPlanResponse(sshmodule.Snapshot{}, sshmodule.Compute(
 				sshmodule.Snapshot{UnavailableReason: "this host has no sshd server"},
 				settingsFromRequest(action), action.GetAllowLockout()))
 		}
@@ -49,7 +49,7 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 		return sshResponse(s.readSSH(actionCtx), "", nil)
 	case helperv1.SshRequest_OPERATION_PLAN:
 		state := s.readSSH(actionCtx)
-		return sshPlanResponse(state, sshmodule.Zaplanuj(state,
+		return sshPlanResponse(state, sshmodule.Compute(state,
 			settingsFromRequest(action), action.GetAllowLockout()))
 	case helperv1.SshRequest_OPERATION_APPLY:
 		return s.writeSSHConfiguration(actionCtx, action)
@@ -73,7 +73,7 @@ func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.Ssh
 	// operator looked at. A different digest means the server or the panel file
 	// changed since the planning - and that is a refusal, not a warning.
 	if expected := action.GetPlanHash(); expected != "" {
-		if now := sshmodule.Zaplanuj(state, settings, action.GetAllowLockout()); now.PlanHash != expected {
+		if now := sshmodule.Compute(state, settings, action.GetAllowLockout()); now.PlanHash != expected {
 			return reject(ErrorPreconditionFailed,
 				"the sshd configuration changed since the planning; the change needs a new plan")
 		}
@@ -81,13 +81,13 @@ func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.Ssh
 
 	// A server nobody can log into by any method is not secured - it is
 	// unreachable.
-	if !action.GetAllowLockout() && sshmodule.OdcinaWszystkieMetody(settings, state) {
+	if !action.GetAllowLockout() && sshmodule.CutsOffAllMethods(settings, state) {
 		return reject(ErrorUnsupported,
 			"after this change no working authentication method would be left; "+
 				"cutting access off deliberately needs explicit operator consent")
 	}
 
-	content, err := sshmodule.SkladajDropIn(settings)
+	content, err := sshmodule.ComposeDropIn(settings)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
@@ -121,7 +121,7 @@ func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.Ssh
 	// In sshd the first value wins, and the included files are read in
 	// alphabetical order: an earlier file of the host administrator shadows
 	// ours. Silence in this place would be a false success.
-	mismatches := sshmodule.RozbiezneUstawienia(settings, after)
+	mismatches := sshmodule.DivergentSettings(settings, after)
 	message := "the configuration was written and reloaded"
 	if len(mismatches) > 0 {
 		message = "the configuration was written, but some settings did not take effect"
@@ -178,19 +178,19 @@ func (s *Server) rotateHostKey(ctx context.Context, action *helperv1.SshRequest)
 
 // readSSH assembles the picture of the server configuration.
 func (s *Server) readSSH(ctx context.Context) sshmodule.Snapshot {
-	snapshot := sshmodule.Snapshot{ObservedAt: time.Now().UTC(), ManagedPath: sshmodule.SciezkaDropIn}
+	snapshot := sshmodule.Snapshot{ObservedAt: time.Now().UTC(), ManagedPath: sshmodule.DropInPath}
 
 	output, err := toolOutput(ctx, sshdPath, "-T")
 	if err != nil {
 		snapshot.UnavailableReason = "sshd -T: " + err.Error()
 		return snapshot
 	}
-	effective := sshmodule.ParsujEffective(output)
+	effective := sshmodule.ParseEffective(output)
 	effective.ObservedAt = snapshot.ObservedAt
 	effective.ManagedPath = snapshot.ManagedPath
 	snapshot = effective
 
-	if content, err := os.ReadFile(sshmodule.SciezkaDropIn); err == nil {
+	if content, err := os.ReadFile(sshmodule.DropInPath); err == nil {
 		snapshot.Managed = string(content)
 		snapshot.ManagedPresent = true
 	}
@@ -214,7 +214,7 @@ func keyFingerprints(ctx context.Context) []sshmodule.HostKey {
 		if err != nil {
 			continue
 		}
-		if key, ok := sshmodule.ParsujOdcisk(output, file); ok {
+		if key, ok := sshmodule.ParseFingerprint(output, file); ok {
 			keys = append(keys, key)
 		}
 	}
@@ -235,8 +235,8 @@ func sshUnit() string {
 	return "sshd.service"
 }
 
-func settingsFromRequest(action *helperv1.SshRequest) sshmodule.Ustawienia {
-	return sshmodule.Ustawienia{
+func settingsFromRequest(action *helperv1.SshRequest) sshmodule.Settings {
+	return sshmodule.Settings{
 		Port:                   action.GetPort(),
 		PermitRootLogin:        action.GetPermitRootLogin(),
 		PasswordAuthentication: action.GetPasswordAuthentication(),
@@ -250,7 +250,7 @@ func settingsFromRequest(action *helperv1.SshRequest) sshmodule.Ustawienia {
 }
 
 func previousDropIn() (string, bool) {
-	content, err := os.ReadFile(sshmodule.SciezkaDropIn)
+	content, err := os.ReadFile(sshmodule.DropInPath)
 	if err != nil {
 		return "", false
 	}
@@ -258,21 +258,21 @@ func previousDropIn() (string, bool) {
 }
 
 func writeDropIn(content string) error {
-	if err := os.MkdirAll(sshmodule.KatalogDropIn, 0o755); err != nil {
+	if err := os.MkdirAll(sshmodule.DropInDir, 0o755); err != nil {
 		return err
 	}
 	// The temporary file must not end in .conf: the directory is included by a
 	// pattern and sshd would read half of the write as configuration.
-	temporary := sshmodule.SciezkaDropIn + ".new"
+	temporary := sshmodule.DropInPath + ".new"
 	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(temporary, sshmodule.SciezkaDropIn)
+	return os.Rename(temporary, sshmodule.DropInPath)
 }
 
 func restoreDropIn(content string, existed bool) {
 	if !existed {
-		_ = os.Remove(sshmodule.SciezkaDropIn)
+		_ = os.Remove(sshmodule.DropInPath)
 		return
 	}
 	_ = writeDropIn(content)
@@ -300,7 +300,7 @@ func sshPlanResponse(state sshmodule.Snapshot, plan sshmodule.Plan) *helperv1.He
 	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == sshmodule.PlanBezZmian:
+	case plan.Action == sshmodule.PlanNoChange:
 		message = "the sshd configuration is already in the desired state"
 	default:
 		message = strings.Join(plan.Changes, "; ")

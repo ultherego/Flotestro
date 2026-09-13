@@ -80,7 +80,7 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 	if action.GetZone() != "" {
 		return s.planZone(state, action)
 	}
-	registry, err := firewall.WczytajRejestr(firewall.KatalogRejestru)
+	registry, err := firewall.LoadRegistry(firewall.RegistryDir)
 	if err != nil {
 		return reject(ErrorExecFailed, "reading the rule registry: "+err.Error())
 	}
@@ -92,7 +92,7 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 
 	var plan firewall.Plan
 	if removal {
-		plan = firewall.ZaplanujUsuniecie(registry, action.GetRuleId(), state.Hash, state.Adapter)
+		plan = firewall.ComputeRemoval(registry, action.GetRuleId(), state.Hash, state.Adapter)
 	} else {
 		rule := firewall.RuleSpec{
 			ID: action.GetRuleId(), Chain: action.GetChain(), Action: action.GetAction(),
@@ -100,14 +100,14 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 			Sources: action.GetSources(), Interface: action.GetInterface(),
 			Comment: action.GetComment(),
 		}
-		if err := rule.Waliduj(); err != nil {
+		if err := rule.Validate(); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		plan = firewall.ZaplanujRegule(registry, rule, state.Hash, state.Adapter)
+		plan = firewall.ComputeRule(registry, rule, state.Hash, state.Adapter)
 		if !action.GetBreakGlass() {
-			if err := firewall.ChroniKanalZarzadzania(rule,
+			if err := firewall.ProtectsManagementChannel(rule,
 				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
-				plan.Odmow(err.Error())
+				plan.Refuse(err.Error())
 			}
 		}
 	}
@@ -129,22 +129,22 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 func (s *Server) planZone(state firewall.Snapshot, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	var plan firewall.ZonePlan
 	switch {
-	case !exists(firewall.SciezkaFirewallCmd):
+	case !exists(firewall.FirewallCmdPath):
 		plan = firewall.ZonePlan{Zone: action.GetZone(), RulesetHash: state.Hash, Adapter: state.Adapter}
-		plan.Odmow("this host has no firewalld")
+		plan.Refuse("this host has no firewalld")
 	case action.GetService() != "":
-		plan = firewall.ZaplanujUsluge(state.Zones, action.GetZone(), action.GetService(),
+		plan = firewall.ComputeService(state.Zones, action.GetZone(), action.GetService(),
 			action.GetEnable(), state.Hash, state.Adapter)
 	case len(action.GetPorts()) != 1:
-		plan = firewall.ZonePlan{Zone: action.GetZone(), Kind: firewall.WpisPortu,
+		plan = firewall.ZonePlan{Zone: action.GetZone(), Kind: firewall.EntryPort,
 			RulesetHash: state.Hash, Adapter: state.Adapter}
-		plan.Odmow("the operation concerns exactly one port")
+		plan.Refuse("the operation concerns exactly one port")
 	default:
-		plan = firewall.ZaplanujPort(state.Zones, action.GetZone(), action.GetPorts()[0],
+		plan = firewall.ComputePort(state.Zones, action.GetZone(), action.GetPorts()[0],
 			action.GetProtocol(), action.GetEnable(), state.Hash, state.Adapter)
 		if plan.Refusal == "" && !action.GetEnable() && !action.GetBreakGlass() &&
 			action.GetPorts()[0] == strconv.Itoa(int(action.GetManagementPort())) {
-			plan.Odmow("the port " + action.GetPorts()[0] + " is the management channel; " +
+			plan.Refuse("the port " + action.GetPorts()[0] + " is the management channel; " +
 				"closing it deliberately needs explicit operator consent")
 		}
 	}
@@ -156,7 +156,7 @@ func (s *Server) planZone(state firewall.Snapshot, action *helperv1.FirewallRequ
 	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
-	case plan.Action == firewall.PlanBezZmian:
+	case plan.Action == firewall.PlanNoChange:
 		message = "the zone " + plan.Zone + " is already in the desired state"
 	default:
 		message = strings.Join(plan.Changes, "; ")
@@ -175,13 +175,13 @@ func describeFirewallPlan(plan firewall.Plan) string {
 		return "the change will not enter this host: " + plan.Refusal
 	}
 	switch plan.Action {
-	case firewall.PlanBezZmian:
+	case firewall.PlanNoChange:
 		return "the rule is already in the desired state"
-	case firewall.PlanTworzy:
+	case firewall.PlanCreate:
 		return "the rule will be created"
-	case firewall.PlanJuzUsuniety:
+	case firewall.PlanRemoveAbsent:
 		return "the rule does not exist, so there is nothing to remove"
-	case firewall.PlanUsuwa:
+	case firewall.PlanRemove:
 		return "the rule will be removed"
 	default:
 		return "what will change: " + strings.Join(plan.Changes, ", ")
@@ -190,7 +190,7 @@ func describeFirewallPlan(plan firewall.Plan) string {
 
 // changeRules creates or removes a panel rule and rebuilds the table.
 func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
-	if !exists(firewall.SciezkaNft) {
+	if !exists(firewall.NftPath) {
 		return reject(ErrorUnsupported, "this host has no nftables")
 	}
 
@@ -202,7 +202,7 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 			"the rule set changed since the plan (%s instead of %s)", state.Hash, expected))
 	}
 
-	registry, err := firewall.WczytajRejestr(firewall.KatalogRejestru)
+	registry, err := firewall.LoadRegistry(firewall.RegistryDir)
 	if err != nil {
 		return reject(ErrorExecFailed, "reading the rule registry: "+err.Error())
 	}
@@ -215,22 +215,22 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 			Sources: action.GetSources(), Interface: action.GetInterface(),
 			Comment: action.GetComment(),
 		}
-		if err := rule.Waliduj(); err != nil {
+		if err := rule.Validate(); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
 		// The management channel is the one thing that must not be lost: without
 		// it the host stops answering and there is nothing left to undo the
 		// change with.
 		if !action.GetBreakGlass() {
-			if err := firewall.ChroniKanalZarzadzania(rule,
+			if err := firewall.ProtectsManagementChannel(rule,
 				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
 				return reject(ErrorUnsupported, err.Error()+
 					"; breaking it deliberately needs explicit operator consent")
 			}
 		}
-		registry = registry.Ustaw(rule)
+		registry = registry.Set(rule)
 	} else {
-		updated, found := registry.Usun(action.GetRuleId())
+		updated, found := registry.Remove(action.GetRuleId())
 		if !found {
 			return reject(ErrorUnsupported, "the rule "+action.GetRuleId()+" does not belong to the panel")
 		}
@@ -253,7 +253,7 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 		}
 		return response
 	}
-	if err := firewall.ZapiszRejestr(firewall.KatalogRejestru, registry); err != nil {
+	if err := firewall.SaveRegistry(firewall.RegistryDir, registry); err != nil {
 		return reject(ErrorExecFailed, "writing the rule registry: "+err.Error())
 	}
 
@@ -264,7 +264,7 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 
 // changeZone opens or closes a port or a service in a firewalld zone.
 func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
-	if !exists(firewall.SciezkaFirewallCmd) {
+	if !exists(firewall.FirewallCmdPath) {
 		return reject(ErrorUnsupported, "this host has no firewalld")
 	}
 	// A change ordered against a different rule set is not the same change the
@@ -291,10 +291,10 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 				"the port "+action.GetPorts()[0]+" is the management channel; "+
 					"closing it deliberately needs explicit operator consent")
 		}
-		steps, err = firewall.ArgumentyOtwarciaPortu(action.GetZone(), action.GetPorts()[0],
+		steps, err = firewall.PortArguments(action.GetZone(), action.GetPorts()[0],
 			action.GetProtocol(), action.GetEnable())
 	} else {
-		steps, err = firewall.ArgumentyUslugi(action.GetZone(), action.GetService(), action.GetEnable())
+		steps, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), action.GetEnable())
 	}
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
@@ -309,14 +309,14 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 }
 
 // rebuildTable recreates the panel table from the registry.
-func (s *Server) rebuildTable(ctx context.Context, registry firewall.Rejestr) error {
+func (s *Server) rebuildTable(ctx context.Context, registry firewall.Registry) error {
 	if len(registry.Rules) == 0 {
 		// An empty table with hooked chains filters nothing but leaves an object
 		// nobody needs.
-		_, _ = runTool(ctx, firewall.ArgumentyUsunieciaTablicy())
+		_, _ = runTool(ctx, firewall.TableRemovalArguments())
 		return nil
 	}
-	steps, err := firewall.ArgumentyPrzebudowy(registry)
+	steps, err := firewall.RebuildArguments(registry)
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func (s *Server) rebuildTable(ctx context.Context, registry firewall.Rejestr) er
 
 // armFirewallRollback writes the registry from before the change and starts the
 // timer.
-func (s *Server) armFirewallRollback(ctx context.Context, previous firewall.Rejestr,
+func (s *Server) armFirewallRollback(ctx context.Context, previous firewall.Registry,
 	seconds uint32) (firewallPlan, *helperv1.HelperResponse) {
 	plan := firewallPlan{
 		ID:        rollbackIdentifier(),
@@ -375,7 +375,7 @@ func (s *Server) restoreFirewall(ctx context.Context, id string) *helperv1.Helpe
 	if err := s.rebuildTable(ctx, plan.Registry); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	if err := firewall.ZapiszRejestr(firewall.KatalogRejestru, plan.Registry); err != nil {
+	if err := firewall.SaveRegistry(firewall.RegistryDir, plan.Registry); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	_ = s.disarmTimer(ctx, firewallRollbackUnit+id)
@@ -387,28 +387,28 @@ func (s *Server) restoreFirewall(ctx context.Context, id string) *helperv1.Helpe
 func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 	snapshot := firewall.Snapshot{ObservedAt: time.Now().UTC()}
 
-	if !exists(firewall.SciezkaNft) {
+	if !exists(firewall.NftPath) {
 		snapshot.UnavailableReason = "this host has no nftables (nft) binary"
 		return snapshot
 	}
 	// nft writes the warnings about tables belonging to other programs to the
 	// error stream, not to the output. Without them the panel would take the
 	// docker tables for ordinary host tables - and would allow touching them.
-	output, warnings, err := outputWithWarnings(ctx, firewall.SciezkaNft, "-a", "list", "ruleset")
+	output, warnings, err := outputWithWarnings(ctx, firewall.NftPath, "-a", "list", "ruleset")
 	if err != nil {
 		snapshot.UnavailableReason = "nft list ruleset: " + err.Error()
 		return snapshot
 	}
-	snapshot = firewall.ParsujRuleset(warnings + output)
+	snapshot = firewall.ParseRuleset(warnings + output)
 	snapshot.ObservedAt = time.Now().UTC()
 	snapshot.Writable = true
 
 	// Firewalld keeps its own tables and rewrites them on a reload, so on such
 	// a host we speak of zones and not of panel rules.
-	if exists(firewall.SciezkaFirewallCmd) {
-		defaultZone, _ := toolOutput(ctx, firewall.SciezkaFirewallCmd, "--get-default-zone")
-		if zones, err := toolOutput(ctx, firewall.SciezkaFirewallCmd, "--list-all-zones"); err == nil {
-			snapshot.Zones = firewall.ParsujStrefy(zones, strings.TrimSpace(defaultZone))
+	if exists(firewall.FirewallCmdPath) {
+		defaultZone, _ := toolOutput(ctx, firewall.FirewallCmdPath, "--get-default-zone")
+		if zones, err := toolOutput(ctx, firewall.FirewallCmdPath, "--list-all-zones"); err == nil {
+			snapshot.Zones = firewall.ParseZones(zones, strings.TrimSpace(defaultZone))
 			snapshot.Adapter = firewall.AdapterFirewalld
 		}
 	}
@@ -422,21 +422,21 @@ const firewallRollbackUnit = "flotestro-firewall-"
 // firewallPlan is the rule registry from before a change together with the
 // deadline of the return.
 type firewallPlan struct {
-	ID        string           `json:"id"`
-	Registry  firewall.Rejestr `json:"registry"`
-	CreatedAt time.Time        `json:"created_at"`
-	Deadline  time.Time        `json:"deadline"`
+	ID        string            `json:"id"`
+	Registry  firewall.Registry `json:"registry"`
+	CreatedAt time.Time         `json:"created_at"`
+	Deadline  time.Time         `json:"deadline"`
 }
 
 func firewallPlanPath(id string) (string, error) {
 	if !validPlanIdentifier(id) {
 		return "", fmt.Errorf("invalid plan identifier %q", id)
 	}
-	return filepath.Join(firewall.KatalogRejestru, id+firewallPlanExtension), nil
+	return filepath.Join(firewall.RegistryDir, id+firewallPlanExtension), nil
 }
 
 func writeFirewallPlan(plan firewallPlan) error {
-	if err := os.MkdirAll(firewall.KatalogRejestru, 0o700); err != nil {
+	if err := os.MkdirAll(firewall.RegistryDir, 0o700); err != nil {
 		return err
 	}
 	path, err := firewallPlanPath(plan.ID)
@@ -494,7 +494,7 @@ func RollbackFirewall(ctx context.Context, id string) error {
 	if err := server.rebuildTable(ctx, plan.Registry); err != nil {
 		return err
 	}
-	if err := firewall.ZapiszRejestr(firewall.KatalogRejestru, plan.Registry); err != nil {
+	if err := firewall.SaveRegistry(firewall.RegistryDir, plan.Registry); err != nil {
 		return err
 	}
 	return removeFirewallPlan(id)

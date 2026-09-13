@@ -9,8 +9,8 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/security"
-	sshmodul "github.com/ultherego/flotestro/internal/modules/ssh"
-	czas "github.com/ultherego/flotestro/internal/modules/time"
+	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
+	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 )
 
 // The names of the inventory modules the checks are computed from.
@@ -140,12 +140,12 @@ func evaluateMAC(input Input) Result {
 	// AppArmor without profiles read is not AppArmor without protection:
 	// without that fact nothing can be judged.
 	if state.MAC.System == security.SystemAppArmor && state.MAC.ProfilesEnforcing == nil {
-		if reason, missing := state.Missing[security.FaktProfileAppArmor]; missing {
+		if reason, missing := state.Missing[security.FactAppArmorProfiles]; missing {
 			return unknown(missingCode(reason), reason)
 		}
 		return unknown(ReasonFactMissing, "the host did not report the number of AppArmor profiles")
 	}
-	if state.MAC.Chroni() {
+	if state.MAC.Protects() {
 		return Result{Passed: true, Observed: describeMAC(state.MAC)}
 	}
 
@@ -154,7 +154,7 @@ func evaluateMAC(input Input) Result {
 	// SELinux in permissive returns to enforcing with one command, AppArmor
 	// without enforced profiles needs profiles, and the panel does not write
 	// those.
-	if state.MAC.System == security.SystemSELinux && state.MAC.Mode == security.TrybPermissive {
+	if state.MAC.System == security.SystemSELinux && state.MAC.Mode == security.ModePermissive {
 		result.Remediation = &Remediation{
 			Action:  "selinux.mode.set",
 			Payload: json.RawMessage(`{"security":{"mode":"enforcing"}}`),
@@ -191,12 +191,12 @@ func evaluateMACPersistence(input Input) Result {
 	}
 	result := Result{
 		Observed: "now " + state.MAC.Mode + ", after a reboot " + state.MAC.ConfiguredMode,
-		Evidence: security.KonfiguracjaMAC,
+		Evidence: security.MACConfiguration,
 	}
 	// Changing the mode through the panel also writes the configuration, so
 	// the same operation removes the drift - as long as SELinux runs in the
 	// kernel at all.
-	if state.MAC.Mode == security.TrybEnforcing || state.MAC.Mode == security.TrybPermissive {
+	if state.MAC.Mode == security.ModeEnforcing || state.MAC.Mode == security.ModePermissive {
 		result.Remediation = &Remediation{
 			Action:  "selinux.mode.set",
 			Payload: json.RawMessage(`{"security":{"mode":"` + state.MAC.Mode + `"}}`),
@@ -247,7 +247,7 @@ func evaluateSecureBoot(input Input) Result {
 		return unknown(ReasonReadFailed, "the protective state was not read")
 	}
 	if state.SecureBoot == nil {
-		if reason, missing := state.Missing[security.FaktSecureBoot]; missing {
+		if reason, missing := state.Missing[security.FactSecureBoot]; missing {
 			return unknown(missingCode(reason), reason)
 		}
 		// A host booting in BIOS mode does not have secure boot disabled - it
@@ -271,12 +271,12 @@ func evaluateExposure(input Input) Result {
 	if !state.ListeningKnown {
 		return unknown(ReasonFactMissing, "the list of listening sockets was not read")
 	}
-	beyond := state.PozaPetla()
+	beyond := state.BeyondLoopback()
 	if len(beyond) == 0 {
 		return Result{Passed: true, Observed: "the host listens on the loopback only"}
 	}
 
-	counts := state.WedlugZasiegu()
+	counts := state.ByReach()
 	descriptions := make([]string, 0, len(beyond))
 	for _, socket := range beyond {
 		description := socket.Protocol + "/" + strconv.Itoa(socket.Port) + " " + socket.Reach
@@ -298,7 +298,7 @@ func evaluateExposure(input Input) Result {
 	// and leaves the decision to a human.
 	return Result{
 		Observed: fmt.Sprintf("%d on every interface, %d on the host's address",
-			counts[security.ZasiegWszystkie], counts[security.ZasiegAdresHosta]),
+			counts[security.ReachAllInterfaces], counts[security.ReachHostNetwork]),
 		Evidence: evidence,
 		Remediation: &Remediation{Note: "every socket is closed differently: a firewall rule, the service's " +
 			"configuration or switching it off; the panel does not guess which of those fits here"},
@@ -315,7 +315,7 @@ func evaluateAuditRules(input Input) Result {
 		return notApplicable("this host has no audit daemon")
 	}
 	if state.Audit.RulesConfigured == nil || state.Audit.RulesLoaded == nil {
-		if reason, missing := state.Missing[security.FaktRegulyAudytu]; missing {
+		if reason, missing := state.Missing[security.FactAuditRules]; missing {
 			return unknown(missingCode(reason), reason)
 		}
 		return unknown(ReasonFactMissing, "the host did not report its audit rules")
@@ -430,7 +430,7 @@ func evaluateTime(input Input) Result {
 	if !ok {
 		return unknown(ReasonFactMissing, "the time state was not read")
 	}
-	var state czas.Snapshot
+	var state hosttime.Snapshot
 	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
 		return unknown(ReasonReadFailed, "the time state was not read: "+err.Error())
 	}
@@ -511,14 +511,14 @@ func protectiveState(input Input) (security.Snapshot, bool) {
 	return state, true
 }
 
-func sshState(input Input) (sshmodul.Snapshot, bool) {
+func sshState(input Input) (sshmodule.Snapshot, bool) {
 	fragment, ok := input.Fragment(moduleSSH)
 	if !ok {
-		return sshmodul.Snapshot{}, false
+		return sshmodule.Snapshot{}, false
 	}
-	var state sshmodul.Snapshot
+	var state sshmodule.Snapshot
 	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
-		return sshmodul.Snapshot{}, false
+		return sshmodule.Snapshot{}, false
 	}
 	return state, true
 }
@@ -559,8 +559,8 @@ func notApplicable(reason string) Result {
 func missingCode(reason string) string {
 	lowered := strings.ToLower(reason)
 	switch {
-	case strings.Contains(lowered, "uprawnien"), strings.Contains(lowered, "permission denied"),
-		strings.Contains(lowered, "tylko root"), strings.Contains(lowered, "securityfs"):
+	case strings.Contains(lowered, "permission denied"), strings.Contains(lowered, "operation not permitted"),
+		strings.Contains(lowered, "only root"), strings.Contains(lowered, "securityfs"):
 		return ReasonPermissionDenied
 	default:
 		return ReasonReadFailed

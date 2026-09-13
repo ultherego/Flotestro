@@ -8,138 +8,139 @@ import (
 	"strings"
 )
 
-// SciezkaNft wskazuje narzedzie nftables. Sciezka jest stala, a nie szukana
-// w PATH: helper uruchamia wylacznie znane binaria.
-const SciezkaNft = "/usr/sbin/nft"
+// NftPath points at the nftables tool. The path is fixed, not searched in
+// PATH: the helper runs only known binaries.
+const NftPath = "/usr/sbin/nft"
 
 var (
-	naglowekTabeli = regexp.MustCompile(`^table\s+(\S+)\s+(\S+)\s*\{(?:\s*#\s*handle\s+(\d+))?`)
-	naglowekLanc   = regexp.MustCompile(`^chain\s+(\S+)\s*\{(?:\s*#\s*handle\s+(\d+))?`)
-	zaczepienie    = regexp.MustCompile(`^type\s+(\S+)\s+hook\s+(\S+)\s+priority\s+([^;]+);(?:\s*policy\s+(\S+);)?`)
-	uchwytReguly   = regexp.MustCompile(`\s*#\s*handle\s+(\d+)\s*$`)
-	licznikiReguly = regexp.MustCompile(`counter packets (\d+) bytes (\d+)`)
-	komentarzRegul = regexp.MustCompile(`comment "([^"]*)"`)
-	// Ostrzezenie nft konczy sie przecinkiem i rada "do not touch", wiec
-	// nazwa wlasciciela urywa sie na pierwszym znaku interpunkcyjnym.
-	ostrzezenie = regexp.MustCompile(`^#\s*Warning:\s*table\s+(\S+)\s+(\S+)\s+is managed by ([A-Za-z0-9_.-]+)`)
+	tableHeader  = regexp.MustCompile(`^table\s+(\S+)\s+(\S+)\s*\{(?:\s*#\s*handle\s+(\d+))?`)
+	chainHeader  = regexp.MustCompile(`^chain\s+(\S+)\s*\{(?:\s*#\s*handle\s+(\d+))?`)
+	hookLine     = regexp.MustCompile(`^type\s+(\S+)\s+hook\s+(\S+)\s+priority\s+([^;]+);(?:\s*policy\s+(\S+);)?`)
+	ruleHandle   = regexp.MustCompile(`\s*#\s*handle\s+(\d+)\s*$`)
+	ruleCounters = regexp.MustCompile(`counter packets (\d+) bytes (\d+)`)
+	ruleComment  = regexp.MustCompile(`comment "([^"]*)"`)
+	// The nft warning ends with a comma and the advice "do not touch", so
+	// the owner name stops at the first punctuation character.
+	warning = regexp.MustCompile(`^#\s*Warning:\s*table\s+(\S+)\s+(\S+)\s+is managed by ([A-Za-z0-9_.-]+)`)
 )
 
-// ParsujRuleset czyta wyjscie "nft -a list ruleset".
+// ParseRuleset reads the output of "nft -a list ruleset".
 //
-// Czytamy postac tekstowa, a nie JSON, bo tresc reguly ma byc dokladnie ta,
-// ktora operator zna z wiersza polecen. Wlasne skladanie tekstu z drzewa
-// wyrazen rozjechaloby sie z tym, co host naprawde ma - a przy zaporze to
-// jest roznica miedzy "przepuszcza" a "odrzuca".
-func ParsujRuleset(wyjscie string) Snapshot {
+// The text form is read, not JSON, because the rule text is meant to be
+// exactly the one the operator knows from the command line. Assembling the
+// text from an expression tree ourselves would drift from what the host
+// really has - and with a firewall that is the difference between "passes"
+// and "rejects".
+func ParseRuleset(output string) Snapshot {
 	snapshot := Snapshot{Adapter: AdapterNftables}
-	wlasciciele := map[string]string{}
+	owners := map[string]string{}
 
-	var tabela *Table
-	var lancuch *Chain
+	var table *Table
+	var chain *Chain
 
-	for _, surowa := range strings.Split(wyjscie, "\n") {
-		linia := strings.TrimSpace(surowa)
-		if linia == "" {
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
 			continue
 		}
 
-		// nft sam ostrzega, ze tablica nalezy do innego programu.
-		if pola := ostrzezenie.FindStringSubmatch(linia); pola != nil {
-			wlasciciele[pola[1]+" "+pola[2]] = pola[3]
+		// nft itself warns that a table belongs to another program.
+		if fields := warning.FindStringSubmatch(line); fields != nil {
+			owners[fields[1]+" "+fields[2]] = fields[3]
 			continue
 		}
-		if strings.HasPrefix(linia, "#") {
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		if linia == "}" {
-			if lancuch != nil {
-				lancuch = nil
+		if line == "}" {
+			if chain != nil {
+				chain = nil
 			} else {
-				tabela = nil
+				table = nil
 			}
 			continue
 		}
 
-		if pola := naglowekTabeli.FindStringSubmatch(linia); pola != nil {
+		if fields := tableHeader.FindStringSubmatch(line); fields != nil {
 			snapshot.Tables = append(snapshot.Tables, Table{
-				Family: pola[1],
-				Name:   pola[2],
-				Handle: liczba(pola[3]),
+				Family: fields[1],
+				Name:   fields[2],
+				Handle: number(fields[3]),
 			})
-			tabela = &snapshot.Tables[len(snapshot.Tables)-1]
+			table = &snapshot.Tables[len(snapshot.Tables)-1]
 			continue
 		}
-		if tabela == nil {
+		if table == nil {
 			continue
 		}
 
-		if pola := naglowekLanc.FindStringSubmatch(linia); pola != nil {
+		if fields := chainHeader.FindStringSubmatch(line); fields != nil {
 			snapshot.Chains = append(snapshot.Chains, Chain{
-				Family: tabela.Family,
-				Table:  tabela.Name,
-				Name:   pola[1],
-				Handle: liczba(pola[2]),
+				Family: table.Family,
+				Table:  table.Name,
+				Name:   fields[1],
+				Handle: number(fields[2]),
 			})
-			lancuch = &snapshot.Chains[len(snapshot.Chains)-1]
+			chain = &snapshot.Chains[len(snapshot.Chains)-1]
 			continue
 		}
-		if lancuch == nil {
-			continue
-		}
-
-		if pola := zaczepienie.FindStringSubmatch(linia); pola != nil {
-			lancuch.Type = pola[1]
-			lancuch.Hook = pola[2]
-			lancuch.Priority = strings.TrimSpace(pola[3])
-			// Polityka dotyczy wylacznie lancuchow bazowych; jej brak zostaje
-			// brakiem, bo "accept" wpisane na wszelki wypadek bylby falszem.
-			lancuch.Policy = pola[4]
+		if chain == nil {
 			continue
 		}
 
-		snapshot.Rules = append(snapshot.Rules, regulaZLinii(linia, *lancuch))
+		if fields := hookLine.FindStringSubmatch(line); fields != nil {
+			chain.Type = fields[1]
+			chain.Hook = fields[2]
+			chain.Priority = strings.TrimSpace(fields[3])
+			// The policy concerns base chains only; its absence stays an
+			// absence, because "accept" written just in case would be false.
+			chain.Policy = fields[4]
+			continue
+		}
+
+		snapshot.Rules = append(snapshot.Rules, ruleFromLine(line, *chain))
 	}
 
-	oznaczPochodzenie(&snapshot, wlasciciele)
-	snapshot.Hash = Odcisk(wyjscie)
+	markOrigin(&snapshot, owners)
+	snapshot.Hash = Fingerprint(output)
 	return snapshot
 }
 
-// regulaZLinii sklada regule z jednego wiersza wyjscia nft.
-func regulaZLinii(linia string, lancuch Chain) Rule {
-	regula := Rule{
-		Family: lancuch.Family,
-		Table:  lancuch.Table,
-		Chain:  lancuch.Name,
-		Text:   linia,
+// ruleFromLine assembles a rule from one row of the nft output.
+func ruleFromLine(line string, chain Chain) Rule {
+	rule := Rule{
+		Family: chain.Family,
+		Table:  chain.Table,
+		Chain:  chain.Name,
+		Text:   line,
 	}
-	if pola := uchwytReguly.FindStringSubmatch(linia); pola != nil {
-		regula.Handle = liczba(pola[1])
-		regula.Text = strings.TrimSpace(uchwytReguly.ReplaceAllString(linia, ""))
+	if fields := ruleHandle.FindStringSubmatch(line); fields != nil {
+		rule.Handle = number(fields[1])
+		rule.Text = strings.TrimSpace(ruleHandle.ReplaceAllString(line, ""))
 	}
-	if pola := licznikiReguly.FindStringSubmatch(linia); pola != nil {
-		pakiety := uliczba(pola[1])
-		bajty := uliczba(pola[2])
-		regula.Packets = &pakiety
-		regula.Bytes = &bajty
+	if fields := ruleCounters.FindStringSubmatch(line); fields != nil {
+		packets := unsignedNumber(fields[1])
+		bytes := unsignedNumber(fields[2])
+		rule.Packets = &packets
+		rule.Bytes = &bytes
 	}
-	if pola := komentarzRegul.FindStringSubmatch(linia); pola != nil {
-		regula.Comment = pola[1]
+	if fields := ruleComment.FindStringSubmatch(line); fields != nil {
+		rule.Comment = fields[1]
 	}
-	return regula
+	return rule
 }
 
-// oznaczPochodzenie rozdziela reguly panelu od cudzych.
+// markOrigin separates the panel rules from foreign ones.
 //
-// Tablica nalezaca do dockera albo firewalld jest przepisywana bez udzialu
-// panelu, wiec regula w niej nie jest ani nasza, ani trwala - i operator ma
-// to widziec, zanim zacznie ja poprawiac.
-func oznaczPochodzenie(snapshot *Snapshot, wlasciciele map[string]string) {
-	pochodzenie := func(family, name string) (string, string) {
-		if wlasciciel, obcy := wlasciciele[family+" "+name]; obcy {
-			return SourceForeign, wlasciciel
+// A table belonging to docker or firewalld is rewritten without the panel's
+// participation, so a rule in it is neither ours nor durable - and the
+// operator is meant to see that before starting to fix it.
+func markOrigin(snapshot *Snapshot, owners map[string]string) {
+	origin := func(family, name string) (string, string) {
+		if owner, foreign := owners[family+" "+name]; foreign {
+			return SourceForeign, owner
 		}
-		if family == RodzinaFlotestro && name == TabelaFlotestro {
+		if family == FlotestroFamily && name == FlotestroTable {
 			return SourceManaged, ""
 		}
 		if name == "firewalld" || strings.HasPrefix(name, "docker") {
@@ -149,43 +150,43 @@ func oznaczPochodzenie(snapshot *Snapshot, wlasciciele map[string]string) {
 	}
 
 	for i := range snapshot.Tables {
-		zrodlo, wlasciciel := pochodzenie(snapshot.Tables[i].Family, snapshot.Tables[i].Name)
-		snapshot.Tables[i].Source = zrodlo
-		snapshot.Tables[i].Owner = wlasciciel
+		source, owner := origin(snapshot.Tables[i].Family, snapshot.Tables[i].Name)
+		snapshot.Tables[i].Source = source
+		snapshot.Tables[i].Owner = owner
 	}
 	for i := range snapshot.Chains {
-		zrodlo, _ := pochodzenie(snapshot.Chains[i].Family, snapshot.Chains[i].Table)
-		snapshot.Chains[i].Source = zrodlo
+		source, _ := origin(snapshot.Chains[i].Family, snapshot.Chains[i].Table)
+		snapshot.Chains[i].Source = source
 	}
 	for i := range snapshot.Rules {
-		zrodlo, _ := pochodzenie(snapshot.Rules[i].Family, snapshot.Rules[i].Table)
-		snapshot.Rules[i].Source = zrodlo
+		source, _ := origin(snapshot.Rules[i].Family, snapshot.Rules[i].Table)
+		snapshot.Rules[i].Source = source
 	}
 }
 
-// Odcisk liczy skrot zestawu regul.
+// Fingerprint computes the digest of a ruleset.
 //
-// Zmiana zlecona wobec innego zestawu nie jest ta sama zmiana, ktora operator
-// ogladal: liczniki pomijamy, bo rosna same i kazdy odczyt dawalby inny
-// odcisk tego samego zestawu.
-func Odcisk(ruleset string) string {
-	bezLicznikow := licznikiReguly.ReplaceAllString(ruleset, "counter")
-	suma := sha256.Sum256([]byte(bezLicznikow))
-	return hex.EncodeToString(suma[:12])
+// A change ordered against a different ruleset is not the same change the
+// operator viewed: the counters are skipped, because they grow on their own
+// and every read would give a different fingerprint of the same ruleset.
+func Fingerprint(ruleset string) string {
+	withoutCounters := ruleCounters.ReplaceAllString(ruleset, "counter")
+	sum := sha256.Sum256([]byte(withoutCounters))
+	return hex.EncodeToString(sum[:12])
 }
 
-func liczba(wartosc string) int {
-	numer, err := strconv.Atoi(wartosc)
+func number(value string) int {
+	n, err := strconv.Atoi(value)
 	if err != nil {
 		return 0
 	}
-	return numer
+	return n
 }
 
-func uliczba(wartosc string) uint64 {
-	numer, err := strconv.ParseUint(wartosc, 10, 64)
+func unsignedNumber(value string) uint64 {
+	n, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
 		return 0
 	}
-	return numer
+	return n
 }

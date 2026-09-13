@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// /proc/sys zawiera przelaczniki, ktore wylaczaja ochrony jadra albo
-// zatrzymuja host. Panel zmienia to, co da sie opisac i cofnac.
-func TestKluczePozaZakresemSaOdrzucane(t *testing.T) {
-	for _, klucz := range []string{
+// /proc/sys holds switches that disable kernel protections or stop the
+// host. The panel changes what can be described and reverted.
+func TestKeysOutsideScopeAreRejected(t *testing.T) {
+	for _, key := range []string{
 		"kernel.sysrq",
 		"kernel.core_pattern",
 		"kernel.modprobe",
@@ -16,126 +16,128 @@ func TestKluczePozaZakresemSaOdrzucane(t *testing.T) {
 		"../etc/passwd",
 		"NET.IPV4.IP_FORWARD",
 	} {
-		if err := WalidujKlucz(klucz); err == nil {
-			t.Errorf("przyjeto klucz %q", klucz)
+		if err := ValidateKey(key); err == nil {
+			t.Errorf("accepted key %q", key)
 		}
 	}
-	for _, klucz := range []string{"vm.swappiness", "net.ipv4.ip_forward",
+	for _, key := range []string{"vm.swappiness", "net.ipv4.ip_forward",
 		"fs.inotify.max_user_watches", "net.ipv4.conf.all.rp_filter"} {
-		if err := WalidujKlucz(klucz); err != nil {
-			t.Errorf("odrzucono klucz %q: %v", klucz, err)
+		if err := ValidateKey(key); err != nil {
+			t.Errorf("rejected key %q: %v", key, err)
 		}
 	}
-	// "net.ipv4" jest galezia, a nie ustawieniem, ale skladniowo wyglada
-	// tak samo jak "vm.swappiness". Rozstrzyga to host, sprawdzajac przed
-	// zapisem, czy klucz w ogole istnieje - i tak ma byc, bo lista kluczy
-	// zalezy od wersji jadra i zaladowanych modulow.
-	if err := WalidujKlucz("net.ipv4"); err != nil {
-		t.Errorf("skladnia galezi odrzucona w walidatorze: %v", err)
+	// "net.ipv4" is a branch, not a setting, but syntactically it looks the
+	// same as "vm.swappiness". The host settles it by checking before the
+	// write whether the key exists at all - and that is how it should be,
+	// because the key list depends on the kernel version and the loaded
+	// modules.
+	if err := ValidateKey("net.ipv4"); err != nil {
+		t.Errorf("branch syntax rejected by the validator: %v", err)
 	}
 }
 
-func TestWartoscSysctlNieWpuszczaNowejLinii(t *testing.T) {
-	for _, wartosc := range []string{"", "10\nkernel.sysrq = 1", "$(reboot)", "tak;nie"} {
-		if err := WalidujWartosc(wartosc); err == nil {
-			t.Errorf("przyjeto wartosc %q", wartosc)
+func TestSysctlValueRejectsNewline(t *testing.T) {
+	for _, value := range []string{"", "10\nkernel.sysrq = 1", "$(reboot)", "yes;no"} {
+		if err := ValidateValue(value); err == nil {
+			t.Errorf("accepted value %q", value)
 		}
 	}
-	for _, wartosc := range []string{"1", "60", "4096 87380 6291456", "0.0.0.0/0"} {
-		if err := WalidujWartosc(wartosc); err != nil {
-			t.Errorf("odrzucono wartosc %q: %v", wartosc, err)
+	for _, value := range []string{"1", "60", "4096 87380 6291456", "0.0.0.0/0"} {
+		if err := ValidateValue(value); err != nil {
+			t.Errorf("rejected value %q: %v", value, err)
 		}
 	}
 }
 
-func TestPlikSysctlJestUporzadkowany(t *testing.T) {
-	tresc, err := SkladajPlikSysctl(map[string]string{
+func TestSysctlFileIsOrdered(t *testing.T) {
+	content, err := ComposeSysctlFile(map[string]string{
 		"vm.swappiness":       "10",
 		"net.ipv4.ip_forward": "1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(tresc, NaglowekPliku) {
-		t.Errorf("plik bez naglowka: %q", tresc)
+	if !strings.HasPrefix(content, FileHeader) {
+		t.Errorf("file without header: %q", content)
 	}
-	// Stala kolejnosc: plik zapisany dwa razy z tym samym zestawem ma byc
-	// tym samym plikiem, inaczej kazdy zapis wygladalby na zmiane.
-	if strings.Index(tresc, "net.ipv4") > strings.Index(tresc, "vm.swappiness") {
-		t.Errorf("kolejnosc = %q", tresc)
+	// Stable order: a file written twice with the same set must be the same
+	// file, otherwise every write would look like a change.
+	if strings.Index(content, "net.ipv4") > strings.Index(content, "vm.swappiness") {
+		t.Errorf("order = %q", content)
 	}
-	odczytane := ParsujPlikSysctl(tresc)
-	if odczytane["vm.swappiness"] != "10" || len(odczytane) != 2 {
-		t.Errorf("odczyt = %v", odczytane)
+	parsed := ParseSysctlFile(content)
+	if parsed["vm.swappiness"] != "10" || len(parsed) != 2 {
+		t.Errorf("parsed = %v", parsed)
 	}
-	if _, err := SkladajPlikSysctl(map[string]string{"kernel.sysrq": "1"}); err == nil {
-		t.Error("przyjeto klucz spoza zakresu")
-	}
-}
-
-// Jadro rozdziela wartosci tabulatorami; bez normalizacji porownanie
-// z zapisana wartoscia zalezaloby od bialych znakow.
-func TestWartosciZJadraSaNormalizowane(t *testing.T) {
-	wartosci := ParsujWartosci("net.ipv4.tcp_rmem = 4096\t87380\t6291456\nvm.swappiness = 60\n")
-	if wartosci["net.ipv4.tcp_rmem"] != "4096 87380 6291456" {
-		t.Errorf("wartosc = %q", wartosci["net.ipv4.tcp_rmem"])
-	}
-	if wartosci["vm.swappiness"] != "60" {
-		t.Errorf("wartosc = %q", wartosci["vm.swappiness"])
+	if _, err := ComposeSysctlFile(map[string]string{"kernel.sysrq": "1"}); err == nil {
+		t.Error("accepted a key outside the scope")
 	}
 }
 
-const trescProcModules = `xt_nat 12288 1 - Live 0x0000000000000000
+// The kernel separates values with tabs; without normalisation the
+// comparison with the written value would depend on whitespace.
+func TestKernelValuesAreNormalised(t *testing.T) {
+	values := ParseValues("net.ipv4.tcp_rmem = 4096\t87380\t6291456\nvm.swappiness = 60\n")
+	if values["net.ipv4.tcp_rmem"] != "4096 87380 6291456" {
+		t.Errorf("value = %q", values["net.ipv4.tcp_rmem"])
+	}
+	if values["vm.swappiness"] != "60" {
+		t.Errorf("value = %q", values["vm.swappiness"])
+	}
+}
+
+const procModulesContent = `xt_nat 12288 1 - Live 0x0000000000000000
 veth 40960 0 - Live 0x0000000000000000
 bridge 421888 1 br_netfilter, Live 0x0000000000000000`
 
-func TestModulyCzytaneZJadra(t *testing.T) {
-	moduly := ParsujModuly(trescProcModules)
-	if len(moduly) != 3 {
-		t.Fatalf("modulow = %d", len(moduly))
+func TestModulesAreReadFromKernel(t *testing.T) {
+	modules := ParseModules(procModulesContent)
+	if len(modules) != 3 {
+		t.Fatalf("modules = %d", len(modules))
 	}
-	if moduly[2].Name != "bridge" || moduly[2].SizeBytes != 421888 {
-		t.Errorf("modul = %+v", moduly[2])
+	if modules[2].Name != "bridge" || modules[2].SizeBytes != 421888 {
+		t.Errorf("module = %+v", modules[2])
 	}
-	if len(moduly[2].UsedBy) != 1 || moduly[2].UsedBy[0] != "br_netfilter" {
-		t.Errorf("zaleznosci = %v", moduly[2].UsedBy)
+	if len(modules[2].UsedBy) != 1 || modules[2].UsedBy[0] != "br_netfilter" {
+		t.Errorf("dependencies = %v", modules[2].UsedBy)
 	}
-	// Myslnik oznacza brak zaleznosci i nie jest nazwa modulu.
-	if len(moduly[0].UsedBy) != 0 {
-		t.Errorf("zaleznosci = %v", moduly[0].UsedBy)
+	// A dash means no dependencies and is not a module name.
+	if len(modules[0].UsedBy) != 0 {
+		t.Errorf("dependencies = %v", modules[0].UsedBy)
 	}
 }
 
-// Zablokowanie modulu, bez ktorego host nie wstanie, nie jest operacja,
-// ktora ma sie udac.
-func TestBlokadaChronionegoModuluJestOdrzucana(t *testing.T) {
-	for _, nazwa := range []string{"ext4", "dm_mod", "virtio_net", "Zly Modul", "../x"} {
-		if err := WalidujModul(nazwa); err == nil {
-			t.Errorf("przyjeto modul %q", nazwa)
+// Blocking a module without which the host does not boot is not an
+// operation that is meant to succeed.
+func TestBlockingProtectedModuleIsRejected(t *testing.T) {
+	for _, name := range []string{"ext4", "dm_mod", "virtio_net", "Bad Module", "../x"} {
+		if err := ValidateModule(name); err == nil {
+			t.Errorf("accepted module %q", name)
 		}
 	}
-	tresc, err := SkladajBlacklist([]string{"pcspkr", "floppy"})
+	content, err := ComposeBlacklist([]string{"pcspkr", "floppy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sama blokada nie wystarczy, gdy modul jest zaleznoscia innego.
-	if !strings.Contains(tresc, "install pcspkr /bin/false") {
-		t.Errorf("plik = %q", tresc)
+	// The blacklist alone is not enough when the module is a dependency of
+	// another.
+	if !strings.Contains(content, "install pcspkr /bin/false") {
+		t.Errorf("file = %q", content)
 	}
-	if len(ParsujBlacklist(tresc)) != 2 {
-		t.Errorf("odczyt = %v", ParsujBlacklist(tresc))
+	if len(ParseBlacklist(content)) != 2 {
+		t.Errorf("parsed = %v", ParseBlacklist(content))
 	}
 }
 
-// Modul zaladowany nie znika po zapisaniu blokady: operator ma przeczytac,
-// dlaczego wpis w modprobe.d jeszcze nic nie zmienil.
-func TestBlokadaZaladowanegoModuluMowiOInitramfs(t *testing.T) {
-	if powod := InitramfsWymagany("pcspkr", true); powod == "" {
-		t.Error("blokada zaladowanego modulu bez ostrzezenia")
-	} else if !strings.Contains(powod, "initramfs") {
-		t.Errorf("powod = %q", powod)
+// A loaded module does not vanish once the block is written: the operator
+// is meant to read why the entry in modprobe.d has changed nothing yet.
+func TestBlockingLoadedModuleMentionsInitramfs(t *testing.T) {
+	if reason := InitramfsRequired("pcspkr", true); reason == "" {
+		t.Error("block of a loaded module without a warning")
+	} else if !strings.Contains(reason, "initramfs") {
+		t.Errorf("reason = %q", reason)
 	}
-	if InitramfsWymagany("pcspkr", false) != "" {
-		t.Error("modul niezaladowany dostal ostrzezenie")
+	if InitramfsRequired("pcspkr", false) != "" {
+		t.Error("a module not loaded got a warning")
 	}
 }

@@ -33,12 +33,12 @@ func CollectNetwork(ctx context.Context, managementAddress string) network.Snaps
 		snapshot.UnavailableReason = "ip addr: " + err.Error()
 		return snapshot
 	}
-	interfaces, err := network.ParsujInterfejsy(output)
+	interfaces, err := network.ParseInterfaces(output)
 	if err != nil {
 		snapshot.UnavailableReason = err.Error()
 		return snapshot
 	}
-	network.UzupelnijZSys("/sys/class/net", interfaces)
+	network.SupplementFromSys("/sys/class/net", interfaces)
 	snapshot.Interfaces = interfaces
 
 	// Both families are read separately, because "ip route show" shows only
@@ -52,19 +52,19 @@ func CollectNetwork(ctx context.Context, managementAddress string) network.Snaps
 		if err != nil {
 			continue
 		}
-		if routes, err := network.ParsujTrasy(output, family.family); err == nil {
+		if routes, err := network.ParseRoutes(output, family.family); err == nil {
 			snapshot.Routes = append(snapshot.Routes, routes...)
 		}
 	}
 
-	network.OznaczKanalZarzadzania(&snapshot, managementAddress)
-	snapshot.WriteAdapter = network.WykryjAdapter(network.Istnieje)
+	network.MarkManagementChannel(&snapshot, managementAddress)
+	snapshot.WriteAdapter = network.DetectAdapter(network.Exists)
 	return snapshot
 }
 
 func ipPath() string {
 	for _, path := range ipPaths {
-		if network.Istnieje(path) {
+		if network.Exists(path) {
 			return path
 		}
 	}

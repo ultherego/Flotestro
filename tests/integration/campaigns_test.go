@@ -515,7 +515,7 @@ func TestKolidujaceOperacjeNaHoscieSaSerializowane(t *testing.T) {
 			"action": "unit.restart", "reason": "test serializacji blokad zasobu",
 			"payload": unitPayload("cron.service"),
 		})
-		if job.RequiresApprova {
+		if job.RequiresApproval {
 			job = h.approve(job.ID, job.PayloadHash)
 		}
 		zadania = append(zadania, job.ID)
@@ -1177,7 +1177,7 @@ func TestPrzebiegKampaniiPrzezywaRestartPanelu(t *testing.T) {
 // je kod powodu przy hostach i zajetosc budzetu.
 func TestMetrykiPokazujaMaszynerieKampanii(t *testing.T) {
 	h := newHarness(t)
-	tekst := h.tekst("/metrics")
+	tekst := h.text("/metrics")
 
 	// Budzety sa opisane zawsze - takze wtedy, gdy nic ich nie zajmuje.
 	// Pojemnosc podana dopiero wtedy, gdy jest problem, nie pozwolilaby
@@ -1210,7 +1210,7 @@ func TestMetrykiPokazujaMaszynerieKampanii(t *testing.T) {
 	}))
 	// Kampania czekajaca na zatwierdzenie jest kampania w toku: ktos musi
 	// podjac decyzje, a metryka ma to pokazac.
-	tekst = h.tekst("/metrics")
+	tekst = h.text("/metrics")
 	if !strings.Contains(tekst, `flotestro_campaigns_active{action="unit.restart"`) {
 		t.Errorf("metryki nie widza kampanii w toku:\n%s", wyciagnij(tekst, "flotestro_campaigns_active"))
 	}
@@ -1410,7 +1410,7 @@ func TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 	zadanie, proby := h.runOperation(cele[0], map[string]any{
 		"action": "firewall.rule.ensure", "reason": "przygotowanie testu kampanii zapory",
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": nazwa, "chain": "wejscie", "action": "drop",
+			"rule_id": nazwa, "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"2525"},
 			"sources": []string{"10.10.0.0/16"}, "rollback_seconds": 60,
 			"expected_hash": stan.Hash}},
@@ -1420,7 +1420,7 @@ func TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 	}
 
 	regula := map[string]any{
-		"rule_id": nazwa, "chain": "wejscie", "action": "drop",
+		"rule_id": nazwa, "chain": "input", "action": "drop",
 		"protocol": "tcp", "ports": []string{"25"},
 		"sources": []string{"10.10.0.0/16"}, "rollback_seconds": 60,
 	}
@@ -1473,7 +1473,7 @@ func TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 		"name": "regula odcinajaca", "action": "firewall.rule.ensure",
 		"reason": "test odmowy planu zapory",
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": "test-odciecia-kampania", "chain": "wejscie", "action": "drop",
+			"rule_id": "test-odciecia-kampania", "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"8000-9000"}, "rollback_seconds": 60}},
 		"selector":    map[string]any{"host_ids": cele},
 		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
@@ -2064,7 +2064,7 @@ func TestKampaniaResolveraLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
 		}
 		var oDomenach bool
 		for _, zmiana := range plan.Changes {
-			oDomenach = oDomenach || strings.Contains(zmiana, "domeny wyszukiwania")
+			oDomenach = oDomenach || strings.Contains(zmiana, "search domains")
 		}
 		if !oDomenach {
 			t.Errorf("host %s nie widzi zmiany domen wyszukiwania: %v", target.Hostname, plan.Changes)
@@ -2903,7 +2903,7 @@ func TestKampaniaKopiiLiczyZakresIWymagaSprawdzenia(t *testing.T) {
 			} `json:"items"`
 		}
 		h.get("/api/v1/jobs/"+target.JobID+"/attempts", &proby)
-		if len(proby.Items) == 0 || !strings.Contains(proby.Items[len(proby.Items)-1].Message, "sprawdzone") {
+		if len(proby.Items) == 0 || !strings.Contains(proby.Items[len(proby.Items)-1].Message, "checked") {
 			t.Errorf("host %s: kopia bez sprawdzenia: %+v", target.Hostname, proby.Items)
 		}
 	}
@@ -3380,7 +3380,7 @@ func TestKampaniaOdnowieniaMowiKtoPilnujeCertyfikatu(t *testing.T) {
 			t.Errorf("host z certmongerem: %s/%s", target.State, target.ErrorCode)
 		}
 		plan := planOdnowienia(h, target.PlanJobID)
-		if !strings.Contains(plan.Refusal, "nie pilnuje pliku") || plan.PlanHash == "" {
+		if !strings.Contains(plan.Refusal, "does not track the file") || plan.PlanHash == "" {
 			t.Errorf("host z certmongerem, plan: %+v", plan)
 		}
 		zPlanem++

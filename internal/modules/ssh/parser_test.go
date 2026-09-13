@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// Wyjscie przepisane z hosta floty testowej.
-const wyjscieEffective = `port 22
+// Output copied from a host of the test fleet.
+const effectiveOutput = `port 22
 addressfamily any
 listenaddress [::]:22
 listenaddress 0.0.0.0:22
@@ -19,50 +19,51 @@ kbdinteractiveauthentication no
 gssapiauthentication no
 allowgroups sudo flotestro`
 
-func TestKonfiguracjaCzytanaZSerwera(t *testing.T) {
-	stan := ParsujEffective(wyjscieEffective)
+func TestConfigurationIsReadFromServer(t *testing.T) {
+	state := ParseEffective(effectiveOutput)
 
-	if len(stan.Ports) != 1 || stan.Ports[0] != "22" {
-		t.Errorf("porty = %v", stan.Ports)
+	if len(state.Ports) != 1 || state.Ports[0] != "22" {
+		t.Errorf("ports = %v", state.Ports)
 	}
-	if len(stan.ListenAddresses) != 2 {
-		t.Errorf("adresy nasluchu = %v", stan.ListenAddresses)
+	if len(state.ListenAddresses) != 2 {
+		t.Errorf("listen addresses = %v", state.ListenAddresses)
 	}
-	// "prohibit-password" nie jest ani yes, ani no - dlatego wartosc jest
-	// tekstem, a nie flaga.
-	if stan.PermitRootLogin != "no" || stan.PasswordAuthentication != "yes" {
-		t.Errorf("stan = %+v", stan)
+	// "prohibit-password" is neither yes nor no - that is why the value is
+	// text, not a flag.
+	if state.PermitRootLogin != "no" || state.PasswordAuthentication != "yes" {
+		t.Errorf("state = %+v", state)
 	}
-	if stan.MaxAuthTries != 6 {
-		t.Errorf("maxauthtries = %d", stan.MaxAuthTries)
+	if state.MaxAuthTries != 6 {
+		t.Errorf("maxauthtries = %d", state.MaxAuthTries)
 	}
-	if len(stan.AllowGroups) != 2 || stan.AllowGroups[1] != "flotestro" {
-		t.Errorf("grupy = %v", stan.AllowGroups)
+	if len(state.AllowGroups) != 2 || state.AllowGroups[1] != "flotestro" {
+		t.Errorf("groups = %v", state.AllowGroups)
 	}
 }
 
-func TestOdciskKluczaHostaBezKluczaPrywatnego(t *testing.T) {
-	klucz, ok := ParsujOdcisk(
+func TestHostKeyFingerprintWithoutPrivateKey(t *testing.T) {
+	key, ok := ParseFingerprint(
 		"256 SHA256:qLkjgPdb7MHXjfjzjsoBE8UhRXoe353g82iwnYYNmS4 root@debian-13 (ED25519)",
 		"/etc/ssh/ssh_host_ed25519_key.pub")
 	if !ok {
-		t.Fatal("nie rozpoznano odcisku")
+		t.Fatal("fingerprint not recognised")
 	}
-	if klucz.Type != "ed25519" || klucz.Bits != 256 {
-		t.Errorf("klucz = %+v", klucz)
+	if key.Type != "ed25519" || key.Bits != 256 {
+		t.Errorf("key = %+v", key)
 	}
-	if !strings.HasPrefix(klucz.Fingerprint, "SHA256:") {
-		t.Errorf("odcisk = %q", klucz.Fingerprint)
+	if !strings.HasPrefix(key.Fingerprint, "SHA256:") {
+		t.Errorf("fingerprint = %q", key.Fingerprint)
 	}
-	if _, ok := ParsujOdcisk("cokolwiek", "/etc/ssh/x"); ok {
-		t.Error("rozpoznano odcisk w smieciach")
+	if _, ok := ParseFingerprint("whatever", "/etc/ssh/x"); ok {
+		t.Error("fingerprint recognised in garbage")
 	}
 }
 
-// Zapisujemy wylacznie to, o co operator poprosil: wypisanie calej
-// konfiguracji zamrozilby na hoscie wartosci domyslne z dnia zapisu.
-func TestDropInZawieraTylkoZleconeUstawienia(t *testing.T) {
-	tresc, err := SkladajDropIn(Ustawienia{
+// Only what the operator asked for is written: printing the whole
+// configuration would freeze on the host the defaults of the day of the
+// write.
+func TestDropInContainsOnlyOrderedSettings(t *testing.T) {
+	content, err := ComposeDropIn(Settings{
 		PermitRootLogin: "prohibit-password",
 		MaxAuthTries:    "3",
 		AllowGroups:     []string{"sudo", "flotestro"},
@@ -70,79 +71,79 @@ func TestDropInZawieraTylkoZleconeUstawienia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(tresc, "PermitRootLogin prohibit-password") ||
-		!strings.Contains(tresc, "AllowGroups sudo flotestro") {
-		t.Errorf("tresc = %q", tresc)
+	if !strings.Contains(content, "PermitRootLogin prohibit-password") ||
+		!strings.Contains(content, "AllowGroups sudo flotestro") {
+		t.Errorf("content = %q", content)
 	}
-	if strings.Contains(tresc, "PasswordAuthentication") {
-		t.Errorf("plik niesie ustawienie, o ktore nikt nie prosil: %q", tresc)
+	if strings.Contains(content, "PasswordAuthentication") {
+		t.Errorf("the file carries a setting nobody asked for: %q", content)
 	}
-	if !strings.HasPrefix(tresc, NaglowekPliku) {
-		t.Errorf("plik bez naglowka: %q", tresc)
+	if !strings.HasPrefix(content, FileHeader) {
+		t.Errorf("file without header: %q", content)
 	}
-	if _, err := SkladajDropIn(Ustawienia{}); err == nil {
-		t.Error("przyjeto zmiane bez zadnego ustawienia")
+	if _, err := ComposeDropIn(Settings{}); err == nil {
+		t.Error("accepted a change without any setting")
 	}
 }
 
-func TestZlaKonfiguracjaJestOdrzucana(t *testing.T) {
-	przypadki := []Ustawienia{
+func TestBadConfigurationIsRejected(t *testing.T) {
+	cases := []Settings{
 		{Port: "0"},
 		{Port: "70000"},
-		{PermitRootLogin: "moze"},
+		{PermitRootLogin: "maybe"},
 		{PasswordAuthentication: "prohibit-password"},
 		{MaxAuthTries: "0"},
-		{AllowUsers: []string{"zly wpis"}},
+		{AllowUsers: []string{"bad entry"}},
 		{DenyUsers: []string{"a;reboot"}},
 	}
-	for _, ustawienia := range przypadki {
-		if err := Waliduj(ustawienia); err == nil {
-			t.Errorf("przyjeto %+v", ustawienia)
+	for _, settings := range cases {
+		if err := Validate(settings); err == nil {
+			t.Errorf("accepted %+v", settings)
 		}
 	}
-	if err := Waliduj(Ustawienia{PermitRootLogin: "prohibit-password",
+	if err := Validate(Settings{PermitRootLogin: "prohibit-password",
 		AllowUsers: []string{"ulther", "admin@10.0.0.1", "flot*"}}); err != nil {
-		t.Errorf("odrzucono poprawna konfiguracje: %v", err)
+		t.Errorf("rejected a valid configuration: %v", err)
 	}
 }
 
-// Serwer, do ktorego nie da sie zalogowac zadna metoda, nie jest
-// zabezpieczony - jest niedostepny.
-func TestZmianaOdcinajacaWszystkieMetodyJestRozpoznawana(t *testing.T) {
-	stan := ParsujEffective(wyjscieEffective)
+// A server nobody can log into by any method is not secured - it is
+// unavailable.
+func TestChangeCuttingOffAllMethodsIsRecognised(t *testing.T) {
+	state := ParseEffective(effectiveOutput)
 
-	if OdcinaWszystkieMetody(Ustawienia{PasswordAuthentication: "no"}, stan) {
-		t.Error("wylaczenie hasla przy dzialajacych kluczach uznane za odciecie")
+	if CutsOffAllMethods(Settings{PasswordAuthentication: "no"}, state) {
+		t.Error("disabling passwords with working keys treated as a lockout")
 	}
-	if !OdcinaWszystkieMetody(Ustawienia{
-		PasswordAuthentication: "no", PubkeyAuthentication: "no"}, stan) {
-		t.Error("wylaczenie hasla i kluczy nie zostalo rozpoznane")
+	if !CutsOffAllMethods(Settings{
+		PasswordAuthentication: "no", PubkeyAuthentication: "no"}, state) {
+		t.Error("disabling passwords and keys not recognised")
 	}
-	// Host w domenie moze polegac na GSSAPI, wiec liczy sie takze ono.
-	zDomena := stan
-	zDomena.GSSAPIAuthentication = "yes"
-	if OdcinaWszystkieMetody(Ustawienia{
-		PasswordAuthentication: "no", PubkeyAuthentication: "no"}, zDomena) {
-		t.Error("pominieto GSSAPI jako dzialajaca metode")
+	// A domain-joined host may rely on GSSAPI, so it counts too.
+	withDomain := state
+	withDomain.GSSAPIAuthentication = "yes"
+	if CutsOffAllMethods(Settings{
+		PasswordAuthentication: "no", PubkeyAuthentication: "no"}, withDomain) {
+		t.Error("GSSAPI skipped as a working method")
 	}
 }
 
-// W sshd wygrywa pierwsza wartosc, a pliki dolaczane maja kolejnosc
-// alfabetyczna: wczesniejszy plik administratora przeslania nasz i zmiana
-// wyglada na wykonana, choc nic nie zmienia.
-func TestRozbieznoscMiedzyZleceniemAStanemJestNazwana(t *testing.T) {
-	stan := ParsujEffective(wyjscieEffective)
+// In sshd the first value wins, and included files are in alphabetical
+// order: an earlier administrator file shadows ours and the change looks
+// done although it changes nothing.
+func TestDivergenceBetweenOrderAndStateIsNamed(t *testing.T) {
+	state := ParseEffective(effectiveOutput)
 
-	rozbiezne := RozbiezneUstawienia(Ustawienia{
-		PasswordAuthentication: "no", MaxAuthTries: "3"}, stan)
-	if len(rozbiezne) != 2 {
-		t.Fatalf("rozbieznosci = %v", rozbiezne)
+	divergent := DivergentSettings(Settings{
+		PasswordAuthentication: "no", MaxAuthTries: "3"}, state)
+	if len(divergent) != 2 {
+		t.Fatalf("divergences = %v", divergent)
 	}
-	if !strings.Contains(rozbiezne[0], "PasswordAuthentication") &&
-		!strings.Contains(rozbiezne[1], "PasswordAuthentication") {
-		t.Errorf("rozbieznosci = %v", rozbiezne)
+	if !strings.Contains(divergent[0], "PasswordAuthentication") &&
+		!strings.Contains(divergent[1], "PasswordAuthentication") {
+		t.Errorf("divergences = %v", divergent)
 	}
-	if len(RozbiezneUstawienia(Ustawienia{PermitRootLogin: "no"}, stan)) != 0 {
-		t.Error("zgodne ustawienie uznane za rozbiezne")
+	if len(DivergentSettings(Settings{PermitRootLogin: "no"}, state)) != 0 {
+		t.Error("a matching setting treated as divergent")
 	}
 }

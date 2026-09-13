@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	modul "github.com/ultherego/flotestro/internal/modules/files"
+	filesmodule "github.com/ultherego/flotestro/internal/modules/files"
 )
 
 // ErrNotFound means a missing file or version.
@@ -75,7 +75,7 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // The same content on a hundred hosts takes space once: the primary key is the
 // digest, so a repeated write does not create a second row.
 func (s *Store) SaveVersion(ctx context.Context, q executor, content []byte) (string, error) {
-	digest := modul.Odcisk(content)
+	digest := filesmodule.Fingerprint(content)
 	const query = `
 		insert into file_versions (sha256, content, size_bytes)
 		values ($1, $2, $3)

@@ -1,5 +1,6 @@
-// Package adminapi wystawia publiczne REST API control plane.
-// Handlery mapuja zadanie na operacje domenowe i nie zawieraja logiki biznesowej.
+// Package adminapi exposes the public REST API of the control plane.
+// The handlers map a request onto domain operations and hold no business
+// logic.
 package adminapi
 
 import (
@@ -14,10 +15,10 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
-	kopiestore "github.com/ultherego/flotestro/internal/backup"
+	backupstore "github.com/ultherego/flotestro/internal/backup"
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
-	certyfikatystore "github.com/ultherego/flotestro/internal/certificates"
+	certificatestore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
@@ -35,16 +36,16 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
-// Server grupuje zaleznosci REST API.
+// Server groups the REST API dependencies.
 type Server struct {
 	pool      *pgxpool.Pool
 	hosts     *hosts.Store
 	inventory *inventory.Store
 	jobs      *jobs.Store
 	campaigns *campaigns.Store
-	// budzety pokazuja pojemnosc floty i lokalizacji. Pusty oznacza
-	// instalacje, w ktorej pojemnosci nikt nie egzekwuje.
-	budzety   *budgets.Store
+	// budgets show the capacity of the fleet and the sites. Nil means an
+	// installation in which nobody enforces the capacity.
+	budgets   *budgets.Store
 	tokens    *enrollment.Store
 	authz     *authz.Store
 	audit     *audit.Recorder
@@ -52,83 +53,88 @@ type Server struct {
 	oidc      *oidc.Provider
 	directory *freeipa.Client
 	changes   *identity.Store
-	// files trzyma stan docelowy plikow konfiguracyjnych i ich historie.
+	// files holds the desired state of configuration files and their history.
 	files *managedfiles.Store
-	// certyfikaty trzymaja zakres obserwacji i historie wdrozen. Panel musi
-	// je znac, bo host sam nie powie, ktory plik jest certyfikatem uslugi.
-	certyfikaty *certyfikatystore.Store
-	// monitoring laczy panel z metrykami i alertami. Pusty oznacza instalacje
-	// bez monitoringu - i to jest stan poprawny, a nie awaria.
+	// certificates hold the watch scope and the deployment history. The
+	// panel must know them, because the host will not say itself which file
+	// is a service certificate.
+	certificates *certificatestore.Store
+	// monitoring connects the panel with metrics and alerts. Nil means an
+	// installation without monitoring - and that is a valid state, not a
+	// failure.
 	monitoring Monitoring
-	// podatnosci trzymaja ustalenia korelatora, a pakietyHostow - liste,
-	// na ktorej te ustalenia sie oparly. Pusty korelator oznacza instalacje
-	// bez oceny podatnosci.
-	podatnosci    *vuln.Store
-	pakietyHostow *vuln.PackageStore
-	wiekFeedu     time.Duration
-	// kopie trzymaja definicje backupu i historie przebiegow. Danych
-	// backupowych panel nie widzi: plyna z hosta wprost do repozytorium.
-	kopie *kopiestore.Store
-	// directoryWrite wlacza modul zmian w katalogu. Domyslnie wylaczony:
-	// klient moze chciec samego widoku, a zmiany robic swoimi narzedziami.
+	// vulnerabilities hold the correlator findings, and hostPackages - the
+	// list those findings were based on. A nil correlator means an
+	// installation without vulnerability assessment.
+	vulnerabilities *vuln.Store
+	hostPackages    *vuln.PackageStore
+	feedAge         time.Duration
+	// backups hold the backup definitions and the run history. The panel
+	// does not see the backup data: it flows from the host straight to the
+	// repository.
+	backups *backupstore.Store
+	// directoryWrite enables the directory changes module. Disabled by
+	// default: a customer may want the view alone, and make the changes with
+	// their own tools.
 	directoryWrite bool
 	log            *slog.Logger
 
-	// productionEnvironments wymagaja drugiej osoby przy zatwierdzaniu.
+	// productionEnvironments require a second person at approval.
 	productionEnvironments map[string]bool
 	sessionLimits          authz.SessionLimits
 	publicURL              string
 	webRoot                string
-	// stepUp opisuje warunki operacji o najwiekszym wplywie.
+	// stepUp describes the conditions of the highest-impact operations.
 	stepUp stepUpPolicy
-	// metrics wystawia stan panelu do monitoringu.
+	// metrics exposes the panel state to monitoring.
 	metrics *metrics.Collector
-	// trust pozwala przejrzec i wymienic CA floty.
+	// trust allows reviewing and replacing the fleet CA.
 	trust *pki.Trust
-	// events rozglasza zmiany stanu operacji do otwartych ekranow.
+	// events broadcasts operation state changes to the open screens.
 	events *events.Bus
-	// remediation trzyma plany naprawy. Bez niego modul bezpieczenstwa
-	// pokazuje ustalenia, ale nie zaklada planow.
+	// remediation holds the remediation plans. Without it the security
+	// module shows the findings, but creates no plans.
 	remediation *remediation.Store
-	// secrets trzyma wartosci, ktore nie moga przejsc przez zadania. Pusty
-	// oznacza instalacje bez magazynu.
+	// secrets holds the values that must not pass through tasks. Nil means
+	// an installation without a store.
 	secrets *secrets.Store
 }
 
-// SetSecrets podlacza magazyn sekretow.
+// SetSecrets attaches the secret store.
 func (s *Server) SetSecrets(store *secrets.Store) { s.secrets = store }
 
-// SetRemediation podlacza magazyn planow naprawy.
+// SetRemediation attaches the remediation plan store.
 func (s *Server) SetRemediation(store *remediation.Store) { s.remediation = store }
 
-// SetEvents podlacza magistrale zdarzen. Bez niej strumienie postepu sa
-// nieczynne, a panel dziala jak dotad - po odswiezeniu strony.
+// SetEvents attaches the event bus. Without it the progress streams are
+// inactive, and the panel works as before - after a page refresh.
 func (s *Server) SetEvents(bus *events.Bus) { s.events = bus }
 
-// SetBudgets podlacza budzety pojemnosci.
-func (s *Server) SetBudgets(store *budgets.Store) { s.budzety = store }
+// SetBudgets attaches the capacity budgets.
+func (s *Server) SetBudgets(store *budgets.Store) { s.budgets = store }
 
-// Options zbiera ustawienia serwera API, ktore nie sa zaleznosciami.
+// Options gathers the API server settings that are not dependencies.
 type Options struct {
 	ProductionEnvironments []string
 	SessionIdle            time.Duration
 	SessionAbsolute        time.Duration
-	// PublicURL jest adresem panelu widocznym dla przegladarki; uzywany przy
-	// wylogowaniu i przy decyzji o fladze Secure ciasteczek.
+	// PublicURL is the panel address visible to the browser; used at logout
+	// and when deciding about the Secure cookie flag.
 	PublicURL string
-	// WebRoot wskazuje katalog ze zbudowanym panelem. Pusty wylacza serwowanie.
+	// WebRoot points at the directory with the built panel. Empty disables
+	// serving.
 	WebRoot string
-	// DirectoryWrite wlacza zmiany w katalogu tozsamosci.
+	// DirectoryWrite enables changes in the identity directory.
 	DirectoryWrite bool
-	// StepUpMaxAge jest dopuszczalnym wiekiem uwierzytelnienia dla operacji
-	// o najwiekszym wplywie. Zero wylacza wymaganie swiezosci.
+	// StepUpMaxAge is the allowed authentication age for the highest-impact
+	// operations. Zero disables the freshness requirement.
 	StepUpMaxAge time.Duration
-	// StepUpACR jest wymaganym poziomem uwierzytelnienia, jesli instalacja
-	// go zdefiniowala u dostawcy tozsamosci.
+	// StepUpACR is the required authentication level, if the installation
+	// defined it at the identity provider.
 	StepUpACR string
-	// Metrics wystawia stan panelu; pusty wylacza endpoint.
+	// Metrics exposes the panel state; nil disables the endpoint.
 	Metrics *metrics.Collector
-	// Trust jest zbiorem CA floty; pusty wylacza zarzadzanie PKI.
+	// Trust is the set of fleet CAs; nil disables PKI management.
 	Trust *pki.Trust
 }
 
@@ -143,10 +149,10 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	}
 	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
-		files:       managedfiles.NewStore(pool),
-		certyfikaty: certyfikatystore.NewStore(pool),
-		kopie:       kopiestore.NewStore(pool),
-		campaigns:   campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
+		files:        managedfiles.NewStore(pool),
+		certificates: certificatestore.NewStore(pool),
+		backups:      backupstore.NewStore(pool),
+		campaigns:    campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
@@ -155,7 +161,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		metrics: options.Metrics, trust: options.Trust}
 }
 
-// Routes buduje router API.
+// Routes builds the API router.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
@@ -166,7 +172,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/pki/activate", s.handleActivateCA)
 	mux.HandleFunc("DELETE /api/v1/pki/{fingerprint}", s.handleRetireCA)
 
-	// Logowanie operatorow przez dostawce tozsamosci.
+	// Operator login through the identity provider.
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
@@ -178,41 +184,45 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts/{id}/files/history", s.handleFileHistory)
 	mux.HandleFunc("GET /api/v1/files/versions/{sha256}", s.handleFileVersion)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/inventory/{module}", s.handleHostInventoryModule)
-	// Historia manifestow projektu. Wycofanie zmiany to wdrozenie
-	// wczesniejszej wersji, wiec nie ma osobnej operacji.
+	// The manifest history of a project. Reverting a change is deploying an
+	// earlier version, so there is no separate operation.
 	mux.HandleFunc("GET /api/v1/hosts/{id}/compose/{project}/versions", s.handleComposeVersions)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/local-accounts", s.handleHostLocalAccounts)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/audit", s.handleHostAudit)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
-	// Zamowienie enrollmentu jest trwalym rekordem oczekujacej instalacji;
-	// token jest tylko sekretem, ktory autoryzuje jedna probe.
+	// An enrollment request is a durable record of a pending installation;
+	// the token is only the secret that authorises one attempt.
 	mux.HandleFunc("GET /api/v1/enrollment-requests", s.handleListEnrollmentRequests)
 	mux.HandleFunc("POST /api/v1/enrollment-requests", s.handleCreateEnrollmentRequest)
 	mux.HandleFunc("GET /api/v1/enrollment-requests/{id}", s.handleGetEnrollmentRequest)
 	mux.HandleFunc("POST /api/v1/enrollment-requests/{id}/revoke", s.handleRevokeEnrollmentRequest)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/identity-recovery", s.handleIdentityRecovery)
-	// Cykl zycia hosta: odciecie, przywrocenie i wycofanie z floty.
+	// The host lifecycle: cut-off, release and decommissioning from the fleet.
 	mux.HandleFunc("POST /api/v1/hosts/{id}/quarantine", s.handleQuarantineHost)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/quarantine/release", s.handleReleaseHost)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/decommission", s.handleDecommissionHost)
 
-	// Operacje typowane: plan, zatwierdzenie, wykonanie, wynik.
+	// Typed operations: plan, approval, execution, result.
 	mux.HandleFunc("GET /api/v1/actions", s.handleListActions)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/operations", s.handleCreateOperation)
-	// Okno serwisowe zmienia to, co panel o hoscie sadzi, a nie stan hosta,
-	// wiec ma wlasny punkt wejscia zamiast miejsca w kolejce zadan.
+	// A maintenance window changes what the panel thinks about the host, not
+	// the host state, so it has its own entry point instead of a place in
+	// the task queue.
 	mux.HandleFunc("POST /api/v1/hosts/{id}/maintenance", s.handleSetMaintenance)
-	// Widok floty: jedno zle ustawienie na stu hostach jest jednym problemem,
-	// a nie stoma - i widac to dopiero wtedy, gdy ustalenia stoja obok siebie.
+	// The fleet view: one bad setting on a hundred hosts is one problem, not
+	// a hundred - and that is visible only when the findings stand side by
+	// side.
 	mux.HandleFunc("GET /api/v1/security", s.handleFleetSecurity)
-	// Zgodnosc z profilem hardeningu liczy panel z faktow, ktore host i tak
-	// zglasza; naprawa jest planem i osobnymi zadaniami modulow.
+	// Compliance with the hardening profile is computed by the panel from
+	// the facts the host reports anyway; the remediation is a plan and
+	// separate module tasks.
 	mux.HandleFunc("GET /api/v1/hosts/{id}/security", s.handleHostSecurity)
 	mux.HandleFunc("GET /api/v1/hosts/{id}/security/remediation", s.handleListRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation", s.handleHostRemediation)
 	mux.HandleFunc("POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
-	// Store sekretow: wartosc wchodzi i nie wychodzi. Jedyna droga wyjscia
-	// prowadzi przez dzierzawe wystawiona hostowi na czas jednego zadania.
+	// The secret store: a value goes in and does not come out. The only way
+	// out leads through a lease issued to a host for the duration of one
+	// task.
 	mux.HandleFunc("GET /api/v1/budgets", s.handleListBudgets)
 	mux.HandleFunc("PUT /api/v1/budgets/{key...}", s.handleSetBudget)
 	mux.HandleFunc("GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
@@ -245,20 +255,20 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", s.handleJobAttempts)
-	// Strumien zdarzen calej widocznej floty. Jedno polaczenie na karte
-	// wystarcza na wszystkie trwajace operacje.
+	// The event stream of the whole visible fleet. One connection per tab is
+	// enough for all the operations in progress.
 	mux.HandleFunc("GET /api/v1/events", s.handleFleetEvents)
-	// Strumien postepu jednej operacji. Wynik zostaje trwaly w bazie;
-	// strumien tylko mowi, kiedy warto go odczytac ponownie.
+	// The progress stream of one operation. The result stays durable in the
+	// database; the stream only says when it is worth reading again.
 	mux.HandleFunc("GET /api/v1/jobs/{id}/events", s.handleJobEvents)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/approve", s.handleApproveJob)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.handleCancelJob)
 
-	// Kampanie: plan, zatwierdzenie, prowadzenie i raport.
+	// Campaigns: plan, approval, conduct and report.
 	mux.HandleFunc("GET /api/v1/campaigns", s.handleListCampaigns)
 	mux.HandleFunc("POST /api/v1/campaigns", s.handleCreateCampaign)
-	// Podglad selektora: liczba celow pochodzi z bazy, a nie z dlugosci
-	// pierwszej strony listy hostow.
+	// The selector preview: the target count comes from the database, not
+	// from the length of the first page of the host list.
 	mux.HandleFunc("GET /api/v1/campaigns/preview", s.handleCampaignPreview)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}", s.handleGetCampaign)
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/targets", s.handleCampaignTargets)
@@ -271,12 +281,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)
 	mux.HandleFunc("POST /api/v1/campaigns/{id}/cancel", s.handleCancelCampaign)
 
-	// Tozsamosci i tokeny API.
+	// Principals and API tokens.
 	mux.HandleFunc("GET /api/v1/principals", s.handleListPrincipals)
 	mux.HandleFunc("POST /api/v1/principals", s.handleCreatePrincipal)
 	mux.HandleFunc("GET /api/v1/whoami", s.handleWhoami)
 	mux.HandleFunc("GET /api/v1/roles", s.handleListRoles)
-	// Katalog tozsamosci w trybie tylko do odczytu.
+	// The identity directory in read-only mode.
 	mux.HandleFunc("GET /api/v1/identity/status", s.handleIdentityStatus)
 	mux.HandleFunc("GET /api/v1/identity/users", directoryHandler(s, "users",
 		func(s *Server, r *http.Request) ([]freeipa.User, error) {
@@ -290,8 +300,8 @@ func (s *Server) Routes() http.Handler {
 		func(s *Server, r *http.Request) ([]freeipa.Host, error) {
 			return s.directory.Hosts(r.Context())
 		}))
-	// Reguly dostepu i sudo wymagaja osobnego uprawnienia: opisuja, kto moze
-	// wejsc na hosta i podniesc uprawnienia.
+	// The access and sudo rules require a separate permission: they describe
+	// who may enter a host and elevate privileges.
 	mux.HandleFunc("GET /api/v1/identity/hbac-rules", policyHandler(s, "hbac",
 		func(s *Server, r *http.Request) ([]freeipa.HBACRule, error) {
 			return s.directory.HBACRules(r.Context())
@@ -301,23 +311,23 @@ func (s *Server) Routes() http.Handler {
 			return s.directory.SudoRules(r.Context())
 		}))
 
-	// DNS katalogowy: strefy i rekordy. Odczyt idzie tym samym uprawnieniem
-	// co reszta katalogu; zapis jest zmiana centralna z wlasnym uprawnieniem
-	// i wlasnym planem.
+	// The directory DNS: zones and records. Reading goes with the same
+	// permission as the rest of the directory; writing is a central change
+	// with its own permission and its own plan.
 	mux.HandleFunc("GET /api/v1/identity/dns/zones", directoryHandler(s, "dns-zones",
 		func(s *Server, r *http.Request) ([]freeipa.Zone, error) {
 			return s.directory.Zones(r.Context())
 		}))
 	mux.HandleFunc("GET /api/v1/identity/dns/records", directoryHandler(s, "dns-records",
 		func(s *Server, r *http.Request) ([]freeipa.Record, error) {
-			strefa := r.URL.Query().Get("zone")
-			if strefa == "" {
-				return nil, fmt.Errorf("wymagany parametr zone")
+			zone := r.URL.Query().Get("zone")
+			if zone == "" {
+				return nil, fmt.Errorf("the zone parameter is required")
 			}
-			return s.directory.Records(r.Context(), strefa)
+			return s.directory.Records(r.Context(), zone)
 		}))
 
-	// Zmiany w katalogu: plan, zatwierdzenie i wykonanie faza po fazie.
+	// Directory changes: plan, approval and execution phase by phase.
 	mux.HandleFunc("GET /api/v1/identity/changes", s.handleListDirectoryChanges)
 	mux.HandleFunc("POST /api/v1/identity/changes", s.handleCreateDirectoryChange)
 	mux.HandleFunc("GET /api/v1/identity/changes/{id}", s.handleGetDirectoryChange)
@@ -328,12 +338,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/group-mappings", s.handleCreateGroupMapping)
 	mux.HandleFunc("DELETE /api/v1/group-mappings/{id}", s.handleDeleteGroupMapping)
 
-	// Panel jest serwowany pod korzeniem; API ma wlasne prefiksy, wiec nie
-	// koliduje z trasami przegladarki.
+	// The panel is served under the root; the API has its own prefixes, so
+	// it does not collide with the browser routes.
 	mux.Handle("/", SPAHandler(s.webRoot))
 
-	// Uwierzytelnienie obejmuje caly router. Autoryzacje robia handlery, bo
-	// tylko one znaja zakres celu.
+	// Authentication covers the whole router. Authorisation is done by the
+	// handlers, because only they know the target scope.
 	authenticator := authz.Authenticator{Tokens: s.authz, Sessions: s.authz}
 	return authenticator.Middleware(mux)
 }
@@ -349,7 +359,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// FleetSummary zawiera wylacznie liczby wymagajace decyzji operatora.
+// FleetSummary holds only the numbers that require an operator decision.
 type FleetSummary struct {
 	Hosts            int `json:"hosts"`
 	Online           int `json:"online"`
@@ -366,9 +376,9 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Podsumowanie liczy tylko te hosty, ktore tozsamosc moze widziec.
-	// Inaczej pulpit operatora jednego srodowiska pokazywalby cala flote.
-	warunek, args := scopeFilter(principal.ScopesFor(authz.PermHostRead))
+	// The summary counts only the hosts the principal may see. Otherwise the
+	// dashboard of a single-environment operator would show the whole fleet.
+	condition, args := scopeFilter(principal.ScopesFor(authz.PermHostRead))
 	query := `
 		select
 			count(*),
@@ -380,7 +390,7 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 			count(*) filter (where lifecycle_state = 'quarantined')
 		from hosts `
 	var summary FleetSummary
-	err := s.pool.QueryRow(r.Context(), query+warunek, args...).Scan(
+	err := s.pool.QueryRow(r.Context(), query+condition, args...).Scan(
 		&summary.Hosts, &summary.Online, &summary.Offline,
 		&summary.RebootRequired, &summary.WithFailedUnits, &summary.PendingSecurity, &summary.QuarantinedHosts)
 	if err != nil {
@@ -392,8 +402,8 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
-	// Lista jest zawezana do zakresu, w ktorym tozsamosc ma prawo odczytu,
-	// zeby operator jednego srodowiska nie widzial calej floty.
+	// The list is narrowed to the scope the principal may read, so that a
+	// single-environment operator does not see the whole fleet.
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "fleet")
 	if !ok {
 		return
@@ -453,11 +463,11 @@ func (s *Server) handleHostInventory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, revision)
 }
 
-// handleHostInventoryModule zwraca stan jednego modulu hosta.
+// handleHostInventoryModule returns the state of one host module.
 //
-// Zakladka pobiera dokladnie to, co pokazuje, wraz z wlasna rewizja i wlasnym
-// znacznikiem obserwacji. Dotad wszystkie zakladki dzielily jedna date, wiec
-// operator patrzacy na pakiety widzial swiezosc czegos innego.
+// A tab fetches exactly what it shows, together with its own revision and
+// its own observation timestamp. Until now all the tabs shared one date, so
+// an operator looking at packages saw the freshness of something else.
 func (s *Server) handleHostInventoryModule(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -474,8 +484,8 @@ func (s *Server) handleHostInventoryModule(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if fragment == nil {
-		// Modul niezgloszony przez hosta rozni sie od modulu pustego, wiec
-		// odpowiedzia jest brak zasobu, a nie pusty payload.
+		// A module not reported by the host differs from an empty module, so
+		// the answer is a missing resource, not an empty payload.
 		problem(w, http.StatusNotFound, "inventory_module_not_found",
 			"the host has not reported this inventory module")
 		return
@@ -515,7 +525,7 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
-	s.log.Error("blad obslugi zadania API", "err", err)
+	s.log.Error("API request handling failed", "err", err)
 	problem(w, http.StatusInternalServerError, "internal_error", "internal error")
 }
 
@@ -525,7 +535,8 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// problem zwraca blad w formacie Problem Details ze stabilnym kodem maszynowym.
+// problem returns an error in the Problem Details format with a stable
+// machine code.
 func problem(w http.ResponseWriter, status int, code, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	w.WriteHeader(status)

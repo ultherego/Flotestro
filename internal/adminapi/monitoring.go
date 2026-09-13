@@ -14,44 +14,44 @@ import (
 	"github.com/ultherego/flotestro/internal/integrations/metrics"
 )
 
-// Monitoring zbiera zrodla, z ktorych panel czyta metryki i alerty.
+// Monitoring gathers the sources the panel reads metrics and alerts from.
 //
-// Zadne z nich nie jest wymagane: instalacja bez monitoringu dziala tak samo,
-// tyle ze zakladka monitoringu mowi wprost, ze zrodel nie wskazano. Awaria
-// integracji tez nie moze zabrac operatorowi zarzadzania hostem - dlatego
-// kazde pytanie ma limit czasu i bezpiecznik.
+// None of them is required: an installation without monitoring works the
+// same, only the monitoring tab says directly that no sources were named.
+// A failure of an integration must not take host management away from the
+// operator either - hence every question has a timeout and a fuse.
 type Monitoring struct {
-	Metryki   metrics.Provider
-	Alerty    alerts.Provider
-	Mapowanie integrations.Mapping
+	Metrics metrics.Provider
+	Alerts  alerts.Provider
+	Mapping integrations.Mapping
 }
 
-// SetMonitoring podlacza integracje monitoringowe.
+// SetMonitoring attaches the monitoring integrations.
 func (s *Server) SetMonitoring(monitoring Monitoring) { s.monitoring = monitoring }
 
-// raportMonitoringu jest odpowiedzia zakladki hosta.
-type raportMonitoringu struct {
+// monitoringReport is the answer of the host tab.
+type monitoringReport struct {
 	HostID string `json:"host_id"`
-	// Sources opisuje stan zrodel: nieskonfigurowane, dzialajace albo takie,
-	// ktore nie odpowiadaja. To trzy rozne odpowiedzi.
+	// Sources describes the source states: unconfigured, working or not
+	// answering. These are three different answers.
 	Sources []integrations.State `json:"sources"`
-	// Label mowi, po czym panel rozpoznaje ten host u zrodel. Bez tego pusty
-	// wykres nie ma wyjasnienia.
+	// Label says what the panel recognises this host by at the sources.
+	// Without it an empty chart has no explanation.
 	Label    string             `json:"label"`
 	Links    integrations.Links `json:"links"`
 	Alerts   []alerts.Alert     `json:"alerts"`
 	Silences []alerts.Silence   `json:"silences"`
 	Series   []metrics.Series   `json:"series"`
-	// From i To opisuja zakres czasu wykresow: panel pokazuje cudze dane
-	// i mowi, z jakiego okna pochodza.
+	// From and To describe the time range of the charts: the panel shows
+	// somebody else's data and says which window it comes from.
 	From time.Time `json:"from"`
 	To   time.Time `json:"to"`
-	// AlertsUnavailable i MetricsUnavailable mowia, dlaczego czegos nie ma.
+	// AlertsUnavailable and MetricsUnavailable say why something is missing.
 	AlertsUnavailable  string `json:"alerts_unavailable_reason,omitempty"`
 	MetricsUnavailable string `json:"metrics_unavailable_reason,omitempty"`
 }
 
-// handleHostMonitoring zwraca alerty, wykresy i odnosniki hosta.
+// handleHostMonitoring returns the alerts, charts and links of a host.
 func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -62,96 +62,97 @@ func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opis := opisHosta(*host)
-	okno := s.monitoring.Mapowanie.WindowOr(oknoZapytania(r))
-	do := time.Now().UTC()
-	od := do.Add(-okno)
+	description := describeHost(*host)
+	window := s.monitoring.Mapping.WindowOr(queryWindow(r))
+	to := time.Now().UTC()
+	from := to.Add(-window)
 
-	raport := raportMonitoringu{
+	report := monitoringReport{
 		HostID: hostID,
-		Label:  s.monitoring.Mapowanie.Label(opis),
-		Links:  s.monitoring.Mapowanie.For(opis),
-		From:   od, To: do,
+		Label:  s.monitoring.Mapping.Label(description),
+		Links:  s.monitoring.Mapping.For(description),
+		From:   from, To: to,
 		Alerts: []alerts.Alert{}, Silences: []alerts.Silence{}, Series: []metrics.Series{},
 	}
-	raport.Sources = s.stanZrodel(r)
+	report.Sources = s.sourceStates(r)
 
-	if s.monitoring.Alerty != nil && s.monitoring.Alerty.Configured() {
-		filtr := []string{s.monitoring.Mapowanie.HostFilter(opis)}
-		if lista, err := s.monitoring.Alerty.Alerts(r.Context(), filtr); err != nil {
-			// Awaria zrodla alertow nie moze wywrocic zakladki: mowimy,
-			// czego nie wiadomo, i pokazujemy reszte.
-			raport.AlertsUnavailable = err.Error()
-		} else if lista != nil {
-			// Pusta lista zostaje pusta lista, a nie brakiem pola: interfejs
-			// ma pokazac "nic sie nie pali", a nie "nie wiadomo".
-			raport.Alerts = lista
+	if s.monitoring.Alerts != nil && s.monitoring.Alerts.Configured() {
+		filter := []string{s.monitoring.Mapping.HostFilter(description)}
+		if list, err := s.monitoring.Alerts.Alerts(r.Context(), filter); err != nil {
+			// A failure of the alert source must not topple the tab: it is
+			// said what is unknown, and the rest is shown.
+			report.AlertsUnavailable = err.Error()
+		} else if list != nil {
+			// An empty list stays an empty list, not a missing field: the
+			// interface is meant to show "nothing is burning", not "unknown".
+			report.Alerts = list
 		}
-		if ciszy, err := s.monitoring.Alerty.Silences(r.Context(), filtr); err != nil {
-			if raport.AlertsUnavailable == "" {
-				raport.AlertsUnavailable = err.Error()
+		if silences, err := s.monitoring.Alerts.Silences(r.Context(), filter); err != nil {
+			if report.AlertsUnavailable == "" {
+				report.AlertsUnavailable = err.Error()
 			}
-		} else if ciszy != nil {
-			raport.Silences = ciszy
+		} else if silences != nil {
+			report.Silences = silences
 		}
 	}
-	if s.monitoring.Metryki != nil && s.monitoring.Metryki.Configured() {
-		raport.Series = s.monitoring.Metryki.Series(r.Context(), raport.Label, od, do)
+	if s.monitoring.Metrics != nil && s.monitoring.Metrics.Configured() {
+		report.Series = s.monitoring.Metrics.Series(r.Context(), report.Label, from, to)
 	} else {
-		raport.MetricsUnavailable = "this installation has no metrics source configured"
+		report.MetricsUnavailable = "this installation has no metrics source configured"
 	}
-	writeJSON(w, http.StatusOK, raport)
+	writeJSON(w, http.StatusOK, report)
 }
 
-// stanZrodel pyta integracje o zdrowie.
-func (s *Server) stanZrodel(r *http.Request) []integrations.State {
-	stany := make([]integrations.State, 0, 2)
-	if s.monitoring.Metryki != nil {
-		stany = append(stany, s.monitoring.Metryki.Health(r.Context()))
+// sourceStates asks the integrations about their health.
+func (s *Server) sourceStates(r *http.Request) []integrations.State {
+	states := make([]integrations.State, 0, 2)
+	if s.monitoring.Metrics != nil {
+		states = append(states, s.monitoring.Metrics.Health(r.Context()))
 	}
-	if s.monitoring.Alerty != nil {
-		stany = append(stany, s.monitoring.Alerty.Health(r.Context()))
+	if s.monitoring.Alerts != nil {
+		states = append(states, s.monitoring.Alerts.Health(r.Context()))
 	}
-	return stany
+	return states
 }
 
-// oknoZapytania czyta zakres czasu z zapytania.
-func oknoZapytania(r *http.Request) time.Duration {
-	wartosc := r.URL.Query().Get("range")
-	if wartosc == "" {
+// queryWindow reads the time range from the query.
+func queryWindow(r *http.Request) time.Duration {
+	value := r.URL.Query().Get("range")
+	if value == "" {
 		return 0
 	}
-	okno, err := time.ParseDuration(wartosc)
-	if err != nil || okno <= 0 || okno > 7*24*time.Hour {
+	window, err := time.ParseDuration(value)
+	if err != nil || window <= 0 || window > 7*24*time.Hour {
 		return 0
 	}
-	return okno
+	return window
 }
 
-func opisHosta(host hosts.Host) integrations.Host {
+func describeHost(host hosts.Host) integrations.Host {
 	return integrations.Host{
 		ID: host.ID, Hostname: host.Hostname, Address: host.ManagementAddress,
 		Site: host.Site, Environment: host.Environment,
 	}
 }
 
-// zadanieCiszy opisuje wyciszenie zlecone z panelu.
-type zadanieCiszy struct {
-	// DurationMinutes jest terminem konca liczonym od teraz. Zero oznacza
-	// czas domyslny; wyciszenia bezterminowego nie da sie tu zlecic.
+// silenceRequest describes a silence ordered from the panel.
+type silenceRequest struct {
+	// DurationMinutes is the end counted from now. Zero means the default
+	// time; an open-ended silence cannot be ordered here.
 	DurationMinutes int    `json:"duration_minutes,omitempty"`
 	Comment         string `json:"comment"`
-	// AlertName zawezaja wyciszenie do jednego alertu. Puste oznacza
-	// wszystkie alerty tego hosta.
+	// AlertName narrows the silence to one alert. Empty means all the
+	// alerts of this host.
 	AlertName string `json:"alert_name,omitempty"`
 }
 
-// handleCreateSilence zaklada wyciszenie alertow hosta.
+// handleCreateSilence creates a silence of the host alerts.
 //
-// To nie jest operacja na hoscie i nie idzie przez opspec: zmienia to, co
-// o hoscie sadzi system alertowy, a nie stan maszyny - tak samo jak okno
-// serwisowe. Ale jest decyzja o wylaczeniu czujnika, wiec ma wlasne
-// uprawnienie, obowiazkowy termin, obowiazkowy powod i slad w audycie.
+// This is not an operation on the host and does not go through opspec: it
+// changes what the alerting system thinks about the host, not the machine
+// state - just like a maintenance window. But it is a decision to switch a
+// sensor off, so it has its own permission, a mandatory end, a mandatory
+// reason and an audit trail.
 func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -162,42 +163,42 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Configured() {
+	if s.monitoring.Alerts == nil || !s.monitoring.Alerts.Configured() {
 		problem(w, http.StatusServiceUnavailable, "alerts_not_configured",
 			"this installation has no alert source configured")
 		return
 	}
 
-	var zadanie zadanieCiszy
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&zadanie); err != nil {
+	var request silenceRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	trwanie := time.Duration(zadanie.DurationMinutes) * time.Minute
-	if trwanie <= 0 {
-		trwanie = alerts.DefaultSilence
+	duration := time.Duration(request.DurationMinutes) * time.Minute
+	if duration <= 0 {
+		duration = alerts.DefaultSilence
 	}
 
-	opis := opisHosta(*host)
-	teraz := time.Now().UTC()
-	cisza := alerts.Silence{
+	description := describeHost(*host)
+	now := time.Now().UTC()
+	silence := alerts.Silence{
 		Matchers: []alerts.Matcher{{
-			Name:  s.monitoring.Mapowanie.HostLabel,
-			Value: s.monitoring.Mapowanie.Label(opis),
+			Name:  s.monitoring.Mapping.HostLabel,
+			Value: s.monitoring.Mapping.Label(description),
 		}},
-		StartsAt: teraz, EndsAt: teraz.Add(trwanie),
-		CreatedBy: principal.Subject, Comment: zadanie.Comment,
+		StartsAt: now, EndsAt: now.Add(duration),
+		CreatedBy: principal.Subject, Comment: request.Comment,
 	}
-	if zadanie.AlertName != "" {
-		cisza.Matchers = append(cisza.Matchers,
-			alerts.Matcher{Name: "alertname", Value: zadanie.AlertName})
+	if request.AlertName != "" {
+		silence.Matchers = append(silence.Matchers,
+			alerts.Matcher{Name: "alertname", Value: request.AlertName})
 	}
-	if err := alerts.ValidateSilence(cisza); err != nil {
+	if err := alerts.ValidateSilence(silence); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_silence", err.Error())
 		return
 	}
 
-	identyfikator, err := s.monitoring.Alerty.Silence(r.Context(), cisza)
+	id, err := s.monitoring.Alerts.Silence(r.Context(), silence)
 	if err != nil {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: principal.Subject,
@@ -208,22 +209,22 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadGateway, "alerts_unavailable", err.Error())
 		return
 	}
-	cisza.ID = identyfikator
+	silence.ID = id
 
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "monitoring.silence.create", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
-			"silence_id": identyfikator, "ends_at": cisza.EndsAt.Format(time.RFC3339),
-			"comment": cisza.Comment, "alert_name": zadanie.AlertName,
-			"label": cisza.Matchers[0].Name + "=" + cisza.Matchers[0].Value,
+			"silence_id": id, "ends_at": silence.EndsAt.Format(time.RFC3339),
+			"comment": silence.Comment, "alert_name": request.AlertName,
+			"label": silence.Matchers[0].Name + "=" + silence.Matchers[0].Value,
 		},
 	})
-	writeJSON(w, http.StatusCreated, cisza)
+	writeJSON(w, http.StatusCreated, silence)
 }
 
-// handleExpireSilence konczy wyciszenie przed czasem.
+// handleExpireSilence ends a silence early.
 func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -234,13 +235,13 @@ func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Configured() {
+	if s.monitoring.Alerts == nil || !s.monitoring.Alerts.Configured() {
 		problem(w, http.StatusServiceUnavailable, "alerts_not_configured",
 			"this installation has no alert source configured")
 		return
 	}
-	identyfikator := r.PathValue("silence")
-	if err := s.monitoring.Alerty.Unsilence(r.Context(), identyfikator); err != nil {
+	id := r.PathValue("silence")
+	if err := s.monitoring.Alerts.Unsilence(r.Context(), id); err != nil {
 		problem(w, http.StatusBadGateway, "alerts_unavailable", err.Error())
 		return
 	}
@@ -248,95 +249,95 @@ func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "monitoring.silence.expire", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"silence_id": identyfikator},
+		Detail: map[string]any{"silence_id": id},
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// alertFloty laczy alert z hostem panelu.
-type alertFloty struct {
+// fleetAlert joins an alert with a panel host.
+type fleetAlert struct {
 	HostID   string       `json:"host_id,omitempty"`
 	Hostname string       `json:"hostname,omitempty"`
 	Alert    alerts.Alert `json:"alert"`
 }
 
-// handleFleetMonitoring zwraca alerty calej widocznej floty.
+// handleFleetMonitoring returns the alerts of the whole visible fleet.
 //
-// Alerty dzialaja flotowo z natury: jedna zla zmiana widac naraz na
-// kilkudziesieciu hostach. Panel dokłada do nich to, czego system alertowy
-// nie wie - ktory host z floty to jest i czy wolno go temu operatorowi
-// pokazac.
+// Alerts work fleet-wide by nature: one bad change is visible at once on
+// dozens of hosts. The panel adds to them what the alerting system does not
+// know - which fleet host this is and whether this operator may be shown
+// it.
 func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
 	if !ok {
 		return
 	}
-	odpowiedz := map[string]any{
-		"sources": s.stanZrodel(r),
-		"items":   []alertFloty{},
+	response := map[string]any{
+		"sources": s.sourceStates(r),
+		"items":   []fleetAlert{},
 	}
-	if s.monitoring.Alerty == nil || !s.monitoring.Alerty.Configured() {
-		odpowiedz["alerts_unavailable_reason"] = "this installation has no alert source configured"
-		writeJSON(w, http.StatusOK, odpowiedz)
+	if s.monitoring.Alerts == nil || !s.monitoring.Alerts.Configured() {
+		response["alerts_unavailable_reason"] = "this installation has no alert source configured"
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
-	lista, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
+	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	poEtykiecie := map[string]hosts.Host{}
-	for _, host := range lista {
+	byLabel := map[string]hosts.Host{}
+	for _, host := range list {
 		if principal.Can(authz.PermMonitoringRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			poEtykiecie[s.monitoring.Mapowanie.Label(opisHosta(host))] = host
+			byLabel[s.monitoring.Mapping.Label(describeHost(host))] = host
 		}
 	}
 
-	wszystkie, err := s.monitoring.Alerty.Alerts(r.Context(), nil)
+	all, err := s.monitoring.Alerts.Alerts(r.Context(), nil)
 	if err != nil {
-		odpowiedz["alerts_unavailable_reason"] = err.Error()
-		writeJSON(w, http.StatusOK, odpowiedz)
+		response["alerts_unavailable_reason"] = err.Error()
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
-	pozycje := make([]alertFloty, 0, len(wszystkie))
-	obce := 0
-	for _, alert := range wszystkie {
-		etykieta := alert.Labels[s.monitoring.Mapowanie.HostLabel]
-		host, znany := poEtykiecie[etykieta]
-		if !znany {
-			// Alert spoza floty albo z hosta, ktorego ten operator nie
-			// widzi. Nie pokazujemy go, ale liczymy: cisza w tym miejscu
-			// wygladalaby jak spokojna flota.
-			obce++
+	items := make([]fleetAlert, 0, len(all))
+	foreign := 0
+	for _, alert := range all {
+		label := alert.Labels[s.monitoring.Mapping.HostLabel]
+		host, known := byLabel[label]
+		if !known {
+			// An alert from outside the fleet or from a host this operator does
+			// not see. It is not shown, but counted: silence here would look
+			// like a calm fleet.
+			foreign++
 			continue
 		}
-		pozycje = append(pozycje, alertFloty{
+		items = append(items, fleetAlert{
 			HostID: host.ID, Hostname: host.Hostname, Alert: alert,
 		})
 	}
-	// Najpierw najciezsze, potem najstarsze: tak sie czyta dyzur.
-	sort.SliceStable(pozycje, func(i, j int) bool {
-		if pozycje[i].Alert.Severity != pozycje[j].Alert.Severity {
-			return wagaWagi(pozycje[i].Alert.Severity) > wagaWagi(pozycje[j].Alert.Severity)
+	// The most severe first, then the oldest: that is how on-call reads.
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Alert.Severity != items[j].Alert.Severity {
+			return severityWeight(items[i].Alert.Severity) > severityWeight(items[j].Alert.Severity)
 		}
-		if pozycje[i].Alert.StartsAt == nil || pozycje[j].Alert.StartsAt == nil {
-			return pozycje[i].Hostname < pozycje[j].Hostname
+		if items[i].Alert.StartsAt == nil || items[j].Alert.StartsAt == nil {
+			return items[i].Hostname < items[j].Hostname
 		}
-		return pozycje[i].Alert.StartsAt.Before(*pozycje[j].Alert.StartsAt)
+		return items[i].Alert.StartsAt.Before(*items[j].Alert.StartsAt)
 	})
 
-	odpowiedz["items"] = pozycje
-	odpowiedz["hosts_visible"] = len(poEtykiecie)
-	odpowiedz["alerts_outside_fleet"] = obce
-	odpowiedz["host_label"] = s.monitoring.Mapowanie.HostLabel
-	writeJSON(w, http.StatusOK, odpowiedz)
+	response["items"] = items
+	response["hosts_visible"] = len(byLabel)
+	response["alerts_outside_fleet"] = foreign
+	response["host_label"] = s.monitoring.Mapping.HostLabel
+	writeJSON(w, http.StatusOK, response)
 }
 
-// wagaWagi porzadkuje alerty wedlug tego, jak pilne sa dla dyzuru.
-func wagaWagi(waga string) int {
-	switch waga {
+// severityWeight orders the alerts by how urgent they are for on-call.
+func severityWeight(severity string) int {
+	switch severity {
 	case "critical", "page":
 		return 3
 	case "warning":

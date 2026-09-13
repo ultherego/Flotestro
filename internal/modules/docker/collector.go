@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Snapshot to pelny odczyt stanu kontenerow hosta.
+// Snapshot is a full read of the host container state.
 type Snapshot struct {
 	Summary    Summary     `json:"summary"`
 	Containers []Container `json:"containers"`
@@ -16,38 +16,40 @@ type Snapshot struct {
 	Volumes    []Volume    `json:"volumes"`
 }
 
-// Collect czyta stan silnika.
+// Collect reads the engine state.
 //
-// Pelne listy sa pobierane na zadanie operatora, a podsumowanie trafia do
-// inventory. Odpytywanie silnika przy kazdym heartbeacie obciazaloby host bez
-// powodu: liczba kontenerow zmienia sie rzadziej niz co trzydziesci sekund,
-// a operator i tak patrzy na te zakladke tylko wtedy, gdy jej potrzebuje.
+// The full lists are fetched on the operator's request, and the summary
+// goes into the inventory. Querying the engine at every heartbeat would
+// load the host for no reason: the container count changes less often than
+// every thirty seconds, and the operator looks at this tab only when they
+// need it anyway.
 func Collect(ctx context.Context, client *Client) Snapshot {
 	if client == nil {
-		return Snapshot{Summary: Summary{UnavailableReason: "brak adaptera silnika kontenerow"}}
+		return Snapshot{Summary: Summary{UnavailableReason: "no container engine adapter"}}
 	}
 
 	snapshot := Snapshot{}
 	engine, api, err := client.Version(ctx)
 	if err != nil {
-		// Silnik niedostepny to nie to samo co host bez kontenerow. Pusta
-		// lista bez powodu wygladalaby jak porzadek na hoscie.
-		snapshot.Summary.UnavailableReason = powodNiedostepnosci(err)
+		// An unavailable engine is not the same as a host without
+		// containers. An empty list without a reason would look like a tidy
+		// host.
+		snapshot.Summary.UnavailableReason = unavailableReason(err)
 		return snapshot
 	}
 	snapshot.Summary.EngineVersion = engine
 	snapshot.Summary.APIVersion = api
 
-	kontenery, err := client.Containers(ctx, true)
+	containers, err := client.Containers(ctx, true)
 	if err != nil {
-		snapshot.Summary.UnavailableReason = powodNiedostepnosci(err)
+		snapshot.Summary.UnavailableReason = unavailableReason(err)
 		return snapshot
 	}
-	snapshot.Containers = kontenery
+	snapshot.Containers = containers
 
-	// Stan zdrowia i licznik restartow wymagaja osobnego zapytania, wiec
-	// pytamy tylko o kontenery, dla ktorych to znaczy cokolwiek. Zatrzymany
-	// kontener nie ma zdrowia do sprawdzenia.
+	// The health state and the restart counter need a separate query, so
+	// only the containers for which it means anything are asked. A stopped
+	// container has no health to check.
 	for i := range snapshot.Containers {
 		if snapshot.Containers[i].State != "running" && snapshot.Containers[i].State != "restarting" {
 			continue
@@ -60,75 +62,77 @@ func Collect(ctx context.Context, client *Client) Snapshot {
 		snapshot.Containers[i].RestartCount = restarts
 	}
 
-	if obrazy, err := client.Images(ctx); err == nil {
-		snapshot.Images = obrazy
+	if images, err := client.Images(ctx); err == nil {
+		snapshot.Images = images
 	}
-	if sieci, err := client.Networks(ctx); err == nil {
-		snapshot.Networks = sieci
+	if networks, err := client.Networks(ctx); err == nil {
+		snapshot.Networks = networks
 	}
-	if wolumeny, err := client.Volumes(ctx); err == nil {
-		snapshot.Volumes = wolumeny
+	if volumes, err := client.Volumes(ctx); err == nil {
+		snapshot.Volumes = volumes
 	}
 
-	powiazUzycie(&snapshot)
-	snapshot.Summary = podsumuj(snapshot, snapshot.Summary)
+	linkUsage(&snapshot)
+	snapshot.Summary = summarise(snapshot, snapshot.Summary)
 	return snapshot
 }
 
-// powiazUzycie wypelnia uzycie sieci i wolumenow z listy kontenerow.
+// linkUsage fills the network and volume usage from the container list.
 //
-// Silnik nie odpowiada na to pytanie: w liscie sieci zwraca pusta mape
-// kontenerow, a rozmiar i licznik odwolan wolumenu podaje dopiero przy
-// osobnym rachunku miejsca. Bez tego wyliczenia kazda siec i kazdy wolumen
-// wygladalyby na porzucone - a to one trafiaja pod sprzatanie.
+// The engine does not answer this question: in the network list it returns
+// an empty container map, and it reports the volume size and reference
+// count only with a separate disk usage computation. Without this
+// derivation every network and every volume would look abandoned - and
+// those are the ones that go under the prune.
 //
-// Liczy sie takze kontener zatrzymany: wolumen zatrzymanego kontenera nie
-// jest wolumenem niczyim.
-func powiazUzycie(snapshot *Snapshot) {
-	poNazwie := map[string]int{}
-	poID := map[string]int{}
+// A stopped container counts too: the volume of a stopped container is not
+// nobody's volume.
+func linkUsage(snapshot *Snapshot) {
+	byName := map[string]int{}
+	byID := map[string]int{}
 	for i := range snapshot.Networks {
-		poNazwie[snapshot.Networks[i].Name] = i
-		poID[snapshot.Networks[i].ID] = i
+		byName[snapshot.Networks[i].Name] = i
+		byID[snapshot.Networks[i].ID] = i
 	}
-	wolumeny := map[string]int{}
+	volumes := map[string]int{}
 	for i := range snapshot.Volumes {
-		wolumeny[snapshot.Volumes[i].Name] = i
+		volumes[snapshot.Volumes[i].Name] = i
 	}
 
-	for _, kontener := range snapshot.Containers {
-		for _, podlaczenie := range kontener.Networks {
-			indeks, ok := poNazwie[podlaczenie.Name]
+	for _, container := range snapshot.Containers {
+		for _, attachment := range container.Networks {
+			index, ok := byName[attachment.Name]
 			if !ok {
-				indeks, ok = poID[podlaczenie.ID]
+				index, ok = byID[attachment.ID]
 			}
 			if !ok {
-				// Siec zniknela miedzy jednym zapytaniem a drugim. Kontener
-				// mowi o niej prawde, ale nie ma jej do czego dopisac.
+				// The network vanished between one query and the other. The
+				// container tells the truth about it, but there is nothing
+				// to attach it to.
 				continue
 			}
-			siec := &snapshot.Networks[indeks]
-			siec.Containers = append(siec.Containers, NetworkMember{
-				ID: kontener.ID, Name: kontener.Name, State: kontener.State,
-				IPv4: podlaczenie.IPv4,
+			network := &snapshot.Networks[index]
+			network.Containers = append(network.Containers, NetworkMember{
+				ID: container.ID, Name: container.Name, State: container.State,
+				IPv4: attachment.IPv4,
 			})
-			siec.InUse = true
+			network.InUse = true
 		}
-		for _, montowanie := range kontener.Mounts {
-			if montowanie.Type != "volume" || montowanie.Name == "" {
+		for _, mount := range container.Mounts {
+			if mount.Type != "volume" || mount.Name == "" {
 				continue
 			}
-			indeks, ok := wolumeny[montowanie.Name]
+			index, ok := volumes[mount.Name]
 			if !ok {
 				continue
 			}
-			wolumen := &snapshot.Volumes[indeks]
-			wolumen.UsedBy = append(wolumen.UsedBy, VolumeMount{
-				ContainerID: kontener.ID, ContainerName: kontener.Name,
-				State: kontener.State, Destination: montowanie.Destination,
-				ReadOnly: montowanie.ReadOnly,
+			volume := &snapshot.Volumes[index]
+			volume.UsedBy = append(volume.UsedBy, VolumeMount{
+				ContainerID: container.ID, ContainerName: container.Name,
+				State: container.State, Destination: mount.Destination,
+				ReadOnly: mount.ReadOnly,
 			})
-			wolumen.InUse = true
+			volume.InUse = true
 		}
 	}
 
@@ -144,94 +148,97 @@ func powiazUzycie(snapshot *Snapshot) {
 	}
 }
 
-// podsumuj liczy sygnaly decyzyjne. Podsumowanie nie jest metryka: mowi, czy
-// cos wymaga uwagi operatora, a nie ile czego jest w kazdej chwili.
-func podsumuj(snapshot Snapshot, podstawa Summary) Summary {
-	podsumowanie := podstawa
-	podsumowanie.Containers = len(snapshot.Containers)
-	podsumowanie.Images = len(snapshot.Images)
-	podsumowanie.Networks = len(snapshot.Networks)
-	podsumowanie.Volumes = len(snapshot.Volumes)
-	for _, siec := range snapshot.Networks {
-		// Siec wbudowana nie jest kandydatem do sprzatania, wiec nie ma jej
-		// w liczniku - inaczej kazdy host mialby trzy sieci "do usuniecia".
-		if !siec.InUse && !siec.Predefined {
-			podsumowanie.NetworksUnused++
+// summarise computes the decision signals. The summary is not a metric: it
+// says whether something needs the operator's attention, not how much of
+// what there is at every moment.
+func summarise(snapshot Snapshot, base Summary) Summary {
+	summary := base
+	summary.Containers = len(snapshot.Containers)
+	summary.Images = len(snapshot.Images)
+	summary.Networks = len(snapshot.Networks)
+	summary.Volumes = len(snapshot.Volumes)
+	for _, network := range snapshot.Networks {
+		// A predefined network is not a cleanup candidate, so it is not in
+		// the counter - otherwise every host would have three networks "to
+		// remove".
+		if !network.InUse && !network.Predefined {
+			summary.NetworksUnused++
 		}
 	}
-	for _, wolumen := range snapshot.Volumes {
-		if !wolumen.InUse {
-			podsumowanie.VolumesUnused++
+	for _, volume := range snapshot.Volumes {
+		if !volume.InUse {
+			summary.VolumesUnused++
 		}
 	}
 
-	projekty := map[string]*Project{}
-	for _, kontener := range snapshot.Containers {
-		switch kontener.State {
+	projects := map[string]*Project{}
+	for _, container := range snapshot.Containers {
+		switch container.State {
 		case "running":
-			podsumowanie.Running++
+			summary.Running++
 		case "paused":
-			podsumowanie.Paused++
+			summary.Paused++
 		default:
-			podsumowanie.Stopped++
+			summary.Stopped++
 		}
-		if kontener.Health == "unhealthy" {
-			podsumowanie.Unhealthy++
+		if container.Health == "unhealthy" {
+			summary.Unhealthy++
 		}
-		// Kontener, ktory wstaje w kolko, jest sprawny w kazdej pojedynczej
-		// chwili i mimo to zepsuty. Bez tego licznika nie widac tego wcale.
-		if kontener.State == "restarting" || kontener.RestartCount >= progPetliRestartow {
-			podsumowanie.RestartLooping++
+		// A container that comes up over and over is fine at every single
+		// moment and broken nevertheless. Without this counter it is not
+		// visible at all.
+		if container.State == "restarting" || container.RestartCount >= restartLoopThreshold {
+			summary.RestartLooping++
 		}
-		if kontener.Compose == nil {
+		if container.Compose == nil {
 			continue
 		}
-		projekt := projekty[kontener.Compose.Project]
-		if projekt == nil {
-			projekt = &Project{
-				Name:        kontener.Compose.Project,
-				ConfigFiles: kontener.Compose.ConfigFiles,
-				WorkingDir:  kontener.Compose.WorkingDir,
+		project := projects[container.Compose.Project]
+		if project == nil {
+			project = &Project{
+				Name:        container.Compose.Project,
+				ConfigFiles: container.Compose.ConfigFiles,
+				WorkingDir:  container.Compose.WorkingDir,
 			}
-			projekty[kontener.Compose.Project] = projekt
+			projects[container.Compose.Project] = project
 		}
-		projekt.Total++
-		if kontener.State == "running" {
-			projekt.Running++
+		project.Total++
+		if container.State == "running" {
+			project.Running++
 		}
-		if kontener.Compose.Service != "" && !zawiera(projekt.Services, kontener.Compose.Service) {
-			projekt.Services = append(projekt.Services, kontener.Compose.Service)
+		if container.Compose.Service != "" && !contains(project.Services, container.Compose.Service) {
+			project.Services = append(project.Services, container.Compose.Service)
 		}
 	}
 
-	for _, projekt := range projekty {
-		sort.Strings(projekt.Services)
-		podsumowanie.Projects = append(podsumowanie.Projects, *projekt)
+	for _, project := range projects {
+		sort.Strings(project.Services)
+		summary.Projects = append(summary.Projects, *project)
 	}
-	sort.Slice(podsumowanie.Projects, func(i, j int) bool {
-		return podsumowanie.Projects[i].Name < podsumowanie.Projects[j].Name
+	sort.Slice(summary.Projects, func(i, j int) bool {
+		return summary.Projects[i].Name < summary.Projects[j].Name
 	})
-	return podsumowanie
+	return summary
 }
 
-// progPetliRestartow oddziela kontener, ktory raz sie podniosl, od takiego,
-// ktory wstaje w kolko. Wartosc jest celowo niska: operator ma zobaczyc
-// problem, zanim urosnie do setek restartow.
-const progPetliRestartow = 5
+// restartLoopThreshold separates a container that came up once from one
+// that comes up over and over. The value is deliberately low: the operator
+// is meant to see the problem before it grows to hundreds of restarts.
+const restartLoopThreshold = 5
 
-func zawiera(lista []string, wartosc string) bool {
-	for _, pozycja := range lista {
-		if pozycja == wartosc {
+func contains(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
 			return true
 		}
 	}
 	return false
 }
 
-// powodNiedostepnosci tlumaczy blad na zdanie dla operatora.
-func powodNiedostepnosci(err error) string {
+// unavailableReason translates an error into a sentence for the operator.
+func unavailableReason(err error) string {
 	if errors.Is(err, ErrUnavailable) {
-		return "silnik kontenerow nie odpowiada: " + skrocBlad(err)
+		return "the container engine does not answer: " + shortenError(err)
 	}
 	return strings.TrimSpace(err.Error())
 }

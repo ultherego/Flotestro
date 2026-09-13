@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// surowyInterfejs odwzorowuje jeden wpis z "ip -j addr show".
-type surowyInterfejs struct {
+// rawInterface maps one entry of "ip -j addr show".
+type rawInterface struct {
 	Index     int      `json:"ifindex"`
 	Name      string   `json:"ifname"`
 	Flags     []string `json:"flags"`
@@ -33,8 +33,8 @@ type surowyInterfejs struct {
 	} `json:"addr_info"`
 }
 
-// surowaTrasa odwzorowuje jeden wpis z "ip -j route show".
-type surowaTrasa struct {
+// rawRoute maps one entry of "ip -j route show".
+type rawRoute struct {
 	Dst      string `json:"dst"`
 	Gateway  string `json:"gateway"`
 	Dev      string `json:"dev"`
@@ -45,142 +45,146 @@ type surowaTrasa struct {
 	Table    string `json:"table"`
 }
 
-// zycieNieskonczone to wartosc, ktora jadro podaje dla adresu bez czasu zycia.
-const zycieNieskonczone = 4294967295
+// infiniteLifetime is the value the kernel reports for an address without
+// a lifetime.
+const infiniteLifetime = 4294967295
 
-// ParsujInterfejsy czyta wyjscie "ip -j addr show".
-func ParsujInterfejsy(wyjscie string) ([]Interface, error) {
-	var surowe []surowyInterfejs
-	if err := json.Unmarshal([]byte(wyjscie), &surowe); err != nil {
-		return nil, fmt.Errorf("odczyt interfejsow: %w", err)
+// ParseInterfaces reads the output of "ip -j addr show".
+func ParseInterfaces(output string) ([]Interface, error) {
+	var raw []rawInterface
+	if err := json.Unmarshal([]byte(output), &raw); err != nil {
+		return nil, fmt.Errorf("reading the interfaces: %w", err)
 	}
-	interfejsy := make([]Interface, 0, len(surowe))
-	for _, wpis := range surowe {
-		interfejs := Interface{
-			Name:      wpis.Name,
-			Index:     wpis.Index,
-			Kind:      rodzaj(wpis),
-			MAC:       wpis.Address,
-			MTU:       wpis.MTU,
-			OperState: strings.ToLower(wpis.OperState),
+	interfaces := make([]Interface, 0, len(raw))
+	for _, entry := range raw {
+		iface := Interface{
+			Name:      entry.Name,
+			Index:     entry.Index,
+			Kind:      kind(entry),
+			MAC:       entry.Address,
+			MTU:       entry.MTU,
+			OperState: strings.ToLower(entry.OperState),
 		}
-		for _, adres := range wpis.AddrInfo {
-			// Adres bez prefiksu nie mowi, jaka siec host uwaza za lokalna.
-			interfejs.Addresses = append(interfejs.Addresses, Address{
-				Family:  adres.Family,
-				Address: adres.Local + "/" + strconv.Itoa(adres.PrefixLen),
-				Scope:   adres.Scope,
-				Source:  adres.Protocol,
-				// Adres dynamiczny ma skonczony czas zycia. Ten sam adres
-				// jutro moze nalezec do kogos innego.
-				Permanent: !adres.Dynamic &&
-					(adres.ValidLife == nil || *adres.ValidLife == zycieNieskonczone),
+		for _, address := range entry.AddrInfo {
+			// An address without the prefix does not say which network the
+			// host considers local.
+			iface.Addresses = append(iface.Addresses, Address{
+				Family:  address.Family,
+				Address: address.Local + "/" + strconv.Itoa(address.PrefixLen),
+				Scope:   address.Scope,
+				Source:  address.Protocol,
+				// A dynamic address has a finite lifetime. The same address
+				// may belong to somebody else tomorrow.
+				Permanent: !address.Dynamic &&
+					(address.ValidLife == nil || *address.ValidLife == infiniteLifetime),
 			})
 		}
-		interfejsy = append(interfejsy, interfejs)
+		interfaces = append(interfaces, iface)
 	}
-	return interfejsy, nil
+	return interfaces, nil
 }
 
-// rodzaj nazywa typ interfejsu. Jadro podaje go tylko dla wirtualnych, wiec
-// brak informacji oznacza interfejs fizyczny albo loopback.
-func rodzaj(wpis surowyInterfejs) string {
-	if wpis.LinkInfo.Kind != "" {
-		return wpis.LinkInfo.Kind
+// kind names the interface type. The kernel reports it only for virtual
+// ones, so no information means a physical interface or the loopback.
+func kind(entry rawInterface) string {
+	if entry.LinkInfo.Kind != "" {
+		return entry.LinkInfo.Kind
 	}
-	if wpis.Name == "lo" {
+	if entry.Name == "lo" {
 		return "loopback"
 	}
-	if wpis.LinkType == "ether" {
+	if entry.LinkType == "ether" {
 		return "ethernet"
 	}
-	return wpis.LinkType
+	return entry.LinkType
 }
 
-// ParsujTrasy czyta wyjscie "ip -j route show".
-func ParsujTrasy(wyjscie, rodzina string) ([]Route, error) {
-	var surowe []surowaTrasa
-	if err := json.Unmarshal([]byte(wyjscie), &surowe); err != nil {
-		return nil, fmt.Errorf("odczyt tras: %w", err)
+// ParseRoutes reads the output of "ip -j route show".
+func ParseRoutes(output, family string) ([]Route, error) {
+	var raw []rawRoute
+	if err := json.Unmarshal([]byte(output), &raw); err != nil {
+		return nil, fmt.Errorf("reading the routes: %w", err)
 	}
-	trasy := make([]Route, 0, len(surowe))
-	for _, wpis := range surowe {
-		trasy = append(trasy, Route{
-			Destination: wpis.Dst,
-			Gateway:     wpis.Gateway,
-			Interface:   wpis.Dev,
-			Source:      wpis.PrefSrc,
-			Protocol:    wpis.Protocol,
-			Scope:       wpis.Scope,
-			Metric:      wpis.Metric,
-			Table:       wpis.Table,
-			Family:      rodzina,
+	routes := make([]Route, 0, len(raw))
+	for _, entry := range raw {
+		routes = append(routes, Route{
+			Destination: entry.Dst,
+			Gateway:     entry.Gateway,
+			Interface:   entry.Dev,
+			Source:      entry.PrefSrc,
+			Protocol:    entry.Protocol,
+			Scope:       entry.Scope,
+			Metric:      entry.Metric,
+			Table:       entry.Table,
+			Family:      family,
 		})
 	}
-	return trasy, nil
+	return routes, nil
 }
 
-// UzupelnijZSys dopisuje to, czego "ip" nie podaje: predkosc lacza i nazwe
-// sterownika. Odczyt z /sys jest tani i nie wymaga uruchamiania procesu.
-func UzupelnijZSys(katalog string, interfejsy []Interface) {
-	for i := range interfejsy {
-		sciezka := filepath.Join(katalog, interfejsy[i].Name)
-		if wartosc, ok := liczbaZPliku(filepath.Join(sciezka, "carrier")); ok {
-			nosna := wartosc == 1
-			interfejsy[i].Carrier = &nosna
+// SupplementFromSys adds what "ip" does not report: the link speed and the
+// driver name. Reading /sys is cheap and does not require starting a
+// process.
+func SupplementFromSys(dir string, interfaces []Interface) {
+	for i := range interfaces {
+		path := filepath.Join(dir, interfaces[i].Name)
+		if value, ok := numberFromFile(filepath.Join(path, "carrier")); ok {
+			carrier := value == 1
+			interfaces[i].Carrier = &carrier
 		}
-		// Predkosc jadro podaje tylko dla czesci sterownikow, a dla lacza
-		// bez nosnej zwraca -1. Nieznana zostaje nieznana.
-		if wartosc, ok := liczbaZPliku(filepath.Join(sciezka, "speed")); ok && wartosc > 0 {
-			predkosc := int(wartosc)
-			interfejsy[i].SpeedMbps = &predkosc
+		// The kernel reports the speed only for some drivers, and for a
+		// link without a carrier returns -1. Unknown stays unknown.
+		if value, ok := numberFromFile(filepath.Join(path, "speed")); ok && value > 0 {
+			speed := int(value)
+			interfaces[i].SpeedMbps = &speed
 		}
-		if cel, err := os.Readlink(filepath.Join(sciezka, "device", "driver")); err == nil {
-			interfejsy[i].Driver = filepath.Base(cel)
+		if target, err := os.Readlink(filepath.Join(path, "device", "driver")); err == nil {
+			interfaces[i].Driver = filepath.Base(target)
 		}
 	}
 }
 
-func liczbaZPliku(sciezka string) (int64, bool) {
-	dane, err := os.ReadFile(sciezka)
+func numberFromFile(path string) (int64, bool) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, false
 	}
-	wartosc, err := strconv.ParseInt(strings.TrimSpace(string(dane)), 10, 64)
+	value, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
 		return 0, false
 	}
-	return wartosc, true
+	return value, true
 }
 
-// OznaczKanalZarzadzania wskazuje interfejs i adres, ktorym host rozmawia
-// z panelem.
+// MarkManagementChannel points at the interface and the address the host
+// talks to the panel through.
 //
-// Adres bierze sie z faktycznego polaczenia agenta, a nie z pierwszej pozycji
-// listy: host ma zwykle kilka adresow, a tylko jeden z nich jest tym, przez
-// ktory panel go widzi. Pomylka w te strone konczy sie zmiana konfiguracji
-// interfejsu, przez ktory wlasnie przyszlo polecenie.
-func OznaczKanalZarzadzania(snapshot *Snapshot, adresLokalny string) {
-	if adresLokalny == "" {
+// The address comes from the agent's actual connection, not from the first
+// position of the list: the host usually has several addresses, and only
+// one of them is the one the panel sees it through. A mistake in this
+// direction ends in changing the configuration of the interface the order
+// has just arrived through.
+func MarkManagementChannel(snapshot *Snapshot, localAddress string) {
+	if localAddress == "" {
 		return
 	}
-	adres := adresLokalny
-	if host, _, err := net.SplitHostPort(adresLokalny); err == nil {
-		adres = host
+	address := localAddress
+	if host, _, err := net.SplitHostPort(localAddress); err == nil {
+		address = host
 	}
-	parsowany := net.ParseIP(adres)
-	if parsowany == nil {
+	parsed := net.ParseIP(address)
+	if parsed == nil {
 		return
 	}
 	for i := range snapshot.Interfaces {
-		for _, przypisany := range snapshot.Interfaces[i].Addresses {
-			wlasny, _, err := net.ParseCIDR(przypisany.Address)
-			if err != nil || !wlasny.Equal(parsowany) {
+		for _, assigned := range snapshot.Interfaces[i].Addresses {
+			own, _, err := net.ParseCIDR(assigned.Address)
+			if err != nil || !own.Equal(parsed) {
 				continue
 			}
 			snapshot.Interfaces[i].Management = true
 			snapshot.ManagementInterface = snapshot.Interfaces[i].Name
-			snapshot.ManagementAddress = przypisany.Address
+			snapshot.ManagementAddress = assigned.Address
 			return
 		}
 	}

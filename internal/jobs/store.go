@@ -24,11 +24,11 @@ var (
 
 // Spec describes the task to create.
 type Spec struct {
-	HostID          string
-	Action          opspec.ActionType
-	Payload         opspec.Payload
-	IdempotencyKey  string
-	RequiresApprova bool
+	HostID           string
+	Action           opspec.ActionType
+	Payload          opspec.Payload
+	IdempotencyKey   string
+	RequiresApproval bool
 	// RequiredApprovals says how many people are needed. An operation that
 	// destroys data requires two: a mistake by one person with the right to
 	// approve costs data nobody will restore. Zero means the default value.
@@ -55,16 +55,16 @@ type Preconditions struct {
 
 // Job is the view of a task returned by the API.
 type Job struct {
-	ID              string          `json:"id"`
-	HostID          string          `json:"host_id"`
-	CampaignID      *string         `json:"campaign_id,omitempty"`
-	ActionType      string          `json:"action_type"`
-	ActionVersion   int             `json:"action_version"`
-	Payload         json.RawMessage `json:"payload"`
-	PayloadHash     string          `json:"payload_hash"`
-	IdempotencyKey  string          `json:"idempotency_key"`
-	State           State           `json:"state"`
-	RequiresApprova bool            `json:"requires_approval"`
+	ID               string          `json:"id"`
+	HostID           string          `json:"host_id"`
+	CampaignID       *string         `json:"campaign_id,omitempty"`
+	ActionType       string          `json:"action_type"`
+	ActionVersion    int             `json:"action_version"`
+	Payload          json.RawMessage `json:"payload"`
+	PayloadHash      string          `json:"payload_hash"`
+	IdempotencyKey   string          `json:"idempotency_key"`
+	State            State           `json:"state"`
+	RequiresApproval bool            `json:"requires_approval"`
 	// RequiredApprovals and Approvals say how many approvals are needed and
 	// how many there already are. Without them the operator clicks "approve"
 	// and does not know why nothing happened.
@@ -144,7 +144,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	}
 
 	state := StateQueued
-	if spec.RequiresApprova {
+	if spec.RequiresApproval {
 		state = StateAwaitingApproval
 	}
 	timeout := spec.TimeoutSeconds
@@ -175,7 +175,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		returning id`
 	jobID := uuid.NewString()
 	err = tx.QueryRow(ctx, query, jobID, spec.HostID, string(spec.Action), opspec.ActionVersion,
-		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApprova,
+		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApproval,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
 		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, requiredApprovals(spec)).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -748,7 +748,7 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		var j Job
 		var collected int
 		if err := rows.Scan(&j.ID, &j.HostID, &j.CampaignID, &j.ActionType, &j.ActionVersion,
-			&j.Payload, &j.PayloadHash, &j.IdempotencyKey, &j.State, &j.RequiresApprova,
+			&j.Payload, &j.PayloadHash, &j.IdempotencyKey, &j.State, &j.RequiresApproval,
 			&j.Preconditions, &j.TimeoutSeconds, &j.MaxOutputBytes, &j.ExpiresAt,
 			&j.CreatedBy, &j.RequestID, &j.ApprovedBy, &j.ApprovedAt,
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,

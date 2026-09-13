@@ -101,7 +101,7 @@ func TestCyklZyciaPlikuZarzadzanego(t *testing.T) {
 	}
 	// Plik, dla ktorego panel nie zna sprawdzenia, dostaje to powiedziane
 	// wprost: brak walidacji jest faktem, a nie cisza.
-	if !strings.Contains(ostatniKomunikat(proby), "walidatora") {
+	if !strings.Contains(ostatniKomunikat(proby), "no validator") {
 		t.Errorf("zapis bez informacji o walidacji: %q", ostatniKomunikat(proby))
 	}
 
@@ -123,7 +123,7 @@ func TestCyklZyciaPlikuZarzadzanego(t *testing.T) {
 	if zadanie.State == "succeeded" {
 		t.Fatal("panel nadpisal istniejacy plik bez odcisku")
 	}
-	if !strings.Contains(ostatniKomunikat(proby), "odcisk") {
+	if !strings.Contains(ostatniKomunikat(proby), "digest") {
 		t.Errorf("odmowa bez powodu: %q", ostatniKomunikat(proby))
 	}
 

@@ -10,140 +10,143 @@ import (
 	"strings"
 )
 
-// Plan opisuje roznice miedzy konfiguracja sshd, ktora host stosuje, a
-// zadana.
+// Plan describes the difference between the sshd configuration the host
+// applies and the requested one.
 //
-// Ta sama zmiana zamowiona na dwoch hostach prawie nigdy nie jest ta sama
-// zmiana: jeden juz ma PasswordAuthentication no, drugi ma je w pliku
-// administratora, ktory przeslania plik panelu, trzeci po zmianie nie
-// mialby zadnej metody logowania. Zgoda operatora ma dotyczyc tych roznic.
+// The same change ordered on two hosts is almost never the same change: one
+// already has PasswordAuthentication no, another has it in an administrator
+// file that shadows the panel's file, a third would have no login method
+// left after the change. The operator's approval is meant to cover those
+// differences.
 type Plan struct {
-	// Action nazywa to, co by sie stalo: update albo no_change.
+	// Action names what would happen: update or no_change.
 	Action string `json:"action"`
 
-	// Current niesie wartosci, ktore serwer stosuje dla ustawien z
-	// zamowienia; Desired - zamowienie.
+	// Current carries the values the server applies for the settings in the
+	// order; Desired - the order.
 	Current map[string]string `json:"current,omitempty"`
-	Desired Ustawienia        `json:"desired"`
-	// Changes wylicza po ludzku, co sie zmieni.
+	Desired Settings          `json:"desired"`
+	// Changes lists in human terms what will change.
 	Changes []string `json:"changes,omitempty"`
 
-	// ManagedPresent i ManagedHash opisuja plik panelu na hoscie: zapis
-	// nadpisuje go w calosci, wiec plik zmieniony po planowaniu jest inna
-	// zmiana niz ogladana.
+	// ManagedPresent and ManagedHash describe the panel's file on the host:
+	// the write overwrites it whole, so a file changed after planning is a
+	// different change than the one viewed.
 	ManagedPresent bool   `json:"managed_present"`
 	ManagedHash    string `json:"managed_hash,omitempty"`
 
-	// Refusal nazywa powod, dla ktorego zmiana nie wejdzie na ten host:
-	// brak sshd, konfiguracja, ktorej serwer nie przyjmie, albo odciecie
-	// wszystkich metod logowania bez jawnej zgody.
+	// Refusal names the reason the change will not land on this host: no
+	// sshd, a configuration the server will not accept, or cutting off all
+	// login methods without explicit consent.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
 
-// Nazwy dzialan planu.
+// Plan action names.
 const (
-	PlanZmienia  = "update"
-	PlanBezZmian = "no_change"
+	PlanUpdate   = "update"
+	PlanNoChange = "no_change"
 )
 
-// Zaplanuj liczy roznice miedzy stanem serwera a zamowieniem.
-func Zaplanuj(stan Snapshot, chciane Ustawienia, allowLockout bool) Plan {
-	plan := Plan{Desired: chciane, ManagedPresent: stan.ManagedPresent}
-	if stan.ManagedPresent {
-		plan.ManagedHash = textFingerprint(stan.Managed)
+// Compute computes the difference between the server state and the order.
+func Compute(state Snapshot, desired Settings, allowLockout bool) Plan {
+	plan := Plan{Desired: desired, ManagedPresent: state.ManagedPresent}
+	if state.ManagedPresent {
+		plan.ManagedHash = textFingerprint(state.Managed)
 	}
-	if stan.UnavailableReason != "" {
-		return plan.zOdmowa(stan.UnavailableReason)
+	if state.UnavailableReason != "" {
+		return plan.withRefusal(state.UnavailableReason)
 	}
-	tresc, err := SkladajDropIn(chciane)
+	content, err := ComposeDropIn(desired)
 	if err != nil {
-		return plan.zOdmowa(err.Error())
+		return plan.withRefusal(err.Error())
 	}
-	if !allowLockout && OdcinaWszystkieMetody(chciane, stan) {
-		return plan.zOdmowa("po tej zmianie nie zostalaby zadna dzialajaca metoda uwierzytelnienia; " +
-			"swiadome odciecie wymaga jawnej zgody operatora")
+	if !allowLockout && CutsOffAllMethods(desired, state) {
+		return plan.withRefusal("after this change no working authentication method would remain; " +
+			"a deliberate lockout requires the operator's explicit consent")
 	}
 
 	plan.Current = map[string]string{}
-	porownaj := func(nazwa, chciana, obecna string) {
-		if chciana == "" {
+	compare := func(name, wanted, current string) {
+		if wanted == "" {
 			return
 		}
-		plan.Current[nazwa] = obecna
-		if !strings.EqualFold(chciana, obecna) {
-			plan.Changes = append(plan.Changes, fmt.Sprintf("%s z %s na %s",
-				nazwa, lubBrak(obecna), chciana))
+		plan.Current[name] = current
+		if !strings.EqualFold(wanted, current) {
+			plan.Changes = append(plan.Changes, fmt.Sprintf("%s from %s to %s",
+				name, orNone(current), wanted))
 		}
 	}
-	porownaj("PermitRootLogin", chciane.PermitRootLogin, stan.PermitRootLogin)
-	porownaj("PasswordAuthentication", chciane.PasswordAuthentication, stan.PasswordAuthentication)
-	porownaj("PubkeyAuthentication", chciane.PubkeyAuthentication, stan.PubkeyAuthentication)
-	porownaj("KbdInteractiveAuthentication", chciane.KbdInteractive, stan.KbdInteractive)
-	if chciane.MaxAuthTries != "" {
-		porownaj("MaxAuthTries", chciane.MaxAuthTries, strconv.Itoa(stan.MaxAuthTries))
+	compare("PermitRootLogin", desired.PermitRootLogin, state.PermitRootLogin)
+	compare("PasswordAuthentication", desired.PasswordAuthentication, state.PasswordAuthentication)
+	compare("PubkeyAuthentication", desired.PubkeyAuthentication, state.PubkeyAuthentication)
+	compare("KbdInteractiveAuthentication", desired.KbdInteractive, state.KbdInteractive)
+	if desired.MaxAuthTries != "" {
+		compare("MaxAuthTries", desired.MaxAuthTries, strconv.Itoa(state.MaxAuthTries))
 	}
-	if chciane.Port != "" {
-		obecny := ""
-		if len(stan.Ports) > 0 {
-			obecny = stan.Ports[0]
+	if desired.Port != "" {
+		current := ""
+		if len(state.Ports) > 0 {
+			current = state.Ports[0]
 		}
-		porownaj("Port", chciane.Port, obecny)
+		compare("Port", desired.Port, current)
 	}
-	porownajListe := func(nazwa string, chciana, obecna []string) {
-		if len(chciana) == 0 {
+	compareList := func(name string, wanted, current []string) {
+		if len(wanted) == 0 {
 			return
 		}
-		plan.Current[nazwa] = strings.Join(obecna, " ")
-		if !tenSamZbior(chciana, obecna) {
-			plan.Changes = append(plan.Changes, fmt.Sprintf("%s z %s na %s",
-				nazwa, lubBrak(strings.Join(obecna, " ")), strings.Join(chciana, " ")))
+		plan.Current[name] = strings.Join(current, " ")
+		if !sameSet(wanted, current) {
+			plan.Changes = append(plan.Changes, fmt.Sprintf("%s from %s to %s",
+				name, orNone(strings.Join(current, " ")), strings.Join(wanted, " ")))
 		}
 	}
-	porownajListe("AllowUsers", chciane.AllowUsers, stan.AllowUsers)
-	porownajListe("AllowGroups", chciane.AllowGroups, stan.AllowGroups)
-	porownajListe("DenyUsers", chciane.DenyUsers, stan.DenyUsers)
+	compareList("AllowUsers", desired.AllowUsers, state.AllowUsers)
+	compareList("AllowGroups", desired.AllowGroups, state.AllowGroups)
+	compareList("DenyUsers", desired.DenyUsers, state.DenyUsers)
 
-	// Plik panelu jest nadpisywany w calosci: inna tresc jest zmiana nawet
-	// wtedy, gdy serwer juz stosuje zadane wartosci - bo po zapisie stosuje
-	// je z innego powodu, a ustawienia z poprzedniego pliku znikaja.
+	// The panel's file is overwritten whole: different content is a change
+	// even when the server already applies the requested values - because
+	// after the write it applies them for a different reason, and the
+	// settings from the previous file vanish.
 	switch {
-	case !stan.ManagedPresent:
-		plan.Changes = append(plan.Changes, "plik panelu powstanie")
-	case stan.Managed != tresc:
-		plan.Changes = append(plan.Changes, "plik panelu zostanie nadpisany")
+	case !state.ManagedPresent:
+		plan.Changes = append(plan.Changes, "the panel's file will be created")
+	case state.Managed != content:
+		plan.Changes = append(plan.Changes, "the panel's file will be overwritten")
 	}
 
-	plan.Action = PlanZmienia
+	plan.Action = PlanUpdate
 	if len(plan.Changes) == 0 {
-		plan.Action = PlanBezZmian
+		plan.Action = PlanNoChange
 	}
-	plan.PlanHash = odciskPlanu(plan)
+	plan.PlanHash = planFingerprint(plan)
 	return plan
 }
 
-// Odmow wpisuje powod odmowy poznany po policzeniu roznic i liczy odcisk
-// na nowo: plan z odmowa jest inna odpowiedzia niz plan bez niej.
-func (p *Plan) Odmow(powod string) {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(*p)
+// Refuse records a refusal reason learned after the differences were
+// computed and recomputes the fingerprint: a plan with a refusal is a
+// different answer than a plan without one.
+func (p *Plan) Refuse(reason string) {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(*p)
 }
 
-func (p Plan) zOdmowa(powod string) Plan {
-	p.Refusal = powod
-	p.PlanHash = odciskPlanu(p)
+func (p Plan) withRefusal(reason string) Plan {
+	p.Refusal = reason
+	p.PlanHash = planFingerprint(p)
 	return p
 }
 
-// OpisujeZmiane mowi, czy ustawienia niosa cokolwiek do zapisania.
-func (u Ustawienia) OpisujeZmiane() bool {
-	return u.Port != "" || u.PermitRootLogin != "" || u.PasswordAuthentication != "" ||
-		u.PubkeyAuthentication != "" || u.KbdInteractive != "" || u.MaxAuthTries != "" ||
-		len(u.AllowUsers) > 0 || len(u.AllowGroups) > 0 || len(u.DenyUsers) > 0
+// DescribesChange says whether the settings carry anything to write.
+func (s Settings) DescribesChange() bool {
+	return s.Port != "" || s.PermitRootLogin != "" || s.PasswordAuthentication != "" ||
+		s.PubkeyAuthentication != "" || s.KbdInteractive != "" || s.MaxAuthTries != "" ||
+		len(s.AllowUsers) > 0 || len(s.AllowGroups) > 0 || len(s.DenyUsers) > 0
 }
 
-func tenSamZbior(a, b []string) bool {
+func sameSet(a, b []string) bool {
 	x := append([]string(nil), a...)
 	y := append([]string(nil), b...)
 	sort.Strings(x)
@@ -151,27 +154,28 @@ func tenSamZbior(a, b []string) bool {
 	return strings.Join(x, "\x00") == strings.Join(y, "\x00")
 }
 
-func lubBrak(wartosc string) string {
-	if wartosc == "" {
-		return "brak"
+func orNone(value string) string {
+	if value == "" {
+		return "none"
 	}
-	return wartosc
+	return value
 }
 
-func textFingerprint(tekst string) string {
-	suma := sha256.Sum256([]byte(tekst))
-	return hex.EncodeToString(suma[:])
+func textFingerprint(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
-// odciskPlanu liczy odcisk planu poza samym odciskiem. Obejmuje stan
-// zastany razem z zadanym: host zmieniony od planowania daje inny odcisk.
-func odciskPlanu(plan Plan) string {
-	bezOdcisku := plan
-	bezOdcisku.PlanHash = ""
-	zakodowany, err := json.Marshal(bezOdcisku)
+// planFingerprint computes the plan fingerprint excluding the fingerprint
+// itself. It covers the state found together with the requested one: a host
+// changed since planning yields a different fingerprint.
+func planFingerprint(plan Plan) string {
+	stripped := plan
+	stripped.PlanHash = ""
+	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""
 	}
-	suma := sha256.Sum256(zakodowany)
-	return hex.EncodeToString(suma[:])
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

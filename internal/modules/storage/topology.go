@@ -7,120 +7,121 @@ import (
 	"strings"
 )
 
-// Sciezki narzedzi. Stale, a nie szukane w PATH: agent i helper uruchamiaja
-// wylacznie znane binaria.
+// Tool paths. Fixed, not searched in PATH: the agent and the helper run
+// only known binaries.
 const (
-	SciezkaLsblk = "/usr/bin/lsblk"
-	SciezkaVGS   = "/usr/sbin/vgs"
-	SciezkaLVS   = "/usr/sbin/lvs"
+	LsblkPath = "/usr/bin/lsblk"
+	VGSPath   = "/usr/sbin/vgs"
+	LVSPath   = "/usr/sbin/lvs"
 )
 
-// KolumnyLsblk wylicza pola, o ktore pytamy lsblk. Pelne "-O" zwraca
-// kilkadziesiat kolumn na urzadzenie i wieksza czesc z nich to szczegoly
-// sterownika, ktorych panel nigdy nie pokaze.
-var KolumnyLsblk = []string{
+// LsblkColumns lists the fields lsblk is asked for. A full "-O" returns
+// dozens of columns per device and most of them are driver details the
+// panel never shows.
+var LsblkColumns = []string{
 	"NAME", "PATH", "TYPE", "SIZE", "FSTYPE", "LABEL", "UUID", "PARTUUID",
 	"MOUNTPOINTS", "MODEL", "SERIAL", "WWN", "ROTA", "RO", "PKNAME",
 	"FSSIZE", "FSUSED", "FSAVAIL",
 }
 
-// surowyBlok odwzorowuje jeden wpis z "lsblk -J -b".
-type surowyBlok struct {
-	Name        string       `json:"name"`
-	Path        string       `json:"path"`
-	Type        string       `json:"type"`
-	Size        *uint64      `json:"size"`
-	FSType      *string      `json:"fstype"`
-	Label       *string      `json:"label"`
-	UUID        *string      `json:"uuid"`
-	PartUUID    *string      `json:"partuuid"`
-	Mountpoints []*string    `json:"mountpoints"`
-	Model       *string      `json:"model"`
-	Serial      *string      `json:"serial"`
-	WWN         *string      `json:"wwn"`
-	Rota        *bool        `json:"rota"`
-	RO          *bool        `json:"ro"`
-	PKName      *string      `json:"pkname"`
-	FSSize      *uint64      `json:"fssize"`
-	FSUsed      *uint64      `json:"fsused"`
-	FSAvail     *uint64      `json:"fsavail"`
-	Children    []surowyBlok `json:"children"`
+// rawBlock maps one entry of "lsblk -J -b".
+type rawBlock struct {
+	Name        string     `json:"name"`
+	Path        string     `json:"path"`
+	Type        string     `json:"type"`
+	Size        *uint64    `json:"size"`
+	FSType      *string    `json:"fstype"`
+	Label       *string    `json:"label"`
+	UUID        *string    `json:"uuid"`
+	PartUUID    *string    `json:"partuuid"`
+	Mountpoints []*string  `json:"mountpoints"`
+	Model       *string    `json:"model"`
+	Serial      *string    `json:"serial"`
+	WWN         *string    `json:"wwn"`
+	Rota        *bool      `json:"rota"`
+	RO          *bool      `json:"ro"`
+	PKName      *string    `json:"pkname"`
+	FSSize      *uint64    `json:"fssize"`
+	FSUsed      *uint64    `json:"fsused"`
+	FSAvail     *uint64    `json:"fsavail"`
+	Children    []rawBlock `json:"children"`
 }
 
-// ParsujUrzadzenia czyta wyjscie "lsblk -J -b".
+// ParseDevices reads the output of "lsblk -J -b".
 //
-// Drzewo splaszczamy do listy z odsylaczem do rodzica: operator patrzy na
-// topologie dysk -> partycja -> wolumen, ale panel musi umiec wskazac kazde
-// urzadzenie z osobna, takze w planie operacji.
-func ParsujUrzadzenia(wyjscie string) ([]Device, error) {
-	var wynik struct {
-		Blockdevices []surowyBlok `json:"blockdevices"`
+// The tree is flattened into a list with a reference to the parent: the
+// operator looks at the topology disk -> partition -> volume, but the panel
+// must be able to point at every device separately, also in an operation
+// plan.
+func ParseDevices(output string) ([]Device, error) {
+	var result struct {
+		Blockdevices []rawBlock `json:"blockdevices"`
 	}
-	if err := json.Unmarshal([]byte(wyjscie), &wynik); err != nil {
-		return nil, fmt.Errorf("odczyt urzadzen blokowych: %w", err)
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		return nil, fmt.Errorf("reading the block devices: %w", err)
 	}
-	var urzadzenia []Device
-	var splaszcz func(blok surowyBlok, rodzic string)
-	splaszcz = func(blok surowyBlok, rodzic string) {
-		urzadzenia = append(urzadzenia, urzadzenieZBloku(blok, rodzic))
-		for _, dziecko := range blok.Children {
-			splaszcz(dziecko, blok.Path)
+	var devices []Device
+	var flatten func(block rawBlock, parent string)
+	flatten = func(block rawBlock, parent string) {
+		devices = append(devices, deviceFromBlock(block, parent))
+		for _, child := range block.Children {
+			flatten(child, block.Path)
 		}
 	}
-	for _, blok := range wynik.Blockdevices {
-		splaszcz(blok, "")
+	for _, block := range result.Blockdevices {
+		flatten(block, "")
 	}
-	return urzadzenia, nil
+	return devices, nil
 }
 
-func urzadzenieZBloku(blok surowyBlok, rodzic string) Device {
-	urzadzenie := Device{
-		Name:       blok.Name,
-		Path:       blok.Path,
-		Type:       blok.Type,
-		FSType:     wartosc(blok.FSType),
-		Label:      wartosc(blok.Label),
-		UUID:       wartosc(blok.UUID),
-		PartUUID:   wartosc(blok.PartUUID),
-		Model:      strings.TrimSpace(wartosc(blok.Model)),
-		Serial:     wartosc(blok.Serial),
-		WWN:        wartosc(blok.WWN),
-		Parent:     rodzic,
-		Rotational: blok.Rota,
+func deviceFromBlock(block rawBlock, parent string) Device {
+	device := Device{
+		Name:       block.Name,
+		Path:       block.Path,
+		Type:       block.Type,
+		FSType:     value(block.FSType),
+		Label:      value(block.Label),
+		UUID:       value(block.UUID),
+		PartUUID:   value(block.PartUUID),
+		Model:      strings.TrimSpace(value(block.Model)),
+		Serial:     value(block.Serial),
+		WWN:        value(block.WWN),
+		Parent:     parent,
+		Rotational: block.Rota,
 	}
-	if blok.Size != nil {
-		urzadzenie.SizeBytes = *blok.Size
+	if block.Size != nil {
+		device.SizeBytes = *block.Size
 	}
-	if blok.RO != nil {
-		urzadzenie.ReadOnly = *blok.RO
+	if block.RO != nil {
+		device.ReadOnly = *block.RO
 	}
-	// lsblk podaje rodzica jako nazwe jadra; sciezka jest wygodniejsza
-	// w planie, wiec zostawiamy te, ktora znamy z drzewa.
-	if rodzic == "" && blok.PKName != nil && *blok.PKName != "" {
-		urzadzenie.Parent = "/dev/" + *blok.PKName
+	// lsblk reports the parent as a kernel name; a path is more convenient
+	// in a plan, so the one known from the tree is kept.
+	if parent == "" && block.PKName != nil && *block.PKName != "" {
+		device.Parent = "/dev/" + *block.PKName
 	}
-	for _, punkt := range blok.Mountpoints {
-		if punkt != nil && *punkt != "" {
-			urzadzenie.Mountpoints = append(urzadzenie.Mountpoints, *punkt)
+	for _, point := range block.Mountpoints {
+		if point != nil && *point != "" {
+			device.Mountpoints = append(device.Mountpoints, *point)
 		}
 	}
-	// Rozmiar filesystemu bywa mniejszy niz partycja, ktora go trzyma -
-	// i to jest dokladnie ta roznica, ktora widac przed resize.
-	urzadzenie.FSSizeBytes = blok.FSSize
-	urzadzenie.FSUsedBytes = blok.FSUsed
-	urzadzenie.FSAvailBytes = blok.FSAvail
-	return urzadzenie
+	// The filesystem size is at times smaller than the partition holding
+	// it - and that is exactly the difference visible before a resize.
+	device.FSSizeBytes = block.FSSize
+	device.FSUsedBytes = block.FSUsed
+	device.FSAvailBytes = block.FSAvail
+	return device
 }
 
-func wartosc(wskaznik *string) string {
-	if wskaznik == nil {
+func value(pointer *string) string {
+	if pointer == nil {
 		return ""
 	}
-	return *wskaznik
+	return *pointer
 }
 
-// raportLVM odwzorowuje wyjscie narzedzi LVM w formacie JSON.
-type raportLVM struct {
+// lvmReport maps the output of the LVM tools in JSON format.
+type lvmReport struct {
 	Report []struct {
 		VG []struct {
 			Name    string `json:"vg_name"`
@@ -138,61 +139,61 @@ type raportLVM struct {
 	} `json:"report"`
 }
 
-// ParsujGrupy czyta wyjscie "vgs --reportformat json --units b".
-func ParsujGrupy(wyjscie string) ([]VolumeGroup, error) {
-	var raport raportLVM
-	if err := json.Unmarshal([]byte(wyjscie), &raport); err != nil {
-		return nil, fmt.Errorf("odczyt grup wolumenow: %w", err)
+// ParseGroups reads the output of "vgs --reportformat json --units b".
+func ParseGroups(output string) ([]VolumeGroup, error) {
+	var report lvmReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		return nil, fmt.Errorf("reading the volume groups: %w", err)
 	}
-	var grupy []VolumeGroup
-	for _, sekcja := range raport.Report {
-		for _, wpis := range sekcja.VG {
-			grupy = append(grupy, VolumeGroup{
-				Name:      wpis.Name,
-				SizeBytes: bajty(wpis.Size),
-				FreeBytes: bajty(wpis.Free),
-				PVCount:   liczba(wpis.PVCount),
-				LVCount:   liczba(wpis.LVCount),
+	var groups []VolumeGroup
+	for _, section := range report.Report {
+		for _, entry := range section.VG {
+			groups = append(groups, VolumeGroup{
+				Name:      entry.Name,
+				SizeBytes: bytes(entry.Size),
+				FreeBytes: bytes(entry.Free),
+				PVCount:   number(entry.PVCount),
+				LVCount:   number(entry.LVCount),
 			})
 		}
 	}
-	return grupy, nil
+	return groups, nil
 }
 
-// ParsujWolumeny czyta wyjscie "lvs --reportformat json --units b".
-func ParsujWolumeny(wyjscie string) ([]LogicalVolume, error) {
-	var raport raportLVM
-	if err := json.Unmarshal([]byte(wyjscie), &raport); err != nil {
-		return nil, fmt.Errorf("odczyt wolumenow: %w", err)
+// ParseVolumes reads the output of "lvs --reportformat json --units b".
+func ParseVolumes(output string) ([]LogicalVolume, error) {
+	var report lvmReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		return nil, fmt.Errorf("reading the volumes: %w", err)
 	}
-	var wolumeny []LogicalVolume
-	for _, sekcja := range raport.Report {
-		for _, wpis := range sekcja.LV {
-			wolumeny = append(wolumeny, LogicalVolume{
-				Name:      wpis.Name,
-				Group:     wpis.Group,
-				Path:      wpis.Path,
-				SizeBytes: bajty(wpis.Size),
+	var volumes []LogicalVolume
+	for _, section := range report.Report {
+		for _, entry := range section.LV {
+			volumes = append(volumes, LogicalVolume{
+				Name:      entry.Name,
+				Group:     entry.Group,
+				Path:      entry.Path,
+				SizeBytes: bytes(entry.Size),
 			})
 		}
 	}
-	return wolumeny, nil
+	return volumes, nil
 }
 
-// bajty czyta wartosc LVM zapisana z sufiksem "B".
-func bajty(wartosc string) uint64 {
-	wartosc = strings.TrimSuffix(strings.TrimSpace(wartosc), "B")
-	liczba, err := strconv.ParseUint(wartosc, 10, 64)
+// bytes reads an LVM value written with the suffix "B".
+func bytes(value string) uint64 {
+	value = strings.TrimSuffix(strings.TrimSpace(value), "B")
+	n, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
 		return 0
 	}
-	return liczba
+	return n
 }
 
-func liczba(wartosc string) int {
-	numer, err := strconv.Atoi(strings.TrimSpace(wartosc))
+func number(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
 		return 0
 	}
-	return numer
+	return n
 }
