@@ -1,61 +1,64 @@
 #!/bin/sh
-# Konfiguracja agenta po instalacji pakietu.
+# Agent configuration after the package installation.
 set -e
 
 case "$1" in
 configure)
-    # Konto uslugowe bez powloki i bez katalogu domowego: agent nie jest
-    # tozsamoscia, ktora ktokolwiek loguje sie na hoscie.
+    # A service account without a shell and without a home directory: the
+    # agent is not an identity anybody logs into the host with.
     if ! getent passwd flotestro-agent >/dev/null; then
         adduser --system --group --no-create-home \
             --home /var/lib/flotestro-agent --shell /usr/sbin/nologin \
             flotestro-agent >/dev/null
     fi
 
-    # Odczyt dziennika bez roota wymaga czlonkostwa w grupie systemd-journal.
-    # Brak grupy nie jest bledem instalacji - odczyt dziennika bedzie wtedy
-    # niedostepny, a agent to zglosi zamiast udawac, ze dziennik jest pusty.
+    # Reading the journal without root requires membership in the
+    # systemd-journal group. A missing group is not an installation error -
+    # the journal read is then unavailable, and the agent reports that
+    # instead of pretending the journal is empty.
     if getent group systemd-journal >/dev/null; then
         usermod --append --groups systemd-journal flotestro-agent
     fi
 
     install -d -m 0700 -o flotestro-agent -g flotestro-agent /var/lib/flotestro-agent
     install -d -m 0755 /etc/flotestro
-    # Konfiguracje czyta sam agent, wiec musi ja umiec otworzyc - ale nikt
-    # poza nim i rootem nie moze jej podmienic: prawo zapisu tutaj jest
-    # prawem przekierowania hosta na cudzy panel.
-    for plik in /etc/flotestro/agent.yaml /etc/flotestro/agent.env; do
-        if [ -f "$plik" ]; then
-            chown root:flotestro-agent "$plik"
-            chmod 0640 "$plik"
+    # The configuration is read by the agent itself, so it must be able to
+    # open it - but nobody besides it and root may replace it: the right to
+    # write here is the right to redirect the host to somebody else's panel.
+    for file in /etc/flotestro/agent.yaml /etc/flotestro/agent.env; do
+        if [ -f "$file" ]; then
+            chown root:flotestro-agent "$file"
+            chmod 0640 "$file"
         fi
     done
 
     systemctl daemon-reload || true
-    # Gniazdo helpera musi istniec, zanim agent sprobuje sie z nim polaczyc.
+    # The helper socket must exist before the agent tries to connect to it.
     systemctl enable --now flotestro-helper.socket || true
-    # Helper jest uruchamiany gniazdem i dziala dalej po podmianie binarki,
-    # wiec po aktualizacji obslugiwalby zadania starym kodem az do wygasniecia
-    # bezczynnosci. Zatrzymanie go tutaj sprawia, ze nastepne zadanie trafi
-    # do nowej wersji; gniazdo uruchomi ja ponownie na zadanie.
+    # The helper is started by the socket and keeps running after the binary
+    # is replaced, so after an update it would serve jobs with the old code
+    # until the idle timeout. Stopping it here makes the next job reach the
+    # new version; the socket starts it again on demand.
     systemctl stop flotestro-helper.service || true
 
-    # Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go
-    # w petli restartow zasmiecaloby dziennik hosta; instalacja konczy sie
-    # wtedy wskazowka, a nie cichym bledem.
+    # An agent without a panel address has nowhere to connect. Running it in
+    # a restart loop would litter the host journal; the installation then
+    # ends with a hint, not a quiet error.
     systemctl enable flotestro-agent.service || true
     if [ -e /var/lib/flotestro-agent/identity/current/agent.pem ] ||
        [ -e /var/lib/flotestro-agent/agent.pem ]; then
-        # Host ma juz tozsamosc: aktualizacja pakietu ma go wznowic - i to
-        # naprawde wznowic. "start" na dzialajacej usludze nic nie robi, wiec
-        # po aktualizacji dalej pracowalby stary proces ze starej binarki.
+        # The host already has an identity: a package update is to resume it
+        # - and really resume it. "start" on a running service does nothing,
+        # so after an update the old process from the old binary would keep
+        # working.
         systemctl start flotestro-agent.service || true
         systemctl try-restart flotestro-agent.service || true
     else
-        # Enrollment jest decyzja operatora i wymaga tokenu, wiec pakiet go
-        # nie zgaduje. Usluga ma warunek startu na tozsamosc, wiec do czasu
-        # rejestracji po prostu nie wstaje - zamiast krecic sie w restartach.
-        echo "flotestro-agent: uzupelnij /etc/flotestro/agent.yaml i zarejestruj host" >&2
+        # Enrollment is an operator decision and requires a token, so the
+        # package does not guess it. The service has a start condition on
+        # the identity, so until enrollment it simply does not come up -
+        # instead of spinning in restarts.
+        echo "flotestro-agent: fill in /etc/flotestro/agent.yaml and enroll the host" >&2
         echo "  sudo -u flotestro-agent flotestro-agentctl enroll" >&2
         echo "  systemctl start flotestro-agent.service" >&2
     fi

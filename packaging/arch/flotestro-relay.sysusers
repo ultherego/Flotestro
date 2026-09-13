@@ -1,3 +1,4 @@
-# Konto uslugowe relaya. Osobne od konta agenta: na maszynie relaya moze stac
-# takze zwykly agent, a jego tozsamosc nie moze byc czytelna dla relaya.
+# The relay service account. Separate from the agent account: an ordinary
+# agent may also run on the relay machine, and its identity must not be
+# readable by the relay.
 u flotestro-relay - "Flotestro relay" /var/lib/flotestro-relay /usr/bin/nologin

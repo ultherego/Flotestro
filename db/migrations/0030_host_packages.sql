@@ -1,23 +1,23 @@
--- Pelna lista zainstalowanych pakietow hosta.
+-- The full list of a host's installed packages.
 --
--- Panel trzyma ja u siebie, bo bez niej nie da sie odpowiedziec na pytanie
--- o podatnosci: tracker bezpieczenstwa dystrybucji mowi o pakiecie zrodlowym
--- i wersji, a nie o hoscie. Lista jest pobierana na zadanie - inwentarz niesie
--- sam odcisk, wiec panel wie, kiedy jego kopia przestala opisywac host.
+-- The panel keeps it, because without it the vulnerability question cannot
+-- be answered: the distribution security tracker speaks of a source package
+-- and a version, not of a host. The list is fetched on demand - the inventory
+-- carries only the digest, so the panel knows when its copy stopped describing the host.
 --
--- Wierszy nie ma dla hosta, ktorego jeszcze nie zapytano. To jest stan
--- "nie wiadomo", a nie "host czysty" - i tak musi byc pokazany.
+-- There are no rows for a host not asked yet. That is the state "unknown",
+-- not "clean host" - and it must be shown that way.
 create table if not exists host_packages (
     host_id       uuid        not null references hosts(id) on delete cascade,
     name          text        not null,
     architecture  text        not null default '',
-    -- Epoka pusta oznacza pakiet bez epoki; zero i brak epoki znacza dla
-    -- porownania to samo, ale w zapisie sa rozne.
+    -- An empty epoch means a package without an epoch; zero and no epoch mean
+    -- the same for comparison, but differ in the record.
     epoch         text        not null default '',
     version       text        not null,
     release       text        not null default '',
-    -- Pakiet zrodlowy: Debian prowadzi bezpieczenstwo wlasnie po nim, a jeden
-    -- zrodlowy daje kilkanascie binarnych.
+    -- The source package: Debian tracks security by exactly that, and one
+    -- source gives a dozen binaries.
     source_name    text       not null default '',
     source_version text       not null default '',
     source_rpm     text       not null default '',
@@ -30,9 +30,9 @@ create table if not exists host_packages (
 create index if not exists host_packages_source_idx on host_packages (source_name);
 create index if not exists host_packages_name_idx on host_packages (name);
 
--- Stan listy: odcisk tego, co panel ma u siebie, oraz to, co ostatnio zglosil
--- host. Rozjazd miedzy nimi znaczy, ze kopia jest nieaktualna - i wtedy ocena
--- podatnosci dla tego hosta jest niepelna, a nie pusta.
+-- The list state: the digest of what the panel holds and what the host last
+-- reported. A mismatch between them means the copy is stale - and then the
+-- vulnerability assessment of this host is incomplete, not empty.
 create table if not exists host_package_state (
     host_id            uuid        primary key references hosts(id) on delete cascade,
     digest             text        not null default '',

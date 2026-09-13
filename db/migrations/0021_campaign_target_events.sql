@@ -1,12 +1,12 @@
--- Powiadomienia o zmianie stanu celu kampanii.
+-- Notifications about campaign target state changes.
 --
--- Zadania mialy swoj wyzwalacz, cele kampanii nie. Operator patrzacy na
--- kampanie widzial "pending" przez caly czas jej trwania i dopiero gotowy
--- wynik - a to jest raport po fakcie, nie kontrola nad rolloutem.
+-- Jobs had their trigger, campaign targets did not. An operator looking at a
+-- campaign saw "pending" for its whole duration and then the finished
+-- result - and that is a report after the fact, not control over the rollout.
 --
--- Cel kampanii nie jest zadaniem: przechodzi przez wlasne stany (running,
--- rebooting, verifying), ktorych zadna operacja nie odzwierciedla. Dlatego
--- ma wlasne powiadomienie, a nie doklejenie do istniejacego.
+-- A campaign target is not a job: it goes through its own states (running,
+-- rebooting, verifying), which no operation reflects. That is why it has its
+-- own notification, not an addition to an existing one.
 create or replace function flotestro_powiadom_o_celu() returns trigger
 language plpgsql as $$
 begin

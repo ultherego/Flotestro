@@ -1,12 +1,13 @@
 #!/bin/sh
-# Konfiguracja relaya po instalacji pakietu.
+# Relay configuration after the package installation.
 set -e
 
 case "$1" in
 configure)
-    # Konto uslugowe bez powloki i bez katalogu domowego. Osobne od konta
-    # agenta: na maszynie relaya moze stac takze zwykly agent, a jego
-    # tozsamosc nie moze byc czytelna dla relaya ani odwrotnie.
+    # A service account without a shell and without a home directory.
+    # Separate from the agent account: an ordinary agent may also run on the
+    # relay machine, and its identity must not be readable by the relay nor
+    # the other way round.
     if ! getent passwd flotestro-relay >/dev/null; then
         adduser --system --group --no-create-home \
             --home /var/lib/flotestro-relay --shell /usr/sbin/nologin \
@@ -16,8 +17,9 @@ configure)
     install -d -m 0700 -o flotestro-relay -g flotestro-relay /var/lib/flotestro-relay
     install -d -m 0755 /etc/flotestro
     if [ -f /etc/flotestro/relay.yaml ]; then
-        # Konfiguracje czyta relay, wiec musi ja umiec otworzyc; prawo zapisu
-        # tutaj jest prawem przekierowania calej lokalizacji na cudza centrale.
+        # The configuration is read by the relay, so it must be able to open
+        # it; the right to write here is the right to redirect the whole site
+        # to somebody else's centre.
         chown root:flotestro-relay /etc/flotestro/relay.yaml
         chmod 0640 /etc/flotestro/relay.yaml
     fi
@@ -28,8 +30,8 @@ configure)
         systemctl start flotestro-relay.service || true
         systemctl try-restart flotestro-relay.service || true
     else
-        echo "flotestro-relay: uzupelnij /etc/flotestro/relay.yaml i zarejestruj relay" >&2
-        echo "  sudo -u flotestro-relay flotestro-relay enroll -token-file <plik>" >&2
+        echo "flotestro-relay: fill in /etc/flotestro/relay.yaml and enroll the relay" >&2
+        echo "  sudo -u flotestro-relay flotestro-relay enroll -token-file <file>" >&2
         echo "  systemctl start flotestro-relay.service" >&2
     fi
     ;;

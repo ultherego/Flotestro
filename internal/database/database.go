@@ -54,6 +54,14 @@ func waitForDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 }
 
+// renamedMigrations maps the former file names of migrations to the current
+// ones. The version is the file name, so a rename would otherwise make an
+// already migrated database run the migration a second time.
+var renamedMigrations = map[string]string{
+	"0044_budzety":      "0044_budgets",
+	"0045_kwalifikacja": "0045_qualification",
+}
+
 // Migrate applies the missing migrations in one transaction per file. An
 // advisory lock prevents several replicas from migrating at the same time.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
@@ -95,6 +103,20 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
+	}
+
+	// Migrations recorded under their former file names are re-labelled, so
+	// that a database migrated before the rename does not run them again.
+	for former, current := range renamedMigrations {
+		if !applied[former] {
+			continue
+		}
+		if _, err := conn.Exec(ctx,
+			"update schema_migrations set version = $2 where version = $1", former, current); err != nil {
+			return fmt.Errorf("re-labelling the migration %s: %w", former, err)
+		}
+		delete(applied, former)
+		applied[current] = true
 	}
 
 	entries, err := fs.Glob(db.Migrations, "migrations/*.sql")

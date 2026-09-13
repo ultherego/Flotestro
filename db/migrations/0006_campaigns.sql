@@ -1,36 +1,36 @@
--- Kampania jest glownym mechanizmem zmian flotowych. Selektor jest zamieniany
--- na niemutowalna migawke hostow w chwili planowania: host dodany do floty po
--- zatwierdzeniu nie moze wejsc do trwajacej kampanii bez wiedzy operatora.
+-- A campaign is the main mechanism of fleet changes. The selector is turned
+-- into an immutable host snapshot at planning time: a host added to the fleet
+-- after approval cannot enter a running campaign without the operator knowing.
 
 create table campaigns (
     id             uuid        primary key,
     name           text        not null,
     action_type    text        not null,
     payload        jsonb       not null default '{}'::jsonb,
-    -- Selektor jest zapisany dla audytu; wiazace sa cele w campaign_targets.
+    -- The selector is recorded for the audit; the targets in campaign_targets are binding.
     selector       jsonb       not null default '{}'::jsonb,
 
     state          text        not null
                        check (state in ('planned', 'awaiting_approval', 'canary', 'running',
                                         'paused', 'completed', 'failed', 'canceled')),
 
-    -- Canary to mala reprezentatywna grupa; fala 0 zawsze jest canary.
+    -- The canary is a small representative group; wave 0 is always the canary.
     canary_size    integer     not null default 1 check (canary_size >= 0),
     wave_size      integer     not null default 10 check (wave_size > 0),
-    -- Limit rownoczesnych hostow chroni lacze i repozytorium lokalizacji.
+    -- The concurrent host limit protects the link and the site repository.
     max_concurrent integer     not null default 5 check (max_concurrent > 0),
 
-    -- Progi zatrzymania. Przekroczenie ktoregokolwiek wstrzymuje kampanie.
+    -- Stop thresholds. Exceeding either one pauses the campaign.
     failure_threshold_percent  integer not null default 20
                                    check (failure_threshold_percent between 0 and 100),
     failure_threshold_absolute integer not null default 0 check (failure_threshold_absolute >= 0),
 
     maintenance_start timestamptz,
     maintenance_end   timestamptz,
-    -- Polityka restartu: never, if_required albo always.
+    -- The reboot policy: never, if_required or always.
     reboot_policy     text not null default 'never'
                           check (reboot_policy in ('never', 'if_required', 'always')),
-    -- Jednostki sprawdzane po zmianie i po restarcie.
+    -- Units checked after the change and after the reboot.
     health_check_units text[] not null default '{}',
 
     job_timeout_seconds integer not null default 1800 check (job_timeout_seconds > 0),
@@ -59,7 +59,7 @@ create table campaign_targets (
     id            uuid        primary key,
     campaign_id   uuid        not null references campaigns (id) on delete cascade,
     host_id       uuid        not null references hosts (id) on delete cascade,
-    -- Fala 0 to canary; kolejne fale rusza dopiero po zamknieciu poprzedniej.
+    -- Wave 0 is the canary; the next waves start only once the previous one closes.
     wave          integer     not null check (wave >= 0),
     position      integer     not null,
 
@@ -69,7 +69,7 @@ create table campaign_targets (
     job_id        uuid        references jobs (id) on delete set null,
     reboot_job_id uuid        references jobs (id) on delete set null,
     health_job_id uuid        references jobs (id) on delete set null,
-    -- Boot ID sprzed restartu; zmiana oznacza, ze host faktycznie wstal.
+    -- The boot ID from before the reboot; a change means the host really came up.
     boot_id_before text,
 
     error_code    text,

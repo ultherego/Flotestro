@@ -1,9 +1,9 @@
--- Plany per host dla kampanii.
+-- Per-host plans for campaigns.
 --
--- Dwa hosty wybrane tym samym zamowieniem prawie nigdy nie maja tego samego
--- diffu: inny zestaw pakietow, inne wersje, inne zaleznosci. Kampania, ktora
--- zatwierdza jeden payload, zatwierdza wiec zmiane, ktorej nikt nie widzial.
--- Plan powstaje osobno dla kazdego hosta, a zgoda dotyczy calego zestawu.
+-- Two hosts picked by the same order almost never have the same diff: a
+-- different package set, different versions, different dependencies. A
+-- campaign that approves one payload therefore approves a change nobody saw.
+-- The plan is made separately for every host, and the consent concerns the whole set.
 create table if not exists campaign_plans (
     campaign_id uuid        not null references campaigns(id) on delete cascade,
     host_id     uuid        not null references hosts(id) on delete cascade,
@@ -14,19 +14,19 @@ create table if not exists campaign_plans (
 );
 
 comment on table campaign_plans is
-    'Plan wyliczony na jednym hoscie. Odcisk wiaze zgode z tym wlasnie diffem.';
+    'A plan computed on one host. The fingerprint binds the consent to exactly this diff.';
 
--- Odcisk calego zestawu planow. Wchodzi do odcisku zatwierdzenia, wiec plan
--- przeliczony na innym stanie hosta uniewaznia zgode.
+-- The fingerprint of the whole plan set. It enters the approval fingerprint,
+-- so a plan recomputed on a different host state invalidates the consent.
 alter table campaigns
     add column if not exists plan_set_hash text not null default '';
 
--- Zadanie planujace hosta. Osobna kolumna, bo plan i zmiana sa dwoma roznymi
--- operacjami tego samego celu.
+-- The host's planning job. A separate column, because the plan and the change
+-- are two different operations of the same target.
 alter table campaign_targets
     add column if not exists plan_job_id uuid references jobs(id);
 
--- Nowe stany: kampania i host licza plan, zanim cokolwiek sie zmieni.
+-- New states: the campaign and the host compute the plan before anything changes.
 alter table campaigns drop constraint if exists campaigns_state_check;
 alter table campaigns add constraint campaigns_state_check
     check (state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running',

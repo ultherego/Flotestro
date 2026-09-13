@@ -1,16 +1,16 @@
--- Rejestr adapterow hosta.
+-- The host adapter registry.
 --
--- Wczesniej zdolnosci byly piecioma polami logicznymi. Pole logiczne nie mowi,
--- dlaczego adaptera nie ma, ani ze jest, lecz tylko do odczytu, ani ze potrafi
--- czesc rzeczy - a wszystkie trzy sa operatorowi potrzebne. Naprawa bazy
--- pakietow dziala wylacznie dla apta i host ma to powiedziec, zanim zadanie
--- zostanie zatwierdzone i wyslane.
+-- Earlier the capabilities were five boolean fields. A boolean does not say
+-- why an adapter is missing, nor that it is there but read-only, nor that it
+-- can do part of the things - and the operator needs all three. Package
+-- database repair works only for apt and the host is to say so before the job
+-- is approved and sent.
 create table host_capability_registry (
     host_id     uuid        not null references hosts(id) on delete cascade,
-    -- Nazwa adaptera, nie nazwa wymagania operacji: 'packages.apt', nie 'packages'.
+    -- The adapter name, not the operation requirement name: 'packages.apt', not 'packages'.
     name        text        not null,
-    -- Wersja kontraktu adaptera. Wersja narzedzia jest faktem o hoscie
-    -- i nalezy do inventory.
+    -- The adapter contract version. The tool version is a fact about the host
+    -- and belongs to the inventory.
     version     int         not null default 1,
     available   boolean     not null,
     read_only   boolean     not null default false,
@@ -20,12 +20,12 @@ create table host_capability_registry (
     primary key (host_id, name)
 );
 
--- Filtrowanie floty po adapterze: "pokaz hosty, ktore maja apta".
+-- Filtering the fleet by adapter: "show the hosts that have apt".
 create index host_capability_registry_name_idx
     on host_capability_registry (name) where available;
 
--- Hosty sprzed rejestru zachowuja to, co o nich wiadomo, do nastepnego
--- polaczenia agenta. Powod jest pusty, bo stare pole logiczne go nie niosło.
+-- Hosts from before the registry keep what is known about them until the
+-- agent's next connection. The reason is empty, because the old boolean did not carry one.
 insert into host_capability_registry (host_id, name, available)
 select host_id, nazwa, wartosc
 from host_capabilities,

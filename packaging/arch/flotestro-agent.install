@@ -1,20 +1,20 @@
-# Skryptlety pakietu. Wolno tu tylko to, co dotyczy samego systemu: konto
-# uslugowe, katalogi i jednostki. Enrollment jest decyzja operatora i nie
-# moze byc skutkiem ubocznym instalacji pakietu, wiec pakiet nie pobiera
-# tokenu ani nie rozmawia z panelem.
+# The package scriptlets. Only what concerns the system itself is allowed
+# here: the service account, the directories and the units. Enrollment is an
+# operator decision and must not be a side effect of installing the package,
+# so the package neither fetches a token nor talks to the panel.
 post_install() {
     systemd-sysusers /usr/lib/sysusers.d/flotestro-agent.conf >/dev/null 2>&1 || true
     systemd-tmpfiles --create /usr/lib/tmpfiles.d/flotestro-agent.conf >/dev/null 2>&1 || true
     chown root:flotestro-agent /etc/flotestro/agent.yaml 2>/dev/null || true
     chmod 0640 /etc/flotestro/agent.yaml 2>/dev/null || true
-    # Gniazdo helpera musi istniec, zanim agent sprobuje sie z nim polaczyc.
+    # The helper socket must exist before the agent tries to connect to it.
     systemctl enable --now flotestro-helper.socket >/dev/null 2>&1 || true
     systemctl enable flotestro-agent.service >/dev/null 2>&1 || true
-    cat >&2 <<'KONIEC'
-flotestro-agent: uzupelnij /etc/flotestro/agent.yaml i zarejestruj host
+    cat >&2 <<'END'
+flotestro-agent: fill in /etc/flotestro/agent.yaml and enroll the host
   sudo -u flotestro-agent flotestro-agentctl enroll
   systemctl start flotestro-agent.service
-KONIEC
+END
 }
 
 post_upgrade() {
@@ -23,8 +23,9 @@ post_upgrade() {
     chown root:flotestro-agent /etc/flotestro/agent.yaml 2>/dev/null || true
     chmod 0640 /etc/flotestro/agent.yaml 2>/dev/null || true
     systemctl daemon-reload >/dev/null 2>&1 || true
-    # Helper dziala dalej po podmianie binarki, wiec po aktualizacji
-    # obslugiwalby zadania starym kodem; gniazdo uruchomi nowa wersje.
+    # The helper keeps running after the binary is replaced, so after an
+    # update it would serve jobs with the old code; the socket starts the
+    # new version.
     systemctl stop flotestro-helper.service >/dev/null 2>&1 || true
     systemctl try-restart flotestro-agent.service >/dev/null 2>&1 || true
 }
@@ -35,7 +36,7 @@ pre_remove() {
 }
 
 post_remove() {
-    # Tozsamosc hosta zostaje: ponowna instalacja ma ja odzyskac bez
-    # enrollmentu. Kasuje ja dopiero wycofanie hosta z floty.
+    # The host identity stays: a reinstall is to recover it without
+    # enrollment. Only retiring the host from the fleet deletes it.
     systemctl daemon-reload >/dev/null 2>&1 || true
 }

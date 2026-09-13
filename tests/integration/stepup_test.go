@@ -7,29 +7,29 @@ import (
 	"testing"
 )
 
-// TestZmianaRegulDostepuWymagaPowodu sprawdza warunek operacji o najwiekszym
-// wplywie. Mapowanie grupy na role decyduje, kogo dostawca tozsamosci wpuszcza
-// i z jakimi uprawnieniami, wiec nie moze zostac wykonane bez uzasadnienia
-// zapisanego w audycie.
-func TestZmianaRegulDostepuWymagaPowodu(t *testing.T) {
+// TestChangingAccessRulesRequiresAReason checks the condition of the
+// operation with the greatest impact. A group-to-role mapping decides whom
+// the identity provider lets in and with which permissions, so it cannot be
+// carried out without a justification recorded in the audit log.
+func TestChangingAccessRulesRequiresAReason(t *testing.T) {
 	h := newHarness(t)
-	grupa := uniqueSubject("flotestro-test-grupa")
+	group := uniqueSubject("flotestro-test-group")
 
-	for nazwa, powod := range map[string]string{
-		"brak powodu":     "",
-		"powod za krotki": "bo tak",
+	for name, reason := range map[string]string{
+		"no reason":        "",
+		"reason too short": "because",
 	} {
-		t.Run(nazwa, func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			var problem struct {
 				Code string `json:"code"`
 			}
 			h.do(http.MethodPost, "/api/v1/group-mappings", map[string]any{
-				"group_name": grupa, "role": "viewer", "reason": powod,
-				// Brak powodu jest brakiem w zadaniu, a nie w sesji: ponowne
-				// uwierzytelnienie by go nie naprawilo.
+				"group_name": group, "role": "viewer", "reason": reason,
+				// A missing reason is a defect of the request, not of the
+				// session: re-authentication would not fix it.
 			}, &problem, http.StatusBadRequest)
 			if problem.Code != "reason_required" {
-				t.Errorf("kod = %q, oczekiwano reason_required", problem.Code)
+				t.Errorf("code = %q, expected reason_required", problem.Code)
 			}
 		})
 	}
@@ -37,72 +37,73 @@ func TestZmianaRegulDostepuWymagaPowodu(t *testing.T) {
 	var mapping struct {
 		ID string `json:"id"`
 	}
-	powod := "nadanie roli viewer zespolowi testowemu"
+	reason := "granting the viewer role to the test team"
 	h.do(http.MethodPost, "/api/v1/group-mappings", map[string]any{
-		"group_name": grupa, "role": "viewer", "reason": powod,
+		"group_name": group, "role": "viewer", "reason": reason,
 	}, &mapping, http.StatusCreated)
 	t.Cleanup(func() {
 		h.do(http.MethodDelete,
-			"/api/v1/group-mappings/"+mapping.ID+"?reason=sprzatanie+po+tescie+integracyjnym",
+			"/api/v1/group-mappings/"+mapping.ID+"?reason=cleanup+after+the+integration+test",
 			nil, nil, http.StatusNoContent)
 	})
 
-	// Usuniecie jest ta sama zmiana reguly dostepu, wiec warunek jest ten sam.
+	// Deletion is the same change of an access rule, so the condition is the
+	// same.
 	var problem struct {
 		Code string `json:"code"`
 	}
 	h.do(http.MethodDelete, "/api/v1/group-mappings/"+mapping.ID, nil, &problem, http.StatusBadRequest)
 	if problem.Code != "reason_required" {
-		t.Errorf("usuniecie bez powodu: kod = %q", problem.Code)
+		t.Errorf("deletion without a reason: code = %q", problem.Code)
 	}
 
-	// Slad audytowy musi niesc powod i to, na jakiej podstawie operacja
-	// przeszla. Identity automatyczna nie moze byc opisana jako uwierzytelniona
-	// ponownie, bo nie ma za nia czlowieka.
-	var audyt struct {
+	// The audit trail must carry the reason and the basis on which the
+	// operation passed. An automated identity cannot be described as
+	// re-authenticated, because there is no human behind it.
+	var audit struct {
 		Items []struct {
 			Action  string         `json:"action"`
 			Outcome string         `json:"outcome"`
 			Detail  map[string]any `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/audit?limit=50", &audyt)
+	h.get("/api/v1/audit?limit=50", &audit)
 
-	znaleziony := false
-	for _, zdarzenie := range audyt.Items {
-		if zdarzenie.Action != "group_mapping.create" || zdarzenie.Outcome != "success" {
+	found := false
+	for _, event := range audit.Items {
+		if event.Action != "group_mapping.create" || event.Outcome != "success" {
 			continue
 		}
-		if zdarzenie.Detail["group"] != grupa {
+		if event.Detail["group"] != group {
 			continue
 		}
-		znaleziony = true
-		if zdarzenie.Detail["purpose"] != powod {
-			t.Errorf("audyt nie niesie powodu: %+v", zdarzenie.Detail)
+		found = true
+		if event.Detail["purpose"] != reason {
+			t.Errorf("the audit entry does not carry the reason: %+v", event.Detail)
 		}
-		if zdarzenie.Detail["authentication"] != "api_token" {
-			t.Errorf("audyt nie odroznia tokenu od sesji: %+v", zdarzenie.Detail)
+		if event.Detail["authentication"] != "api_token" {
+			t.Errorf("the audit entry does not tell a token from a session: %+v", event.Detail)
 		}
-		if zdarzenie.Detail["reauthenticated"] != false {
-			t.Errorf("audyt przypisuje tokenowi ponowne uwierzytelnienie: %+v", zdarzenie.Detail)
+		if event.Detail["reauthenticated"] != false {
+			t.Errorf("the audit entry attributes re-authentication to a token: %+v", event.Detail)
 		}
-		if _, obecny := zdarzenie.Detail["acr"]; obecny {
-			t.Errorf("audyt przypisuje tokenowi poziom uwierzytelnienia: %+v", zdarzenie.Detail)
+		if _, present := event.Detail["acr"]; present {
+			t.Errorf("the audit entry attributes an authentication level to a token: %+v", event.Detail)
 		}
 	}
-	if !znaleziony {
-		t.Fatalf("brak wpisu audytu o utworzeniu mapowania grupy %s", grupa)
+	if !found {
+		t.Fatalf("no audit entry about creating the mapping of group %s", group)
 	}
 
-	// Odmowa tez zostawia slad: proba zmiany reguly dostepu jest zdarzeniem
-	// wartym odnotowania niezaleznie od wyniku.
-	odmowy := 0
-	for _, zdarzenie := range audyt.Items {
-		if zdarzenie.Action == "group_mapping.create" && zdarzenie.Outcome == "denied" {
-			odmowy++
+	// A refusal leaves a trace too: an attempt to change an access rule is
+	// an event worth recording regardless of the outcome.
+	denials := 0
+	for _, event := range audit.Items {
+		if event.Action == "group_mapping.create" && event.Outcome == "denied" {
+			denials++
 		}
 	}
-	if odmowy == 0 {
-		t.Error("odmowy z braku powodu nie trafily do audytu")
+	if denials == 0 {
+		t.Error("the refusals for a missing reason did not reach the audit log")
 	}
 }

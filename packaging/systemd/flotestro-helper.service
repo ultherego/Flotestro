@@ -1,59 +1,62 @@
 [Unit]
-Description=Helper Flotestro (operacje wymagajace roota)
+Description=Flotestro helper (operations that require root)
 Documentation=https://github.com/ultherego/flotestro
 Requires=flotestro-helper.socket
 After=flotestro-helper.socket
 
 [Service]
 Type=simple
-# Helper dziala jako root, ale jest uruchamiany wylacznie przez aktywacje
-# gniazdem i konczy prace po okresie bezczynnosci. W spoczynku floty nie
-# dziala zaden proces uprzywilejowany.
+# The helper runs as root, but is started only through socket activation
+# and exits after an idle period. When the fleet is at rest no privileged
+# process runs.
 ExecStart=/usr/bin/flotestro-agent-helper
 Environment=FLOTESTRO_AGENT_USER=flotestro-agent
 Environment=FLOTESTRO_HELPER_IDLE_SECONDS=300
 
-# Helper nie nasluchuje na sieci - jedynym wejsciem jest gniazdo unixowe - ale
-# transakcje pakietowe musza pobierac pakiety z repozytorium, wiec ruch
-# wychodzacy jest konieczny. Control plane celowo nie posredniczy w pobieraniu.
-# AF_NETLINK jest tu konieczne: przez netlink rozmawiaja z jadrem nft i ip,
-# a wiec caly modul zapory i odczyt stanu sieci. Bez tej rodziny nft konczy
-# sie kodem 3 i komunikatem, ktory nie mowi o gniazdach ani slowa - a modul
-# zapory wyglada wtedy na host bez regul.
+# The helper does not listen on the network - the unix socket is the only
+# entry - but package transactions must fetch packages from the repository,
+# so outbound traffic is necessary. The control plane deliberately does not
+# relay the downloads.
+# AF_NETLINK is necessary here: nft and ip talk to the kernel over netlink,
+# and so does the whole firewall module and the network state read. Without
+# this family nft ends with code 3 and a message that says not a word about
+# sockets - and the firewall module then looks like a host without rules.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-# NoNewPrivileges=yes blokuje przejscia domen SELinuksa przy execve. Skrypty
-# pakietow rpm przechodza do domeny rpm_script_t, wiec na Fedorze i RHEL-u nie
-# daja sie uruchomic - transakcja konczy sie bledem "scriptlet failed" albo
-# cicho nie robi nic, a przyczyny nie widac ani w dzienniku, ani w audycie.
+# NoNewPrivileges=yes blocks SELinux domain transitions at execve. The rpm
+# package scriptlets transition into the rpm_script_t domain, so on Fedora
+# and RHEL they cannot run - the transaction ends with a "scriptlet failed"
+# error or quietly does nothing, and the cause is visible neither in the
+# journal nor in the audit log.
 #
-# Helper i tak dziala jako root, wiec ta dyrektywa niczego mu nie odbierala:
-# nie ma czego eskalowac. Granica jest gniazdo, weryfikacja SO_PEERCRED
-# i zamknieta lista operacji - a nie flagi, ktore udaja, ze proces jest
-# nieuprzywilejowany.
+# The helper runs as root anyway, so this directive took nothing from it:
+# there is nothing to escalate. The boundary is the socket, the SO_PEERCRED
+# verification and the closed list of operations - not flags pretending the
+# process is unprivileged.
 NoNewPrivileges=no
-# PrivateTmp=yes (jak kazda dyrektywa tworzaca przestrzen montowan) odcina
-# propagacje montowan z uslugi do hosta: mount wykonany przez helper wchodzi
-# do jego prywatnej przestrzeni, helper melduje sukces, a host nie ma
-# filesystemu - i po restarcie czyta wpis z fstab, ktorego nikt nie sprawdzil.
-# Helper montuje i odmontowuje w imieniu hosta, wiec musi dzielic z nim
-# przestrzen montowan. Prywatny /tmp niczego tu nie chronil: proces i tak
-# dziala jako root.
+# PrivateTmp=yes (like every directive that creates a mount namespace) cuts
+# off mount propagation from the service to the host: a mount done by the
+# helper enters its private namespace, the helper reports success, and the
+# host has no filesystem - and after a reboot reads an fstab entry nobody
+# checked. The helper mounts and unmounts on behalf of the host, so it must
+# share the mount namespace with it. A private /tmp protected nothing here:
+# the process runs as root anyway.
 PrivateTmp=no
-# Helper zarzadza plikami authorized_keys w katalogach domowych, wiec /home
-# musi byc dla niego widoczny. ProtectHome nie chronilby tu przed niczym:
-# proces i tak dziala jako root i to on jest granica uprawnien.
+# The helper manages the authorized_keys files in the home directories, so
+# /home must be visible to it. ProtectHome would protect against nothing
+# here: the process runs as root anyway and it is the privilege boundary.
 ProtectHome=no
-# ProtectKernelModules=yes podstawia pusty katalog w miejsce /lib/modules.
-# Skrypty pakietow buduja z niego initramfs, wiec transakcja pakietowa
-# wyprodukowalaby obraz bez sterownika dysku i host nie wstalby po restarcie.
-# Ochrona i tak nie stanowilaby granicy: helper dziala jako root i moze
-# ladowac moduly. Granica jest gniazdo i weryfikacja SO_PEERCRED.
+# ProtectKernelModules=yes substitutes an empty directory for /lib/modules.
+# The package scriptlets build the initramfs from it, so a package
+# transaction would produce an image without the disk driver and the host
+# would not come up after a reboot. The protection would be no boundary
+# anyway: the helper runs as root and can load modules. The boundary is the
+# socket and the SO_PEERCRED verification.
 ProtectKernelModules=no
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
-# Narzedzia pakietowe potrzebuja zapisywalnego HOME; katalog stanu jest
-# tworzony i sprzatany przez systemd.
+# The package tools need a writable HOME; the state directory is created and
+# cleaned up by systemd.
 StateDirectory=flotestro-helper
 StateDirectoryMode=0700
 

@@ -6,16 +6,18 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1;helperv1";
 
-// Protokol miedzy nieuprzywilejowanym agentem a helperem roota.
-// Helper nasluchuje wylacznie na gniezdzie unixowym i nigdy nie rozmawia
-// z centrala. Kontrakt jest celowo maly: to jedyna droga do uprawnien roota.
+// The protocol between the unprivileged agent and the root helper. The
+// helper listens only on a unix socket and never talks to the centre. The
+// contract is deliberately small: it is the only way to root privileges.
 
-// PROTOCOL_VERSION zmienia sie przy kazdej niezgodnej zmianie kontraktu.
-// Helper odrzuca wersje, ktorej nie zna, zamiast zgadywac znaczenie pol.
+// PROTOCOL_VERSION changes at every incompatible change of the contract.
+// The helper rejects a version it does not know instead of guessing the
+// meaning of the fields.
 message HelperRequest {
   uint32 protocol_version = 1;
   string task_id = 2;
-  // Helper odrzuca zadanie po terminie, niezaleznie od tego, co twierdzi agent.
+  // The helper rejects a job past its deadline, regardless of what the
+  // agent claims.
   google.protobuf.Timestamp expires_at = 3;
   uint32 timeout_seconds = 4;
   uint32 max_output_bytes = 5;
@@ -29,18 +31,20 @@ message HelperRequest {
     LocalAccountsRequest local_accounts = 25;
     LocalUserActionRequest local_user_action = 26;
     PackageRepairRequest package_repair = 27;
-    // Odczyt stanu silnika kontenerow. Agent nie dostaje gniazda Dockera:
-    // czlonkostwo w grupie docker jest rownowazne rootowi, wiec proces
-    // dzialajacy bez uprawnien nie moze go miec.
+    // A read of the container engine state. The agent does not get the
+    // Docker socket: membership in the docker group is equivalent to root,
+    // so a process running without privileges must not have it.
     DockerReadRequest docker_read = 29;
-    // Dziennik zdarzen silnika: osobne zapytanie, bo ma wlasne okno czasu
-    // i wlasne limity. Odczyt bez konca zostalby na hoscie na zawsze.
+    // The engine event log: a separate request, because it has its own time
+    // window and its own limits. An endless read would stay on the host
+    // forever.
     DockerEventsRequest docker_events = 48;
-    // Operacja na silniku kontenerow. Zakres jest wyliczony, a nie podany
-    // sciezka: helper nie posredniczy w dowolnym wywolaniu Engine API.
+    // An operation on the container engine. The scope is enumerated, not
+    // given by a path: the helper does not relay an arbitrary Engine API
+    // call.
     DockerActionRequest docker_action = 30;
-    // Projekt Compose: plan albo wdrozenie. Manifest przychodzi w tresci,
-    // a nie jako sciezka na hoscie - operator zatwierdzil tresc.
+    // A Compose project: a plan or a deployment. The manifest comes in the
+    // body, not as a path on the host - the operator approved the content.
     ComposeRequest compose = 31;
     LogFileRequest log_file = 32;
     ProcessSignalRequest process_signal = 33;
@@ -59,19 +63,19 @@ message HelperRequest {
     RepositoryRequest repository = 46;
     BackupRequest backup = 47;
   }
-  // Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
-  // odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
-  // za wynik operacji.
+  // Progress of a long operation. A client that does not ask for it gets
+  // one answer as before - an older agent must not take a progress message
+  // for the operation result.
   bool want_progress = 28;
 }
 
-// LocalAccountsRequest odczytuje te dane o kontach, ktore wymagaja roota:
-// stan blokady z /etc/shadow i klucze SSH z katalogow domowych.
+// LocalAccountsRequest reads the account data that requires root: the lock
+// state from /etc/shadow and the SSH keys from the home directories.
 message LocalAccountsRequest {
   repeated string names = 1;
 }
 
-// LocalUserActionRequest zmienia konto lokalne na hoscie.
+// LocalUserActionRequest changes a local account on the host.
 message LocalUserActionRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -85,15 +89,15 @@ message LocalUserActionRequest {
   string gecos = 3;
   string shell = 4;
   repeated string groups = 5;
-  // Klucze publiczne w postaci pelnej. Klucz prywatny nigdy nie trafia
-  // do systemu, a hasla nie sa przesylane w ogole.
+  // Public keys in full form. A private key never reaches the system, and
+  // passwords are not sent at all.
   repeated string ssh_keys = 6;
-  // CreateHome tworzy katalog domowy przy zakladaniu konta.
+  // CreateHome creates the home directory when creating the account.
   bool create_home = 7;
 }
 
-// DomainEnrollRequest dolacza hosta do domeny. Wymaga roota, bo zmienia
-// konfiguracje SSSD, Kerberosa i PAM.
+// DomainEnrollRequest joins the host to the domain. Requires root, because
+// it changes the SSSD, Kerberos and PAM configuration.
 message DomainEnrollRequest {
   string domain = 1;
   string realm = 2;
@@ -103,20 +107,21 @@ message DomainEnrollRequest {
   bool preflight_only = 6;
 }
 
-// IdentityProbeRequest odczytuje te elementy stanu domeny, ktore wymagaja
-// roota: keytab hosta i baze cache SSSD. Reszte agent czyta sam.
+// IdentityProbeRequest reads the elements of the domain state that require
+// root: the host keytab and the SSSD cache database. The agent reads the
+// rest itself.
 message IdentityProbeRequest {
   string domain = 1;
 }
 
-// RebootRequest zleca kontrolowany restart hosta.
+// RebootRequest orders a controlled reboot of the host.
 message RebootRequest {
   uint32 delay_seconds = 1;
   string reason = 2;
 }
 
-// ShutdownRequest wylacza hosta. Opoznienie daje agentowi czas na odeslanie
-// wyniku, zanim host zniknie z sieci.
+// ShutdownRequest powers the host off. The delay gives the agent time to
+// send the result back before the host disappears from the network.
 message ShutdownRequest {
   uint32 delay_seconds = 1;
   string reason = 2;
@@ -131,35 +136,38 @@ message PowerResult {
   string scheduled_at = 4;
 }
 
-// PackageActionRequest obejmuje operacje pakietowe wymagajace roota.
-// Planowanie w trybie symulacji nie wymaga roota i nie idzie przez helper.
+// PackageActionRequest covers the package operations that require root.
+// Planning in simulation mode requires no root and does not go through the
+// helper.
 message PackageActionRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    // Odswiezenie metadanych repozytorium.
+    // A refresh of the repository metadata.
     OPERATION_REFRESH = 1;
-    // Wykonanie transakcji aktualizacji.
+    // Carrying out an update transaction.
     OPERATION_UPGRADE = 2;
-    // Dolozenie pakietow na host.
+    // Adding packages to the host.
     OPERATION_INSTALL = 3;
-    // Usuniecie pakietow wraz z zaleznymi.
+    // Removing packages together with their dependants.
     OPERATION_REMOVE = 4;
-    // Wstrzymanie albo zwolnienie aktualizacji pakietow.
+    // Holding or releasing package updates.
     OPERATION_HOLD = 5;
   }
   Operation operation = 1;
-  // Pusta lista przy OPERATION_UPGRADE oznacza wszystkie aktualizacje.
+  // An empty list with OPERATION_UPGRADE means all updates.
   repeated string packages = 2;
   bool security_only = 3;
-  // Zbior usuwanych zatwierdzony przez operatora. Host liczy go ponownie tuz
-  // przed operacja: roznica oznacza, ze usunieciu podleglby inny zestaw.
+  // The removal set approved by the operator. The host computes it again
+  // right before the operation: a difference means a different set would be
+  // removed.
   repeated string expected_removals = 4;
-  // Wartosc docelowa wstrzymania. Operacja opisuje stan, a nie przelacznik.
+  // The desired hold value. The operation describes a state, not a toggle.
   bool hold = 5;
-  // Zgoda na instalacje wersji starszej niz zainstalowana. Menedzery
-  // pakietow odmawiaja tego domyslnie i slusznie: cofniecie wersji bywa
-  // nieodwracalne dla formatu danych. Wlacza to wylacznie operacja, ktora
-  // wskazuje wersje wprost - jak wymiana agenta na wersje powrotu.
+  // Consent to install a version older than the installed one. Package
+  // managers refuse that by default and rightly so: a downgrade is
+  // sometimes irreversible for the data format. Only an operation that
+  // names the version explicitly enables it - such as replacing the agent
+  // with the rollback version.
   bool allow_downgrade = 6;
 }
 
@@ -170,8 +178,8 @@ message UnitActionRequest {
     OPERATION_STOP = 2;
     OPERATION_RESTART = 3;
     OPERATION_RELOAD = 4;
-    // Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
-    // a nie jego stan teraz.
+    // Enabling and masking change what the host does after a reboot, not
+    // its state now.
     OPERATION_ENABLE = 5;
     OPERATION_DISABLE = 6;
     OPERATION_MASK = 7;
@@ -183,7 +191,7 @@ message UnitActionRequest {
 
 message HelperResponse {
   bool accepted = 1;
-  // Stabilny kod maszynowy: unknown_action, unsupported_version, expired,
+  // A stable machine code: unknown_action, unsupported_version, expired,
   // protected_unit, invalid_unit, locked, exec_failed, timeout.
   string error_code = 2;
   string message = 3;
@@ -198,8 +206,8 @@ message HelperResponse {
   DomainEnrollResult enroll_result = 12;
   LocalAccountsResult accounts_result = 13;
   PackageRepairResponse repair_result = 14;
-  // Postep operacji w toku. Wiadomosc z postepem nie jest odpowiedzia
-  // koncowa: klient czyta dalej, az dostanie final = true.
+  // The progress of an operation in flight. A progress message is not the
+  // final answer: the client keeps reading until it gets final = true.
   TaskProgress progress = 15;
   bool final = 16;
   DockerReadResult docker_result = 17;
@@ -224,21 +232,21 @@ message HelperResponse {
   DockerEventsResult docker_events_result = 36;
 }
 
-// DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
-// a nie podany sciezka: przekazanie sciezki do Engine API oznaczaloby, ze
-// przez helpera da sie wywolac dowolna jego operacje.
+// DockerReadRequest describes what to read from the engine. The scope is
+// enumerated, not given by a path: passing a path to the Engine API would
+// mean any of its operations can be called through the helper.
 message DockerReadRequest {
   enum Scope {
     SCOPE_UNSPECIFIED = 0;
-    // Podsumowanie do inventory: lekkie, liczone przy cyklu inwentarza.
+    // The summary for the inventory: light, computed in the inventory cycle.
     SCOPE_SUMMARY = 1;
-    // Pelny stan na zadanie operatora, gdy otworzy zakladke.
+    // The full state on the operator's demand, when they open the tab.
     SCOPE_FULL = 2;
   }
   Scope scope = 1;
 }
 
-// DockerActionRequest opisuje jedna operacje na silniku.
+// DockerActionRequest describes one operation on the engine.
 message DockerActionRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -250,22 +258,22 @@ message DockerActionRequest {
     OPERATION_PRUNE = 6;
   }
   Operation operation = 1;
-  // Identyfikator kontenera; wylacznie szesnastkowy, sprawdzony przed
-  // wyslaniem i sprawdzony ponownie tutaj.
+  // The container identifier; hexadecimal only, checked before sending and
+  // checked again here.
   string container_id = 2;
   uint32 timeout_seconds = 3;
   bool remove_volumes = 4;
   string image_reference = 5;
-  // Obiekty do usuniecia przy sprzataniu. Lista jest jawna: sprzatanie po
-  // filtrze usunęłoby takze to, czego operator nie widzial.
+  // The objects to remove at cleanup. The list is explicit: a cleanup by
+  // filter would also remove what the operator did not see.
   repeated string image_ids = 6;
   repeated string volume_names = 7;
   repeated string network_ids = 8;
 }
 
 message DockerActionResult {
-  // Stan kontenera przed i po, w postaci JSON. Zapisywany takze przy bledzie:
-  // bez tego nie wiadomo, co zdazylo sie zmienic.
+  // The container state before and after, in JSON form. Recorded also on
+  // failure: without it there is no knowing what managed to change.
   bytes before = 1;
   bytes after = 2;
   repeated string removed = 3;
@@ -273,12 +281,8 @@ message DockerActionResult {
   string image_digest = 5;
 }
 
-// LogFileRequest czyta plik z allowlisty administratora hosta. Sciezka nie
-// jest dowolna: helper rozstrzyga ja wlasnym zakresem, nie tresci zadania.
-// ProcessSignalRequest wysyla sygnal do procesu. Czas startu wiaze zadanie
-// z konkretnym procesem, bo jadro uzywa numerow PID ponownie.
-// ScheduleRequest opisuje operacje na zadaniu cyklicznym. Wpis zarzadzany
-// opisuje stan docelowy, a nie polecenie do wykonania raz.
+// ScheduleRequest describes an operation on a scheduled job. A managed
+// entry describes a desired state, not a command to run once.
 message ScheduleRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -286,7 +290,7 @@ message ScheduleRequest {
     OPERATION_DISABLE = 2;
     OPERATION_REMOVE = 3;
     OPERATION_RUN_NOW = 4;
-    // Odczyt harmonogramow hosta.
+    // A read of the host schedules.
     OPERATION_READ = 5;
   }
   Operation operation = 1;
@@ -296,43 +300,46 @@ message ScheduleRequest {
   string user = 5;
   string comment = 6;
   bool enabled = 7;
-  // Przejecie wpisu zastanego na hoscie. Bez tego panel nie nadpisuje pracy,
-  // ktorej nikt do panelu nie wprowadzal.
+  // Taking over an entry found on the host. Without it the panel does not
+  // overwrite work nobody brought into the panel.
   bool adopt = 8;
 }
 
 message ScheduleResult {
-  // Stan harmonogramow w postaci JSON. Struktura nalezy do modulu
-  // harmonogramow; kontrakt helpera jej nie powtarza.
+  // The schedule state in JSON form. The structure belongs to the schedules
+  // module; the helper contract does not repeat it.
   bytes snapshot = 1;
   string message = 2;
 }
 
-// NetworkRequest opisuje zmiane konfiguracji sieci hosta.
+// NetworkRequest describes a change of the host network configuration.
 //
-// Kazda zmiana jest uzbrajana wycofaniem: helper zapisuje stan sprzed zmiany
-// i uruchamia lokalny zegar, ktory ten stan przywroci. Zegar rozbraja dopiero
-// potwierdzenie od agenta, ze host nadal rozmawia z panelem.
+// Every change is armed with a rollback: the helper records the state from
+// before the change and starts a local timer that restores that state. Only
+// the agent's confirmation that the host still talks to the panel disarms
+// the timer.
 message NetworkRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    // Odczyt profili NetworkManagera wraz z ich ustawieniami.
+    // A read of the NetworkManager profiles together with their settings.
     OPERATION_READ = 1;
     OPERATION_SET_MTU = 2;
     OPERATION_ENSURE_ROUTES = 3;
     OPERATION_APPLY_PROFILE = 4;
-    // Rozbrojenie wycofania po udanym potwierdzeniu lacznosci.
+    // Disarming the rollback after a successful connectivity confirmation.
     OPERATION_CONFIRM = 5;
-    // Natychmiastowe wycofanie zmiany na zadanie operatora.
+    // An immediate rollback of the change on the operator's demand.
     OPERATION_ROLLBACK = 6;
-    // Plan zmiany bez dotykania hosta: roznica miedzy profilem zastanym
-    // a zadanym. Rodzaj zmiany helper poznaje po polach: method wskazuje
-    // profil adresowy, routes trasy, mtu samo MTU.
+    // The change plan without touching the host: the difference between the
+    // found and the requested profile. The helper recognises the kind of
+    // change by the fields: method names an address profile, routes the
+    // routes, mtu the MTU alone.
     OPERATION_PLAN = 7;
   }
   Operation operation = 1;
-  // Interfejs, ktorego zmiana dotyczy. Profil NetworkManagera helper znajduje
-  // sam: panel opisuje interfejs, bo to jego widzi operator.
+  // The interface the change concerns. The helper finds the NetworkManager
+  // profile itself: the panel describes the interface, because that is what
+  // the operator sees.
   string interface = 2;
   string mtu = 3;
   repeated string routes = 4;
@@ -340,57 +347,60 @@ message NetworkRequest {
   repeated string addresses = 6;
   string gateway = 7;
   repeated string dns = 8;
-  // Sekundy do wycofania. Zero oznacza wartosc domyslna helpera, a nie brak
-  // wycofania: zmiana sieci bez zegara ratunkowego nie jest tu mozliwa.
+  // Seconds until the rollback. Zero means the helper's default, not no
+  // rollback: a network change without a rescue timer is not possible here.
   uint32 rollback_seconds = 9;
-  // Identyfikator planu wycofania przy potwierdzeniu albo wycofaniu.
+  // The rollback plan identifier for a confirmation or a rollback.
   string rollback_id = 10;
   string reason = 11;
-  // Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
-  // raz wobec profilu, ktory ma teraz: inny odcisk znaczy, ze host zmienil
-  // sie od planowania i zmiana wchodzilaby w inny stan niz ogladany.
+  // The fingerprint of the plan the operator agreed to. The helper computes
+  // the plan once more against the profile it has now: a different
+  // fingerprint means the host changed since planning and the change would
+  // enter a state other than the one looked at.
   string plan_hash = 12;
 }
 
 message NetworkResult {
-  // Stan profili w postaci JSON. Struktura nalezy do modulu sieci.
+  // The profile state in JSON form. The structure belongs to the network
+  // module.
   bytes profiles = 1;
   string message = 2;
-  // Identyfikator uzbrojonego wycofania. Puste oznacza operacje, ktora
-  // niczego nie uzbroila.
+  // The identifier of the armed rollback. Empty means an operation that
+  // armed nothing.
   string rollback_id = 3;
-  // Chwila, o ktorej wycofanie sie wykona, jesli nikt go nie rozbroi.
+  // The moment the rollback runs at if nobody disarms it.
   string rollback_deadline = 4;
-  // Confirmed mowi, czy wycofanie zostalo rozbrojone.
+  // Confirmed says whether the rollback was disarmed.
   bool confirmed = 5;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN. Struktura nalezy do
-  // modulu sieci.
+  // The change plan in JSON form for OPERATION_PLAN. The structure belongs
+  // to the network module.
   bytes plan = 6;
 }
 
-// DnsRequest zmienia resolver hosta.
+// DnsRequest changes the host resolver.
 //
-// Zmiana idzie przez profil polaczenia, a nie przez zapis do resolv.conf:
-// plik nalezacy do resolved albo NetworkManagera zostanie i tak nadpisany
-// przy nastepnym zdarzeniu sieci, wiec zapis w nim znikalby sam.
+// The change goes through the connection profile, not through a write to
+// resolv.conf: a file owned by resolved or NetworkManager gets overwritten
+// anyway at the next network event, so a write into it would vanish on its
+// own.
 message DnsRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_APPLY = 1;
-    // Plan zmiany resolvera bez dotykania hosta.
+    // The resolver change plan without touching the host.
     OPERATION_PLAN = 2;
   }
   Operation operation = 1;
   string interface = 2;
   repeated string servers = 3;
   repeated string search_domains = 4;
-  // IgnoreAutoDns odrzuca serwery podane przez DHCP. Bez tego serwery panelu
-  // i serwery dostawcy trafiaja do jednej listy, a operator nie wie, ktory
-  // odpowiedzial.
+  // IgnoreAutoDns rejects the servers given by DHCP. Without it the panel's
+  // servers and the provider's servers end up in one list, and the operator
+  // does not know which one answered.
   bool ignore_auto_dns = 5;
   uint32 rollback_seconds = 6;
-  // Odcisk planu, na ktory operator sie zgodzil; helper liczy plan jeszcze
-  // raz wobec profilu, ktory ma teraz.
+  // The fingerprint of the plan the operator agreed to; the helper computes
+  // the plan once more against the profile it has now.
   string plan_hash = 7;
 }
 
@@ -400,15 +410,15 @@ message DnsResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 6;
 }
 
-// FirewallRequest opisuje operacje na zaporze hosta.
+// FirewallRequest describes an operation on the host firewall.
 //
-// Panel zmienia wylacznie wlasna tablice nftables albo strefe firewalld:
-// cudze lancuchy sa przepisywane bez jego udzialu, wiec regula w nich znika
-// bez sladu.
+// The panel changes only its own nftables table or a firewalld zone:
+// foreign chains are rewritten without it, so a rule in them vanishes
+// without a trace.
 message FirewallRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -417,16 +427,17 @@ message FirewallRequest {
     OPERATION_RULE_REMOVE = 3;
     OPERATION_ZONE_PORT = 4;
     OPERATION_ZONE_SERVICE = 5;
-    // Przywrocenie stanu regul panelu sprzed zmiany.
+    // Restoring the panel rule state from before the change.
     OPERATION_RESTORE = 6;
     OPERATION_CONFIRM = 7;
-    // Policzenie roznicy miedzy regula zastana a zadana. Nie zmienia
-    // niczego: odpowiada, co by sie stalo i wobec ktorego zestawu regul.
+    // Computing the difference between the found and the requested rule. It
+    // changes nothing: it answers what would happen and against which
+    // ruleset.
     OPERATION_PLAN = 8;
   }
   Operation operation = 1;
-  // Regula w postaci pol, ktore panel rozumie. Surowego zapisu nft nie
-  // przyjmujemy: host wykonalby wszystko, co da sie w nim zapisac.
+  // The rule as fields the panel understands. Raw nft notation is not
+  // accepted: the host would execute anything that can be written in it.
   string rule_id = 2;
   string chain = 3;
   string action = 4;
@@ -435,44 +446,48 @@ message FirewallRequest {
   repeated string sources = 7;
   string interface = 8;
   string comment = 9;
-  // Strefa i usluga dotycza hostow z firewalld.
+  // The zone and the service concern hosts with firewalld.
   string zone = 10;
   string service = 11;
   bool enable = 12;
-  // Adres i port kanalu zarzadzania. Regula, ktora je obejmuje, odcielaby
-  // panel od hosta - a wtedy nie ma czym cofnac zmiany.
+  // The address and port of the management channel. A rule covering them
+  // would cut the panel off from the host - and then there is nothing to
+  // undo the change with.
   string management_address = 13;
   uint32 management_port = 14;
-  // BreakGlass przelamuje ochrone kanalu zarzadzania. Wymaga jawnej decyzji
-  // operatora, bo skutkiem bywa host, do ktorego trzeba pojechac.
+  // BreakGlass overrides the management channel protection. It requires an
+  // explicit operator decision, because the result is sometimes a host one
+  // has to drive to.
   bool break_glass = 15;
   uint32 rollback_seconds = 16;
   string rollback_id = 17;
-  // Odcisk zestawu regul, wobec ktorego zlecono zmiane.
+  // The fingerprint of the ruleset the change was ordered against.
   string expected_hash = 18;
 }
 
 message FirewallResult {
-  // Stan zapory w postaci JSON. Struktura nalezy do modulu zapory.
+  // The firewall state in JSON form. The structure belongs to the firewall
+  // module.
   bytes snapshot = 1;
   string message = 2;
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
-  // Plan jest opisem roznicy miedzy regula zastana a zadana, w JSON.
+  // Plan describes the difference between the found and the requested rule,
+  // in JSON.
   bytes plan = 6;
 }
 
-// StorageRequest opisuje operacje na przestrzeni dyskowej hosta.
+// StorageRequest describes an operation on the host storage.
 //
-// Urzadzenie wskazujemy sciezka wraz z oczekiwanym identyfikatorem: nazwa
-// /dev/sdX zalezy od kolejnosci wykrywania i po restarcie potrafi wskazac
-// inny dysk. Przy operacji niszczacej to jest roznica miedzy wlasciwym
-// dyskiem a cudzymi danymi.
+// A device is named by path together with an expected identifier: the
+// /dev/sdX name depends on the detection order and after a reboot can point
+// at a different disk. In a destructive operation that is the difference
+// between the right disk and somebody else's data.
 message StorageRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    // Odczyt grup i wolumenow LVM. Narzedzia LVM wymagaja roota.
+    // A read of the LVM groups and volumes. The LVM tools require root.
     OPERATION_READ_LVM = 1;
     OPERATION_MOUNT_ENSURE = 2;
     OPERATION_MOUNT_REMOVE = 3;
@@ -481,11 +496,12 @@ message StorageRequest {
     OPERATION_FS_RESIZE = 6;
     OPERATION_FS_CREATE = 7;
     OPERATION_DISK_WIPE = 8;
-    // Policzenie roznicy miedzy montowaniem zastanym a zadanym. Nie zmienia
-    // niczego i rozwiazuje zrodlo do UUID filesystemu, ktory ten host ma.
+    // Computing the difference between the found and the requested mount.
+    // It changes nothing and resolves the source to the UUID of the
+    // filesystem this host has.
     OPERATION_MOUNT_PLAN = 9;
-    // Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu, bez
-    // dotykania hosta. Rodzaj nazywa pole plan.
+    // The plan of a check or an extension of a filesystem or a volume,
+    // without touching the host. The kind is named by the plan field.
     OPERATION_DEVICE_PLAN = 10;
   }
   Operation operation = 1;
@@ -493,52 +509,56 @@ message StorageRequest {
   string target = 3;
   string fs_type = 4;
   string options = 5;
-  // Persist zapisuje wpis w /etc/fstab. Bez niego montowanie zniknie po
-  // restarcie, a operator ma o tym wiedziec, a nie odkryc to po awarii.
+  // Persist records the entry in /etc/fstab. Without it the mount vanishes
+  // after a reboot, and the operator is to know that, not discover it after
+  // an outage.
   bool persist = 6;
   string device = 7;
-  // ExpectedUuid wiaze operacje z konkretnym filesystemem.
+  // ExpectedUuid binds the operation to a specific filesystem.
   string expected_uuid = 8;
-  // Repair wlacza naprawe zamiast samego sprawdzenia.
+  // Repair enables a repair instead of a bare check.
   bool repair = 9;
-  // Tozsamosc urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
-  // /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
-  // ogladal - a przy formatowaniu to jest roznica miedzy pustym dyskiem
-  // a cudzymi danymi.
+  // The device identity the plan expects. The path alone is not enough:
+  // /dev/sdb after a reboot can be a different disk than the one the
+  // operator looked at - and when formatting that is the difference
+  // between an empty disk and somebody else's data.
   string expected_serial = 10;
   uint64 expected_size_bytes = 11;
-  // Size jest przyrostem wolumenu, np. "+10G" albo "+100%FREE".
+  // Size is the volume increment, e.g. "+10G" or "+100%FREE".
   string size = 12;
   string label = 13;
-  // Plan nazywa rodzaj planowanej operacji na urzadzeniu: check, resize
-  // albo lvm_extend.
+  // Plan names the kind of the planned device operation: check, resize or
+  // lvm_extend.
   string plan = 14;
-  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  // The fingerprint of the plan the operator agreed to; the helper computes
+  // it once more.
   string plan_hash = 15;
 }
 
 message StorageResult {
-  // Stan przestrzeni w postaci JSON. Struktura nalezy do modulu.
+  // The storage state in JSON form. The structure belongs to the module.
   bytes snapshot = 1;
   string message = 2;
-  // Output niesie wyjscie narzedzia sprawdzajacego filesystem.
+  // Output carries the output of the filesystem check tool.
   string output = 3;
-  // Plan jest opisem roznicy miedzy montowaniem zastanym a zadanym, w JSON.
+  // Plan describes the difference between the found and the requested
+  // mount, in JSON.
   bytes plan = 4;
 }
 
-// SshRequest opisuje operacje na serwerze sshd.
+// SshRequest describes an operation on the sshd server.
 //
-// Konfiguracja idzie do wlasnego pliku w sshd_config.d, a nie do
-// sshd_config: plik glowny nalezy do dystrybucji i administratora hosta.
+// The configuration goes into its own file in sshd_config.d, not into
+// sshd_config: the main file belongs to the distribution and the host
+// administrator.
 message SshRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_READ = 1;
     OPERATION_APPLY = 2;
     OPERATION_ROTATE_HOSTKEY = 3;
-    // Plan zmiany bez dotykania hosta: roznica miedzy tym, co serwer
-    // stosuje, a zamowieniem.
+    // The change plan without touching the host: the difference between
+    // what the server applies and the order.
     OPERATION_PLAN = 4;
   }
   Operation operation = 1;
@@ -551,47 +571,50 @@ message SshRequest {
   repeated string allow_users = 8;
   repeated string allow_groups = 9;
   repeated string deny_users = 10;
-  // AllowLockout pozwala zapisac konfiguracje, po ktorej nie zostanie zadna
-  // dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
+  // AllowLockout allows writing a configuration after which no working
+  // authentication method remains. It requires an explicit operator
+  // decision.
   bool allow_lockout = 11;
-  // KeyType wskazuje klucz hosta do wymiany, np. "ed25519".
+  // KeyType names the host key to rotate, e.g. "ed25519".
   string key_type = 12;
-  // Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
-  // raz wobec stanu, ktory ma teraz.
+  // The fingerprint of the plan the operator agreed to. The helper computes
+  // the plan once more against the state it has now.
   string plan_hash = 13;
 }
 
 message SshResult {
-  // Stan sshd w postaci JSON. Struktura nalezy do modulu.
+  // The sshd state in JSON form. The structure belongs to the module.
   bytes snapshot = 1;
   string message = 2;
-  // Mismatches wylicza ustawienia, ktore nie doszly do skutku mimo zapisu:
-  // w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
-  // nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
+  // Mismatches lists the settings that did not take effect despite the
+  // write: in sshd the first value wins, so an earlier file may shadow
+  // ours. Silence here would be a false success.
   repeated string mismatches = 3;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 4;
 }
 
-// SecurityRequest czyta stan ochronny hosta albo przelacza SELinuksa.
+// SecurityRequest reads the host security state or switches SELinux.
 //
-// Odczyt idzie przez helpera, bo prawie wszystko w nim wymaga roota: profile
-// AppArmora leza w securityfs, reguly audytu czyta auditctl, zmienne EFI sa
-// dostepne tylko dla roota, a wlascicieli gniazd widzi tylko ten, kto widzi
-// cudze procesy.
+// The read goes through the helper, because almost everything in it
+// requires root: the AppArmor profiles lie in securityfs, the audit rules
+// are read by auditctl, the EFI variables are readable only by root, and
+// the socket owners are seen only by whoever sees other people's processes.
 message SecurityRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    // Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
-    // ani "uruchom polecenie": dostaje liste nazw faktow, ktore umie zebrac.
+    // A read of the enumerated facts. The helper has no "read a file" nor
+    // "run a command" operation: it gets a list of fact names it knows how
+    // to gather.
     OPERATION_FACTS = 1;
     OPERATION_SELINUX_MODE = 2;
-    // Przeladowanie regul audytu z plikow do jadra. Osobna operacja, bo
-    // jednostka auditd na czesci dystrybucji odmawia recznego restartu.
+    // Reloading the audit rules from the files into the kernel. A separate
+    // operation, because the auditd unit on some distributions refuses a
+    // manual restart.
     OPERATION_AUDIT_RELOAD = 3;
   }
-  // Fact wylicza to, czego nie da sie odczytac bez roota. Reszte obrazu
-  // agent sklada sam, bez przechodzenia przez helpera.
+  // Fact enumerates what cannot be read without root. The rest of the
+  // picture the agent composes itself, without going through the helper.
   enum Fact {
     FACT_UNSPECIFIED = 0;
     FACT_APPARMOR_PROFILES = 1;
@@ -605,16 +628,17 @@ message SecurityRequest {
 }
 
 message SecurityResult {
-  // Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
+  // Facts carries only what was asked for - not the whole host picture.
   bytes facts = 1;
   string message = 2;
 }
 
-// BackupRequest steruje narzedziem backupu na hoscie.
+// BackupRequest drives the backup tool on the host.
 //
-// Poswiadczenia przychodza tu jako wartosci - agent pobral je z magazynu tuz
-// przed operacja - i ida do narzedzia srodowiskiem, a nie argumentem. Wiersz
-// polecen procesu jest w /proc czytelny dla kazdego uzytkownika hosta.
+// The credentials arrive here as values - the agent fetched them from the
+// store right before the operation - and go to the tool through the
+// environment, not as an argument. A process command line is readable in
+// /proc by every user of the host.
 message BackupRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -636,10 +660,11 @@ message BackupRequest {
   int32 keep_monthly = 11;
   bool prune = 12;
   string runbook = 13;
-  // Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+  // Initialize is consent to initialise the repository at the first copy.
   bool initialize = 21;
-  // Password i env niosa wartosci z magazynu; zyja w pamieci helpera na czas
-  // operacji i nie trafiaja do wyniku ani do dziennika.
+  // Password and env carry the values from the store; they live in the
+  // helper's memory for the duration of the operation and reach neither
+  // the result nor the journal.
   bytes password = 14;
   map<string, bytes> env = 15;
   bool read_data = 16;
@@ -647,10 +672,11 @@ message BackupRequest {
   string target = 18;
   repeated string include = 19;
   string overwrite = 20;
-  // Plan nazywa rodzaj planowanej operacji: run albo verify. Puste przy
-  // OPERATION_PLAN znaczy odczyt stanu repozytorium.
+  // Plan names the kind of the planned operation: run or verify. Empty with
+  // OPERATION_PLAN means a read of the repository state.
   string plan = 23;
-  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  // The fingerprint of the plan the operator agreed to; the helper computes
+  // it once more.
   string plan_hash = 22;
 }
 
@@ -658,19 +684,20 @@ message BackupResult {
   bytes state = 1;
   bytes outcome = 2;
   string message = 3;
-  // Plan kopii w postaci JSON przy OPERATION_PLAN z zakresem. Hasla
-  // repozytorium w nim nie ma.
+  // The backup plan in JSON form for OPERATION_PLAN with a scope. The
+  // repository password is not in it.
   bytes plan = 4;
-  // Verified mowi, ze po kopii host sprawdzil repozytorium. Kopia bez
-  // sprawdzenia nie jest sukcesem.
+  // Verified says that after the copy the host checked the repository. A
+  // copy without a check is not a success.
   bool verified = 5;
 }
 
-// RepositoryRequest zapisuje albo usuwa zrodlo pakietow.
+// RepositoryRequest writes or removes a package source.
 //
-// Odczytu tu nie ma: pliki zrodel sa jawne i czyta je agent. Do helpera
-// trafia zapis - bo katalog zrodel nalezy do roota - i haslo, ktore agent
-// pobral z magazynu tuz przed operacja.
+// There is no read here: the source files are public and the agent reads
+// them. The helper gets the write - because the source directory belongs to
+// root - and the password the agent fetched from the store right before the
+// operation.
 message RepositoryRequest {
   string id = 1;
   string name = 2;
@@ -683,11 +710,12 @@ message RepositoryRequest {
   string gpg_key = 9;
   bool allow_unsigned = 10;
   string username = 11;
-  // Password przychodzi z magazynu przez agenta, zyje w pamieci helpera na
-  // czas operacji i trafia wylacznie do pliku z prawami roota.
+  // Password comes from the store through the agent, lives in the helper's
+  // memory for the duration of the operation and goes only into a file with
+  // root permissions.
   bytes password = 12;
-  // SecretName zapisujemy w pliku zrodla jako komentarz: panel ma widziec,
-  // z ktorego sekretu pochodzi haslo. Nazwa, nie wartosc.
+  // SecretName is written into the source file as a comment: the panel is
+  // to see which secret the password comes from. The name, not the value.
   string secret_name = 13;
   bool remove = 14;
 }
@@ -699,35 +727,40 @@ message RepositoryResult {
   bool rolled_back = 4;
 }
 
-// CertificateTarget wskazuje plik certyfikatu i klucz, ktory do niego nalezy.
+// CertificateTarget points at a certificate file and the key that belongs
+// to it.
 message CertificateTarget {
   string path = 1;
   string key_path = 2;
   string service = 3;
 }
 
-// CertificateRequest czyta fakty o certyfikatach albo wdraza nowy.
+// CertificateRequest reads facts about certificates or deploys a new one.
 //
-// Odczytu w calosci tu nie ma: tresc certyfikatu czyta agent, bo plik jest
-// jawny. Do helpera trafia to, czego bez roota nie widac - prawa kluczy,
-// zlecenia certmongera i pliki zamkniete dla wszystkich poza usluga.
+// There is no full read here: the certificate content is read by the agent,
+// because the file is public. The helper gets what cannot be seen without
+// root - the key permissions, the certmonger requests and files closed to
+// everybody but the service.
 message CertificateRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    // Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
-    // ani "uruchom polecenie": dostaje liste nazw faktow i liste celow.
+    // A read of the enumerated facts. The helper has no "read a file" nor
+    // "run a command" operation: it gets a list of fact names and a list of
+    // targets.
     OPERATION_FACTS = 1;
     OPERATION_DEPLOY = 2;
     OPERATION_RENEW = 3;
-    // Plan wdrozenia bez dotykania hosta i bez siegania po klucz prywatny.
+    // The deployment plan without touching the host and without reaching
+    // for the private key.
     OPERATION_PLAN = 4;
-    // Magazyn zaufania: plan kroku rotacji urzedu i sam krok. Kotwica jest
-    // materialem publicznym, wiec jedzie w zleceniu jawnie.
+    // The trust store: the plan of an authority rotation step and the step
+    // itself. The anchor is public material, so it travels in the order in
+    // the clear.
     OPERATION_TRUST_PLAN = 5;
     OPERATION_TRUST_ENSURE = 6;
     OPERATION_TRUST_REMOVE = 7;
   }
-  // Fact wylicza to, czego nie da sie odczytac bez roota.
+  // Fact enumerates what cannot be read without root.
   enum Fact {
     FACT_UNSPECIFIED = 0;
     FACT_KEY_METADATA = 1;
@@ -739,11 +772,12 @@ message CertificateRequest {
   repeated CertificateTarget targets = 3;
   string path = 4;
   string key_path = 5;
-  // Certificate jest trescia jawna certyfikatu wraz z lancuchem.
+  // Certificate is the public content of the certificate together with its
+  // chain.
   bytes certificate = 6;
-  // Key jest trescia klucza prywatnego. Przychodzi z magazynu przez agenta
-  // tuz przed operacja, zyje w pamieci helpera na czas jej trwania i nie
-  // trafia do zadnego pliku poza tym, ktory ma powstac.
+  // Key is the private key content. It comes from the store through the
+  // agent right before the operation, lives in the helper's memory for its
+  // duration and reaches no file other than the one that is to be created.
   bytes key = 7;
   string owner = 8;
   string group = 9;
@@ -752,58 +786,64 @@ message CertificateRequest {
   string reload_unit = 12;
   string probe_target = 13;
   string request = 14;
-  // Authoritative mowi, ze lista celow jest pelna lista panelu dla tego hosta.
-  // Helper zapamietuje ja u siebie, zeby inwentarz opisywal te same pliki
-  // takze wtedy, gdy panel akurat nie pyta - tak samo jak przy plikach
-  // zarzadzanych. Bez tego zakladka pokazywalaby stan sprzed ostatniej zmiany
-  // konfiguracji panelu.
+  // Authoritative says the target list is the panel's full list for this
+  // host. The helper remembers it, so that the inventory describes the same
+  // files also when the panel is not asking right now - just like with
+  // managed files. Without it the tab would show the state from before the
+  // last change of the panel configuration.
   bool authoritative = 15;
-  // KeySecretRef nazywa sekret klucza w postaci "nazwa#wersja". Sama nazwa,
-  // nigdy wartosc: plan ma powiedziec, skad host wezmie klucz.
+  // KeySecretRef names the key secret in the form "name#version". The name
+  // alone, never the value: the plan is to say where the host takes the key
+  // from.
   string key_secret_ref = 16;
-  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  // The fingerprint of the plan the operator agreed to; the helper computes
+  // it once more.
   string plan_hash = 17;
-  // AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+  // AnchorId names the panel anchor in the host trust store.
   string anchor_id = 18;
 }
 
 message CertificateResult {
-  // Facts niesie wylacznie to, o co pytano.
+  // Facts carries only what was asked for.
   bytes facts = 1;
   string message = 2;
   string fingerprint_sha256 = 3;
   string not_after = 4;
   bytes probe = 5;
   bool rolled_back = 6;
-  // Plan wdrozenia w postaci JSON przy OPERATION_PLAN. Klucza prywatnego
-  // w nim nie ma.
+  // The deployment plan in JSON form for OPERATION_PLAN. The private key is
+  // not in it.
   bytes plan = 7;
-  // Trust niesie magazyn zaufania hosta w postaci JSON: kotwice panelu
-  // i te, ktore administrator hosta polozyl tam sam.
+  // Trust carries the host trust store in JSON form: the panel anchors and
+  // those the host administrator put there themselves.
   bytes trust = 8;
 }
 
-// TimeRequest zmienia zrodla czasu albo strefe hosta.
+// TimeRequest changes the time sources or the host time zone.
 //
-// Odczytu tu nie ma: stan czasu czyta agent, bo timedatectl i chronyc
-// odpowiadaja kazdemu, a kazde przejscie przez roota trzeba uzasadnic.
+// There is no read here: the time state is read by the agent, because
+// timedatectl and chronyc answer everybody, and every passage through root
+// has to be justified.
 message TimeRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_CONFIG_APPLY = 1;
     OPERATION_TIMEZONE_SET = 2;
-    // Plan zmiany zrodel czasu bez dotykania hosta.
+    // The time source change plan without touching the host.
     OPERATION_PLAN = 3;
   }
   Operation operation = 1;
   repeated string servers = 2;
   string timezone = 3;
-  // AllowStep jest zgoda operatora na przestawienie zegara skokiem. Bez niej
-  // host odrzuca zmiane, ktora cofnelaby czas o wiecej niz prog.
+  // AllowStep is the operator's consent to step the clock. Without it the
+  // host rejects a change that would move the time back by more than the
+  // threshold.
   bool allow_step = 4;
-  // EnableDropin jest zgoda na dopisanie katalogu zrodel do glownego pliku.
+  // EnableDropin is consent to append the source directory to the main
+  // file.
   bool enable_dropin = 5;
-  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  // The fingerprint of the plan the operator agreed to; the helper computes
+  // it once more.
   string plan_hash = 6;
 }
 
@@ -811,15 +851,15 @@ message TimeResult {
   bytes snapshot = 1;
   string message = 2;
   bytes probes = 3;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 4;
 }
 
-// KernelRequest opisuje operacje na ustawieniach jadra.
+// KernelRequest describes an operation on the kernel settings.
 //
-// Panel zmienia ustawienia z okreslonych galezi /proc/sys i zapisuje je do
-// wlasnego pliku: dowolny zapis do /proc/sys obejmuje takze przelaczniki,
-// ktore wylaczaja ochrony jadra albo zatrzymuja host.
+// The panel changes settings from specific branches of /proc/sys and writes
+// them into its own file: an arbitrary write to /proc/sys also covers the
+// switches that disable kernel protections or halt the host.
 message KernelRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -827,46 +867,49 @@ message KernelRequest {
     OPERATION_SYSCTL_ENSURE = 2;
     OPERATION_MODULE_LOAD = 3;
     OPERATION_MODULE_BLACKLIST = 4;
-    // Plan blokady modulu bez dotykania hosta.
+    // The module blacklist plan without touching the host.
     OPERATION_MODULE_PLAN = 5;
   }
   Operation operation = 1;
   map<string, string> settings = 2;
-  // Keys wskazuje dodatkowe klucze do odczytu poza profilem.
+  // Keys names additional keys to read beyond the profile.
   repeated string keys = 3;
   string module = 4;
-  // Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
+  // Blacklist says whether the module is to be blacklisted or unblacklisted.
   bool blacklist = 5;
-  // Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+  // The fingerprint of the plan the operator agreed to; the helper computes
+  // it once more.
   string plan_hash = 6;
 }
 
 message KernelResult {
   bytes snapshot = 1;
   string message = 2;
-  // PendingReboot wylicza ustawienia zapisane trwale, ktorych jadro nie
-  // przyjelo od reki. Zapis i skutek to dwie rozne rzeczy.
+  // PendingReboot lists the settings written persistently that the kernel
+  // did not accept right away. The write and the effect are two different
+  // things.
   repeated string pending_reboot = 3;
-  // AppliedRuntime wylicza ustawienia, ktore obowiazuja juz teraz.
+  // AppliedRuntime lists the settings that already apply now.
   repeated string applied_runtime = 4;
-  // Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+  // The module blacklist plan in JSON form for OPERATION_MODULE_PLAN.
   bytes plan = 5;
 }
 
-// FileRequest opisuje operacje na pliku konfiguracyjnym.
+// FileRequest describes an operation on a configuration file.
 //
-// To nie jest menedzer plikow roota: zakres sciezek jest wyliczony, a plik
-// z hashami hasel, klucz prywatny i regula sudo nie sa edytowalne nigdy.
+// This is not a root file manager: the path scope is enumerated, and the
+// password hash file, a private key and a sudo rule are never editable.
 message FileRequest {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_READ = 1;
     OPERATION_ENSURE = 2;
     OPERATION_REMOVE = 3;
-    // Odczyt stanu plikow, ktore panel juz zapisal.
+    // A read of the state of the files the panel already wrote.
     OPERATION_LIST = 4;
-    // Policzenie roznicy miedzy stanem zastanym a zadanym. Nie zmienia
-    // niczego: odpowiada na pytanie, co by sie stalo i od czego zalezy.
+    // Computing the difference between the found and the requested state.
+    // It changes nothing: it answers what would happen and what it depends
+    // on.
     OPERATION_PLAN = 5;
   }
   Operation operation = 1;
@@ -875,32 +918,36 @@ message FileRequest {
   string mode = 4;
   string owner = 5;
   string group = 6;
-  // ExpectedSha256 wiaze zapis z trescia, ktora operator ogladal. Niezgodny
-  // ze stanem hosta zatrzymuje zapis zamiast nadpisac cudza zmiane.
+  // ExpectedSha256 binds the write to the content the operator looked at.
+  // One that disagrees with the host state stops the write instead of
+  // overwriting somebody else's change.
   string expected_sha256 = 7;
   string validator = 8;
-  // FromSecret oznacza tresc pochodzaca z magazynu sekretow. Helper zapisuje
-  // to w swoim rejestrze i przestaje zglaszac odcisk takiego pliku: dla
-  // krotkiej wartosci sam odcisk jest wskazowka.
+  // FromSecret means content that comes from the secret store. The helper
+  // records that in its registry and stops reporting the digest of such a
+  // file: for a short value the digest alone is a hint.
   bool from_secret = 9;
 }
 
 message FileResult {
   bytes snapshot = 1;
   string message = 2;
-  // Content jest trescia pliku przy odczycie.
+  // Content is the file content on a read.
   bytes content = 3;
   string sha256 = 4;
   bool truncated = 5;
-  // ValidatorOutput niesie wynik sprawdzenia tresci. Puste oznacza plik,
-  // dla ktorego panel nie zna sprawdzenia - i to tez jest odpowiedz.
+  // ValidatorOutput carries the result of the content check. Empty means a
+  // file the panel knows no check for - and that too is an answer.
   string validator_output = 6;
-  // Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
-  // Osobne pole, bo plan dotyczy zmiany, ktora sie jeszcze nie wydarzyla,
-  // a pozostale pola opisuja to, co host ma teraz.
+  // Plan describes the difference between the found and the requested
+  // state, in JSON. A separate field, because the plan concerns a change
+  // that has not happened yet, and the other fields describe what the host
+  // has now.
   bytes plan = 7;
 }
 
+// ProcessSignalRequest sends a signal to a process. The start time binds the
+// request to a specific process, because the kernel reuses PID numbers.
 message ProcessSignalRequest {
   int32 pid = 1;
   uint64 expected_start_ticks = 2;
@@ -912,6 +959,9 @@ message ProcessSignalResult {
   string signal = 2;
 }
 
+// LogFileRequest reads a file from the host administrator's allowlist. The
+// path is not arbitrary: the helper resolves it against its own scope, not
+// the request body.
 message LogFileRequest {
   string path = 1;
   uint32 lines = 2;
@@ -922,8 +972,8 @@ message LogFileResult {
   repeated string lines = 2;
   bool truncated = 3;
   int64 size_bytes = 4;
-  // Czym odczyt jest ograniczony. Operator ma wiedziec, dlaczego czegos
-  // nie widzi.
+  // What bounds the read. The operator is to know why they do not see
+  // something.
   string allowlist = 5;
 }
 
@@ -936,20 +986,20 @@ message ComposeRequest {
   Operation operation = 1;
   string project = 2;
   string manifest = 3;
-  // Hash zatwierdzonego planu. Wdrozenie bez niego nie ma podstawy.
+  // The hash of the approved plan. A deployment without it has no basis.
   string plan_digest = 4;
 }
 
 message ComposeResult {
-  // Plan albo wynik wdrozenia w postaci JSON. Struktura nalezy do modulu
-  // kontenerow; kontrakt helpera jej nie powtarza.
+  // The plan or the deployment result in JSON form. The structure belongs
+  // to the containers module; the helper contract does not repeat it.
   bytes payload = 1;
   string unavailable_reason = 2;
 }
 
-// DockerEventsRequest opisuje zamkniete okno odczytu dziennika zdarzen.
-// Helper nie przyjmuje filtra w postaci gotowego zapytania do Engine API:
-// rodzaje zdarzen sa nazwane, a okno i limity - wyliczone.
+// DockerEventsRequest describes a closed window of reading the event log.
+// The helper does not accept a filter as a ready Engine API query: the
+// event kinds are named, and the window and limits enumerated.
 message DockerEventsRequest {
   uint32 since_seconds = 1;
   uint32 follow_seconds = 2;
@@ -965,27 +1015,29 @@ message DockerEventsResult {
 }
 
 message DockerReadResult {
-  // Stan silnika w postaci JSON. Struktura nalezy do modulu kontenerow
-  // i nie jest powtarzana w kontrakcie helpera - helper jej nie interpretuje,
-  // tylko przenosi.
+  // The engine state in JSON form. The structure belongs to the containers
+  // module and is not repeated in the helper contract - the helper does not
+  // interpret it, only carries it.
   bytes snapshot = 1;
-  // Powod, dla ktorego stanu nie udalo sie ustalic. Pusty silnik i silnik
-  // nieodpytany to dwie rozne informacje.
+  // The reason the state could not be determined. An empty engine and an
+  // unqueried engine are two different pieces of information.
   string unavailable_reason = 2;
 }
 
-// TaskProgress opisuje postep operacji, ktora trwa na tyle dlugo, ze operator
-// musi widziec, na czym stoi. Postep jest ulotny: nie zastepuje wyniku i nie
-// jest zapisywany - liczy sie to, co widac teraz.
+// TaskProgress describes the progress of an operation that lasts long
+// enough for the operator to need to see where it stands. Progress is
+// transient: it does not replace the result and is not recorded - what
+// counts is what is visible now.
 message TaskProgress {
-  // Krok i liczba krokow, gdy narzedzie je podaje. Zero oznacza nieznane
-  // i nie moze byc pokazane jako zero krokow.
+  // The step and the step count, when the tool gives them. Zero means
+  // unknown and must not be shown as zero steps.
   uint32 step = 1;
   uint32 total = 2;
-  // Procent podawany osobno, bo apt zna procent bez krokow, a dnf kroki
-  // bez procentu. Brak pola oznacza postep nieustalony.
+  // The percentage given separately, because apt knows the percentage
+  // without steps, and dnf the steps without a percentage. A missing field
+  // means undetermined progress.
   optional uint32 percent = 3;
-  // Co sie akurat dzieje, np. "Upgrading nfs-utils".
+  // What is happening right now, e.g. "Upgrading nfs-utils".
   string message = 4;
 }
 
@@ -1027,7 +1079,7 @@ message IdentityProbeResult {
   optional uint64 cache_age_seconds = 3;
   optional bool sssd_online = 4;
   repeated string config_issues = 5;
-  // Powod, dla ktorego czesci stanu nie udalo sie ustalic.
+  // The reason part of the state could not be determined.
   string unavailable_reason = 6;
 }
 
@@ -1036,20 +1088,21 @@ message PackageActionResult {
   repeated PackageVersionChange applied = 2;
   bool reboot_required = 3;
   repeated string services_needing_restart = 4;
-  // Prawda, gdy baza pakietow wymaga naprawy po nieudanej transakcji.
+  // True when the package database needs repair after a failed transaction.
   bool package_database_broken = 5;
-  // Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+  // Packages waiting for their configuration to be finished or broken.
   repeated string packages_needing_attention = 6;
-  // Co adapter naprawil sam przed ponowieniem transakcji. Cicha naprawa
-  // bylaby gorsza od jej braku: host zostal dotkniety inaczej, niz zlecono.
+  // What the adapter repaired itself before retrying the transaction. A
+  // quiet repair would be worse than none: the host was touched differently
+  // than ordered.
   repeated string self_repair = 7;
-  // Koncowka wyjscia narzedzia przy niepowodzeniu.
+  // The tail of the tool output on failure.
   repeated string output = 8;
 }
 
-// PackageRepairRequest odblokowuje operacje pakietowe. Odpowiedzi na pytania
-// konfiguracyjne pochodza od operatora i sa ustawiane przed dokonczeniem
-// konfiguracji pakietow.
+// PackageRepairRequest unblocks package operations. The answers to the
+// configuration questions come from the operator and are set before the
+// package configuration is finished.
 message PackageRepairRequest {
   repeated DebconfSelection answers = 1;
 }

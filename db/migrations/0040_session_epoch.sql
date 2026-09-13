@@ -1,17 +1,17 @@
--- Epoka sesji rozstrzyga, ktora sesja hosta jest ta wlasciwa.
+-- The session epoch decides which host session is the authoritative one.
 --
--- Host laczy sie do jednej bramy naraz, ale przy przelaczeniu miedzy bramami
--- stara sesja moze jeszcze zyc: druga brama nie wie o pierwszej, a stream
--- HTTP/2 zerwany po stronie hosta bywa widziany przez serwer z opoznieniem.
--- Bez rozstrzygniecia obie bramy uwazalyby sie za wlasciwe i to samo zadanie
--- pojechaloby dwa razy.
+-- A host connects to one gateway at a time, but when switching between
+-- gateways the old session may still live: the second gateway does not know
+-- about the first, and an HTTP/2 stream broken on the host side is sometimes
+-- seen by the server with a delay. Without a decision both gateways would
+-- consider themselves authoritative and the same job would go out twice.
 --
--- Numer rosnie w obrebie hosta, wiec porownanie jest lokalne i nie wymaga
--- zegara, ktory na dwoch maszynach i tak nie jest ten sam.
+-- The number grows within a host, so the comparison is local and needs no
+-- clock, which on two machines is not the same anyway.
 alter table agent_sessions add column epoch bigint not null default 0;
 
--- Wypelnienie historii: kolejnosc rozpoczecia jest tu jedyna prawda, jaka
--- mamy, i wystarczy - liczy sie tylko to, ze nowsza sesja ma wyzszy numer.
+-- Backfilling the history: the start order is the only truth there is here,
+-- and it is enough - all that counts is that a newer session has a higher number.
 with numeracja as (
     select id, row_number() over (partition by host_id order by started_at, id) as numer
     from agent_sessions

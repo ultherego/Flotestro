@@ -21,13 +21,13 @@ import (
 // because it is transient: we do not record it and one must not infer the
 // result from it.
 //
-// The names of the channels stay as they are until a migration renames them
-// together with the triggers that publish on them.
+// The job and campaign channels are published by the database triggers, so
+// their names are bound to the migration that creates those triggers.
 const (
-	jobChannel      = "flotestro_zadania"
-	progressChannel = "flotestro_postep"
-	campaignChannel = "flotestro_kampanie"
-	logChannel      = "flotestro_logi"
+	jobChannel      = "flotestro_jobs"
+	progressChannel = "flotestro_progress"
+	campaignChannel = "flotestro_campaigns"
+	logChannel      = "flotestro_logs"
 )
 
 // Event describes the change of the state of one operation or its progress.

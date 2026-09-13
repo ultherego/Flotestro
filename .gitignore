@@ -3,22 +3,23 @@
 /dist/
 *.test
 *.out
-# Binaria zbudowane w katalogu glownym przez "go build" bez -o.
+# Binaries built in the repository root by "go build" without -o.
 /flotestro-*
 /agent
 /agent-helper
 /agent-simulator
 /control-plane
+/relay
 
 # Node / Web UI
 node_modules/
 /web/dist/
 
-# lokalna konfiguracja
+# local configuration
 .env
 .env.*
 *.local
 
-# Zaleznosci i wynik budowania panelu
+# Dependencies and the build output of the panel
 web/node_modules/
 web/dist/

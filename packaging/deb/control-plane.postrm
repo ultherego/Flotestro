@@ -2,9 +2,9 @@
 set -e
 case "$1" in
 purge)
-    # Purge kasuje klucz CA floty. Bez niego zaden agent nie zostanie
-    # rozpoznany i cala flota wymaga ponownego enrollmentu, dlatego przy
-    # zwyklym usunieciu katalog stanu zostaje nietkniety.
+    # Purge deletes the fleet CA key. Without it no agent is recognised and
+    # the whole fleet needs enrolling again, which is why on an ordinary
+    # removal the state directory stays untouched.
     rm -rf /var/lib/flotestro
     rm -f /etc/flotestro/control-plane.env
     rmdir /etc/flotestro 2>/dev/null || true

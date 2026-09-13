@@ -1,16 +1,17 @@
 #!/bin/sh
-# Buduje pakiet .deb z gotowych binarek.
+# Builds a .deb package from ready binaries.
 #
-#   build-deb.sh agent         <stage> <wersja> <arch> <out>
-#   build-deb.sh relay         <stage> <wersja> <arch> <out>
-#   build-deb.sh control-plane <stage> <wersja> <arch> <out>
+#   build-deb.sh agent         <stage> <version> <arch> <out>
+#   build-deb.sh relay         <stage> <version> <arch> <out>
+#   build-deb.sh control-plane <stage> <version> <arch> <out>
 #
-# Skrypt nie kompiluje kodu: pakiet ma powstac dokladnie z tych artefaktow,
-# ktore przeszly testy. Wymaga dpkg-deb, czyli hosta z rodziny Debiana.
+# The script compiles no code: the package is to be made exactly from the
+# artefacts that passed the tests. Requires dpkg-deb, that is a host of the
+# Debian family.
 set -eu
 
-SKLADNIK="${1:?podaj skladnik: agent, relay albo control-plane}"
-STAGE="${2:?podaj katalog z binarkami}"
+COMPONENT="${1:?give the component: agent, relay or control-plane}"
+STAGE="${2:?give the directory with the binaries}"
 VERSION="${3:-0.1.0}"
 ARCH="${4:-amd64}"
 OUT="${5:-.}"
@@ -20,16 +21,16 @@ trap 'rm -rf "$root"' EXIT
 here="$(cd "$(dirname "$0")" && pwd)"
 
 install -d -m 0755 "$root/DEBIAN"
-sed -e "s/__WERSJA__/$VERSION/" -e "s/__ARCH__/$ARCH/" \
-    "$here/deb/$SKLADNIK.control" > "$root/DEBIAN/control"
-install -m 0644 "$here/deb/$SKLADNIK.conffiles" "$root/DEBIAN/conffiles"
-for skrypt in postinst prerm postrm; do
-    install -m 0755 "$here/deb/$SKLADNIK.$skrypt" "$root/DEBIAN/$skrypt"
+sed -e "s/__VERSION__/$VERSION/" -e "s/__ARCH__/$ARCH/" \
+    "$here/deb/$COMPONENT.control" > "$root/DEBIAN/control"
+install -m 0644 "$here/deb/$COMPONENT.conffiles" "$root/DEBIAN/conffiles"
+for script in postinst prerm postrm; do
+    install -m 0755 "$here/deb/$COMPONENT.$script" "$root/DEBIAN/$script"
 done
 
 install -d -m 0755 "$root/usr/bin" "$root/lib/systemd/system" "$root/etc/flotestro"
 
-case "$SKLADNIK" in
+case "$COMPONENT" in
 agent)
     install -m 0755 "$STAGE/flotestro-agent"        "$root/usr/bin/flotestro-agent"
     install -m 0755 "$STAGE/flotestro-agent-helper" "$root/usr/bin/flotestro-agent-helper"
@@ -39,11 +40,11 @@ agent)
         install -m 0644 "$here/systemd/$unit" "$root/lib/systemd/system/$unit"
     done
     install -m 0640 "$here/agent.yaml" "$root/etc/flotestro/agent.yaml"
-    # agent.env zostaje dla hostow postawionych przed wprowadzeniem YAML-a
-    # i jako miejsce na jednorazowy token enrollmentu.
+    # agent.env stays for hosts set up before the YAML was introduced and as
+    # the place for the one-time enrollment token.
     install -m 0640 "$here/agent.env" "$root/etc/flotestro/agent.env"
     install -d -m 0700 "$root/var/lib/flotestro-agent"
-    nazwa="flotestro-agent"
+    name="flotestro-agent"
     ;;
 relay)
     install -m 0755 "$STAGE/flotestro-relay" "$root/usr/bin/flotestro-relay"
@@ -51,7 +52,7 @@ relay)
         "$root/lib/systemd/system/flotestro-relay.service"
     install -m 0640 "$here/relay.yaml" "$root/etc/flotestro/relay.yaml"
     install -d -m 0700 "$root/var/lib/flotestro-relay"
-    nazwa="flotestro-relay"
+    name="flotestro-relay"
     ;;
 control-plane)
     install -m 0755 "$STAGE/flotestro-control-plane" "$root/usr/bin/flotestro-control-plane"
@@ -59,20 +60,20 @@ control-plane)
         "$root/lib/systemd/system/flotestro-control-plane.service"
     install -m 0640 "$here/control-plane.env" "$root/etc/flotestro/control-plane.env"
     install -d -m 0700 "$root/var/lib/flotestro"
-    # Panel webowy jest budowany osobno; pakiet niesie gotowe pliki.
+    # The web panel is built separately; the package carries the ready files.
     if [ -d "$STAGE/web" ]; then
         install -d -m 0755 "$root/usr/share/flotestro/web"
         cp -r "$STAGE/web/." "$root/usr/share/flotestro/web/"
         find "$root/usr/share/flotestro/web" -type d -exec chmod 0755 {} +
         find "$root/usr/share/flotestro/web" -type f -exec chmod 0644 {} +
     fi
-    nazwa="flotestro-control-plane"
+    name="flotestro-control-plane"
     ;;
 *)
-    echo "nieznany skladnik: $SKLADNIK" >&2
+    echo "unknown component: $COMPONENT" >&2
     exit 1
     ;;
 esac
 
-dpkg-deb --root-owner-group --build "$root" "$OUT/${nazwa}_${VERSION}_${ARCH}.deb" >/dev/null
-echo "$OUT/${nazwa}_${VERSION}_${ARCH}.deb"
+dpkg-deb --root-owner-group --build "$root" "$OUT/${name}_${VERSION}_${ARCH}.deb" >/dev/null
+echo "$OUT/${name}_${VERSION}_${ARCH}.deb"

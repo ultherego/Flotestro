@@ -1,10 +1,10 @@
--- Wystawca certyfikatu agenta. Bez tej informacji nie da sie powiedziec, ilu
--- hostom odbiera dostep wycofanie danego CA - a wlasnie to jest jedyna
--- bezpieczna podstawa decyzji o wycofaniu.
+-- The issuer of the agent certificate. Without this there is no telling how
+-- many hosts lose access when a given CA is withdrawn - and that is the only
+-- safe basis for a withdrawal decision.
 --
--- NULL oznacza certyfikat sprzed wprowadzenia wymiany CA. Panel uzupelnia te
--- wartosci przy starcie, ale tylko dopoki istnieje dokladnie jedno CA: przy
--- wiekszej liczbie nie da sie ustalic wystawcy inaczej niz zgadujac.
+-- NULL means a certificate from before the CA rotation was introduced. The panel
+-- fills these values in at startup, but only as long as exactly one CA exists:
+-- with more there is no way to determine the issuer other than guessing.
 alter table agent_certificates add column issuer_subject text;
 alter table agent_certificates add column issuer_serial  text;
 

@@ -2,9 +2,10 @@
 set -e
 case "$1" in
 purge)
-    # Tozsamosc agenta i klucz prywatny zostaja przy zwyklym usunieciu:
-    # ponowna instalacja ma odzyskac te sama tozsamosc bez enrollmentu.
-    # Purge kasuje je swiadomie - host bedzie wtedy nowa maszyna dla panelu.
+    # The agent identity and the private key stay on an ordinary removal: a
+    # reinstall is to recover the same identity without enrollment. Purge
+    # deletes them deliberately - the host is then a new machine to the
+    # panel.
     rm -rf /var/lib/flotestro-agent
     rm -f /etc/flotestro/agent.env
     rmdir /etc/flotestro 2>/dev/null || true

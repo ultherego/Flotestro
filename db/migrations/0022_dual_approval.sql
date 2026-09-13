@@ -1,10 +1,10 @@
--- Operacje niszczace dane wymagaja zgody dwoch osob.
+-- Data-destroying operations require two people's consent.
 --
--- Zasada drugiej osoby, ktora juz mamy, mowi tylko tyle, ze zlecajacy nie
--- zatwierdza sam siebie. Przy formatowaniu dysku to za malo: pomylka jednej
--- osoby, ktora akurat ma prawo zatwierdzac, kosztuje dane, ktorych nikt nie
--- odtworzy. Dlatego liczba wymaganych zgod jest cecha zadania, a nie
--- srodowiska - i zapisujemy kazda zgode osobno, z osoba i czasem.
+-- The second-person rule already in place says only that the requester does
+-- not approve themselves. For formatting a disk that is too little: a mistake
+-- by one person who happens to have the right to approve costs data nobody
+-- will restore. That is why the number of required approvals is a property
+-- of the job, not of the environment - and every approval is recorded separately, with the person and the time.
 alter table jobs
     add column if not exists required_approvals smallint not null default 1
         check (required_approvals between 1 and 3);
@@ -14,8 +14,8 @@ create table if not exists job_approvals (
     approver    text        not null,
     reason      text,
     approved_at timestamptz not null default now(),
-    -- Ta sama osoba nie zatwierdza dwa razy: dwie zgody maja znaczyc dwie
-    -- osoby, a nie dwa klikniecia.
+    -- The same person does not approve twice: two approvals are to mean two
+    -- people, not two clicks.
     primary key (job_id, approver)
 );
 

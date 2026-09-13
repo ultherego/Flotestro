@@ -17,9 +17,9 @@ func planPayload(refresh bool, only ...string) map[string]any {
 	return map[string]any{"package_plan": plan}
 }
 
-// TestPlanAktualizacjiNieZmieniaHosta sprawdza, ze planowanie jest bezpieczne:
-// zwraca liste zmian i hash, ale niczego nie instaluje.
-func TestPlanAktualizacjiNieZmieniaHosta(t *testing.T) {
+// TestUpdatePlanDoesNotChangeTheHost checks that planning is safe: it
+// returns the change list and a hash, but installs nothing.
+func TestUpdatePlanDoesNotChangeTheHost(t *testing.T) {
 	for _, family := range []string{"debian", "rhel"} {
 		t.Run(family, func(t *testing.T) {
 			h := newHarness(t)
@@ -31,46 +31,47 @@ func TestPlanAktualizacjiNieZmieniaHosta(t *testing.T) {
 			}, 3*time.Minute)
 
 			if job.State != "succeeded" {
-				t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+				t.Fatalf("state = %s, code = %s", job.State, job.ResultErrorCode)
 			}
-			// Plan jest operacja niemutujaca, wiec nie wymaga zatwierdzenia.
+			// A plan is a non-mutating operation, so it requires no
+			// approval.
 			if job.RequiresApproval {
-				t.Error("planowanie wymaga zatwierdzenia, choc niczego nie zmienia")
+				t.Error("planning requires approval although it changes nothing")
 			}
 
 			detail := attempts[len(attempts)-1].Detail
 			if detail == nil || detail.Kind != "package_plan" {
-				t.Fatalf("brak typowanego wyniku planu: %+v", detail)
+				t.Fatalf("no typed plan result: %+v", detail)
 			}
 			if detail.Manager == "" {
-				t.Error("plan nie podaje menedzera pakietow")
+				t.Error("the plan does not name the package manager")
 			}
 			if len(detail.Changes) > 0 && detail.PlanHash == "" {
-				t.Error("plan ze zmianami nie ma hasha")
+				t.Error("a plan with changes has no hash")
 			}
 			for _, change := range detail.Changes {
 				if change.Name == "" || change.CandidateVersion == "" {
-					t.Errorf("niepelny opis zmiany: %+v", change)
+					t.Errorf("incomplete change description: %+v", change)
 				}
 			}
 		})
 	}
 }
 
-// TestPlanJestPowtarzalny sprawdza, ze ten sam stan hosta daje ten sam hash.
-// Bez tego weryfikacja planu przy wykonaniu nie mialaby sensu.
-func TestPlanJestPowtarzalny(t *testing.T) {
+// TestPlanIsRepeatable checks that the same host state gives the same hash.
+// Without that the plan verification at execution would make no sense.
+func TestPlanIsRepeatable(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 
 	first := h.planHash(host.ID)
 	second := h.planHash(host.ID)
 	if first != second {
-		t.Fatalf("ten sam stan dal rozne hashe planu: %s != %s", first, second)
+		t.Fatalf("the same state gave different plan hashes: %s != %s", first, second)
 	}
 }
 
-// planHash zleca plan i zwraca jego hash.
+// planHash orders a plan and returns its hash.
 func (h *harness) planHash(hostID string) string {
 	h.t.Helper()
 	job, attempts := h.runOperation(hostID, map[string]any{
@@ -78,19 +79,19 @@ func (h *harness) planHash(hostID string) string {
 		"payload": planPayload(false),
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
-		h.t.Fatalf("plan nie powiodl sie: %s (%s)", job.State, job.ResultErrorCode)
+		h.t.Fatalf("the plan failed: %s (%s)", job.State, job.ResultErrorCode)
 	}
 	detail := attempts[len(attempts)-1].Detail
 	if detail == nil {
-		h.t.Fatal("plan bez wyniku")
+		h.t.Fatal("plan without a result")
 	}
 	return detail.PlanHash
 }
 
-// TestTransakcjaZNieaktualnymPlanemJestOdrzucana chroni przed zastosowaniem
-// innego zestawu pakietow niz zatwierdzony. Metadane repozytorium moga sie
-// zmienic miedzy planem a wykonaniem.
-func TestTransakcjaZNieaktualnymPlanemJestOdrzucana(t *testing.T) {
+// TestTransactionWithAStalePlanIsRejected protects against applying a
+// different package set than the approved one. The repository metadata may
+// change between the plan and the execution.
+func TestTransactionWithAStalePlanIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 
@@ -105,38 +106,39 @@ func TestTransakcjaZNieaktualnymPlanemJestOdrzucana(t *testing.T) {
 	}, 5*time.Minute)
 
 	if job.State == "succeeded" {
-		t.Fatal("transakcja z nieaktualnym planem zostala wykonana")
+		t.Fatal("a transaction with a stale plan was carried out")
 	}
 	last := attempts[len(attempts)-1]
 	if last.ErrorCode != "plan_changed" {
-		t.Fatalf("kod bledu = %q, oczekiwano plan_changed", last.ErrorCode)
+		t.Fatalf("error code = %q, expected plan_changed", last.ErrorCode)
 	}
-	// Nic nie moglo zostac zmienione.
+	// Nothing could have been changed.
 	if last.Detail != nil && len(last.Detail.Applied) > 0 {
-		t.Errorf("odrzucona transakcja zmienila %d pakietow", len(last.Detail.Applied))
+		t.Errorf("the rejected transaction changed %d packages", len(last.Detail.Applied))
 	}
 }
 
-// TestTransakcjaZapisujeWersjePrzedIPo sprawdza, ze raport transakcji zawiera
-// to, czego wymaga dokument: wersje przed i po oraz stan restartu.
-func TestTransakcjaZapisujeWersjePrzedIPo(t *testing.T) {
+// TestTransactionRecordsVersionsBeforeAndAfter checks that the transaction
+// report carries what the document requires: the versions before and after
+// and the reboot state.
+func TestTransactionRecordsVersionsBeforeAndAfter(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 
-	// Wybieramy pakiet z aktualnego planu, zeby test nie zalezal od tego,
-	// co akurat jest nieaktualne na obrazie.
+	// A package from the current plan is picked, so that the test does not
+	// depend on what happens to be outdated on the image.
 	_, planAttempts := h.runOperation(host.ID, map[string]any{
 		"action":  "packages.plan",
 		"payload": planPayload(false),
 	}, 3*time.Minute)
 	plan := planAttempts[len(planAttempts)-1].Detail
 	if plan == nil || len(plan.Changes) == 0 {
-		t.Skip("host nie ma dostepnych aktualizacji")
+		t.Skip("the host has no updates available")
 	}
 
 	target := ""
 	for _, change := range plan.Changes {
-		// Pomijamy pakiety, ktore pociagaja restart lub duze zaleznosci.
+		// Packages that pull a reboot or large dependencies are skipped.
 		switch change.Name {
 		case "kernel", "glibc", "systemd", "dnf", "rpm":
 			continue
@@ -145,7 +147,7 @@ func TestTransakcjaZapisujeWersjePrzedIPo(t *testing.T) {
 		break
 	}
 	if target == "" {
-		t.Skip("brak bezpiecznego pakietu do testu")
+		t.Skip("no safe package for the test")
 	}
 
 	job, attempts := h.runOperation(host.ID, map[string]any{
@@ -157,49 +159,49 @@ func TestTransakcjaZapisujeWersjePrzedIPo(t *testing.T) {
 
 	last := attempts[len(attempts)-1]
 	if last.Detail == nil || last.Detail.Kind != "package_apply" {
-		t.Fatalf("brak raportu transakcji: %+v", last.Detail)
+		t.Fatalf("no transaction report: %+v", last.Detail)
 	}
-	// Raport powstaje takze przy bledzie; sprawdzamy jego kompletnosc.
+	// The report is produced on failure too; its completeness is checked.
 	if job.State == "succeeded" {
 		if len(last.Detail.Applied) == 0 {
-			t.Errorf("udana transakcja nie zapisala zadnej zmiany wersji")
+			t.Errorf("a successful transaction recorded no version change")
 		}
 		for _, change := range last.Detail.Applied {
 			if change.CandidateVersion == "" {
-				t.Errorf("brak wersji po zmianie dla %s", change.Name)
+				t.Errorf("no version after the change for %s", change.Name)
 			}
 		}
 	}
 	if last.Detail.PackageDatabaseBroken {
-		t.Errorf("transakcja zostawila uszkodzona baze pakietow")
+		t.Errorf("the transaction left a broken package database")
 	}
 }
 
-// TestOperatorPlanujeAleNieAktualizuje sprawdza rozdzial uprawnien: transakcja
-// pakietowa jest operacja najwyzszego ryzyka i ma osobne prawo.
-func TestOperatorPlanujeAleNieAktualizuje(t *testing.T) {
+// TestOperatorPlansButDoesNotUpgrade checks the permission split: a package
+// transaction is a highest-risk operation and has a permission of its own.
+func TestOperatorPlansButDoesNotUpgrade(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	operator := h.withToken(h.createPrincipal(uniqueSubject("operator-pakiety"), []map[string]string{
+	operator := h.withToken(h.createPrincipal(uniqueSubject("operator-packages"), []map[string]string{
 		{"role": "operator", "site": host.Site, "environment": host.Environment},
 	}))
 
-	// Planowanie wolno.
+	// Planning is allowed.
 	operator.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "packages.plan", "payload": planPayload(false)},
 		nil, http.StatusCreated)
 
-	// Transakcji juz nie.
+	// A transaction is not.
 	operator.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "packages.upgrade",
 			"payload": map[string]any{"package_upgrade": map[string]any{}}},
 		nil, http.StatusForbidden)
 }
 
-// TestUszkodzonaBazaPakietowBlokujeOperacje sprawdza, ze po nieudanej
-// transakcji host nie dostaje kolejnych operacji pakietowych.
-func TestUszkodzonaBazaPakietowBlokujeOperacje(t *testing.T) {
+// TestBrokenPackageDatabaseBlocksOperations checks that after a failed
+// transaction the host receives no further package operations.
+func TestBrokenPackageDatabaseBlocksOperations(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
@@ -207,43 +209,44 @@ func TestUszkodzonaBazaPakietowBlokujeOperacje(t *testing.T) {
 
 	if _, err := pool.Exec(ctx,
 		`update hosts set package_database_broken = true where id = $1`, host.ID); err != nil {
-		t.Fatalf("nie ustawiono flagi: %v", err)
+		t.Fatalf("the flag was not set: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
 			`update hosts set package_database_broken = false where id = $1`, host.ID)
 	})
 
-	// Transakcja na uszkodzonej bazie nie ma szans sie powiesc i nie moze
-	// zostac zlecona.
+	// A transaction on a broken database has no chance to succeed and
+	// cannot be ordered.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "packages.upgrade",
 			"payload": map[string]any{"package_upgrade": map[string]any{}}},
 		nil, http.StatusConflict)
 
-	// Naprawa musi byc dozwolona wlasnie w tym stanie. Zablokowanie jej
-	// zamykalo hosta w petli bez wyjscia: jedyna operacja, ktora potrafi
-	// zdjac te flage, byla przez nia blokowana.
+	// Repair must be allowed in exactly this state. Blocking it locked the
+	// host in a loop with no exit: the only operation able to clear the
+	// flag was blocked by it.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
-		map[string]any{"action": "packages.repair", "reason": "odblokowanie bazy pakietow",
+		map[string]any{"action": "packages.repair", "reason": "unblocking the package database",
 			"payload": map[string]any{"package_repair": map[string]any{}}},
 		nil, http.StatusCreated)
 
-	// Plan niczego nie zmienia i na zablokowanym hoscie jest najbardziej
-	// potrzebny: pokazuje, co blokuje.
+	// A plan changes nothing and is needed most on a blocked host: it shows
+	// what blocks.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "packages.plan", "payload": planPayload(false)},
 		nil, http.StatusCreated)
 
-	// Operacje niepakietowe nadal dzialaja: blokada dotyczy tylko pakietow.
+	// Non-package operations keep working: the block concerns packages
+	// only.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "journal.read",
 			"payload": map[string]any{"journal": map[string]any{"lines": 5}}},
 		nil, http.StatusCreated)
 }
 
-// TestNieprawidlowaNazwaPakietuJestOdrzucana sprawdza walidacje po stronie API.
-func TestNieprawidlowaNazwaPakietuJestOdrzucana(t *testing.T) {
+// TestInvalidPackageNameIsRejected checks the validation on the API side.
+func TestInvalidPackageNameIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -255,152 +258,156 @@ func TestNieprawidlowaNazwaPakietuJestOdrzucana(t *testing.T) {
 	}
 }
 
-// TestNaprawaWymagaAdapteraZTaCecha sprawdza, ze host bez naprawy dowiaduje
-// sie o tym przy zlecaniu, a nie po dostarczeniu zadania. Naprawa odpowiada
-// na pytania debconfa i istnieje wylacznie dla apta; wczesniej operacja byla
-// przyjmowana na kazdym hoscie i odrzucana dopiero przez helpera na Fedorze.
-func TestNaprawaWymagaAdapteraZTaCecha(t *testing.T) {
+// TestRepairRequiresAnAdapterWithThatFeature checks that a host without
+// repair learns about it when ordered, not after the job is delivered.
+// Repair answers debconf questions and exists only for apt; earlier the
+// operation was accepted on every host and rejected only by the helper on
+// Fedora.
+func TestRepairRequiresAnAdapterWithThatFeature(t *testing.T) {
 	h := newHarness(t)
 
-	// Naprawa jest operacja krytyczna, wiec wymaga uzasadnienia w audycie.
-	const powod = "odblokowanie bazy pakietow"
+	// Repair is a critical operation, so it requires a justification in the
+	// audit log.
+	const reason = "unblocking the package database"
 
 	rhel := h.hostByFamily("rhel")
 	h.do(http.MethodPost, "/api/v1/hosts/"+rhel.ID+"/operations",
-		map[string]any{"action": "packages.repair", "reason": powod,
+		map[string]any{"action": "packages.repair", "reason": reason,
 			"payload": map[string]any{"package_repair": map[string]any{}}},
 		nil, http.StatusConflict)
 
-	// Ta sama operacja na hoscie z aptem przechodzi: odmowa dotyczy braku
-	// cechy adaptera, a nie samej operacji.
+	// The same operation on a host with apt passes: the refusal concerns
+	// the missing adapter feature, not the operation itself.
 	debian := h.hostByFamily("debian")
 	h.do(http.MethodPost, "/api/v1/hosts/"+debian.ID+"/operations",
-		map[string]any{"action": "packages.repair", "reason": powod,
+		map[string]any{"action": "packages.repair", "reason": reason,
 			"payload": map[string]any{"package_repair": map[string]any{}}},
 		nil, http.StatusCreated)
 }
 
-// TestHostZglaszaRejestrAdapterow sprawdza, ze host mowi nie tylko, co ma,
-// ale i dlaczego czegos nie ma. Powod jest faktem o hoscie i to host ma go
-// podac - interfejs ma go powtorzyc, a nie zgadywac we wlasnym kodzie.
-func TestHostZglaszaRejestrAdapterow(t *testing.T) {
+// TestHostReportsTheAdapterRegistry checks that the host says not only what
+// it has, but also why it lacks something. The reason is a fact about the
+// host and the host is to give it - the interface is to repeat it, not
+// guess in its own code.
+func TestHostReportsTheAdapterRegistry(t *testing.T) {
 	h := newHarness(t)
 
-	for _, przypadek := range []struct {
-		rodzina   string
-		obecny    string
-		nieobecny string
+	for _, tc := range []struct {
+		family  string
+		present string
+		absent  string
 	}{
 		{"debian", "packages.apt", "packages.dnf"},
 		{"rhel", "packages.dnf", "packages.apt"},
 	} {
-		t.Run(przypadek.rodzina, func(t *testing.T) {
-			host := h.hostByFamily(przypadek.rodzina)
+		t.Run(tc.family, func(t *testing.T) {
+			host := h.hostByFamily(tc.family)
 			if len(host.Capabilities) == 0 {
-				t.Fatal("host nie zglosil zadnego adaptera")
+				t.Fatal("the host reported no adapter at all")
 			}
-			znajdz := func(nazwa string) *hostCapability {
+			find := func(name string) *hostCapability {
 				for i := range host.Capabilities {
-					if host.Capabilities[i].Name == nazwa {
+					if host.Capabilities[i].Name == name {
 						return &host.Capabilities[i]
 					}
 				}
 				return nil
 			}
 
-			obecny := znajdz(przypadek.obecny)
-			if obecny == nil || !obecny.Available {
-				t.Fatalf("adapter %s nie jest zgloszony jako dostepny", przypadek.obecny)
+			present := find(tc.present)
+			if present == nil || !present.Available {
+				t.Fatalf("adapter %s is not reported as available", tc.present)
 			}
-			if obecny.Version == 0 {
-				t.Errorf("adapter %s nie podaje wersji kontraktu", przypadek.obecny)
+			if present.Version == 0 {
+				t.Errorf("adapter %s does not give a contract version", tc.present)
 			}
 
-			nieobecny := znajdz(przypadek.nieobecny)
-			if nieobecny == nil || nieobecny.Available {
-				t.Fatalf("adapter %s nie jest zgloszony jako niedostepny", przypadek.nieobecny)
+			absent := find(tc.absent)
+			if absent == nil || absent.Available {
+				t.Fatalf("adapter %s is not reported as unavailable", tc.absent)
 			}
-			// Milczaca niedostepnosc zmusza interfejs do zgadywania przyczyny.
-			if nieobecny.Reason == "" {
-				t.Errorf("adapter %s nie podaje powodu niedostepnosci", przypadek.nieobecny)
+			// Silent unavailability forces the interface to guess the cause.
+			if absent.Reason == "" {
+				t.Errorf("adapter %s gives no unavailability reason", tc.absent)
 			}
 		})
 	}
 }
 
-// TestUsunieciePakietuWymagaZatwierdzonegoZbioru sprawdza granice z rozdzialu
-// 3. Jeden pakiet potrafi pociagnac kilkadziesiat zaleznych, wiec operator
-// zatwierdza zbior, a nie nazwe - i host liczy go ponownie przed operacja.
-func TestUsunieciePakietuWymagaZatwierdzonegoZbioru(t *testing.T) {
+// TestPackageRemovalRequiresAnApprovedSet checks the boundary from chapter
+// 3. One package can pull dozens of dependants, so the operator approves a
+// set, not a name - and the host recomputes it before the operation.
+func TestPackageRemovalRequiresAnApprovedSet(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// Bez zatwierdzonego zbioru operacja nie ma podstawy.
+	// Without an approved set the operation has no basis.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":              "packages.remove",
-			"reason":              "porzadki w laboratorium",
+			"reason":              "lab cleanup",
 			"target_confirmation": host.Hostname,
 			"payload":             map[string]any{"package_change": map[string]any{"packages": []string{"sl"}}},
 		}, nil, http.StatusBadRequest)
 
-	// Bez przepisanej nazwy hosta takze nie: usuniecie jest nieodwracalne.
+	// Without the hostname typed in neither: removal is irreversible.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action": "packages.remove",
-			"reason": "porzadki w laboratorium",
+			"reason": "lab cleanup",
 			"payload": map[string]any{"package_change": map[string]any{
 				"packages": []string{"sl"}, "expected_removals": []string{"sl"},
 			}},
 		}, nil, http.StatusBadRequest)
 }
 
-// TestPakietyChronioneSaOdrzucanePrzyZlecaniu pilnuje, ze operator dowiaduje
-// sie o blokadzie przy zlecaniu, a nie po dostarczeniu zadania. Usuniecie
-// agenta odcieloby host od panelu, a wiec takze od naprawy.
-func TestPakietyChronioneSaOdrzucanePrzyZlecaniu(t *testing.T) {
+// TestProtectedPackagesAreRejectedWhenOrdered guards that the operator
+// learns about the block when ordering, not after the job is delivered.
+// Removing the agent would cut the host off from the panel, and thus from
+// the repair too.
+func TestProtectedPackagesAreRejectedWhenOrdered(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	for _, pakiet := range []string{"flotestro-agent", "systemd", "openssh-server", "linux-image-6.12"} {
+	for _, pkg := range []string{"flotestro-agent", "systemd", "openssh-server", "linux-image-6.12"} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action":              "packages.remove",
-				"reason":              "proba usuniecia pakietu chronionego",
+				"reason":              "attempt to remove a protected package",
 				"target_confirmation": host.Hostname,
 				"payload": map[string]any{"package_change": map[string]any{
-					"packages": []string{pakiet}, "expected_removals": []string{pakiet},
+					"packages": []string{pkg}, "expected_removals": []string{pkg},
 				}},
 			}, nil, http.StatusBadRequest)
 	}
 }
 
-// TestPlanUsunieciaPokazujeZaleznosci sprawdza, ze plan odpowiada na pytanie
-// "co zniknie", zanim cokolwiek zniknie.
-func TestPlanUsunieciaPokazujeZaleznosci(t *testing.T) {
+// TestRemovalPlanShowsDependencies checks that the plan answers the question
+// "what goes away" before anything goes away.
+func TestRemovalPlanShowsDependencies(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// Plan bez listy pakietow nie ma sensu.
+	// A plan without a package list makes no sense.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":  "packages.plan",
 			"payload": map[string]any{"package_plan": map[string]any{"mode": "remove"}},
 		}, nil, http.StatusBadRequest)
 
-	// Nieznany rodzaj planu tez nie.
+	// Neither does an unknown plan kind.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action": "packages.plan",
 			"payload": map[string]any{"package_plan": map[string]any{
-				"mode": "wymyslony", "only_packages": []string{"sl"},
+				"mode": "made-up", "only_packages": []string{"sl"},
 			}},
 		}, nil, http.StatusBadRequest)
 }
 
-// TestWstrzymanieJestOdwracalne sprawdza, ze operacja opisuje stan docelowy,
-// a nie przelacznik: powtorzenie jej nie odwraca zmiany.
-func TestWstrzymanieJestOdwracalne(t *testing.T) {
+// TestHoldIsReversible checks that the operation describes a desired state,
+// not a toggle: repeating it does not reverse the change.
+func TestHoldIsReversible(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -412,7 +419,7 @@ func TestWstrzymanieJestOdwracalne(t *testing.T) {
 			}},
 		}, 60*time.Second)
 		if job.State != "succeeded" {
-			t.Fatalf("hold=%v: stan = %s, kod = %s", hold, job.State, job.ResultErrorCode)
+			t.Fatalf("hold=%v: state = %s, code = %s", hold, job.State, job.ResultErrorCode)
 		}
 	}
 }

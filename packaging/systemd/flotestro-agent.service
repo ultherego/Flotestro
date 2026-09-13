@@ -4,13 +4,13 @@ Documentation=https://github.com/ultherego/flotestro
 After=network-online.target flotestro-helper.socket
 Wants=network-online.target flotestro-helper.socket
 
-# Demon startuje dopiero wtedy, gdy jest czym sie przedstawic. Host bez
-# konfiguracji albo przed enrollmentem nie ma sie gdzie polaczyc, a petla
-# restartow zasmieca dziennik i wyglada jak awaria - zamiast jak host, ktory
-# czeka na rejestracje.
+# The daemon starts only when there is something to introduce itself with.
+# A host without a configuration or before enrollment has nowhere to
+# connect, and a restart loop litters the journal and looks like a failure -
+# instead of like a host waiting for enrollment.
 ConditionPathExists=/etc/flotestro/agent.yaml
-# Tozsamosc w magazynie generacji albo, dla hostow sprzed jego wprowadzenia,
-# w starym ukladzie plikow. Wystarczy jedna z nich.
+# The identity in the generation store or, for hosts from before it was
+# introduced, in the old file layout. Either one is enough.
 ConditionPathExists=|/var/lib/flotestro-agent/identity/current/agent.pem
 ConditionPathExists=|/var/lib/flotestro-agent/agent.pem
 
@@ -18,32 +18,34 @@ ConditionPathExists=|/var/lib/flotestro-agent/agent.pem
 Type=simple
 User=flotestro-agent
 Group=flotestro-agent
-# Plik srodowiska jest opcjonalny i taki ma zostac: ustawienia hosta opisuje
-# agent.yaml, a to jest tylko miejsce na override i na jednorazowy token.
-# Jego brak nie moze zatrzymac uslugi - pakiet Archa go nie niesie.
+# The environment file is optional and is to stay so: the host settings are
+# described by agent.yaml, and this is only a place for overrides and the
+# one-time token. Its absence must not stop the service - the Arch package
+# does not carry it.
 EnvironmentFile=-/etc/flotestro/agent.env
 ExecStart=/usr/bin/flotestro-agent
 Restart=always
 RestartSec=5s
 
-# Budzet zasobow agenta jest wymuszony przez systemd, a nie tylko deklarowany.
+# The agent resource budget is enforced by systemd, not merely declared.
 #
-# Budzet musi pokryc to, co agent naprawde robi. Narzedzia pakietowe dzialaja
-# jako jego procesy potomne i trafiaja do tej samej grupy: samo rozwiazanie
-# zaleznosci przez apt siega 75 MB (Debian 13, pomiar na flocie testowej).
-# Wczesniejsze 48M nie konczylo sie czytelnym bledem - jadro dlawilo alokacje
-# i spychalo host w swap, wiec planowanie aktualizacji trwalo dziesiatki sekund
-# zamiast sekund, a operacje czekajace za nim wygladaly na zawieszone.
+# The budget must cover what the agent really does. The package tools run as
+# its child processes and land in the same group: dependency resolution by
+# apt alone reaches 75 MB (Debian 13, measured on the test fleet). The
+# earlier 48M did not end with a readable error - the kernel throttled the
+# allocations and pushed the host into swap, so planning an update took tens
+# of seconds instead of seconds, and the operations waiting behind it looked
+# hung.
 #
-# Agent sam w sobie miesci sie w kilkudziesieciu megabajtach; reszta budzetu
-# jest dla menedzera pakietow. Jednoczesnie moze dzialac jedna operacja
-# pakietowa, wiec szczyt to agent plus jeden resolver.
+# The agent itself fits in a few dozen megabytes; the rest of the budget is
+# for the package manager. One package operation may run at a time, so the
+# peak is the agent plus one resolver.
 MemoryHigh=192M
 MemoryMax=256M
 CPUWeight=20
 IOWeight=20
 
-# Agent nie potrzebuje roota ani zapisu poza wlasnym katalogiem stanu.
+# The agent needs neither root nor writes outside its own state directory.
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
@@ -58,8 +60,9 @@ LockPersonality=yes
 SystemCallArchitectures=native
 StateDirectory=flotestro-agent
 StateDirectoryMode=0700
-# Agent laczy sie z gniazdem helpera, a to wymaga prawa zapisu do samego
-# gniazda; ProtectSystem=strict montuje reszte systemu tylko do odczytu.
+# The agent connects to the helper socket, and that requires write access to
+# the socket itself; ProtectSystem=strict mounts the rest of the system
+# read-only.
 ReadWritePaths=/var/lib/flotestro-agent /run/flotestro
 
 [Install]

@@ -1,25 +1,25 @@
-# Pakiet agenta dla Archa i pochodnych (CachyOS, EndeavourOS).
+# The agent package for Arch and its derivatives (CachyOS, EndeavourOS).
 #
-# PKGBUILD nie kompiluje kodu: bierze binarki, ktore juz przeszly testy,
-# dokladnie tak samo jak pakiety .deb i .rpm. Dzieki temu wszystkie trzy
-# rodziny dostaja ten sam artefakt, a nie trzy rozne wyniki budowania.
+# The PKGBUILD compiles no code: it takes the binaries that already passed
+# the tests, exactly like the .deb and .rpm packages. Thanks to that all
+# three families get the same artefact, not three different build results.
 #
-# Sumy sa jawne i wyliczane przy skladaniu wydania: "SKIP" oznaczaloby
-# pakiet, ktorego zawartosci nikt nie sprawdzil.
+# The checksums are explicit and computed when the release is composed:
+# "SKIP" would mean a package whose content nobody checked.
 pkgname=flotestro-agent
-pkgver=__WERSJA__
+pkgver=__VERSION__
 pkgrel=1
-pkgdesc='Agent floty Flotestro'
+pkgdesc='Flotestro fleet agent'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ultherego/flotestro'
 license=('LicenseRef-Flotestro')
 depends=('systemd' 'ca-certificates')
-# Konfiguracja hosta przezywa aktualizacje pakietu; nowa wersja ladzie obok
-# jako .pacnew i musi byc widoczna w diagnostyce.
+# The host configuration survives package updates; the new version lands
+# next to it as .pacnew and must be visible in diagnostics.
 backup=('etc/flotestro/agent.yaml')
-# Pakiet niesie gotowe binarki, wiec nie ma z czego zlozyc pakietu debug:
-# makepkg zrobilby pusty, a jego nazwa jest tak podobna, ze latwo wydac go
-# zamiast wlasciwego.
+# The package carries ready binaries, so there is nothing to compose a debug
+# package from: makepkg would make an empty one, and its name is so similar
+# that it is easy to release instead of the right one.
 options=('!debug')
 install=flotestro-agent.install
 source=(
@@ -34,7 +34,7 @@ source=(
   'flotestro-agent.tmpfiles'
   'agent.yaml'
 )
-sha256sums=(__SUMY__)
+sha256sums=(__SUMS__)
 
 package() {
   install -Dm755 flotestro-agent        "$pkgdir/usr/bin/flotestro-agent"

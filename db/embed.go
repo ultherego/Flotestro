@@ -1,5 +1,5 @@
-// Package db osadza migracje w binarce control plane.
-// Katalog migrations pozostaje jedynym zrodlem prawdy dla schematu.
+// Package db embeds the migrations in the control plane binary.
+// The migrations directory remains the only source of truth for the schema.
 package db
 
 import "embed"

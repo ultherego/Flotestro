@@ -1,7 +1,7 @@
 Name:           flotestro-agent
 Version:        %{?_flotestro_version}%{!?_flotestro_version:0.1.0}
 Release:        1%{?dist}
-Summary:        Agent floty Flotestro
+Summary:        Flotestro fleet agent
 License:        Proprietary
 URL:            https://github.com/ultherego/flotestro
 BuildArch:      %{_target_cpu}
@@ -10,20 +10,21 @@ Requires:       systemd
 Requires(post): systemd, shadow-utils
 Requires(preun): systemd
 
-# Binarki sa budowane wczesniej i podawane katalogiem; spec nie kompiluje
-# kodu, zeby pakiet powstawal z dokladnie tych samych artefaktow, ktore
-# przeszly testy.
+# The binaries are built earlier and given by directory; the spec compiles
+# no code, so that the package is made from exactly the same artefacts that
+# passed the tests.
 %global _build_id_links none
 %global __strip /bin/true
 
 %description
-Agent laczy hosta z panelem zarzadzania flota Linux. Utrzymuje sesje mTLS
-do control plane, raportuje inventory i wykonuje wylacznie operacje typowane
-- kontrakt nie zna pola z dowolnym poleceniem powloki.
+The agent connects a host to the Linux fleet management panel. It keeps an
+mTLS session to the control plane, reports the inventory and carries out
+only typed operations - the contract has no field for an arbitrary shell
+command.
 
-Operacje wymagajace roota realizuje osobny proces pomocniczy uruchamiany
-przez gniazdo systemd, ktory weryfikuje wolajacego po SO_PEERCRED. Sam agent
-dziala bez uprawnien roota.
+Operations that require root are carried out by a separate helper process
+started by a systemd socket, which verifies the caller by SO_PEERCRED. The
+agent itself runs without root privileges.
 
 %install
 rm -rf %{buildroot}
@@ -53,15 +54,15 @@ install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-agent
 %{_unitdir}/flotestro-helper.service
 %{_unitdir}/flotestro-helper.socket
 %dir %{_sysconfdir}/flotestro
-# Konfiguracja nie moze zostac nadpisana przy aktualizacji: zawiera adres
-# panelu i token enrollmentu tego hosta.
+# The configuration must not be overwritten on an update: it holds the
+# panel address and the enrollment token of this host.
 %config(noreplace) %attr(0640, root, flotestro-agent) %{_sysconfdir}/flotestro/agent.yaml
 %config(noreplace) %attr(0640, root, flotestro-agent) %{_sysconfdir}/flotestro/agent.env
 %dir %attr(0700, flotestro-agent, flotestro-agent) %{_sharedstatedir}/flotestro-agent
 
 %pre
-# Konto uslugowe bez powloki i bez katalogu domowego: agent nie jest
-# tozsamoscia, ktora ktokolwiek loguje sie na hoscie.
+# A service account without a shell and without a home directory: the agent
+# is not an identity anybody logs into the host with.
 getent group flotestro-agent >/dev/null || groupadd --system flotestro-agent
 getent passwd flotestro-agent >/dev/null || \
     useradd --system --gid flotestro-agent --no-create-home \
@@ -70,28 +71,30 @@ getent passwd flotestro-agent >/dev/null || \
 exit 0
 
 %post
-# Odczyt dziennika bez roota wymaga czlonkostwa w grupie systemd-journal.
-# Brak grupy nie jest bledem instalacji - odczyt dziennika bedzie wtedy
-# niedostepny, a agent to zglosi zamiast udawac, ze dziennik jest pusty.
+# Reading the journal without root requires membership in the systemd-journal
+# group. A missing group is not an installation error - the journal read is
+# then unavailable, and the agent reports that instead of pretending the
+# journal is empty.
 if getent group systemd-journal >/dev/null; then
     usermod --append --groups systemd-journal flotestro-agent || :
 fi
 %systemd_post flotestro-agent.service flotestro-helper.socket
-# Gniazdo helpera musi istniec, zanim agent sprobuje sie z nim polaczyc.
+# The helper socket must exist before the agent tries to connect to it.
 systemctl enable --now flotestro-helper.socket || :
-# Helper dziala dalej po podmianie binarki, wiec po aktualizacji obslugiwalby
-# zadania starym kodem. Gniazdo uruchomi nowa wersje przy nastepnym zadaniu.
+# The helper keeps running after the binary is replaced, so after an update
+# it would serve jobs with the old code. The socket starts the new version at
+# the next job.
 systemctl stop flotestro-helper.service || :
 
-# Agent bez adresu panelu nie ma dokad sie polaczyc. Uruchamianie go w petli
-# restartow zasmiecaloby dziennik hosta; instalacja konczy sie wtedy
-# wskazowka, a nie cichym bledem.
+# An agent without a panel address has nowhere to connect. Running it in a
+# restart loop would litter the host journal; the installation then ends
+# with a hint, not a quiet error.
 systemctl enable flotestro-agent.service || :
 if [ -e %{_sharedstatedir}/flotestro-agent/identity/current/agent.pem ] ||
    [ -e %{_sharedstatedir}/flotestro-agent/agent.pem ]; then
     systemctl start flotestro-agent.service || :
 else
-    echo "flotestro-agent: uzupelnij %{_sysconfdir}/flotestro/agent.yaml i zarejestruj host" >&2
+    echo "flotestro-agent: fill in %{_sysconfdir}/flotestro/agent.yaml and enroll the host" >&2
     echo "  sudo -u flotestro-agent flotestro-agentctl enroll" >&2
     echo "  systemctl start flotestro-agent.service" >&2
 fi
@@ -101,7 +104,8 @@ fi
 
 %postun
 %systemd_postun_with_restart flotestro-agent.service
-# Tozsamosc agenta i klucz prywatny zostaja przy aktualizacji i przy zwyklym
-# usunieciu: ponowna instalacja ma odzyskac te sama tozsamosc bez enrollmentu.
+# The agent identity and the private key stay on an update and on an
+# ordinary removal: a reinstall is to recover the same identity without
+# enrollment.
 
 %changelog

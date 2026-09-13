@@ -20,7 +20,7 @@ import (
 //
 // The name of the channel stays as it is until a migration renames it together
 // with the trigger that publishes on it.
-const epochChannel = "flotestro_sesje"
+const epochChannel = "flotestro_sessions"
 
 // WatchEpochs closes the sessions that have been superseded on another
 // gateway.

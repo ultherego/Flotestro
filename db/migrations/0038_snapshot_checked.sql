@@ -1,9 +1,9 @@
--- Snapshot feedu ma dwie daty, bo to dwa rozne fakty.
+-- A feed snapshot has two dates, because they are two different facts.
 --
--- "Pobrano" mowi, z kiedy sa dane. "Sprawdzono" mowi, kiedy panel ostatni raz
--- upewnil sie, ze nic sie nie zmienilo. Feed, ktory zmienia sie raz na dobe,
--- byl bez tego uznawany za nieswiezy po szesciu godzinach - choc panel pytal
--- o niego co pol godziny i za kazdym razem dostawal "bez zmian".
+-- "Fetched" says how old the data is. "Checked" says when the panel last
+-- made sure nothing changed. A feed that changes once a day was without this
+-- considered stale after six hours - although the panel asked about it every
+-- half hour and got "no changes" every time.
 alter table vuln_snapshots
     add column if not exists checked_at timestamptz;
 

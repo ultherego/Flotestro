@@ -1,18 +1,18 @@
--- Okno serwisowe hosta.
+-- The maintenance window of a host.
 --
--- Maintenance nie jest stanem cyklu zycia: host w oknie serwisowym dziala,
--- jest zarzadzany i przyjmuje operacje zlecone recznie. Zmienia sie jedno -
--- kampanie go omijaja, a alerty z niego nie budza nikogo w nocy. Dlatego
--- osobne kolumny, a nie kolejna wartosc lifecycle_state.
+-- Maintenance is not a lifecycle state: a host in a maintenance window runs,
+-- is managed and accepts manually ordered operations. One thing changes -
+-- campaigns skip it, and its alerts wake nobody at night. Hence separate
+-- columns, not another lifecycle_state value.
 --
--- Okno ma termin, a nie flage: "w serwisie do odwolania" konczy sie hostem,
--- o ktorym wszyscy zapomnieli i ktorego nikt nie aktualizuje od pol roku.
+-- A window has a deadline, not a flag: "in maintenance until further notice"
+-- ends with a host everybody forgot and nobody has updated for half a year.
 alter table hosts
     add column if not exists maintenance_until  timestamptz,
     add column if not exists maintenance_reason text,
     add column if not exists maintenance_by     text,
     add column if not exists maintenance_at     timestamptz;
 
--- Kampanie pytaja o hosty poza oknem serwisowym przy kazdej fali.
+-- Campaigns ask for hosts outside a maintenance window at every wave.
 create index if not exists hosts_maintenance_idx
     on hosts (maintenance_until) where maintenance_until is not null;

@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-// TestFlotaJestZarejestrowana sprawdza, ze oba hosty zglosily sie do control
-// plane i zostaly poprawnie rozpoznane.
-func TestFlotaJestZarejestrowana(t *testing.T) {
+// TestFleetIsEnrolled checks that both hosts reported to the control plane
+// and were recognised correctly.
+func TestFleetIsEnrolled(t *testing.T) {
 	h := newHarness(t)
 	hosts := h.hosts()
 	if len(hosts) < 2 {
-		t.Fatalf("we flocie jest %d hostow, oczekiwano co najmniej 2", len(hosts))
+		t.Fatalf("the fleet has %d hosts, expected at least 2", len(hosts))
 	}
 
 	families := map[string]hostView{}
@@ -25,62 +25,63 @@ func TestFlotaJestZarejestrowana(t *testing.T) {
 	t.Run("Debian", func(t *testing.T) {
 		host, ok := families["debian"]
 		if !ok {
-			t.Fatal("brak hosta rodziny debian")
+			t.Fatal("no host of the debian family")
 		}
 		if host.ConnectionState != "online" {
-			t.Errorf("stan polaczenia = %s, oczekiwano online", host.ConnectionState)
+			t.Errorf("connection state = %s, expected online", host.ConnectionState)
 		}
-		if !maAdapter(host, "systemd") || !maAdapter(host, "packages.apt") ||
-			!maAdapter(host, "journald") {
-			t.Errorf("nieoczekiwane zdolnosci hosta Debian: %+v", host.Capabilities)
+		if !hasAdapter(host, "systemd") || !hasAdapter(host, "packages.apt") ||
+			!hasAdapter(host, "journald") {
+			t.Errorf("unexpected capabilities of the Debian host: %+v", host.Capabilities)
 		}
-		if maAdapter(host, "packages.dnf") {
-			t.Error("host Debian nie powinien zglaszac dnf")
+		if hasAdapter(host, "packages.dnf") {
+			t.Error("the Debian host should not report dnf")
 		}
 	})
 
 	t.Run("Fedora", func(t *testing.T) {
 		host, ok := families["rhel"]
 		if !ok {
-			t.Fatal("brak hosta rodziny rhel")
+			t.Fatal("no host of the rhel family")
 		}
 		if host.ConnectionState != "online" {
-			t.Errorf("stan polaczenia = %s, oczekiwano online", host.ConnectionState)
+			t.Errorf("connection state = %s, expected online", host.ConnectionState)
 		}
-		if !maAdapter(host, "systemd") || !maAdapter(host, "packages.dnf") ||
-			!maAdapter(host, "journald") {
-			t.Errorf("nieoczekiwane zdolnosci hosta Fedora: %+v", host.Capabilities)
+		if !hasAdapter(host, "systemd") || !hasAdapter(host, "packages.dnf") ||
+			!hasAdapter(host, "journald") {
+			t.Errorf("unexpected capabilities of the Fedora host: %+v", host.Capabilities)
 		}
-		if maAdapter(host, "packages.apt") {
-			t.Error("host Fedora nie powinien zglaszac apt")
+		if hasAdapter(host, "packages.apt") {
+			t.Error("the Fedora host should not report apt")
 		}
 	})
 }
 
-// TestSygnalyZdrowiaSaUstaloneAlboPuste pilnuje, ze agent nie zamienia bledu
-// odczytu na zero. Puste pole jest dozwolone, zmyslona wartosc nie.
-func TestSygnalyZdrowiaSaUstaloneAlboPuste(t *testing.T) {
+// TestHealthSignalsAreDeterminedOrEmpty guards that the agent does not turn
+// a read error into zero. An empty field is allowed, a made-up value is
+// not.
+func TestHealthSignalsAreDeterminedOrEmpty(t *testing.T) {
 	h := newHarness(t)
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		// Wartosci sa opcjonalne, ale jesli sa obecne, musza byc sensowne.
+		// The values are optional, but when present they must make sense.
 		if host.FailedUnits != nil && *host.FailedUnits < 0 {
-			t.Errorf("%s: ujemna liczba failed units", host.Hostname)
+			t.Errorf("%s: negative number of failed units", host.Hostname)
 		}
 		if host.PendingUpdates != nil && *host.PendingUpdates < 0 {
-			t.Errorf("%s: ujemna liczba aktualizacji", host.Hostname)
+			t.Errorf("%s: negative number of updates", host.Hostname)
 		}
 		if host.BootID == "" {
-			t.Errorf("%s: brak boot_id, a host jest online", host.Hostname)
+			t.Errorf("%s: no boot_id although the host is online", host.Hostname)
 		}
 	}
 }
 
-// TestOperacjaMutujacaWymagaZatwierdzenia sprawdza, ze samo zlecenie nie
-// zmienia niczego na hoscie i czeka na decyzje czlowieka.
-func TestOperacjaMutujacaWymagaZatwierdzenia(t *testing.T) {
+// TestMutatingOperationRequiresApproval checks that the order alone changes
+// nothing on the host and waits for a human decision.
+func TestMutatingOperationRequiresApproval(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -89,28 +90,29 @@ func TestOperacjaMutujacaWymagaZatwierdzenia(t *testing.T) {
 		"payload": unitPayload("cron.service"),
 	})
 	if !job.RequiresApproval {
-		t.Fatal("restart uslugi nie wymaga zatwierdzenia")
+		t.Fatal("a service restart requires no approval")
 	}
 	if job.State != "awaiting_approval" {
-		t.Fatalf("stan = %s, oczekiwano awaiting_approval", job.State)
+		t.Fatalf("state = %s, expected awaiting_approval", job.State)
 	}
 	if job.PayloadHash == "" {
-		t.Fatal("plan nie ma hasha")
+		t.Fatal("the plan has no hash")
 	}
 
-	// Zadanie czeka i nie trafia do kolejki, dopoki nikt go nie zatwierdzi.
+	// The job waits and does not reach the queue until somebody approves
+	// it.
 	time.Sleep(4 * time.Second)
 	if state := h.job(job.ID).State; state != "awaiting_approval" {
-		t.Fatalf("niezatwierdzone zadanie zmienilo stan na %s", state)
+		t.Fatalf("the unapproved job changed its state to %s", state)
 	}
 
 	h.do("POST", "/api/v1/jobs/"+job.ID+"/cancel",
-		map[string]any{"reason": "sprzatanie po tescie"}, nil, 200)
+		map[string]any{"reason": "cleanup after the test"}, nil, 200)
 }
 
-// TestZatwierdzenieZNiezgodnymHashemJestOdrzucane chroni przed podmiana planu
-// miedzy obejrzeniem a zatwierdzeniem.
-func TestZatwierdzenieZNiezgodnymHashemJestOdrzucane(t *testing.T) {
+// TestApprovalWithAMismatchedHashIsRejected protects against swapping the
+// plan between viewing and approving.
+func TestApprovalWithAMismatchedHashIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -119,7 +121,7 @@ func TestZatwierdzenieZNiezgodnymHashemJestOdrzucane(t *testing.T) {
 		"payload": unitPayload("cron.service"),
 	})
 	t.Cleanup(func() {
-		h.do("POST", "/api/v1/jobs/"+job.ID+"/cancel", map[string]any{"reason": "koniec testu"}, nil, 200)
+		h.do("POST", "/api/v1/jobs/"+job.ID+"/cancel", map[string]any{"reason": "end of the test"}, nil, 200)
 	})
 
 	h.do("POST", "/api/v1/jobs/"+job.ID+"/approve",
@@ -127,13 +129,14 @@ func TestZatwierdzenieZNiezgodnymHashemJestOdrzucane(t *testing.T) {
 		nil, 409)
 
 	if state := h.job(job.ID).State; state != "awaiting_approval" {
-		t.Fatalf("odrzucone zatwierdzenie zmienilo stan na %s", state)
+		t.Fatalf("the rejected approval changed the state to %s", state)
 	}
 }
 
-// TestRestartUslugiZmieniaProces sprawdza cala droge: plan, zatwierdzenie,
-// wykonanie przez helpera roota i wynik ze stanem jednostki przed i po.
-func TestRestartUslugiZmieniaProces(t *testing.T) {
+// TestServiceRestartChangesTheProcess checks the whole path: the plan, the
+// approval, execution by the root helper and a result with the unit state
+// before and after.
+func TestServiceRestartChangesTheProcess(t *testing.T) {
 	cases := []struct {
 		family string
 		unit   string
@@ -153,32 +156,32 @@ func TestRestartUslugiZmieniaProces(t *testing.T) {
 			}, 90*time.Second)
 
 			if job.State != "succeeded" {
-				t.Fatalf("stan = %s, kod bledu = %s", job.State, job.ResultErrorCode)
+				t.Fatalf("state = %s, error code = %s", job.State, job.ResultErrorCode)
 			}
 			if len(attempts) == 0 {
-				t.Fatal("brak zapisanej proby wykonania")
+				t.Fatal("no recorded execution attempt")
 			}
 			last := attempts[len(attempts)-1]
 			if last.ExitCode == nil || *last.ExitCode != 0 {
-				t.Fatalf("kod wyjscia = %v, stderr: %s", last.ExitCode, last.Stderr)
+				t.Fatalf("exit code = %v, stderr: %s", last.ExitCode, last.Stderr)
 			}
 			if last.UnitStateBefore == nil || last.UnitStateAfter == nil {
-				t.Fatal("brak stanu jednostki przed lub po operacji")
+				t.Fatal("no unit state before or after the operation")
 			}
-			// Zmiana PID jest dowodem, ze restart faktycznie nastapil, a nie
-			// tylko zwrocil kod zero.
+			// A PID change is the proof that the restart actually happened,
+			// not only returned zero.
 			if last.UnitStateBefore.MainPID == last.UnitStateAfter.MainPID {
-				t.Errorf("PID nie zmienil sie: %d", last.UnitStateAfter.MainPID)
+				t.Errorf("the PID did not change: %d", last.UnitStateAfter.MainPID)
 			}
 			if last.UnitStateAfter.ActiveState != "active" {
-				t.Errorf("jednostka po restarcie jest w stanie %s", last.UnitStateAfter.ActiveState)
+				t.Errorf("the unit after the restart is in state %s", last.UnitStateAfter.ActiveState)
 			}
 		})
 	}
 }
 
-// TestOdczytDziennikaNieWymagaZatwierdzenia sprawdza operacje niemutujaca.
-func TestOdczytDziennikaNieWymagaZatwierdzenia(t *testing.T) {
+// TestJournalReadRequiresNoApproval checks a non-mutating operation.
+func TestJournalReadRequiresNoApproval(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -190,122 +193,125 @@ func TestOdczytDziennikaNieWymagaZatwierdzenia(t *testing.T) {
 	}, 60*time.Second)
 
 	if job.RequiresApproval {
-		t.Error("odczyt dziennika nie powinien wymagac zatwierdzenia")
+		t.Error("a journal read should not require approval")
 	}
 	if job.State != "succeeded" {
-		t.Fatalf("stan = %s, kod bledu = %s", job.State, job.ResultErrorCode)
+		t.Fatalf("state = %s, error code = %s", job.State, job.ResultErrorCode)
 	}
 	if len(attempts) == 0 || attempts[len(attempts)-1].Stdout == "" {
-		t.Fatal("odczyt dziennika nie zwrocil tresci")
+		t.Fatal("the journal read returned no content")
 	}
 }
 
-// maAdapter mowi, czy host zglosil dany adapter jako dostepny.
-func maAdapter(host hostView, nazwa string) bool {
+// hasAdapter says whether the host reported the given adapter as available.
+func hasAdapter(host hostView, name string) bool {
 	for _, adapter := range host.Capabilities {
-		if adapter.Name == nazwa {
+		if adapter.Name == name {
 			return adapter.Available
 		}
 	}
 	return false
 }
 
-// TestInventoryJestPodzieloneNaModuly sprawdza, ze zakladka moze pobrac
-// dokladnie to, co pokazuje, wraz z wlasna rewizja i wlasna swiezoscia.
-// Wczesniej wszystkie zakladki dzielily jedna date obserwacji, wiec operator
-// patrzacy na pakiety widzial swiezosc zupelnie czegos innego.
-func TestInventoryJestPodzieloneNaModuly(t *testing.T) {
+// TestInventoryIsSplitIntoModules checks that a tab can fetch exactly what
+// it shows, with its own revision and its own freshness. Earlier all the
+// tabs shared one observation date, so an operator looking at packages saw
+// the freshness of something else entirely.
+func TestInventoryIsSplitIntoModules(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	rewizje := map[string]string{}
-	for _, modul := range []string{"system", "packages", "services", "identity", "accounts", "network"} {
-		t.Run(modul, func(t *testing.T) {
+	revisions := map[string]string{}
+	for _, module := range []string{"system", "packages", "services", "identity", "accounts", "network"} {
+		t.Run(module, func(t *testing.T) {
 			var fragment inventoryFragment
-			h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/"+modul,
+			h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/"+module,
 				nil, &fragment, http.StatusOK)
 
-			if fragment.Module != modul {
-				t.Errorf("modul = %q, oczekiwano %q", fragment.Module, modul)
+			if fragment.Module != module {
+				t.Errorf("module = %q, expected %q", fragment.Module, module)
 			}
 			if fragment.Revision == "" {
-				t.Error("modul bez wlasnej rewizji")
+				t.Error("module without its own revision")
 			}
-			// Dane bez zrodla nie daja sie ocenic: operator nie wie, czy
-			// patrzy na odczyt z hosta, czy na cache sprzed godziny.
+			// Data without a source cannot be assessed: the operator does
+			// not know whether they look at a read from the host or at an
+			// hour-old cache.
 			if fragment.Source == "" {
-				t.Error("modul nie podaje zrodla odczytu")
+				t.Error("the module does not give the source of the read")
 			}
 			if fragment.ObservedAt.IsZero() {
-				t.Error("modul nie podaje znacznika obserwacji")
+				t.Error("the module does not give the observation timestamp")
 			}
 			if len(fragment.Payload) == 0 {
-				t.Error("modul bez tresci")
+				t.Error("module without content")
 			}
-			rewizje[modul] = fragment.Revision
+			revisions[module] = fragment.Revision
 		})
 	}
 
-	// Rewizje modulow sa niezalezne. Gdyby wszystkie byly rowne, podzial
-	// istnialby tylko w adresie, a nie w danych.
-	widziane := map[string]bool{}
-	for modul, rewizja := range rewizje {
-		if widziane[rewizja] {
-			t.Errorf("modul %s dzieli rewizje z innym modulem", modul)
+	// Module revisions are independent. If they were all equal, the split
+	// would exist only in the address, not in the data.
+	seen := map[string]bool{}
+	for module, revision := range revisions {
+		if seen[revision] {
+			t.Errorf("module %s shares its revision with another module", module)
 		}
-		widziane[rewizja] = true
+		seen[revision] = true
 	}
 }
 
-// TestNiezgloszonyModulJestBrakiemZasobu pilnuje granicy miedzy modulem
-// pustym a modulem, ktorego host nie zglosil. To dwie rozne odpowiedzi.
-func TestNiezgloszonyModulJestBrakiemZasobu(t *testing.T) {
+// TestUnreportedModuleIsAMissingResource guards the boundary between an
+// empty module and a module the host did not report. These are two
+// different answers.
+func TestUnreportedModuleIsAMissingResource(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	// Nazwa celowo nie odpowiada zadnemu modulowi i nigdy nie bedzie:
-	// granica dotyczy odpowiedzi na modul niezgloszony, a nie konkretnego
-	// modulu, ktory za tydzien powstanie i wywroci ten test.
-	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/modul-ktorego-nie-ma",
+	// The name deliberately matches no module and never will: the boundary
+	// concerns the answer for an unreported module, not a specific module
+	// that appears next week and topples this test.
+	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/module-that-does-not-exist",
 		nil, nil, http.StatusNotFound)
 }
 
-// TestModulKontenerowJestZgloszonyTylkoZSilnikiem sprawdza, ze host bez
-// silnika kontenerow nie udaje hosta, na ktorym po prostu nic nie stoi.
-// Pusty modul i modul niedostepny to dwie rozne odpowiedzi.
-func TestModulKontenerowJestZgloszonyTylkoZSilnikiem(t *testing.T) {
+// TestContainersModuleIsReportedOnlyWithAnEngine checks that a host without
+// a container engine does not pose as a host on which simply nothing runs.
+// An empty module and an unavailable module are two different answers.
+func TestContainersModuleIsReportedOnlyWithAnEngine(t *testing.T) {
 	h := newHarness(t)
 
-	for _, rodzina := range []string{"debian", "rhel"} {
-		t.Run(rodzina, func(t *testing.T) {
-			host := h.hostByFamily(rodzina)
-			maSilnik := maAdapter(host, "docker")
+	for _, family := range []string{"debian", "rhel"} {
+		t.Run(family, func(t *testing.T) {
+			host := h.hostByFamily(family)
+			hasEngine := hasAdapter(host, "docker")
 
 			var fragment inventoryFragment
 			h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/containers",
 				nil, &fragment, http.StatusOK)
 
 			if fragment.Source != "agent/docker-engine" {
-				t.Errorf("zrodlo = %q", fragment.Source)
+				t.Errorf("source = %q", fragment.Source)
 			}
-			if maSilnik && fragment.UnavailableReason != "" {
-				t.Errorf("host z silnikiem podaje powod niedostepnosci: %q", fragment.UnavailableReason)
+			if hasEngine && fragment.UnavailableReason != "" {
+				t.Errorf("a host with an engine gives an unavailability reason: %q", fragment.UnavailableReason)
 			}
-			// Host bez silnika musi powiedziec dlaczego, zamiast milczec.
-			if !maSilnik && fragment.UnavailableReason == "" {
-				t.Error("host bez silnika nie wyjasnia braku kontenerow")
+			// A host without an engine must say why instead of staying
+			// quiet.
+			if !hasEngine && fragment.UnavailableReason == "" {
+				t.Error("a host without an engine does not explain the missing containers")
 			}
 		})
 	}
 }
 
-// TestOdczytKontenerowNaZadanie sprawdza sciezke, ktora operator uruchamia,
-// otwierajac zakladke: pelne listy sa pobierane operacja, a nie w kazdym
-// cyklu inwentarza.
-func TestOdczytKontenerowNaZadanie(t *testing.T) {
+// TestContainerReadOnDemand checks the path the operator triggers by opening
+// the tab: the full lists are fetched by an operation, not in every
+// inventory cycle.
+func TestContainerReadOnDemand(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	if !maAdapter(host, "docker") {
-		t.Skip("host testowy nie ma silnika kontenerow")
+	if !hasAdapter(host, "docker") {
+		t.Skip("the test host has no container engine")
 	}
 
 	job, _ := h.runOperation(host.ID, map[string]any{
@@ -313,30 +319,31 @@ func TestOdczytKontenerowNaZadanie(t *testing.T) {
 		"payload": map[string]any{"docker_read": map[string]any{}},
 	}, 90*time.Second)
 	if job.State != "succeeded" {
-		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+		t.Fatalf("state = %s, code = %s", job.State, job.ResultErrorCode)
 	}
-	// Odczyt niczego nie zmienia, wiec nie moze wymagac zatwierdzenia.
+	// The read changes nothing, so it cannot require approval.
 	if job.RequiresApproval {
-		t.Error("odczyt kontenerow wymaga zatwierdzenia, choc niczego nie zmienia")
+		t.Error("the container read requires approval although it changes nothing")
 	}
 
-	// Wynik nalezy do stanu hosta, a nie do historii zadan: zakladka pyta
-	// o stan i ma go dostac bez przegladania operacji.
-	var pelny inventoryFragment
+	// The result belongs to the host state, not to the job history: the tab
+	// asks for the state and is to get it without browsing operations.
+	var full inventoryFragment
 	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/containers.full",
-		nil, &pelny, http.StatusOK)
-	if len(pelny.Payload) == 0 {
-		t.Error("pelny stan kontenerow jest pusty")
+		nil, &full, http.StatusOK)
+	if len(full.Payload) == 0 {
+		t.Error("the full container state is empty")
 	}
 }
 
-// TestHostBezSilnikaOdrzucaOdczytKontenerow pilnuje, ze operacja bez pokrycia
-// w adapterze zostaje odrzucona przy zlecaniu, a nie po dostarczeniu.
-func TestHostBezSilnikaOdrzucaOdczytKontenerow(t *testing.T) {
+// TestHostWithoutAnEngineRejectsTheContainerRead guards that an operation
+// without backing in an adapter is rejected when ordered, not after
+// delivery.
+func TestHostWithoutAnEngineRejectsTheContainerRead(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
-	if maAdapter(host, "docker") {
-		t.Skip("host rhel ma silnik kontenerow")
+	if hasAdapter(host, "docker") {
+		t.Skip("the rhel host has a container engine")
 	}
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "docker.read",
@@ -344,50 +351,51 @@ func TestHostBezSilnikaOdrzucaOdczytKontenerow(t *testing.T) {
 		nil, http.StatusConflict)
 }
 
-// TestOperacjaNiszczacaWymagaPotwierdzeniaCelu sprawdza brame z rozdzialu 6.1:
-// zmiany, ktorej nie da sie cofnac, nie wolno zleci klikniecem. Operator musi
-// podac powod i przepisac nazwe hosta.
-func TestOperacjaNiszczacaWymagaPotwierdzeniaCelu(t *testing.T) {
+// TestDestructiveOperationRequiresTargetConfirmation checks the gate from
+// chapter 6.1: a change that cannot be undone must not be ordered with a
+// click. The operator must give a reason and type in the hostname.
+func TestDestructiveOperationRequiresTargetConfirmation(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	if !maAdapter(host, "docker") {
-		t.Skip("host testowy nie ma silnika kontenerow")
+	if !hasAdapter(host, "docker") {
+		t.Skip("the test host has no container engine")
 	}
-	const kontener = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const container = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-	// Bez powodu operacja nie moze powstac: powod zostaje w audycie.
+	// Without a reason the operation cannot be created: the reason stays in
+	// the audit log.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":  "docker.container.remove",
-			"payload": map[string]any{"docker_container": map[string]any{"container_id": kontener}},
+			"payload": map[string]any{"docker_container": map[string]any{"container_id": container}},
 		}, nil, http.StatusBadRequest)
 
-	// Z powodem, ale bez przepisanej nazwy hosta - nadal odmowa.
+	// With a reason, but without the hostname typed in - still a refusal.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":  "docker.container.remove",
-			"reason":  "porzadki w laboratorium",
-			"payload": map[string]any{"docker_container": map[string]any{"container_id": kontener}},
+			"reason":  "lab cleanup",
+			"payload": map[string]any{"docker_container": map[string]any{"container_id": container}},
 		}, nil, http.StatusBadRequest)
 
-	// Nazwa innego hosta nie jest potwierdzeniem tego hosta.
+	// Another host's name is no confirmation of this host.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":              "docker.container.remove",
-			"reason":              "porzadki w laboratorium",
-			"target_confirmation": "zupelnie-inny-host",
-			"payload":             map[string]any{"docker_container": map[string]any{"container_id": kontener}},
+			"reason":              "lab cleanup",
+			"target_confirmation": "entirely-different-host",
+			"payload":             map[string]any{"docker_container": map[string]any{"container_id": container}},
 		}, nil, http.StatusBadRequest)
 }
 
-// TestOperacjaOdwracalnaNieWymagaPrzepisywaniaNazwy pilnuje, ze brama nie
-// rozlala sie na wszystko. Restart kontenera jest odwracalny i ma isc jednym
-// klikniecem, jak kazda inna operacja.
-func TestOperacjaOdwracalnaNieWymagaPrzepisywaniaNazwy(t *testing.T) {
+// TestReversibleOperationRequiresNoTypedName guards that the gate did not
+// spill over everything. A container restart is reversible and is to go
+// with one click, like any other operation.
+func TestReversibleOperationRequiresNoTypedName(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	if !maAdapter(host, "docker") {
-		t.Skip("host testowy nie ma silnika kontenerow")
+	if !hasAdapter(host, "docker") {
+		t.Skip("the test host has no container engine")
 	}
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
@@ -398,16 +406,16 @@ func TestOperacjaOdwracalnaNieWymagaPrzepisywaniaNazwy(t *testing.T) {
 		}, nil, http.StatusCreated)
 }
 
-// TestNieprawidlowyCelKontenerowyJestOdrzucany sprawdza walidacje po stronie
-// API. Identyfikator trafia do sciezki zapytania Engine API, wiec nie moze
-// niesc niczego, co ta sciezke zmienia.
-func TestNieprawidlowyCelKontenerowyJestOdrzucany(t *testing.T) {
+// TestInvalidContainerTargetIsRejected checks the validation on the API
+// side. The identifier goes into the Engine API request path, so it must
+// not carry anything that changes that path.
+func TestInvalidContainerTargetIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	if !maAdapter(host, "docker") {
-		t.Skip("host testowy nie ma silnika kontenerow")
+	if !hasAdapter(host, "docker") {
+		t.Skip("the test host has no container engine")
 	}
-	for _, id := range []string{"moj-kontener", "../images/json", "abc", ""} {
+	for _, id := range []string{"my-container", "../images/json", "abc", ""} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action":  "docker.container.stop",
@@ -416,69 +424,70 @@ func TestNieprawidlowyCelKontenerowyJestOdrzucany(t *testing.T) {
 	}
 }
 
-// TestWdrozenieProjektuWymagaZatwierdzonegoPlanu sprawdza granice z rozdzialu
-// 7: wdrozenie manifestu uruchamia na hoscie obrazy wskazane przez operatora,
-// wiec nie wolno go zlecic bez planu, ktory ten operator obejrzal.
-func TestWdrozenieProjektuWymagaZatwierdzonegoPlanu(t *testing.T) {
+// TestProjectDeploymentRequiresAnApprovedPlan checks the boundary from
+// chapter 7: deploying a manifest starts the images named by the operator
+// on the host, so it must not be ordered without a plan that operator
+// looked at.
+func TestProjectDeploymentRequiresAnApprovedPlan(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	if !maAdapter(host, "docker.compose") {
-		t.Skip("host testowy nie ma wtyczki compose")
+	if !hasAdapter(host, "docker.compose") {
+		t.Skip("the test host has no compose plugin")
 	}
 	const manifest = "services:\n  web:\n    image: nginx:alpine\n"
 
-	// Bez hasha planu wdrozenie nie ma podstawy.
+	// Without the plan hash the deployment has no basis.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action": "docker.compose.deploy",
-			"reason": "wdrozenie projektu testowego",
+			"reason": "deployment of the test project",
 			"payload": map[string]any{"compose": map[string]any{
-				"project": "testowy", "manifest": manifest,
+				"project": "testproject", "manifest": manifest,
 			}},
 		}, nil, http.StatusBadRequest)
 
-	// Planowanie niczego nie zmienia, wiec nie wymaga ani powodu, ani
-	// zatwierdzenia.
+	// Planning changes nothing, so it requires neither a reason nor an
+	// approval.
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "docker.compose.plan",
 		"payload": map[string]any{"compose": map[string]any{
-			"project": "testowy", "manifest": manifest,
+			"project": "testproject", "manifest": manifest,
 		}},
 	}, 2*time.Minute)
 	if job.State != "succeeded" {
-		t.Fatalf("plan: stan = %s, kod = %s", job.State, job.ResultErrorCode)
+		t.Fatalf("plan: state = %s, code = %s", job.State, job.ResultErrorCode)
 	}
 	if job.RequiresApproval {
-		t.Error("planowanie projektu wymaga zatwierdzenia, choc niczego nie zmienia")
+		t.Error("project planning requires approval although it changes nothing")
 	}
 	if len(attempts) == 0 || attempts[len(attempts)-1].Detail == nil {
-		t.Fatal("plan nie zwrocil wyniku")
+		t.Fatal("the plan returned no result")
 	}
 }
 
-// TestNieprawidlowyProjektJestOdrzucany sprawdza walidacje po stronie API.
-// Nazwa projektu trafia do argumentu polecenia i do nazw kontenerow.
-func TestNieprawidlowyProjektJestOdrzucany(t *testing.T) {
+// TestInvalidProjectIsRejected checks the validation on the API side. The
+// project name goes into a command argument and into container names.
+func TestInvalidProjectIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	if !maAdapter(host, "docker.compose") {
-		t.Skip("host testowy nie ma wtyczki compose")
+	if !hasAdapter(host, "docker.compose") {
+		t.Skip("the test host has no compose plugin")
 	}
-	for _, projekt := range []string{"", "Sklep", "sklep;reboot", "../etc"} {
+	for _, project := range []string{"", "Shop", "shop;reboot", "../etc"} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action": "docker.compose.plan",
 				"payload": map[string]any{"compose": map[string]any{
-					"project": projekt, "manifest": "services: {}",
+					"project": project, "manifest": "services: {}",
 				}},
 			}, nil, http.StatusBadRequest)
 	}
-	// Pusty manifest tez nie jest projektem.
+	// An empty manifest is not a project either.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action": "docker.compose.plan",
 			"payload": map[string]any{"compose": map[string]any{
-				"project": "sklep", "manifest": "   ",
+				"project": "shop", "manifest": "   ",
 			}},
 		}, nil, http.StatusBadRequest)
 }

@@ -1,6 +1,6 @@
--- Operacje typowane: jedna operacja logiczna na jednym hoscie to job,
--- kazde jej uruchomienie to attempt. Rozdzielenie jest konieczne, bo sieć moze
--- dostarczyc zadanie ponownie, a lease moze wygasnac w trakcie wykonania.
+-- Typed operations: one logical operation on one host is a job, every
+-- execution of it is an attempt. The split is necessary, because the network
+-- may deliver a job again and a lease may expire during execution.
 
 create table jobs (
     id                uuid        primary key,
@@ -10,11 +10,11 @@ create table jobs (
     action_type       text        not null,
     action_version    integer     not null default 1,
     payload           jsonb       not null,
-    -- Hash planu zatwierdzonego przez czlowieka. Agent porownuje go z trescia
-    -- koperty, wiec podmiana payloadu po approvalu jest wykrywalna.
+    -- The hash of the plan approved by a human. The agent compares it with the
+    -- envelope content, so a payload swap after approval is detectable.
     payload_hash      bytea       not null,
-    -- Klucz idempotencji jest unikalny w obrebie hosta: ponowne zlecenie tej
-    -- samej operacji nie tworzy drugiego joba.
+    -- The idempotency key is unique within a host: ordering the same
+    -- operation again does not create a second job.
     idempotency_key   text        not null,
 
     state             text        not null
@@ -26,7 +26,7 @@ create table jobs (
     preconditions     jsonb       not null default '{}'::jsonb,
     timeout_seconds   integer     not null default 60 check (timeout_seconds > 0),
     max_output_bytes  integer     not null default 65536 check (max_output_bytes > 0),
-    -- Bezwzgledny TTL: zadanie po terminie nie jest wykonywane po powrocie sieci.
+    -- Absolute TTL: a job past its deadline is not executed once the network is back.
     expires_at        timestamptz not null,
 
     created_by        text        not null,
@@ -50,7 +50,7 @@ create table jobs (
 
 create index jobs_host_idx    on jobs (host_id, created_at desc);
 create index jobs_state_idx   on jobs (state, expires_at);
--- Indeks kolejki: scheduler pobiera wylacznie zadania gotowe do wykonania.
+-- The queue index: the scheduler fetches only jobs ready to run.
 create index jobs_runnable_idx on jobs (created_at) where state = 'queued';
 
 create table job_attempts (
@@ -58,7 +58,7 @@ create table job_attempts (
     job_id            uuid        not null references jobs (id) on delete cascade,
     attempt_number    integer     not null check (attempt_number > 0),
 
-    -- Lease chroni przed dwoma gatewayami wykonujacymi to samo zadanie.
+    -- The lease protects against two gateways executing the same job.
     lease_owner       text,
     lease_expires_at  timestamptz,
     gateway_id        text,
@@ -68,8 +68,8 @@ create table job_attempts (
     exit_code         integer,
     error_code        text,
     message           text,
-    -- Output jest ograniczony przez max_output_bytes joba. Duze wyniki naleza
-    -- do object storage; tu trzymamy wylacznie bounded output.
+    -- The output is bounded by the job's max_output_bytes. Large results belong
+    -- in object storage; only bounded output is kept here.
     stdout            text,
     stderr            text,
     output_truncated  boolean     not null default false,
@@ -86,6 +86,6 @@ create table job_attempts (
 );
 
 create index job_attempts_job_idx   on job_attempts (job_id, attempt_number desc);
--- Wygasle lease trzeba znalezc szybko, zeby zadanie wrocilo do kolejki.
+-- Expired leases must be found quickly, so that the job goes back to the queue.
 create index job_attempts_lease_idx on job_attempts (lease_expires_at)
     where lease_expires_at is not null and finished_at is null;

@@ -1,21 +1,21 @@
-# Pakiet relaya dla Archa i pochodnych (CachyOS, EndeavourOS).
+# The relay package for Arch and its derivatives (CachyOS, EndeavourOS).
 #
-# PKGBUILD nie kompiluje kodu: bierze binarke, ktora juz przeszla testy,
-# dokladnie tak samo jak pakiety .deb i .rpm.
+# The PKGBUILD compiles no code: it takes the binary that already passed the
+# tests, exactly like the .deb and .rpm packages.
 pkgname=flotestro-relay
-pkgver=__WERSJA__
+pkgver=__VERSION__
 pkgrel=1
-pkgdesc='Relay lokalizacji Flotestro'
+pkgdesc='Flotestro site relay'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ultherego/flotestro'
 license=('LicenseRef-Flotestro')
 depends=('systemd' 'ca-certificates')
-# Konfiguracja lokalizacji przezywa aktualizacje pakietu; nowa wersja ladzie
-# obok jako .pacnew.
+# The site configuration survives package updates; the new version lands
+# next to it as .pacnew.
 backup=('etc/flotestro/relay.yaml')
-# Pakiet niesie gotowe binarki, wiec nie ma z czego zlozyc pakietu debug:
-# makepkg zrobilby pusty, a jego nazwa jest tak podobna, ze latwo wydac go
-# zamiast wlasciwego.
+# The package carries ready binaries, so there is nothing to compose a debug
+# package from: makepkg would make an empty one, and its name is so similar
+# that it is easy to release instead of the right one.
 options=('!debug')
 install=flotestro-relay.install
 source=(
@@ -25,7 +25,7 @@ source=(
   'flotestro-relay.tmpfiles'
   'relay.yaml'
 )
-sha256sums=(__SUMY__)
+sha256sums=(__SUMS__)
 
 package() {
   install -Dm755 flotestro-relay          "$pkgdir/usr/bin/flotestro-relay"

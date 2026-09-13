@@ -1,6 +1,6 @@
--- Fundament: tozsamosc hosta, PKI agenta, inventory i audyt.
--- Zgodnie z modelem danych: pola uzywane do filtrowania i autoryzacji sa
--- znormalizowane, surowy inventory trafia do JSONB.
+-- The foundation: host identity, the agent PKI, inventory and audit.
+-- Following the data model: the fields used for filtering and authorisation
+-- are normalised, the raw inventory goes into JSONB.
 
 create table hosts (
     id                       uuid primary key,
@@ -40,8 +40,8 @@ create index hosts_os_idx               on hosts (os_family, os_version);
 create index hosts_attention_idx        on hosts (reboot_required, failed_units)
     where reboot_required or failed_units > 0;
 
--- Token enrollmentu jest jednorazowy lub ograniczony liczba uzyc i zawsze
--- zwiazany z site/environment. W bazie trzymamy wylacznie skrot.
+-- An enrollment token is single-use or bounded by a use count, and always
+-- bound to a site/environment. Only the digest is kept in the database.
 create table enrollment_tokens (
     id          uuid        primary key,
     token_hash  bytea       not null unique,
@@ -85,8 +85,8 @@ create table host_capabilities (
     observed_at timestamptz not null default now()
 );
 
--- Rewizje sa niemutowalne. Ta sama tresc daje ta sama rewizje, wiec powtorzony
--- raport nie tworzy nowego wiersza.
+-- Revisions are immutable. The same content gives the same revision, so a
+-- repeated report does not create a new row.
 create table inventory_revisions (
     id             uuid        primary key,
     host_id        uuid        not null references hosts (id) on delete cascade,
@@ -118,7 +118,7 @@ create table agent_sessions (
 create index agent_sessions_host_idx   on agent_sessions (host_id, started_at desc);
 create index agent_sessions_active_idx on agent_sessions (gateway_id) where ended_at is null;
 
--- Audyt jest append-only. Kazda sciezka sukcesu i bledu tworzy zdarzenie.
+-- The audit log is append-only. Every success and failure path creates an event.
 create table audit_events (
     id           bigserial   primary key,
     occurred_at  timestamptz not null default now(),
@@ -138,7 +138,7 @@ create index audit_events_actor_idx  on audit_events (actor_type, actor_id, occu
 
 create or replace function audit_events_immutable() returns trigger as $$
 begin
-    raise exception 'audit_events jest append-only: % nie jest dozwolone', tg_op;
+    raise exception 'audit_events is append-only: % is not allowed', tg_op;
 end;
 $$ language plpgsql;
 

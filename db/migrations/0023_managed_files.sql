@@ -1,9 +1,9 @@
--- Pliki konfiguracyjne zarzadzane przez panel.
+-- Configuration files managed by the panel.
 --
--- Stan docelowy trzymamy w panelu, a nie tylko na hoscie: bez tego nie da sie
--- powiedziec, czy plik na hoscie zostal zmieniony poza panelem, ani wrocic do
--- tresci sprzed zmiany. Tresci sa adresowane odciskiem, wiec ta sama
--- konfiguracja na stu hostach zajmuje miejsce raz.
+-- The desired state is kept in the panel, not only on the host: without it
+-- there is no telling whether the file on the host was changed outside the
+-- panel, nor going back to the content from before the change. Content is
+-- addressed by digest, so the same configuration on a hundred hosts takes space once.
 create table if not exists file_versions (
     sha256     text        primary key,
     content    bytea       not null,
@@ -24,8 +24,8 @@ create table if not exists managed_files (
     primary key (host_id, path)
 );
 
--- Historia zmian pliku. Rollback jest powrotem do konkretnej wersji, a nie
--- "cofnij ostatnia zmiane": operator wybiera tresc, ktora widzial.
+-- The change history of a file. A rollback is a return to a specific version,
+-- not "undo the last change": the operator picks the content they saw.
 create table if not exists managed_file_history (
     id         uuid        primary key default gen_random_uuid(),
     host_id    uuid        not null references hosts(id) on delete cascade,
@@ -36,5 +36,5 @@ create table if not exists managed_file_history (
     applied_at timestamptz not null default now()
 );
 
-create index if not exists managed_file_history_plik_idx
+create index if not exists managed_file_history_path_idx
     on managed_file_history(host_id, path, applied_at desc);

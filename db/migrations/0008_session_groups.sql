@@ -1,4 +1,4 @@
--- Grupy z tokenu tozsamosci sa zapamietane w sesji. Mapowanie na role liczymy
--- przy kazdym zadaniu, wiec zmiana polityki dziala bez ponownego logowania
--- uzytkownika, a zmiana czlonkostwa w katalogu przy nastepnym logowaniu.
+-- The groups from the identity token are remembered in the session. The role
+-- mapping is computed on every request, so a policy change works without the
+-- user logging in again, and a membership change in the directory at the next login.
 alter table web_sessions add column groups text[] not null default '{}';

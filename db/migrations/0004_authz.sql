@@ -1,6 +1,6 @@
--- Model autoryzacji: uprawnienie to para operacja + zakres. Role nie opieraja
--- sie na jednym szerokim admin=true, bo odczyt logow, restart uslugi
--- i zatwierdzanie zmian to rozne poziomy zaufania.
+-- The authorisation model: a permission is a pair of operation + scope. Roles
+-- are not based on one broad admin=true, because reading logs, restarting a
+-- service and approving changes are different levels of trust.
 
 create table principals (
     id           uuid        primary key,
@@ -13,8 +13,8 @@ create table principals (
     updated_at   timestamptz not null default now()
 );
 
--- Token API jest tymczasowym uwierzytelnieniem do czasu wlaczenia OIDC.
--- W bazie trzymamy wylacznie skrot, tak samo jak dla tokenow enrollmentu.
+-- An API token is a temporary authentication until OIDC is enabled.
+-- Only the digest is kept in the database, just like for enrollment tokens.
 create table api_tokens (
     id           uuid        primary key,
     principal_id uuid        not null references principals (id) on delete cascade,
@@ -29,8 +29,8 @@ create table api_tokens (
 
 create index api_tokens_principal_idx on api_tokens (principal_id) where revoked_at is null;
 
--- Rola jest zawsze przypisana w konkretnym zakresie. Gwiazdka oznacza dowolna
--- wartosc, wiec operator moze miec prawa tylko na staging w jednej lokalizacji.
+-- A role is always assigned within a specific scope. An asterisk means any
+-- value, so an operator may have rights only on staging in one site.
 create table role_bindings (
     id           uuid        primary key,
     principal_id uuid        not null references principals (id) on delete cascade,

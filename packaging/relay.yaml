@@ -1,42 +1,47 @@
-# Konfiguracja relaya Flotestro.
+# The configuration of the Flotestro relay.
 #
-# Relay jest opcjonalnym komponentem lokalizacji i osobna granica zaufania:
-# konczy polaczenie agenta i sam swiadczy centrali, czyj to ruch. Dlatego ma
-# wlasny plik, wlasne konto uslugowe i wlasny katalog stanu.
+# The relay is an optional site component and a separate trust boundary: it
+# terminates the agent connection and attests to the centre itself whose
+# traffic it is. That is why it has its own file, its own service account
+# and its own state directory.
 #
-# Czego tu nie ma i nie moze byc:
-#   - tokenu enrollmentu - to sekret jednorazowy, a ten plik przezywa
-#     aktualizacje pakietu i trafia do kopii zapasowych,
-#   - tozsamosci relaya - bierze sie ona z certyfikatu, a nie z tekstu.
+# What is not here and cannot be:
+#   - the enrollment token - it is a one-time secret, and this file survives
+#     package updates and ends up in backups,
+#   - the relay identity - it comes from the certificate, not from text.
 schema_version: 1
 
 relay:
-  # Nazwa relaya. Jest kluczem naturalnym w rejestrze centrali: ponowna
-  # instalacja tej samej nazwy odswieza wpis, a nie tworzy drugi.
+  # The relay name. It is the natural key in the centre's registry:
+  # reinstalling the same name refreshes the entry instead of creating a
+  # second one.
   name: ""
 
-  # Wartosc oczekiwana. Zakres nadaje token enrollmentu i to on rozstrzyga;
-  # rozjazd oznacza, ze plik opisuje inna lokalizacje niz certyfikat.
+  # The expected value. The scope is granted by the enrollment token and that
+  # is what decides; a mismatch means the file describes a different site
+  # than the certificate.
   site: ""
 
-  # Relay dziala bez uprawnien roota, wiec port jest powyzej 1024.
+  # The relay runs without root privileges, so the port is above 1024.
   listen: "0.0.0.0:8453"
 
-  # Nazwy, pod ktorymi agenci lokalizacji widza relay. Wchodza do certyfikatu
-  # serwerowego; zmiana nazw wymaga decyzji operatora w panelu, bo odnowienie
-  # wystawia wylacznie to, co centrala ma zapisane w rejestrze.
+  # The names the site agents see the relay under. They enter the server
+  # certificate; changing the names requires an operator decision in the
+  # panel, because a renewal issues only what the centre has recorded in the
+  # registry.
   advertised_names: []
 
   state_dir: "/var/lib/flotestro-relay"
 
-  # Limit bufora wynikow na czas awarii lacza do centrali. Zero znaczy
-  # "nie buforuj": wyniki z czasu awarii przepadaja wtedy swiadomie.
+  # The limit of the result buffer for the duration of an outage of the link
+  # to the centre. Zero means "do not buffer": the results from the outage
+  # are then lost deliberately.
   buffer_max_bytes: 268435456
 
 upstream:
   enrollment_url: ""
-  # Bramy centrali w kolejnosci priorytetu.
+  # The centre gateways in priority order.
   gateway_urls: []
-  # Bundle CA floty do pierwszego polaczenia. Po enrollmencie relay uzywa
-  # kopii zapisanej w katalogu stanu.
+  # The fleet CA bundle for the first connection. After enrollment the relay
+  # uses the copy saved in the state directory.
   bootstrap_ca_file: "/var/lib/flotestro-relay/ca.pem"

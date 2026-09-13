@@ -6,83 +6,88 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1;agentv1";
 
-// EnrollmentService jest wystawiany na osobnym listenerze, ktory nie wymaga
-// certyfikatu klienta. Jest to jedyny punkt, w ktorym agent bez tozsamosci
-// moze rozmawiac z control plane.
+// EnrollmentService is exposed on a separate listener that requires no
+// client certificate. It is the only point where an agent without an
+// identity may talk to the control plane.
 service EnrollmentService {
   rpc Enroll(EnrollRequest) returns (EnrollResponse);
 }
 
-// AgentService wymaga mTLS. Tozsamosc hosta pochodzi wylacznie z certyfikatu
-// klienta, nigdy z tresci wiadomosci.
+// AgentService requires mTLS. The host identity comes only from the client
+// certificate, never from the message body.
 service AgentService {
   rpc Connect(stream AgentMessage) returns (stream ServerMessage);
-  // RenewCertificate wymienia nowy CSR na certyfikat. Tozsamosc pochodzi
-  // z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
-  // nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
-  // wejsciem dla hosta bez tozsamosci.
+  // RenewCertificate exchanges a new CSR for a certificate. The identity
+  // comes from the current client certificate, not from the request body, so
+  // a renewal neither requires nor may use an enrollment token: the token is
+  // a one-time entry for a host without an identity.
   rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
-  // Ping sprawdza lacznosc z centrala bez zadnego skutku ubocznego.
+  // Ping checks connectivity with the centre without any side effect.
   //
-  // Relay potrzebuje sposobu na stwierdzenie, ze lacze wrocilo, zanim wysle
-  // cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
-  // kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
+  // A relay needs a way to tell that the link is back before it sends
+  // anything that matters. Probing the link by sending real messages costs
+  // losing those messages if the link does not work after all.
   rpc Ping(PingRequest) returns (PingResponse);
-  // FetchSecret wydaje wartosc sekretu na czas wykonania jednego zadania.
+  // FetchSecret issues a secret value for the duration of one job.
   //
-  // Wartosc nie jedzie w kopercie zadania: koperta niesie sam odnosnik, a host
-  // siega po tresc dopiero wtedy, gdy zaczyna operacje. Dzieki temu wartosci
-  // nie ma ani w zadaniu, ani w audycie, ani w inwentarzu - jest wylacznie
-  // w magazynie i przez chwile w pamieci hosta.
+  // The value does not travel in the job envelope: the envelope carries only
+  // a reference, and the host fetches the content only when it starts the
+  // operation. Thanks to that the value is neither in the job, nor in the
+  // audit log, nor in the inventory - it is only in the store and briefly in
+  // the host's memory.
   rpc FetchSecret(FetchSecretRequest) returns (FetchSecretResponse);
 }
 
-// RelayService obsluguje relaye lokalizacji. Jest osobna usluga, bo relay
-// jest osobna granica zaufania: jego certyfikat ma inny rodzaj tozsamosci
-// i inny czas zycia, a operacje hosta nie sa dla niego dostepne.
+// RelayService serves the site relays. It is a separate service, because a
+// relay is a separate trust boundary: its certificate has a different kind
+// of identity and a different lifetime, and host operations are not
+// available to it.
 //
-// Odnowienie certyfikatu agenta nie moze obsluzyc relaya: tamto RPC oczekuje
-// tozsamosci hosta w URI SAN i slusznie odrzuca wszystko inne.
+// The agent certificate renewal cannot serve a relay: that RPC expects a
+// host identity in the URI SAN and rightly rejects everything else.
 service RelayService {
-  // RenewCertificate wymienia CSR relaya na nowy certyfikat. Tozsamosc
-  // pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
+  // RenewCertificate exchanges the relay's CSR for a new certificate. The
+  // identity comes from the current client certificate, not from the request
+  // body.
   rpc RenewCertificate(RenewRelayCertificateRequest) returns (RenewRelayCertificateResponse);
-  // Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
+  // Ping checks the relay's connectivity with the centre and refreshes its
+  // last presence.
   rpc Ping(RelayPingRequest) returns (RelayPingResponse);
-  // ProxyEnroll przekazuje zgloszenie hosta z izolowanej lokalizacji.
+  // ProxyEnroll forwards a host enrollment from an isolated site.
   //
-  // Relay nie podpisuje niczego sam: CA floty zostaje w centrali. Relay jest
-  // terminatorem TLS, wiec widzi token - i wlasnie dlatego zgloszenie idzie
-  // jego kanalem mTLS, a nie publicznym endpointem enrollmentu. Centrala wie
-  // wtedy, ktora lokalizacja poswiadcza to zgloszenie, i moze odmowic
-  // tokenowi wyniesionemu gdzie indziej.
+  // The relay signs nothing itself: the fleet CA stays in the centre. The
+  // relay is the TLS terminator, so it sees the token - and that is exactly
+  // why the enrollment goes over its mTLS channel, not the public enrollment
+  // endpoint. The centre then knows which site attests to this enrollment
+  // and can refuse a token carried elsewhere.
   rpc ProxyEnroll(ProxyEnrollRequest) returns (EnrollResponse);
 }
 
 message ProxyEnrollRequest {
-  // Zgloszenie hosta w postaci, w jakiej przyszlo do relaya. Relay go nie
-  // zmienia: gdyby mogl, tozsamosc hosta zalezalaby od posrednika.
+  // The host enrollment in the form it arrived at the relay. The relay does
+  // not change it: if it could, the host identity would depend on the
+  // intermediary.
   EnrollRequest enrollment = 1;
 }
 
 message RenewRelayCertificateRequest {
-  // ClientRequestId czyni ponowienie idempotentnym: zerwane polaczenie po
-  // wystawieniu certyfikatu nie moze zostawic relaya bez tozsamosci ani
-  // wygenerowac drugiej.
+  // ClientRequestId makes a retry idempotent: a connection broken after the
+  // certificate was issued must neither leave the relay without an identity
+  // nor generate a second one.
   string client_request_id = 1;
   bytes csr_pem = 2;
   AgentBuild build = 3;
-  // AdvertisedNames sa zyczeniem, a nie deklaracja. Centrala wystawia
-  // wylacznie te nazwy, ktore relay ma zapisane w rejestrze: zmiana nazw
-  // jest decyzja operatora, nie odnowieniem certyfikatu.
+  // AdvertisedNames are a wish, not a declaration. The centre issues only the
+  // names the relay has recorded in the registry: a name change is an
+  // operator decision, not a certificate renewal.
   repeated string advertised_names = 4;
 }
 
 message RenewRelayCertificateResponse {
   bytes certificate_pem = 1;
-  // ClientCaBundlePem sluzy relayowi do weryfikacji certyfikatow agentow
-  // jego lokalizacji. Rotacja CA floty dochodzi do relaya ta droga, zanim
-  // nowy issuer zacznie wystawiac certyfikaty hostom.
+  // ClientCaBundlePem serves the relay to verify the certificates of the
+  // agents of its site. A fleet CA rotation reaches the relay this way before
+  // the new issuer starts issuing certificates to hosts.
   bytes client_ca_bundle_pem = 2;
   google.protobuf.Timestamp not_after = 3;
 }
@@ -91,14 +96,15 @@ message RelayPingRequest {}
 
 message RelayPingResponse {
   google.protobuf.Timestamp server_time = 1;
-  // Sesje mowi, ilu agentow centrala widzi jako polaczonych przez ten relay.
-  // Rozjazd z liczba lokalna jest pierwszym objawem sesji, ktora zawisla.
+  // Sessions says how many agents the centre sees as connected through this
+  // relay. A mismatch with the local count is the first symptom of a hung
+  // session.
   uint32 sessions = 2;
 }
 
 message FetchSecretRequest {
-  // TaskId wiaze pobranie z konkretnym zadaniem: dzierzawa jest wystawiona
-  // dla niego i dla tego hosta.
+  // TaskId binds the fetch to a specific job: the lease is issued for it and
+  // for this host.
   string task_id = 1;
   string secret_name = 2;
   uint32 secret_version = 3;
@@ -107,7 +113,7 @@ message FetchSecretRequest {
 message FetchSecretResponse {
   bytes value = 1;
   uint32 version = 2;
-  // Sha256 pozwala hostowi sprawdzic, ze dostal to, co panel wydal.
+  // Sha256 lets the host check that it got what the panel issued.
   string sha256 = 3;
 }
 
@@ -119,8 +125,8 @@ message PingResponse {
 }
 
 message RenewCertificateRequest {
-  // CSR w formacie PEM. Klucz prywatny nigdy nie opuszcza hosta; przy
-  // odnowieniu agent moze wygenerowac nowa pare kluczy.
+  // The CSR in PEM form. The private key never leaves the host; at renewal
+  // the agent may generate a new key pair.
   bytes csr_pem = 1;
   AgentBuild build = 2;
 }
@@ -133,17 +139,17 @@ message RenewCertificateResponse {
 
 message EnrollRequest {
   string enrollment_token = 1;
-  // Stabilny identyfikator maszyny, zwykle /etc/machine-id.
+  // The stable machine identifier, usually /etc/machine-id.
   string machine_id = 2;
   string hostname = 3;
-  // CSR w formacie PEM. Klucz prywatny nigdy nie opuszcza hosta.
+  // The CSR in PEM form. The private key never leaves the host.
   bytes csr_pem = 4;
   AgentBuild build = 5;
-  // Identyfikator jednej proby enrollmentu, staly przy ponowieniach.
+  // The identifier of one enrollment attempt, constant across retries.
   //
-  // Odpowiedz moze zginac po tym, jak panel zapisal hosta i wystawil
-  // certyfikat. Agent ponawia wtedy ta sama probe i po tym identyfikatorze
-  // dostaje ten sam certyfikat zamiast odmowy "token zuzyty".
+  // The response may get lost after the panel recorded the host and issued
+  // the certificate. The agent then retries the same attempt and by this
+  // identifier gets the same certificate instead of a "token spent" refusal.
   string client_request_id = 6;
 }
 
@@ -181,18 +187,21 @@ message ServerMessage {
   }
 }
 
-// Hello jest pierwsza wiadomoscia w streamie. Gateway odrzuca stream, w ktorym
-// pierwsza wiadomosc jest inna.
+// Hello is the first message in the stream. The gateway rejects a stream
+// whose first message is anything else.
 message Hello {
   string agent_version = 1;
-  // Zmiana boot_id oznacza restart hosta i konczy faze reboot kampanii.
+  // A boot_id change means a host reboot and ends the reboot phase of a
+  // campaign.
   string boot_id = 2;
   Capabilities capabilities = 3;
-  // Ostatnia rewizja inventory znana agentowi; pozwala serwerowi zazadac full.
+  // The last inventory revision known to the agent; lets the server demand a
+  // full one.
   string inventory_revision = 4;
-  // Adres, z ktorego agent zestawil to polaczenie. Panel widzi na swoim koncu
-  // adres relaya, gdy host laczy sie przez relay lokalizacji - wtedy jest to
-  // jedyne zrodlo adresu samego hosta. Puste oznacza adres nieustalony.
+  // The address the agent set this connection up from. At its end the panel
+  // sees the relay address when the host connects through a site relay - then
+  // this is the only source of the host's own address. Empty means an
+  // undetermined address.
   string local_address = 5;
 }
 
@@ -212,12 +221,12 @@ message Heartbeat {
   HealthSignals health = 2;
 }
 
-// HealthSignals celowo zawiera tylko sygnaly decyzyjne. Pelne metryki hosta
-// naleza do node_exportera, nie do heartbeatu.
+// HealthSignals deliberately carries only the decision signals. Full host
+// metrics belong to node_exporter, not to the heartbeat.
 //
-// Pola optional oznaczaja stan nieustalony. Agent, ktory nie zdolal odczytac
-// wartosci, nie wysyla jej wcale. Brak wartosci nigdy nie moze byc mylony
-// z zerem ani z falszem: nieudany odczyt nie jest faktem o hoscie.
+// Optional fields mean an undetermined state. An agent that failed to read a
+// value does not send it at all. A missing value must never be confused with
+// zero or false: a failed read is not a fact about the host.
 message HealthSignals {
   optional uint32 failed_units = 1;
   optional bool reboot_required = 2;
@@ -228,31 +237,33 @@ message HealthSignals {
   optional uint32 pending_security_updates = 7;
 }
 
-// Capability opisuje jeden adapter na hoscie. Nazwa mowi, co to za adapter,
-// a nie czego chce operacja: operacja pyta o "packages", host odpowiada
-// "packages.apt".
+// Capability describes one adapter on the host. The name says what adapter
+// it is, not what the operation wants: the operation asks for "packages",
+// the host answers "packages.apt".
 message Capability {
   string name = 1;
-  // Wersja kontraktu adaptera, nie wersja narzedzia. Wersja narzedzia jest
-  // faktem o hoscie i nalezy do inventory.
+  // The adapter contract version, not the tool version. The tool version is
+  // a fact about the host and belongs to the inventory.
   uint32 version = 2;
   bool available = 3;
-  // Adapter, ktory potrafi czytac, ale nie zmieniac. Wylaczona zakladka
-  // i zakladka bez przyciskow to dwie rozne informacje dla operatora.
+  // An adapter that can read but not change. A disabled tab and a tab
+  // without buttons are two different pieces of information for the
+  // operator.
   bool read_only = 4;
-  // Powod niedostepnosci albo ograniczenia. Bez niego interfejs musi zgadywac,
-  // dlaczego czegos nie ma - a zgaduje w kodzie przegladarki, wiec zle.
+  // The reason for the unavailability or limitation. Without it the
+  // interface has to guess why something is missing - and it guesses in
+  // browser code, so badly.
   string reason = 5;
-  // Czesci adaptera, ktore moga istniec osobno. Naprawa bazy pakietow dziala
-  // tylko dla apta i host ma to powiedziec, zanim zadanie zostanie wyslane.
+  // Parts of the adapter that may exist separately. Package database repair
+  // works only for apt and the host is to say so before the job is sent.
   map<string, bool> features = 6;
 }
 
 message Capabilities {
-  // Pola logiczne sa zaszloscia sprzed rejestru. Agent w starszej wersji nie
-  // przysyla rejestru wcale, a flota aktualizuje sie stopniowo: serwer musi
-  // wtedy odtworzyc rejestr z tych pol, zamiast uznac host za pozbawiony
-  // wszystkich adapterow.
+  // The boolean fields are a leftover from before the registry. An older
+  // agent version sends no registry at all, and the fleet updates
+  // gradually: the server must then reconstruct the registry from those
+  // fields instead of considering the host stripped of all adapters.
   bool systemd = 1;
   bool apt = 2;
   bool dnf = 3;
@@ -262,8 +273,9 @@ message Capabilities {
 }
 
 message InventoryReport {
-  // Rewizja liczona przez agenta z tresci raportu; identyczna tresc daje
-  // identyczna rewizje, wiec serwer moze pominac zapis bez zmian.
+  // The revision computed by the agent from the report content; identical
+  // content gives an identical revision, so the server may skip a write
+  // without changes.
   string revision = 1;
   bool full = 2;
   string schema_version = 3;
@@ -272,76 +284,80 @@ message InventoryReport {
   PackageSummary packages = 6;
   IdentityState identity = 8;
   repeated LocalAccount local_accounts = 9;
-  // Pelny raport w JSON trafia do JSONB. Pola normalizowane sa wyzej.
+  // The full report in JSON goes into JSONB. The normalised fields are above.
   bytes raw_json = 7;
-  // Raport rozbity na moduly. Kazdy modul ma wlasna rewizje i wlasny znacznik
-  // obserwacji, wiec zmiana jednego nie przepisuje calosci, a interfejs wie,
-  // jak swieza jest akurat ta zakladka, ktora operator oglada.
+  // The report split into modules. Every module has its own revision and its
+  // own observation timestamp, so a change of one does not rewrite the
+  // whole, and the interface knows how fresh exactly the tab the operator
+  // looks at is.
   repeated InventoryFragment fragments = 10;
 }
 
-// InventoryFragment to stan jednego modulu hosta.
+// InventoryFragment is the state of one host module.
 message InventoryFragment {
   string module = 1;
-  // Rewizja liczona z tresci fragmentu. Identyczna tresc daje identyczna
-  // rewizje, wiec serwer nie przepisuje wiersza bez zmiany.
+  // The revision computed from the fragment content. Identical content gives
+  // an identical revision, so the server does not rewrite the row without a
+  // change.
   string revision = 2;
-  // Skad pochodzi odczyt, np. "agent/systemctl". Operator patrzacy na dane
-  // ma wiedziec, czym zostaly zmierzone.
+  // Where the read comes from, e.g. "agent/systemctl". An operator looking at
+  // the data is to know what it was measured with.
   string source = 3;
   bytes payload = 4;
-  // Powod, dla ktorego stanu nie udalo sie ustalic. Pusty modul i modul
-  // nieodczytany to dwie rozne informacje.
+  // The reason the state could not be determined. An empty module and an
+  // unread module are two different pieces of information.
   string unavailable_reason = 5;
   google.protobuf.Timestamp observed_at = 6;
 }
 
-// IdentityState opisuje stan integracji hosta z domena. Zbierany w cyklu
-// inventory, nigdy przy heartbeacie: pelna lista uzytkownikow nie moze byc
-// pobierana kilka razy na minute z kazdego hosta floty.
+// IdentityState describes the state of the host's domain integration.
+// Collected in the inventory cycle, never at a heartbeat: the full user list
+// must not be fetched several times a minute from every host of the fleet.
 //
-// Pola optional oznaczaja stan nieustalony. Host niepodlaczony do domeny to
-// inna informacja niz host, ktorego stanu nie udalo sie odczytac.
+// Optional fields mean an undetermined state. A host not joined to the
+// domain is different information than a host whose state could not be
+// read.
 message IdentityState {
   bool enrolled = 1;
   string domain = 2;
   string realm = 3;
-  // Serwery domeny wykryte lokalnie, bez odpytywania katalogu.
+  // The domain servers discovered locally, without querying the directory.
   repeated string servers = 4;
 
   bool sssd_installed = 5;
   bool sssd_running = 6;
-  // Brak wartosci oznacza, ze stanu polaczenia nie udalo sie ustalic.
+  // A missing value means the connection state could not be determined.
   optional bool sssd_online = 7;
-  // Wiek cache SSSD w sekundach; rosnacy wiek przy offline oznacza, ze host
-  // dziala na coraz starszej kopii polityk.
+  // The age of the SSSD cache in seconds; a growing age while offline means
+  // the host runs on an ever older copy of the policies.
   optional uint64 cache_age_seconds = 8;
 
   string host_principal = 9;
   optional uint32 keytab_kvno = 10;
-  // Rozjazd zegara psuje Kerberos zanim zepsuje cokolwiek innego.
+  // Clock skew breaks Kerberos before it breaks anything else.
   optional double clock_skew_seconds = 11;
   bool time_synchronized = 12;
 
-  // Uwagi z kontroli konfiguracji SSSD.
+  // Remarks from the SSSD configuration check.
   repeated string config_issues = 13;
-  // Powod, dla ktorego stanu nie udalo sie ustalic.
+  // The reason the state could not be determined.
   string unavailable_reason = 14;
 }
 
-// LocalAccount opisuje konto widoczne na hoscie.
+// LocalAccount describes an account visible on the host.
 //
-// Zrodlo konta jest istotne: konto lokalne, konto z katalogu i konto
-// systemowe wymagaja innego traktowania, a panel nie moze tworzyc lokalnej
-// kopii konta domenowego, bo przeslonilaby ona tozsamosc z katalogu.
+// The account source matters: a local account, a directory account and a
+// system account need different handling, and the panel must not create a
+// local copy of a domain account, because it would shadow the identity from
+// the directory.
 message LocalAccount {
   enum Source {
     SOURCE_UNSPECIFIED = 0;
-    // Konto z /etc/passwd o identyfikatorze z zakresu uzytkownikow.
+    // An account from /etc/passwd with an identifier from the user range.
     SOURCE_LOCAL = 1;
-    // Konto rozwiazywane przez NSS z katalogu, nieobecne w /etc/passwd.
+    // An account resolved by NSS from the directory, absent from /etc/passwd.
     SOURCE_DIRECTORY = 2;
-    // Konto systemowe: uslugi, nie ludzie.
+    // A system account: services, not people.
     SOURCE_SYSTEM = 3;
   }
 
@@ -353,20 +369,23 @@ message LocalAccount {
   string gecos = 6;
   Source source = 7;
   repeated string groups = 8;
-  // Locked oznacza konto zablokowane administracyjnie (prefiks "!" w shadow).
-  // Puste oznacza, ze stanu nie udalo sie ustalic; odczyt wymaga roota.
+  // Locked means an administratively locked account (the "!" prefix in
+  // shadow). Empty means the state could not be determined; the read
+  // requires root.
   //
-  // Konto bez hasla nie jest zablokowane: konto zalozone przez panel loguje
-  // sie kluczem SSH i ma uwierzytelnianie haslem wylaczone, co jest czym
-  // innym niz odciecie dostepu.
+  // An account without a password is not locked: an account created by the
+  // panel logs in with an SSH key and has password authentication disabled,
+  // which is something other than cutting off access.
   optional bool locked = 9;
-  // Klucze publiczne opisane odciskiem; sama tresc klucza nie jest przesylana.
+  // Public keys described by fingerprint; the key content itself is not
+  // sent.
   repeated SSHKey ssh_keys = 10;
-  // Powod, dla ktorego czesci danych nie udalo sie ustalic.
+  // The reason part of the data could not be determined.
   string unavailable_reason = 11;
-  // PasswordSet mowi, czy konto ma haslo nadajace sie do logowania. Konto
-  // bez hasla i bez kluczy jest niedostepne, a konto bez hasla z kluczem
-  // jest dostepne wylacznie kluczem; panel musi te przypadki rozrozniac.
+  // PasswordSet says whether the account has a password usable for login. An
+  // account without a password and without keys is unreachable, and an
+  // account without a password with a key is reachable only by key; the
+  // panel must tell these cases apart.
   optional bool password_set = 12;
 }
 
@@ -374,7 +393,8 @@ message SSHKey {
   string fingerprint = 1;
   string type = 2;
   string comment = 3;
-  // Zrodlo klucza: plik authorized_keys na hoscie albo katalog tozsamosci.
+  // The key source: the authorized_keys file on the host or the identity
+  // directory.
   string source = 4;
 }
 
@@ -395,9 +415,9 @@ message HardwareInfo {
   string virtualization = 5;
 }
 
-// PackageSummary rozroznia "zero aktualizacji" od "nie udalo sie ustalic".
-// Adapter, ktory zawiodl, zostawia licznik pusty i opisuje powod w
-// unavailable_reason, zamiast raportowac zero.
+// PackageSummary tells "zero updates" from "could not be determined". An
+// adapter that failed leaves the counter empty and describes the reason in
+// unavailable_reason instead of reporting zero.
 message PackageSummary {
   optional uint32 installed = 1;
   optional uint32 upgradable = 2;
@@ -407,19 +427,20 @@ message PackageSummary {
 }
 
 
-// Koperta zadania. Kontrakt podstawowy celowo nie zawiera pola shell_command:
-// zdalne wykonanie dowolnego ciagu shellowego nie jest operacja, tylko luka.
+// The job envelope. The base contract deliberately has no shell_command
+// field: remote execution of an arbitrary shell string is not an operation,
+// only a hole.
 message TaskEnvelope {
   string task_id = 1;
-  // Klucz rozpoznawania ponownego dostarczenia. Handler musi zwrocic poprzedni
-  // wynik zamiast wykonywac mutacje drugi raz.
+  // The key for recognising a redelivery. The handler must return the
+  // previous result instead of performing the mutation a second time.
   string idempotency_key = 2;
   string campaign_id = 3;
   google.protobuf.Timestamp created_at = 4;
-  // Bezwzgledny TTL. Zadanie po terminie nie jest wykonywane nawet wtedy, gdy
-  // dotarlo do agenta po powrocie sieci.
+  // Absolute TTL. A job past its deadline is not executed even when it
+  // reached the agent after the network came back.
   google.protobuf.Timestamp expires_at = 5;
-  // Integralnosc planu zatwierdzonego przez czlowieka.
+  // The integrity of the plan approved by a human.
   bytes payload_hash = 6;
   Preconditions preconditions = 7;
   Limits limits = 8;
@@ -466,38 +487,40 @@ message TaskEnvelope {
   }
 }
 
-// RefreshInventory zamawia ponowny odczyt inwentarza.
+// RefreshInventory orders a fresh read of the inventory.
 //
-// Operacja nie zmienia hosta - i wlasnie dlatego istnieje osobno. Panel widzi
-// obraz sprzed ostatniego cyklu, a decyzje przed kampania albo po recznej
-// zmianie na hoscie musza opierac sie na stanie z tej chwili, a nie sprzed
-// kwadransa.
+// The operation does not change the host - and that is exactly why it exists
+// separately. The panel sees the image from before the last cycle, and a
+// decision before a campaign or after a manual change on the host must rest
+// on the state of this moment, not of a quarter of an hour ago.
 message RefreshInventory {
-  // Modules ogranicza odczyt do wskazanych modulow. Puste znaczy caly
-  // inwentarz. Nazwy sa te same, ktorymi inwentarz dzieli sie na fragmenty.
+  // Modules limits the read to the named modules. Empty means the whole
+  // inventory. The names are the same ones the inventory splits into
+  // fragments by.
   repeated string modules = 1;
 }
 
-// AgentUpgrade wymienia samego agenta. Wynik tej operacji nie wraca ta sama
-// droga co inne: proces, ktory ja wykonuje, zostaje w polowie zastapiony,
-// wiec rozstrzyga ja powrot hosta z oczekiwana wersja.
+// AgentUpgrade replaces the agent itself. The result of this operation does
+// not come back the same way as others: the process that carries it out is
+// replaced halfway through, so the host coming back with the expected
+// version settles it.
 message AgentUpgrade {
   string target_version = 1;
-  // Suma pakietu z wydania. Menedzer sprawdza podpis repozytorium, a to jest
-  // drugie, niezalezne sprawdzenie.
+  // The package checksum from the release. The manager checks the repository
+  // signature, and this is a second, independent check.
   string package_sha256 = 2;
-  // Wersja, do ktorej wrocic, gdy host nie wroci z nowa. Pusta oznacza brak
-  // przygotowanego powrotu.
+  // The version to go back to when the host does not come back with the new
+  // one. Empty means no prepared rollback.
   string rollback_version = 3;
 }
 
-// Preconditions sa sprawdzane lokalnie tuz przed wykonaniem. Stan bazowy mogl
-// zmienic sie miedzy zatwierdzeniem planu a dostarczeniem zadania.
+// Preconditions are checked locally right before execution. The base state
+// may have changed between approving the plan and delivering the job.
 message Preconditions {
   string os_family = 1;
   repeated string required_capabilities = 2;
-  // Pusty boot_id oznacza brak wymagania. Niezgodnosc znaczy, ze host zdazyl
-  // sie zrestartowac od czasu planowania.
+  // An empty boot_id means no requirement. A mismatch means the host managed
+  // to reboot since planning.
   string expected_boot_id = 3;
 }
 
@@ -506,7 +529,7 @@ message Limits {
   uint32 max_output_bytes = 2;
 }
 
-// ActorContext pozwala agentowi zapisac lokalnie, kto zlecil zmiane.
+// ActorContext lets the agent record locally who ordered the change.
 message ActorContext {
   string actor_id = 1;
   string request_id = 2;
@@ -528,73 +551,77 @@ message UnitAction {
 message ReadJournal {
   string unit = 1;
   uint32 lines = 2;
-  // Priorytet wg syslog: 0 emerg ... 7 debug. Puste oznacza brak filtra.
+  // The syslog priority: 0 emerg ... 7 debug. Empty means no filter.
   optional uint32 max_priority = 3;
   string since = 4;
 }
 
-// SystemReboot restartuje hosta. Restart jest osobna faza kampanii, a nie
-// efektem ubocznym aktualizacji.
+// SystemReboot restarts the host. A reboot is a separate campaign phase, not
+// a side effect of an update.
 message SystemReboot {
-  // Opoznienie daje agentowi czas na odeslanie wyniku, zanim host zniknie.
+  // The delay gives the agent time to send the result back before the host
+  // disappears.
   uint32 delay_seconds = 1;
   string reason = 2;
 }
 
-// SystemShutdown wylacza hosta. Inaczej niz restart, konczy sie stanem,
-// z ktorego panel nie potrafi hosta wyprowadzic: wlaczenie wymaga dostepu
-// poza pasmem.
+// SystemShutdown powers the host off. Unlike a reboot, it ends in a state
+// the panel cannot bring the host out of: powering on requires out-of-band
+// access.
 message SystemShutdown {
   uint32 delay_seconds = 1;
   string reason = 2;
-  // Mode rozroznia wylaczenie zasilania od zatrzymania systemu.
+  // Mode tells powering off from halting the system.
   string mode = 3;
-  // IgnoreInhibitors przechodzi nad blokadami logind. Bez tego host
-  // z blokada odsyla ja jako powod odmowy, a nie wylacza sie po cichu.
+  // IgnoreInhibitors steps over the logind inhibitors. Without it a host
+  // with an inhibitor sends it back as the refusal reason instead of quietly
+  // shutting down.
   bool ignore_inhibitors = 4;
 }
 
 message PowerResult {
   bytes snapshot = 1;
   string message = 2;
-  // Inhibitors niesie blokady, ktore wstrzymaly operacje.
+  // Inhibitors carries the inhibitors that held the operation back.
   bytes inhibitors = 3;
   string scheduled_at = 4;
 }
 
-// ReadUnitStatus odczytuje stan jednostek. Operacja niemutujaca, uzywana przez
-// health checki kampanii i widok hosta.
-// ReadUnitStatus czyta stan jednostek. Pusta lista przy all = true oznacza
-// pelny wykaz hosta; to inny koszt niz odczyt kilku znanych z nazwy, wiec
-// musi byc zamowiony jawnie.
+// ReadUnitStatus reads the unit state. A non-mutating operation used by the
+// campaign health checks and the host view. An empty list with all = true
+// means the full listing of the host; that is a different cost than reading
+// a few known by name, so it must be ordered explicitly.
 message ReadUnitStatus {
   repeated string units = 1;
   bool all = 2;
 }
 
-// DomainEnroll dolacza hosta do domeny katalogu.
+// DomainEnroll joins the host to the directory domain.
 //
-// Jednorazowe haslo jest wstrzykiwane do koperty w chwili wysylki i nie jest
-// przechowywane w bazie: wspolne haslo administratora rozeslane do wszystkich
-// hostow byloby dokladnie tym, przed czym broni sie dokument.
+// The one-time password is injected into the envelope at dispatch and is
+// not stored in the database: a shared administrator password sent out to
+// all the hosts would be exactly what the document defends against.
 message DomainEnroll {
   string domain = 1;
   string realm = 2;
   string server = 3;
-  // Krotkotrwale haslo jednorazowe wygenerowane przez katalog dla tego hosta.
+  // A short-lived one-time password generated by the directory for this
+  // host.
   string one_time_password = 4;
-  // Preflight bez dolaczania: sprawdza warunki i nie zmienia stanu hosta.
+  // A preflight without joining: checks the conditions and does not change
+  // the host state.
   bool preflight_only = 5;
-  // Nazwa FQDN, pod ktora host ma zostac zarejestrowany.
+  // The FQDN the host is to be registered under.
   string hostname = 6;
 }
 
-// LocalUserAction zarzadza kontem lokalnym na hoscie. Modul jest przeznaczony
-// dla instalacji bez katalogu: tam, gdzie dziala FreeIPA lub inny katalog,
-// konta ludzi pochodza z katalogu i panel ich nie duplikuje.
+// LocalUserAction manages a local account on the host. The module is meant
+// for installations without a directory: where FreeIPA or another directory
+// runs, people's accounts come from the directory and the panel does not
+// duplicate them.
 //
-// Konta zakladane sa bez hasla. Dostep daje wylacznie klucz SSH, wiec panel
-// nigdy nie przenosi ani nie przechowuje sekretu uwierzytelniajacego.
+// Accounts are created without a password. Only an SSH key gives access, so
+// the panel never carries or stores an authentication secret.
 message LocalUserAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -608,29 +635,30 @@ message LocalUserAction {
   string gecos = 3;
   string shell = 4;
   repeated string groups = 5;
-  // Pelna, zamierzona lista kluczy publicznych. Operacja jest deklaratywna:
-  // pusta lista odbiera dostep, a nie oznacza "nie zmieniaj".
+  // The full, intended list of public keys. The operation is declarative: an
+  // empty list revokes access, it does not mean "do not change".
   repeated string ssh_keys = 6;
   bool create_home = 7;
 }
 
 message LocalUserResult {
   string name = 1;
-  // Changed rozroznia realna zmiane od zgodnosci ze stanem zadanym.
+  // Changed tells a real change from conformance with the requested state.
   bool changed = 2;
-  // Account jest stanem konta po operacji. Puste, gdy konta nie ma.
+  // Account is the account state after the operation. Empty when the
+  // account does not exist.
   LocalAccount account = 3;
 }
 
-// PackagesRepair odblokowuje operacje pakietowe na hoscie.
+// PackagesRepair unblocks package operations on the host.
 //
-// Operacja niesie odpowiedzi na pytania konfiguracyjne, ktore zablokowaly
-// pakiet. Odpowiedzi pochodza od operatora, nie od panelu: wybor urzadzenia
-// rozruchowego czy sposobu obslugi plikow konfiguracyjnych to decyzja, ktorej
-// maszyna nie powinna podejmowac za czlowieka.
+// The operation carries the answers to the configuration questions that
+// blocked a package. The answers come from the operator, not from the panel:
+// picking the boot device or the way configuration files are handled is a
+// decision a machine should not make for a human.
 //
-// Bez odpowiedzi operacja jedynie ponawia dokonczenie konfiguracji - to
-// wystarcza, gdy poprzednia transakcja zostala przerwana.
+// Without answers the operation merely retries finishing the configuration
+// - that is enough when the previous transaction was interrupted.
 message PackagesRepair {
   repeated DebconfAnswer answers = 1;
 }
@@ -638,16 +666,17 @@ message PackagesRepair {
 message DebconfAnswer {
   string package = 1;
   string question = 2;
-  // Typ pytania w rozumieniu debconfa: select, multiselect, boolean, string.
+  // The question type as debconf understands it: select, multiselect,
+  // boolean, string.
   string type = 3;
   string value = 4;
 }
 
 message PackageRepairResult {
   string manager = 1;
-  // Pakiety, ktore po naprawie nadal blokuja operacje pakietowe.
+  // Packages that still block package operations after the repair.
   repeated BlockedPackage still_blocked = 2;
-  // Pytania, na ktore faktycznie ustawiono odpowiedz.
+  // Questions an answer was actually set for.
   repeated string answered = 3;
   bool repaired = 4;
 }
@@ -657,37 +686,38 @@ message CancelTask {
   string reason = 2;
 }
 
-// TaskProgress niesie czesciowy output dlugotrwalego zadania.
-// TaskProgress niesie postep operacji, ktora trwa na tyle dlugo, ze operator
-// musi widziec, na czym stoi. Postep jest ulotny: nie zastepuje wyniku, nie
-// jest zapisywany i nie wolno wnioskowac z niego o rezultacie.
-//
-// Postep jest opisany polami, a nie surowym wyjsciem narzedzia. Strumien
-// bajtow z apta trafialby na ekran operatora bez zadnej kontroli tresci,
-// a i tak nie dalby sie pokazac jako pasek.
-// TaskLogLines niesie kawalek podgladu dziennika. Linie sa ulotne: nie sa
-// zapisywane i nie zastepuja wyniku operacji.
+// TaskLogLines carries a piece of the journal preview. The lines are
+// transient: they are not recorded and do not replace the operation result.
 message TaskLogLines {
   string task_id = 1;
   repeated string lines = 2;
-  // Dropped mowi, ile linii pominieto, gdy host produkowal je szybciej niz
-  // pozwala limit tempa. Ciche pominiecie kazaloby operatorowi wierzyc, ze
-  // widzi wszystko.
+  // Dropped says how many lines were skipped when the host produced them
+  // faster than the rate limit allows. A quiet skip would make the operator
+  // believe they see everything.
   uint32 dropped = 3;
 }
 
+// TaskProgress carries the progress of an operation that lasts long enough
+// for the operator to need to see where it stands. Progress is transient: it
+// does not replace the result, it is not recorded and the result must not be
+// inferred from it.
+//
+// Progress is described by fields, not by the raw tool output. A byte stream
+// from apt would land on the operator's screen without any content control,
+// and still could not be shown as a bar.
 message TaskProgress {
   string task_id = 1;
   bytes chunk = 2;
   bool stderr = 3;
-  // Krok i liczba krokow, gdy narzedzie je podaje. Zero oznacza nieznane
-  // i nie moze byc pokazane jako zero krokow.
+  // The step and the step count, when the tool gives them. Zero means
+  // unknown and must not be shown as zero steps.
   uint32 step = 4;
   uint32 total = 5;
-  // Procent podawany osobno, bo apt zna procent bez krokow, a dnf kroki bez
-  // procentu. Brak pola oznacza postep nieustalony.
+  // The percentage given separately, because apt knows the percentage
+  // without steps, and dnf the steps without a percentage. A missing field
+  // means undetermined progress.
   optional uint32 percent = 6;
-  // Co sie akurat dzieje, np. "Upgrading nfs-utils".
+  // What is happening right now, e.g. "Upgrading nfs-utils".
   string message = 7;
 }
 
@@ -697,9 +727,9 @@ message TaskResult {
     STATUS_SUCCEEDED = 1;
     STATUS_FAILED = 2;
     STATUS_TIMED_OUT = 3;
-    // Odrzucone lokalnie: niespelnione preconditions, zajety lock, zla wersja.
+    // Rejected locally: unmet preconditions, a taken lock, a wrong version.
     STATUS_REJECTED = 4;
-    // Dotarlo po TTL i nie zostalo wykonane.
+    // Arrived after the TTL and was not executed.
     STATUS_EXPIRED = 5;
     STATUS_CANCELED = 6;
   }
@@ -711,20 +741,20 @@ message TaskResult {
   bytes stdout = 5;
   bytes stderr = 6;
   bool output_truncated = 7;
-  // Stabilny kod maszynowy, niezalezny od jezyka i wersji narzedzia.
+  // A stable machine code, independent of the language and the tool version.
   string error_code = 8;
   string message = 9;
   google.protobuf.Timestamp started_at = 10;
   google.protobuf.Timestamp finished_at = 11;
-  // Stan jednostki przed i po zmianie pozwala odroznic "restart wykonany"
-  // od "restart wykonany i jednostka nadal nie dziala".
+  // The unit state before and after the change lets "restart done" be told
+  // from "restart done and the unit still does not run".
   UnitState unit_state_before = 12;
   UnitState unit_state_after = 13;
-  // Prawda, gdy wynik pochodzi z lokalnego dziennika idempotencji.
+  // True when the result comes from the local idempotency journal.
   bool replayed = 14;
 
-  // Wynik wlasciwy dla typu operacji. Kazda operacja ma typowany rezultat,
-  // a nie tylko tekst do przeczytania przez czlowieka.
+  // The result specific to the operation type. Every operation has a typed
+  // result, not only text for a human to read.
   oneof detail {
     PackagePlanResult package_plan = 20;
     PackageApplyResult package_apply = 21;
@@ -759,22 +789,22 @@ message TaskResult {
   InventoryRefreshResult inventory_refresh_result = 48;
 }
 
-// InventoryRefreshResult niesie dowod odswiezenia.
+// InventoryRefreshResult carries the proof of the refresh.
 //
-// Samo przyjecie zadania niczego nie dowodzi: odczyt moglby sie nie udac albo
-// nie dojsc. Dowodem jest rewizja obrazu, ktory z tego odczytu powstal.
+// Accepting the job alone proves nothing: the read could fail or not
+// arrive. The proof is the revision of the image that came out of that read.
 message InventoryRefreshResult {
   string revision = 1;
-  // Changed mowi, czy obraz rozni sie od poprzedniego. Brak zmiany nie jest
-  // bledem: host, ktory sie nie zmienil, jest prawdziwa odpowiedzia.
+  // Changed says whether the image differs from the previous one. No change
+  // is not an error: a host that did not change is a true answer.
   bool changed = 2;
-  // Modules wylicza to, co naprawde zostalo odczytane. Puste znaczy caly
-  // inwentarz.
+  // Modules lists what was really read. Empty means the whole inventory.
   repeated string modules = 3;
 }
 
-// UnitState rozdziela stany, ktore systemd rozroznia, a UI czesto skleja.
-// Dzieki temu "running" nie ukrywa jednostki w petli auto-restartu.
+// UnitState separates the states systemd tells apart and UIs often glue
+// together. Thanks to that "running" does not hide a unit in an auto-restart
+// loop.
 message UnitState {
   string name = 1;
   string load_state = 2;
@@ -787,31 +817,32 @@ message UnitState {
 }
 
 
-// PackagePlan liczy, co zostaloby zaktualizowane. Nie zmienia stanu systemu
-// poza opcjonalnym odswiezeniem metadanych repozytorium.
+// PackagePlan computes what would be updated. It does not change the system
+// state beyond an optional refresh of the repository metadata.
 message PackagePlan {
-  // Odswiezenie metadanych wymaga roota i blokady, wiec jest jawnym wyborem,
-  // a nie efektem ubocznym kazdego planu.
+  // A metadata refresh requires root and a lock, so it is an explicit
+  // choice, not a side effect of every plan.
   bool refresh_metadata = 1;
-  // Pusta lista oznacza wszystkie dostepne aktualizacje.
+  // An empty list means all available updates.
   repeated string only_packages = 2;
   bool security_only = 3;
-  // Rodzaj planu: upgrade (domyslny), install albo remove. Plan usuniecia
-  // liczy co innego, ale odpowiada na to samo pytanie: co ta operacja zmieni.
+  // The plan kind: upgrade (the default), install or remove. A removal plan
+  // computes something else, but answers the same question: what this
+  // operation changes.
   string mode = 4;
 }
 
-// PackageUpgrade wykonuje transakcje menedzera pakietow.
+// PackageUpgrade carries out a package manager transaction.
 message PackageUpgrade {
-  // Hash planu policzony przez agenta przy planowaniu. Niezgodnosc oznacza,
-  // ze metadane repozytorium zmienily sie miedzy planem a wykonaniem.
+  // The plan hash computed by the agent at planning. A mismatch means the
+  // repository metadata changed between the plan and the execution.
   bytes plan_hash = 1;
-  // Pusta lista oznacza wszystkie pakiety z planu.
+  // An empty list means all the packages from the plan.
   repeated string packages = 2;
   bool security_only = 3;
 }
 
-// PackageChange opisuje jedna zmiane wersji.
+// PackageChange describes one version change.
 message PackageChange {
   string name = 1;
   string current_version = 2;
@@ -825,32 +856,33 @@ message PackagePlanResult {
   repeated PackageChange changes = 2;
   uint64 download_bytes = 3;
   uint64 disk_available_bytes = 4;
-  // Hash tresci planu; wykonanie porownuje go ze swoim, zeby nie zastosowac
-  // innego zestawu pakietow niz zatwierdzony.
+  // The hash of the plan content; the execution compares it with its own, so
+  // as not to apply a different package set than the approved one.
   bytes plan_hash = 5;
   bool reboot_predicted = 6;
-  // Prawda, gdy metadane zostaly odswiezone w ramach tego planu.
+  // True when the metadata was refreshed as part of this plan.
   bool metadata_refreshed = 7;
-  // Pakiety blokujace transakcje: czekaja na dokonczenie konfiguracji albo
-  // sa uszkodzone. Dopoki taki pakiet istnieje, zadna aktualizacja na tym
-  // hoscie sie nie powiedzie, bo menedzer pakietow najpierw probuje dokonczyc
-  // jego konfiguracje.
+  // Packages blocking transactions: waiting for their configuration to be
+  // finished or broken. As long as such a package exists, no update on this
+  // host succeeds, because the package manager first tries to finish its
+  // configuration.
   repeated BlockedPackage blocked = 8;
   string mode = 9;
-  // Pakiety, ktore zniknelyby razem z wskazanymi. Usuniecie jednego pakietu
-  // potrafi pociagnac kilkadziesiat zaleznych.
+  // Packages that would go away together with the named ones. Removing one
+  // package can pull dozens of dependants.
   repeated string removals = 10;
-  // Pakiety chronione, ktore znalazly sie w planie. Ich obecnosc oznacza,
-  // ze operacja nie zostanie wykonana.
+  // Protected packages that ended up in the plan. Their presence means the
+  // operation will not be carried out.
   repeated string protected = 11;
 }
 
-// BlockedPackage opisuje pakiet blokujacy operacje pakietowe wraz z pytaniami
-// konfiguracyjnymi, na ktore nikt nie odpowiedzial.
+// BlockedPackage describes a package blocking package operations together
+// with the configuration questions nobody answered.
 //
-// Bez tych pytan operator wie tylko tyle, ze cos jest nie tak; z nimi widzi,
-// jaka decyzje ma podjac. Odpowiedzi nie zgaduje panel: wybor moze dotyczyc
-// na przyklad urzadzenia, na ktore zapisze sie bootloader.
+// Without those questions the operator knows only that something is wrong;
+// with them they see which decision they have to make. The panel does not
+// guess the answers: the choice may concern, for example, the device the
+// bootloader is written to.
 message BlockedPackage {
   string name = 1;
   string status = 2;
@@ -860,67 +892,67 @@ message BlockedPackage {
 message DebconfQuestion {
   string name = 1;
   string value = 2;
-  // Answered mowi, czy pytanie ma juz odpowiedz uznana przez system za
-  // udzielona. Puste nie znaczy "nie": stanu moglo sie nie dac ustalic.
+  // Answered says whether the question already has an answer the system
+  // considers given. Empty does not mean "no": the state may have been
+  // impossible to determine.
   optional bool answered = 3;
 }
 
 message PackageApplyResult {
   string manager = 1;
-  // Wersje przed i po transakcji sa zapisywane zawsze, takze przy bledzie.
+  // The versions before and after the transaction are always recorded, also
+  // on failure.
   repeated PackageChange applied = 2;
   bool reboot_required = 3;
-  // Jednostki wymagajace restartu po aktualizacji bibliotek.
+  // Units needing a restart after a library update.
   repeated string services_needing_restart = 4;
-  // Prawda, gdy po awarii dpkg zostal w stanie wymagajacym naprawy.
-  // Kolejne kampanie na tym hoscie musza zostac wstrzymane.
+  // True when after the failure dpkg was left in a state needing repair.
+  // Further campaigns on this host must be paused.
   bool package_database_broken = 5;
-  // Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+  // Packages waiting for their configuration to be finished or broken.
   //
-  // Sama informacja "baza pakietow wymaga naprawy" nie mowi operatorowi, co
-  // ma zrobic. Typowy przypadek to pakiet z pytaniem konfiguracyjnym bez
-  // odpowiedzi, na przyklad bootloader pytajacy o urzadzenie docelowe: kazda
-  // kolejna transakcja probuje go najpierw dokonfigurowac i pada, nawet gdy
-  // nie ma nic do aktualizacji.
+  // The bare information "the package database needs repair" does not tell
+  // the operator what to do. The typical case is a package with an
+  // unanswered configuration question, for example a bootloader asking for
+  // the target device: every next transaction first tries to configure it
+  // and fails, even when there is nothing to update.
   repeated string packages_needing_attention = 6;
-  // Co adapter naprawil sam przed ponowieniem transakcji. Sam naprawia
-  // wylacznie to, co ma jedna poprawna odpowiedz - uszkodzony plik
-  // w pamieci podrecznej. Pytanie konfiguracyjne pakietu jej nie ma
-  // i zostaje dla operatora.
+  // What the adapter repaired itself before retrying the transaction. It
+  // repairs on its own only what has one correct answer - a corrupted file
+  // in the cache. A package configuration question has none and stays for
+  // the operator.
   repeated string self_repair = 7;
-  // Koncowka wyjscia narzedzia przy niepowodzeniu. Jedno zdanie mowi, ze cos
-  // padlo; kontekst mowi dlaczego, a logowanie sie na host po kazdej nieudanej
-  // transakcji jest tym, czego panel ma oszczedzic.
+  // The tail of the tool output on failure. One sentence says something
+  // failed; the context says why, and logging into the host after every
+  // failed transaction is what the panel is to spare.
   repeated string output = 8;
 }
 
 
-// DockerRead zleca odczyt stanu silnika kontenerow. Zakres wynika z operacji,
-// a nie z parametru: odczyt lekki i odczyt pelny maja rozna cene dla hosta,
-// wiec nie moga byc ta sama operacja.
+// DockerRead orders a read of the container engine state. The scope follows
+// from the operation, not from a parameter: a light read and a full read
+// have a different price for the host, so they cannot be the same operation.
 message DockerRead {}
 
-// DockerReadResult niesie stan silnika w postaci JSON. Struktura nalezy do
-// modulu kontenerow; kontrakt agenta jej nie powtarza.
-// ReadDockerEvents zleca odczyt dziennika zdarzen silnika kontenerow.
+// ReadDockerEvents orders a read of the container engine event log.
 //
-// Odczyt jest zamkniety w oknie czasu i w limitach. Zadanie, ktore czyta
-// zdarzenia "do odwolania", zostaloby na hoscie na zawsze - a operator i tak
-// pyta o to, co stalo sie wokol jednej awarii.
+// The read is closed in a time window and in limits. A job that reads
+// events "until further notice" would stay on the host forever - and the
+// operator asks anyway about what happened around one failure.
 message ReadDockerEvents {
-  // SinceSeconds mowi, jak daleko wstecz siegnac.
+  // SinceSeconds says how far back to reach.
   uint32 since_seconds = 1;
-  // FollowSeconds przedluza odczyt poza chwile obecna. Zero znaczy sam
-  // dziennik przeszly - zadanie konczy sie od razu.
+  // FollowSeconds extends the read beyond the present moment. Zero means the
+  // past log alone - the job ends at once.
   uint32 follow_seconds = 2;
-  // Types ogranicza rodzaje zdarzen: container, image, network, volume.
-  // Pusta lista znaczy wszystkie cztery.
+  // Types limits the event kinds: container, image, network, volume. An
+  // empty list means all four.
   repeated string types = 3;
-  // MaxEvents ogranicza liczbe zwroconych zdarzen.
+  // MaxEvents bounds the number of returned events.
   uint32 max_events = 4;
 }
 
-// DockerAction zleca jedna operacje na silniku kontenerow.
+// DockerAction orders one operation on the container engine.
 message DockerAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -939,16 +971,15 @@ message DockerAction {
   repeated string image_ids = 6;
   repeated string volume_names = 7;
   repeated string network_ids = 8;
-  // Nazwa kontenera sluzy potwierdzeniu i audytowi. Jest czescia payloadu,
-  // wiec musi dojechac do agenta - inaczej hash planu przestaje sie zgadzac
-  // i operacja zostaje odrzucona jako podmieniona.
+  // The container name serves the confirmation and the audit. It is part of
+  // the payload, so it must reach the agent - otherwise the plan hash stops
+  // matching and the operation is rejected as swapped.
   string container_name = 9;
 }
 
-// ComposeAction zleca plan albo wdrozenie projektu Compose.
-// UnitToggle zmienia to, co host zrobi po restarcie: wlaczenie jednostki albo
-// jej zamaskowanie. Pole jest wartoscia docelowa, a nie przelacznikiem -
-// powtorzenie operacji nie odwraca zmiany.
+// UnitToggle changes what the host does after a reboot: enabling a unit or
+// masking it. The field is a desired value, not a toggle - repeating the
+// operation does not reverse the change.
 message UnitToggle {
   enum Property {
     PROPERTY_UNSPECIFIED = 0;
@@ -960,15 +991,7 @@ message UnitToggle {
   bool value = 3;
 }
 
-// ReadLogFile czyta plik logu z allowlisty hosta.
-// FollowJournal zamawia podglad dziennika na zywo. Strumien jest krotkotrwaly
-// i ograniczony z gory: czasem, tempem i liczba linii - inaczej host pracowalby
-// dla nikogo, gdy operator zamknie karte.
-// ListProcesses zamawia snapshot procesow hosta.
-// PackageLifecycle dokłada, usuwa albo wstrzymuje pakiety. Nazwa jest inna
-// niz PackageChange, bo tamta opisuje zmiane wersji w wyniku transakcji,
-// a ta - zlecona operacje.
-// ScheduleAction opisuje operacje na zadaniu cyklicznym.
+// ScheduleAction describes an operation on a scheduled job.
 message ScheduleAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -993,8 +1016,8 @@ message ScheduleResult {
   string message = 2;
 }
 
-// NetworkAction opisuje zmiane konfiguracji sieci hosta. Kazda zmiana jest
-// uzbrajana lokalnym wycofaniem po stronie hosta.
+// NetworkAction describes a change of the host network configuration. Every
+// change is armed with a local rollback on the host side.
 message NetworkAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1004,7 +1027,8 @@ message NetworkAction {
     OPERATION_APPLY_PROFILE = 4;
     OPERATION_CONFIRM = 5;
     OPERATION_ROLLBACK = 6;
-    // Plan zmiany liczony na hoscie bez dotykania konfiguracji.
+    // The change plan computed on the host without touching the
+    // configuration.
     OPERATION_PLAN = 7;
   }
   Operation operation = 1;
@@ -1017,7 +1041,8 @@ message NetworkAction {
   repeated string dns = 8;
   uint32 rollback_seconds = 9;
   string rollback_id = 10;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 11;
 }
 
@@ -1026,22 +1051,24 @@ message NetworkResult {
   string message = 2;
   string rollback_id = 3;
   string rollback_deadline = 4;
-  // Confirmed mowi, czy agent zdazyl potwierdzic lacznosc przed terminem.
-  // Falsz przy zmianie, ktora sie udala, oznacza host wycofany przez zegar.
+  // Confirmed says whether the agent managed to confirm connectivity before
+  // the deadline. False for a change that succeeded means a host rolled back
+  // by the timer.
   bool confirmed = 5;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 6;
 }
 
-// DnsAction opisuje operacje na resolverze hosta.
+// DnsAction describes an operation on the host resolver.
 message DnsAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
-    // Test rozwiazywania nazw z hosta. Odpowiedz panelu nie mowi nic o tym,
-    // co zobaczy host, wiec pytanie zadaje host.
+    // A name resolution test from the host. The panel's answer says nothing
+    // about what the host sees, so the host asks the question.
     OPERATION_RESOLVE_TEST = 1;
     OPERATION_APPLY = 2;
-    // Plan zmiany resolvera liczony na hoscie bez dotykania konfiguracji.
+    // The resolver change plan computed on the host without touching the
+    // configuration.
     OPERATION_PLAN = 3;
   }
   Operation operation = 1;
@@ -1051,23 +1078,24 @@ message DnsAction {
   bool ignore_auto_dns = 5;
   uint32 rollback_seconds = 6;
   repeated string names = 7;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 8;
 }
 
 message DnsResult {
-  // Wyniki zapytan w postaci JSON. Struktura nalezy do modulu DNS.
+  // The query results in JSON form. The structure belongs to the DNS module.
   bytes queries = 1;
   bytes profiles = 2;
   string message = 3;
   string rollback_id = 4;
   string rollback_deadline = 5;
   bool confirmed = 6;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 7;
 }
 
-// FirewallAction opisuje operacje na zaporze hosta.
+// FirewallAction describes an operation on the host firewall.
 message FirewallAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1077,7 +1105,8 @@ message FirewallAction {
     OPERATION_ZONE_PORT = 4;
     OPERATION_ZONE_SERVICE = 5;
     OPERATION_RESTORE = 6;
-    // Policzenie roznicy miedzy regula zastana a zadana, bez zmiany.
+    // Computing the difference between the found and the requested rule,
+    // without a change.
     OPERATION_PLAN = 7;
   }
   Operation operation = 1;
@@ -1104,11 +1133,12 @@ message FirewallResult {
   string rollback_id = 3;
   string rollback_deadline = 4;
   bool confirmed = 5;
-  // Plan jest opisem roznicy miedzy regula zastana a zadana, w JSON.
+  // Plan describes the difference between the found and the requested rule,
+  // in JSON.
   bytes plan = 6;
 }
 
-// StorageAction opisuje operacje na przestrzeni dyskowej hosta.
+// StorageAction describes an operation on the host storage.
 message StorageAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1120,9 +1150,10 @@ message StorageAction {
     OPERATION_FS_RESIZE = 6;
     OPERATION_FS_CREATE = 7;
     OPERATION_DISK_WIPE = 8;
-    // Policzenie roznicy miedzy montowaniem zastanym a zadanym, bez zmiany.
+    // Computing the difference between the found and the requested mount,
+    // without a change.
     OPERATION_MOUNT_PLAN = 9;
-    // Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu.
+    // The plan of a check or an extension of a filesystem or a volume.
     OPERATION_DEVICE_PLAN = 10;
   }
   Operation operation = 1;
@@ -1134,16 +1165,17 @@ message StorageAction {
   string device = 7;
   string expected_uuid = 8;
   bool repair = 9;
-  // Tozsamosc urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
-  // /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
-  // ogladal.
+  // The device identity the plan expects. The path alone is not enough:
+  // /dev/sdb after a reboot can be a different disk than the one the
+  // operator looked at.
   string expected_serial = 10;
   uint64 expected_size_bytes = 11;
   string size = 12;
   string label = 13;
-  // Plan nazywa rodzaj planowanej operacji na urzadzeniu.
+  // Plan names the kind of the planned device operation.
   string plan = 14;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 15;
 }
 
@@ -1151,18 +1183,20 @@ message StorageResult {
   bytes snapshot = 1;
   string message = 2;
   string output = 3;
-  // Plan jest opisem roznicy miedzy montowaniem zastanym a zadanym, w JSON.
+  // Plan describes the difference between the found and the requested
+  // mount, in JSON.
   bytes plan = 4;
 }
 
-// SshAction opisuje operacje na serwerze sshd.
+// SshAction describes an operation on the sshd server.
 message SshAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_READ = 1;
     OPERATION_APPLY = 2;
     OPERATION_ROTATE_HOSTKEY = 3;
-    // Plan zmiany liczony na hoscie bez dotykania konfiguracji.
+    // The change plan computed on the host without touching the
+    // configuration.
     OPERATION_PLAN = 4;
   }
   Operation operation = 1;
@@ -1177,7 +1211,8 @@ message SshAction {
   repeated string deny_users = 10;
   bool allow_lockout = 11;
   string key_type = 12;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 13;
 }
 
@@ -1185,14 +1220,15 @@ message SshResult {
   bytes snapshot = 1;
   string message = 2;
   repeated string mismatches = 3;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 4;
 }
 
-// SecurityAction opisuje operacje modulu bezpieczenstwa.
+// SecurityAction describes an operation of the security module.
 //
-// Skan zbiera fakty, a nie oceny: zgodnosc z profilem liczy panel, bo tam sa
-// wersjonowane sprawdzenia i tam widac cala flote.
+// A scan gathers facts, not assessments: conformance with the profile is
+// computed by the panel, because that is where the versioned checks are and
+// where the whole fleet is visible.
 message SecurityAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1209,37 +1245,38 @@ message SecurityResult {
   string message = 2;
 }
 
-// ListPackages zamawia pelna liste zainstalowanych pakietow.
+// ListPackages orders the full list of installed packages.
 //
-// Lista jest duza i zmienia sie rzadko, wiec nie jedzie w kazdym cyklu
-// inwentarza: inwentarz niesie sam odcisk, a panel prosi o tresc dopiero
-// wtedy, gdy jego kopia przestaje ten odcisk opisywac.
+// The list is large and changes rarely, so it does not travel in every
+// inventory cycle: the inventory carries only the digest, and the panel asks
+// for the content only when its copy stops describing that digest.
 message ListPackages {
 }
 
 message InstalledPackagesResult {
-  // Packages niesie liste w postaci JSON: nazwa, epoka, wersja, wydanie,
-  // architektura i pakiet zrodlowy - komplet potrzebny do korelacji
-  // z trackerem bezpieczenstwa dystrybucji.
+  // Packages carries the list in JSON form: name, epoch, version, release,
+  // architecture and source package - the complete set needed for the
+  // correlation with the distribution security tracker.
   bytes packages = 1;
   string digest = 2;
   uint32 count = 3;
   string manager = 4;
   string unavailable_reason = 5;
-  // Advisories niesie ustalenia producenta znane hostowi z metadanych
-  // repozytoriow - dla dnf sa one zrodlem rozstrzygajacym, bo mowia
-  // o wersjach z tych samych repozytoriow, z ktorych host bierze pakiety.
-  // To sa fakty, a nie ocena: czy dotycza tego hosta, rozstrzyga panel.
+  // Advisories carries the vendor advisories known to the host from the
+  // repository metadata - for dnf they are the deciding source, because they
+  // speak of versions from the same repositories the host takes packages
+  // from. These are facts, not an assessment: whether they concern this
+  // host is decided by the panel.
   bytes advisories = 6;
   string advisories_unavailable_reason = 7;
 }
 
-// MonitoringProbe opisuje sonde wykonywana z hosta.
+// MonitoringProbe describes a probe carried out from the host.
 //
-// Sonda odpowiada na pytanie, ktorego monitoring centralny nie umie zadac:
-// co widzi ten host. Nie zmienia niczego i nie potrzebuje roota.
+// A probe answers the question central monitoring cannot ask: what this
+// host sees. It changes nothing and needs no root.
 message MonitoringProbe {
-  // Kind: http albo tcp.
+  // Kind: http or tcp.
   string kind = 1;
   string target = 2;
   int32 expect_status = 3;
@@ -1252,11 +1289,11 @@ message MonitoringResult {
   string message = 2;
 }
 
-// BackupAction opisuje operacje backupu.
+// BackupAction describes a backup operation.
 //
-// Dane backupowe nie plyna przez panel: host rozmawia z repozytorium wprost.
-// W kopercie sa metadane definicji i odnosniki do poswiadczen - nigdy same
-// poswiadczenia.
+// Backup data does not flow through the panel: the host talks to the
+// repository directly. The envelope holds the definition metadata and
+// references to credentials - never the credentials themselves.
 message BackupAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1277,42 +1314,45 @@ message BackupAction {
   int32 keep_weekly = 10;
   int32 keep_monthly = 11;
   bool prune = 12;
-  // Runbook wskazuje skrypt lezacy juz na hoscie. Tresci panel nie przesyla.
+  // Runbook points at a script already lying on the host. The panel does
+  // not send its content.
   string runbook = 13;
-  // Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+  // Initialize is consent to initialise the repository at the first copy.
   bool initialize = 21;
   SecretRef password_secret = 14;
-  // EnvSecrets przypisuje zmiennym srodowiska sekrety z magazynu.
+  // EnvSecrets maps environment variables to secrets from the store.
   map<string, SecretRef> env_secrets = 15;
   bool read_data = 16;
-  // Odtworzenie: cel i plan nadpisania sa obowiazkowe.
+  // Restore: the target and the overwrite policy are mandatory.
   string snapshot_id = 17;
   string target = 18;
   repeated string include = 19;
   string overwrite = 20;
-  // Plan nazywa rodzaj planowanej operacji: run albo verify.
+  // Plan names the kind of the planned operation: run or verify.
   string plan = 23;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 22;
 }
 
 message BackupResult {
-  // State niesie stan repozytorium po operacji planu.
+  // State carries the repository state after a plan operation.
   bytes state = 1;
-  // Outcome niesie wynik operacji zmieniajacej.
+  // Outcome carries the result of a changing operation.
   bytes outcome = 2;
   string message = 3;
-  // Plan kopii w postaci JSON przy OPERATION_PLAN z zakresem.
+  // The backup plan in JSON form for OPERATION_PLAN with a scope.
   bytes plan = 4;
-  // Verified mowi, ze po kopii host sprawdzil repozytorium.
+  // Verified says that after the copy the host checked the repository.
   bool verified = 5;
 }
 
-// RepositoryAction opisuje zrodlo pakietow.
+// RepositoryAction describes a package source.
 //
-// Klucz zrodla jedzie w kopercie, bo jest materialem publicznym i plan ma
-// pokazywac, czemu host zaufa. Hasla w kopercie nie ma: jest odnosnik do
-// magazynu, po ktory host siega dopiero przy zapisie.
+// The source key travels in the envelope, because it is public material and
+// the plan is to show whom the host will trust. The password is not in the
+// envelope: there is a reference to the store, which the host reaches for
+// only at the write.
 message RepositoryAction {
   string id = 1;
   string name = 2;
@@ -1322,52 +1362,57 @@ message RepositoryAction {
   repeated string architectures = 6;
   bool enabled = 7;
   int32 priority = 8;
-  // GPGKey jest kluczem publicznym zrodla w ramce ASCII.
+  // GPGKey is the public key of the source in an ASCII armour.
   string gpg_key = 9;
-  // AllowUnsigned jest zgoda na zrodlo, ktorego podpisow host nie sprawdza.
+  // AllowUnsigned is consent to a source whose signatures the host does not
+  // check.
   bool allow_unsigned = 10;
   string username = 11;
   SecretRef password_secret = 12;
-  // Remove usuwa zrodlo razem z jego kluczem i haslem.
+  // Remove removes the source together with its key and password.
   bool remove = 13;
 }
 
 message RepositoryResult {
-  // Snapshot niesie zrodla widziane na hoscie po zmianie.
+  // Snapshot carries the sources seen on the host after the change.
   bytes snapshot = 1;
   string message = 2;
-  // GpgKeyFingerprint jest odciskiem klucza, ktory naprawde wyladowal na
-  // hoscie. Tylko czlowiek moze porownac go z odciskiem dostawcy.
+  // GpgKeyFingerprint is the fingerprint of the key that really landed on
+  // the host. Only a human can compare it with the vendor's fingerprint.
   string gpg_key_fingerprint = 3;
-  // RolledBack mowi, ze host wrocil do poprzedniego opisu zrodla.
+  // RolledBack says the host went back to the previous source description.
   bool rolled_back = 4;
 }
 
-// CertificateTarget wskazuje plik certyfikatu wraz z tym, co panel o nim wie.
+// CertificateTarget points at a certificate file together with what the
+// panel knows about it.
 //
-// Powiazanie "ten plik czyta ta usluga" nie jest domyslem hosta: wpisuje je
-// czlowiek w panelu, bo tylko on je zna.
+// The binding "this file is read by this service" is not the host's guess:
+// a human types it in the panel, because only they know it.
 message CertificateTarget {
   string path = 1;
   string key_path = 2;
   string service = 3;
 }
 
-// CertificateAction opisuje operacje modulu certyfikatow.
+// CertificateAction describes an operation of the certificates module.
 //
-// Skan oglada wylacznie wskazane pliki oraz to, czego host pilnuje sam:
-// przeszukanie calego systemu plikow znajduje magazyn zaufania zamiast
-// certyfikatow uslug. Klucz prywatny nie jedzie w kopercie - jest w niej
-// odnosnik do magazynu, po ktory host siega dopiero przy wykonaniu.
+// A scan looks only at the named files and at what the host tracks itself:
+// searching the whole filesystem finds the trust store instead of service
+// certificates. The private key does not travel in the envelope - there is
+// a reference to the store in it, which the host reaches for only at
+// execution.
 message CertificateAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_SCAN = 1;
     OPERATION_DEPLOY = 2;
     OPERATION_RENEW = 3;
-    // Plan wdrozenia liczony na hoscie, bez siegania po klucz prywatny.
+    // The deployment plan computed on the host, without reaching for the
+    // private key.
     OPERATION_PLAN = 4;
-    // Magazyn zaufania: plan kroku rotacji urzedu i sam krok.
+    // The trust store: the plan of an authority rotation step and the step
+    // itself.
     OPERATION_TRUST_PLAN = 5;
     OPERATION_TRUST_ENSURE = 6;
     OPERATION_TRUST_REMOVE = 7;
@@ -1376,82 +1421,85 @@ message CertificateAction {
   repeated CertificateTarget targets = 2;
   string path = 3;
   string key_path = 4;
-  // Certificate jest trescia jawna: certyfikat wraz z lancuchem.
+  // Certificate is public content: the certificate together with its chain.
   string certificate = 5;
   SecretRef key_secret = 6;
   string owner = 7;
   string group = 8;
   string mode = 9;
   string key_mode = 10;
-  // ReloadUnit jest usluga, ktora ma przeczytac nowy plik.
+  // ReloadUnit is the service that is to read the new file.
   string reload_unit = 11;
-  // ProbeTarget jest adresem, pod ktorym host sprawdzi wynik wdrozenia.
+  // ProbeTarget is the address at which the host checks the deployment
+  // result.
   string probe_target = 12;
-  // Request wskazuje zlecenie certmongera przy odnowieniu.
+  // Request points at the certmonger request for a renewal.
   string request = 13;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 14;
-  // AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+  // AnchorId names the panel anchor in the host trust store.
   string anchor_id = 15;
 }
 
 message CertificateResult {
   bytes snapshot = 1;
   string message = 2;
-  // Fingerprint jest odciskiem certyfikatu, ktory naprawde wyladowal na
-  // hoscie - a nie tego, ktory panel wyslal.
+  // Fingerprint is the fingerprint of the certificate that really landed on
+  // the host - not of the one the panel sent.
   string fingerprint_sha256 = 3;
   string not_after = 4;
-  // Probe niesie odpowiedz uslugi po przeladowaniu.
+  // Probe carries the service answer after the reload.
   bytes probe = 5;
-  // RolledBack mowi, ze host wrocil do poprzedniego pliku. Wdrozenie, ktore
-  // sie cofnelo, nie moze wygladac jak wdrozenie, ktore sie nie udalo
-  // w polowie.
+  // RolledBack says the host went back to the previous file. A deployment
+  // that rolled back must not look like a deployment that failed halfway.
   bool rolled_back = 6;
-  // Plan wdrozenia w postaci JSON przy OPERATION_PLAN.
+  // The deployment plan in JSON form for OPERATION_PLAN.
   bytes plan = 7;
-  // Trust niesie magazyn zaufania hosta w postaci JSON.
+  // Trust carries the host trust store in JSON form.
   bytes trust = 8;
 }
 
-// TimeAction opisuje operacje na czasie hosta.
+// TimeAction describes an operation on the host time.
 //
-// Test jest osobna operacja, a nie czescia zmiany: serwer czasu trzeba
-// sprawdzic, zanim odbierze sie hostowi zrodlo, ktore dziala.
+// The test is a separate operation, not part of the change: a time server
+// has to be checked before the host is deprived of a source that works.
 message TimeAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
     OPERATION_SYNC_TEST = 1;
     OPERATION_CONFIG_APPLY = 2;
     OPERATION_TIMEZONE_SET = 3;
-    // Plan zmiany zrodel czasu liczony na hoscie bez dotykania konfiguracji.
+    // The time source change plan computed on the host without touching the
+    // configuration.
     OPERATION_PLAN = 4;
   }
   Operation operation = 1;
   repeated string servers = 2;
   repeated string probe = 3;
   string timezone = 4;
-  // AllowStep jest zgoda operatora na przestawienie zegara skokiem.
+  // AllowStep is the operator's consent to step the clock.
   bool allow_step = 5;
-  // EnableDropin jest zgoda na dopisanie do glownego pliku demona jednego
-  // wiersza, ktory wlacza katalog zrodel panelu. Bez niej host bez takiego
-  // katalogu zostaje tylko do odczytu.
+  // EnableDropin is consent to append to the daemon's main file one line
+  // that includes the panel's source directory. Without it a host without
+  // such a directory stays read-only.
   bool enable_dropin = 6;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 7;
 }
 
 message TimeResult {
   bytes snapshot = 1;
   string message = 2;
-  // Probes niesie pomiary zadane przez panel. Serwer, ktory nie odpowiedzial,
-  // ma tu powod, a nie przesuniecie rowne zeru.
+  // Probes carries the measurements the panel asked for. A server that did
+  // not answer has a reason here, not an offset of zero.
   bytes probes = 3;
-  // Plan zmiany w postaci JSON przy OPERATION_PLAN.
+  // The change plan in JSON form for OPERATION_PLAN.
   bytes plan = 4;
 }
 
-// KernelAction opisuje operacje na ustawieniach jadra.
+// KernelAction describes an operation on the kernel settings.
 message KernelAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1459,7 +1507,8 @@ message KernelAction {
     OPERATION_SYSCTL_ENSURE = 2;
     OPERATION_MODULE_LOAD = 3;
     OPERATION_MODULE_BLACKLIST = 4;
-    // Plan blokady modulu liczony na hoscie bez dotykania konfiguracji.
+    // The module blacklist plan computed on the host without touching the
+    // configuration.
     OPERATION_MODULE_PLAN = 5;
   }
   Operation operation = 1;
@@ -1467,7 +1516,8 @@ message KernelAction {
   repeated string keys = 3;
   string module = 4;
   bool blacklist = 5;
-  // Odcisk planu zatwierdzonego przez operatora; host liczy go jeszcze raz.
+  // The fingerprint of the plan approved by the operator; the host computes
+  // it once more.
   string plan_hash = 6;
 }
 
@@ -1476,18 +1526,18 @@ message KernelResult {
   string message = 2;
   repeated string pending_reboot = 3;
   repeated string applied_runtime = 4;
-  // Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+  // The module blacklist plan in JSON form for OPERATION_MODULE_PLAN.
   bytes plan = 5;
 }
 
-// SecretRef wskazuje sekret w magazynie panelu. Koperta zadania niesie
-// wylacznie odnosnik - nigdy wartosc.
+// SecretRef points at a secret in the panel store. The job envelope carries
+// only the reference - never the value.
 message SecretRef {
   string name = 1;
   uint32 version = 2;
 }
 
-// FileAction opisuje operacje na pliku konfiguracyjnym.
+// FileAction describes an operation on a configuration file.
 message FileAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1495,13 +1545,15 @@ message FileAction {
     OPERATION_ENSURE = 2;
     OPERATION_REMOVE = 3;
     OPERATION_LIST = 4;
-    // Powrot do wczesniejszej wersji jest na hoscie tym samym zapisem co
-    // ensure, ale operacja pozostaje osobna: hash planu obejmuje jej nazwe,
-    // a slad audytowy ma mowic, ze to byl powrot, a nie nowa tresc.
+    // A rollback to an earlier version is on the host the same write as
+    // ensure, but the operation stays separate: the plan hash covers its
+    // name, and the audit trail is to say it was a rollback, not new
+    // content.
     OPERATION_ROLLBACK = 5;
-    // Policzenie roznicy miedzy stanem zastanym a zadanym. Dwa hosty z tym
-    // samym stanem docelowym maja dwa rozne diffy, wiec kampania musi zapytac
-    // kazdy z osobna, zanim operator cokolwiek zatwierdzi.
+    // Computing the difference between the found and the requested state.
+    // Two hosts with the same desired state have two different diffs, so a
+    // campaign must ask each separately before the operator approves
+    // anything.
     OPERATION_PLAN = 6;
   }
   Operation operation = 1;
@@ -1512,9 +1564,9 @@ message FileAction {
   string group = 6;
   string expected_sha256 = 7;
   string validator = 8;
-  // ContentSecret wskazuje sekret, ktorego wartosc ma trafic do pliku.
-  // Wyklucza sie z polem content: albo tresc jest jawna, albo pochodzi
-  // z magazynu.
+  // ContentSecret points at the secret whose value is to go into the file.
+  // It excludes the content field: either the content is plain or it comes
+  // from the store.
   SecretRef content_secret = 9;
 }
 
@@ -1525,10 +1577,14 @@ message FileResult {
   string sha256 = 4;
   bool truncated = 5;
   string validator_output = 6;
-  // Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
+  // Plan describes the difference between the found and the requested
+  // state, in JSON.
   bytes plan = 7;
 }
 
+// PackageLifecycle installs, removes or holds packages. The name differs
+// from PackageChange, because that one describes a version change resulting
+// from a transaction, and this one - the ordered operation.
 message PackageLifecycle {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1540,20 +1596,22 @@ message PackageLifecycle {
   repeated string packages = 2;
   repeated string expected_removals = 3;
   bool hold = 4;
-  // Odcisk planu instalacji zatwierdzonego przez operatora; host liczy plan
-  // jeszcze raz i odmawia, gdy metadane repozytorium sie zmienily.
+  // The fingerprint of the installation plan approved by the operator; the
+  // host computes the plan once more and refuses when the repository
+  // metadata changed.
   string plan_hash = 5;
 }
 
+// ListProcesses orders a snapshot of the host processes.
 message ListProcesses {
-  // Sortowanie decyduje, ktore procesy trafia do wyniku, gdy jest ich wiecej
-  // niz limit.
+  // The sort order decides which processes end up in the result when there
+  // are more of them than the limit.
   string sort_by = 1;
   uint32 limit = 2;
 }
 
-// SignalProcess wysyla sygnal do procesu zwiazanego z czasem startu. Sam PID
-// nie identyfikuje procesu: jadro uzywa numerow ponownie.
+// SignalProcess sends a signal to a process bound to its start time. The
+// PID alone does not identify a process: the kernel reuses the numbers.
 message SignalProcess {
   int32 pid = 1;
   uint64 expected_start_ticks = 2;
@@ -1568,19 +1626,24 @@ message ProcessListResult {
 message ProcessSignalResult {
   int32 pid = 1;
   string signal = 2;
-  // Command zapisany w chwili wyslania: audyt ma pokazac, co zostalo ubite,
-  // a nie sam numer, ktory zaraz przestanie cokolwiek znaczyc.
+  // Command recorded at the moment of sending: the audit is to show what was
+  // killed, not the bare number that will soon stop meaning anything.
   string command = 3;
 }
 
+// FollowJournal orders a live journal preview. The stream is short-lived
+// and bounded from above: by time, by rate and by line count - otherwise the
+// host would work for nobody once the operator closes the tab.
 message FollowJournal {
   string unit = 1;
   optional uint32 max_priority = 2;
-  // Ile ostatnich linii pokazac na poczatku, zanim zacznie sie podglad.
+  // How many of the last lines to show at the start, before the preview
+  // begins.
   uint32 backlog_lines = 3;
   uint32 follow_seconds = 4;
 }
 
+// ReadLogFile reads a log file from the host allowlist.
 message ReadLogFile {
   string path = 1;
   uint32 lines = 2;
@@ -1594,6 +1657,7 @@ message LogFileResult {
   string allowlist = 5;
 }
 
+// ComposeAction orders a plan or a deployment of a Compose project.
 message ComposeAction {
   enum Operation {
     OPERATION_UNSPECIFIED = 0;
@@ -1619,17 +1683,19 @@ message DockerActionResult {
   string image_digest = 5;
 }
 
+// DockerReadResult carries the engine state in JSON form. The structure
+// belongs to the containers module; the agent contract does not repeat it.
 message DockerReadResult {
   bytes snapshot = 1;
   string unavailable_reason = 2;
 }
 
-// DockerEventsResult niesie zdarzenia z zamknietego okna czasu.
+// DockerEventsResult carries the events from a closed time window.
 message DockerEventsResult {
-  // Zdarzenia w postaci JSON. Struktura nalezy do modulu kontenerow.
+  // The events in JSON form. The structure belongs to the containers module.
   bytes events = 1;
-  // Truncated oznacza odczyt urwany limitem liczby albo rozmiaru. Urwana
-  // lista bez tego znacznika wygladalaby na kompletna.
+  // Truncated means a read cut short by the count or size limit. A cut list
+  // without this marker would look complete.
   bool truncated = 2;
   string truncated_reason = 3;
   string unavailable_reason = 4;
@@ -1637,27 +1703,28 @@ message DockerEventsResult {
 
 message UnitStatusResult {
   repeated UnitState units = 1;
-  // Truncated oznacza wykaz urwany limitem. Urwana lista bez tego znacznika
-  // wygladalaby na pelna.
+  // Truncated means a listing cut short by the limit. A cut list without
+  // this marker would look full.
   bool truncated = 2;
 }
 
 
 message DomainEnrollResult {
-  // Checks to wyniki preflightu; kazdy ma nazwe, wynik i opis.
+  // Checks are the preflight results; each has a name, a result and a
+  // description.
   repeated PreflightCheck checks = 1;
   bool enrolled = 2;
   string host_principal = 3;
-  // Verifications potwierdzaja dzialanie NSS, PAM, Kerberos i sudo po
-  // dolaczeniu. Dopiero one pozwalaja uznac enrollment za zakonczony.
+  // Verifications confirm that NSS, PAM, Kerberos and sudo work after the
+  // join. Only they allow the enrollment to be considered complete.
   repeated PreflightCheck verifications = 4;
 }
 
 message PreflightCheck {
   string name = 1;
-  // Passed jest puste, gdy stanu nie udalo sie ustalic.
+  // Passed is empty when the state could not be determined.
   optional bool passed = 2;
   string detail = 3;
-  // Blocking oznacza warunek, ktorego niespelnienie wyklucza dolaczenie.
+  // Blocking means a condition whose failure rules out the join.
   bool blocking = 4;
 }

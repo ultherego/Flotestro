@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// TestJednostkiChronioneSaOdrzucane sprawdza, ze operacja na jednostce, ktorej
-// zatrzymanie odcieloby droge naprawy hosta, nie zostaje wykonana.
-func TestJednostkiChronioneSaOdrzucane(t *testing.T) {
+// TestProtectedUnitsAreRejected checks that an operation on a unit whose
+// stopping would cut off the way to repair the host is not carried out.
+func TestProtectedUnitsAreRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -24,26 +24,26 @@ func TestJednostkiChronioneSaOdrzucane(t *testing.T) {
 			}, 60*time.Second)
 
 			if job.State == "succeeded" {
-				t.Fatalf("operacja na jednostce chronionej %s zakonczyla sie sukcesem", unit)
+				t.Fatalf("the operation on the protected unit %s succeeded", unit)
 			}
 			if len(attempts) == 0 {
-				t.Fatal("brak zapisanej proby")
+				t.Fatal("no recorded attempt")
 			}
 			last := attempts[len(attempts)-1]
 			if last.ErrorCode != "protected_unit" {
-				t.Fatalf("kod bledu = %q, oczekiwano protected_unit", last.ErrorCode)
+				t.Fatalf("error code = %q, expected protected_unit", last.ErrorCode)
 			}
-			// Odrzucenie musi nastapic przed jakakolwiek zmiana stanu.
+			// The rejection must happen before any state change.
 			if last.UnitStateAfter != nil {
-				t.Error("odrzucona operacja zwrocila stan po zmianie")
+				t.Error("the rejected operation returned a state after the change")
 			}
 		})
 	}
 }
 
-// TestNieprawidlowaNazwaJednostkiJestOdrzucana sprawdza walidacje po stronie
-// hosta. Nazwa nigdy nie trafia do powloki, ale odrzucenie musi byc jawne.
-func TestNieprawidlowaNazwaJednostkiJestOdrzucana(t *testing.T) {
+// TestInvalidUnitNameIsRejected checks the validation on the host side. The
+// name never reaches a shell, but the rejection must be explicit.
+func TestInvalidUnitNameIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -55,19 +55,19 @@ func TestNieprawidlowaNazwaJednostkiJestOdrzucana(t *testing.T) {
 			}, 60*time.Second)
 
 			if job.State == "succeeded" {
-				t.Fatalf("nieprawidlowa nazwa %q zostala wykonana", unit)
+				t.Fatalf("the invalid name %q was carried out", unit)
 			}
 			if len(attempts) > 0 && attempts[len(attempts)-1].ErrorCode != "invalid_unit" {
-				t.Errorf("kod bledu = %q, oczekiwano invalid_unit",
+				t.Errorf("error code = %q, expected invalid_unit",
 					attempts[len(attempts)-1].ErrorCode)
 			}
 		})
 	}
 }
 
-// TestNieznanaOperacjaJestOdrzucanaPrzezAPI sprawdza, ze katalog operacji jest
-// zamkniety: nie istnieje sposob zlecenia dowolnego polecenia.
-func TestNieznanaOperacjaJestOdrzucanaPrzezAPI(t *testing.T) {
+// TestUnknownOperationIsRejectedByTheAPI checks that the operation
+// catalogue is closed: there is no way to order an arbitrary command.
+func TestUnknownOperationIsRejectedByTheAPI(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -78,9 +78,9 @@ func TestNieznanaOperacjaJestOdrzucanaPrzezAPI(t *testing.T) {
 	}
 }
 
-// TestKatalogOperacjiNieZawieraPowloki pilnuje zakazanej anty-wlasciwosci
-// z dokumentu: kontrakt podstawowy nie ma operacji uruchamiajacej powloke.
-func TestKatalogOperacjiNieZawieraPowloki(t *testing.T) {
+// TestOperationCatalogueHasNoShell guards the forbidden anti-property from
+// the document: the base contract has no operation that starts a shell.
+func TestOperationCatalogueHasNoShell(t *testing.T) {
 	h := newHarness(t)
 	var catalog struct {
 		Items []struct {
@@ -91,24 +91,24 @@ func TestKatalogOperacjiNieZawieraPowloki(t *testing.T) {
 	h.get("/api/v1/actions", &catalog)
 
 	if len(catalog.Items) == 0 {
-		t.Fatal("katalog operacji jest pusty")
+		t.Fatal("the operation catalogue is empty")
 	}
 	for _, item := range catalog.Items {
 		switch item.Action {
 		case "shell.exec", "shell", "command.run", "exec":
-			t.Fatalf("katalog zawiera operacje powloki: %s", item.Action)
+			t.Fatalf("the catalogue contains a shell operation: %s", item.Action)
 		}
 		if item.Permission == "" {
-			t.Errorf("operacja %s nie ma uprawnienia", item.Action)
+			t.Errorf("operation %s has no permission", item.Action)
 		}
 	}
 }
 
-// TestPonowneDostarczenieNiePowtarzaMutacji jest testem najwazniejszej
-// wlasciwosci at-least-once. Symulujemy wygasniecie lease, zwracajac zadanie
-// do kolejki, i sprawdzamy, ze agent zwraca zapisany wynik zamiast restartowac
-// usluge po raz drugi.
-func TestPonowneDostarczenieNiePowtarzaMutacji(t *testing.T) {
+// TestRedeliveryDoesNotRepeatTheMutation is a test of the most important
+// at-least-once property. A lease expiry is simulated by returning the job
+// to the queue, and the agent is checked to return the recorded result
+// instead of restarting the service a second time.
+func TestRedeliveryDoesNotRepeatTheMutation(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
@@ -119,40 +119,40 @@ func TestPonowneDostarczenieNiePowtarzaMutacji(t *testing.T) {
 		"payload": unitPayload("cron.service"),
 	}, 90*time.Second)
 	if job.State != "succeeded" {
-		t.Fatalf("pierwsze wykonanie nie powiodlo sie: %s", job.State)
+		t.Fatalf("the first execution failed: %s", job.State)
 	}
 	pidAfterFirst := attempts[len(attempts)-1].UnitStateAfter.MainPID
 
-	// Zadanie wraca do kolejki dokladnie tak, jak po wygasnieciu lease.
+	// The job goes back to the queue exactly as after a lease expiry.
 	if _, err := pool.Exec(ctx, `
 		update jobs set state = 'queued', finished_at = null, result_status = null
 		where id = $1`, job.ID); err != nil {
-		t.Fatalf("nie zwrocono zadania do kolejki: %v", err)
+		t.Fatalf("the job was not returned to the queue: %v", err)
 	}
 
 	repeated := h.awaitTerminal(job.ID, 90*time.Second)
 	if repeated.State != "succeeded" {
-		t.Fatalf("ponowne dostarczenie zakonczylo sie stanem %s", repeated.State)
+		t.Fatalf("the redelivery ended in state %s", repeated.State)
 	}
 
 	repeatedAttempts := h.attempts(job.ID)
 	if len(repeatedAttempts) < 2 {
-		t.Fatalf("oczekiwano drugiej proby, jest %d", len(repeatedAttempts))
+		t.Fatalf("expected a second attempt, there are %d", len(repeatedAttempts))
 	}
 	last := repeatedAttempts[len(repeatedAttempts)-1]
 	if !last.Replayed {
-		t.Error("druga proba nie zostala oznaczona jako odtworzona z dziennika")
+		t.Error("the second attempt was not marked as replayed from the journal")
 	}
-	// Sedno testu: usluga nie zostala zrestartowana drugi raz.
+	// The crux of the test: the service was not restarted a second time.
 	if last.UnitStateAfter != nil && last.UnitStateAfter.MainPID != pidAfterFirst {
-		t.Fatalf("mutacja zostala powtorzona: PID %d -> %d",
+		t.Fatalf("the mutation was repeated: PID %d -> %d",
 			pidAfterFirst, last.UnitStateAfter.MainPID)
 	}
 }
 
-// TestSladAudytowyJestKompletny sprawdza, ze kazdy krok operacji zostawia
-// zdarzenie: utworzenie, zatwierdzenie, dostarczenie i wynik.
-func TestSladAudytowyJestKompletny(t *testing.T) {
+// TestAuditTrailIsComplete checks that every step of an operation leaves an
+// event: creation, approval, dispatch and the result.
+func TestAuditTrailIsComplete(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -178,14 +178,14 @@ func TestSladAudytowyJestKompletny(t *testing.T) {
 	}
 	for _, required := range []string{"job.create", "job.approve", "job.dispatch", "job.result"} {
 		if !seen[required] {
-			t.Errorf("brak zdarzenia audytowego %s dla zadania %s", required, job.ID)
+			t.Errorf("no audit event %s for job %s", required, job.ID)
 		}
 	}
 }
 
-// TestOdmowaTezJestAudytowana sprawdza, ze nieudana proba zatwierdzenia
-// zostawia slad. Audyt bez odmow pokazywalby tylko to, co sie udalo.
-func TestOdmowaTezJestAudytowana(t *testing.T) {
+// TestDenialIsAuditedToo checks that a failed approval attempt leaves a
+// trace. An audit log without denials would show only what succeeded.
+func TestDenialIsAuditedToo(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -195,7 +195,7 @@ func TestOdmowaTezJestAudytowana(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		h.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel",
-			map[string]any{"reason": "koniec testu"}, nil, http.StatusOK)
+			map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
 	})
 
 	h.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve",
@@ -216,63 +216,63 @@ func TestOdmowaTezJestAudytowana(t *testing.T) {
 		}
 	}
 	if !denied {
-		t.Fatal("odrzucone zatwierdzenie nie zostawilo zdarzenia audytowego")
+		t.Fatal("the rejected approval left no audit event")
 	}
 }
 
-// TestOdczytPlikuTylkoZAllowlisty sprawdza granice z rozdzialu 6. Panel,
-// ktory potrafi przeczytac dowolny plik roota, potrafi przeczytac klucze
-// prywatne i /etc/shadow - zakres jest wlasnoscia hosta, a nie zadania.
-func TestOdczytPlikuTylkoZAllowlisty(t *testing.T) {
+// TestFileReadOnlyFromTheAllowlist checks the boundary from chapter 6. A
+// panel that can read any root file can read private keys and /etc/shadow -
+// the scope belongs to the host, not to the job.
+func TestFileReadOnlyFromTheAllowlist(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	for _, sciezka := range []string{"/etc/shadow", "/root/.ssh/id_rsa", "/etc/flotestro/agent.env"} {
+	for _, path := range []string{"/etc/shadow", "/root/.ssh/id_rsa", "/etc/flotestro/agent.env"} {
 		job, attempts := h.runOperation(host.ID, map[string]any{
 			"action":  "logfile.read",
-			"payload": map[string]any{"logfile": map[string]any{"path": sciezka, "lines": 5}},
+			"payload": map[string]any{"logfile": map[string]any{"path": path, "lines": 5}},
 		}, 60*time.Second)
 
 		if job.State == "succeeded" {
-			t.Errorf("odczytano plik spoza allowlisty: %s", sciezka)
+			t.Errorf("a file outside the allowlist was read: %s", path)
 		}
 		if len(attempts) > 0 && attempts[len(attempts)-1].Message == "" {
-			t.Errorf("odmowa dla %s nie niesie powodu", sciezka)
+			t.Errorf("the refusal for %s carries no reason", path)
 		}
 	}
 }
 
-// TestNieprawidlowaSciezkaLoguJestOdrzucana sprawdza walidacje po stronie API.
-// Wyjscie w gore katalogu pozwalaloby dopasowac sie do wzorca allowlisty
-// i mimo to czytac plik spoza niej.
-func TestNieprawidlowaSciezkaLoguJestOdrzucana(t *testing.T) {
+// TestInvalidLogPathIsRejected checks the validation on the API side.
+// Climbing up a directory would allow matching an allowlist pattern and
+// still reading a file outside it.
+func TestInvalidLogPathIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	for _, sciezka := range []string{"", "var/log/syslog", "/var/log/../../etc/shadow"} {
+	for _, path := range []string{"", "var/log/syslog", "/var/log/../../etc/shadow"} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action":  "logfile.read",
-				"payload": map[string]any{"logfile": map[string]any{"path": sciezka, "lines": 5}},
+				"payload": map[string]any{"logfile": map[string]any{"path": path, "lines": 5}},
 			}, nil, http.StatusBadRequest)
 	}
 }
 
-// TestPelnyWykazJednostekJestZamawianyJawnie pilnuje, ze pusta lista nazw nie
-// znaczy "wszystkie". Odczyt kilku jednostek i wykaz calego hosta to inny
-// koszt, wiec musi byc inna prosba.
-func TestPelnyWykazJednostekJestZamawianyJawnie(t *testing.T) {
+// TestFullUnitListingIsOrderedExplicitly guards that an empty name list
+// does not mean "all". Reading a few units and listing the whole host cost
+// differently, so they must be different requests.
+func TestFullUnitListingIsOrderedExplicitly(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// Pusta lista bez jawnego zamowienia jest pomylka w wywolaniu.
+	// An empty list without an explicit order is a mistake in the call.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":  "unit.status",
 			"payload": map[string]any{"unit_status": map[string]any{"units": []string{}}},
 		}, nil, http.StatusBadRequest)
 
-	// Zamowienie pelnego wykazu razem z lista nazw jest sprzeczne.
+	// Ordering the full listing together with a name list is contradictory.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action": "unit.status",
@@ -286,17 +286,17 @@ func TestPelnyWykazJednostekJestZamawianyJawnie(t *testing.T) {
 		"payload": map[string]any{"unit_status": map[string]any{"all": true}},
 	}, 90*time.Second)
 	if job.State != "succeeded" {
-		t.Fatalf("wykaz: stan = %s, kod = %s", job.State, job.ResultErrorCode)
+		t.Fatalf("listing: state = %s, code = %s", job.State, job.ResultErrorCode)
 	}
 	if len(attempts) == 0 || attempts[len(attempts)-1].Detail == nil {
-		t.Fatal("wykaz nie zwrocil jednostek")
+		t.Fatal("the listing returned no units")
 	}
 }
 
-// TestZamaskowanieWymagaUzasadnienia sprawdza, ze operacja krytyczna nie idzie
-// jednym klikniecem. Zamaskowanie odbiera jednostce mozliwosc uruchomienia
-// takze recznie i przetrwa restart hosta.
-func TestZamaskowanieWymagaUzasadnienia(t *testing.T) {
+// TestMaskingRequiresAJustification checks that a critical operation does
+// not go with one click. Masking takes away the unit's ability to start
+// even manually and survives a host reboot.
+func TestMaskingRequiresAJustification(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -306,7 +306,7 @@ func TestZamaskowanieWymagaUzasadnienia(t *testing.T) {
 			"payload": map[string]any{"unit_toggle": map[string]any{"unit": "cron.service", "enabled": true}},
 		}, nil, http.StatusBadRequest)
 
-	// Wlaczenie jednostki jest odwracalne i idzie bez uzasadnienia.
+	// Enabling a unit is reversible and goes without a justification.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":  "unit.enable.set",
@@ -314,10 +314,11 @@ func TestZamaskowanieWymagaUzasadnienia(t *testing.T) {
 		}, nil, http.StatusCreated)
 }
 
-// TestPodgladDziennikaKonczySieSam sprawdza granice z rozdzialu 6: strumien
-// jest krotkotrwaly i ograniczony z gory. Podglad bez gornej granicy trzymalby
-// proces na hoscie takze wtedy, gdy operator dawno zamknal karte.
-func TestPodgladDziennikaKonczySieSam(t *testing.T) {
+// TestJournalPreviewEndsOnItsOwn checks the boundary from chapter 6: the
+// stream is short-lived and bounded from above. A preview without an upper
+// bound would hold a process on the host also when the operator closed the
+// tab long ago.
+func TestJournalPreviewEndsOnItsOwn(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -329,16 +330,16 @@ func TestPodgladDziennikaKonczySieSam(t *testing.T) {
 	}, 90*time.Second)
 
 	if job.State != "succeeded" {
-		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+		t.Fatalf("state = %s, code = %s", job.State, job.ResultErrorCode)
 	}
-	// Koniec podgladu jest sukcesem: strumien mial sie skonczyc.
+	// The end of the preview is a success: the stream was meant to end.
 	if !strings.Contains(job.ResultMessage, "the preview ended") {
-		t.Errorf("wynik nie podsumowuje podgladu: %q", job.ResultMessage)
+		t.Errorf("the result does not summarise the preview: %q", job.ResultMessage)
 	}
 }
 
-// TestPodgladNieMozeTrwacBezKonca pilnuje gornej granicy czasu.
-func TestPodgladNieMozeTrwacBezKonca(t *testing.T) {
+// TestPreviewCannotLastForever guards the upper time bound.
+func TestPreviewCannotLastForever(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -351,38 +352,39 @@ func TestPodgladNieMozeTrwacBezKonca(t *testing.T) {
 		}, nil, http.StatusBadRequest)
 }
 
-// TestZakresCzasuDziennikaJestSprawdzany sprawdza walidacje filtru "since".
-// Wartosc trafia do argumentu journalctl - nie do powloki, ale wezsza
-// walidacja i tak jest tansza niz ufanie.
-func TestZakresCzasuDziennikaJestSprawdzany(t *testing.T) {
+// TestJournalTimeRangeIsValidated checks the validation of the "since"
+// filter. The value goes into a journalctl argument - not into a shell, but
+// a narrower validation is still cheaper than trust.
+func TestJournalTimeRangeIsValidated(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	for _, zakres := range []string{"wczoraj", "-1h; reboot", "$(date)"} {
+	for _, since := range []string{"wczoraj", "-1h; reboot", "$(date)"} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action": "journal.read",
 				"payload": map[string]any{"journal": map[string]any{
-					"lines": 5, "since": zakres,
+					"lines": 5, "since": since,
 				}},
 			}, nil, http.StatusBadRequest)
 	}
-	// Formaty, ktore journalctl rozumie, musza przejsc.
-	for _, zakres := range []string{"-1h", "yesterday", "2026-08-01"} {
+	// Formats journalctl understands must pass.
+	for _, since := range []string{"-1h", "yesterday", "2026-08-01"} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action": "journal.read",
 				"payload": map[string]any{"journal": map[string]any{
-					"lines": 5, "since": zakres,
+					"lines": 5, "since": since,
 				}},
 			}, nil, http.StatusCreated)
 	}
 }
 
-// TestSygnalWymagaCzasuStartu sprawdza granice z rozdzialu 5. Sam PID nie
-// identyfikuje procesu: jadro uzywa numerow ponownie, wiec sygnal wyslany
-// chwile po obejrzeniu listy moglby trafic w cos zupelnie innego.
-func TestSygnalWymagaCzasuStartu(t *testing.T) {
+// TestSignalRequiresTheStartTime checks the boundary from chapter 5. A PID
+// alone does not identify a process: the kernel reuses the numbers, so a
+// signal sent a moment after viewing the list could hit something entirely
+// different.
+func TestSignalRequiresTheStartTime(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -395,26 +397,26 @@ func TestSygnalWymagaCzasuStartu(t *testing.T) {
 		}, nil, http.StatusBadRequest)
 }
 
-// TestSygnalyPozaListaSaOdrzucane pilnuje, ze lista jest zamknieta: nie
-// istnieje operacja "wyslij dowolny sygnal".
-func TestSygnalyPozaListaSaOdrzucane(t *testing.T) {
+// TestSignalsOutsideTheListAreRejected guards that the list is closed:
+// there is no "send any signal" operation.
+func TestSignalsOutsideTheListAreRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	for _, sygnal := range []string{"STOP", "SEGV", "USR1", "9", ""} {
+	for _, signal := range []string{"STOP", "SEGV", "USR1", "9", ""} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action": "process.signal",
 				"payload": map[string]any{"process_signal": map[string]any{
-					"pid": 99999, "expected_start_ticks": 1, "signal": sygnal,
+					"pid": 99999, "expected_start_ticks": 1, "signal": signal,
 				}},
 			}, nil, http.StatusBadRequest)
 	}
 }
 
-// TestProcesInicjujacyJestChroniony sprawdza, ze zatrzymanie systemu nie jest
-// operacja dostepna z listy procesow.
-func TestProcesInicjujacyJestChroniony(t *testing.T) {
+// TestInitProcessIsProtected checks that halting the system is not an
+// operation available from the process list.
+func TestInitProcessIsProtected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -429,9 +431,9 @@ func TestProcesInicjujacyJestChroniony(t *testing.T) {
 	}
 }
 
-// TestSnapshotProcesowMaGorneGranice sprawdza koszt na hoscie: snapshot
-// powstaje na zadanie i nie moze urosnac do dowolnego rozmiaru.
-func TestSnapshotProcesowMaGorneGranice(t *testing.T) {
+// TestProcessSnapshotHasUpperBounds checks the cost on the host: the
+// snapshot is made on request and cannot grow to an arbitrary size.
+func TestProcessSnapshotHasUpperBounds(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -444,7 +446,7 @@ func TestSnapshotProcesowMaGorneGranice(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{
 			"action":  "process.list",
-			"payload": map[string]any{"process_list": map[string]any{"sort_by": "wymyslone"}},
+			"payload": map[string]any{"process_list": map[string]any{"sort_by": "made-up"}},
 		}, nil, http.StatusBadRequest)
 
 	job, _ := h.runOperation(host.ID, map[string]any{
@@ -452,13 +454,13 @@ func TestSnapshotProcesowMaGorneGranice(t *testing.T) {
 		"payload": map[string]any{"process_list": map[string]any{"sort_by": "rss", "limit": 10}},
 	}, 60*time.Second)
 	if job.State != "succeeded" {
-		t.Fatalf("stan = %s, kod = %s", job.State, job.ResultErrorCode)
+		t.Fatalf("state = %s, code = %s", job.State, job.ResultErrorCode)
 	}
 
 	var fragment inventoryFragment
 	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/processes",
 		nil, &fragment, http.StatusOK)
 	if len(fragment.Payload) == 0 {
-		t.Error("snapshot procesow jest pusty")
+		t.Error("the process snapshot is empty")
 	}
 }

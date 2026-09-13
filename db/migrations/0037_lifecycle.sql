@@ -1,8 +1,8 @@
--- Cykl zycia hosta ma czwarty stan i wlasna pamiec powodu.
+-- The host lifecycle has a fourth state and its own memory of the reason.
 --
--- Miedzy "dziala" a "wycofany" jest chwila, w ktorej panel juz nie zleca nic
--- nowego, ale host jeszcze konczy to, co zaczal. Bez tego stanu wycofanie
--- albo urywa prace w polowie, albo pozwala zlecic kolejna.
+-- Between "running" and "retired" there is a moment when the panel no longer
+-- orders anything new, but the host still finishes what it started. Without
+-- that state retirement either cuts the work off halfway or lets another be ordered.
 do $$
 begin
     if exists (select 1 from pg_constraint where conname = 'hosts_lifecycle_state_check') then
@@ -13,9 +13,9 @@ begin
 end $$;
 
 alter table hosts
-    -- Powod zmiany stanu jest czescia decyzji, a nie komentarzem: host
-    -- w kwarantannie bez powodu jest hostem, o ktorym nikt juz nie pamieta,
-    -- dlaczego zostal odciety.
+    -- The reason for the state change is part of the decision, not a comment:
+    -- a quarantined host without a reason is a host nobody remembers any
+    -- more why it was cut off.
     add column if not exists lifecycle_reason     text        not null default '',
     add column if not exists lifecycle_changed_at timestamptz,
     add column if not exists lifecycle_changed_by text        not null default '',

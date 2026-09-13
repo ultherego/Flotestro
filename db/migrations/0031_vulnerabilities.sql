@@ -1,26 +1,25 @@
--- Korelator podatnosci.
+-- The vulnerability correlator.
 --
--- Rozstrzyga tracker bezpieczenstwa producenta dystrybucji, a nie feed
--- upstreamowy: poprawki backportowane maja numery wersji, ktorych zaden
--- zakres z NVD nie obejmuje, wiec porownanie z nim daje falszywe alarmy
--- w jedna strone i przeoczenia w druga.
+-- The distribution vendor's security tracker decides, not the upstream feed:
+-- backported fixes have version numbers no NVD range covers, so comparing
+-- against it gives false alarms one way and misses the other.
 --
--- Snapshot feedu jest niezmienny i ma odcisk: ocena, ktorej nie da sie
--- powiazac z konkretnymi danymi, nie da sie ani powtorzyc, ani obronic.
+-- A feed snapshot is immutable and has a digest: an assessment that cannot be
+-- tied to specific data can be neither repeated nor defended.
 create table if not exists vuln_snapshots (
     id                 uuid        primary key default gen_random_uuid(),
     provider           text        not null,
     digest             text        not null,
-    -- Releases wylicza wydania objete snapshotem. To z tego bierze sie
-    -- odpowiedz "tego wydania feed nie obejmuje" - inna niz "brak podatnosci".
+    -- Releases lists the releases the snapshot covers. That is where the
+    -- answer "the feed does not cover this release" comes from - different from "no vulnerabilities".
     releases           text[]      not null default '{}',
     advisory_count     int         not null default 0,
     fetched_at         timestamptz not null default now(),
     source_modified_at timestamptz,
     etag               text        not null default '',
-    -- Aktywny snapshot jest jeden na dostawce. Nieudany import nie zastepuje
-    -- poprzedniego: lepiej ocenic starszymi danymi i powiedziec, ze sa
-    -- starsze, niz nie ocenic wcale.
+    -- There is one active snapshot per provider. A failed import does not
+    -- replace the previous one: better to assess with older data and say it
+    -- is older than not assess at all.
     active  boolean not null default false,
     error   text    not null default '',
     unique (provider, digest)
@@ -36,11 +35,11 @@ create table if not exists vuln_advisories (
     cve_ids        text[] not null default '{}',
     distribution   text   not null,
     release        text   not null,
-    -- Klucz korelacji: tracker mowi o pakiecie zrodlowym, host ma binarne.
+    -- The correlation key: the tracker speaks of the source package, the host has binaries.
     source_package text   not null,
     binary_package text   not null default '',
-    -- Pusta wersja naprawiona oznacza podatnosc bez poprawki: pakiet jest
-    -- podatny i nie ma czym tego naprawic.
+    -- An empty fixed version means a vulnerability without a fix: the package
+    -- is vulnerable and there is nothing to fix it with.
     fixed_version  text   not null default '',
     status         text   not null,
     vendor_severity text  not null default '',
@@ -53,8 +52,8 @@ create table if not exists vuln_advisories (
 create index if not exists vuln_advisories_lookup_idx
     on vuln_advisories (snapshot_id, distribution, release, source_package);
 
--- Ustalenia dla hostow. Kazde niesie odcisk snapshotu i odcisk listy pakietow,
--- ktore je rozstrzygnely: bez tego nie wiadomo, czego dotyczy odpowiedz.
+-- The findings for hosts. Each carries the snapshot digest and the package list
+-- digest that decided it: without them there is no knowing what the answer concerns.
 create table if not exists vuln_findings (
     host_id           uuid   not null references hosts(id) on delete cascade,
     provider          text   not null,
@@ -67,8 +66,8 @@ create table if not exists vuln_findings (
     architecture      text   not null default '',
     installed_version text   not null default '',
     fixed_version     text   not null default '',
-    -- Trzy stany, nie dwa: "nie wiadomo" jest odpowiedzia, a nie brakiem
-    -- odpowiedzi, i zawsze ma kod powodu.
+    -- Three states, not two: "unknown" is an answer, not the absence of one,
+    -- and always has a reason code.
     state             text   not null,
     reason_code       text   not null default '',
     remediation       text   not null default 'unknown',
@@ -83,11 +82,11 @@ create table if not exists vuln_findings (
 create index if not exists vuln_findings_state_idx on vuln_findings (state, vendor_severity);
 create index if not exists vuln_findings_host_idx on vuln_findings (host_id, state);
 
--- Stan oceny hosta: czym byla rozstrzygana, kiedy i na ile pokryta.
+-- The host assessment state: what it was decided with, when and how well covered.
 --
--- Pokrycie jest tu rownie wazne jak liczba znalezisk. Host bez znalezisk
--- i host, ktorego feed nie obejmuje, wygladaja tak samo na liczniku - i tylko
--- ta tabela pozwala je rozroznic.
+-- Coverage is as important here as the number of findings. A host without
+-- findings and a host the feed does not cover look the same on the counter -
+-- and only this table tells them apart.
 create table if not exists vuln_host_state (
     host_id          uuid        primary key references hosts(id) on delete cascade,
     distribution     text        not null default '',
@@ -98,10 +97,10 @@ create table if not exists vuln_host_state (
     packages_total   int         not null default 0,
     packages_covered int         not null default 0,
     affected         int         not null default 0,
-    -- Podatnosc z poprawka i podatnosc bez poprawki prowadza do zupelnie
-    -- innych decyzji: pierwsza jest do zainstalowania dzis, druga jest do
-    -- oceny ryzyka. Sklejone w jedna liczbe daja sciane, ktorej nikt nie
-    -- przeczyta.
+    -- A vulnerability with a fix and one without lead to entirely different
+    -- decisions: the first is to be installed today, the second is a risk
+    -- assessment. Glued into one number they give a wall nobody will
+    -- read.
     affected_fixable int         not null default 0,
     affected_no_fix  int         not null default 0,
     unknown          int         not null default 0,

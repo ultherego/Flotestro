@@ -1,15 +1,15 @@
--- Nazwy sieciowe relaya sa czescia jego tozsamosci, a nie tresci zadania.
+-- The network names of a relay are part of its identity, not of the request body.
 --
--- Certyfikat relaya jest jedynym certyfikatem floty z rola serwerowa: agenci
--- lokalizacji weryfikuja po nim nazwe, pod ktora sie laczyli. Gdyby nazwy
--- pochodzily z zadania odnowienia, relay moglby przy kazdym odnowieniu wziac
--- nazwe cudzej uslugi i stac sie dla agentow czyms innym niz byl.
+-- The relay certificate is the only fleet certificate with a server role: the
+-- site agents verify against it the name they connected to. If the names came
+-- from the renewal request, the relay could at every renewal take the name of
+-- somebody else's service and become for the agents something other than it was.
 --
--- Zapis w rejestrze czyni ze zmiany nazw decyzje operatora: odnowienie
--- wystawia to, co panel ma zapisane, i nic ponadto.
+-- The record in the registry makes a name change an operator decision: the
+-- renewal issues what the panel has recorded, and nothing beyond that.
 alter table relays add column advertised_names text[] not null default '{}';
 
--- Ostatnie odnowienie mowi, czy relay w ogole utrzymuje swoja tozsamosc.
--- Certyfikat relaya zyje siedem dni; relay, ktory nie odnawial sie od
--- tygodnia, jest o krok od odciecia calej lokalizacji.
+-- The last renewal says whether the relay keeps up its identity at all.
+-- A relay certificate lives seven days; a relay that has not renewed for a
+-- week is one step from cutting off the whole site.
 alter table relays add column renewed_at timestamptz;

@@ -1,12 +1,12 @@
--- Sposob i czas uwierzytelnienia sesji.
+-- The way and time of the session authentication.
 --
--- Operacje o najwiekszym wplywie wymagaja swiezego uwierzytelnienia, a nie
--- samego posiadania sesji. Zeby to sprawdzic, panel musi pamietac, kiedy
--- dostawca faktycznie uwierzytelnil uzytkownika i jaki poziom zadeklarowal.
+-- The operations with the greatest impact require fresh authentication, not
+-- merely holding a session. To check that, the panel must remember when the
+-- provider actually authenticated the user and which level it declared.
 --
--- NULL w authenticated_at oznacza, ze dostawca nie podal auth_time. To stan
--- nieustalony, a nie "przed chwila": sesja bez tej wiedzy nie moze przejsc
--- kontroli swiezosci.
+-- NULL in authenticated_at means the provider gave no auth_time. That is an
+-- undetermined state, not "a moment ago": a session without that knowledge
+-- cannot pass the freshness check.
 alter table web_sessions add column authenticated_at timestamptz;
 alter table web_sessions add column acr              text;
 alter table web_sessions add column amr              text[] not null default '{}';

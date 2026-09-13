@@ -23,59 +23,62 @@ import (
 	"github.com/google/uuid"
 )
 
-// domyslnaBrama wskazuje brame agentow floty testowej. Relay laczy sie tam
-// tak samo jak agent - tylko innym rodzajem tozsamosci.
-const domyslnaBrama = "https://192.168.56.10:8443"
+// defaultGateway points at the agent gateway of the test fleet. A relay
+// connects there just like an agent - only with a different kind of
+// identity.
+const defaultGateway = "https://192.168.56.10:8443"
 
-// relayTestowy trzyma tozsamosc relaya zarejestrowanego na potrzeby testu.
-type relayTestowy struct {
+// testRelay holds the identity of a relay enrolled for the test.
+type testRelay struct {
 	ID    string
-	Klucz *ecdsa.PrivateKey
+	Key   *ecdsa.PrivateKey
 	Cert  tls.Certificate
-	Liscz *x509.Certificate
-	Nazwy []string
+	Leaf  *x509.Certificate
+	Names []string
 }
 
-// TestOdnowienieRelayaZachowujeNazwyZRejestru pilnuje wlasciwosci, dla ktorej
-// odnowienie relaya jest osobnym RPC: nazwy sieciowe sa granica zaufania
-// wobec agentow lokalizacji, wiec pochodza z rejestru panelu, a nie z zadania.
+// TestRelayRenewalKeepsTheNamesFromTheRegistry guards the property that
+// makes relay renewal a separate RPC: the network names are the trust
+// boundary towards the site's agents, so they come from the panel registry,
+// not from the request.
 //
-// Gdyby relay mogl je sobie wybrac przy odnowieniu, wystarczyloby jedno
-// odnowienie, zeby wystapic agentom pod cudza nazwa.
-func TestOdnowienieRelayaZachowujeNazwyZRejestru(t *testing.T) {
+// If the relay could pick them at renewal, a single renewal would be enough
+// to appear to the agents under somebody else's name.
+func TestRelayRenewalKeepsTheNamesFromTheRegistry(t *testing.T) {
 	h := newHarness(t)
-	relay := h.zarejestrujRelay(t, []string{"relay-testowy.flotestro.test", "192.168.56.99"})
+	relay := h.enrollRelay(t, []string{"test-relay.flotestro.test", "192.168.56.99"})
 
-	// Certyfikat relaya zyje krocej niz certyfikat hosta: relay widzi ruch
-	// calej lokalizacji, wiec okno uzycia skradzionego klucza ma byc mniejsze.
-	zycie := relay.Liscz.NotAfter.Sub(relay.Liscz.NotBefore)
-	if zycie > 8*24*time.Hour {
-		t.Fatalf("certyfikat relaya zyje %s; dokument mowi o okolo siedmiu dniach", zycie)
+	// A relay certificate lives shorter than a host certificate: the relay
+	// sees the traffic of the whole site, so the window of using a stolen
+	// key is to be smaller.
+	lifetime := relay.Leaf.NotAfter.Sub(relay.Leaf.NotBefore)
+	if lifetime > 8*24*time.Hour {
+		t.Fatalf("the relay certificate lives %s; the document speaks of about seven days", lifetime)
 	}
 
-	odnowiony := h.odnowRelay(t, relay, []string{"relay-podszyty.flotestro.test"})
-	if len(odnowiony.DNSNames) != 1 || odnowiony.DNSNames[0] != "relay-testowy.flotestro.test" {
-		t.Fatalf("nazwy DNS po odnowieniu = %v; oczekiwano tych z rejestru", odnowiony.DNSNames)
+	renewed := h.renewRelay(t, relay, []string{"impostor-relay.flotestro.test"})
+	if len(renewed.DNSNames) != 1 || renewed.DNSNames[0] != "test-relay.flotestro.test" {
+		t.Fatalf("DNS names after the renewal = %v; expected the ones from the registry", renewed.DNSNames)
 	}
-	if len(odnowiony.IPAddresses) != 1 || odnowiony.IPAddresses[0].String() != "192.168.56.99" {
-		t.Fatalf("adresy po odnowieniu = %v", odnowiony.IPAddresses)
+	if len(renewed.IPAddresses) != 1 || renewed.IPAddresses[0].String() != "192.168.56.99" {
+		t.Fatalf("addresses after the renewal = %v", renewed.IPAddresses)
 	}
-	if odnowiony.NotAfter.Before(relay.Liscz.NotAfter) {
-		t.Fatalf("odnowienie nie przesunelo terminu: %s -> %s",
-			relay.Liscz.NotAfter, odnowiony.NotAfter)
+	if renewed.NotAfter.Before(relay.Leaf.NotAfter) {
+		t.Fatalf("the renewal did not move the expiry: %s -> %s",
+			relay.Leaf.NotAfter, renewed.NotAfter)
 	}
-	// Rodzaj tozsamosci zostaje: certyfikatem relaya nadal nie da sie
-	// podszyc pod hosta.
-	if len(odnowiony.URIs) != 1 || odnowiony.URIs[0].Host != "relay" {
-		t.Fatalf("URI SAN po odnowieniu = %v", odnowiony.URIs)
+	// The kind of identity stays: a relay certificate still cannot pose as
+	// a host.
+	if len(renewed.URIs) != 1 || renewed.URIs[0].Host != "relay" {
+		t.Fatalf("URI SAN after the renewal = %v", renewed.URIs)
 	}
 }
 
-// TestOdwolanyRelayNieOdnowiSie pilnuje, ze odwolanie relaya jest odcieciem,
-// a nie przerwa do najblizszego odnowienia.
-func TestOdwolanyRelayNieOdnowiSie(t *testing.T) {
+// TestRevokedRelayDoesNotRenew guards that revoking a relay is a cut-off,
+// not a pause until the next renewal.
+func TestRevokedRelayDoesNotRenew(t *testing.T) {
 	h := newHarness(t)
-	relay := h.zarejestrujRelay(t, []string{"relay-odwolany.flotestro.test"})
+	relay := h.enrollRelay(t, []string{"revoked-relay.flotestro.test"})
 
 	ctx := context.Background()
 	if _, err := h.database(ctx).Exec(ctx,
@@ -84,45 +87,45 @@ func TestOdwolanyRelayNieOdnowiSie(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, status, tresc := h.odnowRelaySurowo(t, relay, relay.Nazwy)
+	_, status, body := h.renewRelayRaw(t, relay, relay.Names)
 	if status == http.StatusOK {
-		t.Fatal("odwolany relay odnowil certyfikat")
+		t.Fatal("the revoked relay renewed its certificate")
 	}
-	if !bytes.Contains(tresc, []byte("revoked")) {
-		t.Fatalf("odmowa bez powodu: %s %s", http.StatusText(status), tresc)
+	if !bytes.Contains(body, []byte("revoked")) {
+		t.Fatalf("refusal without a reason: %s %s", http.StatusText(status), body)
 	}
 }
 
-// zarejestrujRelay wprowadza do floty relay, ktorego nie ma.
+// enrollRelay brings a relay that does not exist into the fleet.
 //
-// Relay laboratoryjny znika razem z testem: wpis w rejestrze zostalby
-// widoczny w panelu jako lokalizacja, ktora nie istnieje.
-func (h *harness) zarejestrujRelay(t *testing.T, nazwy []string) relayTestowy {
+// The lab relay disappears together with the test: the registry entry would
+// stay visible in the panel as a site that does not exist.
+func (h *harness) enrollRelay(t *testing.T, names []string) testRelay {
 	t.Helper()
-	// Pula polaczen musi powstac przed rejestracja sprzatania: sprzatanie
-	// idzie w odwrotnej kolejnosci, wiec pula otwarta pozniej zamknelaby sie
-	// przed usunieciem relaya i wpis zostalby we flocie.
+	// The connection pool must exist before the cleanup is registered:
+	// cleanups run in reverse order, so a pool opened later would close
+	// before the relay is deleted and the entry would stay in the fleet.
 	h.database(context.Background())
 
-	var zamowienie struct {
+	var order struct {
 		Token string `json:"token"`
 	}
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "relay testowy", "site": "lab", "environment": "test",
+		"description": "test relay", "site": "lab", "environment": "test",
 		"kind": "relay", "purpose": "relay",
-	}, &zamowienie, http.StatusCreated)
+	}, &order, http.StatusCreated)
 
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nazwa := uniqueSubject("relay-testowy")
-	csrPEM := csrRelaya(t, klucz, nazwa, nazwy)
+	name := uniqueSubject("test-relay")
+	csrPEM := relayCSR(t, key, name, names)
 
-	tresc, err := json.Marshal(map[string]any{
-		"enrollmentToken": zamowienie.Token,
-		"machineId":       nazwa,
-		"hostname":        nazwa,
+	body, err := json.Marshal(map[string]any{
+		"enrollmentToken": order.Token,
+		"machineId":       name,
+		"hostname":        name,
 		"csrPem":          csrPEM,
 		"clientRequestId": uuid.NewString(),
 		"build":           map[string]any{"agentVersion": "test"},
@@ -131,201 +134,204 @@ func (h *harness) zarejestrujRelay(t *testing.T, nazwy []string) relayTestowy {
 		t.Fatal(err)
 	}
 
-	odpowiedz, status, body := h.wyslijDoEnrollmentu(t, tresc)
+	response, status, raw := h.sendToEnrollment(t, body)
 	if status != http.StatusOK {
-		t.Fatalf("enrollment relaya odrzucony: %d %s", status, body)
+		t.Fatalf("relay enrollment rejected: %d %s", status, raw)
 	}
-	var wynik struct {
+	var result struct {
 		HostID         string `json:"hostId"`
 		CertificatePem []byte `json:"certificatePem"`
 	}
-	if err := json.Unmarshal(odpowiedz, &wynik); err != nil {
+	if err := json.Unmarshal(response, &result); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Cleanup(func() {
 		ctx := context.Background()
 		if _, err := h.database(ctx).Exec(ctx,
-			`delete from relays where id = $1::uuid`, wynik.HostID); err != nil {
-			t.Logf("nie posprzatano relaya %s: %v", wynik.HostID, err)
+			`delete from relays where id = $1::uuid`, result.HostID); err != nil {
+			t.Logf("relay %s was not cleaned up: %v", result.HostID, err)
 		}
 	})
 
-	cert, lisc := paraTLS(t, klucz, wynik.CertificatePem)
-	return relayTestowy{ID: wynik.HostID, Klucz: klucz, Cert: cert, Liscz: lisc, Nazwy: nazwy}
+	cert, leaf := tlsPair(t, key, result.CertificatePem)
+	return testRelay{ID: result.HostID, Key: key, Cert: cert, Leaf: leaf, Names: names}
 }
 
-// odnowRelay wykonuje odnowienie i zwraca wystawiony certyfikat.
-func (h *harness) odnowRelay(t *testing.T, relay relayTestowy, zadaneNazwy []string) *x509.Certificate {
+// renewRelay performs a renewal and returns the issued certificate.
+func (h *harness) renewRelay(t *testing.T, relay testRelay, requestedNames []string) *x509.Certificate {
 	t.Helper()
-	cert, status, tresc := h.odnowRelaySurowo(t, relay, zadaneNazwy)
+	cert, status, body := h.renewRelayRaw(t, relay, requestedNames)
 	if status != http.StatusOK {
-		t.Fatalf("odnowienie relaya odrzucone: %d %s", status, tresc)
+		t.Fatalf("relay renewal rejected: %d %s", status, body)
 	}
 	return cert
 }
 
-// odnowRelaySurowo wola RPC odnowienia i zwraca takze odpowiedz odmowna.
-func (h *harness) odnowRelaySurowo(t *testing.T, relay relayTestowy,
-	zadaneNazwy []string) (*x509.Certificate, int, []byte) {
+// renewRelayRaw calls the renewal RPC and returns a refusal too.
+func (h *harness) renewRelayRaw(t *testing.T, relay testRelay,
+	requestedNames []string) (*x509.Certificate, int, []byte) {
 	t.Helper()
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	csrPEM := csrRelaya(t, klucz, relay.ID, zadaneNazwy)
-	tresc, err := json.Marshal(map[string]any{
+	csrPEM := relayCSR(t, key, relay.ID, requestedNames)
+	body, err := json.Marshal(map[string]any{
 		"clientRequestId": uuid.NewString(),
 		"csrPem":          csrPEM,
 		"build":           map[string]any{"agentVersion": "test"},
-		"advertisedNames": zadaneNazwy,
+		"advertisedNames": requestedNames,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Odnowienie idzie przez mTLS obecnym certyfikatem relaya: to on jest
-	// dowodem tozsamosci, a nie tresc zadania.
-	klient := &http.Client{
+	// The renewal goes over mTLS with the relay's current certificate: it
+	// is the proof of identity, not the request body.
+	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			Certificates: []tls.Certificate{relay.Cert},
-			RootCAs:      pulaZaufaniaTestu(),
+			RootCAs:      testTrustPool(),
 			MinVersion:   tls.VersionTLS13,
 		}},
 	}
-	adres := envOr("FLOTESTRO_TEST_GATEWAY", domyslnaBrama) +
+	address := envOr("FLOTESTRO_TEST_GATEWAY", defaultGateway) +
 		"/flotestro.agent.v1.RelayService/RenewCertificate"
-	zadanie, err := http.NewRequest(http.MethodPost, adres, bytes.NewReader(tresc))
+	request, err := http.NewRequest(http.MethodPost, address, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	zadanie.Header.Set("Content-Type", "application/json")
-	odpowiedz, err := klient.Do(zadanie)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
 	if err != nil {
-		t.Fatalf("odnowienie relaya: %v", err)
+		t.Fatalf("relay renewal: %v", err)
 	}
-	defer odpowiedz.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(odpowiedz.Body, 1<<16))
-	if odpowiedz.StatusCode != http.StatusOK {
-		return nil, odpowiedz.StatusCode, body
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<16))
+	if response.StatusCode != http.StatusOK {
+		return nil, response.StatusCode, raw
 	}
 
-	var wynik struct {
+	var result struct {
 		CertificatePem []byte `json:"certificatePem"`
 	}
-	if err := json.Unmarshal(body, &wynik); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
 	}
-	_, lisc := paraTLS(t, klucz, wynik.CertificatePem)
-	return lisc, odpowiedz.StatusCode, body
+	_, leaf := tlsPair(t, key, result.CertificatePem)
+	return leaf, response.StatusCode, raw
 }
 
-// csrRelaya sklada wniosek o certyfikat z nazwami sieciowymi.
-func csrRelaya(t *testing.T, klucz *ecdsa.PrivateKey, nazwa string, nazwy []string) []byte {
+// relayCSR composes a certificate request with network names.
+func relayCSR(t *testing.T, key *ecdsa.PrivateKey, name string, names []string) []byte {
 	t.Helper()
-	wniosek := &x509.CertificateRequest{Subject: pkix.Name{CommonName: nazwa}}
-	for _, wpis := range nazwy {
-		if adres := net.ParseIP(wpis); adres != nil {
-			wniosek.IPAddresses = append(wniosek.IPAddresses, adres)
+	request := &x509.CertificateRequest{Subject: pkix.Name{CommonName: name}}
+	for _, entry := range names {
+		if address := net.ParseIP(entry); address != nil {
+			request.IPAddresses = append(request.IPAddresses, address)
 			continue
 		}
-		wniosek.DNSNames = append(wniosek.DNSNames, wpis)
+		request.DNSNames = append(request.DNSNames, entry)
 	}
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, wniosek, klucz)
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, request, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 }
 
-// paraTLS sklada certyfikat z kluczem i zwraca takze sparsowany lisc.
-func paraTLS(t *testing.T, klucz *ecdsa.PrivateKey, certPEM []byte) (tls.Certificate, *x509.Certificate) {
+// tlsPair composes a certificate with a key and also returns the parsed
+// leaf.
+func tlsPair(t *testing.T, key *ecdsa.PrivateKey, certPEM []byte) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
-	blok, _ := pem.Decode(certPEM)
-	if blok == nil {
-		t.Fatal("odpowiedz nie zawiera certyfikatu w PEM")
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("the response carries no PEM certificate")
 	}
-	lisc, err := x509.ParseCertificate(blok.Bytes)
+	leaf, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tls.Certificate{Certificate: [][]byte{blok.Bytes}, PrivateKey: klucz, Leaf: lisc}, lisc
+	return tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: key, Leaf: leaf}, leaf
 }
 
-// pulaZaufaniaTestu bierze bundle CA floty stad, skad biora go agenci.
-func pulaZaufaniaTestu() *x509.CertPool {
-	pula, err := x509.SystemCertPool()
-	if err != nil || pula == nil {
-		pula = x509.NewCertPool()
+// testTrustPool takes the fleet CA bundle from where the agents take it.
+func testTrustPool() *x509.CertPool {
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
 	}
 	if bundle, err := os.ReadFile(envOr("FLOTESTRO_TEST_CA", "/var/lib/flotestro/ca.pem")); err == nil {
-		pula.AppendCertsFromPEM(bundle)
+		pool.AppendCertsFromPEM(bundle)
 	}
-	return pula
+	return pool
 }
 
-// wyslijDoEnrollmentu wola publiczny endpoint enrollmentu floty testowej.
-func (h *harness) wyslijDoEnrollmentu(t *testing.T, tresc []byte) ([]byte, int, []byte) {
+// sendToEnrollment calls the public enrollment endpoint of the test fleet.
+func (h *harness) sendToEnrollment(t *testing.T, body []byte) ([]byte, int, []byte) {
 	t.Helper()
-	return h.wyslijDoEnrollmentuNa(t, envOr("FLOTESTRO_TEST_ENROLLMENT", defaultEnrollment), tresc)
+	return h.sendToEnrollmentAt(t, envOr("FLOTESTRO_TEST_ENROLLMENT", defaultEnrollment), body)
 }
 
-// wyslijDoEnrollmentuNa wola enrollment pod wskazanym adresem.
+// sendToEnrollmentAt calls the enrollment at the given address.
 //
-// Adres jest osobnym argumentem, bo host w izolowanej lokalizacji nie zna
-// adresu centrali i rejestruje sie przez relay - a to jest ta sama usluga
-// wystawiona w innym miejscu.
-func (h *harness) wyslijDoEnrollmentuNa(t *testing.T, baza string, tresc []byte) ([]byte, int, []byte) {
+// The address is a separate argument, because a host in an isolated site
+// does not know the address of the centre and enrolls through a relay - and
+// that is the same service exposed in a different place.
+func (h *harness) sendToEnrollmentAt(t *testing.T, base string, body []byte) ([]byte, int, []byte) {
 	t.Helper()
-	adres := baza + "/flotestro.agent.v1.EnrollmentService/Enroll"
-	klient := &http.Client{
+	address := base + "/flotestro.agent.v1.EnrollmentService/Enroll"
+	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			RootCAs: pulaZaufaniaTestu(), MinVersion: tls.VersionTLS12,
+			RootCAs: testTrustPool(), MinVersion: tls.VersionTLS12,
 		}},
 	}
-	zadanie, err := http.NewRequest(http.MethodPost, adres, bytes.NewReader(tresc))
+	request, err := http.NewRequest(http.MethodPost, address, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	zadanie.Header.Set("Content-Type", "application/json")
-	odpowiedz, err := klient.Do(zadanie)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatalf("enrollment: %v", err)
 	}
-	defer odpowiedz.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(odpowiedz.Body, 1<<16))
-	return body, odpowiedz.StatusCode, body
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<16))
+	return raw, response.StatusCode, raw
 }
 
-// TestRejestracjaPrzezRelayWIzolowanejLokalizacji pilnuje drogi, ktora jest
-// jedyna droga hosta nie widzacego centrali: token idzie do relaya, a relay
-// poswiadcza centrali, z ktorej lokalizacji przyszlo zgloszenie.
+// TestEnrollmentThroughARelayInAnIsolatedSite guards the path that is the
+// only path of a host which does not see the centre: the token goes to the
+// relay, and the relay attests to the centre which site the request came
+// from.
 //
-// Relay niczego nie podpisuje: certyfikat wystawia CA floty w centrali.
-func TestRejestracjaPrzezRelayWIzolowanejLokalizacji(t *testing.T) {
+// The relay signs nothing: the certificate is issued by the fleet CA in the
+// centre.
+func TestEnrollmentThroughARelayInAnIsolatedSite(t *testing.T) {
 	h := newHarness(t)
-	relayID, adres := h.relayLaboratorium(t)
+	relayID, address := h.labRelay(t)
 
-	var zamowienie struct {
+	var order struct {
 		Token string `json:"token"`
 	}
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "host za relayem", "site": "lab", "environment": "test",
+		"description": "host behind the relay", "site": "lab", "environment": "test",
 		"relay_id": relayID,
-	}, &zamowienie, http.StatusCreated)
+	}, &order, http.StatusCreated)
 
-	klucz, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	maszyna := uniqueSubject("host-za-relayem")
-	zgloszenie, err := json.Marshal(map[string]any{
-		"enrollmentToken": zamowienie.Token,
-		"machineId":       maszyna,
-		"hostname":        maszyna,
-		"csrPem":          csrRelaya(t, klucz, maszyna, nil),
+	machine := uniqueSubject("host-behind-relay")
+	submission, err := json.Marshal(map[string]any{
+		"enrollmentToken": order.Token,
+		"machineId":       machine,
+		"hostname":        machine,
+		"csrPem":          relayCSR(t, key, machine, nil),
 		"clientRequestId": uuid.NewString(),
 		"build":           map[string]any{"agentVersion": "test"},
 	})
@@ -333,54 +339,55 @@ func TestRejestracjaPrzezRelayWIzolowanejLokalizacji(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Token zwiazany z relayem nie moze zadzialac poza jego lokalizacja.
-	// Inaczej zwiazek nie znaczylby nic: wystarczyloby wyniesc token.
-	_, status, tresc := h.wyslijDoEnrollmentu(t, zgloszenie)
+	// A token bound to a relay must not work outside its site. Otherwise
+	// the binding would mean nothing: carrying the token out would be
+	// enough.
+	_, status, body := h.sendToEnrollment(t, submission)
 	if status == http.StatusOK {
-		t.Fatal("token zwiazany z relayem zarejestrowal host bezposrednio")
+		t.Fatal("a token bound to a relay enrolled a host directly")
 	}
 
-	odpowiedz, status, tresc := h.wyslijDoEnrollmentuNa(t, adres, zgloszenie)
+	response, status, body := h.sendToEnrollmentAt(t, address, submission)
 	if status != http.StatusOK {
-		t.Fatalf("rejestracja przez relay odrzucona: %d %s", status, tresc)
+		t.Fatalf("enrollment through the relay rejected: %d %s", status, body)
 	}
-	var wynik struct {
+	var result struct {
 		HostID         string `json:"hostId"`
 		CertificatePem []byte `json:"certificatePem"`
 	}
-	if err := json.Unmarshal(odpowiedz, &wynik); err != nil {
+	if err := json.Unmarshal(response, &result); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, wynik.HostID); err != nil {
-			t.Logf("nie posprzatano hosta %s: %v", wynik.HostID, err)
+			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
+			t.Logf("host %s was not cleaned up: %v", result.HostID, err)
 		}
 	})
 
-	_, lisc := paraTLS(t, klucz, wynik.CertificatePem)
-	// Certyfikat pochodzi z centrali i jest certyfikatem hosta, a nie relaya:
-	// relay przekazuje zgloszenie, ale nie nadaje tozsamosci.
-	if len(lisc.URIs) != 1 || lisc.URIs[0].Host != "host" {
-		t.Fatalf("URI SAN wystawionego certyfikatu = %v", lisc.URIs)
+	_, leaf := tlsPair(t, key, result.CertificatePem)
+	// The certificate comes from the centre and is a host certificate, not
+	// a relay one: the relay forwards the request but grants no identity.
+	if len(leaf.URIs) != 1 || leaf.URIs[0].Host != "host" {
+		t.Fatalf("URI SAN of the issued certificate = %v", leaf.URIs)
 	}
-	if lisc.URIs[0].Path != "/"+wynik.HostID {
-		t.Fatalf("certyfikat opisuje %q, panel zwrocil %q", lisc.URIs[0].Path, wynik.HostID)
+	if leaf.URIs[0].Path != "/"+result.HostID {
+		t.Fatalf("the certificate describes %q, the panel returned %q", leaf.URIs[0].Path, result.HostID)
 	}
 }
 
-// relayLaboratorium znajduje relay floty testowej i jego adres.
-func (h *harness) relayLaboratorium(t *testing.T) (string, string) {
+// labRelay finds the relay of the test fleet and its address.
+func (h *harness) labRelay(t *testing.T) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 	var relayID string
-	var nazwy []string
+	var names []string
 	err := h.database(ctx).QueryRow(ctx, `
 		select id::text, advertised_names from relays
-		where revoked_at is null order by enrolled_at desc limit 1`).Scan(&relayID, &nazwy)
-	if err != nil || len(nazwy) == 0 {
-		t.Skipf("flota testowa nie ma relaya: %v", err)
+		where revoked_at is null order by enrolled_at desc limit 1`).Scan(&relayID, &names)
+	if err != nil || len(names) == 0 {
+		t.Skipf("the test fleet has no relay: %v", err)
 	}
-	return relayID, "https://" + nazwy[0] + ":8453"
+	return relayID, "https://" + names[0] + ":8453"
 }

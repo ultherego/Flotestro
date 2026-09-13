@@ -13,14 +13,14 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
-// zamowienieView odwzorowuje zamowienie enrollmentu.
-// krokView odwzorowuje jeden krok instalacji.
-type krokView struct {
+// stepView mirrors one installation step.
+type stepView struct {
 	Key   string `json:"key"`
 	State string `json:"state"`
 }
 
-type zamowienieView struct {
+// orderView mirrors an enrollment order.
+type orderView struct {
 	ID                string     `json:"id"`
 	Token             string     `json:"token"`
 	Site              string     `json:"site"`
@@ -34,390 +34,401 @@ type zamowienieView struct {
 	Status            string     `json:"status"`
 	EnrolledHostID    string     `json:"enrolled_host_id"`
 	ExpiresAt         time.Time  `json:"expires_at"`
-	Steps             []krokView `json:"steps"`
+	Steps             []stepView `json:"steps"`
 }
 
-// TestZamowienieEnrollmentuPokazujeTokenRaz pilnuje, ze jawny token istnieje
-// wylacznie w odpowiedzi na utworzenie zamowienia.
+// TestEnrollmentOrderShowsTheTokenOnce guards that the plain token exists
+// only in the response to creating the order.
 //
-// Token jest sekretem jednorazowym. Gdyby dalo sie go odczytac z listy albo
-// z pojedynczego zamowienia, kazdy z prawem odczytu instalacji mialby klucz
-// do wprowadzenia wlasnej maszyny do floty.
-func TestZamowienieEnrollmentuPokazujeTokenRaz(t *testing.T) {
+// The token is a one-time secret. If it could be read from the list or from
+// a single order, anybody with the right to read installations would hold
+// the key to bringing their own machine into the fleet.
+func TestEnrollmentOrderShowsTheTokenOnce(t *testing.T) {
 	h := newHarness(t)
-	var utworzone zamowienieView
+	var created orderView
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "test zamowienia", "site": "lab", "environment": "test",
+		"description": "order test", "site": "lab", "environment": "test",
 		"ttl_minutes": 15,
-	}, &utworzone, http.StatusCreated)
+	}, &created, http.StatusCreated)
 
-	if utworzone.Token == "" {
-		t.Fatal("zamowienie bez tokenu - agent nie ma czym sie przedstawic")
+	if created.Token == "" {
+		t.Fatal("order without a token - the agent has nothing to introduce itself with")
 	}
-	if utworzone.Purpose != "new" || utworzone.Kind != "agent" {
-		t.Fatalf("cel = %q, rodzaj = %q", utworzone.Purpose, utworzone.Kind)
+	if created.Purpose != "new" || created.Kind != "agent" {
+		t.Fatalf("purpose = %q, kind = %q", created.Purpose, created.Kind)
 	}
-	if utworzone.Status != "pending" {
-		t.Fatalf("status = %q", utworzone.Status)
-	}
-
-	var odczytane zamowienieView
-	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &odczytane)
-	if odczytane.Token != "" {
-		t.Fatal("odczyt zamowienia oddaje token")
-	}
-	if odczytane.ID != utworzone.ID {
-		t.Fatalf("id = %q, chcemy %q", odczytane.ID, utworzone.ID)
+	if created.Status != "pending" {
+		t.Fatalf("status = %q", created.Status)
 	}
 
-	var lista struct {
-		Items []zamowienieView `json:"items"`
+	var read orderView
+	h.get("/api/v1/enrollment-requests/"+created.ID, &read)
+	if read.Token != "" {
+		t.Fatal("reading the order gives away the token")
 	}
-	h.get("/api/v1/enrollment-requests", &lista)
-	znalezione := false
-	for _, pozycja := range lista.Items {
-		if pozycja.ID == utworzone.ID {
-			znalezione = true
+	if read.ID != created.ID {
+		t.Fatalf("id = %q, wanted %q", read.ID, created.ID)
+	}
+
+	var list struct {
+		Items []orderView `json:"items"`
+	}
+	h.get("/api/v1/enrollment-requests", &list)
+	found := false
+	for _, item := range list.Items {
+		if item.ID == created.ID {
+			found = true
 		}
-		if pozycja.Token != "" {
-			t.Fatalf("lista zamowien oddaje token dla %s", pozycja.ID)
+		if item.Token != "" {
+			t.Fatalf("the order list gives away the token of %s", item.ID)
 		}
 	}
-	if !znalezione {
-		t.Fatal("utworzone zamowienie nie pojawilo sie na liscie")
+	if !found {
+		t.Fatal("the created order did not appear on the list")
 	}
 }
 
-// TestCofnieteZamowienieNieDzialaOdRazu pilnuje, ze cofniecie zamyka token
-// natychmiast, takze gdy czesc puli zostala juz wykorzystana.
-func TestCofnieteZamowienieNieDzialaOdRazu(t *testing.T) {
+// TestRevokedOrderStopsWorkingAtOnce guards that revocation closes the
+// token immediately, also when part of the pool has already been used.
+func TestRevokedOrderStopsWorkingAtOnce(t *testing.T) {
 	h := newHarness(t)
-	var utworzone zamowienieView
+	var created orderView
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "do cofniecia", "site": "lab", "environment": "test", "max_uses": 5,
-	}, &utworzone, http.StatusCreated)
+		"description": "to be revoked", "site": "lab", "environment": "test", "max_uses": 5,
+	}, &created, http.StatusCreated)
 
-	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+utworzone.ID+"/revoke",
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+created.ID+"/revoke",
 		nil, nil, http.StatusNoContent)
 
-	var po zamowienieView
-	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &po)
-	if po.Status != "revoked" {
-		t.Fatalf("status po cofnieciu = %q", po.Status)
+	var after orderView
+	h.get("/api/v1/enrollment-requests/"+created.ID, &after)
+	if after.Status != "revoked" {
+		t.Fatalf("status after revocation = %q", after.Status)
 	}
-	// Cofniecie jest idempotentne: druga proba nie moze skonczyc sie bledem
-	// serwera, bo operator nie ma jak sprawdzic, czy pierwsza doszla.
-	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+utworzone.ID+"/revoke",
+	// Revocation is idempotent: a second attempt must not end with a server
+	// error, because the operator has no way to check whether the first one
+	// got through.
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+created.ID+"/revoke",
 		nil, nil, http.StatusNoContent)
 	h.do(http.MethodPost,
 		"/api/v1/enrollment-requests/00000000-0000-4000-8000-000000000000/revoke",
 		nil, nil, http.StatusNotFound)
 }
 
-// TestZamowienieOdtworzeniaTozsamosciWiazeSieZHostem pilnuje, ze wymiana
-// tozsamosci jest zwiazana z konkretnym hostem, a nie z dowolna maszyna.
-func TestZamowienieOdtworzeniaTozsamosciWiazeSieZHostem(t *testing.T) {
+// TestIdentityRecoveryOrderIsBoundToTheHost guards that an identity
+// replacement is bound to a specific host, not to any machine.
+func TestIdentityRecoveryOrderIsBoundToTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	var zamowienie zamowienieView
+	var order orderView
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
-		map[string]any{"description": "po przeinstalowaniu"}, &zamowienie, http.StatusCreated)
+		map[string]any{"description": "after a reinstall"}, &order, http.StatusCreated)
 
-	if zamowienie.Purpose != "replace_identity" {
-		t.Fatalf("cel = %q", zamowienie.Purpose)
+	if order.Purpose != "replace_identity" {
+		t.Fatalf("purpose = %q", order.Purpose)
 	}
-	if zamowienie.ExpectedHostID != host.ID {
-		t.Fatalf("zamowienie wskazuje hosta %q, chcemy %q", zamowienie.ExpectedHostID, host.ID)
+	if order.ExpectedHostID != host.ID {
+		t.Fatalf("the order points at host %q, wanted %q", order.ExpectedHostID, host.ID)
 	}
-	// Odtworzenie dotyczy jednego hosta, wiec i jednego uzycia: token
-	// wielokrotny bylby kluczem do tej samej maszyny na zapas.
-	if zamowienie.MaxUses != 1 {
-		t.Fatalf("liczba uzyc = %d", zamowienie.MaxUses)
+	// Recovery concerns one host, so one use too: a multi-use token would be
+	// a spare key to the same machine.
+	if order.MaxUses != 1 {
+		t.Fatalf("uses = %d", order.MaxUses)
 	}
-	if zamowienie.Token == "" {
-		t.Fatal("zamowienie bez tokenu")
+	if order.Token == "" {
+		t.Fatal("order without a token")
 	}
-	// Zakres bierze sie z hosta: odtworzenie tozsamosci nie jest okazja do
-	// przeniesienia hosta do innego srodowiska.
-	if zamowienie.Site != host.Site || zamowienie.Environment != host.Environment {
-		t.Fatalf("zakres = %s/%s, host = %s/%s", zamowienie.Site, zamowienie.Environment,
+	// The scope comes from the host: identity recovery is not an occasion
+	// to move the host to another environment.
+	if order.Site != host.Site || order.Environment != host.Environment {
+		t.Fatalf("scope = %s/%s, host = %s/%s", order.Site, order.Environment,
 			host.Site, host.Environment)
 	}
 
-	// Tego celu nie da sie zamowic zwyklym wejsciem: wymiana tozsamosci ma
-	// wlasne prawo i wlasna droge.
+	// This purpose cannot be ordered through the ordinary entry: an identity
+	// replacement has its own permission and its own path.
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
 		"purpose": "replace_identity", "site": "lab", "environment": "test",
 	}, nil, http.StatusBadRequest)
 }
 
-// TestZamowienieMaGraniceCzasu pilnuje, ze token nie moze lezec tygodniami.
-func TestZamowienieMaGraniceCzasu(t *testing.T) {
+// TestOrderHasATimeLimit guards that a token cannot lie around for weeks.
+func TestOrderHasATimeLimit(t *testing.T) {
 	h := newHarness(t)
-	var utworzone zamowienieView
+	var created orderView
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "domyslny czas", "site": "lab", "environment": "test",
-	}, &utworzone, http.StatusCreated)
-	if zostalo := time.Until(utworzone.ExpiresAt); zostalo > time.Hour {
-		t.Fatalf("domyslny czas zycia = %s", zostalo)
+		"description": "default lifetime", "site": "lab", "environment": "test",
+	}, &created, http.StatusCreated)
+	if left := time.Until(created.ExpiresAt); left > time.Hour {
+		t.Fatalf("default lifetime = %s", left)
 	}
-	// Powyzej doby token jest sekretem czekajacym na wyciek.
+	// Beyond a day the token is a secret waiting to leak.
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "za dlugi", "site": "lab", "environment": "test",
+		"description": "too long", "site": "lab", "environment": "test",
 		"ttl_minutes": 60 * 48,
 	}, nil, http.StatusBadRequest)
 }
 
-// TestKwarantannaOdcinaHostaINieBlokujeGo pilnuje, ze odciecie dziala od razu
-// i da sie je zdjac.
+// TestQuarantineCutsTheHostOffAndDoesNotLockIt guards that the cut-off
+// works at once and can be lifted.
 //
-// Test przechodzi na hoscie floty testowej i przywraca go na koniec: pozostawiony
-// w kwarantannie host wywrocilby wszystkie pozostale testy.
-func TestKwarantannaOdcinaHostaINieBlokujeGo(t *testing.T) {
+// The test runs on a test fleet host and restores it at the end: a host
+// left in quarantine would topple all the remaining tests.
+func TestQuarantineCutsTheHostOffAndDoesNotLockIt(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 
-	var wynik struct {
+	var result struct {
 		LifecycleState string `json:"lifecycle_state"`
 		SessionClosed  bool   `json:"session_closed"`
 		JobsCanceled   int    `json:"jobs_canceled"`
 	}
 	t.Cleanup(func() {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
-			map[string]any{"reason": "koniec testu"}, nil, http.StatusOK)
-		// Agent wraca dopiero po swoim backoffie. Bez czekania kolejne testy
-		// zastaja host offline i przewracaja sie z powodu, ktory nie ma nic
-		// wspolnego z tym, co sprawdzaja.
+			map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
+		// The agent comes back only after its backoff. Without waiting the
+		// next tests find the host offline and fall over for a reason that
+		// has nothing to do with what they check.
 		h.awaitConnection(host.ID, time.Minute)
 	})
 
-	// Powod jest wymagany: host odciety bez powodu jest hostem, o ktorym za
-	// tydzien nikt nie bedzie wiedzial, czemu nie pracuje.
+	// The reason is required: a host cut off without a reason is a host
+	// nobody will know in a week why it does not work.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
 		map[string]any{}, nil, http.StatusBadRequest)
 
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
-		map[string]any{"reason": "test kwarantanny"}, &wynik, http.StatusOK)
-	if wynik.LifecycleState != "quarantined" {
-		t.Fatalf("stan = %q", wynik.LifecycleState)
+		map[string]any{"reason": "quarantine test"}, &result, http.StatusOK)
+	if result.LifecycleState != "quarantined" {
+		t.Fatalf("state = %q", result.LifecycleState)
 	}
-	if !wynik.SessionClosed {
-		t.Error("sesja hosta nie zostala zamknieta - kwarantanna sprawdzana " +
-			"dopiero przy nastepnym polaczeniu nie odcina przejetej maszyny")
+	if !result.SessionClosed {
+		t.Error("the host session was not closed - a quarantine checked only " +
+			"at the next connection does not cut off a compromised machine")
 	}
 
-	// Host w kwarantannie nie przyjmuje nowych operacji.
+	// A quarantined host accepts no new operations.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "journal.read",
 			"payload": map[string]any{"journal": map[string]any{"lines": 5}}},
 		nil, http.StatusConflict)
 }
 
-// TestWycofanieWymagaPrzepisaniaNazwy pilnuje, ze utraty zaufania nie da sie
-// kliknac przez pomylke.
-func TestWycofanieWymagaPrzepisaniaNazwy(t *testing.T) {
+// TestDecommissionRequiresTypingTheName guards that a loss of trust cannot
+// be clicked by mistake.
+func TestDecommissionRequiresTypingTheName(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
-		map[string]any{"reason": "proba bez potwierdzenia"}, nil, http.StatusBadRequest)
+		map[string]any{"reason": "attempt without confirmation"}, nil, http.StatusBadRequest)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
-		map[string]any{"reason": "proba z cudza nazwa", "typed_confirmation": "inny-host"},
+		map[string]any{"reason": "attempt with somebody else's name", "typed_confirmation": "other-host"},
 		nil, http.StatusBadRequest)
 
-	// Hosta floty testowej nie wycofujemy naprawde: sprawdzamy sama bramke.
-	// Pelne wycofanie ma wlasny test na maszynie syntetycznej.
+	// A test fleet host is not really decommissioned: only the gate is
+	// checked. Full decommissioning has its own test on a synthetic machine.
 }
 
-// TestWycofanyHostNieWracaTokenem pilnuje, ze utrata zaufania jest decyzja
-// panelu, a nie stanem, ktory da sie cofnac tokenem na hoscie.
-func TestWycofanyHostNieWracaTokenem(t *testing.T) {
+// TestDecommissionedHostDoesNotComeBackWithAToken guards that a loss of
+// trust is a panel decision, not a state that can be undone with a token on
+// the host.
+func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	h := newHarness(t)
-	// Maszyny syntetycznej nie ma we flocie, wiec mozemy ja naprawde wycofac.
+	// The synthetic machine is not in the fleet, so it can really be
+	// decommissioned.
 	host := h.enrollSyntheticHost(t)
 
-	var wynik struct {
+	var result struct {
 		LifecycleState      string `json:"lifecycle_state"`
 		CertificatesRevoked int    `json:"certificates_revoked"`
 	}
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
-		map[string]any{"reason": "maszyna oddana", "typed_confirmation": host.Hostname},
-		&wynik, http.StatusOK)
-	if wynik.LifecycleState != "retired" {
-		t.Fatalf("stan = %q", wynik.LifecycleState)
+		map[string]any{"reason": "machine handed over", "typed_confirmation": host.Hostname},
+		&result, http.StatusOK)
+	if result.LifecycleState != "retired" {
+		t.Fatalf("state = %q", result.LifecycleState)
 	}
-	// Wycofanie zawsze odwoluje certyfikaty: host nie moze wrocic sam
-	// z waznym certyfikatem w reku.
-	if wynik.CertificatesRevoked == 0 {
-		t.Error("wycofanie nie odwolalo zadnego certyfikatu")
+	// Decommissioning always revokes the certificates: the host cannot come
+	// back on its own with a valid certificate in hand.
+	if result.CertificatesRevoked == 0 {
+		t.Error("decommissioning revoked no certificate")
 	}
 
-	// Zamowienie odtworzenia dla wycofanego hosta jest obietnica bez pokrycia.
+	// A recovery order for a decommissioned host is a promise without
+	// backing.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
-		map[string]any{"description": "powrot"}, nil, http.StatusConflict)
+		map[string]any{"description": "return"}, nil, http.StatusConflict)
 
-	// Kwarantanny wycofanego hosta tez nie ma po co zdejmowac.
+	// There is no point lifting the quarantine of a decommissioned host
+	// either.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
-		map[string]any{"reason": "proba powrotu"}, nil, http.StatusConflict)
+		map[string]any{"reason": "return attempt"}, nil, http.StatusConflict)
 }
 
-// TestPostepInstalacjiOpisujeKroki pilnuje, ze ekran instalacji dostaje
-// prawde o tym, co host juz zrobil.
+// TestInstallationProgressDescribesTheSteps guards that the installation
+// screen gets the truth about what the host has already done.
 //
-// Kroki sa osobne, bo kazdy zawodzi z innego powodu: token moze wygasnac,
-// certyfikat moze zostac odrzucony przy bledzie CSR, sesja moze nie dojsc
-// przez zapore, a inwentarz moze nie przyjsc, gdy agent nie ma zdolnosci.
-func TestPostepInstalacjiOpisujeKroki(t *testing.T) {
+// The steps are separate because each fails for a different reason: the
+// token may expire, the certificate may be rejected on a CSR error, the
+// session may not get through a firewall, and the inventory may not arrive
+// when the agent lacks a capability.
+func TestInstallationProgressDescribesTheSteps(t *testing.T) {
 	h := newHarness(t)
-	var utworzone zamowienieView
+	var created orderView
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
-		"description": "test krokow", "site": "lab", "environment": "test",
-	}, &utworzone, http.StatusCreated)
+		"description": "steps test", "site": "lab", "environment": "test",
+	}, &created, http.StatusCreated)
 	t.Cleanup(func() {
-		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+utworzone.ID+"/revoke",
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+created.ID+"/revoke",
 			nil, nil, 0)
 	})
 
-	var przed zamowienieView
-	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &przed)
-	if len(przed.Steps) != 4 {
-		t.Fatalf("krokow = %d: %+v", len(przed.Steps), przed.Steps)
+	var before orderView
+	h.get("/api/v1/enrollment-requests/"+created.ID, &before)
+	if len(before.Steps) != 4 {
+		t.Fatalf("steps = %d: %+v", len(before.Steps), before.Steps)
 	}
-	for _, krok := range przed.Steps {
-		if krok.State != "waiting" {
-			t.Fatalf("krok %s przed instalacja = %q", krok.Key, krok.State)
+	for _, step := range before.Steps {
+		if step.State != "waiting" {
+			t.Fatalf("step %s before the installation = %q", step.Key, step.State)
 		}
 	}
 
-	// Maszyna syntetyczna rejestruje sie i na tym poprzestaje: nie laczy sie
-	// sesja i nie przysyla inwentarza, wiec dwa pierwsze kroki maja byc
-	// zrobione, a dwa kolejne dalej czekac.
-	host := h.enrollSyntheticHostWithToken(t, utworzone.Token)
-	var po zamowienieView
-	h.get("/api/v1/enrollment-requests/"+utworzone.ID, &po)
-	stany := map[string]string{}
-	for _, krok := range po.Steps {
-		stany[krok.Key] = krok.State
+	// The synthetic machine enrolls and stops there: it neither connects a
+	// session nor sends an inventory, so the first two steps are to be done
+	// and the next two still waiting.
+	host := h.enrollSyntheticHostWithToken(t, created.Token)
+	var after orderView
+	h.get("/api/v1/enrollment-requests/"+created.ID, &after)
+	states := map[string]string{}
+	for _, step := range after.Steps {
+		states[step.Key] = step.State
 	}
-	if stany["token"] != "done" || stany["certificate"] != "done" {
-		t.Fatalf("kroki po rejestracji = %v", stany)
+	if states["token"] != "done" || states["certificate"] != "done" {
+		t.Fatalf("steps after enrollment = %v", states)
 	}
-	if stany["connected"] != "waiting" || stany["inventory"] != "waiting" {
-		t.Errorf("host bez sesji pokazany jako polaczony: %v", stany)
+	if states["connected"] != "waiting" || states["inventory"] != "waiting" {
+		t.Errorf("a host without a session shown as connected: %v", states)
 	}
-	if po.EnrolledHostID != host.ID {
-		t.Fatalf("zamowienie wskazuje hosta %q, chcemy %q", po.EnrolledHostID, host.ID)
+	if after.EnrolledHostID != host.ID {
+		t.Fatalf("the order points at host %q, wanted %q", after.EnrolledHostID, host.ID)
 	}
-	if po.Status != "enrolled" {
-		t.Fatalf("status po rejestracji = %q", po.Status)
+	if after.Status != "enrolled" {
+		t.Fatalf("status after enrollment = %q", after.Status)
 	}
 }
 
-// TestWymianaAgentaKonczySiePowrotemHosta pilnuje wlasciwosci, dla ktorej ta
-// operacja w ogole istnieje osobno: sukcesem jest host, ktory wrocil
-// z oczekiwana wersja, a nie kod wyjscia menedzera pakietow.
+// TestAgentReplacementEndsWithTheHostComingBack guards the property this
+// operation exists separately for in the first place: success is a host
+// that came back with the expected version, not the exit status of the
+// package manager.
 //
-// Agent wymienia sam siebie, wiec proces liczacy zadanie ginie w polowie.
-// Gdyby panel czekal na jego wynik, kazda wymiana konczylaby sie limitem
-// czasu - takze wtedy, gdy host wrocil sprawny.
-func TestWymianaAgentaKonczySiePowrotemHosta(t *testing.T) {
+// The agent replaces itself, so the process accounting for the job dies
+// halfway. If the panel waited for its result, every replacement would end
+// with a timeout - also when the host came back healthy.
+func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	var przed struct {
+	var before struct {
 		AgentVersion string `json:"agent_version"`
 	}
-	h.get("/api/v1/hosts/"+host.ID, &przed)
-	// Cel bierzemy z repozytorium floty testowej: musi tam byc, bo inaczej
-	// menedzer pakietow nie ma czego zainstalowac. Domyslnie jest to wersja
-	// najnowsza - test, ktory cofalby hosta na stare wydanie, zostawialby
-	// flote na kodzie sprzed zmiany i nie dalby sie powtorzyc.
-	cel := os.Getenv("FLOTESTRO_TEST_AGENT_VERSION")
-	if cel == "" {
-		cel = h.najnowszaWersjaAgenta()
+	h.get("/api/v1/hosts/"+host.ID, &before)
+	// The target comes from the test fleet repository: it must be there,
+	// otherwise the package manager has nothing to install. By default it
+	// is the newest version - a test that moved the host back to an old
+	// release would leave the fleet on code from before the change and
+	// could not be repeated.
+	target := os.Getenv("FLOTESTRO_TEST_AGENT_VERSION")
+	if target == "" {
+		target = h.newestAgentVersion()
 	}
-	if przed.AgentVersion == cel {
-		t.Skipf("host jest juz w wersji %s", cel)
+	if before.AgentVersion == target {
+		t.Skipf("the host is already at version %s", target)
 	}
 
 	job := h.createOperation(host.ID, map[string]any{
 		"action":  "agent.upgrade",
-		"payload": map[string]any{"agent_upgrade": map[string]any{"target_version": cel}},
+		"payload": map[string]any{"agent_upgrade": map[string]any{"target_version": target}},
 	})
 	if job.ID == "" {
-		t.Fatal("nie powstalo zadanie wymiany agenta")
+		t.Fatal("no agent replacement job was created")
 	}
-	// Wymiana agenta jest operacja wysokiego ryzyka: odcina host od
-	// zarzadzania na czas restartu, wiec wymaga zatwierdzenia.
+	// An agent replacement is a high-risk operation: it cuts the host off
+	// from management for the duration of the restart, so it requires
+	// approval.
 	if !job.RequiresApproval {
-		t.Fatal("wymiana agenta nie wymaga zatwierdzenia")
+		t.Fatal("the agent replacement requires no approval")
 	}
 	job = h.approve(job.ID, job.PayloadHash)
 
-	// Wymiana trwa: pakiet, restart uslugi i powrot sesji. Panel rozstrzyga
-	// dopiero po Hello z nowa wersja.
-	koniec := time.Now().Add(4 * time.Minute)
-	var stan jobView
-	for time.Now().Before(koniec) {
-		h.get("/api/v1/jobs/"+job.ID, &stan)
-		if stan.State == "succeeded" || stan.State == "failed" {
+	// The replacement takes a while: the package, the service restart and
+	// the session coming back. The panel decides only after a Hello with
+	// the new version.
+	deadline := time.Now().Add(4 * time.Minute)
+	var state jobView
+	for time.Now().Before(deadline) {
+		h.get("/api/v1/jobs/"+job.ID, &state)
+		if state.State == "succeeded" || state.State == "failed" {
 			break
 		}
 		time.Sleep(5 * time.Second)
 	}
-	if stan.State != "succeeded" {
-		t.Fatalf("zadanie wymiany agenta w stanie %q (%s)", stan.State, stan.ResultMessage)
+	if state.State != "succeeded" {
+		t.Fatalf("the agent replacement job in state %q (%s)", state.State, state.ResultMessage)
 	}
 
-	var po struct {
+	var after struct {
 		AgentVersion string `json:"agent_version"`
 	}
-	h.get("/api/v1/hosts/"+host.ID, &po)
-	if po.AgentVersion != cel {
-		t.Fatalf("host zglasza wersje %q, oczekiwano %q", po.AgentVersion, cel)
+	h.get("/api/v1/hosts/"+host.ID, &after)
+	if after.AgentVersion != target {
+		t.Fatalf("the host reports version %q, expected %q", after.AgentVersion, target)
 	}
 	h.awaitConnection(host.ID, time.Minute)
 }
 
-// najnowszaWersjaAgenta czyta z repozytorium floty testowej najwyzsza wersje
-// pakietu agenta.
+// newestAgentVersion reads the highest version of the agent package from
+// the test fleet repository.
 //
-// Wersji nie zgadujemy ze stalej w tescie: repozytorium laboratorium rosnie
-// przy kazdym wydaniu, a wersja wpisana na sztywno cofalaby hosta tym dalej,
-// im dluzej zyje projekt. Brak odpowiedzi konczy test pominieciem z powodem -
-// wymiana agenta na wersje, ktorej nie ma w repozytorium, nie jest testem.
-func (h *harness) najnowszaWersjaAgenta() string {
+// The version is not guessed from a constant in the test: the lab
+// repository grows with every release, and a hard-coded version would move
+// the host back the further the longer the project lives. No answer ends
+// the test with a skip and a reason - replacing the agent with a version
+// the repository does not have is not a test.
+func (h *harness) newestAgentVersion() string {
 	h.t.Helper()
-	adres := envOr("FLOTESTRO_TEST_REPO", defaultRepo)
-	response, err := h.client.Get(adres + "/deb/dists/stable/main/binary-amd64/Packages")
+	address := envOr("FLOTESTRO_TEST_REPO", defaultRepo)
+	response, err := h.client.Get(address + "/deb/dists/stable/main/binary-amd64/Packages")
 	if err != nil {
-		h.t.Skipf("repozytorium floty testowej niedostepne (%s): %v", adres, err)
+		h.t.Skipf("the test fleet repository is unavailable (%s): %v", address, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		h.t.Skipf("repozytorium floty testowej odpowiedzialo %s", response.Status)
+		h.t.Skipf("the test fleet repository answered %s", response.Status)
 	}
-	tresc, err := io.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		h.t.Skipf("indeks repozytorium nieczytelny: %v", err)
+		h.t.Skipf("the repository index is unreadable: %v", err)
 	}
 
-	var pakiet string
-	var najnowsza string
-	for _, linia := range strings.Split(string(tresc), "\n") {
+	var pkg string
+	var newest string
+	for _, line := range strings.Split(string(body), "\n") {
 		switch {
-		case strings.HasPrefix(linia, "Package: "):
-			pakiet = strings.TrimSpace(strings.TrimPrefix(linia, "Package: "))
-		case strings.HasPrefix(linia, "Version: ") && pakiet == "flotestro-agent":
-			wersja := strings.TrimSpace(strings.TrimPrefix(linia, "Version: "))
-			if najnowsza == "" || version.CompareDeb(wersja, najnowsza) > 0 {
-				najnowsza = wersja
+		case strings.HasPrefix(line, "Package: "):
+			pkg = strings.TrimSpace(strings.TrimPrefix(line, "Package: "))
+		case strings.HasPrefix(line, "Version: ") && pkg == "flotestro-agent":
+			candidate := strings.TrimSpace(strings.TrimPrefix(line, "Version: "))
+			if newest == "" || version.CompareDeb(candidate, newest) > 0 {
+				newest = candidate
 			}
 		}
 	}
-	if najnowsza == "" {
-		h.t.Skip("repozytorium floty testowej nie ma pakietu agenta")
+	if newest == "" {
+		h.t.Skip("the test fleet repository has no agent package")
 	}
-	return najnowsza
+	return newest
 }

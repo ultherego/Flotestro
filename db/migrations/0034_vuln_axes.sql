@@ -1,32 +1,32 @@
--- Trzy osie naprawy zamiast jednego slowa, pochodzenie pakietu i osobny cykl
--- ustalen producenta.
+-- Three remediation axes instead of one word, the package origin and a
+-- separate cycle of vendor advisories.
 --
--- Jedno slowo "naprawa" obiecywalo wiecej, niz panel sprawdzil: "dostepna"
--- znaczylo tylko tyle, ze producent gdzies wydal nowsza wersje. Czy ta wersja
--- lezy w repozytorium tego hosta i czy transakcja przejdzie, to sa dwa inne
--- pytania - i odpowiada na nie co innego.
+-- One word "fix" promised more than the panel checked: "available" meant
+-- only that the vendor released a newer version somewhere. Whether that
+-- version lies in this host's repository and whether the transaction passes
+-- are two other questions - and something else answers them.
 alter table vuln_findings drop column if exists remediation;
 
 alter table vuln_findings
-    -- Co wydal producent. Odpowiada advisory.
+    -- What the vendor released. The advisory answers.
     add column if not exists vendor_fix           text not null default 'unknown',
-    -- Czy ta wersja jest widoczna w repozytoriach hosta. Odpowiadaja metadane
-    -- repozytoriow - i tylko dla tych hostow, dla ktorych je mamy.
+    -- Whether that version is visible in the host repositories. The repository
+    -- metadata answers - and only for the hosts it is available for.
     add column if not exists repository_candidate text not null default 'unknown',
-    -- Czy da sie ja teraz zainstalowac. Odpowiada wylacznie plan pakietowy:
-    -- tylko on widzi wstrzymania, wykluczenia i konflikty modulow.
+    -- Whether it can be installed now. Only the package plan answers: it alone
+    -- sees holds, exclusions and module conflicts.
     add column if not exists transaction_state    text not null default 'unknown',
-    -- Wersja naprawde porownana z ustaleniem i to, skad ona pochodzi. Debian
-    -- prowadzi bezpieczenstwo po pakiecie zrodlowym, a wersja binarna bywa
-    -- inna: przebudowa dokleja sufiks i wychodzi wyzsza od zrodlowej przy tym
-    -- samym kodzie.
+    -- The version really compared with the advisory and where it comes from.
+    -- Debian tracks security by source package, and the binary version may
+    -- differ: a rebuild appends a suffix and comes out higher than the source
+    -- with the same code.
     add column if not exists comparison_version   text not null default '',
     add column if not exists comparison_basis     text not null default '',
-    -- Czyj jest pakiet. Bez tego pakiet z obcego repozytorium liczylby sie
-    -- jako objety ustaleniami producenta dystrybucji.
+    -- Whose package it is. Without this a package from a foreign repository
+    -- would count as covered by the distribution vendor's advisories.
     add column if not exists package_origin       text not null default '',
-    -- Odcisk zestawu ustalen, ktory rozstrzygnal. Zestaw zmienia sie takze
-    -- wtedy, gdy na hoscie nie zmienil sie ani jeden pakiet.
+    -- The digest of the advisory set that decided. The set changes also when
+    -- not a single package changed on the host.
     add column if not exists advisory_digest      text not null default '';
 
 do $$
@@ -39,28 +39,28 @@ end $$;
 
 alter table vuln_host_state
     add column if not exists advisory_digest text not null default '',
-    -- Cztery liczniki zamiast jednego: jedna podatnosc dotyka kilku pakietow,
-    -- jedno advisory niesie kilka CVE, a "1354 znalezisk" nie mowi, ile to
-    -- naprawde roznych spraw do zamkniecia.
+    -- Four counters instead of one: one vulnerability touches several
+    -- packages, one advisory carries several CVEs, and "1354 findings" does
+    -- not say how many really different matters there are to close.
     add column if not exists unique_cves       int not null default 0,
     add column if not exists unique_advisories int not null default 0,
     add column if not exists affected_packages int not null default 0,
-    -- Powod, dla ktorego nie ma ustalen producenta. Blad odczytu metadanych
-    -- nie moze wygladac jak host bez ustalen.
+    -- The reason there are no vendor advisories. A metadata read error must
+    -- not look like a host without advisories.
     add column if not exists advisories_reason text not null default '';
 
--- Pochodzenie pakietu: APT nie zapisuje producenta przy pakiecie, wiec bierze
--- sie ono z repozytorium, z ktorego przyszla zainstalowana wersja.
+-- The package origin: APT does not record the vendor with the package, so it
+-- is taken from the repository the installed version came from.
 alter table host_packages
     add column if not exists origin       text not null default '',
     add column if not exists origin_class text not null default '';
 
--- Stan ustalen producenta znanych hostowi.
+-- The state of the vendor advisories known to the host.
 --
--- Osobny od stanu listy pakietow, bo to osobne zrodlo i osobny cykl: producent
--- wydaje poprawki takze wtedy, gdy na hoscie nie zmienil sie ani jeden pakiet.
--- Bez tego panel odswiezalby ustalenia dopiero przy zmianie listy - czyli
--- czasem nigdy.
+-- Separate from the package list state, because it is a separate source and
+-- a separate cycle: the vendor releases fixes also when not a single package
+-- changed on the host. Without this the panel would refresh the advisories
+-- only at a list change - that is sometimes never.
 create table if not exists host_advisory_state (
     host_id            uuid        primary key references hosts(id) on delete cascade,
     digest             text        not null default '',

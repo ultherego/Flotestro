@@ -1,15 +1,15 @@
--- Zmiana w katalogu jest jedna transakcja biznesowa Flotestro, ale moze
--- skladac sie z kilku operacji FreeIPA. Kazda faza ma wlasny wynik, bo
--- czesciowy sukces nie moze byc przedstawiany jako zakonczone powodzeniem.
+-- A directory change is one Flotestro business transaction, but may consist
+-- of several FreeIPA operations. Every phase has its own result, because a
+-- partial success must not be presented as a completed success.
 
 create table directory_changes (
     id                uuid        primary key,
     action_type       text        not null,
     payload           jsonb       not null,
-    -- Hash planu zatwierdzonego przez czlowieka. Podmiana tresci po
-    -- zatwierdzeniu jest wykrywalna.
+    -- The hash of the plan approved by a human. A content swap after
+    -- approval is detectable.
     payload_hash      bytea       not null,
-    -- Podglad wplywu: co zmiana zrobi, zanim cokolwiek sie wydarzy.
+    -- The impact preview: what the change will do before anything happens.
     plan              jsonb       not null default '{}'::jsonb,
 
     state             text        not null
@@ -22,8 +22,8 @@ create table directory_changes (
     canceled_by       text,
     canceled_at       timestamptz,
 
-    -- Wynik kazdej fazy z osobna. Bez tego nie da sie powiedziec, co zdazylo
-    -- sie zmienic przed bledem.
+    -- The result of every phase separately. Without it there is no telling what
+    -- managed to change before the error.
     phases            jsonb       not null default '[]'::jsonb,
     result_message    text,
 
@@ -38,8 +38,8 @@ create table directory_changes (
 create index directory_changes_state_idx on directory_changes (state, created_at desc);
 create index directory_changes_actor_idx on directory_changes (created_by, created_at desc);
 
--- Lokalny znacznik odmowy. Ustawiany przed blokada w katalogu, zeby odebranie
--- dostepu dzialalo natychmiast, zanim zmiana zdazy sie rozpropagowac.
+-- The local denial marker. Set before the lock in the directory, so that
+-- revoking access works at once, before the change manages to propagate.
 alter table principals add column denied_at timestamptz;
 alter table principals add column denied_reason text;
 

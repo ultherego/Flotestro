@@ -19,8 +19,8 @@ type campaignView struct {
 	CanarySize       int    `json:"canary_size"`
 	WaveSize         int    `json:"wave_size"`
 	RequiresApproval bool   `json:"requires_approval"`
-	// Odcisk tego, co zatwierdzajacy widzi. Zgoda bez niego dotyczylaby
-	// samego identyfikatora kampanii.
+	// The fingerprint of what the approver sees. An approval without it
+	// would concern the campaign identifier alone.
 	ApprovalFingerprint string `json:"approval_fingerprint"`
 	PlanSetHash         string `json:"plan_set_hash"`
 	CreatedBy           string `json:"created_by"`
@@ -56,21 +56,22 @@ func (h *harness) createCampaign(body map[string]any) campaignView {
 	var campaign campaignView
 	h.do(http.MethodPost, "/api/v1/campaigns", body, &campaign, http.StatusCreated)
 	h.t.Cleanup(func() {
-		// Kampania w toku zablokowalaby kolejne testy na tych samych hostach.
+		// A campaign in progress would block the next tests on the same
+		// hosts.
 		h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
-			map[string]any{"reason": "koniec testu"}, nil, 0)
+			map[string]any{"reason": "end of the test"}, nil, 0)
 	})
 	return campaign
 }
 
-// approveCampaign zatwierdza kampanie jej wlasnym odciskiem.
+// approveCampaign approves a campaign with its own fingerprint.
 func (h *harness) approveCampaign(campaign campaignView) campaignView {
 	h.t.Helper()
-	var zatwierdzona campaignView
+	var approved campaignView
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
 		map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint},
-		&zatwierdzona, http.StatusOK)
-	return zatwierdzona
+		&approved, http.StatusOK)
+	return approved
 }
 
 func (h *harness) campaign(id string) campaignView {
@@ -89,7 +90,7 @@ func (h *harness) campaignTargets(id string) []campaignTargetView {
 	return result.Items
 }
 
-// awaitCampaign czeka na jeden z oczekiwanych stanow kampanii.
+// awaitCampaign waits for one of the expected campaign states.
 func (h *harness) awaitCampaign(id string, wanted map[string]bool, timeout time.Duration) campaignView {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -101,7 +102,7 @@ func (h *harness) awaitCampaign(id string, wanted map[string]bool, timeout time.
 		}
 		time.Sleep(2 * time.Second)
 	}
-	h.t.Fatalf("kampania %s nie osiagnela oczekiwanego stanu (jest %s)", id, last.State)
+	h.t.Fatalf("campaign %s did not reach the expected state (it is %s)", id, last.State)
 	return last
 }
 
@@ -124,61 +125,61 @@ func labCampaign(name, unit string, extra map[string]any) map[string]any {
 	return body
 }
 
-// TestKampaniaTworzyMigawkeCelow sprawdza, ze selektor jest natychmiast
-// zamieniany na niemutowalna liste hostow z podzialem na fale.
-func TestKampaniaTworzyMigawkeCelow(t *testing.T) {
+// TestCampaignCreatesATargetSnapshot checks that the selector is turned at
+// once into an immutable host list split into waves.
+func TestCampaignCreatesATargetSnapshot(t *testing.T) {
 	h := newHarness(t)
-	campaign := h.createCampaign(labCampaign("migawka celow", "cron.service", nil))
+	campaign := h.createCampaign(labCampaign("target snapshot", "cron.service", nil))
 
 	if campaign.State != "awaiting_approval" {
-		t.Fatalf("stan = %s, oczekiwano awaiting_approval", campaign.State)
+		t.Fatalf("state = %s, expected awaiting_approval", campaign.State)
 	}
 	targets := h.campaignTargets(campaign.ID)
 	if len(targets) < 2 {
-		t.Fatalf("migawka ma %d celow, oczekiwano co najmniej 2", len(targets))
+		t.Fatalf("the snapshot has %d targets, expected at least 2", len(targets))
 	}
 
-	// Fala 0 jest canary i ma dokladnie tyle hostow, ile podano.
+	// Wave 0 is the canary and has exactly as many hosts as given.
 	canary := 0
 	for _, target := range targets {
 		if target.Wave == 0 {
 			canary++
 		}
 		if target.State != "pending" {
-			t.Errorf("cel %s ruszyl przed zatwierdzeniem: %s", target.Hostname, target.State)
+			t.Errorf("target %s started before approval: %s", target.Hostname, target.State)
 		}
 	}
 	if canary != campaign.CanarySize {
-		t.Errorf("canary ma %d hostow, oczekiwano %d", canary, campaign.CanarySize)
+		t.Errorf("the canary has %d hosts, expected %d", canary, campaign.CanarySize)
 	}
 }
 
-// TestKampaniaCzekaNaZatwierdzenie sprawdza, ze samo utworzenie niczego nie
-// uruchamia. Zatwierdzenie kampanii jest zgoda na zmiane na wielu hostach.
-func TestKampaniaCzekaNaZatwierdzenie(t *testing.T) {
+// TestCampaignWaitsForApproval checks that creation alone starts nothing.
+// Approving a campaign is consent to a change on many hosts.
+func TestCampaignWaitsForApproval(t *testing.T) {
 	h := newHarness(t)
-	campaign := h.createCampaign(labCampaign("czekanie na zgode", "cron.service", nil))
+	campaign := h.createCampaign(labCampaign("waiting for consent", "cron.service", nil))
 
 	time.Sleep(8 * time.Second)
 	current := h.campaign(campaign.ID)
 	if current.State != "awaiting_approval" {
-		t.Fatalf("niezatwierdzona kampania zmienila stan na %s", current.State)
+		t.Fatalf("the unapproved campaign changed its state to %s", current.State)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.State != "pending" {
-			t.Errorf("cel %s ruszyl bez zatwierdzenia", target.Hostname)
+			t.Errorf("target %s started without approval", target.Hostname)
 		}
 	}
 }
 
-// TestCanaryPoprzedzaKolejneFale sprawdza, ze fala 1 nie rusza, zanim canary
-// sie nie zamknie.
-func TestCanaryPoprzedzaKolejneFale(t *testing.T) {
+// TestCanaryPrecedesTheNextWaves checks that wave 1 does not start before
+// the canary closes.
+func TestCanaryPrecedesTheNextWaves(t *testing.T) {
 	h := newHarness(t)
-	campaign := h.createCampaign(labCampaign("canary przed fala", "cron.service", nil))
+	campaign := h.createCampaign(labCampaign("canary before the wave", "cron.service", nil))
 	h.approveCampaign(campaign)
 
-	// W chwili, gdy canary pracuje, kolejne fale musza czekac.
+	// While the canary works, the next waves must wait.
 	deadline := time.Now().Add(60 * time.Second)
 	sawCanaryFirst := false
 	for time.Now().Before(deadline) {
@@ -193,7 +194,7 @@ func TestCanaryPoprzedzaKolejneFale(t *testing.T) {
 			}
 		}
 		if canaryOpen && laterStarted {
-			t.Fatal("fala po canary ruszyla, zanim canary sie zamknelo")
+			t.Fatal("the wave after the canary started before the canary closed")
 		}
 		if !canaryOpen {
 			sawCanaryFirst = true
@@ -202,24 +203,24 @@ func TestCanaryPoprzedzaKolejneFale(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 	if !sawCanaryFirst {
-		t.Skip("canary nie zamknelo sie w czasie testu")
+		t.Skip("the canary did not close within the test time")
 	}
 }
 
-// TestProgBledowWstrzymujeKampanie jest testem najwazniejszego zabezpieczenia:
-// bledna zmiana nie moze przejsc przez cala flote.
-func TestProgBledowWstrzymujeKampanie(t *testing.T) {
+// TestFailureThresholdPausesTheCampaign is a test of the most important
+// safeguard: a bad change must not pass through the whole fleet.
+func TestFailureThresholdPausesTheCampaign(t *testing.T) {
 	h := newHarness(t)
-	campaign := h.createCampaign(labCampaign("kampania z bledem", "nieistniejaca-jednostka.service",
+	campaign := h.createCampaign(labCampaign("campaign with a failure", "non-existent-unit.service",
 		map[string]any{"failure_threshold_absolute": 1}))
 	h.approveCampaign(campaign)
 
 	paused := h.awaitCampaign(campaign.ID, map[string]bool{"paused": true}, 90*time.Second)
 	if paused.PauseReason == "" {
-		t.Error("kampania wstrzymana bez podania powodu")
+		t.Error("the campaign was paused without a reason")
 	}
 	if paused.PausedBy != "system" {
-		t.Errorf("wstrzymal %q, oczekiwano system", paused.PausedBy)
+		t.Errorf("paused by %q, expected system", paused.PausedBy)
 	}
 
 	targets := h.campaignTargets(campaign.ID)
@@ -228,28 +229,30 @@ func TestProgBledowWstrzymujeKampanie(t *testing.T) {
 		switch {
 		case target.State == "failed":
 			failed++
-			// Kod bledu musi dotrzec do kampanii, inaczej operator widzi samo
-			// slowo "failed" bez przyczyny.
+			// The error code must reach the campaign, otherwise the operator
+			// sees the bare word "failed" without a cause.
 			if target.ErrorCode == "" {
-				t.Errorf("cel %s padl bez kodu bledu", target.Hostname)
+				t.Errorf("target %s failed without an error code", target.Hostname)
 			}
 		case target.State == "pending":
 			untouched++
 		}
 	}
 	if failed == 0 {
-		t.Fatal("kampania wstrzymana, ale zaden host nie jest oznaczony jako bledny")
+		t.Fatal("the campaign was paused, but no host is marked as failed")
 	}
-	// Sedno progu: hosty kolejnych fal nie zostaly ruszone.
+	// The crux of the threshold: the hosts of the next waves were not
+	// touched.
 	if untouched == 0 {
-		t.Error("po przekroczeniu progu nie zostal zaden nietkniety host")
+		t.Error("no untouched host remained after the threshold was exceeded")
 	}
 }
 
-// TestRaportKampaniiOpisujeFale sprawdza kompletnosc raportu koncowego.
-func TestRaportKampaniiOpisujeFale(t *testing.T) {
+// TestCampaignReportDescribesTheWaves checks the completeness of the final
+// report.
+func TestCampaignReportDescribesTheWaves(t *testing.T) {
 	h := newHarness(t)
-	campaign := h.createCampaign(labCampaign("raport", "nieistniejaca-jednostka.service",
+	campaign := h.createCampaign(labCampaign("report", "non-existent-unit.service",
 		map[string]any{"failure_threshold_absolute": 1}))
 	h.approveCampaign(campaign)
 	h.awaitCampaign(campaign.ID, map[string]bool{"paused": true}, 90*time.Second)
@@ -258,179 +261,182 @@ func TestRaportKampaniiOpisujeFale(t *testing.T) {
 	h.get("/api/v1/campaigns/"+campaign.ID+"/report", &report)
 
 	if len(report.Waves) == 0 {
-		t.Fatal("raport nie opisuje zadnej fali")
+		t.Fatal("the report describes no wave at all")
 	}
 	if !report.Waves[0].IsCanary {
-		t.Error("pierwsza fala nie jest oznaczona jako canary")
+		t.Error("the first wave is not marked as the canary")
 	}
 	if len(report.Failures) == 0 {
-		t.Error("raport nie wymienia hostow, ktore padly")
+		t.Error("the report does not list the hosts that failed")
 	}
 	if report.Totals["failed"] == 0 {
-		t.Error("podsumowanie nie liczy bledow")
+		t.Error("the summary does not count the failures")
 	}
 }
 
-// TestWstrzymanaKampaniaDaSieWznowicIAnulowac sprawdza sterowanie kampania.
-func TestWstrzymanaKampaniaDaSieWznowicIAnulowac(t *testing.T) {
+// TestPausedCampaignCanBeResumedAndCancelled checks the campaign controls.
+func TestPausedCampaignCanBeResumedAndCancelled(t *testing.T) {
 	h := newHarness(t)
-	campaign := h.createCampaign(labCampaign("sterowanie", "cron.service", nil))
+	campaign := h.createCampaign(labCampaign("controls", "cron.service", nil))
 	h.approveCampaign(campaign)
 
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/pause",
 		map[string]any{"reason": "test"}, nil, http.StatusOK)
 	if state := h.campaign(campaign.ID).State; state != "paused" {
-		t.Fatalf("stan po wstrzymaniu = %s", state)
+		t.Fatalf("state after pausing = %s", state)
 	}
 
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/resume", nil, nil, http.StatusOK)
 	if state := h.campaign(campaign.ID).State; state == "paused" {
-		t.Fatal("kampania pozostala wstrzymana po wznowieniu")
+		t.Fatal("the campaign stayed paused after resuming")
 	}
 
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
-		map[string]any{"reason": "koniec"}, nil, http.StatusOK)
+		map[string]any{"reason": "end"}, nil, http.StatusOK)
 	final := h.campaign(campaign.ID)
 	if final.State != "canceled" {
-		t.Fatalf("stan po anulowaniu = %s", final.State)
+		t.Fatalf("state after cancelling = %s", final.State)
 	}
-	// Anulowanie nie moze zostawic hostow czekajacych w kolejce.
+	// Cancelling must not leave hosts waiting in the queue.
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.State == "pending" {
-			t.Errorf("cel %s zostal w stanie pending po anulowaniu", target.Hostname)
+			t.Errorf("target %s stayed pending after cancelling", target.Hostname)
 		}
 	}
 }
 
-// TestOperatorNieZatwierdzaKampanii sprawdza rozdzial obowiazkow na poziomie
-// kampanii: jedno zatwierdzenie uruchamia zmiane na wielu hostach.
-func TestOperatorNieZatwierdzaKampanii(t *testing.T) {
+// TestOperatorDoesNotApproveCampaigns checks the separation of duties at
+// the campaign level: one approval starts a change on many hosts.
+func TestOperatorDoesNotApproveCampaigns(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	operator := h.withToken(h.createPrincipal(uniqueSubject("operator-kampanie"), []map[string]string{
+	operator := h.withToken(h.createPrincipal(uniqueSubject("operator-campaigns"), []map[string]string{
 		{"role": "operator", "site": host.Site, "environment": host.Environment},
 	}))
-	approver := h.withToken(h.createPrincipal(uniqueSubject("approver-kampanie"), []map[string]string{
+	approver := h.withToken(h.createPrincipal(uniqueSubject("approver-campaigns"), []map[string]string{
 		{"role": "approver", "site": host.Site, "environment": host.Environment},
 	}))
 
-	body := labCampaign("rozdzial obowiazkow", "cron.service", map[string]any{
+	body := labCampaign("separation of duties", "cron.service", map[string]any{
 		"selector": map[string]any{"host_ids": []string{host.ID}},
 	})
 	var campaign campaignView
 	operator.do(http.MethodPost, "/api/v1/campaigns", body, &campaign, http.StatusCreated)
 	t.Cleanup(func() {
 		h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
-			map[string]any{"reason": "koniec testu"}, nil, 0)
+			map[string]any{"reason": "end of the test"}, nil, 0)
 	})
 
-	zgoda := map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint}
-	// Operator prowadzi kampanie, ale jej nie zatwierdza.
+	consent := map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint}
+	// The operator runs the campaign, but does not approve it.
 	operator.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
-		zgoda, nil, http.StatusForbidden)
-	// Approver zatwierdza, ale nie tworzy.
+		consent, nil, http.StatusForbidden)
+	// The approver approves, but does not create.
 	approver.do(http.MethodPost, "/api/v1/campaigns", body, nil, http.StatusForbidden)
 	approver.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
-		zgoda, nil, http.StatusOK)
+		consent, nil, http.StatusOK)
 }
 
-// TestKampaniaPozaZakresemJestOdrzucana sprawdza, ze uprawnienie jest badane
-// dla kazdego hosta z migawki, a nie tylko dla pierwszego.
-func TestKampaniaPozaZakresemJestOdrzucana(t *testing.T) {
+// TestCampaignOutsideTheScopeIsRejected checks that the permission is
+// examined for every host of the snapshot, not only for the first.
+func TestCampaignOutsideTheScopeIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	obcy := h.withToken(h.createPrincipal(uniqueSubject("operator-obcy"), []map[string]string{
-		{"role": "operator", "site": "inna-lokalizacja", "environment": "inne"},
+	outsider := h.withToken(h.createPrincipal(uniqueSubject("foreign-operator"), []map[string]string{
+		{"role": "operator", "site": "other-site", "environment": "other"},
 	}))
-	obcy.do(http.MethodPost, "/api/v1/campaigns",
-		labCampaign("poza zakresem", "cron.service", map[string]any{
+	outsider.do(http.MethodPost, "/api/v1/campaigns",
+		labCampaign("outside the scope", "cron.service", map[string]any{
 			"selector": map[string]any{"host_ids": []string{host.ID}},
 		}), nil, http.StatusForbidden)
 }
 
-// TestKampaniaOdmawiaOperacjiBezTrybuMasowego pilnuje bramki, ktora oddziela
-// operacje jednohostowe od flotowych. Odmowa ma przyjsc przy zlecaniu i miec
-// wlasny kod: kampania, ktora zatwierdza jeden payload dla operacji liczacej
-// inny plan na kazdym hoscie, zatwierdzalaby zmiane, ktorej nikt nie widzial.
-func TestKampaniaOdmawiaOperacjiBezTrybuMasowego(t *testing.T) {
+// TestCampaignRefusesAnOperationWithoutABulkMode guards the gate that
+// separates single-host operations from fleet ones. The refusal is to come
+// when ordering and have its own code: a campaign that approves one payload
+// for an operation computing a different plan on every host would approve a
+// change nobody saw.
+func TestCampaignRefusesAnOperationWithoutABulkMode(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// Operacja wyspecjalizowana bez wlasnej fazy w silniku. Kazda rodzina
-	// z planem per host ma juz planera; ta bramka pilnuje, ze przepustka jest
-	// deklaracja i mechanizm, a nie nazwa operacji - naprawa pakietow ma
-	// wlasna maszyne stanow, ktorej kampania jeszcze nie prowadzi.
-	przypadki := map[string]map[string]any{
+	// A specialised operation without its own phase in the engine. Every
+	// family with a per-host plan already has a planner; this gate guards
+	// that the pass is a declaration and a mechanism, not the operation
+	// name - package repair has its own state machine, which the campaign
+	// does not drive yet.
+	cases := map[string]map[string]any{
 		"packages.repair": {"package_repair": map[string]any{
 			"answers": []map[string]any{},
 		}},
 	}
-	for akcja, payload := range przypadki {
-		t.Run(akcja, func(t *testing.T) {
-			var odpowiedz struct {
+	for action, payload := range cases {
+		t.Run(action, func(t *testing.T) {
+			var response struct {
 				Code   string `json:"code"`
 				Detail string `json:"detail"`
 			}
 			h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
-				"name": "tryb masowy " + akcja, "action": akcja, "payload": payload,
+				"name": "bulk mode " + action, "action": action, "payload": payload,
 				"selector": map[string]any{"host_ids": []string{host.ID}},
-			}, &odpowiedz, http.StatusBadRequest)
-			if odpowiedz.Code != "campaign_mode_unsupported" {
-				t.Fatalf("kod odmowy = %q (%s)", odpowiedz.Code, odpowiedz.Detail)
+			}, &response, http.StatusBadRequest)
+			if response.Code != "campaign_mode_unsupported" {
+				t.Fatalf("refusal code = %q (%s)", response.Code, response.Detail)
 			}
-			if odpowiedz.Detail == "" {
-				t.Error("odmowa bez powodu wyglada jak brak funkcji")
+			if response.Detail == "" {
+				t.Error("a refusal without a reason looks like a missing feature")
 			}
 		})
 	}
 }
 
-// TestZatwierdzenieDotyczyTegoCoWidac pilnuje inwariantu zgody: zatwierdzenie
-// bez odcisku albo z cudzym odciskiem nie jest zgoda na te kampanie.
-func TestZatwierdzenieDotyczyTegoCoWidac(t *testing.T) {
+// TestApprovalConcernsWhatIsVisible guards the consent invariant: an
+// approval without a fingerprint or with somebody else's fingerprint is not
+// consent to this campaign.
+func TestApprovalConcernsWhatIsVisible(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	campaign := h.createCampaign(labCampaign("odcisk zgody", "cron.service",
+	campaign := h.createCampaign(labCampaign("consent fingerprint", "cron.service",
 		map[string]any{"selector": map[string]any{"host_ids": []string{host.ID}}}))
 
 	if campaign.ApprovalFingerprint == "" {
-		t.Fatal("kampania bez odcisku zatwierdzenia")
+		t.Fatal("campaign without an approval fingerprint")
 	}
-	// Bez odcisku i z cudzym odciskiem: jedno i drugie jest zgoda na cos
-	// innego niz ta kampania.
+	// Without a fingerprint and with somebody else's fingerprint: both are
+	// consent to something other than this campaign.
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
 		map[string]any{}, nil, http.StatusConflict)
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
 		map[string]any{"approval_fingerprint": "0000000000000000"}, nil, http.StatusConflict)
 
-	zatwierdzona := h.approveCampaign(campaign)
-	if zatwierdzona.ApprovedBy == "" {
-		t.Fatal("kampania zatwierdzona bez zapisania osoby")
+	approved := h.approveCampaign(campaign)
+	if approved.ApprovedBy == "" {
+		t.Fatal("the campaign was approved without recording the person")
 	}
 }
 
-// TestKampaniaPracujeNaWieluHostachNaraz jest dowodem, ze multitasking
-// naprawde dziala. Limit rownoleglosci wiekszy od jednego ma znaczyc, ze dwa
-// hosty pracuja obok siebie, a nie ze kolejka idzie szybciej.
-func TestKampaniaPracujeNaWieluHostachNaraz(t *testing.T) {
+// TestCampaignWorksOnManyHostsAtOnce is the proof that multitasking really
+// works. A concurrency limit greater than one is to mean that two hosts
+// work side by side, not that the queue goes faster.
+func TestCampaignWorksOnManyHostsAtOnce(t *testing.T) {
 	h := newHarness(t)
-	// Jedna rodzina systemow: kampania ma pokazac rownoleglosc, a nie
-	// roznice w nazwach jednostek miedzy dystrybucjami.
-	hosty := h.hosts()
-	online := make([]string, 0, len(hosty))
-	for _, host := range hosty {
+	// One OS family: the campaign is to show concurrency, not the
+	// differences in unit names between distributions.
+	hosts := h.hosts()
+	online := make([]string, 0, len(hosts))
+	for _, host := range hosts {
 		if host.ConnectionState == "online" && host.OSFamily == "debian" {
 			online = append(online, host.ID)
 		}
 	}
 	if len(online) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
 
-	// Bez canary i z jedna fala: caly zestaw ma ruszyc naraz.
-	campaign := h.createCampaign(labCampaign("rownoleglosc", "cron.service", map[string]any{
+	// No canary and one wave: the whole set is to start at once.
+	campaign := h.createCampaign(labCampaign("concurrency", "cron.service", map[string]any{
 		"selector":       map[string]any{"host_ids": online},
 		"canary_size":    0,
 		"wave_size":      len(online),
@@ -438,42 +444,42 @@ func TestKampaniaPracujeNaWieluHostachNaraz(t *testing.T) {
 	}))
 	h.approveCampaign(campaign)
 
-	koncowa := h.awaitCampaign(campaign.ID,
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// Rownoleglosc rozstrzygamy z czasow prob, a nie z odpytywania: dwie
-	// operacje trwajace ulamek sekundy moglyby zmiescic sie miedzy jednym
-	// zapytaniem a drugim, a i tak dzialalyby obok siebie.
-	okna := make([]okno, 0, len(online))
+	// Concurrency is decided from the attempt times, not from polling: two
+	// operations lasting a fraction of a second could fit between one query
+	// and the next, and still work side by side.
+	windows := make([]window, 0, len(online))
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.JobID == "" {
 			continue
 		}
-		for _, proba := range h.probyZadania(target.JobID) {
-			if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+		for _, attempt := range h.timedAttempts(target.JobID) {
+			if attempt.DispatchedAt == nil || attempt.FinishedAt == nil {
 				continue
 			}
-			okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+			windows = append(windows, window{from: *attempt.DispatchedAt, to: *attempt.FinishedAt})
 		}
 	}
-	if len(okna) < 2 {
-		t.Fatalf("kampania zostawila %d prob z czasami", len(okna))
+	if len(windows) < 2 {
+		t.Fatalf("the campaign left %d attempts with times", len(windows))
 	}
-	if !zachodzaNaSiebie(okna) {
-		t.Errorf("zadne dwie proby nie dzialaly obok siebie: %+v", okna)
+	if !overlap(windows) {
+		t.Errorf("no two attempts worked side by side: %+v", windows)
 	}
 }
 
-type okno struct{ od, do time.Time }
+type window struct{ from, to time.Time }
 
-// zachodzaNaSiebie mowi, czy ktorekolwiek dwa okna maja wspolna chwile.
-func zachodzaNaSiebie(okna []okno) bool {
-	for i := range okna {
-		for j := i + 1; j < len(okna); j++ {
-			if okna[i].od.Before(okna[j].do) && okna[j].od.Before(okna[i].do) {
+// overlap says whether any two windows share a moment.
+func overlap(windows []window) bool {
+	for i := range windows {
+		for j := i + 1; j < len(windows); j++ {
+			if windows[i].from.Before(windows[j].to) && windows[j].from.Before(windows[i].to) {
 				return true
 			}
 		}
@@ -481,232 +487,238 @@ func zachodzaNaSiebie(okna []okno) bool {
 	return false
 }
 
-// probyZadania zwraca proby wraz z czasami wyslania i zakonczenia.
-func (h *harness) probyZadania(jobID string) []probaZCzasem {
+// timedAttempts returns the attempts together with their dispatch and
+// finish times.
+func (h *harness) timedAttempts(jobID string) []timedAttempt {
 	h.t.Helper()
-	var odpowiedz struct {
-		Items []probaZCzasem `json:"items"`
+	var response struct {
+		Items []timedAttempt `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	return odpowiedz.Items
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	return response.Items
 }
 
-type probaZCzasem struct {
+type timedAttempt struct {
 	Status       string     `json:"status"`
 	DispatchedAt *time.Time `json:"dispatched_at"`
 	FinishedAt   *time.Time `json:"finished_at"`
 }
 
-// TestKolidujaceOperacjeNaHoscieSaSerializowane pilnuje blokad zasobow hosta.
+// TestConflictingOperationsOnAHostAreSerialised guards the host resource
+// locks.
 //
-// Trzy restarty tej samej jednostki zlecone naraz musza wykonac sie po kolei.
-// Dowod jest w stanie jednostki: kazdy restart widzi przed soba proces, ktory
-// zostawil poprzedni. Gdyby dwa restarty weszly obok siebie, ten lancuch by
-// sie zerwal - a limit zadan hosta sam z siebie tego nie zapewnia, bo klasa
-// ogolna ma wiecej niz jedno miejsce.
-func TestKolidujaceOperacjeNaHoscieSaSerializowane(t *testing.T) {
+// Three restarts of the same unit ordered at once must run one after
+// another. The proof is in the unit state: every restart sees in front of
+// it the process the previous one left. If two restarts went side by side,
+// that chain would break - and the host job limit alone does not ensure it,
+// because the general class has more than one slot.
+func TestConflictingOperationsOnAHostAreSerialised(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	const ile = 3
-	zadania := make([]string, 0, ile)
-	for i := 0; i < ile; i++ {
+	const count = 3
+	jobs := make([]string, 0, count)
+	for i := 0; i < count; i++ {
 		job := h.createOperation(host.ID, map[string]any{
-			"action": "unit.restart", "reason": "test serializacji blokad zasobu",
+			"action": "unit.restart", "reason": "resource lock serialisation test",
 			"payload": unitPayload("cron.service"),
 		})
 		if job.RequiresApproval {
 			job = h.approve(job.ID, job.PayloadHash)
 		}
-		zadania = append(zadania, job.ID)
+		jobs = append(jobs, job.ID)
 	}
 
-	type wykonanie struct {
-		koniec     time.Time
-		pidPrzed   uint32
-		pidPo      uint32
-		stanPrzed  string
-		identyfika string
+	type execution struct {
+		finished    time.Time
+		pidBefore   uint32
+		pidAfter    uint32
+		stateBefore string
+		id          string
 	}
-	wykonania := make([]wykonanie, 0, ile)
-	for _, jobID := range zadania {
-		zadanie := h.awaitTerminal(jobID, 3*time.Minute)
-		if zadanie.State != "succeeded" {
-			t.Fatalf("restart %s: stan = %s, kod = %s",
-				jobID, zadanie.State, zadanie.ResultErrorCode)
+	executions := make([]execution, 0, count)
+	for _, jobID := range jobs {
+		job := h.awaitTerminal(jobID, 3*time.Minute)
+		if job.State != "succeeded" {
+			t.Fatalf("restart %s: state = %s, code = %s",
+				jobID, job.State, job.ResultErrorCode)
 		}
-		proby := h.attempts(jobID)
-		ostatnia := proby[len(proby)-1]
-		if ostatnia.UnitStateBefore == nil || ostatnia.UnitStateAfter == nil {
-			t.Fatalf("restart %s bez stanu jednostki", jobID)
+		attempts := h.attempts(jobID)
+		last := attempts[len(attempts)-1]
+		if last.UnitStateBefore == nil || last.UnitStateAfter == nil {
+			t.Fatalf("restart %s without a unit state", jobID)
 		}
-		czasy := h.probyZadania(jobID)
-		koniec := czasy[len(czasy)-1].FinishedAt
-		if koniec == nil {
-			t.Fatalf("restart %s bez czasu zakonczenia", jobID)
+		timed := h.timedAttempts(jobID)
+		finished := timed[len(timed)-1].FinishedAt
+		if finished == nil {
+			t.Fatalf("restart %s without a finish time", jobID)
 		}
-		wykonania = append(wykonania, wykonanie{
-			koniec: *koniec, pidPrzed: ostatnia.UnitStateBefore.MainPID,
-			pidPo: ostatnia.UnitStateAfter.MainPID, stanPrzed: ostatnia.UnitStateBefore.ActiveState,
-			identyfika: jobID,
+		executions = append(executions, execution{
+			finished: *finished, pidBefore: last.UnitStateBefore.MainPID,
+			pidAfter: last.UnitStateAfter.MainPID, stateBefore: last.UnitStateBefore.ActiveState,
+			id: jobID,
 		})
 	}
 
-	sort.Slice(wykonania, func(i, j int) bool {
-		return wykonania[i].koniec.Before(wykonania[j].koniec)
+	sort.Slice(executions, func(i, j int) bool {
+		return executions[i].finished.Before(executions[j].finished)
 	})
-	for i := 1; i < len(wykonania); i++ {
-		if wykonania[i].pidPrzed != wykonania[i-1].pidPo {
-			t.Errorf("restart %s zaczal od procesu %d, a poprzedni zostawil %d - operacje weszly na siebie",
-				wykonania[i].identyfika, wykonania[i].pidPrzed, wykonania[i-1].pidPo)
+	for i := 1; i < len(executions); i++ {
+		if executions[i].pidBefore != executions[i-1].pidAfter {
+			t.Errorf("restart %s started from process %d, while the previous one left %d - the operations overlapped",
+				executions[i].id, executions[i].pidBefore, executions[i-1].pidAfter)
 		}
 	}
 }
 
-// TestKampaniaPakietowLiczyPlanNaKazdymHoscie pilnuje najwazniejszej zmiany
-// Campaigns v2: zgoda nie dotyczy jednego payloadu, tylko zestawu planow.
+// TestPackageCampaignComputesAPlanOnEveryHost guards the most important
+// change of Campaigns v2: the consent does not concern one payload, but a
+// set of plans.
 //
-// Dwa hosty wybrane tym samym zamowieniem prawie nigdy nie maja tego samego
-// diffu, wiec kampania najpierw pyta kazdy host, co u niego wyjdzie, a dopiero
-// potem prosi o zgode. Odcisk zatwierdzenia zmienia sie po planowaniu -
-// dowodem jest to, ze zgoda podana odciskiem sprzed planowania jest odrzucona.
-func TestKampaniaPakietowLiczyPlanNaKazdymHoscie(t *testing.T) {
+// Two hosts picked by the same order almost never have the same diff, so
+// the campaign first asks every host what comes out there, and only then
+// asks for consent. The approval fingerprint changes after planning - the
+// proof is that consent given with the fingerprint from before planning is
+// rejected.
+func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h := newHarness(t)
-	hosty := h.hosts()
-	cele := make([]string, 0, 2)
-	for _, host := range hosty {
+	hosts := h.hosts()
+	targets := make([]string, 0, 2)
+	for _, host := range hosts {
 		if host.ConnectionState == "online" && host.OSFamily == "debian" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "aktualizacja z planami", "action": "packages.upgrade",
+		"name": "update with plans", "action": "packages.upgrade",
 		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 	if campaign.State != "planning" {
-		t.Fatalf("kampania pakietowa zaczela od stanu %s", campaign.State)
+		t.Fatalf("the package campaign started from state %s", campaign.State)
 	}
-	odciskZamowienia := campaign.ApprovalFingerprint
+	orderFingerprint := campaign.ApprovalFingerprint
 
-	// Faza planowania konczy sie sama: kazdy host liczy swoj plan.
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	// The planning phase ends on its own: every host computes its plan.
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	if poPlanowaniu.PlanSetHash == "" {
-		t.Fatal("kampania po planowaniu bez odcisku zestawu planow")
+	if afterPlanning.PlanSetHash == "" {
+		t.Fatal("the campaign after planning has no plan set fingerprint")
 	}
-	if poPlanowaniu.ApprovalFingerprint == odciskZamowienia {
-		t.Error("zestaw planow nie zmienil odcisku zatwierdzenia")
+	if afterPlanning.ApprovalFingerprint == orderFingerprint {
+		t.Error("the plan set did not change the approval fingerprint")
 	}
 
-	// Zgoda podana odciskiem sprzed planowania dotyczy czegos innego.
+	// Consent given with the fingerprint from before planning concerns
+	// something else.
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
-		map[string]any{"approval_fingerprint": odciskZamowienia}, nil, http.StatusConflict)
+		map[string]any{"approval_fingerprint": orderFingerprint}, nil, http.StatusConflict)
 
-	// Kazdy cel ma zadanie planujace i wrocil do kolejki.
+	// Every target has a planning job and went back to the queue.
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.PlanJobID == "" {
-			t.Errorf("cel %s bez zadania planujacego", target.Hostname)
+			t.Errorf("target %s without a planning job", target.Hostname)
 		}
 		if target.State != "pending" {
-			t.Errorf("cel %s po planowaniu jest w stanie %s", target.Hostname, target.State)
+			t.Errorf("target %s after planning is in state %s", target.Hostname, target.State)
 		}
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 }
 
-type budzetView struct {
-	Klucz     string `json:"key"`
-	Pojemnosc int    `json:"capacity"`
-	Zajete    int    `json:"used"`
-	Chetnych  int    `json:"claimants"`
+type budgetView struct {
+	Key       string `json:"key"`
+	Capacity  int    `json:"capacity"`
+	Used      int    `json:"used"`
+	Claimants int    `json:"claimants"`
 }
 
-// ustawBudzet zmienia pojemnosc budzetu na czas testu i przywraca ja potem.
-func (h *harness) ustawBudzet(klucz string, pojemnosc, poTescie int) {
+// setBudget changes a budget capacity for the duration of the test and
+// restores it afterwards.
+func (h *harness) setBudget(key string, capacity, afterTest int) {
 	h.t.Helper()
-	h.do(http.MethodPut, "/api/v1/budgets/"+klucz,
-		map[string]any{"capacity": pojemnosc, "note": "test integracyjny budzetow"},
+	h.do(http.MethodPut, "/api/v1/budgets/"+key,
+		map[string]any{"capacity": capacity, "note": "integration test of the budgets"},
 		nil, http.StatusOK)
 	h.t.Cleanup(func() {
-		// Budzet zmieniony na czas testu musi wrocic: zostawiony na jedynce
-		// spowolnilby kazdy nastepny przebieg i wygladalo by to na usterke.
-		h.do(http.MethodPut, "/api/v1/budgets/"+klucz,
-			map[string]any{"capacity": poTescie, "note": "po tescie"}, nil, 0)
+		// A budget changed for the test must go back: left at one it would
+		// slow down every next run and look like a defect.
+		h.do(http.MethodPut, "/api/v1/budgets/"+key,
+			map[string]any{"capacity": afterTest, "note": "after the test"}, nil, 0)
 	})
 }
 
-// TestBudzetLokalizacjiZatrzymujeNadmiarowaZmiane pilnuje inwariantu I-05:
-// limit rownoleglosci kampanii nie jest jedynym limitem systemu.
+// TestSiteBudgetStopsTheExcessChange guards invariant I-05: the campaign
+// concurrency limit is not the only limit of the system.
 //
-// Kampania prosi o trzy hosty naraz i ma na to zgode - a mimo to lokalizacja
-// dopuszcza jedna zmiane tej rodziny. Dowod jest w czasach prob: zadne dwie
-// nie moga zachodzic na siebie. Dowodem drugim jest widocznosc: host, ktory
-// czeka, musi to powiedziec, a nie stac w kolejce bez powodu.
+// The campaign asks for three hosts at once and has consent for that - and
+// yet the site admits one change of this family. The proof is in the
+// attempt times: no two may overlap. The second proof is visibility: a host
+// that waits must say so, not stand in the queue without a reason.
 //
-// Kontrola negatywna stoi obok: TestKampaniaPracujeNaWieluHostachNaraz robi to
-// samo na tej samej flocie przy domyslnej pojemnosci i wymaga, zeby okna sie
-// zachodzily. Bez tej pary "brak zachodzenia" moglby znaczyc po prostu wolna
-// flote, a nie dzialajacy budzet.
-func TestBudzetLokalizacjiZatrzymujeNadmiarowaZmiane(t *testing.T) {
+// The negative control stands next to it: TestCampaignWorksOnManyHostsAtOnce
+// does the same on the same fleet at the default capacity and requires the
+// windows to overlap. Without that pair "no overlap" could simply mean a
+// slow fleet, not a working budget.
+func TestSiteBudgetStopsTheExcessChange(t *testing.T) {
 	h := newHarness(t)
-	// Jedna rodzina systemow i jedna lokalizacja: dowod dotyczy budzetu,
-	// a nie roznic w nazwach jednostek miedzy dystrybucjami.
+	// One OS family and one site: the proof concerns the budget, not the
+	// differences in unit names between distributions.
 	online := make([]hostView, 0, 3)
-	lokalizacja := ""
+	site := ""
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" || host.OSFamily != "debian" {
 			continue
 		}
-		if lokalizacja == "" {
-			lokalizacja = host.Site
+		if site == "" {
+			site = host.Site
 		}
-		if host.Site == lokalizacja {
+		if host.Site == site {
 			online = append(online, host)
 		}
 	}
-	if len(online) < 2 || lokalizacja == "" {
-		t.Skip("flota testowa ma mniej niz dwa podlaczone hosty rodziny debian w jednej lokalizacji")
+	if len(online) < 2 || site == "" {
+		t.Skip("the test fleet has fewer than two connected hosts of the debian family in one site")
 	}
 
-	// Jednostki sa najtansza mutacja, jaka mamy: dowod dotyczy budzetu,
-	// a nie tego, co konkretnie robi operacja.
-	klucz := "site:" + lokalizacja + ":units"
-	const domyslnaPojemnosc = 10
-	h.ustawBudzet(klucz, 1, domyslnaPojemnosc)
+	// Units are the cheapest mutation there is: the proof concerns the
+	// budget, not what the operation specifically does.
+	key := "site:" + site + ":units"
+	const defaultCapacity = 10
+	h.setBudget(key, 1, defaultCapacity)
 
-	cele := make([]string, 0, len(online))
+	targets := make([]string, 0, len(online))
 	for _, host := range online {
-		cele = append(cele, host.ID)
+		targets = append(targets, host.ID)
 	}
 	campaign := h.createCampaign(map[string]any{
-		"name": "restart z budzetem", "action": "unit.restart",
-		"reason":                     "test budzetu lokalizacji",
+		"name": "restart with a budget", "action": "unit.restart",
+		"reason":                     "site budget test",
 		"payload":                    unitPayload("cron.service"),
-		"selector":                   map[string]any{"host_ids": cele},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
@@ -715,103 +727,105 @@ func TestBudzetLokalizacjiZatrzymujeNadmiarowaZmiane(t *testing.T) {
 		campaign = h.approveCampaign(campaign)
 	}
 
-	// Po drodze przynajmniej jeden host musi zglosic, ze czeka na pojemnosc.
-	// Sprawdzamy to w trakcie, bo stan jest przejsciowy.
-	czekal := false
+	// Along the way at least one host must report that it waits for
+	// capacity. This is checked during the run, because the state is
+	// transient.
+	waited := false
 	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State == "awaiting_budget" {
-				czekal = true
+				waited = true
 				if target.ErrorCode != "budget_capacity" && target.ErrorCode != "budget_fair_share" {
-					t.Errorf("host czeka na budzet bez podanego powodu: %+v", target)
+					t.Errorf("a host waits for the budget without a given reason: %+v", target)
 				}
 			}
 		}
-		stan := h.campaign(campaign.ID)
-		if stan.State == "completed" || stan.State == "failed" || stan.State == "paused" {
+		state := h.campaign(campaign.ID)
+		if state.State == "completed" || state.State == "failed" || state.State == "paused" {
 			break
 		}
 		time.Sleep(time.Second)
 	}
 
-	koncowa := h.awaitCampaign(campaign.ID,
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
-	if !czekal {
-		t.Error("zaden host nie zglosil oczekiwania na pojemnosc - budzet nikogo nie zatrzymal")
+	if !waited {
+		t.Error("no host reported waiting for capacity - the budget stopped nobody")
 	}
 
-	okna := make([]okno, 0, len(cele))
+	windows := make([]window, 0, len(targets))
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.JobID == "" {
 			continue
 		}
-		for _, proba := range h.probyZadania(target.JobID) {
-			if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+		for _, attempt := range h.timedAttempts(target.JobID) {
+			if attempt.DispatchedAt == nil || attempt.FinishedAt == nil {
 				continue
 			}
-			okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+			windows = append(windows, window{from: *attempt.DispatchedAt, to: *attempt.FinishedAt})
 		}
 	}
-	if len(okna) < 2 {
-		t.Fatalf("kampania zostawila %d prob z czasami", len(okna))
+	if len(windows) < 2 {
+		t.Fatalf("the campaign left %d attempts with times", len(windows))
 	}
-	// Sedno inwariantu: kampania miala zgode na trzy naraz, a lokalizacja
-	// dopuszczala jedna. Zachodzace okna znaczylyby, ze budzet nie wiazal.
-	if zachodzaNaSiebie(okna) {
-		t.Errorf("dwie zmiany weszly obok siebie mimo budzetu 1: %+v", okna)
+	// The crux of the invariant: the campaign had consent for three at
+	// once, and the site admitted one. Overlapping windows would mean the
+	// budget did not bind.
+	if overlap(windows) {
+		t.Errorf("two changes went side by side despite a budget of 1: %+v", windows)
 	}
 }
 
-// TestBudzetPokazujeZajetoscIOdmawiaZerowejPojemnosci pilnuje ekranu, bez
-// ktorego kampania stojaca na budzecie wyglada jak kampania zapomniana.
-func TestBudzetPokazujeZajetoscIOdmawiaZerowejPojemnosci(t *testing.T) {
+// TestBudgetShowsUsageAndRefusesZeroCapacity guards the screen without
+// which a campaign standing on a budget looks like a forgotten campaign.
+func TestBudgetShowsUsageAndRefusesZeroCapacity(t *testing.T) {
 	h := newHarness(t)
-	var widok struct {
-		Items []budzetView `json:"items"`
+	var view struct {
+		Items []budgetView `json:"items"`
 	}
-	h.get("/api/v1/budgets", &widok)
-	if len(widok.Items) == 0 {
-		t.Fatal("panel nie ma ani jednego budzetu - pojemnosci nikt nie pilnuje")
+	h.get("/api/v1/budgets", &view)
+	if len(view.Items) == 0 {
+		t.Fatal("the panel has no budget at all - nobody guards the capacities")
 	}
-	znalezione := map[string]budzetView{}
-	for _, budzet := range widok.Items {
-		if budzet.Pojemnosc < 1 {
-			t.Errorf("budzet %s o pojemnosci %d", budzet.Klucz, budzet.Pojemnosc)
+	found := map[string]budgetView{}
+	for _, budget := range view.Items {
+		if budget.Capacity < 1 {
+			t.Errorf("budget %s with the capacity %d", budget.Key, budget.Capacity)
 		}
-		znalezione[budzet.Klucz] = budzet
+		found[budget.Key] = budget
 	}
-	// Odczyt i mutacja maja osobne pojemnosci: sto odczytow stanu to nie to
-	// samo obciazenie co sto transakcji pakietowych.
-	for _, klucz := range []string{"global:mutations", "global:reads"} {
-		if _, mamy := znalezione[klucz]; !mamy {
-			t.Errorf("brak budzetu %s: %+v", klucz, widok.Items)
+	// Reads and mutations have separate capacities: a hundred state reads
+	// are not the same load as a hundred package transactions.
+	for _, key := range []string{"global:mutations", "global:reads"} {
+		if _, present := found[key]; !present {
+			t.Errorf("no budget %s: %+v", key, view.Items)
 		}
 	}
 
-	// Pojemnosc zerowa nie jest polityka, tylko cichym zatrzymaniem wszystkiego.
+	// A zero capacity is not a policy, only a quiet halt of everything.
 	h.do(http.MethodPut, "/api/v1/budgets/global:mutations",
 		map[string]any{"capacity": 0}, nil, http.StatusBadRequest)
 }
 
-// TestZmianaBudzetuWymagaUprawnienia pilnuje, ze pojemnosci nie podnosi sie
-// po cichu: budzet podniesiony bez sladu odbiera znaczenie kazdemu limitowi
-// ponizej.
-func TestZmianaBudzetuWymagaUprawnienia(t *testing.T) {
+// TestBudgetChangeRequiresAPermission guards that capacities are not raised
+// quietly: a budget raised without a trace takes the meaning away from
+// every limit below it.
+func TestBudgetChangeRequiresAPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	operatorToken := h.createPrincipal(uniqueSubject("bez-budzetow"),
+	operatorToken := h.createPrincipal(uniqueSubject("no-budgets"),
 		[]map[string]string{{"role": "approver", "site": host.Site, "environment": host.Environment}})
-	bezPrawa := h.withToken(operatorToken)
+	withoutRight := h.withToken(operatorToken)
 
-	bezPrawa.do(http.MethodPut, "/api/v1/budgets/global:mutations",
+	withoutRight.do(http.MethodPut, "/api/v1/budgets/global:mutations",
 		map[string]any{"capacity": 500}, nil, http.StatusForbidden)
 }
 
-type podgladView struct {
+type previewView struct {
 	Count        int      `json:"count"`
 	Limit        int      `json:"limit"`
 	Eligible     int      `json:"eligible"`
@@ -830,234 +844,238 @@ type podgladView struct {
 	} `json:"notes"`
 }
 
-// TestPodgladOdrozniaGotowegoOdNiezdolnego pilnuje kryterium A-02: operator ma
-// przed startem wiedziec, ktore hosty ruszaja i dlaczego pozostale nie.
+// TestPreviewTellsReadyFromIncapable guards criterion A-02: before the
+// start the operator is to know which hosts go and why the rest do not.
 //
-// Flota testowa ma host Archa, ktory nie ma ani apta, ani dnf-a. Aktualizacja
-// pakietow jest na nim niewykonalna i panel ma to powiedziec przed
-// utworzeniem kampanii, a nie bledem przy wykonaniu. Ten sam host jest
-// jednoczesnie gotowy do restartu jednostki - kwalifikacja zalezy od operacji,
-// a nie od hosta.
-func TestPodgladOdrozniaGotowegoOdNiezdolnego(t *testing.T) {
+// The test fleet has an Arch host that has neither apt nor dnf. A package
+// update is infeasible on it and the panel is to say so before the campaign
+// is created, not with an error at execution. The same host is at the same
+// time ready for a unit restart - qualification depends on the operation,
+// not on the host.
+func TestPreviewTellsReadyFromIncapable(t *testing.T) {
 	h := newHarness(t)
 
-	var restart podgladView
+	var restart previewView
 	h.get("/api/v1/campaigns/preview?action=unit.restart", &restart)
 	if restart.Count == 0 {
-		t.Fatal("podglad nie widzi ani jednego hosta")
+		t.Fatal("the preview sees no host at all")
 	}
 	if restart.Eligible == 0 {
-		t.Fatalf("zaden host nie jest gotowy do restartu jednostki: %+v", restart)
+		t.Fatalf("no host is ready for a unit restart: %+v", restart)
 	}
 	if restart.CampaignMode != "same_payload" {
-		t.Errorf("restart jednostki w trybie %q", restart.CampaignMode)
+		t.Errorf("unit restart in mode %q", restart.CampaignMode)
 	}
 	if restart.RequiresPlan {
-		t.Error("restart jednostki nie liczy planu na hoscie")
+		t.Error("a unit restart computes no plan on the host")
 	}
 
-	var aktualizacja podgladView
-	h.get("/api/v1/campaigns/preview?action=packages.upgrade", &aktualizacja)
-	if !aktualizacja.RequiresPlan || aktualizacja.CampaignMode != "per_host_plan" {
-		t.Errorf("aktualizacja pakietow opisana jako %q, plan=%v",
-			aktualizacja.CampaignMode, aktualizacja.RequiresPlan)
+	var update previewView
+	h.get("/api/v1/campaigns/preview?action=packages.upgrade", &update)
+	if !update.RequiresPlan || update.CampaignMode != "per_host_plan" {
+		t.Errorf("the package update described as %q, plan=%v",
+			update.CampaignMode, update.RequiresPlan)
 	}
-	// Ta sama flota, inna operacja: host bez adaptera pakietow ma byc
-	// wykluczony z powodem, a nie policzony jako gotowy.
-	if aktualizacja.Eligible >= restart.Eligible {
-		t.Errorf("aktualizacja ma %d gotowych hostow przy %d gotowych do restartu - "+
-			"host bez apta i dnf-a nie zostal rozpoznany",
-			aktualizacja.Eligible, restart.Eligible)
+	// The same fleet, a different operation: a host without a package
+	// adapter is to be excluded with a reason, not counted as ready.
+	if update.Eligible >= restart.Eligible {
+		t.Errorf("the update has %d ready hosts with %d ready for a restart - "+
+			"the host without apt and dnf was not recognised",
+			update.Eligible, restart.Eligible)
 	}
-	brakAdaptera := 0
-	for _, grupa := range aktualizacja.Excluded {
-		if grupa.Reason == "capability_missing" {
-			brakAdaptera = grupa.Count
-			if len(grupa.Sample) == 0 {
-				t.Error("wykluczenie bez ani jednej nazwy hosta")
+	missingAdapter := 0
+	for _, group := range update.Excluded {
+		if group.Reason == "capability_missing" {
+			missingAdapter = group.Count
+			if len(group.Sample) == 0 {
+				t.Error("exclusion without a single hostname")
 			}
 		}
 	}
-	if brakAdaptera == 0 {
-		t.Errorf("podglad nie wyklucza ani jednego hosta bez adaptera: %+v", aktualizacja.Excluded)
+	if missingAdapter == 0 {
+		t.Errorf("the preview excludes no host without an adapter: %+v", update.Excluded)
 	}
-	if aktualizacja.Eligible+brakAdaptera > aktualizacja.Count {
-		t.Errorf("gotowych %d i wykluczonych %d przy %d dopasowanych",
-			aktualizacja.Eligible, brakAdaptera, aktualizacja.Count)
+	if update.Eligible+missingAdapter > update.Count {
+		t.Errorf("%d ready and %d excluded with %d matched",
+			update.Eligible, missingAdapter, update.Count)
 	}
 }
 
-// TestKampaniaZostawiaNiezdolnyHostWMigawce pilnuje doktryny: host, ktory nie
-// wykona operacji, nie znika po cichu.
+// TestCampaignKeepsTheIncapableHostInTheSnapshot guards the doctrine: a host
+// that will not carry out the operation does not disappear quietly.
 //
-// Wykluczenie po cichu jest gorsze niz odmowa: operator zatwierdza kampanie na
-// czterech hostach, a dowiaduje sie o trzech dopiero z raportu - albo nie
-// dowiaduje sie wcale.
-func TestKampaniaZostawiaNiezdolnyHostWMigawce(t *testing.T) {
+// A quiet exclusion is worse than a refusal: the operator approves a
+// campaign on four hosts and learns about three only from the report - or
+// does not learn at all.
+func TestCampaignKeepsTheIncapableHostInTheSnapshot(t *testing.T) {
 	h := newHarness(t)
-	cele := make([]string, 0, 4)
-	niezdolne := 0
+	targets := make([]string, 0, 4)
+	incapable := 0
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		cele = append(cele, host.ID)
+		targets = append(targets, host.ID)
 		if host.OSFamily == "arch" {
-			niezdolne++
+			incapable++
 		}
 	}
-	if niezdolne == 0 {
-		t.Skip("flota testowa nie ma hosta bez adaptera pakietow")
+	if incapable == 0 {
+		t.Skip("the test fleet has no host without a package adapter")
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "aktualizacja calej floty", "action": "packages.upgrade",
+		"name": "update of the whole fleet", "action": "packages.upgrade",
 		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 
-	stany := map[string]int{}
-	powody := map[string]string{}
+	states := map[string]int{}
+	reasons := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		stany[target.State]++
+		states[target.State]++
 		if target.State == "ineligible" {
-			powody[target.Hostname] = target.ErrorCode
+			reasons[target.Hostname] = target.ErrorCode
 		}
 	}
-	if stany["ineligible"] != niezdolne {
-		t.Errorf("migawka ma %d hostow niezdolnych przy %d bez adaptera: %+v",
-			stany["ineligible"], niezdolne, stany)
+	if states["ineligible"] != incapable {
+		t.Errorf("the snapshot has %d incapable hosts with %d without an adapter: %+v",
+			states["ineligible"], incapable, states)
 	}
-	for hostname, kod := range powody {
-		if kod != "capability_missing" {
-			t.Errorf("host %s niezdolny bez podanego powodu: %q", hostname, kod)
+	for hostname, code := range reasons {
+		if code != "capability_missing" {
+			t.Errorf("host %s incapable without a given reason: %q", hostname, code)
 		}
 	}
-	// Host niezdolny nie jest awaria: kampania ma isc dalej na pozostalych.
-	if stany["pending"]+stany["planning"] == 0 {
-		t.Errorf("kampania nie zostawila ani jednego hosta do pracy: %+v", stany)
+	// An incapable host is not a failure: the campaign is to go on with the
+	// rest.
+	if states["pending"]+states["planning"] == 0 {
+		t.Errorf("the campaign left no host to work on at all: %+v", states)
 	}
 }
 
-// TestKampaniaComposeNiesieDigestPlanuNaHosta pilnuje, ze faza planowania nie
-// jest wlasnoscia pakietow: druga rodzina liczy plan na hoscie i dostaje go
-// z powrotem razem ze zmiana.
+// TestComposeCampaignCarriesThePlanDigestToTheHost guards that the planning
+// phase is not owned by packages: the second family computes the plan on
+// the host and gets it back together with the change.
 //
-// Digest planu Compose powstaje z manifestu i z digestow obrazow, ktore ten
-// host naprawde widzi. Wdrozenie niesie go z powrotem, a host odmawia, gdy
-// przestal pasowac - zgoda dotyczyla tamtego planu, nie tego.
-func TestKampaniaComposeNiesieDigestPlanuNaHosta(t *testing.T) {
+// The Compose plan digest is made from the manifest and from the image
+// digests this host really sees. The deployment carries it back, and the
+// host refuses when it stopped matching - the consent concerned that plan,
+// not this one.
+func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 	h := newHarness(t)
-	const projekt = "flotestro-kampania"
+	const project = "flotestro-campaign"
 	manifest := "services:\n  web:\n    image: nginx:alpine\n"
 
-	// Docker jest w tej flocie na jednym hoscie. To wystarczy, zeby pokazac
-	// faze planowania, a pozostale hosty pokazuja przy okazji, ze niezdolnosc
-	// nie jest awaria.
-	cele := make([]string, 0, 4)
-	zDockerem := 0
+	// Docker is on one host in this fleet. That is enough to show the
+	// planning phase, and the other hosts show along the way that
+	// incapability is not a failure.
+	targets := make([]string, 0, 4)
+	withDocker := 0
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		cele = append(cele, host.ID)
-		// O zdolnosci mowi rejestr adapterow hosta, a nie zgadywanie po
-		// dystrybucji: silnik kontenerow moze byc wszedzie albo nigdzie.
-		for _, zdolnosc := range host.Capabilities {
-			if zdolnosc.Name == "docker.compose" && zdolnosc.Available {
-				zDockerem++
+		targets = append(targets, host.ID)
+		// The host adapter registry speaks about capability, not guessing
+		// by distribution: a container engine may be everywhere or nowhere.
+		for _, capability := range host.Capabilities {
+			if capability.Name == "docker.compose" && capability.Available {
+				withDocker++
 			}
 		}
 	}
-	if zDockerem == 0 {
-		t.Skip("flota testowa nie ma hosta z silnikiem kontenerow")
+	if withDocker == 0 {
+		t.Skip("the test fleet has no host with a container engine")
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "wdrozenie projektu", "action": "docker.compose.deploy",
-		"reason":                     "test integracyjny planow Compose",
-		"payload":                    map[string]any{"compose": map[string]any{"project": projekt, "manifest": manifest}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "project deployment", "action": "docker.compose.deploy",
+		"reason":                     "integration test of Compose plans",
+		"payload":                    map[string]any{"compose": map[string]any{"project": project, "manifest": manifest}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 	if campaign.State != "planning" {
-		t.Fatalf("kampania Compose zaczela od stanu %s", campaign.State)
+		t.Fatalf("the Compose campaign started from state %s", campaign.State)
 	}
-	odciskZamowienia := campaign.ApprovalFingerprint
+	orderFingerprint := campaign.ApprovalFingerprint
 
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	if poPlanowaniu.PlanSetHash == "" {
-		t.Fatal("kampania Compose po planowaniu bez odcisku zestawu planow")
+	if afterPlanning.PlanSetHash == "" {
+		t.Fatal("the Compose campaign after planning has no plan set fingerprint")
 	}
-	if poPlanowaniu.ApprovalFingerprint == odciskZamowienia {
-		t.Error("zestaw planow nie zmienil odcisku zatwierdzenia")
+	if afterPlanning.ApprovalFingerprint == orderFingerprint {
+		t.Error("the plan set did not change the approval fingerprint")
 	}
 
-	// Host bez silnika kontenerow jest niezdolny, a nie zepsuty: nie liczy sie
-	// do progu bledow i nie zatrzymuje kampanii.
-	planowalo, niezdolnych := 0, 0
+	// A host without a container engine is incapable, not broken: it does
+	// not count towards the failure threshold and does not stop the
+	// campaign.
+	planned, ineligible := 0, 0
 	for _, target := range h.campaignTargets(campaign.ID) {
 		switch target.State {
 		case "ineligible":
-			niezdolnych++
+			ineligible++
 		case "pending":
-			planowalo++
+			planned++
 			if target.PlanJobID == "" {
-				t.Errorf("cel %s bez zadania planujacego", target.Hostname)
+				t.Errorf("target %s without a planning job", target.Hostname)
 			}
 		}
 	}
-	if planowalo != zDockerem {
-		t.Errorf("plan policzylo %d hostow, silnik ma %d", planowalo, zDockerem)
+	if planned != withDocker {
+		t.Errorf("%d hosts computed the plan, %d have the engine", planned, withDocker)
 	}
-	if niezdolnych != len(cele)-zDockerem {
-		t.Errorf("niezdolnych %d przy %d hostach bez silnika",
-			niezdolnych, len(cele)-zDockerem)
+	if ineligible != len(targets)-withDocker {
+		t.Errorf("%d ineligible with %d hosts without an engine",
+			ineligible, len(targets)-withDocker)
 	}
 
-	// Sprzatanie idzie po kontenerach, bo panel nie ma operacji "zdejmij
-	// projekt": wdrozenie jest deklaracja stanu, a nie poleceniem, ktore da
-	// sie cofnac jednym rozkazem.
+	// The cleanup goes by containers, because the panel has no "take the
+	// project down" operation: a deployment is a declaration of state, not
+	// a command that can be undone with one order.
 	t.Cleanup(func() {
-		for _, hostID := range cele {
-			for _, kontener := range kontenneryProjektu(h, hostID, projekt) {
+		for _, hostID := range targets {
+			for _, container := range projectContainers(h, hostID, project) {
 				h.runOperation(hostID, map[string]any{
 					"action": "docker.container.remove",
-					"reason": "sprzatanie po tescie Compose",
+					"reason": "cleanup after the Compose test",
 					"payload": map[string]any{
-						"docker_container": map[string]any{"container_id": kontener, "force": true},
+						"docker_container": map[string]any{"container_id": container, "force": true},
 					},
 				}, 2*time.Minute)
 			}
 		}
 	})
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 }
 
-// kontenneryProjektu zwraca identyfikatory kontenerow jednego projektu Compose.
-func kontenneryProjektu(h *harness, hostID, projekt string) []string {
+// projectContainers returns the container identifiers of one Compose
+// project.
+func projectContainers(h *harness, hostID, project string) []string {
 	h.t.Helper()
 	var fragment inventoryFragment
 	h.do(http.MethodGet, "/api/v1/hosts/"+hostID+"/inventory/containers",
@@ -1065,7 +1083,7 @@ func kontenneryProjektu(h *harness, hostID, projekt string) []string {
 	if len(fragment.Payload) == 0 {
 		return nil
 	}
-	var stan struct {
+	var state struct {
 		Containers []struct {
 			ID      string            `json:"id"`
 			Labels  map[string]string `json:"labels"`
@@ -1074,20 +1092,20 @@ func kontenneryProjektu(h *harness, hostID, projekt string) []string {
 			} `json:"compose"`
 		} `json:"containers"`
 	}
-	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
+	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
 		return nil
 	}
-	identyfikatory := []string{}
-	for _, kontener := range stan.Containers {
-		if (kontener.Compose != nil && kontener.Compose.Project == projekt) ||
-			kontener.Labels["com.docker.compose.project"] == projekt {
-			identyfikatory = append(identyfikatory, kontener.ID)
+	ids := []string{}
+	for _, container := range state.Containers {
+		if (container.Compose != nil && container.Compose.Project == project) ||
+			container.Labels["com.docker.compose.project"] == project {
+			ids = append(ids, container.ID)
 		}
 	}
-	return identyfikatory
+	return ids
 }
 
-type wpisPrzebieguView struct {
+type timelineEntryView struct {
 	ID         int64           `json:"id"`
 	Aggregate  string          `json:"aggregate_type"`
 	Type       string          `json:"event_type"`
@@ -1095,14 +1113,15 @@ type wpisPrzebieguView struct {
 	OccurredAt time.Time       `json:"occurred_at"`
 }
 
-// TestPrzebiegKampaniiPrzezywaRestartPanelu pilnuje inwariantu I-14: przebieg
-// kampanii da sie odtworzyc z trwalych zapisow, a nie tylko z powiadomien.
+// TestCampaignTimelineSurvivesAPanelRestart guards invariant I-14: the
+// course of a campaign can be reconstructed from durable records, not only
+// from notifications.
 //
-// Powiadomienie wyslane w chwili, gdy panel byl restartowany, nie istnieje juz
-// nigdzie. Stan koncowy zostaje w tabelach, ale przebieg - to, co i kiedy sie
-// stalo - znikal razem z nim. Kampania bez przebiegu jest raportem po fakcie,
-// a nie kontrola nad rolloutem.
-func TestPrzebiegKampaniiPrzezywaRestartPanelu(t *testing.T) {
+// A notification sent at the moment the panel was restarting no longer
+// exists anywhere. The final state stays in the tables, but the course -
+// what happened and when - vanished with it. A campaign without a timeline
+// is a report after the fact, not control over the rollout.
+func TestCampaignTimelineSurvivesAPanelRestart(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
 	for _, host := range h.hosts() {
@@ -1111,84 +1130,86 @@ func TestPrzebiegKampaniiPrzezywaRestartPanelu(t *testing.T) {
 		}
 	}
 	if len(online) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
 
-	campaign := h.createCampaign(labCampaign("przebieg", "cron.service", map[string]any{
+	campaign := h.createCampaign(labCampaign("timeline", "cron.service", map[string]any{
 		"selector":       map[string]any{"host_ids": online},
 		"canary_size":    1,
 		"wave_size":      len(online),
 		"max_concurrent": len(online),
 	}))
 	h.approveCampaign(campaign)
-	koncowa := h.awaitCampaign(campaign.ID,
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	var przebieg struct {
-		Items []wpisPrzebieguView `json:"items"`
+	var timeline struct {
+		Items []timelineEntryView `json:"items"`
 	}
-	h.get("/api/v1/campaigns/"+campaign.ID+"/timeline", &przebieg)
-	if len(przebieg.Items) == 0 {
-		t.Fatal("kampania bez ani jednego zdarzenia w przebiegu")
+	h.get("/api/v1/campaigns/"+campaign.ID+"/timeline", &timeline)
+	if len(timeline.Items) == 0 {
+		t.Fatal("campaign without a single event in the timeline")
 	}
 
-	// Przebieg ma nazwac fazy kampanii i losy hostow. Sam stan koncowy widac
-	// w tabelach; tutaj chodzi o to, jak do niego doszlo.
-	rodzaje := map[string]int{}
-	for _, wpis := range przebieg.Items {
-		rodzaje[wpis.Type]++
-		if wpis.OccurredAt.IsZero() {
-			t.Errorf("zdarzenie %s bez czasu", wpis.Type)
+	// The timeline is to name the campaign phases and the fate of the
+	// hosts. The final state alone is visible in the tables; here it is
+	// about how it came to be.
+	kinds := map[string]int{}
+	for _, entry := range timeline.Items {
+		kinds[entry.Type]++
+		if entry.OccurredAt.IsZero() {
+			t.Errorf("event %s without a time", entry.Type)
 		}
-		if len(wpis.Payload) == 0 {
-			t.Errorf("zdarzenie %s bez tresci", wpis.Type)
+		if len(entry.Payload) == 0 {
+			t.Errorf("event %s without content", entry.Type)
 		}
 	}
-	for _, wymagane := range []string{
+	for _, required := range []string{
 		"campaign.canary", "campaign.running", "campaign.completed",
 		"target.running", "target.succeeded",
 	} {
-		if rodzaje[wymagane] == 0 {
-			t.Errorf("przebieg bez zdarzenia %s: %+v", wymagane, rodzaje)
+		if kinds[required] == 0 {
+			t.Errorf("timeline without the event %s: %+v", required, kinds)
 		}
 	}
-	if rodzaje["target.succeeded"] != len(online) {
-		t.Errorf("zdarzen target.succeeded %d przy %d hostach",
-			rodzaje["target.succeeded"], len(online))
+	if kinds["target.succeeded"] != len(online) {
+		t.Errorf("%d target.succeeded events with %d hosts",
+			kinds["target.succeeded"], len(online))
 	}
 
-	// Kolejnosc jest czescia odpowiedzi: canary poprzedza pozostale fale.
-	for i := 1; i < len(przebieg.Items); i++ {
-		if przebieg.Items[i].ID <= przebieg.Items[i-1].ID {
-			t.Fatalf("przebieg nie jest uporzadkowany: %d po %d",
-				przebieg.Items[i].ID, przebieg.Items[i-1].ID)
+	// The order is part of the answer: the canary precedes the other waves.
+	for i := 1; i < len(timeline.Items); i++ {
+		if timeline.Items[i].ID <= timeline.Items[i-1].ID {
+			t.Fatalf("the timeline is not ordered: %d after %d",
+				timeline.Items[i].ID, timeline.Items[i-1].ID)
 		}
 	}
 }
 
-// TestMetrykiPokazujaMaszynerieKampanii pilnuje obserwowalnosci tej czesci
-// systemu, ktora bez niej jest niewidzialna.
+// TestMetricsShowTheCampaignMachinery guards the observability of the part
+// of the system that is invisible without it.
 //
-// Kampania stojaca na budzecie i kampania, ktora idzie, wygladaja z zewnatrz
-// tak samo: obie sa "w toku". Tylko jedna z nich wymaga reakcji, a rozroznia
-// je kod powodu przy hostach i zajetosc budzetu.
-func TestMetrykiPokazujaMaszynerieKampanii(t *testing.T) {
+// A campaign standing on a budget and a campaign that goes look the same
+// from outside: both are "in progress". Only one of them needs a reaction,
+// and what tells them apart is the reason code at the hosts and the budget
+// usage.
+func TestMetricsShowTheCampaignMachinery(t *testing.T) {
 	h := newHarness(t)
-	tekst := h.text("/metrics")
+	text := h.text("/metrics")
 
-	// Budzety sa opisane zawsze - takze wtedy, gdy nic ich nie zajmuje.
-	// Pojemnosc podana dopiero wtedy, gdy jest problem, nie pozwolilaby
-	// zobaczyc, jak blisko granicy pracuje flota.
+	// Budgets are always described - also when nothing takes them. A
+	// capacity given only when there is a problem would not let anybody see
+	// how close to the limit the fleet works.
 	for _, fragment := range []string{
 		"flotestro_budget_tokens",
 		`flotestro_budget_tokens{budget="global:mutations",status="capacity"}`,
 		`flotestro_budget_tokens{budget="global:mutations",status="used"}`,
 	} {
-		if !strings.Contains(tekst, fragment) {
-			t.Errorf("metryki bez %q", fragment)
+		if !strings.Contains(text, fragment) {
+			t.Errorf("metrics without %q", fragment)
 		}
 	}
 
@@ -1199,24 +1220,24 @@ func TestMetrykiPokazujaMaszynerieKampanii(t *testing.T) {
 		}
 	}
 	if len(online) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
 
-	campaign := h.createCampaign(labCampaign("metryki", "cron.service", map[string]any{
+	campaign := h.createCampaign(labCampaign("metrics", "cron.service", map[string]any{
 		"selector":       map[string]any{"host_ids": online},
 		"canary_size":    0,
 		"wave_size":      len(online),
 		"max_concurrent": len(online),
 	}))
-	// Kampania czekajaca na zatwierdzenie jest kampania w toku: ktos musi
-	// podjac decyzje, a metryka ma to pokazac.
-	tekst = h.text("/metrics")
-	if !strings.Contains(tekst, `flotestro_campaigns_active{action="unit.restart"`) {
-		t.Errorf("metryki nie widza kampanii w toku:\n%s", wyciagnij(tekst, "flotestro_campaigns_active"))
+	// A campaign waiting for approval is a campaign in progress: somebody
+	// has to make a decision, and the metric is to show that.
+	text = h.text("/metrics")
+	if !strings.Contains(text, `flotestro_campaigns_active{action="unit.restart"`) {
+		t.Errorf("the metrics do not see the campaign in progress:\n%s", extract(text, "flotestro_campaigns_active"))
 	}
-	if !strings.Contains(tekst, "flotestro_campaign_targets{") {
-		t.Errorf("metryki nie widza hostow kampanii:\n%s",
-			wyciagnij(tekst, "flotestro_campaign_targets"))
+	if !strings.Contains(text, "flotestro_campaign_targets{") {
+		t.Errorf("the metrics do not see the campaign hosts:\n%s",
+			extract(text, "flotestro_campaign_targets"))
 	}
 
 	h.approveCampaign(campaign)
@@ -1224,134 +1245,139 @@ func TestMetrykiPokazujaMaszynerieKampanii(t *testing.T) {
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 }
 
-// wyciagnij zwraca wiersze metryki o danej nazwie - do komunikatu bledu.
-func wyciagnij(tekst, nazwa string) string {
-	wiersze := []string{}
-	for _, wiersz := range strings.Split(tekst, "\n") {
-		if strings.Contains(wiersz, nazwa) {
-			wiersze = append(wiersze, wiersz)
+// extract returns the lines of the metric with the given name - for an
+// error message.
+func extract(text, name string) string {
+	lines := []string{}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, name) {
+			lines = append(lines, line)
 		}
 	}
-	return strings.Join(wiersze, "\n")
+	return strings.Join(lines, "\n")
 }
 
-// TestKampaniaPlikowLiczyDiffNaKazdymHoscie pilnuje tego, co odroznia plik od
-// operacji o przenosnej intencji.
+// TestFileCampaignComputesTheDiffOnEveryHost guards what tells a file from
+// an operation with a portable intent.
 //
-// Ten sam stan docelowy znaczy na dwoch hostach co innego: jeden ma plik
-// o innej tresci, drugi nie ma go wcale. Kampania musi zapytac kazdy host
-// z osobna, zgoda ma dotyczyc zestawu tych odpowiedzi, a zapis ma wrocic na
-// host z odciskiem tresci, ktora operator ogladal - inaczej zmiana zrobiona
-// miedzy planem a zapisem znikneloby bez sladu.
-func TestKampaniaPlikowLiczyDiffNaKazdymHoscie(t *testing.T) {
+// The same desired state means different things on two hosts: one has a
+// file with different content, the other does not have it at all. The
+// campaign must ask every host separately, the consent is to concern the
+// set of those answers, and the write is to come back to the host with the
+// digest of the content the operator looked at - otherwise a change made
+// between the plan and the write would vanish without a trace.
+func TestFileCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	h := newHarness(t)
-	const sciezka = "/etc/flotestro-kampania-plikow.conf"
-	cele := make([]string, 0, 2)
+	const path = "/etc/flotestro-file-campaign.conf"
+	targets := make([]string, 0, 2)
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" && host.OSFamily == "debian" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "file.remove", "reason": "sprzatanie po tescie planow plikowych",
-				"payload": map[string]any{"file": map[string]any{"path": sciezka}},
+				"action": "file.remove", "reason": "cleanup after the file plans test",
+				"payload": map[string]any{"file": map[string]any{"path": path}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Pierwszy host dostaje plik z inna trescia; drugi zostaje bez niego. Od
-	// tej chwili ten sam stan docelowy to dwie rozne zmiany.
-	zadanie, proby := h.runOperation(cele[0], map[string]any{
-		"action": "file.ensure", "reason": "przygotowanie testu planow plikowych",
+	// The first host gets a file with different content; the second stays
+	// without it. From now on the same desired state is two different
+	// changes.
+	job, attempts := h.runOperation(targets[0], map[string]any{
+		"action": "file.ensure", "reason": "preparation of the file plans test",
 		"payload": map[string]any{"file": map[string]any{
-			"path": sciezka, "content": "stara tresc\n", "mode": "0644"}},
+			"path": path, "content": "old content\n", "mode": "0644"}},
 	}, 2*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("przygotowanie pliku: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("preparing the file: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "wspolny plik konfiguracyjny", "action": "file.ensure",
-		"reason": "test integracyjny planow plikowych",
+		"name": "shared configuration file", "action": "file.ensure",
+		"reason": "integration test of the file plans",
 		"payload": map[string]any{"file": map[string]any{
-			"path": sciezka, "content": "nowa tresc\n", "mode": "0644"}},
-		"selector":                   map[string]any{"host_ids": cele},
+			"path": path, "content": "new content\n", "mode": "0644"}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 	if campaign.State != "planning" {
-		t.Fatalf("kampania plikowa zaczela od stanu %s", campaign.State)
+		t.Fatalf("the file campaign started from state %s", campaign.State)
 	}
-	odciskZamowienia := campaign.ApprovalFingerprint
+	orderFingerprint := campaign.ApprovalFingerprint
 
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	if poPlanowaniu.PlanSetHash == "" {
-		t.Fatal("kampania plikowa po planowaniu bez odcisku zestawu planow")
+	if afterPlanning.PlanSetHash == "" {
+		t.Fatal("the file campaign after planning has no plan set fingerprint")
 	}
-	if poPlanowaniu.ApprovalFingerprint == odciskZamowienia {
-		t.Error("zestaw planow nie zmienil odcisku zatwierdzenia")
+	if afterPlanning.ApprovalFingerprint == orderFingerprint {
+		t.Error("the plan set did not change the approval fingerprint")
 	}
 
-	// Sedno: dwa hosty, dwa rozne plany. Jeden tworzy plik, drugi go zmienia.
-	dzialania := map[string]string{}
+	// The crux: two hosts, two different plans. One creates the file, the
+	// other changes it.
+	actions := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.PlanJobID == "" {
-			t.Fatalf("cel %s bez zadania planujacego", target.Hostname)
+			t.Fatalf("target %s without a planning job", target.Hostname)
 		}
-		dzialania[target.Hostname] = dzialaniePlanu(h, target.PlanJobID)
+		actions[target.Hostname] = planAction(h, target.PlanJobID)
 	}
-	rodzaje := map[string]int{}
-	for _, dzialanie := range dzialania {
-		rodzaje[dzialanie]++
+	kinds := map[string]int{}
+	for _, action := range actions {
+		kinds[action]++
 	}
-	if rodzaje["create"] == 0 || rodzaje["update"] == 0 {
-		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	if kinds["create"] == 0 || kinds["update"] == 0 {
+		t.Errorf("the host plans do not differ: %+v", actions)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// Oba hosty doszly do tego samego stanu docelowego, choc szly do niego
-	// z dwoch roznych miejsc. Plan liczony teraz nie ma juz nic do zrobienia.
-	for _, hostID := range cele {
-		zadanie, proby := h.runOperation(hostID, map[string]any{
-			"action": "file.plan", "reason": "sprawdzenie stanu po kampanii",
+	// Both hosts reached the same desired state, although they went there
+	// from two different places. A plan computed now has nothing left to
+	// do.
+	for _, hostID := range targets {
+		job, attempts := h.runOperation(hostID, map[string]any{
+			"action": "file.plan", "reason": "checking the state after the campaign",
 			"payload": map[string]any{"file": map[string]any{
-				"path": sciezka, "content": "nowa tresc\n", "mode": "0644"}},
+				"path": path, "content": "new content\n", "mode": "0644"}},
 		}, 2*time.Minute)
-		if zadanie.State != "succeeded" {
-			t.Fatalf("plan koncowy: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+		if job.State != "succeeded" {
+			t.Fatalf("final plan: state = %s, %s", job.State, lastMessage(attempts))
 		}
-		if dzialanie := dzialaniePlanu(h, zadanie.ID); dzialanie != "no_change" {
-			t.Errorf("po kampanii host %s ma jeszcze do zrobienia: %s", hostID[:8], dzialanie)
+		if action := planAction(h, job.ID); action != "no_change" {
+			t.Errorf("after the campaign host %s still has something to do: %s", hostID[:8], action)
 		}
-		_ = proby
+		_ = attempts
 	}
 }
 
-// dzialaniePlanu czyta z wyniku zadania planujacego to, co plan ma zrobic.
-func dzialaniePlanu(h *harness, jobID string) string {
+// planAction reads from the planning job result what the plan is to do.
+func planAction(h *harness, jobID string) string {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string `json:"kind"`
@@ -1361,141 +1387,145 @@ func dzialaniePlanu(h *harness, jobID string) string {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "file_plan" {
-			return odpowiedz.Items[i].Detail.Plan.Action
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "file_plan" {
+			return response.Items[i].Detail.Plan.Action
 		}
 	}
 	return ""
 }
 
-// TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda pilnuje dwoch rzeczy naraz.
+// TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent guards two
+// things at once.
 //
-// Pierwsza: regula zapory zamowiona na dwoch hostach to dwie rozne zmiany -
-// jeden host ja tworzy, drugi zmienia - i kazda wraca na host z odciskiem
-// zestawu regul, ktory ten host mial przy planowaniu.
+// First: a firewall rule ordered on two hosts is two different changes -
+// one host creates it, the other changes it - and each comes back to the
+// host with the ruleset fingerprint that host had at planning.
 //
-// Druga: regula, ktora odcielaby kanal zarzadzania, ma odpasc na etapie
-// planu, zanim ktokolwiek cokolwiek zatwierdzi. Odmowa przy wykonaniu na
-// polowie floty bylaby odpowiedzia spozniona.
-func TestKampaniaZaporyLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+// Second: a rule that would cut off the management channel is to fall out
+// at the plan stage, before anybody approves anything. A refusal at
+// execution on half the fleet would be a belated answer.
+func TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
-	const nazwa = "test-kampanii-zapory"
-	cele := make([]string, 0, 2)
+	const name = "firewall-campaign-test"
+	targets := make([]string, 0, 2)
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" && host.OSFamily == "debian" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
-	if !migawkaZaporyHosta(t, h, cele[0]).Writable {
-		t.Skip("host nie pozwala zmieniac zapory")
+	if !hostFirewallSnapshot(t, h, targets[0]).Writable {
+		t.Skip("the host does not allow changing the firewall")
 	}
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "firewall.rule.remove", "reason": "sprzatanie po tescie kampanii zapory",
+				"action": "firewall.rule.remove", "reason": "cleanup after the firewall campaign test",
 				"payload": map[string]any{"firewall": map[string]any{
-					"rule_id": nazwa, "rollback_seconds": 60}},
+					"rule_id": name, "rollback_seconds": 60}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Pierwszy host dostaje regule na inny port; drugi zostaje bez niej.
-	stan := migawkaZaporyHosta(t, h, cele[0])
-	zadanie, proby := h.runOperation(cele[0], map[string]any{
-		"action": "firewall.rule.ensure", "reason": "przygotowanie testu kampanii zapory",
+	// The first host gets a rule on a different port; the second stays
+	// without it.
+	state := hostFirewallSnapshot(t, h, targets[0])
+	job, attempts := h.runOperation(targets[0], map[string]any{
+		"action": "firewall.rule.ensure", "reason": "preparation of the firewall campaign test",
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": nazwa, "chain": "input", "action": "drop",
+			"rule_id": name, "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"2525"},
 			"sources": []string{"10.10.0.0/16"}, "rollback_seconds": 60,
-			"expected_hash": stan.Hash}},
+			"expected_hash": state.Hash}},
 	}, 3*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("przygotowanie reguly: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("preparing the rule: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
-	regula := map[string]any{
-		"rule_id": nazwa, "chain": "input", "action": "drop",
+	rule := map[string]any{
+		"rule_id": name, "chain": "input", "action": "drop",
 		"protocol": "tcp", "ports": []string{"25"},
 		"sources": []string{"10.10.0.0/16"}, "rollback_seconds": 60,
 	}
 	campaign := h.createCampaign(map[string]any{
-		"name": "regula na calej flocie", "action": "firewall.rule.ensure",
-		"reason":                     "test integracyjny planow zapory",
-		"payload":                    map[string]any{"firewall": regula},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "rule on the whole fleet", "action": "firewall.rule.ensure",
+		"reason":                     "integration test of the firewall plans",
+		"payload":                    map[string]any{"firewall": rule},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 	if campaign.State != "planning" {
-		t.Fatalf("kampania zapory zaczela od stanu %s", campaign.State)
+		t.Fatalf("the firewall campaign started from state %s", campaign.State)
 	}
 
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	dzialania := map[string]int{}
+	actions := map[string]int{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		dzialania[dzialaniePlanuZapory(h, target.PlanJobID)]++
+		actions[firewallPlanAction(h, target.PlanJobID)]++
 	}
-	if dzialania["create"] == 0 || dzialania["update"] == 0 {
-		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	if actions["create"] == 0 || actions["update"] == 0 {
+		t.Errorf("the host plans do not differ: %+v", actions)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
-	for _, hostID := range cele {
-		po := regulaPanelu(t, h, hostID, nazwa)
-		if !strings.Contains(po.Text, "tcp dport 25") {
-			t.Errorf("host %s po kampanii ma regule %q", hostID[:8], po.Text)
+	for _, hostID := range targets {
+		after := panelRule(t, h, hostID, name)
+		if !strings.Contains(after.Text, "tcp dport 25") {
+			t.Errorf("host %s after the campaign has the rule %q", hostID[:8], after.Text)
 		}
 	}
 
-	// Regula odcinajaca panel: plan ma ja odrzucic na kazdym hoscie, a kampania
-	// ma sie zatrzymac bez zgody, bo nie zostal zaden host do pracy.
-	odcinajaca := h.createCampaign(map[string]any{
-		"name": "regula odcinajaca", "action": "firewall.rule.ensure",
-		"reason": "test odmowy planu zapory",
+	// A rule cutting off the panel: the plan is to reject it on every host,
+	// and the campaign is to stop without consent, because no host is left
+	// to work on.
+	cutting := h.createCampaign(map[string]any{
+		"name": "cutting rule", "action": "firewall.rule.ensure",
+		"reason": "firewall plan refusal test",
 		"payload": map[string]any{"firewall": map[string]any{
-			"rule_id": "test-odciecia-kampania", "chain": "input", "action": "drop",
+			"rule_id": "campaign-cut-off-test", "chain": "input", "action": "drop",
 			"protocol": "tcp", "ports": []string{"8000-9000"}, "rollback_seconds": 60}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	stanOdmowy := h.awaitCampaign(odcinajaca.ID,
+	refusalState := h.awaitCampaign(cutting.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stanOdmowy.State == "awaiting_approval" {
-		t.Fatal("kampania z regula odcinajaca panel doszla do zgody")
+	if refusalState.State == "awaiting_approval" {
+		t.Fatal("the campaign with a rule cutting off the panel reached consent")
 	}
-	for _, target := range h.campaignTargets(odcinajaca.ID) {
+	for _, target := range h.campaignTargets(cutting.ID) {
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+			t.Errorf("target %s after the plan refusal: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
 }
 
-// dzialaniePlanuZapory czyta z wyniku zadania planujacego, co plan ma zrobic.
-func dzialaniePlanuZapory(h *harness, jobID string) string {
+// firewallPlanAction reads from the planning job result what the plan is
+// to do.
+func firewallPlanAction(h *harness, jobID string) string {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string `json:"kind"`
@@ -1505,152 +1535,156 @@ func dzialaniePlanuZapory(h *harness, jobID string) string {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "firewall_plan" {
-			return odpowiedz.Items[i].Detail.Plan.Action
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "firewall_plan" {
+			return response.Items[i].Detail.Plan.Action
 		}
 	}
 	return ""
 }
 
-// TestKampaniaMontowaniaRozwiazujeUUIDNaKazdymHoscie sprawdza, ze zamowienie
-// "zamontuj /dev/sdb" nie jedzie na hosty jako sciezka: kazdy host rozwiazuje
-// ja do UUID filesystemu, ktory naprawde ma, i ten UUID wraca w zmianie.
-// Dwa hosty z ta sama sciezka maja dwa rozne filesystemy - i dwa rozne UUID.
-func TestKampaniaMontowaniaRozwiazujeUUIDNaKazdymHoscie(t *testing.T) {
+// TestMountCampaignResolvesTheUUIDOnEveryHost checks that the order "mount
+// /dev/sdb" does not go to the hosts as a path: every host resolves it to
+// the UUID of the filesystem it really has, and that UUID comes back in the
+// change. Two hosts with the same path have two different filesystems - and
+// two different UUIDs.
+func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 	h := newHarness(t)
-	const cel = "/mnt/flotestro-kampania"
+	const target = "/mnt/flotestro-campaign"
 
-	// Hosty rodziny debian z wolnym filesystemem pod ta sama sciezka.
-	zrodla := map[string]string{}
-	var hosty []string
+	// Hosts of the debian family with a free filesystem under the same
+	// path.
+	sources := map[string]string{}
+	var hosts []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" || host.OSFamily != "debian" {
 			continue
 		}
-		// Fragment przestrzeni pochodzi z cyklu inwentarza; poprzedni test
-		// mogl wlasnie odmontowac dysk, ktorego migawka jeszcze nie widzi.
+		// The storage fragment comes from the inventory cycle; the previous
+		// test may have just unmounted a disk the snapshot does not see yet.
 		h.runOperation(host.ID, map[string]any{
-			"action": "inventory.refresh", "reason": "test kampanii montowania",
+			"action": "inventory.refresh", "reason": "mount campaign test",
 			"payload": map[string]any{"inventory": map[string]any{"modules": []string{"storage"}}},
 		}, 2*time.Minute)
-		stan := migawkaPrzestrzeniHosta(t, h, host.ID)
-		for _, urzadzenie := range stan.Devices {
-			if urzadzenie.FSType == "ext4" && urzadzenie.UUID != "" &&
-				len(urzadzenie.Mountpoints) == 0 && !wFstab(stan, urzadzenie) {
-				zrodla[host.ID] = urzadzenie.Path
-				hosty = append(hosty, host.ID)
+		state := hostStorageSnapshot(t, h, host.ID)
+		for _, device := range state.Devices {
+			if device.FSType == "ext4" && device.UUID != "" &&
+				len(device.Mountpoints) == 0 && !inFstab(state, device) {
+				sources[host.ID] = device.Path
+				hosts = append(hosts, host.ID)
 				break
 			}
 		}
 	}
-	if len(hosty) < 2 {
-		t.Skip("flota ma mniej niz dwa hosty debian z wolnym filesystemem ext4")
+	if len(hosts) < 2 {
+		t.Skip("the fleet has fewer than two debian hosts with a free ext4 filesystem")
 	}
-	hosty = hosty[:2]
-	if zrodla[hosty[0]] != zrodla[hosty[1]] {
-		t.Skipf("wolne filesystemy maja rozne sciezki: %s i %s",
-			zrodla[hosty[0]], zrodla[hosty[1]])
+	hosts = hosts[:2]
+	if sources[hosts[0]] != sources[hosts[1]] {
+		t.Skipf("the free filesystems have different paths: %s and %s",
+			sources[hosts[0]], sources[hosts[1]])
 	}
-	sciezka := zrodla[hosty[0]]
+	path := sources[hosts[0]]
 
 	t.Cleanup(func() {
-		for _, hostID := range hosty {
+		for _, hostID := range hosts {
 			h.runOperation(hostID, map[string]any{
-				"action": "mount.remove", "reason": "sprzatanie po tescie kampanii montowania",
-				"payload": map[string]any{"storage": map[string]any{"target": cel}},
+				"action": "mount.remove", "reason": "cleanup after the mount campaign test",
+				"payload": map[string]any{"storage": map[string]any{"target": target}},
 			}, 2*time.Minute)
 		}
 	})
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "dysk danych na flocie", "action": "mount.ensure",
-		"reason": "test integracyjny planow montowania",
+		"name": "data disk on the fleet", "action": "mount.ensure",
+		"reason": "integration test of the mount plans",
 		"payload": map[string]any{"storage": map[string]any{
-			"source": sciezka, "target": cel, "fs_type": "ext4",
+			"source": path, "target": target, "fs_type": "ext4",
 			"options": "defaults,noatime", "persist": true}},
-		"selector":                   map[string]any{"host_ids": hosty},
+		"selector":                   map[string]any{"host_ids": hosts},
 		"canary_size":                0,
-		"wave_size":                  len(hosty),
-		"max_concurrent":             len(hosty),
+		"wave_size":                  len(hosts),
+		"max_concurrent":             len(hosts),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 	if campaign.State != "planning" {
-		t.Fatalf("kampania montowania zaczela od stanu %s", campaign.State)
+		t.Fatalf("the mount campaign started from state %s", campaign.State)
 	}
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
 
-	rozwiazane := map[string]string{}
-	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planMontowania(h, target.PlanJobID)
+	resolved := map[string]string{}
+	for _, campaignTarget := range h.campaignTargets(campaign.ID) {
+		plan := mountPlan(h, campaignTarget.PlanJobID)
 		if plan.Action != "create" {
-			t.Errorf("host %s planuje %q zamiast create", target.Hostname, plan.Action)
+			t.Errorf("host %s plans %q instead of create", campaignTarget.Hostname, plan.Action)
 		}
 		if !strings.HasPrefix(plan.ResolvedSource, "UUID=") {
-			t.Errorf("host %s nie rozwiazal zrodla do UUID: %q", target.Hostname, plan.ResolvedSource)
+			t.Errorf("host %s did not resolve the source to a UUID: %q", campaignTarget.Hostname, plan.ResolvedSource)
 		}
-		rozwiazane[target.Hostname] = plan.ResolvedSource
+		resolved[campaignTarget.Hostname] = plan.ResolvedSource
 	}
-	if len(rozwiazane) != 2 {
-		t.Fatalf("plany dla %d hostow zamiast 2", len(rozwiazane))
+	if len(resolved) != 2 {
+		t.Fatalf("plans for %d hosts instead of 2", len(resolved))
 	}
-	var uuidy []string
-	for _, uuid := range rozwiazane {
-		uuidy = append(uuidy, uuid)
+	var uuids []string
+	for _, uuid := range resolved {
+		uuids = append(uuids, uuid)
 	}
-	if uuidy[0] == uuidy[1] {
-		t.Fatalf("dwa hosty rozwiazaly %s do tego samego UUID %s", sciezka, uuidy[0])
+	if uuids[0] == uuids[1] {
+		t.Fatalf("two hosts resolved %s to the same UUID %s", path, uuids[0])
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// Zmiana, ktora weszla na host, ma niesc UUID tego hosta, a nie sciezke
-	// z zamowienia - i host ma po niej montowanie zapisane w fstab.
-	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+	// The change that went onto the host is to carry that host's UUID, not
+	// the path from the order - and the host is to have the mount recorded
+	// in fstab afterwards.
+	for _, campaignTarget := range h.campaignTargets(campaign.ID) {
+		var job struct {
 			Payload struct {
 				Storage struct {
 					Source string `json:"source"`
 				} `json:"storage"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.Storage.Source != rozwiazane[target.Hostname] {
-			t.Errorf("host %s dostal zrodlo %q, plan mial %q",
-				target.Hostname, zadanie.Payload.Storage.Source, rozwiazane[target.Hostname])
+		h.get("/api/v1/jobs/"+campaignTarget.JobID, &job)
+		if job.Payload.Storage.Source != resolved[campaignTarget.Hostname] {
+			t.Errorf("host %s got the source %q, the plan had %q",
+				campaignTarget.Hostname, job.Payload.Storage.Source, resolved[campaignTarget.Hostname])
 		}
-		if !montowanieHosta(t, h, target.HostID, cel) {
-			t.Errorf("host %s po kampanii nie ma %s zamontowanego i w fstab", target.Hostname, cel)
+		if !hostMounted(t, h, campaignTarget.HostID, target) {
+			t.Errorf("host %s after the campaign does not have %s mounted and in fstab", campaignTarget.Hostname, target)
 		}
 	}
 }
 
-// montowanieHosta czeka, az inwentarz hosta pokaze cel zamontowany i w fstab.
-// Fragment przestrzeni pochodzi z cyklu inwentarza, wiec po zmianie trzeba
-// go odswiezyc, a zapis fragmentu jest asynchroniczny wzgledem zadania.
-func montowanieHosta(t *testing.T, h *harness, hostID, cel string) bool {
+// hostMounted waits until the host inventory shows the target mounted and
+// in fstab. The storage fragment comes from the inventory cycle, so after
+// the change it has to be refreshed, and the fragment write is asynchronous
+// with respect to the job.
+func hostMounted(t *testing.T, h *harness, hostID, target string) bool {
 	t.Helper()
 	h.runOperation(hostID, map[string]any{
-		"action": "inventory.refresh", "reason": "test kampanii montowania",
+		"action": "inventory.refresh", "reason": "mount campaign test",
 		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"storage"}}},
 	}, 2*time.Minute)
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		for _, montowanie := range migawkaPrzestrzeniHosta(t, h, hostID).Mounts {
-			if montowanie.Target == cel && montowanie.Mounted && montowanie.InFstab {
+		for _, mount := range hostStorageSnapshot(t, h, hostID).Mounts {
+			if mount.Target == target && mount.Mounted && mount.InFstab {
 				return true
 			}
 		}
@@ -1661,28 +1695,28 @@ func montowanieHosta(t *testing.T, h *harness, hostID, cel string) bool {
 	}
 }
 
-// wFstab mowi, czy urzadzenie ma wpis w fstab pod jakimkolwiek celem.
-func wFstab(stan migawkaPrzestrzeni, urzadzenie urzadzenieView) bool {
-	for _, montowanie := range stan.Mounts {
-		if !montowanie.InFstab {
+// inFstab says whether the device has an fstab entry under any target.
+func inFstab(state storageSnapshot, device deviceView) bool {
+	for _, mount := range state.Mounts {
+		if !mount.InFstab {
 			continue
 		}
-		if montowanie.Source == urzadzenie.Path ||
-			montowanie.Source == "UUID="+urzadzenie.UUID {
+		if mount.Source == device.Path ||
+			mount.Source == "UUID="+device.UUID {
 			return true
 		}
 	}
 	return false
 }
 
-// planMontowania czyta z wyniku zadania planujacego plan montowania.
-func planMontowania(h *harness, jobID string) (plan struct {
+// mountPlan reads the mount plan from the planning job result.
+func mountPlan(h *harness, jobID string) (plan struct {
 	Action         string `json:"action"`
 	ResolvedSource string `json:"resolved_source"`
 	Refusal        string `json:"refusal"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -1690,282 +1724,286 @@ func planMontowania(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "mount_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "mount_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestKampaniaSieciLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze zmiana sieci
-// w kampanii dostaje plan policzony na hoscie: roznice wobec profilu, ktory
-// host ma, odcisk tej roznicy w zmianie i odmowe przed zgoda tam, gdzie
-// zmiana nie ma na czym wejsc.
-func TestKampaniaSieciLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+// TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
+// network change in a campaign gets a plan computed on the host: the
+// difference against the profile the host has, the fingerprint of that
+// difference in the change, and a refusal before consent where the change
+// has nothing to land on.
+func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
-	// Hosty z mechanizmem zapisu i wskazanym interfejsem zarzadzania.
-	interfejsy := map[string]string{}
-	var cele []string
+	// Hosts with a write mechanism and a named management interface.
+	interfaces := map[string]string{}
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		stan := migawkaSieciHosta(t, h, host.ID)
-		if stan.WriteAdapter == "" || stan.ManagementInterface == "" {
+		state := hostNetworkSnapshot(t, h, host.ID)
+		if state.WriteAdapter == "" || state.ManagementInterface == "" {
 			continue
 		}
-		interfejsy[host.ID] = stan.ManagementInterface
-		cele = append(cele, host.ID)
+		interfaces[host.ID] = state.ManagementInterface
+		targets = append(targets, host.ID)
 	}
-	if len(cele) == 0 {
-		t.Skip("flota nie ma hosta z mechanizmem zapisu konfiguracji sieci")
+	if len(targets) == 0 {
+		t.Skip("the fleet has no host with a mechanism to write the network configuration")
 	}
-	// Zamowienie wskazuje jeden interfejs, a hosty nazywaja go roznie.
-	// Kampania idzie na te, ktore maja go pod ta sama nazwa.
-	liczebnosc := map[string]int{}
-	for _, nazwa := range interfejsy {
-		liczebnosc[nazwa]++
+	// The order names one interface, and the hosts call it differently.
+	// The campaign goes to those that have it under the same name.
+	counts := map[string]int{}
+	for _, name := range interfaces {
+		counts[name]++
 	}
-	interfejs := ""
-	for nazwa, ile := range liczebnosc {
-		if ile > liczebnosc[interfejs] || (ile == liczebnosc[interfejs] && nazwa < interfejs) {
-			interfejs = nazwa
+	iface := ""
+	for name, count := range counts {
+		if count > counts[iface] || (count == counts[iface] && name < iface) {
+			iface = name
 		}
 	}
-	wybrane := cele[:0]
-	for _, hostID := range cele {
-		if interfejsy[hostID] == interfejs {
-			wybrane = append(wybrane, hostID)
+	selected := targets[:0]
+	for _, hostID := range targets {
+		if interfaces[hostID] == iface {
+			selected = append(selected, hostID)
 		}
 	}
-	cele = wybrane
+	targets = selected
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "network.mtu.set", "reason": "sprzatanie po tescie kampanii sieci",
+				"action": "network.mtu.set", "reason": "cleanup after the network campaign test",
 				"payload": map[string]any{"network": map[string]any{
-					"interface": interfejs, "mtu": "auto", "rollback_seconds": 60}},
+					"interface": iface, "mtu": "auto", "rollback_seconds": 60}},
 			}, 3*time.Minute)
 		}
 	})
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "MTU na flocie", "action": "network.mtu.set",
-		"reason": "test integracyjny planow sieci",
+		"name": "MTU on the fleet", "action": "network.mtu.set",
+		"reason": "integration test of the network plans",
 		"payload": map[string]any{"network": map[string]any{
-			"interface": interfejs, "mtu": "1400", "rollback_seconds": 60}},
-		"selector":                   map[string]any{"host_ids": cele},
+			"interface": iface, "mtu": "1400", "rollback_seconds": 60}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
 	if campaign.State != "planning" {
-		t.Fatalf("kampania sieci zaczela od stanu %s", campaign.State)
+		t.Fatalf("the network campaign started from state %s", campaign.State)
 	}
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	odciski := map[string]string{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planZRodzaju(h, target.PlanJobID, "network_plan")
+		plan := planOfKind(h, target.PlanJobID, "network_plan")
 		if plan.Action != "update" || len(plan.Changes) != 1 ||
 			!strings.Contains(plan.Changes[0], "MTU") {
-			t.Errorf("host %s planuje %q %v zamiast zmiany MTU", target.Hostname, plan.Action, plan.Changes)
+			t.Errorf("host %s plans %q %v instead of an MTU change", target.Hostname, plan.Action, plan.Changes)
 		}
 		if plan.PlanHash == "" {
-			t.Errorf("host %s nie podal odcisku planu", target.Hostname)
+			t.Errorf("host %s gave no plan fingerprint", target.Hostname)
 		}
-		odciski[target.Hostname] = plan.PlanHash
+		fingerprints[target.Hostname] = plan.PlanHash
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
-	// Zmiana, ktora weszla na host, niesie odcisk planu tego hosta: host
-	// liczyl plan jeszcze raz przed zmiana i mial z czym porownac.
+	// The change that went onto the host carries that host's plan
+	// fingerprint: the host computed the plan once more before the change
+	// and had something to compare against.
 	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+		var job struct {
 			Payload struct {
 				Network struct {
 					PlanHash string `json:"plan_hash"`
 				} `json:"network"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.Network.PlanHash != odciski[target.Hostname] {
-			t.Errorf("host %s dostal odcisk %q, plan mial %q",
-				target.Hostname, zadanie.Payload.Network.PlanHash, odciski[target.Hostname])
+		h.get("/api/v1/jobs/"+target.JobID, &job)
+		if job.Payload.Network.PlanHash != fingerprints[target.Hostname] {
+			t.Errorf("host %s got the fingerprint %q, the plan had %q",
+				target.Hostname, job.Payload.Network.PlanHash, fingerprints[target.Hostname])
 		}
 	}
 
-	// Interfejs bez profilu: plan ma odmowic na kazdym hoscie, a kampania
-	// zatrzymac sie bez zgody, bo nie zostal zaden host do pracy.
-	bezProfilu := h.createCampaign(map[string]any{
-		"name": "MTU na interfejsie, ktorego nie ma", "action": "network.mtu.set",
-		"reason": "test odmowy planu sieci",
+	// An interface without a profile: the plan is to refuse on every host,
+	// and the campaign is to stop without consent, because no host is left
+	// to work on.
+	withoutProfile := h.createCampaign(map[string]any{
+		"name": "MTU on an interface that does not exist", "action": "network.mtu.set",
+		"reason": "network plan refusal test",
 		"payload": map[string]any{"network": map[string]any{
 			"interface": "flotestro9", "mtu": "1400", "rollback_seconds": 60}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	stanOdmowy := h.awaitCampaign(bezProfilu.ID,
+	refusalState := h.awaitCampaign(withoutProfile.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stanOdmowy.State == "awaiting_approval" {
-		t.Fatal("kampania na interfejsie bez profilu doszla do zgody")
+	if refusalState.State == "awaiting_approval" {
+		t.Fatal("the campaign on an interface without a profile reached consent")
 	}
-	for _, target := range h.campaignTargets(bezProfilu.ID) {
+	for _, target := range h.campaignTargets(withoutProfile.ID) {
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+			t.Errorf("target %s after the plan refusal: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
 }
 
-// TestKampaniaStrefyFirewalldLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze wpis
-// w strefie firewalld w kampanii dostaje plan policzony na hoscie: czy port
-// juz jest otwarty, w ktorej strefie i wobec jakiego zestawu regul - a strefa,
-// ktorej host nie ma, jest odmowa przed zgoda.
-func TestKampaniaStrefyFirewalldLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+// TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent checks
+// that a firewalld zone entry in a campaign gets a plan computed on the
+// host: whether the port is already open, in which zone and against which
+// ruleset - and a zone the host does not have is a refusal before consent.
+func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 	const port = "9445"
 
-	strefy := map[string]string{}
-	var cele []string
+	zones := map[string]string{}
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		stan := migawkaZaporyHosta(t, h, host.ID)
-		if stan.Adapter != "firewalld" {
+		state := hostFirewallSnapshot(t, h, host.ID)
+		if state.Adapter != "firewalld" {
 			continue
 		}
-		for _, strefa := range stan.Zones {
-			if strefa.Active {
-				strefy[host.ID] = strefa.Name
-				cele = append(cele, host.ID)
+		for _, zone := range state.Zones {
+			if zone.Active {
+				zones[host.ID] = zone.Name
+				targets = append(targets, host.ID)
 				break
 			}
 		}
 	}
-	if len(cele) == 0 {
-		t.Skip("flota nie ma hosta z firewalld i aktywna strefa")
+	if len(targets) == 0 {
+		t.Skip("the fleet has no host with firewalld and an active zone")
 	}
-	strefa := strefy[cele[0]]
-	wybrane := cele[:0]
-	for _, hostID := range cele {
-		if strefy[hostID] == strefa {
-			wybrane = append(wybrane, hostID)
+	zone := zones[targets[0]]
+	selected := targets[:0]
+	for _, hostID := range targets {
+		if zones[hostID] == zone {
+			selected = append(selected, hostID)
 		}
 	}
-	cele = wybrane
+	targets = selected
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "firewall.zone.port", "reason": "sprzatanie po tescie kampanii stref",
+				"action": "firewall.zone.port", "reason": "cleanup after the zone campaign test",
 				"payload": map[string]any{"firewall": map[string]any{
-					"zone": strefa, "ports": []string{port}, "protocol": "tcp", "enable": false}},
+					"zone": zone, "ports": []string{port}, "protocol": "tcp", "enable": false}},
 			}, 2*time.Minute)
 		}
 	})
 
-	otwarcie := map[string]any{"firewall": map[string]any{
-		"zone": strefa, "ports": []string{port}, "protocol": "tcp", "enable": true}}
+	opening := map[string]any{"firewall": map[string]any{
+		"zone": zone, "ports": []string{port}, "protocol": "tcp", "enable": true}}
 	campaign := h.createCampaign(map[string]any{
-		"name": "port w strefie na flocie", "action": "firewall.zone.port",
-		"reason":                     "test integracyjny planow stref",
-		"payload":                    otwarcie,
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "port in a zone on the fleet", "action": "firewall.zone.port",
+		"reason":                     "integration test of the zone plans",
+		"payload":                    opening,
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planStrefy(h, target.PlanJobID)
+		plan := zonePlan(h, target.PlanJobID)
 		if plan.Action != "create" || plan.Present || plan.Entry != port+"/tcp" || plan.RulesetHash == "" {
-			t.Errorf("host %s planuje %+v zamiast otwarcia portu", target.Hostname, plan)
+			t.Errorf("host %s plans %+v instead of opening the port", target.Hostname, plan)
 		}
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// Ten sam wpis raz jeszcze: plan ma powiedziec, ze port juz jest otwarty.
-	powtorka := h.createCampaign(map[string]any{
-		"name": "port w strefie raz jeszcze", "action": "firewall.zone.port",
-		"reason": "test planu bez zmian", "payload": otwarcie,
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+	// The same entry once more: the plan is to say the port is already
+	// open.
+	repeat := h.createCampaign(map[string]any{
+		"name": "port in a zone once more", "action": "firewall.zone.port",
+		"reason": "no-change plan test", "payload": opening,
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	poPowtorce := h.awaitCampaign(powtorka.ID,
+	afterRepeat := h.awaitCampaign(repeat.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPowtorce.State != "awaiting_approval" {
-		t.Fatalf("powtorka: planowanie skonczylo sie stanem %s (%s)",
-			poPowtorce.State, poPowtorce.PauseReason)
+	if afterRepeat.State != "awaiting_approval" {
+		t.Fatalf("repeat: planning ended in state %s (%s)",
+			afterRepeat.State, afterRepeat.PauseReason)
 	}
-	for _, target := range h.campaignTargets(powtorka.ID) {
-		if plan := planStrefy(h, target.PlanJobID); plan.Action != "no_change" || !plan.Present {
-			t.Errorf("host %s po otwarciu planuje %+v", target.Hostname, plan)
+	for _, target := range h.campaignTargets(repeat.ID) {
+		if plan := zonePlan(h, target.PlanJobID); plan.Action != "no_change" || !plan.Present {
+			t.Errorf("host %s after the opening plans %+v", target.Hostname, plan)
 		}
 	}
-	h.do(http.MethodPost, "/api/v1/campaigns/"+powtorka.ID+"/cancel",
-		map[string]any{"reason": "test planu bez zmian"}, nil, 0)
+	h.do(http.MethodPost, "/api/v1/campaigns/"+repeat.ID+"/cancel",
+		map[string]any{"reason": "no-change plan test"}, nil, 0)
 
-	// Strefa, ktorej host nie ma: odmowa w planie na kazdym hoscie.
-	bezStrefy := h.createCampaign(map[string]any{
-		"name": "port w strefie, ktorej nie ma", "action": "firewall.zone.port",
-		"reason": "test odmowy planu strefy",
+	// A zone the host does not have: a refusal in the plan on every host.
+	withoutZone := h.createCampaign(map[string]any{
+		"name": "port in a zone that does not exist", "action": "firewall.zone.port",
+		"reason": "zone plan refusal test",
 		"payload": map[string]any{"firewall": map[string]any{
-			"zone": "flotestro-nie-ma", "ports": []string{port}, "protocol": "tcp", "enable": true}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+			"zone": "flotestro-missing", "ports": []string{port}, "protocol": "tcp", "enable": true}},
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	stanOdmowy := h.awaitCampaign(bezStrefy.ID,
+	refusalState := h.awaitCampaign(withoutZone.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stanOdmowy.State == "awaiting_approval" {
-		t.Fatal("kampania na strefie, ktorej nie ma, doszla do zgody")
+	if refusalState.State == "awaiting_approval" {
+		t.Fatal("the campaign on a zone that does not exist reached consent")
 	}
-	for _, target := range h.campaignTargets(bezStrefy.ID) {
+	for _, target := range h.campaignTargets(withoutZone.ID) {
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+			t.Errorf("target %s after the plan refusal: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
 }
 
-// planStrefy czyta z wyniku zadania planujacego plan strefy firewalld.
-func planStrefy(h *harness, jobID string) (plan struct {
+// zonePlan reads the firewalld zone plan from the planning job result.
+func zonePlan(h *harness, jobID string) (plan struct {
 	Action      string `json:"action"`
 	Entry       string `json:"entry"`
 	Present     bool   `json:"present"`
@@ -1973,7 +2011,7 @@ func planStrefy(h *harness, jobID string) (plan struct {
 	RulesetHash string `json:"ruleset_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -1981,149 +2019,150 @@ func planStrefy(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "firewall_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "firewall_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestKampaniaResolveraLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze zmiana
-// resolvera w kampanii dostaje plan policzony na hoscie wobec profilu,
-// ktory host ma, i wraca z jego odciskiem - a interfejs bez profilu jest
-// odmowa przed zgoda.
-func TestKampaniaResolveraLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+// TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
+// resolver change in a campaign gets a plan computed on the host against
+// the profile the host has, and comes back with its fingerprint - and an
+// interface without a profile is a refusal before consent.
+func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
-	const serwer = "192.168.56.50"
+	const server = "192.168.56.50"
 
-	interfejsy := map[string]string{}
-	var cele []string
+	interfaces := map[string]string{}
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		stan := migawkaSieciHosta(t, h, host.ID)
-		if stan.WriteAdapter == "" || stan.ManagementInterface == "" {
+		state := hostNetworkSnapshot(t, h, host.ID)
+		if state.WriteAdapter == "" || state.ManagementInterface == "" {
 			continue
 		}
-		interfejsy[host.ID] = stan.ManagementInterface
-		cele = append(cele, host.ID)
+		interfaces[host.ID] = state.ManagementInterface
+		targets = append(targets, host.ID)
 	}
-	if len(cele) == 0 {
-		t.Skip("flota nie ma hosta z mechanizmem zapisu konfiguracji sieci")
+	if len(targets) == 0 {
+		t.Skip("the fleet has no host with a mechanism to write the network configuration")
 	}
-	interfejs := interfejsy[cele[0]]
-	wybrane := cele[:0]
-	for _, hostID := range cele {
-		if interfejsy[hostID] == interfejs {
-			wybrane = append(wybrane, hostID)
+	iface := interfaces[targets[0]]
+	selected := targets[:0]
+	for _, hostID := range targets {
+		if interfaces[hostID] == iface {
+			selected = append(selected, hostID)
 		}
 	}
-	cele = wybrane
+	targets = selected
 
-	// Sprzatanie zostawia serwer bez domen wyszukiwania: resolver bez
-	// serwera jest odmowa, wiec pustego profilu nie da sie tu przywrocic.
+	// The cleanup leaves the server without search domains: a resolver
+	// without a server is a refusal, so an empty profile cannot be restored
+	// here.
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "dns.host.apply", "reason": "sprzatanie po tescie kampanii resolvera",
+				"action": "dns.host.apply", "reason": "cleanup after the resolver campaign test",
 				"payload": map[string]any{"dns": map[string]any{
-					"interface": interfejs, "servers": []string{serwer}, "rollback_seconds": 60}},
+					"interface": iface, "servers": []string{server}, "rollback_seconds": 60}},
 			}, 3*time.Minute)
 		}
 	})
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "resolver na flocie", "action": "dns.host.apply",
-		"reason": "test integracyjny planow resolvera",
+		"name": "resolver on the fleet", "action": "dns.host.apply",
+		"reason": "integration test of the resolver plans",
 		"payload": map[string]any{"dns": map[string]any{
-			"interface": interfejs, "servers": []string{serwer},
+			"interface": iface, "servers": []string{server},
 			"search_domains": []string{"flotestro.test"}, "rollback_seconds": 60}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	odciski := map[string]string{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planZRodzaju(h, target.PlanJobID, "dns_plan")
+		plan := planOfKind(h, target.PlanJobID, "dns_plan")
 		if plan.Action != "update" || plan.PlanHash == "" {
-			t.Errorf("host %s planuje %+v zamiast zmiany resolvera", target.Hostname, plan)
+			t.Errorf("host %s plans %+v instead of a resolver change", target.Hostname, plan)
 		}
-		var oDomenach bool
-		for _, zmiana := range plan.Changes {
-			oDomenach = oDomenach || strings.Contains(zmiana, "search domains")
+		var aboutDomains bool
+		for _, change := range plan.Changes {
+			aboutDomains = aboutDomains || strings.Contains(change, "search domains")
 		}
-		if !oDomenach {
-			t.Errorf("host %s nie widzi zmiany domen wyszukiwania: %v", target.Hostname, plan.Changes)
+		if !aboutDomains {
+			t.Errorf("host %s does not see the search domain change: %v", target.Hostname, plan.Changes)
 		}
-		odciski[target.Hostname] = plan.PlanHash
+		fingerprints[target.Hostname] = plan.PlanHash
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+		var job struct {
 			Payload struct {
 				DNS struct {
 					PlanHash string `json:"plan_hash"`
 				} `json:"dns"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.DNS.PlanHash != odciski[target.Hostname] {
-			t.Errorf("host %s dostal odcisk %q, plan mial %q",
-				target.Hostname, zadanie.Payload.DNS.PlanHash, odciski[target.Hostname])
+		h.get("/api/v1/jobs/"+target.JobID, &job)
+		if job.Payload.DNS.PlanHash != fingerprints[target.Hostname] {
+			t.Errorf("host %s got the fingerprint %q, the plan had %q",
+				target.Hostname, job.Payload.DNS.PlanHash, fingerprints[target.Hostname])
 		}
 	}
 
-	bezProfilu := h.createCampaign(map[string]any{
-		"name": "resolver na interfejsie, ktorego nie ma", "action": "dns.host.apply",
-		"reason": "test odmowy planu resolvera",
+	withoutProfile := h.createCampaign(map[string]any{
+		"name": "resolver on an interface that does not exist", "action": "dns.host.apply",
+		"reason": "resolver plan refusal test",
 		"payload": map[string]any{"dns": map[string]any{
-			"interface": "flotestro9", "servers": []string{serwer}, "rollback_seconds": 60}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+			"interface": "flotestro9", "servers": []string{server}, "rollback_seconds": 60}},
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	stanOdmowy := h.awaitCampaign(bezProfilu.ID,
+	refusalState := h.awaitCampaign(withoutProfile.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stanOdmowy.State == "awaiting_approval" {
-		t.Fatal("kampania na interfejsie bez profilu doszla do zgody")
+	if refusalState.State == "awaiting_approval" {
+		t.Fatal("the campaign on an interface without a profile reached consent")
 	}
-	for _, target := range h.campaignTargets(bezProfilu.ID) {
+	for _, target := range h.campaignTargets(withoutProfile.ID) {
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+			t.Errorf("target %s after the plan refusal: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
 }
 
-// planZRodzaju czyta z wyniku zadania planujacego plan o danym rodzaju.
-func planZRodzaju(h *harness, jobID, rodzaj string) (plan struct {
+// planOfKind reads a plan of the given kind from the planning job result.
+func planOfKind(h *harness, jobID, kind string) (plan struct {
 	Action   string   `json:"action"`
 	Changes  []string `json:"changes"`
 	Refusal  string   `json:"refusal"`
 	PlanHash string   `json:"plan_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -2131,488 +2170,494 @@ func planZRodzaju(h *harness, jobID, rodzaj string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == rodzaj {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == kind {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestKampaniaSSHLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze zmiana konfiguracji
-// sshd w kampanii dostaje plan policzony na hoscie: roznice wobec tego, co
-// serwer stosuje, plik panelu, ktory zapis nadpisze, i odmowe przed zgoda,
-// gdy zmiana odcielaby wszystkie metody logowania.
-func TestKampaniaSSHLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+// TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent checks that an sshd
+// configuration change in a campaign gets a plan computed on the host: the
+// difference against what the server applies, the panel file the write
+// overwrites, and a refusal before consent when the change would cut off
+// all login methods.
+func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		if stan := migawkaSSHHosta(t, h, host.ID); len(stan.Ports) > 0 {
-			cele = append(cele, host.ID)
+		if state := hostSSHSnapshot(t, h, host.ID); len(state.Ports) > 0 {
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty z sshd")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts with sshd")
 	}
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "ssh.config.apply", "reason": "sprzatanie po tescie kampanii sshd",
+				"action": "ssh.config.apply", "reason": "cleanup after the sshd campaign test",
 				"payload": map[string]any{"ssh": map[string]any{"max_auth_tries": "6"}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Pierwszy host dostaje inna wartosc niz reszta, wiec plany hostow maja
-	// sie roznic stanem zastanym, a nie zamowieniem. Reszta dostaje wartosc
-	// jawnie: poprzedni przebieg mogl zostawic host juz w stanie docelowym.
-	for i, hostID := range cele {
-		wartosc := "6"
+	// The first host gets a different value than the rest, so the host
+	// plans are to differ by the state found, not by the order. The rest
+	// get the value explicitly: the previous run may have left the host
+	// already in the desired state.
+	for i, hostID := range targets {
+		value := "6"
 		if i == 0 {
-			wartosc = "3"
+			value = "3"
 		}
-		zadanie, proby := h.runOperation(hostID, map[string]any{
-			"action": "ssh.config.apply", "reason": "przygotowanie testu kampanii sshd",
-			"payload": map[string]any{"ssh": map[string]any{"max_auth_tries": wartosc}},
+		job, attempts := h.runOperation(hostID, map[string]any{
+			"action": "ssh.config.apply", "reason": "preparation of the sshd campaign test",
+			"payload": map[string]any{"ssh": map[string]any{"max_auth_tries": value}},
 		}, 2*time.Minute)
-		if zadanie.State != "succeeded" {
-			t.Fatalf("przygotowanie %s: stan = %s, %s", hostID[:8], zadanie.State, ostatniKomunikat(proby))
+		if job.State != "succeeded" {
+			t.Fatalf("preparing %s: state = %s, %s", hostID[:8], job.State, lastMessage(attempts))
 		}
 	}
 
-	zamowienie := map[string]any{"ssh": map[string]any{"max_auth_tries": "5"}}
+	order := map[string]any{"ssh": map[string]any{"max_auth_tries": "5"}}
 	campaign := h.createCampaign(map[string]any{
-		"name": "MaxAuthTries na flocie", "action": "ssh.config.apply",
-		"reason":                     "test integracyjny planow sshd",
-		"payload":                    zamowienie,
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "MaxAuthTries on the fleet", "action": "ssh.config.apply",
+		"reason":                     "integration test of the sshd plans",
+		"payload":                    order,
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	odciski := map[string]string{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planZRodzaju(h, target.PlanJobID, "ssh_plan")
+		plan := planOfKind(h, target.PlanJobID, "ssh_plan")
 		if plan.Action != "update" || plan.PlanHash == "" {
-			t.Errorf("host %s planuje %+v zamiast zmiany", target.Hostname, plan)
+			t.Errorf("host %s plans %+v instead of a change", target.Hostname, plan)
 		}
-		var oProbach bool
-		for _, zmiana := range plan.Changes {
-			oProbach = oProbach || strings.Contains(zmiana, "MaxAuthTries")
+		var aboutTries bool
+		for _, change := range plan.Changes {
+			aboutTries = aboutTries || strings.Contains(change, "MaxAuthTries")
 		}
-		if !oProbach {
-			t.Errorf("host %s nie widzi zmiany MaxAuthTries: %v", target.Hostname, plan.Changes)
+		if !aboutTries {
+			t.Errorf("host %s does not see the MaxAuthTries change: %v", target.Hostname, plan.Changes)
 		}
-		odciski[target.PlanJobID] = plan.PlanHash
+		fingerprints[target.PlanJobID] = plan.PlanHash
 	}
-	// Host przygotowany inaczej ma inny odcisk: plan opisuje stan zastany.
-	rozne := map[string]bool{}
-	for _, odcisk := range odciski {
-		rozne[odcisk] = true
+	// The host prepared differently has a different fingerprint: the plan
+	// describes the state found.
+	distinct := map[string]bool{}
+	for _, fingerprint := range fingerprints {
+		distinct[fingerprint] = true
 	}
-	if len(rozne) < 2 {
-		t.Errorf("hosty z roznym stanem maja ten sam odcisk planu: %v", odciski)
+	if len(distinct) < 2 {
+		t.Errorf("hosts with different states have the same plan fingerprint: %v", fingerprints)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
-	for _, hostID := range cele {
-		if po := migawkaSSHHosta(t, h, hostID); po.MaxAuthTries != 5 {
-			t.Errorf("host %s po kampanii ma MaxAuthTries = %d", hostID[:8], po.MaxAuthTries)
+	for _, hostID := range targets {
+		if after := hostSSHSnapshot(t, h, hostID); after.MaxAuthTries != 5 {
+			t.Errorf("host %s after the campaign has MaxAuthTries = %d", hostID[:8], after.MaxAuthTries)
 		}
 	}
 
-	// To samo zamowienie raz jeszcze: plan ma powiedziec, ze nie ma zmian.
-	powtorka := h.createCampaign(map[string]any{
-		"name": "MaxAuthTries raz jeszcze", "action": "ssh.config.apply",
-		"reason": "test planu bez zmian", "payload": zamowienie,
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+	// The same order once more: the plan is to say there are no changes.
+	repeat := h.createCampaign(map[string]any{
+		"name": "MaxAuthTries once more", "action": "ssh.config.apply",
+		"reason": "no-change plan test", "payload": order,
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	poPowtorce := h.awaitCampaign(powtorka.ID,
+	afterRepeat := h.awaitCampaign(repeat.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPowtorce.State != "awaiting_approval" {
-		t.Fatalf("powtorka: planowanie skonczylo sie stanem %s (%s)",
-			poPowtorce.State, poPowtorce.PauseReason)
+	if afterRepeat.State != "awaiting_approval" {
+		t.Fatalf("repeat: planning ended in state %s (%s)",
+			afterRepeat.State, afterRepeat.PauseReason)
 	}
-	for _, target := range h.campaignTargets(powtorka.ID) {
-		if plan := planZRodzaju(h, target.PlanJobID, "ssh_plan"); plan.Action != "no_change" {
-			t.Errorf("host %s po zmianie planuje %+v", target.Hostname, plan)
+	for _, target := range h.campaignTargets(repeat.ID) {
+		if plan := planOfKind(h, target.PlanJobID, "ssh_plan"); plan.Action != "no_change" {
+			t.Errorf("host %s after the change plans %+v", target.Hostname, plan)
 		}
 	}
-	h.do(http.MethodPost, "/api/v1/campaigns/"+powtorka.ID+"/cancel",
-		map[string]any{"reason": "test planu bez zmian"}, nil, 0)
+	h.do(http.MethodPost, "/api/v1/campaigns/"+repeat.ID+"/cancel",
+		map[string]any{"reason": "no-change plan test"}, nil, 0)
 
-	// Odciecie wszystkich metod logowania: odmowa w planie na kazdym hoscie.
-	// Host z GSSAPI zachowuje jedna metode, wiec dla niego to nie jest
-	// odciecie - zostaje poza ta czescia testu.
-	bezGSSAPI := cele[:0:0]
-	for _, hostID := range cele {
-		if !strings.EqualFold(migawkaSSHHosta(t, h, hostID).GSSAPIAuthentication, "yes") {
-			bezGSSAPI = append(bezGSSAPI, hostID)
+	// Cutting off all login methods: a refusal in the plan on every host. A
+	// host with GSSAPI keeps one method, so for it that is not a cut-off -
+	// it stays out of this part of the test.
+	withoutGSSAPI := targets[:0:0]
+	for _, hostID := range targets {
+		if !strings.EqualFold(hostSSHSnapshot(t, h, hostID).GSSAPIAuthentication, "yes") {
+			withoutGSSAPI = append(withoutGSSAPI, hostID)
 		}
 	}
-	if len(bezGSSAPI) == 0 {
-		t.Skip("kazdy host ma GSSAPI, wiec odciecia nie da sie zamowic")
+	if len(withoutGSSAPI) == 0 {
+		t.Skip("every host has GSSAPI, so the cut-off cannot be ordered")
 	}
-	cele = bezGSSAPI
-	odciecie := h.createCampaign(map[string]any{
-		"name": "odciecie logowania", "action": "ssh.config.apply",
-		"reason": "test odmowy planu sshd",
+	targets = withoutGSSAPI
+	cutOff := h.createCampaign(map[string]any{
+		"name": "login cut-off", "action": "ssh.config.apply",
+		"reason": "sshd plan refusal test",
 		"payload": map[string]any{"ssh": map[string]any{
 			"password_authentication": "no", "pubkey_authentication": "no",
 			"kbd_interactive_authentication": "no"}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	stanOdmowy := h.awaitCampaign(odciecie.ID,
+	refusalState := h.awaitCampaign(cutOff.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stanOdmowy.State == "awaiting_approval" {
-		t.Fatal("kampania odcinajaca logowanie doszla do zgody")
+	if refusalState.State == "awaiting_approval" {
+		t.Fatal("the campaign cutting off login reached consent")
 	}
-	for _, target := range h.campaignTargets(odciecie.ID) {
+	for _, target := range h.campaignTargets(cutOff.ID) {
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+			t.Errorf("target %s after the plan refusal: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
 }
 
-// TestKampaniaBlokadyModuluLiczyDiffNaKazdymHoscie sprawdza, ze blokada
-// modulu w kampanii dostaje plan policzony na hoscie: host, ktory juz
-// blokuje modul, nie ma zmiany, a reszta dostaje wpis - i zmiana wraca
-// z odciskiem planu tego hosta.
-func TestKampaniaBlokadyModuluLiczyDiffNaKazdymHoscie(t *testing.T) {
+// TestModuleBlacklistCampaignComputesTheDiffOnEveryHost checks that a
+// module blacklist in a campaign gets a plan computed on the host: a host
+// that already blacklists the module has no change, and the rest get the
+// entry - and the change comes back with that host's plan fingerprint.
+func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	h := newHarness(t)
-	const modul = "floppy"
+	const module = "floppy"
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts")
 	}
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "kernel.module.blacklist", "reason": "sprzatanie po tescie kampanii blokad",
-				"payload": map[string]any{"kernel": map[string]any{"module": modul, "blacklist": false}},
+				"action": "kernel.module.blacklist", "reason": "cleanup after the blacklist campaign test",
+				"payload": map[string]any{"kernel": map[string]any{"module": module, "blacklist": false}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Pierwszy host blokuje modul juz przed kampania.
-	zadanie, proby := h.runOperation(cele[0], map[string]any{
-		"action": "kernel.module.blacklist", "reason": "przygotowanie testu kampanii blokad",
-		"payload": map[string]any{"kernel": map[string]any{"module": modul, "blacklist": true}},
+	// The first host blacklists the module already before the campaign.
+	job, attempts := h.runOperation(targets[0], map[string]any{
+		"action": "kernel.module.blacklist", "reason": "preparation of the blacklist campaign test",
+		"payload": map[string]any{"kernel": map[string]any{"module": module, "blacklist": true}},
 	}, 2*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("przygotowanie: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("preparation: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "blokada modulu na flocie", "action": "kernel.module.blacklist",
-		"reason":                     "test integracyjny planow blokad",
-		"payload":                    map[string]any{"kernel": map[string]any{"module": modul, "blacklist": true}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "module blacklist on the fleet", "action": "kernel.module.blacklist",
+		"reason":                     "integration test of the blacklist plans",
+		"payload":                    map[string]any{"kernel": map[string]any{"module": module, "blacklist": true}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	dzialania := map[string]int{}
-	odciski := map[string]string{}
+	actions := map[string]int{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planZRodzaju(h, target.PlanJobID, "kernel_module_plan")
-		dzialania[plan.Action]++
-		odciski[target.Hostname] = plan.PlanHash
+		plan := planOfKind(h, target.PlanJobID, "kernel_module_plan")
+		actions[plan.Action]++
+		fingerprints[target.Hostname] = plan.PlanHash
 		if plan.PlanHash == "" {
-			t.Errorf("host %s nie podal odcisku planu", target.Hostname)
+			t.Errorf("host %s gave no plan fingerprint", target.Hostname)
 		}
 	}
-	if dzialania["create"] == 0 || dzialania["no_change"] == 0 {
-		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	if actions["create"] == 0 || actions["no_change"] == 0 {
+		t.Errorf("the host plans do not differ: %+v", actions)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+		var job struct {
 			Payload struct {
 				Kernel struct {
 					PlanHash string `json:"plan_hash"`
 				} `json:"kernel"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.Kernel.PlanHash != odciski[target.Hostname] {
-			t.Errorf("host %s dostal odcisk %q, plan mial %q",
-				target.Hostname, zadanie.Payload.Kernel.PlanHash, odciski[target.Hostname])
+		h.get("/api/v1/jobs/"+target.JobID, &job)
+		if job.Payload.Kernel.PlanHash != fingerprints[target.Hostname] {
+			t.Errorf("host %s got the fingerprint %q, the plan had %q",
+				target.Hostname, job.Payload.Kernel.PlanHash, fingerprints[target.Hostname])
 		}
-		var zablokowany bool
-		for _, nazwa := range migawkaJadraHosta(t, h, target.HostID).Blacklist {
-			zablokowany = zablokowany || nazwa == modul
+		var blacklisted bool
+		for _, name := range hostKernelSnapshot(t, h, target.HostID).Blacklist {
+			blacklisted = blacklisted || name == module
 		}
-		if !zablokowany {
-			t.Errorf("host %s po kampanii nie blokuje modulu %s", target.Hostname, modul)
+		if !blacklisted {
+			t.Errorf("host %s after the campaign does not blacklist the module %s", target.Hostname, module)
 		}
 	}
 }
 
-// TestKampaniaZrodelCzasuLiczyDiffIOdmawiaPrzedZgoda sprawdza, ze zmiana
-// zrodel czasu w kampanii dostaje plan policzony na hoscie: ktory demon,
-// czy restart, czy przeladowanie - a host bez demona albo bez katalogu
-// panelu jest odmowa przed zgoda, nie awaria w polowie floty.
-func TestKampaniaZrodelCzasuLiczyDiffIOdmawiaPrzedZgoda(t *testing.T) {
+// TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent checks that
+// a time source change in a campaign gets a plan computed on the host:
+// which daemon, whether a restart or a reload - and a host without a daemon
+// or without the panel directory is a refusal before consent, not a failure
+// halfway through the fleet.
+func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
-	stany := map[string]migawkaCzasu{}
-	var cele []string
-	serwer := ""
+	states := map[string]timeSnapshot{}
+	var targets []string
+	server := ""
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		stan := migawkaCzasuHosta(t, h, host.ID)
-		stany[host.ID] = stan
-		cele = append(cele, host.ID)
-		if serwer == "" && len(stan.Sources) > 0 {
-			serwer = stan.Sources[0].Address
+		state := hostTimeSnapshot(t, h, host.ID)
+		states[host.ID] = state
+		targets = append(targets, host.ID)
+		if server == "" && len(state.Sources) > 0 {
+			server = state.Sources[0].Address
 		}
 	}
-	if len(cele) < 2 || serwer == "" {
-		t.Skip("flota nie ma dwoch hostow i dzialajacego zrodla czasu")
+	if len(targets) < 2 || server == "" {
+		t.Skip("the fleet has no two hosts and a working time source")
 	}
-	// Bez zgody na katalog host z chrony bez drop-inu i host bez demona
-	// maja odpasc w planie; reszta dostaje plan zmiany.
-	odmowy := map[string]bool{}
-	for hostID, stan := range stany {
-		odmowy[hostID] = stan.Service == "" ||
-			(stan.Service == "chrony" && stan.ManagedPath == "")
+	// Without consent to the directory, a chrony host without a drop-in and
+	// a host without a daemon are to fall out in the plan; the rest get a
+	// change plan.
+	refusals := map[string]bool{}
+	for hostID, state := range states {
+		refusals[hostID] = state.Service == "" ||
+			(state.Service == "chrony" && state.ManagedPath == "")
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "zrodla czasu na flocie", "action": "time.config.apply",
-		"reason":                     "test integracyjny planow zrodel czasu",
-		"payload":                    map[string]any{"time": map[string]any{"servers": []string{serwer}}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "time sources on the fleet", "action": "time.config.apply",
+		"reason":                     "integration test of the time source plans",
+		"payload":                    map[string]any{"time": map[string]any{"servers": []string{server}}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
 
-	zdolne := 0
+	capable := 0
 	for _, target := range h.campaignTargets(campaign.ID) {
-		if odmowy[target.HostID] {
+		if refusals[target.HostID] {
 			if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-				t.Errorf("cel %s bez demona albo katalogu: %s/%s",
+				t.Errorf("target %s without a daemon or a directory: %s/%s",
 					target.Hostname, target.State, target.ErrorCode)
 			}
 			continue
 		}
-		zdolne++
-		plan := planZRodzaju(h, target.PlanJobID, "time_plan")
+		capable++
+		plan := planOfKind(h, target.PlanJobID, "time_plan")
 		if plan.Refusal != "" || plan.PlanHash == "" ||
 			(plan.Action != "update" && plan.Action != "no_change") {
-			t.Errorf("host %s planuje %+v", target.Hostname, plan)
+			t.Errorf("host %s plans %+v", target.Hostname, plan)
 		}
 	}
-	if zdolne == 0 {
-		if poPlanowaniu.State == "awaiting_approval" {
-			t.Fatal("kampania bez zdolnego hosta doszla do zgody")
+	if capable == 0 {
+		if afterPlanning.State == "awaiting_approval" {
+			t.Fatal("a campaign without a capable host reached consent")
 		}
-		t.Skip("zaden host nie przyjmuje zmiany zrodel czasu; sprawdzono same odmowy")
+		t.Skip("no host accepts the time source change; only the refusals were checked")
 	}
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 6*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		if odmowy[target.HostID] {
+		if refusals[target.HostID] {
 			continue
 		}
-		var zapisany bool
-		for _, wpis := range migawkaCzasuHosta(t, h, target.HostID).Configured {
-			zapisany = zapisany || (wpis.Managed && wpis.Address == serwer)
+		var recorded bool
+		for _, entry := range hostTimeSnapshot(t, h, target.HostID).Configured {
+			recorded = recorded || (entry.Managed && entry.Address == server)
 		}
-		if !zapisany {
-			t.Errorf("host %s po kampanii nie ma serwera %s w pliku panelu", target.Hostname, serwer)
+		if !recorded {
+			t.Errorf("host %s after the campaign does not have the server %s in the panel file", target.Hostname, server)
 		}
 	}
 }
 
-// TestKampaniaSprawdzeniaFilesystemuLiczyPlanNaKazdymHoscie sprawdza, ze
-// sprawdzenie filesystemu w kampanii dostaje plan policzony na hoscie: jaki
-// filesystem i UUID host ma pod sciezka, czy jest odmontowany - a urzadzenie,
-// ktorego host nie widzi, jest odmowa przed zgoda.
-func TestKampaniaSprawdzeniaFilesystemuLiczyPlanNaKazdymHoscie(t *testing.T) {
+// TestFilesystemCheckCampaignComputesAPlanOnEveryHost checks that a
+// filesystem check in a campaign gets a plan computed on the host: which
+// filesystem and UUID the host has under the path, whether it is unmounted
+// - and a device the host does not see is a refusal before consent.
+func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 
-	sciezki := map[string]string{}
-	var cele []string
+	paths := map[string]string{}
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		// Fragment przestrzeni pochodzi z cyklu inwentarza; poprzedni test
-		// mogl wlasnie odmontowac dysk, ktorego migawka jeszcze nie widzi.
+		// The storage fragment comes from the inventory cycle; the previous
+		// test may have just unmounted a disk the snapshot does not see yet.
 		h.runOperation(host.ID, map[string]any{
-			"action": "inventory.refresh", "reason": "test kampanii sprawdzenia filesystemu",
+			"action": "inventory.refresh", "reason": "filesystem check campaign test",
 			"payload": map[string]any{"inventory": map[string]any{"modules": []string{"storage"}}},
 		}, 2*time.Minute)
-		stan := migawkaPrzestrzeniHosta(t, h, host.ID)
-		for _, urzadzenie := range stan.Devices {
-			if urzadzenie.FSType == "ext4" && urzadzenie.UUID != "" && len(urzadzenie.Mountpoints) == 0 {
-				sciezki[host.ID] = urzadzenie.Path
-				cele = append(cele, host.ID)
+		state := hostStorageSnapshot(t, h, host.ID)
+		for _, device := range state.Devices {
+			if device.FSType == "ext4" && device.UUID != "" && len(device.Mountpoints) == 0 {
+				paths[host.ID] = device.Path
+				targets = append(targets, host.ID)
 				break
 			}
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa hosty z odmontowanym filesystemem ext4")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two hosts with an unmounted ext4 filesystem")
 	}
-	sciezka := sciezki[cele[0]]
-	wybrane := cele[:0]
-	for _, hostID := range cele {
-		if sciezki[hostID] == sciezka {
-			wybrane = append(wybrane, hostID)
+	path := paths[targets[0]]
+	selected := targets[:0]
+	for _, hostID := range targets {
+		if paths[hostID] == path {
+			selected = append(selected, hostID)
 		}
 	}
-	cele = wybrane
-	if len(cele) < 2 {
-		t.Skipf("odmontowane filesystemy maja rozne sciezki")
+	targets = selected
+	if len(targets) < 2 {
+		t.Skipf("the unmounted filesystems have different paths")
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "sprawdzenie filesystemu na flocie", "action": "filesystem.check",
-		"reason":                     "test integracyjny planow urzadzen",
-		"payload":                    map[string]any{"storage": map[string]any{"device": sciezka}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "filesystem check on the fleet", "action": "filesystem.check",
+		"reason":                     "integration test of the device plans",
+		"payload":                    map[string]any{"storage": map[string]any{"device": path}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	uuidy := map[string]bool{}
-	odciski := map[string]string{}
+	uuids := map[string]bool{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planUrzadzenia(h, target.PlanJobID)
+		plan := devicePlan(h, target.PlanJobID)
 		if plan.Action != "run" || plan.Refusal != "" || plan.UUID == "" || plan.Mountpoint != "" {
-			t.Errorf("host %s planuje %+v zamiast sprawdzenia", target.Hostname, plan)
+			t.Errorf("host %s plans %+v instead of a check", target.Hostname, plan)
 		}
-		uuidy[plan.UUID] = true
-		odciski[target.Hostname] = plan.PlanHash
+		uuids[plan.UUID] = true
+		fingerprints[target.Hostname] = plan.PlanHash
 	}
-	// Ta sama sciezka, rozne filesystemy: plan opisuje ten, ktory host ma.
-	if len(uuidy) < 2 {
-		t.Errorf("hosty pod %s maja te same UUID: %v", sciezka, uuidy)
+	// The same path, different filesystems: the plan describes the one the
+	// host has.
+	if len(uuids) < 2 {
+		t.Errorf("the hosts under %s have the same UUIDs: %v", path, uuids)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+		var job struct {
 			Payload struct {
 				Storage struct {
 					PlanHash string `json:"plan_hash"`
 				} `json:"storage"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.Storage.PlanHash != odciski[target.Hostname] {
-			t.Errorf("host %s dostal odcisk %q, plan mial %q",
-				target.Hostname, zadanie.Payload.Storage.PlanHash, odciski[target.Hostname])
+		h.get("/api/v1/jobs/"+target.JobID, &job)
+		if job.Payload.Storage.PlanHash != fingerprints[target.Hostname] {
+			t.Errorf("host %s got the fingerprint %q, the plan had %q",
+				target.Hostname, job.Payload.Storage.PlanHash, fingerprints[target.Hostname])
 		}
 	}
 
-	// Urzadzenie, ktorego host nie widzi: odmowa w planie na kazdym hoscie.
-	bezUrzadzenia := h.createCampaign(map[string]any{
-		"name": "sprawdzenie urzadzenia, ktorego nie ma", "action": "filesystem.check",
-		"reason":      "test odmowy planu urzadzenia",
+	// A device the host does not see: a refusal in the plan on every host.
+	withoutDevice := h.createCampaign(map[string]any{
+		"name": "check of a device that does not exist", "action": "filesystem.check",
+		"reason":      "device plan refusal test",
 		"payload":     map[string]any{"storage": map[string]any{"device": "/dev/flotestro0"}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	stanOdmowy := h.awaitCampaign(bezUrzadzenia.ID,
+	refusalState := h.awaitCampaign(withoutDevice.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stanOdmowy.State == "awaiting_approval" {
-		t.Fatal("kampania na urzadzeniu, ktorego nie ma, doszla do zgody")
+	if refusalState.State == "awaiting_approval" {
+		t.Fatal("the campaign on a device that does not exist reached consent")
 	}
-	for _, target := range h.campaignTargets(bezUrzadzenia.ID) {
+	for _, target := range h.campaignTargets(withoutDevice.ID) {
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("cel %s po odmowie planu: %s/%s", target.Hostname, target.State, target.ErrorCode)
+			t.Errorf("target %s after the plan refusal: %s/%s", target.Hostname, target.State, target.ErrorCode)
 		}
 	}
 }
 
-// planUrzadzenia czyta z wyniku zadania planujacego plan urzadzenia.
-func planUrzadzenia(h *harness, jobID string) (plan struct {
+// devicePlan reads the device plan from the planning job result.
+func devicePlan(h *harness, jobID string) (plan struct {
 	Operation  string `json:"operation"`
 	Action     string `json:"action"`
 	UUID       string `json:"uuid"`
@@ -2621,7 +2666,7 @@ func planUrzadzenia(h *harness, jobID string) (plan struct {
 	PlanHash   string `json:"plan_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -2629,141 +2674,143 @@ func planUrzadzenia(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "device_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "device_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestKampaniaCertyfikatuLiczyDiffIChroniKlucz sprawdza dwie rzeczy naraz:
-// wdrozenie certyfikatu w kampanii dostaje plan policzony na hoscie (odcisk
-// zastany i docelowy, termin waznosci), a klucz prywatny nie pojawia sie ani
-// w planie, ani w kopercie zadania, ani w audycie.
-func TestKampaniaCertyfikatuLiczyDiffIChroniKlucz(t *testing.T) {
+// TestCertificateCampaignComputesTheDiffAndProtectsTheKey checks two things
+// at once: a certificate deployment in a campaign gets a plan computed on
+// the host (the found and desired fingerprints, the expiry), and the
+// private key appears neither in the plan, nor in the job envelope, nor in
+// the audit log.
+func TestCertificateCampaignComputesTheDiffAndProtectsTheKey(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts")
 	}
-	cele = cele[:2]
+	targets = targets[:2]
 
-	// Katalog musi istniec na kazdym hoscie kampanii: panel zapisuje plik,
-	// a nie zaklada cudzych katalogow.
-	sciezka := fmt.Sprintf("/etc/ssl/certs/flotestro-kampania-%d.crt", time.Now().UnixNano())
-	sciezkaKlucza := strings.Replace(sciezka, ".crt", ".key", 1)
-	stary, staryKlucz, _ := paraTestowa(t, "kampania.flotestro.test", 10*24*time.Hour)
-	nowy, nowyKlucz, odciskNowego := paraTestowa(t, "kampania.flotestro.test", 40*24*time.Hour)
-	sekretStarego := nowySekret(t, h, staryKlucz)
-	sekretNowego := nowySekret(t, h, nowyKlucz)
+	// The directory must exist on every campaign host: the panel writes a
+	// file, it does not create somebody else's directories.
+	path := fmt.Sprintf("/etc/ssl/certs/flotestro-campaign-%d.crt", time.Now().UnixNano())
+	keyPath := strings.Replace(path, ".crt", ".key", 1)
+	old, oldKey, _ := testPair(t, "campaign.flotestro.test", 10*24*time.Hour)
+	fresh, freshKey, freshFingerprint := testPair(t, "campaign.flotestro.test", 40*24*time.Hour)
+	oldSecret := newSecret(t, h, oldKey)
+	freshSecret := newSecret(t, h, freshKey)
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.do(http.MethodDelete,
-				"/api/v1/hosts/"+hostID+"/certificates/targets?path="+sciezka, nil, nil, 0)
-			// Plik zostaje na hoscie, jesli go nie usuniemy - a rejestr celow
-			// ma limit, ktory kolejne przebiegi w koncu wyczerpia.
-			for _, doUsuniecia := range []string{sciezka, sciezkaKlucza} {
+				"/api/v1/hosts/"+hostID+"/certificates/targets?path="+path, nil, nil, 0)
+			// The file stays on the host unless removed - and the target
+			// registry has a limit the next runs would eventually exhaust.
+			for _, toRemove := range []string{path, keyPath} {
 				h.runOperation(hostID, map[string]any{
-					"action": "file.remove", "reason": "sprzatanie po tescie kampanii certyfikatow",
-					"payload": map[string]any{"file": map[string]any{"path": doUsuniecia}},
+					"action": "file.remove", "reason": "cleanup after the certificate campaign test",
+					"payload": map[string]any{"file": map[string]any{"path": toRemove}},
 				}, 2*time.Minute)
 			}
 		}
 	})
 
-	// Pierwszy host dostaje starszy certyfikat pod ta sama sciezka: plany
-	// hostow maja sie roznic stanem zastanym, a nie zamowieniem.
-	zadanie, proby := h.runOperation(cele[0], map[string]any{
-		"action": "certificate.deploy", "reason": "przygotowanie testu kampanii certyfikatow",
+	// The first host gets an older certificate under the same path: the
+	// host plans are to differ by the state found, not by the order.
+	job, attempts := h.runOperation(targets[0], map[string]any{
+		"action": "certificate.deploy", "reason": "preparation of the certificate campaign test",
 		"payload": map[string]any{"certificate": map[string]any{
-			"path": sciezka, "key_path": sciezkaKlucza, "certificate": stary,
-			"key_secret": map[string]any{"name": sekretStarego.Name},
+			"path": path, "key_path": keyPath, "certificate": old,
+			"key_secret": map[string]any{"name": oldSecret.Name},
 		}},
 	}, 3*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("przygotowanie: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("preparation: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "certyfikat na flocie", "action": "certificate.deploy",
-		"reason": "test integracyjny planow certyfikatow",
+		"name": "certificate on the fleet", "action": "certificate.deploy",
+		"reason": "integration test of the certificate plans",
 		"payload": map[string]any{"certificate": map[string]any{
-			"path": sciezka, "key_path": sciezkaKlucza, "certificate": nowy,
-			"key_secret": map[string]any{"name": sekretNowego.Name},
+			"path": path, "key_path": keyPath, "certificate": fresh,
+			"key_secret": map[string]any{"name": freshSecret.Name},
 		}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	dzialania := map[string]int{}
-	odciski := map[string]string{}
+	actions := map[string]int{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planCertyfikatu(h, target.PlanJobID)
-		dzialania[plan.Action]++
-		odciski[target.Hostname] = plan.PlanHash
-		if plan.DesiredFingerprint != odciskNowego || plan.PlanHash == "" {
-			t.Errorf("host %s planuje %+v", target.Hostname, plan)
+		plan := certificatePlan(h, target.PlanJobID)
+		actions[plan.Action]++
+		fingerprints[target.Hostname] = plan.PlanHash
+		if plan.DesiredFingerprint != freshFingerprint || plan.PlanHash == "" {
+			t.Errorf("host %s plans %+v", target.Hostname, plan)
 		}
-		// Klucz prywatny ma byc w planie wylacznie odnosnikiem do magazynu.
+		// The private key is to be in the plan only as a reference to the
+		// store.
 		if plan.KeySecret == "" || strings.Contains(plan.KeySecret, "BEGIN") {
-			t.Errorf("host %s: odnosnik do klucza = %q", target.Hostname, plan.KeySecret)
+			t.Errorf("host %s: key reference = %q", target.Hostname, plan.KeySecret)
 		}
 	}
-	if dzialania["create"] == 0 || dzialania["update"] == 0 {
-		t.Errorf("plany hostow nie roznia sie: %+v", dzialania)
+	if actions["create"] == 0 || actions["update"] == 0 {
+		t.Errorf("the host plans do not differ: %+v", actions)
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+		var job struct {
 			Payload struct {
 				Certificate struct {
 					PlanHash string `json:"plan_hash"`
 				} `json:"certificate"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.Certificate.PlanHash != odciski[target.Hostname] {
-			t.Errorf("host %s dostal odcisk %q, plan mial %q",
-				target.Hostname, zadanie.Payload.Certificate.PlanHash, odciski[target.Hostname])
+		h.get("/api/v1/jobs/"+target.JobID, &job)
+		if job.Payload.Certificate.PlanHash != fingerprints[target.Hostname] {
+			t.Errorf("host %s got the fingerprint %q, the plan had %q",
+				target.Hostname, job.Payload.Certificate.PlanHash, fingerprints[target.Hostname])
 		}
-		wdrozony := znajdzCertyfikat(t, certyfikatyHosta(h, target.HostID), sciezka)
-		if wdrozony.FingerprintSHA256 != odciskNowego {
-			t.Errorf("host %s ma po kampanii certyfikat %q", target.Hostname, wdrozony.FingerprintSHA256)
+		deployed := findCertificate(t, hostCertificates(h, target.HostID), path)
+		if deployed.FingerprintSHA256 != freshFingerprint {
+			t.Errorf("host %s has the certificate %q after the campaign", target.Hostname, deployed.FingerprintSHA256)
 		}
 	}
-	// Wartosc klucza nie moze byc nigdzie poza magazynem - takze po drodze
-	// przez plan kampanii i jej zatwierdzenie.
-	sprawdzBrakWartosci(t, h, strings.Split(strings.TrimSpace(nowyKlucz), "\n")[1])
+	// The key value must be nowhere but the store - also on the way
+	// through the campaign plan and its approval.
+	assertValueAbsent(t, h, strings.Split(strings.TrimSpace(freshKey), "\n")[1])
 }
 
-// planCertyfikatu czyta z wyniku zadania planujacego plan wdrozenia.
-func planCertyfikatu(h *harness, jobID string) (plan struct {
+// certificatePlan reads the deployment plan from the planning job result.
+func certificatePlan(h *harness, jobID string) (plan struct {
 	Action             string `json:"action"`
 	DesiredFingerprint string `json:"desired_fingerprint"`
 	KeySecret          string `json:"key_secret"`
@@ -2771,7 +2818,7 @@ func planCertyfikatu(h *harness, jobID string) (plan struct {
 	PlanHash           string `json:"plan_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -2779,150 +2826,150 @@ func planCertyfikatu(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "certificate_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "certificate_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestKampaniaKopiiLiczyZakresIWymagaSprawdzenia sprawdza trzy rzeczy naraz:
-// kopia w kampanii dostaje plan policzony na hoscie (zakres, rozmiar, stan
-// repozytorium), kopia konczy sie sprawdzeniem repozytorium, a odtworzenie
-// nie idzie masowo w ogole.
-func TestKampaniaKopiiLiczyZakresIWymagaSprawdzenia(t *testing.T) {
+// TestBackupCampaignComputesTheScopeAndRequiresAVerification checks three
+// things at once: a copy in a campaign gets a plan computed on the host
+// (the scope, the size, the repository state), the copy ends with a
+// repository check, and a restore does not run in bulk at all.
+func TestBackupCampaignComputesTheScopeAndRequiresAVerification(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" && host.OSFamily != "arch" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts")
 	}
-	cele = cele[:2]
+	targets = targets[:2]
 
-	nazwa := fmt.Sprintf("kampania-%d", time.Now().UnixNano())
-	repozytorium := "/srv/" + nazwa
-	haslo := "haslo-" + nazwa
-	sekret := nowySekret(t, h, haslo)
-	zlecenie := map[string]any{
-		"id": nazwa, "tool": "restic", "repository": repozytorium,
-		// Pierwszy katalog ma kazdy host; drugiego nie ma zaden i plan ma
-		// to powiedziec, zamiast zapisac pusta kopie.
-		"paths":     []string{"/etc/flotestro", "/srv/flotestro-nie-ma"},
+	name := fmt.Sprintf("campaign-%d", time.Now().UnixNano())
+	repository := "/srv/" + name
+	password := "password-" + name
+	secret := newSecret(t, h, password)
+	order := map[string]any{
+		"id": name, "tool": "restic", "repository": repository,
+		// Every host has the first directory; none has the second and the
+		// plan is to say so instead of writing an empty copy.
+		"paths":     []string{"/etc/flotestro", "/srv/flotestro-missing"},
 		"keep_last": 2, "initialize": true,
-		"password_secret": map[string]any{"name": sekret.Name},
+		"password_secret": map[string]any{"name": secret.Name},
 	}
 
-	// Odtworzenie nie ma prawa isc masowo - i to nie dlatego, ze panel nie
-	// umie, tylko dlatego, ze nie wolno.
-	var odmowa struct {
+	// A restore has no right to run in bulk - and not because the panel
+	// cannot, but because it is not allowed.
+	var refusal struct {
 		Code   string `json:"code"`
 		Detail string `json:"detail"`
 	}
-	odtworzenie := map[string]any{}
-	for klucz, wartosc := range zlecenie {
-		odtworzenie[klucz] = wartosc
+	restore := map[string]any{}
+	for key, value := range order {
+		restore[key] = value
 	}
-	odtworzenie["snapshot_id"] = "abc123"
-	odtworzenie["target"] = "/srv/odtworzenie"
-	odtworzenie["overwrite"] = "empty-target"
+	restore["snapshot_id"] = "abc123"
+	restore["target"] = "/srv/restore"
+	restore["overwrite"] = "empty-target"
 	h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
-		"name": "odtworzenie na flocie", "action": "backup.restore",
-		"payload":  map[string]any{"backup": odtworzenie},
-		"selector": map[string]any{"host_ids": cele},
-	}, &odmowa, http.StatusBadRequest)
-	if odmowa.Code != "not_a_campaign_action" || !strings.Contains(odmowa.Detail, "an operator present at every host") {
-		t.Errorf("odmowa odtworzenia: %s (%s)", odmowa.Code, odmowa.Detail)
+		"name": "restore on the fleet", "action": "backup.restore",
+		"payload":  map[string]any{"backup": restore},
+		"selector": map[string]any{"host_ids": targets},
+	}, &refusal, http.StatusBadRequest)
+	if refusal.Code != "not_a_campaign_action" || !strings.Contains(refusal.Detail, "an operator present at every host") {
+		t.Errorf("restore refusal: %s (%s)", refusal.Code, refusal.Detail)
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "kopia na flocie", "action": "backup.run",
-		"reason":                     "test integracyjny planow kopii",
-		"payload":                    map[string]any{"backup": zlecenie},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "copy on the fleet", "action": "backup.run",
+		"reason":                     "integration test of the backup plans",
+		"payload":                    map[string]any{"backup": order},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 5*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	odciski := map[string]string{}
+	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planKopii(h, target.PlanJobID)
+		plan := backupPlan(h, target.PlanJobID)
 		if plan.Action != "run" || plan.Refusal != "" || plan.PlanHash == "" {
-			t.Errorf("host %s planuje %+v", target.Hostname, plan)
+			t.Errorf("host %s plans %+v", target.Hostname, plan)
 		}
 		if len(plan.Paths) != 1 || len(plan.MissingPaths) != 1 {
-			t.Errorf("host %s: zakres %v, brakuje %v", target.Hostname, plan.Paths, plan.MissingPaths)
+			t.Errorf("host %s: scope %v, missing %v", target.Hostname, plan.Paths, plan.MissingPaths)
 		}
 		if !plan.Verified || plan.WillInitialize != true {
-			t.Errorf("host %s: plan bez sprawdzenia albo bez zalozenia repozytorium: %+v",
+			t.Errorf("host %s: plan without a check or without initialising the repository: %+v",
 				target.Hostname, plan)
 		}
-		odciski[target.Hostname] = plan.PlanHash
+		fingerprints[target.Hostname] = plan.PlanHash
 	}
 
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 10*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		var zadanie struct {
+		var job struct {
 			Payload struct {
 				Backup struct {
 					PlanHash string `json:"plan_hash"`
 				} `json:"backup"`
 			} `json:"payload"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID, &zadanie)
-		if zadanie.Payload.Backup.PlanHash != odciski[target.Hostname] {
-			t.Errorf("host %s dostal odcisk %q, plan mial %q",
-				target.Hostname, zadanie.Payload.Backup.PlanHash, odciski[target.Hostname])
+		h.get("/api/v1/jobs/"+target.JobID, &job)
+		if job.Payload.Backup.PlanHash != fingerprints[target.Hostname] {
+			t.Errorf("host %s got the fingerprint %q, the plan had %q",
+				target.Hostname, job.Payload.Backup.PlanHash, fingerprints[target.Hostname])
 		}
-		// Kopia bez sprawdzenia repozytorium nie jest sukcesem, wiec wynik
-		// ma powiedziec, ze sprawdzenie sie odbylo.
-		var proby struct {
+		// A copy without a repository check is not a success, so the result
+		// is to say the check took place.
+		var attempts struct {
 			Items []struct {
 				Message string `json:"message"`
 			} `json:"items"`
 		}
-		h.get("/api/v1/jobs/"+target.JobID+"/attempts", &proby)
-		if len(proby.Items) == 0 || !strings.Contains(proby.Items[len(proby.Items)-1].Message, "checked") {
-			t.Errorf("host %s: kopia bez sprawdzenia: %+v", target.Hostname, proby.Items)
+		h.get("/api/v1/jobs/"+target.JobID+"/attempts", &attempts)
+		if len(attempts.Items) == 0 || !strings.Contains(attempts.Items[len(attempts.Items)-1].Message, "checked") {
+			t.Errorf("host %s: copy without a check: %+v", target.Hostname, attempts.Items)
 		}
 	}
-	// Haslo repozytorium nie moze byc nigdzie poza magazynem - takze po
-	// drodze przez plan kampanii.
-	sprawdzBrakWartosci(t, h, haslo)
+	// The repository password must be nowhere but the store - also on the
+	// way through the campaign plan.
+	assertValueAbsent(t, h, password)
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "file.remove", "reason": "sprzatanie po tescie kampanii kopii",
-				"payload": map[string]any{"file": map[string]any{"path": repozytorium + "/config"}},
+				"action": "file.remove", "reason": "cleanup after the backup campaign test",
+				"payload": map[string]any{"file": map[string]any{"path": repository + "/config"}},
 			}, 2*time.Minute)
 		}
 	})
 }
 
-// planKopii czyta z wyniku zadania planujacego plan kopii.
-func planKopii(h *harness, jobID string) (plan struct {
+// backupPlan reads the backup plan from the planning job result.
+func backupPlan(h *harness, jobID string) (plan struct {
 	Action         string   `json:"action"`
 	Paths          []string `json:"paths"`
 	MissingPaths   []string `json:"missing_paths"`
@@ -2932,7 +2979,7 @@ func planKopii(h *harness, jobID string) (plan struct {
 	PlanHash       string   `json:"plan_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -2940,32 +2987,33 @@ func planKopii(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "backup_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "backup_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego sprawdza to, po czym
-// interfejs poznaje granice: instalacja mowi, czy w ogole prowadzi kampanie,
-// a katalog operacji - ktorej zmiany nie zleci masowo i z jakiego powodu.
-// Odmowa bez powodu wyglada w panelu jak brak funkcji.
-func TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego(t *testing.T) {
+// TestCatalogueSaysWhatACampaignWillNotDoAndWhy checks what the interface
+// recognises the boundaries by: the installation says whether it runs
+// campaigns at all, and the operation catalogue - which change it will not
+// order in bulk and for what reason. A refusal without a reason looks in
+// the panel like a missing feature.
+func TestCatalogueSaysWhatACampaignWillNotDoAndWhy(t *testing.T) {
 	h := newHarness(t)
 
-	var zdolnosci struct {
+	var capabilities struct {
 		CampaignV2 bool `json:"campaign_v2"`
 	}
-	h.get("/api/v1/capabilities", &zdolnosci)
-	if !zdolnosci.CampaignV2 {
-		t.Fatal("instalacja z silnikiem kampanii nie zglasza campaign_v2")
+	h.get("/api/v1/capabilities", &capabilities)
+	if !capabilities.CampaignV2 {
+		t.Fatal("an installation with the campaign engine does not report campaign_v2")
 	}
 
-	var katalog struct {
+	var catalogue struct {
 		Items []struct {
 			Action   string `json:"action"`
 			Mutating bool   `json:"mutating"`
@@ -2974,292 +3022,299 @@ func TestKatalogMowiCzegoKampaniaNieZrobiIDlaczego(t *testing.T) {
 			Refusal  string `json:"campaign_refusal"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/actions", &katalog)
-	if len(katalog.Items) == 0 {
-		t.Fatal("katalog operacji jest pusty")
+	h.get("/api/v1/actions", &catalogue)
+	if len(catalogue.Items) == 0 {
+		t.Fatal("the operation catalogue is empty")
 	}
 
-	var gotowe, zOdmowa int
-	for _, pozycja := range katalog.Items {
+	var ready, refused int
+	for _, item := range catalogue.Items {
 		switch {
-		case pozycja.Ready:
-			gotowe++
-			if pozycja.Refusal != "" {
-				t.Errorf("%s jest gotowa masowo i ma odmowe %q", pozycja.Action, pozycja.Refusal)
+		case item.Ready:
+			ready++
+			if item.Refusal != "" {
+				t.Errorf("%s is ready for bulk and has the refusal %q", item.Action, item.Refusal)
 			}
-			if pozycja.Mode == "" {
-				t.Errorf("%s jest gotowa masowo bez zadeklarowanego trybu", pozycja.Action)
+			if item.Mode == "" {
+				t.Errorf("%s is ready for bulk without a declared mode", item.Action)
 			}
-		case pozycja.Mutating:
-			zOdmowa++
-			if pozycja.Refusal == "" {
-				t.Errorf("%s nie idzie masowo i nie mowi dlaczego", pozycja.Action)
-			}
-		}
-		// Odtworzenie kopii jest granica, a nie brakiem funkcji: powod ma
-		// mowic o operatorze przy hoscie, a nie o silniku kampanii.
-		if pozycja.Action == "backup.restore" {
-			if pozycja.Ready || !strings.Contains(pozycja.Refusal, "an operator present at every host") {
-				t.Errorf("odtworzenie: ready=%v, powod=%q", pozycja.Ready, pozycja.Refusal)
+		case item.Mutating:
+			refused++
+			if item.Refusal == "" {
+				t.Errorf("%s does not run in bulk and does not say why", item.Action)
 			}
 		}
-		if pozycja.Action == "backup.run" && !pozycja.Ready {
-			t.Errorf("kopia nie jest gotowa masowo: %q", pozycja.Refusal)
+		// A backup restore is a boundary, not a missing feature: the reason
+		// is to speak of an operator at the host, not of the campaign
+		// engine.
+		if item.Action == "backup.restore" {
+			if item.Ready || !strings.Contains(item.Refusal, "an operator present at every host") {
+				t.Errorf("restore: ready=%v, reason=%q", item.Ready, item.Refusal)
+			}
+		}
+		if item.Action == "backup.run" && !item.Ready {
+			t.Errorf("the copy is not ready for bulk: %q", item.Refusal)
 		}
 	}
-	if gotowe == 0 || zOdmowa == 0 {
-		t.Errorf("katalog nie rozroznia gotowych od odmownych: %d/%d", gotowe, zOdmowa)
+	if ready == 0 || refused == 0 {
+		t.Errorf("the catalogue does not tell ready from refused: %d/%d", ready, refused)
 	}
 }
 
-// TestBudzetBackenduZatrzymujeDrugaKampanie pilnuje limitu, ktorego nie ma
-// ani w kampanii, ani w lokalizacji: repozytorium backupu jest jedno, a
-// kampanii piszacych do niego moze byc kilka naraz. Limit backendu ma je
-// rozsunac, choc kazda z osobna miesci sie w swoim limicie rownoleglosci.
-func TestBudzetBackenduZatrzymujeDrugaKampanie(t *testing.T) {
+// TestBackendBudgetStopsTheSecondCampaign guards a limit that exists
+// neither in the campaign nor in the site: the backup repository is one,
+// and there may be several campaigns writing to it at once. The backend
+// limit is to spread them out, although each on its own fits within its
+// concurrency limit.
+func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" && host.OSFamily != "arch" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty z narzedziem backupu")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts with a backup tool")
 	}
-	cele = cele[:2]
+	targets = targets[:2]
 
-	nazwa := fmt.Sprintf("budzet-%d", time.Now().UnixNano())
-	repozytorium := "/srv/" + nazwa
-	sekret := nowySekret(t, h, "haslo-"+nazwa)
-	zlecenie := map[string]any{
-		"id": nazwa, "tool": "restic", "repository": repozytorium,
+	name := fmt.Sprintf("budget-%d", time.Now().UnixNano())
+	repository := "/srv/" + name
+	secret := newSecret(t, h, "password-"+name)
+	order := map[string]any{
+		"id": name, "tool": "restic", "repository": repository,
 		"paths": []string{"/etc/flotestro"}, "keep_last": 1, "initialize": true,
-		"password_secret": map[string]any{"name": sekret.Name},
+		"password_secret": map[string]any{"name": secret.Name},
 	}
-	// Repozytorium jest jedno na obu hostach, wiec budzet backendu tez jeden.
-	h.ustawBudzet("backend:"+repozytorium+":backup", 1, 50)
+	// The repository is one on both hosts, so the backend budget is one
+	// too.
+	h.setBudget("backend:"+repository+":backup", 1, 50)
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "kopia z budzetem backendu", "action": "backup.run",
-		"reason":                     "test budzetu repozytorium",
-		"payload":                    map[string]any{"backup": zlecenie},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "copy with a backend budget", "action": "backup.run",
+		"reason":                     "repository budget test",
+		"payload":                    map[string]any{"backup": order},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 5*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
-	h.approveCampaign(poPlanowaniu)
+	h.approveCampaign(afterPlanning)
 
-	// Stan oczekiwania jest przejsciowy, wiec patrzymy w trakcie.
-	czekal := false
+	// The waiting state is transient, so it is observed during the run.
+	waited := false
 	deadline := time.Now().Add(6 * time.Minute)
 	for time.Now().Before(deadline) {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State == "awaiting_budget" {
-				czekal = true
+				waited = true
 				if target.ErrorCode != "budget_capacity" && target.ErrorCode != "budget_fair_share" {
-					t.Errorf("host czeka na backend bez powodu: %+v", target)
+					t.Errorf("a host waits for the backend without a reason: %+v", target)
 				}
 			}
 		}
-		stan := h.campaign(campaign.ID)
-		if stan.State == "completed" || stan.State == "failed" || stan.State == "paused" {
+		state := h.campaign(campaign.ID)
+		if state.State == "completed" || state.State == "failed" || state.State == "paused" {
 			break
 		}
 		time.Sleep(time.Second)
 	}
 
-	koncowa := h.awaitCampaign(campaign.ID,
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 6*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("kampania skonczyla sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
-	if !czekal {
-		t.Error("zaden host nie czekal na pojemnosc repozytorium")
+	if !waited {
+		t.Error("no host waited for the repository capacity")
 	}
 
-	// Sedno inwariantu: kampania miala zgode na dwa hosty naraz, a backend
-	// dopuszczal jeden strumien. Zachodzace okna znaczylyby, ze budzet
-	// repozytorium nie wiazal.
-	okna := make([]okno, 0, len(cele))
+	// The crux of the invariant: the campaign had consent for two hosts at
+	// once, and the backend admitted one stream. Overlapping windows would
+	// mean the repository budget did not bind.
+	windows := make([]window, 0, len(targets))
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.JobID == "" {
 			continue
 		}
-		for _, proba := range h.probyZadania(target.JobID) {
-			if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+		for _, attempt := range h.timedAttempts(target.JobID) {
+			if attempt.DispatchedAt == nil || attempt.FinishedAt == nil {
 				continue
 			}
-			okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+			windows = append(windows, window{from: *attempt.DispatchedAt, to: *attempt.FinishedAt})
 		}
 	}
-	if len(okna) < 2 {
-		t.Fatalf("kampania zostawila %d prob z czasami", len(okna))
+	if len(windows) < 2 {
+		t.Fatalf("the campaign left %d attempts with times", len(windows))
 	}
-	if zachodzaNaSiebie(okna) {
-		t.Errorf("dwie kopie pisaly do repozytorium naraz mimo budzetu 1: %+v", okna)
+	if overlap(windows) {
+		t.Errorf("two copies wrote to the repository at once despite a budget of 1: %+v", windows)
 	}
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "file.remove", "reason": "sprzatanie po tescie budzetu backendu",
-				"payload": map[string]any{"file": map[string]any{"path": repozytorium + "/config"}},
+				"action": "file.remove", "reason": "cleanup after the backend budget test",
+				"payload": map[string]any{"file": map[string]any{"path": repository + "/config"}},
 			}, 2*time.Minute)
 		}
 	})
 }
 
-// TestKampaniaZaufaniaRozdajeUrzadIChroniUzywany przechodzi dwa kroki rotacji
-// urzedu: flota zaczyna ufac nowemu urzedowi, a wycofanie urzedu, ktory nadal
-// podpisuje certyfikat hosta, odpada w planie. Miedzy tymi krokami host ufa
-// obu urzedom naraz - i to jest cala tresc rotacji.
-func TestKampaniaZaufaniaRozdajeUrzadIChroniUzywany(t *testing.T) {
+// TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse walks two
+// steps of an authority rotation: the fleet starts trusting the new
+// authority, and withdrawing an authority that still signs a host
+// certificate falls out in the plan. Between those steps the host trusts
+// both authorities at once - and that is the whole substance of a
+// rotation.
+func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts")
 	}
-	cele = cele[:2]
+	targets = targets[:2]
 
-	kotwica := fmt.Sprintf("test-%d", time.Now().Unix())
-	urzad, urzadKlucz := urzadTestowy(t, "Flotestro Rotacja "+kotwica)
+	anchor := fmt.Sprintf("test-%d", time.Now().Unix())
+	authority, authorityKey := testAuthority(t, "Flotestro Rotation "+anchor)
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "certificate.trust.remove", "reason": "sprzatanie po tescie rotacji",
-				"payload": map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
+				"action": "certificate.trust.remove", "reason": "cleanup after the rotation test",
+				"payload": map[string]any{"certificate": map[string]any{"anchor_id": anchor}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Krok pierwszy: flota zaczyna ufac nowemu urzedowi.
+	// Step one: the fleet starts trusting the new authority.
 	campaign := h.createCampaign(map[string]any{
-		"name": "rozdanie urzedu", "action": "certificate.trust.ensure",
-		"reason": "test integracyjny rotacji urzedu",
+		"name": "authority distribution", "action": "certificate.trust.ensure",
+		"reason": "integration test of the authority rotation",
 		"payload": map[string]any{"certificate": map[string]any{
-			"anchor_id": kotwica, "certificate": urzad}},
-		"selector":                   map[string]any{"host_ids": cele},
+			"anchor_id": anchor, "certificate": authority}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		plan := planZaufania(h, target.PlanJobID)
+		plan := trustPlan(h, target.PlanJobID)
 		if plan.Action != "create" || plan.Refusal != "" || plan.PlanHash == "" {
-			t.Errorf("host %s planuje %+v zamiast zaufania nowemu urzedowi", target.Hostname, plan)
+			t.Errorf("host %s plans %+v instead of trusting the new authority", target.Hostname, plan)
 		}
 	}
-	h.approveCampaign(poPlanowaniu)
-	koncowa := h.awaitCampaign(campaign.ID,
+	h.approveCampaign(afterPlanning)
+	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
-	if koncowa.State != "completed" {
-		t.Fatalf("rozdanie urzedu skonczylo sie stanem %s (%s)", koncowa.State, koncowa.PauseReason)
+	if final.State != "completed" {
+		t.Fatalf("the authority distribution ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// Krok drugi, zanim cokolwiek zostalo wymienione: certyfikat podpisany
-	// tym urzedem lezy na pierwszym hoscie, wiec wycofanie ma tam odpasc.
-	sciezka := fmt.Sprintf("/etc/ssl/certs/flotestro-rotacja-%d.crt", time.Now().UnixNano())
-	lisc := liscZUrzedu(t, "rotacja.flotestro.test", urzad, urzadKlucz)
-	sekret := nowySekret(t, h, lisc.klucz)
+	// Step two, before anything was replaced: a certificate signed by this
+	// authority lies on the first host, so the withdrawal is to fall out
+	// there.
+	path := fmt.Sprintf("/etc/ssl/certs/flotestro-rotation-%d.crt", time.Now().UnixNano())
+	leaf := leafFromAuthority(t, "rotation.flotestro.test", authority, authorityKey)
+	secret := newSecret(t, h, leaf.key)
 	t.Cleanup(func() {
 		h.do(http.MethodDelete,
-			"/api/v1/hosts/"+cele[0]+"/certificates/targets?path="+sciezka, nil, nil, 0)
+			"/api/v1/hosts/"+targets[0]+"/certificates/targets?path="+path, nil, nil, 0)
 	})
-	zadanie, proby := h.runOperation(cele[0], map[string]any{
-		"action": "certificate.deploy", "reason": "przygotowanie testu wycofania urzedu",
+	job, attempts := h.runOperation(targets[0], map[string]any{
+		"action": "certificate.deploy", "reason": "preparation of the authority withdrawal test",
 		"payload": map[string]any{"certificate": map[string]any{
-			"path": sciezka, "key_path": strings.Replace(sciezka, ".crt", ".key", 1),
-			"certificate": lisc.certyfikat,
-			"key_secret":  map[string]any{"name": sekret.Name},
+			"path": path, "key_path": strings.Replace(path, ".crt", ".key", 1),
+			"certificate": leaf.certificate,
+			"key_secret":  map[string]any{"name": secret.Name},
 		}},
 	}, 3*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("wdrozenie liscia: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("deploying the leaf: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
-	// Wycofanie urzedu obowiazuje cala flote naraz: kampania obejmujaca host
-	// niepodlaczony nie zaczyna sie wcale, bo ten host zostalby z zaufaniem,
-	// ktorego reszta floty juz nie ma.
-	var niepelne struct {
+	// An authority withdrawal binds the whole fleet at once: a campaign
+	// covering an unconnected host does not start at all, because that
+	// host would be left with a trust the rest of the fleet no longer has.
+	var incomplete struct {
 		Code   string `json:"code"`
 		Detail string `json:"detail"`
 	}
 	h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
-		"name": "wycofanie urzedu poza flota", "action": "certificate.trust.remove",
-		"payload":  map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
-		"selector": map[string]any{"host_ids": append(append([]string{}, cele...), hostPoza(t, h, cele))},
-	}, &niepelne, http.StatusBadRequest)
-	if niepelne.Code != "incomplete_coverage" || !strings.Contains(niepelne.Detail, "the whole fleet at once") {
-		t.Errorf("kampania z niepewnym celem: %s (%s)", niepelne.Code, niepelne.Detail)
+		"name": "authority withdrawal beyond the fleet", "action": "certificate.trust.remove",
+		"payload":  map[string]any{"certificate": map[string]any{"anchor_id": anchor}},
+		"selector": map[string]any{"host_ids": append(append([]string{}, targets...), hostOutside(t, h, targets))},
+	}, &incomplete, http.StatusBadRequest)
+	if incomplete.Code != "incomplete_coverage" || !strings.Contains(incomplete.Detail, "the whole fleet at once") {
+		t.Errorf("campaign with an uncertain target: %s (%s)", incomplete.Code, incomplete.Detail)
 	}
 
-	wycofanie := h.createCampaign(map[string]any{
-		"name": "wycofanie urzedu", "action": "certificate.trust.remove",
-		"reason":      "test odmowy wycofania urzedu w uzyciu",
-		"payload":     map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
-		"selector":    map[string]any{"host_ids": cele},
-		"canary_size": 0, "wave_size": len(cele), "max_concurrent": len(cele),
+	withdrawal := h.createCampaign(map[string]any{
+		"name": "authority withdrawal", "action": "certificate.trust.remove",
+		"reason":      "refusal test for withdrawing an authority in use",
+		"payload":     map[string]any{"certificate": map[string]any{"anchor_id": anchor}},
+		"selector":    map[string]any{"host_ids": targets},
+		"canary_size": 0, "wave_size": len(targets), "max_concurrent": len(targets),
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	poDrugim := h.awaitCampaign(wycofanie.ID,
+	afterSecond := h.awaitCampaign(withdrawal.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
 
-	var odmowil, zgodzil int
-	for _, target := range h.campaignTargets(wycofanie.ID) {
-		if target.HostID == cele[0] {
-			// Host z certyfikatem z tego urzedu ma odpasc w planie.
+	var refused, agreed int
+	for _, target := range h.campaignTargets(withdrawal.ID) {
+		if target.HostID == targets[0] {
+			// The host with a certificate from this authority is to fall
+			// out in the plan.
 			if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-				t.Errorf("host z certyfikatem z tego urzedu: %s/%s", target.State, target.ErrorCode)
+				t.Errorf("the host with a certificate from this authority: %s/%s", target.State, target.ErrorCode)
 			}
-			odmowil++
+			refused++
 			continue
 		}
-		plan := planZaufania(h, target.PlanJobID)
+		plan := trustPlan(h, target.PlanJobID)
 		if plan.Action != "remove" || plan.Refusal != "" {
-			t.Errorf("host bez certyfikatu z tego urzedu planuje %+v", plan)
+			t.Errorf("a host without a certificate from this authority plans %+v", plan)
 		}
-		zgodzil++
+		agreed++
 	}
-	if odmowil == 0 || zgodzil == 0 {
-		t.Errorf("wycofanie nie rozroznilo hostow: odmowa=%d, zgoda=%d", odmowil, zgodzil)
+	if refused == 0 || agreed == 0 {
+		t.Errorf("the withdrawal did not tell the hosts apart: refused=%d, agreed=%d", refused, agreed)
 	}
-	if poDrugim.State == "awaiting_approval" {
-		h.do(http.MethodPost, "/api/v1/campaigns/"+wycofanie.ID+"/cancel",
-			map[string]any{"reason": "test odmowy wycofania"}, nil, 0)
+	if afterSecond.State == "awaiting_approval" {
+		h.do(http.MethodPost, "/api/v1/campaigns/"+withdrawal.ID+"/cancel",
+			map[string]any{"reason": "withdrawal refusal test"}, nil, 0)
 	}
 }
 
-// planZaufania czyta z wyniku zadania planujacego plan kroku rotacji.
-func planZaufania(h *harness, jobID string) (plan struct {
+// trustPlan reads the rotation step plan from the planning job result.
+func trustPlan(h *harness, jobID string) (plan struct {
 	AnchorID string   `json:"anchor_id"`
 	Action   string   `json:"action"`
 	InUseBy  []string `json:"in_use_by"`
@@ -3267,7 +3322,7 @@ func planZaufania(h *harness, jobID string) (plan struct {
 	PlanHash string   `json:"plan_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -3275,39 +3330,41 @@ func planZaufania(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "trust_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "trust_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// hostPoza zwraca host, ktory nie wykona teraz zmiany: niepodlaczony albo
-// w oknie serwisowym. Bez takiego hosta nie da sie pokazac reguly pelnego
-// pokrycia, wiec test bez niego nie ma czego sprawdzac.
-func hostPoza(t *testing.T, h *harness, uzyte []string) string {
+// hostOutside returns a host that will not carry out a change now:
+// unconnected or in a maintenance window. Without such a host the full
+// coverage rule cannot be shown, so the test has nothing to check without
+// it.
+func hostOutside(t *testing.T, h *harness, used []string) string {
 	t.Helper()
-	wziete := map[string]bool{}
-	for _, id := range uzyte {
-		wziete[id] = true
+	taken := map[string]bool{}
+	for _, id := range used {
+		taken[id] = true
 	}
 	for _, host := range h.hosts() {
-		if !wziete[host.ID] && host.ConnectionState != "online" {
+		if !taken[host.ID] && host.ConnectionState != "online" {
 			return host.ID
 		}
 	}
-	// Flota testowa bywa cala podlaczona. Host w oknie serwisowym jest tu
-	// rownowaznym celem niepewnym: tez nie wykona zmiany teraz.
+	// The test fleet tends to be fully connected. A host in a maintenance
+	// window is an equivalent uncertain target here: it will not carry out
+	// the change now either.
 	for _, host := range h.hosts() {
-		if wziete[host.ID] {
+		if taken[host.ID] {
 			continue
 		}
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/maintenance", map[string]any{
 			"duration_minutes": 10,
-			"reason":           "test pelnego pokrycia przy wycofaniu urzedu",
+			"reason":           "full coverage test for the authority withdrawal",
 		}, nil, http.StatusOK)
 		hostID := host.ID
 		t.Cleanup(func() {
@@ -3316,82 +3373,83 @@ func hostPoza(t *testing.T, h *harness, uzyte []string) string {
 		})
 		return hostID
 	}
-	t.Skip("flota nie ma hosta poza kampania, ktorym mozna pokazac niepelne pokrycie")
+	t.Skip("the fleet has no host outside the campaign to show incomplete coverage with")
 	return ""
 }
 
-// TestKampaniaOdnowieniaMowiKtoPilnujeCertyfikatu sprawdza krok rotacji,
-// ktorego panel nie robi sam: o nowy certyfikat prosi demon hosta. Odpowiedzi
-// sa tu dwie i obie musza byc slyszalne - host bez certmongera odpada juz na
-// zdolnosci, a host z certmongerem, ktory tego pliku nie pilnuje, odpada
-// w planie. Jedno nie moze udawac drugiego.
-func TestKampaniaOdnowieniaMowiKtoPilnujeCertyfikatu(t *testing.T) {
+// TestRenewalCampaignSaysWhoTracksTheCertificate checks the rotation step
+// the panel does not do itself: the host daemon asks for a new certificate.
+// There are two answers here and both must be audible - a host without
+// certmonger falls out already on capability, and a host with certmonger
+// that does not track this file falls out in the plan. One must not pose as
+// the other.
+func TestRenewalCampaignSaysWhoTracksTheCertificate(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
-	zDemonem := map[string]bool{}
+	var targets []string
+	withDaemon := map[string]bool{}
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
 		}
-		cele = append(cele, host.ID)
-		if maZdolnosc(host, "certificates.renew") {
-			zDemonem[host.ID] = true
+		targets = append(targets, host.ID)
+		if hasCapability(host, "certificates.renew") {
+			withDaemon[host.ID] = true
 		}
 	}
-	if len(zDemonem) == 0 {
-		t.Skip("flota nie ma hosta z certmongerem")
+	if len(withDaemon) == 0 {
+		t.Skip("the fleet has no host with certmonger")
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts")
 	}
 
-	sciezka := "/etc/pki/tls/certs/flotestro-odnowienie.pem"
+	path := "/etc/pki/tls/certs/flotestro-renewal.pem"
 	campaign := h.createCampaign(map[string]any{
-		"name": "odnowienie na flocie", "action": "certificate.renew",
-		"reason":                     "test integracyjny planow odnowienia",
-		"payload":                    map[string]any{"certificate": map[string]any{"path": sciezka}},
-		"selector":                   map[string]any{"host_ids": cele},
+		"name": "renewal on the fleet", "action": "certificate.renew",
+		"reason":                     "integration test of the renewal plans",
+		"payload":                    map[string]any{"certificate": map[string]any{"path": path}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	stan := h.awaitCampaign(campaign.ID,
+	state := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if stan.State == "awaiting_approval" {
-		t.Fatal("kampania odnowienia pliku, ktorego nikt nie pilnuje, doszla do zgody")
+	if state.State == "awaiting_approval" {
+		t.Fatal("the renewal campaign for a file nobody tracks reached consent")
 	}
 
-	var bezDemona, zPlanem int
+	var withoutDaemon, withPlan int
 	for _, target := range h.campaignTargets(campaign.ID) {
-		if !zDemonem[target.HostID] {
-			// Host bez certmongera nie jest hostem, ktoremu plan cos powie:
-			// on tej operacji nie przyjmie w ogole.
+		if !withDaemon[target.HostID] {
+			// A host without certmonger is not a host the plan will tell
+			// anything: it does not accept this operation at all.
 			if target.State != "ineligible" || target.ErrorCode != "capability_missing" {
-				t.Errorf("host bez certmongera: %s/%s", target.State, target.ErrorCode)
+				t.Errorf("host without certmonger: %s/%s", target.State, target.ErrorCode)
 			}
-			bezDemona++
+			withoutDaemon++
 			continue
 		}
 		if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
-			t.Errorf("host z certmongerem: %s/%s", target.State, target.ErrorCode)
+			t.Errorf("host with certmonger: %s/%s", target.State, target.ErrorCode)
 		}
-		plan := planOdnowienia(h, target.PlanJobID)
+		plan := renewalPlan(h, target.PlanJobID)
 		if !strings.Contains(plan.Refusal, "does not track the file") || plan.PlanHash == "" {
-			t.Errorf("host z certmongerem, plan: %+v", plan)
+			t.Errorf("host with certmonger, plan: %+v", plan)
 		}
-		zPlanem++
+		withPlan++
 	}
-	if bezDemona == 0 || zPlanem == 0 {
-		t.Errorf("kampania nie rozroznila hostow: bez demona=%d, z planem=%d", bezDemona, zPlanem)
+	if withoutDaemon == 0 || withPlan == 0 {
+		t.Errorf("the campaign did not tell the hosts apart: without a daemon=%d, with a plan=%d", withoutDaemon, withPlan)
 	}
 }
 
-// planOdnowienia czyta z wyniku zadania planujacego plan odnowienia.
-func planOdnowienia(h *harness, jobID string) (plan struct {
+// renewalPlan reads the renewal plan from the planning job result.
+func renewalPlan(h *harness, jobID string) (plan struct {
 	Path     string `json:"path"`
 	Request  string `json:"request"`
 	Status   string `json:"status"`
@@ -3399,7 +3457,7 @@ func planOdnowienia(h *harness, jobID string) (plan struct {
 	PlanHash string `json:"plan_hash"`
 }) {
 	h.t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Kind string          `json:"kind"`
@@ -3407,69 +3465,69 @@ func planOdnowienia(h *harness, jobID string) (plan struct {
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &odpowiedz)
-	for i := len(odpowiedz.Items) - 1; i >= 0; i-- {
-		if odpowiedz.Items[i].Detail.Kind == "renewal_plan" {
-			_ = json.Unmarshal(odpowiedz.Items[i].Detail.Plan, &plan)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "renewal_plan" {
+			_ = json.Unmarshal(response.Items[i].Detail.Plan, &plan)
 			return plan
 		}
 	}
 	return plan
 }
 
-// TestPlanyKampaniiSaPogrupowanePoOdcisku sprawdza ekran, na ktorym operator
-// podejmuje decyzje: zgoda dotyczy zestawu planow, wiec zestaw musi byc
-// widoczny - a sto hostow z identycznym diffem ma byc jedna pozycja, nie
-// sciana tekstu.
-func TestPlanyKampaniiSaPogrupowanePoOdcisku(t *testing.T) {
+// TestCampaignPlansAreGroupedByFingerprint checks the screen on which the
+// operator makes the decision: the consent concerns a set of plans, so the
+// set must be visible - and a hundred hosts with an identical diff are to
+// be one item, not a wall of text.
+func TestCampaignPlansAreGroupedByFingerprint(t *testing.T) {
 	h := newHarness(t)
-	const nazwa = "test-planow-pogrupowanych"
+	const name = "grouped-plans-test"
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" && host.OSFamily == "debian" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty rodziny debian")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
 	}
 
-	// Sciezka musi lezec w allowliscie plikow panelu: kampania nie jest
-	// droga naokolo tej granicy.
-	sciezka := "/etc/flotestro-" + nazwa + ".conf"
+	// The path must lie in the panel file allowlist: a campaign is not a
+	// way around that boundary.
+	path := "/etc/flotestro-" + name + ".conf"
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "file.remove", "reason": "sprzatanie po tescie grupowania planow",
-				"payload": map[string]any{"file": map[string]any{"path": sciezka}},
+				"action": "file.remove", "reason": "cleanup after the plan grouping test",
+				"payload": map[string]any{"file": map[string]any{"path": path}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Wszystkie hosty dostaja te sama tresc do tego samego pliku, ktorego
-	// zaden z nich nie ma: plany maja byc identyczne, wiec grupa jedna.
+	// All the hosts get the same content into the same file, which none of
+	// them has: the plans are to be identical, so one group.
 	campaign := h.createCampaign(map[string]any{
-		"name": "plik na flocie", "action": "file.ensure",
-		"reason": "test grupowania planow",
+		"name": "file on the fleet", "action": "file.ensure",
+		"reason": "plan grouping test",
 		"payload": map[string]any{"file": map[string]any{
-			"path": sciezka, "content": "# " + nazwa + "\n", "mode": "0644"}},
-		"selector":                   map[string]any{"host_ids": cele},
+			"path": path, "content": "# " + name + "\n", "mode": "0644"}},
+		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
-		"wave_size":                  len(cele),
-		"max_concurrent":             len(cele),
+		"wave_size":                  len(targets),
+		"max_concurrent":             len(targets),
 		"failure_threshold_percent":  0,
 		"failure_threshold_absolute": 0,
 		"reboot_policy":              "never",
 	})
-	poPlanowaniu := h.awaitCampaign(campaign.ID,
+	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
-	if poPlanowaniu.State != "awaiting_approval" {
-		t.Fatalf("planowanie skonczylo sie stanem %s (%s)",
-			poPlanowaniu.State, poPlanowaniu.PauseReason)
+	if afterPlanning.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)",
+			afterPlanning.State, afterPlanning.PauseReason)
 	}
 
-	var grupy struct {
+	var groups struct {
 		Items []struct {
 			PlanHash string   `json:"plan_hash"`
 			Count    int      `json:"count"`
@@ -3486,40 +3544,41 @@ func TestPlanyKampaniiSaPogrupowanePoOdcisku(t *testing.T) {
 		Hosts       int    `json:"hosts"`
 		PlanSetHash string `json:"plan_set_hash"`
 	}
-	h.get("/api/v1/campaigns/"+campaign.ID+"/plans", &grupy)
+	h.get("/api/v1/campaigns/"+campaign.ID+"/plans", &groups)
 
-	if grupy.Hosts != len(cele) {
-		t.Errorf("plany opisuja %d hostow, celow bylo %d", grupy.Hosts, len(cele))
+	if groups.Hosts != len(targets) {
+		t.Errorf("the plans describe %d hosts, there were %d targets", groups.Hosts, len(targets))
 	}
-	// Ten sam plik o tej samej tresci na hostach, ktore go nie maja, daje
-	// jeden ksztalt zmiany - i tak ma byc pokazany.
-	if grupy.Count != 1 || len(grupy.Items) != 1 {
-		t.Fatalf("plany rozbite na %d grup: %+v", grupy.Count, grupy.Items)
+	// The same file with the same content on hosts that do not have it
+	// gives one shape of change - and it is to be shown that way.
+	if groups.Count != 1 || len(groups.Items) != 1 {
+		t.Fatalf("the plans split into %d groups: %+v", groups.Count, groups.Items)
 	}
-	grupa := grupy.Items[0]
-	if grupa.Count != len(cele) || len(grupa.Hosts) != len(cele) {
-		t.Errorf("grupa obejmuje %d hostow (%v)", grupa.Count, grupa.Hosts)
+	group := groups.Items[0]
+	if group.Count != len(targets) || len(group.Hosts) != len(targets) {
+		t.Errorf("the group covers %d hosts (%v)", group.Count, group.Hosts)
 	}
-	if grupa.PlanHash == "" || grupy.PlanSetHash == "" {
-		t.Errorf("grupa bez odcisku: %q, zestaw: %q", grupa.PlanHash, grupy.PlanSetHash)
+	if group.PlanHash == "" || groups.PlanSetHash == "" {
+		t.Errorf("group without a fingerprint: %q, set: %q", group.PlanHash, groups.PlanSetHash)
 	}
-	// Tresc planu ma dojsc az tutaj: bez niej operator oglada odciski, a nie
-	// zmiane, na ktora sie zgadza.
-	if grupa.Plan.Plan.Action != "create" || len(grupa.Plan.Plan.Changes) == 0 {
-		t.Errorf("grupa bez tresci planu: %+v", grupa.Plan)
+	// The plan content is to reach this far: without it the operator looks
+	// at fingerprints, not at the change they consent to.
+	if group.Plan.Plan.Action != "create" || len(group.Plan.Plan.Changes) == 0 {
+		t.Errorf("group without the plan content: %+v", group.Plan)
 	}
 
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
-		map[string]any{"reason": "test grupowania planow"}, nil, 0)
+		map[string]any{"reason": "plan grouping test"}, nil, 0)
 }
 
-// TestPodgladPokazujeRozkladMigawki sprawdza to, czego sama liczba gotowych
-// hostow nie mowi: z czego sklada sie zamrozona migawka. Trzydziesci hostow
-// z jednej lokalizacji to inna zmiana niz trzydziesci rozrzuconych po trzech.
-func TestPodgladPokazujeRozkladMigawki(t *testing.T) {
+// TestPreviewShowsTheSnapshotDistribution checks what the bare number of
+// ready hosts does not say: what the frozen snapshot consists of. Thirty
+// hosts from one site are a different change than thirty scattered across
+// three.
+func TestPreviewShowsTheSnapshotDistribution(t *testing.T) {
 	h := newHarness(t)
 
-	var podglad struct {
+	var preview struct {
 		Eligible     int `json:"eligible"`
 		Distribution map[string][]struct {
 			Reason string   `json:"reason"`
@@ -3527,84 +3586,86 @@ func TestPodgladPokazujeRozkladMigawki(t *testing.T) {
 			Sample []string `json:"sample"`
 		} `json:"distribution"`
 	}
-	h.get("/api/v1/campaigns/preview?action=unit.restart", &podglad)
-	if podglad.Eligible == 0 {
-		t.Skip("zaden host nie jest gotowy do restartu jednostki")
+	h.get("/api/v1/campaigns/preview?action=unit.restart", &preview)
+	if preview.Eligible == 0 {
+		t.Skip("no host is ready for a unit restart")
 	}
 
-	for _, wymiar := range []string{"site", "environment", "os_family", "capability"} {
-		grupy, mamy := podglad.Distribution[wymiar]
-		if !mamy || len(grupy) == 0 {
-			t.Errorf("rozklad nie ma wymiaru %q", wymiar)
+	for _, dimension := range []string{"site", "environment", "os_family", "capability"} {
+		groups, present := preview.Distribution[dimension]
+		if !present || len(groups) == 0 {
+			t.Errorf("the distribution has no dimension %q", dimension)
 			continue
 		}
-		suma := 0
-		for _, grupa := range grupy {
-			if grupa.Reason == "" || grupa.Count == 0 {
-				t.Errorf("%s: grupa bez nazwy albo pusta: %+v", wymiar, grupa)
+		sum := 0
+		for _, group := range groups {
+			if group.Reason == "" || group.Count == 0 {
+				t.Errorf("%s: group without a name or empty: %+v", dimension, group)
 			}
-			suma += grupa.Count
+			sum += group.Count
 		}
-		// Kazdy gotowy host nalezy dokladnie do jednej grupy w kazdym
-		// wymiarze: rozklad, ktory nie sumuje sie do calosci, mowi o innej
-		// migawce niz ta, ktora wejdzie do kampanii.
-		if suma != podglad.Eligible {
-			t.Errorf("%s: rozklad sumuje sie do %d, gotowych jest %d", wymiar, suma, podglad.Eligible)
+		// Every ready host belongs to exactly one group in every dimension:
+		// a distribution that does not add up to the whole speaks of a
+		// different snapshot than the one entering the campaign.
+		if sum != preview.Eligible {
+			t.Errorf("%s: the distribution adds up to %d, %d are ready", dimension, sum, preview.Eligible)
 		}
 	}
 
-	// Rodzina systemu jest w labie wiecej niz jedna, wiec rozklad ma to
-	// pokazac - inaczej ten ekran nie odroznialby niczego.
-	if len(podglad.Distribution["os_family"]) < 2 {
-		t.Errorf("rozklad po rodzinie systemu: %+v", podglad.Distribution["os_family"])
+	// The lab has more than one OS family, so the distribution is to show
+	// it - otherwise this screen would tell nothing apart.
+	if len(preview.Distribution["os_family"]) < 2 {
+		t.Errorf("distribution by OS family: %+v", preview.Distribution["os_family"])
 	}
 }
 
-// TestFlotaPokazujeKomuUfaWTrakcieRotacji sprawdza ekran, bez ktorego rotacja
-// urzedu jest niewidoczna: w jej trakcie czesc floty ufa obu urzedom naraz,
-// i dopiero to mowi, czy wolno wycofac stary.
-func TestFlotaPokazujeKomuUfaWTrakcieRotacji(t *testing.T) {
+// TestFleetShowsWhomItTrustsDuringARotation checks the screen without which
+// an authority rotation is invisible: during it part of the fleet trusts
+// both authorities at once, and only that says whether the old one may be
+// withdrawn.
+func TestFleetShowsWhomItTrustsDuringARotation(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts")
 	}
-	cele = cele[:2]
+	targets = targets[:2]
 
-	kotwica := fmt.Sprintf("widok-%d", time.Now().Unix())
-	urzad, _ := urzadTestowy(t, "Flotestro Widok "+kotwica)
+	anchor := fmt.Sprintf("view-%d", time.Now().Unix())
+	authority, _ := testAuthority(t, "Flotestro View "+anchor)
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "certificate.trust.remove", "reason": "sprzatanie po tescie widoku zaufania",
-				"payload": map[string]any{"certificate": map[string]any{"anchor_id": kotwica}},
+				"action": "certificate.trust.remove", "reason": "cleanup after the trust view test",
+				"payload": map[string]any{"certificate": map[string]any{"anchor_id": anchor}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Jeden host dostaje urzad, drugi nie: w trakcie rotacji tak wlasnie
-	// wyglada flota, i widok ma to pokazac.
-	zadanie, proby := h.runOperation(cele[0], map[string]any{
-		"action": "certificate.trust.ensure", "reason": "test widoku zaufania",
+	// One host gets the authority, the other does not: that is exactly
+	// what the fleet looks like during a rotation, and the view is to show
+	// it.
+	job, attempts := h.runOperation(targets[0], map[string]any{
+		"action": "certificate.trust.ensure", "reason": "trust view test",
 		"payload": map[string]any{"certificate": map[string]any{
-			"anchor_id": kotwica, "certificate": urzad}},
+			"anchor_id": anchor, "certificate": authority}},
 	}, 3*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("rozdanie urzedu: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("authority distribution: state = %s, %s", job.State, lastMessage(attempts))
 	}
-	// Widok floty czyta inwentarz, wiec host musi go odswiezyc.
-	h.runOperation(cele[0], map[string]any{
-		"action": "inventory.refresh", "reason": "test widoku zaufania",
+	// The fleet view reads the inventory, so the host must refresh it.
+	h.runOperation(targets[0], map[string]any{
+		"action": "inventory.refresh", "reason": "trust view test",
 		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"certificates"}}},
 	}, 2*time.Minute)
 
-	var widok struct {
+	var view struct {
 		Items []struct {
 			Subject           string   `json:"subject"`
 			AnchorID          string   `json:"anchor_id"`
@@ -3615,83 +3676,84 @@ func TestFlotaPokazujeKomuUfaWTrakcieRotacji(t *testing.T) {
 		HostsTotal   int `json:"hosts_total"`
 		HostsUnknown int `json:"hosts_unknown"`
 	}
-	znaleziona := false
+	found := false
 	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) && !znaleziona {
-		h.get("/api/v1/certificates/trust", &widok)
-		for _, pozycja := range widok.Items {
-			if pozycja.AnchorID != kotwica {
+	for time.Now().Before(deadline) && !found {
+		h.get("/api/v1/certificates/trust", &view)
+		for _, item := range view.Items {
+			if item.AnchorID != anchor {
 				continue
 			}
-			znaleziona = true
-			// Urzad rozdany jednemu hostowi ma byc policzony jednemu, a nie
-			// calej flocie: to jest cala tresc tego ekranu.
-			if pozycja.Hosts != 1 || len(pozycja.Sample) != 1 {
-				t.Errorf("urzad na %d hostach: %+v", pozycja.Hosts, pozycja.Sample)
+			found = true
+			// An authority handed to one host is to be counted for one, not
+			// for the whole fleet: that is the whole substance of this
+			// screen.
+			if item.Hosts != 1 || len(item.Sample) != 1 {
+				t.Errorf("authority on %d hosts: %+v", item.Hosts, item.Sample)
 			}
-			if pozycja.FingerprintSHA256 == "" || pozycja.Subject == "" {
-				t.Errorf("kotwica bez opisu: %+v", pozycja)
+			if item.FingerprintSHA256 == "" || item.Subject == "" {
+				t.Errorf("anchor without a description: %+v", item)
 			}
 		}
-		if !znaleziona {
+		if !found {
 			time.Sleep(3 * time.Second)
 		}
 	}
-	if !znaleziona {
-		t.Fatalf("widok floty nie zna kotwicy %s: %+v", kotwica, widok.Items)
+	if !found {
+		t.Fatalf("the fleet view does not know the anchor %s: %+v", anchor, view.Items)
 	}
-	if widok.HostsTotal == 0 {
-		t.Error("widok nie policzyl zadnego hosta")
+	if view.HostsTotal == 0 {
+		t.Error("the view counted no host")
 	}
 }
 
-// TestBudzetBackenduWiazeDwieKampanie pilnuje granicy z dokumentu w jej
-// pelnej postaci: limit backendu ma obowiazywac miedzy kampaniami, a nie
-// tylko wewnatrz jednej. Dwie kampanie do jednego repozytorium nie moga
-// pisac naraz, choc kazda z osobna miesci sie w swoim limicie.
-func TestBudzetBackenduWiazeDwieKampanie(t *testing.T) {
+// TestBackendBudgetBindsTwoCampaigns guards the boundary from the document
+// in its full form: the backend limit is to hold between campaigns, not
+// only within one. Two campaigns to one repository must not write at once,
+// although each on its own fits within its limit.
+func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 	h := newHarness(t)
 
-	var cele []string
+	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" && host.OSFamily != "arch" {
-			cele = append(cele, host.ID)
+			targets = append(targets, host.ID)
 		}
 	}
-	if len(cele) < 2 {
-		t.Skip("flota ma mniej niz dwa podlaczone hosty z narzedziem backupu")
+	if len(targets) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts with a backup tool")
 	}
-	cele = cele[:2]
+	targets = targets[:2]
 
-	nazwa := fmt.Sprintf("dwie-%d", time.Now().UnixNano())
-	repozytorium := "/srv/" + nazwa
-	sekret := nowySekret(t, h, "haslo-"+nazwa)
-	zlecenie := func(id string) map[string]any {
+	name := fmt.Sprintf("two-%d", time.Now().UnixNano())
+	repository := "/srv/" + name
+	secret := newSecret(t, h, "password-"+name)
+	order := func(id string) map[string]any {
 		return map[string]any{
-			"id": id, "tool": "restic", "repository": repozytorium,
+			"id": id, "tool": "restic", "repository": repository,
 			"paths": []string{"/etc/flotestro"}, "keep_last": 1, "initialize": true,
-			"password_secret": map[string]any{"name": sekret.Name},
+			"password_secret": map[string]any{"name": secret.Name},
 		}
 	}
-	h.ustawBudzet("backend:"+repozytorium+":backup", 1, 50)
+	h.setBudget("backend:"+repository+":backup", 1, 50)
 
 	t.Cleanup(func() {
-		for _, hostID := range cele {
+		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
-				"action": "file.remove", "reason": "sprzatanie po tescie dwoch kampanii",
-				"payload": map[string]any{"file": map[string]any{"path": repozytorium + "/config"}},
+				"action": "file.remove", "reason": "cleanup after the two campaigns test",
+				"payload": map[string]any{"file": map[string]any{"path": repository + "/config"}},
 			}, 2*time.Minute)
 		}
 	})
 
-	// Dwie osobne kampanie, kazda na jednym hoscie: limit kampanii nie
-	// zatrzyma tu niczego, bo kazda ma po jednym celu.
-	kampanie := make([]campaignView, 0, 2)
-	for i, hostID := range cele {
-		kampania := h.createCampaign(map[string]any{
-			"name": fmt.Sprintf("kopia %d z %s", i+1, nazwa), "action": "backup.run",
-			"reason":                     "test budzetu backendu miedzy kampaniami",
-			"payload":                    map[string]any{"backup": zlecenie(fmt.Sprintf("%s-%d", nazwa, i+1))},
+	// Two separate campaigns, each on one host: the campaign limit stops
+	// nothing here, because each has one target.
+	campaigns := make([]campaignView, 0, 2)
+	for i, hostID := range targets {
+		campaign := h.createCampaign(map[string]any{
+			"name": fmt.Sprintf("copy %d of %s", i+1, name), "action": "backup.run",
+			"reason":                     "backend budget test between campaigns",
+			"payload":                    map[string]any{"backup": order(fmt.Sprintf("%s-%d", name, i+1))},
 			"selector":                   map[string]any{"host_ids": []string{hostID}},
 			"canary_size":                0,
 			"wave_size":                  1,
@@ -3700,42 +3762,42 @@ func TestBudzetBackenduWiazeDwieKampanie(t *testing.T) {
 			"failure_threshold_absolute": 0,
 			"reboot_policy":              "never",
 		})
-		kampanie = append(kampanie, kampania)
+		campaigns = append(campaigns, campaign)
 	}
-	for i := range kampanie {
-		stan := h.awaitCampaign(kampanie[i].ID,
+	for i := range campaigns {
+		state := h.awaitCampaign(campaigns[i].ID,
 			map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 5*time.Minute)
-		if stan.State != "awaiting_approval" {
-			t.Fatalf("kampania %d skonczyla planowanie stanem %s (%s)", i+1, stan.State, stan.PauseReason)
+		if state.State != "awaiting_approval" {
+			t.Fatalf("campaign %d finished planning in state %s (%s)", i+1, state.State, state.PauseReason)
 		}
-		h.approveCampaign(stan)
+		h.approveCampaign(state)
 	}
 
-	okna := make([]okno, 0, 2)
-	for i := range kampanie {
-		koncowa := h.awaitCampaign(kampanie[i].ID,
+	windows := make([]window, 0, 2)
+	for i := range campaigns {
+		final := h.awaitCampaign(campaigns[i].ID,
 			map[string]bool{"completed": true, "failed": true, "paused": true}, 10*time.Minute)
-		if koncowa.State != "completed" {
-			t.Fatalf("kampania %d skonczyla sie stanem %s (%s)", i+1, koncowa.State, koncowa.PauseReason)
+		if final.State != "completed" {
+			t.Fatalf("campaign %d ended in state %s (%s)", i+1, final.State, final.PauseReason)
 		}
-		for _, target := range h.campaignTargets(kampanie[i].ID) {
+		for _, target := range h.campaignTargets(campaigns[i].ID) {
 			if target.JobID == "" {
 				continue
 			}
-			for _, proba := range h.probyZadania(target.JobID) {
-				if proba.DispatchedAt == nil || proba.FinishedAt == nil {
+			for _, attempt := range h.timedAttempts(target.JobID) {
+				if attempt.DispatchedAt == nil || attempt.FinishedAt == nil {
 					continue
 				}
-				okna = append(okna, okno{od: *proba.DispatchedAt, do: *proba.FinishedAt})
+				windows = append(windows, window{from: *attempt.DispatchedAt, to: *attempt.FinishedAt})
 			}
 		}
 	}
-	if len(okna) < 2 {
-		t.Fatalf("dwie kampanie zostawily %d prob z czasami", len(okna))
+	if len(windows) < 2 {
+		t.Fatalf("the two campaigns left %d attempts with times", len(windows))
 	}
-	// Sedno: budzet backendu jest wspolny dla calej floty, wiec dwie
-	// niezalezne kampanie musialy sie rozsunac w czasie.
-	if zachodzaNaSiebie(okna) {
-		t.Errorf("dwie kampanie pisaly do repozytorium naraz mimo budzetu 1: %+v", okna)
+	// The crux: the backend budget is shared by the whole fleet, so two
+	// independent campaigns had to spread out in time.
+	if overlap(windows) {
+		t.Errorf("two campaigns wrote to the repository at once despite a budget of 1: %+v", windows)
 	}
 }

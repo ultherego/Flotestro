@@ -1,15 +1,17 @@
 Package: flotestro-relay
-Version: __WERSJA__
+Version: __VERSION__
 Section: admin
 Priority: optional
 Architecture: __ARCH__
 Maintainer: Flotestro <flotestro@localhost>
 Depends: systemd, adduser
-Description: Relay lokalizacji Flotestro
- Relay posredniczy miedzy agentami jednej lokalizacji a centrala: utrzymuje
- jedno polaczenie w gore zamiast setek, buforuje wyniki na czas awarii lacza
- i nie przekazuje zadan, ktorym uplynal czas zycia.
+Description: Flotestro site relay
+ The relay mediates between the agents of one site and the centre: it keeps
+ one upstream connection instead of hundreds, buffers results for the
+ duration of a link outage and does not forward jobs whose time to live has
+ passed.
  .
- Relay jest osobna granica zaufania. Ma wlasny certyfikat innego rodzaju niz
- certyfikat hosta, wlasne konto uslugowe i wlasny katalog stanu; nie podpisuje
- zadnego certyfikatu i nie wykonuje operacji na hostach.
+ The relay is a separate trust boundary. It has its own certificate of a
+ different kind than a host certificate, its own service account and its own
+ state directory; it signs no certificate and carries out no operations on
+ hosts.

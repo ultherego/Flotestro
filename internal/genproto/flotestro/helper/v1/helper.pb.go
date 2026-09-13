@@ -81,15 +81,15 @@ type PackageActionRequest_Operation int32
 
 const (
 	PackageActionRequest_OPERATION_UNSPECIFIED PackageActionRequest_Operation = 0
-	// Odswiezenie metadanych repozytorium.
+	// A refresh of the repository metadata.
 	PackageActionRequest_OPERATION_REFRESH PackageActionRequest_Operation = 1
-	// Wykonanie transakcji aktualizacji.
+	// Carrying out an update transaction.
 	PackageActionRequest_OPERATION_UPGRADE PackageActionRequest_Operation = 2
-	// Dolozenie pakietow na host.
+	// Adding packages to the host.
 	PackageActionRequest_OPERATION_INSTALL PackageActionRequest_Operation = 3
-	// Usuniecie pakietow wraz z zaleznymi.
+	// Removing packages together with their dependants.
 	PackageActionRequest_OPERATION_REMOVE PackageActionRequest_Operation = 4
-	// Wstrzymanie albo zwolnienie aktualizacji pakietow.
+	// Holding or releasing package updates.
 	PackageActionRequest_OPERATION_HOLD PackageActionRequest_Operation = 5
 )
 
@@ -148,8 +148,8 @@ const (
 	UnitActionRequest_OPERATION_STOP        UnitActionRequest_Operation = 2
 	UnitActionRequest_OPERATION_RESTART     UnitActionRequest_Operation = 3
 	UnitActionRequest_OPERATION_RELOAD      UnitActionRequest_Operation = 4
-	// Wlaczenie i zamaskowanie zmieniaja to, co host zrobi po restarcie,
-	// a nie jego stan teraz.
+	// Enabling and masking change what the host does after a reboot, not
+	// its state now.
 	UnitActionRequest_OPERATION_ENABLE  UnitActionRequest_Operation = 5
 	UnitActionRequest_OPERATION_DISABLE UnitActionRequest_Operation = 6
 	UnitActionRequest_OPERATION_MASK    UnitActionRequest_Operation = 7
@@ -213,9 +213,9 @@ type DockerReadRequest_Scope int32
 
 const (
 	DockerReadRequest_SCOPE_UNSPECIFIED DockerReadRequest_Scope = 0
-	// Podsumowanie do inventory: lekkie, liczone przy cyklu inwentarza.
+	// The summary for the inventory: light, computed in the inventory cycle.
 	DockerReadRequest_SCOPE_SUMMARY DockerReadRequest_Scope = 1
-	// Pelny stan na zadanie operatora, gdy otworzy zakladke.
+	// The full state on the operator's demand, when they open the tab.
 	DockerReadRequest_SCOPE_FULL DockerReadRequest_Scope = 2
 )
 
@@ -329,7 +329,7 @@ const (
 	ScheduleRequest_OPERATION_DISABLE     ScheduleRequest_Operation = 2
 	ScheduleRequest_OPERATION_REMOVE      ScheduleRequest_Operation = 3
 	ScheduleRequest_OPERATION_RUN_NOW     ScheduleRequest_Operation = 4
-	// Odczyt harmonogramow hosta.
+	// A read of the host schedules.
 	ScheduleRequest_OPERATION_READ ScheduleRequest_Operation = 5
 )
 
@@ -384,18 +384,19 @@ type NetworkRequest_Operation int32
 
 const (
 	NetworkRequest_OPERATION_UNSPECIFIED NetworkRequest_Operation = 0
-	// Odczyt profili NetworkManagera wraz z ich ustawieniami.
+	// A read of the NetworkManager profiles together with their settings.
 	NetworkRequest_OPERATION_READ          NetworkRequest_Operation = 1
 	NetworkRequest_OPERATION_SET_MTU       NetworkRequest_Operation = 2
 	NetworkRequest_OPERATION_ENSURE_ROUTES NetworkRequest_Operation = 3
 	NetworkRequest_OPERATION_APPLY_PROFILE NetworkRequest_Operation = 4
-	// Rozbrojenie wycofania po udanym potwierdzeniu lacznosci.
+	// Disarming the rollback after a successful connectivity confirmation.
 	NetworkRequest_OPERATION_CONFIRM NetworkRequest_Operation = 5
-	// Natychmiastowe wycofanie zmiany na zadanie operatora.
+	// An immediate rollback of the change on the operator's demand.
 	NetworkRequest_OPERATION_ROLLBACK NetworkRequest_Operation = 6
-	// Plan zmiany bez dotykania hosta: roznica miedzy profilem zastanym
-	// a zadanym. Rodzaj zmiany helper poznaje po polach: method wskazuje
-	// profil adresowy, routes trasy, mtu samo MTU.
+	// The change plan without touching the host: the difference between the
+	// found and the requested profile. The helper recognises the kind of
+	// change by the fields: method names an address profile, routes the
+	// routes, mtu the MTU alone.
 	NetworkRequest_OPERATION_PLAN NetworkRequest_Operation = 7
 )
 
@@ -455,7 +456,7 @@ type DnsRequest_Operation int32
 const (
 	DnsRequest_OPERATION_UNSPECIFIED DnsRequest_Operation = 0
 	DnsRequest_OPERATION_APPLY       DnsRequest_Operation = 1
-	// Plan zmiany resolvera bez dotykania hosta.
+	// The resolver change plan without touching the host.
 	DnsRequest_OPERATION_PLAN DnsRequest_Operation = 2
 )
 
@@ -509,11 +510,12 @@ const (
 	FirewallRequest_OPERATION_RULE_REMOVE  FirewallRequest_Operation = 3
 	FirewallRequest_OPERATION_ZONE_PORT    FirewallRequest_Operation = 4
 	FirewallRequest_OPERATION_ZONE_SERVICE FirewallRequest_Operation = 5
-	// Przywrocenie stanu regul panelu sprzed zmiany.
+	// Restoring the panel rule state from before the change.
 	FirewallRequest_OPERATION_RESTORE FirewallRequest_Operation = 6
 	FirewallRequest_OPERATION_CONFIRM FirewallRequest_Operation = 7
-	// Policzenie roznicy miedzy regula zastana a zadana. Nie zmienia
-	// niczego: odpowiada, co by sie stalo i wobec ktorego zestawu regul.
+	// Computing the difference between the found and the requested rule. It
+	// changes nothing: it answers what would happen and against which
+	// ruleset.
 	FirewallRequest_OPERATION_PLAN FirewallRequest_Operation = 8
 )
 
@@ -574,7 +576,7 @@ type StorageRequest_Operation int32
 
 const (
 	StorageRequest_OPERATION_UNSPECIFIED StorageRequest_Operation = 0
-	// Odczyt grup i wolumenow LVM. Narzedzia LVM wymagaja roota.
+	// A read of the LVM groups and volumes. The LVM tools require root.
 	StorageRequest_OPERATION_READ_LVM     StorageRequest_Operation = 1
 	StorageRequest_OPERATION_MOUNT_ENSURE StorageRequest_Operation = 2
 	StorageRequest_OPERATION_MOUNT_REMOVE StorageRequest_Operation = 3
@@ -583,11 +585,12 @@ const (
 	StorageRequest_OPERATION_FS_RESIZE    StorageRequest_Operation = 6
 	StorageRequest_OPERATION_FS_CREATE    StorageRequest_Operation = 7
 	StorageRequest_OPERATION_DISK_WIPE    StorageRequest_Operation = 8
-	// Policzenie roznicy miedzy montowaniem zastanym a zadanym. Nie zmienia
-	// niczego i rozwiazuje zrodlo do UUID filesystemu, ktory ten host ma.
+	// Computing the difference between the found and the requested mount.
+	// It changes nothing and resolves the source to the UUID of the
+	// filesystem this host has.
 	StorageRequest_OPERATION_MOUNT_PLAN StorageRequest_Operation = 9
-	// Plan sprawdzenia albo rozszerzenia filesystemu lub wolumenu, bez
-	// dotykania hosta. Rodzaj nazywa pole plan.
+	// The plan of a check or an extension of a filesystem or a volume,
+	// without touching the host. The kind is named by the plan field.
 	StorageRequest_OPERATION_DEVICE_PLAN StorageRequest_Operation = 10
 )
 
@@ -655,8 +658,8 @@ const (
 	SshRequest_OPERATION_READ           SshRequest_Operation = 1
 	SshRequest_OPERATION_APPLY          SshRequest_Operation = 2
 	SshRequest_OPERATION_ROTATE_HOSTKEY SshRequest_Operation = 3
-	// Plan zmiany bez dotykania hosta: roznica miedzy tym, co serwer
-	// stosuje, a zamowieniem.
+	// The change plan without touching the host: the difference between
+	// what the server applies and the order.
 	SshRequest_OPERATION_PLAN SshRequest_Operation = 4
 )
 
@@ -709,12 +712,14 @@ type SecurityRequest_Operation int32
 
 const (
 	SecurityRequest_OPERATION_UNSPECIFIED SecurityRequest_Operation = 0
-	// Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
-	// ani "uruchom polecenie": dostaje liste nazw faktow, ktore umie zebrac.
+	// A read of the enumerated facts. The helper has no "read a file" nor
+	// "run a command" operation: it gets a list of fact names it knows how
+	// to gather.
 	SecurityRequest_OPERATION_FACTS        SecurityRequest_Operation = 1
 	SecurityRequest_OPERATION_SELINUX_MODE SecurityRequest_Operation = 2
-	// Przeladowanie regul audytu z plikow do jadra. Osobna operacja, bo
-	// jednostka auditd na czesci dystrybucji odmawia recznego restartu.
+	// Reloading the audit rules from the files into the kernel. A separate
+	// operation, because the auditd unit on some distributions refuses a
+	// manual restart.
 	SecurityRequest_OPERATION_AUDIT_RELOAD SecurityRequest_Operation = 3
 )
 
@@ -761,8 +766,8 @@ func (SecurityRequest_Operation) EnumDescriptor() ([]byte, []int) {
 	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{26, 0}
 }
 
-// Fact wylicza to, czego nie da sie odczytac bez roota. Reszte obrazu
-// agent sklada sam, bez przechodzenia przez helpera.
+// Fact enumerates what cannot be read without root. The rest of the
+// picture the agent composes itself, without going through the helper.
 type SecurityRequest_Fact int32
 
 const (
@@ -877,15 +882,18 @@ type CertificateRequest_Operation int32
 
 const (
 	CertificateRequest_OPERATION_UNSPECIFIED CertificateRequest_Operation = 0
-	// Odczyt wyliczonych faktow. Helper nie ma operacji "przeczytaj plik"
-	// ani "uruchom polecenie": dostaje liste nazw faktow i liste celow.
+	// A read of the enumerated facts. The helper has no "read a file" nor
+	// "run a command" operation: it gets a list of fact names and a list of
+	// targets.
 	CertificateRequest_OPERATION_FACTS  CertificateRequest_Operation = 1
 	CertificateRequest_OPERATION_DEPLOY CertificateRequest_Operation = 2
 	CertificateRequest_OPERATION_RENEW  CertificateRequest_Operation = 3
-	// Plan wdrozenia bez dotykania hosta i bez siegania po klucz prywatny.
+	// The deployment plan without touching the host and without reaching
+	// for the private key.
 	CertificateRequest_OPERATION_PLAN CertificateRequest_Operation = 4
-	// Store zaufania: plan kroku rotacji urzedu i sam krok. Kotwica jest
-	// materialem publicznym, wiec jedzie w zleceniu jawnie.
+	// The trust store: the plan of an authority rotation step and the step
+	// itself. The anchor is public material, so it travels in the order in
+	// the clear.
 	CertificateRequest_OPERATION_TRUST_PLAN   CertificateRequest_Operation = 5
 	CertificateRequest_OPERATION_TRUST_ENSURE CertificateRequest_Operation = 6
 	CertificateRequest_OPERATION_TRUST_REMOVE CertificateRequest_Operation = 7
@@ -942,7 +950,7 @@ func (CertificateRequest_Operation) EnumDescriptor() ([]byte, []int) {
 	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{33, 0}
 }
 
-// Fact wylicza to, czego nie da sie odczytac bez roota.
+// Fact enumerates what cannot be read without root.
 type CertificateRequest_Fact int32
 
 const (
@@ -1001,7 +1009,7 @@ const (
 	TimeRequest_OPERATION_UNSPECIFIED  TimeRequest_Operation = 0
 	TimeRequest_OPERATION_CONFIG_APPLY TimeRequest_Operation = 1
 	TimeRequest_OPERATION_TIMEZONE_SET TimeRequest_Operation = 2
-	// Plan zmiany zrodel czasu bez dotykania hosta.
+	// The time source change plan without touching the host.
 	TimeRequest_OPERATION_PLAN TimeRequest_Operation = 3
 )
 
@@ -1056,7 +1064,7 @@ const (
 	KernelRequest_OPERATION_SYSCTL_ENSURE    KernelRequest_Operation = 2
 	KernelRequest_OPERATION_MODULE_LOAD      KernelRequest_Operation = 3
 	KernelRequest_OPERATION_MODULE_BLACKLIST KernelRequest_Operation = 4
-	// Plan blokady modulu bez dotykania hosta.
+	// The module blacklist plan without touching the host.
 	KernelRequest_OPERATION_MODULE_PLAN KernelRequest_Operation = 5
 )
 
@@ -1114,10 +1122,11 @@ const (
 	FileRequest_OPERATION_READ        FileRequest_Operation = 1
 	FileRequest_OPERATION_ENSURE      FileRequest_Operation = 2
 	FileRequest_OPERATION_REMOVE      FileRequest_Operation = 3
-	// Odczyt stanu plikow, ktore panel juz zapisal.
+	// A read of the state of the files the panel already wrote.
 	FileRequest_OPERATION_LIST FileRequest_Operation = 4
-	// Policzenie roznicy miedzy stanem zastanym a zadanym. Nie zmienia
-	// niczego: odpowiada na pytanie, co by sie stalo i od czego zalezy.
+	// Computing the difference between the found and the requested state.
+	// It changes nothing: it answers what would happen and what it depends
+	// on.
 	FileRequest_OPERATION_PLAN FileRequest_Operation = 5
 )
 
@@ -1217,13 +1226,15 @@ func (ComposeRequest_Operation) EnumDescriptor() ([]byte, []int) {
 	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{45, 0}
 }
 
-// PROTOCOL_VERSION zmienia sie przy kazdej niezgodnej zmianie kontraktu.
-// Helper odrzuca wersje, ktorej nie zna, zamiast zgadywac znaczenie pol.
+// PROTOCOL_VERSION changes at every incompatible change of the contract.
+// The helper rejects a version it does not know instead of guessing the
+// meaning of the fields.
 type HelperRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	ProtocolVersion uint32                 `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
 	TaskId          string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	// Helper odrzuca zadanie po terminie, niezaleznie od tego, co twierdzi agent.
+	// The helper rejects a job past its deadline, regardless of what the
+	// agent claims.
 	ExpiresAt      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	TimeoutSeconds uint32                 `protobuf:"varint,4,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
 	MaxOutputBytes uint32                 `protobuf:"varint,5,opt,name=max_output_bytes,json=maxOutputBytes,proto3" json:"max_output_bytes,omitempty"`
@@ -1258,9 +1269,9 @@ type HelperRequest struct {
 	//	*HelperRequest_Repository
 	//	*HelperRequest_Backup
 	Action isHelperRequest_Action `protobuf_oneof:"action"`
-	// Postep dlugiej operacji. Klient, ktory o niego nie prosi, dostaje jedna
-	// odpowiedz jak dotad - starszy agent nie moze wziac wiadomosci o postepie
-	// za wynik operacji.
+	// Progress of a long operation. A client that does not ask for it gets
+	// one answer as before - an older agent must not take a progress message
+	// for the operation result.
 	WantProgress  bool `protobuf:"varint,28,opt,name=want_progress,json=wantProgress,proto3" json:"want_progress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1634,27 +1645,29 @@ type HelperRequest_PackageRepair struct {
 }
 
 type HelperRequest_DockerRead struct {
-	// Odczyt stanu silnika kontenerow. Agent nie dostaje gniazda Dockera:
-	// czlonkostwo w grupie docker jest rownowazne rootowi, wiec proces
-	// dzialajacy bez uprawnien nie moze go miec.
+	// A read of the container engine state. The agent does not get the
+	// Docker socket: membership in the docker group is equivalent to root,
+	// so a process running without privileges must not have it.
 	DockerRead *DockerReadRequest `protobuf:"bytes,29,opt,name=docker_read,json=dockerRead,proto3,oneof"`
 }
 
 type HelperRequest_DockerEvents struct {
-	// Dziennik zdarzen silnika: osobne zapytanie, bo ma wlasne okno czasu
-	// i wlasne limity. Odczyt bez konca zostalby na hoscie na zawsze.
+	// The engine event log: a separate request, because it has its own time
+	// window and its own limits. An endless read would stay on the host
+	// forever.
 	DockerEvents *DockerEventsRequest `protobuf:"bytes,48,opt,name=docker_events,json=dockerEvents,proto3,oneof"`
 }
 
 type HelperRequest_DockerAction struct {
-	// Operacja na silniku kontenerow. Zakres jest wyliczony, a nie podany
-	// sciezka: helper nie posredniczy w dowolnym wywolaniu Engine API.
+	// An operation on the container engine. The scope is enumerated, not
+	// given by a path: the helper does not relay an arbitrary Engine API
+	// call.
 	DockerAction *DockerActionRequest `protobuf:"bytes,30,opt,name=docker_action,json=dockerAction,proto3,oneof"`
 }
 
 type HelperRequest_Compose struct {
-	// Projekt Compose: plan albo wdrozenie. Manifest przychodzi w tresci,
-	// a nie jako sciezka na hoscie - operator zatwierdzil tresc.
+	// A Compose project: a plan or a deployment. The manifest comes in the
+	// body, not as a path on the host - the operator approved the content.
 	Compose *ComposeRequest `protobuf:"bytes,31,opt,name=compose,proto3,oneof"`
 }
 
@@ -1778,8 +1791,8 @@ func (*HelperRequest_Repository) isHelperRequest_Action() {}
 
 func (*HelperRequest_Backup) isHelperRequest_Action() {}
 
-// LocalAccountsRequest odczytuje te dane o kontach, ktore wymagaja roota:
-// stan blokady z /etc/shadow i klucze SSH z katalogow domowych.
+// LocalAccountsRequest reads the account data that requires root: the lock
+// state from /etc/shadow and the SSH keys from the home directories.
 type LocalAccountsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Names         []string               `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
@@ -1824,7 +1837,7 @@ func (x *LocalAccountsRequest) GetNames() []string {
 	return nil
 }
 
-// LocalUserActionRequest zmienia konto lokalne na hoscie.
+// LocalUserActionRequest changes a local account on the host.
 type LocalUserActionRequest struct {
 	state     protoimpl.MessageState           `protogen:"open.v1"`
 	Operation LocalUserActionRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.LocalUserActionRequest_Operation" json:"operation,omitempty"`
@@ -1832,10 +1845,10 @@ type LocalUserActionRequest struct {
 	Gecos     string                           `protobuf:"bytes,3,opt,name=gecos,proto3" json:"gecos,omitempty"`
 	Shell     string                           `protobuf:"bytes,4,opt,name=shell,proto3" json:"shell,omitempty"`
 	Groups    []string                         `protobuf:"bytes,5,rep,name=groups,proto3" json:"groups,omitempty"`
-	// Klucze publiczne w postaci pelnej. Klucz prywatny nigdy nie trafia
-	// do systemu, a hasla nie sa przesylane w ogole.
+	// Public keys in full form. A private key never reaches the system, and
+	// passwords are not sent at all.
 	SshKeys []string `protobuf:"bytes,6,rep,name=ssh_keys,json=sshKeys,proto3" json:"ssh_keys,omitempty"`
-	// CreateHome tworzy katalog domowy przy zakladaniu konta.
+	// CreateHome creates the home directory when creating the account.
 	CreateHome    bool `protobuf:"varint,7,opt,name=create_home,json=createHome,proto3" json:"create_home,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1920,8 +1933,8 @@ func (x *LocalUserActionRequest) GetCreateHome() bool {
 	return false
 }
 
-// DomainEnrollRequest dolacza hosta do domeny. Wymaga roota, bo zmienia
-// konfiguracje SSSD, Kerberosa i PAM.
+// DomainEnrollRequest joins the host to the domain. Requires root, because
+// it changes the SSSD, Kerberos and PAM configuration.
 type DomainEnrollRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Domain          string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
@@ -2006,8 +2019,9 @@ func (x *DomainEnrollRequest) GetPreflightOnly() bool {
 	return false
 }
 
-// IdentityProbeRequest odczytuje te elementy stanu domeny, ktore wymagaja
-// roota: keytab hosta i baze cache SSSD. Reszte agent czyta sam.
+// IdentityProbeRequest reads the elements of the domain state that require
+// root: the host keytab and the SSSD cache database. The agent reads the
+// rest itself.
 type IdentityProbeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
@@ -2052,7 +2066,7 @@ func (x *IdentityProbeRequest) GetDomain() string {
 	return ""
 }
 
-// RebootRequest zleca kontrolowany restart hosta.
+// RebootRequest orders a controlled reboot of the host.
 type RebootRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DelaySeconds  uint32                 `protobuf:"varint,1,opt,name=delay_seconds,json=delaySeconds,proto3" json:"delay_seconds,omitempty"`
@@ -2105,8 +2119,8 @@ func (x *RebootRequest) GetReason() string {
 	return ""
 }
 
-// ShutdownRequest wylacza hosta. Opoznienie daje agentowi czas na odeslanie
-// wyniku, zanim host zniknie z sieci.
+// ShutdownRequest powers the host off. The delay gives the agent time to
+// send the result back before the host disappears from the network.
 type ShutdownRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	DelaySeconds     uint32                 `protobuf:"varint,1,opt,name=delay_seconds,json=delaySeconds,proto3" json:"delay_seconds,omitempty"`
@@ -2243,23 +2257,26 @@ func (x *PowerResult) GetScheduledAt() string {
 	return ""
 }
 
-// PackageActionRequest obejmuje operacje pakietowe wymagajace roota.
-// Planowanie w trybie symulacji nie wymaga roota i nie idzie przez helper.
+// PackageActionRequest covers the package operations that require root.
+// Planning in simulation mode requires no root and does not go through the
+// helper.
 type PackageActionRequest struct {
 	state     protoimpl.MessageState         `protogen:"open.v1"`
 	Operation PackageActionRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.PackageActionRequest_Operation" json:"operation,omitempty"`
-	// Pusta lista przy OPERATION_UPGRADE oznacza wszystkie aktualizacje.
+	// An empty list with OPERATION_UPGRADE means all updates.
 	Packages     []string `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
 	SecurityOnly bool     `protobuf:"varint,3,opt,name=security_only,json=securityOnly,proto3" json:"security_only,omitempty"`
-	// Zbior usuwanych zatwierdzony przez operatora. Host liczy go ponownie tuz
-	// przed operacja: roznica oznacza, ze usunieciu podleglby inny zestaw.
+	// The removal set approved by the operator. The host computes it again
+	// right before the operation: a difference means a different set would be
+	// removed.
 	ExpectedRemovals []string `protobuf:"bytes,4,rep,name=expected_removals,json=expectedRemovals,proto3" json:"expected_removals,omitempty"`
-	// Wartosc docelowa wstrzymania. Operacja opisuje stan, a nie przelacznik.
+	// The desired hold value. The operation describes a state, not a toggle.
 	Hold bool `protobuf:"varint,5,opt,name=hold,proto3" json:"hold,omitempty"`
-	// Zgoda na instalacje wersji starszej niz zainstalowana. Menedzery
-	// pakietow odmawiaja tego domyslnie i slusznie: cofniecie wersji bywa
-	// nieodwracalne dla formatu danych. Wlacza to wylacznie operacja, ktora
-	// wskazuje wersje wprost - jak wymiana agenta na wersje powrotu.
+	// Consent to install a version older than the installed one. Package
+	// managers refuse that by default and rightly so: a downgrade is
+	// sometimes irreversible for the data format. Only an operation that
+	// names the version explicitly enables it - such as replacing the agent
+	// with the rollback version.
 	AllowDowngrade bool `protobuf:"varint,6,opt,name=allow_downgrade,json=allowDowngrade,proto3" json:"allow_downgrade,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -2392,7 +2409,7 @@ func (x *UnitActionRequest) GetOperation() UnitActionRequest_Operation {
 type HelperResponse struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Accepted bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	// Stabilny kod maszynowy: unknown_action, unsupported_version, expired,
+	// A stable machine code: unknown_action, unsupported_version, expired,
 	// protected_unit, invalid_unit, locked, exec_failed, timeout.
 	ErrorCode       string                 `protobuf:"bytes,2,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	Message         string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
@@ -2407,8 +2424,8 @@ type HelperResponse struct {
 	EnrollResult    *DomainEnrollResult    `protobuf:"bytes,12,opt,name=enroll_result,json=enrollResult,proto3" json:"enroll_result,omitempty"`
 	AccountsResult  *LocalAccountsResult   `protobuf:"bytes,13,opt,name=accounts_result,json=accountsResult,proto3" json:"accounts_result,omitempty"`
 	RepairResult    *PackageRepairResponse `protobuf:"bytes,14,opt,name=repair_result,json=repairResult,proto3" json:"repair_result,omitempty"`
-	// Postep operacji w toku. Wiadomosc z postepem nie jest odpowiedzia
-	// koncowa: klient czyta dalej, az dostanie final = true.
+	// The progress of an operation in flight. A progress message is not the
+	// final answer: the client keeps reading until it gets final = true.
 	Progress            *TaskProgress        `protobuf:"bytes,15,opt,name=progress,proto3" json:"progress,omitempty"`
 	Final               bool                 `protobuf:"varint,16,opt,name=final,proto3" json:"final,omitempty"`
 	DockerResult        *DockerReadResult    `protobuf:"bytes,17,opt,name=docker_result,json=dockerResult,proto3" json:"docker_result,omitempty"`
@@ -2717,9 +2734,9 @@ func (x *HelperResponse) GetDockerEventsResult() *DockerEventsResult {
 	return nil
 }
 
-// DockerReadRequest opisuje, co odczytac z silnika. Zakres jest wyliczony,
-// a nie podany sciezka: przekazanie sciezki do Engine API oznaczaloby, ze
-// przez helpera da sie wywolac dowolna jego operacje.
+// DockerReadRequest describes what to read from the engine. The scope is
+// enumerated, not given by a path: passing a path to the Engine API would
+// mean any of its operations can be called through the helper.
 type DockerReadRequest struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	Scope         DockerReadRequest_Scope `protobuf:"varint,1,opt,name=scope,proto3,enum=flotestro.helper.v1.DockerReadRequest_Scope" json:"scope,omitempty"`
@@ -2764,18 +2781,18 @@ func (x *DockerReadRequest) GetScope() DockerReadRequest_Scope {
 	return DockerReadRequest_SCOPE_UNSPECIFIED
 }
 
-// DockerActionRequest opisuje jedna operacje na silniku.
+// DockerActionRequest describes one operation on the engine.
 type DockerActionRequest struct {
 	state     protoimpl.MessageState        `protogen:"open.v1"`
 	Operation DockerActionRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.DockerActionRequest_Operation" json:"operation,omitempty"`
-	// Identyfikator kontenera; wylacznie szesnastkowy, sprawdzony przed
-	// wyslaniem i sprawdzony ponownie tutaj.
+	// The container identifier; hexadecimal only, checked before sending and
+	// checked again here.
 	ContainerId    string `protobuf:"bytes,2,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	TimeoutSeconds uint32 `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
 	RemoveVolumes  bool   `protobuf:"varint,4,opt,name=remove_volumes,json=removeVolumes,proto3" json:"remove_volumes,omitempty"`
 	ImageReference string `protobuf:"bytes,5,opt,name=image_reference,json=imageReference,proto3" json:"image_reference,omitempty"`
-	// Obiekty do usuniecia przy sprzataniu. Lista jest jawna: sprzatanie po
-	// filtrze usunęłoby takze to, czego operator nie widzial.
+	// The objects to remove at cleanup. The list is explicit: a cleanup by
+	// filter would also remove what the operator did not see.
 	ImageIds      []string `protobuf:"bytes,6,rep,name=image_ids,json=imageIds,proto3" json:"image_ids,omitempty"`
 	VolumeNames   []string `protobuf:"bytes,7,rep,name=volume_names,json=volumeNames,proto3" json:"volume_names,omitempty"`
 	NetworkIds    []string `protobuf:"bytes,8,rep,name=network_ids,json=networkIds,proto3" json:"network_ids,omitempty"`
@@ -2871,8 +2888,8 @@ func (x *DockerActionRequest) GetNetworkIds() []string {
 
 type DockerActionResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan kontenera przed i po, w postaci JSON. Zapisywany takze przy bledzie:
-	// bez tego nie wiadomo, co zdazylo sie zmienic.
+	// The container state before and after, in JSON form. Recorded also on
+	// failure: without it there is no knowing what managed to change.
 	Before         []byte   `protobuf:"bytes,1,opt,name=before,proto3" json:"before,omitempty"`
 	After          []byte   `protobuf:"bytes,2,opt,name=after,proto3" json:"after,omitempty"`
 	Removed        []string `protobuf:"bytes,3,rep,name=removed,proto3" json:"removed,omitempty"`
@@ -2947,12 +2964,8 @@ func (x *DockerActionResult) GetImageDigest() string {
 	return ""
 }
 
-// LogFileRequest czyta plik z allowlisty administratora hosta. Sciezka nie
-// jest dowolna: helper rozstrzyga ja wlasnym zakresem, nie tresci zadania.
-// ProcessSignalRequest wysyla sygnal do procesu. Czas startu wiaze zadanie
-// z konkretnym procesem, bo jadro uzywa numerow PID ponownie.
-// ScheduleRequest opisuje operacje na zadaniu cyklicznym. Wpis zarzadzany
-// opisuje stan docelowy, a nie polecenie do wykonania raz.
+// ScheduleRequest describes an operation on a scheduled job. A managed
+// entry describes a desired state, not a command to run once.
 type ScheduleRequest struct {
 	state      protoimpl.MessageState    `protogen:"open.v1"`
 	Operation  ScheduleRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.ScheduleRequest_Operation" json:"operation,omitempty"`
@@ -2962,8 +2975,8 @@ type ScheduleRequest struct {
 	User       string                    `protobuf:"bytes,5,opt,name=user,proto3" json:"user,omitempty"`
 	Comment    string                    `protobuf:"bytes,6,opt,name=comment,proto3" json:"comment,omitempty"`
 	Enabled    bool                      `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	// Przejecie wpisu zastanego na hoscie. Bez tego panel nie nadpisuje pracy,
-	// ktorej nikt do panelu nie wprowadzal.
+	// Taking over an entry found on the host. Without it the panel does not
+	// overwrite work nobody brought into the panel.
 	Adopt         bool `protobuf:"varint,8,opt,name=adopt,proto3" json:"adopt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3057,8 +3070,8 @@ func (x *ScheduleRequest) GetAdopt() bool {
 
 type ScheduleResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan harmonogramow w postaci JSON. Struktura nalezy do modulu
-	// harmonogramow; kontrakt helpera jej nie powtarza.
+	// The schedule state in JSON form. The structure belongs to the schedules
+	// module; the helper contract does not repeat it.
 	Snapshot      []byte `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -3109,16 +3122,18 @@ func (x *ScheduleResult) GetMessage() string {
 	return ""
 }
 
-// NetworkRequest opisuje zmiane konfiguracji sieci hosta.
+// NetworkRequest describes a change of the host network configuration.
 //
-// Kazda zmiana jest uzbrajana wycofaniem: helper zapisuje stan sprzed zmiany
-// i uruchamia lokalny zegar, ktory ten stan przywroci. Zegar rozbraja dopiero
-// potwierdzenie od agenta, ze host nadal rozmawia z panelem.
+// Every change is armed with a rollback: the helper records the state from
+// before the change and starts a local timer that restores that state. Only
+// the agent's confirmation that the host still talks to the panel disarms
+// the timer.
 type NetworkRequest struct {
 	state     protoimpl.MessageState   `protogen:"open.v1"`
 	Operation NetworkRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.NetworkRequest_Operation" json:"operation,omitempty"`
-	// Interfejs, ktorego zmiana dotyczy. Profil NetworkManagera helper znajduje
-	// sam: panel opisuje interfejs, bo to jego widzi operator.
+	// The interface the change concerns. The helper finds the NetworkManager
+	// profile itself: the panel describes the interface, because that is what
+	// the operator sees.
 	Interface string   `protobuf:"bytes,2,opt,name=interface,proto3" json:"interface,omitempty"`
 	Mtu       string   `protobuf:"bytes,3,opt,name=mtu,proto3" json:"mtu,omitempty"`
 	Routes    []string `protobuf:"bytes,4,rep,name=routes,proto3" json:"routes,omitempty"`
@@ -3126,15 +3141,16 @@ type NetworkRequest struct {
 	Addresses []string `protobuf:"bytes,6,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	Gateway   string   `protobuf:"bytes,7,opt,name=gateway,proto3" json:"gateway,omitempty"`
 	Dns       []string `protobuf:"bytes,8,rep,name=dns,proto3" json:"dns,omitempty"`
-	// Sekundy do wycofania. Zero oznacza wartosc domyslna helpera, a nie brak
-	// wycofania: zmiana sieci bez zegara ratunkowego nie jest tu mozliwa.
+	// Seconds until the rollback. Zero means the helper's default, not no
+	// rollback: a network change without a rescue timer is not possible here.
 	RollbackSeconds uint32 `protobuf:"varint,9,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
-	// Identyfikator planu wycofania przy potwierdzeniu albo wycofaniu.
+	// The rollback plan identifier for a confirmation or a rollback.
 	RollbackId string `protobuf:"bytes,10,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
 	Reason     string `protobuf:"bytes,11,opt,name=reason,proto3" json:"reason,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
-	// raz wobec profilu, ktory ma teraz: inny odcisk znaczy, ze host zmienil
-	// sie od planowania i zmiana wchodzilaby w inny stan niz ogladany.
+	// The fingerprint of the plan the operator agreed to. The helper computes
+	// the plan once more against the profile it has now: a different
+	// fingerprint means the host changed since planning and the change would
+	// enter a state other than the one looked at.
 	PlanHash      string `protobuf:"bytes,12,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3256,18 +3272,19 @@ func (x *NetworkRequest) GetPlanHash() string {
 
 type NetworkResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan profili w postaci JSON. Struktura nalezy do modulu sieci.
+	// The profile state in JSON form. The structure belongs to the network
+	// module.
 	Profiles []byte `protobuf:"bytes,1,opt,name=profiles,proto3" json:"profiles,omitempty"`
 	Message  string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// Identyfikator uzbrojonego wycofania. Puste oznacza operacje, ktora
-	// niczego nie uzbroila.
+	// The identifier of the armed rollback. Empty means an operation that
+	// armed nothing.
 	RollbackId string `protobuf:"bytes,3,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
-	// Chwila, o ktorej wycofanie sie wykona, jesli nikt go nie rozbroi.
+	// The moment the rollback runs at if nobody disarms it.
 	RollbackDeadline string `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
-	// Confirmed mowi, czy wycofanie zostalo rozbrojone.
+	// Confirmed says whether the rollback was disarmed.
 	Confirmed bool `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
-	// Plan zmiany w postaci JSON przy OPERATION_PLAN. Struktura nalezy do
-	// modulu sieci.
+	// The change plan in JSON form for OPERATION_PLAN. The structure belongs
+	// to the network module.
 	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3345,24 +3362,25 @@ func (x *NetworkResult) GetPlan() []byte {
 	return nil
 }
 
-// DnsRequest zmienia resolver hosta.
+// DnsRequest changes the host resolver.
 //
-// Zmiana idzie przez profil polaczenia, a nie przez zapis do resolv.conf:
-// plik nalezacy do resolved albo NetworkManagera zostanie i tak nadpisany
-// przy nastepnym zdarzeniu sieci, wiec zapis w nim znikalby sam.
+// The change goes through the connection profile, not through a write to
+// resolv.conf: a file owned by resolved or NetworkManager gets overwritten
+// anyway at the next network event, so a write into it would vanish on its
+// own.
 type DnsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Operation     DnsRequest_Operation   `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.DnsRequest_Operation" json:"operation,omitempty"`
 	Interface     string                 `protobuf:"bytes,2,opt,name=interface,proto3" json:"interface,omitempty"`
 	Servers       []string               `protobuf:"bytes,3,rep,name=servers,proto3" json:"servers,omitempty"`
 	SearchDomains []string               `protobuf:"bytes,4,rep,name=search_domains,json=searchDomains,proto3" json:"search_domains,omitempty"`
-	// IgnoreAutoDns odrzuca serwery podane przez DHCP. Bez tego serwery panelu
-	// i serwery dostawcy trafiaja do jednej listy, a operator nie wie, ktory
-	// odpowiedzial.
+	// IgnoreAutoDns rejects the servers given by DHCP. Without it the panel's
+	// servers and the provider's servers end up in one list, and the operator
+	// does not know which one answered.
 	IgnoreAutoDns   bool   `protobuf:"varint,5,opt,name=ignore_auto_dns,json=ignoreAutoDns,proto3" json:"ignore_auto_dns,omitempty"`
 	RollbackSeconds uint32 `protobuf:"varint,6,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil; helper liczy plan jeszcze
-	// raz wobec profilu, ktory ma teraz.
+	// The fingerprint of the plan the operator agreed to; the helper computes
+	// the plan once more against the profile it has now.
 	PlanHash      string `protobuf:"bytes,7,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3454,7 +3472,7 @@ type DnsResult struct {
 	RollbackId       string                 `protobuf:"bytes,3,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
 	RollbackDeadline string                 `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	Confirmed        bool                   `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
-	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	// The change plan in JSON form for OPERATION_PLAN.
 	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3532,16 +3550,16 @@ func (x *DnsResult) GetPlan() []byte {
 	return nil
 }
 
-// FirewallRequest opisuje operacje na zaporze hosta.
+// FirewallRequest describes an operation on the host firewall.
 //
-// Panel zmienia wylacznie wlasna tablice nftables albo strefe firewalld:
-// cudze lancuchy sa przepisywane bez jego udzialu, wiec regula w nich znika
-// bez sladu.
+// The panel changes only its own nftables table or a firewalld zone:
+// foreign chains are rewritten without it, so a rule in them vanishes
+// without a trace.
 type FirewallRequest struct {
 	state     protoimpl.MessageState    `protogen:"open.v1"`
 	Operation FirewallRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.FirewallRequest_Operation" json:"operation,omitempty"`
-	// Regula w postaci pol, ktore panel rozumie. Surowego zapisu nft nie
-	// przyjmujemy: host wykonalby wszystko, co da sie w nim zapisac.
+	// The rule as fields the panel understands. Raw nft notation is not
+	// accepted: the host would execute anything that can be written in it.
 	RuleId    string   `protobuf:"bytes,2,opt,name=rule_id,json=ruleId,proto3" json:"rule_id,omitempty"`
 	Chain     string   `protobuf:"bytes,3,opt,name=chain,proto3" json:"chain,omitempty"`
 	Action    string   `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"`
@@ -3550,20 +3568,22 @@ type FirewallRequest struct {
 	Sources   []string `protobuf:"bytes,7,rep,name=sources,proto3" json:"sources,omitempty"`
 	Interface string   `protobuf:"bytes,8,opt,name=interface,proto3" json:"interface,omitempty"`
 	Comment   string   `protobuf:"bytes,9,opt,name=comment,proto3" json:"comment,omitempty"`
-	// Strefa i usluga dotycza hostow z firewalld.
+	// The zone and the service concern hosts with firewalld.
 	Zone    string `protobuf:"bytes,10,opt,name=zone,proto3" json:"zone,omitempty"`
 	Service string `protobuf:"bytes,11,opt,name=service,proto3" json:"service,omitempty"`
 	Enable  bool   `protobuf:"varint,12,opt,name=enable,proto3" json:"enable,omitempty"`
-	// Adres i port kanalu zarzadzania. Regula, ktora je obejmuje, odcielaby
-	// panel od hosta - a wtedy nie ma czym cofnac zmiany.
+	// The address and port of the management channel. A rule covering them
+	// would cut the panel off from the host - and then there is nothing to
+	// undo the change with.
 	ManagementAddress string `protobuf:"bytes,13,opt,name=management_address,json=managementAddress,proto3" json:"management_address,omitempty"`
 	ManagementPort    uint32 `protobuf:"varint,14,opt,name=management_port,json=managementPort,proto3" json:"management_port,omitempty"`
-	// BreakGlass przelamuje ochrone kanalu zarzadzania. Wymaga jawnej decyzji
-	// operatora, bo skutkiem bywa host, do ktorego trzeba pojechac.
+	// BreakGlass overrides the management channel protection. It requires an
+	// explicit operator decision, because the result is sometimes a host one
+	// has to drive to.
 	BreakGlass      bool   `protobuf:"varint,15,opt,name=break_glass,json=breakGlass,proto3" json:"break_glass,omitempty"`
 	RollbackSeconds uint32 `protobuf:"varint,16,opt,name=rollback_seconds,json=rollbackSeconds,proto3" json:"rollback_seconds,omitempty"`
 	RollbackId      string `protobuf:"bytes,17,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
-	// Odcisk zestawu regul, wobec ktorego zlecono zmiane.
+	// The fingerprint of the ruleset the change was ordered against.
 	ExpectedHash  string `protobuf:"bytes,18,opt,name=expected_hash,json=expectedHash,proto3" json:"expected_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3727,13 +3747,15 @@ func (x *FirewallRequest) GetExpectedHash() string {
 
 type FirewallResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan zapory w postaci JSON. Struktura nalezy do modulu zapory.
+	// The firewall state in JSON form. The structure belongs to the firewall
+	// module.
 	Snapshot         []byte `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message          string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	RollbackId       string `protobuf:"bytes,3,opt,name=rollback_id,json=rollbackId,proto3" json:"rollback_id,omitempty"`
 	RollbackDeadline string `protobuf:"bytes,4,opt,name=rollback_deadline,json=rollbackDeadline,proto3" json:"rollback_deadline,omitempty"`
 	Confirmed        bool   `protobuf:"varint,5,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
-	// Plan jest opisem roznicy miedzy regula zastana a zadana, w JSON.
+	// Plan describes the difference between the found and the requested rule,
+	// in JSON.
 	Plan          []byte `protobuf:"bytes,6,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3811,12 +3833,12 @@ func (x *FirewallResult) GetPlan() []byte {
 	return nil
 }
 
-// StorageRequest opisuje operacje na przestrzeni dyskowej hosta.
+// StorageRequest describes an operation on the host storage.
 //
-// Urzadzenie wskazujemy sciezka wraz z oczekiwanym identyfikatorem: nazwa
-// /dev/sdX zalezy od kolejnosci wykrywania i po restarcie potrafi wskazac
-// inny dysk. Przy operacji niszczacej to jest roznica miedzy wlasciwym
-// dyskiem a cudzymi danymi.
+// A device is named by path together with an expected identifier: the
+// /dev/sdX name depends on the detection order and after a reboot can point
+// at a different disk. In a destructive operation that is the difference
+// between the right disk and somebody else's data.
 type StorageRequest struct {
 	state     protoimpl.MessageState   `protogen:"open.v1"`
 	Operation StorageRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.StorageRequest_Operation" json:"operation,omitempty"`
@@ -3824,27 +3846,29 @@ type StorageRequest struct {
 	Target    string                   `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
 	FsType    string                   `protobuf:"bytes,4,opt,name=fs_type,json=fsType,proto3" json:"fs_type,omitempty"`
 	Options   string                   `protobuf:"bytes,5,opt,name=options,proto3" json:"options,omitempty"`
-	// Persist zapisuje wpis w /etc/fstab. Bez niego montowanie zniknie po
-	// restarcie, a operator ma o tym wiedziec, a nie odkryc to po awarii.
+	// Persist records the entry in /etc/fstab. Without it the mount vanishes
+	// after a reboot, and the operator is to know that, not discover it after
+	// an outage.
 	Persist bool   `protobuf:"varint,6,opt,name=persist,proto3" json:"persist,omitempty"`
 	Device  string `protobuf:"bytes,7,opt,name=device,proto3" json:"device,omitempty"`
-	// ExpectedUuid wiaze operacje z konkretnym filesystemem.
+	// ExpectedUuid binds the operation to a specific filesystem.
 	ExpectedUuid string `protobuf:"bytes,8,opt,name=expected_uuid,json=expectedUuid,proto3" json:"expected_uuid,omitempty"`
-	// Repair wlacza naprawe zamiast samego sprawdzenia.
+	// Repair enables a repair instead of a bare check.
 	Repair bool `protobuf:"varint,9,opt,name=repair,proto3" json:"repair,omitempty"`
-	// Identity urzadzenia oczekiwana przez plan. Sama sciezka nie wystarczy:
-	// /dev/sdb po restarcie potrafi byc innym dyskiem niz ten, ktory operator
-	// ogladal - a przy formatowaniu to jest roznica miedzy pustym dyskiem
-	// a cudzymi danymi.
+	// The device identity the plan expects. The path alone is not enough:
+	// /dev/sdb after a reboot can be a different disk than the one the
+	// operator looked at - and when formatting that is the difference
+	// between an empty disk and somebody else's data.
 	ExpectedSerial    string `protobuf:"bytes,10,opt,name=expected_serial,json=expectedSerial,proto3" json:"expected_serial,omitempty"`
 	ExpectedSizeBytes uint64 `protobuf:"varint,11,opt,name=expected_size_bytes,json=expectedSizeBytes,proto3" json:"expected_size_bytes,omitempty"`
-	// Size jest przyrostem wolumenu, np. "+10G" albo "+100%FREE".
+	// Size is the volume increment, e.g. "+10G" or "+100%FREE".
 	Size  string `protobuf:"bytes,12,opt,name=size,proto3" json:"size,omitempty"`
 	Label string `protobuf:"bytes,13,opt,name=label,proto3" json:"label,omitempty"`
-	// Plan nazywa rodzaj planowanej operacji na urzadzeniu: check, resize
-	// albo lvm_extend.
+	// Plan names the kind of the planned device operation: check, resize or
+	// lvm_extend.
 	Plan string `protobuf:"bytes,14,opt,name=plan,proto3" json:"plan,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	// The fingerprint of the plan the operator agreed to; the helper computes
+	// it once more.
 	PlanHash      string `protobuf:"bytes,15,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3987,12 +4011,13 @@ func (x *StorageRequest) GetPlanHash() string {
 
 type StorageResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan przestrzeni w postaci JSON. Struktura nalezy do modulu.
+	// The storage state in JSON form. The structure belongs to the module.
 	Snapshot []byte `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// Output niesie wyjscie narzedzia sprawdzajacego filesystem.
+	// Output carries the output of the filesystem check tool.
 	Output string `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
-	// Plan jest opisem roznicy miedzy montowaniem zastanym a zadanym, w JSON.
+	// Plan describes the difference between the found and the requested
+	// mount, in JSON.
 	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4056,10 +4081,11 @@ func (x *StorageResult) GetPlan() []byte {
 	return nil
 }
 
-// SshRequest opisuje operacje na serwerze sshd.
+// SshRequest describes an operation on the sshd server.
 //
-// Konfiguracja idzie do wlasnego pliku w sshd_config.d, a nie do
-// sshd_config: plik glowny nalezy do dystrybucji i administratora hosta.
+// The configuration goes into its own file in sshd_config.d, not into
+// sshd_config: the main file belongs to the distribution and the host
+// administrator.
 type SshRequest struct {
 	state                        protoimpl.MessageState `protogen:"open.v1"`
 	Operation                    SshRequest_Operation   `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.SshRequest_Operation" json:"operation,omitempty"`
@@ -4072,13 +4098,14 @@ type SshRequest struct {
 	AllowUsers                   []string               `protobuf:"bytes,8,rep,name=allow_users,json=allowUsers,proto3" json:"allow_users,omitempty"`
 	AllowGroups                  []string               `protobuf:"bytes,9,rep,name=allow_groups,json=allowGroups,proto3" json:"allow_groups,omitempty"`
 	DenyUsers                    []string               `protobuf:"bytes,10,rep,name=deny_users,json=denyUsers,proto3" json:"deny_users,omitempty"`
-	// AllowLockout pozwala zapisac konfiguracje, po ktorej nie zostanie zadna
-	// dzialajaca metoda uwierzytelnienia. Wymaga jawnej decyzji operatora.
+	// AllowLockout allows writing a configuration after which no working
+	// authentication method remains. It requires an explicit operator
+	// decision.
 	AllowLockout bool `protobuf:"varint,11,opt,name=allow_lockout,json=allowLockout,proto3" json:"allow_lockout,omitempty"`
-	// KeyType wskazuje klucz hosta do wymiany, np. "ed25519".
+	// KeyType names the host key to rotate, e.g. "ed25519".
 	KeyType string `protobuf:"bytes,12,opt,name=key_type,json=keyType,proto3" json:"key_type,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil. Helper liczy plan jeszcze
-	// raz wobec stanu, ktory ma teraz.
+	// The fingerprint of the plan the operator agreed to. The helper computes
+	// the plan once more against the state it has now.
 	PlanHash      string `protobuf:"bytes,13,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4207,14 +4234,14 @@ func (x *SshRequest) GetPlanHash() string {
 
 type SshResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan sshd w postaci JSON. Struktura nalezy do modulu.
+	// The sshd state in JSON form. The structure belongs to the module.
 	Snapshot []byte `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// Mismatches wylicza ustawienia, ktore nie doszly do skutku mimo zapisu:
-	// w sshd wygrywa pierwsza wartosc, wiec wczesniejszy plik moze przeslonic
-	// nasz. Cisza w tym miejscu bylaby falszywym sukcesem.
+	// Mismatches lists the settings that did not take effect despite the
+	// write: in sshd the first value wins, so an earlier file may shadow
+	// ours. Silence here would be a false success.
 	Mismatches []string `protobuf:"bytes,3,rep,name=mismatches,proto3" json:"mismatches,omitempty"`
-	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	// The change plan in JSON form for OPERATION_PLAN.
 	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4278,12 +4305,12 @@ func (x *SshResult) GetPlan() []byte {
 	return nil
 }
 
-// SecurityRequest czyta stan ochronny hosta albo przelacza SELinuksa.
+// SecurityRequest reads the host security state or switches SELinux.
 //
-// Odczyt idzie przez helpera, bo prawie wszystko w nim wymaga roota: profile
-// AppArmora leza w securityfs, reguly audytu czyta auditctl, zmienne EFI sa
-// dostepne tylko dla roota, a wlascicieli gniazd widzi tylko ten, kto widzi
-// cudze procesy.
+// The read goes through the helper, because almost everything in it
+// requires root: the AppArmor profiles lie in securityfs, the audit rules
+// are read by auditctl, the EFI variables are readable only by root, and
+// the socket owners are seen only by whoever sees other people's processes.
 type SecurityRequest struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`
 	Operation     SecurityRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.SecurityRequest_Operation" json:"operation,omitempty"`
@@ -4346,7 +4373,7 @@ func (x *SecurityRequest) GetFacts() []SecurityRequest_Fact {
 
 type SecurityResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Facts niesie wylacznie to, o co pytano - a nie caly obraz hosta.
+	// Facts carries only what was asked for - not the whole host picture.
 	Facts         []byte `protobuf:"bytes,1,opt,name=facts,proto3" json:"facts,omitempty"`
 	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -4397,11 +4424,12 @@ func (x *SecurityResult) GetMessage() string {
 	return ""
 }
 
-// BackupRequest steruje narzedziem backupu na hoscie.
+// BackupRequest drives the backup tool on the host.
 //
-// Poswiadczenia przychodza tu jako wartosci - agent pobral je z magazynu tuz
-// przed operacja - i ida do narzedzia srodowiskiem, a nie argumentem. Wiersz
-// polecen procesu jest w /proc czytelny dla kazdego uzytkownika hosta.
+// The credentials arrive here as values - the agent fetched them from the
+// store right before the operation - and go to the tool through the
+// environment, not as an argument. A process command line is readable in
+// /proc by every user of the host.
 type BackupRequest struct {
 	state       protoimpl.MessageState  `protogen:"open.v1"`
 	Operation   BackupRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.BackupRequest_Operation" json:"operation,omitempty"`
@@ -4417,10 +4445,11 @@ type BackupRequest struct {
 	KeepMonthly int32                   `protobuf:"varint,11,opt,name=keep_monthly,json=keepMonthly,proto3" json:"keep_monthly,omitempty"`
 	Prune       bool                    `protobuf:"varint,12,opt,name=prune,proto3" json:"prune,omitempty"`
 	Runbook     string                  `protobuf:"bytes,13,opt,name=runbook,proto3" json:"runbook,omitempty"`
-	// Initialize jest zgoda na zalozenie repozytorium przy pierwszej kopii.
+	// Initialize is consent to initialise the repository at the first copy.
 	Initialize bool `protobuf:"varint,21,opt,name=initialize,proto3" json:"initialize,omitempty"`
-	// Password i env niosa wartosci z magazynu; zyja w pamieci helpera na czas
-	// operacji i nie trafiaja do wyniku ani do dziennika.
+	// Password and env carry the values from the store; they live in the
+	// helper's memory for the duration of the operation and reach neither
+	// the result nor the journal.
 	Password   []byte            `protobuf:"bytes,14,opt,name=password,proto3" json:"password,omitempty"`
 	Env        map[string][]byte `protobuf:"bytes,15,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	ReadData   bool              `protobuf:"varint,16,opt,name=read_data,json=readData,proto3" json:"read_data,omitempty"`
@@ -4428,10 +4457,11 @@ type BackupRequest struct {
 	Target     string            `protobuf:"bytes,18,opt,name=target,proto3" json:"target,omitempty"`
 	Include    []string          `protobuf:"bytes,19,rep,name=include,proto3" json:"include,omitempty"`
 	Overwrite  string            `protobuf:"bytes,20,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
-	// Plan nazywa rodzaj planowanej operacji: run albo verify. Puste przy
-	// OPERATION_PLAN znaczy odczyt stanu repozytorium.
+	// Plan names the kind of the planned operation: run or verify. Empty with
+	// OPERATION_PLAN means a read of the repository state.
 	Plan string `protobuf:"bytes,23,opt,name=plan,proto3" json:"plan,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	// The fingerprint of the plan the operator agreed to; the helper computes
+	// it once more.
 	PlanHash      string `protobuf:"bytes,22,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4633,11 +4663,11 @@ type BackupResult struct {
 	State   []byte                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
 	Outcome []byte                 `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"`
 	Message string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	// Plan kopii w postaci JSON przy OPERATION_PLAN z zakresem. Hasla
-	// repozytorium w nim nie ma.
+	// The backup plan in JSON form for OPERATION_PLAN with a scope. The
+	// repository password is not in it.
 	Plan []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
-	// Verified mowi, ze po kopii host sprawdzil repozytorium. Kopia bez
-	// sprawdzenia nie jest sukcesem.
+	// Verified says that after the copy the host checked the repository. A
+	// copy without a check is not a success.
 	Verified      bool `protobuf:"varint,5,opt,name=verified,proto3" json:"verified,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4708,11 +4738,12 @@ func (x *BackupResult) GetVerified() bool {
 	return false
 }
 
-// RepositoryRequest zapisuje albo usuwa zrodlo pakietow.
+// RepositoryRequest writes or removes a package source.
 //
-// Odczytu tu nie ma: pliki zrodel sa jawne i czyta je agent. Do helpera
-// trafia zapis - bo katalog zrodel nalezy do roota - i haslo, ktore agent
-// pobral z magazynu tuz przed operacja.
+// There is no read here: the source files are public and the agent reads
+// them. The helper gets the write - because the source directory belongs to
+// root - and the password the agent fetched from the store right before the
+// operation.
 type RepositoryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -4726,11 +4757,12 @@ type RepositoryRequest struct {
 	GpgKey        string                 `protobuf:"bytes,9,opt,name=gpg_key,json=gpgKey,proto3" json:"gpg_key,omitempty"`
 	AllowUnsigned bool                   `protobuf:"varint,10,opt,name=allow_unsigned,json=allowUnsigned,proto3" json:"allow_unsigned,omitempty"`
 	Username      string                 `protobuf:"bytes,11,opt,name=username,proto3" json:"username,omitempty"`
-	// Password przychodzi z magazynu przez agenta, zyje w pamieci helpera na
-	// czas operacji i trafia wylacznie do pliku z prawami roota.
+	// Password comes from the store through the agent, lives in the helper's
+	// memory for the duration of the operation and goes only into a file with
+	// root permissions.
 	Password []byte `protobuf:"bytes,12,opt,name=password,proto3" json:"password,omitempty"`
-	// SecretName zapisujemy w pliku zrodla jako komentarz: panel ma widziec,
-	// z ktorego sekretu pochodzi haslo. Nazwa, nie wartosc.
+	// SecretName is written into the source file as a comment: the panel is
+	// to see which secret the password comes from. The name, not the value.
 	SecretName    string `protobuf:"bytes,13,opt,name=secret_name,json=secretName,proto3" json:"secret_name,omitempty"`
 	Remove        bool   `protobuf:"varint,14,opt,name=remove,proto3" json:"remove,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -4933,7 +4965,8 @@ func (x *RepositoryResult) GetRolledBack() bool {
 	return false
 }
 
-// CertificateTarget wskazuje plik certyfikatu i klucz, ktory do niego nalezy.
+// CertificateTarget points at a certificate file and the key that belongs
+// to it.
 type CertificateTarget struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -4994,11 +5027,12 @@ func (x *CertificateTarget) GetService() string {
 	return ""
 }
 
-// CertificateRequest czyta fakty o certyfikatach albo wdraza nowy.
+// CertificateRequest reads facts about certificates or deploys a new one.
 //
-// Odczytu w calosci tu nie ma: tresc certyfikatu czyta agent, bo plik jest
-// jawny. Do helpera trafia to, czego bez roota nie widac - prawa kluczy,
-// zlecenia certmongera i pliki zamkniete dla wszystkich poza usluga.
+// There is no full read here: the certificate content is read by the agent,
+// because the file is public. The helper gets what cannot be seen without
+// root - the key permissions, the certmonger requests and files closed to
+// everybody but the service.
 type CertificateRequest struct {
 	state     protoimpl.MessageState       `protogen:"open.v1"`
 	Operation CertificateRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.CertificateRequest_Operation" json:"operation,omitempty"`
@@ -5006,11 +5040,12 @@ type CertificateRequest struct {
 	Targets   []*CertificateTarget         `protobuf:"bytes,3,rep,name=targets,proto3" json:"targets,omitempty"`
 	Path      string                       `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
 	KeyPath   string                       `protobuf:"bytes,5,opt,name=key_path,json=keyPath,proto3" json:"key_path,omitempty"`
-	// Certificate jest trescia jawna certyfikatu wraz z lancuchem.
+	// Certificate is the public content of the certificate together with its
+	// chain.
 	Certificate []byte `protobuf:"bytes,6,opt,name=certificate,proto3" json:"certificate,omitempty"`
-	// Key jest trescia klucza prywatnego. Przychodzi z magazynu przez agenta
-	// tuz przed operacja, zyje w pamieci helpera na czas jej trwania i nie
-	// trafia do zadnego pliku poza tym, ktory ma powstac.
+	// Key is the private key content. It comes from the store through the
+	// agent right before the operation, lives in the helper's memory for its
+	// duration and reaches no file other than the one that is to be created.
 	Key         []byte `protobuf:"bytes,7,opt,name=key,proto3" json:"key,omitempty"`
 	Owner       string `protobuf:"bytes,8,opt,name=owner,proto3" json:"owner,omitempty"`
 	Group       string `protobuf:"bytes,9,opt,name=group,proto3" json:"group,omitempty"`
@@ -5019,18 +5054,20 @@ type CertificateRequest struct {
 	ReloadUnit  string `protobuf:"bytes,12,opt,name=reload_unit,json=reloadUnit,proto3" json:"reload_unit,omitempty"`
 	ProbeTarget string `protobuf:"bytes,13,opt,name=probe_target,json=probeTarget,proto3" json:"probe_target,omitempty"`
 	Request     string `protobuf:"bytes,14,opt,name=request,proto3" json:"request,omitempty"`
-	// Authoritative mowi, ze lista celow jest pelna lista panelu dla tego hosta.
-	// Helper zapamietuje ja u siebie, zeby inwentarz opisywal te same pliki
-	// takze wtedy, gdy panel akurat nie pyta - tak samo jak przy plikach
-	// zarzadzanych. Bez tego zakladka pokazywalaby stan sprzed ostatniej zmiany
-	// konfiguracji panelu.
+	// Authoritative says the target list is the panel's full list for this
+	// host. The helper remembers it, so that the inventory describes the same
+	// files also when the panel is not asking right now - just like with
+	// managed files. Without it the tab would show the state from before the
+	// last change of the panel configuration.
 	Authoritative bool `protobuf:"varint,15,opt,name=authoritative,proto3" json:"authoritative,omitempty"`
-	// KeySecretRef nazywa sekret klucza w postaci "nazwa#wersja". Sama nazwa,
-	// nigdy wartosc: plan ma powiedziec, skad host wezmie klucz.
+	// KeySecretRef names the key secret in the form "name#version". The name
+	// alone, never the value: the plan is to say where the host takes the key
+	// from.
 	KeySecretRef string `protobuf:"bytes,16,opt,name=key_secret_ref,json=keySecretRef,proto3" json:"key_secret_ref,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	// The fingerprint of the plan the operator agreed to; the helper computes
+	// it once more.
 	PlanHash string `protobuf:"bytes,17,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
-	// AnchorId nazywa kotwice panelu w magazynie zaufania hosta.
+	// AnchorId names the panel anchor in the host trust store.
 	AnchorId      string `protobuf:"bytes,18,opt,name=anchor_id,json=anchorId,proto3" json:"anchor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5194,18 +5231,18 @@ func (x *CertificateRequest) GetAnchorId() string {
 
 type CertificateResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Facts niesie wylacznie to, o co pytano.
+	// Facts carries only what was asked for.
 	Facts             []byte `protobuf:"bytes,1,opt,name=facts,proto3" json:"facts,omitempty"`
 	Message           string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	FingerprintSha256 string `protobuf:"bytes,3,opt,name=fingerprint_sha256,json=fingerprintSha256,proto3" json:"fingerprint_sha256,omitempty"`
 	NotAfter          string `protobuf:"bytes,4,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
 	Probe             []byte `protobuf:"bytes,5,opt,name=probe,proto3" json:"probe,omitempty"`
 	RolledBack        bool   `protobuf:"varint,6,opt,name=rolled_back,json=rolledBack,proto3" json:"rolled_back,omitempty"`
-	// Plan wdrozenia w postaci JSON przy OPERATION_PLAN. Klucza prywatnego
-	// w nim nie ma.
+	// The deployment plan in JSON form for OPERATION_PLAN. The private key is
+	// not in it.
 	Plan []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
-	// Trust niesie magazyn zaufania hosta w postaci JSON: kotwice panelu
-	// i te, ktore administrator hosta polozyl tam sam.
+	// Trust carries the host trust store in JSON form: the panel anchors and
+	// those the host administrator put there themselves.
 	Trust         []byte `protobuf:"bytes,8,opt,name=trust,proto3" json:"trust,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5297,21 +5334,25 @@ func (x *CertificateResult) GetTrust() []byte {
 	return nil
 }
 
-// TimeRequest zmienia zrodla czasu albo strefe hosta.
+// TimeRequest changes the time sources or the host time zone.
 //
-// Odczytu tu nie ma: stan czasu czyta agent, bo timedatectl i chronyc
-// odpowiadaja kazdemu, a kazde przejscie przez roota trzeba uzasadnic.
+// There is no read here: the time state is read by the agent, because
+// timedatectl and chronyc answer everybody, and every passage through root
+// has to be justified.
 type TimeRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Operation TimeRequest_Operation  `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.TimeRequest_Operation" json:"operation,omitempty"`
 	Servers   []string               `protobuf:"bytes,2,rep,name=servers,proto3" json:"servers,omitempty"`
 	Timezone  string                 `protobuf:"bytes,3,opt,name=timezone,proto3" json:"timezone,omitempty"`
-	// AllowStep jest zgoda operatora na przestawienie zegara skokiem. Bez niej
-	// host odrzuca zmiane, ktora cofnelaby czas o wiecej niz prog.
+	// AllowStep is the operator's consent to step the clock. Without it the
+	// host rejects a change that would move the time back by more than the
+	// threshold.
 	AllowStep bool `protobuf:"varint,4,opt,name=allow_step,json=allowStep,proto3" json:"allow_step,omitempty"`
-	// EnableDropin jest zgoda na dopisanie katalogu zrodel do glownego pliku.
+	// EnableDropin is consent to append the source directory to the main
+	// file.
 	EnableDropin bool `protobuf:"varint,5,opt,name=enable_dropin,json=enableDropin,proto3" json:"enable_dropin,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	// The fingerprint of the plan the operator agreed to; the helper computes
+	// it once more.
 	PlanHash      string `protobuf:"bytes,6,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5394,7 +5435,7 @@ type TimeResult struct {
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	Probes   []byte                 `protobuf:"bytes,3,opt,name=probes,proto3" json:"probes,omitempty"`
-	// Plan zmiany w postaci JSON przy OPERATION_PLAN.
+	// The change plan in JSON form for OPERATION_PLAN.
 	Plan          []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5458,21 +5499,22 @@ func (x *TimeResult) GetPlan() []byte {
 	return nil
 }
 
-// KernelRequest opisuje operacje na ustawieniach jadra.
+// KernelRequest describes an operation on the kernel settings.
 //
-// Panel zmienia ustawienia z okreslonych galezi /proc/sys i zapisuje je do
-// wlasnego pliku: dowolny zapis do /proc/sys obejmuje takze przelaczniki,
-// ktore wylaczaja ochrony jadra albo zatrzymuja host.
+// The panel changes settings from specific branches of /proc/sys and writes
+// them into its own file: an arbitrary write to /proc/sys also covers the
+// switches that disable kernel protections or halt the host.
 type KernelRequest struct {
 	state     protoimpl.MessageState  `protogen:"open.v1"`
 	Operation KernelRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.KernelRequest_Operation" json:"operation,omitempty"`
 	Settings  map[string]string       `protobuf:"bytes,2,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Keys wskazuje dodatkowe klucze do odczytu poza profilem.
+	// Keys names additional keys to read beyond the profile.
 	Keys   []string `protobuf:"bytes,3,rep,name=keys,proto3" json:"keys,omitempty"`
 	Module string   `protobuf:"bytes,4,opt,name=module,proto3" json:"module,omitempty"`
-	// Blacklist mowi, czy modul ma zostac zablokowany, czy odblokowany.
+	// Blacklist says whether the module is to be blacklisted or unblacklisted.
 	Blacklist bool `protobuf:"varint,5,opt,name=blacklist,proto3" json:"blacklist,omitempty"`
-	// Odcisk planu, na ktory operator sie zgodzil; helper liczy go jeszcze raz.
+	// The fingerprint of the plan the operator agreed to; the helper computes
+	// it once more.
 	PlanHash      string `protobuf:"bytes,6,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5554,12 +5596,13 @@ type KernelResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// PendingReboot wylicza ustawienia zapisane trwale, ktorych jadro nie
-	// przyjelo od reki. Zapis i skutek to dwie rozne rzeczy.
+	// PendingReboot lists the settings written persistently that the kernel
+	// did not accept right away. The write and the effect are two different
+	// things.
 	PendingReboot []string `protobuf:"bytes,3,rep,name=pending_reboot,json=pendingReboot,proto3" json:"pending_reboot,omitempty"`
-	// AppliedRuntime wylicza ustawienia, ktore obowiazuja juz teraz.
+	// AppliedRuntime lists the settings that already apply now.
 	AppliedRuntime []string `protobuf:"bytes,4,rep,name=applied_runtime,json=appliedRuntime,proto3" json:"applied_runtime,omitempty"`
-	// Plan blokady modulu w postaci JSON przy OPERATION_MODULE_PLAN.
+	// The module blacklist plan in JSON form for OPERATION_MODULE_PLAN.
 	Plan          []byte `protobuf:"bytes,5,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5630,10 +5673,10 @@ func (x *KernelResult) GetPlan() []byte {
 	return nil
 }
 
-// FileRequest opisuje operacje na pliku konfiguracyjnym.
+// FileRequest describes an operation on a configuration file.
 //
-// To nie jest menedzer plikow roota: zakres sciezek jest wyliczony, a plik
-// z hashami hasel, klucz prywatny i regula sudo nie sa edytowalne nigdy.
+// This is not a root file manager: the path scope is enumerated, and the
+// password hash file, a private key and a sudo rule are never editable.
 type FileRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Operation FileRequest_Operation  `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.FileRequest_Operation" json:"operation,omitempty"`
@@ -5642,13 +5685,14 @@ type FileRequest struct {
 	Mode      string                 `protobuf:"bytes,4,opt,name=mode,proto3" json:"mode,omitempty"`
 	Owner     string                 `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`
 	Group     string                 `protobuf:"bytes,6,opt,name=group,proto3" json:"group,omitempty"`
-	// ExpectedSha256 wiaze zapis z trescia, ktora operator ogladal. Niezgodny
-	// ze stanem hosta zatrzymuje zapis zamiast nadpisac cudza zmiane.
+	// ExpectedSha256 binds the write to the content the operator looked at.
+	// One that disagrees with the host state stops the write instead of
+	// overwriting somebody else's change.
 	ExpectedSha256 string `protobuf:"bytes,7,opt,name=expected_sha256,json=expectedSha256,proto3" json:"expected_sha256,omitempty"`
 	Validator      string `protobuf:"bytes,8,opt,name=validator,proto3" json:"validator,omitempty"`
-	// FromSecret oznacza tresc pochodzaca z magazynu sekretow. Helper zapisuje
-	// to w swoim rejestrze i przestaje zglaszac odcisk takiego pliku: dla
-	// krotkiej wartosci sam odcisk jest wskazowka.
+	// FromSecret means content that comes from the secret store. The helper
+	// records that in its registry and stops reporting the digest of such a
+	// file: for a short value the digest alone is a hint.
 	FromSecret    bool `protobuf:"varint,9,opt,name=from_secret,json=fromSecret,proto3" json:"from_secret,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5751,16 +5795,17 @@ type FileResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// Content jest trescia pliku przy odczycie.
+	// Content is the file content on a read.
 	Content   []byte `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
 	Sha256    string `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
 	Truncated bool   `protobuf:"varint,5,opt,name=truncated,proto3" json:"truncated,omitempty"`
-	// ValidatorOutput niesie wynik sprawdzenia tresci. Puste oznacza plik,
-	// dla ktorego panel nie zna sprawdzenia - i to tez jest odpowiedz.
+	// ValidatorOutput carries the result of the content check. Empty means a
+	// file the panel knows no check for - and that too is an answer.
 	ValidatorOutput string `protobuf:"bytes,6,opt,name=validator_output,json=validatorOutput,proto3" json:"validator_output,omitempty"`
-	// Plan jest opisem roznicy miedzy stanem zastanym a zadanym, w JSON.
-	// Osobne pole, bo plan dotyczy zmiany, ktora sie jeszcze nie wydarzyla,
-	// a pozostale pola opisuja to, co host ma teraz.
+	// Plan describes the difference between the found and the requested
+	// state, in JSON. A separate field, because the plan concerns a change
+	// that has not happened yet, and the other fields describe what the host
+	// has now.
 	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5845,6 +5890,8 @@ func (x *FileResult) GetPlan() []byte {
 	return nil
 }
 
+// ProcessSignalRequest sends a signal to a process. The start time binds the
+// request to a specific process, because the kernel reuses PID numbers.
 type ProcessSignalRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Pid                int32                  `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
@@ -5957,6 +6004,9 @@ func (x *ProcessSignalResult) GetSignal() string {
 	return ""
 }
 
+// LogFileRequest reads a file from the host administrator's allowlist. The
+// path is not arbitrary: the helper resolves it against its own scope, not
+// the request body.
 type LogFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -6015,8 +6065,8 @@ type LogFileResult struct {
 	Lines     []string               `protobuf:"bytes,2,rep,name=lines,proto3" json:"lines,omitempty"`
 	Truncated bool                   `protobuf:"varint,3,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	SizeBytes int64                  `protobuf:"varint,4,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
-	// Czym odczyt jest ograniczony. Operator ma wiedziec, dlaczego czegos
-	// nie widzi.
+	// What bounds the read. The operator is to know why they do not see
+	// something.
 	Allowlist     string `protobuf:"bytes,5,opt,name=allowlist,proto3" json:"allowlist,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6092,7 +6142,7 @@ type ComposeRequest struct {
 	Operation ComposeRequest_Operation `protobuf:"varint,1,opt,name=operation,proto3,enum=flotestro.helper.v1.ComposeRequest_Operation" json:"operation,omitempty"`
 	Project   string                   `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
 	Manifest  string                   `protobuf:"bytes,3,opt,name=manifest,proto3" json:"manifest,omitempty"`
-	// Hash zatwierdzonego planu. Wdrozenie bez niego nie ma podstawy.
+	// The hash of the approved plan. A deployment without it has no basis.
 	PlanDigest    string `protobuf:"bytes,4,opt,name=plan_digest,json=planDigest,proto3" json:"plan_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6158,8 +6208,8 @@ func (x *ComposeRequest) GetPlanDigest() string {
 
 type ComposeResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Plan albo wynik wdrozenia w postaci JSON. Struktura nalezy do modulu
-	// kontenerow; kontrakt helpera jej nie powtarza.
+	// The plan or the deployment result in JSON form. The structure belongs
+	// to the containers module; the helper contract does not repeat it.
 	Payload           []byte `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	UnavailableReason string `protobuf:"bytes,2,opt,name=unavailable_reason,json=unavailableReason,proto3" json:"unavailable_reason,omitempty"`
 	unknownFields     protoimpl.UnknownFields
@@ -6210,9 +6260,9 @@ func (x *ComposeResult) GetUnavailableReason() string {
 	return ""
 }
 
-// DockerEventsRequest opisuje zamkniete okno odczytu dziennika zdarzen.
-// Helper nie przyjmuje filtra w postaci gotowego zapytania do Engine API:
-// rodzaje zdarzen sa nazwane, a okno i limity - wyliczone.
+// DockerEventsRequest describes a closed window of reading the event log.
+// The helper does not accept a filter as a ready Engine API query: the
+// event kinds are named, and the window and limits enumerated.
 type DockerEventsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SinceSeconds  uint32                 `protobuf:"varint,1,opt,name=since_seconds,json=sinceSeconds,proto3" json:"since_seconds,omitempty"`
@@ -6351,12 +6401,12 @@ func (x *DockerEventsResult) GetUnavailableReason() string {
 
 type DockerReadResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Stan silnika w postaci JSON. Struktura nalezy do modulu kontenerow
-	// i nie jest powtarzana w kontrakcie helpera - helper jej nie interpretuje,
-	// tylko przenosi.
+	// The engine state in JSON form. The structure belongs to the containers
+	// module and is not repeated in the helper contract - the helper does not
+	// interpret it, only carries it.
 	Snapshot []byte `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	// Powod, dla ktorego stanu nie udalo sie ustalic. Pusty silnik i silnik
-	// nieodpytany to dwie rozne informacje.
+	// The reason the state could not be determined. An empty engine and an
+	// unqueried engine are two different pieces of information.
 	UnavailableReason string `protobuf:"bytes,2,opt,name=unavailable_reason,json=unavailableReason,proto3" json:"unavailable_reason,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -6406,19 +6456,21 @@ func (x *DockerReadResult) GetUnavailableReason() string {
 	return ""
 }
 
-// TaskProgress opisuje postep operacji, ktora trwa na tyle dlugo, ze operator
-// musi widziec, na czym stoi. Postep jest ulotny: nie zastepuje wyniku i nie
-// jest zapisywany - liczy sie to, co widac teraz.
+// TaskProgress describes the progress of an operation that lasts long
+// enough for the operator to need to see where it stands. Progress is
+// transient: it does not replace the result and is not recorded - what
+// counts is what is visible now.
 type TaskProgress struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Krok i liczba krokow, gdy narzedzie je podaje. Zero oznacza nieznane
-	// i nie moze byc pokazane jako zero krokow.
+	// The step and the step count, when the tool gives them. Zero means
+	// unknown and must not be shown as zero steps.
 	Step  uint32 `protobuf:"varint,1,opt,name=step,proto3" json:"step,omitempty"`
 	Total uint32 `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
-	// Procent podawany osobno, bo apt zna procent bez krokow, a dnf kroki
-	// bez procentu. Brak pola oznacza postep nieustalony.
+	// The percentage given separately, because apt knows the percentage
+	// without steps, and dnf the steps without a percentage. A missing field
+	// means undetermined progress.
 	Percent *uint32 `protobuf:"varint,3,opt,name=percent,proto3,oneof" json:"percent,omitempty"`
-	// Co sie akurat dzieje, np. "Upgrading nfs-utils".
+	// What is happening right now, e.g. "Upgrading nfs-utils".
 	Message       string `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6805,7 +6857,7 @@ type IdentityProbeResult struct {
 	CacheAgeSeconds *uint64                `protobuf:"varint,3,opt,name=cache_age_seconds,json=cacheAgeSeconds,proto3,oneof" json:"cache_age_seconds,omitempty"`
 	SssdOnline      *bool                  `protobuf:"varint,4,opt,name=sssd_online,json=sssdOnline,proto3,oneof" json:"sssd_online,omitempty"`
 	ConfigIssues    []string               `protobuf:"bytes,5,rep,name=config_issues,json=configIssues,proto3" json:"config_issues,omitempty"`
-	// Powod, dla ktorego czesci stanu nie udalo sie ustalic.
+	// The reason part of the state could not be determined.
 	UnavailableReason string `protobuf:"bytes,6,opt,name=unavailable_reason,json=unavailableReason,proto3" json:"unavailable_reason,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -6889,14 +6941,15 @@ type PackageActionResult struct {
 	Applied                []*PackageVersionChange `protobuf:"bytes,2,rep,name=applied,proto3" json:"applied,omitempty"`
 	RebootRequired         bool                    `protobuf:"varint,3,opt,name=reboot_required,json=rebootRequired,proto3" json:"reboot_required,omitempty"`
 	ServicesNeedingRestart []string                `protobuf:"bytes,4,rep,name=services_needing_restart,json=servicesNeedingRestart,proto3" json:"services_needing_restart,omitempty"`
-	// Prawda, gdy baza pakietow wymaga naprawy po nieudanej transakcji.
+	// True when the package database needs repair after a failed transaction.
 	PackageDatabaseBroken bool `protobuf:"varint,5,opt,name=package_database_broken,json=packageDatabaseBroken,proto3" json:"package_database_broken,omitempty"`
-	// Pakiety, ktore czekaja na dokonczenie konfiguracji albo sa uszkodzone.
+	// Packages waiting for their configuration to be finished or broken.
 	PackagesNeedingAttention []string `protobuf:"bytes,6,rep,name=packages_needing_attention,json=packagesNeedingAttention,proto3" json:"packages_needing_attention,omitempty"`
-	// Co adapter naprawil sam przed ponowieniem transakcji. Cicha naprawa
-	// bylaby gorsza od jej braku: host zostal dotkniety inaczej, niz zlecono.
+	// What the adapter repaired itself before retrying the transaction. A
+	// quiet repair would be worse than none: the host was touched differently
+	// than ordered.
 	SelfRepair []string `protobuf:"bytes,7,rep,name=self_repair,json=selfRepair,proto3" json:"self_repair,omitempty"`
-	// Koncowka wyjscia narzedzia przy niepowodzeniu.
+	// The tail of the tool output on failure.
 	Output        []string `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6988,9 +7041,9 @@ func (x *PackageActionResult) GetOutput() []string {
 	return nil
 }
 
-// PackageRepairRequest odblokowuje operacje pakietowe. Odpowiedzi na pytania
-// konfiguracyjne pochodza od operatora i sa ustawiane przed dokonczeniem
-// konfiguracji pakietow.
+// PackageRepairRequest unblocks package operations. The answers to the
+// configuration questions come from the operator and are set before the
+// package configuration is finished.
 type PackageRepairRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Answers       []*DebconfSelection    `protobuf:"bytes,1,rep,name=answers,proto3" json:"answers,omitempty"`

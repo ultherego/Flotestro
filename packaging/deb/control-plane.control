@@ -1,17 +1,19 @@
 Package: flotestro-control-plane
-Version: __WERSJA__
+Version: __VERSION__
 Section: admin
 Priority: optional
 Architecture: __ARCH__
 Maintainer: Flotestro <flotestro@localhost>
 Depends: systemd, adduser
 Recommends: postgresql-client
-Description: Panel zarzadzania flota Linux Flotestro
- Control plane przyjmuje sesje agentow przez mTLS, planuje operacje typowane
- i prowadzi kampanie na flocie. Wystawia panel webowy oraz API REST.
+Description: Flotestro Linux fleet management panel
+ The control plane accepts agent sessions over mTLS, plans typed operations
+ and runs campaigns on the fleet. It serves the web panel and the REST API.
  .
- PostgreSQL jest jedynym zrodlem prawdy; schemat jest zakladany i migrowany
- przy starcie. Baza moze byc lokalna lub zdalna - pakiet jej nie instaluje.
+ PostgreSQL is the only source of truth; the schema is created and migrated
+ at startup. The database may be local or remote - the package does not
+ install it.
  .
- Integracja z katalogiem tozsamosci i z dostawca logowania OIDC sa opcjonalne.
- Bez nich panel dziala na tokenach API i zarzadza kontami lokalnymi hostow.
+ The identity directory integration and the OIDC login provider are
+ optional. Without them the panel works on API tokens and manages the local
+ accounts of the hosts.

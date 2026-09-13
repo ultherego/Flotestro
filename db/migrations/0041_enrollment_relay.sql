@@ -1,13 +1,13 @@
--- Ograniczenie zamowienia enrollmentu do jednego relaya.
+-- Restricting an enrollment order to one relay.
 --
--- W izolowanej lokalizacji host nie widzi centrali i rejestruje sie przez
--- relay. Relay jest wtedy terminatorem TLS, wiec widzi token - i to on
--- poswiadcza centrali, ze zgloszenie przyszlo z jego lokalizacji.
+-- In an isolated site the host does not see the centre and enrolls through
+-- a relay. The relay is then the TLS terminator, so it sees the token - and it
+-- attests to the centre that the request came from its site.
 --
--- Bez tego ograniczenia token wyniesiony z jednej lokalizacji dzialalby
--- w kazdej innej. Wpisany relay_id znaczy: to zamowienie mozna zrealizowac
--- wylacznie przez ten relay. Puste znaczy "bez ograniczenia trasy" i tak
--- zostaje dla instalacji bez relayow.
+-- Without this restriction a token carried out of one site would work in any
+-- other. A set relay_id means: this order may be fulfilled only through this
+-- relay. Empty means "no route restriction" and stays so for installations
+-- without relays.
 alter table enrollment_requests add column relay_id uuid references relays (id);
 
 create index enrollment_requests_relay_idx on enrollment_requests (relay_id)

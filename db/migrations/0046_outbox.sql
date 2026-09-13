@@ -1,15 +1,15 @@
--- Trwaly slad zdarzen kampanii i jej celow.
+-- The durable trace of campaign and target events.
 --
--- Powiadomienia LISTEN/NOTIFY budza otwarte ekrany, ale nie sa kolejka trwala:
--- zdarzenie wyslane w chwili, gdy panel byl restartowany, nie istnieje juz
--- nigdzie. Stan koncowy da sie odczytac z tabel, ale przebieg - to, co i kiedy
--- sie stalo - znikal. Kampania bez przebiegu jest raportem po fakcie, a nie
--- kontrola nad rolloutem.
+-- LISTEN/NOTIFY notifications wake open screens, but are not a durable
+-- queue: an event sent at the moment the panel was restarting no longer
+-- exists anywhere. The final state can be read from the tables, but the
+-- course - what happened and when - vanished. A campaign without a timeline
+-- is a report after the fact, not control over the rollout.
 --
--- Zdarzenie powstaje w wyzwalaczu, a nie w kodzie panelu. Dzieki temu jest
--- zapisane w tej samej transakcji co zmiana stanu i nie da sie zmienic stanu
--- bez zapisania zdarzenia - takze wtedy, gdy zmiane zrobi inna instancja
--- panelu albo reczna poprawka w bazie.
+-- The event is created in a trigger, not in the panel code. Thanks to that
+-- it is recorded in the same transaction as the state change, and the state
+-- cannot be changed without recording the event - also when the change is
+-- made by another panel instance or a manual fix in the database.
 create table if not exists outbox_events (
     id             bigserial   primary key,
     aggregate_type text        not null,
@@ -17,24 +17,24 @@ create table if not exists outbox_events (
     event_type     text        not null,
     payload        jsonb       not null default '{}'::jsonb,
     occurred_at    timestamptz not null default now(),
-    -- published_at czeka na pierwszego konsumenta spoza panelu. Dzisiaj
-    -- jedynym odbiorca jest ten panel i czyta tabele wprost, wiec kolumna
-    -- zostaje pusta. Jest tutaj, bo przeniesienie publikacji na broker ma nie
-    -- wymagac zmiany ksztaltu zdarzen ani ich identyfikatorow.
+    -- published_at waits for the first consumer outside the panel. Today the
+    -- only recipient is this panel and it reads the table directly, so the
+    -- column stays empty. It is here so that moving publication to a broker
+    -- requires no change to the shape of the events or their identifiers.
     published_at   timestamptz
 );
 
 comment on table outbox_events is
-    'Trwaly slad zmian stanu. Zapisywany w jednej transakcji ze zmiana, ktora opisuje.';
+    'The durable trace of state changes. Recorded in the same transaction as the change it describes.';
 
-create index if not exists outbox_events_agregat
+create index if not exists outbox_events_aggregate_idx
     on outbox_events (aggregate_type, aggregate_id, id);
-create index if not exists outbox_events_nieopublikowane
+create index if not exists outbox_events_unpublished_idx
     on outbox_events (id) where published_at is null;
 
--- Zdarzenia celu kampanii. Powod i komunikat sa czescia zdarzenia, bo bez nich
--- "host failed" nie mowi nic poza tym, ze cos poszlo zle.
-create or replace function flotestro_zdarzenie_celu() returns trigger
+-- Campaign target events. The reason and the message are part of the event,
+-- because without them "host failed" says nothing beyond something going wrong.
+create or replace function flotestro_target_event() returns trigger
 language plpgsql as $$
 begin
     if tg_op = 'UPDATE' and old.state = new.state then
@@ -53,13 +53,13 @@ begin
 end;
 $$;
 
-drop trigger if exists campaign_targets_zdarzenie on campaign_targets;
-create trigger campaign_targets_zdarzenie
+drop trigger if exists campaign_targets_event on campaign_targets;
+create trigger campaign_targets_event
     after insert or update of state on campaign_targets
-    for each row execute function flotestro_zdarzenie_celu();
+    for each row execute function flotestro_target_event();
 
--- Zdarzenia samej kampanii: wejscie w faze, wstrzymanie, zamkniecie.
-create or replace function flotestro_zdarzenie_kampanii() returns trigger
+-- Events of the campaign itself: entering a phase, pausing, closing.
+create or replace function flotestro_campaign_event() returns trigger
 language plpgsql as $$
 begin
     if tg_op = 'UPDATE' and old.state = new.state then
@@ -76,7 +76,7 @@ begin
 end;
 $$;
 
-drop trigger if exists campaigns_zdarzenie on campaigns;
-create trigger campaigns_zdarzenie
+drop trigger if exists campaigns_event on campaigns;
+create trigger campaigns_event
     after insert or update of state on campaigns
-    for each row execute function flotestro_zdarzenie_kampanii();
+    for each row execute function flotestro_campaign_event();

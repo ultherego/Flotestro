@@ -1,12 +1,12 @@
--- Plik, ktorego tresc pochodzi z magazynu sekretow.
+-- A file whose content comes from the secret store.
 --
--- Panel nie trzyma wtedy ani tresci, ani jej odcisku: odcisk krotkiej wartosci
--- jest wskazowka, a magazyn ma nie zostawiac wskazowek poza soba. Stanem
--- docelowym jest nazwa sekretu i wersja - i to wlasnie porownuje operator.
+-- The panel then keeps neither the content nor its digest: the digest of a
+-- short value is a hint, and the store is not to leave hints outside itself.
+-- The desired state is the secret name and version - and that is exactly what the operator compares.
 --
--- Zamiast tego traci sie wykrywanie driftu tresci po stronie panelu: panel wie,
--- ktora wersje sekretu wdrozono, ale nie wie, czy ktos podmienil plik na hoscie.
--- To swiadomy koszt tej wlasnosci.
+-- In exchange content drift detection on the panel side is lost: the panel
+-- knows which secret version was deployed, but not whether somebody swapped the file on the host.
+-- That is a deliberate cost of this property.
 alter table managed_files
     add column if not exists desired_secret         text,
     add column if not exists desired_secret_version int;

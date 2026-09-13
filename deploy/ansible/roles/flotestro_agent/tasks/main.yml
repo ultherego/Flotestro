@@ -1,12 +1,12 @@
 ---
-# Instalacja agenta i jednorazowa rejestracja hosta.
+# Installing the agent and the one-time host enrollment.
 #
-# Rola jest idempotentna w obie strony: pakiet i konfiguracja sa deklaratywne,
-# a rejestracja wykonuje sie wylacznie wtedy, gdy host nie ma jeszcze
-# tozsamosci. Powtorzony przebieg nie zamawia drugiego tokenu i nie wymienia
-# certyfikatu, ktory dziala.
+# The role is idempotent both ways: the package and the configuration are
+# declarative, and the enrollment runs only when the host has no identity
+# yet. A repeated run neither orders a second token nor replaces a
+# certificate that works.
 
-- name: Wymagane ustawienia sa podane
+- name: Required settings are given
   ansible.builtin.assert:
     that:
       - flotestro_api_url | length > 0
@@ -14,22 +14,22 @@
       - flotestro_agent_gateway_urls | length > 0
       - flotestro_repo_url | length > 0
     fail_msg: >-
-      Podaj flotestro_api_url, flotestro_agent_enrollment_url,
-      flotestro_agent_gateway_urls i flotestro_repo_url.
+      Give flotestro_api_url, flotestro_agent_enrollment_url,
+      flotestro_agent_gateway_urls and flotestro_repo_url.
 
-- name: Repozytorium pakietow (Debian, Ubuntu)
+- name: Package repository (Debian, Ubuntu)
   when: ansible_facts.os_family == "Debian"
   block:
-    - name: Klucz repozytorium
+    - name: Repository key
       ansible.builtin.get_url:
         url: "{{ flotestro_repo_key_url }}"
         dest: /etc/apt/keyrings/flotestro.asc
         mode: "0644"
       register: flotestro_apt_key
 
-    - name: Zrodlo pakietow
-      # signed-by wiaze zrodlo z jednym kluczem: klucz Flotestro nie podpisuje
-      # wtedy niczego poza tym repozytorium.
+    - name: Package source
+      # signed-by binds the source to one key: the Flotestro key then signs
+      # nothing beyond this repository.
       ansible.builtin.copy:
         content: >-
           deb [signed-by=/etc/apt/keyrings/flotestro.asc]
@@ -38,20 +38,20 @@
         mode: "0644"
       register: flotestro_apt_source
 
-    - name: Odswiezenie indeksu
+    - name: Index refresh
       ansible.builtin.apt:
         update_cache: true
       when: flotestro_apt_key.changed or flotestro_apt_source.changed
 
-- name: Repozytorium pakietow (Fedora, RHEL)
+- name: Package repository (Fedora, RHEL)
   when: ansible_facts.os_family == "RedHat"
   block:
-    - name: Klucz repozytorium
+    - name: Repository key
       ansible.builtin.rpm_key:
         key: "{{ flotestro_repo_key_url }}"
         state: present
 
-    - name: Zrodlo pakietow
+    - name: Package source
       ansible.builtin.yum_repository:
         name: flotestro
         description: Flotestro
@@ -60,12 +60,12 @@
         repo_gpgcheck: true
         gpgkey: "{{ flotestro_repo_key_url }}"
 
-- name: Repozytorium pakietow (Arch)
+- name: Package repository (Arch)
   when: ansible_facts.os_family == "Archlinux"
   block:
-    - name: Klucz repozytorium w keyringu pacmana
-      # pacman ufa kluczowi dopiero po lokalnym podpisaniu; samo dodanie go
-      # do keyringu niczego nie zmienia.
+    - name: Repository key in the pacman keyring
+      # pacman trusts a key only after it is signed locally; merely adding
+      # it to the keyring changes nothing.
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
@@ -76,7 +76,7 @@
         executable: /bin/bash
       changed_when: false
 
-    - name: Zrodlo pakietow
+    - name: Package source
       ansible.builtin.blockinfile:
         path: /etc/pacman.conf
         marker: "# {mark} FLOTESTRO"
@@ -86,20 +86,20 @@
           Server = {{ flotestro_repo_url }}/arch/{{ flotestro_repo_channel }}
       register: flotestro_pacman_source
 
-    - name: Odswiezenie indeksu
+    - name: Index refresh
       ansible.builtin.command:
         cmd: pacman -Sy --noconfirm
       changed_when: false
       when: flotestro_pacman_source.changed
 
-- name: Agent zainstalowany
+- name: Agent installed
   ansible.builtin.package:
     name: "{{ flotestro_agent_package }}"
     state: present
 
-- name: Bundle CA floty
-  # Zaufanie hosta zaczyna sie tutaj: bez wlasciwego CA agent polaczy sie
-  # z panelem, ktory tylko podaje sie za panel.
+- name: Fleet CA bundle
+  # The host's trust starts here: without the right CA the agent connects
+  # to a panel that merely claims to be the panel.
   ansible.builtin.get_url:
     url: "{{ flotestro_ca_url }}"
     dest: "{{ flotestro_agent_state_dir }}/ca.pem"
@@ -107,7 +107,7 @@
     group: flotestro-agent
     mode: "0644"
 
-- name: Konfiguracja agenta
+- name: Agent configuration
   ansible.builtin.template:
     src: agent.yaml.j2
     dest: "{{ flotestro_agent_config_path }}"
@@ -116,23 +116,23 @@
     mode: "0640"
   notify: Restart flotestro agent
 
-- name: Stan tozsamosci hosta
+- name: Host identity state
   ansible.builtin.stat:
     path: "{{ flotestro_agent_state_dir }}/identity/current/agent.pem"
   register: flotestro_identity
 
-- name: Rejestracja hosta we flocie
+- name: Host enrollment into the fleet
   when: not flotestro_identity.stat.exists
   block:
-    - name: Identyfikator maszyny
+    - name: Machine identifier
       ansible.builtin.slurp:
         src: /etc/machine-id
       register: flotestro_machine_id
 
-    - name: Zamowienie enrollmentu dla tego hosta
-      # Token powstaje just-in-time, jest zwiazany z ta maszyna i ma jedno
-      # uzycie. no_log, bo wartosc tokenu nie ma prawa trafic do logu
-      # przebiegu ani do faktow.
+    - name: Enrollment order for this host
+      # The token is created just in time, is bound to this machine and has
+      # one use. no_log, because the token value has no right to end up in
+      # the run log nor in the facts.
       ansible.builtin.uri:
         url: "{{ flotestro_api_url }}/api/v1/enrollment-requests"
         method: POST
@@ -154,9 +154,9 @@
       register: flotestro_enrollment
       no_log: true
 
-    - name: Rejestracja agenta
-      # Token idzie standardowym wejsciem, a nie argumentem: argument widzi
-      # kazdy uzytkownik hosta w liscie procesow.
+    - name: Agent enrollment
+      # The token goes over standard input, not as an argument: an argument
+      # is seen by every user of the host in the process list.
       ansible.builtin.command:
         cmd: flotestro-agentctl enroll --config {{ flotestro_agent_config_path }}
         stdin: "{{ flotestro_enrollment.json.token }}"
@@ -165,7 +165,7 @@
       changed_when: true
       no_log: true
 
-- name: Usluga agenta wlaczona
+- name: Agent service enabled
   ansible.builtin.systemd_service:
     name: flotestro-agent.service
     enabled: true

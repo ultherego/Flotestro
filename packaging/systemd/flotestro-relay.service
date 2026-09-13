@@ -4,9 +4,9 @@ Documentation=https://github.com/ultherego/flotestro
 After=network-online.target
 Wants=network-online.target
 
-# Relay bez konfiguracji i bez tozsamosci nie ma dokad sie polaczyc ani czym
-# przedstawic agentom. Petla restartow zasmiecalaby dziennik maszyny, ktora
-# po prostu czeka na rejestracje.
+# A relay without a configuration and without an identity has nowhere to
+# connect and nothing to present to the agents. A restart loop would litter
+# the journal of a machine that simply waits for enrollment.
 ConditionPathExists=/etc/flotestro/relay.yaml
 ConditionPathExists=/var/lib/flotestro-relay/identity/current/agent.pem
 
@@ -18,8 +18,9 @@ ExecStart=/usr/bin/flotestro-relay run --config /etc/flotestro/relay.yaml
 Restart=on-failure
 RestartSec=5s
 
-# Relay konczy TLS calej lokalizacji i nie wykonuje operacji na hoscie:
-# nie ma tu helpera i nie ma po co dawac wiecej uprawnien.
+# The relay terminates the TLS of the whole site and carries out no
+# operations on the host: there is no helper here and no reason to give more
+# privileges.
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
@@ -36,8 +37,9 @@ StateDirectory=flotestro-relay
 StateDirectoryMode=0700
 ReadWritePaths=/var/lib/flotestro-relay
 
-# Bufor wynikow ma limit w konfiguracji, ale limit procesu jest twardszy:
-# awaria lacza nie moze zamienic sie w awarie maszyny lokalizacji.
+# The result buffer has a limit in the configuration, but the process limit
+# is harder: a link outage must not turn into an outage of the site
+# machine.
 LimitNOFILE=131072
 MemoryHigh=512M
 MemoryMax=768M

@@ -10,27 +10,27 @@ import (
 	"time"
 )
 
-type linkDNSView struct {
+type dnsLinkView struct {
 	Name         string   `json:"name"`
 	Servers      []string `json:"servers"`
 	Domains      []string `json:"domains"`
 	DefaultRoute *bool    `json:"default_route"`
 }
 
-type migawkaDNS struct {
+type dnsSnapshot struct {
 	Owner             string        `json:"owner"`
 	Mode              string        `json:"mode"`
 	ResolvConf        string        `json:"resolv_conf"`
 	Servers           []string      `json:"servers"`
 	SearchDomains     []string      `json:"search_domains"`
-	Links             []linkDNSView `json:"links"`
+	Links             []dnsLinkView `json:"links"`
 	Writable          bool          `json:"writable"`
 	WriteAdapter      string        `json:"write_adapter"`
 	ReadOnlyReason    string        `json:"read_only_reason"`
 	UnavailableReason string        `json:"unavailable_reason"`
 }
 
-type zapytanieView struct {
+type queryView struct {
 	Name       string   `json:"name"`
 	Addresses  []string `json:"addresses"`
 	Server     string   `json:"server"`
@@ -38,147 +38,150 @@ type zapytanieView struct {
 	TookMillis int64    `json:"took_millis"`
 }
 
-// TestResolverMaWlascicielaIPowodDlaTylkoOdczytu sprawdza rzecz, ktora
-// rozstrzyga o kazdej zmianie DNS: kto pisze plik resolvera. Plik nalezacy
-// do uslugi zostanie nadpisany, wiec zapis w nim znikalby sam.
-func TestResolverMaWlascicielaIPowodDlaTylkoOdczytu(t *testing.T) {
+// TestResolverHasAnOwnerAndAReadOnlyReason checks the thing that decides
+// every DNS change: who writes the resolver file. A file owned by a service
+// gets overwritten, so a write into it would vanish on its own.
+func TestResolverHasAnOwnerAndAReadOnlyReason(t *testing.T) {
 	h := newHarness(t)
 
-	for _, rodzina := range []string{"debian", "rhel"} {
-		t.Run(rodzina, func(t *testing.T) {
-			host := h.hostByFamily(rodzina)
-			stan := migawkaDNSHosta(t, h, host.ID)
-			if stan.UnavailableReason != "" {
-				t.Fatalf("stanu resolvera nie odczytano: %s", stan.UnavailableReason)
+	for _, family := range []string{"debian", "rhel"} {
+		t.Run(family, func(t *testing.T) {
+			host := h.hostByFamily(family)
+			state := hostDNSSnapshot(t, h, host.ID)
+			if state.UnavailableReason != "" {
+				t.Fatalf("the resolver state was not read: %s", state.UnavailableReason)
 			}
-			if stan.Owner == "" {
-				t.Error("host nie powiedzial, kto pisze jego resolv.conf")
+			if state.Owner == "" {
+				t.Error("the host did not say who writes its resolv.conf")
 			}
-			if len(stan.Servers) == 0 {
-				t.Error("host nie zglosil zadnego serwera DNS")
+			if len(state.Servers) == 0 {
+				t.Error("the host reported no DNS server at all")
 			}
-			// Host tylko do odczytu ma powiedziec dlaczego, zamiast milczec.
-			if !stan.Writable && stan.ReadOnlyReason == "" {
-				t.Error("host bez mozliwosci zapisu nie tlumaczy, dlaczego")
+			// A read-only host is to say why instead of staying quiet.
+			if !state.Writable && state.ReadOnlyReason == "" {
+				t.Error("a host without write support does not explain why")
 			}
-			if stan.Writable && stan.WriteAdapter == "" {
-				t.Error("host z mozliwoscia zapisu nie nazwal mechanizmu")
+			if state.Writable && state.WriteAdapter == "" {
+				t.Error("a host with write support did not name the mechanism")
 			}
 		})
 	}
 }
 
-// TestTestRozwiazywaniaPytaZHosta sprawdza, ze odpowiedz pochodzi z hosta
-// i niesie powod, gdy nazwy nie da sie rozwiazac. Cisza w miejscu odpowiedzi
-// wygladalaby jak nazwa bez adresu.
-func TestTestRozwiazywaniaPytaZHosta(t *testing.T) {
+// TestResolveTestAsksFromTheHost checks that the answer comes from the host
+// and carries a reason when a name cannot be resolved. Silence in place of
+// an answer would look like a name without an address.
+func TestResolveTestAsksFromTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 
-	zadanie, proby := h.runOperation(host.ID, map[string]any{
+	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "dns.resolve.test",
 		"payload": map[string]any{"dns": map[string]any{
-			"names": []string{"ipa.flotestro.test", "nie-ma-takiej-nazwy.flotestro.test"}}},
+			"names": []string{"ipa.flotestro.test", "no-such-name.flotestro.test"}}},
 	}, 90*time.Second)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("test rozwiazywania: stan = %s, %s", zadanie.State, ostatniKomunikat(proby))
+	if job.State != "succeeded" {
+		t.Fatalf("resolve test: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
-	zapytania := zapytaniaZadania(t, h, zadanie.ID)
-	if len(zapytania) != 2 {
-		t.Fatalf("zapytan = %d", len(zapytania))
+	queries := jobQueries(t, h, job.ID)
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d", len(queries))
 	}
-	po := map[string]zapytanieView{}
-	for _, zapytanie := range zapytania {
-		po[zapytanie.Name] = zapytanie
+	byName := map[string]queryView{}
+	for _, query := range queries {
+		byName[query.Name] = query
 	}
-	rozwiazana := po["ipa.flotestro.test"]
-	if len(rozwiazana.Addresses) == 0 {
-		t.Errorf("nazwa domeny nierozwiazana: %+v", rozwiazana)
+	resolved := byName["ipa.flotestro.test"]
+	if len(resolved.Addresses) == 0 {
+		t.Errorf("the domain name was not resolved: %+v", resolved)
 	}
-	// Zrodlo odpowiedzi jest tu polowa odpowiedzi: przy diagnozie DNS pytanie
-	// brzmi "kto mi to powiedzial".
-	if rozwiazana.Server == "" {
-		t.Error("odpowiedz nie mowi, skad przyszla")
+	// The source of the answer is half of the answer here: in a DNS
+	// diagnosis the question is "who told me that".
+	if resolved.Server == "" {
+		t.Error("the answer does not say where it came from")
 	}
-	nierozwiazana := po["nie-ma-takiej-nazwy.flotestro.test"]
-	if len(nierozwiazana.Addresses) != 0 {
-		t.Errorf("nieistniejaca nazwa dostala adres: %+v", nierozwiazana)
+	unresolved := byName["no-such-name.flotestro.test"]
+	if len(unresolved.Addresses) != 0 {
+		t.Errorf("a non-existent name got an address: %+v", unresolved)
 	}
-	if nierozwiazana.Error == "" {
-		t.Error("nierozwiazana nazwa bez powodu")
+	if unresolved.Error == "" {
+		t.Error("unresolved name without a reason")
 	}
-	// Kod wyjscia nie jest powodem: operator ma przeczytac, co powiedzial
-	// resolver.
-	if strings.Contains(nierozwiazana.Error, "exit status") {
-		t.Errorf("powod bez tresci resolvera: %q", nierozwiazana.Error)
+	// An exit status is not a reason: the operator is to read what the
+	// resolver said.
+	if strings.Contains(unresolved.Error, "exit status") {
+		t.Errorf("reason without the resolver's words: %q", unresolved.Error)
 	}
 }
 
-// TestZlyResolverNieDojezdzaDoHosta pilnuje, ze konfiguracja, ktora odcielaby
-// host od katalogu i Kerberosa, jest odrzucona przy zlecaniu.
-func TestZlyResolverNieDojezdzaDoHosta(t *testing.T) {
+// TestBadResolverDoesNotReachTheHost guards that a configuration which
+// would cut the host off from the directory and Kerberos is rejected when
+// ordered.
+func TestBadResolverDoesNotReachTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
-	const powod = "test integracyjny modulu resolvera"
+	const reason = "integration test of the resolver module"
 
-	przypadki := []struct {
-		zmiana   map[string]any
-		dlaczego string
+	cases := []struct {
+		change map[string]any
+		why    string
 	}{
-		{map[string]any{"interface": "enp0s8"}, "zmiana bez serwera"},
-		{map[string]any{"interface": "enp0s8", "servers": []string{"nie-adres"}}, "serwer, ktory nie jest adresem"},
-		{map[string]any{"interface": "../etc", "servers": []string{"192.168.56.50"}}, "nazwa interfejsu ze sciezka"},
+		{map[string]any{"interface": "enp0s8"}, "change without a server"},
+		{map[string]any{"interface": "enp0s8", "servers": []string{"not-an-address"}}, "server that is not an address"},
+		{map[string]any{"interface": "../etc", "servers": []string{"192.168.56.50"}}, "interface name with a path"},
 		{map[string]any{"interface": "enp0s8", "servers": []string{"192.168.56.50"},
-			"search_domains": []string{"zla domena"}}, "domena z odstepem"},
+			"search_domains": []string{"bad domain"}}, "domain with whitespace"},
 	}
-	for _, przypadek := range przypadki {
-		t.Run(przypadek.dlaczego, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.why, func(t *testing.T) {
 			h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
-				map[string]any{"action": "dns.host.apply", "reason": powod,
-					"payload": map[string]any{"dns": przypadek.zmiana}},
+				map[string]any{"action": "dns.host.apply", "reason": reason,
+					"payload": map[string]any{"dns": tc.change}},
 				nil, http.StatusBadRequest)
 		})
 	}
 
-	// Host bez mechanizmu zapisu odmawia przy zlecaniu, a nie po dostarczeniu.
+	// A host without a write mechanism refuses when ordered, not after
+	// delivery.
 	debian := h.hostByFamily("debian")
-	if stan := migawkaDNSHosta(t, h, debian.ID); !stan.Writable {
+	if state := hostDNSSnapshot(t, h, debian.ID); !state.Writable {
 		h.do(http.MethodPost, "/api/v1/hosts/"+debian.ID+"/operations",
-			map[string]any{"action": "dns.host.apply", "reason": powod,
+			map[string]any{"action": "dns.host.apply", "reason": reason,
 				"payload": map[string]any{"dns": map[string]any{
 					"interface": "eth1", "servers": []string{"192.168.56.50"}}}},
 			nil, http.StatusConflict)
 	}
 }
 
-func migawkaDNSHosta(t *testing.T, h *harness, hostID string) migawkaDNS {
+func hostDNSSnapshot(t *testing.T, h *harness, hostID string) dnsSnapshot {
 	t.Helper()
 	var fragment inventoryFragment
 	h.do(http.MethodGet, "/api/v1/hosts/"+hostID+"/inventory/dns", nil, &fragment, http.StatusOK)
-	var stan migawkaDNS
-	if err := json.Unmarshal(fragment.Payload, &stan); err != nil {
-		t.Fatalf("migawka resolvera: %v", err)
+	var state dnsSnapshot
+	if err := json.Unmarshal(fragment.Payload, &state); err != nil {
+		t.Fatalf("resolver snapshot: %v", err)
 	}
-	return stan
+	return state
 }
 
-// zapytaniaZadania czyta wynik testu z ostatniej proby. Wynik nalezy do proby,
-// bo to ona wie, co odpowiedzial host i kiedy.
-func zapytaniaZadania(t *testing.T, h *harness, jobID string) []zapytanieView {
+// jobQueries reads the test result from the last attempt. The result
+// belongs to the attempt, because it is what knows what the host answered
+// and when.
+func jobQueries(t *testing.T, h *harness, jobID string) []queryView {
 	t.Helper()
-	var odpowiedz struct {
+	var response struct {
 		Items []struct {
 			Detail struct {
 				Queries struct {
-					Queries []zapytanieView `json:"queries"`
+					Queries []queryView `json:"queries"`
 				} `json:"queries"`
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.do(http.MethodGet, "/api/v1/jobs/"+jobID+"/attempts", nil, &odpowiedz, http.StatusOK)
-	if len(odpowiedz.Items) == 0 {
-		t.Fatal("zadanie bez prob")
+	h.do(http.MethodGet, "/api/v1/jobs/"+jobID+"/attempts", nil, &response, http.StatusOK)
+	if len(response.Items) == 0 {
+		t.Fatal("job without attempts")
 	}
-	return odpowiedz.Items[len(odpowiedz.Items)-1].Detail.Queries.Queries
+	return response.Items[len(response.Items)-1].Detail.Queries.Queries
 }

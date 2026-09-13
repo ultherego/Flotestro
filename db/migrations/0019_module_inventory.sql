@@ -1,18 +1,18 @@
--- Inventory rozbite na moduly.
+-- The inventory split into modules.
 --
--- Dotad caly stan hosta byl jedna rewizja: zmiana jednego licznika pakietow
--- przepisywala rowniez sprzet, konta i tozsamosc, a interfejs pokazywal jedna
--- date obserwacji dla wszystkich zakladek naraz. Operator patrzacy na zakladke
--- pakietow widzial swiezosc czegos innego.
+-- Until now the whole host state was one revision: a change of one package
+-- counter rewrote the hardware, accounts and identity too, and the interface
+-- showed one observation date for all the tabs at once. An operator looking at
+-- the packages tab saw the freshness of something else.
 --
--- Kazdy modul ma teraz wlasna rewizje, wlasne zrodlo i wlasny powod
--- niedostepnosci. Pusty modul i modul nieodczytany to dwie rozne informacje.
+-- Every module now has its own revision, its own source and its own
+-- unavailability reason. An empty module and an unread module are two different pieces of information.
 create table host_module_inventory (
     host_id            uuid        not null references hosts (id) on delete cascade,
     module             text        not null,
     revision           text        not null,
-    -- Czym zmierzono, np. "agent/systemctl". Dane bez zrodla nie daja sie
-    -- ocenic: operator nie wie, czy patrzy na odczyt jadra, czy na cache.
+    -- What it was measured with, e.g. "agent/systemctl". Data without a source
+    -- cannot be assessed: the operator does not know whether they look at a kernel read or a cache.
     source             text        not null,
     payload            jsonb       not null,
     unavailable_reason text,

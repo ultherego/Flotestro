@@ -134,23 +134,24 @@ func (UnimplementedEnrollmentServiceHandler) Enroll(context.Context, *connect.Re
 // AgentServiceClient is a client for the flotestro.agent.v1.AgentService service.
 type AgentServiceClient interface {
 	Connect(context.Context) *connect.BidiStreamForClient[v1.AgentMessage, v1.ServerMessage]
-	// RenewCertificate wymienia nowy CSR na certyfikat. Identity pochodzi
-	// z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
-	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
-	// wejsciem dla hosta bez tozsamosci.
+	// RenewCertificate exchanges a new CSR for a certificate. The identity
+	// comes from the current client certificate, not from the request body, so
+	// a renewal neither requires nor may use an enrollment token: the token is
+	// a one-time entry for a host without an identity.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
-	// Ping sprawdza lacznosc z centrala bez zadnego skutku ubocznego.
+	// Ping checks connectivity with the centre without any side effect.
 	//
-	// Relay potrzebuje sposobu na stwierdzenie, ze lacze wrocilo, zanim wysle
-	// cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
-	// kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
+	// A relay needs a way to tell that the link is back before it sends
+	// anything that matters. Probing the link by sending real messages costs
+	// losing those messages if the link does not work after all.
 	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
-	// FetchSecret wydaje wartosc sekretu na czas wykonania jednego zadania.
+	// FetchSecret issues a secret value for the duration of one job.
 	//
-	// Wartosc nie jedzie w kopercie zadania: koperta niesie sam odnosnik, a host
-	// siega po tresc dopiero wtedy, gdy zaczyna operacje. Dzieki temu wartosci
-	// nie ma ani w zadaniu, ani w audycie, ani w inwentarzu - jest wylacznie
-	// w magazynie i przez chwile w pamieci hosta.
+	// The value does not travel in the job envelope: the envelope carries only
+	// a reference, and the host fetches the content only when it starts the
+	// operation. Thanks to that the value is neither in the job, nor in the
+	// audit log, nor in the inventory - it is only in the store and briefly in
+	// the host's memory.
 	FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error)
 }
 
@@ -223,23 +224,24 @@ func (c *agentServiceClient) FetchSecret(ctx context.Context, req *connect.Reque
 // AgentServiceHandler is an implementation of the flotestro.agent.v1.AgentService service.
 type AgentServiceHandler interface {
 	Connect(context.Context, *connect.BidiStream[v1.AgentMessage, v1.ServerMessage]) error
-	// RenewCertificate wymienia nowy CSR na certyfikat. Identity pochodzi
-	// z obecnego certyfikatu klienta, a nie z tresci zadania, wiec odnowienie
-	// nie wymaga i nie moze uzywac tokenu enrollmentu: token jest jednorazowym
-	// wejsciem dla hosta bez tozsamosci.
+	// RenewCertificate exchanges a new CSR for a certificate. The identity
+	// comes from the current client certificate, not from the request body, so
+	// a renewal neither requires nor may use an enrollment token: the token is
+	// a one-time entry for a host without an identity.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewCertificateRequest]) (*connect.Response[v1.RenewCertificateResponse], error)
-	// Ping sprawdza lacznosc z centrala bez zadnego skutku ubocznego.
+	// Ping checks connectivity with the centre without any side effect.
 	//
-	// Relay potrzebuje sposobu na stwierdzenie, ze lacze wrocilo, zanim wysle
-	// cokolwiek istotnego. Badanie lacza wysylaniem prawdziwych wiadomosci
-	// kosztuje utrate tych wiadomosci, jesli lacze jednak nie dziala.
+	// A relay needs a way to tell that the link is back before it sends
+	// anything that matters. Probing the link by sending real messages costs
+	// losing those messages if the link does not work after all.
 	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
-	// FetchSecret wydaje wartosc sekretu na czas wykonania jednego zadania.
+	// FetchSecret issues a secret value for the duration of one job.
 	//
-	// Wartosc nie jedzie w kopercie zadania: koperta niesie sam odnosnik, a host
-	// siega po tresc dopiero wtedy, gdy zaczyna operacje. Dzieki temu wartosci
-	// nie ma ani w zadaniu, ani w audycie, ani w inwentarzu - jest wylacznie
-	// w magazynie i przez chwile w pamieci hosta.
+	// The value does not travel in the job envelope: the envelope carries only
+	// a reference, and the host fetches the content only when it starts the
+	// operation. Thanks to that the value is neither in the job, nor in the
+	// audit log, nor in the inventory - it is only in the store and briefly in
+	// the host's memory.
 	FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error)
 }
 
@@ -311,18 +313,20 @@ func (UnimplementedAgentServiceHandler) FetchSecret(context.Context, *connect.Re
 
 // RelayServiceClient is a client for the flotestro.agent.v1.RelayService service.
 type RelayServiceClient interface {
-	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Identity
-	// pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
+	// RenewCertificate exchanges the relay's CSR for a new certificate. The
+	// identity comes from the current client certificate, not from the request
+	// body.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
-	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
+	// Ping checks the relay's connectivity with the centre and refreshes its
+	// last presence.
 	Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error)
-	// ProxyEnroll przekazuje zgloszenie hosta z izolowanej lokalizacji.
+	// ProxyEnroll forwards a host enrollment from an isolated site.
 	//
-	// Relay nie podpisuje niczego sam: CA floty zostaje w centrali. Relay jest
-	// terminatorem TLS, wiec widzi token - i wlasnie dlatego zgloszenie idzie
-	// jego kanalem mTLS, a nie publicznym endpointem enrollmentu. Centrala wie
-	// wtedy, ktora lokalizacja poswiadcza to zgloszenie, i moze odmowic
-	// tokenowi wyniesionemu gdzie indziej.
+	// The relay signs nothing itself: the fleet CA stays in the centre. The
+	// relay is the TLS terminator, so it sees the token - and that is exactly
+	// why the enrollment goes over its mTLS channel, not the public enrollment
+	// endpoint. The centre then knows which site attests to this enrollment
+	// and can refuse a token carried elsewhere.
 	ProxyEnroll(context.Context, *connect.Request[v1.ProxyEnrollRequest]) (*connect.Response[v1.EnrollResponse], error)
 }
 
@@ -382,18 +386,20 @@ func (c *relayServiceClient) ProxyEnroll(ctx context.Context, req *connect.Reque
 
 // RelayServiceHandler is an implementation of the flotestro.agent.v1.RelayService service.
 type RelayServiceHandler interface {
-	// RenewCertificate wymienia CSR relaya na nowy certyfikat. Identity
-	// pochodzi z obecnego certyfikatu klienta, nie z tresci zadania.
+	// RenewCertificate exchanges the relay's CSR for a new certificate. The
+	// identity comes from the current client certificate, not from the request
+	// body.
 	RenewCertificate(context.Context, *connect.Request[v1.RenewRelayCertificateRequest]) (*connect.Response[v1.RenewRelayCertificateResponse], error)
-	// Ping sprawdza lacznosc relaya z centrala i odswieza jego ostatnia obecnosc.
+	// Ping checks the relay's connectivity with the centre and refreshes its
+	// last presence.
 	Ping(context.Context, *connect.Request[v1.RelayPingRequest]) (*connect.Response[v1.RelayPingResponse], error)
-	// ProxyEnroll przekazuje zgloszenie hosta z izolowanej lokalizacji.
+	// ProxyEnroll forwards a host enrollment from an isolated site.
 	//
-	// Relay nie podpisuje niczego sam: CA floty zostaje w centrali. Relay jest
-	// terminatorem TLS, wiec widzi token - i wlasnie dlatego zgloszenie idzie
-	// jego kanalem mTLS, a nie publicznym endpointem enrollmentu. Centrala wie
-	// wtedy, ktora lokalizacja poswiadcza to zgloszenie, i moze odmowic
-	// tokenowi wyniesionemu gdzie indziej.
+	// The relay signs nothing itself: the fleet CA stays in the centre. The
+	// relay is the TLS terminator, so it sees the token - and that is exactly
+	// why the enrollment goes over its mTLS channel, not the public enrollment
+	// endpoint. The centre then knows which site attests to this enrollment
+	// and can refuse a token carried elsewhere.
 	ProxyEnroll(context.Context, *connect.Request[v1.ProxyEnrollRequest]) (*connect.Response[v1.EnrollResponse], error)
 }
 

@@ -1,17 +1,17 @@
-# Skryptlety pakietu relaya. Wolno tu tylko to, co dotyczy samego systemu.
-# Enrollment jest decyzja operatora i nie moze byc skutkiem ubocznym
-# instalacji pakietu.
+# The relay package scriptlets. Only what concerns the system itself is
+# allowed here. Enrollment is an operator decision and must not be a side
+# effect of installing the package.
 post_install() {
     systemd-sysusers /usr/lib/sysusers.d/flotestro-relay.conf >/dev/null 2>&1 || true
     systemd-tmpfiles --create /usr/lib/tmpfiles.d/flotestro-relay.conf >/dev/null 2>&1 || true
     chown root:flotestro-relay /etc/flotestro/relay.yaml 2>/dev/null || true
     chmod 0640 /etc/flotestro/relay.yaml 2>/dev/null || true
     systemctl enable flotestro-relay.service >/dev/null 2>&1 || true
-    cat >&2 <<'KONIEC'
-flotestro-relay: uzupelnij /etc/flotestro/relay.yaml i zarejestruj relay
-  sudo -u flotestro-relay flotestro-relay enroll -token-file <plik>
+    cat >&2 <<'END'
+flotestro-relay: fill in /etc/flotestro/relay.yaml and enroll the relay
+  sudo -u flotestro-relay flotestro-relay enroll -token-file <file>
   systemctl start flotestro-relay.service
-KONIEC
+END
 }
 
 post_upgrade() {
@@ -28,7 +28,7 @@ pre_remove() {
 }
 
 post_remove() {
-    # Tozsamosc relaya zostaje: ponowna instalacja ma ja odzyskac bez
-    # enrollmentu.
+    # The relay identity stays: a reinstall is to recover it without
+    # enrollment.
     systemctl daemon-reload >/dev/null 2>&1 || true
 }

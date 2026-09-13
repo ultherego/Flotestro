@@ -1,10 +1,10 @@
--- Wzbogacenie ustalen o dane upstreamowe: CVSS i opis podatnosci.
+-- Enriching the findings with upstream data: CVSS and the vulnerability description.
 --
--- Osobna tabela, a nie kolumny przy ustaleniu, bo to sa dane innego rodzaju
--- i innego zrodla. Producent dystrybucji rozstrzyga, czy pakiet jest podatny
--- i ktora wersja to zamyka; NVD nie ma o tym nic do powiedzenia - jego
--- zakresy wersji nie obejmuja poprawek backportowanych. Moze za to powiedziec,
--- jak grozna jest sama podatnosc, i to jest jedyne, co panel stad bierze.
+-- A separate table, not columns on the finding, because it is data of another
+-- kind and another source. The distribution vendor decides whether a package
+-- is vulnerable and which version closes that; NVD has nothing to say about
+-- it - its version ranges do not cover backported fixes. It can say instead
+-- how dangerous the vulnerability itself is, and that is the only thing the panel takes from it.
 create table if not exists vuln_cve_details (
     cve           text primary key,
     source        text not null,
@@ -18,9 +18,9 @@ create table if not exists vuln_cve_details (
     fetched_at    timestamptz not null default now()
 );
 
--- Stan synchronizacji: od kiedy pytac o zmiany. Bez niego kazde uruchomienie
--- panelu pobieraloby caly zbior od nowa - a to prawie czterysta tysiecy
--- wpisow i dwiescie zadan do serwisu, ktory na to patrzy.
+-- The synchronisation state: since when to ask for changes. Without it every
+-- panel start would fetch the whole set anew - and that is nearly four hundred
+-- thousand entries and two hundred requests to a service that watches for it.
 create table if not exists vuln_enrichment_state (
     source        text primary key,
     last_modified timestamptz,

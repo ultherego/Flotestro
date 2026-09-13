@@ -2,9 +2,9 @@
 set -e
 case "$1" in
 purge)
-    # Tozsamosc relaya zostaje przy zwyklym usunieciu: ponowna instalacja ma
-    # ja odzyskac bez enrollmentu. Purge kasuje ja swiadomie - relay bedzie
-    # wtedy dla centrali nowym wezlem.
+    # The relay identity stays on an ordinary removal: a reinstall is to
+    # recover it without enrollment. Purge deletes it deliberately - the
+    # relay is then a new node to the centre.
     rm -rf /var/lib/flotestro-relay
     rmdir /etc/flotestro 2>/dev/null || true
     if getent passwd flotestro-relay >/dev/null; then

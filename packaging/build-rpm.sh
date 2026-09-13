@@ -1,17 +1,18 @@
 #!/bin/sh
-# Buduje pakiet .rpm z gotowych binarek. Wymaga rpmbuild, czyli hosta
-# z rodziny Fedory/RHEL.
+# Builds an .rpm package from ready binaries. Requires rpmbuild, that is a
+# host of the Fedora/RHEL family.
 #
-#   build-rpm.sh agent         <stage> <wersja> <arch> <out>
-#   build-rpm.sh relay         <stage> <wersja> <arch> <out>
-#   build-rpm.sh control-plane <stage> <wersja> <arch> <out>
+#   build-rpm.sh agent         <stage> <version> <arch> <out>
+#   build-rpm.sh relay         <stage> <version> <arch> <out>
+#   build-rpm.sh control-plane <stage> <version> <arch> <out>
 #
-# Architektura jest jawna, a nie brana z maszyny budujacej: pakiet dla arm64
-# powstaje na tej samej maszynie co dla x86_64, bo binarka jest juz gotowa.
+# The architecture is explicit, not taken from the build machine: the
+# package for arm64 is made on the same machine as the one for x86_64,
+# because the binary is already ready.
 set -eu
 
-SKLADNIK="${1:?podaj skladnik: agent, relay albo control-plane}"
-STAGE="${2:?podaj katalog z binarkami}"
+COMPONENT="${1:?give the component: agent, relay or control-plane}"
+STAGE="${2:?give the directory with the binaries}"
 VERSION="${3:-0.1.0}"
 ARCH="${4:-x86_64}"
 OUT="${5:-.}"
@@ -20,15 +21,15 @@ here="$(cd "$(dirname "$0")" && pwd)"
 topdir="$(mktemp -d)"
 trap 'rm -rf "$topdir"' EXIT
 
-case "$SKLADNIK" in
+case "$COMPONENT" in
 agent)         cp "$here/agent.env" "$STAGE/agent.env"
                cp "$here/agent.yaml" "$STAGE/agent.yaml" ;;
 relay)         cp "$here/relay.yaml" "$STAGE/relay.yaml" ;;
 control-plane) cp "$here/control-plane.env" "$STAGE/control-plane.env" ;;
-*) echo "nieznany skladnik: $SKLADNIK" >&2; exit 1 ;;
+*) echo "unknown component: $COMPONENT" >&2; exit 1 ;;
 esac
 
-rpmbuild -bb "$here/rpm/flotestro-$SKLADNIK.spec" \
+rpmbuild -bb "$here/rpm/flotestro-$COMPONENT.spec" \
     --target "$ARCH" \
     --define "_topdir $topdir" \
     --define "_flotestro_version $VERSION" \
@@ -36,7 +37,7 @@ rpmbuild -bb "$here/rpm/flotestro-$SKLADNIK.spec" \
     --define "_flotestro_units $here/systemd" \
     > "$topdir/rpmbuild.log" 2>&1 || { cat "$topdir/rpmbuild.log" >&2; exit 1; }
 
-pakiet="$(find "$topdir/RPMS" -name "flotestro-$SKLADNIK-*.rpm" | head -1)"
-[ -n "$pakiet" ] || { echo "rpmbuild nie wyprodukowal pakietu" >&2; exit 1; }
-cp "$pakiet" "$OUT/"
-echo "$OUT/$(basename "$pakiet")"
+package="$(find "$topdir/RPMS" -name "flotestro-$COMPONENT-*.rpm" | head -1)"
+[ -n "$package" ] || { echo "rpmbuild produced no package" >&2; exit 1; }
+cp "$package" "$OUT/"
+echo "$OUT/$(basename "$package")"

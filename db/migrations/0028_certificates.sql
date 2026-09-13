@@ -1,23 +1,23 @@
--- Certyfikaty na hostach.
+-- Certificates on hosts.
 --
--- Panel trzyma u siebie dwie rzeczy, ktorych host sam nie powie. Pierwsza to
--- zakres: ktore pliki sa certyfikatami uslug i ktora usluga je czyta - tego
--- nie da sie wywnioskowac z nazwy katalogu, a przeszukiwanie calego dysku
--- znajduje magazyn zaufania zamiast odpowiedzi. Druga to historia wdrozen:
--- co panel wyslal, kiedy i na czyje polecenie.
+-- The panel keeps two things the host will not say itself. The first is the
+-- scope: which files are service certificates and which service reads them -
+-- that cannot be inferred from a directory name, and searching the whole disk
+-- finds the trust store instead of the answer. The second is the deployment
+-- history: what the panel sent, when and on whose order.
 --
--- Klucza prywatnego nie ma tu w zadnej postaci. Jest wylacznie nazwa sekretu
--- w magazynie - odnosnik, ktory bez magazynu i bez pliku klucza nie znaczy nic.
+-- The private key is not here in any form. There is only the name of a secret
+-- in the store - a reference that means nothing without the store and the key file.
 create table if not exists certificate_targets (
     id           uuid        primary key default gen_random_uuid(),
     host_id      uuid        not null references hosts(id) on delete cascade,
     path         text        not null,
     key_path     text        not null default '',
-    -- Nazwa sekretu z kluczem prywatnym. Wartosci nie ma tu ani nigdzie
-    -- indziej poza magazynem.
+    -- The name of the secret holding the private key. The value is neither here
+    -- nor anywhere else but the store.
     key_secret   text        not null default '',
-    -- Jednostka, ktora ten plik czyta, oraz adres, pod ktorym widac skutek
-    -- wdrozenia. Oba wpisuje czlowiek: panel ich nie zgaduje.
+    -- The unit that reads this file and the address where the effect of the
+    -- deployment is visible. Both are typed in by a human: the panel does not guess them.
     reload_unit  text        not null default '',
     probe_target text        not null default '',
     service      text        not null default '',
@@ -31,9 +31,9 @@ create table if not exists certificate_targets (
 
 create index if not exists certificate_targets_host_idx on certificate_targets (host_id);
 
--- Historia wdrozen. Certyfikat jest jawny, wiec panel moze go przechowac
--- w calosci: to pozwala pokazac, co dokladnie wyslano, i wrocic do tego,
--- co dzialalo. Klucza to nie dotyczy i dotyczyc nie moze.
+-- The deployment history. A certificate is public, so the panel may keep it
+-- whole: that lets it show exactly what was sent and go back to what
+-- worked. That does not and cannot apply to the key.
 create table if not exists certificate_deployments (
     id                 uuid        primary key default gen_random_uuid(),
     host_id            uuid        not null references hosts(id) on delete cascade,

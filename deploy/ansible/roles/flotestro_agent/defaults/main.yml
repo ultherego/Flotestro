@@ -1,22 +1,24 @@
 ---
-# Ustawienia roli. Nic tu nie jest sekretem: token enrollmentu powstaje
-# dopiero w trakcie i tylko dla tego hosta, ktory wlasnie jest instalowany.
+# The role settings. Nothing here is a secret: the enrollment token is
+# created only during the run and only for the host being installed right
+# now.
 flotestro_agent_package: flotestro-agent
 
-# Panel: API administracyjne (tworzy zamowienia) oraz adresy, ktore trafiaja
-# do konfiguracji hosta.
+# The panel: the administrative API (creates the orders) and the addresses
+# that go into the host configuration.
 flotestro_api_url: ""
 flotestro_agent_enrollment_url: ""
 flotestro_agent_gateway_urls: []
 
-# Repozytorium pakietow i klucz, ktorym jest podpisane. Bez klucza instalacja
-# nie ma jak sprawdzic, co instaluje.
+# The package repository and the key it is signed with. Without the key the
+# installation has no way to check what it installs.
 flotestro_repo_url: ""
 flotestro_repo_key_url: "{{ flotestro_repo_url }}/flotestro-repo.asc"
 flotestro_repo_channel: stable
 
-# Bundle CA floty do pierwszego polaczenia. Musi przyjsc kanalem, ktoremu
-# host ufa - stad osobna zmienna, a nie pobieranie z byle adresu.
+# The fleet CA bundle for the first connection. It must come over a channel
+# the host trusts - hence a separate variable, not a download from just any
+# address.
 flotestro_ca_url: "{{ flotestro_repo_url }}/flotestro-ca.pem"
 
 flotestro_agent_config_path: /etc/flotestro/agent.yaml
@@ -27,7 +29,7 @@ flotestro_agent_inventory_interval: 15m
 flotestro_agent_max_concurrent_tasks: 2
 flotestro_agent_mode: full
 
-# Token administracyjny do zamowienia enrollmentu. Podawany z zewnatrz
-# (vault, zmienna srodowiskowa CI) i nigdy nie zapisywany na hoscie.
+# The administrative token for ordering the enrollment. Given from outside
+# (a vault, a CI environment variable) and never recorded on the host.
 flotestro_automation_api_token: ""
 flotestro_enrollment_ttl_minutes: 15

@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-const powodMonitoringu = "test integracyjny modulu monitoringu"
+const monitoringReason = "integration test of the monitoring module"
 
-type zrodloView struct {
+type sourceView struct {
 	Name          string `json:"name"`
 	Configured    bool   `json:"configured"`
 	Healthy       bool   `json:"healthy"`
@@ -29,7 +29,7 @@ type alertView struct {
 	SilencedBy []string          `json:"silenced_by"`
 }
 
-type ciszaView struct {
+type silenceView struct {
 	ID        string `json:"id"`
 	EndsAt    string `json:"ends_at"`
 	CreatedBy string `json:"created_by"`
@@ -40,15 +40,15 @@ type ciszaView struct {
 	} `json:"matchers"`
 }
 
-type raportMonitoringuView struct {
-	Sources []zrodloView `json:"sources"`
+type monitoringReportView struct {
+	Sources []sourceView `json:"sources"`
 	Label   string       `json:"label"`
 	Links   struct {
 		Dashboard string `json:"dashboard"`
 		Logs      string `json:"logs"`
 	} `json:"links"`
-	Alerts   []alertView `json:"alerts"`
-	Silences []ciszaView `json:"silences"`
+	Alerts   []alertView   `json:"alerts"`
+	Silences []silenceView `json:"silences"`
 	Series   []struct {
 		Name   string   `json:"name"`
 		Last   *float64 `json:"last"`
@@ -65,7 +65,7 @@ type raportMonitoringuView struct {
 	MetricsUnavailable string    `json:"metrics_unavailable_reason"`
 }
 
-type wynikSondyView struct {
+type probeResultView struct {
 	Kind           string `json:"kind"`
 	Target         string `json:"target"`
 	Reachable      bool   `json:"reachable"`
@@ -75,184 +75,187 @@ type wynikSondyView struct {
 	Error          string `json:"error"`
 }
 
-// monitoringHosta czyta zakladke monitoringu hosta.
-func monitoringHosta(h *harness, hostID string) raportMonitoringuView {
+// hostMonitoring reads the monitoring tab of a host.
+func hostMonitoring(h *harness, hostID string) monitoringReportView {
 	h.t.Helper()
-	var raport raportMonitoringuView
-	h.get("/api/v1/hosts/"+hostID+"/monitoring", &raport)
-	return raport
+	var report monitoringReportView
+	h.get("/api/v1/hosts/"+hostID+"/monitoring", &report)
+	return report
 }
 
-func zrodlo(raport raportMonitoringuView, nazwa string) *zrodloView {
-	for i := range raport.Sources {
-		if raport.Sources[i].Name == nazwa {
-			return &raport.Sources[i]
+func source(report monitoringReportView, name string) *sourceView {
+	for i := range report.Sources {
+		if report.Sources[i].Name == name {
+			return &report.Sources[i]
 		}
 	}
 	return nil
 }
 
-// TestMonitoringOpisujeZrodlaTakzeGdyIchNieMa pilnuje wlasciwosci, ktora
-// decyduje o uzytecznosci tej zakladki: brak zrodla, zrodlo dzialajace
-// i zrodlo, ktore nie odpowiada, to trzy rozne odpowiedzi.
-func TestMonitoringOpisujeZrodlaTakzeGdyIchNieMa(t *testing.T) {
+// TestMonitoringDescribesTheSourcesEvenWhenThereAreNone guards the property
+// that decides whether this tab is useful: no source, a working source and
+// a source that does not answer are three different answers.
+func TestMonitoringDescribesTheSourcesEvenWhenThereAreNone(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	raport := monitoringHosta(h, host.ID)
+	report := hostMonitoring(h, host.ID)
 
-	if len(raport.Sources) != 2 {
-		t.Fatalf("panel opisal %d zrodel: %+v", len(raport.Sources), raport.Sources)
+	if len(report.Sources) != 2 {
+		t.Fatalf("the panel described %d sources: %+v", len(report.Sources), report.Sources)
 	}
-	for _, zrodlo := range raport.Sources {
-		if !zrodlo.Configured && zrodlo.Reason == "" {
-			t.Errorf("%s: zrodlo nieskonfigurowane bez wyjasnienia", zrodlo.Name)
+	for _, source := range report.Sources {
+		if !source.Configured && source.Reason == "" {
+			t.Errorf("%s: unconfigured source without an explanation", source.Name)
 		}
-		if zrodlo.Configured && !zrodlo.Healthy && zrodlo.Reason == "" {
-			t.Errorf("%s: zrodlo, ktore nie odpowiada, bez powodu", zrodlo.Name)
+		if source.Configured && !source.Healthy && source.Reason == "" {
+			t.Errorf("%s: a source that does not answer, without a reason", source.Name)
 		}
 	}
-	// Etykieta jest zawsze: bez niej pusty wykres nie ma wyjasnienia.
-	if raport.Label == "" {
-		t.Error("panel nie mowi, po czym rozpoznaje ten host u zrodel")
+	// The label is always there: without it an empty chart has no
+	// explanation.
+	if report.Label == "" {
+		t.Error("the panel does not say how it recognises this host at the sources")
 	}
-	// Zakres czasu tez: panel pokazuje cudze dane i mowi, z jakiego okna.
-	if !raport.To.After(raport.From) {
-		t.Errorf("zakres czasu = %s .. %s", raport.From, raport.To)
+	// The time range too: the panel shows somebody else's data and says
+	// from which window.
+	if !report.To.After(report.From) {
+		t.Errorf("time range = %s .. %s", report.From, report.To)
 	}
-	if metryki := zrodlo(raport, "prometheus"); metryki != nil && !metryki.Configured {
-		if raport.MetricsUnavailable == "" {
-			t.Error("brak zrodla metryk bez wyjasnienia")
+	if metrics := source(report, "prometheus"); metrics != nil && !metrics.Configured {
+		if report.MetricsUnavailable == "" {
+			t.Error("no metrics source without an explanation")
 		}
 	}
 }
 
-// TestWyciszenieWymagaTerminuIPowodu pilnuje reguly, ktora odroznia cisze od
-// wylaczenia alertu na zawsze.
-func TestWyciszenieWymagaTerminuIPowodu(t *testing.T) {
+// TestSilenceRequiresADeadlineAndAReason guards the rule that tells a
+// silence from switching an alert off forever.
+func TestSilenceRequiresADeadlineAndAReason(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	raport := monitoringHosta(h, host.ID)
-	alerty := zrodlo(raport, "alertmanager")
-	if alerty == nil || !alerty.Configured {
-		// Instalacja bez zrodla alertow odmawia wprost - i to tez jest
-		// zachowanie, ktore warto sprawdzic.
+	report := hostMonitoring(h, host.ID)
+	alerts := source(report, "alertmanager")
+	if alerts == nil || !alerts.Configured {
+		// An installation without an alert source refuses outright - and
+		// that too is behaviour worth checking.
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/monitoring/silences",
-			map[string]any{"duration_minutes": 60, "comment": powodMonitoringu},
+			map[string]any{"duration_minutes": 60, "comment": monitoringReason},
 			nil, http.StatusServiceUnavailable)
-		t.Skip("ta instalacja nie ma zrodla alertow")
+		t.Skip("this installation has no alert source")
 	}
 
-	// Powod krotszy niz osiem znakow i cisza dluzsza niz doba odpadaja
-	// w panelu, zanim cokolwiek pojdzie do systemu alertowego.
+	// A reason shorter than eight characters and a silence longer than a
+	// day fall out in the panel, before anything goes to the alerting
+	// system.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/monitoring/silences",
-		map[string]any{"duration_minutes": 60, "comment": "krotkie"},
+		map[string]any{"duration_minutes": 60, "comment": "short"},
 		nil, http.StatusBadRequest)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/monitoring/silences",
-		map[string]any{"duration_minutes": 60 * 48, "comment": powodMonitoringu},
+		map[string]any{"duration_minutes": 60 * 48, "comment": monitoringReason},
 		nil, http.StatusBadRequest)
 
-	var cisza ciszaView
+	var silence silenceView
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/monitoring/silences",
-		map[string]any{"duration_minutes": 45, "comment": powodMonitoringu},
-		&cisza, http.StatusCreated)
-	if cisza.ID == "" || cisza.CreatedBy == "" {
-		t.Fatalf("wyciszenie bez identyfikatora albo wlasciciela: %+v", cisza)
+		map[string]any{"duration_minutes": 45, "comment": monitoringReason},
+		&silence, http.StatusCreated)
+	if silence.ID == "" || silence.CreatedBy == "" {
+		t.Fatalf("silence without an identifier or an owner: %+v", silence)
 	}
-	if len(cisza.Matchers) == 0 || cisza.Matchers[0].Value != raport.Label {
-		t.Errorf("wyciszenie nie dotyczy tego hosta: %+v", cisza.Matchers)
+	if len(silence.Matchers) == 0 || silence.Matchers[0].Value != report.Label {
+		t.Errorf("the silence does not concern this host: %+v", silence.Matchers)
 	}
 	t.Cleanup(func() {
 		h.do(http.MethodDelete,
-			"/api/v1/hosts/"+host.ID+"/monitoring/silences/"+cisza.ID, nil, nil, 0)
+			"/api/v1/hosts/"+host.ID+"/monitoring/silences/"+silence.ID, nil, nil, 0)
 	})
 
-	po := monitoringHosta(h, host.ID)
-	znalezione := false
-	for _, wpis := range po.Silences {
-		if wpis.ID == cisza.ID {
-			znalezione = true
+	after := hostMonitoring(h, host.ID)
+	found := false
+	for _, entry := range after.Silences {
+		if entry.ID == silence.ID {
+			found = true
 		}
 	}
-	if !znalezione {
-		t.Fatalf("zalozone wyciszenie nie wrocilo z zakladki: %+v", po.Silences)
+	if !found {
+		t.Fatalf("the created silence did not come back from the tab: %+v", after.Silences)
 	}
 
-	// Zakonczenie ciszy przed czasem tez jest decyzja - i tez ma slad.
+	// Ending a silence early is a decision too - and leaves a trace too.
 	h.do(http.MethodDelete,
-		"/api/v1/hosts/"+host.ID+"/monitoring/silences/"+cisza.ID, nil, nil, http.StatusNoContent)
-	poZakonczeniu := monitoringHosta(h, host.ID)
-	for _, wpis := range poZakonczeniu.Silences {
-		if wpis.ID == cisza.ID {
-			t.Fatal("zakonczone wyciszenie nadal obowiazuje")
+		"/api/v1/hosts/"+host.ID+"/monitoring/silences/"+silence.ID, nil, nil, http.StatusNoContent)
+	afterEnding := hostMonitoring(h, host.ID)
+	for _, entry := range afterEnding.Silences {
+		if entry.ID == silence.ID {
+			t.Fatal("the ended silence still applies")
 		}
 	}
 }
 
-// TestSondaMowiCoWidziHost pilnuje rozroznienia, ktore jest cala wartoscia
-// sondy: operacja sie udala, a usluga nie odpowiada - to nie to samo, co
-// operacja, ktora sie nie udala.
-func TestSondaMowiCoWidziHost(t *testing.T) {
+// TestProbeSaysWhatTheHostSees guards the distinction that is the whole
+// value of a probe: the operation succeeded and the service does not answer
+// - that is not the same as an operation that failed.
+func TestProbeSaysWhatTheHostSees(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// Sonda do panelu: host go widzi, wiec odpowiedz ma byc zgodna.
-	zadanie, proby := h.runOperation(host.ID, map[string]any{
-		"action": "monitoring.probe.run", "reason": powodMonitoringu,
+	// A probe to the panel: the host sees it, so the answer is to agree.
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "monitoring.probe.run", "reason": monitoringReason,
 		"payload": map[string]any{"monitoring": map[string]any{
 			"kind": "http", "target": envOr("FLOTESTRO_TEST_API", defaultAPI) + "/healthz",
 			"expect_body": "ok",
 		}},
 	}, 3*time.Minute)
-	if zadanie.State != "succeeded" {
-		t.Fatalf("sonda zakonczyla sie stanem %s: %+v", zadanie.State, proby)
+	if job.State != "succeeded" {
+		t.Fatalf("the probe ended in state %s: %+v", job.State, attempts)
 	}
-	wynik := wynikSondy(t, h, zadanie.ID)
-	if !wynik.Reachable || !wynik.Passed {
-		t.Fatalf("sonda do panelu opisana jako %+v", wynik)
+	result := probeResult(t, h, job.ID)
+	if !result.Reachable || !result.Passed {
+		t.Fatalf("the probe to the panel described as %+v", result)
 	}
 
-	// Port zamkniety: zadanie sie udaje, a odpowiedz brzmi "nie dziala".
-	zamkniety, proby := h.runOperation(host.ID, map[string]any{
-		"action": "monitoring.probe.run", "reason": powodMonitoringu,
+	// A closed port: the job succeeds, and the answer says "does not work".
+	closed, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "monitoring.probe.run", "reason": monitoringReason,
 		"payload": map[string]any{"monitoring": map[string]any{
 			"kind": "tcp", "target": "127.0.0.1:9", "timeout_seconds": 3,
 		}},
 	}, 3*time.Minute)
-	if zamkniety.State != "succeeded" {
-		t.Fatalf("sonda do zamknietego portu zakonczyla sie stanem %s: %+v",
-			zamkniety.State, proby)
+	if closed.State != "succeeded" {
+		t.Fatalf("the probe to a closed port ended in state %s: %+v",
+			closed.State, attempts)
 	}
-	wynikZamkniety := wynikSondy(t, h, zamkniety.ID)
-	if wynikZamkniety.Reachable || wynikZamkniety.Error == "" {
-		t.Fatalf("zamkniety port opisany jako %+v", wynikZamkniety)
+	closedResult := probeResult(t, h, closed.ID)
+	if closedResult.Reachable || closedResult.Error == "" {
+		t.Fatalf("the closed port described as %+v", closedResult)
 	}
-	if len(proby) > 0 && !strings.Contains(proby[len(proby)-1].Message, "does not answer") {
-		t.Errorf("komunikat nie mowi, ze usluga nie odpowiada: %q",
-			proby[len(proby)-1].Message)
+	if len(attempts) > 0 && !strings.Contains(attempts[len(attempts)-1].Message, "does not answer") {
+		t.Errorf("the message does not say the service does not answer: %q",
+			attempts[len(attempts)-1].Message)
 	}
 
-	// Sonda nie jest sposobem na czytanie plikow hosta cudzymi rekami.
+	// A probe is not a way to read host files with somebody else's hands.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
-		"action": "monitoring.probe.run", "reason": powodMonitoringu,
+		"action": "monitoring.probe.run", "reason": monitoringReason,
 		"payload": map[string]any{"monitoring": map[string]any{
 			"kind": "http", "target": "file:///etc/shadow",
 		}},
 	}, nil, http.StatusBadRequest)
 }
 
-// wynikSondy czyta wynik sondy z ostatniej proby zadania.
-func wynikSondy(t *testing.T, h *harness, jobID string) wynikSondyView {
+// probeResult reads the probe result from the last attempt of the job.
+func probeResult(t *testing.T, h *harness, jobID string) probeResultView {
 	t.Helper()
-	var wynik struct {
+	var result struct {
 		Items []struct {
 			Detail struct {
-				Probe wynikSondyView `json:"probe"`
+				Probe probeResultView `json:"probe"`
 			} `json:"detail"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/jobs/"+jobID+"/attempts", &wynik)
-	if len(wynik.Items) == 0 {
-		t.Fatalf("zadanie %s nie ma prob", jobID)
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &result)
+	if len(result.Items) == 0 {
+		t.Fatalf("job %s has no attempts", jobID)
 	}
-	return wynik.Items[len(wynik.Items)-1].Detail.Probe
+	return result.Items[len(result.Items)-1].Detail.Probe
 }

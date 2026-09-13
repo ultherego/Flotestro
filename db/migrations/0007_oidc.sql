@@ -1,32 +1,32 @@
--- Uwierzytelnianie operatorow przez Keycloak w ukladzie backend-for-frontend.
--- Refresh token pozostaje po stronie serwera; przegladarka dostaje wylacznie
--- referencje do sesji w ciasteczku HttpOnly.
+-- Operator authentication through Keycloak in the backend-for-frontend layout.
+-- The refresh token stays on the server side; the browser gets only a session
+-- reference in an HttpOnly cookie.
 
--- Rola identity_admin zarzadza obiektami katalogu FreeIPA. Jest osobna od
--- platform_admin, bo prawo do zmiany sudo i HBAC to inny poziom zaufania niz
--- prawo do restartu uslugi.
+-- The identity_admin role manages the FreeIPA directory objects. It is separate
+-- from platform_admin, because the right to change sudo and HBAC is a different
+-- level of trust than the right to restart a service.
 alter table role_bindings drop constraint role_bindings_role_check;
 alter table role_bindings add constraint role_bindings_role_check
     check (role in ('viewer', 'auditor', 'operator', 'approver', 'identity_admin', 'platform_admin'));
 
--- Tozsamosc zewnetrzna wiaze konto Keycloak z principalem Flotestro.
+-- An external identity binds a Keycloak account to a Flotestro principal.
 alter table principals add column issuer  text;
 alter table principals add column subject_id text;
 alter table principals add column email text;
 alter table principals add column last_login_at timestamptz;
 
--- Para issuer + subject_id jest jedynym pewnym identyfikatorem konta
--- zewnetrznego. Nazwa uzytkownika moze sie zmienic, subject nie.
+-- The issuer + subject_id pair is the only reliable identifier of an external
+-- account. The username may change, the subject does not.
 create unique index principals_external_idx on principals (issuer, subject_id)
     where issuer is not null and subject_id is not null;
 
 create table web_sessions (
     id                 uuid        primary key,
-    -- W bazie trzymamy wylacznie skrot wartosci ciasteczka. Wyciek kopii bazy
-    -- nie daje wiec gotowych sesji.
+    -- Only the digest of the cookie value is kept in the database. A leaked
+    -- database copy therefore gives no ready sessions.
     token_hash         bytea       not null unique,
     principal_id       uuid        not null references principals (id) on delete cascade,
-    -- Refresh token nie opuszcza serwera; przegladarka go nie widzi.
+    -- The refresh token does not leave the server; the browser does not see it.
     refresh_token      text,
     id_token           text,
     access_expires_at  timestamptz,
@@ -43,8 +43,8 @@ create table web_sessions (
 create index web_sessions_principal_idx on web_sessions (principal_id) where revoked_at is null;
 create index web_sessions_expiry_idx on web_sessions (absolute_expires_at) where revoked_at is null;
 
--- Stan trwajacego logowania: weryfikator PKCE i cel przekierowania. Rekord
--- zyje krotko i jest kasowany przy wymianie kodu.
+-- The state of a login in progress: the PKCE verifier and the redirect target.
+-- The record lives briefly and is deleted at the code exchange.
 create table auth_flows (
     state          text        primary key,
     code_verifier  text        not null,
@@ -56,8 +56,8 @@ create table auth_flows (
 
 create index auth_flows_expiry_idx on auth_flows (expires_at);
 
--- Mapowanie grup zewnetrznych na role. Grupa nadaje wylacznie kandydacka role;
--- docelowy zakres i wymagania approval pozostaja polityka Flotestro.
+-- The mapping of external groups to roles. A group grants only a candidate role;
+-- the target scope and the approval requirements remain Flotestro policy.
 create table group_role_mappings (
     id          uuid        primary key,
     issuer      text        not null,

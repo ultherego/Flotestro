@@ -1,12 +1,12 @@
--- Backup: definicje i historia przebiegow.
+-- Backups: definitions and run history.
 --
--- Dane backupowe nie plyna przez panel i nie ma ich w tej bazie. Sa tu
--- wylacznie metadane: co jest backupowane, dokad, jak dlugo zostaje i kiedy
--- ostatnia kopia sie udala. Panel, przez ktory plynelyby kopie stu hostow,
--- bylby waskim gardlem i najciekawszym celem w calej instalacji.
+-- Backup data does not flow through the panel and is not in this database.
+-- Only metadata is here: what is backed up, where to, how long it is kept and
+-- when the last copy succeeded. A panel through which the copies of a hundred
+-- hosts flowed would be a bottleneck and the most interesting target in the whole installation.
 --
--- Poswiadczenia sa nazwami sekretow, nie wartosciami: haslo repozytorium
--- i zmienne srodowiskowe narzedzia zyja w magazynie i tylko tam.
+-- Credentials are secret names, not values: the repository password and the
+-- tool's environment variables live in the store and only there.
 create table if not exists backup_definitions (
     id             uuid        primary key default gen_random_uuid(),
     host_id        uuid        not null references hosts(id) on delete cascade,
@@ -22,12 +22,12 @@ create table if not exists backup_definitions (
     keep_monthly   int         not null default 0,
     prune          boolean     not null default false,
     runbook        text        not null default '',
-    -- Zgoda na zalozenie repozytorium przy pierwszej kopii. Bez niej host
-    -- niczego nie tworzy: repozytorium powstale przez literowke w adresie
-    -- wyglada jak backup, ktory dziala.
+    -- Consent to initialise the repository at the first copy. Without it the
+    -- host creates nothing: a repository created by a typo in the address
+    -- looks like a backup that works.
     initialize     boolean     not null default false,
-    -- Nazwa sekretu z haslem repozytorium oraz przypisanie zmiennych
-    -- srodowiskowych do sekretow. Nazwy, nie wartosci.
+    -- The name of the secret with the repository password and the mapping of
+    -- environment variables to secrets. Names, not values.
     password_secret text       not null default '',
     env_secrets    jsonb       not null default '{}'::jsonb,
     note           text        not null default '',
@@ -40,14 +40,14 @@ create table if not exists backup_definitions (
 
 create index if not exists backup_definitions_host_idx on backup_definitions (host_id);
 
--- Historia przebiegow. Definicja moze zniknac, a historia zostaje: to, ze
--- kopia byla robiona i kiedy ostatnio sie udala, jest faktem, ktorego
--- skasowanie definicji nie odwraca.
+-- The run history. A definition may disappear and the history stays: that a
+-- copy was made and when it last succeeded is a fact that deleting the
+-- definition does not undo.
 create table if not exists backup_runs (
     id               uuid        primary key default gen_random_uuid(),
     host_id          uuid        not null references hosts(id) on delete cascade,
     definition       text        not null,
-    -- Rodzaj: plan, run, verify albo restore.
+    -- The kind: plan, run, verify or restore.
     kind             text        not null,
     job_id           uuid        references jobs(id) on delete set null,
     outcome          text        not null,
@@ -56,8 +56,8 @@ create table if not exists backup_runs (
     total_bytes      bigint,
     files_new        bigint,
     duration_seconds double precision,
-    -- Pola z planu: ile kopii jest w repozytorium, ile zajmuja i kiedy
-    -- powstala najnowsza.
+    -- Fields from the plan: how many copies are in the repository, how much
+    -- they take and when the newest was made.
     snapshots        int,
     repository_size  bigint,
     last_success_at  timestamptz,

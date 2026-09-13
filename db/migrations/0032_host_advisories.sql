@@ -1,18 +1,18 @@
--- Ustalenia producenta znane hostowi z metadanych jego wlasnych repozytoriow.
+-- Vendor advisories known to the host from the metadata of its own repositories.
 --
--- Dla Fedory to jest zrodlo rozstrzygajace: mowi o wersjach z tych samych
--- repozytoriow, z ktorych host bierze pakiety. Panel nie zgaduje, czy poprawka
--- jest osiagalna - host ja widzi albo nie.
+-- For Fedora this is the deciding source: it speaks of versions from the same
+-- repositories the host takes packages from. The panel does not guess whether
+-- a fix is reachable - the host sees it or not.
 --
--- Trzymamy wylacznie ustalenia bezpieczenstwa dotyczace pakietow, ktore na tym
--- hoscie naprawde sa: pelna lista wydania to tysiace pozycji, z ktorych
--- wiekszosc dotyczy rzeczy, ktorych host nie ma.
+-- Only security advisories about packages this host really has are kept: the
+-- full release list is thousands of items, most of which concern things the
+-- host does not have.
 create table if not exists host_advisories (
     host_id      uuid   not null references hosts(id) on delete cascade,
     advisory_id  text   not null,
     package_name text   not null,
     architecture text   not null default '',
-    -- Wersja, ktora zamyka ustalenie, w postaci EVR producenta.
+    -- The version that closes the advisory, in the vendor's EVR form.
     fixed_evr    text   not null default '',
     cve_ids      text[] not null default '{}',
     severity     text   not null default '',

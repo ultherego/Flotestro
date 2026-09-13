@@ -10,14 +10,14 @@ import (
 	"time"
 )
 
-// uniqueSubject daje nazwe unikalna dla przebiegu, zeby testy nie zderzaly sie
-// z tozsamosciami z poprzednich uruchomien.
+// uniqueSubject gives a name unique to the run, so that the tests do not
+// collide with identities from previous runs.
 func uniqueSubject(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
 
-// TestBrakTokenuBlokujeDostep sprawdza, ze API nie jest otwarte.
-func TestBrakTokenuBlokujeDostep(t *testing.T) {
+// TestMissingTokenBlocksAccess checks that the API is not open.
+func TestMissingTokenBlocksAccess(t *testing.T) {
 	h := newHarness(t)
 	anonymous := h.withToken("")
 
@@ -29,15 +29,15 @@ func TestBrakTokenuBlokujeDostep(t *testing.T) {
 	}
 }
 
-// TestNieprawidlowyTokenJestOdrzucany sprawdza, ze zmyslony token nie dziala.
-func TestNieprawidlowyTokenJestOdrzucany(t *testing.T) {
+// TestInvalidTokenIsRejected checks that a made-up token does not work.
+func TestInvalidTokenIsRejected(t *testing.T) {
 	h := newHarness(t)
-	h.withToken("flta_nieistniejacy-token").
+	h.withToken("flta_non-existent-token").
 		do(http.MethodGet, "/api/v1/hosts", nil, nil, http.StatusUnauthorized)
 }
 
-// TestOperatorNieZatwierdzaWlasnychZmian jest testem rozdzialu obowiazkow.
-func TestOperatorNieZatwierdzaWlasnychZmian(t *testing.T) {
+// TestOperatorDoesNotApproveOwnChanges is a separation of duties test.
+func TestOperatorDoesNotApproveOwnChanges(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -52,20 +52,21 @@ func TestOperatorNieZatwierdzaWlasnychZmian(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		operator.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel",
-			map[string]any{"reason": "koniec testu"}, nil, http.StatusOK)
+			map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
 	})
 
-	// Operator moze zlecic zmiane, ale nie ma uprawnienia do zatwierdzania.
+	// The operator may order a change, but has no permission to approve.
 	operator.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve",
 		map[string]any{"payload_hash": job.PayloadHash}, nil, http.StatusForbidden)
 
 	if state := h.job(job.ID).State; state != "awaiting_approval" {
-		t.Fatalf("odrzucone zatwierdzenie zmienilo stan na %s", state)
+		t.Fatalf("the rejected approval changed the state to %s", state)
 	}
 }
 
-// TestApproverNieZlecaZmian sprawdza druga strone rozdzialu obowiazkow.
-func TestApproverNieZlecaZmian(t *testing.T) {
+// TestApproverDoesNotOrderChanges checks the other side of the separation
+// of duties.
+func TestApproverDoesNotOrderChanges(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -78,9 +79,9 @@ func TestApproverNieZlecaZmian(t *testing.T) {
 		nil, http.StatusForbidden)
 }
 
-// TestOperatorIApproverRazemWykonujaZmiane sprawdza pelna sciezke z podzialem
-// rol: jeden zleca, drugi zatwierdza.
-func TestOperatorIApproverRazemWykonujaZmiane(t *testing.T) {
+// TestOperatorAndApproverCarryOutAChangeTogether checks the full path with
+// the roles split: one orders, the other approves.
+func TestOperatorAndApproverCarryOutAChangeTogether(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 	scope := []map[string]string{
@@ -99,42 +100,41 @@ func TestOperatorIApproverRazemWykonujaZmiane(t *testing.T) {
 
 	final := h.awaitTerminal(job.ID, 90*time.Second)
 	if final.State != "succeeded" {
-		t.Fatalf("stan = %s, kod bledu = %s", final.State, final.ResultErrorCode)
+		t.Fatalf("state = %s, error code = %s", final.State, final.ResultErrorCode)
 	}
 	if final.ApprovedBy == final.CreatedBy {
-		t.Error("zlecajacy i zatwierdzajacy to ta sama tozsamosc")
+		t.Error("the requester and the approver are the same identity")
 	}
 }
 
-// TestZakresOgraniczaWidocznoscFloty sprawdza, ze operator jednego srodowiska
-// nie widzi hostow spoza swojego zakresu.
-func TestZakresOgraniczaWidocznoscFloty(t *testing.T) {
+// TestScopeLimitsFleetVisibility checks that an operator of one environment
+// does not see hosts outside their scope.
+func TestScopeLimitsFleetVisibility(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	obcy := h.withToken(h.createPrincipal(uniqueSubject("obcy-zakres"), []map[string]string{
-		{"role": "operator", "site": "inna-lokalizacja", "environment": "inne-srodowisko"},
+	outsider := h.withToken(h.createPrincipal(uniqueSubject("foreign-scope"), []map[string]string{
+		{"role": "operator", "site": "other-site", "environment": "other-environment"},
 	}))
 
 	var listing struct {
 		Items []hostView `json:"items"`
 		Count int        `json:"count"`
 	}
-	obcy.get("/api/v1/hosts", &listing)
+	outsider.get("/api/v1/hosts", &listing)
 	if listing.Count != 0 {
-		t.Errorf("tozsamosc spoza zakresu widzi %d hostow", listing.Count)
+		t.Errorf("an identity outside the scope sees %d hosts", listing.Count)
 	}
 
-	// Bezposredni dostep do hosta tez musi byc odmowiony.
-	obcy.do(http.MethodGet, "/api/v1/hosts/"+host.ID, nil, nil, http.StatusForbidden)
-	obcy.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+	// Direct access to the host must be denied too.
+	outsider.do(http.MethodGet, "/api/v1/hosts/"+host.ID, nil, nil, http.StatusForbidden)
+	outsider.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "unit.restart", "payload": unitPayload("cron.service")},
 		nil, http.StatusForbidden)
 }
 
-// TestViewerNiczegoNieZmienia sprawdza, ze rola odczytu jest naprawde tylko
-// do odczytu.
-func TestViewerNiczegoNieZmienia(t *testing.T) {
+// TestViewerChangesNothing checks that the read role is really read-only.
+func TestViewerChangesNothing(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
@@ -142,37 +142,39 @@ func TestViewerNiczegoNieZmienia(t *testing.T) {
 		{"role": "viewer", "site": host.Site, "environment": host.Environment},
 	}))
 
-	// Odczyt dziala.
+	// Reading works.
 	viewer.do(http.MethodGet, "/api/v1/hosts/"+host.ID, nil, nil, http.StatusOK)
 
-	// Zmiany i audyt nie.
+	// Changes and the audit log do not.
 	viewer.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "journal.read",
 			"payload": map[string]any{"journal": map[string]any{"lines": 5}}},
 		nil, http.StatusForbidden)
 	viewer.do(http.MethodGet, "/api/v1/audit", nil, nil, http.StatusForbidden)
 	viewer.do(http.MethodPost, "/api/v1/enrollment-requests",
-		map[string]any{"description": "proba"}, nil, http.StatusForbidden)
+		map[string]any{"description": "attempt"}, nil, http.StatusForbidden)
 	viewer.do(http.MethodGet, "/api/v1/principals", nil, nil, http.StatusForbidden)
 }
 
-// TestUprawnienieJestPerOperacja sprawdza, ze prawo do jednej operacji nie
-// daje prawa do innej. Rola bez uprawnien do jednostek moze czytac dziennik.
-func TestUprawnienieJestPerOperacja(t *testing.T) {
+// TestPermissionIsPerOperation checks that the right to one operation gives
+// no right to another. A role without unit permissions may read the
+// journal.
+func TestPermissionIsPerOperation(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// Auditor ma prawo odczytu, ale nie ma job.create, wiec nie zleci nawet
-	// operacji niemutujacej.
+	// The auditor has read rights but no job.create, so cannot order even a
+	// non-mutating operation.
 	auditor := h.withToken(h.createPrincipal(uniqueSubject("auditor"), []map[string]string{
 		{"role": "auditor", "site": host.Site, "environment": host.Environment},
 	}))
 
-	// Audyt hosta w swoim zakresie czyta.
+	// The host audit log within their scope is readable.
 	auditor.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/audit", nil, nil, http.StatusOK)
 
-	// Ale globalny dziennik obejmuje cala flote, wiec wymaga uprawnienia
-	// w zakresie globalnym, ktorego auditor jednego srodowiska nie ma.
+	// But the global log covers the whole fleet, so it requires the
+	// permission in the global scope, which an auditor of one environment
+	// does not have.
 	auditor.do(http.MethodGet, "/api/v1/audit", nil, nil, http.StatusForbidden)
 
 	auditor.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
@@ -181,19 +183,19 @@ func TestUprawnienieJestPerOperacja(t *testing.T) {
 		nil, http.StatusForbidden)
 }
 
-// TestAudytorGlobalnyCzytaCalyDziennik potwierdza, ze uprawnienie globalne
-// daje dostep do dziennika calej floty.
-func TestAudytorGlobalnyCzytaCalyDziennik(t *testing.T) {
+// TestGlobalAuditorReadsTheWholeLog confirms that the global permission
+// gives access to the log of the whole fleet.
+func TestGlobalAuditorReadsTheWholeLog(t *testing.T) {
 	h := newHarness(t)
-	auditor := h.withToken(h.createPrincipal(uniqueSubject("auditor-globalny"), []map[string]string{
+	auditor := h.withToken(h.createPrincipal(uniqueSubject("global-auditor"), []map[string]string{
 		{"role": "auditor", "site": "*", "environment": "*"},
 	}))
 	auditor.do(http.MethodGet, "/api/v1/audit", nil, nil, http.StatusOK)
 }
 
-// TestProdukcjaWymagaDrugiejOsoby sprawdza zasade czterech oczu. Host jest na
-// czas testu przenoszony do srodowiska produkcyjnego.
-func TestProdukcjaWymagaDrugiejOsoby(t *testing.T) {
+// TestProductionRequiresASecondPerson checks the four-eyes rule. The host
+// is moved to the production environment for the duration of the test.
+func TestProductionRequiresASecondPerson(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
@@ -201,44 +203,45 @@ func TestProdukcjaWymagaDrugiejOsoby(t *testing.T) {
 
 	if _, err := pool.Exec(ctx,
 		`update hosts set environment = 'prod' where id = $1`, host.ID); err != nil {
-		t.Fatalf("nie przeniesiono hosta do produkcji: %v", err)
+		t.Fatalf("the host was not moved to production: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
 			`update hosts set environment = $2 where id = $1`, host.ID, host.Environment)
 	})
 
-	// Identity z obiema rolami: sam rozdzial rol nie wystarcza, bo jedna
-	// osoba moze miec obie.
-	obie := h.withToken(h.createPrincipal(uniqueSubject("operator-approver"), []map[string]string{
+	// An identity with both roles: role separation alone is not enough,
+	// because one person may hold both.
+	both := h.withToken(h.createPrincipal(uniqueSubject("operator-approver"), []map[string]string{
 		{"role": "operator", "site": host.Site, "environment": "prod"},
 		{"role": "approver", "site": host.Site, "environment": "prod"},
 	}))
 
-	job := obie.createOperation(host.ID, map[string]any{
+	job := both.createOperation(host.ID, map[string]any{
 		"action":  "unit.restart",
 		"payload": unitPayload("cron.service"),
 	})
 	t.Cleanup(func() {
 		h.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel",
-			map[string]any{"reason": "koniec testu"}, nil, http.StatusOK)
+			map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
 	})
 
-	// Ma uprawnienie do zatwierdzania, ale nie wlasnej zmiany.
-	obie.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve",
+	// Has the permission to approve, but not their own change.
+	both.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve",
 		map[string]any{"payload_hash": job.PayloadHash}, nil, http.StatusForbidden)
 
 	if state := h.job(job.ID).State; state != "awaiting_approval" {
-		t.Fatalf("samozatwierdzenie zmienilo stan na %s", state)
+		t.Fatalf("the self-approval changed the state to %s", state)
 	}
 }
 
-// TestOdmowaZostawiaSladAudytowy sprawdza, ze proba bez uprawnien jest
-// odnotowana. Audyt pokazujacy tylko sukcesy jest bezuzyteczny przy incydencie.
-func TestOdmowaZostawiaSladAudytowy(t *testing.T) {
+// TestDenialLeavesAnAuditTrail checks that an attempt without permissions
+// is recorded. An audit log showing only successes is useless in an
+// incident.
+func TestDenialLeavesAnAuditTrail(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
-	subject := uniqueSubject("viewer-audyt")
+	subject := uniqueSubject("viewer-audit")
 
 	viewer := h.withToken(h.createPrincipal(subject, []map[string]string{
 		{"role": "viewer", "site": host.Site, "environment": host.Environment},
@@ -261,6 +264,6 @@ func TestOdmowaZostawiaSladAudytowy(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("brak zdarzenia audytowego o odmowie dla %s", subject)
+		t.Fatalf("no audit event about the denial for %s", subject)
 	}
 }

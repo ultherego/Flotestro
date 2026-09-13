@@ -1,3 +1,3 @@
-# Katalog stanu nalezy do relaya i jest zamkniety dla reszty systemu: leza
-# w nim klucz prywatny i tozsamosc relaya.
+# The state directory belongs to the relay and is closed to the rest of the
+# system: the private key and the relay identity lie in it.
 d /var/lib/flotestro-relay 0700 flotestro-relay flotestro-relay -

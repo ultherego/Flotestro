@@ -13,8 +13,8 @@ ExecStart=/usr/bin/flotestro-control-plane
 Restart=always
 RestartSec=5s
 
-# Klucz CA jest najwrazliwszym materialem w systemie, wiec proces dostaje
-# wylacznie wlasny katalog stanu.
+# The CA key is the most sensitive material in the system, so the process
+# gets only its own state directory.
 StateDirectory=flotestro
 StateDirectoryMode=0700
 ReadWritePaths=/var/lib/flotestro

@@ -1,9 +1,9 @@
--- Enrollment przestaje byc samym tokenem.
+-- Enrollment stops being a bare token.
 --
--- Token jest sekretem autoryzujacym jedna probe, ale panel potrzebuje
--- trwalego rekordu oczekujacej instalacji: kto ja zamowil, w jakim celu,
--- czym sie skonczyla i czy nadal wolno jej uzyc. Sam skrot tokenu nie
--- odpowiada na zadne z tych pytan.
+-- The token is a secret authorising one attempt, but the panel needs a
+-- durable record of the pending installation: who ordered it, for what
+-- purpose, how it ended and whether it may still be used. The token digest
+-- alone answers none of those questions.
 do $$
 begin
     if exists (select 1 from information_schema.tables
@@ -13,18 +13,18 @@ begin
 end $$;
 
 alter table enrollment_requests
-    -- Cel blokuje ciche re-enrollment: "nowy host" i "wymiana tozsamosci
-    -- istniejacego hosta" to dwie rozne decyzje i wymagaja dwoch roznych
-    -- zamowien.
+    -- The purpose blocks a quiet re-enrollment: "new host" and "identity
+    -- replacement of an existing host" are two different decisions and need
+    -- two different orders.
     add column if not exists purpose             text,
-    -- Zwiazanie z konkretna maszyna i z konkretnym hostem. Przy automatyzacji
-    -- i przy odzyskiwaniu tozsamosci token nie moze pasowac do czegokolwiek.
+    -- Binding to a specific machine and a specific host. In automation and in
+    -- identity recovery the token must not match just anything.
     add column if not exists expected_machine_id text,
-    -- Zamowienie bez hosta, ktorego dotyczy, nie ma sensu: kasujemy je razem
-    -- z hostem. Zapis o tym, ktory host powstal, zostaje - to historia, a nie
-    -- zaleznosc.
+    -- An order without the host it concerns makes no sense: it is deleted
+    -- together with the host. The record of which host was created stays -
+    -- that is history, not a dependency.
     add column if not exists expected_host_id    uuid references hosts (id) on delete cascade,
-    -- Status jest dla operatora i audytu, nigdy podstawa autoryzacji.
+    -- The status is for the operator and the audit, never a basis of authorisation.
     add column if not exists status              text,
     add column if not exists enrolled_host_id    uuid references hosts (id) on delete set null,
     add column if not exists updated_at          timestamptz not null default now();
@@ -54,26 +54,26 @@ begin
         alter table enrollment_requests add constraint enrollment_requests_status_check
             check (status in ('pending', 'enrolled', 'expired', 'revoked', 'failed'));
     end if;
-    -- Wymiana tozsamosci bez wskazania hosta byla by tokenem, ktory pasuje do
-    -- kazdego - a to jest dokladnie to, przed czym cel ma chronic.
+    -- An identity replacement without naming the host would be a token that
+    -- matches anyone - and that is exactly what the purpose is to protect against.
     if not exists (select 1 from pg_constraint where conname = 'enrollment_requests_recovery_check') then
         alter table enrollment_requests add constraint enrollment_requests_recovery_check
             check ((purpose = 'replace_identity') = (expected_host_id is not null));
     end if;
-    -- Rodzaj tozsamosci i cel musza sie zgadzac: relay nie rejestruje sie
-    -- zamowieniem hosta ani odwrotnie.
+    -- The kind of identity and the purpose must agree: a relay does not enroll
+    -- with a host order nor the other way round.
     if not exists (select 1 from pg_constraint where conname = 'enrollment_requests_kind_check') then
         alter table enrollment_requests add constraint enrollment_requests_kind_check
             check ((kind = 'relay') = (purpose = 'relay'));
     end if;
 end $$;
 
--- Proba enrollmentu jest zapisem tego, co juz zostalo wydane.
+-- An enrollment attempt is the record of what was already issued.
 --
--- Bez niej utrata odpowiedzi w sieci konczy sie hostem bez tozsamosci
--- i tokenem, ktory jest juz zuzyty: serwer zapisal hosta i wystawil
--- certyfikat, a agent nigdy go nie zobaczyl. Powtorzona proba z tym samym
--- identyfikatorem i tym samym CSR ma dostac ten sam certyfikat.
+-- Without it a lost response in the network ends with a host without an
+-- identity and a token that is already spent: the server recorded the host
+-- and issued a certificate, and the agent never saw it. A repeated attempt
+-- with the same identifier and the same CSR is to get the same certificate.
 create table if not exists enrollment_attempts (
     request_id         uuid        not null references enrollment_requests (id) on delete cascade,
     client_request_id  uuid        not null,

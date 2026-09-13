@@ -1,43 +1,45 @@
 #!/usr/bin/env bash
-# Buduje wydanie: binarki dla wskazanych architektur, pakiety, sumy kontrolne
-# i opis pochodzenia.
+# Builds a release: the binaries for the given architectures, the packages,
+# the checksums and the provenance description.
 #
-#   build-release.sh binarki  <wersja> <katalog> [arch ...]   # wymaga Go
+#   build-release.sh binaries <version> <dir> [arch ...]   # requires Go
 #
-# Pakiet .deb powstaje dla dowolnej architektury na dowolnej maszynie: dpkg-deb
-# tylko pakuje gotowe pliki. rpmbuild sprawdza zgodnosc z maszyna budujaca
-# i dla obcej architektury odmawia, wiec .rpm dla arm64 wymaga maszyny arm64.
-#   build-release.sh pakiety  <wersja> <katalog> [arch ...]   # wymaga dpkg-deb/rpmbuild
-#   build-release.sh wszystko <wersja> <katalog> [arch ...]
+# A .deb package is made for any architecture on any machine: dpkg-deb only
+# packs ready files. rpmbuild checks conformance with the build machine and
+# refuses for a foreign architecture, so an .rpm for arm64 requires an arm64
+# machine.
+#   build-release.sh packages <version> <dir> [arch ...]   # requires dpkg-deb/rpmbuild
+#   build-release.sh all      <version> <dir> [arch ...]
 #
-# Kroki sa rozdzielone, bo rozdzielone sa maszyny: toolchain Go stoi gdzie
-# indziej niz narzedzia pakietowania danej dystrybucji, a pakiet ma powstac
-# natywnie - tylko wtedy sprawdzamy to, co dostanie klient.
+# The steps are separate because the machines are separate: the Go toolchain
+# stands elsewhere than the packaging tools of a given distribution, and the
+# package is to be made natively - only then is what the customer gets
+# checked.
 #
-# Skrypt nie podpisuje niczego. Podpis jest osobnym krokiem i osobnym
-# kluczem: maszyna budujaca nie musi go miec i lepiej, zeby nie miala.
+# The script signs nothing. Signing is a separate step and a separate key:
+# the build machine does not have to hold it and had better not.
 set -euo pipefail
 
-TRYB="${1:?podaj tryb: binarki, pakiety albo wszystko}"
-WERSJA="${2:?podaj wersje wydania}"
-WYNIK="${3:?podaj katalog wynikowy}"
+MODE="${1:?give the mode: binaries, packages or all}"
+VERSION="${2:?give the release version}"
+OUT="${3:?give the output directory}"
 shift 3
-ARCHITEKTURY=("$@")
-[ ${#ARCHITEKTURY[@]} -gt 0 ] || ARCHITEKTURY=(amd64 arm64)
+ARCHITECTURES=("$@")
+[ ${#ARCHITECTURES[@]} -gt 0 ] || ARCHITECTURES=(amd64 arm64)
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 GO="${GO:-go}"
-mkdir -p "$WYNIK"
+mkdir -p "$OUT"
 
-# Nazwy architektur roznia sie miedzy Go, Debianem i RPM-em. Tlumaczymy je
-# w jednym miejscu, bo pomylka konczy sie pakietem, ktory instaluje sie na
-# niewlasciwej maszynie.
-# Arch nazywa architektury tak samo jak RPM, ale osobna funkcja mowi wprost,
-# ze to zbieg okolicznosci, a nie wspolny slownik.
-nazwaARCH() { nazwaRPM "$1"; }
+# The architecture names differ between Go, Debian and RPM. They are
+# translated in one place, because a mistake ends with a package that
+# installs on the wrong machine.
+# Arch names architectures the same way as RPM, but a separate function says
+# outright that it is a coincidence, not a shared vocabulary.
+archName() { rpmName "$1"; }
 
-nazwaRPM() {
+rpmName() {
     case "$1" in
     amd64) echo x86_64 ;;
     arm64) echo aarch64 ;;
@@ -45,143 +47,148 @@ nazwaRPM() {
     esac
 }
 
-# stempel sklada flagi konsolidatora wpisujace pochodzenie w binarke.
+# stamp composes the linker flags that write the provenance into the binary.
 #
-# Sam numer wersji nie wystarcza, gdy pakiet zachowuje sie inaczej niz
-# powinien: pierwsze pytanie brzmi wtedy "z ktorego commita to jest" i musi
-# dac sie odpowiedziec na hoscie, bez dostepu do maszyny wydania.
-stempel() {
-    local pakiet=github.com/ultherego/flotestro/internal/buildinfo
-    local commit data
-    # safe.directory: katalog ze zrodlami czesto nalezy do innego uzytkownika
-    # niz proces budujacy, a git odmawia wtedy odczytu.
+# The version number alone is not enough when a package behaves differently
+# than it should: the first question is then "which commit is this from" and
+# it has to be answerable on the host, without access to the release
+# machine.
+stamp() {
+    local pkg=github.com/ultherego/flotestro/internal/buildinfo
+    local commit date
+    # safe.directory: the source directory often belongs to a different user
+    # than the building process, and git then refuses to read it.
     commit="$(git -C "$repo" -c "safe.directory=$repo" rev-parse HEAD 2>/dev/null || true)"
-    data="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf -- "-X %s.Wersja=%s -X %s.Commit=%s -X %s.Data=%s" \
-        "$pakiet" "$WERSJA" "$pakiet" "$commit" "$pakiet" "$data"
+    date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf -- "-X %s.Version=%s -X %s.Commit=%s -X %s.Date=%s" \
+        "$pkg" "$VERSION" "$pkg" "$commit" "$pkg" "$date"
 }
 
-zbudujBinarki() {
-    local arch="$1" stage="$WYNIK/stage-$arch"
-    echo "==> binarki $arch"
+buildBinaries() {
+    local arch="$1" stage="$OUT/stage-$arch"
+    echo "==> binaries $arch"
     rm -rf "$stage"
     mkdir -p "$stage"
-    for skladnik in agent agent-helper agentctl relay control-plane; do
-        # CGO wylaczone: pakiet ma dzialac na kazdej maszynie danej
-        # architektury, a nie tylko na tej, ktora ma te same biblioteki.
-        # -trimpath usuwa sciezki maszyny budujacej, zeby ta sama binarka
-        # powstawala niezaleznie od tego, gdzie lezy katalog roboczy.
-        # Wersja jest wpisywana w binarke: panel porownuje ja z wersja
-        # docelowa po aktualizacji, wiec musi pochodzic z wydania, a nie
-        # z zaszytej stalej.
+    for component in agent agent-helper agentctl relay control-plane; do
+        # CGO disabled: the package is to work on every machine of the given
+        # architecture, not only on one with the same libraries.
+        # -trimpath removes the build machine paths, so that the same binary
+        # comes out regardless of where the working directory lies.
+        # The version is written into the binary: the panel compares it with
+        # the target version after an update, so it must come from the
+        # release, not from a hard-coded constant.
         CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
             "$GO" -C "$repo" build -trimpath \
-            -ldflags "-s -w $(stempel)" \
-            -o "$stage/flotestro-$skladnik" "./cmd/$skladnik"
+            -ldflags "-s -w $(stamp)" \
+            -o "$stage/flotestro-$component" "./cmd/$component"
     done
-    # Panel webowy jest niezalezny od architektury; wchodzi do pakietu
-    # control plane, gdy zostal wczesniej zbudowany.
+    # The web panel is architecture-independent; it enters the control plane
+    # package when it was built earlier.
     if [ -d "${FLOTESTRO_WEB:-/usr/share/flotestro/web}" ]; then
         mkdir -p "$stage/web"
         cp -r "${FLOTESTRO_WEB:-/usr/share/flotestro/web}/." "$stage/web/"
     fi
-    # Lista modulow wchodzacych w binarke. To nie jest pelny SBOM i nie
-    # udajemy, ze jest: to dokladnie ta informacja, ktora niesie sama
-    # binarka, i po niej da sie sprawdzic, czy wydanie zawiera podatna
-    # wersje zaleznosci.
-    "$GO" version -m "$stage/flotestro-agent" > "$WYNIK/moduly-$arch.txt"
+    # The list of modules that enter the binary. It is not a full SBOM and
+    # does not pretend to be: it is exactly the information the binary itself
+    # carries, and it lets one check whether the release contains a
+    # vulnerable dependency version.
+    "$GO" version -m "$stage/flotestro-agent" > "$OUT/modules-$arch.txt"
 }
 
-zbudujPakiety() {
-    local arch="$1" stage="$WYNIK/stage-$arch" zbudowano=false
-    [ -d "$stage" ] || { echo "brak binarek w $stage" >&2; exit 1; }
+buildPackages() {
+    local arch="$1" stage="$OUT/stage-$arch" built=false
+    [ -d "$stage" ] || { echo "no binaries in $stage" >&2; exit 1; }
     if command -v dpkg-deb >/dev/null; then
-        echo "==> pakiety .deb $arch"
-        for skladnik in agent relay control-plane; do
-            "$here/build-deb.sh" "$skladnik" "$stage" "$WERSJA" "$arch" "$WYNIK" >/dev/null
+        echo "==> .deb packages $arch"
+        for component in agent relay control-plane; do
+            "$here/build-deb.sh" "$component" "$stage" "$VERSION" "$arch" "$OUT" >/dev/null
         done
-        zbudowano=true
+        built=true
     fi
     if command -v makepkg >/dev/null; then
-        # makepkg pakuje gotowe pliki, wiec architektura jest kwestia nazwy
-        # pakietu, a nie maszyny budujacej.
-        echo "==> pakiety pacman $(nazwaARCH "$arch")"
-        for skladnik in agent relay; do
-            "$here/build-arch.sh" "$skladnik" "$stage" "$WERSJA" \
-                "$(nazwaARCH "$arch")" "$WYNIK" >/dev/null
+        # makepkg packs ready files, so the architecture is a matter of the
+        # package name, not of the build machine.
+        echo "==> pacman packages $(archName "$arch")"
+        for component in agent relay; do
+            "$here/build-arch.sh" "$component" "$stage" "$VERSION" \
+                "$(archName "$arch")" "$OUT" >/dev/null
         done
-        zbudowano=true
+        built=true
     fi
     if command -v rpmbuild >/dev/null; then
-        # rpmbuild nie buduje dla obcej architektury: sprawdza zgodnosc
-        # z maszyna budujaca i odmawia. Pakiet .rpm dla arm64 wymaga wiec
-        # maszyny arm64 (natywnej albo emulowanej przez mock/qemu). Mowimy
-        # o tym wprost, zamiast wydawac wydanie niepelne po cichu.
-        if [ "$(nazwaRPM "$arch")" = "$(uname -m)" ]; then
-            echo "==> pakiety .rpm $(nazwaRPM "$arch")"
-            for skladnik in agent relay control-plane; do
-                "$here/build-rpm.sh" "$skladnik" "$stage" "$WERSJA" "$(nazwaRPM "$arch")" "$WYNIK" >/dev/null
+        # rpmbuild does not build for a foreign architecture: it checks
+        # conformance with the build machine and refuses. An .rpm for arm64
+        # therefore requires an arm64 machine (native or emulated through
+        # mock/qemu). This is said outright instead of quietly issuing an
+        # incomplete release.
+        if [ "$(rpmName "$arch")" = "$(uname -m)" ]; then
+            echo "==> .rpm packages $(rpmName "$arch")"
+            for component in agent relay control-plane; do
+                "$here/build-rpm.sh" "$component" "$stage" "$VERSION" "$(rpmName "$arch")" "$OUT" >/dev/null
             done
-            zbudowano=true
+            built=true
         else
-            echo "!!! .rpm $(nazwaRPM "$arch") wymaga maszyny $(nazwaRPM "$arch"); ta jest $(uname -m)" >&2
-            echo "$(nazwaRPM "$arch")" >> "$WYNIK/brakujace-rpm.txt"
+            echo "!!! .rpm $(rpmName "$arch") requires a $(rpmName "$arch") machine; this one is $(uname -m)" >&2
+            echo "$(rpmName "$arch")" >> "$OUT/missing-rpm.txt"
         fi
     fi
-    # Brak narzedzi to blad; sama odmowa rpmbuilda dla obcej architektury
-    # nim nie jest - wtedy pakiety tej architektury po prostu robi inna
-    # maszyna, a tu zostaje slad w brakujace-rpm.txt.
-    if [ "$zbudowano" = false ] && [ ! -s "$WYNIK/brakujace-rpm.txt" ]; then
-        echo "brak dpkg-deb i rpmbuild - nie ma czym zbudowac pakietow" >&2
+    # Missing tools are an error; rpmbuild's refusal for a foreign
+    # architecture alone is not - then the packages of that architecture are
+    # simply made by another machine, and a trace stays here in
+    # missing-rpm.txt.
+    if [ "$built" = false ] && [ ! -s "$OUT/missing-rpm.txt" ]; then
+        echo "neither dpkg-deb nor rpmbuild is available - nothing to build the packages with" >&2
         exit 1
     fi
 }
 
-# pochodzenie zapisuje sie tam, gdzie stoi zrodlo - czyli przy budowaniu
-# binarek. Maszyna pakujaca ma tylko kopie plikow bez historii i bez
-# toolchainu, wiec spisany tam commit bylby zgadywaniem.
-pochodzenie() {
-    echo "==> pochodzenie"
-    local commit opis
-    # safe.directory: katalog ze zrodlami czesto nalezy do innego uzytkownika
-    # niz proces budujacy, a git odmawia wtedy odczytu. Bez tego pochodzenie
-    # wychodzi puste i nie widac tego az do zajrzenia do pliku.
+# The provenance is recorded where the source stands - that is when
+# building the binaries. The packaging machine has only a copy of the files
+# without the history and without the toolchain, so a commit written there
+# would be a guess.
+provenance() {
+    echo "==> provenance"
+    local commit description
+    # safe.directory: the source directory often belongs to a different user
+    # than the building process, and git then refuses to read it. Without
+    # this the provenance comes out empty and it is not visible until one
+    # looks into the file.
     local gitopt=(-C "$repo" -c "safe.directory=$repo")
-    commit="$(git "${gitopt[@]}" rev-parse HEAD 2>/dev/null || echo nieznany)"
-    opis="$(git "${gitopt[@]}" describe --tags --always --dirty 2>/dev/null || echo nieznany)"
-    cat > "$WYNIK/pochodzenie.json" <<EOF
+    commit="$(git "${gitopt[@]}" rev-parse HEAD 2>/dev/null || echo unknown)"
+    description="$(git "${gitopt[@]}" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+    cat > "$OUT/provenance.json" <<EOF
 {
-  "wersja": "$WERSJA",
+  "version": "$VERSION",
   "commit": "$commit",
-  "opis": "$opis",
-  "toolchain": "$("$GO" version 2>/dev/null || echo nieznany)",
-  "flagi": "-trimpath -ldflags '-s -w' CGO_ENABLED=0",
-  "architektury": "${ARCHITEKTURY[*]}",
-  "zbudowano": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "description": "$description",
+  "toolchain": "$("$GO" version 2>/dev/null || echo unknown)",
+  "flags": "-trimpath -ldflags '-s -w' CGO_ENABLED=0",
+  "architectures": "${ARCHITECTURES[*]}",
+  "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
 }
 
-# sumy licza sie po nazwie pliku, wiec liczymy je z tego, co naprawde trafi
-# do repozytorium - a nie z artefaktow posrednich.
-sumy() {
-    echo "==> sumy kontrolne"
-    ( cd "$WYNIK" && sha256sum ./*.deb ./*.rpm 2>/dev/null > SHA256SUMS ) || true
+# The checksums are computed by file name, so they are computed from what
+# really goes into the repository - not from intermediate artefacts.
+checksums() {
+    echo "==> checksums"
+    ( cd "$OUT" && sha256sum ./*.deb ./*.rpm 2>/dev/null > SHA256SUMS ) || true
 }
 
-for arch in "${ARCHITEKTURY[@]}"; do
-    case "$TRYB" in
-    binarki)  zbudujBinarki "$arch" ;;
-    pakiety)  zbudujPakiety "$arch" ;;
-    wszystko) zbudujBinarki "$arch"; zbudujPakiety "$arch" ;;
-    *) echo "nieznany tryb: $TRYB" >&2; exit 1 ;;
+for arch in "${ARCHITECTURES[@]}"; do
+    case "$MODE" in
+    binaries) buildBinaries "$arch" ;;
+    packages) buildPackages "$arch" ;;
+    all)      buildBinaries "$arch"; buildPackages "$arch" ;;
+    *) echo "unknown mode: $MODE" >&2; exit 1 ;;
     esac
 done
 
-case "$TRYB" in
-binarki) pochodzenie ;;
-pakiety) sumy ;;
-wszystko) pochodzenie; sumy ;;
+case "$MODE" in
+binaries) provenance ;;
+packages) checksums ;;
+all)      provenance; checksums ;;
 esac
-echo "==> gotowe: $WYNIK"
-ls -1 "$WYNIK"
+echo "==> done: $OUT"
+ls -1 "$OUT"

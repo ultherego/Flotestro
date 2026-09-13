@@ -1,27 +1,28 @@
-# Konfiguracja agenta Flotestro.
+# The configuration of the Flotestro agent.
 #
-# Plik jest kanonicznym zrodlem ustawien hosta i jest oznaczony jako
-# konfiguracyjny, wiec aktualizacja pakietu go nie nadpisuje.
+# The file is the canonical source of the host settings and is marked as a
+# configuration file, so a package update does not overwrite it.
 #
-# Czego tu nie ma i nie moze byc:
-#   - tokenu enrollmentu - to sekret jednorazowy, a ten plik przezywa
-#     aktualizacje pakietu i trafia do kopii zapasowych,
-#   - tozsamosci hosta - bierze sie ona z certyfikatu, a nie z tekstu,
-#     ktory kazdy moze przepisac,
-#   - site, environment i wlasciciela - o nich rozstrzyga panel na podstawie
-#     profilu enrollmentu, a nie plik na hoscie.
+# What is not here and cannot be:
+#   - the enrollment token - it is a one-time secret, and this file survives
+#     package updates and ends up in backups,
+#   - the host identity - it comes from the certificate, not from text
+#     anybody can rewrite,
+#   - the site, the environment and the owner - the panel decides those on
+#     the basis of the enrollment profile, not a file on the host.
 schema_version: 1
 
 connection:
-  # Adres uslugi enrollmentu. Uzywany raz, do wydania certyfikatu hosta.
+  # The address of the enrollment service. Used once, to issue the host
+  # certificate.
   enrollment_url: ""
 
-  # Bramy agentow (mTLS) w kolejnosci priorytetu. Agent utrzymuje jedna
-  # aktywna sesje i wraca na brame pierwsza, gdy tylko znowu odpowiada.
+  # The agent gateways (mTLS) in priority order. The agent keeps one active
+  # session and returns to the first gateway as soon as it answers again.
   gateway_urls: []
 
-  # Bundle CA floty do pierwszego polaczenia. Po enrollmencie agent uzywa
-  # kopii zapisanej w katalogu stanu.
+  # The fleet CA bundle for the first connection. After enrollment the agent
+  # uses the copy saved in the state directory.
   bootstrap_ca_file: "/var/lib/flotestro-agent/ca.pem"
 
   connect_timeout: "15s"
@@ -32,8 +33,8 @@ agent:
   state_dir: "/var/lib/flotestro-agent"
   inventory_interval: "15m"
   max_concurrent_tasks: 2
-  # full - host zarzadzany; read_only - host wylacznie obserwowany:
-  # agent raportuje fakty i nie wykona zadnej zmiany.
+  # full - a managed host; read_only - a host that is only observed: the
+  # agent reports facts and carries out no change.
   mode: "full"
 
 helper:

@@ -1,7 +1,7 @@
 Name:           flotestro-control-plane
 Version:        %{?_flotestro_version}%{!?_flotestro_version:0.1.0}
 Release:        1%{?dist}
-Summary:        Panel zarzadzania flota Linux Flotestro
+Summary:        Flotestro Linux fleet management panel
 License:        Proprietary
 URL:            https://github.com/ultherego/flotestro
 BuildArch:      %{_target_cpu}
@@ -15,14 +15,16 @@ Recommends:     postgresql
 %global __strip /bin/true
 
 %description
-Control plane przyjmuje sesje agentow przez mTLS, planuje operacje typowane
-i prowadzi kampanie na flocie. Wystawia panel webowy oraz API REST.
+The control plane accepts agent sessions over mTLS, plans typed operations
+and runs campaigns on the fleet. It serves the web panel and the REST API.
 
-PostgreSQL jest jedynym zrodlem prawdy; schemat jest zakladany i migrowany
-przy starcie. Baza moze byc lokalna lub zdalna - pakiet jej nie instaluje.
+PostgreSQL is the only source of truth; the schema is created and migrated
+at startup. The database may be local or remote - the package does not
+install it.
 
-Integracja z katalogiem tozsamosci i z dostawca logowania OIDC sa opcjonalne.
-Bez nich panel dziala na tokenach API i zarzadza kontami lokalnymi hostow.
+The identity directory integration and the OIDC login provider are optional.
+Without them the panel works on API tokens and manages the local accounts of
+the hosts.
 
 %install
 rm -rf %{buildroot}
@@ -37,7 +39,7 @@ install -m 0640 %{_flotestro_stage}/control-plane.env %{buildroot}%{_sysconfdir}
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro
 
-# Panel webowy jest budowany osobno; pakiet niesie gotowe pliki.
+# The web panel is built separately; the package carries the ready files.
 install -d -m 0755 %{buildroot}%{_datadir}/flotestro/web
 if [ -d %{_flotestro_stage}/web ]; then
     cp -r %{_flotestro_stage}/web/. %{buildroot}%{_datadir}/flotestro/web/
@@ -49,8 +51,8 @@ fi
 %{_bindir}/flotestro-control-plane
 %{_unitdir}/flotestro-control-plane.service
 %dir %{_sysconfdir}/flotestro
-# Konfiguracja nie moze zostac nadpisana przy aktualizacji: zawiera
-# poswiadczenia do bazy i do dostawcy tozsamosci.
+# The configuration must not be overwritten on an update: it holds the
+# credentials to the database and to the identity provider.
 %config(noreplace) %attr(0640, root, flotestro) %{_sysconfdir}/flotestro/control-plane.env
 %dir %attr(0700, flotestro, flotestro) %{_sharedstatedir}/flotestro
 %{_datadir}/flotestro/web
@@ -64,12 +66,13 @@ exit 0
 
 %post
 %systemd_post flotestro-control-plane.service
-# Panel bez bazy nie ma gdzie trzymac stanu floty. Uruchamianie go w petli
-# restartow zasmiecaloby dziennik; instalacja konczy sie wtedy wskazowka.
-if grep -qs '^FLOTESTRO_DATABASE_URL=.*zmien-to' %{_sysconfdir}/flotestro/control-plane.env; then
+# A panel without a database has nowhere to keep the fleet state. Running it
+# in a restart loop would litter the journal; the installation then ends
+# with a hint.
+if grep -qs '^FLOTESTRO_DATABASE_URL=.*change-me' %{_sysconfdir}/flotestro/control-plane.env; then
     systemctl enable flotestro-control-plane.service || :
-    echo "flotestro-control-plane: ustaw FLOTESTRO_DATABASE_URL w" >&2
-    echo "  %{_sysconfdir}/flotestro/control-plane.env i uruchom" >&2
+    echo "flotestro-control-plane: set FLOTESTRO_DATABASE_URL in" >&2
+    echo "  %{_sysconfdir}/flotestro/control-plane.env and run" >&2
     echo "  systemctl start flotestro-control-plane.service" >&2
 else
     systemctl enable --now flotestro-control-plane.service || :
@@ -80,7 +83,7 @@ fi
 
 %postun
 %systemd_postun_with_restart flotestro-control-plane.service
-# Katalog stanu z kluczem CA floty zostaje: bez niego zaden agent nie
-# zostanie rozpoznany i cala flota wymaga ponownego enrollmentu.
+# The state directory with the fleet CA key stays: without it no agent is
+# recognised and the whole fleet needs enrolling again.
 
 %changelog

@@ -1,10 +1,10 @@
--- Konta lokalne widziane na hoscie. Tabela jest odwzorowaniem stanu hosta,
--- a nie zrodlem prawdy o kontach: prawda jest /etc/passwd na hoscie, a panel
--- jedynie pamieta ostatnia obserwacje, zeby dalo sie ja przegladac i filtrowac.
+-- Local accounts seen on the host. The table mirrors the host state and is
+-- not the source of truth about the accounts: the truth is /etc/passwd on the
+-- host, and the panel only remembers the last observation so it can be browsed and filtered.
 --
--- Modul jest przeznaczony dla instalacji bez katalogu. Tam, gdzie dziala
--- FreeIPA lub inny katalog, konta ludzi pochodza z katalogu i panel ich nie
--- duplikuje; kolumna source pozwala te dwa swiaty odroznic.
+-- The module is meant for installations without a directory. Where FreeIPA or
+-- another directory runs, people's accounts come from the directory and the
+-- panel does not duplicate them; the source column tells these two worlds apart.
 create table host_local_accounts (
     host_id            uuid        not null references hosts (id) on delete cascade,
     name               text        not null,
@@ -16,8 +16,8 @@ create table host_local_accounts (
     -- local | directory | system
     source             text        not null,
     groups             text[]      not null default '{}',
-    -- NULL oznacza stan nieustalony: helper moze byc niedostepny, a wtedy
-    -- "odblokowane" byloby zmyslonym faktem.
+    -- NULL means an undetermined state: the helper may be unavailable, and then
+    -- "unlocked" would be a made-up fact.
     locked             boolean,
     ssh_keys           jsonb       not null default '[]'::jsonb,
     unavailable_reason text,
@@ -26,7 +26,7 @@ create table host_local_accounts (
 );
 
 create index host_local_accounts_source_idx on host_local_accounts (source, name);
--- Konta bez klucza SSH i bez blokady sa dostepne wylacznie haslem albo wcale;
--- to pierwsza rzecz, ktorej szuka audyt w instalacji bez katalogu.
+-- Accounts without an SSH key and without a lock are reachable by password only
+-- or not at all; that is the first thing an audit looks for in an installation without a directory.
 create index host_local_accounts_keyless_idx on host_local_accounts (host_id)
     where source = 'local' and ssh_keys = '[]'::jsonb;
