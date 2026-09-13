@@ -12,16 +12,16 @@
 
   /* Surfaces: the page sits lowest, panels are raised on it, the sidebar
      is the darkest so the content reads as the lit part of the screen. */
-  --bg: #11111b;
-  --bg-panel: #1e1e2e;
-  --bg-sidebar: #0b0b12;
-  --bg-sidebar-hover: #1e1e2e;
-  --bg-hover: #313244;
-  --bg-input: #181825;
-  --bg-sunken: #11111b;
-  --bg-raised: #313244;
-  --border: #363652;
-  --border-strong: #4b4d68;
+  --bg: #1c1c2c;
+  --bg-panel: #26263a;
+  --bg-sidebar: #15151f;
+  --bg-sidebar-hover: #26263a;
+  --bg-hover: #363650;
+  --bg-input: #1c1c2c;
+  --bg-sunken: #15151f;
+  --bg-raised: #34344c;
+  --border: #3c3c58;
+  --border-strong: #52526e;
 
   --text: #cdd6f4;
   --text-muted: #a6adc8;
@@ -1047,17 +1047,38 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 /* ---------------------------------------------------------------------- */
 /* The header of a page: the title on the left, the actions of the whole
    page on the right, the way here above them. */
-.page-header { margin-bottom: 20px; }
+/* The header is a band, not a heading pasted above the page: the mark
+   of the section on an accent tile, the title and its one sentence, the
+   actions at the right edge, and a rule underneath that the widgets
+   hang from. */
+.page-header {
+  margin: 0 0 18px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.page-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.page-mark .icon { width: 22px; height: 22px; }
 .page-header-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px 24px;
   flex-wrap: wrap;
 }
 .page-header-text { flex: 1 1 320px; min-width: 0; }
-.page-title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.3; }
-.page-description { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
+.page-title { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; }
+.page-description { margin: 3px 0 0; color: var(--text-muted); font-size: 13px; max-width: 90ch; line-height: 1.45; }
 .page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
 .breadcrumb {
   display: flex;

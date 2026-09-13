@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { Icon, type IconName } from "./icons";
 
 /**
  * The layout primitives of a page: the header, the card, the stat tile,
@@ -23,24 +24,29 @@ export type Crumb = { label: string; to: string };
  * the detailed explanation goes with the section it explains.
  */
 export function PageHeader({
-  title, description, actions, breadcrumb,
+  title, description, actions, breadcrumb, icon,
 }: {
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
   breadcrumb?: Crumb[];
+  /** The mark of the section; without it the header takes the one of its route. */
+  icon?: IconName;
 }) {
+  const location = useLocation();
+  const mark = icon ?? iconForPath(location.pathname);
   return (
     <header className="page-header">
-      {breadcrumb && breadcrumb.length > 0 && (
-        <nav className="breadcrumb">
-          {breadcrumb.map((crumb) => (
-            <Link key={crumb.to} to={crumb.to}>{crumb.label}</Link>
-          ))}
-        </nav>
-      )}
       <div className="page-header-row">
+        {mark && <span className="page-mark" aria-hidden="true"><Icon name={mark} /></span>}
         <div className="page-header-text">
+          {breadcrumb && breadcrumb.length > 0 && (
+            <nav className="breadcrumb">
+              {breadcrumb.map((crumb) => (
+                <Link key={crumb.to} to={crumb.to}>{crumb.label}</Link>
+              ))}
+            </nav>
+          )}
           <h1 className="page-title">{title}</h1>
           {description && <p className="page-description">{description}</p>}
         </div>
@@ -48,6 +54,21 @@ export function PageHeader({
       </div>
     </header>
   );
+}
+
+/* The mark of a section, by the first segment of its address: the same
+   icon the navigation shows, so the header and the sidebar agree. */
+const SECTION_ICONS: Record<string, IconName> = {
+  dashboard: "dashboard", hosts: "hosts", jobs: "jobs", bulk: "bulk", campaigns: "campaigns",
+  security: "security", vulnerabilities: "vulnerabilities", certificates: "certificates",
+  secrets: "secrets", backups: "backups", monitoring: "monitoring", directory: "directory",
+  access: "access", audit: "audit",
+};
+
+function iconForPath(pathname: string): IconName | undefined {
+  const [, first, second] = pathname.split("/");
+  if (first === "hosts" && second === "new") return "add-host";
+  return SECTION_ICONS[first ?? ""];
 }
 
 /**
