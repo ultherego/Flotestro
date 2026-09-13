@@ -1246,6 +1246,24 @@ func TestMetricsShowTheCampaignMachinery(t *testing.T) {
 	h.approveCampaign(campaign)
 	h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+
+	// A finished campaign leaves its measurements behind: how long the
+	// hosts sat in each state, how long the agents took and how many tasks
+	// were handed over. These are histograms and counters measured at the
+	// point of the event - a table read at scrape time could not give them.
+	text = h.text("/metrics")
+	for _, fragment := range []string{
+		`flotestro_job_dispatch_total{outcome="dispatched"`,
+		`flotestro_agent_task_duration_seconds_bucket{action="unit.restart",outcome="succeeded",le="`,
+		`flotestro_agent_task_duration_seconds_count{action="unit.restart",outcome="succeeded"}`,
+		`flotestro_target_state_duration_seconds_count{state="running",action="unit.restart"}`,
+		`flotestro_target_state_duration_seconds_bucket{state="pending",action="unit.restart",le="+Inf"}`,
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("metrics without %q:\n%s", fragment,
+				extract(text, strings.SplitN(fragment, "{", 2)[0]))
+		}
+	}
 }
 
 // extract returns the lines of the metric with the given name - for an

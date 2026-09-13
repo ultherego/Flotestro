@@ -18,6 +18,7 @@ import (
 	"github.com/ultherego/flotestro/internal/gateway"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/secrets"
 )
@@ -144,6 +145,7 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	if err != nil {
 		s.log.Error("the task envelope was not built", "job_id", item.Job.ID, "err", err)
 		_ = s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "invalid_envelope")
+		metrics.JobDispatch.Inc("invalid_envelope", s.options.GatewayID)
 		return
 	}
 
@@ -158,13 +160,16 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, err.Error()); releaseErr != nil {
 			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
 		}
+		metrics.JobDispatch.Inc("undelivered", s.options.GatewayID)
 		return
 	}
 
 	if err := s.store.MarkDispatched(ctx, item.Job.ID, item.AttemptID, sessionID); err != nil {
 		s.log.Error("the delivery was not recorded", "job_id", item.Job.ID, "err", err)
+		metrics.JobDispatch.Inc("unrecorded", s.options.GatewayID)
 		return
 	}
+	metrics.JobDispatch.Inc("dispatched", s.options.GatewayID)
 
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: s.options.GatewayID,

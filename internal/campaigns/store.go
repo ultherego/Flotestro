@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -626,19 +627,39 @@ func (s *Store) Targets(ctx context.Context, campaignID string) ([]Target, error
 // UpdateTarget records the state of a campaign target.
 func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetState,
 	errorCode, message string) error {
+	// The previous state and the moment it was entered come back with the
+	// update: the time spent in a state is measured when it is left, and
+	// only this statement knows both ends.
 	const query = `
-		update campaign_targets set
+		update campaign_targets t set
 			state       = $2,
 			error_code  = $3,
 			message     = $4,
-			started_at  = coalesce(started_at,
+			started_at  = coalesce(t.started_at,
 			                       case when $2 not in ('pending', 'awaiting_budget')
 			                            then now() end),
 			finished_at = case when $2 in ('succeeded', 'failed', 'skipped', 'canceled')
-			                   then now() else finished_at end
-		where id = $1`
-	_, err := s.pool.Exec(ctx, query, targetID, string(state), nullable(errorCode), nullable(message))
-	return err
+			                   then now() else t.finished_at end,
+			state_since = case when t.state <> $2 then now() else t.state_since end
+		from (select t.id, t.state, t.state_since, c.action_type
+		        from campaign_targets t join campaigns c on c.id = t.campaign_id
+		       where t.id = $1 for update of t) old
+		where t.id = old.id
+		returning old.state, extract(epoch from now() - old.state_since)::float8, old.action_type`
+	var previous, actionType string
+	var seconds float64
+	err := s.pool.QueryRow(ctx, query, targetID, string(state), nullable(errorCode), nullable(message)).
+		Scan(&previous, &seconds, &actionType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if previous != string(state) {
+		metrics.TargetStateDuration.Observe(seconds, previous, actionType)
+	}
+	return nil
 }
 
 // AttachJob binds a target to the task that was created.

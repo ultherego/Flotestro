@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ultherego/flotestro/internal/authz"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -514,26 +515,38 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var currentState State
-	if err := tx.QueryRow(ctx, `select state from jobs where id = $1 for update`, jobID).
-		Scan(&currentState); err != nil {
+	var actionType string
+	if err := tx.QueryRow(ctx, `select state, action_type from jobs where id = $1 for update`, jobID).
+		Scan(&currentState, &actionType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, ErrNotFound
 		}
 		return false, err
 	}
 
-	if _, err := tx.Exec(ctx, `
+	// The time from the hand-over to the result is the agent's task
+	// duration, measured here because this is the one place every result
+	// passes through.
+	var elapsed *float64
+	if err := tx.QueryRow(ctx, `
 		update job_attempts set
 			status = $2, exit_code = $3, error_code = $4, message = $5,
 			stdout = $6, stderr = $7, output_truncated = $8, replayed = $9,
 			unit_state_before = $10, unit_state_after = $11, result_detail = $12,
 			finished_at = now(), lease_expires_at = null
-		where id = $1`,
+		where id = $1
+		returning extract(epoch from now() - dispatched_at)::float8`,
 		attemptID, result.Status, result.ExitCode, nullable(result.ErrorCode), nullable(result.Message),
 		string(result.Stdout), string(result.Stderr), result.OutputTruncated, result.Replayed,
 		nullableJSON(result.UnitStateBefore), nullableJSON(result.UnitStateAfter),
-		nullableJSON(result.Detail)); err != nil {
+		nullableJSON(result.Detail)).Scan(&elapsed); err != nil {
 		return false, err
+	}
+	if elapsed != nil {
+		metrics.AgentTaskDuration.Observe(*elapsed, actionType, result.Status)
+	}
+	if staleReason(result.ErrorCode) {
+		metrics.PlanStale.Inc(actionType, result.ErrorCode)
 	}
 
 	// A final state is final: a result that arrived after a cancellation or
@@ -554,6 +567,17 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+// staleReason says whether a refusal means the host state moved after the
+// plan: the plan was right, the world changed, and the operator has to look
+// again rather than retry.
+func staleReason(code string) bool {
+	switch code {
+	case "precondition_failed", "payload_hash_mismatch", "plan_hash_mismatch", "plan_stale":
+		return true
+	}
+	return false
 }
 
 // ReclaimExpiredLeases returns tasks whose lease expired to the queue. A

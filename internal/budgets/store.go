@@ -5,10 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/metrics"
 )
 
 const (
@@ -105,15 +108,56 @@ func (s *Store) Acquire(ctx context.Context, owner, claimant string, class Class
 			return Refusal{}, err
 		}
 	}
-	if _, err := tx.Exec(ctx,
-		`delete from budget_waiters where claimant = $1 and key = any($2)`,
-		claimant, keysOf(granted)); err != nil {
+	// A grant ends the wait. The waiting entries say how long it took, and
+	// that is measured here - a wait that never ends in a grant is visible
+	// as the current waits, not as a duration.
+	rows, err := tx.Query(ctx,
+		`delete from budget_waiters where claimant = $1 and key = any($2)
+		 returning key, extract(epoch from now() - since)::float8`,
+		claimant, keysOf(granted))
+	if err != nil {
+		return Refusal{}, err
+	}
+	var waits []waitedFor
+	for rows.Next() {
+		var w waitedFor
+		if err := rows.Scan(&w.key, &w.seconds); err != nil {
+			rows.Close()
+			return Refusal{}, err
+		}
+		waits = append(waits, w)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return Refusal{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Refusal{}, err
 	}
+	for _, w := range waits {
+		metrics.BudgetWait.Observe(w.seconds, string(class), siteOf(w.key))
+	}
 	return Refusal{}, nil
+}
+
+// waitedFor is one finished wait for a budget.
+type waitedFor struct {
+	key     string
+	seconds float64
+}
+
+// siteOf takes the site out of a budget key. A fleet-wide or backend
+// budget has no site; it is reported under the class of the key instead of
+// an empty label.
+func siteOf(key string) string {
+	parts := strings.SplitN(key, ":", 3)
+	if len(parts) == 3 && parts[0] == "site" {
+		return parts[1]
+	}
+	if len(parts) > 0 && parts[0] != "" {
+		return parts[0]
+	}
+	return "unknown"
 }
 
 // capacities reads and locks the capacity rows for the whole set of needs.

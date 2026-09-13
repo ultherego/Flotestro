@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/metrics"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -115,6 +116,12 @@ func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 	}
 	if !jobs.State(job.State).Terminal() {
 		return false, nil
+	}
+	if job.FinishedAt != nil {
+		// The planner duration is the whole round trip: from ordering the
+		// plan to having its result, queue and host included.
+		metrics.PlannerDuration.Observe(job.FinishedAt.Sub(job.CreatedAt).Seconds(),
+			campaign.ActionType, string(job.State))
 	}
 	if job.State != jobs.StateSucceeded {
 		o.finishTarget(ctx, campaign, target, TargetFailed,

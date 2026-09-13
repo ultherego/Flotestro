@@ -129,7 +129,12 @@ func (c *Collector) Gather(ctx context.Context) []byte {
 
 	metrics = append(metrics, c.runtimeMetrics()...)
 	metrics = append(metrics, c.databaseMetrics(ctx)...)
-	return render(metrics)
+	var b strings.Builder
+	b.Write(render(metrics))
+	// The instruments measured at the point of the event come last: they
+	// belong to this process, the rest to the database.
+	Default.render(&b)
+	return []byte(b.String())
 }
 
 func (c *Collector) runtimeMetrics() []metric {
