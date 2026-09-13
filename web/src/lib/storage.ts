@@ -45,3 +45,6 @@ export function useStoredState<T>(
 }
 
 export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
+
+export const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string");

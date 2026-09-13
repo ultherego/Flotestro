@@ -491,8 +491,8 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .host-picker-list { list-style: none; margin: 0; padding: 4px; max-height: 320px; overflow-y: auto; }
 .host-picker-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "dot name address" ". meta meta";
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "dot name address star" ". meta meta star";
   column-gap: 10px;
   align-items: center;
   padding: 6px 8px;
@@ -504,6 +504,45 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .host-picker-item .host-picker-address { grid-area: address; }
 .host-picker-item .host-picker-meta { grid-area: meta; font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-picker-item.highlighted { background: var(--bg-hover); }
+/* The first row of a group carries its heading above itself, so the list
+   stays one flat listbox for the keyboard. */
+.host-picker-item.group-start { margin-top: 18px; position: relative; }
+.host-picker-item.group-start::before {
+  content: attr(data-group);
+  position: absolute;
+  top: -17px;
+  left: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.host-picker-item.group-start.group-favourites { margin-top: 20px; }
+.host-picker-item .host-picker-star {
+  grid-area: star;
+  align-self: center;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  opacity: 0;
+  cursor: pointer;
+}
+.host-picker-item .host-picker-star .icon { width: 14px; height: 14px; }
+.host-picker-item:hover .host-picker-star, .host-picker-item.highlighted .host-picker-star,
+.host-picker-item .host-picker-star.on { opacity: 1; }
+.host-picker-item .host-picker-star.on { color: var(--warn-text); }
+.host-picker-item .host-picker-star:hover { color: var(--text); }
+.host-picker-placeholder kbd {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
 .host-picker-item.current .host-picker-name { color: var(--accent-text); }
 .host-picker-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .host-picker-note.error { color: var(--error-text); }

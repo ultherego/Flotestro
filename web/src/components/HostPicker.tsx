@@ -4,12 +4,20 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Host } from "../lib/types";
 import { useCapabilities } from "../lib/capabilities";
+import { isStringList, useStoredState } from "../lib/storage";
 import { module as findModule, DEFAULT_MODULE } from "../pages/host/modules";
 import { useT } from "../i18n";
 import { Icon } from "./icons";
 
 /** The page size asked of the server; past it the operator narrows the filter. */
 const PAGE = 200;
+/** How many recently opened hosts are kept; more than a screenful is noise. */
+const RECENT = 8;
+const RECENT_KEY = "flotestro.hosts.recent";
+const FAVOURITES_KEY = "flotestro.hosts.favourites";
+
+/** A row of the list: a host under the heading of its group. */
+type Row = { host: Host; group: "favourites" | "recent" | "all" };
 
 /**
  * The host picker: one control for jumping between machines, used in the
@@ -20,6 +28,10 @@ const PAGE = 200;
  * it leads to the overview and says what was missing - a quiet tab change
  * would look like an interface bug.
  */
+const GROUP_TITLES: Record<Row["group"], string> = {
+  favourites: "Favourites", recent: "Recent", all: "All hosts",
+};
+
 export function HostPicker({
   current, compact = false,
 }: {
@@ -67,14 +79,62 @@ export function HostPicker({
     enabled: armed,
   });
 
-  const items = useMemo(() => {
+  // The hosts this person keeps coming back to, remembered in the browser:
+  // the ones they starred and the ones they opened last. Neither is fleet
+  // data, so neither goes to the server.
+  const [favourites, setFavourites] = useStoredState<string[]>(FAVOURITES_KEY, [], isStringList);
+  const [recent, setRecent] = useStoredState<string[]>(RECENT_KEY, [], isStringList);
+  useEffect(() => {
+    if (!selected) return;
+    setRecent((current) => [selected.id, ...current.filter((id) => id !== selected.id)].slice(0, RECENT));
+  }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleFavourite = (host: Host) =>
+    setFavourites((current) => current.includes(host.id)
+      ? current.filter((id) => id !== host.id)
+      : [...current, host.id]);
+
+  // With an empty filter the list is grouped: the starred hosts, the recent
+  // ones, then everything. A filter flattens it - the operator is looking
+  // for a name, not browsing.
+  const items = useMemo<Row[]>(() => {
     const all = list.data?.items ?? [];
     const needle = filter.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter((host) =>
-      [host.hostname, host.management_address, host.site, host.environment]
-        .some((field) => (field ?? "").toLowerCase().includes(needle)));
-  }, [list.data, filter]);
+    if (needle) {
+      return all
+        .filter((host) => [host.hostname, host.management_address, host.site, host.environment]
+          .some((field) => (field ?? "").toLowerCase().includes(needle)))
+        .map((host) => ({ host, group: "all" as const }));
+    }
+    const byID = new Map(all.map((host) => [host.id, host]));
+    const starred = favourites.flatMap((id) => { const host = byID.get(id); return host ? [host] : []; });
+    const seen = new Set(starred.map((host) => host.id));
+    const opened = recent.flatMap((id) => {
+      const host = byID.get(id);
+      if (!host || seen.has(id)) return [];
+      seen.add(id);
+      return [host];
+    });
+    return [
+      ...starred.map((host) => ({ host, group: "favourites" as const })),
+      ...opened.map((host) => ({ host, group: "recent" as const })),
+      ...all.filter((host) => !seen.has(host.id)).map((host) => ({ host, group: "all" as const })),
+    ];
+  }, [list.data, filter, favourites, recent]);
+
+  // Ctrl+K (Cmd+K on a Mac) opens the picker from anywhere: switching
+  // hosts is the most frequent move in the panel, and it should not need
+  // the mouse. The sidebar holds the only picker, so one listener is all.
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        show();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The highlight follows the filter: the first match is the one Enter
   // takes, so it must never point past the end of a shorter list.
@@ -139,7 +199,7 @@ export function HostPicker({
     } else if (event.key === "Enter") {
       event.preventDefault();
       const target = items[highlight];
-      if (target) choose(target);
+      if (target) choose(target.host);
     }
   }
 
@@ -164,7 +224,7 @@ export function HostPicker({
               <span className="host-picker-address">{selected.management_address || t("address unknown")}</span>
             </>
           ) : (
-            <span className="host-picker-placeholder">{t("Open a host…")}</span>
+            <span className="host-picker-placeholder">{t("Open a host…")} <kbd>Ctrl K</kbd></span>
           )}
         </span>
         <Icon name="chevron" className="host-picker-chevron" />
@@ -187,7 +247,7 @@ export function HostPicker({
             />
           </div>
           <ul id={listID} role="listbox" className="host-picker-list" aria-label={t("Hosts")}>
-            {items.map((host, index) => (
+            {items.map(({ host, group }, index) => (
               <li
                 key={host.id}
                 id={`${listID}-${index}`}
@@ -197,7 +257,10 @@ export function HostPicker({
                   "host-picker-item",
                   index === highlight ? "highlighted" : "",
                   selected?.id === host.id ? "current" : "",
+                  // The first row of a group carries the heading.
+                  index === 0 || items[index - 1].group !== group ? `group-start group-${group}` : "",
                 ].join(" ").trim()}
+                data-group={t(GROUP_TITLES[group])}
                 onMouseEnter={() => setHighlight(index)}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => choose(host)}
@@ -208,6 +271,16 @@ export function HostPicker({
                 <span className="host-picker-meta">
                   {host.site} / {host.environment}{host.os_family ? ` · ${host.os_family}` : ""}
                 </span>
+                <button
+                  type="button"
+                  className={favourites.includes(host.id) ? "host-picker-star on" : "host-picker-star"}
+                  aria-pressed={favourites.includes(host.id)}
+                  title={favourites.includes(host.id) ? t("Remove from favourites") : t("Add to favourites")}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={(event) => { event.stopPropagation(); toggleFavourite(host); }}
+                >
+                  <Icon name="star" />
+                </button>
               </li>
             ))}
           </ul>
