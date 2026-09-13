@@ -10,6 +10,7 @@ import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
 import { Sidebar, type NavFace, type NavGroup } from "./components/Sidebar";
 import { Topbar, type Trail } from "./components/Topbar";
+import { Logo } from "./components/Logo";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
@@ -275,7 +276,7 @@ function LoginScreen({ provider }: { provider: boolean }) {
   return (
     <div className="login-screen">
       <div>
-        <h1>Flotestro</h1>
+        <h1 className="login-brand"><Logo size={40} /></h1>
         <p className="subtitle">{t("Linux fleet management")}</p>
         {provider ? (
           <>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" width="200" height="48">
+  <style>
+    .ink { fill: #1e1e2e; }
+    .spine { fill: #d97a3a; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #cdd6f4; }
+      .spine { fill: #fab387; }
+    }
+  </style>
+  <rect class="spine" x="4" y="4" width="10" height="40" rx="3"/>
+  <rect class="ink" x="20" y="4" width="24" height="8" rx="3"/>
+  <rect class="ink" x="20" y="20" width="18" height="8" rx="3"/>
+  <rect class="ink" x="20" y="36" width="12" height="8" rx="3"/>
+  <text class="ink" x="58" y="34" font-family="-apple-system, 'Segoe UI', Roboto, Ubuntu, 'Helvetica Neue', Arial, sans-serif" font-size="27" font-weight="600" letter-spacing="-0.5">Flotestro</text>
+</svg>
