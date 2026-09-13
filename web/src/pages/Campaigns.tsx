@@ -158,7 +158,7 @@ function Wizard({ onDone }: { onDone: () => void }) {
               disabled={!WIZARD_OPERATIONS.includes(item.action)}
             >
               {item.action}
-              {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("no bulk form yet")}`}
+              {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("use the Bulk Workspace")}`}
             </option>
           ))}
         </select>

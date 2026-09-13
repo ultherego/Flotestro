@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign, CampaignTarget } from "../lib/types";
-import { ErrorBox, Empty, JobState } from "../components/ui";
+import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanSummary } from "../components/plan";
@@ -31,6 +31,7 @@ export function Bulk() {
     action: "",
     unit: "",
     securityOnly: true,
+    payloadText: "",
     site: "",
     environment: "",
     osFamily: "",
@@ -103,7 +104,8 @@ export function Bulk() {
         {t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}
       </p>
 
-      <ScopeBar order={order} preview={preview.data} campaign={campaign.data} />
+      <ScopeBar order={order} preview={preview.data} campaign={campaign.data}
+        risk={bulk.find((item) => item.action === order.action)?.risk} />
 
       <ol className="bulk-steps">
         {STEPS.map((title, index) => (
@@ -159,6 +161,9 @@ type Order = {
   action: string;
   unit: string;
   securityOnly: boolean;
+  // The payload of an operation without a form of its own, as JSON text
+  // the operator edits; it starts from the template the server gives.
+  payloadText: string;
   site: string;
   environment: string;
   osFamily: string;
@@ -176,7 +181,27 @@ type Operation = {
   mutating: boolean;
   campaign_mode: string;
   campaign_ready: boolean;
+  risk?: string;
+  payload_template?: Record<string, unknown>;
+  needs_material?: boolean;
 };
+
+/**
+ * The payload of the order. The few operations with a form build it from
+ * the fields; every other one takes the JSON the operator edited, starting
+ * from the server's template. The server validates it the same way as an
+ * order typed by hand and names what is wrong.
+ */
+function orderPayload(order: Order): Record<string, unknown> | null {
+  if (UNIT_OPERATIONS.includes(order.action)) return { unit: { unit: order.unit } };
+  if (order.action === "packages.upgrade") return { package_upgrade: { security_only: order.securityOnly } };
+  try {
+    const parsed = JSON.parse(order.payloadText);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 type Group = { reason: string; count: number; sample: string[] };
 
@@ -222,11 +247,13 @@ function stepGates(
   preview?: Preview,
   campaign?: Campaign,
 ): Gate[] {
-  const hasAction = Boolean(order.action && order.name);
+  const hasAction = Boolean(order.action && order.name) &&
+    (!UNIT_OPERATIONS.includes(order.action) || order.unit !== "") &&
+    orderPayload(order) !== null;
   const hasTargets = (preview?.count ?? 0) > 0;
   const hasEligible = (preview?.eligible ?? 0) > 0;
   return [
-    { open: hasAction, reason: t("pick an operation and name the campaign") },
+    { open: hasAction, reason: t("pick an operation, name the campaign and give it a valid payload") },
     { open: hasAction && hasTargets, reason: t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
@@ -247,17 +274,24 @@ function ScopeBar({
   order,
   preview,
   campaign,
+  risk,
 }: {
   order: Order;
   preview?: Preview;
   campaign?: Campaign;
+  risk?: string;
 }) {
   const t = useT();
   return (
     <div className="scope-bar">
       <div className="identity">
         <span className="name">{order.name || t("unnamed campaign")}</span>
-        <span className="action">{order.action || t("no operation")}</span>
+        <span className="action">
+          {order.action || t("no operation")}
+          {/* The risk class of the operation decides the approvals and the
+              step-up; it stays in view for the whole wizard. */}
+          {risk && <span className={`badge ${risk === "critical" ? "error" : risk === "high" ? "warn" : ""}`} style={{ marginLeft: 8 }}>{risk}</span>}
+        </span>
       </div>
       <div className="facts">
         <span>
@@ -273,9 +307,10 @@ function ScopeBar({
               {t("state")}: <JobState state={campaign.state} />
             </span>
             {/* The fingerprint is what the consent applies to. Without it
-                "approved" does not say what was approved. */}
+                "approved" does not say what was approved; the snapshot time
+                says which fleet it was taken of. */}
             <span className="source">
-              {t("fingerprint")} {campaign.approval_fingerprint.slice(0, 12)}
+              {t("fingerprint")} {campaign.approval_fingerprint.slice(0, 12)} · {t("snapshot")} <Time value={campaign.created_at} />
             </span>
           </>
         )}
@@ -303,6 +338,9 @@ function ScopeStep({
 }) {
   const t = useT();
   const needsUnit = UNIT_OPERATIONS.includes(order.action);
+  const chosen = bulk.find((item) => item.action === order.action);
+  const generic = Boolean(order.action) && !WIZARD_OPERATIONS.includes(order.action);
+  const payloadValid = orderPayload(order) !== null;
   return (
     <section className="tile">
       <h2 style={{ marginTop: 0 }}>1. {t("Scope")}</h2>
@@ -316,16 +354,22 @@ function ScopeStep({
           onChange={(e) => change({ name: e.target.value })}
           style={{ minWidth: 240 }}
         />
-        <select value={order.action} onChange={(e) => change({ action: e.target.value })}>
+        <select
+          value={order.action}
+          onChange={(e) => {
+            // Choosing an operation loads its template: the operator edits
+            // a shape the server already accepts, not a blank field.
+            const next = bulk.find((item) => item.action === e.target.value);
+            change({
+              action: e.target.value,
+              payloadText: next?.payload_template ? JSON.stringify(next.payload_template, null, 2) : "",
+            });
+          }}
+        >
           <option value="">{t("pick an operation…")}</option>
           {bulk.map((item) => (
-            <option
-              key={item.action}
-              value={item.action}
-              disabled={!WIZARD_OPERATIONS.includes(item.action)}
-            >
-              {item.action}
-              {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("no bulk form yet")}`}
+            <option key={item.action} value={item.action}>
+              {item.action}{item.risk ? ` · ${item.risk}` : ""}
             </option>
           ))}
         </select>
@@ -347,6 +391,26 @@ function ScopeStep({
           </label>
         )}
       </div>
+      {generic && (
+        <div className="form" style={{ marginTop: 12 }}>
+          <label>
+            {t("Payload (JSON, the same shape as a single-host operation)")}
+            <textarea
+              rows={Math.min(18, Math.max(6, order.payloadText.split("\n").length + 1))}
+              value={order.payloadText}
+              onChange={(e) => change({ payloadText: e.target.value })}
+              spellCheck={false}
+            />
+          </label>
+          <p className="source" style={{ margin: 0 }}>
+            {!payloadValid
+              ? t("This is not valid JSON.")
+              : chosen?.needs_material
+                ? t("The template carries a placeholder for certificate material; replace it with the real PEM before the order.")
+                : t("The server validates the payload when the campaign is created and names what is wrong.")}
+          </p>
+        </div>
+      )}
       {preview?.requires_plan && (
         <p className="subtitle">
           {t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
@@ -591,9 +655,7 @@ function CreateStep({
         name: order.name,
         action: order.action,
         reason: `bulk workspace: ${order.action}`,
-        payload: UNIT_OPERATIONS.includes(order.action)
-          ? { unit: { unit: order.unit } }
-          : { package_upgrade: { security_only: order.securityOnly } },
+        payload: orderPayload(order) ?? {},
         selector: {
           site: order.site || undefined,
           environment: order.environment || undefined,

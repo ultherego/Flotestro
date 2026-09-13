@@ -4025,3 +4025,41 @@ func TestCampaignTargetsArePagedAndFilteredOnTheServer(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/campaigns/"+campaign.ID+"/targets?cursor=garbage",
 		nil, nil, http.StatusBadRequest)
 }
+
+// TestActionCatalogueCarriesTemplates guards the shape the wizard starts
+// from: every operation ready for a campaign comes with a payload template,
+// and the ones that need certificate material say so.
+func TestActionCatalogueCarriesTemplates(t *testing.T) {
+	h := newHarness(t)
+	var catalogue struct {
+		Items []struct {
+			Action          string         `json:"action"`
+			CampaignReady   bool           `json:"campaign_ready"`
+			PayloadTemplate map[string]any `json:"payload_template"`
+			NeedsMaterial   bool           `json:"needs_material"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/actions", &catalogue)
+	ready, withMaterial := 0, 0
+	for _, item := range catalogue.Items {
+		if !item.CampaignReady {
+			if item.PayloadTemplate != nil {
+				t.Errorf("%s is not ready for a campaign and still has a template", item.Action)
+			}
+			continue
+		}
+		ready++
+		if len(item.PayloadTemplate) == 0 {
+			t.Errorf("%s is ready for a campaign without a template", item.Action)
+		}
+		if item.NeedsMaterial {
+			withMaterial++
+		}
+	}
+	if ready < 40 {
+		t.Errorf("only %d operations are ready for a campaign", ready)
+	}
+	if withMaterial != 2 {
+		t.Errorf("%d operations need certificate material, expected the deployment and the trust anchor", withMaterial)
+	}
+}

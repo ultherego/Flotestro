@@ -522,6 +522,11 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		// in bulk. A refusal without a reason looks in the interface like a
 		// missing feature, while it is often a boundary drawn deliberately.
 		CampaignRefusal string `json:"campaign_refusal,omitempty"`
+		// PayloadTemplate is the example payload the wizard starts from for an
+		// operation without a form of its own; NeedsMaterial says the template
+		// holds a placeholder for certificate material the operator supplies.
+		PayloadTemplate *opspec.Payload `json:"payload_template,omitempty"`
+		NeedsMaterial   bool            `json:"needs_material,omitempty"`
 	}
 	items := make([]actionInfo, 0)
 	for _, action := range opspec.AllActions() {
@@ -531,7 +536,13 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		if reason == "" && !ready {
 			reason = campaignModeRefusal(action)
 		}
+		var template *opspec.Payload
+		if example, ok := opspec.PayloadTemplate(action); ok && ready {
+			template = &example
+		}
 		items = append(items, actionInfo{
+			PayloadTemplate:    template,
+			NeedsMaterial:      opspec.TemplateNeedsMaterial(action),
 			Action:             string(action),
 			Mutating:           action.Mutating(),
 			RequiredCapability: action.RequiredCapability(),
