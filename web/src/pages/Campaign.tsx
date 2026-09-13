@@ -7,6 +7,7 @@ import type {
 } from "../lib/types";
 import { ErrorBox, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { JobPlan } from "../components/plan";
+import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
 import { loadedTargets, TARGET_STATES, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
@@ -22,6 +23,10 @@ export function Campaign() {
   // do to the hosts under way before anything happens.
   const [pendingStop, setPendingStop] = useState<"pause" | "cancel" | null>(null);
   const [stopReason, setStopReason] = useState("");
+  // The plan the operator opened from the target table. A plan summary is
+  // several lines and the windowed table needs rows of one fixed height, so
+  // the plan is shown below the table for one host at a time.
+  const [selectedPlanJob, setSelectedPlanJob] = useState<{ jobId: string; host: string } | null>(null);
 
   const campaign = useQuery({
     queryKey: ["campaign", id],
@@ -181,6 +186,11 @@ export function Campaign() {
       )}
 
       <h2>{t("Targets")}</h2>
+      {/* The export is a file, not a screen: a report of ten thousand hosts
+          goes to a spreadsheet, streamed from the server page by page. */}
+      <p className="source">
+        <a href={`/api/v1/campaigns/${id}/report?format=csv`} download={`campaign-${id}.csv`}>{t("Download the targets as CSV")}</a>
+      </p>
       {/* The filter runs on the server and the rows arrive page by page:
           the screen shows what the operator asked about, not the whole
           fleet at once. */}
@@ -195,11 +205,22 @@ export function Campaign() {
       {!loaded.length ? (
         <Empty>{t("No targets.")}</Empty>
       ) : (
-        <table>
-          <thead><tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("Plan")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr></thead>
-          <tbody>
-            {loaded.map((target) => (
-              <tr key={target.host_id}>
+        // The rows are windowed: a campaign of ten thousand hosts is ten
+        // thousand rows on the server and a few dozen in the browser. The
+        // next page is fetched as the operator nears the end of the list.
+        <VirtualRows
+          items={loaded}
+          rowHeight={40}
+          height={480}
+          columns={7}
+          rowKey={(target) => target.host_id}
+          head={<tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("Plan")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr>}
+          onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
+          loading={targets.isFetchingNextPage}
+          render={(target) => {
+            const planJob = target.plan_job_id;
+            return (
+              <>
                 {/* The host opens on the module of the change, with the way
                     back to this campaign in the address. */}
                 <td>
@@ -210,8 +231,25 @@ export function Campaign() {
                 <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
                 {/* The consent covers the differences computed on the host,
                     not the intent. A host without a planning operation has
-                    no plan to show. */}
-                <td>{target.plan_job_id ? <JobPlan jobId={target.plan_job_id} /> : "—"}</td>
+                    no plan to show; a host with one opens it below the table,
+                    because the summary does not fit a row of fixed height. */}
+                <td>
+                  {planJob ? (
+                    <button
+                      className="inline"
+                      aria-pressed={selectedPlanJob?.jobId === planJob}
+                      onClick={() => setSelectedPlanJob(
+                        selectedPlanJob?.jobId === planJob
+                          ? null
+                          : { jobId: planJob, host: target.hostname || target.host_id.slice(0, 8) },
+                      )}
+                    >
+                      {t("plan")}
+                    </button>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td><JobState state={target.state} /></td>
                 {/* The progress belongs to the operation currently running
                     on this host. A host waiting for its wave has nothing to
@@ -228,13 +266,24 @@ export function Campaign() {
                     "—"
                   )}
                 </td>
-                <td>{target.error_code || "—"}</td>
-                <td>{target.message || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                <td title={target.error_code}>{target.error_code || "—"}</td>
+                <td title={target.message}>{target.message || "—"}</td>
+              </>
+            );
+          }}
+        />
       )}
+      {selectedPlanJob && (
+        <div className="form" style={{ marginTop: 12 }}>
+          <h3 style={{ margin: "0 0 8px" }}>{t("Plan for {host}", { host: selectedPlanJob.host })}</h3>
+          <JobPlan jobId={selectedPlanJob.jobId} />
+          <div className="operations">
+            <button className="secondary" onClick={() => setSelectedPlanJob(null)}>{t("Close")}</button>
+          </div>
+        </div>
+      )}
+      {/* The button stays next to the automatic fetch: a page that failed
+          to arrive is asked for again by hand, not by scrolling. */}
       {targets.hasNextPage && (
         <p>
           <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>

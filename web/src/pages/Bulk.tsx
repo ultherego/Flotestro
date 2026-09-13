@@ -7,6 +7,7 @@ import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanSummary } from "../components/plan";
+import { VirtualRows } from "../components/virtual";
 import { loadedTargets, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import { useT } from "../i18n";
@@ -820,28 +821,35 @@ function TargetTable({ targets, action }: { targets: ReturnType<typeof useTarget
   if (!rows.length) return <Empty>{t("No targets.")}</Empty>;
   return (
     <>
-    <table>
-      <thead>
-        <tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("State")}</th><th>{t("Blocker")}</th><th>{t("Message")}</th></tr>
-      </thead>
-      <tbody>
-        {rows.map((target) => (
-          <tr key={target.host_id}>
-            <td>
-              <Link to={`/hosts/${target.host_id}/${moduleForAction(action)}?campaign=${target.campaign_id}`}>
-                {target.hostname || target.host_id.slice(0, 8)}
-              </Link>
-            </td>
-            <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
-            <td><JobState state={target.state} /></td>
-            <td>{blockerName(t, target)}</td>
-            <td>{target.message || "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    {/* The rows are windowed and the next page is fetched as the operator
+        nears the end: the loaded pages do not become that many elements. */}
+    <VirtualRows
+      items={rows}
+      rowHeight={40}
+      height={480}
+      columns={5}
+      rowKey={(target) => target.host_id}
+      head={<tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("State")}</th><th>{t("Blocker")}</th><th>{t("Message")}</th></tr>}
+      onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
+      loading={targets.isFetchingNextPage}
+      render={(target) => (
+        <>
+          <td>
+            <Link to={`/hosts/${target.host_id}/${moduleForAction(action)}?campaign=${target.campaign_id}`}>
+              {target.hostname || target.host_id.slice(0, 8)}
+            </Link>
+          </td>
+          <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
+          <td><JobState state={target.state} /></td>
+          <td>{blockerName(t, target)}</td>
+          <td title={target.message}>{target.message || "—"}</td>
+        </>
+      )}
+    />
     {/* The rows come page by page: a campaign on the whole fleet must not
-        become the whole fleet in the browser. */}
+        become the whole fleet in the browser. The button stays next to the
+        automatic fetch, so a page that failed to arrive can be asked for by
+        hand. */}
     <p className="source">
       {t("{shown} of {total} shown", { shown: rows.length, total })}
       {targets.hasNextPage && (

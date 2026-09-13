@@ -403,3 +403,22 @@ a.button:hover { background: var(--bg-hover); }
   font-size: 12px;
 }
 .bulk-steps .step .reason { font-size: 11px; color: var(--unknown); }
+
+/*
+ * A windowed table: the container scrolls, the header stays in view, and
+ * every row keeps to one line so the rows can share one height - the
+ * window arithmetic depends on it. Separate borders, because a sticky
+ * header loses its collapsed border while it sticks.
+ */
+.virtual { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.virtual table { border-collapse: separate; border-spacing: 0; }
+.virtual thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-panel); }
+.virtual td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.virtual tr:last-child td { border-bottom: none; }
+.virtual .spacer td { padding: 0; border: 0; }
+/* The compact button that opens something below the table, sized to a row. */
+.virtual button.inline {
+  background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+  padding: 1px 8px; font-size: 11px; border-radius: 4px;
+}
+.virtual button.inline[aria-pressed="true"] { border-color: var(--text-muted); color: inherit; }
