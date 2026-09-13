@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4323,5 +4324,76 @@ func TestCampaignHonorsMaxConcurrent(t *testing.T) {
 	}
 	if overlap(windows) {
 		t.Errorf("two attempts worked side by side under a limit of one: %+v", windows)
+	}
+}
+
+// TestCampaignReportExportsCSV covers the report a spreadsheet reads: the
+// same endpoint with format=csv hands out a file with one row per target
+// and the columns in a fixed order, so an operator can hand the outcome
+// of a campaign on to somebody without an account in the panel.
+func TestCampaignReportExportsCSV(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	campaign := h.createCampaign(labCampaign("csv", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": []string{host.ID}},
+	}))
+	h.approveCampaign(campaign)
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+
+	request, _ := http.NewRequest(http.MethodGet, h.api+"/api/v1/campaigns/"+campaign.ID+"/report?format=csv", nil)
+	request.Header.Set("Authorization", "Bearer "+h.token)
+	response, err := h.client.Do(request)
+	if err != nil {
+		t.Fatalf("GET report as CSV: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the CSV report answered %d", response.StatusCode)
+	}
+	if contentType := response.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/csv") {
+		t.Fatalf("the CSV report came as %q", contentType)
+	}
+	if disposition := response.Header.Get("Content-Disposition"); !strings.Contains(disposition, "campaign-"+campaign.ID+".csv") {
+		t.Errorf("the CSV report is not offered as a file: %q", disposition)
+	}
+
+	rows, err := csv.NewReader(response.Body).ReadAll()
+	if err != nil {
+		t.Fatalf("the CSV report does not parse: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("the CSV report is empty")
+	}
+	wantHeader := []string{"hostname", "host_id", "wave", "position", "state",
+		"error_code", "message", "started_at", "finished_at", "job_id"}
+	if strings.Join(rows[0], ",") != strings.Join(wantHeader, ",") {
+		t.Fatalf("the CSV header is %v, want %v", rows[0], wantHeader)
+	}
+
+	targets := h.campaignTargets(campaign.ID)
+	if len(rows)-1 != len(targets) {
+		t.Fatalf("the CSV report has %d rows for %d targets", len(rows)-1, len(targets))
+	}
+	for _, row := range rows[1:] {
+		if len(row) != len(wantHeader) {
+			t.Errorf("row %v has %d columns, want %d", row, len(row), len(wantHeader))
+			continue
+		}
+		if row[1] != host.ID {
+			t.Errorf("row %v names host %q, want %q", row, row[1], host.ID)
+		}
+		if row[4] != "succeeded" {
+			t.Errorf("row %v is in state %q, want succeeded", row, row[4])
+		}
+		for _, column := range []int{7, 8} {
+			if _, err := time.Parse(time.RFC3339, row[column]); err != nil {
+				t.Errorf("row %v carries the time %q in column %s: %v", row, row[column], wantHeader[column], err)
+			}
+		}
 	}
 }

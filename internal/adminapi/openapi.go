@@ -132,6 +132,13 @@ func (s *Server) operation(route apiRoute) map[string]any {
 			"description": "A key chosen by the caller; a repeat with the same key returns the resource already created instead of a second one.",
 		})
 	}
+	if route.Method == http.MethodGet && route.Path == "/api/v1/campaigns/{id}/report" {
+		params = append(params, map[string]any{
+			"name": "format", "in": "query", "required": false,
+			"schema":      map[string]any{"type": "string", "enum": []string{"json", "csv"}},
+			"description": "The shape of the report: the JSON summary by default, or a CSV file with one row per target.",
+		})
+	}
 	for _, segment := range strings.Split(route.Path, "/") {
 		if strings.HasPrefix(segment, "{") {
 			name := strings.Trim(segment, "{}")
@@ -156,6 +163,12 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	if schema, ok := responseSchemas[route.Method+" "+route.Path]; ok {
 		responses[status] = map[string]any{"description": "The resource.",
 			"content": map[string]any{"application/json": map[string]any{"schema": schema}}}
+	} else if route.Path == "/api/v1/campaigns/{id}/report" {
+		responses[status] = map[string]any{"description": "The report: a JSON summary, or with format=csv a file with one row per target.",
+			"content": map[string]any{
+				"application/json": map[string]any{"schema": map[string]any{"type": "object"}},
+				"text/csv":         map[string]any{"schema": map[string]any{"type": "string"}},
+			}}
 	} else if strings.HasSuffix(route.Path, "/events") {
 		responses[status] = map[string]any{"description": "A stream of server-sent events; trail events carry an id for Last-Event-ID resumption.",
 			"content": map[string]any{"text/event-stream": map[string]any{"schema": map[string]any{"type": "string"}}}}
