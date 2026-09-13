@@ -3,11 +3,13 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
@@ -29,6 +31,16 @@ type Orchestrator struct {
 	budgets  *budgets.Store
 	log      *slog.Logger
 	interval time.Duration
+	// Authorizer re-checks, immediately before a host is dispatched, that
+	// the creator still holds the right to this operation on this host.
+	// A permission withdrawn after the approval must stop the hosts that
+	// have not started. Nil skips the check, for tests of the machinery.
+	Authorizer Authorizer
+}
+
+// Authorizer answers whether a subject holds a permission in a scope now.
+type Authorizer interface {
+	PrincipalBySubject(ctx context.Context, subject string) (*authz.Principal, error)
 }
 
 func NewOrchestrator(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
@@ -180,6 +192,14 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		if host.ConnectionState != "online" {
 			continue
 		}
+		// The creator's right is checked again, per host, right before the
+		// dispatch: the approval was given hours ago, and a role withdrawn
+		// since then must not carry a change onto the host through a
+		// campaign that was ordered while it was still held.
+		if refused, detail := o.creatorMayDispatch(ctx, campaign, host); refused {
+			o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", detail)
+			continue
+		}
 		// A maintenance window means "somebody is working on this machine".
 		// The campaign does not wait for it to end; it skips the host and
 		// says so outright: otherwise a wave would stand still because of a
@@ -226,6 +246,36 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			"wave", wave, "job_id", jobID)
 	}
 	return nil
+}
+
+// creatorMayDispatch says whether the campaign's creator still holds
+// campaign.create and the operation's permission in the scope of the host.
+// A campaign is created by an identity; the target rows carry no rights
+// of their own.
+func (o *Orchestrator) creatorMayDispatch(ctx context.Context, campaign Campaign, host *hosts.Host) (bool, string) {
+	if o.Authorizer == nil {
+		return false, ""
+	}
+	principal, err := o.Authorizer.PrincipalBySubject(ctx, campaign.CreatedBy)
+	if errors.Is(err, authz.ErrUnauthenticated) {
+		return true, "the identity that ordered the campaign (" + campaign.CreatedBy + ") is disabled or gone"
+	}
+	if err != nil {
+		// Missing knowledge about the rights must not weaken the control;
+		// the host waits for the next tick rather than starting unchecked.
+		o.log.Error("the creator's rights could not be checked before the dispatch",
+			"campaign_id", campaign.ID, "host_id", host.ID, "err", err)
+		return true, "the rights of " + campaign.CreatedBy + " could not be checked: " + err.Error()
+	}
+	scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+	action := opspec.ActionType(campaign.ActionType)
+	for _, permission := range []authz.Permission{authz.PermCampaignCreate, authz.Permission(action.Permission())} {
+		if !principal.Can(permission, scope) {
+			return true, campaign.CreatedBy + " no longer holds " + string(permission) +
+				" on " + host.Site + "/" + host.Environment
+		}
+	}
+	return false, ""
 }
 
 // createJob creates the campaign's main task for a host.

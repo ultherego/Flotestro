@@ -576,8 +576,10 @@ func run() error {
 
 	// The orchestrator carries the campaigns through the canary and the
 	// waves, creating the jobs the scheduler delivers.
-	go campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
-		budgetStore, log, 5*time.Second).Run(ctx)
+	orchestrator := campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
+		budgetStore, log, 5*time.Second)
+	orchestrator.Authorizer = authzStore
+	go orchestrator.Run(ctx)
 
 	// The runner carries the remediation plans out step by step: every step is
 	// an ordinary job of a module, and the next one starts only once the

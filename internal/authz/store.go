@@ -164,6 +164,32 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 	return &principal, nil
 }
 
+// PrincipalBySubject resolves an identity by its subject with its current
+// bindings. It serves a check made later than the request that named the
+// subject - before a campaign dispatches to a host, hours after the
+// campaign was ordered - so a disabled or denied identity is reported as
+// ErrUnauthenticated, exactly as it would be at the door.
+func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Principal, error) {
+	const query = `
+		select id, subject, display_name, kind from principals
+		where subject = $1 and disabled_at is null and denied_at is null`
+	var principal Principal
+	err := s.pool.QueryRow(ctx, query, subject).
+		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUnauthenticated
+	}
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := s.bindingsOf(ctx, principal.ID)
+	if err != nil {
+		return nil, err
+	}
+	principal.Bindings = bindings
+	return &principal, nil
+}
+
 func (s *Store) bindingsOf(ctx context.Context, principalID string) ([]Binding, error) {
 	const query = `select role, site, environment from role_bindings where principal_id = $1`
 	rows, err := s.pool.Query(ctx, query, principalID)

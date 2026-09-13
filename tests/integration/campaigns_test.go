@@ -50,6 +50,7 @@ type campaignTargetView struct {
 	Wave      int    `json:"wave"`
 	State     string `json:"state"`
 	ErrorCode string `json:"error_code"`
+	Message   string `json:"message"`
 	JobID     string `json:"job_id"`
 	PlanJobID string `json:"plan_job_id"`
 }
@@ -4577,5 +4578,55 @@ func TestApprovalLeavesAnImmutableRecord(t *testing.T) {
 	if _, err := pool.Exec(context.Background(),
 		`delete from campaign_approvals where campaign_id = $1`, campaign.ID); err == nil {
 		t.Error("the approval record accepted a delete")
+	}
+}
+
+// TestARevokedRoleStopsTheHostsNotStarted guards the pre-dispatch check:
+// the approval was given while the creator held the right, and the right
+// withdrawn since then must not carry the change onto the hosts that have
+// not started.
+func TestARevokedRoleStopsTheHostsNotStarted(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	subject := uniqueSubject("operator-revoked")
+	operator := h.withToken(h.createPrincipal(subject, []map[string]string{
+		{"role": "operator", "site": host.Site, "environment": host.Environment},
+	}))
+	approver := h.withToken(h.createPrincipal(uniqueSubject("approver-revoked"), []map[string]string{
+		{"role": "approver", "site": host.Site, "environment": host.Environment},
+	}))
+
+	var campaign campaignView
+	operator.do(http.MethodPost, "/api/v1/campaigns", labCampaign("revoked role", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": []string{host.ID}},
+	}), &campaign, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
+			map[string]any{"reason": "end of the test"}, nil, 0)
+	})
+
+	// The role goes away between the approval and the start. There is no
+	// API for that on purpose - a binding is removed by a person with the
+	// database, or expires - so the test removes it directly.
+	ctx := context.Background()
+	if _, err := h.database(ctx).Exec(ctx, `
+		delete from role_bindings where principal_id = (select id from principals where subject = $1)`,
+		subject); err != nil {
+		t.Fatal(err)
+	}
+	approver.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
+		map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint}, nil, http.StatusOK)
+
+	h.awaitCampaign(campaign.ID, map[string]bool{"completed": true, "failed": true, "paused": true}, 2*time.Minute)
+	targets := h.campaignTargets(campaign.ID)
+	if len(targets) != 1 {
+		t.Fatalf("targets = %d", len(targets))
+	}
+	if targets[0].State != "skipped" || targets[0].ErrorCode != "out_of_scope" {
+		t.Fatalf("the host was not stopped: state %s, code %s, %s",
+			targets[0].State, targets[0].ErrorCode, targets[0].Message)
+	}
+	if !strings.Contains(targets[0].Message, subject) {
+		t.Errorf("the message does not name the identity: %q", targets[0].Message)
 	}
 }
