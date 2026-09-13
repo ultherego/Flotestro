@@ -8,6 +8,7 @@ import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanSummary } from "../components/plan";
 import { loadedTargets, useTargets } from "../lib/targets";
+import { moduleForAction } from "./host/modules";
 import { useT } from "../i18n";
 
 /**
@@ -669,7 +670,7 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
           </tbody>
         </table>
       )}
-      <TargetTable targets={targets} />
+      <TargetTable targets={targets} action={campaign?.action_type ?? ""} />
     </section>
   );
 }
@@ -725,7 +726,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
           <Link to={`/campaigns/${campaign.id}`}>{t("Pause, cancel or read the report")}</Link>.
         </p>
       )}
-      <TargetTable targets={targets} />
+      <TargetTable targets={targets} action={campaign.action_type} />
     </section>
   );
 }
@@ -735,7 +736,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
  * what it waits for: a budget, somebody else's resource lock, or coming back
  * online.
  */
-function TargetTable({ targets }: { targets: ReturnType<typeof useTargets> }) {
+function TargetTable({ targets, action }: { targets: ReturnType<typeof useTargets>; action: string }) {
   const t = useT();
   const rows = loadedTargets(targets.data);
   const total = targets.data?.pages[0]?.total ?? 0;
@@ -750,7 +751,7 @@ function TargetTable({ targets }: { targets: ReturnType<typeof useTargets> }) {
         {rows.map((target) => (
           <tr key={target.host_id}>
             <td>
-              <Link to={`/hosts/${target.host_id}/overview`}>
+              <Link to={`/hosts/${target.host_id}/${moduleForAction(action)}?campaign=${target.campaign_id}`}>
                 {target.hostname || target.host_id.slice(0, 8)}
               </Link>
             </td>

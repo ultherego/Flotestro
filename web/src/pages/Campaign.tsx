@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type {
   Campaign as CampaignType, CampaignReport, CampaignTarget, TimelineEntry,
@@ -9,6 +9,7 @@ import { ErrorBox, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../co
 import { JobPlan } from "../components/plan";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
 import { loadedTargets, TARGET_STATES, useTargets } from "../lib/targets";
+import { moduleForAction } from "./host/modules";
 import { useT } from "../i18n";
 
 export function Campaign() {
@@ -199,7 +200,13 @@ export function Campaign() {
           <tbody>
             {loaded.map((target) => (
               <tr key={target.host_id}>
-                <td>{target.hostname || target.host_id.slice(0, 8)}</td>
+                {/* The host opens on the module of the change, with the way
+                    back to this campaign in the address. */}
+                <td>
+                  <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                    {target.hostname || target.host_id.slice(0, 8)}
+                  </Link>
+                </td>
                 <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
                 {/* The consent covers the differences computed on the host,
                     not the intent. A host without a planning operation has

@@ -99,3 +99,28 @@ export function modules(host: Host, installation: InstallationCapabilities): Vis
 export function module(segment: string): Module | undefined {
   return MODULES.find((item) => item.segment === segment);
 }
+
+/**
+ * The module an operation belongs to, by the prefix of its type. A campaign
+ * links its hosts to that module, so the operator lands where the change
+ * shows rather than on the overview.
+ */
+export function moduleForAction(action: string): string {
+  const prefix = action.split(".")[0];
+  const bySecond: Record<string, string> = {
+    "docker.compose": "compose", "system.reboot": "power", "system.shutdown": "power",
+    "packages.repository": "packages",
+  };
+  const twoParts = action.split(".").slice(0, 2).join(".");
+  if (bySecond[twoParts]) return bySecond[twoParts];
+  const byPrefix: Record<string, string> = {
+    packages: "packages", package: "packages", unit: "services", process: "processes",
+    docker: "containers", journal: "logs", logfile: "logs", schedule: "schedules",
+    network: "network", dns: "dns", firewall: "firewall", storage: "storage", mount: "storage",
+    filesystem: "storage", lvm: "storage", disk: "storage", ssh: "ssh", sysctl: "kernel",
+    kernel: "kernel", time: "time", security: "security", selinux: "security",
+    certificate: "certificates", backup: "backups", monitoring: "monitoring",
+    localuser: "accounts", file: "files", inventory: "overview", agent: "packages",
+  };
+  return byPrefix[prefix] ?? DEFAULT_MODULE;
+}

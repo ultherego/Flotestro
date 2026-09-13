@@ -92,6 +92,7 @@ export const pl: Record<string, string> = {
   "Authority": "Urząd",
   "BLOCKING": "BLOKUJE",
   "Back": "Wróć",
+  "Back to the campaign": "Wróć do kampanii",
   "Back up now": "Kopia teraz",
   "Backup definition": "Definicja kopii",
   "Backups": "Kopie zapasowe",

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host } from "../../lib/types";
@@ -49,16 +49,24 @@ export function HostLayout() {
   const list = modules(data, installation);
   const active = list.find((item) => item.segment === segment);
   const rejected = location.state as { rejected?: string; reason?: string } | null;
+  // A host opened from a campaign keeps the way back in the address: the
+  // operator came here to look at one host of a change, not to leave it.
+  const fromCampaign = new URLSearchParams(location.search).get("campaign");
 
   return (
     <>
+      {fromCampaign && (
+        <p className="source" style={{ margin: "0 0 8px" }}>
+          <Link to={`/campaigns/${fromCampaign}`}>← {t("Back to the campaign")}</Link>
+        </p>
+      )}
       <ContextBar host={data} segment={segment} installation={installation} />
 
       <div className="tabs">
         {list.map((item) => (
           <NavLink
             key={item.segment}
-            to={`/hosts/${data.id}/${item.segment}`}
+            to={`/hosts/${data.id}/${item.segment}${location.search}`}
             className={({ isActive }) =>
               [isActive ? "active" : "", item.available ? "" : "unavailable"].join(" ").trim()
             }

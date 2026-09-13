@@ -181,6 +181,7 @@ export type TimelineEntry = {
 };
 
 export type CampaignTarget = {
+  campaign_id: string;
   host_id: string;
   hostname?: string;
   wave: number;
