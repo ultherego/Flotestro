@@ -19,6 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/budgets"
+	"github.com/ultherego/flotestro/internal/campaigns"
+	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/outbox"
 )
 
@@ -4395,5 +4400,91 @@ func TestCampaignReportExportsCSV(t *testing.T) {
 				t.Errorf("row %v carries the time %q in column %s: %v", row, row[column], wantHeader[column], err)
 			}
 		}
+	}
+}
+
+// TestTwoOrchestratorsCreateOneJobPerTarget guards the invariant of a
+// second control-plane instance: two orchestrators driving the same
+// campaign at once create one job per target step and hold one set of
+// budget tokens per target, not two. The second orchestrator runs inside
+// the test against the same database, ticking faster than the panel's.
+func TestTwoOrchestratorsCreateOneJobPerTarget(t *testing.T) {
+	h := newHarness(t)
+	online := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	pool := h.database(ctx)
+	defer pool.Close()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	second := campaigns.NewOrchestrator(campaigns.NewStore(pool), jobs.NewStore(pool),
+		hosts.NewStore(pool), audit.NewRecorder(pool, quiet), budgets.NewStore(pool, quiet),
+		quiet, 500*time.Millisecond)
+	orchestratorCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	go second.Run(orchestratorCtx)
+
+	campaign := h.createCampaign(labCampaign("two-orchestrators", "cron.service", map[string]any{
+		"selector":       map[string]any{"host_ids": online},
+		"canary_size":    0,
+		"wave_size":      len(online),
+		"max_concurrent": len(online),
+	}))
+	h.approveCampaign(campaign)
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	stop()
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+
+	// One job per host for the main step: the idempotency key of the step
+	// makes the second creation return the first job.
+	rows, err := pool.Query(ctx, `
+		select host_id, count(*) from jobs
+		 where campaign_id = $1 and action_type = 'unit.restart'
+		 group by host_id`, campaign.ID)
+	if err != nil {
+		t.Fatalf("counting the jobs: %v", err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var hostID string
+		var count int
+		if err := rows.Scan(&hostID, &count); err != nil {
+			t.Fatalf("reading the jobs: %v", err)
+		}
+		seen++
+		if count != 1 {
+			t.Errorf("host %s has %d main jobs", hostID, count)
+		}
+	}
+	if seen != len(online) {
+		t.Errorf("%d hosts have jobs, expected %d", seen, len(online))
+	}
+
+	// Every target ended with a job of its own attached, and no token stays
+	// leased once the campaign is over.
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.State != "succeeded" || target.JobID == "" {
+			t.Errorf("target %s ended as %s with job %q", target.HostID, target.State, target.JobID)
+		}
+	}
+	var leases int
+	if err := pool.QueryRow(ctx, `select count(*) from budget_leases where claimant = $1`,
+		"campaign:"+campaign.ID).Scan(&leases); err != nil {
+		t.Fatalf("counting the leases: %v", err)
+	}
+	if leases != 0 {
+		t.Errorf("%d budget leases remain after the campaign", leases)
 	}
 }
