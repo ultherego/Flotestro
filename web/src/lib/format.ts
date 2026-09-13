@@ -1,38 +1,41 @@
-// Wspolne formatowanie. Kazda wartosc pokazana operatorowi ma czas
-// obserwacji, a stan nieustalony nigdy nie jest rysowany jako zero.
+// Shared formatting. Every value shown to the operator has an observation
+// time, and an undetermined state is never drawn as zero.
+
+import { t } from "../i18n";
 
 export function relativeTime(value?: string | null): string {
-  if (!value) return "never";
+  if (!value) return t("never");
   const seconds = Math.floor((Date.now() - new Date(value).getTime()) / 1000);
-  if (seconds < 0) return "in a moment";
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+  if (seconds < 0) return t("in a moment");
+  if (seconds < 60) return t("{n}s ago", { n: seconds });
+  if (seconds < 3600) return t("{n}m ago", { n: Math.floor(seconds / 60) });
+  if (seconds < 86400) return t("{n}h ago", { n: Math.floor(seconds / 3600) });
+  return t("{n}d ago", { n: Math.floor(seconds / 86400) });
 }
 
 /**
- * Czas bezwzgledny w formacie ISO ze strefa lokalna przegladarki.
+ * The absolute time in ISO form in the browser's local zone.
  *
- * Format zalezny od jezyka przegladarki rozjezdzalby sie miedzy operatorami
- * ogladajacymi ten sam incydent, a kolejnosc dnia i miesiaca bywa w nim
- * odwrotna. Slad operacyjny musi czytac sie tak samo u wszystkich.
+ * A format dependent on the browser language would diverge between
+ * operators looking at the same incident, and the order of day and month is
+ * sometimes reversed in it. The operational trail must read the same for
+ * everybody.
  */
 export function absoluteTime(value?: string | null): string {
   if (!value) return "";
   const date = new Date(value);
-  const pad = (liczba: number) => String(liczba).padStart(2, "0");
+  const pad = (number: number) => String(number).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 /**
- * Wartosc nieustalona ma wlasna reprezentacje. Rysowanie jej jako zera
- * bylo by falszywym sygnalem, ze host jest w porzadku.
+ * An undetermined value has its own representation. Drawing it as zero
+ * would be a false signal that the host is fine.
  */
 export function optional(value: number | boolean | null | undefined): string {
-  if (value === null || value === undefined) return "unknown";
-  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (value === null || value === undefined) return t("unknown");
+  if (typeof value === "boolean") return value ? t("yes") : t("no");
   return String(value);
 }
 

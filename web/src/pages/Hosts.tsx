@@ -1,105 +1,107 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ODSTEP_ODSWIEZANIA } from "../lib/strumien";
+import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, type Collection } from "../lib/api";
 import type { Host } from "../lib/types";
-import { Blad, Czas, FlagaOpcjonalna, LiczbaOpcjonalna, Pusto, StanPolaczenia } from "../components/ui";
+import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
+import { useT } from "../i18n";
 
 /**
- * Lista hostow z filtrami wykonywanymi po stronie serwera. Panel nigdy nie
- * pobiera calej floty do pamieci przegladarki, zeby ja przefiltrowac.
+ * The host list with filters executed on the server side. The panel never
+ * fetches the whole fleet into the browser memory to filter it.
  */
-export function Hosty() {
-  const uprawnienia = useQuery({
+export function Hosts() {
+  const t = useT();
+  const permissions = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<{ permissions: string[] }>("/api/v1/whoami"),
     staleTime: 5 * 60 * 1000,
   });
-  const mozeDodac = (uprawnienia.data?.permissions ?? []).includes("host.enroll.create");
+  const canAdd = (permissions.data?.permissions ?? []).includes("host.enroll.create");
   const [site, setSite] = useState("");
   const [environment, setEnvironment] = useState("");
   const [osFamily, setOsFamily] = useState("");
   const [connectionState, setConnectionState] = useState("");
 
-  const parametry = new URLSearchParams();
-  if (site) parametry.set("site", site);
-  if (environment) parametry.set("environment", environment);
-  if (osFamily) parametry.set("os_family", osFamily);
-  if (connectionState) parametry.set("connection_state", connectionState);
-  parametry.set("limit", "200");
+  const params = new URLSearchParams();
+  if (site) params.set("site", site);
+  if (environment) params.set("environment", environment);
+  if (osFamily) params.set("os_family", osFamily);
+  if (connectionState) params.set("connection_state", connectionState);
+  params.set("limit", "200");
 
   const { data, error, isLoading } = useQuery({
-    queryKey: ["hosts", parametry.toString()],
-    queryFn: () => api.get<Collection<Host>>(`/api/v1/hosts?${parametry}`),
-    // Stan hostow zmienia sie sam z siebie - przez heartbeaty, nie tylko
-    // przez operacje operatora - wiec lista odswieza sie bez jego udzialu.
-    refetchInterval: ODSTEP_ODSWIEZANIA,
+    queryKey: ["hosts", params.toString()],
+    queryFn: () => api.get<Collection<Host>>(`/api/v1/hosts?${params}`),
+    // The host state changes on its own - through heartbeats, not only
+    // through operator actions - so the list refreshes without them.
+    refetchInterval: REFRESH_INTERVAL,
   });
 
-  if (error) return <Blad error={error} />;
+  if (error) return <ErrorBox error={error} />;
 
   return (
     <>
-      <div className="naglowek-z-akcja">
-        <h1>Hosts</h1>
-        {/* Odnosnik widzi ten, kto moze zamowic instalacje; pozostalym
-            prowadzilby wylacznie do odmowy. O tym, co wolno, i tak
-            rozstrzyga serwer. */}
-        {mozeDodac && <Link to="/hosts/new" className="przycisk">Add host</Link>}
+      <div className="header-with-action">
+        <h1>{t("Hosts")}</h1>
+        {/* The link is seen by whoever can order an installation; for the
+            rest it would lead only to a refusal. The server decides what is
+            allowed anyway. */}
+        {canAdd && <Link to="/hosts/new" className="button">{t("Add host")}</Link>}
       </div>
-      <p className="podtytul">Filters are applied server-side.</p>
+      <p className="subtitle">{t("Filters are applied server-side.")}</p>
 
-      <div className="filtry">
-        <input placeholder="site" value={site} onChange={(e) => setSite(e.target.value)} />
-        <input placeholder="environment" value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+      <div className="filters">
+        <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
+        <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
         <select value={osFamily} onChange={(e) => setOsFamily(e.target.value)}>
-          <option value="">OS: any</option>
+          <option value="">{t("OS: any")}</option>
           <option value="debian">debian</option>
           <option value="rhel">rhel</option>
         </select>
         <select value={connectionState} onChange={(e) => setConnectionState(e.target.value)}>
-          <option value="">state: any</option>
-          <option value="online">online</option>
-          <option value="offline">offline</option>
-          <option value="stale">stale</option>
-          <option value="unknown">unknown</option>
+          <option value="">{t("state: any")}</option>
+          <option value="online">{t("online")}</option>
+          <option value="offline">{t("offline")}</option>
+          <option value="stale">{t("stale")}</option>
+          <option value="unknown">{t("unknown")}</option>
         </select>
       </div>
 
       {isLoading ? (
-        <Pusto>Loading…</Pusto>
+        <Empty>{t("Loading…")}</Empty>
       ) : !data?.items.length ? (
-        <Pusto>No host matches the filters.</Pusto>
+        <Empty>{t("No host matches the filters.")}</Empty>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Host</th><th>State</th><th>Management address</th><th>System</th><th>Site</th>
-              <th>Environment</th><th>Domain</th><th>Updates</th>
-              <th>Failed units</th><th>Reboot</th><th>Last seen</th>
+              <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Management address")}</th><th>{t("System")}</th><th>{t("Site")}</th>
+              <th>{t("Environment")}</th><th>{t("Domain")}</th><th>{t("Updates")}</th>
+              <th>{t("Failed units")}</th><th>{t("Reboot")}</th><th>{t("Last seen")}</th>
             </tr>
           </thead>
           <tbody>
             {data.items.map((host) => (
               <tr key={host.id}>
                 <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
-                <td><StanPolaczenia stan={host.connection_state} /></td>
-                {/* Adres zarzadzania, a nie pierwszy adres hosta z brzegu.
-                    Nieustalony jest pokazany jako nieustalony. */}
+                <td><ConnectionState state={host.connection_state} /></td>
+                {/* The management address, not just any first address of the
+                    host. Undetermined is shown as undetermined. */}
                 <td>
                   {host.management_address
-                    ? <span className="adres-listy" title={`source: ${host.management_address_source}`}>{host.management_address}</span>
-                    : <span className="znacznik nieznany">unknown</span>}
+                    ? <span className="list-address" title={t("source: {source}", { source: host.management_address_source ?? "" })}>{host.management_address}</span>
+                    : <span className="badge unknown">{t("unknown")}</span>}
                 </td>
                 <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
                 <td>{host.site}</td>
                 <td>{host.environment}</td>
-                <td>{host.identity.enrolled ? host.identity.domain : <span className="znacznik">not in domain</span>}</td>
-                <td><LiczbaOpcjonalna wartosc={host.pending_updates} ostrzegajOd={1} /></td>
-                <td><LiczbaOpcjonalna wartosc={host.failed_units} ostrzegajOd={1} /></td>
-                <td><FlagaOpcjonalna wartosc={host.reboot_required} /></td>
-                <td><Czas wartosc={host.last_seen_at} /></td>
+                <td>{host.identity.enrolled ? host.identity.domain : <span className="badge">{t("not in domain")}</span>}</td>
+                <td><OptionalNumber value={host.pending_updates} warnFrom={1} /></td>
+                <td><OptionalNumber value={host.failed_units} warnFrom={1} /></td>
+                <td><OptionalFlag value={host.reboot_required} /></td>
+                <td><Time value={host.last_seen_at} /></td>
               </tr>
             ))}
           </tbody>

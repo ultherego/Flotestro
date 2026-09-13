@@ -3,14 +3,15 @@ import { Link, useOutletContext } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, InventoryFragment, InventoryRevision, Job } from "../../lib/types";
-import { Czas } from "../../components/ui";
+import { Time } from "../../components/ui";
+import { useT } from "../../i18n";
 
-/** Kontekst hosta pochodzi z layoutu, wiec zakladka nie pobiera go ponownie. */
+/** The host context comes from the layout, so a tab does not fetch it again. */
 export function useHost(): Host {
   return useOutletContext<{ host: Host }>().host;
 }
 
-/** Inventory jest wspolne dla zakladek, wiec dzieli jeden klucz cache. */
+/** The inventory is shared by the tabs, so it shares one cache key. */
 export function useInventory(hostID: string) {
   return useQuery({
     queryKey: ["inventory", hostID],
@@ -20,74 +21,77 @@ export function useInventory(hostID: string) {
 }
 
 /**
- * Zakladka pobiera wlasny modul inventory. Kazdy ma swoja rewizje i swoj
- * znacznik obserwacji, wiec swiezosc opisuje to, na co operator patrzy,
- * a nie caly raport hosta.
+ * A tab fetches its own inventory module. Each has its own revision and its
+ * own observation timestamp, so the freshness describes what the operator
+ * looks at, not the whole host report.
  */
-export function useModul<T>(hostID: string, modul: string) {
+export function useModule<T>(hostID: string, module: string) {
   return useQuery({
-    queryKey: ["inventory", hostID, modul],
-    queryFn: () => api.get<InventoryFragment<T>>(`/api/v1/hosts/${hostID}/inventory/${modul}`),
+    queryKey: ["inventory", hostID, module],
+    queryFn: () => api.get<InventoryFragment<T>>(`/api/v1/hosts/${hostID}/inventory/${module}`),
     retry: false,
   });
 }
 
 /**
- * Stopka zakladki: skad dane pochodza i jak sa swieze. Nieodczytany modul
- * mowi dlaczego - pusty modul i modul nieodczytany to dwie rozne rzeczy.
+ * The tab footer: where the data comes from and how fresh it is. An unread
+ * module says why - an empty module and an unread module are two different
+ * things.
  */
-export function SwiezoscModulu({ fragment }: { fragment?: InventoryFragment<unknown> }) {
+export function ModuleFreshness({ fragment }: { fragment?: InventoryFragment<unknown> }) {
+  const t = useT();
   if (!fragment) return null;
   return (
-    <p className="zrodlo" style={{ marginTop: 16 }}>
-      Source: {fragment.source}, revision {fragment.revision.slice(0, 12)}, observed{" "}
-      <Czas wartosc={fragment.observed_at} />
-      {fragment.unavailable_reason && ` · could not be read: ${fragment.unavailable_reason}`}
+    <p className="source" style={{ marginTop: 16 }}>
+      {t("Source: {source}, revision {revision}, observed", { source: fragment.source, revision: fragment.revision.slice(0, 12) })}{" "}
+      <Time value={fragment.observed_at} />
+      {fragment.unavailable_reason && ` · ${t("could not be read: {reason}", { reason: fragment.unavailable_reason })}`}
     </p>
   );
 }
 
 /**
- * Zlecenie operacji prowadzi do planu, a nie do natychmiastowej zmiany.
- * Operacja mutujaca trafia do stanu oczekiwania na zatwierdzenie.
+ * Ordering an operation leads to a plan, not to an immediate change. A
+ * mutating operation lands in the awaiting-approval state.
  */
-export function ZlecOperacje({
-  host, opis, akcja, payload, etykieta,
-}: { host: Host; opis: string; akcja: string; payload: unknown; etykieta: string }) {
+export function RequestOperation({
+  host, description, action, payload, label,
+}: { host: Host; description: string; action: string; payload: unknown; label: string }) {
+  const t = useT();
   const queryClient = useQueryClient();
-  const [wynik, setWynik] = useState<string>("");
+  const [result, setResult] = useState<string>("");
 
-  const mutacja = useMutation({
+  const mutation = useMutation({
     mutationFn: () =>
-      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, { action: akcja, payload }),
-    onSuccess: (zadanie) => {
-      setWynik(
-        zadanie.requires_approval
-          ? `Job ${zadanie.id.slice(0, 8)} is waiting for approval.`
-          : `Job ${zadanie.id.slice(0, 8)} has been queued.`,
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, { action, payload }),
+    onSuccess: (job) => {
+      setResult(
+        job.requires_approval
+          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
-    onError: (error) => setWynik(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setResult(error instanceof Error ? error.message : String(error)),
   });
 
   return (
     <div style={{ marginTop: 24 }}>
-      <h2>Request an operation</h2>
-      <p className="podtytul">{opis}</p>
-      {/* Cel powtorzony przy samym przycisku: operator zatwierdza konkretna
-          maszyne, a nie "ten host, ktory chyba mam otwarty". */}
-      <p className="zrodlo" style={{ marginBottom: 10 }}>
-        Target: {host.hostname}
-        {host.management_address ? ` · ${host.management_address}` : " · address unknown"}
+      <h2>{t("Request an operation")}</h2>
+      <p className="subtitle">{description}</p>
+      {/* The target repeated right at the button: the operator approves a
+          specific machine, not "the host I think I have open". */}
+      <p className="source" style={{ marginBottom: 10 }}>
+        {t("Target: {host}", { host: host.hostname })}
+        {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}
       </p>
-      <button onClick={() => mutacja.mutate()} disabled={mutacja.isPending}>
-        {mutacja.isPending ? "Requesting…" : etykieta}
+      <button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+        {mutation.isPending ? t("Requesting…") : label}
       </button>
-      {wynik && <p className="zrodlo" style={{ marginTop: 10 }}>{wynik}</p>}
+      {result && <p className="source" style={{ marginTop: 10 }}>{result}</p>}
       <p style={{ marginTop: 12 }}>
-        <Link to="/jobs">See all jobs</Link>
+        <Link to="/jobs">{t("See all jobs")}</Link>
       </p>
     </div>
   );

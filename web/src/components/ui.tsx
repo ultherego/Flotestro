@@ -1,48 +1,53 @@
 import type { ReactNode } from "react";
 import { ApiError } from "../lib/api";
 import { optional, relativeTime, absoluteTime } from "../lib/format";
+import { useT } from "../i18n";
 
-/** Znacznik stanu polaczenia. Stan nieznany ma wlasny wyglad. */
-export function StanPolaczenia({ stan }: { stan: string }) {
-  const klasa =
-    stan === "online" ? "ok" : stan === "offline" ? "blad" : stan === "stale" ? "uwaga" : "unknown";
-  return <span className={`znacznik ${klasa}`}>{nazwaStanu(stan)}</span>;
+/** The connection state badge. The unknown state has a look of its own. */
+export function ConnectionState({ state }: { state: string }) {
+  const t = useT();
+  const kind =
+    state === "online" ? "ok" : state === "offline" ? "error" : state === "stale" ? "warn" : "unknown";
+  return <span className={`badge ${kind}`}>{t(stateName(state))}</span>;
 }
 
-/** Wynik operacji albo stan zadania. */
-export function StanZadania({ stan }: { stan: string }) {
-  const udane = ["succeeded", "completed", "active"].includes(stan);
-  const nieudane = ["failed", "timed_out", "expired", "partially_applied"].includes(stan);
-  // Niezdolnosc i pominiecie nie sa awaria: host nic nie zepsul, po prostu
-  // nie bral udzialu. Czerwien nazywalaby to bledem, ktorego nie bylo.
-  const pominiete = ["ineligible", "skipped", "no_change"].includes(stan);
-  const czeka = ["awaiting_approval", "queued", "planned", "planning", "paused",
-    "awaiting_budget"].includes(stan);
-  const klasa = udane ? "ok" : nieudane ? "blad" : pominiete ? "nieznany" : czeka ? "uwaga" : "";
-  return <span className={`znacznik ${klasa}`}>{nazwaStanu(stan)}</span>;
+/** The operation result or the job state. */
+export function JobState({ state }: { state: string }) {
+  const t = useT();
+  const succeeded = ["succeeded", "completed", "active"].includes(state);
+  const failed = ["failed", "timed_out", "expired", "partially_applied"].includes(state);
+  // Incapability and a skip are not a failure: the host broke nothing, it
+  // simply took no part. Red would call it an error that did not happen.
+  const skipped = ["ineligible", "skipped", "no_change"].includes(state);
+  const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused",
+    "awaiting_budget"].includes(state);
+  const kind = succeeded ? "ok" : failed ? "error" : skipped ? "unknown" : waiting ? "warn" : "";
+  return <span className={`badge ${kind}`}>{t(stateName(state))}</span>;
 }
 
 /**
- * Stany przychodza z bazy jako identyfikatory kontraktu i tak wygladaly
- * w interfejsie: "awaiting_approval" albo "partially_applied". Nazwa czytelna
- * dla operatora nie moze byc jedynym zapisem stanu - identyfikator zostaje
- * w API i w audycie - ale to operator patrzy na ekran.
+ * The states come from the database as contract identifiers and looked like
+ * that in the interface: "awaiting_approval" or "partially_applied". A name
+ * readable for the operator cannot be the only record of the state - the
+ * identifier stays in the API and in the audit log - but it is the operator
+ * who looks at the screen.
  *
- * Stan spoza listy pokazujemy tak, jak przyszedl. Zgadywanie tlumaczenia
- * ukryloby fakt, ze panel zobaczyl cos, czego nie zna.
+ * A state outside the list is shown as it came. Guessing a translation
+ * would hide the fact that the panel saw something it does not know.
  */
-function nazwaStanu(stan: string): string {
-  const nazwy: Record<string, string> = {
+function stateName(state: string): string {
+  const names: Record<string, string> = {
     online: "online", offline: "offline", stale: "stale", unknown: "unknown",
     queued: "queued", planned: "planned", leased: "assigned",
     dispatched: "dispatched", running: "running",
     awaiting_approval: "awaiting approval",
-    // Kampania liczy plan na kazdym hoscie; niczego jeszcze nie zmienia.
+    // The campaign computes a plan on every host; it changes nothing yet.
     planning: "planning per host",
-    // Host jest gotowy, ale flota albo lokalizacja nie ma teraz pojemnosci.
+    // The host is ready, but the fleet or the site has no capacity now.
     awaiting_budget: "waiting for capacity",
-    // Host nie wykona tej operacji: nie ma adaptera albo nie spelnia warunku.
-    // To nie jest awaria wykonania i nie liczy sie do progu bledow.
+    // The host will not carry out this operation: it lacks the adapter or
+    // does not meet the condition. That is not an execution failure and
+    // does not count towards the failure threshold.
     ineligible: "cannot run this",
     succeeded: "succeeded", failed: "failed", timed_out: "timed out",
     canceled: "canceled", cancelled: "canceled", expired: "expired",
@@ -51,67 +56,71 @@ function nazwaStanu(stan: string): string {
     partially_applied: "partially applied",
     denied: "denied", success: "success", failure: "failure",
   };
-  return nazwy[stan] ?? stan;
+  return names[state] ?? state;
 }
 
 /**
- * Liczba, ktora moze byc nieustalona. Zero i brak wiedzy to rozne rzeczy,
- * wiec maja rozny wyglad.
+ * A number that may be undetermined. Zero and missing knowledge are
+ * different things, so they look different.
  */
-export function LiczbaOpcjonalna({
-  wartosc,
-  ostrzegajOd = 1,
+export function OptionalNumber({
+  value,
+  warnFrom = 1,
 }: {
-  wartosc: number | null | undefined;
-  ostrzegajOd?: number;
+  value: number | null | undefined;
+  warnFrom?: number;
 }) {
-  if (wartosc === null || wartosc === undefined) {
-    return <span className="znacznik nieznany">unknown</span>;
+  const t = useT();
+  if (value === null || value === undefined) {
+    return <span className="badge unknown">{t("unknown")}</span>;
   }
-  if (wartosc >= ostrzegajOd) {
-    return <span className="znacznik uwaga">{wartosc}</span>;
+  if (value >= warnFrom) {
+    return <span className="badge warn">{value}</span>;
   }
-  return <span>{wartosc}</span>;
+  return <span>{value}</span>;
 }
 
-export function FlagaOpcjonalna({ wartosc }: { wartosc: boolean | null | undefined }) {
-  if (wartosc === null || wartosc === undefined) {
-    return <span className="znacznik nieznany">unknown</span>;
+export function OptionalFlag({ value }: { value: boolean | null | undefined }) {
+  const t = useT();
+  if (value === null || value === undefined) {
+    return <span className="badge unknown">{t("unknown")}</span>;
   }
-  return wartosc ? <span className="znacznik uwaga">tak</span> : <span>nie</span>;
+  return value ? <span className="badge warn">{t("yes")}</span> : <span>{t("no")}</span>;
 }
 
-/** Czas z zrodlem obserwacji: kazda wartosc ma czas, kiedy byla prawdziwa. */
-export function Czas({ wartosc }: { wartosc?: string | null }) {
-  if (!wartosc) return <span className="znacznik nieznany">never</span>;
-  return <span title={absoluteTime(wartosc)}>{relativeTime(wartosc)}</span>;
+/** A time with its observation source: every value has a time when it was true. */
+export function Time({ value }: { value?: string | null }) {
+  const t = useT();
+  if (!value) return <span className="badge unknown">{t("never")}</span>;
+  return <span title={absoluteTime(value)}>{relativeTime(value)}</span>;
 }
 
-export function Pusto({ children }: { children: ReactNode }) {
-  return <div className="pusto">{children}</div>;
+export function Empty({ children }: { children: ReactNode }) {
+  return <div className="empty">{children}</div>;
 }
 
 /**
- * Odmowa nie jest awaria panelu, tylko odpowiedzia serwera na uprawnienia
- * uzytkownika. Czerwony komunikat o bledzie sugerowalby usterke tam, gdzie
- * system dziala poprawnie.
+ * A refusal is not a panel failure, only the server's answer to the user's
+ * permissions. A red error message would suggest a defect where the system
+ * works correctly.
  */
-export function Blad({ error }: { error: unknown }) {
+export function ErrorBox({ error }: { error: unknown }) {
+  const t = useT();
   if (error instanceof ApiError && error.forbidden) {
-    return <Pusto>You do not have permission to view this.</Pusto>;
+    return <Empty>{t("You do not have permission to view this.")}</Empty>;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return <div className="blad-strony">Blad: {message}</div>;
+  return <div className="page-error">{t("Error: {message}", { message })}</div>;
 }
 
-export function Pary({ children }: { children: ReactNode }) {
-  return <dl className="pary">{children}</dl>;
+export function Pairs({ children }: { children: ReactNode }) {
+  return <dl className="pairs">{children}</dl>;
 }
 
-export function Para({ etykieta, children }: { etykieta: string; children: ReactNode }) {
+export function Pair({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt>{etykieta}</dt>
+      <dt>{label}</dt>
       <dd>{children}</dd>
     </>
   );
@@ -120,31 +129,32 @@ export function Para({ etykieta, children }: { etykieta: string; children: React
 export { optional };
 
 /**
- * Pasek postepu operacji w toku.
+ * The progress bar of an operation in flight.
  *
- * Postep nieustalony nie jest rysowany jako zero - pasek przy zerze wyglada
- * jak praca, ktora stoi. Bez procentu i bez krokow zostaje sam opis tego,
- * co sie akurat dzieje.
+ * Undetermined progress is not drawn as zero - a bar at zero looks like
+ * work that stands still. Without a percentage and without steps only the
+ * description of what is happening right now remains.
  */
-export function PasekPostepu({
-  procent, krok, krokow, opis,
-}: { procent?: number; krok?: number; krokow?: number; opis?: string }) {
-  const zProcentu = typeof procent === "number" ? procent : undefined;
-  const zKrokow = krok && krokow ? Math.round((krok / krokow) * 100) : undefined;
-  const wypelnienie = zProcentu ?? zKrokow;
+export function ProgressBar({
+  percent, step, total, caption,
+}: { percent?: number; step?: number; total?: number; caption?: string }) {
+  const t = useT();
+  const fromPercent = typeof percent === "number" ? percent : undefined;
+  const fromSteps = step && total ? Math.round((step / total) * 100) : undefined;
+  const fill = fromPercent ?? fromSteps;
 
   return (
-    <div className="postep">
-      <div className="postep-tor">
-        {wypelnienie === undefined ? (
-          <span className="postep-nieznany" />
+    <div className="progress">
+      <div className="progress-track">
+        {fill === undefined ? (
+          <span className="progress-unknown" />
         ) : (
-          <span className="postep-wypelnienie" style={{ width: `${Math.min(100, wypelnienie)}%` }} />
+          <span className="progress-fill" style={{ width: `${Math.min(100, fill)}%` }} />
         )}
       </div>
-      <span className="postep-opis">
-        {krok && krokow ? `${krok}/${krokow}` : wypelnienie !== undefined ? `${wypelnienie}%` : "in progress"}
-        {opis ? ` · ${opis}` : ""}
+      <span className="progress-caption">
+        {step && total ? `${step}/${total}` : fill !== undefined ? `${fill}%` : t("in progress")}
+        {caption ? ` · ${caption}` : ""}
       </span>
     </div>
   );

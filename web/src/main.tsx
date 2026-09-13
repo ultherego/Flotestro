@@ -4,21 +4,24 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { ApiError } from "./lib/api";
+import { I18nProvider } from "./i18n";
 import "./styles.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Dane odswiezaja sie same, ale rzadziej: odswiezanie co dziesiec sekund
-      // kazdego zapytania na kazdym ekranie zamienialo panel w migotanie,
-      // bo widok wracal do stanu wczytywania albo do bledu i z powrotem.
+      // The data refreshes on its own, but less often: refreshing every
+      // query on every screen every ten seconds turned the panel into a
+      // flicker, because the view went back to loading or to an error and
+      // back again.
       refetchInterval: 30_000,
       staleTime: 15_000,
-      // Poprzednie dane zostaja na ekranie w czasie odswiezania. Bez tego
-      // kazde odswiezenie kasowalo widok na czas trwania zapytania.
-      placeholderData: (poprzednie: unknown) => poprzednie,
-      // Odmowa i brak uwierzytelnienia sa odpowiedzia serwera, a nie awaria
-      // sieci: ponawianie ich niczego nie naprawia, a mnozy migotanie.
+      // The previous data stays on the screen while refreshing. Without it
+      // every refresh wiped the view for the duration of the query.
+      placeholderData: (previous: unknown) => previous,
+      // A refusal and missing authentication are a server answer, not a
+      // network failure: retrying them fixes nothing and multiplies the
+      // flicker.
       retry: (count, error) => {
         if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
         return count < 2;
@@ -29,10 +32,12 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </I18nProvider>
   </React.StrictMode>,
 );

@@ -3,174 +3,172 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign, CampaignTarget } from "../lib/types";
-import { Blad, Pusto, StanZadania } from "../components/ui";
-import { ODSTEP_OPERACJI } from "../lib/strumien";
+import { ErrorBox, Empty, JobState } from "../components/ui";
+import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
-import { StreszczeniePlanu } from "../components/plan";
+import { PlanSummary } from "../components/plan";
+import { useT } from "../i18n";
 
 /**
- * Bulk Workspace: druga rownorzedna sciezka pracy obok zakladek hosta.
+ * Bulk Workspace: the second, equal path of work next to the host tabs.
  *
- * Host Workspace sluzy do dokladnej pracy na jednej maszynie. Tutaj wybiera
- * sie cel, oglada odmowy i prowadzi zmiane na calej flocie. Kampania nie moze
- * byc jednym przyciskiem schowanym na liscie hostow: to jest glowny mechanizm
- * zmiany, a nie skrot.
+ * The Host Workspace serves precise work on one machine. Here one picks the
+ * target, reads the refusals and drives a change across the whole fleet. A
+ * campaign cannot be one button hidden on the host list: it is the main
+ * mechanism of change, not a shortcut.
  */
 export function Bulk() {
-  const [krok, setKrok] = useState(0);
-  // Kampania powstaje w polowie drogi. Do tej chwili pracujemy na zamowieniu,
-  // potem - na kampanii, ktora sama liczy plany i czeka na zgode.
-  const [kampaniaID, setKampaniaID] = useState("");
-  const [zamowienie, setZamowienie] = useState<Zamowienie>({
-    nazwa: "",
-    akcja: "",
-    jednostka: "",
-    tylkoBezpieczenstwo: true,
+  const t = useT();
+  const [step, setStep] = useState(0);
+  // The campaign comes into being halfway through. Until then we work on an
+  // order, afterwards - on a campaign that computes its plans itself and
+  // waits for consent.
+  const [campaignID, setCampaignID] = useState("");
+  const [order, setOrder] = useState<Order>({
+    name: "",
+    action: "",
+    unit: "",
+    securityOnly: true,
     site: "",
     environment: "",
     osFamily: "",
     canary: 1,
-    fala: 10,
-    rownolegle: 5,
-    progProcent: 20,
-    progLiczba: 0,
-    politykaRestartu: "never",
+    wave: 10,
+    concurrent: 5,
+    thresholdPercent: 20,
+    thresholdCount: 0,
+    rebootPolicy: "never",
   });
 
-  const zmien = (zmiana: Partial<Zamowienie>) =>
-    setZamowienie((poprzednie) => ({ ...poprzednie, ...zmiana }));
+  const change = (delta: Partial<Order>) =>
+    setOrder((previous) => ({ ...previous, ...delta }));
 
-  const zdolnosci = useCapabilities();
-  const operacje = useQuery({
+  const capabilities = useCapabilities();
+  const operations = useQuery({
     queryKey: ["actions"],
-    // Katalog operacji stoi pod /api/v1/actions. Kreator pytal o adres,
-    // ktorego nie ma, wiec lista operacji byla pusta od poczatku.
-    queryFn: () => api.get<Collection<Operacja>>("/api/v1/actions"),
+    // The operation catalogue lives under /api/v1/actions. The wizard used
+    // to ask an address that did not exist, so the list was empty from the
+    // start.
+    queryFn: () => api.get<Collection<Operation>>("/api/v1/actions"),
   });
-  const masowe = (operacje.data?.items ?? []).filter((pozycja) => pozycja.campaign_ready);
-  // Odmowy pokazujemy razem z powodem. Operacja, ktorej nie ma na liscie bez
-  // slowa wyjasnienia, wyglada jak brak funkcji - a bywa granica postawiona
-  // swiadomie, na przyklad odtworzenie kopii.
-  const odmowy = (operacje.data?.items ?? []).filter(
-    (pozycja) => pozycja.mutating && !pozycja.campaign_ready && pozycja.campaign_refusal,
+  const bulk = (operations.data?.items ?? []).filter((item) => item.campaign_ready);
+  // Refusals are shown together with the reason. An operation missing from
+  // the list without a word of explanation looks like a missing feature -
+  // while it may be a boundary drawn on purpose, e.g. restoring a backup.
+  const refusals = (operations.data?.items ?? []).filter(
+    (item) => item.mutating && !item.campaign_ready && item.campaign_refusal,
   );
 
-  const parametry = new URLSearchParams();
-  if (zamowienie.site) parametry.set("site", zamowienie.site);
-  if (zamowienie.environment) parametry.set("environment", zamowienie.environment);
-  if (zamowienie.osFamily) parametry.set("os_family", zamowienie.osFamily);
-  if (zamowienie.akcja) parametry.set("action", zamowienie.akcja);
-  const podglad = useQuery({
-    queryKey: ["campaign-preview", parametry.toString()],
-    queryFn: () => api.get<Podglad>(`/api/v1/campaigns/preview?${parametry}`),
-    enabled: Boolean(zamowienie.akcja),
+  const params = new URLSearchParams();
+  if (order.site) params.set("site", order.site);
+  if (order.environment) params.set("environment", order.environment);
+  if (order.osFamily) params.set("os_family", order.osFamily);
+  if (order.action) params.set("action", order.action);
+  const preview = useQuery({
+    queryKey: ["campaign-preview", params.toString()],
+    queryFn: () => api.get<Preview>(`/api/v1/campaigns/preview?${params}`),
+    enabled: Boolean(order.action),
   });
 
-  const kampania = useQuery({
-    queryKey: ["campaign", kampaniaID],
-    queryFn: () => api.get<Campaign>(`/api/v1/campaigns/${kampaniaID}`),
-    enabled: Boolean(kampaniaID),
-    refetchInterval: ODSTEP_OPERACJI,
+  const campaign = useQuery({
+    queryKey: ["campaign", campaignID],
+    queryFn: () => api.get<Campaign>(`/api/v1/campaigns/${campaignID}`),
+    enabled: Boolean(campaignID),
+    refetchInterval: OPERATIONS_INTERVAL,
   });
 
-  const gotowy = podglad.data?.eligible ?? 0;
-  const bramki = bramkiKrokow(zamowienie, podglad.data, kampania.data);
+  const eligible = preview.data?.eligible ?? 0;
+  const gates = stepGates(t, order, preview.data, campaign.data);
 
-  // Backend bez fazy planowania nie poprowadzi zadnej z tych zmian. Kreator,
-  // ktory konczy sie bledem po wypelnieniu formularza, jest gorszy niz jego
-  // brak razem z powodem.
-  if (!zdolnosci.campaign_v2) {
+  // A backend without a planning phase will not drive any of these changes.
+  // A wizard that ends in an error after the form is filled in is worse than
+  // its absence together with the reason.
+  if (!capabilities.campaign_v2) {
     return (
       <>
-        <h1>Bulk Workspace</h1>
-        <Pusto>
-          This installation runs operations host by host: the backend has no campaign engine,
-          so there is no set of per-host plans to approve.
-        </Pusto>
+        <h1>{t("Bulk Workspace")}</h1>
+        <Empty>
+          {t("This installation runs operations host by host: the backend has no campaign engine, so there is no set of per-host plans to approve.")}
+        </Empty>
       </>
     );
   }
 
   return (
     <>
-      <h1>Bulk Workspace</h1>
-      <p className="podtytul">
-        Choose the target, read the refusals, run the change. One host at a time lives in the
-        host workspace; this is where the fleet is changed.
+      <h1>{t("Bulk Workspace")}</h1>
+      <p className="subtitle">
+        {t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}
       </p>
 
-      <PasekZakresu
-        zamowienie={zamowienie}
-        podglad={podglad.data}
-        kampania={kampania.data}
-      />
+      <ScopeBar order={order} preview={preview.data} campaign={campaign.data} />
 
-      <ol className="kroki-bulk">
-        {KROKI.map((tytul, indeks) => (
-          <li key={tytul}>
+      <ol className="bulk-steps">
+        {STEPS.map((title, index) => (
+          <li key={title}>
             <button
-              className={indeks === krok ? "krok aktywny" : "krok"}
-              onClick={() => setKrok(indeks)}
-              disabled={indeks > 0 && !bramki[indeks - 1].otwarta}
+              className={index === step ? "step active" : "step"}
+              onClick={() => setStep(index)}
+              disabled={index > 0 && !gates[index - 1].open}
             >
-              <span className="numer">{indeks + 1}</span>
-              <span className="tytul">{tytul}</span>
-              {/* Zamknieta bramka mowi, czego brakuje. Krok wygaszony bez
-                  powodu wyglada jak usterka interfejsu. */}
-              {indeks > 0 && !bramki[indeks - 1].otwarta && (
-                <span className="powod">{bramki[indeks - 1].powod}</span>
+              <span className="number">{index + 1}</span>
+              <span className="title">{t(title)}</span>
+              {/* A closed gate says what is missing. A step greyed out
+                  without a reason looks like an interface defect. */}
+              {index > 0 && !gates[index - 1].open && (
+                <span className="reason">{gates[index - 1].reason}</span>
               )}
             </button>
           </li>
         ))}
       </ol>
 
-      {krok === 0 && (
-        <KrokZakresu
-          zamowienie={zamowienie}
-          zmien={zmien}
-          masowe={masowe}
-          odmowy={odmowy}
-          podglad={podglad.data}
+      {step === 0 && (
+        <ScopeStep
+          order={order}
+          change={change}
+          bulk={bulk}
+          refusals={refusals}
+          preview={preview.data}
         />
       )}
-      {krok === 1 && <KrokCelow zamowienie={zamowienie} zmien={zmien} podglad={podglad.data} />}
-      {krok === 2 && <KrokKwalifikacji podglad={podglad.data} pytanie={podglad.isLoading} />}
-      {krok === 3 && <KrokRozwijania zamowienie={zamowienie} zmien={zmien} celow={gotowy} />}
-      {krok === 4 && (
-        <KrokUtworzenia
-          zamowienie={zamowienie}
-          celow={gotowy}
-          kampaniaID={kampaniaID}
-          onUtworzona={(id) => {
-            setKampaniaID(id);
-            setKrok(5);
+      {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} />}
+      {step === 2 && <EligibilityStep preview={preview.data} checking={preview.isLoading} />}
+      {step === 3 && <RolloutStep order={order} change={change} targets={eligible} />}
+      {step === 4 && (
+        <CreateStep
+          order={order}
+          targets={eligible}
+          campaignID={campaignID}
+          onCreated={(id) => {
+            setCampaignID(id);
+            setStep(5);
           }}
         />
       )}
-      {krok === 5 && <KrokPlanow kampaniaID={kampaniaID} kampania={kampania.data} />}
-      {krok === 6 && <KrokZgody kampaniaID={kampaniaID} kampania={kampania.data} />}
+      {step === 5 && <PlansStep campaignID={campaignID} campaign={campaign.data} />}
+      {step === 6 && <ApprovalStep campaignID={campaignID} campaign={campaign.data} />}
     </>
   );
 }
 
-type Zamowienie = {
-  nazwa: string;
-  akcja: string;
-  jednostka: string;
-  tylkoBezpieczenstwo: boolean;
+type Order = {
+  name: string;
+  action: string;
+  unit: string;
+  securityOnly: boolean;
   site: string;
   environment: string;
   osFamily: string;
   canary: number;
-  fala: number;
-  rownolegle: number;
-  progProcent: number;
-  progLiczba: number;
-  politykaRestartu: string;
+  wave: number;
+  concurrent: number;
+  thresholdPercent: number;
+  thresholdCount: number;
+  rebootPolicy: string;
 };
 
-type Operacja = {
+type Operation = {
   action: string;
   campaign_refusal?: string;
   mutating: boolean;
@@ -178,31 +176,32 @@ type Operacja = {
   campaign_ready: boolean;
 };
 
-type Grupa = { reason: string; count: number; sample: string[] };
+type Group = { reason: string; count: number; sample: string[] };
 
-type Podglad = {
+type Preview = {
   count: number;
   limit: number;
   eligible?: number;
   sample?: string[];
-  excluded?: Grupa[];
-  notes?: Grupa[];
+  excluded?: Group[];
+  notes?: Group[];
   campaign_mode?: string;
   requires_plan?: boolean;
-  // Rozklad migawki: trzydziesci hostow z jednej lokalizacji to inna
-  // zmiana niz trzydziesci rozrzuconych po trzech.
-  distribution?: Record<string, Grupa[]>;
+  // The distribution of the snapshot: thirty hosts from one site are a
+  // different change than thirty spread over three.
+  distribution?: Record<string, Group[]>;
 };
 
 /**
- * Kroki ida w kolejnosci, w ktorej system naprawde pracuje.
+ * The steps go in the order the system really works in.
  *
- * Dokument stawia plany przed polityka rozwijania. U nas plan powstaje jako
- * pierwsza faza kampanii - a kampania musi juz znac swoja polityke, bo ta
- * wchodzi do odcisku zgody. Kolejnosc jest wiec inna, i lepiej ja pokazac
- * wprost niz udawac, ze plan da sie policzyc przed zamowieniem.
+ * The document puts the plans before the rollout policy. Here the plan is
+ * computed as the first phase of the campaign - and the campaign must already
+ * know its policy, because it enters the approval fingerprint. The order is
+ * therefore different, and it is better to show it plainly than to pretend a
+ * plan can be computed before the order.
  */
-const KROKI = [
+const STEPS = [
   "Scope",
   "Targets",
   "Eligibility",
@@ -212,66 +211,69 @@ const KROKI = [
   "Approval & run",
 ];
 
-/** Bramka przejscia: krok nastepny otwiera sie dopiero, gdy jest po co. */
-type Bramka = { otwarta: boolean; powod: string };
+/** A transition gate: the next step opens only when there is a reason to. */
+type Gate = { open: boolean; reason: string };
 
-function bramkiKrokow(
-  zamowienie: Zamowienie,
-  podglad?: Podglad,
-  kampania?: Campaign,
-): Bramka[] {
-  const maAkcje = Boolean(zamowienie.akcja && zamowienie.nazwa);
-  const maCele = (podglad?.count ?? 0) > 0;
-  const maGotowe = (podglad?.eligible ?? 0) > 0;
+function stepGates(
+  t: (text: string, params?: Record<string, string | number>) => string,
+  order: Order,
+  preview?: Preview,
+  campaign?: Campaign,
+): Gate[] {
+  const hasAction = Boolean(order.action && order.name);
+  const hasTargets = (preview?.count ?? 0) > 0;
+  const hasEligible = (preview?.eligible ?? 0) > 0;
   return [
-    { otwarta: maAkcje, powod: "pick an operation and name the campaign" },
-    { otwarta: maAkcje && maCele, powod: "the selector matches no host" },
-    { otwarta: maGotowe, powod: "no matched host can run this operation" },
-    { otwarta: maGotowe, powod: "no matched host can run this operation" },
-    { otwarta: Boolean(kampania), powod: "the campaign does not exist yet" },
-    { otwarta: Boolean(kampania && kampania.state !== "planning"), powod: "hosts are still planning" },
+    { open: hasAction, reason: t("pick an operation and name the campaign") },
+    { open: hasAction && hasTargets, reason: t("the selector matches no host") },
+    { open: hasEligible, reason: t("no matched host can run this operation") },
+    { open: hasEligible, reason: t("no matched host can run this operation") },
+    { open: Boolean(campaign), reason: t("the campaign does not exist yet") },
+    { open: Boolean(campaign && campaign.state !== "planning"), reason: t("hosts are still planning") },
   ];
 }
 
 /**
- * ScopeBar: nazwa, operacja, liczba celow i odcisk migawki, przyklejone na
- * czas calego kreatora.
+ * ScopeBar: the name, the operation, the target count and the snapshot
+ * fingerprint, pinned for the whole wizard.
  *
- * Operator ma przez caly czas widziec, czego dotyczy to, co wlasnie ustawia.
- * Liczba hostow schowana dwa kroki wczesniej znaczy tyle co jej brak.
+ * The operator is to see all the time what the thing they are setting up
+ * applies to. A host count hidden two steps earlier is worth as much as its
+ * absence.
  */
-function PasekZakresu({
-  zamowienie,
-  podglad,
-  kampania,
+function ScopeBar({
+  order,
+  preview,
+  campaign,
 }: {
-  zamowienie: Zamowienie;
-  podglad?: Podglad;
-  kampania?: Campaign;
+  order: Order;
+  preview?: Preview;
+  campaign?: Campaign;
 }) {
+  const t = useT();
   return (
-    <div className="pasek-zakresu">
-      <div className="tozsamosc">
-        <span className="nazwa">{zamowienie.nazwa || "unnamed campaign"}</span>
-        <span className="akcja">{zamowienie.akcja || "no operation"}</span>
+    <div className="scope-bar">
+      <div className="identity">
+        <span className="name">{order.name || t("unnamed campaign")}</span>
+        <span className="action">{order.action || t("no operation")}</span>
       </div>
-      <div className="fakty">
+      <div className="facts">
         <span>
-          targets: <strong>{podglad?.eligible ?? podglad?.count ?? 0}</strong>
-          {podglad && podglad.eligible !== undefined && podglad.eligible !== podglad.count && (
-            <> of {podglad.count} matched</>
+          {t("targets")}: <strong>{preview?.eligible ?? preview?.count ?? 0}</strong>
+          {preview && preview.eligible !== undefined && preview.eligible !== preview.count && (
+            <> {t("of {n} matched", { n: preview.count })}</>
           )}
         </span>
-        {podglad?.campaign_mode && <span>mode: {podglad.campaign_mode}</span>}
-        {kampania && (
+        {preview?.campaign_mode && <span>{t("mode")}: {preview.campaign_mode}</span>}
+        {campaign && (
           <>
             <span>
-              state: <StanZadania stan={kampania.state} />
+              {t("state")}: <JobState state={campaign.state} />
             </span>
-            {/* Odcisk jest tym, czego dotyczy zgoda. Bez niego "zatwierdzone"
-                nie mowi, co zostalo zatwierdzone. */}
-            <span className="zrodlo">
-              fingerprint {kampania.approval_fingerprint.slice(0, 12)}
+            {/* The fingerprint is what the consent applies to. Without it
+                "approved" does not say what was approved. */}
+            <span className="source">
+              {t("fingerprint")} {campaign.approval_fingerprint.slice(0, 12)}
             </span>
           </>
         )}
@@ -280,87 +282,86 @@ function PasekZakresu({
   );
 }
 
-/** Operacje, dla ktorych kreator umie zbudowac payload. */
-const OPERACJE_JEDNOSTKI = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
-const OPERACJE_KREATORA = [...OPERACJE_JEDNOSTKI, "packages.upgrade"];
+/** The operations the wizard can build a payload for. */
+const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
+const WIZARD_OPERATIONS = [...UNIT_OPERATIONS, "packages.upgrade"];
 
-function KrokZakresu({
-  zamowienie,
-  zmien,
-  masowe,
-  odmowy,
-  podglad,
+function ScopeStep({
+  order,
+  change,
+  bulk,
+  refusals,
+  preview,
 }: {
-  zamowienie: Zamowienie;
-  zmien: (zmiana: Partial<Zamowienie>) => void;
-  masowe: Operacja[];
-  odmowy: Operacja[];
-  podglad?: Podglad;
+  order: Order;
+  change: (delta: Partial<Order>) => void;
+  bulk: Operation[];
+  refusals: Operation[];
+  preview?: Preview;
 }) {
-  const wymagaJednostki = OPERACJE_JEDNOSTKI.includes(zamowienie.akcja);
+  const t = useT();
+  const needsUnit = UNIT_OPERATIONS.includes(order.action);
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>1. Scope</h2>
-      <p className="podtytul">
-        The registry decides what may run on many hosts at once. An operation with no bulk mode is
-        a deliberate refusal, not a missing screen.
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>1. {t("Scope")}</h2>
+      <p className="subtitle">
+        {t("The registry decides what may run on many hosts at once. An operation with no bulk mode is a deliberate refusal, not a missing screen.")}
       </p>
-      <div className="filtry">
+      <div className="filters">
         <input
-          placeholder="campaign name"
-          value={zamowienie.nazwa}
-          onChange={(e) => zmien({ nazwa: e.target.value })}
+          placeholder={t("campaign name")}
+          value={order.name}
+          onChange={(e) => change({ name: e.target.value })}
           style={{ minWidth: 240 }}
         />
-        <select value={zamowienie.akcja} onChange={(e) => zmien({ akcja: e.target.value })}>
-          <option value="">pick an operation…</option>
-          {masowe.map((pozycja) => (
+        <select value={order.action} onChange={(e) => change({ action: e.target.value })}>
+          <option value="">{t("pick an operation…")}</option>
+          {bulk.map((item) => (
             <option
-              key={pozycja.action}
-              value={pozycja.action}
-              disabled={!OPERACJE_KREATORA.includes(pozycja.action)}
+              key={item.action}
+              value={item.action}
+              disabled={!WIZARD_OPERATIONS.includes(item.action)}
             >
-              {pozycja.action}
-              {OPERACJE_KREATORA.includes(pozycja.action) ? "" : " — no bulk form yet"}
+              {item.action}
+              {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("no bulk form yet")}`}
             </option>
           ))}
         </select>
-        {wymagaJednostki && (
+        {needsUnit && (
           <input
-            placeholder="unit, e.g. cron.service"
-            value={zamowienie.jednostka}
-            onChange={(e) => zmien({ jednostka: e.target.value })}
+            placeholder={t("unit, e.g. cron.service")}
+            value={order.unit}
+            onChange={(e) => change({ unit: e.target.value })}
           />
         )}
-        {zamowienie.akcja === "packages.upgrade" && (
+        {order.action === "packages.upgrade" && (
           <label>
             <input
               type="checkbox"
-              checked={zamowienie.tylkoBezpieczenstwo}
-              onChange={(e) => zmien({ tylkoBezpieczenstwo: e.target.checked })}
+              checked={order.securityOnly}
+              onChange={(e) => change({ securityOnly: e.target.checked })}
             />{" "}
-            security updates only
+            {t("security updates only")}
           </label>
         )}
       </div>
-      {podglad?.requires_plan && (
-        <p className="podtytul">
-          Every host computes its own plan first. You approve the set of plans, not one payload,
-          and a host whose plan changed in the meantime refuses the change.
+      {preview?.requires_plan && (
+        <p className="subtitle">
+          {t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
         </p>
       )}
-      {odmowy.length > 0 && (
+      {refusals.length > 0 && (
         <details style={{ marginTop: 12 }}>
-          <summary className="podtytul">
-            {odmowy.length} operations change hosts but cannot run as a campaign — with reasons
+          <summary className="subtitle">
+            {t("{n} operations change hosts but cannot run as a campaign — with reasons", { n: refusals.length })}
           </summary>
           <table>
-            <thead><tr><th>Operation</th><th>Why not</th></tr></thead>
+            <thead><tr><th>{t("Operation")}</th><th>{t("Why not")}</th></tr></thead>
             <tbody>
-              {odmowy.map((pozycja) => (
-                <tr key={pozycja.action}>
-                  <td>{pozycja.action}</td>
-                  <td className="zrodlo">{pozycja.campaign_refusal}</td>
+              {refusals.map((item) => (
+                <tr key={item.action}>
+                  <td>{item.action}</td>
+                  <td className="source">{item.campaign_refusal}</td>
                 </tr>
               ))}
             </tbody>
@@ -371,390 +372,398 @@ function KrokZakresu({
   );
 }
 
-function KrokCelow({
-  zamowienie,
-  zmien,
-  podglad,
+function TargetsStep({
+  order,
+  change,
+  preview,
 }: {
-  zamowienie: Zamowienie;
-  zmien: (zmiana: Partial<Zamowienie>) => void;
-  podglad?: Podglad;
+  order: Order;
+  change: (delta: Partial<Order>) => void;
+  preview?: Preview;
 }) {
+  const t = useT();
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>2. Targets</h2>
-      <p className="podtytul">
-        The count comes from the database, not from the first page of a list. The snapshot is
-        frozen when the campaign is created; hosts added later do not join it.
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>2. {t("Targets")}</h2>
+      <p className="subtitle">
+        {t("The count comes from the database, not from the first page of a list. The snapshot is frozen when the campaign is created; hosts added later do not join it.")}
       </p>
-      <div className="filtry">
+      <div className="filters">
         <input
-          placeholder="site"
-          value={zamowienie.site}
-          onChange={(e) => zmien({ site: e.target.value })}
+          placeholder={t("site")}
+          value={order.site}
+          onChange={(e) => change({ site: e.target.value })}
         />
         <input
-          placeholder="environment"
-          value={zamowienie.environment}
-          onChange={(e) => zmien({ environment: e.target.value })}
+          placeholder={t("environment")}
+          value={order.environment}
+          onChange={(e) => change({ environment: e.target.value })}
         />
         <input
-          placeholder="os family"
-          value={zamowienie.osFamily}
-          onChange={(e) => zmien({ osFamily: e.target.value })}
+          placeholder={t("os family")}
+          value={order.osFamily}
+          onChange={(e) => change({ osFamily: e.target.value })}
         />
       </div>
       <p>
-        The selector matches <strong>{podglad?.count ?? 0}</strong> hosts
-        {podglad && podglad.count > podglad.limit && (
-          <> — more than the {podglad.limit} one campaign may carry</>
+        {t("The selector matches {n} hosts", { n: preview?.count ?? 0 })}
+        {preview && preview.count > preview.limit && (
+          <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
         )}
         .
       </p>
-      <div className="zrodlo">{(podglad?.sample ?? []).join(", ")}</div>
-      <Rozklad podglad={podglad} />
+      <div className="source">{(preview?.sample ?? []).join(", ")}</div>
+      <Distribution preview={preview} />
     </section>
   );
 }
 
 /**
- * Rozklad zamrozonej migawki po lokalizacji, srodowisku, rodzinie systemu
- * i wymaganej zdolnosci.
+ * The distribution of the frozen snapshot by site, environment, OS family
+ * and the required capability.
  *
- * Sama liczba gotowych hostow nie mowi, co sie zaraz stanie: trzydziesci
- * hostow z jednej lokalizacji to inna zmiana niz trzydziesci rozrzuconych
- * po trzech.
+ * The bare count of eligible hosts does not say what is about to happen:
+ * thirty hosts from one site are a different change than thirty spread over
+ * three.
  */
-function Rozklad({ podglad }: { podglad?: Podglad }) {
-  const wymiary = Object.entries(podglad?.distribution ?? {}).filter(
-    ([, grupy]) => grupy.length > 0,
+function Distribution({ preview }: { preview?: Preview }) {
+  const t = useT();
+  const dimensions = Object.entries(preview?.distribution ?? {}).filter(
+    ([, groups]) => groups.length > 0,
   );
-  if (!wymiary.length) return null;
-  const nazwy: Record<string, string> = {
-    site: "site",
-    environment: "environment",
-    os_family: "os family",
-    capability: "capability",
+  if (!dimensions.length) return null;
+  const names: Record<string, string> = {
+    site: t("site"),
+    environment: t("environment"),
+    os_family: t("os family"),
+    capability: t("capability"),
   };
   return (
     <div style={{ marginTop: 12 }}>
-      {wymiary.map(([wymiar, grupy]) => (
-        <div key={wymiar} className="zrodlo">
-          {nazwy[wymiar] ?? wymiar}:{" "}
-          {grupy.map((grupa) => `${grupa.reason} ${grupa.count}`).join(", ")}
+      {dimensions.map(([dimension, groups]) => (
+        <div key={dimension} className="source">
+          {names[dimension] ?? dimension}:{" "}
+          {groups.map((group) => `${group.reason} ${group.count}`).join(", ")}
         </div>
       ))}
     </div>
   );
 }
 
-function KrokKwalifikacji({ podglad, pytanie }: { podglad?: Podglad; pytanie: boolean }) {
-  if (pytanie) return <Pusto>Checking every matched host…</Pusto>;
-  const wykluczone = podglad?.excluded ?? [];
-  const uwagi = podglad?.notes ?? [];
+function EligibilityStep({ preview, checking }: { preview?: Preview; checking: boolean }) {
+  const t = useT();
+  if (checking) return <Empty>{t("Checking every matched host…")}</Empty>;
+  const excluded = preview?.excluded ?? [];
+  const notes = preview?.notes ?? [];
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>3. Eligibility</h2>
-      <p className="podtytul">
-        A host that cannot run this operation stays in the snapshot with its reason. Dropping it
-        quietly would hide a decision nobody made.
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>3. {t("Eligibility")}</h2>
+      <p className="subtitle">
+        {t("A host that cannot run this operation stays in the snapshot with its reason. Dropping it quietly would hide a decision nobody made.")}
       </p>
       <table>
         <thead>
-          <tr><th>Bucket</th><th>Hosts</th><th>Which</th></tr>
+          <tr><th>{t("Bucket")}</th><th>{t("Hosts")}</th><th>{t("Which")}</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><span className="znacznik ok">eligible</span></td>
-            <td>{podglad?.eligible ?? 0}</td>
-            <td className="zrodlo">{(podglad?.sample ?? []).join(", ")}</td>
+            <td><span className="badge ok">{t("eligible")}</span></td>
+            <td>{preview?.eligible ?? 0}</td>
+            <td className="source">{(preview?.sample ?? []).join(", ")}</td>
           </tr>
-          {wykluczone.map((grupa) => (
-            <tr key={grupa.reason}>
-              <td><span className="znacznik blad">{nazwaPowodu(grupa.reason)}</span></td>
-              <td>{grupa.count}</td>
-              <td className="zrodlo">{grupa.sample.join(", ")}</td>
+          {excluded.map((group) => (
+            <tr key={group.reason}>
+              <td><span className="badge error">{reasonName(t, group.reason)}</span></td>
+              <td>{group.count}</td>
+              <td className="source">{group.sample.join(", ")}</td>
             </tr>
           ))}
-          {/* Uwaga nie wyklucza hosta. Host offline wroci i wykona swoja
-              czesc; host w kolizji poczeka na cudza blokade. */}
-          {uwagi.map((grupa) => (
-            <tr key={grupa.reason}>
-              <td><span className="znacznik uwaga">{nazwaPowodu(grupa.reason)}</span></td>
-              <td>{grupa.count}</td>
-              <td className="zrodlo">{grupa.sample.join(", ")}</td>
+          {/* A note does not exclude the host. An offline host comes back
+              and does its part; a host in a conflict waits for somebody
+              else's lock. */}
+          {notes.map((group) => (
+            <tr key={group.reason}>
+              <td><span className="badge warn">{reasonName(t, group.reason)}</span></td>
+              <td>{group.count}</td>
+              <td className="source">{group.sample.join(", ")}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!wykluczone.length && !uwagi.length && (
-        <p className="podtytul">Every matched host can run this operation.</p>
+      {!excluded.length && !notes.length && (
+        <p className="subtitle">{t("Every matched host can run this operation.")}</p>
       )}
     </section>
   );
 }
 
-function nazwaPowodu(powod: string): string {
-  const nazwy: Record<string, string> = {
-    capability_missing: "no adapter",
-    capability_unknown: "adapter unknown",
-    maintenance: "in maintenance",
-    quarantined: "quarantined",
-    out_of_scope: "out of your scope",
-    conflict: "in another campaign",
-    offline: "offline",
+function reasonName(t: (text: string) => string, reason: string): string {
+  const names: Record<string, string> = {
+    capability_missing: t("no adapter"),
+    capability_unknown: t("adapter unknown"),
+    maintenance: t("in maintenance"),
+    quarantined: t("quarantined"),
+    out_of_scope: t("out of your scope"),
+    conflict: t("in another campaign"),
+    offline: t("offline"),
   };
-  return nazwy[powod] ?? powod;
+  return names[reason] ?? reason;
 }
 
-function KrokRozwijania({
-  zamowienie,
-  zmien,
-  celow,
+function RolloutStep({
+  order,
+  change,
+  targets,
 }: {
-  zamowienie: Zamowienie;
-  zmien: (zmiana: Partial<Zamowienie>) => void;
-  celow: number;
+  order: Order;
+  change: (delta: Partial<Order>) => void;
+  targets: number;
 }) {
+  const t = useT();
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>4. Rollout</h2>
-      <p className="podtytul">
-        Canary is wave zero. The concurrency limit says how many hosts move at once in this
-        change; fleet and site budgets say how much the system carries in total, and a host
-        waiting for capacity says so instead of standing still.
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>4. {t("Rollout")}</h2>
+      <p className="subtitle">
+        {t("Canary is wave zero. The concurrency limit says how many hosts move at once in this change; fleet and site budgets say how much the system carries in total, and a host waiting for capacity says so instead of standing still.")}
       </p>
-      <div className="filtry">
+      <div className="filters">
         <label>
-          canary{" "}
-          <input type="number" min={0} value={zamowienie.canary}
-            onChange={(e) => zmien({ canary: +e.target.value })} style={{ width: 70 }} />
+          {t("canary")}{" "}
+          <input type="number" min={0} value={order.canary}
+            onChange={(e) => change({ canary: +e.target.value })} style={{ width: 70 }} />
         </label>
         <label>
-          wave{" "}
-          <input type="number" min={1} value={zamowienie.fala}
-            onChange={(e) => zmien({ fala: +e.target.value })} style={{ width: 70 }} />
+          {t("wave")}{" "}
+          <input type="number" min={1} value={order.wave}
+            onChange={(e) => change({ wave: +e.target.value })} style={{ width: 70 }} />
         </label>
         <label>
-          concurrent{" "}
-          <input type="number" min={1} value={zamowienie.rownolegle}
-            onChange={(e) => zmien({ rownolegle: +e.target.value })} style={{ width: 70 }} />
+          {t("concurrent")}{" "}
+          <input type="number" min={1} value={order.concurrent}
+            onChange={(e) => change({ concurrent: +e.target.value })} style={{ width: 70 }} />
         </label>
         <label>
-          threshold %{" "}
-          <input type="number" min={0} max={100} value={zamowienie.progProcent}
-            onChange={(e) => zmien({ progProcent: +e.target.value })} style={{ width: 70 }} />
+          {t("threshold %")}{" "}
+          <input type="number" min={0} max={100} value={order.thresholdPercent}
+            onChange={(e) => change({ thresholdPercent: +e.target.value })} style={{ width: 70 }} />
         </label>
         <label>
-          threshold count{" "}
-          <input type="number" min={0} value={zamowienie.progLiczba}
-            onChange={(e) => zmien({ progLiczba: +e.target.value })} style={{ width: 70 }} />
+          {t("threshold count")}{" "}
+          <input type="number" min={0} value={order.thresholdCount}
+            onChange={(e) => change({ thresholdCount: +e.target.value })} style={{ width: 70 }} />
         </label>
-        <select value={zamowienie.politykaRestartu}
-          onChange={(e) => zmien({ politykaRestartu: e.target.value })}>
-          <option value="never">reboot: never</option>
-          <option value="if_required">reboot: when required</option>
-          <option value="always">reboot: always</option>
+        <select value={order.rebootPolicy}
+          onChange={(e) => change({ rebootPolicy: e.target.value })}>
+          <option value="never">{t("reboot: never")}</option>
+          <option value="if_required">{t("reboot: when required")}</option>
+          <option value="always">{t("reboot: always")}</option>
         </select>
       </div>
-      <p className="podtytul">
-        {celow} hosts, canary {zamowienie.canary}, then waves of {zamowienie.fala} with at most{" "}
-        {zamowienie.rownolegle} at a time.
+      <p className="subtitle">
+        {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
+          targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
+        })}
       </p>
     </section>
   );
 }
 
-function KrokUtworzenia({
-  zamowienie,
-  celow,
-  kampaniaID,
-  onUtworzona,
+function CreateStep({
+  order,
+  targets,
+  campaignID,
+  onCreated,
 }: {
-  zamowienie: Zamowienie;
-  celow: number;
-  kampaniaID: string;
-  onUtworzona: (id: string) => void;
+  order: Order;
+  targets: number;
+  campaignID: string;
+  onCreated: (id: string) => void;
 }) {
-  const [blad, setBlad] = useState("");
+  const t = useT();
+  const [errorMessage, setErrorMessage] = useState("");
   const queryClient = useQueryClient();
 
-  const utworz = useMutation({
+  const create = useMutation({
     mutationFn: () =>
       api.post<Campaign>("/api/v1/campaigns", {
-        name: zamowienie.nazwa,
-        action: zamowienie.akcja,
-        reason: `bulk workspace: ${zamowienie.akcja}`,
-        payload: OPERACJE_JEDNOSTKI.includes(zamowienie.akcja)
-          ? { unit: { unit: zamowienie.jednostka } }
-          : { package_upgrade: { security_only: zamowienie.tylkoBezpieczenstwo } },
+        name: order.name,
+        action: order.action,
+        reason: `bulk workspace: ${order.action}`,
+        payload: UNIT_OPERATIONS.includes(order.action)
+          ? { unit: { unit: order.unit } }
+          : { package_upgrade: { security_only: order.securityOnly } },
         selector: {
-          site: zamowienie.site || undefined,
-          environment: zamowienie.environment || undefined,
-          os_family: zamowienie.osFamily || undefined,
+          site: order.site || undefined,
+          environment: order.environment || undefined,
+          os_family: order.osFamily || undefined,
         },
-        canary_size: zamowienie.canary,
-        wave_size: zamowienie.fala,
-        max_concurrent: zamowienie.rownolegle,
-        failure_threshold_percent: zamowienie.progProcent,
-        failure_threshold_absolute: zamowienie.progLiczba,
-        reboot_policy: zamowienie.politykaRestartu,
+        canary_size: order.canary,
+        wave_size: order.wave,
+        max_concurrent: order.concurrent,
+        failure_threshold_percent: order.thresholdPercent,
+        failure_threshold_absolute: order.thresholdCount,
+        reboot_policy: order.rebootPolicy,
       }),
     onSuccess: (campaign) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
-      onUtworzona(campaign.id);
+      onCreated(campaign.id);
     },
-    onError: (error) => setBlad(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
   });
 
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>5. Create</h2>
-      <p className="podtytul">
-        Creating the campaign freezes the snapshot. Nothing changes on any host yet.
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>5. {t("Create")}</h2>
+      <p className="subtitle">
+        {t("Creating the campaign freezes the snapshot. Nothing changes on any host yet.")}
       </p>
-      {blad && <p className="blad-strony">{blad}</p>}
-      <button onClick={() => utworz.mutate()} disabled={utworz.isPending || Boolean(kampaniaID)}>
-        {utworz.isPending ? "Creating…" : `Create campaign on ${celow} hosts`}
+      {errorMessage && <p className="page-error">{errorMessage}</p>}
+      <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID)}>
+        {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
       </button>
     </section>
   );
 }
 
-function KrokPlanow({ kampaniaID, kampania }: { kampaniaID: string; kampania?: Campaign }) {
-  const cele = useQuery({
-    queryKey: ["campaign-targets", kampaniaID],
-    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${kampaniaID}/targets`),
-    enabled: Boolean(kampaniaID),
-    refetchInterval: ODSTEP_OPERACJI,
+function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Campaign }) {
+  const t = useT();
+  const targets = useQuery({
+    queryKey: ["campaign-targets", campaignID],
+    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${campaignID}/targets`),
+    enabled: Boolean(campaignID),
+    refetchInterval: OPERATIONS_INTERVAL,
   });
-  // Zgoda dotyczy zestawu planow, wiec operator ma zobaczyc ten zestaw -
-  // pogrupowany, bo sto hostow z identycznym diffem to jedna zmiana, a nie
-  // sto.
-  const plany = useQuery({
-    queryKey: ["campaign-plans", kampaniaID],
-    queryFn: () => api.get<GrupyPlanow>(`/api/v1/campaigns/${kampaniaID}/plans`),
-    enabled: Boolean(kampaniaID),
-    refetchInterval: ODSTEP_OPERACJI,
+  // The consent covers the set of plans, so the operator is to see that set
+  // - grouped, because a hundred hosts with an identical diff are one
+  // change, not a hundred.
+  const plans = useQuery({
+    queryKey: ["campaign-plans", campaignID],
+    queryFn: () => api.get<PlanGroups>(`/api/v1/campaigns/${campaignID}/plans`),
+    enabled: Boolean(campaignID),
+    refetchInterval: OPERATIONS_INTERVAL,
   });
-  if (cele.error) return <Blad error={cele.error} />;
+  if (targets.error) return <ErrorBox error={targets.error} />;
 
-  const planuje = kampania?.state === "planning";
-  const grupy = plany.data?.items ?? [];
+  const planning = campaign?.state === "planning";
+  const groups = plans.data?.items ?? [];
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>6. Plans</h2>
-      <p className="podtytul">
-        {planuje
-          ? "Each host is computing its own diff. Nothing is applied while this runs."
-          : "Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change."}
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>6. {t("Plans")}</h2>
+      <p className="subtitle">
+        {planning
+          ? t("Each host is computing its own diff. Nothing is applied while this runs.")
+          : t("Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change.")}
       </p>
-      {grupy.length > 0 && (
+      {groups.length > 0 && (
         <table>
           <thead>
-            <tr><th>Change</th><th>Hosts</th><th>Plan fingerprint</th></tr>
+            <tr><th>{t("Change")}</th><th>{t("Hosts")}</th><th>{t("Plan fingerprint")}</th></tr>
           </thead>
           <tbody>
-            {grupy.map((grupa) => (
-              <tr key={grupa.plan_hash}>
-                <td><StreszczeniePlanu plan={(grupa.plan?.plan ?? grupa.plan ?? {}) as Record<string, any>} /></td>
+            {groups.map((group) => (
+              <tr key={group.plan_hash}>
+                <td><PlanSummary plan={(group.plan?.plan ?? group.plan ?? {}) as Record<string, any>} /></td>
                 <td>
-                  {grupa.count}
-                  <div className="zrodlo">{grupa.hosts.join(", ")}</div>
+                  {group.count}
+                  <div className="source">{group.hosts.join(", ")}</div>
                 </td>
-                <td className="zrodlo">{grupa.plan_hash.slice(0, 16)}</td>
+                <td className="source">{group.plan_hash.slice(0, 16)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <TabelaCelow cele={cele.data?.items ?? []} />
+      <TargetTable targets={targets.data?.items ?? []} />
     </section>
   );
 }
 
-type GrupyPlanow = {
+type PlanGroups = {
   items: {
     plan_hash: string;
     count: number;
     hosts: string[];
-    // Tresc planu przychodzi w ksztalcie wyniku zadania: rodzaj i plan.
+    // The plan content arrives in the shape of a job result: kind and plan.
     plan?: { plan?: Record<string, unknown> } & Record<string, unknown>;
   }[];
   plan_set_hash?: string;
 };
 
-function KrokZgody({ kampaniaID, kampania }: { kampaniaID: string; kampania?: Campaign }) {
-  const [blad, setBlad] = useState("");
+function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?: Campaign }) {
+  const t = useT();
+  const [errorMessage, setErrorMessage] = useState("");
   const queryClient = useQueryClient();
-  const cele = useQuery({
-    queryKey: ["campaign-targets", kampaniaID],
-    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${kampaniaID}/targets`),
-    enabled: Boolean(kampaniaID),
-    refetchInterval: ODSTEP_OPERACJI,
+  const targets = useQuery({
+    queryKey: ["campaign-targets", campaignID],
+    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${campaignID}/targets`),
+    enabled: Boolean(campaignID),
+    refetchInterval: OPERATIONS_INTERVAL,
   });
-  const zatwierdz = useMutation({
+  const approve = useMutation({
     mutationFn: () =>
-      api.post(`/api/v1/campaigns/${kampaniaID}/approve`, {
+      api.post(`/api/v1/campaigns/${campaignID}/approve`, {
         reason: "bulk workspace",
-        // Zgoda niesie odcisk tego, co widac na ekranie. Kampania zmieniona
-        // od jej wczytania konczy sie odmowa, a nie przeniesieniem zgody.
-        approval_fingerprint: kampania?.approval_fingerprint,
+        // The consent carries the fingerprint of what is on screen. A
+        // campaign changed since it was loaded ends in a refusal, not in the
+        // consent being transferred.
+        approval_fingerprint: campaign?.approval_fingerprint,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaign", kampaniaID] }),
-    onError: (error) => setBlad(error instanceof Error ? error.message : String(error)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaign", campaignID] }),
+    onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  if (!kampania) return <Pusto>No campaign yet.</Pusto>;
+  if (!campaign) return <Empty>{t("No campaign yet.")}</Empty>;
   return (
-    <section className="kafelek">
-      <h2 style={{ marginTop: 0 }}>7. Approval and run</h2>
-      <p className="podtytul">
-        You are approving this operation, this payload, this list of hosts, this rollout policy
-        and this set of plans - together, as one fingerprint.
+    <section className="tile">
+      <h2 style={{ marginTop: 0 }}>7. {t("Approval and run")}</h2>
+      <p className="subtitle">
+        {t("You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
       </p>
-      <p className="zrodlo">fingerprint {kampania.approval_fingerprint}</p>
-      {blad && <p className="blad-strony">{blad}</p>}
-      {kampania.state === "awaiting_approval" ? (
-        <button onClick={() => zatwierdz.mutate()} disabled={zatwierdz.isPending}>
-          {zatwierdz.isPending ? "Approving..." : "Approve and start"}
+      <p className="source">{t("fingerprint")} {campaign.approval_fingerprint}</p>
+      {errorMessage && <p className="page-error">{errorMessage}</p>}
+      {campaign.state === "awaiting_approval" ? (
+        <button onClick={() => approve.mutate()} disabled={approve.isPending}>
+          {approve.isPending ? t("Approving…") : t("Approve and start")}
         </button>
       ) : (
         <p>
-          This campaign is <StanZadania stan={kampania.state} />.{" "}
-          {/* Pauza i anulowanie nalezy do ekranu kampanii: tam sa opisane
-              skutki, ktorych ten kreator nie powtarza. */}
-          <Link to={`/campaigns/${kampania.id}`}>Pause, cancel or read the report</Link>.
+          {t("This campaign is")} <JobState state={campaign.state} />.{" "}
+          {/* Pausing and cancelling belong to the campaign screen: the
+              consequences are described there, and this wizard does not
+              repeat them. */}
+          <Link to={`/campaigns/${campaign.id}`}>{t("Pause, cancel or read the report")}</Link>.
         </p>
       )}
-      <TabelaCelow cele={cele.data?.items ?? []} />
+      <TargetTable targets={targets.data?.items ?? []} />
     </section>
   );
 }
 
 /**
- * Tabela celow z blokada. Host, ktory stoi, ma powiedziec, na co czeka:
- * na budzet, na cudza blokade zasobu, czy na powrot do sieci.
+ * The target table with the blocker. A host that stands still is to say
+ * what it waits for: a budget, somebody else's resource lock, or coming back
+ * online.
  */
-function TabelaCelow({ cele }: { cele: CampaignTarget[] }) {
-  if (!cele.length) return <Pusto>No targets.</Pusto>;
+function TargetTable({ targets }: { targets: CampaignTarget[] }) {
+  const t = useT();
+  if (!targets.length) return <Empty>{t("No targets.")}</Empty>;
   return (
     <table>
       <thead>
-        <tr><th>Host</th><th>Wave</th><th>State</th><th>Blocker</th><th>Message</th></tr>
+        <tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("State")}</th><th>{t("Blocker")}</th><th>{t("Message")}</th></tr>
       </thead>
       <tbody>
-        {cele.map((cel) => (
-          <tr key={cel.host_id}>
+        {targets.map((target) => (
+          <tr key={target.host_id}>
             <td>
-              <Link to={`/hosts/${cel.host_id}/overview`}>
-                {cel.hostname || cel.host_id.slice(0, 8)}
+              <Link to={`/hosts/${target.host_id}/overview`}>
+                {target.hostname || target.host_id.slice(0, 8)}
               </Link>
             </td>
-            <td>{cel.wave}{cel.wave === 0 && " (canary)"}</td>
-            <td><StanZadania stan={cel.state} /></td>
-            <td>{opisBlokady(cel)}</td>
-            <td>{cel.message || "—"}</td>
+            <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
+            <td><JobState state={target.state} /></td>
+            <td>{blockerName(t, target)}</td>
+            <td>{target.message || "—"}</td>
           </tr>
         ))}
       </tbody>
@@ -762,12 +771,12 @@ function TabelaCelow({ cele }: { cele: CampaignTarget[] }) {
   );
 }
 
-/** opisBlokady nazywa rodzaj przeszkody, a nie sam kod bledu. */
-function opisBlokady(cel: CampaignTarget): string {
-  if (!cel.error_code) return "—";
-  if (cel.error_code.startsWith("budget_")) return "budget";
-  if (cel.error_code === "resource_busy") return "resource lock";
-  if (cel.error_code === "capability_missing") return "capability";
-  if (cel.error_code === "maintenance") return "maintenance";
-  return cel.error_code;
+/** blockerName names the kind of obstacle, not the bare error code. */
+function blockerName(t: (text: string) => string, target: CampaignTarget): string {
+  if (!target.error_code) return "—";
+  if (target.error_code.startsWith("budget_")) return t("budget");
+  if (target.error_code === "resource_busy") return t("resource lock");
+  if (target.error_code === "capability_missing") return t("capability");
+  if (target.error_code === "maintenance") return t("maintenance");
+  return target.error_code;
 }

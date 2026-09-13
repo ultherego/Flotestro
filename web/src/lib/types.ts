@@ -1,9 +1,10 @@
-// Typy odpowiadaja kontraktowi REST control plane.
+// The types mirror the REST contract of the control plane.
 
 /**
- * Adapter wykryty na hoscie. Nazwa mowi, co host ma ("packages.apt"), a nie
- * czego chce operacja ("packages"). Powod pochodzi z hosta: interfejs ma go
- * powtorzyc, a nie zgadywac przyczyne we wlasnym kodzie.
+ * An adapter detected on the host. The name says what the host has
+ * ("packages.apt"), not what the operation wants ("packages"). The reason
+ * comes from the host: the interface is to repeat it, not guess the cause in
+ * its own code.
  */
 export type Capability = {
   name: string;
@@ -17,8 +18,9 @@ export type Capability = {
 export type Capabilities = Capability[];
 
 /**
- * Stan jednego modulu inventory. Rewizja i znacznik obserwacji sa wlasne dla
- * modulu, wiec zakladka pokazuje swiezosc tego, co wyswietla.
+ * The state of one inventory module. The revision and the observation
+ * timestamp belong to the module, so a tab shows the freshness of what it
+ * displays.
  */
 export type InventoryFragment<T> = {
   host_id: string;
@@ -54,18 +56,19 @@ export type Host = {
   connection_state: "online" | "offline" | "stale" | "unknown";
   last_seen_at?: string;
   boot_id?: string;
-  // Okno serwisowe: puste pole oznacza host poza oknem, a nie okno o zerowej
-  // dlugosci. Kampanie omijaja host w oknie, a alerty z niego nie budza nikogo.
+  // The maintenance window: an empty field means a host outside a window,
+  // not a window of zero length. Campaigns skip a host in a window, and its
+  // alerts wake nobody.
   maintenance?: { until: string; reason?: string; set_by?: string; set_at?: string };
-  // Puste wartosci oznaczaja stan nieustalony, nie zero.
+  // Empty values mean an undetermined state, not zero.
   reboot_required: boolean | null;
   failed_units: number | null;
   pending_updates: number | null;
   pending_security_updates: number | null;
   current_inventory_revision?: string;
   package_database_broken: boolean;
-  // Adres zarzadzania i jego pochodzenie. Brak wartosci oznacza adres
-  // nieustalony i musi byc pokazany jako nieustalony.
+  // The management address and its origin. A missing value means an
+  // undetermined address and must be shown as undetermined.
   management_address?: string;
   management_address_source?: "session" | "agent" | "manual";
   management_address_observed_at?: string;
@@ -93,8 +96,9 @@ export type Job = {
   payload: unknown;
   payload_hash: string;
   requires_approval: boolean;
-  // Operacja niszczaca wymaga zgody dwoch osob, wiec sama flaga nie
-  // wystarczy: liczy sie, ile zgod juz jest i ile trzeba.
+  // A destructive operation requires two people's consent, so the flag
+  // alone is not enough: what counts is how many approvals there are and
+  // how many are needed.
   required_approvals: number;
   collected_approvals: number;
   created_by: string;
@@ -143,8 +147,8 @@ export type Campaign = {
   failure_threshold_absolute: number;
   reboot_policy: string;
   requires_approval: boolean;
-  // Odcisk tego, co zatwierdzajacy widzi: operacja, payload, lista hostow
-  // i polityka rozwijania. Zgoda musi go podac.
+  // The fingerprint of what the approver sees: the operation, the payload,
+  // the host list and the rollout policy. The consent must give it.
   approval_fingerprint: string;
   created_by: string;
   approved_by?: string;
@@ -154,14 +158,14 @@ export type Campaign = {
 };
 
 /**
- * Jeden wpis trwalego przebiegu kampanii.
+ * One entry of the durable campaign timeline.
  *
- * Tresc zalezy od rodzaju zdarzenia, wiec jest workiem pol, a nie sztywnym
- * ksztaltem: zdarzenie celu niesie host i fale, zdarzenie kampanii - powod
- * wstrzymania. Udawanie jednego ksztaltu zmuszaloby do wypelniania pol,
- * ktorych dane zdarzenie nie ma.
+ * The content depends on the event kind, so it is a bag of fields rather
+ * than a rigid shape: a target event carries the host and the wave, a
+ * campaign event - the pause reason. Pretending one shape would force
+ * filling in fields the given event does not have.
  */
-export type WpisPrzebiegu = {
+export type TimelineEntry = {
   id: number;
   aggregate_type: string;
   event_type: string;
@@ -183,12 +187,12 @@ export type CampaignTarget = {
   state: string;
   error_code?: string;
   message?: string;
-  // Kampania zaklada hostowi kolejno kilka operacji, wiec postep trzeba
-  // wiazac z operacja, a nie z samym hostem.
+  // A campaign creates several operations for a host one after another, so
+  // the progress has to be bound to the operation, not to the host alone.
   job_id?: string;
   reboot_job_id?: string;
   health_job_id?: string;
-  // Operacja planujaca: jej wynik jest planem, na ktory operator sie zgadza.
+  // The planning operation: its result is the plan the operator consents to.
   plan_job_id?: string;
 };
 
@@ -217,7 +221,7 @@ export type Whoami = {
   kind: string;
   roles: string[];
   bindings: { role: string; scope: { site: string; environment: string } }[];
-  /** Uprawnienia w dowolnym zakresie; interfejs ukrywa nimi sekcje bez pokrycia. */
+  /** The permissions in any scope; the interface hides unbacked sections with them. */
   permissions: string[];
 };
 
@@ -264,9 +268,9 @@ export type InventoryRevision = {
 };
 
 /**
- * Konto widziane na hoscie. Wartosc null oznacza stan nieustalony i musi byc
- * pokazana jako nieznana, a nie jako "nie" - inaczej panel twierdzilby, ze
- * konto ma otwarty dostep, choc tego nie sprawdzil.
+ * An account seen on the host. A null value means an undetermined state and
+ * must be shown as unknown, not as "no" - otherwise the panel would claim
+ * the account has open access although it did not check.
  */
 export type LocalAccount = {
   name: string;
@@ -289,7 +293,7 @@ export type Principal = {
   subject: string;
   display_name?: string;
   kind: string;
-  /** Moze nie przyjsc: tozsamosc bez wlasnych przypisan ma role z mapowan grup. */
+  /** May be absent: an identity without its own bindings has roles from the group mappings. */
   bindings?: { role: string; scope: { site: string; environment: string } }[];
 };
 
@@ -305,9 +309,9 @@ export type GroupMapping = {
 };
 
 /**
- * CA floty. Stan "pending" znaczy, ze CA jest juz uznawane i rozsylane, ale
- * jeszcze nie podpisuje - przekazanie mu podpisywania wymaga, zeby cala flota
- * zdazyla je poznac.
+ * A fleet CA. The "pending" state means the CA is already recognised and
+ * distributed, but does not sign yet - handing it the signing requires the
+ * whole fleet to have learnt it.
  */
 export type Authority = {
   subject: string;

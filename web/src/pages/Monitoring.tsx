@@ -1,9 +1,10 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Blad, Czas, Pusto } from "../components/ui";
+import { ErrorBox, Time, Empty } from "../components/ui";
+import { useT } from "../i18n";
 
-type Zrodlo = {
+type Source = {
   name: string;
   configured: boolean;
   healthy: boolean;
@@ -12,7 +13,7 @@ type Zrodlo = {
   latency_millis?: number;
 };
 
-type Pozycja = {
+type Item = {
   host_id?: string;
   hostname?: string;
   alert: {
@@ -24,9 +25,9 @@ type Pozycja = {
   };
 };
 
-type Widok = {
-  sources: Zrodlo[];
-  items: Pozycja[];
+type View = {
+  sources: Source[];
+  items: Item[];
   hosts_visible?: number;
   alerts_outside_fleet?: number;
   host_label?: string;
@@ -34,88 +35,87 @@ type Widok = {
 };
 
 /**
- * Alerty floty.
+ * Fleet alerts.
  *
- * Panel nie ma wlasnych regul alertowych: pokazuje alerty systemu, ktory je
- * generuje, i doklada do nich to, czego ten system nie wie - ktory host
- * z floty to jest i czy wolno go temu operatorowi pokazac.
+ * The panel has no alert rules of its own: it shows the alerts of the system
+ * that raises them and adds what that system does not know - which fleet
+ * host this is and whether this operator may be shown it.
  */
-export function MonitoringFloty() {
+export function FleetMonitoring() {
+  const t = useT();
   const { data, error } = useQuery({
     queryKey: ["monitoring", "fleet"],
-    queryFn: () => api.get<Widok>("/api/v1/monitoring"),
+    queryFn: () => api.get<View>("/api/v1/monitoring"),
     refetchInterval: 30000,
   });
 
-  if (error) return <Blad error={error} />;
-  if (!data) return <Pusto>Reading alerts…</Pusto>;
+  if (error) return <ErrorBox error={error} />;
+  if (!data) return <Empty>{t("Reading alerts…")}</Empty>;
 
   return (
     <>
-      <h1>Monitoring</h1>
-      <p className="podtytul">
-        Alerts from the system that raises them, mapped onto the fleet by the{" "}
-        <code>{data.host_label ?? "instance"}</code> label. A failing integration
-        does not block anything here — it just says so.
+      <h1>{t("Monitoring")}</h1>
+      <p className="subtitle">
+        {t("Alerts from the system that raises them, mapped onto the fleet by the {label} label. A failing integration does not block anything here — it just says so.", { label: data.host_label ?? "instance" })}
       </p>
 
-      <div className="filtry">
-        {data.sources.map((zrodlo) => (
+      <div className="filters">
+        {data.sources.map((source) => (
           <span
-            key={zrodlo.name}
-            className={`znacznik ${!zrodlo.configured ? "nieznany" : zrodlo.healthy ? "ok" : "blad"}`}
-            title={zrodlo.reason || zrodlo.url}
+            key={source.name}
+            className={`badge ${!source.configured ? "unknown" : source.healthy ? "ok" : "error"}`}
+            title={source.reason || source.url}
           >
-            {zrodlo.name}
-            {!zrodlo.configured
-              ? " · not configured"
-              : zrodlo.healthy
-                ? ` · ${zrodlo.latency_millis ?? "?"} ms`
-                : " · not answering"}
+            {source.name}
+            {!source.configured
+              ? ` · ${t("not configured")}`
+              : source.healthy
+                ? ` · ${source.latency_millis ?? "?"} ms`
+                : ` · ${t("not answering")}`}
           </span>
         ))}
         {data.hosts_visible !== undefined && (
-          <span className="zrodlo">{data.hosts_visible} hosts visible</span>
+          <span className="source">{t("{n} hosts visible", { n: data.hosts_visible })}</span>
         )}
         {!!data.alerts_outside_fleet && (
-          <span className="zrodlo">
-            {data.alerts_outside_fleet} alerts from outside this fleet, not shown
+          <span className="source">
+            {t("{n} alerts from outside this fleet, not shown", { n: data.alerts_outside_fleet })}
           </span>
         )}
       </div>
 
       {data.alerts_unavailable_reason ? (
-        <p className="ostrzezenie"><span>{data.alerts_unavailable_reason}</span></p>
+        <p className="warning"><span>{data.alerts_unavailable_reason}</span></p>
       ) : !data.items.length ? (
-        <Pusto>Nothing is firing on the hosts you can see.</Pusto>
+        <Empty>{t("Nothing is firing on the hosts you can see.")}</Empty>
       ) : (
         <table>
           <thead>
-            <tr><th>Severity</th><th>Alert</th><th>Host</th><th>Since</th><th>Summary</th></tr>
+            <tr><th>{t("Severity")}</th><th>{t("Alert")}</th><th>{t("Host")}</th><th>{t("Since")}</th><th>{t("Summary")}</th></tr>
           </thead>
           <tbody>
-            {data.items.map((pozycja, indeks) => (
-              <tr key={`${pozycja.host_id}-${pozycja.alert.name}-${indeks}`}>
+            {data.items.map((item, index) => (
+              <tr key={`${item.host_id}-${item.alert.name}-${index}`}>
                 <td>
                   <span
-                    className={`znacznik ${pozycja.alert.severity === "critical" ? "blad" : pozycja.alert.severity === "warning" ? "uwaga" : ""}`}
+                    className={`badge ${item.alert.severity === "critical" ? "error" : item.alert.severity === "warning" ? "warn" : ""}`}
                   >
-                    {pozycja.alert.severity || "unknown"}
+                    {item.alert.severity || t("unknown")}
                   </span>
-                  {pozycja.alert.silenced_by?.length ? (
-                    <div className="zrodlo">silenced</div>
+                  {item.alert.silenced_by?.length ? (
+                    <div className="source">{t("silenced")}</div>
                   ) : null}
                 </td>
-                <td>{pozycja.alert.name}</td>
+                <td>{item.alert.name}</td>
                 <td>
-                  {pozycja.host_id ? (
-                    <Link to={`/hosts/${pozycja.host_id}/monitoring`}>{pozycja.hostname}</Link>
+                  {item.host_id ? (
+                    <Link to={`/hosts/${item.host_id}/monitoring`}>{item.hostname}</Link>
                   ) : (
-                    <span className="znacznik nieznany">outside the fleet</span>
+                    <span className="badge unknown">{t("outside the fleet")}</span>
                   )}
                 </td>
-                <td><Czas wartosc={pozycja.alert.starts_at} /></td>
-                <td className="zrodlo">{pozycja.alert.summary}</td>
+                <td><Time value={item.alert.starts_at} /></td>
+                <td className="source">{item.alert.summary}</td>
               </tr>
             ))}
           </tbody>

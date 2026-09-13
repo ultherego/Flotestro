@@ -1,105 +1,112 @@
-/* Panel administracyjny: gestosc informacji wazniejsza od ozdob. */
+/* An administration panel: information density matters more than ornament. */
 :root {
-  --tlo: #0f1115;
-  --tlo-panel: #171a21;
-  --tlo-hover: #1e222b;
-  --obramowanie: #262b36;
-  --tekst: #e6e8ec;
-  --tekst-slaby: #949aa6;
-  --akcent: #4f8cff;
+  --bg: #0f1115;
+  --bg-panel: #171a21;
+  --bg-hover: #1e222b;
+  --border: #262b36;
+  --text: #e6e8ec;
+  --text-muted: #949aa6;
+  --accent: #4f8cff;
   --ok: #3fb950;
-  --uwaga: #d29922;
-  --blad: #f85149;
-  --nieznane: #6e7681;
+  --warn: #d29922;
+  --error: #f85149;
+  --unknown: #6e7681;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  background: var(--tlo);
-  color: var(--tekst);
+  background: var(--bg);
+  color: var(--text);
   font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-a { color: var(--akcent); text-decoration: none; }
+a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.uklad { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
 
-.nawigacja {
-  background: var(--tlo-panel);
-  border-right: 1px solid var(--obramowanie);
+.navigation {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.nawigacja .marka { font-weight: 600; font-size: 16px; padding: 8px; margin-bottom: 12px; }
-.nawigacja a {
-  color: var(--tekst-slaby);
+.navigation .brand { font-weight: 600; font-size: 16px; padding: 8px; margin-bottom: 12px; }
+.navigation a {
+  color: var(--text-muted);
   padding: 8px 10px;
   border-radius: 6px;
   display: block;
 }
-.nawigacja a:hover { background: var(--tlo-hover); color: var(--tekst); text-decoration: none; }
-.nawigacja a.aktywny { background: var(--tlo-hover); color: var(--tekst); }
-.nawigacja .stopka { margin-top: auto; font-size: 12px; color: var(--tekst-slaby); padding: 8px; }
+.navigation a:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.navigation a.active { background: var(--bg-hover); color: var(--text); }
+.navigation .footer { margin-top: auto; font-size: 12px; color: var(--text-muted); padding: 8px; }
+/* The language switch: two small buttons in the navigation footer. */
+.language-switch { display: flex; gap: 4px; margin-bottom: 8px; }
+.language-switch button {
+  padding: 2px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.language-switch button.active { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
 
-.tresc { padding: 24px 28px; overflow-x: auto; }
+.content { padding: 24px 28px; overflow-x: auto; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 24px 0 8px; }
-.podtytul { color: var(--tekst-slaby); margin: 0 0 20px; font-size: 13px; }
+.subtitle { color: var(--text-muted); margin: 0 0 20px; font-size: 13px; }
 
-.kafelki { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-.kafelek {
-  background: var(--tlo-panel);
-  border: 1px solid var(--obramowanie);
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.tile {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 16px;
 }
-.kafelek .etykieta { color: var(--tekst-slaby); font-size: 12px; }
-.kafelek .wartosc { font-size: 26px; font-weight: 600; margin-top: 4px; }
-.kafelek.uwaga .wartosc { color: var(--uwaga); }
-.kafelek.blad .wartosc { color: var(--blad); }
+.tile .label { color: var(--text-muted); font-size: 12px; }
+.tile .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+.tile.warn .value { color: var(--warn); }
+.tile.error .value { color: var(--error); }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th {
   text-align: left;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   font-weight: 500;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--obramowanie);
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
-td { padding: 8px 10px; border-bottom: 1px solid var(--obramowanie); }
-tbody tr:hover { background: var(--tlo-hover); }
+td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+tbody tr:hover { background: var(--bg-hover); }
 
-.znacznik {
+.badge {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 999px;
   font-size: 11px;
-  border: 1px solid var(--obramowanie);
-  color: var(--tekst-slaby);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
   white-space: nowrap;
 }
-.znacznik.ok { color: var(--ok); border-color: #1f4d2a; }
-.znacznik.uwaga { color: var(--uwaga); border-color: #55430f; }
-.znacznik.blad { color: var(--blad); border-color: #5c1f1c; }
-.znacznik.nieznany { color: var(--nieznane); }
+.badge.ok { color: var(--ok); border-color: #1f4d2a; }
+.badge.warn { color: var(--warn); border-color: #55430f; }
+.badge.error { color: var(--error); border-color: #5c1f1c; }
+.badge.unknown { color: var(--unknown); }
 
-.filtry { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 input, select, textarea {
-  background: var(--tlo-panel);
-  border: 1px solid var(--obramowanie);
-  color: var(--tekst);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: 6px;
   padding: 6px 10px;
   font: inherit;
 }
 button {
-  background: var(--akcent);
+  background: var(--accent);
   border: 1px solid transparent;
   color: #fff;
   border-radius: 6px;
@@ -107,28 +114,28 @@ button {
   font: inherit;
   cursor: pointer;
 }
-button.wtorny { background: transparent; border-color: var(--obramowanie); color: var(--tekst); }
+button.secondary { background: transparent; border-color: var(--border); color: var(--text); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.zakladki { display: flex; gap: 4px; border-bottom: 1px solid var(--obramowanie); margin: 16px 0; }
-.zakladki button {
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 16px 0; }
+.tabs button {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   border-radius: 0;
   padding: 8px 12px;
 }
-.zakladki button.aktywna { color: var(--tekst); border-bottom-color: var(--akcent); }
-.zakladki button:disabled { opacity: 0.35; }
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs button:disabled { opacity: 0.35; }
 
-.pary { display: grid; grid-template-columns: 210px 1fr; gap: 6px 16px; font-size: 13px; }
-.pary dt { color: var(--tekst-slaby); }
-.pary dd { margin: 0; }
+.pairs { display: grid; grid-template-columns: 210px 1fr; gap: 6px 16px; font-size: 13px; }
+.pairs dt { color: var(--text-muted); }
+.pairs dd { margin: 0; }
 
 pre {
-  background: var(--tlo-panel);
-  border: 1px solid var(--obramowanie);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
@@ -136,179 +143,181 @@ pre {
   margin: 0;
 }
 
-.pusto { color: var(--tekst-slaby); padding: 24px 0; }
-.blad-strony { color: var(--blad); }
-.zrodlo { color: var(--tekst-slaby); font-size: 11px; }
-.ekran-logowania {
+.empty { color: var(--text-muted); padding: 24px 0; }
+.page-error { color: var(--error); }
+.source { color: var(--text-muted); font-size: 11px; }
+.login-screen {
   display: grid; place-items: center; min-height: 100vh; text-align: center;
 }
 
-/* Formularze i operacje na kontach lokalnych. */
-.przelacznik {
+/* Forms and operations on local accounts. */
+.toggle {
   display: inline-flex; align-items: center; gap: 8px;
-  color: var(--tekst-slaby); font-size: 13px; margin-bottom: 12px;
+  color: var(--text-muted); font-size: 13px; margin-bottom: 12px;
 }
-.przelacznik input { width: auto; }
-.operacje { display: flex; gap: 8px; flex-wrap: wrap; }
-.operacje button { background: transparent; border-color: var(--obramowanie); color: var(--tekst); }
-.operacje button:hover:not(:disabled) { background: var(--tlo-hover); }
-.formularz {
+.toggle input { width: auto; }
+.operations { display: flex; gap: 8px; flex-wrap: wrap; }
+.operations button { background: transparent; border-color: var(--border); color: var(--text); }
+.operations button:hover:not(:disabled) { background: var(--bg-hover); }
+.form {
   display: flex; flex-direction: column; gap: 10px;
-  border: 1px solid var(--obramowanie); border-radius: 8px;
-  padding: 16px; background: var(--tlo-panel); max-width: 640px;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px; background: var(--bg-panel); max-width: 640px;
 }
-.formularz h2 { margin: 0; }
-.formularz label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tekst-slaby); }
-.formularz textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+.form h2 { margin: 0; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.form textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
 
-/* Ekran instalacji hosta: dwie kolumny pol i lista krokow z poleceniami.
-   Polecenia stoja w bloku monospace, zeby dalo sie je przepisac bez pomylki
-   - i zeby bylo widac, ze token nie jest ich czescia. */
-.naglowek-z-akcja { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.naglowek-z-akcja h1 { margin: 0; }
-a.przycisk {
-  border: 1px solid var(--obramowanie); border-radius: 6px;
-  padding: 6px 12px; font-size: 13px; color: var(--tekst); text-decoration: none;
+/* The host installation screen: two columns of fields and a list of steps
+   with commands. The commands stand in a monospace block so they can be
+   copied without a mistake - and so it is visible that the token is not
+   part of them. */
+.header-with-action { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.header-with-action h1 { margin: 0; }
+a.button {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; color: var(--text); text-decoration: none;
 }
-a.przycisk:hover { background: var(--tlo-hover); }
-.siatka-dwie { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.kroki { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
-.kroki pre {
+a.button:hover { background: var(--bg-hover); }
+.grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.steps { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.steps pre {
   margin: 6px 0 0; padding: 8px 10px; overflow-x: auto;
-  border: 1px solid var(--obramowanie); border-radius: 6px;
-  background: var(--tlo); font-size: 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
-.operacje button.drugorzedny { color: var(--tekst-slaby); }
+.operations button.secondary { color: var(--text-muted); }
 
-/* Komunikat wymagajacy decyzji uzytkownika, np. ponownego uwierzytelnienia. */
-.ostrzezenie {
+/* A message that needs the user's decision, e.g. re-authentication. */
+.warning {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  border: 1px solid var(--uwaga); border-radius: 8px;
+  border: 1px solid var(--warn); border-radius: 8px;
   padding: 12px 16px; margin-bottom: 16px;
-  background: var(--tlo-panel); font-size: 13px;
+  background: var(--bg-panel); font-size: 13px;
 }
 
-/* Odnosniki w stopce nawigacji ida jeden pod drugim. */
-.nawigacja .stopka a { display: block; margin-top: 6px; color: var(--akcent); }
+/* The links in the navigation footer go one under another. */
+.navigation .footer a { display: block; margin-top: 6px; color: var(--accent); }
 
-/* Staly pasek kontekstu hosta. Cel operacji ma byc widoczny bez przewijania
-   na kazdej zakladce, dlatego pasek przykleja sie do gory tresci. */
-.pasek-hosta {
+/* The fixed host context bar. The target of an operation is to be visible
+   without scrolling on every tab, so the bar sticks to the top of the
+   content. */
+.host-bar {
   position: sticky;
   top: 0;
   z-index: 5;
   margin: -24px -28px 0;
   padding: 12px 28px;
-  background: var(--tlo-panel);
-  border-bottom: 1px solid var(--obramowanie);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 20px;
 }
-.pasek-hosta-tozsamosc {
+.host-bar-identity {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1 1 auto;
   min-width: 0;
 }
-.pasek-hosta-tozsamosc .nazwa { font-size: 16px; font-weight: 600; }
-.pasek-hosta-tozsamosc .adres {
+.host-bar-identity .name { font-size: 16px; font-weight: 600; }
+.host-bar-identity .address {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 13px;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
 }
-/* Adres bez pochodzenia nie mowi, czy panel go widzial, czy host go zglosil. */
-.pasek-hosta-tozsamosc .zrodlo-adresu {
+/* An address without its origin does not say whether the panel saw it or the host reported it. */
+.host-bar-identity .address-source {
   font-family: inherit;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--nieznane);
+  color: var(--unknown);
 }
-.pasek-hosta-fakty {
+.host-bar-facts {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   font-size: 12px;
 }
 /*
- * Odswiezenie inwentarza stoi wsrod faktow o hoscie, bo dotyczy ich wszystkich:
- * to one sa obrazem sprzed ostatniego cyklu, ktory operator wlasnie chce
- * zastapic stanem z tej chwili.
+ * The inventory refresh stands among the host facts because it concerns
+ * all of them: they are the picture from before the last cycle, which the
+ * operator wants to replace with the state of this moment.
  */
-.odswiezenie-inwentarza {
+.inventory-refresh {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
-.odswiezenie-inwentarza button {
+.inventory-refresh button {
   background: none;
   border: none;
   padding: 0;
   font: inherit;
-  color: var(--akcent);
+  color: var(--accent);
   cursor: pointer;
   text-decoration: underline;
 }
-.odswiezenie-inwentarza button:disabled {
-  color: var(--nieznane);
+.inventory-refresh button:disabled {
+  color: var(--unknown);
   cursor: default;
   text-decoration: none;
 }
-.odswiezenie-inwentarza .komunikat { color: var(--tekst-slaby); }
+.inventory-refresh .message { color: var(--text-muted); }
 
-.przelacznik-hosta {
+.host-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   font-size: 12px;
 }
-.przelacznik-hosta select { font-size: 13px; padding: 4px 8px; }
+.host-toggle select { font-size: 13px; padding: 4px 8px; }
 
-/* Zakladki hosta sa odnosnikami, bo kazda ma wlasny adres. */
-.zakladki a {
-  color: var(--tekst-slaby);
+/* The host tabs are links, because each has an address of its own. */
+.tabs a {
+  color: var(--text-muted);
   padding: 8px 12px;
   border-bottom: 2px solid transparent;
 }
-.zakladki a:hover { color: var(--tekst); text-decoration: none; }
-.zakladki a.aktywna { color: var(--tekst); border-bottom-color: var(--akcent); }
-/* Modul bez pokrycia na hoscie zostaje widoczny wraz z powodem: zniknieta
-   zakladka wygladalaby jak brak funkcji w produkcie. */
-.zakladki a.niedostepna { opacity: 0.4; }
-/* Adres na liscie floty czyta sie kolumnowo, wiec idzie czcionka o stalej szerokosci. */
-.adres-listy { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+.tabs a:hover { color: var(--text); text-decoration: none; }
+.tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+/* A module without coverage on the host stays visible together with the
+   reason: a vanished tab would look like a missing product feature. */
+.tabs a.unavailable { opacity: 0.4; }
+/* An address on the fleet list is read column-wise, hence a fixed-width font. */
+.list-address { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
 
-/* Pasek postepu trwajacej operacji. */
-.postep { display: flex; align-items: center; gap: 10px; min-width: 260px; }
-.postep-tor {
+/* The progress bar of a running operation. */
+.progress { display: flex; align-items: center; gap: 10px; min-width: 260px; }
+.progress-track {
   flex: 1 1 auto;
   height: 6px;
-  background: var(--tlo-hover);
+  background: var(--bg-hover);
   border-radius: 999px;
   overflow: hidden;
 }
-.postep-wypelnienie {
+.progress-fill {
   display: block;
   height: 100%;
-  background: var(--akcent);
+  background: var(--accent);
   transition: width 0.3s ease;
 }
-/* Postep nieustalony nie moze wygladac jak zero ani jak komplet. */
-.postep-nieznany {
+/* Undetermined progress must look neither like zero nor like complete. */
+.progress-unknown {
   display: block;
   height: 100%;
   width: 30%;
-  background: var(--nieznane);
+  background: var(--unknown);
   animation: postep-wedrowka 1.4s ease-in-out infinite;
 }
 @keyframes postep-wedrowka {
@@ -316,51 +325,52 @@ a.przycisk:hover { background: var(--tlo-hover); }
   100% { transform: translateX(333%); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .postep-nieznany { animation: none; width: 100%; opacity: 0.4; }
+  .progress-unknown { animation: none; width: 100%; opacity: 0.4; }
 }
-.postep-opis {
-  color: var(--tekst-slaby);
+.progress-caption {
+  color: var(--text-muted);
   font-size: 11px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
 /*
- * Bulk Workspace. ScopeBar trzyma nazwe, operacje i liczbe celow przez caly
- * kreator: liczba hostow schowana dwa kroki wczesniej znaczy tyle co jej brak.
+ * Bulk Workspace. The ScopeBar holds the name, the operation and the target
+ * count through the whole wizard: a host count hidden two steps earlier is
+ * worth as much as its absence.
  */
-.pasek-zakresu {
+.scope-bar {
   position: sticky;
   top: 0;
   z-index: 5;
   margin: 0 -28px 16px;
   padding: 12px 28px;
-  background: var(--tlo-panel);
-  border-bottom: 1px solid var(--obramowanie);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 24px;
 }
-.pasek-zakresu .tozsamosc { display: flex; align-items: baseline; gap: 10px; }
-.pasek-zakresu .tozsamosc .nazwa { font-size: 16px; font-weight: 600; }
-.pasek-zakresu .tozsamosc .akcja {
+.scope-bar .identity { display: flex; align-items: baseline; gap: 10px; }
+.scope-bar .identity .name { font-size: 16px; font-weight: 600; }
+.scope-bar .identity .action {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 12px;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
 }
-.pasek-zakresu .fakty {
+.scope-bar .facts {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   font-size: 12px;
   align-items: center;
 }
 
-/* Kroki kreatora. Krok zamkniety mowi, czego brakuje - wygaszenie bez powodu
-   wyglada jak usterka interfejsu, a nie jak bramka przejscia. */
-.kroki-bulk {
+/* The wizard steps. A closed step says what is missing - greying out
+   without a reason looks like an interface defect, not like a gate. */
+.bulk-steps {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
@@ -368,24 +378,24 @@ a.przycisk:hover { background: var(--tlo-hover); }
   margin: 0 0 20px;
   padding: 0;
 }
-.kroki-bulk .krok {
+.bulk-steps .step {
   display: flex;
   align-items: center;
   gap: 8px;
   background: none;
-  border: 1px solid var(--obramowanie);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 12px;
   font: inherit;
-  color: var(--tekst);
+  color: var(--text);
   cursor: pointer;
   text-align: left;
 }
-.kroki-bulk .krok.aktywny { border-color: var(--akcent); color: var(--akcent); }
-.kroki-bulk .krok:disabled { cursor: not-allowed; color: var(--tekst-slaby); }
-.kroki-bulk .krok .numer {
+.bulk-steps .step.active { border-color: var(--accent); color: var(--accent); }
+.bulk-steps .step:disabled { cursor: not-allowed; color: var(--text-muted); }
+.bulk-steps .step .number {
   font-variant-numeric: tabular-nums;
-  color: var(--tekst-slaby);
+  color: var(--text-muted);
   font-size: 12px;
 }
-.kroki-bulk .krok .powod { font-size: 11px; color: var(--nieznane); }
+.bulk-steps .step .reason { font-size: 11px; color: var(--unknown); }

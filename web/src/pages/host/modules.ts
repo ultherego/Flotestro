@@ -1,99 +1,101 @@
 import type { Capability, Host } from "../../lib/types";
-import type { Capabilities as ZdolnosciInstalacji } from "../../lib/capabilities";
+import type { Capabilities as InstallationCapabilities } from "../../lib/capabilities";
 
 /**
- * Rejestr modulow hosta. Jedno zrodlo prawdy dla zakladek, tras i przelacznika
- * hostow: gdyby kazde z nich liczylo dostepnosc osobno, zakladka mogłaby
- * prowadzic do trasy, ktorej nie ma, albo odwrotnie.
+ * The host module registry. One source of truth for the tabs, the routes
+ * and the host switch: if each of them computed availability separately, a
+ * tab could lead to a route that does not exist, or the other way round.
  */
-export type Modul = {
-  /** Segment sciezki: /hosts/:id/<segment>. Czesc kontraktu adresu. */
+export type Module = {
+  /** The path segment: /hosts/:id/<segment>. Part of the address contract. */
   segment: string;
-  nazwa: string;
-  /** Powod niedostepnosci albo pusty, gdy modul dziala na tym hoscie. */
-  powod: (host: Host, instalacja: ZdolnosciInstalacji) => string;
+  /** The English tab name; it goes through the translation catalogue. */
+  name: string;
+  /** The unavailability reason, or empty when the module works on this host. */
+  reason: (host: Host, installation: InstallationCapabilities) => string;
   /**
-   * Modul inwentarza, z ktorego zakladka zyje. Brak znaczy, ze zakladka nie
-   * czyta inwentarza (Jobs, Audit) albo czyta go w calosci (Overview) - i ze
-   * odswiezenie z tej zakladki obejmuje caly host.
+   * The inventory module the tab lives off. None means the tab does not read
+   * the inventory (Jobs, Audit) or reads it whole (Overview) - and that a
+   * refresh from that tab covers the whole host.
    */
-  inwentarz?: string;
+  inventory?: string;
 };
 
-/** Modul wylaczony w calej instalacji nie zostawia martwej trasy. */
-export type ModulWidoczny = Modul & { dostepny: boolean; powod_braku: string };
+/** A module disabled in the whole installation leaves no dead route. */
+export type VisibleModule = Module & { available: boolean; missingReason: string };
 
-export function zdolnosc(host: Host, nazwa: string): Capability | undefined {
-  return (host.capabilities ?? []).find((pozycja) => pozycja.name === nazwa);
+export function capability(host: Host, name: string): Capability | undefined {
+  return (host.capabilities ?? []).find((item) => item.name === name);
 }
 
 /**
- * Modul dziala, gdy dziala ktorykolwiek z adapterow, ktore go obsluguja.
- * Gdy nie dziala zaden, operator dostaje powody wszystkich - bo kazdy z nich
- * jest osobna odpowiedzia na pytanie "dlaczego tego tu nie ma".
+ * A module works when any of the adapters serving it works. When none does,
+ * the operator gets the reasons of all of them - because each is a separate
+ * answer to the question "why is this not here".
  */
-function wymaga(...nazwy: string[]) {
+function requires(...names: string[]) {
   return (host: Host): string => {
-    const adaptery = nazwy.map((nazwa) => zdolnosc(host, nazwa));
-    if (adaptery.some((adapter) => adapter?.available)) return "";
-    const powody = adaptery
-      .map((adapter, i) => adapter?.reason || `the host does not report ${nazwy[i]}`)
-      .filter((powod, i, lista) => lista.indexOf(powod) === i);
-    return powody.join("; ");
+    const adapters = names.map((name) => capability(host, name));
+    if (adapters.some((adapter) => adapter?.available)) return "";
+    const reasons = adapters
+      .map((adapter, i) => adapter?.reason || `the host does not report ${names[i]}`)
+      .filter((reason, i, list) => list.indexOf(reason) === i);
+    return reasons.join("; ");
   };
 }
 
-const MODULY: Modul[] = [
-  { segment: "overview", nazwa: "Overview", powod: () => "" },
-  { segment: "packages", nazwa: "Packages", powod: wymaga("packages.apt", "packages.dnf"), inwentarz: "packages" },
-  { segment: "services", nazwa: "Services", powod: wymaga("systemd"), inwentarz: "services" },
-  { segment: "processes", nazwa: "Processes", powod: () => "" },
-  { segment: "containers", nazwa: "Containers", powod: wymaga("docker"), inwentarz: "containers" },
-  { segment: "compose", nazwa: "Compose", powod: wymaga("docker.compose"), inwentarz: "containers" },
-  { segment: "logs", nazwa: "Logs", powod: wymaga("journald") },
-  { segment: "schedules", nazwa: "Schedules", powod: wymaga("schedules"), inwentarz: "schedules" },
-  { segment: "network", nazwa: "Network", powod: wymaga("network"), inwentarz: "network" },
-  { segment: "dns", nazwa: "DNS", powod: wymaga("dns"), inwentarz: "dns" },
-  { segment: "firewall", nazwa: "Firewall", powod: wymaga("firewall"), inwentarz: "firewall" },
-  { segment: "storage", nazwa: "Storage", powod: wymaga("storage"), inwentarz: "storage" },
-  { segment: "ssh", nazwa: "SSH", powod: wymaga("sshd"), inwentarz: "ssh" },
-  { segment: "kernel", nazwa: "Kernel", powod: wymaga("kernel"), inwentarz: "kernel" },
-  { segment: "time", nazwa: "Time", powod: wymaga("time"), inwentarz: "time" },
-  { segment: "power", nazwa: "Power", powod: wymaga("systemd"), inwentarz: "power" },
-  { segment: "security", nazwa: "Security", powod: wymaga("security"), inwentarz: "security" },
-  { segment: "certificates", nazwa: "Certificates", powod: wymaga("certificates"), inwentarz: "certificates" },
-  { segment: "backups", nazwa: "Backups", powod: wymaga("backup"), inwentarz: "backups" },
-  { segment: "monitoring", nazwa: "Monitoring", powod: wymaga("monitoring") },
+const MODULES: Module[] = [
+  { segment: "overview", name: "Overview", reason: () => "" },
+  { segment: "packages", name: "Packages", reason: requires("packages.apt", "packages.dnf"), inventory: "packages" },
+  { segment: "services", name: "Services", reason: requires("systemd"), inventory: "services" },
+  { segment: "processes", name: "Processes", reason: () => "" },
+  { segment: "containers", name: "Containers", reason: requires("docker"), inventory: "containers" },
+  { segment: "compose", name: "Compose", reason: requires("docker.compose"), inventory: "containers" },
+  { segment: "logs", name: "Logs", reason: requires("journald") },
+  { segment: "schedules", name: "Schedules", reason: requires("schedules"), inventory: "schedules" },
+  { segment: "network", name: "Network", reason: requires("network"), inventory: "network" },
+  { segment: "dns", name: "DNS", reason: requires("dns"), inventory: "dns" },
+  { segment: "firewall", name: "Firewall", reason: requires("firewall"), inventory: "firewall" },
+  { segment: "storage", name: "Storage", reason: requires("storage"), inventory: "storage" },
+  { segment: "ssh", name: "SSH", reason: requires("sshd"), inventory: "ssh" },
+  { segment: "kernel", name: "Kernel", reason: requires("kernel"), inventory: "kernel" },
+  { segment: "time", name: "Time", reason: requires("time"), inventory: "time" },
+  { segment: "power", name: "Power", reason: requires("systemd"), inventory: "power" },
+  { segment: "security", name: "Security", reason: requires("security"), inventory: "security" },
+  { segment: "certificates", name: "Certificates", reason: requires("certificates"), inventory: "certificates" },
+  { segment: "backups", name: "Backups", reason: requires("backup"), inventory: "backups" },
+  { segment: "monitoring", name: "Monitoring", reason: requires("monitoring") },
   {
     segment: "vulnerabilities",
-    nazwa: "Vulnerabilities",
-    powod: wymaga("packages.apt", "packages.dnf"),
-    // Podatnosci panel liczy z listy pakietow, wiec swiezosc bierze sie stad.
-    inwentarz: "packages",
+    name: "Vulnerabilities",
+    reason: requires("packages.apt", "packages.dnf"),
+    // The panel computes vulnerabilities from the package list, so the
+    // freshness comes from there.
+    inventory: "packages",
   },
-  { segment: "files", nazwa: "Files", powod: wymaga("files.managed"), inwentarz: "files" },
+  { segment: "files", name: "Files", reason: requires("files.managed"), inventory: "files" },
   {
     segment: "accounts",
-    nazwa: "Accounts",
-    // Konta lokalne wylacza sie w calej instalacji, a nie na hoscie.
-    powod: (_host, instalacja) =>
-      instalacja.local_users ? "" : "the local accounts module is disabled in this installation",
-    inwentarz: "accounts",
+    name: "Accounts",
+    // Local accounts are disabled in the whole installation, not on a host.
+    reason: (_host, installation) =>
+      installation.local_users ? "" : "the local accounts module is disabled in this installation",
+    inventory: "accounts",
   },
-  { segment: "identity", nazwa: "Identity", powod: () => "", inwentarz: "identity" },
-  { segment: "jobs", nazwa: "Jobs", powod: () => "" },
-  { segment: "audit", nazwa: "Audit", powod: () => "" },
+  { segment: "identity", name: "Identity", reason: () => "", inventory: "identity" },
+  { segment: "jobs", name: "Jobs", reason: () => "" },
+  { segment: "audit", name: "Audit", reason: () => "" },
 ];
 
-export const MODUL_DOMYSLNY = "overview";
+export const DEFAULT_MODULE = "overview";
 
-export function moduly(host: Host, instalacja: ZdolnosciInstalacji): ModulWidoczny[] {
-  return MODULY.map((modul) => {
-    const powod = modul.powod(host, instalacja);
-    return { ...modul, dostepny: powod === "", powod_braku: powod };
+export function modules(host: Host, installation: InstallationCapabilities): VisibleModule[] {
+  return MODULES.map((module) => {
+    const reason = module.reason(host, installation);
+    return { ...module, available: reason === "", missingReason: reason };
   });
 }
 
-export function modul(segment: string): Modul | undefined {
-  return MODULY.find((pozycja) => pozycja.segment === segment);
+export function module(segment: string): Module | undefined {
+  return MODULES.find((item) => item.segment === segment);
 }

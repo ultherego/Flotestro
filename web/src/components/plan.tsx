@@ -1,15 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Attempt } from "../lib/types";
+import { useT } from "../i18n";
 
 /**
- * Plan per host: to, na co operator naprawde wyraza zgode.
+ * The per-host plan: what the operator really consents to.
  *
- * Zamowienie jest jedno, ale zmiana na kazdym hoscie inna: plik o innej
- * tresci, regula w innym ksztalcie, dysk pod ta sama sciezka z innym UUID.
- * Plan liczony na hoscie mowi, co sie tam stanie - albo dlaczego nie.
+ * The order is one, but the change on every host differs: a file with
+ * different content, a rule of a different shape, a disk under the same
+ * path with a different UUID. The plan computed on the host says what
+ * happens there - or why not.
  */
-type PlanHosta = {
+type HostPlan = {
   action?: string;
   changes?: string[];
   refusal?: string;
@@ -21,7 +23,7 @@ type PlanHosta = {
   plan_hash?: string;
 };
 
-const NAZWY_DZIALAN: Record<string, string> = {
+const ACTION_NAMES: Record<string, string> = {
   create: "will be created",
   update: "will change",
   no_change: "already in desired state",
@@ -29,40 +31,42 @@ const NAZWY_DZIALAN: Record<string, string> = {
   remove_absent: "already absent",
 };
 
-export function jestPlanemHosta(kind: string | undefined): boolean {
+export function isHostPlan(kind: string | undefined): boolean {
   return kind === "file_plan" || kind === "firewall_plan" || kind === "mount_plan" || kind === "network_plan" || kind === "dns_plan" || kind === "ssh_plan" || kind === "kernel_module_plan" || kind === "time_plan" || kind === "device_plan" || kind === "certificate_plan" || kind === "backup_plan" || kind === "trust_plan" || kind === "renewal_plan";
 }
 
-/** Streszczenie planu z wyniku typowanego operacji planujacej. */
-export function StreszczeniePlanu({ plan }: { plan: PlanHosta }) {
+/** The plan summary from the typed result of a planning operation. */
+export function PlanSummary({ plan }: { plan: HostPlan }) {
+  const t = useT();
   if (plan.refusal) {
-    return <span className="znacznik blad">refused: {plan.refusal}</span>;
+    return <span className="badge error">{t("refused: {reason}", { reason: plan.refusal })}</span>;
   }
   if (plan.validator_failed) {
     return (
-      <span className="znacznik blad">
-        validator failed{plan.validator_output ? `: ${plan.validator_output.slice(0, 200)}` : ""}
+      <span className="badge error">
+        {t("validator failed")}{plan.validator_output ? `: ${plan.validator_output.slice(0, 200)}` : ""}
       </span>
     );
   }
-  const czesci = [NAZWY_DZIALAN[plan.action ?? ""] ?? plan.action ?? "plan"];
-  if (plan.changes?.length) czesci.push(plan.changes.join(", "));
-  // Zrodlo rozwiazane do UUID jest tym, co pojedzie na host; sciezka
-  // z zamowienia zostaje tylko dla porownania.
+  const parts = [plan.action && ACTION_NAMES[plan.action] ? t(ACTION_NAMES[plan.action]) : plan.action ?? t("plan")];
+  if (plan.changes?.length) parts.push(plan.changes.join(", "));
+  // The source resolved to a UUID is what goes to the host; the path from
+  // the order stays only for comparison.
   if (plan.resolved_source && plan.resolved_source !== plan.requested_source) {
-    czesci.push(`${plan.requested_source} → ${plan.resolved_source}`);
+    parts.push(`${plan.requested_source} → ${plan.resolved_source}`);
   }
-  return <span>{czesci.join(" · ")}</span>;
+  return <span>{parts.join(" · ")}</span>;
 }
 
-/** Plan hosta odczytany z ostatniej proby operacji planujacej. */
-export function PlanZadania({ jobId }: { jobId: string }) {
+/** The host plan read from the last attempt of the planning operation. */
+export function JobPlan({ jobId }: { jobId: string }) {
+  const t = useT();
   const { data, error } = useQuery({
     queryKey: ["attempts", jobId],
     queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
   });
-  if (error) return <span className="zrodlo">plan unavailable</span>;
-  const proba = [...(data?.items ?? [])].reverse().find((pozycja) => jestPlanemHosta(pozycja.detail?.kind as string));
-  if (!proba) return <span className="zrodlo">—</span>;
-  return <StreszczeniePlanu plan={(proba.detail?.plan ?? {}) as PlanHosta} />;
+  if (error) return <span className="source">{t("plan unavailable")}</span>;
+  const attempt = [...(data?.items ?? [])].reverse().find((item) => isHostPlan(item.detail?.kind as string));
+  if (!attempt) return <span className="source">—</span>;
+  return <PlanSummary plan={(attempt.detail?.plan ?? {}) as HostPlan} />;
 }

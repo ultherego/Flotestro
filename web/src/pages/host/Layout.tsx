@@ -3,94 +3,98 @@ import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host } from "../../lib/types";
-import { Blad, Pusto } from "../../components/ui";
+import { ErrorBox, Empty } from "../../components/ui";
 import { useCapabilities } from "../../lib/capabilities";
-import { PasekKontekstu } from "./PasekKontekstu";
-import { moduly, MODUL_DOMYSLNY } from "./moduly";
-import { ODSTEP_ODSWIEZANIA } from "../../lib/strumien";
+import { ContextBar } from "./ContextBar";
+import { modules, DEFAULT_MODULE } from "./modules";
+import { REFRESH_INTERVAL } from "../../lib/stream";
+import { useT } from "../../i18n";
 
 /**
- * Host workspace. Aktywny modul jest segmentem adresu, a nie stanem
- * komponentu: dzieki temu dzialaja odswiezenie, historia przegladarki,
- * odnosnik bezposredni i otwarcie w nowej karcie.
+ * The host workspace. The active module is a segment of the address, not
+ * component state: thanks to that a refresh, the browser history, a direct
+ * link and opening in a new tab all work.
  */
-export function UkladHosta() {
+export function HostLayout() {
+  const t = useT();
   const { id = "" } = useParams();
   const location = useLocation();
-  const instalacja = useCapabilities();
+  const installation = useCapabilities();
 
   const host = useQuery({
     queryKey: ["host", id],
     queryFn: () => api.get<Host>(`/api/v1/hosts/${id}`),
-    // Pasek kontekstu niesie stan polaczenia i swiezosc danych, wiec musi
-    // sam sie odswiezac: nieaktualny stan celu jest gorszy niz jego brak.
-    refetchInterval: ODSTEP_ODSWIEZANIA,
+    // The context bar carries the connection state and the data freshness,
+    // so it must refresh itself: a stale target state is worse than none.
+    refetchInterval: REFRESH_INTERVAL,
   });
 
-  const dane = host.data;
-  const segment = location.pathname.split("/")[3] || MODUL_DOMYSLNY;
+  const data = host.data;
+  const segment = location.pathname.split("/")[3] || DEFAULT_MODULE;
 
-  // Tytul karty niesie cel operacji. Operator z kilkoma otwartymi kartami
-  // rozpoznaje maszyne po tytule, zanim na nia spojrzy.
+  // The tab title carries the operation target. An operator with several
+  // open tabs recognises the machine by the title before looking at it.
   useEffect(() => {
-    if (!dane) return;
-    const adres = dane.management_address ? ` ${dane.management_address}` : "";
-    document.title = `${dane.hostname}${adres} · ${segment} · Flotestro`;
+    if (!data) return;
+    const address = data.management_address ? ` ${data.management_address}` : "";
+    document.title = `${data.hostname}${address} · ${segment} · Flotestro`;
     return () => {
       document.title = "Flotestro";
     };
-  }, [dane, segment]);
+  }, [data, segment]);
 
-  if (host.error) return <Blad error={host.error} />;
-  if (!dane) return <Pusto>Loading…</Pusto>;
+  if (host.error) return <ErrorBox error={host.error} />;
+  if (!data) return <Empty>{t("Loading…")}</Empty>;
 
-  const lista = moduly(dane, instalacja);
-  const aktywny = lista.find((pozycja) => pozycja.segment === segment);
-  const odrzucony = location.state as { odrzucony?: string; powod?: string } | null;
+  const list = modules(data, installation);
+  const active = list.find((item) => item.segment === segment);
+  const rejected = location.state as { rejected?: string; reason?: string } | null;
 
   return (
     <>
-      <PasekKontekstu host={dane} segment={segment} instalacja={instalacja} />
+      <ContextBar host={data} segment={segment} installation={installation} />
 
-      <div className="zakladki">
-        {lista.map((pozycja) => (
+      <div className="tabs">
+        {list.map((item) => (
           <NavLink
-            key={pozycja.segment}
-            to={`/hosts/${dane.id}/${pozycja.segment}`}
+            key={item.segment}
+            to={`/hosts/${data.id}/${item.segment}`}
             className={({ isActive }) =>
-              [isActive ? "aktywna" : "", pozycja.dostepny ? "" : "niedostepna"].join(" ").trim()
+              [isActive ? "active" : "", item.available ? "" : "unavailable"].join(" ").trim()
             }
-            title={pozycja.dostepny ? undefined : pozycja.powod_braku}
+            title={item.available ? undefined : item.missingReason}
           >
-            {pozycja.nazwa}
+            {t(item.name)}
           </NavLink>
         ))}
       </div>
 
-      {/* Przelaczenie hosta, ktore zmienilo modul, mowi dlaczego. Bez tego
-          operator widzi inny ekran, niz otwieral, i nie wie, co sie stalo. */}
-      {odrzucony?.odrzucony && (
-        <p className="ostrzezenie">
+      {/* A host switch that changed the module says why. Without that the
+          operator sees a different screen than they opened and does not
+          know what happened. */}
+      {rejected?.rejected && (
+        <p className="warning">
           <span>
-            {odrzucony.odrzucony} is not available on {dane.hostname}: {odrzucony.powod}
+            {t("{module} is not available on {host}: {reason}", { module: t(rejected.rejected), host: data.hostname, reason: rejected.reason ?? "" })}
           </span>
         </p>
       )}
 
-      {/* Adres spoza rejestru modulow nie moze skonczyc sie pusta trescia:
-          operator ma zobaczyc, ze taki modul nie istnieje. */}
-      {!aktywny ? (
-        <Pusto>
-          There is no module named "{segment}". Pick one of the tabs above.
-        </Pusto>
-      ) : /* Modul bez pokrycia na tym hoscie zachowuje trase i podaje powod.
-             Zniknieta zakladka wygladalaby jak brak funkcji w produkcie. */
-      !aktywny.dostepny ? (
-        <Pusto>
-          {aktywny.nazwa} is not available on this host: {aktywny.powod_braku}.
-        </Pusto>
+      {/* An address outside the module registry must not end with empty
+          content: the operator is to see that no such module exists. */}
+      {!active ? (
+        <Empty>
+          {t("There is no module named \"{segment}\". Pick one of the tabs above.", { segment })}
+        </Empty>
+      ) : /* A module without backing on this host keeps its route and gives
+             the reason. A vanished tab would look like a missing feature in
+             the product. */
+      !active.available ? (
+        <Empty>
+          {t("{module} is not available on this host: {reason}.", { module: t(active.name), reason: active.missingReason })}
+        </Empty>
       ) : (
-        <Outlet context={{ host: dane }} />
+        <Outlet context={{ host: data }} />
       )}
     </>
   );

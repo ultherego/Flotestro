@@ -1,52 +1,54 @@
 import { useState } from "react";
 import type { Host } from "../../lib/types";
+import { useT } from "../../i18n";
 
 /**
- * Potwierdzenie operacji nieodwracalnej.
+ * The confirmation of an irreversible operation.
  *
- * Klikniecie nie jest wystarczajaca decyzja przy zmianie, ktorej nie da sie
- * cofnac: lista hostow bywa dluga i podobna, a okno potwierdzenia otwarte na
- * niewlasciwym wierszu wyglada tak samo jak na wlasciwym. Dlatego operator
- * przepisuje nazwe hosta i podaje powod - jedno chroni przed pomylka celu,
- * drugie zostaje w audycie.
+ * A click is not a sufficient decision for a change that cannot be undone:
+ * the host list tends to be long and alike, and a confirmation dialog opened
+ * on the wrong row looks the same as on the right one. That is why the
+ * operator types the hostname and gives a reason - one protects against a
+ * mistaken target, the other stays in the audit log.
  */
-export function PotwierdzenieCelu({
-  host, opis, etykieta, onPotwierdz, onAnuluj, pracuje,
+export function TargetConfirmation({
+  host, description, label, onConfirm, onCancel, busy,
 }: {
   host: Host;
-  opis: string;
-  etykieta: string;
-  onPotwierdz: (powod: string, potwierdzenie: string) => void;
-  onAnuluj: () => void;
-  pracuje: boolean;
+  description: string;
+  label: string;
+  onConfirm: (reason: string, confirmation: string) => void;
+  onCancel: () => void;
+  busy: boolean;
 }) {
-  const [powod, setPowod] = useState("");
-  const [potwierdzenie, setPotwierdzenie] = useState("");
-  const gotowe = powod.trim().length >= 8 && potwierdzenie === host.hostname;
+  const t = useT();
+  const [reason, setReason] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const ready = reason.trim().length >= 8 && confirmation === host.hostname;
 
   return (
-    <div className="formularz" style={{ marginTop: 16 }}>
-      <h2>{etykieta}</h2>
-      <p className="podtytul" style={{ margin: 0 }}>{opis}</p>
-      {/* Cel powtorzony w oknie: operator zatwierdza konkretna maszyne. */}
-      <p className="zrodlo" style={{ margin: 0 }}>
-        Target: {host.hostname}
-        {host.management_address ? ` · ${host.management_address}` : " · address unknown"}
+    <div className="form" style={{ marginTop: 16 }}>
+      <h2>{label}</h2>
+      <p className="subtitle" style={{ margin: 0 }}>{description}</p>
+      {/* The target repeated in the dialog: the operator approves a specific machine. */}
+      <p className="source" style={{ margin: 0 }}>
+        {t("Target: {host}", { host: host.hostname })}
+        {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}
       </p>
       <label>
-        Reason (at least 8 characters, kept in the audit trail)
-        <input value={powod} onChange={(e) => setPowod(e.target.value)} />
+        {t("Reason (at least 8 characters, kept in the audit trail)")}
+        <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
       <label>
-        Type the hostname to confirm: <code>{host.hostname}</code>
-        <input value={potwierdzenie} onChange={(e) => setPotwierdzenie(e.target.value)} />
+        {t("Type the hostname to confirm:")} <code>{host.hostname}</code>
+        <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
       </label>
-      <div className="operacje">
-        <button disabled={!gotowe || pracuje} onClick={() => onPotwierdz(powod, potwierdzenie)}>
-          {pracuje ? "Requesting…" : etykieta}
+      <div className="operations">
+        <button disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
+          {busy ? t("Requesting…") : label}
         </button>
-        <button className="wtorny" onClick={onAnuluj} disabled={pracuje}>Cancel</button>
+        <button className="secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
       </div>
     </div>
   );

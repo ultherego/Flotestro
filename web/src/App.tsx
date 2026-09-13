@@ -3,52 +3,54 @@ import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "./lib/api";
 import type { Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
-import { Pulpit } from "./pages/Pulpit";
-import { Hosty } from "./pages/Hosty";
-import { DodajHost } from "./pages/DodajHost";
-import { UkladHosta } from "./pages/host/Uklad";
-import { Przeglad } from "./pages/host/Przeglad";
-import { Pakiety } from "./pages/host/Pakiety";
-import { Uslugi } from "./pages/host/Uslugi";
-import { Kontenery } from "./pages/host/Kontenery";
-import { Procesy } from "./pages/host/Procesy";
-import { Harmonogramy } from "./pages/host/Harmonogramy";
-import { Siec } from "./pages/host/Siec";
+import { LOCALES, useLocale, useT } from "./i18n";
+import { Dashboard } from "./pages/Dashboard";
+import { Hosts } from "./pages/Hosts";
+import { AddHost } from "./pages/AddHost";
+import { HostLayout } from "./pages/host/Layout";
+import { Overview } from "./pages/host/Overview";
+import { Packages } from "./pages/host/Packages";
+import { Services } from "./pages/host/Services";
+import { Containers } from "./pages/host/Containers";
+import { Processes } from "./pages/host/Processes";
+import { Schedules } from "./pages/host/Schedules";
+import { Network } from "./pages/host/Network";
 import { Resolver } from "./pages/host/Resolver";
-import { Zapora } from "./pages/host/Zapora";
-import { Przestrzen } from "./pages/host/Przestrzen";
-import { SerwerSSH } from "./pages/host/SerwerSSH";
-import { Jadro } from "./pages/host/Jadro";
-import { Zegar } from "./pages/host/Zegar";
-import { Zasilanie } from "./pages/host/Zasilanie";
-import { Bezpieczenstwo } from "./pages/host/Bezpieczenstwo";
-import { Bezpieczenstwo as BezpieczenstwoFloty } from "./pages/Bezpieczenstwo";
-import { Sekrety } from "./pages/Sekrety";
-import { CertyfikatyFloty } from "./pages/Certyfikaty";
-import { KopieFloty } from "./pages/Kopie";
-import { MonitoringFloty } from "./pages/Monitoring";
-import { PodatnosciFloty } from "./pages/Podatnosci";
-import { Podatnosci } from "./pages/host/Podatnosci";
+import { Firewall } from "./pages/host/Firewall";
+import { Storage } from "./pages/host/Storage";
+import { SshServer } from "./pages/host/SshServer";
+import { Kernel } from "./pages/host/Kernel";
+import { Time } from "./pages/host/Time";
+import { Power } from "./pages/host/Power";
+import { Security } from "./pages/host/Security";
+import { FleetSecurity } from "./pages/Security";
+import { Secrets } from "./pages/Secrets";
+import { FleetCertificates } from "./pages/Certificates";
+import { FleetBackups } from "./pages/Backups";
+import { FleetMonitoring } from "./pages/Monitoring";
+import { FleetVulnerabilities } from "./pages/Vulnerabilities";
+import { Vulnerabilities } from "./pages/host/Vulnerabilities";
 import { Monitoring } from "./pages/host/Monitoring";
-import { Kopie } from "./pages/host/Kopie";
-import { Certyfikaty } from "./pages/host/Certyfikaty";
-import { Pliki } from "./pages/host/Pliki";
+import { Backups } from "./pages/host/Backups";
+import { Certificates } from "./pages/host/Certificates";
+import { Files } from "./pages/host/Files";
 import { Compose } from "./pages/host/Compose";
-import { Logi } from "./pages/host/Logi";
-import { KontaHosta } from "./pages/host/Konta";
-import { Tozsamosc } from "./pages/host/Tozsamosc";
-import { ZadaniaHosta } from "./pages/host/Zadania";
-import { AudytHosta } from "./pages/host/Audyt";
-import { Zadania } from "./pages/Zadania";
+import { Logs } from "./pages/host/Logs";
+import { HostAccounts } from "./pages/host/Accounts";
+import { Identity } from "./pages/host/Identity";
+import { HostJobs } from "./pages/host/Jobs";
+import { HostAudit } from "./pages/host/Audit";
+import { Jobs } from "./pages/Jobs";
 import { Bulk } from "./pages/Bulk";
-import { Kampanie } from "./pages/Kampanie";
-import { Kampania } from "./pages/Kampania";
-import { Katalog } from "./pages/Katalog";
-import { Dostep } from "./pages/Dostep";
-import { Audyt } from "./pages/Audyt";
+import { Campaigns } from "./pages/Campaigns";
+import { Campaign } from "./pages/Campaign";
+import { Directory } from "./pages/Directory";
+import { Access } from "./pages/Access";
+import { Audit } from "./pages/Audit";
 
 export function App() {
-  const zdolnosci = useCapabilities();
+  const t = useT();
+  const capabilities = useCapabilities();
   const { data, isLoading, error } = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
@@ -56,162 +58,182 @@ export function App() {
     refetchInterval: false,
   });
 
-  if (isLoading) return <div className="pusto" style={{ padding: 40 }}>Loading…</div>;
+  if (isLoading) return <div className="empty" style={{ padding: 40 }}>{t("Loading…")}</div>;
 
-  // Brak sesji kieruje do logowania u dostawcy tozsamosci. Panel nie zbiera
-  // hasel: poswiadczenia trafiaja wylacznie do Keycloaka.
+  // A missing session leads to the login at the identity provider. The
+  // panel collects no passwords: the credentials go only to Keycloak.
   if (error instanceof ApiError && error.unauthenticated) {
-    return <EkranLogowania dostawca={zdolnosci.identity_provider} />;
+    return <LoginScreen provider={capabilities.identity_provider} />;
   }
-  if (error) return <div className="pusto" style={{ padding: 40 }}>Blad: {String(error)}</div>;
+  if (error) return <div className="empty" style={{ padding: 40 }}>{t("Error: {message}", { message: String(error) })}</div>;
 
-  // Sekcje bez pokrycia w uprawnieniach sa ukrywane: pozycja w nawigacji,
-  // ktora prowadzi wylacznie do odmowy, jest bledem interfejsu, a nie
-  // zabezpieczeniem. O tym, co wolno zrobic, i tak decyduje serwer.
-  const uprawnienia = new Set(data?.permissions ?? []);
-  const zarzadzaDostepem = uprawnienia.has("principal.manage");
-  const widziAudyt = uprawnienia.has("audit.read");
-  const widziKampanie = uprawnienia.has("campaign.read");
-  const widziBezpieczenstwo = uprawnienia.has("security.read");
-  const widziSekrety = uprawnienia.has("secret.read");
-  const widziCertyfikaty = uprawnienia.has("certificate.read");
-  const widziKopie = uprawnienia.has("backup.read");
-  const widziMonitoring = uprawnienia.has("monitoring.read");
-  const widziPodatnosci = uprawnienia.has("vulnerability.read");
+  // Sections without backing in the permissions are hidden: a navigation
+  // item that leads only to a refusal is an interface defect, not a
+  // safeguard. The server decides what is allowed anyway.
+  const permissions = new Set(data?.permissions ?? []);
+  const managesAccess = permissions.has("principal.manage");
+  const seesAudit = permissions.has("audit.read");
+  const seesCampaigns = permissions.has("campaign.read");
+  const seesSecurity = permissions.has("security.read");
+  const seesSecrets = permissions.has("secret.read");
+  const seesCertificates = permissions.has("certificate.read");
+  const seesBackups = permissions.has("backup.read");
+  const seesMonitoring = permissions.has("monitoring.read");
+  const seesVulnerabilities = permissions.has("vulnerability.read");
 
   return (
-    <div className="uklad">
-      <nav className="nawigacja">
-        <div className="marka">Flotestro</div>
-        <Link do="/dashboard">Dashboard</Link>
-        <Link do="/hosts">Hosts</Link>
-        <Link do="/jobs">Jobs</Link>
-        {/* Kampania jest glownym mechanizmem zmiany, a nie skrotem na liscie
-            hostow: ma wlasne miejsce w nawigacji, obok pracy na jednym hoscie. */}
-        {widziKampanie && <Link do="/bulk">Bulk</Link>}
-        {widziKampanie && <Link do="/campaigns">Campaigns</Link>}
-        {widziBezpieczenstwo && <Link do="/security">Security</Link>}
-        {widziCertyfikaty && <Link do="/certificates">Certificates</Link>}
-        {widziKopie && <Link do="/backups">Backups</Link>}
-        {widziMonitoring && <Link do="/monitoring">Monitoring</Link>}
-        {widziPodatnosci && <Link do="/vulnerabilities">Vulnerabilities</Link>}
-        {widziSekrety && <Link do="/secrets">Secrets</Link>}
-        {zdolnosci.directory && <Link do="/directory">Directory</Link>}
-        {/* Zarzadzanie dostepem widzi tylko ten, kto moze cokolwiek w nim
-            zmienic; pozostalym pozycja prowadzilaby do samej odmowy. */}
-        {zarzadzaDostepem && <Link do="/access">Access</Link>}
-        {widziAudyt && <Link do="/audit">Audit</Link>}
-        <div className="stopka">
+    <div className="layout">
+      <nav className="navigation">
+        <div className="brand">Flotestro</div>
+        <Link to="/dashboard">{t("Dashboard")}</Link>
+        <Link to="/hosts">{t("Hosts")}</Link>
+        <Link to="/jobs">{t("Jobs")}</Link>
+        {/* A campaign is the main mechanism of change, not a shortcut on the
+            host list: it has its own place in the navigation, next to the
+            work on a single host. */}
+        {seesCampaigns && <Link to="/bulk">{t("Bulk")}</Link>}
+        {seesCampaigns && <Link to="/campaigns">{t("Campaigns")}</Link>}
+        {seesSecurity && <Link to="/security">{t("Security")}</Link>}
+        {seesCertificates && <Link to="/certificates">{t("Certificates")}</Link>}
+        {seesBackups && <Link to="/backups">{t("Backups")}</Link>}
+        {seesMonitoring && <Link to="/monitoring">{t("Monitoring")}</Link>}
+        {seesVulnerabilities && <Link to="/vulnerabilities">{t("Vulnerabilities")}</Link>}
+        {seesSecrets && <Link to="/secrets">{t("Secrets")}</Link>}
+        {capabilities.directory && <Link to="/directory">{t("Directory")}</Link>}
+        {/* Access management is seen only by whoever can change anything in
+            it; for the rest the item would lead to a bare refusal. */}
+        {managesAccess && <Link to="/access">{t("Access")}</Link>}
+        {seesAudit && <Link to="/audit">{t("Audit")}</Link>}
+        <div className="footer">
           <div>{data?.display_name || data?.subject}</div>
-          <div>{data?.roles.join(", ") || "no roles"}</div>
-          {/* Dostawca tozsamosci moze miec aktywna sesje innego uzytkownika
-              i logowac nia po cichu. Bez tego odnosnika nie ma z tego wyjscia
-              inaczej niz przez czyszczenie ciasteczek przegladarki. */}
+          <div>{data?.roles.join(", ") || t("no roles")}</div>
+          <LanguageSwitch />
+          {/* The identity provider may have an active session of another
+              user and sign in with it quietly. Without this link there is no
+              way out of that other than clearing the browser cookies. */}
           <a href={`/auth/login?force=1&redirect=${encodeURIComponent(window.location.pathname)}`}>
-            Switch account
+            {t("Switch account")}
           </a>
-          <a href="#" onClick={wyloguj}>Sign out</a>
+          <a href="#" onClick={signOut}>{t("Sign out")}</a>
         </div>
       </nav>
-      <main className="tresc">
+      <main className="content">
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Pulpit />} />
-          <Route path="/hosts" element={<Hosty />} />
-          {/* Sciezka jest przed trasa hosta, bo "new" nie jest identyfikatorem. */}
-          <Route path="/hosts/new" element={<DodajHost />} />
-          <Route path="/security" element={<BezpieczenstwoFloty />} />
-          <Route path="/certificates" element={<CertyfikatyFloty />} />
-          <Route path="/backups" element={<KopieFloty />} />
-          <Route path="/monitoring" element={<MonitoringFloty />} />
-          <Route path="/vulnerabilities" element={<PodatnosciFloty />} />
-          <Route path="/secrets" element={<Sekrety />} />
-          {/* Modul hosta jest segmentem adresu, wiec odswiezenie, historia
-              przegladarki i odnosnik bezposredni prowadza tam, gdzie operator
-              faktycznie byl. */}
-          <Route path="/hosts/:id" element={<UkladHosta />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/hosts" element={<Hosts />} />
+          {/* The path is before the host route, because "new" is not an identifier. */}
+          <Route path="/hosts/new" element={<AddHost />} />
+          <Route path="/security" element={<FleetSecurity />} />
+          <Route path="/certificates" element={<FleetCertificates />} />
+          <Route path="/backups" element={<FleetBackups />} />
+          <Route path="/monitoring" element={<FleetMonitoring />} />
+          <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
+          <Route path="/secrets" element={<Secrets />} />
+          {/* The host module is a segment of the address, so a refresh, the
+              browser history and a direct link lead where the operator
+              actually was. */}
+          <Route path="/hosts/:id" element={<HostLayout />}>
             <Route index element={<Navigate to="overview" replace />} />
-            <Route path="overview" element={<Przeglad />} />
-            <Route path="packages" element={<Pakiety />} />
-            <Route path="services" element={<Uslugi />} />
-            <Route path="processes" element={<Procesy />} />
-            <Route path="schedules" element={<Harmonogramy />} />
-            <Route path="network" element={<Siec />} />
+            <Route path="overview" element={<Overview />} />
+            <Route path="packages" element={<Packages />} />
+            <Route path="services" element={<Services />} />
+            <Route path="processes" element={<Processes />} />
+            <Route path="schedules" element={<Schedules />} />
+            <Route path="network" element={<Network />} />
             <Route path="dns" element={<Resolver />} />
-            <Route path="firewall" element={<Zapora />} />
-            <Route path="storage" element={<Przestrzen />} />
-            <Route path="ssh" element={<SerwerSSH />} />
-            <Route path="kernel" element={<Jadro />} />
-            <Route path="time" element={<Zegar />} />
-            <Route path="power" element={<Zasilanie />} />
-            <Route path="security" element={<Bezpieczenstwo />} />
-            <Route path="certificates" element={<Certyfikaty />} />
-            <Route path="backups" element={<Kopie />} />
+            <Route path="firewall" element={<Firewall />} />
+            <Route path="storage" element={<Storage />} />
+            <Route path="ssh" element={<SshServer />} />
+            <Route path="kernel" element={<Kernel />} />
+            <Route path="time" element={<Time />} />
+            <Route path="power" element={<Power />} />
+            <Route path="security" element={<Security />} />
+            <Route path="certificates" element={<Certificates />} />
+            <Route path="backups" element={<Backups />} />
             <Route path="monitoring" element={<Monitoring />} />
-            <Route path="vulnerabilities" element={<Podatnosci />} />
-            <Route path="files" element={<Pliki />} />
-            <Route path="containers" element={<Kontenery />} />
+            <Route path="vulnerabilities" element={<Vulnerabilities />} />
+            <Route path="files" element={<Files />} />
+            <Route path="containers" element={<Containers />} />
             <Route path="compose" element={<Compose />} />
-            <Route path="logs" element={<Logi />} />
-            <Route path="accounts" element={<KontaHosta />} />
-            <Route path="identity" element={<Tozsamosc />} />
-            <Route path="jobs" element={<ZadaniaHosta />} />
-            <Route path="audit" element={<AudytHosta />} />
+            <Route path="logs" element={<Logs />} />
+            <Route path="accounts" element={<HostAccounts />} />
+            <Route path="identity" element={<Identity />} />
+            <Route path="jobs" element={<HostJobs />} />
+            <Route path="audit" element={<HostAudit />} />
           </Route>
-          <Route path="/jobs" element={<Zadania />} />
-          {widziKampanie && <Route path="/bulk" element={<Bulk />} />}
-          {widziKampanie && <Route path="/campaigns" element={<Kampanie />} />}
-          {widziKampanie && <Route path="/campaigns/:id" element={<Kampania />} />}
-          {zdolnosci.directory && <Route path="/directory" element={<Katalog />} />}
-          {zarzadzaDostepem && <Route path="/access" element={<Dostep />} />}
-          {widziAudyt && <Route path="/audit" element={<Audyt />} />}
-          <Route path="*" element={<div className="pusto">Page not found.</div>} />
+          <Route path="/jobs" element={<Jobs />} />
+          {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
+          {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
+          {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
+          {capabilities.directory && <Route path="/directory" element={<Directory />} />}
+          {managesAccess && <Route path="/access" element={<Access />} />}
+          {seesAudit && <Route path="/audit" element={<Audit />} />}
+          <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
         </Routes>
       </main>
     </div>
   );
 }
 
-function Link({ do: cel, children }: { do: string; children: string }) {
+function Link({ to, children }: { to: string; children: string }) {
   return (
-    <NavLink to={cel} className={({ isActive }) => (isActive ? "active" : "")}>
+    <NavLink to={to} className={({ isActive }) => (isActive ? "active" : "")}>
       {children}
     </NavLink>
   );
 }
 
-async function wyloguj(event: React.MouseEvent) {
-  event.preventDefault();
-  // Uniewaznienie sesji panelu nie wystarcza: bez wylogowania u dostawcy
-  // kolejne wejscie zalogowaloby uzytkownika bez pytania.
-  const wynik = await api.post<{ logout_url: string }>("/auth/logout");
-  window.location.href = wynik.logout_url || "/";
+/** The interface language; the choice is remembered in the browser. */
+function LanguageSwitch() {
+  const { locale, setLocale } = useLocale();
+  return (
+    <div className="language-switch">
+      {LOCALES.map((entry) => (
+        <button
+          key={entry.code}
+          type="button"
+          className={entry.code === locale ? "active" : ""}
+          onClick={() => setLocale(entry.code)}
+        >
+          {entry.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
-function EkranLogowania({ dostawca }: { dostawca: boolean }) {
+async function signOut(event: React.MouseEvent) {
+  event.preventDefault();
+  // Invalidating the panel session is not enough: without signing out at
+  // the provider the next visit would sign the user in without asking.
+  const result = await api.post<{ logout_url: string }>("/auth/logout");
+  window.location.href = result.logout_url || "/";
+}
+
+function LoginScreen({ provider }: { provider: boolean }) {
+  const t = useT();
   return (
-    <div className="ekran-logowania">
+    <div className="login-screen">
       <div>
         <h1>Flotestro</h1>
-        <p className="podtytul">Linux fleet management</p>
-        {dostawca ? (
+        <p className="subtitle">{t("Linux fleet management")}</p>
+        {provider ? (
           <>
             <button onClick={() => (window.location.href = "/auth/login?redirect=/dashboard")}>
-              Sign in with identity provider
+              {t("Sign in with identity provider")}
             </button>
-            <p className="podtytul" style={{ marginTop: 14 }}>
-              Your identity provider may sign you in with an account you already
-              have an open session for.{" "}
-              <a href="/auth/login?force=1&redirect=/dashboard">Sign in as a different user</a>
+            <p className="subtitle" style={{ marginTop: 14 }}>
+              {t("Your identity provider may sign you in with an account you already have an open session for.")}{" "}
+              <a href="/auth/login?force=1&redirect=/dashboard">{t("Sign in as a different user")}</a>
             </p>
           </>
         ) : (
-          // Bez skonfigurowanego dostawcy przycisk logowania prowadzilby do
-          // bledu. Panel dziala wtedy na tokenach API i trzeba to powiedziec
-          // wprost, zamiast pokazywac martwa akcje.
-          <p className="podtytul">
-            No identity provider is configured in this installation. Access to
-            the panel uses an API token passed in the Authorization header.
+          // Without a configured provider the login button would lead to an
+          // error. The panel then works on API tokens and that has to be
+          // said outright instead of showing a dead action.
+          <p className="subtitle">
+            {t("No identity provider is configured in this installation. Access to the panel uses an API token passed in the Authorization header.")}
           </p>
         )}
       </div>

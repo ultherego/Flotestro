@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Czas, Pusto, StanZadania } from "../../components/ui";
-import { useHost } from "./wspolne";
+import { Time, Empty, JobState } from "../../components/ui";
+import { useHost } from "./shared";
+import { useT } from "../../i18n";
 
-type WersjaProjektu = {
+type ProjectVersion = {
   job_id: string;
   state: string;
   plan_digest?: string;
@@ -15,110 +16,113 @@ type WersjaProjektu = {
   applied: boolean;
 };
 
-type UslugaPlanu = { name: string; image: string; image_digest?: string; replicas?: number };
-type ZmianaPlanu = { kind: string; name: string; action: string };
-type PlanProjektu = {
+type PlanService = { name: string; image: string; image_digest?: string; replicas?: number };
+type PlanChange = { kind: string; name: string; action: string };
+type ProjectPlan = {
   project: string;
   digest: string;
-  services?: UslugaPlanu[];
-  changes?: ZmianaPlanu[];
+  services?: PlanService[];
+  changes?: PlanChange[];
   warnings?: string[];
 };
 
 /**
- * Projekty Docker Compose.
+ * Docker Compose projects.
  *
- * Manifest opisuje stan docelowy, a nie polecenie. Operator planuje, oglada
- * roznice i dopiero wtedy wdraza - wdrozenie jest zwiazane z tym planem
- * i odmawia, gdy stan podstawy zmienil sie od zatwierdzenia.
+ * The manifest describes the desired state, not a command. The operator
+ * plans, looks at the differences and only then deploys - the deployment is
+ * bound to that plan and refuses when the base state changed since the
+ * approval.
  */
 export function Compose() {
+  const t = useT();
   const host = useHost();
   const queryClient = useQueryClient();
-  const [projekt, setProjekt] = useState("");
+  const [project, setProject] = useState("");
   const [manifest, setManifest] = useState("");
-  const [plan, setPlan] = useState<PlanProjektu | null>(null);
-  const [komunikat, setKomunikat] = useState("");
+  const [plan, setPlan] = useState<ProjectPlan | null>(null);
+  const [message, setMessage] = useState("");
 
-  const wersje = useQuery({
-    queryKey: ["compose-versions", host.id, projekt],
+  const versions = useQuery({
+    queryKey: ["compose-versions", host.id, project],
     queryFn: () =>
-      api.get<Collection<WersjaProjektu>>(
-        `/api/v1/hosts/${host.id}/compose/${encodeURIComponent(projekt)}/versions`,
+      api.get<Collection<ProjectVersion>>(
+        `/api/v1/hosts/${host.id}/compose/${encodeURIComponent(project)}/versions`,
       ),
-    enabled: projekt.length > 0,
+    enabled: project.length > 0,
   });
 
-  const zaplanuj = useMutation({
+  const planProject = useMutation({
     mutationFn: () =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "docker.compose.plan",
-        payload: { compose: { project: projekt, manifest } },
+        payload: { compose: { project, manifest } },
       }),
-    onSuccess: (zadanie) => {
+    onSuccess: (job) => {
       setPlan(null);
-      setKomunikat(`Planning as job ${zadanie.id.slice(0, 8)}. The result appears below when it finishes.`);
-      czekajNaPlan(zadanie.id);
+      setMessage(t("Planning as job {id}. The result appears below when it finishes.", { id: job.id.slice(0, 8) }));
+      awaitPlan(job.id);
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  // Plan powstaje na hoscie, wiec ekran czeka na wynik operacji. Strumien
-  // budzi liste zadan; tutaj wystarczy odpytac o ten jeden wynik.
-  async function czekajNaPlan(jobID: string) {
-    for (let proba = 0; proba < 30; proba++) {
-      await new Promise((gotowe) => setTimeout(gotowe, 2000));
-      const proby = await api.get<{ items: { status?: string; detail?: { payload?: PlanProjektu } }[] }>(
+  // The plan is computed on the host, so the screen waits for the
+  // operation's result. The stream wakes the job list; here it is enough to
+  // poll for this one result.
+  async function awaitPlan(jobID: string) {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await new Promise((done) => setTimeout(done, 2000));
+      const attempts = await api.get<{ items: { status?: string; detail?: { payload?: ProjectPlan } }[] }>(
         `/api/v1/jobs/${jobID}/attempts`,
       );
-      const ostatnia = proby.items[proby.items.length - 1];
-      if (!ostatnia?.status) continue;
-      if (ostatnia.detail?.payload) {
-        setPlan(ostatnia.detail.payload);
-        setKomunikat("");
+      const last = attempts.items[attempts.items.length - 1];
+      if (!last?.status) continue;
+      if (last.detail?.payload) {
+        setPlan(last.detail.payload);
+        setMessage("");
         return;
       }
-      setKomunikat(`Planning finished with status ${ostatnia.status} and no plan.`);
+      setMessage(t("Planning finished with status {status} and no plan.", { status: last.status }));
       return;
     }
-    setKomunikat("The plan did not arrive in time.");
+    setMessage(t("The plan did not arrive in time."));
   }
 
-  const wdroz = useMutation({
-    mutationFn: (tresc: { manifest: string; digest: string; powod: string }) =>
+  const deploy = useMutation({
+    mutationFn: (body: { manifest: string; digest: string; reason: string }) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "docker.compose.deploy",
-        reason: tresc.powod,
+        reason: body.reason,
         payload: {
-          compose: { project: projekt, manifest: tresc.manifest, plan_digest: tresc.digest },
+          compose: { project, manifest: body.manifest, plan_digest: body.digest },
         },
       }),
-    onSuccess: (zadanie) => {
-      setKomunikat(
-        zadanie.requires_approval
-          ? `Job ${zadanie.id.slice(0, 8)} is waiting for approval.`
-          : `Job ${zadanie.id.slice(0, 8)} has been queued.`,
+    onSuccess: (job) => {
+      setMessage(
+        job.requires_approval
+          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
-      queryClient.invalidateQueries({ queryKey: ["compose-versions", host.id, projekt] });
+      queryClient.invalidateQueries({ queryKey: ["compose-versions", host.id, project] });
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
   return (
     <>
-      <h2>Project</h2>
-      <div className="formularz">
+      <h2>{t("Project")}</h2>
+      <div className="form">
         <label>
-          Project name
+          {t("Project name")}
           <input
-            value={projekt}
-            onChange={(e) => setProjekt(e.target.value)}
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
             placeholder="shop"
           />
         </label>
         <label>
-          Manifest (docker-compose.yml)
+          {t("Manifest (docker-compose.yml)")}
           <textarea
             rows={12}
             value={manifest}
@@ -126,98 +130,96 @@ export function Compose() {
             placeholder={"services:\n  web:\n    image: nginx@sha256:…"}
           />
         </label>
-        <div className="operacje">
+        <div className="operations">
           <button
-            onClick={() => zaplanuj.mutate()}
-            disabled={zaplanuj.isPending || !projekt || !manifest}
+            onClick={() => planProject.mutate()}
+            disabled={planProject.isPending || !project || !manifest}
           >
-            {zaplanuj.isPending ? "Planning…" : "Plan"}
+            {planProject.isPending ? t("Planning…") : t("Plan")}
           </button>
         </div>
-        {/* Manifest jest przechowywany w panelu razem z historia wersji,
-            wiec wpisane w nim haslo przestaje byc sekretem. */}
-        <p className="zrodlo" style={{ margin: 0 }}>
-          The manifest is stored with the operation and stays in the panel's history.
-          Keep credentials out of it.
+        {/* The manifest is stored in the panel together with the version
+            history, so a password typed into it stops being a secret. */}
+        <p className="source" style={{ margin: 0 }}>
+          {t("The manifest is stored with the operation and stays in the panel's history. Keep credentials out of it.")}
         </p>
       </div>
 
-      {komunikat && <p className="zrodlo" style={{ marginTop: 12 }}>{komunikat}</p>}
+      {message && <p className="source" style={{ marginTop: 12 }}>{message}</p>}
 
       {plan && (
         <>
-          <h2>Plan</h2>
-          <p className="podtytul">
-            Digest {plan.digest.slice(0, 16)} · deploying uses exactly this plan; if the
-            manifest or the images change, the deployment is refused.
+          <h2>{t("Plan")}</h2>
+          <p className="subtitle">
+            {t("Digest {digest} · deploying uses exactly this plan; if the manifest or the images change, the deployment is refused.", { digest: plan.digest.slice(0, 16) })}
           </p>
 
-          {plan.warnings?.map((ostrzezenie) => (
-            <p key={ostrzezenie} className="ostrzezenie"><span>{ostrzezenie}</span></p>
+          {plan.warnings?.map((warning) => (
+            <p key={warning} className="warning"><span>{warning}</span></p>
           ))}
 
           <table>
-            <thead><tr><th>Object</th><th>Name</th><th>Change</th></tr></thead>
+            <thead><tr><th>{t("Object")}</th><th>{t("Name")}</th><th>{t("Change")}</th></tr></thead>
             <tbody>
               {!plan.changes?.length ? (
-                <tr><td colSpan={3} className="pusto">Nothing would change on this host.</td></tr>
+                <tr><td colSpan={3} className="empty">{t("Nothing would change on this host.")}</td></tr>
               ) : (
-                plan.changes.map((zmiana) => (
-                  <tr key={`${zmiana.kind}/${zmiana.name}`}>
-                    <td>{zmiana.kind}</td>
-                    <td>{zmiana.name}</td>
-                    <td>{zmiana.action}</td>
+                plan.changes.map((change) => (
+                  <tr key={`${change.kind}/${change.name}`}>
+                    <td>{change.kind}</td>
+                    <td>{change.name}</td>
+                    <td>{change.action}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
 
-          <h2>Services after deployment</h2>
+          <h2>{t("Services after deployment")}</h2>
           <table>
-            <thead><tr><th>Service</th><th>Image</th><th>Replicas</th></tr></thead>
+            <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th>{t("Replicas")}</th></tr></thead>
             <tbody>
-              {(plan.services ?? []).map((usluga) => (
-                <tr key={usluga.name}>
-                  <td>{usluga.name}</td>
-                  <td>{usluga.image}</td>
-                  <td>{usluga.replicas ?? 1}</td>
+              {(plan.services ?? []).map((service) => (
+                <tr key={service.name}>
+                  <td>{service.name}</td>
+                  <td>{service.image}</td>
+                  <td>{service.replicas ?? 1}</td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          <PotwierdzenieWdrozenia
-            pracuje={wdroz.isPending}
-            onWdroz={(powod) => wdroz.mutate({ manifest, digest: plan.digest, powod })}
+          <DeployConfirmation
+            busy={deploy.isPending}
+            onDeploy={(reason) => deploy.mutate({ manifest, digest: plan.digest, reason })}
           />
         </>
       )}
 
-      <h2>History</h2>
-      {!projekt ? (
-        <Pusto>Name a project to see its deployment history.</Pusto>
-      ) : !wersje.data?.items.length ? (
-        <Pusto>This project has not been deployed from the panel yet.</Pusto>
+      <h2>{t("History")}</h2>
+      {!project ? (
+        <Empty>{t("Name a project to see its deployment history.")}</Empty>
+      ) : !versions.data?.items.length ? (
+        <Empty>{t("This project has not been deployed from the panel yet.")}</Empty>
       ) : (
         <table>
-          <thead><tr><th>When</th><th>By</th><th>State</th><th>Plan</th><th></th></tr></thead>
+          <thead><tr><th>{t("When")}</th><th>{t("By")}</th><th>{t("State")}</th><th>{t("Plan")}</th><th></th></tr></thead>
           <tbody>
-            {wersje.data.items.map((wersja) => (
-              <tr key={wersja.job_id}>
-                <td><Czas wartosc={wersja.created_at} /></td>
-                <td>{wersja.created_by}</td>
-                <td><StanZadania stan={wersja.state} /></td>
-                <td>{wersja.plan_digest?.slice(0, 12) || "—"}</td>
+            {versions.data.items.map((version) => (
+              <tr key={version.job_id}>
+                <td><Time value={version.created_at} /></td>
+                <td>{version.created_by}</td>
+                <td><JobState state={version.state} /></td>
+                <td>{version.plan_digest?.slice(0, 12) || "—"}</td>
                 <td>
-                  {/* Wycofanie zmiany to wdrozenie wczesniejszej wersji.
-                      Wczytujemy ja do edytora, zeby przeszla przez plan -
-                      stan hosta mogl sie od tamtej pory zmienic. */}
+                  {/* Rolling a change back is deploying an earlier version.
+                      It is loaded into the editor so that it goes through
+                      a plan - the host state may have changed since then. */}
                   <button
-                    className="wtorny"
-                    onClick={() => { setManifest(wersja.manifest); setPlan(null); }}
+                    className="secondary"
+                    onClick={() => { setManifest(version.manifest); setPlan(null); }}
                   >
-                    Load into editor
+                    {t("Load into editor")}
                   </button>
                 </td>
               </tr>
@@ -229,20 +231,21 @@ export function Compose() {
   );
 }
 
-/** Wdrozenie jest operacja krytyczna, wiec wymaga uzasadnienia w audycie. */
-function PotwierdzenieWdrozenia({
-  onWdroz, pracuje,
-}: { onWdroz: (powod: string) => void; pracuje: boolean }) {
-  const [powod, setPowod] = useState("");
+/** A deployment is a critical operation, so it needs a justification in the audit. */
+function DeployConfirmation({
+  onDeploy, busy,
+}: { onDeploy: (reason: string) => void; busy: boolean }) {
+  const t = useT();
+  const [reason, setReason] = useState("");
   return (
-    <div className="formularz" style={{ marginTop: 16 }}>
+    <div className="form" style={{ marginTop: 16 }}>
       <label>
-        Reason (at least 8 characters, kept in the audit trail)
-        <input value={powod} onChange={(e) => setPowod(e.target.value)} />
+        {t("Reason (at least 8 characters, kept in the audit trail)")}
+        <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
-      <div className="operacje">
-        <button disabled={pracuje || powod.trim().length < 8} onClick={() => onWdroz(powod)}>
-          {pracuje ? "Requesting…" : "Deploy this plan"}
+      <div className="operations">
+        <button disabled={busy || reason.trim().length < 8} onClick={() => onDeploy(reason)}>
+          {busy ? t("Requesting…") : t("Deploy this plan")}
         </button>
       </div>
     </div>

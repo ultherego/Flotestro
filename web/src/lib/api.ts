@@ -1,8 +1,8 @@
-// Klient API panelu.
+// The panel API client.
 //
-// Uwierzytelnienie opiera sie na ciasteczku sesji ustawionym przez control
-// plane. Ciasteczko jest HttpOnly, wiec przegladarka dolacza je sama, ale
-// zadania zmieniajace stan musza odeslac token CSRF z drugiego ciasteczka.
+// Authentication rests on the session cookie set by the control plane. The
+// cookie is HttpOnly, so the browser attaches it itself, but state-changing
+// requests must send back the CSRF token from the second cookie.
 
 const CSRF_COOKIE = "flotestro_csrf";
 const CSRF_HEADER = "X-Flotestro-CSRF";
@@ -16,7 +16,7 @@ export class ApiError extends Error {
     super(message);
   }
 
-  /** Brak uwierzytelnienia wymaga przekierowania do logowania. */
+  /** Missing authentication requires a redirect to the login. */
   get unauthenticated() {
     return this.status === 401;
   }

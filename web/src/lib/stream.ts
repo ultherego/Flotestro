@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-/** Postep operacji w toku. Wartosci nieustalone sa pominiete, nie wyzerowane. */
-export type Postep = {
+/** The progress of an operation in flight. Undetermined values are omitted, not zeroed. */
+export type Progress = {
   job_id: string;
   step?: number;
   total?: number;
@@ -11,147 +11,148 @@ export type Postep = {
 };
 
 /**
- * Strumien postepu operacji.
+ * The operation progress stream.
  *
- * Strumien niesie wylacznie sygnal "cos sie zmienilo"; trescia jest zawsze
- * odpowiedz API. Gdyby stan jechal strumieniem, ekran po zerwaniu polaczenia
- * pokazywalby cos innego niz zapisano - a operator nie mialby jak tego
- * zauwazyc.
+ * The stream carries only the signal "something changed"; the content is
+ * always the API answer. If the state travelled over the stream, a screen
+ * after a broken connection would show something other than recorded - and
+ * the operator would have no way to notice.
  *
- * Przegladarka sama wznawia zerwany EventSource, wiec chwilowa utrata
- * polaczenia nie zatrzymuje podgladu na stale.
+ * The browser resumes a broken EventSource itself, so a momentary loss of
+ * the connection does not stop the preview for good.
  */
-export function useStrumienPostepu(sciezka: string | null, klucze: unknown[][]) {
+export function useProgressStream(path: string | null, keys: unknown[][]) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!sciezka) return;
-    const zrodlo = new EventSource(sciezka, { withCredentials: true });
+    if (!path) return;
+    const source = new EventSource(path, { withCredentials: true });
 
-    const odswiez = () => {
-      for (const klucz of klucze) {
-        queryClient.invalidateQueries({ queryKey: klucz });
+    const refresh = () => {
+      for (const key of keys) {
+        queryClient.invalidateQueries({ queryKey: key });
       }
     };
-    zrodlo.addEventListener("job", odswiez);
-    // Podlaczenie tez odswieza: ekran mogl przegapic zmiany, zanim strumien
-    // sie otworzyl.
-    zrodlo.addEventListener("ready", odswiez);
+    source.addEventListener("job", refresh);
+    // Connecting refreshes too: the screen may have missed changes before
+    // the stream opened.
+    source.addEventListener("ready", refresh);
 
-    return () => zrodlo.close();
-    // Klucze zapytan sa stale w obrebie ekranu; zaleznoscia jest sciezka.
+    return () => source.close();
+    // The query keys are constant within a screen; the dependency is the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sciezka, queryClient]);
+  }, [path, queryClient]);
 }
 
 /**
- * Odstep odpytywania dla widokow zbiorczych, ktore nie maja wlasnego
- * strumienia. Lista floty i pulpit zmieniaja sie same z siebie - przez
- * heartbeaty hostow - a nie tylko przez operacje operatora.
+ * The polling interval for the aggregate views that have no stream of their
+ * own. The fleet list and the dashboard change on their own - through the
+ * host heartbeats - not only through operator actions.
  */
-export const ODSTEP_ODSWIEZANIA = 5000;
+export const REFRESH_INTERVAL = 5000;
 
-/** Krotszy odstep dla list operacji, gdzie liczy sie postep na oczach. */
-export const ODSTEP_OPERACJI = 2000;
+/** A shorter interval for operation lists, where progress before one's eyes counts. */
+export const OPERATIONS_INTERVAL = 2000;
 
 /**
- * Postep operacji w toku, prosto ze strumienia.
+ * The progress of operations in flight, straight from the stream.
  *
- * Postep jest ulotny: nie ma go w API i nie da sie go odczytac po fakcie.
- * Ekran podlaczony w polowie transakcji zobaczy dopiero nastepny meldunek -
- * i to wystarczy, bo wynik i tak jest trwaly w bazie.
+ * Progress is transient: it is not in the API and cannot be read after the
+ * fact. A screen attached halfway through a transaction sees only the next
+ * report - and that is enough, because the result is durable in the
+ * database anyway.
  */
-export function usePostep(sciezka: string | null): Map<string, Postep> {
-  const [postepy, setPostepy] = useState<Map<string, Postep>>(new Map());
+export function useProgress(path: string | null): Map<string, Progress> {
+  const [progress, setProgress] = useState<Map<string, Progress>>(new Map());
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!sciezka) {
-      setPostepy(new Map());
+    if (!path) {
+      setProgress(new Map());
       return;
     }
-    const zrodlo = new EventSource(sciezka, { withCredentials: true });
+    const source = new EventSource(path, { withCredentials: true });
 
-    zrodlo.addEventListener("progress", (zdarzenie) => {
+    source.addEventListener("progress", (event) => {
       try {
-        const dane = JSON.parse((zdarzenie as MessageEvent).data);
-        const postep: Postep = { job_id: dane.job_id, ...(dane.progress ?? {}) };
-        setPostepy((poprzednie) => new Map(poprzednie).set(postep.job_id, postep));
+        const data = JSON.parse((event as MessageEvent).data);
+        const report: Progress = { job_id: data.job_id, ...(data.progress ?? {}) };
+        setProgress((previous) => new Map(previous).set(report.job_id, report));
       } catch {
-        // Nieczytelny meldunek pomijamy: podglad nie moze wywrocic ekranu.
+        // An unreadable report is skipped: the preview must not topple the screen.
       }
     });
-    // Koniec operacji konczy jej pasek - inaczej zostalby na ekranie
-    // i sugerowal, ze cos jeszcze trwa.
-    zrodlo.addEventListener("job", (zdarzenie) => {
+    // The end of an operation ends its bar - otherwise it would stay on the
+    // screen and suggest something is still running.
+    source.addEventListener("job", (event) => {
       try {
-        const dane = JSON.parse((zdarzenie as MessageEvent).data);
-        if (["succeeded", "failed", "canceled", "expired", "rejected"].includes(dane.state)) {
-          setPostepy((poprzednie) => {
-            const kopia = new Map(poprzednie);
-            kopia.delete(dane.job_id);
-            return kopia;
+        const data = JSON.parse((event as MessageEvent).data);
+        if (["succeeded", "failed", "canceled", "expired", "rejected"].includes(data.state)) {
+          setProgress((previous) => {
+            const copy = new Map(previous);
+            copy.delete(data.job_id);
+            return copy;
           });
         }
       } catch {
-        // jak wyzej
+        // as above
       }
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
     });
 
-    return () => zrodlo.close();
-  }, [sciezka, queryClient]);
+    return () => source.close();
+  }, [path, queryClient]);
 
-  return postepy;
+  return progress;
 }
 
-/** Kawalek podgladu dziennika prosto ze strumienia. */
-export type LiniaLogu = { lines: string[]; dropped?: number };
+/** A piece of the journal preview straight from the stream. */
+export type LogChunk = { lines: string[]; dropped?: number };
 
 /**
- * Podglad dziennika na zywo.
+ * The live journal preview.
  *
- * Linie sa ulotne: nie ma ich w API i nie da sie ich odczytac po fakcie.
- * Pauza zatrzymuje wylacznie dopisywanie na ekranie - host nadal wysyla,
- * a strumien konczy sie sam po swoim limicie czasu.
+ * The lines are transient: they are not in the API and cannot be read after
+ * the fact. A pause stops only appending on the screen - the host keeps
+ * sending, and the stream ends on its own after its time limit.
  */
-export function usePodgladDziennika(sciezka: string | null, wstrzymane: boolean) {
-  const [linie, setLinie] = useState<string[]>([]);
-  const [pominiete, setPominiete] = useState(0);
-  const wstrzymaneRef = useRef(wstrzymane);
-  wstrzymaneRef.current = wstrzymane;
+export function useJournalPreview(path: string | null, paused: boolean) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [dropped, setDropped] = useState(0);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   useEffect(() => {
-    if (!sciezka) return;
-    setLinie([]);
-    setPominiete(0);
-    const zrodlo = new EventSource(sciezka, { withCredentials: true });
+    if (!path) return;
+    setLines([]);
+    setDropped(0);
+    const source = new EventSource(path, { withCredentials: true });
 
-    zrodlo.addEventListener("log", (zdarzenie) => {
-      if (wstrzymaneRef.current) return;
+    source.addEventListener("log", (event) => {
+      if (pausedRef.current) return;
       try {
-        const dane = JSON.parse((zdarzenie as MessageEvent).data);
-        const kawalek: LiniaLogu = dane.log;
-        if (!kawalek) return;
-        setLinie((poprzednie) => {
-          const razem = [...poprzednie, ...(kawalek.lines ?? [])];
-          // Bufor przegladarki tez ma granice: podglad trwajacy kwadrans
-          // zjadlby pamiec karty.
-          return razem.length > MAKS_LINII_PODGLADU
-            ? razem.slice(razem.length - MAKS_LINII_PODGLADU)
-            : razem;
+        const data = JSON.parse((event as MessageEvent).data);
+        const chunk: LogChunk = data.log;
+        if (!chunk) return;
+        setLines((previous) => {
+          const combined = [...previous, ...(chunk.lines ?? [])];
+          // The browser buffer has limits too: a preview lasting a quarter
+          // of an hour would eat the tab's memory.
+          return combined.length > MAX_PREVIEW_LINES
+            ? combined.slice(combined.length - MAX_PREVIEW_LINES)
+            : combined;
         });
-        if (kawalek.dropped) setPominiete((suma) => suma + kawalek.dropped!);
+        if (chunk.dropped) setDropped((sum) => sum + chunk.dropped!);
       } catch {
-        // Nieczytelny kawalek pomijamy: podglad nie moze wywrocic ekranu.
+        // An unreadable chunk is skipped: the preview must not topple the screen.
       }
     });
 
-    return () => zrodlo.close();
-  }, [sciezka]);
+    return () => source.close();
+  }, [path]);
 
-  return { linie, pominiete };
+  return { lines, dropped };
 }
 
-/** Ile linii podgladu trzyma przegladarka. */
-export const MAKS_LINII_PODGLADU = 5000;
+/** How many preview lines the browser keeps. */
+export const MAX_PREVIEW_LINES = 5000;

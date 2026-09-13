@@ -3,194 +3,201 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
-import { Czas, StanPolaczenia } from "../../components/ui";
-import { modul as znajdzModul, MODUL_DOMYSLNY } from "./moduly";
-import type { Capabilities as ZdolnosciInstalacji } from "../../lib/capabilities";
+import { Time, ConnectionState } from "../../components/ui";
+import { module as findModule, DEFAULT_MODULE } from "./modules";
+import type { Capabilities as InstallationCapabilities } from "../../lib/capabilities";
+import { useT } from "../../i18n";
 
 /**
- * Staly pasek kontekstu hosta. Operator zmieniajacy zakladki musi bez
- * sprawdzania czegokolwiek wiedziec, na ktorej maszynie pracuje - dlatego
- * tozsamosc celu jest czescia layoutu, a nie tekstem powtarzanym przez
- * poszczegolne ekrany.
+ * The persistent host context bar. An operator switching tabs must know
+ * without checking anything which machine they work on - so the target
+ * identity is part of the layout, not text repeated by the individual
+ * screens.
  */
-export function PasekKontekstu({
-  host, segment, instalacja,
-}: { host: Host; segment: string; instalacja: ZdolnosciInstalacji }) {
+export function ContextBar({
+  host, segment, installation,
+}: { host: Host; segment: string; installation: InstallationCapabilities }) {
+  const t = useT();
   return (
-    <div className="pasek-hosta">
-      <div className="pasek-hosta-tozsamosc">
-        <StanPolaczenia stan={host.connection_state} />
-        <span className="nazwa">{host.hostname}</span>
-        <AdresZarzadzania host={host} />
-        <OknoSerwisowe host={host} />
+    <div className="host-bar">
+      <div className="host-bar-identity">
+        <ConnectionState state={host.connection_state} />
+        <span className="name">{host.hostname}</span>
+        <ManagementAddress host={host} />
+        <MaintenanceWindow host={host} />
       </div>
-      <div className="pasek-hosta-fakty">
+      <div className="host-bar-facts">
         <span>{host.site} / {host.environment}</span>
-        <span>{host.os_distribution || host.os_family || "unknown OS"} {host.os_version}</span>
-        <span>{host.architecture || "unknown arch"} · agent {host.agent_version || "unknown"}</span>
-        <span>seen <Czas wartosc={host.last_seen_at} /></span>
-        <OdswiezInwentarz host={host} segment={segment} />
+        <span>{host.os_distribution || host.os_family || t("unknown OS")} {host.os_version}</span>
+        <span>{host.architecture || t("unknown arch")} · {t("agent {version}", { version: host.agent_version || t("unknown") })}</span>
+        <span>{t("seen")} <Time value={host.last_seen_at} /></span>
+        <RefreshInventory host={host} segment={segment} />
       </div>
-      <PrzelacznikHosta host={host} segment={segment} instalacja={instalacja} />
+      <HostSwitch host={host} segment={segment} installation={installation} />
     </div>
   );
 }
 
 /**
- * Odswiezenie inwentarza na zadanie.
+ * An inventory refresh on demand.
  *
- * Panel pokazuje obraz sprzed ostatniego cyklu, wiec operator, ktory wlasnie
- * zmienil cos na hoscie recznie albo szykuje kampanie, musi umiec zapytac
- * "jak jest teraz". Przycisk jest w pasku, a nie w zakladce, bo dotyczy
- * calego hosta; zakres wynika z otwartej zakladki - odswiezamy to, na co
- * operator patrzy, a nie caly host przy kazdym kliknieciu.
+ * The panel shows the image from before the last cycle, so an operator who
+ * just changed something on the host by hand or prepares a campaign must be
+ * able to ask "how is it now". The button is in the bar, not in a tab,
+ * because it concerns the whole host; the scope follows from the open tab -
+ * what the operator looks at is refreshed, not the whole host at every
+ * click.
  */
-function OdswiezInwentarz({ host, segment }: { host: Host; segment: string }) {
+function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
+  const t = useT();
   const queryClient = useQueryClient();
-  const [zadanie, setZadanie] = useState("");
-  const [komunikat, setKomunikat] = useState("");
-  // Zakres bierzemy z rejestru zakladek: to on wie, z ktorego modulu
-  // inwentarza zyje otwarty widok. Zakladka bez modulu (Jobs, Overview)
-  // odswieza caly host - zawezenie do czegos, czego nie ma, nie odswiezyloby
-  // niczego.
-  const zakres = znajdzModul(segment)?.inwentarz;
+  const [jobID, setJobID] = useState("");
+  const [message, setMessage] = useState("");
+  // The scope is taken from the tab registry: it knows which inventory
+  // module the open view lives off. A tab without a module (Jobs,
+  // Overview) refreshes the whole host - narrowing to something that does
+  // not exist would refresh nothing.
+  const scope = findModule(segment)?.inventory;
 
-  // Zadanie konczy sie dopiero po zapisaniu nowej rewizji, wiec przycisk
-  // sledzi je do konca. Inaczej "odswiezono" znaczyloby tylko "zlecono",
-  // a operator patrzylby na stary obraz w przekonaniu, ze jest nowy.
-  const stan = useQuery({
-    queryKey: ["job", zadanie],
-    queryFn: () => api.get<Job>(`/api/v1/jobs/${zadanie}`),
-    enabled: zadanie !== "",
-    refetchInterval: (zapytanie) =>
-      zakonczone((zapytanie.state.data as Job | undefined)?.state) ? false : 2000,
+  // The job ends only once the new revision is saved, so the button follows
+  // it to the end. Otherwise "refreshed" would only mean "ordered", and the
+  // operator would look at the old image believing it is new.
+  const state = useQuery({
+    queryKey: ["job", jobID],
+    queryFn: () => api.get<Job>(`/api/v1/jobs/${jobID}`),
+    enabled: jobID !== "",
+    refetchInterval: (query) =>
+      finished((query.state.data as Job | undefined)?.state) ? false : 2000,
   });
 
   useEffect(() => {
-    const wynik = stan.data;
-    if (!wynik || !zakonczone(wynik.state)) return;
-    setZadanie("");
-    if (wynik.state !== "succeeded") {
-      setKomunikat(wynik.result_error_code || wynik.result_message || wynik.state);
+    const result = state.data;
+    if (!result || !finished(result.state)) return;
+    setJobID("");
+    if (result.state !== "succeeded") {
+      setMessage(result.result_error_code || result.result_message || result.state);
       return;
     }
-    setKomunikat(wynik.result_message || "inventory refreshed");
-    // Nowy obraz jest w panelu, wiec widoki tego hosta maja go pokazac.
-    // Nie ma jednego klucza inwentarza: kazda zakladka czyta swoj, wiec
-    // uniewazniamy wszystko, co dotyczy tej maszyny.
+    setMessage(result.result_message || t("inventory refreshed"));
+    // The new image is in the panel, so the views of this host are to show
+    // it. There is no single inventory key: every tab reads its own, so
+    // everything concerning this machine is invalidated.
     queryClient.invalidateQueries({
-      predicate: (zapytanie) => zapytanie.queryKey.includes(host.id),
+      predicate: (query) => query.queryKey.includes(host.id),
     });
-  }, [stan.data, host.id, queryClient]);
+  }, [state.data, host.id, queryClient, t]);
 
-  const zlec = useMutation({
+  const order = useMutation({
     mutationFn: () =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "inventory.refresh",
-        payload: { inventory: zakres ? { modules: [zakres] } : {} },
+        payload: { inventory: scope ? { modules: [scope] } : {} },
       }),
-    onSuccess: (nowe) => {
-      setKomunikat("");
-      setZadanie(nowe.id);
+    onSuccess: (created) => {
+      setMessage("");
+      setJobID(created.id);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const trwa = zlec.isPending || zadanie !== "";
-  const opis = zakres
-    ? `ask the host to re-read its ${zakres} module now`
-    : "ask the host to re-read its whole inventory now";
+  const busy = order.isPending || jobID !== "";
+  const description = scope
+    ? t("ask the host to re-read its {module} module now", { module: scope })
+    : t("ask the host to re-read its whole inventory now");
   return (
-    <span className="odswiezenie-inwentarza">
+    <span className="inventory-refresh">
       <button
         type="button"
         className="link"
-        disabled={trwa || host.connection_state !== "online"}
-        title={host.connection_state === "online" ? opis : "the host is not connected"}
-        onClick={() => zlec.mutate()}
+        disabled={busy || host.connection_state !== "online"}
+        title={host.connection_state === "online" ? description : t("the host is not connected")}
+        onClick={() => order.mutate()}
       >
-        {trwa ? "refreshing…" : "refresh"}
+        {busy ? t("refreshing…") : t("refresh")}
       </button>
-      {komunikat && <span className="komunikat">{komunikat}</span>}
+      {message && <span className="message">{message}</span>}
     </span>
   );
 }
 
-/** Stany koncowe zadania. Poza nimi warto pytac dalej. */
-function zakonczone(stan: string | undefined): boolean {
-  return ["succeeded", "failed", "timed_out", "canceled", "expired"].includes(stan ?? "");
+/** The terminal job states. Outside them it is worth asking further. */
+function finished(state: string | undefined): boolean {
+  return ["succeeded", "failed", "timed_out", "canceled", "expired"].includes(state ?? "");
 }
 
 /**
- * Znacznik okna serwisowego. Jest w pasku, a nie w zakladce zasilania, bo
- * dotyczy kazdej operacji na tym hoscie: kto zaczyna cokolwiek robic, ma
- * wiedziec, ze ktos inny juz przy tej maszynie pracuje.
+ * The maintenance window badge. It is in the bar, not in the power tab,
+ * because it concerns every operation on this host: whoever starts doing
+ * anything is to know that somebody else already works on this machine.
  */
-function OknoSerwisowe({ host }: { host: Host }) {
+function MaintenanceWindow({ host }: { host: Host }) {
+  const t = useT();
   if (!host.maintenance) return null;
-  const doKiedy = new Date(host.maintenance.until);
-  if (Number.isNaN(doKiedy.getTime()) || doKiedy.getTime() <= Date.now()) return null;
-  const opis = [host.maintenance.reason, host.maintenance.set_by && `set by ${host.maintenance.set_by}`]
+  const until = new Date(host.maintenance.until);
+  if (Number.isNaN(until.getTime()) || until.getTime() <= Date.now()) return null;
+  const description = [host.maintenance.reason, host.maintenance.set_by && t("set by {who}", { who: host.maintenance.set_by })]
     .filter(Boolean)
     .join(" · ");
   return (
-    <span className="znacznik uwaga" title={opis || "maintenance window"}>
-      maintenance until {doKiedy.toISOString().slice(0, 16).replace("T", " ")} UTC
+    <span className="badge warn" title={description || t("maintenance window")}>
+      {t("maintenance until {time} UTC", { time: until.toISOString().slice(0, 16).replace("T", " ") })}
     </span>
   );
 }
 
 /**
- * Adres zarzadzania z jego pochodzeniem. Nieustalony adres jest pokazywany
- * jako nieustalony: host moze miec wiele adresow i podanie dowolnego z nich
- * jako adresu zarzadzania wprowadzaloby operatora w blad.
+ * The management address with its origin. An undetermined address is shown
+ * as undetermined: a host may have many addresses and giving any of them as
+ * the management address would mislead the operator.
  */
-function AdresZarzadzania({ host }: { host: Host }) {
+function ManagementAddress({ host }: { host: Host }) {
+  const t = useT();
   if (!host.management_address) {
     return (
-      <span className="znacznik nieznany" title="no address has been observed for this host yet">
-        address unknown
+      <span className="badge unknown" title={t("no address has been observed for this host yet")}>
+        {t("address unknown")}
       </span>
     );
   }
-  const opis =
+  const description =
     host.management_address_source === "session"
-      ? "address seen by the control plane on its end of the connection"
+      ? t("address seen by the control plane on its end of the connection")
       : host.management_address_source === "agent"
-        ? "address reported by the host itself; it connects through a relay"
-        : "address set manually by an operator";
+        ? t("address reported by the host itself; it connects through a relay")
+        : t("address set manually by an operator");
   return (
-    <span className="adres" title={opis}>
+    <span className="address" title={description}>
       {host.management_address}
-      <span className="zrodlo-adresu">{host.management_address_source}</span>
+      <span className="address-source">{host.management_address_source}</span>
     </span>
   );
 }
 
 /**
- * Przelacznik hostow zachowuje otwarty modul, jesli nowy host go obsluguje.
- * W przeciwnym razie prowadzi do przegladu i mowi, czego zabraklo - cicha
- * zmiana zakladki wygladalaby jak blad interfejsu.
+ * The host switch keeps the open module if the new host supports it.
+ * Otherwise it leads to the overview and says what was missing - a quiet
+ * tab change would look like an interface bug.
  */
-function PrzelacznikHosta({
-  host, segment, instalacja,
-}: { host: Host; segment: string; instalacja: ZdolnosciInstalacji }) {
+function HostSwitch({
+  host, segment, installation,
+}: { host: Host; segment: string; installation: InstallationCapabilities }) {
+  const t = useT();
   const navigate = useNavigate();
-  const lista = useQuery({
+  const list = useQuery({
     queryKey: ["hosts", "switcher"],
     queryFn: () => api.get<Collection<Host>>("/api/v1/hosts?limit=500"),
     staleTime: 30_000,
   });
 
-  function przelacz(id: string) {
+  function switchTo(id: string) {
     if (!id || id === host.id) return;
-    const cel = lista.data?.items.find((pozycja) => pozycja.id === id);
-    const otwarty = znajdzModul(segment);
-    const powod = cel && otwarty ? otwarty.powod(cel, instalacja) : "";
-    if (powod) {
-      navigate(`/hosts/${id}/${MODUL_DOMYSLNY}`, {
-        state: { odrzucony: otwarty?.nazwa, powod },
+    const target = list.data?.items.find((item) => item.id === id);
+    const open = findModule(segment);
+    const reason = target && open ? open.reason(target, installation) : "";
+    if (reason) {
+      navigate(`/hosts/${id}/${DEFAULT_MODULE}`, {
+        state: { rejected: open?.name, reason },
       });
       return;
     }
@@ -198,12 +205,12 @@ function PrzelacznikHosta({
   }
 
   return (
-    <label className="przelacznik-hosta">
-      <span>Switch host</span>
-      <select value={host.id} onChange={(event) => przelacz(event.target.value)}>
-        {(lista.data?.items ?? [host]).map((pozycja) => (
-          <option key={pozycja.id} value={pozycja.id}>
-            {pozycja.hostname}
+    <label className="host-toggle">
+      <span>{t("Switch host")}</span>
+      <select value={host.id} onChange={(event) => switchTo(event.target.value)}>
+        {(list.data?.items ?? [host]).map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.hostname}
           </option>
         ))}
       </select>

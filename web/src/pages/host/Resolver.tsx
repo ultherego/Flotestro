@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Czas, Pusto } from "../../components/ui";
-import { SwiezoscModulu, useHost, useModul } from "./wspolne";
-import { PotwierdzenieCelu } from "./PotwierdzenieCelu";
+import { Time, Empty } from "../../components/ui";
+import { ModuleFreshness, useHost, useModule } from "./shared";
+import { TargetConfirmation } from "./TargetConfirmation";
+import { useT } from "../../i18n";
 
 type Link = {
   name: string;
@@ -16,7 +17,7 @@ type Link = {
   dns_over_tls?: string;
 };
 
-type Zapytanie = {
+type Query = {
   name: string;
   addresses?: string[];
   server?: string;
@@ -24,7 +25,7 @@ type Zapytanie = {
   took_millis: number;
 };
 
-type WynikDNS = { kind?: string; queries?: { queries?: Zapytanie[] } };
+type DNSResult = { kind?: string; queries?: { queries?: Query[] } };
 
 
 type Snapshot = {
@@ -45,90 +46,90 @@ type Snapshot = {
 };
 
 /**
- * Resolver hosta.
+ * The host's resolver.
  *
- * Panel pokazuje stan faktyczny wraz z jego wlascicielem: plik resolvera
- * nalezacy do uslugi zostanie nadpisany przy nastepnym zdarzeniu sieci, wiec
- * to wlasciciel rozstrzyga, czy panel moze tu cokolwiek zmienic.
+ * The panel shows the actual state together with its owner: a resolver file
+ * owned by a service gets overwritten on the next network event, so the
+ * owner decides whether the panel may change anything here.
  */
 export function Resolver() {
+  const t = useT();
   const host = useHost();
   const queryClient = useQueryClient();
-  const modul = useModul<Snapshot>(host.id, "dns");
-  const [nazwy, setNazwy] = useState("ipa.flotestro.test");
-  const [zamiar, setZamiar] = useState<{ opis: string; payload: Record<string, unknown> } | null>(null);
-  const [komunikat, setKomunikat] = useState("");
-  const [formularz, setFormularz] = useState(false);
-  // Wynik testu nalezy do zadania, wiec czekamy na to konkretne zadanie,
-  // zamiast odswiezac cala liste.
-  const [zadanieTestu, setZadanieTestu] = useState("");
+  const module = useModule<Snapshot>(host.id, "dns");
+  const [names, setNames] = useState("ipa.flotestro.test");
+  const [intent, setIntent] = useState<{ description: string; payload: Record<string, unknown> } | null>(null);
+  const [message, setMessage] = useState("");
+  const [form, setForm] = useState(false);
+  // The test result belongs to the job, so we wait for that specific job
+  // instead of refreshing the whole list.
+  const [testJob, setTestJob] = useState("");
+  const unknown = <span className="badge unknown">{t("unknown")}</span>;
 
-  // Wynik zadania mieszka przy probie, a nie przy zadaniu: to proba wie,
-  // co odpowiedzial host i kiedy.
+  // The job result lives on the attempt, not on the job: it is the attempt
+  // that knows what the host answered and when.
   const test = useQuery({
-    queryKey: ["job-attempts", zadanieTestu],
+    queryKey: ["job-attempts", testJob],
     queryFn: () =>
-      api.get<{ items: { status?: string; detail?: WynikDNS }[] }>(
-        `/api/v1/jobs/${zadanieTestu}/attempts`,
+      api.get<{ items: { status?: string; detail?: DNSResult }[] }>(
+        `/api/v1/jobs/${testJob}/attempts`,
       ),
-    enabled: zadanieTestu !== "",
-    refetchInterval: (zapytanie) => {
-      const proby = (zapytanie.state.data as { items?: { status?: string }[] } | undefined)?.items;
-      const ostatnia = proby?.[proby.length - 1];
-      return ostatnia?.status ? false : 2000;
+    enabled: testJob !== "",
+    refetchInterval: (query) => {
+      const attempts = (query.state.data as { items?: { status?: string }[] } | undefined)?.items;
+      const last = attempts?.[attempts.length - 1];
+      return last?.status ? false : 2000;
     },
   });
 
-  const proby = test.data?.items ?? [];
-  const ostatniaProba = proby[proby.length - 1];
-  const odpowiedzi = ostatniaProba?.detail?.queries?.queries ?? [];
+  const attempts = test.data?.items ?? [];
+  const lastAttempt = attempts[attempts.length - 1];
+  const answers = lastAttempt?.detail?.queries?.queries ?? [];
 
-  const zlec = useMutation({
-    mutationFn: (tresc: Record<string, unknown>) =>
-      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, tresc),
-    onSuccess: (zadanie) => {
-      setKomunikat(
-        zadanie.requires_approval
-          ? `Job ${zadanie.id.slice(0, 8)} is waiting for approval.`
-          : `Job ${zadanie.id.slice(0, 8)} has been queued.`,
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (job) => {
+      setMessage(
+        job.requires_approval
+          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
-      if (!zadanie.requires_approval) setZadanieTestu(zadanie.id);
-      setZamiar(null);
-      setFormularz(false);
+      if (!job.requires_approval) setTestJob(job.id);
+      setIntent(null);
+      setForm(false);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const snapshot = modul.data?.payload;
-  if (!modul.data) return <Pusto>This host has not reported its resolver yet.</Pusto>;
+  const snapshot = module.data?.payload;
+  if (!module.data) return <Empty>{t("This host has not reported its resolver yet.")}</Empty>;
 
-  const listaNazw = nazwy.split(",").map((nazwa) => nazwa.trim()).filter(Boolean);
-  const interfejsZarzadzania = snapshot?.links?.find((link) => (link.servers ?? []).length > 0);
+  const nameList = names.split(",").map((name) => name.trim()).filter(Boolean);
+  const managementLink = snapshot?.links?.find((link) => (link.servers ?? []).length > 0);
 
   return (
     <>
-      <p className="podtytul">
-        What the host resolves with, and who writes that configuration. A file
-        owned by a service is rewritten on the next network event, so ownership
-        decides whether the panel can change anything here.
+      <p className="subtitle">
+        {t("What the host resolves with, and who writes that configuration. A file owned by a service is rewritten on the next network event, so ownership decides whether the panel can change anything here.")}
       </p>
 
       {snapshot?.unavailable_reason && (
-        <p className="ostrzezenie">
-          <span>Resolver state could not be read: {snapshot.unavailable_reason}</span>
+        <p className="warning">
+          <span>{t("Resolver state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
       {snapshot?.read_only_reason && (
-        <p className="ostrzezenie">
+        <p className="warning">
           <span>{snapshot.read_only_reason}</span>
         </p>
       )}
 
       <table>
         <tbody>
-          <tr><th>Owner</th><td>{snapshot?.owner || <span className="znacznik nieznany">unknown</span>}</td></tr>
-          <tr><th>Mode</th><td>{snapshot?.mode || "—"}</td></tr>
+          <tr><th>{t("Owner")}</th><td>{snapshot?.owner || unknown}</td></tr>
+          <tr><th>{t("Mode")}</th><td>{snapshot?.mode || "—"}</td></tr>
           <tr>
             <th>resolv.conf</th>
             <td>
@@ -136,22 +137,22 @@ export function Resolver() {
               {snapshot?.resolv_conf_target && ` → ${snapshot.resolv_conf_target}`}
             </td>
           </tr>
-          <tr><th>Servers</th><td>{(snapshot?.servers ?? []).join(", ") || "—"}</td></tr>
-          <tr><th>Search domains</th><td>{(snapshot?.search_domains ?? []).join(", ") || "—"}</td></tr>
-          {/* "unsupported" i "wylaczone" to dwie rozne odpowiedzi, wiec
-              pokazujemy to, co powiedzial host, a nie yes/no. */}
-          <tr><th>DNSSEC</th><td>{snapshot?.dnssec || <span className="znacznik nieznany">unknown</span>}</td></tr>
-          <tr><th>DNS over TLS</th><td>{snapshot?.dns_over_tls || <span className="znacznik nieznany">unknown</span>}</td></tr>
+          <tr><th>{t("Servers")}</th><td>{(snapshot?.servers ?? []).join(", ") || "—"}</td></tr>
+          <tr><th>{t("Search domains")}</th><td>{(snapshot?.search_domains ?? []).join(", ") || "—"}</td></tr>
+          {/* "unsupported" and "disabled" are two different answers, so we
+              show what the host said, not yes/no. */}
+          <tr><th>DNSSEC</th><td>{snapshot?.dnssec || unknown}</td></tr>
+          <tr><th>DNS over TLS</th><td>{snapshot?.dns_over_tls || unknown}</td></tr>
         </tbody>
       </table>
 
-      <h2>Per-link resolvers</h2>
+      <h2>{t("Per-link resolvers")}</h2>
       {!snapshot?.links?.length ? (
-        <Pusto>This host does not report per-link resolvers; it has one global list.</Pusto>
+        <Empty>{t("This host does not report per-link resolvers; it has one global list.")}</Empty>
       ) : (
         <table>
           <thead>
-            <tr><th>Link</th><th>Servers</th><th>Domains</th><th>Answers other names</th><th>DNSSEC</th><th>DoT</th></tr>
+            <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th>DoT</th></tr>
           </thead>
           <tbody>
             {snapshot.links.map((link) => (
@@ -159,15 +160,16 @@ export function Resolver() {
                 <td>{link.name}</td>
                 <td>{(link.servers ?? []).join(", ") || "—"}</td>
                 <td>{(link.domains ?? []).join(", ") || "—"}</td>
-                {/* Trasa domyslna rozstrzyga, ktory link odpowie na nazwe
-                    spoza swoich domen - i to jest pytanie operatora. */}
+                {/* The default route decides which link answers a name
+                    outside its domains - and that is the operator's
+                    question. */}
                 <td>
                   {link.default_route === undefined ? (
-                    <span className="znacznik nieznany">unknown</span>
+                    unknown
                   ) : link.default_route ? (
-                    "yes"
+                    t("yes")
                   ) : (
-                    "no"
+                    t("no")
                   )}
                 </td>
                 <td>{link.dnssec || "—"}</td>
@@ -178,87 +180,86 @@ export function Resolver() {
         </table>
       )}
 
-      <h2>Test resolution from the host</h2>
-      <p className="podtytul">
-        The panel sits in a different network, so its own answer says nothing
-        about what this host sees. The query runs on the host.
+      <h2>{t("Test resolution from the host")}</h2>
+      <p className="subtitle">
+        {t("The panel sits in a different network, so its own answer says nothing about what this host sees. The query runs on the host.")}
       </p>
-      <div className="filtry">
+      <div className="filters">
         <input
-          value={nazwy}
-          onChange={(e) => setNazwy(e.target.value)}
-          placeholder="Names, comma separated"
+          value={names}
+          onChange={(e) => setNames(e.target.value)}
+          placeholder={t("Names, comma separated")}
           style={{ minWidth: 320 }}
         />
         <button
-          onClick={() => zlec.mutate({ action: "dns.resolve.test", payload: { dns: { names: listaNazw } } })}
-          disabled={!listaNazw.length || zlec.isPending}
+          onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
+          disabled={!nameList.length || request.isPending}
         >
-          Resolve
+          {t("Resolve")}
         </button>
         <button
-          className="wtorny"
-          onClick={() => setFormularz((otwarty) => !otwarty)}
+          className="secondary"
+          onClick={() => setForm((open) => !open)}
           disabled={!snapshot?.writable}
           title={snapshot?.writable ? "" : snapshot?.read_only_reason}
         >
-          {formularz ? "Cancel" : "Change resolver"}
+          {form ? t("Cancel") : t("Change resolver")}
         </button>
       </div>
 
-      {komunikat && <p className="zrodlo" style={{ marginBottom: 12 }}>{komunikat}</p>}
+      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
 
-      {/* Odpowiedzi przychodza razem z wynikiem zadania: to fakt z hosta
-          w konkretnej chwili, a nie stan, ktory da sie odswiezyc. */}
-      {zadanieTestu && (
+      {/* The answers arrive with the job result: a fact from the host at a
+          specific moment, not a state that could be refreshed. */}
+      {testJob && (
         <table>
-          <thead><tr><th>Name</th><th>Addresses</th><th>Answered by</th><th>Took</th></tr></thead>
+          <thead><tr><th>{t("Name")}</th><th>{t("Addresses")}</th><th>{t("Answered by")}</th><th>{t("Took")}</th></tr></thead>
           <tbody>
-            {odpowiedzi.map((zapytanie) => (
-              <tr key={zapytanie.name}>
-                <td>{zapytanie.name}</td>
+            {answers.map((query) => (
+              <tr key={query.name}>
+                <td>{query.name}</td>
                 <td>
-                  {zapytanie.addresses?.length
-                    ? zapytanie.addresses.join(", ")
-                    : <span className="znacznik nieznany">{zapytanie.error || "no answer"}</span>}
+                  {query.addresses?.length
+                    ? query.addresses.join(", ")
+                    : <span className="badge unknown">{query.error || t("no answer")}</span>}
                 </td>
-                <td>{zapytanie.server || "—"}</td>
-                <td>{zapytanie.took_millis} ms</td>
+                <td>{query.server || "—"}</td>
+                <td>{query.took_millis} ms</td>
               </tr>
             ))}
-            {!odpowiedzi.length && (
-              <tr><td colSpan={4}>{ostatniaProba?.status ? "No answers." : "Running…"}</td></tr>
+            {!answers.length && (
+              <tr><td colSpan={4}>{lastAttempt?.status ? t("No answers.") : t("Running…")}</td></tr>
             )}
           </tbody>
         </table>
       )}
 
-      {formularz && (
-        <ZmianaResolvera
-          domyslnyInterfejs={interfejsZarzadzania?.name ?? ""}
-          domyslneSerwery={(snapshot?.servers ?? []).join(", ")}
-          domyslneDomeny={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
-          onZamiar={setZamiar}
+      {form && (
+        <ResolverChange
+          defaultInterface={managementLink?.name ?? ""}
+          defaultServers={(snapshot?.servers ?? []).join(", ")}
+          defaultDomains={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
+          onIntent={setIntent}
         />
       )}
 
-      <SwiezoscModulu fragment={modul.data} />
+      <ModuleFreshness fragment={module.data} />
       {snapshot?.observed_at && (
-        <p className="zrodlo">
-          Resolver read <Czas wartosc={snapshot.observed_at} />
+        <p className="source">
+          {t("Resolver read")} <Time value={snapshot.observed_at} />
         </p>
       )}
 
-      {zamiar && (
-        <PotwierdzenieCelu
+      {intent && (
+        <TargetConfirmation
           host={host}
-          etykieta="Change resolver"
-          opis={zamiar.opis}
-          pracuje={zlec.isPending}
-          onPotwierdz={(powod) =>
-            zlec.mutate({ action: "dns.host.apply", reason: powod, payload: zamiar.payload })
+          label={t("Change resolver")}
+          description={intent.description}
+          busy={request.isPending}
+          onConfirm={(reason) =>
+            request.mutate({ action: "dns.host.apply", reason, payload: intent.payload })
           }
-          onAnuluj={() => setZamiar(null)}
+          onCancel={() => setIntent(null)}
         />
       )}
     </>
@@ -266,71 +267,73 @@ export function Resolver() {
 }
 
 /**
- * Formularz zmiany resolvera. Zmiana idzie przez profil polaczenia, wiec
- * pyta o interfejs: resolver nalezy do interfejsu, a plik jest tylko tym,
- * co usluga z tego wyliczyla.
+ * The resolver change form. The change goes through the connection profile,
+ * so it asks for the interface: the resolver belongs to the interface, and
+ * the file is only what the service computed from it.
  */
-function ZmianaResolvera({
-  domyslnyInterfejs, domyslneSerwery, domyslneDomeny, onZamiar,
+function ResolverChange({
+  defaultInterface, defaultServers, defaultDomains, onIntent,
 }: {
-  domyslnyInterfejs: string;
-  domyslneSerwery: string;
-  domyslneDomeny: string;
-  onZamiar: (zamiar: { opis: string; payload: Record<string, unknown> }) => void;
+  defaultInterface: string;
+  defaultServers: string;
+  defaultDomains: string;
+  onIntent: (intent: { description: string; payload: Record<string, unknown> }) => void;
 }) {
-  const [interfejs, setInterfejs] = useState(domyslnyInterfejs);
-  const [serwery, setSerwery] = useState(domyslneSerwery);
-  const [domeny, setDomeny] = useState(domyslneDomeny);
-  const [pomijajDHCP, setPomijajDHCP] = useState(true);
-  const [okno, setOkno] = useState("120");
+  const t = useT();
+  const [iface, setIface] = useState(defaultInterface);
+  const [servers, setServers] = useState(defaultServers);
+  const [domains, setDomains] = useState(defaultDomains);
+  const [ignoreDHCP, setIgnoreDHCP] = useState(true);
+  const [window, setWindow] = useState("120");
 
-  const lista = (wartosc: string) =>
-    wartosc.split(",").map((element) => element.trim()).filter(Boolean);
+  const list = (value: string) =>
+    value.split(",").map((element) => element.trim()).filter(Boolean);
 
   return (
-    <div className="formularz" style={{ marginBottom: 16 }}>
-      <h2>Change resolver</h2>
-      <p className="podtytul" style={{ margin: 0 }}>
-        A host that cannot resolve names loses the directory, Kerberos and with
-        them logins — so this change is armed with the same rollback timer as an
-        address change.
+    <div className="form" style={{ marginBottom: 16 }}>
+      <h2>{t("Change resolver")}</h2>
+      <p className="subtitle" style={{ margin: 0 }}>
+        {t("A host that cannot resolve names loses the directory, Kerberos and with them logins — so this change is armed with the same rollback timer as an address change.")}
       </p>
-      <div className="filtry">
-        <input value={interfejs} onChange={(e) => setInterfejs(e.target.value)} placeholder="Interface" />
+      <div className="filters">
+        <input value={iface} onChange={(e) => setIface(e.target.value)} placeholder={t("Interface")} />
         <input
-          value={serwery}
-          onChange={(e) => setSerwery(e.target.value)}
-          placeholder="DNS servers, comma separated"
+          value={servers}
+          onChange={(e) => setServers(e.target.value)}
+          placeholder={t("DNS servers, comma separated")}
           style={{ minWidth: 260 }}
         />
-        <input value={domeny} onChange={(e) => setDomeny(e.target.value)} placeholder="Search domains" />
+        <input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={t("Search domains")} />
       </div>
-      <div className="filtry">
-        <label className="przelacznik">
-          <input type="checkbox" checked={pomijajDHCP} onChange={(e) => setPomijajDHCP(e.target.checked)} />
-          Ignore DNS servers offered by DHCP
+      <div className="filters">
+        <label className="toggle">
+          <input type="checkbox" checked={ignoreDHCP} onChange={(e) => setIgnoreDHCP(e.target.checked)} />
+          {t("Ignore DNS servers offered by DHCP")}
         </label>
-        <input value={okno} onChange={(e) => setOkno(e.target.value)} placeholder="Rollback seconds" />
+        <input value={window} onChange={(e) => setWindow(e.target.value)} placeholder={t("Rollback seconds")} />
         <button
           onClick={() =>
-            onZamiar({
-              opis: `${interfejs} will resolve through ${lista(serwery).join(", ")}${
-                lista(domeny).length ? `, searching ${lista(domeny).join(", ")}` : ""
-              }. The host rolls back after ${Number(okno) || 0}s unless the agent confirms it still reaches the panel.`,
+            onIntent({
+              description: t("{iface} will resolve through {servers}{domains}. The host rolls back after {seconds}s unless the agent confirms it still reaches the panel.", {
+                iface,
+                servers: list(servers).join(", "),
+                domains: list(domains).length ? `, ${t("searching {domains}", { domains: list(domains).join(", ") })}` : "",
+                seconds: Number(window) || 0,
+              }),
               payload: {
                 dns: {
-                  interface: interfejs,
-                  servers: lista(serwery),
-                  search_domains: lista(domeny),
-                  ignore_auto_dns: pomijajDHCP,
-                  rollback_seconds: Number(okno) || 0,
+                  interface: iface,
+                  servers: list(servers),
+                  search_domains: list(domains),
+                  ignore_auto_dns: ignoreDHCP,
+                  rollback_seconds: Number(window) || 0,
                 },
               },
             })
           }
-          disabled={!interfejs || lista(serwery).length === 0}
+          disabled={!iface || list(servers).length === 0}
         >
-          Apply resolver
+          {t("Apply resolver")}
         </button>
       </div>
     </div>

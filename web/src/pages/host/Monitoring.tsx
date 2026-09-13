@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Blad, Czas, Pusto } from "../../components/ui";
-import { useHost } from "./wspolne";
+import { ErrorBox, Time, Empty } from "../../components/ui";
+import { useHost } from "./shared";
+import { useT } from "../../i18n";
 
-type Zrodlo = {
+type Source = {
   name: string;
   configured: boolean;
   healthy: boolean;
@@ -27,7 +28,7 @@ type Alert = {
   generator_url?: string;
 };
 
-type Cisza = {
+type Silence = {
   id: string;
   starts_at: string;
   ends_at: string;
@@ -37,32 +38,32 @@ type Cisza = {
   matchers?: { name: string; value: string }[];
 };
 
-type Punkt = { at: string; value: number };
+type Point = { at: string; value: number };
 
-type Szereg = {
+type Series = {
   name: string;
   unit?: string;
-  points?: Punkt[];
+  points?: Point[];
   last?: number;
   query?: string;
   unavailable_reason?: string;
 };
 
-type Raport = {
+type Report = {
   host_id: string;
-  sources: Zrodlo[];
+  sources: Source[];
   label: string;
   links: { dashboard?: string; logs?: string };
   alerts: Alert[];
-  silences: Cisza[];
-  series: Szereg[];
+  silences: Silence[];
+  series: Series[];
   from: string;
   to: string;
   alerts_unavailable_reason?: string;
   metrics_unavailable_reason?: string;
 };
 
-type WynikSondy = {
+type ProbeResult = {
   kind: string;
   target: string;
   reachable: boolean;
@@ -75,173 +76,174 @@ type WynikSondy = {
   error?: string;
 };
 
-type Proba = { status?: string; message?: string; detail?: { probe?: WynikSondy } };
+type Attempt = { status?: string; message?: string; detail?: { probe?: ProbeResult } };
 
 /**
- * Wykres z punktow. Prosty, bo ma odpowiadac na jedno pytanie: czy w tym
- * oknie czasu cos sie zmienilo. Po szczegoly panel prowadzi do dashboardu -
- * nie udaje wlasnej bazy szeregow czasowych.
+ * A chart from points. Simple, because it is to answer one question: did
+ * anything change in this time window. For details the panel leads to the
+ * dashboard - it does not pretend to be a time series database.
  */
-function Iskra({ szereg }: { szereg: Szereg }) {
-  const punkty = szereg.points ?? [];
-  if (szereg.unavailable_reason) {
-    return <span className="znacznik nieznany">{szereg.unavailable_reason}</span>;
+function Sparkline({ series }: { series: Series }) {
+  const t = useT();
+  const points = series.points ?? [];
+  if (series.unavailable_reason) {
+    return <span className="badge unknown">{series.unavailable_reason}</span>;
   }
-  if (!punkty.length) {
-    return <span className="znacznik nieznany">no data in this window</span>;
+  if (!points.length) {
+    return <span className="badge unknown">{t("no data in this window")}</span>;
   }
-  const wartosci = punkty.map((punkt) => punkt.value);
-  const minimum = Math.min(...wartosci);
-  const maksimum = Math.max(...wartosci);
-  const zakres = maksimum - minimum || 1;
-  const szerokosc = 240;
-  const wysokosc = 40;
-  const sciezka = punkty
-    .map((punkt, indeks) => {
-      const x = (indeks / Math.max(1, punkty.length - 1)) * szerokosc;
-      const y = wysokosc - ((punkt.value - minimum) / zakres) * wysokosc;
-      return `${indeks === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  const values = points.map((point) => point.value);
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const range = maximum - minimum || 1;
+  const width = 240;
+  const height = 40;
+  const path = points
+    .map((point, index) => {
+      const x = (index / Math.max(1, points.length - 1)) * width;
+      const y = height - ((point.value - minimum) / range) * height;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
   return (
-    <svg width={szerokosc} height={wysokosc} role="img" aria-label={szereg.name}>
-      <path d={sciezka} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <svg width={width} height={height} role="img" aria-label={series.name}>
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   );
 }
 
 /**
- * Monitoring hosta.
+ * Host monitoring.
  *
- * Panel nie ma wlasnych metryk ani wlasnych regul alertowych: czyta cudze
- * i mowi, skad je wzial oraz z jakiego okna czasu. Awaria monitoringu nie
- * moze zabrac operatorowi zarzadzania hostem, wiec kazde pytanie ma limit
- * czasu, a zrodlo, ktore milczy, jest opisane wprost.
+ * The panel has no metrics and no alert rules of its own: it reads other
+ * systems' and says where it took them from and from which time window. A
+ * monitoring failure must not take host management away from the operator,
+ * so every question has a timeout, and a source that stays silent is
+ * described plainly.
  */
 export function Monitoring() {
+  const t = useT();
   const host = useHost();
   const queryClient = useQueryClient();
-  const [okno, setOkno] = useState("3h");
-  const [komunikat, setKomunikat] = useState("");
-  const [powodCiszy, setPowodCiszy] = useState("");
-  const [minuty, setMinuty] = useState("120");
-  const [sonda, setSonda] = useState("");
-  const [zadanieSondy, setZadanieSondy] = useState("");
+  const [range, setRange] = useState("3h");
+  const [message, setMessage] = useState("");
+  const [silenceReason, setSilenceReason] = useState("");
+  const [minutes, setMinutes] = useState("120");
+  const [probe, setProbe] = useState("");
+  const [probeJob, setProbeJob] = useState("");
 
-  const raport = useQuery({
-    queryKey: ["monitoring", host.id, okno],
-    queryFn: () => api.get<Raport>(`/api/v1/hosts/${host.id}/monitoring?range=${okno}`),
+  const report = useQuery({
+    queryKey: ["monitoring", host.id, range],
+    queryFn: () => api.get<Report>(`/api/v1/hosts/${host.id}/monitoring?range=${range}`),
     refetchInterval: 30000,
   });
 
-  const wyniki = useQuery({
-    queryKey: ["job-attempts", zadanieSondy],
-    queryFn: () => api.get<{ items: Proba[] }>(`/api/v1/jobs/${zadanieSondy}/attempts`),
-    enabled: zadanieSondy !== "",
-    refetchInterval: (zapytanie) => {
-      const proby = (zapytanie.state.data as { items?: Proba[] } | undefined)?.items;
-      return proby?.[proby.length - 1]?.status ? false : 2000;
+  const results = useQuery({
+    queryKey: ["job-attempts", probeJob],
+    queryFn: () => api.get<{ items: Attempt[] }>(`/api/v1/jobs/${probeJob}/attempts`),
+    enabled: probeJob !== "",
+    refetchInterval: (query) => {
+      const attempts = (query.state.data as { items?: Attempt[] } | undefined)?.items;
+      return attempts?.[attempts.length - 1]?.status ? false : 2000;
     },
   });
-  const proby = wyniki.data?.items ?? [];
-  const wynikSondy = proby[proby.length - 1]?.detail?.probe;
+  const attempts = results.data?.items ?? [];
+  const probeResult = attempts[attempts.length - 1]?.detail?.probe;
 
-  const ucisz = useMutation({
-    mutationFn: (tresc: Record<string, unknown>) =>
-      api.post<Cisza>(`/api/v1/hosts/${host.id}/monitoring/silences`, tresc),
-    onSuccess: (cisza) => {
-      setKomunikat(`Silence ${cisza.id.slice(0, 8)} runs until ${new Date(cisza.ends_at).toLocaleString()}.`);
-      setPowodCiszy("");
+  const silence = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Silence>(`/api/v1/hosts/${host.id}/monitoring/silences`, body),
+    onSuccess: (created) => {
+      setMessage(t("Silence {id} runs until {until}.", { id: created.id.slice(0, 8), until: new Date(created.ends_at).toLocaleString() }));
+      setSilenceReason("");
       queryClient.invalidateQueries({ queryKey: ["monitoring", host.id] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const odcisz = useMutation({
+  const unsilence = useMutation({
     mutationFn: (id: string) =>
       api.del(`/api/v1/hosts/${host.id}/monitoring/silences/${encodeURIComponent(id)}`),
     onSuccess: () => {
-      setKomunikat("Silence ended.");
+      setMessage(t("Silence ended."));
       queryClient.invalidateQueries({ queryKey: ["monitoring", host.id] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const zlecSonde = useMutation({
-    mutationFn: (cel: string) =>
+  const runProbe = useMutation({
+    mutationFn: (target: string) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "monitoring.probe.run",
         payload: {
           monitoring: {
-            kind: cel.startsWith("http") ? "http" : "tcp",
-            target: cel,
+            kind: target.startsWith("http") ? "http" : "tcp",
+            target,
           },
         },
       }),
-    onSuccess: (zadanie) => {
-      setZadanieSondy(zadanie.id);
-      setKomunikat(`Probe queued as job ${zadanie.id.slice(0, 8)}.`);
+    onSuccess: (job) => {
+      setProbeJob(job.id);
+      setMessage(t("Probe queued as job {id}.", { id: job.id.slice(0, 8) }));
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  if (raport.error) return <Blad error={raport.error} />;
-  const dane = raport.data;
+  if (report.error) return <ErrorBox error={report.error} />;
+  const data = report.data;
 
   return (
     <>
-      <p className="podtytul">
-        Metrics and alerts come from the systems that already collect them. The
-        panel shows where each number is from and for what window of time — it
-        has no time series database of its own, and no alerting rules of its own.
+      <p className="subtitle">
+        {t("Metrics and alerts come from the systems that already collect them. The panel shows where each number is from and for what window of time — it has no time series database of its own, and no alerting rules of its own.")}
       </p>
 
-      <div className="filtry">
-        {(dane?.sources ?? []).map((zrodlo) => (
+      <div className="filters">
+        {(data?.sources ?? []).map((source) => (
           <span
-            key={zrodlo.name}
-            className={`znacznik ${!zrodlo.configured ? "nieznany" : zrodlo.healthy ? "ok" : "blad"}`}
-            title={zrodlo.reason || zrodlo.url}
+            key={source.name}
+            className={`badge ${!source.configured ? "unknown" : source.healthy ? "ok" : "error"}`}
+            title={source.reason || source.url}
           >
-            {zrodlo.name}
-            {!zrodlo.configured
-              ? " · not configured"
-              : zrodlo.healthy
-                ? ` · ${zrodlo.latency_millis ?? "?"} ms`
-                : " · not answering"}
+            {source.name}
+            {!source.configured
+              ? ` · ${t("not configured")}`
+              : source.healthy
+                ? ` · ${source.latency_millis ?? "?"} ms`
+                : ` · ${t("not answering")}`}
           </span>
         ))}
-        {dane?.label && <span className="zrodlo">seen as {dane.label}</span>}
-        {dane?.links.dashboard && (
-          <a href={dane.links.dashboard} target="_blank" rel="noreferrer">Dashboard</a>
+        {data?.label && <span className="source">{t("seen as {label}", { label: data.label })}</span>}
+        {data?.links.dashboard && (
+          <a href={data.links.dashboard} target="_blank" rel="noreferrer">{t("Dashboard")}</a>
         )}
-        {dane?.links.logs && (
-          <a href={dane.links.logs} target="_blank" rel="noreferrer">Logs</a>
+        {data?.links.logs && (
+          <a href={data.links.logs} target="_blank" rel="noreferrer">{t("Logs")}</a>
         )}
-        <select value={okno} onChange={(e) => setOkno(e.target.value)}>
-          <option value="1h">last hour</option>
-          <option value="3h">last 3 hours</option>
-          <option value="12h">last 12 hours</option>
-          <option value="24h">last day</option>
+        <select value={range} onChange={(e) => setRange(e.target.value)}>
+          <option value="1h">{t("last hour")}</option>
+          <option value="3h">{t("last 3 hours")}</option>
+          <option value="12h">{t("last 12 hours")}</option>
+          <option value="24h">{t("last day")}</option>
         </select>
       </div>
-      {komunikat && <p className="zrodlo" style={{ marginBottom: 12 }}>{komunikat}</p>}
+      {message && <p className="source" style={{ marginBottom: 12 }}>{message}</p>}
 
-      <h2>Active alerts</h2>
-      {dane?.alerts_unavailable_reason ? (
-        <p className="ostrzezenie">
-          <span>Alerts could not be read: {dane.alerts_unavailable_reason}</span>
+      <h2>{t("Active alerts")}</h2>
+      {data?.alerts_unavailable_reason ? (
+        <p className="warning">
+          <span>{t("Alerts could not be read: {reason}", { reason: data.alerts_unavailable_reason })}</span>
         </p>
-      ) : !(dane?.alerts ?? []).length ? (
-        <Pusto>No alert is firing for this host.</Pusto>
+      ) : !(data?.alerts ?? []).length ? (
+        <Empty>{t("No alert is firing for this host.")}</Empty>
       ) : (
         <table>
           <thead>
-            <tr><th>Alert</th><th>Severity</th><th>Since</th><th>Summary</th><th>Silence</th></tr>
+            <tr><th>{t("Alert")}</th><th>{t("Severity")}</th><th>{t("Since")}</th><th>{t("Summary")}</th><th>{t("Silence")}</th></tr>
           </thead>
           <tbody>
-            {(dane?.alerts ?? []).map((alert, indeks) => (
-              <tr key={`${alert.name}-${indeks}`}>
+            {(data?.alerts ?? []).map((alert, index) => (
+              <tr key={`${alert.name}-${index}`}>
                 <td>
                   {alert.generator_url ? (
                     <a href={alert.generator_url} target="_blank" rel="noreferrer">{alert.name}</a>
@@ -249,31 +251,31 @@ export function Monitoring() {
                     alert.name
                   )}
                   {alert.silenced_by?.length ? (
-                    <div className="zrodlo">silenced</div>
+                    <div className="source">{t("silenced")}</div>
                   ) : null}
                 </td>
                 <td>
                   <span
-                    className={`znacznik ${alert.severity === "critical" ? "blad" : alert.severity === "warning" ? "uwaga" : ""}`}
+                    className={`badge ${alert.severity === "critical" ? "error" : alert.severity === "warning" ? "warn" : ""}`}
                   >
-                    {alert.severity || "unknown"}
+                    {alert.severity || t("unknown")}
                   </span>
                 </td>
-                <td><Czas wartosc={alert.starts_at} /></td>
-                <td className="zrodlo">{alert.summary || alert.description}</td>
+                <td><Time value={alert.starts_at} /></td>
+                <td className="source">{alert.summary || alert.description}</td>
                 <td>
                   <button
-                    className="wtorny"
-                    disabled={powodCiszy.trim().length < 8 || ucisz.isPending}
+                    className="secondary"
+                    disabled={silenceReason.trim().length < 8 || silence.isPending}
                     onClick={() =>
-                      ucisz.mutate({
-                        duration_minutes: Number(minuty) || 0,
-                        comment: powodCiszy,
+                      silence.mutate({
+                        duration_minutes: Number(minutes) || 0,
+                        comment: silenceReason,
                         alert_name: alert.name,
                       })
                     }
                   >
-                    Silence this
+                    {t("Silence this")}
                   </button>
                 </td>
               </tr>
@@ -282,46 +284,44 @@ export function Monitoring() {
         </table>
       )}
 
-      <div className="formularz" style={{ marginTop: 12 }}>
-        <h2>Silence</h2>
-        <p className="podtytul" style={{ margin: 0 }}>
-          A silence turns a sensor off, so it always ends: no open-ended silences
-          from here, at most a day, and always with a reason and an owner in the
-          audit trail.
+      <div className="form" style={{ marginTop: 12 }}>
+        <h2>{t("Silence")}</h2>
+        <p className="subtitle" style={{ margin: 0 }}>
+          {t("A silence turns a sensor off, so it always ends: no open-ended silences from here, at most a day, and always with a reason and an owner in the audit trail.")}
         </p>
-        <div className="filtry">
-          <input value={powodCiszy} onChange={(e) => setPowodCiszy(e.target.value)}
-                 placeholder="Reason (at least 8 characters)" style={{ minWidth: 320 }} />
-          <input value={minuty} onChange={(e) => setMinuty(e.target.value)}
-                 placeholder="Minutes" style={{ width: 110 }} />
+        <div className="filters">
+          <input value={silenceReason} onChange={(e) => setSilenceReason(e.target.value)}
+                 placeholder={t("Reason (at least 8 characters)")} style={{ minWidth: 320 }} />
+          <input value={minutes} onChange={(e) => setMinutes(e.target.value)}
+                 placeholder={t("Minutes")} style={{ width: 110 }} />
           <button
-            disabled={powodCiszy.trim().length < 8 || ucisz.isPending}
-            onClick={() => ucisz.mutate({ duration_minutes: Number(minuty) || 0, comment: powodCiszy })}
+            disabled={silenceReason.trim().length < 8 || silence.isPending}
+            onClick={() => silence.mutate({ duration_minutes: Number(minutes) || 0, comment: silenceReason })}
           >
-            Silence every alert of this host
+            {t("Silence every alert of this host")}
           </button>
         </div>
       </div>
 
-      {(dane?.silences ?? []).length > 0 && (
+      {(data?.silences ?? []).length > 0 && (
         <>
-          <h2>Silences in force</h2>
+          <h2>{t("Silences in force")}</h2>
           <table>
             <thead>
-              <tr><th>Until</th><th>Scope</th><th>Reason</th><th>By</th><th></th></tr>
+              <tr><th>{t("Until")}</th><th>{t("Scope")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
             </thead>
             <tbody>
-              {(dane?.silences ?? []).map((cisza) => (
-                <tr key={cisza.id}>
-                  <td><Czas wartosc={cisza.ends_at} /></td>
-                  <td className="zrodlo">
-                    {(cisza.matchers ?? []).map((m) => `${m.name}="${m.value}"`).join(", ")}
+              {(data?.silences ?? []).map((entry) => (
+                <tr key={entry.id}>
+                  <td><Time value={entry.ends_at} /></td>
+                  <td className="source">
+                    {(entry.matchers ?? []).map((m) => `${m.name}="${m.value}"`).join(", ")}
                   </td>
-                  <td>{cisza.comment}</td>
-                  <td className="zrodlo">{cisza.created_by}</td>
+                  <td>{entry.comment}</td>
+                  <td className="source">{entry.created_by}</td>
                   <td>
-                    <button className="wtorny" onClick={() => odcisz.mutate(cisza.id)}>
-                      End now
+                    <button className="secondary" onClick={() => unsilence.mutate(entry.id)}>
+                      {t("End now")}
                     </button>
                   </td>
                 </tr>
@@ -331,86 +331,84 @@ export function Monitoring() {
         </>
       )}
 
-      <h2>Metrics</h2>
-      {dane?.metrics_unavailable_reason ? (
-        <Pusto>{dane.metrics_unavailable_reason}</Pusto>
+      <h2>{t("Metrics")}</h2>
+      {data?.metrics_unavailable_reason ? (
+        <Empty>{data.metrics_unavailable_reason}</Empty>
       ) : (
         <>
           <table>
-            <thead><tr><th>Series</th><th>Last</th><th>Window</th><th>Query</th></tr></thead>
+            <thead><tr><th>{t("Series")}</th><th>{t("Last")}</th><th>{t("Window")}</th><th>{t("Query")}</th></tr></thead>
             <tbody>
-              {(dane?.series ?? []).map((szereg) => (
-                <tr key={szereg.name}>
-                  <td>{szereg.name}</td>
+              {(data?.series ?? []).map((series) => (
+                <tr key={series.name}>
+                  <td>{series.name}</td>
                   <td>
-                    {szereg.last === undefined
-                      ? <span className="znacznik nieznany">unknown</span>
-                      : `${szereg.last.toFixed(2)}${szereg.unit ?? ""}`}
+                    {series.last === undefined
+                      ? <span className="badge unknown">{t("unknown")}</span>
+                      : `${series.last.toFixed(2)}${series.unit ?? ""}`}
                   </td>
-                  <td><Iskra szereg={szereg} /></td>
-                  <td className="zrodlo" style={{ maxWidth: 420, overflowWrap: "anywhere" }}>
-                    {szereg.query}
+                  <td><Sparkline series={series} /></td>
+                  <td className="source" style={{ maxWidth: 420, overflowWrap: "anywhere" }}>
+                    {series.query}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {dane && (
-            <p className="zrodlo">
-              Source: {(dane.sources.find((z) => z.name === "prometheus")?.url) || "—"} ·
-              window <Czas wartosc={dane.from} /> to <Czas wartosc={dane.to} />
+          {data && (
+            <p className="source">
+              {t("Source")}: {(data.sources.find((s) => s.name === "prometheus")?.url) || "—"} ·{" "}
+              {t("window")} <Time value={data.from} /> {t("to")} <Time value={data.to} />
             </p>
           )}
         </>
       )}
 
-      <h2>Probe from this host</h2>
-      <p className="podtytul">
-        What the host itself sees. An alert can say a service is down while it
-        answers from here — and then the problem is the network between them,
-        not the service.
+      <h2>{t("Probe from this host")}</h2>
+      <p className="subtitle">
+        {t("What the host itself sees. An alert can say a service is down while it answers from here — and then the problem is the network between them, not the service.")}
       </p>
-      <div className="filtry">
-        <input value={sonda} onChange={(e) => setSonda(e.target.value)}
+      <div className="filters">
+        <input value={probe} onChange={(e) => setProbe(e.target.value)}
                placeholder="https://service.example.test/health or db.example.test:5432"
                style={{ minWidth: 380 }} />
         <button
-          disabled={!sonda || zlecSonde.isPending || host.connection_state !== "online"}
-          onClick={() => zlecSonde.mutate(sonda)}
+          disabled={!probe || runProbe.isPending || host.connection_state !== "online"}
+          onClick={() => runProbe.mutate(probe)}
         >
-          Probe
+          {t("Probe")}
         </button>
       </div>
-      {wynikSondy && (
+      {probeResult && (
         <table>
           <tbody>
             <tr>
-              <td>Result</td>
+              <td>{t("Result")}</td>
               <td>
-                {wynikSondy.passed ? (
-                  <span className="znacznik ok">as expected</span>
-                ) : wynikSondy.reachable ? (
-                  <span className="znacznik uwaga">answers, but not as expected</span>
+                {probeResult.passed ? (
+                  <span className="badge ok">{t("as expected")}</span>
+                ) : probeResult.reachable ? (
+                  <span className="badge warn">{t("answers, but not as expected")}</span>
                 ) : (
-                  <span className="znacznik blad">no answer</span>
+                  <span className="badge error">{t("no answer")}</span>
                 )}
               </td>
             </tr>
-            <tr><td>Target</td><td className="zrodlo">{wynikSondy.target}</td></tr>
-            <tr><td>Took</td><td>{wynikSondy.duration_millis} ms</td></tr>
-            {wynikSondy.status_code !== undefined && (
-              <tr><td>Status</td><td>{wynikSondy.status_code}</td></tr>
+            <tr><td>{t("Target")}</td><td className="source">{probeResult.target}</td></tr>
+            <tr><td>{t("Took")}</td><td>{probeResult.duration_millis} ms</td></tr>
+            {probeResult.status_code !== undefined && (
+              <tr><td>{t("Status")}</td><td>{probeResult.status_code}</td></tr>
             )}
-            {wynikSondy.tls_expiry && (
+            {probeResult.tls_expiry && (
               <tr>
-                <td>Certificate</td>
+                <td>{t("Certificate")}</td>
                 <td>
-                  valid until <Czas wartosc={wynikSondy.tls_expiry} />
-                  <div className="zrodlo">{wynikSondy.tls_issuer}</div>
+                  {t("valid until")} <Time value={probeResult.tls_expiry} />
+                  <div className="source">{probeResult.tls_issuer}</div>
                 </td>
               </tr>
             )}
-            {wynikSondy.error && <tr><td>Detail</td><td className="zrodlo">{wynikSondy.error}</td></tr>}
+            {probeResult.error && <tr><td>{t("Detail")}</td><td className="source">{probeResult.error}</td></tr>}
           </tbody>
         </table>
       )}

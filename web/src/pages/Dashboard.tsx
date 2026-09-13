@@ -1,38 +1,40 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ODSTEP_ODSWIEZANIA } from "../lib/strumien";
+import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetSummary, Host } from "../lib/types";
-import { Blad, Czas, Pusto, StanZadania } from "../components/ui";
+import { ErrorBox, Time, Empty, JobState } from "../components/ui";
+import { useT } from "../i18n";
 
 /**
- * Pulpit pokazuje wylacznie dane wymagajace decyzji. Nie jest sciana
- * dekoracyjnych wykresow: kazdy kafelek prowadzi do konkretnego dzialania.
+ * The dashboard shows only data that needs a decision. It is not a wall of
+ * decorative charts: every tile leads to a specific action.
  */
-export function Pulpit() {
-  const podsumowanie = useQuery({
+export function Dashboard() {
+  const t = useT();
+  const summary = useQuery({
     queryKey: ["summary"],
     queryFn: () => api.get<FleetSummary>("/api/v1/fleet/summary"),
-    refetchInterval: ODSTEP_ODSWIEZANIA,
+    refetchInterval: REFRESH_INTERVAL,
   });
-  const hosty = useQuery({
+  const hosts = useQuery({
     queryKey: ["hosts"],
     queryFn: () => api.get<Collection<Host>>("/api/v1/hosts?limit=500"),
-    refetchInterval: ODSTEP_ODSWIEZANIA,
+    refetchInterval: REFRESH_INTERVAL,
   });
-  const kampanie = useQuery({
+  const campaigns = useQuery({
     queryKey: ["campaigns"],
     queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=20"),
   });
-  const audyt = useQuery({
+  const audit = useQuery({
     queryKey: ["audit", "recent"],
     queryFn: () => api.get<Collection<AuditEvent>>("/api/v1/audit?limit=50"),
   });
 
-  if (podsumowanie.error) return <Blad error={podsumowanie.error} />;
-  const s = podsumowanie.data;
+  if (summary.error) return <ErrorBox error={summary.error} />;
+  const s = summary.data;
 
-  const wymagajaUwagi = (hosty.data?.items ?? []).filter(
+  const needingAttention = (hosts.data?.items ?? []).filter(
     (host) =>
       host.connection_state !== "online" ||
       host.reboot_required === true ||
@@ -41,85 +43,85 @@ export function Pulpit() {
       (host.identity.enrolled && host.identity.sssd_online === false),
   );
 
-  const aktywneKampanie = (kampanie.data?.items ?? []).filter((kampania) =>
-    ["canary", "running", "paused", "awaiting_approval"].includes(kampania.state),
+  const activeCampaigns = (campaigns.data?.items ?? []).filter((campaign) =>
+    ["canary", "running", "paused", "awaiting_approval"].includes(campaign.state),
   );
 
-  const odmowy = (audyt.data?.items ?? []).filter((zdarzenie) => zdarzenie.outcome === "denied");
+  const denials = (audit.data?.items ?? []).filter((event) => event.outcome === "denied");
 
   return (
     <>
-      <h1>Fleet dashboard</h1>
-      <p className="podtytul">Only what needs a decision.</p>
+      <h1>{t("Fleet dashboard")}</h1>
+      <p className="subtitle">{t("Only what needs a decision.")}</p>
 
-      <div className="kafelki">
-        <Kafelek etykieta="Hosts" wartosc={s?.hosts} />
-        <Kafelek etykieta="Online" wartosc={s?.online} />
-        <Kafelek etykieta="Offline" wartosc={s?.offline} alarm={(s?.offline ?? 0) > 0} />
-        <Kafelek etykieta="Active sessions" wartosc={s?.active_sessions} />
-        <Kafelek etykieta="Reboot required" wartosc={s?.reboot_required} uwaga={(s?.reboot_required ?? 0) > 0} />
-        <Kafelek etykieta="With failed units" wartosc={s?.with_failed_units} uwaga={(s?.with_failed_units ?? 0) > 0} />
-        <Kafelek etykieta="Security updates" wartosc={s?.hosts_with_security_updates} uwaga={(s?.hosts_with_security_updates ?? 0) > 0} />
-        <Kafelek etykieta="Quarantined" wartosc={s?.quarantined_hosts} alarm={(s?.quarantined_hosts ?? 0) > 0} />
+      <div className="tiles">
+        <Tile label={t("Hosts")} value={s?.hosts} />
+        <Tile label={t("Online")} value={s?.online} />
+        <Tile label={t("Offline")} value={s?.offline} alarm={(s?.offline ?? 0) > 0} />
+        <Tile label={t("Active sessions")} value={s?.active_sessions} />
+        <Tile label={t("Reboot required")} value={s?.reboot_required} warn={(s?.reboot_required ?? 0) > 0} />
+        <Tile label={t("With failed units")} value={s?.with_failed_units} warn={(s?.with_failed_units ?? 0) > 0} />
+        <Tile label={t("Security updates")} value={s?.hosts_with_security_updates} warn={(s?.hosts_with_security_updates ?? 0) > 0} />
+        <Tile label={t("Quarantined")} value={s?.quarantined_hosts} alarm={(s?.quarantined_hosts ?? 0) > 0} />
       </div>
 
-      <h2>Hosts needing attention</h2>
-      {wymagajaUwagi.length === 0 ? (
-        <Pusto>No host needs attention.</Pusto>
+      <h2>{t("Hosts needing attention")}</h2>
+      {needingAttention.length === 0 ? (
+        <Empty>{t("No host needs attention.")}</Empty>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Host</th><th>State</th><th>Reason</th><th>Last seen</th>
+              <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Reason")}</th><th>{t("Last seen")}</th>
             </tr>
           </thead>
           <tbody>
-            {wymagajaUwagi.map((host) => (
+            {needingAttention.map((host) => (
               <tr key={host.id}>
                 <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
-                <td><span className="znacznik">{host.connection_state}</span></td>
-                <td>{powodyUwagi(host).join(", ")}</td>
-                <td><Czas wartosc={host.last_seen_at} /></td>
+                <td><span className="badge">{t(host.connection_state)}</span></td>
+                <td>{attentionReasons(host, t).join(", ")}</td>
+                <td><Time value={host.last_seen_at} /></td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      <h2>Campaigns in progress</h2>
-      {aktywneKampanie.length === 0 ? (
-        <Pusto>No campaigns need attention.</Pusto>
+      <h2>{t("Campaigns in progress")}</h2>
+      {activeCampaigns.length === 0 ? (
+        <Empty>{t("No campaigns need attention.")}</Empty>
       ) : (
         <table>
           <thead>
-            <tr><th>Name</th><th>State</th><th>Operation</th><th>Pause reason</th></tr>
+            <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th>{t("Pause reason")}</th></tr>
           </thead>
           <tbody>
-            {aktywneKampanie.map((kampania) => (
-              <tr key={kampania.id}>
-                <td><Link to={`/campaigns/${kampania.id}`}>{kampania.name}</Link></td>
-                <td><StanZadania stan={kampania.state} /></td>
-                <td>{kampania.action_type}</td>
-                <td>{kampania.pause_reason || ""}</td>
+            {activeCampaigns.map((campaign) => (
+              <tr key={campaign.id}>
+                <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
+                <td><JobState state={campaign.state} /></td>
+                <td>{campaign.action_type}</td>
+                <td>{campaign.pause_reason || ""}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      <h2>Recent access denials</h2>
-      {odmowy.length === 0 ? (
-        <Pusto>No denials in recent events.</Pusto>
+      <h2>{t("Recent access denials")}</h2>
+      {denials.length === 0 ? (
+        <Empty>{t("No denials in recent events.")}</Empty>
       ) : (
         <table>
-          <thead><tr><th>Time</th><th>Actor</th><th>Operation</th><th>Reason</th></tr></thead>
+          <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Operation")}</th><th>{t("Reason")}</th></tr></thead>
           <tbody>
-            {odmowy.slice(0, 10).map((zdarzenie) => (
-              <tr key={zdarzenie.id}>
-                <td><Czas wartosc={zdarzenie.occurred_at} /></td>
-                <td>{zdarzenie.actor_id}</td>
-                <td>{zdarzenie.action}</td>
-                <td>{String(zdarzenie.detail?.reason ?? "")}</td>
+            {denials.slice(0, 10).map((event) => (
+              <tr key={event.id}>
+                <td><Time value={event.occurred_at} /></td>
+                <td>{event.actor_id}</td>
+                <td>{event.action}</td>
+                <td>{String(event.detail?.reason ?? "")}</td>
               </tr>
             ))}
           </tbody>
@@ -129,24 +131,24 @@ export function Pulpit() {
   );
 }
 
-function powodyUwagi(host: Host): string[] {
-  const powody: string[] = [];
-  if (host.connection_state !== "online") powody.push("no connection");
-  if (host.reboot_required) powody.push("wymaga restartu");
-  if ((host.failed_units ?? 0) > 0) powody.push(`${host.failed_units} jednostek w bledzie`);
-  if (host.package_database_broken) powody.push("package database needs repair");
-  if (host.identity.enrolled && host.identity.sssd_online === false) powody.push("SSSD offline");
-  return powody;
+function attentionReasons(host: Host, t: (text: string, params?: Record<string, string | number>) => string): string[] {
+  const reasons: string[] = [];
+  if (host.connection_state !== "online") reasons.push(t("no connection"));
+  if (host.reboot_required) reasons.push(t("reboot required"));
+  if ((host.failed_units ?? 0) > 0) reasons.push(t("{n} failed units", { n: host.failed_units ?? 0 }));
+  if (host.package_database_broken) reasons.push(t("package database needs repair"));
+  if (host.identity.enrolled && host.identity.sssd_online === false) reasons.push(t("SSSD offline"));
+  return reasons;
 }
 
-function Kafelek({
-  etykieta, wartosc, uwaga, alarm,
-}: { etykieta: string; wartosc?: number; uwaga?: boolean; alarm?: boolean }) {
-  const klasa = alarm ? "kafelek blad" : uwaga ? "kafelek uwaga" : "kafelek";
+function Tile({
+  label, value, warn, alarm,
+}: { label: string; value?: number; warn?: boolean; alarm?: boolean }) {
+  const kind = alarm ? "tile error" : warn ? "tile warn" : "tile";
   return (
-    <div className={klasa}>
-      <div className="etykieta">{etykieta}</div>
-      <div className="wartosc">{wartosc ?? "—"}</div>
+    <div className={kind}>
+      <div className="label">{label}</div>
+      <div className="value">{value ?? "—"}</div>
     </div>
   );
 }

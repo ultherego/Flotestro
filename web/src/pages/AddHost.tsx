@@ -2,16 +2,17 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Blad, Czas, Pusto } from "../components/ui";
+import { ErrorBox, Time, Empty } from "../components/ui";
+import { useT } from "../i18n";
 
-type StanKroku = "waiting" | "done" | "failed";
+type StepState = "waiting" | "done" | "failed";
 
-type KrokInstalacji = {
+type InstallationStep = {
   key: "token" | "certificate" | "connected" | "inventory";
-  state: StanKroku;
+  state: StepState;
 };
 
-type Zamowienie = {
+type Order = {
   id: string;
   description?: string;
   site: string;
@@ -25,263 +26,260 @@ type Zamowienie = {
   expires_at: string;
   created_by: string;
   created_at: string;
-  steps?: KrokInstalacji[];
+  steps?: InstallationStep[];
 };
 
-/** Zamowienie zaraz po utworzeniu - jedyny moment, w ktorym token istnieje. */
-type NoweZamowienie = Zamowienie & { token: string };
+/** The order right after creation - the only moment the token exists. */
+type NewOrder = Order & { token: string };
 
-/** Opis kroku instalacji w jezyku operatora, a nie kodu. */
-const opisyKrokow: Record<KrokInstalacji["key"], string> = {
+/** The installation step described in the operator's language, not the code's. */
+const stepDescriptions: Record<InstallationStep["key"], string> = {
   token: "token accepted",
   certificate: "certificate issued",
   connected: "agent online",
   inventory: "inventory received",
 };
 
-/** Znak stanu kroku. Sam kolor nie wystarczy: stan musi dac sie przeczytac. */
-function znakKroku(stan: StanKroku): string {
-  if (stan === "done") return "✓";
-  if (stan === "failed") return "✕";
+/** The step state mark. Colour alone is not enough: the state must be readable. */
+function stepMark(state: StepState): string {
+  if (state === "done") return "✓";
+  if (state === "failed") return "✕";
   return "…";
 }
 
 /**
- * Dodanie hosta do floty.
+ * Adding a host to the fleet.
  *
- * Ekran prowadzi przez jedna decyzje naraz i pokazuje na zywo, co host juz
- * zrobil. Token pojawia sie wylacznie po utworzeniu zamowienia i nie wraca po
- * odswiezeniu strony: jest sekretem jednorazowym, a nie polem do odczytania.
- * Panel nie sklada za operatora polecenia powloki z tokenem w srodku - token
- * wkleja sie w ukrytym pytaniu narzedzia na hoscie.
+ * The screen leads through one decision at a time and shows live what the
+ * host has already done. The token appears only after the order is created
+ * and does not come back after a page refresh: it is a one-time secret, not
+ * a field to read. The panel does not compose a shell command with the token
+ * inside for the operator - the token is pasted into the hidden prompt of
+ * the tool on the host.
  */
-export function DodajHost() {
+export function AddHost() {
+  const t = useT();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [opis, setOpis] = useState("");
+  const [description, setDescription] = useState("");
   const [site, setSite] = useState("default");
-  const [srodowisko, setSrodowisko] = useState("unassigned");
-  const [minuty, setMinuty] = useState(15);
-  const [rodzina, setRodzina] = useState<"debian" | "rpm">("debian");
-  const [utworzone, setUtworzone] = useState<NoweZamowienie | null>(null);
-  const [skopiowane, setSkopiowane] = useState(false);
-  const [komunikat, setKomunikat] = useState("");
+  const [environment, setEnvironment] = useState("unassigned");
+  const [minutes, setMinutes] = useState(15);
+  const [family, setFamily] = useState<"debian" | "rpm">("debian");
+  const [created, setCreated] = useState<NewOrder | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [message, setMessage] = useState("");
 
-  const lista = useQuery({
+  const list = useQuery({
     queryKey: ["enrollment-requests"],
-    queryFn: () => api.get<{ items: Zamowienie[] }>("/api/v1/enrollment-requests"),
+    queryFn: () => api.get<{ items: Order[] }>("/api/v1/enrollment-requests"),
   });
 
-  // Postep instalacji odswieza sie sam, dopoki cos jeszcze moze sie zmienic.
-  const postep = useQuery({
-    queryKey: ["enrollment-request", utworzone?.id],
-    queryFn: () => api.get<Zamowienie>(`/api/v1/enrollment-requests/${utworzone?.id}`),
-    enabled: !!utworzone,
-    refetchInterval: (zapytanie) =>
-      zapytanie.state.data?.status === "pending" ? 3000 : false,
+  // The installation progress refreshes itself as long as something can still change.
+  const progress = useQuery({
+    queryKey: ["enrollment-request", created?.id],
+    queryFn: () => api.get<Order>(`/api/v1/enrollment-requests/${created?.id}`),
+    enabled: !!created,
+    refetchInterval: (query) =>
+      query.state.data?.status === "pending" ? 3000 : false,
   });
 
-  const zamow = useMutation({
+  const order = useMutation({
     mutationFn: () =>
-      api.post<NoweZamowienie>("/api/v1/enrollment-requests", {
-        description: opis,
+      api.post<NewOrder>("/api/v1/enrollment-requests", {
+        description,
         site,
-        environment: srodowisko,
-        ttl_minutes: minuty,
+        environment,
+        ttl_minutes: minutes,
       }),
-    onSuccess: (zamowienie) => {
-      setUtworzone(zamowienie);
-      setSkopiowane(false);
-      setKomunikat("");
+    onSuccess: (result) => {
+      setCreated(result);
+      setCopied(false);
+      setMessage("");
       queryClient.invalidateQueries({ queryKey: ["enrollment-requests"] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const cofnij = useMutation({
+  const revoke = useMutation({
     mutationFn: (id: string) => api.post(`/api/v1/enrollment-requests/${id}/revoke`, {}),
-    onSuccess: (_wynik, id) => {
-      if (utworzone?.id === id) setUtworzone(null);
-      setKomunikat("Enrollment request revoked; the token no longer works.");
+    onSuccess: (_result, id) => {
+      if (created?.id === id) setCreated(null);
+      setMessage(t("Enrollment request revoked; the token no longer works."));
       queryClient.invalidateQueries({ queryKey: ["enrollment-requests"] });
     },
-    onError: (error) => setKomunikat(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  if (lista.error) return <Blad error={lista.error} />;
+  if (list.error) return <ErrorBox error={list.error} />;
 
-  const stan = postep.data ?? utworzone;
-  const kroki = stan?.steps ?? [];
-  const hostGotowy = stan?.enrolled_host_id;
-  const oczekujace = (lista.data?.items ?? []).filter((wpis) => wpis.status === "pending");
+  const state = progress.data ?? created;
+  const steps = state?.steps ?? [];
+  const hostReady = state?.enrolled_host_id;
+  const pending = (list.data?.items ?? []).filter((entry) => entry.status === "pending");
 
   return (
     <>
-      <h1>Add host</h1>
-      <p className="podtytul">
-        A host joins the fleet by proving it holds a one-time token, then
-        keeping the certificate the panel issues for it. The token is shown
-        once, here, and never again — it is not stored in this browser and
-        cannot be read back from the panel.
+      <h1>{t("Add host")}</h1>
+      <p className="subtitle">
+        {t("A host joins the fleet by proving it holds a one-time token, then keeping the certificate the panel issues for it. The token is shown once, here, and never again — it is not stored in this browser and cannot be read back from the panel.")}
       </p>
 
-      {!utworzone ? (
-        <div className="formularz">
-          <h2>1. What is being installed</h2>
+      {!created ? (
+        <div className="form">
+          <h2>{t("1. What is being installed")}</h2>
           <label>
-            What this host is for
+            {t("What this host is for")}
             <input
-              value={opis}
-              onChange={(e) => setOpis(e.target.value)}
-              placeholder="web-042, Warsaw production"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t("web-042, Warsaw production")}
             />
           </label>
-          <div className="siatka-dwie">
+          <div className="grid-two">
             <label>
-              Site
+              {t("Site")}
               <input value={site} onChange={(e) => setSite(e.target.value)} />
             </label>
             <label>
-              Environment
-              <input value={srodowisko} onChange={(e) => setSrodowisko(e.target.value)} />
+              {t("Environment")}
+              <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
             </label>
           </div>
           <label>
-            {/* Krotki termin jest zabezpieczeniem, a nie niewygoda: token,
-                ktory lezy godzinami, jest sekretem czekajacym na wyciek. */}
-            Token valid for (minutes, at most 24 h)
+            {/* A short deadline is a safeguard, not an inconvenience: a token
+                that lies around for hours is a secret waiting to leak. */}
+            {t("Token valid for (minutes, at most 24 h)")}
             <input
               type="number"
               min={1}
               max={1440}
-              value={minuty}
-              onChange={(e) => setMinuty(Number(e.target.value))}
+              value={minutes}
+              onChange={(e) => setMinutes(Number(e.target.value))}
             />
           </label>
-          <div className="operacje">
-            <button onClick={() => zamow.mutate()} disabled={zamow.isPending}>
-              Create enrollment token
+          <div className="operations">
+            <button onClick={() => order.mutate()} disabled={order.isPending}>
+              {t("Create enrollment token")}
             </button>
           </div>
         </div>
       ) : (
-        <div className="formularz">
-          <h2>2. Install on the host</h2>
-          <p className="zrodlo">
-            Site {utworzone.site} · environment {utworzone.environment} · token expires{" "}
-            <Czas wartosc={utworzone.expires_at} />
+        <div className="form">
+          <h2>{t("2. Install on the host")}</h2>
+          <p className="source">
+            {t("Site {site} · environment {environment} · token expires", { site: created.site, environment: created.environment })}{" "}
+            <Time value={created.expires_at} />
           </p>
 
-          <div className="operacje" style={{ marginBottom: 12 }}>
+          <div className="operations" style={{ marginBottom: 12 }}>
             <button
               onClick={() => {
-                navigator.clipboard?.writeText(utworzone.token);
-                setSkopiowane(true);
+                navigator.clipboard?.writeText(created.token);
+                setCopied(true);
               }}
             >
-              {skopiowane ? "Token copied" : "Copy token"}
+              {copied ? t("Token copied") : t("Copy token")}
             </button>
-            <span className="zrodlo">
-              Shown once. Paste it into the hidden prompt on the host; do not put
-              it in a shell command — the command line is visible to every user
-              of that machine.
+            <span className="source">
+              {t("Shown once. Paste it into the hidden prompt on the host; do not put it in a shell command — the command line is visible to every user of that machine.")}
             </span>
           </div>
 
-          <div className="operacje" style={{ marginBottom: 12 }}>
+          <div className="operations" style={{ marginBottom: 12 }}>
             <button
-              className={rodzina === "debian" ? "" : "drugorzedny"}
-              onClick={() => setRodzina("debian")}
+              className={family === "debian" ? "" : "secondary"}
+              onClick={() => setFamily("debian")}
             >
               Debian / Ubuntu
             </button>
             <button
-              className={rodzina === "rpm" ? "" : "drugorzedny"}
-              onClick={() => setRodzina("rpm")}
+              className={family === "rpm" ? "" : "secondary"}
+              onClick={() => setFamily("rpm")}
             >
               Fedora / RHEL
             </button>
           </div>
-          <ol className="kroki">
+          <ol className="steps">
             <li>
-              Install the agent package
+              {t("Install the agent package")}
               <pre>
-                {rodzina === "debian"
+                {family === "debian"
                   ? "sudo apt-get install flotestro-agent"
                   : "sudo dnf install flotestro-agent"}
               </pre>
             </li>
             <li>
-              Point it at this panel in <code>/etc/flotestro/agent.yaml</code>
+              {t("Point it at this panel in")} <code>/etc/flotestro/agent.yaml</code>
               <pre>
                 {`connection:\n  enrollment_url: "${window.location.origin.replace(/:\d+$/, ":8444")}"\n  gateway_urls: ["${window.location.origin.replace(/:\d+$/, ":8443")}"]`}
               </pre>
             </li>
             <li>
-              Register the host and paste the token when asked
+              {t("Register the host and paste the token when asked")}
               <pre>sudo -u flotestro-agent flotestro-agentctl enroll</pre>
             </li>
             <li>
-              Start the agent
+              {t("Start the agent")}
               <pre>sudo systemctl start flotestro-agent.service</pre>
             </li>
           </ol>
 
-          <h2>3. Enrollment status</h2>
-          <ul className="kroki" aria-live="polite">
-            {kroki.map((krok) => (
-              <li key={krok.key}>
-                <span className={`znacznik ${krok.state === "done" ? "ok" : krok.state === "failed" ? "uwaga" : "nieznany"}`}>
-                  {znakKroku(krok.state)}
+          <h2>{t("3. Enrollment status")}</h2>
+          <ul className="steps" aria-live="polite">
+            {steps.map((step) => (
+              <li key={step.key}>
+                <span className={`badge ${step.state === "done" ? "ok" : step.state === "failed" ? "warn" : "unknown"}`}>
+                  {stepMark(step.state)}
                 </span>{" "}
-                {opisyKrokow[krok.key]}
+                {t(stepDescriptions[step.key])}
               </li>
             ))}
-            {!kroki.length && <li className="zrodlo">waiting for the host…</li>}
+            {!steps.length && <li className="source">{t("waiting for the host…")}</li>}
           </ul>
 
-          <div className="operacje">
-            {hostGotowy && (
-              <button onClick={() => navigate(`/hosts/${hostGotowy}/overview`)}>
-                Open host
+          <div className="operations">
+            {hostReady && (
+              <button onClick={() => navigate(`/hosts/${hostReady}/overview`)}>
+                {t("Open host")}
               </button>
             )}
-            <button className="drugorzedny" onClick={() => cofnij.mutate(utworzone.id)}>
-              Revoke token
+            <button className="secondary" onClick={() => revoke.mutate(created.id)}>
+              {t("Revoke token")}
             </button>
-            <button className="drugorzedny" onClick={() => setUtworzone(null)}>
-              Add another host
+            <button className="secondary" onClick={() => setCreated(null)}>
+              {t("Add another host")}
             </button>
           </div>
         </div>
       )}
 
-      {komunikat && <p className="zrodlo" style={{ margin: "12px 0" }}>{komunikat}</p>}
+      {message && <p className="source" style={{ margin: "12px 0" }}>{message}</p>}
 
-      <h2>Pending installations</h2>
-      {!oczekujace.length ? (
-        <Pusto>No installation is waiting for a host right now.</Pusto>
+      <h2>{t("Pending installations")}</h2>
+      {!pending.length ? (
+        <Empty>{t("No installation is waiting for a host right now.")}</Empty>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>What for</th><th>Scope</th><th>Uses</th><th>Expires</th><th>Requested by</th><th></th>
+              <th>{t("What for")}</th><th>{t("Scope")}</th><th>{t("Uses")}</th><th>{t("Expires")}</th><th>{t("Requested by")}</th><th></th>
             </tr>
           </thead>
           <tbody>
-            {oczekujace.map((wpis) => (
-              <tr key={wpis.id}>
+            {pending.map((entry) => (
+              <tr key={entry.id}>
                 <td>
-                  {wpis.description || "—"}
-                  <div className="zrodlo">{wpis.purpose}</div>
+                  {entry.description || "—"}
+                  <div className="source">{entry.purpose}</div>
                 </td>
-                <td className="zrodlo">{wpis.site} / {wpis.environment}</td>
-                <td className="zrodlo">{wpis.uses} / {wpis.max_uses}</td>
-                <td className="zrodlo"><Czas wartosc={wpis.expires_at} /></td>
-                <td className="zrodlo">{wpis.created_by}</td>
+                <td className="source">{entry.site} / {entry.environment}</td>
+                <td className="source">{entry.uses} / {entry.max_uses}</td>
+                <td className="source"><Time value={entry.expires_at} /></td>
+                <td className="source">{entry.created_by}</td>
                 <td>
-                  <button className="drugorzedny" onClick={() => cofnij.mutate(wpis.id)}>
-                    Revoke
+                  <button className="secondary" onClick={() => revoke.mutate(entry.id)}>
+                    {t("Revoke")}
                   </button>
                 </td>
               </tr>
