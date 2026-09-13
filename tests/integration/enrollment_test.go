@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
@@ -475,4 +477,42 @@ func TestRevokedHostIsNotReleasedWithoutRecovery(t *testing.T) {
 	// authentication is refreshed.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
 		map[string]any{"reason": "again"}, nil, http.StatusBadRequest)
+}
+
+// TestEnrollmentOrderIsIdempotent guards the contract an automation relies
+// on: the same order under the same key returns the order already placed,
+// without a second token - and without repeating the token, which was
+// shown once.
+func TestEnrollmentOrderIsIdempotent(t *testing.T) {
+	h := newHarness(t)
+	key := uuid.NewString()
+	body := map[string]any{
+		"description": "idempotent order test", "site": "lab", "environment": "test",
+		"kind": "agent", "purpose": "new", "ttl_minutes": 5,
+	}
+	first := h.postWithKey("/api/v1/enrollment-requests", body, key, http.StatusCreated)
+	if first["token"] == nil || first["token"] == "" {
+		t.Fatal("the first order shows no token")
+	}
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+first["id"].(string)+"/revoke",
+			map[string]any{"reason": "end of the test"}, nil, 0)
+	})
+
+	second := h.postWithKey("/api/v1/enrollment-requests", body, key, http.StatusOK)
+	if second["id"] != first["id"] {
+		t.Fatalf("the repeat created another order: %v, first %v", second["id"], first["id"])
+	}
+	if token, _ := second["token"].(string); token != "" {
+		t.Error("the repeat showed the token again")
+	}
+	// Another key is another order.
+	third := h.postWithKey("/api/v1/enrollment-requests", body, uuid.NewString(), http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+third["id"].(string)+"/revoke",
+			map[string]any{"reason": "end of the test"}, nil, 0)
+	})
+	if third["id"] == first["id"] {
+		t.Error("a different key returned the same order")
+	}
 }

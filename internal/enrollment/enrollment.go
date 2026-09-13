@@ -38,6 +38,10 @@ var ErrInvalidToken = errors.New("the enrollment token is invalid")
 // ErrUnknownRequest means a request that does not exist.
 var ErrUnknownRequest = errors.New("the enrollment request does not exist")
 
+// ErrRepeated means the creator already placed an order under this
+// idempotency key; the order returned with it is the existing one.
+var ErrRepeated = errors.New("the enrollment order was already placed under this key")
+
 // The kinds of identity that can be registered.
 const (
 	KindAgent = "agent"
@@ -172,6 +176,9 @@ type CreateInput struct {
 	MaxUses   int
 	TTL       time.Duration
 	CreatedBy string
+	// IdempotencyKey, when set, makes a repeat of the order return the
+	// order already placed under the key by the same creator.
+	IdempotencyKey string
 }
 
 // Create issues a new request. Only the digest is recorded in the database.
@@ -231,18 +238,42 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 	const query = `
 		insert into enrollment_requests
 			(id, token_hash, description, site, environment, kind, purpose,
-			 expected_machine_id, expected_host_id, relay_id, max_uses, expires_at, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, nullif($10, '')::uuid, $11, $12, $13)
+			 expected_machine_id, expected_host_id, relay_id, max_uses, expires_at, created_by,
+			 idempotency_key)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, nullif($10, '')::uuid, $11, $12, $13,
+			nullif($14, ''))
+		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing
 		returning created_at, updated_at`
 	err := s.pool.QueryRow(ctx, query, request.ID, hash[:], nullable(input.Description),
 		input.Site, input.Environment, kind, purpose,
 		nullable(input.ExpectedMachineID), nullable(input.ExpectedHostID),
-		input.RelayID, maxUses, request.ExpiresAt, input.CreatedBy).
+		input.RelayID, maxUses, request.ExpiresAt, input.CreatedBy, input.IdempotencyKey).
 		Scan(&request.CreatedAt, &request.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) && input.IdempotencyKey != "" {
+		// The key was used before: the earlier order is the answer. Its
+		// token is not - it was shown once, and the store keeps only the
+		// hash.
+		existing, err := s.byIdempotencyKey(ctx, input.CreatedBy, input.IdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+		return existing, ErrRepeated
+	}
 	if err != nil {
 		return nil, fmt.Errorf("recording the request: %w", err)
 	}
 	return request, nil
+}
+
+func (s *Store) byIdempotencyKey(ctx context.Context, createdBy, key string) (*Request, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		select id from enrollment_requests where created_by = $1 and idempotency_key = $2`,
+		createdBy, key).Scan(&id)
+	if err != nil {
+		return nil, fmt.Errorf("looking up the repeated order: %w", err)
+	}
+	return s.Request(ctx, id)
 }
 
 // checkPurpose guards that the purpose, the kind and the named host hold

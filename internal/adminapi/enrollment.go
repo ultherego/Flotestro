@@ -83,6 +83,13 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	}
 
 	order, err := s.createOrder(r, req, principal.Subject, "")
+	if errors.Is(err, enrollment.ErrRepeated) {
+		// The same order again, from a caller that lost the first answer.
+		// The token is not repeated: it was shown once. A caller that
+		// needs a new one revokes this order and places another.
+		writeJSON(w, http.StatusOK, order)
+		return
+	}
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -131,6 +138,7 @@ func (s *Server) createOrder(r *http.Request, req enrollmentRequestBody, actor,
 		ExpectedMachineID: req.ExpectedMachineID, ExpectedHostID: hostID,
 		RelayID: req.RelayID,
 		MaxUses: req.MaxUses, TTL: ttl, CreatedBy: actor,
+		IdempotencyKey: idempotencyKeyOf(r, ""),
 	})
 }
 
@@ -324,6 +332,10 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	}
 
 	order, err := s.createOrder(r, req.enrollmentRequestBody, principal.Subject, hostID)
+	if errors.Is(err, enrollment.ErrRepeated) {
+		writeJSON(w, http.StatusOK, order)
+		return
+	}
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
