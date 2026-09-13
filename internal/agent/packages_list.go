@@ -86,7 +86,7 @@ func itoa(value int) string {
 	return string(digits)
 }
 
-// packageDigest liczy odcisk listy pakietow na potrzeby inwentarza.
+// packageDigest computes the fingerprint of the package list for the inventory.
 func packageDigest(ctx context.Context, manager string) (string, int, string) {
 	if manager == "" {
 		return "", 0, "this host has no supported package manager"

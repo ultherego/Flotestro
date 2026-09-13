@@ -111,8 +111,8 @@ func TestSELinuxInPermissiveHasARemediation(t *testing.T) {
 		t.Errorf("remediation payload = %+v", payload)
 	}
 	// A drift between the running and the configured mode is a separate finding.
-	trwalosc := finding(report, "mac.persistent")
-	if trwalosc.Passed {
+	persistent := finding(report, "mac.persistent")
+	if persistent.Passed {
 		t.Error("a mode drift treated as conformance")
 	}
 }
@@ -144,7 +144,7 @@ func TestAppArmorWithoutEnforcedProfilesHasNoRemediatingOperation(t *testing.T) 
 func TestAPassedFindingCarriesNoRemediation(t *testing.T) {
 	state := security.Snapshot{
 		MAC: security.Mandatory{System: security.SystemSELinux, Mode: security.ModeEnforcing, ConfiguredMode: security.ModeEnforcing},
-		Audit: security.Audit{Present: true, Active: wskaznikPrawdy(),
+		Audit: security.Audit{Present: true, Active: truePointer(),
 			RulesLoaded: countPointer(12), RulesConfigured: countPointer(12)},
 	}
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
@@ -175,7 +175,7 @@ func TestThePlanDigestDependsOnTheState(t *testing.T) {
 	third := Evaluate("host", Input{Fragments: map[string]Fragment{
 		moduleSecurity: fragmentOf(t, moduleSecurity, enforcing)}}, testNow)
 
-	// Ten sam state daje ten sam digest niezaleznie od chwili policzenia.
+	// The same state gives the same digest regardless of when it was computed.
 	if first.PlanHash != second.PlanHash {
 		t.Error("the plan digest changed without a change of state")
 	}
@@ -229,9 +229,9 @@ func TestRemediationsPointAtOperationsFromTheCatalogue(t *testing.T) {
 			t.Errorf("%s proposes the unknown operation %q", result.CheckID, action)
 			continue
 		}
-		// Payload remediations musi przejsc walidacje tej operacji tak samo jak
-		// A payload typed by hand: a plan that can only be ordered after a
-		// fix is not a plan.
+		// The remediation payload must pass the operation's validation just
+		// like a payload typed by hand: a plan that can only be ordered
+		// after a fix is not a plan.
 		// An operation without a payload is valid: a scan or a reload of the
 		// rules has nothing to carry.
 		var payload opspec.Payload
@@ -257,46 +257,46 @@ func TestRemediationsPointAtOperationsFromTheCatalogue(t *testing.T) {
 	}
 }
 
-// hostWithEveryNonConformance builds a state in which every check
-// z naprawa ma co naprawiac.
+// hostWithEveryNonConformance builds a state in which every check with a
+// remediation has something to fix.
 func hostWithEveryNonConformance(t *testing.T) Input {
 	t.Helper()
-	falsz, seven := false, 7
+	off, seven := false, 7
 	ochrona := security.Snapshot{
 		MAC: security.Mandatory{
 			System: security.SystemSELinux, Mode: security.ModePermissive,
 			ConfiguredMode: security.ModeEnforcing, Policy: "targeted",
 		},
-		Audit:          security.Audit{Present: true, Active: &falsz, RulesLoaded: countPointer(0), RulesConfigured: countPointer(4)},
-		SecureBoot:     &falsz,
+		Audit:          security.Audit{Present: true, Active: &off, RulesLoaded: countPointer(0), RulesConfigured: countPointer(4)},
+		SecureBoot:     &off,
 		ListeningKnown: true,
 		OwnersKnown:    true,
 		Listening: []security.Listener{
 			{Protocol: "tcp", Address: "0.0.0.0", Port: 22, Process: "sshd", Reach: security.ReachAllInterfaces},
 		},
 	}
-	serwer := sshmodule.Snapshot{PermitRootLogin: "yes", PasswordAuthentication: "yes"}
-	jadro := kernel.Snapshot{Settings: []kernel.Setting{
+	sshState := sshmodule.Snapshot{PermitRootLogin: "yes", PasswordAuthentication: "yes"}
+	kernelState := kernel.Snapshot{Settings: []kernel.Setting{
 		{Key: "net.ipv4.conf.all.rp_filter", Current: "0"},
 		{Key: "net.ipv4.tcp_syncookies", Current: "0"},
 	}}
-	zegar := hosttime.Snapshot{Synchronized: &falsz, Service: hosttime.DaemonChrony}
-	prawda := true
-	zasilanie := power.Snapshot{RebootRequired: &prawda, RebootReasons: []string{"linux-image-amd64"}}
+	clock := hosttime.Snapshot{Synchronized: &off, Service: hosttime.DaemonChrony}
+	yes := true
+	powerState := power.Snapshot{RebootRequired: &yes, RebootReasons: []string{"linux-image-amd64"}}
 
 	return Input{
 		Host: Host{PendingSecurityUpdates: &seven},
 		Fragments: map[string]Fragment{
 			moduleSecurity: fragmentOf(t, moduleSecurity, ochrona),
-			moduleSSH:      fragmentOf(t, moduleSSH, serwer),
-			moduleKernel:   fragmentOf(t, moduleKernel, jadro),
-			moduleTime:     fragmentOf(t, moduleTime, zegar),
-			modulePower:    fragmentOf(t, modulePower, zasilanie),
+			moduleSSH:      fragmentOf(t, moduleSSH, sshState),
+			moduleKernel:   fragmentOf(t, moduleKernel, kernelState),
+			moduleTime:     fragmentOf(t, moduleTime, clock),
+			modulePower:    fragmentOf(t, modulePower, powerState),
 		},
 	}
 }
 
-func wskaznikPrawdy() *bool       { prawda := true; return &prawda }
+func truePointer() *bool          { yes := true; return &yes }
 func countPointer(value int) *int { return &value }
 
 // A host with AppArmor does not fail a check requiring SELinux. The "not
@@ -313,17 +313,17 @@ func TestACheckThatDoesNotApplyIsNotAFailure(t *testing.T) {
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
 		moduleSecurity: fragmentOf(t, moduleSecurity, state)}}, testNow)
 
-	trwalosc := finding(report, "mac.persistent")
-	if trwalosc.Applicable {
-		t.Fatalf("sprawdzenie SELinuksa dotyczy hosta z AppArmorem: %+v", trwalosc)
+	persistent := finding(report, "mac.persistent")
+	if persistent.Applicable {
+		t.Fatalf("the SELinux check applies to a host with AppArmor: %+v", persistent)
 	}
-	if trwalosc.Passed || trwalosc.Unknown {
+	if persistent.Passed || persistent.Unknown {
 		t.Error("the not-applicable state was mixed with conformance or with undetermined")
 	}
-	if trwalosc.ReasonCode != ReasonUnsupported {
-		t.Errorf("reason code = %q", trwalosc.ReasonCode)
+	if persistent.ReasonCode != ReasonUnsupported {
+		t.Errorf("reason code = %q", persistent.ReasonCode)
 	}
-	if trwalosc.Remediation != nil {
+	if persistent.Remediation != nil {
 		t.Error("a check that does not apply carries a remediation")
 	}
 	if report.Counts["not_applicable"] == 0 {
@@ -349,7 +349,7 @@ func TestEveryUndeterminedFindingHasAReasonCode(t *testing.T) {
 	cases := map[string]Input{
 		"without modules": {},
 		"a module with an error": {Fragments: map[string]Fragment{
-			moduleSecurity: fragmentZBledem(t, moduleSecurity, "helper: no answer"),
+			moduleSecurity: fragmentWithError(t, moduleSecurity, "helper: no answer"),
 		}},
 		"missing facts": {Fragments: map[string]Fragment{
 			moduleSecurity: fragmentOf(t, moduleSecurity, security.Snapshot{
@@ -367,38 +367,38 @@ func TestEveryUndeterminedFindingHasAReasonCode(t *testing.T) {
 		ReasonFactMissing: true, ReasonReadFailed: true,
 		ReasonPermissionDenied: true, ReasonStaleInventory: true,
 	}
-	for nazwa, input := range cases {
-		t.Run(nazwa, func(t *testing.T) {
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
 			report := Evaluate("host", input, testNow)
-			nieustalone := 0
+			undetermined := 0
 			for _, result := range report.Findings {
 				if !result.Unknown {
 					continue
 				}
-				nieustalone++
+				undetermined++
 				if !dozwolone[result.ReasonCode] {
-					t.Errorf("%s: code powodu = %q", result.CheckID, result.ReasonCode)
+					t.Errorf("%s: reason code = %q", result.CheckID, result.ReasonCode)
 				}
 				if result.Observed == "" {
 					t.Errorf("%s: an undetermined state without a description", result.CheckID)
 				}
 			}
-			if nieustalone == 0 {
+			if undetermined == 0 {
 				t.Fatal("the case produced no undetermined state")
 			}
 		})
 	}
 }
 
-// Odmowa dostepu i nieudany odczyt prowadza do dwoch roznych dzialan
-// of the operator, so they have two different codes.
+// A permission denial and a failed read lead to two different actions of
+// the operator, so they have two different codes.
 func TestTheReasonCodeTellsAPermissionDenialApart(t *testing.T) {
 	state := security.Snapshot{
 		MAC:   security.Mandatory{System: security.SystemAppArmor, Mode: security.ModeEnforcing},
 		Audit: security.Audit{Present: true},
 		Missing: map[string]string{
 			security.FactAppArmorProfiles: "the AppArmor profiles live in securityfs",
-			security.FactAuditRules:       "helper: polaczenie zerwane",
+			security.FactAuditRules:       "helper: connection dropped",
 		},
 	}
 	report := Evaluate("host", Input{Fragments: map[string]Fragment{
@@ -443,7 +443,7 @@ func TestPlanDigestVectors(t *testing.T) {
 
 	step := []Finding{{
 		CheckID: "mac.enforcing", CheckVersion: 1, Applicable: true,
-		Module: "security", Revision: "rew-1", Observed: "SELinux: permissive",
+		Module: "security", Revision: "rev-1", Observed: "SELinux: permissive",
 		Remediation: &Remediation{
 			Action:  "selinux.mode.set",
 			Payload: json.RawMessage(`{"security":{"mode":"enforcing"}}`),
@@ -454,24 +454,24 @@ func TestPlanDigestVectors(t *testing.T) {
 		t.Errorf("the digest of the step = %q", digest)
 	}
 
-	// Ten sam step na innym hoscie to inny plan.
+	// The same step on another host is another plan.
 	if PlanHash("host-b", step) == digest {
 		t.Error("the digest does not depend on the host")
 	}
-	// Zmiana wersji sprawdzenia zmienia znaczenie kroku.
+	// A change of the check version changes the meaning of the step.
 	other := append([]Finding(nil), step...)
 	other[0].CheckVersion = 2
 	if PlanHash("host-a", other) == digest {
 		t.Error("the digest does not depend on the check version")
 	}
-	// Zmiana rewizji odczytu znaczy, ze plan liczono z innych faktow.
+	// A change of the read revision means the plan was computed from other facts.
 	other[0].CheckVersion = 1
-	other[0].Revision = "rew-2"
+	other[0].Revision = "rev-2"
 	if PlanHash("host-a", other) == digest {
 		t.Error("the digest does not depend on the inventory revision")
 	}
-	// Zmiana payloadu remediations zmienia to, co zostanie wykonane.
-	other[0].Revision = "rew-1"
+	// A change of the remediation payload changes what will be executed.
+	other[0].Revision = "rev-1"
 	other[0].Remediation = &Remediation{
 		Action:  "selinux.mode.set",
 		Payload: json.RawMessage(`{"security":{"mode":"permissive"}}`),
@@ -481,9 +481,9 @@ func TestPlanDigestVectors(t *testing.T) {
 	}
 }
 
-func fragmentZBledem(t *testing.T, module, powod string) Fragment {
+func fragmentWithError(t *testing.T, module, reason string) Fragment {
 	t.Helper()
 	fragment := fragmentOf(t, module, security.Snapshot{})
-	fragment.UnavailableReason = powod
+	fragment.UnavailableReason = reason
 	return fragment
 }

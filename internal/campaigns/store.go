@@ -266,7 +266,7 @@ func (s *Store) SetState(ctx context.Context, campaignID string, state State, re
 // Active returns the campaigns the orchestrator has to handle.
 func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
 	// Planning is an active state: the campaign changes nothing yet, but
-	// orchestrator ma co robic - kazdy host liczy wlasny plan.
+	// the orchestrator has work to do - every host computes its own plan.
 	return s.query(ctx,
 		"where state in ('planning', 'planned', 'canary', 'running') order by created_at")
 }
@@ -651,7 +651,7 @@ func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) e
 	return err
 }
 
-// SetBootIDBefore zapisuje boot ID sprzed restartu.
+// SetBootIDBefore records the boot ID from before the reboot.
 func (s *Store) SetBootIDBefore(ctx context.Context, targetID, bootID string) error {
 	_, err := s.pool.Exec(ctx,
 		`update campaign_targets set boot_id_before = $2 where id = $1`, targetID, nullable(bootID))

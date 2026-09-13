@@ -15,12 +15,12 @@ import (
 // root, because it also reads the host keys.
 var sshProbe func(context.Context) (sshmodule.Snapshot, error)
 
-// SetSSHProbe wskazuje funkcje odczytujaca konfiguracje sshd.
+// SetSSHProbe sets the function that reads the sshd configuration.
 func SetSSHProbe(probe func(context.Context) (sshmodule.Snapshot, error)) {
 	sshProbe = probe
 }
 
-// ProbeSSH odczytuje konfiguracje serwera sshd.
+// ProbeSSH reads the configuration of the sshd server.
 func (e *TaskExecutor) ProbeSSH(ctx context.Context) (sshmodule.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,

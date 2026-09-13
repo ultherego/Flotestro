@@ -364,7 +364,7 @@ func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error
 	}
 	defer rows.Close()
 
-	var wynik []Fragment
+	var result []Fragment
 	for rows.Next() {
 		var fragment Fragment
 		if err := rows.Scan(&fragment.HostID, &fragment.Module, &fragment.Revision,
@@ -372,9 +372,9 @@ func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error
 			&fragment.ObservedAt); err != nil {
 			return nil, err
 		}
-		wynik = append(wynik, fragment)
+		result = append(result, fragment)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }
 
 // HostFragments returns the modules of many hosts in one query.
@@ -383,9 +383,9 @@ func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error
 // the database once per host would turn one screen into hundreds of
 // queries.
 func (s *Store) HostFragments(ctx context.Context, hostIDs []string) (map[string][]Fragment, error) {
-	wynik := map[string][]Fragment{}
+	result := map[string][]Fragment{}
 	if len(hostIDs) == 0 {
-		return wynik, nil
+		return result, nil
 	}
 	const query = `
 		select host_id, module, revision, source, payload,
@@ -406,7 +406,7 @@ func (s *Store) HostFragments(ctx context.Context, hostIDs []string) (map[string
 			&fragment.ObservedAt); err != nil {
 			return nil, err
 		}
-		wynik[fragment.HostID] = append(wynik[fragment.HostID], fragment)
+		result[fragment.HostID] = append(result[fragment.HostID], fragment)
 	}
-	return wynik, rows.Err()
+	return result, rows.Err()
 }

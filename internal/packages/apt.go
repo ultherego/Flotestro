@@ -88,7 +88,7 @@ func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 	return plan, nil
 }
 
-// parseAptInstLine czyta linie postaci:
+// parseAptInstLine reads a line of the form:
 //
 //	Inst libfoo [1.0-1] (1.0-2 Debian:12/stable [amd64])
 //
@@ -472,7 +472,7 @@ func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	return plan, nil
 }
 
-// parseAptRemvLine czyta linie postaci:
+// parseAptRemvLine reads a line of the form:
 //
 //	Remv libfoo [1.0-1]
 func parseAptRemvLine(line string) (string, bool) {
@@ -520,6 +520,13 @@ func (a *APT) holdAgent(ctx context.Context) (func(), error) {
 
 // holdTrace names the marker file of our own hold on the agent package.
 func holdTrace() string {
+	return filepath.Join(runtimeDir, "state", "agent-hold")
+}
+
+// legacyHoldTrace is the name earlier helpers gave the marker. A host
+// upgraded with an abandoned hold from such a helper still has it under
+// the old name, and it has to be released the same way.
+func legacyHoldTrace() string {
 	return filepath.Join(runtimeDir, "state", "wstrzymany-agent")
 }
 
@@ -532,7 +539,10 @@ func holdTrace() string {
 func ReleaseAbandonedHold(ctx context.Context) (bool, error) {
 	trace := holdTrace()
 	if _, err := os.Stat(trace); err != nil {
-		return false, nil
+		trace = legacyHoldTrace()
+		if _, err := os.Stat(trace); err != nil {
+			return false, nil
+		}
 	}
 	defer func() { _ = os.Remove(trace) }()
 

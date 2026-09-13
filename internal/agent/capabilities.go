@@ -35,9 +35,9 @@ const (
 	// The disk space. The read needs lsblk; LVM and the arrays are separate
 	// features, because a host is sometimes without them.
 	CapStorage = "storage"
-	// Serwer sshd. Konfiguracja idzie do wlasnego pliku w sshd_config.d.
+	// The sshd server. The configuration goes into its own file in sshd_config.d.
 	CapSSHD = "sshd"
-	// Jadro: ustawienia sysctl i moduly.
+	// The kernel: sysctl settings and modules.
 	CapKernel = "kernel"
 	// The time of the host. The read works everywhere timedatectl is; the write
 	// needs a daemon the panel has somewhere to add servers to.
@@ -52,7 +52,7 @@ const (
 	// reload, and the reload goes through augenrules, not through a restart of
 	// the unit.
 	CapSecurityAudit = "security.audit"
-	// Certyfikaty na hostach. Modul dziala wszedzie, bo oglada wskazane pliki
+	// Certificates on hosts. The module works everywhere, because it looks at the named files
 	// and deploys new ones. The renewal is a separate capability: it is done by
 	// the daemon of the host, and a host without certmonger has nothing to renew
 	// with.
@@ -111,7 +111,7 @@ func (c Capabilities) Available(name string) bool {
 	return false
 }
 
-// Feature mowi, czy adapter ma dana czesc.
+// Feature says whether the adapter has the given part.
 func (c Capabilities) Feature(name, feature string) bool {
 	value, _ := c.FeatureState(name, feature)
 	return value
@@ -274,7 +274,7 @@ func DetectCapabilities() Capabilities {
 			Version:   adapterVersion,
 			Available: dnf,
 			Reason:    reason(dnf, "dnf is not installed on this host"),
-			// Blokada bazy rpm wyglada inaczej niz pytanie debconfa i naprawa
+			// An rpm database lock looks different from a debconf question, and the repair
 			// would look different too, so the adapter does not have it.
 			Features: map[string]bool{"repair": false},
 		},
@@ -454,7 +454,7 @@ func DetectCapabilities() Capabilities {
 			Name:      CapDocker,
 			Version:   adapterVersion,
 			Available: docker,
-			// Adapter czyta stan silnika i wykonuje operacje na kontenerach.
+			// The adapter reads the engine state and runs operations on containers.
 			// Compose projects are a separate feature: an engine is sometimes
 			// without the plugin.
 			Features: map[string]bool{"read": docker, "write": docker, "compose": compose},
@@ -463,7 +463,7 @@ func DetectCapabilities() Capabilities {
 	}
 }
 
-// composePluginPaths to miejsca, w ktorych dystrybucje instaluja wtyczke.
+// composePluginPaths are the places where distributions install the plugin.
 var composePluginPaths = []string{
 	"/usr/libexec/docker/cli-plugins/docker-compose",
 	"/usr/lib/docker/cli-plugins/docker-compose",

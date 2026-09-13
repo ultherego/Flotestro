@@ -86,7 +86,7 @@ func New(cfg Config) (*Client, error) {
 
 	krbConfig, err := config.Load(cfg.KRB5ConfPath)
 	if err != nil {
-		return nil, fmt.Errorf("konfiguracja Kerberosa: %w", err)
+		return nil, fmt.Errorf("Kerberos configuration: %w", err)
 	}
 	krbKeytab, err := keytab.Load(cfg.KeytabPath)
 	if err != nil {
@@ -97,7 +97,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.CACertPath != "" {
 		pem, err := os.ReadFile(cfg.CACertPath)
 		if err != nil {
-			return nil, fmt.Errorf("certyfikat CA katalogu: %w", err)
+			return nil, fmt.Errorf("directory CA certificate: %w", err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
@@ -128,10 +128,10 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// Principal zwraca tozsamosc connectora.
+// Principal returns the connector's identity.
 func (c *Client) Principal() string { return c.config.Principal }
 
-// login wymienia bilet Kerberos na sesje HTTP katalogu.
+// login exchanges the Kerberos ticket for a directory HTTP session.
 func (c *Client) login(ctx context.Context) error {
 	username, realm := splitPrincipal(c.config.Principal, c.config.Realm)
 
@@ -183,8 +183,8 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
-// call wykonuje polecenie katalogu. Nazwa polecenia pochodzi wylacznie
-// z listy jawnie wspieranych komend, nigdy z zadania uzytkownika.
+// call runs a directory command. The command name comes solely from the
+// list of explicitly supported commands, never from a user's request.
 func (c *Client) call(ctx context.Context, method string, args []string, options map[string]any) (json.RawMessage, error) {
 	if !allowedMethod(method) {
 		return nil, fmt.Errorf("the command %q is not supported by the adapter", method)
@@ -262,8 +262,8 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 	return decoded.Result, nil
 }
 
-// findRaw wykonuje wyszukiwanie w trybie surowym. Uzywamy go wylacznie tam,
-// gdzie widok przyjazny odfiltrowuje potrzebny atrybut.
+// findRaw runs a search in raw mode. It is used solely where the friendly
+// view filters out the attribute we need.
 func (c *Client) findRaw(ctx context.Context, method string) ([]map[string]any, error) {
 	return c.find(ctx, method, true)
 }
@@ -286,8 +286,8 @@ var allowedMethods = map[string]bool{
 	"ping":          true,
 
 	// The write operations. Each is carried out solely by the control plane
-	// after the plan is approved; the adapter exposes no deleting commands
-	// konta ani zmieniajacych konfiguracje samego katalogu.
+	// after the plan is approved; the adapter exposes no commands that delete
+	// an account or change the configuration of the directory itself.
 	"user_add":            true,
 	"user_mod":            true,
 	"user_disable":        true,
@@ -313,7 +313,7 @@ var allowedMethods = map[string]bool{
 
 func allowedMethod(method string) bool { return allowedMethods[method] }
 
-// splitPrincipal rozdziela principal na nazwe i realm.
+// splitPrincipal splits a principal into the name and the realm.
 func splitPrincipal(principal, defaultRealm string) (string, string) {
 	if name, realm, found := strings.Cut(principal, "@"); found {
 		return name, realm
@@ -321,9 +321,9 @@ func splitPrincipal(principal, defaultRealm string) (string, string) {
 	return principal, defaultRealm
 }
 
-// cached zwraca wynik z krotkiego cache albo pobiera go z katalogu.
-// The panel does not replicate the directory; the cache protects the IPA server from an excess
-// zapytan przy odswiezaniu widoku.
+// cached returns a result from the short cache or fetches it from the
+// directory. The panel does not replicate the directory; the cache protects
+// the IPA server from an excess of queries when a view is refreshed.
 func cached[T any](ctx context.Context, c *Client, key string, load func() (T, error)) (T, error) {
 	c.mu.Lock()
 	entry, ok := c.cache[key]
@@ -347,9 +347,8 @@ func cached[T any](ctx context.Context, c *Client, key string, load func() (T, e
 }
 
 // The patterns of directory object names. A name never reaches a shell
-// command, but validation is a second line of defence and rejects shapes that
-// cannot be
-// nazwa konta ani grupy.
+// command, but validation is a second line of defence and rejects shapes
+// that can be neither an account nor a group name.
 var (
 	userNamePattern  = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
 	groupNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$`)
@@ -361,7 +360,7 @@ var (
 func validateSSHPublicKey(key string) error {
 	trimmed := strings.TrimSpace(key)
 	if trimmed == "" {
-		return fmt.Errorf("pusty klucz SSH")
+		return fmt.Errorf("empty SSH key")
 	}
 	if strings.Contains(trimmed, "PRIVATE KEY") {
 		return fmt.Errorf("a private key was given; only a public key reaches the directory")

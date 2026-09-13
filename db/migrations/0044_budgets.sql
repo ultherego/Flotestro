@@ -64,11 +64,11 @@ alter table campaign_targets add constraint campaign_targets_state_check
 -- nobody described separately; an installation may override them with an exact row.
 insert into budget_limits (key, capacity, note) values
     ('global:mutations',   50,  'jednoczesne mutacje w calej flocie'),
-    ('global:reads',       200, 'jednoczesne odczyty w calej flocie'),
-    ('site:*:packages',    5,   'transakcje pakietowe w jednej lokalizacji'),
-    ('site:*:reboot',      2,   'restarty w jednej lokalizacji'),
-    ('site:*:network',     1,   'zmiany sieci w jednej lokalizacji'),
+    ('global:reads',       200, 'concurrent reads across the whole fleet'),
+    ('site:*:packages',    5,   'package transactions in one site'),
+    ('site:*:reboot',      2,   'reboots in one site'),
+    ('site:*:network',     1,   'network changes in one site'),
     ('site:*:storage',     2,   'zmiany przestrzeni dyskowej w jednej lokalizacji'),
-    ('site:*:backup',      2,   'operacje na repozytorium kopii'),
+    ('site:*:backup',      2,   'operations on a backup repository'),
     ('site:*:units',       10,  'zmiany jednostek w jednej lokalizacji')
 on conflict (key) do nothing;

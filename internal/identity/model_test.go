@@ -61,12 +61,12 @@ func TestValidationRequiresAPayloadMatchingTheType(t *testing.T) {
 		wantErr bool
 	}{
 		"creation without a payload": {ActionUserCreate, Payload{}, true},
-		"creation without a surname": {ActionUserCreate, Payload{User: &UserPayload{UID: "jan"}}, true},
-		"valid creation":             {ActionUserCreate, Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski"}}, false},
+		"creation without a surname": {ActionUserCreate, Payload{User: &UserPayload{UID: "jane"}}, true},
+		"valid creation":             {ActionUserCreate, Payload{User: &UserPayload{UID: "jane", LastName: "Smith"}}, false},
 		"locking without an account": {ActionUserDisable, Payload{}, true},
-		"valid locking":              {ActionUserDisable, Payload{Reference: &ReferencePayload{UID: "jan"}}, false},
+		"valid locking":              {ActionUserDisable, Payload{Reference: &ReferencePayload{UID: "jane"}}, false},
 		"empty membership change":    {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "group"}}, true},
-		"membership change":          {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "group", Add: []string{"jan"}}}, false},
+		"membership change":          {ActionGroupMembers, Payload{Group: &GroupPayload{Group: "group", Add: []string{"jane"}}}, false},
 		"unknown type":               {"identity.user.delete", Payload{}, true},
 	}
 	for name, tc := range cases {
@@ -83,7 +83,7 @@ func TestValidationRequiresAPayloadMatchingTheType(t *testing.T) {
 }
 
 func TestThePayloadHashDetectsASwap(t *testing.T) {
-	original := Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski",
+	original := Payload{User: &UserPayload{UID: "jane", LastName: "Smith",
 		Groups: []string{"flotestro-viewers"}}}
 	approved, err := PayloadHash(ActionUserCreate, original)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestThePayloadHashDetectsASwap(t *testing.T) {
 
 	// Swapping the group after the approval is a privilege escalation, so it
 	// has to change the plan hash.
-	tampered := Payload{User: &UserPayload{UID: "jan", LastName: "Kowalski",
+	tampered := Payload{User: &UserPayload{UID: "jane", LastName: "Smith",
 		Groups: []string{"flotestro-platform-admins"}}}
 	changed, err := PayloadHash(ActionUserCreate, tampered)
 	if err != nil {

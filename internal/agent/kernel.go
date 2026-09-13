@@ -14,7 +14,7 @@ import (
 // kernelProbe reads the kernel settings through the helper.
 var kernelProbe func(context.Context) (kernel.Snapshot, error)
 
-// SetKernelProbe wskazuje funkcje odczytujaca ustawienia jadra.
+// SetKernelProbe sets the function that reads the kernel settings.
 func SetKernelProbe(probe func(context.Context) (kernel.Snapshot, error)) {
 	kernelProbe = probe
 }

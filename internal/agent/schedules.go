@@ -36,7 +36,7 @@ func (e *TaskExecutor) ProbeSchedules(ctx context.Context) (schedules.Snapshot, 
 	return dekodujHarmonogramy(response.GetScheduleResult())
 }
 
-// applySchedule zleca helperowi operacje na zadaniu cyklicznym.
+// applySchedule asks the helper for an operation on a recurring job.
 func (e *TaskExecutor) applySchedule(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.SchedulePayload) *agentv1.TaskResult {
 	if payload == nil {

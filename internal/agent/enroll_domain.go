@@ -10,8 +10,9 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// enrollDomain zleca helperowi sprawdzenie warunkow i dolaczenie do domeny.
-// Zmiana dotyka SSSD, Kerberosa i PAM, wiec w calosci nalezy do roota.
+// enrollDomain asks the helper to check the preconditions and join the
+// domain. The change touches SSSD, Kerberos and PAM, so it belongs to root
+// in full.
 func (e *TaskExecutor) enrollDomain(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.DomainEnrollPayload, preflightOnly bool) *agentv1.TaskResult {
 	action := opspec.ActionDomainEnroll
@@ -93,7 +94,7 @@ func (e *TaskExecutor) enrollDomain(ctx context.Context, task *agentv1.TaskEnvel
 	}
 }
 
-// blockingChecks wymienia niespelnione warunki blokujace.
+// blockingChecks lists the unmet blocking preconditions.
 func blockingChecks(detail *agentv1.DomainEnrollResult) []string {
 	if detail == nil {
 		return nil

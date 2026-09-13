@@ -70,7 +70,7 @@ type Vulnerabilities struct {
 	// has read in between cycles. The full data are a three hundred megabyte
 	// archive, so without a memory every cycle would fetch them anew.
 	RedHatCache string
-	// NVDURL wskazuje API bazy NVD; pusty wylacza wzbogacanie. To zrodlo
+	// NVDURL points at the NVD API; empty disables enrichment. This source
 	// settles nothing - it only adds the CVSS score and the description of a
 	// vulnerability.
 	NVDURL string

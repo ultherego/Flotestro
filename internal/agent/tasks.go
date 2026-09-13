@@ -552,9 +552,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		// of the plan is computed from the JSON, and an empty array is written
 		// differently than a missing one. A repair without answers used to end in
 		// payload_hash_mismatch because of that.
-		var odpowiedzi []opspec.DebconfAnswer
+		var answers []opspec.DebconfAnswer
 		for _, answer := range action.PackagesRepair.GetAnswers() {
-			odpowiedzi = append(odpowiedzi, opspec.DebconfAnswer{
+			answers = append(answers, opspec.DebconfAnswer{
 				Package:  answer.GetPackage(),
 				Question: answer.GetQuestion(),
 				Type:     answer.GetType(),
@@ -562,7 +562,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			})
 		}
 		return opspec.ActionPackageRepair, opspec.Payload{
-			PackageRepair: &opspec.PackageRepairPayload{Answers: odpowiedzi},
+			PackageRepair: &opspec.PackageRepairPayload{Answers: answers},
 		}, nil
 
 	case *agentv1.TaskEnvelope_LocalUserAction:
@@ -586,13 +586,13 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		return opspec.ActionDockerRead, opspec.Payload{DockerRead: &opspec.DockerReadPayload{}}, nil
 
 	case *agentv1.TaskEnvelope_ReadDockerEvents:
-		zdarzenia := action.ReadDockerEvents
+		events := action.ReadDockerEvents
 		return opspec.ActionDockerEvents, opspec.Payload{
 			DockerEvents: &opspec.DockerEventsPayload{
-				SinceSeconds:  int(zdarzenia.GetSinceSeconds()),
-				FollowSeconds: int(zdarzenia.GetFollowSeconds()),
-				Types:         zdarzenia.GetTypes(),
-				MaxEvents:     int(zdarzenia.GetMaxEvents()),
+				SinceSeconds:  int(events.GetSinceSeconds()),
+				FollowSeconds: int(events.GetFollowSeconds()),
+				Types:         events.GetTypes(),
+				MaxEvents:     int(events.GetMaxEvents()),
 			},
 		}, nil
 
@@ -701,9 +701,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}, nil
 
 	case *agentv1.TaskEnvelope_Backup:
-		kopia := action.Backup
+		backup := action.Backup
 		kind := opspec.ActionBackupPlan
-		switch kopia.GetOperation() {
+		switch backup.GetOperation() {
 		case agentv1.BackupAction_OPERATION_RUN:
 			kind = opspec.ActionBackupRun
 		case agentv1.BackupAction_OPERATION_VERIFY:
@@ -711,57 +711,57 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		case agentv1.BackupAction_OPERATION_RESTORE:
 			kind = opspec.ActionBackupRestore
 		}
-		zawartosc := &opspec.BackupPayload{
-			ID: kopia.GetId(), Tool: kopia.GetTool(), Repository: kopia.GetRepository(),
-			Paths: kopia.GetPaths(), Excludes: kopia.GetExcludes(), Tags: kopia.GetTags(),
-			KeepLast: int(kopia.GetKeepLast()), KeepDaily: int(kopia.GetKeepDaily()),
-			KeepWeekly: int(kopia.GetKeepWeekly()), KeepMonthly: int(kopia.GetKeepMonthly()),
-			Prune: kopia.GetPrune(), Runbook: kopia.GetRunbook(),
-			Initialize: kopia.GetInitialize(), ReadData: kopia.GetReadData(), SnapshotID: kopia.GetSnapshotId(),
-			Target: kopia.GetTarget(), Include: kopia.GetInclude(),
-			Overwrite: kopia.GetOverwrite(), Plan: kopia.GetPlan(), PlanHash: kopia.GetPlanHash(),
+		payload := &opspec.BackupPayload{
+			ID: backup.GetId(), Tool: backup.GetTool(), Repository: backup.GetRepository(),
+			Paths: backup.GetPaths(), Excludes: backup.GetExcludes(), Tags: backup.GetTags(),
+			KeepLast: int(backup.GetKeepLast()), KeepDaily: int(backup.GetKeepDaily()),
+			KeepWeekly: int(backup.GetKeepWeekly()), KeepMonthly: int(backup.GetKeepMonthly()),
+			Prune: backup.GetPrune(), Runbook: backup.GetRunbook(),
+			Initialize: backup.GetInitialize(), ReadData: backup.GetReadData(), SnapshotID: backup.GetSnapshotId(),
+			Target: backup.GetTarget(), Include: backup.GetInclude(),
+			Overwrite: backup.GetOverwrite(), Plan: backup.GetPlan(), PlanHash: backup.GetPlanHash(),
 		}
-		if ref := kopia.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
-			zawartosc.PasswordSecret = &opspec.SecretRef{
+		if ref := backup.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
+			payload.PasswordSecret = &opspec.SecretRef{
 				Name: ref.GetName(), Version: int(ref.GetVersion()),
 			}
 		}
-		if len(kopia.GetEnvSecrets()) > 0 {
-			zawartosc.EnvSecrets = map[string]opspec.SecretRef{}
-			for name, ref := range kopia.GetEnvSecrets() {
-				zawartosc.EnvSecrets[name] = opspec.SecretRef{
+		if len(backup.GetEnvSecrets()) > 0 {
+			payload.EnvSecrets = map[string]opspec.SecretRef{}
+			for name, ref := range backup.GetEnvSecrets() {
+				payload.EnvSecrets[name] = opspec.SecretRef{
 					Name: ref.GetName(), Version: int(ref.GetVersion()),
 				}
 			}
 		}
-		return kind, opspec.Payload{Backup: zawartosc}, nil
+		return kind, opspec.Payload{Backup: payload}, nil
 
 	case *agentv1.TaskEnvelope_Repository:
-		zrodlo := action.Repository
+		repository := action.Repository
 		reference := (*opspec.SecretRef)(nil)
-		if ref := zrodlo.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
+		if ref := repository.GetPasswordSecret(); ref != nil && ref.GetName() != "" {
 			reference = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
 		}
 		return opspec.ActionRepositorySet, opspec.Payload{Repository: &opspec.RepositoryPayload{
-			ID:             zrodlo.GetId(),
-			Name:           zrodlo.GetName(),
-			URL:            zrodlo.GetUrl(),
-			Suites:         zrodlo.GetSuites(),
-			Components:     zrodlo.GetComponents(),
-			Architectures:  zrodlo.GetArchitectures(),
-			Enabled:        zrodlo.GetEnabled(),
-			Priority:       int(zrodlo.GetPriority()),
-			GPGKey:         zrodlo.GetGpgKey(),
-			AllowUnsigned:  zrodlo.GetAllowUnsigned(),
-			Username:       zrodlo.GetUsername(),
+			ID:             repository.GetId(),
+			Name:           repository.GetName(),
+			URL:            repository.GetUrl(),
+			Suites:         repository.GetSuites(),
+			Components:     repository.GetComponents(),
+			Architectures:  repository.GetArchitectures(),
+			Enabled:        repository.GetEnabled(),
+			Priority:       int(repository.GetPriority()),
+			GPGKey:         repository.GetGpgKey(),
+			AllowUnsigned:  repository.GetAllowUnsigned(),
+			Username:       repository.GetUsername(),
 			PasswordSecret: reference,
-			Remove:         zrodlo.GetRemove(),
+			Remove:         repository.GetRemove(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Certificate:
-		certyfikat := action.Certificate
+		certificate := action.Certificate
 		kind := opspec.ActionCertificateScan
-		switch certyfikat.GetOperation() {
+		switch certificate.GetOperation() {
 		case agentv1.CertificateAction_OPERATION_DEPLOY:
 			kind = opspec.ActionCertificateDeploy
 		case agentv1.CertificateAction_OPERATION_RENEW:
@@ -776,44 +776,44 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionCertificateTrustRemove
 		}
 		reference := (*opspec.SecretRef)(nil)
-		if ref := certyfikat.GetKeySecret(); ref != nil && ref.GetName() != "" {
+		if ref := certificate.GetKeySecret(); ref != nil && ref.GetName() != "" {
 			reference = &opspec.SecretRef{Name: ref.GetName(), Version: int(ref.GetVersion())}
 		}
-		zawartosc := &opspec.CertificatePayload{
-			Path:        certyfikat.GetPath(),
-			KeyPath:     certyfikat.GetKeyPath(),
-			Certificate: certyfikat.GetCertificate(),
+		payload := &opspec.CertificatePayload{
+			Path:        certificate.GetPath(),
+			KeyPath:     certificate.GetKeyPath(),
+			Certificate: certificate.GetCertificate(),
 			KeySecret:   reference,
-			Owner:       certyfikat.GetOwner(),
-			Group:       certyfikat.GetGroup(),
-			Mode:        certyfikat.GetMode(),
-			KeyMode:     certyfikat.GetKeyMode(),
-			ReloadUnit:  certyfikat.GetReloadUnit(),
-			ProbeTarget: certyfikat.GetProbeTarget(),
-			Request:     certyfikat.GetRequest(),
-			PlanHash:    certyfikat.GetPlanHash(),
-			AnchorID:    certyfikat.GetAnchorId(),
+			Owner:       certificate.GetOwner(),
+			Group:       certificate.GetGroup(),
+			Mode:        certificate.GetMode(),
+			KeyMode:     certificate.GetKeyMode(),
+			ReloadUnit:  certificate.GetReloadUnit(),
+			ProbeTarget: certificate.GetProbeTarget(),
+			Request:     certificate.GetRequest(),
+			PlanHash:    certificate.GetPlanHash(),
+			AnchorID:    certificate.GetAnchorId(),
 		}
-		for _, cel := range certyfikat.GetTargets() {
-			zawartosc.Targets = append(zawartosc.Targets, opspec.CertificateTarget{
-				Path: cel.GetPath(), KeyPath: cel.GetKeyPath(), Service: cel.GetService(),
+		for _, target := range certificate.GetTargets() {
+			payload.Targets = append(payload.Targets, opspec.CertificateTarget{
+				Path: target.GetPath(), KeyPath: target.GetKeyPath(), Service: target.GetService(),
 			})
 		}
-		return kind, opspec.Payload{Certificate: zawartosc}, nil
+		return kind, opspec.Payload{Certificate: payload}, nil
 
 	case *agentv1.TaskEnvelope_SystemShutdown:
-		wylaczenie := action.SystemShutdown
+		shutdown := action.SystemShutdown
 		return opspec.ActionSystemShutdown, opspec.Payload{Power: &opspec.PowerPayload{
-			Mode:             wylaczenie.GetMode(),
-			DelaySeconds:     wylaczenie.GetDelaySeconds(),
-			Reason:           wylaczenie.GetReason(),
-			IgnoreInhibitors: wylaczenie.GetIgnoreInhibitors(),
+			Mode:             shutdown.GetMode(),
+			DelaySeconds:     shutdown.GetDelaySeconds(),
+			Reason:           shutdown.GetReason(),
+			IgnoreInhibitors: shutdown.GetIgnoreInhibitors(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Time:
-		zegar := action.Time
+		clock := action.Time
 		kind := opspec.ActionTimeSyncTest
-		switch zegar.GetOperation() {
+		switch clock.GetOperation() {
 		case agentv1.TimeAction_OPERATION_CONFIG_APPLY:
 			kind = opspec.ActionTimeConfigApply
 		case agentv1.TimeAction_OPERATION_TIMEZONE_SET:
@@ -822,18 +822,18 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionTimePlan
 		}
 		return kind, opspec.Payload{Time: &opspec.TimePayload{
-			Servers:      zegar.GetServers(),
-			Probe:        zegar.GetProbe(),
-			Timezone:     zegar.GetTimezone(),
-			AllowStep:    zegar.GetAllowStep(),
-			EnableDropIn: zegar.GetEnableDropin(),
-			PlanHash:     zegar.GetPlanHash(),
+			Servers:      clock.GetServers(),
+			Probe:        clock.GetProbe(),
+			Timezone:     clock.GetTimezone(),
+			AllowStep:    clock.GetAllowStep(),
+			EnableDropIn: clock.GetEnableDropin(),
+			PlanHash:     clock.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Kernel:
-		jadro := action.Kernel
+		kernel := action.Kernel
 		kind := opspec.ActionSysctlPlan
-		switch jadro.GetOperation() {
+		switch kernel.GetOperation() {
 		case agentv1.KernelAction_OPERATION_SYSCTL_ENSURE:
 			kind = opspec.ActionSysctlEnsure
 		case agentv1.KernelAction_OPERATION_MODULE_LOAD:
@@ -844,35 +844,35 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionKernelModulePlan
 		}
 		return kind, opspec.Payload{Kernel: &opspec.KernelPayload{
-			Settings:  jadro.GetSettings(),
-			Keys:      jadro.GetKeys(),
-			Module:    jadro.GetModule(),
-			Blacklist: jadro.GetBlacklist(),
-			PlanHash:  jadro.GetPlanHash(),
+			Settings:  kernel.GetSettings(),
+			Keys:      kernel.GetKeys(),
+			Module:    kernel.GetModule(),
+			Blacklist: kernel.GetBlacklist(),
+			PlanHash:  kernel.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Ssh:
-		serwer := action.Ssh
+		sshd := action.Ssh
 		kind := opspec.ActionSSHConfigPlan
-		switch serwer.GetOperation() {
+		switch sshd.GetOperation() {
 		case agentv1.SshAction_OPERATION_APPLY:
 			kind = opspec.ActionSSHConfigApply
 		case agentv1.SshAction_OPERATION_ROTATE_HOSTKEY:
 			kind = opspec.ActionSSHHostKeyRotate
 		}
 		return kind, opspec.Payload{SSH: &opspec.SSHPayload{
-			Port:                   serwer.GetPort(),
-			PermitRootLogin:        serwer.GetPermitRootLogin(),
-			PasswordAuthentication: serwer.GetPasswordAuthentication(),
-			PubkeyAuthentication:   serwer.GetPubkeyAuthentication(),
-			KbdInteractive:         serwer.GetKbdInteractiveAuthentication(),
-			MaxAuthTries:           serwer.GetMaxAuthTries(),
-			AllowUsers:             serwer.GetAllowUsers(),
-			AllowGroups:            serwer.GetAllowGroups(),
-			DenyUsers:              serwer.GetDenyUsers(),
-			AllowLockout:           serwer.GetAllowLockout(),
-			KeyType:                serwer.GetKeyType(),
-			PlanHash:               serwer.GetPlanHash(),
+			Port:                   sshd.GetPort(),
+			PermitRootLogin:        sshd.GetPermitRootLogin(),
+			PasswordAuthentication: sshd.GetPasswordAuthentication(),
+			PubkeyAuthentication:   sshd.GetPubkeyAuthentication(),
+			KbdInteractive:         sshd.GetKbdInteractiveAuthentication(),
+			MaxAuthTries:           sshd.GetMaxAuthTries(),
+			AllowUsers:             sshd.GetAllowUsers(),
+			AllowGroups:            sshd.GetAllowGroups(),
+			DenyUsers:              sshd.GetDenyUsers(),
+			AllowLockout:           sshd.GetAllowLockout(),
+			KeyType:                sshd.GetKeyType(),
+			PlanHash:               sshd.GetPlanHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Storage:
@@ -917,9 +917,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Firewall:
-		zapora := action.Firewall
+		firewall := action.Firewall
 		kind := opspec.ActionFirewallRuleEnsure
-		switch zapora.GetOperation() {
+		switch firewall.GetOperation() {
 		case agentv1.FirewallAction_OPERATION_READ, agentv1.FirewallAction_OPERATION_PLAN:
 			// The read and the plan are the same operation of the panel; they are
 			// told apart by the presence of a rule. The type has to be one, because
@@ -936,21 +936,21 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionFirewallRulesetRestore
 		}
 		return kind, opspec.Payload{Firewall: &opspec.FirewallPayload{
-			RuleID:          zapora.GetRuleId(),
-			Chain:           zapora.GetChain(),
-			Action:          zapora.GetAction(),
-			Protocol:        zapora.GetProtocol(),
-			Ports:           zapora.GetPorts(),
-			Sources:         zapora.GetSources(),
-			Interface:       zapora.GetInterface(),
-			Comment:         zapora.GetComment(),
-			Zone:            zapora.GetZone(),
-			Service:         zapora.GetService(),
-			Enable:          zapora.GetEnable(),
-			BreakGlass:      zapora.GetBreakGlass(),
-			RollbackSeconds: zapora.GetRollbackSeconds(),
-			RollbackID:      zapora.GetRollbackId(),
-			ExpectedHash:    zapora.GetExpectedHash(),
+			RuleID:          firewall.GetRuleId(),
+			Chain:           firewall.GetChain(),
+			Action:          firewall.GetAction(),
+			Protocol:        firewall.GetProtocol(),
+			Ports:           firewall.GetPorts(),
+			Sources:         firewall.GetSources(),
+			Interface:       firewall.GetInterface(),
+			Comment:         firewall.GetComment(),
+			Zone:            firewall.GetZone(),
+			Service:         firewall.GetService(),
+			Enable:          firewall.GetEnable(),
+			BreakGlass:      firewall.GetBreakGlass(),
+			RollbackSeconds: firewall.GetRollbackSeconds(),
+			RollbackID:      firewall.GetRollbackId(),
+			ExpectedHash:    firewall.GetExpectedHash(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Dns:
@@ -973,9 +973,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Network:
-		siec := action.Network
+		network := action.Network
 		kind := opspec.ActionNetworkProfileApply
-		switch siec.GetOperation() {
+		switch network.GetOperation() {
 		case agentv1.NetworkAction_OPERATION_READ, agentv1.NetworkAction_OPERATION_PLAN:
 			kind = opspec.ActionNetworkPlan
 		case agentv1.NetworkAction_OPERATION_SET_MTU:
@@ -986,22 +986,22 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionNetworkRollback
 		}
 		return kind, opspec.Payload{Network: &opspec.NetworkPayload{
-			Interface:       siec.GetInterface(),
-			MTU:             siec.GetMtu(),
-			Routes:          siec.GetRoutes(),
-			Method:          siec.GetMethod(),
-			Addresses:       siec.GetAddresses(),
-			Gateway:         siec.GetGateway(),
-			DNS:             siec.GetDns(),
-			PlanHash:        siec.GetPlanHash(),
-			RollbackSeconds: siec.GetRollbackSeconds(),
-			RollbackID:      siec.GetRollbackId(),
+			Interface:       network.GetInterface(),
+			MTU:             network.GetMtu(),
+			Routes:          network.GetRoutes(),
+			Method:          network.GetMethod(),
+			Addresses:       network.GetAddresses(),
+			Gateway:         network.GetGateway(),
+			DNS:             network.GetDns(),
+			PlanHash:        network.GetPlanHash(),
+			RollbackSeconds: network.GetRollbackSeconds(),
+			RollbackID:      network.GetRollbackId(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Schedule:
-		harmonogram := action.Schedule
+		schedule := action.Schedule
 		kind := opspec.ActionScheduleEnsure
-		switch harmonogram.GetOperation() {
+		switch schedule.GetOperation() {
 		case agentv1.ScheduleAction_OPERATION_DISABLE:
 			kind = opspec.ActionScheduleDisable
 		case agentv1.ScheduleAction_OPERATION_REMOVE:
@@ -1010,13 +1010,13 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionScheduleRunNow
 		}
 		return kind, opspec.Payload{Schedule: &opspec.SchedulePayload{
-			ID:         harmonogram.GetId(),
-			Expression: harmonogram.GetExpression(),
-			Command:    harmonogram.GetCommand(),
-			User:       harmonogram.GetUser(),
-			Comment:    harmonogram.GetComment(),
-			Enabled:    harmonogram.GetEnabled(),
-			Adopt:      harmonogram.GetAdopt(),
+			ID:         schedule.GetId(),
+			Expression: schedule.GetExpression(),
+			Command:    schedule.GetCommand(),
+			User:       schedule.GetUser(),
+			Comment:    schedule.GetComment(),
+			Enabled:    schedule.GetEnabled(),
+			Adopt:      schedule.GetAdopt(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_ListProcesses:

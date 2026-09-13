@@ -359,7 +359,7 @@ func TestJournalTimeRangeIsValidated(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	for _, since := range []string{"wczoraj", "-1h; reboot", "$(date)"} {
+	for _, since := range []string{"the day before", "-1h; reboot", "$(date)"} {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 			map[string]any{
 				"action": "journal.read",

@@ -218,13 +218,13 @@ func TestAMismatchedPairIsRejected(t *testing.T) {
 		TrustPEM:       ca.PEM,
 	}
 	if _, err := store.Commit(pomieszana); !errors.Is(err, ErrKeyPair) {
-		t.Fatalf("blad = %v, chcemy %v", err, ErrKeyPair)
+		t.Fatalf("err = %v, want %v", err, ErrKeyPair)
 	}
-	// Odrzucenie musi nastapic przed jakakolwiek zmiana: host zostaje na tym,
-	// co dzialalo.
+	// The rejection must happen before any change: the host stays on what
+	// worked.
 	current, err := store.Current()
 	if err != nil || current.Dir != first.Dir {
-		t.Fatalf("current = %+v, blad = %v", current, err)
+		t.Fatalf("current = %+v, err = %v", current, err)
 	}
 }
 

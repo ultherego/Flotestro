@@ -78,14 +78,14 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, steps []Step) 
 			plan.ID, step.Position, step.CheckID, step.CheckVersion, step.ActionType,
 			[]byte(emptyWhenMissing(step.Payload)), step.LockClass, step.RequiresReboot, StepPending)
 	}
-	wyniki := tx.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	for range steps {
-		if _, err := wyniki.Exec(); err != nil {
-			_ = wyniki.Close()
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
 			return nil, err
 		}
 	}
-	if err := wyniki.Close(); err != nil {
+	if err := results.Close(); err != nil {
 		return nil, err
 	}
 

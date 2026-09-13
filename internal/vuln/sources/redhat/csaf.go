@@ -702,9 +702,9 @@ func link(errata, cveNumber string) string {
 // shortened trims a title to 300 characters rather than bytes.
 func shortened(title string) string {
 	title = strings.ToValidUTF8(strings.TrimSpace(title), "")
-	znaki := []rune(title)
-	if len(znaki) > 300 {
-		return string(znaki[:300])
+	runes := []rune(title)
+	if len(runes) > 300 {
+		return string(runes[:300])
 	}
 	return title
 }

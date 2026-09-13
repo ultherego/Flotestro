@@ -65,7 +65,7 @@ func (c *Client) CreateUser(ctx context.Context, spec UserSpec) (*User, error) {
 	}
 
 	if _, err := c.call(ctx, "user_add", []string{spec.UID}, options); err != nil {
-		return nil, fmt.Errorf("utworzenie konta %s: %w", spec.UID, err)
+		return nil, fmt.Errorf("creating the account %s: %w", spec.UID, err)
 	}
 	c.invalidate()
 	return c.ShowUser(ctx, spec.UID)

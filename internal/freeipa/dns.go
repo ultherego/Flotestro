@@ -100,13 +100,13 @@ func (s RecordSpec) Validate() error {
 	}
 	switch s.Type {
 	case RecordA:
-		adres := net.ParseIP(value)
-		if adres == nil || adres.To4() == nil {
+		address := net.ParseIP(value)
+		if address == nil || address.To4() == nil {
 			return fmt.Errorf("%q is not an IPv4 address", value)
 		}
 	case RecordAAAA:
-		adres := net.ParseIP(value)
-		if adres == nil || adres.To4() != nil {
+		address := net.ParseIP(value)
+		if address == nil || address.To4() != nil {
 			return fmt.Errorf("%q is not an IPv6 address", value)
 		}
 	case RecordCNAME, RecordPTR:

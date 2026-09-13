@@ -20,7 +20,7 @@ func TestARefreshWithoutAScopeIsValid(t *testing.T) {
 // task that refreshes nothing and looks like a success.
 func TestAnUnknownModuleIsAnError(t *testing.T) {
 	err := Validate(ActionInventoryRefresh, Payload{
-		Inventory: &InventoryPayload{Modules: []string{"pakiety"}},
+		Inventory: &InventoryPayload{Modules: []string{"nonexistent"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown inventory module") {
 		t.Fatalf("an unknown module gave %v", err)

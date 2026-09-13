@@ -103,7 +103,7 @@ func (e *TaskExecutor) applySecurity(ctx context.Context, task *agentv1.TaskEnve
 	callCtx, cancel := context.WithTimeout(ctx, timeout+15*time.Second)
 	defer cancel()
 
-	message := "stan ochronny odczytany"
+	message := "protective state read"
 	if action == opspec.ActionSELinuxModeSet || action == opspec.ActionAuditRulesReload {
 		request := &helperv1.SecurityRequest{
 			Operation: helperv1.SecurityRequest_OPERATION_AUDIT_RELOAD,

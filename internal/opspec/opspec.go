@@ -32,7 +32,7 @@ import (
 	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	hosttime "github.com/ultherego/flotestro/internal/modules/time"
-	pakietymodul "github.com/ultherego/flotestro/internal/packages"
+	packagestore "github.com/ultherego/flotestro/internal/packages"
 )
 
 // ActionType is the type of an operation. Every type has a contract version
@@ -2438,7 +2438,7 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("the operation %s requires a repository payload", action)
 		}
 		repo := payload.Repository
-		source := pakietymodul.Repository{
+		source := packagestore.Repository{
 			ID: repo.ID, Name: repo.Name, URL: repo.URL,
 			Suites: repo.Suites, Components: repo.Components,
 			Architectures: repo.Architectures, Enabled: repo.Enabled,
@@ -2462,7 +2462,7 @@ func Validate(action ActionType, payload Payload) error {
 		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
 			manager = "apt"
 		}
-		if err := pakietymodul.ValidateRepository(source, manager, withSecret); err != nil {
+		if err := packagestore.ValidateRepository(source, manager, withSecret); err != nil {
 			return err
 		}
 		if repo.Remove {
@@ -2476,7 +2476,7 @@ func Validate(action ActionType, payload Payload) error {
 			if repo.GPGKey == "" {
 				return fmt.Errorf("a source with signature checking requires a public key")
 			}
-			if _, err := pakietymodul.KeyFingerprint(repo.GPGKey); err != nil {
+			if _, err := packagestore.KeyFingerprint(repo.GPGKey); err != nil {
 				return err
 			}
 		}

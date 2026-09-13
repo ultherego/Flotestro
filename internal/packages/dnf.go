@@ -74,7 +74,7 @@ func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 	return plan, nil
 }
 
-// parseDNFUpdateLine czyta linie postaci:
+// parseDNFUpdateLine reads a line of the form:
 //
 //	NetworkManager.x86_64   1:1.52.2-1.fc42   updates
 func parseDNFUpdateLine(line string) (Change, bool) {

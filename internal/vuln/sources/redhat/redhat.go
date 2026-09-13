@@ -239,8 +239,8 @@ func (z *Source) documentDirectory() string {
 
 // hasDocuments says whether there are any findings read on disk.
 func (z *Source) hasDocuments() bool {
-	wpisy, err := os.ReadDir(z.documentDirectory())
-	return err == nil && len(wpisy) > 0
+	entries, err := os.ReadDir(z.documentDirectory())
+	return err == nil && len(entries) > 0
 }
 
 // fullFetch pulls and unpacks the archive of every document.

@@ -162,6 +162,6 @@ func storageSummary(snapshot storage.Snapshot) string {
 			mounted++
 		}
 	}
-	return "urzadzen: " + strconv.Itoa(len(snapshot.Devices)) +
-		", zamontowanych filesystemow: " + strconv.Itoa(mounted)
+	return "devices: " + strconv.Itoa(len(snapshot.Devices)) +
+		", mounted filesystems: " + strconv.Itoa(mounted)
 }

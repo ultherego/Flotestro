@@ -20,7 +20,7 @@ func TestValidateSSHPublicKeyRejectsRubbish(t *testing.T) {
 
 func TestValidateSSHPublicKeyAcceptsValidKeys(t *testing.T) {
 	valid := []string{
-		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample uzytkownik@host",
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample user@host",
 		"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC no-comment",
 		"ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY=",
 	}
@@ -32,18 +32,18 @@ func TestValidateSSHPublicKeyAcceptsValidKeys(t *testing.T) {
 }
 
 func TestUserSpecValidate(t *testing.T) {
-	valid := UserSpec{UID: "jkowalski", LastName: "Kowalski"}
+	valid := UserSpec{UID: "jsmith", LastName: "Smith"}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("a valid description was rejected: %v", err)
 	}
 
 	cases := map[string]UserSpec{
-		"no surname":                   {UID: "jkowalski"},
-		"a capital letter in the name": {UID: "JKowalski", LastName: "Kowalski"},
-		"a name with a space":          {UID: "jan kowalski", LastName: "Kowalski"},
-		"a name with a path":           {UID: "../root", LastName: "Kowalski"},
-		"a bad group name":             {UID: "jkowalski", LastName: "Kowalski", Groups: []string{"group; rm"}},
-		"a private key":                {UID: "jkowalski", LastName: "Kowalski", SSHKeys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
+		"no surname":                   {UID: "jsmith"},
+		"a capital letter in the name": {UID: "JSmith", LastName: "Smith"},
+		"a name with a space":          {UID: "jane smith", LastName: "Smith"},
+		"a name with a path":           {UID: "../root", LastName: "Smith"},
+		"a bad group name":             {UID: "jsmith", LastName: "Smith", Groups: []string{"group; rm"}},
+		"a private key":                {UID: "jsmith", LastName: "Smith", SSHKeys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
 	}
 	for name, spec := range cases {
 		t.Run(name, func(t *testing.T) {

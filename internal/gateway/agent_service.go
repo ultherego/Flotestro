@@ -21,7 +21,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	backupstore "github.com/ultherego/flotestro/internal/backup"
-	certyfikaty "github.com/ultherego/flotestro/internal/certificates"
+	certstore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -32,7 +32,7 @@ import (
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	certmodule "github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/opspec"
-	modulpakiety "github.com/ultherego/flotestro/internal/packages"
+	packagestore "github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/vuln"
@@ -99,7 +99,7 @@ type AgentService struct {
 	// certificates keeps the history of the deployed certificates. We write it
 	// only after a successful operation, and on the basis of the fingerprint
 	// the host sent back - not the one the panel sent.
-	certificates *certyfikaty.Store
+	certificates *certstore.Store
 	// backups keeps the history of the backup runs. The panel does not know
 	// when a copy succeeded unless it records it: the host does not remember
 	// that between operations, and the repository answers only once a
@@ -135,7 +135,7 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 	return &AgentService{
 		pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		files:        managedfiles.NewStore(pool),
-		certificates: certyfikaty.NewStore(pool),
+		certificates: certstore.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
 		pkgs:         vuln.NewPackageStore(pool),
 		audit:        recorder, registry: registry, certIssuer: certIssuer, relays: relayStore,
@@ -166,7 +166,7 @@ func (s *AgentService) Connect(ctx context.Context,
 	stream *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage]) error {
 	cert, ok := clientCertificate(ctx)
 	if !ok {
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("brak certyfikatu klienta"))
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("missing client certificate"))
 	}
 
 	// A session can come straight from an agent or through the relay of a
@@ -887,21 +887,21 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// The event log is the answer to a question from one moment rather than the
 	// state of the host: it stays in the result of the job and does not reach
 	// the inventory.
-	if zdarzenia := result.GetDockerEventsResult(); zdarzenia != nil &&
-		(len(zdarzenia.GetEvents()) > 0 || zdarzenia.GetUnavailableReason() != "") {
+	if dockerEvents := result.GetDockerEventsResult(); dockerEvents != nil &&
+		(len(dockerEvents.GetEvents()) > 0 || dockerEvents.GetUnavailableReason() != "") {
 		// An unavailable engine carries no log at all, and the result is to
 		// come into being anyway: it is what tells the operator why they see
 		// nothing.
-		odczyt := json.RawMessage(zdarzenia.GetEvents())
-		if len(odczyt) == 0 {
-			odczyt = json.RawMessage("{}")
+		eventsJSON := json.RawMessage(dockerEvents.GetEvents())
+		if len(eventsJSON) == 0 {
+			eventsJSON = json.RawMessage("{}")
 		}
 		encoded, err := json.Marshal(map[string]any{
 			"kind":               "docker_events",
-			"events":             odczyt,
-			"truncated":          zdarzenia.GetTruncated(),
-			"truncated_reason":   zdarzenia.GetTruncatedReason(),
-			"unavailable_reason": zdarzenia.GetUnavailableReason(),
+			"events":             eventsJSON,
+			"truncated":          dockerEvents.GetTruncated(),
+			"truncated_reason":   dockerEvents.GetTruncatedReason(),
+			"unavailable_reason": dockerEvents.GetUnavailableReason(),
 		})
 		if err == nil {
 			return encoded
@@ -981,34 +981,34 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// A network plan is a result of the job rather than the state of the host:
 	// it describes a change that has not happened yet, against the profile the
 	// host has now.
-	if siec := result.GetNetworkResult(); siec != nil && len(siec.GetPlan()) > 0 {
+	if network := result.GetNetworkResult(); network != nil && len(network.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
 		}
-		_ = json.Unmarshal(siec.GetPlan(), &plan)
+		_ = json.Unmarshal(network.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "network_plan",
-			"plan":      json.RawMessage(siec.GetPlan()),
+			"plan":      json.RawMessage(network.GetPlan()),
 			"plan_hash": plan.PlanHash,
-			"profiles":  rawJSON(siec.GetProfiles()),
+			"profiles":  rawJSON(network.GetProfiles()),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Zmiana sieci niesie identyfikator wycofania i to, czy zdazylo je
-	// disarm the confirmation of connectivity. Without that the operator does
-	// not know whether the host
-	// za chwile wroci do poprzedniej konfiguracji.
-	if siec := result.GetNetworkResult(); siec != nil &&
-		(len(siec.GetProfiles()) > 0 || siec.GetRollbackId() != "") {
+	// A network change carries the rollback identifier and whether the
+	// connectivity confirmation managed to disarm it. Without that the
+	// operator does not know whether the host is about to return to its
+	// previous configuration.
+	if network := result.GetNetworkResult(); network != nil &&
+		(len(network.GetProfiles()) > 0 || network.GetRollbackId() != "") {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":              "network",
-			"profiles":          rawJSON(siec.GetProfiles()),
-			"rollback_id":       siec.GetRollbackId(),
-			"rollback_deadline": siec.GetRollbackDeadline(),
-			"confirmed":         siec.GetConfirmed(),
+			"profiles":          rawJSON(network.GetProfiles()),
+			"rollback_id":       network.GetRollbackId(),
+			"rollback_deadline": network.GetRollbackDeadline(),
+			"confirmed":         network.GetConfirmed(),
 		})
 		if err == nil {
 			return encoded
@@ -1033,7 +1033,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Zmiana zapory niesie identyfikator wycofania i digest zestawu regul.
+	// A firewall change carries the rollback identifier and the digest of
+	// the rule set.
 	if firewall := result.GetFirewallResult(); firewall != nil && firewall.GetRollbackId() != "" {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":              "firewall",
@@ -1071,8 +1072,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Wynik sprawdzenia filesystemu nalezy do zadania: to odpowiedz na jedno
-	// question zadane w jednej chwili.
+	// A filesystem check result belongs to the job: it is the answer to one
+	// question asked at one moment.
 	if storage := result.GetStorageResult(); storage != nil && storage.GetOutput() != "" {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "storage",
@@ -1084,9 +1085,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The settings that did not come into effect are the content of the result:
-	// a change
-	// zapisana i przeslonieta wyglada z zewnatrz tak samo jak udana.
+	// The settings that did not come into effect are the content of the
+	// result: a change written and shadowed looks from the outside exactly
+	// like a successful one.
 	// An sshd plan is a result of the job rather than the state of the host: it
 	// describes a change that has not happened yet, against the configuration
 	// the server
@@ -1134,8 +1135,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Ustawienia zapisane, ale nieprzyjete od reki, sa trescia wyniku:
-	// zapis i skutek to dwie rozne rzeczy.
+	// Settings written but not taken immediately are the content of the
+	// result: the write and the effect are two different things.
 	if kernel := result.GetKernelResult(); kernel != nil &&
 		(len(kernel.GetPendingReboot()) > 0 || len(kernel.GetAppliedRuntime()) > 0) {
 		encoded, err := json.Marshal(map[string]any{
@@ -1149,8 +1150,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Blokady wylaczenia naleza do zadania: to one mowia, dlaczego host
-	// zostal na nogach albo co operator postanowil pominac.
+	// Shutdown inhibitors belong to the job: they say why the host stayed
+	// up or what the operator decided to override.
 	if power := result.GetPowerResult(); power != nil &&
 		(len(power.GetInhibitors()) > 0 || power.GetScheduledAt() != "") {
 		encoded, err := json.Marshal(map[string]any{
@@ -1195,21 +1196,22 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Wynik sondy nalezy do zadania: to odpowiedz uslugi z jednej chwili,
-	// widziana z tego jednego hosta.
-	if sonda := result.GetMonitoringResult(); sonda != nil && len(sonda.GetProbe()) > 0 {
+	// A probe result belongs to the job: it is the service's answer from one
+	// moment, seen from this one host.
+	if probe := result.GetMonitoringResult(); probe != nil && len(probe.GetProbe()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "monitoring",
-			"message": sonda.GetMessage(),
-			"probe":   rawJSON(sonda.GetProbe()),
+			"message": probe.GetMessage(),
+			"probe":   rawJSON(probe.GetProbe()),
 		})
 		if err == nil {
 			return encoded
 		}
 	}
 
-	// Stan repozytorium i result kopii naleza do zadania: to odpowiedz na
-	// a question asked at one moment rather than the state of the host. The
+	// The repository state and the backup result belong to the job: they are
+	// the answer to a question asked at one moment rather than the state of
+	// the host. The
 	// list of the copies is also the only place the operator can pick the one
 	// to restore from.
 	// A backup plan is a result of the job rather than the state of the
@@ -1243,9 +1245,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The fingerprint of the key of a source belongs to the job: it is the only
-	// moment in which
-	// czlowiek moze porownac go z odciskiem podanym przez dostawce.
+	// The fingerprint of a source's key belongs to the job: it is the only
+	// moment in which a human can compare it with the fingerprint given by
+	// the vendor.
 	if sources := result.GetRepositoryResult(); sources != nil &&
 		(sources.GetGpgKeyFingerprint() != "" || sources.GetRolledBack()) {
 		encoded, err := json.Marshal(map[string]any{
@@ -1292,11 +1294,10 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The answer of a service after a deployment belongs to the job rather than
-	// to the state of the host:
-	// to pomiar z jednej chwili, tuz po podmianie. Razem z nim idzie digest
-	// of what really landed, and the information whether the host rolled
-	// back.
+	// The answer of a service after a deployment belongs to the job rather
+	// than to the state of the host: it is a measurement from one moment,
+	// right after the swap. With it goes the digest of what really landed,
+	// and the information whether the host rolled back.
 	if certificate := result.GetCertificateResult(); certificate != nil &&
 		(len(certificate.GetProbe()) > 0 || certificate.GetFingerprintSha256() != "" ||
 			certificate.GetRolledBack()) {
@@ -1332,8 +1333,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// Tresc odczytanego pliku nalezy do zadania: to odpowiedz na question
-	// asked at one moment rather than the state of the host.
+	// The content of a read file belongs to the job: it is the answer to a
+	// question asked at one moment rather than the state of the host.
 	if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":      "file",
@@ -1346,12 +1347,12 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	if sygnal := result.GetProcessSignalResult(); sygnal != nil {
+	if signal := result.GetProcessSignalResult(); signal != nil {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "process_signal",
-			"pid":     sygnal.GetPid(),
-			"signal":  sygnal.GetSignal(),
-			"command": sygnal.GetCommand(),
+			"pid":     signal.GetPid(),
+			"signal":  signal.GetSignal(),
+			"command": signal.GetCommand(),
 		})
 		if err == nil {
 			return encoded
@@ -1492,7 +1493,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 }
 
-// rawJSON przenosi zakodowany state bez ponownego kodowania. Pusty zostaje
+// rawJSON carries an encoded state without re-encoding it. Empty stays
 // empty: a removed container has no state after the operation.
 func rawJSON(data []byte) json.RawMessage {
 	if len(data) == 0 {
@@ -1501,8 +1502,8 @@ func rawJSON(data []byte) json.RawMessage {
 	return json.RawMessage(data)
 }
 
-// preflightChecksJSON zachowuje trojstanowy result sprawdzenia: przeszlo,
-// did not go through or could not be established.
+// preflightChecksJSON keeps the three-state check result: passed, did not
+// pass or could not be established.
 func preflightChecksJSON(checks []*agentv1.PreflightCheck) []map[string]any {
 	items := make([]map[string]any, 0, len(checks))
 	for _, check := range checks {
@@ -1743,8 +1744,9 @@ func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalA
 	return accounts
 }
 
-// accountSourceName odwzorowuje source konta na nazwe uzywana w bazie i API.
-// Wartosc nieokreslona zostaje nieokreslona: "local" byloby zgadywaniem.
+// accountSourceName maps the account source to the name used in the
+// database and the API. An undetermined value stays undetermined: "local"
+// would be a guess.
 func accountSourceName(source agentv1.LocalAccount_Source) string {
 	switch source {
 	case agentv1.LocalAccount_SOURCE_LOCAL:
@@ -2009,10 +2011,10 @@ func fragmentsFromReport(report *agentv1.InventoryReport) []inventory.Fragment {
 	return result
 }
 
-// unitStatesJSON zamienia stany jednostek na postac czytana przez interfejs.
-func unitStatesJSON(stany []*agentv1.UnitState) []map[string]any {
-	result := make([]map[string]any, 0, len(stany))
-	for _, state := range stany {
+// unitStatesJSON turns the unit states into the form the interface reads.
+func unitStatesJSON(states []*agentv1.UnitState) []map[string]any {
+	result := make([]map[string]any, 0, len(states))
+	for _, state := range states {
 		result = append(result, map[string]any{
 			"name":            state.GetName(),
 			"load_state":      state.GetLoadState(),
@@ -2125,7 +2127,7 @@ func (s *AgentService) saveCertificateDeployment(ctx context.Context, hostID, jo
 	if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.Certificate == nil {
 		return
 	}
-	deployment := certyfikaty.Deployment{
+	deployment := certstore.Deployment{
 		HostID:            hostID,
 		Path:              payload.Certificate.Path,
 		FingerprintSHA256: result.GetFingerprintSha256(),
@@ -2306,7 +2308,7 @@ func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string
 	now := time.Now().UTC()
 	state.CollectedAt = &now
 
-	var pkgs []modulpakiety.InstalledPackage
+	var pkgs []packagestore.InstalledPackage
 	if len(result.GetPackages()) > 0 {
 		if err := json.Unmarshal(result.GetPackages(), &pkgs); err != nil {
 			s.log.Error("the package list was not recognised", "host_id", hostID, "err", err)
@@ -2365,7 +2367,7 @@ func advisoriesFromResult(result *agentv1.InstalledPackagesResult,
 	if len(result.GetAdvisories()) == 0 {
 		return nil, ""
 	}
-	var gathered []modulpakiety.Advisory
+	var gathered []packagestore.Advisory
 	if err := json.Unmarshal(result.GetAdvisories(), &gathered); err != nil {
 		// The metadata could not be recognised. An empty list would mean here
 		// "the host has no vendor findings at all" - that is, something nobody

@@ -45,7 +45,7 @@ type Host struct {
 	MemberOf    []string `json:"member_of,omitempty"`
 }
 
-// HBACRule opisuje regule dostepu do hostow i uslug.
+// HBACRule describes an access rule for hosts and services.
 type HBACRule struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
@@ -55,12 +55,12 @@ type HBACRule struct {
 	Hosts       []string `json:"hosts,omitempty"`
 	HostGroups  []string `json:"host_groups,omitempty"`
 	Services    []string `json:"services,omitempty"`
-	// AllowsEverything oznacza regule typu allow_all. Dokument zaleca jej
-	// unikanie: otwiera dostep do calej floty jednym wpisem.
+	// AllowsEverything marks an allow_all rule. The document advises against
+	// it: it opens access to the whole fleet with one entry.
 	AllowsEverything bool `json:"allows_everything"`
 }
 
-// SudoRule opisuje regule podniesienia uprawnien.
+// SudoRule describes a privilege escalation rule.
 type SudoRule struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
@@ -72,13 +72,13 @@ type SudoRule struct {
 	Commands    []string `json:"commands,omitempty"`
 	RunAs       []string `json:"run_as,omitempty"`
 	Options     []string `json:"options,omitempty"`
-	// Critical oznacza regule o podwyzszonym ryzyku: NOPASSWD albo ALL.
+	// Critical marks a rule of raised risk: NOPASSWD or ALL.
 	Critical bool `json:"critical"`
-	// CriticalReasons opisuje, co konkretnie czyni regule ryzykowna.
+	// CriticalReasons says what exactly makes the rule risky.
 	CriticalReasons []string `json:"critical_reasons,omitempty"`
 }
 
-// Ping sprawdza lacznosc i uwierzytelnienie connectora.
+// Ping checks the connectivity and the authentication of the connector.
 func (c *Client) Ping(ctx context.Context) (string, error) {
 	result, err := c.call(ctx, "ping", nil, nil)
 	if err != nil {
@@ -93,7 +93,7 @@ func (c *Client) Ping(ctx context.Context) (string, error) {
 	return decoded.Summary, nil
 }
 
-// Users zwraca konta z katalogu.
+// Users returns the accounts from the directory.
 func (c *Client) Users(ctx context.Context) ([]User, error) {
 	return cached(ctx, c, "users", func() ([]User, error) {
 		records, err := c.findRecords(ctx, "user_find")
@@ -121,7 +121,7 @@ func (c *Client) Users(ctx context.Context) ([]User, error) {
 	})
 }
 
-// Groups zwraca grupy z katalogu.
+// Groups returns the groups from the directory.
 func (c *Client) Groups(ctx context.Context) ([]Group, error) {
 	return cached(ctx, c, "groups", func() ([]Group, error) {
 		records, err := c.findRecords(ctx, "group_find")
@@ -172,7 +172,7 @@ func (c *Client) Hosts(ctx context.Context) ([]Host, error) {
 	})
 }
 
-// HBACRules zwraca reguly dostepu.
+// HBACRules returns the access rules.
 func (c *Client) HBACRules(ctx context.Context) ([]HBACRule, error) {
 	return cached(ctx, c, "hbac", func() ([]HBACRule, error) {
 		records, err := c.findRecords(ctx, "hbacrule_find")
@@ -191,8 +191,8 @@ func (c *Client) HBACRules(ctx context.Context) ([]HBACRule, error) {
 				HostGroups:  strings_(record, "memberhost_hostgroup"),
 				Services:    strings_(record, "memberservice_hbacsvc"),
 			}
-			// Regula obejmujaca wszystkich, wszystkie hosty i wszystkie uslugi
-			// otwiera dostep do calej floty jednym wpisem.
+			// A rule covering everybody, every host and every service opens
+			// access to the whole fleet with one entry.
 			rule.AllowsEverything = first(record, "usercategory") == "all" &&
 				first(record, "hostcategory") == "all" &&
 				first(record, "servicecategory") == "all"
@@ -202,7 +202,7 @@ func (c *Client) HBACRules(ctx context.Context) ([]HBACRule, error) {
 	})
 }
 
-// SudoRules zwraca reguly sudo wraz z oznaczeniem ryzyka.
+// SudoRules returns the sudo rules together with the risk marking.
 func (c *Client) SudoRules(ctx context.Context) ([]SudoRule, error) {
 	return cached(ctx, c, "sudo", func() ([]SudoRule, error) {
 		records, err := c.findRecords(ctx, "sudorule_find")
@@ -346,7 +346,7 @@ func strings_(record map[string]any, key string) []string {
 				result = append(result, text)
 				continue
 			}
-			// Katalog zwraca czasem obiekty {"__base64__": ...} albo liczby.
+			// The directory sometimes returns {"__base64__": ...} objects or numbers.
 			if nested, ok := item.(map[string]any); ok {
 				if text, ok := nested["__base64__"].(string); ok {
 					result = append(result, text)

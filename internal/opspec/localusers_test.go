@@ -6,7 +6,7 @@ func TestLocalAccountValidation(t *testing.T) {
 	key := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 jan@workstation"
 
 	valid := Payload{LocalUser: &LocalUserPayload{
-		Name: "kowalski", Shell: "/bin/bash", Groups: []string{"sudo"}, SSHKeys: []string{key},
+		Name: "smith", Shell: "/bin/bash", Groups: []string{"sudo"}, SSHKeys: []string{key},
 	}}
 	if err := Validate(ActionLocalUserCreate, valid); err != nil {
 		t.Fatalf("a valid payload was rejected: %v", err)
@@ -14,23 +14,23 @@ func TestLocalAccountValidation(t *testing.T) {
 
 	// An empty list of keys is a deliberate removal of access, not missing
 	// data.
-	empty := Payload{LocalUser: &LocalUserPayload{Name: "kowalski", SSHKeys: []string{}}}
+	empty := Payload{LocalUser: &LocalUserPayload{Name: "smith", SSHKeys: []string{}}}
 	if err := Validate(ActionLocalSSHKeysSet, empty); err != nil {
 		t.Fatalf("taking keys away has to be allowed: %v", err)
 	}
 
 	cases := map[string]LocalUserPayload{
-		"name with a capital letter": {Name: "Kowalski"},
+		"name with a capital letter": {Name: "Smith"},
 		"name with a path":           {Name: "../root"},
 		"empty name":                 {Name: ""},
-		"relative shell":             {Name: "kowalski", Shell: "bash"},
-		"colon in the description":   {Name: "kowalski", Gecos: "Jan:Kowalski"},
-		"invalid group":              {Name: "kowalski", Groups: []string{"su do"}},
-		"private key":                {Name: "kowalski", SSHKeys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
-		"key with a newline":         {Name: "kowalski", SSHKeys: []string{key + "\nssh-rsa AAAA"}},
-		"unknown key type":           {Name: "kowalski", SSHKeys: []string{"ssh-dss AAAAB3Nz jan"}},
-		"key without material":       {Name: "kowalski", SSHKeys: []string{"ssh-ed25519"}},
-		"empty key":                  {Name: "kowalski", SSHKeys: []string{"   "}},
+		"relative shell":             {Name: "smith", Shell: "bash"},
+		"colon in the description":   {Name: "smith", Gecos: "Jane:Smith"},
+		"invalid group":              {Name: "smith", Groups: []string{"su do"}},
+		"private key":                {Name: "smith", SSHKeys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
+		"key with a newline":         {Name: "smith", SSHKeys: []string{key + "\nssh-rsa AAAA"}},
+		"unknown key type":           {Name: "smith", SSHKeys: []string{"ssh-dss AAAAB3Nz jane"}},
+		"key without material":       {Name: "smith", SSHKeys: []string{"ssh-ed25519"}},
+		"empty key":                  {Name: "smith", SSHKeys: []string{"   "}},
 	}
 	for name, payload := range cases {
 		if err := Validate(ActionLocalUserCreate, payload.copy()); err == nil {

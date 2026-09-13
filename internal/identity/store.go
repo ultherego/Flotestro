@@ -20,7 +20,7 @@ var (
 	ErrBlocked = errors.New("the plan holds conflicts and cannot be carried out")
 )
 
-// Store realizuje dostep do tabeli zmian katalogu.
+// Store gives access to the directory change table.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -31,7 +31,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Spec opisuje zmiane do utworzenia.
+// Spec describes the change to create.
 type Spec struct {
 	Action           ActionType
 	Payload          Payload
@@ -78,7 +78,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Change, erro
 	return s.getTx(ctx, tx, id)
 }
 
-// Approve zatwierdza zmiane i dopuszcza ja do wykonania.
+// Approve approves the change and admits it to execution.
 func (s *Store) Approve(ctx context.Context, tx pgx.Tx, changeID, actor string) (*Change, error) {
 	const query = `
 		update directory_changes set state = $2, approved_by = $3, approved_at = now(),
@@ -128,7 +128,7 @@ func (s *Store) Claim(ctx context.Context, changeID string) (bool, error) {
 	return tag.RowsAffected() > 0, nil
 }
 
-// Finish zapisuje wynik wykonania wraz z faza po fazie.
+// Finish records the execution result phase by phase.
 func (s *Store) Finish(ctx context.Context, changeID string, state State,
 	phases []Phase, message string) error {
 	phasesJSON, err := json.Marshal(phases)
@@ -143,7 +143,7 @@ func (s *Store) Finish(ctx context.Context, changeID string, state State,
 	return err
 }
 
-// Pending zwraca zatwierdzone zmiany czekajace na wykonanie.
+// Pending returns the approved changes waiting for execution.
 func (s *Store) Pending(ctx context.Context) ([]Change, error) {
 	return s.query(ctx, "where state = 'planned' order by created_at limit 20")
 }
@@ -176,7 +176,7 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, changeID string) (*Change,
 	return &changes[0], nil
 }
 
-// List zwraca zmiany, opcjonalnie zawezone stanem.
+// List returns the changes, optionally narrowed by state.
 func (s *Store) List(ctx context.Context, state string, limit int) ([]Change, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50

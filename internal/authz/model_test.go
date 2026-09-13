@@ -20,7 +20,7 @@ func TestAScopeLimitsAPermission(t *testing.T) {
 	if operator.Can(PermUnitRestart, Scope{Site: "warsaw", Environment: "prod"}) {
 		t.Error("the permission leaked into another environment")
 	}
-	if operator.Can(PermUnitRestart, Scope{Site: "krakow", Environment: "staging"}) {
+	if operator.Can(PermUnitRestart, Scope{Site: "west", Environment: "staging"}) {
 		t.Error("the permission leaked into another site")
 	}
 }

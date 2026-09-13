@@ -47,7 +47,7 @@ func TestLocalPathAcceptsLocalPaths(t *testing.T) {
 // scope, which a narrow binding never satisfies.
 func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 	operator := authz.Principal{
-		Subject: "jkowalski", Kind: "user",
+		Subject: "jsmith", Kind: "user",
 		Bindings: []authz.Binding{{
 			Role:  authz.RoleOperator,
 			Scope: authz.Scope{Site: "lab", Environment: "test"},

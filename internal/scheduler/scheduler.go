@@ -362,9 +362,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 
 	case opspec.ActionPackageRepair:
-		odpowiedzi := make([]*agentv1.DebconfAnswer, 0, len(payload.PackageRepair.Answers))
+		answers := make([]*agentv1.DebconfAnswer, 0, len(payload.PackageRepair.Answers))
 		for _, answer := range payload.PackageRepair.Answers {
-			odpowiedzi = append(odpowiedzi, &agentv1.DebconfAnswer{
+			answers = append(answers, &agentv1.DebconfAnswer{
 				Package:  answer.Package,
 				Question: answer.Question,
 				Type:     answer.Type,
@@ -372,7 +372,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			})
 		}
 		envelope.Action = &agentv1.TaskEnvelope_PackagesRepair{
-			PackagesRepair: &agentv1.PackagesRepair{Answers: odpowiedzi},
+			PackagesRepair: &agentv1.PackagesRepair{Answers: answers},
 		}
 
 	case opspec.ActionDockerRead:
@@ -381,8 +381,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionDockerEvents:
 		// The window is optional: no payload means the module's default
 		// window. The values go into the envelope in full, because the plan
-		// hash is computed from them -
-		// pominiete pole daloby na hoscie inny plan niz w panelu.
+		// hash is computed from them - an omitted field would give a
+		// different plan on the host than in the panel.
 		events := &agentv1.ReadDockerEvents{}
 		if payload.DockerEvents != nil {
 			events.SinceSeconds = uint32(payload.DockerEvents.SinceSeconds)
@@ -394,12 +394,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionInventoryRefresh:
 		// The scope is optional: no payload means the whole inventory.
-		var moduly []string
+		var modules []string
 		if payload.Inventory != nil {
-			moduly = payload.Inventory.Modules
+			modules = payload.Inventory.Modules
 		}
 		envelope.Action = &agentv1.TaskEnvelope_RefreshInventory{
-			RefreshInventory: &agentv1.RefreshInventory{Modules: moduly},
+			RefreshInventory: &agentv1.RefreshInventory{Modules: modules},
 		}
 
 	case opspec.ActionPackageInstall, opspec.ActionPackageRemove, opspec.ActionPackageHoldSet:
@@ -506,8 +506,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			certificate.KeyPath = payload.Certificate.KeyPath
 			certificate.Certificate = payload.Certificate.Certificate
 			// The envelope carries a reference to the key rather than the key
-			// itself: the host fetches
-			// value osobnym wywolaniem, gdy zacznie operacje.
+			// itself: the host fetches the value in a separate call once it
+			// starts the operation.
 			if !payload.Certificate.KeySecret.Empty() {
 				certificate.KeySecret = &agentv1.SecretRef{
 					Name:    payload.Certificate.KeySecret.Name,
@@ -573,7 +573,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			backup.Overwrite = payload.Backup.Overwrite
 			backup.Plan = payload.Backup.Plan
 			backup.PlanHash = payload.Backup.PlanHash
-			// Koperta niesie odnosniki do poswiadczen, nigdy ich values.
+			// The envelope carries references to the credentials, never
+			// their values.
 			if !payload.Backup.PasswordSecret.Empty() {
 				backup.PasswordSecret = &agentv1.SecretRef{
 					Name:    payload.Backup.PasswordSecret.Name,
@@ -618,14 +619,14 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		envelope.Action = &agentv1.TaskEnvelope_Repository{Repository: source}
 
 	case opspec.ActionSystemShutdown:
-		wylaczenie := &agentv1.SystemShutdown{}
+		shutdown := &agentv1.SystemShutdown{}
 		if payload.Power != nil {
-			wylaczenie.DelaySeconds = payload.Power.DelaySeconds
-			wylaczenie.Reason = payload.Power.Reason
-			wylaczenie.Mode = payload.Power.Mode
-			wylaczenie.IgnoreInhibitors = payload.Power.IgnoreInhibitors
+			shutdown.DelaySeconds = payload.Power.DelaySeconds
+			shutdown.Reason = payload.Power.Reason
+			shutdown.Mode = payload.Power.Mode
+			shutdown.IgnoreInhibitors = payload.Power.IgnoreInhibitors
 		}
-		envelope.Action = &agentv1.TaskEnvelope_SystemShutdown{SystemShutdown: wylaczenie}
+		envelope.Action = &agentv1.TaskEnvelope_SystemShutdown{SystemShutdown: shutdown}
 
 	case opspec.ActionTimeSyncTest, opspec.ActionTimePlan, opspec.ActionTimeConfigApply,
 		opspec.ActionTimezoneSet:
@@ -677,8 +678,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		operation := agentv1.SshAction_OPERATION_READ
 		switch action {
 		case opspec.ActionSSHConfigPlan:
-			// A plan without settings is a read of state (the host tab); a plan
-			// z ustawieniami liczy roznice wobec nich - faza planowania.
+			// A plan without settings is a read of state (the host tab); a
+			// plan with settings computes the difference against them - the
+			// planning phase.
 			if payload.SSH != nil && payload.SSH.DescribesChange() {
 				operation = agentv1.SshAction_OPERATION_PLAN
 			}
@@ -713,14 +715,13 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		case opspec.ActionStoragePlan:
 			// A plan without a target is a read of the topology (the host
 			// tab); a plan with a target computes the difference for one
-			// mount - the planning phase
-			// kampanii.
+			// mount - the planning phase of a campaign.
 			operation = agentv1.StorageAction_OPERATION_READ
 			if payload.Storage != nil && strings.TrimSpace(payload.Storage.Target) != "" {
 				operation = agentv1.StorageAction_OPERATION_MOUNT_PLAN
 			}
-			// Plan nazwany po rodzaju dotyczy urzadzenia: sprawdzenia albo
-			// rozszerzenia filesystemu lub wolumenu.
+			// A plan named by kind concerns a device: a check or a growth of
+			// the filesystem or the volume.
 			if payload.Storage != nil && payload.Storage.Plan != "" {
 				operation = agentv1.StorageAction_OPERATION_DEVICE_PLAN
 			}
@@ -779,25 +780,25 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		case opspec.ActionFirewallRulesetRestore:
 			operation = agentv1.FirewallAction_OPERATION_RESTORE
 		}
-		zapora := &agentv1.FirewallAction{Operation: operation}
+		firewall := &agentv1.FirewallAction{Operation: operation}
 		if payload.Firewall != nil {
-			zapora.RuleId = payload.Firewall.RuleID
-			zapora.Chain = payload.Firewall.Chain
-			zapora.Action = payload.Firewall.Action
-			zapora.Protocol = payload.Firewall.Protocol
-			zapora.Ports = payload.Firewall.Ports
-			zapora.Sources = payload.Firewall.Sources
-			zapora.Interface = payload.Firewall.Interface
-			zapora.Comment = payload.Firewall.Comment
-			zapora.Zone = payload.Firewall.Zone
-			zapora.Service = payload.Firewall.Service
-			zapora.Enable = payload.Firewall.Enable
-			zapora.BreakGlass = payload.Firewall.BreakGlass
-			zapora.RollbackSeconds = payload.Firewall.RollbackSeconds
-			zapora.RollbackId = payload.Firewall.RollbackID
-			zapora.ExpectedHash = payload.Firewall.ExpectedHash
+			firewall.RuleId = payload.Firewall.RuleID
+			firewall.Chain = payload.Firewall.Chain
+			firewall.Action = payload.Firewall.Action
+			firewall.Protocol = payload.Firewall.Protocol
+			firewall.Ports = payload.Firewall.Ports
+			firewall.Sources = payload.Firewall.Sources
+			firewall.Interface = payload.Firewall.Interface
+			firewall.Comment = payload.Firewall.Comment
+			firewall.Zone = payload.Firewall.Zone
+			firewall.Service = payload.Firewall.Service
+			firewall.Enable = payload.Firewall.Enable
+			firewall.BreakGlass = payload.Firewall.BreakGlass
+			firewall.RollbackSeconds = payload.Firewall.RollbackSeconds
+			firewall.RollbackId = payload.Firewall.RollbackID
+			firewall.ExpectedHash = payload.Firewall.ExpectedHash
 		}
-		envelope.Action = &agentv1.TaskEnvelope_Firewall{Firewall: zapora}
+		envelope.Action = &agentv1.TaskEnvelope_Firewall{Firewall: firewall}
 
 	case opspec.ActionDNSResolveTest, opspec.ActionDNSPlan, opspec.ActionDNSHostApply:
 		operation := agentv1.DnsAction_OPERATION_APPLY

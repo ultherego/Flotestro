@@ -1,11 +1,11 @@
-# Korpus porownan wersji. Kolumny: rodzaj, wersja A, wersja B, oczekiwany
-# wynik (-1 gdy A < B, 0 gdy rowne, 1 gdy A > B).
+# The version comparison corpus. Columns: kind, version A, version B, the
+# expected result (-1 when A < B, 0 when equal, 1 when A > B).
 #
-# Ten sam plik czyta test jednostkowy i test integracyjny, ktory porownuje
-# kazda pare z odpowiedzia prawdziwego narzedzia: dpkg --compare-versions
-# oraz rpmdev-vercmp. Wlasna implementacja bez takiego porownania predzej czy
-# pozniej rozjedzie sie z menedzerem - a rozjazd w te strone oznacza podatnosc
-# uznana za naprawiona.
+# The same file is read by the unit test and by the integration test, which
+# compares every pair with the answer of the real tool: dpkg
+# --compare-versions and rpmdev-vercmp. An own implementation without such a
+# comparison sooner or later drifts from the package manager - and a drift
+# in that direction means a vulnerability deemed fixed.
 deb	1.0	1.0	0
 deb	1.0	1.1	-1
 deb	1.1	1.0	1

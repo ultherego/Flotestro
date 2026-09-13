@@ -185,12 +185,12 @@ func (s *Store) Set(ctx context.Context, definition Definition) (Definition, err
 
 // Delete removes a definition. The history of runs stays.
 func (s *Store) Delete(ctx context.Context, hostID, name string) error {
-	znacznik, err := s.pool.Exec(ctx,
+	tag, err := s.pool.Exec(ctx,
 		`delete from backup_definitions where host_id = $1 and name = $2`, hostID, name)
 	if err != nil {
 		return err
 	}
-	if znacznik.RowsAffected() == 0 {
+	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
 	return nil

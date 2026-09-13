@@ -69,7 +69,7 @@ func TestSudoRiskMarksTheAllCategory(t *testing.T) {
 func TestSudoRiskDoesNotMarkAnOrdinaryRule(t *testing.T) {
 	critical, reasons := sudoRisk(
 		map[string]any{"cmdcategory": []any{}, "hostcategory": []any{}},
-		SudoRule{Users: []string{"jkowalski"}, Commands: []string{"/usr/bin/systemctl"}},
+		SudoRule{Users: []string{"jsmith"}, Commands: []string{"/usr/bin/systemctl"}},
 	)
 	if critical {
 		t.Fatalf("an ordinary rule was marked as critical: %v", reasons)

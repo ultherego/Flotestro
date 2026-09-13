@@ -30,13 +30,13 @@ const renewalThreshold = 1.0 / 3.0
 // for no reason.
 const maxRenewalCheckInterval = 6 * time.Hour
 
-// minRenewalCheckInterval chroni przed odpytywaniem w petli, gdyby certyfikat
-// mial bardzo krotki termin.
+// minRenewalCheckInterval guards against polling in a loop should the
+// certificate have a very short lifetime.
 const minRenewalCheckInterval = time.Minute
 
-// checkInterval skaluje sprawdzanie do dlugosci zycia certyfikatu. Staly
-// odstep szesciu godzin bylby bezuzyteczny przy certyfikacie godzinnym
-// i niepotrzebnie czesty przy rocznym.
+// checkInterval scales the checking to the certificate's lifetime. A fixed
+// six-hour interval would be useless with an hourly certificate and
+// needlessly frequent with a yearly one.
 func checkInterval(notAfter, notBefore time.Time) time.Duration {
 	total := notAfter.Sub(notBefore)
 	if total <= 0 {

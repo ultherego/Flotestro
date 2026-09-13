@@ -65,7 +65,7 @@ func ReadIdentityState(ctx context.Context) IdentityState {
 	return state
 }
 
-// PrivilegedIdentity uzupelnia stan o data wymagajace roota.
+// PrivilegedIdentity completes the state with the data that requires root.
 type PrivilegedIdentity struct {
 	HostPrincipal     string
 	KeytabKVNO        *uint32
@@ -116,14 +116,6 @@ func unitActive(ctx context.Context, unit string) bool {
 	return result.Ran && result.ExitCode == 0
 }
 
-// sssdOnline asks SSSD about the state of the connection to the domain. A
-// non-zero code without a result
-
-// sssdCacheAge zwraca wiek pliku cache. Rosnacy wiek przy hoscie offline
-
-// hostKeytab reads the host principal and the key version number. A KVNO
-// mismatch
-
 // clockState reads the drift of the clock. Kerberos stops working at a
 // difference of minutes, so this value is an early warning.
 func clockState(ctx context.Context) (skew *float64, synchronized bool) {
@@ -131,8 +123,8 @@ func clockState(ctx context.Context) (skew *float64, synchronized bool) {
 	if !result.Ran || result.ExitCode != 0 {
 		return nil, false
 	}
-	// Format -c to wartosci rozdzielone przecinkami; pole 5 to odchylenie
-	// systemowe w sekundach, a pole 1 to adres zrodla.
+	// The -c format is comma-separated values; field 5 is the system offset
+	// in seconds, and field 1 the address of the source.
 	fields := strings.Split(strings.TrimSpace(result.Stdout), ",")
 	if len(fields) < 6 {
 		return nil, false

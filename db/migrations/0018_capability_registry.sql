@@ -27,13 +27,13 @@ create index host_capability_registry_name_idx
 -- Hosts from before the registry keep what is known about them until the
 -- agent's next connection. The reason is empty, because the old boolean did not carry one.
 insert into host_capability_registry (host_id, name, available)
-select host_id, nazwa, wartosc
+select host_id, name, value
 from host_capabilities,
      lateral (values ('systemd', systemd),
                      ('packages.apt', apt),
                      ('packages.dnf', dnf),
                      ('docker', docker),
-                     ('journald', journald)) as przeniesione(nazwa, wartosc)
+                     ('journald', journald)) as moved(name, value)
 on conflict do nothing;
 
 drop table host_capabilities;

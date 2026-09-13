@@ -12,13 +12,13 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
-// SessionRevoker uniewaznia sesje panelu nalezace do tozsamosci.
+// SessionRevoker revokes the panel sessions that belong to an identity.
 type SessionRevoker interface {
 	RevokeSessionsOf(ctx context.Context, principalID, reason string) (int64, error)
 	ListPrincipals(ctx context.Context) ([]authz.Principal, error)
 }
 
-// Executor wykonuje zatwierdzone zmiany katalogu, faza po fazie.
+// Executor carries out approved directory changes phase by phase.
 type Executor struct {
 	store     *Store
 	directory *freeipa.Client

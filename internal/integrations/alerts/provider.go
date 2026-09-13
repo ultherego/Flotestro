@@ -146,8 +146,8 @@ func (a *Alertmanager) Alerts(ctx context.Context, filters []string) ([]Alert, e
 		return nil, nil
 	}
 	params := url.Values{}
-	for _, filtr := range filters {
-		params.Add("filter", filtr)
+	for _, filter := range filters {
+		params.Add("filter", filter)
 	}
 	params.Set("silenced", "true")
 	params.Set("active", "true")
@@ -168,18 +168,18 @@ func (a *Alertmanager) Alerts(ctx context.Context, filters []string) ([]Alert, e
 		if err := json.Unmarshal(data, &result); err != nil {
 			return fmt.Errorf("the answer of the alert source was not recognised: %w", err)
 		}
-		for _, wpis := range result {
-			start := wpis.StartsAt.UTC()
+		for _, entry := range result {
+			start := entry.StartsAt.UTC()
 			alerty = append(alerty, Alert{
-				Name:         wpis.Labels["alertname"],
-				Severity:     wpis.Labels["severity"],
-				State:        wpis.Status.State,
-				Summary:      wpis.Annotations["summary"],
-				Description:  wpis.Annotations["description"],
-				Labels:       wpis.Labels,
+				Name:         entry.Labels["alertname"],
+				Severity:     entry.Labels["severity"],
+				State:        entry.Status.State,
+				Summary:      entry.Annotations["summary"],
+				Description:  entry.Annotations["description"],
+				Labels:       entry.Labels,
 				StartsAt:     &start,
-				SilencedBy:   wpis.Status.SilencedBy,
-				GeneratorURL: wpis.GeneratorURL,
+				SilencedBy:   entry.Status.SilencedBy,
+				GeneratorURL: entry.GeneratorURL,
 			})
 		}
 		return nil
@@ -193,8 +193,8 @@ func (a *Alertmanager) Silences(ctx context.Context, filters []string) ([]Silenc
 		return nil, nil
 	}
 	params := url.Values{}
-	for _, filtr := range filters {
-		params.Add("filter", filtr)
+	for _, filter := range filters {
+		params.Add("filter", filter)
 	}
 	var ciszy []Silence
 	err := a.ask(ctx, http.MethodGet, "/api/v2/silences", params, nil, func(data []byte) error {
@@ -216,17 +216,17 @@ func (a *Alertmanager) Silences(ctx context.Context, filters []string) ([]Silenc
 		if err := json.Unmarshal(data, &result); err != nil {
 			return fmt.Errorf("the answer of the alert source was not recognised: %w", err)
 		}
-		for _, wpis := range result {
+		for _, entry := range result {
 			// An expired silence is history rather than state: we show the
 			// ones still in force or about to come into force.
-			if wpis.Status.State == "expired" {
+			if entry.Status.State == "expired" {
 				continue
 			}
 			silence := Silence{
-				ID: wpis.ID, StartsAt: wpis.StartsAt.UTC(), EndsAt: wpis.EndsAt.UTC(),
-				CreatedBy: wpis.CreatedBy, Comment: wpis.Comment, Status: wpis.Status.State,
+				ID: entry.ID, StartsAt: entry.StartsAt.UTC(), EndsAt: entry.EndsAt.UTC(),
+				CreatedBy: entry.CreatedBy, Comment: entry.Comment, Status: entry.Status.State,
 			}
-			for _, matcher := range wpis.Matchers {
+			for _, matcher := range entry.Matchers {
 				silence.Matchers = append(silence.Matchers, Matcher{
 					Name: matcher.Name, Value: matcher.Value, IsRegex: matcher.IsRegex,
 				})
