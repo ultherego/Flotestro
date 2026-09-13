@@ -560,6 +560,16 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		// holds a placeholder for certificate material the operator supplies.
 		PayloadTemplate *opspec.Payload `json:"payload_template,omitempty"`
 		NeedsMaterial   bool            `json:"needs_material,omitempty"`
+		// The second half of the contract: what a cancel does to an
+		// operation under way, whether it may be repeated, what way back
+		// exists, what the campaign checks afterwards and which host
+		// resources it takes. The panel draws its cancel button and its
+		// rollback link from these, never from the operation name.
+		CancelMode     opspec.CancelMode      `json:"cancel_mode"`
+		RetryClass     opspec.RetryPolicy     `json:"retry_class"`
+		Rollback       opspec.RollbackClass   `json:"rollback"`
+		Verification   opspec.Verification    `json:"verification"`
+		ResourceClaims []opspec.ResourceClaim `json:"resource_claims"`
 	}
 	items := make([]actionInfo, 0)
 	for _, action := range opspec.AllActions() {
@@ -573,6 +583,7 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		if example, ok := opspec.PayloadTemplate(action); ok && ready {
 			template = &example
 		}
+		contract := action.Contract()
 		items = append(items, actionInfo{
 			PayloadTemplate:    template,
 			NeedsMaterial:      opspec.TemplateNeedsMaterial(action),
@@ -587,6 +598,11 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			OfflinePolicy:      string(action.OfflinePolicy()),
 			CampaignReady:      ready,
 			CampaignRefusal:    reason,
+			CancelMode:         contract.CancelMode,
+			RetryClass:         contract.RetryClass,
+			Rollback:           contract.Rollback,
+			Verification:       contract.Verification,
+			ResourceClaims:     contract.ResourceClaims,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})

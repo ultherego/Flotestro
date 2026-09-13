@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
-import type { Campaign, CampaignTarget, SelectorExpression } from "../lib/types";
+import type {
+  Campaign, CampaignTarget, OperationContract, ResourceClaim, SelectorExpression,
+} from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
@@ -65,13 +67,7 @@ export function Bulk() {
     setOrder((previous) => ({ ...previous, ...delta }));
 
   const capabilities = useCapabilities();
-  const operations = useQuery({
-    queryKey: ["actions"],
-    // The operation catalogue lives under /api/v1/actions. The wizard used
-    // to ask an address that did not exist, so the list was empty from the
-    // start.
-    queryFn: () => api.get<Collection<Operation>>("/api/v1/actions"),
-  });
+  const operations = useOperations();
   const bulk = (operations.data?.items ?? []).filter((item) => item.campaign_ready);
   // A prefilled operation without a payload takes the template once the
   // catalogue is in, exactly as choosing it by hand would.
@@ -256,7 +252,7 @@ function expressionOf(order: Order): SelectorExpression | null {
   return parts.length === 1 ? parts[0] : { all: parts };
 }
 
-type Operation = {
+export type Operation = OperationContract & {
   action: string;
   campaign_refusal?: string;
   mutating: boolean;
@@ -267,6 +263,152 @@ type Operation = {
   payload_template?: Record<string, unknown>;
   needs_material?: boolean;
 };
+
+/**
+ * The operation catalogue under /api/v1/actions, read once and shared by
+ * every screen that draws something from an operation's contract: the
+ * wizard, the campaign page and the job list. The registry changes only
+ * with a release of the control plane, so the copy stays fresh for a good
+ * while and one screen does not fetch what another just did.
+ */
+export function useOperations() {
+  return useQuery({
+    queryKey: ["actions"],
+    queryFn: () => api.get<Collection<Operation>>("/api/v1/actions"),
+    staleTime: 10 * 60_000,
+  });
+}
+
+/** The catalogue entry of one operation, once the catalogue is in. */
+export function useOperation(action: string | undefined): Operation | undefined {
+  const operations = useOperations();
+  return action ? operations.data?.items.find((item) => item.action === action) : undefined;
+}
+
+/**
+ * The reverse of a change, where a true one exists: an operation that puts
+ * back what the forward one changed, as a new plan the operator approves.
+ * A restart or a signal has no reverse, and the list says so by leaving
+ * it out.
+ */
+export const REVERSE_OPERATION: Record<string, string> = {
+  "file.ensure": "file.rollback",
+  "network.profile.apply": "network.rollback",
+  "firewall.rule.ensure": "firewall.ruleset.restore",
+};
+
+/**
+ * The payload the reverse operation starts from: the same file, the same
+ * interface. The version or the rollback identifier is per host and is
+ * left for the operator to fill in.
+ */
+export function reversePayload(action: string, payload: unknown): Record<string, unknown> {
+  const source = payload && typeof payload === "object"
+    ? payload as Record<string, Record<string, unknown> | undefined>
+    : {};
+  const text = (section: string, field: string): string => {
+    const value = source[section]?.[field];
+    return typeof value === "string" ? value : "";
+  };
+  switch (action) {
+    case "file.ensure":
+      return { file: { path: text("file", "path"), version_sha256: "" } };
+    case "network.profile.apply":
+      return { network: { interface: text("network", "interface"), rollback_id: "" } };
+    case "firewall.rule.ensure":
+      return { firewall: { rollback_id: "" } };
+  }
+  return {};
+}
+
+/** The address of the wizard with an order half written. */
+export function bulkPrefill(action: string, name: string, payload: unknown): string {
+  return `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+}
+
+/**
+ * The words for every class of the contract: a short label for the chip
+ * and one sentence for the tooltip. The values are the registry's; the
+ * words are the panel's, so a class the panel does not know yet shows as
+ * it came instead of as nothing.
+ */
+const CONTRACT_WORDS: Record<string, Record<string, [label: string, meaning: string]>> = {
+  cancel: {
+    safe: ["any time", "Can be cancelled at any moment; the host is left in a consistent state."],
+    checkpoint_only: ["between steps", "A cancel is honoured only between steps: the step under way finishes, the next one does not start."],
+    impossible_after_start: ["not after start", "Once the host reported a start, a cancel is only information: the operation runs to its end."],
+    local_watchdog_owned: ["host watchdog", "The host's own watchdog decides: the panel only requests, and never stops a rollback timer that guards the management channel."],
+  },
+  retry: {
+    never: ["never", "Repeating the same order fails the same way; a decision is needed first."],
+    automatic: ["automatic", "Idempotent: the system may repeat it on its own."],
+    after_change: ["after a fix", "Repeat only after fixing what the result names on the host."],
+    after_replan: ["after a new plan", "The plan has to be computed and approved again before a repeat."],
+    read_state: ["after reading the host", "Read the state of the host before repeating; never repeat blind."],
+  },
+  rollback: {
+    automatic_local: ["automatic on the host", "The host reverts itself when the connectivity check fails, with no help from the panel."],
+    exact_restore: ["exact restore", "The previous version is kept and can be put back exactly as it was."],
+    compensating: ["compensating plan", "A new plan neutralises the effect; the history stays."],
+    best_effort: ["best effort", "An attempt to limit the damage, with no guarantee of the initial state."],
+    none: ["none", "Irreversible: there is no way back."],
+  },
+  verification: {
+    none: ["none", "Nothing is checked after the change."],
+    unit_health: ["unit health", "After the change the unit is checked for the expected state and health."],
+    connectivity: ["connectivity", "After the change the host has to answer on the management channel."],
+    plan_recheck: ["plan recheck", "After the change the plan is computed again and has to show no difference."],
+    custom: ["module check", "The module runs its own check: a probe, a new boot ID, a version reported back."],
+  },
+};
+
+/** The label and the meaning of one contract value, translated. */
+export function contractWords(t: (text: string) => string, field: string, value: string | undefined): [string, string] {
+  const words = value ? CONTRACT_WORDS[field]?.[value] : undefined;
+  if (!words) return [value ?? "—", t("The registry declares a value this panel does not describe yet.")];
+  return [t(words[0]), t(words[1])];
+}
+
+function describeClaim(t: (text: string) => string, claim: ResourceClaim): string {
+  const mode = claim.mode === "exclusive" ? t("exclusive") : t("shared");
+  return claim.weight > 1 ? `${claim.class} (${mode} ×${claim.weight})` : `${claim.class} (${mode})`;
+}
+
+/**
+ * The contract of an operation as small chips, each with its sentence on
+ * hover: what a cancel does, whether a repeat is safe, what way back
+ * exists, what is verified and which host resources the operation takes.
+ */
+export function ContractChips({ contract }: { contract: OperationContract }) {
+  const t = useT();
+  const chips: [string, string, string][] = [];
+  for (const [field, value, label] of [
+    ["cancel", contract.cancel_mode, t("cancel")],
+    ["retry", contract.retry_class, t("retry")],
+    ["rollback", contract.rollback, t("rollback")],
+    ["verification", contract.verification, t("verification")],
+  ] as const) {
+    if (!value) continue;
+    const [word, meaning] = contractWords(t, field, value);
+    chips.push([`${label}: ${word}`, meaning, field === "rollback" && value === "none" ? "warn" : ""]);
+  }
+  const claims = contract.resource_claims ?? [];
+  if (claims.length > 0) {
+    chips.push([
+      `${t("claims")}: ${claims.map((claim) => describeClaim(t, claim)).join(", ")}`,
+      t("The host resources the operation holds while it runs. An exclusive claim keeps every other change off that resource; shared claims coexist and their weight is what they cost the host."),
+      "",
+    ]);
+  }
+  if (chips.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {chips.map(([label, meaning, kind]) => (
+        <span key={label} className={`badge ${kind}`} title={meaning}>{label}</span>
+      ))}
+    </div>
+  );
+}
 
 /**
  * The payload of the order. The few operations with a form build it from
@@ -460,6 +602,15 @@ function ScopeStep({
             ))}
           </select>
         </Field>
+        {chosen && (
+          <Field
+            label={t("Contract")}
+            hint={t("What the panel may promise about this operation once it is on the host; hover a chip for the meaning.")}
+            wide
+          >
+            <ContractChips contract={chosen} />
+          </Field>
+        )}
         {needsUnit && (
           <Field label={t("Unit")}>
             <input

@@ -13,6 +13,9 @@ import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
 import { loadedTargets, TARGET_STATES, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
+import {
+  bulkPrefill, ContractChips, contractWords, REVERSE_OPERATION, reversePayload, useOperation,
+} from "./Bulk";
 import { useT } from "../i18n";
 
 export function Campaign() {
@@ -44,6 +47,13 @@ export function Campaign() {
     queryFn: () => api.get<CampaignType>(`/api/v1/campaigns/${id}`),
     refetchInterval: OPERATIONS_INTERVAL,
   });
+  // The contract of the campaign's operation and of its reverse, from the
+  // catalogue: what a stop does to the hosts under way and what way back
+  // exists are read from there, never guessed from the operation name.
+  const actionType = campaign.data?.action_type ?? "";
+  const operation = useOperation(actionType || undefined);
+  const reverseAction: string | undefined = REVERSE_OPERATION[actionType];
+  const reverseOperation = useOperation(reverseAction);
   const targets = useTargets(id, { state: stateFilter, search });
   const loaded = loadedTargets(targets.data);
   const total = targets.data?.pages[0]?.total ?? 0;
@@ -128,6 +138,41 @@ export function Campaign() {
   const succeeded = totals.succeeded ?? 0;
   const failed = (totals.failed ?? 0) + (totals.timed_out ?? 0) + (totals.partially_applied ?? 0);
 
+  // What the hosts under way do when the campaign stops, from the cancel
+  // mode of the operation. The campaign stop itself never interrupts a
+  // host; the sentence says whether such a host could be stopped at all.
+  const underWayFate = (() => {
+    switch (operation?.cancel_mode) {
+      case "safe":
+        return t("{underWay} operations under way stop cleanly when cancelled one by one from the host's job list; the campaign stop itself leaves them to finish.", { underWay });
+      case "checkpoint_only":
+        return t("{underWay} operations under way finish the step they are on and do not start the next one; none is interrupted mid-step.", { underWay });
+      case "local_watchdog_owned":
+        return t("{underWay} operations under way are settled by the host's own watchdog: the change is committed or reverted on the host, and the panel cannot stop that.", { underWay });
+      case "impossible_after_start":
+        return t("{underWay} operations under way finish on their own: once started, this operation cannot be cancelled.", { underWay });
+      default:
+        return t("{underWay} operations already under way finish on their own — cancelling does not interrupt them.", { underWay });
+    }
+  })();
+  const rollbackHint = (() => {
+    switch (operation?.rollback) {
+      case "exact_restore":
+        return t("Nothing is rolled back by the stop. The previous version is kept on every host that changed; putting it back is a new plan.");
+      case "compensating":
+        return t("Nothing is rolled back by the stop. A change that landed is undone by a new plan that neutralises it.");
+      case "automatic_local":
+        return t("Nothing is rolled back by the stop. A host that failed its connectivity check has already reverted itself; a host that committed goes back only with a new plan.");
+      case "best_effort":
+        return t("Nothing is rolled back by the stop, and there is only a best-effort way back with no guarantee of the previous state.");
+      case "none":
+        return t("Nothing is rolled back by the stop, and there is no way back for this operation.");
+      default:
+        return t("Nothing is rolled back by the stop.");
+    }
+  })();
+  const rollbackPlannable = ["exact_restore", "compensating", "automatic_local"].includes(operation?.rollback ?? "");
+
   return (
     <>
       <PageHeader
@@ -209,8 +254,8 @@ export function Campaign() {
           tone={pendingStop === "pause" ? "warn" : "error"}
           title={pendingStop === "pause" ? t("Pause the campaign?") : t("Cancel the campaign?")}
           description={pendingStop === "pause"
-            ? t("No further host starts until the campaign is resumed. {underWay} operations already under way finish on their own — a pause does not interrupt work on a host.", { underWay })
-            : t("{notStarted} hosts that have not started are marked canceled and will not start. {underWay} operations already under way finish on their own — cancelling does not interrupt them and does not roll anything back.", { notStarted, underWay })}
+            ? `${t("No further host starts until the campaign is resumed.")} ${underWayFate}`
+            : `${t("{notStarted} hosts that have not started are marked canceled and will not start.", { notStarted })} ${underWayFate} ${rollbackHint}`}
           footer={
             <Actions>
               <button
@@ -229,6 +274,19 @@ export function Campaign() {
               <input value={stopReason} onChange={(e) => setStopReason(e.target.value)} />
             </Field>
           </FieldGrid>
+          {pendingStop === "cancel" && rollbackPlannable && reverseAction && (
+            <p className="subtitle">
+              {reverseOperation?.campaign_ready ? (
+                <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload))}>
+                  {t("Plan the rollback")}
+                </Link>
+              ) : (
+                t("The reverse operation {action} runs host by host today; a rollback campaign is not offered.", { action: reverseAction })
+              )}
+              {" · "}
+              {t("The rollback is a new campaign with its own plans and its own approval; the version or the rollback identifier is per host.")}
+            </p>
+          )}
         </Card>
       )}
 
@@ -253,6 +311,22 @@ export function Campaign() {
           <Pair label={t("Failure threshold")}>{t("{percent}% or {count} hosts", { percent: data.failure_threshold_percent, count: data.failure_threshold_absolute })}</Pair>
           <Pair label={t("Reboot policy")}>{data.reboot_policy}</Pair>
           <Pair label={t("Offline policy")}>{data.offline_policy}</Pair>
+          <Pair label={t("Contract")}>
+            {operation ? <ContractChips contract={operation} /> : "—"}
+          </Pair>
+          {operation?.rollback && (
+            <Pair label={t("Way back")}>
+              {contractWords(t, "rollback", operation.rollback)[0]}
+              {rollbackPlannable && reverseAction && reverseOperation?.campaign_ready && (
+                <>
+                  {" · "}
+                  <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload))}>
+                    {t("Plan the rollback")}
+                  </Link>
+                </>
+              )}
+            </Pair>
+          )}
           <Pair label={t("Waits for offline hosts until")}>{data.deadline_at ? <Time value={data.deadline_at} /> : "—"}</Pair>
           <Pair label={t("Manual gate after the canary")}>
             {!data.manual_gate ? t("no") : data.gate_advanced_by

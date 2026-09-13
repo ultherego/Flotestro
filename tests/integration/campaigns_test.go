@@ -4928,3 +4928,99 @@ func TestOfflinePolicyMayOnlyBeTightened(t *testing.T) {
 		}
 	}
 }
+
+// TestTheCatalogueCarriesTheOperationContract guards the second half of the
+// contract on the wire: what a cancel does to an operation under way, whether
+// it may be repeated, what way back exists, what is verified and which host
+// resources it takes. The panel draws its cancel button and its rollback
+// link from these fields, so a mutating operation without them would draw a
+// promise nobody made.
+func TestTheCatalogueCarriesTheOperationContract(t *testing.T) {
+	h := newHarness(t)
+
+	type claim struct {
+		Class  string `json:"class"`
+		Mode   string `json:"mode"`
+		Weight int    `json:"weight"`
+	}
+	var catalogue struct {
+		Items []struct {
+			Action       string  `json:"action"`
+			Mutating     bool    `json:"mutating"`
+			CancelMode   string  `json:"cancel_mode"`
+			RetryClass   string  `json:"retry_class"`
+			Rollback     string  `json:"rollback"`
+			Verification string  `json:"verification"`
+			Claims       []claim `json:"resource_claims"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/actions", &catalogue)
+	if len(catalogue.Items) == 0 {
+		t.Fatal("the operation catalogue is empty")
+	}
+
+	expected := map[string]struct {
+		cancel, retry, rollback, verification string
+		claims                                []claim
+	}{
+		"unit.restart": {
+			cancel: "impossible_after_start", retry: "read_state", rollback: "none", verification: "unit_health",
+			claims: []claim{{Class: "units", Mode: "exclusive", Weight: 1}},
+		},
+		"packages.upgrade": {
+			cancel: "impossible_after_start", retry: "read_state", rollback: "compensating", verification: "plan_recheck",
+			claims: []claim{{Class: "packages", Mode: "exclusive", Weight: 4}},
+		},
+	}
+	seen := map[string]bool{}
+	for _, item := range catalogue.Items {
+		if want, ok := expected[item.Action]; ok {
+			seen[item.Action] = true
+			if item.CancelMode != want.cancel || item.RetryClass != want.retry ||
+				item.Rollback != want.rollback || item.Verification != want.verification {
+				t.Errorf("%s declares cancel=%s retry=%s rollback=%s verification=%s, want %s/%s/%s/%s",
+					item.Action, item.CancelMode, item.RetryClass, item.Rollback, item.Verification,
+					want.cancel, want.retry, want.rollback, want.verification)
+			}
+			if len(item.Claims) != len(want.claims) {
+				t.Errorf("%s declares the claims %+v, want %+v", item.Action, item.Claims, want.claims)
+			} else {
+				for i := range want.claims {
+					if item.Claims[i] != want.claims[i] {
+						t.Errorf("%s claim %d = %+v, want %+v", item.Action, i, item.Claims[i], want.claims[i])
+					}
+				}
+			}
+		}
+		if !item.Mutating {
+			// A read derives its contract: it stops on request and takes
+			// only shared claims.
+			if item.CancelMode != "safe" {
+				t.Errorf("%s is a read with the cancel mode %q", item.Action, item.CancelMode)
+			}
+			for _, c := range item.Claims {
+				if c.Mode != "shared" {
+					t.Errorf("%s is a read and takes %s %s", item.Action, c.Class, c.Mode)
+				}
+			}
+			continue
+		}
+		if item.CancelMode == "" || item.RetryClass == "" || item.Rollback == "" || item.Verification == "" {
+			t.Errorf("%s changes the host and lacks a contract field: cancel=%q retry=%q rollback=%q verification=%q",
+				item.Action, item.CancelMode, item.RetryClass, item.Rollback, item.Verification)
+		}
+		if item.Claims == nil {
+			t.Errorf("%s changes the host and has no claims list; an empty list is a declaration, a missing one is not", item.Action)
+		}
+		for _, c := range item.Claims {
+			if c.Mode != "exclusive" || c.Weight < 1 {
+				t.Errorf("%s takes %s as %s with the weight %d", item.Action, c.Class, c.Mode, c.Weight)
+			}
+		}
+	}
+	for action := range expected {
+		if !seen[action] {
+			t.Errorf("%s is missing from the catalogue", action)
+		}
+	}
+}

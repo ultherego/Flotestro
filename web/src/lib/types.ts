@@ -781,3 +781,43 @@ export type OperationContract = {
   verification?: Verification;
   resource_claims?: ResourceClaim[];
 };
+
+/** The record a timeline row comes from; the screen links to its page. */
+export type HostTimelineKind = "job" | "audit" | "session" | "lifecycle" | "alert" | "campaign";
+
+/**
+ * One event in the history of a host: one record of one table, cut to a
+ * common shape. `event` is the moment of the record the row stands for
+ * (a task created or finished, a session opened or ended); `state` and
+ * `error_code` are the record's own.
+ */
+export type HostTimelineItem = {
+  at: string;
+  kind: HostTimelineKind;
+  id: string;
+  title: string;
+  event?: string;
+  detail?: string;
+  state?: string;
+  error_code?: string;
+  actor?: string;
+  ref: { type: string; id: string };
+};
+
+/** A page of the timeline; `sources` names the kinds the caller may see. */
+export type HostTimelinePage = {
+  items: HostTimelineItem[];
+  count: number;
+  next_cursor?: string;
+  sources: HostTimelineKind[];
+};
+
+/** The final report of a campaign: stored once it ended, computed live before. */
+export type CampaignReportOrigin = {
+  stored: boolean;
+  generated_at?: string;
+  approval_fingerprint?: string;
+  plan_set_hash?: string;
+  approved_by?: string;
+  created_by?: string;
+};

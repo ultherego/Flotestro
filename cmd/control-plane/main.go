@@ -42,6 +42,7 @@ import (
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/oidc"
+	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/outbox"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
@@ -187,6 +188,13 @@ func run() error {
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"the environments where a change has to be approved by a second person")
 	flag.Parse()
+
+	// An operation without an explicit decision on what a cancel, a retry
+	// or a rollback means is a reason not to start: the panel would draw a
+	// promise the host cannot keep.
+	if err := opspec.ValidateContracts(); err != nil {
+		return err
+	}
 
 	productionEnvironments := splitList(*productionList)
 

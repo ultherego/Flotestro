@@ -349,11 +349,21 @@ type Spec struct {
 	// approved by a human. The plan hash binds the approval to one specific
 	// diff.
 	RequiresPlan bool `json:"requires_plan"`
+	// The second half of the contract: what a cancel does to an operation
+	// under way, whether it may be repeated, what way back exists, what the
+	// campaign checks afterwards and which host resources it takes. A
+	// mutating operation declares all of it; a read derives it.
+	CancelMode     CancelMode      `json:"cancel_mode"`
+	RetryClass     RetryPolicy     `json:"retry_class"`
+	Rollback       RollbackClass   `json:"rollback"`
+	Verification   Verification    `json:"verification"`
+	ResourceClaims []ResourceClaim `json:"resource_claims"`
 }
 
 // Describe returns the full contract of an operation.
 func (a ActionType) Describe() Spec {
 	spec := actionSpecs[a]
+	declared := a.Contract()
 	return Spec{
 		Action:         a,
 		Version:        ActionVersion,
@@ -367,6 +377,11 @@ func (a ActionType) Describe() Spec {
 		CampaignMode:   a.CampaignMode(),
 		OfflinePolicy:  a.OfflinePolicy(),
 		RequiresPlan:   spec.requiresPlan,
+		CancelMode:     declared.CancelMode,
+		RetryClass:     declared.RetryClass,
+		Rollback:       declared.Rollback,
+		Verification:   declared.Verification,
+		ResourceClaims: declared.ResourceClaims,
 	}
 }
 
