@@ -98,6 +98,9 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	if s.groupProblem(w, err) {
 		return
 	}
+	// The tag names the version of the record; a member change moves
+	// updated_at too, so it covers the list as well as the definition.
+	setETag(w, etagOfTime(group.UpdatedAt))
 	writeJSON(w, http.StatusOK, s.groupView(r.Context(), *group, principal.ScopesFor(authz.PermHostRead)))
 }
 
@@ -180,6 +183,9 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if s.groupProblem(w, err) {
 		return
 	}
+	if !requireMatch(w, r, etagOfTime(current.UpdatedAt)) {
+		return
+	}
 	var request groupRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
@@ -220,6 +226,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 			"selector": updated.Selector.Describe(), "previous_selector": current.Selector.Describe(),
 		},
 	})
+	setETag(w, etagOfTime(updated.UpdatedAt))
 	writeJSON(w, http.StatusOK, s.groupView(r.Context(), *updated, principal.ScopesFor(authz.PermHostRead)))
 }
 
@@ -258,6 +265,11 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 	if s.groupProblem(w, err) {
 		return
 	}
+	// The list is replaced whole, so a stale copy would drop the members
+	// somebody else added since it was read.
+	if !requireMatch(w, r, etagOfTime(group.UpdatedAt)) {
+		return
+	}
 	var request groupMembersRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
@@ -283,6 +295,7 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 			"sample": hostNames(visible[:min(len(visible), previewSampleSize)]),
 		},
 	})
+	setETag(w, etagOfTime(updated.UpdatedAt))
 	writeJSON(w, http.StatusOK, s.groupView(r.Context(), *updated, principal.ScopesFor(authz.PermHostRead)))
 }
 

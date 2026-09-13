@@ -332,6 +332,12 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		campaignID); err != nil {
 		return nil, err
 	}
+	// A cancellation ends the campaign, and an ended campaign has its
+	// report - written here, so the record shows the targets as the
+	// cancellation left them.
+	if err := s.recordReport(ctx, tx, campaignID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -361,6 +367,11 @@ func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaig
 }
 
 // SetState changes the state of a campaign.
+//
+// A terminal state is written together with the final report, in one
+// transaction: the report is the durable record of how the campaign
+// ended, and a campaign that ended without one would be a campaign whose
+// history depends on its target rows staying around.
 func (s *Store) SetState(ctx context.Context, campaignID string, state State, reason string) error {
 	const query = `
 		update campaigns set state = $2, updated_at = now(),
@@ -370,8 +381,22 @@ func (s *Store) SetState(ctx context.Context, campaignID string, state State, re
 			started_at   = coalesce(started_at, case when $2 in ('canary', 'running') then now() end),
 			finished_at  = case when $2 in ('completed', 'failed', 'canceled') then now() else finished_at end
 		where id = $1`
-	_, err := s.pool.Exec(ctx, query, campaignID, string(state), nullable(reason))
-	return err
+	if !state.Terminal() {
+		_, err := s.pool.Exec(ctx, query, campaignID, string(state), nullable(reason))
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, query, campaignID, string(state), nullable(reason)); err != nil {
+		return err
+	}
+	if err := s.recordReport(ctx, tx, campaignID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // Active returns the campaigns the orchestrator has to handle.

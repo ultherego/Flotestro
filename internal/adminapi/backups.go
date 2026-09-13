@@ -67,6 +67,10 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The tag covers the definitions of the host as a set: a write names
+	// one of them by its name in the body, and what an editor read was the
+	// whole list.
+	setETag(w, backupDefinitionsTag(definitions))
 	latest, err := s.backups.Latest(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
@@ -118,6 +122,39 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 		report.Tools = json.RawMessage(fragment.Payload)
 	}
 	writeJSON(w, http.StatusOK, report)
+}
+
+// backupDefinitionsTag is the entity tag of a host's backup definitions:
+// it moves when a definition is added, changed or removed. The list comes
+// ordered by name, so the same set gives the same tag.
+func backupDefinitionsTag(definitions []backupstore.Definition) string {
+	parts := make([]string, 0, len(definitions)*2)
+	for _, definition := range definitions {
+		parts = append(parts, definition.Name, definition.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	}
+	return etagOf(parts...)
+}
+
+// requireBackupDefinitionsMatch enforces If-Match against the current set
+// of the host's definitions.
+func (s *Server) requireBackupDefinitionsMatch(w http.ResponseWriter, r *http.Request, hostID string) bool {
+	if r.Header.Get("If-Match") == "" {
+		return true
+	}
+	definitions, err := s.backups.Definitions(r.Context(), hostID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	return requireMatch(w, r, backupDefinitionsTag(definitions))
+}
+
+// setBackupDefinitionsTag puts the tag of the set after a write on the
+// answer, so an editor can go on without reading the list again.
+func (s *Server) setBackupDefinitionsTag(w http.ResponseWriter, r *http.Request, hostID string) {
+	if definitions, err := s.backups.Definitions(r.Context(), hostID); err == nil {
+		setETag(w, backupDefinitionsTag(definitions))
+	}
 }
 
 // definitionRequest describes a backup definition coming from the panel.
@@ -207,6 +244,9 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	if !s.requireBackupDefinitionsMatch(w, r, hostID) {
+		return
+	}
 	saved, err := s.backups.Set(r.Context(), backupstore.Definition{
 		HostID: hostID, Name: request.Name, Tool: request.Tool,
 		Repository: request.Repository, Paths: request.Paths,
@@ -230,6 +270,7 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 			"repository": saved.Repository, "password_secret": saved.PasswordSecret,
 		},
 	})
+	s.setBackupDefinitionsTag(w, r, hostID)
 	writeJSON(w, http.StatusOK, saved)
 }
 
@@ -249,6 +290,9 @@ func (s *Server) handleDeleteBackupDefinition(w http.ResponseWriter, r *http.Req
 		problem(w, http.StatusBadRequest, "name_required", "name query parameter is required")
 		return
 	}
+	if !s.requireBackupDefinitionsMatch(w, r, hostID) {
+		return
+	}
 	err := s.backups.Delete(r.Context(), hostID, name)
 	if errors.Is(err, backupstore.ErrNotFound) {
 		problem(w, http.StatusNotFound, "definition_not_found", "no such backup definition")
@@ -264,6 +308,7 @@ func (s *Server) handleDeleteBackupDefinition(w http.ResponseWriter, r *http.Req
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"name": name},
 	})
+	s.setBackupDefinitionsTag(w, r, hostID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -5024,3 +5024,69 @@ func TestTheCatalogueCarriesTheOperationContract(t *testing.T) {
 		}
 	}
 }
+
+// TestFinishedCampaignKeepsAnImmutableReport guards the record of a
+// rollout: once a campaign ends, its report is written with the terminal
+// transition and served as stored, and the database refuses to change or
+// remove it. A report computed from the target rows would lose the host
+// that failed the day that host leaves the fleet.
+func TestFinishedCampaignKeepsAnImmutableReport(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	campaign := h.createCampaign(labCampaign("stored report", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": []string{host.ID}},
+	}))
+	// Before the end the report is computed on request and says so.
+	var live struct {
+		campaignReportView
+		Stored bool `json:"stored"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/report", &live)
+	if live.Stored {
+		t.Error("a campaign that has not ended serves a stored report")
+	}
+
+	h.approveCampaign(campaign)
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+
+	var stored struct {
+		campaignReportView
+		Stored              bool   `json:"stored"`
+		GeneratedAt         string `json:"generated_at"`
+		ApprovalFingerprint string `json:"approval_fingerprint"`
+		CreatedBy           string `json:"created_by"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/report", &stored)
+	if !stored.Stored {
+		t.Fatal("the report of a finished campaign is not the stored record")
+	}
+	if stored.GeneratedAt == "" {
+		t.Error("the stored report has no generation time")
+	}
+	if stored.State != "completed" || stored.Totals["succeeded"] != 1 {
+		t.Errorf("the stored report says %s with totals %v", stored.State, stored.Totals)
+	}
+	if len(stored.Waves) == 0 || !stored.Waves[0].IsCanary {
+		t.Errorf("the stored report describes the waves as %+v", stored.Waves)
+	}
+	if stored.ApprovalFingerprint != final.ApprovalFingerprint || stored.CreatedBy != final.CreatedBy {
+		t.Errorf("the stored report belongs to fingerprint %q by %q, the campaign to %q by %q",
+			stored.ApprovalFingerprint, stored.CreatedBy, final.ApprovalFingerprint, final.CreatedBy)
+	}
+
+	// The record cannot be changed: the table refuses updates and deletes.
+	pool := h.database(context.Background())
+	if _, err := pool.Exec(context.Background(),
+		`update campaign_reports set state = 'failed' where campaign_id = $1`, campaign.ID); err == nil {
+		t.Error("the stored report accepted an update")
+	}
+	if _, err := pool.Exec(context.Background(),
+		`delete from campaign_reports where campaign_id = $1`, campaign.ID); err == nil {
+		t.Error("the stored report accepted a delete")
+	}
+}

@@ -200,7 +200,41 @@ func (s *Server) handleListGroupMappings(w http.ResponseWriter, r *http.Request)
 	if mappings == nil {
 		mappings = []authz.GroupMapping{}
 	}
+	setETag(w, groupMappingsTag(mappings))
 	writeJSON(w, http.StatusOK, map[string]any{"items": mappings, "count": len(mappings)})
+}
+
+// groupMappingsTag is the entity tag of the access mappings as a set. A
+// mapping is created or removed, never edited, so the set of identifiers
+// is its version. The list comes in a fixed order from the store.
+func groupMappingsTag(mappings []authz.GroupMapping) string {
+	parts := make([]string, 0, len(mappings))
+	for _, mapping := range mappings {
+		parts = append(parts, mapping.ID)
+	}
+	return etagOf(parts...)
+}
+
+// requireGroupMappingsMatch enforces If-Match against the current set of
+// mappings: an administrator who adds or removes a rule decides against
+// the list they read, and the list may have changed under them.
+func (s *Server) requireGroupMappingsMatch(w http.ResponseWriter, r *http.Request) bool {
+	if r.Header.Get("If-Match") == "" {
+		return true
+	}
+	mappings, err := s.authz.ListGroupMappings(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	return requireMatch(w, r, groupMappingsTag(mappings))
+}
+
+// setGroupMappingsTag puts the tag of the set after a write on the answer.
+func (s *Server) setGroupMappingsTag(w http.ResponseWriter, r *http.Request) {
+	if mappings, err := s.authz.ListGroupMappings(r.Context()); err == nil {
+		setETag(w, groupMappingsTag(mappings))
+	}
 }
 
 // handleCreateGroupMapping adds a mapping of a group to a role in a scope.
@@ -231,6 +265,9 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 	evidence, ok := s.requireStepUp(w, r, actor, request.Reason,
 		"group_mapping.create", "group_mapping", request.GroupName)
 	if !ok {
+		return
+	}
+	if !s.requireGroupMappingsMatch(w, r) {
 		return
 	}
 
@@ -264,6 +301,7 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 		s.fail(w, err)
 		return
 	}
+	s.setGroupMappingsTag(w, r)
 	writeJSON(w, http.StatusCreated, mapping)
 }
 
@@ -281,6 +319,9 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	if !s.requireGroupMappingsMatch(w, r) {
+		return
+	}
 	removed, err := s.authz.DeleteGroupMapping(r.Context(), mappingID)
 	if err != nil {
 		s.fail(w, err)
@@ -296,5 +337,6 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{}, evidence),
 	})
+	s.setGroupMappingsTag(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }

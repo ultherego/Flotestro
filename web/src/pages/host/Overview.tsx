@@ -1,8 +1,13 @@
-import { Time, OptionalFlag, OptionalNumber, Empty } from "../../components/ui";
+import { Link } from "react-router-dom";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, JobState } from "../../components/ui";
+import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
+import { api, loadedItems } from "../../lib/api";
 import { bytes } from "../../lib/format";
+import type { Host, HostTimelineItem, HostTimelineKind, HostTimelinePage } from "../../lib/types";
 import {
-  Fact, Facts, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, usageTone,
+  Fact, Facts, Foot, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, usageTone,
   useHost, useModule,
 } from "./shared";
 import { useT } from "../../i18n";
@@ -112,9 +117,178 @@ export function Overview() {
         <Section title={t("Adapters")} count={(host.capabilities ?? []).length} span={12} flush>
           <Adapters host={host} />
         </Section>
+
+        {/* The history of the host from every record the panel keeps,
+            lined up by time: what ran, what failed, who did what and when
+            the host was last seen. */}
+        <Section
+          title={t("Recent activity")}
+          description={t("Tasks, audit entries, sessions, campaigns and alerts of this host, newest first.")}
+          span={12}
+          flush
+        >
+          <RecentActivity host={host} />
+        </Section>
       </Widgets>
     </ModulePage>
   );
+}
+
+/** How many rows one page of the timeline holds; the operator asks for more. */
+const TIMELINE_PAGE = 30;
+
+/** The mark of every kind of record, taken from the page it links to. */
+const KIND_ICONS: Record<HostTimelineKind, IconName> = {
+  job: "jobs", audit: "audit", session: "server", lifecycle: "hosts", alert: "monitoring", campaign: "campaigns",
+};
+
+/**
+ * The host timeline. Every row is one record of one table - nothing is
+ * derived here - and the row links to the page of that record. The server
+ * folds in only the sources the operator may read; the ones left out are
+ * named under the list rather than passed over.
+ */
+function RecentActivity({ host }: { host: Host }) {
+  const t = useT();
+  const timeline = useInfiniteQuery({
+    queryKey: ["host-timeline", host.id],
+    queryFn: ({ pageParam }) => {
+      const page = new URLSearchParams({ limit: String(TIMELINE_PAGE) });
+      if (pageParam) page.set("cursor", pageParam);
+      return api.get<HostTimelinePage>(`/api/v1/hosts/${host.id}/timeline?${page}`);
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
+    retry: false,
+  });
+  const items = loadedItems(timeline.data);
+  const sources = timeline.data?.pages[0]?.sources ?? [];
+  const hidden = (Object.keys(KIND_ICONS) as HostTimelineKind[]).filter((kind) => !sources.includes(kind));
+
+  if (timeline.error) return <ErrorBox error={timeline.error} />;
+  if (timeline.isPending) return <Empty>{t("Loading…")}</Empty>;
+  return (
+    <>
+      {items.length === 0 ? (
+        <Empty>{t("Nothing has been recorded for this host yet.")}</Empty>
+      ) : (
+        <Table>
+          <thead>
+            <tr>
+              <th>{t("When")}</th><th>{t("Kind")}</th><th>{t("What")}</th><th>{t("State")}</th><th>{t("Who")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={`${item.kind}:${item.id}`}>
+                <td><Time value={item.at} /></td>
+                <td>
+                  <span className="badge" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <Icon name={KIND_ICONS[item.kind]} />{t(kindName(item.kind))}
+                  </span>
+                </td>
+                <td>
+                  <ActivityTitle host={host} item={item} />
+                  {item.detail && <div className="source">{item.detail}</div>}
+                </td>
+                <td><ActivityState item={item} /></td>
+                <td className="source">{item.actor || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+      <Foot>
+        {timeline.hasNextPage && (
+          <button className="secondary" onClick={() => timeline.fetchNextPage()} disabled={timeline.isFetchingNextPage}>
+            {t("Load more")}
+          </button>
+        )}
+        <span>{t("{n} shown", { n: items.length })}</span>
+        {hidden.length > 0 && (
+          <span>{t("Not shown, no permission: {kinds}", { kinds: hidden.map((kind) => t(kindName(kind))).join(", ") })}</span>
+        )}
+      </Foot>
+    </>
+  );
+}
+
+/** The name of a kind of record, as the row's badge says it. */
+function kindName(kind: HostTimelineKind): string {
+  const names: Record<HostTimelineKind, string> = {
+    job: "task", audit: "audit", session: "session", lifecycle: "lifecycle", alert: "alert", campaign: "campaign",
+  };
+  return names[kind];
+}
+
+/**
+ * The title of a row with the link to its record. A task links to the
+ * host's task list and an audit entry to the host's trail, because those
+ * are the pages that show the record; a campaign has a page of its own;
+ * a session has none and stays text.
+ */
+function ActivityTitle({ host, item }: { host: Host; item: HostTimelineItem }) {
+  const t = useT();
+  const target = linkOf(host, item);
+  const title = <span className="hm-mono">{item.title || "—"}</span>;
+  return (
+    <div>
+      {target ? <Link to={target}>{title}</Link> : title}
+      {/* The event words come from the server in a fixed set (created,
+          finished, opened, ended, fired, resolved, selected, started). */}
+      {item.event && <span className="source"> · {t(item.event)}</span>}
+    </div>
+  );
+}
+
+function linkOf(host: Host, item: HostTimelineItem): string | undefined {
+  switch (item.kind) {
+    case "job": return `/hosts/${host.id}/jobs`;
+    case "audit":
+    case "lifecycle": return `/hosts/${host.id}/audit`;
+    case "alert": return `/hosts/${host.id}/monitoring`;
+    case "campaign": return `/campaigns/${item.ref.id}`;
+    default: return undefined;
+  }
+}
+
+/**
+ * The state of the record, coloured by what it means: a task or a
+ * campaign target uses the shared state badge, an audit entry its outcome,
+ * a lifecycle change the state the host went into, an alert whether it
+ * still fires. An empty state is a dash, not a made-up "ok".
+ */
+function ActivityState({ item }: { item: HostTimelineItem }) {
+  const t = useT();
+  if (!item.state) return <>—</>;
+  const errorCode = item.error_code ? <span className="source"> {item.error_code}</span> : null;
+  switch (item.kind) {
+    case "job":
+    case "campaign":
+      return <><JobState state={item.state} />{errorCode}</>;
+    case "audit":
+      return <span className={`badge ${item.state === "success" ? "ok" : "error"}`}>{t(item.state)}</span>;
+    case "lifecycle":
+      return <span className={`badge ${lifecycleTone(item.state)}`}>{t(item.state)}</span>;
+    case "alert":
+      return <span className={`badge ${item.state === "firing" ? "error" : "ok"}`}>{t(item.state)}</span>;
+    case "session":
+      return <span className={`badge ${item.state === "open" ? "ok" : ""}`}>{t(item.state)}</span>;
+    default:
+      return <span className="badge">{item.state}</span>;
+  }
+}
+
+function lifecycleTone(state: string): string {
+  switch (state) {
+    case "active": return "ok";
+    case "quarantined": return "warn";
+    case "retired": return "unknown";
+    // A refused or failed attempt carries its outcome in place of a state.
+    case "denied":
+    case "failure": return "error";
+    default: return "";
+  }
 }
 
 /**

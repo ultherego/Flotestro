@@ -208,6 +208,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/hosts/{id}/compose/{project}/versions", s.handleComposeVersions)
 	s.route(mux, "GET /api/v1/hosts/{id}/local-accounts", s.handleHostLocalAccounts)
 	s.route(mux, "GET /api/v1/hosts/{id}/audit", s.handleHostAudit)
+	// The history of one host from every record the panel keeps: tasks,
+	// the trail, sessions, campaigns and alerts, lined up by time.
+	s.route(mux, "GET /api/v1/hosts/{id}/timeline", s.handleHostTimeline)
 	s.route(mux, "GET /api/v1/audit", s.handleAudit)
 	// An enrollment request is a durable record of a pending installation;
 	// the token is only the secret that authorises one attempt.
@@ -264,6 +267,7 @@ func (s *Server) Routes() http.Handler {
 	// out leads through a lease issued to a host for the duration of one
 	// task.
 	s.route(mux, "GET /api/v1/budgets", s.handleListBudgets)
+	s.route(mux, "GET /api/v1/budgets/{key...}", s.handleGetBudget)
 	s.route(mux, "PUT /api/v1/budgets/{key...}", s.handleSetBudget)
 	s.route(mux, "GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
 	s.route(mux, "GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)

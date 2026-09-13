@@ -749,8 +749,13 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCampaignReport builds the final report: the state totals, the
+// handleCampaignReport serves the final report: the state totals, the
 // split into waves and the list of hosts that need attention.
+//
+// A finished campaign has its report on record, written with the terminal
+// transition; the answer is that record, marked as stored, and it does not
+// change when a host later leaves the fleet. A campaign under way has no
+// record yet and gets the report computed from its targets now.
 func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -765,57 +770,24 @@ func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_format", "format must be json or csv")
 		return
 	}
-	targets, err := s.campaigns.Targets(r.Context(), campaign.ID)
+	if campaign.State.Terminal() {
+		report, err := s.campaigns.StoredReport(r.Context(), campaign.ID)
+		if err == nil {
+			writeJSON(w, http.StatusOK, report)
+			return
+		}
+		// A campaign that ended before the panel kept reports has none;
+		// the live computation is the best knowledge there is, and the
+		// answer says it is not the record.
+		if !errors.Is(err, campaigns.ErrNoReport) {
+			s.fail(w, err)
+			return
+		}
+	}
+	report, err := s.campaigns.LiveReport(r.Context(), *campaign)
 	if err != nil {
 		s.fail(w, err)
 		return
-	}
-
-	report := campaigns.Report{
-		CampaignID: campaign.ID,
-		State:      campaign.State,
-		Totals:     map[string]int{},
-		Failures:   []campaigns.Target{},
-	}
-	waveTotals := map[int]map[string]int{}
-	waveOpen := map[int]bool{}
-	for _, target := range targets {
-		report.Totals[string(target.State)]++
-		if waveTotals[target.Wave] == nil {
-			waveTotals[target.Wave] = map[string]int{}
-		}
-		waveTotals[target.Wave][string(target.State)]++
-		if !target.State.Finished() {
-			waveOpen[target.Wave] = true
-		}
-		if target.State == campaigns.TargetFailed {
-			report.Failures = append(report.Failures, target)
-		}
-		if target.State == campaigns.TargetRebooting || target.State == campaigns.TargetVerifying {
-			report.RebootPending = append(report.RebootPending, target.HostID)
-		}
-		// A host that came back with a different plan ran nothing, and the
-		// report says so by name: the consent covered the old plan, and a
-		// campaign that quietly counted it among the skipped would hide the
-		// one host the operator has to look at again.
-		if target.State == campaigns.TargetSkipped && target.ErrorCode == "plan_changed_offline" {
-			report.PlanChanged = append(report.PlanChanged, target)
-		}
-		if target.State == campaigns.TargetQueuedOffline {
-			report.OfflineQueued = append(report.OfflineQueued, target.HostID)
-		}
-	}
-	for wave := 0; wave < len(waveTotals); wave++ {
-		totals, exists := waveTotals[wave]
-		if !exists {
-			continue
-		}
-		report.Waves = append(report.Waves, campaigns.WaveSummary{
-			Wave:      wave,
-			IsCanary:  wave == 0,
-			Totals:    totals,
-			Completed: !waveOpen[wave],
-		})
 	}
 	writeJSON(w, http.StatusOK, report)
 }

@@ -3,6 +3,9 @@
 package integration
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -490,4 +493,100 @@ func TestInvalidProjectIsRejected(t *testing.T) {
 				"project": "shop", "manifest": "   ",
 			}},
 		}, nil, http.StatusBadRequest)
+}
+
+// TestBudgetWriteHonoursIfMatch guards the entity tags of the settings two
+// operators may edit at once: a budget read carries its ETag, a write
+// with a stale If-Match is refused with the current tag, and the fresh
+// tag lets the write through.
+func TestBudgetWriteHonoursIfMatch(t *testing.T) {
+	h := newHarness(t)
+	const key = "global:reads"
+
+	var before struct {
+		Capacity int    `json:"capacity"`
+		Note     string `json:"note"`
+	}
+	response, body := h.request(http.MethodGet, "/api/v1/budgets/"+key, nil, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("GET the budget: status %d; body: %s", response.StatusCode, body)
+	}
+	if err := json.Unmarshal(body, &before); err != nil {
+		t.Fatalf("the budget does not decode: %v", err)
+	}
+	fresh := response.Header.Get("ETag")
+	if fresh == "" {
+		t.Fatal("the budget read carries no ETag")
+	}
+	t.Cleanup(func() {
+		// The budget goes back to what it was: left changed it would move
+		// the capacity of every next run.
+		h.do(http.MethodPut, "/api/v1/budgets/"+key,
+			map[string]any{"capacity": before.Capacity, "note": before.Note}, nil, 0)
+	})
+
+	stale := map[string]string{"If-Match": `W/"0000000000000000"`}
+	response, body = h.request(http.MethodPut, "/api/v1/budgets/"+key,
+		map[string]any{"capacity": before.Capacity, "note": "stale write"}, stale)
+	if response.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("a stale If-Match answered %d; body: %s", response.StatusCode, body)
+	}
+	var refusal struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &refusal); err != nil || refusal.Code != "precondition_failed" {
+		t.Errorf("the refusal is %s (%v)", body, err)
+	}
+	if got := response.Header.Get("ETag"); got != fresh {
+		t.Errorf("the refusal names ETag %q, the read gave %q", got, fresh)
+	}
+
+	response, body = h.request(http.MethodPut, "/api/v1/budgets/"+key,
+		map[string]any{"capacity": before.Capacity, "note": "fresh write"}, map[string]string{"If-Match": fresh})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the fresh If-Match answered %d; body: %s", response.StatusCode, body)
+	}
+	// The write moved the version: the tag on the answer is a new one, and
+	// the tag read before no longer matches.
+	if next := response.Header.Get("ETag"); next == "" || next == fresh {
+		t.Errorf("after the write the ETag is %q, before it was %q", next, fresh)
+	}
+	response, body = h.request(http.MethodPut, "/api/v1/budgets/"+key,
+		map[string]any{"capacity": before.Capacity, "note": "second stale write"}, map[string]string{"If-Match": fresh})
+	if response.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("the tag of the previous version still passes: %d; body: %s", response.StatusCode, body)
+	}
+}
+
+// request performs a call with extra headers and hands back the response
+// with its body read, for the tests that look at headers rather than at
+// the JSON alone.
+func (h *harness) request(method, path string, body any, headers map[string]string) (*http.Response, []byte) {
+	h.t.Helper()
+	var payload io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			h.t.Fatalf("encoding the request: %v", err)
+		}
+		payload = bytes.NewReader(encoded)
+	}
+	request, err := http.NewRequest(method, h.api+path, payload)
+	if err != nil {
+		h.t.Fatalf("building the request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if h.token != "" {
+		request.Header.Set("Authorization", "Bearer "+h.token)
+	}
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+	response, err := h.client.Do(request)
+	if err != nil {
+		h.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(response.Body)
+	return response, raw
 }
