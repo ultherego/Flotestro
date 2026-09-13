@@ -23,28 +23,6 @@ type ControlPlane struct {
 	GatewayID        string
 }
 
-// Monitoring describes the connections to the metric and alert systems.
-//
-// Each of them is optional: an installation without monitoring works the same,
-// and the panel says outright that no sources were named - instead of drawing
-// empty charts.
-type Monitoring struct {
-	PrometheusURL   string
-	AlertmanagerURL string
-	Timeout         time.Duration
-	// HostLabel and HostValue translate a host of the panel into a label at
-	// the sources.
-	HostLabel        string
-	HostValue        string
-	SiteLabel        string
-	EnvironmentLabel string
-	// DashboardURL and LogsURL are templates of links: the panel leads to
-	// somebody else's screens instead of recreating them.
-	DashboardURL string
-	LogsURL      string
-	Window       time.Duration
-}
-
 // Vulnerabilities describes the CVE correlator.
 //
 // The tracker of the distribution vendor settles the matter; upstream feeds

@@ -175,6 +175,7 @@ message AgentMessage {
     TaskResult task_result = 4;
     TaskProgress task_progress = 5;
     TaskLogLines task_log_lines = 6;
+    MetricsSample metrics_sample = 7;
   }
 }
 
@@ -210,6 +211,9 @@ message SessionConfig {
   int32 heartbeat_jitter_seconds = 2;
   string min_agent_version = 3;
   bool full_inventory_requested = 4;
+  // How often the agent sends a MetricsSample. Zero means the default of
+  // the agent (sixty seconds).
+  int32 metrics_interval_seconds = 5;
 }
 
 message InventoryRequest {
@@ -221,8 +225,8 @@ message Heartbeat {
   HealthSignals health = 2;
 }
 
-// HealthSignals deliberately carries only the decision signals. Full host
-// metrics belong to node_exporter, not to the heartbeat.
+// HealthSignals deliberately carries only the decision signals. The host
+// metrics travel separately as MetricsSample, not in the heartbeat.
 //
 // Optional fields mean an undetermined state. An agent that failed to read a
 // value does not send it at all. A missing value must never be confused with
@@ -235,6 +239,52 @@ message HealthSignals {
   uint64 uptime_seconds = 5;
   optional uint32 pending_updates = 6;
   optional uint32 pending_security_updates = 7;
+}
+
+// MetricsSample is one reading of the host resources. The agent reads the
+// kernel counters itself and sends them at a fixed interval; the panel keeps
+// them, draws the charts and evaluates the alert rules over them. There is
+// no exporter and no external monitoring system in between.
+//
+// The counters are what the kernel reports at the moment of the sample.
+// The CPU load is already a percentage over the interval since the previous
+// sample; the network counters stay cumulative, because a rate computed on
+// the host would hide a reboot and a counter wrap.
+message MetricsSample {
+  int64 sampled_at_unix = 1;
+  double cpu_percent = 2;
+  double load1 = 3;
+  double load5 = 4;
+  double load15 = 5;
+  uint64 memory_total = 6;
+  uint64 memory_used = 7;
+  uint64 memory_available = 8;
+  uint64 swap_total = 9;
+  uint64 swap_used = 10;
+  uint64 uptime_seconds = 11;
+  repeated FilesystemSample filesystems = 12;
+  repeated InterfaceSample interfaces = 13;
+}
+
+// FilesystemSample is the usage of one mounted real filesystem. Pseudo
+// filesystems, overlays and tmpfs are left out: a full /run says nothing
+// about the disk.
+message FilesystemSample {
+  string mount = 1;
+  string device = 2;
+  string fstype = 3;
+  uint64 total_bytes = 4;
+  uint64 used_bytes = 5;
+  uint64 inodes_total = 6;
+  uint64 inodes_used = 7;
+}
+
+// InterfaceSample is the cumulative traffic of one network interface; the
+// loopback is left out.
+message InterfaceSample {
+  string name = 1;
+  uint64 rx_bytes = 2;
+  uint64 tx_bytes = 3;
 }
 
 // Capability describes one adapter on the host. The name says what adapter

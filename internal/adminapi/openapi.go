@@ -247,6 +247,15 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/relays": {
 		{"site", "string", "Only the relays of this site."},
 	},
+	"GET /api/v1/hosts/{id}/metrics": {
+		{"range", "string", "The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups."},
+	},
+	"GET /api/v1/monitoring/alerts": {
+		{"state", "string", "pending, firing or resolved."},
+		{"severity", "string", "critical, warning or info."},
+		{"host_id", "string", ""},
+		{"limit", "integer", "The most alerts to return: 100 by default, 500 at most."},
+	},
 	"GET /api/v1/audit": append([]queryParameter{
 		{"target_id", "string", ""},
 		{"target_type", "string", ""},

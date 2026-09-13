@@ -179,13 +179,16 @@ const (
 	// about the fleet itself.
 	PermVulnerabilityRead Permission = "vulnerability.read"
 
-	// Monitoring. The panel has neither metrics nor alerting rules of its
-	// own: it reads somebody else's. Silencing an alert does have its own
-	// permission, because it switches a sensor off - and a probe leaves the
-	// host with a connection, so it is not an ordinary inventory read.
-	PermMonitoringRead    Permission = "monitoring.read"
-	PermMonitoringProbe   Permission = "monitoring.probe"
-	PermMonitoringSilence Permission = "monitoring.silence.write"
+	// Monitoring. The panel keeps the resource samples of the hosts and
+	// evaluates its own alert rules over them. Silencing an alert has its
+	// own permission, because it switches a sensor off; writing the rules
+	// has another, because a rule decides what the whole fleet alarms on -
+	// and a probe leaves the host with a connection, so it is not an
+	// ordinary inventory read.
+	PermMonitoringRead       Permission = "monitoring.read"
+	PermMonitoringProbe      Permission = "monitoring.probe"
+	PermMonitoringSilence    Permission = "monitoring.silence.write"
+	PermMonitoringRulesWrite Permission = "monitoring.rules.write"
 
 	// A maintenance window belongs to running operations rather than to
 	// changing a host: it is declared by whoever watches the campaigns and
@@ -497,7 +500,7 @@ var rolePermissions = map[Role][]Permission{
 		PermCertificateDeploy, PermCertificateRenew,
 		PermCertificateTrustWrite, PermCertificateTrustRemove,
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
-		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
+		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence, PermMonitoringRulesWrite,
 		PermVulnerabilityRead,
 	},
 }

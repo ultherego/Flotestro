@@ -36,13 +36,11 @@ import (
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/identity"
-	"github.com/ultherego/flotestro/internal/integrations"
-	alertsIntegration "github.com/ultherego/flotestro/internal/integrations/alerts"
-	metricsIntegration "github.com/ultherego/flotestro/internal/integrations/metrics"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
+	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/outbox"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -135,35 +133,16 @@ func run() error {
 		config.Env("FLOTESTRO_IPA_CA_CERT", "/etc/flotestro/ipa-ca.crt"), "the CA certificate of the directory")
 	ipaRealm := flag.String("ipa-realm",
 		config.Env("FLOTESTRO_IPA_REALM", ""), "the Kerberos realm of the directory")
-	monitoring := config.Monitoring{}
-	flag.StringVar(&monitoring.PrometheusURL, "prometheus-url",
-		config.Env("FLOTESTRO_PROMETHEUS_URL", ""),
-		"the address of the metrics source (the Prometheus API); empty disables the charts")
-	flag.StringVar(&monitoring.AlertmanagerURL, "alertmanager-url",
-		config.Env("FLOTESTRO_ALERTMANAGER_URL", ""),
-		"the address of the alert source (the Alertmanager API); empty disables alerts and silences")
-	flag.DurationVar(&monitoring.Timeout, "monitoring-timeout",
-		config.EnvDuration("FLOTESTRO_MONITORING_TIMEOUT", integrations.DefaultTimeout),
-		"the time limit of a single question to the monitoring")
-	flag.StringVar(&monitoring.HostLabel, "monitoring-host-label",
-		config.Env("FLOTESTRO_MONITORING_HOST_LABEL", "instance"),
-		"the label the monitoring recognises a host by")
-	flag.StringVar(&monitoring.HostValue, "monitoring-host-value",
-		config.Env("FLOTESTRO_MONITORING_HOST_VALUE", "{hostname}:9100"),
-		"the template of the value of the host label, e.g. {hostname}:9100")
-	flag.StringVar(&monitoring.SiteLabel, "monitoring-site-label",
-		config.Env("FLOTESTRO_MONITORING_SITE_LABEL", "site"), "the label of the site")
-	flag.StringVar(&monitoring.EnvironmentLabel, "monitoring-environment-label",
-		config.Env("FLOTESTRO_MONITORING_ENVIRONMENT_LABEL", "environment"), "the label of the environment")
-	flag.StringVar(&monitoring.DashboardURL, "monitoring-dashboard-url",
-		config.Env("FLOTESTRO_MONITORING_DASHBOARD_URL", ""),
-		"the template of the link to the dashboard of a host")
-	flag.StringVar(&monitoring.LogsURL, "monitoring-logs-url",
-		config.Env("FLOTESTRO_MONITORING_LOGS_URL", ""),
-		"the template of the link to the logs of a host")
-	flag.DurationVar(&monitoring.Window, "monitoring-window",
-		config.EnvDuration("FLOTESTRO_MONITORING_WINDOW", 3*time.Hour),
-		"the default time range of the charts")
+	// The built-in monitoring keeps the raw samples for two days and the
+	// quarter-hour rollups for a month. Longer keeps more history on the
+	// charts at the cost of the database; shorter is for a large fleet.
+	metricsRetention := monitoring.Options{}
+	flag.DurationVar(&metricsRetention.RawRetention, "metrics-retention-raw",
+		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_RAW", monitoring.DefaultRawRetention),
+		"how long the raw resource samples of the hosts are kept")
+	flag.DurationVar(&metricsRetention.RollupRetention, "metrics-retention-rollup",
+		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_ROLLUP", monitoring.DefaultRollupRetention),
+		"how long the quarter-hour rollups of the resource samples are kept")
 	vulnerabilities := config.Vulnerabilities{}
 	flag.BoolVar(&vulnerabilities.Enabled, "vulnerability-correlator",
 		config.Env("FLOTESTRO_VULN_ENABLED", "true") == "true",
@@ -495,28 +474,18 @@ func run() error {
 	})
 	panelServer.SetRelays(relayStore)
 
-	// Monitoring: the panel reads somebody else's metrics and somebody else's
-	// alerts. Empty addresses mean an installation without monitoring - the
-	// tab then says outright that no sources were named instead of drawing
-	// empty charts.
-	panelServer.SetMonitoring(adminapi.Monitoring{
-		Metrics: metricsIntegration.NewPrometheus(monitoring.PrometheusURL, monitoring.Timeout, nil),
-		Alerts:  alertsIntegration.NewAlertmanager(monitoring.AlertmanagerURL, monitoring.Timeout),
-		Mapping: integrations.Mapping{
-			HostLabel:        monitoring.HostLabel,
-			HostValue:        monitoring.HostValue,
-			SiteLabel:        monitoring.SiteLabel,
-			EnvironmentLabel: monitoring.EnvironmentLabel,
-			DashboardURL:     monitoring.DashboardURL,
-			LogsURL:          monitoring.LogsURL,
-			Window:           monitoring.Window,
-		},
-	})
-	if monitoring.PrometheusURL != "" || monitoring.AlertmanagerURL != "" {
-		log.Info("the monitoring integrations are connected",
-			"metrics", monitoring.PrometheusURL, "alerts", monitoring.AlertmanagerURL,
-			"host_label", monitoring.HostLabel)
-	}
+	// The built-in monitoring: the agents send their resource samples down
+	// the same stream as the heartbeat, the store keeps them, rolls them up
+	// and evaluates the alert rules over them. Nothing outside the panel is
+	// asked for a chart or an alert.
+	monitoringStore := monitoring.NewStore(pool, log, metricsRetention)
+	agentService.SetMetrics(monitoringStore)
+	panelServer.SetMonitoring(monitoringStore)
+	go monitoringStore.Run(ctx)
+	log.Info("the built-in monitoring is running",
+		"sampling_interval", monitoring.SamplingInterval.String(),
+		"raw_retention", metricsRetention.RawRetention.String(),
+		"rollup_retention", metricsRetention.RollupRetention.String())
 
 	// The budgets are visible in the panel: a host standing on capacity is to
 	// show which budget it waits for rather than stand without a reason.

@@ -33,6 +33,7 @@ import (
 	"github.com/ultherego/flotestro/internal/metrics"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	certmodule "github.com/ultherego/flotestro/internal/modules/certificates"
+	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/opspec"
 	packagestore "github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -118,6 +119,9 @@ type AgentService struct {
 	// leases makes it possible to check which version of a secret the panel
 	// really released.
 	leases SecretLeases
+	// samples keeps the resource samples of the hosts. Empty means a panel
+	// without the built-in monitoring: the samples are then dropped.
+	samples *monitoring.Store
 	// attempts translates the identifier of an attempt into the identifier of
 	// an operation. The agent reports progress for an attempt, and the
 	// operator looks at an operation.
@@ -160,6 +164,50 @@ func (s *AgentService) SetAssessmentRefresh(refresh func(hostID string)) {
 // the progress of a long operation does not reach the screen of the
 // operator.
 func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
+
+// SetMetrics connects the store the resource samples of the hosts go to.
+func (s *AgentService) SetMetrics(store *monitoring.Store) { s.samples = store }
+
+// sampleFromProto translates a sample of the agent into the stored shape.
+//
+// The moment of the sample is the host's clock, not the gateway's: a sample
+// delayed on the wire still describes the moment it was taken. A host with
+// a broken clock gets the gateway's time instead, because a sample from a
+// year ago would land outside every chart and be swept at once.
+func sampleFromProto(sample *agentv1.MetricsSample) monitoring.Sample {
+	at := time.Unix(sample.GetSampledAtUnix(), 0).UTC()
+	if skew := time.Since(at); skew > 10*time.Minute || skew < -10*time.Minute {
+		at = time.Now().UTC().Truncate(time.Second)
+	}
+	stored := monitoring.Sample{
+		At:              at,
+		CPUPercent:      sample.GetCpuPercent(),
+		Load1:           sample.GetLoad1(),
+		Load5:           sample.GetLoad5(),
+		Load15:          sample.GetLoad15(),
+		MemoryTotal:     sample.GetMemoryTotal(),
+		MemoryUsed:      sample.GetMemoryUsed(),
+		MemoryAvailable: sample.GetMemoryAvailable(),
+		SwapTotal:       sample.GetSwapTotal(),
+		SwapUsed:        sample.GetSwapUsed(),
+		UptimeSeconds:   sample.GetUptimeSeconds(),
+		Filesystems:     make([]monitoring.Filesystem, 0, len(sample.GetFilesystems())),
+		Interfaces:      make([]monitoring.Interface, 0, len(sample.GetInterfaces())),
+	}
+	for _, fs := range sample.GetFilesystems() {
+		stored.Filesystems = append(stored.Filesystems, monitoring.Filesystem{
+			Mount: fs.GetMount(), Device: fs.GetDevice(), Fstype: fs.GetFstype(),
+			TotalBytes: fs.GetTotalBytes(), UsedBytes: fs.GetUsedBytes(),
+			InodesTotal: fs.GetInodesTotal(), InodesUsed: fs.GetInodesUsed(),
+		})
+	}
+	for _, iface := range sample.GetInterfaces() {
+		stored.Interfaces = append(stored.Interfaces, monitoring.Interface{
+			Name: iface.GetName(), RxBytes: iface.GetRxBytes(), TxBytes: iface.GetTxBytes(),
+		})
+	}
+	return stored
+}
 
 // Connect serves the session of an agent. The identity of the host comes from
 // the client certificate alone; the content of a message must never overwrite
@@ -393,6 +441,15 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 				"host_id", hostID, "revision", report.GetRevision(), "full", report.GetFull())
 		}
 		return nil
+
+	case *agentv1.AgentMessage_MetricsSample:
+		// A sample is kept only where the monitoring store is attached; a
+		// gateway without one drops it, and the host stays a host without
+		// charts rather than a broken session.
+		if s.samples == nil {
+			return nil
+		}
+		return s.samples.Record(ctx, hostID, sampleFromProto(payload.MetricsSample))
 
 	case *agentv1.AgentMessage_TaskResult:
 		return s.recordTaskResult(ctx, hostID, payload.TaskResult)

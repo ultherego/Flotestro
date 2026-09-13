@@ -2,160 +2,484 @@ package adminapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
-	"github.com/ultherego/flotestro/internal/hosts"
-	"github.com/ultherego/flotestro/internal/integrations"
-	"github.com/ultherego/flotestro/internal/integrations/alerts"
-	"github.com/ultherego/flotestro/internal/integrations/metrics"
+	"github.com/ultherego/flotestro/internal/monitoring"
 )
 
-// Monitoring gathers the sources the panel reads metrics and alerts from.
-//
-// None of them is required: an installation without monitoring works the
-// same, only the monitoring tab says directly that no sources were named.
-// A failure of an integration must not take host management away from the
-// operator either - hence every question has a timeout and a fuse.
-type Monitoring struct {
-	Metrics metrics.Provider
-	Alerts  alerts.Provider
-	Mapping integrations.Mapping
+// SetMonitoring attaches the built-in monitoring: the samples the agents
+// send, the rules evaluated over them, the alerts and the silences.
+func (s *Server) SetMonitoring(store *monitoring.Store) { s.monitoring = store }
+
+// monitoringRoutes registers the monitoring endpoints.
+func (s *Server) monitoringRoutes(mux *http.ServeMux) {
+	// The fleet view: what is firing now, who reports and who went quiet.
+	s.route(mux, "GET /api/v1/monitoring", s.handleFleetMonitoring)
+	// The rules are fleet-wide policy: reading them goes with reading the
+	// alerts, writing them has a permission of its own.
+	s.route(mux, "GET /api/v1/monitoring/rules", s.handleListAlertRules)
+	s.route(mux, "POST /api/v1/monitoring/rules", s.handleCreateAlertRule)
+	s.route(mux, "GET /api/v1/monitoring/rules/{id}", s.handleGetAlertRule)
+	s.route(mux, "PUT /api/v1/monitoring/rules/{id}", s.handleUpdateAlertRule)
+	s.route(mux, "DELETE /api/v1/monitoring/rules/{id}", s.handleDeleteAlertRule)
+	s.route(mux, "GET /api/v1/monitoring/alerts", s.handleListAlerts)
+	s.route(mux, "GET /api/v1/monitoring/silences", s.handleListSilences)
+	// The host view: its charts, its alerts and its silences.
+	s.route(mux, "GET /api/v1/hosts/{id}/metrics", s.handleHostMetrics)
+	s.route(mux, "GET /api/v1/hosts/{id}/monitoring", s.handleHostMonitoring)
+	s.route(mux, "POST /api/v1/hosts/{id}/monitoring/silences", s.handleCreateSilence)
+	s.route(mux, "DELETE /api/v1/hosts/{id}/monitoring/silences/{silence}", s.handleExpireSilence)
 }
 
-// SetMonitoring attaches the monitoring integrations.
-func (s *Server) SetMonitoring(monitoring Monitoring) { s.monitoring = monitoring }
+// monitoringEnabled refuses the request when the installation runs without
+// the monitoring store. That is a configuration of the panel rather than a
+// failure, so the answer says so instead of an internal error.
+func (s *Server) monitoringEnabled(w http.ResponseWriter) bool {
+	if s.monitoring == nil {
+		problem(w, http.StatusServiceUnavailable, "monitoring_disabled",
+			"this installation runs without the built-in monitoring")
+		return false
+	}
+	return true
+}
 
-// monitoringReport is the answer of the host tab.
-type monitoringReport struct {
+// hostMetricsView is the answer of the chart endpoint.
+type hostMetricsView struct {
 	HostID string `json:"host_id"`
-	// Sources describes the source states: unconfigured, working or not
-	// answering. These are three different answers.
-	Sources []integrations.State `json:"sources"`
-	// Label says what the panel recognises this host by at the sources.
-	// Without it an empty chart has no explanation.
-	Label    string             `json:"label"`
-	Links    integrations.Links `json:"links"`
-	Alerts   []alerts.Alert     `json:"alerts"`
-	Silences []alerts.Silence   `json:"silences"`
-	Series   []metrics.Series   `json:"series"`
-	// From and To describe the time range of the charts: the panel shows
-	// somebody else's data and says which window it comes from.
-	From time.Time `json:"from"`
-	To   time.Time `json:"to"`
-	// AlertsUnavailable and MetricsUnavailable say why something is missing.
-	AlertsUnavailable  string `json:"alerts_unavailable_reason,omitempty"`
-	MetricsUnavailable string `json:"metrics_unavailable_reason,omitempty"`
+	// Range is the window the points cover, and StepSeconds the distance
+	// between them: the sampling interval for the short windows, a
+	// quarter-hour for the long ones.
+	Range       string             `json:"range"`
+	StepSeconds int                `json:"step_seconds"`
+	Points      []monitoring.Point `json:"points"`
+	// Latest is the newest raw sample whatever the range; nil for a host
+	// that never sent one.
+	Latest       *monitoring.Point `json:"latest"`
+	LastSampleAt *time.Time        `json:"last_sample_at"`
+	// SamplingIntervalSeconds is how often the agent samples; Source says
+	// where the samples come from.
+	SamplingIntervalSeconds int    `json:"sampling_interval_seconds"`
+	Source                  string `json:"source"`
 }
 
-// handleHostMonitoring returns the alerts, charts and links of a host.
-func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
+// handleHostMetrics returns the chart points of a host over a range.
+func (s *Server) handleHostMetrics(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
-	host, scope, ok := s.hostScope(w, r, hostID)
+	_, scope, ok := s.hostScope(w, r, hostID)
 	if !ok {
 		return
 	}
 	if _, ok := s.authorize(w, r, authz.PermMonitoringRead, scope, "host", hostID); !ok {
 		return
 	}
-
-	description := describeHost(*host)
-	window := s.monitoring.Mapping.WindowOr(queryWindow(r))
-	to := time.Now().UTC()
-	from := to.Add(-window)
-
-	report := monitoringReport{
-		HostID: hostID,
-		Label:  s.monitoring.Mapping.Label(description),
-		Links:  s.monitoring.Mapping.For(description),
-		From:   from, To: to,
-		Alerts: []alerts.Alert{}, Silences: []alerts.Silence{}, Series: []metrics.Series{},
+	if !s.monitoringEnabled(w) {
+		return
 	}
-	report.Sources = s.sourceStates(r)
+	window, err := monitoring.ParseRange(r.URL.Query().Get("range"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_range", err.Error())
+		return
+	}
+	series, err := s.monitoring.Series(r.Context(), hostID, window)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, hostMetricsView{
+		HostID: hostID, Range: window.Name, StepSeconds: int(window.Step.Seconds()),
+		Points: series.Points, Latest: series.Latest, LastSampleAt: series.LastSampleAt,
+		SamplingIntervalSeconds: int(monitoring.SamplingInterval.Seconds()),
+		Source:                  "agent",
+	})
+}
 
-	if s.monitoring.Alerts != nil && s.monitoring.Alerts.Configured() {
-		filter := []string{s.monitoring.Mapping.HostFilter(description)}
-		if list, err := s.monitoring.Alerts.Alerts(r.Context(), filter); err != nil {
-			// A failure of the alert source must not topple the tab: it is
-			// said what is unknown, and the rest is shown.
-			report.AlertsUnavailable = err.Error()
-		} else if list != nil {
-			// An empty list stays an empty list, not a missing field: the
-			// interface is meant to show "nothing is burning", not "unknown".
-			report.Alerts = list
+// hostMonitoringView is the answer of the host tab.
+type hostMonitoringView struct {
+	HostID       string               `json:"host_id"`
+	LastSampleAt *time.Time           `json:"last_sample_at"`
+	Latest       *monitoring.Point    `json:"latest"`
+	Alerts       []monitoring.Alert   `json:"alerts"`
+	Silences     []monitoring.Silence `json:"silences"`
+	// RulesMatching counts the enabled rules whose selector covers this
+	// host: a host nobody watches is to say so.
+	RulesMatching int `json:"rules_matching"`
+}
+
+// handleHostMonitoring returns the alerts, silences and latest sample of a
+// host.
+func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	_, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	if _, ok := s.authorize(w, r, authz.PermMonitoringRead, scope, "host", hostID); !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	ctx := r.Context()
+	latest, lastSampleAt, err := s.monitoring.Latest(ctx, hostID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	alerts, err := s.monitoring.HostAlerts(ctx, hostID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	silences, err := s.monitoring.HostSilences(ctx, hostID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	matching, err := s.monitoring.RulesMatching(ctx, hostID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, hostMonitoringView{
+		HostID: hostID, LastSampleAt: lastSampleAt, Latest: latest,
+		Alerts: alerts, Silences: silences, RulesMatching: matching,
+	})
+}
+
+// alertCounts summarises the open alerts for the fleet view.
+type alertCounts struct {
+	Critical int `json:"critical"`
+	Warning  int `json:"warning"`
+	Info     int `json:"info"`
+	// Silenced counts the firing alerts an active silence covers; they are
+	// counted in their severity as well.
+	Silenced int `json:"silenced"`
+	// Pending counts the episodes whose window is still filling.
+	Pending int `json:"pending"`
+}
+
+// fleetMonitoringView is the answer of the fleet view.
+type fleetMonitoringView struct {
+	Firing []monitoring.Alert `json:"firing"`
+	Counts alertCounts        `json:"counts"`
+	// HostsReporting counts the hosts that sent a sample within the last
+	// three intervals, HostsSilent those that did not - a silent host has
+	// no charts and no sample rules, only host_offline.
+	HostsReporting int `json:"hosts_reporting"`
+	HostsSilent    int `json:"hosts_silent"`
+	// Rules counts the enabled rules.
+	Rules       int       `json:"rules"`
+	GeneratedAt time.Time `json:"generated_at"`
+}
+
+// handleFleetMonitoring returns the firing alerts of the visible fleet.
+//
+// Alerts work fleet-wide by nature: one bad change is visible at once on
+// dozens of hosts. The view is narrowed to the hosts this operator may
+// see, so the operator of one environment reads their own alarms rather
+// than the whole fleet's.
+func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	ctx := r.Context()
+	scopes := principal.ScopesFor(authz.PermMonitoringRead)
+	firing, err := s.monitoring.Firing(ctx, scopes)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	view := fleetMonitoringView{Firing: firing, GeneratedAt: time.Now().UTC()}
+	for _, alert := range firing {
+		switch alert.Severity {
+		case "critical":
+			view.Counts.Critical++
+		case "warning":
+			view.Counts.Warning++
+		default:
+			view.Counts.Info++
 		}
-		if silences, err := s.monitoring.Alerts.Silences(r.Context(), filter); err != nil {
-			if report.AlertsUnavailable == "" {
-				report.AlertsUnavailable = err.Error()
-			}
-		} else if silences != nil {
-			report.Silences = silences
+		if alert.Silenced {
+			view.Counts.Silenced++
 		}
 	}
-	if s.monitoring.Metrics != nil && s.monitoring.Metrics.Configured() {
-		report.Series = s.monitoring.Metrics.Series(r.Context(), report.Label, from, to)
-	} else {
-		report.MetricsUnavailable = "this installation has no metrics source configured"
+	if view.Counts.Pending, err = s.monitoring.Pending(ctx, scopes); err != nil {
+		s.fail(w, err)
+		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	if condition == "" {
+		condition = "true"
+	}
+	if view.HostsReporting, view.HostsSilent, err = s.monitoring.Reporting(ctx, condition, args); err != nil {
+		s.fail(w, err)
+		return
+	}
+	rules, err := s.monitoring.ListRules(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	for _, rule := range rules {
+		if rule.Enabled {
+			view.Rules++
+		}
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
-// sourceStates asks the integrations about their health.
-func (s *Server) sourceStates(r *http.Request) []integrations.State {
-	states := make([]integrations.State, 0, 2)
-	if s.monitoring.Metrics != nil {
-		states = append(states, s.monitoring.Metrics.Health(r.Context()))
-	}
-	if s.monitoring.Alerts != nil {
-		states = append(states, s.monitoring.Alerts.Health(r.Context()))
-	}
-	return states
+// alertRuleRequest is the body of a rule to create or to replace.
+type alertRuleRequest struct {
+	Name       string              `json:"name"`
+	Metric     string              `json:"metric"`
+	Operator   string              `json:"operator"`
+	Threshold  float64             `json:"threshold"`
+	ForMinutes int                 `json:"for_minutes"`
+	Severity   string              `json:"severity"`
+	Selector   monitoring.Selector `json:"selector"`
+	// Enabled defaults to true: a rule written down is a rule meant to
+	// run.
+	Enabled *bool `json:"enabled"`
 }
 
-// queryWindow reads the time range from the query.
-func queryWindow(r *http.Request) time.Duration {
-	value := r.URL.Query().Get("range")
-	if value == "" {
-		return 0
+func (request alertRuleRequest) rule() monitoring.Rule {
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
 	}
-	window, err := time.ParseDuration(value)
-	if err != nil || window <= 0 || window > 7*24*time.Hour {
-		return 0
+	return monitoring.Rule{
+		Name: request.Name, Metric: request.Metric, Operator: request.Operator,
+		Threshold: request.Threshold, ForMinutes: request.ForMinutes,
+		Severity: request.Severity, Selector: request.Selector, Enabled: enabled,
 	}
-	return window
 }
 
-func describeHost(host hosts.Host) integrations.Host {
-	return integrations.Host{
-		ID: host.ID, Hostname: host.Hostname, Address: host.ManagementAddress,
-		Site: host.Site, Environment: host.Environment,
+func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "alert_rule"); !ok {
+		return
 	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	rules, err := s.monitoring.ListRules(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": rules, "count": len(rules),
+		// The vocabulary of a rule, so the form does not carry a copy.
+		"metrics": monitoring.Metrics, "operators": monitoring.Operators,
+		"severities": monitoring.Severities,
+	})
+}
+
+func (s *Server) handleGetAlertRule(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "alert_rule"); !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	rule, err := s.monitoring.GetRule(r.Context(), r.PathValue("id"))
+	if s.ruleProblem(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+// ruleProblem answers a store error of the rules; true when it did.
+func (s *Server) ruleProblem(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, monitoring.ErrNotFound):
+		problem(w, http.StatusNotFound, "rule_not_found", "no such alert rule")
+	default:
+		s.fail(w, err)
+	}
+	return true
+}
+
+// handleCreateAlertRule records a rule. A rule is fleet-wide policy, so it
+// takes the write permission in the global scope: a rule scoped to one
+// site by its selector still decides what that site alarms on.
+func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorize(w, r, authz.PermMonitoringRulesWrite, authz.GlobalScope, "alert_rule", "")
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	var request alertRuleRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	rule := request.rule()
+	rule.CreatedBy = principal.Subject
+	if err := rule.Validate(); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_rule", err.Error())
+		return
+	}
+	created, err := s.monitoring.CreateRule(r.Context(), rule)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.rule.create", TargetType: "alert_rule", TargetID: created.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: ruleDetail(*created),
+	})
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	principal, ok := s.authorize(w, r, authz.PermMonitoringRulesWrite, authz.GlobalScope, "alert_rule", id)
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	var request alertRuleRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	rule := request.rule()
+	if err := rule.Validate(); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_rule", err.Error())
+		return
+	}
+	updated, err := s.monitoring.UpdateRule(r.Context(), id, rule)
+	if s.ruleProblem(w, err) {
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.rule.update", TargetType: "alert_rule", TargetID: id,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: ruleDetail(*updated),
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	principal, ok := s.authorize(w, r, authz.PermMonitoringRulesWrite, authz.GlobalScope, "alert_rule", id)
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	rule, err := s.monitoring.GetRule(r.Context(), id)
+	if s.ruleProblem(w, err) {
+		return
+	}
+	if err := s.monitoring.DeleteRule(r.Context(), id); s.ruleProblem(w, err) {
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.rule.delete", TargetType: "alert_rule", TargetID: id,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: ruleDetail(*rule),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ruleDetail is what the trail records about a rule: enough to read what
+// the fleet alarmed on at the time without the rule row.
+func ruleDetail(rule monitoring.Rule) map[string]any {
+	return map[string]any{
+		"name": rule.Name, "metric": rule.Metric, "operator": rule.Operator,
+		"threshold": rule.Threshold, "for_minutes": rule.ForMinutes,
+		"severity": rule.Severity, "selector": rule.Selector, "enabled": rule.Enabled,
+	}
+}
+
+// handleListAlerts returns the alert history, newest first.
+func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	alerts, err := s.monitoring.ListAlerts(r.Context(), monitoring.AlertFilter{
+		State:    query.Get("state"),
+		Severity: query.Get("severity"),
+		HostID:   query.Get("host_id"),
+		Scopes:   principal.ScopesFor(authz.PermMonitoringRead),
+		Limit:    limit,
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": alerts, "count": len(alerts)})
+}
+
+// handleListSilences returns the silences in force on the visible hosts.
+func (s *Server) handleListSilences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	silences, err := s.monitoring.ActiveSilences(r.Context(), principal.ScopesFor(authz.PermMonitoringRead))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": silences, "count": len(silences)})
 }
 
 // silenceRequest describes a silence ordered from the panel.
 type silenceRequest struct {
-	// DurationMinutes is the end counted from now. Zero means the default
-	// time; an open-ended silence cannot be ordered here.
-	DurationMinutes int    `json:"duration_minutes,omitempty"`
-	Comment         string `json:"comment"`
-	// AlertName narrows the silence to one alert. Empty means all the
-	// alerts of this host.
-	AlertName string `json:"alert_name,omitempty"`
+	Reason string `json:"reason"`
+	// Minutes is the length counted from now; zero means an hour. An
+	// open-ended silence cannot be ordered here.
+	Minutes int `json:"minutes"`
+	// RuleID narrows the silence to one rule. Empty means every alert of
+	// this host.
+	RuleID string `json:"rule_id,omitempty"`
 }
+
+// defaultSilence is the length of a silence ordered without one.
+const defaultSilence = time.Hour
 
 // handleCreateSilence creates a silence of the host alerts.
 //
 // This is not an operation on the host and does not go through opspec: it
-// changes what the alerting system thinks about the host, not the machine
-// state - just like a maintenance window. But it is a decision to switch a
-// sensor off, so it has its own permission, a mandatory end, a mandatory
-// reason and an audit trail.
+// changes what the panel thinks about the host, not the machine state -
+// just like a maintenance window. But it is a decision to switch a sensor
+// off, so it has its own permission, a mandatory end, a mandatory reason
+// and an audit trail.
 func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
-	host, scope, ok := s.hostScope(w, r, hostID)
+	_, scope, ok := s.hostScope(w, r, hostID)
 	if !ok {
 		return
 	}
@@ -163,65 +487,47 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.monitoring.Alerts == nil || !s.monitoring.Alerts.Configured() {
-		problem(w, http.StatusServiceUnavailable, "alerts_not_configured",
-			"this installation has no alert source configured")
+	if !s.monitoringEnabled(w) {
 		return
 	}
-
 	var request silenceRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	duration := time.Duration(request.DurationMinutes) * time.Minute
-	if duration <= 0 {
-		duration = alerts.DefaultSilence
+	length := time.Duration(request.Minutes) * time.Minute
+	if request.Minutes == 0 {
+		length = defaultSilence
 	}
-
-	description := describeHost(*host)
 	now := time.Now().UTC()
-	silence := alerts.Silence{
-		Matchers: []alerts.Matcher{{
-			Name:  s.monitoring.Mapping.HostLabel,
-			Value: s.monitoring.Mapping.Label(description),
-		}},
-		StartsAt: now, EndsAt: now.Add(duration),
-		CreatedBy: principal.Subject, Comment: request.Comment,
+	silence := monitoring.Silence{
+		HostID: hostID, RuleID: strings.TrimSpace(request.RuleID),
+		Until: now.Add(length), Reason: request.Reason, CreatedBy: principal.Subject,
 	}
-	if request.AlertName != "" {
-		silence.Matchers = append(silence.Matchers,
-			alerts.Matcher{Name: "alertname", Value: request.AlertName})
-	}
-	if err := alerts.ValidateSilence(silence); err != nil {
+	if err := monitoring.ValidateSilence(silence, now); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_silence", err.Error())
 		return
 	}
-
-	id, err := s.monitoring.Alerts.Silence(r.Context(), silence)
+	if silence.RuleID != "" {
+		if _, err := s.monitoring.GetRule(r.Context(), silence.RuleID); s.ruleProblem(w, err) {
+			return
+		}
+	}
+	created, err := s.monitoring.CreateSilence(r.Context(), silence)
 	if err != nil {
-		s.audit.Record(r.Context(), audit.Event{
-			ActorType: audit.ActorUser, ActorID: principal.Subject,
-			Action: "monitoring.silence.create", TargetType: "host", TargetID: hostID,
-			RequestID: requestIDOf(r), Outcome: audit.OutcomeFailure,
-			Detail: map[string]any{"reason": err.Error()},
-		})
-		problem(w, http.StatusBadGateway, "alerts_unavailable", err.Error())
+		s.fail(w, err)
 		return
 	}
-	silence.ID = id
-
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "monitoring.silence.create", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
-			"silence_id": id, "ends_at": silence.EndsAt.Format(time.RFC3339),
-			"comment": silence.Comment, "alert_name": request.AlertName,
-			"label": silence.Matchers[0].Name + "=" + silence.Matchers[0].Value,
+			"silence_id": created.ID, "until": created.Until.Format(time.RFC3339),
+			"reason": created.Reason, "rule_id": created.RuleID,
 		},
 	})
-	writeJSON(w, http.StatusCreated, silence)
+	writeJSON(w, http.StatusCreated, created)
 }
 
 // handleExpireSilence ends a silence early.
@@ -235,14 +541,17 @@ func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.monitoring.Alerts == nil || !s.monitoring.Alerts.Configured() {
-		problem(w, http.StatusServiceUnavailable, "alerts_not_configured",
-			"this installation has no alert source configured")
+	if !s.monitoringEnabled(w) {
 		return
 	}
 	id := r.PathValue("silence")
-	if err := s.monitoring.Alerts.Unsilence(r.Context(), id); err != nil {
-		problem(w, http.StatusBadGateway, "alerts_unavailable", err.Error())
+	err := s.monitoring.ExpireSilence(r.Context(), hostID, id)
+	if errors.Is(err, monitoring.ErrNotFound) {
+		problem(w, http.StatusNotFound, "silence_not_found", "no such active silence of this host")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{
@@ -252,98 +561,4 @@ func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{"silence_id": id},
 	})
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// fleetAlert joins an alert with a panel host.
-type fleetAlert struct {
-	HostID   string       `json:"host_id,omitempty"`
-	Hostname string       `json:"hostname,omitempty"`
-	Alert    alerts.Alert `json:"alert"`
-}
-
-// handleFleetMonitoring returns the alerts of the whole visible fleet.
-//
-// Alerts work fleet-wide by nature: one bad change is visible at once on
-// dozens of hosts. The panel adds to them what the alerting system does not
-// know - which fleet host this is and whether this operator may be shown
-// it.
-func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
-	if !ok {
-		return
-	}
-	response := map[string]any{
-		"sources": s.sourceStates(r),
-		"items":   []fleetAlert{},
-	}
-	if s.monitoring.Alerts == nil || !s.monitoring.Alerts.Configured() {
-		response["alerts_unavailable_reason"] = "this installation has no alert source configured"
-		writeJSON(w, http.StatusOK, response)
-		return
-	}
-
-	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	byLabel := map[string]hosts.Host{}
-	for _, host := range list {
-		if principal.Can(authz.PermMonitoringRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			byLabel[s.monitoring.Mapping.Label(describeHost(host))] = host
-		}
-	}
-
-	all, err := s.monitoring.Alerts.Alerts(r.Context(), nil)
-	if err != nil {
-		response["alerts_unavailable_reason"] = err.Error()
-		writeJSON(w, http.StatusOK, response)
-		return
-	}
-
-	items := make([]fleetAlert, 0, len(all))
-	foreign := 0
-	for _, alert := range all {
-		label := alert.Labels[s.monitoring.Mapping.HostLabel]
-		host, known := byLabel[label]
-		if !known {
-			// An alert from outside the fleet or from a host this operator does
-			// not see. It is not shown, but counted: silence here would look
-			// like a calm fleet.
-			foreign++
-			continue
-		}
-		items = append(items, fleetAlert{
-			HostID: host.ID, Hostname: host.Hostname, Alert: alert,
-		})
-	}
-	// The most severe first, then the oldest: that is how on-call reads.
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Alert.Severity != items[j].Alert.Severity {
-			return severityWeight(items[i].Alert.Severity) > severityWeight(items[j].Alert.Severity)
-		}
-		if items[i].Alert.StartsAt == nil || items[j].Alert.StartsAt == nil {
-			return items[i].Hostname < items[j].Hostname
-		}
-		return items[i].Alert.StartsAt.Before(*items[j].Alert.StartsAt)
-	})
-
-	response["items"] = items
-	response["hosts_visible"] = len(byLabel)
-	response["alerts_outside_fleet"] = foreign
-	response["host_label"] = s.monitoring.Mapping.HostLabel
-	writeJSON(w, http.StatusOK, response)
-}
-
-// severityWeight orders the alerts by how urgent they are for on-call.
-func severityWeight(severity string) int {
-	switch severity {
-	case "critical", "page":
-		return 3
-	case "warning":
-		return 2
-	case "info", "none":
-		return 1
-	}
-	return 0
 }

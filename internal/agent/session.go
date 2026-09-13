@@ -472,6 +472,20 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	inventoryTicker := time.NewTicker(opts.InventoryInterval)
 	defer inventoryTicker.Stop()
 
+	// The resource sampler runs next to the heartbeat rather than inside it:
+	// a sample is a measurement kept for charts and alert rules, the
+	// heartbeat a decision signal. Synthetic facts mean a synthetic host,
+	// and the counters of the machine running a thousand simulated agents
+	// would say nothing about any of them.
+	if opts.CollectFacts == nil {
+		metricsInterval := time.Duration(sessionConfig.GetMetricsIntervalSeconds()) * time.Second
+		go NewSampler().Run(sessionCtx, metricsInterval, func(sample *agentv1.MetricsSample) error {
+			return send(&agentv1.AgentMessage{
+				Payload: &agentv1.AgentMessage_MetricsSample{MetricsSample: sample},
+			})
+		}, opts.Log)
+	}
+
 	for {
 		select {
 		case <-sessionCtx.Done():

@@ -30,6 +30,7 @@ import (
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
+	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -63,10 +64,10 @@ type Server struct {
 	// panel must know them, because the host will not say itself which file
 	// is a service certificate.
 	certificates *certificatestore.Store
-	// monitoring connects the panel with metrics and alerts. Nil means an
-	// installation without monitoring - and that is a valid state, not a
-	// failure.
-	monitoring Monitoring
+	// monitoring holds the resource samples of the hosts, the alert rules,
+	// the alerts and the silences. Nil means an installation without the
+	// built-in monitoring - a valid state, not a failure.
+	monitoring *monitoring.Store
 	// vulnerabilities hold the correlator findings, and hostPackages - the
 	// list those findings were based on. A nil correlator means an
 	// installation without vulnerability assessment.
@@ -267,10 +268,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
 	s.route(mux, "GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)
 
-	s.route(mux, "GET /api/v1/monitoring", s.handleFleetMonitoring)
-	s.route(mux, "GET /api/v1/hosts/{id}/monitoring", s.handleHostMonitoring)
-	s.route(mux, "POST /api/v1/hosts/{id}/monitoring/silences", s.handleCreateSilence)
-	s.route(mux, "DELETE /api/v1/hosts/{id}/monitoring/silences/{silence}", s.handleExpireSilence)
+	s.monitoringRoutes(mux)
 
 	s.route(mux, "GET /api/v1/backups", s.handleFleetBackups)
 	s.route(mux, "GET /api/v1/hosts/{id}/backups", s.handleHostBackups)
@@ -449,6 +447,11 @@ type FleetSummary struct {
 	// rather than an environment, so the counter exists only for the global
 	// view - a narrowed scope cannot say which relays are its own.
 	DegradedRelays *int `json:"degraded_relays,omitempty"`
+	// AlertsFiring counts the firing alerts on the visible hosts that no
+	// silence covers, and AlertsCritical those of them that are critical.
+	// A silenced alert already has an operator's decision behind it.
+	AlertsFiring   int `json:"alerts_firing"`
+	AlertsCritical int `json:"alerts_critical"`
 }
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
@@ -577,6 +580,23 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		summary.DegradedRelays = &degraded
+	}
+
+	// The firing alerts of the visible hosts, without the silenced ones: a
+	// silence is a decision already taken, and the dashboard counts what
+	// still waits for one.
+	err = s.pool.QueryRow(ctx, `
+		select count(*), count(*) filter (where a.severity = 'critical')
+		from alerts a join hosts h on h.id = a.host_id
+		where a.state = 'firing'
+		  and not exists (select 1 from silences s
+		                  where s.expired_at is null and s.until > now()
+		                    and (s.host_id is null or s.host_id = a.host_id)
+		                    and (s.rule_id is null or s.rule_id = a.rule_id))
+		  and `+visible, args...).Scan(&summary.AlertsFiring, &summary.AlertsCritical)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, summary)
 }
