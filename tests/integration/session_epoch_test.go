@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // sessionView describes an agent session row in the database.
@@ -106,4 +108,72 @@ func (h *harness) hostSessions(t *testing.T, hostID string) []sessionView {
 		t.Fatal(err)
 	}
 	return sessions
+}
+
+// TestACloneOfTheIdentityIsReported guards the detection of a copied
+// identity: the same certificate alive on two boots at the same time. The
+// clone is staged as a session row whose heartbeat is dated ahead, so it
+// counts as alive however long the real agent takes to reconnect with its
+// own boot ID.
+func TestACloneOfTheIdentityIsReported(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	ctx := context.Background()
+	pool := h.database(ctx)
+
+	var fingerprint []byte
+	if err := pool.QueryRow(ctx, `
+		select cert_fingerprint from agent_sessions
+		where host_id = $1::uuid and ended_at is null order by epoch desc limit 1`,
+		host.ID).Scan(&fingerprint); err != nil {
+		t.Fatalf("the host has no open session: %v", err)
+	}
+	cloneID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		insert into agent_sessions
+			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, epoch, last_heartbeat_at)
+		values ($1::uuid, $2::uuid, 'clone-test', $3, '203.0.113.7', 'test', 'cloned-boot',
+			(select coalesce(max(epoch), 0) + 1 from agent_sessions where host_id = $2::uuid),
+			now() + interval '10 minutes')`,
+		cloneID, host.ID, fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `delete from agent_sessions where id = $1::uuid`, cloneID)
+	})
+
+	t.Cleanup(func() {
+		var state struct {
+			LifecycleState string `json:"lifecycle_state"`
+		}
+		h.get("/api/v1/hosts/"+host.ID, &state)
+		if state.LifecycleState == "quarantined" {
+			h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
+				map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
+		}
+		h.awaitConnection(host.ID, 2*time.Minute)
+	})
+	// The reconnect of the real agent is forced the only way the API allows.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
+		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
+		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
+	h.awaitConnection(host.ID, 2*time.Minute)
+
+	var audit struct {
+		Items []struct {
+			Action string         `json:"action"`
+			Detail map[string]any `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/hosts/"+host.ID+"/audit?limit=50", &audit)
+	for _, event := range audit.Items {
+		if event.Action == "security.duplicate_identity" && event.Detail["previous_session"] == cloneID {
+			if event.Detail["previous_boot_id"] != "cloned-boot" || event.Detail["previous_addr"] != "203.0.113.7" {
+				t.Errorf("the incident does not describe the clone: %+v", event.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("no security.duplicate_identity event was recorded for the clone")
 }

@@ -207,6 +207,10 @@ var (
 	TargetStateDuration = Default.NewHistogram("flotestro_target_state_duration_seconds",
 		"Time a campaign target spent in a state before leaving it, by state and operation.",
 		DurationBuckets, "state", "action")
+	// DuplicateIdentity counts the sessions opened while another session
+	// of the same certificate, on a different boot, was still alive.
+	DuplicateIdentity = Default.NewCounter("flotestro_duplicate_identity_total",
+		"Sessions opened while the same identity was alive on a different boot, by gateway.", "gateway")
 	// BudgetWait measures the wait for capacity that ended in a grant.
 	BudgetWait = Default.NewHistogram("flotestro_budget_wait_seconds",
 		"Wait for budget capacity that ended in a grant, by class and site.",

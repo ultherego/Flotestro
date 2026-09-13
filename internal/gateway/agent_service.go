@@ -17,6 +17,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -29,6 +30,7 @@ import (
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/metrics"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	certmodule "github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -1597,6 +1599,8 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		return err
 	}
 
+	s.detectDuplicateIdentity(ctx, session, fingerprint)
+
 	// The older sessions of this host are closed in the database at once: a row
 	// left open on a gateway that no longer serves the host inflates every
 	// measurement that counts connections and has the scheduler send jobs into
@@ -1632,6 +1636,59 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		},
 	})
 	return nil
+}
+
+// detectDuplicateIdentity looks for a clone: the same certificate alive on
+// a different boot at the same time. A reconnect after a reboot also
+// brings a new boot ID, but then the old session is dead; a session that
+// sent a heartbeat a moment ago is another machine with a copied
+// identity or a replay. The new session is not refused here - the epoch
+// rule has already closed the older one - but the incident is recorded
+// where the operator will find it and counted where the alert fires.
+func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Session, fingerprint []byte) {
+	// Two heartbeat intervals with the jitter: a session silent for longer
+	// is a session that died without saying so.
+	alive := time.Duration(2*(s.heartbeatSeconds+s.heartbeatJitter)) * time.Second
+	if alive <= 0 {
+		alive = 2 * time.Minute
+	}
+	const query = `
+		select id, boot_id, coalesce(remote_addr, ''), coalesce(last_heartbeat_at, started_at)
+		from agent_sessions
+		where host_id = $1 and epoch < $2 and ended_at is null
+		  and cert_fingerprint = $3 and boot_id <> $4
+		  and coalesce(last_heartbeat_at, started_at) > now() - $5::interval
+		order by epoch desc limit 1`
+	var (
+		previousID, previousBoot, previousAddr string
+		lastSeen                               time.Time
+	)
+	err := s.pool.QueryRow(ctx, query, session.HostID, session.Epoch, fingerprint, session.BootID,
+		alive).Scan(&previousID, &previousBoot, &previousAddr, &lastSeen)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		s.log.Error("the duplicate identity check failed", "host_id", session.HostID, "err", err)
+		return
+	}
+	metrics.DuplicateIdentity.Inc(s.gatewayID)
+	s.log.Warn("the same identity is alive on two boots",
+		"host_id", session.HostID, "previous_session", previousID, "previous_boot_id", previousBoot,
+		"previous_addr", previousAddr, "new_session", session.ID, "new_boot_id", session.BootID,
+		"new_addr", session.RemoteAddr)
+	s.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorAgent, ActorID: session.HostID,
+		Action: "security.duplicate_identity", TargetType: "host", TargetID: session.HostID,
+		Outcome: audit.OutcomeDenied,
+		Detail: map[string]any{
+			"previous_session": previousID, "previous_boot_id": previousBoot,
+			"previous_addr": previousAddr, "previous_seen_at": lastSeen.UTC().Format(time.RFC3339),
+			"session_id": session.ID, "boot_id": session.BootID, "remote_addr": session.RemoteAddr,
+			"gateway_id": s.gatewayID,
+			"action": "the older session was superseded; assess the host and quarantine it if the identity was copied",
+		},
+	})
 }
 
 func (s *AgentService) closeSession(ctx context.Context, session *Session, hostID string) {
