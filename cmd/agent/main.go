@@ -186,6 +186,13 @@ func main() {
 		},
 	})
 
+	// The service is ready once it has something to introduce itself with
+	// and its background work is running; the connection itself is not a
+	// readiness condition - a host waiting out an outage is a healthy
+	// service. From here the watchdog is fed as long as the process lives.
+	agent.Notify("READY=1\nSTATUS=identity ready, connecting to the fleet")
+	go agent.KeepWatchdogFed(ctx, agent.WatchdogInterval())
+
 	if err := agent.Run(ctx, agent.SessionOptions{
 		GatewayURLs:        gateways,
 		Identity:           identity,

@@ -15,7 +15,12 @@ ConditionPathExists=|/var/lib/flotestro-agent/identity/current/agent.pem
 ConditionPathExists=|/var/lib/flotestro-agent/agent.pem
 
 [Service]
-Type=simple
+# The agent reports readiness itself, once its identity is loaded and its
+# background work runs, and feeds the watchdog as long as its scheduler
+# lives. A hung process is restarted; a host waiting out a network outage
+# keeps feeding the watchdog and is left alone.
+Type=notify
+WatchdogSec=90s
 User=flotestro-agent
 Group=flotestro-agent
 # The environment file is optional and is to stay so: the host settings are
