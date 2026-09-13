@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
-import type { Campaign, CampaignTarget } from "../lib/types";
+import type { Campaign, CampaignTarget, SelectorExpression } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
@@ -11,6 +11,7 @@ import { PlanSummary } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { loadedTargets, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
+import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
 import { useT } from "../i18n";
 
 /**
@@ -42,6 +43,12 @@ export function Bulk() {
     site: "",
     environment: "",
     osFamily: "",
+    targetMode: "filters",
+    group: "",
+    rules: [{ field: "tag", value: "", negated: false }],
+    combine: "all",
+    exclude: [],
+    excludeReason: "",
     canary: 1,
     wave: 10,
     concurrent: 5,
@@ -84,9 +91,18 @@ export function Bulk() {
   );
 
   const params = new URLSearchParams();
-  if (order.site) params.set("site", order.site);
-  if (order.environment) params.set("environment", order.environment);
-  if (order.osFamily) params.set("os_family", order.osFamily);
+  const expression = expressionOf(order);
+  if (expression) {
+    // The typed selector decides alone; the flat filters are not sent
+    // next to it, so the preview asks exactly what the order will.
+    params.set("expression", JSON.stringify(expression));
+  } else {
+    if (order.site) params.set("site", order.site);
+    if (order.environment) params.set("environment", order.environment);
+    if (order.osFamily) params.set("os_family", order.osFamily);
+  }
+  for (const hostID of order.exclude) params.append("exclude", hostID);
+  if (order.excludeReason.trim()) params.set("exclude_reason", order.excludeReason.trim());
   if (order.action) params.set("action", order.action);
   const preview = useQuery({
     queryKey: ["campaign-preview", params.toString()],
@@ -197,6 +213,17 @@ type Order = {
   site: string;
   environment: string;
   osFamily: string;
+  // How the targets are named: by the flat filters of the next step, or
+  // by a group and tag rules compiled into one expression. The expression,
+  // when present, decides alone.
+  targetMode: "filters" | "expression";
+  group: string;
+  rules: Rule[];
+  combine: "all" | "any";
+  // Hosts left out by name, with the reason the approver will read next
+  // to them; the server refuses an exclusion without one.
+  exclude: string[];
+  excludeReason: string;
   canary: number;
   wave: number;
   concurrent: number;
@@ -214,6 +241,20 @@ type Order = {
   // How many lost sessions mid-task pause the campaign; zero disables it.
   connectivityLost: number;
 };
+
+/**
+ * The expression the order carries: the chosen group and the tag rules
+ * joined by "all". Null means the flat filters decide.
+ */
+function expressionOf(order: Order): SelectorExpression | null {
+  if (order.targetMode !== "expression") return null;
+  const parts: SelectorExpression[] = [];
+  if (order.group) parts.push({ group: order.group });
+  const rules = buildExpression(order.rules, order.combine);
+  if (rules) parts.push(rules);
+  if (parts.length === 0) return null;
+  return parts.length === 1 ? parts[0] : { all: parts };
+}
 
 type Operation = {
   action: string;
@@ -293,8 +334,11 @@ function stepGates(
     orderPayload(order) !== null;
   const hasTargets = (preview?.count ?? 0) > 0;
   const hasEligible = (preview?.eligible ?? 0) > 0;
+  const exclusionsExplained = order.exclude.length === 0 || order.excludeReason.trim() !== "";
   return [
-    { open: hasAction, reason: t("pick an operation, name the campaign and give it a valid payload") },
+    { open: hasAction && exclusionsExplained, reason: exclusionsExplained
+      ? t("pick an operation, name the campaign and give it a valid payload")
+      : t("give the exclusions a reason") },
     { open: hasAction && hasTargets, reason: t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
@@ -454,6 +498,7 @@ function ScopeStep({
           </Field>
         )}
       </FieldGrid>
+      <TargetChoice order={order} change={change} />
       {preview?.requires_plan && (
         <p className="subtitle">
           {t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
@@ -478,6 +523,103 @@ function ScopeStep({
         </details>
       )}
     </Card>
+  );
+}
+
+/**
+ * How the targets are named: by the flat filters of the next step, or by
+ * a saved group and tag rules. The second way builds the typed expression
+ * the server compiles into the host query - it is shown here as the
+ * campaign will carry it, so what the approver reads is what was sent.
+ * Under it, the hosts left out by name, with the reason that goes into
+ * the snapshot next to each of them.
+ */
+function TargetChoice({ order, change }: { order: Order; change: (delta: Partial<Order>) => void }) {
+  const t = useT();
+  const groups = useQuery({
+    queryKey: ["host-groups"],
+    queryFn: () => api.get<Collection<{ id: string; name: string; kind: string }>>("/api/v1/host-groups"),
+    enabled: order.targetMode === "expression",
+    staleTime: 60 * 1000,
+  });
+  const [excluding, setExcluding] = useState(false);
+  const expression = expressionOf(order);
+  return (
+    <>
+      <h4 className="widget-subhead">{t("Targets")}</h4>
+      <FieldGrid>
+        <Field label={t("Named by")} hint={order.targetMode === "expression"
+          ? t("The expression decides alone; the site, environment and OS filters of the next step do not apply.")
+          : t("Site, environment and OS family, set in the next step.")}>
+          <select value={order.targetMode} onChange={(e) => change({ targetMode: e.target.value as Order["targetMode"] })}>
+            <option value="filters">{t("site, environment and OS")}</option>
+            <option value="expression">{t("groups and tags")}</option>
+          </select>
+        </Field>
+        {order.targetMode === "expression" && (
+          <Field label={t("Group")} hint={t("Optional; the rules below narrow it further.")}>
+            <select value={order.group} onChange={(e) => change({ group: e.target.value })}>
+              <option value="">{t("no group")}</option>
+              {(groups.data?.items ?? []).map((group) => (
+                <option key={group.id} value={group.name}>{group.name} · {group.kind}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </FieldGrid>
+      {order.targetMode === "expression" && (
+        <>
+          <SelectorBuilder
+            rules={order.rules}
+            combine={order.combine}
+            onRules={(rules) => change({ rules })}
+            onCombine={(combine) => change({ combine })}
+          />
+          {/* The expression as the campaign will carry it: the structure
+              the server compiles, not a sentence the panel made up. */}
+          <p className="source">
+            {expression
+              ? <>{t("the campaign will carry")} <span className="mono">{describeExpression(expression)}</span></>
+              : t("pick a group or give a rule a value; until then the selector names nobody")}
+          </p>
+        </>
+      )}
+
+      <h4 className="widget-subhead">{t("Exclude")}</h4>
+      <p className="subtitle">
+        {order.exclude.length === 0
+          ? t("No host is left out by name. An excluded host stays in the snapshot as excluded, with the reason and your name next to it.")
+          : t("{n} hosts left out by name; each stays in the snapshot as excluded, with the reason and your name next to it.", { n: order.exclude.length })}
+      </p>
+      {order.exclude.length > 0 && (
+        <FieldGrid>
+          <Field label={t("Reason for the exclusions")} hint={t("Required; it is what the approver reads next to every excluded host.")} wide>
+            <input
+              placeholder={t("e.g. the database primary; failing over first")}
+              value={order.excludeReason}
+              onChange={(e) => change({ excludeReason: e.target.value })}
+            />
+          </Field>
+        </FieldGrid>
+      )}
+      {excluding ? (
+        <>
+          <HostChooser selected={new Set(order.exclude)} onChange={(next) => change({ exclude: [...next] })} />
+          <Actions>
+            <button type="button" className="secondary" onClick={() => setExcluding(false)}>{t("Done choosing")}</button>
+          </Actions>
+        </>
+      ) : (
+        <Actions>
+          <button type="button" className="secondary" onClick={() => setExcluding(true)}>
+            {order.exclude.length === 0 ? t("Exclude hosts by name") : t("Change the excluded hosts")}
+          </button>
+          {order.exclude.length > 0 && (
+            <button type="button" className="secondary" onClick={() => change({ exclude: [], excludeReason: "" })}>{t("Clear the exclusions")}</button>
+          )}
+        </Actions>
+      )}
+    </>
   );
 }
 
@@ -760,9 +902,12 @@ function CreateStep({
         reason: `bulk workspace: ${order.action}`,
         payload: orderPayload(order) ?? {},
         selector: {
-          site: order.site || undefined,
-          environment: order.environment || undefined,
-          os_family: order.osFamily || undefined,
+          site: expressionOf(order) ? undefined : order.site || undefined,
+          environment: expressionOf(order) ? undefined : order.environment || undefined,
+          os_family: expressionOf(order) ? undefined : order.osFamily || undefined,
+          expression: expressionOf(order) ?? undefined,
+          exclude: order.exclude.length > 0 ? order.exclude : undefined,
+          exclude_reason: order.exclude.length > 0 ? order.excludeReason.trim() : undefined,
         },
         canary_size: order.canary,
         wave_size: order.wave,

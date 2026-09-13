@@ -47,6 +47,9 @@ export type Host = {
   site: string;
   environment: string;
   owner?: string;
+  // What operators recorded about the host: "key" or "key=value". Always a
+  // list; a host without tags has an empty one.
+  tags: string[];
   lifecycle_state: string;
   os_family?: string;
   os_distribution?: string;
@@ -75,6 +78,44 @@ export type Host = {
   enrolled_at: string;
   capabilities: Capabilities;
   identity: HostIdentity;
+};
+
+/**
+ * One node of a campaign selector: exactly one field is set. A combinator
+ * holds other nodes; a leaf names one fact about the host. The server
+ * compiles it into the host query, so the panel never resolves it itself.
+ */
+export type SelectorExpression = {
+  all?: SelectorExpression[];
+  any?: SelectorExpression[];
+  not?: SelectorExpression;
+  site?: string;
+  environment?: string;
+  os_family?: string;
+  tag?: string;
+  /** A saved group, by identifier or by name. */
+  group?: string;
+  capability?: string;
+  connection_state?: string;
+  lifecycle_state?: string;
+  owner?: string;
+};
+
+/** A saved host selection: a fixed member list or a selector resolved when read. */
+export type HostGroup = {
+  id: string;
+  name: string;
+  description?: string;
+  kind: "static" | "dynamic";
+  selector?: SelectorExpression;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  // The size: counted in the database for a static group, resolved for the
+  // caller for a dynamic one. Missing means the count is not known, not zero.
+  member_count?: number;
+  // Why a dynamic group does not resolve any more, e.g. a group it names was deleted.
+  unresolvable?: string;
 };
 
 export type FleetSummary = {

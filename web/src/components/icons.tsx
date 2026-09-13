@@ -5,7 +5,7 @@
  * are hidden from assistive technology.
  */
 export type IconName =
-  | "dashboard" | "hosts" | "add-host" | "jobs" | "bulk" | "campaigns"
+  | "dashboard" | "hosts" | "add-host" | "groups" | "jobs" | "bulk" | "campaigns"
   | "security" | "vulnerabilities" | "certificates" | "secrets"
   | "backups" | "monitoring" | "directory" | "access" | "audit"
   | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user" | "back" | "star"
@@ -18,6 +18,8 @@ const PATHS: Record<IconName, string> = {
   dashboard: "M3 3h8v8H3zM13 3h8v5h-8zM13 11h8v10h-8zM3 14h8v7H3z",
   hosts: "M3 5h18v6H3zM3 13h18v6H3zM7 8h.01M7 16h.01",
   "add-host": "M3 5h18v6H3zM3 13h10v6H3zM7 8h.01M7 16h.01M18 15v6M15 18h6",
+  // Two hosts held in one bracket: a group is a named set, not a machine.
+  groups: "M7 6h13v4H7zM7 14h13v4H7zM10 8h.01M10 16h.01M4 4v16",
   jobs: "M9 5h6M9 3h6v4H9zM5 6h2v15h10V6h2M9 12l2 2 4-4",
   bulk: "M4 6h16M4 12h16M4 18h10M18 16l2 2 2-4",
   campaigns: "M4 20V4M4 4h13l-2 4 2 4H4",

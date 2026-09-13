@@ -15,18 +15,18 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/selector"
 )
 
 type createCampaignRequest struct {
-	Name     string          `json:"name"`
-	Action   string          `json:"action"`
-	Payload  json.RawMessage `json:"payload"`
-	Selector struct {
-		Site        string   `json:"site,omitempty"`
-		Environment string   `json:"environment,omitempty"`
-		OSFamily    string   `json:"os_family,omitempty"`
-		HostIDs     []string `json:"host_ids,omitempty"`
-	} `json:"selector"`
+	Name    string          `json:"name"`
+	Action  string          `json:"action"`
+	Payload json.RawMessage `json:"payload"`
+	// Selector is recorded as given; the typed expression, when present,
+	// decides alone. The exclusions name hosts the selector matches that
+	// are to stay out, and need a reason the approver will read.
+	Selector campaigns.Selector `json:"selector"`
+
 	CanarySize               *int       `json:"canary_size,omitempty"`
 	WaveSize                 *int       `json:"wave_size,omitempty"`
 	MaxConcurrent            *int       `json:"max_concurrent,omitempty"`
@@ -144,19 +144,13 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	selector := campaigns.Selector{
-		Site:        request.Selector.Site,
-		Environment: request.Selector.Environment,
-		OSFamily:    request.Selector.OSFamily,
-		HostIDs:     request.Selector.HostIDs,
-	}
-	candidates, err := s.resolveTargets(r, selector)
-	if errors.Is(err, ErrSelectorTooBroad) {
-		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
+	principal := authz.FromContext(r.Context())
+	chosen, ok := s.checkSelector(w, request.Selector)
+	if !ok {
 		return
 	}
-	if err != nil {
-		s.fail(w, err)
+	candidates, ok := s.materialize(w, r, chosen)
+	if !ok {
 		return
 	}
 	if len(candidates) == 0 {
@@ -168,9 +162,11 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// maintenance window and a host without the required adapter stay in the
 	// snapshot, but closed at once and with a reason: vanishing quietly would
 	// hide the decision, and listing them as ready would call a missing
-	// capability a failure.
-	assessment := assessCandidates(candidates, action, s.activeConflicts(r.Context()),
-		time.Now().UTC())
+	// capability a failure. A host the operator excluded by name is closed
+	// the same way, with the reason and the author.
+	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)
+	assessment := assessCandidates(kept, action, s.activeConflicts(r.Context()), time.Now().UTC())
+	assessment.Closed = append(assessment.Closed, excluded...)
 	if len(assessment.Ready) == 0 {
 		problem(w, http.StatusBadRequest, "no_eligible_targets",
 			"no matched host can run this operation: "+describeExclusions(assessment.Exclusions()))
@@ -192,7 +188,6 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// The permission is checked for every host of the snapshot. A campaign
 	// covering one host outside the scope must not pass because the rest is
 	// inside it.
-	principal := authz.FromContext(r.Context())
 	for _, host := range candidates {
 		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
 		if _, ok := s.authorize(w, r, authz.PermCampaignCreate, scope, "host", host.ID); !ok {
@@ -220,7 +215,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		Name:                     request.Name,
 		ActionType:               string(action),
 		Payload:                  request.Payload,
-		Selector:                 selector,
+		Selector:                 chosen,
 		CanarySize:               valueOrDefault(request.CanarySize, 1),
 		WaveSize:                 valueOr(request.WaveSize, 10),
 		MaxConcurrent:            valueOr(request.MaxConcurrent, 5),
@@ -271,6 +266,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"campaign_mode": string(action.CampaignMode()),
 			"targets":       len(targets), "eligible": len(assessment.Ready),
 			"excluded": assessment.Exclusions(), "notes": assessment.Notes,
+			"selector": chosen.Expression.Describe(), "exclude_reason": chosen.ExcludeReason,
 			"canary_size": campaign.CanarySize,
 			"wave_size":   campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
 			"offline_policy": string(campaign.OfflinePolicy), "deadline_at": campaign.DeadlineAt,
@@ -308,11 +304,80 @@ func describeExclusions(groups []hostGroup) string {
 	return description
 }
 
+// checkSelector validates the selector of an order and answers a request
+// that does not hold together. The expression is validated and resolved
+// here, so an order naming a group that does not exist is refused with the
+// name rather than materialised as nothing.
+func (s *Server) checkSelector(w http.ResponseWriter, chosen campaigns.Selector) (campaigns.Selector, bool) {
+	if chosen.Expression != nil {
+		if err := chosen.Expression.Validate(); err != nil {
+			s.selectorProblem(w, err)
+			return chosen, false
+		}
+	}
+	chosen.ExcludeReason = strings.TrimSpace(chosen.ExcludeReason)
+	exclude := make([]string, 0, len(chosen.Exclude))
+	for _, hostID := range chosen.Exclude {
+		if hostID = strings.TrimSpace(hostID); hostID != "" {
+			exclude = append(exclude, hostID)
+		}
+	}
+	chosen.Exclude = exclude
+	// An exclusion without a reason is a hole in the snapshot: the approver
+	// sees a host left out and nothing to say why.
+	if len(chosen.Exclude) > 0 && chosen.ExcludeReason == "" {
+		problem(w, http.StatusBadRequest, "exclude_reason_required",
+			"excluding hosts needs a reason; it is what the approver will read next to them")
+		return chosen, false
+	}
+	if len(chosen.Exclude) > maxCampaignSnapshot {
+		problem(w, http.StatusBadRequest, "selector_too_broad",
+			fmt.Sprintf("the exclusion list names more than %d hosts", maxCampaignSnapshot))
+		return chosen, false
+	}
+	return chosen, true
+}
+
+// materialize turns the selector into the host list and answers a
+// selector that does not resolve or resolves to too much. An empty list is
+// an answer, not an error: the preview says "nobody", and the order
+// refuses it in its own words. The answer has already been written when
+// the second result is false.
+func (s *Server) materialize(w http.ResponseWriter, r *http.Request, chosen campaigns.Selector) ([]hosts.Host, bool) {
+	candidates, err := s.resolveTargets(r, chosen)
+	switch {
+	case errors.Is(err, ErrSelectorTooBroad):
+		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
+		return nil, false
+	case errors.Is(err, selector.ErrCycle), errors.Is(err, selector.ErrUnknownGroup),
+		errors.Is(err, selector.ErrInvalid):
+		s.selectorProblem(w, err)
+		return nil, false
+	case err != nil:
+		s.fail(w, err)
+		return nil, false
+	}
+	return candidates, true
+}
+
 // resolveTargets turns the selector into a host list.
-func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([]hosts.Host, error) {
-	if len(selector.HostIDs) > 0 {
-		result := make([]hosts.Host, 0, len(selector.HostIDs))
-		for _, hostID := range selector.HostIDs {
+//
+// The typed expression, when present, decides alone: it is expanded of
+// its group references and compiled into the host query, the same query
+// the host list and the group page run. The older fields take the older
+// way - an explicit list is read host by host, the flat filters page
+// through the list.
+func (s *Server) resolveTargets(r *http.Request, chosen campaigns.Selector) ([]hosts.Host, error) {
+	if chosen.Expression != nil {
+		expanded, err := selector.Expand(r.Context(), chosen.Expression, s.groups)
+		if err != nil {
+			return nil, err
+		}
+		return s.pageHosts(r.Context(), hosts.ListFilter{Expression: expanded})
+	}
+	if len(chosen.HostIDs) > 0 {
+		result := make([]hosts.Host, 0, len(chosen.HostIDs))
+		for _, hostID := range chosen.HostIDs {
 			host, err := s.hosts.Get(r.Context(), hostID)
 			if errors.Is(err, hosts.ErrNotFound) {
 				continue
@@ -328,29 +393,34 @@ func (s *Server) resolveTargets(r *http.Request, selector campaigns.Selector) ([
 	// covering a thousand hosts is meant to mean a thousand hosts, not the
 	// first five hundred sorted alphabetically. The upper bound is explicit
 	// and ends in an error, not a quiet trimming of the list.
-	filter := hosts.ListFilter{
-		Site:        selector.Site,
-		Environment: selector.Environment,
-		OSFamily:    selector.OSFamily,
+	return s.pageHosts(r.Context(), hosts.ListFilter{
+		Site:        chosen.Site,
+		Environment: chosen.Environment,
+		OSFamily:    chosen.OSFamily,
+	})
+}
+
+// excludeHosts takes the hosts on the exclusion list out of the candidate
+// list. The rest goes to the qualification; the excluded ones come back
+// settled - closed at once with the reason and the author - so that they
+// enter the snapshot rather than vanish. A host on the list that the
+// selector did not match is not a target and leaves no trace.
+func excludeHosts(candidates []hosts.Host, chosen campaigns.Selector, actor string) (kept []hosts.Host, closed []closedHost) {
+	if len(chosen.Exclude) == 0 {
+		return candidates, nil
 	}
-	result := make([]hosts.Host, 0, hosts.PageSize)
-	afterName, afterID := "", ""
-	for {
-		page, err := s.hosts.Page(r.Context(), filter, afterName, afterID, hosts.PageSize)
-		if err != nil {
-			return nil, err
+	kept = make([]hosts.Host, 0, len(candidates))
+	for _, host := range candidates {
+		if !chosen.Excluded(host.ID) {
+			kept = append(kept, host)
+			continue
 		}
-		result = append(result, page...)
-		if len(page) < hosts.PageSize {
-			return result, nil
-		}
-		if len(result) > maxCampaignSnapshot {
-			return nil, fmt.Errorf("%w: the selector covers more than %d hosts",
-				ErrSelectorTooBroad, maxCampaignSnapshot)
-		}
-		last := page[len(page)-1]
-		afterName, afterID = last.Hostname, last.ID
+		closed = append(closed, closedHost{
+			Host: host, State: campaigns.TargetExcluded, Reason: ReasonExcluded,
+			Message: fmt.Sprintf("excluded by %s: %s", actor, chosen.ExcludeReason),
+		})
 	}
+	return kept, closed
 }
 
 // maxCampaignSnapshot is the bound of one campaign. It does not protect the
@@ -370,13 +440,46 @@ var ErrSelectorTooBroad = errors.New("the selector covers too many hosts")
 // shown, so the preview must not stop at a hidden limit. The sample is only
 // a sample and is named so.
 func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign"); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign")
+	if !ok {
 		return
 	}
-	filter := hosts.ListFilter{
-		Site:        r.URL.Query().Get("site"),
-		Environment: r.URL.Query().Get("environment"),
-		OSFamily:    r.URL.Query().Get("os_family"),
+	query := r.URL.Query()
+	chosen := campaigns.Selector{
+		Site:          query.Get("site"),
+		Environment:   query.Get("environment"),
+		OSFamily:      query.Get("os_family"),
+		Exclude:       query["exclude"],
+		ExcludeReason: query.Get("exclude_reason"),
+	}
+	// The typed selector travels in the query as JSON: the preview is a
+	// read, and a read with a body is a read nobody can link to.
+	if text := query.Get("expression"); text != "" {
+		chosen.Expression = &selector.Expression{}
+		if err := json.Unmarshal([]byte(text), chosen.Expression); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_selector", "the expression is not valid JSON")
+			return
+		}
+	}
+	// The preview shows what the order would do, exclusions included; the
+	// reason is not required here, because nothing is recorded yet.
+	if chosen.ExcludeReason == "" && len(chosen.Exclude) > 0 {
+		chosen.ExcludeReason = "(no reason given yet)"
+	}
+	if chosen, ok = s.checkSelector(w, chosen); !ok {
+		return
+	}
+
+	// The count comes from the same query the snapshot will run: a preview
+	// counted differently than the creation would be worse than none.
+	filter := hosts.ListFilter{Site: chosen.Site, Environment: chosen.Environment, OSFamily: chosen.OSFamily}
+	if chosen.Expression != nil {
+		expanded, err := selector.Expand(r.Context(), chosen.Expression, s.groups)
+		if err != nil {
+			s.selectorProblem(w, err)
+			return
+		}
+		filter = hosts.ListFilter{Expression: expanded}
 	}
 	count, err := s.hosts.Count(r.Context(), filter)
 	if err != nil {
@@ -384,15 +487,16 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := map[string]any{
-		"count": count,
-		"limit": maxCampaignSnapshot,
+		"count":    count,
+		"limit":    maxCampaignSnapshot,
+		"selector": chosen.Expression.Describe(),
 	}
 
 	// Without an operation the preview answers only the question "how many
 	// hosts does this concern". The qualification depends on the operation:
 	// hosts without a package adapter are ready for a service restart and
 	// unable to update.
-	action := opspec.ActionType(r.URL.Query().Get("action"))
+	action := opspec.ActionType(query.Get("action"))
 	if action == "" {
 		sample, err := s.hosts.Page(r.Context(), filter, "", "", previewSampleSize)
 		if err != nil {
@@ -412,19 +516,13 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	// the campaign. A preview computed differently than the creation would be
 	// worse than none: the operator would approve one campaign and get
 	// another.
-	candidates, err := s.resolveTargets(r, campaigns.Selector{
-		Site: filter.Site, Environment: filter.Environment, OSFamily: filter.OSFamily,
-	})
-	if errors.Is(err, ErrSelectorTooBroad) {
-		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
+	candidates, ok := s.materialize(w, r, chosen)
+	if !ok {
 		return
 	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	assessment := assessCandidates(candidates, action, s.activeConflicts(r.Context()),
-		time.Now().UTC())
+	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)
+	assessment := assessCandidates(kept, action, s.activeConflicts(r.Context()), time.Now().UTC())
+	assessment.Closed = append(assessment.Closed, excluded...)
 
 	response["sample"] = hostNames(assessment.Ready[:min(len(assessment.Ready), previewSampleSize)])
 	response["eligible"] = len(assessment.Ready)

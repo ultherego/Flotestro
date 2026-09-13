@@ -36,6 +36,7 @@ import (
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/secrets"
+	"github.com/ultherego/flotestro/internal/selector"
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
@@ -109,6 +110,9 @@ type Server struct {
 	relays *relays.Store
 	// installation is what the panel knows about how the hosts reach it.
 	installation Installation
+	// groups holds the saved host selections: static member lists and
+	// dynamic selectors a campaign can name.
+	groups *selector.Store
 }
 
 // SetSecrets attaches the secret store.
@@ -163,6 +167,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		files:        managedfiles.NewStore(pool),
 		certificates: certificatestore.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
+		groups:       selector.NewStore(pool),
 		campaigns:    campaignStore, tokens: tokens, authz: authzStore, audit: recorder,
 		registry: registry, oidc: provider, directory: directory, changes: changes, log: log,
 		productionEnvironments: production,
@@ -230,6 +235,19 @@ func (s *Server) Routes() http.Handler {
 	// the host state, so it has its own entry point instead of a place in
 	// the task queue.
 	s.route(mux, "POST /api/v1/hosts/{id}/maintenance", s.handleSetMaintenance)
+	// Tags describe a host in the panel; the host itself is not asked. The
+	// list is replaced whole, so the trail shows every change as one write.
+	s.route(mux, "PUT /api/v1/hosts/{id}/tags", s.handleSetHostTags)
+	// Host groups: a saved answer to "which hosts", either a fixed member
+	// list or a selector resolved when read. A campaign names a group in
+	// its selector instead of repeating the list.
+	s.route(mux, "GET /api/v1/host-groups", s.handleListGroups)
+	s.route(mux, "POST /api/v1/host-groups", s.handleCreateGroup)
+	s.route(mux, "GET /api/v1/host-groups/{id}", s.handleGetGroup)
+	s.route(mux, "PUT /api/v1/host-groups/{id}", s.handleUpdateGroup)
+	s.route(mux, "DELETE /api/v1/host-groups/{id}", s.handleDeleteGroup)
+	s.route(mux, "PUT /api/v1/host-groups/{id}/members", s.handleSetGroupMembers)
+	s.route(mux, "GET /api/v1/host-groups/{id}/hosts", s.handleGroupHosts)
 	// The fleet view: one bad setting on a hundred hosts is one problem, not
 	// a hundred - and that is visible only when the findings stand side by
 	// side.
@@ -594,6 +612,16 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		Owner:           query.Get("owner"),
 		Capability:      query.Get("capability"),
 		Scopes:          principal.ScopesFor(authz.PermHostRead),
+	}
+	// The tag filter repeats: every given tag has to be on the host. A tag
+	// that is not a tag is refused rather than matched to nothing.
+	if tags := query["tag"]; len(tags) > 0 {
+		normalized, err := hosts.NormalizeTags(tags)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", err.Error())
+			return
+		}
+		filter.Tags = normalized
 	}
 	if value := query.Get("maintenance"); value != "" {
 		inWindow, err := strconv.ParseBool(value)

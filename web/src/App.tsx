@@ -14,6 +14,7 @@ import { Logo } from "./components/Logo";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
+import { Groups } from "./pages/Groups";
 import { HostLayout } from "./pages/host/Layout";
 import { DEFAULT_MODULE, groupedModules, modules } from "./pages/host/modules";
 import { REFRESH_INTERVAL } from "./lib/stream";
@@ -121,6 +122,10 @@ export function App() {
         // screen, which has an item of its own under the same prefix.
         { to: "/hosts", label: "Hosts", icon: "hosts", active: (path) => path.startsWith("/hosts") && !path.startsWith("/hosts/new") },
         ...(addsHosts ? [{ to: "/hosts/new", label: "Add host", icon: "add-host" as const }] : []),
+        // A group is a saved answer to "which hosts"; it lives with the
+        // fleet, because that is what it describes, not with the campaigns
+        // that use it.
+        { to: "/groups", label: "Groups", icon: "groups" },
       ],
     },
     {
@@ -210,6 +215,8 @@ export function App() {
           <Route path="/hosts" element={<Hosts />} />
           {/* The path is before the host route, because "new" is not an identifier. */}
           <Route path="/hosts/new" element={<AddHost />} />
+          <Route path="/groups" element={<Groups />} />
+          <Route path="/groups/:id" element={<Groups />} />
           <Route path="/security" element={<FleetSecurity />} />
           <Route path="/certificates" element={<FleetCertificates />} />
           <Route path="/backups" element={<FleetBackups />} />

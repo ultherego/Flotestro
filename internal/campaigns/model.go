@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/selector"
 )
 
 // State is the state of a campaign.
@@ -72,6 +73,11 @@ const (
 	// but the host stays in the snapshot, because nobody can manage something
 	// that disappears silently.
 	TargetIneligible TargetState = "ineligible"
+	// TargetExcluded marks a host the operator left out by name when the
+	// campaign was ordered. It stays in the snapshot with the reason and
+	// the author: an exclusion is a decision, and a decision nobody can
+	// read afterwards is a hole in the audit trail. Not a failure.
+	TargetExcluded TargetState = "excluded"
 	// TargetQueuedOffline marks a host that was not connected when its turn
 	// came and whose campaign waits for it. It takes no slot and no budget
 	// token: nothing runs on it. It goes back to the queue when the host
@@ -107,7 +113,7 @@ func (t TargetState) HoldsWave() bool {
 // Finished says whether the host has finished taking part in the campaign.
 func (t TargetState) Finished() bool {
 	switch t {
-	case TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled, TargetIneligible:
+	case TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled, TargetIneligible, TargetExcluded:
 		return true
 	default:
 		return false
@@ -136,16 +142,42 @@ func KnownRebootPolicy(policy RebootPolicy) bool {
 // Selector describes which hosts enter a campaign. It is recorded for the
 // audit trail; what binds is the snapshot of targets created while
 // planning.
+//
+// Two generations live side by side. The flat fields and the host list are
+// the first one and stay for the orders that use them. Expression is the
+// second: a typed selector over tags, groups and the host facts, compiled
+// into the same query the host list runs. When it is present it decides
+// alone and the flat fields are ignored.
 type Selector struct {
 	Site        string   `json:"site,omitempty"`
 	Environment string   `json:"environment,omitempty"`
 	OSFamily    string   `json:"os_family,omitempty"`
 	HostIDs     []string `json:"host_ids,omitempty"`
+	// Expression is the typed selector; see the selector package for its
+	// grammar.
+	Expression *selector.Expression `json:"expression,omitempty"`
+	// Exclude names hosts the selector matches that are to stay out, with
+	// the reason the operator gave. Such a host enters the snapshot as an
+	// excluded target rather than vanishing: the approver is to see what
+	// was left out and why.
+	Exclude       []string `json:"exclude,omitempty"`
+	ExcludeReason string   `json:"exclude_reason,omitempty"`
 }
 
 // Empty says whether the selector narrows nothing.
 func (s Selector) Empty() bool {
-	return s.Site == "" && s.Environment == "" && s.OSFamily == "" && len(s.HostIDs) == 0
+	return s.Site == "" && s.Environment == "" && s.OSFamily == "" && len(s.HostIDs) == 0 &&
+		s.Expression == nil
+}
+
+// Excluded says whether the host is on the exclusion list.
+func (s Selector) Excluded(hostID string) bool {
+	for _, excluded := range s.Exclude {
+		if excluded == hostID {
+			return true
+		}
+	}
+	return false
 }
 
 // Spec describes the campaign to create.
@@ -296,12 +328,31 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 	if len(payload) == 0 {
 		payload = json.RawMessage("{}")
 	}
+	// The exclusions are part of the consent too: a campaign that leaves
+	// the database master out is a different campaign from one that does
+	// not, even when the rest of the snapshot is the same. The expression
+	// is recorded in the shape it was ordered in, so a change to a group's
+	// definition after the order does not move the fingerprint - the
+	// snapshot already holds what the group resolved to.
+	excluded := append([]string(nil), spec.Selector.Exclude...)
+	sort.Strings(excluded)
+	var expression json.RawMessage
+	if spec.Selector.Expression != nil {
+		encoded, err := json.Marshal(spec.Selector.Expression)
+		if err != nil {
+			return "", err
+		}
+		expression = encoded
+	}
 	content := struct {
-		Version int             `json:"campaign_version"`
-		Action  string          `json:"action"`
-		Payload json.RawMessage `json:"payload"`
-		Targets []string        `json:"targets"`
-		Rollout struct {
+		Version    int             `json:"campaign_version"`
+		Action     string          `json:"action"`
+		Payload    json.RawMessage `json:"payload"`
+		Targets    []string        `json:"targets"`
+		Expression json.RawMessage `json:"expression,omitempty"`
+		Excluded   []string        `json:"excluded,omitempty"`
+		Reason     string          `json:"exclude_reason,omitempty"`
+		Rollout    struct {
 			Canary           int          `json:"canary_size"`
 			Wave             int          `json:"wave_size"`
 			Concurrent       int          `json:"max_concurrent"`
@@ -320,7 +371,8 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 			ManualGate       bool                 `json:"manual_gate"`
 			ConnectivityLost int                  `json:"connectivity_lost_absolute"`
 		} `json:"rollout"`
-	}{Version: CampaignVersion, Action: spec.ActionType, Payload: payload, Targets: hosts}
+	}{Version: CampaignVersion, Action: spec.ActionType, Payload: payload, Targets: hosts,
+		Expression: expression, Excluded: excluded, Reason: spec.Selector.ExcludeReason}
 	content.Rollout.Canary = spec.CanarySize
 	content.Rollout.Wave = spec.WaveSize
 	content.Rollout.Concurrent = spec.MaxConcurrent

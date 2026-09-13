@@ -12,7 +12,7 @@ import { useT } from "../i18n";
 
 /** The adapters a host can be filtered by; the names the hosts report. */
 const CAPABILITIES = [
-  "systemd", "packages.apt", "packages.dnf", "journald", "docker", "docker.compose",
+  "systemd", "packages.apt", "packages.dnf", "packages.pacman", "journald", "docker", "docker.compose",
   "schedules", "network", "dns", "firewall", "storage", "sshd", "kernel", "files.managed",
 ];
 
@@ -42,17 +42,24 @@ export function Hosts() {
   const [owner, setOwner] = useState(initial.get("owner") ?? "");
   const [maintenance, setMaintenance] = useState(initial.get("maintenance") ?? "");
   const [capability, setCapability] = useState(initial.get("capability") ?? "");
+  // Tags typed as words: every one of them has to be on the host. A chip
+  // on a row links here with the tag filled in.
+  const [tags, setTags] = useState(initial.getAll("tag").join(" "));
   // A segment of the status bar above the list links here with a state;
   // the page is already open then, so the address is read again on every
   // arrival, not only on the first.
   const location = useLocation();
   useEffect(() => {
-    const wanted = new URLSearchParams(location.search).get("connection_state");
+    const params = new URLSearchParams(location.search);
+    const wanted = params.get("connection_state");
     if (wanted !== null) setConnectionState(wanted);
+    const wantedTags = params.getAll("tag");
+    if (wantedTags.length > 0) setTags(wantedTags.join(" "));
   }, [location.key, location.search]);
   // The typed text reaches the server after a pause, not per keystroke.
   const settledSearch = useDebounced(search.trim());
   const settledOwner = useDebounced(owner.trim());
+  const settledTags = useDebounced(tags.trim());
 
   const params = new URLSearchParams();
   if (settledSearch) params.set("q", settledSearch);
@@ -64,6 +71,7 @@ export function Hosts() {
   if (settledOwner) params.set("owner", settledOwner);
   if (maintenance) params.set("maintenance", maintenance);
   if (capability) params.set("capability", capability);
+  for (const tag of settledTags.split(/\s+/).filter(Boolean)) params.append("tag", tag);
   params.set("limit", String(LIST_PAGE));
 
   const hosts = useInfiniteQuery({
@@ -138,6 +146,12 @@ export function Hosts() {
             <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
             <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
             <input placeholder={t("owner")} value={owner} onChange={(e) => setOwner(e.target.value)} />
+            <input
+              placeholder={t("tags, e.g. role=db tier=gold")}
+              title={t("every listed tag has to be on the host")}
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+            />
             <select value={osFamily} onChange={(e) => setOsFamily(e.target.value)}>
               <option value="">{t("OS: any")}</option>
               <option value="debian">debian</option>
@@ -195,6 +209,23 @@ export function Hosts() {
                         {host.management_address
                           ? <span className="fp-host-address" title={t("source: {source}", { source: host.management_address_source ?? "" })}>{host.management_address}</span>
                           : <span><span className="badge unknown">{t("unknown")}</span></span>}
+                        {/* The tags as chips; a chip narrows the list to
+                            its tag, so a role is one click from "every
+                            host with this role". */}
+                        {host.tags.length > 0 && (
+                          <span className="fp-host-tags" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            {host.tags.map((tag) => (
+                              <Link
+                                key={tag}
+                                className="badge"
+                                to={`/hosts?tag=${encodeURIComponent(tag)}`}
+                                title={t("show every host tagged {tag}", { tag })}
+                              >
+                                {tag}
+                              </Link>
+                            ))}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td><ConnectionState state={host.connection_state} /></td>

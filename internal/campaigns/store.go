@@ -102,6 +102,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		return nil, err
 	}
 
+	// The selector is recorded as ordered, exclusions included: the
+	// approver reads what was asked for, and the snapshot below says what
+	// it resolved to.
 	// The deadline is counted from the creation, in the database's clock:
 	// the same clock the orchestrator compares it with later.
 	const insert = `
@@ -149,7 +152,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 
 	// We count the waves from the ready hosts only. A host settled right away
 	// must not take a place in the canary: a canary made of hosts that will
-	// do nothing is not a trial on a small group.
+	// do nothing is not a trial on a small group. An excluded host is
+	// settled the same way - closed at once, with the reason and the author
+	// in its message.
 	ready := 0
 	for _, host := range hosts {
 		state := host.State

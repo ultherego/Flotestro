@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Host, Job } from "../../lib/types";
+import type { Host, Job, Whoami } from "../../lib/types";
 import { Time, ConnectionState } from "../../components/ui";
 import { module as findModule } from "./modules";
 import { useT } from "../../i18n";
@@ -49,8 +49,96 @@ export function ContextBar({ host, segment, campaign }: {
         </span>
         <RefreshInventory host={host} segment={segment} />
       </div>
+      <Tags host={host} />
     </div>
   );
+}
+
+/**
+ * The tags of the host as chips, with an editor in place.
+ *
+ * Tags are what the operator recorded about the machine - its role, its
+ * tier, its team - and a campaign selector reads them, so they stand in the
+ * bar next to the facts the host reports. Editing replaces the whole list:
+ * the field shows what is there and the save sends what is typed, so two
+ * operators editing at once see the second write in full rather than a
+ * merge nobody asked for. The editor is gated like every other host write:
+ * whoever cannot change the tags sees them and no button.
+ */
+function Tags({ host }: { host: Host }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const canEdit = (whoami.data?.permissions ?? []).includes("host.tag.write");
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const [message, setMessage] = useState("");
+
+  const save = useMutation({
+    mutationFn: (tags: string[]) => api.put<Host>(`/api/v1/hosts/${host.id}/tags`, { tags }),
+    onSuccess: () => {
+      setEditing(false);
+      setMessage("");
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  const open = () => {
+    setText(host.tags.join(" "));
+    setMessage("");
+    setEditing(true);
+  };
+
+  return (
+    <div className="host-header-facts">
+      {host.tags.map((tag) => (
+        <Link key={tag} className="chip" to={`/hosts?tag=${encodeURIComponent(tag)}`} title={t("show every host tagged {tag}", { tag })}>
+          {tag}
+        </Link>
+      ))}
+      {host.tags.length === 0 && !editing && (
+        <span className="chip unknown" title={t("nobody has tagged this host yet")}>{t("no tags")}</span>
+      )}
+      {canEdit && !editing && (
+        <span className="chip inventory-refresh">
+          <button type="button" className="link" onClick={open}>{t("edit tags")}</button>
+        </span>
+      )}
+      {editing && (
+        <span className="inventory-refresh">
+          <input
+            value={text}
+            placeholder={t("tags separated by spaces, e.g. role=db tier=gold")}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save.mutate(splitTags(text));
+              if (e.key === "Escape") setEditing(false);
+            }}
+            autoFocus
+            style={{ minWidth: 260 }}
+          />
+          <button type="button" className="link" disabled={save.isPending} onClick={() => save.mutate(splitTags(text))}>
+            {save.isPending ? t("saving…") : t("Save")}
+          </button>
+          <button type="button" className="link" disabled={save.isPending} onClick={() => setEditing(false)}>
+            {t("Cancel")}
+          </button>
+          {message && <span className="message">{message}</span>}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The typed tags as a list: words, in the order the server will sort anyway. */
+function splitTags(text: string): string[] {
+  return text.split(/\s+/).map((tag) => tag.trim()).filter(Boolean);
 }
 
 /**

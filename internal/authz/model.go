@@ -191,6 +191,12 @@ const (
 	// changing a host: it is declared by whoever watches the campaigns and
 	// the on-call duty.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
+	// Tags and groups describe the fleet in the panel and change nothing on
+	// a host, but they decide which hosts a campaign reaches: a wrong tag
+	// puts a machine into somebody else's rollout. Hence rights of their
+	// own, separate from reading the host and from running the campaign.
+	PermHostTagWrite   Permission = "host.tag.write"
+	PermHostGroupWrite Permission = "host.group.write"
 	// Shutting a host down has its own permission, separate from rebooting:
 	// after a reboot the host comes back by itself, after a shutdown somebody
 	// has to go to it.
@@ -400,6 +406,9 @@ var rolePermissions = map[Role][]Permission{
 		// A maintenance window is a tool for running operations: it is the
 		// operator who knows that this host is being repaired right now.
 		PermHostMaintenanceWrite,
+		// Tags and groups are how the operator names the targets of a
+		// campaign, so they go with the right to order one.
+		PermHostTagWrite, PermHostGroupWrite,
 		// The operator sees local accounts but does not create them: granting
 		// access to a host is an administrative decision rather than part of
 		// handling an outage.
@@ -471,6 +480,7 @@ var rolePermissions = map[Role][]Permission{
 		PermPackagesPlan, PermPackagesRead, PermPackagesUpgrade, PermPackagesRepair,
 		PermAgentUpgrade,
 		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,
+		PermHostTagWrite, PermHostGroupWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermBudgetRead, PermBudgetWrite,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,

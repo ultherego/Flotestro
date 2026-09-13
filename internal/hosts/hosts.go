@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/paging"
+	"github.com/ultherego/flotestro/internal/selector"
 )
 
 // ErrNotFound means there is no host with the given identity.
@@ -43,6 +45,7 @@ const (
 	CapSystemd   = "systemd"
 	CapAPT       = "packages.apt"
 	CapDNF       = "packages.dnf"
+	CapPacman    = "packages.pacman"
 	CapJournald  = "journald"
 	CapDocker    = "docker"
 	CapCompose   = "docker.compose"
@@ -123,9 +126,9 @@ func (c Capabilities) Satisfies(requirement string) bool {
 	case "":
 		return true
 	case NeedPackages:
-		return c.Available(CapAPT) || c.Available(CapDNF)
+		return c.Available(CapAPT) || c.Available(CapDNF) || c.Available(CapPacman)
 	case NeedPackageRepair:
-		for _, adapter := range []string{CapAPT, CapDNF} {
+		for _, adapter := range []string{CapAPT, CapDNF, CapPacman} {
 			value, known := c.FeatureState(adapter, "repair")
 			if value {
 				return true
@@ -216,6 +219,10 @@ type Host struct {
 	ConnectionState string     `json:"connection_state"`
 	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
 	BootID          string     `json:"boot_id,omitempty"`
+	// Tags are what operators recorded about the host: 'key' or
+	// 'key=value'. The list is always present - a host without tags has an
+	// empty one - so a selector can tell "no tags" from "not asked".
+	Tags []string `json:"tags"`
 	// Empty fields mean an undetermined state, not zero.
 	RebootRequired           *bool  `json:"reboot_required"`
 	FailedUnits              *int   `json:"failed_units"`
@@ -598,6 +605,15 @@ type ListFilter struct {
 	// Capability keeps the hosts whose registry has the named adapter
 	// available; 'packages.apt', not 'packages'.
 	Capability string
+	// Tags keeps the hosts carrying every one of the given tags.
+	Tags []string
+	// IDs keeps the named hosts. Nil does not narrow; an empty list keeps
+	// nothing, because a list of nobody names nobody.
+	IDs []string
+	// Expression is a selector already expanded of its group references;
+	// it is compiled into the same query as the other filters, so a
+	// campaign's targets and the host list answer the same question.
+	Expression *selector.Expression
 	// Scopes narrow the result to what the caller may read. Nil narrows
 	// nothing, which is right only for a caller that has checked the scope
 	// itself or has the global one.
@@ -608,7 +624,7 @@ type ListFilter struct {
 // conditions renders the filter as SQL over the alias h. Every list of
 // hosts - the page, the count and the plain list - goes through this one
 // place, so a filter cannot work in the list and be forgotten in the count.
-func (f ListFilter) conditions() ([]string, []any) {
+func (f ListFilter) conditions() ([]string, []any, error) {
 	var (
 		conditions []string
 		args       []any
@@ -629,10 +645,25 @@ func (f ListFilter) conditions() ([]string, []any) {
 	add("h.owner", f.Owner)
 
 	if f.Search != "" {
+		// A tag is one of the things an operator remembers about a host,
+		// so the search reads the tags as well as the names.
 		args = append(args, "%"+escapeLike(f.Search)+"%")
 		conditions = append(conditions, fmt.Sprintf(
 			"(h.hostname ilike $%[1]d or h.management_address ilike $%[1]d"+
-				" or h.machine_id ilike $%[1]d or h.owner ilike $%[1]d)", len(args)))
+				" or h.machine_id ilike $%[1]d or h.owner ilike $%[1]d"+
+				" or exists (select 1 from unnest(h.tags) tag where tag ilike $%[1]d))", len(args)))
+	}
+	if len(f.Tags) > 0 {
+		// Containment: every given tag has to be on the host. The GIN
+		// index on the column answers exactly this operator.
+		args = append(args, f.Tags)
+		conditions = append(conditions, fmt.Sprintf("h.tags @> $%d::text[]", len(args)))
+	}
+	if f.IDs != nil {
+		// The identifiers travel as text and are cast in the query, so an
+		// identifier list needs no guesswork about the driver's encoding.
+		args = append(args, f.IDs)
+		conditions = append(conditions, fmt.Sprintf("h.id in (select unnest($%d::text[])::uuid)", len(args)))
 	}
 	if f.Maintenance != nil {
 		// A window is in force until its deadline; an expired one is no
@@ -649,6 +680,14 @@ func (f ListFilter) conditions() ([]string, []any) {
 			"exists (select 1 from host_capability_registry r"+
 				" where r.host_id = h.id and r.name = $%d and r.available)", len(args)))
 	}
+	if f.Expression != nil {
+		condition, extra, err := selector.Compile(f.Expression, len(args))
+		if err != nil {
+			return nil, nil, err
+		}
+		conditions = append(conditions, condition)
+		args = append(args, extra...)
+	}
 	if f.Scopes != nil {
 		// The narrowing rule lives next to the authorisation, so that a list
 		// cannot show what a direct read would refuse.
@@ -657,7 +696,7 @@ func (f ListFilter) conditions() ([]string, []any) {
 			args = append(args, extra...)
 		}
 	}
-	return conditions, args
+	return conditions, args, nil
 }
 
 // escapeLike neutralises the pattern characters of a search. An operator
@@ -669,7 +708,10 @@ func escapeLike(value string) string {
 // List returns the hosts matching the filter. Filtering happens in the
 // database; the UI never pulls the whole fleet into the browser's memory.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
-	conditions, args := filter.conditions()
+	conditions, args, err := filter.conditions()
+	if err != nil {
+		return nil, err
+	}
 	where := ""
 	if len(conditions) > 0 {
 		where = "where " + strings.Join(conditions, " and ")
@@ -695,7 +737,10 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 // The first page is taken with an empty key.
 func (s *Store) Page(ctx context.Context, filter ListFilter,
 	afterName, afterID string, limit int) ([]Host, error) {
-	conditions, args := filter.conditions()
+	conditions, args, err := filter.conditions()
+	if err != nil {
+		return nil, err
+	}
 
 	if afterID == "" {
 		afterID = "00000000-0000-0000-0000-000000000000"
@@ -720,7 +765,10 @@ func (s *Store) Page(ctx context.Context, filter ListFilter,
 // length of the first page: the operator approves a change on as many hosts
 // as they were shown.
 func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
-	conditions, args := filter.conditions()
+	conditions, args, err := filter.conditions()
+	if err != nil {
+		return 0, err
+	}
 	query := "select count(*) from hosts h"
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
@@ -859,7 +907,7 @@ func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int)
 
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
-		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''),
+		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''), h.tags,
 		       h.lifecycle_state, coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
@@ -894,7 +942,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var h Host
 		var windowUntil, windowFrom *time.Time
 		var windowReason, windowBy string
-		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner,
+		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
 			&h.LifecycleState, &h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
 			&h.RebootRequired, &h.FailedUnits, &h.PendingUpdates, &h.PendingSecurityUpdates,
@@ -905,6 +953,11 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&windowUntil, &windowReason, &windowBy, &windowFrom,
 			&h.Capabilities); err != nil {
 			return nil, err
+		}
+		// An empty tag list is a fact about the host and is sent as one,
+		// not as a missing field.
+		if h.Tags == nil {
+			h.Tags = []string{}
 		}
 		// A closed or expired window is not a window: we show it only while
 		// it is still in force.
@@ -1038,6 +1091,63 @@ func (s *Store) SetMaintenanceWindow(ctx context.Context, hostID string,
 		 where id = $1`, hostID, until, reason, actor)
 	if err != nil {
 		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
+// MaxTags bounds the tags of one host. More than that is not a description
+// anybody reads; it is a second inventory kept by hand.
+const MaxTags = 32
+
+// ErrInvalidTags means a tag list the panel does not accept; the message
+// names the tag.
+var ErrInvalidTags = errors.New("invalid tags")
+
+// NormalizeTags checks a tag list and returns it sorted and without
+// repeats. A tag is 'key' or 'key=value' in the shape selector.TagPattern
+// describes; the same tag twice is one tag, and the order is not a fact
+// about the host.
+func NormalizeTags(tags []string) ([]string, error) {
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		if len(tag) > 128 {
+			return nil, fmt.Errorf("%w: %q is longer than 128 characters", ErrInvalidTags, tag)
+		}
+		if !selector.TagPattern.MatchString(tag) {
+			return nil, fmt.Errorf("%w: %q is not a tag (key or key=value, lower-case key)", ErrInvalidTags, tag)
+		}
+		if seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		normalized = append(normalized, tag)
+	}
+	if len(normalized) > MaxTags {
+		return nil, fmt.Errorf("%w: a host carries at most %d tags", ErrInvalidTags, MaxTags)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+// SetTags replaces the tags of a host. The list is the whole list: a tag
+// left out is a tag removed, so the caller sends what it read plus the
+// change, and two operators editing at once see the second write win in
+// full rather than a merge nobody asked for.
+func (s *Store) SetTags(ctx context.Context, hostID string, tags []string) (*Host, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	tag, err := s.pool.Exec(ctx, `update hosts set tags = $2, updated_at = now() where id = $1`, hostID, tags)
+	if err != nil {
+		return nil, fmt.Errorf("setting the tags: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, ErrNotFound

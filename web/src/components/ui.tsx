@@ -46,6 +46,7 @@ function stateMeaning(state: string): string {
     rebooting: "The host is rebooting; done only when it comes back with a new boot ID.",
     verifying: "The change is applied; the post-change check is running.",
     ineligible: "This host will not run the operation: it lacks the adapter or does not meet a condition. Not a failure and not counted towards the threshold.",
+    excluded: "Left out by name when the campaign was ordered; the message carries who excluded it and why. Not a failure.",
     skipped: "Left out on purpose, e.g. a maintenance window. Not a failure.",
     no_change: "The host already had the desired state; nothing was changed.",
     succeeded: "Done and verified on the host.",

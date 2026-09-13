@@ -38,6 +38,10 @@ const (
 	// ReasonOffline means a disconnected host. The campaign waits for it
 	// instead of excluding it: the host comes back and does its part.
 	ReasonOffline = "offline"
+	// ReasonExcluded means a host the operator left out by name. It is
+	// the one exclusion that is a decision rather than a finding, and the
+	// target carries who took it and why.
+	ReasonExcluded = "excluded"
 )
 
 // hostGroup gathers hosts with a common reason.
