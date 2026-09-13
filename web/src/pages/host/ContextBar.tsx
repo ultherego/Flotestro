@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Collection } from "../../lib/api";
+import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
 import { Time, ConnectionState } from "../../components/ui";
-import { module as findModule, DEFAULT_MODULE } from "./modules";
-import type { Capabilities as InstallationCapabilities } from "../../lib/capabilities";
+import { HostPicker } from "../../components/HostPicker";
+import { module as findModule } from "./modules";
 import { useT } from "../../i18n";
 
 /**
@@ -14,9 +13,7 @@ import { useT } from "../../i18n";
  * identity is part of the layout, not text repeated by the individual
  * screens.
  */
-export function ContextBar({
-  host, segment, installation,
-}: { host: Host; segment: string; installation: InstallationCapabilities }) {
+export function ContextBar({ host, segment }: { host: Host; segment: string }) {
   const t = useT();
   return (
     <div className="host-bar">
@@ -33,7 +30,13 @@ export function ContextBar({
         <span>{t("seen")} <Time value={host.last_seen_at} /></span>
         <RefreshInventory host={host} segment={segment} />
       </div>
-      <HostSwitch host={host} segment={segment} installation={installation} />
+      {/* The switch is the same picker as in the sidebar: it keeps the open
+          module when the new host supports it and says why when it does
+          not. */}
+      <div className="host-toggle">
+        <span>{t("Switch host")}</span>
+        <HostPicker current={host} />
+      </div>
     </div>
   );
 }
@@ -171,49 +174,5 @@ function ManagementAddress({ host }: { host: Host }) {
       {host.management_address}
       <span className="address-source">{host.management_address_source}</span>
     </span>
-  );
-}
-
-/**
- * The host switch keeps the open module if the new host supports it.
- * Otherwise it leads to the overview and says what was missing - a quiet
- * tab change would look like an interface bug.
- */
-function HostSwitch({
-  host, segment, installation,
-}: { host: Host; segment: string; installation: InstallationCapabilities }) {
-  const t = useT();
-  const navigate = useNavigate();
-  const list = useQuery({
-    queryKey: ["hosts", "switcher"],
-    queryFn: () => api.get<Collection<Host>>("/api/v1/hosts?limit=500"),
-    staleTime: 30_000,
-  });
-
-  function switchTo(id: string) {
-    if (!id || id === host.id) return;
-    const target = list.data?.items.find((item) => item.id === id);
-    const open = findModule(segment);
-    const reason = target && open ? open.reason(target, installation) : "";
-    if (reason) {
-      navigate(`/hosts/${id}/${DEFAULT_MODULE}`, {
-        state: { rejected: open?.name, reason },
-      });
-      return;
-    }
-    navigate(`/hosts/${id}/${segment}`);
-  }
-
-  return (
-    <label className="host-toggle">
-      <span>{t("Switch host")}</span>
-      <select value={host.id} onChange={(event) => switchTo(event.target.value)}>
-        {(list.data?.items ?? [host]).map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.hostname}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

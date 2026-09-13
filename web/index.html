@@ -3,7 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>Flotestro</title>
+    <script>
+      // The remembered theme is applied before anything is painted, so the
+      // panel does not flash the default colours while React starts.
+      (function () {
+        var theme = null;
+        try { theme = window.localStorage.getItem("flotestro.theme"); } catch (e) {}
+        if (theme !== "mocha-peach" && theme !== "mocha-green" && theme !== "latte") {
+          var light = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+          theme = light ? "latte" : "mocha-peach";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

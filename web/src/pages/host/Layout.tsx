@@ -60,7 +60,7 @@ export function HostLayout() {
           <Link to={`/campaigns/${fromCampaign}`}>← {t("Back to the campaign")}</Link>
         </p>
       )}
-      <ContextBar host={data} segment={segment} installation={installation} />
+      <ContextBar host={data} segment={segment} />
 
       <div className="tabs">
         {list.map((item) => (

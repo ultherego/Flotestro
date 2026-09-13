@@ -1,9 +1,14 @@
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useState, type MouseEvent } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "./lib/api";
 import type { Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
-import { LOCALES, useLocale, useT } from "./i18n";
+import { useTheme } from "./lib/theme";
+import { isBoolean, useStoredState } from "./lib/storage";
+import { useT } from "./i18n";
+import { Sidebar, type NavGroup } from "./components/Sidebar";
+import { Icon } from "./components/icons";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
@@ -48,9 +53,23 @@ import { Directory } from "./pages/Directory";
 import { Access } from "./pages/Access";
 import { Audit } from "./pages/Audit";
 
+const SIDEBAR_KEY = "flotestro.sidebar";
+
 export function App() {
   const t = useT();
   const capabilities = useCapabilities();
+  const location = useLocation();
+  // The theme is owned here so that it applies to every screen, the login
+  // included; the switch in the sidebar only changes it.
+  const { theme, setTheme } = useTheme();
+  const [collapsed, setCollapsed] = useStoredState<boolean>(SIDEBAR_KEY, false, isBoolean);
+  // The drawer on a narrow screen; it closes on every navigation, because
+  // the operator opened it to go somewhere, not to keep it.
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => {
+    setDrawer(false);
+  }, [location.pathname]);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
@@ -80,43 +99,99 @@ export function App() {
   const seesBackups = permissions.has("backup.read");
   const seesMonitoring = permissions.has("monitoring.read");
   const seesVulnerabilities = permissions.has("vulnerability.read");
+  const addsHosts = permissions.has("host.enroll.create");
+
+  // The navigation, grouped by what the operator is doing rather than by
+  // backend module. An item that is not allowed is left out of its group;
+  // a group left empty is not drawn.
+  const groups: NavGroup[] = [
+    {
+      key: "fleet",
+      label: "Fleet",
+      items: [
+        { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
+        // The host list stays lit on a host page, but not on the enrolment
+        // screen, which has an item of its own under the same prefix.
+        { to: "/hosts", label: "Hosts", icon: "hosts", active: (path) => path.startsWith("/hosts") && !path.startsWith("/hosts/new") },
+        ...(addsHosts ? [{ to: "/hosts/new", label: "Add host", icon: "add-host" as const }] : []),
+      ],
+    },
+    {
+      key: "operations",
+      label: "Operations",
+      items: [
+        { to: "/jobs", label: "Jobs", icon: "jobs" },
+        // A campaign is the main mechanism of change, not a shortcut on the
+        // host list: it has its own place in the navigation, next to the
+        // work on a single host.
+        ...(seesCampaigns ? [
+          { to: "/bulk", label: "Bulk Workspace", icon: "bulk" as const },
+          { to: "/campaigns", label: "Campaigns", icon: "campaigns" as const },
+        ] : []),
+      ],
+    },
+    {
+      key: "security",
+      label: "Security",
+      items: [
+        ...(seesSecurity ? [{ to: "/security", label: "Security", icon: "security" as const }] : []),
+        ...(seesVulnerabilities ? [{ to: "/vulnerabilities", label: "Vulnerabilities", icon: "vulnerabilities" as const }] : []),
+        ...(seesCertificates ? [{ to: "/certificates", label: "Certificates", icon: "certificates" as const }] : []),
+        ...(seesSecrets ? [{ to: "/secrets", label: "Secrets", icon: "secrets" as const }] : []),
+      ],
+    },
+    {
+      key: "continuity",
+      label: "Continuity",
+      items: [
+        ...(seesBackups ? [{ to: "/backups", label: "Backups", icon: "backups" as const }] : []),
+        ...(seesMonitoring ? [{ to: "/monitoring", label: "Monitoring", icon: "monitoring" as const }] : []),
+      ],
+    },
+    {
+      key: "identity",
+      label: "Identity",
+      items: [
+        ...(capabilities.directory ? [{ to: "/directory", label: "Directory", icon: "directory" as const }] : []),
+        // Access management is seen only by whoever can change anything in
+        // it; for the rest the item would lead to a bare refusal.
+        ...(managesAccess ? [{ to: "/access", label: "Access", icon: "access" as const }] : []),
+      ],
+    },
+    {
+      key: "audit",
+      items: seesAudit ? [{ to: "/audit", label: "Audit", icon: "audit" as const }] : [],
+    },
+  ];
 
   return (
-    <div className="layout">
-      <nav className="navigation">
-        <div className="brand">Flotestro</div>
-        <Link to="/dashboard">{t("Dashboard")}</Link>
-        <Link to="/hosts">{t("Hosts")}</Link>
-        <Link to="/jobs">{t("Jobs")}</Link>
-        {/* A campaign is the main mechanism of change, not a shortcut on the
-            host list: it has its own place in the navigation, next to the
-            work on a single host. */}
-        {seesCampaigns && <Link to="/bulk">{t("Bulk")}</Link>}
-        {seesCampaigns && <Link to="/campaigns">{t("Campaigns")}</Link>}
-        {seesSecurity && <Link to="/security">{t("Security")}</Link>}
-        {seesCertificates && <Link to="/certificates">{t("Certificates")}</Link>}
-        {seesBackups && <Link to="/backups">{t("Backups")}</Link>}
-        {seesMonitoring && <Link to="/monitoring">{t("Monitoring")}</Link>}
-        {seesVulnerabilities && <Link to="/vulnerabilities">{t("Vulnerabilities")}</Link>}
-        {seesSecrets && <Link to="/secrets">{t("Secrets")}</Link>}
-        {capabilities.directory && <Link to="/directory">{t("Directory")}</Link>}
-        {/* Access management is seen only by whoever can change anything in
-            it; for the rest the item would lead to a bare refusal. */}
-        {managesAccess && <Link to="/access">{t("Access")}</Link>}
-        {seesAudit && <Link to="/audit">{t("Audit")}</Link>}
-        <div className="footer">
-          <div>{data?.display_name || data?.subject}</div>
-          <div>{data?.roles.join(", ") || t("no roles")}</div>
-          <LanguageSwitch />
-          {/* The identity provider may have an active session of another
-              user and sign in with it quietly. Without this link there is no
-              way out of that other than clearing the browser cookies. */}
-          <a href={`/auth/login?force=1&redirect=${encodeURIComponent(window.location.pathname)}`}>
-            {t("Switch account")}
-          </a>
-          <a href="#" onClick={signOut}>{t("Sign out")}</a>
-        </div>
-      </nav>
+    <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
+      {/* The top bar exists only on a narrow screen, where the sidebar
+          becomes a drawer behind it. */}
+      <header className="topbar">
+        <button
+          type="button"
+          className="topbar-menu"
+          onClick={() => setDrawer(true)}
+          aria-label={t("Open the navigation")}
+          title={t("Open the navigation")}
+        >
+          <Icon name="menu" />
+        </button>
+        <span className="topbar-brand">Flotestro</span>
+      </header>
+      {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
+      <Sidebar
+        groups={groups}
+        user={data}
+        collapsed={collapsed}
+        onToggleCollapsed={() => setCollapsed((current) => !current)}
+        open={drawer}
+        onClose={() => setDrawer(false)}
+        onSignOut={signOut}
+        theme={theme}
+        setTheme={setTheme}
+      />
       <main className="content">
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -176,34 +251,7 @@ export function App() {
   );
 }
 
-function Link({ to, children }: { to: string; children: string }) {
-  return (
-    <NavLink to={to} className={({ isActive }) => (isActive ? "active" : "")}>
-      {children}
-    </NavLink>
-  );
-}
-
-/** The interface language; the choice is remembered in the browser. */
-function LanguageSwitch() {
-  const { locale, setLocale } = useLocale();
-  return (
-    <div className="language-switch">
-      {LOCALES.map((entry) => (
-        <button
-          key={entry.code}
-          type="button"
-          className={entry.code === locale ? "active" : ""}
-          onClick={() => setLocale(entry.code)}
-        >
-          {entry.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-async function signOut(event: React.MouseEvent) {
+async function signOut(event: MouseEvent) {
   event.preventDefault();
   // Invalidating the panel session is not enough: without signing out at
   // the provider the next visit would sign the user in without asking.
