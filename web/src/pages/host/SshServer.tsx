@@ -118,6 +118,9 @@ export function SshServer() {
 
       {editor && <SshEditor state={snapshot} onIntent={setIntent} />}
 
+      {/* The facts and the short method table share a row; the keys and
+          the drop-in below share the next one. */}
+      <div className="columns">
       <Section title={t("SSH")} flush>
         <Facts>
           <Fact label={t("Port")}><span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
@@ -144,7 +147,9 @@ export function SshServer() {
           </tbody>
         </Table>
       </Section>
+      </div>
 
+      <div className="columns wide">
       <Section
         title={t("Host keys")}
         count={(snapshot?.host_keys ?? []).length}
@@ -191,6 +196,7 @@ export function SshServer() {
           <Empty>{t("The panel has not written anything to this host yet.")}</Empty>
         )}
       </Section>
+      </div>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">

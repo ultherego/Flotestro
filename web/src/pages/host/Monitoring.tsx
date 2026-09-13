@@ -306,6 +306,8 @@ export function Monitoring() {
         )}
       </Section>
 
+      {/* The silence form beside the silences it adds to. */}
+      <div className="columns">
       <Section
         title={t("Silence")}
         description={t("A silence turns a sensor off, so it always ends: no open-ended silences from here, at most a day, and always with a reason and an owner in the audit trail.")}
@@ -356,6 +358,7 @@ export function Monitoring() {
           </Table>
         </Section>
       )}
+      </div>
 
       <Section title={t("Metrics")} count={data && !data.metrics_unavailable_reason ? (data.series ?? []).length : undefined} flush>
         {data?.metrics_unavailable_reason ? (

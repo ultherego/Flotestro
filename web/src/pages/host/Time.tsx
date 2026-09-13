@@ -229,6 +229,9 @@ export function Time() {
         </Facts>
       </Section>
 
+      {/* What the daemon uses beside what it was told to use, then the two
+          forms: four short blocks in two rows rather than a strip of four. */}
+      <div className="columns wide">
       <Section title={t("Sources")} count={snapshot?.sources?.length} flush>
         {!snapshot?.sources?.length ? (
           <Empty>{t("The time daemon reports no sources on this host.")}</Empty>
@@ -279,6 +282,9 @@ export function Time() {
         )}
       </Section>
 
+      </div>
+
+      <div className="columns wide">
       <Section
         title={t("Test time sources")}
         description={t("The query goes out from the host, not from the panel. Leave the field empty to ask the sources this host already uses.")}
@@ -410,6 +416,8 @@ export function Time() {
           </FormActions>
         </Form>
       </Section>
+
+      </div>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">

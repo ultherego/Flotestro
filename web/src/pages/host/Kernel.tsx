@@ -98,6 +98,8 @@ export function Kernel() {
         </p>
       )}
 
+      {/* Two tiles and three facts: one summary row, not two thin strips. */}
+      <div className="columns">
       <Stats>
         <Stat label={t("Settings")} value={settings.length} hint={pendingSettings ? `${pendingSettings} ${t("not applied yet")}` : undefined} tone={pendingSettings ? "warn" : undefined} />
         <Stat label={t("Modules")} value={(snapshot?.modules ?? []).length} hint={t("{loaded} loaded · {blocked} blocked", { loaded: (snapshot?.modules ?? []).length, blocked: (snapshot?.blacklist ?? []).length })} />
@@ -112,6 +114,7 @@ export function Kernel() {
           <Fact label={t("Command line")} wide><span className="source hm-mono">{snapshot?.command_line || "—"}</span></Fact>
         </Facts>
       </Section>
+      </div>
 
       <Section title={t("Settings")} count={settings.length} flush>
         <Table>

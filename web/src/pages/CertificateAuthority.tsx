@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Authority } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, Field, FieldGrid } from "../components/layout";
+import { Actions, Card, Columns, Field, FieldGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 /**
@@ -56,8 +56,10 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   const pending = list.find((ca) => ca.state === "pending");
   const reasonReady = reason.trim().length >= 8;
 
+  // The trust set and the step that changes it stand side by side: the
+  // operator reads the fingerprints on the left and acts on the right.
   return (
-    <>
+    <Columns wide>
       <Card
         title={t("Fleet CA")}
         description={t("Agent certificates are issued by the fleet CA. Rotation happens in two phases: the new CA first reaches agents as their certificates are renewed, and only then takes over signing.")}
@@ -141,7 +143,7 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           </Field>
         </FieldGrid>
       </Card>
-    </>
+    </Columns>
   );
 }
 

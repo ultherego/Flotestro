@@ -89,6 +89,7 @@ export function Secrets() {
         description={t("Values go in and do not come out. Nothing here can read a secret back: the only way out is a short lease issued to one host for one job, and the value never appears in a job payload, in the audit trail or in inventory. The store is encrypted with a key kept outside the database.")}
       />
 
+      {/* The outcome of the last request stands by the button that made it. */}
       <Card
         title={t("New secret")}
         footer={
@@ -96,6 +97,7 @@ export function Secrets() {
             <button onClick={() => create.mutate()} disabled={!name || !value || create.isPending}>
               {t("Create")}
             </button>
+            {message && <span className="source">{message}</span>}
           </Actions>
         }
       >
@@ -116,7 +118,6 @@ export function Secrets() {
           </Field>
         </FieldGrid>
       </Card>
-      {message && <p className="source">{message}</p>}
 
       <Card flush>
         {!secrets.length ? (

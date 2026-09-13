@@ -692,7 +692,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .tabs button.active { color: var(--accent-text); border-bottom-color: var(--accent); }
 .tabs button:disabled { opacity: 0.35; }
 
-.pairs { display: grid; grid-template-columns: 210px 1fr; gap: 6px 16px; font-size: 13px; }
+/* Label/value pairs: two tracks per pair, and as many pairs across as the
+   width allows, so a short list does not stand in one column on the left. */
+.pairs { display: grid; grid-template-columns: repeat(auto-fill, 140px minmax(140px, 1fr)); gap: 8px 16px; font-size: 13px; align-items: baseline; }
 .pairs dt { color: var(--text-muted); }
 .pairs dd { margin: 0; }
 
@@ -739,6 +741,16 @@ pre {
   padding: 16px; background: var(--bg-panel); max-width: 640px;
 }
 .form h2 { margin: 0; }
+/* On a host page the confirmation takes the page's width and asks its
+   two questions side by side instead of standing in one narrow strip. */
+.hm-page > .form {
+  max-width: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 10px 16px;
+  align-items: start;
+}
+.hm-page > .form > h2, .hm-page > .form > p, .hm-page > .form > .operations { grid-column: 1 / -1; }
 .form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
 .form textarea { font-family: var(--font-mono); font-size: 12px; }
 
@@ -771,7 +783,7 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
   border-left: 3px solid var(--warn);
   border-radius: var(--radius-sm);
-  padding: 12px 16px; margin-bottom: 16px;
+  padding: 12px 16px; margin: 0 0 16px;
   background: color-mix(in srgb, var(--warn) 8%, var(--bg-panel)); font-size: 13px;
 }
 
@@ -1052,16 +1064,19 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 16px;
   align-items: start;
-  margin-bottom: 16px;
 }
 .columns.wide { grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); }
-.columns > .card, .columns > .hm-section { margin: 0; min-width: 0; }
 /* Several blocks in one column of the grid keep their own rhythm. */
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.stack > .card { margin: 0; }
-.stack:empty { display: none; }
-.columns > .card + .card { margin-top: 0; }
-.card + .columns, .stats + .columns { margin-top: 16px; }
+/* A row whose every block is conditional and absent takes no space. */
+.columns:empty, .stack:empty { display: none; }
+
+/* The vertical rhythm of a page: 16px between any two blocks, whatever
+   they are, so a page never shows a gap of 40px next to one of zero. The
+   grid and the stack space their children with their own gap, so a block
+   inside them brings no margin. */
+:is(.card, .stats, .columns, .stack, .warning, .toolbar, .tabs, .form) + :is(.card, .stats, .columns, .stack, .warning, .toolbar, .form) { margin-top: 16px; }
+.columns > *, .stack > * { margin: 0; min-width: 0; }
 
 /* A card is the raised panel every list and form stands on. The head and
    the foot keep their own padding, so a flush body can let a table reach
@@ -1074,7 +1089,6 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   border-radius: var(--radius);
   min-width: 0;
 }
-.card + .card, .card + .stats, .stats + .card, .card + .toolbar, .toolbar + .card { margin-top: 16px; }
 .card.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .card.error { border-color: color-mix(in srgb, var(--error) 55%, var(--border)); }
 .card-head {
@@ -1164,10 +1178,12 @@ tr.detail-row:hover > td { background: var(--bg); }
 /* The stat tiles: a label, a big number, a hint saying what it counts. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
+/* A line of figures right under the tiles reads as their caption. */
+.stats + .source { display: block; margin: -4px 0 16px; }
 .stat {
   display: flex;
   flex-direction: column;
@@ -1202,10 +1218,19 @@ tr.detail-row:hover > td { background: var(--bg); }
 .stat.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); box-shadow: inset 0 2px 0 var(--warn); }
 .stat.error { border-color: color-mix(in srgb, var(--error) 45%, var(--border)); box-shadow: inset 0 2px 0 var(--error); }
 a.stat-link:hover { text-decoration: none; border-color: var(--border-strong); background: var(--bg-hover); }
-/* The compact grid stands inside a card: no boxes, a hairline between. */
-.stats.compact { gap: 0; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-.stats.compact .stat { border: none; border-radius: 0; background: transparent; box-shadow: none; }
-.stats.compact .stat + .stat { border-left: 1px solid var(--border); }
+/* The compact grid stands inside a card: no boxes, a hairline between.
+   Each tile draws the line above and to the left of itself; on the first
+   row and in the first column that line falls under the frame, so a row
+   that is not full ends without a stray line. */
+.stats.compact {
+  gap: 0;
+  margin: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.stats.compact .stat { border: none; border-radius: 0; background: transparent; box-shadow: -1px -1px 0 0 var(--border); }
 .stats.compact .stat-value { font-size: 20px; }
 
 /* The toolbar: filters, a search and the actions in one wrapping row. */
@@ -1256,10 +1281,14 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
 .segmented button.active { background: var(--accent-soft); color: var(--accent-text); }
 .card-body > .segmented { margin: 14px 0 12px; }
 
-/* The empty state of a card: one sentence and the action that fills it. */
-.empty-state { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 28px var(--card-pad-x, 0); }
+/* The empty state of a card: one sentence and the action that fills it,
+   in the middle of the card rather than in its corner. */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 32px var(--card-pad-x, 0); }
 .empty-state > p { margin: 0; max-width: 60ch; }
-.card-body.flush > .empty-state { padding: 28px var(--card-pad-x); }
+.empty-state > .actions { justify-content: center; }
+.card-body.flush > .empty-state { padding: 32px var(--card-pad-x); }
+/* The plain empty line inside a card stands in the middle as well. */
+.card-body > .empty, .card-body.flush > .empty { text-align: center; padding: 28px var(--card-pad-x); }
 
 /* The execution attempts under a job: one block per attempt. */
 .attempt + .attempt { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
@@ -1283,9 +1312,6 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
 @media (max-width: 600px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stats.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stats.compact .stat + .stat { border-left: none; }
-  .stats.compact .stat:nth-child(even) { border-left: 1px solid var(--border); }
-  .stats.compact .stat:nth-child(n + 3) { border-top: 1px solid var(--border); }
   .stat-value { font-size: 22px; }
   .toolbar-end { margin-left: 0; width: 100%; }
 }

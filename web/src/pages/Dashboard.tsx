@@ -69,6 +69,10 @@ export function Dashboard() {
         <Stat label={t("In maintenance")} value={s?.in_maintenance} hint={t("campaigns skip them")} to="/hosts?maintenance=true" />
       </StatGrid>
 
+      {/* The counters that ask for a decision stand beside the two lists
+          that do: one row, read left to right, instead of three blocks
+          down the left with nothing beside them. */}
+      <Columns>
       {/* A tile the server left out is a counter it could not answer
           honestly for this view; it is missing, not zero. */}
       <Card
@@ -104,7 +108,7 @@ export function Dashboard() {
         </StatGrid>
       </Card>
 
-      <Columns>
+      <div className="stack">
       <Card
         title={t("Campaigns in progress")}
         actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
@@ -154,6 +158,7 @@ export function Dashboard() {
           </table>
         )}
       </Card>
+      </div>
       </Columns>
     </>
   );

@@ -30,7 +30,7 @@ export function TargetConfirmation({
   const ready = reason.trim().length >= 8 && confirmation === host.hostname;
 
   return (
-    <div className={danger ? "form danger" : "form"} style={{ marginTop: 16 }}>
+    <div className={danger ? "form danger" : "form"}>
       <h2>{label}</h2>
       <p className="subtitle" style={{ margin: 0 }}>{description}</p>
       {/* The target repeated in the dialog: the operator approves a specific machine. */}

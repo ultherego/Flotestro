@@ -322,6 +322,8 @@ export function Storage() {
         </Table>
       </Section>
 
+      {/* The two LVM tables are narrow; side by side they fill the row. */}
+      <div className="columns">
       <Section title={t("Volume groups")} count={snapshot?.groups?.length} flush>
         {snapshot?.lvm_unavailable_reason ? (
           <Empty>{snapshot.lvm_unavailable_reason}</Empty>
@@ -383,6 +385,7 @@ export function Storage() {
           </Table>
         </Section>
       ) : null}
+      </div>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">

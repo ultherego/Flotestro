@@ -91,6 +91,9 @@ export function Services() {
       <ModuleFreshness fragment={module.data} />
       <Message text={message} />
 
+      {/* The tiles and the failed units share one row: both are short, and
+          the failed list is the reason to look at the tiles at all. */}
+      <div className="columns">
       {/* An unread state must not look like no failed units. */}
       <Stats>
         <Stat
@@ -126,6 +129,7 @@ export function Services() {
           </Table>
         )}
       </Section>
+      </div>
 
       <Section
         title={t("All units")}

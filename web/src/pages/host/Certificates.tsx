@@ -452,8 +452,10 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
   if (!certificate) return null;
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
 
+  // The facts of the file beside its deployment history: one row for the
+  // chosen certificate, not two blocks under the list.
   return (
-    <>
+    <div className="columns">
       <Section title={<span className="hm-mono">{certificate.path}</span>} flush>
         <Facts>
           <Fact label={t("Issuer")}>{certificate.issuer || unknown}</Fact>
@@ -519,7 +521,7 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
           </Table>
         )}
       </Section>
-    </>
+    </div>
   );
 }
 

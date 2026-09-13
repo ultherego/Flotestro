@@ -150,18 +150,16 @@ export function Packages() {
         <Stat label={t("Repositories")} value={packages?.repositories?.repositories_known === false ? <Unknown /> : sources.length} />
       </Stats>
 
+      {/* The three things an operator does here are short forms; in one
+          row they make a workbench, in a column a strip. The removal plan,
+          when there is one, follows the row; the sources come last. */}
+      <div className="columns">
       <RequestOperation
         host={host}
         description={t("Count available updates without changing host state.")}
         action="packages.plan"
         payload={{ package_plan: { refresh_metadata: true } }}
         label={t("Plan updates")}
-      />
-
-      <Repositories
-        view={packages?.repositories}
-        manager={packages?.manager}
-        onIntent={setSourceIntent}
       />
 
       <Section title={t("Install, remove or hold")}>
@@ -216,6 +214,38 @@ export function Packages() {
         </Form>
       </Section>
 
+      <Section
+        title={t("Agent")}
+        description={t("The agent is left alone by ordinary package upgrades: replacing it in the middle of a transaction it is running would cut the host off from management with nobody to report the result. Replacing it is its own operation, and it counts as done only when the host comes back reporting the version that was asked for.")}
+      >
+        <Form>
+          <Fields>
+            <Field label={t("Target agent version (currently {version})", { version: host.agent_version || t("unknown") })} narrow>
+              <input
+                value={agentVersion}
+                onChange={(e) => setAgentVersion(e.target.value)}
+                placeholder="0.2.0"
+              />
+            </Field>
+          </Fields>
+          <FormActions>
+            <button
+              disabled={!agentVersion || agentVersion === host.agent_version}
+              onClick={() =>
+                request.mutate({
+                  action: "agent.upgrade",
+                  payload: { agent_upgrade: { target_version: agentVersion } },
+                })
+              }
+            >
+              {t("Replace agent")}
+            </button>
+          </FormActions>
+        </Form>
+      </Section>
+
+      </div>
+
       {plan && (
         <Section title={t("Removal plan")} count={plan.removals?.length ?? 0} flush>
           {plan.protected && plan.protected.length > 0 && (
@@ -255,35 +285,11 @@ export function Packages() {
         </Section>
       )}
 
-      <Section
-        title={t("Agent")}
-        description={t("The agent is left alone by ordinary package upgrades: replacing it in the middle of a transaction it is running would cut the host off from management with nobody to report the result. Replacing it is its own operation, and it counts as done only when the host comes back reporting the version that was asked for.")}
-      >
-        <Form>
-          <Fields>
-            <Field label={t("Target agent version (currently {version})", { version: host.agent_version || t("unknown") })} narrow>
-              <input
-                value={agentVersion}
-                onChange={(e) => setAgentVersion(e.target.value)}
-                placeholder="0.2.0"
-              />
-            </Field>
-          </Fields>
-          <FormActions>
-            <button
-              disabled={!agentVersion || agentVersion === host.agent_version}
-              onClick={() =>
-                request.mutate({
-                  action: "agent.upgrade",
-                  payload: { agent_upgrade: { target_version: agentVersion } },
-                })
-              }
-            >
-              {t("Replace agent")}
-            </button>
-          </FormActions>
-        </Form>
-      </Section>
+      <Repositories
+        view={packages?.repositories}
+        manager={packages?.manager}
+        onIntent={setSourceIntent}
+      />
 
       {sourceIntent && (
         <TargetConfirmation

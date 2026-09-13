@@ -149,6 +149,10 @@ export function Resolver() {
         <Stat label="DNS over TLS" value={snapshot?.dns_over_tls || unknown} />
       </Stats>
 
+      {/* The facts on the left, the test the operator runs against them on
+          the right; the change form and the per-link list follow in full
+          width. */}
+      <div className="columns">
       <Section title={t("DNS")} flush>
         <Facts>
           <Fact label={t("Owner")}>{snapshot?.owner || unknown}</Fact>
@@ -166,50 +170,6 @@ export function Resolver() {
           <Fact label="DNSSEC">{snapshot?.dnssec || unknown}</Fact>
           <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknown}</Fact>
         </Facts>
-      </Section>
-
-      {form && (
-        <ResolverChange
-          defaultInterface={managementLink?.name ?? ""}
-          defaultServers={(snapshot?.servers ?? []).join(", ")}
-          defaultDomains={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
-          onIntent={setIntent}
-        />
-      )}
-
-      <Section title={t("Per-link resolvers")} count={snapshot?.links?.length} flush>
-        {!snapshot?.links?.length ? (
-          <Empty>{t("This host does not report per-link resolvers; it has one global list.")}</Empty>
-        ) : (
-          <Table>
-            <thead>
-              <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th>DoT</th></tr>
-            </thead>
-            <tbody>
-              {snapshot.links.map((link) => (
-                <tr key={link.name}>
-                  <td className="hm-mono hm-primary">{link.name}</td>
-                  <td className="hm-mono">{(link.servers ?? []).join(", ") || "—"}</td>
-                  <td className="hm-mono">{(link.domains ?? []).join(", ") || "—"}</td>
-                  {/* The default route decides which link answers a name
-                      outside its domains - and that is the operator's
-                      question. */}
-                  <td>
-                    {link.default_route === undefined ? (
-                      unknown
-                    ) : link.default_route ? (
-                      t("yes")
-                    ) : (
-                      t("no")
-                    )}
-                  </td>
-                  <td>{link.dnssec || "—"}</td>
-                  <td>{link.dns_over_tls || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
       </Section>
 
       <Section
@@ -260,6 +220,51 @@ export function Resolver() {
               {!answers.length && (
                 <tr><td colSpan={4}>{lastAttempt?.status ? t("No answers.") : t("Running…")}</td></tr>
               )}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+      </div>
+
+      {form && (
+        <ResolverChange
+          defaultInterface={managementLink?.name ?? ""}
+          defaultServers={(snapshot?.servers ?? []).join(", ")}
+          defaultDomains={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
+          onIntent={setIntent}
+        />
+      )}
+
+      <Section title={t("Per-link resolvers")} count={snapshot?.links?.length} flush>
+        {!snapshot?.links?.length ? (
+          <Empty>{t("This host does not report per-link resolvers; it has one global list.")}</Empty>
+        ) : (
+          <Table>
+            <thead>
+              <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th>DoT</th></tr>
+            </thead>
+            <tbody>
+              {snapshot.links.map((link) => (
+                <tr key={link.name}>
+                  <td className="hm-mono hm-primary">{link.name}</td>
+                  <td className="hm-mono">{(link.servers ?? []).join(", ") || "—"}</td>
+                  <td className="hm-mono">{(link.domains ?? []).join(", ") || "—"}</td>
+                  {/* The default route decides which link answers a name
+                      outside its domains - and that is the operator's
+                      question. */}
+                  <td>
+                    {link.default_route === undefined ? (
+                      unknown
+                    ) : link.default_route ? (
+                      t("yes")
+                    ) : (
+                      t("no")
+                    )}
+                  </td>
+                  <td>{link.dnssec || "—"}</td>
+                  <td>{link.dns_over_tls || "—"}</td>
+                </tr>
+              ))}
             </tbody>
           </Table>
         )}

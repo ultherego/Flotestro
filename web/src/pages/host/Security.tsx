@@ -232,6 +232,9 @@ export function Security() {
         />
       </Stats>
 
+      {/* The protective facts and the open sockets are the two short
+          answers; they share a row above the findings. */}
+      <div className="columns">
       <Section title={t("Protective state")} flush>
         <Facts>
           <Fact label={t("Mandatory access control")}>
@@ -316,6 +319,7 @@ export function Security() {
           </Table>
         )}
       </Section>
+      </div>
 
       <Section
         title={t("Findings")}

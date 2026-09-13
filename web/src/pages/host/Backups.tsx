@@ -390,6 +390,9 @@ export function Backups() {
         )}
       </Section>
 
+      {/* The repository's copies and the run history of the chosen
+          definition are both narrow; when both are open they share a row. */}
+      <div className="columns">
       {repositoryState && (
         <Section title={t("Copies in the repository")} count={repositoryState.snapshots?.length} flush>
           {repositoryState.unavailable_reason ? (
@@ -487,6 +490,7 @@ export function Backups() {
           )}
         </Section>
       )}
+      </div>
 
       {intent && (
         <TargetConfirmation

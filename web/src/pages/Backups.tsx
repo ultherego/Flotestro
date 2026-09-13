@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
+import { Card, Columns, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 type Item = {
@@ -97,9 +97,12 @@ export function FleetBackups() {
         <Stat label={t("Hosts")} value={data.hosts_total} hint={t("{n} hosts visible", { n: data.hosts_total })} />
       </StatGrid>
 
-      <Calendar items={data.items} />
-
-      <Repositories repositories={data.repositories ?? []} />
+      {/* The calendar and the backends are two short blocks: side by side
+          they make one row above the list instead of two thin strips. */}
+      <Columns>
+        <Calendar items={data.items} />
+        <Repositories repositories={data.repositories ?? []} />
+      </Columns>
 
       <Card flush>
         {!data.items.length ? (

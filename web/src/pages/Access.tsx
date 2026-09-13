@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { GroupMapping, Principal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, Columns, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
 import { CertificateAuthority } from "./CertificateAuthority";
 import { useT } from "../i18n";
 
@@ -95,6 +95,9 @@ function Mappings() {
     <>
       <Warning error={warning} close={() => setWarning(null)} />
 
+      {/* The form opens beside the list it adds to; while it is closed the
+          list has the row to itself. */}
+      <Columns wide>
       <Card
         title={t("Group mappings")}
         actions={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}
@@ -175,6 +178,7 @@ function Mappings() {
           </FieldGrid>
         </Card>
       )}
+      </Columns>
     </>
   );
 }

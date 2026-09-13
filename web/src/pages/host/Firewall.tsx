@@ -119,6 +119,8 @@ export function Firewall() {
         </p>
       )}
 
+      {/* The tiles and the facts of the rule set make one summary row. */}
+      <div className="columns">
       <Stats>
         <Stat label={t("Effective rules")} value={(snapshot?.rules ?? []).length} />
         <Stat label={t("Rules owned by Flotestro")} value={own.length} />
@@ -142,6 +144,7 @@ export function Firewall() {
           <Fact label={t("Read")}>{snapshot?.observed_at ? <Time value={snapshot.observed_at} /> : "—"}</Fact>
         </Facts>
       </Section>
+      </div>
 
       {wizard && <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />}
 

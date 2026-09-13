@@ -126,6 +126,11 @@ export function Power() {
         />
       </Stats>
 
+      {/* What the host reports on the left; what the operator can do about
+          it on the right. Both columns are short blocks, and side by side
+          they use the width instead of running down the left edge. */}
+      <div className="columns wide">
+      <div className="stack">
       <Section title={t("Boot")} flush>
         <Facts>
           <Fact label={t("Boot ID")}><span className="hm-mono">{snapshot?.boot_id || unknown}</span></Fact>
@@ -146,8 +151,6 @@ export function Power() {
           </Fact>
         </Facts>
       </Section>
-
-      <MaintenanceWindow host={host} />
 
       <Section
         title={t("Inhibitors")}
@@ -196,6 +199,10 @@ export function Power() {
           </Table>
         )}
       </Section>
+      </div>
+
+      <div className="stack">
+      <MaintenanceWindow host={host} />
 
       <Section title={t("Power")}>
         <Form>
@@ -256,6 +263,9 @@ export function Power() {
           </FormActions>
         </Form>
       </Section>
+
+      </div>
+      </div>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">

@@ -119,6 +119,10 @@ export function Compose() {
       />
       <Message text={message} />
 
+      {/* The editor and the project's history side by side: a manifest is
+          written with the previous deployments in view. The plan, once
+          there is one, follows as a pair of tables and the consent below. */}
+      <div className="columns wide">
       <Section title={t("Project")}>
         <Form>
           <Fields>
@@ -154,8 +158,43 @@ export function Compose() {
         </Form>
       </Section>
 
+      <Section title={t("History")} count={project ? versions.data?.items.length : undefined} flush>
+        {!project ? (
+          <Empty>{t("Name a project to see its deployment history.")}</Empty>
+        ) : !versions.data?.items.length ? (
+          <Empty>{t("This project has not been deployed from the panel yet.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th>{t("When")}</th><th>{t("By")}</th><th>{t("State")}</th><th>{t("Plan")}</th><th></th></tr></thead>
+            <tbody>
+              {versions.data.items.map((version) => (
+                <tr key={version.job_id}>
+                  <td><Time value={version.created_at} /></td>
+                  <td>{version.created_by}</td>
+                  <td><JobState state={version.state} /></td>
+                  <td className="hm-mono">{version.plan_digest?.slice(0, 12) || "—"}</td>
+                  <td>
+                    {/* Rolling a change back is deploying an earlier version.
+                        It is loaded into the editor so that it goes through
+                        a plan - the host state may have changed since then. */}
+                    <button
+                      className="secondary"
+                      onClick={() => { setManifest(version.manifest); setPlan(null); }}
+                    >
+                      {t("Load into editor")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+      </div>
+
       {plan && (
         <>
+          <div className="columns">
           <Section
             title={t("Plan")}
             count={plan.changes?.length ?? 0}
@@ -198,6 +237,7 @@ export function Compose() {
               </tbody>
             </Table>
           </Section>
+          </div>
 
           <DeployConfirmation
             busy={deploy.isPending}
@@ -206,38 +246,6 @@ export function Compose() {
         </>
       )}
 
-      <Section title={t("History")} count={project ? versions.data?.items.length : undefined} flush>
-        {!project ? (
-          <Empty>{t("Name a project to see its deployment history.")}</Empty>
-        ) : !versions.data?.items.length ? (
-          <Empty>{t("This project has not been deployed from the panel yet.")}</Empty>
-        ) : (
-          <Table>
-            <thead><tr><th>{t("When")}</th><th>{t("By")}</th><th>{t("State")}</th><th>{t("Plan")}</th><th></th></tr></thead>
-            <tbody>
-              {versions.data.items.map((version) => (
-                <tr key={version.job_id}>
-                  <td><Time value={version.created_at} /></td>
-                  <td>{version.created_by}</td>
-                  <td><JobState state={version.state} /></td>
-                  <td className="hm-mono">{version.plan_digest?.slice(0, 12) || "—"}</td>
-                  <td>
-                    {/* Rolling a change back is deploying an earlier version.
-                        It is loaded into the editor so that it goes through
-                        a plan - the host state may have changed since then. */}
-                    <button
-                      className="secondary"
-                      onClick={() => { setManifest(version.manifest); setPlan(null); }}
-                    >
-                      {t("Load into editor")}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Section>
     </ModulePage>
   );
 }

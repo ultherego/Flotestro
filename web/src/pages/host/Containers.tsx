@@ -261,6 +261,8 @@ export function Containers() {
         />
       </Stats>
 
+      {/* Two facts about the engine and the project list share a row. */}
+      <div className="columns">
       <Section title={t("Engine")} flush>
         <Facts>
           <Fact label={t("Engine")}>{state?.engine_version || unknown}</Fact>
@@ -284,6 +286,7 @@ export function Containers() {
           </Table>
         </Section>
       )}
+      </div>
 
       <Section title={t("Engine objects")} flush>
         <div className="tabs">
