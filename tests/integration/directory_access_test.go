@@ -322,7 +322,7 @@ func TestDirectoryRuleValidationRefusesBadMaterial(t *testing.T) {
 	}
 	bad := map[string]map[string]any{
 		"a name with a space": {
-			"action": "identity.hbac.rule.ensure",
+			"action":  "identity.hbac.rule.ensure",
 			"payload": map[string]any{"hbac_rule": map[string]any{"name": "bad name", "enabled": false}},
 		},
 		"an enabled rule without hosts": {
