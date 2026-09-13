@@ -4,7 +4,7 @@ import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetSummary } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
-import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
+import { Card, Columns, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 /**
@@ -104,6 +104,7 @@ export function Dashboard() {
         </StatGrid>
       </Card>
 
+      <Columns>
       <Card
         title={t("Campaigns in progress")}
         actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
@@ -153,6 +154,7 @@ export function Dashboard() {
           </table>
         )}
       </Card>
+      </Columns>
     </>
   );
 }

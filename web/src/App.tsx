@@ -199,6 +199,10 @@ export function App() {
         setTheme={setTheme}
       />
       <main className="content">
+        {/* The page keeps a reading width and sits in the middle of the
+            content area: on a wide screen a full-width page hugs the left
+            edge and leaves the rest empty. */}
+        <div className="page">
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
@@ -252,6 +256,7 @@ export function App() {
           {seesAudit && <Route path="/audit" element={<Audit />} />}
           <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
         </Routes>
+        </div>
       </main>
     </div>
   );

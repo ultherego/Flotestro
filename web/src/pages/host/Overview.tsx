@@ -28,6 +28,7 @@ export function Overview() {
       />
       <ModuleFreshness fragment={module.data} />
 
+      <div className="columns">
       <Section title={t("System")} flush>
         <Facts>
           <Fact label={t("System")}>{host.os_distribution} {host.os_version} ({host.os_family})</Fact>
@@ -61,6 +62,7 @@ export function Overview() {
           </Facts>
         </Section>
       )}
+      </div>
 
       <Section title={t("Adapters")} count={(host.capabilities ?? []).length} flush>
         <Adapters host={host} />

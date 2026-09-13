@@ -183,3 +183,12 @@ export function EmptyState({ children, action }: { children: ReactNode; action?:
     </div>
   );
 }
+
+/**
+ * Blocks side by side. A page of short cards stacked in one column reads
+ * as a strip down the left with nothing beside it; two or three across
+ * use the width. On a narrow screen they stack again.
+ */
+export function Columns({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  return <div className={wide ? "columns wide" : "columns"}>{children}</div>;
+}

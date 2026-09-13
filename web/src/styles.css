@@ -60,8 +60,9 @@
 
   --sidebar-width: 240px;
   --sidebar-rail: 56px;
-  --content-pad-x: 28px;
-  --content-pad-y: 24px;
+  --content-pad-x: 32px;
+  --content-pad-y: 28px;
+  --page-max-width: 1360px;
   --topbar-height: 0px;
 }
 
@@ -380,6 +381,15 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .content {
   padding: var(--content-pad-y) var(--content-pad-x);
   overflow-x: auto;
+  min-width: 0;
+}
+/* The page is bounded in width and centred: tables and forms are read
+   at a width the eye can follow, and a wide screen gets margins rather
+   than a page stretched to the corner. */
+.page {
+  width: 100%;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
   min-width: 0;
 }
 
@@ -1033,6 +1043,25 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 }
 .breadcrumb a { color: var(--text-muted); }
 .breadcrumb a::after { content: "/"; margin-left: 6px; color: var(--text-faint); }
+
+/* Two or three blocks side by side where each is short: a page of
+   small cards stacked in one column reads as a strip down the left with
+   nothing beside it. The columns collapse to one on a narrow screen. */
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.columns.wide { grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); }
+.columns > .card, .columns > .hm-section { margin: 0; min-width: 0; }
+/* Several blocks in one column of the grid keep their own rhythm. */
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.stack > .card { margin: 0; }
+.stack:empty { display: none; }
+.columns > .card + .card { margin-top: 0; }
+.card + .columns, .stats + .columns { margin-top: 16px; }
 
 /* A card is the raised panel every list and form stands on. The head and
    the foot keep their own padding, so a flush body can let a table reach

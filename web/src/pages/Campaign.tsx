@@ -6,7 +6,7 @@ import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, TimelineEntry,
 } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
+import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
 import { JobPlan } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
@@ -199,6 +199,7 @@ export function Campaign() {
         </StatGrid>
       )}
 
+      <Columns wide>
       <Card title={t("Details")}>
         <Pairs>
           <Pair label={t("Canary / wave")}>{data.canary_size} / {data.wave_size}</Pair>
@@ -214,6 +215,7 @@ export function Campaign() {
           <Pair label={t("Created")}><Time value={data.created_at} /></Pair>
         </Pairs>
       </Card>
+      <div className="stack">
 
       {approvals.data && approvals.data.items.length > 0 && (
         <Card title={t("Approval record")} description={t("Who consented to what, on what authentication and why. The record is written once and never changed.")} flush>
@@ -255,6 +257,8 @@ export function Campaign() {
           </table>
         </Card>
       )}
+      </div>
+      </Columns>
 
       <Card title={t("Timeline")} flush>
         {!timeline.data?.items.length ? (
