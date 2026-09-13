@@ -5,7 +5,7 @@ import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Stat, Stats, Table, useHost, useModule,
+  Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -111,6 +111,9 @@ export function Resolver() {
 
   const nameList = names.split(",").map((name) => name.trim()).filter(Boolean);
   const managementLink = snapshot?.links?.find((link) => (link.servers ?? []).length > 0);
+  // An unread resolver has nothing to count: the bar shows dashes then.
+  const known = snapshot?.unavailable_reason ? undefined : snapshot;
+  const links = known?.links ?? (known ? [] : undefined);
 
   return (
     <ModulePage>
@@ -142,18 +145,42 @@ export function Resolver() {
         </p>
       )}
 
-      <Stats>
-        <Stat label={t("Owner")} value={snapshot?.owner || unknown} tone={snapshot?.owner ? undefined : "unknown"} hint={snapshot?.mode || undefined} />
-        <Stat label={t("Servers")} value={(snapshot?.servers ?? []).length} hint={<span className="hm-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span>} />
-        <Stat label="DNSSEC" value={snapshot?.dnssec || unknown} />
-        <Stat label="DNS over TLS" value={snapshot?.dns_over_tls || unknown} />
-      </Stats>
+      <Widgets>
+      {/* What the host resolves with, counted; then who owns it and how it
+          is protected, which decide whether the panel may touch it. */}
+      <Summary
+        title={t("Resolution")}
+        description={t("The servers, the search domains and the links with resolvers of their own.")}
+        span={8}
+        segments={[
+          { label: t("Servers"), value: known ? (known.servers ?? []).length : undefined, tone: "info" },
+          { label: t("Search domains"), value: known ? (known.search_domains ?? []).length : undefined, tone: "info" },
+          { label: t("Per-link resolvers"), value: countWhere(links, (link) => (link.servers ?? []).length > 0), tone: "neutral" },
+          { label: t("links with DNS over TLS"), value: countWhere(links, (link) => link.dns_over_tls === "yes"), tone: "ok" },
+        ]}
+      />
+      <Section title={t("Ownership")} span={4} flush>
+        <Facts>
+          <Fact label={t("Owner")}>
+            {snapshot?.owner || unknown}
+            {snapshot?.mode && <span className="source"> · {snapshot.mode}</span>}
+          </Fact>
+          <Fact label={t("Write adapter")}>
+            {snapshot?.writable
+              ? <span className="badge ok">{snapshot.write_adapter || t("yes")}</span>
+              : <span className="badge unknown">{t("read only")}</span>}
+          </Fact>
+          {/* "unsupported" and "disabled" are two different answers, so we
+              show what the host said, not yes/no. */}
+          <Fact label="DNSSEC">{snapshot?.dnssec || unknown}</Fact>
+          <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknown}</Fact>
+        </Facts>
+      </Section>
 
       {/* The facts on the left, the test the operator runs against them on
           the right; the change form and the per-link list follow in full
           width. */}
-      <div className="columns">
-      <Section title={t("DNS")} flush>
+      <Section title={t("DNS")} span={6} flush>
         <Facts>
           <Fact label={t("Owner")}>{snapshot?.owner || unknown}</Fact>
           <Fact label={t("Mode")}>{snapshot?.mode || "—"}</Fact>
@@ -175,6 +202,7 @@ export function Resolver() {
       <Section
         title={t("Test resolution from the host")}
         description={t("The panel sits in a different network, so its own answer says nothing about what this host sees. The query runs on the host.")}
+        span={6}
         flush
       >
         <div className="hm-section-body">
@@ -224,7 +252,6 @@ export function Resolver() {
           </Table>
         )}
       </Section>
-      </div>
 
       {form && (
         <ResolverChange
@@ -235,7 +262,7 @@ export function Resolver() {
         />
       )}
 
-      <Section title={t("Per-link resolvers")} count={snapshot?.links?.length} flush>
+      <Section title={t("Per-link resolvers")} count={snapshot?.links?.length} span={12} flush>
         {!snapshot?.links?.length ? (
           <Empty>{t("This host does not report per-link resolvers; it has one global list.")}</Empty>
         ) : (
@@ -269,6 +296,7 @@ export function Resolver() {
           </Table>
         )}
       </Section>
+      </Widgets>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">
@@ -319,6 +347,7 @@ function ResolverChange({
     <Section
       title={t("Change resolver")}
       description={t("A host that cannot resolve names loses the directory, Kerberos and with them logins — so this change is armed with the same rollback timer as an address change.")}
+      span={12}
     >
       <Form>
         <Fields>

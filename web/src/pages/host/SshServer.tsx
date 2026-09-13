@@ -3,9 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Stat, Stats, Table, useHost, useModule,
+  Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -78,6 +79,10 @@ export function SshServer() {
     [t("Keyboard interactive"), snapshot?.kbd_interactive_authentication],
     ["GSSAPI", snapshot?.gssapi_authentication],
   ];
+  // An unread configuration has nothing to count; the bar shows dashes then.
+  const known = snapshot?.unavailable_reason ? undefined : snapshot;
+  const knownMethods = known ? methods : undefined;
+  const risky = (value?: string) => value === "yes" ? "badge warn" : value === "no" ? "badge ok" : "badge unknown";
 
   return (
     <ModulePage>
@@ -99,29 +104,53 @@ export function SshServer() {
         </p>
       )}
 
-      <Stats>
-        <Stat label={t("Port")} value={<span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span>} />
-        {/* "prohibit-password" is neither yes nor no - we show what the
-            server said, not a translation into a flag. */}
-        <Stat
-          label={t("Root login")}
-          value={snapshot?.permit_root_login || "—"}
-          tone={snapshot?.permit_root_login === "yes" ? "warn" : snapshot?.permit_root_login === "no" ? "ok" : undefined}
-        />
-        <Stat
-          label={t("Password")}
-          value={snapshot?.password_authentication || <span className="badge unknown">{t("unknown")}</span>}
-          tone={snapshot?.password_authentication === "yes" ? "warn" : snapshot?.password_authentication === "no" ? "ok" : undefined}
-        />
-        <Stat label={t("Host keys")} value={(snapshot?.host_keys ?? []).length} />
-      </Stats>
+      <Widgets>
+      {/* The ways in, counted: ports, methods, keys. Beside them the two
+          settings that decide most break-ins, as badges, and the access
+          lists by length. */}
+      <Summary
+        title={t("Ways in")}
+        description={t("What sshd listens on and accepts, as it reports it.")}
+        span={8}
+        segments={[
+          { label: t("ports"), value: known ? (known.ports ?? []).length : undefined, tone: "info" },
+          { label: t("methods enabled"), value: countWhere(knownMethods, ([, value]) => value === "yes"), tone: "warn" },
+          { label: t("methods disabled"), value: countWhere(knownMethods, ([, value]) => value === "no"), tone: "ok" },
+          { label: t("methods unknown"), value: countWhere(knownMethods, ([, value]) => value !== "yes" && value !== "no"), tone: "unknown" },
+          { label: t("Host keys"), value: known ? (known.host_keys ?? []).length : undefined, tone: "neutral" },
+        ]}
+      />
+      <Section title={t("Posture")} span={4} flush>
+        <Facts>
+          {/* "prohibit-password" is neither yes nor no - we show what the
+              server said, not a translation into a flag. */}
+          <Fact label={t("Root login")}>
+            <span className={risky(snapshot?.permit_root_login)}>{snapshot?.permit_root_login || t("unknown")}</span>
+          </Fact>
+          <Fact label={t("Password")}>
+            <span className={risky(snapshot?.password_authentication)}>{snapshot?.password_authentication || t("unknown")}</span>
+          </Fact>
+          <Fact label={t("Max auth tries")}>{snapshot?.max_auth_tries ?? "—"}</Fact>
+          <Fact label={t("Access lists")} wide>
+            {known ? (
+              <Breakdown
+                items={[
+                  { label: t("Allow users"), value: (known.allow_users ?? []).length, tone: "ok" },
+                  { label: t("Allow groups"), value: (known.allow_groups ?? []).length, tone: "ok" },
+                  { label: t("Deny users"), value: (known.deny_users ?? []).length, tone: "error" },
+                  { label: t("Deny groups"), value: (known.deny_groups ?? []).length, tone: "error" },
+                ]}
+              />
+            ) : "—"}
+          </Fact>
+        </Facts>
+      </Section>
 
       {editor && <SshEditor state={snapshot} onIntent={setIntent} />}
 
       {/* The facts and the short method table share a row; the keys and
           the drop-in below share the next one. */}
-      <div className="columns">
-      <Section title={t("SSH")} flush>
+      <Section title={t("SSH")} span={7} flush>
         <Facts>
           <Fact label={t("Port")}><span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Listening on")}><span className="hm-mono">{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</span></Fact>
@@ -134,7 +163,7 @@ export function SshServer() {
         </Facts>
       </Section>
 
-      <Section title={t("Authentication methods")} flush>
+      <Section title={t("Authentication methods")} span={5} flush>
         <Table>
           <thead><tr><th>{t("Method")}</th><th>{t("Enabled")}</th></tr></thead>
           <tbody>
@@ -147,12 +176,11 @@ export function SshServer() {
           </tbody>
         </Table>
       </Section>
-      </div>
 
-      <div className="columns wide">
       <Section
         title={t("Host keys")}
         count={(snapshot?.host_keys ?? []).length}
+        span={7}
         description={t("Fingerprints only — the panel has no reason to see a host's private key. Rotating one changes this host's identity for every client that has it in known_hosts.")}
         flush
       >
@@ -187,7 +215,7 @@ export function SshServer() {
         </Table>
       </Section>
 
-      <Section title={t("Managed drop-in")} description={<span className="hm-mono">{snapshot?.managed_path}</span>} flush>
+      <Section title={t("Managed drop-in")} description={<span className="hm-mono">{snapshot?.managed_path}</span>} span={5} flush>
         {snapshot?.managed_present ? (
           <div className="hm-section-body">
             <pre>{snapshot.managed_config}</pre>
@@ -196,7 +224,7 @@ export function SshServer() {
           <Empty>{t("The panel has not written anything to this host yet.")}</Empty>
         )}
       </Section>
-      </div>
+      </Widgets>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">
@@ -252,6 +280,7 @@ function SshEditor({
     <Section
       title={t("Change configuration")}
       description={t("Empty means “leave it alone”. The host validates the file with sshd itself before reloading, and reloads instead of restarting so open sessions survive.")}
+      span={12}
     >
       <Form>
         <Fields>

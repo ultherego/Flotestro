@@ -3,9 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { Breakdown, Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Stat, Stats, Table, useHost, useModule,
+  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -98,6 +99,17 @@ export function Firewall() {
   });
   const own = (snapshot?.rules ?? []).filter((rule) => rule.source === "managed");
   const zones = (snapshot?.zones ?? []).filter((zone) => zone.active || zone.default || (zone.ports ?? []).length > 0);
+  // The rules by who wrote them: ours are the durable ones, the rest belong
+  // to docker, firewalld or whoever else rewrites its table without asking.
+  // An unread rule set has no counts, only dashes.
+  const knownRules = snapshot?.unavailable_reason ? undefined : snapshot?.rules ?? [];
+  const otherSources = Array.from(new Set((knownRules ?? []).map((rule) => rule.source))).filter((source) => source !== "managed").sort();
+  const tables = Object.entries((knownRules ?? []).reduce<Record<string, number>>((acc, rule) => {
+    const key = `${rule.family} ${rule.table}`;
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const maxPackets = Math.max(1, ...(snapshot?.rules ?? []).map((rule) => rule.packets ?? 0));
 
   return (
     <ModulePage>
@@ -119,32 +131,44 @@ export function Firewall() {
         </p>
       )}
 
-      {/* The tiles and the facts of the rule set make one summary row. */}
-      <div className="columns">
-      <Stats>
-        <Stat label={t("Effective rules")} value={(snapshot?.rules ?? []).length} />
-        <Stat label={t("Rules owned by Flotestro")} value={own.length} />
-        {snapshot?.zones?.length ? <Stat label={t("Zones")} value={zones.length} /> : null}
-        <Stat
-          label={t("Adapter")}
-          value={snapshot?.adapter || <span className="badge unknown">{t("unknown")}</span>}
-          tone={snapshot?.writable ? "ok" : "unknown"}
-          hint={snapshot?.read_only_reason || undefined}
-        />
-      </Stats>
+      <Widgets>
+      {/* The rules by owner and the facts of the rule set make one summary
+          row: whose rules these are is the first question, because only
+          ours survive the next container start or reload. */}
+      <Summary
+        title={t("Effective rules")}
+        description={t("By who wrote them; only the rules in the Flotestro table are durable.")}
+        span={8}
+        segments={[
+          { label: "Flotestro", value: countWhere(knownRules, (rule) => rule.source === "managed"), tone: "ok" },
+          ...otherSources.map((source) => ({
+            label: source, value: countWhere(knownRules, (rule) => rule.source === source), tone: "neutral" as const,
+          })),
+          ...(snapshot?.zones?.length ? [{ label: t("Zones"), value: zones.length, tone: "info" as const }] : []),
+        ]}
+      />
 
-      <Section title={t("Firewall")} flush>
+      <Section title={t("Firewall")} span={4} flush>
         <Facts>
-          <Fact label={t("Adapter")}>{snapshot?.adapter || <span className="badge unknown">{t("unknown")}</span>}</Fact>
+          <Fact label={t("Adapter")}>
+            {snapshot?.adapter
+              ? <span className={snapshot.writable ? "badge ok" : "badge unknown"}>{snapshot.adapter}</span>
+              : <span className="badge unknown">{t("unknown")}</span>}
+            {snapshot?.read_only_reason && <span className="source"> · {snapshot.read_only_reason}</span>}
+          </Fact>
           {/* The fingerprint ties the plan to the rule set: a change
               requested against a different set is not the same change the
               operator looked at. */}
           <Fact label={t("Ruleset fingerprint")}><span className="hm-mono">{snapshot?.hash || "—"}</span></Fact>
           <Fact label={t("Rules owned by Flotestro")}>{own.length}</Fact>
           <Fact label={t("Read")}>{snapshot?.observed_at ? <Time value={snapshot.observed_at} /> : "—"}</Fact>
+          <Fact label={t("By table")} wide>
+            {tables.length
+              ? <Breakdown items={tables.map(([table, count]) => ({ label: <span className="hm-mono">{table}</span>, value: count }))} />
+              : "—"}
+          </Fact>
         </Facts>
       </Section>
-      </div>
 
       {wizard && <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />}
 
@@ -152,6 +176,7 @@ export function Firewall() {
         <Section
           title={t("Zones")}
           count={zones.length}
+          span={12}
           description={t("firewalld describes access by zone, not by rule order: the question is what is open on an interface, not which rule matches first.")}
           flush
         >
@@ -184,6 +209,7 @@ export function Firewall() {
       <Section
         title={t("Effective rules")}
         count={rules.length}
+        span={12}
         tools={
           <>
             <input
@@ -204,7 +230,7 @@ export function Firewall() {
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Table")}</th><th>{t("Chain")}</th><th>{t("Rule")}</th><th>{t("Owner")}</th><th className="hm-num">{t("Counters")}</th><th>{t("Actions")}</th></tr>
+              <tr><th>{t("Table")}</th><th>{t("Chain")}</th><th>{t("Rule")}</th><th>{t("Owner")}</th><th>{t("Counters")}</th><th>{t("Actions")}</th></tr>
             </thead>
             <tbody>
               {rules.map((rule) => (
@@ -224,11 +250,11 @@ export function Firewall() {
                   </td>
                   {/* A rule without a counter must not pretend nothing passed
                       through it. */}
-                  <td className="hm-num">
+                  <td>
                     {rule.packets === undefined ? (
                       <span className="badge unknown">{t("no counter")}</span>
                     ) : (
-                      `${rule.packets} pkt / ${rule.bytes} B`
+                      <Meter value={rule.packets} max={maxPackets} tone="info" text={`${rule.packets} pkt / ${rule.bytes} B`} />
                     )}
                   </td>
                   <td>
@@ -257,6 +283,7 @@ export function Firewall() {
           <span>{t("{shown} of {total} rules shown", { shown: rules.length, total: (snapshot?.rules ?? []).length })}</span>
         </Foot>
       </Section>
+      </Widgets>
 
       {intent && (
         <TargetConfirmation
@@ -303,6 +330,7 @@ function RuleWizard({ fingerprint, onIntent }: { fingerprint: string; onIntent: 
     <Section
       title={t("New rule")}
       description={t("The rule goes into Flotestro's own table. The host arms a rollback before applying it and cancels it only after the agent proves it can still reach the panel.")}
+      span={12}
     >
       <Form>
         <Fields>

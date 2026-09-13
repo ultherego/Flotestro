@@ -3,9 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader,
-  ModulePage, RequestOperation, Section, Stat, Stats, Table, Unknown, useHost, useModule,
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader,
+  ModulePage, RequestOperation, Section, Summary, Table, Unknown, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -116,8 +117,14 @@ export function Packages() {
   });
 
   const sources = packages?.repositories?.repositories ?? [];
-  const pending = host.pending_updates;
-  const security = host.pending_security_updates;
+  const pending = host.pending_updates ?? undefined;
+  const security = host.pending_security_updates ?? undefined;
+  // The sources are a known list only when the host could read them; an
+  // unread list is not an empty one.
+  const knownSources = packages?.repositories?.repositories_known === false ? undefined : sources;
+  const upToDate = packages?.installed !== undefined && pending !== undefined
+    ? Math.max(0, packages.installed - pending)
+    : undefined;
 
   return (
     <ModulePage>
@@ -128,41 +135,59 @@ export function Packages() {
       <ModuleFreshness fragment={module.data} />
       <Message text={message} />
 
-      {/* The counts decide whether the rest is worth reading; an unknown
-          count is shown as unknown, because zero would mean "nothing to do". */}
-      <Stats>
-        <Stat label={t("Installed")} value={packages?.installed ?? <Unknown />} hint={packages?.manager ? `${t("Manager")}: ${packages.manager}` : undefined} />
-        <Stat
-          label={t("Upgradable")}
-          value={pending === null || pending === undefined ? <Unknown /> : pending}
-          tone={pending ? "warn" : undefined}
+      <Widgets>
+        {/* The counts decide whether the rest is worth reading; an unknown
+            count is a dash, because zero would mean "nothing to do". Held
+            packages are not in the report yet, so their slot says so. */}
+        <Summary
+          title={t("Updates")}
+          description={t("The installed packages by what waits for them.")}
+          span={8}
+          segments={[
+            { label: t("up to date"), value: upToDate, tone: "ok" },
+            { label: t("upgradable"), value: pending, tone: "warn" },
+            { label: t("security"), value: security, tone: "error" },
+            { label: t("held"), value: undefined, tone: "neutral" },
+          ]}
         />
-        <Stat
-          label={t("Security updates")}
-          value={security === null || security === undefined ? <Unknown /> : security}
-          tone={security ? "error" : undefined}
-        />
-        <Stat
-          label={t("Package database")}
-          value={host.package_database_broken ? t("needs repair") : t("healthy")}
-          tone={host.package_database_broken ? "error" : "ok"}
-        />
-        <Stat label={t("Repositories")} value={packages?.repositories?.repositories_known === false ? <Unknown /> : sources.length} />
-      </Stats>
+        <Section title={t("Sources")} span={4} flush>
+          <Facts>
+            <Fact label={t("Installed")}>{packages?.installed ?? <Unknown />}</Fact>
+            <Fact label={t("Manager")}>{packages?.manager || "—"}</Fact>
+            <Fact label={t("Package database")}>
+              {host.package_database_broken
+                ? <span className="badge error">{t("needs repair")}</span>
+                : <span className="badge ok">{t("healthy")}</span>}
+            </Fact>
+            <Fact label={t("Repositories")}>{knownSources ? knownSources.length : <Unknown />}</Fact>
+            <Fact label={t("By state")} wide>
+              {knownSources ? (
+                <Breakdown
+                  items={[
+                    { label: t("enabled"), value: countWhere(knownSources, (s) => s.enabled) ?? 0, tone: "ok" },
+                    { label: t("signatures checked"), value: countWhere(knownSources, (s) => s.signed) ?? 0, tone: "ok" },
+                    { label: t("not checked"), value: countWhere(knownSources, (s) => !s.signed) ?? 0, tone: "error" },
+                    { label: t("managed by the panel"), value: countWhere(knownSources, (s) => s.managed) ?? 0, tone: "info" },
+                  ]}
+                />
+              ) : "—"}
+            </Fact>
+          </Facts>
+        </Section>
 
       {/* The three things an operator does here are short forms; in one
           row they make a workbench, in a column a strip. The removal plan,
           when there is one, follows the row; the sources come last. */}
-      <div className="columns">
       <RequestOperation
         host={host}
         description={t("Count available updates without changing host state.")}
         action="packages.plan"
         payload={{ package_plan: { refresh_metadata: true } }}
         label={t("Plan updates")}
+        span={4}
       />
 
-      <Section title={t("Install, remove or hold")}>
+      <Section title={t("Install, remove or hold")} span={4}>
         <Form>
           <Fields>
             <Field label={t("Package names (space or comma separated)")} wide>
@@ -216,6 +241,7 @@ export function Packages() {
 
       <Section
         title={t("Agent")}
+        span={4}
         description={t("The agent is left alone by ordinary package upgrades: replacing it in the middle of a transaction it is running would cut the host off from management with nobody to report the result. Replacing it is its own operation, and it counts as done only when the host comes back reporting the version that was asked for.")}
       >
         <Form>
@@ -244,7 +270,7 @@ export function Packages() {
         </Form>
       </Section>
 
-      </div>
+      </Widgets>
 
       {plan && (
         <Section title={t("Removal plan")} count={plan.removals?.length ?? 0} flush>

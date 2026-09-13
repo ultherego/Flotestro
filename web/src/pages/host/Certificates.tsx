@@ -3,9 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
-  Stats, Table, useHost, useModule,
+  Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -186,7 +187,15 @@ export function Certificates() {
   const list = data?.certificates ?? [];
   const targets = data?.targets ?? [];
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
-  const byStatus = (status: string) => list.filter((certificate) => certificate.status === status).length;
+  // The list is unknown until the report loads; the bar shows dashes then.
+  const known = data ? list : undefined;
+  const byStatus = (status: string) => countWhere(known, (certificate) => certificate.status === status);
+  const tally = (key: (certificate: Certificate) => string) =>
+    Object.entries(list.reduce<Record<string, number>>((acc, certificate) => {
+      const value = key(certificate);
+      acc[value] = (acc[value] ?? 0) + 1;
+      return acc;
+    }, {})).sort((a, b) => b[1] - a[1]);
 
   return (
     <ModulePage>
@@ -242,29 +251,45 @@ export function Certificates() {
         </p>
       )}
 
-      {data && (
-        <Stats>
-          <Stat label={t("Certificates")} value={list.length} />
-          <Stat label={t("Expired")} value={byStatus("expired")} tone={byStatus("expired") > 0 ? "error" : undefined} />
-          <Stat
-            label={t("Expiring soon")}
-            value={byStatus("critical") + byStatus("warning")}
-            tone={byStatus("critical") > 0 ? "error" : byStatus("warning") > 0 ? "warn" : undefined}
-          />
-          <Stat
-            label={t("Manual renewal")}
-            value={list.filter((certificate) => certificate.renewal === "manual").length}
-            tone={list.some((certificate) => certificate.renewal === "manual") ? "warn" : undefined}
-          />
-        </Stats>
-      )}
+      <Widgets>
+      {/* The certificates by deadline: the panel's judgement of what the
+          host reported, read before the list. */}
+      <Summary
+        title={t("By deadline")}
+        description={t("How long each certificate has left, as the panel judges it.")}
+        span={8}
+        segments={[
+          { label: t("valid"), value: byStatus("valid"), tone: "ok" },
+          { label: t("Expiring soon"), value: byStatus("warning"), tone: "warn" },
+          { label: t("critical"), value: byStatus("critical"), tone: "error" },
+          { label: t("Expired"), value: byStatus("expired"), tone: "error" },
+          { label: t("unknown"), value: countWhere(known, (c) => !["valid", "warning", "critical", "expired"].includes(c.status)), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Renewal")} span={4} description={t("What renews each certificate, and where the panel learnt of it.")}>
+        {!known ? (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        ) : !list.length ? (
+          <p className="source" style={{ margin: 0 }}>{t("No certificate is watched on this host yet.")}</p>
+        ) : (
+          <>
+            <Breakdown
+              items={tally((c) => c.renewal || t("unknown")).map(([renewal, count]) => ({
+                label: renewal, value: count, tone: renewal === "manual" ? "warn" as const : renewal === "unknown" ? "unknown" as const : "ok" as const,
+              }))}
+            />
+            <p className="widget-subhead">{t("Source")}</p>
+            <Breakdown items={tally((c) => c.source).map(([source, count]) => ({ label: source, value: count }))} />
+          </>
+        )}
+      </Section>
 
       {form === "watch" && <WatchForm onSave={(body) => watch.mutate(body)} />}
       {form === "deploy" && (
         <DeployForm targets={targets} hostname={host.hostname} onIntent={setIntent} />
       )}
 
-      <Section title={t("Certificates")} count={list.length} flush>
+      <Section title={t("Certificates")} count={list.length} span={12} flush>
         {!list.length ? (
           <Empty>
             {t("No certificate is watched on this host yet. Add a path, or scan the host if certmonger tracks something here.")}
@@ -401,6 +426,7 @@ export function Certificates() {
           </Table>
         )}
       </Section>
+      </Widgets>
 
       {selected && <Details hostID={host.id} certificate={list.find((c) => c.path === selected)} />}
 
@@ -539,6 +565,7 @@ function WatchForm({ onSave }: { onSave: (body: Record<string, unknown>) => void
     <Section
       title={t("Watch a path")}
       description={t("This changes what the panel looks at, not the host. The service that reads the file and the address where the result is visible are yours to fill in — the panel does not guess them from a directory name.")}
+      span={12}
     >
       <Form>
         <Fields>
@@ -598,6 +625,7 @@ function DeployForm({
     <Section
       title={t("Deploy a certificate")}
       description={t("Paste the certificate with its chain, leaf first. The private key is not pasted here and never travels in the job: the host fetches it from the secret named on the watched path, once, while it runs the operation.")}
+      span={12}
     >
       <Form>
         <Fields>

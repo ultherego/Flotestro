@@ -3,9 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time as Timestamp, Empty } from "../../components/ui";
+import { Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Stat, Stats, Table, useHost, useModule,
+  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -144,6 +145,10 @@ export function Time() {
   const serverList = servers.split(",").map((entry) => entry.trim()).filter(Boolean);
   const offset = snapshot?.offset_seconds;
   const drifted = offset !== undefined && offset !== null && Math.abs(offset) >= STEP_THRESHOLD;
+  // The sources by what the daemon makes of them, in chrony's words. An
+  // unread clock has nothing to count and shows dashes.
+  const sources = snapshot?.unavailable_reason ? undefined : snapshot?.sources ?? [];
+  const rejected = ["not combined", "false ticker", "too variable"];
 
   return (
     <ModulePage>
@@ -174,28 +179,51 @@ export function Time() {
         </p>
       )}
 
-      <Stats>
-        <Stat
-          label={t("Synchronized")}
-          value={flag(snapshot?.synchronized)}
-          tone={snapshot?.synchronized === true ? "ok" : snapshot?.synchronized === false ? "error" : "unknown"}
-        />
-        <Stat
-          label={t("Offset")}
-          value={seconds(snapshot?.offset_seconds, 3)}
-          tone={drifted ? "error" : snapshot?.offset_seconds === undefined || snapshot?.offset_seconds === null ? "unknown" : "ok"}
-        />
-        <Stat label={t("Stratum")} value={snapshot?.stratum ?? unknown} />
-        <Stat
-          label={t("Daemon")}
-          value={snapshot?.service || unknown}
-          hint={snapshot?.service_active === false ? t("not running") : snapshot?.unit}
-          tone={snapshot?.service_active === false ? "error" : undefined}
-        />
-        <Stat label={t("Sources")} value={(snapshot?.sources ?? []).length} />
-      </Stats>
+      <Widgets>
+      {/* The sources by what the daemon makes of them, and beside them the
+          four numbers that say whether the clock can be trusted. */}
+      <Summary
+        title={t("Sources")}
+        description={t("What the daemon uses, what it keeps in reserve and what it rejected.")}
+        span={8}
+        segments={[
+          { label: t("selected"), value: countWhere(sources, (source) => source.state === "selected"), tone: "ok" },
+          { label: t("candidate"), value: countWhere(sources, (source) => source.state === "candidate"), tone: "info" },
+          { label: t("rejected"), value: countWhere(sources, (source) => rejected.includes(source.state ?? "")), tone: "warn" },
+          { label: t("unreachable"), value: countWhere(sources, (source) => source.state === "unreachable"), tone: "error" },
+          { label: t("other"), value: countWhere(sources, (source) => !["selected", "candidate", "unreachable", ...rejected].includes(source.state ?? "")), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Clock")} span={4} flush>
+        <Facts>
+          <Fact label={t("Synchronized")}>
+            <span className={snapshot?.synchronized === true ? "badge ok" : snapshot?.synchronized === false ? "badge error" : "badge unknown"}>
+              {flag(snapshot?.synchronized)}
+            </span>
+          </Fact>
+          <Fact label={t("Stratum")}>{snapshot?.stratum ?? unknown}</Fact>
+          <Fact label={t("Daemon")}>
+            {snapshot?.service
+              ? <span className={snapshot.service_active === false ? "badge error" : "badge ok"}>{snapshot.service}</span>
+              : unknown}
+            {snapshot?.service_active === false && <span className="source"> · {t("not running")}</span>}
+          </Fact>
+          {/* The offset against the step threshold: the bar fills as the
+              clock drifts towards the point where Kerberos gives up. */}
+          <Fact label={t("Offset")} wide>
+            {offset === undefined || offset === null ? unknown : (
+              <Meter
+                value={Math.abs(offset)}
+                max={STEP_THRESHOLD}
+                tone={drifted ? "error" : Math.abs(offset) >= STEP_THRESHOLD / 2 ? "warn" : "ok"}
+                text={seconds(offset, 3)}
+              />
+            )}
+          </Fact>
+        </Facts>
+      </Section>
 
-      <Section title={t("Time")} flush>
+      <Section title={t("Time")} span={12} flush>
         <Facts>
           <Fact label={t("Host time")}>{snapshot?.now ? <Timestamp value={snapshot.now} /> : unknown}</Fact>
           <Fact label={t("Timezone")}>{snapshot?.timezone || unknown}</Fact>
@@ -231,8 +259,7 @@ export function Time() {
 
       {/* What the daemon uses beside what it was told to use, then the two
           forms: four short blocks in two rows rather than a strip of four. */}
-      <div className="columns wide">
-      <Section title={t("Sources")} count={snapshot?.sources?.length} flush>
+      <Section title={t("Sources")} count={snapshot?.sources?.length} span={7} flush>
         {!snapshot?.sources?.length ? (
           <Empty>{t("The time daemon reports no sources on this host.")}</Empty>
         ) : (
@@ -260,6 +287,7 @@ export function Time() {
       <Section
         title={t("Configured servers")}
         count={snapshot?.configured_servers?.length}
+        span={5}
         description={t("Configuration, not reachability: a server written here that never answers does not show up in the source list above at all.")}
         flush
       >
@@ -282,12 +310,10 @@ export function Time() {
         )}
       </Section>
 
-      </div>
-
-      <div className="columns wide">
       <Section
         title={t("Test time sources")}
         description={t("The query goes out from the host, not from the panel. Leave the field empty to ask the sources this host already uses.")}
+        span={7}
         flush
       >
         <div className="hm-section-body">
@@ -386,7 +412,7 @@ export function Time() {
         )}
       </Section>
 
-      <Section title={t("Timezone")}>
+      <Section title={t("Timezone")} span={5}>
         <Form>
           <Fields>
             <Field label={t("Timezone")}>
@@ -416,8 +442,7 @@ export function Time() {
           </FormActions>
         </Form>
       </Section>
-
-      </div>
+      </Widgets>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">

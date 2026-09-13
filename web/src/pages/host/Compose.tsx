@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty, JobState } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Table, useHost,
+  Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
+  countWhere, useHost,
 } from "./shared";
 import { useT } from "../../i18n";
 
@@ -111,6 +113,14 @@ export function Compose() {
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
+  // The deployments of the named project by outcome; without a project
+  // there is nothing to count and the bar shows dashes.
+  const history = project ? versions.data?.items : undefined;
+  const changes = Object.entries((plan?.changes ?? []).reduce<Record<string, number>>((acc, change) => {
+    acc[change.action] = (acc[change.action] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]);
+
   return (
     <ModulePage>
       <ModuleHeader
@@ -119,11 +129,37 @@ export function Compose() {
       />
       <Message text={message} />
 
+      <Widgets>
+      {/* The project's deployments by outcome, and the plan's changes by
+          kind once there is a plan. */}
+      <Summary
+        title={t("Deployments")}
+        description={project ? t("Every deployment of {project} from the panel.", { project }) : t("Name a project to see its deployment history.")}
+        span={8}
+        segments={[
+          { label: t("applied"), value: countWhere(history, (version) => version.applied), tone: "ok" },
+          { label: t("failed"), value: countWhere(history, (version) => !version.applied && version.state === "failed"), tone: "error" },
+          { label: t("other"), value: countWhere(history, (version) => !version.applied && version.state !== "failed"), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Plan")} span={4} description={t("What the plan would change on this host, by kind.")}>
+        {!plan ? (
+          <p className="source" style={{ margin: 0 }}>{t("No plan yet.")}</p>
+        ) : !changes.length ? (
+          <p className="source" style={{ margin: 0 }}>{t("Nothing would change on this host.")}</p>
+        ) : (
+          <Breakdown
+            items={changes.map(([action, count]) => ({
+              label: action, value: count, tone: action === "remove" ? "error" as const : action === "create" ? "ok" as const : "warn" as const,
+            }))}
+          />
+        )}
+      </Section>
+
       {/* The editor and the project's history side by side: a manifest is
           written with the previous deployments in view. The plan, once
           there is one, follows as a pair of tables and the consent below. */}
-      <div className="columns wide">
-      <Section title={t("Project")}>
+      <Section title={t("Project")} span={7}>
         <Form>
           <Fields>
             <Field label={t("Project name")}>
@@ -158,7 +194,7 @@ export function Compose() {
         </Form>
       </Section>
 
-      <Section title={t("History")} count={project ? versions.data?.items.length : undefined} flush>
+      <Section title={t("History")} count={project ? versions.data?.items.length : undefined} span={5} flush>
         {!project ? (
           <Empty>{t("Name a project to see its deployment history.")}</Empty>
         ) : !versions.data?.items.length ? (
@@ -190,14 +226,13 @@ export function Compose() {
           </Table>
         )}
       </Section>
-      </div>
 
       {plan && (
         <>
-          <div className="columns">
           <Section
             title={t("Plan")}
             count={plan.changes?.length ?? 0}
+            span={6}
             description={t("Digest {digest} · deploying uses exactly this plan; if the manifest or the images change, the deployment is refused.", { digest: plan.digest.slice(0, 16) })}
             flush
           >
@@ -223,7 +258,7 @@ export function Compose() {
             </Table>
           </Section>
 
-          <Section title={t("Services after deployment")} count={(plan.services ?? []).length} flush>
+          <Section title={t("Services after deployment")} count={(plan.services ?? []).length} span={6} flush>
             <Table>
               <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th className="hm-num">{t("Replicas")}</th></tr></thead>
               <tbody>
@@ -237,7 +272,6 @@ export function Compose() {
               </tbody>
             </Table>
           </Section>
-          </div>
 
           <DeployConfirmation
             busy={deploy.isPending}
@@ -245,7 +279,7 @@ export function Compose() {
           />
         </>
       )}
-
+      </Widgets>
     </ModulePage>
   );
 }
@@ -257,7 +291,7 @@ function DeployConfirmation({
   const t = useT();
   const [reason, setReason] = useState("");
   return (
-    <Section title={t("Deploy this plan")}>
+    <Section title={t("Deploy this plan")} span={12}>
       <Form>
         <Fields>
           <Field label={t("Reason (at least 8 characters, kept in the audit trail)")} wide>

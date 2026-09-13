@@ -3,9 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
-  Stats, Table, useHost, useModule,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -77,6 +78,12 @@ export function Schedules() {
   const snapshot = module.data?.payload;
   const entries = snapshot?.schedules ?? [];
   const managed = entries.filter((entry) => entry.source === "managed").length;
+  // An unread list is not an empty one: the counts are dashes until then.
+  const known = snapshot && !snapshot.unavailable_reason ? entries : undefined;
+  const kinds = Object.entries(entries.reduce<Record<string, number>>((acc, entry) => {
+    acc[entry.kind] = (acc[entry.kind] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]);
 
   return (
     <ModulePage>
@@ -101,14 +108,28 @@ export function Schedules() {
         </p>
       )}
 
-      {snapshot && (
-        <Stats>
-          <Stat label={t("Schedules")} value={entries.length} />
-          <Stat label="Flotestro" value={managed} />
-          <Stat label={t("host admin")} value={entries.length - managed} />
-          <Stat label={t("Timezone")} value={snapshot.timezone || "—"} />
-        </Stats>
-      )}
+      <Widgets>
+      {/* The entries by state and owner: what runs, what is switched off,
+          and how much of it is ours to change. */}
+      <Summary
+        title={t("Schedules")}
+        description={t("Cron entries and timers, by whether they run and who owns them.")}
+        span={8}
+        segments={[
+          { label: t("enabled"), value: countWhere(known, (entry) => entry.enabled), tone: "ok" },
+          { label: t("disabled"), value: countWhere(known, (entry) => !entry.enabled), tone: "neutral" },
+          { label: "Flotestro", value: known ? managed : undefined, tone: "info" },
+          { label: t("host admin"), value: known ? known.length - managed : undefined, tone: "unknown" },
+        ]}
+      />
+      <Section title={t("By kind")} span={4} flush>
+        <Facts>
+          <Fact label={t("Timezone")}>{snapshot?.timezone || "—"}</Fact>
+          <Fact label={t("Kinds")} wide>
+            {kinds.length ? <Breakdown items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} /> : "—"}
+          </Fact>
+        </Facts>
+      </Section>
 
       {form && (
         <NewEntry
@@ -118,7 +139,7 @@ export function Schedules() {
         />
       )}
 
-      <Section title={t("Schedules")} count={module.data ? entries.length : undefined} flush>
+      <Section title={t("Schedules")} count={module.data ? entries.length : undefined} span={12} flush>
         {!module.data ? (
           <Empty>{t("This host has not reported its schedules yet.")}</Empty>
         ) : !entries.length ? (
@@ -223,6 +244,7 @@ export function Schedules() {
           </Foot>
         )}
       </Section>
+      </Widgets>
 
       {intent && (
         <TargetConfirmation
@@ -264,7 +286,7 @@ function NewEntry({
   const args = commandLine.trim().split(/\s+/).filter(Boolean);
 
   return (
-    <Section title={t("New schedule")}>
+    <Section title={t("New schedule")} span={12}>
       <Form>
         <Fields>
           <Field label={t("Name")}>

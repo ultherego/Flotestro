@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../../components/ui";
-import { ModuleHeader, ModulePage, Section, Table, useHost } from "./shared";
+import { Breakdown } from "../../components/widgets";
+import { ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost } from "./shared";
 import { OPERATIONS_INTERVAL, useProgress } from "../../lib/stream";
 import { useT } from "../../i18n";
 
@@ -17,13 +18,48 @@ export function HostJobs() {
   });
   if (error) return <ErrorBox error={error} />;
 
+  // The listed jobs by outcome, in the words the state badge uses; the
+  // list is unknown until it loads and shows dashes then.
+  const jobs = data?.items;
+  const succeeded = ["succeeded", "completed"];
+  const failed = ["failed", "timed_out", "expired", "partially_applied"];
+  const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused", "awaiting_budget"];
+  const running = ["dispatched", "running"];
+  const operations = Object.entries((jobs ?? []).reduce<Record<string, number>>((acc, job) => {
+    const module = job.action_type.split(".")[0];
+    acc[module] = (acc[module] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
   return (
     <ModulePage>
       <ModuleHeader
         title={t("Jobs")}
         description={t("Every operation requested on this host, newest first.")}
       />
-      <Section title={t("Jobs")} count={data?.items.length} flush>
+      <Widgets>
+      <Summary
+        title={t("Outcomes")}
+        description={t("The last {n} jobs on this host, by where they stand.", { n: jobs?.length ?? 50 })}
+        span={8}
+        segments={[
+          { label: t("succeeded"), value: countWhere(jobs, (job) => succeeded.includes(job.state)), tone: "ok" },
+          { label: t("failed"), value: countWhere(jobs, (job) => failed.includes(job.state)), tone: "error" },
+          { label: t("running"), value: countWhere(jobs, (job) => running.includes(job.state)), tone: "info" },
+          { label: t("waiting"), value: countWhere(jobs, (job) => waiting.includes(job.state)), tone: "warn" },
+          { label: t("other"), value: countWhere(jobs, (job) => ![...succeeded, ...failed, ...running, ...waiting].includes(job.state)), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("By module")} span={4} description={t("Which modules the operations belong to.")}>
+        {!jobs ? (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        ) : !operations.length ? (
+          <p className="source" style={{ margin: 0 }}>{t("No jobs for this host.")}</p>
+        ) : (
+          <Breakdown items={operations.map(([module, count]) => ({ label: <span className="hm-mono">{module}</span>, value: count }))} />
+        )}
+      </Section>
+      <Section title={t("Jobs")} count={data?.items.length} span={12} flush>
         {!data?.items.length ? (
           <Empty>{t("No jobs for this host.")}</Empty>
         ) : (
@@ -54,6 +90,7 @@ export function HostJobs() {
           </Table>
         )}
       </Section>
+      </Widgets>
     </ModulePage>
   );
 }

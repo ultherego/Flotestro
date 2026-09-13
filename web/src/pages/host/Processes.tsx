@@ -4,8 +4,10 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
+import { Breakdown, Meter } from "../../components/widgets";
 import {
-  Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, useHost, useModule,
+  Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
+  useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -60,6 +62,17 @@ export function Processes() {
   });
 
   const snapshot = module.data?.payload;
+  const listed = snapshot?.processes;
+  // The meters are read against the largest process in the slice, and the
+  // CPU column against the CPU time of the whole slice: the snapshot has no
+  // rate, so the share of the time consumed so far is what it can say.
+  const maxRss = Math.max(1, ...(listed ?? []).map((process) => process.rss_bytes));
+  const cpuTotal = (listed ?? []).reduce((sum, process) => sum + process.cpu_ticks, 0);
+  const users = Object.entries((listed ?? []).reduce<Record<string, number>>((acc, process) => {
+    const user = process.user || "?";
+    acc[user] = (acc[user] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const processes = (snapshot?.processes ?? []).filter((process) => {
     if (!filter) return true;
     const needle = filter.toLowerCase();
@@ -101,9 +114,45 @@ export function Processes() {
       <ModuleFreshness fragment={module.data} />
       <Message text={message} />
 
+      <Widgets>
+      {/* The slice by state, then by who runs it; both are dashes until the
+          host has been read. */}
+      <Summary
+        title={t("Process states")}
+        description={t("The processes in the snapshot, by their scheduler state.")}
+        span={8}
+        segments={[
+          { label: t("running"), value: countWhere(listed, (p) => p.state.startsWith("R")), tone: "ok" },
+          { label: t("sleeping"), value: countWhere(listed, (p) => p.state.startsWith("S")), tone: "neutral" },
+          { label: t("waiting on disk"), value: countWhere(listed, (p) => p.state.startsWith("D")), tone: "warn" },
+          { label: t("zombie"), value: countWhere(listed, (p) => p.state.startsWith("Z")), tone: "error" },
+          { label: t("stopped"), value: countWhere(listed, (p) => p.state.startsWith("T") || p.state.startsWith("t")), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("By user")} span={4} description={t("Who runs the most of the slice.")}>
+        {listed ? (
+          <Breakdown items={users.map(([user, count]) => ({ label: user, value: count }))} />
+        ) : (
+          <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+        )}
+        {listed && (
+          <>
+            <p className="widget-subhead">{t("Managed by")}</p>
+            <Breakdown
+              items={[
+                { label: t("units"), value: countWhere(listed, (p) => !!p.unit && !p.container) ?? 0, tone: "info" },
+                { label: t("containers"), value: countWhere(listed, (p) => !!p.container) ?? 0, tone: "info" },
+                { label: t("neither"), value: countWhere(listed, (p) => !p.unit && !p.container) ?? 0, tone: "info" },
+              ]}
+            />
+          </>
+        )}
+      </Section>
+
       <Section
         title={t("Processes")}
         count={snapshot ? processes.length : undefined}
+        span={12}
         tools={snapshot && (
           <input
             placeholder={t("Filter by command, user, unit or PID")}
@@ -132,7 +181,7 @@ export function Processes() {
             <Table>
               <thead>
                 <tr>
-                  <th className="hm-num">PID</th><th>{t("User")}</th><th className="hm-num">{t("Memory")}</th><th className="hm-num">{t("Threads")}</th>
+                  <th className="hm-num">PID</th><th>{t("User")}</th><th>{t("Memory")}</th><th>{t("CPU share")}</th><th className="hm-num">{t("Threads")}</th>
                   <th>{t("State")}</th><th>{t("Managed by")}</th><th>{t("Command")}</th><th>{t("Actions")}</th>
                 </tr>
               </thead>
@@ -141,7 +190,15 @@ export function Processes() {
                   <tr key={process.pid}>
                     <td className="hm-num">{process.pid}</td>
                     <td>{process.user || <span className="badge unknown">{t("unknown")}</span>}</td>
-                    <td className="hm-num">{bytes(process.rss_bytes)}</td>
+                    <td><Meter value={process.rss_bytes} max={maxRss} tone="info" text={bytes(process.rss_bytes)} /></td>
+                    <td>
+                      <Meter
+                        value={process.cpu_ticks}
+                        max={cpuTotal}
+                        tone="info"
+                        text={cpuTotal > 0 ? `${(process.cpu_ticks / cpuTotal * 100).toFixed(1)}%` : "—"}
+                      />
+                    </td>
                     <td className="hm-num">{process.threads}</td>
                     <td>{process.state}</td>
                     {/* The PID alone says nothing about whose process it is. */}
@@ -175,6 +232,7 @@ export function Processes() {
           </>
         )}
       </Section>
+      </Widgets>
 
       {toSignal && (
         <TargetConfirmation

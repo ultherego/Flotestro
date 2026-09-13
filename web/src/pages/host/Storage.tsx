@@ -4,9 +4,10 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
+import { Breakdown, Meter } from "../../components/widgets";
 import {
-  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
-  Stats, Table, Unknown, useHost, useModule,
+  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -96,10 +97,12 @@ export function Storage() {
 
   const mounts = snapshot?.mounts ?? [];
   const devices = snapshot?.devices ?? [];
-  // The fullest mount is the one the operator will hear about first.
-  const fullest = mounts
-    .filter((mount) => mount.mounted && mount.used_percent !== undefined)
-    .sort((a, b) => (b.used_percent ?? 0) - (a.used_percent ?? 0))[0];
+  // An unread snapshot has no mounts to count; an empty one has zero.
+  const known = snapshot?.unavailable_reason ? undefined : mounts;
+  const deviceTypes = Object.entries(devices.reduce<Record<string, number>>((acc, device) => {
+    acc[device.type] = (acc[device.type] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]);
 
   return (
     <ModulePage>
@@ -129,30 +132,50 @@ export function Storage() {
         </p>
       )}
 
-      <Stats>
-        <Stat label={t("Mounts")} value={mounts.length} />
-        <Stat label={t("Devices")} value={devices.length} />
-        <Stat
-          label={t("Space used")}
-          value={fullest ? `${fullest.used_percent}%` : <Unknown />}
-          hint={fullest ? <span className="hm-mono">{fullest.target}</span> : undefined}
-          tone={!fullest ? "unknown" : (fullest.used_percent ?? 0) >= 90 ? "error" : (fullest.used_percent ?? 0) >= 75 ? "warn" : undefined}
-        />
-        <Stat
-          label={t("Volume groups")}
-          value={snapshot?.lvm_unavailable_reason ? <Unknown /> : (snapshot?.groups ?? []).length}
-          hint={snapshot?.lvm_unavailable_reason || undefined}
-        />
-      </Stats>
-
       {wizard && <MountWizard onIntent={setIntent} />}
 
-      <Section title={t("Mounts")} count={mounts.length} flush>
+      <Widgets>
+      {/* The mounts by what they will look like after a reboot, and the ones
+          that are running out of room: the two reasons to open this page. */}
+      <Summary
+        title={t("Mounts")}
+        description={t("Mounted now against written in fstab, and the filesystems that are filling up.")}
+        span={8}
+        segments={[
+          { label: t("persistent"), value: countWhere(known, (m) => m.mounted && m.in_fstab), tone: "ok" },
+          { label: t("gone after reboot"), value: countWhere(known, (m) => m.mounted && !m.in_fstab), tone: "warn" },
+          { label: t("not mounted"), value: countWhere(known, (m) => !m.mounted && m.in_fstab), tone: "unknown" },
+          { label: t("over 80 % full"), value: countWhere(known, (m) => m.mounted && (m.used_percent ?? 0) >= 80), tone: "error" },
+        ]}
+      />
+      <Section title={t("Devices")} span={4} description={t("What the kernel sees, by kind.")}>
+        {deviceTypes.length ? (
+          <Breakdown items={deviceTypes.map(([type, count]) => ({ label: type, value: count }))} />
+        ) : (
+          <p className="source" style={{ margin: 0 }}>{t("This host reports no block device.")}</p>
+        )}
+        <p className="widget-subhead">{t("Volume groups")}</p>
+        {snapshot?.lvm_unavailable_reason ? (
+          <p className="source" style={{ margin: 0 }}>{snapshot.lvm_unavailable_reason}</p>
+        ) : !snapshot?.groups?.length ? (
+          <p className="source" style={{ margin: 0 }}>{t("This host has LVM but no volume groups.")}</p>
+        ) : (
+          <Breakdown
+            items={(snapshot?.groups ?? []).map((group) => ({
+              label: <span className="hm-mono">{group.name}</span>,
+              value: group.lv_count,
+              tone: usageTone(group.size_bytes - group.free_bytes, group.size_bytes),
+            }))}
+          />
+        )}
+      </Section>
+
+      <Section title={t("Mounts")} count={mounts.length} span={12} flush>
         <Table>
           <thead>
             <tr>
               <th>{t("Mount point")}</th><th>{t("Source")}</th><th>{t("Type")}</th><th>{t("State")}</th>
-              <th className="hm-num">{t("Space used")}</th><th className="hm-num">{t("Inodes used")}</th><th>{t("Owner")}</th><th>{t("Actions")}</th>
+              <th>{t("Space used")}</th><th>{t("Inodes used")}</th><th>{t("Owner")}</th><th>{t("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -174,23 +197,30 @@ export function Storage() {
                 </td>
                 {/* Unknown usage stays unknown: a network filesystem may not
                     report an inode count at all. */}
-                <td className="hm-num">
+                <td>
                   {mount.used_percent === undefined ? (
                     unknown
                   ) : (
-                    <>
-                      {mount.used_percent}%
-                      {mount.size_bytes !== undefined && (
-                        <span className="source"> {t("of {size}", { size: bytes(mount.size_bytes) })}</span>
-                      )}
-                    </>
+                    <Meter
+                      value={mount.used_percent}
+                      max={100}
+                      tone={usageTone(mount.used_percent, 100)}
+                      text={mount.size_bytes !== undefined
+                        ? `${mount.used_percent}% ${t("of {size}", { size: bytes(mount.size_bytes) })}`
+                        : `${mount.used_percent}%`}
+                    />
                   )}
                 </td>
-                <td className="hm-num">
+                <td>
                   {mount.inodes_used_percent === undefined ? (
                     unknown
                   ) : (
-                    `${mount.inodes_used_percent}%`
+                    <Meter
+                      value={mount.inodes_used_percent}
+                      max={100}
+                      tone={usageTone(mount.inodes_used_percent, 100)}
+                      text={`${mount.inodes_used_percent}%`}
+                    />
                   )}
                 </td>
                 <td>{mount.managed ? "Flotestro" : <span className="badge unknown">{t("host admin")}</span>}</td>
@@ -217,7 +247,7 @@ export function Storage() {
         </Table>
       </Section>
 
-      <Section title={t("Devices")} count={devices.length} flush>
+      <Section title={t("Devices")} count={devices.length} span={12} flush>
         <Table>
           <thead>
             <tr><th>{t("Device")}</th><th>{t("Type")}</th><th className="hm-num">{t("Size")}</th><th>{t("Filesystem")}</th><th>{t("Mounted at")}</th><th>{t("Identity")}</th><th>{t("Actions")}</th></tr>
@@ -323,20 +353,27 @@ export function Storage() {
       </Section>
 
       {/* The two LVM tables are narrow; side by side they fill the row. */}
-      <div className="columns">
-      <Section title={t("Volume groups")} count={snapshot?.groups?.length} flush>
+      <Section title={t("Volume groups")} count={snapshot?.groups?.length} span={snapshot?.volumes?.length ? 6 : 12} flush>
         {snapshot?.lvm_unavailable_reason ? (
           <Empty>{snapshot.lvm_unavailable_reason}</Empty>
         ) : !snapshot?.groups?.length ? (
           <Empty>{t("This host has LVM but no volume groups.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th className="hm-num">{t("Free")}</th><th className="hm-num">{t("Volumes")}</th></tr></thead>
+            <thead><tr><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Allocated")}</th><th className="hm-num">{t("Free")}</th><th className="hm-num">{t("Volumes")}</th></tr></thead>
             <tbody>
               {snapshot.groups.map((group) => (
                 <tr key={group.name}>
                   <td className="hm-mono hm-primary">{group.name}</td>
                   <td className="hm-num">{bytes(group.size_bytes)}</td>
+                  <td>
+                    <Meter
+                      value={group.size_bytes - group.free_bytes}
+                      max={group.size_bytes}
+                      tone={usageTone(group.size_bytes - group.free_bytes, group.size_bytes)}
+                      text={group.size_bytes > 0 ? `${Math.round((group.size_bytes - group.free_bytes) / group.size_bytes * 100)}%` : "—"}
+                    />
+                  </td>
                   {/* Zero free space decides whether anything can be extended
                       - and it is a number, not an absence. */}
                   <td className="hm-num">{bytes(group.free_bytes)}</td>
@@ -352,7 +389,7 @@ export function Storage() {
       </Section>
 
       {snapshot?.volumes?.length ? (
-        <Section title={t("Volumes")} count={snapshot.volumes.length} flush>
+        <Section title={t("Volumes")} count={snapshot.volumes.length} span={6} flush>
           <Table>
             <thead><tr><th>{t("Logical volume")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Actions")}</th></tr></thead>
             <tbody>
@@ -385,7 +422,7 @@ export function Storage() {
           </Table>
         </Section>
       ) : null}
-      </div>
+      </Widgets>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">

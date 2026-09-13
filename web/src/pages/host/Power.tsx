@@ -5,7 +5,7 @@ import type { Host, Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Stat, Stats, Table, useHost, useModule,
+  Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -78,6 +78,9 @@ export function Power() {
   if (!module.data) return <Empty>{t("This host has not reported its boot state yet.")}</Empty>;
 
   const blocking = (snapshot?.inhibitors ?? []).filter((inhibitor) => inhibitor.mode === "block");
+  // Unreported inhibitors are not zero inhibitors; the bar shows a dash.
+  const inhibitors = snapshot?.inhibitors_known ? snapshot.inhibitors ?? [] : undefined;
+  const known = snapshot?.unavailable_reason ? undefined : snapshot;
 
   return (
     <ModulePage>
@@ -104,34 +107,47 @@ export function Power() {
         </p>
       )}
 
-      <Stats>
-        <Stat
-          label={t("Uptime")}
-          value={snapshot?.uptime_seconds === undefined || snapshot?.uptime_seconds === null ? unknown : uptime(snapshot.uptime_seconds)}
-        />
-        <Stat
-          label={t("Reboot required")}
-          value={snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
-            ? unknown
-            : snapshot.reboot_required
-              ? t("yes")
-              : t("no")}
-          tone={snapshot?.reboot_required ? "warn" : snapshot?.reboot_required === false ? "ok" : "unknown"}
-          hint={(snapshot?.reboot_reasons ?? []).length > 0 ? snapshot!.reboot_reasons!.join(", ") : undefined}
-        />
-        <Stat
-          label={t("Inhibitors")}
-          value={!snapshot?.inhibitors_known ? unknown : (snapshot.inhibitors ?? []).length}
-          tone={!snapshot?.inhibitors_known ? "unknown" : blocking.length > 0 ? "warn" : undefined}
-        />
-      </Stats>
+      <Widgets>
+      {/* What would hold a shutdown and what asks for one, counted; beside
+          them the state of this boot. */}
+      <Summary
+        title={t("Holds and reasons")}
+        description={t("What logind would hold a shutdown for, and what asks for a reboot.")}
+        span={8}
+        segments={[
+          { label: t("blocking"), value: countWhere(inhibitors, (inhibitor) => inhibitor.mode === "block"), tone: "warn" },
+          { label: t("delaying"), value: countWhere(inhibitors, (inhibitor) => inhibitor.mode !== "block"), tone: "info" },
+          { label: t("reboot reasons"), value: known ? (known.reboot_reasons ?? []).length : undefined, tone: known?.reboot_required ? "error" : "neutral" },
+          { label: t("earlier boots"), value: known ? (known.last_boots ?? []).length : undefined, tone: "neutral" },
+        ]}
+      />
+      <Section title={t("This boot")} span={4} flush>
+        <Facts>
+          <Fact label={t("Uptime")}>
+            {snapshot?.uptime_seconds === undefined || snapshot?.uptime_seconds === null ? unknown : uptime(snapshot.uptime_seconds)}
+          </Fact>
+          <Fact label={t("Reboot required")}>
+            {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
+              ? unknown
+              : <span className={snapshot.reboot_required ? "badge warn" : "badge ok"}>{snapshot.reboot_required ? t("yes") : t("no")}</span>}
+          </Fact>
+          <Fact label={t("Inhibitors")}>
+            {!snapshot?.inhibitors_known
+              ? unknown
+              : <span className={blocking.length > 0 ? "badge warn" : "badge"}>{(snapshot.inhibitors ?? []).length}</span>}
+          </Fact>
+          <Fact label={t("Scheduled shutdown")}>
+            {snapshot?.scheduled_shutdown
+              ? <><span className="badge warn">{snapshot.scheduled_shutdown.mode}</span> <Time value={snapshot.scheduled_shutdown.at} /></>
+              : t("none")}
+          </Fact>
+        </Facts>
+      </Section>
 
       {/* What the host reports on the left; what the operator can do about
-          it on the right. Both columns are short blocks, and side by side
-          they use the width instead of running down the left edge. */}
-      <div className="columns wide">
-      <div className="stack">
-      <Section title={t("Boot")} flush>
+          it on the right. Both are short blocks, and side by side they use
+          the width instead of running down the left edge. */}
+      <Section title={t("Boot")} span={7} flush>
         <Facts>
           <Fact label={t("Boot ID")}><span className="hm-mono">{snapshot?.boot_id || unknown}</span></Fact>
           <Fact label={t("Booted")}>{snapshot?.booted_at ? <Time value={snapshot.booted_at} /> : unknown}</Fact>
@@ -152,9 +168,12 @@ export function Power() {
         </Facts>
       </Section>
 
+      <MaintenanceWindow host={host} />
+
       <Section
         title={t("Inhibitors")}
         count={snapshot?.inhibitors_known ? (snapshot.inhibitors ?? []).length : undefined}
+        span={7}
         description={t("What logind would hold a shutdown for. A delay is waited out; a block stops the operation until an operator decides otherwise.")}
         flush
       >
@@ -180,31 +199,7 @@ export function Power() {
         )}
       </Section>
 
-      <Section title={t("Last boots")} count={snapshot?.last_boots?.length} flush>
-        {!snapshot?.last_boots?.length ? (
-          <Empty>{t("The journal on this host lists no earlier boots.")}</Empty>
-        ) : (
-          <Table>
-            <thead><tr><th className="hm-num">#</th><th>{t("Boot ID")}</th><th>{t("First entry")}</th><th>{t("Last entry")}</th></tr></thead>
-            <tbody>
-              {[...snapshot.last_boots].reverse().map((boot) => (
-                <tr key={boot.boot_id}>
-                  <td className="hm-num">{boot.index}</td>
-                  <td className="hm-mono">{boot.boot_id}</td>
-                  <td><Time value={boot.first_entry} /></td>
-                  <td><Time value={boot.last_entry} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Section>
-      </div>
-
-      <div className="stack">
-      <MaintenanceWindow host={host} />
-
-      <Section title={t("Power")}>
+      <Section title={t("Power")} span={5}>
         <Form>
           <Fields>
             <Field label={t("Reason for shutting this host down")} wide>
@@ -264,8 +259,26 @@ export function Power() {
         </Form>
       </Section>
 
-      </div>
-      </div>
+      <Section title={t("Last boots")} count={snapshot?.last_boots?.length} span={12} flush>
+        {!snapshot?.last_boots?.length ? (
+          <Empty>{t("The journal on this host lists no earlier boots.")}</Empty>
+        ) : (
+          <Table>
+            <thead><tr><th className="hm-num">#</th><th>{t("Boot ID")}</th><th>{t("First entry")}</th><th>{t("Last entry")}</th></tr></thead>
+            <tbody>
+              {[...snapshot.last_boots].reverse().map((boot) => (
+                <tr key={boot.boot_id}>
+                  <td className="hm-num">{boot.index}</td>
+                  <td className="hm-mono">{boot.boot_id}</td>
+                  <td><Time value={boot.first_entry} /></td>
+                  <td><Time value={boot.last_entry} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Section>
+      </Widgets>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">
@@ -326,6 +339,7 @@ function MaintenanceWindow({ host }: { host: Host }) {
     <Section
       title={t("Maintenance window")}
       description={t("A window says somebody is working on this machine: campaigns skip it and its alerts stay quiet. It always has an end — a window without one ends as a host nobody patches and nobody remembers.")}
+      span={5}
       flush
     >
       {active ? (

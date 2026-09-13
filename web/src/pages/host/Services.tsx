@@ -3,8 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat, Stats, Table, Unknown, useHost, useModule,
+  Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
+  useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -72,7 +74,12 @@ export function Services() {
     if (!filter) return true;
     return unit.name.toLowerCase().includes(filter.toLowerCase());
   });
-  const active = allUnits.filter((unit) => unit.active_state === "active").length;
+  // The state counts come from the full listing, which exists only after a
+  // read; the failed count comes from the inventory and is known earlier.
+  // Neither is zero before it is known.
+  const listed = listing.data ? allUnits : undefined;
+  const failedCount = known ? failed.length : countWhere(listed, (unit) => unit.active_state === "failed");
+  const bootStates = ["enabled", "disabled", "static", "masked"];
 
   return (
     <ModulePage>
@@ -91,21 +98,25 @@ export function Services() {
       <ModuleFreshness fragment={module.data} />
       <Message text={message} />
 
-      {/* The tiles and the failed units share one row: both are short, and
-          the failed list is the reason to look at the tiles at all. */}
-      <div className="columns">
-      {/* An unread state must not look like no failed units. */}
-      <Stats>
-        <Stat
-          label={t("Failed units")}
-          value={known ? failed.length : <Unknown />}
-          tone={!known ? "unknown" : failed.length > 0 ? "error" : "ok"}
-        />
-        <Stat label={t("Active")} value={listing.data ? active : <Unknown />} />
-        <Stat label={t("All units")} value={listing.data ? allUnits.length : <Unknown />} />
-      </Stats>
+      <Widgets>
+      {/* An unread state must not look like no failed units: the bar shows
+          dashes until the host has been read. */}
+      <Summary
+        title={t("Unit states")}
+        description={t("Every unit the host lists, by its active state.")}
+        span={12}
+        segments={[
+          { label: t("active"), value: countWhere(listed, (unit) => unit.active_state === "active"), tone: "ok" },
+          { label: t("failed"), value: failedCount, tone: "error" },
+          { label: t("inactive"), value: countWhere(listed, (unit) => unit.active_state === "inactive"), tone: "neutral" },
+          { label: t("other"), value: countWhere(listed, (unit) => !["active", "failed", "inactive"].includes(unit.active_state)), tone: "unknown" },
+        ]}
+      />
 
-      <Section title={t("Failed units")} count={known ? failed.length : undefined} flush>
+      {/* The failed units stand beside the full list: they are the reason
+          to open the page, and the list is where the rest is found. Under
+          them, what starts at boot. */}
+      <Section title={t("Failed units")} count={known ? failed.length : undefined} span={4} flush>
         {!known ? (
           <Empty>{t("Unit states could not be determined.")}</Empty>
         ) : failed.length === 0 ? (
@@ -128,12 +139,28 @@ export function Services() {
             </tbody>
           </Table>
         )}
+        <div className="hm-section-body">
+          <p className="widget-subhead">{t("On boot")}</p>
+          {listed ? (
+            <Breakdown
+              items={[
+                ...bootStates.map((state) => ({
+                  label: state, value: countWhere(listed, (unit) => unit.unit_file_state === state) ?? 0,
+                  tone: state === "masked" ? "warn" as const : state === "enabled" ? "ok" as const : "info" as const,
+                })),
+                { label: t("other"), value: countWhere(listed, (unit) => !bootStates.includes(unit.unit_file_state ?? "")) ?? 0, tone: "info" as const },
+              ]}
+            />
+          ) : (
+            <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+          )}
+        </div>
       </Section>
-      </div>
 
       <Section
         title={t("All units")}
         count={listing.data ? units.length : undefined}
+        span={8}
         description={t("The full list is read from the host on request, not on every inventory cycle.")}
         tools={listing.data && (
           <>
@@ -219,6 +246,7 @@ export function Services() {
           </>
         )}
       </Section>
+      </Widgets>
 
       {toMask && (
         <TargetConfirmation

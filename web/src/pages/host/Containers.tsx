@@ -4,9 +4,10 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
+import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Stat, Stats, Table, Unknown, useHost, useModule,
+  Section, Summary as SummaryBar, Table, Widgets, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -227,51 +228,51 @@ export function Containers() {
       <ModuleFreshness fragment={summary.data} />
       <Message text={message} />
 
-      <Stats>
-        <Stat
-          label={t("Containers")}
-          value={state?.containers ?? <Unknown />}
-          hint={state?.running !== undefined ? t("{running} running, {stopped} stopped", { running: state.running, stopped: state.stopped ?? 0 }) : undefined}
-        />
-        <Stat
-          label={t("Unhealthy")}
-          value={state?.unhealthy ?? "—"}
-          tone={state?.unhealthy ? "error" : undefined}
-        />
-        {/* A container that keeps coming up is healthy at every single
-            moment and broken nonetheless - without this counter that is
-            not visible at all. */}
-        <Stat
-          label={t("Restart looping")}
-          value={state?.restart_looping ?? "—"}
-          tone={state?.restart_looping ? "warn" : undefined}
-        />
-        <Stat label={t("Images")} value={state?.images ?? "—"} />
-        {/* The unused counter says how much of this can be cleaned up - and
-            that is the only reason these numbers are in the summary at all. */}
-        <Stat
-          label={t("Networks")}
-          value={state?.networks ?? "—"}
-          hint={state?.networks_unused ? t("{n} unused", { n: state.networks_unused }) : undefined}
-        />
-        <Stat
-          label={t("Volumes")}
-          value={state?.volumes ?? "—"}
-          hint={state?.volumes_unused ? t("{n} unused", { n: state.volumes_unused }) : undefined}
-        />
-      </Stats>
+      <Widgets>
+      {/* The containers by state. A container that keeps coming up is
+          healthy at every single moment and broken nonetheless - without
+          the restarting slot that is not visible at all. */}
+      <SummaryBar
+        title={t("Containers")}
+        description={t("Counted by the inventory cycle; the lists below come from a read.")}
+        span={8}
+        segments={[
+          { label: t("running"), value: state?.running, tone: "ok" },
+          { label: t("unhealthy"), value: state?.unhealthy, tone: "error" },
+          { label: t("restarting"), value: state?.restart_looping, tone: "warn" },
+          { label: t("paused"), value: state?.paused, tone: "unknown" },
+          { label: t("stopped"), value: state?.stopped, tone: "neutral" },
+        ]}
+      />
 
-      {/* Two facts about the engine and the project list share a row. */}
-      <div className="columns">
-      <Section title={t("Engine")} flush>
+      {/* The engine and what it holds. The unused counters say how much of
+          this can be cleaned up - the only reason the objects are counted
+          in the summary at all. */}
+      <Section title={t("Engine")} span={4} flush>
         <Facts>
           <Fact label={t("Engine")}>{state?.engine_version || unknown}</Fact>
           <Fact label="API">{state?.api_version || "—"}</Fact>
         </Facts>
+        <div className="hm-section-body">
+          <p className="widget-subhead">{t("Objects")}</p>
+          {state?.images !== undefined || state?.networks !== undefined || state?.volumes !== undefined ? (
+            <Breakdown
+              items={[
+                { label: t("Images"), value: state?.images ?? 0, tone: "info" },
+                { label: t("Networks"), value: state?.networks ?? 0, tone: "info" },
+                { label: t("unused"), value: state?.networks_unused ?? 0, tone: "warn" },
+                { label: t("Volumes"), value: state?.volumes ?? 0, tone: "info" },
+                { label: t("unused"), value: state?.volumes_unused ?? 0, tone: "warn" },
+              ]}
+            />
+          ) : (
+            <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+          )}
+        </div>
       </Section>
 
       {state?.projects && state.projects.length > 0 && (
-        <Section title={t("Compose projects")} count={state.projects.length} flush>
+        <Section title={t("Compose projects")} count={state.projects.length} span={12} flush>
           <Table>
             <thead><tr><th>{t("Project")}</th><th>{t("Services")}</th><th className="hm-num">{t("Running")}</th></tr></thead>
             <tbody>
@@ -286,9 +287,8 @@ export function Containers() {
           </Table>
         </Section>
       )}
-      </div>
 
-      <Section title={t("Engine objects")} flush>
+      <Section title={t("Engine objects")} span={12} flush>
         <div className="tabs">
           <button className={view === "containers" ? "active" : ""} onClick={() => setView("containers")}>
             {t("Containers")}{lists?.containers?.length ? ` (${lists.containers.length})` : ""}
@@ -358,6 +358,7 @@ export function Containers() {
           </Foot>
         )}
       </Section>
+      </Widgets>
 
       {pending && (
         <TargetConfirmation

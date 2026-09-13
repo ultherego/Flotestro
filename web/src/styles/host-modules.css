@@ -15,28 +15,46 @@
 /* The page and its header.                                                */
 /* ---------------------------------------------------------------------- */
 .hm-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-/* The freshness line belongs to the header: it hangs right under the lede. */
+/* The freshness line belongs to the header: it hangs right under the band. */
 .hm-header + .hm-freshness { margin-top: -6px; }
 /* The page spaces its blocks with its gap; a warning brings no margin of
    its own here, so two of them do not open a hole. */
 .hm-page > .warning, .hm-section-body > .warning { margin: 0; }
 
+/* The header is a band, not a heading pasted above the page: the mark of
+   the module on an accent tile, the title and its one sentence, the actions
+   at the right edge, and a rule underneath that the sections hang from. */
 .hm-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px 24px;
+  gap: 12px 20px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
 }
+.hm-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.hm-mark .icon { width: 22px; height: 22px; }
 .hm-header-text { flex: 1 1 320px; min-width: 0; }
 .hm-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 650;
   letter-spacing: -0.02em;
   line-height: 1.25;
 }
-.hm-lede { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
+.hm-lede { margin: 3px 0 0; color: var(--text-muted); font-size: 13px; max-width: 90ch; line-height: 1.45; }
 /* The primary actions of the module sit on the right of the header, so the
    operator finds "read", "add" and "plan" in the same place on every page. */
 .hm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
@@ -364,3 +382,35 @@ button.hm-link:where(:hover:not(:disabled)) { background: none; text-decoration:
   .hm-table.keyed th { width: 130px; }
   .hm-columns { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------------------------------------------------------------------- */
+/* Sections on the widget grid.                                            */
+/* ---------------------------------------------------------------------- */
+/* A module page composes its blocks on the shell's twelve-column grid:
+   the summary bar across the top, then the short sections beside each
+   other and the long table across the width. A section on the grid
+   stretches to the height of its row, and its body takes the slack, so
+   two sections side by side share one bottom edge. */
+.hm-page > .widgets { margin: 0; }
+.widgets > .hm-section { display: flex; flex-direction: column; }
+.widgets > .hm-section > .hm-section-body,
+.widgets > .hm-section > .hm-table,
+.widgets > .hm-section > .empty { flex: 1 1 auto; }
+.widgets > .hm-section > .empty { display: flex; align-items: center; justify-content: center; }
+/* The status bar in a section body keeps its full height; the widgets
+   under it (a breakdown, a note) follow at the body's rhythm. */
+.hm-section-body > .status-bar { flex: none; }
+.hm-section-body > .breakdown { margin: 0; }
+.hm-section-body > .widget-subhead { margin: 2px 0 -4px; }
+/* A meter in a table cell fills its column; the text keeps its width. */
+.hm-table td > .meter { display: flex; min-width: 140px; }
+.hm-table td > .meter .meter-value { min-width: 9ch; text-align: right; }
+/* A meter as a fact's value: the bar takes the width of the fact. */
+.hm-fact dd > .meter { display: flex; }
+.hm-fact dd > .meter .meter-track { height: 10px; border-radius: 5px; }
+.hm-fact dd > .meter .meter-value { color: var(--text); font-size: 13px; }
+/* A breakdown as a fact's value: the rows start a little under the label. */
+.hm-fact dd > .breakdown { margin-top: 6px; }
+/* A short block beside a tall one keeps its facts at the top; the slack
+   goes under them, not between them. */
+.widgets > .hm-section > .hm-facts { flex: none; }

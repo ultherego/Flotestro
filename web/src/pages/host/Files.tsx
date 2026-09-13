@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost,
+  Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
+  useHost,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -86,6 +88,14 @@ export function Files() {
   const list = files.data?.items ?? [];
   const drifted = list.filter((file) => file.exists && file.drift).length;
   const missing = list.filter((file) => !file.unavailable_reason && !file.exists).length;
+  // The list is unknown until it loads; then every file is in one of four
+  // states, and a file the host could not read is in the unknown one.
+  const known = files.data ? list : undefined;
+  const unreadable = (file: ManagedFile) => !!file.unavailable_reason || !!file.drift_unknown_reason;
+  const editors = Object.entries(list.reduce<Record<string, number>>((acc, file) => {
+    acc[file.updated_by] = (acc[file.updated_by] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   return (
     <ModulePage>
@@ -100,17 +110,45 @@ export function Files() {
       />
       <Message text={message} />
 
-      {list.length > 0 && (
-        <Stats>
-          <Stat label={t("Files")} value={list.length} />
-          <Stat label={t("changed outside the panel")} value={drifted} tone={drifted > 0 ? "warn" : "ok"} />
-          <Stat label={t("missing on host")} value={missing} tone={missing > 0 ? "error" : "ok"} />
-        </Stats>
-      )}
+      <Widgets>
+      {/* The files by whether the host has what the panel expects: the
+          reason to open the page, before the list. */}
+      <Summary
+        title={t("Managed files")}
+        description={t("What the host has against what the panel expects.")}
+        span={8}
+        segments={[
+          { label: t("as expected"), value: countWhere(known, (file) => file.exists && !file.drift && !unreadable(file)), tone: "ok" },
+          { label: t("changed outside the panel"), value: known ? drifted : undefined, tone: "warn" },
+          { label: t("missing on host"), value: known ? missing : undefined, tone: "error" },
+          { label: t("unknown"), value: countWhere(known, unreadable), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Content")} span={4} description={t("Where the content comes from, and who last wrote it.")}>
+        {known ? (
+          <>
+            <Breakdown
+              items={[
+                { label: t("from the panel"), value: countWhere(known, (file) => !file.desired_secret) ?? 0, tone: "info" },
+                { label: t("from a secret"), value: countWhere(known, (file) => !!file.desired_secret) ?? 0, tone: "info" },
+                { label: t("with a validator"), value: countWhere(known, (file) => !!file.validator) ?? 0, tone: "ok" },
+              ]}
+            />
+            {editors.length > 0 && (
+              <>
+                <p className="widget-subhead">{t("Last changed by")}</p>
+                <Breakdown items={editors.map(([who, count]) => ({ label: who, value: count }))} />
+              </>
+            )}
+          </>
+        ) : (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        )}
+      </Section>
 
       {adding && <NewFile onIntent={setIntent} />}
 
-      <Section title={t("Files")} count={list.length} flush>
+      <Section title={t("Files")} count={list.length} span={12} flush>
         {!list.length ? (
           <Empty>{t("The panel does not manage any file on this host yet.")}</Empty>
         ) : (
@@ -193,6 +231,7 @@ export function Files() {
           </Table>
         )}
       </Section>
+      </Widgets>
 
       {selected && (
         <History
@@ -400,6 +439,7 @@ function NewFile({ onIntent }: { onIntent: (intent: Intent) => void }) {
     <Section
       title={t("Manage a file")}
       description={t("A file that already exists needs the checksum of the content you reviewed — read it first. Without that, a change someone made after you looked would vanish under this write.")}
+      span={12}
     >
       <Form>
         <Fields>

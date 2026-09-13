@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { Breakdown, Meter } from "../../components/widgets";
 import {
-  Fact, Facts, Foot, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost,
+  Fact, Facts, Foot, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost,
 } from "./shared";
 import { useT } from "../../i18n";
 
@@ -189,6 +190,18 @@ export function Vulnerabilities() {
   const state = data?.state;
   const findings = data?.findings ?? [];
 
+  // The affected findings by the vendor's severity and by package. Both are
+  // unknown until the report arrives - and even then they stand next to the
+  // coverage, because a host the feed does not cover shows zero too.
+  const affected = data ? findings.filter((finding) => finding.state === "affected") : undefined;
+  const severities = ["critical", "high", "medium", "low"];
+  const packages = Object.entries((affected ?? []).reduce<Record<string, number>>((acc, finding) => {
+    const name = finding.binary_package || finding.source_package || "?";
+    acc[name] = (acc[name] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const coverage = data?.coverage_percent;
+
   const visible = findings.filter((finding) => {
     if (filter === "unknown") return finding.state === "unknown";
     if (filter === "no-fix") return finding.state === "affected" && !finding.fixed_version;
@@ -231,40 +244,58 @@ export function Vulnerabilities() {
         </p>
       )}
 
+      <Widgets>
       {/* The finding counts stand next to the coverage, because without it
           they mean nothing: a host the feed does not cover and a host
           without vulnerabilities both show zero. */}
-      <Stats>
-        <Stat
-          label={t("With a vendor fix")}
-          value={state?.affected_with_vendor_fix ?? 0}
-          tone={(state?.affected_with_vendor_fix ?? 0) > 0 ? "error" : undefined}
-        />
-        <Stat
-          label={t("No fix from vendor")}
-          value={state?.affected_no_fix ?? 0}
-          tone={(state?.affected_no_fix ?? 0) > 0 ? "warn" : undefined}
-        />
-        <Stat
-          label={t("Not established")}
-          value={state?.unknown ?? 0}
-          tone={(state?.unknown ?? 0) > 0 ? "unknown" : undefined}
-        />
-        {/* Coverage rounded to a whole number turned 99.7% into "100%" -
-            "everything checked" where dozens of packages stayed outside
-            the assessment. A complete assessment has its own explicit
-            answer here. */}
-        <Stat
-          label={t("Coverage")}
-          value={`${(data?.coverage_percent ?? 0).toFixed(1)}%`}
-          hint={t("{percent}% of packages covered", { percent: (data?.coverage_percent ?? 0).toFixed(1) })}
-          tone={data?.fully_assessed ? "ok" : "warn"}
-        />
-      </Stats>
+      <Summary
+        title={t("Affected packages by severity")}
+        description={t("As the distribution vendor rates them; a package without a rating is unrated, not harmless.")}
+        span={8}
+        segments={[
+          ...severities.map((severity) => ({
+            label: severity,
+            value: countWhere(affected, (f) => f.vendor_severity === severity),
+            tone: severity === "critical" || severity === "high" ? "error" as const : severity === "medium" ? "warn" as const : "neutral" as const,
+          })),
+          { label: t("unrated"), value: countWhere(affected, (f) => !severities.includes(f.vendor_severity ?? "")), tone: "unknown" },
+          { label: t("not established"), value: state?.unknown, tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Coverage")} span={4} flush>
+        <Facts>
+          {/* Coverage rounded to a whole number turned 99.7% into "100%" -
+              "everything checked" where dozens of packages stayed outside
+              the assessment. A complete assessment has its own explicit
+              answer here. */}
+          <Fact label={t("Coverage")} wide>
+            {coverage === undefined ? "—" : (
+              <Meter
+                value={coverage}
+                max={100}
+                tone={data?.fully_assessed ? "ok" : "warn"}
+                text={t("{percent}% of packages covered", { percent: coverage.toFixed(1) })}
+              />
+            )}
+          </Fact>
+          <Fact label={t("By vendor fix")} wide>
+            {state ? (
+              <Breakdown
+                items={[
+                  { label: t("With a vendor fix"), value: state.affected_with_vendor_fix, tone: "error" },
+                  { label: t("No fix from vendor"), value: state.affected_no_fix, tone: "warn" },
+                  { label: t("Not established"), value: state.unknown, tone: "unknown" },
+                ]}
+              />
+            ) : "—"}
+          </Fact>
+        </Facts>
+      </Section>
 
       <Section
         title={t("Findings")}
         count={visible.length}
+        span={12}
         tools={
           <span className="hm-choices">
             {(["fixable", "no-fix", "unknown"] as const).map((key) => (
@@ -365,7 +396,17 @@ export function Vulnerabilities() {
         )}
       </Section>
 
-      <Section title={t("What decided this")} flush>
+      <Section title={t("Most affected packages")} span={4} description={t("Findings per package; one advisory can touch several.")}>
+        {affected === undefined ? (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        ) : !packages.length ? (
+          <p className="source" style={{ margin: 0 }}>{t("No package on this host is known to be affected.")}</p>
+        ) : (
+          <Breakdown items={packages.map(([name, count]) => ({ label: <span className="hm-mono">{name}</span>, value: count, tone: "warn" as const }))} />
+        )}
+      </Section>
+
+      <Section title={t("What decided this")} span={8} flush>
         <Facts>
           <Fact label={t("Distribution")}>{state?.distribution} {state?.release}</Fact>
           <Fact label={t("Security data")}>
@@ -405,6 +446,7 @@ export function Vulnerabilities() {
           </Fact>
         </Facts>
       </Section>
+      </Widgets>
     </ModulePage>
   );
 }

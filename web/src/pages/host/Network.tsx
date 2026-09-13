@@ -3,9 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat, Stats,
-  Table, useHost, useModule,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -100,7 +101,13 @@ export function Network() {
   const interfaces = snapshot?.interfaces ?? [];
   const visible = all ? interfaces : interfaces.filter(relevant);
   const routes = snapshot?.routes ?? [];
-  const up = interfaces.filter((iface) => iface.oper_state === "up").length;
+  // An unread snapshot has nothing to count; the bar shows dashes then.
+  const known = snapshot?.unavailable_reason ? undefined : interfaces;
+  const kinds = Object.entries(interfaces.reduce<Record<string, number>>((acc, iface) => {
+    const kind = iface.kind || t("unknown");
+    acc[kind] = (acc[kind] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
   if (!module.data) return <Empty>{t("This host has not reported its network state yet.")}</Empty>;
 
@@ -129,25 +136,45 @@ export function Network() {
         </p>
       )}
 
-      <Stats>
-        <Stat label={t("Interfaces")} value={interfaces.length} hint={`${up} ${t("up")}`} />
-        <Stat label={t("Routes")} value={routes.length} />
-        <Stat
-          label={t("Management channel")}
-          value={<span className="hm-mono">{snapshot?.management_interface || t("unknown")}</span>}
-          hint={snapshot?.management_address ? <span className="hm-mono">{snapshot.management_address}</span> : undefined}
-          tone={snapshot?.management_interface ? undefined : "unknown"}
-        />
-        <Stat
-          label={t("Write adapter")}
-          value={snapshot?.write_adapter || t("none")}
-          tone={snapshot?.write_adapter ? "ok" : "unknown"}
-        />
-      </Stats>
+      <Widgets>
+      {/* The interfaces by link state, then the channel the panel itself
+          comes through - the one whose change cuts the branch we sit on. */}
+      <Summary
+        title={t("Interfaces")}
+        description={t("Every interface the kernel lists, by its operational state.")}
+        span={8}
+        segments={[
+          { label: t("up"), value: countWhere(known, (iface) => iface.oper_state === "up"), tone: "ok" },
+          { label: t("down"), value: countWhere(known, (iface) => iface.oper_state === "down"), tone: "neutral" },
+          { label: t("other"), value: countWhere(known, (iface) => iface.oper_state !== "up" && iface.oper_state !== "down"), tone: "unknown" },
+          { label: t("Routes"), value: snapshot?.unavailable_reason ? undefined : routes.length, tone: "info" },
+        ]}
+      />
+      <Section title={t("Management channel")} span={4} flush>
+        <Facts>
+          <Fact label={t("Interface")}>
+            {snapshot?.management_interface
+              ? <span className="hm-mono">{snapshot.management_interface}</span>
+              : <span className="badge unknown">{t("unknown")}</span>}
+          </Fact>
+          <Fact label={t("Address")}>
+            {snapshot?.management_address ? <span className="hm-mono">{snapshot.management_address}</span> : "—"}
+          </Fact>
+          <Fact label={t("Write adapter")}>
+            {snapshot?.write_adapter
+              ? <span className="badge ok">{snapshot.write_adapter}</span>
+              : <span className="badge unknown">{t("none")}</span>}
+          </Fact>
+          <Fact label={t("By kind")} wide>
+            {kinds.length ? <Breakdown items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} /> : "—"}
+          </Fact>
+        </Facts>
+      </Section>
 
       <Section
         title={t("Interfaces")}
         count={visible.length}
+        span={12}
         tools={
           <label className="toggle">
             <input
@@ -240,7 +267,7 @@ export function Network() {
         />
       )}
 
-      <Section title={t("Routes")} count={routes.length} flush>
+      <Section title={t("Routes")} count={routes.length} span={12} flush>
         {!routes.length ? (
           <Empty>{t("No routes reported.")}</Empty>
         ) : (
@@ -279,6 +306,7 @@ export function Network() {
           )}
         </Foot>
       </Section>
+      </Widgets>
 
       {intent && (
         <TargetConfirmation
@@ -335,6 +363,7 @@ function InterfaceChange({
       title={t("Change {iface}", { iface: iface.name })}
       description={t("The host arms a rollback before it applies anything and cancels it only after the agent proves it can still reach the panel.")}
       tools={<button className="secondary" onClick={onCancel}>{t("Cancel")}</button>}
+      span={12}
     >
       {/* Changing the management interface is changing the branch we sit
           on: the operator is to read this before, not see it after. */}

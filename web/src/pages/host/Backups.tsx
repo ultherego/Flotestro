@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost,
+  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
+  countWhere, useHost,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -233,6 +235,13 @@ export function Backups() {
 
   const stale = definitions.filter((item) => item.status !== "ok" && item.status !== "unknown").length;
   const unverified = definitions.filter((item) => item.unverified).length;
+  // The definitions are unknown until the report loads; the bar shows
+  // dashes then, not an empty host.
+  const known = report.data ? definitions : undefined;
+  const byTool = Object.entries(definitions.reduce<Record<string, number>>((acc, item) => {
+    acc[item.tool] = (acc[item.tool] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]);
 
   return (
     <ModulePage>
@@ -259,22 +268,45 @@ export function Backups() {
       </p>
       <Message text={message} />
 
-      {definitions.length > 0 && (
-        <Stats>
-          <Stat label={t("Backups")} value={definitions.length} />
-          <Stat label={t("Need action")} value={stale} tone={stale > 0 ? "error" : "ok"} />
-          <Stat
-            label={t("Verified")}
-            value={definitions.length - unverified}
-            tone={unverified > 0 ? "warn" : "ok"}
-            hint={unverified > 0 ? `${unverified} ${t("not verified")}` : undefined}
+      <Widgets>
+      {/* The definitions by the state of their last copy, and whether
+          anyone has ever read one back: a backup nobody restored from is a
+          hope, not a backup. */}
+      <Summary
+        title={t("Backups")}
+        description={t("By the state of the last copy.")}
+        span={8}
+        segments={[
+          { label: t("fresh"), value: countWhere(known, (item) => item.status === "ok"), tone: "ok" },
+          { label: t("warning"), value: countWhere(known, (item) => item.status === "warning"), tone: "warn" },
+          { label: t("Need action"), value: countWhere(known, (item) => item.status !== "ok" && item.status !== "warning" && item.status !== "unknown" && item.status !== "never"), tone: "error" },
+          { label: t("no backup yet"), value: countWhere(known, (item) => item.status === "never"), tone: "neutral" },
+          { label: t("unknown"), value: countWhere(known, (item) => item.status === "unknown"), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Verification and tools")} span={4}>
+        {known ? (
+          <Breakdown
+            items={[
+              { label: t("Verified"), value: definitions.length - unverified, tone: "ok" },
+              { label: t("not verified"), value: unverified, tone: "warn" },
+              { label: t("Need action"), value: stale, tone: "error" },
+            ]}
           />
-        </Stats>
-      )}
+        ) : (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        )}
+        {byTool.length > 0 && (
+          <>
+            <p className="widget-subhead">{t("By tool")}</p>
+            <Breakdown items={byTool.map(([tool, count]) => ({ label: tool, value: count }))} />
+          </>
+        )}
+      </Section>
 
       {form && <DefinitionForm runbooks={runbooks} onSave={(body) => save.mutate(body)} />}
 
-      <Section title={t("Backups")} count={definitions.length} flush>
+      <Section title={t("Backups")} count={definitions.length} span={12} flush>
         {!definitions.length ? (
           <Empty>
             {t("The panel does not back up anything on this host yet. A definition says what to copy, where to and how long it stays.")}
@@ -392,9 +424,8 @@ export function Backups() {
 
       {/* The repository's copies and the run history of the chosen
           definition are both narrow; when both are open they share a row. */}
-      <div className="columns">
       {repositoryState && (
-        <Section title={t("Copies in the repository")} count={repositoryState.snapshots?.length} flush>
+        <Section title={t("Copies in the repository")} count={repositoryState.snapshots?.length} span={selected ? 6 : 12} flush>
           {repositoryState.unavailable_reason ? (
             <p className="warning">
               <span>{t("The repository could not be read: {reason}", { reason: repositoryState.unavailable_reason })}</span>
@@ -459,7 +490,7 @@ export function Backups() {
       )}
 
       {selected && (
-        <Section title={t("History of {name}", { name: selected })} count={(history.data?.items ?? []).length} flush>
+        <Section title={t("History of {name}", { name: selected })} count={(history.data?.items ?? []).length} span={repositoryState ? 6 : 12} flush>
           {!(history.data?.items ?? []).length ? (
             <Empty>{t("Nothing has run for this definition yet.")}</Empty>
           ) : (
@@ -490,7 +521,7 @@ export function Backups() {
           )}
         </Section>
       )}
-      </div>
+      </Widgets>
 
       {intent && (
         <TargetConfirmation
@@ -534,6 +565,7 @@ function DefinitionForm({
     <Section
       title={t("Backup definition")}
       description={t("The repository password is named, not pasted: the host fetches its value from the secret store once, while the backup runs, and passes it to the tool through the environment — never as a command-line argument, which every user on the host can read.")}
+      span={12}
     >
       <Form>
         <Fields>

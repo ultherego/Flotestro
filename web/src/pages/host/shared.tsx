@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useLocation, useOutletContext } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, InventoryFragment, InventoryRevision, Job } from "../../lib/types";
 import { Time } from "../../components/ui";
+import { Icon, type IconName } from "../../components/icons";
+import { StatusBar, type Segment, type WidgetTone } from "../../components/widgets";
+import { module as moduleOf } from "./modules";
 import { useT } from "../../i18n";
 
 /** The host context comes from the layout, so a tab does not fetch it again. */
@@ -47,17 +50,81 @@ export function ModulePage({ children }: { children: ReactNode }) {
   return <div className="hm-page">{children}</div>;
 }
 
+/** How many of the twelve columns of the widget grid a block takes. */
+export type Span = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12;
+
 /**
- * The module header: the title, one line on what the module shows and the
- * module's primary actions. The actions live here on every page, so the
- * operator does not hunt for "read from host" at a different place in
- * every module.
+ * The widget grid of a module page: twelve columns, and every section says
+ * how many it spans. Short blocks sit beside each other instead of each
+ * taking a row of its own with nothing at its right.
+ */
+export function Widgets({ children }: { children: ReactNode }) {
+  return <div className="widgets">{children}</div>;
+}
+
+/**
+ * The summary of a page: a status bar in a section, read before the list
+ * below it. An unknown count is a dash there, never a zero.
+ */
+export function Summary({
+  title, description, span = 12, segments, compact, children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  span?: Span;
+  segments: Segment[];
+  compact?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <Section title={title} description={description} span={span}>
+      <StatusBar segments={segments} compact={compact} />
+      {children}
+    </Section>
+  );
+}
+
+/**
+ * The tone of a share of a whole: a filesystem or a memory at four fifths
+ * is a warning, at nine tenths an error. An undetermined share is not a
+ * state at all and stays neutral.
+ */
+export function usageTone(used?: number, total?: number): WidgetTone {
+  if (used === undefined || total === undefined || total <= 0) return "neutral";
+  const share = used / total;
+  if (share >= 0.9) return "error";
+  if (share >= 0.8) return "warn";
+  return "ok";
+}
+
+/** A count of the items that satisfy a test, or undefined when the list itself is unknown. */
+export function countWhere<T>(items: T[] | undefined, test: (item: T) => boolean): number | undefined {
+  return items === undefined ? undefined : items.filter(test).length;
+}
+
+/**
+ * The module header: a band with the module's mark on an accent tile, the
+ * title, one line on what the module shows and the module's primary
+ * actions. The actions live here on every page, so the operator does not
+ * hunt for "read from host" at a different place in every module. The mark
+ * is the one of the module in the registry, found from the address, so a
+ * page does not have to name it.
  */
 export function ModuleHeader({
-  title, description, actions,
-}: { title: string; description?: ReactNode; actions?: ReactNode }) {
+  title, description, actions, icon,
+}: {
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  /** The mark of the module; without it the header takes the one of its route. */
+  icon?: IconName;
+}) {
+  const location = useLocation();
+  // The address is /hosts/:id/<segment>; the segment names the module.
+  const mark = icon ?? moduleOf(location.pathname.split("/")[3] ?? "")?.icon;
   return (
     <header className="hm-header">
+      {mark && <span className="hm-mark" aria-hidden="true"><Icon name={mark} /></span>}
       <div className="hm-header-text">
         <h2 className="hm-title">{title}</h2>
         {description && <p className="hm-lede">{description}</p>}
@@ -74,17 +141,19 @@ export function ModuleHeader({
  * edge and brings its own inset.
  */
 export function Section({
-  title, count, tools, description, flush, children,
+  title, count, tools, description, flush, span, children,
 }: {
   title: ReactNode;
   count?: number;
   tools?: ReactNode;
   description?: ReactNode;
   flush?: boolean;
+  /** The columns of the widget grid the section takes when it stands on one. */
+  span?: Span;
   children: ReactNode;
 }) {
   return (
-    <section className="hm-section">
+    <section className={span ? `hm-section span-${span}` : "hm-section"}>
       <header className="hm-section-head">
         <h3>{title}</h3>
         {count !== undefined && <span className="hm-count">{count}</span>}
@@ -125,8 +194,8 @@ export function Fact({ label, wide, children }: { label: ReactNode; wide?: boole
 }
 
 /** Summary tiles: the numbers that decide whether the rest is worth reading. */
-export function Stats({ children }: { children: ReactNode }) {
-  return <div className="hm-stats">{children}</div>;
+export function Stats({ span, children }: { span?: Span; children: ReactNode }) {
+  return <div className={span ? `hm-stats span-${span}` : "hm-stats"}>{children}</div>;
 }
 
 export function Stat({
@@ -232,8 +301,8 @@ export function ModuleFreshness({ fragment }: { fragment?: InventoryFragment<unk
  * mutating operation lands in the awaiting-approval state.
  */
 export function RequestOperation({
-  host, description, action, payload, label,
-}: { host: Host; description: string; action: string; payload: unknown; label: string }) {
+  host, description, action, payload, label, span,
+}: { host: Host; description: string; action: string; payload: unknown; label: string; span?: Span }) {
   const t = useT();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<string>("");
@@ -253,7 +322,7 @@ export function RequestOperation({
   });
 
   return (
-    <Section title={t("Request an operation")} description={description}>
+    <Section title={t("Request an operation")} description={description} span={span}>
       {/* The target repeated right at the button: the operator approves a
           specific machine, not "the host I think I have open". */}
       <p className="source" style={{ margin: 0 }}>

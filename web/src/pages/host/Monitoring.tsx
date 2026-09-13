@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table,
+  Widgets, countWhere,
   useHost,
 } from "./shared";
 import { useT } from "../../i18n";
@@ -195,7 +197,10 @@ export function Monitoring() {
   if (report.error) return <ErrorBox error={report.error} />;
   const data = report.data;
   const alerts = data?.alerts ?? [];
-  const critical = alerts.filter((alert) => alert.severity === "critical").length;
+  // Unreadable alerts are not zero alerts: the bar shows dashes then.
+  const knownAlerts = data && !data.alerts_unavailable_reason ? alerts : undefined;
+  const severities = ["critical", "warning", "info"];
+  const sources = data?.sources ?? [];
 
   return (
     <ModulePage>
@@ -238,19 +243,50 @@ export function Monitoring() {
       </p>
       <Message text={message} />
 
-      {data && (
-        <Stats>
-          <Stat
-            label={t("Active alerts")}
-            value={data.alerts_unavailable_reason ? <span className="badge unknown">{t("unknown")}</span> : alerts.length}
-            tone={data.alerts_unavailable_reason ? "unknown" : critical > 0 ? "error" : alerts.length > 0 ? "warn" : "ok"}
-          />
-          <Stat label={t("Silences in force")} value={(data.silences ?? []).length} tone={(data.silences ?? []).length > 0 ? "warn" : undefined} />
-          <Stat label={t("Metrics")} value={data.metrics_unavailable_reason ? <span className="badge unknown">{t("unknown")}</span> : (data.series ?? []).length} />
-        </Stats>
-      )}
+      <Widgets>
+      {/* The alerts by severity, with the silenced ones set apart: a
+          silenced alert is still firing, only nobody is told. */}
+      <Summary
+        title={t("Active alerts")}
+        description={t("Firing for this host, by severity; the silenced ones counted apart.")}
+        span={8}
+        segments={[
+          ...severities.map((severity) => ({
+            label: severity,
+            value: countWhere(knownAlerts, (alert) => alert.severity === severity && !alert.silenced_by?.length),
+            tone: severity === "critical" ? "error" as const : severity === "warning" ? "warn" as const : "info" as const,
+          })),
+          { label: t("other"), value: countWhere(knownAlerts, (alert) => !severities.includes(alert.severity ?? "") && !alert.silenced_by?.length), tone: "unknown" },
+          { label: t("silenced"), value: countWhere(knownAlerts, (alert) => !!alert.silenced_by?.length), tone: "neutral" },
+        ]}
+      />
+      <Section title={t("Sources")} span={4} description={t("The systems the numbers come from, and what they hold for this host.")}>
+        {!data ? (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        ) : (
+          <>
+            <Breakdown
+              items={[
+                { label: t("answering"), value: countWhere(sources, (source) => source.configured && source.healthy) ?? 0, tone: "ok" },
+                { label: t("not answering"), value: countWhere(sources, (source) => source.configured && !source.healthy) ?? 0, tone: "error" },
+                { label: t("not configured"), value: countWhere(sources, (source) => !source.configured) ?? 0, tone: "unknown" },
+              ]}
+            />
+            <p className="widget-subhead">{t("For this host")}</p>
+            <Breakdown
+              items={[
+                { label: t("Silences in force"), value: (data.silences ?? []).length, tone: "warn" },
+                { label: t("Metrics"), value: data.metrics_unavailable_reason ? 0 : (data.series ?? []).length, tone: "info" },
+              ]}
+            />
+            {data.metrics_unavailable_reason && (
+              <p className="source" style={{ margin: 0 }}>{data.metrics_unavailable_reason}</p>
+            )}
+          </>
+        )}
+      </Section>
 
-      <Section title={t("Active alerts")} count={data && !data.alerts_unavailable_reason ? alerts.length : undefined} flush>
+      <Section title={t("Active alerts")} count={data && !data.alerts_unavailable_reason ? alerts.length : undefined} span={12} flush>
         {data?.alerts_unavailable_reason ? (
           <p className="warning">
             <span>{t("Alerts could not be read: {reason}", { reason: data.alerts_unavailable_reason })}</span>
@@ -307,9 +343,9 @@ export function Monitoring() {
       </Section>
 
       {/* The silence form beside the silences it adds to. */}
-      <div className="columns">
       <Section
         title={t("Silence")}
+        span={(data?.silences ?? []).length > 0 ? 5 : 12}
         description={t("A silence turns a sensor off, so it always ends: no open-ended silences from here, at most a day, and always with a reason and an owner in the audit trail.")}
       >
         <Form>
@@ -333,7 +369,7 @@ export function Monitoring() {
       </Section>
 
       {(data?.silences ?? []).length > 0 && (
-        <Section title={t("Silences in force")} count={(data?.silences ?? []).length} flush>
+        <Section title={t("Silences in force")} count={(data?.silences ?? []).length} span={7} flush>
           <Table>
             <thead>
               <tr><th>{t("Until")}</th><th>{t("Scope")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
@@ -358,9 +394,8 @@ export function Monitoring() {
           </Table>
         </Section>
       )}
-      </div>
 
-      <Section title={t("Metrics")} count={data && !data.metrics_unavailable_reason ? (data.series ?? []).length : undefined} flush>
+      <Section title={t("Metrics")} count={data && !data.metrics_unavailable_reason ? (data.series ?? []).length : undefined} span={12} flush>
         {data?.metrics_unavailable_reason ? (
           <Empty>{data.metrics_unavailable_reason}</Empty>
         ) : (
@@ -398,6 +433,7 @@ export function Monitoring() {
 
       <Section
         title={t("Probe from this host")}
+        span={12}
         description={t("What the host itself sees. An alert can say a service is down while it answers from here — and then the problem is the network between them, not the service.")}
       >
         <Form>
@@ -442,6 +478,7 @@ export function Monitoring() {
           </Facts>
         )}
       </Section>
+      </Widgets>
     </ModulePage>
   );
 }

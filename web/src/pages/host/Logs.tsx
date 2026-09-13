@@ -4,7 +4,8 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
 import {
-  Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, useHost,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Widgets,
+  countWhere, useHost,
 } from "./shared";
 import { useJournalPreview } from "../../lib/stream";
 import { useT } from "../../i18n";
@@ -126,6 +127,12 @@ export function Logs() {
     },
   });
 
+  // The lines on screen, from the live stream or the last read, sorted
+  // by what they say of themselves. Nothing read means nothing to count.
+  const output = preview ? stream.lines : lines ?? undefined;
+  const severe = /\b(emerg|alert|crit|fatal|panic|error|err|fail(ed|ure)?)\b/i;
+  const warning = /\bwarn(ing)?\b/i;
+
   return (
     <ModulePage>
       <ModuleHeader
@@ -134,8 +141,41 @@ export function Logs() {
       />
       <Message text={errorMessage} error />
 
+      <Widgets>
+      {/* What the lines on screen say of themselves, by the words in them:
+          a rough sort, but it says at a glance whether the read is worth
+          reading line by line. */}
+      <Summary
+        title={t("Lines on screen")}
+        description={t("The lines of the last read or the live stream, by the severity words in them.")}
+        span={8}
+        segments={[
+          { label: t("errors"), value: countWhere(output, (line) => severe.test(line)), tone: "error" },
+          { label: t("warnings"), value: countWhere(output, (line) => !severe.test(line) && warning.test(line)), tone: "warn" },
+          { label: t("other"), value: countWhere(output, (line) => !severe.test(line) && !warning.test(line)), tone: "neutral" },
+          { label: t("dropped"), value: preview ? stream.dropped : undefined, tone: "unknown" },
+        ]}
+      />
+      <Section title={t("Reading")} span={4} flush>
+        <Facts>
+          <Fact label={t("Source")}>{source === "journal" ? t("journal") : t("file")}</Fact>
+          <Fact label={source === "journal" ? t("Unit") : t("Path")}>
+            <span className="hm-mono">{source === "journal" ? unit || t("all units") : path}</span>
+          </Fact>
+          <Fact label={t("Limit")}>{preview ? t("5 minutes, 32 KiB/s") : t("{n} lines", { n: lineCount })}</Fact>
+          <Fact label={t("State")}>
+            {preview
+              ? <span className={paused ? "badge warn" : "badge ok"}>{paused ? t("paused") : t("live")}</span>
+              : lines !== null
+                ? <span className="badge">{t("read")}</span>
+                : <span className="badge unknown">{t("nothing read yet")}</span>}
+          </Fact>
+        </Facts>
+      </Section>
+
       <Section
         title={t("Read")}
+        span={12}
         tools={
           <>
             <label className="toggle">
@@ -238,6 +278,7 @@ export function Logs() {
       {preview && (
         <Section
           title={t("Live")}
+          span={12}
           description={
             <>
               {t("Streaming for up to 5 minutes, capped at 32 KiB/s.")}
@@ -257,7 +298,7 @@ export function Logs() {
       )}
 
       {lines !== null && !preview && (
-        <Section title={t("Output")} count={lines.length} flush>
+        <Section title={t("Output")} count={lines.length} span={12} flush>
           {lines.length === 0 ? (
             <Empty>{t("Nothing matched.")}</Empty>
           ) : (
@@ -268,6 +309,7 @@ export function Logs() {
           {footer && <Foot><span>{footer}</span></Foot>}
         </Section>
       )}
+      </Widgets>
     </ModulePage>
   );
 }

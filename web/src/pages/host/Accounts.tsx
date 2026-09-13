@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import type { Host, Job, LocalAccount } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost,
+  Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
+  useHost,
 } from "./shared";
 import { useT } from "../../i18n";
 
@@ -43,6 +45,9 @@ export function HostAccounts() {
   const locked = accounts.filter((account) => account.locked === true).length;
   const noAccess = accounts.filter((account) =>
     account.locked === false && account.ssh_keys.length === 0 && account.password_set === false).length;
+  // The list is unknown until it loads: dashes, not an empty host.
+  const known = query.data ? accounts : undefined;
+  const sources: LocalAccount["source"][] = ["local", "directory", "system", "unknown"];
 
   return (
     <ModulePage>
@@ -57,19 +62,40 @@ export function HostAccounts() {
         </p>
       )}
 
-      {accounts.length > 0 && (
-        <Stats>
-          <Stat label={t("Accounts")} value={accounts.length} />
-          <Stat label={t("locked")} value={locked} tone={locked > 0 ? "warn" : undefined} />
-          <Stat label={t("no access")} value={noAccess} tone={noAccess > 0 ? "error" : undefined} />
-        </Stats>
-      )}
+      <Widgets>
+      {/* The accounts by how they can be entered: a key, a password, not at
+          all - and the ones nobody can say anything about. */}
+      <Summary
+        title={t("Access")}
+        description={t("How each account can be entered, as the host reports it.")}
+        span={8}
+        segments={[
+          { label: t("SSH key"), value: countWhere(known, (a) => a.locked === false && a.ssh_keys.length > 0), tone: "ok" },
+          { label: t("password"), value: countWhere(known, (a) => a.locked === false && a.ssh_keys.length === 0 && a.password_set === true), tone: "warn" },
+          { label: t("locked"), value: known ? locked : undefined, tone: "neutral" },
+          { label: t("no access"), value: known ? noAccess : undefined, tone: "error" },
+          { label: t("unknown"), value: countWhere(known, (a) => a.locked === null || (a.locked === false && a.ssh_keys.length === 0 && a.password_set === null)), tone: "unknown" },
+        ]}
+      />
+      <Section title={t("By source")} span={4} description={t("Where each account is defined.")}>
+        {!known ? (
+          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        ) : (
+          <Breakdown
+            items={sources.map((source) => ({
+              label: sourceName(t, source), value: countWhere(known, (a) => a.source === source) ?? 0,
+              tone: source === "unknown" ? "unknown" as const : "info" as const,
+            }))}
+          />
+        )}
+      </Section>
 
       {creating && <NewAccount host={host} onClose={() => setCreating(false)} />}
 
       <Section
         title={t("Accounts")}
         count={accounts.length}
+        span={12}
         tools={
           <label className="toggle">
             <input
@@ -104,6 +130,7 @@ export function HostAccounts() {
           </Table>
         )}
       </Section>
+      </Widgets>
     </ModulePage>
   );
 }
@@ -245,6 +272,7 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
     <Section
       title={t("New local account")}
       description={t("The account is created without a password; access is by SSH key only. The panel never stores or transmits passwords.")}
+      span={12}
     >
       <Form>
         <Fields>

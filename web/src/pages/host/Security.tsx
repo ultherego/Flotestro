@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat, Stats, Table, useHost, useModule,
+  Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
+  useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -192,6 +194,10 @@ export function Security() {
   const fixable = findings.filter((f) => !f.passed && !f.unknown && f.remediation?.action);
   const counts = report.data?.counts;
   const exposed = (snapshot?.listening ?? []).filter((socket) => socket.exposed).length;
+  // The failing findings by severity: what happens when nobody does
+  // anything, read before the list. Unknown until the report is computed.
+  const failing = report.data ? findings.filter((f) => f.applicable && !f.passed && !f.unknown) : undefined;
+  const severities = ["high", "medium", "low", "info"];
 
   return (
     <ModulePage>
@@ -213,29 +219,48 @@ export function Security() {
         </p>
       )}
 
+      <Widgets>
       {/* The counts of the findings decide whether the list is worth
-          reading; while the report computes, the tiles say so rather than
-          showing zeros. */}
-      <Stats>
-        <Stat
-          label={t("Need action")}
-          value={counts ? counts.failed ?? 0 : "…"}
-          tone={counts && (counts.failed ?? 0) > 0 ? "error" : counts ? "ok" : undefined}
+          reading; while the report computes, the bar shows dashes rather
+          than zeros. */}
+      <Summary
+        title={t("Checks")}
+        description={t("Every versioned check, by its verdict on this host.")}
+        span={8}
+        segments={[
+          { label: t("need action"), value: counts ? counts.failed ?? 0 : undefined, tone: "error" },
+          { label: t("passed"), value: counts ? counts.passed ?? 0 : undefined, tone: "ok" },
+          { label: t("unknown"), value: counts ? counts.unknown ?? 0 : undefined, tone: "unknown" },
+          { label: t("not applicable"), value: counts ? counts.not_applicable ?? 0 : undefined, tone: "neutral" },
+        ]}
+      />
+      <Section title={t("Need action")} span={4} description={t("By what happens when nobody does anything.")}>
+        {failing ? (
+          <Breakdown
+            items={severities.map((severity) => ({
+              label: severity,
+              value: countWhere(failing, (f) => f.severity === severity) ?? 0,
+              tone: severity === "high" ? "error" as const : severity === "info" ? "unknown" as const : "warn" as const,
+            }))}
+          />
+        ) : (
+          <p className="source" style={{ margin: 0 }}>{t("Computing findings…")}</p>
+        )}
+        <p className="widget-subhead">{t("Exposed services")}</p>
+        <Breakdown
+          items={[
+            { label: t("exposed"), value: snapshot?.listening_known ? exposed : 0, tone: "warn" },
+            { label: "loopback", value: snapshot?.listening_known ? (snapshot.listening ?? []).length - exposed : 0, tone: "ok" },
+          ]}
         />
-        <Stat label={t("Passed")} value={counts ? counts.passed ?? 0 : "…"} tone={counts ? "ok" : undefined} />
-        <Stat label={t("Unknown")} value={counts ? counts.unknown ?? 0 : "…"} tone={counts && (counts.unknown ?? 0) > 0 ? "unknown" : undefined} />
-        <Stat label={t("n/a")} value={counts ? counts.not_applicable ?? 0 : "…"} />
-        <Stat
-          label={t("Exposed services")}
-          value={snapshot?.listening_known ? exposed : unknown}
-          tone={!snapshot?.listening_known ? "unknown" : exposed > 0 ? "warn" : "ok"}
-        />
-      </Stats>
+        {!snapshot?.listening_known && (
+          <p className="source" style={{ margin: 0 }}>{t("This host did not report its listening sockets.")}</p>
+        )}
+      </Section>
 
       {/* The protective facts and the open sockets are the two short
           answers; they share a row above the findings. */}
-      <div className="columns">
-      <Section title={t("Protective state")} flush>
+      <Section title={t("Protective state")} span={5} flush>
         <Facts>
           <Fact label={t("Mandatory access control")}>
             {snapshot?.mac?.system
@@ -288,6 +313,7 @@ export function Security() {
       <Section
         title={t("Exposed services")}
         count={snapshot?.listening_known ? (snapshot.listening ?? []).length : undefined}
+        span={7}
         description={t("Sockets listening beyond the loopback interface. Each one is a way into this host for anyone who can see its network.")}
         flush
       >
@@ -319,11 +345,11 @@ export function Security() {
           </Table>
         )}
       </Section>
-      </div>
 
       <Section
         title={t("Findings")}
         count={report.data ? findings.length : undefined}
+        span={12}
         tools={
           <span className="source">
             {report.data
@@ -444,6 +470,8 @@ export function Security() {
           )}
         </Foot>
       </Section>
+
+      </Widgets>
 
       <Message text={planMessage} />
 

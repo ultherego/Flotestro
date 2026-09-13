@@ -4,9 +4,10 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
+import { Breakdown, Meter } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Stat,
-  Stats, Table, useHost, useModule,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -81,7 +82,11 @@ export function Kernel() {
     filter ? entry.name.toLowerCase().includes(filter.toLowerCase()) : true,
   );
   const settings = snapshot?.settings ?? [];
-  const pendingSettings = settings.filter((setting) => setting.desired && setting.desired !== setting.current).length;
+  // An unread kernel has nothing to count: dashes, not zeros, until then.
+  const knownSettings = snapshot?.unavailable_reason ? undefined : settings;
+  const knownModules = snapshot?.unavailable_reason ? undefined : snapshot?.modules ?? [];
+  const pending = (setting: Setting) => !!setting.desired && setting.desired !== setting.current;
+  const maxModule = Math.max(1, ...(snapshot?.modules ?? []).map((entry) => entry.size_bytes));
 
   return (
     <ModulePage>
@@ -98,25 +103,42 @@ export function Kernel() {
         </p>
       )}
 
-      {/* Two tiles and three facts: one summary row, not two thin strips. */}
-      <div className="columns">
-      <Stats>
-        <Stat label={t("Settings")} value={settings.length} hint={pendingSettings ? `${pendingSettings} ${t("not applied yet")}` : undefined} tone={pendingSettings ? "warn" : undefined} />
-        <Stat label={t("Modules")} value={(snapshot?.modules ?? []).length} hint={t("{loaded} loaded · {blocked} blocked", { loaded: (snapshot?.modules ?? []).length, blocked: (snapshot?.blacklist ?? []).length })} />
-      </Stats>
+      <Widgets>
+      {/* The settings by whether the kernel applies what was asked, then
+          the kernel itself and its modules: one summary row. */}
+      <Summary
+        title={t("Settings")}
+        description={t("The profile keys, by whether the kernel applies the desired value.")}
+        span={8}
+        segments={[
+          { label: t("applied"), value: countWhere(knownSettings, (setting) => !pending(setting) && setting.current !== undefined), tone: "ok" },
+          { label: t("not applied yet"), value: countWhere(knownSettings, pending), tone: "warn" },
+          { label: t("value unknown"), value: countWhere(knownSettings, (setting) => setting.current === undefined), tone: "unknown" },
+          { label: t("written by the panel"), value: countWhere(knownSettings, (setting) => setting.managed), tone: "info" },
+        ]}
+      />
 
-      <Section title={t("Kernel")} flush>
+      <Section title={t("Kernel")} span={4} flush>
         <Facts>
           <Fact label={t("Kernel")}><span className="hm-mono">{snapshot?.release || "—"}</span></Fact>
           <Fact label={t("Managed file")}><span className="hm-mono">{snapshot?.managed_path}</span></Fact>
           {/* Some settings can only be changed on the kernel command line
               and only after a reboot - that is why it is visible. */}
           <Fact label={t("Command line")} wide><span className="source hm-mono">{snapshot?.command_line || "—"}</span></Fact>
+          <Fact label={t("Modules")} wide>
+            {knownModules ? (
+              <Breakdown
+                items={[
+                  { label: t("loaded"), value: knownModules.length, tone: "ok" },
+                  { label: t("blocked by Flotestro"), value: (snapshot?.blacklist ?? []).length, tone: "warn" },
+                ]}
+              />
+            ) : "—"}
+          </Fact>
         </Facts>
       </Section>
-      </div>
 
-      <Section title={t("Settings")} count={settings.length} flush>
+      <Section title={t("Settings")} count={settings.length} span={12} flush>
         <Table>
           <thead>
             <tr><th>{t("Key")}</th><th>{t("Current")}</th><th>{t("Desired")}</th><th>{t("Owner")}</th></tr>
@@ -173,6 +195,7 @@ export function Kernel() {
       <Section
         title={t("Modules")}
         count={modules.length}
+        span={12}
         tools={
           <>
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter modules")} />
@@ -185,13 +208,13 @@ export function Kernel() {
       >
         <Table>
           <thead>
-            <tr><th>{t("Module")}</th><th className="hm-num">{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
+            <tr><th>{t("Module")}</th><th>{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
           </thead>
           <tbody>
             {modules.slice(0, 60).map((entry) => (
               <tr key={entry.name}>
                 <td className="hm-mono hm-primary">{entry.name}</td>
-                <td className="hm-num">{bytes(entry.size_bytes)}</td>
+                <td><Meter value={entry.size_bytes} max={maxModule} tone="info" text={bytes(entry.size_bytes)} /></td>
                 <td className="hm-mono">{(entry.used_by ?? []).join(", ") || "—"}</td>
                 <td>{entry.blacklisted ? <span className="badge warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
                 <td>
@@ -219,6 +242,7 @@ export function Kernel() {
           <Foot><span>{t("Showing 60 of {n} modules; narrow the filter to see the rest.", { n: modules.length })}</span></Foot>
         )}
       </Section>
+      </Widgets>
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">
