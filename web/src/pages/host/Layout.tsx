@@ -1,9 +1,10 @@
-import { useEffect } from "react";
-import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
+import { useEffect, useState, type CSSProperties } from "react";
+import { Outlet, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host } from "../../lib/types";
 import { ErrorBox, Empty } from "../../components/ui";
+import { HostNav } from "../../components/HostNav";
 import { useCapabilities } from "../../lib/capabilities";
 import { ContextBar } from "./ContextBar";
 import { modules, DEFAULT_MODULE } from "./modules";
@@ -24,8 +25,8 @@ export function HostLayout() {
   const host = useQuery({
     queryKey: ["host", id],
     queryFn: () => api.get<Host>(`/api/v1/hosts/${id}`),
-    // The context bar carries the connection state and the data freshness,
-    // so it must refresh itself: a stale target state is worse than none.
+    // The header carries the connection state and the data freshness, so
+    // it must refresh itself: a stale target state is worse than none.
     refetchInterval: REFRESH_INTERVAL,
   });
 
@@ -43,6 +44,21 @@ export function HostLayout() {
     };
   }, [data, segment]);
 
+  // The header sticks to the top of the content and the module navigation
+  // sticks right below it. The header's height depends on how its chips
+  // wrap, so it is measured rather than assumed; the stylesheet reads it
+  // from a custom property on the page.
+  const [header, setHeader] = useState<HTMLDivElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  useEffect(() => {
+    if (!header) return;
+    const measure = () => setHeaderHeight(header.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [header]);
+
   if (host.error) return <ErrorBox error={host.error} />;
   if (!data) return <Empty>{t("Loading…")}</Empty>;
 
@@ -55,55 +71,41 @@ export function HostLayout() {
 
   return (
     <>
-      {fromCampaign && (
-        <p className="source" style={{ margin: "0 0 8px" }}>
-          <Link to={`/campaigns/${fromCampaign}`}>← {t("Back to the campaign")}</Link>
-        </p>
-      )}
-      <ContextBar host={data} segment={segment} />
+      <ContextBar host={data} segment={segment} campaign={fromCampaign} ref={setHeader} />
 
-      <div className="tabs">
-        {list.map((item) => (
-          <NavLink
-            key={item.segment}
-            to={`/hosts/${data.id}/${item.segment}${location.search}`}
-            className={({ isActive }) =>
-              [isActive ? "active" : "", item.available ? "" : "unavailable"].join(" ").trim()
-            }
-            title={item.available ? undefined : item.missingReason}
-          >
-            {t(item.name)}
-          </NavLink>
-        ))}
+      <div className="host-page" style={{ "--host-header-height": `${headerHeight}px` } as CSSProperties}>
+        <HostNav host={data} list={list} segment={segment} />
+
+        <div className="host-content">
+          {/* A host switch that changed the module says why. Without that the
+              operator sees a different screen than they opened and does not
+              know what happened. */}
+          {rejected?.rejected && (
+            <p className="warning">
+              <span>
+                {t("{module} is not available on {host}: {reason}", { module: t(rejected.rejected), host: data.hostname, reason: rejected.reason ?? "" })}
+              </span>
+            </p>
+          )}
+
+          {/* An address outside the module registry must not end with empty
+              content: the operator is to see that no such module exists. */}
+          {!active ? (
+            <Empty>
+              {t("There is no module named \"{segment}\". Pick one from the module list.", { segment })}
+            </Empty>
+          ) : /* A module without backing on this host keeps its route and gives
+                 the reason. A vanished entry would look like a missing feature
+                 in the product. */
+          !active.available ? (
+            <Empty>
+              {t("{module} is not available on this host: {reason}.", { module: t(active.name), reason: active.missingReason })}
+            </Empty>
+          ) : (
+            <Outlet context={{ host: data }} />
+          )}
+        </div>
       </div>
-
-      {/* A host switch that changed the module says why. Without that the
-          operator sees a different screen than they opened and does not
-          know what happened. */}
-      {rejected?.rejected && (
-        <p className="warning">
-          <span>
-            {t("{module} is not available on {host}: {reason}", { module: t(rejected.rejected), host: data.hostname, reason: rejected.reason ?? "" })}
-          </span>
-        </p>
-      )}
-
-      {/* An address outside the module registry must not end with empty
-          content: the operator is to see that no such module exists. */}
-      {!active ? (
-        <Empty>
-          {t("There is no module named \"{segment}\". Pick one of the tabs above.", { segment })}
-        </Empty>
-      ) : /* A module without backing on this host keeps its route and gives
-             the reason. A vanished tab would look like a missing feature in
-             the product. */
-      !active.available ? (
-        <Empty>
-          {t("{module} is not available on this host: {reason}.", { module: t(active.name), reason: active.missingReason })}
-        </Empty>
-      ) : (
-        <Outlet context={{ host: data }} />
-      )}
     </>
   );
 }

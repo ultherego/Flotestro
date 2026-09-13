@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Ref } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
@@ -8,37 +9,66 @@ import { module as findModule } from "./modules";
 import { useT } from "../../i18n";
 
 /**
- * The persistent host context bar. An operator switching tabs must know
+ * The persistent host header. An operator switching modules must know
  * without checking anything which machine they work on - so the target
  * identity is part of the layout, not text repeated by the individual
- * screens.
+ * screens. The first line is the identity, the second the facts as chips:
+ * a fact read at a glance is a fact that gets read.
+ *
+ * The header reports its element through the ref: the module navigation
+ * sticks below it and needs its height, which depends on how the chips
+ * wrap.
  */
-export function ContextBar({ host, segment }: { host: Host; segment: string }) {
+export function ContextBar({ host, segment, campaign, ref }: {
+  host: Host;
+  segment: string;
+  /** The campaign the operator came from; it keeps the way back in view. */
+  campaign?: string | null;
+  ref?: Ref<HTMLDivElement>;
+}) {
   const t = useT();
   return (
-    <div className="host-bar">
-      <div className="host-bar-identity">
+    <div className="host-header" ref={ref}>
+      {campaign && (
+        <p className="host-header-crumb source">
+          <Link to={`/campaigns/${campaign}`}>← {t("Back to the campaign")}</Link>
+        </p>
+      )}
+      <div className="host-header-title">
+        <ConnectionDot state={host.connection_state} />
+        <h1 className="host-header-name">{host.hostname}</h1>
         <ConnectionState state={host.connection_state} />
-        <span className="name">{host.hostname}</span>
-        <ManagementAddress host={host} />
         <MaintenanceWindow host={host} />
+        {/* The switch is the same picker as in the sidebar: it keeps the open
+            module when the new host supports it and says why when it does
+            not. */}
+        <div className="host-header-switch">
+          <span>{t("Switch host")}</span>
+          <HostPicker current={host} />
+        </div>
       </div>
-      <div className="host-bar-facts">
-        <span>{host.site} / {host.environment}</span>
-        <span>{host.os_distribution || host.os_family || t("unknown OS")} {host.os_version}</span>
-        <span>{host.architecture || t("unknown arch")} · {t("agent {version}", { version: host.agent_version || t("unknown") })}</span>
-        <span>{t("seen")} <Time value={host.last_seen_at} /></span>
+      <div className="host-header-facts">
+        <ManagementAddress host={host} />
+        <span className="chip" title={t("site / environment")}>{host.site} / {host.environment}</span>
+        <span className="chip" title={t("operating system")}>
+          {host.os_distribution || host.os_family || t("unknown OS")} {host.os_version}
+        </span>
+        <span className="chip" title={t("architecture and agent version")}>
+          {host.architecture || t("unknown arch")} · {t("agent {version}", { version: host.agent_version || t("unknown") })}
+        </span>
+        <span className="chip" title={t("last seen")}>
+          {t("seen")} <Time value={host.last_seen_at} />
+        </span>
         <RefreshInventory host={host} segment={segment} />
-      </div>
-      {/* The switch is the same picker as in the sidebar: it keeps the open
-          module when the new host supports it and says why when it does
-          not. */}
-      <div className="host-toggle">
-        <span>{t("Switch host")}</span>
-        <HostPicker current={host} />
       </div>
     </div>
   );
+}
+
+/** The connection state as a dot, in the same colours as the badge. */
+function ConnectionDot({ state }: { state: Host["connection_state"] }) {
+  const kind = state === "online" ? "ok" : state === "offline" ? "error" : state === "stale" ? "warn" : "unknown";
+  return <span className={`dot ${kind}`} aria-hidden="true" />;
 }
 
 /**
@@ -109,7 +139,7 @@ function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
     ? t("ask the host to re-read its {module} module now", { module: scope })
     : t("ask the host to re-read its whole inventory now");
   return (
-    <span className="inventory-refresh">
+    <span className="chip inventory-refresh">
       <button
         type="button"
         className="link"
@@ -158,7 +188,7 @@ function ManagementAddress({ host }: { host: Host }) {
   const t = useT();
   if (!host.management_address) {
     return (
-      <span className="badge unknown" title={t("no address has been observed for this host yet")}>
+      <span className="chip unknown" title={t("no address has been observed for this host yet")}>
         {t("address unknown")}
       </span>
     );
@@ -170,9 +200,9 @@ function ManagementAddress({ host }: { host: Host }) {
         ? t("address reported by the host itself; it connects through a relay")
         : t("address set manually by an operator");
   return (
-    <span className="address" title={description}>
-      {host.management_address}
-      <span className="address-source">{host.management_address_source}</span>
+    <span className="chip" title={description}>
+      <span className="chip-mono">{host.management_address}</span>
+      <span className="chip-tag">{host.management_address_source}</span>
     </span>
   );
 }

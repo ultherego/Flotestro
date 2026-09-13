@@ -507,10 +507,10 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .host-picker.compact .host-picker-text, .host-picker.compact .host-picker-chevron { display: none; }
 .host-picker.compact .host-picker-popover { top: 0; left: calc(100% + 10px); width: 320px; }
 
-/* In the context bar the picker sits at the right edge, so the popover
+/* In the host header the picker sits at the right edge, so the popover
    opens leftwards to stay on the screen. */
-.host-toggle .host-picker { width: 240px; max-width: 100%; }
-.host-toggle .host-picker-popover { left: auto; right: 0; }
+.host-header-switch .host-picker { width: 240px; max-width: 100%; }
+.host-header-switch .host-picker-popover { left: auto; right: 0; }
 
 /* The state dot, in the badge colours. */
 .dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
@@ -725,10 +725,10 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 /* ---------------------------------------------------------------------- */
 /* The host workspace.                                                     */
 /* ---------------------------------------------------------------------- */
-/* The fixed host context bar. The target of an operation is to be visible
-   without scrolling on every tab, so the bar sticks to the top of the
-   content. */
-.host-bar {
+/* The host header card. The target of an operation is to be visible
+   without scrolling in every module, so the header sticks to the top of
+   the content; the module navigation sticks right below it. */
+.host-header {
   position: sticky;
   top: var(--topbar-height);
   z-index: 5;
@@ -737,42 +737,71 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 20px;
+  flex-direction: column;
+  gap: 8px;
 }
-.host-bar-identity {
+.host-header-crumb { margin: 0; }
+.host-header-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1 1 auto;
-  min-width: 0;
   flex-wrap: wrap;
+  min-width: 0;
 }
-.host-bar-identity .name { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-.host-bar-identity .address {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-muted);
+.host-header-title .dot { width: 10px; height: 10px; }
+.host-header-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-header-switch {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.host-header-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
+
+/* A fact chip: one value, read at a glance and never wrapped; the meaning
+   of the value is on hover. The row wraps, the chips do not. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+/* An address is read character by character, hence the fixed-width font. */
+.chip-mono { font-family: var(--font-mono); color: var(--text); }
 /* An address without its origin does not say whether the panel saw it or the host reported it. */
-.host-bar-identity .address-source {
-  font-family: inherit;
+.chip-tag {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-faint);
 }
-.host-bar-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
+/* An undetermined fact looks undetermined, not like a fact with an empty value. */
+.chip.unknown { color: var(--unknown-text); border-style: dashed; }
+
 /*
  * The inventory refresh stands among the host facts because it concerns
  * all of them: they are the picture from before the last cycle, which the
@@ -800,30 +829,92 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   opacity: 1;
 }
 .inventory-refresh .message { color: var(--text-muted); }
+/* The result of a refresh may be a whole sentence from the host; it wraps
+   rather than runs off the screen. */
+.chip.inventory-refresh { white-space: normal; }
 
-.host-toggle {
-  display: inline-flex;
+/* The host page: the module navigation in a column beside the content.
+   The column is sticky under the header, so the list of modules is in
+   reach however far down the content the operator scrolled. */
+.host-page {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  padding-top: 20px;
+}
+.host-content { min-width: 0; }
+.host-nav {
+  /* A stretched grid item is as tall as its row and has nowhere to stick,
+     so the column keeps its own height and scrolls when the screen is
+     shorter than the list. The header height is measured by the page. */
+  align-self: start;
+  position: sticky;
+  top: calc(var(--topbar-height) + var(--host-header-height, 0px) + 12px);
+  max-height: calc(100vh - var(--topbar-height) - var(--host-header-height, 0px) - 12px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+.host-nav-heading {
+  margin: 0 0 2px;
+  padding: 0 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.host-nav-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.host-nav-item {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  gap: 9px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+.host-nav-item .icon { flex: none; opacity: 0.85; }
+.host-nav-label { overflow: hidden; text-overflow: ellipsis; }
+.host-nav-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.host-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.host-nav-item.active .icon { opacity: 1; }
+/* A module without coverage on the host stays visible together with the
+   reason: a vanished entry would look like a missing product feature. */
+.host-nav-item.unavailable { opacity: 0.45; }
+.host-nav-item.unavailable.active { opacity: 0.7; }
+
+/* The narrow-screen form of the navigation: one select above the content. */
+.host-nav-select { display: none; }
+.host-nav-select label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   color: var(--text-muted);
   font-size: 12px;
 }
-.host-toggle select { font-size: 13px; padding: 4px 8px; }
+.host-nav-select select { flex: 1 1 auto; }
 
-/* The host tabs are links, because each has an address of its own. */
-.tabs a {
-  color: var(--text-muted);
-  padding: 8px 12px;
-  border-bottom: 2px solid transparent;
-  font-weight: 500;
-  white-space: nowrap;
+@media (max-width: 900px) {
+  .host-page { grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 16px; }
+  .host-nav { display: none; }
+  .host-nav-select { display: block; }
+  .host-header-name { font-size: 17px; }
+  /* The picker takes its own line: beside the name it would not fit. */
+  .host-header-switch { margin-left: 0; flex: 1 1 100%; }
+  .host-header-switch .host-picker { flex: 1 1 auto; width: auto; }
 }
-.tabs a:hover { color: var(--text); text-decoration: none; }
-.tabs a.active { color: var(--accent-text); border-bottom-color: var(--accent); }
-/* A module without coverage on the host stays visible together with the
-   reason: a vanished tab would look like a missing product feature. */
-.tabs a.unavailable { opacity: 0.4; }
+
 /* An address on the fleet list is read column-wise, hence a fixed-width font. */
 .list-address { font-family: var(--font-mono); font-size: 12px; }
 

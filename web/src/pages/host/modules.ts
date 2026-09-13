@@ -1,5 +1,6 @@
 import type { Capability, Host } from "../../lib/types";
 import type { Capabilities as InstallationCapabilities } from "../../lib/capabilities";
+import type { IconName } from "../../components/icons";
 
 /**
  * The host module registry. One source of truth for the tabs, the routes
@@ -11,6 +12,14 @@ export type Module = {
   segment: string;
   /** The English tab name; it goes through the translation catalogue. */
   name: string;
+  /**
+   * The heading the module sits under in the host navigation. Two dozen
+   * modules in one flat list are read by scanning; grouped by what they
+   * concern they are found by knowing.
+   */
+  group: ModuleGroup;
+  /** The icon beside the name in the host navigation. */
+  icon: IconName;
   /** The unavailability reason, or empty when the module works on this host. */
   reason: (host: Host, installation: InstallationCapabilities) => string;
   /**
@@ -23,6 +32,25 @@ export type Module = {
 
 /** A module disabled in the whole installation leaves no dead route. */
 export type VisibleModule = Module & { available: boolean; missingReason: string };
+
+export type ModuleGroup =
+  | "system" | "network" | "storage" | "containers" | "security" | "identity" | "observability" | "records";
+
+/**
+ * The groups in the order the navigation shows them: the machine itself
+ * first, what it talks to next, what it keeps, what it runs, and the
+ * records last. The titles are English and go through the catalogue.
+ */
+export const MODULE_GROUPS: { key: ModuleGroup; title: string }[] = [
+  { key: "system", title: "System" },
+  { key: "network", title: "Network" },
+  { key: "storage", title: "Storage and files" },
+  { key: "containers", title: "Containers" },
+  { key: "security", title: "Security" },
+  { key: "identity", title: "Identity" },
+  { key: "observability", title: "Observability" },
+  { key: "records", title: "Records" },
+];
 
 export function capability(host: Host, name: string): Capability | undefined {
   return (host.capabilities ?? []).find((item) => item.name === name);
@@ -44,47 +72,60 @@ function requires(...names: string[]) {
   };
 }
 
+// The registry is written in the order of the groups, so the flat list
+// and the grouped navigation agree on where a module stands.
 const MODULES: Module[] = [
-  { segment: "overview", name: "Overview", reason: () => "" },
-  { segment: "packages", name: "Packages", reason: requires("packages.apt", "packages.dnf"), inventory: "packages" },
-  { segment: "services", name: "Services", reason: requires("systemd"), inventory: "services" },
-  { segment: "processes", name: "Processes", reason: () => "" },
-  { segment: "containers", name: "Containers", reason: requires("docker"), inventory: "containers" },
-  { segment: "compose", name: "Compose", reason: requires("docker.compose"), inventory: "containers" },
-  { segment: "logs", name: "Logs", reason: requires("journald") },
-  { segment: "schedules", name: "Schedules", reason: requires("schedules"), inventory: "schedules" },
-  { segment: "network", name: "Network", reason: requires("network"), inventory: "network" },
-  { segment: "dns", name: "DNS", reason: requires("dns"), inventory: "dns" },
-  { segment: "firewall", name: "Firewall", reason: requires("firewall"), inventory: "firewall" },
-  { segment: "storage", name: "Storage", reason: requires("storage"), inventory: "storage" },
-  { segment: "ssh", name: "SSH", reason: requires("sshd"), inventory: "ssh" },
-  { segment: "kernel", name: "Kernel", reason: requires("kernel"), inventory: "kernel" },
-  { segment: "time", name: "Time", reason: requires("time"), inventory: "time" },
-  { segment: "power", name: "Power", reason: requires("systemd"), inventory: "power" },
-  { segment: "security", name: "Security", reason: requires("security"), inventory: "security" },
-  { segment: "certificates", name: "Certificates", reason: requires("certificates"), inventory: "certificates" },
-  { segment: "backups", name: "Backups", reason: requires("backup"), inventory: "backups" },
-  { segment: "monitoring", name: "Monitoring", reason: requires("monitoring") },
+  { segment: "overview", name: "Overview", group: "system", icon: "overview", reason: () => "" },
+  { segment: "packages", name: "Packages", group: "system", icon: "packages", reason: requires("packages.apt", "packages.dnf"), inventory: "packages" },
+  { segment: "services", name: "Services", group: "system", icon: "services", reason: requires("systemd"), inventory: "services" },
+  { segment: "processes", name: "Processes", group: "system", icon: "processes", reason: () => "" },
+  { segment: "schedules", name: "Schedules", group: "system", icon: "schedules", reason: requires("schedules"), inventory: "schedules" },
+  { segment: "kernel", name: "Kernel", group: "system", icon: "kernel", reason: requires("kernel"), inventory: "kernel" },
+  { segment: "time", name: "Time", group: "system", icon: "time", reason: requires("time"), inventory: "time" },
+  { segment: "power", name: "Power", group: "system", icon: "power", reason: requires("systemd"), inventory: "power" },
+
+  { segment: "network", name: "Network", group: "network", icon: "network", reason: requires("network"), inventory: "network" },
+  { segment: "dns", name: "DNS", group: "network", icon: "dns", reason: requires("dns"), inventory: "dns" },
+  { segment: "firewall", name: "Firewall", group: "network", icon: "firewall", reason: requires("firewall"), inventory: "firewall" },
+  { segment: "ssh", name: "SSH", group: "network", icon: "ssh", reason: requires("sshd"), inventory: "ssh" },
+
+  { segment: "storage", name: "Storage", group: "storage", icon: "storage", reason: requires("storage"), inventory: "storage" },
+  { segment: "files", name: "Files", group: "storage", icon: "files", reason: requires("files.managed"), inventory: "files" },
+  { segment: "backups", name: "Backups", group: "storage", icon: "backups", reason: requires("backup"), inventory: "backups" },
+
+  { segment: "containers", name: "Containers", group: "containers", icon: "containers", reason: requires("docker"), inventory: "containers" },
+  { segment: "compose", name: "Compose", group: "containers", icon: "compose", reason: requires("docker.compose"), inventory: "containers" },
+
+  { segment: "security", name: "Security", group: "security", icon: "security", reason: requires("security"), inventory: "security" },
   {
     segment: "vulnerabilities",
     name: "Vulnerabilities",
+    group: "security",
+    icon: "vulnerabilities",
     reason: requires("packages.apt", "packages.dnf"),
     // The panel computes vulnerabilities from the package list, so the
     // freshness comes from there.
     inventory: "packages",
   },
-  { segment: "files", name: "Files", reason: requires("files.managed"), inventory: "files" },
+  { segment: "certificates", name: "Certificates", group: "security", icon: "certificates", reason: requires("certificates"), inventory: "certificates" },
+
   {
     segment: "accounts",
     name: "Accounts",
+    group: "identity",
+    icon: "accounts",
     // Local accounts are disabled in the whole installation, not on a host.
     reason: (_host, installation) =>
       installation.local_users ? "" : "the local accounts module is disabled in this installation",
     inventory: "accounts",
   },
-  { segment: "identity", name: "Identity", reason: () => "", inventory: "identity" },
-  { segment: "jobs", name: "Jobs", reason: () => "" },
-  { segment: "audit", name: "Audit", reason: () => "" },
+  { segment: "identity", name: "Identity", group: "identity", icon: "identity", reason: () => "", inventory: "identity" },
+
+  { segment: "logs", name: "Logs", group: "observability", icon: "logs", reason: requires("journald") },
+  { segment: "monitoring", name: "Monitoring", group: "observability", icon: "monitoring", reason: requires("monitoring") },
+
+  { segment: "jobs", name: "Jobs", group: "records", icon: "jobs", reason: () => "" },
+  { segment: "audit", name: "Audit", group: "records", icon: "audit", reason: () => "" },
 ];
 
 export const DEFAULT_MODULE = "overview";
@@ -98,6 +139,19 @@ export function modules(host: Host, installation: InstallationCapabilities): Vis
 
 export function module(segment: string): Module | undefined {
   return MODULES.find((item) => item.segment === segment);
+}
+
+/**
+ * The visible modules under their group headings, in the group order. The
+ * group list is the registry's, not the host's: an unavailable module
+ * stays under its heading. A heading with nothing under it is dropped, so
+ * a group added before its modules does not show as an empty title.
+ */
+export function groupedModules(list: VisibleModule[]): { key: ModuleGroup; title: string; items: VisibleModule[] }[] {
+  return MODULE_GROUPS.map((group) => ({
+    ...group,
+    items: list.filter((item) => item.group === group.key),
+  })).filter((group) => group.items.length > 0);
 }
 
 /**

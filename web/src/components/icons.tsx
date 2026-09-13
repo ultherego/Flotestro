@@ -8,7 +8,11 @@ export type IconName =
   | "dashboard" | "hosts" | "add-host" | "jobs" | "bulk" | "campaigns"
   | "security" | "vulnerabilities" | "certificates" | "secrets"
   | "backups" | "monitoring" | "directory" | "access" | "audit"
-  | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user";
+  | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user"
+  // The host modules.
+  | "overview" | "packages" | "services" | "processes" | "schedules" | "kernel" | "time" | "power"
+  | "network" | "dns" | "firewall" | "ssh" | "storage" | "files" | "containers" | "compose"
+  | "accounts" | "identity" | "logs";
 
 const PATHS: Record<IconName, string> = {
   dashboard: "M3 3h8v8H3zM13 3h8v5h-8zM13 11h8v10h-8zM3 14h8v7H3z",
@@ -34,6 +38,27 @@ const PATHS: Record<IconName, string> = {
   "sign-out": "M10 4H5v16h5M14 8l5 4-5 4M19 12H9",
   server: "M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01",
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+  // The host modules. Each is the object the module manages, not an
+  // abstract sign, so an operator who knows the machine knows the icon.
+  overview: "M4 17a8 8 0 1 1 16 0M12 17l4-6M12 17h.01",
+  packages: "M12 3l9 4.5v9L12 21l-9-4.5v-9zM3 7.5l9 4.5 9-4.5M12 12v9",
+  services: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1",
+  processes: "M3 6h12M3 12h8M3 18h10M16 10l5 3-5 3z",
+  schedules: "M4 5h16v15H4zM4 10h16M8 3v4M16 3v4M8 14h.01M12 14h.01M16 14h.01",
+  kernel: "M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4",
+  time: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
+  power: "M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0",
+  network: "M9 3h6v6H9zM3 15h6v6H3zM15 15h6v6h-6zM12 9v3M6 15v-3h12v3",
+  dns: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18",
+  firewall: "M3 5h18v14H3zM3 9.7h18M3 14.3h18M9 5v4.7M15 9.7v4.6M9 14.3V19",
+  ssh: "M4 5h16v14H4zM8 9l3 3-3 3M13 15h4",
+  storage: "M12 3c5 0 8 1.3 8 3s-3 3-8 3-8-1.3-8-3 3-3 8-3zM4 6v12c0 1.7 3 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3 3 8 3s8-1.3 8-3",
+  files: "M6 3h8l4 4v14H6zM14 3v4h4",
+  containers: "M4 11h4v4H4zM10 11h4v4h-4zM16 11h4v4h-4zM7 5h4v4H7zM13 5h4v4h-4zM2 19h20",
+  compose: "M12 3l9 5-9 5-9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5",
+  accounts: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20a6 6 0 0 0-4-5.6",
+  identity: "M3 5h18v14H3zM7 15a3 3 0 0 1 6 0M10 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4M15 10h4M15 14h4",
+  logs: "M4 6h16M4 10h12M4 14h16M4 18h8",
 };
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {
