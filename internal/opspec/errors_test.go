@@ -16,7 +16,8 @@ func TestErrorGuidesAreComplete(t *testing.T) {
 			t.Errorf("%s is missing a stage, a retry policy, a meaning or an action: %+v", guide.Code, guide)
 		}
 	}
-	for _, excluded := range []string{"capability_missing", "maintenance", "offline", "conflict", "quarantined"} {
+	for _, excluded := range []string{"capability_missing", "maintenance", "offline", "conflict", "quarantined",
+		"skipped_offline", "offline_deadline", "plan_changed_offline"} {
 		guide, ok := ErrorGuideFor(excluded)
 		if !ok || guide.CountsAsFailure {
 			t.Errorf("%s counts as a failure of the change: %+v (%v)", excluded, guide, ok)

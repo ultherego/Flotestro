@@ -48,6 +48,10 @@ export function Bulk() {
     thresholdPercent: 20,
     thresholdCount: 0,
     rebootPolicy: "never",
+    offlinePolicy: "",
+    deadlineMinutes: 24 * 60,
+    manualGate: false,
+    connectivityLost: 0,
   });
 
   const change = (delta: Partial<Order>) =>
@@ -157,7 +161,14 @@ export function Bulk() {
       )}
       {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} />}
       {step === 2 && <EligibilityStep preview={preview.data} checking={preview.isLoading} />}
-      {step === 3 && <RolloutStep order={order} change={change} targets={eligible} />}
+      {step === 3 && (
+        <RolloutStep
+          order={order}
+          change={change}
+          targets={eligible}
+          declaredPolicy={bulk.find((item) => item.action === order.action)?.offline_policy}
+        />
+      )}
       {step === 4 && (
         <CreateStep
           order={order}
@@ -192,6 +203,16 @@ type Order = {
   thresholdPercent: number;
   thresholdCount: number;
   rebootPolicy: string;
+  // What happens to a host that is not connected when its turn comes. An
+  // empty value keeps the operation's own policy; a chosen one may only
+  // tighten it.
+  offlinePolicy: string;
+  // How long the campaign waits for offline hosts, counted from creation.
+  deadlineMinutes: number;
+  // Whether the campaign stops after the canary for a decision.
+  manualGate: boolean;
+  // How many lost sessions mid-task pause the campaign; zero disables it.
+  connectivityLost: number;
 };
 
 type Operation = {
@@ -200,6 +221,7 @@ type Operation = {
   mutating: boolean;
   campaign_mode: string;
   campaign_ready: boolean;
+  offline_policy?: string;
   risk?: string;
   payload_template?: Record<string, unknown>;
   needs_material?: boolean;
@@ -606,16 +628,38 @@ function reasonName(t: (text: string) => string, reason: string): string {
   return names[reason] ?? reason;
 }
 
+/**
+ * The offline policies, from the one that does the most with an offline host
+ * to the one that does the least. A campaign may move down this list and
+ * never up: the operation's own policy is the boundary its module drew, and
+ * the server refuses a request that loosens it.
+ */
+const OFFLINE_POLICIES = ["wait_until_deadline", "replan_on_reconnect", "skip_if_offline", "require_online"];
+
 function RolloutStep({
   order,
   change,
   targets,
+  declaredPolicy,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
   targets: number;
+  declaredPolicy?: string;
 }) {
   const t = useT();
+  const policyNames: Record<string, string> = {
+    wait_until_deadline: t("wait for the host until the deadline"),
+    replan_on_reconnect: t("wait, then compute the plan again when the host is back"),
+    skip_if_offline: t("leave the host out, not a failure"),
+    require_online: t("skip the host and say it was offline"),
+  };
+  // Only the policies at least as strict as the operation's own are offered;
+  // the rest would be refused anyway, and a refusal after the form is filled
+  // in is worse than a shorter list with the reason next to it.
+  const declaredIndex = declaredPolicy ? OFFLINE_POLICIES.indexOf(declaredPolicy) : -1;
+  const offered = OFFLINE_POLICIES.filter((policy, index) =>
+    index >= declaredIndex && (policy !== "replan_on_reconnect" || declaredPolicy === "replan_on_reconnect"));
   return (
     <Card
       title={`4. ${t("Rollout")}`}
@@ -657,6 +701,37 @@ function RolloutStep({
             <option value="always">{t("reboot: always")}</option>
           </select>
         </Field>
+        <Field label={t("connectivity loss threshold")}
+          hint={t("Pause once this many hosts lose their session mid-task; 0 turns the check off. A change that cuts hosts off shows up here, not among the failures.")}>
+          <input type="number" min={0} value={order.connectivityLost}
+            onChange={(e) => change({ connectivityLost: +e.target.value })} />
+        </Field>
+        <Field label={t("Offline policy")}
+          hint={declaredPolicy
+            ? t("The operation declares {policy}; a campaign may only tighten it.", { policy: declaredPolicy })
+            : t("What happens to a host that is not connected when its turn comes.")}>
+          <select value={order.offlinePolicy}
+            onChange={(e) => change({ offlinePolicy: e.target.value })}>
+            <option value="">{t("as the operation declares")}</option>
+            {offered.map((policy) => (
+              <option key={policy} value={policy}>{policy}: {policyNames[policy]}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t("Deadline for offline hosts (minutes)")}
+          hint={t("Counted from the creation; a host still offline by then is left out with a reason.")}>
+          <input type="number" min={1} value={order.deadlineMinutes}
+            onChange={(e) => change({ deadlineMinutes: +e.target.value })} />
+        </Field>
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={order.manualGate}
+            disabled={order.canary <= 0}
+            onChange={(e) => change({ manualGate: e.target.checked })}
+          />{" "}
+          {t("stop after the canary until somebody advances the campaign")}
+        </label>
       </FieldGrid>
     </Card>
   );
@@ -695,6 +770,10 @@ function CreateStep({
         failure_threshold_percent: order.thresholdPercent,
         failure_threshold_absolute: order.thresholdCount,
         reboot_policy: order.rebootPolicy,
+        offline_policy: order.offlinePolicy || undefined,
+        deadline_minutes: order.deadlineMinutes,
+        manual_gate: order.manualGate && order.canary > 0,
+        connectivity_lost_absolute: order.connectivityLost,
       }),
     onSuccess: (campaign) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });

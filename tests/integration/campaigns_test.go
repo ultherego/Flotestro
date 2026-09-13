@@ -42,6 +42,12 @@ type campaignView struct {
 	ApprovedBy          string `json:"approved_by"`
 	PausedBy            string `json:"paused_by"`
 	PauseReason         string `json:"pause_reason"`
+	// The offline policy the campaign really runs under, the moment it
+	// stops waiting for offline hosts, and the record of the manual gate.
+	OfflinePolicy  string     `json:"offline_policy"`
+	DeadlineAt     *time.Time `json:"deadline_at"`
+	ManualGate     bool       `json:"manual_gate"`
+	GateAdvancedBy string     `json:"gate_advanced_by"`
 }
 
 type campaignTargetView struct {
@@ -84,8 +90,13 @@ func (h *harness) createCampaign(body map[string]any) campaignView {
 func (h *harness) approveCampaign(campaign campaignView) campaignView {
 	h.t.Helper()
 	var approved campaignView
+	// A critical operation is approved with a reason, like everywhere the
+	// authentication is refreshed; the record keeps it.
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
-		map[string]any{"approval_fingerprint": campaign.ApprovalFingerprint},
+		map[string]any{
+			"approval_fingerprint": campaign.ApprovalFingerprint,
+			"reason":               "integration test of " + campaign.Name,
+		},
 		&approved, http.StatusOK)
 	return approved
 }
@@ -4687,5 +4698,233 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 	targets := h.campaignTargets(campaign.ID)
 	if len(targets) != 1 || targets[0].State != "failed" || targets[0].ErrorCode != "plan_stale" {
 		t.Fatalf("campaign %s; the host was not stopped on the expired plan: %+v", final.State, targets)
+	}
+}
+
+// TestOfflinePolicySkipsAHostThatIsNotConnected guards the answer a
+// campaign gives for a host that is not connected when its turn comes: the
+// policy decides, and the host is closed with a reason rather than passed
+// over in silence. A synthetic host never connects, so it stands in for
+// every unplugged machine of a real fleet.
+func TestOfflinePolicySkipsAHostThatIsNotConnected(t *testing.T) {
+	h := newHarness(t)
+	offline := h.enrollSyntheticHost(t)
+	if offline.ConnectionState == "online" {
+		t.Fatalf("the synthetic host %s is connected", offline.Hostname)
+	}
+
+	cases := map[string]string{
+		"skip_if_offline": "skipped_offline",
+		"require_online":  "offline",
+	}
+	for policy, code := range cases {
+		t.Run(policy, func(t *testing.T) {
+			campaign := h.createCampaign(labCampaign("offline "+policy, "cron.service", map[string]any{
+				"selector":       map[string]any{"host_ids": []string{offline.ID}},
+				"offline_policy": policy,
+			}))
+			if campaign.OfflinePolicy != policy {
+				t.Fatalf("the campaign runs under %q, asked for %q", campaign.OfflinePolicy, policy)
+			}
+			h.approveCampaign(campaign)
+
+			final := h.awaitCampaign(campaign.ID,
+				map[string]bool{"completed": true, "failed": true, "paused": true}, 90*time.Second)
+			// A skipped host is not a failure: the campaign closes as
+			// completed, with the host visible and its reason given.
+			if final.State != "completed" {
+				t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+			}
+			targets := h.campaignTargets(campaign.ID)
+			if len(targets) != 1 {
+				t.Fatalf("the snapshot has %d hosts, expected 1", len(targets))
+			}
+			target := targets[0]
+			if target.State != "skipped" || target.ErrorCode != code {
+				t.Errorf("target = %s/%s, expected skipped/%s (%s)",
+					target.State, target.ErrorCode, code, target.Message)
+			}
+			if target.Message == "" {
+				t.Error("the host was skipped without a reason")
+			}
+		})
+	}
+}
+
+// TestWaitingPolicyClosesTheHostAtTheDeadline guards the bound on
+// waiting: a host queued offline takes no slot, and a campaign does not wait
+// for it without end. The deadline is short here; a real one is a day.
+func TestWaitingPolicyClosesTheHostAtTheDeadline(t *testing.T) {
+	h := newHarness(t)
+	offline := h.enrollSyntheticHost(t)
+
+	campaign := h.createCampaign(labCampaign("offline deadline", "cron.service", map[string]any{
+		"selector":         map[string]any{"host_ids": []string{offline.ID}},
+		"offline_policy":   "wait_until_deadline",
+		"deadline_minutes": 1,
+	}))
+	if campaign.DeadlineAt == nil {
+		t.Fatal("the campaign has no deadline")
+	}
+	// The clocks of the panel and of the test runner may differ a little;
+	// the check is that the deadline is minutes away rather than a day.
+	if wait := time.Until(*campaign.DeadlineAt); wait > 5*time.Minute || wait < -time.Minute {
+		t.Fatalf("the deadline lies %s away, expected about a minute", wait)
+	}
+	h.approveCampaign(campaign)
+
+	// The host enters the offline queue first: visible, with a reason, and
+	// without a slot.
+	queued := false
+	for deadline := time.Now().Add(45 * time.Second); time.Now().Before(deadline) && !queued; {
+		for _, target := range h.campaignTargets(campaign.ID) {
+			if target.State == "queued_offline" {
+				queued = true
+				if target.ErrorCode != "offline" || target.Message == "" {
+					t.Errorf("a queued host without a reason: %s (%s)", target.ErrorCode, target.Message)
+				}
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if !queued {
+		t.Error("the host never appeared in the offline queue")
+	}
+
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+	targets := h.campaignTargets(campaign.ID)
+	if len(targets) != 1 {
+		t.Fatalf("the snapshot has %d hosts, expected 1", len(targets))
+	}
+	if target := targets[0]; target.State != "skipped" || target.ErrorCode != "offline_deadline" {
+		t.Errorf("target = %s/%s, expected skipped/offline_deadline (%s)",
+			target.State, target.ErrorCode, target.Message)
+	}
+}
+
+// TestManualGateStopsAfterTheCanary guards the stop the document asks for
+// between the canary and the waves: with the gate set, the campaign waits
+// for a person after the canary, and only an explicit advance lets the
+// waves go.
+func TestManualGateStopsAfterTheCanary(t *testing.T) {
+	h := newHarness(t)
+	// The unit exists on the debian family; a host without it would fail
+	// the canary for a reason that has nothing to do with the gate.
+	online := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" && len(online) < 2 {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
+	}
+
+	campaign := h.createCampaign(labCampaign("manual gate", "cron.service", map[string]any{
+		"selector":    map[string]any{"host_ids": online},
+		"canary_size": 1,
+		"wave_size":   1,
+		"manual_gate": true,
+	}))
+	if !campaign.ManualGate {
+		t.Fatal("the campaign does not record the manual gate")
+	}
+	// Nothing to advance yet: the gate is a state, not a flag.
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/advance",
+		map[string]any{"reason": "too early"}, nil, http.StatusConflict)
+	h.approveCampaign(campaign)
+
+	gated := h.awaitCampaign(campaign.ID,
+		map[string]bool{"manual_gate": true, "completed": true, "failed": true, "paused": true}, 2*time.Minute)
+	if gated.State != "manual_gate" {
+		t.Fatalf("the campaign reached %s instead of the gate (%s)", gated.State, gated.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		switch {
+		case target.Wave == 0 && target.State != "succeeded":
+			t.Errorf("canary host %s is %s at the gate", target.Hostname, target.State)
+		case target.Wave > 0 && target.State != "pending":
+			t.Errorf("host %s of wave %d started before the gate was opened: %s",
+				target.Hostname, target.Wave, target.State)
+		}
+	}
+
+	// The gate can be paused like any other phase; the decision is not
+	// forced.
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/pause",
+		map[string]any{"reason": "not now"}, nil, http.StatusOK)
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/resume", nil, nil, http.StatusOK)
+	back := h.awaitCampaign(campaign.ID,
+		map[string]bool{"manual_gate": true, "completed": true, "failed": true}, 60*time.Second)
+	if back.State != "manual_gate" {
+		t.Fatalf("after the pause the campaign is %s, expected the gate again", back.State)
+	}
+
+	var advanced campaignView
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/advance",
+		map[string]any{"reason": "the canary looks good"}, &advanced, http.StatusOK)
+	if advanced.State != "running" || advanced.GateAdvancedBy == "" {
+		t.Fatalf("after advancing the campaign is %s, advanced by %q", advanced.State, advanced.GateAdvancedBy)
+	}
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 2*time.Minute)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.State != "succeeded" {
+			t.Errorf("host %s ended %s/%s", target.Hostname, target.State, target.ErrorCode)
+		}
+	}
+}
+
+// TestOfflinePolicyMayOnlyBeTightened guards the boundary the registry
+// draws: a reboot requires the host online, and a campaign that would wait
+// a day for a host to reboot it is exactly the order that must not exist.
+func TestOfflinePolicyMayOnlyBeTightened(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	var response struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	h.do(http.MethodPost, "/api/v1/campaigns", map[string]any{
+		"name": "loosened reboot", "action": "system.reboot",
+		"payload":        map[string]any{"reboot": map[string]any{"delay_seconds": 15, "reason": "test"}},
+		"selector":       map[string]any{"host_ids": []string{host.ID}},
+		"offline_policy": "wait_until_deadline",
+	}, &response, http.StatusBadRequest)
+	if response.Code != "offline_policy_loosened" {
+		t.Fatalf("refusal code = %q (%s)", response.Code, response.Detail)
+	}
+	if !strings.Contains(response.Detail, "require_online") {
+		t.Errorf("the refusal does not name the declared policy: %s", response.Detail)
+	}
+
+	// The catalogue says what every operation declares, so the wizard can
+	// offer only what the server will accept.
+	var catalogue struct {
+		Items []struct {
+			Action        string `json:"action"`
+			OfflinePolicy string `json:"offline_policy"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/actions", &catalogue)
+	declared := map[string]string{}
+	for _, item := range catalogue.Items {
+		declared[item.Action] = item.OfflinePolicy
+	}
+	for action, policy := range map[string]string{
+		"system.reboot": "require_online", "unit.restart": "wait_until_deadline",
+		"packages.upgrade": "replan_on_reconnect", "inventory.refresh": "skip_if_offline",
+	} {
+		if declared[action] != policy {
+			t.Errorf("%s declares %q, expected %s", action, declared[action], policy)
+		}
 	}
 }

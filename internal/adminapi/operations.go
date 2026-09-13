@@ -548,6 +548,9 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		// latter and explains a refusal with the former.
 		CampaignMode  string `json:"campaign_mode"`
 		CampaignReady bool   `json:"campaign_ready"`
+		// OfflinePolicy is what a campaign does with a host that is not
+		// connected when its turn comes; a campaign may only tighten it.
+		OfflinePolicy string `json:"offline_policy"`
 		// CampaignRefusal carries the reason the operation cannot be ordered
 		// in bulk. A refusal without a reason looks in the interface like a
 		// missing feature, while it is often a boundary drawn deliberately.
@@ -581,6 +584,7 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			Risk:               string(action.Risk()),
 			LockClass:          action.LockClass(),
 			CampaignMode:       string(action.CampaignMode()),
+			OfflinePolicy:      string(action.OfflinePolicy()),
 			CampaignReady:      ready,
 			CampaignRefusal:    reason,
 		})

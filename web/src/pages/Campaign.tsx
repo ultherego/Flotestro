@@ -29,6 +29,10 @@ export function Campaign() {
   const [approving, setApproving] = useState(false);
   const [approvalReason, setApprovalReason] = useState("");
   const [changeTicket, setChangeTicket] = useState("");
+  // The manual gate: the canary ran, and going on into the waves is a
+  // decision somebody signs with a reason, like every other control.
+  const [advancing, setAdvancing] = useState(false);
+  const [advanceReason, setAdvanceReason] = useState("");
   // The plan the operator opened from the target table. A plan summary is
   // several lines and the windowed table needs rows of one fixed height, so
   // the plan is shown below the table for one host at a time.
@@ -75,24 +79,34 @@ export function Campaign() {
   // The progress of the campaign's running operations, per host.
   const progress = useProgress(id ? `/api/v1/campaigns/${id}/events` : null);
 
-  const control = useMutation({
-    mutationFn: (operation: string) =>
-      api.post(`/api/v1/campaigns/${id}/${operation}`, operation === "approve" ? {
-        // The approval carries the fingerprint of the campaign currently on
-        // screen. When the campaign changed since it was loaded, the server
-        // refuses instead of transferring the consent onto something else.
+  // Every control carries a reason. The approval carries the fingerprint of
+  // the campaign currently on screen as well: when the campaign changed
+  // since it was loaded, the server refuses instead of transferring the
+  // consent onto something else.
+  const controlBody = (operation: string) => {
+    if (operation === "approve") {
+      return {
         approval_fingerprint: campaign.data?.approval_fingerprint,
         reason: approvalReason.trim(),
         change_ticket: changeTicket.trim(),
-      } : {
-        reason: stopReason.trim() || "from the panel",
-      }),
+      };
+    }
+    if (operation === "advance") {
+      return { reason: advanceReason.trim() || "from the panel" };
+    }
+    return { reason: stopReason.trim() || "from the panel" };
+  };
+  const control = useMutation({
+    mutationFn: (operation: string) =>
+      api.post(`/api/v1/campaigns/${id}/${operation}`, controlBody(operation)),
     onSuccess: () => {
       setPendingStop(null);
       setStopReason("");
       setApproving(false);
       setApprovalReason("");
       setChangeTicket("");
+      setAdvancing(false);
+      setAdvanceReason("");
       queryClient.invalidateQueries({ queryKey: ["campaign", id] });
       queryClient.invalidateQueries({ queryKey: ["campaign-targets", id] });
     },
@@ -106,7 +120,8 @@ export function Campaign() {
   // started will not start, a host mid-operation finishes on its own - no
   // campaign action here interrupts work on a host or rolls it back.
   const totals = report.data?.totals ?? {};
-  const notStarted = (totals.pending ?? 0) + (totals.awaiting_budget ?? 0) + (totals.planning ?? 0);
+  const offlineQueued = totals.queued_offline ?? 0;
+  const notStarted = (totals.pending ?? 0) + (totals.awaiting_budget ?? 0) + (totals.planning ?? 0) + offlineQueued;
   const underWay = (totals.running ?? 0) + (totals.rebooting ?? 0) + (totals.verifying ?? 0);
 
   const succeeded = totals.succeeded ?? 0;
@@ -123,7 +138,10 @@ export function Campaign() {
             {data.state === "awaiting_approval" && (
               <button onClick={() => { setPendingStop(null); setApproving(true); }}>{t("Approve")}</button>
             )}
-            {["canary", "running", "planned"].includes(data.state) && (
+            {data.state === "manual_gate" && (
+              <button onClick={() => { setPendingStop(null); setAdvancing(true); }}>{t("Advance to the waves")}</button>
+            )}
+            {["canary", "running", "planned", "manual_gate"].includes(data.state) && (
               <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
             )}
             {data.state === "paused" && (
@@ -155,6 +173,30 @@ export function Campaign() {
             </Field>
             <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
               <input value={changeTicket} onChange={(e) => setChangeTicket(e.target.value)} placeholder="CHG-1234" />
+            </Field>
+          </FieldGrid>
+          {control.error && <p className="warning"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
+        </Card>
+      )}
+
+      {advancing && data.state === "manual_gate" && (
+        <Card
+          title={t("Advance to the waves?")}
+          description={t("The canary is settled. {succeeded} hosts succeeded and {failed} failed; the remaining {notStarted} hosts start in waves of {wave} once you advance. The decision is recorded with your identity and the reason.", {
+            succeeded, failed, notStarted, wave: data.wave_size,
+          })}
+          footer={
+            <Actions>
+              <button onClick={() => control.mutate("advance")} disabled={control.isPending}>
+                {t("Advance to the waves")}
+              </button>
+              <button className="secondary" onClick={() => setAdvancing(false)}>{t("Back")}</button>
+            </Actions>
+          }
+        >
+          <FieldGrid>
+            <Field label={t("Reason (kept in the audit trail)")} wide>
+              <input value={advanceReason} onChange={(e) => setAdvanceReason(e.target.value)} />
             </Field>
           </FieldGrid>
           {control.error && <p className="warning"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
@@ -196,6 +238,9 @@ export function Campaign() {
           <Stat label={t("In progress")} value={underWay} />
           <Stat label={t("Succeeded")} value={succeeded} tone={succeeded > 0 ? "ok" : undefined} />
           <Stat label={t("Failed")} value={failed} tone={failed > 0 ? "error" : undefined} />
+          {offlineQueued > 0 && (
+            <Stat label={t("Waiting for connection")} value={offlineQueued} tone="warn" />
+          )}
         </StatGrid>
       )}
 
@@ -206,6 +251,18 @@ export function Campaign() {
           <Pair label={t("Concurrent hosts")}>{data.max_concurrent}</Pair>
           <Pair label={t("Failure threshold")}>{t("{percent}% or {count} hosts", { percent: data.failure_threshold_percent, count: data.failure_threshold_absolute })}</Pair>
           <Pair label={t("Reboot policy")}>{data.reboot_policy}</Pair>
+          <Pair label={t("Offline policy")}>{data.offline_policy}</Pair>
+          <Pair label={t("Waits for offline hosts until")}>{data.deadline_at ? <Time value={data.deadline_at} /> : "—"}</Pair>
+          <Pair label={t("Manual gate after the canary")}>
+            {!data.manual_gate ? t("no") : data.gate_advanced_by
+              ? t("advanced by {who}", { who: data.gate_advanced_by })
+              : t("yes")}
+          </Pair>
+          <Pair label={t("Connectivity loss threshold")}>
+            {data.connectivity_lost_absolute > 0
+              ? t("{count} hosts", { count: data.connectivity_lost_absolute })
+              : t("off")}
+          </Pair>
           <Pair label={t("Approved by")}>{data.approved_by || "—"}</Pair>
           <Pair label={t("Approval fingerprint")}>
             <span className="mono" title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
@@ -237,6 +294,28 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
+        </Card>
+      )}
+
+      {/* A host that came back with a different plan ran nothing: the
+          consent covered the old plan, and the operator is to see which
+          hosts need a new one rather than count them among the skipped. */}
+      {report.data?.plan_changed && report.data.plan_changed.length > 0 && (
+        <Card
+          tone="warn"
+          title={t("Plans changed after a reconnect")}
+          description={t("These hosts came back with a state that gives a different plan than the one approved. Nothing ran on them; order a new campaign to approve the new plans.")}
+        >
+          <ul>
+            {report.data.plan_changed.map((target) => (
+              <li key={target.host_id}>
+                <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                  {target.hostname || target.host_id.slice(0, 8)}
+                </Link>
+                {target.message && <> — {target.message}</>}
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
 

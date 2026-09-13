@@ -85,6 +85,14 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	}
 	campaignID := uuid.NewString()
 
+	// The policy is recorded as resolved: an empty value would leave the
+	// orchestrator to guess, and a guess about an offline host is exactly
+	// what the policy exists to replace. It is resolved before the
+	// fingerprint, so the consent covers the policy that really applies.
+	if spec.OfflinePolicy == "" {
+		spec.OfflinePolicy = opspec.ActionType(spec.ActionType).OfflinePolicy()
+	}
+
 	// The fingerprint comes from the same description that reaches the
 	// database. The approval will have to quote it, so the consent concerns
 	// this list of hosts and this policy rather than the campaign identifier
@@ -94,6 +102,8 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		return nil, err
 	}
 
+	// The deadline is counted from the creation, in the database's clock:
+	// the same clock the orchestrator compares it with later.
 	const insert = `
 		insert into campaigns (id, name, action_type, payload, selector, state,
 		                       canary_size, wave_size, max_concurrent,
@@ -101,8 +111,11 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		                       maintenance_start, maintenance_end, reboot_policy,
 		                       health_check_units, job_timeout_seconds,
 		                       requires_approval, created_by, request_id,
-		                       approval_fingerprint, idempotency_key)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		                       approval_fingerprint, idempotency_key,
+		                       offline_policy, deadline_at, manual_gate,
+		                       connectivity_lost_absolute)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+		        $22, now() + make_interval(mins => $23), $24, $25)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
 	tag, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
 		string(state), spec.CanarySize, spec.WaveSize, spec.MaxConcurrent,
@@ -110,7 +123,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		spec.MaintenanceStart, spec.MaintenanceEnd, string(spec.RebootPolicy),
 		healthChecks, spec.JobTimeoutSeconds,
 		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID),
-		fingerprint, nullable(spec.IdempotencyKey))
+		fingerprint, nullable(spec.IdempotencyKey),
+		string(spec.OfflinePolicy), int(spec.Deadline()/time.Minute), spec.ManualGate,
+		spec.ConnectivityLostAbsolute)
 	if err != nil {
 		return nil, fmt.Errorf("creating the campaign: %w", err)
 	}
@@ -245,11 +260,13 @@ func (s *Store) Approvals(ctx context.Context, campaignID string) ([]Approval, e
 }
 
 // Pause holds a campaign back. The hosts already started finish their tasks.
+// A campaign standing at the manual gate can be paused too: the gate is a
+// question, and a pause is the answer "not now".
 func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, paused_by = $3, paused_at = now(),
 		                     pause_reason = $4, updated_at = now()
-		where id = $1 and state in ('planned', 'canary', 'running')
+		where id = $1 and state in ('planned', 'canary', 'manual_gate', 'running')
 		returning id`
 	var updated string
 	err := s.pool.QueryRow(ctx, query, campaignID, string(StatePaused), actor, nullable(reason)).Scan(&updated)
@@ -302,14 +319,37 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		return nil, err
 	}
 
-	// The hosts that have not started will not be started.
+	// The hosts that have not started will not be started - the ones
+	// waiting for their connection included.
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets set state = 'canceled', finished_at = now()
-		where campaign_id = $1 and state in ('pending', 'awaiting_budget')`,
+		where campaign_id = $1 and state in ('pending', 'awaiting_budget', 'queued_offline')`,
 		campaignID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, campaignID)
+}
+
+// Advance lets a campaign standing at the manual gate into the waves. The
+// decision is recorded on the campaign: who let it through and when, so
+// that a later return to the queue of an offline canary host does not
+// close the gate again.
+func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaign, error) {
+	const query = `
+		update campaigns set state = $2, gate_advanced_by = $3, gate_advanced_at = now(),
+		                     updated_at = now()
+		where id = $1 and state = $4
+		returning id`
+	var updated string
+	err := s.pool.QueryRow(ctx, query, campaignID, string(StateRunning), actor,
+		string(StateManualGate)).Scan(&updated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrConflict
+	}
+	if err != nil {
 		return nil, err
 	}
 	return s.Get(ctx, campaignID)
@@ -533,9 +573,10 @@ func (s *Store) ActiveTargets(ctx context.Context) (map[string]string, error) {
 		select t.host_id, t.campaign_id
 		  from campaign_targets t
 		  join campaigns c on c.id = t.campaign_id
-		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running')
-		   and t.state in ('pending', 'planning', 'awaiting_budget', 'running',
-		                   'rebooting', 'verifying')`
+		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary',
+		                   'manual_gate', 'running')
+		   and t.state in ('pending', 'planning', 'awaiting_budget', 'queued_offline',
+		                   'running', 'rebooting', 'verifying')`
 	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -634,7 +675,9 @@ const campaignColumns = `
 	       job_timeout_seconds, requires_approval, approval_fingerprint, plan_set_hash,
 	       coalesce(approved_by, ''), approved_at, coalesce(paused_by, ''),
 	       coalesce(pause_reason, ''), coalesce(canceled_by, ''),
-	       created_by, coalesce(request_id, ''), started_at, finished_at, created_at, updated_at
+	       created_by, coalesce(request_id, ''), started_at, finished_at, created_at, updated_at,
+	       offline_policy, deadline_at, manual_gate, coalesce(gate_advanced_by, ''),
+	       gate_advanced_at, connectivity_lost_absolute
 	from campaigns `
 
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Campaign, error) {
@@ -657,7 +700,9 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.JobTimeoutSeconds, &c.RequiresApproval, &c.ApprovalFingerprint, &c.PlanSetHash,
 			&c.ApprovedBy, &c.ApprovedAt, &c.PausedBy, &c.PauseReason, &c.CanceledBy,
 			&c.CreatedBy, &c.RequestID, &c.StartedAt, &c.FinishedAt,
-			&c.CreatedAt, &c.UpdatedAt); err != nil {
+			&c.CreatedAt, &c.UpdatedAt,
+			&c.OfflinePolicy, &c.DeadlineAt, &c.ManualGate, &c.GateAdvancedBy,
+			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)
@@ -813,7 +858,7 @@ func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetS
 			error_code  = $3,
 			message     = $4,
 			started_at  = coalesce(t.started_at,
-			                       case when $2 not in ('pending', 'awaiting_budget')
+			                       case when $2 not in ('pending', 'awaiting_budget', 'queued_offline')
 			                            then now() end),
 			finished_at = case when $2 in ('succeeded', 'failed', 'skipped', 'canceled')
 			                   then now() else t.finished_at end,

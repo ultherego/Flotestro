@@ -40,6 +40,8 @@ function stateMeaning(state: string): string {
     planning: "Every host computes its own plan; nothing is applied yet.",
     planned: "The plans are in; the campaign waits for the consent.",
     awaiting_budget: "The host is ready, but the fleet or the site has no capacity now; it starts when a token frees up.",
+    queued_offline: "The host was not connected when its turn came; the campaign waits for it without a slot until its deadline, then leaves it out.",
+    manual_gate: "The canary is settled; nothing more starts until somebody advances the campaign into the waves.",
     pending: "In the snapshot, waiting for its wave.",
     rebooting: "The host is rebooting; done only when it comes back with a new boot ID.",
     verifying: "The change is applied; the post-change check is running.",

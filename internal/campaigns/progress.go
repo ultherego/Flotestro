@@ -21,6 +21,10 @@ func (o *Orchestrator) progressTarget(ctx context.Context, campaign Campaign, ta
 		return o.afterReboot(ctx, campaign, target)
 	case TargetVerifying:
 		return o.afterHealthCheck(ctx, campaign, target)
+	case TargetPlanning:
+		// Outside the planning phase a planning host is one that came back
+		// from being offline and computes its plan again.
+		return o.afterReplan(ctx, campaign, target)
 	default:
 		return nil
 	}
@@ -39,8 +43,18 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 		return nil
 	}
 	if job.State != jobs.StateSucceeded {
-		o.finishTarget(ctx, campaign, target, TargetFailed,
-			job.ResultErrorCode, job.ResultMessage)
+		code, message := orDefault(job.ResultErrorCode, string(job.State)), job.ResultMessage
+		// A broken session is told apart from a failed change: the outcome
+		// on the host is unknown, and the campaign counts such hosts against
+		// its own threshold.
+		lost, detail, err := o.connectivityLost(ctx, job, target)
+		if err != nil {
+			return err
+		}
+		if lost {
+			code, message = ConnectivityLostCode, detail
+		}
+		o.finishTarget(ctx, campaign, target, TargetFailed, code, message)
 		return nil
 	}
 

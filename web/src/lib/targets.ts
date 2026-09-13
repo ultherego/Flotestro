@@ -50,6 +50,6 @@ export function loadedTargets(data?: { pages: TargetPage[] }): CampaignTarget[] 
 
 /** The states a target can be in, for the filter. */
 export const TARGET_STATES = [
-  "pending", "awaiting_budget", "planning", "running", "rebooting", "verifying",
+  "pending", "awaiting_budget", "queued_offline", "planning", "running", "rebooting", "verifying",
   "succeeded", "failed", "skipped", "ineligible", "canceled",
 ];

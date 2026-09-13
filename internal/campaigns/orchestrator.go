@@ -107,13 +107,16 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		}
 	}
 
-	failed, finished := 0, 0
+	failed, finished, lost := 0, 0, 0
 	for _, target := range targets {
 		if target.State.Finished() {
 			finished++
 		}
 		if target.State == TargetFailed {
 			failed++
+		}
+		if target.ConnectivityLost() {
+			lost++
 		}
 	}
 
@@ -122,9 +125,22 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		campaign.FailureThresholdPercent, campaign.FailureThresholdAbsolute); exceeded {
 		return o.pauseOnThreshold(ctx, campaign, reason, failed, finished)
 	}
+	// A lost session is a different signal from a failed change: a firewall
+	// campaign that cuts hosts off looks like hosts that merely stopped
+	// answering. It has its own threshold, and the first case can be enough.
+	if campaign.ConnectivityLostAbsolute > 0 && lost >= campaign.ConnectivityLostAbsolute {
+		return o.pauseOnConnectivityLoss(ctx, campaign, lost)
+	}
 
 	if allFinished(targets) {
 		return o.complete(ctx, campaign, targets, failed)
+	}
+
+	// The hosts waiting for their connection are looked at on every pass,
+	// whatever wave they belong to: one that came back goes to the queue,
+	// one that did not by the deadline is closed.
+	if err := o.serviceOfflineQueue(ctx, campaign, targets); err != nil {
+		return err
 	}
 
 	// A maintenance window holds back the start of new hosts but does not
@@ -135,6 +151,8 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 
 	wave := currentWave(targets)
 	if wave < 0 {
+		// Everything is settled or queued offline: nothing to start until a
+		// host comes back or the deadline closes the queue.
 		return nil
 	}
 	// A wave starts only once the previous one is settled in full. The canary
@@ -144,8 +162,19 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		return nil
 	}
 
+	// The manual gate: the canary is settled and the campaign asked for a
+	// decision before the waves. Nothing starts until somebody advances it;
+	// the gate opens once, and a canary host coming back from being offline
+	// later does not close it again.
+	if wave > 0 && campaign.ManualGate && campaign.GateAdvancedAt == nil {
+		return o.enterGate(ctx, campaign)
+	}
+
 	desiredState := StateRunning
-	if wave == 0 {
+	// The canary phase is entered once. A canary host that comes back from
+	// being offline while the waves run is started under the running state,
+	// not by turning the campaign back into a canary.
+	if wave == 0 && campaign.State != StateRunning {
 		desiredState = StateCanary
 	}
 	if campaign.State != desiredState {
@@ -177,6 +206,12 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		if target.Wave != wave || !target.State.Waiting() {
 			continue
 		}
+		// A host waiting for its connection belongs to the offline queue,
+		// which is walked before the wave: it comes back here as pending -
+		// or, under replan_on_reconnect, only after its plan is checked.
+		if target.State == TargetQueuedOffline {
+			continue
+		}
 		if running >= campaign.MaxConcurrent {
 			return nil
 		}
@@ -186,10 +221,14 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			o.finishTarget(ctx, campaign, target, TargetSkipped, "host_unavailable", err.Error())
 			continue
 		}
-		// A disconnected host is not a campaign failure: the task would wait
-		// in the queue anyway, but then the concurrency limit would block the
-		// whole wave.
+		// A disconnected host is handled by the campaign's offline policy:
+		// skipped with a reason, or queued without a slot until it comes
+		// back. Passing it over in silence would leave the wave standing
+		// still with no reason given.
 		if host.ConnectionState != "online" {
+			if err := o.holdOffline(ctx, campaign, target, host); err != nil {
+				return err
+			}
 			continue
 		}
 		// The creator's right is checked again, per host, right before the
@@ -374,11 +413,13 @@ func allFinished(targets []Target) bool {
 	return true
 }
 
-// currentWave returns the lowest wave that still has unfinished targets.
+// currentWave returns the lowest wave that still has targets to start or
+// to settle. A host queued offline does not hold its wave: it is looked
+// after separately and joins the queue again when it comes back.
 func currentWave(targets []Target) int {
 	wave := -1
 	for _, target := range targets {
-		if target.State.Finished() {
+		if !target.State.HoldsWave() {
 			continue
 		}
 		if wave < 0 || target.Wave < wave {
@@ -388,13 +429,14 @@ func currentWave(targets []Target) int {
 	return wave
 }
 
-// waveFinished says whether every target of the given wave is settled.
+// waveFinished says whether every target of the given wave is settled or
+// waiting for its connection.
 func waveFinished(targets []Target, wave int) bool {
 	if wave < 0 {
 		return true
 	}
 	for _, target := range targets {
-		if target.Wave == wave && !target.State.Finished() {
+		if target.Wave == wave && target.State.HoldsWave() {
 			return false
 		}
 	}

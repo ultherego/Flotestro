@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"time"
 
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
@@ -61,6 +62,20 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 			if done {
 				settled++
 			}
+		case TargetQueuedOffline:
+			// A host that was offline when its plan was ordered: back to the
+			// queue when it returns, closed when the deadline passes. The
+			// planning phase must not wait without end either.
+			returned, err := o.recheckOfflinePlanning(ctx, campaign, target)
+			if err != nil {
+				return err
+			}
+			if returned {
+				if err := o.orderPlan(ctx, campaign, target, action,
+					opspec.ActionType(campaign.ActionType), payload); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -78,9 +93,10 @@ func (o *Orchestrator) orderPlan(ctx context.Context, campaign Campaign, target 
 		o.finishTarget(ctx, campaign, target, TargetSkipped, "host_unavailable", err.Error())
 		return nil
 	}
-	// A disconnected host is not a planning failure: the plan waits for it to come back.
+	// A disconnected host is not a planning failure. The offline policy
+	// says whether the plan waits for it, and until when.
 	if host.ConnectionState != "online" {
-		return nil
+		return o.holdOffline(ctx, campaign, target, host)
 	}
 
 	jobID, err := o.submitJob(ctx, campaign, host, action, planPayload(action, change, payload),
@@ -100,6 +116,32 @@ func (o *Orchestrator) orderPlan(ctx context.Context, campaign Campaign, target 
 	o.log.Info("the campaign is planning a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", jobID)
 	return nil
+}
+
+// recheckOfflinePlanning looks at a host that was offline when its plan was
+// ordered. It returns true when the host is back and may be planned now.
+func (o *Orchestrator) recheckOfflinePlanning(ctx context.Context, campaign Campaign,
+	target *Target) (bool, error) {
+	host, err := o.hosts.Get(ctx, target.HostID)
+	if err != nil {
+		o.finishTarget(ctx, campaign, target, TargetSkipped, "host_unavailable", err.Error())
+		return false, nil
+	}
+	if host.ConnectionState != "online" {
+		if pastDeadline(campaign, time.Now()) {
+			o.finishTarget(ctx, campaign, target, TargetSkipped, "offline_deadline",
+				"the host is "+host.ConnectionState+" and the campaign's deadline "+
+					campaign.DeadlineAt.UTC().Format(time.RFC3339)+" has passed")
+		}
+		return false, nil
+	}
+	if err := o.store.UpdateTarget(ctx, target.ID, TargetPending, "",
+		"the host came back; its plan is ordered"); err != nil {
+		return false, err
+	}
+	target.State = TargetPending
+	target.ErrorCode = ""
+	return true, nil
 }
 
 // collectPlan records the result of planning on a host. It returns true once

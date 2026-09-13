@@ -191,3 +191,64 @@ func TestTheFingerprintChangesWithEveryDecision(t *testing.T) {
 		})
 	}
 }
+
+// TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave guards the two things
+// the offline queue exists for: such a host is not working, so it takes no
+// concurrency slot, and it is not a verdict, so it does not keep its wave
+// open - otherwise one unplugged machine would hold the fleet until the
+// deadline.
+func TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave(t *testing.T) {
+	if !TargetQueuedOffline.Waiting() {
+		t.Error("a host queued offline should wait in the queue")
+	}
+	if TargetQueuedOffline.Finished() {
+		t.Error("a host queued offline has not finished")
+	}
+	if TargetQueuedOffline.HoldsWave() {
+		t.Error("a host queued offline holds its wave open")
+	}
+	for _, state := range []TargetState{TargetPending, TargetRunning, TargetAwaitingBudget, TargetPlanning} {
+		if !state.HoldsWave() {
+			t.Errorf("%s does not hold its wave open", state)
+		}
+	}
+	if !(Target{State: TargetFailed, ErrorCode: ConnectivityLostCode}).ConnectivityLost() {
+		t.Error("a failed host with an expired lease does not count as a lost connection")
+	}
+	if (Target{State: TargetFailed, ErrorCode: "exec_failed"}).ConnectivityLost() {
+		t.Error("a failed change counts as a lost connection")
+	}
+}
+
+// TestTheGateAndTheOfflinePolicyAreValidated guards the rules of the new
+// rollout fields: a gate needs a canary, a policy has to be one the registry
+// knows, and the bounds cannot be negative.
+func TestTheGateAndTheOfflinePolicyAreValidated(t *testing.T) {
+	valid := Spec{Name: "test", CanarySize: 1, WaveSize: 10, MaxConcurrent: 5,
+		RebootPolicy: RebootNever, ManualGate: true, OfflinePolicy: "wait_until_deadline",
+		DeadlineMinutes: 60, ConnectivityLostAbsolute: 1}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("a valid description was rejected: %v", err)
+	}
+	if valid.Deadline() != time.Hour {
+		t.Errorf("deadline = %s, expected an hour", valid.Deadline())
+	}
+	if (Spec{}).Deadline() != DefaultDeadline {
+		t.Error("a missing deadline is not the default one")
+	}
+	cases := map[string]func(*Spec){
+		"a gate without a canary":   func(s *Spec) { s.CanarySize = 0 },
+		"an unknown offline policy": func(s *Spec) { s.OfflinePolicy = "sometimes" },
+		"a negative deadline":       func(s *Spec) { s.DeadlineMinutes = -1 },
+		"a negative loss threshold": func(s *Spec) { s.ConnectivityLostAbsolute = -1 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			spec := valid
+			mutate(&spec)
+			if err := spec.Validate(); err == nil {
+				t.Fatal("an invalid description passed validation")
+			}
+		})
+	}
+}

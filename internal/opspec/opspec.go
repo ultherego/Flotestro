@@ -341,6 +341,10 @@ type Spec struct {
 	// CampaignMode says whether the operation may run in bulk and on what
 	// terms. A missing declaration means a refusal.
 	CampaignMode CampaignMode `json:"campaign_mode"`
+	// OfflinePolicy says what a campaign does with a host that is not
+	// connected when its turn comes. A campaign may tighten it, never
+	// loosen it.
+	OfflinePolicy OfflinePolicy `json:"offline_policy"`
 	// RequiresPlan marks an operation that must not be ordered without a plan
 	// approved by a human. The plan hash binds the approval to one specific
 	// diff.
@@ -361,6 +365,7 @@ func (a ActionType) Describe() Spec {
 		MaxOutputBytes: spec.maxOutputBytes,
 		LockClass:      spec.lockClass,
 		CampaignMode:   a.CampaignMode(),
+		OfflinePolicy:  a.OfflinePolicy(),
 		RequiresPlan:   spec.requiresPlan,
 	}
 }

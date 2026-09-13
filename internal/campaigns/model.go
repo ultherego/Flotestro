@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // State is the state of a campaign.
@@ -25,11 +27,16 @@ const (
 	StatePlanned          State = "planned"
 	StateAwaitingApproval State = "awaiting_approval"
 	StateCanary           State = "canary"
-	StateRunning          State = "running"
-	StatePaused           State = "paused"
-	StateCompleted        State = "completed"
-	StateFailed           State = "failed"
-	StateCanceled         State = "canceled"
+	// StateManualGate is the stop after the canary: the campaign asked for
+	// an explicit decision before the waves, and nothing starts until an
+	// operator advances it. Like a pause, it waits for a human rather than
+	// for the machinery.
+	StateManualGate State = "manual_gate"
+	StateRunning    State = "running"
+	StatePaused     State = "paused"
+	StateCompleted  State = "completed"
+	StateFailed     State = "failed"
+	StateCanceled   State = "canceled"
 )
 
 // Active says whether the campaign is under way.
@@ -65,21 +72,36 @@ const (
 	// but the host stays in the snapshot, because nobody can manage something
 	// that disappears silently.
 	TargetIneligible TargetState = "ineligible"
-	TargetRunning    TargetState = "running"
-	TargetRebooting  TargetState = "rebooting"
-	TargetVerifying  TargetState = "verifying"
-	TargetSucceeded  TargetState = "succeeded"
-	TargetFailed     TargetState = "failed"
-	TargetSkipped    TargetState = "skipped"
-	TargetCanceled   TargetState = "canceled"
+	// TargetQueuedOffline marks a host that was not connected when its turn
+	// came and whose campaign waits for it. It takes no slot and no budget
+	// token: nothing runs on it. It goes back to the queue when the host
+	// comes back and ends skipped when the campaign's deadline passes.
+	TargetQueuedOffline TargetState = "queued_offline"
+	TargetRunning       TargetState = "running"
+	TargetRebooting     TargetState = "rebooting"
+	TargetVerifying     TargetState = "verifying"
+	TargetSucceeded     TargetState = "succeeded"
+	TargetFailed        TargetState = "failed"
+	TargetSkipped       TargetState = "skipped"
+	TargetCanceled      TargetState = "canceled"
 )
 
 // Waiting says whether the host is ready to start but has not started yet.
 //
 // Waiting for a budget is the same place in the queue as pending: the host
-// takes no slot and asks for capacity again on every pass.
+// takes no slot and asks for capacity again on every pass. A host queued
+// offline waits in the same place - for its connection rather than for a
+// token.
 func (t TargetState) Waiting() bool {
-	return t == TargetPending || t == TargetAwaitingBudget
+	return t == TargetPending || t == TargetAwaitingBudget || t == TargetQueuedOffline
+}
+
+// HoldsWave says whether the host keeps its wave open. A host queued
+// offline does not: the wave's verdict comes from the hosts that ran, and
+// the offline one gets its turn when it comes back - otherwise a single
+// unplugged machine would hold the whole fleet until the deadline.
+func (t TargetState) HoldsWave() bool {
+	return !t.Finished() && t != TargetQueuedOffline
 }
 
 // Finished says whether the host has finished taking part in the campaign.
@@ -143,11 +165,37 @@ type Spec struct {
 	HealthCheckUnits         []string
 	JobTimeoutSeconds        int
 	RequiresApproval         bool
+	// OfflinePolicy says what happens to a host that is not connected when
+	// its turn comes. Empty means the operation's own policy; the handler
+	// resolves it before the campaign is created, so the record always
+	// carries the policy that really applies.
+	OfflinePolicy opspec.OfflinePolicy
+	// DeadlineMinutes bounds the wait for offline hosts, counted from the
+	// creation. Zero means the default of a day.
+	DeadlineMinutes int
+	// ManualGate stops the campaign after the canary until an operator
+	// advances it into the waves.
+	ManualGate bool
+	// ConnectivityLostAbsolute pauses the campaign once that many hosts
+	// lost their session while their task ran. Zero disables the check.
+	ConnectivityLostAbsolute int
 	CreatedBy                string
 	RequestID                string
 	// IdempotencyKey lets a caller repeat the order without a second
 	// campaign; empty means every order is new.
 	IdempotencyKey string
+}
+
+// DefaultDeadline is how long a campaign waits for offline hosts when the
+// order names no deadline.
+const DefaultDeadline = 24 * time.Hour
+
+// Deadline returns the wait for offline hosts as a duration.
+func (s Spec) Deadline() time.Duration {
+	if s.DeadlineMinutes <= 0 {
+		return DefaultDeadline
+	}
+	return time.Duration(s.DeadlineMinutes) * time.Minute
 }
 
 // Validate checks that the description of the campaign holds together.
@@ -173,6 +221,20 @@ func (s Spec) Validate() error {
 	if s.MaintenanceStart != nil && s.MaintenanceEnd != nil &&
 		!s.MaintenanceEnd.After(*s.MaintenanceStart) {
 		return fmt.Errorf("the maintenance window ends before it starts")
+	}
+	if s.OfflinePolicy != "" && !opspec.KnownOfflinePolicy(s.OfflinePolicy) {
+		return fmt.Errorf("unknown offline policy %q", s.OfflinePolicy)
+	}
+	if s.DeadlineMinutes < 0 {
+		return fmt.Errorf("the deadline must not be negative")
+	}
+	if s.ConnectivityLostAbsolute < 0 {
+		return fmt.Errorf("the connectivity loss threshold must not be negative")
+	}
+	// A gate after the canary needs a canary to gate on; without one it
+	// would stop the campaign before anything ran at all.
+	if s.ManualGate && s.CanarySize <= 0 {
+		return fmt.Errorf("a manual gate needs a canary")
 	}
 	return nil
 }
@@ -250,6 +312,13 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 			Timeout          int          `json:"job_timeout_seconds"`
 			WindowFrom       *time.Time   `json:"maintenance_start,omitempty"`
 			WindowTo         *time.Time   `json:"maintenance_end,omitempty"`
+			// What happens to an offline host, how long the campaign waits
+			// for it, whether it stops after the canary and when a loss of
+			// connectivity halts it are decisions the approver read too.
+			Offline          opspec.OfflinePolicy `json:"offline_policy"`
+			DeadlineMinutes  int                  `json:"deadline_minutes"`
+			ManualGate       bool                 `json:"manual_gate"`
+			ConnectivityLost int                  `json:"connectivity_lost_absolute"`
 		} `json:"rollout"`
 	}{Version: CampaignVersion, Action: spec.ActionType, Payload: payload, Targets: hosts}
 	content.Rollout.Canary = spec.CanarySize
@@ -262,6 +331,10 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 	content.Rollout.Timeout = spec.JobTimeoutSeconds
 	content.Rollout.WindowFrom = spec.MaintenanceStart
 	content.Rollout.WindowTo = spec.MaintenanceEnd
+	content.Rollout.Offline = spec.OfflinePolicy
+	content.Rollout.DeadlineMinutes = int(spec.Deadline() / time.Minute)
+	content.Rollout.ManualGate = spec.ManualGate
+	content.Rollout.ConnectivityLost = spec.ConnectivityLostAbsolute
 
 	encoded, err := json.Marshal(content)
 	if err != nil {
@@ -318,6 +391,20 @@ type Campaign struct {
 	HealthCheckUnits         []string        `json:"health_check_units"`
 	JobTimeoutSeconds        int             `json:"job_timeout_seconds"`
 	RequiresApproval         bool            `json:"requires_approval"`
+	// OfflinePolicy is what the campaign does with a host that is not
+	// connected when its turn comes; DeadlineAt is how long it waits for
+	// such a host under a waiting policy.
+	OfflinePolicy opspec.OfflinePolicy `json:"offline_policy"`
+	DeadlineAt    *time.Time           `json:"deadline_at,omitempty"`
+	// ManualGate stops the campaign after the canary; the gate fields say
+	// who let it into the waves and when.
+	ManualGate     bool       `json:"manual_gate"`
+	GateAdvancedBy string     `json:"gate_advanced_by,omitempty"`
+	GateAdvancedAt *time.Time `json:"gate_advanced_at,omitempty"`
+	// ConnectivityLostAbsolute is the number of hosts that may lose their
+	// session mid-task before the campaign pauses; zero means no such
+	// check.
+	ConnectivityLostAbsolute int `json:"connectivity_lost_absolute"`
 	// ApprovalFingerprint is the fingerprint of what the approver sees. A
 	// consent given against a different fingerprint concerns a different
 	// campaign.
@@ -368,6 +455,23 @@ type Report struct {
 	Failures   []Target       `json:"failures"`
 	// RebootPending are the hosts that still wait for a reboot after the change.
 	RebootPending []string `json:"reboot_pending,omitempty"`
+	// PlanChanged are the hosts that came back from being offline with a
+	// state that gives a different plan than the approved one. They ran
+	// nothing: the consent covered the old plan.
+	PlanChanged []Target `json:"plan_changed,omitempty"`
+	// OfflineQueued are the hosts still waiting for their connection.
+	OfflineQueued []string `json:"offline_queued,omitempty"`
+}
+
+// ConnectivityLostCode is the error code of a host whose session broke
+// while its task ran. The outcome on the host is unknown, and the
+// campaign counts such hosts separately from failures of the change.
+const ConnectivityLostCode = "lease_expired"
+
+// ConnectivityLost says whether the host ended because its session broke
+// while its task ran rather than because the change failed.
+func (t Target) ConnectivityLost() bool {
+	return t.State == TargetFailed && t.ErrorCode == ConnectivityLostCode
 }
 
 // WaveSummary describes one wave.

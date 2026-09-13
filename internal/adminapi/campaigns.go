@@ -38,6 +38,22 @@ type createCampaignRequest struct {
 	HealthCheckUnits         []string   `json:"health_check_units,omitempty"`
 	JobTimeoutSeconds        *int       `json:"job_timeout_seconds,omitempty"`
 	RequiresApproval         *bool      `json:"requires_approval,omitempty"`
+	// OfflinePolicy overrides what the operation declares for a host that
+	// is not connected when its turn comes. It may only tighten the
+	// declaration: wait_until_deadline may become skip_if_offline or
+	// require_online, and require_online may become nothing else - the
+	// operation's policy is the boundary its module drew. Empty means the
+	// operation's own policy.
+	OfflinePolicy string `json:"offline_policy,omitempty"`
+	// DeadlineMinutes bounds the wait for offline hosts, counted from the
+	// creation; the default is a day.
+	DeadlineMinutes *int `json:"deadline_minutes,omitempty"`
+	// ManualGate stops the campaign after the canary until somebody
+	// advances it into the waves.
+	ManualGate *bool `json:"manual_gate,omitempty"`
+	// ConnectivityLostAbsolute pauses the campaign once that many hosts
+	// lost their session while their task ran; zero disables the check.
+	ConnectivityLostAbsolute *int `json:"connectivity_lost_absolute,omitempty"`
 	// Reason justifies the highest-risk campaigns and goes to the audit log.
 	Reason string `json:"reason,omitempty"`
 	// IdempotencyKey lets a caller that lost the answer ask again without a
@@ -98,6 +114,18 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	if !opspec.ExecutableMode(action) {
 		problem(w, http.StatusBadRequest, "campaign_mode_unsupported",
 			campaignModeRefusal(action))
+		return
+	}
+	// The offline policy is a property of the operation the campaign may
+	// tighten and never loosen. It is settled before the payload, because
+	// it does not depend on it.
+	offlinePolicy, err := opspec.ResolveOfflinePolicy(action, opspec.OfflinePolicy(request.OfflinePolicy))
+	if errors.Is(err, opspec.ErrOfflinePolicyLoosened) {
+		problem(w, http.StatusBadRequest, "offline_policy_loosened", err.Error())
+		return
+	}
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_offline_policy", err.Error())
 		return
 	}
 
@@ -204,6 +232,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		HealthCheckUnits:         request.HealthCheckUnits,
 		JobTimeoutSeconds:        valueOr(request.JobTimeoutSeconds, action.DefaultTimeout()),
 		RequiresApproval:         request.RequiresApproval == nil || *request.RequiresApproval,
+		OfflinePolicy:            offlinePolicy,
+		DeadlineMinutes:          valueOr(request.DeadlineMinutes, int(campaigns.DefaultDeadline/time.Minute)),
+		ManualGate:               request.ManualGate != nil && *request.ManualGate,
+		ConnectivityLostAbsolute: valueOr(request.ConnectivityLostAbsolute, 0),
 		CreatedBy:                principal.Subject,
 		RequestID:                requestIDOf(r),
 		IdempotencyKey:           idempotencyKeyOf(r, request.IdempotencyKey),
@@ -241,7 +273,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"excluded": assessment.Exclusions(), "notes": assessment.Notes,
 			"canary_size": campaign.CanarySize,
 			"wave_size":   campaign.WaveSize, "reboot_policy": string(campaign.RebootPolicy),
-			"approval_fingerprint": campaign.ApprovalFingerprint,
+			"offline_policy": string(campaign.OfflinePolicy), "deadline_at": campaign.DeadlineAt,
+			"manual_gate":                campaign.ManualGate,
+			"connectivity_lost_absolute": campaign.ConnectivityLostAbsolute,
+			"approval_fingerprint":       campaign.ApprovalFingerprint,
 		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
@@ -661,6 +696,16 @@ func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 		if target.State == campaigns.TargetRebooting || target.State == campaigns.TargetVerifying {
 			report.RebootPending = append(report.RebootPending, target.HostID)
 		}
+		// A host that came back with a different plan ran nothing, and the
+		// report says so by name: the consent covered the old plan, and a
+		// campaign that quietly counted it among the skipped would hide the
+		// one host the operator has to look at again.
+		if target.State == campaigns.TargetSkipped && target.ErrorCode == "plan_changed_offline" {
+			report.PlanChanged = append(report.PlanChanged, target)
+		}
+		if target.State == campaigns.TargetQueuedOffline {
+			report.OfflineQueued = append(report.OfflineQueued, target.HostID)
+		}
 	}
 	for wave := 0; wave < len(waveTotals); wave++ {
 		totals, exists := waveTotals[wave]
@@ -893,6 +938,13 @@ func (s *Server) handleCancelCampaign(w http.ResponseWriter, r *http.Request) {
 	s.controlCampaign(w, r, "cancel")
 }
 
+// handleAdvanceCampaign lets a campaign standing at the manual gate into
+// the waves. The canary ran; the decision to go on is a person's, and it is
+// recorded with a reason like every other control.
+func (s *Server) handleAdvanceCampaign(w http.ResponseWriter, r *http.Request) {
+	s.controlCampaign(w, r, "advance")
+}
+
 func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operation string) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignControl)
 	if !ok {
@@ -916,6 +968,8 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 		updated, err = s.campaigns.Pause(r.Context(), campaign.ID, principal.Subject, request.Reason)
 	case "resume":
 		updated, err = s.campaigns.Resume(r.Context(), campaign.ID, principal.Subject)
+	case "advance":
+		updated, err = s.campaigns.Advance(r.Context(), campaign.ID, principal.Subject)
 	default:
 		updated, err = s.campaigns.Cancel(r.Context(), campaign.ID, principal.Subject, request.Reason)
 	}
