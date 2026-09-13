@@ -4270,3 +4270,58 @@ func (h *harness) postWithKey(path string, body any, key string, wantStatus int)
 	}
 	return out
 }
+
+// TestCampaignHonorsMaxConcurrent is the other half of the proof of
+// multitasking: a concurrency limit is a ceiling, not a hint. With the
+// limit at one, two hosts of one wave work one after another - their
+// attempts never share a moment - and both still get done.
+func TestCampaignHonorsMaxConcurrent(t *testing.T) {
+	h := newHarness(t)
+	online := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
+	}
+
+	campaign := h.createCampaign(labCampaign("ceiling", "cron.service", map[string]any{
+		"selector":       map[string]any{"host_ids": online},
+		"canary_size":    0,
+		"wave_size":      len(online),
+		"max_concurrent": 1,
+	}))
+	h.approveCampaign(campaign)
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+
+	windows := make([]window, 0, len(online))
+	done := 0
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.State == "succeeded" {
+			done++
+		}
+		if target.JobID == "" {
+			continue
+		}
+		for _, attempt := range h.timedAttempts(target.JobID) {
+			if attempt.DispatchedAt != nil && attempt.FinishedAt != nil {
+				windows = append(windows, window{from: *attempt.DispatchedAt, to: *attempt.FinishedAt})
+			}
+		}
+	}
+	if done != len(online) {
+		t.Fatalf("%d of %d hosts succeeded", done, len(online))
+	}
+	if len(windows) < len(online) {
+		t.Fatalf("the campaign left %d attempts with times for %d hosts", len(windows), len(online))
+	}
+	if overlap(windows) {
+		t.Errorf("two attempts worked side by side under a limit of one: %+v", windows)
+	}
+}
