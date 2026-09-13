@@ -17,6 +17,10 @@ export function Campaign() {
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState("");
   const [search, setSearch] = useState("");
+  // The stop that is being confirmed: pausing and cancelling say what they
+  // do to the hosts under way before anything happens.
+  const [pendingStop, setPendingStop] = useState<"pause" | "cancel" | null>(null);
+  const [stopReason, setStopReason] = useState("");
 
   const campaign = useQuery({
     queryKey: ["campaign", id],
@@ -55,13 +59,15 @@ export function Campaign() {
   const control = useMutation({
     mutationFn: (operation: string) =>
       api.post(`/api/v1/campaigns/${id}/${operation}`, {
-        reason: "from the panel",
+        reason: stopReason.trim() || "from the panel",
         // The approval carries the fingerprint of the campaign currently on
         // screen. When the campaign changed since it was loaded, the server
         // refuses instead of transferring the consent onto something else.
         approval_fingerprint: campaign.data?.approval_fingerprint,
       }),
     onSuccess: () => {
+      setPendingStop(null);
+      setStopReason("");
       queryClient.invalidateQueries({ queryKey: ["campaign", id] });
       queryClient.invalidateQueries({ queryKey: ["campaign-targets", id] });
     },
@@ -70,6 +76,13 @@ export function Campaign() {
   if (campaign.error) return <ErrorBox error={campaign.error} />;
   if (!campaign.data) return <Empty>{t("Loading…")}</Empty>;
   const data = campaign.data;
+
+  // What a stop does depends on where the hosts are: a host that has not
+  // started will not start, a host mid-operation finishes on its own - no
+  // campaign action here interrupts work on a host or rolls it back.
+  const totals = report.data?.totals ?? {};
+  const notStarted = (totals.pending ?? 0) + (totals.awaiting_budget ?? 0) + (totals.planning ?? 0);
+  const underWay = (totals.running ?? 0) + (totals.rebooting ?? 0) + (totals.verifying ?? 0);
 
   return (
     <>
@@ -83,15 +96,36 @@ export function Campaign() {
           <button onClick={() => control.mutate("approve")}>{t("Approve")}</button>
         )}{" "}
         {["canary", "running", "planned"].includes(data.state) && (
-          <button className="secondary" onClick={() => control.mutate("pause")}>{t("Pause")}</button>
+          <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
         )}{" "}
         {data.state === "paused" && (
           <button onClick={() => control.mutate("resume")}>{t("Resume")}</button>
         )}{" "}
         {!["completed", "failed", "canceled"].includes(data.state) && (
-          <button className="secondary" onClick={() => control.mutate("cancel")}>{t("Cancel")}</button>
+          <button className="secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
         )}
       </div>
+
+      {pendingStop && (
+        <div className="form" style={{ marginBottom: 20 }}>
+          <h2 style={{ marginTop: 0 }}>{pendingStop === "pause" ? t("Pause the campaign?") : t("Cancel the campaign?")}</h2>
+          <p className="subtitle" style={{ margin: 0 }}>
+            {pendingStop === "pause"
+              ? t("No further host starts until the campaign is resumed. {underWay} operations already under way finish on their own — a pause does not interrupt work on a host.", { underWay })
+              : t("{notStarted} hosts that have not started are marked canceled and will not start. {underWay} operations already under way finish on their own — cancelling does not interrupt them and does not roll anything back.", { notStarted, underWay })}
+          </p>
+          <label>
+            {t("Reason (kept in the audit trail)")}
+            <input value={stopReason} onChange={(e) => setStopReason(e.target.value)} />
+          </label>
+          <div className="operations">
+            <button onClick={() => control.mutate(pendingStop)} disabled={control.isPending}>
+              {pendingStop === "pause" ? t("Pause") : t("Cancel the campaign")}
+            </button>
+            <button className="secondary" onClick={() => setPendingStop(null)}>{t("Back")}</button>
+          </div>
+        </div>
+      )}
 
       <Pairs>
         <Pair label={t("Canary / wave")}>{data.canary_size} / {data.wave_size}</Pair>
