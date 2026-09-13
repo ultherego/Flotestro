@@ -92,6 +92,8 @@ export function FleetBackups() {
         <span className="source">{t("{n} hosts visible", { n: data.hosts_total })}</span>
       </div>
 
+      <Calendar items={data.items} />
+
       <Repositories repositories={data.repositories ?? []} />
 
       {!data.items.length ? (
@@ -196,6 +198,54 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
           ))}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+/**
+ * The last two weeks of copies, day by day.
+ *
+ * The list says which host has an old copy; the calendar says whether the
+ * fleet backs up at all and when it stopped. A row of full days followed by
+ * empty ones is a broken schedule, and that shows here before any single
+ * copy is old enough to turn red.
+ */
+function Calendar({ items }: { items: Item[] }) {
+  const t = useT();
+  const days = 14;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const counts = new Array<number>(days).fill(0);
+  for (const item of items) {
+    if (!item.last_success_at) continue;
+    const day = new Date(item.last_success_at);
+    day.setHours(0, 0, 0, 0);
+    const back = Math.round((today.getTime() - day.getTime()) / 86400000);
+    if (back >= 0 && back < days) counts[days - 1 - back]++;
+  }
+  const most = Math.max(1, ...counts);
+  if (!items.length) return null;
+  return (
+    <section style={{ marginTop: 16 }}>
+      <h2>{t("Last {n} days", { n: days })}</h2>
+      <p className="subtitle">
+        {t("How many definitions had their newest successful copy on each day. Empty days in a row are a schedule that stopped, visible before any copy is old enough to turn red.")}
+      </p>
+      <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 60 }}>
+        {counts.map((count, index) => {
+          const date = new Date(today.getTime() - (days - 1 - index) * 86400000);
+          const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+          return (
+            <div key={label} title={`${label}: ${count}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+              <div style={{
+                width: "100%", height: `${Math.max(2, (count / most) * 44)}px`,
+                background: count ? "var(--ok)" : "var(--border)", borderRadius: 2,
+              }} />
+              <span className="source" style={{ fontSize: 10 }}>{date.getDate()}</span>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

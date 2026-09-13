@@ -12,11 +12,14 @@ import { useT } from "../../i18n";
  * mistaken target, the other stays in the audit log.
  */
 export function TargetConfirmation({
-  host, description, label, onConfirm, onCancel, busy,
+  host, description, label, onConfirm, onCancel, busy, danger,
 }: {
   host: Host;
   description: string;
   label: string;
+  // danger marks the operations that destroy or overwrite data: a restore
+  // has its own red workflow, so it is never mistaken for a routine change.
+  danger?: boolean;
   onConfirm: (reason: string, confirmation: string) => void;
   onCancel: () => void;
   busy: boolean;
@@ -27,7 +30,7 @@ export function TargetConfirmation({
   const ready = reason.trim().length >= 8 && confirmation === host.hostname;
 
   return (
-    <div className="form" style={{ marginTop: 16 }}>
+    <div className={danger ? "form danger" : "form"} style={{ marginTop: 16 }}>
       <h2>{label}</h2>
       <p className="subtitle" style={{ margin: 0 }}>{description}</p>
       {/* The target repeated in the dialog: the operator approves a specific machine. */}
@@ -45,7 +48,7 @@ export function TargetConfirmation({
         <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
       </label>
       <div className="operations">
-        <button disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
+        <button className={danger ? "danger" : undefined} disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
           {busy ? t("Requesting…") : label}
         </button>
         <button className="secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>

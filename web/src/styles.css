@@ -115,6 +115,10 @@ button {
   cursor: pointer;
 }
 button.secondary { background: transparent; border-color: var(--border); color: var(--text); }
+/* The red workflow: an operation that overwrites data looks different from
+   every routine change, on the button and on its confirmation. */
+button.danger { background: var(--error); border-color: var(--error); color: #fff; }
+.form.danger { border-color: var(--error); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 16px 0; }

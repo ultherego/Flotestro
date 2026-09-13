@@ -81,7 +81,7 @@ type Run = {
   recorded_at: string;
 };
 
-type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
+type Intent = { action: string; label: string; description: string; payload: Record<string, unknown>; danger?: boolean };
 
 /** A size in human-readable form. A missing value is not zero. */
 function Size({ bytes }: { bytes?: number }) {
@@ -392,7 +392,7 @@ export function Backups() {
                     <td className="source">{snapshot.paths?.join(", ")}</td>
                     <td>
                       <button
-                        className="secondary"
+                        className="danger"
                         disabled={!definition}
                         onClick={() => {
                           const target = window.prompt(
@@ -403,6 +403,7 @@ export function Backups() {
                           setIntent({
                             action: "backup.restore",
                             label: t("Restore copy"),
+                            danger: true,
                             description: t("Copy {id} is unpacked into {target} on {host}. The target must be empty; what goes back from there to its place is a separate decision.", {
                               id: snapshot.id, target, host: host.hostname,
                             }),
@@ -472,6 +473,7 @@ export function Backups() {
           host={host}
           label={intent.label}
           description={intent.description}
+          danger={intent.danger}
           busy={request.isPending}
           onConfirm={(reason) =>
             request.mutate({ action: intent.action, reason, payload: intent.payload })
