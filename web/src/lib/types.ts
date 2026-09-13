@@ -103,6 +103,7 @@ export type FleetSummary = {
 export type Job = {
   id: string;
   host_id: string;
+  hostname?: string;
   campaign_id?: string;
   action_type: string;
   state: string;

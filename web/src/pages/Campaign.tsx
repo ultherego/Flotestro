@@ -6,7 +6,8 @@ import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, TimelineEntry,
 } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
+import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { StatusBar } from "../components/widgets";
 import { JobPlan } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
@@ -231,18 +232,18 @@ export function Campaign() {
         </Card>
       )}
 
-      {report.data && (
-        <StatGrid>
-          <Stat label={t("Targets")} value={total} />
-          <Stat label={t("Not started")} value={notStarted} />
-          <Stat label={t("In progress")} value={underWay} />
-          <Stat label={t("Succeeded")} value={succeeded} tone={succeeded > 0 ? "ok" : undefined} />
-          <Stat label={t("Failed")} value={failed} tone={failed > 0 ? "error" : undefined} />
-          {offlineQueued > 0 && (
-            <Stat label={t("Waiting for connection")} value={offlineQueued} tone="warn" />
-          )}
-        </StatGrid>
-      )}
+      {/* The fate of the hosts as one coloured bar: the campaign's state
+          read from across the room, each segment leading to its hosts. */}
+      <Card title={t("Targets")} description={t("{n} hosts in this campaign", { n: total })}>
+        <StatusBar segments={[
+          { label: t("Not started"), value: report.data ? notStarted - offlineQueued : undefined, tone: "neutral" },
+          { label: t("Waiting for connection"), value: report.data ? offlineQueued : undefined, tone: "warn" },
+          { label: t("In progress"), value: report.data ? underWay : undefined, tone: "info" },
+          { label: t("Succeeded"), value: report.data ? succeeded : undefined, tone: "ok" },
+          { label: t("Failed"), value: report.data ? failed : undefined, tone: "error" },
+          { label: t("Skipped"), value: report.data ? (totals.skipped ?? 0) + (totals.canceled ?? 0) : undefined, tone: "unknown" },
+        ]} />
+      </Card>
 
       <Columns wide>
       <Card title={t("Details")}>

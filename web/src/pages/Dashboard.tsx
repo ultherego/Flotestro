@@ -209,7 +209,7 @@ export function Dashboard() {
                 {(failures.data?.items ?? []).map((job) => (
                   <tr key={job.id}>
                     <td><Time value={job.finished_at ?? job.created_at} /></td>
-                    <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.host_id.slice(0, 8)}</Link></td>
+                    <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.hostname || job.host_id.slice(0, 8)}</Link></td>
                     <td className="mono">{job.action_type}</td>
                     <td><ErrorCode code={job.result_error_code || "failed"} /></td>
                   </tr>

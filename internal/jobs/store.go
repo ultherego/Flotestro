@@ -58,8 +58,11 @@ type Preconditions struct {
 
 // Job is the view of a task returned by the API.
 type Job struct {
-	ID               string          `json:"id"`
-	HostID           string          `json:"host_id"`
+	ID     string `json:"id"`
+	HostID string `json:"host_id"`
+	// Hostname is read with the task for the lists: a host is known by its
+	// name, and a list of identifiers tells nobody anything.
+	Hostname         string          `json:"hostname,omitempty"`
 	CampaignID       *string         `json:"campaign_id,omitempty"`
 	ActionType       string          `json:"action_type"`
 	ActionVersion    int             `json:"action_version"`
@@ -866,7 +869,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		       coalesce(result_status, ''), coalesce(result_error_code, ''),
 		       coalesce(result_message, ''), finished_at, created_at, updated_at,
 		       required_approvals,
-		       (select count(*) from job_approvals a where a.job_id = jobs.id)
+		       (select count(*) from job_approvals a where a.job_id = jobs.id),
+		       coalesce((select h.hostname from hosts h where h.id = jobs.host_id), '')
 		from jobs ` + clause
 
 	rows, err := q.Query(ctx, query, args...)
@@ -885,7 +889,7 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 			&j.CreatedBy, &j.RequestID, &j.ApprovedBy, &j.ApprovedAt,
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,
 			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
-			&j.RequiredApprovals, &collected); err != nil {
+			&j.RequiredApprovals, &collected, &j.Hostname); err != nil {
 			return nil, err
 		}
 		// Every view of a task carries the number of collected approvals:
