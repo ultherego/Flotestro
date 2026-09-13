@@ -62,9 +62,13 @@ type Client struct {
 	jsonURL    string
 	referer    string
 
-	mu     sync.Mutex
-	cache  map[string]cacheEntry
-	logged bool
+	mu    sync.Mutex
+	cache map[string]cacheEntry
+	// generation counts the invalidations. A read that started before a
+	// write and finished after it must not put the state from before the
+	// write back into the cache; it compares the generation it started in.
+	generation uint64
+	logged     bool
 }
 
 type cacheEntry struct {
@@ -256,6 +260,12 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
 		return nil, fmt.Errorf("the directory response: %w", err)
 	}
+	// FLOTESTRO_IPA_TRACE prints every exchange with the directory; for
+	// troubleshooting a connector, never for normal operation - the
+	// records carry personal data.
+	if os.Getenv("FLOTESTRO_IPA_TRACE") != "" {
+		fmt.Fprintf(os.Stderr, "ipa-trace request=%s\nipa-trace result=%s\n", truncateTrace(payload), truncateTrace(decoded.Result))
+	}
 	if decoded.Error != nil {
 		return nil, fmt.Errorf("the directory: %s (%s)", decoded.Error.Message, decoded.Error.Name)
 	}
@@ -365,6 +375,7 @@ func splitPrincipal(principal, defaultRealm string) (string, string) {
 func cached[T any](ctx context.Context, c *Client, key string, load func() (T, error)) (T, error) {
 	c.mu.Lock()
 	entry, ok := c.cache[key]
+	started := c.generation
 	c.mu.Unlock()
 	if ok && time.Now().Before(entry.expiresAt) {
 		if value, ok := entry.value.(T); ok {
@@ -379,7 +390,9 @@ func cached[T any](ctx context.Context, c *Client, key string, load func() (T, e
 	}
 
 	c.mu.Lock()
-	c.cache[key] = cacheEntry{value: value, expiresAt: time.Now().Add(c.config.CacheTTL)}
+	if c.generation == started {
+		c.cache[key] = cacheEntry{value: value, expiresAt: time.Now().Add(c.config.CacheTTL)}
+	}
 	c.mu.Unlock()
 	return value, nil
 }
@@ -414,4 +427,11 @@ func validateSSHPublicKey(key string) error {
 	default:
 		return fmt.Errorf("unsupported SSH key type %q", fields[0])
 	}
+}
+
+func truncateTrace(raw []byte) string {
+	if len(raw) > 4000 {
+		return string(raw[:4000]) + "..."
+	}
+	return string(raw)
 }

@@ -233,16 +233,24 @@ func TestDirectoryHBACRuleGoesThroughPlanApprovalAndExecution(t *testing.T) {
 	if final := approveAndRun(t, h, approver, change); final.State != "succeeded" {
 		t.Fatalf("the second change finished as %s: %s", final.State, final.ResultMessage)
 	}
-	h.get("/api/v1/identity/hbac-rules", &rules)
-	index = slices.IndexFunc(rules.Items, func(rule hbacRuleView) bool { return rule.Name == name })
-	if index < 0 || rules.Items[index].Enabled || len(rules.Items[index].Hosts) != 0 {
-		t.Fatalf("the rule after the second change: %+v", rules.Items)
+	// A fresh variable: decoding into the list read before would keep the
+	// hosts of the old element where the new answer has no "hosts" at all.
+	var after struct {
+		Items []hbacRuleView `json:"items"`
+	}
+	h.get("/api/v1/identity/hbac-rules", &after)
+	index = slices.IndexFunc(after.Items, func(rule hbacRuleView) bool { return rule.Name == name })
+	if index < 0 || after.Items[index].Enabled || len(after.Items[index].Hosts) != 0 {
+		t.Fatalf("the rule after the second change: %+v", after.Items)
 	}
 
 	// The removal, ordered and approved the same way.
 	removeRule(t, h, approver, "identity.hbac.rule.remove", "hbac_rule", name)
-	h.get("/api/v1/identity/hbac-rules", &rules)
-	if slices.ContainsFunc(rules.Items, func(rule hbacRuleView) bool { return rule.Name == name }) {
+	var removed struct {
+		Items []hbacRuleView `json:"items"`
+	}
+	h.get("/api/v1/identity/hbac-rules", &removed)
+	if slices.ContainsFunc(removed.Items, func(rule hbacRuleView) bool { return rule.Name == name }) {
 		t.Fatalf("the rule %s is still in the directory after its removal", name)
 	}
 }

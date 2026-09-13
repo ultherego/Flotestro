@@ -208,6 +208,7 @@ func (c *Client) invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cache = map[string]cacheEntry{}
+	c.generation++
 }
 
 func firstNonEmpty(values ...string) string {
