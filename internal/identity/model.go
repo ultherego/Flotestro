@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/freeipa"
@@ -27,6 +28,16 @@ const (
 	// through the directory connector - not through an agent.
 	ActionDNSRecordEnsure ActionType = "dns.record.ensure"
 	ActionDNSRecordRemove ActionType = "dns.record.remove"
+	// The access and sudo rules. A rule reaches every host it names, so it
+	// goes the same way as an account: plan, a second person, execution.
+	ActionHBACRuleEnsure ActionType = "identity.hbac.rule.ensure"
+	ActionHBACRuleRemove ActionType = "identity.hbac.rule.remove"
+	ActionSudoRuleEnsure ActionType = "identity.sudo.rule.ensure"
+	ActionSudoRuleRemove ActionType = "identity.sudo.rule.remove"
+	// ActionHBACTest is a read: the directory's own simulation of an access
+	// rule. It is never a change and never enters the change store; it is
+	// named here so its permission stands next to the rules it reads.
+	ActionHBACTest ActionType = "identity.hbac.test"
 )
 
 // State is the state of a change.
@@ -61,6 +72,67 @@ type Payload struct {
 	SSHKeys   *SSHKeysPayload   `json:"ssh_keys,omitempty"`
 	Reference *ReferencePayload `json:"reference,omitempty"`
 	DNS       *DNSRecordPayload `json:"dns,omitempty"`
+	HBACRule  *HBACRulePayload  `json:"hbac_rule,omitempty"`
+	SudoRule  *SudoRulePayload  `json:"sudo_rule,omitempty"`
+}
+
+// HBACRulePayload declares an access rule as a whole. Removal names the
+// rule alone; the other fields are then ignored.
+type HBACRulePayload struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	Enabled       bool     `json:"enabled"`
+	Users         []string `json:"users,omitempty"`
+	UserGroups    []string `json:"user_groups,omitempty"`
+	Hosts         []string `json:"hosts,omitempty"`
+	HostGroups    []string `json:"host_groups,omitempty"`
+	Services      []string `json:"services,omitempty"`
+	ServiceGroups []string `json:"service_groups,omitempty"`
+	AllUsers      bool     `json:"all_users,omitempty"`
+	AllHosts      bool     `json:"all_hosts,omitempty"`
+	AllServices   bool     `json:"all_services,omitempty"`
+}
+
+// Spec translates the payload into the adapter's declaration.
+func (p HBACRulePayload) Spec() freeipa.HBACRuleSpec {
+	return freeipa.HBACRuleSpec{
+		Name: p.Name, Description: p.Description, Enabled: p.Enabled,
+		Users: p.Users, UserGroups: p.UserGroups, Hosts: p.Hosts, HostGroups: p.HostGroups,
+		Services: p.Services, ServiceGroups: p.ServiceGroups,
+		AllUsers: p.AllUsers, AllHosts: p.AllHosts, AllServices: p.AllServices,
+	}
+}
+
+// SudoRulePayload declares a sudo rule as a whole.
+type SudoRulePayload struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	Enabled       bool     `json:"enabled"`
+	Users         []string `json:"users,omitempty"`
+	UserGroups    []string `json:"user_groups,omitempty"`
+	Hosts         []string `json:"hosts,omitempty"`
+	HostGroups    []string `json:"host_groups,omitempty"`
+	Commands      []string `json:"commands,omitempty"`
+	CommandGroups []string `json:"command_groups,omitempty"`
+	RunAsUsers    []string `json:"run_as_users,omitempty"`
+	RunAsGroups   []string `json:"run_as_groups,omitempty"`
+	Options       []string `json:"options,omitempty"`
+	AllUsers      bool     `json:"all_users,omitempty"`
+	AllHosts      bool     `json:"all_hosts,omitempty"`
+	AllCommands   bool     `json:"all_commands,omitempty"`
+	RunAsAnyUser  bool     `json:"run_as_any_user,omitempty"`
+}
+
+// Spec translates the payload into the adapter's declaration.
+func (p SudoRulePayload) Spec() freeipa.SudoRuleSpec {
+	return freeipa.SudoRuleSpec{
+		Name: p.Name, Description: p.Description, Enabled: p.Enabled,
+		Users: p.Users, UserGroups: p.UserGroups, Hosts: p.Hosts, HostGroups: p.HostGroups,
+		Commands: p.Commands, CommandGroups: p.CommandGroups,
+		RunAsUsers: p.RunAsUsers, RunAsGroups: p.RunAsGroups, Options: p.Options,
+		AllUsers: p.AllUsers, AllHosts: p.AllHosts, AllCommands: p.AllCommands,
+		RunAsAnyUser: p.RunAsAnyUser,
+	}
 }
 
 // DNSRecordPayload describes a record in a directory zone.
@@ -163,11 +235,65 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
+	case ActionHBACRuleEnsure:
+		if payload.HBACRule == nil {
+			return fmt.Errorf("the operation %s requires an hbac_rule payload", action)
+		}
+		// The same code that will carry out the write checks the shape: a
+		// rule the directory refuses is to fall out at ordering time.
+		if err := payload.HBACRule.Spec().Validate(); err != nil {
+			return err
+		}
+		if payload.HBACRule.Enabled {
+			// An enabled rule with a side missing matches nothing - or, once
+			// somebody fills the side in, more than anybody planned. A draft
+			// stays disabled.
+			rule := payload.HBACRule
+			if !rule.AllUsers && len(rule.Users) == 0 && len(rule.UserGroups) == 0 {
+				return fmt.Errorf("an enabled rule requires users, groups or every user")
+			}
+			if !rule.AllHosts && len(rule.Hosts) == 0 && len(rule.HostGroups) == 0 {
+				return fmt.Errorf("an enabled rule requires hosts, host groups or every host")
+			}
+			if !rule.AllServices && len(rule.Services) == 0 && len(rule.ServiceGroups) == 0 {
+				return fmt.Errorf("an enabled rule requires services, service groups or every service")
+			}
+		}
+	case ActionSudoRuleEnsure:
+		if payload.SudoRule == nil {
+			return fmt.Errorf("the operation %s requires a sudo_rule payload", action)
+		}
+		if err := payload.SudoRule.Spec().Validate(); err != nil {
+			return err
+		}
+		if payload.SudoRule.Enabled {
+			rule := payload.SudoRule
+			if !rule.AllUsers && len(rule.Users) == 0 && len(rule.UserGroups) == 0 {
+				return fmt.Errorf("an enabled rule requires users, groups or every user")
+			}
+			if !rule.AllHosts && len(rule.Hosts) == 0 && len(rule.HostGroups) == 0 {
+				return fmt.Errorf("an enabled rule requires hosts, host groups or every host")
+			}
+			if !rule.AllCommands && len(rule.Commands) == 0 && len(rule.CommandGroups) == 0 {
+				return fmt.Errorf("an enabled rule requires commands, command groups or every command")
+			}
+		}
+	case ActionHBACRuleRemove:
+		if payload.HBACRule == nil || !ruleNamePattern.MatchString(payload.HBACRule.Name) {
+			return fmt.Errorf("the operation %s requires naming a rule", action)
+		}
+	case ActionSudoRuleRemove:
+		if payload.SudoRule == nil || !ruleNamePattern.MatchString(payload.SudoRule.Name) {
+			return fmt.Errorf("the operation %s requires naming a rule", action)
+		}
 	default:
 		return fmt.Errorf("unknown type of change %q", action)
 	}
 	return nil
 }
+
+// ruleNamePattern bounds the name of an access or sudo rule.
+var ruleNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
 
 // Permission returns the permission required to order a change.
 func (a ActionType) Permission() string {
@@ -178,28 +304,36 @@ func (a ActionType) Permission() string {
 		return "identity.group.write"
 	case ActionDNSRecordEnsure, ActionDNSRecordRemove:
 		return "dns.directory.write"
+	case ActionHBACTest:
+		// A simulation reads the rules; it changes nothing.
+		return "identity.policy.read"
 	default:
 		return "identity.policy.write"
 	}
 }
 
 // ChangesAccess says whether the change alters who may sign in where: an
-// account, its keys or a group membership. Such a change is taken with
-// fresh authentication, like an access rule on a host; a DNS record is not.
+// account, its keys, a group membership or an access or sudo rule. Such a
+// change is taken with fresh authentication, like an access rule on a host;
+// a DNS record is not.
 func (a ActionType) ChangesAccess() bool {
 	switch a {
-	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys:
+	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
+		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove:
 		return true
 	default:
 		return false
 	}
 }
 
-// Known checks whether the type of change is supported.
+// Known checks whether the type of change is supported. A simulation is
+// not a change, so it is not known here: it cannot be ordered, approved or
+// executed.
 func (a ActionType) Known() bool {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
-		ActionDNSRecordEnsure, ActionDNSRecordRemove:
+		ActionDNSRecordEnsure, ActionDNSRecordRemove,
+		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove:
 		return true
 	default:
 		return false
@@ -229,6 +363,9 @@ type Plan struct {
 	// ReachableHosts and SudoRules show the access that follows from the membership.
 	ReachableHosts []string `json:"reachable_hosts,omitempty"`
 	SudoRules      []string `json:"sudo_rules,omitempty"`
+	// Replaces says that a rule of the same name exists and will be brought
+	// to the declared state; the steps then carry the member diff.
+	Replaces bool `json:"replaces,omitempty"`
 	// Warnings describe the consequences that are easy to miss.
 	Warnings []string `json:"warnings,omitempty"`
 	// Conflicts stop the execution: the directory already holds an object with that name.

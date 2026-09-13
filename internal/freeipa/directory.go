@@ -55,6 +55,13 @@ type HBACRule struct {
 	Hosts       []string `json:"hosts,omitempty"`
 	HostGroups  []string `json:"host_groups,omitempty"`
 	Services    []string `json:"services,omitempty"`
+	// ServiceGroups are HBAC service groups such as "Sudo".
+	ServiceGroups []string `json:"service_groups,omitempty"`
+	// AllUsers, AllHosts and AllServices mirror the categories of the rule:
+	// a category set to "all" stands in for a member list.
+	AllUsers    bool `json:"all_users"`
+	AllHosts    bool `json:"all_hosts"`
+	AllServices bool `json:"all_services"`
 	// AllowsEverything marks an allow_all rule. The document advises against
 	// it: it opens access to the whole fleet with one entry.
 	AllowsEverything bool `json:"allows_everything"`
@@ -70,8 +77,17 @@ type SudoRule struct {
 	Hosts       []string `json:"hosts,omitempty"`
 	HostGroups  []string `json:"host_groups,omitempty"`
 	Commands    []string `json:"commands,omitempty"`
-	RunAs       []string `json:"run_as,omitempty"`
-	Options     []string `json:"options,omitempty"`
+	// CommandGroups are sudo command groups.
+	CommandGroups []string `json:"command_groups,omitempty"`
+	RunAs         []string `json:"run_as,omitempty"`
+	RunAsGroups   []string `json:"run_as_groups,omitempty"`
+	Options       []string `json:"options,omitempty"`
+	// AllUsers, AllHosts and AllCommands mirror the categories of the rule;
+	// RunAsAnyUser mirrors the run-as user category.
+	AllUsers     bool `json:"all_users"`
+	AllHosts     bool `json:"all_hosts"`
+	AllCommands  bool `json:"all_commands"`
+	RunAsAnyUser bool `json:"run_as_any_user"`
 	// Critical marks a rule of raised risk: NOPASSWD or ALL.
 	Critical bool `json:"critical"`
 	// CriticalReasons says what exactly makes the rule risky.
@@ -181,22 +197,7 @@ func (c *Client) HBACRules(ctx context.Context) ([]HBACRule, error) {
 		}
 		rules := make([]HBACRule, 0, len(records))
 		for _, record := range records {
-			rule := HBACRule{
-				Name:        first(record, "cn"),
-				Description: first(record, "description"),
-				Enabled:     boolean(record, "ipaenabledflag"),
-				Users:       strings_(record, "memberuser_user"),
-				UserGroups:  strings_(record, "memberuser_group"),
-				Hosts:       strings_(record, "memberhost_host"),
-				HostGroups:  strings_(record, "memberhost_hostgroup"),
-				Services:    strings_(record, "memberservice_hbacsvc"),
-			}
-			// A rule covering everybody, every host and every service opens
-			// access to the whole fleet with one entry.
-			rule.AllowsEverything = first(record, "usercategory") == "all" &&
-				first(record, "hostcategory") == "all" &&
-				first(record, "servicecategory") == "all"
-			rules = append(rules, rule)
+			rules = append(rules, hbacRuleFromRecord(record))
 		}
 		return rules, nil
 	})
@@ -211,20 +212,7 @@ func (c *Client) SudoRules(ctx context.Context) ([]SudoRule, error) {
 		}
 		rules := make([]SudoRule, 0, len(records))
 		for _, record := range records {
-			rule := SudoRule{
-				Name:        first(record, "cn"),
-				Description: first(record, "description"),
-				Enabled:     boolean(record, "ipaenabledflag"),
-				Users:       strings_(record, "memberuser_user"),
-				UserGroups:  strings_(record, "memberuser_group"),
-				Hosts:       strings_(record, "memberhost_host"),
-				HostGroups:  strings_(record, "memberhost_hostgroup"),
-				Commands:    strings_(record, "memberallowcmd_sudocmd"),
-				RunAs:       strings_(record, "ipasudorunas_user"),
-				Options:     strings_(record, "ipasudoopt"),
-			}
-			rule.Critical, rule.CriticalReasons = sudoRisk(record, rule)
-			rules = append(rules, rule)
+			rules = append(rules, sudoRuleFromRecord(record))
 		}
 		return rules, nil
 	})
@@ -250,7 +238,9 @@ func sudoRisk(record map[string]any, rule SudoRule) (bool, []string) {
 	if first(record, "usercategory") == "all" {
 		reasons = append(reasons, "the rule covers every user")
 	}
-	if first(record, "runasusercategory") == "all" {
+	// The directory names the attribute ipasudorunasusercategory; the short
+	// spelling is kept for records that arrived without the prefix.
+	if first(record, "ipasudorunasusercategory") == "all" || first(record, "runasusercategory") == "all" {
 		reasons = append(reasons, "the rule allows acting as any user")
 	}
 	return len(reasons) > 0, reasons

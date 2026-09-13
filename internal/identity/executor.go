@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -97,6 +98,10 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 		phases = e.writeRecord(ctx, payload.DNS, true)
 	case ActionDNSRecordRemove:
 		phases = e.writeRecord(ctx, payload.DNS, false)
+	case ActionHBACRuleEnsure, ActionHBACRuleRemove:
+		phases = e.writeHBACRule(ctx, payload.HBACRule, action == ActionHBACRuleEnsure)
+	case ActionSudoRuleEnsure, ActionSudoRuleRemove:
+		phases = e.writeSudoRule(ctx, payload.SudoRule, action == ActionSudoRuleEnsure)
 	default:
 		e.finish(ctx, change, StateFailed, nil, "unknown type of change")
 		return
@@ -356,4 +361,65 @@ func (e *Executor) writeRecord(ctx context.Context, spec *DNSRecordPayload, addi
 	}
 	phases = append(phases, finishPhase(phase, err, ""))
 	return phases
+}
+
+// writeHBACRule brings an access rule to the declared state or removes it.
+// The adapter carries the member changes out one kind at a time, so the
+// phase reports the rule as the directory holds it afterwards; a failure
+// half-way leaves the message saying which command refused.
+func (e *Executor) writeHBACRule(ctx context.Context, spec *HBACRulePayload, ensure bool) []Phase {
+	if spec == nil {
+		return nil
+	}
+	if !ensure {
+		phase := startPhase("removing the HBAC rule " + spec.Name)
+		err := e.directory.RemoveHBACRule(ctx, spec.Name)
+		return []Phase{finishPhase(phase, err, "")}
+	}
+	phase := startPhase("ensuring the HBAC rule " + spec.Name)
+	rule, err := e.directory.EnsureHBACRule(ctx, spec.Spec())
+	message := ""
+	if rule != nil {
+		message = describeHBACRule(*rule)
+	}
+	return []Phase{finishPhase(phase, err, message)}
+}
+
+// writeSudoRule brings a sudo rule to the declared state or removes it.
+func (e *Executor) writeSudoRule(ctx context.Context, spec *SudoRulePayload, ensure bool) []Phase {
+	if spec == nil {
+		return nil
+	}
+	if !ensure {
+		phase := startPhase("removing the sudo rule " + spec.Name)
+		err := e.directory.RemoveSudoRule(ctx, spec.Name)
+		return []Phase{finishPhase(phase, err, "")}
+	}
+	phase := startPhase("ensuring the sudo rule " + spec.Name)
+	rule, err := e.directory.EnsureSudoRule(ctx, spec.Spec())
+	message := ""
+	if rule != nil {
+		message = describeSudoRule(*rule)
+	}
+	return []Phase{finishPhase(phase, err, message)}
+}
+
+func describeHBACRule(rule freeipa.HBACRule) string {
+	state := "disabled"
+	if rule.Enabled {
+		state = "enabled"
+	}
+	return fmt.Sprintf("%s; %d users, %d user groups, %d hosts, %d host groups, %d services",
+		state, len(rule.Users), len(rule.UserGroups), len(rule.Hosts), len(rule.HostGroups),
+		len(rule.Services)+len(rule.ServiceGroups))
+}
+
+func describeSudoRule(rule freeipa.SudoRule) string {
+	state := "disabled"
+	if rule.Enabled {
+		state = "enabled"
+	}
+	return fmt.Sprintf("%s; %d users, %d user groups, %d hosts, %d host groups, %d commands, %d options",
+		state, len(rule.Users), len(rule.UserGroups), len(rule.Hosts), len(rule.HostGroups),
+		len(rule.Commands)+len(rule.CommandGroups), len(rule.Options))
 }

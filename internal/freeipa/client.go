@@ -275,15 +275,21 @@ const apiVersion = "2.254"
 // allowedMethods are the only commands the adapter is able to run. The list
 // is closed: there is no way to call an arbitrary IPA command.
 var allowedMethods = map[string]bool{
-	"user_find":     true,
-	"user_show":     true,
-	"group_find":    true,
-	"group_show":    true,
-	"host_find":     true,
-	"host_show":     true,
-	"hbacrule_find": true,
-	"sudorule_find": true,
-	"ping":          true,
+	"user_find":      true,
+	"user_show":      true,
+	"group_find":     true,
+	"group_show":     true,
+	"host_find":      true,
+	"host_show":      true,
+	"hostgroup_find": true,
+	"hbacrule_find":  true,
+	"hbacrule_show":  true,
+	"sudorule_find":  true,
+	"sudorule_show":  true,
+	"ping":           true,
+	// hbactest is the directory's own simulation of an access rule: the
+	// verdict the host will apply, not a reconstruction by the panel.
+	"hbactest": true,
 
 	// The write operations. Each is carried out solely by the control plane
 	// after the plan is approved; the adapter exposes no commands that delete
@@ -299,6 +305,38 @@ var allowedMethods = map[string]bool{
 	// administrators' access.
 	"host_add": true,
 	"host_mod": true,
+
+	// The access and sudo rules. A rule is declared as a whole and brought to
+	// that state member kind by member kind; the panel writes only the rules
+	// it manages and never touches the services, commands or hosts they name.
+	"hbacrule_add":                  true,
+	"hbacrule_mod":                  true,
+	"hbacrule_del":                  true,
+	"hbacrule_enable":               true,
+	"hbacrule_disable":              true,
+	"hbacrule_add_user":             true,
+	"hbacrule_remove_user":          true,
+	"hbacrule_add_host":             true,
+	"hbacrule_remove_host":          true,
+	"hbacrule_add_service":          true,
+	"hbacrule_remove_service":       true,
+	"sudorule_add":                  true,
+	"sudorule_mod":                  true,
+	"sudorule_del":                  true,
+	"sudorule_enable":               true,
+	"sudorule_disable":              true,
+	"sudorule_add_user":             true,
+	"sudorule_remove_user":          true,
+	"sudorule_add_host":             true,
+	"sudorule_remove_host":          true,
+	"sudorule_add_allow_command":    true,
+	"sudorule_remove_allow_command": true,
+	"sudorule_add_runasuser":        true,
+	"sudorule_remove_runasuser":     true,
+	"sudorule_add_runasgroup":       true,
+	"sudorule_remove_runasgroup":    true,
+	"sudorule_add_option":           true,
+	"sudorule_remove_option":        true,
 
 	// Directory DNS. Reading zones and records plus adding and removing a
 	// single value. Commands that change the zone itself - its name servers,

@@ -109,7 +109,7 @@ func TestAllowedMethodIsAClosedList(t *testing.T) {
 	for _, method := range []string{
 		"user_del", "group_del", "host_del", "config_mod",
 		"permission_add", "privilege_add", "role_add_member",
-		"hbacrule_add", "sudorule_add", "", "user_find; drop",
+		"hbacsvc_add", "sudocmd_add", "hostgroup_add", "", "user_find; drop",
 	} {
 		if allowedMethod(method) {
 			t.Errorf("the command %s should not be available through the adapter", method)

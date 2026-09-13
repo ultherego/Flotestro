@@ -132,3 +132,75 @@ func TestTheFinalStateIsRecognised(t *testing.T) {
 		}
 	}
 }
+
+func TestRuleValidationRequiresAWholeEnabledRule(t *testing.T) {
+	cases := map[string]struct {
+		action  ActionType
+		payload Payload
+		wantErr bool
+	}{
+		"an HBAC rule without a payload": {ActionHBACRuleEnsure, Payload{}, true},
+		"a name with a space": {ActionHBACRuleEnsure, Payload{HBACRule: &HBACRulePayload{
+			Name: "ops ssh", Enabled: false}}, true},
+		"a disabled draft without members": {ActionHBACRuleEnsure, Payload{HBACRule: &HBACRulePayload{
+			Name: "draft", Enabled: false}}, false},
+		"an enabled rule without hosts": {ActionHBACRuleEnsure, Payload{HBACRule: &HBACRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, Services: []string{"sshd"}}}, true},
+		"an enabled rule without services": {ActionHBACRuleEnsure, Payload{HBACRule: &HBACRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, HostGroups: []string{"web"}}}, true},
+		"a whole HBAC rule": {ActionHBACRuleEnsure, Payload{HBACRule: &HBACRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, HostGroups: []string{"web"},
+			Services: []string{"sshd"}}}, false},
+		"a category next to members": {ActionHBACRuleEnsure, Payload{HBACRule: &HBACRulePayload{
+			Name: "ops", Enabled: true, AllUsers: true, Users: []string{"alice"}, AllHosts: true,
+			AllServices: true}}, true},
+		"removal without a name": {ActionHBACRuleRemove, Payload{HBACRule: &HBACRulePayload{}}, true},
+		"removal by name":        {ActionHBACRuleRemove, Payload{HBACRule: &HBACRulePayload{Name: "ops"}}, false},
+		"a sudo rule with an unknown option": {ActionSudoRuleEnsure, Payload{SudoRule: &SudoRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, AllHosts: true, AllCommands: true,
+			Options: []string{"nopassword"}}}, true},
+		"a sudo rule with a relative command": {ActionSudoRuleEnsure, Payload{SudoRule: &SudoRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, AllHosts: true,
+			Commands: []string{"systemctl"}}}, true},
+		"an enabled sudo rule without commands": {ActionSudoRuleEnsure, Payload{SudoRule: &SudoRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, AllHosts: true}}, true},
+		"a whole sudo rule": {ActionSudoRuleEnsure, Payload{SudoRule: &SudoRulePayload{
+			Name: "ops", Enabled: true, UserGroups: []string{"ops"}, HostGroups: []string{"web"},
+			Commands: []string{"/usr/bin/systemctl"}, RunAsUsers: []string{"root"},
+			Options: []string{"!authenticate"}}}, false},
+		"the simulation is not a change": {ActionHBACTest, Payload{}, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := Validate(tc.action, tc.payload)
+			if tc.wantErr && err == nil {
+				t.Fatal("an invalid change passed validation")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("a valid change was rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestRuleChangesAreAccessChangesWithThePolicyPermission(t *testing.T) {
+	for _, action := range []ActionType{ActionHBACRuleEnsure, ActionHBACRuleRemove,
+		ActionSudoRuleEnsure, ActionSudoRuleRemove} {
+		if action.Permission() != "identity.policy.write" {
+			t.Errorf("%s has the permission %s", action, action.Permission())
+		}
+		if !action.ChangesAccess() {
+			t.Errorf("%s is not taken as a change of access", action)
+		}
+		if !action.Known() {
+			t.Errorf("%s is not a known change", action)
+		}
+	}
+	// The simulation reads and is never a change.
+	if ActionHBACTest.Permission() != "identity.policy.read" {
+		t.Errorf("the simulation has the permission %s", ActionHBACTest.Permission())
+	}
+	if ActionHBACTest.Known() || ActionHBACTest.ChangesAccess() {
+		t.Error("the simulation can be ordered as a change")
+	}
+}

@@ -9,14 +9,30 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
+// Directory is the part of the directory client the planner reads. It is an
+// interface so the impact rules can be checked against a fake directory
+// without a Kerberos session.
+type Directory interface {
+	Principal() string
+	Users(ctx context.Context) ([]freeipa.User, error)
+	ShowUser(ctx context.Context, uid string) (*freeipa.User, error)
+	Groups(ctx context.Context) ([]freeipa.Group, error)
+	Hosts(ctx context.Context) ([]freeipa.Host, error)
+	HostGroups(ctx context.Context) ([]freeipa.HostGroup, error)
+	HBACRules(ctx context.Context) ([]freeipa.HBACRule, error)
+	SudoRules(ctx context.Context) ([]freeipa.SudoRule, error)
+	Zones(ctx context.Context) ([]freeipa.Zone, error)
+	Records(ctx context.Context, zone string) ([]freeipa.Record, error)
+}
+
 // Planner builds a preview of a change's impact. The plan shows the resulting
 // membership, the hosts reachable through HBAC and the sudo rules before
 // anything happens.
 type Planner struct {
-	directory *freeipa.Client
+	directory Directory
 }
 
-func NewPlanner(directory *freeipa.Client) *Planner {
+func NewPlanner(directory Directory) *Planner {
 	return &Planner{directory: directory}
 }
 
@@ -37,6 +53,14 @@ func (p *Planner) Build(ctx context.Context, action ActionType, payload Payload)
 		return p.planRecord(ctx, payload.DNS, true)
 	case ActionDNSRecordRemove:
 		return p.planRecord(ctx, payload.DNS, false)
+	case ActionHBACRuleEnsure:
+		return p.planHBACRule(ctx, payload.HBACRule)
+	case ActionHBACRuleRemove:
+		return p.planHBACRuleRemoval(ctx, payload.HBACRule.Name)
+	case ActionSudoRuleEnsure:
+		return p.planSudoRule(ctx, payload.SudoRule)
+	case ActionSudoRuleRemove:
+		return p.planSudoRuleRemoval(ctx, payload.SudoRule.Name)
 	default:
 		return Plan{}, fmt.Errorf("unknown type of change %q", action)
 	}

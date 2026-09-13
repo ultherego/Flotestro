@@ -64,7 +64,7 @@ func TestWritingHasAClosedListOfCommands(t *testing.T) {
 		}
 	}
 	for _, method := range []string{"user_del", "group_del", "config_mod",
-		"permission_add", "role_add_member", "hbacrule_add", "sudorule_add"} {
+		"permission_add", "role_add_member", "hbacsvc_add", "sudocmd_add"} {
 		if allowedMethod(method) {
 			t.Errorf("the command %s should not be available through the adapter", method)
 		}
