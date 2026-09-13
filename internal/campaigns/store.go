@@ -409,6 +409,14 @@ type Event struct {
 // that - an event sent at the moment the panel restarts exists nowhere any
 // more.
 func (s *Store) Course(ctx context.Context, campaignID string, limit int) ([]Event, error) {
+	return s.CourseAfter(ctx, campaignID, 0, limit)
+}
+
+// CourseAfter returns the trail of a campaign after the given event
+// identifier. It is how a stream resumes after a broken connection and how
+// a long trail is read page by page: the identifiers grow with time, so
+// "after" is a cursor that no later insert can move.
+func (s *Store) CourseAfter(ctx context.Context, campaignID string, after int64, limit int) ([]Event, error) {
 	if limit <= 0 || limit > maxCourseEntries {
 		limit = maxCourseEntries
 	}
@@ -416,9 +424,10 @@ func (s *Store) Course(ctx context.Context, campaignID string, limit int) ([]Eve
 		select id, aggregate_type, event_type, payload, occurred_at
 		  from outbox_events
 		 where aggregate_id = $1 and aggregate_type in ('campaign', 'campaign_target')
+		   and id > $2
 		 order by id
-		 limit $2`
-	rows, err := s.pool.Query(ctx, query, campaignID, limit)
+		 limit $3`
+	rows, err := s.pool.Query(ctx, query, campaignID, after, limit)
 	if err != nil {
 		return nil, err
 	}

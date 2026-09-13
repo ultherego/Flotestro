@@ -511,7 +511,13 @@ func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		limit = 0
 	}
-	course, err := s.campaigns.Course(r.Context(), campaign.ID, limit)
+	// "after" is the cursor of the trail: the last event identifier the
+	// caller already has.
+	after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	if err != nil || after < 0 {
+		after = 0
+	}
+	course, err := s.campaigns.CourseAfter(r.Context(), campaign.ID, after, limit)
 	if err != nil {
 		s.fail(w, err)
 		return

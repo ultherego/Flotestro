@@ -443,7 +443,7 @@ func TestPlanDigestVectors(t *testing.T) {
 
 	step := []Finding{{
 		CheckID: "mac.enforcing", CheckVersion: 1, Applicable: true,
-		Module: "security", Revision: "rev-1", Observed: "SELinux: permissive",
+		Module: "security", Revision: "rew-1", Observed: "SELinux: permissive",
 		Remediation: &Remediation{
 			Action:  "selinux.mode.set",
 			Payload: json.RawMessage(`{"security":{"mode":"enforcing"}}`),
@@ -466,12 +466,12 @@ func TestPlanDigestVectors(t *testing.T) {
 	}
 	// A change of the read revision means the plan was computed from other facts.
 	other[0].CheckVersion = 1
-	other[0].Revision = "rev-2"
+	other[0].Revision = "rew-2"
 	if PlanHash("host-a", other) == digest {
 		t.Error("the digest does not depend on the inventory revision")
 	}
 	// A change of the remediation payload changes what will be executed.
-	other[0].Revision = "rev-1"
+	other[0].Revision = "rew-1"
 	other[0].Remediation = &Remediation{
 		Action:  "selinux.mode.set",
 		Payload: json.RawMessage(`{"security":{"mode":"permissive"}}`),

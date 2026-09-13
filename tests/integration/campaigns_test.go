@@ -3,10 +3,13 @@
 package integration
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -3800,4 +3803,136 @@ func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 	if overlap(windows) {
 		t.Errorf("two campaigns wrote to the repository at once despite a budget of 1: %+v", windows)
 	}
+}
+
+// TestCampaignStreamResumesFromTheLastEvent guards the durable stream of a
+// campaign: the trail events carry identifiers, a reconnection with
+// Last-Event-ID gets only what happened after it, and the publisher marks
+// every row it handed on.
+//
+// Without the identifier a broken connection would lose the events sent in
+// between, and the operator watching the canary would see a state jump
+// with no way to tell what happened.
+func TestCampaignStreamResumesFromTheLastEvent(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	campaign := h.createCampaign(labCampaign("stream", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": []string{host.ID}},
+	}))
+	h.approveCampaign(campaign)
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	if final.State != "completed" {
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+	}
+
+	// The publisher has two seconds between rounds; the marks appear soon
+	// after the last state change.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := h.database(ctx)
+	defer pool.Close()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var unpublished int
+		if err := pool.QueryRow(ctx, `select count(*) from outbox_events
+			 where aggregate_id = $1 and published_at is null`, campaign.ID).Scan(&unpublished); err != nil {
+			t.Fatalf("counting the unpublished events: %v", err)
+		}
+		if unpublished == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d events of the campaign were never published", unpublished)
+		}
+		time.Sleep(time.Second)
+	}
+
+	// A fresh stream replays the whole trail with identifiers.
+	all := h.streamTimeline(campaign.ID, 0)
+	if len(all) < 3 {
+		t.Fatalf("the stream replayed only %d events: %+v", len(all), all)
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i].ID <= all[i-1].ID {
+			t.Fatalf("the stream is not ordered: %d after %d", all[i].ID, all[i-1].ID)
+		}
+	}
+
+	// A reconnection carrying the identifier of the middle event gets only
+	// what came after it - nothing twice, nothing missing.
+	middle := all[len(all)/2]
+	resumed := h.streamTimeline(campaign.ID, middle.ID)
+	if len(resumed) != len(all)-len(all)/2-1 {
+		t.Fatalf("after %d the stream sent %d events, expected %d", middle.ID, len(resumed), len(all)-len(all)/2-1)
+	}
+	for _, entry := range resumed {
+		if entry.ID <= middle.ID {
+			t.Errorf("event %d repeated after the cursor %d", entry.ID, middle.ID)
+		}
+	}
+
+	// The last identifier resumes into silence: the campaign is over and
+	// nothing else is to arrive.
+	if tail := h.streamTimeline(campaign.ID, all[len(all)-1].ID); len(tail) != 0 {
+		t.Errorf("resuming after the last event replayed %d events", len(tail))
+	}
+}
+
+// streamTimeline opens the campaign stream with a cursor and returns the
+// trail events it replays before going quiet.
+func (h *harness) streamTimeline(campaignID string, after int64) []timelineEntryView {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		h.api+"/api/v1/campaigns/"+campaignID+"/events", nil)
+	if err != nil {
+		h.t.Fatalf("building the request: %v", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+h.token)
+	if after > 0 {
+		// The browser sends this header on its own after a broken
+		// connection; here the test plays the browser.
+		request.Header.Set("Last-Event-ID", strconv.FormatInt(after, 10))
+	}
+	response, err := h.client.Do(request)
+	if err != nil {
+		h.t.Fatalf("opening the stream: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		h.t.Fatalf("the stream answered %d", response.StatusCode)
+	}
+
+	var entries []timelineEntryView
+	var id int64
+	var event string
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// The replay ends when the stream goes quiet: the keep-alive comes
+	// only every 25 seconds, so the read deadline is the end of the read.
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "id: "):
+			id, _ = strconv.ParseInt(strings.TrimPrefix(line, "id: "), 10, 64)
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			if event == "timeline" {
+				var entry timelineEntryView
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &entry); err != nil {
+					h.t.Fatalf("a trail event that is not JSON: %v", err)
+				}
+				if entry.ID != id {
+					h.t.Fatalf("the event identifier %d differs from the id line %d", entry.ID, id)
+				}
+				entries = append(entries, entry)
+			}
+			event, id = "", 0
+		}
+	}
+	return entries
 }

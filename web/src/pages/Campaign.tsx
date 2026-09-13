@@ -45,6 +45,7 @@ export function Campaign() {
     ["campaign", id],
     ["campaign-targets", id],
     ["campaign-report", id],
+    ["campaign-timeline", id],
   ]);
   // The progress of the campaign's running operations, per host.
   const progress = useProgress(id ? `/api/v1/campaigns/${id}/events` : null);

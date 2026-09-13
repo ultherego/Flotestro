@@ -44,6 +44,7 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
+	"github.com/ultherego/flotestro/internal/outbox"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/remediation"
@@ -414,6 +415,27 @@ func run() error {
 	eventBus := events.NewBus(pool)
 	go eventBus.Run(ctx, log)
 	agentService.SetEvents(eventBus)
+
+	// The publisher of the durable trail: the triggers write the events,
+	// this hands them on at least once and marks them published. The
+	// campaign notifications wake it, so a screen sees a state change with
+	// the delay of one round trip rather than of the polling interval.
+	trailPublisher := outbox.NewPublisher(pool, outbox.NotifySink{}, log, 2*time.Second)
+	go trailPublisher.Run(ctx)
+	go func() {
+		wakes, unsubscribe := eventBus.Subscribe(func(event events.Event) bool {
+			return event.CampaignID != "" && event.Outbox == nil
+		})
+		defer unsubscribe()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wakes:
+				trailPublisher.Wake()
+			}
+		}
+	}()
 
 	panelServer := adminapi.NewServer(pool, hostStore, inventoryStore, jobStore, campaignStore,
 		tokenStore, authzStore, recorder, registry, identityProvider, directory,

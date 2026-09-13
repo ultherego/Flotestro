@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/events"
 )
 
@@ -41,19 +43,78 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermJobRead, scope, "job", jobID); !ok {
 		return
 	}
-	s.stream(w, r, events.ForJob(jobID), nil)
+	s.stream(w, r, events.ForJob(jobID), nil, nil)
 }
 
-// handleCampaignEvents streams the progress of a campaign. A campaign has no
-// real-time state of its own - it consists of the states of its operations,
-// so the events are the same, only filtered differently.
+// handleCampaignEvents streams a campaign: the transient progress of its
+// operations and its durable trail.
+//
+// The trail events carry an identifier, so the browser sends it back as
+// Last-Event-ID after a broken connection and the stream resumes from the
+// row after it - nothing that happened while the connection was down is
+// lost. The content comes from the table, never from the notification: a
+// notification is a wake-up call, and a screen that missed one reads
+// everything after the last identifier it has anyway.
 func (s *Server) handleCampaignEvents(w http.ResponseWriter, r *http.Request) {
 	campaignID := r.PathValue("id")
 	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign"); !ok {
 		return
 	}
-	s.stream(w, r, events.ForCampaign(campaignID), nil)
+	after := lastEventID(r)
+	s.stream(w, r, events.ForCampaign(campaignID), nil, &trail{
+		campaignID: campaignID, last: after, read: s.campaigns.CourseAfter,
+	})
 }
+
+// lastEventID reads the cursor of the trail: the Last-Event-ID header the
+// browser sends on reconnection, or the after parameter of a first request
+// that wants to skip what it already has.
+func lastEventID(r *http.Request) int64 {
+	value := r.Header.Get("Last-Event-ID")
+	if value == "" {
+		value = r.URL.Query().Get("after")
+	}
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id < 0 {
+		return 0
+	}
+	return id
+}
+
+// trail follows the durable events of one campaign inside a stream.
+type trail struct {
+	campaignID string
+	// last is the identifier of the last event sent; nothing at or before
+	// it goes out again, so a replay and a live notification cannot
+	// duplicate an event.
+	last int64
+	read func(ctx context.Context, campaignID string, after int64, limit int) ([]campaigns.Event, error)
+}
+
+// emit sends every event after the cursor, page by page.
+func (t *trail) emit(ctx context.Context, w http.ResponseWriter, flusher http.Flusher) {
+	for {
+		batch, err := t.read(ctx, t.campaignID, t.last, trailPage)
+		if err != nil || len(batch) == 0 {
+			return
+		}
+		for _, event := range batch {
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "id: %d\nevent: timeline\ndata: %s\n\n", event.ID, data)
+			t.last = event.ID
+		}
+		flusher.Flush()
+		if len(batch) < trailPage {
+			return
+		}
+	}
+}
+
+// trailPage bounds one read of the trail inside a stream.
+const trailPage = 200
 
 // handleFleetEvents streams the events of all the operations the operator
 // may see.
@@ -67,7 +128,7 @@ func (s *Server) handleFleetEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.stream(w, r, func(events.Event) bool { return true }, s.scopeGate(principal))
+	s.stream(w, r, func(events.Event) bool { return true }, s.scopeGate(principal), nil)
 }
 
 // scopeGate lets through only the events of operations from hosts visible
@@ -94,9 +155,11 @@ func (s *Server) scopeGate(principal authz.Principal) func(context.Context, even
 	}
 }
 
-// stream sends events as Server-Sent Events.
+// stream sends events as Server-Sent Events. With a trail it also replays
+// the durable events after the caller's cursor and follows them live.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request,
-	filter func(events.Event) bool, allowed func(context.Context, events.Event) bool) {
+	filter func(events.Event) bool, allowed func(context.Context, events.Event) bool,
+	durable *trail) {
 	if s.events == nil {
 		// No bus is not a client error: the panel works, only without the
 		// stream. The answer says so directly instead of hanging in wait.
@@ -127,6 +190,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request,
 	fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
+	// The replay comes after the subscription, so an event published in
+	// between is seen twice at most - and the cursor drops the repeat.
+	if durable != nil {
+		durable.emit(r.Context(), w, flusher)
+	}
+
 	keepalive := time.NewTicker(keepaliveInterval)
 	defer keepalive.Stop()
 
@@ -138,6 +207,15 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request,
 			fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()
 		case event := <-incoming:
+			if event.Outbox != nil {
+				// A published row of the trail: read from the cursor on,
+				// because the notification is only a signal that there is
+				// something to read.
+				if durable != nil && event.Outbox.ID > durable.last {
+					durable.emit(r.Context(), w, flusher)
+				}
+				continue
+			}
 			if allowed != nil && !allowed(r.Context(), event) {
 				continue
 			}

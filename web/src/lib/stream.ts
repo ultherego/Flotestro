@@ -34,6 +34,10 @@ export function useProgressStream(path: string | null, keys: unknown[][]) {
       }
     };
     source.addEventListener("job", refresh);
+    // A durable event of the trail refreshes as well. It carries an
+    // identifier, so after a broken connection the browser resumes the
+    // stream from the last one it saw and nothing in between is lost.
+    source.addEventListener("timeline", refresh);
     // Connecting refreshes too: the screen may have missed changes before
     // the stream opened.
     source.addEventListener("ready", refresh);

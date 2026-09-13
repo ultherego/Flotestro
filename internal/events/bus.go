@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/outbox"
 )
 
 // The notification channels in the database. Progress has one of its own,
@@ -41,6 +43,18 @@ type Event struct {
 	// Log is filled in for the live view of a log. The lines are transient:
 	// they are not recorded and cannot be read after the fact.
 	Log *LogLines `json:"log,omitempty"`
+	// Outbox points at a row of the durable trail that has just been
+	// published. It carries the identifiers only: a receiver reads the row
+	// from the table, so a missed notification loses nothing.
+	Outbox *OutboxRef `json:"outbox,omitempty"`
+}
+
+// OutboxRef identifies a published event of the durable trail.
+type OutboxRef struct {
+	ID          int64  `json:"id"`
+	Aggregate   string `json:"aggregate_type"`
+	AggregateID string `json:"aggregate_id"`
+	Type        string `json:"event_type"`
 }
 
 // LogLines is a piece of the live view of a log.
@@ -109,7 +123,7 @@ func (b *Bus) listen(ctx context.Context) error {
 	}
 	defer conn.Release()
 
-	for _, name := range []string{jobChannel, progressChannel, campaignChannel, logChannel} {
+	for _, name := range []string{jobChannel, progressChannel, campaignChannel, logChannel, outbox.NotifyChannel} {
 		if _, err := conn.Exec(ctx, "listen "+name); err != nil {
 			return err
 		}
@@ -126,6 +140,10 @@ func (b *Bus) listen(ctx context.Context) error {
 			b.broadcast(parseTarget(notification.Payload))
 		case logChannel:
 			b.broadcast(parseProgress(notification.Payload))
+		case outbox.NotifyChannel:
+			if event, ok := parseOutbox(notification.Payload); ok {
+				b.broadcast(event)
+			}
 		default:
 			b.broadcast(parse(notification.Payload))
 		}
@@ -163,6 +181,21 @@ func parseTarget(payload string) Event {
 		event.State = strings.TrimSpace(parts[1])
 	}
 	return event
+}
+
+// parseOutbox reads the notification about a published row of the trail.
+func parseOutbox(payload string) (Event, bool) {
+	id, aggregate, aggregateID, eventType, ok := outbox.Notification(payload)
+	if !ok {
+		return Event{}, false
+	}
+	event := Event{Outbox: &OutboxRef{ID: id, Aggregate: aggregate,
+		AggregateID: aggregateID, Type: eventType}}
+	// The trail of a campaign belongs to that campaign's stream.
+	if aggregate == "campaign" || aggregate == "campaign_target" {
+		event.CampaignID = aggregateID
+	}
+	return event, true
 }
 
 // parseProgress reads a progress notification written as JSON.
@@ -241,7 +274,12 @@ func (b *Bus) Subscribe(filter func(Event) bool) (<-chan Event, func()) {
 
 // ForJob filters the events of one operation.
 func ForJob(jobID string) func(Event) bool {
-	return func(event Event) bool { return event.JobID == jobID }
+	return func(event Event) bool { return event.JobID == jobID && event.Outbox == nil }
+}
+
+// ForOutbox filters the published rows of the durable trail.
+func ForOutbox() func(Event) bool {
+	return func(event Event) bool { return event.Outbox != nil }
 }
 
 // ForCampaign filters the events of the operations of one campaign.

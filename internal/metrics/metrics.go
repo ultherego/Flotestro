@@ -299,7 +299,45 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 			samples: samples,
 		})
 	}
+
+	// The lag of the durable trail: how old the oldest unpublished event is.
+	// A publisher that stopped shows up here long before anyone notices a
+	// screen that no longer refreshes.
+	if samples, err := c.outboxLag(ctx); err == nil {
+		result = append(result, metric{
+			name: "flotestro_outbox_lag_seconds", kind: "gauge",
+			help:    "Age of the oldest event of the durable trail not published yet, by event type.",
+			samples: samples,
+		})
+	}
 	return result
+}
+
+// outboxLag measures the unpublished part of the trail. A type with nothing
+// waiting reports zero: that is a measured zero, not a missing value.
+func (c *Collector) outboxLag(ctx context.Context) ([]sample, error) {
+	rows, err := c.pool.Query(ctx, `
+		select event_type, extract(epoch from now() - min(occurred_at))
+		  from outbox_events
+		 where published_at is null
+		 group by 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	samples := []sample{}
+	for rows.Next() {
+		var eventType string
+		var lag float64
+		if err := rows.Scan(&eventType, &lag); err != nil {
+			return nil, err
+		}
+		samples = append(samples, sample{labels: map[string]string{"event_type": eventType}, value: lag})
+	}
+	if len(samples) == 0 {
+		samples = append(samples, sample{labels: map[string]string{"event_type": "none"}, value: 0})
+	}
+	return samples, rows.Err()
 }
 
 // labelPairs reads a query with three columns: two labels and a count.
