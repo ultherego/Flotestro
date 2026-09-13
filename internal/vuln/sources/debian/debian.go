@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/vuln"
+	"github.com/ultherego/flotestro/internal/vuln/sources/local"
 )
 
 // Provider is the name of the source written down with every finding.
@@ -50,7 +51,7 @@ func New(address string, limit time.Duration) *Source {
 	if limit <= 0 {
 		limit = 10 * time.Minute
 	}
-	return &Source{URL: address, Client: &http.Client{Timeout: limit}}
+	return &Source{URL: address, Client: local.Client(limit)}
 }
 
 func (z *Source) Name() string { return Provider }

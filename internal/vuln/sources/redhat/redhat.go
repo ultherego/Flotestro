@@ -19,6 +19,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/ultherego/flotestro/internal/vuln"
+	"github.com/ultherego/flotestro/internal/vuln/sources/local"
 )
 
 // DefaultURL points at the VEX directory of Red Hat.
@@ -86,7 +87,7 @@ func New(address, directory string, limit time.Duration) *Source {
 	if limit <= 0 {
 		limit = 30 * time.Minute
 	}
-	return &Source{Base: address, Directory: directory, Client: &http.Client{Timeout: limit}}
+	return &Source{Base: address, Directory: directory, Client: local.Client(limit)}
 }
 
 func (z *Source) Name() string { return Provider }

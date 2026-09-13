@@ -1,8 +1,12 @@
 package debian
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ultherego/flotestro/internal/vuln"
@@ -182,5 +186,26 @@ func TestACutDumpIsNotTheFullThing(t *testing.T) {
 	}
 	if len(advisories) != 1 || advisories[0].FixedVersion != "3.0.12-1" {
 		t.Fatalf("findings = %+v", advisories)
+	}
+}
+
+// A dump copied onto the panel is read through the same fetch as the
+// remote one: an installation without Internet access points the source at
+// a file:// address and gets the findings, the tag and a 304 on a repeat.
+func TestFetchReadsACopiedDump(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "debian.json")
+	if err := os.WriteFile(path, []byte(testDump), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := New("file://"+path, time.Second)
+	snapshot, advisories, err := source.Fetch(context.Background(), []string{"trixie"}, "")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(advisories) != 4 || snapshot.ETag == "" || snapshot.SourceModifiedAt == nil {
+		t.Fatalf("read %d findings, tag %q, time %v", len(advisories), snapshot.ETag, snapshot.SourceModifiedAt)
+	}
+	if _, _, err := source.Fetch(context.Background(), []string{"trixie"}, snapshot.ETag); err != ErrNotModified {
+		t.Fatalf("an unchanged copy was fetched again: %v", err)
 	}
 }
