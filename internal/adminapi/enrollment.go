@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -30,18 +31,30 @@ type enrollmentRequestBody struct {
 	RelayID    string `json:"relay_id"`
 	MaxUses    int    `json:"max_uses"`
 	TTLMinutes int    `json:"ttl_minutes"`
+	// Reason is the purpose of an order that requires fresh authentication:
+	// production, a batch token or a relay. The description stands in for
+	// it when it says enough.
+	Reason string `json:"reason"`
 }
 
 // handleCreateEnrollmentRequest issues an order and shows the token once.
 func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authorize(w, r, authz.PermHostEnrollCreate, authz.GlobalScope,
-		"enrollment_request", "")
-	if !ok {
-		return
-	}
 	var req enrollmentRequestBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	req.Site, req.Environment = orderPlacement(req.Site, req.Environment)
+	// The order is authorised where the machine will live: an operator of
+	// one site invites machines into that site, not into the whole fleet.
+	// A relay is a separate right - it carries the traffic of a site.
+	permission := authz.PermHostEnrollCreate
+	if req.Kind == enrollment.KindRelay {
+		permission = authz.PermRelayEnrollCreate
+	}
+	scope := authz.Scope{Site: req.Site, Environment: req.Environment}
+	principal, ok := s.authorize(w, r, permission, scope, "enrollment_request", "")
+	if !ok {
 		return
 	}
 	// Identity recovery has its own entry on the host and its own
@@ -51,6 +64,22 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		problem(w, http.StatusBadRequest, "purpose_not_allowed",
 			"identity recovery is requested on the host itself")
 		return
+	}
+	// Enrollment opens the way to root on the machine through the helper.
+	// An order for production, a token good for many machines or a relay
+	// requires fresh authentication, like any change of that weight.
+	var stepUpEvidence map[string]any
+	if s.requiresSecondPerson(req.Environment) || req.MaxUses > 1 || req.Kind == enrollment.KindRelay {
+		reason := strings.TrimSpace(req.Reason)
+		if reason == "" {
+			reason = strings.TrimSpace(req.Description)
+		}
+		evidence, ok := s.requireStepUp(w, r, principal, reason,
+			"host.enrollment.create", "enrollment_request", "")
+		if !ok {
+			return
+		}
+		stepUpEvidence = evidence
 	}
 
 	order, err := s.createOrder(r, req, principal.Subject, "")
@@ -65,25 +94,33 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		// The token value does not go to the audit log: it is a secret, and
 		// the audit log is read by more people than the one who ordered the
 		// installation.
-		Detail: map[string]any{
+		Detail: withStepUp(map[string]any{
 			"site": order.Site, "environment": order.Environment,
 			"kind": order.Kind, "purpose": order.Purpose,
 			"relay_id": order.RelayID,
 			"max_uses": order.MaxUses, "expires_at": order.ExpiresAt,
-		},
+		}, stepUpEvidence),
 	})
 	writeJSON(w, http.StatusCreated, order)
+}
+
+// orderPlacement fills in the site and the environment of an order that
+// names none: a machine has to land somewhere, and "unassigned" says
+// honestly that nobody decided yet.
+func orderPlacement(site, environment string) (string, string) {
+	if site == "" {
+		site = "default"
+	}
+	if environment == "" {
+		environment = "unassigned"
+	}
+	return site, environment
 }
 
 // createOrder assembles the store input from the HTTP request.
 func (s *Server) createOrder(r *http.Request, req enrollmentRequestBody, actor,
 	hostID string) (*enrollment.Request, error) {
-	if req.Site == "" {
-		req.Site = "default"
-	}
-	if req.Environment == "" {
-		req.Environment = "unassigned"
-	}
+	req.Site, req.Environment = orderPlacement(req.Site, req.Environment)
 	ttl := time.Duration(req.TTLMinutes) * time.Minute
 	if req.TTLMinutes <= 0 {
 		ttl = 15 * time.Minute
@@ -251,7 +288,14 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var req enrollmentRequestBody
+	var req struct {
+		enrollmentRequestBody
+		// RevokeOldImmediately cuts the old key off now, for a suspected
+		// theft. Without it the old certificate stays valid until the new
+		// session confirms the replacement - a planned key change.
+		RevokeOldImmediately bool `json:"revoke_old_immediately"`
+		TTLSeconds           int  `json:"ttl_seconds"`
+	}
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
@@ -264,20 +308,63 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	req.Site, req.Environment = host.Site, host.Environment
 	req.Kind, req.Purpose = enrollment.KindAgent, enrollment.PurposeReplace
 	req.MaxUses = 1
+	if req.TTLSeconds > 0 && req.TTLMinutes <= 0 {
+		req.TTLMinutes = (req.TTLSeconds + 59) / 60
+	}
 
-	order, err := s.createOrder(r, req, principal.Subject, hostID)
+	// Taking over the identity of a machine in the fleet is a change of
+	// the highest weight: fresh authentication, with the reason recorded.
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = strings.TrimSpace(req.Description)
+	}
+	evidence, ok := s.requireStepUp(w, r, principal, reason, "host.identity.recovery", "host", hostID)
+	if !ok {
+		return
+	}
+
+	order, err := s.createOrder(r, req.enrollmentRequestBody, principal.Subject, hostID)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
+	}
+	revoked := 0
+	if req.RevokeOldImmediately {
+		revoked, err = s.revokeNow(r, hostID, reason)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if s.registry != nil {
+			s.registry.EndSession(hostID, "identity_recovery")
+		}
 	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.identity.recovery", TargetType: "host", TargetID: hostID,
 		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
+		Detail: withStepUp(map[string]any{
 			"request_id": order.ID, "expires_at": order.ExpiresAt,
 			"expected_machine_id": order.ExpectedMachineID,
-		},
+			"reason":              reason, "revoke_old_immediately": req.RevokeOldImmediately,
+			"certificates_revoked": revoked,
+		}, evidence),
 	})
 	writeJSON(w, http.StatusCreated, order)
+}
+
+// revokeNow revokes every live certificate of the host in its own
+// transaction. The old certificate record stays with the revocation reason:
+// history is not deleted.
+func (s *Server) revokeNow(r *http.Request, hostID, reason string) (int, error) {
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	revoked, err := s.hosts.RevokeCertificates(r.Context(), tx, hostID, reason)
+	if err != nil {
+		return 0, err
+	}
+	return revoked, tx.Commit(r.Context())
 }

@@ -176,6 +176,25 @@ func (s Spec) Validate() error {
 	return nil
 }
 
+// Approval is the evidence of a consent: who approved which fingerprint,
+// on the strength of what authentication, and why. It is written once.
+type Approval struct {
+	ID                  string `json:"id"`
+	CampaignID          string `json:"campaign_id"`
+	ApprovalFingerprint string `json:"approval_fingerprint"`
+	RequestedBy         string `json:"requested_by"`
+	ApprovedBy          string `json:"approved_by"`
+	// Authentication is "session" or "api_token". A token cannot
+	// re-authenticate; the record says so instead of pretending.
+	Authentication  string     `json:"authentication"`
+	ACR             string     `json:"acr,omitempty"`
+	AMR             []string   `json:"amr,omitempty"`
+	AuthenticatedAt *time.Time `json:"authenticated_at,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	ChangeTicket    string     `json:"change_ticket,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+}
+
 // Fingerprint computes the approval fingerprint of a campaign.
 //
 // The consent is to concern exactly what the operator saw: the same

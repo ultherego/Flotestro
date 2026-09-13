@@ -48,6 +48,10 @@ func (s *Server) handleReleaseHost(w http.ResponseWriter, r *http.Request) {
 		FromStates: []string{hosts.StateQuarantined},
 		To:         hosts.StateActive,
 		Action:     "host.quarantine.release",
+		// A release with a revoked certificate would be a release in name
+		// only - the host cannot connect - and would hide that the
+		// identity is still to be recovered.
+		RequiresLiveCertificate: true,
 	})
 }
 
@@ -79,9 +83,12 @@ type lifecycleTransition struct {
 	To                   string
 	Action               string
 	RequiresConfirmation bool
-	AlwaysRevoke         bool
-	CancelJobs           bool
-	CloseSession         bool
+	// RequiresLiveCertificate refuses the transition when every certificate
+	// of the host is revoked or expired.
+	RequiresLiveCertificate bool
+	AlwaysRevoke            bool
+	CancelJobs              bool
+	CloseSession            bool
 }
 
 // changeLifecycle performs the transition together with its side effects.
@@ -119,6 +126,28 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 		problem(w, http.StatusBadRequest, "confirmation_mismatch",
 			"type the hostname to confirm this change")
 		return
+	}
+	// Every lifecycle decision is taken with fresh authentication: cutting
+	// a host off, letting it back in and ending the trust in it are the
+	// decisions an attacker with a stolen session would want most.
+	evidence, ok := s.requireStepUp(w, r, principal, req.Reason, transition.Action, "host", hostID)
+	if !ok {
+		return
+	}
+	// A host whose certificates were revoked does not return by lifting
+	// the quarantine: the key was suspect, and the state in the database
+	// was never what kept it out. Its return is identity recovery.
+	if transition.RequiresLiveCertificate {
+		live, err := s.hosts.HasLiveCertificate(r.Context(), hostID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if !live {
+			problem(w, http.StatusConflict, "identity_revoked",
+				"the certificates of this host were revoked; recover its identity before releasing it")
+			return
+		}
 	}
 
 	tx, err := s.pool.Begin(r.Context())
@@ -161,10 +190,10 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: transition.Action, TargetType: "host", TargetID: hostID,
 		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
+		Detail: withStepUp(map[string]any{
 			"reason": req.Reason, "state": transition.To,
 			"certificates_revoked": revoked, "jobs_canceled": canceled,
-		},
+		}, evidence),
 	}); err != nil {
 		s.fail(w, err)
 		return

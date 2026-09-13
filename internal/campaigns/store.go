@@ -184,21 +184,64 @@ func AssignWave(index, canarySize, waveSize int) (wave, position int) {
 }
 
 // Approve approves a campaign and lets it start.
-func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID, actor string) (*Campaign, error) {
+func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID string, approval Approval) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, approved_by = $3, approved_at = now(), updated_at = now()
 		where id = $1 and state = $4
-		returning id`
-	var updated string
-	err := tx.QueryRow(ctx, query, campaignID, string(StatePlanned), actor,
-		string(StateAwaitingApproval)).Scan(&updated)
+		returning created_by, approval_fingerprint`
+	var requestedBy, fingerprint string
+	err := tx.QueryRow(ctx, query, campaignID, string(StatePlanned), approval.ApprovedBy,
+		string(StateAwaitingApproval)).Scan(&requestedBy, &fingerprint)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrConflict
 	}
 	if err != nil {
 		return nil, err
 	}
+	// The record is the evidence; the columns above are the convenience.
+	// It is written in the same transaction, so there is no approval
+	// without its record and no record without the approval.
+	const record = `
+		insert into campaign_approvals
+		    (campaign_id, approval_fingerprint, requested_by, approved_by,
+		     authentication, acr, amr, authenticated_at, reason, change_ticket)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	amr := approval.AMR
+	if amr == nil {
+		amr = []string{}
+	}
+	if _, err := tx.Exec(ctx, record, campaignID, fingerprint, requestedBy, approval.ApprovedBy,
+		approval.Authentication, approval.ACR, amr, approval.AuthenticatedAt,
+		approval.Reason, approval.ChangeTicket); err != nil {
+		return nil, fmt.Errorf("record the approval: %w", err)
+	}
 	return s.getTx(ctx, tx, campaignID)
+}
+
+// Approvals lists the approval records of a campaign, oldest first. A
+// campaign approved once has one; the list form leaves room for a second
+// person where a policy asks for two.
+func (s *Store) Approvals(ctx context.Context, campaignID string) ([]Approval, error) {
+	const query = `
+		select id, campaign_id, approval_fingerprint, requested_by, approved_by,
+		       authentication, acr, amr, authenticated_at, reason, change_ticket, created_at
+		from campaign_approvals where campaign_id = $1 order by created_at`
+	rows, err := s.pool.Query(ctx, query, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	approvals := []Approval{}
+	for rows.Next() {
+		var a Approval
+		if err := rows.Scan(&a.ID, &a.CampaignID, &a.ApprovalFingerprint, &a.RequestedBy, &a.ApprovedBy,
+			&a.Authentication, &a.ACR, &a.AMR, &a.AuthenticatedAt, &a.Reason, &a.ChangeTicket,
+			&a.CreatedAt); err != nil {
+			return nil, err
+		}
+		approvals = append(approvals, a)
+	}
+	return approvals, rows.Err()
 }
 
 // Pause holds a campaign back. The hosts already started finish their tasks.

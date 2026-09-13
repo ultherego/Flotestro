@@ -432,3 +432,47 @@ func (h *harness) newestAgentVersion() string {
 	}
 	return newest
 }
+
+// TestRevokedHostIsNotReleasedWithoutRecovery guards that lifting a
+// quarantine imposed with a revocation does not pretend to bring the host
+// back: without a live certificate the host cannot connect, and its return
+// is identity recovery.
+func TestRevokedHostIsNotReleasedWithoutRecovery(t *testing.T) {
+	h := newHarness(t)
+	host := h.enrollSyntheticHost(t)
+
+	var result struct {
+		LifecycleState      string `json:"lifecycle_state"`
+		CertificatesRevoked int    `json:"certificates_revoked"`
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
+		map[string]any{"reason": "suspected key theft", "revoke_certificates": true},
+		&result, http.StatusOK)
+	if result.LifecycleState != "quarantined" || result.CertificatesRevoked == 0 {
+		t.Fatalf("quarantine = %+v", result)
+	}
+
+	// The release is refused with the reason, not accepted in name only.
+	var denial struct {
+		Code string `json:"code"`
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
+		map[string]any{"reason": "incident assessed"}, &denial, http.StatusConflict)
+	if denial.Code != "identity_revoked" {
+		t.Errorf("code = %q, expected identity_revoked", denial.Code)
+	}
+
+	// The recovery order names its reason and may revoke what is left at
+	// once; the token is bound to this host.
+	var order orderView
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
+		"reason": "key replaced after the incident", "revoke_old_immediately": true, "ttl_seconds": 600,
+	}, &order, http.StatusCreated)
+	if order.ExpectedHostID != host.ID {
+		t.Errorf("the order points at host %q, wanted %q", order.ExpectedHostID, host.ID)
+	}
+	// A reason too short to mean anything is refused, like everywhere the
+	// authentication is refreshed.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
+		map[string]any{"reason": "again"}, nil, http.StatusBadRequest)
+}

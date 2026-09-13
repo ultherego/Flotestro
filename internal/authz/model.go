@@ -32,6 +32,9 @@ const (
 	PermHostEnrollCreate Permission = "host.enroll.create"
 	PermHostEnrollRead   Permission = "host.enroll.read"
 	PermHostEnrollRevoke Permission = "host.enroll.revoke"
+	// PermRelayEnrollCreate is separate from inviting hosts: a relay carries
+	// the traffic of a whole site, so the right to add one is its own role.
+	PermRelayEnrollCreate Permission = "relay.enroll.create"
 	// PermHostIdentityReplace allows restoring the identity of an existing
 	// host. That is a right separate from inviting new machines: replacing an
 	// identity means taking over a host that is already in the fleet.
@@ -473,7 +476,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermDNSDirectoryWrite,
-		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke,
+		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke, PermRelayEnrollCreate,
 		PermHostIdentityReplace, PermHostQuarantine, PermHostQuarantineRelease,
 		PermHostDecommission, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,

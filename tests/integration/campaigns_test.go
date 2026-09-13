@@ -4523,3 +4523,59 @@ func TestEveryErrorCodeExplainsItself(t *testing.T) {
 		}
 	}
 }
+
+// A consent is evidence, not a flag: the approval leaves a record saying
+// who approved which fingerprint, on what authentication and why.
+func TestApprovalLeavesAnImmutableRecord(t *testing.T) {
+	h := newHarness(t)
+	campaign := h.createCampaign(labCampaign("approval record", "cron.service", nil))
+
+	var approved campaignView
+	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve", map[string]any{
+		"approval_fingerprint": campaign.ApprovalFingerprint,
+		"reason":               "planned restart of cron on the lab",
+		"change_ticket":        "CHG-1234",
+	}, &approved, http.StatusOK)
+
+	var records struct {
+		Items []struct {
+			ApprovalFingerprint string `json:"approval_fingerprint"`
+			RequestedBy         string `json:"requested_by"`
+			ApprovedBy          string `json:"approved_by"`
+			Authentication      string `json:"authentication"`
+			Reason              string `json:"reason"`
+			ChangeTicket        string `json:"change_ticket"`
+		} `json:"items"`
+		Count int `json:"count"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/approvals", &records)
+	if records.Count != 1 || len(records.Items) != 1 {
+		t.Fatalf("approvals = %+v", records)
+	}
+	record := records.Items[0]
+	if record.ApprovalFingerprint != campaign.ApprovalFingerprint {
+		t.Errorf("the record carries fingerprint %q, the campaign %q", record.ApprovalFingerprint, campaign.ApprovalFingerprint)
+	}
+	if record.RequestedBy != approved.CreatedBy || record.ApprovedBy != approved.ApprovedBy {
+		t.Errorf("record %+v does not match the campaign (created_by %q, approved_by %q)", record, approved.CreatedBy, approved.ApprovedBy)
+	}
+	// The harness signs in with an API token, which cannot re-authenticate;
+	// the record says so rather than pretending.
+	if record.Authentication != "api_token" {
+		t.Errorf("authentication = %q", record.Authentication)
+	}
+	if record.Reason != "planned restart of cron on the lab" || record.ChangeTicket != "CHG-1234" {
+		t.Errorf("the reason and the ticket were not recorded: %+v", record)
+	}
+
+	// The record cannot be changed: the table refuses updates and deletes.
+	pool := h.database(context.Background())
+	if _, err := pool.Exec(context.Background(),
+		`update campaign_approvals set reason = 'rewritten' where campaign_id = $1`, campaign.ID); err == nil {
+		t.Error("the approval record accepted an update")
+	}
+	if _, err := pool.Exec(context.Background(),
+		`delete from campaign_approvals where campaign_id = $1`, campaign.ID); err == nil {
+		t.Error("the approval record accepted a delete")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -756,6 +757,11 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 	// would refer to the campaign identifier alone.
 	var request struct {
 		ApprovalFingerprint string `json:"approval_fingerprint"`
+		// The reason is part of the evidence. A critical campaign requires
+		// it, like the same operation on one host; elsewhere it is recorded
+		// when given.
+		Reason       string `json:"reason"`
+		ChangeTicket string `json:"change_ticket"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request)
@@ -788,6 +794,34 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The consent is what starts the change, so the fresh authentication
+	// belongs here, immediately before it - a session that was fresh at
+	// creation may be hours old by the time the plans are reviewed.
+	approval := campaigns.Approval{
+		ApprovedBy:     principal.Subject,
+		Authentication: "api_token",
+		Reason:         strings.TrimSpace(request.Reason),
+		ChangeTicket:   strings.TrimSpace(request.ChangeTicket),
+	}
+	if session, ok := authz.SessionFromContext(r.Context()); ok && session != nil {
+		approval.Authentication = "session"
+		approval.ACR = session.Auth.ACR
+		approval.AMR = session.Auth.AMR
+		if !session.Auth.At.IsZero() {
+			at := session.Auth.At.UTC()
+			approval.AuthenticatedAt = &at
+		}
+	}
+	var stepUpEvidence map[string]any
+	if opspec.ActionType(campaign.ActionType).RequiresFreshAuth() {
+		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
+			"campaign.approve", "campaign", campaign.ID)
+		if !ok {
+			return
+		}
+		stepUpEvidence = evidence
+	}
+
 	tx, err := s.campaigns.Pool().Begin(r.Context())
 	if err != nil {
 		s.fail(w, err)
@@ -795,7 +829,7 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	approved, err := s.campaigns.Approve(r.Context(), tx, campaign.ID, principal.Subject)
+	approved, err := s.campaigns.Approve(r.Context(), tx, campaign.ID, approval)
 	if errors.Is(err, campaigns.ErrConflict) {
 		problem(w, http.StatusConflict, "invalid_state",
 			"the campaign is not awaiting approval (state "+string(campaign.State)+")")
@@ -809,7 +843,11 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "campaign.approve", TargetType: "campaign", TargetID: campaign.ID,
 		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"name": campaign.Name, "created_by": campaign.CreatedBy},
+		Detail: withStepUp(map[string]any{
+			"name": campaign.Name, "created_by": campaign.CreatedBy,
+			"approval_fingerprint": campaign.ApprovalFingerprint,
+			"reason":               approval.Reason, "change_ticket": approval.ChangeTicket,
+		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -819,6 +857,21 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, approved)
+}
+
+// handleCampaignApprovals returns the approval records: the evidence of
+// who consented to what, on what authentication and why.
+func (s *Server) handleCampaignApprovals(w http.ResponseWriter, r *http.Request) {
+	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
+	if !ok {
+		return
+	}
+	approvals, err := s.campaigns.Approvals(r.Context(), campaign.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": approvals, "count": len(approvals)})
 }
 
 func (s *Server) handlePauseCampaign(w http.ResponseWriter, r *http.Request) {

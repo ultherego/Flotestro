@@ -280,6 +280,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/campaigns/{id}/timeline", s.handleCampaignTimeline)
 	s.route(mux, "GET /api/v1/campaigns/{id}/plans", s.handleCampaignPlans)
 	s.route(mux, "GET /api/v1/campaigns/{id}/events", s.handleCampaignEvents)
+	s.route(mux, "GET /api/v1/campaigns/{id}/approvals", s.handleCampaignApprovals)
 	s.route(mux, "POST /api/v1/campaigns/{id}/approve", s.handleApproveCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/pause", s.handlePauseCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)

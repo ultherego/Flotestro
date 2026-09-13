@@ -183,6 +183,18 @@ func (a ActionType) Permission() string {
 	}
 }
 
+// ChangesAccess says whether the change alters who may sign in where: an
+// account, its keys or a group membership. Such a change is taken with
+// fresh authentication, like an access rule on a host; a DNS record is not.
+func (a ActionType) ChangesAccess() bool {
+	switch a {
+	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys:
+		return true
+	default:
+		return false
+	}
+}
+
 // Known checks whether the type of change is supported.
 func (a ActionType) Known() bool {
 	switch a {

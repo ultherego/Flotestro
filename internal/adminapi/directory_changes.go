@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
@@ -15,6 +16,9 @@ type createChangeRequest struct {
 	Action           string          `json:"action"`
 	Payload          json.RawMessage `json:"payload"`
 	RequiresApproval *bool           `json:"requires_approval,omitempty"`
+	// Reason is required for a change of access: it is part of the
+	// evidence recorded with the fresh authentication.
+	Reason string `json:"reason,omitempty"`
 }
 
 // handleCreateDirectoryChange plans a change in the directory. The order
@@ -43,6 +47,19 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 		authz.GlobalScope, "directory_change", "")
 	if !ok {
 		return
+	}
+
+	// A change of access in the directory reaches every host that trusts
+	// it, so it is taken with fresh authentication, like the same change
+	// on one host - and all the more.
+	var stepUpEvidence map[string]any
+	if action.ChangesAccess() {
+		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
+			"directory_change.create", "directory_change", "")
+		if !ok {
+			return
+		}
+		stepUpEvidence = evidence
 	}
 
 	var payload identity.Payload
@@ -90,10 +107,11 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "directory_change.create", TargetType: "directory_change", TargetID: change.ID,
 		RequestID: change.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
+		Detail: withStepUp(map[string]any{
 			"action_type": change.ActionType, "payload_hash": change.PayloadHash,
 			"conflicts": plan.Conflicts, "warnings": plan.Warnings,
-		},
+			"reason": strings.TrimSpace(request.Reason),
+		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -115,6 +133,7 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 
 	var request struct {
 		PayloadHash string `json:"payload_hash,omitempty"`
+		Reason      string `json:"reason,omitempty"`
 	}
 	if r.ContentLength > 0 {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request)
@@ -140,6 +159,18 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 		problem(w, http.StatusForbidden, "self_approval",
 			"a directory change must be approved by a second person")
 		return
+	}
+
+	// The consent is what admits the change, so the fresh authentication
+	// belongs immediately before it.
+	var stepUpEvidence map[string]any
+	if identity.ActionType(change.ActionType).ChangesAccess() {
+		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
+			"directory_change.approve", "directory_change", change.ID)
+		if !ok {
+			return
+		}
+		stepUpEvidence = evidence
 	}
 
 	var plan identity.Plan
@@ -170,7 +201,10 @@ func (s *Server) handleApproveDirectoryChange(w http.ResponseWriter, r *http.Req
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "directory_change.approve", TargetType: "directory_change", TargetID: change.ID,
 		RequestID: change.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"action_type": change.ActionType, "created_by": change.CreatedBy},
+		Detail: withStepUp(map[string]any{
+			"action_type": change.ActionType, "created_by": change.CreatedBy,
+			"reason": strings.TrimSpace(request.Reason),
+		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
 		return

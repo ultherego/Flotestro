@@ -406,6 +406,21 @@ func (s *Store) RevokeCertificates(ctx context.Context, tx pgx.Tx, hostID, reaso
 	return int(tag.RowsAffected()), nil
 }
 
+// HasLiveCertificate says whether the host holds a certificate that is
+// neither revoked nor expired. A host without one cannot come back on its
+// own: its return starts with identity recovery.
+func (s *Store) HasLiveCertificate(ctx context.Context, hostID string) (bool, error) {
+	const query = `
+		select exists (
+			select 1 from agent_certificates
+			where host_id = $1::uuid and revoked_at is null and not_after > now())`
+	var live bool
+	if err := s.pool.QueryRow(ctx, query, hostID).Scan(&live); err != nil {
+		return false, fmt.Errorf("checking the certificates: %w", err)
+	}
+	return live, nil
+}
+
 // SaveCertificate records an issued agent certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
 	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial string) error {
