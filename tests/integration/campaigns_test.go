@@ -4488,3 +4488,38 @@ func TestTwoOrchestratorsCreateOneJobPerTarget(t *testing.T) {
 		t.Errorf("%d budget leases remain after the campaign", leases)
 	}
 }
+
+// The error guide is part of the contract: every code the panel can put on a
+// job or a target explains itself, and the explanation reaches the API.
+func TestEveryErrorCodeExplainsItself(t *testing.T) {
+	h := newHarness(t)
+	var guide struct {
+		Items []struct {
+			Code    string `json:"code"`
+			Stage   string `json:"stage"`
+			Retry   string `json:"retry"`
+			Meaning string `json:"meaning"`
+			Action  string `json:"action"`
+		} `json:"items"`
+		Count int `json:"count"`
+	}
+	h.get("/api/v1/errors", &guide)
+	if guide.Count == 0 || guide.Count != len(guide.Items) {
+		t.Fatalf("count = %d, items = %d", guide.Count, len(guide.Items))
+	}
+	seen := map[string]bool{}
+	for _, item := range guide.Items {
+		if seen[item.Code] {
+			t.Errorf("the code %s is explained twice", item.Code)
+		}
+		seen[item.Code] = true
+		if item.Stage == "" || item.Retry == "" || item.Meaning == "" || item.Action == "" {
+			t.Errorf("the code %s is not fully explained: %+v", item.Code, item)
+		}
+	}
+	for _, code := range []string{"offline", "precondition_failed", "lease_expired", "budget_capacity", "plan_stale", "unsupported"} {
+		if !seen[code] {
+			t.Errorf("the guide does not explain %s", code)
+		}
+	}
+}

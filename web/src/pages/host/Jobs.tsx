@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { ErrorBox, Time, ProgressBar, Empty, JobState } from "../../components/ui";
+import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../../components/ui";
 import { useHost } from "./shared";
 import { OPERATIONS_INTERVAL, useProgress } from "../../lib/stream";
 import { useT } from "../../i18n";
@@ -38,7 +38,7 @@ export function HostJobs() {
             </td>
             <td>{job.created_by}</td>
             <td>{job.approved_by || "—"}</td>
-            <td>{job.result_error_code || job.result_status || "—"}</td>
+            <td>{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</td>
             <td><Time value={job.created_at} /></td>
           </tr>
         ))}

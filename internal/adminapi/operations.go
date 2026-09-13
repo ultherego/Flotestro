@@ -558,6 +558,19 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "version": opspec.ActionVersion})
 }
 
+// handleListErrors serves the guide to error codes: what each one means,
+// whether a retry helps and what the operator does next. Automation reads
+// the retry policy from here rather than matching messages.
+func (s *Server) handleListErrors(w http.ResponseWriter, r *http.Request) {
+	if principal := authz.FromContext(r.Context()); !principal.Authenticated() {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
+		problem(w, http.StatusUnauthorized, "unauthenticated", "no valid token")
+		return
+	}
+	guides := opspec.ErrorGuides()
+	writeJSON(w, http.StatusOK, map[string]any{"items": guides, "count": len(guides)})
+}
+
 // hostHasCapability resolves the operation requirement against the host's
 // adapter registry. The decision belongs to the registry, not to this file:
 // the operation states a logical requirement, the host says which adapters

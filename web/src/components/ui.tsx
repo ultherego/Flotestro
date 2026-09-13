@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ApiError } from "../lib/api";
 import { optional, relativeTime, absoluteTime } from "../lib/format";
+import { useErrorGuides } from "../lib/errors";
 import { useT } from "../i18n";
 
 /** The connection state badge. The unknown state has a look of its own. */
@@ -190,4 +191,26 @@ export function ProgressBar({
       </span>
     </div>
   );
+}
+
+/**
+ * An error code with its guide on hover: what happened, whether a retry
+ * helps and what to do next. The code stays visible as it came - it is
+ * the identifier automation and the audit log use.
+ */
+export function ErrorCode({ code }: { code?: string | null }) {
+  const t = useT();
+  const guides = useErrorGuides();
+  if (!code) return <>—</>;
+  const guide = guides.get(code);
+  if (!guide) return <code>{code}</code>;
+  const retry: Record<string, string> = {
+    never: t("a retry will fail the same way"),
+    automatic: t("retried automatically"),
+    after_change: t("retry after the named change"),
+    after_replan: t("compute the plan again first"),
+    read_state: t("read the state of the host before repeating"),
+  };
+  const title = `${t(guide.meaning)}\n${t("Next")}: ${t(guide.action)}\n${t("Retry")}: ${retry[guide.retry] ?? guide.retry}`;
+  return <code title={title} className={guide.counts_as_failure ? "" : "source"}>{code}</code>;
 }

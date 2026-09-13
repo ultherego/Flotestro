@@ -5,7 +5,7 @@ import { api, type Collection } from "../lib/api";
 import type {
   Campaign as CampaignType, CampaignReport, CampaignTarget, TimelineEntry,
 } from "../lib/types";
-import { ErrorBox, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
+import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { JobPlan } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
@@ -266,7 +266,7 @@ export function Campaign() {
                     "—"
                   )}
                 </td>
-                <td title={target.error_code}>{target.error_code || "—"}</td>
+                <td><ErrorCode code={target.error_code} /></td>
                 <td title={target.message}>{target.message || "—"}</td>
               </>
             );

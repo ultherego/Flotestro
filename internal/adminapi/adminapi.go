@@ -207,6 +207,7 @@ func (s *Server) Routes() http.Handler {
 
 	// Typed operations: plan, approval, execution, result.
 	s.route(mux, "GET /api/v1/actions", s.handleListActions)
+	s.route(mux, "GET /api/v1/errors", s.handleListErrors)
 	s.route(mux, "POST /api/v1/hosts/{id}/operations", s.handleCreateOperation)
 	// A maintenance window changes what the panel thinks about the host, not
 	// the host state, so it has its own entry point instead of a place in
