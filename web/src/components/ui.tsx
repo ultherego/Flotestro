@@ -33,6 +33,7 @@ export function JobState({ state }: { state: string }) {
 function stateMeaning(state: string): string {
   const meanings: Record<string, string> = {
     queued: "Approved and waiting for delivery to the host.",
+    active: "The change is in force; nothing waits.",
     leased: "Taken by a scheduler; delivery to the host is under way.",
     dispatched: "Handed to the agent; the host has not reported a start yet.",
     running: "The host is carrying out the operation.",

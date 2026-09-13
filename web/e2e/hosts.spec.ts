@@ -1,0 +1,150 @@
+import { expect, test } from "@playwright/test";
+import { expectHealthy, fleetHosts, navigation, openHostList, watchErrors, type Host } from "./fleet";
+
+/**
+ * The host list and the host workspace. The fleet is read through the
+ * API first, so the assertions compare the screen with what the server
+ * knows rather than with names hard-coded for one laboratory.
+ */
+
+let hosts: Host[] = [];
+
+test.beforeAll(async ({ request }) => {
+  hosts = await fleetHosts(request);
+  expect(hosts.length, "the token sees no host; enroll one before running the tests").toBeGreaterThan(0);
+});
+
+test.describe("host list", () => {
+  test("shows every host the API lists", async ({ page }) => {
+    const { errors } = watchErrors(page);
+    const table = await openHostList(page);
+    for (const host of hosts.slice(0, 50)) {
+      await expect(table.getByRole("link", { name: host.hostname, exact: true })).toBeVisible();
+    }
+    // The count in the toolbar is the total the database counted.
+    await expect(page.getByText(new RegExp(`^${hosts.length} hosts$`))).toBeVisible();
+    await expectHealthy(page, errors);
+  });
+
+  test("the search box narrows the list by a hostname fragment", async ({ page }) => {
+    const table = await openHostList(page);
+    const rows = table.locator("tbody tr");
+    await expect(rows).toHaveCount(Math.min(hosts.length, 100));
+
+    // A fragment that names some hosts but not all of them, when the
+    // fleet allows it: the whole name otherwise.
+    const target = hosts[0];
+    const fragment = distinctiveFragment(target.hostname, hosts.map((host) => host.hostname));
+    const expected = hosts.filter((host) => host.hostname.toLowerCase().includes(fragment.toLowerCase()));
+
+    const search = page.getByPlaceholder("Search hostname, address, machine ID or owner");
+    await search.fill(fragment);
+    // The filter runs on the server after a pause. The search also reads
+    // addresses, machine IDs and owners, so the list may keep a row the
+    // hostname alone would not explain; it must keep every matching name
+    // and drop at least one host.
+    if (hosts.length > 1) await expect.poll(() => rows.count()).toBeLessThan(hosts.length);
+    for (const host of expected) {
+      await expect(table.getByRole("link", { name: host.hostname, exact: true })).toBeVisible();
+    }
+    expect(await rows.count()).toBeGreaterThanOrEqual(expected.length);
+
+    await search.fill("no-such-host-" + Date.now());
+    await expect(page.getByText("No host matches the filters.")).toBeVisible();
+
+    await search.fill("");
+    await expect(rows).toHaveCount(Math.min(hosts.length, 100));
+  });
+});
+
+test.describe("host workspace", () => {
+  test("clicking a host opens its overview and the sidebar switches to the host face", async ({ page }) => {
+    const { errors } = watchErrors(page);
+    const table = await openHostList(page);
+    const host = hosts[0];
+    await table.getByRole("link", { name: host.hostname, exact: true }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/hosts/${host.id}/overview$`));
+    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+
+    // The top bar names the host between the section and the module.
+    const trail = page.getByRole("navigation", { name: "Breadcrumb" });
+    await expect(trail).toContainText(host.hostname);
+    await expect(trail).toContainText("Overview");
+
+    // The sidebar shows the modules of this host under their headings,
+    // with the way back to the list above them; the fleet items are gone.
+    const nav = navigation(page);
+    await expect(nav.getByRole("link", { name: "All hosts" })).toBeVisible();
+    await expect(nav.getByRole("button", { name: "System" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Dashboard", exact: true })).toHaveCount(0);
+
+    // The tab title carries the machine.
+    await expect(page).toHaveTitle(new RegExp(`^${host.hostname}`));
+    await expectHealthy(page, errors);
+  });
+
+  test("every module in the sidebar opens, and an unavailable one says why", async ({ page }) => {
+    const { errors } = watchErrors(page);
+    const host = hosts.find((entry) => entry.connection_state === "online") ?? hosts[0];
+    await page.goto(`/hosts/${host.id}/overview`);
+    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+
+    const nav = navigation(page);
+    const links = nav.locator("a.sidebar-item:not(.sidebar-back)");
+    await expect(links.first()).toBeVisible();
+
+    const modules: { name: string; href: string; unavailable: string | null }[] = [];
+    for (const link of await links.all()) {
+      const href = await link.getAttribute("href");
+      const name = (await link.textContent())?.trim() ?? "";
+      if (!href || href === "/hosts") continue;
+      const dimmed = (await link.getAttribute("class"))?.split(/\s+/).includes("unavailable") ?? false;
+      modules.push({ name, href, unavailable: dimmed ? await link.getAttribute("title") : null });
+    }
+    expect(modules.length).toBeGreaterThan(10);
+    expect(modules.map((module) => module.name)).toContain("Jobs");
+
+    for (const module of modules) {
+      await test.step(module.unavailable ? `${module.name} (unavailable)` : module.name, async () => {
+        await nav.getByRole("link", { name: module.name, exact: true }).click();
+        await expect(page).toHaveURL(new RegExp(`${module.href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+        // The trail keeps the host and names the module.
+        const trail = page.getByRole("navigation", { name: "Breadcrumb" });
+        await expect(trail).toContainText(host.hostname);
+        await expect(trail).toContainText(module.name);
+
+        if (module.unavailable) {
+          // The route stays and the reason is on the page: a vanished
+          // module would look like a missing feature.
+          const notice = page.getByText(`${module.name} is not available on this host: ${module.unavailable}.`);
+          await expect(notice).toBeVisible();
+          await expect(page.locator(".hm-header")).toHaveCount(0);
+        } else {
+          // A module with backing shows its header, or an honest empty
+          // state while the host has not reported it yet.
+          const header = page.locator(".hm-header").getByRole("heading", { name: module.name, exact: true });
+          await expect(header.or(page.locator(".empty")).first()).toBeVisible();
+        }
+        await expectHealthy(page, errors);
+      });
+    }
+  });
+});
+
+/**
+ * The shortest prefix of a hostname that does not name every host in the
+ * fleet, so the filter demonstrably leaves rows out. With a fleet of one,
+ * or hosts that share the name up to the end, the whole name is used.
+ */
+function distinctiveFragment(hostname: string, all: string[]): string {
+  for (let length = 3; length < hostname.length; length += 1) {
+    const prefix = hostname.slice(0, length);
+    // A prefix that reads as hex could also match a machine ID.
+    if (/^[0-9a-f]+$/i.test(prefix)) continue;
+    const matching = all.filter((name) => name.toLowerCase().includes(prefix.toLowerCase()));
+    if (matching.length < all.length) return prefix;
+  }
+  return hostname;
+}

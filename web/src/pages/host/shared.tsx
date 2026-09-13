@@ -284,7 +284,7 @@ export function ModuleFreshness({ fragment }: { fragment?: InventoryFragment<unk
   const t = useT();
   if (!fragment) return null;
   return (
-    <p className="hm-freshness">
+    <p className="hm-freshness" data-testid="module-freshness">
       <span>
         {t("Source: {source}, revision {revision}, observed", { source: fragment.source, revision: fragment.revision.slice(0, 12) })}{" "}
         <Time value={fragment.observed_at} />

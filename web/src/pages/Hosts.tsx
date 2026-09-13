@@ -237,7 +237,7 @@ export function Hosts() {
                         list; the security part is named, because it is the
                         part that cannot wait. An unknown count stays a badge,
                         not an empty bar. */}
-                    <td className="fp-meter-cell">
+                    <td className="fp-meter-cell" data-testid="host-updates">
                       {host.pending_updates === null ? (
                         <OptionalNumber value={host.pending_updates} warnFrom={1} />
                       ) : (
