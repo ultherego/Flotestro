@@ -29,11 +29,7 @@ func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest
 		}
 	}
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 5*time.Minute {
-		timeout = time.Minute
-	}
-	readCtx, cancel := context.WithTimeout(ctx, timeout)
+	readCtx, cancel := deadline(ctx, request, time.Minute, 5*time.Minute)
 	defer cancel()
 
 	snapshot := docker.Collect(readCtx, client)
@@ -66,7 +62,7 @@ func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest
 // and not taken from the message at its word. A read "until further notice"
 // would stay on the host forever, also when the panel stopped listening to it
 // long ago.
-func (s *Server) readDockerEvents(ctx context.Context,
+func (s *Server) readDockerEvents(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerEventsRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
 	if err != nil {
@@ -78,7 +74,13 @@ func (s *Server) readDockerEvents(ctx context.Context,
 		}
 	}
 
-	snapshot, err := docker.Events(ctx, client, docker.EventsOptions{
+	// The window of the module is the inner limit and the limit of the order
+	// the outer one: an engine that keeps the stream open past the window
+	// still lets the connection go.
+	readCtx, cancel := deadline(ctx, request, 3*time.Minute, 10*time.Minute)
+	defer cancel()
+
+	snapshot, err := docker.Events(readCtx, client, docker.EventsOptions{
 		Since:  time.Duration(action.GetSinceSeconds()) * time.Second,
 		Follow: time.Duration(action.GetFollowSeconds()) * time.Second,
 		Types:  action.GetTypes(),
@@ -121,16 +123,13 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 
 	// At most one container mutation runs at a time: a concurrent restart and
 	// removal of the same container give an unpredictable result.
-	if !s.containerMutex.TryLock() {
-		return reject(ErrorLocked, "another container operation is in flight")
+	release, busy := s.hold(GuardContainers, request)
+	if busy != nil {
+		return busy
 	}
-	defer s.containerMutex.Unlock()
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > time.Hour {
-		timeout = 5 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, time.Hour)
 	defer cancel()
 
 	identifier := action.GetContainerId()

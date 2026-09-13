@@ -35,11 +35,7 @@ func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequ
 		return reject(ErrorMalformed, "unsupported shutdown mode "+mode)
 	}
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 10*time.Minute {
-		timeout = 2 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
 	// A logind inhibitor is the answer of the host to the question "is it

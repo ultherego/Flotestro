@@ -23,6 +23,12 @@ func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequ
 	result := &helperv1.IdentityProbeResult{}
 	var missing []string
 
+	// Every tool below has its own short limit; the limit of the order binds
+	// them together, so a stuck SSSD does not hold the connection for all of
+	// them in a row.
+	ctx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
+	defer cancel()
+
 	principal, kvno, err := readHostKeytab(ctx)
 	switch {
 	case err != nil:

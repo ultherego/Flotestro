@@ -33,16 +33,13 @@ const (
 // leave a window in which the host is already cut off and nothing saves it.
 func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.NetworkRequest) *helperv1.HelperResponse {
-	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "another unit operation is in flight")
+	release, busy := s.hold(networkGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	defer s.unitMutex.Unlock()
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	if !network.Exists(network.NmcliPath) {
@@ -76,6 +73,17 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 		return s.changeNetwork(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown network operation")
+}
+
+// networkGuard names the guard of a network operation. A read and a plan take
+// none; a confirmation and a rollback change the armed timer and take it like
+// the change itself.
+func networkGuard(operation helperv1.NetworkRequest_Operation) string {
+	switch operation {
+	case helperv1.NetworkRequest_OPERATION_READ, helperv1.NetworkRequest_OPERATION_PLAN:
+		return ""
+	}
+	return GuardNetwork
 }
 
 // planNetwork computes the difference between the profile found and the one

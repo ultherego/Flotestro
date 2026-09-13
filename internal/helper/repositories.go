@@ -23,11 +23,15 @@ import (
 // on this host.
 func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.RepositoryRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 10 * time.Minute
+	// A source write ends with a metadata refresh on the same package
+	// database a transaction uses, so it shares the guard of the packages.
+	release, busy := s.hold(GuardPackages, request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 10*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	manager, err := packages.Detect()

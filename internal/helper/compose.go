@@ -54,17 +54,15 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 
 	// Compose projects share the same resource with the other container
 	// operations: a deployment and a restart of the same project at once give
-	// an unpredictable result.
-	if !s.containerMutex.TryLock() {
-		return reject(ErrorLocked, "another container operation is in flight")
+	// an unpredictable result. The plan takes the guard as well - it writes
+	// the manifest of the project into the same directory the deployment uses.
+	release, busy := s.hold(GuardContainers, request)
+	if busy != nil {
+		return busy
 	}
-	defer s.containerMutex.Unlock()
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > time.Hour {
-		timeout = 15 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 15*time.Minute, time.Hour)
 	defer cancel()
 
 	planner := compose.Planner{Runner: composeRunner(actionCtx), Dir: s.composeDirectory()}

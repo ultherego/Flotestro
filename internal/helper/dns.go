@@ -25,16 +25,19 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	if !planning && action.GetOperation() != helperv1.DnsRequest_OPERATION_APPLY {
 		return reject(ErrorUnknownAction, "unknown resolver operation")
 	}
-	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "another unit operation is in flight")
+	// The resolver lives in the NetworkManager profile: a change of it shares
+	// the guard with the other network changes, and a plan takes none.
+	guard := GuardNetwork
+	if planning {
+		guard = ""
 	}
-	defer s.unitMutex.Unlock()
+	release, busy := s.hold(guard, request)
+	if busy != nil {
+		return busy
+	}
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	if !network.Exists(network.NmcliPath) {

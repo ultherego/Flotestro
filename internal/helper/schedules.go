@@ -24,17 +24,19 @@ import (
 func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
 	// Cron entries and systemd units share the same host resource: a concurrent
-	// write of two entries can leave the directory in an intermediate state.
-	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "another unit operation is in flight")
+	// write of two entries can leave the directory in an intermediate state. A
+	// read takes no guard.
+	guard := GuardUnits
+	if action.GetOperation() == helperv1.ScheduleRequest_OPERATION_READ {
+		guard = ""
 	}
-	defer s.unitMutex.Unlock()
+	release, busy := s.hold(guard, request)
+	if busy != nil {
+		return busy
+	}
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {

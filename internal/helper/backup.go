@@ -11,6 +11,20 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/backup"
 )
 
+// backupGuard names the guard of a backup operation. A plan reads the
+// repository and takes none; a copy, a check and a restore hold the lock of
+// the tool and take the guard, so a second one is refused instead of waiting
+// under that lock.
+func backupGuard(operation helperv1.BackupRequest_Operation) string {
+	switch operation {
+	case helperv1.BackupRequest_OPERATION_RUN,
+		helperv1.BackupRequest_OPERATION_VERIFY,
+		helperv1.BackupRequest_OPERATION_RESTORE:
+		return GuardBackup
+	}
+	return ""
+}
+
 // applyBackup drives the backup tool.
 //
 // The helper does not make the backup itself: it is made by the tool the host
@@ -20,14 +34,16 @@ import (
 // panel can show.
 func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.BackupRequest, progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
+	release, busy := s.hold(backupGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
+	}
+	defer release()
+
 	// A backup takes a long time and that is normal. The limit comes from the
 	// order, because it is the panel that knows how much time the operator gave
 	// this operation.
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 12*time.Hour {
-		timeout = 2 * time.Hour
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 2*time.Hour, longestOperation)
 	defer cancel()
 
 	definition := backup.Definition{

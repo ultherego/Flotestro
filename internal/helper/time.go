@@ -28,11 +28,13 @@ const (
 // applyTime handles the operations on the host time.
 func (s *Server) applyTime(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.TimeRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
+	release, busy := s.hold(timeGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
@@ -44,6 +46,16 @@ func (s *Server) applyTime(ctx context.Context, request *helperv1.HelperRequest,
 		return s.setTimezone(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown time operation")
+}
+
+// timeGuard names the guard of a time operation. A plan changes nothing and
+// takes none.
+func timeGuard(operation helperv1.TimeRequest_Operation) string {
+	switch operation {
+	case helperv1.TimeRequest_OPERATION_CONFIG_APPLY, helperv1.TimeRequest_OPERATION_TIMEZONE_SET:
+		return GuardTime
+	}
+	return ""
 }
 
 // writeTimeServers writes the time sources and reloads the daemon.

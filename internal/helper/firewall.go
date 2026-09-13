@@ -27,16 +27,13 @@ const firewallPlanExtension = ".firewall.json"
 // container start or service reload.
 func (s *Server) applyFirewall(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.FirewallRequest) *helperv1.HelperResponse {
-	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "another unit operation is in flight")
+	release, busy := s.hold(firewallGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	defer s.unitMutex.Unlock()
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
@@ -56,6 +53,16 @@ func (s *Server) applyFirewall(ctx context.Context, request *helperv1.HelperRequ
 		return s.planRule(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown firewall operation")
+}
+
+// firewallGuard names the guard of a firewall operation. The table is part of
+// the network of the host and shares its guard; a read and a plan take none.
+func firewallGuard(operation helperv1.FirewallRequest_Operation) string {
+	switch operation {
+	case helperv1.FirewallRequest_OPERATION_READ, helperv1.FirewallRequest_OPERATION_PLAN:
+		return ""
+	}
+	return GuardNetwork
 }
 
 // planRule computes the difference between the rule found and the one

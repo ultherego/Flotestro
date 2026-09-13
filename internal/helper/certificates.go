@@ -37,11 +37,13 @@ var certificateFactNames = map[helperv1.CertificateRequest_Fact]string{
 // applyCertificate handles the operations of the certificate module.
 func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
+	release, busy := s.hold(certificateGuard(action), request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
@@ -65,6 +67,27 @@ func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperR
 		return s.renewCertificate(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown operation of the certificate module")
+}
+
+// certificateGuard names the guard of a certificate operation.
+//
+// The plans change nothing and take none. A facts read takes the guard only
+// when the panel sends an authoritative target list: that read replaces the
+// registry, and a deployment writing the registry at the same time would lose
+// its target.
+func certificateGuard(action *helperv1.CertificateRequest) string {
+	switch action.GetOperation() {
+	case helperv1.CertificateRequest_OPERATION_DEPLOY,
+		helperv1.CertificateRequest_OPERATION_RENEW,
+		helperv1.CertificateRequest_OPERATION_TRUST_ENSURE,
+		helperv1.CertificateRequest_OPERATION_TRUST_REMOVE:
+		return GuardCertificates
+	case helperv1.CertificateRequest_OPERATION_FACTS:
+		if action.GetAuthoritative() {
+			return GuardCertificates
+		}
+	}
+	return ""
 }
 
 // requestTargets reads the targets from the order and checks every path with

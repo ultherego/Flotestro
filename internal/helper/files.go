@@ -27,11 +27,13 @@ const FileRegistryPath = "/var/lib/flotestro-helper/files.json"
 // applyFile handles the operations on configuration files.
 func (s *Server) applyFile(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.FileRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
+	release, busy := s.hold(fileGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	allowlist := files.LoadAllowlist(files.AllowlistPath)
@@ -49,6 +51,16 @@ func (s *Server) applyFile(ctx context.Context, request *helperv1.HelperRequest,
 		return s.planFile(actionCtx, allowlist, action)
 	}
 	return reject(ErrorUnknownAction, "unknown file operation")
+}
+
+// fileGuard names the guard of a file operation. A write and a removal both
+// rewrite the registry of managed files; a list, a read and a plan only look.
+func fileGuard(operation helperv1.FileRequest_Operation) string {
+	switch operation {
+	case helperv1.FileRequest_OPERATION_ENSURE, helperv1.FileRequest_OPERATION_REMOVE:
+		return GuardFiles
+	}
+	return ""
 }
 
 // readFile returns the content of a file within the scope.

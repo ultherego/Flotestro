@@ -14,11 +14,13 @@ import (
 // applyKernel handles the operations on the kernel settings.
 func (s *Server) applyKernel(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.KernelRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
+	release, busy := s.hold(kernelGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
@@ -34,6 +36,18 @@ func (s *Server) applyKernel(ctx context.Context, request *helperv1.HelperReques
 		return s.planBlock(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown kernel operation")
+}
+
+// kernelGuard names the guard of a kernel operation. A read and a module plan
+// change nothing and take none.
+func kernelGuard(operation helperv1.KernelRequest_Operation) string {
+	switch operation {
+	case helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE,
+		helperv1.KernelRequest_OPERATION_MODULE_LOAD,
+		helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST:
+		return GuardKernel
+	}
+	return ""
 }
 
 // writeSysctl writes the settings persistently and applies them right away.

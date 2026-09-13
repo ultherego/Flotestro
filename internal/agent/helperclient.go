@@ -67,6 +67,14 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 			}
 			continue
 		}
+		// The helper guards its resources by class, as the agent guards its
+		// own claims. A refusal on a busy class is the same answer as the
+		// agent's - "wait for that task", not a failure of the operation -
+		// and travels under the same code, whichever module asked.
+		if !response.GetAccepted() && response.GetErrorCode() == helper.ErrorLocked &&
+			helper.BusyResource(response.GetMessage()) != "" {
+			response.ErrorCode = RejectResourceBusy
+		}
 		return &response, nil
 	}
 }

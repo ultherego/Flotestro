@@ -25,20 +25,11 @@ type Server struct {
 	allowedUID uint32
 	log        *slog.Logger
 
-	// At most one unit mutation runs at a time. A concurrent start and stop of
-	// the same unit give an unpredictable result.
-	unitMutex sync.Mutex
-	// A separate lock for package operations: a transaction can take minutes,
-	// and unit operations do not have to wait for it.
-	packageMutex sync.Mutex
-	// Joining a domain changes SSSD, Kerberos and PAM at once.
-	enrollMutex sync.Mutex
-	// Local account changes are serialized: useradd and usermod write to the
-	// same files.
-	accountMutex sync.Mutex
-	// A concurrent restart and removal of the same container give an
-	// unpredictable result.
-	containerMutex sync.Mutex
+	// At most one mutation of a resource class runs at a time: a concurrent
+	// start and stop of the same unit, or two transactions on the same package
+	// database, give an unpredictable result. The classes are separate, so a
+	// package transaction that takes minutes does not hold up a unit restart.
+	guards guards
 
 	// Idleness is counted from the closing of the last connection, not from
 	// the start of the process. A clock counted from the start used to cut a
@@ -169,6 +160,11 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		_ = WriteMessage(conn, reject(ErrorMalformed, err.Error()))
 		return
 	}
+	// The socket deadline covers the whole operation, not a fixed window: a
+	// package transaction or a backup takes longer than ten minutes, and its
+	// result must still find an open socket at the end.
+	limit := timeLimit(&request, 10*time.Minute, longestOperation) + time.Minute
+	_ = conn.SetDeadline(time.Now().Add(limit))
 
 	// The progress of a long operation travels in separate messages, before
 	// the final answer arrives. A client that did not ask for it gets a single
@@ -271,7 +267,7 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.readDocker(ctx, request, action.DockerRead)
 
 	case *helperv1.HelperRequest_DockerEvents:
-		return s.readDockerEvents(ctx, action.DockerEvents)
+		return s.readDockerEvents(ctx, request, action.DockerEvents)
 
 	case *helperv1.HelperRequest_PackageRepair:
 		return s.repairPackages(ctx, request, action.PackageRepair)
@@ -300,10 +296,11 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 		return reject(packages.ErrorUnsupported, err.Error())
 	}
 
-	if !s.packageMutex.TryLock() {
-		return reject(ErrorLocked, "another package operation is in flight")
+	release, busy := s.hold(GuardPackages, request)
+	if busy != nil {
+		return busy
 	}
-	defer s.packageMutex.Unlock()
+	defer release()
 
 	// The manager lock is checked explicitly and never worked around. Manual
 	// work by the administrator takes precedence over a task from the panel.
@@ -312,11 +309,7 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 			fmt.Sprintf("the package manager is busy (%s)", path))
 	}
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 2*time.Hour {
-		timeout = 30 * time.Minute
-	}
-	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	operationCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
 	defer cancel()
 
 	options := packages.Options{
@@ -395,9 +388,14 @@ func (s *Server) applyReboot(ctx context.Context, request *helperv1.HelperReques
 		reason = "Flotestro: controlled restart"
 	}
 
+	// Scheduling is a short talk with systemd, but a manager that does not
+	// answer must not hold the connection until the socket gives up.
+	scheduleCtx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
+	defer cancel()
+
 	// shutdown -r takes time in minutes or the word now, so short delays are
 	// carried out through a transient systemd timer.
-	stdout, stderr, exitCode, err := systemd.ScheduleReboot(ctx, time.Duration(delay)*time.Second, reason)
+	stdout, stderr, exitCode, err := systemd.ScheduleReboot(scheduleCtx, time.Duration(delay)*time.Second, reason)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
@@ -477,18 +475,21 @@ func (s *Server) applyUnitAction(ctx context.Context, request *helperv1.HelperRe
 		}
 	}
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 10*time.Minute {
-		timeout = 60 * time.Second
+	release, busy := s.hold(GuardUnits, request)
+	if busy != nil {
+		return busy
 	}
+	defer release()
 
-	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "another unit mutation is in flight")
-	}
-	defer s.unitMutex.Unlock()
+	// The state reads before and after stay outside the limit: each has its
+	// own short one, and the state after an operation that used up its whole
+	// time is still worth reporting.
+	timeout := timeLimit(request, 60*time.Second, 10*time.Minute)
+	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	before, _ := systemd.Show(ctx, unit)
-	stdout, stderr, exitCode, err := systemd.Apply(ctx, unit, operation, timeout)
+	stdout, stderr, exitCode, err := systemd.Apply(operationCtx, unit, operation, timeout)
 	if err != nil {
 		code := ErrorExecFailed
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -630,11 +631,15 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 		})
 	}
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 {
-		timeout = 30 * time.Minute
+	// A repair is a package transaction like any other: it must not run next
+	// to an upgrade on the same database.
+	release, busy := s.hold(GuardPackages, request)
+	if busy != nil {
+		return busy
 	}
-	repairCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	repairCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
 	defer cancel()
 
 	answered, remaining, err := apt.Repair(repairCtx, answers)

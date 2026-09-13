@@ -21,16 +21,13 @@ const (
 // applySSH handles the operations on the sshd server.
 func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.SshRequest) *helperv1.HelperResponse {
-	if !s.unitMutex.TryLock() {
-		return reject(ErrorLocked, "another unit operation is in flight")
+	release, busy := s.hold(sshGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	defer s.unitMutex.Unlock()
+	defer release()
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 5 * time.Minute
-	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, 30*time.Minute)
 	defer cancel()
 
 	if !exists(sshdPath) {
@@ -57,6 +54,17 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 		return s.rotateHostKey(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown sshd operation")
+}
+
+// sshGuard names the guard of an sshd operation. Both changes end with a
+// reload of the sshd unit, so they share the guard of the units; a read and a
+// plan take none.
+func sshGuard(operation helperv1.SshRequest_Operation) string {
+	switch operation {
+	case helperv1.SshRequest_OPERATION_APPLY, helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY:
+		return GuardUnits
+	}
+	return ""
 }
 
 // writeSSHConfiguration writes the panel file and reloads the server.

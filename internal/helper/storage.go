@@ -24,11 +24,13 @@ const (
 // applyStorage handles the operations on the disk space of the host.
 func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 60*time.Minute {
-		timeout = 10 * time.Minute
+	release, busy := s.hold(storageGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 10*time.Minute, 60*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
@@ -54,6 +56,18 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 		return s.planDevice(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown disk space operation")
+}
+
+// storageGuard names the guard of a disk space operation. The reads and the
+// plans change nothing and take none.
+func storageGuard(operation helperv1.StorageRequest_Operation) string {
+	switch operation {
+	case helperv1.StorageRequest_OPERATION_READ_LVM,
+		helperv1.StorageRequest_OPERATION_MOUNT_PLAN,
+		helperv1.StorageRequest_OPERATION_DEVICE_PLAN:
+		return ""
+	}
+	return GuardStorage
 }
 
 // planMount computes the difference between the mount found and the one

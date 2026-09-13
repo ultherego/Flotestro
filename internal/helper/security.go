@@ -27,11 +27,13 @@ var factNames = map[helperv1.SecurityRequest_Fact]string{
 // applySecurity handles the operations of the security module.
 func (s *Server) applySecurity(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.SecurityRequest) *helperv1.HelperResponse {
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 10*time.Minute {
-		timeout = 2 * time.Minute
+	release, busy := s.hold(securityGuard(action.GetOperation()), request)
+	if busy != nil {
+		return busy
 	}
-	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	actionCtx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
@@ -43,6 +45,16 @@ func (s *Server) applySecurity(ctx context.Context, request *helperv1.HelperRequ
 		return reloadRules(actionCtx)
 	}
 	return reject(ErrorUnknownAction, "unknown operation of the security module")
+}
+
+// securityGuard names the guard of a security operation. The facts change
+// nothing and take none.
+func securityGuard(operation helperv1.SecurityRequest_Operation) string {
+	switch operation {
+	case helperv1.SecurityRequest_OPERATION_SELINUX_MODE, helperv1.SecurityRequest_OPERATION_AUDIT_RELOAD:
+		return GuardSecurity
+	}
+	return ""
 }
 
 // collectFacts reads only the facts the agent asked for.

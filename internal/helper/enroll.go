@@ -19,6 +19,12 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	action *helperv1.DomainEnrollRequest) *helperv1.HelperResponse {
 	result := &helperv1.DomainEnrollResult{}
 
+	// One limit for the whole order: the preflight, the join and the checks
+	// after it. A directory server that does not answer must not stretch the
+	// operation past what the panel gave it.
+	ctx, cancel := deadline(ctx, request, 10*time.Minute, 30*time.Minute)
+	defer cancel()
+
 	hostname := action.GetHostname()
 	if hostname == "" {
 		hostname, _ = os.Hostname()
@@ -46,13 +52,14 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	}
 
 	// At most one join runs at a time: it changes the configuration of SSSD,
-	// Kerberos and PAM at once.
-	if !s.enrollMutex.TryLock() {
-		response := reject(ErrorLocked, "another domain join is in flight")
-		response.EnrollResult = result
-		return response
+	// Kerberos and PAM at once. The preflight above takes no guard - it only
+	// looks.
+	release, busy := s.hold(GuardIdentity, request)
+	if busy != nil {
+		busy.EnrollResult = result
+		return busy
 	}
-	defer s.enrollMutex.Unlock()
+	defer release()
 
 	args := []string{
 		"--unattended", "--mkhomedir", "--no-ntp",
@@ -65,14 +72,8 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 		args = append(args, "--server="+server)
 	}
 
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 30*time.Minute {
-		timeout = 10 * time.Minute
-	}
-	enrollCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	stdout, stderr, err := runIdentityTool(enrollCtx, timeout, "ipa-client-install", args...)
+	stdout, stderr, err := runIdentityTool(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
+		"ipa-client-install", args...)
 	if err != nil {
 		// The one-time password must not reach the error message or the logs.
 		response := reject("enroll_failed", redactSecret(err.Error(), action.GetOneTimePassword()))

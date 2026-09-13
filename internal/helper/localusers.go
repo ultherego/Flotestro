@@ -24,6 +24,11 @@ func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.Helper
 	result := &helperv1.LocalAccountsResult{}
 	var problems []string
 
+	// The key files are read with ssh-keygen, one account after another; the
+	// limit of the order binds the whole read.
+	ctx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
+	defer cancel()
+
 	shadow, err := readShadowStates()
 	if err != nil {
 		problems = append(problems, "shadow: "+err.Error())

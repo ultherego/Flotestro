@@ -44,14 +44,15 @@ func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.Hel
 		return reject(ErrorInvalidAccount, fmt.Sprintf("invalid account name %q", name))
 	}
 
-	s.accountMutex.Lock()
-	defer s.accountMutex.Unlock()
-
-	timeout := time.Duration(request.GetTimeoutSeconds()) * time.Second
-	if timeout <= 0 || timeout > 5*time.Minute {
-		timeout = 60 * time.Second
+	// Account changes are serialized: useradd and usermod write to the same
+	// files.
+	release, busy := s.hold(GuardAccounts, request)
+	if busy != nil {
+		return busy
 	}
-	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer release()
+
+	operationCtx, cancel := deadline(ctx, request, 60*time.Second, 5*time.Minute)
 	defer cancel()
 
 	switch action.GetOperation() {
