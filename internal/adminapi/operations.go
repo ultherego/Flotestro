@@ -200,10 +200,10 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	requiresApproval := action.Mutating()
-	if request.RequiresApproval != nil {
-		requiresApproval = *request.RequiresApproval
-	}
+	// A mutation always waits for its approval; the request may ask for
+	// an approval where none is needed, never waive one. Waiving it was
+	// the way around the second person and the plan review.
+	requiresApproval := action.Mutating() || (request.RequiresApproval != nil && *request.RequiresApproval)
 
 	preconditions := jobs.Preconditions{
 		OSFamily:             host.OSFamily,

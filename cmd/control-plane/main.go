@@ -3,6 +3,7 @@
 package main
 
 import (
+	"connectrpc.com/connect"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -374,8 +375,13 @@ func run() error {
 		enrollmentService, log)
 
 	gatewayMux := http.NewServeMux()
-	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService))
-	gatewayMux.Handle(agentv1connect.NewRelayServiceHandler(relayService))
+	// Every message from a host has a ceiling. An inventory of a large host
+	// fits in a few megabytes; anything beyond that is not an inventory,
+	// whatever the certificate says.
+	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService,
+		connect.WithReadMaxBytes(8<<20)))
+	gatewayMux.Handle(agentv1connect.NewRelayServiceHandler(relayService,
+		connect.WithReadMaxBytes(8<<20)))
 	gatewayServer := &http.Server{
 		Addr:    cfg.GatewayAddr,
 		Handler: gateway.WithClientCertificate(gatewayMux),
@@ -390,12 +396,17 @@ func run() error {
 			NextProtos:         []string{"h2"},
 		},
 		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       5 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	// Enrollment: TLS without a client certificate, because the host has no
 	// identity yet.
 	enrollmentMux := http.NewServeMux()
-	enrollmentMux.Handle(agentv1connect.NewEnrollmentServiceHandler(enrollmentService))
+	// The enrollment listener answers strangers: a request is a token and
+	// a CSR, and nothing legitimate is larger than a few kilobytes.
+	enrollmentMux.Handle(agentv1connect.NewEnrollmentServiceHandler(enrollmentService,
+		connect.WithReadMaxBytes(256<<10)))
 	enrollmentServer := &http.Server{
 		Addr:    cfg.EnrollmentAddr,
 		Handler: enrollmentMux,
@@ -405,6 +416,9 @@ func run() error {
 			NextProtos:   []string{"h2", "http/1.1"},
 		},
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       time.Minute,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	// The event bus wakes the open screens when the state of an operation
@@ -533,6 +547,8 @@ func run() error {
 		Addr:              cfg.AdminAddr,
 		Handler:           h2c.NewHandler(panelServer.Routes(), &http2.Server{}),
 		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       5 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	errCh := make(chan error, 3)

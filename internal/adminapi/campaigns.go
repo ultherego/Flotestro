@@ -77,9 +77,24 @@ func campaignModeRefusal(action opspec.ActionType) string {
 	}
 }
 
+// The ceilings of a campaign's parallelism. A wave larger than this is
+// several waves; more hosts at once than this is not a rollout.
+const (
+	maxWaveSize            = 500
+	maxCampaignConcurrency = 200
+)
+
 // handleCreateCampaign plans a campaign. The selector is immediately turned
 // into an immutable host snapshot; the creation itself changes nothing.
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
+	// Whoever asks must at least be somebody who may create campaigns
+	// somewhere, before the selector is read: the answers about the
+	// snapshot - how many hosts, in what state, which groups exist - are
+	// facts about the fleet, not for a stranger. Every host of the
+	// snapshot is checked again below, in its own scope.
+	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignCreate, "campaign"); !ok {
+		return
+	}
 	var request createCampaignRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
@@ -212,13 +227,16 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := campaigns.Spec{
-		Name:                     request.Name,
-		ActionType:               string(action),
-		Payload:                  request.Payload,
-		Selector:                 chosen,
-		CanarySize:               valueOrDefault(request.CanarySize, 1),
-		WaveSize:                 valueOr(request.WaveSize, 10),
-		MaxConcurrent:            valueOr(request.MaxConcurrent, 5),
+		Name:       request.Name,
+		ActionType: string(action),
+		Payload:    request.Payload,
+		Selector:   chosen,
+		CanarySize: valueOrDefault(request.CanarySize, 1),
+		// The concurrency is bounded whatever the request says: budgets are
+		// the safety net of the fleet, and an installation without them
+		// must not be one request away from restarting everything at once.
+		WaveSize:                 min(valueOr(request.WaveSize, 10), maxWaveSize),
+		MaxConcurrent:            min(valueOr(request.MaxConcurrent, 5), maxCampaignConcurrency),
 		FailureThresholdPercent:  valueOrDefault(request.FailureThresholdPercent, 20),
 		FailureThresholdAbsolute: valueOr(request.FailureThresholdAbsolute, 0),
 		MaintenanceStart:         request.MaintenanceStart,
@@ -226,7 +244,9 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RebootPolicy:             campaigns.RebootPolicy(orDefault(request.RebootPolicy, "never")),
 		HealthCheckUnits:         request.HealthCheckUnits,
 		JobTimeoutSeconds:        valueOr(request.JobTimeoutSeconds, action.DefaultTimeout()),
-		RequiresApproval:         request.RequiresApproval == nil || *request.RequiresApproval,
+		// A campaign is always approved: the consent binds the fingerprint
+		// of what runs on many hosts, and a request cannot waive it.
+		RequiresApproval:         true,
 		OfflinePolicy:            offlinePolicy,
 		DeadlineMinutes:          valueOr(request.DeadlineMinutes, int(campaigns.DefaultDeadline/time.Minute)),
 		ManualGate:               request.ManualGate != nil && *request.ManualGate,
@@ -860,10 +880,24 @@ func campaignCSVRow(target campaigns.Target) []string {
 		jobID = *target.JobID
 	}
 	return []string{
-		target.Hostname, target.HostID, strconv.Itoa(target.Wave), strconv.Itoa(target.Position),
-		string(target.State), target.ErrorCode, target.Message,
+		csvText(target.Hostname), target.HostID, strconv.Itoa(target.Wave), strconv.Itoa(target.Position),
+		string(target.State), target.ErrorCode, csvText(target.Message),
 		stamp(target.StartedAt), stamp(target.FinishedAt), jobID,
 	}
+}
+
+// csvText keeps a cell from becoming a formula. A host name or a message
+// comes from the host, and a spreadsheet runs a cell that starts with =,
+// +, - or @; a leading apostrophe makes it text again.
+func csvText(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + value
+	}
+	return value
 }
 
 func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {

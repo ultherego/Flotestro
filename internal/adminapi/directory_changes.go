@@ -87,10 +87,9 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
+	// A directory change reaches every host that trusts the directory; it
+	// is always approved by a second person, and a request cannot waive it.
 	requiresApproval := true
-	if request.RequiresApproval != nil {
-		requiresApproval = *request.RequiresApproval
-	}
 	change, err := s.changes.Create(r.Context(), tx, identity.Spec{
 		Action:           action,
 		Payload:          payload,

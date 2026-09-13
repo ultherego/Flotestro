@@ -925,11 +925,15 @@ func nullableJSON(value json.RawMessage) any {
 // AttemptOwner returns the task an attempt belongs to. The agent sends the
 // result back with the attempt identifier, so the gateway has to find the
 // job.
-func (s *Store) AttemptOwner(ctx context.Context, attemptID string) (jobID, action string, err error) {
+func (s *Store) AttemptOwner(ctx context.Context, attemptID, hostID string) (jobID, action string, err error) {
+	// The attempt must belong to the host that reports it: a host that
+	// learned another host's attempt identifier must not settle that
+	// host's operation. The identity comes from the certificate, never
+	// from the message.
 	err = s.pool.QueryRow(ctx, `
 		select a.job_id, j.action_type
 		  from job_attempts a join jobs j on j.id = a.job_id
-		 where a.id = $1`, attemptID).Scan(&jobID, &action)
+		 where a.id = $1 and j.host_id = $2::uuid`, attemptID, hostID).Scan(&jobID, &action)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", ErrNotFound
 	}
@@ -955,12 +959,14 @@ func (s *Store) LastAttempt(ctx context.Context, jobID string) (string, error) {
 // AttemptContext returns the attempt's operation together with its campaign.
 // Progress ordered in a campaign has to reach the campaign screen as well,
 // and the agent knows only the attempt identifier.
-func (s *Store) AttemptContext(ctx context.Context, attemptID string) (jobID, campaignID string, err error) {
+func (s *Store) AttemptContext(ctx context.Context, attemptID, hostID string) (jobID, campaignID string, err error) {
 	var campaign *string
+	// Bound to the reporting host for the same reason as AttemptOwner: a
+	// progress line or a log line from a host is about that host's work.
 	err = s.pool.QueryRow(ctx, `
 		select a.job_id, j.campaign_id::text
 		  from job_attempts a join jobs j on j.id = a.job_id
-		 where a.id = $1`, attemptID).Scan(&jobID, &campaign)
+		 where a.id = $1 and j.host_id = $2::uuid`, attemptID, hostID).Scan(&jobID, &campaign)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", ErrNotFound
 	}

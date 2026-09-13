@@ -79,7 +79,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	}
 	// The agent knows the identifier of the attempt; the lease is issued for
 	// the operation.
-	jobID, _ := s.attemptContext(ctx, req.Msg.GetTaskId())
+	jobID, _ := s.attemptContext(ctx, req.Msg.GetTaskId(), hostID)
 	if jobID == "" {
 		s.refuseSecret(ctx, hostID, name, "unknown_task")
 		return nil, connect.NewError(connect.CodePermissionDenied,

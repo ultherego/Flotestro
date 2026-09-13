@@ -460,7 +460,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		// session of the agent.
 		if s.events != nil {
 			lines := payload.TaskLogLines
-			jobID, campaignID := s.attemptContext(ctx, lines.GetTaskId())
+			jobID, campaignID := s.attemptContext(ctx, lines.GetTaskId(), hostID)
 			if jobID == "" {
 				return nil
 			}
@@ -487,7 +487,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			// looks at the operation. The translation is remembered, because
 			// progress reports several times a second while the assignment of
 			// an attempt to an operation does not change.
-			jobID, campaignID := s.attemptContext(ctx, progress.GetTaskId())
+			jobID, campaignID := s.attemptContext(ctx, progress.GetTaskId(), hostID)
 			if jobID == "" {
 				return nil
 			}
@@ -518,18 +518,18 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 // attemptContext translates the identifier of an attempt into the operation
 // and its campaign. An unknown attempt returns nothing: progress without an
 // operation has nobody to reach.
-func (s *AgentService) attemptContext(ctx context.Context, attemptID string) (string, string) {
+func (s *AgentService) attemptContext(ctx context.Context, attemptID, hostID string) (string, string) {
 	if attemptID == "" {
 		return "", ""
 	}
 	s.attemptsMu.RLock()
 	entry, known := s.attempts[attemptID]
 	s.attemptsMu.RUnlock()
-	if known {
+	if known && entry.hostID == hostID {
 		return entry.jobID, entry.campaignID
 	}
 
-	jobID, campaignID, err := s.jobs.AttemptContext(ctx, attemptID)
+	jobID, campaignID, err := s.jobs.AttemptContext(ctx, attemptID, hostID)
 	if err != nil {
 		return "", ""
 	}
@@ -540,7 +540,7 @@ func (s *AgentService) attemptContext(ctx context.Context, attemptID string) (st
 	if len(s.attempts) >= maxRememberedAttempts {
 		s.attempts = map[string]attemptContextEntry{}
 	}
-	s.attempts[attemptID] = attemptContextEntry{jobID: jobID, campaignID: campaignID}
+	s.attempts[attemptID] = attemptContextEntry{jobID: jobID, campaignID: campaignID, hostID: hostID}
 	s.attemptsMu.Unlock()
 	return jobID, campaignID
 }
@@ -550,6 +550,7 @@ func (s *AgentService) attemptContext(ctx context.Context, attemptID string) (st
 type attemptContextEntry struct {
 	jobID      string
 	campaignID string
+	hostID     string
 }
 
 // maxRememberedAttempts limits the memory of the attempt -> operation
@@ -562,8 +563,18 @@ const maxRememberedAttempts = 4096
 func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	result *agentv1.TaskResult) error {
 	attemptID := result.GetTaskId()
-	jobID, action, err := s.jobs.AttemptOwner(ctx, attemptID)
+	jobID, action, err := s.jobs.AttemptOwner(ctx, attemptID, hostID)
 	if err != nil {
+		if errors.Is(err, jobs.ErrNotFound) {
+			// Either the attempt never existed or it belongs to another
+			// host. The second is an incident, and the audit says so.
+			s.audit.Record(ctx, audit.Event{
+				ActorType: audit.ActorAgent, ActorID: hostID,
+				Action: "security.attempt_mismatch", TargetType: "host", TargetID: hostID,
+				Outcome: audit.OutcomeDenied,
+				Detail:  map[string]any{"attempt_id": attemptID, "status": result.GetStatus().String()},
+			})
+		}
 		return fmt.Errorf("a result for the unknown attempt %s: %w", attemptID, err)
 	}
 

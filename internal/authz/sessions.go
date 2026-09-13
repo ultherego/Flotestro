@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -286,16 +287,43 @@ func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 		return "", err
 	}
 
+	// An external identity never takes over a principal that exists under
+	// the same subject with another origin: a local or service principal
+	// (an API token holder, the bootstrap administrator) keeps its
+	// bindings to itself, and a provider user who happens to carry that
+	// name gets a principal of their own, named with the issuer.
 	err = tx.QueryRow(ctx, `
 		insert into principals (id, subject, display_name, kind, issuer, subject_id, email, last_login_at)
 		values ($1, $2, $3, 'user', $4, $5, $6, now())
 		on conflict (subject) do update set
-			issuer = excluded.issuer, subject_id = excluded.subject_id,
 			display_name = coalesce(nullif(excluded.display_name, ''), principals.display_name),
 			email = excluded.email, last_login_at = now(), updated_at = now()
+		where principals.issuer = excluded.issuer and principals.subject_id = excluded.subject_id
 		returning id`,
 		uuid.NewString(), subject, displayName, issuer, subjectID, nullable(email)).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The subject is taken by somebody else; the provider's user is
+		// still welcome, under a name that says where they come from.
+		err = tx.QueryRow(ctx, `
+			insert into principals (id, subject, display_name, kind, issuer, subject_id, email, last_login_at)
+			values ($1, $2, $3, 'user', $4, $5, $6, now())
+			on conflict (issuer, subject_id) where issuer is not null and subject_id is not null do update set
+				display_name = coalesce(nullif(excluded.display_name, ''), principals.display_name),
+				email = excluded.email, last_login_at = now(), updated_at = now()
+			returning id`,
+			uuid.NewString(), subject+"@"+issuerHost(issuer), displayName, issuer, subjectID, nullable(email)).Scan(&id)
+	}
 	return id, err
+}
+
+// issuerHost is the host part of an issuer URL, for a subject that has to
+// say where it comes from.
+func issuerHost(issuer string) string {
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(issuer, "https://"), "http://")
+	if i := strings.IndexByte(trimmed, '/'); i >= 0 {
+		trimmed = trimmed[:i]
+	}
+	return trimmed
 }
 
 // mergeBindings joins manual assignments with those following from groups, without duplicates.

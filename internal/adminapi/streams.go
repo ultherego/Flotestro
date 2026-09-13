@@ -56,10 +56,14 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 // notification is a wake-up call, and a screen that missed one reads
 // everything after the last identifier it has anyway.
 func (s *Server) handleCampaignEvents(w http.ResponseWriter, r *http.Request) {
-	campaignID := r.PathValue("id")
-	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign"); !ok {
+	// The trail of a campaign is read in the scope of its hosts, like the
+	// campaign itself: a right to read campaigns somewhere is not a right
+	// to follow every campaign.
+	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
+	if !ok {
 		return
 	}
+	campaignID := campaign.ID
 	after := lastEventID(r)
 	s.stream(w, r, events.ForCampaign(campaignID), nil, &trail{
 		campaignID: campaignID, last: after, read: s.campaigns.CourseAfter,

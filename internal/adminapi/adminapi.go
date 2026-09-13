@@ -396,7 +396,28 @@ func (s *Server) Routes() http.Handler {
 	// Authentication covers the whole router. Authorisation is done by the
 	// handlers, because only they know the target scope.
 	authenticator := authz.Authenticator{Tokens: s.authz, Sessions: s.authz}
-	return authenticator.Middleware(mux)
+	return securityHeaders(authenticator.Middleware(mux), inlineScriptHashes(s.webRoot))
+}
+
+// securityHeaders sets what every browser is told about this origin: the
+// panel is never framed, content types are not guessed, the referrer stays
+// home, and scripts, styles and connections come only from the panel
+// itself. The one inline script in index.html applies the remembered
+// theme before the first paint; its hash is the only exception. A page
+// that needs an image from a host would have to say so here first.
+func securityHeaders(next http.Handler, scriptHashes []string) http.Handler {
+	policy := "default-src 'self'; script-src 'self' " + strings.Join(scriptHashes, " ") + "; " +
+		"style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+		"connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", policy)
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

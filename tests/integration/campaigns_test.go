@@ -903,11 +903,15 @@ func TestPreviewTellsReadyFromIncapable(t *testing.T) {
 		t.Errorf("the package update described as %q, plan=%v",
 			update.CampaignMode, update.RequiresPlan)
 	}
-	// The same fleet, a different operation: a host without a package
-	// adapter is to be excluded with a reason, not counted as ready.
+	// The same fleet, a different operation: a host without the adapter
+	// is to be excluded with a reason, not counted as ready. Every lab
+	// family has a package manager now, so the operation without an
+	// adapter everywhere is a container image pull - only the host with
+	// a container engine can carry it out.
+	h.get("/api/v1/campaigns/preview?action=docker.image.pull", &update)
 	if update.Eligible >= restart.Eligible {
-		t.Errorf("the update has %d ready hosts with %d ready for a restart - "+
-			"the host without apt and dnf was not recognised",
+		t.Errorf("the image pull has %d ready hosts with %d ready for a restart - "+
+			"the hosts without a container engine were not recognised",
 			update.Eligible, restart.Eligible)
 	}
 	missingAdapter := 0
@@ -943,17 +947,25 @@ func TestCampaignKeepsTheIncapableHostInTheSnapshot(t *testing.T) {
 			continue
 		}
 		targets = append(targets, host.ID)
-		if host.OSFamily == "arch" {
+		// A host without a container engine cannot pull an image; it is
+		// the incapable one of this campaign.
+		hasDocker := false
+		for _, capability := range host.Capabilities {
+			if capability.Name == "docker" && capability.Available {
+				hasDocker = true
+			}
+		}
+		if !hasDocker {
 			incapable++
 		}
 	}
 	if incapable == 0 {
-		t.Skip("the test fleet has no host without a package adapter")
+		t.Skip("the test fleet has no host without a container engine")
 	}
 
 	campaign := h.createCampaign(map[string]any{
-		"name": "update of the whole fleet", "action": "packages.upgrade",
-		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
+		"name": "image on the whole fleet", "action": "docker.image.pull",
+		"payload":                    map[string]any{"docker_image": map[string]any{"reference": "alpine:3.20"}},
 		"selector":                   map[string]any{"host_ids": targets},
 		"canary_size":                0,
 		"wave_size":                  len(targets),

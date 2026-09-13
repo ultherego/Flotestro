@@ -1,6 +1,8 @@
 package adminapi
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,4 +48,36 @@ func SPAHandler(root string) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFile(w, r, filepath.Join(root, "index.html"))
 	})
+}
+
+// inlineScriptHashes reads index.html once and returns the CSP source
+// expressions of its inline scripts. The theme script must run before the
+// first paint, so it cannot be a file; the hash lets the policy admit
+// exactly that script and nothing else, and a rebuilt index.html changes
+// the hash with it rather than breaking the theme.
+func inlineScriptHashes(root string) []string {
+	if root == "" {
+		return nil
+	}
+	page, err := os.ReadFile(filepath.Join(root, "index.html"))
+	if err != nil {
+		return nil
+	}
+	var hashes []string
+	rest := string(page)
+	for {
+		start := strings.Index(rest, "<script>")
+		if start < 0 {
+			break
+		}
+		rest = rest[start+len("<script>"):]
+		end := strings.Index(rest, "</script>")
+		if end < 0 {
+			break
+		}
+		sum := sha256.Sum256([]byte(rest[:end]))
+		hashes = append(hashes, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		rest = rest[end:]
+	}
+	return hashes
 }
