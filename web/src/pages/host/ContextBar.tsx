@@ -9,10 +9,11 @@ import { useT } from "../../i18n";
 
 /**
  * The persistent host header. An operator switching modules must know
- * without checking anything which machine they work on - so the target
- * identity is part of the layout, not text repeated by the individual
- * screens. The first line is the identity, the second the facts as chips:
- * a fact read at a glance is a fact that gets read.
+ * without checking anything which machine they work on - the top bar
+ * names it, and this card under the bar carries its state and facts, so
+ * the identity is part of the layout, not text repeated by the individual
+ * screens. The first line is the state, the second the facts as chips: a
+ * fact read at a glance is a fact that gets read.
  */
 export function ContextBar({ host, segment, campaign }: {
   host: Host;
@@ -28,9 +29,9 @@ export function ContextBar({ host, segment, campaign }: {
           <Link to={`/campaigns/${campaign}`}>← {t("Back to the campaign")}</Link>
         </p>
       )}
+      {/* The name and the address stand in the top bar; repeating them
+          here would only push the facts down. */}
       <div className="host-header-title">
-        <ConnectionDot state={host.connection_state} />
-        <h1 className="host-header-name">{host.hostname}</h1>
         <ConnectionState state={host.connection_state} />
         <MaintenanceWindow host={host} />
       </div>
@@ -50,12 +51,6 @@ export function ContextBar({ host, segment, campaign }: {
       </div>
     </div>
   );
-}
-
-/** The connection state as a dot, in the same colours as the badge. */
-function ConnectionDot({ state }: { state: Host["connection_state"] }) {
-  const kind = state === "online" ? "ok" : state === "offline" ? "error" : state === "stale" ? "warn" : "unknown";
-  return <span className={`dot ${kind}`} aria-hidden="true" />;
 }
 
 /**

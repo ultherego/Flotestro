@@ -65,7 +65,9 @@
   /* The page fills the width: a bounded page on a wide screen left the
      rest empty, and a fleet panel has more to show, not less. */
   --page-max-width: none;
-  --topbar-height: 0px;
+  /* The top bar stands at every width; the sticky parts of a page hang
+     from this height so nothing slides under it. */
+  --topbar-height: 52px;
 }
 
 [data-theme="mocha-peach"] {
@@ -161,19 +163,23 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .subtitle { color: var(--text-muted); margin: 0 0 20px; font-size: 13px; max-width: 80ch; }
 
 /* ---------------------------------------------------------------------- */
-/* The shell: a sidebar and the content.                                   */
+/* The shell: the sidebar down the left edge, the top bar across the rest  */
+/* and the content beneath it.                                             */
 /* ---------------------------------------------------------------------- */
 .layout {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
   min-height: 100vh;
 }
 .layout.sidebar-collapsed { --sidebar-width: var(--sidebar-rail); }
 
 .sidebar {
+  grid-column: 1;
+  grid-row: 1 / 3;
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -182,12 +188,19 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   transition: width 0.15s ease;
 }
 
+/* The brand row is as tall as the top bar, so the two borders meet in one
+   line across the screen. */
 .sidebar-brand {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 12px 10px;
+  height: var(--topbar-height);
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
 }
+.sidebar-brand:hover { text-decoration: none; color: var(--text); }
 .sidebar-mark {
   flex: none;
   width: 28px;
@@ -201,32 +214,13 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   place-items: center;
 }
 .sidebar-title { flex: 1 1 auto; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; }
-.sidebar-fold, .topbar-menu {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.sidebar-fold:hover, .topbar-menu:hover { background: var(--bg-sidebar-hover); color: var(--text); }
-
-.sidebar-picker { padding: 4px 12px 8px; }
-/* On the dark rail the field colour would vanish, so the trigger takes the hover shade. */
-.sidebar-picker .host-picker-trigger { background: var(--bg-sidebar-hover); }
-.sidebar-picker .host-picker-trigger:hover { background: var(--bg-hover); }
 
 .sidebar-nav {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 8px 12px;
+  padding: 10px 8px 12px;
 }
 .sidebar-group + .sidebar-group { margin-top: 6px; }
 .sidebar-group-head {
@@ -280,33 +274,193 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 /* The way back from a host to the fleet sits above the host's modules. */
 .sidebar-back { margin-bottom: 6px; color: var(--text-faint); font-size: 12px; }
 
-.sidebar-footer {
-  border-top: 1px solid var(--border);
-  padding: 10px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text-muted);
+/* The rail: icons only. The labels stay in the markup for the tooltips and
+   the screen reader; the folding is purely visual. */
+@media (min-width: 901px) {
+  .sidebar.collapsed .sidebar-title,
+  .sidebar.collapsed .sidebar-item-label,
+  .sidebar.collapsed .sidebar-group-label,
+  .sidebar.collapsed .sidebar-group-chevron,
+  .sidebar.collapsed .sidebar-group-dot { display: none; }
+  .sidebar.collapsed .sidebar-brand { justify-content: center; padding: 0; }
+  .sidebar.collapsed .sidebar-nav { padding: 10px 8px 12px; }
+  .sidebar.collapsed .sidebar-group-head {
+    height: 1px;
+    padding: 0;
+    margin: 8px 6px;
+    background: var(--border);
+    pointer-events: none;
+  }
+  .sidebar.collapsed .sidebar-group.closed .sidebar-items { display: flex; }
+  .sidebar.collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
+  .sidebar.collapsed .sidebar-item.active { box-shadow: none; }
 }
-.sidebar-user { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.sidebar-avatar {
+
+/* ---------------------------------------------------------------------- */
+/* The top bar: the fold, the trail, the host search and the user menu.    */
+/* It spans from the sidebar to the screen edge and stays on top while the */
+/* page scrolls, so everything sticky in the page hangs below its height.  */
+/* ---------------------------------------------------------------------- */
+.topbar {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  height: var(--topbar-height);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-fold, .topbar-menu {
   flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--bg-hover);
-  color: var(--text);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.topbar-fold:hover, .topbar-menu:hover { background: var(--bg-hover); color: var(--text); }
+/* The drawer button belongs to the narrow screen; the fold to the wide one. */
+.topbar-menu { display: none; }
+
+.topbar-trail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.topbar-crumb {
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-crumb.current { color: var(--text); }
+a.topbar-crumb:hover { color: var(--text); text-decoration: none; }
+.topbar-sep { flex: none; width: 12px; height: 12px; color: var(--text-faint); }
+/* The host in the trail: its state, its name and its address, as one link
+   to its overview. The name keeps the full text colour even when a module
+   follows it, because it is the target of every operation on the page. */
+.topbar-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+}
+.topbar-host:hover { background: var(--bg-hover); text-decoration: none; }
+.topbar-host .dot { width: 9px; height: 9px; }
+.topbar-host-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-host-address { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+.topbar-search { flex: 0 1 300px; min-width: 0; }
+
+/* The user menu: the avatar and the name open a popover with the identity,
+   the settings and the way out of the session. */
+.topbar-user { position: relative; flex: none; }
+.topbar-user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  max-width: 240px;
+  padding: 0 6px 0 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.topbar-user-trigger:hover, .topbar-user-trigger[aria-expanded="true"] { background: var(--bg-hover); }
+.topbar-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+  font-size: 13px;
   display: grid;
   place-items: center;
 }
-.sidebar-user-text { display: flex; flex-direction: column; min-width: 0; }
-.sidebar-user-name { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-user-roles { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-switches { display: flex; flex-direction: column; gap: 6px; }
-.sidebar-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.sidebar-signout {
+.topbar-user-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-user-chevron { flex: none; width: 12px; height: 12px; transform: rotate(90deg); color: var(--text-faint); }
+.topbar-user-trigger[aria-expanded="true"] .topbar-user-chevron { transform: rotate(-90deg); }
+
+.user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: min(300px, calc(100vw - 32px));
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.user-menu-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.user-menu-identity .topbar-avatar { width: 36px; height: 36px; font-size: 15px; }
+.user-menu-text { display: flex; flex-direction: column; min-width: 0; }
+.user-menu-name { color: var(--text); font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-subject { font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-roles { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-section { display: flex; flex-direction: column; gap: 5px; }
+.user-menu-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.user-menu-session {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.user-menu-signout {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -314,9 +468,9 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   border-radius: var(--radius-xs);
   color: var(--text-muted);
 }
-.sidebar-signout:hover { background: var(--bg-sidebar-hover); color: var(--text); text-decoration: none; }
+.user-menu-signout:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
 
-/* The segmented controls in the footer: the language and the theme. */
+/* The segmented controls in the user menu: the language, the theme and the text size. */
 .language-switch, .theme-switch {
   display: inline-flex;
   padding: 2px;
@@ -354,40 +508,11 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .theme-swatch.mocha-green { background: #a6e3a1; box-shadow: 0 0 0 2px #1e1e2e; }
 .theme-swatch.latte { background: #1e66f5; box-shadow: 0 0 0 2px #eff1f5; }
 
-/* The rail: icons only. The labels stay in the markup for the tooltips and
-   the screen reader; the folding is purely visual. */
-@media (min-width: 901px) {
-  .sidebar.collapsed .sidebar-title,
-  .sidebar.collapsed .sidebar-item-label,
-  .sidebar.collapsed .sidebar-group-label,
-  .sidebar.collapsed .sidebar-group-chevron,
-  .sidebar.collapsed .sidebar-group-dot,
-  .sidebar.collapsed .sidebar-user-text,
-  .sidebar.collapsed .sidebar-switches,
-  .sidebar.collapsed .sidebar-session > a:not(.sidebar-signout) { display: none; }
-  .sidebar.collapsed .sidebar-brand { flex-direction: column; gap: 6px; padding: 12px 0 8px; }
-  .sidebar.collapsed .sidebar-picker { padding: 4px 8px 8px; }
-  .sidebar.collapsed .sidebar-nav { padding: 4px 8px 12px; }
-  .sidebar.collapsed .sidebar-group-head {
-    height: 1px;
-    padding: 0;
-    margin: 8px 6px;
-    background: var(--border);
-    pointer-events: none;
-  }
-  .sidebar.collapsed .sidebar-group.closed .sidebar-items { display: flex; }
-  .sidebar.collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
-  .sidebar.collapsed .sidebar-item.active { box-shadow: none; }
-  .sidebar.collapsed .sidebar-footer { padding: 10px 8px 12px; align-items: center; }
-  .sidebar.collapsed .sidebar-session { justify-content: center; }
-  .sidebar.collapsed .sidebar-signout { padding: 8px; }
-}
-
-/* The top bar and the drawer exist only on a narrow screen. */
-.topbar { display: none; }
 .sidebar-backdrop { display: none; }
 
 .content {
+  grid-column: 2;
+  grid-row: 2;
   padding: var(--content-pad-y) var(--content-pad-x);
   overflow-x: auto;
   min-width: 0;
@@ -402,27 +527,19 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   min-width: 0;
 }
 
+/* A narrow screen: the sidebar leaves the grid and becomes a drawer behind
+   the bar's menu button; the bar and the content take the whole width. */
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
-    --topbar-height: 52px;
     --content-pad-x: 16px;
     --content-pad-y: 16px;
     --sidebar-width: 0px;
   }
-  .topbar {
-    position: sticky;
-    top: 0;
-    z-index: 15;
-    height: var(--topbar-height);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px;
-    background: var(--bg-sidebar);
-    border-bottom: 1px solid var(--border);
-  }
-  .topbar-brand { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .topbar, .content { grid-column: 1; }
+  .topbar { padding: 0 12px 0 8px; }
+  .topbar-fold { display: none; }
+  .topbar-menu { display: grid; }
   .sidebar {
     position: fixed;
     top: 0;
@@ -436,7 +553,6 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
     box-shadow: none;
   }
   .sidebar.open { transform: none; box-shadow: var(--shadow); }
-  .sidebar-fold { display: none; }
   .sidebar-backdrop {
     display: block;
     position: fixed;
@@ -450,40 +566,48 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 }
 
 /* ---------------------------------------------------------------------- */
-/* The host picker: a trigger and a popover with a filter and a list.      */
+/* The host picker: a search trigger and a popover with a filter and a     */
+/* list. It hangs from the right side of the top bar, so the popover opens */
+/* leftwards to stay on the screen.                                        */
 /* ---------------------------------------------------------------------- */
 .host-picker { position: relative; min-width: 0; }
 .host-picker-trigger {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 7px 10px;
+  height: 34px;
+  padding: 0 10px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text);
+  color: var(--text-muted);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.host-picker-trigger:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.host-picker-trigger:hover { border-color: var(--border-strong); color: var(--text); }
 .host-picker-trigger[aria-expanded="true"] { border-color: var(--accent); }
-.host-picker-trigger .icon { color: var(--text-muted); flex: none; }
-.host-picker-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.host-picker-trigger .icon { flex: none; }
+.host-picker-placeholder { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-picker-key {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
 .host-picker-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-picker-address { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.host-picker-placeholder { font-size: 13px; color: var(--text-muted); }
-.host-picker-chevron { transform: rotate(90deg); width: 12px; height: 12px; }
-.host-picker-trigger[aria-expanded="true"] .host-picker-chevron { transform: rotate(-90deg); }
 
 .host-picker-popover {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  right: 0;
   z-index: 40;
-  width: max(100%, 320px);
-  max-width: calc(100vw - 32px);
+  width: min(400px, calc(100vw - 32px));
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -507,7 +631,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   color: var(--text);
 }
 .host-picker-search input:focus { outline: none; box-shadow: none; }
-.host-picker-list { list-style: none; margin: 0; padding: 4px; max-height: 320px; overflow-y: auto; }
+.host-picker-list { list-style: none; margin: 0; padding: 4px; max-height: min(320px, 60vh); overflow-y: auto; }
 .host-picker-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -553,26 +677,34 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .host-picker-item .host-picker-star.on { opacity: 1; }
 .host-picker-item .host-picker-star.on { color: var(--warn-text); }
 .host-picker-item .host-picker-star:hover { color: var(--text); }
-.host-picker-placeholder kbd {
-  margin-left: 6px;
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-faint);
-}
 .host-picker-item.current .host-picker-name { color: var(--accent-text); }
 .host-picker-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .host-picker-note.error { color: var(--error-text); }
 
-/* Folded to the rail: the trigger is an icon and the popover opens beside it. */
-.host-picker.compact .host-picker-trigger { justify-content: center; padding: 9px 0; }
-.host-picker.compact .host-picker-text, .host-picker.compact .host-picker-chevron { display: none; }
-.host-picker.compact .host-picker-popover { top: 0; left: calc(100% + 10px); width: 320px; }
-
-/* In the host header the picker sits at the right edge, so the popover
-   opens leftwards to stay on the screen. */
+/* A phone: the bar keeps the menu button, one title and the avatar. The
+   trail shrinks to the page the operator is on - the host on a host page -
+   and the search and the user menu fold to their icons. */
+@media (max-width: 600px) {
+  .topbar { gap: 6px; }
+  .topbar-trail .topbar-sep,
+  .topbar-trail.on-host .topbar-crumb,
+  .topbar-host-address { display: none; }
+  .topbar-host { padding: 3px 4px; }
+  .topbar-search { flex: none; }
+  .host-picker-trigger { width: 34px; padding: 0; justify-content: center; }
+  .host-picker-placeholder, .host-picker-key { display: none; }
+  /* An icon at the right edge cannot anchor a list wider than the space
+     beside it, so the popover hangs from the bar across the screen. */
+  .host-picker-popover {
+    position: fixed;
+    top: calc(var(--topbar-height) + 6px);
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+  .topbar-user-name, .topbar-user-chevron { display: none; }
+  .topbar-user-trigger { padding: 0 4px; }
+}
 
 /* The state dot, in the badge colours. */
 .dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
@@ -802,20 +934,15 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 /* The host header card. The target of an operation is to be visible
    without scrolling in every module, so the header sticks to the top of
    the content; the module navigation sticks right below it. */
-/* The header is a card that sticks under the top edge while the module
-   scrolls beneath it. It stays inside the page box: a header pulled out
-   with negative margins collapsed into the page and covered the module
-   title. */
+/* The header is a card at the top of the host page. It no longer sticks:
+   the top bar names the host and the module wherever the page scrolls,
+   and a sticky card only covered the module's own header. */
 .host-header {
-  position: sticky;
-  top: calc(var(--topbar-height) + 8px);
-  z-index: 5;
-  margin: 0;
+  margin: 0 0 16px;
   padding: 12px 16px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 6%, transparent);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -907,7 +1034,7 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 
 /* The host page: the header and the content; the modules of the host are
    in the sidebar, which shows the fleet or one host, never both. */
-.host-content { min-width: 0; padding-top: 16px; }
+.host-content { min-width: 0; }
 
 @media (max-width: 900px) {
   .host-content { padding-top: 16px; }

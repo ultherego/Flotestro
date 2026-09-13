@@ -1,11 +1,6 @@
-import type { MouseEvent } from "react";
-import { NavLink, useLocation } from "react-router-dom";
-import type { Whoami } from "../lib/types";
-import { LOCALES, useLocale, useT } from "../i18n";
-import { THEMES, type Theme } from "../lib/theme";
-import { SCALES, type Scale } from "../lib/scale";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { useT } from "../i18n";
 import { useStoredState } from "../lib/storage";
-import { HostPicker } from "./HostPicker";
 import { Icon, type IconName } from "./icons";
 
 export type NavItem = {
@@ -31,7 +26,7 @@ export type NavGroup = {
  * The navigation has two faces, never both at once: the fleet, and one
  * host. Two columns of links side by side confused more than they helped,
  * so a host page replaces the fleet groups with the host's modules and a
- * way back; the picker above stays the same in both.
+ * way back; the brand above stays the same in both.
  */
 export type NavFace = {
   groups: NavGroup[];
@@ -47,27 +42,19 @@ function isFoldMap(value: unknown): value is Record<string, boolean> {
 }
 
 /**
- * The application sidebar: the brand, the host picker, the grouped
- * navigation and the footer with the session controls. It folds to a rail
- * of icons on demand and becomes a drawer on a narrow screen; both are
- * layout decisions, so the pages know nothing about them.
+ * The application sidebar: the brand and the grouped navigation, nothing
+ * else - the session, the search and the settings live in the top bar, so
+ * this column is only a list of places. It folds to a rail of icons on
+ * demand and becomes a drawer on a narrow screen; both are layout
+ * decisions, so the pages know nothing about them.
  */
-export function Sidebar({
-  face, user, collapsed, onToggleCollapsed, open, onClose, onSignOut, theme, setTheme, scale, setScale,
-}: {
+export function Sidebar({ face, collapsed, open, onClose }: {
   face: NavFace;
-  user: Whoami | undefined;
   /** The rail of icons, remembered between visits. */
   collapsed: boolean;
-  onToggleCollapsed: () => void;
   /** The drawer on a narrow screen. */
   open: boolean;
   onClose: () => void;
-  onSignOut: (event: MouseEvent) => void;
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-  scale: Scale;
-  setScale: (scale: Scale) => void;
 }) {
   const t = useT();
   const location = useLocation();
@@ -80,23 +67,13 @@ export function Sidebar({
 
   return (
     <aside className={["sidebar", collapsed ? "collapsed" : "", open ? "open" : ""].join(" ").trim()}>
-      <div className="sidebar-brand">
+      {/* The brand is a link to the dashboard: the one place every page
+          can be left for, and the drawer closes behind it like behind any
+          other item. */}
+      <Link to="/dashboard" className="sidebar-brand" onClick={onClose} title={t("Fleet dashboard")}>
         <span className="sidebar-mark" aria-hidden="true">F</span>
         <span className="sidebar-title">Flotestro</span>
-        <button
-          type="button"
-          className="sidebar-fold"
-          onClick={onToggleCollapsed}
-          title={collapsed ? t("Expand the sidebar") : t("Collapse the sidebar")}
-          aria-label={collapsed ? t("Expand the sidebar") : t("Collapse the sidebar")}
-        >
-          <Icon name={collapsed ? "expand" : "collapse"} />
-        </button>
-      </div>
-
-      <div className="sidebar-picker">
-        <HostPicker compact={collapsed} />
-      </div>
+      </Link>
 
       <nav className="sidebar-nav" aria-label={t("Main navigation")}>
         {face.back && (
@@ -149,104 +126,7 @@ export function Sidebar({
           );
         })}
       </nav>
-
-      <div className="sidebar-footer">
-        <div className="sidebar-user" title={`${user?.display_name || user?.subject || ""}\n${user?.roles.join(", ") || t("no roles")}`}>
-          <span className="sidebar-avatar" aria-hidden="true">
-            {initial(user?.display_name || user?.subject || "")}
-          </span>
-          <span className="sidebar-user-text">
-            <span className="sidebar-user-name">{user?.display_name || user?.subject}</span>
-            <span className="sidebar-user-roles">{user?.roles.join(", ") || t("no roles")}</span>
-          </span>
-        </div>
-        <div className="sidebar-switches">
-          <LanguageSwitch />
-          <ThemeSwitch theme={theme} setTheme={setTheme} />
-          <ScaleSwitch scale={scale} setScale={setScale} />
-        </div>
-        <div className="sidebar-session">
-          {/* The identity provider may have an active session of another
-              user and sign in with it quietly. Without this link there is
-              no way out of that other than clearing the browser cookies. */}
-          <a href={`/auth/login?force=1&redirect=${encodeURIComponent(window.location.pathname)}`}>
-            {t("Switch account")}
-          </a>
-          <a href="#" onClick={onSignOut} className="sidebar-signout" title={t("Sign out")}>
-            <Icon name="sign-out" />
-            <span className="sidebar-item-label">{t("Sign out")}</span>
-          </a>
-        </div>
-      </div>
     </aside>
   );
 }
 
-function initial(name: string): string {
-  const letter = name.trim().charAt(0);
-  return letter ? letter.toUpperCase() : "?";
-}
-
-/** The interface language; the choice is remembered in the browser. */
-export function LanguageSwitch() {
-  const { locale, setLocale } = useLocale();
-  const t = useT();
-  return (
-    <div className="language-switch" role="group" aria-label={t("Language")}>
-      {LOCALES.map((entry) => (
-        <button
-          key={entry.code}
-          type="button"
-          className={entry.code === locale ? "active" : ""}
-          aria-pressed={entry.code === locale}
-          onClick={() => setLocale(entry.code)}
-        >
-          {entry.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The colour theme; the choice is remembered in the browser. */
-export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
-  const t = useT();
-  return (
-    <div className="theme-switch" role="group" aria-label={t("Theme")}>
-      {THEMES.map((entry) => (
-        <button
-          key={entry.code}
-          type="button"
-          className={entry.code === theme ? "active" : ""}
-          aria-pressed={entry.code === theme}
-          title={t(entry.description)}
-          onClick={() => setTheme(entry.code)}
-        >
-          <span className={`theme-swatch ${entry.code}`} aria-hidden="true" />
-          {t(entry.label)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The text size; the choice is remembered in the browser, like the theme. */
-export function ScaleSwitch({ scale, setScale }: { scale: Scale; setScale: (scale: Scale) => void }) {
-  const t = useT();
-  return (
-    <div className="theme-switch scale-switch" role="group" aria-label={t("Text size")}>
-      {SCALES.map((entry) => (
-        <button
-          key={entry.code}
-          type="button"
-          className={entry.code === scale ? "active" : ""}
-          aria-pressed={entry.code === scale}
-          title={t(entry.description)}
-          onClick={() => setScale(entry.code)}
-        >
-          {entry.label}
-        </button>
-      ))}
-    </div>
-  );
-}

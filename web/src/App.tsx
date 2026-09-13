@@ -9,12 +9,12 @@ import { useScale } from "./lib/scale";
 import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
 import { Sidebar, type NavFace, type NavGroup } from "./components/Sidebar";
-import { Icon } from "./components/icons";
+import { Topbar, type Trail } from "./components/Topbar";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
 import { HostLayout } from "./pages/host/Layout";
-import { groupedModules, modules } from "./pages/host/modules";
+import { DEFAULT_MODULE, groupedModules, modules } from "./pages/host/modules";
 import { REFRESH_INTERVAL } from "./lib/stream";
 import { Overview } from "./pages/host/Overview";
 import { Packages } from "./pages/host/Packages";
@@ -63,7 +63,7 @@ export function App() {
   const capabilities = useCapabilities();
   const location = useLocation();
   // The theme is owned here so that it applies to every screen, the login
-  // included; the switch in the sidebar only changes it.
+  // included; the switch in the user menu only changes it.
   const { theme, setTheme } = useTheme();
   const { scale, setScale } = useScale();
   const [collapsed, setCollapsed] = useStoredState<boolean>(SIDEBAR_KEY, false, isBoolean);
@@ -74,7 +74,7 @@ export function App() {
     setDrawer(false);
   }, [location.pathname]);
 
-  const hostFace = useHostFace(capabilities);
+  const onHost = useHostContext(capabilities);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["whoami"],
@@ -170,32 +170,28 @@ export function App() {
     },
   ];
 
-  const face: NavFace = hostFace ?? { groups };
+  const face: NavFace = onHost?.face ?? { groups };
+  const trail: Trail = { ...sectionOf(groups, location.pathname), host: onHost?.host, module: onHost?.module };
 
   return (
     <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
-      {/* The top bar exists only on a narrow screen, where the sidebar
-          becomes a drawer behind it. */}
-      <header className="topbar">
-        <button
-          type="button"
-          className="topbar-menu"
-          onClick={() => setDrawer(true)}
-          aria-label={t("Open the navigation")}
-          title={t("Open the navigation")}
-        >
-          <Icon name="menu" />
-        </button>
-        <span className="topbar-brand">Flotestro</span>
-      </header>
-      {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
+      {/* The shell is two panels: the sidebar down the left edge with the
+          places to go, and the top bar across the rest with where the
+          operator is and who they are. On a narrow screen the sidebar
+          becomes a drawer behind the bar's menu button. */}
       <Sidebar
         face={face}
+        collapsed={collapsed}
+        open={drawer}
+        onClose={() => setDrawer(false)}
+      />
+      {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
+      <Topbar
+        trail={trail}
         user={data}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((current) => !current)}
-        open={drawer}
-        onClose={() => setDrawer(false)}
+        onOpenDrawer={() => setDrawer(true)}
         onSignOut={signOut}
         theme={theme}
         setTheme={setTheme}
@@ -305,12 +301,33 @@ function LoginScreen({ provider }: { provider: boolean }) {
 }
 
 /**
- * The host face of the sidebar: on a host page the fleet groups give way
- * to the modules of that host, under the same headings the registry
- * knows, with the way back to the list above them. The host is read with
- * the same query the page uses, so it costs no second request.
+ * The section the address belongs to, for the trail in the top bar. It is
+ * found in the navigation itself, so the bar names a page exactly as the
+ * sidebar does; a page deeper than its item (a campaign, a host) gets the
+ * item as a link back. An address outside the navigation is named by the
+ * product, because a bar with an empty title would look broken.
  */
-function useHostFace(installation: ReturnType<typeof useCapabilities>): NavFace | undefined {
+function sectionOf(groups: NavGroup[], pathname: string): Pick<Trail, "section" | "to"> {
+  for (const group of groups) {
+    for (const item of group.items) {
+      const on = item.active
+        ? item.active(pathname)
+        : pathname === item.to || pathname.startsWith(`${item.to}/`);
+      if (!on) continue;
+      return pathname === item.to ? { section: item.label } : { section: item.label, to: item.to };
+    }
+  }
+  return { section: "Flotestro" };
+}
+
+/**
+ * The host context of the shell: on a host page the fleet groups of the
+ * sidebar give way to the modules of that host, under the same headings
+ * the registry knows, with the way back to the list above them; the top
+ * bar names the host and the open module. The host is read with the same
+ * query the page uses, so it costs no second request.
+ */
+function useHostContext(installation: ReturnType<typeof useCapabilities>): { face: NavFace; host?: Host; module?: string } | undefined {
   const match = useMatch("/hosts/:id/*");
   const location = useLocation();
   const id = match?.params.id;
@@ -323,9 +340,10 @@ function useHostFace(installation: ReturnType<typeof useCapabilities>): NavFace 
   });
   if (!onHost) return undefined;
   const back = { to: "/hosts", label: "All hosts" };
-  if (!host.data) return { groups: [], back };
+  if (!host.data) return { face: { groups: [], back } };
+  const list = modules(host.data, installation);
   // The search keeps the way back to a campaign across module switches.
-  const groups: NavGroup[] = groupedModules(modules(host.data, installation)).map((group) => ({
+  const groups: NavGroup[] = groupedModules(list).map((group) => ({
     key: `host:${group.key}`,
     label: group.title,
     items: group.items.map((item) => ({
@@ -335,5 +353,9 @@ function useHostFace(installation: ReturnType<typeof useCapabilities>): NavFace 
       unavailable: item.available ? undefined : item.missingReason,
     })),
   }));
-  return { groups, back };
+  // The module is the third segment of the address, as the host layout
+  // reads it; the default is what the index route redirects to.
+  const segment = location.pathname.split("/")[3] || DEFAULT_MODULE;
+  const open = list.find((item) => item.segment === segment);
+  return { face: { groups, back }, host: host.data, module: open?.name };
 }

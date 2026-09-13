@@ -19,27 +19,21 @@ const FAVOURITES_KEY = "flotestro.hosts.favourites";
 /** A row of the list: a host under the heading of its group. */
 type Row = { host: Host; group: "favourites" | "recent" | "all" };
 
+const GROUP_TITLES: Record<Row["group"], string> = {
+  favourites: "Favourites", recent: "Recent", all: "All hosts",
+};
+
 /**
- * The host picker: one control for jumping between machines, used in the
- * sidebar and in the host context bar. Both read the same list and both
- * switch the same way, so an operator learns one behaviour.
+ * The host picker: the search field of the top bar, and the one control
+ * for jumping between machines. It reads as a search rather than as the
+ * name of the open host, because the trail beside it already names the
+ * host; on a narrow screen it folds to an icon that opens the same list.
  *
  * The switch keeps the open module if the new host supports it. Otherwise
  * it leads to the overview and says what was missing - a quiet tab change
  * would look like an interface bug.
  */
-const GROUP_TITLES: Record<Row["group"], string> = {
-  favourites: "Favourites", recent: "Recent", all: "All hosts",
-};
-
-export function HostPicker({
-  current, compact = false,
-}: {
-  /** The host the caller already knows; without it the picker reads the address. */
-  current?: Host;
-  /** Icon-only trigger, for the folded sidebar. */
-  compact?: boolean;
-}) {
+export function HostPicker() {
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,15 +45,15 @@ export function HostPicker({
   const onHost = root === "hosts" && urlID !== "" && urlID !== "new";
   const segment = onHost ? (urlSegment || DEFAULT_MODULE) : "";
 
-  // The sidebar has no host in hand, so it asks for the one in the address.
+  // The picker has no host in hand, so it asks for the one in the address.
   // The key is the one the host workspace uses, so the request is shared
   // with it rather than doubled.
   const fromAddress = useQuery({
     queryKey: ["host", urlID],
     queryFn: () => api.get<Host>(`/api/v1/hosts/${urlID}`),
-    enabled: current === undefined && onHost,
+    enabled: onHost,
   });
-  const selected = current ?? (onHost ? fromAddress.data : undefined);
+  const selected = onHost ? fromAddress.data : undefined;
 
   const [open, setOpen] = useState(false);
   // The list is fetched once the picker is first opened, not on every
@@ -124,7 +118,7 @@ export function HostPicker({
 
   // Ctrl+K (Cmd+K on a Mac) opens the picker from anywhere: switching
   // hosts is the most frequent move in the panel, and it should not need
-  // the mouse. The sidebar holds the only picker, so one listener is all.
+  // the mouse. The top bar holds the only picker, so one listener is all.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -206,28 +200,19 @@ export function HostPicker({
   const truncated = (list.data?.items.length ?? 0) >= PAGE;
 
   return (
-    <div className={compact ? "host-picker compact" : "host-picker"} ref={container}>
+    <div className="host-picker" ref={container}>
       <button
         type="button"
         className="host-picker-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={t("Switch host")}
-        title={selected ? `${selected.hostname} - ${t("Switch host")}` : t("Switch host")}
+        aria-label={t("Search hosts")}
+        title={`${t("Search hosts")} (Ctrl K)`}
         onClick={() => (open ? setOpen(false) : show())}
       >
-        {selected ? <ConnectionDot state={selected.connection_state} /> : <Icon name="server" />}
-        <span className="host-picker-text">
-          {selected ? (
-            <>
-              <span className="host-picker-name">{selected.hostname}</span>
-              <span className="host-picker-address">{selected.management_address || t("address unknown")}</span>
-            </>
-          ) : (
-            <span className="host-picker-placeholder">{t("Open a host…")} <kbd>Ctrl K</kbd></span>
-          )}
-        </span>
-        <Icon name="chevron" className="host-picker-chevron" />
+        <Icon name="search" />
+        <span className="host-picker-placeholder">{t("Search hosts…")}</span>
+        <kbd className="host-picker-key">Ctrl K</kbd>
       </button>
 
       {open && (
