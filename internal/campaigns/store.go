@@ -23,6 +23,9 @@ var (
 	ErrConflict = errors.New("the operation is not allowed in the current state of the campaign")
 	// ErrNoTargets means a selector that named no host.
 	ErrNoTargets = errors.New("the selector named no host")
+	// ErrRepeated says the order carried an idempotency key already used:
+	// the campaign returned with it is the existing one, not a new one.
+	ErrRepeated = errors.New("the campaign was already created with this idempotency key")
 )
 
 // Store provides access to the campaign tables.
@@ -98,16 +101,35 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		                       maintenance_start, maintenance_end, reboot_policy,
 		                       health_check_units, job_timeout_seconds,
 		                       requires_approval, created_by, request_id,
-		                       approval_fingerprint)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`
-	if _, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
+		                       approval_fingerprint, idempotency_key)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
+	tag, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
 		string(state), spec.CanarySize, spec.WaveSize, spec.MaxConcurrent,
 		spec.FailureThresholdPercent, spec.FailureThresholdAbsolute,
 		spec.MaintenanceStart, spec.MaintenanceEnd, string(spec.RebootPolicy),
 		healthChecks, spec.JobTimeoutSeconds,
 		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID),
-		fingerprint); err != nil {
+		fingerprint, nullable(spec.IdempotencyKey))
+	if err != nil {
 		return nil, fmt.Errorf("creating the campaign: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// The same key from the same creator: the campaign already exists
+		// and the repeat gets it back instead of a second one.
+		rows, err := tx.Query(ctx, campaignColumns+" where created_by = $1 and idempotency_key = $2",
+			spec.CreatedBy, spec.IdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+		existing, err := scanCampaigns(rows)
+		if err != nil {
+			return nil, err
+		}
+		if len(existing) == 0 {
+			return nil, ErrConflict
+		}
+		return &existing[0], ErrRepeated
 	}
 
 	// We count the waves from the ready hosts only. A host settled right away

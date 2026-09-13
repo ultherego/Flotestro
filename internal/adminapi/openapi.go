@@ -125,6 +125,13 @@ func (s *Server) operation(route apiRoute) map[string]any {
 		"operationId": strings.ToLower(route.Method) + strings.NewReplacer("/", "_", "{", "", "}", "", "...", "", "-", "_").Replace(route.Path),
 	}
 	var params []map[string]any
+	if route.Method == http.MethodPost && (route.Path == "/api/v1/campaigns" || strings.HasSuffix(route.Path, "/operations")) {
+		params = append(params, map[string]any{
+			"name": "Idempotency-Key", "in": "header", "required": false,
+			"schema":      map[string]any{"type": "string"},
+			"description": "A key chosen by the caller; a repeat with the same key returns the resource already created instead of a second one.",
+		})
+	}
 	for _, segment := range strings.Split(route.Path, "/") {
 		if strings.HasPrefix(segment, "{") {
 			name := strings.Trim(segment, "{}")

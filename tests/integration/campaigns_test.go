@@ -4,10 +4,12 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -4210,4 +4212,61 @@ func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 			t.Errorf("GET %s is in the contract and answers %d", path, response.StatusCode)
 		}
 	}
+}
+
+// TestRepeatedOrdersAreIdempotent guards the contract a pipeline relies
+// on: an order repeated with the same Idempotency-Key gives the campaign
+// or the job that already exists, not a second one.
+func TestRepeatedOrdersAreIdempotent(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	key := "integration-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+
+	body := labCampaign("idempotent", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": []string{host.ID}},
+	})
+	first := h.postWithKey("/api/v1/campaigns", body, key, http.StatusCreated)
+	second := h.postWithKey("/api/v1/campaigns", body, key, http.StatusOK)
+	if first["id"] != second["id"] {
+		t.Fatalf("the repeat created a second campaign: %v and %v", first["id"], second["id"])
+	}
+	defer h.do(http.MethodPost, "/api/v1/campaigns/"+first["id"].(string)+"/cancel",
+		map[string]any{"reason": "end of the idempotency test"}, nil, 0)
+
+	operation := map[string]any{
+		"action": "unit.status", "payload": map[string]any{"unit_status": map[string]any{"units": []string{"cron.service"}}},
+	}
+	one := h.postWithKey("/api/v1/hosts/"+host.ID+"/operations", operation, key, http.StatusCreated)
+	two := h.postWithKey("/api/v1/hosts/"+host.ID+"/operations", operation, key, http.StatusCreated)
+	if one["id"] != two["id"] {
+		t.Fatalf("the repeat created a second job: %v and %v", one["id"], two["id"])
+	}
+}
+
+// postWithKey posts a body with an Idempotency-Key header and returns the
+// answer as a map.
+func (h *harness) postWithKey(path string, body any, key string, wantStatus int) map[string]any {
+	h.t.Helper()
+	encoded, _ := json.Marshal(body)
+	request, err := http.NewRequest(http.MethodPost, h.api+path, bytes.NewReader(encoded))
+	if err != nil {
+		h.t.Fatalf("building the request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+h.token)
+	request.Header.Set("Idempotency-Key", key)
+	response, err := h.client.Do(request)
+	if err != nil {
+		h.t.Fatalf("POST %s: %v", path, err)
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(response.Body)
+	if response.StatusCode != wantStatus {
+		h.t.Fatalf("POST %s: status %d, expected %d; body: %s", path, response.StatusCode, wantStatus, truncate(raw, 300))
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		h.t.Fatalf("response of POST %s: %v", path, err)
+	}
+	return out
 }

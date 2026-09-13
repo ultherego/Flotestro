@@ -144,6 +144,9 @@ type Spec struct {
 	RequiresApproval         bool
 	CreatedBy                string
 	RequestID                string
+	// IdempotencyKey lets a caller repeat the order without a second
+	// campaign; empty means every order is new.
+	IdempotencyKey string
 }
 
 // Validate checks that the description of the campaign holds together.

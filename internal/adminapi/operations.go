@@ -221,7 +221,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		HostID:           hostID,
 		Action:           action,
 		Payload:          payload,
-		IdempotencyKey:   request.IdempotencyKey,
+		IdempotencyKey:   idempotencyKeyOf(r, request.IdempotencyKey),
 		RequiresApproval: requiresApproval,
 		TimeoutSeconds:   request.TimeoutSeconds,
 		MaxOutputBytes:   request.MaxOutputBytes,
@@ -579,6 +579,16 @@ func joinActions() string {
 
 func requestIDOf(r *http.Request) string {
 	return r.Header.Get("X-Request-Id")
+}
+
+// idempotencyKeyOf reads the key a caller repeats an order with: the
+// Idempotency-Key header the document names, or the body field for
+// callers that prefer it. The header wins when both are given.
+func idempotencyKeyOf(r *http.Request, fromBody string) string {
+	if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
+		return key
+	}
+	return strings.TrimSpace(fromBody)
 }
 
 // blockedByBrokenDatabase says which package operations make no sense on a

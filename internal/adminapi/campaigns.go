@@ -38,6 +38,9 @@ type createCampaignRequest struct {
 	RequiresApproval         *bool      `json:"requires_approval,omitempty"`
 	// Reason justifies the highest-risk campaigns and goes to the audit log.
 	Reason string `json:"reason,omitempty"`
+	// IdempotencyKey lets a caller that lost the answer ask again without a
+	// second campaign; the Idempotency-Key header does the same.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // campaignModeRefusal translates a refusal into a sentence the operator
@@ -201,6 +204,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RequiresApproval:         request.RequiresApproval == nil || *request.RequiresApproval,
 		CreatedBy:                principal.Subject,
 		RequestID:                requestIDOf(r),
+		IdempotencyKey:           idempotencyKeyOf(r, request.IdempotencyKey),
 	}
 
 	targets := assessment.Targets()
@@ -213,6 +217,13 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	campaign, err := s.campaigns.Create(r.Context(), tx, spec, targets)
+	if errors.Is(err, campaigns.ErrRepeated) {
+		// A repeat of an order already carried out: the existing campaign
+		// comes back, and nothing is recorded a second time.
+		_ = tx.Rollback(r.Context())
+		writeJSON(w, http.StatusOK, campaign)
+		return
+	}
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_campaign", err.Error())
 		return

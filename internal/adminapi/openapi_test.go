@@ -37,7 +37,7 @@ func TestOpenAPICoversEveryRoute(t *testing.T) {
 		t.Error("the browser login flow leaked into the contract")
 	}
 	op := paths["/api/v1/hosts/{id}/operations"]["post"].(map[string]any)
-	if params := op["parameters"].([]map[string]any); len(params) != 1 || params[0]["name"] != "id" {
+	if params := op["parameters"].([]map[string]any); len(params) != 2 || params[0]["name"] != "Idempotency-Key" || params[1]["name"] != "id" {
 		t.Errorf("the operation has parameters %+v", params)
 	}
 	if op["requestBody"] == nil {
