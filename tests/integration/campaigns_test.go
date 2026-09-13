@@ -4163,3 +4163,51 @@ func (r *recordingReceiver) Deliver(_ context.Context, events []outbox.Event) er
 	r.got = append(r.got, events...)
 	return nil
 }
+
+// TestOpenAPIDescribesTheLiveAPI guards the public contract: the running
+// panel serves a document that names the routes the tests use, and every
+// route the document names answers - a 404 would be a contract without an
+// implementation.
+func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
+	h := newHarness(t)
+	var document struct {
+		OpenAPI string                           `json:"openapi"`
+		Paths   map[string]map[string]any        `json:"paths"`
+		Schemas map[string]any                   `json:"-"`
+		Comp    struct{ Schemas map[string]any } `json:"components"`
+	}
+	h.get("/api/v1/openapi.json", &document)
+	if !strings.HasPrefix(document.OpenAPI, "3.") {
+		t.Fatalf("openapi = %q", document.OpenAPI)
+	}
+	for _, path := range []string{"/api/v1/hosts", "/api/v1/campaigns/{id}/targets", "/api/v1/jobs/{id}/approve", "/api/v1/openapi.json"} {
+		if document.Paths[path] == nil {
+			t.Errorf("the contract lacks %s", path)
+		}
+	}
+	for _, name := range []string{"Host", "Job", "Campaign", "CampaignTarget", "Problem", "Payload"} {
+		if document.Comp.Schemas[name] == nil {
+			t.Errorf("the contract lacks the schema %s", name)
+		}
+	}
+	if len(document.Paths) < 90 {
+		t.Errorf("the contract names only %d paths", len(document.Paths))
+	}
+	// A GET without parameters must answer with something other than 404
+	// or 405: it is registered.
+	for path, operations := range document.Paths {
+		if operations["get"] == nil || strings.Contains(path, "{") || strings.HasSuffix(path, "/events") {
+			continue
+		}
+		request, _ := http.NewRequest(http.MethodGet, h.api+path, nil)
+		request.Header.Set("Authorization", "Bearer "+h.token)
+		response, err := h.client.Do(request)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		response.Body.Close()
+		if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {
+			t.Errorf("GET %s is in the contract and answers %d", path, response.StatusCode)
+		}
+	}
+}
