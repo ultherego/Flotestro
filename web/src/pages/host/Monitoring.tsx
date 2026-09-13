@@ -1,167 +1,107 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Job } from "../../lib/types";
+import type { Alert, HostMetrics, HostMonitoring, MetricPoint, MetricRange, RuleCatalogue, Silence } from "../../lib/types";
+import { bytes } from "../../lib/format";
 import { ErrorBox, Time, Empty } from "../../components/ui";
-import { Breakdown } from "../../components/widgets";
+import { AreaChart, ChartLegend, Meter, type AreaSeries } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table,
-  Widgets, countWhere,
-  useHost,
+  Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table,
+  Unknown, Widgets, countWhere, usageTone, useHost,
 } from "./shared";
+import { AlertStateBadge, SeverityBadge, duration, metricValue } from "../Monitoring";
 import { useT } from "../../i18n";
 
-type Source = {
-  name: string;
-  configured: boolean;
-  healthy: boolean;
-  url?: string;
-  reason?: string;
-  latency_millis?: number;
-  checked_at?: string;
-};
+const RANGES: { value: MetricRange; label: string }[] = [
+  { value: "3h", label: "3 hours" },
+  { value: "24h", label: "24 hours" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+];
 
-type Alert = {
-  name: string;
-  severity?: string;
-  state?: string;
-  summary?: string;
-  description?: string;
-  labels?: Record<string, string>;
-  starts_at?: string;
-  silenced_by?: string[];
-  generator_url?: string;
-};
+/** How an instant reads on the time axis: the hour in a short window, the day in a long one. */
+function axisLabel(range: MetricRange): (iso: string) => string {
+  const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const day = (iso: string) => new Date(iso).toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+  if (range === "3h" || range === "24h") return time;
+  if (range === "7d") return (iso) => `${day(iso)} ${time(iso)}`;
+  return day;
+}
 
-type Silence = {
-  id: string;
-  starts_at: string;
-  ends_at: string;
-  created_by: string;
-  comment: string;
-  status?: string;
-  matchers?: { name: string; value: string }[];
-};
-
-type Point = { at: string; value: number };
-
-type Series = {
-  name: string;
-  unit?: string;
-  points?: Point[];
-  last?: number;
-  query?: string;
-  unavailable_reason?: string;
-};
-
-type Report = {
-  host_id: string;
-  sources: Source[];
-  label: string;
-  links: { dashboard?: string; logs?: string };
-  alerts: Alert[];
-  silences: Silence[];
-  series: Series[];
-  from: string;
-  to: string;
-  alerts_unavailable_reason?: string;
-  metrics_unavailable_reason?: string;
-};
-
-type ProbeResult = {
-  kind: string;
-  target: string;
-  reachable: boolean;
-  passed: boolean;
-  status_code?: number;
-  duration_millis: number;
-  body_matched?: boolean;
-  tls_expiry?: string;
-  tls_issuer?: string;
-  error?: string;
-};
-
-type Attempt = { status?: string; message?: string; detail?: { probe?: ProbeResult } };
+const percent = (value: number) => `${Math.round(value)}%`;
+const rate = (value: number) => `${bytes(value)}/s`;
 
 /**
- * A chart from points. Simple, because it is to answer one question: did
- * anything change in this time window. For details the panel leads to the
- * dashboard - it does not pretend to be a time series database.
+ * The busiest interface of the window: the one that moved the most bytes
+ * in both directions. A host with one interface has it; a host with ten
+ * gets the one worth a chart, named, and the count of the rest.
  */
-function Sparkline({ series }: { series: Series }) {
-  const t = useT();
-  const points = series.points ?? [];
-  if (series.unavailable_reason) {
-    return <span className="badge unknown">{series.unavailable_reason}</span>;
+function busiestInterface(points: MetricPoint[]): { name: string; count: number } | undefined {
+  const totals = new Map<string, number>();
+  for (const point of points) {
+    for (const link of point.interfaces ?? []) {
+      totals.set(link.name, (totals.get(link.name) ?? 0) + (link.rx_bytes_per_second ?? 0) + (link.tx_bytes_per_second ?? 0));
+    }
   }
-  if (!points.length) {
-    return <span className="badge unknown">{t("no data in this window")}</span>;
-  }
-  const values = points.map((point) => point.value);
-  const minimum = Math.min(...values);
-  const maximum = Math.max(...values);
-  const range = maximum - minimum || 1;
-  const width = 240;
-  const height = 40;
-  const path = points
-    .map((point, index) => {
-      const x = (index / Math.max(1, points.length - 1)) * width;
-      const y = height - ((point.value - minimum) / range) * height;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg className="hm-spark" width={width} height={height} role="img" aria-label={series.name}>
-      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
+  const sorted = [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  return sorted.length ? { name: sorted[0][0], count: sorted.length } : undefined;
 }
 
 /**
  * Host monitoring.
  *
- * The panel has no metrics and no alert rules of its own: it reads other
- * systems' and says where it took them from and from which time window. A
- * monitoring failure must not take host management away from the operator,
- * so every question has a timeout, and a source that stays silent is
- * described plainly.
+ * The agent samples the host once a minute and the panel keeps the samples:
+ * what the charts show is what the agent saw, with the time it saw it. A
+ * host that has not sent a sample yet has no numbers, and is shown as
+ * such - a chart of zeros would say the host is idle, which nobody knows.
+ * The alerts are the panel's own rules applied to the same samples.
  */
 export function Monitoring() {
   const t = useT();
   const host = useHost();
   const queryClient = useQueryClient();
-  const [range, setRange] = useState("3h");
+  const [range, setRange] = useState<MetricRange>("3h");
   const [message, setMessage] = useState("");
   const [silenceReason, setSilenceReason] = useState("");
-  const [minutes, setMinutes] = useState("120");
-  const [probe, setProbe] = useState("");
-  const [probeJob, setProbeJob] = useState("");
+  const [minutes, setMinutes] = useState("60");
+  const [silenceRule, setSilenceRule] = useState("");
 
+  const metrics = useQuery({
+    queryKey: ["monitoring", host.id, "metrics", range],
+    queryFn: () => api.get<HostMetrics>(`/api/v1/hosts/${host.id}/metrics?range=${range}`),
+    refetchInterval: 60000,
+    retry: false,
+  });
   const report = useQuery({
-    queryKey: ["monitoring", host.id, range],
-    queryFn: () => api.get<Report>(`/api/v1/hosts/${host.id}/monitoring?range=${range}`),
+    queryKey: ["monitoring", host.id, "state"],
+    queryFn: () => api.get<HostMonitoring>(`/api/v1/hosts/${host.id}/monitoring`),
     refetchInterval: 30000,
+    retry: false,
+  });
+  // The rule catalogue names the rules a silence can be narrowed to; a
+  // viewer who may not read it still silences every rule of the host.
+  const rules = useQuery({
+    queryKey: ["monitoring", "rules"],
+    queryFn: () => api.get<RuleCatalogue>("/api/v1/monitoring/rules"),
+    retry: false,
   });
 
-  const results = useQuery({
-    queryKey: ["job-attempts", probeJob],
-    queryFn: () => api.get<{ items: Attempt[] }>(`/api/v1/jobs/${probeJob}/attempts`),
-    enabled: probeJob !== "",
-    refetchInterval: (query) => {
-      const attempts = (query.state.data as { items?: Attempt[] } | undefined)?.items;
-      return attempts?.[attempts.length - 1]?.status ? false : 2000;
-    },
-  });
-  const attempts = results.data?.items ?? [];
-  const probeResult = attempts[attempts.length - 1]?.detail?.probe;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["monitoring"] });
 
   const silence = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      api.post<Silence>(`/api/v1/hosts/${host.id}/monitoring/silences`, body),
+    mutationFn: (ruleID: string) =>
+      api.post<Silence>(`/api/v1/hosts/${host.id}/monitoring/silences`, {
+        reason: silenceReason.trim(),
+        minutes: Number(minutes) || 60,
+        ...(ruleID ? { rule_id: ruleID } : {}),
+      }),
     onSuccess: (created) => {
-      setMessage(t("Silence {id} runs until {until}.", { id: created.id.slice(0, 8), until: new Date(created.ends_at).toLocaleString() }));
+      setMessage(t("{rule} is silenced until {until}.", {
+        rule: created.rule_name ?? t("Every rule"),
+        until: new Date(created.until).toLocaleString(),
+      }));
       setSilenceReason("");
-      queryClient.invalidateQueries({ queryKey: ["monitoring", host.id] });
+      refresh();
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
@@ -171,313 +111,323 @@ export function Monitoring() {
       api.del(`/api/v1/hosts/${host.id}/monitoring/silences/${encodeURIComponent(id)}`),
     onSuccess: () => {
       setMessage(t("Silence ended."));
-      queryClient.invalidateQueries({ queryKey: ["monitoring", host.id] });
+      refresh();
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const runProbe = useMutation({
-    mutationFn: (target: string) =>
-      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
-        action: "monitoring.probe.run",
-        payload: {
-          monitoring: {
-            kind: target.startsWith("http") ? "http" : "tcp",
-            target,
-          },
-        },
-      }),
-    onSuccess: (job) => {
-      setProbeJob(job.id);
-      setMessage(t("Probe queued as job {id}.", { id: job.id.slice(0, 8) }));
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
-  });
+  if (report.error && metrics.error) return <ErrorBox error={report.error} />;
 
-  if (report.error) return <ErrorBox error={report.error} />;
-  const data = report.data;
-  const alerts = data?.alerts ?? [];
-  // Unreadable alerts are not zero alerts: the bar shows dashes then.
-  const knownAlerts = data && !data.alerts_unavailable_reason ? alerts : undefined;
-  const severities = ["critical", "warning", "info"];
-  const sources = data?.sources ?? [];
+  const state = report.data;
+  const series = metrics.data;
+  const points = series?.points ?? [];
+  const times = points.map((point) => point.at);
+  const latest = series?.latest ?? state?.latest ?? null;
+  const lastSampleAt = series?.last_sample_at ?? state?.last_sample_at ?? undefined;
+  const rollup = (series?.step_seconds ?? 60) > 60;
+  const label = axisLabel(range);
+  // Unread alerts are not zero alerts: the bar shows dashes then.
+  const knownAlerts: Alert[] | undefined = state?.alerts;
+  const alerts = knownAlerts ?? [];
+  const silences = state?.silences ?? [];
+  const reasonReady = silenceReason.trim().length >= 8 && Number(minutes) > 0 && Number(minutes) <= 1440;
+  // The rules a silence can name: the catalogue when it is readable, else
+  // the ones already alerting on this host.
+  const ruleOptions = rules.data
+    ? rules.data.items.map((rule) => ({ id: rule.id, name: rule.name }))
+    : alerts.filter((alert, i, list) => list.findIndex((other) => other.rule_id === alert.rule_id) === i)
+      .map((alert) => ({ id: alert.rule_id, name: alert.rule_name }));
+
+  const link = busiestInterface(points);
+  const memoryTop = Math.max(0, ...points.map((point) => point.memory_total));
+  const cpuSeries: AreaSeries[] = [{ name: t("CPU"), tone: "accent", values: points.map((point) => point.cpu_percent) }];
+  const loadSeries: AreaSeries[] = [
+    { name: t("1 min"), tone: "accent", values: points.map((point) => point.load1) },
+    { name: t("5 min"), tone: "info", values: points.map((point) => point.load5), line: true },
+    { name: t("15 min"), tone: "unknown", values: points.map((point) => point.load15), line: true },
+  ];
+  const memorySeries: AreaSeries[] = [
+    { name: t("Memory used"), tone: "accent", values: points.map((point) => point.memory_used) },
+    { name: t("Swap used"), tone: "warn", values: points.map((point) => point.swap_used), line: true },
+  ];
+  const networkSeries: AreaSeries[] = link ? [
+    { name: t("{name} received", { name: link.name }), tone: "info", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.rx_bytes_per_second) },
+    { name: t("{name} sent", { name: link.name }), tone: "accent", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.tx_bytes_per_second), line: true },
+  ] : [];
+
+  // What stands in a chart section while there is no line to draw.
+  const blank = metrics.error
+    ? <ErrorBox error={metrics.error} />
+    : !series
+      ? <Empty>{t("Loading…")}</Empty>
+      : !latest
+        ? <Empty>{t("The agent has not sent a sample yet")}</Empty>
+        : points.length === 0
+          ? <Empty>{t("No sample in this window.")}</Empty>
+          : null;
 
   return (
     <ModulePage>
       <ModuleHeader
         title={t("Monitoring")}
-        description={t("Metrics and alerts come from the systems that already collect them. The panel shows where each number is from and for what window of time — it has no time series database of its own, and no alerting rules of its own.")}
+        description={t("Metrics the agent samples every minute; alerts by the panel's own rules.")}
         actions={
-          <>
-            {data?.links.dashboard && (
-              <a className="button" href={data.links.dashboard} target="_blank" rel="noreferrer">{t("Dashboard")}</a>
-            )}
-            {data?.links.logs && (
-              <a className="button" href={data.links.logs} target="_blank" rel="noreferrer">{t("Logs")}</a>
-            )}
-            <select value={range} onChange={(e) => setRange(e.target.value)}>
-              <option value="1h">{t("last hour")}</option>
-              <option value="3h">{t("last 3 hours")}</option>
-              <option value="12h">{t("last 12 hours")}</option>
-              <option value="24h">{t("last day")}</option>
-            </select>
-          </>
+          <div className="segmented" role="group" aria-label={t("Window")}>
+            {RANGES.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={item.value === range ? "active" : undefined}
+                onClick={() => setRange(item.value)}
+              >
+                {t(item.label)}
+              </button>
+            ))}
+          </div>
         }
       />
       <p className="hm-freshness">
-        {(data?.sources ?? []).map((source) => (
-          <span
-            key={source.name}
-            className={`badge ${!source.configured ? "unknown" : source.healthy ? "ok" : "error"}`}
-            title={source.reason || source.url}
-          >
-            {source.name}
-            {!source.configured
-              ? ` · ${t("not configured")}`
-              : source.healthy
-                ? ` · ${source.latency_millis ?? "?"} ms`
-                : ` · ${t("not answering")}`}
-          </span>
-        ))}
-        {data?.label && <span>{t("seen as {label}", { label: data.label })}</span>}
+        {series || state ? (
+          lastSampleAt
+            ? <span>{t("Last sample")} <Time value={lastSampleAt} /></span>
+            : <span className="unread">{t("The agent has not sent a sample yet")}</span>
+        ) : (
+          <span>{t("Loading…")}</span>
+        )}
+        {series && <span>{t("sampled every {n} s", { n: series.sampling_interval_seconds })}</span>}
+        {series && rollup && <span>{t("15-minute rollups with the peak of each step")}</span>}
       </p>
       <Message text={message} />
 
       <Widgets>
-      {/* The alerts by severity, with the silenced ones set apart: a
-          silenced alert is still firing, only nobody is told. */}
-      <Summary
-        title={t("Active alerts")}
-        description={t("Firing for this host, by severity; the silenced ones counted apart.")}
-        span={8}
-        segments={[
-          ...severities.map((severity) => ({
-            label: severity,
-            value: countWhere(knownAlerts, (alert) => alert.severity === severity && !alert.silenced_by?.length),
-            tone: severity === "critical" ? "error" as const : severity === "warning" ? "warn" as const : "info" as const,
-          })),
-          { label: t("other"), value: countWhere(knownAlerts, (alert) => !severities.includes(alert.severity ?? "") && !alert.silenced_by?.length), tone: "unknown" },
-          { label: t("silenced"), value: countWhere(knownAlerts, (alert) => !!alert.silenced_by?.length), tone: "neutral" },
-        ]}
-      />
-      <Section title={t("Sources")} span={4} description={t("The systems the numbers come from, and what they hold for this host.")}>
-        {!data ? (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
-        ) : (
-          <>
-            <Breakdown
-              items={[
-                { label: t("answering"), value: countWhere(sources, (source) => source.configured && source.healthy) ?? 0, tone: "ok" },
-                { label: t("not answering"), value: countWhere(sources, (source) => source.configured && !source.healthy) ?? 0, tone: "error" },
-                { label: t("not configured"), value: countWhere(sources, (source) => !source.configured) ?? 0, tone: "unknown" },
-              ]}
-            />
-            <p className="widget-subhead">{t("For this host")}</p>
-            <Breakdown
-              items={[
-                { label: t("Silences in force"), value: (data.silences ?? []).length, tone: "warn" },
-                { label: t("Metrics"), value: data.metrics_unavailable_reason ? 0 : (data.series ?? []).length, tone: "info" },
-              ]}
-            />
-            {data.metrics_unavailable_reason && (
-              <p className="source" style={{ margin: 0 }}>{data.metrics_unavailable_reason}</p>
-            )}
-          </>
-        )}
-      </Section>
+        {/* The alerts by severity, the silenced ones set apart: a silenced
+            alert is still firing, only nobody is told. */}
+        <Summary
+          title={t("Alerts")}
+          description={t("Firing for this host, by severity; the pending and the silenced ones counted apart.")}
+          span={12}
+          segments={[
+            { label: t("Critical"), value: countWhere(knownAlerts, (alert) => alert.state === "firing" && alert.severity === "critical" && !alert.silenced), tone: "error" },
+            { label: t("Warning"), value: countWhere(knownAlerts, (alert) => alert.state === "firing" && alert.severity === "warning" && !alert.silenced), tone: "warn" },
+            { label: t("Info"), value: countWhere(knownAlerts, (alert) => alert.state === "firing" && alert.severity === "info" && !alert.silenced), tone: "info" },
+            { label: t("Pending"), value: countWhere(knownAlerts, (alert) => alert.state === "pending"), tone: "unknown" },
+            { label: t("Silenced"), value: countWhere(knownAlerts, (alert) => alert.state !== "resolved" && alert.silenced), tone: "neutral" },
+          ]}
+        />
 
-      <Section title={t("Active alerts")} count={data && !data.alerts_unavailable_reason ? alerts.length : undefined} span={12} flush>
-        {data?.alerts_unavailable_reason ? (
-          <p className="warning">
-            <span>{t("Alerts could not be read: {reason}", { reason: data.alerts_unavailable_reason })}</span>
-          </p>
-        ) : !alerts.length ? (
-          <Empty>{t("No alert is firing for this host.")}</Empty>
-        ) : (
-          <Table>
-            <thead>
-              <tr><th>{t("Alert")}</th><th>{t("Severity")}</th><th>{t("Since")}</th><th>{t("Summary")}</th><th>{t("Silence")}</th></tr>
-            </thead>
-            <tbody>
-              {alerts.map((alert, index) => (
-                <tr key={`${alert.name}-${index}`}>
-                  <td>
-                    {alert.generator_url ? (
-                      <a href={alert.generator_url} target="_blank" rel="noreferrer">{alert.name}</a>
-                    ) : (
-                      <span className="hm-primary">{alert.name}</span>
-                    )}
-                    {alert.silenced_by?.length ? (
-                      <div className="source">{t("silenced")}</div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <span
-                      className={`badge ${alert.severity === "critical" ? "error" : alert.severity === "warning" ? "warn" : ""}`}
-                    >
-                      {alert.severity || t("unknown")}
-                    </span>
-                  </td>
-                  <td><Time value={alert.starts_at} /></td>
-                  <td className="source">{alert.summary || alert.description}</td>
-                  <td>
-                    <button
-                      className="secondary"
-                      disabled={silenceReason.trim().length < 8 || silence.isPending}
-                      onClick={() =>
-                        silence.mutate({
-                          duration_minutes: Number(minutes) || 0,
-                          comment: silenceReason,
-                          alert_name: alert.name,
-                        })
-                      }
-                    >
-                      {t("Silence this")}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Section>
-
-      {/* The silence form beside the silences it adds to. */}
-      <Section
-        title={t("Silence")}
-        span={(data?.silences ?? []).length > 0 ? 5 : 12}
-        description={t("A silence turns a sensor off, so it always ends: no open-ended silences from here, at most a day, and always with a reason and an owner in the audit trail.")}
-      >
-        <Form>
-          <Fields>
-            <Field label={t("Reason (at least 8 characters)")} wide>
-              <input value={silenceReason} onChange={(e) => setSilenceReason(e.target.value)} />
-            </Field>
-            <Field label={t("Minutes")} narrow>
-              <input value={minutes} onChange={(e) => setMinutes(e.target.value)} />
-            </Field>
-          </Fields>
-          <FormActions>
-            <button
-              disabled={silenceReason.trim().length < 8 || silence.isPending}
-              onClick={() => silence.mutate({ duration_minutes: Number(minutes) || 0, comment: silenceReason })}
-            >
-              {t("Silence every alert of this host")}
-            </button>
-          </FormActions>
-        </Form>
-      </Section>
-
-      {(data?.silences ?? []).length > 0 && (
-        <Section title={t("Silences in force")} count={(data?.silences ?? []).length} span={7} flush>
-          <Table>
-            <thead>
-              <tr><th>{t("Until")}</th><th>{t("Scope")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
-            </thead>
-            <tbody>
-              {(data?.silences ?? []).map((entry) => (
-                <tr key={entry.id}>
-                  <td><Time value={entry.ends_at} /></td>
-                  <td className="source hm-mono">
-                    {(entry.matchers ?? []).map((m) => `${m.name}="${m.value}"`).join(", ")}
-                  </td>
-                  <td>{entry.comment}</td>
-                  <td className="source">{entry.created_by}</td>
-                  <td>
-                    <button className="secondary" onClick={() => unsilence.mutate(entry.id)}>
-                      {t("End now")}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+        <Section
+          title={t("CPU")}
+          description={t("Busy time across all cores, in percent.")}
+          tools={latest && <span className="hm-mono">{t("now {value}", { value: metricValue("cpu_percent", latest.cpu_percent) })}</span>}
+          span={6}
+          flush={blank !== null}
+        >
+          {blank ?? (
+            <>
+              <AreaChart times={times} series={cpuSeries} max={100} format={percent} label={label} peak={rollup ? points.map((point) => point.cpu_percent_max) : undefined} />
+              {rollup && <ChartLegend items={[{ name: t("mean of the step"), tone: "accent" }, { name: t("peak of the step"), tone: "accent", dashed: true }]} />}
+            </>
+          )}
         </Section>
-      )}
 
-      <Section title={t("Metrics")} count={data && !data.metrics_unavailable_reason ? (data.series ?? []).length : undefined} span={12} flush>
-        {data?.metrics_unavailable_reason ? (
-          <Empty>{data.metrics_unavailable_reason}</Empty>
-        ) : (
-          <>
+        <Section
+          title={t("Load")}
+          description={t("Load average over 1, 5 and 15 minutes.")}
+          tools={latest && <span className="hm-mono">{`${latest.load1.toFixed(2)} · ${latest.load5.toFixed(2)} · ${latest.load15.toFixed(2)}`}</span>}
+          span={6}
+          flush={blank !== null}
+        >
+          {blank ?? (
+            <>
+              <AreaChart times={times} series={loadSeries} format={(value) => String(Math.round(value * 100) / 100)} label={label} />
+              <ChartLegend items={loadSeries.map((item) => ({ name: item.name, tone: item.tone }))} />
+            </>
+          )}
+        </Section>
+
+        <Section
+          title={t("Memory")}
+          description={t("Used memory against the total, with swap as a second line.")}
+          tools={latest && <span className="hm-mono">{`${bytes(latest.memory_used)} / ${bytes(latest.memory_total)}`}</span>}
+          span={6}
+          flush={blank !== null}
+        >
+          {blank ?? (
+            <>
+              <AreaChart times={times} series={memorySeries} max={memoryTop > 0 ? memoryTop : undefined} format={bytes} label={label} peak={rollup ? points.map((point) => point.memory_used_max) : undefined} />
+              <ChartLegend items={[
+                ...memorySeries.map((item) => ({ name: item.name, tone: item.tone })),
+                ...(rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
+              ]} />
+            </>
+          )}
+        </Section>
+
+        <Section
+          title={t("Network")}
+          description={link && link.count > 1
+            ? t("{name}, the busiest of {n} interfaces; bytes per second.", { name: link.name, n: link.count })
+            : t("Bytes per second, received and sent.")}
+          span={6}
+          flush={blank !== null || !link}
+        >
+          {blank ?? (!link ? (
+            <Empty>{t("No interface rates in this window: a rate needs two samples.")}</Empty>
+          ) : (
+            <>
+              <AreaChart times={times} series={networkSeries} format={rate} label={label} />
+              <ChartLegend items={networkSeries.map((item) => ({ name: item.name, tone: item.tone }))} />
+            </>
+          ))}
+        </Section>
+
+        <Section title={t("Filesystems")} description={t("As of the last sample.")} span={4} flush>
+          {!latest ? (
+            <Empty>{metrics.error || series ? t("The agent has not sent a sample yet") : t("Loading…")}</Empty>
+          ) : !(latest.filesystems ?? []).length ? (
+            <Empty>{t("The sample lists no filesystem.")}</Empty>
+          ) : (
             <Table>
-              <thead><tr><th>{t("Series")}</th><th className="hm-num">{t("Last")}</th><th>{t("Window")}</th><th>{t("Query")}</th></tr></thead>
+              <thead><tr><th>{t("Mount")}</th><th>{t("Used")}</th></tr></thead>
               <tbody>
-                {(data?.series ?? []).map((series) => (
-                  <tr key={series.name}>
-                    <td className="hm-primary">{series.name}</td>
-                    <td className="hm-num">
-                      {series.last === undefined
-                        ? <span className="badge unknown">{t("unknown")}</span>
-                        : `${series.last.toFixed(2)}${series.unit ?? ""}`}
+                {(latest.filesystems ?? []).map((fs) => (
+                  <tr key={fs.mount}>
+                    <td>
+                      <span className="hm-primary hm-mono">{fs.mount}</span>
+                      {fs.inodes_total > 0 && (
+                        <div className="source">{t("inodes {value}", { value: percent((fs.inodes_used / fs.inodes_total) * 100) })}</div>
+                      )}
                     </td>
-                    <td><Sparkline series={series} /></td>
-                    <td className="source hm-mono" style={{ maxWidth: 420, overflowWrap: "anywhere" }}>
-                      {series.query}
+                    <td>
+                      <Meter
+                        value={fs.used_bytes}
+                        max={fs.total_bytes}
+                        tone={usageTone(fs.used_bytes, fs.total_bytes)}
+                        text={`${bytes(fs.used_bytes)} / ${bytes(fs.total_bytes)}`}
+                      />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </Table>
-            {data && (
-              <Foot>
-                <span>
-                  {t("Source")}: {(data.sources.find((s) => s.name === "prometheus")?.url) || "—"} ·{" "}
-                  {t("window")} <Time value={data.from} /> {t("to")} <Time value={data.to} />
-                </span>
-              </Foot>
-            )}
-          </>
-        )}
-      </Section>
+          )}
+        </Section>
 
-      <Section
-        title={t("Probe from this host")}
-        span={12}
-        description={t("What the host itself sees. An alert can say a service is down while it answers from here — and then the problem is the network between them, not the service.")}
-      >
-        <Form>
-          <Fields>
-            <Field label={t("Target")} wide>
-              <input value={probe} onChange={(e) => setProbe(e.target.value)}
-                     placeholder="https://service.example.test/health or db.example.test:5432" />
-            </Field>
-          </Fields>
-          <FormActions>
-            <button
-              disabled={!probe || runProbe.isPending || host.connection_state !== "online"}
-              onClick={() => runProbe.mutate(probe)}
-            >
-              {t("Probe")}
-            </button>
-          </FormActions>
-        </Form>
-        {probeResult && (
+        <Section title={t("Facts")} span={4}>
           <Facts>
-            <Fact label={t("Result")}>
-              {probeResult.passed ? (
-                <span className="badge ok">{t("as expected")}</span>
-              ) : probeResult.reachable ? (
-                <span className="badge warn">{t("answers, but not as expected")}</span>
-              ) : (
-                <span className="badge error">{t("no answer")}</span>
-              )}
+            <Fact label={t("Uptime")}>{latest ? duration(latest.uptime_seconds) : <Unknown />}</Fact>
+            <Fact label={t("Last sample")}>{lastSampleAt ? <Time value={lastSampleAt} /> : <Unknown />}</Fact>
+            <Fact label={t("Sampling interval")}>{series ? t("every {n} s", { n: series.sampling_interval_seconds }) : <Unknown />}</Fact>
+            <Fact label={t("Samples in window")}>
+              {!series ? <Unknown /> : rollup ? t("{n} steps of 15 minutes", { n: points.length }) : t("{n} samples", { n: points.length })}
             </Fact>
-            <Fact label={t("Target")}><span className="source hm-mono">{probeResult.target}</span></Fact>
-            <Fact label={t("Took")}>{probeResult.duration_millis} ms</Fact>
-            {probeResult.status_code !== undefined && (
-              <Fact label={t("Status")}>{probeResult.status_code}</Fact>
-            )}
-            {probeResult.tls_expiry && (
-              <Fact label={t("Certificate")}>
-                {t("valid until")} <Time value={probeResult.tls_expiry} />
-                <div className="source">{probeResult.tls_issuer}</div>
-              </Fact>
-            )}
-            {probeResult.error && <Fact label={t("Detail")} wide><span className="source">{probeResult.error}</span></Fact>}
+            <Fact label={t("Rules watching this host")}>{state ? state.rules_matching : <Unknown />}</Fact>
+            <Fact label={t("Memory total")}>{latest ? bytes(latest.memory_total) : <Unknown />}</Fact>
           </Facts>
-        )}
-      </Section>
+        </Section>
+
+        {/* The silence form beside the tables it adds to. */}
+        <Section
+          title={t("Silence")}
+          span={4}
+          description={t("A silence turns a sensor off, so it always ends: at most a day, with a reason and an owner in the audit trail.")}
+        >
+          <Form>
+            <Fields>
+              <Field label={t("Reason (at least 8 characters)")} wide>
+                <input value={silenceReason} onChange={(e) => setSilenceReason(e.target.value)} />
+              </Field>
+              <Field label={t("Minutes")} narrow help={t("At most 1440.")}>
+                <input type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+              </Field>
+              <Field label={t("Rule")}>
+                <select value={silenceRule} onChange={(e) => setSilenceRule(e.target.value)}>
+                  <option value="">{t("every rule")}</option>
+                  {ruleOptions.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
+                </select>
+              </Field>
+            </Fields>
+            <FormActions>
+              <button disabled={!reasonReady || silence.isPending} onClick={() => silence.mutate(silenceRule)}>
+                {silence.isPending ? t("Silencing…") : silenceRule ? t("Silence this rule") : t("Silence every rule of this host")}
+              </button>
+            </FormActions>
+            <FormNote>{t("The reason above is also used by the Silence buttons in the alerts table.")}</FormNote>
+          </Form>
+        </Section>
+
+        <Section title={t("Alerts")} count={knownAlerts?.length} span={12} flush>
+          {report.error ? (
+            <ErrorBox error={report.error} />
+          ) : !state ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : alerts.length === 0 ? (
+            <Empty>{t("No alert is pending or firing for this host.")}</Empty>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <th>{t("Rule")}</th><th>{t("Severity")}</th><th>{t("State")}</th><th className="hm-num">{t("Value")}</th>
+                  <th>{t("Detail")}</th><th>{t("Since")}</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {alerts.map((alert) => (
+                  <tr key={alert.id}>
+                    <td>
+                      <span className="hm-primary">{alert.rule_name}</span>
+                      <div className="source hm-mono">{alert.metric}</div>
+                    </td>
+                    <td><SeverityBadge severity={alert.severity} /></td>
+                    <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /></td>
+                    <td className="hm-num">{metricValue(alert.metric, alert.value)}</td>
+                    <td className="source">{alert.detail}</td>
+                    <td><Time value={alert.fired_at || alert.started_at} /></td>
+                    <td>
+                      <button
+                        className="secondary"
+                        disabled={alert.silenced || !reasonReady || silence.isPending}
+                        title={reasonReady ? undefined : t("Write a reason in the silence form first.")}
+                        onClick={() => silence.mutate(alert.rule_id)}
+                      >
+                        {t("Silence this")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Section>
+
+        <Section title={t("Silences in force")} count={state ? silences.length : undefined} span={12} flush>
+          {!state ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : silences.length === 0 ? (
+            <Empty>{t("No silence is in force for this host.")}</Empty>
+          ) : (
+            <Table>
+              <thead>
+                <tr><th>{t("Until")}</th><th>{t("Rule")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
+              </thead>
+              <tbody>
+                {silences.map((entry) => (
+                  <tr key={entry.id}>
+                    <td><Time value={entry.until} /></td>
+                    <td>{entry.rule_name || <span className="source">{t("every rule")}</span>}</td>
+                    <td>{entry.reason}</td>
+                    <td className="source">{entry.created_by}</td>
+                    <td>
+                      <button className="secondary" disabled={unsilence.isPending} onClick={() => unsilence.mutate(entry.id)}>
+                        {t("End now")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Section>
       </Widgets>
     </ModulePage>
   );

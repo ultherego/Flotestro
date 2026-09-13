@@ -210,6 +210,9 @@ export type Campaign = {
   id: string;
   name: string;
   action_type: string;
+  // The payload as ordered, in the shape of a single-host operation. A
+  // rollback plan starts from it: the same path, the same interface.
+  payload?: unknown;
   state: string;
   canary_size: number;
   wave_size: number;
@@ -586,4 +589,195 @@ export type FleetActivity = {
   by_agent_version: Facet[];
   by_connection_state: Facet[];
   by_lifecycle_state: Facet[];
+};
+
+/* ---------------------------------------------------------------------- */
+/* Monitoring: the metrics the agent samples and the panel's own rules.    */
+/* ---------------------------------------------------------------------- */
+
+/** The window of a metrics query; the two long ones come back as rollups. */
+export type MetricRange = "3h" | "24h" | "7d" | "30d";
+
+export type FilesystemSample = {
+  mount: string;
+  used_bytes: number;
+  total_bytes: number;
+  inodes_used: number;
+  inodes_total: number;
+};
+
+/** The rates are absent on the first point of a window: a rate needs two samples. */
+export type InterfaceSample = {
+  name: string;
+  rx_bytes_per_second?: number;
+  tx_bytes_per_second?: number;
+};
+
+/**
+ * One sample of a host, or one rollup step of them. A rollup carries the
+ * peak of the step beside the mean, so a short spike within a quarter of
+ * an hour is not averaged away.
+ */
+export type MetricPoint = {
+  at: string;
+  cpu_percent: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  memory_used: number;
+  memory_total: number;
+  memory_available: number;
+  swap_used: number;
+  swap_total: number;
+  uptime_seconds: number;
+  filesystems?: FilesystemSample[];
+  interfaces?: InterfaceSample[];
+  cpu_percent_max?: number;
+  memory_used_max?: number;
+};
+
+export type HostMetrics = {
+  host_id: string;
+  range: MetricRange;
+  /** 60 for raw samples, 900 for the rollups of the long windows. */
+  step_seconds: number;
+  points: MetricPoint[];
+  /** The newest sample of the host at all, or null before the first one. */
+  latest: MetricPoint | null;
+  last_sample_at?: string | null;
+  sampling_interval_seconds: number;
+  source: "agent";
+};
+
+export type AlertSeverity = "critical" | "warning" | "info";
+export type AlertState = "pending" | "firing" | "resolved";
+
+export type Alert = {
+  id: string;
+  rule_id: string;
+  rule_name: string;
+  metric: string;
+  severity: AlertSeverity;
+  state: AlertState;
+  value: number;
+  detail?: string;
+  started_at: string;
+  fired_at?: string | null;
+  resolved_at?: string | null;
+  silenced: boolean;
+  host_id: string;
+  hostname: string;
+};
+
+/** A silence always ends: it is a sensor turned off, with an owner and a reason. */
+export type Silence = {
+  id: string;
+  host_id: string;
+  hostname: string;
+  /** Empty when the silence covers every rule of the host. */
+  rule_id?: string | null;
+  rule_name?: string | null;
+  until: string;
+  reason: string;
+  created_by: string;
+  created_at: string;
+  expired_at?: string | null;
+};
+
+export type RuleOperator = "gt" | "lt" | "gte" | "lte";
+
+/** Which hosts a rule applies to; an empty selector is the whole fleet. */
+export type RuleSelector = {
+  site?: string;
+  environment?: string;
+  os_family?: string;
+  host_ids?: string[];
+};
+
+export type AlertRule = {
+  id: string;
+  name: string;
+  metric: string;
+  operator: RuleOperator;
+  threshold: number;
+  /** How long the condition must hold before the alert fires. */
+  for_minutes: number;
+  severity: AlertSeverity;
+  selector: RuleSelector;
+  enabled: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertRuleInput = {
+  name: string;
+  metric: string;
+  operator: RuleOperator;
+  threshold: number;
+  for_minutes: number;
+  severity: AlertSeverity;
+  selector: RuleSelector;
+  enabled: boolean;
+};
+
+/** The rules with the vocabulary the server accepts, so a form offers only what it takes. */
+export type RuleCatalogue = {
+  items: AlertRule[];
+  count: number;
+  metrics: string[];
+  operators: string[];
+  severities: string[];
+};
+
+export type HostMonitoring = {
+  host_id: string;
+  last_sample_at?: string | null;
+  latest: MetricPoint | null;
+  alerts: Alert[];
+  silences: Silence[];
+  /** How many rules select this host. */
+  rules_matching: number;
+};
+
+export type FleetMonitoring = {
+  firing: Alert[];
+  counts: { critical: number; warning: number; info: number; silenced: number; pending: number };
+  hosts_reporting: number;
+  hosts_silent: number;
+  rules: number;
+  generated_at: string;
+};
+
+/** What a cancel request does to an operation that is under way. */
+export type CancelMode = "safe" | "checkpoint_only" | "impossible_after_start" | "local_watchdog_owned";
+
+/** Whether repeating an operation can succeed; the same classes as the error guide. */
+export type RetryClass = "never" | "automatic" | "after_change" | "after_replan" | "read_state";
+
+/** What way back exists once the change landed. */
+export type RollbackClass = "automatic_local" | "exact_restore" | "compensating" | "best_effort" | "none";
+
+/** What a campaign checks on the host after the change. */
+export type Verification = "none" | "unit_health" | "connectivity" | "plan_recheck" | "custom";
+
+/** One claim an operation takes on a host resource. */
+export type ResourceClaim = {
+  class: string;
+  mode: "shared" | "exclusive";
+  weight: number;
+};
+
+/**
+ * The second half of an operation's contract, as `/api/v1/actions` serves
+ * it: what the panel may promise about an operation under way. The cancel
+ * button, the stop confirmation and the rollback link are drawn from
+ * these, never from the operation name.
+ */
+export type OperationContract = {
+  cancel_mode?: CancelMode;
+  retry_class?: RetryClass;
+  rollback?: RollbackClass;
+  verification?: Verification;
+  resource_claims?: ResourceClaim[];
 };

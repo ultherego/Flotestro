@@ -33,8 +33,8 @@ type Snapshot = { processes?: Process[]; total?: number; truncated?: boolean };
  * The host's processes.
  *
  * The module is a diagnostic, not an observability system: the snapshot is
- * taken on request and has an upper bound. Long-term metrics belong to
- * Prometheus.
+ * taken on request and has an upper bound. The trend of the host over
+ * time is the Monitoring module's.
  */
 export function Processes() {
   const t = useT();
@@ -88,7 +88,7 @@ export function Processes() {
     <ModulePage>
       <ModuleHeader
         title={t("Processes")}
-        description={t("A snapshot is read from the host on request. Long-term metrics belong to Prometheus, not to this panel.")}
+        description={t("A snapshot is read from the host on request; the trend over time is on the Monitoring tab.")}
         actions={
           <>
             <select value={sort} onChange={(e) => setSort(e.target.value)}>

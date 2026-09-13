@@ -21,7 +21,7 @@ export type Segment = {
 export function StatusBar({ segments, compact = false }: { segments: Segment[]; compact?: boolean }) {
   const total = segments.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
   return (
-    <div className={compact ? "status-bar compact" : "status-bar"} role="list">
+    <div className={compact ? "status-bar compact" : "status-bar"} role="list" data-testid="status-bar">
       {segments.map((segment) => {
         const value = segment.value;
         const zero = !value;
@@ -30,7 +30,7 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
         const style = { "--share": share } as React.CSSProperties;
         const body = (
           <>
-            <span className="status-bar-value">{value === undefined ? "—" : value}</span>
+            <span className="status-bar-value" data-testid="status-bar-value">{value === undefined ? "—" : value}</span>
             <span className="status-bar-label">{segment.label}</span>
           </>
         );
@@ -108,6 +108,162 @@ export function BarChart({
         </ul>
       )}
     </>
+  );
+}
+
+/** The colour token of a tone, for the parts of a chart that take an inline colour. */
+const TONE_VAR: Record<WidgetTone | "accent", string> = {
+  ok: "--ok", warn: "--warn", error: "--error", unknown: "--unknown", info: "--blue",
+  neutral: "--text-faint", accent: "--accent",
+};
+
+export type AreaSeries = {
+  name: string;
+  tone: WidgetTone | "accent";
+  /** One value per time; an undefined one is a gap, not a zero. */
+  values: (number | undefined)[];
+  /** Draw the line only, without the fill under it, for a series read against another. */
+  line?: boolean;
+};
+
+/**
+ * A time series as plain SVG: time on the x axis, one or more series
+ * as a line with a soft fill under it, a faint grid and the values on the
+ * y axis. A gap in a series is left open rather than bridged, so a host
+ * that sent nothing for an hour shows the hour empty. An optional peak
+ * line runs above a series: the rollups of a long window carry the
+ * highest sample of each step beside the mean, and a spike averaged away
+ * would be a lie of omission.
+ */
+export function AreaChart({
+  times, series, height = 160, max, format = (value) => String(value), label = shortTime, peak,
+}: {
+  /** The instants of the points, one per index of every series. */
+  times: string[];
+  series: AreaSeries[];
+  height?: number;
+  /** The top of the y axis: a fixed one for a share (100), the largest value otherwise. */
+  max?: number;
+  /** How a value on the y axis reads. */
+  format?: (value: number) => string;
+  /** How an instant on the x axis reads. */
+  label?: (iso: string) => string;
+  /** The peak within each step, drawn as a thin dashed line in the tone of the first series. */
+  peak?: (number | undefined)[];
+}) {
+  const width = 600;
+  const pad = { top: 8, right: 10, bottom: 22, left: 48 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const count = times.length;
+  const highest = Math.max(
+    0,
+    ...series.flatMap((s) => s.values.filter((v): v is number => v !== undefined)),
+    ...(peak ?? []).filter((v): v is number => v !== undefined),
+  );
+  // A fixed top keeps a share on the same scale on every host; a top from
+  // the data rounds up to a tick, so the largest value is not on the edge.
+  // A fixed top of nothing is no top at all.
+  const ceiling = max !== undefined && max > 0 ? max : undefined;
+  const step = ceiling !== undefined ? ceiling / 4 : niceStep(Math.max(1, highest));
+  const top = ceiling ?? Math.max(step, Math.ceil(highest / step) * step);
+  const x = (i: number) => pad.left + (count > 1 ? (i / (count - 1)) * innerW : innerW / 2);
+  const y = (value: number) => pad.top + innerH - (Math.min(value, top) / top) * innerH;
+  const ticks: number[] = [];
+  for (let v = 0; v <= top + step / 1000; v += step) ticks.push(v);
+  // Five labels along the time axis, whatever the number of points.
+  const labelAt = count > 1 ? [0, 1, 2, 3, 4].map((k) => Math.round((k * (count - 1)) / 4)) : [0];
+
+  return (
+    <svg className="chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
+      {ticks.map((v) => (
+        <g key={v}>
+          <line className="grid" x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} />
+          <text x={pad.left - 6} y={y(v) + 4} textAnchor="end">{format(v)}</text>
+        </g>
+      ))}
+      <line className="axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
+      {series.map((s) => {
+        const colour = `var(${TONE_VAR[s.tone]})`;
+        return (
+          <g key={s.name}>
+            {!s.line && runs(s.values).map((run, k) => (
+              <path
+                key={k}
+                className="area"
+                style={{ fill: colour }}
+                fillOpacity={0.18}
+                d={`${runPath(run, x, y)} L${x(run[run.length - 1].i).toFixed(1)},${y(0).toFixed(1)} L${x(run[0].i).toFixed(1)},${y(0).toFixed(1)} Z`}
+              />
+            ))}
+            {runs(s.values).map((run, k) => (
+              run.length === 1
+                ? <circle key={k} cx={x(run[0].i)} cy={y(run[0].value)} r={2} style={{ fill: colour }} />
+                : <path key={k} className="line" vectorEffect="non-scaling-stroke" style={{ stroke: colour }} d={runPath(run, x, y)} />
+            ))}
+          </g>
+        );
+      })}
+      {peak && series[0] && runs(peak).map((run, k) => (
+        <path
+          key={k}
+          className="line"
+          vectorEffect="non-scaling-stroke"
+          style={{ stroke: `var(${TONE_VAR[series[0].tone]})` }}
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          d={runPath(run, x, y)}
+        />
+      ))}
+      {labelAt.map((i, k) => times[i] !== undefined && (
+        <text key={k} x={x(i)} y={height - 6} textAnchor={k === 0 ? "start" : k === labelAt.length - 1 ? "end" : "middle"}>
+          {label(times[i])}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+type Run = { i: number; value: number }[];
+
+/** The stretches of a series between its gaps, each drawn as one line. */
+function runs(values: (number | undefined)[]): Run[] {
+  const out: Run[] = [];
+  let current: Run = [];
+  values.forEach((value, i) => {
+    if (value === undefined) {
+      if (current.length) out.push(current);
+      current = [];
+    } else {
+      current.push({ i, value });
+    }
+  });
+  if (current.length) out.push(current);
+  return out;
+}
+
+function runPath(run: Run, x: (i: number) => number, y: (value: number) => number): string {
+  return run.map((p, k) => `${k === 0 ? "M" : "L"}${x(p.i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+}
+
+function shortTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** The names of the series under a chart, each with its swatch; a dashed one is a peak line. */
+export function ChartLegend({ items }: { items: { name: string; tone: WidgetTone | "accent"; dashed?: boolean }[] }) {
+  return (
+    <ul className="chart-legend">
+      {items.map((item) => (
+        <li key={item.name}>
+          <span
+            className="swatch"
+            style={{ "--swatch": `var(${TONE_VAR[item.tone]})`, opacity: item.dashed ? 0.55 : 1 } as React.CSSProperties}
+          />
+          {item.name}
+        </li>
+      ))}
+    </ul>
   );
 }
 
