@@ -14,6 +14,8 @@ export type NavItem = {
   icon: IconName;
   /** Overrides the router's prefix match where two items share a prefix. */
   active?: (pathname: string) => boolean;
+  /** The reason the item has no backing here; it stays listed, dimmed. */
+  unavailable?: string;
 };
 
 export type NavGroup = {
@@ -22,6 +24,18 @@ export type NavGroup = {
   /** The English heading; a group without one is a single top-level item. */
   label?: string;
   items: NavItem[];
+};
+
+/**
+ * The navigation has two faces, never both at once: the fleet, and one
+ * host. Two columns of links side by side confused more than they helped,
+ * so a host page replaces the fleet groups with the host's modules and a
+ * way back; the picker above stays the same in both.
+ */
+export type NavFace = {
+  groups: NavGroup[];
+  /** Set on a host page: the address of the fleet view the modules replace. */
+  back?: { to: string; label: string };
 };
 
 const GROUPS_KEY = "flotestro.sidebar.groups";
@@ -38,9 +52,9 @@ function isFoldMap(value: unknown): value is Record<string, boolean> {
  * layout decisions, so the pages know nothing about them.
  */
 export function Sidebar({
-  groups, user, collapsed, onToggleCollapsed, open, onClose, onSignOut, theme, setTheme,
+  face, user, collapsed, onToggleCollapsed, open, onClose, onSignOut, theme, setTheme,
 }: {
-  groups: NavGroup[];
+  face: NavFace;
   user: Whoami | undefined;
   /** The rail of icons, remembered between visits. */
   collapsed: boolean;
@@ -82,7 +96,13 @@ export function Sidebar({
       </div>
 
       <nav className="sidebar-nav" aria-label={t("Main navigation")}>
-        {groups.map((group) => {
+        {face.back && (
+          <NavLink to={face.back.to} className="sidebar-item sidebar-back" onClick={onClose} title={t(face.back.label)}>
+            <Icon name="back" />
+            <span className="sidebar-item-label">{t(face.back.label)}</span>
+          </NavLink>
+        )}
+        {face.groups.map((group) => {
           if (group.items.length === 0) return null;
           const closed = folded[group.key] === true;
           const holdsActive = group.items.some((item) =>
@@ -111,9 +131,9 @@ export function Sidebar({
                       to={item.to}
                       className={({ isActive }) => {
                         const on = item.active ? item.active(location.pathname) : isActive;
-                        return on ? "sidebar-item active" : "sidebar-item";
+                        return ["sidebar-item", on ? "active" : "", item.unavailable ? "unavailable" : ""].join(" ").trim();
                       }}
-                      title={t(item.label)}
+                      title={item.unavailable ?? t(item.label)}
                       onClick={onClose}
                     >
                       <Icon name={item.icon} />

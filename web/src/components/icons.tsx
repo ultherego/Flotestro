@@ -8,7 +8,7 @@ export type IconName =
   | "dashboard" | "hosts" | "add-host" | "jobs" | "bulk" | "campaigns"
   | "security" | "vulnerabilities" | "certificates" | "secrets"
   | "backups" | "monitoring" | "directory" | "access" | "audit"
-  | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user"
+  | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user" | "back"
   // The host modules.
   | "overview" | "packages" | "services" | "processes" | "schedules" | "kernel" | "time" | "power"
   | "network" | "dns" | "firewall" | "ssh" | "storage" | "files" | "containers" | "compose"
@@ -59,6 +59,7 @@ const PATHS: Record<IconName, string> = {
   accounts: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20a6 6 0 0 0-4-5.6",
   identity: "M3 5h18v14H3zM7 15a3 3 0 0 1 6 0M10 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4M15 10h4M15 14h4",
   logs: "M4 6h16M4 10h12M4 14h16M4 18h8",
+  back: "M19 12H5M11 6l-6 6 6 6",
 };
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {

@@ -1,10 +1,9 @@
-import { useEffect, useState, type Ref } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
 import { Time, ConnectionState } from "../../components/ui";
-import { HostPicker } from "../../components/HostPicker";
 import { module as findModule } from "./modules";
 import { useT } from "../../i18n";
 
@@ -14,21 +13,16 @@ import { useT } from "../../i18n";
  * identity is part of the layout, not text repeated by the individual
  * screens. The first line is the identity, the second the facts as chips:
  * a fact read at a glance is a fact that gets read.
- *
- * The header reports its element through the ref: the module navigation
- * sticks below it and needs its height, which depends on how the chips
- * wrap.
  */
-export function ContextBar({ host, segment, campaign, ref }: {
+export function ContextBar({ host, segment, campaign }: {
   host: Host;
   segment: string;
   /** The campaign the operator came from; it keeps the way back in view. */
   campaign?: string | null;
-  ref?: Ref<HTMLDivElement>;
 }) {
   const t = useT();
   return (
-    <div className="host-header" ref={ref}>
+    <div className="host-header">
       {campaign && (
         <p className="host-header-crumb source">
           <Link to={`/campaigns/${campaign}`}>← {t("Back to the campaign")}</Link>
@@ -39,13 +33,6 @@ export function ContextBar({ host, segment, campaign, ref }: {
         <h1 className="host-header-name">{host.hostname}</h1>
         <ConnectionState state={host.connection_state} />
         <MaintenanceWindow host={host} />
-        {/* The switch is the same picker as in the sidebar: it keeps the open
-            module when the new host supports it and says why when it does
-            not. */}
-        <div className="host-header-switch">
-          <span>{t("Switch host")}</span>
-          <HostPicker current={host} />
-        </div>
       </div>
       <div className="host-header-facts">
         <ManagementAddress host={host} />

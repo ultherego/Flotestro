@@ -1,18 +1,20 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useMatch } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "./lib/api";
-import type { Whoami } from "./lib/types";
+import type { Host, Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { useTheme } from "./lib/theme";
 import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
-import { Sidebar, type NavGroup } from "./components/Sidebar";
+import { Sidebar, type NavFace, type NavGroup } from "./components/Sidebar";
 import { Icon } from "./components/icons";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
 import { HostLayout } from "./pages/host/Layout";
+import { groupedModules, modules } from "./pages/host/modules";
+import { REFRESH_INTERVAL } from "./lib/stream";
 import { Overview } from "./pages/host/Overview";
 import { Packages } from "./pages/host/Packages";
 import { Services } from "./pages/host/Services";
@@ -69,6 +71,8 @@ export function App() {
   useEffect(() => {
     setDrawer(false);
   }, [location.pathname]);
+
+  const hostFace = useHostFace(capabilities);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["whoami"],
@@ -164,6 +168,8 @@ export function App() {
     },
   ];
 
+  const face: NavFace = hostFace ?? { groups };
+
   return (
     <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
       {/* The top bar exists only on a narrow screen, where the sidebar
@@ -182,7 +188,7 @@ export function App() {
       </header>
       {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
       <Sidebar
-        groups={groups}
+        face={face}
         user={data}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((current) => !current)}
@@ -287,4 +293,38 @@ function LoginScreen({ provider }: { provider: boolean }) {
       </div>
     </div>
   );
+}
+
+/**
+ * The host face of the sidebar: on a host page the fleet groups give way
+ * to the modules of that host, under the same headings the registry
+ * knows, with the way back to the list above them. The host is read with
+ * the same query the page uses, so it costs no second request.
+ */
+function useHostFace(installation: ReturnType<typeof useCapabilities>): NavFace | undefined {
+  const match = useMatch("/hosts/:id/*");
+  const location = useLocation();
+  const id = match?.params.id;
+  const onHost = id !== undefined && id !== "new";
+  const host = useQuery({
+    queryKey: ["host", id],
+    queryFn: () => api.get<Host>(`/api/v1/hosts/${id}`),
+    refetchInterval: REFRESH_INTERVAL,
+    enabled: onHost,
+  });
+  if (!onHost) return undefined;
+  const back = { to: "/hosts", label: "All hosts" };
+  if (!host.data) return { groups: [], back };
+  // The search keeps the way back to a campaign across module switches.
+  const groups: NavGroup[] = groupedModules(modules(host.data, installation)).map((group) => ({
+    key: `host:${group.key}`,
+    label: group.title,
+    items: group.items.map((item) => ({
+      to: `/hosts/${id}/${item.segment}${location.search}`,
+      label: item.name,
+      icon: item.icon,
+      unavailable: item.available ? undefined : item.missingReason,
+    })),
+  }));
+  return { groups, back };
 }
