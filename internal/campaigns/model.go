@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -175,6 +176,16 @@ func (s Spec) Validate() error {
 	}
 	return nil
 }
+
+// PlanTTL bounds a per-host plan in time. A plan is a description of a
+// change against the state the host had when it was computed; a day later
+// the vendor may have published other versions and the change would differ
+// from the one the approver read, digest or no digest. A host whose plan
+// is older is not started; the campaign is planned again.
+const PlanTTL = 24 * time.Hour
+
+// ErrPlanExpired means the host's plan is older than PlanTTL.
+var ErrPlanExpired = errors.New("the plan expired")
 
 // Approval is the evidence of a consent: who approved which fingerprint,
 // on the strength of what authentication, and why. It is written once.

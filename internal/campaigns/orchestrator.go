@@ -226,7 +226,11 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		if err != nil {
 			// The task was not created, so the tokens have nothing to guard.
 			o.releaseCapacity(ctx, target)
-			o.finishTarget(ctx, campaign, target, TargetFailed, "job_create_failed", err.Error())
+			code := "job_create_failed"
+			if errors.Is(err, ErrPlanExpired) {
+				code = "plan_stale"
+			}
+			o.finishTarget(ctx, campaign, target, TargetFailed, code, err.Error())
 			continue
 		}
 		if err := o.store.AttachJob(ctx, target.ID, "job_id", jobID); err != nil {
@@ -293,12 +297,20 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 	// host compares it with the state it has now and refuses when the plan
 	// has gone stale - the consent concerned that diff, not this one.
 	if opspec.PlanningAction(action) != "" {
-		hash, plan, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
+		hash, plan, computedAt, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
 		if err != nil {
 			return "", err
 		}
 		if hash == "" {
 			return "", fmt.Errorf("the host %s has no computed plan", target.HostID)
+		}
+		// The digest still matches what was approved, but the world the
+		// plan described is a day old: a plan computed before a weekend of
+		// vendor updates would carry a different change than the approver
+		// read. The host compares digests too; this is the bound in time.
+		if age := time.Since(computedAt); age > PlanTTL {
+			return "", fmt.Errorf("%w: computed %s ago, the limit is %s",
+				ErrPlanExpired, age.Round(time.Minute), PlanTTL)
 		}
 		payload = withPlan(action, payload, hash, plan)
 	}

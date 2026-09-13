@@ -582,15 +582,21 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 		Count    int             `json:"count"`
 		Hosts    []string        `json:"hosts"`
 		Plan     json.RawMessage `json:"plan,omitempty"`
+		// The group expires with its oldest plan: past that moment the
+		// hosts are not started on it, digest or no digest.
+		ExpiresAt time.Time `json:"expires_at"`
 	}
 	order := []string{}
 	by := map[string]*planGroup{}
 	for _, entry := range entries {
 		group, present := by[entry.PlanHash]
 		if !present {
-			group = &planGroup{PlanHash: entry.PlanHash, Plan: entry.Plan}
+			group = &planGroup{PlanHash: entry.PlanHash, Plan: entry.Plan, ExpiresAt: entry.ExpiresAt}
 			by[entry.PlanHash] = group
 			order = append(order, entry.PlanHash)
+		}
+		if entry.ExpiresAt.Before(group.ExpiresAt) {
+			group.ExpiresAt = entry.ExpiresAt
 		}
 		group.Count++
 		// The host list matters here, but need not be a full wall: the first
@@ -605,7 +611,8 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": groups, "count": len(groups), "hosts": len(entries),
-		"plan_set_hash": campaign.PlanSetHash,
+		"plan_set_hash":    campaign.PlanSetHash,
+		"plan_ttl_seconds": int(campaigns.PlanTTL.Seconds()),
 	})
 }
 

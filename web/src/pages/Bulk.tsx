@@ -745,7 +745,7 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
       {groups.length > 0 && (
         <table>
           <thead>
-            <tr><th>{t("Change")}</th><th>{t("Hosts")}</th><th>{t("Plan fingerprint")}</th></tr>
+            <tr><th>{t("Change")}</th><th>{t("Hosts")}</th><th>{t("Plan fingerprint")}</th><th>{t("Valid until")}</th></tr>
           </thead>
           <tbody>
             {groups.map((group) => (
@@ -756,6 +756,10 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
                   <div className="source">{group.hosts.join(", ")}</div>
                 </td>
                 <td className="mono source">{group.plan_hash.slice(0, 16)}</td>
+                {/* A plan is bound in time as well as by its digest: past the
+                    expiry the hosts are not started on it and the campaign is
+                    planned again. */}
+                <td><Time value={group.expires_at} /></td>
               </tr>
             ))}
           </tbody>
@@ -773,19 +777,27 @@ type PlanGroups = {
     hosts: string[];
     // The plan content arrives in the shape of a job result: kind and plan.
     plan?: { plan?: Record<string, unknown> } & Record<string, unknown>;
+    expires_at: string;
   }[];
   plan_set_hash?: string;
+  plan_ttl_seconds?: number;
 };
 
 function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?: Campaign }) {
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
+  // The reason and the change ticket go into the approval record next to
+  // the fingerprint; a critical operation cannot be approved without the
+  // reason.
+  const [reason, setReason] = useState("");
+  const [ticket, setTicket] = useState("");
   const queryClient = useQueryClient();
   const targets = useTargets(campaignID, {});
   const approve = useMutation({
     mutationFn: () =>
       api.post(`/api/v1/campaigns/${campaignID}/approve`, {
-        reason: "bulk workspace",
+        reason: reason.trim(),
+        change_ticket: ticket.trim(),
         // The consent carries the fingerprint of what is on screen. A
         // campaign changed since it was loaded ends in a refusal, not in the
         // consent being transferred.
@@ -805,11 +817,21 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
       <p className="source mono">{t("fingerprint")} {campaign.approval_fingerprint}</p>
       {errorMessage && <p className="page-error">{errorMessage}</p>}
       {campaign.state === "awaiting_approval" ? (
-        <p>
-          <button onClick={() => approve.mutate()} disabled={approve.isPending}>
-            {approve.isPending ? t("Approving…") : t("Approve and start")}
-          </button>
-        </p>
+        <>
+          <FieldGrid>
+            <Field label={t("Reason (kept in the audit trail)")} hint={t("Required for a critical operation, at least 8 characters.")} wide>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+            <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
+              <input value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="CHG-1234" />
+            </Field>
+          </FieldGrid>
+          <p>
+            <button onClick={() => approve.mutate()} disabled={approve.isPending}>
+              {approve.isPending ? t("Approving…") : t("Approve and start")}
+            </button>
+          </p>
+        </>
       ) : (
         <p>
           {t("This campaign is")} <JobState state={campaign.state} />.{" "}

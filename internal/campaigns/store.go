@@ -382,17 +382,18 @@ func (s *Store) Plans(ctx context.Context, campaignID string) (map[string]string
 // write has to come back to the host with the digest of the content the
 // operator reviewed, and that lies in the plan's content rather than in its
 // digest.
-func (s *Store) HostPlan(ctx context.Context, campaignID, hostID string) (string, json.RawMessage, error) {
+func (s *Store) HostPlan(ctx context.Context, campaignID, hostID string) (string, json.RawMessage, time.Time, error) {
 	var hash string
 	var plan json.RawMessage
+	var computedAt time.Time
 	const query = `
-		select plan_hash, plan from campaign_plans
+		select plan_hash, plan, computed_at from campaign_plans
 		 where campaign_id = $1 and host_id = $2`
-	err := s.pool.QueryRow(ctx, query, campaignID, hostID).Scan(&hash, &plan)
+	err := s.pool.QueryRow(ctx, query, campaignID, hostID).Scan(&hash, &plan, &computedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil, nil
+		return "", nil, time.Time{}, nil
 	}
-	return hash, plan, err
+	return hash, plan, computedAt, err
 }
 
 // PlanEntry is one host's plan together with its content.
@@ -401,6 +402,10 @@ type PlanEntry struct {
 	Hostname string          `json:"hostname,omitempty"`
 	PlanHash string          `json:"plan_hash"`
 	Plan     json.RawMessage `json:"plan,omitempty"`
+	// ComputedAt and ExpiresAt bound the plan in time: past the expiry the
+	// host is not started on it, however good the digest still looks.
+	ComputedAt time.Time `json:"computed_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
 
 // PlansWithContent returns the plans of every host in a campaign.
@@ -411,7 +416,7 @@ type PlanEntry struct {
 // anything.
 func (s *Store) PlansWithContent(ctx context.Context, campaignID string) ([]PlanEntry, error) {
 	const query = `
-		select p.host_id, coalesce(h.hostname, ''), p.plan_hash, p.plan
+		select p.host_id, coalesce(h.hostname, ''), p.plan_hash, p.plan, p.computed_at
 		  from campaign_plans p
 		  left join hosts h on h.id = p.host_id
 		 where p.campaign_id = $1
@@ -425,9 +430,10 @@ func (s *Store) PlansWithContent(ctx context.Context, campaignID string) ([]Plan
 	entries := []PlanEntry{}
 	for rows.Next() {
 		var entry PlanEntry
-		if err := rows.Scan(&entry.HostID, &entry.Hostname, &entry.PlanHash, &entry.Plan); err != nil {
+		if err := rows.Scan(&entry.HostID, &entry.Hostname, &entry.PlanHash, &entry.Plan, &entry.ComputedAt); err != nil {
 			return nil, err
 		}
+		entry.ExpiresAt = entry.ComputedAt.Add(PlanTTL)
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
