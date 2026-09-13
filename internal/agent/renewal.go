@@ -225,3 +225,39 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// RenewNow renews the stored certificate at once, however much of its
+// validity is left.
+//
+// The operator's tool uses it: the daemon renews on its own schedule, and a
+// forced renewal is the way out when the panel rotated its CA or the operator
+// wants a fresh key pair today. It takes the same path as the scheduled
+// renewal - the current certificate proves the identity over mTLS, the new
+// generation is committed atomically, and the previous one stays on disk
+// until the store cleans it up.
+//
+// The running daemon keeps the identity it loaded at start: nothing on the
+// host tells it about the new generation, and the previous certificate stays
+// valid until its term, so the session goes on. The new certificate is used
+// from the next start of the service.
+func RenewNow(ctx context.Context, stateDir, gatewayURL string) (*Identity, error) {
+	store := identitystore.New(stateDir)
+	current, err := store.Current()
+	if err != nil {
+		// A host from before the generation store has its files loose in
+		// the state directory; the daemon moves them at start, and the tool
+		// has to do the same to have something to renew with.
+		p := paths(stateDir)
+		if moved, migrateErr := store.Migrate(p.Key, p.Cert, p.CA); !moved || migrateErr != nil {
+			return nil, err
+		}
+		if current, err = store.Current(); err != nil {
+			return nil, err
+		}
+	}
+	identity := fromIdentity(current)
+	if err := renewCertificate(ctx, identity, RenewalOptions{StateDir: stateDir, GatewayURL: gatewayURL}); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}

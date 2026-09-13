@@ -39,6 +39,8 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 		return diagnoseCommand(args[1:], out, errOut)
 	case "enroll":
 		return enrollmentCommand(args[1:], in_, out, errOut)
+	case "renew":
+		return renewCommand(args[1:], out, errOut)
 	case "version":
 		// The version number alone is not enough when a package behaves
 		// differently than it should: the first question is "which commit is
@@ -59,12 +61,14 @@ func usage(where io.Writer) {
 	fmt.Fprint(where, `flotestro-agentctl - the tool of the host
 
   enroll          [--token-file FILE]  registers the host in the fleet and writes the identity
+  renew           [--config FILE]   forces a renewal of the certificate (at most once in 10 minutes)
   config validate [--config FILE]   checks the configuration file and the permissions on it
   config show     [--config FILE]   shows the settings once the defaults are filled in
+  config migrate  [--write]         converts the environment file of the service into agent.yaml
   status          [--config FILE]   the identity, the certificate, the session and the helper
-  diagnose        [--config FILE]   DNS, TCP, TLS, the clock, the socket and the capabilities
+  diagnose        [--json]          the config, machine-id, clock, DNS, TLS, identity, socket, capabilities
   version                           the version of the tool
 
-Exit codes: 0 ready, 1 a problem to fix, 2 a usage error.
+Exit codes: 0 ready, 1 a problem to fix, 2 a usage error or a refused request.
 `)
 }

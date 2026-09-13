@@ -9,10 +9,11 @@ import (
 	"github.com/ultherego/flotestro/internal/agentconfig"
 )
 
-// configurationCommands handles "config validate" and "config show".
+// configurationCommands handles "config validate", "config show" and "config
+// migrate".
 func configurationCommands(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(errOut, "usage: agentctl config validate|show [--config FILE]")
+		fmt.Fprintln(errOut, "usage: agentctl config validate|show|migrate [--config FILE]")
 		return 2
 	}
 	switch args[0] {
@@ -20,6 +21,8 @@ func configurationCommands(args []string, out, errOut io.Writer) int {
 		return checkConfiguration(args[1:], out, errOut, false)
 	case "show":
 		return checkConfiguration(args[1:], out, errOut, true)
+	case "migrate":
+		return migrateConfiguration(args[1:], out, errOut)
 	default:
 		fmt.Fprintf(errOut, "unknown config command: %s\n", args[0])
 		return 2
