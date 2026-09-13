@@ -28,8 +28,6 @@ func main() {
 		gatewayURL = flag.String("gateway-url",
 			config.Env("FLOTESTRO_GATEWAY_URL", ""),
 			"the address of the agent gateway; it overrides the whole list from the file")
-		token = flag.String("enrollment-token",
-			config.Env("FLOTESTRO_ENROLLMENT_TOKEN", ""), "the enrollment token (the first start only)")
 		caFile = flag.String("ca-file",
 			config.Env("FLOTESTRO_CA_FILE", ""), "the CA bundle for bootstrapping the trust")
 		inventoryMinutes = flag.Int("inventory-minutes",
@@ -115,12 +113,23 @@ func main() {
 	if len(gateways) == 0 && *gatewayURL != "" {
 		gateways = []string{*gatewayURL}
 	}
-	if *enrollmentURL == "" || len(gateways) == 0 {
-		log.Error("--enrollment-url and --gateway-url are required")
+	if len(gateways) == 0 {
+		log.Error("--gateway-url is required")
 		os.Exit(1)
 	}
 
-	identity, err := agent.EnsureIdentity(ctx, *stateDir, *enrollmentURL, *token, *caFile)
+	// The daemon does not enroll. A token in its environment is a leftover
+	// of the old flow - it is ignored, and said so: a secret that stays in
+	// a file that survives package updates is worth a word at every start
+	// until somebody removes it.
+	if os.Getenv("FLOTESTRO_ENROLLMENT_TOKEN") != "" {
+		log.Warn("FLOTESTRO_ENROLLMENT_TOKEN is ignored: the daemon does not enroll; " +
+			"enroll with flotestro-agentctl enroll and remove the line from /etc/flotestro/agent.env")
+	}
+
+	// Only what the host already has: an enrollment is a one-time decision
+	// of the operator and lives in flotestro-agentctl enroll.
+	identity, err := agent.LoadIdentity(*stateDir)
 	if err != nil {
 		log.Error("no identity of the agent", "err", err)
 		os.Exit(1)

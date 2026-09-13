@@ -48,7 +48,8 @@ agent)
         > "$root/usr/lib/sysusers.d/flotestro-agent.conf"
     chmod 0644 "$root/usr/lib/sysusers.d/flotestro-agent.conf"
     # agent.env stays for hosts set up before the YAML was introduced and as
-    # the place for the one-time enrollment token.
+    # the place for explicit overrides; the enrollment token has no place in
+    # it - the daemon does not enroll.
     install -m 0640 "$here/agent.env" "$root/etc/flotestro/agent.env"
     install -d -m 0700 "$root/var/lib/flotestro-agent"
     name="flotestro-agent"

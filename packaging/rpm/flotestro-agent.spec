@@ -78,6 +78,16 @@ exit 0
 if getent group systemd-journal >/dev/null; then
     usermod --append --groups systemd-journal flotestro-agent || :
 fi
+# The daemon no longer enrolls, so a token left in the environment file from
+# the old flow is a secret lying in a file that survives updates and ends up
+# in backups. The package says so and touches nothing: the file is the
+# operator's, and the token is usually spent anyway.
+if [ -f %{_sysconfdir}/flotestro/agent.env ] &&
+   grep -Eq '^[[:space:]]*FLOTESTRO_ENROLLMENT_TOKEN=[[:space:]]*[^[:space:]#]' %{_sysconfdir}/flotestro/agent.env; then
+    echo "flotestro-agent: %{_sysconfdir}/flotestro/agent.env still carries FLOTESTRO_ENROLLMENT_TOKEN" >&2
+    echo "  the daemon ignores it; enrollment is done with: sudo -u flotestro-agent flotestro-agentctl enroll" >&2
+    echo "  remove the line from the file" >&2
+fi
 %systemd_post flotestro-agent.service flotestro-helper.socket
 # The helper socket must exist before the agent tries to connect to it.
 systemctl enable --now flotestro-helper.socket || :

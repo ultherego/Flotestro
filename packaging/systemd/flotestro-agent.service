@@ -24,9 +24,10 @@ WatchdogSec=90s
 User=flotestro-agent
 Group=flotestro-agent
 # The environment file is optional and is to stay so: the host settings are
-# described by agent.yaml, and this is only a place for overrides and the
-# one-time token. Its absence must not stop the service - the Arch package
-# does not carry it.
+# described by agent.yaml, and this is only a place for overrides. The daemon
+# reads no enrollment token from it - enrollment is the one-shot
+# flotestro-enroll.service or the operator's flotestro-agentctl enroll. Its
+# absence must not stop the service - the Arch package does not carry it.
 EnvironmentFile=-/etc/flotestro/agent.env
 ExecStart=/usr/bin/flotestro-agent
 Restart=always

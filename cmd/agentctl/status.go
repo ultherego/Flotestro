@@ -9,6 +9,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
 // statusCommand answers the question "what is this agent doing at all".
@@ -45,6 +46,16 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 		default:
 			fmt.Fprintf(out, "Certificate:  valid until %s (%s)\n",
 				identity.NotAfter.UTC().Format(time.RFC3339), rounded(left))
+		}
+	}
+
+	// An attempt that has not ended is a state of its own: the host is
+	// between "no identity" and "registered", and the operator is to see
+	// that the next enrollment repeats it rather than starts anew.
+	if pending := agent.ReadPendingAttempt(cfg.Agent.StateDir, time.Now()); pending != nil {
+		fmt.Fprintf(out, "Pending:      %s\n", describePending(pending))
+		if pending.Err != "" || pending.Stale {
+			problems++
 		}
 	}
 
@@ -92,6 +103,27 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// describePending puts an unfinished attempt into one line.
+//
+// The attempt number, its age and whether the token is known by its
+// opening: what the operator needs to match it with an order in the panel.
+// Never the key and never the request.
+func describePending(pending *agent.PendingAttempt) string {
+	if pending.Err != "" {
+		return fmt.Sprintf("DAMAGED record of an enrollment attempt (%s); discard it: flotestro-agentctl identity reset --discard-pending", pending.Err)
+	}
+	token := "token prefix unknown"
+	if pending.TokenPrefix != "" {
+		token = "token prefix " + pending.TokenPrefix
+	}
+	if pending.Stale {
+		return fmt.Sprintf("STALE enrollment attempt %s, started %s ago (%s); older than %s, abandoned at the next attempt",
+			pending.ClientRequestID, rounded(pending.Age), token, rounded(identitystore.PendingMaxAge))
+	}
+	return fmt.Sprintf("enrollment attempt %s, started %s ago (%s); the next enrollment repeats it",
+		pending.ClientRequestID, rounded(pending.Age), token)
 }
 
 // socketWorks checks whether the helper can be connected to.

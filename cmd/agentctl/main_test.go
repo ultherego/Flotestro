@@ -41,6 +41,8 @@ func TestExitCodes(t *testing.T) {
 		{"usage", []string{"help"}, 0},
 		{"config without a subcommand", []string{"config"}, 2},
 		{"config with an unknown subcommand", []string{"config", "fix"}, 2},
+		{"identity without a subcommand", []string{"identity"}, 2},
+		{"identity with an unknown subcommand", []string{"identity", "forget"}, 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

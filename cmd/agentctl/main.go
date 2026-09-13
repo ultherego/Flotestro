@@ -41,6 +41,8 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 		return enrollmentCommand(args[1:], in_, out, errOut)
 	case "renew":
 		return renewCommand(args[1:], out, errOut)
+	case "identity":
+		return identityCommands(args[1:], in_, out, errOut)
 	case "version":
 		// The version number alone is not enough when a package behaves
 		// differently than it should: the first question is "which commit is
@@ -62,10 +64,14 @@ func usage(where io.Writer) {
 
   enroll          [--token-file FILE]  registers the host in the fleet and writes the identity
   renew           [--config FILE]   forces a renewal of the certificate (at most once in 10 minutes)
+  identity reset  --confirm HOSTNAME [--token-file FILE] [--revoke-old]
+                                    replaces the identity with a recovery token from the panel;
+                                    the current one is kept until the new one is verified
+  identity reset  --discard-pending abandons the record of an unfinished enrollment attempt
   config validate [--config FILE]   checks the configuration file and the permissions on it
   config show     [--config FILE]   shows the settings once the defaults are filled in
   config migrate  [--write]         converts the environment file of the service into agent.yaml
-  status          [--config FILE]   the identity, the certificate, the session and the helper
+  status          [--config FILE]   the identity, the certificate, a pending attempt, the session and the helper
   diagnose        [--json]          the config, machine-id, clock, DNS, TLS, identity, socket, capabilities
   version                           the version of the tool
 

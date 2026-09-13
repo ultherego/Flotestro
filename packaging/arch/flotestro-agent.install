@@ -2,7 +2,23 @@
 # here: the service account, the directories and the units. Enrollment is an
 # operator decision and must not be a side effect of installing the package,
 # so the package neither fetches a token nor talks to the panel.
+# The Arch package ships no environment file, but a host may carry one from
+# an earlier installation. The daemon no longer enrolls, so a token left in
+# it is a secret lying in a file for nothing; the package says so and
+# touches nothing.
+warn_about_lingering_token() {
+    if [ -f /etc/flotestro/agent.env ] &&
+       grep -Eq '^[[:space:]]*FLOTESTRO_ENROLLMENT_TOKEN=[[:space:]]*[^[:space:]#]' /etc/flotestro/agent.env; then
+        cat >&2 <<'END'
+flotestro-agent: /etc/flotestro/agent.env still carries FLOTESTRO_ENROLLMENT_TOKEN
+  the daemon ignores it; enrollment is done with: sudo -u flotestro-agent flotestro-agentctl enroll
+  remove the line from the file
+END
+    fi
+}
+
 post_install() {
+    warn_about_lingering_token
     systemd-sysusers /usr/lib/sysusers.d/flotestro-agent.conf >/dev/null 2>&1 || true
     systemd-tmpfiles --create /usr/lib/tmpfiles.d/flotestro-agent.conf >/dev/null 2>&1 || true
     chown root:flotestro-agent /etc/flotestro/agent.yaml 2>/dev/null || true
@@ -18,6 +34,7 @@ END
 }
 
 post_upgrade() {
+    warn_about_lingering_token
     systemd-sysusers /usr/lib/sysusers.d/flotestro-agent.conf >/dev/null 2>&1 || true
     systemd-tmpfiles --create /usr/lib/tmpfiles.d/flotestro-agent.conf >/dev/null 2>&1 || true
     chown root:flotestro-agent /etc/flotestro/agent.yaml 2>/dev/null || true

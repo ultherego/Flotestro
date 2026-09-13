@@ -49,10 +49,20 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 	// a recovery request in the panel.
 	state := agent.ReadIdentity(cfg.Agent.StateDir)
 	if state.Present && !state.Expired {
-		fmt.Fprintf(errOut, "the host is already registered as host/%s (the certificate is valid until %s)\n",
-			state.HostID, state.NotAfter.UTC().Format(time.RFC3339))
-		fmt.Fprintln(errOut, "a replacement of the identity is requested in the panel: POST /hosts/{id}/identity-recovery")
+		fmt.Fprintf(errOut, "%s: the host is already registered as host/%s (the certificate is valid until %s)\n",
+			agent.CodeAlreadyEnrolled, state.HostID, state.NotAfter.UTC().Format(time.RFC3339))
+		fmt.Fprintln(errOut, "a replacement of the identity is requested in the panel (POST /hosts/{id}/identity-recovery) and carried out with: flotestro-agentctl identity reset")
 		return 1
+	}
+	if err := sameOwner(cfg.Agent.StateDir, "enroll"); err != nil {
+		fmt.Fprintf(errOut, "%v\n", err)
+		return 1
+	}
+	// An attempt that has not ended is repeated rather than started anew:
+	// the operator is told, because the panel will answer with the
+	// certificate of that attempt and not with a new one.
+	if pending := agent.ReadPendingAttempt(cfg.Agent.StateDir, time.Now()); pending != nil && pending.Err == "" && !pending.Stale {
+		fmt.Fprintf(errOut, "repeating the attempt %s started %s ago\n", pending.ClientRequestID, rounded(pending.Age))
 	}
 
 	token, err := readToken(*tokenFile, in_, errOut)
@@ -69,13 +79,21 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	if *name == "" {
-		*name, _ = os.Hostname()
-	}
-	identity, err := agent.EnsureIdentity(ctx, cfg.Agent.StateDir,
+	request, err := agent.LocalIdentityRequest(cfg.Agent.StateDir,
 		cfg.Connection.EnrollmentURL, string(token), cfg.Connection.BootstrapCA)
 	if err != nil {
 		fmt.Fprintf(errOut, "the enrollment failed: %v\n", err)
+		return 1
+	}
+	if *name != "" {
+		request.Hostname = *name
+	}
+	identity, err := agent.Enroll(ctx, request)
+	if err != nil {
+		// The code goes first: it is what the operator matches against the
+		// table of errors, and the cause after it is for reading.
+		fmt.Fprintf(errOut, "the enrollment failed: %v\n", err)
+		fmt.Fprintln(errOut, enrollmentHint(err))
 		return 1
 	}
 
@@ -84,6 +102,30 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 		identity.NotAfter.UTC().Format(time.RFC3339))
 	fmt.Fprintln(out, "Start the service: systemctl start flotestro-agent.service")
 	return 0
+}
+
+// enrollmentHint says what to do next for a refused enrollment.
+//
+// The panel gives every refusal of the token the same answer, so the hint
+// cannot name the reason; it can name where the reason is written down.
+func enrollmentHint(err error) string {
+	switch agent.ErrorCode(err) {
+	case agent.CodeTokenInvalid:
+		return "the token was refused: the reason is in the enrollment order in the panel (expired, revoked, used up or bound to another machine); a new order gives a new token, and the attempt on this host is kept and repeated with it"
+	case agent.CodeRequestReused:
+		return "the attempt number is known to the panel with another request; discard the attempt (flotestro-agentctl identity reset --discard-pending) and ask for a new token"
+	case agent.CodeIdentityRejected:
+		return "the certificate from the panel was not accepted - it does not fit the key or the trust bundle, or the gateway refused it in the handshake; nothing was switched, and the attempt is kept for a retry"
+	case agent.CodeCommitFailed:
+		return "the identity was not written; the current one, if any, stays in force: check the state directory and its filesystem"
+	case agent.CodeConnectFailed, agent.CodeConnectTimeout:
+		return "the endpoint did not answer; the attempt is kept and the same command repeats it: flotestro-agentctl diagnose"
+	case agent.CodeUnknownAuthority, agent.CodeNameMismatch:
+		return "the endpoint failed the check against the bootstrap CA: flotestro-agentctl diagnose"
+	case agent.CodePendingInvalid:
+		return "the record of the previous attempt cannot be repeated; discard it: flotestro-agentctl identity reset --discard-pending"
+	}
+	return "see flotestro-agentctl diagnose"
 }
 
 // readToken takes the token without leaving it in the arguments or in the

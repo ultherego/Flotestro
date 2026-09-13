@@ -99,7 +99,7 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "a renewal needs a valid certificate; enroll the host again")
 		return 1
 	}
-	if err := sameOwner(r.StateDir); err != nil {
+	if err := sameOwner(r.StateDir, "renew"); err != nil {
 		fmt.Fprintf(errOut, "%v\n", err)
 		return 1
 	}
@@ -153,10 +153,16 @@ func (r renewal) recordForced(now time.Time) error {
 //
 // The store writes the new generation as the calling user. Run as root, it
 // would leave a key the daemon cannot read - and the host would drop out of
-// the fleet at the next restart, not now, when the operator is looking.
-func sameOwner(stateDir string) error {
+// the fleet at the next restart, not now, when the operator is looking. The
+// command is named in the hint so that the operator can repeat it as the
+// right user. A directory that does not exist yet has no owner to compare
+// with: the caller creates it as itself.
+func sameOwner(stateDir, command string) error {
 	info, err := os.Stat(stateDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("the state directory: %w", err)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
@@ -164,8 +170,8 @@ func sameOwner(stateDir string) error {
 		return nil
 	}
 	if int(stat.Uid) != os.Geteuid() {
-		return fmt.Errorf("%s belongs to uid %d and this process runs as uid %d; run the renewal as the agent: sudo -u flotestro-agent flotestro-agentctl renew",
-			stateDir, stat.Uid, os.Geteuid())
+		return fmt.Errorf("%s belongs to uid %d and this process runs as uid %d; run the command as the agent: sudo -u flotestro-agent flotestro-agentctl %s",
+			stateDir, stat.Uid, os.Geteuid(), command)
 	}
 	return nil
 }
