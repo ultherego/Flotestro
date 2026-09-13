@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { pl } from "./pl";
 
 /**
@@ -70,6 +70,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
     setLocaleState(next);
   }, []);
+  // The document language follows the choice: screen readers, spell
+  // checking and hyphenation read it from the root element.
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
   const value = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
 }
