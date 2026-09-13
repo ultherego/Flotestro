@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 export function Campaigns() {
@@ -15,40 +16,63 @@ export function Campaigns() {
   });
   if (error) return <ErrorBox error={error} />;
 
+  // The tiles count the listed campaigns: the newest page, not the whole
+  // history, and the hint says so.
+  const campaigns = data?.items ?? [];
+  const count = (states: string[]) => campaigns.filter((campaign) => states.includes(campaign.state)).length;
+  const awaiting = count(["awaiting_approval", "planned"]);
+  const inProgress = count(["planning", "canary", "running"]);
+  const paused = count(["paused"]);
+  const completed = count(["completed"]);
+  const listed = t("among the {n} listed", { n: campaigns.length });
+
   return (
     <>
-      <h1>{t("Campaigns")}</h1>
-      <p className="subtitle">{t("Campaigns are the main mechanism for fleet-wide change.")}</p>
+      <PageHeader
+        title={t("Campaigns")}
+        description={t("Campaigns are the main mechanism for fleet-wide change.")}
+        actions={
+          <button className={building ? "secondary" : ""} onClick={() => setBuilding(!building)}>
+            {building ? t("Hide the wizard") : t("New campaign")}
+          </button>
+        }
+      />
 
-      <button onClick={() => setBuilding(!building)}>
-        {building ? t("Hide the wizard") : t("New campaign")}
-      </button>
+      <StatGrid>
+        <Stat label={t("Awaiting approval")} value={awaiting} hint={listed} tone={awaiting > 0 ? "warn" : undefined} />
+        <Stat label={t("In progress")} value={inProgress} hint={listed} />
+        <Stat label={t("Paused")} value={paused} hint={listed} tone={paused > 0 ? "warn" : undefined} />
+        <Stat label={t("Completed")} value={completed} hint={listed} />
+      </StatGrid>
 
       {building && <Wizard onDone={() => setBuilding(false)} />}
 
-      <h2>{t("List")}</h2>
-      {!data?.items.length ? (
-        <Empty>{t("No campaigns.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th>{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
-          </thead>
-          <tbody>
-            {data.items.map((campaign) => (
-              <tr key={campaign.id}>
-                <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
-                <td><JobState state={campaign.state} /></td>
-                <td>{campaign.action_type}</td>
-                <td>{campaign.canary_size} / {campaign.wave_size}</td>
-                <td>{campaign.created_by}</td>
-                <td>{campaign.approved_by || "—"}</td>
-                <td><Time value={campaign.created_at} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Card title={t("List")} flush>
+        {!data?.items.length ? (
+          <EmptyState action={!building && <button onClick={() => setBuilding(true)}>{t("New campaign")}</button>}>
+            {t("No campaigns.")}
+          </EmptyState>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th className="num">{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
+            </thead>
+            <tbody>
+              {data.items.map((campaign) => (
+                <tr key={campaign.id}>
+                  <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
+                  <td><JobState state={campaign.state} /></td>
+                  <td className="mono">{campaign.action_type}</td>
+                  <td className="num">{campaign.canary_size} / {campaign.wave_size}</td>
+                  <td>{campaign.created_by}</td>
+                  <td>{campaign.approved_by || "—"}</td>
+                  <td><Time value={campaign.created_at} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }
@@ -145,27 +169,50 @@ function Wizard({ onDone }: { onDone: () => void }) {
   const needsUnit = UNIT_OPERATIONS.includes(action);
   const ready = name && (!needsUnit || unit) && targetCount > 0;
 
+  // An operation that computes a different plan on every host goes
+  // through a planning phase - it does not pretend to be one payload.
+  // Operations the panel has no planner for yet are not hidden: they
+  // are refused with a reason.
   return (
-    <div className="tile" style={{ marginTop: 16, maxWidth: 760 }}>
-      <h2 style={{ marginTop: 0 }}>{t("New campaign")}</h2>
-      <div className="filters">
-        <input placeholder={t("campaign name")} value={name} onChange={(e) => setName(e.target.value)} style={{ minWidth: 240 }} />
-        <select value={action} onChange={(e) => setAction(e.target.value)}>
-          {bulk.map((item) => (
-            <option
-              key={item.action}
-              value={item.action}
-              disabled={!WIZARD_OPERATIONS.includes(item.action)}
-            >
-              {item.action}
-              {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("use the Bulk Workspace")}`}
-            </option>
-          ))}
-        </select>
+    <Card
+      title={t("New campaign")}
+      description={needsUnit
+        ? t("The same payload means the same thing on every host; each host still runs its own preflight.")
+        : t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
+      footer={
+        <Actions>
+          <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>
+            {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targetCount })}
+          </button>
+          <button className="secondary" onClick={onDone}>{t("Cancel")}</button>
+          {errorMessage && <p className="page-error">{errorMessage}</p>}
+        </Actions>
+      }
+    >
+      <FieldGrid>
+        <Field label={t("Name")}>
+          <input placeholder={t("campaign name")} value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label={t("Operation")}>
+          <select value={action} onChange={(e) => setAction(e.target.value)}>
+            {bulk.map((item) => (
+              <option
+                key={item.action}
+                value={item.action}
+                disabled={!WIZARD_OPERATIONS.includes(item.action)}
+              >
+                {item.action}
+                {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("use the Bulk Workspace")}`}
+              </option>
+            ))}
+          </select>
+        </Field>
         {needsUnit ? (
-          <input placeholder={t("unit, e.g. cron.service")} value={unit} onChange={(e) => setUnit(e.target.value)} />
+          <Field label={t("Unit")}>
+            <input placeholder={t("unit, e.g. cron.service")} value={unit} onChange={(e) => setUnit(e.target.value)} />
+          </Field>
         ) : (
-          <label>
+          <label className="toggle">
             <input
               type="checkbox"
               checked={securityOnly}
@@ -174,34 +221,17 @@ function Wizard({ onDone }: { onDone: () => void }) {
             {t("security updates only")}
           </label>
         )}
-      </div>
-      {/* An operation that computes a different plan on every host goes
-          through a planning phase - it does not pretend to be one payload.
-          Operations the panel has no planner for yet are not hidden: they
-          are refused with a reason. */}
-      <p className="subtitle">
-        {needsUnit
-          ? t("The same payload means the same thing on every host; each host still runs its own preflight.")
-          : t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
-      </p>
-      <div className="filters">
-        <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
-        <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-      </div>
-      <div className="filters">
-        <label>{t("canary")} <input type="number" min={0} value={canary} onChange={(e) => setCanary(+e.target.value)} style={{ width: 70 }} /></label>
-        <label>{t("wave")} <input type="number" min={1} value={wave} onChange={(e) => setWave(+e.target.value)} style={{ width: 70 }} /></label>
-        <label>{t("concurrent")} <input type="number" min={1} value={concurrent} onChange={(e) => setConcurrent(+e.target.value)} style={{ width: 70 }} /></label>
-        <label>{t("threshold %")} <input type="number" min={0} max={100} value={thresholdPercent} onChange={(e) => setThresholdPercent(+e.target.value)} style={{ width: 70 }} /></label>
-        <label>{t("threshold count")} <input type="number" min={0} value={thresholdCount} onChange={(e) => setThresholdCount(+e.target.value)} style={{ width: 70 }} /></label>
-        <select value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value)}>
-          <option value="never">{t("reboot: never")}</option>
-          <option value="if_required">{t("reboot: when required")}</option>
-          <option value="always">{t("reboot: always")}</option>
-        </select>
-      </div>
+      </FieldGrid>
 
-      <h2>{t("Targets")}</h2>
+      <h3>{t("Targets")}</h3>
+      <FieldGrid>
+        <Field label={t("Site")}>
+          <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
+        </Field>
+        <Field label={t("Environment")}>
+          <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+        </Field>
+      </FieldGrid>
       {preview.isLoading ? (
         <Empty>{t("Counting targets…")}</Empty>
       ) : (
@@ -216,13 +246,31 @@ function Wizard({ onDone }: { onDone: () => void }) {
         </>
       )}
 
-      {errorMessage && <p className="page-error" style={{ marginTop: 12 }}>{errorMessage}</p>}
-      <div style={{ marginTop: 16 }}>
-        <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>
-          {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targetCount })}
-        </button>{" "}
-        <button className="secondary" onClick={onDone}>{t("Cancel")}</button>
-      </div>
-    </div>
+      <h3>{t("Rollout")}</h3>
+      <FieldGrid>
+        <Field label={t("Canary")}>
+          <input type="number" min={0} value={canary} onChange={(e) => setCanary(+e.target.value)} />
+        </Field>
+        <Field label={t("Wave")}>
+          <input type="number" min={1} value={wave} onChange={(e) => setWave(+e.target.value)} />
+        </Field>
+        <Field label={t("Concurrent hosts")}>
+          <input type="number" min={1} value={concurrent} onChange={(e) => setConcurrent(+e.target.value)} />
+        </Field>
+        <Field label={t("threshold %")}>
+          <input type="number" min={0} max={100} value={thresholdPercent} onChange={(e) => setThresholdPercent(+e.target.value)} />
+        </Field>
+        <Field label={t("threshold count")}>
+          <input type="number" min={0} value={thresholdCount} onChange={(e) => setThresholdCount(+e.target.value)} />
+        </Field>
+        <Field label={t("Reboot policy")}>
+          <select value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value)}>
+            <option value="never">{t("reboot: never")}</option>
+            <option value="if_required">{t("reboot: when required")}</option>
+            <option value="always">{t("reboot: always")}</option>
+          </select>
+        </Field>
+      </FieldGrid>
+    </Card>
   );
 }

@@ -3,9 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type {
-  Campaign as CampaignType, CampaignReport, CampaignTarget, TimelineEntry,
+  Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, TimelineEntry,
 } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
+import { Actions, Card, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
 import { JobPlan } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
@@ -23,6 +24,11 @@ export function Campaign() {
   // do to the hosts under way before anything happens.
   const [pendingStop, setPendingStop] = useState<"pause" | "cancel" | null>(null);
   const [stopReason, setStopReason] = useState("");
+  // The approval is a decision with evidence: the reason and the change
+  // ticket go into the approval record next to the fingerprint.
+  const [approving, setApproving] = useState(false);
+  const [approvalReason, setApprovalReason] = useState("");
+  const [changeTicket, setChangeTicket] = useState("");
   // The plan the operator opened from the target table. A plan summary is
   // several lines and the windowed table needs rows of one fixed height, so
   // the plan is shown below the table for one host at a time.
@@ -40,6 +46,13 @@ export function Campaign() {
     queryKey: ["campaign-report", id],
     queryFn: () => api.get<CampaignReport>(`/api/v1/campaigns/${id}/report`),
     refetchInterval: OPERATIONS_INTERVAL,
+  });
+  // The approval record is the evidence of the consent; it exists only
+  // once somebody approved, so the card appears with it.
+  const approvals = useQuery({
+    queryKey: ["campaign-approvals", id],
+    queryFn: () => api.get<Collection<CampaignApproval>>(`/api/v1/campaigns/${id}/approvals`),
+    enabled: campaign.data !== undefined && campaign.data.approved_by !== undefined && campaign.data.approved_by !== "",
   });
   // The timeline comes from the durable trail, not from notifications: an
   // event sent while the panel restarted no longer exists anywhere, and an
@@ -64,16 +77,22 @@ export function Campaign() {
 
   const control = useMutation({
     mutationFn: (operation: string) =>
-      api.post(`/api/v1/campaigns/${id}/${operation}`, {
-        reason: stopReason.trim() || "from the panel",
+      api.post(`/api/v1/campaigns/${id}/${operation}`, operation === "approve" ? {
         // The approval carries the fingerprint of the campaign currently on
         // screen. When the campaign changed since it was loaded, the server
         // refuses instead of transferring the consent onto something else.
         approval_fingerprint: campaign.data?.approval_fingerprint,
+        reason: approvalReason.trim(),
+        change_ticket: changeTicket.trim(),
+      } : {
+        reason: stopReason.trim() || "from the panel",
       }),
     onSuccess: () => {
       setPendingStop(null);
       setStopReason("");
+      setApproving(false);
+      setApprovalReason("");
+      setChangeTicket("");
       queryClient.invalidateQueries({ queryKey: ["campaign", id] });
       queryClient.invalidateQueries({ queryKey: ["campaign-targets", id] });
     },
@@ -90,72 +109,143 @@ export function Campaign() {
   const notStarted = (totals.pending ?? 0) + (totals.awaiting_budget ?? 0) + (totals.planning ?? 0);
   const underWay = (totals.running ?? 0) + (totals.rebooting ?? 0) + (totals.verifying ?? 0);
 
+  const succeeded = totals.succeeded ?? 0;
+  const failed = (totals.failed ?? 0) + (totals.timed_out ?? 0) + (totals.partially_applied ?? 0);
+
   return (
     <>
-      <h1>{data.name}</h1>
-      <p className="subtitle">
-        <JobState state={data.state} /> · {data.action_type} · {t("requested by {who}", { who: data.created_by })}
-      </p>
+      <PageHeader
+        breadcrumb={[{ label: t("Campaigns"), to: "/campaigns" }]}
+        title={data.name}
+        description={<><JobState state={data.state} /> · {data.action_type} · {t("requested by {who}", { who: data.created_by })}</>}
+        actions={
+          <>
+            {data.state === "awaiting_approval" && (
+              <button onClick={() => { setPendingStop(null); setApproving(true); }}>{t("Approve")}</button>
+            )}
+            {["canary", "running", "planned"].includes(data.state) && (
+              <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
+            )}
+            {data.state === "paused" && (
+              <button onClick={() => control.mutate("resume")}>{t("Resume")}</button>
+            )}
+            {!["completed", "failed", "canceled"].includes(data.state) && (
+              <button className="secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
+            )}
+          </>
+        }
+      />
 
-      <div style={{ marginBottom: 20 }}>
-        {data.state === "awaiting_approval" && (
-          <button onClick={() => control.mutate("approve")}>{t("Approve")}</button>
-        )}{" "}
-        {["canary", "running", "planned"].includes(data.state) && (
-          <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
-        )}{" "}
-        {data.state === "paused" && (
-          <button onClick={() => control.mutate("resume")}>{t("Resume")}</button>
-        )}{" "}
-        {!["completed", "failed", "canceled"].includes(data.state) && (
-          <button className="secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
-        )}
-      </div>
-
-      {pendingStop && (
-        <div className="form" style={{ marginBottom: 20 }}>
-          <h2 style={{ marginTop: 0 }}>{pendingStop === "pause" ? t("Pause the campaign?") : t("Cancel the campaign?")}</h2>
-          <p className="subtitle" style={{ margin: 0 }}>
-            {pendingStop === "pause"
-              ? t("No further host starts until the campaign is resumed. {underWay} operations already under way finish on their own — a pause does not interrupt work on a host.", { underWay })
-              : t("{notStarted} hosts that have not started are marked canceled and will not start. {underWay} operations already under way finish on their own — cancelling does not interrupt them and does not roll anything back.", { notStarted, underWay })}
-          </p>
-          <label>
-            {t("Reason (kept in the audit trail)")}
-            <input value={stopReason} onChange={(e) => setStopReason(e.target.value)} />
-          </label>
-          <div className="operations">
-            <button onClick={() => control.mutate(pendingStop)} disabled={control.isPending}>
-              {pendingStop === "pause" ? t("Pause") : t("Cancel the campaign")}
-            </button>
-            <button className="secondary" onClick={() => setPendingStop(null)}>{t("Back")}</button>
-          </div>
-        </div>
+      {approving && data.state === "awaiting_approval" && (
+        <Card
+          title={t("Approve the campaign?")}
+          description={t("The consent covers exactly what is on screen: this operation, this payload, these {count} hosts and this rollout. It is recorded with the fingerprint {fingerprint}, your authentication and the reason.", { count: total, fingerprint: data.approval_fingerprint.slice(0, 12) })}
+          footer={
+            <Actions>
+              <button onClick={() => control.mutate("approve")} disabled={control.isPending}>
+                {t("Approve")}
+              </button>
+              <button className="secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
+            </Actions>
+          }
+        >
+          <FieldGrid>
+            <Field label={t("Reason (kept in the audit trail)")} hint={t("Required for a critical operation, at least 8 characters.")} wide>
+              <input value={approvalReason} onChange={(e) => setApprovalReason(e.target.value)} />
+            </Field>
+            <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
+              <input value={changeTicket} onChange={(e) => setChangeTicket(e.target.value)} placeholder="CHG-1234" />
+            </Field>
+          </FieldGrid>
+          {control.error && <p className="warning"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
+        </Card>
       )}
 
-      <Pairs>
-        <Pair label={t("Canary / wave")}>{data.canary_size} / {data.wave_size}</Pair>
-        <Pair label={t("Concurrent hosts")}>{data.max_concurrent}</Pair>
-        <Pair label={t("Failure threshold")}>{t("{percent}% or {count} hosts", { percent: data.failure_threshold_percent, count: data.failure_threshold_absolute })}</Pair>
-        <Pair label={t("Reboot policy")}>{data.reboot_policy}</Pair>
-        <Pair label={t("Approved by")}>{data.approved_by || "—"}</Pair>
-        <Pair label={t("Approval fingerprint")}>
-          <span title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
-        </Pair>
-        <Pair label={t("Paused by")}>{data.paused_by || "—"}</Pair>
-        <Pair label={t("Pause reason")}>{data.pause_reason || "—"}</Pair>
-        <Pair label={t("Created")}><Time value={data.created_at} /></Pair>
-      </Pairs>
+      {pendingStop && (
+        <Card
+          tone={pendingStop === "pause" ? "warn" : "error"}
+          title={pendingStop === "pause" ? t("Pause the campaign?") : t("Cancel the campaign?")}
+          description={pendingStop === "pause"
+            ? t("No further host starts until the campaign is resumed. {underWay} operations already under way finish on their own — a pause does not interrupt work on a host.", { underWay })
+            : t("{notStarted} hosts that have not started are marked canceled and will not start. {underWay} operations already under way finish on their own — cancelling does not interrupt them and does not roll anything back.", { notStarted, underWay })}
+          footer={
+            <Actions>
+              <button
+                className={pendingStop === "cancel" ? "danger" : ""}
+                onClick={() => control.mutate(pendingStop)}
+                disabled={control.isPending}
+              >
+                {pendingStop === "pause" ? t("Pause") : t("Cancel the campaign")}
+              </button>
+              <button className="secondary" onClick={() => setPendingStop(null)}>{t("Back")}</button>
+            </Actions>
+          }
+        >
+          <FieldGrid>
+            <Field label={t("Reason (kept in the audit trail)")} wide>
+              <input value={stopReason} onChange={(e) => setStopReason(e.target.value)} />
+            </Field>
+          </FieldGrid>
+        </Card>
+      )}
 
       {report.data && (
-        <>
-          <h2>{t("Waves")}</h2>
+        <StatGrid>
+          <Stat label={t("Targets")} value={total} />
+          <Stat label={t("Not started")} value={notStarted} />
+          <Stat label={t("In progress")} value={underWay} />
+          <Stat label={t("Succeeded")} value={succeeded} tone={succeeded > 0 ? "ok" : undefined} />
+          <Stat label={t("Failed")} value={failed} tone={failed > 0 ? "error" : undefined} />
+        </StatGrid>
+      )}
+
+      <Card title={t("Details")}>
+        <Pairs>
+          <Pair label={t("Canary / wave")}>{data.canary_size} / {data.wave_size}</Pair>
+          <Pair label={t("Concurrent hosts")}>{data.max_concurrent}</Pair>
+          <Pair label={t("Failure threshold")}>{t("{percent}% or {count} hosts", { percent: data.failure_threshold_percent, count: data.failure_threshold_absolute })}</Pair>
+          <Pair label={t("Reboot policy")}>{data.reboot_policy}</Pair>
+          <Pair label={t("Approved by")}>{data.approved_by || "—"}</Pair>
+          <Pair label={t("Approval fingerprint")}>
+            <span className="mono" title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
+          </Pair>
+          <Pair label={t("Paused by")}>{data.paused_by || "—"}</Pair>
+          <Pair label={t("Pause reason")}>{data.pause_reason || "—"}</Pair>
+          <Pair label={t("Created")}><Time value={data.created_at} /></Pair>
+        </Pairs>
+      </Card>
+
+      {approvals.data && approvals.data.items.length > 0 && (
+        <Card title={t("Approval record")} description={t("Who consented to what, on what authentication and why. The record is written once and never changed.")} flush>
           <table>
-            <thead><tr><th>{t("Wave")}</th><th>{t("Canary")}</th><th>{t("Closed")}</th><th>{t("Summary")}</th></tr></thead>
+            <thead><tr><th>{t("Approved by")}</th><th>{t("Requested by")}</th><th>{t("Authentication")}</th><th>{t("Reason")}</th><th>{t("Change ticket")}</th><th>{t("When")}</th></tr></thead>
+            <tbody>
+              {approvals.data.items.map((record) => (
+                <tr key={record.id}>
+                  <td>{record.approved_by}</td>
+                  <td>{record.requested_by}</td>
+                  <td title={record.acr ? `acr ${record.acr}${record.amr?.length ? `, amr ${record.amr.join(" ")}` : ""}` : undefined}>
+                    {record.authentication === "api_token" ? t("API token (not re-authenticated)") : t("session")}
+                    {record.authenticated_at && <> · <Time value={record.authenticated_at} /></>}
+                  </td>
+                  <td>{record.reason || "—"}</td>
+                  <td className="mono">{record.change_ticket || "—"}</td>
+                  <td><Time value={record.created_at} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {report.data && (
+        <Card title={t("Waves")} flush>
+          <table>
+            <thead><tr><th className="num">{t("Wave")}</th><th>{t("Canary")}</th><th>{t("Closed")}</th><th>{t("Summary")}</th></tr></thead>
             <tbody>
               {report.data.waves.map((wave) => (
                 <tr key={wave.wave}>
-                  <td>{wave.wave}</td>
+                  <td className="num">{wave.wave}</td>
                   <td>{wave.is_canary ? t("yes") : t("no")}</td>
                   <td>{wave.completed ? t("yes") : t("no")}</td>
                   <td>{Object.entries(wave.totals).map(([state, count]) => `${state}: ${count}`).join(", ")}</td>
@@ -163,133 +253,140 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
-        </>
+        </Card>
       )}
 
-      <h2>{t("Timeline")}</h2>
-      {!timeline.data?.items.length ? (
-        <Empty>{t("No recorded events yet.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("When")}</th><th>{t("Event")}</th><th>{t("Host")}</th><th>{t("Detail")}</th></tr></thead>
-          <tbody>
-            {timeline.data.items.map((entry) => (
-              <tr key={entry.id}>
-                <td><Time value={entry.occurred_at} /></td>
-                <td>{entry.event_type}</td>
-                <td>{eventHostName(entry, loaded)}</td>
-                <td>{eventDescription(entry)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Card title={t("Timeline")} flush>
+        {!timeline.data?.items.length ? (
+          <Empty>{t("No recorded events yet.")}</Empty>
+        ) : (
+          <table>
+            <thead><tr><th>{t("When")}</th><th>{t("Event")}</th><th>{t("Host")}</th><th>{t("Detail")}</th></tr></thead>
+            <tbody>
+              {timeline.data.items.map((entry) => (
+                <tr key={entry.id}>
+                  <td><Time value={entry.occurred_at} /></td>
+                  <td className="mono">{entry.event_type}</td>
+                  <td>{eventHostName(entry, loaded)}</td>
+                  <td>{eventDescription(entry)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
-      <h2>{t("Targets")}</h2>
       {/* The export is a file, not a screen: a report of ten thousand hosts
           goes to a spreadsheet, streamed from the server page by page. */}
-      <p className="source">
-        <a href={`/api/v1/campaigns/${id}/report?format=csv`} download={`campaign-${id}.csv`}>{t("Download the targets as CSV")}</a>
-      </p>
-      {/* The filter runs on the server and the rows arrive page by page:
-          the screen shows what the operator asked about, not the whole
-          fleet at once. */}
-      <div className="filters">
-        <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
-          <option value="">{t("state: any")}</option>
-          {TARGET_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
-        </select>
-        <input placeholder={t("Filter by hostname")} value={search} onChange={(e) => setSearch(e.target.value)} />
-        <span className="source">{t("{shown} of {total} shown", { shown: loaded.length, total })}</span>
-      </div>
-      {!loaded.length ? (
-        <Empty>{t("No targets.")}</Empty>
-      ) : (
-        // The rows are windowed: a campaign of ten thousand hosts is ten
-        // thousand rows on the server and a few dozen in the browser. The
-        // next page is fetched as the operator nears the end of the list.
-        <VirtualRows
-          items={loaded}
-          rowHeight={40}
-          height={480}
-          columns={7}
-          rowKey={(target) => target.host_id}
-          head={<tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("Plan")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr>}
-          onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
-          loading={targets.isFetchingNextPage}
-          render={(target) => {
-            const planJob = target.plan_job_id;
-            return (
-              <>
-                {/* The host opens on the module of the change, with the way
-                    back to this campaign in the address. */}
-                <td>
-                  <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
-                    {target.hostname || target.host_id.slice(0, 8)}
-                  </Link>
-                </td>
-                <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
-                {/* The consent covers the differences computed on the host,
-                    not the intent. A host without a planning operation has
-                    no plan to show; a host with one opens it below the table,
-                    because the summary does not fit a row of fixed height. */}
-                <td>
-                  {planJob ? (
-                    <button
-                      className="inline"
-                      aria-pressed={selectedPlanJob?.jobId === planJob}
-                      onClick={() => setSelectedPlanJob(
-                        selectedPlanJob?.jobId === planJob
-                          ? null
-                          : { jobId: planJob, host: target.hostname || target.host_id.slice(0, 8) },
-                      )}
-                    >
-                      {t("plan")}
-                    </button>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td><JobState state={target.state} /></td>
-                {/* The progress belongs to the operation currently running
-                    on this host. A host waiting for its wave has nothing to
-                    show. */}
-                <td>
-                  {targetProgress(progress, target) ? (
-                    <ProgressBar
-                      percent={targetProgress(progress, target)?.percent}
-                      step={targetProgress(progress, target)?.step}
-                      total={targetProgress(progress, target)?.total}
-                      caption={targetProgress(progress, target)?.message}
-                    />
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td><ErrorCode code={target.error_code} /></td>
-                <td title={target.message}>{target.message || "—"}</td>
-              </>
-            );
-          }}
-        />
-      )}
+      <Card
+        title={t("Targets")}
+        actions={
+          <a className="button" href={`/api/v1/campaigns/${id}/report?format=csv`} download={`campaign-${id}.csv`}>{t("Download the targets as CSV")}</a>
+        }
+        flush
+      >
+        {/* The filter runs on the server and the rows arrive page by page:
+            the screen shows what the operator asked about, not the whole
+            fleet at once. */}
+        <Toolbar end={<span>{t("{shown} of {total} shown", { shown: loaded.length, total })}</span>}>
+          <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
+            <option value="">{t("state: any")}</option>
+            {TARGET_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <input placeholder={t("Filter by hostname")} value={search} onChange={(e) => setSearch(e.target.value)} />
+        </Toolbar>
+        {!loaded.length ? (
+          <Empty>{t("No targets.")}</Empty>
+        ) : (
+          // The rows are windowed: a campaign of ten thousand hosts is ten
+          // thousand rows on the server and a few dozen in the browser. The
+          // next page is fetched as the operator nears the end of the list.
+          <VirtualRows
+            items={loaded}
+            rowHeight={40}
+            height={480}
+            columns={7}
+            rowKey={(target) => target.host_id}
+            head={<tr><th>{t("Host")}</th><th className="num">{t("Wave")}</th><th>{t("Plan")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr>}
+            onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
+            loading={targets.isFetchingNextPage}
+            render={(target) => {
+              const planJob = target.plan_job_id;
+              return (
+                <>
+                  {/* The host opens on the module of the change, with the way
+                      back to this campaign in the address. */}
+                  <td>
+                    <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                      {target.hostname || target.host_id.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td className="num">{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
+                  {/* The consent covers the differences computed on the host,
+                      not the intent. A host without a planning operation has
+                      no plan to show; a host with one opens it below the table,
+                      because the summary does not fit a row of fixed height. */}
+                  <td>
+                    {planJob ? (
+                      <button
+                        className="inline"
+                        aria-pressed={selectedPlanJob?.jobId === planJob}
+                        onClick={() => setSelectedPlanJob(
+                          selectedPlanJob?.jobId === planJob
+                            ? null
+                            : { jobId: planJob, host: target.hostname || target.host_id.slice(0, 8) },
+                        )}
+                      >
+                        {t("plan")}
+                      </button>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td><JobState state={target.state} /></td>
+                  {/* The progress belongs to the operation currently running
+                      on this host. A host waiting for its wave has nothing to
+                      show. */}
+                  <td>
+                    {targetProgress(progress, target) ? (
+                      <ProgressBar
+                        percent={targetProgress(progress, target)?.percent}
+                        step={targetProgress(progress, target)?.step}
+                        total={targetProgress(progress, target)?.total}
+                        caption={targetProgress(progress, target)?.message}
+                      />
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td><ErrorCode code={target.error_code} /></td>
+                  <td title={target.message}>{target.message || "—"}</td>
+                </>
+              );
+            }}
+          />
+        )}
+        {/* The button stays next to the automatic fetch: a page that failed
+            to arrive is asked for again by hand, not by scrolling. */}
+        {targets.hasNextPage && (
+          <p>
+            <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
+              {t("Load more ({n} left)", { n: total - loaded.length })}
+            </button>
+          </p>
+        )}
+      </Card>
       {selectedPlanJob && (
-        <div className="form" style={{ marginTop: 12 }}>
-          <h3 style={{ margin: "0 0 8px" }}>{t("Plan for {host}", { host: selectedPlanJob.host })}</h3>
+        <Card
+          title={t("Plan for {host}", { host: selectedPlanJob.host })}
+          footer={
+            <Actions>
+              <button className="secondary" onClick={() => setSelectedPlanJob(null)}>{t("Close")}</button>
+            </Actions>
+          }
+        >
           <JobPlan jobId={selectedPlanJob.jobId} />
-          <div className="operations">
-            <button className="secondary" onClick={() => setSelectedPlanJob(null)}>{t("Close")}</button>
-          </div>
-        </div>
-      )}
-      {/* The button stays next to the automatic fetch: a page that failed
-          to arrive is asked for again by hand, not by scrolling. */}
-      {targets.hasNextPage && (
-        <p>
-          <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
-            {t("Load more ({n} left)", { n: total - loaded.length })}
-          </button>
-        </p>
+        </Card>
       )}
     </>
   );

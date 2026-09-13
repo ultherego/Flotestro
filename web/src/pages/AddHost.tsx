@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
+import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useT } from "../i18n";
 
 type StepState = "waiting" | "done" | "failed";
@@ -120,173 +121,185 @@ export function AddHost() {
 
   return (
     <>
-      <h1>{t("Add host")}</h1>
-      <p className="subtitle">
-        {t("A host joins the fleet by proving it holds a one-time token, then keeping the certificate the panel issues for it. The token is shown once, here, and never again — it is not stored in this browser and cannot be read back from the panel.")}
-      </p>
+      <PageHeader
+        title={t("Add host")}
+        description={t("A host joins the fleet by proving it holds a one-time token, then keeping the certificate the panel issues for it. The token is shown once, here, and never again — it is not stored in this browser and cannot be read back from the panel.")}
+      />
 
       {!created ? (
-        <div className="form">
-          <h2>{t("1. What is being installed")}</h2>
-          <label>
-            {t("What this host is for")}
-            <input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t("web-042, Warsaw production")}
-            />
-          </label>
-          <div className="grid-two">
-            <label>
-              {t("Site")}
+        <Card
+          title={t("1. What is being installed")}
+          footer={
+            <Actions>
+              <button onClick={() => order.mutate()} disabled={order.isPending}>
+                {t("Create enrollment token")}
+              </button>
+            </Actions>
+          }
+        >
+          <FieldGrid>
+            <Field label={t("What this host is for")} wide>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={t("web-042, Warsaw production")}
+              />
+            </Field>
+            <Field label={t("Site")}>
               <input value={site} onChange={(e) => setSite(e.target.value)} />
-            </label>
-            <label>
-              {t("Environment")}
+            </Field>
+            <Field label={t("Environment")}>
               <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-            </label>
-          </div>
-          <label>
+            </Field>
             {/* A short deadline is a safeguard, not an inconvenience: a token
                 that lies around for hours is a secret waiting to leak. */}
-            {t("Token valid for (minutes, at most 24 h)")}
-            <input
-              type="number"
-              min={1}
-              max={1440}
-              value={minutes}
-              onChange={(e) => setMinutes(Number(e.target.value))}
-            />
-          </label>
-          <div className="operations">
-            <button onClick={() => order.mutate()} disabled={order.isPending}>
-              {t("Create enrollment token")}
-            </button>
-          </div>
-        </div>
+            <Field label={t("Token valid for (minutes, at most 24 h)")}>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={minutes}
+                onChange={(e) => setMinutes(Number(e.target.value))}
+              />
+            </Field>
+          </FieldGrid>
+        </Card>
       ) : (
-        <div className="form">
-          <h2>{t("2. Install on the host")}</h2>
-          <p className="source">
-            {t("Site {site} · environment {environment} · token expires", { site: created.site, environment: created.environment })}{" "}
-            <Time value={created.expires_at} />
-          </p>
-
-          <div className="operations" style={{ marginBottom: 12 }}>
-            <button
-              onClick={() => {
-                navigator.clipboard?.writeText(created.token);
-                setCopied(true);
-              }}
-            >
-              {copied ? t("Token copied") : t("Copy token")}
-            </button>
-            <span className="source">
-              {t("Shown once. Paste it into the hidden prompt on the host; do not put it in a shell command — the command line is visible to every user of that machine.")}
-            </span>
-          </div>
-
-          <div className="operations" style={{ marginBottom: 12 }}>
-            <button
-              className={family === "debian" ? "" : "secondary"}
-              onClick={() => setFamily("debian")}
-            >
-              Debian / Ubuntu
-            </button>
-            <button
-              className={family === "rpm" ? "" : "secondary"}
-              onClick={() => setFamily("rpm")}
-            >
-              Fedora / RHEL
-            </button>
-          </div>
-          <ol className="steps">
-            <li>
-              {t("Install the agent package")}
-              <pre>
-                {family === "debian"
-                  ? "sudo apt-get install flotestro-agent"
-                  : "sudo dnf install flotestro-agent"}
-              </pre>
-            </li>
-            <li>
-              {t("Point it at this panel in")} <code>/etc/flotestro/agent.yaml</code>
-              <pre>
-                {`connection:\n  enrollment_url: "${window.location.origin.replace(/:\d+$/, ":8444")}"\n  gateway_urls: ["${window.location.origin.replace(/:\d+$/, ":8443")}"]`}
-              </pre>
-            </li>
-            <li>
-              {t("Register the host and paste the token when asked")}
-              <pre>sudo -u flotestro-agent flotestro-agentctl enroll</pre>
-            </li>
-            <li>
-              {t("Start the agent")}
-              <pre>sudo systemctl start flotestro-agent.service</pre>
-            </li>
-          </ol>
-
-          <h2>{t("3. Enrollment status")}</h2>
-          <ul className="steps" aria-live="polite">
-            {steps.map((step) => (
-              <li key={step.key}>
-                <span className={`badge ${step.state === "done" ? "ok" : step.state === "failed" ? "warn" : "unknown"}`}>
-                  {stepMark(step.state)}
-                </span>{" "}
-                {t(stepDescriptions[step.key])}
-              </li>
-            ))}
-            {!steps.length && <li className="source">{t("waiting for the host…")}</li>}
-          </ul>
-
-          <div className="operations">
-            {hostReady && (
-              <button onClick={() => navigate(`/hosts/${hostReady}/overview`)}>
-                {t("Open host")}
+        <>
+          <Card
+            title={t("2. Install on the host")}
+            description={
+              <>
+                {t("Site {site} · environment {environment} · token expires", { site: created.site, environment: created.environment })}{" "}
+                <Time value={created.expires_at} />
+              </>
+            }
+          >
+            <Actions>
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(created.token);
+                  setCopied(true);
+                }}
+              >
+                {copied ? t("Token copied") : t("Copy token")}
               </button>
-            )}
-            <button className="secondary" onClick={() => revoke.mutate(created.id)}>
-              {t("Revoke token")}
-            </button>
-            <button className="secondary" onClick={() => setCreated(null)}>
-              {t("Add another host")}
-            </button>
-          </div>
-        </div>
-      )}
+              <span className="source">
+                {t("Shown once. Paste it into the hidden prompt on the host; do not put it in a shell command — the command line is visible to every user of that machine.")}
+              </span>
+            </Actions>
 
-      {message && <p className="source" style={{ margin: "12px 0" }}>{message}</p>}
+            {/* The commands differ by package manager; the choice changes
+                nothing on the server. */}
+            <div className="segmented" role="group">
+                <button
+                  className={family === "debian" ? "active" : ""}
+                  onClick={() => setFamily("debian")}
+                >
+                  Debian / Ubuntu
+                </button>
+                <button
+                  className={family === "rpm" ? "active" : ""}
+                  onClick={() => setFamily("rpm")}
+                >
+                  Fedora / RHEL
+                </button>
+            </div>
+            <ol className="steps">
+              <li>
+                {t("Install the agent package")}
+                <pre>
+                  {family === "debian"
+                    ? "sudo apt-get install flotestro-agent"
+                    : "sudo dnf install flotestro-agent"}
+                </pre>
+              </li>
+              <li>
+                {t("Point it at this panel in")} <code>/etc/flotestro/agent.yaml</code>
+                <pre>
+                  {`connection:\n  enrollment_url: "${window.location.origin.replace(/:\d+$/, ":8444")}"\n  gateway_urls: ["${window.location.origin.replace(/:\d+$/, ":8443")}"]`}
+                </pre>
+              </li>
+              <li>
+                {t("Register the host and paste the token when asked")}
+                <pre>sudo -u flotestro-agent flotestro-agentctl enroll</pre>
+              </li>
+              <li>
+                {t("Start the agent")}
+                <pre>sudo systemctl start flotestro-agent.service</pre>
+              </li>
+            </ol>
+          </Card>
 
-      <h2>{t("Pending installations")}</h2>
-      {!pending.length ? (
-        <Empty>{t("No installation is waiting for a host right now.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("What for")}</th><th>{t("Scope")}</th><th>{t("Uses")}</th><th>{t("Expires")}</th><th>{t("Requested by")}</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {pending.map((entry) => (
-              <tr key={entry.id}>
-                <td>
-                  {entry.description || "—"}
-                  <div className="source">{entry.purpose}</div>
-                </td>
-                <td className="source">{entry.site} / {entry.environment}</td>
-                <td className="source">{entry.uses} / {entry.max_uses}</td>
-                <td className="source"><Time value={entry.expires_at} /></td>
-                <td className="source">{entry.created_by}</td>
-                <td>
-                  <button className="secondary" onClick={() => revoke.mutate(entry.id)}>
-                    {t("Revoke")}
+          <Card
+            title={t("3. Enrollment status")}
+            footer={
+              <Actions>
+                {hostReady && (
+                  <button onClick={() => navigate(`/hosts/${hostReady}/overview`)}>
+                    {t("Open host")}
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                )}
+                <button className="secondary" onClick={() => revoke.mutate(created.id)}>
+                  {t("Revoke token")}
+                </button>
+                <button className="secondary" onClick={() => setCreated(null)}>
+                  {t("Add another host")}
+                </button>
+              </Actions>
+            }
+          >
+            <ul className="steps" aria-live="polite">
+              {steps.map((step) => (
+                <li key={step.key}>
+                  <span className={`badge ${step.state === "done" ? "ok" : step.state === "failed" ? "warn" : "unknown"}`}>
+                    {stepMark(step.state)}
+                  </span>{" "}
+                  {t(stepDescriptions[step.key])}
+                </li>
+              ))}
+              {!steps.length && <li className="source">{t("waiting for the host…")}</li>}
+            </ul>
+          </Card>
+        </>
       )}
+
+      {message && <p className="source">{message}</p>}
+
+      <Card title={t("Pending installations")} flush>
+        {!pending.length ? (
+          <Empty>{t("No installation is waiting for a host right now.")}</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>{t("What for")}</th><th>{t("Scope")}</th><th className="num">{t("Uses")}</th><th>{t("Expires")}</th><th>{t("Requested by")}</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pending.map((entry) => (
+                <tr key={entry.id}>
+                  <td>
+                    {entry.description || "—"}
+                    <div className="source">{entry.purpose}</div>
+                  </td>
+                  <td className="source">{entry.site} / {entry.environment}</td>
+                  <td className="num">{entry.uses} / {entry.max_uses}</td>
+                  <td className="source"><Time value={entry.expires_at} /></td>
+                  <td className="source">{entry.created_by}</td>
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      <button className="secondary" onClick={() => revoke.mutate(entry.id)}>
+                        {t("Revoke")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }

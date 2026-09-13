@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
+import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 type Item = {
@@ -61,88 +62,94 @@ export function FleetCertificates() {
   if (!data) return <Empty>{t("Reading certificates…")}</Empty>;
 
   const counts = data.counts ?? {};
+  const expired = counts.expired ?? 0;
+  const critical = counts.critical ?? 0;
+  const warning = counts.warning ?? 0;
   return (
     <>
-      <h1>{t("Certificates")}</h1>
-      <p className="subtitle">
-        {t("Expiry dates from the paths the panel watches and from everything certmonger tracks. Warning at {warning} days, urgent at {critical}. A host that reports no certificate is not a host without them — it is a host nobody has pointed at a path yet.", {
+      <PageHeader
+        title={t("Certificates")}
+        description={t("Expiry dates from the paths the panel watches and from everything certmonger tracks. Warning at {warning} days, urgent at {critical}. A host that reports no certificate is not a host without them — it is a host nobody has pointed at a path yet.", {
           warning: data.thresholds.warning_days, critical: data.thresholds.critical_days,
         })}
-      </p>
+      />
 
-      <div className="filters">
-        <span className="badge error">{t("{n} expired", { n: counts.expired ?? 0 })}</span>
-        <span className="badge error">{t("{n} urgent", { n: counts.critical ?? 0 })}</span>
-        <span className="badge warn">{t("{n} expiring", { n: counts.warning ?? 0 })}</span>
-        <span className="badge unknown">{t("{n} unknown", { n: counts.unknown ?? 0 })}</span>
-        <span className="badge ok">{t("{n} valid", { n: counts.valid ?? 0 })}</span>
-        <span className="source">
-          {t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.hosts_total })}
-        </span>
-      </div>
+      <StatGrid>
+        <Stat label={t("Expired")} value={expired} tone={expired > 0 ? "error" : undefined} />
+        <Stat label={t("Urgent")} value={critical} tone={critical > 0 ? "error" : undefined} />
+        <Stat label={t("Expiring")} value={warning} tone={warning > 0 ? "warn" : undefined} />
+        <Stat label={t("Unknown")} value={counts.unknown ?? 0} tone="unknown" />
+        <Stat label={t("Valid")} value={counts.valid ?? 0} tone="ok" />
+        <Stat
+          label={t("Hosts")}
+          value={data.hosts_total}
+          hint={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.hosts_total })}
+        />
+      </StatGrid>
 
       <ExpiryTimeline timeline={data.timeline ?? []} />
 
       <Trust leaves={data.items} />
 
-      {!data.items.length ? (
-        <Empty>
-          {t("No host reports a certificate yet. Open a host, watch a path and scan it.")}
-        </Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Expires")}</th><th>{t("Host")}</th><th>{t("Path")}</th><th>{t("Subject")}</th>
-              <th>{t("Issuer")}</th><th>{t("Renewal")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((item) => (
-              <tr key={`${item.host_id}-${item.path}`}>
-                <td>
-                  <ExpiryBadge status={item.status} days={item.days_to_expiry} />
-                  {item.not_after && (
-                    <div className="source"><Time value={item.not_after} /></div>
-                  )}
-                </td>
-                <td>
-                  <Link to={`/hosts/${item.host_id}/certificates`}>{item.hostname}</Link>
-                </td>
-                <td className="source">
-                  {item.path}
-                  {item.owner_service && <div>{item.owner_service}</div>}
-                </td>
-                <td>
-                  {item.unavailable_reason ? (
-                    <span className="badge unknown">{item.unavailable_reason}</span>
-                  ) : (
-                    item.subject
-                  )}
-                </td>
-                <td className="source">{item.issuer}</td>
-                <td>
-                  {/* "Manual" is a finding, "unknown" a missing answer - and
-                      the two must not look the same. */}
-                  {item.renewal === "tracked" ? (
-                    <span className="badge ok">certmonger</span>
-                  ) : item.renewal === "manual" ? (
-                    <span className="badge warn">{t("manual")}</span>
-                  ) : (
-                    <span className="badge unknown">{t("unknown")}</span>
-                  )}
-                </td>
+      <Card
+        flush
+        footer={data.truncated && (
+          <p>{t("Only the closest {n} certificates are listed. The counts above cover all of them.", { n: data.items.length })}</p>
+        )}
+      >
+        {!data.items.length ? (
+          <Empty>
+            {t("No host reports a certificate yet. Open a host, watch a path and scan it.")}
+          </Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>{t("Expires")}</th><th>{t("Host")}</th><th>{t("Path")}</th><th>{t("Subject")}</th>
+                <th>{t("Issuer")}</th><th>{t("Renewal")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {data.truncated && (
-        <p className="source">
-          {t("Only the closest {n} certificates are listed. The counts above cover all of them.", { n: data.items.length })}
-        </p>
-      )}
+            </thead>
+            <tbody>
+              {data.items.map((item) => (
+                <tr key={`${item.host_id}-${item.path}`}>
+                  <td>
+                    <ExpiryBadge status={item.status} days={item.days_to_expiry} />
+                    {item.not_after && (
+                      <div className="source"><Time value={item.not_after} /></div>
+                    )}
+                  </td>
+                  <td>
+                    <Link to={`/hosts/${item.host_id}/certificates`}>{item.hostname}</Link>
+                  </td>
+                  <td className="source mono">
+                    {item.path}
+                    {item.owner_service && <div>{item.owner_service}</div>}
+                  </td>
+                  <td>
+                    {item.unavailable_reason ? (
+                      <span className="badge unknown">{item.unavailable_reason}</span>
+                    ) : (
+                      item.subject
+                    )}
+                  </td>
+                  <td className="source">{item.issuer}</td>
+                  <td>
+                    {/* "Manual" is a finding, "unknown" a missing answer - and
+                        the two must not look the same. */}
+                    {item.renewal === "tracked" ? (
+                      <span className="badge ok">certmonger</span>
+                    ) : item.renewal === "manual" ? (
+                      <span className="badge warn">{t("manual")}</span>
+                    ) : (
+                      <span className="badge unknown">{t("unknown")}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }
@@ -191,23 +198,33 @@ function Trust({ leaves }: { leaves: Item[] }) {
     `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
 
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t("Trusted authorities")}</h2>
-      <p className="subtitle">
-        {t("Anchors the panel put on hosts. During a rotation a host trusts both the old and the new authority; the old one may only be withdrawn once nothing signs with it any more.")}
-      </p>
-      <p className="source">
-        {t("Rotation in four stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old authority. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.")}{" "}
-        <Link to={bulk("certificate.trust.ensure", t("Distribute a new authority"), {
+    <Card
+      title={t("Trusted authorities")}
+      description={t("Anchors the panel put on hosts. During a rotation a host trusts both the old and the new authority; the old one may only be withdrawn once nothing signs with it any more.")}
+      actions={
+        <Link className="button" to={bulk("certificate.trust.ensure", t("Distribute a new authority"), {
           certificate: { anchor_id: "fleet-ca-" + new Date().getFullYear(), certificate: "-----BEGIN CERTIFICATE-----\nREPLACE WITH THE AUTHORITY CERTIFICATE\n-----END CERTIFICATE-----\n" },
         })}>{t("Distribute a new authority")}</Link>
-      </p>
+      }
+      footer={
+        <div>
+          <p className="source">
+            {t("Rotation in four stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old authority. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.")}
+          </p>
+          <div className="source">
+            {t("{n} hosts have not reported a trust store yet", { n: data.hosts_unknown })}
+            {withoutStore.map((group) => `; ${group.count}: ${group.reason}`).join("")}
+          </div>
+        </div>
+      }
+      flush
+    >
       {!data.items.length ? (
         <Empty>{t("No panel-managed authority on any host.")}</Empty>
       ) : (
         <table>
           <thead>
-            <tr><th>{t("Authority")}</th><th>{t("Hosts")}</th><th>{t("Leaves issued by it")}</th><th>{t("Valid until")}</th><th>{t("Fingerprint")}</th><th>{t("Stage")}</th></tr>
+            <tr><th>{t("Authority")}</th><th>{t("Hosts")}</th><th className="num">{t("Leaves issued by it")}</th><th>{t("Valid until")}</th><th>{t("Fingerprint")}</th><th>{t("Stage")}</th></tr>
           </thead>
           <tbody>
             {data.items.map((anchor) => {
@@ -225,12 +242,12 @@ function Trust({ leaves }: { leaves: Item[] }) {
                   {t("{n} of {total}", { n: anchor.hosts, total: data.hosts_total })}
                   <div className="source">{(anchor.sample ?? []).join(", ")}</div>
                 </td>
-                <td>
+                <td className="num">
                   {issued}
                   {issued > 0 && <div className="source">{t("rotate the leaves before withdrawing")}</div>}
                 </td>
                 <td>{anchor.not_after ? <Time value={anchor.not_after} /> : "—"}</td>
-                <td className="source">{(anchor.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
+                <td className="source mono">{(anchor.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
                 <td>
                   {!covered ? (
                     <>
@@ -256,11 +273,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
           </tbody>
         </table>
       )}
-      <div className="source">
-        {t("{n} hosts have not reported a trust store yet", { n: data.hosts_unknown })}
-        {withoutStore.map((group) => `; ${group.count}: ${group.reason}`).join("")}
-      </div>
-    </section>
+    </Card>
   );
 }
 
@@ -272,17 +285,17 @@ function Trust({ leaves }: { leaves: Item[] }) {
  * planned for this week or for the quarter.
  */
 function ExpiryTimeline({ timeline }: { timeline: { reason: string; count: number }[] }) {
+  const t = useT();
   if (!timeline.length) return null;
   const total = timeline.reduce((sum, window) => sum + window.count, 0);
   if (total === 0) return null;
   return (
-    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12 }}>
-      {timeline.map((window) => (
-        <div key={window.reason}>
-          <strong>{window.count}</strong>
-          <div className="source">{window.reason}</div>
-        </div>
-      ))}
-    </div>
+    <Card title={t("Expires")}>
+      <StatGrid compact>
+        {timeline.map((window) => (
+          <Stat key={window.reason} label={window.reason} value={window.count} />
+        ))}
+      </StatGrid>
+    </Card>
   );
 }

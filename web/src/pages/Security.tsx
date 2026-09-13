@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
+import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 type HostWithFinding = { host_id: string; hostname: string; observed: string; action?: string };
@@ -47,74 +48,91 @@ export function FleetSecurity() {
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Empty>{t("Computing findings…")}</Empty>;
 
+  // The fleet-wide sums: a finding on a hundred hosts counts a hundred
+  // times here, because that is how many jobs the fix takes.
+  const sum = (key: "failed" | "fixable" | "unknown") => data.checks.reduce((total, check) => total + check[key], 0);
+  const needAction = sum("failed");
+  const fixable = sum("fixable");
+  const unknown = sum("unknown");
+
   return (
     <>
-      <h1>{t("Security")}</h1>
-      <p className="subtitle">
-        {t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — but the fix still goes host by host, as a job of the module that owns it.")}
-      </p>
+      <PageHeader
+        title={t("Security")}
+        description={t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — but the fix still goes host by host, as a job of the module that owns it.")}
+      />
 
-      <table>
-        <thead>
-          <tr>
-            <th>{t("Check")}</th><th>{t("Need action")}</th><th>{t("Passed")}</th><th>{t("Unknown")}</th><th>{t("N/A")}</th><th>{t("Expected")}</th><th>{t("Fixable")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.checks.map((check) => (
-            <Fragment key={check.check_id}>
-              <tr>
-                <td>
-                  <button
-                    className="secondary"
-                    onClick={() =>
-                      setExpanded((current) =>
-                        current === check.check_id ? "" : check.check_id,
-                      )
-                    }
-                    disabled={!check.failed}
-                  >
-                    {expanded === check.check_id ? "▾" : "▸"}
-                  </button>{" "}
-                  {check.title}
-                  <div className="source">{check.check_id}</div>
-                </td>
-                <td>{severityBadge(check.severity, check.failed)}</td>
-                <td>{check.passed}</td>
-                {/* Unknown is not passed: a host that did not report the
-                    fact is not a compliant host. */}
-                <td>{check.unknown ? <span className="badge unknown">{check.unknown}</span> : 0}</td>
-                {/* A check that does not apply to the host enters neither
-                    compliance nor non-compliance. */}
-                <td>{check.not_applicable}</td>
-                <td>{check.expected}</td>
-                <td>
-                  {check.fixable}
-                  {check.failed > check.fixable && (
-                    <div className="source">
-                      {t("{n} need a decision", { n: check.failed - check.fixable })}
-                    </div>
-                  )}
-                </td>
-              </tr>
-              {expanded === check.check_id &&
-                (check.hosts ?? []).map((host) => (
-                  <tr key={`${check.check_id}-${host.host_id}`}>
-                    <td colSpan={2}>
-                      <Link to={`/hosts/${host.host_id}/security`}>{host.hostname}</Link>
-                    </td>
-                    <td colSpan={4}>{host.observed}</td>
-                    <td>{host.action ? <code>{host.action}</code> : <span className="source">—</span>}</td>
-                  </tr>
-                ))}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+      <StatGrid>
+        <Stat label={t("Hosts")} value={data.hosts} />
+        <Stat label={t("Checks")} value={data.checks.length} />
+        <Stat label={t("Need action")} value={needAction} tone={needAction > 0 ? "error" : "ok"} />
+        <Stat label={t("Fixable")} value={fixable} />
+        <Stat label={t("Unknown")} value={unknown} tone={unknown > 0 ? "unknown" : undefined} />
+      </StatGrid>
 
-      <p className="source">
-        {t("{n} hosts", { n: data.hosts })} · {t("computed")} <Time value={data.generated_at} />
-      </p>
+      <Card
+        flush
+        footer={<p>{t("{n} hosts", { n: data.hosts })} · {t("computed")} <Time value={data.generated_at} /></p>}
+      >
+        <table>
+          <thead>
+            <tr>
+              <th>{t("Check")}</th><th className="num">{t("Need action")}</th><th className="num">{t("Passed")}</th><th className="num">{t("Unknown")}</th><th className="num">{t("N/A")}</th><th>{t("Expected")}</th><th className="num">{t("Fixable")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.checks.map((check) => (
+              <Fragment key={check.check_id}>
+                <tr>
+                  <td>
+                    <button
+                      className="expander"
+                      aria-expanded={expanded === check.check_id}
+                      onClick={() =>
+                        setExpanded((current) =>
+                          current === check.check_id ? "" : check.check_id,
+                        )
+                      }
+                      disabled={!check.failed}
+                    >
+                      {expanded === check.check_id ? "▾" : "▸"}
+                    </button>
+                    {check.title}
+                    <div className="source mono">{check.check_id}</div>
+                  </td>
+                  <td className="num">{severityBadge(check.severity, check.failed)}</td>
+                  <td className="num">{check.passed}</td>
+                  {/* Unknown is not passed: a host that did not report the
+                      fact is not a compliant host. */}
+                  <td className="num">{check.unknown ? <span className="badge unknown">{check.unknown}</span> : 0}</td>
+                  {/* A check that does not apply to the host enters neither
+                      compliance nor non-compliance. */}
+                  <td className="num">{check.not_applicable}</td>
+                  <td className="mono">{check.expected}</td>
+                  <td className="num">
+                    {check.fixable}
+                    {check.failed > check.fixable && (
+                      <div className="source">
+                        {t("{n} need a decision", { n: check.failed - check.fixable })}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+                {expanded === check.check_id &&
+                  (check.hosts ?? []).map((host) => (
+                    <tr key={`${check.check_id}-${host.host_id}`} className="detail-row">
+                      <td colSpan={2}>
+                        <Link to={`/hosts/${host.host_id}/security`}>{host.hostname}</Link>
+                      </td>
+                      <td colSpan={4} className="mono">{host.observed}</td>
+                      <td>{host.action ? <code>{host.action}</code> : <span className="source">—</span>}</td>
+                    </tr>
+                  ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </>
   );
 }

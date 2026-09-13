@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { AuditEvent } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
+import { Card, PageHeader, Toolbar } from "../components/layout";
 import { useT } from "../i18n";
 
 /** The audit trail. Denials are as visible as successes. */
@@ -18,10 +19,12 @@ export function Audit() {
   if (error instanceof ApiError && error.forbidden) {
     return (
       <>
-        <h1>{t("Audit")}</h1>
-        <Empty>
-          {t("You do not have permission to read the fleet-wide audit trail. A single host's audit trail is available in its own view.")}
-        </Empty>
+        <PageHeader title={t("Audit")} />
+        <Card>
+          <Empty>
+            {t("You do not have permission to read the fleet-wide audit trail. A single host's audit trail is available in its own view.")}
+          </Empty>
+        </Card>
       </>
     );
   }
@@ -31,36 +34,40 @@ export function Audit() {
 
   return (
     <>
-      <h1>{t("Audit")}</h1>
-      <p className="subtitle">{t("Every success and failure creates an event; so does every denial.")}</p>
+      <PageHeader
+        title={t("Audit")}
+        description={t("Every success and failure creates an event; so does every denial.")}
+      />
 
-      <div className="filters">
-        <label>
-          <input type="checkbox" checked={denialsOnly} onChange={(e) => setDenialsOnly(e.target.checked)} />
-          {" "}{t("denials only")}
-        </label>
-      </div>
+      <Card flush>
+        <Toolbar end={<span>{t("{n} events", { n: events.length })}</span>}>
+          <label className="toggle">
+            <input type="checkbox" checked={denialsOnly} onChange={(e) => setDenialsOnly(e.target.checked)} />
+            {" "}{t("denials only")}
+          </label>
+        </Toolbar>
 
-      {!events.length ? (
-        <Empty>{t("No events.")}</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Kind")}</th><th>{t("Operation")}</th><th>{t("Target")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
-          <tbody>
-            {events.map((event) => (
-              <tr key={event.id}>
-                <td><Time value={event.occurred_at} /></td>
-                <td>{event.actor_id}</td>
-                <td>{event.actor_type}</td>
-                <td>{event.action}</td>
-                <td>{event.target_type ? `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}` : "—"}</td>
-                <td><JobState state={event.outcome} /></td>
-                <td className="source">{digest(event.detail)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        {!events.length ? (
+          <Empty>{t("No events.")}</Empty>
+        ) : (
+          <table>
+            <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Kind")}</th><th>{t("Operation")}</th><th>{t("Target")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
+            <tbody>
+              {events.map((event) => (
+                <tr key={event.id}>
+                  <td><Time value={event.occurred_at} /></td>
+                  <td className="mono">{event.actor_id}</td>
+                  <td>{event.actor_type}</td>
+                  <td className="mono">{event.action}</td>
+                  <td className="mono">{event.target_type ? `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}` : "—"}</td>
+                  <td><JobState state={event.outcome} /></td>
+                  <td className="source">{digest(event.detail)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }

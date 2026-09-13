@@ -135,6 +135,22 @@ export type Attempt = {
   finished_at?: string;
 };
 
+/** The evidence of a consent: written once when a campaign is approved. */
+export type CampaignApproval = {
+  id: string;
+  campaign_id: string;
+  approval_fingerprint: string;
+  requested_by: string;
+  approved_by: string;
+  authentication: "session" | "api_token";
+  acr?: string;
+  amr?: string[];
+  authenticated_at?: string;
+  reason?: string;
+  change_ticket?: string;
+  created_at: string;
+};
+
 export type Campaign = {
   id: string;
   name: string;

@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import { PlanSummary } from "../components/plan";
 import type { Attempt, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
+import { Card, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
 import { OPERATIONS_INTERVAL, useProgress } from "../lib/stream";
 import { useT } from "../i18n";
 
@@ -42,90 +43,118 @@ export function Jobs() {
 
   if (error) return <ErrorBox error={error} />;
 
+  // The tiles count what is on the list, nothing more: the list is one
+  // page of the newest jobs, and the hint says so.
+  const jobs = data?.items ?? [];
+  const count = (states: string[]) => jobs.filter((job) => states.includes(job.state)).length;
+  const awaiting = count(["awaiting_approval"]);
+  const inProgress = count(["queued", "leased", "dispatched", "running"]);
+  const failed = count(["failed", "timed_out", "expired"]);
+  const succeeded = count(["succeeded"]);
+  const listed = t("among the {n} listed", { n: jobs.length });
+
   return (
     <>
-      <h1>{t("Jobs")}</h1>
-      <p className="subtitle">{t("Approval confirms the plan hash, so tampering with its content is detectable.")}</p>
+      <PageHeader
+        title={t("Jobs")}
+        description={t("Approval confirms the plan hash, so tampering with its content is detectable.")}
+      />
 
-      <div className="filters">
-        <select value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">{t("state: any")}</option>
-          {["awaiting_approval", "queued", "dispatched", "running", "succeeded", "failed", "canceled", "expired"].map(
-            (value) => <option key={value} value={value}>{value}</option>,
-          )}
-        </select>
-      </div>
+      <StatGrid>
+        <Stat label={t("Awaiting approval")} value={awaiting} hint={listed} tone={awaiting > 0 ? "warn" : undefined} />
+        <Stat label={t("In progress")} value={inProgress} hint={listed} />
+        <Stat label={t("Failed")} value={failed} hint={listed} tone={failed > 0 ? "error" : undefined} />
+        <Stat label={t("Succeeded")} value={succeeded} hint={listed} />
+      </StatGrid>
 
-      {!data?.items.length ? (
-        <Empty>{t("No jobs.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Operation")}</th><th>{t("State")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th>
-              <th>{t("Result")}</th><th>{t("Created")}</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((job) => (
-              <>
-                <tr key={job.id}>
-                  <td>
-                    <a href="#" onClick={(e) => { e.preventDefault(); setExpanded(expanded === job.id ? "" : job.id); }}>
-                      {job.action_type}
-                    </a>
-                  </td>
-                  <td>
-                    <JobState state={job.state} />
-                    {/* The bar accompanies the state, it does not replace it:
-                        the operator is to see both that the operation runs
-                        and how far it got. */}
-                    {progress.has(job.id) && (
-                      <ProgressBar
-                        percent={progress.get(job.id)?.percent}
-                        step={progress.get(job.id)?.step}
-                        total={progress.get(job.id)?.total}
-                        caption={progress.get(job.id)?.message}
-                      />
-                    )}
-                  </td>
-                  <td>{job.created_by}</td>
-                  {/* For a destructive operation one approval starts nothing:
-                      the operator is to see whom we are still waiting for,
-                      instead of clicking "Approve" and seeing nothing happen. */}
-                  <td>
-                    {job.required_approvals > 1 ? (
-                      <>
-                        {t("{collected} of {required} approvals", { collected: job.collected_approvals, required: job.required_approvals })}
-                        {job.approved_by && <span className="source"> · {job.approved_by}</span>}
-                      </>
-                    ) : (
-                      job.approved_by || "—"
-                    )}
-                  </td>
-                  <td>{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</td>
-                  <td><Time value={job.created_at} /></td>
-                  <td>
-                    {job.state === "awaiting_approval" && (
-                      <>
-                        <button onClick={() => approve.mutate(job)} disabled={approve.isPending}>
-                          {t("Approve")}
-                        </button>{" "}
-                        <button className="secondary" onClick={() => cancel.mutate(job)}>{t("Cancel")}</button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-                {expanded === job.id && (
-                  <tr key={`${job.id}-attempts`}>
-                    <td colSpan={7}><Attempts jobId={job.id} /></td>
+      <Card flush>
+        <Toolbar>
+          <select value={state} onChange={(e) => setState(e.target.value)}>
+            <option value="">{t("state: any")}</option>
+            {["awaiting_approval", "queued", "dispatched", "running", "succeeded", "failed", "canceled", "expired"].map(
+              (value) => <option key={value} value={value}>{value}</option>,
+            )}
+          </select>
+        </Toolbar>
+
+        {!data?.items.length ? (
+          <Empty>{t("No jobs.")}</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>{t("Operation")}</th><th>{t("State")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th>
+                <th>{t("Result")}</th><th>{t("Created")}</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((job) => (
+                <Fragment key={job.id}>
+                  <tr>
+                    <td>
+                      <button
+                        className="expander"
+                        aria-expanded={expanded === job.id}
+                        onClick={() => setExpanded(expanded === job.id ? "" : job.id)}
+                      >
+                        {expanded === job.id ? "▾" : "▸"}
+                      </button>
+                      <a href="#" className="mono" onClick={(e) => { e.preventDefault(); setExpanded(expanded === job.id ? "" : job.id); }}>
+                        {job.action_type}
+                      </a>
+                    </td>
+                    <td>
+                      <JobState state={job.state} />
+                      {/* The bar accompanies the state, it does not replace it:
+                          the operator is to see both that the operation runs
+                          and how far it got. */}
+                      {progress.has(job.id) && (
+                        <ProgressBar
+                          percent={progress.get(job.id)?.percent}
+                          step={progress.get(job.id)?.step}
+                          total={progress.get(job.id)?.total}
+                          caption={progress.get(job.id)?.message}
+                        />
+                      )}
+                    </td>
+                    <td>{job.created_by}</td>
+                    {/* For a destructive operation one approval starts nothing:
+                        the operator is to see whom we are still waiting for,
+                        instead of clicking "Approve" and seeing nothing happen. */}
+                    <td>
+                      {job.required_approvals > 1 ? (
+                        <>
+                          {t("{collected} of {required} approvals", { collected: job.collected_approvals, required: job.required_approvals })}
+                          {job.approved_by && <span className="source"> · {job.approved_by}</span>}
+                        </>
+                      ) : (
+                        job.approved_by || "—"
+                      )}
+                    </td>
+                    <td>{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</td>
+                    <td><Time value={job.created_at} /></td>
+                    <td className="actions-cell">
+                      {job.state === "awaiting_approval" && (
+                        <div className="row-actions">
+                          <button onClick={() => approve.mutate(job)} disabled={approve.isPending}>
+                            {t("Approve")}
+                          </button>
+                          <button className="secondary" onClick={() => cancel.mutate(job)}>{t("Cancel")}</button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
-                )}
-              </>
-            ))}
-          </tbody>
-        </table>
-      )}
+                  {expanded === job.id && (
+                    <tr className="detail-row">
+                      <td colSpan={7}><Attempts jobId={job.id} /></td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }
@@ -143,8 +172,8 @@ function Attempts({ jobId }: { jobId: string }) {
   return (
     <div>
       {data.items.map((attempt) => (
-        <div key={attempt.id} style={{ marginBottom: 12 }}>
-          <div>
+        <div key={attempt.id} className="attempt">
+          <div className="attempt-head">
             {t("attempt {n}", { n: attempt.attempt_number })} · <JobState state={attempt.status ?? "—"} /> ·{" "}
             {t("exit code {code}", { code: attempt.exit_code ?? "—" })}
             {attempt.replayed && <> · <span className="badge">{t("replayed from journal")}</span></>}
@@ -159,8 +188,8 @@ function Attempts({ jobId }: { jobId: string }) {
           )}
           {attempt.message && <div className="source">{attempt.message}</div>}
           {attempt.detail && <TypedResult detail={attempt.detail} />}
-          {attempt.stdout && <pre style={{ marginTop: 8 }}>{attempt.stdout.slice(0, 4000)}</pre>}
-          {attempt.stderr && <pre style={{ marginTop: 8 }}>{attempt.stderr.slice(0, 2000)}</pre>}
+          {attempt.stdout && <pre>{attempt.stdout.slice(0, 4000)}</pre>}
+          {attempt.stderr && <pre>{attempt.stderr.slice(0, 2000)}</pre>}
         </div>
       ))}
     </div>

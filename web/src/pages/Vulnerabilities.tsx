@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
+import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 type Item = {
@@ -89,24 +90,30 @@ export function FleetVulnerabilities() {
 
   const reason = (code: string) => (COVERAGE_REASONS[code] ? t(COVERAGE_REASONS[code]) : code);
 
+  const fullyAssessed = data.hosts_assessed >= data.hosts_total;
+
   return (
     <>
-      <h1>{t("Vulnerabilities")}</h1>
-      <p className="subtitle">
-        {t("Decided by each distribution's own security tracker, because fixes are backported: a version that looks vulnerable upstream may already carry the patch. Upstream feeds can add descriptions and scores later, but they never overrule the vendor.")}
-      </p>
+      <PageHeader
+        title={t("Vulnerabilities")}
+        description={t("Decided by each distribution's own security tracker, because fixes are backported: a version that looks vulnerable upstream may already carry the patch. Upstream feeds can add descriptions and scores later, but they never overrule the vendor.")}
+      />
 
-      <div className="filters">
-        <span className="badge error">{t("{n} with a vendor fix", { n: data.affected_with_vendor_fix })}</span>
-        <span className="badge warn">{t("{n} no vendor fix", { n: data.affected_no_fix })}</span>
-        <span className="badge unknown">{t("{n} not established", { n: data.unknown })}</span>
-        <span className={`badge ${data.hosts_assessed < data.hosts_total ? "warn" : "ok"}`}>
-          {t("{assessed}/{total} hosts fully assessed", { assessed: data.hosts_assessed, total: data.hosts_total })}
-        </span>
-      </div>
-      {/* Four numbers, because they are four different questions. The same
+      {/* Two rows of numbers, because they are different questions. The
+          first says how much is open and whether the fleet could be
+          assessed at all; the second says how big the work is - the same
           CVE on twenty hosts is one vendor matter and twenty machines to
-          move - a single "findings" number says neither. */}
+          move, and a single "findings" number says neither. */}
+      <StatGrid>
+        <Stat label={t("Vendor fix")} value={data.affected_with_vendor_fix} tone={data.affected_with_vendor_fix > 0 ? "error" : "ok"} />
+        <Stat label={t("No fix")} value={data.affected_no_fix} tone={data.affected_no_fix > 0 ? "warn" : undefined} />
+        <Stat label={t("Not established")} value={data.unknown} tone={data.unknown > 0 ? "unknown" : undefined} />
+        <Stat
+          label={t("Assessed")}
+          value={`${data.hosts_assessed}/${data.hosts_total}`}
+          tone={fullyAssessed ? "ok" : "warn"}
+        />
+      </StatGrid>
       <p className="source">
         {t("{cves} distinct CVEs · {advisories} vendor advisories · {packages} installed packages to move · {hosts} hosts affected.", {
           cves: data.unique_cves, advisories: data.unique_advisories,
@@ -126,85 +133,87 @@ export function FleetVulnerabilities() {
         </p>
       )}
 
-      <h2>{t("Security data")}</h2>
-      {!data.sources.length ? (
-        <Empty>{t("No feed has been fetched yet.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr><th>{t("Provider")}</th><th>{t("Advisories")}</th><th>{t("Releases")}</th><th>{t("Fetched")}</th><th>{t("State")}</th></tr>
-          </thead>
-          <tbody>
-            {data.sources.map((source) => (
-              <tr key={source.provider}>
-                <td>{source.provider}</td>
-                <td>{source.advisories}</td>
-                <td className="source">{(source.releases ?? []).join(", ")}</td>
-                <td><Time value={source.fetched_at} /></td>
-                <td>
-                  {source.error ? (
-                    <span className="badge error">{source.error.slice(0, 80)}</span>
-                  ) : source.stale ? (
-                    <span className="badge warn">
-                      {t("older than {n} h", { n: data.max_snapshot_age_hours })}
-                    </span>
-                  ) : (
-                    <span className="badge ok">{t("fresh")}</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Card title={t("Security data")} flush>
+        {!data.sources.length ? (
+          <Empty>{t("No feed has been fetched yet.")}</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>{t("Provider")}</th><th className="num">{t("Advisories")}</th><th>{t("Releases")}</th><th>{t("Fetched")}</th><th>{t("State")}</th></tr>
+            </thead>
+            <tbody>
+              {data.sources.map((source) => (
+                <tr key={source.provider}>
+                  <td>{source.provider}</td>
+                  <td className="num">{source.advisories}</td>
+                  <td className="source">{(source.releases ?? []).join(", ")}</td>
+                  <td><Time value={source.fetched_at} /></td>
+                  <td>
+                    {source.error ? (
+                      <span className="badge error">{source.error.slice(0, 80)}</span>
+                    ) : source.stale ? (
+                      <span className="badge warn">
+                        {t("older than {n} h", { n: data.max_snapshot_age_hours })}
+                      </span>
+                    ) : (
+                      <span className="badge ok">{t("fresh")}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
-      <h2>{t("Hosts")}</h2>
-      {!data.items.length ? (
-        <Empty>{t("No host has been assessed yet.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Host")}</th><th>{t("Distribution")}</th><th>{t("Vendor fix")}</th><th>{t("No fix")}</th>
-              <th>{t("Not established")}</th><th>{t("Coverage")}</th><th>{t("Assessed")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((item) => (
-              <tr key={item.host_id}>
-                <td>
-                  <Link to={`/hosts/${item.host_id}/vulnerabilities`}>
-                    {item.hostname || item.host_id.slice(0, 8)}
-                  </Link>
-                </td>
-                <td className="source">{item.distribution} {item.release}</td>
-                <td>
-                  {item.affected_with_vendor_fix > 0
-                    ? <span className="badge error">{item.affected_with_vendor_fix}</span>
-                    : <span className="badge ok">0</span>}
-                </td>
-                <td>{item.affected_no_fix}</td>
-                <td>{item.unknown}</td>
-                <td>
-                  {item.coverage_reason ? (
-                    <span className="badge unknown">
-                      {reason(item.coverage_reason)}
-                    </span>
-                  ) : (
-                    // Rounding to a whole number turned 99.7% into "100%":
-                    // "everything checked" where dozens of packages stayed
-                    // outside the assessment.
-                    <span className={`badge ${item.fully_assessed ? "ok" : "warn"}`}>
-                      {t("{percent}% of {total}", { percent: item.coverage_percent.toFixed(1), total: item.packages_total })}
-                    </span>
-                  )}
-                </td>
-                <td><Time value={item.evaluated_at} /></td>
+      <Card title={t("Hosts")} flush>
+        {!data.items.length ? (
+          <Empty>{t("No host has been assessed yet.")}</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>{t("Host")}</th><th>{t("Distribution")}</th><th className="num">{t("Vendor fix")}</th><th className="num">{t("No fix")}</th>
+                <th className="num">{t("Not established")}</th><th>{t("Coverage")}</th><th>{t("Assessed")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {data.items.map((item) => (
+                <tr key={item.host_id}>
+                  <td>
+                    <Link to={`/hosts/${item.host_id}/vulnerabilities`}>
+                      {item.hostname || item.host_id.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td className="source">{item.distribution} {item.release}</td>
+                  <td className="num">
+                    {item.affected_with_vendor_fix > 0
+                      ? <span className="badge error">{item.affected_with_vendor_fix}</span>
+                      : <span className="badge ok">0</span>}
+                  </td>
+                  <td className="num">{item.affected_no_fix}</td>
+                  <td className="num">{item.unknown}</td>
+                  <td>
+                    {item.coverage_reason ? (
+                      <span className="badge unknown">
+                        {reason(item.coverage_reason)}
+                      </span>
+                    ) : (
+                      // Rounding to a whole number turned 99.7% into "100%":
+                      // "everything checked" where dozens of packages stayed
+                      // outside the assessment.
+                      <span className={`badge ${item.fully_assessed ? "ok" : "warn"}`}>
+                        {t("{percent}% of {total}", { percent: item.coverage_percent.toFixed(1), total: item.packages_total })}
+                      </span>
+                    )}
+                  </td>
+                  <td><Time value={item.evaluated_at} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }

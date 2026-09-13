@@ -5,6 +5,7 @@ import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, type Collection } from "../lib/api";
 import type { Host } from "../lib/types";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
+import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import { useT } from "../i18n";
 
 /**
@@ -43,70 +44,74 @@ export function Hosts() {
 
   return (
     <>
-      <div className="header-with-action">
-        <h1>{t("Hosts")}</h1>
-        {/* The link is seen by whoever can order an installation; for the
-            rest it would lead only to a refusal. The server decides what is
-            allowed anyway. */}
-        {canAdd && <Link to="/hosts/new" className="button">{t("Add host")}</Link>}
-      </div>
-      <p className="subtitle">{t("Filters are applied server-side.")}</p>
+      {/* The link is seen by whoever can order an installation; for the
+          rest it would lead only to a refusal. The server decides what is
+          allowed anyway. */}
+      <PageHeader
+        title={t("Hosts")}
+        description={t("Filters are applied server-side.")}
+        actions={canAdd && <Link to="/hosts/new" className="button primary">{t("Add host")}</Link>}
+      />
 
-      <div className="filters">
-        <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
-        <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-        <select value={osFamily} onChange={(e) => setOsFamily(e.target.value)}>
-          <option value="">{t("OS: any")}</option>
-          <option value="debian">debian</option>
-          <option value="rhel">rhel</option>
-        </select>
-        <select value={connectionState} onChange={(e) => setConnectionState(e.target.value)}>
-          <option value="">{t("state: any")}</option>
-          <option value="online">{t("online")}</option>
-          <option value="offline">{t("offline")}</option>
-          <option value="stale">{t("stale")}</option>
-          <option value="unknown">{t("unknown")}</option>
-        </select>
-      </div>
+      <Card flush>
+        <Toolbar end={data && <span>{t("{n} hosts", { n: data.items.length })}</span>}>
+          <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
+          <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+          <select value={osFamily} onChange={(e) => setOsFamily(e.target.value)}>
+            <option value="">{t("OS: any")}</option>
+            <option value="debian">debian</option>
+            <option value="rhel">rhel</option>
+          </select>
+          <select value={connectionState} onChange={(e) => setConnectionState(e.target.value)}>
+            <option value="">{t("state: any")}</option>
+            <option value="online">{t("online")}</option>
+            <option value="offline">{t("offline")}</option>
+            <option value="stale">{t("stale")}</option>
+            <option value="unknown">{t("unknown")}</option>
+          </select>
+        </Toolbar>
 
-      {isLoading ? (
-        <Empty>{t("Loading…")}</Empty>
-      ) : !data?.items.length ? (
-        <Empty>{t("No host matches the filters.")}</Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Management address")}</th><th>{t("System")}</th><th>{t("Site")}</th>
-              <th>{t("Environment")}</th><th>{t("Domain")}</th><th>{t("Updates")}</th>
-              <th>{t("Failed units")}</th><th>{t("Reboot")}</th><th>{t("Last seen")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((host) => (
-              <tr key={host.id}>
-                <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
-                <td><ConnectionState state={host.connection_state} /></td>
-                {/* The management address, not just any first address of the
-                    host. Undetermined is shown as undetermined. */}
-                <td>
-                  {host.management_address
-                    ? <span className="list-address" title={t("source: {source}", { source: host.management_address_source ?? "" })}>{host.management_address}</span>
-                    : <span className="badge unknown">{t("unknown")}</span>}
-                </td>
-                <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
-                <td>{host.site}</td>
-                <td>{host.environment}</td>
-                <td>{host.identity.enrolled ? host.identity.domain : <span className="badge">{t("not in domain")}</span>}</td>
-                <td><OptionalNumber value={host.pending_updates} warnFrom={1} /></td>
-                <td><OptionalNumber value={host.failed_units} warnFrom={1} /></td>
-                <td><OptionalFlag value={host.reboot_required} /></td>
-                <td><Time value={host.last_seen_at} /></td>
+        {isLoading ? (
+          <Empty>{t("Loading…")}</Empty>
+        ) : !data?.items.length ? (
+          <EmptyState action={canAdd && <Link to="/hosts/new" className="button">{t("Add host")}</Link>}>
+            {t("No host matches the filters.")}
+          </EmptyState>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Management address")}</th><th>{t("System")}</th><th>{t("Site")}</th>
+                <th>{t("Environment")}</th><th>{t("Domain")}</th><th className="num">{t("Updates")}</th>
+                <th className="num">{t("Failed units")}</th><th>{t("Reboot")}</th><th>{t("Last seen")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {data.items.map((host) => (
+                <tr key={host.id}>
+                  <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
+                  <td><ConnectionState state={host.connection_state} /></td>
+                  {/* The management address, not just any first address of the
+                      host. Undetermined is shown as undetermined. */}
+                  <td>
+                    {host.management_address
+                      ? <span className="list-address" title={t("source: {source}", { source: host.management_address_source ?? "" })}>{host.management_address}</span>
+                      : <span className="badge unknown">{t("unknown")}</span>}
+                  </td>
+                  <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
+                  <td>{host.site}</td>
+                  <td>{host.environment}</td>
+                  <td>{host.identity.enrolled ? host.identity.domain : <span className="badge">{t("not in domain")}</span>}</td>
+                  <td className="num"><OptionalNumber value={host.pending_updates} warnFrom={1} /></td>
+                  <td className="num"><OptionalNumber value={host.failed_units} warnFrom={1} /></td>
+                  <td><OptionalFlag value={host.reboot_required} /></td>
+                  <td><Time value={host.last_seen_at} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }

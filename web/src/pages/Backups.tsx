@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
+import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 type Item = {
@@ -70,78 +71,84 @@ export function FleetBackups() {
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Empty>{t("Reading backup state…")}</Empty>;
   const counts = data.counts ?? {};
+  const never = counts.never ?? 0;
+  const stale = counts.critical ?? 0;
+  const ageing = counts.warning ?? 0;
+  const neverRestored = data.never_restored ?? 0;
 
   return (
     <>
-      <h1>{t("Backups")}</h1>
-      <p className="subtitle">
-        {t("What is copied, where to and how old the newest copy is. Warning after {warning} h, urgent after {critical} h. A copy nobody has ever read back is a promise, not a safeguard — that is what the verification column says, with a {days}-day limit.", {
+      <PageHeader
+        title={t("Backups")}
+        description={t("What is copied, where to and how old the newest copy is. Warning after {warning} h, urgent after {critical} h. A copy nobody has ever read back is a promise, not a safeguard — that is what the verification column says, with a {days}-day limit.", {
           warning: data.thresholds.warning_hours, critical: data.thresholds.critical_hours, days: data.thresholds.verification_days,
         })}
-      </p>
+      />
 
-      <div className="filters">
-        <span className="badge error">{t("{n} never ran", { n: counts.never ?? 0 })}</span>
-        <span className="badge error">{t("{n} stale", { n: counts.critical ?? 0 })}</span>
-        <span className="badge warn">{t("{n} ageing", { n: counts.warning ?? 0 })}</span>
-        <span className="badge ok">{t("{n} fresh", { n: counts.ok ?? 0 })}</span>
-        <span className="badge warn">{t("{n} unverified", { n: data.unverified })}</span>
+      <StatGrid>
+        <Stat label={t("Never ran")} value={never} tone={never > 0 ? "error" : undefined} />
+        <Stat label={t("Stale")} value={stale} tone={stale > 0 ? "error" : undefined} />
+        <Stat label={t("Ageing")} value={ageing} tone={ageing > 0 ? "warn" : undefined} />
+        <Stat label={t("Fresh")} value={counts.ok ?? 0} tone="ok" />
+        <Stat label={t("Unverified")} value={data.unverified} tone={data.unverified > 0 ? "warn" : undefined} />
         {/* A copy nobody has ever restored is a hope, not a copy. The panel
             does not force a trial - it is to say there was none. */}
-        <span className="badge unknown">{t("{n} never restored", { n: data.never_restored ?? 0 })}</span>
-        <span className="source">{t("{n} hosts visible", { n: data.hosts_total })}</span>
-      </div>
+        <Stat label={t("Never restored")} value={neverRestored} tone={neverRestored > 0 ? "unknown" : undefined} />
+        <Stat label={t("Hosts")} value={data.hosts_total} hint={t("{n} hosts visible", { n: data.hosts_total })} />
+      </StatGrid>
 
       <Calendar items={data.items} />
 
       <Repositories repositories={data.repositories ?? []} />
 
-      {!data.items.length ? (
-        <Empty>
-          {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
-        </Empty>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t("Age")}</th><th>{t("Host")}</th><th>{t("Definition")}</th><th>{t("Tool")}</th>
-              <th>{t("Destination")}</th><th>{t("Verified")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((item) => (
-              <tr key={`${item.host_id}-${item.definition}`}>
-                <td>
-                  <AgeBadge status={item.status} age={item.age_hours} />
-                  {item.last_success_at && (
-                    <div className="source"><Time value={item.last_success_at} /></div>
-                  )}
-                </td>
-                <td>
-                  <Link to={`/hosts/${item.host_id}/backups`}>{item.hostname}</Link>
-                </td>
-                <td>{item.definition}</td>
-                <td className="source">{item.tool}</td>
-                <td className="source">{item.repository}</td>
-                <td>
-                  {item.unverified ? (
-                    <span className="badge warn">{t("not verified")}</span>
-                  ) : (
-                    <span className="badge ok">{t("verified")}</span>
-                  )}
-                  <div className="source">
-                    {item.last_restore_at ? (
-                      <>{t("restored")} <Time value={item.last_restore_at} /></>
-                    ) : (
-                      t("never restored")
-                    )}
-                  </div>
-                </td>
+      <Card flush>
+        {!data.items.length ? (
+          <Empty>
+            {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
+          </Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>{t("Age")}</th><th>{t("Host")}</th><th>{t("Definition")}</th><th>{t("Tool")}</th>
+                <th>{t("Destination")}</th><th>{t("Verified")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {data.items.map((item) => (
+                <tr key={`${item.host_id}-${item.definition}`}>
+                  <td>
+                    <AgeBadge status={item.status} age={item.age_hours} />
+                    {item.last_success_at && (
+                      <div className="source"><Time value={item.last_success_at} /></div>
+                    )}
+                  </td>
+                  <td>
+                    <Link to={`/hosts/${item.host_id}/backups`}>{item.hostname}</Link>
+                  </td>
+                  <td>{item.definition}</td>
+                  <td className="source">{item.tool}</td>
+                  <td className="source mono">{item.repository}</td>
+                  <td>
+                    {item.unverified ? (
+                      <span className="badge warn">{t("not verified")}</span>
+                    ) : (
+                      <span className="badge ok">{t("verified")}</span>
+                    )}
+                    <div className="source">
+                      {item.last_restore_at ? (
+                        <>{t("restored")} <Time value={item.last_restore_at} /></>
+                      ) : (
+                        t("never restored")
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </>
   );
 }
@@ -158,31 +165,30 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
   const t = useT();
   if (!repositories.length) return null;
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t("Repositories")}</h2>
+    <Card title={t("Repositories")} flush>
       <table>
         <thead>
-          <tr><th>{t("Repository")}</th><th>{t("Hosts")}</th><th>{t("Oldest backup")}</th><th>{t("Parallel writes")}</th></tr>
+          <tr><th>{t("Repository")}</th><th className="num">{t("Hosts")}</th><th className="num">{t("Oldest backup")}</th><th className="num">{t("Parallel writes")}</th></tr>
         </thead>
         <tbody>
           {repositories.map((item) => (
             <tr key={item.repository}>
               <td>
-                {item.repository}
+                <span className="mono">{item.repository}</span>
                 <div className="source">{item.budget_key}</div>
               </td>
-              <td>
+              <td className="num">
                 {item.hosts}
                 {item.unverified > 0 && (
                   <div className="source">{t("{n} unverified", { n: item.unverified })}</div>
                 )}
               </td>
-              <td>
+              <td className="num">
                 {item.oldest_age_hours === undefined
                   ? "—"
                   : `${Math.round(item.oldest_age_hours)} h`}
               </td>
-              <td>
+              <td className="num">
                 {item.capacity === undefined ? (
                   <span className="badge unknown">{t("no limit set")}</span>
                 ) : (
@@ -198,7 +204,7 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
           ))}
         </tbody>
       </table>
-    </section>
+    </Card>
   );
 }
 
@@ -226,26 +232,22 @@ function Calendar({ items }: { items: Item[] }) {
   const most = Math.max(1, ...counts);
   if (!items.length) return null;
   return (
-    <section style={{ marginTop: 16 }}>
-      <h2>{t("Last {n} days", { n: days })}</h2>
-      <p className="subtitle">
-        {t("How many definitions had their newest successful copy on each day. Empty days in a row are a schedule that stopped, visible before any copy is old enough to turn red.")}
-      </p>
-      <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 60 }}>
+    <Card
+      title={t("Last {n} days", { n: days })}
+      description={t("How many definitions had their newest successful copy on each day. Empty days in a row are a schedule that stopped, visible before any copy is old enough to turn red.")}
+    >
+      <div className="calendar">
         {counts.map((count, index) => {
           const date = new Date(today.getTime() - (days - 1 - index) * 86400000);
           const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
           return (
-            <div key={label} title={`${label}: ${count}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-              <div style={{
-                width: "100%", height: `${Math.max(2, (count / most) * 44)}px`,
-                background: count ? "var(--ok)" : "var(--border)", borderRadius: 2,
-              }} />
-              <span className="source" style={{ fontSize: 10 }}>{date.getDate()}</span>
+            <div key={label} title={`${label}: ${count}`} className="calendar-day">
+              <div className={count ? "calendar-bar filled" : "calendar-bar"} style={{ height: `${Math.max(2, (count / most) * 44)}px` }} />
+              <span className="calendar-label">{date.getDate()}</span>
             </div>
           );
         })}
       </div>
-    </section>
+    </Card>
   );
 }

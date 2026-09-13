@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign, CampaignTarget } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
+import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanSummary } from "../components/plan";
@@ -105,20 +106,22 @@ export function Bulk() {
   if (!capabilities.campaign_v2) {
     return (
       <>
-        <h1>{t("Bulk Workspace")}</h1>
-        <Empty>
-          {t("This installation runs operations host by host: the backend has no campaign engine, so there is no set of per-host plans to approve.")}
-        </Empty>
+        <PageHeader title={t("Bulk Workspace")} />
+        <Card>
+          <Empty>
+            {t("This installation runs operations host by host: the backend has no campaign engine, so there is no set of per-host plans to approve.")}
+          </Empty>
+        </Card>
       </>
     );
   }
 
   return (
     <>
-      <h1>{t("Bulk Workspace")}</h1>
-      <p className="subtitle">
-        {t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}
-      </p>
+      <PageHeader
+        title={t("Bulk Workspace")}
+        description={t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}
+      />
 
       <ScopeBar order={order} preview={preview.data} campaign={campaign.data}
         risk={bulk.find((item) => item.action === order.action)?.risk} />
@@ -306,7 +309,7 @@ function ScopeBar({
           {order.action || t("no operation")}
           {/* The risk class of the operation decides the approvals and the
               step-up; it stays in view for the whole wizard. */}
-          {risk && <span className={`badge ${risk === "critical" ? "error" : risk === "high" ? "warn" : ""}`} style={{ marginLeft: 8 }}>{risk}</span>}
+          {risk && <span className={`badge ${risk === "critical" ? "error" : risk === "high" ? "warn" : ""}`}>{risk}</span>}
         </span>
       </div>
       <div className="facts">
@@ -358,46 +361,50 @@ function ScopeStep({
   const generic = Boolean(order.action) && !WIZARD_OPERATIONS.includes(order.action);
   const payloadValid = orderPayload(order) !== null;
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>1. {t("Scope")}</h2>
-      <p className="subtitle">
-        {t("The registry decides what may run on many hosts at once. An operation with no bulk mode is a deliberate refusal, not a missing screen.")}
-      </p>
-      <div className="filters">
-        <input
-          placeholder={t("campaign name")}
-          value={order.name}
-          onChange={(e) => change({ name: e.target.value })}
-          style={{ minWidth: 240 }}
-        />
-        <select
-          value={order.action}
-          onChange={(e) => {
-            // Choosing an operation loads its template: the operator edits
-            // a shape the server already accepts, not a blank field.
-            const next = bulk.find((item) => item.action === e.target.value);
-            change({
-              action: e.target.value,
-              payloadText: next?.payload_template ? JSON.stringify(next.payload_template, null, 2) : "",
-            });
-          }}
-        >
-          <option value="">{t("pick an operation…")}</option>
-          {bulk.map((item) => (
-            <option key={item.action} value={item.action}>
-              {item.action}{item.risk ? ` · ${item.risk}` : ""}
-            </option>
-          ))}
-        </select>
-        {needsUnit && (
+    <Card
+      title={`1. ${t("Scope")}`}
+      description={t("The registry decides what may run on many hosts at once. An operation with no bulk mode is a deliberate refusal, not a missing screen.")}
+    >
+      <FieldGrid>
+        <Field label={t("Name")}>
           <input
-            placeholder={t("unit, e.g. cron.service")}
-            value={order.unit}
-            onChange={(e) => change({ unit: e.target.value })}
+            placeholder={t("campaign name")}
+            value={order.name}
+            onChange={(e) => change({ name: e.target.value })}
           />
+        </Field>
+        <Field label={t("Operation")}>
+          <select
+            value={order.action}
+            onChange={(e) => {
+              // Choosing an operation loads its template: the operator edits
+              // a shape the server already accepts, not a blank field.
+              const next = bulk.find((item) => item.action === e.target.value);
+              change({
+                action: e.target.value,
+                payloadText: next?.payload_template ? JSON.stringify(next.payload_template, null, 2) : "",
+              });
+            }}
+          >
+            <option value="">{t("pick an operation…")}</option>
+            {bulk.map((item) => (
+              <option key={item.action} value={item.action}>
+                {item.action}{item.risk ? ` · ${item.risk}` : ""}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {needsUnit && (
+          <Field label={t("Unit")}>
+            <input
+              placeholder={t("unit, e.g. cron.service")}
+              value={order.unit}
+              onChange={(e) => change({ unit: e.target.value })}
+            />
+          </Field>
         )}
         {order.action === "packages.upgrade" && (
-          <label>
+          <label className="toggle">
             <input
               type="checkbox"
               checked={order.securityOnly}
@@ -406,34 +413,32 @@ function ScopeStep({
             {t("security updates only")}
           </label>
         )}
-      </div>
-      {generic && (
-        <div className="form" style={{ marginTop: 12 }}>
-          <label>
-            {t("Payload (JSON, the same shape as a single-host operation)")}
+        {generic && (
+          <Field
+            label={t("Payload (JSON, the same shape as a single-host operation)")}
+            hint={!payloadValid
+              ? t("This is not valid JSON.")
+              : chosen?.needs_material
+                ? t("The template carries a placeholder for certificate material; replace it with the real PEM before the order.")
+                : t("The server validates the payload when the campaign is created and names what is wrong.")}
+            wide
+          >
             <textarea
               rows={Math.min(18, Math.max(6, order.payloadText.split("\n").length + 1))}
               value={order.payloadText}
               onChange={(e) => change({ payloadText: e.target.value })}
               spellCheck={false}
             />
-          </label>
-          <p className="source" style={{ margin: 0 }}>
-            {!payloadValid
-              ? t("This is not valid JSON.")
-              : chosen?.needs_material
-                ? t("The template carries a placeholder for certificate material; replace it with the real PEM before the order.")
-                : t("The server validates the payload when the campaign is created and names what is wrong.")}
-          </p>
-        </div>
-      )}
+          </Field>
+        )}
+      </FieldGrid>
       {preview?.requires_plan && (
         <p className="subtitle">
           {t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
         </p>
       )}
       {refusals.length > 0 && (
-        <details style={{ marginTop: 12 }}>
+        <details>
           <summary className="subtitle">
             {t("{n} operations change hosts but cannot run as a campaign — with reasons", { n: refusals.length })}
           </summary>
@@ -442,7 +447,7 @@ function ScopeStep({
             <tbody>
               {refusals.map((item) => (
                 <tr key={item.action}>
-                  <td>{item.action}</td>
+                  <td className="mono">{item.action}</td>
                   <td className="source">{item.campaign_refusal}</td>
                 </tr>
               ))}
@@ -450,7 +455,7 @@ function ScopeStep({
           </table>
         </details>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -465,38 +470,47 @@ function TargetsStep({
 }) {
   const t = useT();
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>2. {t("Targets")}</h2>
-      <p className="subtitle">
-        {t("The count comes from the database, not from the first page of a list. The snapshot is frozen when the campaign is created; hosts added later do not join it.")}
-      </p>
-      <div className="filters">
-        <input
-          placeholder={t("site")}
-          value={order.site}
-          onChange={(e) => change({ site: e.target.value })}
-        />
-        <input
-          placeholder={t("environment")}
-          value={order.environment}
-          onChange={(e) => change({ environment: e.target.value })}
-        />
-        <input
-          placeholder={t("os family")}
-          value={order.osFamily}
-          onChange={(e) => change({ osFamily: e.target.value })}
-        />
-      </div>
-      <p>
-        {t("The selector matches {n} hosts", { n: preview?.count ?? 0 })}
-        {preview && preview.count > preview.limit && (
-          <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
-        )}
-        .
-      </p>
-      <div className="source">{(preview?.sample ?? []).join(", ")}</div>
-      <Distribution preview={preview} />
-    </section>
+    <Card
+      title={`2. ${t("Targets")}`}
+      description={t("The count comes from the database, not from the first page of a list. The snapshot is frozen when the campaign is created; hosts added later do not join it.")}
+      footer={
+        <div>
+          <p>
+            {t("The selector matches {n} hosts", { n: preview?.count ?? 0 })}
+            {preview && preview.count > preview.limit && (
+              <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
+            )}
+            .
+          </p>
+          <div className="source">{(preview?.sample ?? []).join(", ")}</div>
+          <Distribution preview={preview} />
+        </div>
+      }
+    >
+      <FieldGrid>
+        <Field label={t("Site")}>
+          <input
+            placeholder={t("site")}
+            value={order.site}
+            onChange={(e) => change({ site: e.target.value })}
+          />
+        </Field>
+        <Field label={t("Environment")}>
+          <input
+            placeholder={t("environment")}
+            value={order.environment}
+            onChange={(e) => change({ environment: e.target.value })}
+          />
+        </Field>
+        <Field label={t("OS family")}>
+          <input
+            placeholder={t("os family")}
+            value={order.osFamily}
+            onChange={(e) => change({ osFamily: e.target.value })}
+          />
+        </Field>
+      </FieldGrid>
+    </Card>
   );
 }
 
@@ -521,7 +535,7 @@ function Distribution({ preview }: { preview?: Preview }) {
     capability: t("capability"),
   };
   return (
-    <div style={{ marginTop: 12 }}>
+    <div className="distribution">
       {dimensions.map(([dimension, groups]) => (
         <div key={dimension} className="source">
           {names[dimension] ?? dimension}:{" "}
@@ -538,25 +552,28 @@ function EligibilityStep({ preview, checking }: { preview?: Preview; checking: b
   const excluded = preview?.excluded ?? [];
   const notes = preview?.notes ?? [];
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>3. {t("Eligibility")}</h2>
-      <p className="subtitle">
-        {t("A host that cannot run this operation stays in the snapshot with its reason. Dropping it quietly would hide a decision nobody made.")}
-      </p>
+    <Card
+      title={`3. ${t("Eligibility")}`}
+      description={t("A host that cannot run this operation stays in the snapshot with its reason. Dropping it quietly would hide a decision nobody made.")}
+      footer={!excluded.length && !notes.length && (
+        <p>{t("Every matched host can run this operation.")}</p>
+      )}
+      flush
+    >
       <table>
         <thead>
-          <tr><th>{t("Bucket")}</th><th>{t("Hosts")}</th><th>{t("Which")}</th></tr>
+          <tr><th>{t("Bucket")}</th><th className="num">{t("Hosts")}</th><th>{t("Which")}</th></tr>
         </thead>
         <tbody>
           <tr>
             <td><span className="badge ok">{t("eligible")}</span></td>
-            <td>{preview?.eligible ?? 0}</td>
+            <td className="num">{preview?.eligible ?? 0}</td>
             <td className="source">{(preview?.sample ?? []).join(", ")}</td>
           </tr>
           {excluded.map((group) => (
             <tr key={group.reason}>
               <td><span className="badge error">{reasonName(t, group.reason)}</span></td>
-              <td>{group.count}</td>
+              <td className="num">{group.count}</td>
               <td className="source">{group.sample.join(", ")}</td>
             </tr>
           ))}
@@ -566,16 +583,13 @@ function EligibilityStep({ preview, checking }: { preview?: Preview; checking: b
           {notes.map((group) => (
             <tr key={group.reason}>
               <td><span className="badge warn">{reasonName(t, group.reason)}</span></td>
-              <td>{group.count}</td>
+              <td className="num">{group.count}</td>
               <td className="source">{group.sample.join(", ")}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!excluded.length && !notes.length && (
-        <p className="subtitle">{t("Every matched host can run this operation.")}</p>
-      )}
-    </section>
+    </Card>
   );
 }
 
@@ -603,50 +617,48 @@ function RolloutStep({
 }) {
   const t = useT();
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>4. {t("Rollout")}</h2>
-      <p className="subtitle">
-        {t("Canary is wave zero. The concurrency limit says how many hosts move at once in this change; fleet and site budgets say how much the system carries in total, and a host waiting for capacity says so instead of standing still.")}
-      </p>
-      <div className="filters">
-        <label>
-          {t("canary")}{" "}
+    <Card
+      title={`4. ${t("Rollout")}`}
+      description={t("Canary is wave zero. The concurrency limit says how many hosts move at once in this change; fleet and site budgets say how much the system carries in total, and a host waiting for capacity says so instead of standing still.")}
+      footer={
+        <p>
+          {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
+            targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
+          })}
+        </p>
+      }
+    >
+      <FieldGrid>
+        <Field label={t("Canary")}>
           <input type="number" min={0} value={order.canary}
-            onChange={(e) => change({ canary: +e.target.value })} style={{ width: 70 }} />
-        </label>
-        <label>
-          {t("wave")}{" "}
+            onChange={(e) => change({ canary: +e.target.value })} />
+        </Field>
+        <Field label={t("Wave")}>
           <input type="number" min={1} value={order.wave}
-            onChange={(e) => change({ wave: +e.target.value })} style={{ width: 70 }} />
-        </label>
-        <label>
-          {t("concurrent")}{" "}
+            onChange={(e) => change({ wave: +e.target.value })} />
+        </Field>
+        <Field label={t("Concurrent hosts")}>
           <input type="number" min={1} value={order.concurrent}
-            onChange={(e) => change({ concurrent: +e.target.value })} style={{ width: 70 }} />
-        </label>
-        <label>
-          {t("threshold %")}{" "}
+            onChange={(e) => change({ concurrent: +e.target.value })} />
+        </Field>
+        <Field label={t("threshold %")}>
           <input type="number" min={0} max={100} value={order.thresholdPercent}
-            onChange={(e) => change({ thresholdPercent: +e.target.value })} style={{ width: 70 }} />
-        </label>
-        <label>
-          {t("threshold count")}{" "}
+            onChange={(e) => change({ thresholdPercent: +e.target.value })} />
+        </Field>
+        <Field label={t("threshold count")}>
           <input type="number" min={0} value={order.thresholdCount}
-            onChange={(e) => change({ thresholdCount: +e.target.value })} style={{ width: 70 }} />
-        </label>
-        <select value={order.rebootPolicy}
-          onChange={(e) => change({ rebootPolicy: e.target.value })}>
-          <option value="never">{t("reboot: never")}</option>
-          <option value="if_required">{t("reboot: when required")}</option>
-          <option value="always">{t("reboot: always")}</option>
-        </select>
-      </div>
-      <p className="subtitle">
-        {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
-          targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
-        })}
-      </p>
-    </section>
+            onChange={(e) => change({ thresholdCount: +e.target.value })} />
+        </Field>
+        <Field label={t("Reboot policy")}>
+          <select value={order.rebootPolicy}
+            onChange={(e) => change({ rebootPolicy: e.target.value })}>
+            <option value="never">{t("reboot: never")}</option>
+            <option value="if_required">{t("reboot: when required")}</option>
+            <option value="always">{t("reboot: always")}</option>
+          </select>
+        </Field>
+      </FieldGrid>
+    </Card>
   );
 }
 
@@ -692,16 +704,17 @@ function CreateStep({
   });
 
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>5. {t("Create")}</h2>
-      <p className="subtitle">
-        {t("Creating the campaign freezes the snapshot. Nothing changes on any host yet.")}
-      </p>
-      {errorMessage && <p className="page-error">{errorMessage}</p>}
-      <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID)}>
-        {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
-      </button>
-    </section>
+    <Card
+      title={`5. ${t("Create")}`}
+      description={t("Creating the campaign freezes the snapshot. Nothing changes on any host yet.")}
+    >
+      <Actions>
+        <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID)}>
+          {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
+        </button>
+        {errorMessage && <p className="page-error">{errorMessage}</p>}
+      </Actions>
+    </Card>
   );
 }
 
@@ -722,13 +735,13 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
   const planning = campaign?.state === "planning";
   const groups = plans.data?.items ?? [];
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>6. {t("Plans")}</h2>
-      <p className="subtitle">
-        {planning
-          ? t("Each host is computing its own diff. Nothing is applied while this runs.")
-          : t("Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change.")}
-      </p>
+    <Card
+      title={`6. ${t("Plans")}`}
+      description={planning
+        ? t("Each host is computing its own diff. Nothing is applied while this runs.")
+        : t("Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change.")}
+      flush
+    >
       {groups.length > 0 && (
         <table>
           <thead>
@@ -742,14 +755,14 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
                   {group.count}
                   <div className="source">{group.hosts.join(", ")}</div>
                 </td>
-                <td className="source">{group.plan_hash.slice(0, 16)}</td>
+                <td className="mono source">{group.plan_hash.slice(0, 16)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       <TargetTable targets={targets} action={campaign?.action_type ?? ""} />
-    </section>
+    </Card>
   );
 }
 
@@ -784,17 +797,19 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
 
   if (!campaign) return <Empty>{t("No campaign yet.")}</Empty>;
   return (
-    <section className="tile">
-      <h2 style={{ marginTop: 0 }}>7. {t("Approval and run")}</h2>
-      <p className="subtitle">
-        {t("You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
-      </p>
-      <p className="source">{t("fingerprint")} {campaign.approval_fingerprint}</p>
+    <Card
+      title={`7. ${t("Approval and run")}`}
+      description={t("You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
+      flush
+    >
+      <p className="source mono">{t("fingerprint")} {campaign.approval_fingerprint}</p>
       {errorMessage && <p className="page-error">{errorMessage}</p>}
       {campaign.state === "awaiting_approval" ? (
-        <button onClick={() => approve.mutate()} disabled={approve.isPending}>
-          {approve.isPending ? t("Approving…") : t("Approve and start")}
-        </button>
+        <p>
+          <button onClick={() => approve.mutate()} disabled={approve.isPending}>
+            {approve.isPending ? t("Approving…") : t("Approve and start")}
+          </button>
+        </p>
       ) : (
         <p>
           {t("This campaign is")} <JobState state={campaign.state} />.{" "}
@@ -805,7 +820,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
         </p>
       )}
       <TargetTable targets={targets} action={campaign.action_type} />
-    </section>
+    </Card>
   );
 }
 
