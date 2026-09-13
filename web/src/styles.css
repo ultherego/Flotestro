@@ -12,16 +12,16 @@
 
   /* Surfaces: the page sits lowest, panels are raised on it, the sidebar
      is the darkest so the content reads as the lit part of the screen. */
-  --bg: #181825;
+  --bg: #11111b;
   --bg-panel: #1e1e2e;
-  --bg-sidebar: #11111b;
+  --bg-sidebar: #0b0b12;
   --bg-sidebar-hover: #1e1e2e;
   --bg-hover: #313244;
   --bg-input: #181825;
   --bg-sunken: #11111b;
   --bg-raised: #313244;
-  --border: #313244;
-  --border-strong: #45475a;
+  --border: #363652;
+  --border-strong: #4b4d68;
 
   --text: #cdd6f4;
   --text-muted: #a6adc8;
@@ -60,9 +60,11 @@
 
   --sidebar-width: 240px;
   --sidebar-rail: 56px;
-  --content-pad-x: 32px;
-  --content-pad-y: 28px;
-  --page-max-width: 1360px;
+  --content-pad-x: 20px;
+  --content-pad-y: 20px;
+  /* The page fills the width: a bounded page on a wide screen left the
+     rest empty, and a fleet panel has more to show, not less. */
+  --page-max-width: none;
   --topbar-height: 0px;
 }
 
@@ -86,9 +88,9 @@
 
 [data-theme="latte"] {
   color-scheme: light;
-  --bg: #e6e9ef;
-  --bg-panel: #eff1f5;
-  --bg-sidebar: #dce0e8;
+  --bg: #dfe3ea;
+  --bg-panel: #ffffff;
+  --bg-sidebar: #d3d8e2;
   --bg-sidebar-hover: #ccd0da;
   --bg-hover: #dce0e8;
   --bg-input: #e6e9ef;
@@ -124,6 +126,12 @@
 
   --shadow: 0 12px 32px rgba(76, 79, 105, 0.18), 0 1px 2px rgba(76, 79, 105, 0.12);
 }
+
+/* The text size chosen by the person at the screen scales the whole
+   interface, so the composition stays the same at every size. */
+html[data-scale="small"] { zoom: 0.9; }
+html[data-scale="large"] { zoom: 1.12; }
+html[data-scale="larger"] { zoom: 1.25; }
 
 * { box-sizing: border-box; }
 
@@ -334,6 +342,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   cursor: pointer;
 }
 .language-switch button:hover, .theme-switch button:hover { color: var(--text); }
+.scale-switch button { font-weight: 600; letter-spacing: 0; }
 .language-switch button.active, .theme-switch button.active {
   background: var(--bg-hover);
   color: var(--text);
@@ -793,14 +802,20 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 /* The host header card. The target of an operation is to be visible
    without scrolling in every module, so the header sticks to the top of
    the content; the module navigation sticks right below it. */
+/* The header is a card that sticks under the top edge while the module
+   scrolls beneath it. It stays inside the page box: a header pulled out
+   with negative margins collapsed into the page and covered the module
+   title. */
 .host-header {
   position: sticky;
-  top: var(--topbar-height);
+  top: calc(var(--topbar-height) + 8px);
   z-index: 5;
-  margin: calc(-1 * var(--content-pad-y)) calc(-1 * var(--content-pad-x)) 0;
-  padding: 12px var(--content-pad-x);
+  margin: 0;
+  padding: 12px 16px;
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 6%, transparent);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -892,7 +907,7 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 
 /* The host page: the header and the content; the modules of the host are
    in the sidebar, which shows the fleet or one host, never both. */
-.host-content { min-width: 0; padding-top: 20px; }
+.host-content { min-width: 0; padding-top: 16px; }
 
 @media (max-width: 900px) {
   .host-content { padding-top: 16px; }
@@ -1315,3 +1330,126 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
   .stat-value { font-size: 22px; }
   .toolbar-end { margin-left: 0; width: 100%; }
 }
+
+/* ---------------------------------------------------------------------- */
+/* Widgets: status bars, charts and the widget grid.                       */
+/* ---------------------------------------------------------------------- */
+/* A status bar is a row of coloured segments, one per state, each with
+   its count in large type: the whole fleet's condition at one glance,
+   read from across the room. The segments share the width in proportion
+   to their counts, but a zero keeps a narrow slot, so the states that are
+   absent are still named. */
+.status-bar {
+  display: flex;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  min-height: 84px;
+}
+.status-bar-segment {
+  flex: var(--share, 1) 1 96px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 8px;
+  text-align: center;
+  background: var(--segment, var(--bg-raised));
+  color: var(--segment-text, var(--text));
+  text-decoration: none;
+}
+.status-bar-segment.zero { flex: 0.6 1 84px; opacity: 0.55; }
+a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; color: var(--segment-text, var(--text)); }
+.status-bar-value { font-size: 28px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.status-bar-label { font-size: 12px; font-weight: 500; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.status-bar-segment.ok { --segment: var(--ok); --segment-text: var(--error-contrast); }
+.status-bar-segment.warn { --segment: var(--warn); --segment-text: var(--error-contrast); }
+.status-bar-segment.error { --segment: var(--error); --segment-text: var(--error-contrast); }
+.status-bar-segment.unknown { --segment: var(--unknown); --segment-text: var(--error-contrast); }
+.status-bar-segment.info { --segment: var(--blue); --segment-text: var(--error-contrast); }
+.status-bar-segment.neutral { --segment: var(--bg-raised); --segment-text: var(--text); }
+.status-bar.compact { min-height: 60px; }
+.status-bar.compact .status-bar-value { font-size: 22px; }
+.status-bar.compact .status-bar-segment { padding: 8px 6px; }
+
+/* Charts are plain SVG: bars for counts over categories or hours, an
+   area for a trend. The grid is faint and the numbers are on the axis,
+   so the shape is read first and the value second. */
+.chart { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--text-faint); font-size: 11px; font-family: var(--font-sans); }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .axis { stroke: var(--border-strong); stroke-width: 1; }
+.chart .bar { rx: 2; }
+.chart .bar.ok { fill: var(--ok); }
+.chart .bar.warn { fill: var(--warn); }
+.chart .bar.error { fill: var(--error); }
+.chart .bar.unknown { fill: var(--unknown); }
+.chart .bar.info { fill: var(--blue); }
+.chart .bar.accent { fill: var(--accent); }
+.chart .area { fill: color-mix(in srgb, var(--accent) 28%, transparent); }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--text-muted); }
+.chart-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--swatch, var(--accent)); }
+.chart-legend .swatch.ok { background: var(--ok); }
+.chart-legend .swatch.warn { background: var(--warn); }
+.chart-legend .swatch.error { background: var(--error); }
+.chart-legend .swatch.unknown { background: var(--unknown); }
+.chart-legend .swatch.info { background: var(--blue); }
+
+/* A horizontal breakdown: label, bar and count, one row per category,
+   for a composition of the fleet (by system, by site) beside a list. */
+.breakdown { display: grid; grid-template-columns: minmax(80px, auto) minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; margin: 0; }
+.breakdown dt { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.breakdown dd { margin: 0; min-width: 0; }
+.breakdown .breakdown-bar { height: 10px; border-radius: 5px; background: var(--bg-raised); overflow: hidden; }
+.breakdown .breakdown-fill { height: 100%; border-radius: 5px; background: var(--accent); }
+.breakdown .breakdown-fill.ok { background: var(--ok); }
+.breakdown .breakdown-fill.warn { background: var(--warn); }
+.breakdown .breakdown-fill.error { background: var(--error); }
+.breakdown .breakdown-fill.info { background: var(--blue); }
+.breakdown .breakdown-count { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* A meter inside a table cell: the number and its share of a whole. */
+.meter { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; }
+.meter-track { flex: 1 1 auto; height: 8px; border-radius: 4px; background: var(--bg-raised); overflow: hidden; }
+.meter-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+.meter-fill.ok { background: var(--ok); }
+.meter-fill.warn { background: var(--warn); }
+.meter-fill.error { background: var(--error); }
+.meter-value { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
+
+/* The widget grid: twelve columns, each widget says how many it spans.
+   The dashboard and the list pages are built from it, so the width of
+   the screen is always in use and a widget row never has a hole. */
+.widgets {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.widgets > * { min-width: 0; margin: 0; }
+.widgets > .card { display: flex; flex-direction: column; }
+.widgets > .card > .card-body { flex: 1 1 auto; }
+.span-3 { grid-column: span 3; }
+.span-4 { grid-column: span 4; }
+.span-5 { grid-column: span 5; }
+.span-6 { grid-column: span 6; }
+.span-7 { grid-column: span 7; }
+.span-8 { grid-column: span 8; }
+.span-9 { grid-column: span 9; }
+.span-12 { grid-column: span 12; }
+@media (max-width: 1400px) {
+  .span-3, .span-4 { grid-column: span 6; }
+  .span-5, .span-7, .span-8, .span-9 { grid-column: span 12; }
+}
+@media (max-width: 900px) {
+  .widgets > * { grid-column: span 12; }
+  .status-bar { flex-wrap: wrap; }
+  .status-bar-segment { flex-basis: 40%; }
+}
+:is(.card, .stats, .columns, .stack, .warning, .toolbar, .tabs, .form) + .widgets,
+.widgets + :is(.card, .stats, .columns, .stack, .warning, .toolbar) { margin-top: 16px; }
+.widget-subhead { margin: 14px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }

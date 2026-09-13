@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import type { Whoami } from "../lib/types";
 import { LOCALES, useLocale, useT } from "../i18n";
 import { THEMES, type Theme } from "../lib/theme";
+import { SCALES, type Scale } from "../lib/scale";
 import { useStoredState } from "../lib/storage";
 import { HostPicker } from "./HostPicker";
 import { Icon, type IconName } from "./icons";
@@ -52,7 +53,7 @@ function isFoldMap(value: unknown): value is Record<string, boolean> {
  * layout decisions, so the pages know nothing about them.
  */
 export function Sidebar({
-  face, user, collapsed, onToggleCollapsed, open, onClose, onSignOut, theme, setTheme,
+  face, user, collapsed, onToggleCollapsed, open, onClose, onSignOut, theme, setTheme, scale, setScale,
 }: {
   face: NavFace;
   user: Whoami | undefined;
@@ -65,6 +66,8 @@ export function Sidebar({
   onSignOut: (event: MouseEvent) => void;
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  scale: Scale;
+  setScale: (scale: Scale) => void;
 }) {
   const t = useT();
   const location = useLocation();
@@ -160,6 +163,7 @@ export function Sidebar({
         <div className="sidebar-switches">
           <LanguageSwitch />
           <ThemeSwitch theme={theme} setTheme={setTheme} />
+          <ScaleSwitch scale={scale} setScale={setScale} />
         </div>
         <div className="sidebar-session">
           {/* The identity provider may have an active session of another
@@ -220,6 +224,27 @@ export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (them
         >
           <span className={`theme-swatch ${entry.code}`} aria-hidden="true" />
           {t(entry.label)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The text size; the choice is remembered in the browser, like the theme. */
+export function ScaleSwitch({ scale, setScale }: { scale: Scale; setScale: (scale: Scale) => void }) {
+  const t = useT();
+  return (
+    <div className="theme-switch scale-switch" role="group" aria-label={t("Text size")}>
+      {SCALES.map((entry) => (
+        <button
+          key={entry.code}
+          type="button"
+          className={entry.code === scale ? "active" : ""}
+          aria-pressed={entry.code === scale}
+          title={t(entry.description)}
+          onClick={() => setScale(entry.code)}
+        >
+          {entry.label}
         </button>
       ))}
     </div>

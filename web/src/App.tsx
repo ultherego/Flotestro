@@ -5,6 +5,7 @@ import { api, ApiError } from "./lib/api";
 import type { Host, Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { useTheme } from "./lib/theme";
+import { useScale } from "./lib/scale";
 import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
 import { Sidebar, type NavFace, type NavGroup } from "./components/Sidebar";
@@ -64,6 +65,7 @@ export function App() {
   // The theme is owned here so that it applies to every screen, the login
   // included; the switch in the sidebar only changes it.
   const { theme, setTheme } = useTheme();
+  const { scale, setScale } = useScale();
   const [collapsed, setCollapsed] = useStoredState<boolean>(SIDEBAR_KEY, false, isBoolean);
   // The drawer on a narrow screen; it closes on every navigation, because
   // the operator opened it to go somewhere, not to keep it.
@@ -197,6 +199,8 @@ export function App() {
         onSignOut={signOut}
         theme={theme}
         setTheme={setTheme}
+        scale={scale}
+        setScale={setScale}
       />
       <main className="content">
         {/* The page keeps a reading width and sits in the middle of the

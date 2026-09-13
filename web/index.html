@@ -16,6 +16,12 @@
           theme = light ? "latte" : "mocha-peach";
         }
         document.documentElement.setAttribute("data-theme", theme);
+        // The text size is remembered the same way and applied just as
+        // early, so the page does not jump when React starts.
+        var scale = null;
+        try { scale = window.localStorage.getItem("flotestro.scale"); } catch (e) {}
+        if (scale !== "small" && scale !== "large" && scale !== "larger") scale = "normal";
+        document.documentElement.setAttribute("data-scale", scale);
       })();
     </script>
   </head>

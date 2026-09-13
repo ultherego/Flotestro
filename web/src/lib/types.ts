@@ -176,6 +176,18 @@ export type Campaign = {
   failure_threshold_absolute: number;
   reboot_policy: string;
   requires_approval: boolean;
+  // What the campaign does with a host that is not connected when its turn
+  // comes, and how long it waits for such a host under a waiting policy.
+  offline_policy: string;
+  deadline_at?: string;
+  // The stop after the canary: whether the campaign asks for a decision
+  // before the waves, and who gave it.
+  manual_gate: boolean;
+  gate_advanced_by?: string;
+  gate_advanced_at?: string;
+  // How many hosts may lose their session mid-task before the campaign
+  // pauses; zero means no such check.
+  connectivity_lost_absolute: number;
   // The fingerprint of what the approver sees: the operation, the payload,
   // the host list and the rollout policy. The consent must give it.
   approval_fingerprint: string;
@@ -231,6 +243,11 @@ export type CampaignReport = {
   totals: Record<string, number>;
   waves: { wave: number; is_canary: boolean; totals: Record<string, number>; completed: boolean }[];
   failures: CampaignTarget[];
+  // Hosts that came back from being offline with a different plan: they ran
+  // nothing, because the consent covered the old plan.
+  plan_changed?: CampaignTarget[];
+  // Hosts still waiting for their connection.
+  offline_queued?: string[];
 };
 
 export type AuditEvent = {
@@ -275,20 +292,89 @@ export type DirectoryGroup = {
 
 export type SudoRule = {
   name: string;
+  description?: string;
   enabled: boolean;
   users?: string[];
   user_groups?: string[];
+  hosts?: string[];
+  host_groups?: string[];
+  commands?: string[];
+  command_groups?: string[];
+  run_as?: string[];
+  run_as_groups?: string[];
+  options?: string[];
+  all_users: boolean;
+  all_hosts: boolean;
+  all_commands: boolean;
+  run_as_any_user: boolean;
   critical: boolean;
   critical_reasons?: string[];
 };
 
 export type HBACRule = {
   name: string;
+  description?: string;
   enabled: boolean;
   allows_everything: boolean;
+  users?: string[];
   user_groups?: string[];
   hosts?: string[];
   host_groups?: string[];
+  services?: string[];
+  service_groups?: string[];
+  all_users: boolean;
+  all_hosts: boolean;
+  all_services: boolean;
+};
+
+/** The plan of a directory change: the impact, read before anybody approves. */
+export type DirectoryPlan = {
+  summary: string;
+  steps?: string[];
+  affected_users?: string[];
+  reachable_hosts?: string[];
+  sudo_rules?: string[];
+  warnings?: string[];
+  conflicts?: string[];
+  replaces?: boolean;
+};
+
+export type DirectoryChange = {
+  id: string;
+  action_type: string;
+  state: string;
+  plan?: DirectoryPlan;
+  payload_hash?: string;
+  requires_approval?: boolean;
+  created_by?: string;
+};
+
+/** The directory's own verdict on one user, host and service. */
+export type AccessSimulation = {
+  user: string;
+  host: string;
+  service: string;
+  allowed: boolean;
+  matched: string[];
+  not_matched: string[];
+  errors?: string[];
+  warnings?: string[];
+};
+
+/**
+ * The effective access of one host. `known` false means the directory has
+ * no entry for the host: the rules that reach it are then undetermined,
+ * not absent.
+ */
+export type HostAccess = {
+  hostname: string;
+  known: boolean;
+  detail?: string;
+  fqdn?: string;
+  enrolled: boolean;
+  host_groups: string[];
+  hbac_rules: (HBACRule & { via: string[]; reached_users?: string[] })[];
+  sudo_rules: (SudoRule & { via: string[]; reached_users?: string[] })[];
 };
 
 export type InventoryRevision = {
@@ -354,4 +440,108 @@ export type Authority = {
   prepared_at?: string;
   hosts_missing?: number;
   ready_to_activate?: boolean;
+};
+
+/** One stage of an installation, as the panel really sees it. */
+export type EnrollmentStepState = "waiting" | "done" | "failed";
+
+export type EnrollmentStep = {
+  key: "token" | "certificate" | "connected" | "inventory";
+  state: EnrollmentStepState;
+  // The reason the step does not go on, when the panel knows it: a refused
+  // attempt recorded against the order, or a readiness gate the host has
+  // not passed in time. Absent when the panel knows nothing yet.
+  error_code?: string;
+  detail?: string;
+};
+
+/**
+ * An enrollment order. The token is not here: it exists only in the answer
+ * to placing the order, and the screen keeps it in memory alone.
+ */
+export type EnrollmentOrder = {
+  id: string;
+  description?: string;
+  site: string;
+  environment: string;
+  kind: "agent" | "relay";
+  purpose: "new" | "replace_identity" | "relay";
+  relay_id?: string;
+  max_uses: number;
+  uses: number;
+  status: "pending" | "enrolled" | "expired" | "revoked" | "failed";
+  enrolled_host_id?: string;
+  expires_at: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  // The ready configuration of the order, without the token.
+  config_url: string;
+  steps?: EnrollmentStep[];
+};
+
+/** A relay of a site: the route of an installation in an isolated site. */
+export type Relay = {
+  id: string;
+  name: string;
+  site: string;
+  environment?: string;
+  not_after?: string;
+  enrolled_at: string;
+  last_seen_at?: string;
+  revoked_at?: string;
+};
+
+export type InstallationCommand = {
+  key: "repository" | "package" | "config" | "ca" | "enroll" | "start";
+  command: string;
+};
+
+export type InstallationFamily = {
+  key: string;
+  label: string;
+  package_manager: string;
+  steps: InstallationCommand[];
+};
+
+/**
+ * Everything a host needs before it holds a token. Nothing here is secret,
+ * so the profile is read for a placement and as often as needed; the token
+ * is ordered separately and shown once.
+ */
+export type InstallationProfile = {
+  kind: "agent" | "relay";
+  site: string;
+  environment: string;
+  architecture: string;
+  channel: string;
+  reason_required: boolean;
+  connection: {
+    enrollment_url: string;
+    gateway_urls: string[];
+    relay?: { id: string; name: string; site: string };
+  };
+  config: { path: string; content: string };
+  ca: { path: string; pem: string; fingerprint_sha256: string; subject: string; not_after: string };
+  repository: { configured: boolean; url: string; key_url: string; package: string };
+  architectures: string[];
+  families: InstallationFamily[];
+  warnings?: string[];
+};
+
+/** One category of the fleet and how many hosts fall into it. */
+export type Facet = { key: string; count: number };
+
+/** The activity behind the dashboard widgets, computed in the database. */
+export type FleetActivity = {
+  hours: string[];
+  succeeded: number[];
+  failed: number[];
+  other: number[];
+  by_os_family: Facet[];
+  by_site: Facet[];
+  by_environment: Facet[];
+  by_agent_version: Facet[];
+  by_connection_state: Facet[];
+  by_lifecycle_state: Facet[];
 };
