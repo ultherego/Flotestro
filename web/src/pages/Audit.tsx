@@ -7,6 +7,7 @@ import { toInstant } from "../lib/format";
 import type { AuditEvent } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
+import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
 /**
@@ -65,6 +66,16 @@ export function Audit() {
   if (trail.error) return <ErrorBox error={trail.error} />;
 
   const events = loadedItems(trail.data);
+  const loaded = trail.data !== undefined;
+  const listed = t("among the {n} listed", { n: events.length });
+  const outcomeCount = (kind: AuditEvent["outcome"]) => (loaded ? events.filter((event) => event.outcome === kind).length : undefined);
+  const hourly = eventsPerHour(events);
+  // The actors behind the listed events, the busiest first: a trail
+  // dominated by one token or one operator is read here at a glance.
+  const byActor = Object.entries(
+    events.reduce<Record<string, number>>((acc, event) => { acc[event.actor_id] = (acc[event.actor_id] ?? 0) + 1; return acc; }, {}),
+  ).sort((x, y) => y[1] - x[1]).slice(0, 8);
+  const hourLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit" });
 
   return (
     <>
@@ -73,59 +84,137 @@ export function Audit() {
         description={t("Every success and failure creates an event; so does every denial.")}
       />
 
-      <Card flush>
-        <Toolbar end={<span>{t("{n} events", { n: events.length })}</span>}>
-          <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-            <option value="">{t("outcome: any")}</option>
-            <option value="denied">{t("denials only")}</option>
-            <option value="failure">{t("failures only")}</option>
-            <option value="success">{t("successes only")}</option>
-          </select>
-          <input placeholder={t("actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
-          <input placeholder={t("operation, e.g. job.create")} value={action} onChange={(e) => setAction(e.target.value)} />
-          <input placeholder={t("target type, e.g. host")} value={targetType} onChange={(e) => setTargetType(e.target.value)} />
-          <label className="toggle">
-            {t("Since")}{" "}
-            <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
-          </label>
-          <label className="toggle">
-            {t("Until")}{" "}
-            <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
-          </label>
-        </Toolbar>
+      <div className="widgets">
+        {/* The chart is drawn from the page in the browser, not from the
+            database: it is the shape of what is listed, and the caption
+            says so. A filter narrows the chart with the list. */}
+        <Card className="span-8" title={t("Events per hour")} description={`${t("By outcome")} · ${listed}`}>
+          {!loaded ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : hourly.labels.length === 0 ? (
+            <p className="fp-blank">{t("No events.")}</p>
+          ) : (
+            <BarChart
+              labels={hourly.labels.map(hourLabel)}
+              everyLabel={Math.max(1, Math.ceil(hourly.labels.length / 8))}
+              series={[
+                { name: t("success"), tone: "ok", values: hourly.success },
+                { name: t("failure"), tone: "error", values: hourly.failure },
+                { name: t("denied"), tone: "warn", values: hourly.denied },
+              ]}
+            />
+          )}
+        </Card>
 
-        {trail.isLoading ? (
-          <Empty>{t("Loading…")}</Empty>
-        ) : events.length === 0 ? (
-          <Empty>{t("No events.")}</Empty>
-        ) : (
-          <table>
-            <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Kind")}</th><th>{t("Operation")}</th><th>{t("Target")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
-            <tbody>
-              {events.map((event) => (
-                <tr key={event.id}>
-                  <td><Time value={event.occurred_at} /></td>
-                  <td className="mono">{event.actor_id}</td>
-                  <td>{event.actor_type}</td>
-                  <td className="mono">{event.action}</td>
-                  <td className="mono">{event.target_type ? `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}` : "—"}</td>
-                  <td><JobState state={event.outcome} /></td>
-                  <td className="source">{digest(event.detail)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {trail.hasNextPage && (
-          <p>
-            <button className="secondary" onClick={() => trail.fetchNextPage()} disabled={trail.isFetchingNextPage}>
-              {t("Load more")}
-            </button>
-          </p>
-        )}
-      </Card>
+        <Card className="span-4" title={t("Outcome")} description={listed}>
+          <div className="fp-stack">
+            <StatusBar compact segments={[
+              { label: t("success"), value: outcomeCount("success"), tone: "ok" },
+              { label: t("failure"), value: outcomeCount("failure"), tone: "error" },
+              { label: t("denied"), value: outcomeCount("denied"), tone: "warn" },
+            ]} />
+            <div>
+              <h4 className="widget-subhead">{t("By actor")}</h4>
+              {!loaded ? (
+                <Empty>{t("Loading…")}</Empty>
+              ) : byActor.length === 0 ? (
+                <p className="fp-blank">{t("No events.")}</p>
+              ) : (
+                <Breakdown tone="neutral" items={byActor.map(([actor, n]) => ({ label: <span className="mono">{actor}</span>, value: n }))} />
+              )}
+            </div>
+          </div>
+        </Card>
+
+        <Card className="span-12" flush>
+          <Toolbar end={<span>{t("{n} events", { n: events.length })}</span>}>
+            <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+              <option value="">{t("outcome: any")}</option>
+              <option value="denied">{t("denials only")}</option>
+              <option value="failure">{t("failures only")}</option>
+              <option value="success">{t("successes only")}</option>
+            </select>
+            <input placeholder={t("actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
+            <input placeholder={t("operation, e.g. job.create")} value={action} onChange={(e) => setAction(e.target.value)} />
+            <input placeholder={t("target type, e.g. host")} value={targetType} onChange={(e) => setTargetType(e.target.value)} />
+            <label className="toggle">
+              {t("Since")}{" "}
+              <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
+            </label>
+            <label className="toggle">
+              {t("Until")}{" "}
+              <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
+            </label>
+          </Toolbar>
+
+          {trail.isLoading ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : events.length === 0 ? (
+            <Empty>{t("No events.")}</Empty>
+          ) : (
+            <table>
+              <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Kind")}</th><th>{t("Operation")}</th><th>{t("Target")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
+              <tbody>
+                {events.map((event) => (
+                  <tr key={event.id}>
+                    <td><Time value={event.occurred_at} /></td>
+                    <td className="mono">{event.actor_id}</td>
+                    <td>{event.actor_type}</td>
+                    <td className="mono">{event.action}</td>
+                    <td className="mono">{event.target_type ? `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}` : "—"}</td>
+                    <td><JobState state={event.outcome} /></td>
+                    <td className="source">{digest(event.detail)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {trail.hasNextPage && (
+            <p>
+              <button className="secondary" onClick={() => trail.fetchNextPage()} disabled={trail.isFetchingNextPage}>
+                {t("Load more")}
+              </button>
+            </p>
+          )}
+        </Card>
+      </div>
     </>
   );
+}
+
+/**
+ * The listed events in hourly buckets, from the oldest listed to the
+ * newest, with the outcomes side by side. An hour with no event keeps
+ * its bucket, so a quiet night shows as a gap and not as a jump.
+ */
+function eventsPerHour(events: AuditEvent[]): { labels: string[]; success: number[]; failure: number[]; denied: number[] } {
+  const empty = { labels: [], success: [], failure: [], denied: [] };
+  if (events.length === 0) return empty;
+  const hour = 60 * 60 * 1000;
+  // One stamp per event, in step with the events; a stamp that could not
+  // be read stays NaN and its event is left out of the buckets.
+  const stamps = events.map((event) => Math.floor(new Date(event.occurred_at).getTime() / hour) * hour);
+  const readable = stamps.filter((value) => !Number.isNaN(value));
+  if (readable.length === 0) return empty;
+  const first = Math.min(...readable);
+  const last = Math.max(...readable);
+  // A page that spans more than a fortnight is bucketed by hour all the
+  // same; the bars get thin, but the shape stays honest.
+  const buckets = Math.floor((last - first) / hour) + 1;
+  const labels: string[] = [];
+  const success = new Array<number>(buckets).fill(0);
+  const failure = new Array<number>(buckets).fill(0);
+  const denied = new Array<number>(buckets).fill(0);
+  for (let i = 0; i < buckets; i++) labels.push(new Date(first + i * hour).toISOString());
+  events.forEach((event, i) => {
+    const stamp = stamps[i] ?? Number.NaN;
+    if (Number.isNaN(stamp)) return;
+    const index = Math.floor((stamp - first) / hour);
+    if (event.outcome === "success") success[index]++;
+    else if (event.outcome === "failure") failure[index]++;
+    else if (event.outcome === "denied") denied[index]++;
+  });
+  return { labels, success, failure, denied };
 }
 
 function digest(detail: Record<string, unknown>): string {

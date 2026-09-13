@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Authority } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid } from "../components/layout";
+import { Actions, Card, Field, FieldGrid } from "../components/layout";
+import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
 
 /**
@@ -55,12 +56,44 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   const list = query.data?.authorities ?? [];
   const pending = list.find((ca) => ca.state === "pending");
   const reasonReady = reason.trim().length >= 8;
+  // The trust set by state: one authority signs, at most one is prepared,
+  // and the retired ones stay until no host holds a certificate of theirs.
+  // Before the answer arrives nothing is known, and the bar shows dashes.
+  const count = (state: Authority["state"]) => (query.data ? list.filter((ca) => ca.state === state).length : undefined);
+  const holding = list.filter((ca) => ca.hosts_using > 0);
+  const holdingTone = (state: Authority["state"]): WidgetTone => (state === "active" ? "ok" : state === "pending" ? "warn" : "info");
 
   // The trust set and the step that changes it stand side by side: the
   // operator reads the fingerprints on the left and acts on the right.
   return (
-    <Columns wide>
+    <div className="widgets">
+      <Card className="span-8" title={t("Trust set")} description={t("{n} authorities", { n: list.length })}>
+        <StatusBar segments={[
+          { label: t("signing"), value: count("active"), tone: "ok" },
+          { label: t("prepared"), value: count("pending"), tone: "warn" },
+          { label: t("retired"), value: count("retired"), tone: "unknown" },
+        ]} />
+      </Card>
+
+      {/* Which authority the agents' certificates hang on: a retired CA
+          with hosts still holding its certificates cannot leave the trust
+          set yet, and that is read here before the row says so. */}
+      <Card className="span-4" title={t("Certificates by authority")} description={t("Agent certificates each authority issued.")}>
+        {!query.data ? (
+          <Empty>{t("Loading…")}</Empty>
+        ) : holding.length === 0 ? (
+          <p className="fp-blank">{t("No host holds a certificate of any authority.")}</p>
+        ) : (
+          <Breakdown items={holding.map((ca) => ({
+            label: <><span className="mono">{ca.serial.slice(0, 8)}</span> <AuthorityState state={ca.state} /></>,
+            value: ca.hosts_using,
+            tone: holdingTone(ca.state),
+          }))} />
+        )}
+      </Card>
+
       <Card
+        className="span-8"
         title={t("Fleet CA")}
         description={t("Agent certificates are issued by the fleet CA. Rotation happens in two phases: the new CA first reaches agents as their certificates are renewed, and only then takes over signing.")}
         flush
@@ -110,6 +143,7 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
       </Card>
 
       <Card
+        className="span-4"
         title={pending ? t("Phase 2: hand over signing") : t("Phase 1: prepare a new CA")}
         description={pending
           ? pending.ready_to_activate
@@ -143,7 +177,7 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           </Field>
         </FieldGrid>
       </Card>
-    </Columns>
+    </div>
   );
 }
 

@@ -1,0 +1,45 @@
+/* ---------------------------------------------------------------------- */
+/* Fleet pages: the pieces the list pages need beyond the shared widgets. */
+/* ---------------------------------------------------------------------- */
+/* The widgets themselves - status bars, charts, breakdowns, meters - live
+   with the components. What stands here is the glue of a list page: a
+   two-line cell, a note under a bar, a second widget stacked under the
+   first in one card. Every colour is a token; nothing is named here. */
+
+/* A host in two lines: the name to open, the address to type. */
+.fp-host-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fp-host-cell .fp-host-address { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+
+/* A cell that carries a meter keeps room for the bar and its number. */
+td.fp-meter-cell { min-width: 160px; }
+td.fp-meter-cell .meter { width: 100%; }
+/* The security share of the pending updates, under the meter: it is the
+   part that cannot wait, so it is the colour of a warning. */
+.fp-security { display: block; margin-top: 2px; font-size: 11px; color: var(--warn-text); }
+
+/* Widgets stacked in one card: a status bar and, under it, a breakdown
+   or a chart, with the rhythm of the page between them. */
+.fp-stack { display: flex; flex-direction: column; gap: 14px; }
+.fp-stack > * { min-width: 0; }
+.fp-stack .widget-subhead:first-child { margin-top: 0; }
+
+/* A line of figures under a bar: the numbers the bar does not carry. */
+.fp-note { margin: 10px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+/* The reason a widget shows dashes: it stands where the numbers would. */
+.fp-blank { margin: 0; padding: 18px 0; text-align: center; font-size: 13px; color: var(--text-faint); }
+
+/* A breakdown whose labels open a page: the link keeps its own colour. */
+.fp-links .breakdown dt a { color: var(--accent-text); }
+
+/* A breakdown with a row for what is not known: its bar is grey, like
+   every other mark of an unknown, never the accent. */
+.fp-tones .breakdown-fill.unknown { background: var(--unknown); }
+.fp-tones .breakdown-fill.neutral { background: var(--border-strong); }
+
+/* A breakdown that ends with a line about the rest of the list. */
+.fp-rest { margin: 8px 0 0; font-size: 11px; color: var(--text-faint); }
+
+/* The form of a page inside the grid keeps its fields readable in a
+   narrow column: one field per row, the whole width for each. */
+.fp-narrow .field-grid { grid-template-columns: 1fr; }

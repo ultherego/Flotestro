@@ -2,7 +2,8 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
+import { Card, PageHeader } from "../components/layout";
+import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
 type Item = {
@@ -65,6 +66,11 @@ export function FleetCertificates() {
   const expired = counts.expired ?? 0;
   const critical = counts.critical ?? 0;
   const warning = counts.warning ?? 0;
+  const reporting = data.hosts_total - data.hosts_without_certificates;
+  // What renews the listed certificates: the list is the closest
+  // deadlines, so this says whether the next wave renews itself.
+  const renewal = (kind: string) => data.items.filter((item) => item.renewal === kind).length;
+  const listed = t("among the {n} listed", { n: data.items.length });
   return (
     <>
       <PageHeader
@@ -74,82 +80,106 @@ export function FleetCertificates() {
         })}
       />
 
-      <StatGrid>
-        <Stat label={t("Expired")} value={expired} tone={expired > 0 ? "error" : undefined} />
-        <Stat label={t("Urgent")} value={critical} tone={critical > 0 ? "error" : undefined} />
-        <Stat label={t("Expiring")} value={warning} tone={warning > 0 ? "warn" : undefined} />
-        <Stat label={t("Unknown")} value={counts.unknown ?? 0} tone="unknown" />
-        <Stat label={t("Valid")} value={counts.valid ?? 0} tone="ok" />
-        <Stat
-          label={t("Hosts")}
-          value={data.hosts_total}
-          hint={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.hosts_total })}
-        />
-      </StatGrid>
+      <div className="widgets">
+        {/* The counts cover every certificate the fleet reports, not only
+            the listed ones; the nearest deadline is the leftmost segment. */}
+        <Card className="span-9" title={t("Expiry")} description={t("Every certificate the fleet reports, by how close its deadline is.")}>
+          <StatusBar segments={[
+            { label: t("Expired"), value: expired, tone: "error" },
+            { label: t("Urgent"), value: critical, tone: "error" },
+            { label: t("Expiring"), value: warning, tone: "warn" },
+            { label: t("Unknown"), value: counts.unknown ?? 0, tone: "unknown" },
+            { label: t("Valid"), value: counts.valid ?? 0, tone: "ok" },
+          ]} />
+        </Card>
 
-      <ExpiryTimeline timeline={data.timeline ?? []} />
+        {/* A host that reports none is not a host without certificates: it
+            is a host nobody has pointed at a path yet. */}
+        <Card className="span-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.hosts_total })}>
+          <Breakdown items={[
+            { label: t("Reporting certificates"), value: reporting, tone: "ok" },
+            { label: t("Reporting none"), value: data.hosts_without_certificates, tone: "warn" },
+          ]} />
+        </Card>
 
-      <Trust leaves={data.items} />
+        <Trust leaves={data.items} />
 
-      <Card
-        flush
-        footer={data.truncated && (
-          <p>{t("Only the closest {n} certificates are listed. The counts above cover all of them.", { n: data.items.length })}</p>
-        )}
-      >
-        {!data.items.length ? (
-          <Empty>
-            {t("No host reports a certificate yet. Open a host, watch a path and scan it.")}
-          </Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>{t("Expires")}</th><th>{t("Host")}</th><th>{t("Path")}</th><th>{t("Subject")}</th>
-                <th>{t("Issuer")}</th><th>{t("Renewal")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((item) => (
-                <tr key={`${item.host_id}-${item.path}`}>
-                  <td>
-                    <ExpiryBadge status={item.status} days={item.days_to_expiry} />
-                    {item.not_after && (
-                      <div className="source"><Time value={item.not_after} /></div>
-                    )}
-                  </td>
-                  <td>
-                    <Link to={`/hosts/${item.host_id}/certificates`}>{item.hostname}</Link>
-                  </td>
-                  <td className="source mono">
-                    {item.path}
-                    {item.owner_service && <div>{item.owner_service}</div>}
-                  </td>
-                  <td>
-                    {item.unavailable_reason ? (
-                      <span className="badge unknown">{item.unavailable_reason}</span>
-                    ) : (
-                      item.subject
-                    )}
-                  </td>
-                  <td className="source">{item.issuer}</td>
-                  <td>
-                    {/* "Manual" is a finding, "unknown" a missing answer - and
-                        the two must not look the same. */}
-                    {item.renewal === "tracked" ? (
-                      <span className="badge ok">certmonger</span>
-                    ) : item.renewal === "manual" ? (
-                      <span className="badge warn">{t("manual")}</span>
-                    ) : (
-                      <span className="badge unknown">{t("unknown")}</span>
-                    )}
-                  </td>
+        <Card
+          className="span-9"
+          flush
+          footer={data.truncated && (
+            <p>{t("Only the closest {n} certificates are listed. The counts above cover all of them.", { n: data.items.length })}</p>
+          )}
+        >
+          {!data.items.length ? (
+            <Empty>
+              {t("No host reports a certificate yet. Open a host, watch a path and scan it.")}
+            </Empty>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("Expires")}</th><th>{t("Host")}</th><th>{t("Path")}</th><th>{t("Subject")}</th>
+                  <th>{t("Issuer")}</th><th>{t("Renewal")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
+              </thead>
+              <tbody>
+                {data.items.map((item) => (
+                  <tr key={`${item.host_id}-${item.path}`}>
+                    <td>
+                      <ExpiryBadge status={item.status} days={item.days_to_expiry} />
+                      {item.not_after && (
+                        <div className="source"><Time value={item.not_after} /></div>
+                      )}
+                    </td>
+                    <td>
+                      <Link to={`/hosts/${item.host_id}/certificates`}>{item.hostname}</Link>
+                    </td>
+                    <td className="source mono">
+                      {item.path}
+                      {item.owner_service && <div>{item.owner_service}</div>}
+                    </td>
+                    <td>
+                      {item.unavailable_reason ? (
+                        <span className="badge unknown">{item.unavailable_reason}</span>
+                      ) : (
+                        item.subject
+                      )}
+                    </td>
+                    <td className="source">{item.issuer}</td>
+                    <td>
+                      {/* "Manual" is a finding, "unknown" a missing answer - and
+                          the two must not look the same. */}
+                      {item.renewal === "tracked" ? (
+                        <span className="badge ok">certmonger</span>
+                      ) : item.renewal === "manual" ? (
+                        <span className="badge warn">{t("manual")}</span>
+                      ) : (
+                        <span className="badge unknown">{t("unknown")}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+
+        <Card className="span-3" title={t("Expires")} description={t("When the next waves of deadlines come.")}>
+          <ExpiryTimeline timeline={data.timeline ?? []} />
+          <h4 className="widget-subhead">{t("Renewal")}</h4>
+          {/* "Manual" is a finding, "unknown" a missing answer - and the
+              two must not look the same. */}
+          <div className="fp-tones">
+            <Breakdown items={[
+              { label: "certmonger", value: renewal("tracked"), tone: "ok" },
+              { label: t("manual"), value: renewal("manual"), tone: "warn" },
+              { label: t("unknown"), value: renewal("unknown"), tone: "unknown" },
+            ]} />
+          </div>
+          <p className="fp-rest">{listed}</p>
+        </Card>
+      </div>
     </>
   );
 }
@@ -199,6 +229,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
 
   return (
     <Card
+      className="span-12"
       title={t("Trusted authorities")}
       description={t("Anchors the panel put on hosts. During a rotation a host trusts both the old and the new authority; the old one may only be withdrawn once nothing signs with it any more.")}
       actions={
@@ -286,16 +317,9 @@ function Trust({ leaves }: { leaves: Item[] }) {
  */
 function ExpiryTimeline({ timeline }: { timeline: { reason: string; count: number }[] }) {
   const t = useT();
-  if (!timeline.length) return null;
   const total = timeline.reduce((sum, window) => sum + window.count, 0);
-  if (total === 0) return null;
+  if (!timeline.length || total === 0) return <p className="fp-blank">{t("No deadline in the windows watched.")}</p>;
   return (
-    <Card title={t("Expires")}>
-      <StatGrid compact>
-        {timeline.map((window) => (
-          <Stat key={window.reason} label={window.reason} value={window.count} />
-        ))}
-      </StatGrid>
-    </Card>
+    <Breakdown tone="warn" items={timeline.map((window) => ({ label: window.reason, value: window.count }))} />
   );
 }

@@ -2,7 +2,8 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, Columns, PageHeader, Stat, StatGrid } from "../components/layout";
+import { Card, PageHeader } from "../components/layout";
+import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
 type Item = {
@@ -75,6 +76,15 @@ export function FleetBackups() {
   const stale = counts.critical ?? 0;
   const ageing = counts.warning ?? 0;
   const neverRestored = data.never_restored ?? 0;
+  // The listed definitions by tool and by verification: which backup
+  // program the fleet leans on, and how many copies anybody has read back.
+  const tally = (key: (item: Item) => string) => Object.entries(
+    data.items.reduce<Record<string, number>>((acc, item) => { const k = key(item); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
+  ).sort((x, y) => y[1] - x[1]);
+  const byTool = tally((item) => item.tool || "—");
+  const verified = data.items.filter((item) => !item.unverified).length;
+  const restored = data.items.filter((item) => !!item.last_restore_at).length;
+  const listed = t("among the {n} listed", { n: data.items.length });
 
   return (
     <>
@@ -85,73 +95,98 @@ export function FleetBackups() {
         })}
       />
 
-      <StatGrid>
-        <Stat label={t("Never ran")} value={never} tone={never > 0 ? "error" : undefined} />
-        <Stat label={t("Stale")} value={stale} tone={stale > 0 ? "error" : undefined} />
-        <Stat label={t("Ageing")} value={ageing} tone={ageing > 0 ? "warn" : undefined} />
-        <Stat label={t("Fresh")} value={counts.ok ?? 0} tone="ok" />
-        <Stat label={t("Unverified")} value={data.unverified} tone={data.unverified > 0 ? "warn" : undefined} />
-        {/* A copy nobody has ever restored is a hope, not a copy. The panel
-            does not force a trial - it is to say there was none. */}
-        <Stat label={t("Never restored")} value={neverRestored} tone={neverRestored > 0 ? "unknown" : undefined} />
-        <Stat label={t("Hosts")} value={data.hosts_total} hint={t("{n} hosts visible", { n: data.hosts_total })} />
-      </StatGrid>
+      <div className="widgets">
+        {/* The age of the newest copy, one segment per verdict, and beside
+            it what nobody has checked: a copy nobody has ever restored is a
+            hope, not a copy. The panel does not force a trial - it is to
+            say there was none. */}
+        <Card className="span-8" title={t("Age")} description={t("{n} hosts visible", { n: data.hosts_total })}>
+          <StatusBar segments={[
+            { label: t("Never ran"), value: never, tone: "error" },
+            { label: t("Stale"), value: stale, tone: "error" },
+            { label: t("Ageing"), value: ageing, tone: "warn" },
+            { label: t("Fresh"), value: counts.ok ?? 0, tone: "ok" },
+            { label: t("Unknown"), value: counts.unknown ?? 0, tone: "unknown" },
+          ]} />
+        </Card>
+        <Card className="span-4" title={t("Verified")} description={t("A copy is a safeguard once somebody has read it back.")}>
+          <StatusBar segments={[
+            { label: t("Unverified"), value: data.unverified, tone: "warn" },
+            { label: t("Never restored"), value: neverRestored, tone: "unknown" },
+          ]} />
+        </Card>
 
-      {/* The calendar and the backends are two short blocks: side by side
-          they make one row above the list instead of two thin strips. */}
-      <Columns>
-        <Calendar items={data.items} />
+        {/* The calendar and the backends are two short blocks: side by side
+            they make one row above the list instead of two thin strips. */}
+        <Calendar items={data.items} wide={!(data.repositories ?? []).length} />
         <Repositories repositories={data.repositories ?? []} />
-      </Columns>
 
-      <Card flush>
-        {!data.items.length ? (
-          <Empty>
-            {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
-          </Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>{t("Age")}</th><th>{t("Host")}</th><th>{t("Definition")}</th><th>{t("Tool")}</th>
-                <th>{t("Destination")}</th><th>{t("Verified")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((item) => (
-                <tr key={`${item.host_id}-${item.definition}`}>
-                  <td>
-                    <AgeBadge status={item.status} age={item.age_hours} />
-                    {item.last_success_at && (
-                      <div className="source"><Time value={item.last_success_at} /></div>
-                    )}
-                  </td>
-                  <td>
-                    <Link to={`/hosts/${item.host_id}/backups`}>{item.hostname}</Link>
-                  </td>
-                  <td>{item.definition}</td>
-                  <td className="source">{item.tool}</td>
-                  <td className="source mono">{item.repository}</td>
-                  <td>
-                    {item.unverified ? (
-                      <span className="badge warn">{t("not verified")}</span>
-                    ) : (
-                      <span className="badge ok">{t("verified")}</span>
-                    )}
-                    <div className="source">
-                      {item.last_restore_at ? (
-                        <>{t("restored")} <Time value={item.last_restore_at} /></>
-                      ) : (
-                        t("never restored")
-                      )}
-                    </div>
-                  </td>
+        <Card className="span-9" flush>
+          {!data.items.length ? (
+            <Empty>
+              {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
+            </Empty>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("Age")}</th><th>{t("Host")}</th><th>{t("Definition")}</th><th>{t("Tool")}</th>
+                  <th>{t("Destination")}</th><th>{t("Verified")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
+              </thead>
+              <tbody>
+                {data.items.map((item) => (
+                  <tr key={`${item.host_id}-${item.definition}`}>
+                    <td>
+                      <AgeBadge status={item.status} age={item.age_hours} />
+                      {item.last_success_at && (
+                        <div className="source"><Time value={item.last_success_at} /></div>
+                      )}
+                    </td>
+                    <td>
+                      <Link to={`/hosts/${item.host_id}/backups`}>{item.hostname}</Link>
+                    </td>
+                    <td>{item.definition}</td>
+                    <td className="source">{item.tool}</td>
+                    <td className="source mono">{item.repository}</td>
+                    <td>
+                      {item.unverified ? (
+                        <span className="badge warn">{t("not verified")}</span>
+                      ) : (
+                        <span className="badge ok">{t("verified")}</span>
+                      )}
+                      <div className="source">
+                        {item.last_restore_at ? (
+                          <>{t("restored")} <Time value={item.last_restore_at} /></>
+                        ) : (
+                          t("never restored")
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+
+        <Card className="span-3" title={t("By tool")} description={listed}>
+          {!data.items.length ? (
+            <p className="fp-blank">{t("No backup definition yet.")}</p>
+          ) : (
+            <>
+              <Breakdown tone="info" items={byTool.map(([tool, n]) => ({ label: <span className="mono">{tool}</span>, value: n }))} />
+              <h4 className="widget-subhead">{t("Verification")}</h4>
+              <Breakdown items={[
+                { label: t("verified"), value: verified, tone: "ok" },
+                { label: t("not verified"), value: data.items.length - verified, tone: "warn" },
+                { label: t("restored"), value: restored, tone: "ok" },
+                { label: t("never restored"), value: data.items.length - restored, tone: "warn" },
+              ]} />
+            </>
+          )}
+        </Card>
+      </div>
     </>
   );
 }
@@ -168,7 +203,7 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
   const t = useT();
   if (!repositories.length) return null;
   return (
-    <Card title={t("Repositories")} flush>
+    <Card className="span-6" title={t("Repositories")} flush>
       <table>
         <thead>
           <tr><th>{t("Repository")}</th><th className="num">{t("Hosts")}</th><th className="num">{t("Oldest backup")}</th><th className="num">{t("Parallel writes")}</th></tr>
@@ -219,7 +254,7 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
  * empty ones is a broken schedule, and that shows here before any single
  * copy is old enough to turn red.
  */
-function Calendar({ items }: { items: Item[] }) {
+function Calendar({ items, wide }: { items: Item[]; wide: boolean }) {
   const t = useT();
   const days = 14;
   const today = new Date();
@@ -236,6 +271,7 @@ function Calendar({ items }: { items: Item[] }) {
   if (!items.length) return null;
   return (
     <Card
+      className={wide ? "span-12" : "span-6"}
       title={t("Last {n} days", { n: days })}
       description={t("How many definitions had their newest successful copy on each day. Empty days in a row are a schedule that stopped, visible before any copy is old enough to turn red.")}
     >

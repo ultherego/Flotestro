@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
 
 export function Campaigns() {
@@ -16,15 +17,29 @@ export function Campaigns() {
   });
   if (error) return <ErrorBox error={error} />;
 
-  // The tiles count the listed campaigns: the newest page, not the whole
-  // history, and the hint says so.
+  // The bar counts the listed campaigns: the newest page, not the whole
+  // history, and the caption says so. Before the list arrives nothing is
+  // known, and the segments show dashes.
   const campaigns = data?.items ?? [];
-  const count = (states: string[]) => campaigns.filter((campaign) => states.includes(campaign.state)).length;
+  const count = (states: string[]) => (data ? campaigns.filter((campaign) => states.includes(campaign.state)).length : undefined);
   const awaiting = count(["awaiting_approval", "planned"]);
   const inProgress = count(["planning", "canary", "running"]);
   const paused = count(["paused"]);
   const completed = count(["completed"]);
+  const failed = count(["failed", "partially_applied"]);
+  const canceled = count(["canceled", "cancelled"]);
   const listed = t("among the {n} listed", { n: campaigns.length });
+  // How the listed campaigns ended, and what they did: a fleet whose
+  // campaigns mostly end canceled has a planning problem, not a rollout
+  // problem, and that is read here rather than row by row.
+  const tally = (key: (campaign: Campaign) => string) => Object.entries(
+    campaigns.reduce<Record<string, number>>((acc, campaign) => { const k = key(campaign); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
+  ).sort((x, y) => y[1] - x[1]);
+  const outcomes = tally((campaign) => campaign.state);
+  const operations = tally((campaign) => campaign.action_type);
+  const outcomeTone = (state: string): WidgetTone =>
+    state === "completed" ? "ok" : ["failed", "partially_applied"].includes(state) ? "error"
+      : ["paused", "awaiting_approval", "planned"].includes(state) ? "warn" : ["canceled", "cancelled"].includes(state) ? "unknown" : "info";
 
   return (
     <>
@@ -38,41 +53,64 @@ export function Campaigns() {
         }
       />
 
-      <StatGrid>
-        <Stat label={t("Awaiting approval")} value={awaiting} hint={listed} tone={awaiting > 0 ? "warn" : undefined} />
-        <Stat label={t("In progress")} value={inProgress} hint={listed} />
-        <Stat label={t("Paused")} value={paused} hint={listed} tone={paused > 0 ? "warn" : undefined} />
-        <Stat label={t("Completed")} value={completed} hint={listed} />
-      </StatGrid>
-
       {building && <Wizard onDone={() => setBuilding(false)} />}
 
-      <Card title={t("List")} flush>
-        {!data?.items.length ? (
-          <EmptyState action={!building && <button onClick={() => setBuilding(true)}>{t("New campaign")}</button>}>
-            {t("No campaigns.")}
-          </EmptyState>
-        ) : (
-          <table>
-            <thead>
-              <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th className="num">{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
-            </thead>
-            <tbody>
-              {data.items.map((campaign) => (
-                <tr key={campaign.id}>
-                  <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
-                  <td><JobState state={campaign.state} /></td>
-                  <td className="mono">{campaign.action_type}</td>
-                  <td className="num">{campaign.canary_size} / {campaign.wave_size}</td>
-                  <td>{campaign.created_by}</td>
-                  <td>{campaign.approved_by || "—"}</td>
-                  <td><Time value={campaign.created_at} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
+      <div className="widgets">
+        <Card className="span-12" title={t("State")} description={listed}>
+          <StatusBar segments={[
+            { label: t("Awaiting approval"), value: awaiting, tone: "warn" },
+            { label: t("In progress"), value: inProgress, tone: "info" },
+            { label: t("Paused"), value: paused, tone: "warn" },
+            { label: t("Completed"), value: completed, tone: "ok" },
+            { label: t("Failed"), value: failed, tone: "error" },
+            { label: t("Canceled"), value: canceled, tone: "unknown" },
+          ]} />
+        </Card>
+
+        <Card className="span-9" title={t("List")} flush>
+          {!data?.items.length ? (
+            <EmptyState action={!building && <button onClick={() => setBuilding(true)}>{t("New campaign")}</button>}>
+              {t("No campaigns.")}
+            </EmptyState>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th className="num">{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
+              </thead>
+              <tbody>
+                {data.items.map((campaign) => (
+                  <tr key={campaign.id}>
+                    <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
+                    <td><JobState state={campaign.state} /></td>
+                    <td className="mono">{campaign.action_type}</td>
+                    <td className="num">{campaign.canary_size} / {campaign.wave_size}</td>
+                    <td>{campaign.created_by}</td>
+                    <td>{campaign.approved_by || "—"}</td>
+                    <td><Time value={campaign.created_at} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+
+        {/* The campaigns carry no per-host totals on the list, so the side
+            widget reads their outcomes and operations, not their progress;
+            the progress of one campaign is on its own page. */}
+        <Card className="span-3" title={t("Outcomes")} description={listed}>
+          {!data ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : campaigns.length === 0 ? (
+            <p className="fp-blank">{t("No campaigns.")}</p>
+          ) : (
+            <>
+              <Breakdown items={outcomes.map(([state, n]) => ({ label: <JobState state={state} />, value: n, tone: outcomeTone(state) }))} />
+              <h4 className="widget-subhead">{t("By operation")}</h4>
+              <Breakdown tone="neutral" items={operations.map(([action, n]) => ({ label: <span className="mono">{action}</span>, value: n }))} />
+            </>
+          )}
+        </Card>
+      </div>
     </>
   );
 }

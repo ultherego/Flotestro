@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { GroupMapping, Principal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, Columns, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Breakdown } from "../components/widgets";
 import { CertificateAuthority } from "./CertificateAuthority";
 import { useT } from "../i18n";
 
@@ -91,94 +92,119 @@ function Mappings() {
   }
   if (list.error) return <ErrorBox error={list.error} />;
 
+  const mappings = list.data?.items ?? [];
+  const listed = t("among the {n} listed", { n: mappings.length });
+  // The mappings by role and by reach: how many hand out which role, and
+  // how many of them reach the whole fleet rather than one site or
+  // environment. A fleet-wide operator mapping is the one to look at.
+  const byRole = ROLES.map((role) => ({ role, count: mappings.filter((mapping) => mapping.role === role).length }));
+  const fleetWide = mappings.filter((mapping) => !mapping.site && !mapping.environment).length;
+
   return (
     <>
       <Warning error={warning} close={() => setWarning(null)} />
 
       {/* The form opens beside the list it adds to; while it is closed the
           list has the row to itself. */}
-      <Columns wide>
-      <Card
-        title={t("Group mappings")}
-        actions={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}
-        flush
-      >
-        {list.data?.items.length ? (
-          <table>
-            <thead>
-              <tr><th>{t("Group")}</th><th>{t("Role")}</th><th>{t("Scope")}</th><th>{t("Added by")}</th><th>{t("When")}</th><th /></tr>
-            </thead>
-            <tbody>
-              {list.data.items.map((mapping) => (
-                <tr key={mapping.id}>
-                  <td className="mono">{mapping.group_name}</td>
-                  <td>{mapping.role}</td>
-                  <td className="source">
-                    {mapping.site || "*"} / {mapping.environment || "*"}
-                  </td>
-                  <td className="source">{mapping.created_by}</td>
-                  <td><Time value={mapping.created_at} /></td>
-                  <td className="actions-cell">
-                    <div className="row-actions">
-                      <button
-                        className="danger"
-                        onClick={() => {
-                          const reason = window.prompt(
-                            t("Reason for removing the group mapping {group} (min. 8 characters):", { group: mapping.group_name }),
-                          );
-                          if (reason) remove.mutate({ id: mapping.id, reason });
-                        }}
-                      >
-                        {t("Remove")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <EmptyState action={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}>
-            {t("No mappings. Without them nobody gets a role from the identity provider.")}
-          </EmptyState>
-        )}
-      </Card>
-
-      {form && (
+      <div className="widgets">
         <Card
-          title={t("New mapping")}
-          footer={
-            <Actions>
-              <button disabled={!group.trim() || reason.trim().length < 8 || add.isPending}
-                      onClick={() => add.mutate()}>
-                {t("Add mapping")}
-              </button>
-              <button className="secondary" onClick={() => setForm(false)}>{t("Cancel")}</button>
-            </Actions>
-          }
+          className={form ? "span-6" : "span-9"}
+          title={t("Group mappings")}
+          actions={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}
+          flush
         >
-          <FieldGrid>
-            <Field label={t("Identity provider group")}>
-              <input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="flotestro-operators" />
-            </Field>
-            <Field label={t("Role")}>
-              <select value={role} onChange={(e) => setRole(e.target.value)}>
-                {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </Field>
-            <Field label={t("Site (empty = all)")}>
-              <input value={site} onChange={(e) => setSite(e.target.value)} placeholder="lab" />
-            </Field>
-            <Field label={t("Environment (empty = all)")}>
-              <input value={environment} onChange={(e) => setEnvironment(e.target.value)} placeholder="test" />
-            </Field>
-            <Field label={t("Reason for the change")} wide>
-              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. new on-call team")} />
-            </Field>
-          </FieldGrid>
+          {list.data?.items.length ? (
+            <table>
+              <thead>
+                <tr><th>{t("Group")}</th><th>{t("Role")}</th><th>{t("Scope")}</th><th>{t("Added by")}</th><th>{t("When")}</th><th /></tr>
+              </thead>
+              <tbody>
+                {list.data.items.map((mapping) => (
+                  <tr key={mapping.id}>
+                    <td className="mono">{mapping.group_name}</td>
+                    <td>{mapping.role}</td>
+                    <td className="source">
+                      {mapping.site || "*"} / {mapping.environment || "*"}
+                    </td>
+                    <td className="source">{mapping.created_by}</td>
+                    <td><Time value={mapping.created_at} /></td>
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        <button
+                          className="danger"
+                          onClick={() => {
+                            const reason = window.prompt(
+                              t("Reason for removing the group mapping {group} (min. 8 characters):", { group: mapping.group_name }),
+                            );
+                            if (reason) remove.mutate({ id: mapping.id, reason });
+                          }}
+                        >
+                          {t("Remove")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <EmptyState action={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}>
+              {t("No mappings. Without them nobody gets a role from the identity provider.")}
+            </EmptyState>
+          )}
         </Card>
-      )}
-      </Columns>
+
+        {form && (
+          <Card
+            className="span-3 fp-narrow"
+            title={t("New mapping")}
+            footer={
+              <Actions>
+                <button disabled={!group.trim() || reason.trim().length < 8 || add.isPending}
+                        onClick={() => add.mutate()}>
+                  {t("Add mapping")}
+                </button>
+                <button className="secondary" onClick={() => setForm(false)}>{t("Cancel")}</button>
+              </Actions>
+            }
+          >
+            <FieldGrid>
+              <Field label={t("Identity provider group")}>
+                <input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="flotestro-operators" />
+              </Field>
+              <Field label={t("Role")}>
+                <select value={role} onChange={(e) => setRole(e.target.value)}>
+                  {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </Field>
+              <Field label={t("Site (empty = all)")}>
+                <input value={site} onChange={(e) => setSite(e.target.value)} placeholder="lab" />
+              </Field>
+              <Field label={t("Environment (empty = all)")}>
+                <input value={environment} onChange={(e) => setEnvironment(e.target.value)} placeholder="test" />
+              </Field>
+              <Field label={t("Reason for the change")} wide>
+                <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. new on-call team")} />
+              </Field>
+            </FieldGrid>
+          </Card>
+        )}
+
+        <Card className="span-3" title={t("By role")} description={listed}>
+          {!list.data ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : (
+            <>
+              <Breakdown tone="info" items={byRole.map((row) => ({ label: row.role, value: row.count }))} />
+              <h4 className="widget-subhead">{t("Reach")}</h4>
+              <Breakdown items={[
+                { label: t("Fleet-wide"), value: fleetWide, tone: "warn" },
+                { label: t("Scoped"), value: mappings.length - fleetWide, tone: "ok" },
+              ]} />
+            </>
+          )}
+        </Card>
+      </div>
     </>
   );
 }
@@ -196,36 +222,59 @@ function Identities() {
   if (error) return <ErrorBox error={error} />;
   if (!data?.items.length) return <Card><Empty>{t("No identities.")}</Empty></Card>;
 
+  // The identities by kind, and the roles their direct assignments hand
+  // out; an identity without assignments is named, because its roles, if
+  // any, come from the group mappings and are not visible here.
+  const tally = (keys: (principal: Principal) => string[]) => Object.entries(
+    data.items.reduce<Record<string, number>>((acc, principal) => { for (const k of keys(principal)) acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
+  ).sort((x, y) => y[1] - x[1]);
+  const byKind = tally((principal) => [principal.kind]);
+  const byRole = tally((principal) => (principal.bindings ?? []).map((binding) => binding.role));
+  const unassigned = data.items.filter((principal) => (principal.bindings ?? []).length === 0).length;
+
   return (
-    <Card title={t("Identities")} flush>
-      <table>
-        <thead><tr><th>{t("Subject")}</th><th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th></tr></thead>
-        <tbody>
-          {data.items.map((principal) => (
-            <tr key={principal.id}>
-              <td className="mono">{principal.subject}</td>
-              <td>{principal.display_name || "—"}</td>
-              <td className="source">{principal.kind}</td>
-              <td>
-                {/* The field may not arrive at all. The interface must not
-                    fall over because of it: one missing key used to take the
-                    whole screen down. */}
-                {(principal.bindings ?? []).length === 0
-                  ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
-                  : (principal.bindings ?? []).map((binding, index) => (
-                      <div key={index}>
-                        {binding.role}
-                        <span className="source">
-                          {" "}{binding.scope.site || "*"} / {binding.scope.environment || "*"}
-                        </span>
-                      </div>
-                    ))}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+    <div className="widgets">
+      <Card className="span-9" title={t("Identities")} flush>
+        <table>
+          <thead><tr><th>{t("Subject")}</th><th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th></tr></thead>
+          <tbody>
+            {data.items.map((principal) => (
+              <tr key={principal.id}>
+                <td className="mono">{principal.subject}</td>
+                <td>{principal.display_name || "—"}</td>
+                <td className="source">{principal.kind}</td>
+                <td>
+                  {/* The field may not arrive at all. The interface must not
+                      fall over because of it: one missing key used to take the
+                      whole screen down. */}
+                  {(principal.bindings ?? []).length === 0
+                    ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
+                    : (principal.bindings ?? []).map((binding, index) => (
+                        <div key={index}>
+                          {binding.role}
+                          <span className="source">
+                            {" "}{binding.scope.site || "*"} / {binding.scope.environment || "*"}
+                          </span>
+                        </div>
+                      ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <Card className="span-3" title={t("By kind")} description={t("among the {n} listed", { n: data.items.length })}>
+        <Breakdown tone="info" items={byKind.map(([kind, n]) => ({ label: kind, value: n }))} />
+        <h4 className="widget-subhead">{t("Direct roles")}</h4>
+        {byRole.length === 0 ? (
+          <p className="fp-blank">{t("No direct assignments.")}</p>
+        ) : (
+          <Breakdown tone="ok" items={byRole.map(([role, n]) => ({ label: role, value: n }))} />
+        )}
+        <p className="fp-rest">{t("{n} without direct assignments", { n: unassigned })}</p>
+      </Card>
+    </div>
   );
 }
 
