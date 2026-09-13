@@ -38,6 +38,37 @@ var ErrInvalidToken = errors.New("the enrollment token is invalid")
 // ErrUnknownRequest means a request that does not exist.
 var ErrUnknownRequest = errors.New("the enrollment request does not exist")
 
+// Denial says why an attempt was refused.
+//
+// It exists for the audit trail and the installation screen alone. The agent
+// gets the same answer whatever the reason - it unwraps to ErrInvalidToken -
+// so that nothing about the orders can be probed from the outside. The
+// operator, who ordered the installation, may know why it does not go on.
+type Denial struct {
+	// RequestID names the order the attempt was made against. Empty when
+	// the token matched no order at all: there is nothing to attach the
+	// refusal to then.
+	RequestID string
+	Code      string
+}
+
+func (d *Denial) Error() string { return ErrInvalidToken.Error() }
+
+// Unwrap keeps every refusal an invalid token for the caller.
+func (d *Denial) Unwrap() error { return ErrInvalidToken }
+
+// The reasons an attempt is refused, as the installation screen names them.
+const (
+	DenialTokenUnknown     = "token_unknown"
+	DenialTokenExpired     = "token_expired"
+	DenialTokenRevoked     = "token_revoked"
+	DenialRequestReused    = "enrollment_request_reused"
+	DenialMachineMismatch  = "machine_id_mismatch"
+	DenialRelayScope       = "relay_scope_mismatch"
+	DenialDuplicateMachine = "duplicate_machine_id"
+	DenialCSRInvalid       = "csr_invalid"
+)
+
 // ErrRepeated means the creator already placed an order under this
 // idempotency key; the order returned with it is the existing one.
 var ErrRepeated = errors.New("the enrollment order was already placed under this key")
@@ -339,7 +370,7 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outc
 			&scope.ExpectedMachineID, &scope.ExpectedHostID, &scope.RelayID,
 			&maxUses, &uses, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Outcome{}, ErrInvalidToken
+		return Outcome{}, &Denial{Code: DenialTokenUnknown}
 	}
 	if err != nil {
 		return Outcome{}, err
@@ -356,17 +387,19 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outc
 		return Outcome{Scope: scope, Replay: replay}, nil
 	}
 
+	// The reason stays with the order for the operator; the agent learns
+	// none of it.
 	switch {
 	case revokedAt != nil:
-		return Outcome{}, ErrInvalidToken
+		return Outcome{}, &Denial{RequestID: scope.TokenID, Code: DenialTokenRevoked}
 	case time.Now().After(expiresAt):
-		return Outcome{}, ErrInvalidToken
+		return Outcome{}, &Denial{RequestID: scope.TokenID, Code: DenialTokenExpired}
 	case uses >= maxUses:
-		return Outcome{}, ErrInvalidToken
+		return Outcome{}, &Denial{RequestID: scope.TokenID, Code: DenialRequestReused}
 	}
 	// A request bound to a machine matches no other one.
 	if scope.ExpectedMachineID != "" && scope.ExpectedMachineID != input.MachineID {
-		return Outcome{}, ErrInvalidToken
+		return Outcome{}, &Denial{RequestID: scope.TokenID, Code: DenialMachineMismatch}
 	}
 
 	if _, err := tx.Exec(ctx,
@@ -416,7 +449,7 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 	// different attempt under somebody else's number. We refuse instead of
 	// issuing an identity.
 	if !bytes.Equal(storedCSR, fingerprint[:]) {
-		return nil, ErrInvalidToken
+		return nil, &Denial{RequestID: requestID, Code: DenialRequestReused}
 	}
 	return &Replay{
 		HostID: hostID, CertificatePEM: certPEM,

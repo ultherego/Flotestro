@@ -158,6 +158,27 @@ func (s *Store) List(ctx context.Context) ([]Relay, error) {
 	return list, rows.Err()
 }
 
+// Get returns one relay, revoked or not. The caller decides what a revoked
+// relay means for it: a route for a new host it is not, a row in history it
+// still is.
+func (s *Store) Get(ctx context.Context, id string) (*Relay, error) {
+	const query = `
+		select id, name, site, coalesce(environment, ''), coalesce(serial, ''),
+		       not_after, enrolled_at, last_seen_at, revoked_at
+		from relays where id = $1`
+	var relay Relay
+	err := s.pool.QueryRow(ctx, query, id).Scan(&relay.ID, &relay.Name, &relay.Site,
+		&relay.Environment, &relay.Serial, &relay.NotAfter, &relay.EnrolledAt,
+		&relay.LastSeenAt, &relay.RevokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &relay, nil
+}
+
 // Revoke takes the right to mediate away from a relay. The sessions of the
 // agents then go directly or do not go at all - that is a deliberate decision
 // of the operator.

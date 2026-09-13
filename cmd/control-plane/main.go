@@ -115,6 +115,9 @@ func run() error {
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "the directory with the built panel")
 	publicURL := flag.String("public-url",
 		config.Env("FLOTESTRO_PUBLIC_URL", ""), "the address of the panel as the browser sees it")
+	packageRepositoryURL := flag.String("package-repository-url",
+		config.Env("FLOTESTRO_PACKAGE_REPOSITORY_URL", ""),
+		"the base address of the signed package repository the installation instructions point the hosts at")
 	groupsClaim := flag.String("oidc-groups-claim",
 		config.Env("FLOTESTRO_OIDC_GROUPS_CLAIM", "groups"), "the field of the token with the list of groups")
 	// The name of the variable has to match the configuration file the
@@ -482,6 +485,15 @@ func run() error {
 			Trust: trust,
 		})
 	panelServer.SetEvents(eventBus)
+	// The installation profile: the addresses the hosts connect to are the
+	// advertised ones, because those alone are in the gateway certificate.
+	panelServer.SetInstallation(adminapi.Installation{
+		AdvertisedAddresses:  splitList(*advertised),
+		GatewayAddr:          cfg.GatewayAddr,
+		EnrollmentAddr:       cfg.EnrollmentAddr,
+		PackageRepositoryURL: *packageRepositoryURL,
+	})
+	panelServer.SetRelays(relayStore)
 
 	// Monitoring: the panel reads somebody else's metrics and somebody else's
 	// alerts. Empty addresses mean an installation without monitoring - the

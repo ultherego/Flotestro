@@ -88,11 +88,11 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 			// A refusal is an audit event just as a success is. The reason
 			// stays in the audit of the server; the agent always gets the same
 			// answer, so that tokens cannot be guessed from it.
-			s.audit.Record(ctx, audit.Event{
-				ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
-				Action: "host.enroll", Outcome: audit.OutcomeDenied,
-				Detail: map[string]any{"reason": "invalid_token", "hostname": msg.GetHostname()},
-			})
+			var denial *enrollment.Denial
+			if !errors.As(err, &denial) {
+				denial = &enrollment.Denial{Code: "invalid_token"}
+			}
+			s.deny(ctx, msg, denial.RequestID, denial.Code, denialMessage(denial.Code), nil)
 			return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -104,14 +104,8 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	// not register anything; a token without a tie works the same way over
 	// both paths.
 	if err := checkRoute(scope, viaRelay); err != nil {
-		s.audit.Record(ctx, audit.Event{
-			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
-			Action: "host.enroll", Outcome: audit.OutcomeDenied,
-			Detail: map[string]any{
-				"reason": err.Error(), "token_id": scope.TokenID,
-				"relay_id": nullableRelay(viaRelay.ID), "hostname": msg.GetHostname(),
-			},
-		})
+		s.deny(ctx, msg, scope.TokenID, enrollment.DenialRelayScope, err.Error(),
+			map[string]any{"relay_id": nullableRelay(viaRelay.ID)})
 		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
 	}
 
@@ -152,14 +146,8 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	// panel already knows. Without it every token would be a key to taking
 	// over the identity of a running host.
 	if err := s.checkPurpose(ctx, tx, msg, scope); err != nil {
-		s.audit.Record(ctx, audit.Event{
-			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
-			Action: "host.enroll", Outcome: audit.OutcomeDenied,
-			Detail: map[string]any{
-				"reason": err.Error(), "purpose": scope.Purpose,
-				"hostname": msg.GetHostname(), "token_id": scope.TokenID,
-			},
-		})
+		s.deny(ctx, msg, scope.TokenID, purposeDenialCode(err), err.Error(),
+			map[string]any{"purpose": scope.Purpose})
 		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
 	}
 
@@ -200,6 +188,11 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 			Outcome: audit.OutcomeFailure,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
+		// The order is what the operator watches: a refused CSR is to show
+		// up on the installation screen, not only under a host that does
+		// not exist yet.
+		s.deny(ctx, msg, scope.TokenID, enrollment.DenialCSRInvalid,
+			"the certificate request was refused", map[string]any{"host_id": hostID})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	// The trust bundle goes in the same answer as the certificate: without it
@@ -285,6 +278,8 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 			Outcome: audit.OutcomeFailure,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
+		s.deny(ctx, msg, scope.TokenID, enrollment.DenialCSRInvalid,
+			"the certificate request was refused", map[string]any{"relay_id": relayID})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	trust, err := s.certIssuer.Trust(ctx)
@@ -373,6 +368,65 @@ func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 		return errors.New("unknown_purpose")
 	}
 	return nil
+}
+
+// deny records a refused attempt against the order it was made with.
+//
+// The order is the target, because that is what the operator watches on the
+// installation screen: the screen reads the last refusal of its order and
+// says why the host does not go on. An attempt with a token that matched no
+// order has nothing to be attached to and is recorded without a target. The
+// agent learns none of this - it gets the same answer for every reason.
+func (s *EnrollmentService) deny(ctx context.Context, msg *agentv1.EnrollRequest,
+	requestID, code, message string, extra map[string]any) {
+	detail := map[string]any{
+		"reason": code, "message": message, "hostname": msg.GetHostname(),
+	}
+	for key, value := range extra {
+		detail[key] = value
+	}
+	event := audit.Event{
+		ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
+		Action: "host.enroll", Outcome: audit.OutcomeDenied, Detail: detail,
+	}
+	if requestID != "" {
+		detail["token_id"] = requestID
+		event.TargetType, event.TargetID = "enrollment_request", requestID
+	}
+	s.audit.Record(ctx, event)
+}
+
+// denialMessage puts a token refusal into words the operator can act on.
+// The agent never sees these: they go to the order on the installation
+// screen, where the person who placed the order reads them.
+func denialMessage(code string) string {
+	switch code {
+	case enrollment.DenialTokenExpired:
+		return "the token expired before the host used it"
+	case enrollment.DenialTokenRevoked:
+		return "the order was revoked before the host used it"
+	case enrollment.DenialRequestReused:
+		return "the order was already used up; another host needs another order"
+	case enrollment.DenialMachineMismatch:
+		return "the machine is not the one the order was bound to"
+	case enrollment.DenialTokenUnknown:
+		return "the token matched no order"
+	default:
+		return "the token was refused"
+	}
+}
+
+// purposeDenialCode names a purpose refusal the way the installation screen
+// does. Two of the internal reasons mean the same thing to the operator: the
+// machine is already in the fleet under another host, so a "new host" token
+// does not fit it. The remaining reasons keep their own names.
+func purposeDenialCode(err error) string {
+	switch err.Error() {
+	case "machine_id_known", "machine_id_other_host":
+		return enrollment.DenialDuplicateMachine
+	default:
+		return err.Error()
+	}
 }
 
 // networkNames gathers the names the panel issued in the certificate of a

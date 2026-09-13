@@ -33,6 +33,7 @@ import (
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/vuln"
@@ -102,6 +103,12 @@ type Server struct {
 	// secrets holds the values that must not pass through tasks. Nil means
 	// an installation without a store.
 	secrets *secrets.Store
+	// relays is the registry of the site relays; the installation of a host
+	// in an isolated site goes through one of them. Nil means an
+	// installation without relays.
+	relays *relays.Store
+	// installation is what the panel knows about how the hosts reach it.
+	installation Installation
 }
 
 // SetSecrets attaches the secret store.
@@ -182,6 +189,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /auth/callback", s.handleAuthCallback)
 	s.route(mux, "POST /auth/logout", s.handleLogout)
 	s.route(mux, "GET /api/v1/fleet/summary", s.handleFleetSummary)
+	s.route(mux, "GET /api/v1/fleet/activity", s.handleFleetActivity)
 	s.route(mux, "GET /api/v1/hosts", s.handleListHosts)
 	s.route(mux, "GET /api/v1/hosts/{id}", s.handleGetHost)
 	s.route(mux, "GET /api/v1/hosts/{id}/inventory", s.handleHostInventory)
@@ -201,6 +209,13 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/enrollment-requests", s.handleCreateEnrollmentRequest)
 	s.route(mux, "GET /api/v1/enrollment-requests/{id}", s.handleGetEnrollmentRequest)
 	s.route(mux, "POST /api/v1/enrollment-requests/{id}/revoke", s.handleRevokeEnrollmentRequest)
+	// The ready configuration of an order: the same file the installation
+	// profile composes, without the token, fetchable as often as needed.
+	s.route(mux, "GET /api/v1/enrollment-requests/{id}/config", s.handleEnrollmentConfig)
+	// Everything a host needs before it holds a token: the addresses, the
+	// trust, the repository and the commands for its family.
+	s.route(mux, "GET /api/v1/installation-profiles", s.handleInstallationProfile)
+	s.route(mux, "GET /api/v1/relays", s.handleListRelays)
 	s.route(mux, "POST /api/v1/hosts/{id}/identity-recovery", s.handleIdentityRecovery)
 	// The host lifecycle: cut-off, release and decommissioning from the fleet.
 	s.route(mux, "POST /api/v1/hosts/{id}/quarantine", s.handleQuarantineHost)
@@ -287,6 +302,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/campaigns/{id}/pause", s.handlePauseCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/cancel", s.handleCancelCampaign)
+	s.route(mux, "POST /api/v1/campaigns/{id}/advance", s.handleAdvanceCampaign)
 
 	// Principals and API tokens.
 	s.route(mux, "GET /api/v1/principals", s.handleListPrincipals)
@@ -317,6 +333,14 @@ func (s *Server) Routes() http.Handler {
 		func(s *Server, r *http.Request) ([]freeipa.SudoRule, error) {
 			return s.directory.SudoRules(r.Context())
 		}))
+	s.route(mux, "GET /api/v1/identity/host-groups", directoryHandler(s, "host-groups",
+		func(s *Server, r *http.Request) ([]freeipa.HostGroup, error) {
+			return s.directory.HostGroups(r.Context())
+		}))
+	// The effective access: the directory's own simulation for a user and
+	// a host, and the projection of the rules onto one host.
+	s.route(mux, "POST /api/v1/identity/access/simulate", s.handleSimulateAccess)
+	s.route(mux, "GET /api/v1/hosts/{id}/access", s.handleHostAccess)
 
 	// The directory DNS: zones and records. Reading goes with the same
 	// permission as the rest of the directory; writing is a central change

@@ -3,9 +3,19 @@
 package integration
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +27,10 @@ import (
 
 // stepView mirrors one installation step.
 type stepView struct {
-	Key   string `json:"key"`
-	State string `json:"state"`
+	Key       string `json:"key"`
+	State     string `json:"state"`
+	ErrorCode string `json:"error_code"`
+	Detail    string `json:"detail"`
 }
 
 // orderView mirrors an enrollment order.
@@ -36,7 +48,42 @@ type orderView struct {
 	Status            string     `json:"status"`
 	EnrolledHostID    string     `json:"enrolled_host_id"`
 	ExpiresAt         time.Time  `json:"expires_at"`
+	ConfigURL         string     `json:"config_url"`
 	Steps             []stepView `json:"steps"`
+}
+
+// profileView mirrors the installation profile.
+type profileView struct {
+	Site       string         `json:"site"`
+	Connection connectionView `json:"connection"`
+	Config     configFileView `json:"config"`
+	CA         trustView      `json:"ca"`
+	Families   []familyView   `json:"families"`
+}
+
+type connectionView struct {
+	EnrollmentURL string   `json:"enrollment_url"`
+	GatewayURLs   []string `json:"gateway_urls"`
+}
+
+type configFileView struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+type trustView struct {
+	PEM               string `json:"pem"`
+	FingerprintSHA256 string `json:"fingerprint_sha256"`
+}
+
+type familyView struct {
+	Key   string        `json:"key"`
+	Steps []commandView `json:"steps"`
+}
+
+type commandView struct {
+	Key     string `json:"key"`
+	Command string `json:"command"`
 }
 
 // TestEnrollmentOrderShowsTheTokenOnce guards that the plain token exists
@@ -515,4 +562,186 @@ func TestEnrollmentOrderIsIdempotent(t *testing.T) {
 	if third["id"] == first["id"] {
 		t.Error("a different key returned the same order")
 	}
+}
+
+// TestInstallationProfileNamesTheTrust guards that the profile gives a host
+// everything it needs before it holds a token: the addresses to connect
+// to, in a configuration the agent reads as it is, and the CA with a
+// fingerprint the operator can compare on the host.
+func TestInstallationProfileNamesTheTrust(t *testing.T) {
+	h := newHarness(t)
+	var profile profileView
+	h.get("/api/v1/installation-profiles?site=lab&environment=test", &profile)
+
+	if profile.Connection.EnrollmentURL == "" || !strings.HasPrefix(profile.Connection.EnrollmentURL, "https://") {
+		t.Fatalf("enrollment_url = %q", profile.Connection.EnrollmentURL)
+	}
+	if len(profile.Connection.GatewayURLs) == 0 {
+		t.Fatal("the profile names no gateway")
+	}
+	if !strings.Contains(profile.Config.Content, "enrollment_url: \""+profile.Connection.EnrollmentURL+"\"") {
+		t.Fatalf("the configuration does not name the enrollment URL:\n%s", profile.Config.Content)
+	}
+	if !strings.Contains(profile.Config.Content, "schema_version: 1") {
+		t.Fatalf("the configuration has no schema version:\n%s", profile.Config.Content)
+	}
+	if profile.Config.Path != "/etc/flotestro/agent.yaml" {
+		t.Errorf("config path = %q", profile.Config.Path)
+	}
+	if !strings.Contains(profile.CA.PEM, "BEGIN CERTIFICATE") {
+		t.Fatal("the profile carries no CA in PEM")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(profile.CA.FingerprintSHA256) {
+		t.Fatalf("the CA fingerprint is not a SHA-256 hex digest: %q", profile.CA.FingerprintSHA256)
+	}
+	// The commands exist for every family the release packages, and none
+	// of them carries a token: the token is pasted into a hidden prompt.
+	families := map[string]bool{}
+	for _, family := range profile.Families {
+		families[family.Key] = true
+		if len(family.Steps) == 0 {
+			t.Errorf("family %s has no commands", family.Key)
+		}
+		for _, step := range family.Steps {
+			if strings.Contains(step.Command, "flt_") {
+				t.Errorf("a command of %s carries a token", family.Key)
+			}
+		}
+	}
+	for _, key := range []string{"debian", "ubuntu", "rhel", "arch"} {
+		if !families[key] {
+			t.Errorf("the profile has no commands for %s", key)
+		}
+	}
+	// A relay of another site is not a route for this placement.
+	h.do(http.MethodGet, "/api/v1/installation-profiles?site=lab&environment=test&relay_id="+
+		uuid.NewString(), nil, nil, http.StatusNotFound)
+}
+
+// TestOrderCarriesItsConfiguration guards that an order points at its
+// ready configuration, and that the configuration repeats no token: it can
+// be fetched as often as the installation needs, the token cannot.
+func TestOrderCarriesItsConfiguration(t *testing.T) {
+	h := newHarness(t)
+	var created orderView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "configuration test", "site": "lab", "environment": "test",
+	}, &created, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+created.ID+"/revoke", nil, nil, 0)
+	})
+	if created.ConfigURL != "/api/v1/enrollment-requests/"+created.ID+"/config" {
+		t.Fatalf("config_url = %q", created.ConfigURL)
+	}
+
+	content := h.text(created.ConfigURL)
+	if strings.Contains(content, created.Token) || strings.Contains(content, "flt_") {
+		t.Fatal("the configuration repeats the token")
+	}
+	var profile profileView
+	h.get("/api/v1/installation-profiles?site=lab&environment=test", &profile)
+	if content != profile.Config.Content {
+		t.Fatalf("the configuration of the order differs from the profile:\n%s\n---\n%s",
+			content, profile.Config.Content)
+	}
+	if !strings.Contains(content, "enrollment_url: \""+profile.Connection.EnrollmentURL+"\"") {
+		t.Fatalf("the configuration does not name the enrollment URL:\n%s", content)
+	}
+}
+
+// TestRevokedOrderNamesTheRefusal guards that the installation screen
+// learns why a host did not get in. The agent gets a uniform answer, so
+// that tokens cannot be probed; the operator who placed the order sees the
+// reason on the order.
+func TestRevokedOrderNamesTheRefusal(t *testing.T) {
+	h := newHarness(t)
+	var created orderView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "refusal test", "site": "lab", "environment": "test",
+	}, &created, http.StatusCreated)
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+created.ID+"/revoke",
+		nil, nil, http.StatusNoContent)
+
+	// A revoked token is refused like any other invalid one: the answer
+	// says nothing about the reason.
+	if status := enrollmentAttemptStatus(t, created.Token); status == http.StatusOK {
+		t.Fatal("a revoked token registered a host")
+	}
+
+	var after orderView
+	h.get("/api/v1/enrollment-requests/"+created.ID, &after)
+	var token *stepView
+	for i := range after.Steps {
+		if after.Steps[i].Key == "token" {
+			token = &after.Steps[i]
+		}
+	}
+	if token == nil {
+		t.Fatalf("no token step: %+v", after.Steps)
+	}
+	if token.State != "failed" {
+		t.Errorf("token step state = %q", token.State)
+	}
+	if token.ErrorCode != "token_revoked" {
+		t.Fatalf("token step error_code = %q, detail %q; wanted token_revoked",
+			token.ErrorCode, token.Detail)
+	}
+	if token.Detail == "" {
+		t.Error("the refusal carries no sentence for the operator")
+	}
+}
+
+// enrollmentAttemptStatus makes one enrollment attempt with a token and
+// returns the HTTP status alone. The lifecycle helper fails the test on a
+// refusal; here the refusal is the point.
+func enrollmentAttemptStatus(t *testing.T, token string) int {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine := uniqueSubject("refused-machine")
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: machine}}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"enrollmentToken": token,
+		"machineId":       machine,
+		"hostname":        machine,
+		"csrPem":          pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}),
+		"clientRequestId": uuid.NewString(),
+		"build":           map[string]any{"agentVersion": "test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if bundle, err := os.ReadFile(envOr("FLOTESTRO_TEST_CA", "/var/lib/flotestro/ca.pem")); err == nil {
+		pool.AppendCertsFromPEM(bundle)
+	}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs: pool, MinVersion: tls.VersionTLS12,
+		}},
+	}
+	address := envOr("FLOTESTRO_TEST_ENROLLMENT", defaultEnrollment) +
+		"/flotestro.agent.v1.EnrollmentService/Enroll"
+	request, err := http.NewRequest(http.MethodPost, address, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("the enrollment attempt: %v", err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	return response.StatusCode
 }

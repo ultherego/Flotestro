@@ -176,6 +176,9 @@ func (s *Server) operation(route apiRoute) map[string]any {
 				"application/json": map[string]any{"schema": map[string]any{"type": "object"}},
 				"text/csv":         map[string]any{"schema": map[string]any{"type": "string"}},
 			}}
+	} else if strings.HasSuffix(route.Path, "/config") {
+		responses[status] = map[string]any{"description": "The ready configuration file of the order, without the token.",
+			"content": map[string]any{"application/yaml": map[string]any{"schema": map[string]any{"type": "string"}}}}
 	} else if strings.HasSuffix(route.Path, "/events") {
 		responses[status] = map[string]any{"description": "A stream of server-sent events; trail events carry an id for Last-Event-ID resumption.",
 			"content": map[string]any{"text/event-stream": map[string]any{"schema": map[string]any{"type": "string"}}}}
@@ -233,6 +236,17 @@ var queryParameters = map[string][]queryParameter{
 		{"since", "string", "RFC 3339; tasks created at or after this moment."},
 		{"until", "string", "RFC 3339; tasks created before this moment."},
 	}, pagingParameters...),
+	"GET /api/v1/installation-profiles": {
+		{"site", "string", "The site the host will live in; \"default\" when empty."},
+		{"environment", "string", "The environment of the host; \"unassigned\" when empty."},
+		{"kind", "string", "agent (default) or relay."},
+		{"relay_id", "string", "The relay of the site the host connects through; empty means directly to the panel."},
+		{"architecture", "string", "amd64 (default) or arm64."},
+		{"channel", "string", "The repository channel; stable by default."},
+	},
+	"GET /api/v1/relays": {
+		{"site", "string", "Only the relays of this site."},
+	},
 	"GET /api/v1/audit": append([]queryParameter{
 		{"target_id", "string", ""},
 		{"target_type", "string", ""},
