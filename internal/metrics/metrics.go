@@ -238,7 +238,147 @@ func (c *Collector) databaseMetrics(ctx context.Context) []metric {
 		})
 	}
 
+	result = append(result, c.lifecycleMetrics(queryCtx)...)
 	return append(result, c.campaignMetrics(queryCtx)...)
+}
+
+// lifecycleMetrics show the way into and out of the fleet: the enrollment
+// orders and how long they take, the certificates and when they run out,
+// the versions of the agents, the lifecycle states and the relays. These
+// are the numbers behind the alerts of the lifecycle document: a pending
+// installation that never completes, a certificate about to expire with
+// no renewal, an agent left behind on an old build.
+func (c *Collector) lifecycleMetrics(ctx context.Context) []metric {
+	var result []metric
+
+	if grouped, err := c.groupCount(ctx,
+		`select status, count(*) from enrollment_requests group by 1`); err == nil {
+		result = append(result, metric{
+			name: "flotestro_enrollment_requests", kind: "gauge",
+			help:    "Enrollment orders by status.",
+			samples: labelled("status", grouped),
+		})
+	}
+	var pending float64
+	if err := c.pool.QueryRow(ctx, `
+		select count(*) from enrollment_requests
+		where status = 'pending' and expires_at > now()`).Scan(&pending); err == nil {
+		result = append(result, metric{
+			name: "flotestro_enrollment_pending", kind: "gauge",
+			help:    "Enrollment orders still valid and not yet used.",
+			samples: []sample{{value: pending}},
+		})
+	}
+	// From the order to the certificate: the time an installation takes
+	// end to end, over the last day. Only completed attempts count; a
+	// token never used is a pending order, not a slow one.
+	var avg, max *float64
+	if err := c.pool.QueryRow(ctx, `
+		select avg(extract(epoch from a.completed_at - r.created_at)),
+		       max(extract(epoch from a.completed_at - r.created_at))
+		from enrollment_attempts a join enrollment_requests r on r.id = a.request_id
+		where a.completed_at > now() - interval '24 hours'`).Scan(&avg, &max); err == nil {
+		if avg != nil {
+			result = append(result, metric{
+				name: "flotestro_enrollment_duration_seconds_avg", kind: "gauge",
+				help:    "The average time from ordering an enrollment to the certificate, over the last day.",
+				samples: []sample{{value: *avg}},
+			})
+		}
+		if max != nil {
+			result = append(result, metric{
+				name: "flotestro_enrollment_duration_seconds_max", kind: "gauge",
+				help:    "The longest time from ordering an enrollment to the certificate, over the last day.",
+				samples: []sample{{value: *max}},
+			})
+		}
+	}
+
+	if grouped, err := c.groupCount(ctx,
+		`select lifecycle_state, count(*) from hosts group by 1`); err == nil {
+		result = append(result, metric{
+			name: "flotestro_hosts_lifecycle", kind: "gauge",
+			help:    "The fleet's hosts by lifecycle state.",
+			samples: labelled("lifecycle_state", grouped),
+		})
+	}
+	if grouped, err := c.groupCount(ctx,
+		`select coalesce(nullif(agent_version, ''), 'unknown'), count(*) from hosts
+		 where lifecycle_state <> 'retired' group by 1`); err == nil {
+		result = append(result, metric{
+			name: "flotestro_agent_builds", kind: "gauge",
+			help:    "Hosts by the version of the agent they last reported.",
+			samples: labelled("agent_version", grouped),
+		})
+	}
+
+	// The soonest expiry among the live certificates of hosts that are not
+	// retired, and how many run out within a week and a month. A renewal
+	// that stopped working shows here days before it cuts a host off.
+	var soonest *float64
+	if err := c.pool.QueryRow(ctx, `
+		select min(extract(epoch from c.not_after - now()))
+		from agent_certificates c join hosts h on h.id = c.host_id
+		where c.revoked_at is null and c.not_after > now() and h.lifecycle_state <> 'retired'`).
+		Scan(&soonest); err == nil && soonest != nil {
+		result = append(result, metric{
+			name: "flotestro_agent_certificate_expiry_seconds_min", kind: "gauge",
+			help:    "Seconds until the soonest expiry among the live agent certificates.",
+			samples: []sample{{value: *soonest}},
+		})
+	}
+	if grouped, err := c.groupCount(ctx, `
+		select window, count(*) from (
+			select h.id, case when min(c.not_after) < now() + interval '7 days' then '7d' else '30d' end as window
+			from agent_certificates c join hosts h on h.id = c.host_id
+			where c.revoked_at is null and c.not_after > now() and h.lifecycle_state <> 'retired'
+			group by h.id having min(c.not_after) < now() + interval '30 days') t
+		group by 1`); err == nil {
+		result = append(result, metric{
+			name: "flotestro_agent_certificates_expiring", kind: "gauge",
+			help:    "Hosts whose live certificate expires within the window.",
+			samples: labelled("within", grouped),
+		})
+	}
+
+	// Sessions opened over the last day, by how they ended: a host that
+	// reconnects every few minutes is a host with a flapping link or an
+	// agent that crashes, and neither shows in the connection state alone.
+	if grouped, err := c.groupCount(ctx, `
+		select coalesce(end_reason, 'open'), count(*) from agent_sessions
+		where started_at > now() - interval '24 hours' group by 1`); err == nil {
+		result = append(result, metric{
+			name: "flotestro_agent_sessions_opened", kind: "gauge",
+			help:    "Agent sessions opened over the last day, by how they ended (open = still running).",
+			samples: labelled("end_reason", grouped),
+		})
+	}
+	var recoveries float64
+	if err := c.pool.QueryRow(ctx, `
+		select count(*) from enrollment_requests
+		where purpose = 'replace_identity' and created_at > now() - interval '24 hours'`).
+		Scan(&recoveries); err == nil {
+		result = append(result, metric{
+			name: "flotestro_identity_recovery_orders", kind: "gauge",
+			help:    "Identity recovery orders placed over the last day.",
+			samples: []sample{{value: recoveries}},
+		})
+	}
+
+	if grouped, err := c.groupCount(ctx, `
+		select case
+			when revoked_at is not null then 'revoked'
+			when last_seen_at is null then 'never_seen'
+			when last_seen_at < now() - interval '10 minutes' then 'silent'
+			else 'active' end, count(*)
+		from relays group by 1`); err == nil {
+		result = append(result, metric{
+			name: "flotestro_relays", kind: "gauge",
+			help:    "Relays by state: active, silent for ten minutes, never seen, or revoked.",
+			samples: labelled("state", grouped),
+		})
+	}
+	return result
 }
 
 // campaignMetrics show the machinery of a fleet-wide change: the campaigns

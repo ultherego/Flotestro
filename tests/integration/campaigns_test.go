@@ -1223,6 +1223,15 @@ func TestMetricsShowTheCampaignMachinery(t *testing.T) {
 		"flotestro_budget_tokens",
 		`flotestro_budget_tokens{budget="global:mutations",status="capacity"}`,
 		`flotestro_budget_tokens{budget="global:mutations",status="used"}`,
+		// The lifecycle families: the way into and out of the fleet.
+		"flotestro_enrollment_requests{",
+		"flotestro_enrollment_pending ",
+		`flotestro_hosts_lifecycle{lifecycle_state="active"}`,
+		"flotestro_agent_builds{agent_version=",
+		"flotestro_agent_certificate_expiry_seconds_min ",
+		"flotestro_agent_sessions_opened{",
+		"flotestro_identity_recovery_orders ",
+		"flotestro_duplicate_identity_total",
 	} {
 		if !strings.Contains(text, fragment) {
 			t.Errorf("metrics without %q", fragment)
@@ -4628,5 +4637,55 @@ func TestARevokedRoleStopsTheHostsNotStarted(t *testing.T) {
 	}
 	if !strings.Contains(targets[0].Message, subject) {
 		t.Errorf("the message does not name the identity: %q", targets[0].Message)
+	}
+}
+
+// TestAnExpiredPlanDoesNotStartTheHost guards the bound in time: a plan
+// older than a day is not carried out even though its digest still matches
+// the consent. The age is staged in the database; the panel has no way to
+// wait a day.
+func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	campaign := h.createCampaign(map[string]any{
+		"name": "expired plan", "action": "packages.upgrade",
+		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
+		"selector":                   map[string]any{"host_ids": []string{host.ID}},
+		"canary_size":                0,
+		"wave_size":                  1,
+		"max_concurrent":             1,
+		"failure_threshold_percent":  0,
+		"failure_threshold_absolute": 0,
+		"reboot_policy":              "never",
+	})
+	planned := h.awaitCampaign(campaign.ID,
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+	if planned.State != "awaiting_approval" {
+		t.Fatalf("planning ended in state %s (%s)", planned.State, planned.PauseReason)
+	}
+
+	var plans struct {
+		Items []struct {
+			ExpiresAt time.Time `json:"expires_at"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/plans", &plans)
+	if len(plans.Items) == 0 || plans.Items[0].ExpiresAt.Before(time.Now().Add(23*time.Hour)) {
+		t.Fatalf("the plan carries no expiry a day ahead: %+v", plans.Items)
+	}
+
+	ctx := context.Background()
+	if _, err := h.database(ctx).Exec(ctx, `
+		update campaign_plans set computed_at = now() - interval '25 hours' where campaign_id = $1`,
+		campaign.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.approveCampaign(planned)
+	final := h.awaitCampaign(campaign.ID,
+		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+	targets := h.campaignTargets(campaign.ID)
+	if len(targets) != 1 || targets[0].State != "failed" || targets[0].ErrorCode != "plan_stale" {
+		t.Fatalf("campaign %s; the host was not stopped on the expired plan: %+v", final.State, targets)
 	}
 }
