@@ -7,6 +7,7 @@ import { ErrorBox, Empty, JobState } from "../components/ui";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanSummary } from "../components/plan";
+import { loadedTargets, useTargets } from "../lib/targets";
 import { useT } from "../i18n";
 
 /**
@@ -627,12 +628,7 @@ function CreateStep({
 
 function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Campaign }) {
   const t = useT();
-  const targets = useQuery({
-    queryKey: ["campaign-targets", campaignID],
-    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${campaignID}/targets`),
-    enabled: Boolean(campaignID),
-    refetchInterval: OPERATIONS_INTERVAL,
-  });
+  const targets = useTargets(campaignID, {});
   // The consent covers the set of plans, so the operator is to see that set
   // - grouped, because a hundred hosts with an identical diff are one
   // change, not a hundred.
@@ -673,7 +669,7 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
           </tbody>
         </table>
       )}
-      <TargetTable targets={targets.data?.items ?? []} />
+      <TargetTable targets={targets} />
     </section>
   );
 }
@@ -693,12 +689,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
   const queryClient = useQueryClient();
-  const targets = useQuery({
-    queryKey: ["campaign-targets", campaignID],
-    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${campaignID}/targets`),
-    enabled: Boolean(campaignID),
-    refetchInterval: OPERATIONS_INTERVAL,
-  });
+  const targets = useTargets(campaignID, {});
   const approve = useMutation({
     mutationFn: () =>
       api.post(`/api/v1/campaigns/${campaignID}/approve`, {
@@ -734,7 +725,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
           <Link to={`/campaigns/${campaign.id}`}>{t("Pause, cancel or read the report")}</Link>.
         </p>
       )}
-      <TargetTable targets={targets.data?.items ?? []} />
+      <TargetTable targets={targets} />
     </section>
   );
 }
@@ -744,16 +735,19 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
  * what it waits for: a budget, somebody else's resource lock, or coming back
  * online.
  */
-function TargetTable({ targets }: { targets: CampaignTarget[] }) {
+function TargetTable({ targets }: { targets: ReturnType<typeof useTargets> }) {
   const t = useT();
-  if (!targets.length) return <Empty>{t("No targets.")}</Empty>;
+  const rows = loadedTargets(targets.data);
+  const total = targets.data?.pages[0]?.total ?? 0;
+  if (!rows.length) return <Empty>{t("No targets.")}</Empty>;
   return (
+    <>
     <table>
       <thead>
         <tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("State")}</th><th>{t("Blocker")}</th><th>{t("Message")}</th></tr>
       </thead>
       <tbody>
-        {targets.map((target) => (
+        {rows.map((target) => (
           <tr key={target.host_id}>
             <td>
               <Link to={`/hosts/${target.host_id}/overview`}>
@@ -768,6 +762,20 @@ function TargetTable({ targets }: { targets: CampaignTarget[] }) {
         ))}
       </tbody>
     </table>
+    {/* The rows come page by page: a campaign on the whole fleet must not
+        become the whole fleet in the browser. */}
+    <p className="source">
+      {t("{shown} of {total} shown", { shown: rows.length, total })}
+      {targets.hasNextPage && (
+        <>
+          {" "}
+          <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
+            {t("Load more ({n} left)", { n: total - rows.length })}
+          </button>
+        </>
+      )}
+    </p>
+    </>
   );
 }
 

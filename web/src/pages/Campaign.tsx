@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
@@ -7,23 +8,24 @@ import type {
 import { ErrorBox, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { JobPlan } from "../components/plan";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
+import { loadedTargets, TARGET_STATES, useTargets } from "../lib/targets";
 import { useT } from "../i18n";
 
 export function Campaign() {
   const t = useT();
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
+  const [stateFilter, setStateFilter] = useState("");
+  const [search, setSearch] = useState("");
 
   const campaign = useQuery({
     queryKey: ["campaign", id],
     queryFn: () => api.get<CampaignType>(`/api/v1/campaigns/${id}`),
     refetchInterval: OPERATIONS_INTERVAL,
   });
-  const targets = useQuery({
-    queryKey: ["campaign-targets", id],
-    queryFn: () => api.get<Collection<CampaignTarget>>(`/api/v1/campaigns/${id}/targets`),
-    refetchInterval: OPERATIONS_INTERVAL,
-  });
+  const targets = useTargets(id, { state: stateFilter, search });
+  const loaded = loadedTargets(targets.data);
+  const total = targets.data?.pages[0]?.total ?? 0;
   const report = useQuery({
     queryKey: ["campaign-report", id],
     queryFn: () => api.get<CampaignReport>(`/api/v1/campaigns/${id}/report`),
@@ -135,7 +137,7 @@ export function Campaign() {
               <tr key={entry.id}>
                 <td><Time value={entry.occurred_at} /></td>
                 <td>{entry.event_type}</td>
-                <td>{eventHostName(entry, targets.data?.items ?? [])}</td>
+                <td>{eventHostName(entry, loaded)}</td>
                 <td>{eventDescription(entry)}</td>
               </tr>
             ))}
@@ -144,13 +146,24 @@ export function Campaign() {
       )}
 
       <h2>{t("Targets")}</h2>
-      {!targets.data?.items.length ? (
+      {/* The filter runs on the server and the rows arrive page by page:
+          the screen shows what the operator asked about, not the whole
+          fleet at once. */}
+      <div className="filters">
+        <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
+          <option value="">{t("state: any")}</option>
+          {TARGET_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <input placeholder={t("Filter by hostname")} value={search} onChange={(e) => setSearch(e.target.value)} />
+        <span className="source">{t("{shown} of {total} shown", { shown: loaded.length, total })}</span>
+      </div>
+      {!loaded.length ? (
         <Empty>{t("No targets.")}</Empty>
       ) : (
         <table>
           <thead><tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("Plan")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr></thead>
           <tbody>
-            {targets.data.items.map((target) => (
+            {loaded.map((target) => (
               <tr key={target.host_id}>
                 <td>{target.hostname || target.host_id.slice(0, 8)}</td>
                 <td>{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
@@ -180,6 +193,13 @@ export function Campaign() {
             ))}
           </tbody>
         </table>
+      )}
+      {targets.hasNextPage && (
+        <p>
+          <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
+            {t("Load more ({n} left)", { n: total - loaded.length })}
+          </button>
+        </p>
       )}
     </>
   );

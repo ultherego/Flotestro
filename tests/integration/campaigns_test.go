@@ -3954,3 +3954,74 @@ func (h *harness) streamTimeline(campaignID string, after int64) []timelineEntry
 	}
 	return entries
 }
+
+// TestCampaignTargetsArePagedAndFilteredOnTheServer guards the contract a
+// large campaign needs: the targets come page by page in the order of the
+// rollout, a filter is answered by the database and the total says how many
+// hosts match beyond the page.
+func TestCampaignTargetsArePagedAndFilteredOnTheServer(t *testing.T) {
+	h := newHarness(t)
+	online := make([]string, 0, 2)
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" && host.OSFamily == "debian" {
+			online = append(online, host.ID)
+		}
+	}
+	if len(online) < 2 {
+		t.Skip("the fleet has fewer than two connected hosts of the debian family")
+	}
+
+	campaign := h.createCampaign(labCampaign("paging", "cron.service", map[string]any{
+		"selector": map[string]any{"host_ids": online},
+	}))
+	defer h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
+		map[string]any{"reason": "end of the paging test"}, nil, http.StatusOK)
+
+	type page struct {
+		Items      []campaignTargetView `json:"items"`
+		Count      int                  `json:"count"`
+		Total      int                  `json:"total"`
+		NextCursor string               `json:"next_cursor"`
+	}
+
+	// One row per page: the cursor walks the whole snapshot without a
+	// repeat and without a gap.
+	seen := map[string]bool{}
+	cursor := ""
+	for {
+		var p page
+		h.get("/api/v1/campaigns/"+campaign.ID+"/targets?limit=1&cursor="+cursor, &p)
+		if p.Total != len(online) {
+			t.Fatalf("total = %d, expected %d", p.Total, len(online))
+		}
+		if p.Count != 1 {
+			t.Fatalf("a page of one row has %d rows", p.Count)
+		}
+		if seen[p.Items[0].HostID] {
+			t.Fatalf("host %s came twice", p.Items[0].HostID)
+		}
+		seen[p.Items[0].HostID] = true
+		if p.NextCursor == "" {
+			break
+		}
+		cursor = p.NextCursor
+	}
+	if len(seen) != len(online) {
+		t.Fatalf("the pages covered %d of %d hosts", len(seen), len(online))
+	}
+
+	// A filter nobody matches is an empty page with a zero total, not an
+	// error and not the unfiltered list.
+	var none page
+	h.get("/api/v1/campaigns/"+campaign.ID+"/targets?state=succeeded", &none)
+	if none.Total != 0 || len(none.Items) != 0 {
+		t.Fatalf("the state filter returned %d rows, total %d", len(none.Items), none.Total)
+	}
+	var byName page
+	h.get("/api/v1/campaigns/"+campaign.ID+"/targets?q="+h.hosts()[0].Hostname[:3], &byName)
+	if byName.Total == 0 {
+		t.Fatalf("the hostname filter matched nothing")
+	}
+	h.do(http.MethodGet, "/api/v1/campaigns/"+campaign.ID+"/targets?cursor=garbage",
+		nil, nil, http.StatusBadRequest)
+}

@@ -484,16 +484,37 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	targets, err := s.campaigns.Targets(r.Context(), campaign.ID)
+	// The targets go page by page in the order of the rollout, filtered on
+	// the server: a campaign on ten thousand hosts must not become ten
+	// thousand rows in the browser, and "the failed ones" is a question the
+	// database answers better than a screen.
+	query := r.URL.Query()
+	filter := campaigns.TargetFilter{State: query.Get("state"), Search: query.Get("q")}
+	if wave, err := strconv.Atoi(query.Get("wave")); err == nil && wave >= 0 {
+		filter.Wave, filter.WaveSet = wave, true
+	}
+	cursor, err := campaigns.ParseTargetCursor(query.Get("cursor"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	limit, err := strconv.Atoi(query.Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = defaultTargetPage
+	}
+	page, err := s.campaigns.TargetsPage(r.Context(), campaign.ID, filter, cursor, limit)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if targets == nil {
-		targets = []campaigns.Target{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": targets, "count": len(targets)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items),
+		"total": page.Total, "next_cursor": page.NextCursor,
+	})
 }
+
+// defaultTargetPage is the page of targets a screen gets without asking.
+const defaultTargetPage = 200
 
 // handleCampaignTimeline returns the durable course of a campaign.
 //

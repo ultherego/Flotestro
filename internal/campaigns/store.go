@@ -596,32 +596,138 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 
 // Targets returns the campaign's targets in wave order.
 func (s *Store) Targets(ctx context.Context, campaignID string) ([]Target, error) {
-	const query = `
+	page, err := s.TargetsPage(ctx, campaignID, TargetFilter{}, TargetCursor{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+
+// TargetFilter narrows a page of targets. Every field is optional.
+type TargetFilter struct {
+	// State keeps only the targets in this state.
+	State string
+	// Wave keeps only one wave when WaveSet is true.
+	Wave    int
+	WaveSet bool
+	// Search keeps the hosts whose name contains the text.
+	Search string
+}
+
+// TargetCursor is the position of the last row of the previous page. The
+// order of the targets is the order of the rollout - wave, then position -
+// and both are fixed once the snapshot is frozen, so a cursor built from
+// them stays valid however the states change underneath.
+type TargetCursor struct {
+	Wave     int
+	Position int
+	Set      bool
+}
+
+// ParseTargetCursor reads a cursor of the form "wave:position".
+func ParseTargetCursor(value string) (TargetCursor, error) {
+	if value == "" {
+		return TargetCursor{}, nil
+	}
+	var cursor TargetCursor
+	if _, err := fmt.Sscanf(value, "%d:%d", &cursor.Wave, &cursor.Position); err != nil {
+		return TargetCursor{}, fmt.Errorf("invalid cursor %q", value)
+	}
+	cursor.Set = true
+	return cursor, nil
+}
+
+// String renders the cursor for the next request.
+func (c TargetCursor) String() string {
+	return fmt.Sprintf("%d:%d", c.Wave, c.Position)
+}
+
+// TargetPage is one page of a campaign's targets.
+type TargetPage struct {
+	Items []Target `json:"items"`
+	// Total is the number of targets matching the filter, all pages included:
+	// the operator is to know how many hosts a filter names, not how many fit
+	// on the screen.
+	Total int `json:"total"`
+	// NextCursor is empty on the last page.
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// maxTargetPage bounds a page. A screen showing more rows than that is not
+// a screen anybody reads; larger reads go page by page.
+const maxTargetPage = 1000
+
+// TargetsPage reads the targets of a campaign page by page, in the order of
+// the rollout. A limit of zero means no limit - the orchestrator needs the
+// whole set, and it is the only caller that does.
+func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter TargetFilter,
+	cursor TargetCursor, limit int) (TargetPage, error) {
+	if limit > maxTargetPage {
+		limit = maxTargetPage
+	}
+	where := "where t.campaign_id = $1"
+	args := []any{campaignID}
+	if filter.State != "" {
+		args = append(args, filter.State)
+		where += fmt.Sprintf(" and t.state = $%d", len(args))
+	}
+	if filter.WaveSet {
+		args = append(args, filter.Wave)
+		where += fmt.Sprintf(" and t.wave = $%d", len(args))
+	}
+	if filter.Search != "" {
+		args = append(args, "%"+filter.Search+"%")
+		where += fmt.Sprintf(" and h.hostname ilike $%d", len(args))
+	}
+
+	page := TargetPage{Items: []Target{}}
+	if err := s.pool.QueryRow(ctx, `select count(*) from campaign_targets t
+		left join hosts h on h.id = t.host_id `+where, args...).Scan(&page.Total); err != nil {
+		return page, err
+	}
+
+	if cursor.Set {
+		args = append(args, cursor.Wave, cursor.Position)
+		where += fmt.Sprintf(" and (t.wave, t.position) > ($%d, $%d)", len(args)-1, len(args))
+	}
+	query := `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,
 		       t.state, t.job_id, t.plan_job_id, t.reboot_job_id, t.health_job_id,
 		       coalesce(t.boot_id_before, ''),
 		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at
 		from campaign_targets t
-		left join hosts h on h.id = t.host_id
-		where t.campaign_id = $1
+		left join hosts h on h.id = t.host_id ` + where + `
 		order by t.wave, t.position`
-	rows, err := s.pool.Query(ctx, query, campaignID)
+	if limit > 0 {
+		// One row more than the page says whether there is a next page
+		// without a second count.
+		args = append(args, limit+1)
+		query += fmt.Sprintf(" limit $%d", len(args))
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 	defer rows.Close()
 
-	var targets []Target
 	for rows.Next() {
 		var t Target
 		if err := rows.Scan(&t.ID, &t.CampaignID, &t.HostID, &t.Hostname, &t.Wave, &t.Position,
 			&t.State, &t.JobID, &t.PlanJobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
 			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt); err != nil {
-			return nil, err
+			return page, err
 		}
-		targets = append(targets, t)
+		page.Items = append(page.Items, t)
 	}
-	return targets, rows.Err()
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if limit > 0 && len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		last := page.Items[limit-1]
+		page.NextCursor = TargetCursor{Wave: last.Wave, Position: last.Position}.String()
+	}
+	return page, nil
 }
 
 // UpdateTarget records the state of a campaign target.
