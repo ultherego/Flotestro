@@ -1,6 +1,9 @@
 import { Fragment, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Collection } from "../lib/api";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
+import { api, loadedItems, LIST_PAGE, type Collection, type Page } from "../lib/api";
+import { useDebounced } from "../lib/debounce";
+import { toInstant } from "../lib/format";
 import { PlanSummary } from "../components/plan";
 import type { Attempt, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
@@ -8,19 +11,53 @@ import { Card, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout"
 import { OPERATIONS_INTERVAL, useProgress } from "../lib/stream";
 import { useT } from "../i18n";
 
-/** The job list with approvals. An approval confirms the plan hash. */
+/** The states the filter offers. */
+const JOB_STATES = ["awaiting_approval", "queued", "dispatched", "running", "succeeded", "failed", "timed_out", "canceled", "expired"];
+
+/**
+ * The job list with approvals. An approval confirms the plan hash.
+ *
+ * The filters run on the server and the list grows page by page: the fleet
+ * orders thousands of tasks a week, and "the failed ones since Monday" is a
+ * question the database answers better than a screen scanning a list.
+ */
 export function Jobs() {
   const t = useT();
-  const [state, setState] = useState("");
+  // A tile on the dashboard links here with a filter already set.
+  const [initial] = useSearchParams();
+  const [state, setState] = useState(initial.get("state") ?? "");
+  const [action, setAction] = useState(initial.get("action") ?? "");
+  const [actor, setActor] = useState(initial.get("actor") ?? "");
+  const [campaignID, setCampaignID] = useState(initial.get("campaign_id") ?? "");
+  const [errorCode, setErrorCode] = useState(initial.get("error_code") ?? "");
+  const [since, setSince] = useState(initial.get("since") ?? "");
+  const [until, setUntil] = useState(initial.get("until") ?? "");
   const [expanded, setExpanded] = useState<string>("");
   const queryClient = useQueryClient();
+  // The typed filters reach the server after a pause, not per keystroke.
+  const settledAction = useDebounced(action.trim());
+  const settledActor = useDebounced(actor.trim());
+  const settledCampaign = useDebounced(campaignID.trim());
+  const settledError = useDebounced(errorCode.trim());
 
-  const params = new URLSearchParams({ limit: "100" });
+  const params = new URLSearchParams({ limit: String(LIST_PAGE) });
   if (state) params.set("state", state);
+  if (settledAction) params.set("action", settledAction);
+  if (settledActor) params.set("actor", settledActor);
+  if (settledCampaign) params.set("campaign_id", settledCampaign);
+  if (settledError) params.set("error_code", settledError);
+  if (toInstant(since)) params.set("since", toInstant(since));
+  if (toInstant(until)) params.set("until", toInstant(until));
 
-  const { data, error } = useQuery({
+  const list = useInfiniteQuery({
     queryKey: ["jobs", params.toString()],
-    queryFn: () => api.get<Collection<Job>>(`/api/v1/jobs?${params}`),
+    queryFn: ({ pageParam }) => {
+      const page = new URLSearchParams(params);
+      if (pageParam) page.set("cursor", pageParam);
+      return api.get<Page<Job>>(`/api/v1/jobs?${page}`);
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
     // The operation list has no stream of its own, because its content also
     // changes through other operators' operations and through jobs expiring.
     refetchInterval: OPERATIONS_INTERVAL,
@@ -41,11 +78,11 @@ export function Jobs() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
-  if (error) return <ErrorBox error={error} />;
+  if (list.error) return <ErrorBox error={list.error} />;
 
-  // The tiles count what is on the list, nothing more: the list is one
-  // page of the newest jobs, and the hint says so.
-  const jobs = data?.items ?? [];
+  // The tiles count what is on the list, nothing more: the list is the
+  // pages loaded so far of the newest jobs, and the hint says so.
+  const jobs = loadedItems(list.data);
   const count = (states: string[]) => jobs.filter((job) => states.includes(job.state)).length;
   const awaiting = count(["awaiting_approval"]);
   const inProgress = count(["queued", "leased", "dispatched", "running"]);
@@ -68,16 +105,28 @@ export function Jobs() {
       </StatGrid>
 
       <Card flush>
-        <Toolbar>
+        <Toolbar end={<span>{t("{n} listed", { n: jobs.length })}</span>}>
           <select value={state} onChange={(e) => setState(e.target.value)}>
             <option value="">{t("state: any")}</option>
-            {["awaiting_approval", "queued", "dispatched", "running", "succeeded", "failed", "canceled", "expired"].map(
-              (value) => <option key={value} value={value}>{value}</option>,
-            )}
+            {JOB_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
+          <input placeholder={t("operation, e.g. unit.restart")} value={action} onChange={(e) => setAction(e.target.value)} />
+          <input placeholder={t("requested by")} value={actor} onChange={(e) => setActor(e.target.value)} />
+          <input placeholder={t("campaign ID")} value={campaignID} onChange={(e) => setCampaignID(e.target.value)} />
+          <input placeholder={t("error code")} value={errorCode} onChange={(e) => setErrorCode(e.target.value)} />
+          <label className="toggle">
+            {t("Since")}{" "}
+            <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
+          </label>
+          <label className="toggle">
+            {t("Until")}{" "}
+            <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
+          </label>
         </Toolbar>
 
-        {!data?.items.length ? (
+        {list.isLoading ? (
+          <Empty>{t("Loading…")}</Empty>
+        ) : jobs.length === 0 ? (
           <Empty>{t("No jobs.")}</Empty>
         ) : (
           <table>
@@ -88,7 +137,7 @@ export function Jobs() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((job) => (
+              {jobs.map((job) => (
                 <Fragment key={job.id}>
                   <tr>
                     <td>
@@ -153,6 +202,15 @@ export function Jobs() {
               ))}
             </tbody>
           </table>
+        )}
+        {/* The next page comes on request; the list has no total, because
+            nobody counts the trail of tasks, they browse it. */}
+        {list.hasNextPage && (
+          <p>
+            <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+              {t("Load more")}
+            </button>
+          </p>
         )}
       </Card>
     </>

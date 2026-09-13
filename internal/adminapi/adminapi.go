@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,6 +31,7 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/oidc"
+	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -365,6 +367,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // FleetSummary holds only the numbers that require an operator decision.
+//
+// The attention counters are computed in the database over the hosts the
+// principal may see: the dashboard must not fetch the fleet into the browser
+// to count it. A nil counter is one the database cannot answer honestly for
+// this view and is left out of the answer rather than shown as zero.
 type FleetSummary struct {
 	Hosts            int `json:"hosts"`
 	Online           int `json:"online"`
@@ -374,6 +381,32 @@ type FleetSummary struct {
 	WithFailedUnits  int `json:"with_failed_units"`
 	PendingSecurity  int `json:"hosts_with_security_updates"`
 	QuarantinedHosts int `json:"quarantined_hosts"`
+	// The attention counters over the hosts that are not retired: a retired
+	// host is nobody's concern any more.
+	PackageDatabaseBroken int `json:"package_database_broken"`
+	SSSDOffline           int `json:"sssd_offline"`
+	InMaintenance         int `json:"in_maintenance"`
+	// FailedJobs24h counts the tasks that failed or timed out in the last
+	// day on the visible hosts.
+	FailedJobs24h *int `json:"failed_jobs_24h,omitempty"`
+	// PendingEnrollmentRequests counts the installations ordered in the
+	// visible scopes that nobody has completed yet.
+	PendingEnrollmentRequests *int `json:"pending_enrollment_requests,omitempty"`
+	// AgentsBehindLatest counts the hosts running an agent older than the
+	// newest version seen in the visible fleet; LatestAgentVersion names
+	// that version. Both are missing when no host reports a version the
+	// panel can order.
+	AgentsBehindLatest *int   `json:"agents_behind_latest,omitempty"`
+	LatestAgentVersion string `json:"latest_agent_version,omitempty"`
+	// AgentCertificatesExpiring counts the hosts whose current agent
+	// certificate runs out within thirty days.
+	AgentCertificatesExpiring *int `json:"agent_certificates_expiring,omitempty"`
+	// DegradedRelays counts the relays that missed their renewal: a relay
+	// certificate lives seven days and renews at a third left, so one with
+	// less than a day is a site about to be cut off. A relay serves a site
+	// rather than an environment, so the counter exists only for the global
+	// view - a narrowed scope cannot say which relays are its own.
+	DegradedRelays *int `json:"degraded_relays,omitempty"`
 }
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
@@ -383,57 +416,193 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	// The summary counts only the hosts the principal may see. Otherwise the
 	// dashboard of a single-environment operator would show the whole fleet.
-	condition, args := scopeFilter(principal.ScopesFor(authz.PermHostRead))
-	query := `
+	scopes := principal.ScopesFor(authz.PermHostRead)
+	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	visible := "true"
+	if condition != "" {
+		visible = condition
+	}
+	ctx := r.Context()
+
+	var summary FleetSummary
+	err := s.pool.QueryRow(ctx, `
 		select
 			count(*),
-			count(*) filter (where connection_state = 'online'),
-			count(*) filter (where connection_state <> 'online'),
-			count(*) filter (where reboot_required),
-			count(*) filter (where failed_units > 0),
-			count(*) filter (where pending_security_updates > 0),
-			count(*) filter (where lifecycle_state = 'quarantined')
-		from hosts `
-	var summary FleetSummary
-	err := s.pool.QueryRow(r.Context(), query+condition, args...).Scan(
+			count(*) filter (where h.connection_state = 'online'),
+			count(*) filter (where h.connection_state <> 'online'),
+			count(*) filter (where h.reboot_required),
+			count(*) filter (where h.failed_units > 0),
+			count(*) filter (where h.pending_security_updates > 0),
+			count(*) filter (where h.lifecycle_state = 'quarantined'),
+			count(*) filter (where h.package_database_broken and h.lifecycle_state <> 'retired'),
+			count(*) filter (where h.identity_enrolled and h.identity_sssd_online = false
+			                   and h.lifecycle_state <> 'retired'),
+			count(*) filter (where h.maintenance_until > now() and h.lifecycle_state <> 'retired')
+		from hosts h where `+visible, args...).Scan(
 		&summary.Hosts, &summary.Online, &summary.Offline,
-		&summary.RebootRequired, &summary.WithFailedUnits, &summary.PendingSecurity, &summary.QuarantinedHosts)
+		&summary.RebootRequired, &summary.WithFailedUnits, &summary.PendingSecurity,
+		&summary.QuarantinedHosts, &summary.PackageDatabaseBroken, &summary.SSSDOffline,
+		&summary.InMaintenance)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	summary.ActiveSessions = s.registry.Count()
+
+	var failedJobs int
+	err = s.pool.QueryRow(ctx, `
+		select count(*)
+		from jobs j
+		where j.state in ('failed', 'timed_out')
+		  and j.finished_at >= now() - interval '24 hours'
+		  and exists (select 1 from hosts h where h.id = j.host_id and `+visible+`)`,
+		args...).Scan(&failedJobs)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	summary.FailedJobs24h = &failedJobs
+
+	// An order past its deadline is not pending, whatever its status column
+	// says: the store reports it as expired for the same reason.
+	var pendingEnrollments int
+	enrollmentCondition, enrollmentArgs := authz.ScopeSQL(scopes, "e.site", "e.environment", 0)
+	if enrollmentCondition == "" {
+		enrollmentCondition = "true"
+	}
+	err = s.pool.QueryRow(ctx, `
+		select count(*) from enrollment_requests e
+		where e.status = 'pending' and e.revoked_at is null and e.expires_at > now()
+		  and `+enrollmentCondition, enrollmentArgs...).Scan(&pendingEnrollments)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	summary.PendingEnrollmentRequests = &pendingEnrollments
+
+	// The newest version is the newest the fleet reports, not a release the
+	// panel knows of: the panel has no release feed, and a made-up "latest"
+	// would tell every operator their whole fleet is behind. A version is
+	// ordered numerically part by part; a host whose version does not
+	// parse is neither behind nor current and stays out of the count.
+	var behind, ordered int
+	var latest []int32
+	err = s.pool.QueryRow(ctx, `
+		with versions as (
+			select string_to_array(substring(h.agent_version from '^v?(\d+(?:\.\d+)*)'), '.')::int[] as v
+			from hosts h
+			where h.lifecycle_state <> 'retired'
+			  and h.agent_version ~ '^v?\d+(\.\d+)*'
+			  and `+visible+`
+		)
+		select count(*) filter (where v < (select max(v) from versions)), count(*),
+		       (select max(v) from versions)
+		from versions`, args...).Scan(&behind, &ordered, &latest)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if ordered > 0 {
+		summary.AgentsBehindLatest = &behind
+		summary.LatestAgentVersion = joinVersion(latest)
+	}
+
+	// The certificate that counts is the host's newest live one: after a
+	// renewal the old certificate stays valid for a while and must not
+	// raise an alarm the new one has already answered.
+	var expiring int
+	err = s.pool.QueryRow(ctx, `
+		select count(*)
+		from hosts h
+		where h.lifecycle_state <> 'retired'
+		  and `+visible+`
+		  and (select max(c.not_after) from agent_certificates c
+		       where c.host_id = h.id and c.revoked_at is null) < now() + interval '30 days'`,
+		args...).Scan(&expiring)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	summary.AgentCertificatesExpiring = &expiring
+
+	if condition == "" {
+		var degraded int
+		err = s.pool.QueryRow(ctx, `
+			select count(*) from relays
+			where revoked_at is null and not_after < now() + interval '1 day'`).Scan(&degraded)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		summary.DegradedRelays = &degraded
+	}
 	writeJSON(w, http.StatusOK, summary)
+}
+
+// joinVersion renders a version ordered by the database back into text.
+func joinVersion(parts []int32) string {
+	rendered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		rendered = append(rendered, strconv.Itoa(int(part)))
+	}
+	return strings.Join(rendered, ".")
 }
 
 func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	// The list is narrowed to the scope the principal may read, so that a
-	// single-environment operator does not see the whole fleet.
+	// single-environment operator does not see the whole fleet. The
+	// narrowing is part of the query rather than a filter over the fetched
+	// page: a page filtered afterwards would report a count and a cursor
+	// for rows the caller never sees, and a narrow operator could get an
+	// empty page with more to come.
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "fleet")
 	if !ok {
 		return
 	}
 	query := r.URL.Query()
-	limit, _ := strconv.Atoi(query.Get("limit"))
-	result, err := s.hosts.List(r.Context(), hosts.ListFilter{
+	filter := hosts.ListFilter{
 		Site:            query.Get("site"),
 		Environment:     query.Get("environment"),
 		OSFamily:        query.Get("os_family"),
 		ConnectionState: query.Get("connection_state"),
-		Limit:           limit,
-	})
+		Search:          strings.TrimSpace(query.Get("q")),
+		LifecycleState:  query.Get("lifecycle_state"),
+		Owner:           query.Get("owner"),
+		Capability:      query.Get("capability"),
+		Scopes:          principal.ScopesFor(authz.PermHostRead),
+	}
+	if value := query.Get("maintenance"); value != "" {
+		inWindow, err := strconv.ParseBool(value)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", "maintenance must be true or false")
+			return
+		}
+		filter.Maintenance = &inWindow
+	}
+	cursor, err := hosts.ParseCursor(query.Get("cursor"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	page, err := s.hosts.ListPaged(r.Context(), filter, cursor,
+		paging.Limit(limit, defaultListPage, maxListPage))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	visible := make([]hosts.Host, 0, len(result))
-	for _, host := range result {
-		if principal.Can(authz.PermHostRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			visible = append(visible, host)
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "count": len(visible)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items),
+		"total": page.Total, "next_cursor": page.NextCursor,
+	})
 }
+
+// The page of a fleet list: what a screen gets without asking, and the
+// most it may ask for. Beyond that a caller pages on with the cursor.
+const (
+	defaultListPage = 100
+	maxListPage     = 500
+)
 
 func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
@@ -520,13 +689,52 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermAuditRead, authz.GlobalScope, "audit", ""); !ok {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	records, err := s.audit.List(r.Context(), r.URL.Query().Get("target_id"), limit)
+	query := r.URL.Query()
+	filter := audit.ListFilter{
+		TargetID:   query.Get("target_id"),
+		TargetType: query.Get("target_type"),
+		Actor:      query.Get("actor"),
+		Action:     query.Get("action"),
+		Outcome:    query.Get("outcome"),
+	}
+	var err error
+	if filter.Since, err = parseTimeParam(query.Get("since")); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_filter", "since must be an RFC 3339 timestamp")
+		return
+	}
+	if filter.Until, err = parseTimeParam(query.Get("until")); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_filter", "until must be an RFC 3339 timestamp")
+		return
+	}
+	cursor, err := audit.ParseCursor(query.Get("cursor"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	page, err := s.audit.ListPaged(r.Context(), filter, cursor,
+		paging.Limit(limit, defaultListPage, maxListPage))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": records, "count": len(records)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
+	})
+}
+
+// parseTimeParam reads an optional RFC 3339 query parameter. An empty value
+// is no bound; a value that is not a timestamp is the caller's mistake and
+// must not quietly turn into "no bound".
+func parseTimeParam(value string) (*time.Time, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {

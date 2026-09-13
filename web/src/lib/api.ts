@@ -74,3 +74,18 @@ export const api = {
 };
 
 export type Collection<T> = { items: T[]; count: number };
+
+/**
+ * One page of a list read by cursor. The server hands back the key of the
+ * last row as `next_cursor`; the screen asks for the next page with it and
+ * stops when it is empty. `total` comes only from the lists that count.
+ */
+export type Page<T> = Collection<T> & { next_cursor?: string; total?: number };
+
+/** The rows loaded so far by an infinite query, in one list. */
+export function loadedItems<T>(data?: { pages: Page<T>[] }): T[] {
+  return data?.pages.flatMap((page) => page.items) ?? [];
+}
+
+/** How many rows one request fetches; a screen grows page by page. */
+export const LIST_PAGE = 100;

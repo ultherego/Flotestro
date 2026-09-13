@@ -7,11 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 type ActorType string
@@ -115,38 +119,144 @@ type Record struct {
 	Detail     json.RawMessage `json:"detail"`
 }
 
-// List returns the latest events, optionally narrowed to one target.
-func (r *Recorder) List(ctx context.Context, targetID string, limit int) ([]Record, error) {
+// ListFilter narrows the trail. Empty fields do not narrow.
+type ListFilter struct {
+	TargetID   string
+	TargetType string
+	// Actor is the identity that acted: a principal subject or an agent's
+	// host identifier.
+	Actor   string
+	Action  string
+	Outcome string
+	// Since and Until bound the time of the events; Until is exclusive.
+	Since *time.Time
+	Until *time.Time
+}
+
+// conditions renders the filter as SQL; the parameters continue from those
+// already in args.
+func (f ListFilter) conditions(args []any) ([]string, []any) {
+	var conditions []string
+	add := func(column, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	add("target_id", f.TargetID)
+	add("target_type", f.TargetType)
+	add("actor_id", f.Actor)
+	add("action", f.Action)
+	add("outcome", f.Outcome)
+	if f.Since != nil {
+		args = append(args, *f.Since)
+		conditions = append(conditions, fmt.Sprintf("occurred_at >= $%d", len(args)))
+	}
+	if f.Until != nil {
+		args = append(args, *f.Until)
+		conditions = append(conditions, fmt.Sprintf("occurred_at < $%d", len(args)))
+	}
+	return conditions, args
+}
+
+// Cursor is the key of the last event of the previous page. The trail is
+// read newest first, so the next page holds the events before it.
+type Cursor struct {
+	OccurredAt time.Time
+	ID         int64
+	Set        bool
+}
+
+// ParseCursor reads a cursor issued by ListPaged. An empty value is the
+// first page.
+func ParseCursor(value string) (Cursor, error) {
+	parts, err := paging.Decode(value, 2)
+	if err != nil {
+		return Cursor{}, err
+	}
+	if parts == nil {
+		return Cursor{}, nil
+	}
+	at, err := paging.ParseTime(parts[0])
+	if err != nil {
+		return Cursor{}, err
+	}
+	id, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	return Cursor{OccurredAt: at, ID: id, Set: true}, nil
+}
+
+// String renders the cursor for the next request.
+func (c Cursor) String() string {
+	return paging.Encode(paging.FormatTime(c.OccurredAt), strconv.FormatInt(c.ID, 10))
+}
+
+// ListPage is one page of the trail.
+type ListPage struct {
+	Items []Record `json:"items"`
+	// NextCursor is empty on the last page.
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// ListPaged reads the trail newest first, page by page. The key is
+// (occurred_at, id): two events written in the same microsecond still have
+// an order, so a page boundary between them loses neither.
+func (r *Recorder) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	conditions, args := filter.conditions(nil)
+	if cursor.Set {
+		args = append(args, cursor.OccurredAt, cursor.ID)
+		conditions = append(conditions, fmt.Sprintf("(occurred_at, id) < ($%d, $%d)", len(args)-1, len(args)))
 	}
 	query := `
 		select id, occurred_at, actor_type, actor_id, action,
 		       coalesce(target_type, ''), coalesce(target_id, ''), coalesce(request_id, ''),
 		       outcome, detail
 		from audit_events`
-	args := []any{}
-	if targetID != "" {
-		args = append(args, targetID)
-		query += " where target_id = $1"
+	if len(conditions) > 0 {
+		query += " where " + strings.Join(conditions, " and ")
 	}
-	args = append(args, limit)
+	// One row more than the page says whether there is a next page without
+	// a count over the whole trail.
+	args = append(args, limit+1)
 	query += fmt.Sprintf(" order by occurred_at desc, id desc limit $%d", len(args))
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return ListPage{}, err
 	}
 	defer rows.Close()
 
-	var records []Record
+	page := ListPage{Items: []Record{}}
 	for rows.Next() {
 		var rec Record
 		if err := rows.Scan(&rec.ID, &rec.OccurredAt, &rec.ActorType, &rec.ActorID, &rec.Action,
 			&rec.TargetType, &rec.TargetID, &rec.RequestID, &rec.Outcome, &rec.Detail); err != nil {
-			return nil, err
+			return ListPage{}, err
 		}
-		records = append(records, rec)
+		page.Items = append(page.Items, rec)
 	}
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ListPage{}, err
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		last := page.Items[limit-1]
+		page.NextCursor = Cursor{OccurredAt: last.OccurredAt, ID: last.ID, Set: true}.String()
+	}
+	return page, nil
+}
+
+// List returns the latest events, optionally narrowed to one target.
+func (r *Recorder) List(ctx context.Context, targetID string, limit int) ([]Record, error) {
+	page, err := r.ListPaged(ctx, ListFilter{TargetID: targetID}, Cursor{}, limit)
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
 }

@@ -50,3 +50,16 @@ export function bytes(value?: number): string {
   }
   return `${size.toFixed(size < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
 }
+
+/**
+ * Turns the value of a datetime-local input into the RFC 3339 instant the
+ * API reads. The input speaks the browser's local time without a zone; the
+ * API wants an instant, so the conversion happens here rather than on the
+ * server guessing the operator's zone. An empty or unreadable value is no
+ * bound.
+ */
+export function toInstant(local: string): string {
+  if (!local) return "";
+  const parsed = new Date(local);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+}

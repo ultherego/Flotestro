@@ -2,14 +2,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, type Collection } from "../lib/api";
-import type { AuditEvent, Campaign, FleetSummary, Host } from "../lib/types";
-import { ErrorBox, Time, Empty, JobState, ConnectionState } from "../components/ui";
+import type { AuditEvent, Campaign, FleetSummary } from "../lib/types";
+import { ErrorBox, Time, Empty, JobState } from "../components/ui";
 import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { useT } from "../i18n";
 
 /**
  * The dashboard shows only data that needs a decision. It is not a wall of
  * decorative charts: every tile leads to a specific action.
+ *
+ * The counters come from the fleet summary, computed in the database over
+ * the hosts the operator may see. The dashboard does not fetch the fleet
+ * to count it: a fleet of five thousand hosts is five thousand rows the
+ * browser would download every few seconds to learn one number.
  */
 export function Dashboard() {
   const t = useT();
@@ -18,42 +23,37 @@ export function Dashboard() {
     queryFn: () => api.get<FleetSummary>("/api/v1/fleet/summary"),
     refetchInterval: REFRESH_INTERVAL,
   });
-  const hosts = useQuery({
-    queryKey: ["hosts"],
-    queryFn: () => api.get<Collection<Host>>("/api/v1/hosts?limit=500"),
-    refetchInterval: REFRESH_INTERVAL,
-  });
   const campaigns = useQuery({
     queryKey: ["campaigns"],
     queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=20"),
   });
-  const audit = useQuery({
-    queryKey: ["audit", "recent"],
-    queryFn: () => api.get<Collection<AuditEvent>>("/api/v1/audit?limit=50"),
+  // The denials are asked for by name: the trail filters on the server, so
+  // the dashboard does not read fifty events to find the three that matter.
+  const denials = useQuery({
+    queryKey: ["audit", "denied"],
+    queryFn: () => api.get<Collection<AuditEvent>>("/api/v1/audit?outcome=denied&limit=10"),
   });
 
   if (summary.error) return <ErrorBox error={summary.error} />;
   const s = summary.data;
 
-  const needingAttention = (hosts.data?.items ?? []).filter(
-    (host) =>
-      host.connection_state !== "online" ||
-      host.reboot_required === true ||
-      (host.failed_units ?? 0) > 0 ||
-      host.package_database_broken ||
-      (host.identity.enrolled && host.identity.sssd_online === false),
-  );
-
   const activeCampaigns = (campaigns.data?.items ?? []).filter((campaign) =>
     ["canary", "running", "paused", "awaiting_approval"].includes(campaign.state),
   );
-
-  const denials = (audit.data?.items ?? []).filter((event) => event.outcome === "denied");
+  const denied = denials.data?.items ?? [];
 
   // A count above zero on a tile that should read zero is the alarm; the
   // rest of the tiles are the fleet's size, not a state.
   const warnAbove = (value?: number) => ((value ?? 0) > 0 ? "warn" : undefined);
   const errorAbove = (value?: number) => ((value ?? 0) > 0 ? "error" : undefined);
+  // The window the failed-task counter covers, for the link to the list.
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const attention = [
+    s?.reboot_required, s?.with_failed_units, s?.package_database_broken, s?.sssd_offline,
+    s?.failed_jobs_24h, s?.pending_enrollment_requests, s?.agents_behind_latest,
+    s?.agent_certificates_expiring, s?.degraded_relays,
+  ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
   return (
     <>
@@ -61,41 +61,47 @@ export function Dashboard() {
 
       <StatGrid>
         <Stat label={t("Hosts")} value={s?.hosts} to="/hosts" />
-        <Stat label={t("Online")} value={s?.online} />
-        <Stat label={t("Offline")} value={s?.offline} tone={errorAbove(s?.offline)} />
+        <Stat label={t("Online")} value={s?.online} to="/hosts?connection_state=online" />
+        <Stat label={t("Offline")} value={s?.offline} tone={errorAbove(s?.offline)} to="/hosts?connection_state=offline" />
         <Stat label={t("Active sessions")} value={s?.active_sessions} />
-        <Stat label={t("Reboot required")} value={s?.reboot_required} tone={warnAbove(s?.reboot_required)} />
-        <Stat label={t("With failed units")} value={s?.with_failed_units} tone={warnAbove(s?.with_failed_units)} />
         <Stat label={t("Security updates")} value={s?.hosts_with_security_updates} tone={warnAbove(s?.hosts_with_security_updates)} />
-        <Stat label={t("Quarantined")} value={s?.quarantined_hosts} tone={errorAbove(s?.quarantined_hosts)} />
+        <Stat label={t("Quarantined")} value={s?.quarantined_hosts} tone={errorAbove(s?.quarantined_hosts)} to="/hosts?lifecycle_state=quarantined" />
+        <Stat label={t("In maintenance")} value={s?.in_maintenance} hint={t("campaigns skip them")} to="/hosts?maintenance=true" />
       </StatGrid>
 
+      {/* A tile the server left out is a counter it could not answer
+          honestly for this view; it is missing, not zero. */}
       <Card
-        title={t("Hosts needing attention")}
-        actions={needingAttention.length > 0 && <span className="badge warn">{needingAttention.length}</span>}
-        flush
+        title={t("Needs attention")}
+        description={t("Counted in the database over the hosts you can see.")}
+        actions={attention > 0 && <span className="badge warn">{attention}</span>}
       >
-        {needingAttention.length === 0 ? (
-          <Empty>{t("No host needs attention.")}</Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Reason")}</th><th>{t("Last seen")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {needingAttention.map((host) => (
-                <tr key={host.id}>
-                  <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
-                  <td><ConnectionState state={host.connection_state} /></td>
-                  <td>{attentionReasons(host, t).join(", ")}</td>
-                  <td><Time value={host.last_seen_at} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <StatGrid compact>
+          <Stat label={t("Reboot required")} value={s?.reboot_required} tone={warnAbove(s?.reboot_required)} />
+          <Stat label={t("With failed units")} value={s?.with_failed_units} tone={warnAbove(s?.with_failed_units)} />
+          <Stat label={t("Package database broken")} value={s?.package_database_broken} tone={errorAbove(s?.package_database_broken)} />
+          <Stat label={t("SSSD offline")} value={s?.sssd_offline} tone={warnAbove(s?.sssd_offline)} />
+          {s?.failed_jobs_24h !== undefined && (
+            <Stat label={t("Failed jobs, 24 h")} value={s.failed_jobs_24h} tone={errorAbove(s.failed_jobs_24h)} to={`/jobs?state=failed&since=${encodeURIComponent(dayAgo)}`} />
+          )}
+          {s?.pending_enrollment_requests !== undefined && (
+            <Stat label={t("Pending enrollments")} value={s.pending_enrollment_requests} tone={warnAbove(s.pending_enrollment_requests)} to="/hosts/new" />
+          )}
+          {s?.agents_behind_latest !== undefined && (
+            <Stat
+              label={t("Agents behind {version}", { version: s.latest_agent_version ?? "" })}
+              value={s.agents_behind_latest}
+              tone={warnAbove(s.agents_behind_latest)}
+              hint={t("newest version seen in the fleet")}
+            />
+          )}
+          {s?.agent_certificates_expiring !== undefined && (
+            <Stat label={t("Agent certificates expiring")} value={s.agent_certificates_expiring} hint={t("within 30 days")} tone={warnAbove(s.agent_certificates_expiring)} />
+          )}
+          {s?.degraded_relays !== undefined && (
+            <Stat label={t("Degraded relays")} value={s.degraded_relays} hint={t("missed renewal")} tone={errorAbove(s.degraded_relays)} />
+          )}
+        </StatGrid>
       </Card>
 
       <Card
@@ -126,16 +132,16 @@ export function Dashboard() {
 
       <Card
         title={t("Recent access denials")}
-        actions={denials.length > 0 && <span className="badge error">{denials.length}</span>}
+        actions={denied.length > 0 && <span className="badge error">{denied.length}</span>}
         flush
       >
-        {denials.length === 0 ? (
+        {denied.length === 0 ? (
           <Empty>{t("No denials in recent events.")}</Empty>
         ) : (
           <table>
             <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Operation")}</th><th>{t("Reason")}</th></tr></thead>
             <tbody>
-              {denials.slice(0, 10).map((event) => (
+              {denied.map((event) => (
                 <tr key={event.id}>
                   <td><Time value={event.occurred_at} /></td>
                   <td className="mono">{event.actor_id}</td>
@@ -149,14 +155,4 @@ export function Dashboard() {
       </Card>
     </>
   );
-}
-
-function attentionReasons(host: Host, t: (text: string, params?: Record<string, string | number>) => string): string[] {
-  const reasons: string[] = [];
-  if (host.connection_state !== "online") reasons.push(t("no connection"));
-  if (host.reboot_required) reasons.push(t("reboot required"));
-  if ((host.failed_units ?? 0) > 0) reasons.push(t("{n} failed units", { n: host.failed_units ?? 0 }));
-  if (host.package_database_broken) reasons.push(t("package database needs repair"));
-  if (host.identity.enrolled && host.identity.sssd_online === false) reasons.push(t("SSSD offline"));
-  return reasons;
 }

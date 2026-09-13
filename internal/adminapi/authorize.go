@@ -113,15 +113,3 @@ func (s *Server) jobScope(r *http.Request, hostID string) authz.Scope {
 	}
 	return authz.Scope{Site: host.Site, Environment: host.Environment}
 }
-
-// scopeFilter builds the WHERE clause narrowing the hosts to the principal
-// scopes. The narrowing rule itself lives in the authz package, together
-// with the authorisation: two separate implementations of the same
-// semantics have drifted apart once already.
-func scopeFilter(scopes []authz.Scope) (string, []any) {
-	condition, args := authz.ScopeSQL(scopes, "site", "environment", 0)
-	if condition == "" {
-		return "", nil
-	}
-	return " where " + condition, args
-}

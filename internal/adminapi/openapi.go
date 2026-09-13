@@ -139,6 +139,13 @@ func (s *Server) operation(route apiRoute) map[string]any {
 			"description": "The shape of the report: the JSON summary by default, or a CSV file with one row per target.",
 		})
 	}
+	for _, parameter := range queryParameters[route.Method+" "+route.Path] {
+		params = append(params, map[string]any{
+			"name": parameter.name, "in": "query", "required": false,
+			"schema":      map[string]any{"type": parameter.kind},
+			"description": parameter.description,
+		})
+	}
 	for _, segment := range strings.Split(route.Path, "/") {
 		if strings.HasPrefix(segment, "{") {
 			name := strings.Trim(segment, "{}")
@@ -190,6 +197,53 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	return op
 }
 
+// queryParameter is one filter or paging control of a list.
+type queryParameter struct {
+	name, kind, description string
+}
+
+// The paging controls every cursor-paged list shares.
+var pagingParameters = []queryParameter{
+	{"limit", "integer", "The page size: 100 by default, 500 at most."},
+	{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
+}
+
+// The query parameters of the lists. A list filters on the server, so its
+// filters are part of the contract: a CMDB asking for the hosts of one
+// owner must not have to fetch the fleet and filter it itself.
+var queryParameters = map[string][]queryParameter{
+	"GET /api/v1/hosts": append([]queryParameter{
+		{"q", "string", "A fragment of the hostname, the management address, the machine identifier or the owner; case-insensitive."},
+		{"site", "string", ""},
+		{"environment", "string", ""},
+		{"os_family", "string", ""},
+		{"connection_state", "string", "online, offline, stale or unknown."},
+		{"lifecycle_state", "string", "active, quarantined, retiring or retired."},
+		{"owner", "string", ""},
+		{"maintenance", "boolean", "true keeps the hosts inside a maintenance window now, false those outside one."},
+		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
+	}, pagingParameters...),
+	"GET /api/v1/jobs": append([]queryParameter{
+		{"host_id", "string", ""},
+		{"state", "string", ""},
+		{"action", "string", "The operation type."},
+		{"actor", "string", "The identity that ordered the task."},
+		{"campaign_id", "string", ""},
+		{"error_code", "string", "The result error code the task ended with."},
+		{"since", "string", "RFC 3339; tasks created at or after this moment."},
+		{"until", "string", "RFC 3339; tasks created before this moment."},
+	}, pagingParameters...),
+	"GET /api/v1/audit": append([]queryParameter{
+		{"target_id", "string", ""},
+		{"target_type", "string", ""},
+		{"actor", "string", "The identity that acted."},
+		{"action", "string", ""},
+		{"outcome", "string", "success, failure or denied."},
+		{"since", "string", "RFC 3339; events at or after this moment."},
+		{"until", "string", "RFC 3339; events before this moment."},
+	}, pagingParameters...),
+}
+
 func ref(name string) map[string]any {
 	return map[string]any{"$ref": "#/components/schemas/" + name}
 }
@@ -207,9 +261,9 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
-	"GET /api/v1/hosts":                   collection("Host"),
+	"GET /api/v1/hosts":                   pagedCollection("Host"),
 	"GET /api/v1/hosts/{id}":              ref("Host"),
-	"GET /api/v1/jobs":                    collection("Job"),
+	"GET /api/v1/jobs":                    cursorCollection("Job"),
 	"GET /api/v1/jobs/{id}":               ref("Job"),
 	"POST /api/v1/jobs/{id}/approve":      ref("Job"),
 	"POST /api/v1/jobs/{id}/cancel":       ref("Job"),
@@ -224,15 +278,23 @@ var responseSchemas = map[string]map[string]any{
 	"POST /api/v1/campaigns/{id}/cancel":  ref("Campaign"),
 	"GET /api/v1/campaigns/{id}/targets":  pagedCollection("CampaignTarget"),
 	"GET /api/v1/campaigns/{id}/timeline": collection("TimelineEntry"),
-	"GET /api/v1/audit":                   collection("AuditEvent"),
+	"GET /api/v1/audit":                   cursorCollection("AuditEvent"),
 	"GET /api/v1/hosts/{id}/audit":        collection("AuditEvent"),
 }
 
-func pagedCollection(name string) map[string]any {
+// cursorCollection is a list read page by page without a total: the task
+// list and the audit trail are counted by nobody, only browsed.
+func cursorCollection(name string) map[string]any {
 	schema := collection(name)
 	properties := schema["properties"].(map[string]any)
-	properties["total"] = map[string]any{"type": "integer", "description": "How many match the filter across every page."}
 	properties["next_cursor"] = map[string]any{"type": "string", "description": "Empty on the last page."}
+	return schema
+}
+
+func pagedCollection(name string) map[string]any {
+	schema := cursorCollection(name)
+	properties := schema["properties"].(map[string]any)
+	properties["total"] = map[string]any{"type": "integer", "description": "How many match the filter across every page."}
 	return schema
 }
 

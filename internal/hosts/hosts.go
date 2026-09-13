@@ -14,6 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 // ErrNotFound means there is no host with the given identity.
@@ -582,12 +585,30 @@ type ListFilter struct {
 	ConnectionState string
 	// IdentityDomain narrows to the hosts in a given domain.
 	IdentityDomain string
-	Limit          int
+	// Search keeps the hosts with the text somewhere in the hostname, the
+	// management address, the machine identifier or the owner. The
+	// operator types what they remember about a host, and that is one of
+	// those four things.
+	Search         string
+	LifecycleState string
+	Owner          string
+	// Maintenance keeps the hosts inside a maintenance window (true) or
+	// outside one (false). Nil does not narrow.
+	Maintenance *bool
+	// Capability keeps the hosts whose registry has the named adapter
+	// available; 'packages.apt', not 'packages'.
+	Capability string
+	// Scopes narrow the result to what the caller may read. Nil narrows
+	// nothing, which is right only for a caller that has checked the scope
+	// itself or has the global one.
+	Scopes []authz.Scope
+	Limit  int
 }
 
-// List returns the hosts matching the filter. Filtering happens in the
-// database; the UI never pulls the whole fleet into the browser's memory.
-func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
+// conditions renders the filter as SQL over the alias h. Every list of
+// hosts - the page, the count and the plain list - goes through this one
+// place, so a filter cannot work in the list and be forgotten in the count.
+func (f ListFilter) conditions() ([]string, []any) {
 	var (
 		conditions []string
 		args       []any
@@ -599,12 +620,56 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 		args = append(args, value)
 		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
 	}
-	add("h.site", filter.Site)
-	add("h.environment", filter.Environment)
-	add("h.os_family", filter.OSFamily)
-	add("h.connection_state", filter.ConnectionState)
-	add("h.identity_domain", filter.IdentityDomain)
+	add("h.site", f.Site)
+	add("h.environment", f.Environment)
+	add("h.os_family", f.OSFamily)
+	add("h.connection_state", f.ConnectionState)
+	add("h.identity_domain", f.IdentityDomain)
+	add("h.lifecycle_state", f.LifecycleState)
+	add("h.owner", f.Owner)
 
+	if f.Search != "" {
+		args = append(args, "%"+escapeLike(f.Search)+"%")
+		conditions = append(conditions, fmt.Sprintf(
+			"(h.hostname ilike $%[1]d or h.management_address ilike $%[1]d"+
+				" or h.machine_id ilike $%[1]d or h.owner ilike $%[1]d)", len(args)))
+	}
+	if f.Maintenance != nil {
+		// A window is in force until its deadline; an expired one is no
+		// window, even though its columns are still filled in.
+		if *f.Maintenance {
+			conditions = append(conditions, "h.maintenance_until > now()")
+		} else {
+			conditions = append(conditions, "(h.maintenance_until is null or h.maintenance_until <= now())")
+		}
+	}
+	if f.Capability != "" {
+		args = append(args, f.Capability)
+		conditions = append(conditions, fmt.Sprintf(
+			"exists (select 1 from host_capability_registry r"+
+				" where r.host_id = h.id and r.name = $%d and r.available)", len(args)))
+	}
+	if f.Scopes != nil {
+		// The narrowing rule lives next to the authorisation, so that a list
+		// cannot show what a direct read would refuse.
+		if condition, extra := authz.ScopeSQL(f.Scopes, "h.site", "h.environment", len(args)); condition != "" {
+			conditions = append(conditions, condition)
+			args = append(args, extra...)
+		}
+	}
+	return conditions, args
+}
+
+// escapeLike neutralises the pattern characters of a search. An operator
+// looking for "db_01" means an underscore, not any character.
+func escapeLike(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+}
+
+// List returns the hosts matching the filter. Filtering happens in the
+// database; the UI never pulls the whole fleet into the browser's memory.
+func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
+	conditions, args := filter.conditions()
 	where := ""
 	if len(conditions) > 0 {
 		where = "where " + strings.Join(conditions, " and ")
@@ -630,22 +695,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 // The first page is taken with an empty key.
 func (s *Store) Page(ctx context.Context, filter ListFilter,
 	afterName, afterID string, limit int) ([]Host, error) {
-	var (
-		conditions []string
-		args       []any
-	)
-	add := func(column, value string) {
-		if value == "" {
-			return
-		}
-		args = append(args, value)
-		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
-	}
-	add("h.site", filter.Site)
-	add("h.environment", filter.Environment)
-	add("h.os_family", filter.OSFamily)
-	add("h.connection_state", filter.ConnectionState)
-	add("h.identity_domain", filter.IdentityDomain)
+	conditions, args := filter.conditions()
 
 	if afterID == "" {
 		afterID = "00000000-0000-0000-0000-000000000000"
@@ -670,24 +720,8 @@ func (s *Store) Page(ctx context.Context, filter ListFilter,
 // length of the first page: the operator approves a change on as many hosts
 // as they were shown.
 func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
-	var (
-		conditions []string
-		args       []any
-	)
-	add := func(column, value string) {
-		if value == "" {
-			return
-		}
-		args = append(args, value)
-		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
-	}
-	add("site", filter.Site)
-	add("environment", filter.Environment)
-	add("os_family", filter.OSFamily)
-	add("connection_state", filter.ConnectionState)
-	add("identity_domain", filter.IdentityDomain)
-
-	query := "select count(*) from hosts"
+	conditions, args := filter.conditions()
+	query := "select count(*) from hosts h"
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
@@ -696,6 +730,77 @@ func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+// Cursor is the key of the last host of the previous page: its name and its
+// identifier, the same key a sweep pages by.
+type Cursor struct {
+	Hostname string
+	ID       string
+	Set      bool
+}
+
+// ParseCursor reads a cursor issued by ListPaged. An empty value is the
+// first page.
+func ParseCursor(value string) (Cursor, error) {
+	parts, err := paging.Decode(value, 2)
+	if err != nil {
+		return Cursor{}, err
+	}
+	if parts == nil {
+		return Cursor{}, nil
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	return Cursor{Hostname: parts[0], ID: parts[1], Set: true}, nil
+}
+
+// String renders the cursor for the next request.
+func (c Cursor) String() string {
+	return paging.Encode(c.Hostname, c.ID)
+}
+
+// ListPage is one page of the host list.
+type ListPage struct {
+	Items []Host `json:"items"`
+	// Total is the number of hosts matching the filter across every page:
+	// the operator is to know how many hosts a filter names, not how many
+	// fit on the screen.
+	Total int `json:"total"`
+	// NextCursor is empty on the last page.
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// ListPaged reads the hosts matching the filter page by page, in the order
+// of (hostname, id). The count comes with the page, so the screen can say
+// how many hosts stand behind a filter without a second request.
+func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
+	page := ListPage{Items: []Host{}}
+	total, err := s.Count(ctx, filter)
+	if err != nil {
+		return page, err
+	}
+	page.Total = total
+
+	if limit <= 0 {
+		limit = PageSize
+	}
+	// One row more than the page says whether there is a next page without
+	// a second count.
+	items, err := s.Page(ctx, filter, cursor.Hostname, cursor.ID, limit+1)
+	if err != nil {
+		return page, err
+	}
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[limit-1]
+		page.NextCursor = Cursor{Hostname: last.Hostname, ID: last.ID, Set: true}.String()
+	}
+	if items != nil {
+		page.Items = items
+	}
+	return page, nil
 }
 
 // Summary is what a sweep over the whole fleet needs to know about a host.

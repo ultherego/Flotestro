@@ -9,12 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
@@ -428,24 +431,51 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	query := r.URL.Query()
 	// The database narrows the list: checking the scope after fetching meant
 	// a host query for every job separately.
 	scopes := principal.ScopesFor(authz.PermJobRead)
 	filter := jobs.ListFilter{
-		HostID: r.URL.Query().Get("host_id"),
-		State:  r.URL.Query().Get("state"),
-		Limit:  limit,
+		HostID:     query.Get("host_id"),
+		State:      query.Get("state"),
+		Action:     query.Get("action"),
+		Actor:      query.Get("actor"),
+		CampaignID: query.Get("campaign_id"),
+		ErrorCode:  query.Get("error_code"),
+	}
+	if filter.CampaignID != "" {
+		if _, err := uuid.Parse(filter.CampaignID); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", "campaign_id must be a campaign identifier")
+			return
+		}
+	}
+	var err error
+	if filter.Since, err = parseTimeParam(query.Get("since")); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_filter", "since must be an RFC 3339 timestamp")
+		return
+	}
+	if filter.Until, err = parseTimeParam(query.Get("until")); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_filter", "until must be an RFC 3339 timestamp")
+		return
 	}
 	for _, scope := range scopes {
 		filter.Scopes = append(filter.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
 	}
-	visible, err := s.jobs.List(r.Context(), filter)
+	cursor, err := jobs.ParseCursor(query.Get("cursor"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	page, err := s.jobs.ListPaged(r.Context(), filter, cursor,
+		paging.Limit(limit, defaultListPage, maxListPage))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "count": len(visible)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
+	})
 }
 
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {

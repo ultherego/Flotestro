@@ -86,11 +86,24 @@ export type FleetSummary = {
   with_failed_units: number;
   hosts_with_security_updates: number;
   quarantined_hosts: number;
+  package_database_broken: number;
+  sssd_offline: number;
+  in_maintenance: number;
+  // The attention counters the database computes over the visible fleet.
+  // A missing one is a counter the server could not answer honestly for
+  // this view, and the tile is left out rather than shown as zero.
+  failed_jobs_24h?: number;
+  pending_enrollment_requests?: number;
+  agents_behind_latest?: number;
+  latest_agent_version?: string;
+  agent_certificates_expiring?: number;
+  degraded_relays?: number;
 };
 
 export type Job = {
   id: string;
   host_id: string;
+  campaign_id?: string;
   action_type: string;
   state: string;
   payload: unknown;

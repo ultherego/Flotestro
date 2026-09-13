@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 var (
@@ -645,7 +647,17 @@ func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 type ListFilter struct {
 	HostID string
 	State  string
-	Limit  int
+	// Action keeps one operation type; Actor the identity that ordered it;
+	// CampaignID the rollout the tasks belong to; ErrorCode the result the
+	// tasks ended with.
+	Action     string
+	Actor      string
+	CampaignID string
+	ErrorCode  string
+	// Since and Until bound the creation time; Until is exclusive.
+	Since *time.Time
+	Until *time.Time
+	Limit int
 	// Scopes narrow the result to the scopes in which the caller has the
 	// right to read. An empty list narrows nothing; an empty scope inside the
 	// list means a global permission.
@@ -658,39 +670,135 @@ type Scope struct {
 	Environment string
 }
 
-// List returns the tasks matching the filter.
-func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
-	clause := "where 1 = 1"
-	args := []any{}
+// conditions renders the filter as SQL over the jobs table.
+func (f ListFilter) conditions() ([]string, []any) {
+	var (
+		conditions []string
+		args       []any
+	)
 	// A task belongs to a host, so it inherits visibility from it: the
 	// operator of one environment must not see the tasks of the whole
 	// fleet.
-	if len(filter.Scopes) > 0 {
-		translated := make([]authz.Scope, 0, len(filter.Scopes))
-		for _, scope := range filter.Scopes {
+	if len(f.Scopes) > 0 {
+		translated := make([]authz.Scope, 0, len(f.Scopes))
+		for _, scope := range f.Scopes {
 			translated = append(translated, authz.Scope{Site: scope.Site, Environment: scope.Environment})
 		}
 		if condition, extra := authz.ScopeSQL(translated, "h.site", "h.environment", len(args)); condition != "" {
-			clause += " and exists (select 1 from hosts h where h.id = jobs.host_id and " + condition + ")"
+			conditions = append(conditions,
+				"exists (select 1 from hosts h where h.id = jobs.host_id and "+condition+")")
 			args = append(args, extra...)
 		}
 	}
-	if filter.HostID != "" {
-		args = append(args, filter.HostID)
-		clause += fmt.Sprintf(" and host_id = $%d", len(args))
+	add := func(column, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
 	}
-	if filter.State != "" {
-		args = append(args, filter.State)
-		clause += fmt.Sprintf(" and state = $%d", len(args))
+	add("host_id", f.HostID)
+	add("state", f.State)
+	add("action_type", f.Action)
+	add("created_by", f.Actor)
+	add("campaign_id", f.CampaignID)
+	add("result_error_code", f.ErrorCode)
+	if f.Since != nil {
+		args = append(args, *f.Since)
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)))
 	}
-	limit := filter.Limit
+	if f.Until != nil {
+		args = append(args, *f.Until)
+		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)))
+	}
+	return conditions, args
+}
+
+// List returns the tasks matching the filter, newest first.
+func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
+	page, err := s.ListPaged(ctx, filter, Cursor{}, filter.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+
+// Cursor is the key of the last task of the previous page. The list is
+// read newest first, so the next page holds the tasks created before it.
+type Cursor struct {
+	CreatedAt time.Time
+	ID        string
+	Set       bool
+}
+
+// ParseCursor reads a cursor issued by ListPaged. An empty value is the
+// first page.
+func ParseCursor(value string) (Cursor, error) {
+	parts, err := paging.Decode(value, 2)
+	if err != nil {
+		return Cursor{}, err
+	}
+	if parts == nil {
+		return Cursor{}, nil
+	}
+	at, err := paging.ParseTime(parts[0])
+	if err != nil {
+		return Cursor{}, err
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	return Cursor{CreatedAt: at, ID: parts[1], Set: true}, nil
+}
+
+// String renders the cursor for the next request.
+func (c Cursor) String() string {
+	return paging.Encode(paging.FormatTime(c.CreatedAt), c.ID)
+}
+
+// ListPage is one page of the task list.
+type ListPage struct {
+	Items []Job `json:"items"`
+	// NextCursor is empty on the last page.
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// ListPaged reads the tasks matching the filter page by page, newest first.
+// The key is (created_at, id): two tasks ordered in the same microsecond
+// still have an order, so a page boundary between them loses neither.
+func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	args = append(args, limit)
-	clause += fmt.Sprintf(" order by created_at desc limit $%d", len(args))
+	conditions, args := filter.conditions()
+	if cursor.Set {
+		args = append(args, cursor.CreatedAt, cursor.ID)
+		conditions = append(conditions,
+			fmt.Sprintf("(created_at, id) < ($%d, $%d::uuid)", len(args)-1, len(args)))
+	}
+	clause := ""
+	if len(conditions) > 0 {
+		clause = "where " + strings.Join(conditions, " and ")
+	}
+	// One row more than the page says whether there is a next page without
+	// a count over the whole table.
+	args = append(args, limit+1)
+	clause += fmt.Sprintf(" order by created_at desc, id desc limit $%d", len(args))
 
-	return s.queryJobs(ctx, s.pool, clause, args...)
+	items, err := s.queryJobs(ctx, s.pool, clause, args...)
+	if err != nil {
+		return ListPage{}, err
+	}
+	page := ListPage{Items: []Job{}}
+	if items != nil {
+		page.Items = items
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		last := page.Items[limit-1]
+		page.NextCursor = Cursor{CreatedAt: last.CreatedAt, ID: last.ID, Set: true}.String()
+	}
+	return page, nil
 }
 
 // Attempts returns the attempts at carrying out a task.

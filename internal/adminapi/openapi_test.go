@@ -43,6 +43,17 @@ func TestOpenAPICoversEveryRoute(t *testing.T) {
 	if op["requestBody"] == nil {
 		t.Error("creating an operation has no request body")
 	}
+	// A list filtered on the server declares its filters and its cursor:
+	// without them the contract promises a paged list nobody can page.
+	declared := map[string]bool{}
+	for _, param := range paths["/api/v1/hosts"]["get"].(map[string]any)["parameters"].([]map[string]any) {
+		declared[param["name"].(string)] = true
+	}
+	for _, name := range []string{"q", "lifecycle_state", "maintenance", "capability", "limit", "cursor"} {
+		if !declared[name] {
+			t.Errorf("the host list does not declare the %s parameter", name)
+		}
+	}
 	responses := op["responses"].(map[string]any)
 	if responses["201"] == nil || responses["default"] == nil {
 		t.Errorf("the operation has responses %v", responses)
