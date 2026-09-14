@@ -139,6 +139,12 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A login replaces the session the browser came with. Both re-login
+	// entries ("sign in as a different user", the step-up) leave the old
+	// session behind otherwise, valid until its idle window runs out and
+	// bound to the account the browser has just walked away from.
+	previous, hasPrevious := authz.SessionFromContext(r.Context())
+
 	sessionID, cookieValue, err := s.authz.CreateSession(r.Context(), tx, principalID,
 		claims.Groups, authz.SessionTokens{
 			RefreshToken:    tokens.RefreshToken,
@@ -166,14 +172,18 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		roles = append(roles, string(binding.Role))
 	}
 
+	detail := map[string]any{
+		"issuer": s.oidc.Issuer(), "session_id": sessionID,
+		"groups": claims.Groups, "mapped_roles": roles, "remote_addr": r.RemoteAddr,
+	}
+	if hasPrevious {
+		detail["replaced_session_id"] = previous.ID
+	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: firstNonEmpty(claims.PreferredUsername, claims.Subject),
 		Action: "auth.login", TargetType: "principal", TargetID: principalID,
 		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"issuer": s.oidc.Issuer(), "session_id": sessionID,
-			"groups": claims.Groups, "mapped_roles": roles, "remote_addr": r.RemoteAddr,
-		},
+		Detail:  detail,
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -181,6 +191,14 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(r.Context()); err != nil {
 		s.fail(w, err)
 		return
+	}
+
+	// The old session ends once the new one stands; a failure here leaves a
+	// session that expires on its own, not a browser without one.
+	if hasPrevious && previous.ID != sessionID {
+		if err := s.authz.RevokeSession(r.Context(), previous.ID, "replaced_by_login"); err != nil {
+			s.log.Error("the replaced session was not revoked", "session_id", previous.ID, "err", err)
+		}
 	}
 
 	s.setSessionCookies(w, r, cookieValue)
@@ -284,6 +302,13 @@ func localPath(value string) string {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") ||
 		strings.HasPrefix(parsed.Path, "//") {
+		return ""
+	}
+	// The decoded path is what the Location header carries, so it has to
+	// pass the same test as the raw value: "/%5Cevil.example.com" is a
+	// backslash once decoded, and "/%09/evil.example.com" a tab a browser
+	// drops before reading the rest as a host.
+	if !localPathPattern.MatchString(parsed.Path) || strings.HasPrefix(parsed.Path, "//") {
 		return ""
 	}
 	return parsed.Path

@@ -26,6 +26,16 @@ func TestLocalPathRejectsExternalRedirects(t *testing.T) {
 		"/hosts\n",
 		"/hosts<script>",
 		"/hosts;id",
+		// Percent-encoded, the same characters pass the raw check and come
+		// out of the decoder as the backslash, the double slash, or the
+		// tab a browser strips before it reads "//evil" as a host.
+		"/%5Cevil.example.com",
+		"/%5c%5cevil.example.com",
+		"/%2F%2Fevil.example.com",
+		"/%2Fevil.example.com",
+		"/%09/evil.example.com",
+		"/%0A/evil.example.com",
+		"/%00",
 	}
 	for _, value := range rejected {
 		if got := localPath(value); got != "" {
@@ -40,6 +50,7 @@ func TestLocalPathAcceptsLocalPaths(t *testing.T) {
 		"/hosts":          "/hosts",
 		"/campaigns/123":  "/campaigns/123",
 		"/hosts?site=lab": "/hosts",
+		"/hosts%2F1":      "/hosts/1",
 	}
 	for value, want := range accepted {
 		if got := localPath(value); got != want {

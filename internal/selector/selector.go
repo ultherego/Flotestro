@@ -260,17 +260,20 @@ func Expand(ctx context.Context, e *Expression, groups Groups) (*Expression, err
 	if e == nil {
 		return nil, fmt.Errorf("%w: the selector is empty", ErrInvalid)
 	}
-	expanded, err := expand(ctx, e, groups, nil)
-	if err != nil {
-		return nil, err
-	}
 	// The bound on the size holds after the expansion as before it: a
 	// handful of references to large dynamic groups would otherwise turn a
 	// selector that passed validation into one the database has to chew
-	// through unbounded.
-	if nodes := expanded.count(); nodes > MaxNodes {
+	// through unbounded. The count runs along with the expansion, so a
+	// chain of groups that widened after they were saved is refused at the
+	// bound and not after every group behind it was looked up and copied.
+	nodes := 0
+	expanded, err := expand(ctx, e, groups, nil, &nodes)
+	if err != nil {
+		return nil, err
+	}
+	if total := expanded.count(); total > MaxNodes {
 		return nil, fmt.Errorf("%w: the expanded selector has %d conditions, more than %d",
-			ErrInvalid, nodes, MaxNodes)
+			ErrInvalid, total, MaxNodes)
 	}
 	return expanded, nil
 }
@@ -291,25 +294,34 @@ func (e *Expression) count() int {
 	return nodes
 }
 
-func expand(ctx context.Context, e *Expression, groups Groups, chain []string) (*Expression, error) {
+// expand copies the selector with every group reference resolved. nodes
+// counts what the copy holds so far: a reference is counted by what
+// replaces it, every other node as it is copied, which is the same count
+// the finished tree gives - reached one node at a time.
+func expand(ctx context.Context, e *Expression, groups Groups, chain []string, nodes *int) (*Expression, error) {
+	if e.Group == "" {
+		if err := countNode(nodes); err != nil {
+			return nil, err
+		}
+	}
 	out := *e
 	out.All, out.Any, out.Not = nil, nil, nil
 	for i := range e.All {
-		child, err := expand(ctx, &e.All[i], groups, chain)
+		child, err := expand(ctx, &e.All[i], groups, chain, nodes)
 		if err != nil {
 			return nil, err
 		}
 		out.All = append(out.All, *child)
 	}
 	for i := range e.Any {
-		child, err := expand(ctx, &e.Any[i], groups, chain)
+		child, err := expand(ctx, &e.Any[i], groups, chain, nodes)
 		if err != nil {
 			return nil, err
 		}
 		out.Any = append(out.Any, *child)
 	}
 	if e.Not != nil {
-		child, err := expand(ctx, e.Not, groups, chain)
+		child, err := expand(ctx, e.Not, groups, chain, nodes)
 		if err != nil {
 			return nil, err
 		}
@@ -336,6 +348,9 @@ func expand(ctx context.Context, e *Expression, groups Groups, chain []string) (
 	}
 	switch group.Kind {
 	case KindStatic:
+		if err := countNode(nodes); err != nil {
+			return nil, err
+		}
 		return &Expression{MemberOf: group.ID}, nil
 	case KindDynamic:
 		if group.Selector == nil {
@@ -347,10 +362,20 @@ func expand(ctx context.Context, e *Expression, groups Groups, chain []string) (
 		// The chain is copied: siblings under one "all" must not see each
 		// other's path through a shared backing array.
 		next := append(append([]string(nil), chain...), group.ID)
-		return expand(ctx, group.Selector, groups, next)
+		return expand(ctx, group.Selector, groups, next, nodes)
 	default:
 		return nil, fmt.Errorf("%w: the group %q has an unknown kind %q", ErrInvalid, group.Name, group.Kind)
 	}
+}
+
+// countNode adds one node to the running count of an expansion and stops
+// it at the bound.
+func countNode(nodes *int) error {
+	*nodes++
+	if *nodes > MaxNodes {
+		return fmt.Errorf("%w: the expanded selector has more than %d conditions", ErrInvalid, MaxNodes)
+	}
+	return nil
 }
 
 // Compile renders an expanded selector as an SQL condition over the alias

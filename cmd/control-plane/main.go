@@ -61,6 +61,10 @@ import (
 
 const staleCheckInterval = 30 * time.Second
 
+// sessionAbsolute ends a panel session a day after the login whatever the
+// activity; the idle window within it is a setting.
+const sessionAbsolute = 24 * time.Hour
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("the control plane ended with an error", "err", err)
@@ -106,6 +110,9 @@ func run() error {
 	stepUpACR := flag.String("stepup-acr",
 		config.Env("FLOTESTRO_STEPUP_ACR", ""),
 		"the required level of authentication (acr) for the operations of the greatest impact")
+	sessionIdle := flag.Duration("session-idle",
+		config.EnvDuration("FLOTESTRO_SESSION_IDLE", 8*time.Hour),
+		"how long a panel session survives without a request; the absolute limit of a day stands regardless")
 	// The key of the store lies in the state directory next to the CA key:
 	// that is the only place the service is allowed to write to, and the only
 	// one whose permissions are narrow enough to keep cryptographic material
@@ -211,6 +218,12 @@ func run() error {
 	productionEnvironments := splitList(*productionList)
 	if *stepUpTokens != "allow" && *stepUpTokens != "refuse" {
 		return fmt.Errorf("FLOTESTRO_STEPUP_TOKENS must be allow or refuse, not %q", *stepUpTokens)
+	}
+	// A zero would fall back to the built-in window in silence, and a
+	// window past the absolute limit never applies; neither is a setting
+	// anybody meant.
+	if *sessionIdle < time.Minute || *sessionIdle > sessionAbsolute {
+		return fmt.Errorf("FLOTESTRO_SESSION_IDLE must be between 1m and %s, not %s", sessionAbsolute, *sessionIdle)
 	}
 
 	cfg.GatewayID = config.Env("FLOTESTRO_GATEWAY_ID", defaultGatewayID())
@@ -496,8 +509,8 @@ func run() error {
 		changeStore, log,
 		adminapi.Options{
 			ProductionEnvironments: productionEnvironments,
-			SessionIdle:            8 * time.Hour,
-			SessionAbsolute:        24 * time.Hour,
+			SessionIdle:            *sessionIdle,
+			SessionAbsolute:        sessionAbsolute,
 			PublicURL:              *publicURL,
 			WebRoot:                *webRoot,
 			DirectoryWrite:         *directoryWrite,
@@ -596,8 +609,8 @@ func run() error {
 			WriteEnabled: directory != nil && *directoryWrite,
 		},
 		StepUp:                 config.EffectiveStepUp{MaxAge: *stepUpMaxAge, ACR: *stepUpACR, Tokens: *stepUpTokens},
-		SessionIdle:            8 * time.Hour,
-		SessionAbsolute:        24 * time.Hour,
+		SessionIdle:            *sessionIdle,
+		SessionAbsolute:        sessionAbsolute,
 		ProductionEnvironments: productionEnvironments,
 		Webhook: config.EffectiveWebhook{
 			URL: *webhookURL, SecretSet: *webhookSecret != "", Events: splitList(*webhookEvents),

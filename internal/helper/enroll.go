@@ -61,6 +61,13 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	}
 	defer release()
 
+	// The one-time password travels in argv, so it is readable in the
+	// process list of the host for the length of the join. That is the
+	// residual: ipa-client-install takes it either there or from a
+	// terminal prompt, and the helper has no terminal. The password is
+	// bound to this host, single-use and spent by the join itself, so what
+	// the process list shows is a credential nobody can use again. It is
+	// kept out of the logs and of every message of the result.
 	args := []string{
 		"--unattended", "--mkhomedir", "--no-ntp",
 		"--domain=" + action.GetDomain(),

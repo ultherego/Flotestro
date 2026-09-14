@@ -264,3 +264,71 @@ func TestExpandRecountsTheNodes(t *testing.T) {
 		t.Fatalf("three references expanded past the bound: %v", err)
 	}
 }
+
+// countingGroups counts the lookups an expansion makes.
+type countingGroups struct {
+	fakeGroups
+	lookups int
+}
+
+func (c *countingGroups) Lookup(ctx context.Context, ref string) (*Group, error) {
+	c.lookups++
+	return c.fakeGroups.Lookup(ctx, ref)
+}
+
+// TestExpandStopsAtTheBound: the bound holds during the expansion, not
+// only after it. Each group of a chain passes its own check when saved and
+// widens afterwards; expanding the head would otherwise look up and copy
+// a tree of thousands of nodes before the count says no.
+func TestExpandStopsAtTheBound(t *testing.T) {
+	const width = 16
+	groups := &countingGroups{fakeGroups: fakeGroups{}}
+	leaves := make([]string, 0, width)
+	for i := 0; i < width; i++ {
+		leaves = append(leaves, fmt.Sprintf(`{"tag":"t=%d"}`, i))
+	}
+	groups.fakeGroups["d"] = &Group{ID: "0b0e7a3e-0000-4000-8000-00000000000d", Name: "d", Kind: KindDynamic,
+		Selector: parse(t, `{"any":[`+strings.Join(leaves, ",")+`]}`)}
+	for _, link := range []struct{ name, next string }{{"c", "d"}, {"b", "c"}, {"a", "b"}} {
+		refs := make([]string, 0, width)
+		for i := 0; i < width; i++ {
+			refs = append(refs, `{"group":"`+link.next+`"}`)
+		}
+		groups.fakeGroups[link.name] = &Group{ID: "0b0e7a3e-0000-4000-8000-00000000000" + link.name,
+			Name: link.name, Kind: KindDynamic, Selector: parse(t, `{"any":[`+strings.Join(refs, ",")+`]}`)}
+	}
+
+	_, err := Expand(context.Background(), parse(t, `{"group":"a"}`), groups)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("the chain expanded: %v", err)
+	}
+	// The full tree is width^4 leaves and width^3 lookups of d alone; the
+	// bound is reached within the first few references.
+	if groups.lookups > MaxNodes {
+		t.Errorf("the expansion made %d lookups past the bound of %d nodes", groups.lookups, MaxNodes)
+	}
+}
+
+// TestExpandCountsStaticReferencesOnce: a reference to a static group is
+// one membership test, and the running count must agree with the finished
+// tree - a selector at the bound made of such references is still valid.
+func TestExpandCountsStaticReferencesOnce(t *testing.T) {
+	groups := fakeGroups{
+		"static": {ID: "0b0e7a3e-0000-4000-8000-000000000001", Name: "databases", Kind: KindStatic},
+	}
+	refs := make([]string, 0, MaxNodes-1)
+	for i := 0; i < MaxNodes-1; i++ {
+		refs = append(refs, `{"group":"databases"}`)
+	}
+	full := parse(t, `{"any":[`+strings.Join(refs, ",")+`]}`)
+	if err := full.Validate(); err != nil {
+		t.Fatalf("a selector at the bound failed validation: %v", err)
+	}
+	expanded, err := Expand(context.Background(), full, groups)
+	if err != nil {
+		t.Fatalf("a selector at the bound failed to expand: %v", err)
+	}
+	if got := expanded.count(); got != MaxNodes {
+		t.Errorf("the expanded selector has %d nodes, expected %d", got, MaxNodes)
+	}
+}
