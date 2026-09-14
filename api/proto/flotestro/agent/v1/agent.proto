@@ -92,7 +92,23 @@ message RenewRelayCertificateResponse {
   google.protobuf.Timestamp not_after = 3;
 }
 
-message RelayPingRequest {}
+message RelayPingRequest {
+  // The heartbeat of the relay. Everything below is informational: the
+  // identity of the relay comes from its certificate, and the centre
+  // decides nothing on these numbers. They are what the panel shows the
+  // operator about a site whose results do not arrive.
+  AgentBuild build = 1;
+  // The fill of the buffer of results waiting for the link to the centre.
+  uint64 buffer_bytes = 2;
+  uint32 buffered_items = 3;
+  uint64 buffer_max_bytes = 4;
+  // BufferDroppedTotal counts the results dropped since the start because
+  // the buffer was full. A non-zero value means the site lost results.
+  uint64 buffer_dropped_total = 5;
+  // Sessions counts the agents connected to the relay as it sees them; the
+  // answer carries the count as the centre sees it.
+  uint32 sessions = 6;
+}
 
 message RelayPingResponse {
   google.protobuf.Timestamp server_time = 1;
@@ -222,6 +238,24 @@ message SessionConfig {
   // How often the agent sends a MetricsSample. Zero means the default of
   // the agent (sixty seconds).
   int32 metrics_interval_seconds = 5;
+  // The periodic inventory cycle. Absent means the agent's own settings.
+  InventoryCadence inventory_cadence = 6;
+}
+
+// InventoryCadence sets the periodic inventory cycle of the agent. Every
+// zero field keeps the agent's own value, so an older panel that does not
+// send the message changes nothing.
+message InventoryCadence {
+  // The base interval of the cycle; the agent spreads every wait by ten per
+  // cent either way.
+  int32 interval_seconds = 1;
+  // Every which cycle the normal modules (packages, network, storage,
+  // security) are read. The fast ones go every cycle.
+  int32 normal_every = 2;
+  // The hour (UTC) of the daily full report. Unset means the hour the
+  // agent derives from its host identifier, which spreads the fleet over
+  // the day.
+  optional int32 full_report_hour_utc = 3;
 }
 
 message InventoryRequest {
@@ -591,6 +625,14 @@ message Preconditions {
 message Limits {
   uint32 timeout_seconds = 1;
   uint32 max_output_bytes = 2;
+  // The resource scope of the operation on the host: a transient systemd
+  // scope with these controls around the tools the operation starts. Zero
+  // means no scope. The values come from the operation registry per
+  // family, so a package transaction on a busy host is slowed down rather
+  // than the host.
+  uint32 cpu_weight = 3;
+  uint32 io_weight = 4;
+  uint64 memory_high_bytes = 5;
 }
 
 // ActorContext lets the agent record locally who ordered the change.

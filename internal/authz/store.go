@@ -85,18 +85,22 @@ func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 	return id, nil
 }
 
-// GrantRole assigns a role within a scope. Assigning it again is safe.
+// GrantRole assigns a role within a scope, until the given moment or, with
+// nil, until revoked. Assigning it again is safe: the binding keeps its
+// identity and takes the new validity, so a rotation can be extended - or
+// an open-ended grant given a date - without revoking and re-granting.
 func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
-	principalID string, role Role, scope Scope, createdBy string) error {
+	principalID string, role Role, scope Scope, validUntil *time.Time, createdBy string) error {
 	if !KnownRole(role) {
 		return fmt.Errorf("unknown role %q", role)
 	}
 	const query = `
-		insert into role_bindings (id, principal_id, role, site, environment, created_by)
-		values ($1, $2, $3, $4, $5, $6)
-		on conflict (principal_id, role, site, environment) do nothing`
+		insert into role_bindings (id, principal_id, role, site, environment, valid_until, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7)
+		on conflict (principal_id, role, site, environment) do update
+			set valid_until = excluded.valid_until, expiry_noted = false`
 	_, err := tx.Exec(ctx, query, uuid.NewString(), principalID, string(role),
-		orWildcard(scope.Site), orWildcard(scope.Environment), createdBy)
+		orWildcard(scope.Site), orWildcard(scope.Environment), validUntil, createdBy)
 	return err
 }
 
@@ -233,7 +237,7 @@ func (s *Store) PrincipalByID(ctx context.Context, principalID string) (*Princip
 	if err != nil {
 		return nil, err
 	}
-	bindings, err := s.bindingsOf(ctx, principal.ID)
+	bindings, err := s.allBindingsOf(ctx, principal.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +261,8 @@ func (s *Store) BootstrapTokenState(ctx context.Context) (live, otherAdmins bool
 		exists (
 			select 1 from role_bindings b
 			join principals p on p.id = b.principal_id
-			where b.role = $2 and p.subject <> $1 and p.disabled_at is null)`
+			where b.role = $2 and p.subject <> $1 and p.disabled_at is null
+			  and (b.valid_until is null or b.valid_until > now()))`
 	err = s.pool.QueryRow(ctx, query, BootstrapSubject, string(RolePlatformAdmin)).Scan(&live, &otherAdmins)
 	return live, otherAdmins, err
 }
@@ -338,9 +343,26 @@ func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Princi
 	return &principal, nil
 }
 
+// bindingsOf returns the bindings that grant something now. It serves the
+// authentication paths: an expired binding is not part of the identity a
+// request acts under.
 func (s *Store) bindingsOf(ctx context.Context, principalID string) ([]Binding, error) {
-	const query = `select role, site, environment from role_bindings where principal_id = $1`
-	rows, err := s.pool.Query(ctx, query, principalID)
+	return s.readBindings(ctx, principalID, true)
+}
+
+// allBindingsOf returns every binding on record, the expired ones
+// included. It serves the listings: an administrator reviewing access is
+// to see what has ended as well as what has not.
+func (s *Store) allBindingsOf(ctx context.Context, principalID string) ([]Binding, error) {
+	return s.readBindings(ctx, principalID, false)
+}
+
+func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly bool) ([]Binding, error) {
+	query := `select role, site, environment, valid_until from role_bindings where principal_id = $1`
+	if liveOnly {
+		query += ` and (valid_until is null or valid_until > now())`
+	}
+	rows, err := s.pool.Query(ctx, query+` order by role, site, environment`, principalID)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +371,8 @@ func (s *Store) bindingsOf(ctx context.Context, principalID string) ([]Binding, 
 	var bindings []Binding
 	for rows.Next() {
 		var binding Binding
-		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment); err != nil {
+		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
+			&binding.ValidUntil); err != nil {
 			return nil, err
 		}
 		bindings = append(bindings, binding)
@@ -384,7 +407,7 @@ func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 	}
 
 	for i := range principals {
-		bindings, err := s.bindingsOf(ctx, principals[i].ID)
+		bindings, err := s.allBindingsOf(ctx, principals[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -486,4 +509,211 @@ func (s *Store) DeleteGroupMapping(ctx context.Context, mappingID string) (bool,
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// The thresholds of the access review. They are the customary ones of an
+// access review rather than a policy of the installation: a quarter
+// without use, two weeks before an expiry, a year for a key.
+const (
+	ReviewUnusedAfter  = 90 * 24 * time.Hour
+	ReviewExpiringSoon = 14 * 24 * time.Hour
+	ReviewTokenMaxAge  = 365 * 24 * time.Hour
+)
+
+// The flags the review raises. A flag is a question for the reviewer, not
+// a verdict: an administrator without an expiry may be exactly what the
+// installation wants, but somebody has to have said so.
+const (
+	FlagUnused90Days       = "unused_90_days"
+	FlagExpiresSoon        = "expires_soon"
+	FlagAdminWithoutExpiry = "admin_without_expiry"
+	FlagTokenOlderThanYear = "token_older_than_year"
+)
+
+// ReviewedBinding is a binding as the access review shows it: with its
+// validity, whether it has ended, and who granted it when.
+type ReviewedBinding struct {
+	Role       Role       `json:"role"`
+	Scope      Scope      `json:"scope"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+	Expired    bool       `json:"expired"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// ReviewedPrincipal is one identity of the access review.
+type ReviewedPrincipal struct {
+	ID          string    `json:"id"`
+	Subject     string    `json:"subject"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Kind        string    `json:"kind"`
+	CreatedAt   time.Time `json:"created_at"`
+	// LastLoginAt is the last sign-in through the identity provider,
+	// LastTokenUseAt the last request with one of the identity's tokens,
+	// and LastSeenAt the later of the two. DaysSinceUse counts from it;
+	// nil means never used.
+	LastLoginAt    *time.Time `json:"last_login_at,omitempty"`
+	LastTokenUseAt *time.Time `json:"last_token_use_at,omitempty"`
+	LastSeenAt     *time.Time `json:"last_seen_at,omitempty"`
+	DaysSinceUse   *int       `json:"days_since_use,omitempty"`
+	// EarliestExpiry is the first moment one of the live bindings ends.
+	EarliestExpiry *time.Time        `json:"earliest_expiry,omitempty"`
+	Bindings       []ReviewedBinding `json:"bindings"`
+	Tokens         []Token           `json:"tokens"`
+	Flags          []string          `json:"flags"`
+}
+
+// ReviewAccess lists every enabled identity with what it can do, when it
+// was last used and what the reviewer should look at. A disabled identity
+// has no access to review.
+func (s *Store) ReviewAccess(ctx context.Context, now time.Time) ([]ReviewedPrincipal, error) {
+	rows, err := s.pool.Query(ctx, `
+		select p.id, p.subject, p.display_name, p.kind, p.created_at, p.last_login_at,
+		       (select max(t.last_used_at) from api_tokens t where t.principal_id = p.id)
+		from principals p
+		where p.disabled_at is null
+		order by p.subject`)
+	if err != nil {
+		return nil, err
+	}
+	principals := []ReviewedPrincipal{}
+	index := map[string]int{}
+	for rows.Next() {
+		var principal ReviewedPrincipal
+		if err := rows.Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind,
+			&principal.CreatedAt, &principal.LastLoginAt, &principal.LastTokenUseAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		principal.Bindings = []ReviewedBinding{}
+		principal.Tokens = []Token{}
+		principal.Flags = []string{}
+		index[principal.ID] = len(principals)
+		principals = append(principals, principal)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	bindings, err := s.pool.Query(ctx, `
+		select principal_id, role, site, environment, valid_until, created_by, created_at
+		from role_bindings order by principal_id, role, site, environment`)
+	if err != nil {
+		return nil, err
+	}
+	for bindings.Next() {
+		var principalID string
+		var binding ReviewedBinding
+		if err := bindings.Scan(&principalID, &binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
+			&binding.ValidUntil, &binding.CreatedBy, &binding.CreatedAt); err != nil {
+			bindings.Close()
+			return nil, err
+		}
+		binding.Expired = binding.ValidUntil != nil && !now.Before(*binding.ValidUntil)
+		if i, ok := index[principalID]; ok {
+			principals[i].Bindings = append(principals[i].Bindings, binding)
+		}
+	}
+	bindings.Close()
+	if err := bindings.Err(); err != nil {
+		return nil, err
+	}
+
+	tokens, err := s.pool.Query(ctx, `
+		select t.id, t.principal_id, p.subject, coalesce(t.description, ''),
+		       t.expires_at, t.last_used_at, t.created_at
+		from api_tokens t
+		join principals p on p.id = t.principal_id
+		where t.revoked_at is null
+		  and (t.expires_at is null or t.expires_at > now())
+		order by t.created_at`)
+	if err != nil {
+		return nil, err
+	}
+	for tokens.Next() {
+		var token Token
+		if err := tokens.Scan(&token.ID, &token.PrincipalID, &token.Subject, &token.Description,
+			&token.ExpiresAt, &token.LastUsedAt, &token.CreatedAt); err != nil {
+			tokens.Close()
+			return nil, err
+		}
+		if i, ok := index[token.PrincipalID]; ok {
+			principals[i].Tokens = append(principals[i].Tokens, token)
+		}
+	}
+	tokens.Close()
+	if err := tokens.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range principals {
+		principals[i].review(now)
+	}
+	return principals, nil
+}
+
+// review fills in what follows from the facts: the last use, the earliest
+// expiry and the flags.
+func (p *ReviewedPrincipal) review(now time.Time) {
+	p.LastSeenAt = laterOf(p.LastLoginAt, p.LastTokenUseAt)
+	if p.LastSeenAt != nil {
+		days := int(now.Sub(*p.LastSeenAt).Hours() / 24)
+		p.DaysSinceUse = &days
+	}
+
+	// An identity that was never used is unused since it was created: a
+	// fresh one is not flagged, a forgotten one is.
+	since := p.CreatedAt
+	if p.LastSeenAt != nil {
+		since = *p.LastSeenAt
+	}
+	if now.Sub(since) > ReviewUnusedAfter {
+		p.Flags = append(p.Flags, FlagUnused90Days)
+	}
+
+	expiresSoon, adminWithoutExpiry := false, false
+	for _, binding := range p.Bindings {
+		if binding.Expired {
+			continue
+		}
+		if binding.ValidUntil == nil {
+			if binding.Role == RolePlatformAdmin {
+				adminWithoutExpiry = true
+			}
+			continue
+		}
+		if p.EarliestExpiry == nil || binding.ValidUntil.Before(*p.EarliestExpiry) {
+			expiry := *binding.ValidUntil
+			p.EarliestExpiry = &expiry
+		}
+		if binding.ValidUntil.Sub(now) <= ReviewExpiringSoon {
+			expiresSoon = true
+		}
+	}
+	if expiresSoon {
+		p.Flags = append(p.Flags, FlagExpiresSoon)
+	}
+	if adminWithoutExpiry {
+		p.Flags = append(p.Flags, FlagAdminWithoutExpiry)
+	}
+	for _, token := range p.Tokens {
+		if now.Sub(token.CreatedAt) > ReviewTokenMaxAge {
+			p.Flags = append(p.Flags, FlagTokenOlderThanYear)
+			break
+		}
+	}
+}
+
+func laterOf(a, b *time.Time) *time.Time {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case a.After(*b):
+		return a
+	default:
+		return b
+	}
 }

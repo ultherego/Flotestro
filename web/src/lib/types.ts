@@ -50,6 +50,9 @@ export type Host = {
   // What operators recorded about the host: "key" or "key=value". Always a
   // list; a host without tags has an empty one.
   tags: string[];
+  // Which agent releases the host follows. A policy of the panel, always
+  // set: a host on no channel would follow nothing.
+  release_channel: ReleaseChannel;
   lifecycle_state: string;
   // The decision behind a state other than active: the reason given and
   // when it was taken. Absent for a host that has always been active.
@@ -103,7 +106,13 @@ export type SelectorExpression = {
   connection_state?: string;
   lifecycle_state?: string;
   owner?: string;
+  /** The release channel the host follows: an upgrade in waves names beta first. */
+  channel?: ReleaseChannel;
 };
+
+/** The release channels a host may follow. */
+export type ReleaseChannel = "stable" | "beta";
+export const RELEASE_CHANNELS: ReleaseChannel[] = ["stable", "beta"];
 
 /** A saved host selection: a fixed member list or a selector resolved when read. */
 export type HostGroup = {
@@ -328,6 +337,17 @@ export type AuditEvent = {
   target_id?: string;
   outcome: "success" | "failure" | "denied";
   detail: Record<string, unknown>;
+  /** The session behind the event and how it was authenticated; absent for a token, an agent or the system. */
+  session_id?: string;
+  acr?: string;
+  amr?: string[];
+  auth_time?: string;
+  /** The target host as it was when the event was written. */
+  target_hostname?: string;
+  target_address?: string;
+  approval_chain?: { created_by: string; approvers: string[] };
+  before?: unknown;
+  after?: unknown;
 };
 
 export type Whoami = {
@@ -480,9 +500,65 @@ export type Principal = {
   display_name?: string;
   kind: string;
   /** May be absent: an identity without its own bindings has roles from the group mappings. */
-  bindings?: { role: string; scope: { site: string; environment: string } }[];
+  bindings?: RoleBinding[];
   /** The live API tokens; the value of a token is never among them. */
   tokens?: ApiToken[];
+};
+
+/** A role in a scope; a binding with a validity ends by itself. */
+export type RoleBinding = {
+  role: string;
+  scope: { site: string; environment: string };
+  /** Absent means until revoked. */
+  valid_until?: string;
+};
+
+/** One identity of the access review, with what the reviewer should look at. */
+export type ReviewedPrincipal = {
+  id: string;
+  subject: string;
+  display_name?: string;
+  kind: string;
+  created_at: string;
+  last_login_at?: string;
+  last_token_use_at?: string;
+  last_seen_at?: string;
+  /** Absent means never used. */
+  days_since_use?: number;
+  earliest_expiry?: string;
+  bindings: (RoleBinding & { expired: boolean; created_by: string; created_at: string })[];
+  tokens: ApiToken[];
+  flags: ReviewFlag[];
+};
+
+export type ReviewFlag = "unused_90_days" | "expires_soon" | "admin_without_expiry" | "token_older_than_year";
+
+export type AccessReview = {
+  items: ReviewedPrincipal[];
+  count: number;
+  flagged: number;
+  reviewed_at: string;
+  thresholds: { unused_days: number; expires_soon_days: number; token_max_days: number };
+};
+
+/** One row of the settings screen; a secret is masked and says only whether it is set. */
+export type SettingsFact = {
+  key: string;
+  value: string | number | boolean | string[] | null;
+  secret?: boolean;
+  configured?: boolean;
+};
+
+export type SettingsArea = {
+  key: string;
+  title: string;
+  facts: SettingsFact[];
+};
+
+export type Settings = {
+  source: string;
+  note: string;
+  areas: SettingsArea[];
 };
 
 export type ApiToken = {
@@ -560,17 +636,55 @@ export type EnrollmentOrder = {
   steps?: EnrollmentStep[];
 };
 
-/** A relay of a site: the route of an installation in an isolated site. */
+/** The state of a relay: the same four states the metrics count. */
+export type RelayState = "active" | "silent" | "never_seen" | "revoked";
+
+/** What a relay reported about itself at its last heartbeat. */
+export type RelayBuffer = {
+  buffer_bytes: number;
+  buffer_max_bytes: number;
+  buffered_items: number;
+  buffer_dropped: number;
+  sessions: number;
+  relay_version?: string;
+  reported_at: string;
+};
+
+/**
+ * A relay of a site: the route of an installation in an isolated site, and
+ * the point a whole site hangs on once it is there.
+ */
 export type Relay = {
   id: string;
   name: string;
   site: string;
   environment?: string;
+  serial?: string;
   not_after?: string;
   enrolled_at: string;
   last_seen_at?: string;
   revoked_at?: string;
+  revocation_reason?: string;
+  state: RelayState;
+  hosts_attested: number;
+  buffer?: RelayBuffer;
+  certificate_not_after?: string;
+  advertised_names?: string[];
 };
+
+/** A host whose open session came through a relay. */
+export type RelayHost = {
+  host_id: string;
+  hostname: string;
+  site: string;
+  environment?: string;
+  lifecycle_state: string;
+  agent_version?: string;
+  connected_at: string;
+  last_heartbeat_at?: string;
+};
+
+export type RelayDetail = { relay: Relay; hosts: RelayHost[] };
 
 export type InstallationCommand = {
   key: "repository" | "package" | "config" | "ca" | "enroll" | "start";

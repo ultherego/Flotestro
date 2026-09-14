@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Permission is a single permission. Host operations have their own
@@ -35,6 +36,10 @@ const (
 	// PermRelayEnrollCreate is separate from inviting hosts: a relay carries
 	// the traffic of a whole site, so the right to add one is its own role.
 	PermRelayEnrollCreate Permission = "relay.enroll.create"
+	// PermRelayManage covers the life of a relay after its registration:
+	// revoking one cuts a whole site off from the panel, so it is a right
+	// separate from adding one.
+	PermRelayManage Permission = "relay.manage"
 	// PermHostIdentityReplace allows restoring the identity of an existing
 	// host. That is a right separate from inviting new machines: replacing an
 	// identity means taking over a host that is already in the fleet.
@@ -355,6 +360,12 @@ const (
 	// here cuts off the whole fleet.
 	PermPKIRead   Permission = "pki.read"
 	PermPKIRotate Permission = "pki.rotate"
+
+	// The effective configuration of the installation: which provider
+	// signs people in, which directory the panel reads, what the step-up
+	// policy is. It names servers and accounts, so it is not a viewer's
+	// read; the secrets in it are never shown, whoever asks.
+	PermSettingsRead Permission = "settings.read"
 )
 
 // Role groups permissions. The split matches the roles from the document:
@@ -519,6 +530,7 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermDNSDirectoryWrite,
 		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke, PermRelayEnrollCreate,
+		PermRelayManage,
 		PermHostIdentityReplace, PermHostQuarantine, PermHostQuarantineRelease,
 		PermHostDecommission, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
@@ -532,6 +544,7 @@ var rolePermissions = map[Role][]Permission{
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence, PermMonitoringRulesWrite,
 		PermVulnerabilityRead,
+		PermSettingsRead,
 	},
 }
 
@@ -608,6 +621,18 @@ func orWildcard(value string) string {
 type Binding struct {
 	Role  Role  `json:"role"`
 	Scope Scope `json:"scope"`
+	// ValidUntil is the moment the binding stops granting anything. Nil
+	// means until somebody revokes it. An access granted for a rotation or
+	// an engagement ends by itself this way, instead of depending on
+	// somebody remembering to take it back.
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// Active says whether the binding still grants its role at the given
+// moment. An expired binding stays on the record and in the listings; it
+// grants nothing.
+func (b Binding) Active(now time.Time) bool {
+	return b.ValidUntil == nil || now.Before(*b.ValidUntil)
 }
 
 // Principal is an authenticated identity together with its roles.
@@ -619,9 +644,23 @@ type Principal struct {
 	Bindings    []Binding `json:"bindings"`
 }
 
+// live returns the bindings that grant something now. Every decision goes
+// through it, so an expired binding is ignored at once, whether the
+// principal was loaded a moment ago or is held by a long-running check.
+func (p Principal) live() []Binding {
+	now := time.Now()
+	live := p.Bindings[:0:0]
+	for _, binding := range p.Bindings {
+		if binding.Active(now) {
+			live = append(live, binding)
+		}
+	}
+	return live
+}
+
 // Can checks whether the identity has the permission within the target's scope.
 func (p Principal) Can(permission Permission, target Scope) bool {
-	for _, binding := range p.Bindings {
+	for _, binding := range p.live() {
 		if binding.Role.Has(permission) && binding.Scope.Matches(target) {
 			return true
 		}
@@ -637,7 +676,7 @@ func (p Principal) Can(permission Permission, target Scope) bool {
 // operator of one environment is to see their part of the fleet, not a
 // refusal.
 func (p Principal) CanAnywhere(permission Permission) bool {
-	for _, binding := range p.Bindings {
+	for _, binding := range p.live() {
 		if binding.Role.Has(permission) {
 			return true
 		}
@@ -653,7 +692,7 @@ func (p Principal) CanAnywhere(permission Permission) bool {
 // browser: the policy can change without rebuilding the panel.
 func (p Principal) Permissions() []string {
 	unique := map[string]bool{}
-	for _, binding := range p.Bindings {
+	for _, binding := range p.live() {
 		for _, permission := range binding.Role.Permissions() {
 			unique[string(permission)] = true
 		}
@@ -670,7 +709,7 @@ func (p Principal) Permissions() []string {
 // permission. An empty result means no permission anywhere.
 func (p Principal) ScopesFor(permission Permission) []Scope {
 	var scopes []Scope
-	for _, binding := range p.Bindings {
+	for _, binding := range p.live() {
 		if binding.Role.Has(permission) {
 			scopes = append(scopes, binding.Scope)
 		}
@@ -682,7 +721,7 @@ func (p Principal) ScopesFor(permission Permission) []Scope {
 func (p Principal) Roles() []string {
 	seen := map[Role]bool{}
 	var roles []string
-	for _, binding := range p.Bindings {
+	for _, binding := range p.live() {
 		if !seen[binding.Role] {
 			seen[binding.Role] = true
 			roles = append(roles, string(binding.Role))

@@ -49,6 +49,12 @@ var campaignModes = map[ActionType]CampaignMode{
 	// A package version hold is a declaration about a name, not about a diff.
 	ActionPackageHoldSet: CampaignSamePayload,
 
+	// An agent replacement: the target version means the same on every host,
+	// and the verification is the host's own - the job is settled by the
+	// host coming back with the version asked for, not by the exit code of
+	// the package manager. A fleet is upgraded in waves this way.
+	ActionAgentUpgrade: CampaignSamePayload,
+
 	// Containers: the container identifier is local, but the operation goes
 	// through preflight on every host separately.
 	ActionDockerStart:   CampaignSamePayload,

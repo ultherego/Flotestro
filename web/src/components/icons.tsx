@@ -5,9 +5,9 @@
  * are hidden from assistive technology.
  */
 export type IconName =
-  | "dashboard" | "hosts" | "add-host" | "groups" | "jobs" | "bulk" | "campaigns" | "reads"
+  | "dashboard" | "hosts" | "add-host" | "groups" | "relays" | "jobs" | "bulk" | "campaigns" | "reads"
   | "security" | "vulnerabilities" | "certificates" | "secrets"
-  | "backups" | "monitoring" | "directory" | "access" | "audit"
+  | "backups" | "monitoring" | "directory" | "access" | "audit" | "settings"
   | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user" | "back" | "star"
   // The host modules.
   | "overview" | "packages" | "services" | "processes" | "schedules" | "kernel" | "time" | "power"
@@ -20,6 +20,9 @@ const PATHS: Record<IconName, string> = {
   "add-host": "M3 5h18v6H3zM3 13h10v6H3zM7 8h.01M7 16h.01M18 15v6M15 18h6",
   // Two hosts held in one bracket: a group is a named set, not a machine.
   groups: "M7 6h13v4H7zM7 14h13v4H7zM10 8h.01M10 16h.01M4 4v16",
+  // One box between the hosts of a site and the centre: a relay is the
+  // single link upwards that a whole site hangs on.
+  relays: "M3 4h6v4H3zM3 16h6v4H3zM15 10h6v4h-6zM9 6h3v12H9M12 12h3",
   jobs: "M9 5h6M9 3h6v4H9zM5 6h2v15h10V6h2M9 12l2 2 4-4",
   bulk: "M4 6h16M4 12h16M4 18h10M18 16l2 2 2-4",
   campaigns: "M4 20V4M4 4h13l-2 4 2 4H4",
@@ -35,6 +38,8 @@ const PATHS: Record<IconName, string> = {
   directory: "M4 5h6l2 2h8v12H4zM8 13h8",
   access: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a5 5 0 0 1 10 0M14 9h7M17 9v3M20 9v2",
   audit: "M6 3h9l4 4v14H6zM9 12h6M9 16h6M9 8h3",
+  // Three sliders: the settings are values somebody set, read here as they stand.
+  settings: "M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4",
   chevron: "M9 6l6 6-6 6",
   menu: "M4 7h16M4 12h16M4 17h16",
   collapse: "M4 4v16M20 12H9M13 8l-4 4 4 4",

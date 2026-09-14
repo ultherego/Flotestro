@@ -281,6 +281,11 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		return nil, err
 	}
 
+	// The resource scope comes from the registry by family: the host wraps
+	// the tools of a package transaction or a backup in a transient scope
+	// with these controls, so a heavy operation slows itself down on a busy
+	// host rather than the host.
+	scope := opspec.ActionType(item.Job.ActionType).ResourceLimits()
 	envelope := &agentv1.TaskEnvelope{
 		TaskId:         item.AttemptID,
 		IdempotencyKey: item.Job.IdempotencyKey,
@@ -293,8 +298,11 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			ExpectedBootId:       preconditions.ExpectedBootID,
 		},
 		Limits: &agentv1.Limits{
-			TimeoutSeconds: uint32(item.Job.TimeoutSeconds),
-			MaxOutputBytes: uint32(item.Job.MaxOutputBytes),
+			TimeoutSeconds:  uint32(item.Job.TimeoutSeconds),
+			MaxOutputBytes:  uint32(item.Job.MaxOutputBytes),
+			CpuWeight:       scope.CPUWeight,
+			IoWeight:        scope.IOWeight,
+			MemoryHighBytes: scope.MemoryHighBytes,
 		},
 		ActorContext: &agentv1.ActorContext{
 			ActorId:   item.Job.CreatedBy,

@@ -73,6 +73,11 @@ func remoteAddr(ctx context.Context) string {
 	return addr
 }
 
+// inventoryNormalEvery says every which periodic cycle the agent reads the
+// normal modules - packages, network, storage, security. The fast modules go
+// every cycle and the static ones once a day.
+const inventoryNormalEvery = 4
+
 // AgentService serves the long-lived stream of an agent. The stream is the
 // only channel of commands; the root helper never speaks to the centre.
 type AgentService struct {
@@ -323,6 +328,14 @@ func (s *AgentService) Connect(ctx context.Context,
 				HeartbeatSeconds:       int32(s.heartbeatSeconds),
 				HeartbeatJitterSeconds: int32(s.heartbeatJitter),
 				FullInventoryRequested: true,
+				// The cycle itself stays the agent's: the interval comes
+				// from its configuration and the hour of the full report
+				// from its identifier. The panel names only the ratio, so a
+				// change of the ratio is a change of one number here rather
+				// than a package on every host.
+				InventoryCadence: &agentv1.InventoryCadence{
+					NormalEvery: inventoryNormalEvery,
+				},
 			},
 		},
 	}); err != nil {

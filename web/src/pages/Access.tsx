@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
-import type { GroupMapping, Principal } from "../lib/types";
+import type { AccessReview, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { toInstant } from "../lib/format";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, StatGrid, Stat } from "../components/layout";
 import { Breakdown } from "../components/widgets";
 import { CertificateAuthority } from "./CertificateAuthority";
 import { useT } from "../i18n";
@@ -21,7 +22,7 @@ const ROLES = [
  */
 export function Access() {
   const t = useT();
-  const [tab, setTab] = useState<"mappings" | "identities" | "ca">("mappings");
+  const [tab, setTab] = useState<"mappings" | "identities" | "review" | "ca">("mappings");
   const [warning, setWarning] = useState<ApiError | null>(null);
 
   return (
@@ -38,6 +39,9 @@ export function Access() {
         <button className={tab === "identities" ? "active" : ""} onClick={() => setTab("identities")}>
           {t("Identities")}
         </button>
+        <button className={tab === "review" ? "active" : ""} onClick={() => setTab("review")}>
+          {t("Access review")}
+        </button>
         <button className={tab === "ca" ? "active" : ""} onClick={() => setTab("ca")}>
           {t("Fleet CA")}
         </button>
@@ -46,6 +50,7 @@ export function Access() {
       {tab === "ca" && <Warning error={warning} close={() => setWarning(null)} />}
       {tab === "mappings" && <Mappings />}
       {tab === "identities" && <Identities />}
+      {tab === "review" && <Review />}
       {tab === "ca" && <CertificateAuthority reportError={setWarning} />}
     </>
   );
@@ -254,6 +259,23 @@ function Identities() {
       api.del(`/api/v1/principals/${id}/roles/${role}`, { site, environment, reason }),
     onSuccess: refresh, onError,
   });
+  // A grant names the identity, the role, the scope and - when the access
+  // is meant to end by itself - until when. Granting a role the identity
+  // already has changes the validity alone.
+  const [grant, setGrant] = useState<{ id: string; subject: string } | null>(null);
+  const [grantRole, setGrantRole] = useState("viewer");
+  const [grantSite, setGrantSite] = useState("");
+  const [grantEnvironment, setGrantEnvironment] = useState("");
+  const [grantUntil, setGrantUntil] = useState("");
+  const [grantReason, setGrantReason] = useState("");
+  const grantMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/api/v1/principals/${grant?.id}/roles`, {
+        role: grantRole, site: grantSite.trim(), environment: grantEnvironment.trim(),
+        valid_until: toInstant(grantUntil), reason: grantReason.trim(),
+      }),
+    onSuccess: () => { setGrant(null); setGrantReason(""); setGrantUntil(""); refresh(); }, onError,
+  });
 
   if (error instanceof ApiError && error.forbidden) {
     return <Card><Empty>{t("You do not have permission to manage access.")}</Empty></Card>;
@@ -295,7 +317,7 @@ function Identities() {
       )}
 
       <div className="widgets">
-        <Card className="span-9" title={t("Identities")} flush>
+        <Card className={grant ? "span-6" : "span-9"} title={t("Identities")} flush>
           <table>
             <thead>
               <tr><th>{t("Subject")}</th><th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th><th>{t("Tokens")}</th><th /></tr>
@@ -319,6 +341,13 @@ function Identities() {
                               <span className="source">
                                 {" "}{binding.scope.site || "*"} / {binding.scope.environment || "*"}
                               </span>
+                              {/* A binding with a date ends by itself; one past its date
+                                  stays on the record and grants nothing. */}
+                              {binding.valid_until && (
+                                new Date(binding.valid_until).getTime() <= Date.now()
+                                  ? <> <span className="badge unknown">{t("expired")}</span></>
+                                  : <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>
+                              )}
                             </span>
                             <button
                               className="secondary"
@@ -367,6 +396,12 @@ function Identities() {
                     <div className="row-actions">
                       <button
                         className="secondary"
+                        onClick={() => setGrant({ id: principal.id, subject: principal.subject })}
+                      >
+                        {t("Grant role")}
+                      </button>
+                      <button
+                        className="secondary"
                         disabled={issueToken.isPending}
                         onClick={() => {
                           const reason = ask(t("Reason for issuing a token to {subject} (min. 8 characters):", { subject: principal.subject }));
@@ -393,6 +428,42 @@ function Identities() {
           </table>
         </Card>
 
+        {grant && (
+          <Card
+            className="span-3 fp-narrow"
+            title={t("Grant role to {subject}", { subject: grant.subject })}
+            footer={
+              <Actions>
+                <button disabled={grantReason.trim().length < 8 || grantMutation.isPending}
+                        onClick={() => grantMutation.mutate()}>
+                  {t("Grant role")}
+                </button>
+                <button className="secondary" onClick={() => setGrant(null)}>{t("Cancel")}</button>
+              </Actions>
+            }
+          >
+            <FieldGrid>
+              <Field label={t("Role")}>
+                <select value={grantRole} onChange={(e) => setGrantRole(e.target.value)}>
+                  {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </Field>
+              <Field label={t("Site (empty = all)")}>
+                <input value={grantSite} onChange={(e) => setGrantSite(e.target.value)} placeholder="lab" />
+              </Field>
+              <Field label={t("Environment (empty = all)")}>
+                <input value={grantEnvironment} onChange={(e) => setGrantEnvironment(e.target.value)} placeholder="test" />
+              </Field>
+              <Field label={t("Valid until (empty = until revoked)")}>
+                <input type="datetime-local" value={grantUntil} onChange={(e) => setGrantUntil(e.target.value)} />
+              </Field>
+              <Field label={t("Reason for the change")} wide>
+                <input value={grantReason} onChange={(e) => setGrantReason(e.target.value)} placeholder={t("e.g. on-call rotation until the end of the quarter")} />
+              </Field>
+            </FieldGrid>
+          </Card>
+        )}
+
         <Card className="span-3" title={t("By kind")} description={t("among the {n} listed", { n: data.items.length })}>
           <Breakdown tone="info" items={byKind.map(([kind, n]) => ({ label: kind, value: n }))} />
           <h4 className="widget-subhead">{t("Direct roles")}</h4>
@@ -407,6 +478,145 @@ function Identities() {
     </>
   );
 }
+
+/**
+ * The access review: every enabled identity with what it can do, when it
+ * was last used and what the reviewer should look at. A flag is a question
+ * for the reviewer, not a verdict - an administrator without an expiry may
+ * be exactly what the installation wants, but somebody has to have said
+ * so. The CSV is the same review for the record an auditor keeps.
+ */
+function Review() {
+  const t = useT();
+  const [only, setOnly] = useState<ReviewFlag | "flagged" | "all">("all");
+  const { data, error } = useQuery({
+    queryKey: ["access-review"],
+    queryFn: () => api.get<AccessReview>("/api/v1/access/review"),
+    retry: false,
+  });
+  if (error instanceof ApiError && error.forbidden) {
+    return <Card><Empty>{t("You do not have permission to manage access.")}</Empty></Card>;
+  }
+  if (error) return <ErrorBox error={error} />;
+  if (!data) return <Card><Empty>{t("Loading…")}</Empty></Card>;
+
+  const count = (flag: ReviewFlag) => data.items.filter((principal) => principal.flags.includes(flag)).length;
+  const shown = data.items.filter((principal) =>
+    only === "all" ? true : only === "flagged" ? principal.flags.length > 0 : principal.flags.includes(only));
+
+  return (
+    <>
+      <StatGrid>
+        <Stat label={t("Identities")} value={data.count} hint={t("enabled identities")} />
+        <Stat label={t("Flagged")} value={data.flagged} tone={data.flagged > 0 ? "warn" : "ok"} />
+        <Stat label={t("Unused {n} days", { n: data.thresholds.unused_days })} value={count("unused_90_days")} tone={count("unused_90_days") > 0 ? "warn" : "ok"} />
+        <Stat label={t("Admins without expiry")} value={count("admin_without_expiry")} tone={count("admin_without_expiry") > 0 ? "warn" : "ok"} />
+        <Stat label={t("Expiring within {n} days", { n: data.thresholds.expires_soon_days })} value={count("expires_soon")} tone={count("expires_soon") > 0 ? "warn" : "ok"} />
+        <Stat label={t("Tokens older than a year")} value={count("token_older_than_year")} tone={count("token_older_than_year") > 0 ? "warn" : "ok"} />
+      </StatGrid>
+
+      <div className="widgets">
+        <Card
+          className="span-12"
+          title={t("Access review")}
+          description={t("Reviewed {when}. Every enabled identity with its roles, tokens and last use; the flags say what to look at.", { when: new Date(data.reviewed_at).toLocaleString() })}
+          actions={
+            <>
+              <select value={only} onChange={(e) => setOnly(e.target.value as ReviewFlag | "flagged" | "all")}>
+                <option value="all">{t("All identities")}</option>
+                <option value="flagged">{t("Flagged only")}</option>
+                <option value="unused_90_days">{t("Unused {n} days", { n: data.thresholds.unused_days })}</option>
+                <option value="expires_soon">{t("Expiring within {n} days", { n: data.thresholds.expires_soon_days })}</option>
+                <option value="admin_without_expiry">{t("Admins without expiry")}</option>
+                <option value="token_older_than_year">{t("Tokens older than a year")}</option>
+              </select>
+              {/* A plain link: the browser carries the session, and the answer is a file. */}
+              <a className="button" href="/api/v1/access/review?format=csv" download>{t("Export CSV")}</a>
+            </>
+          }
+          flush
+        >
+          {shown.length === 0 ? (
+            <EmptyState>{t("No identity matches the filter.")}</EmptyState>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("Subject")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th>
+                  <th>{t("Last use")}</th><th>{t("Tokens")}</th><th>{t("Flags")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((principal) => <ReviewRow key={principal.id} principal={principal} />)}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </div>
+    </>
+  );
+}
+
+function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
+  const t = useT();
+  return (
+    <tr>
+      <td>
+        <span className="mono">{principal.subject}</span>
+        {principal.display_name && <div className="source">{principal.display_name}</div>}
+      </td>
+      <td className="source">{principal.kind}</td>
+      <td>
+        {principal.bindings.length === 0
+          ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
+          : principal.bindings.map((binding, index) => (
+              <div key={index}>
+                {binding.role}
+                <span className="source"> {binding.scope.site || "*"} / {binding.scope.environment || "*"}</span>
+                {binding.expired
+                  ? <> <span className="badge unknown">{t("expired")}</span></>
+                  : binding.valid_until && <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>}
+              </div>
+            ))}
+      </td>
+      <td>
+        {principal.last_seen_at
+          ? <>
+              <Time value={principal.last_seen_at} />
+              <div className="source">
+                {principal.last_login_at && <>{t("login")} <Time value={principal.last_login_at} /></>}
+                {principal.last_login_at && principal.last_token_use_at && " · "}
+                {principal.last_token_use_at && <>{t("token")} <Time value={principal.last_token_use_at} /></>}
+              </div>
+            </>
+          : <span className="badge unknown">{t("never")}</span>}
+      </td>
+      <td>
+        {principal.tokens.length === 0
+          ? <span className="source">{t("none")}</span>
+          : principal.tokens.map((token) => (
+              <div key={token.id}>
+                {token.description || token.id.slice(0, 8)}
+                <span className="source"> · {t("issued")} <Time value={token.created_at} /></span>
+              </div>
+            ))}
+      </td>
+      <td>
+        {principal.flags.length === 0
+          ? <span className="badge ok">{t("nothing to review")}</span>
+          : principal.flags.map((flag) => <span key={flag} className="badge warn" style={{ marginRight: 6 }}>{t(FLAG_LABELS[flag])}</span>)}
+      </td>
+    </tr>
+  );
+}
+
+/* The English label of each flag; the catalogue translates it. */
+const FLAG_LABELS: Record<ReviewFlag, string> = {
+  unused_90_days: "unused for 90 days",
+  expires_soon: "expires soon",
+  admin_without_expiry: "admin without expiry",
+  token_older_than_year: "token older than a year",
+};
 
 /**
  * A refusal because of a stale authentication is not an application error:

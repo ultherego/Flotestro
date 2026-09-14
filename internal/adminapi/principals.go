@@ -1,9 +1,11 @@
 package adminapi
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -329,6 +331,9 @@ func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The binding as it was: the trail keeps what the revocation removed,
+	// its validity included.
+	before := findBinding(target.Bindings, role, scope)
 
 	tx, err := s.authz.Pool().Begin(r.Context())
 	if err != nil {
@@ -353,6 +358,7 @@ func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 		Detail: withStepUp(map[string]any{
 			"subject": target.Subject, "role": string(role), "scope": scope.String(),
 		}, evidence),
+		Before: before,
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -365,14 +371,10 @@ func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 }
 
 type createPrincipalRequest struct {
-	Subject     string `json:"subject"`
-	DisplayName string `json:"display_name"`
-	Kind        string `json:"kind"`
-	Roles       []struct {
-		Role        string `json:"role"`
-		Site        string `json:"site"`
-		Environment string `json:"environment"`
-	} `json:"roles"`
+	Subject     string        `json:"subject"`
+	DisplayName string        `json:"display_name"`
+	Kind        string        `json:"kind"`
+	Roles       []roleRequest `json:"roles"`
 	// IssueToken issues an API token together with the principal. The value
 	// is visible only in this response.
 	IssueToken    bool `json:"issue_token"`
@@ -381,6 +383,127 @@ type createPrincipalRequest struct {
 	// the access rules of the whole fleet, so the reason is part of the
 	// audit trail.
 	Reason string `json:"reason"`
+}
+
+// roleRequest names one binding to grant: the role, the scope and, when
+// the access is meant to end by itself, until when.
+type roleRequest struct {
+	Role        string `json:"role"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	// ValidUntil is an RFC 3339 moment; empty means until revoked. A moment
+	// already past is accepted and means "expired at once": a way to end
+	// an access without removing its record.
+	ValidUntil string `json:"valid_until"`
+}
+
+// parse checks the role and reads the validity.
+func (request roleRequest) parse() (authz.Role, authz.Scope, *time.Time, error) {
+	role := authz.Role(request.Role)
+	if !authz.KnownRole(role) {
+		return "", authz.Scope{}, nil, errors.New("unknown role " + request.Role)
+	}
+	scope := authz.Scope{Site: strings.TrimSpace(request.Site), Environment: strings.TrimSpace(request.Environment)}
+	validUntil, err := parseTimeParam(strings.TrimSpace(request.ValidUntil))
+	if err != nil {
+		return "", authz.Scope{}, nil, errors.New("valid_until must be an RFC 3339 timestamp")
+	}
+	return role, scope, validUntil, nil
+}
+
+// bindingRecord is a binding as the trail describes it.
+func bindingRecord(role authz.Role, scope authz.Scope, validUntil *time.Time) map[string]any {
+	record := map[string]any{"role": string(role), "scope": scope.String()}
+	if validUntil != nil {
+		record["valid_until"] = validUntil.UTC().Format(time.RFC3339)
+	}
+	return record
+}
+
+// findBinding returns the binding of the role in the scope as the trail
+// describes it, or nil when the identity has none.
+func findBinding(bindings []authz.Binding, role authz.Role, scope authz.Scope) map[string]any {
+	wanted := authz.Scope{Site: orWildcard(scope.Site), Environment: orWildcard(scope.Environment)}
+	for _, binding := range bindings {
+		if binding.Role == role && binding.Scope == wanted {
+			return bindingRecord(binding.Role, binding.Scope, binding.ValidUntil)
+		}
+	}
+	return nil
+}
+
+func orWildcard(value string) string {
+	if value == "" {
+		return authz.Wildcard
+	}
+	return value
+}
+
+type grantRoleRequest struct {
+	roleRequest
+	Reason string `json:"reason"`
+}
+
+// handleGrantRole adds one binding to an identity, or changes the validity
+// of one it already has. The same operation of the greatest impact as
+// creating the identity with roles: it moves who can do what.
+func (s *Server) handleGrantRole(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	var request grantRoleRequest
+	reason, ok := requestReason(w, r, &request)
+	if !ok {
+		return
+	}
+	role, scope, validUntil, err := request.parse()
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_binding", err.Error())
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.grant", "principal", target.ID)
+	if !ok {
+		return
+	}
+	before := findBinding(target.Bindings, role, scope)
+	after := bindingRecord(role, scope, validUntil)
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.authz.GrantRole(r.Context(), tx, target.ID, role, scope, validUntil, actor.Subject); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.role.grant", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "role": string(role), "scope": scope.String(),
+			"valid_until": validUntil,
+		}, evidence),
+		Before: before, After: after,
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"principal_id": target.ID, "subject": target.Subject,
+		"role": string(role), "scope": scope, "valid_until": validUntil,
+	})
 }
 
 // handleCreatePrincipal creates a principal together with its role
@@ -400,11 +523,19 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_subject", "missing identity subject")
 		return
 	}
+	type parsedBinding struct {
+		role       authz.Role
+		scope      authz.Scope
+		validUntil *time.Time
+	}
+	bindings := make([]parsedBinding, 0, len(request.Roles))
 	for _, binding := range request.Roles {
-		if !authz.KnownRole(authz.Role(binding.Role)) {
-			problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+binding.Role)
+		role, scope, validUntil, err := binding.parse()
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_binding", err.Error())
 			return
 		}
+		bindings = append(bindings, parsedBinding{role: role, scope: scope, validUntil: validUntil})
 	}
 
 	// Granting permissions is a highest-impact operation: it moves who can
@@ -428,17 +559,14 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	granted := make([]map[string]string, 0, len(request.Roles))
-	for _, binding := range request.Roles {
-		scope := authz.Scope{Site: binding.Site, Environment: binding.Environment}
+	granted := make([]map[string]any, 0, len(bindings))
+	for _, binding := range bindings {
 		if err := s.authz.GrantRole(r.Context(), tx, principalID,
-			authz.Role(binding.Role), scope, actor.Subject); err != nil {
+			binding.role, binding.scope, binding.validUntil, actor.Subject); err != nil {
 			s.fail(w, err)
 			return
 		}
-		granted = append(granted, map[string]string{
-			"role": binding.Role, "scope": scope.String(),
-		})
+		granted = append(granted, bindingRecord(binding.role, binding.scope, binding.validUntil))
 	}
 
 	response := map[string]any{
@@ -467,6 +595,7 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 			"subject": request.Subject, "roles": granted,
 			"token_issued": request.IssueToken,
 		}, evidence),
+		After: map[string]any{"subject": request.Subject, "bindings": granted},
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -594,6 +723,7 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 			"issuer": mapping.Issuer, "group": mapping.GroupName, "role": string(mapping.Role),
 			"site": mapping.Site, "environment": mapping.Environment,
 		}, evidence),
+		After: mapping,
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -623,6 +753,16 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 	if !s.requireGroupMappingsMatch(w, r) {
 		return
 	}
+	// The mapping as it was, for the trail: once it is gone, nothing else
+	// says which group lost which role.
+	var before *authz.GroupMapping
+	if mappings, err := s.authz.ListGroupMappings(r.Context()); err == nil {
+		for i := range mappings {
+			if mappings[i].ID == mappingID {
+				before = &mappings[i]
+			}
+		}
+	}
 	removed, err := s.authz.DeleteGroupMapping(r.Context(), mappingID)
 	if err != nil {
 		s.fail(w, err)
@@ -632,12 +772,106 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		problem(w, http.StatusNotFound, "mapping_not_found", "no such mapping")
 		return
 	}
-	s.audit.Record(r.Context(), audit.Event{
+	event := audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "group_mapping.delete", TargetType: "group_mapping", TargetID: mappingID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{}, evidence),
-	})
+	}
+	if before != nil {
+		event.Detail["group"] = before.GroupName
+		event.Detail["role"] = string(before.Role)
+		event.Before = before
+	}
+	s.audit.Record(r.Context(), event)
 	s.setGroupMappingsTag(w, r)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAccessReview lists every enabled identity with what it can do,
+// when it was last used and what the reviewer should look at. The review
+// is a compliance artefact, so making one is on the trail: an auditor asks
+// "when was access last reviewed, and by whom" before anything else.
+func (s *Server) handleAccessReview(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", "")
+	if !ok {
+		return
+	}
+	format := r.URL.Query().Get("format")
+	if format != "" && format != "json" && format != "csv" {
+		problem(w, http.StatusBadRequest, "invalid_format", "format must be json or csv")
+		return
+	}
+	now := time.Now()
+	principals, err := s.authz.ReviewAccess(r.Context(), now)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	flagged := 0
+	for _, principal := range principals {
+		if len(principal.Flags) > 0 {
+			flagged++
+		}
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "access.review", TargetType: "principal", TargetID: "",
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"format": orDefault(format, "json"), "principals": len(principals), "flagged": flagged,
+		},
+	})
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition",
+			`attachment; filename="access-review-`+now.UTC().Format("20060102")+`.csv"`)
+		writer := csv.NewWriter(w)
+		_ = writer.Write([]string{
+			"subject", "display_name", "kind", "roles", "last_login_at", "last_token_use_at",
+			"days_since_use", "earliest_expiry", "tokens", "flags",
+		})
+		for _, principal := range principals {
+			roles := make([]string, 0, len(principal.Bindings))
+			for _, binding := range principal.Bindings {
+				role := string(binding.Role) + "@" + binding.Scope.Site + "/" + binding.Scope.Environment
+				if binding.ValidUntil != nil {
+					role += " until " + binding.ValidUntil.UTC().Format(time.RFC3339)
+				}
+				if binding.Expired {
+					role += " (expired)"
+				}
+				roles = append(roles, role)
+			}
+			days := ""
+			if principal.DaysSinceUse != nil {
+				days = strconv.Itoa(*principal.DaysSinceUse)
+			}
+			_ = writer.Write([]string{
+				principal.Subject, principal.DisplayName, principal.Kind, strings.Join(roles, "; "),
+				formatTime(principal.LastLoginAt), formatTime(principal.LastTokenUseAt),
+				days, formatTime(principal.EarliestExpiry),
+				strconv.Itoa(len(principal.Tokens)), strings.Join(principal.Flags, " "),
+			})
+		}
+		writer.Flush()
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": principals, "count": len(principals), "flagged": flagged,
+		"reviewed_at": now.UTC(),
+		"thresholds": map[string]any{
+			"unused_days":       int(authz.ReviewUnusedAfter.Hours() / 24),
+			"expires_soon_days": int(authz.ReviewExpiringSoon.Hours() / 24),
+			"token_max_days":    int(authz.ReviewTokenMaxAge.Hours() / 24),
+		},
+	})
+}
+
+func formatTime(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }

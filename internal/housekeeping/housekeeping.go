@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/audit"
 )
 
 // SessionRetention is how long an ended agent session stays on record. The
@@ -45,6 +47,9 @@ type Sweeper struct {
 	// extra are the sweeps of other stores that keep their own rules, run
 	// on the same clock.
 	extra []namedSweep
+	// recorder writes what the sweep notices onto the trail. Nil means the
+	// expiries are still enforced, but not noted.
+	recorder *audit.Recorder
 }
 
 type namedSweep struct {
@@ -57,6 +62,12 @@ type namedSweep struct {
 // its own.
 func (s *Sweeper) Also(name string, run func(ctx context.Context) error) *Sweeper {
 	s.extra = append(s.extra, namedSweep{name: name, run: run})
+	return s
+}
+
+// WithAudit attaches the recorder the sweep notes its findings with.
+func (s *Sweeper) WithAudit(recorder *audit.Recorder) *Sweeper {
+	s.recorder = recorder
 	return s
 }
 
@@ -100,6 +111,13 @@ func (s *Sweeper) Sweep(ctx context.Context) error {
 	if sessions > 0 || events > 0 {
 		s.log.Info("the retention sweep deleted old records",
 			"agent_sessions", sessions, "audit_events", events)
+	}
+	expired, err := s.NoteExpiredBindings(ctx)
+	if err != nil {
+		return err
+	}
+	if expired > 0 {
+		s.log.Info("role bindings expired", "bindings", expired)
 	}
 	for _, sweep := range s.extra {
 		if err := sweep.run(ctx); err != nil {
@@ -150,4 +168,69 @@ func (s *Sweeper) SweepAudit(ctx context.Context) (int64, error) {
 // interval renders a duration for a PostgreSQL interval parameter.
 func interval(d time.Duration) string {
 	return fmt.Sprintf("%d seconds", int64(d.Seconds()))
+}
+
+// NoteExpiredBindings writes one audit event for every role binding whose
+// validity has passed since the last sweep. The binding stops granting
+// anything the moment it expires, whether or not the sweep has run; the
+// sweep only makes the expiry visible on the trail, once, which the flag
+// on the row guarantees. The flag and the event are committed together.
+func (s *Sweeper) NoteExpiredBindings(ctx context.Context) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("noting the expired bindings: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `
+		update role_bindings b set expiry_noted = true
+		from principals p
+		where p.id = b.principal_id
+		  and b.valid_until is not null and b.valid_until <= now() and not b.expiry_noted
+		returning b.id, b.principal_id, p.subject, b.role, b.site, b.environment, b.valid_until`)
+	if err != nil {
+		return 0, fmt.Errorf("noting the expired bindings: %w", err)
+	}
+	type expiredBinding struct {
+		id, principalID, subject, role, site, environment string
+		validUntil                                        time.Time
+	}
+	var expired []expiredBinding
+	for rows.Next() {
+		var binding expiredBinding
+		if err := rows.Scan(&binding.id, &binding.principalID, &binding.subject, &binding.role,
+			&binding.site, &binding.environment, &binding.validUntil); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		expired = append(expired, binding)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(expired) == 0 {
+		return 0, nil
+	}
+
+	if s.recorder != nil {
+		for _, binding := range expired {
+			if err := s.recorder.RecordTx(ctx, tx, audit.Event{
+				ActorType: audit.ActorSystem, ActorID: "housekeeping",
+				Action: "binding.expired", TargetType: "principal", TargetID: binding.principalID,
+				Outcome: audit.OutcomeSuccess,
+				Detail: map[string]any{
+					"subject": binding.subject, "binding_id": binding.id,
+					"role": binding.role, "site": binding.site, "environment": binding.environment,
+					"valid_until": binding.validUntil.UTC().Format(time.RFC3339),
+				},
+			}); err != nil {
+				return 0, fmt.Errorf("noting the expired binding %s: %w", binding.id, err)
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("noting the expired bindings: %w", err)
+	}
+	return len(expired), nil
 }

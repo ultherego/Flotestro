@@ -49,10 +49,14 @@ type Server struct {
 	// agentStateDir is the directory the final wipe clears. Empty means the
 	// agent's real one; a test points it at a directory of its own.
 	agentStateDir string
+	// scopes wraps the tools of a heavy operation in a transient resource
+	// scope. A test stands in a host without systemd-run through it.
+	scopes scopeRunner
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
-	return &Server{allowedUID: allowedUID, log: log, traffic: make(chan struct{}, 1)}
+	return &Server{allowedUID: allowedUID, log: log, traffic: make(chan struct{}, 1),
+		scopes: newScopeRunner(log)}
 }
 
 // Serve accepts connections until the context is closed or until the idle

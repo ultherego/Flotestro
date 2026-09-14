@@ -5,6 +5,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	"github.com/ultherego/flotestro/internal/audit"
 )
 
 const (
@@ -41,6 +43,10 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		principal := Anonymous
+		// What the trail records about the request beyond the identity: the
+		// session and its authentication, when there is one, and the
+		// request identifier either way.
+		actor := audit.Actor{RequestID: r.Header.Get("X-Request-Id")}
 
 		// The browser session takes precedence; the API token serves automation.
 		if cookie, err := r.Cookie(SessionCookie); err == nil && a.Sessions != nil {
@@ -55,6 +61,10 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 				}
 				principal = *authenticated
 				ctx = ContextWithSession(ctx, session)
+				actor.SessionID = audit.SessionDigest(session.ID)
+				actor.ACR = session.Auth.ACR
+				actor.AMR = session.Auth.AMR
+				actor.AuthTime = session.Auth.At
 			}
 		}
 
@@ -66,6 +76,7 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
+		ctx = audit.WithActor(ctx, actor)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, principalKey, principal)))
 	})
 }

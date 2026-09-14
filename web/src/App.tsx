@@ -15,6 +15,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
 import { Groups } from "./pages/Groups";
+import { Relays, RelayPage } from "./pages/Relays";
 import { HostLayout } from "./pages/host/Layout";
 import { DEFAULT_MODULE, groupedModules, modules } from "./pages/host/modules";
 import { REFRESH_INTERVAL } from "./lib/stream";
@@ -58,6 +59,7 @@ import { Reads } from "./pages/Reads";
 import { Directory } from "./pages/Directory";
 import { Access } from "./pages/Access";
 import { Audit } from "./pages/Audit";
+import { Settings } from "./pages/Settings";
 
 const SIDEBAR_KEY = "flotestro.sidebar";
 
@@ -109,6 +111,12 @@ export function App() {
   const seesMonitoring = permissions.has("monitoring.read");
   const seesVulnerabilities = permissions.has("vulnerability.read");
   const addsHosts = permissions.has("host.enroll.create");
+  // The settings screen is read by whoever administers the panel: the
+  // permission of its own, or the one to decide who may do what.
+  const seesSettings = permissions.has("settings.read") || managesAccess;
+  // The relays are read with the right that reads the installations: the
+  // list is the same one the add-host wizard picks a route from.
+  const seesRelays = permissions.has("host.enroll.read");
 
   // The navigation, grouped by what the operator is doing rather than by
   // backend module. An item that is not allowed is left out of its group;
@@ -127,6 +135,9 @@ export function App() {
         // fleet, because that is what it describes, not with the campaigns
         // that use it.
         { to: "/groups", label: "Groups", icon: "groups" },
+        // A relay is a piece of the fleet's plumbing rather than a host: it
+        // stands with the fleet, because a silent one is a site cut off.
+        ...(seesRelays ? [{ to: "/relays", label: "Relays", icon: "relays" as const }] : []),
       ],
     },
     {
@@ -179,6 +190,12 @@ export function App() {
       key: "audit",
       items: seesAudit ? [{ to: "/audit", label: "Audit", icon: "audit" as const }] : [],
     },
+    // The settings stand last: they describe the panel itself rather than
+    // the fleet, and they are read rarely.
+    {
+      key: "settings",
+      items: seesSettings ? [{ to: "/settings", label: "Settings", icon: "settings" as const }] : [],
+    },
   ];
 
   const face: NavFace = onHost?.face ?? { groups };
@@ -222,6 +239,8 @@ export function App() {
           <Route path="/hosts/new" element={<AddHost />} />
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<Groups />} />
+          {seesRelays && <Route path="/relays" element={<Relays />} />}
+          {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
           <Route path="/security" element={<FleetSecurity />} />
           <Route path="/certificates" element={<FleetCertificates />} />
           <Route path="/backups" element={<FleetBackups />} />
@@ -269,6 +288,7 @@ export function App() {
           {capabilities.directory && <Route path="/directory" element={<Directory />} />}
           {managesAccess && <Route path="/access" element={<Access />} />}
           {seesAudit && <Route path="/audit" element={<Audit />} />}
+          {seesSettings && <Route path="/settings" element={<Settings />} />}
           <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
         </Routes>
         </div>

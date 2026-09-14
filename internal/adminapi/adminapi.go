@@ -20,6 +20,7 @@ import (
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	certificatestore "github.com/ultherego/flotestro/internal/certificates"
+	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
@@ -117,6 +118,9 @@ type Server struct {
 	// groups holds the saved host selections: static member lists and
 	// dynamic selectors a campaign can name.
 	groups *selector.Store
+	// settings is the configuration the panel was started with, for the
+	// settings screen. Nil means a panel started without one.
+	settings *config.Effective
 }
 
 // SetSecrets attaches the secret store.
@@ -227,6 +231,9 @@ func (s *Server) Routes() http.Handler {
 	// the trail, sessions, campaigns and alerts, lined up by time.
 	s.route(mux, "GET /api/v1/hosts/{id}/timeline", s.handleHostTimeline)
 	s.route(mux, "GET /api/v1/audit", s.handleAudit)
+	// The export is the trail as a file with a hash chain, for a copy kept
+	// outside the panel; cmd/auditverify checks such a file offline.
+	s.route(mux, "GET /api/v1/audit/export", s.handleAuditExport)
 	// An enrollment request is a durable record of a pending installation;
 	// the token is only the secret that authorises one attempt.
 	s.route(mux, "GET /api/v1/enrollment-requests", s.handleListEnrollmentRequests)
@@ -239,7 +246,12 @@ func (s *Server) Routes() http.Handler {
 	// Everything a host needs before it holds a token: the addresses, the
 	// trust, the repository and the commands for its family.
 	s.route(mux, "GET /api/v1/installation-profiles", s.handleInstallationProfile)
+	// The relays of the sites: the route of an installation for the wizard,
+	// the state of a site for the relay page. Revoking one cuts a whole site
+	// off, so it has a right of its own.
 	s.route(mux, "GET /api/v1/relays", s.handleListRelays)
+	s.route(mux, "GET /api/v1/relays/{id}", s.handleGetRelay)
+	s.route(mux, "POST /api/v1/relays/{id}/revoke", s.handleRevokeRelay)
 	s.route(mux, "POST /api/v1/hosts/{id}/identity-recovery", s.handleIdentityRecovery)
 	// The host lifecycle: cut-off, release and decommissioning from the fleet.
 	s.route(mux, "POST /api/v1/hosts/{id}/quarantine", s.handleQuarantineHost)
@@ -257,6 +269,9 @@ func (s *Server) Routes() http.Handler {
 	// Tags describe a host in the panel; the host itself is not asked. The
 	// list is replaced whole, so the trail shows every change as one write.
 	s.route(mux, "PUT /api/v1/hosts/{id}/tags", s.handleSetHostTags)
+	// The release channel is a policy like a tag: which agent releases the
+	// host sees first.
+	s.route(mux, "PUT /api/v1/hosts/{id}/channel", s.handleSetHostChannel)
 	// Host groups: a saved answer to "which hosts", either a fixed member
 	// list or a selector resolved when read. A campaign names a group in
 	// its selector instead of repeating the list.
@@ -360,9 +375,18 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "DELETE /api/v1/principals/{id}", s.handleDisablePrincipal)
 	s.route(mux, "POST /api/v1/principals/{id}/tokens", s.handleIssueToken)
 	s.route(mux, "DELETE /api/v1/principals/{id}/tokens/{token}", s.handleRevokeToken)
+	// A binding is granted with a validity or without one; granting it
+	// again changes the validity alone.
+	s.route(mux, "POST /api/v1/principals/{id}/roles", s.handleGrantRole)
 	s.route(mux, "DELETE /api/v1/principals/{id}/roles/{role}", s.handleRevokeRole)
+	// The access review: every identity with what it can do, when it was
+	// last used and what the reviewer should look at.
+	s.route(mux, "GET /api/v1/access/review", s.handleAccessReview)
 	s.route(mux, "GET /api/v1/whoami", s.handleWhoami)
 	s.route(mux, "GET /api/v1/roles", s.handleListRoles)
+	// The effective configuration, secrets masked: what this panel was
+	// started with, for whoever administers it.
+	s.route(mux, "GET /api/v1/settings", s.handleSettings)
 	// The identity directory in read-only mode.
 	s.route(mux, "GET /api/v1/identity/status", s.handleIdentityStatus)
 	s.route(mux, "GET /api/v1/identity/users", directoryHandler(s, "users",
@@ -500,11 +524,13 @@ type FleetSummary struct {
 	// AgentCertificatesExpiring counts the hosts whose current agent
 	// certificate runs out within thirty days.
 	AgentCertificatesExpiring *int `json:"agent_certificates_expiring,omitempty"`
-	// DegradedRelays counts the relays that missed their renewal: a relay
-	// certificate lives seven days and renews at a third left, so one with
-	// less than a day is a site about to be cut off. A relay serves a site
-	// rather than an environment, so the counter exists only for the global
-	// view - a narrowed scope cannot say which relays are its own.
+	// DegradedRelays counts the relays in trouble: those that missed their
+	// renewal - a relay certificate lives seven days and renews at a third
+	// left, so one with less than a day is a site about to be cut off - and
+	// those silent for ten minutes, which report themselves every minute
+	// while they reach the centre. A relay serves a site rather than an
+	// environment, so the counter exists only for the global view - a
+	// narrowed scope cannot say which relays are its own.
 	DegradedRelays *int `json:"degraded_relays,omitempty"`
 	// AlertsFiring counts the firing alerts on the visible hosts that no
 	// silence covers, and AlertsCritical those of them that are critical.
@@ -633,7 +659,9 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		var degraded int
 		err = s.pool.QueryRow(ctx, `
 			select count(*) from relays
-			where revoked_at is null and not_after < now() + interval '1 day'`).Scan(&degraded)
+			where revoked_at is null
+			  and (not_after < now() + interval '1 day'
+			       or last_seen_at < now() - interval '10 minutes')`).Scan(&degraded)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -691,6 +719,16 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		Owner:           query.Get("owner"),
 		Capability:      query.Get("capability"),
 		Scopes:          principal.ScopesFor(authz.PermHostRead),
+	}
+	// A channel that is not a channel is refused rather than matched to
+	// nothing.
+	if channel := query.Get("channel"); channel != "" {
+		normalized, err := hosts.NormalizeChannel(channel)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", err.Error())
+			return
+		}
+		filter.Channel = normalized
 	}
 	// The tag filter repeats: every given tag has to be on the host. A tag
 	// that is not a tag is refused rather than matched to nothing.
@@ -796,62 +834,6 @@ func (s *Server) handleHostInventoryModule(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, fragment)
-}
-
-func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
-	hostID := r.PathValue("id")
-	_, scope, ok := s.hostScope(w, r, hostID)
-	if !ok {
-		return
-	}
-	if _, ok := s.authorize(w, r, authz.PermAuditRead, scope, "host", hostID); !ok {
-		return
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	records, err := s.audit.List(r.Context(), hostID, limit)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": records, "count": len(records)})
-}
-
-func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermAuditRead, authz.GlobalScope, "audit", ""); !ok {
-		return
-	}
-	query := r.URL.Query()
-	filter := audit.ListFilter{
-		TargetID:   query.Get("target_id"),
-		TargetType: query.Get("target_type"),
-		Actor:      query.Get("actor"),
-		Action:     query.Get("action"),
-		Outcome:    query.Get("outcome"),
-	}
-	var err error
-	if filter.Since, err = parseTimeParam(query.Get("since")); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_filter", "since must be an RFC 3339 timestamp")
-		return
-	}
-	if filter.Until, err = parseTimeParam(query.Get("until")); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_filter", "until must be an RFC 3339 timestamp")
-		return
-	}
-	cursor, err := audit.ParseCursor(query.Get("cursor"))
-	if err != nil {
-		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
-		return
-	}
-	limit, _ := strconv.Atoi(query.Get("limit"))
-	page, err := s.audit.ListPaged(r.Context(), filter, cursor,
-		paging.Limit(limit, defaultListPage, maxListPage))
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
-	})
 }
 
 // parseTimeParam reads an optional RFC 3339 query parameter. An empty value

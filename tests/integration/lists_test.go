@@ -177,11 +177,14 @@ func TestJobListFiltersByActionAndPages(t *testing.T) {
 // auditPage mirrors one page of the trail.
 type auditPage struct {
 	Items []struct {
-		ID         int64     `json:"id"`
-		OccurredAt time.Time `json:"occurred_at"`
-		Action     string    `json:"action"`
-		Outcome    string    `json:"outcome"`
-		ActorID    string    `json:"actor_id"`
+		ID         int64          `json:"id"`
+		OccurredAt time.Time      `json:"occurred_at"`
+		Action     string         `json:"action"`
+		Outcome    string         `json:"outcome"`
+		ActorID    string         `json:"actor_id"`
+		TargetID   string         `json:"target_id"`
+		RequestID  string         `json:"request_id"`
+		Detail     map[string]any `json:"detail"`
 	} `json:"items"`
 	NextCursor string `json:"next_cursor"`
 }

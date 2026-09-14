@@ -1,5 +1,7 @@
 package opspec
 
+import "errors"
+
 // The guide to error codes.
 //
 // A code answers two questions: what happened and what can safely be done
@@ -70,6 +72,9 @@ var errorGuides = []ErrorGuide{
 	{Code: "selector_too_broad", Stage: "materialize", Retry: RetryAfterChange,
 		Meaning: "The selector names more hosts than one campaign may carry.",
 		Action:  "Narrow the selector or split the change into several campaigns."},
+	{Code: RefusalProtocolIncompatible, Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The target agent release speaks a protocol this panel does not.",
+		Action:  "Upgrade the panel first, or pick a release the panel can talk to."},
 	{Code: "capability_missing", Stage: "preflight", Retry: RetryAfterChange,
 		Meaning: "The host has no adapter for this operation.",
 		Action:  "Exclude the host or install what the adapter needs; not a failure."},
@@ -238,4 +243,34 @@ var errorGuides = []ErrorGuide{
 	{Code: "rolled_back", Stage: "verify", Retry: RetryAfterReplan,
 		Meaning: "The host undid the change itself because the connectivity check failed.",
 		Action:  "Fix the plan; the host is on its previous configuration.", CountsAsFailure: true},
+}
+
+// RefusalError is a validation refusal with a code of its own. Validate
+// returns plain errors for a malformed payload - the interface shows the
+// message and that is enough - but a refusal on grounds other than shape
+// needs a code the interface can act on: a protocol the panel does not
+// speak is a fact about the release, not a typo in the order.
+type RefusalError struct {
+	Code string
+	Err  error
+}
+
+// RefusalProtocolIncompatible refuses an agent release whose protocol this
+// panel does not speak.
+const RefusalProtocolIncompatible = "protocol_incompatible"
+
+func (e *RefusalError) Error() string { return e.Code + ": " + e.Err.Error() }
+
+func (e *RefusalError) Unwrap() error { return e.Err }
+
+// RefusalCode returns the code of a validation error: the refusal's own
+// one, or invalid_payload for a plain validation error. The handlers that
+// call Validate answer with it, so the interface tells a wrong shape from
+// a refused release.
+func RefusalCode(err error) string {
+	var refusal *RefusalError
+	if errors.As(err, &refusal) {
+		return refusal.Code
+	}
+	return "invalid_payload"
 }

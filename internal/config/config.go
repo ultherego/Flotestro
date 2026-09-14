@@ -108,3 +108,107 @@ func (c ControlPlane) Validate() error {
 	}
 	return nil
 }
+
+// Effective is the configuration the control plane resolved at start, as
+// the settings screen shows it: every value after the defaults, the
+// environment and the flags had their say. It carries no secret - only
+// whether one is set - so nothing that reads it can leak one, whatever it
+// renders.
+//
+// The values are set in /etc/flotestro/control-plane.env; the screen shows
+// them and changes nothing. A panel that let its own configuration be
+// edited over the API would let a stolen session redirect the login to a
+// provider of the thief's choosing.
+type Effective struct {
+	Version   string
+	Commit    string
+	BuildDate string
+	Protocol  int
+
+	// The listeners and how the fleet and the browser reach them.
+	GatewayAddr          string
+	EnrollmentAddr       string
+	AdminAddr            string
+	Advertised           []string
+	GatewayID            string
+	PublicURL            string
+	WebRoot              string
+	StateDir             string
+	PackageRepositoryURL string
+
+	// The agent contract.
+	HeartbeatSeconds int
+	HeartbeatJitter  int
+	StaleAfter       time.Duration
+	AgentCertTTL     time.Duration
+
+	Identity  EffectiveIdentity
+	Directory EffectiveDirectory
+	StepUp    EffectiveStepUp
+	// The browser session lifetimes and the environments a change in
+	// which asks for a second person.
+	SessionIdle            time.Duration
+	SessionAbsolute        time.Duration
+	ProductionEnvironments []string
+
+	Webhook         EffectiveWebhook
+	Vulnerabilities EffectiveVulnerabilities
+
+	// The retentions: the resource samples of the hosts, their rollups and
+	// the trail. Zero for the trail means forever.
+	MetricsRawRetention    time.Duration
+	MetricsRollupRetention time.Duration
+	AuditRetention         time.Duration
+	// SecretsKeyFile is where the key of the secret store lies; the key
+	// itself is not here.
+	SecretsKeyFile string
+}
+
+// EffectiveIdentity describes the identity provider the operators sign in
+// through.
+type EffectiveIdentity struct {
+	IssuerURL       string
+	ClientID        string
+	ClientSecretSet bool
+	GroupsClaim     string
+}
+
+// EffectiveDirectory describes the directory connector.
+type EffectiveDirectory struct {
+	Configured   bool
+	ServerURL    string
+	Principal    string
+	KeytabPath   string
+	CACertPath   string
+	Realm        string
+	WriteEnabled bool
+}
+
+// EffectiveStepUp is the policy of the operations of the greatest impact.
+type EffectiveStepUp struct {
+	MaxAge time.Duration
+	ACR    string
+	// Tokens is "allow" or "refuse": whether an API token may carry such
+	// an operation out.
+	Tokens string
+}
+
+// EffectiveWebhook describes the delivery of the durable trail.
+type EffectiveWebhook struct {
+	URL       string
+	SecretSet bool
+	Events    []string
+}
+
+// EffectiveVulnerabilities describes the correlator and its sources.
+type EffectiveVulnerabilities struct {
+	Enabled        bool
+	SyncInterval   time.Duration
+	MaxSnapshotAge time.Duration
+	DebianURL      string
+	UbuntuURL      string
+	RedHatURL      string
+	NVDURL         string
+	NVDKeySet      bool
+	NVDInterval    time.Duration
+}

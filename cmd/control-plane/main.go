@@ -27,6 +27,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/budgets"
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/database"
@@ -566,6 +567,57 @@ func run() error {
 	panelServer.SetSecrets(secretStore)
 	agentService.SetSecrets(secretStore)
 	agentService.SetSecretLeases(secretStore)
+	// The settings screen shows what this process resolved, with the
+	// secrets reduced to "set" or "not set": the values themselves stay in
+	// the environment file.
+	panelServer.SetSettings(config.Effective{
+		Version: buildinfo.Version, Commit: buildinfo.ShortCommit(), BuildDate: buildinfo.Date,
+		Protocol:             buildinfo.AgentProtocol,
+		GatewayAddr:          cfg.GatewayAddr,
+		EnrollmentAddr:       cfg.EnrollmentAddr,
+		AdminAddr:            cfg.AdminAddr,
+		Advertised:           splitList(*advertised),
+		GatewayID:            cfg.GatewayID,
+		PublicURL:            *publicURL,
+		WebRoot:              *webRoot,
+		StateDir:             cfg.StateDir,
+		PackageRepositoryURL: *packageRepositoryURL,
+		HeartbeatSeconds:     cfg.HeartbeatSeconds,
+		HeartbeatJitter:      cfg.HeartbeatJitter,
+		StaleAfter:           cfg.StaleAfter,
+		AgentCertTTL:         *agentCertTTL,
+		Identity: config.EffectiveIdentity{
+			IssuerURL: *issuerURL, ClientID: *clientID,
+			ClientSecretSet: *clientSecret != "", GroupsClaim: *groupsClaim,
+		},
+		Directory: config.EffectiveDirectory{
+			Configured: directory != nil, ServerURL: *ipaServer, Principal: *ipaPrincipal,
+			KeytabPath: *ipaKeytab, CACertPath: *ipaCACert, Realm: *ipaRealm,
+			WriteEnabled: directory != nil && *directoryWrite,
+		},
+		StepUp:                 config.EffectiveStepUp{MaxAge: *stepUpMaxAge, ACR: *stepUpACR, Tokens: *stepUpTokens},
+		SessionIdle:            8 * time.Hour,
+		SessionAbsolute:        24 * time.Hour,
+		ProductionEnvironments: productionEnvironments,
+		Webhook: config.EffectiveWebhook{
+			URL: *webhookURL, SecretSet: *webhookSecret != "", Events: splitList(*webhookEvents),
+		},
+		Vulnerabilities: config.EffectiveVulnerabilities{
+			Enabled:        vulnerabilities.Enabled,
+			SyncInterval:   vulnerabilities.SyncInterval,
+			MaxSnapshotAge: vulnerabilities.MaxSnapshotAge,
+			DebianURL:      vulnerabilities.DebianURL,
+			UbuntuURL:      vulnerabilities.UbuntuURL,
+			RedHatURL:      vulnerabilities.RedHatURL,
+			NVDURL:         vulnerabilities.NVDURL,
+			NVDKeySet:      vulnerabilities.NVDKey != "",
+			NVDInterval:    vulnerabilities.NVDInterval,
+		},
+		MetricsRawRetention:    metricsRetention.RawRetention,
+		MetricsRollupRetention: metricsRetention.RollupRetention,
+		AuditRetention:         *auditRetention,
+		SecretsKeyFile:         keyPath,
+	})
 
 	adminServer := &http.Server{
 		Addr:              cfg.AdminAddr,
@@ -590,7 +642,10 @@ func run() error {
 	// The retention sweep: the ended sessions of the agents go after a
 	// month, the trail after the configured retention if there is one, and
 	// the expired browser sessions with their abandoned logins alongside.
+	// A role binding past its validity is noted on the trail by the same
+	// sweep; it stopped granting anything the moment it expired.
 	go housekeeping.New(pool, log, housekeeping.Options{Audit: *auditRetention}).
+		WithAudit(recorder).
 		Also("web sessions", authzStore.PurgeExpired).
 		// A host whose recovery order expired unused comes back to active on
 		// the same clock: nobody revoked the order, so nothing else would.
@@ -752,7 +807,7 @@ func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, lo
 		return err
 	}
 	if err := store.GrantRole(ctx, tx, principalID, authz.RolePlatformAdmin,
-		authz.GlobalScope, "system"); err != nil {
+		authz.GlobalScope, nil, "system"); err != nil {
 		return err
 	}
 	// The token lives a month: long enough to create the proper identities,

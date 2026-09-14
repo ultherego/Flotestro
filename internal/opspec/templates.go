@@ -1,5 +1,7 @@
 package opspec
 
+import "github.com/ultherego/flotestro/internal/buildinfo"
+
 // PayloadTemplate gives an example payload for an operation: the shape the
 // wizard starts from when the operation has no form of its own. The panel
 // is the authority on the contract, so the example lives here, next to the
@@ -61,6 +63,10 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return pkgs(false), true
 	case ActionPackageUpgrade:
 		return Payload{PackageUpgrade: &PackageUpgradePayload{SecurityOnly: true}}, true
+	case ActionAgentUpgrade:
+		// The panel's own version is the one release every fleet can be
+		// brought to; the operator replaces it with the release they ship.
+		return Payload{AgentUpgrade: &AgentUpgradePayload{TargetVersion: buildinfo.Version}}, true
 
 	case ActionDockerStart, ActionDockerStop, ActionDockerRestart:
 		return docker(), true

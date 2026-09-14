@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
@@ -3284,6 +3285,13 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if sum := payload.AgentUpgrade.PackageSHA256; sum != "" && !validChecksum(sum) {
 			return fmt.Errorf("the package checksum is not a hexadecimal SHA-256")
+		}
+		// The target has to speak a protocol this panel speaks. Otherwise
+		// the host would come back with the new version and stay unmanaged:
+		// the replacement itself would succeed, and everything after it
+		// would fail.
+		if err := buildinfo.CheckProtocol(payload.AgentUpgrade.TargetVersion); err != nil {
+			return &RefusalError{Code: RefusalProtocolIncompatible, Err: err}
 		}
 		return nil
 
