@@ -1,7 +1,6 @@
 <div align="center">
 
-![Flotestro](docs/logo.svg#gh-light-mode-only)
-![Flotestro](docs/logo-dark.svg#gh-dark-mode-only)
+![Flotestro](docs/logo.webp)
 
 </div>
 
