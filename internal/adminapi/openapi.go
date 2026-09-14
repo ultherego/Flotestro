@@ -226,6 +226,7 @@ var queryParameters = map[string][]queryParameter{
 		{"owner", "string", ""},
 		{"maintenance", "boolean", "true keeps the hosts inside a maintenance window now, false those outside one."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
+		{"connection_refusal", "string", "The reason the gateway last turned the host away since its last session: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch or lifecycle_<state>."},
 	}, pagingParameters...),
 	"GET /api/v1/jobs": append([]queryParameter{
 		{"host_id", "string", ""},
@@ -347,6 +348,8 @@ var requestSchemas = map[string]map[string]any{
 			"reason":              map[string]any{"type": "string"},
 			"target_confirmation": map[string]any{"type": "string", "description": "The hostname, typed, for irreversible operations."},
 			"idempotency_key":     map[string]any{"type": "string"},
+			"class": map[string]any{"type": "string", "enum": []string{"incident", "interactive"},
+				"description": "How urgently the job asks the budgets for capacity; left out, the class follows from the operation and its author."},
 		},
 		"required": []string{"action"},
 	},

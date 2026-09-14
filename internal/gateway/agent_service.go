@@ -224,6 +224,13 @@ func (s *AgentService) Connect(ctx context.Context,
 	if !ok {
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("missing client certificate"))
 	}
+	// The handshake refuses a certificate outside its validity before the
+	// request exists; this is the second lock on the same door. The
+	// listener is configured elsewhere, and a listener that let such a
+	// certificate through must still not get a session out of it.
+	if problem := s.rejectStaleCertificate(ctx, cert); problem != nil {
+		return problem
+	}
 
 	// A session can come straight from an agent or through the relay of a
 	// site. In the second case the identity of the host does not come from the
@@ -2055,6 +2062,48 @@ func (s *AgentService) denied(ctx context.Context, hostID, reason string) {
 	s.log.Warn("the session of the agent was rejected", "host_id", hostID, "reason", reason)
 }
 
+// refused is a denial the host page is to show: the trail entry as always,
+// and the reason written on the host, so an operator looking at an offline
+// machine sees why the gateway would not have it rather than a silence.
+// Only a host named by a certificate the fleet signed gets here; a
+// refusal the store cannot place - a name that is not a host - stays on
+// the trail alone.
+func (s *AgentService) refused(ctx context.Context, hostID, code, detail string) {
+	s.denied(ctx, hostID, code)
+	if _, err := s.hosts.RecordConnectionRefusal(ctx, hostID, code, detail); err != nil {
+		s.log.Error("the refusal was not recorded on the host", "host_id", hostID, "reason", code, "err", err)
+	}
+}
+
+// rejectStaleCertificate refuses a certificate outside its validity at the
+// session layer, whatever the listener did with it. The refusal is
+// attributed to the host the certificate names: the listener vouches for
+// the chain by the time a request exists, as it does for every identity
+// read from a certificate here.
+func (s *AgentService) rejectStaleCertificate(ctx context.Context, cert *x509.Certificate) error {
+	now := time.Now()
+	var code, message string
+	switch {
+	case now.Before(cert.NotBefore):
+		code = hosts.RefusalCertificateNotYetValid
+		message = "the certificate is not valid before " + cert.NotBefore.UTC().Format(time.RFC3339)
+	case now.After(cert.NotAfter):
+		code = hosts.RefusalCertificateExpired
+		message = "the certificate expired at " + cert.NotAfter.UTC().Format(time.RFC3339)
+	default:
+		return nil
+	}
+	detail := fmt.Sprintf("serial %s valid from %s to %s", cert.SerialNumber,
+		cert.NotBefore.UTC().Format(time.RFC3339), cert.NotAfter.UTC().Format(time.RFC3339))
+	if hostID, err := pki.HostIDFromCert(cert); err == nil {
+		s.refused(ctx, hostID, code, detail)
+	} else {
+		s.log.Warn("a certificate outside its validity reached the session layer",
+			"reason", code, "serial", cert.SerialNumber.String(), "subject", cert.Subject.CommonName)
+	}
+	return connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("%s: %s", code, message))
+}
+
 // capabilitiesFromProto reads the registry of the adapters. An agent of an
 // older version does not send the registry at all, and a fleet upgrades
 // gradually - the registry is then reconstructed from the boolean fields from
@@ -2263,36 +2312,53 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 // direct connection.
 func (s *AgentService) rejectCertificate(ctx context.Context,
 	status hosts.CertificateStatus, hostID string) error {
-	switch {
-	case !status.Known:
-		s.denied(ctx, hostID, "unknown_certificate")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate is unknown"))
-	case status.Revoked:
-		s.denied(ctx, hostID, "revoked_certificate")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate was revoked"))
-	case status.HostID != hostID:
-		s.denied(ctx, hostID, "identity_mismatch")
-		return connect.NewError(connect.CodeUnauthenticated, errors.New("the identity does not match the certificate"))
-	case status.LifecycleState == hosts.StateRetired:
+	code, detail := certificateStatusRefusal(status, hostID, time.Now())
+	if code == "" {
+		return nil
+	}
+	if code == "lifecycle_"+hosts.StateRetired {
 		// A retired host decommissioned while offline may have kept a valid
 		// certificate when the operator chose not to revoke blind. The first
 		// contact is where the certificate is revoked: the host has shown it
 		// is alive and holds a key that is no longer its.
 		s.revokeOnContact(ctx, hostID)
-		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
+	}
+	s.refused(ctx, hostID, code, detail)
+	switch code {
+	case hosts.RefusalUnknownCertificate:
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate is unknown"))
+	case hosts.RefusalRevokedCertificate:
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate was revoked"))
+	case hosts.RefusalIdentityMismatch:
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("the identity does not match the certificate"))
+	default:
 		return connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("the host is in the state %s", status.LifecycleState))
-	case !hosts.Connectable(status.LifecycleState, status.LifecycleChangedAt, time.Now()):
+	}
+}
+
+// certificateStatusRefusal names the refusal of a certificate the handshake
+// let through, from what the record says about it. Revocation and the
+// lifecycle are facts of the database rather than of the certificate, so
+// the handshake cannot see them; this is where they are read. An empty
+// code is a certificate with nothing against it.
+func certificateStatusRefusal(status hosts.CertificateStatus, hostID string, now time.Time) (code, detail string) {
+	switch {
+	case !status.Known:
+		return hosts.RefusalUnknownCertificate, "no certificate of this fingerprint is on record"
+	case status.Revoked:
+		return hosts.RefusalRevokedCertificate, "serial " + status.Serial + " was revoked"
+	case status.HostID != hostID:
+		return hosts.RefusalIdentityMismatch, "serial " + status.Serial + " is on record for host " + status.HostID
+	case !hosts.Connectable(status.LifecycleState, status.LifecycleChangedAt, now):
 		// A quarantine, a withdrawal in progress and a withdrawal differ for
 		// the operator, but for a connection they mean the same: this host has
 		// no right to work. A recovery is the exception for the length of the
 		// overlap: the old key still reads, so that the operator does not
 		// lose the host before the new key works.
-		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
-		return connect.NewError(connect.CodePermissionDenied,
-			fmt.Errorf("the host is in the state %s", status.LifecycleState))
+		return "lifecycle_" + status.LifecycleState, "the host is " + status.LifecycleState
 	}
-	return nil
+	return "", ""
 }
 
 // revokeOnContact revokes the live certificates of a retired host that has

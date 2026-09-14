@@ -371,7 +371,7 @@ test.describe("settings", () => {
     expect(response.ok(), `GET /api/v1/settings answered ${response.status()}`).toBeTruthy();
     const settings = (await response.json()) as {
       source: string;
-      areas: { key: string; title: string; facts: { key: string; secret?: boolean; configured?: boolean }[] }[];
+      areas: { key: string; title: string; facts: { key: string; value?: unknown; secret?: boolean; configured?: boolean }[] }[];
     };
     expect(settings.areas.length).toBeGreaterThan(0);
 
@@ -388,6 +388,8 @@ test.describe("settings", () => {
       for (const fact of area.facts.filter((entry) => entry.secret)) {
         const value = section.locator("dd").nth(area.facts.indexOf(fact));
         await expect(value).toContainText(fact.configured ? "set" : "not set");
+        // Not even the mask the API sends in place of the value.
+        if (typeof fact.value === "string" && fact.value !== "") await expect(value).not.toContainText(fact.value);
       }
     }
     await expectHealthy(page, errors);

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/gateway"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -62,6 +63,7 @@ type Scheduler struct {
 	audit       *audit.Recorder
 	credentials EnrollmentCredentials
 	secrets     SecretLeases
+	admission   admission
 	log         *slog.Logger
 	options     Options
 }
@@ -70,6 +72,12 @@ type Scheduler struct {
 // will not be delivered: the host would get a reference it has no way of
 // following, and the operation would fail only on the host.
 func (s *Scheduler) SetSecrets(leases SecretLeases) { s.secrets = leases }
+
+// SetBudgets replaces the capacity budgets the scheduler asks before it
+// takes a task. The scheduler builds its own over the task store's
+// database, so this is for an installation that keeps them elsewhere and
+// for checking the decision without a database.
+func (s *Scheduler) SetBudgets(store Budgets) { s.admission.budgets = store }
 
 func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder,
 	credentials EnrollmentCredentials, log *slog.Logger, options Options) *Scheduler {
@@ -85,8 +93,16 @@ func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder
 	if options.SendTimeout <= 0 {
 		options.SendTimeout = 5 * time.Second
 	}
-	return &Scheduler{store: store, registry: registry, audit: recorder,
+	scheduler := &Scheduler{store: store, registry: registry, audit: recorder,
 		credentials: credentials, log: log, options: options}
+	scheduler.admission = admission{waits: store, log: log, gateway: options.GatewayID}
+	// The budgets live in the database, not in the process: a second store
+	// over the same tables sees the same grants as the orchestrator's, so
+	// a task and a campaign target compete for the same tokens.
+	if store != nil && store.Pool() != nil {
+		scheduler.admission.budgets = budgets.NewStore(store.Pool(), log)
+	}
+	return scheduler
 }
 
 // Run keeps the delivery loop going until the context is closed.
@@ -123,6 +139,34 @@ func (s *Scheduler) housekeep(ctx context.Context) {
 	} else if count > 0 {
 		s.log.Info("tasks expired before they started", "count", count)
 	}
+	s.renewBudgets(ctx)
+}
+
+// renewBudgets keeps the tokens of the running tasks alive.
+//
+// A budget lease is shorter than a package transaction on purpose - a
+// gateway that vanished has to free its capacity after a moment - so the
+// tasks that are still working have to say so, the way a campaign's hosts
+// do every pass of the orchestrator.
+func (s *Scheduler) renewBudgets(ctx context.Context) {
+	if s.admission.budgets == nil {
+		return
+	}
+	running, err := s.store.InFlight(ctx)
+	if err != nil {
+		s.log.Error("the running tasks were not listed for the budgets", "err", err)
+		return
+	}
+	if len(running) == 0 {
+		return
+	}
+	owners := make([]string, 0, len(running))
+	for _, jobID := range running {
+		owners = append(owners, budgets.JobOwner(jobID))
+	}
+	if err := s.admission.budgets.Renew(ctx, owners); err != nil {
+		s.log.Error("the capacity of the running tasks was not renewed", "err", err)
+	}
 }
 
 func (s *Scheduler) dispatchOnce(ctx context.Context) {
@@ -131,10 +175,41 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 		return
 	}
 
-	leased, err := s.store.Lease(ctx, s.options.GatewayID, hosts, s.options.BatchSize, s.options.LeaseDuration)
+	candidates, err := s.store.Queued(ctx, hosts, s.options.BatchSize)
+	if err != nil {
+		s.log.Error("the queue was not read", "err", err)
+		return
+	}
+	// Every task is admitted on its own, oldest first, before any is taken:
+	// a task the budgets refuse stays queued as it was, with no attempt
+	// opened, and the tasks behind it in the queue still get their turn - a
+	// restart in one site does not wait behind a reboot refused in another.
+	admitted := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		ok, err := s.admission.admit(ctx, candidate)
+		if err != nil {
+			s.log.Error("the budgets did not answer for the task",
+				"job_id", candidate.Job.ID, "err", err)
+			continue
+		}
+		if ok {
+			admitted = append(admitted, candidate.Job.ID)
+		}
+	}
+	if len(admitted) == 0 {
+		return
+	}
+
+	leased, err := s.store.LeaseJobs(ctx, s.options.GatewayID, admitted, s.options.LeaseDuration)
 	if err != nil {
 		s.log.Error("the tasks were not taken from the queue", "err", err)
+		for _, jobID := range admitted {
+			s.admission.release(ctx, jobID)
+		}
 		return
+	}
+	for _, jobID := range untaken(admitted, leased) {
+		s.admission.release(ctx, jobID)
 	}
 	for _, item := range leased {
 		s.deliver(ctx, item)

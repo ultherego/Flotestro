@@ -76,7 +76,7 @@ export function Dashboard() {
   const attention = [
     s?.reboot_required, s?.with_failed_units, s?.package_database_broken, s?.sssd_offline,
     s?.failed_jobs_24h, s?.pending_enrollment_requests, s?.agents_behind_latest,
-    s?.agent_certificates_expiring, s?.degraded_relays,
+    s?.agent_certificates_expiring, s?.agent_certificates_expired, s?.degraded_relays,
   ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
   return (
@@ -144,8 +144,15 @@ export function Dashboard() {
                 hint={t("newest version seen in the fleet")}
               />
             )}
+            {/* Two tiles for one lifetime: an agent renews with ten days
+                left, so a certificate inside its last week is one the agent
+                should already have renewed, and one that has run out is a
+                host that comes back only through an identity recovery. */}
             {s?.agent_certificates_expiring !== undefined && (
-              <Stat label={t("Agent certificates expiring")} value={s.agent_certificates_expiring} hint={t("within 30 days")} tone={warnAbove(s.agent_certificates_expiring)} />
+              <Stat label={t("Agent certificates expiring")} value={s.agent_certificates_expiring} hint={t("within 7 days; the agent renews at 10 days left")} tone={warnAbove(s.agent_certificates_expiring)} />
+            )}
+            {s?.agent_certificates_expired !== undefined && (
+              <Stat label={t("Agent certificates expired")} value={s.agent_certificates_expired} hint={t("needs identity recovery")} tone={errorAbove(s.agent_certificates_expired)} to="/hosts?connection_refusal=certificate_expired" />
             )}
             {s?.degraded_relays !== undefined && (
               <Stat label={t("Degraded relays")} value={s.degraded_relays} hint={t("missed renewal")} tone={errorAbove(s.degraded_relays)} />

@@ -157,3 +157,53 @@ func TestBackendBudgetFollowsTheRepository(t *testing.T) {
 		t.Error("a unit restart loaded the backend budget")
 	}
 }
+
+// TestJobClassFollowsTheOperatorThenTheEvidence guards the order of the
+// class rule: what the order stated, then what can be seen - the panel's
+// own sweeps never make an operator wait, locking an account never waits
+// behind a campaign.
+func TestJobClassFollowsTheOperatorThenTheEvidence(t *testing.T) {
+	cases := []struct {
+		action    opspec.ActionType
+		createdBy string
+		stated    Class
+		want      Class
+	}{
+		{opspec.ActionUnitRestart, "alice", "", ClassInteractive},
+		{opspec.ActionUnitRestart, "alice", ClassIncident, ClassIncident},
+		{opspec.ActionInventoryRefresh, PanelAuthorPrefix + "vuln", "", ClassBackground},
+		{opspec.ActionLocalUserLock, "alice", "", ClassIncident},
+		// A class nobody knows is not a class: the evidence decides.
+		{opspec.ActionUnitRestart, "alice", Class("urgent"), ClassInteractive},
+	}
+	for _, c := range cases {
+		if got := JobClass(c.action, c.createdBy, c.stated); got != c.want {
+			t.Errorf("%s by %s stated %q: class %s, want %s", c.action, c.createdBy, c.stated, got, c.want)
+		}
+	}
+}
+
+// TestWaitReasonNamesTheKeyAndReadsBack guards the one fixed form the job
+// list shows and the metrics count.
+func TestWaitReasonNamesTheKeyAndReadsBack(t *testing.T) {
+	reason := WaitReason(Refusal{Key: "site:warsaw:units", Reason: ReasonCapacity})
+	if reason != "awaiting_budget:site:warsaw:units" {
+		t.Fatalf("reason = %q", reason)
+	}
+	if key := WaitedKey(reason); key != "site:warsaw:units" {
+		t.Errorf("key read back = %q", key)
+	}
+	if WaitReason(Refusal{}) != "" || WaitedKey("resource_busy") != "" {
+		t.Error("no refusal or a reason of another kind names a budget")
+	}
+}
+
+// TestUnknownOperationAsksForTheScarcerCapacity guards that an operation
+// the registry does not describe is not treated as a read: unknown is not
+// harmless.
+func TestUnknownOperationAsksForTheScarcerCapacity(t *testing.T) {
+	needs := Needs(opspec.ActionType("nobody.knows"), "warsaw", "")
+	if len(needs) == 0 || needs[0].Key != KeyGlobalMutations {
+		t.Fatalf("an unknown operation loads budgets %+v", needs)
+	}
+}

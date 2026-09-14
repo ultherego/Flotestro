@@ -4,7 +4,8 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
-import { RELEASE_CHANNELS, type FleetActivity, type Host } from "../lib/types";
+import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host } from "../lib/types";
+import { relativeTime } from "../lib/format";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, Meter, StatusBar } from "../components/widgets";
@@ -43,6 +44,11 @@ export function Hosts() {
   const [maintenance, setMaintenance] = useState(initial.get("maintenance") ?? "");
   const [capability, setCapability] = useState(initial.get("capability") ?? "");
   const [channel, setChannel] = useState(initial.get("channel") ?? "");
+  // The refusal filter has no control of its own: the dashboard's
+  // expired-certificates tile links here with it set, and the address is
+  // the only way in. Clearing the connection state clears it too, so the
+  // operator is never stuck in a filter they cannot see.
+  const [refusal, setRefusal] = useState(initial.get("connection_refusal") ?? "");
   // Tags typed as words: every one of them has to be on the host. A chip
   // on a row links here with the tag filled in.
   const [tags, setTags] = useState(initial.getAll("tag").join(" "));
@@ -54,6 +60,8 @@ export function Hosts() {
     const params = new URLSearchParams(location.search);
     const wanted = params.get("connection_state");
     if (wanted !== null) setConnectionState(wanted);
+    const wantedRefusal = params.get("connection_refusal");
+    if (wantedRefusal !== null) setRefusal(wantedRefusal);
     const wantedTags = params.getAll("tag");
     if (wantedTags.length > 0) setTags(wantedTags.join(" "));
   }, [location.key, location.search]);
@@ -73,6 +81,7 @@ export function Hosts() {
   if (maintenance) params.set("maintenance", maintenance);
   if (capability) params.set("capability", capability);
   if (channel) params.set("channel", channel);
+  if (refusal) params.set("connection_refusal", refusal);
   for (const tag of settledTags.split(/\s+/).filter(Boolean)) params.append("tag", tag);
   params.set("limit", String(LIST_PAGE));
 
@@ -159,7 +168,7 @@ export function Hosts() {
               <option value="debian">debian</option>
               <option value="rhel">rhel</option>
             </select>
-            <select value={connectionState} onChange={(e) => setConnectionState(e.target.value)}>
+            <select value={connectionState} onChange={(e) => { setConnectionState(e.target.value); setRefusal(""); }}>
               <option value="">{t("state: any")}</option>
               <option value="online">{t("online")}</option>
               <option value="offline">{t("offline")}</option>
@@ -188,6 +197,12 @@ export function Hosts() {
               {RELEASE_CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </Toolbar>
+          {refusal && (
+            <p className="source">
+              {t("Showing the hosts the gateway last refused for: {reason}.", { reason: t(refusalName(refusal)) })}{" "}
+              <button type="button" className="link" onClick={() => setRefusal("")}>{t("show all")}</button>
+            </p>
+          )}
 
           {hosts.isLoading ? (
             <Empty>{t("Loading…")}</Empty>
@@ -235,7 +250,22 @@ export function Hosts() {
                         )}
                       </div>
                     </td>
-                    <td><ConnectionState state={host.connection_state} /></td>
+                    {/* An offline host with a refusal on record is not
+                        merely away: the gateway turned it down, and the
+                        reason stands under the badge rather than in a
+                        trail nobody reads for a host that looks switched
+                        off. */}
+                    <td>
+                      <ConnectionState state={host.connection_state} />
+                      {host.last_connection_refusal && host.connection_state !== "online" && (
+                        <div className="source" title={host.last_connection_refusal.detail}>
+                          {t("refused: {reason} {when}", {
+                            reason: t(refusalName(host.last_connection_refusal.code)),
+                            when: relativeTime(host.last_connection_refusal.at),
+                          })}
+                        </div>
+                      )}
+                    </td>
                     <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
                     <td>{host.site}</td>
                     <td>{host.environment}</td>

@@ -7,7 +7,7 @@ import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
   Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
-  useHost, useModule,
+  useHost, useModule, useModuleRefresh,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -44,6 +44,8 @@ export function Processes() {
   const host = useHost();
   const queryClient = useQueryClient();
   const module = useModule<Snapshot>(host.id, "processes");
+  // The snapshot lands in the inventory when the read is over.
+  const refresh = useModuleRefresh(host.id, ["processes"]);
   const [sort, setSort] = useState("rss");
   const [filter, setFilter] = useState("");
   const [tree, setTree] = useState(false);
@@ -62,6 +64,7 @@ export function Processes() {
       );
       setToSignal(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      refresh(job);
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });

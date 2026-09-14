@@ -433,6 +433,23 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 		})
 	}
 
+	// The jobs ordered one by one that stand in the queue for a budget, by
+	// the key that had no room. A campaign's waiting hosts are counted above
+	// under awaiting_budget; a job ordered by hand has no campaign to be
+	// counted under, and without this series a full budget shows only in a
+	// job list somebody happens to be looking at.
+	if grouped, err := c.groupCount(ctx, `
+		select substr(wait_reason, length('awaiting_budget:') + 1), count(*)
+		  from jobs
+		 where state = 'queued' and wait_reason like 'awaiting_budget:%'
+		 group by 1`); err == nil && len(grouped) > 0 {
+		result = append(result, metric{
+			name: "flotestro_jobs_awaiting_budget", kind: "gauge",
+			help:    "Single-host jobs standing in the queue for a budget, by budget key.",
+			samples: labelled("budget", grouped),
+		})
+	}
+
 	// The longest current wait for capacity. There is no histogram here: the
 	// collector renders series straight from the queries, and an invented
 	// histogram with buckets computed after the fact would lie about the

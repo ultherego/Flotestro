@@ -308,8 +308,13 @@ func run() error {
 	// The trust set changes when the CA is exchanged, so the verification of
 	// a client reads it at every handshake instead of holding a copy from the
 	// moment of the start.
+	// The verifier takes the place of the built-in check: it verifies the
+	// chain the same way, and it also names the host behind an expired
+	// certificate on the host's row, which the built-in check cannot do.
+	// It is built once the stores exist and read at every handshake.
+	var clientVerifier *gateway.ClientVerifier
 	clientTrust := func(*tls.ClientHelloInfo) (*tls.Config, error) {
-		return &tls.Config{
+		config := &tls.Config{
 			Certificates: []tls.Certificate{serverCert},
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 			ClientCAs:    trust.Pool(),
@@ -319,7 +324,11 @@ func run() error {
 			// the negotiation ends at HTTP/1.1 and a bidirectional stream has
 			// no way of working.
 			NextProtos: []string{"h2"},
-		}, nil
+		}
+		if clientVerifier != nil {
+			clientVerifier.Apply(config)
+		}
+		return config, nil
 	}
 
 	hostStore := hosts.NewStore(pool)
@@ -331,6 +340,7 @@ func run() error {
 	relayStore := relays.NewStore(pool)
 	authzStore := authz.NewStore(pool)
 	recorder := audit.NewRecorder(pool, log)
+	clientVerifier = gateway.NewClientVerifier(trust.Pool, hostStore, recorder, log)
 	registry := gateway.NewRegistry()
 
 	// The agent gateway: mTLS is mandatory, the identity comes from the
@@ -702,6 +712,9 @@ func run() error {
 	// The leases of the secrets are created at the moment a job is delivered:
 	// the short window starts when the host starts working.
 	dispatcher.SetSecrets(secretStore)
+	// The same budget store the campaigns lease from: a single job and a
+	// campaign target compete for the same tokens.
+	dispatcher.SetBudgets(budgetStore)
 	go dispatcher.Run(ctx)
 
 	// The budgets answer a question other than the limit of a campaign: not

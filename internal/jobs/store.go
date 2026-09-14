@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/paging"
@@ -51,6 +52,10 @@ type Spec struct {
 	// by it, and the result of every host is read from its own job.
 	FanoutID      string
 	Preconditions Preconditions
+	// Class is the urgency the job asks for capacity with, when the order
+	// stated one. Empty is not a class: the scheduler derives one from the
+	// operation and its author at dispatch time.
+	Class budgets.Class
 }
 
 // Preconditions are checked by the agent right before execution.
@@ -92,12 +97,19 @@ type Job struct {
 	ApprovedAt         *time.Time      `json:"approved_at,omitempty"`
 	CanceledBy         string          `json:"canceled_by,omitempty"`
 	CancelReason       string          `json:"cancel_reason,omitempty"`
-	ResultStatus       string          `json:"result_status,omitempty"`
-	ResultErrorCode    string          `json:"result_error_code,omitempty"`
-	ResultMessage      string          `json:"result_message,omitempty"`
-	FinishedAt         *time.Time      `json:"finished_at,omitempty"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
+	// WaitReason says why a queued job has not been taken yet: the budget
+	// it waits for, as awaiting_budget:<key>. A job standing in the queue
+	// with no reason given looks like a forgotten job.
+	WaitReason string `json:"wait_reason,omitempty"`
+	// BudgetClass is the class the order stated; empty means it was left
+	// to the scheduler to derive.
+	BudgetClass     string     `json:"budget_class,omitempty"`
+	ResultStatus    string     `json:"result_status,omitempty"`
+	ResultErrorCode string     `json:"result_error_code,omitempty"`
+	ResultMessage   string     `json:"result_message,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // Attempt describes one attempt at carrying out a task.
@@ -179,9 +191,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		insert into jobs (id, host_id, action_type, action_version, payload, payload_hash,
 		                  idempotency_key, state, requires_approval, preconditions,
 		                  timeout_seconds, max_output_bytes, expires_at, created_by, request_id,
-		                  campaign_id, required_approvals, fanout_id)
+		                  campaign_id, required_approvals, fanout_id, budget_class)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        nullif($16, '')::uuid, $17, nullif($18, '')::uuid)
+		        nullif($16, '')::uuid, $17, nullif($18, '')::uuid, $19)
 		on conflict (host_id, idempotency_key) do nothing
 		returning id`
 	jobID := uuid.NewString()
@@ -189,7 +201,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApproval,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
 		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, requiredApprovals(spec),
-		spec.FanoutID).Scan(&jobID)
+		spec.FanoutID, string(spec.Class)).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The same idempotency key returns the existing task instead of
 		// creating a second one. A repeated order is not an error.
@@ -302,7 +314,7 @@ func requiredApprovals(spec Spec) int {
 func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
 	const query = `
 		update jobs set state = $2, canceled_by = $3, canceled_at = now(),
-		                cancel_reason = $4, finished_at = now(), updated_at = now()
+		                cancel_reason = $4, wait_reason = '', finished_at = now(), updated_at = now()
 		where id = $1
 		  and state in ('planned', 'awaiting_approval', 'queued', 'leased', 'dispatched', 'running')
 		returning id`
@@ -312,6 +324,9 @@ func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason stri
 		return nil, ErrConflict
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := releaseBudgets(ctx, tx, jobID); err != nil {
 		return nil, err
 	}
 	return s.getTx(ctx, tx, "where id = $1", jobID)
@@ -327,14 +342,20 @@ func (s *Store) CancelUndelivered(ctx context.Context, tx pgx.Tx, hostID, actor,
 	reason string) (int, error) {
 	const query = `
 		update jobs set state = $2, canceled_by = $3, canceled_at = now(),
-		                cancel_reason = $4, finished_at = now(), updated_at = now()
+		                cancel_reason = $4, wait_reason = '', finished_at = now(), updated_at = now()
 		where host_id = $1::uuid
-		  and state in ('planned', 'awaiting_approval', 'queued', 'leased')`
-	tag, err := tx.Exec(ctx, query, hostID, string(StateCanceled), actor, nullable(reason))
+		  and state in ('planned', 'awaiting_approval', 'queued', 'leased')
+		returning id`
+	canceled, err := collectIDs(tx.Query(ctx, query, hostID, string(StateCanceled), actor, nullable(reason)))
 	if err != nil {
 		return 0, err
 	}
-	return int(tag.RowsAffected()), nil
+	// A leased job may already hold budget tokens; a canceled one holds
+	// nothing.
+	if err := releaseBudgets(ctx, tx, canceled...); err != nil {
+		return 0, err
+	}
+	return len(canceled), nil
 }
 
 // OpenTasksOfAction returns the host's unfinished tasks of a given action
@@ -386,12 +407,67 @@ type LeasedJob struct {
 	Attempt   int
 }
 
-// Lease takes the tasks ready to run for the given hosts and gives them a
-// lease. SKIP LOCKED means parallel workers neither block each other nor take
-// the same task.
-func (s *Store) Lease(ctx context.Context, gatewayID string, hostIDs []string,
-	limit int, leaseDuration time.Duration) ([]LeasedJob, error) {
+// Candidate is a queued task the scheduler weighs before taking it,
+// together with the site of its host: the site is what the budgets are
+// keyed by, and the task itself does not carry it.
+type Candidate struct {
+	Job  Job
+	Site string
+}
+
+// Queued lists the tasks ready to run on the given hosts, oldest first,
+// without taking them.
+//
+// Taking a task and deciding whether the fleet can carry it are two steps
+// on purpose: a task refused by a budget must stay in the queue as it was,
+// with no attempt opened for it - otherwise every pass of the scheduler
+// would leave a record of an attempt that never went anywhere.
+func (s *Store) Queued(ctx context.Context, hostIDs []string, limit int) ([]Candidate, error) {
 	if len(hostIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	queued, err := s.queryJobs(ctx, s.pool, `
+		where state = 'queued'
+		  and host_id = any($1)
+		  and expires_at > now()
+		order by created_at
+		limit $2`, hostIDs, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing the queued tasks: %w", err)
+	}
+	if len(queued) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `select id::text, site from hosts where id = any($1)`, hostIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sites := map[string]string{}
+	for rows.Next() {
+		var id, site string
+		if err := rows.Scan(&id, &site); err != nil {
+			return nil, err
+		}
+		sites[id] = site
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	candidates := make([]Candidate, 0, len(queued))
+	for _, job := range queued {
+		candidates = append(candidates, Candidate{Job: job, Site: sites[job.HostID]})
+	}
+	return candidates, nil
+}
+
+// LeaseJobs takes the given tasks, provided they are still queued, and
+// gives each a lease. SKIP LOCKED means parallel workers neither block each
+// other nor take the same task; a task somebody else took or canceled in
+// the meantime is simply missing from the result.
+func (s *Store) LeaseJobs(ctx context.Context, gatewayID string, jobIDs []string,
+	leaseDuration time.Duration) ([]LeasedJob, error) {
+	if len(jobIDs) == 0 {
 		return nil, nil
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -403,37 +479,25 @@ func (s *Store) Lease(ctx context.Context, gatewayID string, hostIDs []string,
 	const selectQuery = `
 		select id from jobs
 		where state = 'queued'
-		  and host_id = any($1)
+		  and id = any($1)
 		  and expires_at > now()
 		order by created_at
-		limit $2
 		for update skip locked`
-	rows, err := tx.Query(ctx, selectQuery, hostIDs, limit)
+	taken, err := collectIDs(tx.Query(ctx, selectQuery, jobIDs))
 	if err != nil {
 		return nil, fmt.Errorf("taking the tasks: %w", err)
 	}
-	var jobIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		jobIDs = append(jobIDs, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(jobIDs) == 0 {
+	if len(taken) == 0 {
 		return nil, tx.Commit(ctx)
 	}
 
-	leased := make([]LeasedJob, 0, len(jobIDs))
+	leased := make([]LeasedJob, 0, len(taken))
 	deadline := time.Now().Add(leaseDuration)
-	for _, jobID := range jobIDs {
+	for _, jobID := range taken {
+		// A task that is taken no longer waits: the reason it stood in the
+		// queue goes away together with the queue state.
 		if _, err := tx.Exec(ctx,
-			`update jobs set state = $2, updated_at = now() where id = $1`,
+			`update jobs set state = $2, wait_reason = '', updated_at = now() where id = $1`,
 			jobID, string(StateLeased)); err != nil {
 			return nil, err
 		}
@@ -462,6 +526,28 @@ func (s *Store) Lease(ctx context.Context, gatewayID string, hostIDs []string,
 		return nil, err
 	}
 	return leased, nil
+}
+
+// SetWaitReason records why a queued task was not taken. The write happens
+// only when the reason changes: the scheduler asks every few seconds, and
+// a task waiting a quarter of an hour must not be rewritten hundreds of
+// times to say the same thing.
+func (s *Store) SetWaitReason(ctx context.Context, jobID, reason string) error {
+	_, err := s.pool.Exec(ctx, `
+		update jobs set wait_reason = $2, updated_at = now()
+		where id = $1 and state = 'queued' and wait_reason <> $2`, jobID, reason)
+	return err
+}
+
+// InFlight lists the tasks between the lease and the result that were
+// admitted one by one - the ones whose budget tokens the scheduler has to
+// keep alive. A campaign's and a fan-out's tasks hold tokens under their
+// campaign target and fan-out, which renew themselves.
+func (s *Store) InFlight(ctx context.Context) ([]string, error) {
+	return collectIDs(s.pool.Query(ctx, `
+		select id from jobs
+		where state in ('leased', 'dispatched', 'running')
+		  and campaign_id is null and fanout_id is null`))
 }
 
 // MarkDispatched records handing the task over to the agent.
@@ -503,6 +589,11 @@ func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason strin
 		update job_attempts set finished_at = now(), status = 'released',
 		                        message = $2, lease_expires_at = null
 		where id = $1`, attemptID, reason); err != nil {
+		return err
+	}
+	// The tokens go back with the task: a host that is not there to take
+	// the work must not hold capacity for it until the next attempt.
+	if err := releaseBudgets(ctx, tx, jobID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -594,6 +685,13 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		nullable(result.ErrorCode), nullable(result.Message)); err != nil {
 		return false, err
 	}
+	// A result ends the work, whatever it says: the capacity the task held
+	// is free the moment the settlement is.
+	if jobState.Terminal() {
+		if err := releaseBudgets(ctx, tx, jobID); err != nil {
+			return false, err
+		}
+	}
 	return true, tx.Commit(ctx)
 }
 
@@ -650,36 +748,75 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 		update jobs set state = 'queued', updated_at = now()
 		where id in (select job_id from closed)
 		returning id`
-	rows, err := s.pool.Query(ctx, query)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		count++
+	defer func() { _ = tx.Rollback(ctx) }()
+	reclaimed, err := collectIDs(tx.Query(ctx, query))
+	if err != nil {
+		return 0, err
 	}
-	return count, rows.Err()
+	// The task asks for its tokens again when it is taken again; until
+	// then it holds none, so that the capacity of a gateway that vanished
+	// comes back to the fleet with the tasks.
+	if err := releaseBudgets(ctx, tx, reclaimed...); err != nil {
+		return 0, err
+	}
+	return len(reclaimed), tx.Commit(ctx)
 }
 
 // ExpireOverdue marks the tasks that exceeded their TTL before starting.
 func (s *Store) ExpireOverdue(ctx context.Context) (int, error) {
 	const query = `
-		update jobs set state = 'expired', result_status = 'expired',
+		update jobs set state = 'expired', result_status = 'expired', wait_reason = '',
 		                finished_at = now(), updated_at = now()
 		where state in ('planned', 'awaiting_approval', 'queued')
 		  and expires_at <= now()
 		returning id`
-	rows, err := s.pool.Query(ctx, query)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		count++
+	defer func() { _ = tx.Rollback(ctx) }()
+	expired, err := collectIDs(tx.Query(ctx, query))
+	if err != nil {
+		return 0, err
 	}
-	return count, rows.Err()
+	// A queued task holds no tokens, but a lease that outlived a lost
+	// gateway may still be on the books under its name.
+	if err := releaseBudgets(ctx, tx, expired...); err != nil {
+		return 0, err
+	}
+	return len(expired), tx.Commit(ctx)
+}
+
+// releaseBudgets gives back the budget tokens of the given tasks inside the
+// caller's transaction. A task that held none is not an error.
+func releaseBudgets(ctx context.Context, tx pgx.Tx, jobIDs ...string) error {
+	for _, jobID := range jobIDs {
+		if err := budgets.ReleaseIn(ctx, tx, budgets.JobOwner(jobID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// collectIDs reads a single-column result of identifiers.
+func collectIDs(rows pgx.Rows, err error) ([]string, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // Get returns a task.
@@ -914,7 +1051,7 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		       required_approvals,
 		       (select count(*) from job_approvals a where a.job_id = jobs.id),
 		       coalesce((select h.hostname from hosts h where h.id = jobs.host_id), ''),
-		       fanout_id
+		       fanout_id, wait_reason, budget_class
 		from jobs ` + clause
 
 	rows, err := q.Query(ctx, query, args...)
@@ -933,7 +1070,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 			&j.CreatedBy, &j.RequestID, &j.ApprovedBy, &j.ApprovedAt,
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,
 			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
-			&j.RequiredApprovals, &collected, &j.Hostname, &j.FanoutID); err != nil {
+			&j.RequiredApprovals, &collected, &j.Hostname, &j.FanoutID,
+			&j.WaitReason, &j.BudgetClass); err != nil {
 			return nil, err
 		}
 		// Every view of a task carries the number of collected approvals:

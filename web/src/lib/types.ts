@@ -95,10 +95,41 @@ export type Host = {
   management_address?: string;
   management_address_source?: "session" | "agent" | "manual";
   management_address_observed_at?: string;
+  // Why the gateway last turned the host away since its last session.
+  // Absent for a host that connected the last time it tried: a session
+  // that opens clears it.
+  last_connection_refusal?: ConnectionRefusal;
   enrolled_at: string;
   capabilities: Capabilities;
   identity: HostIdentity;
 };
+
+/**
+ * A refusal of the gateway. The certificate codes name the certificate the
+ * host presented; a lifecycle refusal reads lifecycle_<state> and is an
+ * operator's decision rather than a fault of the host.
+ */
+export type ConnectionRefusal = {
+  code: string;
+  at: string;
+  detail?: string;
+};
+
+/** The refusal codes that an identity recovery answers. */
+export const RECOVERABLE_REFUSALS = ["certificate_expired", "unknown_certificate", "revoked_certificate"];
+
+/** The refusal in the operator's words; an unlisted code shows as it came. */
+export function refusalName(code: string): string {
+  switch (code) {
+    case "certificate_expired": return "certificate expired";
+    case "certificate_not_yet_valid": return "certificate not yet valid";
+    case "unknown_certificate": return "certificate unknown";
+    case "revoked_certificate": return "certificate revoked";
+    case "identity_mismatch": return "identity mismatch";
+    default:
+      return code.startsWith("lifecycle_") ? `host ${code.slice("lifecycle_".length)}` : code;
+  }
+}
 
 /**
  * One node of a campaign selector: exactly one field is set. A combinator
@@ -164,6 +195,7 @@ export type FleetSummary = {
   agents_behind_latest?: number;
   latest_agent_version?: string;
   agent_certificates_expiring?: number;
+  agent_certificates_expired?: number;
   degraded_relays?: number;
 };
 
@@ -206,6 +238,12 @@ export type Job = {
   result_status?: string;
   result_error_code?: string;
   result_message?: string;
+  // A queued job that got no capacity says which budget it waits for, as
+  // awaiting_budget:<key>. Absent when nothing holds the job.
+  wait_reason?: string;
+  // The urgency the order stated for the budgets; absent when it was left
+  // to the scheduler.
+  budget_class?: string;
   expires_at: string;
   created_at: string;
   finished_at?: string;

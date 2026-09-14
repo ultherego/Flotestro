@@ -524,9 +524,15 @@ type FleetSummary struct {
 	// panel can order.
 	AgentsBehindLatest *int   `json:"agents_behind_latest,omitempty"`
 	LatestAgentVersion string `json:"latest_agent_version,omitempty"`
-	// AgentCertificatesExpiring counts the hosts whose current agent
-	// certificate runs out within thirty days.
+	// AgentCertificatesExpiring counts the hosts whose newest live agent
+	// certificate runs out within CertificateWarningDays and is still
+	// valid: the agent should have renewed it by now and has not.
 	AgentCertificatesExpiring *int `json:"agent_certificates_expiring,omitempty"`
+	// AgentCertificatesExpired counts the hosts with no valid agent
+	// certificate left, or that the gateway last turned away for an
+	// expired one. Such a host does not come back on its own: it needs an
+	// identity recovery.
+	AgentCertificatesExpired *int `json:"agent_certificates_expired,omitempty"`
 	// DegradedRelays counts the relays in trouble: those that missed their
 	// renewal - a relay certificate lives seven days and renews at a third
 	// left, so one with less than a day is a site about to be cut off - and
@@ -541,6 +547,17 @@ type FleetSummary struct {
 	AlertsFiring   int `json:"alerts_firing"`
 	AlertsCritical int `json:"alerts_critical"`
 }
+
+// CertificateWarningDays is the window of the expiring-certificates tile.
+//
+// An agent certificate lives thirty days and the agent starts renewing it
+// with a third of that left - at ten days - so a window as long as the
+// lifetime would count every host the day its certificate was issued. Seven
+// days is inside the renewal window with margin: a host counted here had
+// three days of chances to renew and took none of them, which is a fault
+// worth a look rather than the normal course of rotation. The agent's
+// threshold lives with the agent; this number must stay under it.
+const CertificateWarningDays = 7
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "fleet")
@@ -642,21 +659,32 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 
 	// The certificate that counts is the host's newest live one: after a
 	// renewal the old certificate stays valid for a while and must not
-	// raise an alarm the new one has already answered.
-	var expiring int
+	// raise an alarm the new one has already answered. A certificate that
+	// has already run out is the other counter's: the two tiles do not
+	// count the same host twice, and one says "look soon" while the other
+	// says "act now".
+	var expiring, expired int
 	err = s.pool.QueryRow(ctx, `
-		select count(*)
-		from hosts h
-		where h.lifecycle_state <> 'retired'
-		  and `+visible+`
-		  and (select max(c.not_after) from agent_certificates c
-		       where c.host_id = h.id and c.revoked_at is null) < now() + interval '30 days'`,
-		args...).Scan(&expiring)
+		with newest as (
+			select h.id, h.last_connection_refusal_code as refusal,
+			       (select max(c.not_after) from agent_certificates c
+			         where c.host_id = h.id and c.revoked_at is null) as not_after
+			from hosts h
+			where h.lifecycle_state <> 'retired'
+			  and `+visible+`
+		)
+		select count(*) filter (where not_after >= now()
+		                          and not_after < now() + make_interval(days => $`+strconv.Itoa(len(args)+1)+`)
+		                          and refusal is distinct from 'certificate_expired'),
+		       count(*) filter (where not_after < now() or refusal = 'certificate_expired')
+		from newest`,
+		append(append([]any{}, args...), CertificateWarningDays)...).Scan(&expiring, &expired)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	summary.AgentCertificatesExpiring = &expiring
+	summary.AgentCertificatesExpired = &expired
 
 	if condition == "" {
 		var degraded int
@@ -721,7 +749,11 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		LifecycleState:  query.Get("lifecycle_state"),
 		Owner:           query.Get("owner"),
 		Capability:      query.Get("capability"),
-		Scopes:          principal.ScopesFor(authz.PermHostRead),
+		// The refusal code narrows to the hosts the gateway last turned
+		// away for that reason - the dashboard's expired-certificates
+		// tile leads here.
+		ConnectionRefusal: query.Get("connection_refusal"),
+		Scopes:            principal.ScopesFor(authz.PermHostRead),
 	}
 	// A channel that is not a channel is refused rather than matched to
 	// nothing.

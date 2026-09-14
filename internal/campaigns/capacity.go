@@ -100,11 +100,8 @@ func (o *Orchestrator) renewCapacity(ctx context.Context, targets []Target) {
 }
 
 // campaignRepository takes the address of the backup repository out of the
-// request.
-//
-// Empty means a campaign that does not touch a backend - not an unknown
-// backend: operations outside the backup module have nothing to look for
-// here.
+// request. The key itself is derived in the budgets package, the same way
+// for a campaign and for a job ordered by hand.
 func campaignRepository(campaign Campaign) string {
 	if len(campaign.Payload) == 0 {
 		return ""
@@ -113,8 +110,5 @@ func campaignRepository(campaign Campaign) string {
 	if err := json.Unmarshal(campaign.Payload, &payload); err != nil {
 		return ""
 	}
-	if payload.Backup == nil {
-		return ""
-	}
-	return payload.Backup.Repository
+	return budgets.RepositoryOf(payload)
 }

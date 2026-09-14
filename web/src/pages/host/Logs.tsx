@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
+import { awaitJob } from "../../lib/jobs";
 import type { Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
 import {
@@ -19,16 +20,6 @@ type FileResult = {
   truncated?: boolean;
   size_bytes?: number;
   allowlist?: string;
-};
-
-type Attempt = {
-  status?: string;
-  error_code?: string;
-  message?: string;
-  detail?: Record<string, unknown>;
-  // A journal read prints its lines on stdout; a file read carries them in
-  // the detail.
-  stdout?: string;
 };
 
 /**
@@ -129,15 +120,12 @@ export function Logs() {
       const job = await api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
 
-      // The read goes through a job, so the screen waits for its result.
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((done) => setTimeout(done, 1500));
-        const attempts = await api.get<{ items: Attempt[] }>(`/api/v1/jobs/${job.id}/attempts`);
-        const last = attempts.items[attempts.items.length - 1];
-        if (!last?.status) continue;
-        return last;
-      }
-      throw new Error(t("The host did not answer in time."));
+      // The read goes through a job, so the screen waits for its result. A
+      // journal read prints its lines on stdout; a file read carries them in
+      // the detail.
+      const last = await awaitJob<Record<string, unknown>>(api, job.id);
+      if (!last) throw new Error(t("The host did not answer in time."));
+      return last;
     },
     onSuccess: (attempt) => {
       setErrorMessage("");

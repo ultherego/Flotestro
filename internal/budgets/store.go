@@ -331,6 +331,18 @@ func (s *Store) Release(ctx context.Context, owner string) error {
 	return err
 }
 
+// ReleaseIn returns the tokens of one piece of work inside the caller's
+// transaction.
+//
+// A job's tokens go back in the same transaction that settles the job: a
+// process that dies between the settlement and a separate release would
+// leave capacity held by work that no longer exists, for as long as the
+// lease lasts - and the next job would wait for room nobody was using.
+func ReleaseIn(ctx context.Context, tx pgx.Tx, owner string) error {
+	_, err := tx.Exec(ctx, `delete from budget_leases where owner = $1`, owner)
+	return err
+}
+
 // ReleaseClaimant returns everything one campaign holds.
 //
 // Cancelling does not go through closing every host one by one: the campaign
@@ -401,6 +413,11 @@ type State struct {
 	Capacity  int    `json:"capacity"`
 	Used      int    `json:"used"`
 	Claimants int    `json:"claimants"`
+	// WaitingJobs counts the single-host jobs standing in the queue for
+	// this budget. A campaign shows its waiting hosts on its own screen; a
+	// job ordered by hand has no screen but the job list, and the budget
+	// that holds it must be visible from the budget's side as well.
+	WaitingJobs int `json:"waiting_jobs"`
 }
 
 // States returns the picture of the budgets that hold anything or have anyone
@@ -419,10 +436,21 @@ func (s *Store) States(ctx context.Context) ([]State, error) {
 		            union
 		            select claimant from budget_waiters w
 		             where w.key = l.key and w.seen_at > now() - make_interval(secs => $1)
-		       ) as asking)
+		       ) as asking),
+		       (select count(*) from jobs j
+		         where j.state = 'queued' and j.wait_reason like $2::text || '%'
+		           and (substr(j.wait_reason, length($2::text) + 1) = l.key
+		                or (split_part(l.key, ':', 2) = '*'
+		                    and split_part(substr(j.wait_reason, length($2::text) + 1), ':', 1) = split_part(l.key, ':', 1)
+		                    and split_part(substr(j.wait_reason, length($2::text) + 1), ':', 3) = split_part(l.key, ':', 3)
+		                    and not exists (select 1 from budget_limits e
+		                                     where e.key = substr(j.wait_reason, length($2::text) + 1)))))
 		  from budget_limits l
 		 order by l.key`
-	rows, err := s.pool.Query(ctx, query, waiterAge.Seconds())
+	// A job waits on the exact key of its site; the row on the screen may
+	// be the pattern that gave the site its capacity. The job counts under
+	// the pattern only when no exact row took the site out from under it.
+	rows, err := s.pool.Query(ctx, query, waiterAge.Seconds(), WaitReasonPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +459,8 @@ func (s *Store) States(ctx context.Context) ([]State, error) {
 	states := []State{}
 	for rows.Next() {
 		var state State
-		if err := rows.Scan(&state.Key, &state.Capacity, &state.Used, &state.Claimants); err != nil {
+		if err := rows.Scan(&state.Key, &state.Capacity, &state.Used, &state.Claimants,
+			&state.WaitingJobs); err != nil {
 			return nil, err
 		}
 		states = append(states, state)

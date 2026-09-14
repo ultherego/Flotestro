@@ -202,6 +202,20 @@ func split(key string) []string {
 	return append(parts, key[start:])
 }
 
+// RepositoryOf takes the address of the backup repository out of a payload.
+//
+// Empty means an operation that does not touch a backend - not an unknown
+// backend: operations outside the backup module have nothing to look for
+// here. Both the campaign and the scheduler derive the backend key from it,
+// so that a copy ordered by hand and one ordered in a campaign land in the
+// same budget.
+func RepositoryOf(payload opspec.Payload) string {
+	if payload.Backup == nil {
+		return ""
+	}
+	return payload.Backup.Repository
+}
+
 // Needs lists the budgets one operation loads on one host.
 //
 // What is not here: a gateway budget and a failure domain budget. The panel
@@ -209,15 +223,19 @@ func split(key string) []string {
 // them to be absent than to pretend to be a limit computed out of nothing.
 // Adding them means adding entries to this list.
 func Needs(action opspec.ActionType, site, repository string) []Need {
+	// An operation the registry does not describe is not a read just
+	// because nothing says it changes anything: unknown is not harmless,
+	// so it asks for the scarcer capacity.
+	mutating := action.Mutating() || !action.Known()
 	global := KeyGlobalReads
-	if action.Mutating() {
+	if mutating {
 		global = KeyGlobalMutations
 	}
 	needs := []Need{{Key: global, Weight: 1}}
 
 	// The site budget applies to changes. Reads load the host and its link,
 	// and those have their own limits on the agent side.
-	if action.Mutating() {
+	if mutating {
 		if key := SiteKey(site, SiteFamily(action)); key != "" {
 			needs = append(needs, Need{Key: key, Weight: 1})
 		}
@@ -238,4 +256,65 @@ func Needs(action opspec.ActionType, site, repository string) []Need {
 		}
 	}
 	return needs
+}
+
+// JobOwner names the budget owner of a single-host job.
+//
+// The owner is the job rather than the attempt: an attempt that lost its
+// lease and went back to the queue is the same load asking again, and the
+// grant it held must replace itself rather than count twice.
+func JobOwner(jobID string) string { return "job:" + jobID }
+
+// JobClaimant names the unit of fairness of a single-host job: the identity
+// that ordered it. One operator clicking through twenty hosts is one
+// claimant, the way a campaign over twenty hosts is - otherwise the twenty
+// clicks would have twenty times the share of the campaign.
+func JobClaimant(createdBy string) string { return "jobs:" + createdBy }
+
+// WaitReasonPrefix starts the wait reason of a job that got no tokens; the
+// key of the budget that had no room follows it.
+const WaitReasonPrefix = "awaiting_budget:"
+
+// WaitReason spells out why a job stays in the queue: the budget it waits
+// for, by key. The list of jobs shows it and the metrics count it, so it is
+// one fixed form rather than a sentence.
+func WaitReason(refusal Refusal) string {
+	if refusal.Empty() {
+		return ""
+	}
+	return WaitReasonPrefix + refusal.Key
+}
+
+// WaitedKey reads the budget key back out of a wait reason. Empty means the
+// job was not waiting on a budget.
+func WaitedKey(reason string) string {
+	if !strings.HasPrefix(reason, WaitReasonPrefix) {
+		return ""
+	}
+	return strings.TrimPrefix(reason, WaitReasonPrefix)
+}
+
+// PanelAuthorPrefix marks a job the panel ordered on its own: a
+// vulnerability sweep, a scheduled refresh. Such work is background - it
+// must never make an operator wait.
+const PanelAuthorPrefix = "flotestro/"
+
+// JobClass decides how urgently a single-host job asks for capacity.
+//
+// A class the request stated wins: the operator knows whether a restart is
+// an incident response, and the panel does not. Without one the class comes
+// from what can be seen - the panel's own sweeps are background, locking an
+// account is the textbook incident response, and everything else is an
+// operator working on one host.
+func JobClass(action opspec.ActionType, createdBy string, stated Class) Class {
+	if Known(stated) {
+		return stated
+	}
+	if strings.HasPrefix(createdBy, PanelAuthorPrefix) {
+		return ClassBackground
+	}
+	if action == opspec.ActionLocalUserLock {
+		return ClassIncident
+	}
+	return ClassInteractive
 }

@@ -62,9 +62,12 @@ function AreaCard({ area }: { area: SettingsArea }) {
 
 function FactValue({ fact }: { fact: SettingsFact }) {
   const t = useT();
+  // A secret says only whether it is set. The server masks the value, but
+  // the screen does not print it either way: what it gets is not its to
+  // show, masked or not.
   if (fact.secret) {
     return fact.configured
-      ? <span className="mono" title={t("The value is set; it is never shown here.")}>{String(fact.value)} <span className="source">{t("set")}</span></span>
+      ? <span className="badge ok" title={t("The value is set; it is never shown here.")}>{t("set")}</span>
       : <span className="badge unknown">{t("not set")}</span>;
   }
   const value = fact.value;

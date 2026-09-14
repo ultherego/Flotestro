@@ -7,7 +7,7 @@ import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule, useReadOperation,
+  Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule, useModuleRefresh, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -105,6 +105,9 @@ export function Storage() {
   const host = useHost();
   const queryClient = useQueryClient();
   const module = useModule<Snapshot>(host.id, "storage");
+  // The image of the storage lands in the inventory when a read or a
+  // change is over: every operation sends it back after itself.
+  const refresh = useModuleRefresh(host.id, ["storage"]);
   const [intent, setIntent] = useState<Intent | null>(null);
   const [smartOf, setSmartOf] = useState<Device | null>(null);
   const [message, setMessage] = useState("");
@@ -123,6 +126,7 @@ export function Storage() {
       setIntent(null);
       setWizard(false);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      refresh(job);
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });

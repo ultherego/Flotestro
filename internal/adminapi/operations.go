@@ -13,6 +13,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/budgets"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
@@ -39,6 +40,22 @@ type createOperationRequest struct {
 	// reboot the job is rejected instead of running against a different
 	// state.
 	PinBootID bool `json:"pin_boot_id,omitempty"`
+	// Class is how urgently the job asks the budgets for capacity. An
+	// operator may say a restart is an incident response; left out, the
+	// scheduler derives the class from the operation and its author.
+	Class string `json:"class,omitempty"`
+}
+
+// requestedClass reads the budget class of an order. Only the classes an
+// operator can claim are accepted: maintenance is what a campaign is, and
+// background is the panel's own work - neither is a thing to ask for by hand.
+func requestedClass(value string) (budgets.Class, bool) {
+	class := budgets.Class(strings.TrimSpace(value))
+	switch class {
+	case "", budgets.ClassIncident, budgets.ClassInteractive:
+		return class, true
+	}
+	return "", false
 }
 
 // lifecycleRefusal puts a state that takes no operation into words.
@@ -102,6 +119,12 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// interface can tell it from a typo in the order.
 	if err := opspec.Validate(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
+		return
+	}
+	class, ok := requestedClass(request.Class)
+	if !ok {
+		problem(w, http.StatusBadRequest, "invalid_request",
+			"class must be incident or interactive, or left out")
 		return
 	}
 
@@ -259,6 +282,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:        actor,
 		RequestID:        requestIDOf(r),
 		Preconditions:    preconditions,
+		Class:            class,
 	})
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_operation", err.Error())

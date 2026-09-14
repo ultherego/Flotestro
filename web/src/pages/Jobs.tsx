@@ -212,6 +212,14 @@ export function Jobs() {
                       </td>
                       <td>
                         <JobState state={job.state} />
+                        {/* A queued job the budgets refused says so next to its
+                            state: without the key it stands in the queue for no
+                            visible reason and looks like a forgotten job. */}
+                        {job.state === "queued" && waitedBudget(job.wait_reason) && (
+                          <span className="badge warn" title={t("The fleet or the site has no free capacity for this operation; the job starts when a token of this budget is free.")}>
+                            {t("waiting for budget {key}", { key: waitedBudget(job.wait_reason) })}
+                          </span>
+                        )}
                         {/* The bar accompanies the state, it does not replace it:
                             the operator is to see both that the operation runs
                             and how far it got. */}
@@ -274,6 +282,12 @@ export function Jobs() {
       </div>
     </>
   );
+}
+
+/** The budget key out of a wait reason; empty when the job waits on no budget. */
+function waitedBudget(reason?: string): string {
+  const prefix = "awaiting_budget:";
+  return reason?.startsWith(prefix) ? reason.slice(prefix.length) : "";
 }
 
 /** The job execution attempts together with the result typed for the given operation. */

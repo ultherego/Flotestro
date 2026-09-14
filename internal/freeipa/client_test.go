@@ -18,13 +18,17 @@ import (
 
 // countingDirectory stands in for the two doors of the directory: the
 // Kerberos session door and the JSON-RPC door. It counts the knocks on each
-// and answers the RPC door with whatever status the test set, so the test
-// sees how many times the adapter came back rather than what it asked.
+// and answers the RPC door with whatever status and body the test set, so
+// the test sees how many times the adapter came back rather than what it
+// asked.
 type countingDirectory struct {
 	server    *httptest.Server
 	logins    atomic.Int64
 	calls     atomic.Int64
 	rpcStatus atomic.Int64
+	// rpcBody is the answer of the RPC door on a 200; empty means an empty
+	// result with no error.
+	rpcBody atomic.Value
 }
 
 func newCountingDirectory(t *testing.T, rpcStatus int) *countingDirectory {
@@ -41,7 +45,11 @@ func newCountingDirectory(t *testing.T, rpcStatus int) *countingDirectory {
 			status := int(fake.rpcStatus.Load())
 			w.WriteHeader(status)
 			if status == http.StatusOK {
-				_, _ = w.Write([]byte(`{"result":{"result":{}},"error":null}`))
+				body, _ := fake.rpcBody.Load().(string)
+				if body == "" {
+					body = `{"result":{"result":{}},"error":null}`
+				}
+				_, _ = w.Write([]byte(body))
 			}
 		default:
 			http.NotFound(w, r)
@@ -187,6 +195,31 @@ func TestACallReLogsInOnceAfterA401AndThenGivesUp(t *testing.T) {
 	}
 	if fake.calls.Load() != 1 {
 		t.Fatalf("a query went out on a session known to be dead: %d queries", fake.calls.Load())
+	}
+}
+
+// TestACallDoesNotReLogInOnAnErrorThatMerelyMentions401 pins the signal
+// of an expired session to the status of the answer. A command the
+// directory refuses on a live session comes back as the refusal, whatever
+// its text says - a message with "401" in it is not a dead session, and a
+// re-login would hide the real error behind a Kerberos one.
+func TestACallDoesNotReLogInOnAnErrorThatMerelyMentions401(t *testing.T) {
+	fake := newCountingDirectory(t, http.StatusOK)
+	fake.rpcBody.Store(`{"result":null,"error":{"code":4001,"message":"web401.flotestro.test: host not found","name":"NotFound"}}`)
+	client := fake.clientWithoutATicket(true)
+
+	_, err := client.call(context.Background(), "host_show", []string{"web401.flotestro.test"}, map[string]any{})
+	if err == nil {
+		t.Fatal("a call the directory answered with an error succeeded")
+	}
+	if !strings.Contains(err.Error(), "host not found") || strings.Contains(err.Error(), "Kerberos login") {
+		t.Fatalf("the error is not the directory's refusal: %v", err)
+	}
+	if fake.logins.Load() != 0 || fake.calls.Load() != 1 {
+		t.Fatalf("%d logins and %d queries for one refused call", fake.logins.Load(), fake.calls.Load())
+	}
+	if !client.logged {
+		t.Fatal("the client dropped a session the directory did not refuse")
 	}
 }
 

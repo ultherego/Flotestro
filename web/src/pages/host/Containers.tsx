@@ -7,7 +7,7 @@ import { bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader,
-  ModulePage, Section, Summary as SummaryBar, Table, Widgets, useHost, useModule, useReadOperation,
+  ModulePage, Section, Summary as SummaryBar, Table, Widgets, useHost, useModule, useModuleRefresh, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -150,6 +150,8 @@ export function Containers() {
   const summary = useModule<Summary>(host.id, "containers");
   const full = useModule<FullState>(host.id, "containers.full");
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  // The state of the containers lands in the inventory when the read is over.
+  const refetch = useModuleRefresh(host.id, ["containers", "containers.full"]);
 
   const refresh = useMutation({
     mutationFn: () =>
@@ -157,7 +159,10 @@ export function Containers() {
         action: "docker.read",
         payload: { docker_read: {} },
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs", host.id] }),
+    onSuccess: (job) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      refetch(job);
+    },
   });
 
   // Reversible operations go straight through; irreversible ones pass
@@ -173,6 +178,7 @@ export function Containers() {
       );
       setPending(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      refetch(job);
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });

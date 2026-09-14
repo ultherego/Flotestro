@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Host, Job, Whoami } from "../../lib/types";
+import { refusalName, type Host, type Job, type Whoami } from "../../lib/types";
+import { relativeTime } from "../../lib/format";
 import { Time, ConnectionState } from "../../components/ui";
 import { module as findModule } from "./modules";
 import { useT } from "../../i18n";
@@ -33,6 +34,7 @@ export function ContextBar({ host, segment, campaign }: {
           here would only push the facts down. */}
       <div className="host-header-title">
         <ConnectionState state={host.connection_state} />
+        <ConnectionRefusal host={host} />
         <MaintenanceWindow host={host} />
       </div>
       <div className="host-header-facts">
@@ -227,6 +229,33 @@ function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
 /** The terminal job states. Outside them it is worth asking further. */
 function finished(state: string | undefined): boolean {
   return ["succeeded", "failed", "timed_out", "canceled", "expired"].includes(state ?? "");
+}
+
+/**
+ * The refusal badge: the gateway turned the host away, and this is why.
+ *
+ * It stands next to the connection state because it changes what that
+ * state means - an offline host with a refusal is alive and knocking, not
+ * away - and it leads to the lifecycle card of the overview, where the
+ * identity recovery that answers it is ordered.
+ */
+function ConnectionRefusal({ host }: { host: Host }) {
+  const t = useT();
+  const refusal = host.last_connection_refusal;
+  if (!refusal || host.connection_state === "online") return null;
+  return (
+    <Link
+      className="badge error"
+      to={`/hosts/${host.id}/overview`}
+      title={refusal.detail || t("the gateway refused the last connection of this host")}
+      data-testid="connection-refusal-badge"
+    >
+      {t("connection refused: {reason} {when}", {
+        reason: t(refusalName(refusal.code)),
+        when: relativeTime(refusal.at),
+      })}
+    </Link>
+  );
 }
 
 /**

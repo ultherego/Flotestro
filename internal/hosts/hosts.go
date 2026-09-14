@@ -247,11 +247,49 @@ type Host struct {
 	ManagementAddressObservedAt *time.Time `json:"management_address_observed_at,omitempty"`
 	// Maintenance is the maintenance window. An empty field means a host
 	// outside a window, not a window of zero length.
-	Maintenance  *MaintenanceWindow `json:"maintenance,omitempty"`
-	Identity     HostIdentity       `json:"identity"`
-	EnrolledAt   time.Time          `json:"enrolled_at"`
-	Capabilities Capabilities       `json:"capabilities"`
+	Maintenance *MaintenanceWindow `json:"maintenance,omitempty"`
+	// LastConnectionRefusal is why the gateway last turned the host away
+	// since its last session. Absent for a host that connected the last
+	// time it tried: a session that opens clears it, so an old refusal
+	// never outlives a reconnect.
+	LastConnectionRefusal *ConnectionRefusal `json:"last_connection_refusal,omitempty"`
+	Identity              HostIdentity       `json:"identity"`
+	EnrolledAt            time.Time          `json:"enrolled_at"`
+	Capabilities          Capabilities       `json:"capabilities"`
 }
+
+// ConnectionRefusal is the reason the gateway would not open a session for
+// the host, as the host page and the fleet list show it.
+type ConnectionRefusal struct {
+	Code string    `json:"code"`
+	At   time.Time `json:"at"`
+	// Detail is what the gateway saw - the serial and the validity of the
+	// certificate, or the state of the host - for the operator who wants
+	// more than the code.
+	Detail string `json:"detail,omitempty"`
+}
+
+// The refusal codes of the gateway. The certificate ones name the
+// certificate the host presented; a lifecycle refusal is spelled as
+// lifecycle_<state> and is a decision of an operator rather than a fault of
+// the host.
+const (
+	// RefusalCertificateExpired is an agent that missed its renewal: the
+	// remedy is an identity recovery ordered from the panel.
+	RefusalCertificateExpired = "certificate_expired"
+	// RefusalCertificateNotYetValid is a certificate from the future -
+	// the clock of the host or of the panel is wrong.
+	RefusalCertificateNotYetValid = "certificate_not_yet_valid"
+	// RefusalUnknownCertificate is a certificate the panel never issued or
+	// no longer has on record.
+	RefusalUnknownCertificate = "unknown_certificate"
+	// RefusalRevokedCertificate is a certificate an operator or a
+	// replacement withdrew.
+	RefusalRevokedCertificate = "revoked_certificate"
+	// RefusalIdentityMismatch is a certificate on record for another host
+	// than the one it names.
+	RefusalIdentityMismatch = "identity_mismatch"
+)
 
 // MaintenanceWindow describes a host's maintenance window.
 //
@@ -668,8 +706,14 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 			boot_id          = coalesce(nullif($3, ''), boot_id),
 			connection_state = 'online',
 			last_seen_at     = now(),
-			updated_at       = now()
+			updated_at       = now(),
+			last_connection_refusal_code   = null,
+			last_connection_refusal_at     = null,
+			last_connection_refusal_detail = null
 		where id = $1`
+	// The refusal goes with the session that opens: whatever kept the host
+	// out is over, and a reason left standing would send the operator after
+	// a fault the host no longer has.
 	if _, err := tx.Exec(ctx, hostQuery, hostID, agentVersion, bootID); err != nil {
 		return fmt.Errorf("updating the host: %w", err)
 	}
@@ -746,6 +790,32 @@ func (s *Store) MarkDisconnected(ctx context.Context, hostID string) error {
 	return err
 }
 
+// RecordConnectionRefusal writes down why the gateway turned the host away.
+// The row keeps the newest refusal alone: the trail has every one of them,
+// and the host needs only the reason it is not connected now.
+//
+// The identity comes from a certificate, so it is checked for the shape of
+// an identifier before it reaches the query: a name that is not one matches
+// no host, and must not turn into a query error either. False means no host
+// of that identifier.
+func (s *Store) RecordConnectionRefusal(ctx context.Context, hostID, code, detail string) (bool, error) {
+	if _, err := uuid.Parse(hostID); err != nil {
+		return false, nil
+	}
+	const query = `
+		update hosts
+		   set last_connection_refusal_code   = $2,
+		       last_connection_refusal_at     = now(),
+		       last_connection_refusal_detail = nullif($3, ''),
+		       updated_at                     = now()
+		 where id = $1`
+	tag, err := s.pool.Exec(ctx, query, hostID, code, detail)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // Get returns a single host.
 func (s *Store) Get(ctx context.Context, hostID string) (*Host, error) {
 	rows, err := s.query(ctx, "where h.id = $1", hostID)
@@ -783,6 +853,10 @@ type ListFilter struct {
 	Tags []string
 	// Channel keeps the hosts on the given release channel.
 	Channel string
+	// ConnectionRefusal keeps the hosts the gateway last turned away for
+	// the given reason, so the dashboard counter leads to the hosts it
+	// counted.
+	ConnectionRefusal string
 	// IDs keeps the named hosts. Nil does not narrow; an empty list keeps
 	// nothing, because a list of nobody names nobody.
 	IDs []string
@@ -820,6 +894,7 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	add("h.lifecycle_state", f.LifecycleState)
 	add("h.owner", f.Owner)
 	add("h.release_channel", f.Channel)
+	add("h.last_connection_refusal_code", f.ConnectionRefusal)
 
 	if f.Search != "" {
 		// A tag is one of the things an operator remembers about a host,
@@ -1098,6 +1173,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.identity_sssd_online, h.identity_checked_at,
 		       h.maintenance_until, coalesce(h.maintenance_reason, ''),
 		       coalesce(h.maintenance_by, ''), h.maintenance_at,
+		       coalesce(h.last_connection_refusal_code, ''), h.last_connection_refusal_at,
+		       coalesce(h.last_connection_refusal_detail, ''),
 		       coalesce(c.rejestr, '[]'::json),
 		       i.payload, i.observed_at
 		from hosts h
@@ -1124,6 +1201,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var h Host
 		var windowUntil, windowFrom *time.Time
 		var windowReason, windowBy string
+		var refusalCode, refusalDetail string
+		var refusalAt *time.Time
 		// The identity module rides along so the verdict on offline logins
 		// is judged from the same facts the host tab shows.
 		var identityPayload []byte
@@ -1139,6 +1218,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
 			&windowUntil, &windowReason, &windowBy, &windowFrom,
+			&refusalCode, &refusalAt, &refusalDetail,
 			&h.Capabilities, &identityPayload, &identityObservedAt); err != nil {
 			return nil, err
 		}
@@ -1159,6 +1239,11 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 				window.SetAt = *windowFrom
 			}
 			h.Maintenance = &window
+		}
+		// A refusal is reported with its moment or not at all: a code
+		// without a time would be a fault nobody can place.
+		if refusalCode != "" && refusalAt != nil {
+			h.LastConnectionRefusal = &ConnectionRefusal{Code: refusalCode, At: *refusalAt, Detail: refusalDetail}
 		}
 		result = append(result, h)
 	}

@@ -4,9 +4,12 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
-import { api, loadedItems } from "../../lib/api";
-import { bytes } from "../../lib/format";
-import type { DecommissionOutcome, Host, HostTimelineItem, HostTimelineKind, HostTimelinePage, Job } from "../../lib/types";
+import { api, ApiError, loadedItems } from "../../lib/api";
+import { bytes, relativeTime } from "../../lib/format";
+import {
+  RECOVERABLE_REFUSALS, refusalName,
+  type DecommissionOutcome, type EnrollmentOrder, type Host, type HostTimelineItem, type HostTimelineKind, type HostTimelinePage, type Job,
+} from "../../lib/types";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
   Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
@@ -123,7 +126,7 @@ export function Overview() {
             the one change that cannot be undone. */}
         <Section
           title={t("Lifecycle")}
-          description={t("Whether the panel trusts this host, and ending that trust.")}
+          description={t("Whether the panel trusts this host, restoring its identity, and ending that trust.")}
           span={12}
           flush
         >
@@ -274,8 +277,9 @@ function lifecycleMeaning(t: (text: string) => string, state: string): string {
 }
 
 /**
- * The lifecycle of the host: the state with the decision behind it, and the
- * decommission.
+ * The lifecycle of the host: the state with the decision behind it, the
+ * refusal that keeps it out if there is one, the recovery of its identity
+ * and the decommission.
  */
 function Lifecycle({ host }: { host: Host }) {
   const t = useT();
@@ -283,17 +287,199 @@ function Lifecycle({ host }: { host: Host }) {
   // the host is retired, and the answer - above all an unconfirmed cleanup
   // - has to stay on screen after that.
   const [outcome, setOutcome] = useState<DecommissionOutcome | null>(null);
+  const refusal = host.connection_state !== "online" ? host.last_connection_refusal : undefined;
+  const alive = host.lifecycle_state !== "retired" && host.lifecycle_state !== "retiring";
   return (
     <>
+      {refusal && <ConnectionRefusalNotice host={host} />}
       <Facts>
         <Fact label={t("State")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
         <Fact label={t("Since")}>{host.lifecycle_changed_at ? <Time value={host.lifecycle_changed_at} /> : "—"}</Fact>
         <Fact label={t("Reason")}>{host.lifecycle_reason || "—"}</Fact>
         <Fact label={t("Meaning")} wide>{lifecycleMeaning(t, host.lifecycle_state)}</Fact>
       </Facts>
+      {alive && <IdentityRecovery host={host} prompted={!!refusal && RECOVERABLE_REFUSALS.includes(refusal.code)} />}
       {outcome && <div className="hm-section-body"><DecommissionResult outcome={outcome} /></div>}
       {host.lifecycle_state !== "retired" && <DecommissionHost host={host} onDone={setOutcome} />}
     </>
+  );
+}
+
+/**
+ * Why the host is not connected, when the gateway is the one that said no.
+ *
+ * An offline host and a refused host look the same from the connection
+ * badge, and the difference is the whole diagnosis: a refused host is
+ * alive and knocking, and the reason names what to do about it. The
+ * certificate refusals are answered by an identity recovery; a lifecycle
+ * refusal is an operator's own decision and is said to be one.
+ */
+function ConnectionRefusalNotice({ host }: { host: Host }) {
+  const t = useT();
+  const refusal = host.last_connection_refusal;
+  if (!refusal) return null;
+  const remedy = RECOVERABLE_REFUSALS.includes(refusal.code)
+    ? t("The agent on the host is alive and connecting, but the gateway will not take its certificate. Order an identity recovery below and run the recovery on the host; nothing else brings it back.")
+    : refusal.code === "certificate_not_yet_valid"
+      ? t("The certificate is from the future: the clock of the host or of the panel is wrong. Fix the time; the agent reconnects on its own.")
+      : refusal.code.startsWith("lifecycle_")
+        ? t("The host is kept out by its lifecycle state, a decision recorded above, not by a fault of its own.")
+        : t("The certificate is on record for another host. Check which machine holds this identity before anything else.");
+  return (
+    <div className="hm-section-body" data-testid="connection-refusal">
+      <Message
+        error
+        text={t("Connection refused: {reason} {when}.", {
+          reason: t(refusalName(refusal.code)),
+          when: relativeTime(refusal.at),
+        })}
+      />
+      <FormNote>{remedy}</FormNote>
+      {refusal.detail && <FormNote><span className="hm-mono">{refusal.detail}</span></FormNote>}
+    </div>
+  );
+}
+
+/** The recovery order as it comes back: the token exists only in this answer. */
+type RecoveryOrder = EnrollmentOrder & { token?: string };
+
+/**
+ * Ordering an identity recovery.
+ *
+ * The host stays in the fleet with its history: the order issues a token
+ * that fits this host alone, and the agent on the machine trades it for a
+ * new key and certificate. Meant for a host whose certificate the gateway
+ * refuses - expired, unknown, revoked - and for a suspected key theft, in
+ * which case the old certificate is cut off at once rather than at the
+ * first session of the new one. Critical: the operator types the hostname
+ * and gives a reason, and the order asks for fresh authentication.
+ */
+function IdentityRecovery({ host, prompted }: { host: Host; prompted: boolean }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [revokeOld, setRevokeOld] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [message, setMessage] = useState("");
+  const [signInAgain, setSignInAgain] = useState(false);
+  const [order, setOrder] = useState<RecoveryOrder | null>(null);
+
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<RecoveryOrder>(`/api/v1/hosts/${host.id}/identity-recovery`, body),
+    onSuccess: (result) => {
+      setOrder(result);
+      setMessage("");
+      setSignInAgain(false);
+      setConfirming(false);
+      setOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => {
+      setConfirming(false);
+      // A stale authentication is a sign-in that comes back here, not a
+      // failure of the order.
+      if (error instanceof ApiError && error.unauthenticated) {
+        setSignInAgain(true);
+        setMessage(t("Fresh authentication is required: sign in again and repeat the order."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  return (
+    <div className="hm-section-body" data-testid="identity-recovery">
+      {order && <RecoveryOrderResult host={host} order={order} />}
+      {!open ? (
+        <FormActions>
+          <button className={prompted ? undefined : "secondary"} onClick={() => setOpen(true)}>
+            {t("Order identity recovery…")}
+          </button>
+        </FormActions>
+      ) : (
+        <Form>
+          <Check checked={revokeOld} onChange={setRevokeOld}>
+            {t("Revoke the old certificate at once (suspected key theft)")}
+          </Check>
+          <FormNote>
+            {revokeOld
+              ? t("The old certificate stops working now: the host loses its session and cannot come back until the recovery is run on it.")
+              : t("The old certificate stays valid for a day, so the host can still be read; it is revoked when the new one opens its first session.")}
+          </FormNote>
+          <FormNote>
+            {t("The host enters recovery: no operations and no secrets until the new certificate has proven it works. The token is shown once and fits this host alone.")}
+          </FormNote>
+          <FormActions>
+            <button onClick={() => setConfirming(true)} disabled={confirming}>
+              {t("Order identity recovery…")}
+            </button>
+            <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+          </FormActions>
+          <Message text={message} error />
+          {signInAgain && (
+            <FormActions>
+              <button
+                className="secondary"
+                onClick={() => {
+                  const target = encodeURIComponent(window.location.pathname);
+                  window.location.href = `/auth/login?step_up=1&redirect=${target}`;
+                }}
+              >
+                {t("Sign in again")}
+              </button>
+            </FormActions>
+          )}
+        </Form>
+      )}
+
+      {confirming && (
+        <TargetConfirmation
+          host={host}
+          label={t("Order identity recovery")}
+          description={t("{host} gets a one-time token for a new key and certificate; its record and history stay. Until the new certificate connects, the host takes no operations.", { host: host.hostname })}
+          busy={request.isPending}
+          onConfirm={(reason) =>
+            request.mutate({
+              reason,
+              description: reason,
+              revoke_old_immediately: revokeOld,
+            })
+          }
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The recovery order and what to do with it on the host. The token is
+ * shown here and never again: it is not stored in the browser and cannot
+ * be read back from the panel.
+ */
+function RecoveryOrderResult({ host, order }: { host: Host; order: RecoveryOrder }) {
+  const t = useT();
+  return (
+    <div className="hm-form" data-testid="recovery-order">
+      <Message text={order.token
+        ? t("The recovery order is placed. Run the command below on the host as root and paste the token when asked.")
+        : t("A recovery order for this host is already open; its token was shown when it was placed.")} />
+      <Facts>
+        <Fact label={t("On the host")} wide>
+          <span className="hm-mono">flotestro-agentctl identity reset --confirm {host.hostname}</span>
+        </Fact>
+        {order.token && (
+          <Fact label={t("Token (shown once)")} wide>
+            <span className="hm-mono" data-testid="recovery-token">{order.token}</span>
+          </Fact>
+        )}
+        <Fact label={t("Expires")}><Time value={order.expires_at} /></Fact>
+        <Fact label={t("Order")}><Link to="/hosts/new">{order.id.slice(0, 8)}</Link></Fact>
+      </Facts>
+    </div>
   );
 }
 

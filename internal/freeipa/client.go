@@ -12,6 +12,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
@@ -202,6 +203,11 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
+// errSessionExpired says the directory no longer accepts the session
+// cookie. It is the one error after which a call logs in again; a refused
+// command or a broken connection comes back as it is, whatever its text.
+var errSessionExpired = errors.New("the directory refused the session")
+
 // call runs a directory command. The command name comes solely from the
 // list of explicitly supported commands, never from a user's request.
 func (c *Client) call(ctx context.Context, method string, args []string, options map[string]any) (json.RawMessage, error) {
@@ -232,7 +238,7 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 		return result, nil
 	}
 	// The directory session expires; one re-login is the normal path.
-	if !strings.Contains(err.Error(), "401") {
+	if !errors.Is(err, errSessionExpired) {
 		return nil, err
 	}
 	c.setLogged(false)
@@ -265,7 +271,7 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("the directory refused the session: 401")
+		return nil, fmt.Errorf("%w: 401", errSessionExpired)
 	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("the directory: code %d", response.StatusCode)

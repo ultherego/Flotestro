@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
+import { awaitJob, type JobAttempt } from "../../lib/jobs";
 import type { Job } from "../../lib/types";
 import { absoluteTime } from "../../lib/format";
 import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
-  useHost, useModule,
+  useHost, useModule, useModuleRefresh,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -56,7 +57,7 @@ type UnitDetail = {
 
 type DetailDocument = { kind?: string; units?: UnitDetail[] };
 
-type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string; detail?: DetailDocument };
+type Attempt = JobAttempt<DetailDocument>;
 
 /**
  * The detail of a read, typed by the panel from the result of the agent. An
@@ -76,6 +77,9 @@ export function Services() {
   const queryClient = useQueryClient();
   const module = useModule<ServicesState>(host.id, "services");
   const listing = useModule<UnitListing>(host.id, "services.full");
+  // The full listing lands in the inventory when the read is over; the
+  // other operations change what the next inventory cycle reports.
+  const refresh = useModuleRefresh(host.id, ["services", "services.full"]);
   const [params] = useSearchParams();
   const [filter, setFilter] = useState("");
   const [activeOnly, setActiveOnly] = useState(false);
@@ -99,6 +103,7 @@ export function Services() {
       );
       setToMask(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      refresh(job);
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
@@ -113,20 +118,15 @@ export function Services() {
         payload: { unit_status: { units: [unit], detail: true } },
       });
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((done) => setTimeout(done, 1500));
-        const attempts = await api.get<{ items: Attempt[] }>(`/api/v1/jobs/${job.id}/attempts`);
-        const last = attempts.items[attempts.items.length - 1];
-        if (!last?.status) continue;
-        if (last.status !== "succeeded") {
-          throw new Error(last.message || last.error_code || t("The host refused the read."));
-        }
-        const document = detailDocumentOf(last);
-        const found = document.units?.find((entry) => entry.state?.name === unit) ?? document.units?.[0];
-        if (!found) throw new Error(t("The host returned no detail for {unit}.", { unit }));
-        return found;
+      const last = await awaitJob<DetailDocument>(api, job.id);
+      if (!last) throw new Error(t("The host did not answer in time."));
+      if (last.status !== "succeeded") {
+        throw new Error(last.message || last.error_code || t("The host refused the read."));
       }
-      throw new Error(t("The host did not answer in time."));
+      const document = detailDocumentOf(last);
+      const found = document.units?.find((entry) => entry.state?.name === unit) ?? document.units?.[0];
+      if (!found) throw new Error(t("The host returned no detail for {unit}.", { unit }));
+      return found;
     },
     onSuccess: (found, unit) => {
       setDetailError("");

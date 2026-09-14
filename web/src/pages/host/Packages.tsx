@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { awaitJob } from "../../lib/jobs";
 import { RELEASE_CHANNELS, type Host, type Job, type ReleaseChannel } from "../../lib/types";
 import { Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
@@ -48,8 +49,6 @@ type RemovalPlan = {
   removals?: string[];
   protected?: string[];
 };
-
-type Attempt = { status?: string; message?: string; detail?: RemovalPlan };
 
 /**
  * The host's packages.
@@ -109,17 +108,12 @@ export function Packages() {
         action: "packages.plan",
         payload: { package_plan: { mode: "remove", only_packages: list() } },
       });
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((done) => setTimeout(done, 1500));
-        const attempts = await api.get<{ items: Attempt[] }>(`/api/v1/jobs/${job.id}/attempts`);
-        const last = attempts.items[attempts.items.length - 1];
-        if (!last?.status) continue;
-        if (last.status !== "succeeded") {
-          throw new Error(last.message || t("The host refused to plan the removal."));
-        }
-        return last.detail ?? {};
+      const last = await awaitJob<RemovalPlan>(api, job.id);
+      if (!last) throw new Error(t("The plan did not arrive in time."));
+      if (last.status !== "succeeded") {
+        throw new Error(last.message || t("The host refused to plan the removal."));
       }
-      throw new Error(t("The plan did not arrive in time."));
+      return last.detail ?? {};
     },
     onSuccess: (result) => { setPlan(result); setMessage(""); },
     onError: (error) => {

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useLocation, useOutletContext } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { awaitJob } from "../../lib/jobs";
 import type { Host, InventoryFragment, InventoryRevision, Job } from "../../lib/types";
 import { Time } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
@@ -34,6 +35,29 @@ export function useModule<T>(hostID: string, module: string) {
     queryFn: () => api.get<InventoryFragment<T>>(`/api/v1/hosts/${hostID}/inventory/${module}`),
     retry: false,
   });
+}
+
+/**
+ * A read whose answer lands in the inventory - the full list of the units,
+ * the snapshot of the processes - is settled when the job is over, not when
+ * it is queued: the order answers at once, the host later, and the module
+ * is written right before the result. The hook follows the job and refetches
+ * the modules then, so the listing appears when it exists rather than at the
+ * next timed refetch. A job that does not land in time - one waiting for
+ * approval, say - is left to that refetch.
+ */
+export function useModuleRefresh(hostID: string, modules: string[]) {
+  const queryClient = useQueryClient();
+  return (job: Job) => {
+    void awaitJob(api, job.id).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", hostID] });
+      for (const module of modules) {
+        queryClient.invalidateQueries({ queryKey: ["inventory", hostID, module] });
+      }
+      // The API answering with an error is not the screen's to report here:
+      // the job list shows the job, and the refetch comes on its own.
+    }, () => undefined);
+  };
 }
 
 /* ---------------------------------------------------------------------- */

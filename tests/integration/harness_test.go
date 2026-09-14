@@ -560,3 +560,68 @@ func testCSR(t *testing.T, commonName string) []byte {
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 }
+
+// awaitJobState waits until the job is in one of the wanted states.
+//
+// A job that reaches a final state other than the wanted ones is a failure
+// right away: waiting out the whole bound for something that cannot happen
+// any more would only hide the reason.
+func (h *harness) awaitJobState(jobID string, timeout time.Duration, states ...string) jobView {
+	h.t.Helper()
+	wanted := map[string]bool{}
+	for _, state := range states {
+		wanted[state] = true
+	}
+	deadline := time.Now().Add(timeout)
+	var last jobView
+	for time.Now().Before(deadline) {
+		last = h.job(jobID)
+		if wanted[last.State] {
+			return last
+		}
+		switch last.State {
+		case "succeeded", "failed", "timed_out", "canceled", "expired":
+			h.t.Fatalf("job %s ended in state %s before reaching %v (code: %s)",
+				jobID, last.State, states, last.ResultErrorCode)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	h.t.Fatalf("job %s did not reach %v within %s (state: %s)", jobID, states, timeout, last.State)
+	return last
+}
+
+// awaitHealthy waits until the control plane answers on /healthz again.
+//
+// Unlike requireHealthy it tolerates a refused connection: the panel is
+// expected to be away for a moment, and only staying away is a failure.
+func (h *harness) awaitHealthy(limit time.Duration) {
+	h.t.Helper()
+	client := &http.Client{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(limit)
+	for {
+		response, err := client.Get(h.api + "/healthz")
+		if err == nil {
+			var health struct {
+				Status string `json:"status"`
+			}
+			_ = json.NewDecoder(response.Body).Decode(&health)
+			response.Body.Close()
+			if health.Status == "ok" {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("the control plane did not come back within %s (last error: %v)", limit, err)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// cancelJob ends a job that a test leaves behind. It ignores the answer: a
+// job that has already finished refuses the cancellation, and that is fine
+// for a cleanup.
+func (h *harness) cancelJob(jobID string) {
+	h.t.Helper()
+	h.do(http.MethodPost, "/api/v1/jobs/"+jobID+"/cancel",
+		map[string]any{"reason": "end of the test"}, nil, 0)
+}
