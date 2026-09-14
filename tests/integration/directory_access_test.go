@@ -440,3 +440,115 @@ func TestHostEffectiveAccessIsAProjectionOrHonestlyUnknown(t *testing.T) {
 		t.Log("no fleet host has an entry in the directory; the projection was checked as unknown only")
 	}
 }
+
+// simulationView mirrors the answer of the access simulation.
+type simulationView struct {
+	User       string   `json:"user"`
+	Host       string   `json:"host"`
+	Service    string   `json:"service"`
+	Allowed    bool     `json:"allowed"`
+	Matched    []string `json:"matched"`
+	NotMatched []string `json:"not_matched"`
+}
+
+// catchAllRuleView reads only the categories of a rule: the question is
+// whether some enabled rule admits everyone to every host, because next to
+// such a rule no denial can be observed.
+type catchAllRuleView struct {
+	Name        string `json:"name"`
+	Enabled     bool   `json:"enabled"`
+	AllUsers    bool   `json:"all_users"`
+	AllHosts    bool   `json:"all_hosts"`
+	AllServices bool   `json:"all_services"`
+}
+
+// userOutsideTheGroup picks an enabled account of the directory that is not
+// a member of the group, so that the rule cannot match it.
+func userOutsideTheGroup(t *testing.T, h *harness, group string) string {
+	t.Helper()
+	var users struct {
+		Items []struct {
+			UID      string   `json:"uid"`
+			Groups   []string `json:"groups"`
+			Disabled bool     `json:"disabled"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/identity/users", &users)
+	for _, user := range users.Items {
+		// The administrator sits in admins and in every catch-all rule; an
+		// ordinary account is the one whose denial is worth checking.
+		if user.Disabled || user.UID == "admin" || slices.Contains(user.Groups, group) {
+			continue
+		}
+		return user.UID
+	}
+	t.Skipf("the directory has no enabled account outside the group %s", group)
+	return ""
+}
+
+// TestHBACSimulationDeniesAUserOutsideTheGroup is the denial the design
+// requires the panel to show honestly: a rule for one group on one host does
+// not admit a user outside that group, and the directory's own simulation
+// says so together with the rule it evaluated.
+func TestHBACSimulationDeniesAUserOutsideTheGroup(t *testing.T) {
+	h := newHarness(t)
+	if !directoryAvailable(t, h) {
+		t.Skip("this installation has no directory connection")
+	}
+	approver := secondPerson(t, h)
+	host := labDirectoryHost(t, h)
+	group := labDirectoryGroup(t, h)
+	outsider := userOutsideTheGroup(t, h, group)
+	name := "flotestro-test-hbac-outsider"
+	t.Cleanup(func() { removeRule(t, h, approver, "identity.hbac.rule.remove", "hbac_rule", name) })
+
+	var change ruleChange
+	h.do(http.MethodPost, "/api/v1/identity/changes", map[string]any{
+		"action": "identity.hbac.rule.ensure", "reason": ruleReason,
+		"payload": map[string]any{"hbac_rule": map[string]any{
+			"name": name, "description": "created by the integration tests", "enabled": true,
+			"user_groups": []string{group}, "hosts": []string{host}, "services": []string{"sshd"},
+		}},
+	}, &change, http.StatusCreated)
+	if len(change.Plan.Conflicts) > 0 {
+		t.Fatalf("the plan has conflicts: %v", change.Plan.Conflicts)
+	}
+	if final := approveAndRun(t, h, approver, change); final.State != "succeeded" {
+		t.Fatalf("the change finished as %s: %s", final.State, final.ResultMessage)
+	}
+
+	var result simulationView
+	h.do(http.MethodPost, "/api/v1/identity/access/simulate",
+		map[string]any{"user": outsider, "host": host, "service": "sshd"}, &result, http.StatusOK)
+	if result.User != outsider || result.Host != host {
+		t.Fatalf("the simulation answered for %+v", result)
+	}
+	// The rule was evaluated and did not admit the outsider: that is the
+	// reason the operator reads, whatever the other rules say.
+	if slices.Contains(result.Matched, name) {
+		t.Fatalf("the rule %s admitted %s, who is not in %s", name, outsider, group)
+	}
+	if !slices.Contains(result.NotMatched, name) {
+		t.Fatalf("the verdict does not list %s among the rules that did not match: %+v", name, result)
+	}
+
+	// The verdict itself is a denial only when no other rule admits
+	// everyone: a fresh directory ships with allow_all enabled, and next to it
+	// nobody is ever denied. The lab decides which of the two it is.
+	var rules struct {
+		Items []catchAllRuleView `json:"items"`
+	}
+	h.get("/api/v1/identity/hbac-rules", &rules)
+	for _, rule := range rules.Items {
+		if rule.Enabled && rule.AllUsers && rule.AllHosts {
+			t.Skipf("the rule %s admits everyone to every host; the denial of %s cannot be observed next to it",
+				rule.Name, outsider)
+		}
+	}
+	if result.Allowed {
+		t.Fatalf("%s outside %s was allowed on %s by %v", outsider, group, host, result.Matched)
+	}
+	if len(result.Matched) != 0 {
+		t.Fatalf("a denial with matched rules: %v", result.Matched)
+	}
+}

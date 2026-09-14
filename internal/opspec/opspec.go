@@ -470,6 +470,32 @@ func (a ActionType) RequiresPlan() bool {
 	return actionSpecs[a].requiresPlan
 }
 
+// reverseActions names, for every change that has a declared way back, the
+// operation that takes it. The web side keeps the same list for the
+// "Plan the rollback" link; the server is the one that refuses a
+// compensation ordered with anything else. A change with no row has no
+// reverse the panel will run in bulk: a restart or a signal has no before
+// state to return to, and a package downgrade is best effort rather than a
+// way back.
+var reverseActions = map[ActionType]ActionType{
+	// A managed file keeps its previous versions: the rollback writes the
+	// version named per host, bound to the digest the host has now.
+	ActionFileEnsure: ActionFileRollback,
+	// The network and the firewall keep a rollback plan on the host under
+	// the identifier the change reported; the rollback names it.
+	ActionNetworkProfileApply: ActionNetworkRollback,
+	ActionFirewallRuleEnsure:  ActionFirewallRulesetRestore,
+}
+
+// ReverseAction returns the operation that undoes the given change, and
+// whether there is one. The answer is a declaration of the registry, not a
+// guess from the name: "rollback" in a name says nothing about which
+// change it belongs to.
+func ReverseAction(action ActionType) (ActionType, bool) {
+	reverse, ok := reverseActions[action]
+	return reverse, ok
+}
+
 // RequiresFreshAuth says whether the operator has to confirm their identity
 // right before ordering. An operation that can cut off access to a host must
 // not travel on an hour-old session.

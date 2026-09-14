@@ -225,3 +225,37 @@ func TestEveryHashSchemeIsAFunctionOfThePlan(t *testing.T) {
 		t.Fatal("an unknown scheme gave a hash")
 	}
 }
+
+// TestTheReverseTableNamesOnlyDeclaredWaysBack guards the table a
+// compensation is checked against: every row is a mutating operation whose
+// reverse is another known mutating operation with a real way back, and an
+// operation without a row - a restart, a signal - has no reverse at all
+// rather than a guessed one.
+func TestTheReverseTableNamesOnlyDeclaredWaysBack(t *testing.T) {
+	for forward, reverse := range reverseActions {
+		if !forward.Known() || !forward.Mutating() {
+			t.Errorf("%s is not a known change and has no business in the reverse table", forward)
+		}
+		if !reverse.Known() || !reverse.Mutating() {
+			t.Errorf("the reverse of %s, %s, is not a known change", forward, reverse)
+		}
+		if forward == reverse {
+			t.Errorf("%s is listed as its own reverse", forward)
+		}
+		// A change whose contract says there is no way back cannot have
+		// one in the table: the two declarations would contradict each
+		// other on the screen.
+		if forward.Contract().Rollback == RollbackNone || forward.Contract().Rollback == RollbackBestEffort {
+			t.Errorf("%s declares rollback %s and yet names %s as its reverse",
+				forward, forward.Contract().Rollback, reverse)
+		}
+	}
+	if reverse, ok := ReverseAction(ActionFileEnsure); !ok || reverse != ActionFileRollback {
+		t.Errorf("the reverse of a file write is %s (%v), expected file.rollback", reverse, ok)
+	}
+	for _, action := range []ActionType{ActionUnitRestart, ActionProcessSignal, ActionSystemReboot, ActionFileRollback, "no.such"} {
+		if reverse, ok := ReverseAction(action); ok {
+			t.Errorf("%s has a reverse, %s, though nothing declares one", action, reverse)
+		}
+	}
+}

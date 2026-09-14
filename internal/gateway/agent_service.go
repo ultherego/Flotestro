@@ -1582,6 +1582,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"reboot_predicted":     schedule.GetRebootPredicted(),
 			"metadata_refreshed":   schedule.GetMetadataRefreshed(),
 			"blocked":              blockedJSON(schedule.GetBlocked()),
+			"space":                spaceJSON(schedule.GetSpace()),
 		})
 		if err != nil {
 			return nil
@@ -2387,6 +2388,24 @@ func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Dur
 // blockedJSON describes the packages that block the package operations
 // together with their configuration questions. The panel shows them to the
 // operator, because it is the operator who makes the decision.
+// spaceJSON renders the space facts of a plan with the field names the
+// panel reads; an empty list is a list, not null, so the page can tell
+// "nothing measured" from "an old agent".
+func spaceJSON(facts []*agentv1.SpaceFact) []map[string]any {
+	out := make([]map[string]any, 0, len(facts))
+	for _, fact := range facts {
+		out = append(out, map[string]any{
+			"path":            fact.GetPath(),
+			"filesystem":      fact.GetFilesystem(),
+			"available_bytes": fact.GetAvailableBytes(),
+			"needed_bytes":    fact.GetNeededBytes(),
+			"purpose":         fact.GetPurpose(),
+			"basis":           fact.GetBasis(),
+		})
+	}
+	return out
+}
+
 func blockedJSON(blocked []*agentv1.BlockedPackage) []map[string]any {
 	result := make([]map[string]any, 0, len(blocked))
 	for _, pkg := range blocked {

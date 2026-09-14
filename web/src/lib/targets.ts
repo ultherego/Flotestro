@@ -48,6 +48,19 @@ export function loadedTargets(data?: { pages: TargetPage[] }): CampaignTarget[] 
   return data?.pages.flatMap((page) => page.items) ?? [];
 }
 
+/**
+ * The link between a campaign and the campaign that compensates it, as
+ * the server returns it on a campaign. A compensating campaign names the
+ * original by identifier and name; the original lists the campaigns
+ * ordered to undo it. Both sides come from the compensating campaign's
+ * record - the original is never rewritten.
+ */
+export type CompensationLinks = {
+  compensates_campaign_id?: string;
+  compensates_campaign_name?: string;
+  compensated_by?: { id: string; name: string; state: string }[];
+};
+
 /** The states a target can be in, for the filter. */
 export const TARGET_STATES = [
   "pending", "awaiting_budget", "queued_offline", "planning", "running", "rebooting", "verifying",

@@ -76,22 +76,25 @@ func (e *Executor) tick(ctx context.Context) {
 func (e *Executor) execute(ctx context.Context, change Change) {
 	var payload Payload
 	if err := json.Unmarshal(change.Payload, &payload); err != nil {
-		e.finish(ctx, change, StateFailed, nil, "unreadable payload: "+err.Error())
+		e.finish(ctx, change, StateFailed, nil, "unreadable payload: "+err.Error(), nil)
 		return
 	}
 
 	action := ActionType(change.ActionType)
 	var phases []Phase
+	// revoked is filled in by the actions that end panel sessions, so that
+	// the trail says how many - and for whom there was nothing to end.
+	var revoked *sessionRevocation
 
 	switch action {
 	case ActionUserCreate:
-		phases = e.createUser(ctx, payload.User)
+		phases, revoked = e.createUser(ctx, payload.User)
 	case ActionUserDisable:
-		phases = e.setUserAccess(ctx, payload.Reference, false)
+		phases, revoked = e.setUserAccess(ctx, payload.Reference, false)
 	case ActionUserEnable:
-		phases = e.setUserAccess(ctx, payload.Reference, true)
+		phases, _ = e.setUserAccess(ctx, payload.Reference, true)
 	case ActionGroupMembers:
-		phases = e.changeGroupMembers(ctx, payload.Group)
+		phases, revoked = e.changeGroupMembers(ctx, payload.Group)
 	case ActionSSHKeys:
 		phases = e.setSSHKeys(ctx, payload.SSHKeys)
 	case ActionDNSRecordEnsure:
@@ -103,7 +106,7 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 	case ActionSudoRuleEnsure, ActionSudoRuleRemove:
 		phases = e.writeSudoRule(ctx, payload.SudoRule, action == ActionSudoRuleEnsure)
 	default:
-		e.finish(ctx, change, StateFailed, nil, "unknown type of change")
+		e.finish(ctx, change, StateFailed, nil, "unknown type of change", nil)
 		return
 	}
 
@@ -114,13 +117,13 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 		// changes were applied and some were not.
 		message = "some phases failed; the directory is in an intermediate state"
 	}
-	e.finish(ctx, change, state, phases, message)
+	e.finish(ctx, change, state, phases, message, revoked)
 }
 
 // createUser creates the account, adds it to the groups and sets the keys.
 // Every step is a separate phase, because the directory carries them out
 // separately and they can drift apart.
-func (e *Executor) createUser(ctx context.Context, spec *UserPayload) []Phase {
+func (e *Executor) createUser(ctx context.Context, spec *UserPayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 
 	phase := startPhase("creating the account")
@@ -135,15 +138,26 @@ func (e *Executor) createUser(ctx context.Context, spec *UserPayload) []Phase {
 	phases = append(phases, finishPhase(phase, err, describeUser(user)))
 	if err != nil {
 		// Without the account the following phases make no sense.
-		return phases
+		return phases, nil
 	}
 
+	joined := false
 	for _, group := range spec.Groups {
 		phase := startPhase("adding to the group " + group)
 		err := e.directory.AddGroupMembers(ctx, group, []string{spec.UID})
 		phases = append(phases, finishPhase(phase, err, ""))
+		joined = joined || err == nil
 	}
-	return phases
+	if !joined {
+		return phases, nil
+	}
+	// The account did not exist a moment ago, so as a rule there is no
+	// session to end. A reused name is the exception: a principal left by
+	// an earlier account of that name may still hold a session, and it
+	// would carry the old groups into the new membership.
+	phase, revoked := e.revokeChangedMembers(ctx, []string{spec.UID},
+		"the group membership changed: "+strings.Join(spec.Groups, ", "))
+	return append(phases, phase), &revoked
 }
 
 // setUserAccess locks or unlocks an account.
@@ -152,8 +166,9 @@ func (e *Executor) createUser(ctx context.Context, spec *UserPayload) []Phase {
 // revocation of the panel sessions, and only then the directory. The reverse
 // order would leave a working session for the time the change takes to
 // propagate.
-func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, enable bool) []Phase {
+func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, enable bool) ([]Phase, *sessionRevocation) {
 	var phases []Phase
+	var revoked *sessionRevocation
 
 	if !enable {
 		phase := startPhase("the local denial marker")
@@ -162,9 +177,9 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 			describeCount("identities marked", count)))
 
 		phase = startPhase("revoking the panel sessions")
-		revoked, err := e.revokeSessions(ctx, ref.UID, ref.Reason)
-		phases = append(phases, finishPhase(phase, err,
-			describeCount("sessions revoked", revoked)))
+		result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was locked"))
+		phases = append(phases, finishPhase(phase, err, result.String()))
+		revoked = &result
 	}
 
 	phase := startPhase("changing the account state in the directory")
@@ -177,43 +192,118 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 		phases = append(phases, finishPhase(phase, denyErr,
 			describeCount("identities unlocked", count)))
 	}
-	return phases
+	return phases, revoked
 }
 
-// revokeSessions ends the panel sessions belonging to an account.
-func (e *Executor) revokeSessions(ctx context.Context, subject, reason string) (int64, error) {
+// sessionRevocation is the outcome of ending the panel sessions of the
+// directory users a change touched. A user without a panel identity has
+// nothing to end; that is a fact of the result, not a failure.
+type sessionRevocation struct {
+	// Sessions is the number of sessions ended.
+	Sessions int64 `json:"sessions_revoked"`
+	// WithoutPrincipal names the users who never logged into the panel.
+	WithoutPrincipal []string `json:"without_principal"`
+}
+
+// String renders the outcome as the message of a phase.
+func (r sessionRevocation) String() string {
+	message := describeCount("sessions revoked", r.Sessions)
+	if len(r.WithoutPrincipal) > 0 {
+		message += "; no panel identity for " + strings.Join(r.WithoutPrincipal, ", ")
+	}
+	return message
+}
+
+// MatchesDirectoryUser says whether a panel principal is the given
+// directory account. The login names the principal after the provider's
+// preferred_username, which for a directory-backed provider is the uid;
+// when that name was already taken by a local principal, the login named
+// it "uid@issuer-host" instead. Both belong to the same person in the
+// directory, so both are matched. A local principal of the same name is
+// matched as well: it holds no provider session, so nothing is ended
+// there, and it is not worth telling the two apart here.
+func MatchesDirectoryUser(subject, uid string) bool {
+	if uid == "" {
+		return false
+	}
+	return subject == uid || strings.HasPrefix(subject, uid+"@")
+}
+
+// revokeSessions ends the panel sessions belonging to a directory account.
+// The listing is read once for every account; a change touches a handful
+// of them and the executor runs alone, so the repeated read is cheaper
+// than a query shape of its own.
+func (e *Executor) revokeSessions(ctx context.Context, uid, reason string) (sessionRevocation, error) {
+	result := sessionRevocation{WithoutPrincipal: []string{}}
 	principals, err := e.sessions.ListPrincipals(ctx)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
-	var total int64
+	matched := false
 	for _, principal := range principals {
-		if principal.Subject != subject {
+		if !MatchesDirectoryUser(principal.Subject, uid) {
 			continue
 		}
-		revoked, err := e.sessions.RevokeSessionsOf(ctx, principal.ID,
-			firstNonEmpty(reason, "the account was locked"))
+		matched = true
+		revoked, err := e.sessions.RevokeSessionsOf(ctx, principal.ID, reason)
 		if err != nil {
-			return total, err
+			return result, err
 		}
-		total += revoked
+		result.Sessions += revoked
 	}
-	return total, nil
+	if !matched {
+		result.WithoutPrincipal = append(result.WithoutPrincipal, uid)
+	}
+	return result, nil
 }
 
-func (e *Executor) changeGroupMembers(ctx context.Context, spec *GroupPayload) []Phase {
+// revokeChangedMembers ends the sessions of the users whose groups changed,
+// as one phase. A session carries the groups of the moment of login; the
+// membership the directory holds now is a different scope, and the only
+// honest thing to do with the old one is to end it and let the next login
+// take a fresh snapshot. Whether there was anything to end is part of the
+// message: a user who never logged into the panel is not an error.
+func (e *Executor) revokeChangedMembers(ctx context.Context, uids []string, reason string) (Phase, sessionRevocation) {
+	phase := startPhase("revoking the panel sessions of the changed members")
+	total := sessionRevocation{WithoutPrincipal: []string{}}
+	for _, uid := range uids {
+		result, err := e.revokeSessions(ctx, uid, reason)
+		total.Sessions += result.Sessions
+		total.WithoutPrincipal = append(total.WithoutPrincipal, result.WithoutPrincipal...)
+		if err != nil {
+			return finishPhase(phase, err, ""), total
+		}
+	}
+	return finishPhase(phase, nil, total.String()), total
+}
+
+func (e *Executor) changeGroupMembers(ctx context.Context, spec *GroupPayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
+	// Only the members the directory actually moved lose their session: a
+	// user whose change was refused still holds the scope they had.
+	var changed []string
 	if len(spec.Add) > 0 {
 		phase := startPhase("adding members to the group " + spec.Group)
 		err := e.directory.AddGroupMembers(ctx, spec.Group, spec.Add)
 		phases = append(phases, finishPhase(phase, err, ""))
+		if err == nil {
+			changed = append(changed, spec.Add...)
+		}
 	}
 	if len(spec.Remove) > 0 {
 		phase := startPhase("removing members from the group " + spec.Group)
 		err := e.directory.RemoveGroupMembers(ctx, spec.Group, spec.Remove)
 		phases = append(phases, finishPhase(phase, err, ""))
+		if err == nil {
+			changed = append(changed, spec.Remove...)
+		}
 	}
-	return phases
+	if len(changed) == 0 {
+		return phases, nil
+	}
+	phase, revoked := e.revokeChangedMembers(ctx, changed,
+		"the group membership changed: "+spec.Group)
+	return append(phases, phase), &revoked
 }
 
 func (e *Executor) setSSHKeys(ctx context.Context, spec *SSHKeysPayload) []Phase {
@@ -224,7 +314,7 @@ func (e *Executor) setSSHKeys(ctx context.Context, spec *SSHKeysPayload) []Phase
 
 // finish records the result and notes it in the audit trail.
 func (e *Executor) finish(ctx context.Context, change Change, state State,
-	phases []Phase, message string) {
+	phases []Phase, message string, revoked *sessionRevocation) {
 	if err := e.store.Finish(ctx, change.ID, state, phases, message); err != nil {
 		e.log.Error("the result of the directory change was not recorded", "change_id", change.ID, "err", err)
 	}
@@ -239,15 +329,23 @@ func (e *Executor) finish(ctx context.Context, change Change, state State,
 			failedPhases = append(failedPhases, phase.Name+": "+phase.Message)
 		}
 	}
+	detail := map[string]any{
+		"action_type": change.ActionType, "state": string(state),
+		"created_by": change.CreatedBy, "approved_by": change.ApprovedBy,
+		"failed_phases": failedPhases, "message": message,
+	}
+	if revoked != nil {
+		// The count is what an auditor looks for after a membership change:
+		// whether the old scope really ended. Zero with a name under
+		// without_principal means there was nothing to end.
+		detail["sessions_revoked"] = revoked.Sessions
+		detail["without_principal"] = revoked.WithoutPrincipal
+	}
 	e.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "identity-executor",
 		Action: "directory_change.execute", TargetType: "directory_change", TargetID: change.ID,
 		RequestID: change.RequestID, Outcome: outcome,
-		Detail: map[string]any{
-			"action_type": change.ActionType, "state": string(state),
-			"created_by": change.CreatedBy, "approved_by": change.ApprovedBy,
-			"failed_phases": failedPhases, "message": message,
-		},
+		Detail: detail,
 	})
 
 	logger := e.log.Info

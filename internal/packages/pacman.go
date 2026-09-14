@@ -32,6 +32,7 @@ const (
 	// of a transaction. A crash leaves it behind.
 	pacmanLockPath    = "/var/lib/pacman/db.lck"
 	pacmanCacheDir    = "/var/cache/pacman/pkg"
+	pacmanDatabaseDir = "/var/lib/pacman"
 	pacmanModulesRoot = "/usr/lib/modules"
 	pacmanProcRoot    = "/proc"
 )
@@ -159,7 +160,67 @@ func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
 	}
 	p.enrichFromSyncCopy(ctx, &plan)
 	plan.RebootPredicted = p.rebootPredicted(plan.Changes)
+	// The sizes of the candidates come from the same copy of the database
+	// the plan came from, so the plan and its sizes agree.
+	plan.Space = p.planSpace(ctx, plan, "--dbpath", checkupdatesDB())
 	return plan, nil
+}
+
+// planSpace measures where the bytes of the plan go. The download size is
+// already summed up from the printed targets; the growth of /usr comes from
+// the installed size pacman prints for the candidate and for what is there
+// now. The database arguments pick the sync database the candidates are
+// read from.
+func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) []SpaceFact {
+	needs := spaceNeeds{downloadKnown: true, installBasis: BasisInstalledSize}
+	if len(plan.Changes) == 0 {
+		return spaceFacts(pacmanCacheDir, pacmanDatabaseDir, needs)
+	}
+	needs.download = plan.DownloadBytes
+	needs.kernel = anyKernel(p.Name(), plan.Changes)
+	names := changeNames(plan.Changes)
+	candidate := p.packageInfoSizes(ctx, append(append([]string{"-Si"}, database...), names...)...)
+	current := p.packageInfoSizes(ctx, append([]string{"-Qi"}, names...)...)
+	grown, measured := growth(names, candidate, current)
+	installNeeds(&needs, grown, measured)
+	return spaceFacts(pacmanCacheDir, pacmanDatabaseDir, needs)
+}
+
+// packageInfoSizes runs a query of pacman and reads the installed sizes out
+// of its answer. A name pacman does not know ends the query with an error
+// and the records of the known ones on the standard output; what it printed
+// is used.
+func (p *Pacman) packageInfoSizes(ctx context.Context, args ...string) map[string]uint64 {
+	result := run(ctx, 2*time.Minute, pacmanPath, args...)
+	if !result.Ran {
+		return nil
+	}
+	return ParsePacmanInfoSizes(result.Stdout)
+}
+
+// ParsePacmanInfoSizes reads the "Name" and "Installed Size" lines of
+// "pacman -Si" and "pacman -Qi":
+//
+//	Name            : linux
+//	Installed Size  : 143.39 MiB
+func ParsePacmanInfoSizes(output string) map[string]uint64 {
+	sizes := map[string]uint64{}
+	name := ""
+	for _, line := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "Name":
+			name = strings.TrimSpace(value)
+		case "Installed Size":
+			if size, ok := ParseHumanSize(value); ok && name != "" {
+				sizes[name] = size
+			}
+		}
+	}
+	return sizes
 }
 
 // checkupdatesNoUpdates is the exit code checkupdates ends with when there is
@@ -464,6 +525,7 @@ func (p *Pacman) planInstall(ctx context.Context, plan Plan, options Options) (P
 		plan.DownloadBytes += target.Size
 	}
 	plan.RebootPredicted = p.rebootPredicted(plan.Changes)
+	plan.Space = p.planSpace(ctx, plan)
 	return plan, nil
 }
 

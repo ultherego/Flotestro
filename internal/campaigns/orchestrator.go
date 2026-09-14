@@ -294,10 +294,13 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		// The task, the boot ID, the transition and the step go in one
 		// transaction: a host that is running has its change step open,
 		// and a step that is open has a host that is running.
+		// A compensating campaign opens, with its own change step, the
+		// compensate step on the original's target for this host: the two
+		// records agree from the first moment that the reverse change runs.
 		if err := o.startStep(ctx, target, stepStart{
 			Key: StepExecute, DependsOn: dependencyOf(StepExecute, campaignPlans(campaign), false),
 			PlanHash: planHash, JobID: jobID, Column: "job_id", State: TargetRunning,
-			BootID: &host.BootID,
+			BootID: &host.BootID, Compensates: campaign.CompensatesCampaignID,
 		}); err != nil {
 			return err
 		}

@@ -61,6 +61,11 @@ type createCampaignRequest struct {
 	// IdempotencyKey lets a caller that lost the answer ask again without a
 	// second campaign; the Idempotency-Key header does the same.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// CompensatesCampaignID names a finished campaign this one undoes. The
+	// operation has to be the declared reverse of that campaign's, and the
+	// targets have to be hosts it changed; an empty selector takes exactly
+	// those hosts. The original's record is linked, never rewritten.
+	CompensatesCampaignID string `json:"compensates_campaign_id,omitempty"`
 }
 
 // campaignModeRefusal translates a refusal into a sentence the operator
@@ -162,9 +167,38 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
+	// A rollback to an earlier file version carries only the digest, as on
+	// one host: the content is attached here, so the plans, the consent and
+	// what reaches the hosts are the same thing. Left as a digest it would
+	// plan and write emptiness on every host. The digest itself leaves the
+	// payload once the content is in, exactly as the single-host order does,
+	// so the job envelope and the plan hash see an ordinary write.
+	if action == opspec.ActionFileRollback && payload.File != nil && payload.File.VersionSHA256 != "" {
+		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "version_not_found",
+				"no stored version with the checksum "+payload.File.VersionSHA256)
+			return
+		}
+		payload.File.Content = string(content)
+		payload.File.VersionSHA256 = ""
+		resolved, err := json.Marshal(payload)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		request.Payload = resolved
+	}
 
 	principal := authz.FromContext(r.Context())
 	chosen, ok := s.checkSelector(w, request.Selector)
+	if !ok {
+		return
+	}
+	// A compensation is checked before the selector is resolved: the
+	// original decides which hosts may be named at all, and an order that
+	// names none takes the hosts the original changed.
+	compensation, ok := s.checkCompensation(w, r, request.CompensatesCampaignID, action, &chosen)
 	if !ok {
 		return
 	}
@@ -175,6 +209,11 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	if len(candidates) == 0 {
 		problem(w, http.StatusBadRequest, "no_targets", "the selector matched no hosts")
 		return
+	}
+	if compensation != nil {
+		if !compensation.covers(w, candidates, action) {
+			return
+		}
 	}
 
 	// The qualification decides which hosts really move. A host in a
@@ -258,6 +297,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:                principal.Subject,
 		RequestID:                requestIDOf(r),
 		IdempotencyKey:           idempotencyKeyOf(r, request.IdempotencyKey),
+		CompensatesCampaignID:    request.CompensatesCampaignID,
 	}
 
 	targets := assessment.Targets()
@@ -297,6 +337,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"manual_gate":                campaign.ManualGate,
 			"connectivity_lost_absolute": campaign.ConnectivityLostAbsolute,
 			"approval_fingerprint":       campaign.ApprovalFingerprint,
+			"compensates_campaign_id":    campaign.CompensatesCampaignID,
 		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
@@ -326,6 +367,101 @@ func describeExclusions(groups []hostGroup) string {
 		return "no reasons to give"
 	}
 	return description
+}
+
+// compensationOrder is a compensation order once checked: the original
+// campaign and the hosts it changed, by host identifier.
+type compensationOrder struct {
+	original *campaigns.Campaign
+	changed  []campaigns.Target
+}
+
+// checkCompensation reads and checks the campaign an order says it undoes.
+// An empty identifier means an ordinary campaign and passes with nil. The
+// answer has already been written when the second result is false.
+//
+// The original has to exist and be readable by the caller in its scope -
+// the same door as reading it directly, so an identifier cannot be used
+// to learn about a campaign elsewhere. Then the rules of the package
+// apply: the original is settled, the operation is its declared reverse,
+// and there is something to compensate. An order with an empty selector
+// gets the changed hosts of the original as its host list: those are the
+// only hosts it may name, and the operator should not have to copy them.
+func (s *Server) checkCompensation(w http.ResponseWriter, r *http.Request, compensatesID string,
+	action opspec.ActionType, chosen *campaigns.Selector) (*compensationOrder, bool) {
+	if compensatesID == "" {
+		return nil, true
+	}
+	if _, err := uuid.Parse(compensatesID); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_compensates_campaign_id",
+			"compensates_campaign_id must be a campaign identifier")
+		return nil, false
+	}
+	original, err := s.campaigns.Get(r.Context(), compensatesID)
+	if errors.Is(err, campaigns.ErrNotFound) {
+		problem(w, http.StatusBadRequest, "compensated_campaign_not_found",
+			"the campaign to compensate, "+compensatesID+", does not exist")
+		return nil, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+	scope, err := s.campaignScope(r, original.ID)
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+	if _, ok := s.authorize(w, r, authz.PermCampaignRead, scope, "campaign", original.ID); !ok {
+		return nil, false
+	}
+	changed, err := s.campaigns.ChangedTargets(r.Context(), original.ID)
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+	// A preview without an operation asks about the compensation itself;
+	// it is checked as the declared reverse would be. An original with no
+	// reverse is refused below, as it would be with any operation.
+	if action == "" {
+		action, _ = opspec.ReverseAction(opspec.ActionType(original.ActionType))
+	}
+	// The rules are checked once here without hosts, so an order refused
+	// for its original or its operation is refused before the fleet is
+	// read; the hosts are checked once the selector resolved.
+	if err := campaigns.CheckCompensation(*original, action, changed, nil); err != nil {
+		problem(w, http.StatusBadRequest, campaigns.CompensationCode(err), err.Error())
+		return nil, false
+	}
+	if chosen.Empty() {
+		for _, target := range changed {
+			chosen.HostIDs = append(chosen.HostIDs, target.HostID)
+		}
+	}
+	return &compensationOrder{original: original, changed: changed}, true
+}
+
+// covers checks that every host the selector resolved to is one the
+// original changed, and answers the order that names another. The
+// hostname goes into the reason where there is one: an identifier alone
+// tells the operator nothing about which row of the list to take out.
+func (c *compensationOrder) covers(w http.ResponseWriter, candidates []hosts.Host, action opspec.ActionType) bool {
+	names := make([]string, 0, len(candidates))
+	for _, host := range candidates {
+		names = append(names, host.ID)
+	}
+	err := campaigns.CheckCompensation(*c.original, action, c.changed, names)
+	if err == nil {
+		return true
+	}
+	reason := err.Error()
+	for _, host := range candidates {
+		if host.Hostname != "" {
+			reason = strings.ReplaceAll(reason, host.ID, host.Hostname+" ("+host.ID+")")
+		}
+	}
+	problem(w, http.StatusBadRequest, campaigns.CompensationCode(err), reason)
+	return false
 }
 
 // checkSelector validates the selector of an order and answers a request
@@ -493,6 +629,22 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	if chosen, ok = s.checkSelector(w, chosen); !ok {
 		return
 	}
+	// Without an operation the preview answers only the question "how many
+	// hosts does this concern". The qualification depends on the operation:
+	// hosts without a package adapter are ready for a service restart and
+	// unable to update.
+	action := opspec.ActionType(query.Get("action"))
+	if action != "" && !action.Known() {
+		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(action))
+		return
+	}
+	// A compensation previews what the order would do: the same check,
+	// the same default host list, so the wizard shows the refusal before
+	// the form is filled in rather than after.
+	compensation, ok := s.checkCompensation(w, r, query.Get("compensates"), action, &chosen)
+	if !ok {
+		return
+	}
 
 	// The count comes from the same query the snapshot will run: a preview
 	// counted differently than the creation would be worse than none.
@@ -505,34 +657,48 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		}
 		filter = hosts.ListFilter{Expression: expanded}
 	}
-	count, err := s.hosts.Count(r.Context(), filter)
-	if err != nil {
-		s.fail(w, err)
-		return
+	var count int
+	var listed []hosts.Host
+	if len(chosen.HostIDs) > 0 {
+		// A list of hosts is not a filter the host table counts; it is
+		// resolved the way the order resolves it, and counted.
+		listed, ok = s.materialize(w, r, chosen)
+		if !ok {
+			return
+		}
+		count = len(listed)
+	} else {
+		var err error
+		count, err = s.hosts.Count(r.Context(), filter)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	response := map[string]any{
 		"count":    count,
 		"limit":    maxCampaignSnapshot,
 		"selector": chosen.Expression.Describe(),
 	}
-
-	// Without an operation the preview answers only the question "how many
-	// hosts does this concern". The qualification depends on the operation:
-	// hosts without a package adapter are ready for a service restart and
-	// unable to update.
-	action := opspec.ActionType(query.Get("action"))
-	if action == "" {
-		sample, err := s.hosts.Page(r.Context(), filter, "", "", previewSampleSize)
-		if err != nil {
-			s.fail(w, err)
-			return
+	if compensation != nil {
+		response["compensates"] = map[string]any{
+			"id": compensation.original.ID, "name": compensation.original.Name,
+			"state": compensation.original.State, "changed": len(compensation.changed),
 		}
-		response["sample"] = hostNames(sample)
-		writeJSON(w, http.StatusOK, response)
-		return
 	}
-	if !action.Known() {
-		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(action))
+
+	if action == "" {
+		sample := listed
+		if len(chosen.HostIDs) == 0 {
+			var err error
+			sample, err = s.hosts.Page(r.Context(), filter, "", "", previewSampleSize)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+		response["sample"] = hostNames(sample[:min(len(sample), previewSampleSize)])
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -542,6 +708,9 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	// another.
 	candidates, ok := s.materialize(w, r, chosen)
 	if !ok {
+		return
+	}
+	if compensation != nil && !compensation.covers(w, candidates, action) {
 		return
 	}
 	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)

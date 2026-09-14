@@ -29,6 +29,7 @@ const (
 	ErrorUnsupported    = "unsupported_manager"
 	ErrorDatabaseBroken = "package_database_broken"
 	ErrorModulesHidden  = "kernel_modules_hidden"
+	ErrorNoSpace        = "insufficient_space"
 )
 
 // ErrLocked means the lock of the package manager is held. We do not work
@@ -68,6 +69,8 @@ func ErrorCodeOf(err error) (string, bool) {
 		return ErrorPartialUpgrade, true
 	case errors.Is(err, ErrSecurityUnknown):
 		return ErrorSecurityUnknown, true
+	case errors.Is(err, ErrNoSpace):
+		return ErrorNoSpace, true
 	}
 	return "", false
 }
@@ -77,7 +80,8 @@ func ErrorCodeOf(err error) (string, bool) {
 // cannot do or its distribution does not allow, and nothing was attempted.
 func Refused(err error) bool {
 	return errors.Is(err, ErrLocked) || errors.Is(err, ErrCheckupdatesMissing) ||
-		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown)
+		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown) ||
+		errors.Is(err, ErrNoSpace)
 }
 
 // compareSets returns a description of the difference, or nothing when the
@@ -129,12 +133,20 @@ type Change struct {
 
 // Plan describes what would be changed.
 type Plan struct {
-	Manager            string   `json:"manager"`
-	Changes            []Change `json:"changes"`
-	DownloadBytes      uint64   `json:"download_bytes"`
-	DiskAvailableBytes uint64   `json:"disk_available_bytes"`
-	MetadataRefreshed  bool     `json:"metadata_refreshed"`
-	RebootPredicted    bool     `json:"reboot_predicted"`
+	Manager       string   `json:"manager"`
+	Changes       []Change `json:"changes"`
+	DownloadBytes uint64   `json:"download_bytes"`
+	// DiskAvailableBytes is the free space of "/". It stays for the callers
+	// that read one number; the per-file-system facts are in Space.
+	DiskAvailableBytes uint64 `json:"disk_available_bytes"`
+	// Space says, file system by file system, what the change needs and what
+	// is there: the cache the archives land in, /usr where the files go, /boot
+	// when a kernel is among the changes. A separate /var or /boot can be
+	// full while "/" has room, and a transaction that runs out of space
+	// halfway through is the failure this plan exists to prevent.
+	Space             []SpaceFact `json:"space,omitempty"`
+	MetadataRefreshed bool        `json:"metadata_refreshed"`
+	RebootPredicted   bool        `json:"reboot_predicted"`
 	// Blocked describes the packages that make carrying the plan out
 	// impossible. The plan itself goes through, because it changes nothing,
 	// but a transaction on such a host will fail - the operator is to know

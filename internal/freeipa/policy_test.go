@@ -462,3 +462,140 @@ func TestDiffIgnoresOrderAndDuplicates(t *testing.T) {
 		t.Fatalf("diff = %+v", result)
 	}
 }
+
+// TestHBACTestParsesADenial mirrors the verdict test for the answer that
+// matters most to an operator: "no". A denial has to come back as denied
+// with the rules that were evaluated and did not match, so the screen can
+// say why - not as an empty success.
+func TestHBACTestParsesADenial(t *testing.T) {
+	fake, client := newFakeDirectory(t)
+	fake.answers["hbactest"] = func(call rpcCall) (any, *rpcError) {
+		if call.Options["user"] != "bob" || call.Options["targethost"] != "web1.flotestro.test" ||
+			call.Options["service"] != "sshd" {
+			return nil, &rpcError{Name: "ValidationError", Message: "unexpected parameters"}
+		}
+		return map[string]any{
+			"value":      false,
+			"matched":    []any{},
+			"notmatched": []any{"ops-ssh", map[string]any{"cn": []any{"admins-console"}}},
+			"error":      []any{},
+			"warning":    []any{},
+			"summary":    "Access denied",
+		}, nil
+	}
+	result, err := client.HBACTest(context.Background(), "bob", "web1.flotestro.test", "sshd")
+	if err != nil {
+		t.Fatalf("HBACTest: %v", err)
+	}
+	if result.Allowed {
+		t.Fatal("a denial was read as allowed")
+	}
+	if result.User != "bob" || result.Host != "web1.flotestro.test" || result.Service != "sshd" {
+		t.Fatalf("the verdict answers for %+v", result)
+	}
+	// The reason of a denial is the list of rules that did not match; an
+	// absent list would read as "no rules at all" on the screen.
+	if result.Matched == nil || len(result.Matched) != 0 {
+		t.Fatalf("matched = %v, expected an empty list", result.Matched)
+	}
+	if !slices.Equal(result.NotMatched, []string{"ops-ssh", "admins-console"}) {
+		t.Fatalf("not matched = %v", result.NotMatched)
+	}
+	if len(result.Errors) != 0 || len(result.Warnings) != 0 {
+		t.Fatalf("errors = %v, warnings = %v", result.Errors, result.Warnings)
+	}
+}
+
+// TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers guards the boundary
+// between a rule for named hosts and commands and a rule for everything. A
+// category of "all" next to named members is the widest rule the directory
+// can hold, and it would arrive silently: the members would still be listed
+// and the screen would look narrow. So a spec with names must never send a
+// category, and a spec that narrows an ALL rule down to names must clear
+// the category before the names go in.
+func TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers(t *testing.T) {
+	t.Run("a new rule with names", func(t *testing.T) {
+		fake, client := newFakeDirectory(t)
+		fake.answers["sudorule_show"] = func(call rpcCall) (any, *rpcError) {
+			if fake.count("sudorule_add") == 0 {
+				return notFound(call)
+			}
+			return map[string]any{"result": map[string]any{
+				"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true},
+				"memberhost_host":        []any{"web1.flotestro.test"},
+				"memberallowcmd_sudocmd": []any{"/usr/bin/systemctl"},
+			}}, nil
+		}
+		_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
+			Name: "ops-restart", Enabled: true, UserGroups: []string{"ops"},
+			Hosts: []string{"web1.flotestro.test"}, Commands: []string{"/usr/bin/systemctl"},
+		})
+		if err != nil {
+			t.Fatalf("EnsureSudoRule: %v", err)
+		}
+		assertNoAllCategory(t, fake)
+		if _, sent := fake.find("sudorule_mod"); sent {
+			t.Fatalf("a rule of named members modified the entry itself: %v", fake.methods())
+		}
+	})
+
+	t.Run("an ALL rule narrowed to names", func(t *testing.T) {
+		fake, client := newFakeDirectory(t)
+		// The directory holds the widest shape: every host, every command.
+		fake.answers["sudorule_show"] = answerWith(map[string]any{
+			"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true},
+			"hostcategory": []any{"all"}, "cmdcategory": []any{"all"},
+			"memberuser_group": []any{"ops"},
+		})
+		_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
+			Name: "ops-restart", Enabled: true, UserGroups: []string{"ops"},
+			Hosts: []string{"web1.flotestro.test"}, Commands: []string{"/usr/bin/systemctl"},
+		})
+		if err != nil {
+			t.Fatalf("EnsureSudoRule: %v", err)
+		}
+		assertNoAllCategory(t, fake)
+
+		mod, sent := fake.find("sudorule_mod")
+		if !sent {
+			t.Fatalf("the categories were not cleared: %v", fake.methods())
+		}
+		for _, category := range []string{"hostcategory", "cmdcategory"} {
+			value, present := mod.Options[category]
+			if !present || value != nil {
+				t.Errorf("%s was not cleared: present=%v value=%v", category, present, value)
+			}
+		}
+		// The user category was never set and must not be touched: clearing
+		// what is clear would be an EmptyModError on some directory versions.
+		if _, present := mod.Options["usercategory"]; present {
+			t.Errorf("usercategory was sent although the rule never had it: %v", mod.Options)
+		}
+
+		// A category and members of the same kind exclude each other, so the
+		// clearing has to precede the members.
+		methods := fake.methods()
+		modAt := slices.Index(methods, "sudorule_mod")
+		hostAt := slices.Index(methods, "sudorule_add_host")
+		commandAt := slices.Index(methods, "sudorule_add_allow_command")
+		if hostAt < 0 || commandAt < 0 || modAt > hostAt || modAt > commandAt {
+			t.Fatalf("the members went in before the categories were cleared: %v", methods)
+		}
+	})
+}
+
+// assertNoAllCategory fails when any command sent to the directory sets a
+// category to "all".
+func assertNoAllCategory(t *testing.T, fake *fakeDirectory) {
+	t.Helper()
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for _, call := range fake.calls {
+		for _, category := range []string{"usercategory", "hostcategory", "cmdcategory",
+			"ipasudorunasusercategory"} {
+			if call.Options[category] == "all" {
+				t.Fatalf("%s sent %s=all for a rule of named members: %v", call.Method, category, call.Options)
+			}
+		}
+	}
+}

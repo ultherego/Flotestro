@@ -1,0 +1,11 @@
+-- When the group snapshot of a session was last confirmed with the provider.
+--
+-- A session carries the groups of the moment of login, and the mapping of
+-- those groups to roles is recomputed on every request. What that leaves
+-- out is a change of membership made behind the panel's back: an operator
+-- removed from a privileged group in Keycloak or FreeIPA keeps the scope
+-- until the session runs out. A background loop now renews the identity
+-- token with the stored refresh token and compares the groups; this column
+-- says which sessions are due. Null means never refreshed, and the loop then
+-- counts from the login.
+alter table web_sessions add column groups_refreshed_at timestamptz;

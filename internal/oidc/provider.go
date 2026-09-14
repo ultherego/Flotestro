@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -238,6 +239,17 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*TokenSet,
 		return set, claims, nil
 	}
 	return set, nil, nil
+}
+
+// IsInvalidGrant says whether a renewal failed because the provider no
+// longer honours the refresh token: the user was disabled or deleted, the
+// provider's session was logged out, or the token was revoked. Every other
+// failure - the provider unreachable, a malformed answer, a signature that
+// does not verify - says nothing about the user and is treated as
+// transient by the callers.
+func IsInvalidGrant(err error) bool {
+	var retrieve *oauth2.RetrieveError
+	return errors.As(err, &retrieve) && retrieve.ErrorCode == "invalid_grant"
 }
 
 // verify checks the signature, the issuer, the audience, the validity times

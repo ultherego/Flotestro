@@ -251,6 +251,16 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/hosts/{id}/metrics": {
 		{"range", "string", "The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups."},
 	},
+	"GET /api/v1/campaigns/preview": {
+		{"action", "string", "The operation type; without it the preview counts hosts and qualifies none."},
+		{"site", "string", ""},
+		{"environment", "string", ""},
+		{"os_family", "string", ""},
+		{"expression", "string", "The typed selector as JSON; when present it decides alone."},
+		{"exclude", "string", "A host identifier to leave out; may repeat."},
+		{"exclude_reason", "string", ""},
+		{"compensates", "string", "The campaign the order would undo; an empty selector then names the hosts that campaign changed, and the answer carries the original under compensates."},
+	},
 	"GET /api/v1/campaigns/{id}/steps": {
 		{"host_id", "string", "Only the steps of this host."},
 		{"limit", "integer", "How many hosts one page covers: 200 by default, 1000 at most; a page is cut between hosts, never inside one."},
@@ -354,6 +364,11 @@ var requestSchemas = map[string]map[string]any{
 			"failure_threshold_percent":  map[string]any{"type": "integer"},
 			"failure_threshold_absolute": map[string]any{"type": "integer"},
 			"reboot_policy":              map[string]any{"type": "string", "enum": []string{"never", "if_required", "always"}},
+			"compensates_campaign_id": map[string]any{"type": "string",
+				"description": "A finished campaign this one undoes. The operation has to be the declared reverse of that campaign's " +
+					"and the targets hosts it changed; an empty selector takes exactly those hosts. The original is linked, never rewritten. " +
+					"Refusals: compensated_campaign_not_found, compensated_campaign_not_settled, not_reverse_operation, " +
+					"nothing_to_compensate, compensation_target_unchanged."},
 		},
 		"required": []string{"name", "action", "selector"},
 	},

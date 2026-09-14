@@ -11,7 +11,9 @@ import { StatusBar } from "../components/widgets";
 import { type HostPlan, JobPlan, PlanSummary } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
-import { type CampaignStep, loadedTargets, TARGET_STATES, useTargets, useTargetSteps } from "../lib/targets";
+import {
+  type CampaignStep, type CompensationLinks, loadedTargets, TARGET_STATES, useTargets, useTargetSteps,
+} from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import {
   bulkPrefill, ContractChips, contractWords, type PlanGroups, REVERSE_OPERATION, reversePayload, useOperation,
@@ -140,6 +142,9 @@ export function Campaign() {
   if (campaign.error) return <ErrorBox error={campaign.error} />;
   if (!campaign.data) return <Empty>{t("Loading…")}</Empty>;
   const data = campaign.data;
+  // The compensation link travels on the campaign record; the shared
+  // Campaign type does not name it yet, so it is read through its own.
+  const links = data as CampaignType & CompensationLinks;
 
   // What a stop does depends on where the hosts are: a host that has not
   // started will not start, a host mid-operation finishes on its own - no
@@ -291,7 +296,7 @@ export function Campaign() {
           {pendingStop === "cancel" && rollbackPlannable && reverseAction && (
             <p className="subtitle">
               {reverseOperation?.campaign_ready ? (
-                <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload))}>
+                <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload), data.id)}>
                   {t("Plan the rollback")}
                 </Link>
               ) : (
@@ -331,14 +336,39 @@ export function Campaign() {
           {operation?.rollback && (
             <Pair label={t("Way back")}>
               {contractWords(t, "rollback", operation.rollback)[0]}
-              {rollbackPlannable && reverseAction && reverseOperation?.campaign_ready && (
+              {/* A compensation needs a settled original: the server refuses
+                  one ordered against a campaign that may still change hosts,
+                  so the link waits for the end. */}
+              {rollbackPlannable && reverseAction && reverseOperation?.campaign_ready &&
+                ["completed", "failed", "canceled"].includes(data.state) && (
                 <>
                   {" · "}
-                  <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload))}>
+                  <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload), data.id)}>
                     {t("Plan the rollback")}
                   </Link>
                 </>
               )}
+            </Pair>
+          )}
+          {/* The two sides of a compensation. The compensating campaign
+              names what it undoes; the original lists what was ordered to
+              undo it - read from the compensating records, so the
+              original's own record stays as it was approved. */}
+          {links.compensates_campaign_id && (
+            <Pair label={t("Compensates")}>
+              <Link to={`/campaigns/${links.compensates_campaign_id}`}>
+                {links.compensates_campaign_name || links.compensates_campaign_id.slice(0, 8)}
+              </Link>
+            </Pair>
+          )}
+          {links.compensated_by && links.compensated_by.length > 0 && (
+            <Pair label={t("Compensated by")}>
+              {links.compensated_by.map((other, index) => (
+                <span key={other.id}>
+                  {index > 0 && ", "}
+                  <Link to={`/campaigns/${other.id}`}>{other.name}</Link> <JobState state={other.state} />
+                </span>
+              ))}
             </Pair>
           )}
           <Pair label={t("Waits for offline hosts until")}>{data.deadline_at ? <Time value={data.deadline_at} /> : "—"}</Pair>

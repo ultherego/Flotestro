@@ -13,7 +13,23 @@ import (
 const (
 	dnfPath = "/usr/bin/dnf"
 	rpmPath = "/usr/bin/rpm"
+	// The database of rpm. The cache is not a constant: dnf4 and dnf5 keep
+	// theirs in different directories, see dnfCacheDir.
+	rpmDatabaseDir = "/var/lib/rpm"
 )
+
+// dnfCacheDir is where the archives land. Dnf5 downloads into
+// /var/cache/libdnf5 and dnf4 into /var/cache/dnf; the one that exists is the
+// one in use, and a host with neither has never downloaded anything - then
+// the directory of dnf5, the current tool, stands for both.
+func dnfCacheDir() string {
+	for _, dir := range []string{"/var/cache/libdnf5", "/var/cache/dnf"} {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return "/var/cache/libdnf5"
+}
 
 // dnfLockFiles are the files locked for the duration of an RPM transaction.
 var dnfLockFiles = []string{
@@ -69,9 +85,86 @@ func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 		plan.Changes = append(plan.Changes, change)
 	}
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
-	// Fedora does not publish consistent metadata about the download size in
-	// this mode, so we do not guess the value.
+	// check-update lists the versions and nothing about their size. The
+	// resolver knows: a transaction dnf refuses to run with --assumeno ends
+	// with the summary of what it would download and install, read from the
+	// same cache.
+	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string {
+		args := []string{"--assumeno", "--cacheonly", "upgrade"}
+		if options.SecurityOnly {
+			args = append(args, "--security")
+		}
+		if len(options.Packages) == 0 {
+			args = append(args, "--exclude="+AgentPackage)
+		}
+		result := run(ctx, 10*time.Minute, dnfPath, append(args, options.Packages...)...)
+		return result.Stdout + "\n" + result.Stderr
+	})
 	return plan, nil
+}
+
+// planSpace measures where the bytes of the plan go: the archives and the
+// installed size from the summary of the transaction, the growth of /boot
+// from the kernel of the plan. The summary is asked for lazily, because an
+// empty plan has nothing to size and the resolver pass is not free.
+func (d *DNF) planSpace(ctx context.Context, changes []Change, summary func() string) (uint64, []SpaceFact) {
+	needs := spaceNeeds{downloadKnown: true, installBasis: BasisInstalledSize}
+	if len(changes) == 0 {
+		return 0, spaceFacts(dnfCacheDir(), rpmDatabaseDir, needs)
+	}
+	needs.kernel = anyKernel(d.Name(), changes)
+	sizes := ParseDNFTransactionSizes(summary())
+	needs.download, needs.downloadKnown = sizes.Download, sizes.DownloadKnown
+	installNeeds(&needs, sizes.Install, sizes.InstallKnown)
+	return needs.download, spaceFacts(dnfCacheDir(), rpmDatabaseDir, needs)
+}
+
+// DNFTransactionSizes is what the summary of a transaction says about its
+// size. Either number can be missing: dnf4 prints the installed size of an
+// installation and not of an upgrade.
+type DNFTransactionSizes struct {
+	Download      uint64
+	DownloadKnown bool
+	Install       uint64
+	InstallKnown  bool
+}
+
+// ParseDNFTransactionSizes reads the size lines of a transaction summary in
+// both spellings. Dnf4:
+//
+//	Total download size: 12 M
+//	Installed size: 40 M
+//
+// or "Total size: 12 M" when every archive is in the cache already, which
+// means there is nothing to download. Dnf5:
+//
+//	Total size of inbound packages is 12 MiB. Need to download 12 MiB.
+//	After this operation, 40 MiB extra will be used (install 45 MiB, remove 5 MiB).
+//
+// The installed size is what the new files take; what the removed ones free
+// is not credited, because they are gone only when the transaction is over.
+func ParseDNFTransactionSizes(output string) DNFTransactionSizes {
+	var sizes DNFTransactionSizes
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Total download size:"):
+			sizes.Download, sizes.DownloadKnown = ParseHumanSize(strings.TrimPrefix(line, "Total download size:"))
+		case strings.HasPrefix(line, "Total size:"):
+			sizes.Download, sizes.DownloadKnown = 0, true
+		case strings.HasPrefix(line, "Installed size:"):
+			sizes.Install, sizes.InstallKnown = ParseHumanSize(strings.TrimPrefix(line, "Installed size:"))
+		case strings.Contains(line, "Need to download "):
+			rest := line[strings.Index(line, "Need to download ")+len("Need to download "):]
+			sizes.Download, sizes.DownloadKnown = ParseHumanSize(strings.TrimSuffix(rest, "."))
+		case strings.Contains(line, "(install "):
+			rest := line[strings.Index(line, "(install ")+len("(install "):]
+			if end := strings.IndexAny(rest, ",)"); end > 0 {
+				sizes.Install, sizes.InstallKnown = ParseHumanSize(rest[:end])
+			}
+		}
+	}
+	return sizes
 }
 
 // parseDNFUpdateLine reads a line of the form:
@@ -300,6 +393,7 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	}
 	plan.Changes = append(plan.Changes, changes...)
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
+	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string { return output })
 	return plan, nil
 }
 

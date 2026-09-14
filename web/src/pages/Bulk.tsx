@@ -42,6 +42,7 @@ export function Bulk() {
     unit: "",
     securityOnly: true,
     payloadText: prefill.get("payload") ?? "",
+    compensates: prefill.get("compensates") ?? "",
     site: "",
     environment: "",
     osFamily: "",
@@ -100,6 +101,9 @@ export function Bulk() {
   for (const hostID of order.exclude) params.append("exclude", hostID);
   if (order.excludeReason.trim()) params.set("exclude_reason", order.excludeReason.trim());
   if (order.action) params.set("action", order.action);
+  // A compensation previews against its original: the server names the
+  // hosts that changed and refuses the rest, before anything is created.
+  if (order.compensates) params.set("compensates", order.compensates);
   const preview = useQuery({
     queryKey: ["campaign-preview", params.toString()],
     queryFn: () => api.get<Preview>(`/api/v1/campaigns/preview?${params}`),
@@ -171,7 +175,7 @@ export function Bulk() {
           preview={preview.data}
         />
       )}
-      {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} />}
+      {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} refusal={preview.error} />}
       {step === 2 && <EligibilityStep preview={preview.data} checking={preview.isLoading} />}
       {step === 3 && (
         <RolloutStep
@@ -185,6 +189,7 @@ export function Bulk() {
         <CreateStep
           order={order}
           targets={eligible}
+          compensates={preview.data?.compensates}
           campaignID={campaignID}
           onCreated={(id) => {
             setCampaignID(id);
@@ -206,6 +211,10 @@ type Order = {
   // The payload of an operation without a form of its own, as JSON text
   // the operator edits; it starts from the template the server gives.
   payloadText: string;
+  // The campaign this order undoes, when it came from "Plan the rollback"
+  // on a finished campaign. Empty for an ordinary campaign. The server
+  // holds the rules: the reverse operation, the hosts that changed.
+  compensates: string;
   site: string;
   environment: string;
   osFamily: string;
@@ -321,9 +330,15 @@ export function reversePayload(action: string, payload: unknown): Record<string,
   return {};
 }
 
-/** The address of the wizard with an order half written. */
-export function bulkPrefill(action: string, name: string, payload: unknown): string {
-  return `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+/**
+ * The address of the wizard with an order half written. A rollback link
+ * names the campaign it undoes as well, so the order is created as its
+ * compensation and the two campaigns are linked rather than merely named
+ * alike.
+ */
+export function bulkPrefill(action: string, name: string, payload: unknown, compensates?: string): string {
+  const address = `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+  return compensates ? `${address}&compensates=${encodeURIComponent(compensates)}` : address;
 }
 
 /**
@@ -441,6 +456,9 @@ type Preview = {
   // The distribution of the snapshot: thirty hosts from one site are a
   // different change than thirty spread over three.
   distribution?: Record<string, Group[]>;
+  // The campaign the order would undo, as the server checked it, with the
+  // number of hosts it changed - the only hosts the order may name.
+  compensates?: { id: string; name: string; state: string; changed: number };
 };
 
 /**
@@ -528,6 +546,14 @@ function ScopeBar({
           )}
         </span>
         {preview?.campaign_mode && <span>{t("mode")}: {preview.campaign_mode}</span>}
+        {/* What the order undoes stays in view for the whole wizard: a
+            rollback approved without its original in sight is a change
+            like any other. */}
+        {preview?.compensates && (
+          <span>
+            {t("compensates")}: <Link to={`/campaigns/${preview.compensates.id}`}>{preview.compensates.name}</Link>
+          </span>
+        )}
         {campaign && (
           <>
             <span>
@@ -778,10 +804,15 @@ function TargetsStep({
   order,
   change,
   preview,
+  refusal,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
   preview?: Preview;
+  // The server's refusal of the selector, when there is one: a
+  // compensation narrowed to a host the original did not change is
+  // refused here, with the host named, rather than at the creation.
+  refusal?: unknown;
 }) {
   const t = useT();
   return (
@@ -790,6 +821,17 @@ function TargetsStep({
       description={t("The count comes from the database, not from the first page of a list. The snapshot is frozen when the campaign is created; hosts added later do not join it.")}
       footer={
         <div>
+          {refusal ? <ErrorBox error={refusal} /> : null}
+          {/* A compensation may only name hosts the original changed; with
+              the filters empty it takes all of them, and the operator is
+              told so instead of reading it off an empty form. */}
+          {order.compensates && preview?.compensates && (
+            <p>
+              {t("This campaign compensates {name}: only the {changed} hosts that campaign changed can be its targets. Leave the filters empty to take all of them, or narrow them to a part.", {
+                name: preview.compensates.name, changed: preview.compensates.changed,
+              })}
+            </p>
+          )}
           <p>
             {t("The selector matches {n} hosts", { n: preview?.count ?? 0 })}
             {preview && preview.count > preview.limit && (
@@ -1033,11 +1075,13 @@ function RolloutStep({
 function CreateStep({
   order,
   targets,
+  compensates,
   campaignID,
   onCreated,
 }: {
   order: Order;
   targets: number;
+  compensates?: Preview["compensates"];
   campaignID: string;
   onCreated: (id: string) => void;
 }) {
@@ -1070,6 +1114,7 @@ function CreateStep({
         deadline_minutes: order.deadlineMinutes,
         manual_gate: order.manualGate && order.canary > 0,
         connectivity_lost_absolute: order.connectivityLost,
+        compensates_campaign_id: order.compensates || undefined,
       }),
     onSuccess: (campaign) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
@@ -1083,6 +1128,19 @@ function CreateStep({
       title={`5. ${t("Create")}`}
       description={t("Creating the campaign freezes the snapshot. Nothing changes on any host yet.")}
     >
+      {/* The link is part of what is created: the operator is to read
+          which campaign this one undoes before pressing the button, not
+          find out from the campaign page afterwards. */}
+      {order.compensates && (
+        <p>
+          {t("Compensates campaign")}{" "}
+          {compensates
+            ? <Link to={`/campaigns/${compensates.id}`}>{compensates.name}</Link>
+            : <span className="mono">{order.compensates}</span>}
+          {" · "}
+          {t("The original is linked, never rewritten; its hosts get a compensate step as the reverse change runs on them.")}
+        </p>
+      )}
       <Actions>
         <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID)}>
           {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}

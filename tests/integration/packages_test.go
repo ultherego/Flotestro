@@ -423,3 +423,20 @@ func TestHoldIsReversible(t *testing.T) {
 		}
 	}
 }
+
+// TestAFailingMaintainerScriptIsATypedFailure is the scenario of chapter
+// 23 in which a postinst script fails half-way: the transaction ends as
+// transaction_failed, the attention list names the package, the host flag
+// package_database_broken is raised, and a repair clears it.
+//
+// The test cannot be carried out from the harness: packages.install takes
+// package names only (packageNamePattern in opspec admits no slash, so a
+// .deb built by the test and placed with file.ensure cannot be named), and
+// the harness has no way to run a command on a lab host. A package with a
+// failing maintainer script has to come from the lab repository on the
+// panel VM; until it does, the scenario is covered by the typed-failure
+// tests of the apt adapter and by TestBrokenPackageDatabaseBlocksOperations,
+// which exercises the flag from the panel's side.
+func TestAFailingMaintainerScriptIsATypedFailure(t *testing.T) {
+	t.Skip("package.install takes repository names only; a broken maintainer script needs a lab repository package")
+}

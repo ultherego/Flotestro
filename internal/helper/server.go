@@ -345,6 +345,15 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 		Packages:     action.GetPackages(),
 		SecurityOnly: action.GetSecurityOnly(),
 	}
+
+	// A change that does not fit on the disk is refused here, before the
+	// lock is taken and the first archive lands. The package manager itself
+	// finds out halfway through unpacking - and leaves a database nobody can
+	// trust and a host nobody can upgrade.
+	if refusal := s.packageSpacePreflight(operationCtx, request, manager, action, options); refusal != nil {
+		return refusal
+	}
+
 	if progress != nil {
 		options.Progress = func(p packages.Progress) {
 			progress(&helperv1.TaskProgress{
@@ -397,6 +406,39 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 	default:
 		return reject(ErrorUnknownAction, "unknown package operation")
 	}
+}
+
+// packageSpacePreflight computes the plan of an upgrade or an installation
+// and judges its space facts. It returns the refusal, or nil when the change
+// fits or nothing could be measured. A plan that cannot be computed is not
+// a refusal on its own: the transaction has checks of its own, and the ones
+// that apply here - the lock, a distribution that does not do partial
+// upgrades - refuse it the same way a moment later.
+func (s *Server) packageSpacePreflight(ctx context.Context, request *helperv1.HelperRequest,
+	manager packages.Manager, action *helperv1.PackageActionRequest,
+	options packages.Options) *helperv1.HelperResponse {
+	switch action.GetOperation() {
+	case helperv1.PackageActionRequest_OPERATION_INSTALL:
+		options.Mode = packages.ModeInstall
+	case helperv1.PackageActionRequest_OPERATION_UPGRADE:
+		options.Mode = packages.ModeUpgrade
+	default:
+		// A removal frees space and a hold writes one line; a refresh writes
+		// the lists, whose size nobody publishes.
+		return nil
+	}
+	plan, err := manager.Plan(ctx, options)
+	if err != nil {
+		s.log.Warn("the space of the package change could not be measured",
+			"task_id", request.GetTaskId(), "manager", manager.Name(), "err", err)
+		return nil
+	}
+	if err := packages.SpaceShortfall(plan.Space); err != nil {
+		s.log.Warn("the package change was refused for lack of space",
+			"task_id", request.GetTaskId(), "manager", manager.Name(), "err", err)
+		return packageFailure(manager.Name(), err)
+	}
+	return nil
 }
 
 // applyReboot orders a delayed restart. The delay is necessary: without it

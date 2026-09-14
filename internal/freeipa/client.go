@@ -68,7 +68,22 @@ type Client struct {
 	// write and finished after it must not put the state from before the
 	// write back into the cache; it compares the generation it started in.
 	generation uint64
-	logged     bool
+	// logged says whether the directory session is believed alive. It is
+	// read and written by every caller of the client at once, so it goes
+	// under the same mutex as the cache.
+	logged bool
+}
+
+func (c *Client) isLogged() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.logged
+}
+
+func (c *Client) setLogged(logged bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.logged = logged
 }
 
 type cacheEntry struct {
@@ -165,7 +180,7 @@ func (c *Client) login(ctx context.Context) error {
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("the directory session: code %d", response.StatusCode)
 	}
-	c.logged = true
+	c.setLogged(true)
 	return nil
 }
 
@@ -220,7 +235,7 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 	if !strings.Contains(err.Error(), "401") {
 		return nil, err
 	}
-	c.logged = false
+	c.setLogged(false)
 	if err := c.login(ctx); err != nil {
 		return nil, err
 	}
@@ -228,7 +243,7 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 }
 
 func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, error) {
-	if !c.logged {
+	if !c.isLogged() {
 		if err := c.login(ctx); err != nil {
 			return nil, err
 		}

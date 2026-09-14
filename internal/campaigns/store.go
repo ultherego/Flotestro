@@ -116,9 +116,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		                       requires_approval, created_by, request_id,
 		                       approval_fingerprint, idempotency_key,
 		                       offline_policy, deadline_at, manual_gate,
-		                       connectivity_lost_absolute)
+		                       connectivity_lost_absolute, compensates_campaign_id)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-		        $22, now() + make_interval(mins => $23), $24, $25)
+		        $22, now() + make_interval(mins => $23), $24, $25, $26)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
 	tag, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
 		string(state), spec.CanarySize, spec.WaveSize, spec.MaxConcurrent,
@@ -128,7 +128,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID),
 		fingerprint, nullable(spec.IdempotencyKey),
 		string(spec.OfflinePolicy), int(spec.Deadline()/time.Minute), spec.ManualGate,
-		spec.ConnectivityLostAbsolute)
+		spec.ConnectivityLostAbsolute, nullable(spec.CompensatesCampaignID))
 	if err != nil {
 		return nil, fmt.Errorf("creating the campaign: %w", err)
 	}
@@ -815,7 +815,12 @@ const campaignColumns = `
 	       coalesce(pause_reason, ''), coalesce(canceled_by, ''),
 	       created_by, coalesce(request_id, ''), started_at, finished_at, created_at, updated_at,
 	       offline_policy, deadline_at, manual_gate, coalesce(gate_advanced_by, ''),
-	       gate_advanced_at, connectivity_lost_absolute
+	       gate_advanced_at, connectivity_lost_absolute,
+	       coalesce(compensates_campaign_id::text, ''),
+	       coalesce((select o.name from campaigns o where o.id = campaigns.compensates_campaign_id), ''),
+	       coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'state', c.state)
+	                                  order by c.created_at)
+	                   from campaigns c where c.compensates_campaign_id = campaigns.id), '[]'::jsonb)
 	from campaigns `
 
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Campaign, error) {
@@ -840,7 +845,8 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.CreatedBy, &c.RequestID, &c.StartedAt, &c.FinishedAt,
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.OfflinePolicy, &c.DeadlineAt, &c.ManualGate, &c.GateAdvancedBy,
-			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute); err != nil {
+			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute,
+			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)

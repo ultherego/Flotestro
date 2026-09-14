@@ -181,7 +181,23 @@ func planToProto(plan packages.Plan) *agentv1.PackagePlanResult {
 		Mode:               plan.Mode,
 		Removals:           plan.Removals,
 		Protected:          plan.Protected,
+		Space:              spaceToProto(plan.Space),
 	}
+}
+
+func spaceToProto(facts []packages.SpaceFact) []*agentv1.SpaceFact {
+	out := make([]*agentv1.SpaceFact, 0, len(facts))
+	for _, fact := range facts {
+		out = append(out, &agentv1.SpaceFact{
+			Path:           fact.Path,
+			Filesystem:     fact.Filesystem,
+			AvailableBytes: fact.AvailableBytes,
+			NeededBytes:    fact.NeededBytes,
+			Purpose:        fact.Purpose,
+			Basis:          fact.Basis,
+		})
+	}
+	return out
 }
 
 // blockedPlanToProto carries the blocks together with the configuration

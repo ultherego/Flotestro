@@ -175,6 +175,9 @@ func TestTheFingerprintChangesWithEveryDecision(t *testing.T) {
 		"no canary":          func(s *Spec, _ *[]TargetHost) { s.CanarySize = 0 },
 		"a higher threshold": func(s *Spec, _ *[]TargetHost) { s.FailureThresholdPercent = 100 },
 		"rebooting hosts":    func(s *Spec, _ *[]TargetHost) { s.RebootPolicy = RebootAlways },
+		// Undoing a named campaign is a different decision from the same
+		// change ordered on its own.
+		"compensating a campaign": func(s *Spec, _ *[]TargetHost) { s.CompensatesCampaignID = "orig" },
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {

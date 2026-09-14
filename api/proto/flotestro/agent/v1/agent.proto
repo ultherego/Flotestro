@@ -1040,6 +1040,27 @@ message PackagePlanResult {
   // Protected packages that ended up in the plan. Their presence means the
   // operation will not be carried out.
   repeated string protected = 11;
+  // The space the change needs, per filesystem it touches: the download
+  // cache, the package database and the files themselves, and /boot when a
+  // kernel is among the changes. The helper refuses a change whose need
+  // exceeds what is free, before the transaction starts.
+  repeated SpaceFact space = 12;
+}
+
+// SpaceFact is what a package change needs on one filesystem against what
+// the filesystem has. A need that could not be sized says so in its basis,
+// and is reported rather than judged.
+message SpaceFact {
+  string path = 1;
+  // The mount point the path lives on: needs on one filesystem add up.
+  string filesystem = 2;
+  uint64 available_bytes = 3;
+  uint64 needed_bytes = 4;
+  // download, install or boot.
+  string purpose = 5;
+  // How the need was sized: download_size, installed_size, download_only,
+  // boot_files or unknown.
+  string basis = 6;
 }
 
 // BlockedPackage describes a package blocking package operations together

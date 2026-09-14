@@ -56,6 +56,11 @@ const (
 	// did not get it. This is not a failure: the host is working, only on
 	// something else this operation cannot run in parallel with.
 	RejectResourceBusy = "resource_busy"
+	// RejectOutcomeUnknown marks an operation the previous process of the
+	// agent started and did not live to see the end of. The helper finishes
+	// a transaction on its own, so the host may have changed; the agent that
+	// came back neither repeats the operation nor invents how it ended.
+	RejectOutcomeUnknown = "outcome_unknown"
 )
 
 // TaskExecutor performs the tasks delivered by the control plane.
@@ -88,6 +93,14 @@ type TaskExecutor struct {
 	// hostID is what the agent's certificate names. Empty means the executor
 	// was not told, and the rename preflight says so rather than guessing.
 	hostID string
+	// running holds the keys of the tasks inside Execute right now, so that a
+	// redelivery of a task still in progress is told to wait rather than
+	// judged by the marker it left on disk.
+	running *runningKeys
+	// packageState reads what the package adapter can say cheaply about the
+	// host. It fills the answer for a package operation whose outcome is
+	// unknown; nil means the answer carries no package facts.
+	packageState PackageStateProbe
 }
 
 // SecretFetch reaches for the value of the secret named in the task.
@@ -100,10 +113,17 @@ type SecretFetch func(ctx context.Context, taskID, name string, version int) ([]
 
 func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	facts func() Facts, log *slog.Logger) *TaskExecutor {
-	return &TaskExecutor{
+	executor := &TaskExecutor{
 		helper: helperClient, journal: journal, facts: facts, log: log,
-		cancels: newCancellationTable(),
+		cancels:      newCancellationTable(),
+		running:      newRunningKeys(),
+		packageState: packageStateNow,
 	}
+	// A marker without a result is an operation the previous process did not
+	// finish reporting on. Each is answered when its task is delivered again;
+	// the log names them now, so that the restart is visible on the host too.
+	executor.reportInFlight()
+	return executor
 }
 
 // SetReadOnlyMode turns on observation mode: the agent performs no mutation.
@@ -118,6 +138,19 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 	taskID := task.GetTaskId()
 	idempotencyKey := task.GetIdempotencyKey()
 
+	// A delivery of a task this process is still working on has neither a
+	// result to replay nor a restart to report. It is told to wait: the
+	// first delivery stores the result when it ends, and the next delivery
+	// replays it.
+	if !e.running.claim(idempotencyKey) {
+		result := rejected(agentv1.TaskResult_STATUS_REJECTED, RejectResourceBusy,
+			"the same operation is still running in the agent; its result is stored when it ends")
+		result.TaskId = taskID
+		result.IdempotencyKey = idempotencyKey
+		return result
+	}
+	defer e.running.release(idempotencyKey)
+
 	// A repeated delivery returns the previous result instead of performing the
 	// mutation a second time. That is the whole point of at-least-once.
 	if previous := e.journal.Lookup(idempotencyKey); previous != nil {
@@ -131,8 +164,44 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		return replayed
 	}
 
+	// A marker without a result: the previous process of the agent started
+	// the operation and stopped before writing down how it ended. The task is
+	// not run again, and the answer is stored in the marker's place so that
+	// the next delivery replays it rather than judging the host once more.
+	if marker, found := e.journal.InFlight(idempotencyKey); found {
+		e.log.Warn("the task was in flight when the previous process of the agent stopped; answering with an unknown outcome",
+			"task_id", taskID, "previous_task_id", marker.TaskID, "action", marker.Action,
+			"started_at", marker.StartedAt.Format(time.RFC3339))
+		result := e.outcomeUnknown(ctx, marker)
+		e.settle(task, result, marker.StartedAt)
+		return result
+	}
+
 	started := time.Now().UTC()
+	settled := false
+	defer func() {
+		if settled {
+			return
+		}
+		// Leaving without a result - a panic on the way - must not leave the
+		// marker for a later delivery to judge as a restart. What is known is
+		// the same as after a restart: the operation started and nobody saw
+		// its end. That is written down now.
+		if marker, found := e.journal.InFlight(idempotencyKey); found {
+			e.settle(task, e.outcomeUnknown(ctx, marker), marker.StartedAt)
+		}
+	}()
 	result := e.run(ctx, task, started)
+	e.settle(task, result, started)
+	settled = true
+	return result
+}
+
+// settle stamps the result with the attempt and the times and stores it in
+// the journal, where it replaces the in-flight marker of the same key.
+func (e *TaskExecutor) settle(task *agentv1.TaskEnvelope, result *agentv1.TaskResult, started time.Time) {
+	taskID := task.GetTaskId()
+	idempotencyKey := task.GetIdempotencyKey()
 	result.TaskId = taskID
 	result.IdempotencyKey = idempotencyKey
 	result.StartedAt = timestamppb.New(started)
@@ -142,7 +211,6 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		e.log.Error("the result was not stored in the idempotency journal",
 			"task_id", taskID, "idempotency_key", idempotencyKey, "err", err)
 	}
-	return result
 }
 
 func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now time.Time) *agentv1.TaskResult {
@@ -184,6 +252,17 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPayloadHash,
 				"the content of the task does not match the approved plan")
 		}
+	}
+
+	// Every check that can refuse the task without touching the host is
+	// behind us. From here on the host may change, so the journal has to say
+	// so before the helper is asked: an agent that dies past this point and
+	// comes back without the marker would carry the change out again.
+	if err := e.markInFlight(task, action, payload, now); err != nil {
+		// Not knowing is allowed; a silent second execution is not. A host
+		// whose journal cannot take the marker performs no mutation.
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
+			"the in-flight marker was not written to the journal: "+err.Error())
 	}
 
 	switch action {

@@ -199,6 +199,80 @@ func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string
 	return tag.RowsAffected(), nil
 }
 
+// RefreshableSession is a live session whose group snapshot is due for a
+// check with the provider. The refresh token is the only credential the
+// check needs; the subject is carried for the trail.
+type RefreshableSession struct {
+	ID           string
+	PrincipalID  string
+	Subject      string
+	Groups       []string
+	RefreshToken string
+}
+
+// StaleGroupSnapshots lists the live sessions whose groups were confirmed
+// with the provider before the given moment - or never, in which case the
+// login counts as the confirmation. Only sessions with a refresh token are
+// listed: without one there is nothing to ask the provider with, and the
+// snapshot lasts until the session ends. Oldest first, so that a provider
+// that answers slowly does not starve the same sessions every tick.
+func (s *Store) StaleGroupSnapshots(ctx context.Context, before time.Time, limit int) ([]RefreshableSession, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	const query = `
+		select w.id, w.principal_id, p.subject, w.groups, w.refresh_token
+		from web_sessions w
+		join principals p on p.id = w.principal_id
+		where w.revoked_at is null
+		  and w.absolute_expires_at > now()
+		  and w.idle_expires_at > now()
+		  and w.refresh_token is not null
+		  and coalesce(w.groups_refreshed_at, w.created_at) < $1
+		order by coalesce(w.groups_refreshed_at, w.created_at)
+		limit $2`
+	rows, err := s.pool.Query(ctx, query, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []RefreshableSession
+	for rows.Next() {
+		var session RefreshableSession
+		if err := rows.Scan(&session.ID, &session.PrincipalID, &session.Subject,
+			&session.Groups, &session.RefreshToken); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
+}
+
+// RecordGroupRefresh writes the outcome of a successful check: the groups
+// as the provider gives them now and the tokens that came back with them.
+// The refresh token is replaced whenever the provider rotated it - a
+// provider that revokes the old token on use would otherwise refuse the
+// next check as an invalid grant and the session would be ended for a
+// user who is still there. A session revoked in the meantime is left as
+// it is: the revocation wins over a check that started before it.
+func (s *Store) RecordGroupRefresh(ctx context.Context, sessionID string,
+	groups []string, tokens SessionTokens) error {
+	if groups == nil {
+		groups = []string{}
+	}
+	_, err := s.pool.Exec(ctx, `
+		update web_sessions set
+			groups = $2,
+			refresh_token = coalesce(nullif($3, ''), refresh_token),
+			id_token = coalesce(nullif($4, ''), id_token),
+			access_expires_at = coalesce($5, access_expires_at),
+			groups_refreshed_at = now()
+		where id = $1 and revoked_at is null`,
+		sessionID, groups, tokens.RefreshToken, tokens.IDToken, nullableTime(tokens.AccessExpiresAt))
+	return err
+}
+
 // PurgeExpired deletes expired sessions and abandoned login flows.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx,

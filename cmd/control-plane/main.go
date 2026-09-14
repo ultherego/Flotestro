@@ -113,6 +113,9 @@ func run() error {
 	sessionIdle := flag.Duration("session-idle",
 		config.EnvDuration("FLOTESTRO_SESSION_IDLE", 8*time.Hour),
 		"how long a panel session survives without a request; the absolute limit of a day stands regardless")
+	sessionGroupRefresh := flag.Duration("session-group-refresh",
+		config.EnvDuration("FLOTESTRO_SESSION_GROUP_REFRESH", 5*time.Minute),
+		"how often the groups of a live panel session are confirmed with the identity provider; 0 turns it off")
 	// The key of the store lies in the state directory next to the CA key:
 	// that is the only place the service is allowed to write to, and the only
 	// one whose permissions are narrow enough to keep cryptographic material
@@ -224,6 +227,12 @@ func run() error {
 	// anybody meant.
 	if *sessionIdle < time.Minute || *sessionIdle > sessionAbsolute {
 		return fmt.Errorf("FLOTESTRO_SESSION_IDLE must be between 1m and %s, not %s", sessionAbsolute, *sessionIdle)
+	}
+	// Zero is the switch that turns the refresh off; anything shorter than a
+	// minute would turn the provider's token endpoint into a heartbeat.
+	if *sessionGroupRefresh != 0 && (*sessionGroupRefresh < time.Minute || *sessionGroupRefresh > sessionAbsolute) {
+		return fmt.Errorf("FLOTESTRO_SESSION_GROUP_REFRESH must be 0 or between 1m and %s, not %s",
+			sessionAbsolute, *sessionGroupRefresh)
 	}
 
 	cfg.GatewayID = config.Env("FLOTESTRO_GATEWAY_ID", defaultGatewayID())
@@ -382,6 +391,17 @@ func run() error {
 		// jobs: a change in the directory is not an operation on a host.
 		go identity.NewExecutor(changeStore, directory, authzStore, recorder,
 			log, 3*time.Second).Run(ctx)
+	}
+
+	// A membership taken away in Keycloak or FreeIPA behind the panel's back
+	// reaches a live session through this loop rather than at the next
+	// login. Without a provider there is nobody to ask, and the token-only
+	// deployment stays as it is.
+	if identityProvider != nil && *sessionGroupRefresh > 0 {
+		go identity.NewSessionGroupRefresher(authzStore, identityProvider, recorder,
+			log, *sessionGroupRefresh).Run(ctx)
+		log.Info("the group snapshots of the panel sessions are refreshed",
+			"interval", sessionGroupRefresh.String())
 	}
 
 	// The issuer stands between the services and the certificate authority.

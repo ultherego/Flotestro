@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -332,10 +334,10 @@ func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign,
 		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
 		Action: "campaign.target." + string(state), TargetType: "host", TargetID: target.HostID,
 		RequestID: campaign.RequestID, Outcome: outcome,
-		Detail: map[string]any{
+		Detail: withCompensation(map[string]any{
 			"campaign_id": campaign.ID, "wave": target.Wave,
 			"error_code": errorCode, "message": message,
-		},
+		}, campaign),
 	})
 	o.log.Info("the campaign settled a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID,
@@ -401,6 +403,16 @@ func (o *Orchestrator) complete(ctx context.Context, campaign Campaign,
 	return nil
 }
 
+// withCompensation adds the compensated campaign to an audit detail when
+// there is one: the trail of the original is to lead to the campaign that
+// undid it, and the trail of the compensation to what it undid.
+func withCompensation(detail map[string]any, campaign Campaign) map[string]any {
+	if campaign.CompensatesCampaignID != "" {
+		detail["compensates_campaign_id"] = campaign.CompensatesCampaignID
+	}
+	return detail
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -444,7 +456,74 @@ func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, targ
 			return err
 		}
 	}
+	if campaign.CompensatesCampaignID != "" && state.Finished() {
+		if err := o.closeCompensation(ctx, tx, campaign, target, state, errorCode, message); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
+}
+
+// openCompensation records, on the original campaign's target for the same
+// host, that its compensation started: a compensate step that follows the
+// original's change, runs under the compensating campaign's plan for the
+// host and is carried by that campaign's task.
+//
+// The original's target keeps its state. Its terminal state is the record
+// of what that campaign did to the host, the report written from those
+// states is immutable, and moving a failed target to "compensated" would
+// take the failure out of every count and filter that reads the state -
+// the history the document says a compensation must not erase. The step
+// row is that history: it names the compensating campaign in its note,
+// so the strip of the original reads "compensated by ..." without a word
+// of the original's own record rewritten.
+func (o *Orchestrator) openCompensation(ctx context.Context, tx pgx.Tx, originalID string,
+	target *Target, start stepStart) error {
+	original, found, err := o.store.compensatedTarget(ctx, tx, originalID, target.HostID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		// The order was checked against the original's snapshot; a host
+		// missing from it now has left the fleet, and the compensating
+		// campaign's own step says what happened on it.
+		o.log.Warn("the compensated campaign has no target for the host",
+			"campaign_id", originalID, "host_id", target.HostID)
+		return nil
+	}
+	return o.store.StartStep(ctx, tx, StepRecord{
+		Target: original, Key: StepCompensate, DependsOn: StepExecute,
+		PlanHash: start.PlanHash, JobID: start.JobID,
+		Reason: compensationNote(target.CampaignID),
+	})
+}
+
+// compensationNote is what the compensate step of the original says about
+// where it came from. The task and the plan digest point at the
+// compensating campaign already; the note says it in words, on the strip.
+func compensationNote(campaignID string) string {
+	return "compensated by campaign " + campaignID
+}
+
+// closeCompensation settles the compensate step the compensating target
+// opened on the original's target, with the outcome of the compensating
+// change. A compensating host settled before its change started opened
+// nothing, and nothing is closed: the original host was not touched, and
+// the compensating campaign's own strip says why its host never ran.
+func (o *Orchestrator) closeCompensation(ctx context.Context, tx pgx.Tx, campaign Campaign,
+	target *Target, state TargetState, errorCode, message string) error {
+	original, found, err := o.store.compensatedTarget(ctx, tx, campaign.CompensatesCampaignID, target.HostID)
+	if err != nil || !found {
+		return err
+	}
+	stepState, reason := compensationOutcome(state, errorCode, message)
+	if reason == "" {
+		// A change that succeeded has no error to quote; the note that
+		// opened the step stays on it rather than giving way to nothing.
+		reason = compensationNote(campaign.ID)
+	}
+	_, err = o.store.FinishStep(ctx, tx, original.ID, StepCompensate, stepState, reason)
+	return err
 }
 
 // stepStart describes a step being ordered for a host: the task that
@@ -465,6 +544,12 @@ type stepStart struct {
 	BootID *string
 	// Closes are the steps that ended for this one to start.
 	Closes []stepOutcome
+	// Compensates names the campaign whose change on this host the step
+	// undoes; set on the change step of a compensating campaign only. The
+	// original's target for the same host gets its compensate step opened
+	// in the same transaction: the reverse change runs on the host, and
+	// the original is to say so on its own strip.
+	Compensates string
 }
 
 // startStep orders a step: it binds the task, moves the target into the
@@ -500,6 +585,11 @@ func (o *Orchestrator) startStep(ctx context.Context, target *Target, start step
 		PlanHash: start.PlanHash, JobID: start.JobID, Reason: start.Note,
 	}); err != nil {
 		return err
+	}
+	if start.Compensates != "" {
+		if err := o.openCompensation(ctx, tx, start.Compensates, target, start); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err

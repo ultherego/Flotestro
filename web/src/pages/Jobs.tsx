@@ -3,7 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useSearchParams } from "react-router-dom";
 import { api, loadedItems, LIST_PAGE, type Collection, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
-import { toInstant } from "../lib/format";
+import { bytes, toInstant } from "../lib/format";
 import { PlanSummary } from "../components/plan";
 import type { Attempt, FleetActivity, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
@@ -313,6 +313,51 @@ function Attempts({ jobId }: { jobId: string }) {
   );
 }
 
+type SpaceFact = {
+  path: string; filesystem?: string; available_bytes?: number; needed_bytes?: number;
+  purpose?: string; basis?: string;
+};
+
+/**
+ * Where the bytes of a package change go, file system by file system. A
+ * separate /var or /boot can be full while "/" has room; the host refuses
+ * such a change before the transaction, and the plan is where the operator
+ * sees it coming. A fact whose need was not measured says so - an unknown
+ * size is not zero.
+ */
+function SpaceFacts({ facts }: { facts?: SpaceFact[] }) {
+  const t = useT();
+  if (!facts || facts.length === 0) return null;
+  const purposes: Record<string, string> = {
+    download: t("download cache"), install: t("installed files"), boot: t("boot files"),
+  };
+  return (
+    <div>
+      {facts.map((fact) => {
+        const known = fact.basis && fact.basis !== "unknown";
+        const short = known && (fact.needed_bytes ?? 0) > (fact.available_bytes ?? 0);
+        return (
+          <div key={`${fact.purpose}:${fact.path}`} className={short ? "warning" : undefined}
+            title={short ? t("The host will refuse this change: the file system has fewer free bytes than the change needs.") : undefined}>
+            {fact.path}
+            {fact.filesystem && fact.filesystem !== fact.path && ` (${fact.filesystem})`}
+            {": "}
+            {purposes[fact.purpose ?? ""] ?? fact.purpose}
+            {", "}
+            {known
+              ? t("needs {needed}, {available} free", {
+                  needed: bytes(fact.needed_bytes), available: bytes(fact.available_bytes),
+                })
+              : t("need unknown, {available} free", { available: bytes(fact.available_bytes) })}
+            {fact.basis === "download_only" && ` (${t("estimated from the archives alone")})`}
+            {fact.basis === "boot_files" && ` (${t("estimated from the running kernel")})`}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The result dependent on the operation type: a package plan, a transaction report, a preflight. */
 function TypedResult({ detail }: { detail: Record<string, any> }) {
   const t = useT();
@@ -325,6 +370,7 @@ function TypedResult({ detail }: { detail: Record<string, any> }) {
             mb: Math.round((detail.download_bytes ?? 0) / 1048576),
           })}
           {detail.reboot_predicted && `, ${t("reboot predicted")}`}
+          <SpaceFacts facts={detail.space} />
         </div>
       );
     case "package_apply":

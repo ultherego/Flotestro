@@ -15,7 +15,12 @@ const (
 	dpkgPath       = "/usr/bin/dpkg"
 	dpkgQueryPath  = "/usr/bin/dpkg-query"
 	aptMarkPath    = "/usr/bin/apt-mark"
+	aptCachePath   = "/usr/bin/apt-cache"
 	dpkgStatusPath = "/var/lib/dpkg/status"
+	// The archives land in the cache and the database lives under /var/lib;
+	// both are on /var, which is often a file system of its own.
+	aptCacheDir     = "/var/cache/apt/archives"
+	dpkgDatabaseDir = "/var/lib/dpkg"
 	// The debconf tools serve only to unblock a package that waits for a
 	// decision of the operator.
 	debconfShowPath = "/usr/bin/debconf-show"
@@ -83,9 +88,108 @@ func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 		plan.Changes = append(plan.Changes, change)
 	}
 
-	plan.DownloadBytes = a.downloadSize(ctx, options)
+	// The archives of a narrowed upgrade are those of the named packages,
+	// not of everything apt-get would raise; the transaction narrows the same
+	// way, with "install --only-upgrade" and the names.
+	sizing := []string{"upgrade"}
+	if options.SecurityOnly || len(options.Packages) > 0 {
+		sizing = append([]string{"install", "--only-upgrade"}, changeNames(plan.Changes)...)
+	}
+	plan.DownloadBytes, plan.Space = a.planSpace(ctx, plan.Changes, sizing)
 	plan.RebootPredicted = a.rebootPredicted(plan.Changes)
 	return plan, nil
+}
+
+// planSpace measures where the bytes of the plan go. The archives of the
+// operation come from --print-uris, the growth of /usr from the installed
+// sizes apt-cache and dpkg-query know; sizing is the apt-get operation whose
+// archives are counted.
+func (a *APT) planSpace(ctx context.Context, changes []Change, sizing []string) (uint64, []SpaceFact) {
+	// Nothing to change needs nothing; the tools are not asked about an
+	// empty set, which apt-get would read as "everything".
+	needs := spaceNeeds{downloadKnown: true, installBasis: BasisInstalledSize}
+	if len(changes) == 0 {
+		return 0, spaceFacts(aptCacheDir, dpkgDatabaseDir, needs)
+	}
+	needs.download, needs.downloadKnown = a.downloadSize(ctx, sizing...)
+	needs.kernel = anyKernel(a.Name(), changes)
+	names := changeNames(changes)
+	grown, measured := growth(names, a.candidateSizes(ctx, names), a.installedSizes(ctx, names))
+	installNeeds(&needs, grown, measured)
+	return needs.download, spaceFacts(aptCacheDir, dpkgDatabaseDir, needs)
+}
+
+// changeNames lists the names of the changes in their order.
+func changeNames(changes []Change) []string {
+	names := make([]string, 0, len(changes))
+	for _, change := range changes {
+		names = append(names, change.Name)
+	}
+	return names
+}
+
+// candidateSizes reads the installed size of the candidate version of every
+// named package. --no-all-versions keeps the record of the candidate alone;
+// the size is in KiB, as the Debian policy defines the field.
+func (a *APT) candidateSizes(ctx context.Context, names []string) map[string]uint64 {
+	result := run(ctx, 2*time.Minute, aptCachePath,
+		append([]string{"--no-all-versions", "show"}, names...)...)
+	if !result.Ran {
+		return nil
+	}
+	// A name apt-cache does not know ends with the code 100 and the records
+	// of the known ones on the standard output; what it printed is used.
+	return ParseAPTCacheSizes(result.Stdout)
+}
+
+// installedSizes reads the installed size of the installed version of every
+// named package. A package that is not installed yet makes dpkg-query
+// complain on the error output and end with the code 1, with the rest of the
+// answer intact on the standard output.
+func (a *APT) installedSizes(ctx context.Context, names []string) map[string]uint64 {
+	result := run(ctx, 2*time.Minute, dpkgQueryPath,
+		append([]string{"-W", "-f", "${binary:Package}\t${Installed-Size}\n"}, names...)...)
+	if !result.Ran {
+		return nil
+	}
+	return ParseInstalledSizeLines(result.Stdout)
+}
+
+// ParseAPTCacheSizes reads the records of "apt-cache show": the Package and
+// the Installed-Size fields, the latter in KiB.
+func ParseAPTCacheSizes(output string) map[string]uint64 {
+	sizes := map[string]uint64{}
+	name := ""
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.HasPrefix(line, "Package: "):
+			name = strings.TrimSpace(strings.TrimPrefix(line, "Package: "))
+		case strings.HasPrefix(line, "Installed-Size: ") && name != "":
+			if kib, err := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "Installed-Size: ")), 10, 64); err == nil {
+				sizes[name] = kib << 10
+			}
+		case strings.TrimSpace(line) == "":
+			name = ""
+		}
+	}
+	return sizes
+}
+
+// ParseInstalledSizeLines reads lines of "name<TAB>KiB", as dpkg-query
+// prints them with the format above. A line without a size - a package
+// known to dpkg but not installed - is skipped.
+func ParseInstalledSizeLines(output string) map[string]uint64 {
+	sizes := map[string]uint64{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		if len(fields) != 2 {
+			continue
+		}
+		if kib, err := strconv.ParseUint(strings.TrimSpace(fields[1]), 10, 64); err == nil {
+			sizes[fields[0]] = kib << 10
+		}
+	}
+	return sizes
 }
 
 // parseAptInstLine reads a line of the form:
@@ -130,14 +234,15 @@ func parseAptInstLine(line string) (Change, bool) {
 	return change, true
 }
 
-// downloadSize sums up the sizes of the packages to fetch. The value is an
-// estimate of the plan rather than a promise; on an error we return zero
-// instead of guessing.
-func (a *APT) downloadSize(ctx context.Context, options Options) uint64 {
-	result := run(ctx, 2*time.Minute, aptGetPath,
-		"--print-uris", "--quiet", "--yes", "-o", "Debug::NoLocking=true", "upgrade")
+// downloadSize sums up the sizes of the packages the operation fetches. The
+// value is an estimate of the plan rather than a promise; on an error the
+// size is not known, and the caller says so rather than guessing.
+func (a *APT) downloadSize(ctx context.Context, operation ...string) (uint64, bool) {
+	args := append([]string{"--print-uris", "--quiet", "--yes", "-o", "Debug::NoLocking=true"},
+		operation...)
+	result := run(ctx, 2*time.Minute, aptGetPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
-		return 0
+		return 0, false
 	}
 	var total uint64
 	for _, line := range strings.Split(result.Stdout, "\n") {
@@ -150,7 +255,7 @@ func (a *APT) downloadSize(ctx context.Context, options Options) uint64 {
 			total += size
 		}
 	}
-	return total
+	return total, true
 }
 
 // rebootPredicted guesses the need for a restart from the packages being
@@ -468,7 +573,8 @@ func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 		}
 	}
 	plan.Protected = ProtectedInSet(plan.Removals)
-	plan.DownloadBytes = a.downloadSize(ctx, options)
+	plan.DownloadBytes, plan.Space = a.planSpace(ctx, plan.Changes,
+		append([]string{"install"}, options.Packages...))
 	return plan, nil
 }
 

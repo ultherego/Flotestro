@@ -216,6 +216,11 @@ type Spec struct {
 	// IdempotencyKey lets a caller repeat the order without a second
 	// campaign; empty means every order is new.
 	IdempotencyKey string
+	// CompensatesCampaignID names the campaign this one undoes: the
+	// reverse operation on the hosts that campaign changed. Empty for a
+	// campaign that is not a compensation. The handler checks the rules
+	// (CheckCompensation) before the order reaches the store.
+	CompensatesCampaignID string
 }
 
 // DefaultDeadline is how long a campaign waits for offline hosts when the
@@ -352,7 +357,12 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 		Expression json.RawMessage `json:"expression,omitempty"`
 		Excluded   []string        `json:"excluded,omitempty"`
 		Reason     string          `json:"exclude_reason,omitempty"`
-		Rollout    struct {
+		// What the campaign undoes is part of what the approver consents
+		// to: "the rollback of last night's rollout" is a different
+		// decision from the same file write ordered on its own. Absent
+		// from the digest of every other campaign, so theirs stay.
+		Compensates string `json:"compensates_campaign_id,omitempty"`
+		Rollout     struct {
 			Canary           int          `json:"canary_size"`
 			Wave             int          `json:"wave_size"`
 			Concurrent       int          `json:"max_concurrent"`
@@ -372,7 +382,8 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 			ConnectivityLost int                  `json:"connectivity_lost_absolute"`
 		} `json:"rollout"`
 	}{Version: CampaignVersion, Action: spec.ActionType, Payload: payload, Targets: hosts,
-		Expression: expression, Excluded: excluded, Reason: spec.Selector.ExcludeReason}
+		Expression: expression, Excluded: excluded, Reason: spec.Selector.ExcludeReason,
+		Compensates: spec.CompensatesCampaignID}
 	content.Rollout.Canary = spec.CanarySize
 	content.Rollout.Wave = spec.WaveSize
 	content.Rollout.Concurrent = spec.MaxConcurrent
@@ -475,6 +486,23 @@ type Campaign struct {
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
+	// CompensatesCampaignID and CompensatesCampaignName name the campaign
+	// this one undoes; both empty for a campaign that is not a
+	// compensation. The name travels with the identifier so a screen can
+	// link the original without a second read.
+	CompensatesCampaignID   string `json:"compensates_campaign_id,omitempty"`
+	CompensatesCampaignName string `json:"compensates_campaign_name,omitempty"`
+	// CompensatedBy lists the campaigns ordered to undo this one, oldest
+	// first. It is read from the compensating campaigns' link, so the
+	// record of the original never changes when a rollback is ordered.
+	CompensatedBy []CampaignLink `json:"compensated_by,omitempty"`
+}
+
+// CampaignLink names another campaign the way a screen links to it.
+type CampaignLink struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State State  `json:"state"`
 }
 
 // Target is a host within a campaign.
