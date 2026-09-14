@@ -1,12 +1,26 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
-  <img src="docs/logo.svg" alt="Flotestro" width="360">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+    <img src="docs/logo.svg" alt="Flotestro" width="420">
+  </picture>
+</p>
 
-Fleet management for Linux servers: one panel that plans, approves, carries and
-records changes across Debian, Ubuntu, Fedora, RHEL and Arch hosts.
+<p align="center">
+  Fleet management for Linux servers.<br>
+  One panel that plans, approves, carries and records changes across Debian, Ubuntu, Fedora, RHEL and Arch hosts.
+</p>
 
-![Fleet dashboard](docs/screenshots/dashboard.png)
+<p align="center">
+  <a href="#what-it-does">Features</a> ·
+  <a href="#how-a-change-happens">How it works</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#building">Building</a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="900">
+</p>
 
 ## What it does
 
@@ -37,7 +51,7 @@ Every operation is typed and versioned. The panel never runs a shell on a host.
 Across a fleet the same change runs as a campaign: canary, waves, manual or automatic
 gates, failure thresholds, maintenance windows, per-site budgets, offline policy per host.
 
-![Campaign](docs/screenshots/campaign.png)
+<p align="center"><img src="docs/screenshots/campaign.png" alt="Campaign" width="900"></p>
 
 ## The panel
 
@@ -45,24 +59,24 @@ Hosts are listed with state, site, environment and what needs attention; each ho
 page per module with the facts as the agent reported them and the actions the operator
 may take.
 
-![Host overview](docs/screenshots/host-overview.png)
+<p align="center"><img src="docs/screenshots/host-overview.png" alt="Host overview" width="900"></p>
 
-![Packages of a host](docs/screenshots/host-packages.png)
+<p align="center"><img src="docs/screenshots/host-packages.png" alt="Packages of a host" width="900"></p>
 
 Security checks are versioned and judged in the panel over facts the hosts already
 report; a fix for many hosts is one campaign with one approval.
 
-![Security](docs/screenshots/security.png)
+<p align="center"><img src="docs/screenshots/security.png" alt="Security" width="900"></p>
 
 Monitoring needs no external system: agents sample once a minute, the panel keeps raw
 samples and rollups, evaluates rules and keeps alerts and silences.
 
-![Monitoring](docs/screenshots/monitoring.png)
+<p align="center"><img src="docs/screenshots/monitoring.png" alt="Monitoring" width="900"></p>
 
 Every order, approval and result is an audit event with the actor, the request and the
 authentication it rested on.
 
-![Audit](docs/screenshots/audit.png)
+<p align="center"><img src="docs/screenshots/audit.png" alt="Audit" width="900"></p>
 
 ## Architecture
 
