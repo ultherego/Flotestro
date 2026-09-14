@@ -19,8 +19,6 @@
   <a href="#building">Building</a>
 </p>
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="900"></p>
-
 ## Why Flotestro
 
 - **Typed operations only.** Every action is a versioned contract with its own permission, risk level, lock class and campaign mode. There is no "run a command" type; the panel never runs a shell on a host.
@@ -49,6 +47,8 @@
 | Notifications | durable trail posted to a webhook in batches, signed with HMAC-SHA256, delivered at least once and in order |
 
 ## Screenshots
+
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="900"></p>
 
 <table>
   <tr>
