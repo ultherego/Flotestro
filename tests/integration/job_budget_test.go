@@ -100,6 +100,21 @@ func TestJobWaitsForTheMutationBudget(t *testing.T) {
 		}
 	}
 
+	// The budget screen says who holds the token and who waits for it
+	// while it is held: the stand-in as a holder the panel cannot place,
+	// two jobs in the queue. A page that showed only the numbers would
+	// leave the operator guessing whom to wait for.
+	held := h.budgetState(key)
+	if held.WaitingJobs != 2 {
+		t.Errorf("the budget counts %d waiting jobs while two stand in the queue", held.WaitingJobs)
+	}
+	if !holds(held, holder) {
+		t.Errorf("the budget does not list the held token among its holders: %+v", held.Holders)
+	}
+	if held.ByClass["unknown"] < 1 {
+		t.Errorf("a stand-in's token is not counted as unknown: %v", held.ByClass)
+	}
+
 	// A read is not a mutation: the held token does not hold it.
 	read, attempts := h.runOperation(first.ID, map[string]any{
 		"action":  "unit.status",
@@ -121,12 +136,31 @@ func TestJobWaitsForTheMutationBudget(t *testing.T) {
 	if _, err := pool.Exec(ctx, `delete from budget_leases where owner = $1`, holder); err != nil {
 		t.Fatalf("giving the token back: %v", err)
 	}
+	// While the first job holds the token, the budget names it as the
+	// holder by its job id and still counts the second in the queue. The
+	// window is the job's run, so the screen is read as soon as the first
+	// job has left the queue; a run too short to be caught proves nothing
+	// either way and is not a failure.
+	shown := false
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		later := h.waitingJob(two.ID)
 		earlier := h.waitingJob(one.ID)
 		if terminal(earlier.State) {
 			break
+		}
+		if !shown && earlier.State != "queued" && later.State == "queued" {
+			running := h.budgetState(key)
+			if !holds(running, "job:"+one.ID) {
+				t.Errorf("the budget does not list the running job among its holders: %+v", running.Holders)
+			}
+			if running.WaitingJobs != 1 {
+				t.Errorf("the budget counts %d waiting jobs while one runs and one waits", running.WaitingJobs)
+			}
+			if running.ByClass["interactive"] < 1 {
+				t.Errorf("an operator's job is not counted as interactive: %v", running.ByClass)
+			}
+			shown = true
 		}
 		if later.State != "queued" {
 			t.Fatalf("the second job is %s while the first is still %s: one token admitted two changes",
@@ -168,18 +202,53 @@ func TestJobWaitsForTheMutationBudget(t *testing.T) {
 
 	// The budget screen counts the jobs it holds while it holds them; after
 	// the run it holds none.
+	if after := h.budgetState(key); after.WaitingJobs != 0 {
+		t.Errorf("the budget still counts %d waiting jobs after the run", after.WaitingJobs)
+	}
+}
+
+// budgetStateView is the part of a budget row the tests read: the numbers
+// and who is behind them.
+type budgetStateView struct {
+	Key            string         `json:"key"`
+	Capacity       int            `json:"capacity"`
+	Used           int            `json:"used"`
+	WaitingJobs    int            `json:"waiting_jobs"`
+	WaitingTargets int            `json:"waiting_targets"`
+	ByClass        map[string]int `json:"by_class"`
+	Holders        []struct {
+		Owner    string `json:"owner"`
+		Claimant string `json:"claimant"`
+		Class    string `json:"class"`
+		Tokens   int    `json:"tokens"`
+	} `json:"holders"`
+}
+
+// budgetState reads one row of the budget screen. A key the screen does
+// not show fails the test: the test configured it, so it has to be there.
+func (h *harness) budgetState(key string) budgetStateView {
+	h.t.Helper()
 	var view struct {
-		Items []struct {
-			Key         string `json:"key"`
-			WaitingJobs int    `json:"waiting_jobs"`
-		} `json:"items"`
+		Items []budgetStateView `json:"items"`
 	}
 	h.get("/api/v1/budgets", &view)
 	for _, budget := range view.Items {
-		if budget.Key == key && budget.WaitingJobs != 0 {
-			t.Errorf("the budget still counts %d waiting jobs after the run", budget.WaitingJobs)
+		if budget.Key == key {
+			return budget
 		}
 	}
+	h.t.Fatalf("the budget screen shows no row for %s", key)
+	return budgetStateView{}
+}
+
+// holds says whether the row lists the owner among its holders.
+func holds(budget budgetStateView, owner string) bool {
+	for _, holder := range budget.Holders {
+		if holder.Owner == owner {
+			return true
+		}
+	}
+	return false
 }
 
 func terminal(state string) bool {

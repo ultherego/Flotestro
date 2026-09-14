@@ -294,6 +294,61 @@ func WaitedKey(reason string) string {
 	return strings.TrimPrefix(reason, WaitReasonPrefix)
 }
 
+// DescribedKey reads the budget key back out of the sentence Describe
+// wrote. A campaign target that waits carries only that sentence - its
+// state names the reason, the message names the budget - so the budget
+// screen counts the waiting targets by reading the sentence. Empty means
+// the message is not a refusal of ours.
+func DescribedKey(description string) string {
+	rest, ok := strings.CutPrefix(description, "budget ")
+	if !ok {
+		return ""
+	}
+	// The key has colons of its own, so the boundary is the colon that
+	// Describe puts before the numbers: the first one followed by a space.
+	key, _, found := strings.Cut(rest, ": ")
+	if !found {
+		return ""
+	}
+	return key
+}
+
+// ClassUnknown is the class of a lease the panel cannot read a class from:
+// a lease taken by something that is neither a job, a campaign nor a fan-out.
+// It is named rather than left empty or counted as background, because a
+// token the panel cannot explain is still a token taken.
+const ClassUnknown = "unknown"
+
+// JobFacts is what the job of a lease says about its own class.
+type JobFacts struct {
+	Action    opspec.ActionType
+	CreatedBy string
+	Stated    Class
+}
+
+// LeaseClass names the class a lease was taken with.
+//
+// The lease itself records no class - only the waiting entry does - so the
+// class is read from the holder: a job's from its order the way the
+// scheduler read it, a campaign target's from the campaign, which always
+// asks as maintenance, a fan-out's from the fan-out, which always asks as
+// interactive. A job whose row is gone leaves the class unknown rather than
+// guessed.
+func LeaseClass(owner, claimant string, job *JobFacts) string {
+	switch {
+	case strings.HasPrefix(owner, "job:"):
+		if job == nil {
+			return ClassUnknown
+		}
+		return string(JobClass(job.Action, job.CreatedBy, job.Stated))
+	case strings.HasPrefix(claimant, "campaign:"):
+		return string(ClassMaintenance)
+	case strings.HasPrefix(owner, "fanout:"):
+		return string(ClassInteractive)
+	}
+	return ClassUnknown
+}
+
 // PanelAuthorPrefix marks a job the panel ordered on its own: a
 // vulnerability sweep, a scheduled refresh. Such work is background - it
 // must never make an operator wait.

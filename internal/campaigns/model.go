@@ -539,6 +539,12 @@ type Campaign struct {
 	// first. It is read from the compensating campaigns' link, so the
 	// record of the original never changes when a rollback is ordered.
 	CompensatedBy []CampaignLink `json:"compensated_by,omitempty"`
+	// ChangedHosts counts the hosts the campaign changed, by the rule
+	// ChangedTargets reads them: the change landed, whatever came after.
+	// It is the number a compensation would run on. Zero until the
+	// campaign settles: a count of a campaign still changing hosts would
+	// invite a rollback of a moving target, which the server refuses.
+	ChangedHosts int `json:"changed_hosts"`
 }
 
 // CampaignLink names another campaign the way a screen links to it.

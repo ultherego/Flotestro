@@ -621,6 +621,7 @@ message TaskEnvelope {
     ReadDockerEvents read_docker_events = 56;
     DockerLogs docker_logs = 57;
     HostnameSet hostname_set = 58;
+    DomainLeave domain_leave = 59;
   }
 }
 
@@ -770,6 +771,15 @@ message DomainEnroll {
   bool preflight_only = 5;
   // The FQDN the host is to be registered under.
   string hostname = 6;
+}
+
+// DomainLeave takes the host out of the directory domain. It carries no
+// credential: the host unenrolls itself with its own keytab. The result
+// comes back as a DomainEnrollResult with enrolled = false - the checks
+// before and the verifications after have the same shape as the join's.
+message DomainLeave {
+  string domain = 1;
+  string realm = 2;
 }
 
 // LocalUserAction manages a local account on the host. The module is meant

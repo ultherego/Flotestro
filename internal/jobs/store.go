@@ -571,6 +571,35 @@ func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID 
 	return tx.Commit(ctx)
 }
 
+// FailUndelivered settles a task that could not be assembled for delivery
+// and never will be by trying again: the attempt is closed with the reason,
+// the job fails with a typed code, and the tokens go back.
+func (s *Store) FailUndelivered(ctx context.Context, jobID, attemptID, code, message string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		update job_attempts set finished_at = now(), status = 'failed', error_code = $2,
+		                        message = $3, lease_expires_at = null
+		where id = $1`, attemptID, code, message); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		update jobs set state = 'failed', result_status = 'failed', result_error_code = $2,
+		                result_message = $3, wait_reason = '', finished_at = now(), updated_at = now()
+		where id = $1 and state in ('leased', 'dispatched')`,
+		jobID, code, message); err != nil {
+		return err
+	}
+	if err := releaseBudgets(ctx, tx, jobID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // ReleaseLease returns the task to the queue when it could not be delivered.
 func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason string) error {
 	tx, err := s.pool.Begin(ctx)

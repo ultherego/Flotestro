@@ -737,6 +737,31 @@ export type RelayHost = {
 
 export type RelayDetail = { relay: Relay; hosts: RelayHost[] };
 
+/**
+ * One capacity budget as the fleet page lists it: the key, the capacity
+ * somebody set, the tokens held right now, and who holds or asks for them.
+ * A key with an asterisk in its middle segment is the default policy for
+ * every key of that family nobody described separately.
+ */
+export type Budget = {
+  key: string;
+  capacity: number;
+  /** The weight of the tokens held under live leases. */
+  used: number;
+  /** The claimants holding tokens or waiting for them; the fair share divides the capacity between them. */
+  claimants: number;
+  /** The single-host jobs standing in the queue for this budget. */
+  waiting_jobs: number;
+};
+
+/** A configured budget as its own record, read for its entity tag before a write. */
+export type BudgetLimit = {
+  key: string;
+  capacity: number;
+  note: string;
+  updated_at: string;
+};
+
 export type InstallationCommand = {
   key: "repository" | "package" | "config" | "ca" | "enroll" | "start";
   command: string;

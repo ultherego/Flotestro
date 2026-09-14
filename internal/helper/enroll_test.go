@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -274,5 +275,234 @@ func TestBlockingFailuresIgnoreAdvisoryChecks(t *testing.T) {
 	failures := blockingFailures(checks)
 	if len(failures) != 1 || failures[0] != "port_88 (ipa.flotestro.test:88)" {
 		t.Fatalf("blocking failures = %v", failures)
+	}
+}
+
+// fakeIdentityTool records the directory tool calls, each with what it got
+// on its standard input, instead of running them. Every tool answers as if
+// it succeeded: the tests below are about what the helper hands to the
+// tools, not about what the tools say back.
+type fakeIdentityTool struct {
+	calls  [][]string
+	inputs []string
+}
+
+func (f *fakeIdentityTool) run(_ context.Context, _ time.Duration, input io.Reader,
+	tool string, args ...string) (string, string, error) {
+	f.calls = append(f.calls, append([]string{tool}, args...))
+	text := ""
+	if input != nil {
+		data, _ := io.ReadAll(input)
+		text = string(data)
+	}
+	f.inputs = append(f.inputs, text)
+	return "", "", nil
+}
+
+// call returns the first recorded call of the tool whose argv contains the
+// marker, with what it got on stdin.
+func (f *fakeIdentityTool) call(tool, marker string) ([]string, string, bool) {
+	for i, call := range f.calls {
+		if call[0] != tool {
+			continue
+		}
+		for _, arg := range call[1:] {
+			if arg == marker {
+				return call[1:], f.inputs[i], true
+			}
+		}
+	}
+	return nil, "", false
+}
+
+// useFakeIdentityTool puts the fake in place of the real tools for the
+// length of the test.
+func useFakeIdentityTool(t *testing.T) *fakeIdentityTool {
+	t.Helper()
+	fake := &fakeIdentityTool{}
+	previous := identityToolRunner
+	identityToolRunner = fake.run
+	t.Cleanup(func() { identityToolRunner = previous })
+	return fake
+}
+
+// resolvableHostname finds a qualified name the machine running the tests
+// resolves, so the preflight of a join can pass without a directory. A
+// machine that resolves none of the candidates cannot observe a join
+// reaching the tool and says so.
+func resolvableHostname(t *testing.T) string {
+	t.Helper()
+	candidates := []string{"localhost.localdomain", "localhost."}
+	if own, err := os.Hostname(); err == nil && strings.Contains(own, ".") {
+		candidates = append([]string{own}, candidates...)
+	}
+	for _, candidate := range candidates {
+		if addresses, err := net.LookupHost(candidate); err == nil && len(addresses) > 0 {
+			return candidate
+		}
+	}
+	t.Skip("no qualified name resolves on this machine; the join cannot pass its preflight here")
+	return ""
+}
+
+// TestTheJoinArgumentsCarryNoPassword pins the shape of the argv: the
+// password is asked for with -W and never written after --password=, so
+// the process list of the host shows no credential for the length of the
+// join.
+func TestTheJoinArgumentsCarryNoPassword(t *testing.T) {
+	args := enrollArguments(&helperv1.DomainEnrollRequest{
+		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST", Server: "ipa.flotestro.test",
+		OneTimePassword: "one-time-secret-4711",
+	}, "web1.flotestro.test")
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--password") || strings.Contains(joined, "one-time-secret-4711") {
+		t.Fatalf("the password is in the argv: %v", args)
+	}
+	for _, wanted := range []string{"-W", "--unattended", "--domain=flotestro.test",
+		"--realm=FLOTESTRO.TEST", "--hostname=web1.flotestro.test", "--server=ipa.flotestro.test"} {
+		found := false
+		for _, arg := range args {
+			if arg == wanted {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the argv lacks %s: %v", wanted, args)
+		}
+	}
+}
+
+// TestTheJoinHandsThePasswordToThePrompt runs the whole join against the
+// fake tools and checks the one thing the residual was about: the
+// one-time password reaches ipa-client-install on its standard input, as
+// the answer to the -W prompt, and nowhere in the argv. The preflight is
+// the real one, so the test needs a name that resolves and a machine that
+// is in no domain.
+func TestTheJoinHandsThePasswordToThePrompt(t *testing.T) {
+	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
+		t.Skip("this machine is joined to a domain; the realm check would refuse the join")
+	}
+	hostname := resolvableHostname(t)
+	fake := useFakeIdentityTool(t)
+
+	const password = "one-time-secret-4711"
+	action := &helperv1.DomainEnrollRequest{
+		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST",
+		Hostname: hostname, OneTimePassword: password,
+	}
+	response := testServer().enrollDomain(context.Background(), enrollRequest(action), action)
+	if !response.GetAccepted() {
+		t.Fatalf("the join was refused: %s %s (checks: %v)", response.GetErrorCode(),
+			response.GetMessage(), checkNames(response.GetEnrollResult().GetChecks()))
+	}
+	if !response.GetEnrollResult().GetEnrolled() {
+		t.Fatal("the join ran and does not report the host as enrolled")
+	}
+
+	args, input, ok := fake.call("ipa-client-install", "--unattended")
+	if !ok {
+		t.Fatalf("ipa-client-install was not run for the join; calls: %v", fake.calls)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--password") || strings.Contains(arg, password) {
+			t.Fatalf("the password is in the argv: %v", args)
+		}
+	}
+	if _, _, ok := fake.call("ipa-client-install", "-W"); !ok {
+		t.Fatalf("the join does not ask for the password with -W: %v", args)
+	}
+	if input != password+"\n" {
+		t.Fatalf("stdin of the join = %q, expected the password and a newline", input)
+	}
+	// The version query of the preflight prompts for nothing, so it gets
+	// no input at all: a tool that does not ask must not be handed a secret.
+	if _, input, ok := fake.call("ipa-client-install", "--version"); !ok || input != "" {
+		t.Fatalf("the version query got %q on stdin (ran: %v)", input, ok)
+	}
+}
+
+// TestTheRealRunnerHandsTheInputToTheTool checks the runner itself, with a
+// real process: what is given as input arrives on the tool's standard
+// input. cat echoes it back, and it lives at a fixed path on every Linux.
+func TestTheRealRunnerHandsTheInputToTheTool(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/cat"); err != nil {
+		t.Skip("/usr/bin/cat is missing")
+	}
+	stdout, _, err := execIdentityTool(context.Background(), 10*time.Second,
+		strings.NewReader("one-time-secret-4711\n"), "cat")
+	if err != nil {
+		t.Fatalf("cat: %v", err)
+	}
+	if stdout != "one-time-secret-4711\n" {
+		t.Fatalf("cat read %q from its standard input", stdout)
+	}
+}
+
+// TestALeaveOfAHostInNoDomainIsRefused is the first condition of leaving:
+// a host that is in no domain has nothing to leave, and the order stops
+// before ipa-client-install --uninstall runs.
+func TestALeaveOfAHostInNoDomainIsRefused(t *testing.T) {
+	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
+		t.Skip("this machine is joined to a domain; the fresh-host case cannot be observed here")
+	}
+	fake := useFakeIdentityTool(t)
+
+	action := &helperv1.DomainLeaveRequest{Domain: "flotestro.test", Realm: "FLOTESTRO.TEST"}
+	request := &helperv1.HelperRequest{
+		ProtocolVersion: ProtocolVersion,
+		TaskId:          "task-leave",
+		ExpiresAt:       timestamppb.New(time.Now().Add(time.Minute)),
+		TimeoutSeconds:  60,
+		MaxOutputBytes:  4096,
+		Action:          &helperv1.HelperRequest_DomainLeave{DomainLeave: action},
+	}
+	response := testServer().leaveDomain(context.Background(), request, action)
+
+	if response.GetAccepted() {
+		t.Fatal("a leave of a host in no domain was accepted")
+	}
+	if response.GetErrorCode() != "preflight_failed" {
+		t.Fatalf("code = %q, expected preflight_failed", response.GetErrorCode())
+	}
+	if !strings.Contains(response.GetMessage(), "enrolled") {
+		t.Fatalf("the message does not name the failed condition: %q", response.GetMessage())
+	}
+	enrolled := findCheck(t, response.GetEnrollResult().GetChecks(), "enrolled")
+	if enrolled.GetPassed() || !enrolled.GetBlocking() {
+		t.Fatalf("a host in no domain passed the enrolled check: %+v", enrolled)
+	}
+	if _, _, ok := fake.call("ipa-client-install", "--uninstall"); ok {
+		t.Fatalf("the uninstall ran despite the failed preflight: %v", fake.calls)
+	}
+	if response.GetEnrollResult().GetEnrolled() {
+		t.Fatal("a refused leave reports the host as enrolled")
+	}
+}
+
+// TestTheLeaveVerificationsNameWhatIsLeftBehind pins the meaning of the
+// checks after a leave on a machine that was never joined: the client
+// configuration and the keytab are absent, and that is what "gone" means.
+func TestTheLeaveVerificationsNameWhatIsLeftBehind(t *testing.T) {
+	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
+		t.Skip("this machine is joined to a domain")
+	}
+	if _, err := os.Stat("/etc/krb5.keytab"); err == nil {
+		t.Skip("this machine has a host keytab")
+	}
+	useFakeIdentityTool(t)
+
+	checks := verifyLeave(context.Background(), "flotestro.test")
+	for _, name := range []string{"ipa_config", "keytab"} {
+		item := findCheck(t, checks, name)
+		if !item.GetPassed() || !item.GetBlocking() {
+			t.Errorf("%s: %+v", name, item)
+		}
+		if !strings.Contains(item.GetDetail(), "gone") {
+			t.Errorf("%s does not say the file is gone: %q", name, item.GetDetail())
+		}
+	}
+	if describeAbsence("/etc/ipa/default.conf", nil) != "/etc/ipa/default.conf is still present" {
+		t.Error("a present file is not named as still present")
 	}
 }

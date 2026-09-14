@@ -53,12 +53,15 @@ export function loadedTargets(data?: { pages: TargetPage[] }): CampaignTarget[] 
  * the server returns it on a campaign. A compensating campaign names the
  * original by identifier and name; the original lists the campaigns
  * ordered to undo it. Both sides come from the compensating campaign's
- * record - the original is never rewritten.
+ * record - the original is never rewritten. The count of changed hosts is
+ * the number a compensation runs on; the server keeps it at zero until
+ * the campaign settles, since a compensation is refused before that.
  */
 export type CompensationLinks = {
   compensates_campaign_id?: string;
   compensates_campaign_name?: string;
   compensated_by?: { id: string; name: string; state: string }[];
+  changed_hosts?: number;
 };
 
 /**

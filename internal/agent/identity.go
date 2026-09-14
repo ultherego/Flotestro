@@ -9,6 +9,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // IdentityState describes the integration of the host with the domain. It is
@@ -190,4 +191,66 @@ func clockState(ctx context.Context) (skew *float64, synchronized bool) {
 	}
 	synchronized = fields[1] != "" && fields[1] != "0.0.0.0"
 	return skew, synchronized
+}
+
+// leaveDomain asks the helper to take the host out of its domain. The
+// executor mirrors the join: the helper's preflight is a refusal with the
+// checks attached, and the verification after the uninstall decides the
+// result - the command finishing is not the host being out.
+func (e *TaskExecutor) leaveDomain(ctx context.Context, task *agentv1.TaskEnvelope,
+	payload *opspec.DomainLeavePayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectUnknownAction,
+			"the leave order names no domain")
+	}
+	timeout := timeoutOf(task, opspec.ActionDomainLeave)
+	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
+	defer cancel()
+
+	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		MaxOutputBytes: task.GetLimits().GetMaxOutputBytes(),
+		Action: &helperv1.HelperRequest_DomainLeave{
+			DomainLeave: &helperv1.DomainLeaveRequest{
+				Domain: payload.Domain,
+				Realm:  payload.Realm,
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+
+	// The leave answers in the join's shape with enrolled = false, so the
+	// panel reads the checks and the verifications the way it already does.
+	detail := enrollResultToAgent(response.GetEnrollResult())
+	if !response.GetAccepted() {
+		// A refusal before the uninstall - the preflight, a held guard - is
+		// a rejection: nothing changed. A failure of the uninstall itself
+		// is not: the host may be half out, and the panel must not read it
+		// as untouched.
+		status := agentv1.TaskResult_STATUS_FAILED
+		if response.GetErrorCode() == "preflight_failed" || response.GetErrorCode() == "locked" {
+			status = agentv1.TaskResult_STATUS_REJECTED
+		}
+		result := rejected(status, response.GetErrorCode(), response.GetMessage())
+		result.Stderr = response.GetStderr()
+		result.Detail = &agentv1.TaskResult_DomainEnroll{DomainEnroll: detail}
+		return result
+	}
+
+	status := agentv1.TaskResult_STATUS_SUCCEEDED
+	message := "the host left the domain"
+	if failed := failedVerifications(detail); len(failed) > 0 {
+		status = agentv1.TaskResult_STATUS_FAILED
+		message = "the uninstall ran, but the host is not out of the domain: " + failed[0]
+	}
+	return &agentv1.TaskResult{
+		Status:   status,
+		ExitCode: 0,
+		Message:  message,
+		Detail:   &agentv1.TaskResult_DomainEnroll{DomainEnroll: detail},
+	}
 }

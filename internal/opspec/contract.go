@@ -371,6 +371,10 @@ var contracts = map[ActionType]contract{
 	// Identity. Enrollment is a saga with checkpoints; leaving the domain
 	// is a separate decision, not an automatic reverse.
 	ActionDomainEnroll: {cancel: CancelCheckpointOnly, retry: RetryAfterChange, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	// Leaving is one uninstall that runs to its end once started; the way
+	// back is a new join with a new credential, and the host's own
+	// verification - configuration and keytab gone - settles the result.
+	ActionDomainLeave: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 
 	// Local accounts. Each change is one call on the account database and
 	// has a compensating change: lock after create, unlock after lock, the

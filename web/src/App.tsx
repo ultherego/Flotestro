@@ -56,6 +56,7 @@ import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
 import { Reads } from "./pages/Reads";
+import { Budgets } from "./pages/Budgets";
 import { Directory } from "./pages/Directory";
 import { Access } from "./pages/Access";
 import { Audit } from "./pages/Audit";
@@ -117,6 +118,9 @@ export function App() {
   // The relays are read with the right that reads the installations: the
   // list is the same one the add-host wizard picks a route from.
   const seesRelays = permissions.has("host.enroll.read");
+  // The budgets are the reason a job or a campaign stands in the queue, so
+  // they stand with the operations they hold back.
+  const seesBudgets = permissions.has("budget.read");
 
   // The navigation, grouped by what the operator is doing rather than by
   // backend module. An item that is not allowed is left out of its group;
@@ -156,6 +160,9 @@ export function App() {
           { to: "/bulk", label: "Bulk Workspace", icon: "bulk" as const },
           { to: "/campaigns", label: "Campaigns", icon: "campaigns" as const },
         ] : []),
+        // The capacity the jobs and the campaigns draw on: the gauge stands
+        // last in the group, after the work it meters.
+        ...(seesBudgets ? [{ to: "/budgets", label: "Budgets", icon: "overview" as const }] : []),
       ],
     },
     {
@@ -285,6 +292,7 @@ export function App() {
           {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
           {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
           {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
+          {seesBudgets && <Route path="/budgets" element={<Budgets />} />}
           {capabilities.directory && <Route path="/directory" element={<Directory />} />}
           {managesAccess && <Route path="/access" element={<Access />} />}
           {seesAudit && <Route path="/audit" element={<Audit />} />}

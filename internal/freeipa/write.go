@@ -242,6 +242,17 @@ func (c *Client) EnsureHostWithOTP(ctx context.Context, fqdn string) (string, er
 			return "", fmt.Errorf("the host entry %s: %w", fqdn, err)
 		}
 		result, err = c.call(ctx, "host_mod", []string{fqdn}, map[string]any{"random": true})
+		if err != nil && strings.Contains(err.Error(), "enrolled host") {
+			// The entry still carries a keytab - a previous life of this host
+			// that was reinstalled without leaving, or a join that broke
+			// after the directory's half. The operator ordered a join of
+			// this host, so the stale keytab is revoked and the password is
+			// issued anew; the entry and its history stay.
+			if _, err := c.call(ctx, "host_disable", []string{fqdn}, map[string]any{}); err != nil {
+				return "", fmt.Errorf("revoking the stale keytab of the host %s: %w", fqdn, err)
+			}
+			result, err = c.call(ctx, "host_mod", []string{fqdn}, map[string]any{"random": true})
+		}
 		if err != nil {
 			return "", fmt.Errorf("refreshing the password of the host %s: %w", fqdn, err)
 		}

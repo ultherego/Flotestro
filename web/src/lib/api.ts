@@ -33,12 +33,28 @@ function csrfToken(): string {
   return match ? match.slice(CSRF_COOKIE.length + 1) : "";
 }
 
-async function request<T>(
+/**
+ * What a caller may add to one request. Headers are for the conditional
+ * write: a record read with its entity tag goes back with `If-Match`, so a
+ * capacity or a secret written over somebody else's change is refused
+ * rather than winning quietly.
+ */
+export type RequestOptions = { headers?: Record<string, string> };
+
+/** An answer with the part of the response the body does not carry. */
+export type WithMeta<T> = {
+  data: T;
+  /** The entity tag of the record, empty when the server sent none. */
+  etag: string;
+};
+
+async function requestWithMeta<T>(
   method: string,
   path: string,
   body?: unknown,
-): Promise<T> {
-  const headers: Record<string, string> = {};
+  options: RequestOptions = {},
+): Promise<WithMeta<T>> {
+  const headers: Record<string, string> = { ...options.headers };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET") {
     const token = csrfToken();
@@ -51,11 +67,18 @@ async function request<T>(
     credentials: "same-origin",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  const etag = response.headers.get("ETag") ?? "";
 
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204) return { data: undefined as T, etag };
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload: { code?: string; detail?: string } | null = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    // A body that is not JSON is a proxy's page, not the API's answer;
+    // the status still says what happened.
+  }
 
   if (!response.ok) {
     throw new ApiError(
@@ -64,17 +87,29 @@ async function request<T>(
       payload?.detail ?? response.statusText,
     );
   }
-  return payload as T;
+  return { data: payload as T, etag };
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options?: RequestOptions,
+): Promise<T> {
+  return (await requestWithMeta<T>(method, path, body, options)).data;
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  get: <T>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
+  // A read that needs the entity tag with the record: the tag names the
+  // version an editor writes back on.
+  getWithMeta: <T>(path: string, options?: RequestOptions) => requestWithMeta<T>("GET", path, undefined, options),
+  post: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>("POST", path, body, options),
   // A whole-list replacement: tags of a host, members of a group.
-  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
+  put: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>("PUT", path, body, options),
   // A removal keyed by more than the path - a role binding by its scope -
   // carries the key in the body.
-  del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
+  del: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>("DELETE", path, body, options),
 };
 
 export type Collection<T> = { items: T[]; count: number };

@@ -11,7 +11,8 @@ import (
 
 // compensationView is the campaign as the link between an original and its
 // compensation shows on it: the compensating side names the original, the
-// original lists what was ordered to undo it.
+// original lists what was ordered to undo it and counts the hosts a
+// compensation would run on.
 type compensationView struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
@@ -25,6 +26,7 @@ type compensationView struct {
 		Name  string `json:"name"`
 		State string `json:"state"`
 	} `json:"compensated_by"`
+	ChangedHosts int `json:"changed_hosts"`
 }
 
 func (h *harness) compensationLinks(id string) compensationView {
@@ -47,6 +49,12 @@ func (h *harness) runFileCampaign(body map[string]any) campaignView {
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
 	if planned.State != "awaiting_approval" {
 		h.t.Fatalf("planning of %s ended in state %s (%s)", campaign.Name, planned.State, planned.PauseReason)
+	}
+	// Nothing landed yet. The count stays zero even while hosts run: it
+	// is the number a compensation runs on, and that is known only once
+	// the campaign settles.
+	if view := h.compensationLinks(campaign.ID); view.ChangedHosts != 0 {
+		h.t.Errorf("the campaign %s counts %d changed hosts before it ran", campaign.Name, view.ChangedHosts)
 	}
 	h.approveCampaign(planned)
 	final := h.awaitCampaign(campaign.ID,
@@ -110,6 +118,12 @@ func TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets(t *testing.T)
 	originalTarget := originalTargets[0]
 	var originalReport campaignReportView
 	h.get("/api/v1/campaigns/"+original.ID+"/report", &originalReport)
+	// Settled, the original counts the host it changed: the number the
+	// campaign page offers to compensate, before any rollback is ordered.
+	if view := h.compensationLinks(original.ID); view.ChangedHosts != 1 || len(view.CompensatedBy) != 0 {
+		t.Errorf("the settled original counts %d changed hosts and %d compensations, expected 1 and none",
+			view.ChangedHosts, len(view.CompensatedBy))
+	}
 
 	rollback := map[string]any{"file": map[string]any{
 		"path": path, "version_sha256": before, "mode": "0644"}}
@@ -179,6 +193,9 @@ func TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets(t *testing.T)
 	if refusal.Code != "compensated_campaign_not_settled" {
 		t.Errorf("an unsettled original was refused with %s (%s)", refusal.Code, refusal.Detail)
 	}
+	if view := h.compensationLinks(pending.ID); view.ChangedHosts != 0 {
+		t.Errorf("the pending campaign counts %d changed hosts", view.ChangedHosts)
+	}
 
 	// The preview of the compensation names the original and the hosts it
 	// changed, so the wizard shows both before anything is created.
@@ -220,6 +237,13 @@ func TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets(t *testing.T)
 	}
 	if originalLinks.ApprovalFingerprint != original.ApprovalFingerprint {
 		t.Error("the original's approval fingerprint changed with the compensation")
+	}
+	// The count is what the original changed, not what is left to undo:
+	// a second compensation is still the operator's decision, and the
+	// compensating campaign counts its own change the same way.
+	if originalLinks.ChangedHosts != 1 || links.ChangedHosts != 1 {
+		t.Errorf("after the compensation the original counts %d changed hosts and the compensation %d, expected 1 and 1",
+			originalLinks.ChangedHosts, links.ChangedHosts)
 	}
 
 	// The original's target: the same state, the same outcome, and a

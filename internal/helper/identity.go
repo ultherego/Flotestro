@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -184,9 +186,31 @@ func parseConfigCheck(ctx context.Context) []string {
 	return details
 }
 
-// runIdentityTool runs a tool from a fixed list of paths. The name never comes
-// from the request, so it cannot point at an arbitrary program.
+// runIdentityTool runs a tool from a fixed list of paths with nothing on
+// its standard input. The name never comes from the request, so it cannot
+// point at an arbitrary program.
 func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, args ...string) (string, string, error) {
+	return identityToolRunner(ctx, timeout, nil, tool, args...)
+}
+
+// runIdentityToolWithInput runs a tool with the given text on its standard
+// input. It exists for one purpose: a credential that must not travel in
+// argv, where every user of the host can read it in the process list, is
+// handed to the tool's own prompt instead.
+func runIdentityToolWithInput(ctx context.Context, timeout time.Duration, input string,
+	tool string, args ...string) (string, string, error) {
+	return identityToolRunner(ctx, timeout, strings.NewReader(input), tool, args...)
+}
+
+// identityToolRunner is the seam the tests replace: the join and the leave
+// call real directory tools, and a unit test has neither a directory nor
+// the right to change the host running it.
+var identityToolRunner = execIdentityTool
+
+// execIdentityTool runs the tool. A nil input leaves the tool without a
+// standard input, so a tool that prompts fails at once instead of waiting.
+func execIdentityTool(ctx context.Context, timeout time.Duration, input io.Reader,
+	tool string, args ...string) (string, string, error) {
 	path := ""
 	for _, candidate := range []string{"/usr/bin/" + tool, "/usr/sbin/" + tool, "/sbin/" + tool} {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
@@ -206,6 +230,14 @@ func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, ar
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Env = []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/var/lib/flotestro-helper"}
+	if input != nil {
+		cmd.Stdin = input
+		// A password prompt reads the controlling terminal first and falls
+		// back to standard input only without one. The helper runs as a
+		// service and has none, but an operator starting it by hand from a
+		// shell does; a session of its own makes the fallback certain.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
 
 	err := cmd.Run()
 	if cmdCtx.Err() != nil {

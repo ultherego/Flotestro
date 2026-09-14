@@ -1,9 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
-import type { Host, HostAccess, OfflineVerdict } from "../../lib/types";
+import type { Host, HostAccess, Job, OfflineVerdict } from "../../lib/types";
 import { Time, OptionalFlag } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
-import { Fact, Facts, Foot, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, Unknown, useHost, useModule } from "./shared";
+import {
+  Fact, Facts, Foot, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, Unknown,
+  useHost, useModule,
+} from "./shared";
+import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
 /**
@@ -79,7 +84,78 @@ export function Identity() {
       )}
 
       <EffectiveAccess host={host} />
+
+      {host.identity.enrolled && <LeaveDomain host={host} />}
     </ModulePage>
+  );
+}
+
+/**
+ * Taking the host out of its domain. The button exists only for a host that
+ * is in one and an operator allowed to order it: a button that leads to a
+ * refusal is an interface defect. The order is confirmed by typing the
+ * hostname, because every directory account loses this host at once and
+ * the way back is a new join with a new credential from the directory.
+ */
+function LeaveDomain({ host }: { host: Host }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const [message, setMessage] = useState("");
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<{ permissions: string[] }>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const mayLeave = (whoami.data?.permissions ?? []).includes("identity.host.leave");
+
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (job) => {
+      setMessage(
+        job.requires_approval
+          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
+      );
+      setConfirming(false);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  if (!mayLeave) return null;
+
+  return (
+    <Section
+      title={t("Leave the domain")}
+      description={t("The host unenrolls itself with its own keytab and restores the files the join changed. Directory accounts stop signing in here at once; the entry in the directory stays, and a new join needs a new one-time password.")}
+    >
+      <Message text={message} />
+      {confirming ? (
+        <TargetConfirmation
+          host={host}
+          label={t("Leave domain")}
+          description={t("{host} will leave {realm}. Every directory account loses this host the moment SSSD is reconfigured.", {
+            host: host.hostname, realm: host.identity.realm ?? "",
+          })}
+          busy={request.isPending}
+          onConfirm={(reason, confirmation) =>
+            request.mutate({
+              action: "identity.host.leave",
+              reason,
+              target_confirmation: confirmation,
+              payload: { domain_leave: { domain: host.identity.domain, realm: host.identity.realm } },
+            })
+          }
+          onCancel={() => setConfirming(false)}
+        />
+      ) : (
+        <FormActions>
+          <button className="secondary" onClick={() => setConfirming(true)}>{t("Leave domain")}</button>
+        </FormActions>
+      )}
+    </Section>
   );
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -220,8 +221,18 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	envelope, err := s.buildEnvelopeFor(ctx, item)
 	if err != nil {
 		s.log.Error("the task envelope was not built", "job_id", item.Job.ID, "err", err)
-		_ = s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "invalid_envelope")
 		metrics.JobDispatch.Inc("invalid_envelope", s.options.GatewayID)
+		if permanentFailure(err) {
+			// The same answer would come on every pass until the deadline;
+			// a task that cannot be assembled is settled now, with the
+			// reason, instead of waiting in the queue and saying nothing.
+			if err := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
+				"envelope_rejected", err.Error()); err != nil {
+				s.log.Error("the rejected task was not settled", "job_id", item.Job.ID, "err", err)
+			}
+			return
+		}
+		_ = s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "invalid_envelope")
 		return
 	}
 
@@ -453,6 +464,16 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				Server:        payload.DomainEnroll.Server,
 				Hostname:      payload.DomainEnroll.Hostname,
 				PreflightOnly: action == opspec.ActionDomainPreflight,
+			},
+		}
+
+	case opspec.ActionDomainLeave:
+		// No credential is fetched for a leave: the host unenrolls itself
+		// with its own keytab, so the envelope carries only the names.
+		envelope.Action = &agentv1.TaskEnvelope_DomainLeave{
+			DomainLeave: &agentv1.DomainLeave{
+				Domain: payload.DomainLeave.Domain,
+				Realm:  payload.DomainLeave.Realm,
 			},
 		}
 
@@ -1161,6 +1182,24 @@ func approvalsOf(job jobs.Job) []string {
 type unknownActionError string
 
 func (e unknownActionError) Error() string { return "unknown operation type: " + string(e) }
+
+// Permanent: a payload that cannot be turned into an envelope does not
+// become one by waiting.
+func (e unknownActionError) Permanent() bool { return true }
+
+// permanentFailure says whether an envelope error is one that a retry
+// cannot mend: an error that says so itself, or a payload that does not
+// decode. A directory or a secret store that is merely unreachable is not
+// one - the next pass may find it back.
+func permanentFailure(err error) bool {
+	var permanent interface{ Permanent() bool }
+	if errors.As(err, &permanent) && permanent.Permanent() {
+		return true
+	}
+	var syntax *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	return errors.As(err, &syntax) || errors.As(err, &typeErr)
+}
 
 func errUnknownAction(action string) error { return unknownActionError(action) }
 

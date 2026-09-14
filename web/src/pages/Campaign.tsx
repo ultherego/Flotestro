@@ -190,7 +190,27 @@ export function Campaign() {
         return t("Nothing is rolled back by the stop.");
     }
   })();
-  const rollbackPlannable = ["exact_restore", "compensating", "automatic_local"].includes(operation?.rollback ?? "");
+  const rollbackPlannable = PLANNABLE_ROLLBACK.includes(operation?.rollback ?? "");
+  // What the compensation card offers. The catalogue decides the class and
+  // whether the reverse runs as a campaign; the record says whether the
+  // campaign settled and how many hosts it changed. Until the catalogue is
+  // in, nothing is offered rather than something guessed.
+  const offer: CompensationOffer = operation
+    ? compensationOffer({
+      state: data.state,
+      rollback: operation.rollback,
+      reverseAction,
+      reverseReady: reverseOperation?.campaign_ready,
+      changedHosts: links.changed_hosts,
+    })
+    : { kind: "not_settled" };
+  const [rollbackWord, rollbackMeaning] = contractWords(t, "rollback", operation?.rollback);
+  // The address of the compensation in the Bulk workspace: the whole set
+  // the campaign changed, or the hosts named - one row of the table.
+  const compensationOf = (hostIDs: string[] = []) =>
+    bulkPrefill(reverseAction ?? "", t("Rollback of {name}", { name: data.name }),
+      reversePayload(actionType, data.payload), data.id, hostIDs);
+  const rowCompensation = offer.kind === "campaign";
 
   return (
     <>
@@ -322,6 +342,49 @@ export function Campaign() {
         ]} />
       </Card>
 
+      {/* The way back, as a decision on a settled campaign: how many hosts
+          changed, what class of return the operation declares, and one
+          button into a new plan with its own approval. An operation with
+          no way back says so here instead of leaving the operator to infer
+          it from a missing link. */}
+      {offer.kind !== "not_settled" && (
+        <Card
+          title={t("Compensation")}
+          description={`${t("Way back")}: ${rollbackWord} — ${rollbackMeaning}`}
+          footer={offer.kind === "campaign" ? (
+            <Actions>
+              <Link className="button" to={compensationOf()}>{t("Compensate {n} hosts", { n: offer.changed })}</Link>
+              <span className="subtitle">
+                {t("The compensation is a new campaign with its own plans and its own approval; the version or the rollback identifier is per host.")}
+              </span>
+            </Actions>
+          ) : undefined}
+        >
+          <p>
+            {offer.kind === "no_reverse" && t("There is no reverse operation to plan for this campaign; what it changed stays as the hosts hold it.")}
+            {offer.kind === "nothing_changed" && t("No host was changed by this campaign; there is nothing to compensate.")}
+            {offer.kind === "host_by_host" && t("{n} hosts changed. The reverse operation {action} runs host by host today; a compensating campaign is not offered.", { n: offer.changed, action: offer.reverse })}
+            {offer.kind === "campaign" && t("{n} hosts changed and can be put back by {action} on exactly those hosts; a host the change did not land on is refused.", { n: offer.changed, action: offer.reverse })}
+          </p>
+          <Pairs>
+            {/* What was already ordered to undo this campaign, read from
+                the compensating records: a second compensation is still
+                the operator's decision, so the list informs and never
+                hides the button. */}
+            <Pair label={t("Compensated by")}>
+              {links.compensated_by && links.compensated_by.length > 0
+                ? links.compensated_by.map((other, index) => (
+                  <span key={other.id}>
+                    {index > 0 && ", "}
+                    <Link to={`/campaigns/${other.id}`}>{other.name}</Link> <JobState state={other.state} />
+                  </span>
+                ))
+                : t("no compensation ordered yet")}
+            </Pair>
+          </Pairs>
+        </Card>
+      )}
+
       <Columns wide>
       <Card title={t("Details")}>
         <Pairs>
@@ -333,42 +396,18 @@ export function Campaign() {
           <Pair label={t("Contract")}>
             {operation ? <ContractChips contract={operation} /> : "—"}
           </Pair>
-          {operation?.rollback && (
-            <Pair label={t("Way back")}>
-              {contractWords(t, "rollback", operation.rollback)[0]}
-              {/* A compensation needs a settled original: the server refuses
-                  one ordered against a campaign that may still change hosts,
-                  so the link waits for the end. */}
-              {rollbackPlannable && reverseAction && reverseOperation?.campaign_ready &&
-                ["completed", "failed", "canceled"].includes(data.state) && (
-                <>
-                  {" · "}
-                  <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload), data.id)}>
-                    {t("Plan the rollback")}
-                  </Link>
-                </>
-              )}
-            </Pair>
-          )}
-          {/* The two sides of a compensation. The compensating campaign
-              names what it undoes; the original lists what was ordered to
-              undo it - read from the compensating records, so the
-              original's own record stays as it was approved. */}
+          {/* The class alone here; the offer to plan the way back is the
+              compensation card, which appears once the campaign settled. */}
+          {operation?.rollback && <Pair label={t("Way back")}>{rollbackWord}</Pair>}
+          {/* The compensating campaign names what it undoes; the original's
+              side of the link is on the compensation card, read from the
+              compensating records, so the original's own record stays as
+              it was approved. */}
           {links.compensates_campaign_id && (
             <Pair label={t("Compensates")}>
               <Link to={`/campaigns/${links.compensates_campaign_id}`}>
                 {links.compensates_campaign_name || links.compensates_campaign_id.slice(0, 8)}
               </Link>
-            </Pair>
-          )}
-          {links.compensated_by && links.compensated_by.length > 0 && (
-            <Pair label={t("Compensated by")}>
-              {links.compensated_by.map((other, index) => (
-                <span key={other.id}>
-                  {index > 0 && ", "}
-                  <Link to={`/campaigns/${other.id}`}>{other.name}</Link> <JobState state={other.state} />
-                </span>
-              ))}
             </Pair>
           )}
           <Pair label={t("Waits for offline hosts until")}>{data.deadline_at ? <Time value={data.deadline_at} /> : "—"}</Pair>
@@ -546,9 +585,9 @@ export function Campaign() {
             items={loaded}
             rowHeight={40}
             height={480}
-            columns={8}
+            columns={rowCompensation ? 9 : 8}
             rowKey={(target) => target.host_id}
-            head={<tr><th>{t("Host")}</th><th className="num">{t("Wave")}</th><th>{t("Plan")}</th><th>{t("Steps")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr>}
+            head={<tr><th>{t("Host")}</th><th className="num">{t("Wave")}</th><th>{t("Plan")}</th><th>{t("Steps")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th>{rowCompensation && <th>{t("Way back")}</th>}</tr>}
             onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
             loading={targets.isFetchingNextPage}
             render={(target) => {
@@ -618,6 +657,19 @@ export function Campaign() {
                   </td>
                   <td><ErrorCode code={target.error_code} /></td>
                   <td title={target.message}>{target.message || "—"}</td>
+                  {/* The way back for one host. A row knows the target's
+                      state and not its steps, so only a host that succeeded
+                      gets the link here; a host that failed after its change
+                      landed is offered it from its step strip, which knows. */}
+                  {rowCompensation && (
+                    <td>
+                      {target.state === "succeeded" ? (
+                        <Link to={compensationOf([target.host_id])}>{t("compensate this host")}</Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  )}
                 </>
               );
             }}
@@ -655,7 +707,11 @@ export function Campaign() {
             </Actions>
           }
         >
-          <TargetSteps campaignID={id} hostID={selectedStepsHost.hostId} />
+          <TargetSteps
+            campaignID={id}
+            hostID={selectedStepsHost.hostId}
+            compensation={rowCompensation ? compensationOf([selectedStepsHost.hostId]) : undefined}
+          />
         </Card>
       )}
     </>
@@ -674,7 +730,12 @@ const STEP_NAMES: Record<string, string> = {
  * file. A step the host has not reached has no record and is drawn as
  * unknown rather than as pending: nothing decided about it yet.
  */
-function TargetSteps({ campaignID, hostID }: { campaignID: string; hostID: string }) {
+function TargetSteps({ campaignID, hostID, compensation }: {
+  campaignID: string;
+  hostID: string;
+  /** The address of this host's compensation, when the campaign offers one. */
+  compensation?: string;
+}) {
   const t = useT();
   const steps = useTargetSteps(campaignID, hostID);
   if (steps.error) return <ErrorBox error={steps.error} />;
@@ -683,6 +744,10 @@ function TargetSteps({ campaignID, hostID }: { campaignID: string; hostID: strin
   const byKey = new Map<string, CampaignStep>(steps.data.items.map((step) => [step.step_key, step]));
   if (byKey.size === 0) return <Empty>{t("No step recorded yet.")}</Empty>;
   const explained = order.map((key) => byKey.get(key)).filter((step): step is CampaignStep => !!step?.reason);
+  // The change landed when the execute step succeeded, whatever the reboot
+  // or the verification did after it - the same rule the server counts
+  // changed hosts by, and the rule the row cannot apply on its own.
+  const changed = byKey.get("execute")?.state === "succeeded";
   return (
     <>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }} data-testid="step-strip">
@@ -720,8 +785,56 @@ function TargetSteps({ campaignID, hostID }: { campaignID: string; hostID: strin
           ))}
         </Pairs>
       )}
+      {compensation && changed && (
+        <p>
+          <Link to={compensation}>{t("compensate this host")}</Link>
+          {" · "}
+          {t("The change landed on this host; the compensation is a new campaign on this host alone, with its own plan and approval.")}
+        </p>
+      )}
     </>
   );
+}
+
+/** The classes of return a compensation can be planned along; the others have no plan to make. */
+const PLANNABLE_ROLLBACK = ["exact_restore", "compensating", "automatic_local"];
+
+/**
+ * What the compensation card offers on a campaign. Nothing until the
+ * campaign settled - the server refuses a compensation of a campaign that
+ * may still change hosts, and the count of changed hosts is zero until
+ * then. A plain statement for an operation with no reverse the panel could
+ * plan. Otherwise the reverse operation with the count of changed hosts:
+ * as a campaign where the reverse runs as one, and as a note where it runs
+ * host by host today.
+ */
+export type CompensationOffer =
+  | { kind: "not_settled" }
+  | { kind: "no_reverse" }
+  | { kind: "nothing_changed"; reverse: string }
+  | { kind: "host_by_host"; reverse: string; changed: number }
+  | { kind: "campaign"; reverse: string; changed: number };
+
+/**
+ * compensationOffer decides the variant from the record and the catalogue
+ * alone, so the decision reads without a screen. The rollback class and
+ * the reverse operation both come from the catalogue: a class that can be
+ * planned along without a declared reverse is no offer, and a reverse
+ * under a best-effort or absent way back is none either.
+ */
+export function compensationOffer(input: {
+  state: string;
+  rollback?: string;
+  reverseAction?: string;
+  reverseReady?: boolean;
+  changedHosts?: number;
+}): CompensationOffer {
+  if (!["completed", "failed", "canceled"].includes(input.state)) return { kind: "not_settled" };
+  if (!input.reverseAction || !PLANNABLE_ROLLBACK.includes(input.rollback ?? "")) return { kind: "no_reverse" };
+  const changed = input.changedHosts ?? 0;
+  if (changed <= 0) return { kind: "nothing_changed", reverse: input.reverseAction };
+  if (!input.reverseReady) return { kind: "host_by_host", reverse: input.reverseAction, changed };
+  return { kind: "campaign", reverse: input.reverseAction, changed };
 }
 
 /** eventHostName translates a host identifier into a name from the target list. */

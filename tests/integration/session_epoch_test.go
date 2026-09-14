@@ -154,11 +154,15 @@ func TestACloneOfTheIdentityIsReported(t *testing.T) {
 		h.awaitConnection(host.ID, 2*time.Minute)
 	})
 	// The reconnect of the real agent is forced the only way the API allows.
+	// The host does not go offline in between: the staged clone row is an
+	// open session of a higher epoch, and the panel rightly takes that as
+	// the host being connected elsewhere. So the wait is for the real
+	// agent's new session, not for the host's state.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
 		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
-	h.awaitConnection(host.ID, 2*time.Minute)
+	awaitNewSession(ctx, t, pool, host.ID, cloneID, 2*time.Minute)
 
 	var audit struct {
 		Items []struct {

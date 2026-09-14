@@ -198,6 +198,31 @@ type rpcError struct {
 	Name    string `json:"name"`
 }
 
+// DirectoryError is an answer of the directory that refuses a call: the
+// name is the directory's own class (ValidationError, NotFound,
+// DuplicateEntry...). It is kept as a type, because a refusal is not the
+// same thing as a directory that cannot be reached: the first does not
+// change with a retry, the second may.
+type DirectoryError struct {
+	Name    string
+	Message string
+}
+
+func (e *DirectoryError) Error() string {
+	return "the directory: " + e.Message + " (" + e.Name + ")"
+}
+
+// Permanent says that repeating the same call gives the same answer. The
+// scheduler settles a task on such an error instead of trying again until
+// the deadline.
+func (e *DirectoryError) Permanent() bool {
+	switch e.Name {
+	case "ValidationError", "NotFound", "DuplicateEntry", "ACIError", "RequirementError", "ConversionError":
+		return true
+	}
+	return false
+}
+
 type rpcResponse struct {
 	Result json.RawMessage `json:"result"`
 	Error  *rpcError       `json:"error"`
@@ -288,7 +313,7 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 		fmt.Fprintf(os.Stderr, "ipa-trace request=%s\nipa-trace result=%s\n", truncateTrace(payload), truncateTrace(decoded.Result))
 	}
 	if decoded.Error != nil {
-		return nil, fmt.Errorf("the directory: %s (%s)", decoded.Error.Message, decoded.Error.Name)
+		return nil, &DirectoryError{Name: decoded.Error.Name, Message: decoded.Error.Message}
 	}
 	return decoded.Result, nil
 }
@@ -336,6 +361,10 @@ var allowedMethods = map[string]bool{
 	// administrators' access.
 	"host_add": true,
 	"host_mod": true,
+	// A host whose keytab is on record cannot be given a new join password;
+	// disabling the entry revokes the keytab and the certificates, and the
+	// entry stays. It is used only for a host the operator is joining anew.
+	"host_disable": true,
 
 	// The access and sudo rules. A rule is declared as a whole and brought to
 	// that state member kind by member kind; the panel writes only the rules

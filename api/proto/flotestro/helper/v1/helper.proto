@@ -72,6 +72,10 @@ message HelperRequest {
     // journal are removed and the agent service is disabled. The agent is
     // unprivileged and cannot do any of it itself.
     FinalWipeRequest final_wipe = 51;
+    // Leaving the directory domain. The answer travels in enroll_result
+    // with enrolled = false: the checks before and the verifications after
+    // have the same shape as the join's, so the panel reads one shape.
+    DomainLeaveRequest domain_leave = 52;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
@@ -126,6 +130,15 @@ message DomainEnrollRequest {
   string one_time_password = 4;
   string hostname = 5;
   bool preflight_only = 6;
+}
+
+// DomainLeaveRequest takes the host out of the domain with
+// ipa-client-install --uninstall. No credential is needed: the host
+// unenrolls itself with its own keytab. The domain and the realm name what
+// the operator meant to leave; a host in another domain refuses the order.
+message DomainLeaveRequest {
+  string domain = 1;
+  string realm = 2;
 }
 
 // IdentityProbeRequest reads the elements of the domain state that require

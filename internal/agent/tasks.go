@@ -451,6 +451,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.enrollDomain(ctx, task, payload.DomainEnroll, true)
 	case opspec.ActionDomainEnroll:
 		return e.enrollDomain(ctx, task, payload.DomainEnroll, false)
+	case opspec.ActionDomainLeave:
+		return e.leaveDomain(ctx, task, payload.DomainLeave)
 	default:
 		return e.applyUnitAction(ctx, task, action, payload.Unit)
 	}
@@ -841,6 +843,15 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 				Realm:    request.GetRealm(),
 				Server:   request.GetServer(),
 				Hostname: request.GetHostname(),
+			},
+		}, nil
+
+	case *agentv1.TaskEnvelope_DomainLeave:
+		request := action.DomainLeave
+		return opspec.ActionDomainLeave, opspec.Payload{
+			DomainLeave: &opspec.DomainLeavePayload{
+				Domain: request.GetDomain(),
+				Realm:  request.GetRealm(),
 			},
 		}, nil
 

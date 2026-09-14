@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/metrics"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 const (
@@ -418,7 +419,39 @@ type State struct {
 	// job ordered by hand has no screen but the job list, and the budget
 	// that holds it must be visible from the budget's side as well.
 	WaitingJobs int `json:"waiting_jobs"`
+	// WaitingTargets counts the hosts of running campaigns that stand in
+	// awaiting_budget for this budget. The campaign's screen shows them one
+	// by one; here they add up to the pressure on one key, next to the jobs.
+	WaitingTargets int `json:"waiting_targets"`
+	// Holders lists the live leases, newest first, at most holdersShown of
+	// them. The usage says how much is taken; the holders say by whom, which
+	// is what an operator needs before deciding whether to raise the
+	// capacity or wait a minute.
+	Holders []Holder `json:"holders"`
+	// ByClass is the weight of the tokens in use per class of work. The
+	// lease records no class, so it is read from the holder; a holder the
+	// panel cannot place counts under unknown rather than under nothing.
+	ByClass map[string]int `json:"by_class"`
 }
+
+// Holder is one live lease of a budget.
+type Holder struct {
+	// Owner is the piece of work that holds the tokens: job:<id> for a job,
+	// a target id for a campaign host, fanout:<id> for a fan-out read.
+	Owner string `json:"owner"`
+	// Claimant is the unit of fairness the lease counts under: the
+	// campaign, or the identity that ordered the job.
+	Claimant string `json:"claimant"`
+	Class    string `json:"class"`
+	Tokens   int    `json:"tokens"`
+	// Since is when the lease was first taken; a renewal keeps it.
+	Since time.Time `json:"since"`
+}
+
+// holdersShown bounds the holders listed per budget. A budget of two
+// hundred reads may have two hundred holders, and the screen needs the
+// newest few to say who is there, not the whole ledger.
+const holdersShown = 50
 
 // States returns the picture of the budgets that hold anything or have anyone
 // asking.
@@ -458,14 +491,130 @@ func (s *Store) States(ctx context.Context) ([]State, error) {
 
 	states := []State{}
 	for rows.Next() {
-		var state State
+		state := State{Holders: []Holder{}, ByClass: map[string]int{}}
 		if err := rows.Scan(&state.Key, &state.Capacity, &state.Used, &state.Claimants,
 			&state.WaitingJobs); err != nil {
 			return nil, err
 		}
 		states = append(states, state)
 	}
-	return states, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(states) == 0 {
+		return states, nil
+	}
+
+	// The leases and the waiting targets name the exact key of their site;
+	// they land on the row of that key, or on the pattern's row when no
+	// exact row took the site out from under it - the same attribution
+	// the waiting jobs get above.
+	rowOf := map[string]int{}
+	for i, state := range states {
+		rowOf[state.Key] = i
+	}
+	resolve := func(key string) (int, bool) {
+		if i, ok := rowOf[key]; ok {
+			return i, true
+		}
+		i, ok := rowOf[Pattern(key)]
+		return i, ok
+	}
+	if err := s.collectHolders(ctx, states, resolve); err != nil {
+		return nil, err
+	}
+	if err := s.countWaitingTargets(ctx, states, resolve); err != nil {
+		return nil, err
+	}
+	return states, nil
+}
+
+// collectHolders reads the live leases into the states: the newest few as
+// holders, all of them into the per-class sum.
+func (s *Store) collectHolders(ctx context.Context, states []State,
+	resolve func(string) (int, bool)) error {
+	// The class of a job's lease is the job's; the owner names the job,
+	// and its row says with what class it asked. The cast is guarded,
+	// because an owner of another shape - a test's stand-in, a future
+	// caller - must not break the whole read.
+	const query = `
+		select l.key, l.owner, l.claimant, l.weight, l.acquired_at,
+		       j.action_type, j.created_by, j.budget_class
+		  from budget_leases l
+		  left join jobs j on j.id = case when l.owner ~ '^job:[0-9a-f-]{36}$'
+		                                  then substr(l.owner, 5)::uuid end
+		 where l.lease_until > now()
+		 order by l.acquired_at desc, l.key, l.owner`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var holder Holder
+		var action, createdBy, stated *string
+		if err := rows.Scan(&key, &holder.Owner, &holder.Claimant, &holder.Tokens,
+			&holder.Since, &action, &createdBy, &stated); err != nil {
+			return err
+		}
+		var job *JobFacts
+		if action != nil && createdBy != nil && stated != nil {
+			job = &JobFacts{Action: opspec.ActionType(*action), CreatedBy: *createdBy,
+				Stated: Class(*stated)}
+		}
+		holder.Class = LeaseClass(holder.Owner, holder.Claimant, job)
+		i, ok := resolve(key)
+		if !ok {
+			// A lease under a key nobody configured any more: it holds
+			// nothing that binds, and there is no row to show it on.
+			continue
+		}
+		states[i].ByClass[holder.Class] += holder.Tokens
+		if len(states[i].Holders) < holdersShown {
+			states[i].Holders = append(states[i].Holders, holder)
+		}
+	}
+	return rows.Err()
+}
+
+// countWaitingTargets adds up the campaign hosts waiting on each budget.
+//
+// Only the campaigns that still run count: a paused campaign keeps its
+// hosts in awaiting_budget, but they ask for nothing until it resumes, and
+// a number that includes them would say the budget is under pressure it
+// is not.
+func (s *Store) countWaitingTargets(ctx context.Context, states []State,
+	resolve func(string) (int, bool)) error {
+	const query = `
+		select t.message, count(*)
+		  from campaign_targets t
+		  join campaigns c on c.id = t.campaign_id
+		 where t.state = 'awaiting_budget' and c.state in ('canary', 'running')
+		 group by t.message`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var message *string
+		var count int
+		if err := rows.Scan(&message, &count); err != nil {
+			return err
+		}
+		if message == nil {
+			continue
+		}
+		key := DescribedKey(*message)
+		if key == "" {
+			continue
+		}
+		if i, ok := resolve(key); ok {
+			states[i].WaitingTargets += count
+		}
+	}
+	return rows.Err()
 }
 
 func keysOf(needs []Need) []string {

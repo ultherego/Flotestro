@@ -302,6 +302,8 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.probeIdentity(ctx, request, action.IdentityProbe)
 	case *helperv1.HelperRequest_DomainEnroll:
 		return s.enrollDomain(ctx, request, action.DomainEnroll)
+	case *helperv1.HelperRequest_DomainLeave:
+		return s.leaveDomain(ctx, request, action.DomainLeave)
 	case *helperv1.HelperRequest_LocalAccounts:
 		return s.readLocalAccounts(ctx, request, action.LocalAccounts)
 	case *helperv1.HelperRequest_LocalUserAction:

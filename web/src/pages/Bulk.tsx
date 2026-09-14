@@ -43,6 +43,7 @@ export function Bulk() {
     securityOnly: true,
     payloadText: prefill.get("payload") ?? "",
     compensates: prefill.get("compensates") ?? "",
+    hostIDs: prefill.getAll("host_id"),
     site: "",
     environment: "",
     osFamily: "",
@@ -118,7 +119,11 @@ export function Bulk() {
     refetchInterval: OPERATIONS_INTERVAL,
   });
 
-  const eligible = preview.data?.eligible ?? 0;
+  // A host list from the address is not a filter the preview can count:
+  // the preview reads the selector fields, and a compensation narrowed to
+  // one host previews the whole set the original changed. The named hosts
+  // are what the order carries, so they are what the count says.
+  const eligible = order.hostIDs.length > 0 ? order.hostIDs.length : preview.data?.eligible ?? 0;
   const gates = stepGates(t, order, preview.data, campaign.data);
 
   // A backend without a planning phase will not drive any of these changes.
@@ -216,6 +221,11 @@ type Order = {
   // on a finished campaign. Empty for an ordinary campaign. The server
   // holds the rules: the reverse operation, the hosts that changed.
   compensates: string;
+  // Hosts named by identifier in the address - a compensation of one host
+  // from the campaign page. When present they are the order's targets and
+  // the filters below are not sent; the server checks them against the
+  // original the way it checks any selector.
+  hostIDs: string[];
   site: string;
   environment: string;
   osFamily: string;
@@ -339,9 +349,13 @@ export function reversePayload(action: string, payload: unknown): Record<string,
  * compensation and the two campaigns are linked rather than merely named
  * alike.
  */
-export function bulkPrefill(action: string, name: string, payload: unknown, compensates?: string): string {
-  const address = `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
-  return compensates ? `${address}&compensates=${encodeURIComponent(compensates)}` : address;
+export function bulkPrefill(action: string, name: string, payload: unknown, compensates?: string, hostIDs: string[] = []): string {
+  let address = `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+  if (compensates) address += `&compensates=${encodeURIComponent(compensates)}`;
+  // One host of the original, when the rollback is ordered from its row;
+  // the parameter repeats, one host per value.
+  for (const hostID of hostIDs) address += `&host_id=${encodeURIComponent(hostID)}`;
+  return address;
 }
 
 /**
@@ -835,6 +849,13 @@ function TargetsStep({
               })}
             </p>
           )}
+          {/* The preview cannot count a host list, so the operator is told
+              which number binds: the hosts the address named. */}
+          {order.hostIDs.length > 0 && (
+            <p>
+              {t("The order names {n} hosts by identifier, from the campaign page; the campaign is created on those alone, whatever the filters below match.", { n: order.hostIDs.length })}
+            </p>
+          )}
           <p>
             {t("The selector matches {n} hosts", { n: preview?.count ?? 0 })}
             {preview && preview.count > preview.limit && (
@@ -1001,7 +1022,13 @@ function RolloutStep({
   return (
     <Card
       title={`4. ${t("Rollout")}`}
-      description={t("Canary is wave zero. The concurrency limit says how many hosts move at once in this change; fleet and site budgets say how much the system carries in total, and a host waiting for capacity says so instead of standing still.")}
+      description={
+        <>
+          {t("Canary is wave zero. The concurrency limit says how many hosts move at once in this change; fleet and site budgets say how much the system carries in total, and a host waiting for capacity says so instead of standing still.")}
+          {" "}
+          <Link to="/budgets">{t("See the budgets.")}</Link>
+        </>
+      }
       footer={
         <p>
           {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
@@ -1110,7 +1137,10 @@ function CreateStep({
           site: expressionOf(order) ? undefined : order.site || undefined,
           environment: expressionOf(order) ? undefined : order.environment || undefined,
           os_family: expressionOf(order) ? undefined : order.osFamily || undefined,
-          expression: expressionOf(order) ?? undefined,
+          // A typed expression would decide over the host list on the
+          // server; the named hosts are the order, so it is not sent.
+          expression: order.hostIDs.length > 0 ? undefined : expressionOf(order) ?? undefined,
+          host_ids: order.hostIDs.length > 0 ? order.hostIDs : undefined,
           exclude: order.exclude.length > 0 ? order.exclude : undefined,
           exclude_reason: order.exclude.length > 0 ? order.excludeReason.trim() : undefined,
         },

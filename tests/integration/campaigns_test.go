@@ -3184,6 +3184,18 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 	for time.Now().Before(deadline) {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State == "awaiting_budget" {
+				if !waited {
+					// The budget screen counts the waiting host from the
+					// budget's side, read while the host still waits - the
+					// operator looking at the budget must see the campaign
+					// behind it, not only the campaign looking at the budget.
+					// The host may be admitted between the two reads; a
+					// count of none is a failure only while it still waits.
+					shown := h.budgetState("backend:" + repository + ":backup")
+					if shown.WaitingTargets < 1 && stillWaiting(h.campaignTargets(campaign.ID), target.HostID) {
+						t.Errorf("a host waits for the backend and the budget counts %d waiting targets", shown.WaitingTargets)
+					}
+				}
 				waited = true
 				if target.ErrorCode != "budget_capacity" && target.ErrorCode != "budget_fair_share" {
 					t.Errorf("a host waits for the backend without a reason: %+v", target)
@@ -3236,6 +3248,16 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 			}, 2*time.Minute)
 		}
 	})
+}
+
+// stillWaiting says whether the host's target still stands in awaiting_budget.
+func stillWaiting(targets []campaignTargetView, hostID string) bool {
+	for _, target := range targets {
+		if target.HostID == hostID {
+			return target.State == "awaiting_budget"
+		}
+	}
+	return false
 }
 
 // TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse walks two

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
@@ -70,6 +71,49 @@ func (s *Server) openAPI() map[string]any {
 	register("CampaignStep", campaigns.Step{})
 	register("AuditEvent", audit.Event{})
 	register("Payload", opspec.Payload{})
+	register("Budget", budgets.State{})
+	register("BudgetHolder", budgets.Holder{})
+	// The reflection inlines the holder into the budget; the contract
+	// names it once, so the sentences below land on the shape a client sees.
+	schemas["Budget"].(map[string]any)["properties"].(map[string]any)["holders"] =
+		map[string]any{"type": "array", "items": ref("BudgetHolder")}
+	// The reflection reads the shape, not the meaning. A field a program
+	// decides on - whether a rollback can be ordered, and on how many
+	// hosts - gets its sentence here, next to the type it belongs to.
+	describe(schemas, "Campaign", "compensated_by",
+		"The campaigns ordered to undo this one, oldest first, each with its state. "+
+			"Read from the compensating campaigns; the record of this one never changes when a rollback is ordered.")
+	describe(schemas, "Campaign", "changed_hosts",
+		"How many hosts the campaign changed: the target succeeded, or failed only after its change landed "+
+			"(in the reboot or the verification). These are the hosts a compensation runs on. "+
+			"Zero until the campaign is completed, failed or canceled - a compensation is refused before that.")
+	// The budget row grew additively: a client of the first shape reads
+	// the same five fields, and the new ones say who holds the tokens and
+	// who waits for them, which the numbers alone never did.
+	describe(schemas, "Budget", "used", "The weight of the tokens under live leases of this exact key.")
+	describe(schemas, "Budget", "claimants",
+		"How many campaigns and job authors hold tokens of this key or wait for them; the fair share divides the capacity between them.")
+	describe(schemas, "Budget", "waiting_jobs",
+		"The single-host jobs queued behind this key. A job waits on the exact key of its site; it counts under a "+
+			"pattern row (site:*:packages) only when no exact row took the site out from under the pattern.")
+	describe(schemas, "Budget", "waiting_targets",
+		"The hosts of running campaigns standing in awaiting_budget behind this key, attributed like the waiting jobs. "+
+			"A paused campaign's hosts do not count: they ask for nothing until it resumes.")
+	describe(schemas, "Budget", "holders",
+		"The live leases of this key, newest first, at most 50; the per-class sum counts every lease. "+
+			"Attributed like the waiting jobs, so a pattern row lists the leases of the sites under its policy.")
+	describe(schemas, "Budget", "by_class",
+		"The weight of the tokens in use per class of work: incident, interactive, maintenance, background, "+
+			"or unknown for a lease the panel cannot place.")
+	describe(schemas, "BudgetHolder", "owner",
+		"The work holding the tokens: job:<id> for a single-host job, the target id for a campaign host, fanout:<id> for a fan-out read.")
+	describe(schemas, "BudgetHolder", "claimant",
+		"The unit of fairness the lease counts under: campaign:<id>, jobs:<author> or reads:<author>.")
+	describe(schemas, "BudgetHolder", "class",
+		"The class the lease was taken with, read from the holder because the lease records none; "+
+			"unknown when the holder is neither a job, a campaign target nor a fan-out.")
+	describe(schemas, "BudgetHolder", "tokens", "The weight of the lease.")
+	describe(schemas, "BudgetHolder", "since", "When the lease was first taken; renewals keep it.")
 	schemas["Problem"] = map[string]any{
 		"type":        "object",
 		"description": "The error answer. The code is stable and meant for programs; the message is for people.",
@@ -284,6 +328,18 @@ var queryParameters = map[string][]queryParameter{
 	}, pagingParameters...),
 }
 
+// describe adds the sentence of one property to a schema already
+// reflected. A schema without the property is a mistake in this file, not
+// in the type, so it fails loudly at the first read of the contract.
+func describe(schemas map[string]any, schema, property, description string) {
+	properties := schemas[schema].(map[string]any)["properties"].(map[string]any)
+	field, ok := properties[property].(map[string]any)
+	if !ok {
+		panic("openapi: " + schema + " has no property " + property)
+	}
+	field["description"] = description
+}
+
 func ref(name string) map[string]any {
 	return map[string]any{"$ref": "#/components/schemas/" + name}
 }
@@ -320,7 +376,19 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/campaigns/{id}/timeline": collection("TimelineEntry"),
 	"GET /api/v1/campaigns/{id}/steps":    cursorCollection("CampaignStep"),
 	"GET /api/v1/audit":                   cursorCollection("AuditEvent"),
+	"GET /api/v1/budgets":                 items("Budget"),
 	"GET /api/v1/hosts/{id}/audit":        collection("AuditEvent"),
+}
+
+// items is a whole list answered at once, without a count: the budgets
+// are as many as somebody configured, and nobody pages through them.
+func items(name string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items": map[string]any{"type": "array", "items": ref(name)},
+		},
+	}
 }
 
 // cursorCollection is a list read page by page without a total: the task

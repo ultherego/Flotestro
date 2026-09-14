@@ -303,6 +303,10 @@ const (
 	PermIdentityGroupWrite  Permission = "identity.group.write"
 	PermIdentityPolicyWrite Permission = "identity.policy.write"
 	PermIdentityHostEnroll  Permission = "identity.host.enroll"
+	// Taking a host out of the domain is a separate right: it cuts every
+	// directory account off the host, and bringing hosts in does not imply
+	// the right to do that.
+	PermIdentityHostLeave Permission = "identity.host.leave"
 
 	// Local accounts are a separate path of access to the host, independent
 	// of the directory. Creating an account and changing SSH keys means
@@ -481,6 +485,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
+		PermIdentityHostLeave,
 		PermDNSDirectoryWrite,
 		PermUnitStatus,
 		// Local accounts are an alternative to the directory, so they belong
@@ -528,6 +533,7 @@ var rolePermissions = map[Role][]Permission{
 		PermBudgetRead, PermBudgetWrite,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
+		PermIdentityHostLeave,
 		PermDNSDirectoryWrite,
 		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke, PermRelayEnrollCreate,
 		PermRelayManage,

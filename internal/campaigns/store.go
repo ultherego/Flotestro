@@ -825,8 +825,23 @@ const campaignColumns = `
 	       coalesce((select o.name from campaigns o where o.id = campaigns.compensates_campaign_id), ''),
 	       coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'state', c.state)
 	                                  order by c.created_at)
-	                   from campaigns c where c.compensates_campaign_id = campaigns.id), '[]'::jsonb)
+	                   from campaigns c where c.compensates_campaign_id = campaigns.id), '[]'::jsonb),
+	       case when campaigns.state in ('completed', 'failed', 'canceled')
+	            then (select count(*) from campaign_targets t
+	                   where t.campaign_id = campaigns.id and ` + changedTargetCondition + `)
+	            else 0 end
 	from campaigns `
+
+// changedTargetCondition tells a target whose change landed on the host,
+// on the alias t: the host succeeded, or failed only after the change -
+// in the reboot or the verification - which the execute step records as
+// succeeded. A host whose change failed, or whose session broke mid-task,
+// holds something unknown, and unknown is not "unchanged". The same rule
+// ChangedTargets reads the hosts of a compensation by, so the count the
+// campaign carries is the count that compensation will run on.
+const changedTargetCondition = `(t.state = 'succeeded'
+	                          or exists (select 1 from campaign_steps s
+	                                      where s.target_id = t.id and s.step_key = 'execute' and s.state = 'succeeded'))`
 
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Campaign, error) {
 	rows, err := s.pool.Query(ctx, campaignColumns+clause, args...)
@@ -851,7 +866,7 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.OfflinePolicy, &c.DeadlineAt, &c.ManualGate, &c.GateAdvancedBy,
 			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute, &c.RebootTimeoutSeconds,
-			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy); err != nil {
+			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy, &c.ChangedHosts); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)

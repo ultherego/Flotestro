@@ -207,3 +207,53 @@ func TestUnknownOperationAsksForTheScarcerCapacity(t *testing.T) {
 		t.Fatalf("an unknown operation loads budgets %+v", needs)
 	}
 }
+
+// TestDescribedKeyReadsTheBudgetOutOfTheSentence guards the only place a
+// waiting campaign target names its budget: the sentence Describe wrote.
+// A key with colons of its own, a backend key with a path, and both
+// reasons have to read back; any other message names no budget.
+func TestDescribedKeyReadsTheBudgetOutOfTheSentence(t *testing.T) {
+	refusals := []Refusal{
+		{Key: "site:warsaw:packages", Reason: ReasonCapacity, Used: 5, Capacity: 5, Waiting: 3 * time.Second},
+		{Key: KeyGlobalMutations, Reason: ReasonFairShare, Capacity: 50, Share: 25, Held: 25},
+		{Key: BackendKey("s3:https://bucket/repo"), Reason: ReasonCapacity, Used: 2, Capacity: 2},
+	}
+	for _, refusal := range refusals {
+		if key := DescribedKey(refusal.Describe()); key != refusal.Key {
+			t.Errorf("%q reads back as %q, want %q", refusal.Describe(), key, refusal.Key)
+		}
+	}
+	for _, message := range []string{"", "resource busy", "budget", "budget site:warsaw:packages"} {
+		if key := DescribedKey(message); key != "" {
+			t.Errorf("%q names budget %q", message, key)
+		}
+	}
+}
+
+// TestLeaseClassIsReadFromTheHolder guards how the budget screen tells the
+// classes apart although the lease records none: a job's class comes from
+// its order, a campaign always asks as maintenance, a fan-out as
+// interactive - and a holder the panel cannot place is unknown, not
+// background.
+func TestLeaseClassIsReadFromTheHolder(t *testing.T) {
+	cases := []struct {
+		name     string
+		owner    string
+		claimant string
+		job      *JobFacts
+		want     string
+	}{
+		{"a job by an operator", "job:1", "jobs:alice", &JobFacts{Action: opspec.ActionUnitRestart, CreatedBy: "alice"}, string(ClassInteractive)},
+		{"a job the operator marked", "job:1", "jobs:alice", &JobFacts{Action: opspec.ActionUnitRestart, CreatedBy: "alice", Stated: ClassIncident}, string(ClassIncident)},
+		{"the panel's own job", "job:1", "jobs:" + PanelAuthorPrefix + "vuln", &JobFacts{Action: opspec.ActionInventoryRefresh, CreatedBy: PanelAuthorPrefix + "vuln"}, string(ClassBackground)},
+		{"a job whose row is gone", "job:1", "jobs:alice", nil, ClassUnknown},
+		{"a campaign target", "5a1c3e2f-0000-0000-0000-000000000000", "campaign:7", nil, string(ClassMaintenance)},
+		{"a fan-out read", "fanout:3", "reads:alice", nil, string(ClassInteractive)},
+		{"a stand-in of a test", "integration-test:job-budget", "integration-test", nil, ClassUnknown},
+	}
+	for _, c := range cases {
+		if got := LeaseClass(c.owner, c.claimant, c.job); got != c.want {
+			t.Errorf("%s: class %q, want %q", c.name, got, c.want)
+		}
+	}
+}

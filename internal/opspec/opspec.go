@@ -232,6 +232,9 @@ const (
 
 	ActionDomainEnroll    ActionType = "identity.host.enroll"
 	ActionDomainPreflight ActionType = "identity.host.preflight"
+	// Leaving the domain is a decision of its own, not the join undone: it
+	// cuts every directory user off the host at once.
+	ActionDomainLeave ActionType = "identity.host.leave"
 
 	ActionLocalUserCreate ActionType = "localuser.create"
 	ActionLocalUserLock   ActionType = "localuser.lock"
@@ -521,6 +524,13 @@ func (a ActionType) RequiresTargetConfirmation() bool {
 	// name loses it at once: the operator types the name they are taking
 	// away.
 	if a == ActionSystemHostnameSet {
+		return true
+	}
+	// Leaving a domain destroys no data, but every directory account loses
+	// the host at once, and the join back needs a new credential from the
+	// directory: the operator types the name of the host they are taking
+	// out.
+	if a == ActionDomainLeave {
 		return true
 	}
 	return a.Risk() == RiskDestructive
@@ -1004,6 +1014,12 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Preflight changes nothing, so it needs no approval.
 	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockIdentity},
+	// Leaving changes authentication for the whole host the same way the
+	// join does, in the other direction: every directory account loses the
+	// host at once. The same risk, the same lock and a permission of its
+	// own - the right to bring hosts in is not the right to take them out.
+	ActionDomainLeave: {mutating: true, capability: "systemd", permission: "identity.host.leave",
+		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity},
 
 	// Local accounts depend neither on systemd nor on a directory: the module
 	// works also where the customer stays with plain SSH authorisation.
@@ -1622,6 +1638,7 @@ type Payload struct {
 	Reboot          *RebootPayload          `json:"reboot,omitempty"`
 	UnitStatus      *UnitStatusPayload      `json:"unit_status,omitempty"`
 	DomainEnroll    *DomainEnrollPayload    `json:"domain_enroll,omitempty"`
+	DomainLeave     *DomainLeavePayload     `json:"domain_leave,omitempty"`
 	LocalUser       *LocalUserPayload       `json:"local_user,omitempty"`
 	PackageRepair   *PackageRepairPayload   `json:"package_repair,omitempty"`
 	DockerRead      *DockerReadPayload      `json:"docker_read,omitempty"`
@@ -2321,6 +2338,15 @@ type DomainEnrollPayload struct {
 	Hostname string `json:"hostname,omitempty"`
 }
 
+// DomainLeavePayload describes taking the host out of a domain. The domain
+// and the realm are the ones the operator means to leave: the host refuses
+// the order when it is in a different one, so a stale view of the fleet
+// cannot take a host out of the wrong domain.
+type DomainLeavePayload struct {
+	Domain string `json:"domain"`
+	Realm  string `json:"realm"`
+}
+
 // LocalUserPayload describes a change to a local account.
 //
 // The payload contains neither a password nor a hash. An account created by
@@ -2501,6 +2527,18 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if !domainPattern.MatchString(payload.DomainEnroll.Domain) {
 			return fmt.Errorf("invalid domain name %q", payload.DomainEnroll.Domain)
+		}
+		return nil
+
+	case ActionDomainLeave:
+		if payload.DomainLeave == nil {
+			return fmt.Errorf("the operation %s requires a domain_leave payload", action)
+		}
+		if payload.DomainLeave.Domain == "" || payload.DomainLeave.Realm == "" {
+			return fmt.Errorf("leaving requires the domain and the realm the host is in")
+		}
+		if !domainPattern.MatchString(payload.DomainLeave.Domain) {
+			return fmt.Errorf("invalid domain name %q", payload.DomainLeave.Domain)
 		}
 		return nil
 
