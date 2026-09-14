@@ -1,4 +1,7 @@
-# Flotestro
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+  <img src="docs/logo.svg" alt="Flotestro" width="360">
+</picture>
 
 Fleet management for Linux servers: one panel that plans, approves, carries and
 records changes across Debian, Ubuntu, Fedora, RHEL and Arch hosts.
