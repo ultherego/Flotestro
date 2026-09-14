@@ -1,9 +1,9 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
-    <img src="docs/logo.svg" alt="Flotestro" width="420">
-  </picture>
-</p>
+<div align="center">
+
+![Flotestro](docs/logo.svg#gh-light-mode-only)
+![Flotestro](docs/logo-dark.svg#gh-dark-mode-only)
+
+</div>
 
 <p align="center">
   Fleet management for Linux servers.<br>
@@ -87,6 +87,12 @@
 </table>
 
 ## How a change happens
+
+<div align="center">
+
+![How Flotestro works](docs/flow.svg)
+
+</div>
 
 1. The host computes a plan of the change and reports its digest.
 2. An approver reads the plan; in production a second person approves.
