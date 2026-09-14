@@ -43,3 +43,13 @@ td.fp-meter-cell .meter { width: 100%; }
 /* The form of a page inside the grid keeps its fields readable in a
    narrow column: one field per row, the whole width for each. */
 .fp-narrow .field-grid { grid-template-columns: 1fr; }
+
+/* The audit trail: the session under the actor, and under a row the
+   people behind an approval and the two sides of a change, one line per
+   key that differs. The lines wrap; the table never widens for them. */
+.fp-audit-session { display: flex; flex-wrap: wrap; gap: 0 10px; margin-top: 2px; }
+.fp-audit-chain { margin: 0 0 6px; }
+.fp-audit-diff { margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.6; }
+.fp-audit-diff li { overflow-wrap: anywhere; }
+.fp-audit-before { color: var(--text-muted); text-decoration: line-through; }
+.fp-audit-after { color: var(--text); }

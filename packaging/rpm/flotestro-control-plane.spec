@@ -30,6 +30,9 @@ the hosts.
 rm -rf %{buildroot}
 install -d -m 0755 %{buildroot}%{_bindir}
 install -m 0755 %{_flotestro_stage}/flotestro-control-plane %{buildroot}%{_bindir}/flotestro-control-plane
+# The audit verifier stands next to the panel: an export of the audit trail
+# is checked where the trail was written, or on any machine with this package.
+install -m 0755 %{_flotestro_stage}/flotestro-auditverify %{buildroot}%{_bindir}/flotestro-auditverify
 
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -m 0644 %{_flotestro_units}/flotestro-control-plane.service %{buildroot}%{_unitdir}/
@@ -44,6 +47,8 @@ install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro
 install -d -m 0755 %{buildroot}%{_docdir}/flotestro-control-plane
 [ -f %{_flotestro_stage}/sbom/flotestro-control-plane.cdx.json ] && \
     install -m 0644 %{_flotestro_stage}/sbom/flotestro-control-plane.cdx.json %{buildroot}%{_docdir}/flotestro-control-plane/sbom.cdx.json || :
+[ -f %{_flotestro_stage}/sbom/flotestro-auditverify.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-auditverify.cdx.json %{buildroot}%{_docdir}/flotestro-control-plane/sbom-flotestro-auditverify.cdx.json || :
 
 # The web panel is built separately; the package carries the ready files.
 install -d -m 0755 %{buildroot}%{_datadir}/flotestro/web
@@ -56,6 +61,7 @@ fi
 %files
 %{_docdir}/flotestro-control-plane
 %{_bindir}/flotestro-control-plane
+%{_bindir}/flotestro-auditverify
 %{_unitdir}/flotestro-control-plane.service
 %dir %{_sysconfdir}/flotestro
 # The configuration must not be overwritten on an update: it holds the

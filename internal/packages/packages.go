@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ultherego/flotestro/internal/helper/runscope"
 )
 
 // The stable error codes of the adapter. They are part of the contract of
@@ -325,8 +327,12 @@ func runCommand(ctx context.Context, timeout time.Duration, input string,
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// The tool was checked above; what runs is the tool behind the resource
+	// scope the context asks for, when the helper put one there.
+	argv := runscope.Apply(ctx, append([]string{path}, args...))
+
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(cmdCtx, path, args...)
+	cmd := exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if input != "" {

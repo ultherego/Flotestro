@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/buildinfo"
+	"github.com/ultherego/flotestro/internal/jcs"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
@@ -3443,18 +3444,55 @@ func (p Payload) withoutEmpty() Payload {
 	return p
 }
 
-// PayloadHash computes the plan hash in canonical form. The agent computes it
-// the same way and compares it with the envelope, so swapping the payload
-// after approval is detectable.
+// PayloadHashVersion is the version of the payload hash scheme the panel
+// issues. It says how the bytes under the digest are laid out, not what the
+// payload means - that is ActionVersion.
 //
-// The canonical form is: "<type>\n<version>\n<payload JSON>". The JSON comes
-// from encoding/json, which serialises struct fields in declaration order, so
-// the result is deterministic.
+// Version 1 hashes the encoding/json text of the payload without a scheme
+// line. Version 2 hashes the canonical JSON of RFC 8785 with a scheme line in
+// front, so the digest depends on the document alone and another
+// implementation of the scheme comes out the same. The agent verifies both;
+// the panel issues version 1 until every agent of the fleet knows version 2,
+// because an agent from before the change refuses a hash it cannot recompute
+// and the fleet would stop taking tasks. Raising the constant is the whole
+// switch: it is made once the agents have been upgraded, not together with
+// them.
+const PayloadHashVersion = 1
+
+// PayloadHash computes the plan hash of the scheme the panel issues,
+// PayloadHashVersion. The agent computes it the same way and compares it
+// with the envelope, so swapping the payload after approval is detectable.
 func PayloadHash(action ActionType, version int, payload Payload) ([]byte, error) {
-	encoded, err := json.Marshal(payload.withoutEmpty())
-	if err != nil {
-		return nil, err
+	return PayloadHashOfScheme(PayloadHashVersion, action, version, payload)
+}
+
+// PayloadHashSchemes lists the scheme versions the agent recognises, the
+// one the panel issues first.
+var PayloadHashSchemes = []int{PayloadHashVersion, 2}
+
+// PayloadHashOfScheme computes the plan hash of one scheme version.
+//
+// Version 1 hashes "<type>\n<version>\n<encoding/json text>". Version 2
+// hashes "flotestro-payload-hash/2\n<type>\n<version>\n<canonical JSON>",
+// where the JSON is the canonical form of RFC 8785.
+func PayloadHashOfScheme(scheme int, action ActionType, version int, payload Payload) ([]byte, error) {
+	switch scheme {
+	case 1:
+		encoded, err := json.Marshal(payload.withoutEmpty())
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(fmt.Appendf(nil, "%s\n%d\n%s", action, version, encoded))
+		return sum[:], nil
+	case 2:
+		encoded, err := jcs.Canonical(payload.withoutEmpty())
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(fmt.Appendf(nil, "flotestro-payload-hash/%d\n%s\n%d\n%s",
+			scheme, action, version, encoded))
+		return sum[:], nil
+	default:
+		return nil, fmt.Errorf("unknown payload hash scheme %d", scheme)
 	}
-	sum := sha256.Sum256(fmt.Appendf(nil, "%s\n%d\n%s", action, version, encoded))
-	return sum[:], nil
 }

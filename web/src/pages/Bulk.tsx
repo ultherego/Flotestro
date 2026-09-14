@@ -547,7 +547,7 @@ function ScopeBar({
 }
 
 /** The operations the wizard can build a payload for. */
-const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
+const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload", "unit.reset_failed"];
 const WIZARD_OPERATIONS = [...UNIT_OPERATIONS, "packages.upgrade"];
 
 function ScopeStep({
@@ -1145,7 +1145,8 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
   );
 }
 
-type PlanGroups = {
+/** The plans of a campaign grouped by fingerprint, as the panel serves them. */
+export type PlanGroups = {
   items: {
     plan_hash: string;
     count: number;

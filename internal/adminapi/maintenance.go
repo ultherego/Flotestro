@@ -8,6 +8,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
 // MaxWindow bounds the length of a maintenance window.
@@ -79,8 +80,23 @@ func (s *Server) handleSetMaintenance(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.maintenance", TargetType: "host", TargetID: host.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess, Detail: detail,
+		Before: windowState(host.Maintenance),
+		After:  windowState(updated.Maintenance),
 	})
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// windowState renders a maintenance window for one side of an audit
+// event. A host outside a window is a known state, not a missing one, so
+// it reads as a window without an end rather than as nothing recorded.
+func windowState(window *hosts.MaintenanceWindow) map[string]any {
+	if window == nil {
+		return map[string]any{"until": nil, "reason": ""}
+	}
+	return map[string]any{
+		"until": window.Until.UTC().Format(time.RFC3339), "reason": window.Reason,
+		"set_by": window.SetBy,
+	}
 }
 
 // windowDeadline computes the end of the window from what the interface

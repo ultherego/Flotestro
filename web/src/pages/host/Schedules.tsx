@@ -39,7 +39,24 @@ type Preview = {
   error?: string;
 };
 
-type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string };
+/** The preview as the panel types it from the result of the agent. */
+type PreviewDetail = { kind?: string; expression?: string; timezone?: string; runs?: string[]; error?: string };
+
+type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string; detail?: PreviewDetail };
+
+/**
+ * The preview of an attempt: typed from the result when the panel has read
+ * it, otherwise the document the agent prints on stdout. An agent from
+ * before the typed result prints only stdout, so it stays the fallback for
+ * one release; drop it together with the support for those agents.
+ */
+function previewOf(attempt: Attempt): Preview {
+  const detail = attempt.detail;
+  if (detail?.kind === "schedule_preview") {
+    return { expression: detail.expression, timezone: detail.timezone, next_runs: detail.runs, error: detail.error };
+  }
+  return JSON.parse(attempt.stdout ?? "{}") as Preview;
+}
 
 type Snapshot = {
   schedules?: Schedule[];
@@ -339,7 +356,7 @@ function NewEntry({
         if (last.status !== "succeeded") {
           throw new Error(last.message || last.error_code || t("The host refused the read."));
         }
-        return JSON.parse(last.stdout ?? "{}") as Preview;
+        return previewOf(last);
       }
       throw new Error(t("The host did not answer in time."));
     },

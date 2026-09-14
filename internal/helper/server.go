@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/systemd"
 )
@@ -335,6 +336,10 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 
 	operationCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
 	defer cancel()
+	// Every operation of the manager - a refresh as much as a transaction -
+	// runs in the scope of the package family: the manager starts its tools
+	// itself, and reads the scope out of the context.
+	operationCtx = s.scopeContext(operationCtx, request.GetTaskId(), opspec.FamilyPackages)
 
 	options := packages.Options{
 		Packages:     action.GetPackages(),
@@ -669,6 +674,7 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 
 	repairCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
 	defer cancel()
+	repairCtx = s.scopeContext(repairCtx, request.GetTaskId(), opspec.FamilyPackages)
 
 	answered, remaining, err := apt.Repair(repairCtx, answers)
 	response := &helperv1.PackageRepairResponse{
@@ -708,6 +714,7 @@ func (s *Server) repairPacman(ctx context.Context, request *helperv1.HelperReque
 
 	repairCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
 	defer cancel()
+	repairCtx = s.scopeContext(repairCtx, request.GetTaskId(), opspec.FamilyPackages)
 
 	steps, remaining, err := pacman.Repair(repairCtx)
 	response := &helperv1.PackageRepairResponse{

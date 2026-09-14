@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api, ApiError, loadedItems, LIST_PAGE, type Page } from "../lib/api";
@@ -155,17 +155,62 @@ export function Audit() {
             <table>
               <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Kind")}</th><th>{t("Operation")}</th><th>{t("Target")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
               <tbody>
-                {events.map((event) => (
-                  <tr key={event.id}>
-                    <td><Time value={event.occurred_at} /></td>
-                    <td className="mono">{event.actor_id}</td>
-                    <td>{event.actor_type}</td>
-                    <td className="mono">{event.action}</td>
-                    <td className="mono">{event.target_type ? `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}` : "—"}</td>
-                    <td><JobState state={event.outcome} /></td>
-                    <td className="source">{digest(event.detail)}</td>
-                  </tr>
-                ))}
+                {events.map((event) => {
+                  const changes = changedKeys(event.before, event.after);
+                  const chain = event.approval_chain;
+                  return (
+                    <Fragment key={event.id}>
+                      <tr>
+                        <td><Time value={event.occurred_at} /></td>
+                        <td className="mono">
+                          {event.actor_id}
+                          {/* The session and how it was authenticated stand
+                              under the actor: they say which sign-in acted,
+                              which the name alone does not. */}
+                          {(event.session_id || event.acr) && (
+                            <div className="source fp-audit-session">
+                              {event.session_id && (
+                                <span title={`${t("Session")} ${event.session_id}`}>{t("session")} {event.session_id.slice(0, 12)}</span>
+                              )}
+                              {event.acr && <span title={t("Authentication context class")}>acr={event.acr}</span>}
+                            </div>
+                          )}
+                        </td>
+                        <td>{event.actor_type}</td>
+                        <td className="mono">{event.action}</td>
+                        <td className="mono"><TargetCell event={event} /></td>
+                        <td><JobState state={event.outcome} /></td>
+                        <td className="source">{digest(event.detail)}</td>
+                      </tr>
+                      {/* What an approval rests on and what a change did,
+                          under the row rather than in columns of their
+                          own: the table keeps its width on a phone. */}
+                      {(chain || changes.length > 0) && (
+                        <tr className="detail-row">
+                          <td colSpan={7}>
+                            {chain && (
+                              <p className="source fp-audit-chain">
+                                {t("Approval chain")}: {t("ordered by {creator}, approved by {approvers}", {
+                                  creator: chain.created_by,
+                                  approvers: chain.approvers.length > 0 ? chain.approvers.join(", ") : "—",
+                                })}
+                              </p>
+                            )}
+                            {changes.length > 0 && (
+                              <ul className="fp-audit-diff">
+                                {changes.map((change) => (
+                                  <li key={change.key}>
+                                    <span className="mono">{change.key}</span>: <span className="fp-audit-before">{change.before}</span> → <span className="fp-audit-after">{change.after}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -215,6 +260,51 @@ function eventsPerHour(events: AuditEvent[]): { labels: string[]; success: numbe
     else if (event.outcome === "denied") denied[index]++;
   });
   return { labels, success, failure, denied };
+}
+
+/**
+ * The target of an event: the host by the name and the address it had when
+ * the event was written, where the trail kept them, else the type and the
+ * start of the identifier. The full identifier stays in the title.
+ */
+function TargetCell({ event }: { event: AuditEvent }) {
+  if (!event.target_type) return <>—</>;
+  const ref = `${event.target_type}/${event.target_id ?? ""}`;
+  if (!event.target_hostname && !event.target_address) return <span title={ref}>{`${event.target_type}/${(event.target_id ?? "").slice(0, 8)}`}</span>;
+  return (
+    <span className="fp-host-cell" title={ref}>
+      <span>{event.target_hostname || `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}`}</span>
+      {event.target_address && <span className="fp-host-address">{event.target_address}</span>}
+    </span>
+  );
+}
+
+type Change = { key: string; before: string; after: string };
+
+/**
+ * The keys whose value differs between the two sides of a change, each
+ * side rendered for a line. A side the event does not carry - the
+ * creation has nothing before it, the deletion nothing after - reads as a
+ * dash, so every key of the other side is listed.
+ */
+function changedKeys(before: unknown, after: unknown): Change[] {
+  if (before === undefined && after === undefined) return [];
+  const left = asRecord(before);
+  const right = asRecord(after);
+  const keys = Array.from(new Set([...Object.keys(left), ...Object.keys(right)])).sort();
+  return keys
+    .filter((key) => JSON.stringify(left[key]) !== JSON.stringify(right[key]))
+    .map((key) => ({ key, before: renderSide(left[key]), after: renderSide(right[key]) }));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function renderSide(value: unknown): string {
+  if (value === undefined || value === null) return "—";
+  if (typeof value === "string") return value === "" ? "—" : value;
+  return JSON.stringify(value);
 }
 
 function digest(detail: Record<string, unknown>): string {

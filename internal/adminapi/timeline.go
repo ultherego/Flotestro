@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/paging"
 )
@@ -246,11 +247,26 @@ func (s *Server) handleHostTimeline(w http.ResponseWriter, r *http.Request) {
 
 	var sources []timelineSource
 	kinds := []string{}
+	readsTrail := false
 	for _, source := range timelineSources {
 		if principal.Can(source.permission, scope) {
 			sources = append(sources, source)
 			kinds = append(kinds, source.kind)
+			readsTrail = readsTrail || source.permission == authz.PermAuditRead
 		}
+	}
+	// The timeline is one more way of reading the trail, and a read of the
+	// trail is itself on the trail, however it was made. It is recorded
+	// the way the trail's own handlers record it - the same event, the
+	// same filter - and only when the trail is among the sources: a
+	// caller without the permission did not read it.
+	if readsTrail {
+		extra := map[string]any{"limit": limit, "sources": kinds}
+		if cursor.Set {
+			extra["continued"] = true
+		}
+		s.recordAuditRead(r, principal, "audit.read", "host", hostID,
+			audit.ListFilter{TargetID: hostID, Since: since, Until: until}, extra)
 	}
 	items, next, err := s.hostTimeline(r.Context(), hostID, sources, since, until, cursor, limit)
 	if err != nil {

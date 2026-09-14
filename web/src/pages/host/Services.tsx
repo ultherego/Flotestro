@@ -56,7 +56,19 @@ type UnitDetail = {
 
 type DetailDocument = { kind?: string; units?: UnitDetail[] };
 
-type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string };
+type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string; detail?: DetailDocument };
+
+/**
+ * The detail of a read, typed by the panel from the result of the agent. An
+ * agent from before the typed result prints the same document on stdout, so
+ * stdout stays the fallback for one release; drop it together with the
+ * support for those agents.
+ */
+function detailDocumentOf(attempt: Attempt): DetailDocument {
+  const detail = attempt.detail;
+  if (detail?.kind === "unit_detail") return detail;
+  return JSON.parse(attempt.stdout ?? "{}") as DetailDocument;
+}
 
 export function Services() {
   const t = useT();
@@ -109,7 +121,7 @@ export function Services() {
         if (last.status !== "succeeded") {
           throw new Error(last.message || last.error_code || t("The host refused the read."));
         }
-        const document = JSON.parse(last.stdout ?? "{}") as DetailDocument;
+        const document = detailDocumentOf(last);
         const found = document.units?.find((entry) => entry.state?.name === unit) ?? document.units?.[0];
         if (!found) throw new Error(t("The host returned no detail for {unit}.", { unit }));
         return found;
@@ -487,7 +499,7 @@ function UnitDetailPanel({
   };
 
   return (
-    <div className="hm-section-body">
+    <div className="hm-section-body" data-testid="unit-detail">
       <Facts>
         <Fact label={t("Description")} wide>{detail.description || "—"}</Fact>
         <Fact label={t("Unit file")} wide><span className="hm-mono">{detail.fragment_path || "—"}</span></Fact>

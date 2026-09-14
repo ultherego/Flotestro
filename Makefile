@@ -11,6 +11,7 @@ help:
 
 build: ## Builds the control plane and the agent for the host
 	go build -ldflags '$(LDFLAGS)' -o bin/flotestro-control-plane ./cmd/control-plane
+	go build -ldflags '$(LDFLAGS)' -o bin/flotestro-auditverify ./cmd/auditverify
 	go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent ./cmd/agent
 
 build-agent: ## Builds a static agent for linux/amd64
@@ -25,6 +26,7 @@ ifeq ($(COMPONENT),agent)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-agent-helper ./cmd/agent-helper
 else
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-control-plane ./cmd/control-plane
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '$(LDFLAGS)' -o bin/flotestro-auditverify ./cmd/auditverify
 endif
 
 package-deb: stage ## Builds the .deb package (COMPONENT=agent|control-plane, requires dpkg-deb)

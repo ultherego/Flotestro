@@ -239,7 +239,9 @@ export function Processes() {
                     {/* In the tree the command is indented by its depth and a
                         parent carries the fold; the flat table has neither. */}
                     <td className="hm-mono" title={process.command || process.name}>
-                      {tree && depth > 0 && <span style={{ display: "inline-block", width: depth * 16 }} />}
+                      {tree && depth > 0 && (
+                        <span data-testid="process-indent" data-depth={depth} style={{ display: "inline-block", width: depth * 16 }} />
+                      )}
                       {tree && children > 0 && (
                         <button
                           type="button"

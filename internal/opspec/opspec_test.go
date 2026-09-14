@@ -183,3 +183,45 @@ func TestReplacingTheAgentHasItsOwnRules(t *testing.T) {
 		t.Error("replacing the agent does not lock against package transactions")
 	}
 }
+
+// TestEveryHashSchemeIsAFunctionOfThePlan guards the switch of the scheme:
+// the agent accepts a hash of any known scheme, so every scheme has to be
+// as sensitive to a swapped plan as the one the panel issues, and the
+// schemes have to differ from one another - otherwise the version number
+// says nothing.
+func TestEveryHashSchemeIsAFunctionOfThePlan(t *testing.T) {
+	plan := Payload{Unit: &UnitPayload{Unit: "nginx.service"}}
+	swapped := Payload{Unit: &UnitPayload{Unit: "sshd.service"}}
+	seen := map[string]int{}
+	for _, scheme := range PayloadHashSchemes {
+		approved, err := PayloadHashOfScheme(scheme, ActionUnitRestart, ActionVersion, plan)
+		if err != nil {
+			t.Fatalf("scheme %d: %v", scheme, err)
+		}
+		again, err := PayloadHashOfScheme(scheme, ActionUnitRestart, ActionVersion, plan)
+		if err != nil || !bytes.Equal(approved, again) {
+			t.Fatalf("scheme %d is not stable", scheme)
+		}
+		tampered, err := PayloadHashOfScheme(scheme, ActionUnitRestart, ActionVersion, swapped)
+		if err != nil {
+			t.Fatalf("scheme %d: %v", scheme, err)
+		}
+		if bytes.Equal(approved, tampered) {
+			t.Fatalf("scheme %d does not see a swapped plan", scheme)
+		}
+		if other, dup := seen[string(approved)]; dup {
+			t.Fatalf("schemes %d and %d give the same hash", other, scheme)
+		}
+		seen[string(approved)] = scheme
+	}
+	issued, err := PayloadHash(ActionUnitRestart, ActionVersion, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen[string(issued)] != PayloadHashVersion {
+		t.Fatalf("the panel issues a hash of scheme %d, not %d", seen[string(issued)], PayloadHashVersion)
+	}
+	if _, err := PayloadHashOfScheme(99, ActionUnitRestart, ActionVersion, plan); err == nil {
+		t.Fatal("an unknown scheme gave a hash")
+	}
+}

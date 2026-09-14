@@ -154,8 +154,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// A campaign order is validated differently than an operation on one
 	// host: there is no plan fingerprint yet, because the plan is made on the
 	// hosts.
+	// A refusal with a code of its own (a protocol this panel does not
+	// speak) keeps that code; a malformed payload stays invalid_payload.
 	if err := opspec.ValidateCampaignRequest(action, payload); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
 
@@ -995,10 +997,23 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The event names everybody behind the change: who ordered the campaign
+	// and who has consented so far, this approval included - the list is
+	// read inside the transaction, so it holds the record just written.
+	approvals, err := s.campaigns.ApprovalsTx(r.Context(), tx, campaign.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	chain := &audit.ApprovalChain{CreatedBy: campaign.CreatedBy, Approvers: make([]string, 0, len(approvals))}
+	for _, record := range approvals {
+		chain.Approvers = append(chain.Approvers, record.ApprovedBy)
+	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "campaign.approve", TargetType: "campaign", TargetID: campaign.ID,
 		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
+		ApprovalChain: chain,
 		Detail: withStepUp(map[string]any{
 			"name": campaign.Name, "created_by": campaign.CreatedBy,
 			"approval_fingerprint": campaign.ApprovalFingerprint,

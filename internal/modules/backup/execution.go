@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/ultherego/flotestro/internal/helper/runscope"
 )
 
 // ErrInterrupted means an operation interrupted before the end.
@@ -105,7 +107,11 @@ func run(ctx context.Context, path string, arguments []string,
 // is part of the invocation here, not of the command text.
 func runInDir(ctx context.Context, dir, path string, arguments []string,
 	environment []string, secrets [][]byte, lineFunc func(string)) commandResult {
-	cmd := exec.CommandContext(ctx, path, arguments...)
+	// The tool runs behind the resource scope the context asks for, when the
+	// helper put one there; the working directory and the environment are
+	// those of the tool either way, the scope adds nothing of its own.
+	argv := runscope.Apply(ctx, append([]string{path}, arguments...))
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = environment
 	cmd.Dir = dir
 

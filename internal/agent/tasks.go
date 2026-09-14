@@ -177,11 +177,10 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	// swap of the payload between the approval and the delivery is detectable
 	// this way.
 	if expected := task.GetPayloadHash(); len(expected) > 0 {
-		computed, err := opspec.PayloadHash(action, opspec.ActionVersion, payload)
-		if err != nil {
+		if err := verifyPayloadHash(action, payload); err != nil {
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
 		}
-		if !bytes.Equal(expected, computed) {
+		if !payloadHashMatches(action, payload, expected) {
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPayloadHash,
 				"the content of the task does not match the approved plan")
 		}
@@ -586,6 +585,30 @@ func checkPreconditions(preconditions *agentv1.Preconditions, facts Facts) error
 		return fmt.Errorf("the host has been restarted since the planning")
 	}
 	return nil
+}
+
+// verifyPayloadHash says whether the payload can be hashed at all. A payload
+// that cannot be rendered is refused as invalid rather than as a mismatch:
+// the two refusals mean different things to the operator.
+func verifyPayloadHash(action opspec.ActionType, payload opspec.Payload) error {
+	_, err := opspec.PayloadHash(action, opspec.ActionVersion, payload)
+	return err
+}
+
+// payloadHashMatches compares the envelope's hash with the one computed
+// here over the payload as received. Every scheme the agent knows is tried,
+// the one the panel issues first, so a task from a panel of either side of
+// a scheme change is verified rather than refused. All schemes are digests
+// of the same payload, so the check stays what it is: the task carries
+// exactly what was approved.
+func payloadHashMatches(action opspec.ActionType, payload opspec.Payload, expected []byte) bool {
+	for _, scheme := range opspec.PayloadHashSchemes {
+		computed, err := opspec.PayloadHashOfScheme(scheme, action, opspec.ActionVersion, payload)
+		if err == nil && bytes.Equal(expected, computed) {
+			return true
+		}
+	}
+	return false
 }
 
 // decodeAction translates an envelope into the type of the operation and the

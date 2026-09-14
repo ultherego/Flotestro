@@ -97,8 +97,11 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A refusal on grounds other than shape - a release whose protocol
+	// this panel does not speak - carries a code of its own, so the
+	// interface can tell it from a typo in the order.
 	if err := opspec.Validate(action, payload); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
 
@@ -410,10 +413,27 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
+	// An approval names everybody behind the change: who ordered it and
+	// who has consented so far, this approval included. The list is read
+	// inside the transaction, so it already holds the row just written.
+	var chain *audit.ApprovalChain
+	if operation == "approve" {
+		approvals, err := s.jobs.ApprovalsTx(r.Context(), tx, jobID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		chain = &audit.ApprovalChain{CreatedBy: job.CreatedBy, Approvers: make([]string, 0, len(approvals))}
+		for _, approval := range approvals {
+			chain.Approvers = append(chain.Approvers, approval.Approver)
+		}
+	}
+
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor,
 		Action: action, TargetType: "job", TargetID: jobID,
 		RequestID: job.RequestID, Outcome: audit.OutcomeSuccess,
+		ApprovalChain: chain,
 		Detail: map[string]any{
 			"host_id": job.HostID, "action_type": job.ActionType,
 			"payload_hash": job.PayloadHash, "state": string(job.State),

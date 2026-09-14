@@ -238,11 +238,13 @@ func readBounded(path string, limit int) (content string, truncated bool, proble
 // The cursor is what lets the Logs page continue where the detail ended:
 // journalctl prints it as the final line when asked, and the panel hands
 // it back with --after-cursor. The read is bounded by the line count, by
-// the byte limit and by its own timeout.
+// the byte limit and by its own timeout. It is quiet: without --quiet
+// journalctl decorates a tail that spans reboots with "-- Boot ... --"
+// markers, and the tail carries more lines than were asked for.
 func journalTail(ctx context.Context, unit string) (lines []string, cursor string, truncated bool, err error) {
 	args := []string{
 		"--unit=" + unit, "--lines=" + fmt.Sprint(journalTailSize),
-		"--no-pager", "--output=short-iso", "--show-cursor",
+		"--no-pager", "--quiet", "--output=short-iso", "--show-cursor",
 	}
 	stdout, stderr, err := runTool(ctx, 15*time.Second, journalctlPath, args...)
 	if err != nil {

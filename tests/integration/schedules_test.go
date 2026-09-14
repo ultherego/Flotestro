@@ -348,6 +348,30 @@ func TestSchedulePreviewComesFromTheHost(t *testing.T) {
 		}
 	}
 
+	// The same preview reaches the panel typed, in the detail of the
+	// attempt, so the form does not parse stdout; stdout stays for one
+	// release for a panel from before the typed detail.
+	var typed struct {
+		Items []struct {
+			Detail struct {
+				Kind       string      `json:"kind"`
+				Expression string      `json:"expression"`
+				Timezone   string      `json:"timezone"`
+				Runs       []time.Time `json:"runs"`
+				Error      string      `json:"error"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+job.ID+"/attempts", &typed)
+	if len(typed.Items) == 0 {
+		t.Fatalf("job %s has no attempts", job.ID)
+	}
+	detail := typed.Items[len(typed.Items)-1].Detail
+	if detail.Kind != "schedule_preview" || detail.Expression != preview.Expression ||
+		detail.Timezone != preview.Timezone || len(detail.Runs) != len(preview.NextRuns) || detail.Error != "" {
+		t.Errorf("typed preview = %+v, stdout preview = %+v", detail, preview)
+	}
+
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "schedule.preview",
 			"payload": map[string]any{"schedule": map[string]any{"expression": "0 25 * * *"}}},

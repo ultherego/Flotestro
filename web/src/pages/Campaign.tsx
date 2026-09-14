@@ -8,13 +8,13 @@ import type {
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { StatusBar } from "../components/widgets";
-import { JobPlan } from "../components/plan";
+import { type HostPlan, JobPlan, PlanSummary } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
 import { loadedTargets, TARGET_STATES, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import {
-  bulkPrefill, ContractChips, contractWords, REVERSE_OPERATION, reversePayload, useOperation,
+  bulkPrefill, ContractChips, contractWords, type PlanGroups, REVERSE_OPERATION, reversePayload, useOperation,
 } from "./Bulk";
 import { useT } from "../i18n";
 
@@ -76,6 +76,14 @@ export function Campaign() {
   const timeline = useQuery({
     queryKey: ["campaign-timeline", id],
     queryFn: () => api.get<Collection<TimelineEntry>>(`/api/v1/campaigns/${id}/timeline`),
+    refetchInterval: OPERATIONS_INTERVAL,
+  });
+  // The plans grouped by fingerprint: a hundred hosts with an identical
+  // change are one row, so the operator reads what the campaign does per
+  // shape of the change rather than per host.
+  const plans = useQuery({
+    queryKey: ["campaign-plans", id],
+    queryFn: () => api.get<PlanGroups>(`/api/v1/campaigns/${id}/plans`),
     refetchInterval: OPERATIONS_INTERVAL,
   });
 
@@ -413,6 +421,45 @@ export function Campaign() {
       )}
       </div>
       </Columns>
+
+      {/* The change as the hosts computed it: one row per shape of the
+          plan together with the hosts that get it. A document or a list of
+          commands in the plan is shown in full, since that is what lands
+          on the host. */}
+      <Card
+        title={t("Plans")}
+        description={t("One row is one shape of the change and the hosts that get it. A host whose plan changed since refuses the change.")}
+        flush
+      >
+        {plans.error ? (
+          <ErrorBox error={plans.error} />
+        ) : !plans.data ? (
+          <Empty>{t("Loading…")}</Empty>
+        ) : plans.data.items.length === 0 ? (
+          <Empty>{t("No plan yet.")}</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>{t("Change")}</th><th>{t("Hosts")}</th><th>{t("Plan fingerprint")}</th><th>{t("Valid until")}</th></tr>
+            </thead>
+            <tbody>
+              {plans.data.items.map((group) => (
+                <tr key={group.plan_hash}>
+                  <td><PlanSummary plan={(group.plan?.plan ?? group.plan ?? {}) as HostPlan} /></td>
+                  <td>
+                    {group.count}
+                    <div className="source">{group.hosts.join(", ")}</div>
+                  </td>
+                  <td className="mono source" title={group.plan_hash}>{group.plan_hash.slice(0, 16)}</td>
+                  {/* The plan is bound in time as well as by its digest:
+                      past the expiry the hosts are not started on it. */}
+                  <td><Time value={group.expires_at} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
       <Card title={t("Timeline")} flush>
         {!timeline.data?.items.length ? (

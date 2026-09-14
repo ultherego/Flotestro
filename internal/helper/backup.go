@@ -9,6 +9,7 @@ import (
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/backup"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // backupGuard names the guard of a backup operation. A plan reads the
@@ -45,6 +46,13 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 	// this operation.
 	actionCtx, cancel := deadline(ctx, request, 2*time.Hour, longestOperation)
 	defer cancel()
+	// The operations that hold the guard are the ones that walk the file
+	// system and hash it, so they run in the scope of the backup family; the
+	// tool reads the scope out of the context. A plan alone reads the
+	// repository and runs bare, like the plan of a Compose deployment.
+	if backupGuard(action.GetOperation()) != "" {
+		actionCtx = s.scopeContext(actionCtx, request.GetTaskId(), opspec.FamilyBackups)
+	}
 
 	definition := backup.Definition{
 		ID: action.GetId(), Tool: action.GetTool(), Repository: action.GetRepository(),

@@ -148,11 +148,20 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The event carries both sides of the policy. A budget configured for
+	// the first time has no side before: nil says there was no record,
+	// which is the truth, rather than an invented zero.
+	var before map[string]any
+	if current != nil {
+		before = map[string]any{"capacity": current.Capacity, "note": current.Note}
+	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: string(authz.PermBudgetWrite), TargetType: "budget", TargetID: key,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"capacity": request.Capacity, "note": request.Note},
+		Before: before,
+		After:  map[string]any{"capacity": request.Capacity, "note": request.Note},
 	})
 	// The answer carries the tag of what was just written, so an editor
 	// can go on editing without reading the record again.

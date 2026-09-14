@@ -294,11 +294,28 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID string, appro
 // campaign approved once has one; the list form leaves room for a second
 // person where a policy asks for two.
 func (s *Store) Approvals(ctx context.Context, campaignID string) ([]Approval, error) {
+	return s.approvalsFrom(ctx, s.pool, campaignID)
+}
+
+// ApprovalsTx lists the approvals as the caller's transaction sees them:
+// the record Approve wrote a moment ago is on the list before the commit,
+// which a read through the pool would not show yet.
+func (s *Store) ApprovalsTx(ctx context.Context, tx pgx.Tx, campaignID string) ([]Approval, error) {
+	return s.approvalsFrom(ctx, tx, campaignID)
+}
+
+// approvalQuerier is what a list of approvals needs; both the pool and a
+// transaction provide it.
+type approvalQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func (s *Store) approvalsFrom(ctx context.Context, q approvalQuerier, campaignID string) ([]Approval, error) {
 	const query = `
 		select id, campaign_id, approval_fingerprint, requested_by, approved_by,
 		       authentication, acr, amr, authenticated_at, reason, change_ticket, created_at
 		from campaign_approvals where campaign_id = $1 order by created_at`
-	rows, err := s.pool.Query(ctx, query, campaignID)
+	rows, err := q.Query(ctx, query, campaignID)
 	if err != nil {
 		return nil, err
 	}

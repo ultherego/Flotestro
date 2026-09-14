@@ -1,11 +1,13 @@
 package helper
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"reflect"
 	"testing"
 
+	"github.com/ultherego/flotestro/internal/helper/runscope"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -31,6 +33,7 @@ func TestScopeWrapsTheSameArgvUnderSystemdRun(t *testing.T) {
 		"/usr/bin/systemd-run", "--scope", "--quiet",
 		"--unit=flotestro-op-0b0e7a3e-0000-4000-8000-000000000001",
 		"--description=Flotestro: packages operation",
+		"--property=CollectMode=inactive-or-failed",
 		"--property=CPUWeight=50", "--property=IOWeight=50", "--property=MemoryHigh=536870912",
 		"--",
 		"/usr/bin/apt-get", "-o", "Dpkg::Options::=--force-confdef", "upgrade", "a b",
@@ -108,5 +111,45 @@ func TestFamilyLimitsTable(t *testing.T) {
 	}
 	if !opspec.ActionFilesystemCheck.ResourceLimits().Empty() {
 		t.Error("a filesystem check has a resource scope by default")
+	}
+}
+
+// TestScopeContextCarriesThePrefixOfTheRequest: the modules that start
+// their own tools read the same prefix out of the context, and a family
+// without limits leaves them a bare run.
+func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
+	server := &Server{
+		log: slog.New(slog.DiscardHandler),
+		scopes: scopeRunner{
+			lookPath: func(string) (string, error) { return "/usr/bin/systemd-run", nil },
+			log:      slog.New(slog.DiscardHandler),
+		},
+	}
+	argv := []string{"/usr/bin/restic", "backup", "/srv"}
+
+	ctx := server.scopeContext(context.Background(), "task-1", opspec.FamilyBackups)
+	want := []string{
+		"/usr/bin/systemd-run", "--scope", "--quiet",
+		"--unit=flotestro-op-task-1",
+		"--description=Flotestro: backups operation",
+		"--property=CollectMode=inactive-or-failed",
+		"--property=CPUWeight=30", "--property=IOWeight=30", "--property=MemoryHigh=1073741824",
+		"--",
+		"/usr/bin/restic", "backup", "/srv",
+	}
+	if got := runscope.Apply(ctx, argv); !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %q\nexpected %q", got, want)
+	}
+	// Two tools of the same operation do not share a backing array.
+	first := runscope.Apply(ctx, []string{"/usr/bin/restic", "check"})
+	second := runscope.Apply(ctx, []string{"/usr/bin/restic", "forget"})
+	if first[len(first)-1] != "check" || second[len(second)-1] != "forget" {
+		t.Fatalf("the tools were mixed up: %q and %q", first, second)
+	}
+
+	// A family without limits clears the scope, even one recorded higher up.
+	bare := server.scopeContext(ctx, "task-1", opspec.FamilyStorage)
+	if got := runscope.Apply(bare, argv); !reflect.DeepEqual(got, argv) {
+		t.Fatalf("argv = %q, expected the plain %q", got, argv)
 	}
 }

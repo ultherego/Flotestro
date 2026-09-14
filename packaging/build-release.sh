@@ -73,7 +73,7 @@ buildBinaries() {
     echo "==> binaries $arch"
     rm -rf "$stage"
     mkdir -p "$stage"
-    for component in agent agent-helper agentctl relay relayctl control-plane; do
+    for component in agent agent-helper agentctl relay relayctl control-plane auditverify; do
         # CGO disabled: the package is to work on every machine of the given
         # architecture, not only on one with the same libraries.
         # -trimpath removes the build machine paths, so that the same binary

@@ -61,11 +61,15 @@ func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 	// The trail keeps both lists: what the host carried and what it
 	// carries now. A diff would be shorter, but the question asked of the
 	// trail is "what was on this host on Tuesday", not "what changed".
+	// The detail keeps the lists under their old keys for the readers that
+	// already know them; the two sides of the event are the same lists.
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.tags", TargetType: "host", TargetID: host.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"before": host.Tags, "after": tags},
+		Before: map[string]any{"tags": tagList(host.Tags)},
+		After:  map[string]any{"tags": tagList(tags)},
 	})
 	writeJSON(w, http.StatusOK, updated)
 }
@@ -122,6 +126,17 @@ func (s *Server) handleSetHostChannel(w http.ResponseWriter, r *http.Request) {
 		Action: "host.channel", TargetType: "host", TargetID: host.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"before": host.ReleaseChannel, "after": channel},
+		Before: map[string]any{"release_channel": host.ReleaseChannel},
+		After:  map[string]any{"release_channel": channel},
 	})
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// tagList renders a tag list for the trail: a host without tags has an
+// empty list, not a missing one - the state was read, and it was empty.
+func tagList(tags []string) []string {
+	if tags == nil {
+		return []string{}
+	}
+	return tags
 }

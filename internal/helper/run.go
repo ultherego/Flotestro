@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/ultherego/flotestro/internal/helper/runscope"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -41,32 +42,53 @@ func newScopeRunner(log *slog.Logger) scopeRunner {
 // limits, and whether it was wrapped. The array is prefixed and nothing in
 // it is interpreted: no shell, no quoting, the same argv as without the
 // scope.
+func (r scopeRunner) wrap(taskID string, family opspec.ResourceFamily,
+	limits opspec.ResourceLimits, argv []string) ([]string, bool) {
+	if len(argv) == 0 {
+		return argv, false
+	}
+	prefix, ok := r.prefix(taskID, family, limits)
+	if !ok {
+		return argv, false
+	}
+	return runscope.Prefixed(prefix, argv), true
+}
+
+// prefix returns the systemd-run invocation that puts a tool under a scope
+// with the given limits, and whether there is one. The prefix ends with the
+// "--" separator, so the tool and its arguments follow it verbatim.
 //
 // Empty limits mean the caller asked for no scope. A missing systemd-run
 // means a plain run, with the reason logged once per operation.
-func (r scopeRunner) wrap(taskID string, family opspec.ResourceFamily,
-	limits opspec.ResourceLimits, argv []string) ([]string, bool) {
-	if limits.Empty() || len(argv) == 0 {
-		return argv, false
+func (r scopeRunner) prefix(taskID string, family opspec.ResourceFamily,
+	limits opspec.ResourceLimits) ([]string, bool) {
+	if limits.Empty() {
+		return nil, false
 	}
 	systemdRun, err := r.lookPath("systemd-run")
 	if err != nil {
 		if r.log != nil {
 			r.log.Warn("the operation runs without a resource scope: systemd-run is not available",
-				"task_id", taskID, "family", string(family), "tool", argv[0])
+				"task_id", taskID, "family", string(family))
 		}
-		return argv, false
+		return nil, false
 	}
 	prefixed := []string{
 		systemdRun, "--scope", "--quiet",
 		"--unit=" + scopeUnit(taskID),
 		"--description=Flotestro: " + string(family) + " operation",
+		// The tools of one operation share one unit name, one after the
+		// other. A scope whose tool failed stays behind as a failed unit
+		// until somebody resets it, and the next tool of the same operation
+		// - a retry of the manager, the check after a copy - would then be
+		// refused for a name already taken. Collected on failure as well,
+		// the name is free again the moment the tool ends.
+		"--property=CollectMode=inactive-or-failed",
 	}
 	for _, property := range limits.Properties() {
 		prefixed = append(prefixed, "--property="+property)
 	}
-	prefixed = append(prefixed, "--")
-	return append(prefixed, argv...), true
+	return append(prefixed, "--"), true
 }
 
 // scopeUnit names the scope of a task. A unit name takes letters, digits and
@@ -108,6 +130,35 @@ func (s *Server) scoped(taskID string, family opspec.ResourceFamily, argv []stri
 			"task_id", taskID, "family", string(family), "unit", scopeUnit(taskID))
 	}
 	return wrapped
+}
+
+// scopeContext records the scope of a family in the context, for the
+// modules that start their tools on their own: the package managers and the
+// backup tools build their commands far from the helper, and read the
+// prefix back at that one place. A family without limits, or a host without
+// systemd-run, clears the scope instead - the tools of that request run
+// bare, and so does every other request, because the scope lives in the
+// context of this one and dies with it.
+//
+// The unit is named after the task, like the scopes of runScoped: one
+// request, one scope, however many tools the operation starts in it.
+func (s *Server) scopeContext(ctx context.Context, taskID string,
+	family opspec.ResourceFamily) context.Context {
+	runner := s.scopes
+	if runner.lookPath == nil {
+		runner = newScopeRunner(s.log)
+	}
+	prefix, ok := runner.prefix(taskID, family, opspec.FamilyLimits(family))
+	if !ok {
+		return runscope.With(ctx, nil)
+	}
+	if s.log != nil {
+		s.log.Info("the operation runs in a resource scope",
+			"task_id", taskID, "family", string(family), "unit", scopeUnit(taskID))
+	}
+	return runscope.With(ctx, func(argv []string) []string {
+		return runscope.Prefixed(prefix, argv)
+	})
 }
 
 // runScoped runs a tool of a heavy operation under the scope of its family

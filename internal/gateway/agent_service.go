@@ -1515,6 +1515,17 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// The preview of a schedule is the answer to one question - when would
+	// this expression run here - computed in the host's own zone. It is not
+	// a snapshot of the schedules, so it belongs to the job, not to the
+	// inventory.
+	if schedule := result.GetScheduleResult(); schedule != nil && len(schedule.GetPreview()) > 0 {
+		encoded, err := json.Marshal(schedulePreviewJSON(schedule.GetPreview()))
+		if err == nil {
+			return encoded
+		}
+	}
+
 	if signal := result.GetProcessSignalResult(); signal != nil {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":    "process_signal",
@@ -1619,18 +1630,23 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		return encoded
 
 	case *agentv1.TaskResult_UnitStatus:
+		// The detail of a few units and the listing of the host are two
+		// shapes under one result: the detail is the answer to an opened row,
+		// so it gets a kind of its own and the panel reads it typed rather
+		// than parsing stdout.
+		if details := detail.UnitStatus.GetDetails(); len(details) > 0 {
+			encoded, err := json.Marshal(map[string]any{
+				"kind":  "unit_detail",
+				"units": unitDetailsJSON(details),
+			})
+			if err != nil {
+				return nil
+			}
+			return encoded
+		}
 		units := make([]map[string]any, 0)
 		for _, unit := range detail.UnitStatus.GetUnits() {
-			units = append(units, map[string]any{
-				"name":            unit.GetName(),
-				"load_state":      unit.GetLoadState(),
-				"active_state":    unit.GetActiveState(),
-				"sub_state":       unit.GetSubState(),
-				"unit_file_state": unit.GetUnitFileState(),
-				"result":          unit.GetResult(),
-				"main_pid":        unit.GetMainPid(),
-				"n_restarts":      unit.GetNRestarts(),
-			})
+			units = append(units, unitStateFields(unit))
 		}
 		encoded, err := json.Marshal(map[string]any{"kind": "unit_status", "units": units})
 		if err != nil {
@@ -1658,6 +1674,101 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	default:
 		return nil
+	}
+}
+
+// unitStateFields writes the state of one unit the way the listing, the
+// detail and the before/after of an operation all show it.
+func unitStateFields(unit *agentv1.UnitState) map[string]any {
+	return map[string]any{
+		"name":            unit.GetName(),
+		"load_state":      unit.GetLoadState(),
+		"active_state":    unit.GetActiveState(),
+		"sub_state":       unit.GetSubState(),
+		"unit_file_state": unit.GetUnitFileState(),
+		"result":          unit.GetResult(),
+		"main_pid":        unit.GetMainPid(),
+		"n_restarts":      unit.GetNRestarts(),
+	}
+}
+
+// unitDetailsJSON writes the full picture of the units a detail read
+// returned: the dependencies, the drop-ins with their content, the last
+// journal lines and the cursor to continue from. Lists stay lists rather
+// than null, so the panel iterates them without a guard; an empty journal
+// error means the journal was read, not that nobody asked.
+func unitDetailsJSON(details []*agentv1.UnitDetail) []map[string]any {
+	items := make([]map[string]any, 0, len(details))
+	for _, detail := range details {
+		dropIns := make([]map[string]any, 0, len(detail.GetDropIns()))
+		for _, dropIn := range detail.GetDropIns() {
+			dropIns = append(dropIns, map[string]any{
+				"path":      dropIn.GetPath(),
+				"content":   dropIn.GetContent(),
+				"truncated": dropIn.GetTruncated(),
+				"error":     dropIn.GetError(),
+			})
+		}
+		items = append(items, map[string]any{
+			"state":             unitStateFields(detail.GetState()),
+			"description":       detail.GetDescription(),
+			"fragment_path":     detail.GetFragmentPath(),
+			"requires":          stringList(detail.GetRequires()),
+			"wants":             stringList(detail.GetWants()),
+			"after":             stringList(detail.GetAfter()),
+			"before":            stringList(detail.GetBefore()),
+			"binds_to":          stringList(detail.GetBindsTo()),
+			"part_of":           stringList(detail.GetPartOf()),
+			"triggered_by":      stringList(detail.GetTriggeredBy()),
+			"triggers":          stringList(detail.GetTriggers()),
+			"drop_ins":          dropIns,
+			"exec_main_start":   detail.GetExecMainStart(),
+			"journal_lines":     stringList(detail.GetJournalLines()),
+			"journal_cursor":    detail.GetJournalCursor(),
+			"journal_truncated": detail.GetJournalTruncated(),
+			"journal_error":     detail.GetJournalError(),
+		})
+	}
+	return items
+}
+
+// stringList keeps an absent list as an empty one: the panel tells "no
+// dependencies" from "not read" by the kind of the result, not by null.
+func stringList(items []string) []string {
+	if items == nil {
+		return []string{}
+	}
+	return items
+}
+
+// schedulePreviewJSON lifts the preview the agent computed into the shape
+// of an attempt detail. The expression travels along, because a preview of
+// another expression than the one in the field is stale, and the panel
+// tells that by comparing them. A preview the gateway cannot read stays a
+// preview of no runs with the raw document attached, rather than nothing:
+// the host did answer.
+func schedulePreviewJSON(preview []byte) map[string]any {
+	var parsed struct {
+		Expression string   `json:"expression"`
+		Timezone   string   `json:"timezone"`
+		NextRuns   []string `json:"next_runs"`
+		Error      string   `json:"error"`
+	}
+	if err := json.Unmarshal(preview, &parsed); err != nil {
+		return map[string]any{
+			"kind":     "schedule_preview",
+			"runs":     []string{},
+			"timezone": "",
+			"error":    "the preview of the host could not be read: " + err.Error(),
+			"raw":      string(preview),
+		}
+	}
+	return map[string]any{
+		"kind":       "schedule_preview",
+		"expression": parsed.Expression,
+		"runs":       stringList(parsed.NextRuns),
+		"timezone":   parsed.Timezone,
+		"error":      parsed.Error,
 	}
 }
 
@@ -1707,16 +1818,7 @@ func unitStateJSON(state *agentv1.UnitState) json.RawMessage {
 	if state == nil {
 		return nil
 	}
-	encoded, err := json.Marshal(map[string]any{
-		"name":            state.GetName(),
-		"load_state":      state.GetLoadState(),
-		"active_state":    state.GetActiveState(),
-		"sub_state":       state.GetSubState(),
-		"unit_file_state": state.GetUnitFileState(),
-		"result":          state.GetResult(),
-		"main_pid":        state.GetMainPid(),
-		"n_restarts":      state.GetNRestarts(),
-	})
+	encoded, err := json.Marshal(unitStateFields(state))
 	if err != nil {
 		return nil
 	}

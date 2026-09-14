@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -168,6 +169,9 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 			"name": group.Name, "kind": string(group.Kind),
 			"selector": group.Selector.Describe(), "members": len(visible),
 		},
+		// A creation has no side before: the group did not exist. A
+		// dynamic group has no list; its selector is the whole definition.
+		After: groupState(group, staticMembers(group, sortedIDs(hostIDs(visible)))),
 	})
 	writeJSON(w, http.StatusCreated, s.groupView(r.Context(), *group, principal.ScopesFor(authz.PermHostRead)))
 }
@@ -209,6 +213,10 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The members are read before the write, as part of the state the
+	// change started from; an update does not touch them, so the same
+	// list stands on both sides of the event.
+	members := s.groupMembers(r.Context(), current)
 	updated, err := s.groups.Update(r.Context(), current.ID, selector.SavedGroup{
 		Name:        strings.TrimSpace(orDefault(request.Name, current.Name)),
 		Description: strings.TrimSpace(request.Description),
@@ -225,6 +233,8 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 			"name": updated.Name, "previous_name": current.Name,
 			"selector": updated.Selector.Describe(), "previous_selector": current.Selector.Describe(),
 		},
+		Before: groupState(current, members),
+		After:  groupState(updated, members),
 	})
 	setETag(w, etagOfTime(updated.UpdatedAt))
 	writeJSON(w, http.StatusOK, s.groupView(r.Context(), *updated, principal.ScopesFor(authz.PermHostRead)))
@@ -239,6 +249,9 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	if s.groupProblem(w, err) {
 		return
 	}
+	// The members go with the group, so they are read while they exist:
+	// the trail is the last place the list of a deleted group is kept.
+	members := s.groupMembers(r.Context(), group)
 	if err := s.groups.Delete(r.Context(), group.ID); s.groupProblem(w, err) {
 		return
 	}
@@ -247,6 +260,8 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		Action: "host_group.delete", TargetType: "host_group", TargetID: group.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"name": group.Name, "kind": string(group.Kind)},
+		// A deletion has no side after: the group is gone.
+		Before: groupState(group, members),
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -284,7 +299,8 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 	// mean to remove, so the write is refused rather than quietly dropping
 	// them - a group shared between two sites would otherwise lose the
 	// other site's hosts at the first edit from this one.
-	if ok := s.requireMembersInScope(w, r, principal, group.ID); !ok {
+	previous, ok := s.requireMembersInScope(w, r, principal, group.ID)
+	if !ok {
 		return
 	}
 	if err := s.groups.SetMembers(r.Context(), group.ID, hostIDs(visible)); s.groupProblem(w, err) {
@@ -302,6 +318,8 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 			"name": group.Name, "members": len(visible),
 			"sample": hostNames(visible[:min(len(visible), previewSampleSize)]),
 		},
+		Before: groupState(group, previous),
+		After:  groupState(updated, sortedIDs(hostIDs(visible))),
 	})
 	setETag(w, etagOfTime(updated.UpdatedAt))
 	writeJSON(w, http.StatusOK, s.groupView(r.Context(), *updated, principal.ScopesFor(authz.PermHostRead)))
@@ -352,21 +370,21 @@ func (s *Server) handleGroupHosts(w http.ResponseWriter, r *http.Request) {
 // include hosts the caller cannot see. The answer has been written when
 // the result is false.
 func (s *Server) requireMembersInScope(w http.ResponseWriter, r *http.Request,
-	principal authz.Principal, groupID string) bool {
+	principal authz.Principal, groupID string) ([]string, bool) {
 	current, err := s.groups.Members(r.Context(), groupID)
 	if err != nil {
 		s.fail(w, err)
-		return false
+		return nil, false
 	}
 	if len(current) == 0 {
-		return true
+		return current, true
 	}
 	seen, err := s.pageHosts(r.Context(), hosts.ListFilter{
 		IDs: current, Scopes: principal.ScopesFor(authz.PermHostRead),
 	})
 	if err != nil {
 		s.fail(w, err)
-		return false
+		return nil, false
 	}
 	if len(seen) < len(current) {
 		s.audit.Record(r.Context(), audit.Event{
@@ -380,9 +398,57 @@ func (s *Server) requireMembersInScope(w http.ResponseWriter, r *http.Request,
 		problem(w, http.StatusForbidden, "members_out_of_scope",
 			fmt.Sprintf("the group has %d members outside your scope; the list can only be replaced by somebody who sees them all",
 				len(current)-len(seen)))
-		return false
+		return nil, false
 	}
-	return true
+	return current, true
+}
+
+// groupMembers reads the member list of a static group for the trail. A
+// dynamic group has no list, and a list that could not be read is left
+// out rather than recorded as empty: the trail must not say "no members"
+// when the truth is "not known".
+func (s *Server) groupMembers(ctx context.Context, group *selector.SavedGroup) []string {
+	if group.Kind != selector.KindStatic {
+		return nil
+	}
+	members, err := s.groups.Members(ctx, group.ID)
+	if err != nil {
+		s.log.Warn("the members of a group were not read for the audit trail",
+			"group", group.ID, "err", err)
+		return nil
+	}
+	return members
+}
+
+// groupState renders a group for the two sides of an audit event: the
+// fields an operator sets, keyed by name, and the member identifiers where
+// the list is known. A nil list leaves the key out.
+func groupState(group *selector.SavedGroup, members []string) map[string]any {
+	state := map[string]any{
+		"name": group.Name, "description": group.Description, "kind": string(group.Kind),
+		"selector": group.Selector.Describe(),
+	}
+	if members != nil {
+		state["members"] = members
+	}
+	return state
+}
+
+// staticMembers keeps a member list for a static group and drops it for
+// a dynamic one, which has none.
+func staticMembers(group *selector.SavedGroup, members []string) []string {
+	if group.Kind != selector.KindStatic {
+		return nil
+	}
+	return members
+}
+
+// sortedIDs orders a member list the way the store lists it, so the same
+// membership reads the same on both sides of an event.
+func sortedIDs(ids []string) []string {
+	sorted := append([]string{}, ids...)
+	sort.Strings(sorted)
+	return sorted
 }
 
 // visibleHosts reads the named hosts, narrowed to the caller's scope. A

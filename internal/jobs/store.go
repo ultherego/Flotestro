@@ -247,10 +247,21 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason str
 
 // Approvals returns the people who approved the task.
 func (s *Store) Approvals(ctx context.Context, jobID string) ([]Approval, error) {
+	return s.approvalsFrom(ctx, s.pool, jobID)
+}
+
+// ApprovalsTx returns the approvals as the caller's transaction sees them:
+// an approval written a moment ago in the same transaction is on the list,
+// which a read through the pool would not show yet.
+func (s *Store) ApprovalsTx(ctx context.Context, tx pgx.Tx, jobID string) ([]Approval, error) {
+	return s.approvalsFrom(ctx, tx, jobID)
+}
+
+func (s *Store) approvalsFrom(ctx context.Context, q queryable, jobID string) ([]Approval, error) {
 	const query = `
 		select approver, coalesce(reason, ''), approved_at
 		from job_approvals where job_id = $1 order by approved_at`
-	rows, err := s.pool.Query(ctx, query, jobID)
+	rows, err := q.Query(ctx, query, jobID)
 	if err != nil {
 		return nil, err
 	}

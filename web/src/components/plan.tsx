@@ -11,7 +11,7 @@ import { useT } from "../i18n";
  * path with a different UUID. The plan computed on the host says what
  * happens there - or why not.
  */
-type HostPlan = {
+export type HostPlan = {
   action?: string;
   changes?: string[];
   refusal?: string;
@@ -21,6 +21,12 @@ type HostPlan = {
   resolved_source?: string;
   ruleset_hash?: string;
   plan_hash?: string;
+  // The text the network adapter applies: the nmstate document of the
+  // touched interface or the netplan file after the merge.
+  document?: string;
+  // The commands a firewall driven by its command line (ufw) runs, as the
+  // operator would type them.
+  commands?: string[];
 };
 
 const ACTION_NAMES: Record<string, string> = {
@@ -55,7 +61,25 @@ export function PlanSummary({ plan }: { plan: HostPlan }) {
   if (plan.resolved_source && plan.resolved_source !== plan.requested_source) {
     parts.push(`${plan.requested_source} → ${plan.resolved_source}`);
   }
-  return <span>{parts.join(" · ")}</span>;
+  // The summary names the change; the document or the commands show it
+  // verbatim, because that text is exactly what lands on the host and the
+  // operator consents to it, not to a paraphrase.
+  const verbatim = plan.document
+    ? { label: t("Document"), text: plan.document }
+    : plan.commands?.length
+      ? { label: t("Commands"), text: plan.commands.join("\n") }
+      : null;
+  return (
+    <>
+      <span>{parts.join(" · ")}</span>
+      {verbatim && (
+        <>
+          <div className="source">{verbatim.label}</div>
+          <pre className="hm-log hm-mono">{verbatim.text}</pre>
+        </>
+      )}
+    </>
+  );
 }
 
 /** The host plan read from the last attempt of the planning operation. */

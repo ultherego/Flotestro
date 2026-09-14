@@ -34,6 +34,28 @@ type unitDetailView struct {
 	JournalError  string   `json:"journal_error"`
 }
 
+// unitDetailDocumentView is the document of a detail read: typed in the
+// detail of the attempt, and printed on stdout.
+type unitDetailDocumentView struct {
+	Kind  string           `json:"kind"`
+	Units []unitDetailView `json:"units"`
+}
+
+// unitDetailDocument reads the typed detail from the last attempt of the job.
+func unitDetailDocument(t *testing.T, h *harness, jobID string) unitDetailDocumentView {
+	t.Helper()
+	var result struct {
+		Items []struct {
+			Detail unitDetailDocumentView `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &result)
+	if len(result.Items) == 0 {
+		t.Fatalf("job %s has no attempts", jobID)
+	}
+	return result.Items[len(result.Items)-1].Detail
+}
+
 const unitReason = "integration test of the unit detail"
 
 // TestUnitDetailReadsTheWholePicture checks the detail view of a unit: the
@@ -68,15 +90,24 @@ func TestUnitDetailReadsTheWholePicture(t *testing.T) {
 	if job.State != "succeeded" {
 		t.Fatalf("detail: state = %s, %s", job.State, lastMessage(attempts))
 	}
-	var document struct {
-		Kind  string           `json:"kind"`
-		Units []unitDetailView `json:"units"`
-	}
-	if err := json.Unmarshal([]byte(attempts[len(attempts)-1].Stdout), &document); err != nil {
-		t.Fatalf("the detail is not a JSON document: %v", err)
-	}
+	// The detail reaches the panel typed, in the detail of the attempt: the
+	// panel reads it without parsing stdout.
+	document := unitDetailDocument(t, h, job.ID)
 	if document.Kind != "unit_detail" || len(document.Units) != 1 {
-		t.Fatalf("document = %+v", document)
+		t.Fatalf("typed detail = %+v", document)
+	}
+	// The same document still goes on stdout for one release: a panel from
+	// before the typed detail reads it from there.
+	var printed unitDetailDocumentView
+	if err := json.Unmarshal([]byte(attempts[len(attempts)-1].Stdout), &printed); err != nil {
+		t.Fatalf("the detail is not a JSON document on stdout: %v", err)
+	}
+	if printed.Kind != "unit_detail" || len(printed.Units) != 1 {
+		t.Fatalf("stdout document = %+v", printed)
+	}
+	if printed.Units[0].State.Name != document.Units[0].State.Name ||
+		printed.Units[0].JournalCursor != document.Units[0].JournalCursor {
+		t.Errorf("the typed detail and stdout disagree: %+v vs %+v", document.Units[0], printed.Units[0])
 	}
 	detail := document.Units[0]
 	if detail.State.Name != "cron.service" || detail.State.ActiveState == "" {
