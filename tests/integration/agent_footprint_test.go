@@ -70,6 +70,13 @@ func TestAgentFootprintIsWithinBudget(t *testing.T) {
 
 	for _, host := range online {
 		view := h.latestFootprint(host.ID)
+		// An agent samples once a minute and the first sample follows the
+		// start; a host that joined the fleet a moment ago has none yet,
+		// which is not a missing footprint - it is waited for, once.
+		for waited := time.Duration(0); (view.Latest == nil || view.LastSampleAt == nil) && waited < 150*time.Second; waited += 10 * time.Second {
+			time.Sleep(10 * time.Second)
+			view = h.latestFootprint(host.ID)
+		}
 		if view.Latest == nil || view.LastSampleAt == nil {
 			t.Errorf("%s: the agent has not sent a sample; the footprint was not measured", host.Hostname)
 			continue
