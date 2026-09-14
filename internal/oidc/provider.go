@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -295,14 +296,16 @@ func (p *Provider) LogoutURL(idToken, redirectAfter string) string {
 	if err := p.provider.Claims(&endpoint); err != nil || endpoint.EndSessionEndpoint == "" {
 		return redirectAfter
 	}
-	url := endpoint.EndSessionEndpoint + "?client_id=" + p.config.ClientID
+	// The parameters are encoded: a return address with a query of its own
+	// would otherwise be read by the provider as part of the logout request.
+	query := neturl.Values{"client_id": {p.config.ClientID}}
 	if idToken != "" {
-		url += "&id_token_hint=" + idToken
+		query.Set("id_token_hint", idToken)
 	}
 	if redirectAfter != "" {
-		url += "&post_logout_redirect_uri=" + redirectAfter
+		query.Set("post_logout_redirect_uri", redirectAfter)
 	}
-	return url
+	return endpoint.EndSessionEndpoint + "?" + query.Encode()
 }
 
 // timeClaim reads a timestamp expressed in seconds of the epoch. A missing
