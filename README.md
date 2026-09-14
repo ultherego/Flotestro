@@ -11,18 +11,26 @@
 </p>
 
 <p align="center">
-  <a href="#what-it-does">Features</a> ·
+  <a href="#why-flotestro">Why</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#screenshots">Screenshots</a> ·
   <a href="#how-a-change-happens">How it works</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick start</a> ·
   <a href="#building">Building</a>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="900">
-</p>
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="900"></p>
 
-## What it does
+## Why Flotestro
+
+- **Typed operations only.** Every action is a versioned contract with its own permission, risk level, lock class and campaign mode. There is no "run a command" type; the panel never runs a shell on a host.
+- **Plans approved by digest.** The host computes the plan, an approver reads it, and the host applies it only if the content still matches the approved digest.
+- **Unknown is shown as unknown.** A fact the agent could not determine is empty, not zero; a missing declaration means a refusal, not consent.
+- **Evidence, not logs.** Every order, approval and result is an event in a hash-chained audit trail that `auditverify` checks offline, without the database.
+- **No external monitoring stack.** Agents sample their host, the panel keeps the samples and rollups, evaluates rules, and holds alerts and silences.
+
+## Features
 
 | Area | Operations |
 |---|---|
@@ -37,9 +45,46 @@
 | Identity | FreeIPA users, groups, HBAC and sudo rules, access simulation, domain joins; local accounts and keys |
 | Certificates and backups | scanning, trust-anchor rotation, certmonger renewal; restic and borg runs, verification, restore |
 | Monitoring | CPU, memory, swap, filesystems, inodes, uptime sampled by the agent; alert rules and silences in the panel |
-| Vulnerabilities | package lists correlated against Debian, Ubuntu, Red Hat and NVD feeds |
+| Vulnerabilities | package lists correlated against Debian, Ubuntu, Red Hat and NVD feeds; the panel reads the feeds, never the hosts |
+| Campaigns | canary, waves, manual or automatic gates, failure thresholds, maintenance windows, per-site budgets, offline policy per host |
+| Notifications | durable trail posted to a webhook in batches, signed with HMAC-SHA256, delivered at least once and in order |
 
-Every operation is typed and versioned. The panel never runs a shell on a host.
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/hosts.png" alt="Hosts" width="440"></td>
+    <td><img src="docs/screenshots/host-overview.png" alt="Host overview" width="440"></td>
+  </tr>
+  <tr>
+    <td>Hosts with state, site, environment and what needs attention.</td>
+    <td>One page per module with the facts as the agent reported them.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/host-packages.png" alt="Packages of a host" width="440"></td>
+    <td><img src="docs/screenshots/campaign.png" alt="Campaign" width="440"></td>
+  </tr>
+  <tr>
+    <td>Packages of a host: the plan, its digest and the actions the operator may take.</td>
+    <td>A campaign across the fleet: canary, waves, gates and thresholds.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/security.png" alt="Security" width="440"></td>
+    <td><img src="docs/screenshots/monitoring.png" alt="Monitoring" width="440"></td>
+  </tr>
+  <tr>
+    <td>Versioned security checks judged in the panel; a fix for many hosts is one campaign with one approval.</td>
+    <td>Built-in monitoring: raw samples, rollups, rules, alerts and silences.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/audit.png" alt="Audit" width="440"></td>
+    <td></td>
+  </tr>
+  <tr>
+    <td>Audit trail: the actor, the request and the authentication it rested on.</td>
+    <td></td>
+  </tr>
+</table>
 
 ## How a change happens
 
@@ -50,33 +95,6 @@ Every operation is typed and versioned. The panel never runs a shell on a host.
 
 Across a fleet the same change runs as a campaign: canary, waves, manual or automatic
 gates, failure thresholds, maintenance windows, per-site budgets, offline policy per host.
-
-<p align="center"><img src="docs/screenshots/campaign.png" alt="Campaign" width="900"></p>
-
-## The panel
-
-Hosts are listed with state, site, environment and what needs attention; each host has a
-page per module with the facts as the agent reported them and the actions the operator
-may take.
-
-<p align="center"><img src="docs/screenshots/host-overview.png" alt="Host overview" width="900"></p>
-
-<p align="center"><img src="docs/screenshots/host-packages.png" alt="Packages of a host" width="900"></p>
-
-Security checks are versioned and judged in the panel over facts the hosts already
-report; a fix for many hosts is one campaign with one approval.
-
-<p align="center"><img src="docs/screenshots/security.png" alt="Security" width="900"></p>
-
-Monitoring needs no external system: agents sample once a minute, the panel keeps raw
-samples and rollups, evaluates rules and keeps alerts and silences.
-
-<p align="center"><img src="docs/screenshots/monitoring.png" alt="Monitoring" width="900"></p>
-
-Every order, approval and result is an audit event with the actor, the request and the
-authentication it rested on.
-
-<p align="center"><img src="docs/screenshots/audit.png" alt="Audit" width="900"></p>
 
 ## Architecture
 
@@ -92,20 +110,18 @@ leaves the host, renewed by the agent itself, revoked when superseded. Enrollmen
 are one-time and stored as digests. Users sign in through OpenID Connect; roles come from
 group mappings scoped by site and environment; sensitive actions need step-up
 authentication. Secrets are fetched by the host under a short lease and never travel in a
-task.
+task. PostgreSQL is the only source of truth; the panel keeps the fleet state nowhere else.
 
-## Installation
+## Quick start
 
-Panel server (PostgreSQL required; the schema is migrated at start):
+Control plane (PostgreSQL required; the schema is migrated at start):
 
 ```
 apt install flotestro-control-plane          # or dnf
 vi /etc/flotestro/control-plane.env          # FLOTESTRO_DATABASE_URL, FLOTESTRO_PUBLIC_URL, FLOTESTRO_OIDC_*, FLOTESTRO_IPA_*
 systemctl enable --now flotestro-control-plane
+cat /var/lib/flotestro/bootstrap-token       # written at first start; maps identity-provider groups to roles
 ```
-
-The first start writes a bootstrap API token to `/var/lib/flotestro/bootstrap-token`;
-use it to map identity-provider groups to roles.
 
 Host:
 
@@ -114,26 +130,37 @@ apt install flotestro-agent                  # or dnf, pacman
 vi /etc/flotestro/agent.yaml                 # enrollment_url, gateway_urls
 sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token   # token from an enrollment request in the panel
 systemctl enable --now flotestro-agent
+flotestro-agentctl diagnose                  # explains a host that does not show up
 ```
 
-`deploy/ansible` does the same for a whole inventory, ordering a one-time token per host.
-`flotestro-agentctl diagnose` explains a host that does not show up.
+A whole inventory with Ansible:
 
-Ports: 8080 panel and API (behind a TLS proxy), 8443 agent gateway, 8444 enrollment,
-8453 relay.
+```
+ansible-playbook -i inventory.ini site.yml -e flotestro_automation_api_token="$TOKEN"   # deploy/ansible; one-time token ordered per host
+```
+
+| Port | Service |
+|---|---|
+| 8080 | panel and API; loopback by default, put behind a TLS proxy |
+| 8443 | agent gateway (mTLS) |
+| 8444 | enrollment (TLS) |
+| 8453 | relay |
 
 ## Building
 
 Go 1.25 for the services, Node.js for the panel.
 
 ```
-make build                      # control plane, agent, auditverify
-make generate                   # code from api/proto
-make test                       # unit tests
-(cd web && npm ci && npm run build)
+make build                                   # control plane, agent, auditverify
+make generate                                # code from api/proto
+make test                                    # unit tests
+make lint                                    # gofmt and go vet
+(cd web && npm ci && npm run build)          # the panel
 packaging/build-release.sh all 1.0.0 dist    # packages for amd64 and arm64 with a CycloneDX SBOM
 packaging/sign-repo.sh dist <gpg-key> repo   # signed apt, dnf and pacman repositories
 ```
+
+## Repository layout
 
 ```
 api/proto/    protobuf contracts       internal/     the product      web/        the panel
